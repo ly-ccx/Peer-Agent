@@ -1,0 +1,168 @@
+@layer components {
+  .markdown-content {
+    @apply grid gap-2;
+    min-width: 0;
+  }
+
+  .markdown-content h3,
+  .markdown-content h4,
+  .markdown-content h5,
+  .markdown-content h6 {
+    @apply m-0 leading-6;
+    color: var(--za-text);
+    font-weight: 600;
+  }
+
+  .markdown-content h3 {
+    font-size: 15px;
+  }
+
+  .markdown-content h4,
+  .markdown-content h5,
+  .markdown-content h6 {
+    font-size: 13.5px;
+  }
+
+  .markdown-content p {
+    white-space: normal;
+  }
+
+  .markdown-content ul,
+  .markdown-content ol {
+    @apply my-0 grid gap-1 pl-5;
+  }
+
+  .markdown-content li {
+    @apply min-w-0 leading-6;
+    color: var(--za-text-soft);
+  }
+
+  .markdown-content strong {
+    color: var(--za-text);
+    font-weight: 600;
+  }
+
+  .markdown-content em {
+    color: var(--za-text-soft);
+    font-style: italic;
+  }
+
+  .markdown-token {
+    font-weight: 600;
+  }
+
+  .markdown-token-red {
+    color: var(--za-danger);
+  }
+
+  .markdown-token-warning {
+    color: var(--za-warn);
+  }
+
+  .markdown-token-success {
+    color: var(--za-good);
+  }
+
+  .markdown-token-info {
+    color: var(--za-accent);
+  }
+
+  .markdown-content code {
+    @apply rounded-md px-1.5 py-0.5 text-[12px];
+    color: var(--za-text-soft);
+    background: var(--za-surface-1);
+  }
+
+  .cloud-chat-message pre,
+  .markdown-content pre {
+    @apply m-0 mt-2 max-w-full overflow-auto p-2 text-[11px] leading-5;
+    max-height: 260px;
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius-sm);
+    color: var(--za-text-muted);
+    background: var(--za-bg-1);
+  }
+
+  .markdown-content pre code {
+    @apply block rounded-none bg-transparent p-0;
+    color: inherit;
+  }
+
+  .markdown-content .code-block-wrapper {
+    @apply relative mt-2;
+  }
+  .markdown-content .code-block-wrapper pre {
+    @apply mt-0;
+  }
+  .markdown-content .code-copy-btn {
+    @apply absolute right-1.5 top-1.5 flex items-center justify-center rounded-md p-1;
+    opacity: 0;
+    transition: opacity 0.15s;
+    color: var(--za-text-muted);
+    background: var(--za-surface-1);
+    border: 1px solid var(--za-line);
+    cursor: pointer;
+    z-index: 1;
+  }
+  .markdown-content .code-block-wrapper:hover .code-copy-btn {
+    opacity: 1;
+  }
+  .markdown-content .code-copy-btn:hover {
+    color: var(--za-text);
+    background: var(--za-surface-2);
+  }
+  .markdown-content .code-copy-btn.copied {
+    opacity: 1;
+    color: var(--za-accent);
+  }
+
+  .markdown-content blockquote {
+    @apply my-0 border-l-2 py-0.5 pl-3;
+    border-color: var(--za-line-strong);
+    color: var(--za-text-muted);
+  }
+
+  .markdown-table-scroll {
+    @apply max-w-full overflow-x-auto;
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius-md);
+    background: var(--za-surface-0);
+  }
+
+  .markdown-content table {
+    @apply w-full border-collapse text-left;
+    min-width: 520px;
+  }
+
+  .markdown-content th,
+  .markdown-content td {
+    @apply align-top leading-6;
+    padding: 9px 11px;
+    border-bottom: 1px solid var(--za-line);
+    border-right: 1px solid var(--za-line);
+  }
+
+  .markdown-content th:last-child,
+  .markdown-content td:last-child {
+    border-right: 0;
+  }
+
+  .markdown-content tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .markdown-content th {
+    color: var(--za-text);
+    font-weight: 600;
+    background: var(--za-surface-1);
+  }
+
+  .markdown-content td {
+    color: var(--za-text-soft);
+  }
+
+  .markdown-content hr {
+    @apply my-1 border-0 border-t;
+    border-color: var(--za-line);
+  }
+}

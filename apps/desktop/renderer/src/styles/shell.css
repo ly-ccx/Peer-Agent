@@ -1,0 +1,307 @@
+@layer components {
+  .app-shell {
+    @apply grid h-screen min-h-0 w-screen overflow-hidden;
+    grid-template-columns: minmax(0, 1fr);
+    background: var(--za-app-bg);
+    animation: za-fade-rise var(--za-motion-slow) var(--za-ease-out) both;
+  }
+
+  .main-panel {
+    @apply grid h-screen min-h-0 min-w-0 overflow-hidden;
+    position: relative;
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .header {
+    @apply absolute top-0 right-0 z-20 flex h-11 items-center justify-end pr-6;
+    left: var(--za-sidebar-width, 300px);
+    border-bottom: 1px solid var(--za-line);
+    background: var(--za-header-bg);
+    backdrop-filter: blur(18px);
+    -webkit-app-region: drag;
+    animation: za-fade-rise var(--za-motion-medium) var(--za-ease-out) both;
+  }
+
+  .profile-chip {
+    @apply flex items-center gap-2;
+    -webkit-app-region: no-drag;
+  }
+
+  .profile-chip strong {
+    @apply max-w-[160px] overflow-hidden text-ellipsis whitespace-nowrap text-[12px] font-normal;
+    color: var(--za-text-soft);
+  }
+
+  .profile-chip span {
+    @apply grid h-7 w-7 place-items-center text-[11px] font-medium;
+    border: 1px solid var(--za-line);
+    border-radius: 999px;
+    color: var(--za-text);
+    background: var(--za-surface-1);
+  }
+
+  .thread {
+    @apply flex min-h-0 flex-col gap-4 overflow-y-auto px-10 pb-6 pt-[52px];
+    contain: layout;
+  }
+
+  .cloud-thread-host {
+    @apply gap-0 overflow-hidden p-0;
+  }
+
+  .section-heading {
+    @apply flex items-center justify-between gap-3;
+  }
+
+  /* 章节标题 — Atlas Vellum §6.1 白名单 #4：1px 朱砂短横 + 章节号 */
+  .section-heading h2 {
+    @apply relative m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
+    font-family: var(--font-serif-zh);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ink-base);
+    padding-left: 28px;
+  }
+
+  .section-heading h2::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 18px;
+    height: 1px;
+    background: var(--cinnabar-seal);
+    transform: translateY(-50%);
+  }
+
+  .thread-actions,
+  .empty-actions,
+  .context-row,
+  .row-meta,
+  .za-card-meta {
+    @apply flex flex-wrap items-center gap-1.5;
+  }
+
+  /* 通用卡片样式 — 注意：.cloud-chat-message 已抽出走文档式（无 border/bg/radius） */
+  .empty-task,
+  .fact-card,
+  .inventory-row,
+  .automation-card,
+  .message-references article,
+  .timeline-iteration,
+  .timeline-tool,
+  .za-card {
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius);
+    background: var(--za-panel-1);
+  }
+
+  .message-kicker {
+    @apply px-0 pb-2 text-[11px] font-semibold uppercase;
+    color: var(--za-text-faint);
+    letter-spacing: 0;
+  }
+
+  .empty-actions span,
+  .running-note {
+    border-color: var(--za-line);
+    color: var(--za-warn);
+    background: var(--za-warn-soft);
+  }
+
+  /* 系统运行时信息（区别于 user-facing warning）：
+   * 不带暖色警告框，只是一行 mono caption 静态批注。
+   * 用于：Cloud Chat 后端 404、bootstrap 加载提示等"用户不需要立刻处理"的状态。 */
+  .runtime-note {
+    @apply m-0 px-0 py-1;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+    color: var(--ink-fade);
+    background: transparent;
+    border: none;
+  }
+
+  .empty-actions span,
+  .context-row > span,
+  .row-meta span,
+  .za-card-meta span,
+  .za-status-badge,
+  .timeline-summary span,
+  .timeline-iteration header span,
+  .timeline-tool div span,
+  .message-meta span {
+    @apply inline-flex min-h-6 items-center px-2 text-[11px] leading-none;
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius-sm);
+    color: var(--za-text-muted);
+    background: var(--za-surface-1);
+  }
+
+  .za-status-badge-good {
+    border-color: var(--za-line);
+    color: var(--za-good);
+    background: var(--za-good-soft);
+  }
+
+  .za-status-badge-warn {
+    border-color: var(--za-line);
+    color: var(--za-warn);
+    background: var(--za-warn-soft);
+  }
+
+  .row-meta {
+    @apply justify-end;
+    max-width: 430px;
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+   *  Atlas Vellum 启动页 / 未登录 hero（v2：单列居中布局）
+   *  整页 = vertical hero（中心对齐）+ footer（hairline + 版权）
+   * ───────────────────────────────────────────────────────────── */
+  .atlas-startup {
+    @apply flex flex-col items-center;
+    width: 100%;
+    flex: 1;
+    min-height: 100%;
+    padding: 24px 24px 32px;
+    animation: za-fade-rise var(--za-motion-slow) var(--za-ease-out) both;
+  }
+
+  /* hero 区垂直居中占据剩余空间 */
+  .atlas-startup-hero {
+    @apply flex flex-1 flex-col items-center justify-center gap-6 text-center;
+    max-width: 480px;
+    width: 100%;
+  }
+
+  /* 朱砂方印 — 居中放大到 80px */
+  .atlas-startup-seal {
+    @apply grid h-20 w-20 place-items-center;
+    flex-shrink: 0;
+    border-radius: 2px;
+    background: var(--cinnabar-seal);
+    color: var(--surface-vellum-base);
+    font-family: var(--font-serif-zh);
+    font-size: 44px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  /* Serif 大标题 — central hero 给得起更大字号 */
+  .atlas-startup-title {
+    @apply m-0;
+    font-family: var(--font-serif-zh);
+    font-size: 56px;
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    color: var(--ink-base);
+  }
+
+  .atlas-startup-subtitle {
+    display: block;
+    font-family: var(--font-sans);
+    font-size: 16px;
+    font-weight: 400;
+    letter-spacing: 0.12em;
+    color: var(--ink-fade);
+    margin-top: 4px;
+  }
+
+  .atlas-startup-body {
+    @apply m-0;
+    max-width: 380px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--ink-soft);
+  }
+
+  .atlas-startup-actions {
+    @apply flex items-center justify-center gap-3;
+    margin-top: 8px;
+  }
+
+  /* Footer：hairline 上分割 + 居中 caption */
+  .atlas-startup-footer {
+    @apply mt-auto pt-4 text-center;
+    width: 100%;
+    max-width: 880px;
+    border-top: 1px solid var(--ink-hairline);
+    font-size: 12px;
+    letter-spacing: 0.01em;
+    color: var(--ink-fade);
+  }
+
+  /* Primary 登录按钮 — 墨填底 + 雪文字（红线 §1：朱砂不上 CTA） */
+  .atlas-startup-primary {
+    @apply inline-flex cursor-pointer items-center justify-center;
+    min-width: 220px;
+    height: 48px;
+    padding: 0 32px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    font-family: var(--font-sans-zh);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--surface-vellum-base);
+    background: var(--ink-base);
+    transition: background var(--za-motion-fast) var(--za-ease-standard);
+  }
+
+  .atlas-startup-primary:hover:not(:disabled) {
+    background: var(--ink-base-hover);
+  }
+
+  .atlas-startup-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  /* Secondary 次要按钮（取消登录） — 描边透明底，与 primary 区分 */
+  .atlas-startup-secondary {
+    @apply inline-flex cursor-pointer items-center justify-center;
+    height: 48px;
+    padding: 0 24px;
+    border-radius: 6px;
+    border: 1px solid var(--ink-hairline);
+    font-family: var(--font-sans-zh);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--ink-fade);
+    background: transparent;
+    transition: color var(--za-motion-fast) var(--za-ease-standard),
+      border-color var(--za-motion-fast) var(--za-ease-standard);
+  }
+
+  .atlas-startup-secondary:hover {
+    color: var(--ink-base);
+    border-color: var(--ink-base);
+  }
+
+  /* 登录中权限引导文案 — 限宽多行居中 */
+  .atlas-startup-hint {
+    @apply m-0;
+    max-width: 360px;
+    margin-top: 4px;
+    font-size: 12px;
+    line-height: 1.6;
+    text-align: center;
+    color: var(--ink-fade);
+  }
+
+  .atlas-startup-status {
+    font-size: 13px;
+    color: var(--ink-fade);
+  }
+
+  .atlas-startup-error {
+    @apply m-0;
+    font-size: 12px;
+    color: var(--state-danger);
+  }
+
+}

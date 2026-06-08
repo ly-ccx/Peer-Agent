@@ -1,0 +1,146 @@
+# Zeus Atlas CI/CD Pipeline
+# GitLab CI configuration for build, package, and publish
+
+stages:
+  - check
+  - build
+  - package
+  - publish
+
+variables:
+  PNPM_VERSION: "10.22.0"
+  NODE_VERSION: "22"
+
+# ── 全局缓存 ──
+.pnpm-cache: &pnpm-cache
+  cache:
+    key: pnpm-${CI_COMMIT_REF_SLUG}
+    paths:
+      - .pnpm-store/
+    policy: pull-push
+
+# ════════════════════════════════════════════════════════════════
+# Stage: check
+# ════════════════════════════════════════════════════════════════
+
+version-check:
+  stage: check
+  <<: *pnpm-cache
+  script:
+    - corepack enable
+    - pnpm install --frozen-lockfile
+    - pnpm version:check
+    - pnpm typecheck
+    - pnpm --filter @zeus-atlas/chat-kernel test
+
+# ════════════════════════════════════════════════════════════════
+# Stage: build
+# ════════════════════════════════════════════════════════════════
+
+build-renderer:
+  stage: build
+  <<: *pnpm-cache
+  needs: [version-check]
+  script:
+    - corepack enable
+    - pnpm install --frozen-lockfile
+    - pnpm build
+  artifacts:
+    paths:
+      - apps/desktop/dist/
+    expire_in: 1 day
+
+build-rust-macos:
+  stage: build
+  tags: [macos]
+  needs: [version-check]
+  script:
+    - rustup target add x86_64-apple-darwin aarch64-apple-darwin
+    - cargo build --release --target x86_64-apple-darwin
+    - cargo build --release --target aarch64-apple-darwin
+    # 合并 universal binary
+    - lipo -create
+        target/x86_64-apple-darwin/release/cu-proxy-core
+        target/aarch64-apple-darwin/release/cu-proxy-core
+        -output target/release/cu-proxy-core
+  artifacts:
+    paths:
+      - target/release/cu-proxy-core
+    expire_in: 1 day
+
+build-rust-windows:
+  stage: build
+  tags: [windows]
+  needs: [version-check]
+  script:
+    - cargo build --release --target x86_64-pc-windows-msvc
+    - copy target\x86_64-pc-windows-msvc\release\cu-proxy-core.exe target\release\cu-proxy-core.exe
+  artifacts:
+    paths:
+      - target/release/cu-proxy-core.exe
+    expire_in: 1 day
+
+# ════════════════════════════════════════════════════════════════
+# Stage: package
+# ════════════════════════════════════════════════════════════════
+
+package-mac:
+  stage: package
+  tags: [macos]
+  needs: [build-renderer, build-rust-macos]
+  script:
+    - corepack enable
+    - pnpm install --frozen-lockfile
+    - pnpm --filter @zeus-atlas/desktop dist:mac
+  artifacts:
+    paths:
+      - dist-electron/*.dmg
+      - dist-electron/*.zip
+      - dist-electron/*.blockmap
+      - dist-electron/latest-mac.yml
+    expire_in: 7 days
+
+package-win:
+  stage: package
+  tags: [windows]
+  needs: [build-renderer, build-rust-windows]
+  script:
+    - corepack enable
+    - pnpm install --frozen-lockfile
+    - pnpm --filter @zeus-atlas/desktop dist:win
+  artifacts:
+    paths:
+      - dist-electron/*.exe
+      - dist-electron/*.blockmap
+      - dist-electron/latest.yml
+    expire_in: 7 days
+
+# ════════════════════════════════════════════════════════════════
+# Stage: publish
+# ════════════════════════════════════════════════════════════════
+
+publish-beta:
+  stage: publish
+  when: manual
+  needs: [package-mac, package-win]
+  rules:
+    - if: $CI_COMMIT_BRANCH =~ /^release\//
+  script:
+    - corepack enable
+    - pnpm install --frozen-lockfile
+    - node scripts/upload-to-oss.mjs --channel beta
+  environment:
+    name: beta
+
+publish-stable:
+  stage: publish
+  when: manual
+  needs: [package-mac, package-win]
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d/
+  script:
+    - corepack enable
+    - pnpm install --frozen-lockfile
+    - node scripts/upload-to-oss.mjs --channel latest
+  environment:
+    name: production

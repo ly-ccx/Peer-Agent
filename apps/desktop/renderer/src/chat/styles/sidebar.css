@@ -1,0 +1,358 @@
+@layer components {
+  .cloud-chat-conversations {
+    @apply flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden px-3.5 pb-4 pt-[52px];
+    position: relative;
+    z-index: 20;
+    border-right: 1px solid var(--za-line);
+    background: var(--za-sidebar-bg);
+    animation: za-panel-in var(--za-motion-medium) var(--za-ease-out) both;
+    -webkit-app-region: drag;
+    overflow: visible;
+  }
+
+  /* 全局品牌印（Atlas Vellum §6.1 白名单 #1）— 整个 App 唯一允许"高饱和朱砂"的位置 */
+  .sidebar-brand {
+    @apply flex items-center gap-2.5 pb-2;
+  }
+
+  .sidebar-brand-seal {
+    @apply grid h-8 w-8 place-items-center;
+    flex-shrink: 0;
+    border-radius: 2px;
+    background: var(--cinnabar-seal);
+    color: var(--surface-vellum-base);
+    font-family: var(--font-serif-zh);
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    -webkit-app-region: no-drag;
+  }
+
+  .sidebar-brand-meta {
+    @apply grid min-w-0 gap-0.5;
+  }
+
+  .sidebar-brand-meta strong {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
+    font-family: var(--font-serif-zh);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ink-base);
+  }
+
+  .sidebar-brand-meta small {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
+    font-size: 10.5px;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    color: var(--ink-fade);
+  }
+
+  .sidebar-nav {
+    @apply grid min-h-0 flex-1 content-start gap-1 overflow-y-auto pr-1;
+    -webkit-app-region: no-drag;
+  }
+
+  .codex-sidebar-actions,
+  .sidebar-group,
+  .channel-block {
+    @apply grid gap-1;
+  }
+
+  .codex-sidebar-actions {
+    @apply pb-3;
+    border-bottom: 1px solid var(--za-line);
+  }
+
+  .sidebar-group {
+    @apply pt-3;
+  }
+
+  .sidebar-group-heading {
+    @apply flex min-h-7 items-center justify-between gap-2 px-2 text-[12px] font-normal;
+    color: var(--za-text-faint);
+  }
+
+  .codex-sidebar-actions button,
+  .sidebar-search-row {
+    @apply grid min-h-8 w-full min-w-0 items-center gap-2 px-2 text-left text-[12.5px] font-normal;
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    border: 1px solid transparent;
+    border-radius: var(--za-radius);
+    color: var(--za-text-soft);
+    background: transparent;
+    outline: none;
+  }
+
+  .codex-sidebar-actions button:focus,
+  .codex-sidebar-actions button:focus-visible,
+  .codex-sidebar-actions button:focus-within,
+  .sidebar-search-row:focus,
+  .sidebar-search-row:focus-visible,
+  .sidebar-search-row:focus-within {
+    border-color: transparent !important;
+    outline: none !important;
+    box-shadow: none !important;
+    -webkit-focus-ring-color: transparent;
+  }
+
+  .channel-row {
+    @apply grid min-h-8 min-w-0 items-center gap-2 px-3 text-left text-[12.5px] font-normal;
+    width: calc(100% - 2px);
+    margin-inline: 1px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    border: 1px solid transparent;
+    border-radius: var(--za-radius);
+    color: var(--za-text-soft);
+    background: transparent;
+  }
+
+  .codex-sidebar-actions button:hover,
+  .channel-row:hover {
+    color: var(--za-text);
+    background: var(--za-hover);
+  }
+
+  .codex-sidebar-actions button.active,
+  .channel-row.active {
+    color: var(--za-text);
+    border-color: transparent;
+    background: var(--za-sidebar-active-bg);
+    box-shadow: none;
+  }
+
+  .channel-conversation-list {
+    @apply grid gap-0.5 py-1 pl-0;
+    animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
+  }
+
+  .pinned-conversation-list {
+    @apply grid gap-0.5;
+  }
+
+  .channel-conversation-list .conversation-row {
+    @apply min-h-10;
+    width: calc(100% - 2px);
+    margin-inline: 1px;
+  }
+
+  .conversation-row {
+    @apply grid min-h-11 w-full items-center gap-2 px-1.5 py-1 text-left;
+    grid-template-columns: 22px minmax(0, 1fr) 22px;
+    border: 1px solid transparent;
+    border-radius: var(--za-radius);
+    transform-origin: center;
+    transition:
+      background var(--za-motion-fast) var(--za-ease-standard),
+      border-color var(--za-motion-fast) var(--za-ease-standard),
+      opacity var(--za-motion-medium) var(--za-ease-standard);
+  }
+
+  .conversation-row:hover {
+    background: var(--za-surface-1);
+  }
+
+  .conversation-row.active {
+    border-color: transparent;
+    background: var(--za-sidebar-thread-active-bg);
+    box-shadow: none;
+  }
+
+  .conversation-row.active:hover {
+    background: var(--za-sidebar-active-bg);
+  }
+
+  .conversation-main {
+    @apply grid min-w-0 gap-0.5 rounded-[8px] px-0.5 py-1 text-left;
+    color: inherit;
+    background: transparent;
+  }
+
+  .conversation-action {
+    @apply grid h-[22px] w-[22px] place-items-center rounded-[7px] p-0;
+    color: var(--za-text-faint);
+    background: transparent;
+    border: none;
+    outline: none;
+    opacity: 0;
+    cursor: pointer;
+    transition: color var(--za-motion-fast), background var(--za-motion-fast);
+  }
+
+  .conversation-row:hover .conversation-action,
+  .conversation-row:focus-within .conversation-action,
+  .conversation-action.active {
+    opacity: 1;
+  }
+
+  .conversation-action:hover,
+  .conversation-action.active {
+    color: var(--za-text-soft);
+    background: var(--za-hover);
+  }
+
+  .conversation-action.danger:hover {
+    color: var(--za-text-muted);
+  }
+
+  .conversation-row strong,
+  .conversation-row span,
+  .codex-sidebar-actions span,
+  .channel-row span {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
+  }
+
+  .conversation-row strong {
+    color: var(--za-text-soft);
+    font-size: 12.5px;
+    font-weight: 400;
+  }
+
+  .conversation-row.active strong {
+    color: var(--za-text);
+  }
+
+  .conversation-row span {
+    color: var(--za-text-faint);
+    font-size: 10.5px;
+    font-weight: 400;
+  }
+
+  .sidebar-footer {
+    @apply pt-3;
+    border-top: 1px solid var(--za-line);
+    -webkit-app-region: no-drag;
+  }
+
+  .sidebar-account {
+    @apply relative;
+  }
+
+  .sidebar-account-button {
+    @apply grid min-h-10 w-full min-w-0 items-center gap-2 px-2 text-left text-[12.5px] font-normal;
+    grid-template-columns: 26px minmax(0, 1fr) 18px;
+    border: 1px solid transparent;
+    border-radius: var(--za-radius);
+    color: var(--za-text-soft);
+    background: transparent;
+  }
+
+  .sidebar-account-button:hover,
+  .sidebar-account-button.active {
+    color: var(--za-text);
+    border-color: var(--za-line);
+    background: var(--za-hover);
+  }
+
+  .sidebar-avatar {
+    @apply grid h-6 w-6 place-items-center text-[11px] font-medium;
+    border: 1px solid var(--za-line);
+    border-radius: 999px;
+    color: var(--za-text);
+    background: var(--za-surface-1);
+  }
+
+  .sidebar-account-button strong {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-normal;
+    color: inherit;
+  }
+
+  .sidebar-account-popover {
+    @apply absolute right-0 left-0 z-40 grid gap-1 p-2;
+    bottom: 48px;
+    max-height: calc(100vh - 96px);
+    overflow-y: auto;
+    border: 1px solid var(--za-line-strong);
+    border-radius: var(--za-radius-lg);
+    color: var(--za-text-soft);
+    background: var(--za-popover-bg);
+    box-shadow: var(--za-shadow-popover);
+    animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
+  }
+
+  .sidebar-account-popover > button,
+  .sidebar-account-row {
+    @apply grid min-h-9 w-full min-w-0 items-center gap-2 rounded-[8px] px-2 text-left text-[12.5px] font-normal;
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    color: var(--za-text-soft);
+    background: transparent;
+  }
+
+  .sidebar-account-popover > button:hover {
+    color: var(--za-text);
+    background: var(--za-hover);
+  }
+
+  .sidebar-appearance-quick {
+    @apply grid gap-1 rounded-[12px] p-1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    background: var(--za-surface-1);
+  }
+
+  .sidebar-locale-quick {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sidebar-account-popover .sidebar-appearance-quick button {
+    @apply min-h-7 place-items-center rounded-[9px] px-1 text-center text-[11.5px];
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 选中态：墨填底 + 雪文字（与 Vellum Primary 按钮 / appearance 分段 / automation tabs 一致）
+   * 之前 surface-2 与容器 surface-1 只差 1-2% 亮度，看不出选中
+   * .active:hover 也锁住，避免被通用 hover 规则覆盖 bg */
+  .sidebar-account-popover .sidebar-appearance-quick button.active,
+  .sidebar-account-popover .sidebar-appearance-quick button.active:hover {
+    color: var(--za-primary-control-ink);
+    background: var(--za-primary-control-bg);
+  }
+
+  .sidebar-account-row.muted {
+    color: var(--za-text-muted);
+  }
+
+  .sidebar-account-row span,
+  .sidebar-account-popover > button span {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
+  }
+
+  .sidebar-account-separator {
+    @apply my-1 h-px;
+    background: var(--za-line);
+  }
+
+  .sidebar-icon {
+    @apply h-[18px] w-[18px];
+    color: var(--za-text-faint);
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.48;
+  }
+
+  .sidebar-search-row input {
+    @apply h-8 min-w-0 border-0 bg-transparent p-0 outline-none;
+    color: var(--za-text-soft);
+  }
+
+  .sidebar-search-row input::placeholder {
+    color: var(--za-text-muted);
+  }
+
+  .codex-sidebar-actions small,
+  .channel-row small {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-normal;
+    color: var(--za-text-faint);
+  }
+
+  .sidebar-chevron {
+    transition: transform var(--za-motion-medium) var(--za-ease-standard);
+  }
+
+  .sidebar-account-button.active .sidebar-chevron {
+    transform: rotate(180deg);
+  }
+}

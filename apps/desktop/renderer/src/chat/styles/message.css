@@ -1,0 +1,379 @@
+@layer components {
+  /* Atlas Vellum · 卷轴文档式 chat（v0.1.4）
+   * 不是 IM 气泡，是连续的"卷轴文本"：
+   *   - 消息无 border / bg / radius，靠 hairline + 字号差 + 间距分章
+   *   - 用户消息：朱砂 2px 左竖线（白名单 #3 在左对齐场景的正当用法）
+   *   - Agent 消息：墨色头像 + Serif 名号 + 全宽段落
+   *   - 章节切换由 .section-heading 承担（每个新会话 = 新卷）
+   */
+  .cloud-chat-messages {
+    @apply flex min-h-0 flex-1 flex-col overflow-y-auto pr-1;
+    gap: 32px;
+  }
+
+  .cloud-chat-message {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-left: 16px;
+    color: var(--ink-base);
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.72;
+    animation: za-message-in var(--za-motion-slow) var(--za-ease-decelerate) both;
+  }
+
+  .cloud-chat-message::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.06) 40%,
+      rgba(255, 255, 255, 0.10) 50%,
+      rgba(255, 255, 255, 0.06) 60%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    border-radius: var(--za-radius-sm);
+    pointer-events: none;
+    animation: za-message-shimmer 800ms var(--za-ease-decelerate) both;
+  }
+
+  /* 用户消息：朱砂 2px 左竖线（作者印记） */
+  .cloud-chat-message.user::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--cinnabar-seal);
+  }
+
+  /* Agent / system / tool：默认无标记，靠头像 + 名号识别发送方 */
+  /* （之前的 self-end / max-width 全部移除）*/
+
+  /* 消息头：avatar + 角色名 + 时间戳 inline */
+  .cloud-chat-message .message-sender {
+    @apply flex items-center gap-2;
+  }
+
+  /* 角色名号 — 不再是小字 metadata，是"作者署名"级别 */
+  .cloud-chat-message .role-label {
+    font-family: var(--font-sans-zh);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink-base);
+    letter-spacing: -0.005em;
+  }
+
+  /* summary 仍保持 caption 级（思维链折叠开关）*/
+  /* 消息 hover 操作条 */
+  .message-action-bar {
+    @apply flex items-center gap-1;
+    opacity: 0;
+    transition: opacity var(--za-motion-fast) var(--za-ease-standard);
+  }
+  .cloud-chat-message:hover .message-action-bar {
+    opacity: 1;
+  }
+  .message-action-bar button {
+    @apply flex items-center justify-center rounded-md p-1;
+    color: var(--za-text-muted);
+    background: transparent;
+    border: none;
+    outline: none;
+    cursor: pointer;
+    transition: color var(--za-motion-fast), background var(--za-motion-fast);
+  }
+  .message-action-bar button:hover {
+    color: var(--za-text);
+    background: var(--za-hover);
+  }
+  .message-action-bar button.danger:hover {
+    color: #e55;
+  }
+
+  /* 分享选择模式 */
+  .cloud-chat-message.selection-mode {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 10px;
+    cursor: pointer;
+    border-radius: var(--za-radius);
+    padding: 12px 16px;
+    transition: background var(--za-motion-fast) var(--za-ease-standard);
+  }
+  .cloud-chat-message.selection-mode:hover {
+    background: var(--za-hover);
+  }
+  .cloud-chat-message.selection-mode.selected {
+    background: var(--za-hover);
+    outline: 1px solid var(--za-accent);
+  }
+  .cloud-chat-message.selection-mode > *:not(.share-select-checkbox) {
+    min-width: 0;
+  }
+  .share-select-checkbox {
+    @apply flex shrink-0 items-center pt-1;
+    pointer-events: none;
+  }
+  .share-select-checkbox input[type="checkbox"] {
+    @apply h-4 w-4;
+    accent-color: var(--za-accent);
+    pointer-events: none;
+  }
+
+  .share-selection-bar {
+    @apply flex items-center gap-3 px-4 py-2;
+    background: var(--za-surface-1);
+    border-top: 1px solid var(--za-line);
+    font-size: 13px;
+    color: var(--za-text-soft);
+    animation: za-fade-rise var(--za-motion-fast) var(--za-ease-out) both;
+  }
+  .share-selection-bar span {
+    flex: 1;
+  }
+  .share-selection-bar button {
+    @apply rounded-md border px-3 py-1.5 text-xs font-medium;
+    border-color: var(--za-line);
+    background: var(--za-surface-1);
+    color: var(--za-text-soft);
+    cursor: pointer;
+    outline: none;
+    transition: background var(--za-motion-fast), color var(--za-motion-fast);
+  }
+  .share-selection-bar button:hover {
+    background: var(--za-surface-2);
+    color: var(--za-text);
+  }
+  .share-selection-bar .share-btn-confirm {
+    border-color: var(--za-accent);
+    background: var(--za-accent);
+    color: #fff;
+  }
+  .share-selection-bar .share-btn-confirm:hover {
+    opacity: 0.85;
+  }
+  .share-selection-bar .share-btn-confirm:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .cloud-chat-message summary {
+    color: var(--za-text-faint);
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: color var(--za-motion-fast) var(--za-ease-standard);
+  }
+  .cloud-chat-message summary:hover {
+    color: var(--za-text-soft);
+  }
+  .cloud-chat-message details[open] > .thinking-timeline {
+    animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
+  }
+
+  /* Agent 头像 — 仅墨色底 + 思源宋体字
+   * 朱砂角标已与"全局品牌印（侧栏顶部用户印章）"合并语义，本处不再叠朱砂点
+   * 这样整套 UI 朱砂落点收敛回 ≤ 4 个白名单位置（红线 §6.3）*/
+  .cloud-chat-message .agent-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--ink-soft);
+    color: var(--surface-vellum-base);
+    font-family: var(--font-serif-zh);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0;
+    flex-shrink: 0;
+  }
+
+  .cloud-chat-message p,
+  .za-card p {
+    @apply m-0;
+  }
+
+  .cloud-chat-message p {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+
+  .message-meta,
+  .assistant-actions {
+    @apply flex flex-wrap items-center gap-1.5;
+  }
+
+  .message-images {
+    @apply grid gap-2;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 150px));
+  }
+
+  .message-images img {
+    @apply w-full object-cover;
+    max-height: 160px;
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius);
+    background: var(--za-surface-1);
+  }
+
+  .message-references article {
+    @apply mt-2 grid gap-1 p-2;
+    background: var(--za-surface-0);
+    box-shadow: none;
+    animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
+  }
+
+  .message-references strong {
+    color: var(--za-text-muted);
+    font-size: 11.5px;
+  }
+
+  .cloud-chat-message details {
+    @apply pt-1.5;
+  }
+
+  .cloud-chat-message details[open] > :not(summary) {
+    animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
+  }
+
+  /* 思维链折叠开关：自定义三角符替换浏览器原生 marker */
+  .cloud-chat-message details > summary {
+    @apply inline-flex cursor-pointer select-none items-center gap-1.5;
+    list-style: none;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.02em;
+    color: var(--ink-fade);
+    transition: color var(--za-motion-fast) var(--za-ease-standard);
+  }
+
+  .cloud-chat-message details > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .cloud-chat-message details > summary::before {
+    content: "›";
+    display: inline-block;
+    width: 10px;
+    text-align: center;
+    color: var(--ink-fade);
+    transition: transform var(--za-motion-fast) var(--za-ease-standard);
+  }
+
+  .cloud-chat-message details[open] > summary::before {
+    transform: rotate(90deg);
+  }
+
+  .cloud-chat-message details > summary:hover {
+    color: var(--ink-base);
+  }
+
+  /* 流式进行态扫光（高性能版）：文字本体静态 ink-base,叠一层"背景色"半透明遮罩压暗,
+   * 遮罩上一道透明缝随 transform 横扫 → 缝处文字恢复亮色 = 一道光扫过文字。
+   * 动画属性只有 transform（GPU 合成、零 repaint）;遮罩取真实背景色 --za-thread-bg,移动不露馅。
+   * reduced-motion 下 tokens.css 撤掉 ::after,文字回归纯 ink-base。 */
+  .za-streaming-text {
+    position: relative;
+    display: inline-block;
+    vertical-align: bottom;
+    overflow: hidden;
+    color: var(--ink-base);
+  }
+  .za-streaming-text::after {
+    content: "";
+    position: absolute;
+    inset: 0 -100%;
+    background: var(--za-thread-bg);
+    opacity: 0.6;
+    pointer-events: none;
+    -webkit-mask-image: linear-gradient(100deg, #000 44%, transparent 50%, #000 56%);
+    mask-image: linear-gradient(100deg, #000 44%, transparent 50%, #000 56%);
+    animation: za-text-sweep 2.3s linear infinite;
+    will-change: transform;
+  }
+
+  /* 「生成中…」答案占位：azure 脉冲点 + 扫光文字,与工具运行态同一信号语言 */
+  .streaming-placeholder {
+    @apply inline-flex items-center gap-2;
+    font-size: 14px;
+    line-height: 1.72;
+  }
+  .streaming-placeholder::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--za-accent);
+    animation: za-loading-dot 1.1s var(--za-ease-standard) infinite;
+  }
+
+  /* 思考完成后内容揭示：渐现 + 高光扫过 */
+  .message-content-reveal {
+    position: relative;
+    animation: za-content-reveal 600ms var(--za-ease-decelerate) both;
+  }
+
+  .message-content-reveal::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.12) 35%,
+      rgba(255, 255, 255, 0.22) 50%,
+      rgba(255, 255, 255, 0.12) 65%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    border-radius: var(--za-radius-sm);
+    pointer-events: none;
+    animation: za-content-shimmer 1s 200ms var(--za-ease-decelerate) both;
+  }
+
+  /* Confirmation 行内卷轴 — Atlas Vellum §7.6：上下 1px 古铜横线 + 右上方印
+   * 不是普通卡片，是"等用户阅读签字"的卷轴形态；border-radius 归零强调"打开的卷轴"语感 */
+  .confirmation-inline {
+    @apply flex min-h-9 items-center justify-between gap-2.5 px-2 py-2 text-xs;
+    position: relative;
+    border: none;
+    border-top: 1px solid var(--state-confirm);
+    border-bottom: 1px solid var(--state-confirm);
+    border-radius: 0;
+    background: transparent;
+    color: var(--ink-base);
+  }
+
+  /* 古铜方印（"阅"印）— 卷轴右上角的状态标记 */
+  .confirmation-inline::before {
+    content: "等你确认";
+    position: absolute;
+    top: -8px;
+    left: 8px;
+    padding: 0 6px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--state-confirm);
+    background: var(--za-thread-bg);
+  }
+
+  .confirmation-inline > span {
+    @apply min-w-0;
+    overflow-wrap: anywhere;
+  }
+
+  .confirmation-inline > div {
+    @apply flex shrink-0 gap-1.5;
+  }
+}

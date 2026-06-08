@@ -1,0 +1,199 @@
+@layer components {
+  .share-dialog {
+    @apply fixed inset-0 m-auto rounded-xl border-0 p-0;
+    width: min(440px, calc(100vw - 64px));
+    background: var(--za-surface-2);
+    color: var(--za-text);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
+    animation: za-panel-in var(--za-motion-medium) var(--za-ease-out) both;
+  }
+  .share-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.4);
+  }
+  .share-dialog *,
+  .share-dialog *:focus,
+  .share-dialog *:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+    -webkit-focus-ring-color: transparent;
+  }
+  .share-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.45);
+  }
+
+  .share-dialog-content {
+    @apply flex flex-col gap-4 p-5;
+    overflow: visible;
+  }
+  .share-dialog {
+    overflow: visible;
+  }
+  .share-dialog-content h3 {
+    @apply m-0 text-base font-semibold;
+  }
+  .share-dialog-desc {
+    @apply m-0 text-xs leading-relaxed;
+    color: var(--za-text-muted);
+  }
+
+  .share-mode-group {
+    @apply flex flex-col gap-2;
+  }
+  .share-mode-option {
+    @apply flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5;
+    border-color: var(--za-line);
+    background: transparent;
+    transition:
+      border-color var(--za-motion-fast) var(--za-ease-standard),
+      background var(--za-motion-fast) var(--za-ease-standard);
+  }
+  .share-mode-option:hover {
+    background: var(--za-hover);
+  }
+  .share-mode-option.selected {
+    border-color: var(--za-accent);
+    background: var(--za-hover);
+  }
+  .share-mode-option.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .share-mode-option input[type="radio"] {
+    @apply mt-0.5 shrink-0;
+    accent-color: var(--za-accent, #6fb8c4);
+  }
+  .share-mode-option div {
+    @apply flex flex-col gap-0.5;
+  }
+  .share-mode-option strong {
+    @apply text-sm font-medium;
+    color: var(--za-text);
+  }
+  .share-mode-option span {
+    @apply text-xs;
+    color: var(--za-text-muted);
+  }
+
+  .share-section {
+    @apply flex flex-col gap-1.5;
+  }
+  .share-section-label {
+    @apply text-xs font-medium;
+    color: var(--za-text-soft);
+  }
+
+  .share-acl-input {
+    @apply w-full resize-y rounded-lg border px-3 py-2 text-xs;
+    border-color: var(--za-line);
+    background: var(--za-bg-1);
+    color: var(--za-text);
+    font-family: var(--za-font-ui);
+    outline: none;
+    transition: border-color var(--za-motion-fast);
+  }
+  .share-acl-input::placeholder {
+    color: var(--za-text-faint);
+  }
+
+  /* StaffSelect 人员搜索 */
+  .staff-select {
+    @apply relative;
+  }
+  .staff-select-tags {
+    @apply flex flex-wrap items-center gap-1 rounded-lg border px-2 py-1.5;
+    border-color: var(--za-line);
+    background: var(--za-bg-1);
+    min-height: 36px;
+    transition: border-color var(--za-motion-fast) var(--za-ease-standard);
+  }
+  .staff-select-tags *:focus,
+  .staff-select-input:focus {
+    outline: none;
+    box-shadow: none;
+  }
+  .staff-tag {
+    @apply flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs;
+    background: var(--za-surface-1);
+    color: var(--za-text-soft);
+    border: 1px solid var(--za-line);
+  }
+  .staff-tag button {
+    @apply border-none bg-transparent p-0 text-xs leading-none;
+    color: var(--za-text-faint);
+    cursor: pointer;
+  }
+  .staff-tag button:hover {
+    color: var(--za-text);
+  }
+  .staff-select-input {
+    @apply min-w-[80px] flex-1 border-none bg-transparent p-0 text-xs outline-none;
+    color: var(--za-text);
+  }
+  .staff-select-input::placeholder {
+    color: var(--za-text-faint);
+  }
+  .staff-select-dropdown {
+    @apply absolute left-0 top-full z-10 mt-1 flex max-h-[200px] flex-col overflow-y-auto rounded-lg py-1;
+    min-width: 100%;
+    background: var(--za-surface-2);
+    border: 1px solid var(--za-line);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    animation: za-fade-rise var(--za-motion-fast) var(--za-ease-out) both;
+  }
+  .staff-select-dropdown button {
+    @apply flex w-full items-center gap-2 border-none bg-transparent px-3 py-1.5 text-left text-xs;
+    color: var(--za-text-soft);
+    cursor: pointer;
+    transition: background var(--za-motion-fast);
+  }
+  .staff-select-dropdown button:hover {
+    background: var(--za-hover);
+    color: var(--za-text);
+  }
+  .staff-select-dropdown button.selected {
+    color: var(--za-accent);
+  }
+  .staff-select-dropdown strong {
+    color: var(--za-text);
+  }
+  .staff-realname {
+    color: var(--za-text-faint);
+  }
+  .staff-select-loading {
+    @apply px-2 py-1 text-xs;
+    color: var(--za-text-faint);
+  }
+
+  .share-dialog-footer {
+    @apply flex items-center justify-end gap-2 pt-1;
+  }
+  .share-btn-cancel,
+  .share-btn-confirm {
+    @apply rounded-md border px-4 py-1.5 text-xs font-medium;
+    cursor: pointer;
+    transition:
+      background var(--za-motion-fast) var(--za-ease-standard),
+      border-color var(--za-motion-fast) var(--za-ease-standard);
+  }
+  .share-btn-cancel {
+    border-color: var(--za-line);
+    background: transparent;
+    color: var(--za-text-soft);
+  }
+  .share-btn-cancel:hover {
+    background: var(--za-hover);
+  }
+  .share-btn-confirm {
+    border-color: var(--za-accent);
+    background: var(--za-accent);
+    color: var(--za-surface-2);
+  }
+  .share-btn-confirm:hover {
+    opacity: 0.9;
+  }
+  .share-btn-confirm:disabled,
+  .share-btn-cancel:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}

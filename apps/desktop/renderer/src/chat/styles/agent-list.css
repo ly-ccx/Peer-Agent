@@ -1,0 +1,46 @@
+@layer components {
+  .agent-list-page {
+    @apply flex min-h-0 min-w-0 flex-col gap-5 overflow-y-auto px-8 pb-7 pt-[52px];
+    background: var(--za-thread-bg);
+    animation: za-panel-in var(--za-motion-medium) var(--za-ease-out) 50ms both;
+  }
+
+  .agent-list-page h2 {
+    @apply m-0 text-lg font-semibold;
+    color: var(--za-text);
+  }
+
+  .agent-grid {
+    @apply grid gap-3;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+
+  .agent-card {
+    @apply flex flex-col items-start gap-1.5 rounded-xl border px-4 py-3 text-left;
+    border-color: var(--za-line);
+    background: var(--za-surface-1);
+    cursor: pointer;
+    transition:
+      background var(--za-motion-fast) var(--za-ease-standard),
+      border-color var(--za-motion-fast) var(--za-ease-standard);
+  }
+
+  .agent-card:hover {
+    background: var(--za-surface-2);
+    border-color: var(--za-text-faint);
+  }
+
+  .agent-card.active {
+    border-color: var(--za-accent, var(--azure-trace));
+  }
+
+  .agent-card strong {
+    @apply text-sm font-medium;
+    color: var(--za-text);
+  }
+
+  .agent-card p {
+    @apply m-0 line-clamp-2 text-xs;
+    color: var(--za-text-muted);
+  }
+}

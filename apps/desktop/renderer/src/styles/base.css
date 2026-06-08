@@ -1,0 +1,85 @@
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+
+  body {
+    @apply m-0 min-h-[720px] min-w-[1024px] overflow-hidden antialiased;
+    background: var(--za-bg-0);
+    font-weight: 400;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button {
+    @apply border-0 bg-transparent text-inherit;
+    cursor: default;
+    font-weight: 400;
+    transition:
+      background-color var(--za-motion-fast) var(--za-ease-standard),
+      border-color var(--za-motion-fast) var(--za-ease-standard),
+      color var(--za-motion-fast) var(--za-ease-standard),
+      opacity var(--za-motion-fast) var(--za-ease-standard),
+      transform var(--za-motion-fast) var(--za-ease-out);
+  }
+
+  button:disabled,
+  input:disabled,
+  select:disabled {
+    opacity: 0.46;
+  }
+
+  button:focus-visible,
+  select:focus-visible,
+  summary:focus-visible {
+    outline: 1px solid var(--za-focus);
+    outline-offset: 1px;
+  }
+
+  input:focus,
+  input:focus-visible,
+  textarea:focus,
+  textarea:focus-visible {
+    outline: none;
+    box-shadow: none;
+    -webkit-focus-ring-color: transparent;
+  }
+
+  /* ::selection 由 tokens.css 顶层接管（cinnabar-trace 极淡晕染，文本可读性优先）*/
+}
+
+/* 滚动条样式 */
+*::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px 0;
+}
+
+*::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background-color: transparent;
+}
+
+:hover> ::-webkit-scrollbar-thumb,
+:hover::-webkit-scrollbar-thumb {
+  background-color: var(--za-scrollbar-thumb);
+}
+
+*::-webkit-scrollbar-thumb:active {
+  background-color: var(--za-scrollbar-thumb);
+}

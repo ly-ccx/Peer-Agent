@@ -1,0 +1,77 @@
+@layer components {
+
+  .empty-task,
+  .facts-grid,
+  .inventory-section {
+    width: min(920px, 100%);
+    margin: 0 auto;
+  }
+
+  .empty-task {
+    @apply grid gap-3 px-6 py-5;
+  }
+
+  .empty-task h2 {
+    @apply m-0 text-lg font-semibold;
+    color: var(--za-text);
+  }
+
+  .empty-task p {
+    @apply m-0 max-w-[760px] text-[13px] leading-7;
+    color: var(--za-text-soft);
+  }
+
+  .facts-grid {
+    @apply grid grid-cols-4 gap-2.5;
+  }
+
+  .fact-card {
+    @apply grid min-w-0 gap-2 p-3.5;
+    box-shadow: none;
+  }
+
+  .fact-card span,
+  .section-heading span {
+    color: var(--za-text-faint);
+    font-size: 12px;
+  }
+
+  .fact-card strong {
+    @apply overflow-hidden text-ellipsis whitespace-nowrap text-[15px] font-semibold;
+    color: var(--za-text);
+  }
+
+  .fact-card small,
+  .inventory-row p {
+    @apply overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-5;
+    color: var(--za-text-faint);
+  }
+
+  .inventory-section,
+  .inventory-list {
+    @apply grid gap-2.5;
+  }
+
+  .inventory-row {
+    @apply grid min-h-[60px] min-w-0 items-center gap-4 px-3.5 py-3;
+    grid-template-columns: minmax(0, 1fr) auto;
+    background: var(--za-surface-0);
+    box-shadow: none;
+  }
+
+  .inventory-row strong {
+    color: var(--za-text-soft);
+    font-size: 12.5px;
+  }
+
+  .empty-inline {
+    @apply m-0 text-[12px] leading-5;
+    color: var(--za-text-muted);
+  }
+
+  .running-note {
+    @apply m-0 px-2 py-1.5 text-[12px] leading-5;
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius);
+  }
+}

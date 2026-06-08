@@ -1,0 +1,107 @@
+@layer components {
+  /* PermissionGateStrip — Atlas Vellum control 层
+   * 紧贴 ChatComposer 上方，跟 composer 同 control 家族保证视觉连续
+   * 单行布局：badge / capability / · / preview / [+N more] / [拒绝] [允许]
+   * 不要朱砂、不要光圈，仅用墨色发丝 + 暖灰底，符合 Atlas Vellum 克制原则
+   */
+  .permission-gate-strip {
+    @apply flex flex-wrap items-center gap-2 px-3 py-2;
+    margin-top: 8px;
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius);
+    background: var(--za-control-fill);
+    color: var(--ink-base);
+    font-size: 13px;
+    line-height: 1.4;
+    animation: za-fade-rise var(--za-motion-medium) var(--za-ease-out) both;
+  }
+
+  .permission-gate-strip .badge {
+    flex-shrink: 0;
+    padding: 1px 8px;
+    border: 1px solid var(--ink-hairline);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--ink-soft);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .permission-gate-strip .capability {
+    flex-shrink: 0;
+    color: var(--ink-base);
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+
+  .permission-gate-strip .separator {
+    flex-shrink: 0;
+    color: var(--ink-mute);
+  }
+
+  .permission-gate-strip .preview {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
+    flex: 1 1 0%;
+    color: var(--ink-soft);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+  }
+
+  .permission-gate-strip .more {
+    flex-shrink: 0;
+    color: var(--ink-mute);
+    font-size: 11.5px;
+  }
+
+  .permission-gate-strip .actions {
+    @apply flex items-center gap-1.5;
+    flex-shrink: 0;
+    margin-left: auto;
+  }
+
+  .permission-gate-strip button {
+    padding: 4px 12px;
+    border: 1px solid var(--ink-hairline);
+    border-radius: var(--za-radius-sm);
+    background: transparent;
+    color: var(--ink-base);
+    font-size: 12px;
+    line-height: 1.4;
+    cursor: pointer;
+    transition:
+      background var(--za-motion-fast) var(--za-ease-standard),
+      border-color var(--za-motion-fast) var(--za-ease-standard);
+  }
+
+  .permission-gate-strip button:hover {
+    background: var(--za-hover);
+    border-color: var(--ink-soft);
+  }
+
+  /* 「允许」是高频主操作：极浅墨填充作为弱强调，不刺眼 */
+  .permission-gate-strip button.allow {
+    background: var(--za-control-fill-hover);
+  }
+
+  .permission-gate-strip button.allow:hover {
+    background: var(--za-hover);
+  }
+
+  .permission-gate-strip.exiting {
+    animation: za-slide-down-out 180ms var(--za-ease-accelerate) forwards;
+    pointer-events: none;
+  }
+
+  /* 「一直允许」冰湖青描边 */
+  .permission-gate-strip button.allow-always {
+    border-color: var(--za-accent, var(--azure-trace));
+  }
+
+  /* 点击即时反馈：按钮按下微缩 */
+  .permission-gate-strip button:active {
+    transform: scale(0.96);
+    transition: transform 60ms;
+  }
+}

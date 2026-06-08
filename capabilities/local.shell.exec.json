@@ -1,0 +1,55 @@
+{
+  "capabilityId": "local.shell.exec",
+  "name": "Local shell execution",
+  "description": "Executes a local shell command after client-side permission classification and enforcement.",
+  "localizedName": {
+    "zh-CN": "本地 Shell 执行",
+    "en-US": "Local shell execution"
+  },
+  "localizedDescription": {
+    "zh-CN": "在客户端完成权限分类和执行约束后执行本地 Shell 指令。",
+    "en-US": "Executes a local shell command after client-side permission classification and enforcement."
+  },
+  "source": "shell",
+  "riskLevel": "L4_privileged",
+  "dataLevel": "D2_sensitive",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "command": {
+        "type": "string",
+        "description": "Shell command to execute."
+      },
+      "cwd": {
+        "type": "string",
+        "description": "Working directory. Defaults to the workspace root."
+      },
+      "timeoutMs": {
+        "type": "number",
+        "description": "Execution timeout in milliseconds."
+      },
+      "description": {
+        "type": "string",
+        "description": "Human-readable reason shown in the shell task timeline."
+      },
+      "runInBackground": {
+        "type": "boolean",
+        "description": "Whether to return immediately with a background task id."
+      }
+    },
+    "required": ["command"]
+  },
+  "evidencePolicy": {
+    "returnMode": "artifact_ref",
+    "maxChars": 4000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "workspace",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": true,
+    "backgroundTasks": true,
+    "sandboxAvailable": false
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "reportVersion": "1",
+  "branch": "dev/0.0.1",
+  "commit": "<git_commit>",
+  "environment": "prod",
+  "testerWorkId": "<work_id>",
+  "startedAt": "<iso_datetime>",
+  "finishedAt": "<iso_datetime>",
+  "checks": {
+    "bucLogin": { "status": "pending", "evidence": "" },
+    "cloudRuntimeConnected": { "status": "pending", "evidence": "" },
+    "conversationList": { "status": "pending", "evidence": "" },
+    "conversationCreate": { "status": "pending", "evidence": "" },
+    "messageStream": { "status": "pending", "evidence": "" },
+    "timelineThinking": { "status": "pending", "evidence": "" },
+    "toolTimeline": { "status": "pending", "evidence": "" },
+    "humanConfirmationOrNoPending": { "status": "pending", "evidence": "" },
+    "sharePanel": { "status": "pending", "evidence": "" },
+    "workingMemory": { "status": "pending", "evidence": "" },
+    "memoryWiki": { "status": "pending", "evidence": "" },
+    "billingSummary": { "status": "pending", "evidence": "" },
+    "channelFilters": { "status": "pending", "evidence": "" },
+    "channelEvidence": { "status": "pending", "evidence": "" },
+    "governanceRead": { "status": "pending", "evidence": "" },
+    "observabilityRead": { "status": "pending", "evidence": "" },
+    "statisticsRead": { "status": "pending", "evidence": "" },
+    "statisticsExport": { "status": "pending", "evidence": "" },
+    "agentStudioRead": { "status": "pending", "evidence": "" },
+    "localProxyPolling": { "status": "pending", "evidence": "" },
+    "localPermissionReview": { "status": "pending", "evidence": "" },
+    "evidenceReturn": { "status": "pending", "evidence": "" },
+    "writeGatesBlocked": { "status": "pending", "evidence": "" },
+    "logout": { "status": "pending", "evidence": "" }
+  },
+  "cloudContractProbe": {
+    "origin": "<cloud_gateway_origin>",
+    "checkedAt": "<iso_datetime>",
+    "blockerCount": 0,
+    "results": []
+  }
+}

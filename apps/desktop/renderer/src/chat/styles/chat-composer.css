@@ -1,0 +1,231 @@
+@layer components {
+  /* Composer — Atlas Vellum 扁平风：只有 1px 发丝边线 + 暖纸沉色底
+   * 圆角与消息气泡保持一致（--za-radius = 12px），避免相邻视觉割裂
+   * 不要 inset 光影，不要 drop shadow（红线 §7：阴影仅限 popover / drag） */
+  .cloud-chat-composer {
+    @apply grid items-end gap-2 p-2;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius);
+    background: var(--za-composer-bg);
+    animation: za-fade-rise var(--za-motion-medium) var(--za-ease-out) both;
+    transition: border-color var(--za-motion-fast) var(--za-ease-standard);
+  }
+
+  /* 空线程下的 hero composer：单独存在，无相邻消息参照，允许 16px 大圆角 */
+  .cloud-chat-composer.empty {
+    @apply items-end p-4;
+    min-height: 144px;
+    border-radius: var(--radius-xl);
+    background: var(--za-composer-empty-bg);
+  }
+
+  .cloud-chat-composer textarea {
+    @apply min-w-0 resize-none border-0 bg-transparent px-3 py-2 font-normal outline-none;
+    color: var(--za-text);
+    font-size: 13px;
+    line-height: 1.52;
+  }
+
+  .cloud-chat-composer.thread textarea {
+    @apply h-10;
+    max-height: 120px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .cloud-chat-composer.empty textarea {
+    @apply min-h-[88px] px-4 py-3;
+    color: var(--za-text);
+    font-size: 17px;
+    line-height: 1.45;
+  }
+
+  .cloud-chat-composer textarea::placeholder {
+    color: var(--za-text-faint);
+  }
+
+  .cloud-chat-composer button[type="submit"] {
+    @apply grid h-10 min-h-10 w-10 place-items-center rounded-full p-0 text-[13px] font-medium;
+    color: var(--za-primary-control-ink);
+    background: var(--za-primary-control-bg);
+    border-color: transparent;
+  }
+
+  .cloud-chat-composer button[type="submit"]:hover {
+    color: var(--za-primary-control-ink);
+    background: var(--za-text);
+    transform: translate3d(0, -1px, 0);
+  }
+
+  .cloud-chat-composer button[type="submit"]:disabled {
+    color: var(--za-text-faint);
+    background: var(--za-control-fill);
+  }
+
+  .cloud-chat-composer button[type="submit"].streaming {
+    color: var(--za-text);
+    background: var(--za-control-fill-hover);
+  }
+
+  .cloud-chat-composer button[type="submit"].streaming:hover {
+    color: var(--za-text);
+    background: var(--za-active);
+  }
+
+  .cloud-chat-composer button[type="submit"] span {
+    @apply flex items-center justify-center;
+  }
+
+  .cloud-chat-composer > textarea {
+    grid-column: 1 / -1;
+  }
+
+  /* 没有 agent-picker 时 button 自动到右(grid auto-placement) */
+  .cloud-chat-composer > button[type="submit"] {
+    grid-column: -2;
+  }
+
+  .agent-picker {
+    position: relative;
+  }
+  .agent-picker-label,
+  .agent-picker-trigger {
+    @apply flex items-center gap-1 rounded-md px-2 py-1 text-xs;
+    color: var(--za-text-soft);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: color var(--za-motion-fast) var(--za-ease-standard),
+      background var(--za-motion-fast) var(--za-ease-standard);
+  }
+  .agent-picker-trigger:hover {
+    color: var(--za-text);
+    background: var(--za-hover);
+  }
+  .agent-picker-caret {
+    font-size: 10px;
+    opacity: 0.5;
+  }
+  .agent-picker-dropdown {
+    @apply absolute bottom-full left-0 mb-1 flex flex-col rounded-lg py-1;
+    min-width: 200px;
+    max-height: 280px;
+    overflow-y: auto;
+    color-scheme: dark;
+    background: var(--za-surface-2);
+    border: 1px solid var(--za-line);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    animation: za-fade-rise var(--za-motion-fast) var(--za-ease-out) both;
+    z-index: 10;
+  }
+  .agent-picker-dropdown button {
+    @apply w-full rounded-none border-none px-3 py-1.5 text-left text-xs;
+    color: var(--za-text-soft);
+    background: transparent;
+    cursor: pointer;
+    transition: background var(--za-motion-fast) var(--za-ease-standard);
+  }
+  .agent-picker-dropdown button:hover {
+    background: var(--za-hover);
+    color: var(--za-text);
+  }
+  .agent-picker-dropdown button.selected {
+    color: var(--za-accent);
+  }
+
+  .agent-picker-search {
+    @apply mx-1.5 mb-1 rounded-md border px-2 py-1 text-xs;
+    border-color: var(--za-line);
+    background: var(--za-bg-1);
+    color: var(--za-text);
+    outline: none;
+  }
+  .agent-picker-dropdown button:focus {
+    outline: none;
+  }
+  .agent-picker-empty {
+    @apply px-3 py-1.5 text-xs;
+    color: var(--za-text-faint);
+  }
+
+  /* ── Image Preview Bar ── */
+
+  .image-preview-bar {
+    @apply flex flex-wrap items-center gap-2 px-2 pt-2;
+    grid-column: 1 / -1;
+  }
+
+  .image-preview-item {
+    @apply relative shrink-0 overflow-hidden rounded-lg;
+    height: 64px;
+    border: 1px solid var(--za-line);
+    background: var(--za-surface-1);
+  }
+
+  .image-preview-item img {
+    @apply block h-full object-cover;
+    max-width: 120px;
+  }
+
+  .image-preview-remove {
+    @apply absolute right-0.5 top-0.5 grid place-items-center text-[9px] leading-none;
+    width: 14px;
+    height: 14px;
+    background: rgba(0, 0, 0, 0.45);
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .image-preview-item:hover .image-preview-remove {
+    opacity: 1;
+  }
+
+  .image-preview-remove:hover {
+    background: rgba(0, 0, 0, 0.7);
+  }
+
+  .image-preview-item.uploading {
+    @apply grid h-16 w-16 place-items-center;
+  }
+
+  .image-preview-spinner {
+    @apply inline-block h-4 w-4 animate-spin rounded-full border-2;
+    border-color: var(--za-text-muted);
+    border-right-color: transparent;
+  }
+
+  .image-preview-add {
+    @apply grid h-16 w-16 shrink-0 place-items-center rounded-lg text-[18px];
+    border: 1px dashed var(--za-line);
+    color: var(--za-text-muted);
+    background: transparent;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+
+  .image-preview-add:hover {
+    border-color: var(--za-text-soft);
+    color: var(--za-text-soft);
+  }
+
+  /* 消息中的图片 */
+
+  .message-images {
+    @apply flex flex-wrap gap-2 pt-2;
+  }
+
+  .message-image-thumb {
+    @apply h-32 max-w-[200px] rounded-lg object-cover;
+    border: 1px solid var(--za-line);
+    cursor: pointer;
+  }
+
+  .message-image-thumb:hover {
+    opacity: 0.9;
+  }
+}

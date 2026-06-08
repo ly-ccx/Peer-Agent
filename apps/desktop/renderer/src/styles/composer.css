@@ -1,0 +1,60 @@
+@layer components {
+  .composer {
+    @apply px-12 pt-3 pb-6;
+  }
+
+  .context-row {
+    width: min(920px, 100%);
+    margin: 0 auto 8px;
+  }
+
+  /* Fallback composer — Vellum 扁平：1px 边线 + 暖纸底，不要 drop shadow（红线 §7） */
+  .composer-box {
+    @apply grid min-h-[76px] items-center gap-2 p-3;
+    grid-template-columns: 38px minmax(0, 1fr) 38px;
+    width: min(920px, 100%);
+    margin: 0 auto;
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius);
+    background: var(--za-composer-bg);
+  }
+
+  .composer-box input {
+    @apply h-[42px] border-0 bg-transparent outline-none;
+    color: var(--za-text);
+  }
+
+  .composer-box input::placeholder,
+  .cloud-chat-composer input::placeholder {
+    color: var(--za-text-faint);
+  }
+
+  .composer-box button,
+  .send-button,
+  .za-primary-button {
+    @apply grid min-h-8 place-items-center px-3 text-[13px] font-semibold transition-colors duration-150;
+    border: 1px solid var(--za-line-strong);
+    border-radius: var(--za-radius-sm);
+    color: var(--za-text);
+    background: var(--za-surface-2);
+  }
+
+  .composer-box button,
+  .send-button {
+    @apply h-[38px] w-[38px] p-0 text-base;
+  }
+
+  .send-button {
+    border-color: var(--za-accent-soft);
+    color: var(--za-accent);
+    background: var(--za-accent-soft);
+  }
+
+  .composer-box button:hover,
+  .send-button:hover,
+  .za-primary-button:hover {
+    border-color: var(--za-line-strong);
+    background: var(--za-hover);
+    transform: translate3d(0, -1px, 0);
+  }
+}

@@ -1,0 +1,151 @@
+@layer components {
+  .sidebar-account-popover.appearance {
+    width: min(360px, calc(100vw - 28px));
+    right: auto;
+  }
+
+  .appearance-panel {
+    @apply grid gap-4;
+    color: var(--za-text-soft);
+  }
+
+  .appearance-panel-header {
+    @apply grid items-start gap-2;
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .appearance-panel-header button {
+    @apply grid h-7 w-7 place-items-center rounded-full p-0 text-[15px];
+    color: var(--za-text-muted);
+    background: var(--za-control-fill);
+  }
+
+  .appearance-panel-header button:hover {
+    color: var(--za-text);
+    background: var(--za-control-fill-hover);
+  }
+
+  .appearance-panel-header div {
+    @apply grid min-w-0 gap-0.5;
+  }
+
+  .appearance-panel-header strong {
+    @apply text-[14px] font-semibold;
+    font-family: var(--font-serif-zh);
+    color: var(--za-text);
+    letter-spacing: -0.01em;
+  }
+
+  .appearance-panel-header span {
+    @apply text-[11px] font-normal;
+    color: var(--za-text-faint);
+  }
+
+  /* 浅 / 深 / 跟随系统 — 三段式分段控件 */
+  .appearance-segmented {
+    @apply grid gap-1 rounded-[8px] p-1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    background: var(--za-surface-1);
+    border: 1px solid var(--za-line);
+  }
+
+  .appearance-segmented button {
+    @apply min-h-7 rounded-[6px] px-2 text-[12px] font-normal;
+    color: var(--za-text-muted);
+    background: transparent;
+    transition: background var(--za-motion-fast) var(--za-ease-standard),
+                color var(--za-motion-fast) var(--za-ease-standard);
+  }
+
+  .appearance-segmented button:hover {
+    color: var(--za-text);
+    background: var(--za-control-fill-hover);
+  }
+
+  /* 选中态：墨填底 + 雪文字（红线 1：朱砂不上 CTA） */
+  .appearance-segmented button.active {
+    color: var(--za-primary-control-ink);
+    background: var(--za-primary-control-bg);
+  }
+
+  /* 预览区：纸面上一段缩略卡，不带阴影、不带 thread-glow */
+  .appearance-preview {
+    @apply grid gap-2 rounded-[8px] p-3;
+    border: 1px solid var(--za-line);
+    background: var(--za-bg-1);
+  }
+
+  .appearance-preview-sidebar {
+    @apply grid min-h-8 items-center gap-2 rounded-[6px] px-2 text-[11px];
+    grid-template-columns: 14px minmax(0, 1fr) auto;
+    color: var(--za-text-soft);
+    background: var(--za-surface-1);
+  }
+
+  /* 预览侧栏的小圆点：朱砂方印缩影（白名单 #1：品牌印）*/
+  .appearance-preview-sidebar span {
+    @apply h-3 w-3 rounded-[2px];
+    background: var(--cinnabar-seal);
+  }
+
+  .appearance-preview-sidebar strong {
+    @apply overflow-hidden text-ellipsis whitespace-nowrap font-medium;
+    font-family: var(--font-serif-zh);
+    letter-spacing: -0.01em;
+    color: var(--za-text);
+  }
+
+  .appearance-preview-sidebar small {
+    @apply text-[10.5px] font-normal;
+    color: var(--za-text-faint);
+  }
+
+  .appearance-preview-thread {
+    @apply grid gap-1 rounded-[8px] px-3 py-2;
+    border: 1px solid var(--za-line);
+    background: var(--za-message-bg);
+  }
+
+  .appearance-preview-thread p {
+    @apply m-0 text-[13px] font-medium;
+    font-family: var(--font-serif-zh);
+    letter-spacing: -0.01em;
+    color: var(--za-text);
+  }
+
+  .appearance-preview-thread span {
+    @apply w-fit rounded-[4px] px-2 py-1 text-[10.5px];
+    color: var(--za-text-muted);
+    background: var(--za-surface-1);
+  }
+
+  .appearance-preview-composer {
+    @apply grid min-h-9 items-center gap-2 rounded-[8px] px-3 text-[11.5px];
+    grid-template-columns: minmax(0, 1fr) 24px;
+    color: var(--za-text-muted);
+    background: var(--za-composer-bg);
+    border: 1px solid var(--za-line);
+  }
+
+  .appearance-preview-composer i {
+    @apply grid h-6 w-6 place-items-center rounded-full text-[13px] not-italic;
+    color: var(--za-primary-control-ink);
+    background: var(--za-primary-control-bg);
+  }
+
+  .appearance-reset {
+    @apply w-fit justify-self-end rounded-[4px] px-2.5 py-1.5 text-[12px] font-normal;
+    color: var(--za-text-faint);
+    background: transparent;
+    border: 1px solid transparent;
+    transition: color var(--za-motion-fast) var(--za-ease-standard),
+                background var(--za-motion-fast) var(--za-ease-standard),
+                border-color var(--za-motion-fast) var(--za-ease-standard);
+  }
+
+  .appearance-reset:hover {
+    color: var(--za-text);
+    background: var(--za-control-fill-hover);
+    border-color: var(--za-line);
+  }
+}

@@ -1,0 +1,14 @@
+@layer components {
+  .za-card {
+    @apply grid self-start gap-3 p-4;
+    width: min(820px, 100%);
+  }
+
+  .za-card-row {
+    @apply flex items-center justify-between gap-4;
+  }
+
+  .za-muted {
+    color: var(--za-text-muted);
+  }
+}

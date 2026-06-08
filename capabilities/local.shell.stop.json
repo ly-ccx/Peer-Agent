@@ -1,0 +1,34 @@
+{
+  "capabilityId": "local.shell.stop",
+  "name": "Stop local shell task",
+  "description": "Stops a running local shell task by task id or tool call id.",
+  "localizedName": {
+    "zh-CN": "停止本地 Shell 任务",
+    "en-US": "Stop local shell task"
+  },
+  "localizedDescription": {
+    "zh-CN": "按 task id 或 tool call id 停止正在运行的本地 Shell 任务。",
+    "en-US": "Stops a running local shell task by task id or tool call id."
+  },
+  "source": "shell",
+  "riskLevel": "L1_local_read",
+  "dataLevel": "D1_internal",
+  "health": "available",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "taskId": {
+        "type": "string",
+        "description": "Background shell task id."
+      },
+      "toolCallId": {
+        "type": "string",
+        "description": "Tool call id that started the shell task."
+      }
+    }
+  },
+  "evidencePolicy": {
+    "returnMode": "summary",
+    "redactSensitive": true
+  }
+}

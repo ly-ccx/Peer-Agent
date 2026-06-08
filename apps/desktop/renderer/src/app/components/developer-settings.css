@@ -1,0 +1,165 @@
+@layer components {
+  .developer-page {
+    @apply min-h-0 w-full overflow-y-auto px-8 pb-8 pt-[52px];
+    background: var(--za-thread-bg);
+    animation: za-panel-in var(--za-motion-medium) var(--za-ease-out) 50ms both;
+  }
+
+  .fallback-developer-page {
+    @apply self-start px-0 pt-2;
+    background: transparent;
+  }
+
+  .developer-panel {
+    @apply grid gap-3;
+    width: min(760px, 100%);
+    margin-inline: auto;
+    color: var(--za-text-soft);
+  }
+
+  .developer-page .developer-panel {
+    @apply rounded-[8px] p-5;
+    border: 1px solid var(--za-line);
+    background: var(--za-panel-1);
+  }
+
+  .developer-panel-header {
+    @apply grid min-w-0 items-start gap-2;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .developer-panel-header.with-back {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .developer-panel-header button {
+    @apply grid h-7 w-7 place-items-center rounded-full p-0 text-[15px];
+    color: var(--za-text-muted);
+    background: var(--za-control-fill);
+  }
+
+  .developer-panel-header button:hover {
+    color: var(--za-text);
+    background: var(--za-control-fill-hover);
+  }
+
+  .developer-panel-header div,
+  .developer-status,
+  .developer-diagnostics,
+  .developer-fields {
+    @apply grid min-w-0 gap-1;
+  }
+
+  .developer-panel-header strong {
+    @apply text-[14px] font-semibold;
+    font-family: var(--font-serif-zh);
+    color: var(--za-text);
+  }
+
+  .developer-panel-header span,
+  .developer-status small,
+  .developer-diagnostics span,
+  .developer-fields span {
+    @apply text-[11px] font-normal;
+    color: var(--za-text-faint);
+  }
+
+  .developer-status {
+    @apply rounded-[8px] p-3;
+    border: 1px solid var(--za-line);
+    background: var(--za-bg-1);
+  }
+
+  .developer-status div,
+  .developer-diagnostics div {
+    @apply grid min-w-0 items-center gap-2;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .developer-status strong,
+  .developer-diagnostics strong {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] font-medium;
+    color: var(--za-text);
+  }
+
+  .developer-status small {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
+  }
+
+  .developer-toggle {
+    @apply flex min-h-8 items-center gap-2 rounded-[8px] px-2 text-[12.5px];
+    color: var(--za-text-soft);
+    background: var(--za-surface-1);
+    border: 1px solid var(--za-line);
+  }
+
+  .developer-toggle input {
+    accent-color: var(--za-primary-control-bg);
+  }
+
+  .developer-segmented {
+    @apply grid gap-1 rounded-[8px] p-1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    background: var(--za-surface-1);
+    border: 1px solid var(--za-line);
+  }
+
+  .developer-segmented button {
+    @apply min-h-7 rounded-[6px] px-2 text-[12px] font-normal;
+    color: var(--za-text-muted);
+    background: transparent;
+  }
+
+  .developer-segmented button:hover {
+    color: var(--za-text);
+    background: var(--za-control-fill-hover);
+  }
+
+  .developer-segmented button.active {
+    color: var(--za-primary-control-ink);
+    background: var(--za-primary-control-bg);
+  }
+
+  .developer-fields label {
+    @apply grid gap-1;
+  }
+
+  .developer-fields input {
+    @apply min-h-8 min-w-0 rounded-[6px] px-2 text-[12px] outline-none;
+    color: var(--za-text);
+    background: var(--za-bg-1);
+    border: 1px solid var(--za-line);
+  }
+
+  .developer-diagnostics {
+    @apply rounded-[8px] p-3;
+    border: 1px solid var(--za-line);
+    background: var(--za-surface-1);
+  }
+
+  .developer-error {
+    @apply m-0 rounded-[6px] px-2 py-1.5 text-[11.5px];
+    color: var(--za-danger);
+    background: var(--za-danger-soft);
+  }
+
+  .developer-actions {
+    @apply grid gap-1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .developer-actions button {
+    @apply min-h-8 rounded-[6px] px-2 text-[12px] font-normal;
+    color: var(--za-text-soft);
+    background: var(--za-control-fill);
+  }
+
+  .developer-actions button:hover:not(:disabled) {
+    color: var(--za-text);
+    background: var(--za-control-fill-hover);
+  }
+
+  .developer-actions button:disabled {
+    opacity: 0.55;
+  }
+}

@@ -1,0 +1,135 @@
+@layer components {
+  .settings-view {
+    @apply grid h-full min-h-0 min-w-0 overflow-hidden;
+    grid-template-rows: auto minmax(0, 1fr);
+    background: var(--za-thread-bg);
+    animation: za-panel-in var(--za-motion-medium) var(--za-ease-out) both;
+  }
+
+  .settings-view-header {
+    @apply flex items-center gap-2 px-6;
+    height: 52px;
+    border-bottom: 1px solid var(--za-line);
+    -webkit-app-region: drag;
+  }
+
+  .settings-view-header button {
+    @apply flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] font-normal;
+    color: var(--za-text-muted);
+    background: transparent;
+    -webkit-app-region: no-drag;
+  }
+
+  .settings-view-header button:hover {
+    color: var(--za-text);
+    background: var(--za-control-fill-hover);
+  }
+
+  .settings-view-body {
+    @apply grid min-h-0 min-w-0 overflow-hidden;
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+
+  .settings-nav {
+    @apply grid content-start gap-0.5 p-3;
+    border-right: 1px solid var(--za-line);
+    background: var(--za-sidebar-bg);
+  }
+
+  .settings-nav button {
+    @apply flex min-h-8 items-center gap-2 rounded-md px-3 text-left text-[12.5px] font-normal;
+    color: var(--za-text-soft);
+    background: transparent;
+  }
+
+  .settings-nav button:hover {
+    color: var(--za-text);
+    background: var(--za-hover);
+  }
+
+  .settings-nav button.active {
+    color: var(--za-text);
+    background: var(--za-hover);
+    font-weight: 500;
+  }
+
+  .settings-content {
+    @apply min-h-0 overflow-y-auto px-10 pb-10 pt-8;
+  }
+
+  .settings-content-inner {
+    @apply grid gap-6;
+    width: min(640px, 100%);
+  }
+
+  .settings-content-inner > h2 {
+    @apply m-0;
+    font-family: var(--font-serif-zh);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--za-text);
+  }
+
+  .settings-group {
+    @apply grid gap-3 rounded-[8px] p-5;
+    border: 1px solid var(--za-line);
+    background: var(--za-panel-1);
+  }
+
+  .settings-group > h3 {
+    @apply m-0 text-[13px] font-semibold;
+    color: var(--za-text);
+  }
+
+  .settings-group > p {
+    @apply m-0 text-[11.5px];
+    color: var(--za-text-muted);
+  }
+
+  .settings-row {
+    @apply flex items-center justify-between gap-4;
+  }
+
+  .settings-row-label {
+    @apply grid min-w-0 gap-0.5;
+  }
+
+  .settings-row-label strong {
+    @apply text-[12.5px] font-medium;
+    color: var(--za-text);
+  }
+
+  .settings-row-label small {
+    @apply text-[11px];
+    color: var(--za-text-muted);
+  }
+
+  .settings-segmented {
+    @apply grid gap-1 rounded-[8px] p-1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    background: var(--za-surface-1);
+    border: 1px solid var(--za-line);
+  }
+
+  .settings-segmented.two-col {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-segmented button {
+    @apply min-h-8 rounded-[6px] px-3 text-[12px] font-normal;
+    color: var(--za-text-muted);
+    background: transparent;
+    transition: background var(--za-motion-fast) var(--za-ease-standard),
+                color var(--za-motion-fast) var(--za-ease-standard);
+  }
+
+  .settings-segmented button:hover {
+    color: var(--za-text);
+    background: var(--za-control-fill-hover);
+  }
+
+  .settings-segmented button.active {
+    color: var(--za-primary-control-ink);
+    background: var(--za-primary-control-bg);
+  }
+}

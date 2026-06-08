@@ -1,0 +1,188 @@
+@layer components {
+  .cloud-chat-surface {
+    @apply grid h-full min-h-0 w-full;
+    position: relative;
+    grid-template-columns: var(--za-sidebar-width, 300px) minmax(0, 1fr);
+    animation: za-panel-in var(--za-motion-slow) var(--za-ease-out) both;
+  }
+
+  .cloud-chat-surface.resizing-sidebar {
+    cursor: col-resize;
+    user-select: none;
+  }
+
+  .sidebar-drag-strip {
+    @apply absolute top-0 bottom-0 z-30 outline-none;
+    left: var(--za-sidebar-width, 300px);
+    width: 12px;
+    cursor: col-resize;
+    transform: translateX(-6px);
+    -webkit-app-region: no-drag;
+  }
+
+  .sidebar-drag-strip::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 5px;
+    width: 1px;
+    background: var(--za-line);
+    transition:
+      background-color var(--za-motion-fast) var(--za-ease-standard),
+      box-shadow var(--za-motion-fast) var(--za-ease-standard),
+      width var(--za-motion-fast) var(--za-ease-standard);
+  }
+
+  /* 拖拽条只在真正拖动时显示朱砂指示
+   * hover：依靠 col-resize cursor 反馈，不改边线视觉
+   * focus-visible：键盘走 arrow keys 操作，不画全高度焦点线
+   * 这是符合 Vellum「克制」的取舍 — 全屏垂直线在大窗口里是视觉污染 */
+  .cloud-chat-surface.resizing-sidebar .sidebar-drag-strip::before {
+    width: 2px;
+    background: var(--cinnabar-seal);
+  }
+
+  .cloud-chat-thread {
+    @apply flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden px-8 pb-7 pt-[52px];
+    background: var(--za-thread-bg);
+    animation: za-panel-in var(--za-motion-medium) var(--za-ease-out) 50ms both;
+  }
+
+  .cloud-chat-thread.empty {
+    @apply px-7 pb-7 pt-0;
+  }
+
+  .thread-actions {
+    @apply justify-end;
+  }
+
+  .cloud-chat-thread.active > .section-heading,
+  .cloud-chat-thread.active > .cloud-chat-messages,
+  .cloud-chat-thread.active > .permission-gate-strip,
+  .cloud-chat-thread.active > .cloud-chat-composer {
+    width: min(1040px, calc(100% - 32px));
+    margin-inline: auto;
+  }
+
+  .cloud-chat-thread.active > .cloud-chat-messages {
+    padding-right: 4px;
+  }
+
+  .cloud-chat-thread .section-heading button,
+  .cloud-chat-composer button:not(.image-preview-remove):not(.image-preview-add),
+  .assistant-actions button,
+  .confirmation-inline button {
+    @apply min-h-7 px-2.5 text-xs transition-colors duration-150;
+    border: 1px solid transparent;
+    border-radius: var(--za-radius-sm);
+    color: var(--za-text-soft);
+    background: var(--za-surface-2);
+  }
+
+  .cloud-chat-thread .section-heading button:hover,
+  .assistant-actions button:hover {
+    color: var(--za-text);
+    border-color: var(--za-line);
+    background: var(--za-hover);
+    transform: translate3d(0, -1px, 0);
+  }
+
+  .empty-command-surface {
+    @apply flex min-h-0 flex-1 items-center justify-center;
+    padding-bottom: 5vh;
+  }
+
+  .empty-command-inner {
+    @apply grid w-full gap-5;
+    max-width: 920px;
+    animation: za-fade-rise var(--za-motion-slow) var(--za-ease-out) both;
+  }
+
+  /* Empty state 主标题 — Atlas Vellum 红线 2/3：必须 Serif 思源宋体，字号 ≥ 30px */
+  .empty-command-inner h1 {
+    @apply m-0 text-center;
+    color: var(--ink-base);
+    font-family: var(--font-serif-zh);
+    font-size: 32px;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+  }
+
+  .empty-command-suggestions {
+    @apply mx-auto grid w-full gap-0.5;
+    max-width: 760px;
+  }
+
+  .empty-command-suggestions button {
+    @apply flex min-h-10 w-full items-center justify-between px-3.5 py-2 text-left transition-colors duration-150;
+    border: 1px solid transparent;
+    border-radius: var(--za-radius);
+    color: var(--za-text-muted);
+    background: transparent;
+  }
+
+  .empty-command-suggestions button:hover {
+    color: var(--za-text);
+    background: var(--za-hover);
+  }
+
+  .empty-command-suggestions button span {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-normal;
+  }
+
+  .thread-loading-state {
+    @apply mt-20 grid w-full max-w-[340px] gap-2 text-[12px];
+    color: var(--za-text-faint);
+    animation: za-fade-rise var(--za-motion-medium) var(--za-ease-out) both;
+  }
+
+  .thread-loading-skeleton {
+    @apply block h-3 rounded-full;
+    background:
+      linear-gradient(90deg, transparent, var(--za-surface-2), transparent),
+      var(--za-surface-1);
+    background-size: 220% 100%, auto;
+    animation: za-loading-skeleton 1.3s var(--za-ease-standard) infinite;
+  }
+
+  .thread-loading-skeleton.wide {
+    width: 320px;
+  }
+
+  .thread-loading-skeleton.short {
+    width: 220px;
+  }
+
+  .thread-loading-state p {
+    @apply m-0 mt-1 flex items-center gap-2;
+    color: var(--za-text-faint);
+  }
+
+  .thread-loading-state i {
+    @apply block h-1.5 w-1.5 rounded-full;
+    background: var(--za-text-faint);
+    animation: za-loading-dot 1.1s var(--za-ease-standard) infinite;
+  }
+
+  .thread-loading-state i:nth-child(3) {
+    animation-delay: 120ms;
+  }
+
+  .thread-loading-state i:nth-child(4) {
+    animation-delay: 240ms;
+  }
+
+  .cloud-chat-messages.loading {
+    @apply items-start;
+  }
+
+  /* 会话切换 cross-fade */
+  .cloud-chat-messages {
+    transition: opacity var(--za-motion-fast) var(--za-ease-standard);
+  }
+  .cloud-chat-messages.transitioning {
+    opacity: 0;
+  }
+}

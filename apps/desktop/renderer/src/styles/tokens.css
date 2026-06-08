@@ -1,0 +1,517 @@
+/**
+ * Atlas Frost × Zeus Atlas Renderer Tokens
+ *
+ * 设计语言：Atlas Frost（清晨冰面上的工具集）
+ * 规范：xiaoer_design/knowledge/definition/2026-05-27-Atlas-Frost-设计语言系统.md
+ * 纪律：xiaoer_design/behavior/2026-05-27-Atlas-Frost-视觉纪律.md
+ * 前身：xiaoer_design/archive/atlas-vellum-v0.x/
+ *
+ * 红线（不可逾越）：
+ *   1. Azure 不上 CTA       2. H1 字号 ≥ 30px
+ *   3. Serif 标题不可去     4. 单屏 azure ≤ 3
+ *   5. 纯黑禁 / 纯白仅环境层 6. 状态不只靠颜色
+ *   7. 阴影限定 2 场景      8. 圆角 ≤ 16px
+ *
+ * 本文件提供三套变量：
+ *   1. Frost 正名 token（--chrome-*, --paper-*, --control-*, --graphite-*, --azure-*, --state-*）—— 新代码必须用
+ *   2. Vellum 兼容别名（--surface-vellum-*, --ink-*, --cinnabar-*）—— 18 个旧文件继续可用，值已切到 Frost
+ *   3. --za-* 别名 —— 既有 18 个 CSS/TSX 文件继续使用，值已切到 Frost
+ *
+ * v1.0 (2026-05-27) — Atlas Frost 立项：
+ *   Vellum 经过 v0.2 → v0.2.1 → v0.2.2 → v0.2.3 四次"去黄"迭代仍然没能满足
+ *   用户的冷感诉求。Vellum 三个核心 motif（朱砂 + 暖墨 + 羊皮纸）本身就是
+ *   暖色，与"全屏无暖色"的诉求不可调和，因此整套设计语言推翻重建为
+ *   Atlas Frost。
+ *
+ *   chrome 系列   = 环境层 (canvas / chrome)  → 冷感纯白 hue 210-220 sat 14-19%（沿用 v0.2.3）
+ *   paper 系列    = 内容层 (message / panel)  → 冷雪纸 hue 210-215 sat 10-13%（替代暖羊皮纸）
+ *   control 系列  = 控件层 (composer / fill)  → 冷感灰 hue 216-220 sat 16-19%（沿用 v0.2.3）
+ *   graphite 系列 = 文字阶                     → 中性偏冷石墨 hue 210-220 sat 5-14%（替代暖墨）
+ *   azure 系列    = 印记                       → 冰湖青 hue 200-205（替代朱砂）
+ *   state 系列    = 状态色                     → 全冷化；warn 与 confirm 同 hue 区，靠 icon+文案区分
+ *
+ *   兼容策略：旧 --surface-vellum-* / --ink-* / --cinnabar-* / --za-* 全部
+ *           保留命名做映射，18 个组件 CSS / TSX 文件零改动即可全冷化。
+ */
+
+@theme {
+  --font-sans: "Inter", -apple-system, "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", system-ui, sans-serif;
+  --font-serif-zh: "Noto Serif SC", "Source Han Serif SC", "Songti SC", STSong, serif;
+  --font-mono: "IBM Plex Mono", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --color-paper-sheet: #F7F9FC;
+  --color-paper-base: #EDF1F6;
+  --color-graphite-base: #1A1D21;
+  --color-azure-seal: #3B7FAB;
+  --radius-frost: 12px;
+  --radius-frost-sm: 6px;
+}
+
+/* ─────────────────────────────────────────────────────────────
+ *  Light Mode（默认）
+ *  Atlas Frost 主色：冷玻璃 + 石墨 + 冰湖青
+ * ───────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: light;
+  color: var(--za-text);
+  background: var(--za-bg-0);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "kern";
+
+  /* ─── Chrome 环境层（冷感纯白，hue 210-220 sat 14-19%）─── */
+  --chrome-canvas: #FAFBFC;
+  --chrome-raised: #F3F5F8;
+  --chrome-sunken: #EBEEF3;
+  --chrome-hover: #F0F2F6;
+  --chrome-active: #E5E8EE;
+  --chrome-hairline: #DCE0E8;
+
+  /* ─── Paper 内容层（冷雪纸，hue 210-215 sat 10-13%）─── */
+  --paper-base: #EDF1F6;
+  --paper-sheet: #F7F9FC;
+  /* ★ 消息卡 / 面板卡默认 */
+  --paper-sunken: #DDE3EB;
+  --paper-hover: #EAEEF4;
+  --paper-active: #D5DCE6;
+
+  /* ─── Control 控件层（冷感灰，hue 216-220 sat 16-19%）─── */
+  --control-composer: #EFF2F6;
+  --control-fill: #EAEDF2;
+  --control-fill-hover: #DFE3EA;
+
+  /* ─── Graphite 文字阶（冷石墨，hue 210-220 sat 5-14%）─── */
+  --graphite-base: #1A1D21;
+  --graphite-base-hover: #2A2D33;
+  --graphite-soft: #525660;
+  --graphite-fade: #878B95;
+  --graphite-mute: #B0B4BC;
+  --graphite-hairline: #DCE0E8;
+
+  /* ─── Azure 印记（冰湖青，仅 5 处白名单使用）─── */
+  --azure-seal: #3B7FAB;
+  --azure-soft: #7BA8C8;
+  --azure-trace: #D8E4EE;
+
+  /* ─── State 状态色（全冷化）─── */
+  --state-thinking: #6B7FA0;
+  --state-active-on: #1A1D21;
+  --state-confirm: #1F6B9B;
+  --state-success: #3E7A6B;
+  --state-warn: #3B6FAB;
+  /* 与 confirm 同 hue 区，靠 icon+文案区分 */
+  --state-danger: #7A3E50;
+  --state-denied: #5C5A70;
+
+  /* ─── Spacing / Radius / Shadow ─── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-16: 64px;
+  --radius-xs: 2px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --shadow-popover: 0 2px 12px rgba(26, 29, 33, 0.06);
+  --shadow-drag: 0 4px 16px rgba(26, 29, 33, 0.10);
+
+  /* ─────────────────────────────────────────────────────────────
+   *  Vellum 兼容别名（18 个旧组件 CSS / TSX 文件零改动）
+   *  这些变量名仍存在，但值已切到 Frost。
+   *  新代码必须用 --paper-* / --graphite-* / --azure-* 正名。
+   * ───────────────────────────────────────────────────────────── */
+  --surface-vellum-base: var(--paper-base);
+  --surface-vellum-paper: var(--paper-sheet);
+  --surface-vellum-sunken: var(--paper-sunken);
+  --surface-vellum-hover: var(--paper-hover);
+  --surface-vellum-active: var(--paper-active);
+
+  --ink-base: var(--graphite-base);
+  --ink-base-hover: var(--graphite-base-hover);
+  --ink-soft: var(--graphite-soft);
+  --ink-fade: var(--graphite-fade);
+  --ink-mute: var(--graphite-mute);
+  --ink-hairline: var(--graphite-hairline);
+
+  --cinnabar-seal: var(--azure-seal);
+  --cinnabar-soft: var(--azure-soft);
+  --cinnabar-trace: var(--azure-trace);
+
+  /* ─────────────────────────────────────────────────────────────
+   *  --za-* 别名层（向后兼容，所有既有 .css/.tsx 继续可用）
+   *  Atlas Frost 化的语义重映射：
+   *    accent 永远是 azure-seal（红线 1：azure 不上 CTA，所以 accent 也不能做按钮背景）
+   *    primary control 永远是 graphite-on-paper（红线 1）
+   *    surface 体系全部解构成冷雪纸 paper 阶
+   * ───────────────────────────────────────────────────────────── */
+  --za-bg-0: #FAFBFC;
+  --za-bg-1: #F3F5F8;
+  --za-bg-2: #EBEEF3;
+  --za-panel-1: #F7F9FC;
+  --za-surface-0: #F7F9FC;
+  --za-surface-1: #EAEEF4;
+  --za-surface-2: #DDE3EB;
+  --za-line: #DCE0E8;
+  --za-line-strong: #B0B4BC;
+  --za-text: #1A1D21;
+  --za-text-soft: #525660;
+  --za-text-muted: #878B95;
+  --za-text-faint: #B0B4BC;
+  --za-accent: #3B7FAB;
+  --za-accent-soft: #D8E4EE;
+  --za-accent-ink: #F7F9FC;
+  --za-good: #3E7A6B;
+  --za-good-soft: rgba(62, 122, 107, 0.10);
+  --za-warn: #3B6FAB;
+  --za-warn-soft: rgba(59, 111, 171, 0.10);
+  --za-danger: #7A3E50;
+  --za-danger-soft: rgba(122, 62, 80, 0.10);
+  --za-app-bg: #FAFBFC;
+  --za-thread-bg: #FAFBFC;
+  --za-thread-glow: rgba(59, 127, 171, 0.025);
+  --za-hover: #F0F2F6;
+  --za-active: #E5E8EE;
+  --za-sidebar-bg: #F3F5F8;
+  --za-sidebar-active-bg: #E5E8EE;
+  --za-sidebar-thread-active-bg: #EBEEF3;
+  --za-sidebar-active-border: #DCE0E8;
+  --za-sidebar-width: 264px;
+  --za-inset-highlight: #FAFBFC;
+  --za-focus: rgba(59, 127, 171, 0.25);
+  --za-scrollbar-thumb: rgba(176, 180, 188, 0.25);
+  --za-popover-bg: #FAFBFC;
+  --za-header-bg: #F3F5F8;
+  --za-message-bg: #F7F9FC;
+  --za-user-message-bg: #F7F9FC;
+  --za-composer-bg: #EFF2F6;
+  --za-composer-empty-bg: #EFF2F6;
+  --za-control-fill: #EAEDF2;
+  --za-control-fill-hover: #DFE3EA;
+  --za-control-ink: #1A1D21;
+  --za-primary-control-bg: #1A1D21;
+  --za-primary-control-ink: #F7F9FC;
+  --za-shadow-panel: 0 2px 12px rgba(26, 29, 33, 0.06);
+  --za-shadow-popover: 0 2px 12px rgba(26, 29, 33, 0.06);
+  --za-radius: 12px;
+  --za-radius-sm: 6px;
+  --za-radius-md: 8px;
+  --za-radius-lg: 16px;
+  --za-ease-out: cubic-bezier(0.0, 0.0, 0.2, 1);
+  --za-ease-standard: cubic-bezier(0.4, 0.0, 0.2, 1);
+  --za-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --za-ease-decelerate: cubic-bezier(0.0, 0.0, 0.2, 1);
+  --za-ease-accelerate: cubic-bezier(0.4, 0.0, 1, 1);
+  --za-motion-fast: 120ms;
+  --za-motion-medium: 200ms;
+  --za-motion-slow: 320ms;
+  --za-font-ui: var(--font-sans);
+  --za-font-code: var(--font-mono);
+  /* 用户偏好快照（Frost 模式下永远固定为 canonical 值，不再可改） */
+  --za-user-accent: #3B7FAB;
+  --za-user-background: #FAFBFC;
+  --za-user-foreground: #1A1D21;
+}
+
+/* ─────────────────────────────────────────────────────────────
+ *  Dark Mode
+ *  红线：dark 不是 invert，独立调色，冰面/纸/凹槽三层关系单独验证
+ * ───────────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* ─── Frost 正名 token ─── */
+  --chrome-canvas: #11141A;
+  --chrome-raised: #181C24;
+  --chrome-sunken: #0C0F14;
+  --chrome-hover: #1E232C;
+  --chrome-active: #262C37;
+  --chrome-hairline: #2A303B;
+
+  --paper-base: #1A1E26;
+  --paper-sheet: #1E232C;
+  --paper-sunken: #11141A;
+  --paper-hover: #262C37;
+  --paper-active: #30374A;
+
+  --control-composer: #0C0F14;
+  --control-fill: #1E232C;
+  --control-fill-hover: #262C37;
+
+  --graphite-base: #EDF1F6;
+  --graphite-base-hover: #D5DCE6;
+  --graphite-soft: #B0B4BC;
+  --graphite-fade: #7B7F8A;
+  --graphite-mute: #494D58;
+  --graphite-hairline: #2A303B;
+
+  --azure-seal: #5D9CBF;
+  --azure-soft: #3D6E8E;
+  --azure-trace: #1D2F3D;
+
+  --state-thinking: #8B9FC0;
+  --state-active-on: #EDF1F6;
+  --state-confirm: #4F9BCB;
+  --state-success: #6EAA9B;
+  --state-warn: #6B9FCB;
+  --state-danger: #AA6E80;
+  --state-denied: #8C8AA0;
+  --shadow-popover: 0 2px 12px rgba(0, 0, 0, 0.40);
+  --shadow-drag: 0 4px 16px rgba(0, 0, 0, 0.55);
+
+  /* ─── Vellum 兼容别名 ─── */
+  --surface-vellum-base: var(--paper-base);
+  --surface-vellum-paper: var(--paper-sheet);
+  --surface-vellum-sunken: var(--paper-sunken);
+  --surface-vellum-hover: var(--paper-hover);
+  --surface-vellum-active: var(--paper-active);
+
+  --ink-base: var(--graphite-base);
+  --ink-base-hover: var(--graphite-base-hover);
+  --ink-soft: var(--graphite-soft);
+  --ink-fade: var(--graphite-fade);
+  --ink-mute: var(--graphite-mute);
+  --ink-hairline: var(--graphite-hairline);
+
+  --cinnabar-seal: var(--azure-seal);
+  --cinnabar-soft: var(--azure-soft);
+  --cinnabar-trace: var(--azure-trace);
+
+  /* ─── --za-* 别名层 ─── */
+  --za-bg-0: #11141A;
+  --za-bg-1: #181C24;
+  --za-bg-2: #0C0F14;
+  --za-panel-1: #1E232C;
+  --za-surface-0: #1E232C;
+  --za-surface-1: #262C37;
+  --za-surface-2: #11141A;
+  --za-line: #2A303B;
+  --za-line-strong: #494D58;
+  --za-text: #EDF1F6;
+  --za-text-soft: #B0B4BC;
+  --za-text-muted: #7B7F8A;
+  --za-text-faint: #494D58;
+  --za-accent: #5D9CBF;
+  --za-accent-soft: #1D2F3D;
+  --za-accent-ink: #11141A;
+  --za-good: #6EAA9B;
+  --za-good-soft: rgba(110, 170, 155, 0.14);
+  --za-warn: #6B9FCB;
+  --za-warn-soft: rgba(107, 159, 203, 0.14);
+  --za-danger: #AA6E80;
+  --za-danger-soft: rgba(170, 110, 128, 0.14);
+  --za-app-bg: #11141A;
+  --za-thread-bg: #11141A;
+  --za-thread-glow: rgba(93, 156, 191, 0.04);
+  --za-hover: #1E232C;
+  --za-active: #262C37;
+  --za-sidebar-bg: #181C24;
+  --za-sidebar-active-bg: #262C37;
+  --za-sidebar-thread-active-bg: #1E232C;
+  --za-sidebar-active-border: #2A303B;
+  --za-inset-highlight: #181C24;
+  --za-focus: rgba(93, 156, 191, 0.30);
+  --za-scrollbar-thumb: rgba(73, 77, 88, 0.25);
+  --za-popover-bg: #181C24;
+  --za-header-bg: #181C24;
+  --za-message-bg: #1E232C;
+  --za-user-message-bg: #1E232C;
+  --za-composer-bg: #0C0F14;
+  --za-composer-empty-bg: #0C0F14;
+  --za-control-fill: #1E232C;
+  --za-control-fill-hover: #262C37;
+  --za-control-ink: #EDF1F6;
+  --za-primary-control-bg: #EDF1F6;
+  --za-primary-control-ink: #11141A;
+  --za-shadow-panel: 0 2px 12px rgba(0, 0, 0, 0.40);
+  --za-shadow-popover: 0 2px 12px rgba(0, 0, 0, 0.40);
+  --za-user-accent: #5D9CBF;
+  --za-user-background: #11141A;
+  --za-user-foreground: #EDF1F6;
+}
+
+/* ─────────────────────────────────────────────────────────────
+ *  Density: Compact（默认 comfortable）
+ * ───────────────────────────────────────────────────────────── */
+[data-density="compact"] {
+  /* 留作后续落地：行高 / control 高度 / 卡内边距压缩 */
+}
+
+/* ─────────────────────────────────────────────────────────────
+ *  焦点环（红线 6：键盘可达性）
+ *  纪律：
+ *    - 小尺寸交互原子（button / select / link）— azure outline
+ *    - 大尺寸输入容器（composer / contenteditable）— 用 :focus-within
+ *      让父容器的 hairline 升级到 graphite-base，避免大块 azure 硬直角破坏冷面
+ * ───────────────────────────────────────────────────────────── */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible:not(input):not(select):not(textarea):not([contenteditable]) {
+  outline: 2px solid var(--azure-seal);
+  outline-offset: 2px;
+}
+
+/* textarea / contenteditable：azure 硬框在大区块上视觉过重，交给父容器示意 */
+textarea:focus-visible,
+[contenteditable]:focus-visible {
+  outline: none;
+}
+
+::selection {
+  background: var(--azure-trace);
+  color: var(--graphite-base);
+}
+
+/* ─────────────────────────────────────────────────────────────
+ *  既有动画（保留）
+ * ───────────────────────────────────────────────────────────── */
+@keyframes za-fade-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes za-panel-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.995);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes za-message-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes za-details-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -4px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes za-loading-dot {
+
+  0%,
+  80%,
+  100% {
+    opacity: 0.34;
+    transform: translate3d(0, 0, 0);
+  }
+
+  40% {
+    opacity: 0.92;
+    transform: translate3d(0, -2px, 0);
+  }
+}
+
+@keyframes za-loading-skeleton {
+  from {
+    background-position: 180% 0, 0 0;
+  }
+
+  to {
+    background-position: -80% 0, 0 0;
+  }
+}
+
+@keyframes za-message-shimmer {
+  from {
+    background-position: 200% 0;
+    opacity: 1;
+  }
+
+  to {
+    background-position: -100% 0;
+    opacity: 0;
+  }
+}
+
+@keyframes za-content-reveal {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes za-content-shimmer {
+  from { background-position: 200% 0; opacity: 0.8; }
+  60% { opacity: 0.6; }
+  to { background-position: -100% 0; opacity: 0; }
+}
+@keyframes za-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes za-slide-down-out {
+  to {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+}
+
+@keyframes za-scale-out {
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* 流式进行态扫光（高性能）：transform 平移遮罩缝,只动合成层不触发 repaint。
+ * 行程足够大让缝两端完全移出文字,循环 reset 发生在文字全暗瞬间 → 看不到位置突变。 */
+@keyframes za-text-sweep {
+  from {
+    transform: translate3d(-25%, 0, 0);
+  }
+
+  to {
+    transform: translate3d(25%, 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+
+  /* 扫光停动后直接撤掉遮罩,文字回归纯 ink-base 静态可读 */
+  .za-streaming-text::after {
+    display: none;
+  }
+}

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Allow JIT compilation (V8/Electron) -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <!-- Allow unsigned executable memory (Electron/Node.js) -->
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <!-- Allow DYLD env vars (needed for Electron dev tools) -->
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+  <!-- Network client access (for cloud gateway, OSS updates) -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <!-- File access (for local capabilities, shell execution) -->
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+</dict>
+</plist>

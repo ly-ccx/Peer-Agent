@@ -1,0 +1,70 @@
+appId: com.alibaba.zeus-atlas
+productName: Zeus Atlas
+copyright: Copyright © 2026 Alibaba Group
+
+directories:
+  output: ../../dist-electron
+  buildResources: build
+
+# ── 打包文件 ──
+files:
+  - "dist/**/*"
+  - "electron/**/*"
+  - "!electron/**/*.test.*"
+
+extraResources:
+  # Rust native binary (must be pre-built for target platform)
+  - from: "../../target/release/"
+    to: "bin/"
+    filter:
+      - "cu-proxy-core"
+      - "cu-proxy-core.exe"
+  # 本地能力 Manifest
+  - from: "../../capabilities/"
+    to: "capabilities/"
+    filter:
+      - "**/*.json"
+
+# ── macOS ──
+mac:
+  icon: build/icon.icns
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
+
+afterSign: scripts/after-sign.cjs
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+# ── Windows ──
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+
+# ── 发布 (electron-updater generic provider → 阿里云 OSS) ──
+publish:
+  provider: generic
+  url: "https://zeus-atlas.oss-cn-beijing.aliyuncs.com/releases/latest"
+  channel: latest

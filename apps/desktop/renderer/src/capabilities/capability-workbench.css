@@ -1,0 +1,1432 @@
+@layer components {
+  .capability-workbench {
+    @apply grid h-full min-h-0 min-w-0 overflow-hidden;
+    grid-template-columns: minmax(0, 1fr) minmax(340px, 30vw);
+    color: var(--za-text);
+    background: var(--za-thread-bg);
+    animation: za-fade-rise var(--za-motion-medium) var(--za-ease-out) both;
+  }
+
+  .capability-workbench.skills-active {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .capability-workbench-main {
+    @apply min-h-0 min-w-0 overflow-y-auto;
+    padding: 64px 48px 56px;
+    scrollbar-gutter: stable;
+  }
+
+  .capability-hero {
+    @apply grid gap-5;
+    max-width: 760px;
+  }
+
+  .capability-hero>p:first-child {
+    @apply m-0 flex items-center gap-3 text-[12px] font-semibold;
+    color: var(--cinnabar-seal);
+    letter-spacing: 0.04em;
+  }
+
+  .capability-hero>p:first-child span {
+    width: 24px;
+    height: 1px;
+    background: var(--cinnabar-seal);
+  }
+
+  .capability-hero h2 {
+    @apply m-0;
+    font-family: var(--font-serif-zh);
+    font-size: 32px;
+    font-weight: 600;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    color: var(--ink-base);
+  }
+
+  .capability-hero-copy {
+    @apply m-0 text-[14px] leading-7;
+    color: var(--ink-fade);
+    max-width: 760px;
+    margin-top: 20px;
+  }
+
+  .capability-tabs {
+    @apply grid h-10 w-full max-w-[420px] auto-cols-fr grid-flow-col gap-1 p-1;
+    border-radius: var(--za-radius);
+    background: var(--za-surface-1);
+  }
+
+  .capability-tabs-row {
+    @apply flex w-full items-center justify-between gap-4;
+    margin-top: 20px;
+  }
+
+  .capability-tabs button {
+    @apply min-w-0 rounded-[6px] px-3 text-[13px] font-semibold;
+    color: var(--za-text-soft);
+  }
+
+  .capability-tabs button:hover {
+    color: var(--za-text);
+    background: var(--za-hover);
+  }
+
+  .capability-tabs button.active {
+    color: var(--za-primary-control-ink);
+    background: var(--za-primary-control-bg);
+  }
+
+  .capability-sections {
+    @apply grid gap-9 pt-10;
+  }
+
+  .capability-section {
+    @apply grid gap-4;
+  }
+
+  .capability-empty-state {
+    @apply grid max-w-[520px] gap-2 px-5 py-6;
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius);
+    background: var(--za-panel-1);
+  }
+
+  .capability-empty-state h3 {
+    @apply m-0 text-[15px] font-semibold;
+    color: var(--za-text);
+  }
+
+  .capability-empty-state p {
+    @apply m-0 text-[13px] leading-6;
+    color: var(--za-text-muted);
+  }
+
+  .capability-section h3 {
+    @apply m-0 text-[13px] font-semibold;
+    color: var(--za-text-muted);
+    letter-spacing: 0.04em;
+  }
+
+  .capability-grid {
+    @apply grid gap-4;
+    grid-template-columns: repeat(2, minmax(260px, 1fr));
+  }
+
+  .capability-card {
+    @apply relative grid min-h-[104px] min-w-0 content-start gap-2 px-5 py-4 text-left;
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius);
+    color: var(--za-text);
+    background: var(--za-panel-1);
+  }
+
+  .capability-card.local {
+    margin-left: 8px;
+  }
+
+  .capability-card.local .capability-card-marker {
+    position: absolute;
+    left: -8px;
+    top: 12px;
+    bottom: 12px;
+    width: 1px;
+    background: var(--cinnabar-seal);
+  }
+
+  .capability-card:hover {
+    background: var(--za-hover);
+  }
+
+  .capability-card.active {
+    border-color: var(--ink-base);
+    background: var(--za-active);
+  }
+
+  .capability-card-head {
+    @apply flex min-w-0 items-start justify-between gap-4;
+  }
+
+  .capability-card-head strong {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[16px] font-semibold;
+    color: var(--za-text);
+  }
+
+  .capability-state {
+    @apply inline-flex shrink-0 items-center gap-1.5 text-[12px] font-semibold;
+  }
+
+  .capability-state i {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: currentColor;
+  }
+
+  .capability-state.good,
+  .capability-card-meta em.good {
+    color: var(--za-good);
+  }
+
+  .capability-state.warn,
+  .capability-card-meta em.warn {
+    color: var(--za-warn);
+  }
+
+  .capability-state.danger,
+  .capability-card-meta em.danger {
+    color: var(--za-danger);
+  }
+
+  .capability-state.muted,
+  .capability-card-meta em.muted {
+    color: var(--za-text-muted);
+  }
+
+  .capability-card-meta {
+    @apply flex min-w-0 flex-wrap items-center gap-2;
+  }
+
+  .capability-card-meta code {
+    @apply inline-flex min-h-6 items-center rounded-[2px] px-1.5 text-[12px];
+    border: 1px solid var(--za-line);
+    color: var(--za-text-soft);
+    background: transparent;
+    font-family: var(--font-mono);
+  }
+
+  .capability-card-meta em {
+    @apply text-[12px] not-italic font-semibold;
+  }
+
+  .capability-card-subline {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[12px];
+    color: var(--za-text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .capability-detail-panel {
+    @apply grid min-h-0 overflow-y-auto px-6 py-16;
+    align-content: start;
+    gap: 22px;
+    border-left: 1px solid var(--za-line);
+    background: var(--za-sidebar-bg);
+    animation: za-panel-in var(--za-motion-medium) var(--za-ease-out) both;
+  }
+
+  .capability-detail-panel header {
+    @apply flex items-start justify-between gap-4;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--za-line);
+  }
+
+  .capability-detail-title {
+    @apply flex min-w-0 items-start gap-3;
+  }
+
+  .capability-detail-seal {
+    @apply grid h-7 w-7 shrink-0 place-items-center;
+    border-radius: 2px;
+    color: var(--surface-vellum-base);
+    background: var(--cinnabar-seal);
+    font-family: var(--font-serif-zh);
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .capability-detail-title p,
+  .capability-detail-panel h4 {
+    @apply m-0 text-[11px] font-semibold;
+    color: var(--za-text-muted);
+    letter-spacing: 0.06em;
+  }
+
+  .capability-detail-title h3 {
+    @apply m-0 pt-1 text-[18px] font-semibold;
+    font-family: var(--font-serif-zh);
+    color: var(--za-text);
+  }
+
+  .capability-detail-panel header button {
+    @apply h-7 w-7 rounded-[6px] text-[18px];
+    color: var(--za-text-muted);
+  }
+
+  .capability-detail-panel header button:hover {
+    color: var(--za-text);
+    background: var(--za-hover);
+  }
+
+  .capability-detail-panel section {
+    @apply grid gap-2;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--za-line);
+  }
+
+  .capability-detail-panel p {
+    @apply m-0 text-[13px] leading-6;
+    color: var(--za-text);
+  }
+
+  .capability-detail-panel code {
+    @apply block overflow-hidden text-ellipsis whitespace-nowrap text-[12px];
+    color: var(--za-text-soft);
+    font-family: var(--font-mono);
+  }
+
+  .capability-detail-list {
+    @apply m-0 grid gap-2 pl-5 text-[13px] leading-6;
+    color: var(--za-text);
+  }
+
+  .capability-detail-list li::marker {
+    color: var(--za-text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .capability-manifest-preview {
+    @apply m-0 max-h-56 overflow-auto whitespace-pre-wrap rounded-[8px] p-3 text-[11px] leading-5;
+    border: 1px solid var(--za-line);
+    color: var(--za-text-soft);
+    background: var(--za-bg-2);
+    font-family: var(--font-mono);
+  }
+
+  .capability-detail-panel footer {
+    @apply flex flex-wrap items-center gap-2 pt-2;
+  }
+
+  .capability-detail-panel footer button {
+    @apply h-9 rounded-[6px] px-4 text-[13px] font-semibold;
+    border: 1px solid var(--za-line);
+    color: var(--za-text);
+    background: transparent;
+  }
+
+  .capability-detail-panel footer button:hover {
+    background: var(--za-hover);
+  }
+
+  .capability-detail-panel footer button.primary {
+    color: var(--za-primary-control-ink);
+    border-color: transparent;
+    background: var(--za-primary-control-bg);
+  }
+
+  .capability-detail-panel footer button:disabled {
+    opacity: 0.72;
+  }
+
+  .capability-detail-panel footer button.danger {
+    color: var(--za-danger);
+  }
+
+  @media (max-width: 1180px) {
+    .capability-workbench {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .capability-detail-panel {
+      display: none;
+    }
+  }
+
+  @media (max-width: 980px) {
+    .capability-workbench-main {
+      padding-inline: 32px;
+    }
+
+    .capability-grid,
+    .skill-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  /* ── Skills Panel ── */
+
+  .skill-panel {
+    @apply grid gap-3;
+  }
+
+  .skill-panel-content {
+    @apply grid min-h-0 gap-3;
+  }
+
+  .skill-sub-tabs {
+    @apply flex h-9 items-center gap-1 rounded-lg p-1;
+    background: var(--za-surface-1);
+    width: fit-content;
+  }
+
+  .skill-sub-tabs button {
+    @apply min-w-0 rounded-md px-4 py-1.5 text-[13px] font-medium;
+    color: var(--za-text-soft);
+  }
+
+  .skill-sub-tabs button:hover {
+    color: var(--za-text);
+    background: var(--za-hover);
+  }
+
+  .skill-sub-tabs button.active {
+    color: var(--za-primary-control-ink);
+    background: var(--za-primary-control-bg);
+  }
+
+  .skill-toolbar {
+    @apply flex items-center gap-3 pb-5;
+  }
+
+  .skill-search-box {
+    @apply flex flex-1 items-center gap-2 rounded-lg px-3;
+    height: 38px;
+    border: 1px solid var(--za-line);
+    background: var(--za-panel-1);
+    max-width: 320px;
+  }
+
+  .skill-search-icon {
+    @apply shrink-0 text-[14px];
+    opacity: 0.45;
+  }
+
+  .skill-search-input {
+    @apply min-w-0 flex-1 border-none bg-transparent text-[14px] outline-none;
+    color: var(--za-text);
+  }
+
+  .skill-search-input::placeholder {
+    color: var(--za-text-muted);
+  }
+
+  .skill-upload-btn {
+    @apply ml-auto h-9 shrink-0 rounded-full px-5 text-[13px] font-semibold;
+    color: #fff;
+    background: #222;
+  }
+
+  .skill-upload-btn:hover {
+    background: #333;
+  }
+
+  .skill-grid {
+    @apply grid gap-4;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .skill-market-grid {
+    @apply grid gap-3;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .skill-market-card {
+    @apply relative flex min-w-0 items-start gap-2.5 px-3 py-2.5;
+    border: 1px solid var(--za-line);
+    border-radius: 8px;
+    color: var(--za-text);
+    background: var(--za-panel-1);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    overflow: hidden;
+  }
+
+  .skill-market-card::after {
+    content: '';
+    @apply absolute inset-0 rounded-lg;
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(1.5px);
+    -webkit-backdrop-filter: blur(2px);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    pointer-events: none;
+  }
+
+  .skill-market-card:hover::after {
+    opacity: 1;
+  }
+
+  .skill-market-card:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
+
+  .skill-market-card-icon {
+    @apply h-8 w-8 shrink-0 rounded-md object-cover;
+  }
+
+  .skill-market-card-body {
+    @apply grid min-w-0 flex-1 gap-0.5;
+  }
+
+  .skill-market-card-name {
+    @apply truncate text-[13px] font-semibold;
+  }
+
+  .skill-market-card-desc {
+    @apply m-0 text-[11px] leading-relaxed;
+    color: var(--za-text-soft);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .skill-market-card-meta {
+    @apply flex items-center gap-3 text-[10px];
+    color: var(--za-text-muted);
+  }
+
+  .skill-market-card-footer {
+    @apply flex items-center justify-between;
+  }
+
+  .skill-market-card-services {
+    @apply flex items-center gap-0.5;
+  }
+
+  .skill-market-service-icon {
+    @apply relative flex h-4 w-4 shrink-0 cursor-default items-center justify-center overflow-hidden rounded;
+  }
+
+  .skill-market-service-icon img {
+    @apply h-full w-full object-cover;
+  }
+
+  .skill-market-service-placeholder {
+    @apply flex h-full w-full items-center justify-center rounded text-[8px] font-medium;
+    background: var(--za-surface-1);
+    color: var(--za-text-muted);
+  }
+
+  .skill-market-card-tags {
+    @apply flex flex-wrap gap-1;
+  }
+
+  .skill-market-tag {
+    @apply rounded-full px-1.5 py-0 text-[8px];
+    background: var(--za-surface-1);
+    color: var(--za-text-soft);
+  }
+
+  .skill-market-card--installed::after {
+    display: none;
+  }
+
+  .skill-market-card--installed:hover {
+    box-shadow: none;
+  }
+
+  .skill-market-card-badge {
+    @apply absolute text-[10px] font-bold leading-none;
+    top: 10px;
+    right: -20px;
+    padding: 3px 24px;
+    background: linear-gradient(135deg, #34d058 0%, #2ea44f 100%);
+    color: #fff;
+    transform: rotate(45deg);
+    z-index: 1;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  }
+
+  .skill-market-card-install-btn {
+    @apply absolute rounded-md px-3 py-1 text-[12px] font-medium;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1;
+    background: var(--za-primary-control-bg);
+    color: var(--za-primary-control-ink);
+    border: none;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .skill-market-card:hover .skill-market-card-install-btn {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .skill-market-card-install-btn:hover {
+    filter: brightness(1.1);
+  }
+
+  .skill-market-card-install-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    filter: none;
+  }
+
+  .skill-card {
+    @apply flex min-w-0 items-start gap-3 px-4 py-3;
+    border: 1px solid var(--za-line);
+    border-radius: 10px;
+    color: var(--za-text);
+    background: var(--za-panel-1);
+    transition: opacity 0.2s, box-shadow 0.2s, border-color 0.2s;
+  }
+
+  .skill-card:hover {
+    border-color: rgba(0, 0, 0, 0.08);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+
+  .skill-card.disabled {
+    opacity: 0.5;
+  }
+
+  .skill-avatar {
+    @apply grid h-8 w-8 shrink-0 place-items-center rounded-full text-[13px] font-semibold;
+    color: var(--za-text-muted);
+    background: #f0f0f0;
+  }
+
+  .skill-card-body {
+    @apply grid min-w-0 flex-1 gap-1.5;
+  }
+
+  .skill-card-title-row {
+    @apply flex min-w-0 items-center gap-2;
+  }
+
+  .skill-card-name {
+    @apply min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-semibold;
+    color: var(--za-text);
+  }
+
+  .skill-card-actions {
+    @apply flex shrink-0 items-center gap-2;
+  }
+
+  .skill-card-menu {
+    @apply text-[14px] leading-none tracking-widest;
+    color: var(--za-text-muted);
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+
+  .skill-card-menu:hover {
+    color: var(--za-text);
+    background: var(--za-hover);
+  }
+
+  .skill-card-desc {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] leading-5;
+    color: var(--za-text-muted);
+  }
+
+  .skill-loading {
+    @apply py-12 text-center text-[14px];
+    color: var(--za-text-muted);
+  }
+
+  .skill-aone-login-btn {
+    @apply mt-3 rounded-lg px-5 py-2 text-[14px] font-medium;
+    background: var(--za-primary-control-bg);
+    color: var(--za-primary-control-ink);
+    border: none;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+
+  .skill-aone-login-btn:hover {
+    opacity: 0.85;
+  }
+
+  .skill-aone-login-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Aone skill card grid */
+  .aone-skill-grid {
+    @apply grid gap-3;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+
+  .aone-skill-sentinel {
+    grid-column: 1 / -1;
+    @apply flex justify-center py-4 text-[12px];
+    color: var(--za-text-muted);
+  }
+
+  .aone-skill-end {
+    opacity: 0.6;
+  }
+
+  .aone-skill-card {
+    @apply relative flex flex-col gap-1.5 rounded-lg px-3 py-2.5;
+    border: 1px solid var(--za-line);
+    background: var(--za-surface-0);
+    transition: box-shadow 0.2s;
+    overflow: hidden;
+  }
+
+  .aone-skill-card::after {
+    content: '';
+    @apply absolute inset-0 rounded-lg;
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(1.5px);
+    -webkit-backdrop-filter: blur(2px);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    pointer-events: none;
+  }
+
+  .aone-skill-card:hover::after {
+    opacity: 1;
+  }
+
+  .aone-skill-card:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
+
+  /* 已接入卡片禁用 hover 效果 */
+  .aone-skill-card--installed::after {
+    display: none;
+  }
+
+  .aone-skill-card--installed:hover {
+    box-shadow: none;
+  }
+
+  .aone-skill-card-header {
+    @apply flex items-center gap-2;
+  }
+
+  .aone-skill-card-icon {
+    @apply h-7 w-7 shrink-0 rounded-md object-cover;
+  }
+
+  .aone-skill-card-avatar {
+    @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[12px] font-medium;
+    background: #f0f0f0;
+    color: #666;
+  }
+
+  .aone-skill-card-title-row {
+    @apply flex min-w-0 flex-1 items-center justify-between gap-2;
+  }
+
+  .aone-skill-card-name {
+    @apply truncate text-[13px] font-semibold;
+    color: var(--za-text-primary);
+  }
+
+  .aone-skill-card-stats {
+    @apply flex shrink-0 items-center gap-1.5 text-[11px];
+    color: var(--za-text-muted);
+  }
+
+  .aone-skill-card-stat {
+    @apply whitespace-nowrap;
+  }
+
+  .aone-skill-card-desc {
+    @apply line-clamp-2 text-[12px] leading-snug;
+    color: var(--za-text-secondary);
+  }
+
+  .aone-skill-card-footer {
+    @apply flex items-center gap-2 text-[11px];
+    color: var(--za-text-muted);
+  }
+
+  .aone-skill-card-tag {
+    @apply rounded px-1.5 py-0.5 shrink-0;
+    background: var(--za-surface-2);
+  }
+
+  .aone-skill-card-owner {
+    @apply truncate;
+  }
+
+  .aone-skill-card-badge {
+    @apply absolute text-[10px] font-bold leading-none;
+    top: 10px;
+    right: -20px;
+    padding: 3px 24px;
+    background: linear-gradient(135deg, #34d058 0%, #2ea44f 100%);
+    color: #fff;
+    transform: rotate(45deg);
+    z-index: 1;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  }
+
+  .aone-skill-card-install-btn {
+    @apply absolute rounded-md px-3 py-1 text-[12px] font-medium;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1;
+    background: var(--za-primary-control-bg);
+    color: var(--za-primary-control-ink);
+    border: none;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .aone-skill-card:hover .aone-skill-card-install-btn {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .aone-skill-card-install-btn:hover {
+    filter: brightness(1.1);
+  }
+
+  /* Toggle switch — iOS style */
+  .skill-toggle {
+    @apply relative inline-flex h-[18px] w-[32px] shrink-0 cursor-pointer items-center rounded-full;
+    background: #ccc;
+    transition: background 0.2s;
+    border: none;
+    padding: 0;
+  }
+
+  .skill-toggle.on {
+    background: #4cd964;
+  }
+
+  .skill-toggle-thumb {
+    @apply block h-[14px] w-[14px] rounded-full;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    transform: translateX(2px);
+    transition: transform 0.2s;
+  }
+
+  .skill-toggle.on .skill-toggle-thumb {
+    transform: translateX(16px);
+  }
+
+  /* ── MCP Panel ── */
+
+  .mcp-panel {
+    @apply relative h-full min-h-0 min-w-0;
+  }
+
+  .mcp-panel-main {
+    @apply grid min-h-0 min-w-0 content-start gap-6;
+  }
+
+  .mcp-panel-content {
+    @apply grid gap-6;
+  }
+
+  .mcp-sidebar {
+    @apply fixed top-0 right-0 bottom-0 grid min-h-0 content-start gap-5 overflow-y-auto px-6 py-6;
+    width: 380px;
+    border-left: 1px solid var(--za-line);
+    background: var(--za-sidebar-bg);
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.08);
+    animation: za-panel-in var(--za-motion-medium) var(--za-ease-out) both;
+    z-index: 20;
+  }
+
+  .mcp-sidebar header {
+    @apply flex items-start justify-between gap-3;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--za-line);
+  }
+
+  .mcp-sidebar header h3 {
+    @apply m-0 text-[17px] font-semibold;
+    color: var(--za-text);
+  }
+
+  .mcp-sidebar-provider {
+    @apply text-[12px];
+    color: var(--za-text-muted);
+  }
+
+  .mcp-sidebar header button {
+    @apply h-7 w-7 shrink-0 rounded-[6px] text-[18px];
+    color: var(--za-text-muted);
+  }
+
+  .mcp-sidebar header button:hover {
+    color: var(--za-text);
+    background: var(--za-hover);
+  }
+
+  .mcp-sidebar-section {
+    @apply grid gap-2;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--za-line);
+  }
+
+  .mcp-sidebar-section h4 {
+    @apply m-0 text-[12px] font-semibold;
+    color: var(--za-text-muted);
+    letter-spacing: 0.04em;
+  }
+
+  .mcp-sidebar-section p {
+    @apply m-0 text-[13px] leading-6;
+    color: var(--za-text);
+  }
+
+  .mcp-sidebar-meta {
+    @apply m-0 grid gap-1 text-[12px] leading-5;
+  }
+
+  .mcp-sidebar-meta dt {
+    @apply font-semibold;
+    color: var(--za-text);
+    font-family: var(--font-mono);
+  }
+
+  .mcp-sidebar-meta dd {
+    @apply m-0 break-all;
+    color: var(--za-text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .mcp-sidebar-tools {
+    @apply m-0 grid gap-2 pl-0 text-[13px] leading-6;
+    list-style: none;
+  }
+
+  .mcp-sidebar-tools li {
+    @apply grid gap-0.5;
+  }
+
+  .mcp-sidebar-tools code {
+    @apply text-[12px] font-semibold;
+    color: var(--za-text);
+    font-family: var(--font-mono);
+  }
+
+  .mcp-sidebar-tools span {
+    @apply text-[12px] leading-5;
+    color: var(--za-text-muted);
+  }
+
+  .mcp-sidebar-footer {
+    @apply flex gap-3 pt-4;
+  }
+
+  .mcp-btn-danger {
+    @apply h-9 rounded-lg px-5 text-[13px] font-semibold;
+    color: var(--za-danger);
+    border: 1px solid var(--za-line);
+    background: transparent;
+  }
+
+  .mcp-btn-danger:hover {
+    background: var(--za-hover);
+  }
+
+  .mcp-sub-tabs {
+    @apply flex h-9 items-center gap-1 rounded-lg p-1;
+    background: var(--za-surface-1);
+    width: fit-content;
+  }
+
+  .mcp-sub-tabs button {
+    @apply min-w-0 rounded-md px-4 py-1.5 text-[13px] font-medium;
+    color: var(--za-text-soft);
+  }
+
+  .mcp-sub-tabs button:hover {
+    color: var(--za-text);
+    background: var(--za-hover);
+  }
+
+  .mcp-sub-tabs button.active {
+    color: var(--za-primary-control-ink);
+    background: var(--za-primary-control-bg);
+  }
+
+  .mcp-grid {
+    @apply grid gap-4;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mcp-card {
+    @apply relative grid min-w-0 gap-2 px-4 py-3;
+    grid-template-rows: auto auto 1fr auto;
+    border: 1px solid var(--za-line);
+    border-radius: 10px;
+    color: var(--za-text);
+    background: var(--za-panel-1);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    cursor: default;
+    overflow: hidden;
+  }
+
+  .mcp-card::after {
+    content: '';
+    @apply absolute inset-0 rounded-[10px];
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(1.5px);
+    -webkit-backdrop-filter: blur(2px);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    pointer-events: none;
+  }
+
+  .mcp-card:hover::after {
+    opacity: 1;
+  }
+
+  .mcp-card:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
+
+  /* 已接入卡片禁用 hover 模糊效果 */
+  .mcp-card--installed::after {
+    display: none;
+  }
+
+  .mcp-card--installed:hover {
+    box-shadow: none;
+  }
+
+  .mcp-card.active {
+    border-color: var(--ink-base);
+    background: var(--za-active);
+  }
+
+  .mcp-card-head {
+    @apply flex min-w-0 items-center gap-2;
+  }
+
+  .mcp-card-head strong {
+    @apply min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-semibold;
+    color: var(--za-text);
+  }
+
+  .mcp-status-dot {
+    @apply inline-block h-[6px] w-[6px] shrink-0 rounded-full;
+    background: var(--za-text-muted);
+  }
+
+  .mcp-status-dot.good {
+    background: var(--za-good);
+  }
+
+  .mcp-status-dot.warn {
+    background: var(--za-warn);
+  }
+
+  .mcp-status-dot.danger {
+    background: var(--za-danger);
+  }
+
+  .mcp-status-label {
+    @apply shrink-0 text-[11px] font-semibold;
+  }
+
+  .mcp-status-label.good {
+    color: var(--za-good);
+  }
+
+  .mcp-status-label.warn {
+    color: var(--za-warn);
+  }
+
+  .mcp-card-desc {
+    @apply min-w-0 text-[12px] leading-5;
+    color: var(--za-text-soft);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .mcp-card-meta {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[12px];
+    color: var(--za-text-muted);
+  }
+
+  .mcp-card-footer {
+    @apply flex min-w-0 items-end justify-end gap-2;
+    margin-top: auto;
+  }
+
+  .mcp-card-tools {
+    margin-right: auto;
+  }
+
+  .mcp-card-tools {
+    @apply text-[12px];
+    color: var(--za-text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .mcp-card-action {
+    @apply h-7 rounded-md px-3 text-[12px] font-semibold;
+    color: var(--za-primary-control-ink);
+    background: var(--za-primary-control-bg);
+    border: none;
+    cursor: pointer;
+  }
+
+  .mcp-card-action:hover {
+    opacity: 0.85;
+  }
+
+  .mcp-card-install-btn {
+    @apply absolute rounded-md px-3 py-1 text-[12px] font-medium;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1;
+    background: var(--za-primary-control-bg);
+    color: var(--za-primary-control-ink);
+    border: none;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .mcp-card:hover .mcp-card-install-btn {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .mcp-card-install-btn:hover {
+    filter: brightness(1.1);
+  }
+
+  .mcp-search-box {
+    @apply flex items-center gap-2 rounded-lg px-3;
+    height: 38px;
+    border: 1px solid var(--za-line);
+    background: var(--za-panel-1);
+    max-width: 380px;
+  }
+
+  .mcp-search-icon {
+    @apply shrink-0 text-[14px];
+    opacity: 0.45;
+  }
+
+  .mcp-search-input {
+    @apply min-w-0 flex-1 border-none bg-transparent text-[14px] outline-none;
+    color: var(--za-text);
+  }
+
+  .mcp-search-input::placeholder {
+    color: var(--za-text-muted);
+  }
+
+  .mcp-loading {
+    @apply py-12 text-center text-[14px];
+    color: var(--za-text-muted);
+  }
+
+  /* Aone panel */
+  .mcp-auth-required {
+    @apply grid max-w-[520px] place-items-center px-8 py-12;
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius);
+    background: var(--za-panel-1);
+  }
+
+  .mcp-auth-required-content {
+    @apply grid gap-3 text-center;
+  }
+
+  .mcp-auth-required-content h3 {
+    @apply m-0 text-[16px] font-semibold;
+    color: var(--za-text);
+  }
+
+  .mcp-auth-required-content p {
+    @apply m-0 text-[13px] leading-6;
+    color: var(--za-text-muted);
+  }
+
+  .mcp-auth-required-content .mcp-btn-primary {
+    margin-top: 8px;
+    justify-self: center;
+  }
+
+  .mcp-aone-probe-section {
+    @apply grid gap-3;
+    padding-top: 20px;
+    border-top: 1px solid var(--za-line);
+  }
+
+  .mcp-aone-desc {
+    @apply m-0 text-[13px] leading-6;
+    color: var(--za-text-muted);
+  }
+
+  .mcp-aone-field {
+    @apply flex items-center gap-3;
+  }
+
+  .mcp-aone-input {
+    @apply min-w-0 flex-1 rounded-lg border bg-transparent px-3 text-[14px] outline-none;
+    height: 38px;
+    border-color: var(--za-line);
+    color: var(--za-text);
+  }
+
+  .mcp-aone-input::placeholder {
+    color: var(--za-text-muted);
+  }
+
+  .mcp-aone-probe-btn {
+    @apply h-[38px] shrink-0 rounded-lg px-5 text-[13px] font-semibold;
+    border: 1px solid var(--za-line);
+    color: var(--za-text);
+    background: transparent;
+  }
+
+  .mcp-aone-probe-btn:hover:not(:disabled) {
+    background: var(--za-hover);
+  }
+
+  .mcp-aone-probe-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .mcp-aone-error {
+    @apply m-0 text-[13px];
+    color: var(--za-danger);
+  }
+
+  .mcp-probe-result {
+    @apply grid gap-4 rounded-xl px-5 py-4;
+    border: 1px solid var(--za-line);
+    background: var(--za-panel-1);
+    max-width: 600px;
+    margin-top: 12px;
+  }
+
+  .mcp-probe-result h4 {
+    @apply m-0 flex items-center gap-2 text-[15px] font-semibold;
+    color: var(--za-text);
+  }
+
+  .mcp-probe-tools strong {
+    @apply text-[13px] font-semibold;
+    color: var(--za-text-muted);
+  }
+
+  .mcp-probe-tools ul {
+    @apply m-0 grid gap-1 pl-5 pt-2 text-[13px] leading-6;
+    color: var(--za-text);
+  }
+
+  .mcp-probe-tools code {
+    @apply text-[12px];
+    color: var(--za-text-soft);
+    font-family: var(--font-mono);
+  }
+
+  .mcp-probe-actions {
+    @apply flex gap-2 pt-2;
+    border-top: 1px solid var(--za-line);
+  }
+
+  .mcp-btn-primary {
+    @apply h-9 rounded-lg px-5 text-[13px] font-semibold;
+    color: var(--za-primary-control-ink);
+    border: none;
+    background: var(--za-primary-control-bg);
+  }
+
+  .mcp-btn-primary:hover {
+    opacity: 0.85;
+  }
+
+  .mcp-installed-layout {
+    @apply grid gap-6;
+  }
+
+  .mcp-detail-inline {
+    @apply grid gap-4 rounded-xl px-5 py-4;
+    border: 1px solid var(--za-line);
+    background: var(--za-panel-1);
+    animation: za-fade-rise var(--za-motion-medium) var(--za-ease-out) both;
+  }
+
+  .mcp-detail-header {
+    @apply grid gap-1;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--za-line);
+  }
+
+  .mcp-detail-header h4 {
+    @apply m-0 text-[16px] font-semibold;
+    color: var(--za-text);
+  }
+
+  .mcp-detail-meta {
+    @apply text-[12px];
+    color: var(--za-text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .mcp-detail-tools strong {
+    @apply text-[13px] font-semibold;
+    color: var(--za-text-muted);
+  }
+
+  .mcp-detail-tools ul {
+    @apply m-0 grid gap-1.5 pl-5 pt-2 text-[13px] leading-6;
+    color: var(--za-text);
+  }
+
+  .mcp-detail-tools code {
+    @apply text-[12px];
+    color: var(--za-text-soft);
+    font-family: var(--font-mono);
+  }
+
+  .mcp-detail-empty-tools {
+    @apply m-0 text-[13px];
+    color: var(--za-text-muted);
+  }
+
+  @media (max-width: 980px) {
+    .mcp-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  /* Upload dialog */
+  .skill-upload-overlay {
+    @apply fixed inset-0 z-50 grid place-items-center;
+    background: rgba(255, 255, 255, 0.35);
+    backdrop-filter: blur(1.5px);
+    -webkit-backdrop-filter: blur(1.5px);
+  }
+
+  .skill-upload-dialog {
+    @apply grid w-[480px] gap-5 p-7;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+  }
+
+  .skill-upload-dialog header {
+    @apply flex items-center justify-between;
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+
+  .skill-upload-dialog header h3 {
+    @apply m-0 text-[18px] font-bold;
+    color: var(--za-text);
+  }
+
+  .skill-upload-close {
+    @apply flex h-7 w-7 items-center justify-center rounded-full text-[16px] leading-none;
+    color: var(--za-text-muted);
+    background: transparent;
+    border: none;
+  }
+
+  .skill-upload-close:hover {
+    color: var(--za-text);
+    background: #f0f0f0;
+  }
+
+  /* Info banner */
+  .skill-upload-banner {
+    @apply flex items-center gap-2 rounded-lg px-3 py-2.5 text-[13px];
+    background: #e8f4fd;
+    color: #1a1a1a;
+  }
+
+  .skill-upload-banner-icon {
+    @apply grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full text-[11px] font-bold;
+    background: #5bb7f0;
+    color: #fff;
+  }
+
+  .skill-upload-banner-close {
+    @apply ml-auto grid h-5 w-5 shrink-0 place-items-center rounded text-[14px];
+    color: var(--za-text-muted);
+    background: transparent;
+    border: none;
+  }
+
+  .skill-upload-banner-close:hover {
+    color: var(--za-text);
+  }
+
+  /* File field */
+  .skill-upload-field {
+    @apply grid gap-2;
+  }
+
+  .skill-upload-label {
+    @apply text-[14px] font-semibold;
+    color: var(--za-text);
+  }
+
+  .skill-upload-label .required {
+    color: #e53935;
+  }
+
+  .skill-upload-file-row {
+    @apply flex items-center gap-3;
+  }
+
+  .skill-upload-file-btn {
+    @apply flex h-9 shrink-0 items-center justify-center rounded-lg px-4 text-[13px] font-medium leading-none;
+    border: 1px dashed #ccc;
+    color: var(--za-text);
+    background: transparent;
+  }
+
+  .skill-upload-file-btn:hover {
+    border-color: #999;
+    background: #fafafa;
+  }
+
+  .skill-upload-tip {
+    @apply text-[13px];
+    color: var(--za-text-muted);
+  }
+
+  .skill-upload-error {
+    @apply m-0 text-[13px];
+    color: var(--za-danger);
+  }
+
+  .skill-upload-dialog footer {
+    @apply flex justify-end gap-3 pt-1;
+  }
+
+  .skill-btn-cancel {
+    @apply h-10 rounded-full px-6 text-[14px] font-medium;
+    border: 1px solid #ddd;
+    color: var(--za-text);
+    background: transparent;
+  }
+
+  .skill-btn-cancel:hover {
+    background: #f5f5f5;
+  }
+
+  .skill-btn-confirm {
+    @apply h-10 rounded-full px-6 text-[14px] font-medium;
+    border: none;
+    color: #fff;
+    background: #222;
+  }
+
+  .skill-btn-confirm:hover {
+    background: #333;
+  }
+
+  .skill-btn-confirm:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
