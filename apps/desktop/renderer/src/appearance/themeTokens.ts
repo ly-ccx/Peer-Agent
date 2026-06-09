@@ -1,5 +1,5 @@
 /**
- * Atlas Vellum 不再做 token 派生；token 全部固化在 styles/tokens.css。
+ * Peer Vellum 不再做 token 派生；token 全部固化在 styles/tokens.css。
  * 本文件只保留：
  *   - applyAppearance()：把 mode/density 写到 <html dataset>，让 CSS 切换生效
  *   - sanitizeSettings()：normalize loadSettings() 读到的 localStorage payload

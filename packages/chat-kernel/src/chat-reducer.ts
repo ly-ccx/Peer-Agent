@@ -7,7 +7,7 @@ import type {
   MessageImage,
   MessageReference,
   ResolvedHumanConfirmation,
-} from '@zeus-atlas/protocol';
+} from '@peer-agent/protocol';
 import {
   normalizePendingHumanConfirmation,
   removeResolvedConfirmation,

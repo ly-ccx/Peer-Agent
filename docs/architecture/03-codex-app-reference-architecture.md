@@ -1,13 +1,13 @@
 # Codex.app 参考架构
 
 > 状态：产品与工程架构基准  
-> 目标：用 Codex.app 的任务型桌面产品形态约束 Zeus Atlas，避免退化成后台管理系统、普通聊天壳或本地工具集合。
+> 目标：用 Codex.app 的任务型桌面产品形态约束 Peer Agent，避免退化成后台管理系统、普通聊天壳或本地工具集合。
 
 ---
 
 ## 一、采用 Codex.app 的原因
 
-Zeus Atlas 要解决的不是“把 Web 小二搬到桌面”，而是让云端 CEO Agent Runtime 可以在客户端场景里可靠调用本地能力。
+Peer Agent 要解决的不是“把 Web 小二搬到桌面”，而是让云端 CEO Agent Runtime 可以在客户端场景里可靠调用本地能力。
 
 因此客户端形态应该更接近 Codex.app：
 
@@ -78,13 +78,13 @@ App Shell
 
 ---
 
-## 三、Zeus Atlas 的差异
+## 三、Peer Agent 的差异
 
-Codex.app 可以作为交互参考，但 Zeus Atlas 不是代码执行器，也不是本地 Agent。
+Codex.app 可以作为交互参考，但 Peer Agent 不是代码执行器，也不是本地 Agent。
 
-Zeus Atlas 的差异：
+Peer Agent 的差异：
 
-| 维度 | Codex.app 参考 | Zeus Atlas 约束 |
+| 维度 | Codex.app 参考 | Peer Agent 约束 |
 |---|---|---|
 | 认知来源 | Agent task runtime | Cloud CEO Agent Runtime |
 | 本地执行 | 本地 workspace / tool | Local Capability Runtime |
@@ -94,7 +94,7 @@ Zeus Atlas 的差异：
 | 个人上下文 | project / local work | 云端为准，个人为辅 |
 | 业务治理 | product-level safety | 组织策略 + 云端治理 + 本地授权 |
 
-所以 Zeus Atlas 的产品气质可以像 Codex.app，但运行时对象必须是 Zeus OS 的对象。
+所以 Peer Agent 的产品气质可以像 Codex.app，但运行时对象必须是 Peer Agent 的对象。
 
 ---
 
@@ -130,7 +130,7 @@ User intent
 
 ## 五、核心领域对象
 
-参考 Codex.app 后，Zeus Atlas 应该固定以下领域对象：
+参考 Codex.app 后，Peer Agent 应该固定以下领域对象：
 
 ```text
 Workspace
@@ -169,7 +169,7 @@ DiagnosticSnapshot
 
 ## 六、状态分层
 
-Zeus Atlas 不能把所有状态放进 React store。
+Peer Agent 不能把所有状态放进 React store。
 
 建议分层：
 
@@ -241,7 +241,7 @@ Renderer state
 - 把本地项目历史直接当成云端认知更新。
 - 把插件和工具调用绕过 Manifest / Projection / Evidence。
 
-Zeus Atlas 的本地能力更泛化，目标用户也不只写代码。因此必须保持：
+Peer Agent 的本地能力更泛化，目标用户也不只写代码。因此必须保持：
 
 ```text
 云端为准，个人为辅。

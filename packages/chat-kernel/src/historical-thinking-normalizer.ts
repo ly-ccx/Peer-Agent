@@ -1,4 +1,4 @@
-import type { IterationNode, ThinkingProcess, ToolCard } from '@zeus-atlas/protocol';
+import type { IterationNode, ThinkingProcess, ToolCard } from '@peer-agent/protocol';
 
 /**
  * 历史 thinking_process.stepsData → 前端 ThinkingProcess.iterations 归一化。

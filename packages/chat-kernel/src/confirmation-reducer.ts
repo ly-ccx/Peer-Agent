@@ -1,7 +1,7 @@
 import type {
   PendingHumanConfirmation,
   ResolvedHumanConfirmation,
-} from '@zeus-atlas/protocol';
+} from '@peer-agent/protocol';
 
 export function replacePendingConfirmation(
   pending: readonly PendingHumanConfirmation[],

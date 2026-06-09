@@ -1,5 +1,5 @@
 {
-  "name": "@zeus-atlas/protocol",
+  "name": "@peer-agent/protocol",
   "version": "0.0.1",
   "private": true,
   "type": "module",

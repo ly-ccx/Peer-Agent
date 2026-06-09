@@ -10,7 +10,7 @@ let tmpRoot;
 let settingsFile;
 
 beforeEach(() => {
-  tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'zeus-settings-'));
+  tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'peer-settings-'));
   settingsFile = path.join(tmpRoot, 'settings.json');
 });
 

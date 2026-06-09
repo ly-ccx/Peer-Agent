@@ -1,5 +1,5 @@
 {
-  "name": "@zeus-atlas/ui",
+  "name": "@peer-agent/ui",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -11,8 +11,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@zeus-atlas/i18n": "workspace:*",
-    "@zeus-atlas/protocol": "workspace:*"
+    "@peer-agent/i18n": "workspace:*",
+    "@peer-agent/protocol": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.2.0"

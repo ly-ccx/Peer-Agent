@@ -1,4 +1,4 @@
-import type { ChatStreamEvent } from '@zeus-atlas/protocol';
+import type { ChatStreamEvent } from '@peer-agent/protocol';
 
 export interface SseParserState {
   readonly buffer: string;

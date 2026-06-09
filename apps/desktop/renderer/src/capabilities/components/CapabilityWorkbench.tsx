@@ -1,4 +1,4 @@
-import type { CapabilityManifest } from '@zeus-atlas/protocol';
+import type { CapabilityManifest } from '@peer-agent/protocol';
 import { useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import {
@@ -11,7 +11,7 @@ import { CapabilityDetailPanel } from './CapabilityDetailPanel';
 import { CapabilityEmptyState } from './CapabilityEmptyState';
 import { CapabilitySection } from './CapabilitySection';
 import { CapabilityTabs } from './CapabilityTabs';
-import { McpPanel } from './mcp/McpPanel';
+import { McpPanel } from './McpPanel';
 import { SkillsPanel } from './SkillsPanel';
 
 const TAB_DESCRIPTIONS: Record<CapabilityWorkbenchTab, string> = {

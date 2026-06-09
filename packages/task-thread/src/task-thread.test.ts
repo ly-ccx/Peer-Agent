@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { ClientToolCall, ClientToolResult, PermissionGrant } from '@zeus-atlas/protocol';
+import type { ClientToolCall, ClientToolResult, PermissionGrant } from '@peer-agent/protocol';
 import { applyToolResult, type TaskThread } from './index.ts';
 
 const call: ClientToolCall = {

@@ -1,37 +1,19 @@
-export type ClientApi = NonNullable<Window['zeusAtlas']>;
+export type ClientApi = NonNullable<Window['peerAgent']>;
 
 function desktopOnly(method: string): never {
-  throw new Error(`Zeus Atlas desktop preload is not available. ${method} must run inside Electron.`);
+  throw new Error(`Peer Agent desktop preload is not available. ${method} must run inside Electron.`);
 }
 
 function unavailableMethod<T extends (...args: never[]) => unknown>(method: string): T {
   return ((..._args: Parameters<T>) => desktopOnly(method)) as unknown as T;
 }
 
-const unavailableChatApi = new Proxy({}, {
-  get(_target, property) {
-    return unavailableMethod(`chat.${String(property)}`);
-  },
-}) as ClientApi['chat'];
-
 const unavailableApi: ClientApi = {
-  searchStaff: unavailableMethod('searchStaff'),
   getBootstrap: unavailableMethod('getBootstrap'),
   getClientSession: unavailableMethod('getClientSession'),
   listCapabilities: unavailableMethod('listCapabilities'),
   listProjects: unavailableMethod('listProjects'),
-  getCloudRuntime: unavailableMethod('getCloudRuntime'),
-  probeCloudContracts: unavailableMethod('probeCloudContracts'),
-  getDeveloperSettings: unavailableMethod('getDeveloperSettings'),
-  updateDeveloperSettings: unavailableMethod('updateDeveloperSettings'),
-  resetDeveloperSettings: unavailableMethod('resetDeveloperSettings'),
-  getDeveloperDiagnostics: unavailableMethod('getDeveloperDiagnostics'),
   getRuntimeProjection: unavailableMethod('getRuntimeProjection'),
-  publishRuntimeProjection: unavailableMethod('publishRuntimeProjection'),
-  getAuthState: unavailableMethod('getAuthState'),
-  login: unavailableMethod('login'),
-  cancelLogin: unavailableMethod('cancelLogin'),
-  logout: unavailableMethod('logout'),
   setLocale: unavailableMethod('setLocale'),
   approveLocalAction: unavailableMethod('approveLocalAction'),
   denyLocalAction: unavailableMethod('denyLocalAction'),
@@ -50,27 +32,42 @@ const unavailableApi: ClientApi = {
   mcpListInstalled: unavailableMethod('mcpListInstalled'),
   mcpInstall: unavailableMethod('mcpInstall'),
   mcpUninstall: unavailableMethod('mcpUninstall'),
-  mcpListAoneMarket: unavailableMethod('mcpListAoneMarket'),
-  mcpListAoneMcpServers: unavailableMethod('mcpListAoneMcpServers'),
-  mcpGetAoneMcpDetail: unavailableMethod('mcpGetAoneMcpDetail'),
-  mcpListDingtalkMarket: unavailableMethod('mcpListDingtalkMarket'),
-  mcpGetDingtalkDetail: unavailableMethod('mcpGetDingtalkDetail'),
-  mcpProbe: unavailableMethod('mcpProbe'),
-  mcpDingtalkActivate: unavailableMethod('mcpDingtalkActivate'),
-  mcpDingtalkAuthStatus: unavailableMethod('mcpDingtalkAuthStatus'),
   mcpConnectAndRegister: unavailableMethod('mcpConnectAndRegister'),
-  skillListDingtalkMarket: unavailableMethod('skillListDingtalkMarket'),
-  skillListAoneMarket: unavailableMethod('skillListAoneMarket'),
-  skillAoneEnsureAuth: unavailableMethod('skillAoneEnsureAuth'),
-  skillAoneLogin: unavailableMethod('skillAoneLogin'),
-  skillInstallAone: unavailableMethod('skillInstallAone'),
-  skillInstallDingtalk: unavailableMethod('skillInstallDingtalk'),
+  workspaceList: unavailableMethod('workspaceList'),
+  workspaceAdd: unavailableMethod('workspaceAdd'),
+  workspaceSetActive: unavailableMethod('workspaceSetActive'),
+  workspaceRemove: unavailableMethod('workspaceRemove'),
+  workspaceInfo: unavailableMethod('workspaceInfo'),
+  conversationsList: unavailableMethod('conversationsList'),
+  conversationsCreate: unavailableMethod('conversationsCreate'),
+  conversationsGet: unavailableMethod('conversationsGet'),
+  conversationsUpdateTitle: unavailableMethod('conversationsUpdateTitle'),
+  conversationsAppendMessage: unavailableMethod('conversationsAppendMessage'),
+  conversationsUpdateLastMessage: unavailableMethod('conversationsUpdateLastMessage'),
+  conversationsReplaceMessages: unavailableMethod('conversationsReplaceMessages'),
+  conversationsDelete: unavailableMethod('conversationsDelete'),
+  chatSend: unavailableMethod('chatSend'),
+  chatAbort: unavailableMethod('chatAbort'),
+  chatCompact: unavailableMethod('chatCompact'),
+  onChatStreamDelta: unavailableMethod('onChatStreamDelta'),
+  onChatStreamDone: unavailableMethod('onChatStreamDone'),
+  onChatStreamAborted: unavailableMethod('onChatStreamAborted'),
+  onChatStreamUsage: unavailableMethod('onChatStreamUsage'),
+  onChatStreamToolCall: unavailableMethod('onChatStreamToolCall'),
+  onChatStreamToolResult: unavailableMethod('onChatStreamToolResult'),
+  onChatStreamError: unavailableMethod('onChatStreamError'),
+  onChatCompaction: unavailableMethod('onChatCompaction'),
+  llmListProviders: unavailableMethod('llmListProviders'),
+  llmAddProvider: unavailableMethod('llmAddProvider'),
+  llmUpdateProvider: unavailableMethod('llmUpdateProvider'),
+  llmRemoveProvider: unavailableMethod('llmRemoveProvider'),
+  llmSetDefault: unavailableMethod('llmSetDefault'),
+  llmTestConnection: unavailableMethod('llmTestConnection'),
   initialSettings: {},
   getSettings: unavailableMethod('getSettings'),
   updateSettings: unavailableMethod('updateSettings'),
   exportConfig: unavailableMethod('exportConfig'),
   importConfig: unavailableMethod('importConfig'),
-  chat: unavailableChatApi,
 };
 
-export const clientApi: ClientApi = window.zeusAtlas ?? unavailableApi;
+export const clientApi: ClientApi = window.peerAgent ?? unavailableApi;

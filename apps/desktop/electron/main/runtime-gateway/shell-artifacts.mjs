@@ -48,6 +48,10 @@ export function createShellArtifactStore({ userDataPath }) {
       completedAt,
       stdoutTruncated: cappedStdout.truncated,
       stderrTruncated: cappedStderr.truncated,
+      stdoutChars: String(stdout ?? '').length,
+      stderrChars: String(stderr ?? '').length,
+      stdoutLines: String(stdout ?? '').split('\n').length,
+      stderrLines: String(stderr ?? '').split('\n').length,
     }, null, 2)}\n`, 'utf8');
 
     return {
@@ -58,6 +62,9 @@ export function createShellArtifactStore({ userDataPath }) {
         `local-shell-artifact://${taskId}/metadata`,
       ],
       localPath: artifactDir,
+      stdoutPath: path.join(artifactDir, 'stdout.txt'),
+      stderrPath: path.join(artifactDir, 'stderr.txt'),
+      metadataPath: path.join(artifactDir, 'metadata.json'),
       truncated: cappedStdout.truncated || cappedStderr.truncated,
     };
   }

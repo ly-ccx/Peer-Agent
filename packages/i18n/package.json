@@ -1,5 +1,5 @@
 {
-  "name": "@zeus-atlas/i18n",
+  "name": "@peer-agent/i18n",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@zeus-atlas/protocol": "workspace:*"
+    "@peer-agent/protocol": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

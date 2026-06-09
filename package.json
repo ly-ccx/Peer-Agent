@@ -1,28 +1,20 @@
 {
-  "name": "zeus-atlas",
+  "name": "peer-agent",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.22.0",
   "scripts": {
-    "dev": "node scripts/ensure-dotenv.mjs && pnpm --filter @zeus-atlas/desktop dev",
+    "dev": "pnpm --filter @peer-agent/desktop dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "version:check": "node scripts/check-version.mjs",
-    "parity:audit": "node scripts/client-parity-audit.mjs",
-    "parity:completion-audit": "node scripts/client-parity-completion-audit.mjs",
-    "prod-e2e:preflight": "node scripts/prod-e2e-preflight.mjs",
-    "prod-e2e:probe-contract": "node scripts/prod-cloud-contract-probe.mjs",
-    "prod-e2e:create-report": "node scripts/create-prod-e2e-report.mjs",
-    "prod-e2e:validate": "node scripts/validate-prod-e2e-report.mjs",
     "build:core": "cargo build --workspace",
     "build:core:release": "cargo build --workspace --release",
-    "pack": "pnpm build && pnpm --filter @zeus-atlas/desktop pack",
-    "dist": "pnpm build && pnpm --filter @zeus-atlas/desktop dist",
-    "dist:mac": "pnpm build && pnpm --filter @zeus-atlas/desktop dist:mac",
-    "dist:win": "pnpm build && pnpm --filter @zeus-atlas/desktop dist:win",
-    "release:beta": "pnpm build && pnpm --filter @zeus-atlas/desktop release:beta",
-    "release:stable": "pnpm build && pnpm --filter @zeus-atlas/desktop release:stable",
+    "pack": "pnpm build && pnpm --filter @peer-agent/desktop pack",
+    "dist": "pnpm build && pnpm --filter @peer-agent/desktop dist",
+    "dist:mac": "pnpm build && pnpm --filter @peer-agent/desktop dist:mac",
+    "dist:win": "pnpm build && pnpm --filter @peer-agent/desktop dist:win",
     "check": "pnpm typecheck && pnpm build:core"
   },
   "devDependencies": {
@@ -36,8 +28,6 @@
     ]
   },
   "dependencies": {
-    "adm-zip": "^0.5.17",
-    "ali-oss": "^6.21.0"
-  },
-  "repository": "git@gitlab.alibaba-inc.com:zeus_os/zeus_atlas.git"
+    "adm-zip": "^0.5.17"
+  }
 }

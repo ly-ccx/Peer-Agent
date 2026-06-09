@@ -1,4 +1,4 @@
-import type { CapabilityManifest } from '@zeus-atlas/protocol';
+import type { CapabilityManifest } from '@peer-agent/protocol';
 import type {
   CapabilityTone,
   CapabilityWorkbenchCounts,

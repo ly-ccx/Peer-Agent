@@ -1,8 +1,8 @@
-import type { ZeusAtlasPreloadApi } from './preload/contracts/zeusAtlasPreloadApi';
+import type { PeerAgentPreloadApi } from './preload/contracts/peerAgentPreloadApi';
 
 declare global {
   interface Window {
-    zeusAtlas?: ZeusAtlasPreloadApi;
+    peerAgent?: PeerAgentPreloadApi;
   }
 }
 

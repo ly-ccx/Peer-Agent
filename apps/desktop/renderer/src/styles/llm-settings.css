@@ -1,0 +1,252 @@
+/* ── LLM Settings Panel · Frost ── */
+
+.llm-settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  padding-top: 52px;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.llm-settings-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.llm-settings-header button {
+  background: none;
+  border: none;
+  color: var(--graphite-soft);
+  cursor: pointer;
+  font-size: 1.2rem;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  transition: color var(--za-motion-fast);
+}
+.llm-settings-header button:hover { color: var(--graphite-base); }
+.llm-settings-header strong {
+  font-family: var(--font-serif-zh);
+  font-size: 1.1rem;
+  color: var(--graphite-base);
+}
+
+.llm-provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.llm-empty {
+  color: var(--graphite-mute);
+  text-align: center;
+  padding: var(--space-8) 0;
+  font-size: 0.85rem;
+}
+
+.llm-provider-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  background: var(--paper-sheet);
+  transition: border-color var(--za-motion-fast);
+}
+.llm-provider-card.is-default {
+  border-left: 2px solid var(--azure-seal);
+}
+
+.llm-provider-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.llm-provider-info strong {
+  color: var(--graphite-base);
+  font-size: 0.9rem;
+}
+.llm-provider-meta {
+  color: var(--graphite-soft);
+  font-size: 0.76rem;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.llm-badge-default {
+  background: var(--azure-trace);
+  color: var(--azure-seal);
+  font-size: 0.62rem;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  font-weight: 600;
+}
+.llm-provider-specs {
+  color: var(--graphite-mute);
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+}
+.llm-provider-key {
+  color: var(--graphite-mute);
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+}
+.llm-test-result { font-size: 0.72rem; }
+.llm-test-result.success { color: var(--state-success); }
+.llm-test-result.fail { color: var(--state-danger); }
+
+.llm-provider-actions {
+  display: flex;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+.llm-provider-actions button {
+  background: transparent;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-sm);
+  color: var(--graphite-soft);
+  cursor: pointer;
+  font-size: 0.72rem;
+  padding: 3px 8px;
+  transition: all var(--za-motion-fast);
+}
+.llm-provider-actions button:hover {
+  background: var(--chrome-hover);
+  color: var(--graphite-base);
+}
+.llm-provider-actions button.danger:hover {
+  color: var(--state-danger);
+  border-color: var(--state-danger);
+}
+
+.llm-add-btn {
+  background: none;
+  border: 1px dashed var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  color: var(--graphite-fade);
+  cursor: pointer;
+  padding: var(--space-3);
+  font-size: 0.85rem;
+  text-align: center;
+  transition: all var(--za-motion-fast);
+}
+.llm-add-btn:hover {
+  border-color: var(--graphite-mute);
+  color: var(--graphite-soft);
+}
+
+.llm-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  background: var(--paper-sheet);
+}
+.llm-form h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--graphite-base);
+}
+.llm-form > label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.llm-form > label > span {
+  color: var(--graphite-soft);
+  font-size: 0.76rem;
+  font-weight: 500;
+}
+.llm-form input[type="text"],
+.llm-form input[type="password"],
+.llm-form input[type="number"],
+.llm-form input:not([type]) {
+  background: var(--chrome-canvas);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-sm);
+  color: var(--graphite-base);
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.82rem;
+  font-family: var(--font-mono);
+  transition: border-color var(--za-motion-fast);
+}
+.llm-form input:focus {
+  outline: none;
+  border-color: var(--graphite-base);
+}
+
+.llm-radio-group {
+  display: flex;
+  gap: var(--space-5);
+}
+.llm-radio-group label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--graphite-base);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.llm-price-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.llm-price-group-label {
+  color: var(--graphite-soft);
+  font-size: 0.76rem;
+  font-weight: 500;
+}
+.llm-price-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+.llm-price-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.llm-price-field > span {
+  color: var(--graphite-mute);
+  font-size: 0.68rem;
+}
+
+.llm-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.llm-form-actions button {
+  background: transparent;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-sm);
+  color: var(--graphite-soft);
+  cursor: pointer;
+  font-size: 0.82rem;
+  padding: var(--space-2) var(--space-4);
+  transition: all var(--za-motion-fast);
+}
+.llm-form-actions button:hover {
+  background: var(--chrome-hover);
+}
+.llm-form-actions button.primary {
+  background: var(--za-primary-control-bg);
+  border-color: var(--za-primary-control-bg);
+  color: var(--za-primary-control-ink);
+}
+.llm-form-actions button.primary:hover {
+  opacity: 0.9;
+}
+.llm-form-actions button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}

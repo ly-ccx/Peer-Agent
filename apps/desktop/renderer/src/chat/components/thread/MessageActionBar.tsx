@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
-import type { I18nRuntime } from '@zeus-atlas/i18n';
+import type { I18nRuntime } from '@peer-agent/i18n';
 
-export type MessageActionId = 'copy' | 'regenerate' | 'delete' | 'branch' | 'share';
+export type MessageActionId = 'copy' | 'regenerate' | 'delete' | 'branch';
 
 interface MessageActionBarProps {
   readonly role: 'user' | 'assistant' | 'system' | 'tool';
@@ -33,11 +33,10 @@ export function MessageActionBar({
   const hasContent = content.trim().length > 0;
   const canCopy = hasContent;
   const canRegenerate = role === 'assistant' && canEdit && !isStreaming;
-  const canDelete = role === 'user' && canEdit && !isStreaming;
+  const canDelete = canEdit && !isStreaming;
   const canBranch = hasContent && !isStreaming;
-  const canShare = role === 'assistant' && hasContent && !isStreaming;
 
-  if (!canCopy && !canRegenerate && !canDelete && !canBranch && !canShare) return null;
+  if (!canCopy && !canRegenerate && !canDelete && !canBranch) return null;
 
   return (
     <div className="message-action-bar">
@@ -67,14 +66,6 @@ export function MessageActionBar({
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" />
             <path d="M6 21V9a9 9 0 0 0 9 9" />
-          </svg>
-        </button>
-      ) : null}
-      {canShare ? (
-        <button type="button" onClick={() => onAction('share')} title={i18n.t('chat.message.action.share')} aria-label={i18n.t('chat.message.action.share')}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
-            <path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98" />
           </svg>
         </button>
       ) : null}

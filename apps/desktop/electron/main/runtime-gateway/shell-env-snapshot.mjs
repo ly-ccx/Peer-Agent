@@ -48,7 +48,7 @@ function getConfigFile(shellPath) {
 export async function createShellEnvSnapshot() {
   const userShell = process.env.SHELL || '/bin/zsh';
   const configFile = getConfigFile(userShell);
-  const snapshotDir = join(tmpdir(), 'zeus-atlas-shell');
+  const snapshotDir = join(tmpdir(), 'peer-agent-shell');
   if (!existsSync(snapshotDir)) mkdirSync(snapshotDir, { recursive: true });
   const filePath = join(snapshotDir, `env-snapshot-${process.pid}.sh`);
 
@@ -63,7 +63,7 @@ export async function createShellEnvSnapshot() {
   
     # Create snapshot file
     SNAPSHOT_FILE="${filePath}"
-    echo "# zeus-atlas shell env snapshot" >| "$SNAPSHOT_FILE"
+    echo "# peer-agent shell env snapshot" >| "$SNAPSHOT_FILE"
   
     # Export key env vars (PATH is the critical one — contains .zshrc additions)
     # 白名单扩充：A1_*/BUC_*/AONE_*/ALIBABA_*/QODERWORK_*/XDG_* 用于内网 CLI 登录态

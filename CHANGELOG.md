@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Zeus Atlas are tracked here.
+All notable changes to Peer Agent are tracked here.
 
 ## 0.0.1 - Unreleased
 
@@ -100,9 +100,9 @@ Scope:
 Release gate:
 
 - `npx --yes pnpm@10.22.0 version:check`
-- `npx --yes pnpm@10.22.0 --filter @zeus-atlas/chat-kernel test`
-- `npx --yes pnpm@10.22.0 --filter @zeus-atlas/desktop test`
-- `npx --yes pnpm@10.22.0 --filter @zeus-atlas/task-thread test`
+- `npx --yes pnpm@10.22.0 --filter @peer-agent/chat-kernel test`
+- `npx --yes pnpm@10.22.0 --filter @peer-agent/desktop test`
+- `npx --yes pnpm@10.22.0 --filter @peer-agent/task-thread test`
 - `npx --yes pnpm@10.22.0 typecheck`
 - `npx --yes pnpm@10.22.0 parity:audit`
 - `npx --yes pnpm@10.22.0 build`

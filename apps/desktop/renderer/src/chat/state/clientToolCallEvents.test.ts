@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { ChatStreamEvent } from '@zeus-atlas/protocol';
+import type { ChatStreamEvent } from '@peer-agent/protocol';
 import { normalizeClientToolCall } from './clientToolCallEvents.ts';
 
 // 钉死 backend 实际推的事件名(cbu-xiaoer-node-service ClientToolEventTypes.ts

@@ -1,4 +1,4 @@
-import type { CapabilityManifest, LocaleCode, LocalizedText } from '@zeus-atlas/protocol';
+import type { CapabilityManifest, LocaleCode, LocalizedText } from '@peer-agent/protocol';
 
 export type { LocaleCode };
 
@@ -344,7 +344,7 @@ export type TranslationKey =
   | 'chat.openclawGovernance.trainingScorecards'
   | 'chat.openclawGovernance.learningSamples'
   | 'chat.openclawGovernance.memoryCandidates'
-  | 'chat.openclawGovernance.zeusBackflowExports'
+  | 'chat.openclawGovernance.peer-agentBackflowExports'
   | 'chat.openclawGovernance.modelPolicies'
   | 'chat.openclawGovernance.credentialProfiles'
   | 'chat.openclawGovernance.evalSuites'
@@ -380,7 +380,7 @@ export type TranslationKey =
   | 'chat.memoryReview.candidates'
   | 'chat.memoryReview.simulationEvals'
   | 'chat.memoryReview.trainingRuns'
-  | 'chat.memoryReview.zeusBackflow'
+  | 'chat.memoryReview.peer-agentBackflow'
   | 'chat.memoryReview.relatedShadow'
   | 'chat.memoryReview.empty'
   | 'chat.memoryWriteGate.title'
@@ -806,7 +806,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'chat.openclawGovernance.trainingScorecards': 'Training Scorecards',
     'chat.openclawGovernance.learningSamples': 'Learning Samples',
     'chat.openclawGovernance.memoryCandidates': 'Memory Candidates',
-    'chat.openclawGovernance.zeusBackflowExports': 'Zeus Backflow',
+    'chat.openclawGovernance.peer-agentBackflowExports': 'Peer Agent Backflow',
     'chat.openclawGovernance.modelPolicies': 'Model Policies',
     'chat.openclawGovernance.credentialProfiles': 'Credential Profiles',
     'chat.openclawGovernance.evalSuites': 'Eval Suites',
@@ -842,7 +842,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'chat.memoryReview.candidates': 'Memory Candidates',
     'chat.memoryReview.simulationEvals': 'Simulation Evals',
     'chat.memoryReview.trainingRuns': 'Training Runs',
-    'chat.memoryReview.zeusBackflow': 'Zeus Backflow',
+    'chat.memoryReview.peer-agentBackflow': 'Peer Agent Backflow',
     'chat.memoryReview.relatedShadow': '相关 Shadow',
     'chat.memoryReview.empty': '暂无审核数据。',
     'chat.memoryWriteGate.title': 'Agent Memory 写动作 Gate',
@@ -1076,8 +1076,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'chat.thread.stop': 'Stop',
     'chat.thread.empty': 'Select a conversation, or send a message to create a real cloud conversation.',
     'chat.thread.loading': 'Opening this thread',
-    'chat.empty.title': 'What should Zeus handle first?',
-    'chat.empty.placeholder': 'Ask Zeus to plan meetings, organize messages, or create tasks...',
+    'chat.empty.title': 'What should Peer Agent handle first?',
+    'chat.empty.placeholder': 'Ask Peer Agent to plan meetings, organize messages, or create tasks...',
     'chat.empty.suggestionsLabel': 'Common tasks',
     'chat.empty.suggestion.focus': "Help me sort today's work priorities",
     'chat.empty.suggestion.todo': 'Turn a DingTalk thread into action items',
@@ -1265,7 +1265,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'chat.openclawGovernance.trainingScorecards': 'Training Scorecards',
     'chat.openclawGovernance.learningSamples': 'Learning Samples',
     'chat.openclawGovernance.memoryCandidates': 'Memory Candidates',
-    'chat.openclawGovernance.zeusBackflowExports': 'Zeus Backflow',
+    'chat.openclawGovernance.peer-agentBackflowExports': 'Peer Agent Backflow',
     'chat.openclawGovernance.modelPolicies': 'Model Policies',
     'chat.openclawGovernance.credentialProfiles': 'Credential Profiles',
     'chat.openclawGovernance.evalSuites': 'Eval Suites',
@@ -1301,7 +1301,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'chat.memoryReview.candidates': 'Memory Candidates',
     'chat.memoryReview.simulationEvals': 'Simulation Evals',
     'chat.memoryReview.trainingRuns': 'Training Runs',
-    'chat.memoryReview.zeusBackflow': 'Zeus Backflow',
+    'chat.memoryReview.peer-agentBackflow': 'Peer Agent Backflow',
     'chat.memoryReview.relatedShadow': 'Related Shadow',
     'chat.memoryReview.empty': 'No review data yet.',
     'chat.memoryWriteGate.title': 'Agent Memory Write Gates',

@@ -1,5 +1,5 @@
-import type { I18nRuntime } from '@zeus-atlas/i18n';
-import type { ClientToolCall } from '@zeus-atlas/protocol';
+import type { I18nRuntime } from '@peer-agent/i18n';
+import type { ClientToolCall } from '@peer-agent/protocol';
 import { useExitAnimation } from '../../hooks/useExitAnimation';
 
 interface PermissionGateStripProps {
@@ -12,7 +12,7 @@ interface PermissionGateStripProps {
 }
 
 /**
- * Atlas Vellum：紧贴 ChatComposer 上方的单行授权 strip。
+ * Peer Vellum：紧贴 ChatComposer 上方的单行授权 strip。
  * 设计依据：[[feedback-tool-approval-inline-with-composer]] —— 待授权请求是用户的下一个动作，
  * 必须出现在视觉路径终点（输入框旁），不能在 thread 顶部。
  * surface 归属 control 层（暖灰），跟 composer 同家族保证视觉连续。

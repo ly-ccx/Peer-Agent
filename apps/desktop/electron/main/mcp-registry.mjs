@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { pathOf } from './zeus-store.mjs';
+import { pathOf } from './data-store.mjs';
 
 function registryPath() {
   return pathOf('mcpRegistry');

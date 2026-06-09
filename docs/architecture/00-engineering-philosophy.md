@@ -1,13 +1,13 @@
-# Zeus Atlas 工程哲学
+# Peer Agent 工程哲学
 
 > 状态：工程原则草案  
-> 目的：把 Zeus Atlas 的工程设计固定在 Xiaoer / Zeus OS 的既有设计哲学上，避免退化成普通 Electron App 或本地 Agent。
+> 目的：把 Peer Agent 的工程设计固定在 Xiaoer / Peer Agent 的既有设计哲学上，避免退化成普通 Electron App 或本地 Agent。
 
 ---
 
 ## 一、核心判断
 
-Zeus Atlas 的工程哲学不是“客户端越强越好”，而是：
+Peer Agent 的工程哲学不是“客户端越强越好”，而是：
 
 ```text
 云端负责认知。
@@ -20,9 +20,9 @@ Zeus Atlas 的工程哲学不是“客户端越强越好”，而是：
 它必须同时满足两件事：
 
 1. 像 Codex 一样提供高质量任务执行界面。
-2. 像 Zeus OS 一样保留显式对象、显式账本、显式边界和显式闭环。
+2. 像 Peer Agent 一样保留显式对象、显式账本、显式边界和显式闭环。
 
-所以 Zeus Atlas 不能被设计成：
+所以 Peer Agent 不能被设计成：
 
 - 本地 Agent。
 - 本地 CEO Agent Runtime。
@@ -38,7 +38,7 @@ Cloud cognition runtime
   + task-thread interaction harness
 ```
 
-Codex.app 是 Zeus Atlas 的客户端产品参考模型，但只参考它的任务型运行态组织方式：
+Codex.app 是 Peer Agent 的客户端产品参考模型，但只参考它的任务型运行态组织方式：
 
 ```text
 Sidebar 是任务和项目索引。
@@ -47,7 +47,7 @@ Composer 是上下文和权限入口。
 Tool call / Review / Evidence 是线程事件。
 ```
 
-Zeus Atlas 不照搬 Codex.app 的代码执行假设；本地能力必须继续服从 Manifest、Runtime Projection、PermissionGrant 和 Evidence 主链路。
+Peer Agent 不照搬 Codex.app 的代码执行假设；本地能力必须继续服从 Manifest、Runtime Projection、PermissionGrant 和 Evidence 主链路。
 
 ---
 
@@ -55,7 +55,7 @@ Zeus Atlas 不照搬 Codex.app 的代码执行假设；本地能力必须继续�
 
 现有知识里最重要的工程哲学是：不要把系统设计成一层层补救模型错误，而要消除错误发生的条件。
 
-在 Zeus Atlas 中，这意味着：
+在 Peer Agent 中，这意味着：
 
 | 防御式设计 | 赋能式设计 |
 |---|---|
@@ -75,7 +75,7 @@ Zeus Atlas 不照搬 Codex.app 的代码执行假设；本地能力必须继续�
 
 ## 三、Harness 优先
 
-Zeus Atlas 不是只写一个桌面应用，而是在为云端 Agent 设计一个客户端 Harness。
+Peer Agent 不是只写一个桌面应用，而是在为云端 Agent 设计一个客户端 Harness。
 
 工程目标不是“功能越多越好”，而是提升 Agent 在客户端场景中的真实能力上限：
 
@@ -89,16 +89,16 @@ Zeus Atlas 不是只写一个桌面应用，而是在为云端 Agent 设计一�
 
 ```text
 Agent 能力 = 模型 + Harness。
-Zeus Atlas 是客户端 Harness，不是本地大脑。
+Peer Agent 是客户端 Harness，不是本地大脑。
 ```
 
 ---
 
 ## 四、三种真相不能混
 
-Zeus OS 运行态里有一个关键判断：不同层持有不同真相。
+Peer Agent 运行态里有一个关键判断：不同层持有不同真相。
 
-Zeus Atlas 中也必须保持这个边界：
+Peer Agent 中也必须保持这个边界：
 
 | 真相 | 持有者 | 说明 |
 |---|---|---|
@@ -119,7 +119,7 @@ Zeus Atlas 中也必须保持这个边界：
 
 ## 五、运行链和进化链分离
 
-Zeus Atlas 允许个人经验参与本次任务，但不能把个人经验自动推入云端认知。
+Peer Agent 允许个人经验参与本次任务，但不能把个人经验自动推入云端认知。
 
 正确链路是：
 
@@ -173,7 +173,7 @@ Protocol contracts
 
 ## 七、界面是运行态，不是装饰层
 
-Zeus Atlas 的 UI 不是简单展示层。它是 Agent 运行态的一部分。
+Peer Agent 的 UI 不是简单展示层。它是 Agent 运行态的一部分。
 
 UI 需要承载：
 

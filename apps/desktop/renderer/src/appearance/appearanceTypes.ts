@@ -1,5 +1,5 @@
 /**
- * Atlas Vellum 设计语言下，主题不再是"用户可调旋钮"，
+ * Peer Vellum 设计语言下，主题不再是"用户可调旋钮"，
  * 而是固定的设计语言契约。Appearance 仅暴露：
  *   - mode: 浅 / 深 / 跟随系统
  *   - density: 宽松 / 紧凑（Phase 2 启用 UI）

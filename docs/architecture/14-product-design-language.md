@@ -1,14 +1,14 @@
-# Zeus Atlas 产品设计语言
+# Peer Agent 产品设计语言
 
 > 状态：设计治理基准草案
-> 适用范围：Zeus Atlas Desktop 的产品结构、视觉语言、交互状态和组件实现。
+> 适用范围：Peer Agent Desktop 的产品结构、视觉语言、交互状态和组件实现。
 > 目标：先固定统一审美和交互契约，再继续改 UI，避免每次补丁都把产品推向不同方向。
 
 ---
 
 ## 一、产品定位
 
-Zeus Atlas Desktop 不是 Web 后台，不是普通聊天壳，也不是把调试入口堆在桌面里的工程面板。
+Peer Agent Desktop 不是 Web 后台，不是普通聊天壳，也不是把调试入口堆在桌面里的工程面板。
 
 它应该是：
 
@@ -53,8 +53,8 @@ Zeus Atlas Desktop 不是 Web 后台，不是普通聊天壳，也不是把调�
 
 - 不出现项目工程概念。
 - 不暴露模型选择。
-- 不把本地代码执行假设带进 Zeus Atlas。
-- 不出现 Codex 的 Review / Git / Workspace 语义，除非 Zeus Atlas 有等价业务对象。
+- 不把本地代码执行假设带进 Peer Agent。
+- 不出现 Codex 的 Review / Git / Workspace 语义，除非 Peer Agent 有等价业务对象。
 
 ### 2.2 借鉴 Claude Desktop / Cowork
 
@@ -75,9 +75,9 @@ Zeus Atlas Desktop 不是 Web 后台，不是普通聊天壳，也不是把调�
 
 ## 三、Zeus 的产品特色
 
-上一节只说明“参考谁”，这一节定义 Zeus Atlas 自己的识别度。
+上一节只说明“参考谁”，这一节定义 Peer Agent 自己的识别度。
 
-Zeus Atlas 的特色不应该来自装饰图形，而应该来自三个产品机制：
+Peer Agent 的特色不应该来自装饰图形，而应该来自三个产品机制：
 
 ```text
 Channel Command
@@ -456,7 +456,7 @@ tool count
 
 ## 六、品牌化但克制
 
-Zeus Atlas 需要有自己的味道，但不能靠 logo 堆砌。
+Peer Agent 需要有自己的味道，但不能靠 logo 堆砌。
 
 ### 6.1 设计母题
 
@@ -496,7 +496,7 @@ Zeus Atlas 需要有自己的味道，但不能靠 logo 堆砌。
 
 ### 6.3 Appearance 与主题系统
 
-Zeus Atlas 必须支持黑白配色和用户自定义主题，类似 Codex 的 Appearance，但要更贴近 Zeus 的产品语义。
+Peer Agent 必须支持黑白配色和用户自定义主题，类似 Codex 的 Appearance，但要更贴近 Zeus 的产品语义。
 
 主题不是装饰面板，而是长时间办公产品的基础能力：
 

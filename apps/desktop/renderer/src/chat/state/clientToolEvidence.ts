@@ -1,4 +1,4 @@
-import type { ClientToolCall, ClientToolResult, LocaleCode } from '@zeus-atlas/protocol';
+import type { ClientToolCall, ClientToolResult, LocaleCode } from '@peer-agent/protocol';
 
 export function markClientToolResultReturnedToCloud(result: ClientToolResult): ClientToolResult {
   if (result.evidence.returnedToCloud) return result;

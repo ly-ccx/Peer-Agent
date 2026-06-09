@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import { renderInlineLines } from './InlineMarkdown';
 import { parseMarkdownBlocks } from './markdownParser';
 
@@ -41,7 +41,7 @@ function CopyableCodeBlock({ content, language, blockKey }: {
   );
 }
 
-export function MarkdownMessage({ content }: { readonly content: string }) {
+function MarkdownMessageImpl({ content }: { readonly content: string }) {
   const blocks = parseMarkdownBlocks(content);
   if (blocks.length === 0) return null;
 
@@ -113,3 +113,6 @@ export function MarkdownMessage({ content }: { readonly content: string }) {
     </div>
   );
 }
+
+// memo：避免父组件无关状态变化（如 token usage）连带重渲全部历史消息。
+export const MarkdownMessage = memo(MarkdownMessageImpl);

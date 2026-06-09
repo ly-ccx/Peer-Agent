@@ -55,6 +55,34 @@ test('local shell provider auto-runs read-only commands and persists output arti
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
+test('local shell provider materializes large stdout as an artifact-backed context preview', async () => {
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'shell-system-large-'));
+  const provider = createLocalShellProvider({ workspaceRoot: tmpDir, userDataPath: tmpDir });
+  provider.permissionReview.addShellRule({
+    behavior: 'allow',
+    match: { type: 'prefix', prefix: 'node -e' },
+    scope: { cwd: tmpDir, maxRiskLevel: 'L4_privileged' },
+  });
+
+  const { result } = await provider.execute(
+    toolCall('shell-large', 'node -e "process.stdout.write(\'x\'.repeat(12000))"'),
+    'zh-CN',
+  );
+
+  assert.equal(result.status, 'success');
+  assert.equal(result.outputPreview.stdout.length < 5000, true);
+  assert.equal(result.outputPreview.contextPreviewTruncated, true);
+  assert.equal(result.outputPreview.stdoutChars, 12000);
+  assert.equal(existsSync(result.outputPreview.stdoutArtifactPath), true);
+  assert.match(readFileSync(result.outputPreview.stdoutArtifactPath, 'utf8'), /^x{12000}$/);
+  assert.equal(result.outputPreview.localToolResultRef.kind, 'local_tool_result_ref');
+  assert.equal(result.outputPreview.localToolResultRef.stdoutPath, result.outputPreview.stdoutArtifactPath);
+  assert.equal(result.outputPreview.suggestedRetrieval.length > 0, true);
+  assert.equal(result.evidence.redactions.includes('context_preview_truncated'), true);
+
+  rmSync(tmpDir, { recursive: true, force: true });
+});
+
 test('shell permission rule can allow an exact write command without broad shell trust', async () => {
   const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'shell-system-rule-'));
   const provider = createLocalShellProvider({ workspaceRoot: tmpDir, userDataPath: tmpDir });

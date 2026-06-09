@@ -1,4 +1,4 @@
-import { createI18n } from '@zeus-atlas/i18n';
+import { createI18n } from '@peer-agent/i18n';
 import type {
   CapabilityManifest,
   CapabilitySelection,
@@ -6,7 +6,7 @@ import type {
   ClientToolResult,
   Evidence,
   PermissionGrant,
-} from '@zeus-atlas/protocol';
+} from '@peer-agent/protocol';
 
 export type ThreadEvent =
   | {

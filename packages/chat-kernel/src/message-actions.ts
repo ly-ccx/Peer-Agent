@@ -1,4 +1,4 @@
-import type { ConversationView, MessageActions, MessageNodeOrigin, MessageRole } from '@zeus-atlas/protocol';
+import type { ConversationView, MessageActions, MessageNodeOrigin, MessageRole } from '@peer-agent/protocol';
 
 export function computeMessageActions(params: {
   readonly role: MessageRole | 'gap' | string;

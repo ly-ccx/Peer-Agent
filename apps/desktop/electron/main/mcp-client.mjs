@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-const CLIENT_INFO = { name: 'zeus-atlas', version: '1.0.0' };
+const CLIENT_INFO = { name: 'peer-agent', version: '1.0.0' };
 
 const pool = new Map();
 

@@ -1,4 +1,3 @@
-import type { ConversationChannel, ConversationChannelMetadata } from './channel.ts';
 import type {
   PendingDispatch,
   PendingHumanConfirmation,
@@ -8,9 +7,8 @@ import type {
 
 export type ConversationStatus = 'active' | 'inactive' | 'archived';
 
-export interface ConversationMetadata extends ConversationChannelMetadata {
+export interface ConversationMetadata {
   readonly source?: string;
-  readonly governanceBinding?: Record<string, unknown>;
   readonly [key: string]: unknown;
 }
 
@@ -18,10 +16,8 @@ export interface Conversation {
   readonly id: number;
   readonly conversationUuid: string;
   readonly title: string;
-  readonly workId: string;
   readonly agentId?: number;
   readonly status: ConversationStatus;
-  readonly channel: ConversationChannel;
   readonly metadata?: ConversationMetadata;
   readonly spectatorEnabled?: boolean;
   readonly spectatorAclKey?: string | null;

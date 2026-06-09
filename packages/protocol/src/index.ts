@@ -1,5 +1,4 @@
 export type LocalAccessLevel =
-  | 'cloud_only'
   | 'ask_before_local'
   | 'session_local'
   | 'restricted_local'
@@ -70,23 +69,9 @@ export interface RuntimeProjection {
   readonly createdAt: string;
 }
 
-export interface RuntimeProjectionPublishRequest {
-  readonly projection: RuntimeProjection;
-  readonly session: ClientSessionState;
-  readonly workspace?: WorkspaceProject;
-  readonly publishedAt: string;
-}
-
-export interface RuntimeProjectionPublishResult {
-  readonly accepted: boolean;
-  readonly projectionId: string;
-  readonly expiresAt?: string;
-  readonly message?: string;
-}
-
 export interface ClientSessionState {
   readonly sessionId: string;
-  readonly status: 'cloud_only' | 'local_ready' | 'hybrid_ready' | 'permission_required' | 'degraded' | 'offline';
+  readonly status: 'local_ready' | 'hybrid_ready' | 'permission_required' | 'degraded' | 'offline';
   readonly accessLevel: LocalAccessLevel;
   readonly capabilityCount: number;
   readonly pendingReviewCount: number;
@@ -116,144 +101,43 @@ export interface WorkspaceProject {
   readonly updatedAt: string;
 }
 
-export interface CloudRuntimeState {
-  readonly status: 'not_configured' | 'configured' | 'connected' | 'degraded';
-  readonly endpoint?: string;
-  readonly streamEndpoint?: string;
-  readonly runtimeGatewayEndpoint?: string;
-  readonly mode?: 'prod' | 'pre' | 'custom';
-  readonly developerMode?: boolean;
-  readonly source?: 'developer-settings' | 'environment';
-  readonly lastCheckedAt: string;
-}
+export type LlmProviderType = 'openai' | 'anthropic';
 
-export type CloudContractProbeClass =
-  | 'ok'
-  | 'route_exists'
-  | 'missing'
-  | 'not_implemented'
-  | 'server_error'
-  | 'unreachable'
-  | 'redirect'
-  | 'unexpected';
-
-export interface CloudContractProbeResult {
+export interface LlmProviderConfig {
   readonly id: string;
-  readonly method: string;
-  readonly path: string;
-  readonly origin?: string;
-  readonly status?: number;
-  readonly class: CloudContractProbeClass;
-  readonly durationMs?: number;
-  readonly error?: string;
-}
-
-export interface CloudContractProbeReport {
-  readonly origin?: string;
-  readonly runtimeGatewayOrigin?: string;
-  readonly mode?: 'prod' | 'pre' | 'custom';
-  readonly developerMode?: boolean;
-  readonly source?: 'developer-settings' | 'environment';
-  readonly checkedAt: string;
-  readonly results: readonly CloudContractProbeResult[];
-  readonly blockerCount: number;
-  readonly error?: string;
-}
-
-export type CloudEndpointMode = 'prod' | 'pre' | 'custom';
-export type CloudEndpointConfigSource = 'developer-settings' | 'environment';
-
-export interface EffectiveCloudEndpointConfig {
-  readonly mode: CloudEndpointMode;
-  readonly developerMode: boolean;
-  readonly gatewayUrl?: string;
-  readonly streamUrl?: string;
-  readonly runtimeGatewayUrl?: string;
-  readonly source: CloudEndpointConfigSource;
-}
-
-export interface DeveloperSettings {
-  readonly developerMode: boolean;
-  readonly cloudMode: CloudEndpointMode;
-  readonly gatewayUrl?: string;
-  readonly streamUrl?: string;
-  readonly runtimeGatewayUrl?: string;
-  readonly updatedAt?: string;
-}
-
-export interface DeveloperSettingsState {
-  readonly settings: DeveloperSettings;
-  readonly effectiveConfig: EffectiveCloudEndpointConfig;
-  readonly persisted: boolean;
-}
-
-export interface RequestDiagnostic {
-  readonly method: string;
-  readonly path: string;
-  readonly origin?: string;
-  readonly url?: string;
-  readonly status?: number;
-  readonly durationMs?: number;
-  readonly error?: string;
-  readonly mode?: CloudEndpointMode;
-  readonly developerMode?: boolean;
-  readonly source?: CloudEndpointConfigSource;
-  readonly checkedAt: string;
-}
-
-export interface DeveloperDiagnostics {
-  readonly cloudRuntime: CloudRuntimeState;
-  readonly lastRequest?: RequestDiagnostic | null;
-}
-
-export interface AuthProviderConfig {
-  readonly provider: 'buc';
-  readonly environment: 'daily' | 'prod';
+  readonly provider: LlmProviderType;
+  readonly name: string;
   readonly baseUrl: string;
-  readonly clientId?: string;
-  readonly redirectUri: string;
-  readonly logoutBackUrl: string;
-  readonly scope: string;
-  readonly configured: boolean;
+  readonly model: string;
+  readonly enabled: boolean;
+  readonly isDefault: boolean;
+  readonly createdAt: string;
+  readonly contextWindow?: number;
+  readonly inputPrice?: number;
+  readonly outputPrice?: number;
+  readonly cacheWritePrice?: number;
+  readonly cacheReadPrice?: number;
 }
 
-export interface AuthenticatedUser {
-  readonly account?: string;
-  readonly accountId?: string;
-  readonly empId?: string;
-  readonly name?: string;
-  readonly nickname?: string;
-  readonly userType?: string;
-  readonly avatar?: string;
-  readonly locale?: string;
-  readonly realmId?: string;
-  readonly realmName?: string;
-  readonly openid?: string;
+export interface LlmProviderConfigView extends LlmProviderConfig {
+  readonly apiKeyMasked: string;
+  readonly apiKeyConfigured: boolean;
 }
 
-export interface AuthState {
-  readonly status: 'not_configured' | 'signed_out' | 'signing_in' | 'authenticated' | 'error';
-  readonly provider: 'buc';
-  readonly config: AuthProviderConfig;
-  readonly user?: AuthenticatedUser;
-  readonly tokenExpiresAt?: string;
+export interface LlmProviderTestResult {
+  readonly success: boolean;
+  readonly model?: string;
+  readonly latencyMs?: number;
   readonly error?: string;
-  readonly updatedAt: string;
-}
-
-export interface ClientBootstrapRuntime {
-  readonly isDevMode: boolean;
 }
 
 export interface ClientBootstrap {
   readonly session: ClientSessionState;
-  readonly auth: AuthState;
   readonly capabilities: readonly CapabilityManifest[];
   readonly projects: readonly WorkspaceProject[];
   readonly activeProjectId: string;
-  readonly cloudRuntime: CloudRuntimeState;
   readonly availableLocales: readonly LocaleCode[];
-  readonly runtime: ClientBootstrapRuntime;
+  readonly llmProviders: readonly LlmProviderConfigView[];
 }
 
 export interface CapabilitySelection {
@@ -393,17 +277,6 @@ export interface AuditEvent {
   readonly metadata?: Record<string, unknown>;
 }
 
-export * from './channel.ts';
 export * from './execution.ts';
 export * from './chat.ts';
 export * from './memory.ts';
-export * from './share.ts';
-export * from './billing.ts';
-export * from './agent-memory-write-policy.ts';
-export * from './governance.ts';
-export * from './observability.ts';
-export * from './openclaw-governance.ts';
-export * from './openclaw-write-policy.ts';
-export * from './statistics.ts';
-export * from './studio.ts';
-export * from './runtime-gateway.ts';

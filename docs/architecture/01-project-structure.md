@@ -1,14 +1,14 @@
-# Zeus Atlas 工程结构设计
+# Peer Agent 工程结构设计
 
 > 状态：工程结构草案  
-> 目标：定义 Zeus Atlas 的仓库组织、模块边界和第一阶段落地路径。
+> 目标：定义 Peer Agent 的仓库组织、模块边界和第一阶段落地路径。
 
 ---
 
 ## 一、推荐仓库结构
 
 ```text
-zeus_atlas/
+peer_agent/
 ├── apps/
 │   └── desktop/
 │       ├── electron/

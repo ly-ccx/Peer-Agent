@@ -1,4 +1,4 @@
-import type { ClientToolCall } from '@zeus-atlas/protocol';
+import type { ClientToolCall } from '@peer-agent/protocol';
 
 /**
  * M3·G —— "一直允许"的命令签名。

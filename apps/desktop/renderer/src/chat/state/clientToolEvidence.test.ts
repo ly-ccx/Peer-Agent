@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { ClientToolCall, ClientToolResult } from '@zeus-atlas/protocol';
+import type { ClientToolCall, ClientToolResult } from '@peer-agent/protocol';
 import {
   createDeniedClientToolResult,
   createFailedClientToolResult,

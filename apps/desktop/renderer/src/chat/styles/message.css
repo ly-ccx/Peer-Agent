@@ -77,7 +77,8 @@
     opacity: 0;
     transition: opacity var(--za-motion-fast) var(--za-ease-standard);
   }
-  .cloud-chat-message:hover .message-action-bar {
+  .cloud-chat-message:hover .message-action-bar,
+  .chat-msg:hover .message-action-bar {
     opacity: 1;
   }
   .message-action-bar button {

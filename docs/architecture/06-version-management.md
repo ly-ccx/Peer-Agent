@@ -1,7 +1,7 @@
 # 版本管理
 
 > 状态：0.0.1 开发期版本规则  
-> 目标：让 Zeus Atlas 从第一版开始具备清晰版本事实源、发布边界和变更记录，避免脚手架阶段的版本漂移。
+> 目标：让 Peer Agent 从第一版开始具备清晰版本事实源、发布边界和变更记录，避免脚手架阶段的版本漂移。
 
 ---
 
@@ -15,7 +15,7 @@
 
 含义：
 
-- `0.0.1` 是 Zeus Atlas 的第一个工程开发版本。
+- `0.0.1` 是 Peer Agent 的第一个工程开发版本。
 - 当前不是稳定发布版，也不是对外产品版本。
 - 版本号用于约束代码、文档、协议和验证记录，而不是表达功能成熟度。
 
@@ -150,7 +150,7 @@ CHANGELOG.md
 
 ```bash
 npx --yes pnpm@10.22.0 version:check
-npx --yes pnpm@10.22.0 --filter @zeus-atlas/chat-kernel test
+npx --yes pnpm@10.22.0 --filter @peer-agent/chat-kernel test
 npx --yes pnpm@10.22.0 typecheck
 npx --yes pnpm@10.22.0 build
 cargo build --workspace
@@ -185,9 +185,9 @@ OSS /releases/latest/ → Stable OTA 推送
 
 ### 7.3 产物存储
 
-- **OSS Bucket**: `zeus-atlas`
+- **OSS Bucket**: `peer-agent`
 - **Region**: `oss-cn-beijing`
-- **公网 URL**: `https://zeus-atlas.oss-cn-beijing.aliyuncs.com`
+- **公网 URL**: `https://peer-agent.oss-cn-beijing.aliyuncs.com`
 - **凭证来源**: 字典 ID 262
 
 目录结构：

@@ -8,6 +8,8 @@ import { createShellTaskManager } from './shell-task-manager.mjs';
 
 export { classifyShellCommand } from './shell-classifier.mjs';
 
+const MAX_CONTEXT_STREAM_CHARS = 4_000;
+
 function readShellArgs(call) {
   // arguments 优先，但如果是空对象要 fallback 到 argumentsPreview——
   // normalizeClientToolCall 构造 ClientToolCall 时只设 argumentsPreview
@@ -36,6 +38,67 @@ function createGrant({ toolCallId, granted, classification, decision }) {
     duration: granted ? (decision.ruleId ? 'scope' : 'once') : 'denied',
     scope: `local.shell.exec:${classification?.category ?? 'unknown'}`,
     decidedAt: nowIso(),
+  };
+}
+
+function previewText(value, maxChars = MAX_CONTEXT_STREAM_CHARS) {
+  const text = String(value ?? '');
+  if (text.length <= maxChars) {
+    return { text, truncated: false };
+  }
+  const headChars = Math.max(1_000, Math.floor(maxChars * 0.55));
+  const tailChars = Math.max(800, maxChars - headChars - 80);
+  return {
+    text: `${text.slice(0, headChars)}\n...[context preview truncated: ${text.length} chars]...\n${text.slice(-tailChars)}`,
+    truncated: true,
+  };
+}
+
+function lineCount(value) {
+  const text = String(value ?? '');
+  if (!text) return 0;
+  return text.split('\n').length;
+}
+
+function quoteShellPath(filePath) {
+  return `"${String(filePath ?? '').replace(/(["\\$`])/g, '\\$1')}"`;
+}
+
+function buildSuggestedRetrieval({ artifact, status }) {
+  if (!artifact?.stdoutPath && !artifact?.stderrPath) return [];
+  const suggestions = [];
+  if (artifact.stdoutPath) {
+    suggestions.push(`rg -n "FAIL|Error|error|failed|Expected|panic" ${quoteShellPath(artifact.stdoutPath)}`);
+    suggestions.push(`tail -n 120 ${quoteShellPath(artifact.stdoutPath)}`);
+  }
+  if (status !== 'success' && artifact.stderrPath) {
+    suggestions.push(`sed -n '1,160p' ${quoteShellPath(artifact.stderrPath)}`);
+  }
+  return suggestions;
+}
+
+function buildLocalToolResultRef({ call, classification, taskOutput, stdoutPreview, stderrPreview, contextTruncated }) {
+  const artifact = taskOutput.artifact ?? {};
+  return {
+    kind: 'local_tool_result_ref',
+    command: classification.command,
+    cwd: classification.cwd,
+    exitCode: taskOutput.exitCode,
+    status: taskOutput.status,
+    stdoutPath: artifact.stdoutPath ?? null,
+    stderrPath: artifact.stderrPath ?? null,
+    metadataPath: artifact.metadataPath ?? null,
+    artifactRef: artifact.artifactRef ?? null,
+    artifactRefs: artifact.artifactRefs ?? [],
+    stdoutChars: String(taskOutput.stdout ?? '').length,
+    stderrChars: String(taskOutput.stderr ?? '').length,
+    stdoutLines: lineCount(taskOutput.stdout),
+    stderrLines: lineCount(taskOutput.stderr),
+    stdoutPreview: stdoutPreview || null,
+    stderrPreview: stderrPreview || null,
+    contextPreviewTruncated: contextTruncated,
+    suggestedRetrieval: buildSuggestedRetrieval({ artifact, status: taskOutput.status }),
+    toolCallId: call.toolCallId,
   };
 }
 
@@ -105,12 +168,23 @@ function invalidCommandResult({ call, locale, reason }) {
 function shellRunResult({ call, locale, classification, taskOutput, runMode = 'foreground' }) {
   const redactedStdout = redactShellOutput(taskOutput.stdout);
   const redactedStderr = redactShellOutput(taskOutput.stderr);
+  const stdoutPreview = previewText(redactedStdout);
+  const stderrPreview = previewText(redactedStderr);
   const redactions = outputRedactions(taskOutput.stdout, taskOutput.stderr, redactedStdout, redactedStderr);
   if (taskOutput.artifact?.truncated) redactions.push('artifact_truncated');
+  if (stdoutPreview.truncated || stderrPreview.truncated) redactions.push('context_preview_truncated');
   const status = taskOutput.status;
   const summary = locale === 'zh-CN'
     ? `本地 Shell 指令执行完成，状态：${status}，退出码：${taskOutput.exitCode ?? '-'}。`
     : `Local shell command completed with status ${status}, exit code ${taskOutput.exitCode ?? '-'}.`;
+  const localToolResultRef = buildLocalToolResultRef({
+    call,
+    classification,
+    taskOutput,
+    stdoutPreview: stdoutPreview.text,
+    stderrPreview: stderrPreview.text,
+    contextTruncated: stdoutPreview.truncated || stderrPreview.truncated,
+  });
 
   return {
     toolCallId: call.toolCallId,
@@ -118,15 +192,26 @@ function shellRunResult({ call, locale, classification, taskOutput, runMode = 'f
     outputPreview: {
       status,
       exitCode: taskOutput.exitCode,
-      stdout: redactedStdout || null,
-      stderr: redactedStderr || null,
-      stdoutPreview: redactedStdout || null,
-      stderrPreview: redactedStderr || null,
+      stdout: stdoutPreview.text || null,
+      stderr: stderrPreview.text || null,
+      stdoutPreview: stdoutPreview.text || null,
+      stderrPreview: stderrPreview.text || null,
+      stdoutChars: localToolResultRef.stdoutChars,
+      stderrChars: localToolResultRef.stderrChars,
+      stdoutLines: localToolResultRef.stdoutLines,
+      stderrLines: localToolResultRef.stderrLines,
+      contextPreviewTruncated: localToolResultRef.contextPreviewTruncated,
       interrupted: taskOutput.interrupted,
       timedOut: taskOutput.timedOut,
       promptDetected: taskOutput.promptDetected,
       backgroundTaskId: taskOutput.taskId,
       outputArtifactRef: taskOutput.artifact?.artifactRef ?? null,
+      outputArtifactPath: taskOutput.artifact?.localPath ?? null,
+      stdoutArtifactPath: taskOutput.artifact?.stdoutPath ?? null,
+      stderrArtifactPath: taskOutput.artifact?.stderrPath ?? null,
+      metadataArtifactPath: taskOutput.artifact?.metadataPath ?? null,
+      suggestedRetrieval: localToolResultRef.suggestedRetrieval,
+      localToolResultRef,
       category: classification.category,
       riskLevel: classification.riskLevel,
       cwd: classification.cwd,

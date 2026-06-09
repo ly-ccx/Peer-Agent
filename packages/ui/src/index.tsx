@@ -1,5 +1,5 @@
-import { createI18n } from '@zeus-atlas/i18n';
-import type { ClientToolCall, ClientToolResult, LocaleCode, LocalAccessLevel } from '@zeus-atlas/protocol';
+import { createI18n } from '@peer-agent/i18n';
+import type { ClientToolCall, ClientToolResult, LocaleCode, LocalAccessLevel } from '@peer-agent/protocol';
 import type { ReactNode } from 'react';
 
 export function StatusBadge({ children, tone = 'neutral' }: { readonly children: ReactNode; readonly tone?: 'neutral' | 'good' | 'warn' }) {

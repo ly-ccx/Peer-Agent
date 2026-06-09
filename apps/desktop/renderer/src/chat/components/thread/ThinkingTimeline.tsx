@@ -1,5 +1,5 @@
-import type { I18nRuntime, TranslationKey } from '@zeus-atlas/i18n';
-import type { ThinkingProcess, ToolCard } from '@zeus-atlas/protocol';
+import type { I18nRuntime, TranslationKey } from '@peer-agent/i18n';
+import type { ThinkingProcess, ToolCard } from '@peer-agent/protocol';
 
 function renderToolResult(tool: ToolCard) {
   const summary = tool.resultSummary || '';

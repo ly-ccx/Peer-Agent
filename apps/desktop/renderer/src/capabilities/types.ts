@@ -1,4 +1,4 @@
-import type { CapabilityHealth, CapabilityManifest, CapabilityRiskLevel } from '@zeus-atlas/protocol';
+import type { CapabilityHealth, CapabilityManifest, CapabilityRiskLevel } from '@peer-agent/protocol';
 
 export type CapabilityWorkbenchTab = 'skills' | 'mcp';
 

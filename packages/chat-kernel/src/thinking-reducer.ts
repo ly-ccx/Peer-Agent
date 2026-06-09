@@ -5,7 +5,7 @@ import type {
   SkillStep,
   ThinkingProcess,
   ToolCard,
-} from '@zeus-atlas/protocol';
+} from '@peer-agent/protocol';
 import { normalizePendingHumanConfirmation } from './confirmation-reducer.ts';
 
 const DEFAULT_MAX_ITERATIONS = 8;

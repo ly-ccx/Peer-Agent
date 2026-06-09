@@ -1,5 +1,5 @@
-import type { I18nRuntime } from '@zeus-atlas/i18n';
-import type { AssistantAction, ChatMessage } from '@zeus-atlas/protocol';
+import type { I18nRuntime } from '@peer-agent/i18n';
+import type { AssistantAction, ChatMessage } from '@peer-agent/protocol';
 import { isRecord } from '../../utils/records';
 
 function actionPrompt(action: AssistantAction): string | null {

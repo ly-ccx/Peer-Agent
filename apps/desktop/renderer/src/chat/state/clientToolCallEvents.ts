@@ -1,4 +1,4 @@
-import type { ChatStreamEvent, ClientToolCall, ClientToolResult } from '@zeus-atlas/protocol';
+import type { ChatStreamEvent, ClientToolCall, ClientToolResult } from '@peer-agent/protocol';
 import { isRecord } from '../utils/records.ts';
 
 function readString(data: Record<string, unknown>, keys: readonly string[]): string | undefined {

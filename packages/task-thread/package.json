@@ -1,5 +1,5 @@
 {
-  "name": "@zeus-atlas/task-thread",
+  "name": "@peer-agent/task-thread",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -12,8 +12,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@zeus-atlas/i18n": "workspace:*",
-    "@zeus-atlas/protocol": "workspace:*"
+    "@peer-agent/i18n": "workspace:*",
+    "@peer-agent/protocol": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

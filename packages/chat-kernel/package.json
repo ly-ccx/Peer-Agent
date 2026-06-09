@@ -1,5 +1,5 @@
 {
-  "name": "@zeus-atlas/chat-kernel",
+  "name": "@peer-agent/chat-kernel",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -12,7 +12,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@zeus-atlas/protocol": "workspace:*"
+    "@peer-agent/protocol": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

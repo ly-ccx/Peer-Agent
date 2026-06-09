@@ -87,7 +87,7 @@ function defaultDecision(classification, env) {
   if (classification.category === 'read-only') {
     return decision({ behavior: 'allow', reason: 'read_only_auto_allowed', classification });
   }
-  if (env.ZEUS_ATLAS_SHELL_TRUST_WORKSPACE === '1' && compareRisk(classification.riskLevel, 'L4_privileged') <= 0) {
+  if (env.PEER_AGENT_SHELL_TRUST_WORKSPACE === '1' && compareRisk(classification.riskLevel, 'L4_privileged') <= 0) {
     return decision({ behavior: 'allow', reason: 'workspace_shell_trusted_by_environment', classification });
   }
   // destructive / unknown / privileged 都走 ask —— 由上层 approvalDecider 决定

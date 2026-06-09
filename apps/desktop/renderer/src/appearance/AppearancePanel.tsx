@@ -1,9 +1,9 @@
-import type { I18nRuntime } from '@zeus-atlas/i18n';
+import type { I18nRuntime } from '@peer-agent/i18n';
 import { useAppearance } from './AppearanceProvider';
-import { ATLAS_VELLUM_NAME } from './themePresets';
+import { PEER_VELLUM_NAME } from './themePresets';
 
 /**
- * Atlas Vellum 设计语言下，AppearancePanel 只负责切换：
+ * Peer Vellum 设计语言下，AppearancePanel 只负责切换：
  *   - 浅 / 深 / 跟随系统
  *
  * 不再暴露：accent / background / foreground / 字体 / 半透明 / 对比度
@@ -28,7 +28,7 @@ export function AppearancePanel({
         </button>
         <div>
           <strong>{i18n.t('appearance.title')}</strong>
-          <span>Atlas Vellum · {ATLAS_VELLUM_NAME}</span>
+          <span>Peer Vellum · {PEER_VELLUM_NAME}</span>
         </div>
       </header>
 
@@ -48,7 +48,7 @@ export function AppearancePanel({
       <section className="appearance-preview" aria-label={i18n.t('appearance.preview')}>
         <div className="appearance-preview-sidebar">
           <span />
-          <strong>{ATLAS_VELLUM_NAME}</strong>
+          <strong>{PEER_VELLUM_NAME}</strong>
           <small>v0.1</small>
         </div>
         <div className="appearance-preview-thread">

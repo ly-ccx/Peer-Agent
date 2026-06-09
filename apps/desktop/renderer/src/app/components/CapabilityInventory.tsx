@@ -1,5 +1,5 @@
-import type { I18nRuntime } from '@zeus-atlas/i18n';
-import type { CapabilityManifest } from '@zeus-atlas/protocol';
+import type { I18nRuntime } from '@peer-agent/i18n';
+import type { CapabilityManifest } from '@peer-agent/protocol';
 
 export function CapabilityInventory({
   capabilities,

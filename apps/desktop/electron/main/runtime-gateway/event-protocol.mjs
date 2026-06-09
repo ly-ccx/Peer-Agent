@@ -11,12 +11,12 @@ export function nowIso() {
 }
 
 export function isRuntimeGatewayDisabled(env = process.env) {
-  const raw = String(env.ZEUS_ATLAS_RUNTIME_GATEWAY_DISABLED ?? '').toLowerCase();
+  const raw = String(env.PEER_AGENT_RUNTIME_GATEWAY_DISABLED ?? '').toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 }
 
 export function runtimeGatewayPath(env = process.env) {
-  return env.ZEUS_ATLAS_RUNTIME_GATEWAY_WS_PATH || '/api/client/runtime/ws';
+  return env.PEER_AGENT_RUNTIME_GATEWAY_WS_PATH || '/api/client/runtime/ws';
 }
 
 export function toWebSocketUrl(baseUrl, pathname, query = {}) {
@@ -53,7 +53,7 @@ export function createHelloEvent({ session, projection, clientVersion, platform 
     session,
     projection,
     client: {
-      name: 'zeus-atlas-desktop',
+      name: 'peer-agent-desktop',
       version: clientVersion,
       platform,
       locale: session.locale,

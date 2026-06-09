@@ -1,6 +1,6 @@
-appId: com.alibaba.zeus-atlas
-productName: Zeus Atlas
-copyright: Copyright © 2026 Alibaba Group
+appId: com.peeragent.desktop
+productName: Peer Agent
+copyright: Copyright © 2026 Peer Agent
 
 directories:
   output: ../../dist-electron
@@ -63,8 +63,8 @@ nsis:
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
 
-# ── 发布 (electron-updater generic provider → 阿里云 OSS) ──
-publish:
-  provider: generic
-  url: "https://zeus-atlas.oss-cn-beijing.aliyuncs.com/releases/latest"
-  channel: latest
+# ── 发布 (TODO: configure release channel) ──
+# publish:
+#   provider: github
+#   owner: your-org
+#   repo: peer-agent

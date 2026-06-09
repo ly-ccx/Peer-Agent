@@ -1,4 +1,4 @@
-import type { SkillSummary } from '@zeus-atlas/protocol';
+import type { SkillSummary } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
 

@@ -6,7 +6,7 @@ import test from 'node:test';
 import { runHealthStub } from './core-health.mjs';
 
 function createWorkspace() {
-  return mkdtempSync(path.join(tmpdir(), 'zeus-atlas-core-health-'));
+  return mkdtempSync(path.join(tmpdir(), 'peer-agent-core-health-'));
 }
 
 test('runHealthStub returns failed evidence when the Rust core binary is missing', async () => {

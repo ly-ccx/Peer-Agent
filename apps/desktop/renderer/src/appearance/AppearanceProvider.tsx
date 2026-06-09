@@ -16,8 +16,8 @@ import type {
 import { DEFAULT_APPEARANCE_SETTINGS } from './themePresets';
 import { applyAppearance, sanitizeSettings } from './themeTokens';
 
-const STORAGE_KEY = 'zeus-atlas.appearance.v2';
-const LEGACY_STORAGE_KEY = 'zeus-atlas.appearance.v1';
+const STORAGE_KEY = 'peer-agent.appearance.v2';
+const LEGACY_STORAGE_KEY = 'peer-agent.appearance.v1';
 
 interface AppearanceContextValue {
   readonly activeScheme: AppearanceScheme;
@@ -36,8 +36,8 @@ function readSystemScheme(): AppearanceScheme {
 
 function loadSettings(): AppearanceSettings {
   if (typeof window === 'undefined') return DEFAULT_APPEARANCE_SETTINGS;
-  const api = window.zeusAtlas;
-  // 1) 首选 ~/.zeusos/settings.json 的首屏同步快照（preload 注入），无 IPC 往返、无闪烁
+  const api = window.peerAgent;
+  // 1) 首选 ~/.peer-agent/settings.json 的首屏同步快照（preload 注入），无 IPC 往返、无闪烁
   const stored = api?.initialSettings?.appearance;
   if (stored && typeof stored === 'object') return sanitizeSettings(stored);
   // 2) 一次性迁移旧 Chromium localStorage（v2 → v1）到统一设置，迁完清掉 localStorage
@@ -69,8 +69,8 @@ function loadSettings(): AppearanceSettings {
 
 function saveSettings(settings: AppearanceSettings) {
   if (typeof window === 'undefined') return;
-  // 落 ~/.zeusos/settings.json（异步 IPC）；不再写 Chromium localStorage
-  void window.zeusAtlas?.updateSettings({ appearance: settings });
+  // 落 ~/.peer-agent/settings.json（异步 IPC）；不再写 Chromium localStorage
+  void window.peerAgent?.updateSettings({ appearance: settings });
 }
 
 export function AppearanceProvider({

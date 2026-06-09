@@ -4,7 +4,7 @@
 分支：`dev/0.0.1`
 状态：设计草案
 
-本文定义 Zeus Atlas 的能力扩展体系。这里刻意区分三个经常被混在一起的对象：
+本文定义 Peer Agent 的能力扩展体系。这里刻意区分三个经常被混在一起的对象：
 
 - `Skill`：云端编排对象。
 - `Plugin`：本地能力打包和分发对象。
@@ -50,7 +50,7 @@ Runtime Gateway Session
 
 ## 一、产品边界
 
-Zeus Atlas 不是插件市场壳，也不是本地 Agent Runtime。它是云端认知 Runtime 的客户端 Harness。
+Peer Agent 不是插件市场壳，也不是本地 Agent Runtime。它是云端认知 Runtime 的客户端 Harness。
 
 云端负责：
 
@@ -147,7 +147,7 @@ Plugin: dingtalk-workbench
 
 它不是产品对象，不是治理模型，也不是权限模型。
 
-Zeus Atlas 支持两类 MCP：
+Peer Agent 支持两类 MCP：
 
 | MCP 类型 | 运行位置 | 使用方 | 主要风险 |
 |---|---|---|---|
@@ -368,7 +368,7 @@ interface ShellPermissionRule {
 - read-only 自动允许。
 - destructive 默认拒绝。
 - write / network / process-control / unknown 默认 ask；没有本地授权 UI 或匹配规则时拒绝。
-- `ZEUS_ATLAS_SHELL_TRUST_WORKSPACE=1` 只用于开发联调，可临时允许 workspace 范围内非 destructive 命令，不能作为生产默认。
+- `PEER_AGENT_SHELL_TRUST_WORKSPACE=1` 只用于开发联调，可临时允许 workspace 范围内非 destructive 命令，不能作为生产默认。
 
 ### 5.4 执行约束
 
@@ -733,7 +733,7 @@ capabilities/local.health.json
 在 macOS 上实际路径是：
 
 ```text
-~/Library/Application Support/@zeus-atlas/desktop/plugins/registry.json
+~/Library/Application Support/@peer-agent/desktop/plugins/registry.json
 ```
 
 Windows / Linux 通过 Electron `app.getPath('userData')` 获取，不在代码里硬编码。
@@ -804,7 +804,7 @@ plugin.json
 示例：
 
 ```text
-~/Library/Application Support/@zeus-atlas/desktop/plugins/
+~/Library/Application Support/@peer-agent/desktop/plugins/
   registry.json
   packages/
     dingtalk-workbench/
@@ -860,7 +860,7 @@ plugin.json
 开发者调试 Plugin / MCP 时，允许工作区下放一个本地注册文件：
 
 ```text
-<workspaceRoot>/.zeus-atlas/plugins.local.json
+<workspaceRoot>/.peer-agent/plugins.local.json
 ```
 
 这个文件只在 developer mode 下读取，不进入生产用户默认路径。
@@ -909,7 +909,7 @@ plugin.json
 2. <workspaceRoot>/capabilities/*.json                 # 现状兼容 / 开发态 capability
 3. <userData>/plugins/registry.json                    # 正式用户安装
 4. <userData>/plugins/packages/*/*/plugin.json          # 插件包 manifest
-5. <workspaceRoot>/.zeus-atlas/plugins.local.json       # developer mode only
+5. <workspaceRoot>/.peer-agent/plugins.local.json       # developer mode only
 6. health check local MCP / adapters
 7. build personal tool surface
 ```
@@ -1157,7 +1157,7 @@ User enables Local MCP / Plugin
     "type": "oauth2_1",
     "providerId": "dingtalk",
     "connectionOwner": "client",
-    "secretRef": "keychain://zeus-atlas/oauth/dingtalk/default",
+    "secretRef": "keychain://peer-agent/oauth/dingtalk/default",
     "scopes": ["todo.read", "todo.write"]
   }
 }
@@ -1344,7 +1344,7 @@ Client reads package / catalog metadata
 开发者模式可以额外写：
 
 ```text
-<workspaceRoot>/.zeus-atlas/plugins.local.json
+<workspaceRoot>/.peer-agent/plugins.local.json
 ```
 
 安装完成后，客户端可以选择性上报本地 inventory：
@@ -1400,7 +1400,7 @@ discovered
 - 定义 local MCP server config shape。
 - 明确云端 API：`capability/bootstrap`、`runtime/projection`、`runtime/ws`、`client-tool/result`、`plugins/catalog`、`plugins/download-ticket`；`runtime/tasks/poll` 仅作为兼容兜底。
 - 明确 OAuth 2.1 鉴权边界：Skill 不持有 token；Cloud MCP token 在云端 vault；Local MCP token 在本地 credential store。
-- 明确本地配置文件：`<userData>/plugins/registry.json`、`<userData>/plugins/state.json`、`<workspaceRoot>/.zeus-atlas/plugins.local.json`。
+- 明确本地配置文件：`<userData>/plugins/registry.json`、`<userData>/plugins/state.json`、`<workspaceRoot>/.peer-agent/plugins.local.json`。
 - 文档化云端 MCP 和本地 MCP 的差异。
 - 保持现有 `local.health` 链路不变，并新增 `local.shell.exec` 作为第一阶段真实本地调度能力。
 

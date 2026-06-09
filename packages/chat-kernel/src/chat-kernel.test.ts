@@ -4,7 +4,7 @@ import {
   FULL_CONVERSATION_CAPABILITIES,
   buildConversationView,
   type ChatStreamEvent,
-} from '@zeus-atlas/protocol';
+} from '@peer-agent/protocol';
 import {
   computeMessageActions,
   createAssistantPlaceholder,
