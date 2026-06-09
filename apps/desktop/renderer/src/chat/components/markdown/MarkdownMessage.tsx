@@ -1,6 +1,7 @@
 import { memo, useCallback, useState } from 'react';
 import { renderInlineLines } from './InlineMarkdown';
 import { parseMarkdownBlocks } from './markdownParser';
+import { stripHistoricalLocalRecordForDisplay } from '../../state/historicalLocalRecord';
 
 const HISTORICAL_PREVIEW_MARKER = '[历史长文本已从活跃上下文压缩为预览；原文没有可恢复的本地 artifact ref]';
 
@@ -60,7 +61,8 @@ function CopyableCodeBlock({ content, language, blockKey }: {
 }
 
 function MarkdownMessageImpl({ content }: { readonly content: string }) {
-  const blocks = parseMarkdownBlocks(content);
+  const sanitized = stripHistoricalLocalRecordForDisplay(content);
+  const blocks = parseMarkdownBlocks(sanitized);
   if (blocks.length === 0) return null;
 
   return (
