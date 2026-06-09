@@ -14,6 +14,7 @@ interface FormState {
   outputPrice: string;
   cacheWritePrice: string;
   cacheReadPrice: string;
+  supportsVision: boolean;
 }
 
 const PRESETS: Record<LlmProviderType, { baseUrl: string; model: string }> = {
@@ -22,7 +23,7 @@ const PRESETS: Record<LlmProviderType, { baseUrl: string; model: string }> = {
 };
 
 function emptyForm(provider: LlmProviderType = 'openai'): FormState {
-  return { provider, name: '', baseUrl: PRESETS[provider].baseUrl, model: PRESETS[provider].model, apiKey: '', contextWindow: '', inputPrice: '', outputPrice: '', cacheWritePrice: '', cacheReadPrice: '' };
+  return { provider, name: '', baseUrl: PRESETS[provider].baseUrl, model: PRESETS[provider].model, apiKey: '', contextWindow: '', inputPrice: '', outputPrice: '', cacheWritePrice: '', cacheReadPrice: '', supportsVision: false };
 }
 
 export function LlmSettingsPanel({
@@ -74,6 +75,7 @@ export function LlmSettingsPanel({
       outputPrice: p.outputPrice != null ? String(p.outputPrice) : '',
       cacheWritePrice: p.cacheWritePrice != null ? String(p.cacheWritePrice) : '',
       cacheReadPrice: p.cacheReadPrice != null ? String(p.cacheReadPrice) : '',
+      supportsVision: p.supportsVision ?? false,
     });
     setShowForm(true);
   };
@@ -98,6 +100,7 @@ export function LlmSettingsPanel({
           outputPrice: outPrice,
           cacheWritePrice: cwPrice,
           cacheReadPrice: crPrice,
+          supportsVision: form.supportsVision,
         };
         if (form.apiKey) patch.apiKey = form.apiKey;
         await clientApi.llmUpdateProvider(patch as { id: string });
@@ -113,6 +116,7 @@ export function LlmSettingsPanel({
           outputPrice: outPrice,
           cacheWritePrice: cwPrice,
           cacheReadPrice: crPrice,
+          supportsVision: form.supportsVision,
         } as Record<string, unknown>);
       }
       setShowForm(false);
@@ -272,6 +276,15 @@ export function LlmSettingsPanel({
               </label>
             </div>
           </div>
+
+          <label className="llm-vision-toggle">
+            <input
+              type="checkbox"
+              checked={form.supportsVision}
+              onChange={(e) => setForm((prev) => ({ ...prev, supportsVision: e.target.checked }))}
+            />
+            <span>{i18n.locale === 'zh-CN' ? '支持多模态（图像输入）' : 'Multimodal (image input) support'}</span>
+          </label>
 
           <div className="llm-form-actions">
             <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }}>
