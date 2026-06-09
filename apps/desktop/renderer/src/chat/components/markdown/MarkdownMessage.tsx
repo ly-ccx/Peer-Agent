@@ -2,6 +2,24 @@ import { memo, useCallback, useState } from 'react';
 import { renderInlineLines } from './InlineMarkdown';
 import { parseMarkdownBlocks } from './markdownParser';
 
+const HISTORICAL_PREVIEW_MARKER = '[历史长文本已从活跃上下文压缩为预览；原文没有可恢复的本地 artifact ref]';
+
+function HistoricalPreviewBlock({ content }: { readonly content: string }) {
+  const lines = content.split('\n');
+  const originalChars = lines.find((line) => line.startsWith('originalChars:'))?.replace('originalChars:', '').trim();
+  const preview = lines.filter((line) => line && line !== HISTORICAL_PREVIEW_MARKER && !line.startsWith('originalChars:')).join('\n').trim();
+
+  return (
+    <details className="historical-preview-card">
+      <summary>
+        <span>历史长文本已压缩为预览</span>
+        {originalChars ? <span className="historical-preview-meta">{Number(originalChars).toLocaleString()} chars</span> : null}
+      </summary>
+      {preview ? <pre>{preview}</pre> : null}
+    </details>
+  );
+}
+
 function CopyableCodeBlock({ content, language, blockKey }: {
   readonly content: string;
   readonly language?: string;
@@ -107,6 +125,9 @@ function MarkdownMessageImpl({ content }: { readonly content: string }) {
         }
         if (block.type === 'rule') {
           return <hr key={`rule-${index}`} />;
+        }
+        if (block.content.startsWith(HISTORICAL_PREVIEW_MARKER)) {
+          return <HistoricalPreviewBlock key={`historical-preview-${index}`} content={block.content} />;
         }
         return <p key={`paragraph-${index}`}>{renderInlineLines(block.content, `paragraph-${index}`)}</p>;
       })}

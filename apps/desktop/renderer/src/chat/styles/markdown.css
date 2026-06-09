@@ -2,6 +2,14 @@
   .markdown-content {
     @apply grid gap-2;
     min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .markdown-content > * {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .markdown-content h3,
@@ -25,6 +33,8 @@
 
   .markdown-content p {
     white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .markdown-content ul,
@@ -69,13 +79,21 @@
 
   .markdown-content code {
     @apply rounded-md px-1.5 py-0.5 text-[12px];
+    box-sizing: border-box;
     color: var(--za-text-soft);
     background: var(--za-surface-1);
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: break-spaces;
   }
 
   .cloud-chat-message pre,
   .markdown-content pre {
     @apply m-0 mt-2 max-w-full overflow-auto p-2 text-[11px] leading-5;
+    box-sizing: border-box;
+    min-width: 0;
+    width: 100%;
     max-height: 260px;
     border: 1px solid var(--za-line);
     border-radius: var(--za-radius-sm);
@@ -86,10 +104,15 @@
   .markdown-content pre code {
     @apply block rounded-none bg-transparent p-0;
     color: inherit;
+    min-width: 0;
+    white-space: pre-wrap;
   }
 
   .markdown-content .code-block-wrapper {
     @apply relative mt-2;
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
   }
   .markdown-content .code-block-wrapper pre {
     @apply mt-0;
@@ -122,16 +145,70 @@
     color: var(--za-text-muted);
   }
 
-  .markdown-table-scroll {
-    @apply max-w-full overflow-x-auto;
+  .historical-preview-card {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
     border: 1px solid var(--za-line);
     border-radius: var(--za-radius-md);
     background: var(--za-surface-0);
+    overflow: hidden;
+  }
+
+  .historical-preview-card summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 11px;
+    cursor: pointer;
+    color: var(--za-text-soft);
+    font-size: 12px;
+    font-family: var(--font-mono);
+    list-style: none;
+  }
+
+  .historical-preview-card summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .historical-preview-card summary::before {
+    content: "▸";
+    color: var(--za-text-muted);
+    transition: transform 0.15s;
+  }
+
+  .historical-preview-card[open] summary::before {
+    transform: rotate(90deg);
+  }
+
+  .historical-preview-meta {
+    margin-left: auto;
+    color: var(--za-text-muted);
+  }
+
+  .historical-preview-card pre {
+    margin-top: 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 0;
+  }
+
+  .markdown-table-scroll {
+    @apply max-w-full overflow-x-auto;
+    box-sizing: border-box;
+    min-width: 0;
+    width: 100%;
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius-md);
+    background: var(--za-surface-0);
+    scrollbar-gutter: stable;
   }
 
   .markdown-content table {
     @apply w-full border-collapse text-left;
-    min-width: 520px;
+    min-width: min(520px, 100%);
   }
 
   .markdown-content th,
@@ -140,6 +217,7 @@
     padding: 9px 11px;
     border-bottom: 1px solid var(--za-line);
     border-right: 1px solid var(--za-line);
+    overflow-wrap: anywhere;
   }
 
   .markdown-content th:last-child,

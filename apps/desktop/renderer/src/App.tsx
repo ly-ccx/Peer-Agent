@@ -3,6 +3,7 @@ import type { LlmProviderConfigView } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { LlmSettingsPanel } from './app/components/LlmSettingsPanel';
 import { AppearancePanel } from './appearance/AppearancePanel';
+import { getRuntimeIdentity } from './app/runtimeIdentity';
 import { useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { ChatSurface } from './chat/components/ChatSurface';
 import { Sidebar } from './chat/components/Sidebar';
@@ -20,6 +21,7 @@ interface ConversationMeta {
 export function App() {
   const { initError, session } = useDesktopBootstrap();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
+  const runtimeIdentity = useMemo(() => getRuntimeIdentity(), []);
   const [activePage, setActivePage] = useState<AppPage>('chat');
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
   const [conversations, setConversations] = useState<readonly ConversationMeta[]>([]);
@@ -45,6 +47,11 @@ export function App() {
       void refreshConversations(r.activeWorkspace);
     }).catch(() => {});
   }, [refreshProviders, refreshConversations]);
+
+  useEffect(() => {
+    const runtimeLabel = i18n.locale === 'zh-CN' ? runtimeIdentity.labelZh : runtimeIdentity.labelEn;
+    document.title = `Peer Agent · ${runtimeLabel}`;
+  }, [i18n.locale, runtimeIdentity]);
 
   const handleWorkspaceChanged = useCallback(async () => {
     const r = await clientApi.workspaceList();
@@ -80,6 +87,7 @@ export function App() {
             activeConversationId={activeConversationId}
             activePage={activePage}
             i18n={i18n}
+            runtimeIdentity={runtimeIdentity}
             onNewChat={handleNewChat}
             onSelectConversation={handleSelectConversation}
             onDeleteConversation={handleDeleteConversation}

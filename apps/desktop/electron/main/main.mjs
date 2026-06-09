@@ -209,12 +209,16 @@ function createPermissionGrant({ toolCallId, granted }) {
     decidedAt: new Date().toISOString(),
   };
 }
-ipcMain.handle('permission:approve', (_event, payload) =>
-  createPermissionGrant({ toolCallId: payload.toolCallId, granted: true }),
-);
-ipcMain.handle('permission:deny', (_event, payload) =>
-  createPermissionGrant({ toolCallId: payload.toolCallId, granted: false }),
-);
+ipcMain.handle('permission:approve', (_event, payload) => {
+  const grant = createPermissionGrant({ toolCallId: payload.toolCallId, granted: true });
+  llmChatService.resolvePermissionGrant(payload.toolCallId, grant);
+  return grant;
+});
+ipcMain.handle('permission:deny', (_event, payload) => {
+  const grant = createPermissionGrant({ toolCallId: payload.toolCallId, granted: false });
+  llmChatService.resolvePermissionGrant(payload.toolCallId, grant);
+  return grant;
+});
 
 // ── Core Health ──
 ipcMain.handle('core:health', (_event, payload) => {

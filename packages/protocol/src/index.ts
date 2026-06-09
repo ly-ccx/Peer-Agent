@@ -117,6 +117,7 @@ export interface LlmProviderConfig {
   readonly outputPrice?: number;
   readonly cacheWritePrice?: number;
   readonly cacheReadPrice?: number;
+  readonly supportsVision?: boolean;
 }
 
 export interface LlmProviderConfigView extends LlmProviderConfig {

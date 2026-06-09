@@ -8,6 +8,7 @@ interface PermissionGateStripProps {
   /** M3·G「一直允许」：放行本次 + 把命令签名加入会话白名单，同签名后续自动放行。 */
   readonly onApproveAlways: (call: ClientToolCall) => void;
   readonly onReject: (call: ClientToolCall) => void;
+  readonly showApproveAlways?: boolean;
   readonly i18n: I18nRuntime;
 }
 
@@ -22,6 +23,7 @@ export function PermissionGateStrip({
   onApprove,
   onApproveAlways,
   onReject,
+  showApproveAlways = true,
   i18n,
 }: PermissionGateStripProps) {
   const { exiting, exit } = useExitAnimation(180);
@@ -61,9 +63,11 @@ export function PermissionGateStrip({
         <button type="button" className="allow" onClick={() => handleAction(onApprove)}>
           {i18n.t('review.allow')}
         </button>
-        <button type="button" className="allow-always" onClick={handleApproveAlways}>
-          {i18n.t('review.allowAlways')}
-        </button>
+        {showApproveAlways ? (
+          <button type="button" className="allow-always" onClick={handleApproveAlways}>
+            {i18n.t('review.allowAlways')}
+          </button>
+        ) : null}
       </div>
     </aside>
   );

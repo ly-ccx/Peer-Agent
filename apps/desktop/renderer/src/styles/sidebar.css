@@ -37,6 +37,39 @@
   color: var(--graphite-base);
   letter-spacing: 0.03em;
 }
+.sidebar-brand-copy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.sidebar-runtime-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  line-height: 1;
+  color: var(--graphite-mute);
+  background: var(--chrome-sunken);
+  white-space: nowrap;
+}
+.sidebar-runtime-badge.main {
+  color: #2f6f95;
+  border-color: rgba(47, 111, 149, 0.25);
+  background: rgba(47, 111, 149, 0.08);
+}
+.sidebar-runtime-badge.lab {
+  color: #9a4c14;
+  border-color: rgba(154, 76, 20, 0.24);
+  background: rgba(154, 76, 20, 0.09);
+}
+.sidebar-runtime-badge.packaged {
+  color: var(--graphite-mute);
+}
 
 /* ── Workspace selector ── */
 .sidebar-workspace-wrap {

@@ -54,11 +54,11 @@ export interface BootstrapPreloadApi {
   readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null }) => Promise<{ id: string; title: string; messageCount: number; createdAt: string; updatedAt: string }>;
   readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string } | null>;
   readonly conversationsUpdateTitle: (params: { id: string; title: string }) => Promise<unknown>;
-  readonly conversationsAppendMessage: (params: { id: string; message: { id: string; role: string; content: string; toolCalls?: unknown[]; timestamp?: number } }) => Promise<unknown>;
+  readonly conversationsAppendMessage: (params: { id: string; message: Record<string, unknown> & { id: string; role: string; content: string } }) => Promise<unknown>;
   readonly conversationsUpdateLastMessage: (params: { id: string; content: string }) => Promise<unknown>;
   readonly conversationsReplaceMessages: (params: { id: string; messages: readonly Record<string, unknown>[] }) => Promise<unknown>;
   readonly conversationsDelete: (params: { id: string }) => Promise<unknown>;
-  readonly chatSend: (params: { messages: readonly { role: string; content: string }[]; streamId: string; effort?: string; conversationId?: string }) => Promise<void>;
+  readonly chatSend: (params: { messages: readonly { role: string; content: unknown }[]; streamId: string; effort?: string; conversationId?: string }) => Promise<void>;
   readonly chatAbort: (params: { streamId: string }) => Promise<void>;
   readonly chatCompact: (params: { conversationId: string; streamId: string }) => Promise<{ compacted: boolean; notification?: { method: string; beforeTokens: number; afterTokens: number; oldMessageCount: number; keptMessageCount: number } }>;
   readonly onChatStreamDelta: (listener: (payload: { streamId: string; content: string }) => void) => () => void;
@@ -67,6 +67,7 @@ export interface BootstrapPreloadApi {
   readonly onChatStreamUsage: (listener: (payload: { streamId: string; usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number } }) => void) => () => void;
   readonly onChatStreamToolCall: (listener: (payload: { streamId: string; tool: string; args: Record<string, unknown>; toolCallId: string }) => void) => () => void;
   readonly onChatStreamToolResult: (listener: (payload: { streamId: string; toolCallId: string; result: string }) => void) => () => void;
+  readonly onChatStreamPermissionRequest: (listener: (payload: { streamId: string; call: ClientToolCall }) => void) => () => void;
   readonly onChatStreamError: (listener: (payload: { streamId: string; error: string }) => void) => () => void;
   readonly onChatCompaction: (listener: (payload: { streamId: string; stage?: 'start' | 'done' | 'idle'; method?: string; beforeTokens?: number; afterTokens?: number; oldMessageCount?: number; keptMessageCount?: number }) => void) => () => void;
   readonly llmListProviders: () => Promise<readonly LlmProviderConfigView[]>;

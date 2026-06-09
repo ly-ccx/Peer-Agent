@@ -16,16 +16,17 @@
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
     "publish:stable": "bash scripts/publish.sh stable",
-    "publish:beta": "bash scripts/publish.sh beta"
+    "publish:beta": "bash scripts/publish.sh beta",
+    "dev:lab": "concurrently -k \"cross-env PEER_DEV_PORT=5273 vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5273 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5273 PEER_AGENT_HOME=$HOME/.peer-agent electron .\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@vitejs/plugin-react": "^5.1.0",
     "@peer-agent/chat-kernel": "workspace:*",
     "@peer-agent/i18n": "workspace:*",
     "@peer-agent/protocol": "workspace:*",
     "@peer-agent/task-thread": "workspace:*",
     "@peer-agent/ui": "workspace:*",
+    "@vitejs/plugin-react": "^5.1.0",
     "adm-zip": "^0.5.17",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

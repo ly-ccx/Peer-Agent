@@ -6,7 +6,8 @@
    */
   .permission-gate-strip {
     @apply flex flex-wrap items-center gap-2 px-3 py-2;
-    margin-top: 8px;
+    max-width: 740px;
+    margin: 0 auto 8px;
     border: 1px solid var(--za-line);
     border-radius: var(--za-radius);
     background: var(--za-control-fill);

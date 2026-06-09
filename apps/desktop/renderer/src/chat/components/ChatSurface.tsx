@@ -1,10 +1,33 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import type { LlmProviderConfigView } from '@peer-agent/protocol';
+import type { ClientToolCall, LlmProviderConfigView } from '@peer-agent/protocol';
+import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import { MarkdownMessage } from './markdown/MarkdownMessage';
+import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
 import { useTypewriterStream } from '../hooks/useTypewriterStream';
+
+const MAX_ATTACHMENTS = 8;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_TEXT_FILE_BYTES = 512 * 1024;
+
+interface ChatAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  kind: 'image' | 'text' | 'unsupported';
+  dataUrl?: string;
+  text?: string;
+}
+
+type ChatApiContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
+type ChatApiMessage = { role: string; content: string | ChatApiContentPart[] };
 
 interface ContentSegment {
   type: 'text' | 'tool-call';
@@ -12,12 +35,14 @@ interface ContentSegment {
   tool?: string;
   args?: Record<string, unknown>;
   result?: string;
+  synthetic?: boolean;
 }
 
 interface ToolCallLegacy {
   tool: string;
   args: Record<string, unknown>;
   result?: string;
+  synthetic?: boolean;
 }
 
 interface CompactionMeta {
@@ -35,6 +60,7 @@ interface ChatMsg {
   timestamp?: number;
   usage?: { input: number; output: number; cacheWrite?: number; cacheRead?: number };
   compaction?: CompactionMeta;
+  attachments?: ChatAttachment[];
 }
 
 function isEmptyAssistantPlaceholder(message: Pick<ChatMsg, 'role' | 'content' | 'segments'>): boolean {
@@ -45,10 +71,70 @@ function isEmptyAssistantPlaceholder(message: Pick<ChatMsg, 'role' | 'content' |
   );
 }
 
-function toApiMessages(messages: readonly ChatMsg[]): { role: string; content: string }[] {
+function getApiContent(message: ChatMsg): string {
+  if (!message.segments?.length) {
+    return message.role === 'assistant'
+      ? sanitizeAssistantHistoryTextForApi(message.content)
+      : message.content;
+  }
+  return message.segments
+    .map((segment) => {
+      if (segment.type !== 'text') return formatHistoricalLocalRecordForApi(segment);
+      const content = segment.content || '';
+      return message.role === 'assistant' ? sanitizeAssistantHistoryTextForApi(content) : content;
+    })
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function buildAttachmentText(attachments: readonly ChatAttachment[]): string {
+  const blocks: string[] = [];
+  for (const attachment of attachments) {
+    if (attachment.kind === 'text') {
+      blocks.push([
+        `Attached file: ${attachment.name}`,
+        `MIME: ${attachment.mimeType || 'text/plain'}`,
+        `Size: ${formatBytes(attachment.size)}`,
+        'Content:',
+        '```',
+        attachment.text || '',
+        '```',
+      ].join('\n'));
+    } else if (attachment.kind === 'unsupported') {
+      blocks.push([
+        `Attached file: ${attachment.name}`,
+        `MIME: ${attachment.mimeType || 'application/octet-stream'}`,
+        `Size: ${formatBytes(attachment.size)}`,
+        'Content is not included because this file type is not supported yet.',
+      ].join('\n'));
+    }
+  }
+  return blocks.join('\n\n');
+}
+
+function getApiMessageContent(message: ChatMsg): string | ChatApiContentPart[] {
+  const text = getApiContent(message);
+  const attachments = message.attachments ?? [];
+  if (!attachments.length) return text;
+
+  const parts: ChatApiContentPart[] = [];
+  const attachmentText = buildAttachmentText(attachments);
+  const combinedText = [text, attachmentText].filter((value) => value.trim()).join('\n\n');
+  if (combinedText) parts.push({ type: 'text', text: combinedText });
+
+  for (const attachment of attachments) {
+    if (attachment.kind === 'image' && attachment.dataUrl) {
+      parts.push({ type: 'image_url', image_url: { url: attachment.dataUrl } });
+    }
+  }
+
+  return parts.length ? parts : text;
+}
+
+function toApiMessages(messages: readonly ChatMsg[]): ChatApiMessage[] {
   return messages
     .filter((message) => !isEmptyAssistantPlaceholder(message))
-    .map((message) => ({ role: message.role, content: message.content }));
+    .map((message) => ({ role: message.role, content: getApiMessageContent(message) }));
 }
 
 interface TokenUsageState {
@@ -89,6 +175,40 @@ function formatTime(ts: number) {
   return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isTextLikeFile(file: File): boolean {
+  if (file.type.startsWith('text/')) return true;
+  const lower = file.name.toLowerCase();
+  return [
+    '.txt', '.md', '.markdown', '.json', '.jsonl', '.csv', '.tsv', '.yaml', '.yml',
+    '.xml', '.html', '.css', '.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.go',
+    '.rs', '.c', '.cpp', '.h', '.hpp', '.sh', '.zsh', '.sql', '.log',
+  ].some((suffix) => lower.endsWith(suffix));
+}
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error ?? new Error('failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function readAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error ?? new Error('failed to read file'));
+    reader.readAsText(file);
+  });
+}
+
 interface TextGroup { type: 'text'; content: string }
 interface ToolCallGroup { type: 'tool-call-group'; calls: ToolCallLegacy[] }
 type SegmentGroup = TextGroup | ToolCallGroup;
@@ -101,9 +221,9 @@ function groupSegments(segments: ContentSegment[]): SegmentGroup[] {
     } else {
       const last = groups[groups.length - 1];
       if (last && last.type === 'tool-call-group') {
-        last.calls.push({ tool: seg.tool!, args: seg.args || {}, result: seg.result });
+        last.calls.push({ tool: seg.tool!, args: seg.args || {}, result: seg.result, synthetic: seg.synthetic });
       } else {
-        groups.push({ type: 'tool-call-group', calls: [{ tool: seg.tool!, args: seg.args || {}, result: seg.result }] });
+        groups.push({ type: 'tool-call-group', calls: [{ tool: seg.tool!, args: seg.args || {}, result: seg.result, synthetic: seg.synthetic }] });
       }
     }
   }
@@ -126,6 +246,77 @@ function migrateToSegments(content: string, toolCalls?: ToolCallLegacy[]): Conte
   return segs.length ? segs : undefined;
 }
 
+function findNextSerializedToolCall(content: string, fromIndex: number): number {
+  const match = content.slice(fromIndex).match(/\n\[Tool call:/);
+  return match?.index === undefined ? content.length : fromIndex + match.index + 1;
+}
+
+function parseSerializedToolSegments(content: string): ContentSegment[] | undefined {
+  if (!content.includes('[Tool call:')) return undefined;
+
+  const segments: ContentSegment[] = [];
+  let cursor = 0;
+  while (cursor < content.length) {
+    const start = content.indexOf('[Tool call:', cursor);
+    if (start < 0) {
+      const tail = content.slice(cursor);
+      if (tail) segments.push({ type: 'text', content: tail });
+      break;
+    }
+
+    const before = content.slice(cursor, start);
+    if (before) segments.push({ type: 'text', content: before });
+
+    const headerEnd = content.indexOf('\n', start);
+    if (headerEnd < 0) {
+      segments.push({ type: 'text', content: content.slice(start) });
+      break;
+    }
+
+    const header = content.slice(start, headerEnd).trim();
+    const headerMatch = header.match(/^\[Tool call:\s+(\S+)\s+(.+)\]$/);
+    const resultMarker = '\n[Tool result]\n';
+    const resultMarkerIndex = content.indexOf(resultMarker, headerEnd);
+    if (!headerMatch) {
+      segments.push({ type: 'text', content: content.slice(start) });
+      break;
+    }
+
+    let args: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(headerMatch[2]);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) args = parsed as Record<string, unknown>;
+    } catch {
+      args = { raw: headerMatch[2] };
+    }
+
+    if (resultMarkerIndex < 0) {
+      segments.push({
+        type: 'tool-call',
+        tool: headerMatch[1],
+        args,
+        result: undefined,
+        synthetic: true,
+      });
+      const rest = content.slice(headerEnd).trim();
+      if (rest) segments.push({ type: 'text', content: rest });
+      break;
+    }
+
+    const resultStart = resultMarkerIndex + resultMarker.length;
+    const nextStart = findNextSerializedToolCall(content, resultStart);
+    segments.push({
+      type: 'tool-call',
+      tool: headerMatch[1],
+      args,
+      result: content.slice(resultStart, nextStart).trim(),
+    });
+    cursor = nextStart;
+  }
+
+  return segments.some((segment) => segment.type === 'tool-call') ? segments : undefined;
+}
+
 function estimateTextTokens(value: unknown): number {
   return Math.ceil(String(value ?? '').length / 4);
 }
@@ -133,6 +324,13 @@ function estimateTextTokens(value: unknown): number {
 function estimateMessageTokens(message: ChatMsg): number {
   let tokens = 10;
   tokens += estimateTextTokens(message.content);
+  if (message.attachments?.length) {
+    for (const attachment of message.attachments) {
+      tokens += estimateTextTokens(attachment.name);
+      tokens += estimateTextTokens(attachment.text);
+      if (attachment.kind === 'image') tokens += 800;
+    }
+  }
   if (message.segments?.length) {
     for (const segment of message.segments) {
       tokens += estimateTextTokens(segment.content);
@@ -144,9 +342,15 @@ function estimateMessageTokens(message: ChatMsg): number {
   return tokens;
 }
 
-function estimateConversationTokens(messages: readonly ChatMsg[], draft: string): number {
+function estimateAttachmentTokens(attachments: readonly ChatAttachment[]): number {
+  return attachments.reduce((sum, attachment) => {
+    return sum + estimateTextTokens(attachment.name) + estimateTextTokens(attachment.text) + (attachment.kind === 'image' ? 800 : 0);
+  }, 0);
+}
+
+function estimateConversationTokens(messages: readonly ChatMsg[], draft: string, draftAttachments: readonly ChatAttachment[]): number {
   const messageTokens = messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
-  return Math.max(0, messageTokens + estimateTextTokens(draft));
+  return Math.max(0, messageTokens + estimateTextTokens(draft) + estimateAttachmentTokens(draftAttachments));
 }
 
 function formatTokenCount(tokens: number): string {
@@ -172,6 +376,8 @@ async function loadConversationMessages(conversationId: string): Promise<{
       msg.segments = m.segments as ContentSegment[];
     } else if (Array.isArray(m.toolCalls) && (m.toolCalls as unknown[]).length) {
       msg.segments = migrateToSegments(msg.content, m.toolCalls as ToolCallLegacy[]);
+    } else if (msg.role === 'assistant') {
+      msg.segments = parseSerializedToolSegments(msg.content);
     }
     if (m.usage && typeof m.usage === 'object') {
       const u = m.usage as { input?: number; output?: number; cacheWrite?: number; cacheRead?: number };
@@ -184,6 +390,9 @@ async function loadConversationMessages(conversationId: string): Promise<{
     if (m._compaction && typeof m._compaction === 'object') {
       const c = m._compaction as unknown as CompactionMeta;
       msg.compaction = c;
+    }
+    if (Array.isArray(m.attachments)) {
+      msg.attachments = m.attachments as ChatAttachment[];
     }
     return msg;
   }).filter((message) => !isEmptyAssistantPlaceholder(message));
@@ -220,6 +429,9 @@ export function ChatSurface({
   const [activeUsage, setActiveUsage] = useState<TokenUsageState | null>(null);
   const [compactionNotice, setCompactionNotice] = useState<{ method: string; beforeTokens: number; afterTokens: number; oldMessageCount: number; keptMessageCount: number } | null>(null);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [pendingPermissionCalls, setPendingPermissionCalls] = useState<ClientToolCall[]>([]);
   const streamIdRef = useRef<string | null>(null);
 
   // 把流式文本追加到最后一条 assistant 消息的尾部文本段。
@@ -243,16 +455,21 @@ export function ChatSurface({
   const typewriter = useTypewriterStream(appendStreamText);
   const threadRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const hasProvider = providers.some((p) => p.apiKeyConfigured);
+  const isZh = i18n.locale === 'zh-CN';
   const slashQuery = draft.startsWith('/') && !/\s/.test(draft) ? draft.toLowerCase() : null;
   const slashCommands = slashQuery
     ? SLASH_COMMANDS.filter((command) => command.value.startsWith(slashQuery))
     : [];
   const showSlashCommands = !isStreaming && !isCompacting && slashCommands.length > 0;
-  const estimatedContextTokens = estimateConversationTokens(messages, draft);
+  const estimatedContextTokens = estimateConversationTokens(messages, draft, attachments);
 
   useEffect(() => {
+    setAttachments([]);
+    setAttachmentError(null);
+    setPendingPermissionCalls([]);
     if (!conversationId) { typewriter.reset(); setMessages([]); setTokenUsage(null); return; }
     setTokenUsage(null);
     void (async () => {
@@ -268,7 +485,7 @@ export function ChatSurface({
       void clientApi.conversationsReplaceMessages({
         id: conversationId,
         messages: msgs.map((m) => ({
-          id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage,
+          id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, _compaction: m.compaction, attachments: m.attachments,
         })),
       });
     };
@@ -284,6 +501,7 @@ export function ChatSurface({
       setIsStreaming(false);
       setIsCompacting(false);
       setActiveUsage(null);
+      setPendingPermissionCalls([]);
       const hasUsage = usage?.inputTokens || usage?.outputTokens || usage?.cacheWriteTokens || usage?.cacheReadTokens;
       const msgUsage = hasUsage
         ? { input: usage.inputTokens ?? 0, output: usage.outputTokens ?? 0, cacheWrite: usage.cacheWriteTokens ?? 0, cacheRead: usage.cacheReadTokens ?? 0 }
@@ -298,8 +516,13 @@ export function ChatSurface({
       }
       if (conversationId) {
         setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last && isEmptyAssistantPlaceholder(last)) {
+            const next = prev.slice(0, -1);
+            persistMessages(next);
+            return next;
+          }
           if (msgUsage) {
-            const last = prev[prev.length - 1];
             if (last?.role === 'assistant') {
               const updated = [...prev.slice(0, -1), { ...last, usage: msgUsage }];
               persistMessages(updated);
@@ -330,6 +553,7 @@ export function ChatSurface({
       setIsStreaming(false);
       setIsCompacting(false);
       setActiveUsage(null);
+      setPendingPermissionCalls([]);
       if (conversationId) {
         setMessages((prev) => {
           const last = prev[prev.length - 1];
@@ -373,12 +597,21 @@ export function ChatSurface({
       });
     });
 
+    const offPermissionRequest = clientApi.onChatStreamPermissionRequest(({ streamId, call }) => {
+      if (streamId !== streamIdRef.current) return;
+      setPendingPermissionCalls((prev) => {
+        if (prev.some((item) => item.toolCallId === call.toolCallId)) return prev;
+        return [...prev, call];
+      });
+    });
+
     const offError = clientApi.onChatStreamError(({ streamId, error }) => {
       if (streamId !== streamIdRef.current) return;
       typewriter.flush();
       setIsStreaming(false);
       setIsCompacting(false);
       setActiveUsage(null);
+      setPendingPermissionCalls([]);
       setStreamError(error);
       if (conversationId) {
         setMessages((prev) => {
@@ -416,7 +649,7 @@ export function ChatSurface({
       setTimeout(() => setCompactionNotice(null), 10000);
     });
 
-    return () => { offDelta(); offDone(); offUsage(); offAborted(); offToolCall(); offToolResult(); offError(); offCompaction(); };
+    return () => { offDelta(); offDone(); offUsage(); offAborted(); offToolCall(); offToolResult(); offPermissionRequest(); offError(); offCompaction(); };
   }, [conversationId, onConversationUpdated]);
 
   useEffect(() => {
@@ -435,15 +668,104 @@ export function ChatSurface({
     });
   }, []);
 
+  const removePendingPermissionCall = useCallback((toolCallId: string) => {
+    setPendingPermissionCalls((prev) => prev.filter((call) => call.toolCallId !== toolCallId));
+  }, []);
+
+  const approvePendingPermissionCall = useCallback((call: ClientToolCall) => {
+    removePendingPermissionCall(call.toolCallId);
+    void clientApi.approveLocalAction(call.toolCallId);
+  }, [removePendingPermissionCall]);
+
+  const denyPendingPermissionCall = useCallback((call: ClientToolCall) => {
+    removePendingPermissionCall(call.toolCallId);
+    void clientApi.denyLocalAction(call.toolCallId);
+  }, [removePendingPermissionCall]);
+
+  const addFiles = useCallback(async (files: FileList | File[] | null | undefined) => {
+    const incoming = Array.from(files ?? []);
+    if (!incoming.length) return;
+
+    setAttachmentError(null);
+    const next: ChatAttachment[] = [];
+    for (const file of incoming) {
+      if (attachments.length + next.length >= MAX_ATTACHMENTS) {
+        setAttachmentError(isZh ? `最多只能添加 ${MAX_ATTACHMENTS} 个附件` : `You can attach up to ${MAX_ATTACHMENTS} files`);
+        break;
+      }
+
+      try {
+        if (file.type.startsWith('image/')) {
+          if (file.size > MAX_IMAGE_BYTES) {
+            setAttachmentError(isZh ? `${file.name} 超过 8MB，未添加` : `${file.name} is larger than 8MB and was not attached`);
+            continue;
+          }
+          next.push({
+            id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name: file.name || 'image',
+            mimeType: file.type || 'image/png',
+            size: file.size,
+            kind: 'image',
+            dataUrl: await readAsDataUrl(file),
+          });
+        } else if (isTextLikeFile(file)) {
+          if (file.size > MAX_TEXT_FILE_BYTES) {
+            setAttachmentError(isZh ? `${file.name} 超过 512KB，未添加` : `${file.name} is larger than 512KB and was not attached`);
+            continue;
+          }
+          next.push({
+            id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name: file.name || 'file.txt',
+            mimeType: file.type || 'text/plain',
+            size: file.size,
+            kind: 'text',
+            text: await readAsText(file),
+          });
+        } else {
+          next.push({
+            id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name: file.name || 'file',
+            mimeType: file.type || 'application/octet-stream',
+            size: file.size,
+            kind: 'unsupported',
+          });
+          setAttachmentError(isZh ? `${file.name || '文件'} 暂不支持读取内容，仅附带文件信息` : `${file.name || 'File'} content is not supported yet; only file metadata was attached`);
+        }
+      } catch (error) {
+        setAttachmentError(error instanceof Error ? error.message : (isZh ? '读取附件失败' : 'Failed to read attachment'));
+      }
+    }
+
+    if (next.length) setAttachments((prev) => [...prev, ...next]);
+  }, [attachments.length, isZh]);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
+    setAttachmentError(null);
+  }, []);
+
+  const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const fileItems = Array.from(event.clipboardData?.items ?? [])
+      .filter((item) => item.kind === 'file')
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+    if (!fileItems.length) return;
+    event.preventDefault();
+    void addFiles(fileItems);
+  }, [addFiles]);
+
   const handleSend = useCallback(async () => {
     const text = draft.trim();
-    if (!text || isStreaming || !hasProvider || !conversationId) return;
+    if ((!text && attachments.length === 0) || isStreaming || !hasProvider || !conversationId) return;
+    const sentAttachments = attachments;
     setDraft('');
+    setAttachments([]);
+    setAttachmentError(null);
     setStreamError(null);
     setActiveUsage(null);
 
     // /compact: run compaction in-place without an agent turn
-    if (text === '/compact') {
+    if (text === '/compact' && sentAttachments.length === 0) {
       const streamId = `compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       streamIdRef.current = streamId;
       setIsCompacting(true);
@@ -463,11 +785,11 @@ export function ChatSurface({
     }
 
     const now = Date.now();
-    const userMsg: ChatMsg = { id: nextId(), role: 'user', content: text, timestamp: now };
+    const userMsg: ChatMsg = { id: nextId(), role: 'user', content: text, timestamp: now, attachments: sentAttachments.length ? sentAttachments : undefined };
     const assistantMsg: ChatMsg = { id: nextId(), role: 'assistant', content: '', segments: [], timestamp: now };
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
 
-    await clientApi.conversationsAppendMessage({ id: conversationId, message: { id: userMsg.id, role: 'user', content: text, timestamp: now } });
+    await clientApi.conversationsAppendMessage({ id: conversationId, message: { id: userMsg.id, role: 'user', content: text, timestamp: now, attachments: userMsg.attachments } });
     await clientApi.conversationsAppendMessage({ id: conversationId, message: { id: assistantMsg.id, role: 'assistant', content: '', timestamp: now } });
     onConversationUpdated?.();
 
@@ -477,7 +799,7 @@ export function ChatSurface({
 
     const apiMessages = toApiMessages([...messages, userMsg]);
     void clientApi.chatSend({ messages: apiMessages, streamId, effort, conversationId });
-  }, [draft, isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort]);
+  }, [draft, attachments, isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort]);
 
   const handleStop = useCallback(() => {
     if (streamIdRef.current) void clientApi.chatAbort({ streamId: streamIdRef.current });
@@ -510,7 +832,7 @@ export function ChatSurface({
     const branchTitle = contextMessages.find((m) => m.role === 'user')?.content.slice(0, 50) || 'Branch';
     const conv = await clientApi.conversationsCreate({ title: branchTitle }) as { id: string };
     for (const m of contextMessages) {
-      await clientApi.conversationsAppendMessage({ id: conv.id, message: { id: m.id, role: m.role, content: m.content } });
+      await clientApi.conversationsAppendMessage({ id: conv.id, message: { id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, timestamp: m.timestamp, _compaction: m.compaction, attachments: m.attachments } });
     }
     onConversationUpdated?.();
     onBranch?.(conv.id);
@@ -522,7 +844,7 @@ export function ChatSurface({
     setMessages(updated);
     await clientApi.conversationsReplaceMessages({
       id: conversationId,
-      messages: updated.map((m) => ({ id: m.id, role: m.role, content: m.content, segments: m.segments })),
+      messages: updated.map((m) => ({ id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, timestamp: m.timestamp, _compaction: m.compaction, attachments: m.attachments })),
     });
     onConversationUpdated?.();
   }, [conversationId, isStreaming, messages, onConversationUpdated]);
@@ -532,8 +854,6 @@ export function ChatSurface({
     else if (action === 'branch') void handleBranch(msgIndex);
     else if (action === 'delete') void handleDeleteMessage(msgIndex);
   }, [handleRegenerate, handleBranch, handleDeleteMessage]);
-
-  const isZh = i18n.locale === 'zh-CN';
 
   if (!conversationId) {
     return (
@@ -575,7 +895,12 @@ export function ChatSurface({
             <span className="chat-msg-role-label">{msg.role === 'user' ? (isZh ? '你' : 'You') : 'Peer Agent'}</span>
             <div className="chat-msg-body">
               {msg.role === 'user' ? (
-                <p>{msg.content}</p>
+                <>
+                  {msg.content ? <p>{msg.content}</p> : null}
+                  {msg.attachments?.length ? (
+                    <AttachmentStrip attachments={msg.attachments} readOnly isZh={isZh} />
+                  ) : null}
+                </>
               ) : (
                 <AssistantContent
                   segments={msg.segments}
@@ -618,24 +943,14 @@ export function ChatSurface({
       </div>
 
       <div className="chat-composer-wrap">
-        <div className="chat-composer-toolbar">
-          <div className="effort-selector">
-            {(['low', 'default', 'high'] as const).map((level) => (
-              <button
-                key={level}
-                type="button"
-                className={`effort-btn ${effort === level ? 'active' : ''}`}
-                onClick={() => setEffort(level)}
-                title={level}
-              >
-                {level === 'low' ? (isZh ? '简洁' : 'Low')
-                  : level === 'high' ? (isZh ? '深度' : 'High')
-                  : (isZh ? '标准' : 'Default')}
-              </button>
-            ))}
-          </div>
-          <TokenUsageDisplay providers={providers} tokenUsage={tokenUsage} activeUsage={activeUsage} contextTokens={estimatedContextTokens} isStreaming={isStreaming} isZh={isZh} />
-        </div>
+        <PermissionGateStrip
+          pendingCalls={pendingPermissionCalls}
+          onApprove={approvePendingPermissionCall}
+          onApproveAlways={approvePendingPermissionCall}
+          onReject={denyPendingPermissionCall}
+          showApproveAlways={false}
+          i18n={i18n}
+        />
         <form
           className="chat-composer"
           onSubmit={(e) => { e.preventDefault(); isStreaming ? handleStop() : void handleSend(); }}
@@ -663,12 +978,21 @@ export function ChatSurface({
               ))}
             </div>
           ) : null}
+          {attachments.length ? (
+            <AttachmentStrip
+              attachments={attachments}
+              onRemove={removeAttachment}
+              isZh={isZh}
+            />
+          ) : null}
+          {attachmentError ? <div className="attachment-error">{attachmentError}</div> : null}
           <textarea
             ref={textareaRef}
             value={draft}
             disabled={!hasProvider}
             placeholder={hasProvider ? (isZh ? '输入消息...' : 'Type a message...') : (isZh ? '请先配置模型' : 'Configure a model first')}
             rows={1}
+            onPaste={handlePaste}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (showSlashCommands) {
@@ -699,10 +1023,32 @@ export function ChatSurface({
               }
             }}
           />
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="chat-file-input"
+            onChange={(event) => {
+              void addFiles(event.currentTarget.files);
+              event.currentTarget.value = '';
+            }}
+          />
+          <button
+            type="button"
+            className="composer-attach-btn"
+            disabled={!hasProvider || isStreaming}
+            title={isZh ? '添加附件' : 'Attach files'}
+            aria-label={isZh ? '添加附件' : 'Attach files'}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 1 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
           <button
             type="submit"
             className={isStreaming ? 'streaming' : undefined}
-            disabled={!hasProvider || (!isStreaming && !draft.trim())}
+            disabled={!hasProvider || (!isStreaming && !draft.trim() && attachments.length === 0)}
           >
             {isStreaming ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
@@ -713,7 +1059,79 @@ export function ChatSurface({
             )}
           </button>
         </form>
+        <div className="chat-composer-toolbar">
+          <div className="effort-selector">
+            {(['low', 'default', 'high'] as const).map((level) => (
+              <button
+                key={level}
+                type="button"
+                className={`effort-btn ${effort === level ? 'active' : ''}`}
+                onClick={() => setEffort(level)}
+                title={level}
+              >
+                {level === 'low' ? (isZh ? '简洁' : 'Low')
+                  : level === 'high' ? (isZh ? '深度' : 'High')
+                  : (isZh ? '标准' : 'Default')}
+              </button>
+            ))}
+          </div>
+          <TokenUsageDisplay providers={providers} tokenUsage={tokenUsage} activeUsage={activeUsage} contextTokens={estimatedContextTokens} isStreaming={isStreaming} isZh={isZh} />
+        </div>
       </div>
+    </div>
+  );
+}
+
+function AttachmentStrip({
+  attachments,
+  onRemove,
+  readOnly = false,
+  isZh,
+}: {
+  readonly attachments: readonly ChatAttachment[];
+  readonly onRemove?: (id: string) => void;
+  readonly readOnly?: boolean;
+  readonly isZh: boolean;
+}) {
+  if (!attachments.length) return null;
+  return (
+    <div className={`attachment-strip ${readOnly ? 'readonly' : ''}`}>
+      {attachments.map((attachment) => (
+        <div key={attachment.id} className={`attachment-chip ${attachment.kind}`}>
+          {attachment.kind === 'image' && attachment.dataUrl ? (
+            <img src={attachment.dataUrl} alt={attachment.name} className="attachment-thumb" />
+          ) : (
+            <span className="attachment-file-icon" aria-hidden="true">
+              {attachment.kind === 'text' ? 'TXT' : 'FILE'}
+            </span>
+          )}
+          <span className="attachment-meta">
+            <span className="attachment-name" title={attachment.name}>{attachment.name}</span>
+            <span className="attachment-size">
+              {attachment.kind === 'image'
+                ? (isZh ? '图片' : 'Image')
+                : attachment.kind === 'text'
+                  ? (isZh ? '文本' : 'Text')
+                  : (isZh ? '未读取' : 'Metadata only')}
+              {' · '}
+              {formatBytes(attachment.size)}
+            </span>
+          </span>
+          {!readOnly && onRemove ? (
+            <button
+              type="button"
+              className="attachment-remove"
+              onClick={() => onRemove(attachment.id)}
+              aria-label={isZh ? `移除 ${attachment.name}` : `Remove ${attachment.name}`}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                <path d="M18 6 6 18" />
+                <path d="m6 6 12 12" />
+              </svg>
+            </button>
+          ) : null}
+        </div>
+      ))}
     </div>
   );
 }
@@ -792,18 +1210,30 @@ function ThinkingSection({ toolCalls, isActive, isZh }: { readonly toolCalls: To
 
 function ToolCallCard({ tc }: { readonly tc: ToolCallLegacy }) {
   const [expanded, setExpanded] = useState(false);
-  const label = tc.tool === 'bash' ? (tc.args.command as string) : tc.tool === 'read_file' ? `read ${tc.args.path}` : tc.tool === 'write_file' ? `write ${tc.args.path}` : tc.tool;
-  const isDone = tc.result !== undefined;
+  const label = tc.tool === 'bash'
+    ? (tc.args.command as string)
+    : tc.tool === 'read_file'
+      ? `read ${tc.args.path}`
+      : tc.tool === 'edit_file'
+        ? `edit ${tc.args.path}`
+        : tc.tool === 'write_file'
+          ? `write ${tc.args.path}`
+          : tc.tool;
+  const isSynthetic = tc.synthetic === true;
+  const isDone = tc.result !== undefined && !isSynthetic;
 
   return (
-    <div className={`tool-call-card ${isDone ? 'done' : 'running'}`} onClick={() => setExpanded(!expanded)}>
+    <div className={`tool-call-card ${isSynthetic ? 'synthetic' : isDone ? 'done' : 'running'}`} onClick={() => setExpanded(!expanded)}>
       <div className="tool-call-header">
-        <span className="tool-call-icon">{isDone ? '✓' : '⟳'}</span>
+        <span className="tool-call-icon">{isSynthetic ? '!' : isDone ? '✓' : '⟳'}</span>
         <span className="tool-call-label">{label}</span>
         <svg className="tool-call-expand" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
           <path d="m6 9 6 6 6-6" />
         </svg>
       </div>
+      {isSynthetic && expanded ? (
+        <pre className="tool-call-output">这不是一次真实工具调用记录，而是历史 assistant 文本中出现的伪 Tool Call 标记；没有收到对应的工具结果。</pre>
+      ) : null}
       {expanded && tc.result ? (
         <pre className="tool-call-output">{tc.result}</pre>
       ) : null}

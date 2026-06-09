@@ -82,6 +82,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.on('chat:stream:tool-result', handler);
     return () => ipcRenderer.removeListener('chat:stream:tool-result', handler);
   },
+  onChatStreamPermissionRequest: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('chat:stream:permission-request', handler);
+    return () => ipcRenderer.removeListener('chat:stream:permission-request', handler);
+  },
   onChatStreamError: (listener) => {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('chat:stream:error', handler);

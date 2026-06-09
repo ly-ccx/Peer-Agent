@@ -15,7 +15,8 @@
     "dist": "pnpm build && pnpm --filter @peer-agent/desktop dist",
     "dist:mac": "pnpm build && pnpm --filter @peer-agent/desktop dist:mac",
     "dist:win": "pnpm build && pnpm --filter @peer-agent/desktop dist:win",
-    "check": "pnpm typecheck && pnpm build:core"
+    "check": "pnpm typecheck && pnpm build:core",
+    "dev:lab": "pnpm --filter @peer-agent/desktop run dev:lab"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
@@ -25,6 +26,9 @@
     "onlyBuiltDependencies": [
       "electron",
       "esbuild"
+    ],
+    "ignoredBuiltDependencies": [
+      "electron-winstaller"
     ]
   },
   "dependencies": {

@@ -55,6 +55,7 @@ const unavailableApi: ClientApi = {
   onChatStreamUsage: unavailableMethod('onChatStreamUsage'),
   onChatStreamToolCall: unavailableMethod('onChatStreamToolCall'),
   onChatStreamToolResult: unavailableMethod('onChatStreamToolResult'),
+  onChatStreamPermissionRequest: unavailableMethod('onChatStreamPermissionRequest'),
   onChatStreamError: unavailableMethod('onChatStreamError'),
   onChatCompaction: unavailableMethod('onChatCompaction'),
   llmListProviders: unavailableMethod('llmListProviders'),
