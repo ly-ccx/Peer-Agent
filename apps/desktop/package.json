@@ -17,7 +17,7 @@
     "dist:win": "electron-builder --win",
     "publish:stable": "bash scripts/publish.sh stable",
     "publish:beta": "bash scripts/publish.sh beta",
-    "dev:lab": "concurrently -k \"cross-env PEER_DEV_PORT=5273 vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5273 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5273 PEER_AGENT_HOME=$HOME/.peer-agent electron .\""
+    "dev:lab": "concurrently -k \"cross-env PEER_DEV_PORT=5273 vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5273 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5273 PEER_AGENT_HOME=$HOME/.peer-agent-lab electron .\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
