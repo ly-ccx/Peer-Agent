@@ -87,8 +87,25 @@ describe('Provider message encoders', () => {
     assert.equal(body.model, 'claude-test');
     assert.equal(body.system, 'system prompt');
     assert.equal(body.stream, true);
-    assert.equal(body.max_tokens, 16384);
     assert.equal(body.thinking.type, 'enabled');
+    assert.equal(body.thinking.budget_tokens, 32768);
+    // 回归保护: 开启 thinking 时 max_tokens 必须严格大于 budget_tokens，
+    // 否则 Anthropic API 返回 400，"深度"模式必挂。
+    assert.equal(body.max_tokens, 32768 + 16384);
+    assert.ok(body.max_tokens > body.thinking.budget_tokens);
     assert.equal(body.tools[0].name, 'bash');
+  });
+
+  it('does not enable Anthropic thinking for default effort', () => {
+    const body = encodeAnthropicMessagesRequest({
+      model: 'claude-test',
+      system: 'system prompt',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{ name: 'bash' }],
+      effort: 'default',
+    });
+
+    assert.equal(body.thinking, undefined);
+    assert.equal(body.max_tokens, 16384);
   });
 });
