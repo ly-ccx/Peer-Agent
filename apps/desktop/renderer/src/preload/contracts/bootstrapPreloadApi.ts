@@ -18,6 +18,14 @@ import type {
   WorkspaceProject,
 } from '@peer-agent/protocol';
 
+export interface PendingTask {
+  readonly conversationId?: string;
+  readonly prompt: string;
+  readonly reason?: string;
+  readonly effort?: string;
+  readonly [key: string]: unknown;
+}
+
 export interface BootstrapPreloadApi {
   readonly getBootstrap: () => Promise<ClientBootstrap>;
   readonly getClientSession: () => Promise<ClientSessionState>;
@@ -68,6 +76,9 @@ export interface BootstrapPreloadApi {
   readonly conversationsDelete: (params: { id: string }) => Promise<unknown>;
   readonly chatSend: (params: ChatSendRequest) => Promise<void>;
   readonly chatAbort: (params: { streamId: string }) => Promise<void>;
+  readonly restartHost: (options?: { hostDir?: string; port?: number; pendingTask?: PendingTask }) => Promise<unknown>;
+  readonly writePendingTask: (task: PendingTask) => Promise<unknown>;
+  readonly consumePendingTask: () => Promise<PendingTask | null>;
   readonly chatCompact: (params: { conversationId: string; streamId: string }) => Promise<{ compacted: boolean; notification?: { method: string; beforeTokens: number; afterTokens: number; oldMessageCount: number; keptMessageCount: number } }>;
   readonly promptSnapshotsList: (params?: { limit?: number }) => Promise<readonly PromptSnapshotIndexEntry[]>;
   readonly promptSnapshotsGet: (params: { id: string }) => Promise<PromptSnapshotRecord | null>;

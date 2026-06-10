@@ -57,4 +57,52 @@
     background: var(--za-hover);
     transform: translate3d(0, -1px, 0);
   }
+
+  /* Pending task resume banner —— 重启后取回待办的确认条（方案 B）。
+     沿用 composer 设计语言：1px 边线 + surface 底、--za 设计 token，扁平无阴影。 */
+  .pending-resume-banner {
+    @apply flex items-center gap-3 px-3 py-2 mb-2 text-[13px];
+    width: min(920px, 100%);
+    margin-left: auto;
+    margin-right: auto;
+    border: 1px solid var(--za-accent-soft);
+    border-radius: var(--za-radius-sm);
+    color: var(--za-text);
+    background: var(--za-surface-2);
+  }
+
+  .pending-resume-text {
+    @apply flex-1 min-w-0 flex flex-col gap-0.5;
+  }
+
+  .pending-resume-reason {
+    color: var(--za-text-faint);
+    font-size: 12px;
+  }
+
+  .pending-resume-actions {
+    @apply flex items-center gap-2 shrink-0;
+  }
+
+  .pending-resume-continue,
+  .pending-resume-dismiss {
+    @apply px-3 py-1 text-[12px] font-semibold transition-colors duration-150;
+    border: 1px solid var(--za-line-strong);
+    border-radius: var(--za-radius-sm);
+    color: var(--za-text);
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .pending-resume-continue {
+    border-color: var(--za-accent-soft);
+    color: var(--za-accent);
+    background: var(--za-accent-soft);
+  }
+
+  .pending-resume-continue:hover,
+  .pending-resume-dismiss:hover {
+    border-color: var(--za-line-strong);
+    background: var(--za-hover);
+  }
 }

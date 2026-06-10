@@ -19,6 +19,7 @@ import { createMcpRegistry } from './mcp-registry.mjs';
 import { listMcpTools, disconnectMcp } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
 import { createHostRestarter } from './host-restart.mjs';
+import { readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
 import { createLlmChatService } from './llm-chat-service.mjs';
 import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
 import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
@@ -591,7 +592,30 @@ ipcMain.handle('host:restart', (_event, payload = {}) => {
       ? workspaceRoot.slice(0, -'-lab'.length)
       : workspaceRoot;
   }
+  // 原子续传:若调用方随重启带了 pendingTask,先落盘再重启。
+  // 这样新实例启动后 consume 即可取回,避免"写了没重启/重启没写"竞态。
+  if (payload.pendingTask) {
+    try {
+      writePendingTask(payload.pendingTask);
+    } catch (err) {
+      // 落盘失败不阻断重启;续传降级为本次不可用,记录供排查。
+      console.error('[pending-task] failed to persist before restart:', err);
+    }
+  }
   return hostRestarter.restartHost({ hostDir, port: payload.port });
+});
+
+// ── Pending Task 续传(跨重启)──
+// 重启会中断当前会话;为免用户手动说"继续",重启前由 renderer 调 write 把待办落盘,
+// 新实例启动后 renderer 主动调 consume 取回(read-and-clear,一次性),
+// 再由 renderer 用自身上下文发起 chat:send 续执行。
+// 续传必须走 renderer 拉取,因为 chat:send 依赖 event.sender 推流回发起方;
+// main 主动发起没有 renderer 上下文,故不能在 main 内直接调 chat:send。
+ipcMain.handle('pending-task:write', (_event, task = {}) => {
+  return writePendingTask(task);
+});
+ipcMain.handle('pending-task:consume', () => {
+  return readAndClearPendingTask();
 });
 
 // ── MCP (local only) ──

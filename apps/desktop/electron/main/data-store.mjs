@@ -44,6 +44,7 @@ export const ZEUS_ENTRIES = {
   settings:          { rel: 'settings.json',           kind: 'file', scope: 'portable' },
   llmProviders:      { rel: 'llm-providers.json',      kind: 'file', scope: 'portable' },
   conversations:     { rel: 'conversations',            kind: 'dir',  scope: 'portable' },
+  pendingTask:       { rel: 'pending-task.json',       kind: 'file', scope: 'device'   },
   shellArtifacts:    { rel: 'shell-artifacts',         kind: 'dir',  scope: 'cache'    },
   promptSnapshots:   { rel: 'prompt-snapshots',        kind: 'dir',  scope: 'cache'    },
 };

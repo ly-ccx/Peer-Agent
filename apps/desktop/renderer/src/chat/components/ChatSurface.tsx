@@ -520,6 +520,8 @@ export function ChatSurface({
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [pendingPermissionCalls, setPendingPermissionCalls] = useState<ClientToolCall[]>([]);
+  // 方案 B 任务续传:重启后取回的待办任务(预填 + 待用户确认,不自动发)。
+  const [pendingResume, setPendingResume] = useState<{ prompt: string; reason?: string } | null>(null);
   const streamIdRef = useRef<string | null>(null);
 
   // 把流式文本追加到最后一条 assistant 消息的尾部文本段。
@@ -569,6 +571,26 @@ export function ChatSurface({
     : [];
   const showSlashCommands = !isStreaming && !isCompacting && slashCommands.length > 0;
   const estimatedContextTokens = estimateConversationTokens(messages, draft, attachments);
+
+  // 方案 B 任务续传:进程启动后一次性取回重启前落盘的待办任务(read-and-clear)。
+  // 取回后只做预填(draft + effort)并显示确认提示条,不自动发送——由用户点"继续"才发。
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const task = await clientApi.consumePendingTask();
+        if (cancelled || !task || typeof task.prompt !== 'string' || !task.prompt.trim()) return;
+        setDraft(task.prompt);
+        if (task.effort === 'low' || task.effort === 'default' || task.effort === 'high') {
+          setEffort(task.effort);
+        }
+        setPendingResume({ prompt: task.prompt, reason: typeof task.reason === 'string' ? task.reason : undefined });
+      } catch {
+        // consume 失败(无任务/文件损坏)静默降级:正常空白启动。
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     setAttachments([]);
@@ -872,15 +894,13 @@ export function ChatSurface({
     void addFiles(fileItems);
   }, [addFiles]);
 
-  const handleSend = useCallback(async () => {
-    const text = draft.trim();
-    if ((!text && attachments.length === 0) || isStreaming || !hasProvider || !conversationId) return;
-    const sentAttachments = attachments;
-    setDraft('');
-    setAttachments([]);
-    setAttachmentError(null);
+  // 核心发送路径:给定文本(+ 可选附件)就执行一次 agent turn。
+  // handleSend(用户输入)与 pending-task 续传(跨重启)都复用它,避免另造发送路径。
+  const submitMessage = useCallback(async (text: string, sentAttachments: ChatAttachment[], submitEffort?: string) => {
+    if ((!text && sentAttachments.length === 0) || isStreaming || !hasProvider || !conversationId) return;
     setStreamError(null);
     setActiveUsage(null);
+    const turnEffort = submitEffort ?? effort;
 
     // /compact: run compaction in-place without an agent turn
     if (text === '/compact' && sentAttachments.length === 0) {
@@ -920,8 +940,18 @@ export function ChatSurface({
     const attachmentContext = buildConversationAttachmentContext(contextMessages);
     const continuityContext = buildConversationContinuityContext(contextMessages);
     const configInstructions = buildConfigInstructionContext(systemInstructions);
-    void clientApi.chatSend({ messages: apiMessages, streamId, effort, conversationId, attachmentContext, continuityContext, configInstructions });
-  }, [draft, attachments, isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, systemInstructions]);
+    void clientApi.chatSend({ messages: apiMessages, streamId, effort: turnEffort, conversationId, attachmentContext, continuityContext, configInstructions });
+  }, [isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, systemInstructions]);
+
+  const handleSend = useCallback(async () => {
+    const text = draft.trim();
+    if ((!text && attachments.length === 0) || isStreaming || !hasProvider || !conversationId) return;
+    const sentAttachments = attachments;
+    setDraft('');
+    setAttachments([]);
+    setAttachmentError(null);
+    await submitMessage(text, sentAttachments);
+  }, [draft, attachments, isStreaming, hasProvider, conversationId, submitMessage]);
 
   const handleStop = useCallback(() => {
     if (streamIdRef.current) void clientApi.chatAbort({ streamId: streamIdRef.current });
@@ -1079,6 +1109,34 @@ export function ChatSurface({
           className="chat-composer"
           onSubmit={(e) => { e.preventDefault(); isStreaming ? handleStop() : void handleSend(); }}
         >
+          {pendingResume ? (
+            <div className="pending-resume-banner" role="status">
+              <span className="pending-resume-text">
+                {isZh
+                  ? '检测到上次重启前的待办任务,已为你预填。是否继续?'
+                  : 'A pending task from before the last restart was restored and pre-filled. Continue?'}
+                {pendingResume.reason ? (
+                  <span className="pending-resume-reason">{pendingResume.reason}</span>
+                ) : null}
+              </span>
+              <span className="pending-resume-actions">
+                <button
+                  type="button"
+                  className="pending-resume-continue"
+                  onClick={() => { setPendingResume(null); textareaRef.current?.focus(); }}
+                >
+                  {isZh ? '继续' : 'Continue'}
+                </button>
+                <button
+                  type="button"
+                  className="pending-resume-dismiss"
+                  onClick={() => { setPendingResume(null); setDraft(''); }}
+                >
+                  {isZh ? '忽略' : 'Dismiss'}
+                </button>
+              </span>
+            </div>
+          ) : null}
           {showSlashCommands ? (
             <div className="slash-command-menu" role="listbox" aria-label={isZh ? '命令' : 'Commands'}>
               {slashCommands.map((command, index) => (

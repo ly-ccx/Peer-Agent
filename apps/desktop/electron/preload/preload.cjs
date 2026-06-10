@@ -114,6 +114,8 @@ contextBridge.exposeInMainWorld('peerAgent', {
   llmSetDefault: (params) => ipcRenderer.invoke('llm:set-default', params),
   llmTestConnection: (params) => ipcRenderer.invoke('llm:test', params),
   restartHost: (options) => ipcRenderer.invoke('host:restart', options || {}),
+  writePendingTask: (task) => ipcRenderer.invoke('pending-task:write', task || {}),
+  consumePendingTask: () => ipcRenderer.invoke('pending-task:consume'),
   mcpListInstalled: () => ipcRenderer.invoke('mcp:list-installed'),
   mcpInstall: (item) => ipcRenderer.invoke('mcp:install', item),
   mcpUninstall: (params) => ipcRenderer.invoke('mcp:uninstall', params),

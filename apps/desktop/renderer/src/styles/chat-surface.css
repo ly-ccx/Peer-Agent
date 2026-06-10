@@ -733,3 +733,59 @@
   overflow-y: auto;
   overflow-x: hidden;
 }
+
+/* 方案 B 任务续传:重启后待办提示条。flex 子项需占满整行避免与输入框挤在一行。 */
+.pending-resume-banner {
+  flex: 0 0 100%;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  background: var(--paper-sheet);
+  font-size: 13px;
+  color: var(--graphite-base);
+  animation: slash-command-in var(--za-motion-fast) var(--za-ease-out) both;
+}
+.pending-resume-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pending-resume-reason {
+  font-size: 12px;
+  opacity: 0.7;
+}
+.pending-resume-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.pending-resume-continue,
+.pending-resume-dismiss {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--chrome-hairline);
+  background: transparent;
+  color: var(--graphite-base);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--za-motion-fast), border-color var(--za-motion-fast);
+}
+.pending-resume-continue {
+  border-color: var(--graphite-base);
+  background: var(--graphite-base);
+  color: var(--paper-sheet);
+}
+.pending-resume-continue:hover {
+  opacity: 0.85;
+}
+.pending-resume-dismiss:hover {
+  background: var(--control-composer);
+}
