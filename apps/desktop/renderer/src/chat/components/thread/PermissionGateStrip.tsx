@@ -5,7 +5,7 @@ import { useExitAnimation } from '../../hooks/useExitAnimation';
 interface PermissionGateStripProps {
   readonly pendingCalls: readonly ClientToolCall[];
   readonly onApprove: (call: ClientToolCall) => void;
-  /** M3·G「一直允许」：放行本次 + 把命令签名加入会话白名单，同签名后续自动放行。 */
+  /** M3·G「一直允许」：请求 main runtime 生成 scope grant，后续同 scope 由 main 自动放行。 */
   readonly onApproveAlways: (call: ClientToolCall) => void;
   readonly onReject: (call: ClientToolCall) => void;
   readonly showApproveAlways?: boolean;

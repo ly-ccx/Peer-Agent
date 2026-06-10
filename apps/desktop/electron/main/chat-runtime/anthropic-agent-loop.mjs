@@ -1,0 +1,154 @@
+import { sendAnthropicMessagesStream } from '../provider-adapters/anthropic-messages-adapter.mjs';
+import {
+  createAgentLoopKernel,
+  handleTerminalTextResponse,
+} from './agent-loop-kernel.mjs';
+import {
+  applyMicrocompaction,
+  isPromptTooLongResponse,
+  runCompactionCheck,
+} from './compaction-coordinator.mjs';
+import { sanitizeApiMessages } from './message-sanitizer.mjs';
+import * as responseGuard from './response-guard.mjs';
+import {
+  executeModelToolCall,
+  safeParseJson,
+} from './tool-orchestrator.mjs';
+
+export async function agentLoopAnthropic({
+  baseUrl,
+  apiKey,
+  model,
+  systemPrompt,
+  messages,
+  tools,
+  webContents,
+  streamId,
+  signal,
+  effort,
+  contextWindow,
+  conversationId,
+  persistCompaction,
+  toolContext,
+  workspacePath,
+  permissionGate,
+}) {
+  let effectiveSystem = systemPrompt;
+  let apiMessages = sanitizeApiMessages(messages);
+  const loop = createAgentLoopKernel({ webContents, streamId });
+  const providerConfig = { provider: 'anthropic', baseUrl, apiKey, model };
+
+  for (let turn = 0; turn < loop.maxTurns; turn++) {
+    const microcompactResult = applyMicrocompaction(apiMessages);
+    if (microcompactResult.stats.compactedCount > 0) {
+      apiMessages = microcompactResult.messages;
+    }
+
+    const compaction = await runCompactionCheck({
+      messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
+      systemPrompt: effectiveSystem,
+      contextWindow,
+      providerConfig,
+      signal,
+      persistCompaction,
+      conversationId,
+      streamId,
+      webContents,
+    });
+    if (compaction.compacted) {
+      effectiveSystem = compaction.messages
+        .filter((m) => m.role === 'system')
+        .map((m) => m.content)
+        .join('\n\n');
+      apiMessages = compaction.messages.filter((m) => m.role !== 'system');
+    }
+
+    apiMessages = sanitizeApiMessages(apiMessages);
+    const providerResponse = await sendAnthropicMessagesStream({
+      baseUrl,
+      apiKey,
+      model,
+      system: effectiveSystem,
+      messages: apiMessages,
+      tools,
+      effort,
+      signal,
+      webContents,
+      streamId,
+    });
+    apiMessages = providerResponse.messages;
+
+    if (!providerResponse.ok) {
+      const text = providerResponse.errorText || '';
+      if (isPromptTooLongResponse(providerResponse.status, text)) {
+        const emergencyCompaction = await runCompactionCheck({
+          messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
+          systemPrompt: effectiveSystem,
+          contextWindow,
+          providerConfig: null,
+          signal,
+          persistCompaction,
+          conversationId,
+          streamId,
+          webContents,
+          emergency: true,
+          force: true,
+        });
+        if (emergencyCompaction.compacted) {
+          effectiveSystem = emergencyCompaction.messages
+            .filter((m) => m.role === 'system')
+            .map((m) => m.content)
+            .join('\n\n');
+          apiMessages = emergencyCompaction.messages.filter((m) => m.role !== 'system');
+          continue;
+        }
+      }
+      loop.sendHttpError(providerResponse.status, text);
+      return;
+    }
+
+    const { textContent, toolUseBlocks, stopReason, streamUsage } = providerResponse;
+    loop.addUsage(streamUsage);
+
+    const effectiveToolUseBlocks = stopReason === 'tool_use' ? toolUseBlocks : [];
+
+    if (!effectiveToolUseBlocks.length) {
+      const terminalResponse = handleTerminalTextResponse({
+        text: textContent,
+        apiMessages,
+        loop,
+        responseGuard,
+      });
+      if (terminalResponse.action === 'retry') continue;
+      return;
+    }
+
+    const assistantContent = [];
+    if (textContent) assistantContent.push({ type: 'text', text: textContent });
+    for (const tu of effectiveToolUseBlocks) {
+      assistantContent.push({ type: 'tool_use', id: tu.id, name: tu.name, input: safeParseJson(tu.inputJson) });
+    }
+    apiMessages.push({ role: 'assistant', content: assistantContent });
+
+    const toolResults = [];
+    for (const tu of effectiveToolUseBlocks) {
+      const toolExecution = await executeModelToolCall({
+        name: tu.name,
+        rawArguments: tu.inputJson,
+        toolCallId: tu.id,
+        workspacePath,
+        toolContext,
+        permissionGate,
+        webContents,
+        streamId,
+        conversationId,
+        signal,
+      });
+      if (toolExecution.aborted) return;
+      toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: toolExecution.output });
+    }
+    apiMessages.push({ role: 'user', content: toolResults });
+  }
+
+  loop.sendDone();
+}

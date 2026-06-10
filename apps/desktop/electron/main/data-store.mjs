@@ -45,6 +45,7 @@ export const ZEUS_ENTRIES = {
   llmProviders:      { rel: 'llm-providers.json',      kind: 'file', scope: 'portable' },
   conversations:     { rel: 'conversations',            kind: 'dir',  scope: 'portable' },
   shellArtifacts:    { rel: 'shell-artifacts',         kind: 'dir',  scope: 'cache'    },
+  promptSnapshots:   { rel: 'prompt-snapshots',        kind: 'dir',  scope: 'cache'    },
 };
 
 /** 返回数据根并确保其存在。mkdir recursive 对已存在目录是 no-op，可安全多次调用。 */

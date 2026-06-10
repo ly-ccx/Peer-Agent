@@ -18,6 +18,10 @@ interface ConversationMeta {
   updatedAt: string;
 }
 
+function readSystemInstructions(settings: Record<string, unknown> | null | undefined): string {
+  return typeof settings?.systemInstructions === 'string' ? settings.systemInstructions : '';
+}
+
 export function App() {
   const { initError, session } = useDesktopBootstrap();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
@@ -27,6 +31,8 @@ export function App() {
   const [conversations, setConversations] = useState<readonly ConversationMeta[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
+  const [systemInstructions, setSystemInstructions] = useState(() =>
+    readSystemInstructions(clientApi.initialSettings));
 
   const refreshProviders = useCallback(async () => {
     try { setProviders(await clientApi.llmListProviders()); } catch {}
@@ -40,13 +46,20 @@ export function App() {
     } catch {}
   }, [activeWorkspace]);
 
+  const refreshSettings = useCallback(async () => {
+    try {
+      setSystemInstructions(readSystemInstructions(await clientApi.getSettings()));
+    } catch {}
+  }, []);
+
   useEffect(() => {
     void refreshProviders();
+    void refreshSettings();
     void clientApi.workspaceList().then((r) => {
       setActiveWorkspace(r.activeWorkspace);
       void refreshConversations(r.activeWorkspace);
     }).catch(() => {});
-  }, [refreshProviders, refreshConversations]);
+  }, [refreshProviders, refreshSettings, refreshConversations]);
 
   useEffect(() => {
     const runtimeLabel = i18n.locale === 'zh-CN' ? runtimeIdentity.labelZh : runtimeIdentity.labelEn;
@@ -98,7 +111,15 @@ export function App() {
           <section className="main-panel">
             <section className="thread">
               {activePage === 'model-settings' ? (
-                <LlmSettingsPanel i18n={i18n} onBack={() => { setActivePage('chat'); void refreshProviders(); }} />
+                <LlmSettingsPanel
+                  i18n={i18n}
+                  onBack={() => {
+                    setActivePage('chat');
+                    void refreshProviders();
+                    void refreshSettings();
+                  }}
+                  onSystemInstructionsChanged={setSystemInstructions}
+                />
               ) : activePage === 'appearance' ? (
                 <AppearancePanel i18n={i18n} onBack={() => setActivePage('chat')} />
               ) : (
@@ -106,6 +127,7 @@ export function App() {
                   i18n={i18n}
                   providers={providers}
                   conversationId={activeConversationId}
+                  systemInstructions={systemInstructions}
                   onOpenSettings={() => setActivePage('model-settings')}
                   onConversationUpdated={refreshConversations}
                   onBranch={(id) => { setActiveConversationId(id); void refreshConversations(); }}

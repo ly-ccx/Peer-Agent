@@ -22,7 +22,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   listProjects: () => ipcRenderer.invoke('projects:list'),
   getRuntimeProjection: () => ipcRenderer.invoke('runtime-projection:get'),
   setLocale: (locale) => ipcRenderer.invoke('locale:set', { locale }),
-  approveLocalAction: (toolCallId) => ipcRenderer.invoke('permission:approve', { toolCallId }),
+  approveLocalAction: (toolCallId, options) => ipcRenderer.invoke('permission:approve', { toolCallId, ...(options || {}) }),
   denyLocalAction: (toolCallId) => ipcRenderer.invoke('permission:deny', { toolCallId }),
   executeClientToolCall: (call, grant) => ipcRenderer.invoke('client-tool:execute', { call, grant }),
   runHealthCheck: (toolCallId) => ipcRenderer.invoke('core:health', { toolCallId }),
@@ -52,6 +52,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
   chatSend: (params) => ipcRenderer.invoke('chat:send', params),
   chatAbort: (params) => ipcRenderer.invoke('chat:abort', params),
   chatCompact: (params) => ipcRenderer.invoke('chat:compact', params),
+  promptSnapshotsList: (params) => ipcRenderer.invoke('prompt-snapshots:list', params),
+  promptSnapshotsGet: (params) => ipcRenderer.invoke('prompt-snapshots:get', params),
+  promptContextEpochsList: (params) => ipcRenderer.invoke('prompt-context-epochs:list', params),
+  promptContextEpochEvents: (params) => ipcRenderer.invoke('prompt-context-epochs:events', params),
+  promptContextEpochChain: (params) => ipcRenderer.invoke('prompt-context-epochs:chain', params),
   onChatStreamDelta: (listener) => {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('chat:stream:delta', handler);

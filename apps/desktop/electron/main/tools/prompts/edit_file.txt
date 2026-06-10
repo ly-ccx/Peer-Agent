@@ -1,0 +1,14 @@
+Edit an existing local file by replacing an exact old_string with new_string.
+
+Use this tool when:
+- Making scoped changes to existing source, config, or documentation files.
+- The current file content has already been inspected with read_file in this conversation.
+- You can provide the exact old_string that should be replaced.
+
+Rules:
+- Before editing an existing file, call read_file for that file and use the exact current content returned by the tool.
+- old_string must be a non-empty exact match from the current file.
+- If old_string appears more than once, the edit is rejected unless replace_all is true.
+- Set replace_all=true only when every matching occurrence should be replaced.
+- If the edit fails because the file changed or old_string does not match, re-read the file before retrying.
+- Do not use this tool for creating a new file; use write_file instead.

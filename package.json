@@ -8,6 +8,7 @@
     "dev": "pnpm --filter @peer-agent/desktop dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
+    "architecture:check": "node scripts/check-architecture-governance.mjs",
     "version:check": "node scripts/check-version.mjs",
     "build:core": "cargo build --workspace",
     "build:core:release": "cargo build --workspace --release",
@@ -15,7 +16,7 @@
     "dist": "pnpm build && pnpm --filter @peer-agent/desktop dist",
     "dist:mac": "pnpm build && pnpm --filter @peer-agent/desktop dist:mac",
     "dist:win": "pnpm build && pnpm --filter @peer-agent/desktop dist:win",
-    "check": "pnpm typecheck && pnpm build:core",
+    "check": "pnpm architecture:check && pnpm typecheck && pnpm build:core",
     "dev:lab": "pnpm --filter @peer-agent/desktop run dev:lab"
   },
   "devDependencies": {

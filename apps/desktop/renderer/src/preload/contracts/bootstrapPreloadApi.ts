@@ -1,5 +1,6 @@
 import type {
   CapabilityManifest,
+  ChatSendRequest,
   ClientBootstrap,
   ClientSessionState,
   ClientToolCall,
@@ -8,6 +9,10 @@ import type {
   LlmProviderTestResult,
   LocaleCode,
   PermissionGrant,
+  PromptContextEpochEventRecord,
+  PromptContextEpochRecord,
+  PromptSnapshotIndexEntry,
+  PromptSnapshotRecord,
   RuntimeProjection,
   SkillSummary,
   WorkspaceProject,
@@ -20,7 +25,10 @@ export interface BootstrapPreloadApi {
   readonly listProjects: () => Promise<readonly WorkspaceProject[]>;
   readonly getRuntimeProjection: () => Promise<RuntimeProjection>;
   readonly setLocale: (locale: LocaleCode) => Promise<ClientSessionState>;
-  readonly approveLocalAction: (toolCallId: string) => Promise<PermissionGrant>;
+  readonly approveLocalAction: (
+    toolCallId: string,
+    options?: { duration?: PermissionGrant['duration']; scope?: string }
+  ) => Promise<PermissionGrant>;
   readonly denyLocalAction: (toolCallId: string) => Promise<PermissionGrant>;
   readonly executeClientToolCall: (
     call: ClientToolCall,
@@ -58,9 +66,22 @@ export interface BootstrapPreloadApi {
   readonly conversationsUpdateLastMessage: (params: { id: string; content: string }) => Promise<unknown>;
   readonly conversationsReplaceMessages: (params: { id: string; messages: readonly Record<string, unknown>[] }) => Promise<unknown>;
   readonly conversationsDelete: (params: { id: string }) => Promise<unknown>;
-  readonly chatSend: (params: { messages: readonly { role: string; content: unknown }[]; streamId: string; effort?: string; conversationId?: string }) => Promise<void>;
+  readonly chatSend: (params: ChatSendRequest) => Promise<void>;
   readonly chatAbort: (params: { streamId: string }) => Promise<void>;
   readonly chatCompact: (params: { conversationId: string; streamId: string }) => Promise<{ compacted: boolean; notification?: { method: string; beforeTokens: number; afterTokens: number; oldMessageCount: number; keptMessageCount: number } }>;
+  readonly promptSnapshotsList: (params?: { limit?: number }) => Promise<readonly PromptSnapshotIndexEntry[]>;
+  readonly promptSnapshotsGet: (params: { id: string }) => Promise<PromptSnapshotRecord | null>;
+  readonly promptContextEpochsList: (params?: { limit?: number }) => Promise<readonly PromptContextEpochRecord[]>;
+  readonly promptContextEpochEvents: (params?: {
+    limit?: number;
+    conversationId?: string | null;
+    contextEpochId?: string;
+  }) => Promise<readonly PromptContextEpochEventRecord[]>;
+  readonly promptContextEpochChain: (params?: {
+    limit?: number;
+    conversationId?: string | null;
+    contextEpochId?: string;
+  }) => Promise<readonly PromptContextEpochRecord[]>;
   readonly onChatStreamDelta: (listener: (payload: { streamId: string; content: string }) => void) => () => void;
   readonly onChatStreamDone: (listener: (payload: { streamId: string; usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number } }) => void) => () => void;
   readonly onChatStreamAborted: (listener: (payload: { streamId: string }) => void) => () => void;

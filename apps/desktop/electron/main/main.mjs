@@ -19,6 +19,9 @@ import { createMcpRegistry } from './mcp-registry.mjs';
 import { listMcpTools, disconnectMcp } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
 import { createLlmChatService } from './llm-chat-service.mjs';
+import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
+import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
+import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
 import { createConversationStore } from './conversation-store.mjs';
 import { buildPersistedCompactedMessages } from './conversation-compaction-persistence.mjs';
 import { compactIfNeeded } from './context-compactor.mjs';
@@ -86,6 +89,51 @@ let skillStore;
 const mcpRegistry = createMcpRegistry();
 const llmConfigStore = createLlmConfigStore();
 const conversationStore = createConversationStore();
+const promptSnapshotStore = createPromptSnapshotStore();
+const contextBaselineRecorder = createContextBaselineRecorder({
+  promptSnapshotStore,
+  getWorkspacePath: () => settingsStore.getAll().activeWorkspace || null,
+});
+
+function providerPromptTargetChanged(before = null, after = null) {
+  if (!after?.isDefault) return false;
+  if (!before) return true;
+  return before.provider !== after.provider || before.model !== after.model;
+}
+
+function recordProviderBaseline(reason, provider) {
+  contextBaselineRecorder.recordProviderBaseline({ reason, provider });
+}
+
+function getDefaultProviderView() {
+  const providers = llmConfigStore.listProviders();
+  return providers.find((provider) => provider.isDefault && provider.apiKeyConfigured)
+    || providers.find((provider) => provider.apiKeyConfigured)
+    || providers.find((provider) => provider.isDefault)
+    || null;
+}
+
+function normalizeSystemInstructions(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function recordInstructionBaseline(instructions) {
+  contextBaselineRecorder.recordConfiguredInstructionsBaseline({
+    reason: 'instruction_change',
+    instructions,
+    provider: getDefaultProviderView(),
+  });
+}
+
+function getActiveContextEpochId(conversationId = null) {
+  try {
+    return promptSnapshotStore.getLatestContextEpoch(conversationId)?.contextEpochId
+      ?? promptSnapshotStore.getLatestContextEpoch(null)?.contextEpochId
+      ?? null;
+  } catch {
+    return null;
+  }
+}
 
 function persistCompactionToConversation({
   conversationId,
@@ -105,9 +153,23 @@ function persistCompactionToConversation({
   return conversationStore.replaceMessages(conversationId, compactedMessages);
 }
 
+function continuityContextFromCompactionResult(result) {
+  const handoff = result?.messages?.find((message) => message?._compaction)?._compaction;
+  if (!handoff) return [];
+  return [{
+    id: `manual-compact:${Date.now()}`,
+    method: handoff.method || result.notification?.method || 'unknown',
+    originalMessageCount: handoff.originalMessageCount ?? result.notification?.oldMessageCount ?? 0,
+    beforeTokens: handoff.beforeTokens ?? result.notification?.beforeTokens ?? 0,
+    afterTokens: handoff.afterTokens ?? result.notification?.afterTokens ?? 0,
+    summary: handoff.summary || '',
+  }];
+}
+
 const llmChatService = createLlmChatService({
   llmConfigStore,
   persistCompaction: persistCompactionToConversation,
+  promptSnapshotStore,
 });
 llmChatService.setWorkspacePath(settingsStore.getAll().activeWorkspace || null);
 
@@ -170,7 +232,20 @@ ipcMain.handle('runtime-projection:get', () => buildRuntimeProjection());
 
 // ── Settings ──
 ipcMain.handle('settings:get', () => settingsStore.getAll());
-ipcMain.handle('settings:update', (_event, partial) => settingsStore.merge(partial));
+ipcMain.handle('settings:update', (_event, partial) => {
+  const before = settingsStore.getAll();
+  const next = settingsStore.merge(partial);
+  if (
+    partial
+    && typeof partial === 'object'
+    && !Array.isArray(partial)
+    && Object.prototype.hasOwnProperty.call(partial, 'systemInstructions')
+    && normalizeSystemInstructions(before.systemInstructions) !== normalizeSystemInstructions(next.systemInstructions)
+  ) {
+    recordInstructionBaseline(next.systemInstructions);
+  }
+  return next;
+});
 ipcMain.on('settings:get-sync', (event) => {
   event.returnValue = settingsStore.getAll();
 });
@@ -199,18 +274,23 @@ ipcMain.handle('locale:set', (_event, payload) => {
 });
 
 // ── Permission ──
-function createPermissionGrant({ toolCallId, granted }) {
+function createPermissionGrant({ toolCallId, granted, duration, scope }) {
   return {
     grantId: randomUUID(),
     toolCallId,
     granted,
-    duration: granted ? 'once' : 'denied',
-    scope: 'client_session',
+    duration: granted ? (duration || 'once') : 'denied',
+    scope: scope || 'client_session',
     decidedAt: new Date().toISOString(),
   };
 }
 ipcMain.handle('permission:approve', (_event, payload) => {
-  const grant = createPermissionGrant({ toolCallId: payload.toolCallId, granted: true });
+  const grant = createPermissionGrant({
+    toolCallId: payload.toolCallId,
+    granted: true,
+    duration: payload.duration,
+    scope: payload.scope,
+  });
   llmChatService.resolvePermissionGrant(payload.toolCallId, grant);
   return grant;
 });
@@ -306,8 +386,27 @@ ipcMain.handle('conversations:replace-messages', (_, { id, messages }) => conver
 ipcMain.handle('conversations:delete', (_, { id }) => conversationStore.deleteConversation(id));
 
 // ── LLM Chat ──
-ipcMain.handle('chat:send', (event, { messages, streamId, effort, conversationId }) =>
-  llmChatService.sendMessage({ messages, webContents: event.sender, streamId, effort, conversationId }));
+ipcMain.handle('chat:send', (event, {
+  messages,
+  streamId,
+  effort,
+  conversationId,
+  attachmentContext,
+  continuityContext,
+  configInstructions,
+  contextExtensions,
+}) =>
+  llmChatService.sendMessage({
+    messages,
+    webContents: event.sender,
+    streamId,
+    effort,
+    conversationId,
+    attachmentContext,
+    continuityContext,
+    configInstructions,
+    contextExtensions,
+  }));
 ipcMain.handle('chat:abort', (_, { streamId }) =>
   llmChatService.abort(streamId));
 
@@ -321,14 +420,31 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
   if (filteredMessages.length === 0) return { compacted: false };
 
   const workspacePath = settingsStore.getAll().activeWorkspace || null;
-  const systemPrompt = workspacePath
-    ? `You are Peer Agent, a helpful local AI assistant with access to the user's machine.\nCurrent workspace: ${workspacePath}\nUse relative paths when possible. You can read files, execute commands, and write files in this workspace.`
-    : 'You are Peer Agent, a helpful local AI assistant with access to the user\'s machine.';
 
   const provider = llmConfigStore.listProviders().find((p) => p.isDefault && p.apiKeyConfigured)
     || llmConfigStore.listProviders().find((p) => p.apiKeyConfigured)
     || null;
   const apiKey = provider ? llmConfigStore.getDecryptedApiKey(provider.id) : null;
+  const systemContext = buildSystemContext(workspacePath, {
+    conversationId,
+    mode: 'compact',
+    provider: provider?.provider ?? null,
+    model: provider?.model ?? null,
+  });
+  const systemPrompt = renderSystemContext(systemContext);
+  try {
+    promptSnapshotStore.record(systemContext, {
+      streamId,
+      conversationId,
+      contextEpochId: getActiveContextEpochId(conversationId),
+      provider: provider?.provider ?? null,
+      providerId: provider?.id ?? null,
+      model: provider?.model ?? null,
+      mode: 'compact',
+    });
+  } catch (error) {
+    console.warn('[main] failed to record compact prompt snapshot:', error?.message || error);
+  }
 
   const providerConfig = provider && apiKey
     ? { provider: provider.provider, baseUrl: provider.baseUrl, apiKey, model: provider.model }
@@ -360,6 +476,27 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     sourceMessages: filteredMessages,
   });
 
+  try {
+    const baselineContext = buildSystemContext(workspacePath, {
+      conversationId,
+      continuityContext: continuityContextFromCompactionResult(result),
+      mode: 'chat',
+      provider: provider?.provider ?? null,
+      model: provider?.model ?? null,
+    });
+    promptSnapshotStore.recordBaseline(baselineContext, {
+      streamId,
+      conversationId,
+      provider: provider?.provider ?? null,
+      providerId: provider?.id ?? null,
+      model: provider?.model ?? null,
+      mode: 'chat',
+      baselineReason: 'manual_compact',
+    });
+  } catch (error) {
+    console.warn('[main] failed to record compact baseline:', error?.message || error);
+  }
+
   if (result.notification) {
     event.sender.send('chat:compaction', { streamId, stage: 'done', manual: true, ...result.notification });
   }
@@ -367,12 +504,58 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
   return { compacted: true, notification: result.notification };
 });
 
+ipcMain.handle('prompt-snapshots:list', (_event, params = {}) =>
+  promptSnapshotStore.list({ limit: params?.limit }));
+ipcMain.handle('prompt-snapshots:get', (_event, { id }) =>
+  promptSnapshotStore.get(id));
+ipcMain.handle('prompt-context-epochs:list', (_event, params = {}) =>
+  promptSnapshotStore.listContextEpochs({ limit: params?.limit }));
+ipcMain.handle('prompt-context-epochs:events', (_event, params = {}) =>
+  promptSnapshotStore.listContextEpochEvents({
+    limit: params?.limit,
+    conversationId: params?.conversationId,
+    contextEpochId: params?.contextEpochId,
+  }));
+ipcMain.handle('prompt-context-epochs:chain', (_event, params = {}) =>
+  promptSnapshotStore.getContextEpochChain({
+    conversationId: params?.conversationId ?? null,
+    contextEpochId: params?.contextEpochId ?? null,
+    limit: params?.limit,
+  }));
+
 // ── LLM Providers ──
 ipcMain.handle('llm:list', () => llmConfigStore.listProviders());
-ipcMain.handle('llm:add', (_, config) => llmConfigStore.addProvider(config));
-ipcMain.handle('llm:update', (_, { id, ...patch }) => llmConfigStore.updateProvider(id, patch));
-ipcMain.handle('llm:remove', (_, { id }) => llmConfigStore.removeProvider(id));
-ipcMain.handle('llm:set-default', (_, { id }) => llmConfigStore.setDefault(id));
+ipcMain.handle('llm:add', (_, config) => {
+  const provider = llmConfigStore.addProvider(config);
+  if (provider.isDefault) recordProviderBaseline('initial', provider);
+  return provider;
+});
+ipcMain.handle('llm:update', (_, { id, ...patch }) => {
+  const before = llmConfigStore.listProviders().find((provider) => provider.id === id) ?? null;
+  const updated = llmConfigStore.updateProvider(id, patch);
+  if (providerPromptTargetChanged(before, updated)) {
+    recordProviderBaseline('model_switch', updated);
+  }
+  return updated;
+});
+ipcMain.handle('llm:remove', (_, { id }) => {
+  const beforeDefault = llmConfigStore.listProviders().find((provider) => provider.isDefault) ?? null;
+  const providers = llmConfigStore.removeProvider(id);
+  const afterDefault = providers.find((provider) => provider.isDefault) ?? null;
+  if (beforeDefault?.id === id && afterDefault) {
+    recordProviderBaseline('model_switch', afterDefault);
+  }
+  return providers;
+});
+ipcMain.handle('llm:set-default', (_, { id }) => {
+  const beforeDefault = llmConfigStore.listProviders().find((provider) => provider.isDefault) ?? null;
+  const providers = llmConfigStore.setDefault(id);
+  const afterDefault = providers.find((provider) => provider.id === id) ?? null;
+  if (afterDefault && beforeDefault?.id !== afterDefault.id) {
+    recordProviderBaseline('model_switch', afterDefault);
+  }
+  return providers;
+});
 ipcMain.handle('llm:test', (_, { id }) => llmConfigStore.testConnection(id));
 
 // ── MCP (local only) ──

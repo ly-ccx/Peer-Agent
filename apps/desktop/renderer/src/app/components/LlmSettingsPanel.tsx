@@ -26,12 +26,18 @@ function emptyForm(provider: LlmProviderType = 'openai'): FormState {
   return { provider, name: '', baseUrl: PRESETS[provider].baseUrl, model: PRESETS[provider].model, apiKey: '', contextWindow: '', inputPrice: '', outputPrice: '', cacheWritePrice: '', cacheReadPrice: '', supportsVision: false };
 }
 
+function readSystemInstructions(settings: Record<string, unknown> | null | undefined): string {
+  return typeof settings?.systemInstructions === 'string' ? settings.systemInstructions : '';
+}
+
 export function LlmSettingsPanel({
   i18n,
   onBack,
+  onSystemInstructionsChanged,
 }: {
   readonly i18n: I18nRuntime;
   readonly onBack: () => void;
+  readonly onSystemInstructionsChanged?: (value: string) => void;
 }) {
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -40,6 +46,9 @@ export function LlmSettingsPanel({
   const [saving, setSaving] = useState(false);
   const [testResults, setTestResults] = useState<Record<string, LlmProviderTestResult>>({});
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [systemInstructions, setSystemInstructions] = useState(() => readSystemInstructions(clientApi.initialSettings));
+  const [systemInstructionsDraft, setSystemInstructionsDraft] = useState(() => readSystemInstructions(clientApi.initialSettings));
+  const [savingInstructions, setSavingInstructions] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -49,6 +58,18 @@ export function LlmSettingsPanel({
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void clientApi.getSettings().then((settings) => {
+      if (cancelled) return;
+      const value = readSystemInstructions(settings);
+      setSystemInstructions(value);
+      setSystemInstructionsDraft(value);
+      onSystemInstructionsChanged?.(value);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [onSystemInstructionsChanged]);
 
   const handleProviderTypeChange = (provider: LlmProviderType) => {
     const preset = PRESETS[provider];
@@ -150,6 +171,19 @@ export function LlmSettingsPanel({
     }
   };
 
+  const handleSaveSystemInstructions = async () => {
+    setSavingInstructions(true);
+    try {
+      const next = await clientApi.updateSettings({ systemInstructions: systemInstructionsDraft });
+      const saved = readSystemInstructions(next);
+      setSystemInstructions(saved);
+      setSystemInstructionsDraft(saved);
+      onSystemInstructionsChanged?.(saved);
+    } catch { /* silent */ } finally {
+      setSavingInstructions(false);
+    }
+  };
+
   return (
     <div className="llm-settings-panel">
       <header className="llm-settings-header">
@@ -205,6 +239,35 @@ export function LlmSettingsPanel({
           </div>
         ))}
       </div>
+
+      <section className="llm-instructions-card">
+        <div className="llm-instructions-header">
+          <strong>{i18n.locale === 'zh-CN' ? '系统指令' : 'System Instructions'}</strong>
+        </div>
+        <textarea
+          value={systemInstructionsDraft}
+          rows={5}
+          placeholder={i18n.locale === 'zh-CN' ? '回答偏好、代码风格或项目约束' : 'Response preferences, code style, or project constraints'}
+          onChange={(event) => setSystemInstructionsDraft(event.target.value)}
+        />
+        <div className="llm-instructions-actions">
+          <button
+            type="button"
+            onClick={() => setSystemInstructionsDraft(systemInstructions)}
+            disabled={savingInstructions || systemInstructionsDraft === systemInstructions}
+          >
+            {i18n.locale === 'zh-CN' ? '还原' : 'Reset'}
+          </button>
+          <button
+            type="button"
+            className="primary"
+            onClick={handleSaveSystemInstructions}
+            disabled={savingInstructions || systemInstructionsDraft === systemInstructions}
+          >
+            {savingInstructions ? '...' : (i18n.locale === 'zh-CN' ? '保存指令' : 'Save Instructions')}
+          </button>
+        </div>
+      </section>
 
       {!showForm ? (
         <button type="button" className="llm-add-btn" onClick={openAdd}>

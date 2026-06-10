@@ -139,6 +139,69 @@
   color: var(--graphite-soft);
 }
 
+.llm-instructions-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  background: var(--paper-sheet);
+}
+.llm-instructions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.llm-instructions-header strong {
+  color: var(--graphite-base);
+  font-size: 0.9rem;
+}
+.llm-instructions-card textarea {
+  min-height: 108px;
+  resize: vertical;
+  background: var(--chrome-canvas);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-sm);
+  color: var(--graphite-base);
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  font-family: var(--font-sans);
+}
+.llm-instructions-card textarea:focus {
+  outline: none;
+  border-color: var(--graphite-base);
+}
+.llm-instructions-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.llm-instructions-actions button {
+  background: transparent;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-sm);
+  color: var(--graphite-soft);
+  cursor: pointer;
+  font-size: 0.82rem;
+  padding: var(--space-2) var(--space-4);
+  transition: all var(--za-motion-fast);
+}
+.llm-instructions-actions button:hover {
+  background: var(--chrome-hover);
+}
+.llm-instructions-actions button.primary {
+  background: var(--za-primary-control-bg);
+  border-color: var(--za-primary-control-bg);
+  color: var(--za-primary-control-ink);
+}
+.llm-instructions-actions button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
 .llm-form {
   display: flex;
   flex-direction: column;

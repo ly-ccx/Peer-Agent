@@ -1,9 +1,14 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import type { ClientToolCall, LlmProviderConfigView } from '@peer-agent/protocol';
+import type {
+  AttachmentContextItem,
+  ClientToolCall,
+  ConfigInstructionContextItem,
+  ContinuityContextItem,
+  LlmProviderConfigView,
+} from '@peer-agent/protocol';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
-import { buildClientToolCommandSignature } from '../state/clientToolCommandSignature';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import { MarkdownMessage } from './markdown/MarkdownMessage';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
@@ -51,6 +56,7 @@ interface CompactionMeta {
   originalMessageCount: number;
   beforeTokens: number;
   afterTokens: number;
+  summary?: string;
 }
 
 interface ChatMsg {
@@ -113,6 +119,30 @@ function buildAttachmentText(attachments: readonly ChatAttachment[]): string {
   return blocks.join('\n\n');
 }
 
+function buildAttachmentContext(attachments: readonly ChatAttachment[]): AttachmentContextItem[] {
+  return attachments.map((attachment) => ({
+    id: attachment.id,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+    kind: attachment.kind,
+    contentIncluded: attachment.kind !== 'unsupported',
+    transport: attachment.kind === 'image'
+      ? 'provider_image_part'
+      : attachment.kind === 'text'
+        ? 'user_text_part'
+        : 'metadata_only',
+  }));
+}
+
+function buildConversationAttachmentContext(messages: readonly ChatMsg[]): AttachmentContextItem[] {
+  return messages.flatMap((message) => (
+    message.role === 'user' && message.attachments?.length
+      ? buildAttachmentContext(message.attachments)
+      : []
+  ));
+}
+
 function getApiMessageContent(message: ChatMsg): string | ChatApiContentPart[] {
   const text = getApiContent(message);
   const attachments = message.attachments ?? [];
@@ -134,8 +164,34 @@ function getApiMessageContent(message: ChatMsg): string | ChatApiContentPart[] {
 
 function toApiMessages(messages: readonly ChatMsg[]): ChatApiMessage[] {
   return messages
-    .filter((message) => !isEmptyAssistantPlaceholder(message))
+    .filter((message) => !isEmptyAssistantPlaceholder(message) && !message.compaction)
     .map((message) => ({ role: message.role, content: getApiMessageContent(message) }));
+}
+
+function buildConversationContinuityContext(messages: readonly ChatMsg[]): ContinuityContextItem[] {
+  return messages
+    .filter((message) => Boolean(message.compaction))
+    .map((message) => ({
+      id: message.id,
+      method: message.compaction?.method ?? 'unknown',
+      originalMessageCount: message.compaction?.originalMessageCount ?? 0,
+      beforeTokens: message.compaction?.beforeTokens ?? 0,
+      afterTokens: message.compaction?.afterTokens ?? 0,
+      summary: message.compaction?.summary || message.content,
+      content: message.content,
+    }));
+}
+
+function buildConfigInstructionContext(systemInstructions: string | null | undefined): ConfigInstructionContextItem[] {
+  const content = typeof systemInstructions === 'string' ? systemInstructions.trim() : '';
+  if (!content) return [];
+  return [{
+    id: 'settings.systemInstructions',
+    title: 'System Instructions',
+    content,
+    priority: 0,
+    source: 'settings.systemInstructions',
+  }];
 }
 
 interface TokenUsageState {
@@ -409,6 +465,7 @@ export function ChatSurface({
   i18n,
   providers,
   conversationId,
+  systemInstructions,
   onOpenSettings,
   onConversationUpdated,
   onBranch,
@@ -416,6 +473,7 @@ export function ChatSurface({
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
   readonly conversationId: string | null;
+  readonly systemInstructions?: string;
   readonly onOpenSettings: () => void;
   readonly onConversationUpdated?: () => void;
   readonly onBranch?: (newConversationId: string) => void;
@@ -434,7 +492,6 @@ export function ChatSurface({
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [pendingPermissionCalls, setPendingPermissionCalls] = useState<ClientToolCall[]>([]);
   const streamIdRef = useRef<string | null>(null);
-  const alwaysAllowedPermissionSignaturesRef = useRef<Set<string>>(new Set());
 
   // 把流式文本追加到最后一条 assistant 消息的尾部文本段。
   const appendStreamText = useCallback((chunk: string) => {
@@ -472,7 +529,6 @@ export function ChatSurface({
     setAttachments([]);
     setAttachmentError(null);
     setPendingPermissionCalls([]);
-    alwaysAllowedPermissionSignaturesRef.current.clear();
     if (!conversationId) { typewriter.reset(); setMessages([]); setTokenUsage(null); return; }
     setTokenUsage(null);
     void (async () => {
@@ -602,11 +658,6 @@ export function ChatSurface({
 
     const offPermissionRequest = clientApi.onChatStreamPermissionRequest(({ streamId, call }) => {
       if (streamId !== streamIdRef.current) return;
-      const signature = buildClientToolCommandSignature(call);
-      if (alwaysAllowedPermissionSignaturesRef.current.has(signature)) {
-        void clientApi.approveLocalAction(call.toolCallId);
-        return;
-      }
       setPendingPermissionCalls((prev) => {
         if (prev.some((item) => item.toolCallId === call.toolCallId)) return prev;
         return [...prev, call];
@@ -686,9 +737,11 @@ export function ChatSurface({
   }, [removePendingPermissionCall]);
 
   const approveAlwaysPendingPermissionCall = useCallback((call: ClientToolCall) => {
-    alwaysAllowedPermissionSignaturesRef.current.add(buildClientToolCommandSignature(call));
     removePendingPermissionCall(call.toolCallId);
-    void clientApi.approveLocalAction(call.toolCallId);
+    void clientApi.approveLocalAction(call.toolCallId, {
+      duration: 'scope',
+      scope: call.capabilityId,
+    });
   }, [removePendingPermissionCall]);
 
   const denyPendingPermissionCall = useCallback((call: ClientToolCall) => {
@@ -811,9 +864,13 @@ export function ChatSurface({
     streamIdRef.current = streamId;
     setIsStreaming(true);
 
-    const apiMessages = toApiMessages([...messages, userMsg]);
-    void clientApi.chatSend({ messages: apiMessages, streamId, effort, conversationId });
-  }, [draft, attachments, isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort]);
+    const contextMessages = [...messages, userMsg];
+    const apiMessages = toApiMessages(contextMessages);
+    const attachmentContext = buildConversationAttachmentContext(contextMessages);
+    const continuityContext = buildConversationContinuityContext(contextMessages);
+    const configInstructions = buildConfigInstructionContext(systemInstructions);
+    void clientApi.chatSend({ messages: apiMessages, streamId, effort, conversationId, attachmentContext, continuityContext, configInstructions });
+  }, [draft, attachments, isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, systemInstructions]);
 
   const handleStop = useCallback(() => {
     if (streamIdRef.current) void clientApi.chatAbort({ streamId: streamIdRef.current });
@@ -837,8 +894,11 @@ export function ChatSurface({
     setIsStreaming(true);
 
     const apiMessages = toApiMessages(contextMessages);
-    void clientApi.chatSend({ messages: apiMessages, streamId, effort, conversationId });
-  }, [isStreaming, hasProvider, conversationId, messages, effort]);
+    const attachmentContext = buildConversationAttachmentContext(contextMessages);
+    const continuityContext = buildConversationContinuityContext(contextMessages);
+    const configInstructions = buildConfigInstructionContext(systemInstructions);
+    void clientApi.chatSend({ messages: apiMessages, streamId, effort, conversationId, attachmentContext, continuityContext, configInstructions });
+  }, [isStreaming, hasProvider, conversationId, messages, effort, systemInstructions]);
 
   const handleBranch = useCallback(async (msgIndex: number) => {
     if (!conversationId || isStreaming) return;

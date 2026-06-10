@@ -12,6 +12,5 @@ target/
 .env.*
 !.env.example
 
-# 设计文档（本地保留，不提交），但治理基线必须进入仓库约束
+# 设计文档（本地保留，不提交）
 docs/architecture/*
-!docs/architecture/20-architecture-governance.md

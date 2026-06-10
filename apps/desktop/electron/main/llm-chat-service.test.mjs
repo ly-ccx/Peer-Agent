@@ -4,10 +4,27 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
+import { executeProjectedModelTool } from './chat-runtime/projected-tool-executor.mjs';
+import { createToolContext } from './chat-runtime/tool-orchestrator.mjs';
+
 let tmpDir;
 
 async function loadService() {
   return import(`./llm-chat-service.mjs?test=${Date.now()}-${Math.random()}`);
+}
+
+async function runProjectedTool(name, args, workspacePath, toolContext = null, options = {}) {
+  return executeProjectedModelTool({
+    name,
+    args,
+    workspacePath,
+    toolContext,
+    requestPermission: options?.requestPermission,
+    shellApprovalDecider: options?.shellApprovalDecider,
+    toolCallId: options?.toolCallId,
+    registry: options?.registry,
+    runtimeProjection: options?.runtimeProjection,
+  });
 }
 
 describe('llm chat service tool materialization', () => {
@@ -22,12 +39,12 @@ describe('llm chat service tool materialization', () => {
   });
 
   it('materializes bash output as an artifact-backed local tool result ref', async () => {
-    const { executeTool } = await loadService();
-
-    const result = await executeTool(
+    const result = await runProjectedTool(
       'bash',
       { command: 'node -e "process.stdout.write(\'x\'.repeat(12000))"' },
       tmpDir,
+      null,
+      { shellApprovalDecider: async () => ({ granted: true, reason: 'test_approved' }) },
     );
 
     assert.equal(result.success, true);
@@ -43,12 +60,11 @@ describe('llm chat service tool materialization', () => {
   });
 
   it('materializes large file reads as a local file ref', async () => {
-    const { createToolContext, executeTool } = await loadService();
     const filePath = path.join(tmpDir, 'large.txt');
     writeFileSync(filePath, 'line\n'.repeat(3000), 'utf8');
     const toolContext = createToolContext({ conversationId: 'c1', workspacePath: tmpDir });
 
-    const result = await executeTool('read_file', { path: filePath }, tmpDir, toolContext);
+    const result = await runProjectedTool('read_file', { path: filePath }, tmpDir, toolContext);
 
     assert.equal(result.success, true);
     const parsed = JSON.parse(result.output);
@@ -64,12 +80,11 @@ describe('llm chat service tool materialization', () => {
   });
 
   it('rejects edit_file before the file has been read', async () => {
-    const { createToolContext, executeTool } = await loadService();
     const filePath = path.join(tmpDir, 'app.js');
     writeFileSync(filePath, 'const value = 1;\n', 'utf8');
     const toolContext = createToolContext({ conversationId: 'c1', workspacePath: tmpDir });
 
-    const result = await executeTool(
+    const result = await runProjectedTool(
       'edit_file',
       { path: filePath, old_string: '1', new_string: '2' },
       tmpDir,
@@ -85,13 +100,12 @@ describe('llm chat service tool materialization', () => {
   });
 
   it('edits an existing file with an exact old_string after read_file', async () => {
-    const { createToolContext, executeTool } = await loadService();
     const filePath = path.join(tmpDir, 'app.js');
     writeFileSync(filePath, 'const value = 1;\n', 'utf8');
     const toolContext = createToolContext({ conversationId: 'c1', workspacePath: tmpDir });
 
-    await executeTool('read_file', { path: filePath }, tmpDir, toolContext);
-    const result = await executeTool(
+    await runProjectedTool('read_file', { path: filePath }, tmpDir, toolContext);
+    const result = await runProjectedTool(
       'edit_file',
       { path: filePath, old_string: 'const value = 1;', new_string: 'const value = 2;' },
       tmpDir,
@@ -110,13 +124,12 @@ describe('llm chat service tool materialization', () => {
   });
 
   it('requires replace_all for repeated old_string matches', async () => {
-    const { createToolContext, executeTool } = await loadService();
     const filePath = path.join(tmpDir, 'copy.txt');
     writeFileSync(filePath, 'same\nsame\n', 'utf8');
     const toolContext = createToolContext({ conversationId: 'c1', workspacePath: tmpDir });
 
-    await executeTool('read_file', { path: filePath }, tmpDir, toolContext);
-    const blocked = await executeTool(
+    await runProjectedTool('read_file', { path: filePath }, tmpDir, toolContext);
+    const blocked = await runProjectedTool(
       'edit_file',
       { path: filePath, old_string: 'same', new_string: 'done' },
       tmpDir,
@@ -127,7 +140,7 @@ describe('llm chat service tool materialization', () => {
     assert.match(JSON.parse(blocked.output).reason, /matched 2 times/);
     assert.equal(readFileSync(filePath, 'utf8'), 'same\nsame\n');
 
-    const replaced = await executeTool(
+    const replaced = await runProjectedTool(
       'edit_file',
       { path: filePath, old_string: 'same', new_string: 'done', replace_all: true },
       tmpDir,
@@ -140,14 +153,13 @@ describe('llm chat service tool materialization', () => {
   });
 
   it('rejects edit_file when the file changed after read_file', async () => {
-    const { createToolContext, executeTool } = await loadService();
     const filePath = path.join(tmpDir, 'stale.txt');
     writeFileSync(filePath, 'before\n', 'utf8');
     const toolContext = createToolContext({ conversationId: 'c1', workspacePath: tmpDir });
 
-    await executeTool('read_file', { path: filePath }, tmpDir, toolContext);
+    await runProjectedTool('read_file', { path: filePath }, tmpDir, toolContext);
     writeFileSync(filePath, 'external change\n', 'utf8');
-    const result = await executeTool(
+    const result = await runProjectedTool(
       'edit_file',
       { path: filePath, old_string: 'before', new_string: 'after' },
       tmpDir,
@@ -160,18 +172,17 @@ describe('llm chat service tool materialization', () => {
   });
 
   it('tightens write_file for existing files and allows explicit full replacement after read_file', async () => {
-    const { createToolContext, executeTool } = await loadService();
     const filePath = path.join(tmpDir, 'replace.txt');
     writeFileSync(filePath, 'old\n', 'utf8');
     const toolContext = createToolContext({ conversationId: 'c1', workspacePath: tmpDir });
 
-    const blocked = await executeTool('write_file', { path: filePath, content: 'new\n' }, tmpDir, toolContext);
+    const blocked = await runProjectedTool('write_file', { path: filePath, content: 'new\n' }, tmpDir, toolContext);
     assert.equal(blocked.success, false);
     assert.match(JSON.parse(blocked.output).reason, /allow_overwrite=true/);
     assert.equal(readFileSync(filePath, 'utf8'), 'old\n');
 
-    await executeTool('read_file', { path: filePath }, tmpDir, toolContext);
-    const replaced = await executeTool(
+    await runProjectedTool('read_file', { path: filePath }, tmpDir, toolContext);
+    const replaced = await runProjectedTool(
       'write_file',
       { path: filePath, content: 'new\n', allow_overwrite: true },
       tmpDir,
@@ -188,7 +199,6 @@ describe('llm chat service tool materialization', () => {
   });
 
   it('keeps out-of-workspace write_file blocked when no permission requester is available', async () => {
-    const { createToolContext, executeTool } = await loadService();
     const workspaceDir = path.join(tmpDir, 'workspace');
     const outsideDir = path.join(tmpDir, 'outside');
     mkdirSync(workspaceDir);
@@ -196,7 +206,7 @@ describe('llm chat service tool materialization', () => {
     const outsidePath = path.join(outsideDir, 'new.txt');
     const toolContext = createToolContext({ conversationId: 'c1', workspacePath: workspaceDir });
 
-    const result = await executeTool(
+    const result = await runProjectedTool(
       'write_file',
       { path: outsidePath, content: 'outside\n' },
       workspaceDir,
@@ -212,7 +222,6 @@ describe('llm chat service tool materialization', () => {
   });
 
   it('writes outside the active workspace only after permission approval', async () => {
-    const { createToolContext, executeTool } = await loadService();
     const workspaceDir = path.join(tmpDir, 'workspace');
     const outsideDir = path.join(tmpDir, 'outside');
     mkdirSync(workspaceDir);
@@ -221,7 +230,7 @@ describe('llm chat service tool materialization', () => {
     const toolContext = createToolContext({ conversationId: 'c1', workspacePath: workspaceDir });
     let requested = null;
 
-    const result = await executeTool(
+    const result = await runProjectedTool(
       'write_file',
       { path: outsidePath, content: 'outside\n' },
       workspaceDir,
@@ -243,7 +252,6 @@ describe('llm chat service tool materialization', () => {
   });
 
   it('does not mutate an outside file when edit_file permission is denied', async () => {
-    const { createToolContext, executeTool } = await loadService();
     const workspaceDir = path.join(tmpDir, 'workspace');
     const outsideDir = path.join(tmpDir, 'outside');
     mkdirSync(workspaceDir);
@@ -252,8 +260,8 @@ describe('llm chat service tool materialization', () => {
     writeFileSync(outsidePath, 'const value = 1;\n', 'utf8');
     const toolContext = createToolContext({ conversationId: 'c1', workspacePath: workspaceDir });
 
-    await executeTool('read_file', { path: outsidePath }, workspaceDir, toolContext);
-    const result = await executeTool(
+    await runProjectedTool('read_file', { path: outsidePath }, workspaceDir, toolContext);
+    const result = await runProjectedTool(
       'edit_file',
       { path: outsidePath, old_string: 'const value = 1;', new_string: 'const value = 2;' },
       workspaceDir,
@@ -270,7 +278,6 @@ describe('llm chat service tool materialization', () => {
   });
 
   it('edits outside the active workspace only after permission approval', async () => {
-    const { createToolContext, executeTool } = await loadService();
     const workspaceDir = path.join(tmpDir, 'workspace');
     const outsideDir = path.join(tmpDir, 'outside');
     mkdirSync(workspaceDir);
@@ -280,8 +287,8 @@ describe('llm chat service tool materialization', () => {
     const toolContext = createToolContext({ conversationId: 'c1', workspacePath: workspaceDir });
     let requested = null;
 
-    await executeTool('read_file', { path: outsidePath }, workspaceDir, toolContext);
-    const result = await executeTool(
+    await runProjectedTool('read_file', { path: outsidePath }, workspaceDir, toolContext);
+    const result = await runProjectedTool(
       'edit_file',
       { path: outsidePath, old_string: 'const value = 1;', new_string: 'const value = 2;' },
       workspaceDir,
@@ -420,6 +427,181 @@ describe('llm chat service tool materialization', () => {
 
     assert.equal(events.find((event) => event.channel === 'chat:stream:delta')?.payload.content, 'hello');
     assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
+    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+  });
+
+  it('reuses scope permission grants in the main runtime without renderer auto-approval state', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const workspaceDir = path.join(tmpDir, 'workspace');
+    const outsideDir = path.join(tmpDir, 'outside');
+    mkdirSync(workspaceDir);
+    mkdirSync(outsideDir);
+    const firstPath = path.join(outsideDir, 'first.txt');
+    const secondPath = path.join(outsideDir, 'second.txt');
+    const requests = [];
+    const events = [];
+
+    function toolStream(id, args) {
+      const frame = JSON.stringify({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id,
+              type: 'function',
+              function: { name: 'write_file', arguments: JSON.stringify(args) },
+            }],
+          },
+        }],
+      });
+      return new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { status: 200 });
+    }
+
+    function textStream(content) {
+      const frame = JSON.stringify({ choices: [{ delta: { content } }] });
+      return new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { status: 200 });
+    }
+
+    const responses = [
+      () => toolStream('tool-1', { path: firstPath, content: 'one\n' }),
+      () => toolStream('tool-2', { path: secondPath, content: 'two\n' }),
+      () => textStream('done'),
+    ];
+    globalThis.fetch = async () => responses.shift()();
+
+    let service;
+    try {
+      service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+      });
+      service.setWorkspacePath(workspaceDir);
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'write twice' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        webContents: {
+          send: (channel, payload) => {
+            events.push({ channel, payload });
+            if (channel === 'chat:stream:permission-request') {
+              requests.push(payload.call);
+              service.resolvePermissionGrant(payload.call.toolCallId, {
+                grantId: 'grant-1',
+                toolCallId: payload.call.toolCallId,
+                granted: true,
+                duration: 'scope',
+                scope: payload.call.capabilityId,
+                decidedAt: new Date().toISOString(),
+              });
+            }
+          },
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].capabilityId, 'local.file.write');
+    assert.equal(readFileSync(firstPath, 'utf8'), 'one\n');
+    assert.equal(readFileSync(secondPath, 'utf8'), 'two\n');
+    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+  });
+
+  it('requests permission for model bash commands through local.shell.exec', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const command = 'node -e "process.stdout.write(\'ok\')"';
+    const requests = [];
+    const events = [];
+
+    function toolStream() {
+      const frame = JSON.stringify({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'tool-shell',
+              type: 'function',
+              function: { name: 'bash', arguments: JSON.stringify({ command }) },
+            }],
+          },
+        }],
+      });
+      return new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { status: 200 });
+    }
+
+    function textStream(content) {
+      const frame = JSON.stringify({ choices: [{ delta: { content } }] });
+      return new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { status: 200 });
+    }
+
+    const responses = [
+      () => toolStream(),
+      () => textStream('done'),
+    ];
+    globalThis.fetch = async () => responses.shift()();
+
+    let service;
+    try {
+      service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+      });
+      service.setWorkspacePath(tmpDir);
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'run command' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        webContents: {
+          send: (channel, payload) => {
+            events.push({ channel, payload });
+            if (channel === 'chat:stream:permission-request') {
+              requests.push(payload.call);
+              service.resolvePermissionGrant(payload.call.toolCallId, {
+                grantId: 'grant-shell',
+                toolCallId: payload.call.toolCallId,
+                granted: true,
+                duration: 'once',
+                scope: payload.call.capabilityId,
+                decidedAt: new Date().toISOString(),
+              });
+            }
+          },
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].capabilityId, 'local.shell.exec');
+    assert.equal(requests[0].arguments.command, command);
+    assert.equal(events.some((event) => (
+      event.channel === 'chat:stream:tool-result' &&
+      String(event.payload.result).includes('"stdoutPreview": "ok"')
+    )), true);
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
   });
 

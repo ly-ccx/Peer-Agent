@@ -1,0 +1,15 @@
+Execute a bash command on the local machine and return an artifact-backed result.
+
+Use this tool for:
+- File and content search when the exact file path is unknown.
+- Git inspection and git operations explicitly requested by the user.
+- Builds, tests, package manager commands, code generation, and project scripts.
+- Filesystem exploration such as listing directories before creating new files.
+
+Rules:
+- Use read_file instead of bash cat/head/tail when reading a known file path.
+- Use edit_file or write_file instead of shell redirection, heredocs, sed -i, perl -pi, or ad-hoc scripts when changing user files.
+- Keep commands scoped to the current workspace unless the user requested another path or the task clearly requires it.
+- Quote paths that contain spaces.
+- Do not use destructive git or filesystem commands unless the user explicitly requested that exact operation.
+- If a command fails, report the failure from the returned stderr/stdout instead of inventing a successful result.
