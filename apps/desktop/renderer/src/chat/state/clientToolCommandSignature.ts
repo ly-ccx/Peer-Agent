@@ -13,6 +13,9 @@ import type { ClientToolCall } from '@peer-agent/protocol';
  */
 export function buildClientToolCommandSignature(call: ClientToolCall): string {
   const capabilityId = call.capabilityId;
+  if (capabilityId === 'local.file.edit' || capabilityId === 'local.file.write') {
+    return capabilityId;
+  }
   const command = extractCommand(call.argumentsPreview);
   if (!command) return capabilityId;
   return `${capabilityId}::${normalizeCommandSignature(command)}`;

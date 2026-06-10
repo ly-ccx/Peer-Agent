@@ -56,4 +56,20 @@ describe('buildClientToolCommandSignature（G·一直允许）', () => {
       'local.shell.exec'
     );
   });
+
+  it('file edit/write 一直允许按操作类型记忆，不按具体路径记忆', () => {
+    const editA = buildClientToolCommandSignature(
+      call('local.file.edit', { command: 'edit /tmp/a.txt' })
+    );
+    const editB = buildClientToolCommandSignature(
+      call('local.file.edit', { command: 'edit /tmp/b.txt' })
+    );
+    const write = buildClientToolCommandSignature(
+      call('local.file.write', { command: 'write /tmp/a.txt' })
+    );
+
+    assert.equal(editA, 'local.file.edit');
+    assert.equal(editA, editB);
+    assert.notEqual(editA, write);
+  });
 });

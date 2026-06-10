@@ -3,6 +3,7 @@ import type { ClientToolCall, LlmProviderConfigView } from '@peer-agent/protocol
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { buildClientToolCommandSignature } from '../state/clientToolCommandSignature';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import { MarkdownMessage } from './markdown/MarkdownMessage';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
@@ -433,6 +434,7 @@ export function ChatSurface({
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [pendingPermissionCalls, setPendingPermissionCalls] = useState<ClientToolCall[]>([]);
   const streamIdRef = useRef<string | null>(null);
+  const alwaysAllowedPermissionSignaturesRef = useRef<Set<string>>(new Set());
 
   // 把流式文本追加到最后一条 assistant 消息的尾部文本段。
   const appendStreamText = useCallback((chunk: string) => {
@@ -470,6 +472,7 @@ export function ChatSurface({
     setAttachments([]);
     setAttachmentError(null);
     setPendingPermissionCalls([]);
+    alwaysAllowedPermissionSignaturesRef.current.clear();
     if (!conversationId) { typewriter.reset(); setMessages([]); setTokenUsage(null); return; }
     setTokenUsage(null);
     void (async () => {
@@ -599,6 +602,11 @@ export function ChatSurface({
 
     const offPermissionRequest = clientApi.onChatStreamPermissionRequest(({ streamId, call }) => {
       if (streamId !== streamIdRef.current) return;
+      const signature = buildClientToolCommandSignature(call);
+      if (alwaysAllowedPermissionSignaturesRef.current.has(signature)) {
+        void clientApi.approveLocalAction(call.toolCallId);
+        return;
+      }
       setPendingPermissionCalls((prev) => {
         if (prev.some((item) => item.toolCallId === call.toolCallId)) return prev;
         return [...prev, call];
@@ -673,6 +681,12 @@ export function ChatSurface({
   }, []);
 
   const approvePendingPermissionCall = useCallback((call: ClientToolCall) => {
+    removePendingPermissionCall(call.toolCallId);
+    void clientApi.approveLocalAction(call.toolCallId);
+  }, [removePendingPermissionCall]);
+
+  const approveAlwaysPendingPermissionCall = useCallback((call: ClientToolCall) => {
+    alwaysAllowedPermissionSignaturesRef.current.add(buildClientToolCommandSignature(call));
     removePendingPermissionCall(call.toolCallId);
     void clientApi.approveLocalAction(call.toolCallId);
   }, [removePendingPermissionCall]);
@@ -946,9 +960,8 @@ export function ChatSurface({
         <PermissionGateStrip
           pendingCalls={pendingPermissionCalls}
           onApprove={approvePendingPermissionCall}
-          onApproveAlways={approvePendingPermissionCall}
+          onApproveAlways={approveAlwaysPendingPermissionCall}
           onReject={denyPendingPermissionCall}
-          showApproveAlways={false}
           i18n={i18n}
         />
         <form

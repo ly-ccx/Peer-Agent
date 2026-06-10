@@ -219,6 +219,25 @@
   font-size: 0.68rem;
 }
 
+.llm-form > label.llm-vision-toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-2);
+  color: var(--graphite-base);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.llm-vision-toggle input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  flex: none;
+  cursor: pointer;
+  accent-color: var(--za-primary-control-bg);
+}
+
 .llm-form-actions {
   display: flex;
   justify-content: flex-end;
