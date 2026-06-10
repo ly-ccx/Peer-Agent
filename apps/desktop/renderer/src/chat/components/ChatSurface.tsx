@@ -237,6 +237,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     descriptionZh: '压缩当前对话历史',
     descriptionEn: 'Compact conversation history',
   },
+  {
+    id: 'restart',
+    value: '/restart',
+    labelZh: '/restart',
+    labelEn: '/restart',
+    descriptionZh: '重启本体(可在后面写续传指令,重启后预填)',
+    descriptionEn: 'Restart host (append a follow-up to pre-fill after restart)',
+  },
 ];
 
 let msgSeq = 0;
@@ -918,6 +926,25 @@ export function ChatSurface({
       } finally {
         streamIdRef.current = null;
         setIsCompacting(false);
+      }
+      return;
+    }
+
+    // /restart: 重启本体(in-place),不走 agent turn。
+    // `/restart` 后面可跟续传指令,作为 pendingTask.prompt 落盘,新实例启动后预填提示条。
+    // 本次会话会被重启中断;重启动作由 main 的 host:restart handler 委派给本体进程树外的施动者执行。
+    if (text === '/restart' || text.startsWith('/restart ')) {
+      const followUp = text.slice('/restart'.length).trim();
+      const pendingTask = followUp
+        ? { prompt: followUp, reason: isZh ? '重启前的待办,已预填' : 'Pending task from before restart' }
+        : undefined;
+      try {
+        await clientApi.restartHost(pendingTask ? { pendingTask } : {});
+      } catch (err) {
+        setStreamError(
+          (isZh ? '重启请求失败:' : 'Restart request failed: ') +
+            (err instanceof Error ? err.message : String(err)),
+        );
       }
       return;
     }
