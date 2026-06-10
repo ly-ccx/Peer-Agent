@@ -528,8 +528,8 @@ export function ChatSurface({
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [pendingPermissionCalls, setPendingPermissionCalls] = useState<ClientToolCall[]>([]);
-  // 方案 B 任务续传:重启后取回的待办任务(预填 + 待用户确认,不自动发)。
-  const [pendingResume, setPendingResume] = useState<{ prompt: string; reason?: string } | null>(null);
+  // 方案 A 任务续传:暂存重启前 consume 回来的待办,待 conversationId/hasProvider 就绪后自动发送。
+  const [pendingAutoSend, setPendingAutoSend] = useState<{ prompt: string; effort?: string } | null>(null);
   const streamIdRef = useRef<string | null>(null);
 
   // 把流式文本追加到最后一条 assistant 消息的尾部文本段。
@@ -580,19 +580,22 @@ export function ChatSurface({
   const showSlashCommands = !isStreaming && !isCompacting && slashCommands.length > 0;
   const estimatedContextTokens = estimateConversationTokens(messages, draft, attachments);
 
-  // 方案 B 任务续传:进程启动后一次性取回重启前落盘的待办任务(read-and-clear)。
-  // 取回后只做预填(draft + effort)并显示确认提示条,不自动发送——由用户点"继续"才发。
+  // 方案 A 任务续传:进程启动后一次性取回重启前落盘的待办任务(read-and-clear)。
+  // 取回后不立即发送——consume effect 在挂载瞬间跑,此时 conversationId/hasProvider
+  // 往往还没就绪,直接调 submitMessage 会被开头的门槛 return 掉。
+  // 因此先把任务暂存到 pendingAutoSend,由下面"就绪后自动发"的 effect 在条件满足时发送。
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
         const task = await clientApi.consumePendingTask();
         if (cancelled || !task || typeof task.prompt !== 'string' || !task.prompt.trim()) return;
-        setDraft(task.prompt);
-        if (task.effort === 'low' || task.effort === 'default' || task.effort === 'high') {
-          setEffort(task.effort);
-        }
-        setPendingResume({ prompt: task.prompt, reason: typeof task.reason === 'string' ? task.reason : undefined });
+        const effortValue =
+          task.effort === 'low' || task.effort === 'default' || task.effort === 'high'
+            ? task.effort
+            : undefined;
+        if (effortValue) setEffort(effortValue);
+        setPendingAutoSend({ prompt: task.prompt, effort: effortValue });
       } catch {
         // consume 失败(无任务/文件损坏)静默降级:正常空白启动。
       }
@@ -980,6 +983,16 @@ export function ChatSurface({
     await submitMessage(text, sentAttachments);
   }, [draft, attachments, isStreaming, hasProvider, conversationId, submitMessage]);
 
+  // 方案 A 任务续传:就绪后自动发送。consume effect 已把待办存进 pendingAutoSend,
+  // 这里等到 conversationId + hasProvider 就绪、且当前没有流式进行中时,自动发出一次,
+  // 然后清空 pendingAutoSend 防重复发送。无需用户点击。
+  useEffect(() => {
+    if (!pendingAutoSend || !conversationId || !hasProvider || isStreaming) return;
+    const { prompt, effort: taskEffort } = pendingAutoSend;
+    setPendingAutoSend(null);
+    void submitMessage(prompt, [], taskEffort);
+  }, [pendingAutoSend, conversationId, hasProvider, isStreaming, submitMessage]);
+
   const handleStop = useCallback(() => {
     if (streamIdRef.current) void clientApi.chatAbort({ streamId: streamIdRef.current });
   }, []);
@@ -1136,34 +1149,6 @@ export function ChatSurface({
           className="chat-composer"
           onSubmit={(e) => { e.preventDefault(); isStreaming ? handleStop() : void handleSend(); }}
         >
-          {pendingResume ? (
-            <div className="pending-resume-banner" role="status">
-              <span className="pending-resume-text">
-                {isZh
-                  ? '检测到上次重启前的待办任务,已为你预填。是否继续?'
-                  : 'A pending task from before the last restart was restored and pre-filled. Continue?'}
-                {pendingResume.reason ? (
-                  <span className="pending-resume-reason">{pendingResume.reason}</span>
-                ) : null}
-              </span>
-              <span className="pending-resume-actions">
-                <button
-                  type="button"
-                  className="pending-resume-continue"
-                  onClick={() => { setPendingResume(null); textareaRef.current?.focus(); }}
-                >
-                  {isZh ? '继续' : 'Continue'}
-                </button>
-                <button
-                  type="button"
-                  className="pending-resume-dismiss"
-                  onClick={() => { setPendingResume(null); setDraft(''); }}
-                >
-                  {isZh ? '忽略' : 'Dismiss'}
-                </button>
-              </span>
-            </div>
-          ) : null}
           {showSlashCommands ? (
             <div className="slash-command-menu" role="listbox" aria-label={isZh ? '命令' : 'Commands'}>
               {slashCommands.map((command, index) => (
