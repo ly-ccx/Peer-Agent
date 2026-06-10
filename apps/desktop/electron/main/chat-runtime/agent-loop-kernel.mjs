@@ -54,12 +54,20 @@ export function createAgentLoopKernel({
 
 export function handleTerminalTextResponse({
   text,
+  thinking = '',
   apiMessages,
   loop,
   responseGuard,
 } = {}) {
   const content = String(text || '');
+  const thinkingContent = String(thinking || '');
   if (!content.trim()) {
+    // 深度模式下模型可能只产出了 thinking 而正文为空。此时不是错误响应，
+    // 已通过 chat:stream:thinking 推送给渲染层，正常结束即可。
+    if (thinkingContent.trim()) {
+      loop.sendDone();
+      return { action: 'done', reason: 'thinking-only' };
+    }
     loop.sendError(responseGuard.emptyModelResponseError());
     return { action: 'stop', reason: 'empty-response' };
   }

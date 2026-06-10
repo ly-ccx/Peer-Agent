@@ -92,6 +92,25 @@ describe('agent loop kernel', () => {
     }]);
   });
 
+  it('emits done (not error) when text is empty but thinking is present', () => {
+    const webContents = makeWebContents();
+    const loop = createAgentLoopKernel({ webContents, streamId: 's4b' });
+
+    const result = handleTerminalTextResponse({
+      text: '   ',
+      thinking: 'deep reasoning happened here',
+      apiMessages: [],
+      loop,
+      responseGuard: makeResponseGuard(),
+    });
+
+    assert.deepEqual(result, { action: 'done', reason: 'thinking-only' });
+    assert.deepEqual(webContents.events, [{
+      channel: 'chat:stream:done',
+      payload: { streamId: 's4b', usage: loop.usage },
+    }]);
+  });
+
   it('adds one retry instruction for unsupported tool claims', () => {
     const webContents = makeWebContents();
     const loop = createAgentLoopKernel({ webContents, streamId: 's5' });

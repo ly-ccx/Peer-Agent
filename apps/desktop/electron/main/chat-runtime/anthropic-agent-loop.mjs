@@ -107,7 +107,7 @@ export async function agentLoopAnthropic({
       return;
     }
 
-    const { textContent, toolUseBlocks, stopReason, streamUsage } = providerResponse;
+    const { textContent, thinkingContent, thinkingSignature, toolUseBlocks, stopReason, streamUsage } = providerResponse;
     loop.addUsage(streamUsage);
 
     const effectiveToolUseBlocks = stopReason === 'tool_use' ? toolUseBlocks : [];
@@ -115,6 +115,9 @@ export async function agentLoopAnthropic({
     if (!effectiveToolUseBlocks.length) {
       const terminalResponse = handleTerminalTextResponse({
         text: textContent,
+        // 深度模式下正文可能为空但已产出 thinking；把 thinking 计入“非空”，
+        // 避免误报 empty_model_response。
+        thinking: thinkingContent,
         apiMessages,
         loop,
         responseGuard,
@@ -124,6 +127,10 @@ export async function agentLoopAnthropic({
     }
 
     const assistantContent = [];
+    // Anthropic 要求多轮回传时 thinking block 在 content 数组最前，且带 signature。
+    if (thinkingContent && thinkingSignature) {
+      assistantContent.push({ type: 'thinking', thinking: thinkingContent, signature: thinkingSignature });
+    }
     if (textContent) assistantContent.push({ type: 'text', text: textContent });
     for (const tu of effectiveToolUseBlocks) {
       assistantContent.push({ type: 'tool_use', id: tu.id, name: tu.name, input: safeParseJson(tu.inputJson) });

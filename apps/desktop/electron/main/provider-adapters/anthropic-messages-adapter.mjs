@@ -9,16 +9,30 @@ function consumeAnthropicStreamLine(line, state, webContents, streamId) {
       if (parsed.content_block?.type === 'tool_use') {
         state.currentToolIndex = state.toolUseBlocks.length;
         state.toolUseBlocks.push({ id: parsed.content_block.id, name: parsed.content_block.name, inputJson: '' });
+      } else if (parsed.content_block?.type === 'thinking') {
+        state.currentToolIndex = -1;
+        state.inThinking = true;
       } else {
         state.currentToolIndex = -1;
+        state.inThinking = false;
       }
     } else if (parsed.type === 'content_block_delta') {
       if (parsed.delta?.type === 'text_delta' && parsed.delta.text) {
         state.textContent += parsed.delta.text;
         webContents.send('chat:stream:delta', { streamId, content: parsed.delta.text });
+      } else if (parsed.delta?.type === 'thinking_delta' && parsed.delta.thinking) {
+        // 深度模式: Anthropic 先流式发送 thinking 内容。收集它并单独推给渲染层，
+        // 同时纳入“非空响应”判定，避免被误判为 empty_model_response。
+        state.thinkingContent += parsed.delta.thinking;
+        webContents.send('chat:stream:thinking', { streamId, content: parsed.delta.thinking });
+      } else if (parsed.delta?.type === 'signature_delta' && parsed.delta.signature) {
+        // thinking block 的签名，多轮回传时 Anthropic 要求带上。
+        state.thinkingSignature += parsed.delta.signature;
       } else if (parsed.delta?.type === 'input_json_delta' && state.currentToolIndex >= 0) {
         state.toolUseBlocks[state.currentToolIndex].inputJson += parsed.delta.partial_json;
       }
+    } else if (parsed.type === 'content_block_stop') {
+      state.inThinking = false;
     } else if (parsed.type === 'message_delta') {
       if (parsed.delta?.stop_reason) state.stopReason = parsed.delta.stop_reason;
       if (parsed.usage) {
@@ -46,6 +60,9 @@ async function consumeAnthropicStream(res, webContents, streamId) {
   let buffer = '';
   const state = {
     textContent: '',
+    thinkingContent: '',
+    thinkingSignature: '',
+    inThinking: false,
     toolUseBlocks: [],
     currentToolIndex: -1,
     stopReason: null,
@@ -67,6 +84,8 @@ async function consumeAnthropicStream(res, webContents, streamId) {
 
   return {
     textContent: state.textContent,
+    thinkingContent: state.thinkingContent,
+    thinkingSignature: state.thinkingSignature,
     toolUseBlocks: state.toolUseBlocks,
     stopReason: state.stopReason,
     streamUsage: state.usage,
