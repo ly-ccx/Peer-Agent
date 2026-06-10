@@ -26,6 +26,7 @@ export async function agentLoopOpenAI({
   contextWindow,
   conversationId,
   persistCompaction,
+  continuityContext = [],
   toolContext,
   workspacePath,
   permissionGate,
@@ -50,6 +51,7 @@ export async function agentLoopOpenAI({
       conversationId,
       streamId,
       webContents,
+      continuityContext,
     });
     if (compaction.compacted) {
       apiMessages = compaction.messages;
@@ -84,6 +86,7 @@ export async function agentLoopOpenAI({
           webContents,
           emergency: true,
           force: true,
+          continuityContext,
         });
         if (emergencyCompaction.compacted) {
           apiMessages = emergencyCompaction.messages;
@@ -94,12 +97,13 @@ export async function agentLoopOpenAI({
       return;
     }
 
-    const { content, toolCalls, streamUsage } = providerResponse;
+    const { content, thinkingContent, toolCalls, streamUsage } = providerResponse;
     loop.addUsage(streamUsage);
 
     if (!toolCalls.length) {
       const terminalResponse = handleTerminalTextResponse({
         text: content,
+        thinking: thinkingContent,
         apiMessages,
         loop,
         responseGuard,

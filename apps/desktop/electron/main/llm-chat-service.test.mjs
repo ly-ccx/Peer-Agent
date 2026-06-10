@@ -13,6 +13,10 @@ async function loadService() {
   return import(`./llm-chat-service.mjs?test=${Date.now()}-${Math.random()}`);
 }
 
+function sse(frames) {
+  return frames.map((frame) => `data: ${typeof frame === 'string' ? frame : JSON.stringify(frame)}\n\n`).join('');
+}
+
 async function runProjectedTool(name, args, workspacePath, toolContext = null, options = {}) {
   return executeProjectedModelTool({
     name,
@@ -389,6 +393,47 @@ describe('llm chat service tool materialization', () => {
     const errorEvent = events.find((event) => event.channel === 'chat:stream:error');
     assert.ok(errorEvent);
     assert.match(errorEvent.payload.error, /empty_model_response/);
+  });
+
+  it('completes an OpenAI-compatible reasoning-only response without empty response error', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { reasoning_content: '先分析问题' } }] },
+      '[DONE]',
+    ]), { status: 200 });
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.equal(events.find((event) => event.channel === 'chat:stream:thinking')?.payload.content, '先分析问题');
+    assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
+    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
   });
 
   it('parses an OpenAI stream frame that ends without a trailing newline', async () => {

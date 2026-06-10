@@ -55,6 +55,7 @@ const unavailableApi: ClientApi = {
   promptContextEpochEvents: unavailableMethod('promptContextEpochEvents'),
   promptContextEpochChain: unavailableMethod('promptContextEpochChain'),
   onChatStreamDelta: unavailableMethod('onChatStreamDelta'),
+  onChatStreamThinking: unavailableMethod('onChatStreamThinking'),
   onChatStreamDone: unavailableMethod('onChatStreamDone'),
   onChatStreamAborted: unavailableMethod('onChatStreamAborted'),
   onChatStreamUsage: unavailableMethod('onChatStreamUsage'),

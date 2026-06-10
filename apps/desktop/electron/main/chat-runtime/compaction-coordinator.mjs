@@ -58,6 +58,7 @@ export async function runCompactionCheck({
   webContents,
   emergency = false,
   force = false,
+  continuityContext = [],
 }) {
   if (!contextWindow && !force) {
     return { compacted: false, messages };
@@ -75,6 +76,7 @@ export async function runCompactionCheck({
     providerConfig,
     signal,
     force,
+    continuityContext,
   });
 
   if (compactResult.compacted) {

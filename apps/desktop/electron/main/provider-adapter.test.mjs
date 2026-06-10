@@ -69,6 +69,41 @@ describe('Provider adapters', () => {
     }
   });
 
+  it('parses OpenAI-compatible reasoning deltas as thinking content', async () => {
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { reasoning_content: '先思考' } }] },
+      { choices: [{ delta: { thinking: { content: '再判断' } } }] },
+      '[DONE]',
+    ]), { status: 200 });
+
+    try {
+      const result = await sendOpenAIChatStream({
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'key',
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [],
+        effort: 'high',
+        webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        streamId: 's1',
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.content, '');
+      assert.equal(result.thinkingContent, '先思考再判断');
+      assert.deepEqual(
+        events
+          .filter((event) => event.channel === 'chat:stream:thinking')
+          .map((event) => event.payload.content),
+        ['先思考', '再判断'],
+      );
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   it('sends an Anthropic messages request and parses text, tool use, and usage', async () => {
     const previousFetch = globalThis.fetch;
     const events = [];

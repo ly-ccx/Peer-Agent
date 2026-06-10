@@ -29,6 +29,7 @@ export async function agentLoopAnthropic({
   contextWindow,
   conversationId,
   persistCompaction,
+  continuityContext = [],
   toolContext,
   workspacePath,
   permissionGate,
@@ -54,6 +55,7 @@ export async function agentLoopAnthropic({
       conversationId,
       streamId,
       webContents,
+      continuityContext,
     });
     if (compaction.compacted) {
       effectiveSystem = compaction.messages
@@ -93,6 +95,7 @@ export async function agentLoopAnthropic({
           webContents,
           emergency: true,
           force: true,
+          continuityContext,
         });
         if (emergencyCompaction.compacted) {
           effectiveSystem = emergencyCompaction.messages

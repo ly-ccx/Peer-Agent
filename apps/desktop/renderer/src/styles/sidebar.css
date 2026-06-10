@@ -26,9 +26,12 @@
   -webkit-app-region: no-drag;
 }
 .sidebar-brand-icon {
-  font-size: 1.1rem;
-  color: var(--azure-seal);
-  line-height: 1;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border-radius: 6px;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--chrome-hairline) 70%, transparent);
 }
 .sidebar-brand-title {
   font-family: var(--font-serif-zh);

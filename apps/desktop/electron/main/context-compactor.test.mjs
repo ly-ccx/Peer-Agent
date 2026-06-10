@@ -51,6 +51,34 @@ describe('context compactor', () => {
     assert.equal(result.notification.keptMessageCount, 10);
   });
 
+  it('carries forward prior continuity while reporting only the delta message count', async () => {
+    const result = await compactIfNeeded({
+      messages: buildMessages(12, 20),
+      systemPrompt: 'system prompt',
+      contextWindow: 100_000,
+      providerConfig: null,
+      force: true,
+      continuityContext: [{
+        id: 'previous-compact',
+        method: 'structural',
+        originalMessageCount: 100,
+        beforeTokens: 38_500,
+        afterTokens: 6_376,
+        summary: 'previous summary',
+      }],
+    });
+
+    assert.equal(result.compacted, true);
+    assert.equal(result.notification.oldMessageCount, 2);
+    assert.equal(result.notification.previousMessageCount, 100);
+    assert.equal(result.notification.totalMessageCount, 102);
+    assert.equal(result.messages[1]._compaction.originalMessageCount, 102);
+    assert.equal(result.messages[1]._compaction.deltaMessageCount, 2);
+    assert.equal(result.messages[1]._compaction.previousMessageCount, 100);
+    assert.match(result.messages[1]._compaction.summary, /previous summary/);
+    assert.match(result.messages[1]._compaction.summary, /Delta summary since previous compaction \(2 messages\)/);
+  });
+
   it('keeps the assistant tool call when the recent window starts with a tool result', async () => {
     const messages = [
       { role: 'system', content: 'system prompt' },

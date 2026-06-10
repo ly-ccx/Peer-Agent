@@ -83,6 +83,7 @@ export interface BootstrapPreloadApi {
     contextEpochId?: string;
   }) => Promise<readonly PromptContextEpochRecord[]>;
   readonly onChatStreamDelta: (listener: (payload: { streamId: string; content: string }) => void) => () => void;
+  readonly onChatStreamThinking: (listener: (payload: { streamId: string; content: string }) => void) => () => void;
   readonly onChatStreamDone: (listener: (payload: { streamId: string; usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number } }) => void) => () => void;
   readonly onChatStreamAborted: (listener: (payload: { streamId: string }) => void) => () => void;
   readonly onChatStreamUsage: (listener: (payload: { streamId: string; usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number } }) => void) => () => void;

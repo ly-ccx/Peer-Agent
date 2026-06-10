@@ -1,5 +1,38 @@
 import { encodeOpenAIChatRequest } from '../provider-encoders/index.mjs';
 
+function extractTextLikeDelta(value) {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((part) => extractTextLikeDelta(part))
+      .filter(Boolean)
+      .join('');
+  }
+  if (value && typeof value === 'object') {
+    return extractTextLikeDelta(
+      value.text ?? value.content ?? value.delta ?? value.summary ?? value.output_text,
+    );
+  }
+  return '';
+}
+
+function extractOpenAIReasoningDelta(delta) {
+  if (!delta || typeof delta !== 'object') return '';
+  const fields = [
+    'reasoning_content',
+    'reasoning',
+    'reasoning_text',
+    'thinking',
+    'thinking_content',
+    'reasoning_summary',
+  ];
+  for (const field of fields) {
+    const text = extractTextLikeDelta(delta[field]);
+    if (text) return text;
+  }
+  return '';
+}
+
 function consumeOpenAIStreamLine(line, state, webContents, streamId) {
   const trimmed = line.trim();
   if (!trimmed || !trimmed.startsWith('data: ')) return;
@@ -8,9 +41,15 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId) {
   try {
     const parsed = JSON.parse(payload);
     const delta = parsed.choices?.[0]?.delta;
-    if (delta?.content) {
-      state.content += delta.content;
-      webContents.send('chat:stream:delta', { streamId, content: delta.content });
+    const contentDelta = extractTextLikeDelta(delta?.content);
+    if (contentDelta) {
+      state.content += contentDelta;
+      webContents.send('chat:stream:delta', { streamId, content: contentDelta });
+    }
+    const reasoningDelta = extractOpenAIReasoningDelta(delta);
+    if (reasoningDelta) {
+      state.thinkingContent += reasoningDelta;
+      webContents.send('chat:stream:thinking', { streamId, content: reasoningDelta });
     }
     if (delta?.tool_calls) {
       for (const tc of delta.tool_calls) {
@@ -40,7 +79,7 @@ async function consumeOpenAIStream(res, webContents, streamId) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  const state = { content: '', toolCalls: [], usage: null };
+  const state = { content: '', thinkingContent: '', toolCalls: [], usage: null };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -57,6 +96,7 @@ async function consumeOpenAIStream(res, webContents, streamId) {
 
   return {
     content: state.content,
+    thinkingContent: state.thinkingContent,
     toolCalls: state.toolCalls.filter(Boolean),
     streamUsage: state.usage,
   };

@@ -94,7 +94,7 @@ export function Sidebar({
   return (
     <aside className="app-sidebar">
       <div className="sidebar-brand">
-        <span className="sidebar-brand-icon">⬡</span>
+        <img className="sidebar-brand-icon" src="/logo.png" alt="" aria-hidden="true" />
         <span className="sidebar-brand-copy">
           <span className="sidebar-brand-title">Peer Agent</span>
           <span

@@ -693,6 +693,54 @@ function buildHandoffContent({ compactSummary, oldCount }) {
   ].join('\n');
 }
 
+function normalizeContinuityContext(continuityContext = []) {
+  if (!Array.isArray(continuityContext)) return [];
+  return continuityContext
+    .filter((item) => item && typeof item === 'object')
+    .map((item, index) => ({
+      id: typeof item.id === 'string' ? item.id : `continuity-${index}`,
+      method: typeof item.method === 'string' ? item.method : 'unknown',
+      originalMessageCount: Number.isFinite(item.originalMessageCount) ? item.originalMessageCount : 0,
+      beforeTokens: Number.isFinite(item.beforeTokens) ? item.beforeTokens : 0,
+      afterTokens: Number.isFinite(item.afterTokens) ? item.afterTokens : 0,
+      summary: typeof item.summary === 'string' ? item.summary : '',
+    }))
+    .filter((item) => item.summary.trim() || item.originalMessageCount > 0);
+}
+
+function buildContinuityCarryForwardSummary(continuityContext) {
+  const items = normalizeContinuityContext(continuityContext);
+  if (!items.length) return '';
+  return items
+    .map((item, index) => [
+      `### Previous compacted context ${index + 1}`,
+      `id: ${item.id}`,
+      `method: ${item.method}`,
+      `representedMessages: ${item.originalMessageCount}`,
+      item.summary.trim() || '[previous compacted context summary unavailable]',
+    ].join('\n'))
+    .join('\n\n');
+}
+
+function mergeContinuityAndDeltaSummary({ continuityContext, compactSummary, oldCount }) {
+  const previousSummary = buildContinuityCarryForwardSummary(continuityContext);
+  const deltaSummary = compactSummary?.trim()
+    || `No semantic delta summary was available for the ${oldCount} newly compacted messages.`;
+  if (!previousSummary) return deltaSummary;
+  return [
+    '## Carry-forward summary from previous compaction',
+    previousSummary,
+    '',
+    `## Delta summary since previous compaction (${oldCount} messages)`,
+    deltaSummary,
+  ].join('\n');
+}
+
+function countContinuityMessages(continuityContext) {
+  return normalizeContinuityContext(continuityContext)
+    .reduce((sum, item) => sum + Math.max(0, item.originalMessageCount || 0), 0);
+}
+
 function buildCompactedMessages({
   systemPrompt,
   compactSummary,
@@ -701,18 +749,28 @@ function buildCompactedMessages({
   method,
   beforeTokens,
   afterTokens,
+  continuityContext = [],
 }) {
   const result = [{ role: 'system', content: systemPrompt }];
+  const previousMessageCount = countContinuityMessages(continuityContext);
+  const representedMessageCount = previousMessageCount + oldCount;
+  const mergedSummary = mergeContinuityAndDeltaSummary({
+    continuityContext,
+    compactSummary,
+    oldCount,
+  });
 
   result.push({
     role: 'user',
-    content: buildHandoffContent({ compactSummary, oldCount }),
+    content: buildHandoffContent({ compactSummary: mergedSummary, oldCount: representedMessageCount }),
     _compaction: {
       method,
-      originalMessageCount: oldCount,
+      originalMessageCount: representedMessageCount,
+      deltaMessageCount: oldCount,
+      previousMessageCount,
       beforeTokens,
       afterTokens,
-      summary: compactSummary || '',
+      summary: mergedSummary || '',
     },
   });
 
@@ -785,9 +843,11 @@ export async function compactIfNeeded({
   providerConfig,
   signal,
   force = false,
+  continuityContext = [],
 }) {
   const microcompactResult = microcompactMessagesForContext(messages);
   messages = microcompactResult.messages;
+  const previousMessageCount = countContinuityMessages(continuityContext);
 
   // Circuit breaker: stop trying if we've failed too many times
   if (isCircuitBreakerTripped()) {
@@ -808,6 +868,7 @@ export async function compactIfNeeded({
         { role: 'system', content: systemPrompt },
         ...keep,
       ]),
+      continuityContext,
     });
 
     console.warn(
@@ -822,6 +883,8 @@ export async function compactIfNeeded({
         beforeTokens,
         afterTokens: estimateTokensFromMessages(result),
         oldMessageCount: old.length,
+        previousMessageCount,
+        totalMessageCount: previousMessageCount + old.length,
         keptMessageCount: keep.length,
       },
     };
@@ -918,6 +981,7 @@ export async function compactIfNeeded({
     method,
     beforeTokens,
     afterTokens: 0, // computed below
+    continuityContext,
   });
 
   const afterTokens = estimateTokensFromMessages(result);
@@ -945,6 +1009,7 @@ export async function compactIfNeeded({
         },
         ...keep.slice(-5),
       ]),
+      continuityContext,
     });
     const trimmedAfterTokens = estimateTokensFromMessages(trimmedResult);
     setCompactionAfterTokens(trimmedResult, trimmedAfterTokens);
@@ -957,6 +1022,8 @@ export async function compactIfNeeded({
         beforeTokens,
         afterTokens: trimmedAfterTokens,
         oldMessageCount: old.length + Math.max(0, keep.length - 5),
+        previousMessageCount,
+        totalMessageCount: previousMessageCount + old.length + Math.max(0, keep.length - 5),
         keptMessageCount: Math.min(5, keep.length),
       },
     };
@@ -974,6 +1041,8 @@ export async function compactIfNeeded({
       beforeTokens,
       afterTokens,
       oldMessageCount: old.length,
+      previousMessageCount,
+      totalMessageCount: previousMessageCount + old.length,
       keptMessageCount: keep.length,
     },
   };

@@ -167,6 +167,22 @@ function continuityContextFromCompactionResult(result) {
   }];
 }
 
+function continuityContextFromMessages(messages = []) {
+  return messages
+    .filter((message) => message?._compaction)
+    .map((message, index) => {
+      const handoff = message._compaction;
+      return {
+        id: `conversation-compact:${message.id || index}`,
+        method: handoff.method || 'unknown',
+        originalMessageCount: handoff.originalMessageCount ?? 0,
+        beforeTokens: handoff.beforeTokens ?? 0,
+        afterTokens: handoff.afterTokens ?? 0,
+        summary: handoff.summary || message.content || '',
+      };
+    });
+}
+
 const llmChatService = createLlmChatService({
   llmConfigStore,
   persistCompaction: persistCompactionToConversation,
@@ -419,6 +435,9 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     (m) => !(m.role === 'user' && typeof m.content === 'string' && m.content.trim() === '/compact'),
   );
   if (filteredMessages.length === 0) return { compacted: false };
+  const priorContinuityContext = continuityContextFromMessages(filteredMessages);
+  const activeMessages = filteredMessages.filter((m) => !m?._compaction);
+  if (activeMessages.length === 0) return { compacted: false };
 
   const workspacePath = settingsStore.getAll().activeWorkspace || null;
 
@@ -428,6 +447,7 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
   const apiKey = provider ? llmConfigStore.getDecryptedApiKey(provider.id) : null;
   const systemContext = buildSystemContext(workspacePath, {
     conversationId,
+    continuityContext: priorContinuityContext,
     mode: 'compact',
     provider: provider?.provider ?? null,
     model: provider?.model ?? null,
@@ -454,7 +474,7 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
 
   const apiMessages = [
     { role: 'system', content: systemPrompt },
-    ...filteredMessages.map((m) => ({ role: m.role, content: m.content })),
+    ...activeMessages.map((m) => ({ role: m.role, content: m.content })),
   ];
 
   event.sender.send('chat:compaction', { streamId, stage: 'start', manual: true });
@@ -464,6 +484,7 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     contextWindow,
     providerConfig,
     force: true,
+    continuityContext: priorContinuityContext,
   });
 
   if (!result.compacted) {
@@ -474,7 +495,7 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
   persistCompactionToConversation({
     conversationId,
     compactResult: result,
-    sourceMessages: filteredMessages,
+    sourceMessages: activeMessages,
   });
 
   try {

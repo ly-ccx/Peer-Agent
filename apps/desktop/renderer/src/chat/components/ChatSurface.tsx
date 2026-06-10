@@ -35,14 +35,16 @@ type ChatApiContentPart =
 
 type ChatApiMessage = { role: string; content: string | ChatApiContentPart[] };
 
-interface ContentSegment {
-  type: 'text' | 'tool-call';
-  content?: string;
-  tool?: string;
-  args?: Record<string, unknown>;
-  result?: string;
-  synthetic?: boolean;
-}
+type ContentSegment =
+  | { type: 'text'; content?: string }
+  | { type: 'thinking'; content?: string }
+  | {
+      type: 'tool-call';
+      tool?: string;
+      args?: Record<string, unknown>;
+      result?: string;
+      synthetic?: boolean;
+    };
 
 interface ToolCallLegacy {
   tool: string;
@@ -54,6 +56,8 @@ interface ToolCallLegacy {
 interface CompactionMeta {
   method: string;
   originalMessageCount: number;
+  deltaMessageCount?: number;
+  previousMessageCount?: number;
   beforeTokens: number;
   afterTokens: number;
   summary?: string;
@@ -86,6 +90,7 @@ function getApiContent(message: ChatMsg): string {
   }
   return message.segments
     .map((segment) => {
+      if (segment.type === 'thinking') return '';
       if (segment.type !== 'text') return formatHistoricalLocalRecordForApi(segment);
       const content = segment.content || '';
       return message.role === 'assistant' ? sanitizeAssistantHistoryTextForApi(content) : content;
@@ -162,10 +167,23 @@ function getApiMessageContent(message: ChatMsg): string | ChatApiContentPart[] {
   return parts.length ? parts : text;
 }
 
+function hasApiMessageContent(content: string | ChatApiContentPart[]): boolean {
+  if (typeof content === 'string') return content.trim().length > 0;
+  return content.some((part) => {
+    if (part.type === 'image_url') return Boolean(part.image_url.url);
+    return part.text.trim().length > 0;
+  });
+}
+
 function toApiMessages(messages: readonly ChatMsg[]): ChatApiMessage[] {
-  return messages
-    .filter((message) => !isEmptyAssistantPlaceholder(message) && !message.compaction)
-    .map((message) => ({ role: message.role, content: getApiMessageContent(message) }));
+  const apiMessages: ChatApiMessage[] = [];
+  for (const message of messages) {
+    if (message.compaction) continue;
+    const content = getApiMessageContent(message);
+    if (message.role === 'assistant' && !hasApiMessageContent(content)) continue;
+    apiMessages.push({ role: message.role, content });
+  }
+  return apiMessages;
 }
 
 function buildConversationContinuityContext(messages: readonly ChatMsg[]): ContinuityContextItem[] {
@@ -267,14 +285,22 @@ function readAsText(file: File): Promise<string> {
 }
 
 interface TextGroup { type: 'text'; content: string }
+interface ThinkingGroup { type: 'thinking'; content: string }
 interface ToolCallGroup { type: 'tool-call-group'; calls: ToolCallLegacy[] }
-type SegmentGroup = TextGroup | ToolCallGroup;
+type SegmentGroup = TextGroup | ThinkingGroup | ToolCallGroup;
 
 function groupSegments(segments: ContentSegment[]): SegmentGroup[] {
   const groups: SegmentGroup[] = [];
   for (const seg of segments) {
     if (seg.type === 'text') {
       groups.push({ type: 'text', content: seg.content || '' });
+    } else if (seg.type === 'thinking') {
+      const last = groups[groups.length - 1];
+      if (last && last.type === 'thinking') {
+        last.content += seg.content || '';
+      } else {
+        groups.push({ type: 'thinking', content: seg.content || '' });
+      }
     } else {
       const last = groups[groups.length - 1];
       if (last && last.type === 'tool-call-group') {
@@ -390,10 +416,13 @@ function estimateMessageTokens(message: ChatMsg): number {
   }
   if (message.segments?.length) {
     for (const segment of message.segments) {
-      tokens += estimateTextTokens(segment.content);
-      tokens += estimateTextTokens(segment.tool);
-      tokens += estimateTextTokens(JSON.stringify(segment.args ?? {}));
-      tokens += estimateTextTokens(segment.result);
+      if (segment.type === 'tool-call') {
+        tokens += estimateTextTokens(segment.tool);
+        tokens += estimateTextTokens(JSON.stringify(segment.args ?? {}));
+        tokens += estimateTextTokens(segment.result);
+      } else if (segment.type === 'text') {
+        tokens += estimateTextTokens(segment.content);
+      }
     }
   }
   return tokens;
@@ -510,6 +539,22 @@ export function ChatSurface({
     });
   }, []);
 
+  const appendStreamThinking = useCallback((chunk: string) => {
+    if (!chunk) return;
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (!last || last.role !== 'assistant') return prev;
+      const segments = [...(last.segments || [])];
+      const lastSeg = segments[segments.length - 1];
+      if (lastSeg && lastSeg.type === 'thinking') {
+        segments[segments.length - 1] = { ...lastSeg, content: (lastSeg.content || '') + chunk };
+      } else {
+        segments.push({ type: 'thinking', content: chunk });
+      }
+      return [...prev.slice(0, -1), { ...last, segments }];
+    });
+  }, []);
+
   // 平滑打字机：网络 delta 进 buffer，rAF 泵匀速吐字，告别"一坨一坨"的生硬感。
   const typewriter = useTypewriterStream(appendStreamText);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -552,6 +597,11 @@ export function ChatSurface({
     const offDelta = clientApi.onChatStreamDelta(({ streamId, content }) => {
       if (streamId !== streamIdRef.current) return;
       typewriter.push(content);
+    });
+
+    const offThinking = clientApi.onChatStreamThinking(({ streamId, content }) => {
+      if (streamId !== streamIdRef.current) return;
+      appendStreamThinking(content);
     });
 
     const offDone = clientApi.onChatStreamDone(({ streamId, usage }) => {
@@ -645,8 +695,9 @@ export function ChatSurface({
         if (!last || last.role !== 'assistant') return prev;
         const segments = [...(last.segments || [])];
         for (let i = segments.length - 1; i >= 0; i--) {
-          if (segments[i].type === 'tool-call' && segments[i].result === undefined) {
-            segments[i] = { ...segments[i], result };
+          const segment = segments[i];
+          if (segment.type === 'tool-call' && segment.result === undefined) {
+            segments[i] = { ...segment, result };
             break;
           }
         }
@@ -708,8 +759,8 @@ export function ChatSurface({
       setTimeout(() => setCompactionNotice(null), 10000);
     });
 
-    return () => { offDelta(); offDone(); offUsage(); offAborted(); offToolCall(); offToolResult(); offPermissionRequest(); offError(); offCompaction(); };
-  }, [conversationId, onConversationUpdated]);
+    return () => { offDelta(); offThinking(); offDone(); offUsage(); offAborted(); offToolCall(); offToolResult(); offPermissionRequest(); offError(); offCompaction(); };
+  }, [appendStreamThinking, conversationId, onConversationUpdated]);
 
   useEffect(() => {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
@@ -1239,6 +1290,16 @@ function AssistantContent({ segments, content, isStreaming, isZh }: {
             </div>
           );
         }
+        if (group.type === 'thinking') {
+          return (
+            <ThinkingTextSection
+              key={i}
+              content={group.content}
+              isActive={isStreaming && i === groups.length - 1}
+              isZh={isZh}
+            />
+          );
+        }
         return (
           <ThinkingSection
             key={i}
@@ -1249,6 +1310,30 @@ function AssistantContent({ segments, content, isStreaming, isZh }: {
         );
       })}
       {showCursor ? <span className="streaming-cursor">▍</span> : null}
+    </div>
+  );
+}
+
+function ThinkingTextSection({ content, isActive, isZh }: { readonly content: string; readonly isActive: boolean; readonly isZh: boolean }) {
+  const [expanded, setExpanded] = useState(isActive);
+  const label = isActive
+    ? (isZh ? '深度思考中...' : 'Thinking...')
+    : (isZh ? '深度思考' : 'Thinking');
+
+  return (
+    <div className={`thinking-section ${isActive ? 'active' : 'done'}`}>
+      <button type="button" className="thinking-toggle" onClick={() => setExpanded(!expanded)}>
+        <span className="thinking-indicator">{isActive ? '◐' : '●'}</span>
+        <span className="thinking-label">{label}</span>
+        <svg className="thinking-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+      {expanded ? (
+        <div className="thinking-body thinking-text">
+          <MarkdownMessage content={content} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1320,6 +1405,12 @@ function CompactionSummaryCard({ compaction, isZh }: { readonly compaction: Comp
     compaction.method === 'llm' ? 'LLM'
     : compaction.method === 'structural' ? (isZh ? '结构' : 'Structural')
     : (isZh ? '截断' : 'Truncated');
+  const countLabel = compaction.deltaMessageCount !== undefined
+    && compaction.deltaMessageCount !== compaction.originalMessageCount
+    ? (isZh
+      ? `本次 ${compaction.deltaMessageCount} / 累计 ${compaction.originalMessageCount} 条`
+      : `${compaction.deltaMessageCount} this run / ${compaction.originalMessageCount} total`)
+    : `${compaction.originalMessageCount} msgs`;
 
   return (
     <div className="compaction-summary-card">
@@ -1329,7 +1420,7 @@ function CompactionSummaryCard({ compaction, isZh }: { readonly compaction: Comp
           {isZh ? '更早的对话（已压缩为摘要）' : 'Earlier conversation (compacted)'}
         </span>
         <span className="compaction-summary-count">
-          {compaction.originalMessageCount} msgs · {methodLabel}
+          {countLabel} · {methodLabel}
         </span>
         <svg className="tool-call-expand" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
           <path d="m6 9 6 6 6-6" />

@@ -63,4 +63,36 @@ describe('conversation compaction persistence', () => {
     assert.deepEqual(persisted[1], sourceMessages[2]);
     assert.deepEqual(persisted[2], pendingAssistant);
   });
+
+  it('does not keep an older compaction handoff as a recent source message', () => {
+    const previousCompaction = {
+      id: 'previous-compaction',
+      role: 'user',
+      content: '[上下文交接 - 共压缩 100 条消息]',
+      _compaction: {
+        method: 'structural',
+        originalMessageCount: 100,
+        beforeTokens: 1000,
+        afterTokens: 300,
+        summary: 'previous summary',
+      },
+    };
+    const sourceMessages = [
+      previousCompaction,
+      { id: 'm1', role: 'user', content: 'recent 1' },
+      { id: 'm2', role: 'assistant', content: 'recent 2' },
+    ];
+
+    const persisted = buildPersistedCompactedMessages({
+      compactedMessages,
+      sourceMessages,
+      keptCount: 2,
+      idFactory: () => 'compaction-id',
+    });
+
+    assert.equal(persisted.length, 3);
+    assert.equal(persisted[0].id, 'compaction-id');
+    assert.deepEqual(persisted.slice(1), sourceMessages.slice(1));
+    assert.equal(persisted.some((message) => message.id === 'previous-compaction'), false);
+  });
 });

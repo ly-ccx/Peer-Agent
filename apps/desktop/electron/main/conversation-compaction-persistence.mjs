@@ -6,6 +6,10 @@ export function isPendingAssistantMessage(message) {
   );
 }
 
+export function isCompactionMessage(message) {
+  return Boolean(message?._compaction);
+}
+
 export function buildPersistedCompactedMessages({
   compactedMessages,
   sourceMessages,
@@ -17,6 +21,7 @@ export function buildPersistedCompactedMessages({
     ? sourceMessages.at(-1)
     : null;
   const sourceWithoutPending = pendingAssistant ? sourceMessages.slice(0, -1) : sourceMessages;
+  const activeSourceMessages = sourceWithoutPending.filter((message) => !isCompactionMessage(message));
 
   const persisted = [];
   for (const message of compactedMessages) {
@@ -29,7 +34,7 @@ export function buildPersistedCompactedMessages({
     });
   }
 
-  persisted.push(...sourceWithoutPending.slice(-keptCount));
+  persisted.push(...activeSourceMessages.slice(-keptCount));
   if (pendingAssistant) persisted.push(pendingAssistant);
   return persisted;
 }
