@@ -18,6 +18,7 @@ import { createSettingsStore } from './settings-store.mjs';
 import { createMcpRegistry } from './mcp-registry.mjs';
 import { listMcpTools, disconnectMcp } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
+import { createHostRestarter } from './host-restart.mjs';
 import { createLlmChatService } from './llm-chat-service.mjs';
 import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
 import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
@@ -557,6 +558,20 @@ ipcMain.handle('llm:set-default', (_, { id }) => {
   return providers;
 });
 ipcMain.handle('llm:test', (_, { id }) => llmConfigStore.testConnection(id));
+
+// ── Host restart (self-iteration M3, see docs/architecture/21-...) ──
+// 由实验体(lab)程序化重启本体(host)。施动者在本体进程树之外，故 lab 调用安全。
+const hostRestarter = createHostRestarter({ workspaceRoot });
+ipcMain.handle('host:restart', (_event, payload = {}) => {
+  // hostDir 优先使用调用方显式传入；否则按"当前 lab 工作区去掉 -lab 后缀"推导本体目录。
+  let hostDir = payload.hostDir;
+  if (!hostDir && workspaceRoot) {
+    hostDir = workspaceRoot.endsWith('-lab')
+      ? workspaceRoot.slice(0, -'-lab'.length)
+      : workspaceRoot;
+  }
+  return hostRestarter.restartHost({ hostDir, port: payload.port });
+});
 
 // ── MCP (local only) ──
 ipcMain.handle('mcp:list-installed', () => mcpRegistry.listInstalled());
