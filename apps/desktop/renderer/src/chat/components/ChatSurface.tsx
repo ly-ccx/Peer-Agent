@@ -580,15 +580,16 @@ export function ChatSurface({
   const showSlashCommands = !isStreaming && !isCompacting && slashCommands.length > 0;
   const estimatedContextTokens = estimateConversationTokens(messages, draft, attachments);
 
-  // 方案 A 任务续传:进程启动后一次性取回重启前落盘的待办任务(read-and-clear)。
-  // 取回后不立即发送——consume effect 在挂载瞬间跑,此时 conversationId/hasProvider
-  // 往往还没就绪,直接调 submitMessage 会被开头的门槛 return 掉。
-  // 因此先把任务暂存到 pendingAutoSend,由下面"就绪后自动发"的 effect 在条件满足时发送。
+  // 方案 A 任务续传:进程启动后取回重启前落盘的待办任务。
+  // 这里用 peek(只读不删),不用 consume(读即删),原因是 React StrictMode 下
+  // [] 依赖的 effect 会挂载两次;若读即删,第一次挂载删文件后、其 setState 可能因
+  // cleanup 时序被丢弃,第二次挂载又读不到 → 任务彻底丢失。peek 让两次挂载都能读到,
+  // 真正的删除推迟到"就绪后自动发"effect 在 submitMessage 成功后再 clear,防止丢失与重发。
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const task = await clientApi.consumePendingTask();
+        const task = await clientApi.peekPendingTask();
         if (cancelled || !task || typeof task.prompt !== 'string' || !task.prompt.trim()) return;
         const effortValue =
           task.effort === 'low' || task.effort === 'default' || task.effort === 'high'
@@ -609,11 +610,38 @@ export function ChatSurface({
     setPendingPermissionCalls([]);
     if (!conversationId) { typewriter.reset(); setMessages([]); setTokenUsage(null); return; }
     setTokenUsage(null);
+    let cancelled = false;
     void (async () => {
       const { messages: loaded, tokenUsage: usage } = await loadConversationMessages(conversationId);
+      if (cancelled) return;
       setMessages(loaded);
       if (usage) setTokenUsage(usage);
+
+      // ADR 22: HMR 重载/重新打开后,main 进程的流式推理可能仍在进行。
+      // 询问后端是否有本会话的活跃流;若有,把已累积的思考/正文接回 UI,
+      // 并恢复 streamIdRef,使现有 delta 监听重新匹配、无缝续上(不重发、不打断)。
+      try {
+        const live = await clientApi.chatStreamReattach({ conversationId });
+        if (cancelled || !live || !live.isStreaming || !live.streamId) return;
+        const segments: ContentSegment[] = [];
+        if (live.accumulatedThinking) segments.push({ type: 'thinking', content: live.accumulatedThinking });
+        if (live.accumulatedText) segments.push({ type: 'text', content: live.accumulatedText });
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: nextId(),
+            role: 'assistant',
+            content: live.accumulatedText ?? '',
+            segments,
+          },
+        ]);
+        streamIdRef.current = live.streamId;
+        setIsStreaming(true);
+      } catch {
+        // reattach 失败不影响正常加载;降级为无续接(用户可重新发送)。
+      }
     })();
+    return () => { cancelled = true; };
   }, [conversationId]);
 
   useEffect(() => {
@@ -983,14 +1011,18 @@ export function ChatSurface({
     await submitMessage(text, sentAttachments);
   }, [draft, attachments, isStreaming, hasProvider, conversationId, submitMessage]);
 
-  // 方案 A 任务续传:就绪后自动发送。consume effect 已把待办存进 pendingAutoSend,
+  // 方案 A 任务续传:就绪后自动发送。peek effect 已把待办存进 pendingAutoSend(文件未删),
   // 这里等到 conversationId + hasProvider 就绪、且当前没有流式进行中时,自动发出一次,
-  // 然后清空 pendingAutoSend 防重复发送。无需用户点击。
+  // 然后清空内存 pendingAutoSend(防重复发)并清除磁盘文件(发送成功后才删,确保不丢)。
   useEffect(() => {
     if (!pendingAutoSend || !conversationId || !hasProvider || isStreaming) return;
     const { prompt, effort: taskEffort } = pendingAutoSend;
     setPendingAutoSend(null);
-    void submitMessage(prompt, [], taskEffort);
+    void (async () => {
+      await submitMessage(prompt, [], taskEffort);
+      // 发送成功后才删除磁盘任务文件,避免发送失败时任务丢失。
+      try { await clientApi.clearPendingTask(); } catch { /* 删除失败下次启动会重试,无害 */ }
+    })();
   }, [pendingAutoSend, conversationId, hasProvider, isStreaming, submitMessage]);
 
   const handleStop = useCallback(() => {

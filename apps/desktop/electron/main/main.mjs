@@ -19,7 +19,7 @@ import { createMcpRegistry } from './mcp-registry.mjs';
 import { listMcpTools, disconnectMcp } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
 import { createHostRestarter } from './host-restart.mjs';
-import { readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
+import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
 import { createLlmChatService } from './llm-chat-service.mjs';
 import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
 import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
@@ -428,6 +428,13 @@ ipcMain.handle('chat:send', (event, {
 ipcMain.handle('chat:abort', (_, { streamId }) =>
   llmChatService.abort(streamId));
 
+// ── Stream reattach (ADR 22) ──
+// renderer 经 HMR 重载或重新打开后,内存里的流式状态丢失,但 main 进程的
+// 流式推理仍在继续。renderer 挂载时调用此入口,询问"当前有无活跃流",
+// 若有则取回已累积的正文/思考文本,无缝接回 UI(不重发、不打断后端)。
+ipcMain.handle('chat:stream:reattach', (_event, { streamId, conversationId } = {}) =>
+  llmChatService.reattach({ streamId, conversationId }));
+
 ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
   const conv = conversationStore.getConversation(conversationId);
   if (!conv || !conv.messages?.length) return { compacted: false };
@@ -616,6 +623,16 @@ ipcMain.handle('pending-task:write', (_event, task = {}) => {
 });
 ipcMain.handle('pending-task:consume', () => {
   return readAndClearPendingTask();
+});
+// peek/clear 分离:解决 React StrictMode 双挂载 + 未就绪时序导致的"读后即清却没发出去"。
+// renderer 启动时先 peek(文件保留)拿到任务并自动发送;发送成功后再显式 clear。
+// 任一环节中断(重挂载/崩溃/未就绪),文件仍在,下次启动可重试,任务不被吞。
+ipcMain.handle('pending-task:peek', () => {
+  return peekPendingTask();
+});
+ipcMain.handle('pending-task:clear', () => {
+  clearPendingTask();
+  return true;
 });
 
 // ── MCP (local only) ──

@@ -37,6 +37,24 @@ function recordPromptSnapshot(store, context, metadata) {
   }
 }
 
+/**
+ * ADR 22: 累积代理。包裹真实 webContents,拦截流式正文/思考事件追加到 streamRecord,
+ * 其余事件原样透传。这样两个 provider adapter / agent loop 都无需改动,
+ * 累积逻辑集中在单一 seam。返回的对象只需实现 send()(adapter/loop 只用到 send)。
+ */
+function wrapWebContentsForAccumulation(realWebContents, streamRecord) {
+  return {
+    send(channel, payload) {
+      if (channel === 'chat:stream:delta' && typeof payload?.content === 'string') {
+        streamRecord.accumulatedText += payload.content;
+      } else if (channel === 'chat:stream:thinking' && typeof payload?.content === 'string') {
+        streamRecord.accumulatedThinking += payload.content;
+      }
+      return realWebContents.send(channel, payload);
+    },
+  };
+}
+
 function getActiveContextEpochId(store, conversationId = null) {
   try {
     return store?.getLatestContextEpoch?.(conversationId)?.contextEpochId
@@ -94,7 +112,18 @@ export function createLlmChatService({
     }
 
     const controller = new AbortController();
-    activeStreams.set(streamId, { controller, webContents, permissionIds: new Set() });
+    const streamRecord = {
+      controller,
+      webContents,
+      permissionIds: new Set(),
+      conversationId,
+      // ADR 22: 累积进行中的流式正文/思考,供 HMR 重载后 reattach 取快照续接。
+      accumulatedText: '',
+      accumulatedThinking: '',
+    };
+    activeStreams.set(streamId, streamRecord);
+    // 累积代理:拦截 delta/thinking 追加到记录,其余事件透传给真实 webContents。
+    const accumulatingWebContents = wrapWebContentsForAccumulation(webContents, streamRecord);
 
     const systemContext = buildSystemContext(activeWorkspacePath, {
       attachmentContext,
@@ -131,7 +160,7 @@ export function createLlmChatService({
           systemPrompt,
           messages,
           tools: TOOLS_ANTHROPIC,
-          webContents,
+          webContents: accumulatingWebContents,
           streamId,
           signal: controller.signal,
           effort,
@@ -151,7 +180,7 @@ export function createLlmChatService({
           systemPrompt,
           messages,
           tools: TOOLS_OPENAI,
-          webContents,
+          webContents: accumulatingWebContents,
           streamId,
           signal: controller.signal,
           effort,
@@ -195,5 +224,40 @@ export function createLlmChatService({
     return permissionGate.settlePermissionRequest(toolCallId, grant);
   }
 
-  return { sendMessage, abort, setWorkspacePath, resolvePermissionGrant };
+  /**
+   * ADR 22: 重载后认领进行中的流。只读,不改变流状态。
+   * 匹配优先级:
+   * - 传 streamId:返回该流快照(不存在返回 null)。
+   * - 传 conversationId:返回该会话的活跃流(避免跨会话误认领)。
+   * - 都不传:存在唯一活跃流时返回它;无/多条时返回 null。
+   */
+  function reattach({ streamId, conversationId } = {}) {
+    let record = null;
+    let id = streamId ?? null;
+    if (id != null) {
+      record = activeStreams.get(id) ?? null;
+    } else if (conversationId != null) {
+      for (const [activeId, activeRecord] of activeStreams.entries()) {
+        if (activeRecord?.conversationId === conversationId) {
+          id = activeId;
+          record = activeRecord;
+          break;
+        }
+      }
+    } else if (activeStreams.size === 1) {
+      const only = activeStreams.entries().next().value;
+      id = only?.[0] ?? null;
+      record = only?.[1] ?? null;
+    }
+    if (!record || id == null) return null;
+    return {
+      streamId: id,
+      conversationId: record.conversationId ?? null,
+      accumulatedText: record.accumulatedText ?? '',
+      accumulatedThinking: record.accumulatedThinking ?? '',
+      isStreaming: true,
+    };
+  }
+
+  return { sendMessage, abort, setWorkspacePath, resolvePermissionGrant, reattach };
 }

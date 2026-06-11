@@ -26,6 +26,24 @@ export interface PendingTask {
   readonly [key: string]: unknown;
 }
 
+/**
+ * ADR 22: 流式重连结果。renderer 重载后询问 main "当前有无活跃流"。
+ * - null:无活跃流,renderer 正常初始化。
+ * - 快照对象:取回已累积文本接回 UI(不重发、不打断后端正在进行的推理)。
+ *
+ * 形状与 llm-chat-service.reattach() 的真实返回严格对齐:命中返回快照,
+ * 未命中返回 null。consumer(ChatSurface)依据 isStreaming/streamId 判定。
+ */
+export type StreamReattachResult =
+  | null
+  | {
+      readonly streamId: string;
+      readonly conversationId: string | null;
+      readonly accumulatedText: string;
+      readonly accumulatedThinking: string;
+      readonly isStreaming: boolean;
+    };
+
 export interface BootstrapPreloadApi {
   readonly getBootstrap: () => Promise<ClientBootstrap>;
   readonly getClientSession: () => Promise<ClientSessionState>;
@@ -76,9 +94,12 @@ export interface BootstrapPreloadApi {
   readonly conversationsDelete: (params: { id: string }) => Promise<unknown>;
   readonly chatSend: (params: ChatSendRequest) => Promise<void>;
   readonly chatAbort: (params: { streamId: string }) => Promise<void>;
+  readonly chatStreamReattach: (params?: { conversationId?: string }) => Promise<StreamReattachResult>;
   readonly restartHost: (options?: { hostDir?: string; port?: number; pendingTask?: PendingTask }) => Promise<unknown>;
   readonly writePendingTask: (task: PendingTask) => Promise<unknown>;
   readonly consumePendingTask: () => Promise<PendingTask | null>;
+  readonly peekPendingTask: () => Promise<PendingTask | null>;
+  readonly clearPendingTask: () => Promise<boolean>;
   readonly chatCompact: (params: { conversationId: string; streamId: string }) => Promise<{ compacted: boolean; notification?: { method: string; beforeTokens: number; afterTokens: number; oldMessageCount: number; keptMessageCount: number } }>;
   readonly promptSnapshotsList: (params?: { limit?: number }) => Promise<readonly PromptSnapshotIndexEntry[]>;
   readonly promptSnapshotsGet: (params: { id: string }) => Promise<PromptSnapshotRecord | null>;

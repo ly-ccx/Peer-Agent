@@ -55,7 +55,49 @@ export function hasPendingTask() {
 }
 
 /**
- * 读取并清除待办任务（read-and-clear）。
+ * 解析待办任务文件的共用逻辑。
+ *
+ * @param {string} file 任务文件路径。
+ * @param {{ clearOnRead: boolean }} opts
+ *   clearOnRead=true：读后即清（consume 语义）。
+ *   clearOnRead=false：只读不清（peek 语义）。损坏文件无论如何都清除。
+ * @returns {object|null} task 负载或 null。
+ */
+function parsePendingTaskFile(file, { clearOnRead }) {
+  if (!existsSync(file)) return null;
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (error) {
+    // 损坏文件始终清除（无论 peek 还是 consume），避免坏文件反复阻塞启动。
+    console.warn('[pending-task-store] corrupt pending task file, discarding:', error?.message ?? error);
+    safeRemove(file);
+    return null;
+  }
+
+  let valid = true;
+  if (!parsed || typeof parsed !== 'object') {
+    valid = false;
+  } else if (parsed.version !== PENDING_TASK_VERSION) {
+    console.warn(`[pending-task-store] unsupported version ${parsed.version}, discarding`);
+    valid = false;
+  } else if (!parsed.task || typeof parsed.task !== 'object') {
+    valid = false;
+  }
+
+  // 清除策略：
+  // - 无效内容（版本不符/结构损坏）：始终清除，避免坏文件长期残留。
+  // - 有效内容：仅当 clearOnRead=true（consume）才清除；peek 保留文件。
+  if (!valid || clearOnRead) {
+    safeRemove(file);
+  }
+
+  return valid ? parsed.task : null;
+}
+
+/**
+ * 读取并清除待办任务（read-and-clear / consume 语义）。
  *
  * - 无文件：返回 null。
  * - 文件损坏 / 版本不符：清掉坏文件，返回 null（绝不抛错阻塞启动）。
@@ -64,28 +106,25 @@ export function hasPendingTask() {
  * @returns {object|null} 写入时传入的 task 对象，或 null。
  */
 export function readAndClearPendingTask() {
-  const file = taskFilePath();
-  if (!existsSync(file)) return null;
+  return parsePendingTaskFile(taskFilePath(), { clearOnRead: true });
+}
 
-  let parsed = null;
-  try {
-    parsed = JSON.parse(readFileSync(file, 'utf8'));
-  } catch (error) {
-    console.warn('[pending-task-store] corrupt pending task file, discarding:', error?.message ?? error);
-    safeRemove(file);
-    return null;
-  }
-
-  // 消费即删：无论后续校验是否通过，文件都不应再保留。
-  safeRemove(file);
-
-  if (!parsed || typeof parsed !== 'object') return null;
-  if (parsed.version !== PENDING_TASK_VERSION) {
-    console.warn(`[pending-task-store] unsupported version ${parsed.version}, discarding`);
-    return null;
-  }
-  if (!parsed.task || typeof parsed.task !== 'object') return null;
-  return parsed.task;
+/**
+ * 只读取不清除待办任务（peek 语义）。
+ *
+ * 用于"读和清分离"的事务化续传：启动时先 peek（文件保留），
+ * 待任务真正成功发送后再调 clearPendingTask() 删除。
+ * 这样即使 consume 与发送之间发生重新挂载/未就绪/崩溃，文件仍在，下次可重试，
+ * 不会出现"读后即清但没发出去"导致任务被吞的情况。
+ *
+ * - 无文件：返回 null。
+ * - 文件损坏 / 版本不符：清掉坏文件，返回 null（损坏文件不保留）。
+ * - 正常：保留文件，返回 task 负载。
+ *
+ * @returns {object|null} 写入时传入的 task 对象，或 null。
+ */
+export function peekPendingTask() {
+  return parsePendingTaskFile(taskFilePath(), { clearOnRead: false });
 }
 
 /** 主动清除待办任务（如用户取消续传）。无文件时 no-op。 */
