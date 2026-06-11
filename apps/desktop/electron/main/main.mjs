@@ -618,17 +618,33 @@ ipcMain.handle('host:restart', (_event, payload = {}) => {
 // 再由 renderer 用自身上下文发起 chat:send 续执行。
 // 续传必须走 renderer 拉取,因为 chat:send 依赖 event.sender 推流回发起方;
 // main 主动发起没有 renderer 上下文,故不能在 main 内直接调 chat:send。
+// 会话锚定(ADR 21):workspace 由 main 持有并负责补齐 + 校验,
+// renderer 只需提供 { sessionId, task }(它有 conversationId,但拿不到 workspace 绝对路径)。
+function withWorkspace(task) {
+  return { ...task, workspace: workspaceRoot ?? null };
+}
+// 读回时校验 workspace 匹配:防止把 A 工作区的续传任务恢复到 B 工作区。
+// workspaceRoot 为 null(打包态)时不做跨工作区校验,直接放行。
+function matchWorkspace(record) {
+  if (!record) return null;
+  if (workspaceRoot && record.workspace && record.workspace !== workspaceRoot) {
+    console.warn('[pending-task] workspace mismatch, discarding:', record.workspace, '!=', workspaceRoot);
+    clearPendingTask();
+    return null;
+  }
+  return record;
+}
 ipcMain.handle('pending-task:write', (_event, task = {}) => {
-  return writePendingTask(task);
+  return writePendingTask(withWorkspace(task));
 });
 ipcMain.handle('pending-task:consume', () => {
-  return readAndClearPendingTask();
+  return matchWorkspace(readAndClearPendingTask());
 });
 // peek/clear 分离:解决 React StrictMode 双挂载 + 未就绪时序导致的"读后即清却没发出去"。
 // renderer 启动时先 peek(文件保留)拿到任务并自动发送;发送成功后再显式 clear。
 // 任一环节中断(重挂载/崩溃/未就绪),文件仍在,下次启动可重试,任务不被吞。
 ipcMain.handle('pending-task:peek', () => {
-  return peekPendingTask();
+  return matchWorkspace(peekPendingTask());
 });
 ipcMain.handle('pending-task:clear', () => {
   clearPendingTask();

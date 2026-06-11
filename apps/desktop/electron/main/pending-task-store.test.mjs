@@ -8,6 +8,7 @@ import { pathOf } from './data-store.mjs';
 import {
   writePendingTask,
   readAndClearPendingTask,
+  peekPendingTask,
   hasPendingTask,
   clearPendingTask,
 } from './pending-task-store.mjs';
@@ -26,7 +27,7 @@ afterEach(() => {
 });
 
 test('write then read returns the same task payload', () => {
-  const task = { conversationId: 'c1', prompt: '继续做任务续传', reason: 'restart' };
+  const task = { sessionId: 'c1', task: '继续做任务续传', reason: 'restart' };
   const res = writePendingTask(task);
   assert.equal(res.ok, true);
   assert.equal(hasPendingTask(), true);
@@ -36,7 +37,7 @@ test('write then read returns the same task payload', () => {
 });
 
 test('read clears the file (read-and-clear, one-shot)', () => {
-  writePendingTask({ conversationId: 'c1', prompt: 'x' });
+  writePendingTask({ sessionId: 'c1', task: 'x' });
   assert.equal(hasPendingTask(), true);
 
   const first = readAndClearPendingTask();
@@ -44,6 +45,22 @@ test('read clears the file (read-and-clear, one-shot)', () => {
   // 第二次应为 null，文件已删
   assert.equal(hasPendingTask(), false);
   assert.equal(readAndClearPendingTask(), null);
+});
+
+test('peek returns the task but keeps the file (read without clear)', () => {
+  const task = { sessionId: 'c1', task: 'peek-me' };
+  writePendingTask(task);
+
+  const peeked = peekPendingTask();
+  assert.deepEqual(peeked, task);
+  // peek 不清除：文件仍在，可再次读到
+  assert.equal(hasPendingTask(), true);
+  assert.deepEqual(peekPendingTask(), task);
+
+  // consume 之后才清除
+  const consumed = readAndClearPendingTask();
+  assert.deepEqual(consumed, task);
+  assert.equal(hasPendingTask(), false);
 });
 
 test('returns null when no pending task file exists', () => {
@@ -76,7 +93,7 @@ test('unsupported version is discarded and returns null', () => {
 });
 
 test('clearPendingTask removes the file and is a no-op when absent', () => {
-  writePendingTask({ conversationId: 'c1', prompt: 'x' });
+  writePendingTask({ sessionId: 'c1', task: 'x' });
   assert.equal(hasPendingTask(), true);
   clearPendingTask();
   assert.equal(hasPendingTask(), false);
@@ -90,10 +107,10 @@ test('writePendingTask rejects non-object task', () => {
 });
 
 test('payload wraps task with version and createdAt metadata', () => {
-  writePendingTask({ prompt: 'meta-check' });
+  writePendingTask({ sessionId: 'c1', task: 'meta-check' });
   const file = pathOf('pendingTask');
   const raw = JSON.parse(readFileSync(file, 'utf8'));
-  assert.equal(raw.version, 1);
+  assert.equal(raw.version, 2);
   assert.equal(typeof raw.createdAt, 'string');
-  assert.deepEqual(raw.task, { prompt: 'meta-check' });
+  assert.deepEqual(raw.task, { sessionId: 'c1', task: 'meta-check' });
 });

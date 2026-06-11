@@ -23,10 +23,16 @@
 
 import { spawn } from 'node:child_process';
 import { execSync } from 'node:child_process';
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import process from 'node:process';
 
-const LOG = '/tmp/peer-agent-restart-host.log';
+// 独立日志路径：只由本脚本写，绝不与 dev server 的混合 stdout 共用文件。
+// （历史教训：曾用 /tmp/peer-agent-restart-host.log，被 pnpm dev 的 [0]/[1] 输出
+//  污染，导致无法判断脚本是否真的执行过。见 ADR 21。）
+const LOG = '/tmp/peer-agent-restart-executor.log';
+// 启动标记文件：detached 执行体一启动就写它（带 PID + 时间戳），
+// 让发起方可以轮询这个文件来获得"执行体确实活着"的硬证据。
+const STARTED_MARKER = '/tmp/peer-agent-restart-executor.started';
 
 function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
@@ -105,6 +111,17 @@ async function runRestart(args) {
   log('=== restart executor started (detached from host tree) ===');
   log(`host-dir=${args.hostDir} port=${args.port} pid=${process.pid}`);
 
+  // 写启动标记：这是"执行体确实活着并进入了真正重启流程"的硬证据。
+  // 发起方可轮询此文件确认 detached 没有夭折（解决"脚本是否真启动"无证据的问题）。
+  try {
+    writeFileSync(
+      STARTED_MARKER,
+      JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), port: args.port }),
+    );
+  } catch {
+    // 标记写失败不阻断重启本身。
+  }
+
   // 1) settle：给发起方留时间干净返回
   await sleep(args.settleMs);
 
@@ -182,6 +199,13 @@ async function main() {
   }
 
   if (args.detach) {
+    // 先清掉上一次的启动标记，确保发起方轮询看到的是本次执行体写的新标记，
+    // 而不是上次残留（避免"以为这次启动了，其实是旧标记"的误判）。
+    try {
+      unlinkSync(STARTED_MARKER);
+    } catch {
+      /* 不存在则忽略 */
+    }
     // 第一阶段：把真正的执行体脱离出去，然后立刻返回，让发起方（可能在本体树内）干净退出。
     reSpawnDetached(args);
     log('parent (launcher) exiting; detached executor will perform restart');

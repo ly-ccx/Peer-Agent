@@ -503,6 +503,8 @@ export function ChatSurface({
   providers,
   conversationId,
   systemInstructions,
+  resumeTask,
+  onResumeConsumed,
   onOpenSettings,
   onConversationUpdated,
   onBranch,
@@ -511,6 +513,8 @@ export function ChatSurface({
   readonly providers: readonly LlmProviderConfigView[];
   readonly conversationId: string | null;
   readonly systemInstructions?: string;
+  readonly resumeTask?: { sessionId: string; task: string; effort?: string } | null;
+  readonly onResumeConsumed?: () => void;
   readonly onOpenSettings: () => void;
   readonly onConversationUpdated?: () => void;
   readonly onBranch?: (newConversationId: string) => void;
@@ -528,8 +532,8 @@ export function ChatSurface({
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [pendingPermissionCalls, setPendingPermissionCalls] = useState<ClientToolCall[]>([]);
-  // 方案 A 任务续传:暂存重启前 consume 回来的待办,待 conversationId/hasProvider 就绪后自动发送。
-  const [pendingAutoSend, setPendingAutoSend] = useState<{ prompt: string; effort?: string } | null>(null);
+  // 任务续传(ADR 21):防止同一 resumeTask 被自动发送多次的一次性闸门。
+  const resumeFiredRef = useRef<string | null>(null);
   const streamIdRef = useRef<string | null>(null);
 
   // 把流式文本追加到最后一条 assistant 消息的尾部文本段。
@@ -579,30 +583,6 @@ export function ChatSurface({
     : [];
   const showSlashCommands = !isStreaming && !isCompacting && slashCommands.length > 0;
   const estimatedContextTokens = estimateConversationTokens(messages, draft, attachments);
-
-  // 方案 A 任务续传:进程启动后取回重启前落盘的待办任务。
-  // 这里用 peek(只读不删),不用 consume(读即删),原因是 React StrictMode 下
-  // [] 依赖的 effect 会挂载两次;若读即删,第一次挂载删文件后、其 setState 可能因
-  // cleanup 时序被丢弃,第二次挂载又读不到 → 任务彻底丢失。peek 让两次挂载都能读到,
-  // 真正的删除推迟到"就绪后自动发"effect 在 submitMessage 成功后再 clear,防止丢失与重发。
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const task = await clientApi.peekPendingTask();
-        if (cancelled || !task || typeof task.prompt !== 'string' || !task.prompt.trim()) return;
-        const effortValue =
-          task.effort === 'low' || task.effort === 'default' || task.effort === 'high'
-            ? task.effort
-            : undefined;
-        if (effortValue) setEffort(effortValue);
-        setPendingAutoSend({ prompt: task.prompt, effort: effortValue });
-      } catch {
-        // consume 失败(无任务/文件损坏)静默降级:正常空白启动。
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
 
   useEffect(() => {
     setAttachments([]);
@@ -962,12 +942,14 @@ export function ChatSurface({
     }
 
     // /restart: 重启本体(in-place),不走 agent turn。
-    // `/restart` 后面可跟续传指令,作为 pendingTask.prompt 落盘,新实例启动后预填提示条。
+    // `/restart` 后面可跟续传指令;落盘的续传记录会锚定「当前会话」(sessionId = conversationId),
+    // 重启后 App.tsx peek 取回 → 切回该会话 → 在原会话内自动发出 task(回到中断现场)。见 ADR 21。
     // 本次会话会被重启中断;重启动作由 main 的 host:restart handler 委派给本体进程树外的施动者执行。
     if (text === '/restart' || text.startsWith('/restart ')) {
       const followUp = text.slice('/restart'.length).trim();
-      const pendingTask = followUp
-        ? { prompt: followUp, reason: isZh ? '重启前的待办,已预填' : 'Pending task from before restart' }
+      // 续传锚定当前会话:无 conversationId 或无 followUp 时不写任务,只做纯重启。
+      const pendingTask = followUp && conversationId
+        ? { sessionId: conversationId, task: followUp, effort, reason: isZh ? '重启前的待办,已在原会话自动续上' : 'Pending task from before restart' }
         : undefined;
       try {
         await clientApi.restartHost(pendingTask ? { pendingTask } : {});
@@ -1011,19 +993,27 @@ export function ChatSurface({
     await submitMessage(text, sentAttachments);
   }, [draft, attachments, isStreaming, hasProvider, conversationId, submitMessage]);
 
-  // 方案 A 任务续传:就绪后自动发送。peek effect 已把待办存进 pendingAutoSend(文件未删),
-  // 这里等到 conversationId + hasProvider 就绪、且当前没有流式进行中时,自动发出一次,
-  // 然后清空内存 pendingAutoSend(防重复发)并清除磁盘文件(发送成功后才删,确保不丢)。
+  // 任务续传(ADR 21):就绪后在「正确的会话内」自动发送。
+  // App.tsx 已 peek 到会话锚定的待办、切到 resumeTask.sessionId 并经 prop 传入;这里要求
+  // 当前 conversationId 已切到该 sessionId(回到中断现场)、provider 就绪、无流式进行中,
+  // 才自动发出一次。resumeFiredRef 作一次性闸门防重发;发送成功后回调 onResumeConsumed,
+  // 由 App.tsx 清空内存 resumeTask 并清除磁盘文件(成功后才删,确保失败不丢)。
   useEffect(() => {
-    if (!pendingAutoSend || !conversationId || !hasProvider || isStreaming) return;
-    const { prompt, effort: taskEffort } = pendingAutoSend;
-    setPendingAutoSend(null);
+    if (!resumeTask || !conversationId || !hasProvider || isStreaming) return;
+    // 必须落到续传记录指定的那个会话,避免把任务发进错误/新建的会话。
+    if (conversationId !== resumeTask.sessionId) return;
+    if (resumeFiredRef.current === resumeTask.sessionId) return;
+    resumeFiredRef.current = resumeTask.sessionId;
+    const taskEffort =
+      resumeTask.effort === 'low' || resumeTask.effort === 'default' || resumeTask.effort === 'high'
+        ? resumeTask.effort
+        : undefined;
+    if (taskEffort) setEffort(taskEffort);
     void (async () => {
-      await submitMessage(prompt, [], taskEffort);
-      // 发送成功后才删除磁盘任务文件,避免发送失败时任务丢失。
-      try { await clientApi.clearPendingTask(); } catch { /* 删除失败下次启动会重试,无害 */ }
+      await submitMessage(resumeTask.task, [], taskEffort);
+      onResumeConsumed?.();
     })();
-  }, [pendingAutoSend, conversationId, hasProvider, isStreaming, submitMessage]);
+  }, [resumeTask, conversationId, hasProvider, isStreaming, submitMessage, onResumeConsumed]);
 
   const handleStop = useCallback(() => {
     if (streamIdRef.current) void clientApi.chatAbort({ streamId: streamIdRef.current });

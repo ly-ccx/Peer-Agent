@@ -19,8 +19,14 @@ import { pathOf } from './data-store.mjs';
  * 本模块只依赖 fs/path + data-store（不 import electron），可被单测直接 import。
  */
 
-/** 当前 schema 版本，便于将来字段演进时做兼容判断。 */
-const PENDING_TASK_VERSION = 1;
+/**
+ * 当前 schema 版本。
+ * v1: 旧设计，task 仅 { prompt }（无会话坐标）。
+ * v2: 会话锚定，task = { workspace, sessionId, task }（见 ADR 21）。
+ * 升级版本号会使旧的 v1 记录在读取时被判为"版本不符"而丢弃，
+ * 避免旧的、缺坐标的续传记录被错误恢复到当前会话。
+ */
+const PENDING_TASK_VERSION = 2;
 
 function taskFilePath() {
   return pathOf('pendingTask');

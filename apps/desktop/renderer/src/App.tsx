@@ -31,6 +31,9 @@ export function App() {
   const [conversations, setConversations] = useState<readonly ConversationMeta[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
+  // 任务续传(ADR 21):重启后 peek 回来的待办,带会话坐标。
+  // App 负责切到 sessionId(回到中断现场)后,把 task 下发给 ChatSurface 自动发出。
+  const [resumeTask, setResumeTask] = useState<{ sessionId: string; task: string; effort?: string } | null>(null);
   const [systemInstructions, setSystemInstructions] = useState(() =>
     readSystemInstructions(clientApi.initialSettings));
 
@@ -60,6 +63,33 @@ export function App() {
       void refreshConversations(r.activeWorkspace);
     }).catch(() => {});
   }, [refreshProviders, refreshSettings, refreshConversations]);
+
+  // 任务续传(ADR 21):重启后回到中断现场。
+  // peek(只读不清)拿到会话锚定的待办 → 切到 sessionId(回到原会话)→ 存 resumeTask,
+  // 由 ChatSurface 在该会话内自动发出;workspace 校验已由 main 侧 peek handler 完成。
+  // 用 peek 而非 consume:发送成功前不删文件,抗 StrictMode 双挂载与未就绪时序。
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const record = await clientApi.peekPendingTask();
+        if (cancelled || !record) return;
+        const sessionId = typeof record.sessionId === 'string' ? record.sessionId : null;
+        const task = typeof record.task === 'string' ? record.task.trim() : '';
+        if (!sessionId || !task) return;
+        const effort =
+          record.effort === 'low' || record.effort === 'default' || record.effort === 'high'
+            ? record.effort
+            : undefined;
+        setActiveConversationId(sessionId);
+        setActivePage('chat');
+        setResumeTask({ sessionId, task, effort });
+      } catch {
+        // 无任务 / 文件损坏 / workspace 不匹配:静默降级为正常空白启动。
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const runtimeLabel = i18n.locale === 'zh-CN' ? runtimeIdentity.labelZh : runtimeIdentity.labelEn;
@@ -128,6 +158,11 @@ export function App() {
                   providers={providers}
                   conversationId={activeConversationId}
                   systemInstructions={systemInstructions}
+                  resumeTask={resumeTask}
+                  onResumeConsumed={() => {
+                    setResumeTask(null);
+                    void clientApi.clearPendingTask().catch(() => {});
+                  }}
                   onOpenSettings={() => setActivePage('model-settings')}
                   onConversationUpdated={refreshConversations}
                   onBranch={(id) => { setActiveConversationId(id); void refreshConversations(); }}
