@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   conversationsUpdateLastMessage: (params) => ipcRenderer.invoke('conversations:update-last-message', params),
   conversationsReplaceMessages: (params) => ipcRenderer.invoke('conversations:replace-messages', params),
   conversationsDelete: (params) => ipcRenderer.invoke('conversations:delete', params),
+  conversationsAddUsage: (params) => ipcRenderer.invoke('conversations:add-usage', params),
   chatSend: (params) => ipcRenderer.invoke('chat:send', params),
   chatAbort: (params) => ipcRenderer.invoke('chat:abort', params),
   chatStreamReattach: (params) => ipcRenderer.invoke('chat:stream:reattach', params),

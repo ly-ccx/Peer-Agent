@@ -53,6 +53,18 @@ export type StreamReattachResult =
       readonly isStreaming: boolean;
     };
 
+/**
+ * ADR 23: 会话累计用量(lifetime usage)。
+ * 存于 index meta,独立于消息 jsonl,因此压缩(replaceMessages)不影响它。
+ * 反映本次会话从创建至今的累计 token 用量,用于右下角计费与缓存命中率显示。
+ */
+export interface LifetimeUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly cacheReadTokens: number;
+}
+
 export interface BootstrapPreloadApi {
   readonly getBootstrap: () => Promise<ClientBootstrap>;
   readonly getClientSession: () => Promise<ClientSessionState>;
@@ -95,12 +107,21 @@ export interface BootstrapPreloadApi {
   readonly workspaceInfo: (params: { path: string }) => Promise<{ name: string; absolutePath: string; git?: { branch?: string; isDirty?: boolean } } | null>;
   readonly conversationsList: (params?: { workspacePath?: string | null }) => Promise<readonly { id: string; title: string; workspacePath?: string | null; messageCount: number; createdAt: string; updatedAt: string }[]>;
   readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null }) => Promise<{ id: string; title: string; messageCount: number; createdAt: string; updatedAt: string }>;
-  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string } | null>;
+  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage } | null>;
   readonly conversationsUpdateTitle: (params: { id: string; title: string }) => Promise<unknown>;
   readonly conversationsAppendMessage: (params: { id: string; message: Record<string, unknown> & { id: string; role: string; content: string } }) => Promise<unknown>;
   readonly conversationsUpdateLastMessage: (params: { id: string; content: string }) => Promise<unknown>;
   readonly conversationsReplaceMessages: (params: { id: string; messages: readonly Record<string, unknown>[] }) => Promise<unknown>;
   readonly conversationsDelete: (params: { id: string }) => Promise<unknown>;
+  readonly conversationsAddUsage: (params: {
+    id: string;
+    usage: {
+      inputTokens?: number;
+      outputTokens?: number;
+      cacheWriteTokens?: number;
+      cacheReadTokens?: number;
+    };
+  }) => Promise<LifetimeUsage>;
   readonly chatSend: (params: ChatSendRequest) => Promise<void>;
   readonly chatAbort: (params: { streamId: string }) => Promise<void>;
   readonly chatStreamReattach: (params?: { conversationId?: string }) => Promise<StreamReattachResult>;

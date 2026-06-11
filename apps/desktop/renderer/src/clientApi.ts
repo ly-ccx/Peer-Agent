@@ -46,6 +46,7 @@ const unavailableApi: ClientApi = {
   conversationsUpdateLastMessage: unavailableMethod('conversationsUpdateLastMessage'),
   conversationsReplaceMessages: unavailableMethod('conversationsReplaceMessages'),
   conversationsDelete: unavailableMethod('conversationsDelete'),
+  conversationsAddUsage: unavailableMethod('conversationsAddUsage'),
   chatSend: unavailableMethod('chatSend'),
   chatAbort: unavailableMethod('chatAbort'),
   chatStreamReattach: unavailableMethod('chatStreamReattach'),

@@ -103,6 +103,32 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
     return meta ? { ...meta, messages: newMessages } : null;
   }
 
+  // 会话级累计用量账本。独立挂在 index meta 上（不在消息 jsonl 里），
+  // 因此压缩（replaceMessages 仅重写消息文件）不会触及它 —— 这是修复
+  // "压缩后右下角计费被清零" 的核心：累计 usage 不再依附于会被删除的消息。
+  // 见 docs/architecture/23-session-usage-ledger.md。
+  function addUsage(id, usage) {
+    const index = readIndex();
+    const meta = index.find((c) => c.id === id);
+    if (!meta) return null;
+    // 字段统一用 *Tokens 命名,与契约 LifetimeUsage / renderer 读写口径一致(ADR 23)。
+    const prev = meta.lifetimeUsage || {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 0,
+    };
+    meta.lifetimeUsage = {
+      inputTokens: (prev.inputTokens || 0) + (usage?.inputTokens || 0),
+      outputTokens: (prev.outputTokens || 0) + (usage?.outputTokens || 0),
+      cacheWriteTokens: (prev.cacheWriteTokens || 0) + (usage?.cacheWriteTokens || 0),
+      cacheReadTokens: (prev.cacheReadTokens || 0) + (usage?.cacheReadTokens || 0),
+    };
+    meta.updatedAt = new Date().toISOString();
+    writeJsonl(indexFile, index);
+    return meta.lifetimeUsage;
+  }
+
   function deleteConversation(id) {
     const index = readIndex().filter((c) => c.id !== id);
     writeJsonl(indexFile, index);
@@ -132,5 +158,5 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
     }
   }
 
-  return { listConversations, listConversationsByWorkspace, createConversation, getConversation, updateTitle, appendMessage, updateLastMessage, replaceMessages, deleteConversation };
+  return { listConversations, listConversationsByWorkspace, createConversation, getConversation, updateTitle, appendMessage, updateLastMessage, replaceMessages, addUsage, deleteConversation };
 }

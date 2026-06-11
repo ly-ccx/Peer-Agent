@@ -490,6 +490,28 @@ async function loadConversationMessages(conversationId: string): Promise<{
     }
     return msg;
   }).filter((message) => !isEmptyAssistantPlaceholder(message));
+  // ADR 23: 计费优先读 index meta 的权威累计 lifetimeUsage(不受压缩影响)。
+  // 仅当老会话尚无该字段时,才回退到遍历消息累加(此路径会被压缩低估,属兼容降级)。
+  const lifetime = conv.lifetimeUsage as
+    | { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number }
+    | undefined;
+  if (
+    lifetime &&
+    ((lifetime.inputTokens ?? 0) > 0 ||
+      (lifetime.outputTokens ?? 0) > 0 ||
+      (lifetime.cacheWriteTokens ?? 0) > 0 ||
+      (lifetime.cacheReadTokens ?? 0) > 0)
+  ) {
+    return {
+      messages: loaded,
+      tokenUsage: {
+        input: lifetime.inputTokens ?? 0,
+        output: lifetime.outputTokens ?? 0,
+        cacheWrite: lifetime.cacheWriteTokens ?? 0,
+        cacheRead: lifetime.cacheReadTokens ?? 0,
+      },
+    };
+  }
   return {
     messages: loaded,
     tokenUsage: totalInput > 0 || totalOutput > 0 || totalCacheWrite > 0 || totalCacheRead > 0
@@ -657,12 +679,44 @@ export function ChatSurface({
         ? { input: usage.inputTokens ?? 0, output: usage.outputTokens ?? 0, cacheWrite: usage.cacheWriteTokens ?? 0, cacheRead: usage.cacheReadTokens ?? 0 }
         : null;
       if (msgUsage) {
-        setTokenUsage((prev) => ({
-          input: (prev?.input ?? 0) + msgUsage.input,
-          output: (prev?.output ?? 0) + msgUsage.output,
-          cacheWrite: (prev?.cacheWrite ?? 0) + msgUsage.cacheWrite,
-          cacheRead: (prev?.cacheRead ?? 0) + msgUsage.cacheRead,
-        }));
+        // ADR 23: 把本回合 usage 累加到 index meta 的 lifetimeUsage(独立于消息 jsonl)。
+        // 压缩(replaceMessages)只重写消息文件、不碰 meta,故计费不会被压没。
+        // 落盘成功后以后端返回的权威累计值刷新右下角;失败则降级为内存累加。
+        if (conversationId) {
+          void clientApi
+            .conversationsAddUsage({
+              id: conversationId,
+              usage: {
+                inputTokens: msgUsage.input,
+                outputTokens: msgUsage.output,
+                cacheWriteTokens: msgUsage.cacheWrite,
+                cacheReadTokens: msgUsage.cacheRead,
+              },
+            })
+            .then((lifetime) => {
+              setTokenUsage({
+                input: lifetime.inputTokens,
+                output: lifetime.outputTokens,
+                cacheWrite: lifetime.cacheWriteTokens,
+                cacheRead: lifetime.cacheReadTokens,
+              });
+            })
+            .catch(() => {
+              setTokenUsage((prev) => ({
+                input: (prev?.input ?? 0) + msgUsage.input,
+                output: (prev?.output ?? 0) + msgUsage.output,
+                cacheWrite: (prev?.cacheWrite ?? 0) + msgUsage.cacheWrite,
+                cacheRead: (prev?.cacheRead ?? 0) + msgUsage.cacheRead,
+              }));
+            });
+        } else {
+          setTokenUsage((prev) => ({
+            input: (prev?.input ?? 0) + msgUsage.input,
+            output: (prev?.output ?? 0) + msgUsage.output,
+            cacheWrite: (prev?.cacheWrite ?? 0) + msgUsage.cacheWrite,
+            cacheRead: (prev?.cacheRead ?? 0) + msgUsage.cacheRead,
+          }));
+        }
       }
       if (conversationId) {
         setMessages((prev) => {
@@ -1564,6 +1618,11 @@ function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, 
   const ctxWindow = defaultProvider?.contextWindow;
   const ctxPercent = ctxWindow ? Math.min((currentContextTokens / ctxWindow) * 100, 100) : null;
 
+  // ADR 23: 缓存命中率 = 缓存读取 token / 总输入 token(新输入 + 缓存读取)。
+  // 反映本次会话有多少输入是从 provider 缓存命中的,占比越高越省钱。
+  const totalInputForCache = input + cacheRead;
+  const cacheHitRate = totalInputForCache > 0 ? (cacheRead / totalInputForCache) * 100 : null;
+
   return (
     <div className="token-usage-wrap">
       <span className="token-usage">
@@ -1576,6 +1635,11 @@ function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, 
           <span className="token-usage-detail"> {isZh ? '入' : '↑'}{(input / 1000).toFixed(1)}k {isZh ? '出' : '↓'}{(output / 1000).toFixed(1)}k</span>
         ) : null}
         {costStr ? <span className="token-usage-cost">{costStr}</span> : null}
+        {cacheHitRate != null ? (
+          <span className="token-usage-detail" title={isZh ? '缓存命中率(缓存读取 / 总输入)' : 'Cache hit rate (cache read / total input)'}>
+            {isZh ? '缓存' : 'cache'} {cacheHitRate.toFixed(0)}%
+          </span>
+        ) : null}
         {isStreaming && !activeUsage ? <span className="token-usage-detail">{isZh ? '计费待返回' : 'usage pending'}</span> : null}
       </span>
       {ctxPercent != null ? (

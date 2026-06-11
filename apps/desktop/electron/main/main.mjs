@@ -402,6 +402,9 @@ ipcMain.handle('conversations:append-message', (_, { id, message }) => conversat
 ipcMain.handle('conversations:update-last-message', (_, { id, content }) => conversationStore.updateLastMessage(id, content));
 ipcMain.handle('conversations:replace-messages', (_, { id, messages }) => conversationStore.replaceMessages(id, messages));
 ipcMain.handle('conversations:delete', (_, { id }) => conversationStore.deleteConversation(id));
+// 累计计费账本:独立于消息/压缩,累加到 index meta 的 lifetimeUsage(见 ADR 23)。
+// 压缩(replace-messages)只重写消息文件,不碰 meta,故 lifetimeUsage 不受压缩影响。
+ipcMain.handle('conversations:add-usage', (_, { id, usage }) => conversationStore.addUsage(id, usage));
 
 // ── LLM Chat ──
 ipcMain.handle('chat:send', (event, {
