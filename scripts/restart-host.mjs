@@ -23,7 +23,7 @@
 
 import { spawn } from 'node:child_process';
 import { execSync } from 'node:child_process';
-import { appendFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { appendFileSync, writeFileSync, unlinkSync, openSync } from 'node:fs';
 import process from 'node:process';
 
 // 独立日志路径：只由本脚本写，绝不与 dev server 的混合 stdout 共用文件。
@@ -33,6 +33,10 @@ const LOG = '/tmp/peer-agent-restart-executor.log';
 // 启动标记文件：detached 执行体一启动就写它（带 PID + 时间戳），
 // 让发起方可以轮询这个文件来获得"执行体确实活着"的硬证据。
 const STARTED_MARKER = '/tmp/peer-agent-restart-executor.started';
+// detached 子执行体的 stdio 重定向目标：捕获子进程在写出第一行 log() 之前的
+// 任何启动期崩溃（之前用 stdio:'ignore' 会把这类错误吞掉，导致"spawn 了却零副作用"
+// 无从排查）。与 LOG 分开，避免父子进程互相覆盖。
+const CHILD_STDIO_LOG = '/tmp/peer-agent-restart-executor.child-stdio.log';
 
 function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
@@ -97,9 +101,18 @@ function reSpawnDetached(args) {
     // 注意：不带 --detach，子执行体直接进入真正的重启流程
   ];
   log(`re-spawning detached executor: node ${childArgs.join(' ')}`);
+  // 关键修复：detached 子进程的 stdio 不再用 'ignore'（会吞掉启动期崩溃，
+  // 导致\"spawn 了却零副作用\"无法排查）。改为把 stdout/stderr 重定向到独立的
+  // crash 日志文件，这样子进程在写出第一行 log() 之前的任何报错都会落盘。
+  let childOut = 'ignore';
+  try {
+    childOut = openSync(CHILD_STDIO_LOG, 'a');
+  } catch {
+    childOut = 'ignore';
+  }
   const child = spawn(process.execPath, childArgs, {
     detached: true, // 创建新进程组 + 新 session（脱离本体进程树）
-    stdio: 'ignore',
+    stdio: childOut === 'ignore' ? 'ignore' : ['ignore', childOut, childOut],
     cwd: args.hostDir,
     env: process.env,
   });
@@ -187,10 +200,14 @@ async function runRestart(args) {
 
 async function main() {
   const args = parseArgs(process.argv);
-  try {
-    writeFileSync(LOG, '');
-  } catch {
-    /* ignore */
+  // 只有 --detach 启动器(父)截断日志；脱离后的子执行体绝不截断，
+  // 否则会把父进程刚写的"re-spawning"行抹掉，导致无法判断脱离链路是否走通。
+  if (args.detach) {
+    try {
+      writeFileSync(LOG, '');
+    } catch {
+      /* ignore */
+    }
   }
 
   if (!args.hostDir) {
