@@ -6,6 +6,8 @@
   height: 100%;
   min-height: 0;
   background: var(--chrome-canvas);
+  /* 表达层定位上下文:让右缘消息导航轨(.message-rail)相对会话面板绝对定位。 */
+  position: relative;
 }
 
 /* ── Thread ── */
@@ -804,4 +806,152 @@
 }
 .pending-resume-dismiss:hover {
   background: var(--control-composer);
+}
+
+/* ── Message Rail · 右缘用户消息导航轨 ── */
+/*
+ * 表达层组件:把当前会话的用户消息映射成右缘刻度,hover/focus 展开为可点击列表。
+ * 绝对定位在 .chat-surface 内,避开会话列与输入框;不参与列布局,不持有真值。
+ */
+.message-rail {
+  position: absolute;
+  top: 52px;
+  right: var(--space-2);
+  bottom: 96px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+/* ── 折叠态:右缘竖排短横杠(默认形态) ── */
+.message-rail-ticks {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: var(--space-2) 4px;
+  max-height: 100%;
+  pointer-events: auto;
+  transition: opacity var(--za-motion-fast);
+}
+.message-rail-tick {
+  width: 12px;
+  height: 2px;
+  flex: 0 0 auto;
+  border-radius: 1px;
+  background: var(--chrome-hairline);
+  transition: background var(--za-motion-fast);
+}
+/* hover/focus 整条轨道时,横杠淡入提示色。 */
+.message-rail:hover .message-rail-tick {
+  background: var(--graphite-mute);
+}
+
+/* ── 展开态:hover/focus 时滑出的标题面板(默认隐藏) ── */
+.message-rail-panel {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  max-height: 100%;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-2);
+  background: var(--paper-sheet);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 30px rgba(16, 24, 40, 0.14);
+  opacity: 0;
+  transform: translate(8px, -50%);
+  pointer-events: none;
+  transition:
+    opacity var(--za-motion-medium) var(--za-ease-decelerate),
+    transform var(--za-motion-medium) var(--za-ease-decelerate);
+}
+.message-rail:hover .message-rail-panel,
+.message-rail:focus-within .message-rail-panel {
+  opacity: 1;
+  transform: translate(0, -50%);
+  pointer-events: auto;
+}
+/* 展开时隐藏折叠态横杠,避免与面板重叠。 */
+.message-rail:hover .message-rail-ticks,
+.message-rail:focus-within .message-rail-ticks {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.message-rail-panel-title {
+  flex: 0 0 auto;
+  padding: 0 var(--space-2) var(--space-1);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--graphite-mute);
+}
+.message-rail-panel-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.message-rail-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  color: var(--graphite-soft);
+  transition:
+    background var(--za-motion-fast),
+    color var(--za-motion-fast);
+}
+.message-rail-item-index {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--graphite-mute);
+}
+.message-rail-item-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+.message-rail-item:hover,
+.message-rail-item:focus-visible {
+  background: var(--control-composer);
+  color: var(--graphite-base);
+  outline: none;
+}
+.message-rail-item:focus-visible {
+  box-shadow: 0 0 0 3px var(--za-focus);
+}
+
+/* 导航高亮:scrollToMessage 命中后短暂闪烁目标消息。 */
+.chat-msg-flash {
+  animation: chat-msg-flash var(--za-motion-slow) var(--za-ease-decelerate);
+}
+@keyframes chat-msg-flash {
+  0% {
+    background: var(--azure-soft);
+    box-shadow: 0 0 0 6px var(--azure-soft);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 6px transparent;
+  }
 }
