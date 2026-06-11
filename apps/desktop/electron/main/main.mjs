@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createCapabilityRegistry } from './capability-registry.mjs';
@@ -351,6 +351,29 @@ ipcMain.handle('core:health', (_event, payload) => {
 ipcMain.handle('workspace:list', () => {
   const all = settingsStore.getAll();
   return { workspaces: all.workspaces || [], activeWorkspace: all.activeWorkspace || null };
+});
+
+ipcMain.handle('workspace:ensure-default', () => {
+  const all = settingsStore.getAll();
+  const workspaces = all.workspaces || [];
+  // 已有 active 工作区：直接返回，不做任何事
+  if (all.activeWorkspace && existsSync(all.activeWorkspace)) {
+    return { path: all.activeWorkspace, name: path.basename(all.activeWorkspace), created: false };
+  }
+  // 没有 active：在用户主目录下初始化一个默认工作区
+  const defaultDir = path.join(app.getPath('home'), 'PeerAgent');
+  let created = false;
+  if (!existsSync(defaultDir)) {
+    mkdirSync(defaultDir, { recursive: true });
+    created = true;
+  }
+  const name = path.basename(defaultDir);
+  if (!workspaces.some((w) => w.path === defaultDir)) {
+    workspaces.push({ path: defaultDir, name, addedAt: new Date().toISOString() });
+  }
+  settingsStore.merge({ workspaces, activeWorkspace: defaultDir });
+  llmChatService.setWorkspacePath(defaultDir);
+  return { path: defaultDir, name, created };
 });
 
 ipcMain.handle('workspace:add', async (event) => {

@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
 import { getDataHome } from '../data-store.mjs';
 import { createLocalToolHost } from '../runtime-gateway/local-tool-host.mjs';
 import { createLocalShellProvider } from '../runtime-gateway/local-shell-provider.mjs';
@@ -25,6 +28,17 @@ function createSessionStore(locale) {
 
 function executorCapabilityId(tool) {
   return tool?.runtime?.executorCapabilityId || tool?.capabilityId || null;
+}
+
+// 工具执行 cwd 的安全兜底:绝不回退到 process.cwd()(打包后 = 根目录),
+// 而是回退到用户主目录下的默认工作区 ~/PeerAgent,并确保其存在。
+function resolveSafeWorkspaceRoot(workspacePath) {
+  if (workspacePath && existsSync(workspacePath)) return workspacePath;
+  const defaultDir = path.join(os.homedir(), 'PeerAgent');
+  if (!existsSync(defaultDir)) {
+    mkdirSync(defaultDir, { recursive: true });
+  }
+  return defaultDir;
 }
 
 export function resolveProjectedModelToolCall({
@@ -152,7 +166,7 @@ export async function executeProjectedModelTool({
     return { success: false, error: projection.error };
   }
 
-  const cwd = workspacePath || process.cwd();
+  const cwd = resolveSafeWorkspaceRoot(workspacePath);
   const userDataPath = getDataHome();
   const host = createLocalToolHost({
     workspaceRoot: cwd,

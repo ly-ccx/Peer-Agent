@@ -34,6 +34,7 @@ const unavailableApi: ClientApi = {
   mcpUninstall: unavailableMethod('mcpUninstall'),
   mcpConnectAndRegister: unavailableMethod('mcpConnectAndRegister'),
   workspaceList: unavailableMethod('workspaceList'),
+  workspaceEnsureDefault: unavailableMethod('workspaceEnsureDefault'),
   workspaceAdd: unavailableMethod('workspaceAdd'),
   workspaceSetActive: unavailableMethod('workspaceSetActive'),
   workspaceRemove: unavailableMethod('workspaceRemove'),

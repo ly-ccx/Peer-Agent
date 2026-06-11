@@ -101,6 +101,7 @@ export interface BootstrapPreloadApi {
   readonly mcpUninstall: (params: { mcpId: string | number }) => Promise<unknown>;
   readonly mcpConnectAndRegister: (params: { serverUrl: string; serverName: string }) => Promise<{ success: boolean; toolCount: number }>;
   readonly workspaceList: () => Promise<{ workspaces: readonly { path: string; name: string; addedAt: string }[]; activeWorkspace: string | null }>;
+  readonly workspaceEnsureDefault: () => Promise<{ path: string; name: string; created: boolean }>;
   readonly workspaceAdd: () => Promise<{ path: string; name: string; existing: boolean } | null>;
   readonly workspaceSetActive: (params: { path: string | null }) => Promise<{ activeWorkspace: string | null }>;
   readonly workspaceRemove: (params: { path: string }) => Promise<unknown>;

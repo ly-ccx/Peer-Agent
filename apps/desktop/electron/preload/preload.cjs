@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   enableSkill: (skillId) => ipcRenderer.invoke('skills:enable', { skillId }),
   disableSkill: (skillId) => ipcRenderer.invoke('skills:disable', { skillId }),
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
+  workspaceEnsureDefault: () => ipcRenderer.invoke('workspace:ensure-default'),
   workspaceAdd: () => ipcRenderer.invoke('workspace:add'),
   workspaceSetActive: (params) => ipcRenderer.invoke('workspace:set-active', params),
   workspaceRemove: (params) => ipcRenderer.invoke('workspace:remove', params),

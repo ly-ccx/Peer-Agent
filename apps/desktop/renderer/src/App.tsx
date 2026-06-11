@@ -101,8 +101,15 @@ export function App() {
   }, [refreshConversations]);
 
   const handleNewChat = useCallback(async () => {
-    const conv = await clientApi.conversationsCreate({ workspacePath: activeWorkspace }) as ConversationMeta;
-    await refreshConversations();
+    // 没有工作区时不允许把对话落到根目录:先确保有一个工作区(必要时默认初始化)。
+    let ws = activeWorkspace;
+    if (!ws) {
+      const ensured = await clientApi.workspaceEnsureDefault();
+      ws = ensured.path;
+      setActiveWorkspace(ws);
+    }
+    const conv = await clientApi.conversationsCreate({ workspacePath: ws }) as ConversationMeta;
+    await refreshConversations(ws);
     setActiveConversationId(conv.id);
     setActivePage('chat');
   }, [refreshConversations, activeWorkspace]);
