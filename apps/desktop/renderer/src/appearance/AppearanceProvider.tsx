@@ -10,6 +10,7 @@ import type { ReactNode } from 'react';
 import type {
   AppearanceDensity,
   AppearanceMode,
+  AppearancePalette,
   AppearanceScheme,
   AppearanceSettings,
 } from './appearanceTypes';
@@ -23,6 +24,7 @@ interface AppearanceContextValue {
   readonly activeScheme: AppearanceScheme;
   readonly settings: AppearanceSettings;
   readonly setMode: (mode: AppearanceMode) => void;
+  readonly setPalette: (palette: AppearancePalette) => void;
   readonly setDensity: (density: AppearanceDensity) => void;
   readonly reset: () => void;
 }
@@ -98,6 +100,10 @@ export function AppearanceProvider({
     setSettings((current) => ({ ...current, mode }));
   }, []);
 
+  const setPalette = useCallback((palette: AppearancePalette) => {
+    setSettings((current) => ({ ...current, palette }));
+  }, []);
+
   const setDensity = useCallback((density: AppearanceDensity) => {
     setSettings((current) => ({ ...current, density }));
   }, []);
@@ -108,9 +114,10 @@ export function AppearanceProvider({
     activeScheme,
     settings,
     setMode,
+    setPalette,
     setDensity,
     reset,
-  }), [activeScheme, reset, setDensity, setMode, settings]);
+  }), [activeScheme, reset, setDensity, setMode, setPalette, settings]);
 
   return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
 }

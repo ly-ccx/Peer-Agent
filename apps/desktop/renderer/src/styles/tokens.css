@@ -337,6 +337,189 @@
 }
 
 /* ─────────────────────────────────────────────────────────────
+ *  Catppuccin 配色（方案①：浅=Latte / 深=Mocha）
+ *  仅在 [data-palette="catppuccin"] 时覆盖 Frost 默认。
+ *  覆盖范围：核心正名层 + --za-* 别名层（组件实际消费层）。
+ *  红线沿用 Frost：accent 不上 CTA；primary-control 用高对比文字阶。
+ *  调色板来源：catppuccin/catppuccin 官方 Latte / Mocha。
+ * ───────────────────────────────────────────────────────────── */
+
+/* ── Catppuccin Latte（浅色）────────────────────────────────── */
+[data-palette="catppuccin"]:root,
+[data-palette="catppuccin"][data-theme="light"] {
+  color-scheme: light;
+
+  /* 核心正名层 */
+  --chrome-canvas: #EFF1F5;   /* base */
+  --chrome-raised: #E6E9EF;   /* mantle */
+  --chrome-sunken: #DCE0E8;   /* crust */
+  --chrome-hover: #E6E9EF;
+  --chrome-active: #CCD0DA;   /* surface0 */
+  --chrome-hairline: #BCC0CC; /* surface1 */
+  --paper-base: #E6E9EF;
+  --paper-sheet: #EFF1F5;
+  --paper-sunken: #DCE0E8;
+  --paper-hover: #E6E9EF;
+  --paper-active: #CCD0DA;
+  --control-composer: #E6E9EF;
+  --control-fill: #DCE0E8;
+  --control-fill-hover: #CCD0DA;
+  --graphite-base: #4C4F69;   /* text */
+  --graphite-base-hover: #5C5F77; /* subtext0 */
+  --graphite-soft: #6C6F85;   /* subtext0 */
+  --graphite-fade: #8C8FA1;   /* overlay1 */
+  --graphite-mute: #9CA0B0;   /* overlay0 */
+  --graphite-hairline: #BCC0CC;
+  --azure-seal: #1E66F5;      /* blue */
+  --azure-soft: #7287FD;      /* lavender */
+  --azure-trace: #DCE0E8;
+  --state-thinking: #8839EF;  /* mauve */
+  --state-active-on: #4C4F69;
+  --state-confirm: #1E66F5;
+  --state-success: #40A02B;   /* green */
+  --state-warn: #DF8E1D;      /* yellow */
+  --state-danger: #D20F39;    /* red */
+  --state-denied: #6C6F85;
+
+  /* --za-* 别名层（组件实际消费） */
+  --za-bg-0: #EFF1F5;
+  --za-bg-1: #E6E9EF;
+  --za-bg-2: #DCE0E8;
+  --za-panel-1: #EFF1F5;
+  --za-surface-0: #EFF1F5;
+  --za-surface-1: #E6E9EF;
+  --za-surface-2: #DCE0E8;
+  --za-line: #BCC0CC;
+  --za-line-strong: #9CA0B0;
+  --za-text: #4C4F69;
+  --za-text-soft: #5C5F77;
+  --za-text-muted: #6C6F85;
+  --za-text-faint: #8C8FA1;
+  --za-accent: #1E66F5;
+  --za-accent-soft: #DCE0F4;
+  --za-accent-ink: #EFF1F5;
+  --za-good: #40A02B;
+  --za-good-soft: rgba(64, 160, 43, 0.12);
+  --za-warn: #DF8E1D;
+  --za-warn-soft: rgba(223, 142, 29, 0.12);
+  --za-danger: #D20F39;
+  --za-danger-soft: rgba(210, 15, 57, 0.12);
+  --za-app-bg: #EFF1F5;
+  --za-thread-bg: #EFF1F5;
+  --za-thread-glow: rgba(30, 102, 245, 0.03);
+  --za-hover: #E6E9EF;
+  --za-active: #CCD0DA;
+  --za-sidebar-bg: #E6E9EF;
+  --za-sidebar-active-bg: #CCD0DA;
+  --za-sidebar-thread-active-bg: #DCE0E8;
+  --za-sidebar-active-border: #BCC0CC;
+  --za-inset-highlight: #FFFFFF;
+  --za-focus: rgba(30, 102, 245, 0.30);
+  --za-scrollbar-thumb: rgba(156, 160, 176, 0.45);
+  --za-popover-bg: #EFF1F5;
+  --za-header-bg: #E6E9EF;
+  --za-message-bg: #E6E9EF;
+  --za-user-message-bg: #E6E9EF;
+  --za-composer-bg: #EFF1F5;
+  --za-composer-empty-bg: #EFF1F5;
+  --za-control-fill: #DCE0E8;
+  --za-control-fill-hover: #CCD0DA;
+  --za-control-ink: #4C4F69;
+  --za-primary-control-bg: #4C4F69;
+  --za-primary-control-ink: #EFF1F5;
+  --za-user-accent: #1E66F5;
+  --za-user-background: #EFF1F5;
+  --za-user-foreground: #4C4F69;
+}
+
+/* ── Catppuccin Mocha（深色）────────────────────────────────── */
+[data-palette="catppuccin"][data-theme="dark"] {
+  color-scheme: dark;
+
+  /* 核心正名层 */
+  --chrome-canvas: #1E1E2E;   /* base */
+  --chrome-raised: #181825;   /* mantle */
+  --chrome-sunken: #11111B;   /* crust */
+  --chrome-hover: #313244;    /* surface0 */
+  --chrome-active: #45475A;   /* surface1 */
+  --chrome-hairline: #45475A;
+  --paper-base: #181825;
+  --paper-sheet: #1E1E2E;
+  --paper-sunken: #11111B;
+  --paper-hover: #313244;
+  --paper-active: #45475A;
+  --control-composer: #11111B;
+  --control-fill: #313244;
+  --control-fill-hover: #45475A;
+  --graphite-base: #CDD6F4;   /* text */
+  --graphite-base-hover: #BAC2DE; /* subtext1 */
+  --graphite-soft: #A6ADC8;   /* subtext0 */
+  --graphite-fade: #7F849C;   /* overlay1 */
+  --graphite-mute: #6C7086;   /* overlay0 */
+  --graphite-hairline: #45475A;
+  --azure-seal: #89B4FA;      /* blue */
+  --azure-soft: #B4BEFE;      /* lavender */
+  --azure-trace: #313244;
+  --state-thinking: #CBA6F7;  /* mauve */
+  --state-active-on: #CDD6F4;
+  --state-confirm: #89B4FA;
+  --state-success: #A6E3A1;   /* green */
+  --state-warn: #F9E2AF;      /* yellow */
+  --state-danger: #F38BA8;    /* red */
+  --state-denied: #6C7086;
+
+  /* --za-* 别名层（组件实际消费） */
+  --za-bg-0: #1E1E2E;
+  --za-bg-1: #181825;
+  --za-bg-2: #11111B;
+  --za-panel-1: #1E1E2E;
+  --za-surface-0: #1E1E2E;
+  --za-surface-1: #313244;
+  --za-surface-2: #45475A;
+  --za-line: #45475A;
+  --za-line-strong: #585B70;
+  --za-text: #CDD6F4;
+  --za-text-soft: #BAC2DE;
+  --za-text-muted: #A6ADC8;
+  --za-text-faint: #7F849C;
+  --za-accent: #89B4FA;
+  --za-accent-soft: #2A2B47;
+  --za-accent-ink: #11111B;
+  --za-good: #A6E3A1;
+  --za-good-soft: rgba(166, 227, 161, 0.14);
+  --za-warn: #F9E2AF;
+  --za-warn-soft: rgba(249, 226, 175, 0.14);
+  --za-danger: #F38BA8;
+  --za-danger-soft: rgba(243, 139, 168, 0.14);
+  --za-app-bg: #1E1E2E;
+  --za-thread-bg: #1E1E2E;
+  --za-thread-glow: rgba(137, 180, 250, 0.05);
+  --za-hover: #313244;
+  --za-active: #45475A;
+  --za-sidebar-bg: #181825;
+  --za-sidebar-active-bg: #45475A;
+  --za-sidebar-thread-active-bg: #313244;
+  --za-sidebar-active-border: #585B70;
+  --za-inset-highlight: #181825;
+  --za-focus: rgba(137, 180, 250, 0.30);
+  --za-scrollbar-thumb: rgba(108, 112, 134, 0.40);
+  --za-popover-bg: #181825;
+  --za-header-bg: #181825;
+  --za-message-bg: #313244;
+  --za-user-message-bg: #313244;
+  --za-composer-bg: #11111B;
+  --za-composer-empty-bg: #11111B;
+  --za-control-fill: #313244;
+  --za-control-fill-hover: #45475A;
+  --za-control-ink: #CDD6F4;
+  --za-primary-control-bg: #CDD6F4;
+  --za-primary-control-ink: #11111B;
+  --za-user-accent: #89B4FA;
+  --za-user-background: #1E1E2E;
+  --za-user-foreground: #CDD6F4;
+}
+
+/* ─────────────────────────────────────────────────────────────
  *  Density: Compact（默认 comfortable）
  * ───────────────────────────────────────────────────────────── */
 [data-density="compact"] {

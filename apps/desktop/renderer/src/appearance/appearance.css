@@ -41,12 +41,111 @@
     color: var(--za-text-faint);
   }
 
+  /* 字段标签：mode / palette 等分组的小标题 */
+  .appearance-field-label {
+    @apply text-[11px] font-medium;
+    color: var(--za-text-muted);
+    letter-spacing: 0.01em;
+  }
+
   /* 浅 / 深 / 跟随系统 — 三段式分段控件 */
   .appearance-segmented {
     @apply grid gap-1 rounded-[8px] p-1;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     background: var(--za-surface-1);
     border: 1px solid var(--za-line);
+  }
+
+  /* 配色选择：下拉框（配色会越来越多，下拉比分段控件更紧凑、可扩展）。
+     新增配色只需在 paletteRegistry.ts 加一条记录，<option> 自动跟随。 */
+  /* 自定义配色下拉框（PaletteSelect）：非原生 <select>，主题完全可控。
+     触发器 + 自绘 listbox，每项带色点和选中勾。 */
+  .palette-select {
+    @apply relative;
+  }
+
+  .palette-select-trigger {
+    @apply grid w-full items-center rounded-[8px] px-2.5 text-left;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    min-height: 2.25rem;
+    background: var(--za-surface-1);
+    border: 1px solid var(--za-line);
+    cursor: pointer;
+    transition: border-color var(--za-motion-fast, 0.15s) ease,
+                background var(--za-motion-fast, 0.15s) ease;
+  }
+
+  .palette-select-trigger:hover {
+    border-color: var(--za-line-strong, var(--za-line));
+  }
+
+  .palette-select-trigger:focus-visible,
+  .palette-select-trigger[aria-expanded='true'] {
+    outline: none;
+    border-color: var(--za-accent);
+  }
+
+  .palette-select-value {
+    @apply truncate text-[12px] font-normal;
+    color: var(--za-text);
+  }
+
+  .palette-select-caret {
+    @apply pointer-events-none inline-flex items-center justify-center;
+    color: var(--za-text-muted);
+    transition: transform var(--za-motion-fast, 0.15s) ease;
+  }
+
+  .palette-select-caret.open {
+    transform: rotate(180deg);
+  }
+
+  /* 自绘下拉菜单：绝对定位浮层，主题色一致。 */
+  .palette-select-list {
+    @apply absolute left-0 right-0 z-50 m-0 mt-1 list-none overflow-auto p-1;
+    top: 100%;
+    max-height: 16rem;
+    border-radius: 10px;
+    background: var(--za-surface-1);
+    border: 1px solid var(--za-line);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+    outline: none;
+  }
+
+  .palette-select-option {
+    @apply grid items-center rounded-[6px] px-2 text-[12px] font-normal;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    min-height: 2rem;
+    color: var(--za-text);
+    cursor: pointer;
+  }
+
+  .palette-select-option.active {
+    background: var(--za-surface-hover, var(--za-control-fill, rgba(127, 127, 127, 0.12)));
+  }
+
+  .palette-select-option.selected {
+    color: var(--za-accent);
+    font-weight: 600;
+  }
+
+  .palette-select-option-label {
+    @apply truncate;
+  }
+
+  .palette-select-check {
+    @apply inline-flex items-center justify-center;
+    color: var(--za-accent);
+    width: 14px;
+  }
+
+  /* 配色色板小圆点：直观呈现该 palette 的主色相。
+     具体颜色由组件 inline style 从配色注册表的 dotColor 注入。 */
+  .palette-dot {
+    @apply inline-block h-2.5 w-2.5 shrink-0 rounded-full;
+    border: 1px solid rgba(0, 0, 0, 0.12);
   }
 
   .appearance-segmented button {
@@ -68,55 +167,33 @@
     background: var(--za-primary-control-bg);
   }
 
-  /* 预览区：纸面上一段缩略卡，不带阴影、不带 thread-glow */
-  .appearance-preview {
-    @apply grid gap-2 rounded-[8px] p-3;
+  /* 色板区：当前配色 + 明暗下的真实色值清单 */
+  .appearance-swatches {
+    @apply grid gap-1 rounded-[8px] p-2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     border: 1px solid var(--za-line);
     background: var(--za-bg-1);
   }
 
-  .appearance-preview-sidebar {
-    @apply grid min-h-8 items-center gap-2 rounded-[6px] px-2 text-[11px];
-    grid-template-columns: 14px minmax(0, 1fr) auto;
-    color: var(--za-text-soft);
-    background: var(--za-surface-1);
+  .appearance-swatch {
+    @apply grid min-w-0 items-center gap-2 rounded-[6px] px-2 py-1.5 text-[11px];
+    grid-template-columns: 16px minmax(0, 1fr) auto;
   }
 
-  /* 预览侧栏的小圆点：朱砂方印缩影（白名单 #1：品牌印）*/
-  .appearance-preview-sidebar span {
-    @apply h-3 w-3 rounded-[2px];
-    background: var(--cinnabar-seal);
-  }
-
-  .appearance-preview-sidebar strong {
-    @apply overflow-hidden text-ellipsis whitespace-nowrap font-medium;
-    font-family: var(--font-serif-zh);
-    letter-spacing: -0.01em;
-    color: var(--za-text);
-  }
-
-  .appearance-preview-sidebar small {
-    @apply text-[10.5px] font-normal;
-    color: var(--za-text-faint);
-  }
-
-  .appearance-preview-thread {
-    @apply grid gap-1 rounded-[8px] px-3 py-2;
+  .appearance-swatch-chip {
+    @apply h-4 w-4 rounded-[4px];
     border: 1px solid var(--za-line);
-    background: var(--za-message-bg);
   }
 
-  .appearance-preview-thread p {
-    @apply m-0 text-[13px] font-medium;
-    font-family: var(--font-serif-zh);
-    letter-spacing: -0.01em;
+  .appearance-swatch-name {
+    @apply overflow-hidden text-ellipsis whitespace-nowrap;
     color: var(--za-text);
   }
 
-  .appearance-preview-thread span {
-    @apply w-fit rounded-[4px] px-2 py-1 text-[10.5px];
-    color: var(--za-text-muted);
-    background: var(--za-surface-1);
+  .appearance-swatch-value {
+    @apply text-[10px] tabular-nums uppercase;
+    font-family: var(--font-mono);
+    color: var(--za-text-faint);
   }
 
   .appearance-reset {

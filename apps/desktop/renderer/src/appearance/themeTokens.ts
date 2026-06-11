@@ -12,6 +12,7 @@ import type {
   AppearanceSettings,
 } from './appearanceTypes';
 import { DEFAULT_APPEARANCE_SETTINGS } from './themePresets.ts';
+import { sanitizePalette } from './paletteRegistry';
 
 function isMode(value: unknown): value is AppearanceMode {
   return value === 'light' || value === 'dark' || value === 'system';
@@ -26,6 +27,8 @@ export function sanitizeSettings(raw: unknown): AppearanceSettings {
   const candidate = raw as Partial<AppearanceSettings>;
   return {
     mode: isMode(candidate.mode) ? candidate.mode : DEFAULT_APPEARANCE_SETTINGS.mode,
+    // palette 合法性由配色注册表统一判定，新增配色自动生效
+    palette: sanitizePalette(candidate.palette),
     density: isDensity(candidate.density) ? candidate.density : DEFAULT_APPEARANCE_SETTINGS.density,
   };
 }
@@ -35,6 +38,7 @@ export function applyAppearance(scheme: AppearanceScheme, settings: AppearanceSe
   const root = document.documentElement;
   root.dataset.theme = scheme;
   root.dataset.themeMode = settings.mode;
+  root.dataset.palette = settings.palette;
   root.dataset.density = settings.density;
   root.style.colorScheme = scheme;
 }

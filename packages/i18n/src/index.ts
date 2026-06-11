@@ -46,11 +46,11 @@ export type TranslationKey =
   | 'appearance.mode.light'
   | 'appearance.mode.dark'
   | 'appearance.mode.system'
+  | 'appearance.palette'
   | 'appearance.quick'
   | 'appearance.quick.black'
   | 'appearance.quick.white'
-  | 'appearance.preview'
-  | 'appearance.previewTool'
+  | 'appearance.swatches'
   | 'appearance.editTheme'
   | 'appearance.scheme.light'
   | 'appearance.scheme.dark'
@@ -486,11 +486,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.mode.light': '浅色',
     'appearance.mode.dark': '深色',
     'appearance.mode.system': '跟随系统',
+    'appearance.palette': '配色',
     'appearance.quick': '快速切换外观',
     'appearance.quick.black': '黑',
     'appearance.quick.white': '白',
-    'appearance.preview': '外观预览',
-    'appearance.previewTool': 'Tool · completed',
+    'appearance.swatches': '色板',
     'appearance.editTheme': '编辑主题',
     'appearance.scheme.light': '浅色主题',
     'appearance.scheme.dark': '深色主题',
@@ -944,11 +944,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.mode.light': 'Light',
     'appearance.mode.dark': 'Dark',
     'appearance.mode.system': 'System',
+    'appearance.palette': 'Palette',
     'appearance.quick': 'Quick appearance switch',
     'appearance.quick.black': 'Black',
     'appearance.quick.white': 'White',
-    'appearance.preview': 'Appearance preview',
-    'appearance.previewTool': 'Tool · completed',
+    'appearance.swatches': 'Palette colors',
     'appearance.editTheme': 'Edit theme',
     'appearance.scheme.light': 'Light theme',
     'appearance.scheme.dark': 'Dark theme',
