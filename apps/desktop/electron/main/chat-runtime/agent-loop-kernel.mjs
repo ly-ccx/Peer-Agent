@@ -5,6 +5,7 @@ export function createAgentLoopKernel({
   streamId,
   maxTurns = DEFAULT_AGENT_LOOP_MAX_TURNS,
   maxUnsupportedToolRetries = 1,
+  maxEmptyResponseRetries = 1,
 } = {}) {
   const usage = {
     inputTokens: 0,
@@ -13,6 +14,7 @@ export function createAgentLoopKernel({
     cacheReadTokens: 0,
   };
   let unsupportedToolRetries = 0;
+  let emptyResponseRetries = 0;
 
   function addUsage(streamUsage = null) {
     if (!streamUsage) return usage;
@@ -26,6 +28,12 @@ export function createAgentLoopKernel({
   function claimUnsupportedToolRetry() {
     if (unsupportedToolRetries >= maxUnsupportedToolRetries) return false;
     unsupportedToolRetries += 1;
+    return true;
+  }
+
+  function claimEmptyResponseRetry() {
+    if (emptyResponseRetries >= maxEmptyResponseRetries) return false;
+    emptyResponseRetries += 1;
     return true;
   }
 
@@ -46,10 +54,29 @@ export function createAgentLoopKernel({
     usage,
     addUsage,
     claimUnsupportedToolRetry,
+    claimEmptyResponseRetry,
     sendDone,
     sendError,
     sendHttpError,
   };
+}
+
+function isToolResultMessage(message) {
+  if (message?.role === 'tool') return true;
+  return (
+    message?.role === 'user' &&
+    Array.isArray(message.content) &&
+    message.content.some((block) => block?.type === 'tool_result')
+  );
+}
+
+function appendUserCorrection(apiMessages, content) {
+  const last = apiMessages?.[apiMessages.length - 1];
+  if (last?.role === 'user' && Array.isArray(last.content)) {
+    last.content.push({ type: 'text', text: content });
+    return;
+  }
+  apiMessages.push({ role: 'user', content });
 }
 
 export function handleTerminalTextResponse({
@@ -67,6 +94,16 @@ export function handleTerminalTextResponse({
     if (thinkingContent.trim()) {
       loop.sendDone();
       return { action: 'done', reason: 'thinking-only' };
+    }
+    if (
+      Array.isArray(apiMessages) &&
+      isToolResultMessage(apiMessages[apiMessages.length - 1]) &&
+      loop.claimEmptyResponseRetry?.()
+    ) {
+      const correction = responseGuard.emptyModelResponseCorrection?.()
+        || 'The previous model response was empty after tool results. Continue with text or a real tool call.';
+      appendUserCorrection(apiMessages, correction);
+      return { action: 'retry', reason: 'empty-response-after-tool-result' };
     }
     loop.sendError(responseGuard.emptyModelResponseError());
     return { action: 'stop', reason: 'empty-response' };

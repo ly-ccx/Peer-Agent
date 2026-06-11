@@ -143,7 +143,9 @@ describe('Provider adapters', () => {
 
       assert.equal(captured.url, 'https://example.test/v1/messages');
       assert.equal(captured.init.headers['x-api-key'], 'key');
-      assert.equal(captured.body.system, 'system');
+      assert.ok(Array.isArray(captured.body.system));
+      assert.equal(captured.body.system[0].text, 'system');
+      assert.equal(captured.body.system[0].cache_control.type, 'ephemeral');
       assert.equal(captured.body.thinking.type, 'enabled');
       assert.equal(result.ok, true);
       assert.equal(result.textContent, 'hello');

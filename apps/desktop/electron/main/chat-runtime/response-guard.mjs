@@ -48,3 +48,12 @@ export function unsupportedToolResponseFallback() {
 export function emptyModelResponseError() {
   return 'empty_model_response: 模型没有返回任何文本或工具调用，请检查当前模型、baseUrl、API 兼容性或模型是否支持当前请求格式。';
 }
+
+export function emptyModelResponseCorrection() {
+  return [
+    'The previous model response was empty immediately after tool results.',
+    'Continue from the actual tool results already provided.',
+    'Emit either a normal text answer or another real tool call.',
+    'Do not return an empty assistant message.',
+  ].join(' ');
+}

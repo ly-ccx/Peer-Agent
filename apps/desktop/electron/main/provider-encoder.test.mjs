@@ -113,7 +113,7 @@ describe('Provider message encoders', () => {
     assert.equal(body.max_tokens, 16384);
   });
 
-  it('applies ephemeral cache_control to system and the second-to-last message (ADR 24)', () => {
+  it('applies ephemeral cache_control to system and the second-to-last text message (ADR 24)', () => {
     const body = encodeAnthropicMessagesRequest({
       model: 'claude-test',
       system: 'stable system prefix',
@@ -129,7 +129,7 @@ describe('Provider message encoders', () => {
     assert.ok(Array.isArray(body.system));
     assert.equal(body.system[0].cache_control.type, 'ephemeral');
 
-    // 历史前缀断点: 打在【倒数第二条】(稳定前缀边界), 即 assistant 'reply'。
+    // 历史前缀断点: 从【倒数第二条】向前找到最近 text block, 即 assistant 'reply'。
     const secondToLast = body.messages[body.messages.length - 2];
     assert.ok(Array.isArray(secondToLast.content));
     const markedBlock = secondToLast.content[secondToLast.content.length - 1];
@@ -142,12 +142,89 @@ describe('Provider message encoders', () => {
       assert.equal(block.cache_control, undefined);
     }
 
-    // 第一条也不应带断点。
+    // 第一条也不应带断点, 因为倒数第二条已经有可缓存 text block。
     const firstMsg = body.messages[0];
     const firstBlocks = Array.isArray(firstMsg.content) ? firstMsg.content : [];
     for (const block of firstBlocks) {
       assert.equal(block.cache_control, undefined);
     }
+  });
+
+  it('does not put Anthropic cache_control on tool_use or tool_result blocks', () => {
+    const body = encodeAnthropicMessagesRequest({
+      model: 'claude-test',
+      system: 'stable system prefix',
+      messages: [
+        { role: 'user', content: 'initial task' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'need a file' },
+            { type: 'tool_use', id: 'tool-1', name: 'read_file', input: { path: 'a.ts' } },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'tool-1', content: 'file a' },
+          ],
+        },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'need another file' },
+            { type: 'tool_use', id: 'tool-2', name: 'read_file', input: { path: 'b.ts' } },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'tool-2', content: 'file b' },
+          ],
+        },
+      ],
+      effort: 'default',
+    });
+
+    const secondAssistant = body.messages[body.messages.length - 2];
+    const markedText = secondAssistant.content.find((block) => block.type === 'text');
+    const toolUse = secondAssistant.content.find((block) => block.type === 'tool_use');
+    const latestToolResult = body.messages[body.messages.length - 1].content[0];
+
+    assert.equal(markedText.cache_control.type, 'ephemeral');
+    assert.equal(toolUse.cache_control, undefined);
+    assert.equal(latestToolResult.cache_control, undefined);
+  });
+
+  it('walks backward to the nearest text block when the second-to-last message is tool-only', () => {
+    const body = encodeAnthropicMessagesRequest({
+      model: 'claude-test',
+      system: 'stable system prefix',
+      messages: [
+        { role: 'user', content: 'initial task' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'tool-1', name: 'read_file', input: { path: 'a.ts' } },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'tool-1', content: 'file a' },
+          ],
+        },
+      ],
+      effort: 'default',
+    });
+
+    const firstMsg = body.messages[0];
+    const toolUse = body.messages[1].content[0];
+    const toolResult = body.messages[2].content[0];
+
+    assert.equal(firstMsg.content[0].cache_control.type, 'ephemeral');
+    assert.equal(toolUse.cache_control, undefined);
+    assert.equal(toolResult.cache_control, undefined);
   });
 
   it('skips history breakpoint when only one message exists (ADR 24)', () => {

@@ -111,6 +111,74 @@ describe('agent loop kernel', () => {
     }]);
   });
 
+  it('retries once when an empty terminal response follows OpenAI tool results', () => {
+    const webContents = makeWebContents();
+    const loop = createAgentLoopKernel({ webContents, streamId: 's4c' });
+    const apiMessages = [
+      { role: 'assistant', content: null, tool_calls: [{ id: 't1', type: 'function', function: { name: 'bash', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 't1', content: '{"status":"success"}' },
+    ];
+
+    const result = handleTerminalTextResponse({
+      text: '',
+      apiMessages,
+      loop,
+      responseGuard: makeResponseGuard(),
+    });
+
+    assert.deepEqual(result, { action: 'retry', reason: 'empty-response-after-tool-result' });
+    assert.deepEqual(apiMessages[2], { role: 'user', content: 'empty retry correction' });
+    assert.deepEqual(webContents.events, []);
+  });
+
+  it('retries once by appending correction text to Anthropic tool results', () => {
+    const webContents = makeWebContents();
+    const loop = createAgentLoopKernel({ webContents, streamId: 's4d' });
+    const apiMessages = [
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 't1', name: 'read_file', input: { path: 'a' } }],
+      },
+      {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 't1', content: '{"kind":"local_file_ref"}' }],
+      },
+    ];
+
+    const result = handleTerminalTextResponse({
+      text: '',
+      apiMessages,
+      loop,
+      responseGuard: makeResponseGuard(),
+    });
+
+    assert.deepEqual(result, { action: 'retry', reason: 'empty-response-after-tool-result' });
+    assert.deepEqual(apiMessages[1].content[1], { type: 'text', text: 'empty retry correction' });
+    assert.deepEqual(webContents.events, []);
+  });
+
+  it('emits an error when the empty response retry budget is exhausted', () => {
+    const webContents = makeWebContents();
+    const loop = createAgentLoopKernel({
+      webContents,
+      streamId: 's4e',
+      maxEmptyResponseRetries: 0,
+    });
+
+    const result = handleTerminalTextResponse({
+      text: '',
+      apiMessages: [{ role: 'tool', tool_call_id: 't1', content: '{}' }],
+      loop,
+      responseGuard: makeResponseGuard(),
+    });
+
+    assert.deepEqual(result, { action: 'stop', reason: 'empty-response' });
+    assert.deepEqual(webContents.events, [{
+      channel: 'chat:stream:error',
+      payload: { streamId: 's4e', error: 'empty response' },
+    }]);
+  });
+
   it('adds one retry instruction for unsupported tool claims', () => {
     const webContents = makeWebContents();
     const loop = createAgentLoopKernel({ webContents, streamId: 's5' });
@@ -157,6 +225,7 @@ describe('agent loop kernel', () => {
 function makeResponseGuard() {
   return {
     emptyModelResponseError: () => 'empty response',
+    emptyModelResponseCorrection: () => 'empty retry correction',
     shouldRetryNoToolResponse: (text) => text.includes('fake tool result'),
     unsupportedToolResponseCorrection: () => 'retry correction',
     unsupportedToolResponseFallback: () => 'unsupported fallback',
