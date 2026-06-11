@@ -1,0 +1,111 @@
+/* ── Settings Page · 左侧分区列表 + 右侧配置内容 ── */
+
+.settings-page {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  height: 100%;
+  min-height: 0;
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-3);
+  padding-top: 52px;
+  border-right: 1px solid var(--pa-border-subtle);
+  overflow-y: auto;
+}
+
+.settings-nav-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-2) var(--space-2);
+}
+.settings-nav-header button {
+  background: none;
+  border: none;
+  color: var(--graphite-soft);
+  cursor: pointer;
+  font-size: 1.2rem;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  transition: color var(--za-motion-fast);
+}
+.settings-nav-header button:hover { color: var(--graphite-base); }
+.settings-nav-header strong {
+  font-family: var(--font-serif-zh);
+  font-size: 1.1rem;
+  color: var(--graphite-base);
+}
+
+.settings-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--pa-text-secondary);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  width: 100%;
+  transition: background var(--za-motion-fast), color var(--za-motion-fast);
+}
+.settings-nav-item:hover { background: var(--pa-surface-hover); }
+.settings-nav-item.active {
+  background: var(--pa-surface-hover);
+  color: var(--graphite-base);
+}
+
+.settings-content {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ── 外观分区在设置页内补齐内边距与收窄宽度 ──
+   .appearance-panel 原本设计在账户弹层(.sidebar-account-popover.appearance)
+   里使用,自身只有 grid+gap、没有 padding/max-width。搬进设置页后会贴边撑满,
+   这里只在 .settings-content 作用域内补齐,与其它分区(.llm-settings-panel /
+   .system-instructions-panel)的内边距和居中宽度保持一致。
+   (.llm-settings-panel 自身已带相同边距,无需在此重复。) */
+.settings-content > .appearance-panel {
+  box-sizing: border-box;
+  padding: var(--space-6);
+  padding-top: 52px;
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* ── 系统指令分区 · 与 .llm-settings-panel 视觉对齐 ── */
+.system-instructions-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  padding-top: 52px;
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.system-instructions-panel .llm-instructions-hint {
+  margin: 0;
+  color: var(--graphite-soft);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.system-instructions-panel .llm-instructions-card textarea {
+  min-height: 200px;
+}

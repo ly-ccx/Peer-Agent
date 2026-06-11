@@ -1,8 +1,8 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type {
-  AttachmentContextItem,
   ClientToolCall,
   ConfigInstructionContextItem,
+  ContextAttachmentItem,
   ContinuityContextItem,
   LlmProviderConfigView,
 } from '@peer-agent/protocol';
@@ -124,7 +124,7 @@ function buildAttachmentText(attachments: readonly ChatAttachment[]): string {
   return blocks.join('\n\n');
 }
 
-function buildAttachmentContext(attachments: readonly ChatAttachment[]): AttachmentContextItem[] {
+function buildAttachmentContext(attachments: readonly ChatAttachment[]): ContextAttachmentItem[] {
   return attachments.map((attachment) => ({
     id: attachment.id,
     name: attachment.name,
@@ -137,10 +137,13 @@ function buildAttachmentContext(attachments: readonly ChatAttachment[]): Attachm
       : attachment.kind === 'text'
         ? 'user_text_part'
         : 'metadata_only',
+    sourceKind: 'user_upload',
+    scope: 'conversation',
+    lifecycle: 'ephemeral',
   }));
 }
 
-function buildConversationAttachmentContext(messages: readonly ChatMsg[]): AttachmentContextItem[] {
+function buildConversationAttachmentContext(messages: readonly ChatMsg[]): ContextAttachmentItem[] {
   return messages.flatMap((message) => (
     message.role === 'user' && message.attachments?.length
       ? buildAttachmentContext(message.attachments)
@@ -452,6 +455,20 @@ function formatTokenCount(tokens: number): string {
   return `${(tokens / 1000).toFixed(1)}k`;
 }
 
+function usageFromLifetime(lifetime: {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheWriteTokens?: number;
+  cacheReadTokens?: number;
+}): { input: number; output: number; cacheWrite: number; cacheRead: number } {
+  return {
+    input: lifetime.inputTokens ?? 0,
+    output: lifetime.outputTokens ?? 0,
+    cacheWrite: lifetime.cacheWriteTokens ?? 0,
+    cacheRead: lifetime.cacheReadTokens ?? 0,
+  };
+}
+
 async function loadConversationMessages(conversationId: string): Promise<{
   messages: ChatMsg[];
   tokenUsage: { input: number; output: number; cacheWrite: number; cacheRead: number } | null;
@@ -504,12 +521,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
   ) {
     return {
       messages: loaded,
-      tokenUsage: {
-        input: lifetime.inputTokens ?? 0,
-        output: lifetime.outputTokens ?? 0,
-        cacheWrite: lifetime.cacheWriteTokens ?? 0,
-        cacheRead: lifetime.cacheReadTokens ?? 0,
-      },
+      tokenUsage: usageFromLifetime(lifetime),
     };
   }
   return {
@@ -667,7 +679,7 @@ export function ChatSurface({
       appendStreamThinking(content);
     });
 
-    const offDone = clientApi.onChatStreamDone(({ streamId, usage }) => {
+    const offDone = clientApi.onChatStreamDone(({ streamId, usage, lifetimeUsage }) => {
       if (streamId !== streamIdRef.current) return;
       typewriter.flush();
       setIsStreaming(false);
@@ -678,45 +690,19 @@ export function ChatSurface({
       const msgUsage = hasUsage
         ? { input: usage.inputTokens ?? 0, output: usage.outputTokens ?? 0, cacheWrite: usage.cacheWriteTokens ?? 0, cacheRead: usage.cacheReadTokens ?? 0 }
         : null;
-      if (msgUsage) {
-        // ADR 23: 把本回合 usage 累加到 index meta 的 lifetimeUsage(独立于消息 jsonl)。
-        // 压缩(replaceMessages)只重写消息文件、不碰 meta,故计费不会被压没。
-        // 落盘成功后以后端返回的权威累计值刷新右下角;失败则降级为内存累加。
-        if (conversationId) {
-          void clientApi
-            .conversationsAddUsage({
-              id: conversationId,
-              usage: {
-                inputTokens: msgUsage.input,
-                outputTokens: msgUsage.output,
-                cacheWriteTokens: msgUsage.cacheWrite,
-                cacheReadTokens: msgUsage.cacheRead,
-              },
-            })
-            .then((lifetime) => {
-              setTokenUsage({
-                input: lifetime.inputTokens,
-                output: lifetime.outputTokens,
-                cacheWrite: lifetime.cacheWriteTokens,
-                cacheRead: lifetime.cacheReadTokens,
-              });
-            })
-            .catch(() => {
-              setTokenUsage((prev) => ({
-                input: (prev?.input ?? 0) + msgUsage.input,
-                output: (prev?.output ?? 0) + msgUsage.output,
-                cacheWrite: (prev?.cacheWrite ?? 0) + msgUsage.cacheWrite,
-                cacheRead: (prev?.cacheRead ?? 0) + msgUsage.cacheRead,
-              }));
-            });
-        } else {
-          setTokenUsage((prev) => ({
-            input: (prev?.input ?? 0) + msgUsage.input,
-            output: (prev?.output ?? 0) + msgUsage.output,
-            cacheWrite: (prev?.cacheWrite ?? 0) + msgUsage.cacheWrite,
-            cacheRead: (prev?.cacheRead ?? 0) + msgUsage.cacheRead,
-          }));
-        }
+      if (lifetimeUsage) {
+        // Usage ledger is owned by main/runtime; renderer only reflects the
+        // authoritative lifetimeUsage returned with the stream terminal event.
+        setTokenUsage(usageFromLifetime(lifetimeUsage));
+      } else if (msgUsage) {
+        // Compatibility fallback for older runtimes/tests that do not enrich
+        // terminal stream events with lifetimeUsage.
+        setTokenUsage((prev) => ({
+          input: (prev?.input ?? 0) + msgUsage.input,
+          output: (prev?.output ?? 0) + msgUsage.output,
+          cacheWrite: (prev?.cacheWrite ?? 0) + msgUsage.cacheWrite,
+          cacheRead: (prev?.cacheRead ?? 0) + msgUsage.cacheRead,
+        }));
       }
       if (conversationId) {
         setMessages((prev) => {
@@ -810,7 +796,7 @@ export function ChatSurface({
       });
     });
 
-    const offError = clientApi.onChatStreamError(({ streamId, error }) => {
+    const offError = clientApi.onChatStreamError(({ streamId, error, usage, lifetimeUsage }) => {
       if (streamId !== streamIdRef.current) return;
       typewriter.flush();
       setIsStreaming(false);
@@ -818,6 +804,22 @@ export function ChatSurface({
       setActiveUsage(null);
       setPendingPermissionCalls([]);
       setStreamError(error);
+      if (lifetimeUsage) {
+        setTokenUsage(usageFromLifetime(lifetimeUsage));
+      } else if (usage?.inputTokens || usage?.outputTokens || usage?.cacheWriteTokens || usage?.cacheReadTokens) {
+        const msgUsage = {
+          input: usage.inputTokens ?? 0,
+          output: usage.outputTokens ?? 0,
+          cacheWrite: usage.cacheWriteTokens ?? 0,
+          cacheRead: usage.cacheReadTokens ?? 0,
+        };
+        setTokenUsage((prev) => ({
+          input: (prev?.input ?? 0) + msgUsage.input,
+          output: (prev?.output ?? 0) + msgUsage.output,
+          cacheWrite: (prev?.cacheWrite ?? 0) + msgUsage.cacheWrite,
+          cacheRead: (prev?.cacheRead ?? 0) + msgUsage.cacheRead,
+        }));
+      }
       if (conversationId) {
         setMessages((prev) => {
           const last = prev[prev.length - 1];
@@ -1031,10 +1033,10 @@ export function ChatSurface({
 
     const contextMessages = [...messages, userMsg];
     const apiMessages = toApiMessages(contextMessages);
-    const attachmentContext = buildConversationAttachmentContext(contextMessages);
+    const contextAttachments = buildConversationAttachmentContext(contextMessages);
     const continuityContext = buildConversationContinuityContext(contextMessages);
     const configInstructions = buildConfigInstructionContext(systemInstructions);
-    void clientApi.chatSend({ messages: apiMessages, streamId, effort: turnEffort, conversationId, attachmentContext, continuityContext, configInstructions });
+    void clientApi.chatSend({ messages: apiMessages, streamId, effort: turnEffort, conversationId, contextAttachments, continuityContext, configInstructions });
   }, [isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, systemInstructions]);
 
   const handleSend = useCallback(async () => {
@@ -1091,10 +1093,10 @@ export function ChatSurface({
     setIsStreaming(true);
 
     const apiMessages = toApiMessages(contextMessages);
-    const attachmentContext = buildConversationAttachmentContext(contextMessages);
+    const contextAttachments = buildConversationAttachmentContext(contextMessages);
     const continuityContext = buildConversationContinuityContext(contextMessages);
     const configInstructions = buildConfigInstructionContext(systemInstructions);
-    void clientApi.chatSend({ messages: apiMessages, streamId, effort, conversationId, attachmentContext, continuityContext, configInstructions });
+    void clientApi.chatSend({ messages: apiMessages, streamId, effort, conversationId, contextAttachments, continuityContext, configInstructions });
   }, [isStreaming, hasProvider, conversationId, messages, effort, systemInstructions]);
 
   const handleBranch = useCallback(async (msgIndex: number) => {

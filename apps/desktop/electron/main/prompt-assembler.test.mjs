@@ -124,6 +124,36 @@ describe('System Context assembly', () => {
     assert.equal(context.snapshot.sectionRefs[2].source.attachments[1].contentIncluded, true);
   });
 
+  it('renders first-class context attachments through the attachment source', () => {
+    const context = buildSystemContext('/tmp/workspace', {
+      contextAttachments: [
+        {
+          id: 'clip-1',
+          name: 'pasted.png',
+          mimeType: 'image/png',
+          size: 4096,
+          kind: 'image',
+          contentIncluded: true,
+          transport: 'provider_image_part',
+          sourceKind: 'clipboard',
+          scope: 'turn',
+          lifecycle: 'ephemeral',
+          dataUrl: 'data:image/png;base64,SHOULD_NOT_BE_IN_SYSTEM_PROMPT',
+        },
+      ],
+    });
+
+    const attachmentSection = context.sections.find((section) => section.id === 'runtime.attachments');
+    assert.ok(attachmentSection);
+    const rendered = renderSystemContext(context);
+    assert.match(rendered, /pasted\.png/);
+    assert.match(rendered, /source=clipboard/);
+    assert.match(rendered, /scope=turn/);
+    assert.doesNotMatch(rendered, /SHOULD_NOT_BE_IN_SYSTEM_PROMPT/);
+    assert.equal(attachmentSection.source.attachments[0].sourceKind, 'clipboard');
+    assert.equal(attachmentSection.source.attachments[0].lifecycle, 'ephemeral');
+  });
+
   it('adds mode reminders only when the turn needs a non-default mode section', () => {
     const defaultContext = buildSystemContext('/tmp/workspace');
     assert.equal(defaultContext.sections.some((section) => section.id === 'runtime.mode'), false);
@@ -142,6 +172,27 @@ describe('System Context assembly', () => {
     assert.match(modeSection.content, /Reasoning effort: high/);
     assert.equal(modeSection.source.provider, 'anthropic');
     assert.equal(compactContext.snapshot.mode, 'compact');
+  });
+
+  it('renders explicit runtime reminders without mixing them into user messages', () => {
+    const context = buildSystemContext('/tmp/workspace', {
+      runtimeReminders: [{
+        id: 'permission-scope',
+        title: 'Permission scope',
+        kind: 'permission',
+        scope: 'session',
+        layer: 'L5_TOOL_RULES',
+        content: 'File writes outside the workspace require an explicit PermissionGrant.',
+      }],
+    });
+
+    const reminderSection = context.sections.find((section) => section.id === 'runtime.reminders.permission-scope');
+    assert.ok(reminderSection);
+    assert.equal(reminderSection.layer, 'L5_TOOL_RULES');
+    assert.equal(reminderSection.source.kind, 'permission');
+    assert.equal(reminderSection.source.scope, 'session');
+    assert.match(reminderSection.content, /Runtime reminder \(permission, scope=session\)/);
+    assert.match(reminderSection.content, /PermissionGrant/);
   });
 
   it('renders compaction continuity as a governed source instead of chat history text', () => {

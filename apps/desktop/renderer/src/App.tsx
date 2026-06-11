@@ -1,14 +1,13 @@
 import { createI18n } from '@peer-agent/i18n';
 import type { LlmProviderConfigView } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { LlmSettingsPanel } from './app/components/LlmSettingsPanel';
-import { AppearancePanel } from './appearance/AppearancePanel';
+import { SettingsPage } from './app/components/SettingsPage';
 import { useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { ChatSurface } from './chat/components/ChatSurface';
 import { Sidebar } from './chat/components/Sidebar';
 import { clientApi } from './clientApi';
 
-type AppPage = 'chat' | 'model-settings' | 'appearance';
+type AppPage = 'chat' | 'settings';
 
 interface ConversationMeta {
   id: string;
@@ -121,7 +120,17 @@ export function App() {
 
   return (
     <main className="app-shell">
-      {session ? (
+      {session && activePage === 'settings' ? (
+        <SettingsPage
+          i18n={i18n}
+          onBack={() => {
+            setActivePage('chat');
+            void refreshProviders();
+            void refreshSettings();
+          }}
+          onSystemInstructionsChanged={setSystemInstructions}
+        />
+      ) : session ? (
         <div className="app-layout">
           <Sidebar
             conversations={conversations}
@@ -131,40 +140,25 @@ export function App() {
             onNewChat={handleNewChat}
             onSelectConversation={handleSelectConversation}
             onDeleteConversation={handleDeleteConversation}
-            onOpenModelSettings={() => setActivePage('model-settings')}
-            onOpenAppearance={() => setActivePage('appearance')}
+            onOpenSettings={() => setActivePage('settings')}
             onWorkspaceChanged={handleWorkspaceChanged}
           />
           <section className="main-panel">
             <section className="thread">
-              {activePage === 'model-settings' ? (
-                <LlmSettingsPanel
-                  i18n={i18n}
-                  onBack={() => {
-                    setActivePage('chat');
-                    void refreshProviders();
-                    void refreshSettings();
-                  }}
-                  onSystemInstructionsChanged={setSystemInstructions}
-                />
-              ) : activePage === 'appearance' ? (
-                <AppearancePanel i18n={i18n} onBack={() => setActivePage('chat')} />
-              ) : (
-                <ChatSurface
-                  i18n={i18n}
-                  providers={providers}
-                  conversationId={activeConversationId}
-                  systemInstructions={systemInstructions}
-                  resumeTask={resumeTask}
-                  onResumeConsumed={() => {
-                    setResumeTask(null);
-                    void clientApi.clearPendingTask().catch(() => {});
-                  }}
-                  onOpenSettings={() => setActivePage('model-settings')}
-                  onConversationUpdated={refreshConversations}
-                  onBranch={(id) => { setActiveConversationId(id); void refreshConversations(); }}
-                />
-              )}
+              <ChatSurface
+                i18n={i18n}
+                providers={providers}
+                conversationId={activeConversationId}
+                systemInstructions={systemInstructions}
+                resumeTask={resumeTask}
+                onResumeConsumed={() => {
+                  setResumeTask(null);
+                  void clientApi.clearPendingTask().catch(() => {});
+                }}
+                onOpenSettings={() => setActivePage('settings')}
+                onConversationUpdated={refreshConversations}
+                onBranch={(id) => { setActiveConversationId(id); void refreshConversations(); }}
+              />
             </section>
           </section>
         </div>

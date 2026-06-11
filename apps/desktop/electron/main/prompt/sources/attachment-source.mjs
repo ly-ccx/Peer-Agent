@@ -15,6 +15,10 @@ function normalizeAttachment(item, index) {
     transport: typeof item.transport === 'string' ? item.transport : (
       kind === 'image' ? 'provider_image_part' : kind === 'text' ? 'user_text_part' : 'metadata_only'
     ),
+    sourceKind: typeof item.sourceKind === 'string' && item.sourceKind ? item.sourceKind : 'user_upload',
+    scope: typeof item.scope === 'string' && item.scope ? item.scope : 'conversation',
+    lifecycle: typeof item.lifecycle === 'string' && item.lifecycle ? item.lifecycle : 'ephemeral',
+    contentRef: typeof item.contentRef === 'string' && item.contentRef ? item.contentRef : null,
   };
 }
 
@@ -42,8 +46,12 @@ function formatAttachmentContext(attachments) {
       `mime=${attachment.mimeType}`,
       `size=${formatBytes(attachment.size)}`,
       `transport=${attachment.transport}`,
+      `source=${attachment.sourceKind}`,
+      `scope=${attachment.scope}`,
+      `lifecycle=${attachment.lifecycle}`,
       `contentIncluded=${attachment.contentIncluded ? 'yes' : 'no'}`,
-    ].join('; ')),
+      attachment.contentRef ? `contentRef=${attachment.contentRef}` : null,
+    ].filter(Boolean).join('; ')),
   ];
   if (attachments.length > shown.length) {
     lines.push(`- ... ${attachments.length - shown.length} more attachment(s) omitted from context metadata.`);
@@ -58,9 +66,11 @@ export function createAttachmentPromptSource() {
     priority: 50,
     trust: 'user',
     observe(input = {}) {
-      const rawAttachments = Array.isArray(input.attachmentContext)
-        ? input.attachmentContext
-        : [];
+      const rawAttachments = Array.isArray(input.contextAttachments)
+        ? input.contextAttachments
+        : Array.isArray(input.attachmentContext)
+          ? input.attachmentContext
+          : [];
       const attachments = rawAttachments
         .map(normalizeAttachment)
         .filter(Boolean);
@@ -88,6 +98,10 @@ export function createAttachmentPromptSource() {
             kind: attachment.kind,
             contentIncluded: attachment.contentIncluded,
             transport: attachment.transport,
+            sourceKind: attachment.sourceKind,
+            scope: attachment.scope,
+            lifecycle: attachment.lifecycle,
+            contentRef: attachment.contentRef,
           })),
         },
         trust: 'user',

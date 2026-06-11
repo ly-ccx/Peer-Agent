@@ -146,13 +146,22 @@ export interface BootstrapPreloadApi {
   }) => Promise<readonly PromptContextEpochRecord[]>;
   readonly onChatStreamDelta: (listener: (payload: { streamId: string; content: string }) => void) => () => void;
   readonly onChatStreamThinking: (listener: (payload: { streamId: string; content: string }) => void) => () => void;
-  readonly onChatStreamDone: (listener: (payload: { streamId: string; usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number } }) => void) => () => void;
+  readonly onChatStreamDone: (listener: (payload: {
+    streamId: string;
+    usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number };
+    lifetimeUsage?: LifetimeUsage;
+  }) => void) => () => void;
   readonly onChatStreamAborted: (listener: (payload: { streamId: string }) => void) => () => void;
   readonly onChatStreamUsage: (listener: (payload: { streamId: string; usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number } }) => void) => () => void;
   readonly onChatStreamToolCall: (listener: (payload: { streamId: string; tool: string; args: Record<string, unknown>; toolCallId: string }) => void) => () => void;
   readonly onChatStreamToolResult: (listener: (payload: { streamId: string; toolCallId: string; result: string }) => void) => () => void;
   readonly onChatStreamPermissionRequest: (listener: (payload: { streamId: string; call: ClientToolCall }) => void) => () => void;
-  readonly onChatStreamError: (listener: (payload: { streamId: string; error: string }) => void) => () => void;
+  readonly onChatStreamError: (listener: (payload: {
+    streamId: string;
+    error: string;
+    usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number };
+    lifetimeUsage?: LifetimeUsage;
+  }) => void) => () => void;
   readonly onChatCompaction: (listener: (payload: { streamId: string; stage?: 'start' | 'done' | 'idle'; method?: string; beforeTokens?: number; afterTokens?: number; oldMessageCount?: number; keptMessageCount?: number }) => void) => () => void;
   readonly llmListProviders: () => Promise<readonly LlmProviderConfigView[]>;
   readonly llmAddProvider: (config: Record<string, unknown>) => Promise<LlmProviderConfigView>;

@@ -16,21 +16,23 @@ export function AppearancePanel({
   onBack,
 }: {
   readonly i18n: I18nRuntime;
-  readonly onBack: () => void;
+  readonly onBack?: () => void;
 }) {
   const { settings, setMode, reset } = useAppearance();
 
   return (
     <div className="appearance-panel">
-      <header className="appearance-panel-header">
-        <button type="button" onClick={onBack} aria-label={i18n.t('app.settings')}>
-          ←
-        </button>
-        <div>
-          <strong>{i18n.t('appearance.title')}</strong>
-          <span>Peer Vellum · {PEER_VELLUM_NAME}</span>
-        </div>
-      </header>
+      {onBack ? (
+        <header className="appearance-panel-header">
+          <button type="button" onClick={onBack} aria-label={i18n.t('app.settings')}>
+            ←
+          </button>
+          <div>
+            <strong>{i18n.t('appearance.title')}</strong>
+            <span>Peer Vellum · {PEER_VELLUM_NAME}</span>
+          </div>
+        </header>
+      ) : null}
 
       <div className="appearance-segmented" role="group" aria-label={i18n.t('appearance.mode')}>
         {(['light', 'dark', 'system'] as const).map((mode) => (

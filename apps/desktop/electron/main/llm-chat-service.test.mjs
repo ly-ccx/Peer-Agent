@@ -436,6 +436,156 @@ describe('llm chat service tool materialization', () => {
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
   });
 
+  it('records completed stream usage in the main conversation ledger before done reaches the renderer', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    const usageWrites = [];
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'ok' } }] },
+      {
+        choices: [{ delta: {} }],
+        usage: {
+          prompt_tokens: 12,
+          completion_tokens: 3,
+          prompt_tokens_details: { cached_tokens: 5 },
+        },
+      },
+      '[DONE]',
+    ]), { status: 200 });
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        conversationStore: {
+          addUsage: (id, usage) => {
+            usageWrites.push({ id, usage });
+            return {
+              inputTokens: 112,
+              outputTokens: 13,
+              cacheWriteTokens: 7,
+              cacheReadTokens: 55,
+            };
+          },
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.deepEqual(usageWrites, [{
+      id: 'c1',
+      usage: {
+        inputTokens: 12,
+        outputTokens: 3,
+        cacheWriteTokens: 0,
+        cacheReadTokens: 5,
+      },
+    }]);
+    const done = events.find((event) => event.channel === 'chat:stream:done');
+    assert.ok(done);
+    assert.deepEqual(done.payload.lifetimeUsage, {
+      inputTokens: 112,
+      outputTokens: 13,
+      cacheWriteTokens: 7,
+      cacheReadTokens: 55,
+    });
+  });
+
+  it('records provider usage from empty-response errors in the main conversation ledger', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    const usageWrites = [];
+    globalThis.fetch = async () => new Response(sse([
+      {
+        choices: [{ delta: {} }],
+        usage: {
+          prompt_tokens: 30,
+          completion_tokens: 0,
+          prompt_tokens_details: { cached_tokens: 10 },
+        },
+      },
+      '[DONE]',
+    ]), { status: 200 });
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        conversationStore: {
+          addUsage: (id, usage) => {
+            usageWrites.push({ id, usage });
+            return {
+              inputTokens: 230,
+              outputTokens: 9,
+              cacheWriteTokens: 0,
+              cacheReadTokens: 40,
+            };
+          },
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.deepEqual(usageWrites, [{
+      id: 'c1',
+      usage: {
+        inputTokens: 30,
+        outputTokens: 0,
+        cacheWriteTokens: 0,
+        cacheReadTokens: 10,
+      },
+    }]);
+    const error = events.find((event) => event.channel === 'chat:stream:error');
+    assert.ok(error);
+    assert.match(error.payload.error, /empty_model_response/);
+    assert.deepEqual(error.payload.lifetimeUsage, {
+      inputTokens: 230,
+      outputTokens: 9,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 40,
+    });
+  });
+
   it('parses an OpenAI stream frame that ends without a trailing newline', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;

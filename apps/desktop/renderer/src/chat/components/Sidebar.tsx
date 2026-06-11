@@ -29,8 +29,7 @@ export function Sidebar({
   onNewChat,
   onSelectConversation,
   onDeleteConversation,
-  onOpenModelSettings,
-  onOpenAppearance,
+  onOpenSettings,
   onWorkspaceChanged,
 }: {
   readonly conversations: readonly ConversationMeta[];
@@ -40,8 +39,7 @@ export function Sidebar({
   readonly onNewChat: () => void;
   readonly onSelectConversation: (id: string) => void;
   readonly onDeleteConversation: (id: string) => void;
-  readonly onOpenModelSettings: () => void;
-  readonly onOpenAppearance: () => void;
+  readonly onOpenSettings: () => void;
   readonly onWorkspaceChanged?: () => Promise<void> | void;
 }) {
   const isZh = i18n.locale === 'zh-CN';
@@ -173,18 +171,12 @@ export function Sidebar({
       </div>
 
       <div className="sidebar-bottom">
-        <button type="button" className={`sidebar-nav-btn ${activePage === 'model-settings' ? 'active' : ''}`} onClick={onOpenModelSettings}>
+        <button type="button" className={`sidebar-nav-btn ${activePage === 'settings' ? 'active' : ''}`} onClick={onOpenSettings}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3" />
             <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
           </svg>
-          <span>{isZh ? '模型配置' : 'Models'}</span>
-        </button>
-        <button type="button" className={`sidebar-nav-btn ${activePage === 'appearance' ? 'active' : ''}`} onClick={onOpenAppearance}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" /><path d="M12 2a10 10 0 0 1 0 20" />
-          </svg>
-          <span>{isZh ? '外观' : 'Appearance'}</span>
+          <span>{isZh ? '设置' : 'Settings'}</span>
         </button>
       </div>
     </aside>

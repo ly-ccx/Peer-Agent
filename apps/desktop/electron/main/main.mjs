@@ -186,6 +186,7 @@ function continuityContextFromMessages(messages = []) {
 
 const llmChatService = createLlmChatService({
   llmConfigStore,
+  conversationStore,
   persistCompaction: persistCompactionToConversation,
   promptSnapshotStore,
 });
@@ -412,6 +413,8 @@ ipcMain.handle('chat:send', (event, {
   streamId,
   effort,
   conversationId,
+  contextAttachments,
+  runtimeReminders,
   attachmentContext,
   continuityContext,
   configInstructions,
@@ -423,6 +426,8 @@ ipcMain.handle('chat:send', (event, {
     streamId,
     effort,
     conversationId,
+    contextAttachments,
+    runtimeReminders,
     attachmentContext,
     continuityContext,
     configInstructions,

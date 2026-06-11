@@ -37,18 +37,49 @@ function recordPromptSnapshot(store, context, metadata) {
   }
 }
 
+function hasBillableUsage(usage) {
+  return Boolean(
+    (usage?.inputTokens || 0) ||
+    (usage?.outputTokens || 0) ||
+    (usage?.cacheWriteTokens || 0) ||
+    (usage?.cacheReadTokens || 0)
+  );
+}
+
+function recordConversationUsage({ conversationStore, streamRecord, usage }) {
+  if (!conversationStore?.addUsage || !streamRecord?.conversationId || !hasBillableUsage(usage)) return null;
+  if (streamRecord.usageRecorded) return null;
+  try {
+    const lifetimeUsage = conversationStore.addUsage(streamRecord.conversationId, usage);
+    streamRecord.usageRecorded = Boolean(lifetimeUsage);
+    return lifetimeUsage;
+  } catch (error) {
+    console.warn('[llm-chat] failed to record conversation usage:', error?.message || error);
+    return null;
+  }
+}
+
 /**
  * ADR 22: 累积代理。包裹真实 webContents,拦截流式正文/思考事件追加到 streamRecord,
  * 其余事件原样透传。这样两个 provider adapter / agent loop 都无需改动,
  * 累积逻辑集中在单一 seam。返回的对象只需实现 send()(adapter/loop 只用到 send)。
  */
-function wrapWebContentsForAccumulation(realWebContents, streamRecord) {
+function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conversationStore = null } = {}) {
   return {
     send(channel, payload) {
       if (channel === 'chat:stream:delta' && typeof payload?.content === 'string') {
         streamRecord.accumulatedText += payload.content;
       } else if (channel === 'chat:stream:thinking' && typeof payload?.content === 'string') {
         streamRecord.accumulatedThinking += payload.content;
+      } else if (channel === 'chat:stream:done' || channel === 'chat:stream:error') {
+        const lifetimeUsage = recordConversationUsage({
+          conversationStore,
+          streamRecord,
+          usage: payload?.usage,
+        });
+        if (lifetimeUsage) {
+          payload = { ...payload, lifetimeUsage };
+        }
       }
       return realWebContents.send(channel, payload);
     },
@@ -78,6 +109,7 @@ function getConversationToolContext({ conversationId = null, workspacePath = nul
 
 export function createLlmChatService({
   llmConfigStore,
+  conversationStore = null,
   persistCompaction = null,
   promptSnapshotStore = null,
 }) {
@@ -94,6 +126,8 @@ export function createLlmChatService({
     streamId,
     effort = 'default',
     conversationId = null,
+    contextAttachments = [],
+    runtimeReminders = [],
     attachmentContext = [],
     continuityContext = [],
     configInstructions = [],
@@ -120,12 +154,15 @@ export function createLlmChatService({
       // ADR 22: 累积进行中的流式正文/思考,供 HMR 重载后 reattach 取快照续接。
       accumulatedText: '',
       accumulatedThinking: '',
+      usageRecorded: false,
     };
     activeStreams.set(streamId, streamRecord);
     // 累积代理:拦截 delta/thinking 追加到记录,其余事件透传给真实 webContents。
-    const accumulatingWebContents = wrapWebContentsForAccumulation(webContents, streamRecord);
+    const accumulatingWebContents = wrapWebContentsForRuntimeEvents(webContents, streamRecord, { conversationStore });
 
     const systemContext = buildSystemContext(activeWorkspacePath, {
+      contextAttachments,
+      runtimeReminders,
       attachmentContext,
       configInstructions,
       contextExtensions,

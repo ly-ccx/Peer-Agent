@@ -1,5 +1,14 @@
 export const DEFAULT_AGENT_LOOP_MAX_TURNS = 20;
 
+function hasBillableUsage(usage) {
+  return Boolean(
+    (usage?.inputTokens || 0) ||
+    (usage?.outputTokens || 0) ||
+    (usage?.cacheWriteTokens || 0) ||
+    (usage?.cacheReadTokens || 0)
+  );
+}
+
 export function createAgentLoopKernel({
   webContents,
   streamId,
@@ -42,7 +51,9 @@ export function createAgentLoopKernel({
   }
 
   function sendError(error) {
-    webContents?.send?.('chat:stream:error', { streamId, error });
+    const payload = { streamId, error };
+    if (hasBillableUsage(usage)) payload.usage = usage;
+    webContents?.send?.('chat:stream:error', payload);
   }
 
   function sendHttpError(status, text) {

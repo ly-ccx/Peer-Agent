@@ -16,6 +16,50 @@ export interface AttachmentContextItem {
   readonly transport: AttachmentContextTransport;
 }
 
+export type ContextAttachmentSourceKind =
+  | 'user_upload'
+  | 'clipboard'
+  | 'skill'
+  | 'memory'
+  | 'hook'
+  | 'mcp'
+  | 'runtime'
+  | string;
+
+export type ContextAttachmentScope = 'turn' | 'conversation' | 'workspace' | 'session' | string;
+
+export type ContextAttachmentLifecycle = 'ephemeral' | 'durable_ref' | 'evidence_ref' | string;
+
+export interface ContextAttachmentItem extends AttachmentContextItem {
+  readonly sourceKind?: ContextAttachmentSourceKind;
+  readonly scope?: ContextAttachmentScope;
+  readonly lifecycle?: ContextAttachmentLifecycle;
+  readonly contentRef?: string;
+}
+
+export type RuntimeReminderKind =
+  | 'mode'
+  | 'provider'
+  | 'permission'
+  | 'continuity'
+  | 'attachment'
+  | 'runtime'
+  | string;
+
+export type RuntimeReminderScope = 'turn' | 'conversation' | 'workspace' | 'session' | string;
+
+export interface RuntimeReminderItem {
+  readonly id: string;
+  readonly title?: string;
+  readonly content: string;
+  readonly kind?: RuntimeReminderKind;
+  readonly scope?: RuntimeReminderScope;
+  readonly layer?: 'L2_RUNTIME' | 'L5_TOOL_RULES' | 'L6_MODE_REMINDER' | 'L7_CONTINUITY' | string;
+  readonly priority?: number;
+  readonly sourceKind?: 'runtime' | 'system' | 'plugin' | 'skill' | 'mcp' | string;
+  readonly trust?: 'builtin' | 'runtime' | 'workspace' | 'user' | 'extension' | string;
+}
+
 export interface ContinuityContextItem {
   readonly id?: string;
   readonly method: string;
@@ -54,6 +98,8 @@ export interface ChatSendRequest {
   readonly streamId: string;
   readonly effort?: string;
   readonly conversationId?: string;
+  readonly contextAttachments?: readonly ContextAttachmentItem[];
+  readonly runtimeReminders?: readonly RuntimeReminderItem[];
   readonly attachmentContext?: readonly AttachmentContextItem[];
   readonly continuityContext?: readonly ContinuityContextItem[];
   readonly configInstructions?: readonly ConfigInstructionContextItem[];

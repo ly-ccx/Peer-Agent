@@ -11,4 +11,5 @@ export { renderSystemCorePrompt } from './sources/core-source.mjs';
 export { createModePromptSource } from './sources/mode-source.mjs';
 export { createProviderPromptSource } from './sources/provider-source.mjs';
 export { createProjectInstructionsPromptSource } from './sources/project-instructions-source.mjs';
+export { createRuntimeReminderPromptSource } from './sources/runtime-reminder-source.mjs';
 export { renderRuntimeContext } from './sources/runtime-source.mjs';
