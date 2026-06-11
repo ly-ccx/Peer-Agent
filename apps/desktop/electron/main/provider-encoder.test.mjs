@@ -113,7 +113,7 @@ describe('Provider message encoders', () => {
     assert.equal(body.max_tokens, 16384);
   });
 
-  it('applies ephemeral cache_control to system and the last message (ADR 24)', () => {
+  it('applies ephemeral cache_control to system and the second-to-last message (ADR 24)', () => {
     const body = encodeAnthropicMessagesRequest({
       model: 'claude-test',
       system: 'stable system prefix',
@@ -129,16 +129,43 @@ describe('Provider message encoders', () => {
     assert.ok(Array.isArray(body.system));
     assert.equal(body.system[0].cache_control.type, 'ephemeral');
 
-    // 历史前缀断点: 只在最后一条 message 的最后一个 block 打 cache_control。
-    const lastMsg = body.messages[body.messages.length - 1];
-    assert.ok(Array.isArray(lastMsg.content));
-    const lastBlock = lastMsg.content[lastMsg.content.length - 1];
-    assert.equal(lastBlock.cache_control.type, 'ephemeral');
+    // 历史前缀断点: 打在【倒数第二条】(稳定前缀边界), 即 assistant 'reply'。
+    const secondToLast = body.messages[body.messages.length - 2];
+    assert.ok(Array.isArray(secondToLast.content));
+    const markedBlock = secondToLast.content[secondToLast.content.length - 1];
+    assert.equal(markedBlock.cache_control.type, 'ephemeral');
 
-    // 非最后的消息不应带 cache_control 断点。
+    // 最后一条 (本轮新输入) 不应带断点 —— 否则每轮断点位置都变, 永远命中不到旧缓存。
+    const lastMsg = body.messages[body.messages.length - 1];
+    const lastBlocks = Array.isArray(lastMsg.content) ? lastMsg.content : [];
+    for (const block of lastBlocks) {
+      assert.equal(block.cache_control, undefined);
+    }
+
+    // 第一条也不应带断点。
     const firstMsg = body.messages[0];
     const firstBlocks = Array.isArray(firstMsg.content) ? firstMsg.content : [];
     for (const block of firstBlocks) {
+      assert.equal(block.cache_control, undefined);
+    }
+  });
+
+  it('skips history breakpoint when only one message exists (ADR 24)', () => {
+    const body = encodeAnthropicMessagesRequest({
+      model: 'claude-test',
+      system: 'stable system prefix',
+      messages: [{ role: 'user', content: 'only message' }],
+      effort: 'default',
+    });
+
+    // system 仍打断点。
+    assert.ok(Array.isArray(body.system));
+    assert.equal(body.system[0].cache_control.type, 'ephemeral');
+
+    // 单条消息(首轮)无稳定历史前缀, 该消息不应被打断点。
+    const onlyMsg = body.messages[0];
+    const blocks = Array.isArray(onlyMsg.content) ? onlyMsg.content : [];
+    for (const block of blocks) {
       assert.equal(block.cache_control, undefined);
     }
   });

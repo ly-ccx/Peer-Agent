@@ -32,15 +32,39 @@ export function encodeOpenAIChatRequest({
 const EPHEMERAL = { type: 'ephemeral' };
 
 /**
+ * 在一条 message 的最后一个 content block 上打 ephemeral cache_control 断点。
+ * content 可能是字符串或数组；统一成数组才能在末块打断点。返回是否成功打上。
+ */
+function markMessageCacheBreakpoint(msg) {
+  if (!msg || typeof msg !== 'object') return false;
+  if (typeof msg.content === 'string' && msg.content.trim()) {
+    msg.content = [{ type: 'text', text: msg.content, cache_control: EPHEMERAL }];
+    return true;
+  }
+  if (Array.isArray(msg.content) && msg.content.length) {
+    const lastBlock = msg.content[msg.content.length - 1];
+    if (lastBlock && typeof lastBlock === 'object') {
+      lastBlock.cache_control = EPHEMERAL;
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Prompt caching (ADR 24): 在请求体的稳定前缀上打 ephemeral cache_control 断点，
  * 让 Anthropic 缓存「system + 历史」前缀，下一轮命中以降低输入计费、提升命中率。
  *
  * 两个断点：
  *  1. system —— 最大且最稳定的前缀，字符串转为带 cache_control 的 text block 数组。
- *  2. 最后一条消息的最后一个 content block —— 缓存「到目前为止的全部历史」前缀，
- *     使下一轮请求的历史前缀命中缓存。
+ *  2. 历史前缀 —— 断点打在【倒数第二条消息】（即上一轮的结尾），而不是每轮都变的
+ *     最后一条。这样下一轮请求的断点位置正好匹配上一轮已缓存的前缀边界，命中
+ *     cache_read；本轮新输入留在断点之后，不破坏前缀。
  *
- * 纯函数：只读 body 的字段、返回打好断点的新结构，不产生副作用，便于单测。
+ *     若断点打在每轮变化的最后一条上，则每轮只写新缓存、永远读不到旧缓存
+ *     （cacheWrite 一直涨、cacheRead 恒为 0），是最差组合（既交写入溢价又拿不到读取折扣）。
+ *
+ * 纯函数：只读 body 的字段、原地打好断点并返回，便于单测。
  */
 export function applyAnthropicCacheControl(body) {
   // 1. system 断点。
@@ -51,23 +75,11 @@ export function applyAnthropicCacheControl(body) {
     if (last && typeof last === 'object') last.cache_control = EPHEMERAL;
   }
 
-  // 2. 最后一条消息断点（缓存历史前缀）。
+  // 2. 历史前缀断点：打在倒数第二条消息（稳定前缀边界），而非每轮都变的最后一条。
+  //    仅一条消息（首轮）时无稳定历史前缀可缓存，跳过，仅靠 system 缓存。
   const msgs = body.messages;
-  if (Array.isArray(msgs) && msgs.length) {
-    const lastMsg = msgs[msgs.length - 1];
-    if (lastMsg && typeof lastMsg === 'object') {
-      // content 可能是字符串或数组；统一成数组才能在末块打断点。
-      if (typeof lastMsg.content === 'string' && lastMsg.content.trim()) {
-        lastMsg.content = [
-          { type: 'text', text: lastMsg.content, cache_control: EPHEMERAL },
-        ];
-      } else if (Array.isArray(lastMsg.content) && lastMsg.content.length) {
-        const lastBlock = lastMsg.content[lastMsg.content.length - 1];
-        if (lastBlock && typeof lastBlock === 'object') {
-          lastBlock.cache_control = EPHEMERAL;
-        }
-      }
-    }
+  if (Array.isArray(msgs) && msgs.length >= 2) {
+    markMessageCacheBreakpoint(msgs[msgs.length - 2]);
   }
   return body;
 }
