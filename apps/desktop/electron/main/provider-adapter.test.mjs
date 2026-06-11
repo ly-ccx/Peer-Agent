@@ -49,6 +49,7 @@ describe('Provider adapters', () => {
         messages: [{ role: 'user', content: 'hi' }],
         tools: [{ type: 'function', function: { name: 'bash' } }],
         effort: 'high',
+        supportsReasoning: true,
         webContents: { send: (channel, payload) => events.push({ channel, payload }) },
         streamId: 's1',
       });
@@ -64,6 +65,37 @@ describe('Provider adapters', () => {
       assert.equal(result.streamUsage.inputTokens, 10);
       assert.equal(events.find((event) => event.channel === 'chat:stream:delta').payload.content, 'hello');
       assert.equal(events.find((event) => event.channel === 'chat:stream:usage').payload.usage.cacheReadTokens, 3);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('does not send OpenAI native reasoning parameters without provider capability', async () => {
+    const previousFetch = globalThis.fetch;
+    let captured = null;
+    globalThis.fetch = async (url, init) => {
+      captured = { url, init, body: JSON.parse(init.body) };
+      return new Response(sse([
+        { choices: [{ delta: { content: 'ok' } }] },
+        '[DONE]',
+      ]), { status: 200 });
+    };
+
+    try {
+      const result = await sendOpenAIChatStream({
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'key',
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [],
+        effort: 'high',
+        supportsReasoning: false,
+        webContents: { send: () => {} },
+        streamId: 's1',
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(captured.body.reasoning_effort, undefined);
     } finally {
       globalThis.fetch = previousFetch;
     }
@@ -86,6 +118,7 @@ describe('Provider adapters', () => {
         messages: [{ role: 'user', content: 'hi' }],
         tools: [],
         effort: 'high',
+        supportsReasoning: true,
         webContents: { send: (channel, payload) => events.push({ channel, payload }) },
         streamId: 's1',
       });
@@ -137,6 +170,7 @@ describe('Provider adapters', () => {
         messages: [{ role: 'user', content: 'hi' }],
         tools: [{ name: 'bash' }],
         effort: 'high',
+        supportsReasoning: true,
         webContents: { send: (channel, payload) => events.push({ channel, payload }) },
         streamId: 's1',
       });
@@ -158,6 +192,108 @@ describe('Provider adapters', () => {
       assert.equal(events.find((event) => event.channel === 'chat:stream:usage').payload.usage.cacheReadTokens, 5);
     } finally {
       globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('does not send Anthropic thinking without provider capability', async () => {
+    const previousFetch = globalThis.fetch;
+    let captured = null;
+    globalThis.fetch = async (url, init) => {
+      captured = { url, init, body: JSON.parse(init.body) };
+      return new Response(sse([
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'ok' } },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
+      ]), { status: 200 });
+    };
+
+    try {
+      const result = await sendAnthropicMessagesStream({
+        baseUrl: 'https://example.test',
+        apiKey: 'key',
+        model: 'claude-test',
+        system: 'system',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [],
+        effort: 'high',
+        supportsReasoning: false,
+        webContents: { send: () => {} },
+        streamId: 's1',
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.textContent, 'ok');
+      assert.equal(captured.body.thinking, undefined);
+      assert.equal(captured.body.max_tokens, 16384);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('uses adaptive Anthropic thinking for the idealab Anthropic gateway', async () => {
+    const previousFetch = globalThis.fetch;
+    let captured = null;
+    globalThis.fetch = async (url, init) => {
+      captured = { url, init, body: JSON.parse(init.body) };
+      return new Response(sse([
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'ok' } },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
+      ]), { status: 200 });
+    };
+
+    try {
+      const result = await sendAnthropicMessagesStream({
+        baseUrl: 'https://idealab.alibaba-inc.com/api/anthropic',
+        apiKey: 'key',
+        model: 'claude-test',
+        system: 'system',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [],
+        effort: 'high',
+        supportsReasoning: true,
+        webContents: { send: () => {} },
+        streamId: 's1',
+      });
+
+      assert.equal(result.ok, true);
+      assert.deepEqual(captured.body.thinking, { type: 'adaptive' });
+      assert.deepEqual(captured.body.output_config, { effort: 'high' });
+      assert.equal(captured.body.max_tokens, 16384);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('returns Anthropic SSE error events as provider stream errors', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    globalThis.fetch = async () => new Response([
+      'event: error',
+      'data: {"type":"error","error":{"type":"invalid_request_error","message":"bad thinking"}}',
+      '',
+    ].join('\n'), { status: 200 });
+
+    try {
+      const result = await sendAnthropicMessagesStream({
+        baseUrl: 'https://example.test',
+        apiKey: 'key',
+        model: 'claude-test',
+        system: 'system',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [],
+        effort: 'high',
+        supportsReasoning: true,
+        webContents: { send: () => {} },
+        streamId: 's1',
+      });
+
+      assert.equal(result.ok, false);
+      assert.equal(result.providerError, true);
+      assert.match(result.errorText, /provider_stream_error: bad thinking/);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
     }
   });
 });

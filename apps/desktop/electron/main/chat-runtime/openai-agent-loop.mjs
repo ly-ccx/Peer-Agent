@@ -23,6 +23,7 @@ export async function agentLoopOpenAI({
   streamId,
   signal,
   effort,
+  supportsReasoning = false,
   contextWindow,
   conversationId,
   persistCompaction,
@@ -30,10 +31,12 @@ export async function agentLoopOpenAI({
   toolContext,
   workspacePath,
   permissionGate,
+  onNativeReasoningFallback = null,
 }) {
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
   const loop = createAgentLoopKernel({ webContents, streamId });
   const providerConfig = { provider: 'openai', baseUrl, apiKey, model };
+  let effectiveSupportsReasoning = Boolean(supportsReasoning);
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {
     const microcompactResult = applyMicrocompaction(apiMessages);
@@ -65,6 +68,7 @@ export async function agentLoopOpenAI({
       messages: apiMessages,
       tools,
       effort,
+      supportsReasoning: effectiveSupportsReasoning,
       signal,
       webContents,
       streamId,
@@ -73,6 +77,10 @@ export async function agentLoopOpenAI({
 
     if (!providerResponse.ok) {
       const text = providerResponse.errorText || '';
+      if (providerResponse.providerError) {
+        loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
+        return;
+      }
       if (isPromptTooLongResponse(providerResponse.status, text)) {
         const emergencyCompaction = await runCompactionCheck({
           messages: apiMessages,
@@ -101,9 +109,20 @@ export async function agentLoopOpenAI({
     loop.addUsage(streamUsage);
 
     if (!toolCalls.length) {
+      if (
+        effectiveSupportsReasoning &&
+        effort === 'high' &&
+        !String(content || '').trim() &&
+        !String(thinkingContent || '').trim()
+      ) {
+        effectiveSupportsReasoning = false;
+        onNativeReasoningFallback?.({ provider: 'openai', reason: 'empty_response' });
+        continue;
+      }
       const terminalResponse = handleTerminalTextResponse({
         text: content,
         thinking: thinkingContent,
+        providerTracePath: providerResponse.providerTracePath,
         apiMessages,
         loop,
         responseGuard,

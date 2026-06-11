@@ -59,6 +59,18 @@ function recordConversationUsage({ conversationStore, streamRecord, usage }) {
   }
 }
 
+function disableProviderReasoningCapability(llmConfigStore, provider, details = {}) {
+  if (!provider?.id || !provider.supportsReasoning || typeof llmConfigStore?.updateProvider !== 'function') return;
+  try {
+    llmConfigStore.updateProvider(provider.id, { supportsReasoning: false });
+    console.warn(
+      `[llm-chat] disabled native reasoning for provider ${provider.id}: ${details.reason || 'unsupported'}`
+    );
+  } catch (error) {
+    console.warn('[llm-chat] failed to disable provider native reasoning:', error?.message || error);
+  }
+}
+
 /**
  * ADR 22: 累积代理。包裹真实 webContents,拦截流式正文/思考事件追加到 streamRecord,
  * 其余事件原样透传。这样两个 provider adapter / agent loop 都无需改动,
@@ -187,6 +199,7 @@ export function createLlmChatService({
     const toolContext = getConversationToolContext({ conversationId, workspacePath: activeWorkspacePath });
 
     const contextWindow = provider.contextWindow || 0;
+    const onNativeReasoningFallback = (details) => disableProviderReasoningCapability(llmConfigStore, provider, details);
 
     try {
       if (provider.provider === 'anthropic') {
@@ -201,6 +214,7 @@ export function createLlmChatService({
           streamId,
           signal: controller.signal,
           effort,
+          supportsReasoning: Boolean(provider.supportsReasoning),
           contextWindow,
           conversationId,
           persistCompaction,
@@ -208,6 +222,7 @@ export function createLlmChatService({
           toolContext,
           workspacePath: activeWorkspacePath,
           permissionGate,
+          onNativeReasoningFallback,
         });
       } else {
         await agentLoopOpenAI({
@@ -221,6 +236,7 @@ export function createLlmChatService({
           streamId,
           signal: controller.signal,
           effort,
+          supportsReasoning: Boolean(provider.supportsReasoning),
           contextWindow,
           conversationId,
           persistCompaction,
@@ -228,6 +244,7 @@ export function createLlmChatService({
           toolContext,
           workspacePath: activeWorkspacePath,
           permissionGate,
+          onNativeReasoningFallback,
         });
       }
     } catch (err) {

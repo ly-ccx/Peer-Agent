@@ -89,7 +89,10 @@ export function Sidebar({
   return (
     <aside className="app-sidebar">
       <div className="sidebar-brand">
-        <img className="sidebar-brand-icon" src="/logo.png" alt="" aria-hidden="true" />
+        <span className="sidebar-brand-mark" aria-hidden="true">
+          <img className="sidebar-brand-icon light" src="./logo-light.png" alt="" />
+          <img className="sidebar-brand-icon dark" src="./logo-dark.png" alt="" />
+        </span>
         <span className="sidebar-brand-copy">
           <span className="sidebar-brand-title">Peer Agent</span>
         </span>

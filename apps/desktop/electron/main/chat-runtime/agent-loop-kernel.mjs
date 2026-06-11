@@ -93,6 +93,7 @@ function appendUserCorrection(apiMessages, content) {
 export function handleTerminalTextResponse({
   text,
   thinking = '',
+  providerTracePath = null,
   apiMessages,
   loop,
   responseGuard,
@@ -116,7 +117,7 @@ export function handleTerminalTextResponse({
       appendUserCorrection(apiMessages, correction);
       return { action: 'retry', reason: 'empty-response-after-tool-result' };
     }
-    loop.sendError(responseGuard.emptyModelResponseError());
+    loop.sendError(responseGuard.emptyModelResponseError({ providerTracePath }));
     return { action: 'stop', reason: 'empty-response' };
   }
 

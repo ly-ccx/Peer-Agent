@@ -15,6 +15,7 @@ interface FormState {
   cacheWritePrice: string;
   cacheReadPrice: string;
   supportsVision: boolean;
+  supportsReasoning: boolean;
 }
 
 const PRESETS: Record<LlmProviderType, { baseUrl: string; model: string }> = {
@@ -23,7 +24,7 @@ const PRESETS: Record<LlmProviderType, { baseUrl: string; model: string }> = {
 };
 
 function emptyForm(provider: LlmProviderType = 'openai'): FormState {
-  return { provider, name: '', baseUrl: PRESETS[provider].baseUrl, model: PRESETS[provider].model, apiKey: '', contextWindow: '', inputPrice: '', outputPrice: '', cacheWritePrice: '', cacheReadPrice: '', supportsVision: false };
+  return { provider, name: '', baseUrl: PRESETS[provider].baseUrl, model: PRESETS[provider].model, apiKey: '', contextWindow: '', inputPrice: '', outputPrice: '', cacheWritePrice: '', cacheReadPrice: '', supportsVision: false, supportsReasoning: false };
 }
 
 export function LlmSettingsPanel({
@@ -76,6 +77,7 @@ export function LlmSettingsPanel({
       cacheWritePrice: p.cacheWritePrice != null ? String(p.cacheWritePrice) : '',
       cacheReadPrice: p.cacheReadPrice != null ? String(p.cacheReadPrice) : '',
       supportsVision: p.supportsVision ?? false,
+      supportsReasoning: p.supportsReasoning ?? false,
     });
     setShowForm(true);
   };
@@ -101,6 +103,7 @@ export function LlmSettingsPanel({
           cacheWritePrice: cwPrice,
           cacheReadPrice: crPrice,
           supportsVision: form.supportsVision,
+          supportsReasoning: form.supportsReasoning,
         };
         if (form.apiKey) patch.apiKey = form.apiKey;
         await clientApi.llmUpdateProvider(patch as { id: string });
@@ -117,6 +120,7 @@ export function LlmSettingsPanel({
           cacheWritePrice: cwPrice,
           cacheReadPrice: crPrice,
           supportsVision: form.supportsVision,
+          supportsReasoning: form.supportsReasoning,
         } as Record<string, unknown>);
       }
       setShowForm(false);
@@ -286,6 +290,15 @@ export function LlmSettingsPanel({
               onChange={(e) => setForm((prev) => ({ ...prev, supportsVision: e.target.checked }))}
             />
             <span>{i18n.locale === 'zh-CN' ? '支持多模态（图像输入）' : 'Multimodal (image input) support'}</span>
+          </label>
+
+          <label className="llm-vision-toggle">
+            <input
+              type="checkbox"
+              checked={form.supportsReasoning}
+              onChange={(e) => setForm((prev) => ({ ...prev, supportsReasoning: e.target.checked }))}
+            />
+            <span>{i18n.locale === 'zh-CN' ? '支持原生推理参数（reasoning/thinking）' : 'Native reasoning/thinking parameters'}</span>
           </label>
 
           <div className="llm-form-actions">

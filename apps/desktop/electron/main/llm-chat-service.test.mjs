@@ -436,6 +436,118 @@ describe('llm chat service tool materialization', () => {
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
   });
 
+  it('does not send Anthropic native thinking for high effort unless the provider declares reasoning support', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    let capturedBody = null;
+    globalThis.fetch = async (_url, init) => {
+      capturedBody = JSON.parse(init.body);
+      return new Response(sse([
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'ok' } },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
+      ]), { status: 200 });
+    };
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'anthropic',
+            baseUrl: 'https://example.test',
+            model: 'claude-test',
+            isDefault: true,
+            apiKeyConfigured: true,
+            supportsReasoning: false,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        effort: 'high',
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.equal(capturedBody.thinking, undefined);
+    assert.equal(capturedBody.max_tokens, 16384);
+    assert.equal(events.find((event) => event.channel === 'chat:stream:delta')?.payload.content, 'ok');
+    assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
+    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+  });
+
+  it('falls back and disables Anthropic native reasoning when high effort returns an empty response', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    const capturedBodies = [];
+    const providerState = {
+      id: 'p1',
+      provider: 'anthropic',
+      baseUrl: 'https://example.test',
+      model: 'claude-test',
+      isDefault: true,
+      apiKeyConfigured: true,
+      supportsReasoning: true,
+    };
+    globalThis.fetch = async (_url, init) => {
+      const body = JSON.parse(init.body);
+      capturedBodies.push(body);
+      if (capturedBodies.length === 1) {
+        return new Response(sse([
+          {
+            type: 'message_start',
+            message: { usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
+          },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } },
+        ]), { status: 200 });
+      }
+      return new Response(sse([
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'ok' } },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
+      ]), { status: 200 });
+    };
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [providerState],
+          getDecryptedApiKey: () => 'test-key',
+          updateProvider: (_id, patch) => Object.assign(providerState, patch),
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        effort: 'high',
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.equal(capturedBodies.length, 2);
+    assert.equal(capturedBodies[0].thinking.type, 'enabled');
+    assert.equal(capturedBodies[1].thinking, undefined);
+    assert.equal(providerState.supportsReasoning, false);
+    assert.equal(events.find((event) => event.channel === 'chat:stream:delta')?.payload.content, 'ok');
+    assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
+    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+  });
+
   it('records completed stream usage in the main conversation ledger before done reaches the renderer', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;

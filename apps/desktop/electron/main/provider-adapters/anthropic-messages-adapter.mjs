@@ -1,10 +1,58 @@
 import { encodeAnthropicMessagesRequest } from '../provider-encoders/index.mjs';
+import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 
-function consumeAnthropicStreamLine(line, state, webContents, streamId) {
-  const trimmed = line.trim();
-  if (!trimmed || !trimmed.startsWith('data: ')) return;
+function resolveAnthropicReasoningFormat(baseUrl) {
   try {
-    const parsed = JSON.parse(trimmed.slice(6));
+    const url = new URL(baseUrl);
+    if (url.hostname === 'idealab.alibaba-inc.com' && url.pathname.includes('/api/anthropic')) {
+      return 'adaptive';
+    }
+  } catch {
+    /* fall through */
+  }
+  return 'enabled';
+}
+
+function parseNestedProviderErrorMessage(message) {
+  if (typeof message !== 'string' || !message.trim()) return '';
+  try {
+    const parsed = JSON.parse(message);
+    return parsed?.error?.message || parsed?.message || message;
+  } catch {
+    return message;
+  }
+}
+
+function extractAnthropicStreamError(parsed) {
+  if (parsed?.type !== 'error' && !parsed?.error) return null;
+  const error = parsed?.error ?? parsed;
+  const rawMessage = error?.message || parsed?.message || JSON.stringify(error);
+  return {
+    type: error?.type || parsed?.type || 'provider_stream_error',
+    message: parseNestedProviderErrorMessage(rawMessage),
+  };
+}
+
+function consumeAnthropicStreamLine(line, state, webContents, streamId, trace = null) {
+  const trimmed = line.trim();
+  if (!trimmed) return;
+  if (!trimmed.startsWith('data: ')) {
+    trace?.recordIgnoredLine?.(trimmed);
+    return;
+  }
+  const payload = trimmed.slice(6);
+  if (payload === '[DONE]') {
+    trace?.recordDoneMarker?.();
+    return;
+  }
+  try {
+    const parsed = JSON.parse(payload);
+    trace?.recordSsePayload?.(payload, parsed);
+    const streamError = extractAnthropicStreamError(parsed);
+    if (streamError) {
+      state.streamError = streamError;
+      return;
+    }
     if (parsed.type === 'content_block_start') {
       if (parsed.content_block?.type === 'tool_use') {
         state.currentToolIndex = state.toolUseBlocks.length;
@@ -49,12 +97,13 @@ function consumeAnthropicStreamLine(line, state, webContents, streamId) {
       };
       webContents.send('chat:stream:usage', { streamId, usage: state.usage });
     }
-  } catch {
+  } catch (error) {
+    trace?.recordParseError?.(payload, error);
     /* skip malformed stream frame */
   }
 }
 
-async function consumeAnthropicStream(res, webContents, streamId) {
+async function consumeAnthropicStream(res, webContents, streamId, trace = null) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -67,6 +116,7 @@ async function consumeAnthropicStream(res, webContents, streamId) {
     currentToolIndex: -1,
     stopReason: null,
     usage: null,
+    streamError: null,
   };
 
   while (true) {
@@ -77,10 +127,10 @@ async function consumeAnthropicStream(res, webContents, streamId) {
     buffer = lines.pop() || '';
 
     for (const line of lines) {
-      consumeAnthropicStreamLine(line, state, webContents, streamId);
+      consumeAnthropicStreamLine(line, state, webContents, streamId, trace);
     }
   }
-  if (buffer.trim()) consumeAnthropicStreamLine(buffer, state, webContents, streamId);
+  if (buffer.trim()) consumeAnthropicStreamLine(buffer, state, webContents, streamId, trace);
 
   return {
     textContent: state.textContent,
@@ -89,6 +139,7 @@ async function consumeAnthropicStream(res, webContents, streamId) {
     toolUseBlocks: state.toolUseBlocks,
     stopReason: state.stopReason,
     streamUsage: state.usage,
+    streamError: state.streamError,
   };
 }
 
@@ -100,9 +151,11 @@ export async function sendAnthropicMessagesStream({
   messages,
   tools,
   effort,
+  supportsReasoning,
   signal,
   webContents,
   streamId,
+  reasoningFormat = resolveAnthropicReasoningFormat(baseUrl),
 }) {
   const url = `${baseUrl.replace(/\/+$/, '')}/v1/messages`;
   const body = encodeAnthropicMessagesRequest({
@@ -111,6 +164,17 @@ export async function sendAnthropicMessagesStream({
     messages,
     tools,
     effort,
+    supportsReasoning,
+    reasoningFormat,
+  });
+  const trace = createProviderStreamTrace({
+    provider: 'anthropic',
+    baseUrl,
+    model,
+    effort,
+    supportsReasoning,
+    streamId,
+    requestBody: body,
   });
 
   const res = await fetch(url, {
@@ -119,19 +183,75 @@ export async function sendAnthropicMessagesStream({
     body: JSON.stringify(body),
     signal,
   });
+  trace.recordResponse(res);
 
   if (!res.ok) {
+    const errorText = await res.text().catch(() => '');
+    const tracePath = await trace.finish({
+      anomaly: 'http_error',
+      httpError: errorText,
+      result: { ok: false, status: res.status },
+    });
+    if (tracePath) console.warn(`[provider-trace] wrote Anthropic HTTP error trace: ${tracePath}`);
     return {
       ok: false,
       status: res.status,
-      errorText: await res.text().catch(() => ''),
+      errorText,
       messages: body.messages,
+      providerTracePath: tracePath,
     };
   }
+
+  const streamResult = await consumeAnthropicStream(res, webContents, streamId, trace);
+  if (streamResult.streamError) {
+    const errorText = `provider_stream_error: ${streamResult.streamError.message}`;
+    const tracePath = await trace.finish({
+      anomaly: 'provider_stream_error',
+      httpError: errorText,
+      result: {
+        ok: false,
+        status: res.status,
+        streamErrorType: streamResult.streamError.type,
+        textChars: streamResult.textContent.length,
+        thinkingChars: streamResult.thinkingContent.length,
+        toolUseCount: streamResult.toolUseBlocks.length,
+      },
+    });
+    if (tracePath) console.warn(`[provider-trace] wrote Anthropic stream error trace: ${tracePath}`);
+    return {
+      ok: false,
+      status: res.status,
+      errorText,
+      providerError: true,
+      messages: body.messages,
+      providerTracePath: tracePath,
+    };
+  }
+  const anomaly =
+    !String(streamResult.textContent || '').trim() &&
+    !String(streamResult.thinkingContent || '').trim() &&
+    !streamResult.toolUseBlocks.length
+      ? 'empty_stream_result'
+      : null;
+  const tracePath = await trace.finish({
+    anomaly,
+    result: {
+      ok: true,
+      status: res.status,
+      textChars: streamResult.textContent.length,
+      thinkingChars: streamResult.thinkingContent.length,
+      thinkingSignatureChars: streamResult.thinkingSignature.length,
+      toolUseCount: streamResult.toolUseBlocks.length,
+      stopReason: streamResult.stopReason,
+      hasUsage: Boolean(streamResult.streamUsage),
+    },
+  });
+  if (tracePath && anomaly) console.warn(`[provider-trace] wrote Anthropic empty stream trace: ${tracePath}`);
 
   return {
     ok: true,
     messages: body.messages,
-    ...(await consumeAnthropicStream(res, webContents, streamId)),
+    providerTracePath: tracePath,
+    ...streamResult,
   };
 }

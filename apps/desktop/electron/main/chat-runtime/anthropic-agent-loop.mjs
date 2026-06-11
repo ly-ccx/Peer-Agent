@@ -26,6 +26,7 @@ export async function agentLoopAnthropic({
   streamId,
   signal,
   effort,
+  supportsReasoning = false,
   contextWindow,
   conversationId,
   persistCompaction,
@@ -33,11 +34,13 @@ export async function agentLoopAnthropic({
   toolContext,
   workspacePath,
   permissionGate,
+  onNativeReasoningFallback = null,
 }) {
   let effectiveSystem = systemPrompt;
   let apiMessages = sanitizeApiMessages(messages);
   const loop = createAgentLoopKernel({ webContents, streamId });
   const providerConfig = { provider: 'anthropic', baseUrl, apiKey, model };
+  let effectiveSupportsReasoning = Boolean(supportsReasoning);
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {
     const microcompactResult = applyMicrocompaction(apiMessages);
@@ -74,6 +77,7 @@ export async function agentLoopAnthropic({
       messages: apiMessages,
       tools,
       effort,
+      supportsReasoning: effectiveSupportsReasoning,
       signal,
       webContents,
       streamId,
@@ -82,6 +86,10 @@ export async function agentLoopAnthropic({
 
     if (!providerResponse.ok) {
       const text = providerResponse.errorText || '';
+      if (providerResponse.providerError) {
+        loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
+        return;
+      }
       if (isPromptTooLongResponse(providerResponse.status, text)) {
         const emergencyCompaction = await runCompactionCheck({
           messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
@@ -116,11 +124,22 @@ export async function agentLoopAnthropic({
     const effectiveToolUseBlocks = stopReason === 'tool_use' ? toolUseBlocks : [];
 
     if (!effectiveToolUseBlocks.length) {
+      if (
+        effectiveSupportsReasoning &&
+        effort === 'high' &&
+        !String(textContent || '').trim() &&
+        !String(thinkingContent || '').trim()
+      ) {
+        effectiveSupportsReasoning = false;
+        onNativeReasoningFallback?.({ provider: 'anthropic', reason: 'empty_response' });
+        continue;
+      }
       const terminalResponse = handleTerminalTextResponse({
         text: textContent,
         // 深度模式下正文可能为空但已产出 thinking；把 thinking 计入“非空”，
         // 避免误报 empty_model_response。
         thinking: thinkingContent,
+        providerTracePath: providerResponse.providerTracePath,
         apiMessages,
         loop,
         responseGuard,

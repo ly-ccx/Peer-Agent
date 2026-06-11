@@ -25,13 +25,30 @@
   padding: 0 var(--space-4) var(--space-2);
   -webkit-app-region: no-drag;
 }
-.sidebar-brand-icon {
+.sidebar-brand-mark {
+  position: relative;
   width: 22px;
   height: 22px;
   flex: 0 0 22px;
+  display: block;
+}
+.sidebar-brand-icon {
+  position: absolute;
+  inset: 0;
+  width: 22px;
+  height: 22px;
   border-radius: 6px;
   object-fit: cover;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--chrome-hairline) 70%, transparent);
+}
+.sidebar-brand-icon.dark {
+  display: none;
+}
+[data-theme="dark"] .sidebar-brand-icon.light {
+  display: none;
+}
+[data-theme="dark"] .sidebar-brand-icon.dark {
+  display: block;
 }
 .sidebar-brand-title {
   font-family: var(--font-serif-zh);

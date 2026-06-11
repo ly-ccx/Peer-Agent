@@ -51,7 +51,6 @@ export type TranslationKey =
   | 'appearance.quick.white'
   | 'appearance.preview'
   | 'appearance.previewTool'
-  | 'appearance.previewComposer'
   | 'appearance.editTheme'
   | 'appearance.scheme.light'
   | 'appearance.scheme.dark'
@@ -492,7 +491,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.quick.white': '白',
     'appearance.preview': '外观预览',
     'appearance.previewTool': 'Tool · completed',
-    'appearance.previewComposer': '继续交代任务或补充信息...',
     'appearance.editTheme': '编辑主题',
     'appearance.scheme.light': '浅色主题',
     'appearance.scheme.dark': '深色主题',
@@ -951,7 +949,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.quick.white': 'White',
     'appearance.preview': 'Appearance preview',
     'appearance.previewTool': 'Tool · completed',
-    'appearance.previewComposer': 'Continue the task or add context...',
     'appearance.editTheme': 'Edit theme',
     'appearance.scheme.light': 'Light theme',
     'appearance.scheme.dark': 'Dark theme',

@@ -57,10 +57,6 @@ export function AppearancePanel({
           <p>羊皮纸上的墨与印</p>
           <span>{i18n.t('appearance.previewTool')}</span>
         </div>
-        <div className="appearance-preview-composer">
-          <span>{i18n.t('appearance.previewComposer')}</span>
-          <i>↑</i>
-        </div>
       </section>
 
       <button type="button" className="appearance-reset" onClick={reset}>

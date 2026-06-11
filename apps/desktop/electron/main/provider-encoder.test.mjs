@@ -59,7 +59,7 @@ describe('Provider message encoders', () => {
     assert.equal(encoded[0].content, '');
   });
 
-  it('encodes OpenAI chat request shape in one provider boundary', () => {
+  it('keeps OpenAI high effort as prompt-level intent unless native reasoning is enabled', () => {
     const body = encodeOpenAIChatRequest({
       model: 'gpt-test',
       messages: [{ role: 'user', content: 'hello' }],
@@ -70,12 +70,24 @@ describe('Provider message encoders', () => {
     assert.equal(body.model, 'gpt-test');
     assert.equal(body.stream, true);
     assert.equal(body.stream_options.include_usage, true);
-    assert.equal(body.reasoning_effort, 'high');
+    assert.equal(body.reasoning_effort, undefined);
     assert.equal(body.messages[0].content, 'hello');
     assert.equal(body.tools[0].function.name, 'bash');
   });
 
-  it('encodes Anthropic messages request shape in one provider boundary', () => {
+  it('sends OpenAI native reasoning effort only when the provider capability is enabled', () => {
+    const body = encodeOpenAIChatRequest({
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{ type: 'function', function: { name: 'bash' } }],
+      effort: 'high',
+      supportsReasoning: true,
+    });
+
+    assert.equal(body.reasoning_effort, 'high');
+  });
+
+  it('keeps Anthropic high effort as prompt-level intent unless native reasoning is enabled', () => {
     const body = encodeAnthropicMessagesRequest({
       model: 'claude-test',
       system: 'system prompt',
@@ -91,13 +103,43 @@ describe('Provider message encoders', () => {
     assert.equal(body.system[0].text, 'system prompt');
     assert.equal(body.system[0].cache_control.type, 'ephemeral');
     assert.equal(body.stream, true);
+    assert.equal(body.thinking, undefined);
+    assert.equal(body.max_tokens, 16384);
+    assert.equal(body.tools[0].name, 'bash');
+  });
+
+  it('sends Anthropic thinking only when the provider capability is enabled', () => {
+    const body = encodeAnthropicMessagesRequest({
+      model: 'claude-test',
+      system: 'system prompt',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{ name: 'bash' }],
+      effort: 'high',
+      supportsReasoning: true,
+    });
+
     assert.equal(body.thinking.type, 'enabled');
     assert.equal(body.thinking.budget_tokens, 32768);
     // 回归保护: 开启 thinking 时 max_tokens 必须严格大于 budget_tokens，
     // 否则 Anthropic API 返回 400，"深度"模式必挂。
     assert.equal(body.max_tokens, 32768 + 16384);
     assert.ok(body.max_tokens > body.thinking.budget_tokens);
-    assert.equal(body.tools[0].name, 'bash');
+  });
+
+  it('sends Anthropic adaptive thinking when requested by provider encoder policy', () => {
+    const body = encodeAnthropicMessagesRequest({
+      model: 'claude-test',
+      system: 'system prompt',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{ name: 'bash' }],
+      effort: 'high',
+      supportsReasoning: true,
+      reasoningFormat: 'adaptive',
+    });
+
+    assert.deepEqual(body.thinking, { type: 'adaptive' });
+    assert.deepEqual(body.output_config, { effort: 'high' });
+    assert.equal(body.max_tokens, 16384);
   });
 
   it('does not enable Anthropic thinking for default effort', () => {

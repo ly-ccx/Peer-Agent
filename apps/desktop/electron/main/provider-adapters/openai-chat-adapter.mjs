@@ -1,4 +1,5 @@
 import { encodeOpenAIChatRequest } from '../provider-encoders/index.mjs';
+import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 
 function extractTextLikeDelta(value) {
   if (typeof value === 'string') return value;
@@ -33,13 +34,36 @@ function extractOpenAIReasoningDelta(delta) {
   return '';
 }
 
-function consumeOpenAIStreamLine(line, state, webContents, streamId) {
+function extractOpenAIStreamError(parsed) {
+  const error = parsed?.error ?? parsed?.choices?.[0]?.delta?.error;
+  if (!error) return null;
+  if (typeof error === 'string') return { type: 'provider_stream_error', message: error };
+  return {
+    type: error.type || error.code || 'provider_stream_error',
+    message: error.message || JSON.stringify(error),
+  };
+}
+
+function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = null) {
   const trimmed = line.trim();
-  if (!trimmed || !trimmed.startsWith('data: ')) return;
+  if (!trimmed) return;
+  if (!trimmed.startsWith('data: ')) {
+    trace?.recordIgnoredLine?.(trimmed);
+    return;
+  }
   const payload = trimmed.slice(6);
-  if (payload === '[DONE]') return;
+  if (payload === '[DONE]') {
+    trace?.recordDoneMarker?.();
+    return;
+  }
   try {
     const parsed = JSON.parse(payload);
+    trace?.recordSsePayload?.(payload, parsed);
+    const streamError = extractOpenAIStreamError(parsed);
+    if (streamError) {
+      state.streamError = streamError;
+      return;
+    }
     const delta = parsed.choices?.[0]?.delta;
     const contentDelta = extractTextLikeDelta(delta?.content);
     if (contentDelta) {
@@ -70,16 +94,17 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId) {
       };
       webContents.send('chat:stream:usage', { streamId, usage: state.usage });
     }
-  } catch {
+  } catch (error) {
+    trace?.recordParseError?.(payload, error);
     /* skip malformed stream frame */
   }
 }
 
-async function consumeOpenAIStream(res, webContents, streamId) {
+async function consumeOpenAIStream(res, webContents, streamId, trace = null) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  const state = { content: '', thinkingContent: '', toolCalls: [], usage: null };
+  const state = { content: '', thinkingContent: '', toolCalls: [], usage: null, streamError: null };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -89,16 +114,17 @@ async function consumeOpenAIStream(res, webContents, streamId) {
     buffer = lines.pop() || '';
 
     for (const line of lines) {
-      consumeOpenAIStreamLine(line, state, webContents, streamId);
+      consumeOpenAIStreamLine(line, state, webContents, streamId, trace);
     }
   }
-  if (buffer.trim()) consumeOpenAIStreamLine(buffer, state, webContents, streamId);
+  if (buffer.trim()) consumeOpenAIStreamLine(buffer, state, webContents, streamId, trace);
 
   return {
     content: state.content,
     thinkingContent: state.thinkingContent,
     toolCalls: state.toolCalls.filter(Boolean),
     streamUsage: state.usage,
+    streamError: state.streamError,
   };
 }
 
@@ -109,6 +135,7 @@ export async function sendOpenAIChatStream({
   messages,
   tools,
   effort,
+  supportsReasoning,
   signal,
   webContents,
   streamId,
@@ -119,6 +146,16 @@ export async function sendOpenAIChatStream({
     messages,
     tools,
     effort,
+    supportsReasoning,
+  });
+  const trace = createProviderStreamTrace({
+    provider: 'openai',
+    baseUrl,
+    model,
+    effort,
+    supportsReasoning,
+    streamId,
+    requestBody: body,
   });
 
   const res = await fetch(url, {
@@ -127,19 +164,73 @@ export async function sendOpenAIChatStream({
     body: JSON.stringify(body),
     signal,
   });
+  trace.recordResponse(res);
 
   if (!res.ok) {
+    const errorText = await res.text().catch(() => '');
+    const tracePath = await trace.finish({
+      anomaly: 'http_error',
+      httpError: errorText,
+      result: { ok: false, status: res.status },
+    });
+    if (tracePath) console.warn(`[provider-trace] wrote OpenAI HTTP error trace: ${tracePath}`);
     return {
       ok: false,
       status: res.status,
-      errorText: await res.text().catch(() => ''),
+      errorText,
       messages: body.messages,
+      providerTracePath: tracePath,
     };
   }
+
+  const streamResult = await consumeOpenAIStream(res, webContents, streamId, trace);
+  if (streamResult.streamError) {
+    const errorText = `provider_stream_error: ${streamResult.streamError.message}`;
+    const tracePath = await trace.finish({
+      anomaly: 'provider_stream_error',
+      httpError: errorText,
+      result: {
+        ok: false,
+        status: res.status,
+        streamErrorType: streamResult.streamError.type,
+        textChars: streamResult.content.length,
+        thinkingChars: streamResult.thinkingContent.length,
+        toolCallCount: streamResult.toolCalls.length,
+      },
+    });
+    if (tracePath) console.warn(`[provider-trace] wrote OpenAI stream error trace: ${tracePath}`);
+    return {
+      ok: false,
+      status: res.status,
+      errorText,
+      providerError: true,
+      messages: body.messages,
+      providerTracePath: tracePath,
+    };
+  }
+  const anomaly =
+    !String(streamResult.content || '').trim() &&
+    !String(streamResult.thinkingContent || '').trim() &&
+    !streamResult.toolCalls.length
+      ? 'empty_stream_result'
+      : null;
+  const tracePath = await trace.finish({
+    anomaly,
+    result: {
+      ok: true,
+      status: res.status,
+      textChars: streamResult.content.length,
+      thinkingChars: streamResult.thinkingContent.length,
+      toolCallCount: streamResult.toolCalls.length,
+      hasUsage: Boolean(streamResult.streamUsage),
+    },
+  });
+  if (tracePath && anomaly) console.warn(`[provider-trace] wrote OpenAI empty stream trace: ${tracePath}`);
 
   return {
     ok: true,
     messages: body.messages,
-    ...(await consumeOpenAIStream(res, webContents, streamId)),
+    providerTracePath: tracePath,
+    ...streamResult,
   };
 }

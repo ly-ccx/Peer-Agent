@@ -15,6 +15,7 @@ export function encodeOpenAIChatRequest({
   messages,
   tools,
   effort = 'default',
+  supportsReasoning = false,
 }) {
   const body = {
     model,
@@ -23,7 +24,7 @@ export function encodeOpenAIChatRequest({
     stream_options: { include_usage: true },
     tools,
   };
-  if (effort && effort !== 'default') {
+  if (supportsReasoning && effort && effort !== 'default') {
     body.reasoning_effort = OPENAI_REASONING_EFFORT[effort] ?? 'medium';
   }
   return body;
@@ -110,6 +111,8 @@ export function encodeAnthropicMessagesRequest({
   messages,
   tools,
   effort = 'default',
+  supportsReasoning = false,
+  reasoningFormat = 'enabled',
 }) {
   const body = {
     model,
@@ -119,14 +122,19 @@ export function encodeAnthropicMessagesRequest({
     stream: true,
     tools,
   };
-  if (effort === 'high') {
-    const budgetTokens = ANTHROPIC_THINKING_BUDGET.high;
-    body.thinking = {
-      type: 'enabled',
-      budget_tokens: budgetTokens,
-    };
-    // max_tokens 必须严格大于 budget_tokens，并额外预留回复 token。
-    body.max_tokens = budgetTokens + ANTHROPIC_REPLY_TOKENS;
+  if (supportsReasoning && effort === 'high') {
+    if (reasoningFormat === 'adaptive') {
+      body.thinking = { type: 'adaptive' };
+      body.output_config = { effort: 'high' };
+    } else {
+      const budgetTokens = ANTHROPIC_THINKING_BUDGET.high;
+      body.thinking = {
+        type: 'enabled',
+        budget_tokens: budgetTokens,
+      };
+      // max_tokens 必须严格大于 budget_tokens，并额外预留回复 token。
+      body.max_tokens = budgetTokens + ANTHROPIC_REPLY_TOKENS;
+    }
   }
   return applyAnthropicCacheControl(body);
 }

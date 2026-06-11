@@ -119,20 +119,6 @@
     background: var(--za-surface-1);
   }
 
-  .appearance-preview-composer {
-    @apply grid min-h-9 items-center gap-2 rounded-[8px] px-3 text-[11.5px];
-    grid-template-columns: minmax(0, 1fr) 24px;
-    color: var(--za-text-muted);
-    background: var(--za-composer-bg);
-    border: 1px solid var(--za-line);
-  }
-
-  .appearance-preview-composer i {
-    @apply grid h-6 w-6 place-items-center rounded-full text-[13px] not-italic;
-    color: var(--za-primary-control-ink);
-    background: var(--za-primary-control-bg);
-  }
-
   .appearance-reset {
     @apply w-fit justify-self-end rounded-[4px] px-2.5 py-1.5 text-[12px] font-normal;
     color: var(--za-text-faint);
