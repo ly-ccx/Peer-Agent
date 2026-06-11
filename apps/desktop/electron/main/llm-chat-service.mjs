@@ -92,6 +92,9 @@ function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conver
         if (lifetimeUsage) {
           payload = { ...payload, lifetimeUsage };
         }
+        streamRecord.terminalEventSent = true;
+      } else if (channel === 'chat:stream:aborted') {
+        streamRecord.terminalEventSent = true;
       }
       return realWebContents.send(channel, payload);
     },
@@ -167,6 +170,8 @@ export function createLlmChatService({
       accumulatedText: '',
       accumulatedThinking: '',
       usageRecorded: false,
+      // 终态事件去重:保证 done/error/aborted 三选一恰好发一次,防止压缩等中间阶段抛错后界面悬挂。
+      terminalEventSent: false,
     };
     activeStreams.set(streamId, streamRecord);
     // 累积代理:拦截 delta/thinking 追加到记录,其余事件透传给真实 webContents。
@@ -249,14 +254,30 @@ export function createLlmChatService({
       }
     } catch (err) {
       console.error('[llm-chat] error:', err);
-      if (err?.name !== 'AbortError') {
-        webContents.send('chat:stream:error', { streamId, error: err?.message || 'stream_failed' });
+      if (err?.name === 'AbortError') {
+        // 用户主动中断:补发 aborted 终态(若 abort() 已发则被去重保护跳过)。
+        if (!streamRecord.terminalEventSent) {
+          accumulatingWebContents.send('chat:stream:aborted', { streamId });
+        }
+      } else {
+        accumulatingWebContents.send('chat:stream:error', {
+          streamId,
+          error: err?.message || 'stream_failed',
+        });
       }
     } finally {
       permissionGate.settleStreamPermissionRequests(streamId, {
         granted: false,
         reason: 'stream_finished',
       });
+      // 终态兜底:任何路径(含压缩等中间阶段提前 return / 静默吞错)都必须解锁渲染端,
+      // 否则停止按钮会一直悬挂。恰好发一次,依赖 terminalEventSent 去重。
+      if (!streamRecord.terminalEventSent) {
+        accumulatingWebContents.send('chat:stream:error', {
+          streamId,
+          error: 'stream_terminated_without_result',
+        });
+      }
       activeStreams.delete(streamId);
     }
   }
