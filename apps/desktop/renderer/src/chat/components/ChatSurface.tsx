@@ -13,6 +13,7 @@ import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi }
 import { MarkdownMessage } from './markdown/MarkdownMessage';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
+import { MessageRail, type MessageRailItem } from './thread/MessageRail';
 import { useTypewriterStream } from '../hooks/useTypewriterStream';
 
 const MAX_ATTACHMENTS = 8;
@@ -541,6 +542,7 @@ export function ChatSurface({
   onResumeConsumed,
   onOpenSettings,
   onConversationUpdated,
+  onStreamingChange,
   onBranch,
 }: {
   readonly i18n: I18nRuntime;
@@ -551,12 +553,19 @@ export function ChatSurface({
   readonly onResumeConsumed?: () => void;
   readonly onOpenSettings: () => void;
   readonly onConversationUpdated?: () => void;
+  // 把当前会话的流式运行状态上报给上层(App),供左侧列表显示 Loading 图标。
+  readonly onStreamingChange?: (conversationId: string | null, isStreaming: boolean) => void;
   readonly onBranch?: (newConversationId: string) => void;
 }) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [draft, setDraft] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isCompacting, setIsCompacting] = useState(false);
+  // 把流式运行状态(含会话坐标)上报给上层,供左侧列表显示 Loading 图标。
+  // 表达层只反映 isStreaming 真值,不引入新的执行真值。
+  useEffect(() => {
+    onStreamingChange?.(conversationId, isStreaming);
+  }, [isStreaming, conversationId, onStreamingChange]);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [effort, setEffort] = useState<'low' | 'default' | 'high'>('default');
   const [tokenUsage, setTokenUsage] = useState<TokenUsageState | null>(null);
@@ -609,6 +618,21 @@ export function ChatSurface({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 表达层导航:点击右侧消息轨时,把对应用户消息滚动到视口并短暂高亮。
+  // 仅操作已渲染的 DOM 锚点(data-msg-id),不触碰会话真值。
+  const scrollToMessage = useCallback((id: string) => {
+    const container = threadRef.current;
+    if (!container) return;
+    const target = container.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.remove('chat-msg-flash');
+    // 强制重排以便重复点击同一条时动画可再次触发。
+    void target.offsetWidth;
+    target.classList.add('chat-msg-flash');
+    window.setTimeout(() => target.classList.remove('chat-msg-flash'), 1600);
+  }, []);
+
   const hasProvider = providers.some((p) => p.apiKeyConfigured);
   // 当前激活 provider(默认且已配置 Key,否则取首个已配置)是否勾选了原生推理(reasoning/thinking)。
   // 只有勾选时才显示思考强度选择器(简洁/标准/深度)。
@@ -621,6 +645,15 @@ export function ChatSurface({
   const slashCommands = slashQuery
     ? SLASH_COMMANDS.filter((command) => command.value.startsWith(slashQuery))
     : [];
+
+  // 右侧消息轨条目:仅取用户消息(排除压缩摘要),文本截断用于 hover 预览。
+  const railItems: MessageRailItem[] = messages
+    .filter((msg) => msg.role === 'user' && !msg.compaction)
+    .map((msg) => {
+      const raw = (msg.content ?? '').trim();
+      const text = raw.length > 80 ? `${raw.slice(0, 80)}…` : raw;
+      return { id: msg.id, text };
+    });
   const showSlashCommands = !isStreaming && !isCompacting && slashCommands.length > 0;
   const estimatedContextTokens = estimateConversationTokens(messages, draft, attachments);
 
@@ -1165,7 +1198,7 @@ export function ChatSurface({
             <p>{isZh ? '输入消息开始对话' : 'Type a message to start'}</p>
           </div>
         ) : messages.map((msg, idx) => (
-          <div key={msg.id} className={`chat-msg chat-msg-${msg.role}`}>
+          <div key={msg.id} data-msg-id={msg.id} className={`chat-msg chat-msg-${msg.role}`}>
             {msg.compaction ? (
               <CompactionSummaryCard compaction={msg.compaction} isZh={isZh} />
             ) : (
@@ -1220,6 +1253,8 @@ export function ChatSurface({
           <div className="chat-stream-error"><span>⚠ {streamError}</span></div>
         ) : null}
       </div>
+
+      <MessageRail items={railItems} onSelect={scrollToMessage} i18n={i18n} />
 
       <div className="chat-composer-wrap">
         <PermissionGateStrip
@@ -1430,10 +1465,15 @@ function AssistantContent({ segments, content, isStreaming, isZh }: {
 
   const groups = groupSegments(segments);
   const lastGroup = groups[groups.length - 1];
-  const showCursor = isStreaming && (
-    !groups.length ||
-    (lastGroup.type === 'tool-call-group' && lastGroup.calls.every((c) => c.result !== undefined))
+  // 流式期间始终保留一个“还在运行”的指示，避免工具执行间隙/文本结束等待下一步时
+  // 光标消失造成“卡住”的错觉。仅当末尾组本身已有 active 视觉（工具执行中的工具组、
+  // active 的思考文本组）时才省略底部光标，避免重复闪烁。
+  const lastGroupHasActiveIndicator = Boolean(
+    lastGroup &&
+    ((lastGroup.type === 'tool-call-group' && lastGroup.calls.some((c) => c.result === undefined)) ||
+      lastGroup.type === 'thinking'),
   );
+  const showCursor = isStreaming && !lastGroupHasActiveIndicator;
 
   return (
     <div className="assistant-segments">

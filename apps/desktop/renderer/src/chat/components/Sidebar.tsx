@@ -24,6 +24,7 @@ interface WorkspaceInfo {
 export function Sidebar({
   conversations,
   activeConversationId,
+  runningConversationId,
   activePage,
   i18n,
   onNewChat,
@@ -34,6 +35,8 @@ export function Sidebar({
 }: {
   readonly conversations: readonly ConversationMeta[];
   readonly activeConversationId: string | null;
+  // 当前正在流式运行的会话 id(表达层状态,真值来自 ChatSurface)。
+  readonly runningConversationId?: string | null;
   readonly activePage: string;
   readonly i18n: I18nRuntime;
   readonly onNewChat: () => void;
@@ -152,6 +155,14 @@ export function Sidebar({
             onMouseEnter={() => setHoveredId(conv.id)}
             onMouseLeave={() => setHoveredId(null)}
           >
+            {runningConversationId === conv.id ? (
+              <span
+                className="sidebar-conv-spinner"
+                role="img"
+                aria-label={isZh ? '运行中' : 'Running'}
+                title={isZh ? '运行中' : 'Running'}
+              />
+            ) : null}
             <span className="sidebar-conv-title">{conv.title || (isZh ? '新对话' : 'New Chat')}</span>
             {confirmDeleteId === conv.id ? (
               <span className="sidebar-conv-confirm" onClick={(e) => e.stopPropagation()}>

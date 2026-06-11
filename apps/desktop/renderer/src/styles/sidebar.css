@@ -255,6 +255,20 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.sidebar-conv-spinner {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--azure-seal);
+  border-top-color: transparent;
+  animation: sidebar-conv-spin 0.7s linear infinite;
+}
+@keyframes sidebar-conv-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .sidebar-conv-delete {
   background: none;
   border: none;

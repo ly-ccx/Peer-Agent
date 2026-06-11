@@ -27,6 +27,9 @@ export function App() {
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
   const [conversations, setConversations] = useState<readonly ConversationMeta[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  // 表达层状态:当前正在流式运行的会话 id,用于左侧列表显示 Loading 图标。
+  // 真值来自 ChatSurface 内部的 isStreaming,经回调上提;表达层只表达,不持有执行真值。
+  const [runningConversationId, setRunningConversationId] = useState<string | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
   // 任务续传(ADR 21):重启后 peek 回来的待办,带会话坐标。
   // App 负责切到 sessionId(回到中断现场)后,把 task 下发给 ChatSurface 自动发出。
@@ -142,6 +145,7 @@ export function App() {
           <Sidebar
             conversations={conversations}
             activeConversationId={activeConversationId}
+            runningConversationId={runningConversationId}
             activePage={activePage}
             i18n={i18n}
             onNewChat={handleNewChat}
@@ -164,6 +168,13 @@ export function App() {
                 }}
                 onOpenSettings={() => setActivePage('settings')}
                 onConversationUpdated={refreshConversations}
+                onStreamingChange={(convId, streaming) => {
+                  setRunningConversationId((prev) => {
+                    if (streaming) return convId;
+                    // 仅当上报的会话正是当前标记为运行中的会话时才清除,避免切换会话时误清。
+                    return prev === convId ? null : prev;
+                  });
+                }}
                 onBranch={(id) => { setActiveConversationId(id); void refreshConversations(); }}
               />
             </section>
