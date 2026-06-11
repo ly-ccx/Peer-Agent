@@ -30,10 +30,12 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
   function readIndex() { return readJsonl(indexFile); }
 
   function listConversations() {
-    return readIndex().map((meta) => {
-      const msgs = existsSync(convFile(meta.id)) ? readJsonl(convFile(meta.id)) : [];
-      return { ...meta, messageCount: msgs.length };
-    });
+    return readIndex()
+      .map((meta) => {
+        const msgs = existsSync(convFile(meta.id)) ? readJsonl(convFile(meta.id)) : [];
+        return { ...meta, messageCount: msgs.length };
+      })
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   }
 
   function listConversationsByWorkspace(workspacePath) {
