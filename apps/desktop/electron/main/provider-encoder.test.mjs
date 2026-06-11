@@ -85,7 +85,11 @@ describe('Provider message encoders', () => {
     });
 
     assert.equal(body.model, 'claude-test');
-    assert.equal(body.system, 'system prompt');
+    // ADR 24 prompt caching: system 由字符串降为带 ephemeral cache_control 的 text block 数组。
+    assert.ok(Array.isArray(body.system));
+    assert.equal(body.system[0].type, 'text');
+    assert.equal(body.system[0].text, 'system prompt');
+    assert.equal(body.system[0].cache_control.type, 'ephemeral');
     assert.equal(body.stream, true);
     assert.equal(body.thinking.type, 'enabled');
     assert.equal(body.thinking.budget_tokens, 32768);
@@ -107,5 +111,35 @@ describe('Provider message encoders', () => {
 
     assert.equal(body.thinking, undefined);
     assert.equal(body.max_tokens, 16384);
+  });
+
+  it('applies ephemeral cache_control to system and the last message (ADR 24)', () => {
+    const body = encodeAnthropicMessagesRequest({
+      model: 'claude-test',
+      system: 'stable system prefix',
+      messages: [
+        { role: 'user', content: 'first' },
+        { role: 'assistant', content: 'reply' },
+        { role: 'user', content: 'latest question' },
+      ],
+      effort: 'default',
+    });
+
+    // system 断点: 字符串降为带 ephemeral 的 text block 数组。
+    assert.ok(Array.isArray(body.system));
+    assert.equal(body.system[0].cache_control.type, 'ephemeral');
+
+    // 历史前缀断点: 只在最后一条 message 的最后一个 block 打 cache_control。
+    const lastMsg = body.messages[body.messages.length - 1];
+    assert.ok(Array.isArray(lastMsg.content));
+    const lastBlock = lastMsg.content[lastMsg.content.length - 1];
+    assert.equal(lastBlock.cache_control.type, 'ephemeral');
+
+    // 非最后的消息不应带 cache_control 断点。
+    const firstMsg = body.messages[0];
+    const firstBlocks = Array.isArray(firstMsg.content) ? firstMsg.content : [];
+    for (const block of firstBlocks) {
+      assert.equal(block.cache_control, undefined);
+    }
   });
 });
