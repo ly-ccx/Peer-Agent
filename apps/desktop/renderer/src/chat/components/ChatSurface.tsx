@@ -610,6 +610,12 @@ export function ChatSurface({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const hasProvider = providers.some((p) => p.apiKeyConfigured);
+  // 当前激活 provider(默认且已配置 Key,否则取首个已配置)是否勾选了原生推理(reasoning/thinking)。
+  // 只有勾选时才显示思考强度选择器(简洁/标准/深度)。
+  const activeProviderSupportsReasoning = Boolean(
+    (providers.find((p) => p.isDefault && p.apiKeyConfigured)
+      || providers.find((p) => p.apiKeyConfigured))?.supportsReasoning,
+  );
   const isZh = i18n.locale === 'zh-CN';
   const slashQuery = draft.startsWith('/') && !/\s/.test(draft) ? draft.toLowerCase() : null;
   const slashCommands = slashQuery
@@ -1332,21 +1338,23 @@ export function ChatSurface({
           </button>
         </form>
         <div className="chat-composer-toolbar">
-          <div className="effort-selector">
-            {(['low', 'default', 'high'] as const).map((level) => (
-              <button
-                key={level}
-                type="button"
-                className={`effort-btn ${effort === level ? 'active' : ''}`}
-                onClick={() => setEffort(level)}
-                title={level}
-              >
-                {level === 'low' ? (isZh ? '简洁' : 'Low')
-                  : level === 'high' ? (isZh ? '深度' : 'High')
-                  : (isZh ? '标准' : 'Default')}
-              </button>
-            ))}
-          </div>
+          {activeProviderSupportsReasoning ? (
+            <div className="effort-selector">
+              {(['low', 'default', 'high'] as const).map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  className={`effort-btn ${effort === level ? 'active' : ''}`}
+                  onClick={() => setEffort(level)}
+                  title={level}
+                >
+                  {level === 'low' ? (isZh ? '简洁' : 'Low')
+                    : level === 'high' ? (isZh ? '深度' : 'High')
+                    : (isZh ? '标准' : 'Default')}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <TokenUsageDisplay providers={providers} tokenUsage={tokenUsage} activeUsage={activeUsage} contextTokens={estimatedContextTokens} isStreaming={isStreaming} isZh={isZh} />
         </div>
       </div>
@@ -1471,7 +1479,18 @@ function ThinkingTextSection({ content, isActive, isZh }: { readonly content: st
   return (
     <div className={`thinking-section ${isActive ? 'active' : 'done'}`}>
       <button type="button" className="thinking-toggle" onClick={() => setExpanded(!expanded)}>
-        <span className="thinking-indicator">{isActive ? '◐' : '●'}</span>
+        <span className="thinking-indicator" aria-hidden="true">
+          {isActive ? (
+            <svg className="thinking-indicator-svg" width="13" height="13" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.3" />
+              <path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" />
+            </svg>
+          ) : (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="9" fill="currentColor" />
+            </svg>
+          )}
+        </span>
         <span className="thinking-label">{label}</span>
         <svg className="thinking-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
           <path d="m6 9 6 6 6-6" />
@@ -1497,7 +1516,18 @@ function ThinkingSection({ toolCalls, isActive, isZh }: { readonly toolCalls: To
   return (
     <div className={`thinking-section ${isActive ? 'active' : 'done'}`}>
       <button type="button" className="thinking-toggle" onClick={() => setExpanded(!expanded)}>
-        <span className="thinking-indicator">{isActive ? '◐' : '●'}</span>
+        <span className="thinking-indicator" aria-hidden="true">
+          {isActive ? (
+            <svg className="thinking-indicator-svg" width="13" height="13" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.3" />
+              <path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" />
+            </svg>
+          ) : (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="9" fill="currentColor" />
+            </svg>
+          )}
+        </span>
         <span className="thinking-label">{label}</span>
         <svg className="thinking-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
           <path d="m6 9 6 6 6-6" />
@@ -1531,7 +1561,22 @@ function ToolCallCard({ tc }: { readonly tc: ToolCallLegacy }) {
   return (
     <div className={`tool-call-card ${isSynthetic ? 'synthetic' : isDone ? 'done' : 'running'}`} onClick={() => setExpanded(!expanded)}>
       <div className="tool-call-header">
-        <span className="tool-call-icon">{isSynthetic ? '!' : isDone ? '✓' : '⟳'}</span>
+        <span className="tool-call-icon" aria-hidden="true">
+          {isSynthetic ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="8" x2="12" y2="13" />
+              <circle cx="12" cy="16.6" r="0.9" fill="currentColor" stroke="none" />
+            </svg>
+          ) : isDone ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m5 12.5 4.5 4.5L19 7" />
+            </svg>
+          ) : (
+            <svg className="tool-call-spinner-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+              <path d="M12 3a9 9 0 1 0 9 9" />
+            </svg>
+          )}
+        </span>
         <span className="tool-call-label">{label}</span>
         <svg className="tool-call-expand" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
           <path d="m6 9 6 6 6-6" />

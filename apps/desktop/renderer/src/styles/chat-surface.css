@@ -174,8 +174,14 @@
   color: var(--graphite-base);
 }
 .thinking-indicator {
-  font-size: 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
   flex-shrink: 0;
+}
+.thinking-indicator svg {
+  display: block;
 }
 .thinking-section.active .thinking-indicator {
   color: var(--azure-seal);
@@ -265,12 +271,22 @@
   font-size: 0.78rem;
 }
 .tool-call-icon {
-  font-size: 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
   flex-shrink: 0;
+}
+.tool-call-icon svg {
+  display: block;
 }
 .tool-call-card.running .tool-call-icon {
   color: var(--azure-seal);
-  animation: spin 1s linear infinite;
+}
+.tool-call-card.running .tool-call-spinner-svg {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: spin 0.9s linear infinite;
 }
 .tool-call-card.done .tool-call-icon {
   color: var(--state-success);
