@@ -1,6 +1,5 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useCallback, useEffect, useState } from 'react';
-import type { RuntimeIdentity } from '../../app/runtimeIdentity';
 import { clientApi } from '../../clientApi';
 
 interface ConversationMeta {
@@ -27,7 +26,6 @@ export function Sidebar({
   activeConversationId,
   activePage,
   i18n,
-  runtimeIdentity,
   onNewChat,
   onSelectConversation,
   onDeleteConversation,
@@ -39,7 +37,6 @@ export function Sidebar({
   readonly activeConversationId: string | null;
   readonly activePage: string;
   readonly i18n: I18nRuntime;
-  readonly runtimeIdentity: RuntimeIdentity;
   readonly onNewChat: () => void;
   readonly onSelectConversation: (id: string) => void;
   readonly onDeleteConversation: (id: string) => void;
@@ -97,13 +94,6 @@ export function Sidebar({
         <img className="sidebar-brand-icon" src="/logo.png" alt="" aria-hidden="true" />
         <span className="sidebar-brand-copy">
           <span className="sidebar-brand-title">Peer Agent</span>
-          <span
-            className={`sidebar-runtime-badge ${runtimeIdentity.variant}`}
-            title={runtimeIdentity.detail}
-          >
-            {isZh ? runtimeIdentity.labelZh : runtimeIdentity.labelEn}
-            {runtimeIdentity.detail.includes(':') ? ` · ${runtimeIdentity.detail.split(':').pop()}` : ''}
-          </span>
         </span>
       </div>
 
