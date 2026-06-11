@@ -159,5 +159,5 @@ export async function agentLoopOpenAI({
     }
   }
 
-  loop.sendDone();
+  loop.sendLoopExhausted();
 }

@@ -1,4 +1,30 @@
-export const DEFAULT_AGENT_LOOP_MAX_TURNS = 20;
+export const AGENT_LOOP_UNBOUNDED = Number.POSITIVE_INFINITY;
+export const DEFAULT_AGENT_LOOP_MAX_TURNS = AGENT_LOOP_UNBOUNDED;
+
+export function normalizeAgentLoopMaxTurns(value) {
+  if (value === undefined || value === null || value === '' || value === false) {
+    return AGENT_LOOP_UNBOUNDED;
+  }
+  if (value === AGENT_LOOP_UNBOUNDED || value === true) return AGENT_LOOP_UNBOUNDED;
+  const text = String(value).trim().toLowerCase();
+  if (
+    !text ||
+    text === '0' ||
+    text === 'none' ||
+    text === 'unbounded' ||
+    text === 'unlimited' ||
+    text === 'infinite' ||
+    text === 'infinity'
+  ) {
+    return AGENT_LOOP_UNBOUNDED;
+  }
+  const parsed = Number(text);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : AGENT_LOOP_UNBOUNDED;
+}
+
+function defaultAgentLoopMaxTurns() {
+  return normalizeAgentLoopMaxTurns(process.env.PEER_AGENT_AGENT_LOOP_MAX_TURNS);
+}
 
 function hasBillableUsage(usage) {
   return Boolean(
@@ -12,10 +38,11 @@ function hasBillableUsage(usage) {
 export function createAgentLoopKernel({
   webContents,
   streamId,
-  maxTurns = DEFAULT_AGENT_LOOP_MAX_TURNS,
+  maxTurns = defaultAgentLoopMaxTurns(),
   maxUnsupportedToolRetries = 1,
   maxEmptyResponseRetries = 1,
 } = {}) {
+  const normalizedMaxTurns = normalizeAgentLoopMaxTurns(maxTurns);
   const usage = {
     inputTokens: 0,
     outputTokens: 0,
@@ -60,8 +87,15 @@ export function createAgentLoopKernel({
     sendError(`HTTP ${status}: ${String(text || '').slice(0, 300)}`);
   }
 
+  function sendLoopExhausted({ turns = normalizedMaxTurns } = {}) {
+    const budget = Number.isFinite(turns) ? String(turns) : 'unbounded';
+    sendError(
+      `agent_loop_exhausted: configured agent loop turn budget (${budget}) was reached before the model returned a terminal response. The task is not complete; continue the conversation to resume.`
+    );
+  }
+
   return {
-    maxTurns,
+    maxTurns: normalizedMaxTurns,
     usage,
     addUsage,
     claimUnsupportedToolRetry,
@@ -69,6 +103,7 @@ export function createAgentLoopKernel({
     sendDone,
     sendError,
     sendHttpError,
+    sendLoopExhausted,
   };
 }
 

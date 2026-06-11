@@ -912,6 +912,91 @@ describe('llm chat service tool materialization', () => {
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
   });
 
+  it('emits agent_loop_exhausted instead of done when an explicit loop budget is reached', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const previousMaxTurns = process.env.PEER_AGENT_AGENT_LOOP_MAX_TURNS;
+    const command = 'node -e "process.stdout.write(\'ok\')"';
+    const requests = [];
+    const events = [];
+    let fetchCalls = 0;
+
+    const frame = JSON.stringify({
+      choices: [{
+        delta: {
+          tool_calls: [{
+            index: 0,
+            id: 'tool-shell',
+            type: 'function',
+            function: { name: 'bash', arguments: JSON.stringify({ command }) },
+          }],
+        },
+      }],
+    });
+
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { status: 200 });
+    };
+    process.env.PEER_AGENT_AGENT_LOOP_MAX_TURNS = '1';
+
+    let service;
+    try {
+      service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+      });
+      service.setWorkspacePath(tmpDir);
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'run command' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        webContents: {
+          send: (channel, payload) => {
+            events.push({ channel, payload });
+            if (channel === 'chat:stream:permission-request') {
+              requests.push(payload.call);
+              service.resolvePermissionGrant(payload.call.toolCallId, {
+                grantId: 'grant-shell',
+                toolCallId: payload.call.toolCallId,
+                granted: true,
+                duration: 'once',
+                scope: payload.call.capabilityId,
+                decidedAt: new Date().toISOString(),
+              });
+            }
+          },
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousMaxTurns === undefined) {
+        delete process.env.PEER_AGENT_AGENT_LOOP_MAX_TURNS;
+      } else {
+        process.env.PEER_AGENT_AGENT_LOOP_MAX_TURNS = previousMaxTurns;
+      }
+    }
+
+    assert.equal(fetchCalls, 1);
+    assert.equal(requests.length, 1);
+    assert.equal(events.some((event) => event.channel === 'chat:stream:tool-result'), true);
+    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), false);
+    const error = events.find((event) => event.channel === 'chat:stream:error');
+    assert.ok(error);
+    assert.match(error.payload.error, /agent_loop_exhausted/);
+    assert.match(error.payload.error, /task is not complete/);
+  });
+
   it('adds evidence-discipline rules to the system prompt', async () => {
     const { buildSystemPrompt } = await loadService();
 

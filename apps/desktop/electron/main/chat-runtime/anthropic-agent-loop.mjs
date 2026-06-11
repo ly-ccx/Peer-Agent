@@ -179,5 +179,5 @@ export async function agentLoopAnthropic({
     apiMessages.push({ role: 'user', content: toolResults });
   }
 
-  loop.sendDone();
+  loop.sendLoopExhausted();
 }

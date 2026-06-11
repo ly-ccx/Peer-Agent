@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  AGENT_LOOP_UNBOUNDED,
   createAgentLoopKernel,
   handleTerminalTextResponse,
+  normalizeAgentLoopMaxTurns,
 } from './agent-loop-kernel.mjs';
 
 function makeWebContents() {
@@ -17,6 +19,15 @@ function makeWebContents() {
 }
 
 describe('agent loop kernel', () => {
+  it('defaults to an unbounded loop so model terminal responses control completion', () => {
+    const loop = createAgentLoopKernel({ webContents: makeWebContents(), streamId: 's0' });
+
+    assert.equal(loop.maxTurns, AGENT_LOOP_UNBOUNDED);
+    assert.equal(normalizeAgentLoopMaxTurns('0'), AGENT_LOOP_UNBOUNDED);
+    assert.equal(normalizeAgentLoopMaxTurns('unlimited'), AGENT_LOOP_UNBOUNDED);
+    assert.equal(normalizeAgentLoopMaxTurns('42'), 42);
+  });
+
   it('accumulates usage and emits done events with the shared usage object', () => {
     const webContents = makeWebContents();
     const loop = createAgentLoopKernel({ webContents, streamId: 's1' });
@@ -52,6 +63,20 @@ describe('agent loop kernel', () => {
     assert.equal(webContents.events[0].channel, 'chat:stream:error');
     assert.equal(webContents.events[0].payload.streamId, 's2');
     assert.equal(webContents.events[0].payload.error.length, 'HTTP 400: '.length + 300);
+  });
+
+  it('emits an explicit exhausted error for configured loop budgets', () => {
+    const webContents = makeWebContents();
+    const loop = createAgentLoopKernel({ webContents, streamId: 's2b', maxTurns: 2 });
+
+    loop.addUsage({ inputTokens: 13, outputTokens: 21 });
+    loop.sendLoopExhausted();
+
+    assert.equal(webContents.events.length, 1);
+    assert.equal(webContents.events[0].channel, 'chat:stream:error');
+    assert.match(webContents.events[0].payload.error, /agent_loop_exhausted/);
+    assert.match(webContents.events[0].payload.error, /task is not complete/);
+    assert.deepEqual(webContents.events[0].payload.usage, loop.usage);
   });
 
   it('emits done for terminal text responses', () => {
