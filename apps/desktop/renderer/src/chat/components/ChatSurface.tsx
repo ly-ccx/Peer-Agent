@@ -241,14 +241,6 @@ const SLASH_COMMANDS: SlashCommand[] = [
     descriptionZh: '压缩当前对话历史',
     descriptionEn: 'Compact conversation history',
   },
-  {
-    id: 'restart',
-    value: '/restart',
-    labelZh: '/restart',
-    labelEn: '/restart',
-    descriptionZh: '重启本体(可在后面写续传指令,重启后预填)',
-    descriptionEn: 'Restart host (append a follow-up to pre-fill after restart)',
-  },
 ];
 
 let msgSeq = 0;
@@ -1032,27 +1024,6 @@ export function ChatSurface({
       } finally {
         streamIdRef.current = null;
         setIsCompacting(false);
-      }
-      return;
-    }
-
-    // /restart: 重启本体(in-place),不走 agent turn。
-    // `/restart` 后面可跟续传指令;落盘的续传记录会锚定「当前会话」(sessionId = conversationId),
-    // 重启后 App.tsx peek 取回 → 切回该会话 → 在原会话内自动发出 task(回到中断现场)。见 ADR 21。
-    // 本次会话会被重启中断;重启动作由 main 的 host:restart handler 委派给本体进程树外的施动者执行。
-    if (text === '/restart' || text.startsWith('/restart ')) {
-      const followUp = text.slice('/restart'.length).trim();
-      // 续传锚定当前会话:无 conversationId 或无 followUp 时不写任务,只做纯重启。
-      const pendingTask = followUp && conversationId
-        ? { sessionId: conversationId, task: followUp, effort, reason: isZh ? '重启前的待办,已在原会话自动续上' : 'Pending task from before restart' }
-        : undefined;
-      try {
-        await clientApi.restartHost(pendingTask ? { pendingTask } : {});
-      } catch (err) {
-        setStreamError(
-          (isZh ? '重启请求失败:' : 'Restart request failed: ') +
-            (err instanceof Error ? err.message : String(err)),
-        );
       }
       return;
     }
