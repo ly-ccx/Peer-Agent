@@ -81,7 +81,8 @@ export function App() {
         const task = typeof record.task === 'string' ? record.task.trim() : '';
         if (!sessionId || !task) return;
         const effort =
-          record.effort === 'low' || record.effort === 'default' || record.effort === 'high'
+          record.effort === 'off' || record.effort === 'low'
+          || record.effort === 'default' || record.effort === 'high'
             ? record.effort
             : undefined;
         setActiveConversationId(sessionId);

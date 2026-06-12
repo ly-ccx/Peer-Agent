@@ -559,14 +559,17 @@ export function ChatSurface({
     onStreamingChange?.(conversationId, isStreaming);
   }, [isStreaming, conversationId, onStreamingChange]);
   const [streamError, setStreamError] = useState<string | null>(null);
-  const [effort, setEffort] = useState<'low' | 'default' | 'high'>(() => {
+  const [effort, setEffort] = useState<'off' | 'low' | 'default' | 'high'>(() => {
     // 思考强度是全局偏好,持久化在 settings-store(扁平 key),启动时同步注入到 initialSettings。
     // 表达层只读取/回写这一个偏好字段,不引入新的执行真值。
+    // 四档: off(关闭) / low(简洁) / default(标准) / high(深度)。
     const stored = (clientApi.initialSettings as Record<string, unknown>)?.effort;
-    return stored === 'low' || stored === 'high' || stored === 'default' ? stored : 'default';
+    return stored === 'off' || stored === 'low' || stored === 'high' || stored === 'default'
+      ? stored
+      : 'default';
   });
   // 切换思考强度时回写全局设置,使其跨会话/重启保持一致。
-  const changeEffort = useCallback((level: 'low' | 'default' | 'high') => {
+  const changeEffort = useCallback((level: 'off' | 'low' | 'default' | 'high') => {
     setEffort(level);
     void clientApi.updateSettings({ effort: level });
   }, []);
@@ -1088,7 +1091,8 @@ export function ChatSurface({
     if (resumeFiredRef.current === resumeTask.sessionId) return;
     resumeFiredRef.current = resumeTask.sessionId;
     const taskEffort =
-      resumeTask.effort === 'low' || resumeTask.effort === 'default' || resumeTask.effort === 'high'
+      resumeTask.effort === 'off' || resumeTask.effort === 'low'
+      || resumeTask.effort === 'default' || resumeTask.effort === 'high'
         ? resumeTask.effort
         : undefined;
     if (taskEffort) setEffort(taskEffort);
@@ -1363,7 +1367,7 @@ export function ChatSurface({
         <div className="chat-composer-toolbar">
           {activeProviderSupportsReasoning ? (
             <div className="effort-selector">
-              {(['low', 'default', 'high'] as const).map((level) => (
+              {(['off', 'low', 'default', 'high'] as const).map((level) => (
                 <button
                   key={level}
                   type="button"
@@ -1371,7 +1375,8 @@ export function ChatSurface({
                   onClick={() => changeEffort(level)}
                   title={level}
                 >
-                  {level === 'low' ? (isZh ? '简洁' : 'Low')
+                  {level === 'off' ? (isZh ? '关闭' : 'Off')
+                    : level === 'low' ? (isZh ? '简洁' : 'Low')
                     : level === 'high' ? (isZh ? '深度' : 'High')
                     : (isZh ? '标准' : 'Default')}
                 </button>

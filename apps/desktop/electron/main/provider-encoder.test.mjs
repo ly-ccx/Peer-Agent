@@ -142,17 +142,64 @@ describe('Provider message encoders', () => {
     assert.equal(body.max_tokens, 16384);
   });
 
-  it('does not enable Anthropic thinking for default effort', () => {
+  it('disables Anthropic thinking only for the off tier', () => {
     const body = encodeAnthropicMessagesRequest({
       model: 'claude-test',
       system: 'system prompt',
       messages: [{ role: 'user', content: 'hello' }],
       tools: [{ name: 'bash' }],
-      effort: 'default',
+      effort: 'off',
+      supportsReasoning: true,
     });
 
     assert.equal(body.thinking, undefined);
+    assert.equal(body.output_config, undefined);
     assert.equal(body.max_tokens, 16384);
+  });
+
+  it('maps each thinking tier to a distinct Anthropic budget (enabled format)', () => {
+    const make = (effort) => encodeAnthropicMessagesRequest({
+      model: 'claude-test',
+      system: 'system prompt',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{ name: 'bash' }],
+      effort,
+      supportsReasoning: true,
+    });
+
+    const low = make('low');
+    const def = make('default');
+    const high = make('high');
+
+    assert.equal(low.thinking.budget_tokens, 4096);
+    assert.equal(def.thinking.budget_tokens, 10240);
+    assert.equal(high.thinking.budget_tokens, 32768);
+    // 三档严格递增, 确保"简洁/标准/深度"真正区分。
+    assert.ok(low.thinking.budget_tokens < def.thinking.budget_tokens);
+    assert.ok(def.thinking.budget_tokens < high.thinking.budget_tokens);
+    // max_tokens 始终严格大于 budget_tokens。
+    assert.ok(low.max_tokens > low.thinking.budget_tokens);
+    assert.ok(high.max_tokens > high.thinking.budget_tokens);
+  });
+
+  it('maps each thinking tier to a distinct adaptive output effort', () => {
+    const make = (effort) => encodeAnthropicMessagesRequest({
+      model: 'claude-test',
+      system: 'system prompt',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{ name: 'bash' }],
+      effort,
+      supportsReasoning: true,
+      reasoningFormat: 'adaptive',
+    });
+
+    assert.deepEqual(make('low').output_config, { effort: 'low' });
+    assert.deepEqual(make('default').output_config, { effort: 'medium' });
+    assert.deepEqual(make('high').output_config, { effort: 'high' });
+    // off 档不发 thinking / output_config。
+    const off = make('off');
+    assert.equal(off.thinking, undefined);
+    assert.equal(off.output_config, undefined);
   });
 
   it('applies ephemeral cache_control to system and the second-to-last text message (ADR 24)', () => {
