@@ -41,10 +41,6 @@ export function unsupportedToolResponseCorrection() {
   ].join(' ');
 }
 
-export function unsupportedToolResponseFallback() {
-  return '我还没有完成实际工具调用，因此不能声称或承诺已经读取、执行、修改或验证。本轮回答已被拦截，避免把无工具证据的内容写入对话。';
-}
-
 export function emptyModelResponseError({ providerTracePath = null } = {}) {
   const suffix = providerTracePath ? ` provider_trace=${providerTracePath}` : '';
   return `empty_model_response: 模型没有返回任何文本或工具调用，请检查当前模型、baseUrl、API 兼容性或模型是否支持当前请求格式。${suffix}`;

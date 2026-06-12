@@ -164,7 +164,9 @@ export function handleTerminalTextResponse({
       });
       return { action: 'retry', reason: 'unsupported-tool-claim' };
     }
-    loop.sendError(responseGuard.unsupportedToolResponseFallback());
+    // 重试用尽后不再向用户弹出守卫文案；静默收尾，避免突兀的系统提示。
+    // 检测 + 静默重试（unsupportedToolResponseCorrection）仍保留，守卫骨架不变。
+    loop.sendDone();
     return { action: 'stop', reason: 'unsupported-tool-claim-exhausted' };
   }
 

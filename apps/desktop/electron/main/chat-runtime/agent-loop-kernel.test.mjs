@@ -221,7 +221,7 @@ describe('agent loop kernel', () => {
     assert.deepEqual(webContents.events, []);
   });
 
-  it('emits the unsupported tool fallback after retry budget is exhausted', () => {
+  it('silently completes after the unsupported tool retry budget is exhausted', () => {
     const webContents = makeWebContents();
     const loop = createAgentLoopKernel({
       webContents,
@@ -240,9 +240,10 @@ describe('agent loop kernel', () => {
       action: 'stop',
       reason: 'unsupported-tool-claim-exhausted',
     });
+    // 不再向用户弹出守卫文案：以 done 静默收尾，不发 error。
     assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:error',
-      payload: { streamId: 's6', error: 'unsupported fallback' },
+      channel: 'chat:stream:done',
+      payload: { streamId: 's6', usage: loop.usage },
     }]);
   });
 });
@@ -253,6 +254,5 @@ function makeResponseGuard() {
     emptyModelResponseCorrection: () => 'empty retry correction',
     shouldRetryNoToolResponse: (text) => text.includes('fake tool result'),
     unsupportedToolResponseCorrection: () => 'retry correction',
-    unsupportedToolResponseFallback: () => 'unsupported fallback',
   };
 }
