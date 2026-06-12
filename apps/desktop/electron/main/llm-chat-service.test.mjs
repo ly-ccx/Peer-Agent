@@ -1061,4 +1061,55 @@ describe('llm chat service tool materialization', () => {
     assert.equal('extractPseudoToolCalls' in service, false);
     assert.equal(service.hasUnsupportedToolClaim('[Tool call: read_file {"path":"/tmp/a.txt"}]'), true);
   });
+
+  it('broadcasts active conversation ids while streaming and clears them after done', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    // 记录每次 active-changed 广播时的会话集合快照,验证运行中含 c1、结束后清空。
+    const activeSnapshots = [];
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'hi' } }] },
+      '[DONE]',
+    ]), { status: 200 });
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        broadcast: (channel, payload) => {
+          if (channel === 'chat:stream:active-changed') {
+            activeSnapshots.push([...payload.conversationIds]);
+          }
+        },
+      });
+
+      // 发起前无活跃流。
+      assert.deepEqual(service.listActiveConversationIds(), []);
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        webContents: { send: () => {} },
+      });
+
+      // 至少广播两次:创建(含 c1) + 终态删除(清空)。
+      assert.equal(activeSnapshots.length >= 2, true);
+      assert.deepEqual(activeSnapshots[0], ['c1']);
+      assert.deepEqual(activeSnapshots[activeSnapshots.length - 1], []);
+      // 结束后枚举为空。
+      assert.deepEqual(service.listActiveConversationIds(), []);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
 });

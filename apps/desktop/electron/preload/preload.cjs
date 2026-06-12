@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   chatSend: (params) => ipcRenderer.invoke('chat:send', params),
   chatAbort: (params) => ipcRenderer.invoke('chat:abort', params),
   chatStreamReattach: (params) => ipcRenderer.invoke('chat:stream:reattach', params),
+  chatStreamListActive: () => ipcRenderer.invoke('chat:stream:list-active'),
   chatCompact: (params) => ipcRenderer.invoke('chat:compact', params),
   promptSnapshotsList: (params) => ipcRenderer.invoke('prompt-snapshots:list', params),
   promptSnapshotsGet: (params) => ipcRenderer.invoke('prompt-snapshots:get', params),
@@ -109,6 +110,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('chat:compaction', handler);
     return () => ipcRenderer.removeListener('chat:compaction', handler);
+  },
+  onChatActiveStreamsChanged: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('chat:stream:active-changed', handler);
+    return () => ipcRenderer.removeListener('chat:stream:active-changed', handler);
   },
   llmListProviders: () => ipcRenderer.invoke('llm:list'),
   llmAddProvider: (config) => ipcRenderer.invoke('llm:add', config),

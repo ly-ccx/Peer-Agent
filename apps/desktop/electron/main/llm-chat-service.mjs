@@ -127,8 +127,28 @@ export function createLlmChatService({
   conversationStore = null,
   persistCompaction = null,
   promptSnapshotStore = null,
+  // 全局活跃流广播宿主(由 main 注入):向所有渲染窗口推送当前正在运行的会话列表,
+  // 使左侧列表无需"点进去"即可知道哪些会话在跑。表达层订阅,真值仍在 activeStreams。
+  broadcast = null,
 }) {
   function setWorkspacePath(wsPath) { activeWorkspacePath = wsPath; }
+
+  // 当前正在流式运行的会话 id 去重列表(只读快照)。
+  function listActiveConversationIds() {
+    const ids = new Set();
+    for (const record of activeStreams.values()) {
+      if (record.conversationId) ids.add(record.conversationId);
+    }
+    return [...ids];
+  }
+
+  // activeStreams 发生增删后广播一次,让所有窗口的左侧列表同步运行状态。
+  function emitActiveStreamsChanged() {
+    if (typeof broadcast !== 'function') return;
+    try {
+      broadcast('chat:stream:active-changed', { conversationIds: listActiveConversationIds() });
+    } catch {}
+  }
 
   function getDefaultProvider() {
     const providers = llmConfigStore.listProviders();
@@ -174,6 +194,7 @@ export function createLlmChatService({
       terminalEventSent: false,
     };
     activeStreams.set(streamId, streamRecord);
+    emitActiveStreamsChanged();
     // 累积代理:拦截 delta/thinking 追加到记录,其余事件透传给真实 webContents。
     const accumulatingWebContents = wrapWebContentsForRuntimeEvents(webContents, streamRecord, { conversationStore });
 
@@ -279,6 +300,7 @@ export function createLlmChatService({
         });
       }
       activeStreams.delete(streamId);
+      emitActiveStreamsChanged();
     }
   }
 
@@ -292,6 +314,7 @@ export function createLlmChatService({
     });
     active.webContents.send('chat:stream:aborted', { streamId });
     activeStreams.delete(streamId);
+    emitActiveStreamsChanged();
     return { aborted: true };
   }
 
@@ -334,5 +357,12 @@ export function createLlmChatService({
     };
   }
 
-  return { sendMessage, abort, setWorkspacePath, resolvePermissionGrant, reattach };
+  return {
+    sendMessage,
+    abort,
+    setWorkspacePath,
+    resolvePermissionGrant,
+    reattach,
+    listActiveConversationIds,
+  };
 }

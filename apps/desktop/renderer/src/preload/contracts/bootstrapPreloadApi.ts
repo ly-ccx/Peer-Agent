@@ -126,6 +126,8 @@ export interface BootstrapPreloadApi {
   readonly chatSend: (params: ChatSendRequest) => Promise<void>;
   readonly chatAbort: (params: { streamId: string }) => Promise<void>;
   readonly chatStreamReattach: (params?: { conversationId?: string }) => Promise<StreamReattachResult>;
+  // 全局活跃流查询:挂载时拉取当前正在运行的会话 id 列表(不依赖切入某个会话)。
+  readonly chatStreamListActive: () => Promise<{ conversationIds: readonly string[] }>;
   readonly restartHost: (options?: { hostDir?: string; port?: number; pendingTask?: PendingTask }) => Promise<unknown>;
   readonly writePendingTask: (task: PendingTask) => Promise<unknown>;
   readonly consumePendingTask: () => Promise<PendingTask | null>;
@@ -164,6 +166,8 @@ export interface BootstrapPreloadApi {
     lifetimeUsage?: LifetimeUsage;
   }) => void) => () => void;
   readonly onChatCompaction: (listener: (payload: { streamId: string; stage?: 'start' | 'done' | 'idle'; method?: string; beforeTokens?: number; afterTokens?: number; oldMessageCount?: number; keptMessageCount?: number }) => void) => () => void;
+  // 全局活跃流变更广播:main 在任一会话开始/结束流式时推送最新运行中的会话 id 列表。
+  readonly onChatActiveStreamsChanged: (listener: (payload: { conversationIds: readonly string[] }) => void) => () => void;
   readonly llmListProviders: () => Promise<readonly LlmProviderConfigView[]>;
   readonly llmAddProvider: (config: Record<string, unknown>) => Promise<LlmProviderConfigView>;
   readonly llmUpdateProvider: (params: { id: string; [key: string]: unknown }) => Promise<LlmProviderConfigView>;

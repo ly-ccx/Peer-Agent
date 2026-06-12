@@ -24,7 +24,7 @@ interface WorkspaceInfo {
 export function Sidebar({
   conversations,
   activeConversationId,
-  runningConversationId,
+  runningConversationIds,
   activePage,
   i18n,
   onNewChat,
@@ -35,8 +35,8 @@ export function Sidebar({
 }: {
   readonly conversations: readonly ConversationMeta[];
   readonly activeConversationId: string | null;
-  // 当前正在流式运行的会话 id(表达层状态,真值来自 ChatSurface)。
-  readonly runningConversationId?: string | null;
+  // 当前正在流式运行的会话 id 集合(表达层状态,真值来自 main 的 activeStreams 广播)。
+  readonly runningConversationIds?: ReadonlySet<string>;
   readonly activePage: string;
   readonly i18n: I18nRuntime;
   readonly onNewChat: () => void;
@@ -155,7 +155,7 @@ export function Sidebar({
             onMouseEnter={() => setHoveredId(conv.id)}
             onMouseLeave={() => setHoveredId(null)}
           >
-            {runningConversationId === conv.id ? (
+            {runningConversationIds?.has(conv.id) ? (
               <span
                 className="sidebar-conv-spinner"
                 role="img"

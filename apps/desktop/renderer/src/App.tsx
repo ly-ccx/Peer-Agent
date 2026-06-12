@@ -27,9 +27,12 @@ export function App() {
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
   const [conversations, setConversations] = useState<readonly ConversationMeta[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  // 表达层状态:当前正在流式运行的会话 id,用于左侧列表显示 Loading 图标。
-  // 真值来自 ChatSurface 内部的 isStreaming,经回调上提;表达层只表达,不持有执行真值。
-  const [runningConversationId, setRunningConversationId] = useState<string | null>(null);
+  // 表达层状态:当前正在流式运行的会话 id 集合,用于左侧列表显示 Loading 图标。
+  // 真值来自 main 的 activeStreams:挂载时经 chatStreamListActive 拉取,之后由
+  // onChatActiveStreamsChanged 广播实时更新——因此无需"点进会话"即可显示运行状态。
+  // 另外 ChatSurface 的 onStreamingChange 作为本会话的即时信号合并进集合(更快反馈)。
+  const [runningConversationIds, setRunningConversationIds] = useState<ReadonlySet<string>>(
+    () => new Set());
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
   // 任务续传(ADR 21):重启后 peek 回来的待办,带会话坐标。
   // App 负责切到 sessionId(回到中断现场)后,把 task 下发给 ChatSurface 自动发出。
@@ -96,6 +99,18 @@ export function App() {
     document.title = 'Peer Agent';
   }, []);
 
+  // 全局运行中会话:挂载时拉取当前活跃流快照,并订阅后续变更广播。
+  // 这让左侧列表无需"点进去"即可知道哪些会话正在跑(含后台并行会话)。
+  useEffect(() => {
+    void clientApi.chatStreamListActive()
+      .then(({ conversationIds }) => setRunningConversationIds(new Set(conversationIds)))
+      .catch(() => {});
+    const unsubscribe = clientApi.onChatActiveStreamsChanged(({ conversationIds }) => {
+      setRunningConversationIds(new Set(conversationIds));
+    });
+    return unsubscribe;
+  }, []);
+
   const handleWorkspaceChanged = useCallback(async () => {
     const r = await clientApi.workspaceList();
     setActiveWorkspace(r.activeWorkspace);
@@ -145,7 +160,7 @@ export function App() {
           <Sidebar
             conversations={conversations}
             activeConversationId={activeConversationId}
-            runningConversationId={runningConversationId}
+            runningConversationIds={runningConversationIds}
             activePage={activePage}
             i18n={i18n}
             onNewChat={handleNewChat}
@@ -169,10 +184,16 @@ export function App() {
                 onOpenSettings={() => setActivePage('settings')}
                 onConversationUpdated={refreshConversations}
                 onStreamingChange={(convId, streaming) => {
-                  setRunningConversationId((prev) => {
-                    if (streaming) return convId;
-                    // 仅当上报的会话正是当前标记为运行中的会话时才清除,避免切换会话时误清。
-                    return prev === convId ? null : prev;
+                  // 本会话即时信号:合并/移除到全局运行集合,作为广播之外的更快反馈。
+                  // 权威真值仍由 main 的 active-changed 广播覆盖,二者最终一致。
+                  if (!convId) return;
+                  setRunningConversationIds((prev) => {
+                    const has = prev.has(convId);
+                    if (streaming === has) return prev;
+                    const next = new Set(prev);
+                    if (streaming) next.add(convId);
+                    else next.delete(convId);
+                    return next;
                   });
                 }}
                 onBranch={(id) => { setActiveConversationId(id); void refreshConversations(); }}

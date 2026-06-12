@@ -184,11 +184,19 @@ function continuityContextFromMessages(messages = []) {
     });
 }
 
+// 向所有渲染窗口广播一个事件(用于全局活跃流状态等不绑定单一 streamId 的通知)。
+function broadcastToAllWindows(channel, payload) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(channel, payload);
+  }
+}
+
 const llmChatService = createLlmChatService({
   llmConfigStore,
   conversationStore,
   persistCompaction: persistCompactionToConversation,
   promptSnapshotStore,
+  broadcast: broadcastToAllWindows,
 });
 llmChatService.setWorkspacePath(settingsStore.getAll().activeWorkspace || null);
 
@@ -465,6 +473,12 @@ ipcMain.handle('chat:abort', (_, { streamId }) =>
 // 若有则取回已累积的正文/思考文本,无缝接回 UI(不重发、不打断后端)。
 ipcMain.handle('chat:stream:reattach', (_event, { streamId, conversationId } = {}) =>
   llmChatService.reattach({ streamId, conversationId }));
+
+// 全局活跃流查询:renderer 挂载时拉取当前正在运行的会话列表,补齐"未点进去"的会话状态。
+// 之后的变更由 main 主动广播 chat:stream:active-changed 推送。
+ipcMain.handle('chat:stream:list-active', () => ({
+  conversationIds: llmChatService.listActiveConversationIds(),
+}));
 
 ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
   const conv = conversationStore.getConversation(conversationId);
