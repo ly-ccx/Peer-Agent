@@ -663,7 +663,14 @@ export function ChatSurface({
     setAttachments([]);
     setAttachmentError(null);
     setPendingPermissionCalls([]);
-    if (!conversationId) { typewriter.reset(); setMessages([]); setTokenUsage(null); return; }
+    // 切换会话时,先把流式表达状态按会话归零,避免上一会话的 isStreaming/streamId 残留:
+    // 否则从"正在输出的 A"切到"未运行的 B",B 会误显示运行中(左侧列表 Loading、
+    // 右下角停止按钮误亮),且旧会话的 delta 仍匹配旧 streamIdRef 污染新会话消息。
+    // 归零后由下方 reattach 按"新会话是否确有活跃流"重新点亮,仅以真值为准。
+    setIsStreaming(false);
+    streamIdRef.current = null;
+    typewriter.reset();
+    if (!conversationId) { setMessages([]); setTokenUsage(null); return; }
     setTokenUsage(null);
     let cancelled = false;
     void (async () => {
