@@ -842,16 +842,21 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 6px;
+  /* 方案 A:横杠等分压缩,始终铺满整条轨。gap 收窄以减少多条时的累计占用,
+   * overflow: hidden 仅作极端数量下的安全兜底。 */
+  gap: 4px;
   padding: var(--space-2) 4px;
-  max-height: 100%;
+  height: 100%;
+  overflow: hidden;
   pointer-events: auto;
   transition: opacity var(--za-motion-fast);
 }
 .message-rail-tick {
   width: 12px;
-  height: 2px;
-  flex: 0 0 auto;
+  /* 单根在 1~2px 之间随条数自适应:少则取 2px(细横杠),多则等分压缩变细,绝不裁切。 */
+  flex: 1 1 0;
+  min-height: 1px;
+  max-height: 2px;
   border-radius: 1px;
   background: var(--chrome-hairline);
   transition: background var(--za-motion-fast);
@@ -866,7 +871,8 @@
   position: absolute;
   top: 50%;
   right: 0;
-  max-height: 100%;
+  /* 上限取「轨道高度」与 420px 的较小值:既不超出 App,也不在高屏上占满整条轨。 */
+  max-height: min(100%, 420px);
   width: 240px;
   display: flex;
   flex-direction: column;
