@@ -101,8 +101,10 @@ export const PALETTE_IDS: readonly AppearancePalette[] = PALETTE_REGISTRY.map(
 );
 
 /** id → 完整定义的查表，运行时常用。 */
+// Object.fromEntries 返回宽泛的 { [k: string]: ... }，且值仍是 as const 字面量，
+// 与目标 Record 不充分重叠（TS2352）。先经 unknown 再断言到目标形状。
 export const PALETTE_BY_ID: Readonly<Record<AppearancePalette, PaletteDefinition>> =
-  Object.fromEntries(PALETTE_REGISTRY.map((p) => [p.id, p])) as Readonly<
+  Object.fromEntries(PALETTE_REGISTRY.map((p) => [p.id, p])) as unknown as Readonly<
     Record<AppearancePalette, PaletteDefinition>
   >;
 

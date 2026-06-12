@@ -17,7 +17,10 @@ export type AppearanceScheme = 'light' | 'dark';
 
 // palette 的合法集合由配色注册表（paletteRegistry.ts）派生，
 // 新增配色只需在注册表加一条记录，类型自动跟随。
-export type { AppearancePalette } from './paletteRegistry';
+// 注意：必须 import 进本模块作用域再 re-export——纯 `export type {…} from`
+// 只做转发、不把名字引入本文件，否则下面 AppearanceSettings.palette 会 TS2304。
+import type { AppearancePalette } from './paletteRegistry';
+export type { AppearancePalette };
 
 export type AppearanceDensity = 'comfortable' | 'compact';
 

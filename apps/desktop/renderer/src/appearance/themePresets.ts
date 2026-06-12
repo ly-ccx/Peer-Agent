@@ -64,10 +64,12 @@ export type { SwatchEntry } from './paletteRegistry';
  * 各 palette 在浅/深下的真实色板，从配色注册表派生（唯一数据源）。
  * 用于「外观」面板展示当前配色的具体颜色配置项。新增配色无需改这里。
  */
+// Object.fromEntries 的返回类型过宽，且 swatches 仍是 as const 字面量，
+// 与目标 Record 不充分重叠（TS2352）。先经 unknown 再断言到目标形状。
 export const PALETTE_SWATCHES: Readonly<
   Record<AppearancePalette, Readonly<Record<AppearanceScheme, readonly { label: string; value: string }[]>>>
 > = Object.fromEntries(
   PALETTE_REGISTRY.map((p) => [p.id, p.swatches]),
-) as Readonly<
+) as unknown as Readonly<
   Record<AppearancePalette, Readonly<Record<AppearanceScheme, readonly { label: string; value: string }[]>>>
 >;
