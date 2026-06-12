@@ -1700,8 +1700,13 @@ function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, 
 
   // ADR 23: 缓存命中率 = 缓存读取 token / 总输入 token(新输入 + 缓存读取)。
   // 反映本次会话有多少输入是从 provider 缓存命中的,占比越高越省钱。
+  // 仅当该 provider 开启了 prompt caching 时才显示——未开启时缓存命中率恒为 0,
+  // 展示它只会误导(让人以为缓存没生效),所以直接隐藏。
   const totalInputForCache = input + cacheRead;
-  const cacheHitRate = totalInputForCache > 0 ? (cacheRead / totalInputForCache) * 100 : null;
+  const cacheHitRate =
+    defaultProvider?.supportsPromptCaching && totalInputForCache > 0
+      ? (cacheRead / totalInputForCache) * 100
+      : null;
 
   return (
     <div className="token-usage-wrap">

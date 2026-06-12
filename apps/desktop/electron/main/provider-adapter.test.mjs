@@ -171,6 +171,7 @@ describe('Provider adapters', () => {
         tools: [{ name: 'bash' }],
         effort: 'high',
         supportsReasoning: true,
+        promptCaching: true,
         webContents: { send: (channel, payload) => events.push({ channel, payload }) },
         streamId: 's1',
       });
@@ -258,6 +259,88 @@ describe('Provider adapters', () => {
       assert.deepEqual(captured.body.thinking, { type: 'adaptive' });
       assert.deepEqual(captured.body.output_config, { effort: 'high' });
       assert.equal(captured.body.max_tokens, 16384);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('omits cache_control breakpoints when promptCaching is disabled (default off)', async () => {
+    const previousFetch = globalThis.fetch;
+    let captured = null;
+    globalThis.fetch = async (url, init) => {
+      captured = { url, init, body: JSON.parse(init.body) };
+      return new Response(sse([
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'ok' } },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
+      ]), { status: 200 });
+    };
+
+    try {
+      const result = await sendAnthropicMessagesStream({
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'key',
+        model: 'claude-test',
+        system: 'stable system prefix',
+        messages: [
+          { role: 'user', content: 'first' },
+          { role: 'assistant', content: 'reply' },
+          { role: 'user', content: 'latest question' },
+        ],
+        tools: [],
+        effort: 'default',
+        supportsReasoning: true,
+        promptCaching: false,
+        webContents: { send: () => {} },
+        streamId: 's1',
+      });
+
+      assert.equal(result.ok, true);
+      // system 保持字符串, 不降为带 cache_control 的 block 数组。
+      assert.equal(typeof captured.body.system, 'string');
+      for (const msg of captured.body.messages) {
+        const blocks = Array.isArray(msg.content) ? msg.content : [];
+        for (const block of blocks) {
+          assert.equal(block.cache_control, undefined);
+        }
+      }
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('keeps cache_control breakpoints when promptCaching is explicitly enabled', async () => {
+    const previousFetch = globalThis.fetch;
+    let captured = null;
+    globalThis.fetch = async (url, init) => {
+      captured = { url, init, body: JSON.parse(init.body) };
+      return new Response(sse([
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'ok' } },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
+      ]), { status: 200 });
+    };
+
+    try {
+      const result = await sendAnthropicMessagesStream({
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'key',
+        model: 'claude-test',
+        system: 'stable system prefix',
+        messages: [
+          { role: 'user', content: 'first' },
+          { role: 'assistant', content: 'reply' },
+          { role: 'user', content: 'latest question' },
+        ],
+        tools: [],
+        effort: 'default',
+        supportsReasoning: true,
+        promptCaching: true,
+        webContents: { send: () => {} },
+        streamId: 's1',
+      });
+
+      assert.equal(result.ok, true);
+      assert.ok(Array.isArray(captured.body.system));
+      assert.equal(captured.body.system[0].cache_control.type, 'ephemeral');
     } finally {
       globalThis.fetch = previousFetch;
     }

@@ -241,6 +241,7 @@ export function createLlmChatService({
           signal: controller.signal,
           effort,
           supportsReasoning: Boolean(provider.supportsReasoning),
+          supportsPromptCaching: Boolean(provider.supportsPromptCaching),
           contextWindow,
           conversationId,
           persistCompaction,

@@ -156,6 +156,7 @@ export async function sendAnthropicMessagesStream({
   webContents,
   streamId,
   reasoningFormat = resolveAnthropicReasoningFormat(baseUrl),
+  promptCaching = false,
 }) {
   const url = `${baseUrl.replace(/\/+$/, '')}/v1/messages`;
   const body = encodeAnthropicMessagesRequest({
@@ -166,6 +167,7 @@ export async function sendAnthropicMessagesStream({
     effort,
     supportsReasoning,
     reasoningFormat,
+    promptCaching,
   });
   const trace = createProviderStreamTrace({
     provider: 'anthropic',

@@ -117,6 +117,7 @@ export function encodeAnthropicMessagesRequest({
   effort = 'default',
   supportsReasoning = false,
   reasoningFormat = 'enabled',
+  promptCaching = true,
 }) {
   const body = {
     model,
@@ -143,5 +144,9 @@ export function encodeAnthropicMessagesRequest({
       body.max_tokens = budgetTokens + ANTHROPIC_REPLY_TOKENS;
     }
   }
+  // 部分网关(如 idealab adaptive 链路)只写缓存、从不返回 cache_read，
+  // 实测探针证明缓存断点在该链路是纯成本(写入 $6.25/M)而无复用收益。
+  // 这类链路关闭断点，让前缀退化为普通 input($5/M)，反而更省。
+  if (!promptCaching) return body;
   return applyAnthropicCacheControl(body);
 }

@@ -335,4 +335,48 @@ describe('Provider message encoders', () => {
       assert.equal(block.cache_control, undefined);
     }
   });
+
+  it('omits all cache_control breakpoints when promptCaching is disabled', () => {
+    // 探针实测: idealab adaptive 网关只写缓存、从不返回 cache_read。
+    // 该链路 promptCaching=false, 编码器必须完全不打断点,
+    // 让前缀退化为普通 input, 避免纯写入成本。
+    const body = encodeAnthropicMessagesRequest({
+      model: 'claude-test',
+      system: 'stable system prefix',
+      messages: [
+        { role: 'user', content: 'first' },
+        { role: 'assistant', content: 'reply' },
+        { role: 'user', content: 'latest question' },
+      ],
+      effort: 'default',
+      promptCaching: false,
+    });
+
+    // system 保持字符串, 不降为带 cache_control 的 text block 数组。
+    assert.equal(typeof body.system, 'string');
+
+    // 任何消息的任何 block 都不应带 cache_control。
+    for (const msg of body.messages) {
+      const blocks = Array.isArray(msg.content) ? msg.content : [];
+      for (const block of blocks) {
+        assert.equal(block.cache_control, undefined);
+      }
+    }
+  });
+
+  it('keeps cache_control breakpoints when promptCaching defaults to enabled', () => {
+    const body = encodeAnthropicMessagesRequest({
+      model: 'claude-test',
+      system: 'stable system prefix',
+      messages: [
+        { role: 'user', content: 'first' },
+        { role: 'assistant', content: 'reply' },
+        { role: 'user', content: 'latest question' },
+      ],
+      effort: 'default',
+    });
+
+    assert.ok(Array.isArray(body.system));
+    assert.equal(body.system[0].cache_control.type, 'ephemeral');
+  });
 });

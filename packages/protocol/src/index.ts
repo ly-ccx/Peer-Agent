@@ -119,6 +119,7 @@ export interface LlmProviderConfig {
   readonly cacheReadPrice?: number;
   readonly supportsVision?: boolean;
   readonly supportsReasoning?: boolean;
+  readonly supportsPromptCaching?: boolean;
 }
 
 export interface LlmProviderConfigView extends LlmProviderConfig {

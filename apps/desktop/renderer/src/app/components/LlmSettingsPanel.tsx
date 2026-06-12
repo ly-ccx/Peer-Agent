@@ -16,6 +16,7 @@ interface FormState {
   cacheReadPrice: string;
   supportsVision: boolean;
   supportsReasoning: boolean;
+  supportsPromptCaching: boolean;
 }
 
 const PRESETS: Record<LlmProviderType, { baseUrl: string; model: string }> = {
@@ -24,7 +25,7 @@ const PRESETS: Record<LlmProviderType, { baseUrl: string; model: string }> = {
 };
 
 function emptyForm(provider: LlmProviderType = 'openai'): FormState {
-  return { provider, name: '', baseUrl: PRESETS[provider].baseUrl, model: PRESETS[provider].model, apiKey: '', contextWindow: '', inputPrice: '', outputPrice: '', cacheWritePrice: '', cacheReadPrice: '', supportsVision: false, supportsReasoning: false };
+  return { provider, name: '', baseUrl: PRESETS[provider].baseUrl, model: PRESETS[provider].model, apiKey: '', contextWindow: '', inputPrice: '', outputPrice: '', cacheWritePrice: '', cacheReadPrice: '', supportsVision: false, supportsReasoning: false, supportsPromptCaching: false };
 }
 
 export function LlmSettingsPanel({
@@ -78,6 +79,7 @@ export function LlmSettingsPanel({
       cacheReadPrice: p.cacheReadPrice != null ? String(p.cacheReadPrice) : '',
       supportsVision: p.supportsVision ?? false,
       supportsReasoning: p.supportsReasoning ?? false,
+      supportsPromptCaching: p.supportsPromptCaching ?? false,
     });
     setShowForm(true);
   };
@@ -104,6 +106,7 @@ export function LlmSettingsPanel({
           cacheReadPrice: crPrice,
           supportsVision: form.supportsVision,
           supportsReasoning: form.supportsReasoning,
+          supportsPromptCaching: form.supportsPromptCaching,
         };
         if (form.apiKey) patch.apiKey = form.apiKey;
         await clientApi.llmUpdateProvider(patch as { id: string });
@@ -121,6 +124,7 @@ export function LlmSettingsPanel({
           cacheReadPrice: crPrice,
           supportsVision: form.supportsVision,
           supportsReasoning: form.supportsReasoning,
+          supportsPromptCaching: form.supportsPromptCaching,
         } as Record<string, unknown>);
       }
       setShowForm(false);
@@ -299,6 +303,15 @@ export function LlmSettingsPanel({
               onChange={(e) => setForm((prev) => ({ ...prev, supportsReasoning: e.target.checked }))}
             />
             <span>{i18n.locale === 'zh-CN' ? '支持原生推理参数（reasoning/thinking）' : 'Native reasoning/thinking parameters'}</span>
+          </label>
+
+          <label className="llm-vision-toggle">
+            <input
+              type="checkbox"
+              checked={form.supportsPromptCaching}
+              onChange={(e) => setForm((prev) => ({ ...prev, supportsPromptCaching: e.target.checked }))}
+            />
+            <span>{i18n.locale === 'zh-CN' ? '启用 Prompt 缓存（仅当网关真正复用缓存时开启，否则纯增成本）' : 'Enable prompt caching (only if the gateway actually reuses cache; otherwise pure cost)'}</span>
           </label>
 
           <div className="llm-form-actions">

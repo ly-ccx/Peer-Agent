@@ -73,6 +73,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       cacheReadPrice: item.cacheReadPrice ?? undefined,
       supportsVision: item.supportsVision ?? false,
       supportsReasoning: item.supportsReasoning ?? false,
+      supportsPromptCaching: item.supportsPromptCaching ?? false,
       apiKeyMasked: maskApiKey(key),
       apiKeyConfigured: Boolean(key),
     };
@@ -82,7 +83,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     return readAll().map(toView);
   }
 
-  function addProvider({ provider, name, baseUrl, model, apiKey, contextWindow, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning }) {
+  function addProvider({ provider, name, baseUrl, model, apiKey, contextWindow, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching }) {
     const items = readAll();
     const defaults = PROVIDER_DEFAULTS[provider] || PROVIDER_DEFAULTS.openai;
     const item = {
@@ -102,6 +103,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       cacheReadPrice: cacheReadPrice ?? undefined,
       supportsVision: supportsVision ?? false,
       supportsReasoning: supportsReasoning ?? false,
+      supportsPromptCaching: supportsPromptCaching ?? false,
     };
     items.push(item);
     writeAll(items);
@@ -126,6 +128,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     if (patch.cacheReadPrice !== undefined) item.cacheReadPrice = patch.cacheReadPrice;
     if (patch.supportsVision !== undefined) item.supportsVision = patch.supportsVision;
     if (patch.supportsReasoning !== undefined) item.supportsReasoning = patch.supportsReasoning;
+    if (patch.supportsPromptCaching !== undefined) item.supportsPromptCaching = patch.supportsPromptCaching;
     items[idx] = item;
     writeAll(items);
     return toView(item);
