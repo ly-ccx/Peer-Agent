@@ -559,7 +559,17 @@ export function ChatSurface({
     onStreamingChange?.(conversationId, isStreaming);
   }, [isStreaming, conversationId, onStreamingChange]);
   const [streamError, setStreamError] = useState<string | null>(null);
-  const [effort, setEffort] = useState<'low' | 'default' | 'high'>('default');
+  const [effort, setEffort] = useState<'low' | 'default' | 'high'>(() => {
+    // 思考强度是全局偏好,持久化在 settings-store(扁平 key),启动时同步注入到 initialSettings。
+    // 表达层只读取/回写这一个偏好字段,不引入新的执行真值。
+    const stored = (clientApi.initialSettings as Record<string, unknown>)?.effort;
+    return stored === 'low' || stored === 'high' || stored === 'default' ? stored : 'default';
+  });
+  // 切换思考强度时回写全局设置,使其跨会话/重启保持一致。
+  const changeEffort = useCallback((level: 'low' | 'default' | 'high') => {
+    setEffort(level);
+    void clientApi.updateSettings({ effort: level });
+  }, []);
   const [tokenUsage, setTokenUsage] = useState<TokenUsageState | null>(null);
   const [activeUsage, setActiveUsage] = useState<TokenUsageState | null>(null);
   const [compactionNotice, setCompactionNotice] = useState<{ method: string; beforeTokens: number; afterTokens: number; oldMessageCount: number; keptMessageCount: number } | null>(null);
@@ -1351,7 +1361,7 @@ export function ChatSurface({
                   key={level}
                   type="button"
                   className={`effort-btn ${effort === level ? 'active' : ''}`}
-                  onClick={() => setEffort(level)}
+                  onClick={() => changeEffort(level)}
                   title={level}
                 >
                   {level === 'low' ? (isZh ? '简洁' : 'Low')
@@ -1684,6 +1694,9 @@ function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, 
   return (
     <div className="token-usage-wrap">
       <span className="token-usage">
+        {defaultProvider?.model ? (
+          <span className="token-usage-model" title={isZh ? '当前会话使用的模型' : 'Model used for this conversation'}>{defaultProvider.model}</span>
+        ) : null}
         {ctxWindow ? (
           <>{isZh ? '上下文' : 'Ctx'} {formatTokenCount(currentContextTokens)}<span className="token-usage-detail"> / {formatTokenCount(ctxWindow)}</span></>
         ) : currentContextTokens > 0 ? (

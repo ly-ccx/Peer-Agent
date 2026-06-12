@@ -385,6 +385,18 @@
   font-size: 0.62rem;
   color: var(--graphite-fade);
 }
+.token-usage-model {
+  font-size: 0.62rem;
+  color: var(--graphite-soft);
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--control-composer);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .token-usage-cost {
   font-size: 0.62rem;
   color: var(--azure-seal);
