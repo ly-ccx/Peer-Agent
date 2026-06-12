@@ -1,8 +1,8 @@
 @layer components {
-  /* PermissionGateStrip — Atlas Vellum control 层
+  /* PermissionGateStrip — Peer Vellum control 层
    * 紧贴 ChatComposer 上方，跟 composer 同 control 家族保证视觉连续
    * 单行布局：badge / capability / · / preview / [+N more] / [拒绝] [允许]
-   * 不要朱砂、不要光圈，仅用墨色发丝 + 暖灰底，符合 Atlas Vellum 克制原则
+   * 不要朱砂、不要光圈，仅用墨色发丝 + 暖灰底，符合 Peer Vellum 克制原则
    */
   .permission-gate-strip {
     @apply flex flex-wrap items-center gap-2 px-3 py-2;

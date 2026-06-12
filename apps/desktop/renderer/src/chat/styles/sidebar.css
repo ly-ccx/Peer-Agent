@@ -10,7 +10,7 @@
     overflow: visible;
   }
 
-  /* 全局品牌印（Atlas Vellum §6.1 白名单 #1）— 整个 App 唯一允许"高饱和朱砂"的位置 */
+  /* 全局品牌印（Peer Vellum §6.1 白名单 #1）— 整个 App 唯一允许"高饱和朱砂"的位置 */
   .sidebar-brand {
     @apply flex items-center gap-2.5 pb-2;
   }

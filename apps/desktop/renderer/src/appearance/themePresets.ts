@@ -1,11 +1,11 @@
 /**
- * Atlas Frost 是 Peer Agent 桌面端的默认设计语言（前身 Peer Vellum，已 archive）。
+ * Peer Frost 是 Peer Agent 桌面端的默认设计语言。
  *
  * 此文件保留：
  *   - DEFAULT_APPEARANCE_SETTINGS：第一次启动的默认值
  *   - DESIGN_SYSTEM_NAME：默认设计语言名（展示用）
  *   - PALETTE_LABELS：palette → 展示名映射
- *   - ATLAS_FROST_TOKENS：浅/深两套快照，仅供测试断言/导出使用
+ *   - PEER_FROST_TOKENS：浅/深两套快照，仅供测试断言/导出使用
  *
  * 真正的 token 值落在 styles/tokens.css，本文件只作语义副本。
  */
@@ -17,10 +17,7 @@ import type {
 } from './appearanceTypes';
 import { PALETTE_REGISTRY } from './paletteRegistry';
 
-export const DESIGN_SYSTEM_NAME = 'Atlas Frost';
-
-// 向后兼容旧导入名（指向新名）。
-export const PEER_VELLUM_NAME = DESIGN_SYSTEM_NAME;
+export const DESIGN_SYSTEM_NAME = 'Peer Frost';
 
 // 从配色注册表派生：palette → 展示名。新增配色无需改这里。
 export const PALETTE_LABELS: Readonly<Record<AppearancePalette, string>> =
@@ -36,10 +33,10 @@ export interface ThemeSnapshot {
 }
 
 /**
- * Atlas Frost 视觉契约的核心三色锚点（与 tokens.css 一致）。
+ * Peer Frost 视觉契约的核心三色锚点（与 tokens.css 一致）。
  * 仅用于：1. 测试断言（验证锚点未漂移）2. 导出/分享识别。
  */
-export const ATLAS_FROST_TOKENS: Readonly<Record<AppearanceScheme, ThemeSnapshot>> = {
+export const PEER_FROST_TOKENS: Readonly<Record<AppearanceScheme, ThemeSnapshot>> = {
   light: {
     scheme: 'light',
     accent: '#3B7FAB',     // azure-seal

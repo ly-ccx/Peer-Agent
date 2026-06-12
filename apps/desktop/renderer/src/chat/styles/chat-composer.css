@@ -1,5 +1,5 @@
 @layer components {
-  /* Composer — Atlas Vellum 扁平风：只有 1px 发丝边线 + 暖纸沉色底
+  /* Composer — Peer Vellum 扁平风：只有 1px 发丝边线 + 暖纸沉色底
    * 圆角与消息气泡保持一致（--za-radius = 12px），避免相邻视觉割裂
    * 不要 inset 光影，不要 drop shadow（红线 §7：阴影仅限 popover / drag） */
   .cloud-chat-composer {

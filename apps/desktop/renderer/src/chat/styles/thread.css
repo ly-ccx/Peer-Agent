@@ -99,7 +99,7 @@
     animation: za-fade-rise var(--za-motion-slow) var(--za-ease-out) both;
   }
 
-  /* Empty state 主标题 — Atlas Vellum 红线 2/3：必须 Serif 思源宋体，字号 ≥ 30px */
+  /* Empty state 主标题 — Peer Vellum 红线 2/3：必须 Serif 思源宋体，字号 ≥ 30px */
   .empty-command-inner h1 {
     @apply m-0 text-center;
     color: var(--ink-base);

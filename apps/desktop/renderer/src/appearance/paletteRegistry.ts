@@ -39,7 +39,7 @@ export interface PaletteDefinition {
 export const PALETTE_REGISTRY = [
   {
     id: 'frost',
-    label: 'Atlas Frost',
+    label: 'Peer Frost',
     dotColor: '#3b7fab',
     swatches: {
       light: [

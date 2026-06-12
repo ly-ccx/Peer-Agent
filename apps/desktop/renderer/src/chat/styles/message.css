@@ -1,5 +1,5 @@
 @layer components {
-  /* Atlas Vellum · 卷轴文档式 chat（v0.1.4）
+  /* Peer Vellum · 卷轴文档式 chat（v0.1.4）
    * 不是 IM 气泡，是连续的"卷轴文本"：
    *   - 消息无 border / bg / radius，靠 hairline + 字号差 + 间距分章
    *   - 用户消息：朱砂 2px 左竖线（白名单 #3 在左对齐场景的正当用法）
@@ -342,7 +342,7 @@
     animation: za-content-shimmer 1s 200ms var(--za-ease-decelerate) both;
   }
 
-  /* Confirmation 行内卷轴 — Atlas Vellum §7.6：上下 1px 古铜横线 + 右上方印
+  /* Confirmation 行内卷轴 — Peer Vellum §7.6：上下 1px 古铜横线 + 右上方印
    * 不是普通卡片，是"等用户阅读签字"的卷轴形态；border-radius 归零强调"打开的卷轴"语感 */
   .confirmation-inline {
     @apply flex min-h-9 items-center justify-between gap-2.5 px-2 py-2 text-xs;

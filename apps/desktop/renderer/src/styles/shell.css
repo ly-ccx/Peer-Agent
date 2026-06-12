@@ -53,7 +53,7 @@
     @apply flex items-center justify-between gap-3;
   }
 
-  /* 章节标题 — Atlas Vellum §6.1 白名单 #4：1px 朱砂短横 + 章节号 */
+  /* 章节标题 — Peer Vellum §6.1 白名单 #4：1px 朱砂短横 + 章节号 */
   .section-heading h2 {
     @apply relative m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
     font-family: var(--font-serif-zh);
@@ -158,10 +158,10 @@
   }
 
   /* ─────────────────────────────────────────────────────────────
-   *  Atlas Vellum 启动页 / 未登录 hero（v2：单列居中布局）
+   *  Peer Vellum 启动页 / 未登录 hero（v2：单列居中布局）
    *  整页 = vertical hero（中心对齐）+ footer（hairline + 版权）
    * ───────────────────────────────────────────────────────────── */
-  .atlas-startup {
+  .peer-startup {
     @apply flex flex-col items-center;
     width: 100%;
     flex: 1;
@@ -171,14 +171,14 @@
   }
 
   /* hero 区垂直居中占据剩余空间 */
-  .atlas-startup-hero {
+  .peer-startup-hero {
     @apply flex flex-1 flex-col items-center justify-center gap-6 text-center;
     max-width: 480px;
     width: 100%;
   }
 
   /* 朱砂方印 — 居中放大到 80px */
-  .atlas-startup-seal {
+  .peer-startup-seal {
     @apply grid h-20 w-20 place-items-center;
     flex-shrink: 0;
     border-radius: 2px;
@@ -191,7 +191,7 @@
   }
 
   /* Serif 大标题 — central hero 给得起更大字号 */
-  .atlas-startup-title {
+  .peer-startup-title {
     @apply m-0;
     font-family: var(--font-serif-zh);
     font-size: 56px;
@@ -201,7 +201,7 @@
     color: var(--ink-base);
   }
 
-  .atlas-startup-subtitle {
+  .peer-startup-subtitle {
     display: block;
     font-family: var(--font-sans);
     font-size: 16px;
@@ -211,7 +211,7 @@
     margin-top: 4px;
   }
 
-  .atlas-startup-body {
+  .peer-startup-body {
     @apply m-0;
     max-width: 380px;
     font-size: 14px;
@@ -219,13 +219,13 @@
     color: var(--ink-soft);
   }
 
-  .atlas-startup-actions {
+  .peer-startup-actions {
     @apply flex items-center justify-center gap-3;
     margin-top: 8px;
   }
 
   /* Footer：hairline 上分割 + 居中 caption */
-  .atlas-startup-footer {
+  .peer-startup-footer {
     @apply mt-auto pt-4 text-center;
     width: 100%;
     max-width: 880px;
@@ -236,7 +236,7 @@
   }
 
   /* Primary 登录按钮 — 墨填底 + 雪文字（红线 §1：朱砂不上 CTA） */
-  .atlas-startup-primary {
+  .peer-startup-primary {
     @apply inline-flex cursor-pointer items-center justify-center;
     min-width: 220px;
     height: 48px;
@@ -252,17 +252,17 @@
     transition: background var(--za-motion-fast) var(--za-ease-standard);
   }
 
-  .atlas-startup-primary:hover:not(:disabled) {
+  .peer-startup-primary:hover:not(:disabled) {
     background: var(--ink-base-hover);
   }
 
-  .atlas-startup-primary:disabled {
+  .peer-startup-primary:disabled {
     opacity: 0.6;
     cursor: not-allowed;
   }
 
   /* Secondary 次要按钮（取消登录） — 描边透明底，与 primary 区分 */
-  .atlas-startup-secondary {
+  .peer-startup-secondary {
     @apply inline-flex cursor-pointer items-center justify-center;
     height: 48px;
     padding: 0 24px;
@@ -277,13 +277,13 @@
       border-color var(--za-motion-fast) var(--za-ease-standard);
   }
 
-  .atlas-startup-secondary:hover {
+  .peer-startup-secondary:hover {
     color: var(--ink-base);
     border-color: var(--ink-base);
   }
 
   /* 登录中权限引导文案 — 限宽多行居中 */
-  .atlas-startup-hint {
+  .peer-startup-hint {
     @apply m-0;
     max-width: 360px;
     margin-top: 4px;
@@ -293,12 +293,12 @@
     color: var(--ink-fade);
   }
 
-  .atlas-startup-status {
+  .peer-startup-status {
     font-size: 13px;
     color: var(--ink-fade);
   }
 
-  .atlas-startup-error {
+  .peer-startup-error {
     @apply m-0;
     font-size: 12px;
     color: var(--state-danger);

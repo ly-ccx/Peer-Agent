@@ -1,6 +1,6 @@
 @layer components {
 
-  /* Atlas Vellum 思维链 — §7.5「thinking trace 区块」
+  /* Peer Vellum 思维链 — §7.5「thinking trace 区块」
    * 整个 trace 用上下发丝线包夹，去掉卡片背景；mono 风格用于工具调用，sans-zh 用于结论 */
   .thinking-timeline {
     @apply mt-3 grid gap-3;

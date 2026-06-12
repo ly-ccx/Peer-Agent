@@ -1,10 +1,7 @@
 /**
- * Atlas Frost × Peer Agent Renderer Tokens
+ * Peer Frost × Peer Agent Renderer Tokens
  *
- * 设计语言：Atlas Frost（清晨冰面上的工具集）
- * 规范：xiaoer_design/knowledge/definition/2026-05-27-Atlas-Frost-设计语言系统.md
- * 纪律：xiaoer_design/behavior/2026-05-27-Atlas-Frost-视觉纪律.md
- * 前身：xiaoer_design/archive/atlas-vellum-v0.x/
+ * 设计语言：Peer Frost（清晨冰面上的工具集）
  *
  * 红线（不可逾越）：
  *   1. Azure 不上 CTA       2. H1 字号 ≥ 30px
@@ -17,11 +14,11 @@
  *   2. Vellum 兼容别名（--surface-vellum-*, --ink-*, --cinnabar-*）—— 18 个旧文件继续可用，值已切到 Frost
  *   3. --za-* 别名 —— 既有 18 个 CSS/TSX 文件继续使用，值已切到 Frost
  *
- * v1.0 (2026-05-27) — Atlas Frost 立项：
+ * v1.0 (2026-05-27) — Peer Frost 立项：
  *   Vellum 经过 v0.2 → v0.2.1 → v0.2.2 → v0.2.3 四次"去黄"迭代仍然没能满足
  *   用户的冷感诉求。Vellum 三个核心 motif（朱砂 + 暖墨 + 羊皮纸）本身就是
  *   暖色，与"全屏无暖色"的诉求不可调和，因此整套设计语言推翻重建为
- *   Atlas Frost。
+ *   Peer Frost。
  *
  *   chrome 系列   = 环境层 (canvas / chrome)  → 冷感纯白 hue 210-220 sat 14-19%（沿用 v0.2.3）
  *   paper 系列    = 内容层 (message / panel)  → 冷雪纸 hue 210-215 sat 10-13%（替代暖羊皮纸）
@@ -48,7 +45,7 @@
 
 /* ─────────────────────────────────────────────────────────────
  *  Light Mode（默认）
- *  Atlas Frost 主色：冷玻璃 + 石墨 + 冰湖青
+ *  Peer Frost 主色：冷玻璃 + 石墨 + 冰湖青
  * ───────────────────────────────────────────────────────────── */
 :root {
   color-scheme: light;
@@ -146,7 +143,7 @@
 
   /* ─────────────────────────────────────────────────────────────
    *  --za-* 别名层（向后兼容，所有既有 .css/.tsx 继续可用）
-   *  Atlas Frost 化的语义重映射：
+   *  Peer Frost 化的语义重映射：
    *    accent 永远是 azure-seal（红线 1：azure 不上 CTA，所以 accent 也不能做按钮背景）
    *    primary control 永远是 graphite-on-paper（红线 1）
    *    surface 体系全部解构成冷雪纸 paper 阶

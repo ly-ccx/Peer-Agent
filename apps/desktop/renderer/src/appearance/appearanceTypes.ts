@@ -1,5 +1,5 @@
 /**
- * Atlas Frost 是 Peer Agent 桌面端的默认设计语言。Appearance 暴露：
+ * Peer Frost 是 Peer Agent 桌面端的默认设计语言。Appearance 暴露：
  *   - mode: 浅 / 深 / 跟随系统
  *   - palette: 配色方案（frost 默认；catppuccin 为可选第三方调色板）
  *   - density: 宽松 / 紧凑（Phase 2 启用 UI）
