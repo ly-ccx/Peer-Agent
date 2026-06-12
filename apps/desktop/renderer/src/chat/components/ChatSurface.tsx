@@ -1709,9 +1709,6 @@ function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, 
         ) : currentContextTokens > 0 ? (
           <>{formatTokenCount(currentContextTokens)} tokens</>
         ) : null}
-        {billedTokens > 0 ? (
-          <span className="token-usage-detail"> {isZh ? '入' : '↑'}{(input / 1000).toFixed(1)}k {isZh ? '出' : '↓'}{(output / 1000).toFixed(1)}k</span>
-        ) : null}
         {costStr ? <span className="token-usage-cost">{costStr}</span> : null}
         {cacheHitRate != null ? (
           <span className="token-usage-detail" title={isZh ? '缓存命中率(缓存读取 / 总输入)' : 'Cache hit rate (cache read / total input)'}>
