@@ -60,7 +60,9 @@ export function SettingsPage({
         </nav>
       </aside>
 
-      <section className="settings-content" aria-live="polite">
+      {/* key={section} 让每次切换分区时内容重新挂载,触发 .settings-content > *
+          的 za-content-reveal 入场动画(动效约定见 settings-page.css)。 */}
+      <section className="settings-content" aria-live="polite" key={section}>
         {section === 'model' ? (
           <LlmSettingsPanel i18n={i18n} />
         ) : section === 'instructions' ? (

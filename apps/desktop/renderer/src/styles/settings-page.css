@@ -5,6 +5,9 @@
   grid-template-columns: 220px 1fr;
   height: 100%;
   min-height: 0;
+  /* 与 .thread / .capability-workbench 等大面板统一入场:整页 fade+rise,
+     复用既有动效 token,reduced-motion 由 tokens.css 全局降级兜底。 */
+  animation: za-panel-in var(--za-motion-slow) var(--za-ease-out) both;
 }
 
 .settings-nav {
@@ -83,6 +86,12 @@
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* 分区切换时右侧内容做一次轻量 reveal,配合 React 端的 key={section}
+   在每次切换重新挂载触发。复用 za-content-reveal,与正文揭示动效一致。 */
+.settings-content > * {
+  animation: za-content-reveal var(--za-motion-medium) var(--za-ease-out) both;
 }
 
 /* ── 外观分区在设置页内补齐内边距与收窄宽度 ──
