@@ -1,5 +1,6 @@
 import { encodeOpenAIChatRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
+import { emitToolArgProgress } from './tool-arg-progress.mjs';
 
 function extractTextLikeDelta(value) {
   if (typeof value === 'string') return value;
@@ -78,9 +79,19 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
     if (delta?.tool_calls) {
       for (const tc of delta.tool_calls) {
         if (!state.toolCalls[tc.index]) state.toolCalls[tc.index] = { id: '', name: '', arguments: '' };
-        if (tc.id) state.toolCalls[tc.index].id = tc.id;
-        if (tc.function?.name) state.toolCalls[tc.index].name = tc.function.name;
-        if (tc.function?.arguments) state.toolCalls[tc.index].arguments += tc.function.arguments;
+        const entry = state.toolCalls[tc.index];
+        if (tc.id) entry.id = tc.id;
+        if (tc.function?.name) entry.name = tc.function.name;
+        if (tc.function?.arguments) {
+          entry.arguments += tc.function.arguments;
+          emitToolArgProgress(entry, {
+            webContents,
+            streamId,
+            toolCallId: entry.id,
+            toolName: entry.name,
+            argsJson: entry.arguments,
+          });
+        }
       }
     }
     if (parsed.usage) {
