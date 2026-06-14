@@ -25,6 +25,7 @@ export function Sidebar({
   conversations,
   activeConversationId,
   runningConversationIds,
+  runningWorkspacePaths,
   activePage,
   i18n,
   onNewChat,
@@ -37,6 +38,8 @@ export function Sidebar({
   readonly activeConversationId: string | null;
   // 当前正在流式运行的会话 id 集合(表达层状态,真值来自 main 的 activeStreams 广播)。
   readonly runningConversationIds?: ReadonlySet<string>;
+  // ADR 27: 有运行中流的工作区路径集合,用于在工作区入口/下拉项上提示"该工作区有任务在跑"。
+  readonly runningWorkspacePaths?: ReadonlySet<string>;
   readonly activePage: string;
   readonly i18n: I18nRuntime;
   readonly onNewChat: () => void;
@@ -76,11 +79,19 @@ export function Sidebar({
   }, [refreshWorkspaces, onWorkspaceChanged]);
 
   const handleSwitchWorkspace = useCallback(async (wsPath: string) => {
+    // ADR 27: 去阻塞切换。先乐观回填当前工作区名称(用已知的 workspaces 条目),
+    // 避免等待 git(workspaceInfo)阻塞 UI;git 分支等信息由后续 refresh 异步补齐。
     setWsDropdownOpen(false);
+    const known = workspaces.find((w) => w.path === wsPath);
+    setActiveWorkspace(wsPath);
+    setWsInfo(known ? { name: known.name, absolutePath: wsPath } : null);
     await clientApi.workspaceSetActive({ path: wsPath });
-    await refreshWorkspaces();
-    onWorkspaceChanged?.();
-  }, [refreshWorkspaces, onWorkspaceChanged]);
+    // 会话列表刷新(onWorkspaceChanged)与工作区/ git 详情刷新并行,互不阻塞。
+    await Promise.all([
+      Promise.resolve(onWorkspaceChanged?.()),
+      refreshWorkspaces(),
+    ]);
+  }, [workspaces, refreshWorkspaces, onWorkspaceChanged]);
 
   const handleRemoveWorkspace = useCallback(async (wsPath: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -103,6 +114,15 @@ export function Sidebar({
 
       <div className="sidebar-workspace-wrap">
         <div className="sidebar-workspace" onClick={() => setWsDropdownOpen(!wsDropdownOpen)}>
+          {/* ADR 27: 折叠态下,若有"非当前工作区"存在运行中的流,显示一个运行点,
+              提示用户切走的工作区任务仍在跑——展开下拉可定位到具体工作区。 */}
+          {[...(runningWorkspacePaths ?? [])].some((p) => p !== activeWorkspace) ? (
+            <span
+              className="ws-running-dot ws-running-dot-other"
+              aria-label={isZh ? '其它工作区有任务运行中' : 'Tasks running in another workspace'}
+              title={isZh ? '其它工作区有任务正在运行' : 'Another workspace has running tasks'}
+            />
+          ) : null}
           {wsInfo ? (
             <>
               <span className="ws-name">{wsInfo.name}</span>
@@ -124,6 +144,14 @@ export function Sidebar({
                 className={`ws-dropdown-item ${ws.path === activeWorkspace ? 'active' : ''}`}
                 onClick={() => handleSwitchWorkspace(ws.path)}
               >
+                {/* ADR 27: 该工作区有运行中的流时显示运行点,提示任务仍在跑(未丢失)。 */}
+                {runningWorkspacePaths?.has(ws.path) ? (
+                  <span
+                    className="ws-running-dot"
+                    aria-label={isZh ? '有任务运行中' : 'Tasks running'}
+                    title={isZh ? '该工作区有任务正在运行' : 'This workspace has running tasks'}
+                  />
+                ) : null}
                 <span className="ws-dropdown-name">{ws.name}</span>
                 <button type="button" className="ws-dropdown-remove" onClick={(e) => handleRemoveWorkspace(ws.path, e)}>×</button>
               </div>
@@ -144,7 +172,9 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="sidebar-conversations">
+      {/* ADR 27: key 绑定当前工作区,切换工作区时列表重新挂载,触发一次入场 reveal,
+          配合 sidebar.css 的 .sidebar-conversations 动画,避免硬切的卡顿观感。 */}
+      <div className="sidebar-conversations" key={activeWorkspace ?? 'none'}>
         {conversations.length === 0 ? (
           <p className="sidebar-empty">{isZh ? '暂无对话' : 'No conversations'}</p>
         ) : conversations.map((conv) => (

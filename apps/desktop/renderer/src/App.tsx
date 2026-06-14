@@ -33,6 +33,10 @@ export function App() {
   // 另外 ChatSurface 的 onStreamingChange 作为本会话的即时信号合并进集合(更快反馈)。
   const [runningConversationIds, setRunningConversationIds] = useState<ReadonlySet<string>>(
     () => new Set());
+  // ADR 27: 有运行中流的工作区路径集合,由活跃流投影的 streams 维度派生。
+  // 让侧栏能提示"其它工作区仍有任务在跑",避免切换工作区后误以为任务丢失。
+  const [runningWorkspacePaths, setRunningWorkspacePaths] = useState<ReadonlySet<string>>(
+    () => new Set());
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
   // 任务续传(ADR 21):重启后 peek 回来的待办,带会话坐标。
   // App 负责切到 sessionId(回到中断现场)后,把 task 下发给 ChatSurface 自动发出。
@@ -103,11 +107,23 @@ export function App() {
   // 全局运行中会话:挂载时拉取当前活跃流快照,并订阅后续变更广播。
   // 这让左侧列表无需"点进去"即可知道哪些会话正在跑(含后台并行会话)。
   useEffect(() => {
-    void clientApi.chatStreamListActive()
-      .then(({ conversationIds }) => setRunningConversationIds(new Set(conversationIds)))
-      .catch(() => {});
-    const unsubscribe = clientApi.onChatActiveStreamsChanged(({ conversationIds }) => {
+    // ADR 27: streams 携带工作区维度,据此派生"哪些工作区有运行中的流"。
+    const applyStreams = (
+      conversationIds: readonly string[],
+      streams: readonly { conversationId: string; workspacePath: string | null }[],
+    ) => {
       setRunningConversationIds(new Set(conversationIds));
+      const wsPaths = new Set<string>();
+      for (const s of streams) {
+        if (s.workspacePath) wsPaths.add(s.workspacePath);
+      }
+      setRunningWorkspacePaths(wsPaths);
+    };
+    void clientApi.chatStreamListActive()
+      .then(({ conversationIds, streams }) => applyStreams(conversationIds, streams ?? []))
+      .catch(() => {});
+    const unsubscribe = clientApi.onChatActiveStreamsChanged(({ conversationIds, streams }) => {
+      applyStreams(conversationIds, streams ?? []);
     });
     return unsubscribe;
   }, []);
@@ -162,6 +178,7 @@ export function App() {
             conversations={conversations}
             activeConversationId={activeConversationId}
             runningConversationIds={runningConversationIds}
+            runningWorkspacePaths={runningWorkspacePaths}
             activePage={activePage}
             i18n={i18n}
             onNewChat={handleNewChat}

@@ -131,6 +131,29 @@
   font-family: var(--font-mono);
   flex-shrink: 0;
 }
+
+/* ADR 27: 工作区运行指示点。表示该工作区有运行中的流(任务仍在跑,未丢失)。
+   柔和脉冲呼应"进行中"语义;prefers-reduced-motion 由 tokens.css 全局降级兜底。 */
+.ws-running-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--state-success, #3a9d6e);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-success, #3a9d6e) 60%, transparent);
+  animation: ws-running-pulse 1.6s var(--za-ease-standard) infinite;
+}
+/* 折叠态、提示"其它工作区"时用警示色,和当前工作区的运行点区分。 */
+.ws-running-dot-other {
+  background: var(--state-warning, #c8861a);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-warning, #c8861a) 60%, transparent);
+  margin-right: var(--space-1);
+}
+@keyframes ws-running-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-success, #3a9d6e) 55%, transparent); }
+  70% { box-shadow: 0 0 0 5px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
 .ws-chevron {
   color: var(--graphite-mute);
   flex-shrink: 0;
@@ -224,6 +247,9 @@
   overflow-y: auto;
   padding: 0 var(--space-2);
   -webkit-app-region: no-drag;
+  /* ADR 27: 工作区切换时(key 变化重新挂载)做一次轻量入场 reveal,
+     复用既有动效 token,避免列表硬切的卡顿观感;reduced-motion 全局降级兜底。 */
+  animation: za-content-reveal var(--za-motion-medium) var(--za-ease-out) both;
 }
 .sidebar-empty {
   color: var(--graphite-mute);
