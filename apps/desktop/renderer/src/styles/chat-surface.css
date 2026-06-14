@@ -711,34 +711,35 @@
   color: var(--graphite-mute);
 }
 
-/* ── Tool argument streaming progress (Codex-style live feedback) ── */
+/* ── Tool argument streaming progress (Frost live feedback) ──
+ * 气质对齐 .thinking-indicator:无蓝底/蓝边的轻状态行,呼吸点替代旋转圈,
+ * azure 仅作微弱脉冲点缀(红线:单屏 azure ≤ 3 / azure 不上 CTA)。 */
 .tool-progress-notice {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  background: var(--azure-trace);
-  border: 1px solid var(--azure-soft);
-  border-radius: var(--radius-md);
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  background: transparent;
+  border: none;
   font-size: 0.78rem;
   color: var(--graphite-soft);
-  animation: compaction-notice-in var(--za-motion-medium) var(--za-ease-out) both;
+  animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
   max-width: 740px;
   margin: 0 auto;
   width: 100%;
 }
 .tool-progress-spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--chrome-sunken);
-  border-top-color: var(--azure-core);
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
+  background: var(--azure-seal);
   flex-shrink: 0;
-  animation: compaction-spin 0.8s linear infinite;
+  animation: thinking-pulse 1.8s ease-in-out infinite;
 }
 .tool-progress-body {
   flex: 1;
   line-height: 1.4;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
