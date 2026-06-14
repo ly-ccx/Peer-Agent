@@ -5,6 +5,7 @@ import type {
   ClientSessionState,
   ClientToolCall,
   ClientToolResult,
+  LlmModelListResult,
   LlmProviderConfigView,
   LlmProviderTestResult,
   LocaleCode,
@@ -173,6 +174,8 @@ export interface BootstrapPreloadApi {
   readonly onChatStreamAborted: (listener: (payload: { streamId: string }) => void) => () => void;
   readonly onChatStreamUsage: (listener: (payload: { streamId: string; usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number } }) => void) => () => void;
   readonly onChatStreamToolCall: (listener: (payload: { streamId: string; tool: string; args: Record<string, unknown>; toolCallId: string }) => void) => () => void;
+  // 流式工具参数进度(Codex 式实时体感)。仅是 provider 流式提示,不替代 Tool Result / Evidence。
+  readonly onChatStreamToolProgress: (listener: (payload: { streamId: string; toolCallId: string; tool: string; path: string | null; receivedChars: number; receivedLines: number }) => void) => () => void;
   readonly onChatStreamToolResult: (listener: (payload: { streamId: string; toolCallId: string; result: string }) => void) => () => void;
   readonly onChatStreamPermissionRequest: (listener: (payload: { streamId: string; call: ClientToolCall }) => void) => () => void;
   readonly onChatStreamError: (listener: (payload: {
@@ -194,6 +197,19 @@ export interface BootstrapPreloadApi {
   readonly llmRemoveProvider: (params: { id: string }) => Promise<readonly LlmProviderConfigView[]>;
   readonly llmSetDefault: (params: { id: string }) => Promise<readonly LlmProviderConfigView[]>;
   readonly llmTestConnection: (params: { id: string }) => Promise<LlmProviderTestResult>;
+  // ADR 28: 启动 ChatGPT 订阅 OAuth 登录(browser 模式)。
+  // 链路契约:"先登录、成功后才落盘"。
+  // - { id }   : 对已存在的订阅 provider 重新登录(刷新 token)。
+  // - { draft }: 新建订阅。登录成功后才创建 provider;失败/取消不写入任何配置。
+  // 成功返回更新/新建后的脱敏视图。
+  readonly llmOAuthStart: (
+    params: { id: string; draft?: undefined } | { id?: undefined; draft: Record<string, unknown> },
+  ) => Promise<
+    { success: true; provider: LlmProviderConfigView } | { success: false; error: string }
+  >;
+  readonly llmOAuthCancel: () => Promise<{ success: boolean }>;
+  // ADR 28(方案 B): 列出订阅可用模型(远程拉取,失败回退内置清单)。
+  readonly llmListModels: (params: { id: string }) => Promise<LlmModelListResult>;
   readonly initialSettings: Record<string, unknown>;
   readonly getSettings: () => Promise<Record<string, unknown>>;
   readonly updateSettings: (partial: Record<string, unknown>) => Promise<Record<string, unknown>>;

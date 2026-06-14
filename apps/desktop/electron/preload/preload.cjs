@@ -91,6 +91,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.on('chat:stream:tool-call', handler);
     return () => ipcRenderer.removeListener('chat:stream:tool-call', handler);
   },
+  onChatStreamToolProgress: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('chat:stream:tool-progress', handler);
+    return () => ipcRenderer.removeListener('chat:stream:tool-progress', handler);
+  },
   onChatStreamToolResult: (listener) => {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('chat:stream:tool-result', handler);
@@ -122,6 +127,9 @@ contextBridge.exposeInMainWorld('peerAgent', {
   llmRemoveProvider: (params) => ipcRenderer.invoke('llm:remove', params),
   llmSetDefault: (params) => ipcRenderer.invoke('llm:set-default', params),
   llmTestConnection: (params) => ipcRenderer.invoke('llm:test', params),
+  llmOAuthStart: (params) => ipcRenderer.invoke('llm:oauth:start', params),
+  llmOAuthCancel: () => ipcRenderer.invoke('llm:oauth:cancel'),
+  llmListModels: (params) => ipcRenderer.invoke('llm:models:list', params),
   restartHost: (options) => ipcRenderer.invoke('host:restart', options || {}),
   writePendingTask: (task) => ipcRenderer.invoke('pending-task:write', task || {}),
   consumePendingTask: () => ipcRenderer.invoke('pending-task:consume'),

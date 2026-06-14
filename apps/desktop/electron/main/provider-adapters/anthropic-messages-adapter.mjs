@@ -33,6 +33,49 @@ function extractAnthropicStreamError(parsed) {
   };
 }
 
+const TOOL_ARG_PROGRESS_INTERVAL_MS = 120;
+
+// 工具调用参数(尤其 edit_file/write_file 的整文件内容)以 input_json_delta 流式抵达，
+// 在 content_block_stop 之前对 renderer 完全不可见，长编辑会表现为“一直等待中”。
+// 这里在参数累积期间发出节流的 tool-progress 事件，给用户 Codex 式的实时体感。
+// 注意:这是 provider 适配层的“流式进度提示”，不替代真正的 Tool Result / Evidence,
+// 仅由后续 chat:stream:tool-call 与本地能力执行结果接管事实。
+function emitToolArgProgress(block, webContents, streamId) {
+  if (!block || !webContents) return;
+  const json = block.inputJson || '';
+  // 路径在 JSON 前部即可解析出来,先于整段内容到达。
+  if (block.argPath === undefined) {
+    const match = /"path"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(json);
+    if (match) {
+      try {
+        block.argPath = JSON.parse(`"${match[1]}"`);
+      } catch {
+        block.argPath = match[1];
+      }
+    }
+  }
+  // JSON 转义后的换行表现为字面量 \n,据此估算“已接收行数”。
+  const receivedLines = (json.match(/\\n/g) || []).length;
+  const now = Date.now();
+  if (
+    block.lastProgressAt &&
+    now - block.lastProgressAt < TOOL_ARG_PROGRESS_INTERVAL_MS &&
+    receivedLines === block.lastProgressLines
+  ) {
+    return;
+  }
+  block.lastProgressAt = now;
+  block.lastProgressLines = receivedLines;
+  webContents.send('chat:stream:tool-progress', {
+    streamId,
+    toolCallId: block.id,
+    tool: block.name,
+    path: block.argPath ?? null,
+    receivedChars: json.length,
+    receivedLines,
+  });
+}
+
 function consumeAnthropicStreamLine(line, state, webContents, streamId, trace = null) {
   const trimmed = line.trim();
   if (!trimmed) return;
@@ -77,7 +120,9 @@ function consumeAnthropicStreamLine(line, state, webContents, streamId, trace = 
         // thinking block 的签名，多轮回传时 Anthropic 要求带上。
         state.thinkingSignature += parsed.delta.signature;
       } else if (parsed.delta?.type === 'input_json_delta' && state.currentToolIndex >= 0) {
-        state.toolUseBlocks[state.currentToolIndex].inputJson += parsed.delta.partial_json;
+        const block = state.toolUseBlocks[state.currentToolIndex];
+        block.inputJson += parsed.delta.partial_json;
+        emitToolArgProgress(block, webContents, streamId);
       }
     } else if (parsed.type === 'content_block_stop') {
       state.inThinking = false;

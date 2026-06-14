@@ -448,6 +448,32 @@ function formatTokenCount(tokens: number): string {
   return `${(tokens / 1000).toFixed(1)}k`;
 }
 
+// 流式工具参数进度的展示文案。仅描述“正在接收/准备调用”这一过程,
+// 不声称工具已执行或文件已落地——真正的结果由后续 tool-call 段与本地能力 Evidence 接管。
+function toolProgressLabel(
+  progress: { tool: string; path: string | null; receivedLines: number },
+  isZh: boolean,
+): string {
+  const file = progress.path ? progress.path.split('/').pop() || progress.path : null;
+  const verbZh =
+    progress.tool === 'edit_file' ? '编辑'
+      : progress.tool === 'write_file' ? '写入'
+        : progress.tool === 'read_file' ? '读取'
+          : '准备';
+  const verbEn =
+    progress.tool === 'edit_file' ? 'Editing'
+      : progress.tool === 'write_file' ? 'Writing'
+        : progress.tool === 'read_file' ? 'Reading'
+          : 'Preparing';
+  const lines = progress.receivedLines;
+  if (isZh) {
+    const target = file ? ` ${file}` : ` ${progress.tool}`;
+    return lines > 0 ? `正在${verbZh}${target} · 已接收 ${lines} 行` : `正在${verbZh}${target}…`;
+  }
+  const target = file ? ` ${file}` : ` ${progress.tool}`;
+  return lines > 0 ? `${verbEn}${target} · ${lines} lines received` : `${verbEn}${target}…`;
+}
+
 function usageFromLifetime(lifetime: {
   inputTokens?: number;
   outputTokens?: number;
@@ -580,6 +606,12 @@ export function ChatSurface({
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [pendingPermissionCalls, setPendingPermissionCalls] = useState<ClientToolCall[]>([]);
+  // 流式工具参数进度(Codex 式实时体感):工具调用参数(如 edit_file 的整文件内容)
+  // 在落地为正式 tool-call 段之前会先以增量形式抵达,这里保存最近一次进度用于展示。
+  // 仅为过程提示,不替代 Tool Result / Evidence。
+  const [toolProgress, setToolProgress] = useState<
+    { tool: string; path: string | null; receivedLines: number } | null
+  >(null);
   // 任务续传(ADR 21):防止同一 resumeTask 被自动发送多次的一次性闸门。
   const resumeFiredRef = useRef<string | null>(null);
   const streamIdRef = useRef<string | null>(null);
@@ -737,6 +769,7 @@ export function ChatSurface({
       setIsCompacting(false);
       setActiveUsage(null);
       setPendingPermissionCalls([]);
+      setToolProgress(null);
       const hasUsage = usage?.inputTokens || usage?.outputTokens || usage?.cacheWriteTokens || usage?.cacheReadTokens;
       const msgUsage = hasUsage
         ? { input: usage.inputTokens ?? 0, output: usage.outputTokens ?? 0, cacheWrite: usage.cacheWriteTokens ?? 0, cacheRead: usage.cacheReadTokens ?? 0 }
@@ -795,6 +828,7 @@ export function ChatSurface({
       setIsCompacting(false);
       setActiveUsage(null);
       setPendingPermissionCalls([]);
+      setToolProgress(null);
       if (conversationId) {
         setMessages((prev) => {
           const last = prev[prev.length - 1];
@@ -807,8 +841,15 @@ export function ChatSurface({
       streamIdRef.current = null;
     });
 
+    const offToolProgress = clientApi.onChatStreamToolProgress(({ streamId, tool, path, receivedLines }) => {
+      if (streamId !== streamIdRef.current) return;
+      setToolProgress({ tool, path, receivedLines });
+    });
+
     const offToolCall = clientApi.onChatStreamToolCall(({ streamId, tool, args }) => {
       if (streamId !== streamIdRef.current) return;
+      // 参数已落地为正式 tool-call 段,过程提示让位给结构化段。
+      setToolProgress(null);
       setMessages((prev) => {
         const last = prev[prev.length - 1];
         if (!last || last.role !== 'assistant') return prev;
@@ -854,6 +895,7 @@ export function ChatSurface({
       setIsCompacting(false);
       setActiveUsage(null);
       setPendingPermissionCalls([]);
+      setToolProgress(null);
       setStreamError(error);
       if (lifetimeUsage) {
         setTokenUsage(usageFromLifetime(lifetimeUsage));
@@ -907,7 +949,7 @@ export function ChatSurface({
       setTimeout(() => setCompactionNotice(null), 10000);
     });
 
-    return () => { offDelta(); offThinking(); offDone(); offUsage(); offAborted(); offToolCall(); offToolResult(); offPermissionRequest(); offError(); offCompaction(); };
+    return () => { offDelta(); offThinking(); offDone(); offUsage(); offAborted(); offToolProgress(); offToolCall(); offToolResult(); offPermissionRequest(); offError(); offCompaction(); };
   }, [appendStreamThinking, conversationId, onConversationUpdated]);
 
   useEffect(() => {
@@ -1226,6 +1268,14 @@ export function ChatSurface({
             )}
           </div>
         ))}
+        {toolProgress ? (
+          <div className="tool-progress-notice">
+            <span className="tool-progress-spinner" aria-hidden="true" />
+            <div className="tool-progress-body">
+              {toolProgressLabel(toolProgress, isZh)}
+            </div>
+          </div>
+        ) : null}
         {isCompacting || compactionNotice ? (
           <div className={`compaction-notice ${isCompacting ? 'compaction-notice-active' : ''}`}>
             {isCompacting ? <span className="compaction-spinner" aria-hidden="true" /> : <span className="compaction-notice-icon">📦</span>}
