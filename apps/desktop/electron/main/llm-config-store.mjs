@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { pathOf } from './data-store.mjs';
+import { deriveOAuthStatus, resolveSubscriptionTestResult } from './provider-connectivity.mjs';
 
 function encrypt(plaintext) {
   if (!plaintext) return { encrypted: false, data: '' };
@@ -34,10 +35,34 @@ function maskApiKey(key) {
   return key.slice(0, 4) + '...' + key.slice(-4);
 }
 
+// ChatGPT 订阅(OAuth)写死的固定身份(ADR 28)。
+// - baseUrl 沿用 opencode 的 Codex 订阅端点;Responses adapter 会在其后拼 `/responses`。
+// - 显示名固定,UI 不暴露给用户编辑。
+const CHATGPT_SUBSCRIPTION_NAME = 'ChatGPT 订阅';
+const CHATGPT_SUBSCRIPTION_BASE_URL = 'https://chatgpt.com/backend-api/codex';
+
 const PROVIDER_DEFAULTS = {
   openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o' },
   anthropic: { baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-20250514' },
 };
+
+// 订阅 token 集合以加密 JSON 形态存于 item.oauthTokens。
+function decryptTokens(stored) {
+  const raw = decrypt(stored);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+// 由存储的 token 推导对外可见的登录态(不泄漏 token 本身)。
+function oauthStatusOf(item) {
+  if (item.authMethod !== 'oauth_chatgpt') return undefined;
+  return deriveOAuthStatus(decryptTokens(item.oauthTokens));
+}
 
 export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {}) {
   function readAll() {
@@ -60,6 +85,8 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     return {
       id: item.id,
       provider: item.provider,
+      authMethod: item.authMethod || 'api_key',
+      oauthStatus: oauthStatusOf(item),
       name: item.name,
       baseUrl: item.baseUrl,
       model: item.model,
@@ -75,7 +102,11 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       supportsReasoning: item.supportsReasoning ?? false,
       supportsPromptCaching: item.supportsPromptCaching ?? false,
       apiKeyMasked: maskApiKey(key),
-      apiKeyConfigured: Boolean(key),
+      // 订阅链路无 API Key,凭据是否就绪以 OAuth 登录态(connected)为准。
+      apiKeyConfigured:
+        item.authMethod === 'oauth_chatgpt'
+          ? oauthStatusOf(item)?.status === 'connected'
+          : Boolean(key),
     };
   }
 
@@ -83,16 +114,21 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     return readAll().map(toView);
   }
 
-  function addProvider({ provider, name, baseUrl, model, apiKey, contextWindow, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching }) {
+  function addProvider({ provider, authMethod, name, baseUrl, model, apiKey, contextWindow, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching }) {
     const items = readAll();
     const defaults = PROVIDER_DEFAULTS[provider] || PROVIDER_DEFAULTS.openai;
+    const method = authMethod === 'oauth_chatgpt' ? 'oauth_chatgpt' : 'api_key';
+    // 订阅(OAuth)身份写死:名称/baseURL 固定,不接受外部传入。model 留待登录后选择。
+    const isSubscription = method === 'oauth_chatgpt';
     const item = {
       id: randomUUID(),
       provider: provider || 'openai',
-      name: name || provider || 'Untitled',
-      baseUrl: baseUrl || defaults.baseUrl,
-      model: model || defaults.model,
-      apiKey: encrypt(apiKey || ''),
+      authMethod: method,
+      name: isSubscription ? CHATGPT_SUBSCRIPTION_NAME : name || provider || 'Untitled',
+      baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : baseUrl || defaults.baseUrl,
+      model: model || (isSubscription ? '' : defaults.model),
+      apiKey: encrypt(isSubscription ? '' : apiKey || ''),
+      oauthTokens: encrypt(''),
       enabled: true,
       isDefault: items.length === 0,
       createdAt: new Date().toISOString(),
@@ -161,10 +197,36 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     return decrypt(item.apiKey);
   }
 
+  // 返回订阅凭据 { tokens },tokens 为解密后的 OAuth token 集合。
+  function getCredential(id) {
+    const items = readAll();
+    const item = items.find((i) => i.id === id);
+    if (!item) return null;
+    return { tokens: decryptTokens(item.oauthTokens) };
+  }
+
+  // 写入/刷新订阅 token 集合(整体加密存储)。tokens 形如
+  // { access, refresh, expires, accountId }。
+  function setOAuthTokens(id, tokens) {
+    const items = readAll();
+    const idx = items.findIndex((i) => i.id === id);
+    if (idx < 0) throw new Error(`Provider ${id} not found`);
+    items[idx].oauthTokens = encrypt(tokens ? JSON.stringify(tokens) : '');
+    writeAll(items);
+    return toView(items[idx]);
+  }
+
   async function testConnection(id) {
     const items = readAll();
     const item = items.find((i) => i.id === id);
     if (!item) return { success: false, error: 'Provider not found' };
+
+    // 订阅(ChatGPT OAuth)provider 不持有 apiKey；连通性以 OAuth 登录态为准。
+    // 真正的远程模型探测走 `llm:models:list`(main 层,含 token 刷新)，此处只判定凭证有效性，
+    // 避免存储层反向依赖 provider 网络适配器，也避免对订阅误报 "API key not configured"。
+    if (item.authMethod === 'oauth_chatgpt') {
+      return resolveSubscriptionTestResult(oauthStatusOf(item), item.model);
+    }
 
     const apiKey = decrypt(item.apiKey);
     if (!apiKey) return { success: false, error: 'API key not configured' };
@@ -180,7 +242,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     }
   }
 
-  return { listProviders, addProvider, updateProvider, removeProvider, setDefault, getDecryptedApiKey, testConnection };
+  return { listProviders, addProvider, updateProvider, removeProvider, setDefault, getDecryptedApiKey, getCredential, setOAuthTokens, testConnection };
 }
 
 async function testOpenAI(baseUrl, apiKey, model, start) {

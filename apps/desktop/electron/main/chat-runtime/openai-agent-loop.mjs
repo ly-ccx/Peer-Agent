@@ -1,4 +1,5 @@
 import { sendOpenAIChatStream } from '../provider-adapters/openai-chat-adapter.mjs';
+import { sendOpenAIResponsesStream } from '../provider-adapters/openai-responses-adapter.mjs';
 import {
   createAgentLoopKernel,
   handleTerminalTextResponse,
@@ -32,7 +33,15 @@ export async function agentLoopOpenAI({
   workspacePath,
   permissionGate,
   onNativeReasoningFallback = null,
+  // ADR 28: ChatGPT 订阅链路走 Responses 传输,需附带 accountId。
+  authMethod = 'api_key',
+  accountId = null,
 }) {
+  // 按鉴权方式选择 OpenAI 协议族的传输 adapter,保持循环逻辑统一。
+  const useResponses = authMethod === 'oauth_chatgpt';
+  const sendStream = useResponses
+    ? (args) => sendOpenAIResponsesStream({ ...args, accountId })
+    : sendOpenAIChatStream;
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
   const loop = createAgentLoopKernel({ webContents, streamId });
   const providerConfig = { provider: 'openai', baseUrl, apiKey, model };
@@ -61,7 +70,7 @@ export async function agentLoopOpenAI({
     }
 
     apiMessages = sanitizeApiMessages(apiMessages);
-    const providerResponse = await sendOpenAIChatStream({
+    const providerResponse = await sendStream({
       baseUrl,
       apiKey,
       model,

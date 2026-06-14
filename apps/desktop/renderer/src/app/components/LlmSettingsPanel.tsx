@@ -1,10 +1,12 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import type { LlmProviderConfigView, LlmProviderTestResult, LlmProviderType } from '@peer-agent/protocol';
+import type { LlmAuthMethod, LlmModelInfo, LlmProviderConfigView, LlmProviderTestResult, LlmProviderType } from '@peer-agent/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
 
 interface FormState {
   provider: LlmProviderType;
+  // ADR 28: 鉴权方式(api_key | oauth_chatgpt),与协议族正交。
+  authMethod: LlmAuthMethod;
   name: string;
   baseUrl: string;
   model: string;
@@ -25,7 +27,22 @@ const PRESETS: Record<LlmProviderType, { baseUrl: string; model: string }> = {
 };
 
 function emptyForm(provider: LlmProviderType = 'openai'): FormState {
-  return { provider, name: '', baseUrl: PRESETS[provider].baseUrl, model: PRESETS[provider].model, apiKey: '', contextWindow: '', inputPrice: '', outputPrice: '', cacheWritePrice: '', cacheReadPrice: '', supportsVision: false, supportsReasoning: false, supportsPromptCaching: false };
+  return { provider, authMethod: 'api_key', name: '', baseUrl: PRESETS[provider].baseUrl, model: PRESETS[provider].model, apiKey: '', contextWindow: '', inputPrice: '', outputPrice: '', cacheWritePrice: '', cacheReadPrice: '', supportsVision: false, supportsReasoning: false, supportsPromptCaching: false };
+}
+
+// 把后端连通性测试的错误码映射为可读文案；未知码原样透传(便于排障)。
+function friendlyTestError(error: string | undefined, locale: string): string {
+  const zh = locale === 'zh-CN';
+  switch (error) {
+    case 'oauth_not_logged_in':
+      return zh ? '未登录，请先登录 ChatGPT' : 'Not logged in — please log in to ChatGPT';
+    case 'oauth_session_expired':
+      return zh ? '登录已过期，请重新登录' : 'Session expired — please re-login';
+    case 'API key not configured':
+      return zh ? '未配置 API Key' : 'API key not configured';
+    default:
+      return error || (zh ? '测试失败' : 'Test failed');
+  }
 }
 
 export function LlmSettingsPanel({
@@ -42,6 +59,10 @@ export function LlmSettingsPanel({
   const [saving, setSaving] = useState(false);
   const [testResults, setTestResults] = useState<Record<string, LlmProviderTestResult>>({});
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [oauthBusyId, setOauthBusyId] = useState<string | null>(null);
+  // ADR 28(方案 B): 订阅 provider 的远程模型清单与加载态(按 provider id 维度)。
+  const [modelLists, setModelLists] = useState<Record<string, readonly LlmModelInfo[]>>({});
+  const [modelLoadingId, setModelLoadingId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -51,6 +72,34 @@ export function LlmSettingsPanel({
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // 拉取某订阅 provider 的可用模型(远程,失败回退内置清单)。
+  const loadModels = useCallback(async (id: string) => {
+    setModelLoadingId(id);
+    try {
+      const res = await clientApi.llmListModels({ id });
+      if (res.success) setModelLists((prev) => ({ ...prev, [id]: res.models }));
+    } catch { /* silent */ } finally {
+      setModelLoadingId((cur) => (cur === id ? null : cur));
+    }
+  }, []);
+
+  // 已登录(connected)的订阅 provider 自动加载一次模型清单。
+  useEffect(() => {
+    for (const p of providers) {
+      if (p.authMethod === 'oauth_chatgpt' && p.oauthStatus?.status === 'connected' && !modelLists[p.id]) {
+        void loadModels(p.id);
+      }
+    }
+  }, [providers, modelLists, loadModels]);
+
+  // 切换订阅 provider 当前使用的模型。
+  const handleSelectModel = async (id: string, model: string) => {
+    try {
+      await clientApi.llmUpdateProvider({ id, model });
+      await refresh();
+    } catch { /* silent */ }
+  };
 
   const handleProviderTypeChange = (provider: LlmProviderType) => {
     const preset = PRESETS[provider];
@@ -71,7 +120,7 @@ export function LlmSettingsPanel({
   const openEdit = (p: LlmProviderConfigView) => {
     setEditingId(p.id);
     setForm({
-      provider: p.provider, name: p.name, baseUrl: p.baseUrl, model: p.model, apiKey: '',
+      provider: p.provider, authMethod: p.authMethod ?? 'api_key', name: p.name, baseUrl: p.baseUrl, model: p.model, apiKey: '',
       contextWindow: p.contextWindow ? String(p.contextWindow) : '',
       inputPrice: p.inputPrice != null ? String(p.inputPrice) : '',
       outputPrice: p.outputPrice != null ? String(p.outputPrice) : '',
@@ -111,8 +160,9 @@ export function LlmSettingsPanel({
         if (form.apiKey) patch.apiKey = form.apiKey;
         await clientApi.llmUpdateProvider(patch as { id: string });
       } else {
-        await clientApi.llmAddProvider({
+        const draft = {
           provider: form.provider,
+          authMethod: form.authMethod,
           name: form.name || form.provider,
           baseUrl: form.baseUrl,
           model: form.model,
@@ -125,7 +175,15 @@ export function LlmSettingsPanel({
           supportsVision: form.supportsVision,
           supportsReasoning: form.supportsReasoning,
           supportsPromptCaching: form.supportsPromptCaching,
-        } as Record<string, unknown>);
+        } as Record<string, unknown>;
+        // ADR 28: 订阅链路必须"先登录、成功后才落盘"。
+        // 不在这里 llmAddProvider —— 把草稿交给 OAuth,登录成功才由 main 创建 provider,
+        // 失败/取消则什么都不留。
+        if (form.authMethod === 'oauth_chatgpt') {
+          await handleOAuthLogin({ draft });
+          return;
+        }
+        await clientApi.llmAddProvider(draft);
       }
       setShowForm(false);
       setEditingId(null);
@@ -158,6 +216,33 @@ export function LlmSettingsPanel({
     }
   };
 
+  // ADR 28: 拉起 ChatGPT 订阅 OAuth 登录(browser 模式)。token 由 main 进程写入。
+  // 链路契约:"先登录、成功后才落盘"。
+  // - 传 { id }   : 对已存在订阅 provider 重新登录。
+  // - 传 { draft }: 新建订阅,登录成功后才由 main 创建 provider;失败/取消不落盘。
+  const handleOAuthLogin = async (
+    target: { id: string; draft?: undefined } | { id?: undefined; draft: Record<string, unknown> },
+  ) => {
+    // 新建订阅尚无 provider id,用 'new' 作为按钮 busy 哨兵。
+    const busyKey = target.id ?? 'new';
+    setOauthBusyId(busyKey);
+    try {
+      const result = await clientApi.llmOAuthStart(target);
+      if (!result.success) {
+        setTestResults((prev) => ({ ...prev, [busyKey]: { success: false, error: result.error } }));
+        // 登录失败:保持表单打开,让用户可重试或取消。
+        return;
+      }
+      setShowForm(false);
+      setEditingId(null);
+      await refresh();
+    } catch (err: unknown) {
+      setTestResults((prev) => ({ ...prev, [busyKey]: { success: false, error: err instanceof Error ? err.message : 'Login failed' } }));
+    } finally {
+      setOauthBusyId(null);
+    }
+  };
+
   return (
     <div className="llm-settings-panel">
       {onBack ? (
@@ -185,14 +270,44 @@ export function LlmSettingsPanel({
                   {p.inputPrice != null ? `$${p.inputPrice}/${p.outputPrice ?? '?'}` : ''}
                 </span>
               ) : null}
-              <small className="llm-provider-key">
-                {p.apiKeyConfigured ? `Key: ${p.apiKeyMasked}` : (i18n.locale === 'zh-CN' ? '未配置 Key' : 'Key not set')}
-              </small>
+              {p.authMethod === 'oauth_chatgpt' ? (
+                <small className={`llm-provider-key llm-oauth-status-${p.oauthStatus?.status ?? 'disconnected'}`}>
+                  {p.oauthStatus?.status === 'connected'
+                    ? (i18n.locale === 'zh-CN' ? `已登录${p.oauthStatus.accountId ? ` · ${p.oauthStatus.accountId}` : ''}` : `Connected${p.oauthStatus.accountId ? ` · ${p.oauthStatus.accountId}` : ''}`)
+                    : p.oauthStatus?.status === 'expired'
+                      ? (i18n.locale === 'zh-CN' ? '登录已过期,请重新登录' : 'Session expired, please re-login')
+                      : (i18n.locale === 'zh-CN' ? '未登录' : 'Not logged in')}
+                </small>
+              ) : (
+                <small className="llm-provider-key">
+                  {p.apiKeyConfigured ? `Key: ${p.apiKeyMasked}` : (i18n.locale === 'zh-CN' ? '未配置 Key' : 'Key not set')}
+                </small>
+              )}
+              {p.authMethod === 'oauth_chatgpt' && p.oauthStatus?.status === 'connected' ? (
+                <label className="llm-model-select">
+                  <span>{i18n.locale === 'zh-CN' ? '模型' : 'Model'}</span>
+                  <select
+                    value={p.model}
+                    disabled={modelLoadingId === p.id}
+                    onChange={(e) => void handleSelectModel(p.id, e.target.value)}
+                  >
+                    {modelLoadingId === p.id && !modelLists[p.id] ? (
+                      <option value={p.model}>{i18n.locale === 'zh-CN' ? '加载中…' : 'Loading…'}</option>
+                    ) : null}
+                    {(modelLists[p.id] && modelLists[p.id].length > 0
+                      ? modelLists[p.id]
+                      : [{ id: p.model, label: p.model } as LlmModelInfo]
+                    ).map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               {testResults[p.id] ? (
                 <small className={`llm-test-result ${testResults[p.id].success ? 'success' : 'fail'}`}>
                   {testResults[p.id].success
                     ? `✓ ${testResults[p.id].model} (${testResults[p.id].latencyMs}ms)`
-                    : `✗ ${testResults[p.id].error}`}
+                    : `✗ ${friendlyTestError(testResults[p.id].error, i18n.locale)}`}
                 </small>
               ) : null}
             </div>
@@ -200,6 +315,11 @@ export function LlmSettingsPanel({
               {!p.isDefault ? (
                 <button type="button" onClick={() => handleSetDefault(p.id)}>
                   {i18n.locale === 'zh-CN' ? '设为默认' : 'Set Default'}
+                </button>
+              ) : null}
+              {p.authMethod === 'oauth_chatgpt' && p.oauthStatus?.status !== 'connected' ? (
+                <button type="button" className="primary" onClick={() => void handleOAuthLogin({ id: p.id })} disabled={oauthBusyId === p.id}>
+                  {oauthBusyId === p.id ? '...' : (i18n.locale === 'zh-CN' ? '重新登录' : 'Re-login')}
                 </button>
               ) : null}
               <button type="button" onClick={() => handleTest(p.id)} disabled={testingId === p.id}>
@@ -238,21 +358,53 @@ export function LlmSettingsPanel({
             </div>
           </label>
 
-          <label>
-            <span>{i18n.locale === 'zh-CN' ? '显示名称' : 'Display Name'}</span>
-            <input value={form.name} placeholder={form.provider} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
-          </label>
+          {form.provider === 'openai' && !editingId ? (
+            <label>
+              <span>{i18n.locale === 'zh-CN' ? '鉴权方式' : 'Auth Method'}</span>
+              <div className="llm-radio-group">
+                <label>
+                  <input type="radio" checked={form.authMethod === 'api_key'} onChange={() => setForm((prev) => ({ ...prev, authMethod: 'api_key' }))} />
+                  API Key
+                </label>
+                <label>
+                  <input type="radio" checked={form.authMethod === 'oauth_chatgpt'} onChange={() => setForm((prev) => ({ ...prev, authMethod: 'oauth_chatgpt' }))} />
+                  {i18n.locale === 'zh-CN' ? 'ChatGPT 订阅登录' : 'ChatGPT Subscription'}
+                </label>
+              </div>
+            </label>
+          ) : null}
 
-          <label>
-            <span>Base URL</span>
-            <input value={form.baseUrl} onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))} />
-          </label>
+          {/* ADR 28: 订阅(OAuth)模式下显示名称/baseUrl/模型/定价均由系统确定,表单折叠为"仅登录"。 */}
+          {form.authMethod === 'oauth_chatgpt' ? (
+            <label>
+              <span>{i18n.locale === 'zh-CN' ? '登录' : 'Login'}</span>
+              <p className="llm-oauth-hint">
+                {i18n.locale === 'zh-CN'
+                  ? '点击登录将打开浏览器完成 ChatGPT 订阅账号登录;登录成功后才会保存,登录失败或取消不会保存任何配置。登录后自动拉取可用模型(默认使用最新模型)。'
+                  : 'Clicking login opens your browser to sign in with your ChatGPT subscription. The provider is saved only after a successful login — nothing is saved if login fails or is cancelled. Available models are fetched after login (latest selected by default).'}
+              </p>
+            </label>
+          ) : (
+            <>
+              <label>
+                <span>{i18n.locale === 'zh-CN' ? '显示名称' : 'Display Name'}</span>
+                <input value={form.name} placeholder={form.provider} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+              </label>
 
-          <label>
-            <span>API Key</span>
-            <input type="password" value={form.apiKey} placeholder={editingId ? (i18n.locale === 'zh-CN' ? '留空则不修改' : 'Leave empty to keep') : ''} onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))} />
-          </label>
+              <label>
+                <span>Base URL</span>
+                <input value={form.baseUrl} onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))} />
+              </label>
 
+              <label>
+                <span>API Key</span>
+                <input type="password" value={form.apiKey} placeholder={editingId ? (i18n.locale === 'zh-CN' ? '留空则不修改' : 'Leave empty to keep') : ''} onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))} />
+              </label>
+            </>
+          )}
+
+          {form.authMethod !== 'oauth_chatgpt' ? (
+          <>
           <label>
             <span>{i18n.locale === 'zh-CN' ? '模型名称' : 'Model'}</span>
             <input value={form.model} onChange={(e) => setForm((prev) => ({ ...prev, model: e.target.value }))} />
@@ -313,13 +465,15 @@ export function LlmSettingsPanel({
             />
             <span>{i18n.locale === 'zh-CN' ? '启用 Prompt 缓存（仅当网关真正复用缓存时开启，否则纯增成本）' : 'Enable prompt caching (only if the gateway actually reuses cache; otherwise pure cost)'}</span>
           </label>
+          </>
+          ) : null}
 
           <div className="llm-form-actions">
             <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }}>
               {i18n.locale === 'zh-CN' ? '取消' : 'Cancel'}
             </button>
-            <button type="button" className="primary" onClick={handleSave} disabled={saving || (!form.apiKey && !editingId)}>
-              {saving ? '...' : (i18n.locale === 'zh-CN' ? '保存' : 'Save')}
+            <button type="button" className="primary" onClick={handleSave} disabled={saving || Boolean(oauthBusyId) || (form.authMethod !== 'oauth_chatgpt' && !form.apiKey && !editingId)}>
+              {saving || oauthBusyId ? '...' : (form.authMethod === 'oauth_chatgpt' && !editingId ? (i18n.locale === 'zh-CN' ? '登录 ChatGPT' : 'Login with ChatGPT') : (i18n.locale === 'zh-CN' ? '保存' : 'Save'))}
             </button>
           </div>
         </div>

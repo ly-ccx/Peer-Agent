@@ -103,9 +103,25 @@ export interface WorkspaceProject {
 
 export type LlmProviderType = 'openai' | 'anthropic';
 
+// 鉴权方式与协议族(provider)正交(ADR 28)。
+// - api_key: 用户手填 API Key,经 safeStorage 加密存储。
+// - oauth_chatgpt: ChatGPT 订阅账号 OAuth 登录,access/refresh token 存 main 进程,
+//   订阅模型走 OpenAI Responses 传输。
+export type LlmAuthMethod = 'api_key' | 'oauth_chatgpt';
+
+// 订阅(OAuth)登录态投影。token 永不回传 renderer,仅以状态 + 账号标识表达。
+export type LlmOAuthConnectionStatus = 'connected' | 'expired' | 'disconnected';
+
+export interface LlmOAuthStatus {
+  readonly status: LlmOAuthConnectionStatus;
+  readonly accountId?: string;
+  readonly expiresAt?: string;
+}
+
 export interface LlmProviderConfig {
   readonly id: string;
   readonly provider: LlmProviderType;
+  readonly authMethod: LlmAuthMethod;
   readonly name: string;
   readonly baseUrl: string;
   readonly model: string;
@@ -125,6 +141,24 @@ export interface LlmProviderConfig {
 export interface LlmProviderConfigView extends LlmProviderConfig {
   readonly apiKeyMasked: string;
   readonly apiKeyConfigured: boolean;
+  // 仅当 authMethod === 'oauth_chatgpt' 时存在,表达订阅登录态。
+  readonly oauthStatus?: LlmOAuthStatus;
+}
+
+// ADR 28: 订阅(OAuth)登录后从远程拉取的可用模型项。
+export interface LlmModelInfo {
+  readonly id: string;
+  readonly label: string;
+  // 模型创建时间戳(秒),用于"最新"排序;远程未提供时缺省。
+  readonly created?: number;
+}
+
+// 列模型结果。source 标明数据来自远程还是内置兜底清单。
+export interface LlmModelListResult {
+  readonly success: boolean;
+  readonly models: readonly LlmModelInfo[];
+  readonly source?: 'remote' | 'fallback';
+  readonly error?: string;
 }
 
 export interface LlmProviderTestResult {

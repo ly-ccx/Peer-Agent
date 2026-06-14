@@ -18,6 +18,8 @@ import { createSettingsStore } from './settings-store.mjs';
 import { createMcpRegistry } from './mcp-registry.mjs';
 import { listMcpTools, disconnectMcp } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
+import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
+import { listSubscriptionModels } from './provider-adapters/openai-model-catalog.mjs';
 import { createHostRestarter } from './host-restart.mjs';
 import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
 import { createLlmChatService } from './llm-chat-service.mjs';
@@ -634,6 +636,72 @@ ipcMain.handle('llm:set-default', (_, { id }) => {
   return providers;
 });
 ipcMain.handle('llm:test', (_, { id }) => llmConfigStore.testConnection(id));
+
+// ── ChatGPT 订阅 OAuth(ADR 28) ──
+// 同一时刻只允许一个进行中的 browser 登录会话,便于取消。
+let activeOAuthLogin = null;
+
+ipcMain.handle('llm:oauth:start', async (_event, params) => {
+  // ADR 28: 订阅登录链路必须"先登录、成功后才落盘"。
+  // - { id }   : 对已存在的订阅 provider 重新登录(刷新 token)。
+  // - { draft }: 新建订阅。draft 是表单草稿,登录成功后才创建 provider;
+  //              登录失败/取消则什么都不写入,绝不留下没有 token 的死配置。
+  const id = params?.id ?? null;
+  const draft = params?.draft ?? null;
+  if (!id && !draft) throw new Error('provider id or draft required');
+  if (activeOAuthLogin) {
+    try { activeOAuthLogin.cancel(); } catch {}
+    activeOAuthLogin = null;
+  }
+  const session = startBrowserLogin();
+  activeOAuthLogin = session;
+  let createdId = null;
+  try {
+    // 先完成浏览器授权,拿到 token 之后再决定是否落盘。
+    const tokens = await session.promise;
+    // 新建订阅:授权成功后才原子创建 provider。
+    const targetId = id
+      ?? (createdId = llmConfigStore.addProvider({ ...draft, authMethod: 'oauth_chatgpt' }).id);
+    llmConfigStore.setOAuthTokens(targetId, tokens);
+    const provider = llmConfigStore.listProviders().find((p) => p.id === targetId) ?? null;
+    if (provider) recordProviderBaseline('oauth_login', provider);
+    return { success: true, provider };
+  } catch (err) {
+    // 若已创建了草稿 provider 但 token 写入失败,回滚以保持"失败不留痕"。
+    if (createdId) {
+      try { llmConfigStore.removeProvider(createdId); } catch {}
+    }
+    return { success: false, error: err?.message || 'oauth_login_failed' };
+  } finally {
+    if (activeOAuthLogin === session) activeOAuthLogin = null;
+  }
+});
+
+ipcMain.handle('llm:oauth:cancel', () => {
+  if (activeOAuthLogin) {
+    try { activeOAuthLogin.cancel(); } catch {}
+    activeOAuthLogin = null;
+  }
+  return { success: true };
+});
+
+// 登录后远程拉取可用模型(失败回退内置清单)。临近过期则刷新并回写 token。
+ipcMain.handle('llm:models:list', async (_event, { id }) => {
+  if (!id) throw new Error('provider id required');
+  const credential = llmConfigStore.getCredential(id);
+  const tokens = credential?.tokens || null;
+  if (!tokens?.access) {
+    return { success: false, models: [], error: 'oauth_not_logged_in' };
+  }
+  try {
+    const { tokens: fresh, refreshed } = await ensureFreshTokens(tokens);
+    if (refreshed) llmConfigStore.setOAuthTokens(id, fresh);
+    const { models, source, error } = await listSubscriptionModels(fresh);
+    return { success: true, models, source, error };
+  } catch (err) {
+    return { success: false, models: [], error: err?.message || 'models_list_failed' };
+  }
+});
 
 // ── Host restart (self-iteration M3, see docs/architecture/21-...) ──
 // 由实验体(lab)程序化重启本体(host)。施动者在本体进程树之外，故 lab 调用安全。
