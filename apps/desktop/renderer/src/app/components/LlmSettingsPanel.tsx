@@ -2,6 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LlmAuthMethod, LlmModelInfo, LlmProviderConfigView, LlmProviderTestResult, LlmProviderType } from '@peer-agent/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { Dropdown } from './Dropdown';
 
 interface FormState {
   provider: LlmProviderType;
@@ -284,24 +285,24 @@ export function LlmSettingsPanel({
                 </small>
               )}
               {p.authMethod === 'oauth_chatgpt' && p.oauthStatus?.status === 'connected' ? (
-                <label className="llm-model-select">
+                <div className="llm-model-select">
                   <span>{i18n.locale === 'zh-CN' ? '模型' : 'Model'}</span>
-                  <select
+                  <Dropdown
                     value={p.model}
-                    disabled={modelLoadingId === p.id}
-                    onChange={(e) => void handleSelectModel(p.id, e.target.value)}
-                  >
-                    {modelLoadingId === p.id && !modelLists[p.id] ? (
-                      <option value={p.model}>{i18n.locale === 'zh-CN' ? '加载中…' : 'Loading…'}</option>
-                    ) : null}
-                    {(modelLists[p.id] && modelLists[p.id].length > 0
+                    disabled={modelLoadingId === p.id && !modelLists[p.id]}
+                    ariaLabel={i18n.locale === 'zh-CN' ? '选择模型' : 'Select model'}
+                    placeholder={
+                      modelLoadingId === p.id && !modelLists[p.id]
+                        ? (i18n.locale === 'zh-CN' ? '加载中…' : 'Loading…')
+                        : p.model
+                    }
+                    options={(modelLists[p.id] && modelLists[p.id].length > 0
                       ? modelLists[p.id]
                       : [{ id: p.model, label: p.model } as LlmModelInfo]
-                    ).map((m) => (
-                      <option key={m.id} value={m.id}>{m.label}</option>
-                    ))}
-                  </select>
-                </label>
+                    ).map((m) => ({ value: m.id, label: m.label }))}
+                    onChange={(value) => void handleSelectModel(p.id, value)}
+                  />
+                </div>
               ) : null}
               {testResults[p.id] ? (
                 <small className={`llm-test-result ${testResults[p.id].success ? 'success' : 'fail'}`}>
