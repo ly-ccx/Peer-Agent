@@ -477,7 +477,9 @@ ipcMain.handle('chat:stream:reattach', (_event, { streamId, conversationId } = {
 // 全局活跃流查询:renderer 挂载时拉取当前正在运行的会话列表,补齐"未点进去"的会话状态。
 // 之后的变更由 main 主动广播 chat:stream:active-changed 推送。
 ipcMain.handle('chat:stream:list-active', () => ({
+  // ADR 27: 保留 conversationIds(既有消费者),附带带工作区维度的 streams。
   conversationIds: llmChatService.listActiveConversationIds(),
+  streams: llmChatService.listActiveStreams(),
 }));
 
 ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {

@@ -1112,4 +1112,60 @@ describe('llm chat service tool materialization', () => {
       globalThis.fetch = previousFetch;
     }
   });
+
+  it('ADR 27: active stream projection carries the workspace it was started in', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    // 捕获每次 active-changed 广播时的 streams 快照(含工作区维度)。
+    const streamSnapshots = [];
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'hi' } }] },
+      '[DONE]',
+    ]), { status: 200 });
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        broadcast: (channel, payload) => {
+          if (channel === 'chat:stream:active-changed') {
+            streamSnapshots.push(payload.streams.map((s) => ({ ...s })));
+          }
+        },
+      });
+
+      // 发起前投影为空。
+      assert.deepEqual(service.listActiveStreams(), []);
+
+      // 流在发起时快照工作区:先设置当前工作区再发起。
+      service.setWorkspacePath('/ws/alpha');
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        webContents: { send: () => {} },
+      });
+
+      // 创建时的首个广播应携带 c1 + 其发起工作区 /ws/alpha。
+      const firstWithStream = streamSnapshots.find((snap) => snap.length > 0);
+      assert.ok(firstWithStream, 'expected at least one broadcast with an active stream');
+      assert.deepEqual(firstWithStream[0], {
+        conversationId: 'c1',
+        workspacePath: '/ws/alpha',
+      });
+      // 终态后投影清空。
+      assert.deepEqual(service.listActiveStreams(), []);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
 });

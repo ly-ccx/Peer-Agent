@@ -65,6 +65,18 @@ export interface LifetimeUsage {
   readonly cacheReadTokens: number;
 }
 
+/**
+ * ADR 27: 活跃流投影(带工作区维度)。
+ * - conversationId:正在运行的会话 id。
+ * - workspacePath:该流发起时所属的工作区(发起时快照,切换工作区不改变);
+ *   无工作区上下文时为 null。
+ * 让 renderer 能派生"哪些工作区有运行中的流",使跨工作区运行可见而非静默丢失。
+ */
+export interface ActiveStreamProjection {
+  readonly conversationId: string;
+  readonly workspacePath: string | null;
+}
+
 export interface BootstrapPreloadApi {
   readonly getBootstrap: () => Promise<ClientBootstrap>;
   readonly getClientSession: () => Promise<ClientSessionState>;
@@ -127,7 +139,11 @@ export interface BootstrapPreloadApi {
   readonly chatAbort: (params: { streamId: string }) => Promise<void>;
   readonly chatStreamReattach: (params?: { conversationId?: string }) => Promise<StreamReattachResult>;
   // 全局活跃流查询:挂载时拉取当前正在运行的会话 id 列表(不依赖切入某个会话)。
-  readonly chatStreamListActive: () => Promise<{ conversationIds: readonly string[] }>;
+  readonly chatStreamListActive: () => Promise<{
+    conversationIds: readonly string[];
+    // ADR 27: 带工作区维度的活跃流投影(与 conversationIds 并列,后者保留兼容)。
+    streams: readonly ActiveStreamProjection[];
+  }>;
   readonly restartHost: (options?: { hostDir?: string; port?: number; pendingTask?: PendingTask }) => Promise<unknown>;
   readonly writePendingTask: (task: PendingTask) => Promise<unknown>;
   readonly consumePendingTask: () => Promise<PendingTask | null>;
@@ -167,7 +183,11 @@ export interface BootstrapPreloadApi {
   }) => void) => () => void;
   readonly onChatCompaction: (listener: (payload: { streamId: string; stage?: 'start' | 'done' | 'idle'; method?: string; beforeTokens?: number; afterTokens?: number; oldMessageCount?: number; keptMessageCount?: number }) => void) => () => void;
   // 全局活跃流变更广播:main 在任一会话开始/结束流式时推送最新运行中的会话 id 列表。
-  readonly onChatActiveStreamsChanged: (listener: (payload: { conversationIds: readonly string[] }) => void) => () => void;
+  readonly onChatActiveStreamsChanged: (listener: (payload: {
+    conversationIds: readonly string[];
+    // ADR 27: 带工作区维度的活跃流投影(与 conversationIds 并列,后者保留兼容)。
+    streams: readonly ActiveStreamProjection[];
+  }) => void) => () => void;
   readonly llmListProviders: () => Promise<readonly LlmProviderConfigView[]>;
   readonly llmAddProvider: (config: Record<string, unknown>) => Promise<LlmProviderConfigView>;
   readonly llmUpdateProvider: (params: { id: string; [key: string]: unknown }) => Promise<LlmProviderConfigView>;

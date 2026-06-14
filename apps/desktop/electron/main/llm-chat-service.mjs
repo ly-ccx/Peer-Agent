@@ -142,11 +142,31 @@ export function createLlmChatService({
     return [...ids];
   }
 
+  // ADR 27: 活跃流投影携带工作区维度。按 conversationId 去重(同一会话可能有多条流,
+  // 取首条记录的工作区即可),供 renderer 派生"哪些工作区有运行中的流"。
+  function listActiveStreams() {
+    const byConversation = new Map();
+    for (const record of activeStreams.values()) {
+      if (!record.conversationId) continue;
+      if (!byConversation.has(record.conversationId)) {
+        byConversation.set(record.conversationId, {
+          conversationId: record.conversationId,
+          workspacePath: record.workspacePath ?? null,
+        });
+      }
+    }
+    return [...byConversation.values()];
+  }
+
   // activeStreams 发生增删后广播一次,让所有窗口的左侧列表同步运行状态。
+  // ADR 27: 在保留 conversationIds(既有消费者不破坏)的同时附带 streams(带工作区)。
   function emitActiveStreamsChanged() {
     if (typeof broadcast !== 'function') return;
     try {
-      broadcast('chat:stream:active-changed', { conversationIds: listActiveConversationIds() });
+      broadcast('chat:stream:active-changed', {
+        conversationIds: listActiveConversationIds(),
+        streams: listActiveStreams(),
+      });
     } catch {}
   }
 
@@ -186,6 +206,10 @@ export function createLlmChatService({
       webContents,
       permissionIds: new Set(),
       conversationId,
+      // ADR 27: 快照发起时的工作区。流的工作区归属在发起时固定(与 sendMessage
+      // 入口快照 activeWorkspacePath 的语义一致),后续切换工作区不改变已在跑的流。
+      // 供活跃流投影携带工作区维度,让"任务在其它工作区仍在跑"成为可见事实。
+      workspacePath: activeWorkspacePath,
       // ADR 22: 累积进行中的流式正文/思考,供 HMR 重载后 reattach 取快照续接。
       accumulatedText: '',
       accumulatedThinking: '',
@@ -365,5 +389,6 @@ export function createLlmChatService({
     resolvePermissionGrant,
     reattach,
     listActiveConversationIds,
+    listActiveStreams,
   };
 }
