@@ -485,11 +485,12 @@ describe('llm chat service tool materialization', () => {
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
   });
 
-  it('falls back and disables Anthropic native reasoning when high effort returns an empty response', async () => {
+  it('falls back to plain mode for the turn but does NOT persist supportsReasoning=false on an empty response', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;
     const events = [];
     const capturedBodies = [];
+    const updateProviderCalls = [];
     const providerState = {
       id: 'p1',
       provider: 'anthropic',
@@ -522,7 +523,10 @@ describe('llm chat service tool materialization', () => {
         llmConfigStore: {
           listProviders: () => [providerState],
           getDecryptedApiKey: () => 'test-key',
-          updateProvider: (_id, patch) => Object.assign(providerState, patch),
+          updateProvider: (id, patch) => {
+            updateProviderCalls.push({ id, patch });
+            Object.assign(providerState, patch);
+          },
         },
       });
 
@@ -541,8 +545,15 @@ describe('llm chat service tool materialization', () => {
 
     assert.equal(capturedBodies.length, 2);
     assert.equal(capturedBodies[0].thinking.type, 'enabled');
+    // 第二轮在 loop 内当轮降级:本轮请求不带 thinking。
     assert.equal(capturedBodies[1].thinking, undefined);
-    assert.equal(providerState.supportsReasoning, false);
+    // 关键回归:偶发空响应不得把 supportsReasoning 持久化为 false。
+    assert.equal(
+      updateProviderCalls.some((call) => call.patch && 'supportsReasoning' in call.patch),
+      false,
+      'empty_response fallback must not persist supportsReasoning=false',
+    );
+    assert.equal(providerState.supportsReasoning, true);
     assert.equal(events.find((event) => event.channel === 'chat:stream:delta')?.payload.content, 'ok');
     assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);

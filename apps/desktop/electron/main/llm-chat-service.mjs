@@ -15,6 +15,7 @@ import { sanitizeApiMessages } from './chat-runtime/message-sanitizer.mjs';
 import { createChatPermissionGate } from './chat-runtime/permission-gate.mjs';
 import { hasDanglingToolIntent, hasUnsupportedToolClaim } from './chat-runtime/response-guard.mjs';
 import { createToolContext } from './chat-runtime/tool-orchestrator.mjs';
+import { ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
 
 const activeStreams = new Map();
 const permissionGate = createChatPermissionGate({ activeStreams });
@@ -59,16 +60,22 @@ function recordConversationUsage({ conversationStore, streamRecord, usage }) {
   }
 }
 
-function disableProviderReasoningCapability(llmConfigStore, provider, details = {}) {
-  if (!provider?.id || !provider.supportsReasoning || typeof llmConfigStore?.updateProvider !== 'function') return;
-  try {
-    llmConfigStore.updateProvider(provider.id, { supportsReasoning: false });
-    console.warn(
-      `[llm-chat] disabled native reasoning for provider ${provider.id}: ${details.reason || 'unsupported'}`
-    );
-  } catch (error) {
-    console.warn('[llm-chat] failed to disable provider native reasoning:', error?.message || error);
-  }
+/**
+ * 原生 reasoning 当轮自愈降级的观测点（不持久化）。
+ *
+ * agent loop 在某一轮拿到“空响应”(textContent 与 thinkingContent 均为空) 时,
+ * 已在 loop 内将 effectiveSupportsReasoning 置 false 并重试当轮——这是合理的会话内自愈。
+ *
+ * 这里**刻意不再写回 provider 配置**:偶发空响应(限流/网络抖动/深度模式边界/上下文极满)
+ * 不能等同于“该 provider 不支持 reasoning”。曾经在此调用 updateProvider({supportsReasoning:false})
+ * 会把一次偶发事件固化成持久能力位,导致用户没动设置、深度档却被悄悄永久关闭。
+ * 详见 docs/architecture 中关于 provider 能力位与会话内降级的边界说明。
+ */
+function noteNativeReasoningFallback(provider, details = {}) {
+  if (!provider?.id) return;
+  console.warn(
+    `[llm-chat] native reasoning fell back to plain mode for this turn (provider ${provider.id}): ${details.reason || 'unsupported'}; capability flag left unchanged`
+  );
 }
 
 /**
@@ -194,10 +201,32 @@ export function createLlmChatService({
       return;
     }
 
-    const apiKey = llmConfigStore.getDecryptedApiKey(provider.id);
-    if (!apiKey) {
-      webContents.send('chat:stream:error', { streamId, error: 'api_key_not_found' });
-      return;
+    // 凭据解析:api_key 直接取密钥;oauth_chatgpt 取 token,临近过期则刷新并回写。
+    let apiKey = null;
+    let accountId = null;
+    const authMethod = provider.authMethod || 'api_key';
+    if (authMethod === 'oauth_chatgpt') {
+      const credential = llmConfigStore.getCredential(provider.id);
+      const tokens = credential?.tokens || null;
+      if (!tokens?.access) {
+        webContents.send('chat:stream:error', { streamId, error: 'oauth_not_logged_in' });
+        return;
+      }
+      try {
+        const { tokens: fresh, refreshed } = await ensureFreshTokens(tokens);
+        if (refreshed) llmConfigStore.setOAuthTokens(provider.id, fresh);
+        apiKey = fresh.access;
+        accountId = fresh.accountId || null;
+      } catch (err) {
+        webContents.send('chat:stream:error', { streamId, error: 'oauth_token_refresh_failed' });
+        return;
+      }
+    } else {
+      apiKey = llmConfigStore.getDecryptedApiKey(provider.id);
+      if (!apiKey) {
+        webContents.send('chat:stream:error', { streamId, error: 'api_key_not_found' });
+        return;
+      }
     }
 
     const controller = new AbortController();
@@ -249,7 +278,7 @@ export function createLlmChatService({
     const toolContext = getConversationToolContext({ conversationId, workspacePath: activeWorkspacePath });
 
     const contextWindow = provider.contextWindow || 0;
-    const onNativeReasoningFallback = (details) => disableProviderReasoningCapability(llmConfigStore, provider, details);
+    const onNativeReasoningFallback = (details) => noteNativeReasoningFallback(provider, details);
 
     try {
       if (provider.provider === 'anthropic') {
@@ -296,6 +325,8 @@ export function createLlmChatService({
           workspacePath: activeWorkspacePath,
           permissionGate,
           onNativeReasoningFallback,
+          authMethod,
+          accountId,
         });
       }
     } catch (err) {
