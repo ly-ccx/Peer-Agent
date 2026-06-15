@@ -890,6 +890,10 @@ export function ChatSurface({
 
     const offToolCall = clientApi.onChatStreamToolCall(({ streamId, tool, args }) => {
       if (streamId !== streamIdRef.current) return;
+      // Tool-call events can arrive while the typewriter still holds earlier text
+      // deltas. Flush first so pre-call text is committed above the structured
+      // tool-call segment instead of being appended below it later.
+      typewriter.flush();
       // 参数已落地为正式 tool-call 段,过程提示让位给结构化段。
       setToolProgress(null);
       setMessages((prev) => {
