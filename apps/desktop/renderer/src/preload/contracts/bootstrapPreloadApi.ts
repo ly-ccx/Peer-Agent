@@ -184,6 +184,23 @@ export interface BootstrapPreloadApi {
     usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number };
     lifetimeUsage?: LifetimeUsage;
   }) => void) => () => void;
+  readonly onChatStreamProviderRecovery: (listener: (payload: {
+    streamId: string;
+    fromProviderId?: string;
+    fromProvider?: string;
+    toProviderId?: string;
+    toProvider?: string;
+    reason?: string;
+    attempt?: number;
+  }) => void) => () => void;
+  readonly onChatStreamConnectionRecovery: (listener: (payload: {
+    streamId: string;
+    provider?: string;
+    model?: string;
+    fromConnection?: string;
+    toConnection?: string;
+    reason?: string;
+  }) => void) => () => void;
   readonly onChatCompaction: (listener: (payload: { streamId: string; stage?: 'start' | 'done' | 'idle'; method?: string; beforeTokens?: number; afterTokens?: number; oldMessageCount?: number; keptMessageCount?: number }) => void) => () => void;
   // 全局活跃流变更广播:main 在任一会话开始/结束流式时推送最新运行中的会话 id 列表。
   readonly onChatActiveStreamsChanged: (listener: (payload: {

@@ -12,6 +12,7 @@
 
 import { encodeOpenAIResponsesRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
+import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
 
 function consumeResponsesEvent(parsed, state, webContents, streamId) {
@@ -182,11 +183,16 @@ export async function sendOpenAIResponsesStream({
   };
   if (accountId) headers['chatgpt-account-id'] = accountId;
 
-  const res = await fetch(url, {
+  const res = await fetchWithConnectionRecovery(url, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
     signal,
+  }, {
+    webContents,
+    streamId,
+    provider: 'openai-responses',
+    model,
   });
   trace.recordResponse(res);
 

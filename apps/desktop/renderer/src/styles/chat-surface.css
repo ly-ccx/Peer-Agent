@@ -743,6 +743,32 @@
   font-variant-numeric: tabular-nums;
 }
 
+.provider-recovery-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 740px;
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--space-2) 0;
+  color: var(--graphite-soft);
+  font-size: 0.78rem;
+  animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
+}
+.provider-recovery-body {
+  flex: 1;
+  line-height: 1.4;
+  font-family: var(--font-mono);
+}
+.provider-recovery-meta {
+  max-width: 42%;
+  color: var(--graphite-mute);
+  font-size: 0.68rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Compaction Summary Card (historical, from JSONL) ── */
 .compaction-summary-card {
   border: 1px solid var(--chrome-sunken);

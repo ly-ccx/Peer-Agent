@@ -602,6 +602,11 @@ export function ChatSurface({
   const [tokenUsage, setTokenUsage] = useState<TokenUsageState | null>(null);
   const [activeUsage, setActiveUsage] = useState<TokenUsageState | null>(null);
   const [compactionNotice, setCompactionNotice] = useState<{ method: string; beforeTokens: number; afterTokens: number; oldMessageCount: number; keptMessageCount: number } | null>(null);
+  const [providerRecoveryNotice, setProviderRecoveryNotice] = useState<{
+    fromProvider?: string;
+    toProvider?: string;
+    reason?: string;
+  } | null>(null);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -698,6 +703,7 @@ export function ChatSurface({
     setAttachments([]);
     setAttachmentError(null);
     setPendingPermissionCalls([]);
+    setProviderRecoveryNotice(null);
     // 切换会话时,先把流式表达状态按会话归零,避免上一会话的 isStreaming/streamId 残留:
     // 否则从"正在输出的 A"切到"未运行的 B",B 会误显示运行中(左侧列表 Loading、
     // 右下角停止按钮误亮),且旧会话的 delta 仍匹配旧 streamIdRef 污染新会话消息。
@@ -924,6 +930,16 @@ export function ChatSurface({
       streamIdRef.current = null;
     });
 
+    const offProviderRecovery = clientApi.onChatStreamProviderRecovery(({
+      streamId,
+      fromProvider,
+      toProvider,
+      reason,
+    }) => {
+      if (streamId !== streamIdRef.current) return;
+      setProviderRecoveryNotice({ fromProvider, toProvider, reason });
+    });
+
     const offCompaction = clientApi.onChatCompaction(({ streamId, stage, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount }) => {
       if (streamId !== streamIdRef.current) return;
       if (stage === 'start') {
@@ -949,7 +965,7 @@ export function ChatSurface({
       setTimeout(() => setCompactionNotice(null), 10000);
     });
 
-    return () => { offDelta(); offThinking(); offDone(); offUsage(); offAborted(); offToolProgress(); offToolCall(); offToolResult(); offPermissionRequest(); offError(); offCompaction(); };
+    return () => { offDelta(); offThinking(); offDone(); offUsage(); offAborted(); offToolProgress(); offToolCall(); offToolResult(); offPermissionRequest(); offError(); offProviderRecovery(); offCompaction(); };
   }, [appendStreamThinking, conversationId, onConversationUpdated]);
 
   useEffect(() => {
@@ -1068,6 +1084,7 @@ export function ChatSurface({
     if ((!text && sentAttachments.length === 0) || isStreaming || !hasProvider || !conversationId) return;
     setStreamError(null);
     setActiveUsage(null);
+    setProviderRecoveryNotice(null);
     const turnEffort = submitEffort ?? effort;
 
     // /compact: run compaction in-place without an agent turn
@@ -1158,6 +1175,7 @@ export function ChatSurface({
     setMessages([...contextMessages, newAssistant]);
     setStreamError(null);
     setActiveUsage(null);
+    setProviderRecoveryNotice(null);
 
     await clientApi.conversationsUpdateLastMessage({ id: conversationId, content: '' });
 
@@ -1274,6 +1292,20 @@ export function ChatSurface({
             <div className="tool-progress-body">
               {toolProgressLabel(toolProgress, isZh)}
             </div>
+          </div>
+        ) : null}
+        {providerRecoveryNotice ? (
+          <div className="provider-recovery-notice">
+            <div className="provider-recovery-body">
+              {isZh
+                ? `主模型连接失败，已切换到 ${providerRecoveryNotice.toProvider || '备用模型'}`
+                : `Primary provider failed; switched to ${providerRecoveryNotice.toProvider || 'fallback provider'}`}
+            </div>
+            {providerRecoveryNotice.reason ? (
+              <span className="provider-recovery-meta">
+                {providerRecoveryNotice.fromProvider ? `${providerRecoveryNotice.fromProvider}: ` : ''}{providerRecoveryNotice.reason}
+              </span>
+            ) : null}
           </div>
         ) : null}
         {isCompacting || compactionNotice ? (

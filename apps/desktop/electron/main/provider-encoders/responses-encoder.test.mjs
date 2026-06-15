@@ -15,6 +15,7 @@ describe('OpenAI Responses request encoder (ADR 28)', () => {
     assert.equal(body.model, 'gpt-5');
     assert.equal(body.instructions, 'be concise');
     assert.equal(body.stream, true);
+    assert.equal(body.store, false);
     assert.equal(body.input.length, 1);
     assert.equal(body.input[0].role, 'user');
     assert.deepEqual(body.input[0].content, [{ type: 'input_text', text: 'hello' }]);

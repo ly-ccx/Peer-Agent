@@ -114,6 +114,7 @@ export function encodeOpenAIResponsesRequest({
     instructions: instructions || undefined,
     input,
     stream: true,
+    store: false,
     tools: toResponsesTools(tools),
   };
 

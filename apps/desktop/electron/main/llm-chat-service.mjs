@@ -13,6 +13,12 @@ import { agentLoopAnthropic } from './chat-runtime/anthropic-agent-loop.mjs';
 import { agentLoopOpenAI } from './chat-runtime/openai-agent-loop.mjs';
 import { sanitizeApiMessages } from './chat-runtime/message-sanitizer.mjs';
 import { createChatPermissionGate } from './chat-runtime/permission-gate.mjs';
+import {
+  createProviderAttemptStream,
+  describeFetchFailure,
+  describeProviderTarget,
+  orderProviderCandidates,
+} from './chat-runtime/provider-recovery-broker.mjs';
 import { hasDanglingToolIntent, hasUnsupportedToolClaim } from './chat-runtime/response-guard.mjs';
 import { createToolContext } from './chat-runtime/tool-orchestrator.mjs';
 import { ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
@@ -177,9 +183,40 @@ export function createLlmChatService({
     } catch {}
   }
 
-  function getDefaultProvider() {
+  function getProviderCandidates() {
     const providers = llmConfigStore.listProviders();
-    return providers.find((p) => p.isDefault && p.apiKeyConfigured) || providers.find((p) => p.apiKeyConfigured) || null;
+    return orderProviderCandidates(providers);
+  }
+
+  async function resolveProviderCredential(provider, webContents, streamId) {
+    const authMethod = provider.authMethod || 'api_key';
+    if (authMethod === 'oauth_chatgpt') {
+      const credential = llmConfigStore.getCredential(provider.id);
+      const tokens = credential?.tokens || null;
+      if (!tokens?.access) {
+        webContents.send('chat:stream:error', { streamId, error: 'oauth_not_logged_in' });
+        return null;
+      }
+      try {
+        const { tokens: fresh, refreshed } = await ensureFreshTokens(tokens);
+        if (refreshed) llmConfigStore.setOAuthTokens(provider.id, fresh);
+        return {
+          authMethod,
+          apiKey: fresh.access,
+          accountId: fresh.accountId || null,
+        };
+      } catch {
+        webContents.send('chat:stream:error', { streamId, error: 'oauth_token_refresh_failed' });
+        return null;
+      }
+    }
+
+    const apiKey = llmConfigStore.getDecryptedApiKey(provider.id);
+    if (!apiKey) {
+      webContents.send('chat:stream:error', { streamId, error: 'api_key_not_found' });
+      return null;
+    }
+    return { authMethod, apiKey, accountId: null };
   }
 
   async function sendMessage({
@@ -195,38 +232,10 @@ export function createLlmChatService({
     configInstructions = [],
     contextExtensions = [],
   }) {
-    const provider = getDefaultProvider();
-    if (!provider) {
+    const providerCandidates = getProviderCandidates();
+    if (!providerCandidates.length) {
       webContents.send('chat:stream:error', { streamId, error: 'no_provider_configured' });
       return;
-    }
-
-    // 凭据解析:api_key 直接取密钥;oauth_chatgpt 取 token,临近过期则刷新并回写。
-    let apiKey = null;
-    let accountId = null;
-    const authMethod = provider.authMethod || 'api_key';
-    if (authMethod === 'oauth_chatgpt') {
-      const credential = llmConfigStore.getCredential(provider.id);
-      const tokens = credential?.tokens || null;
-      if (!tokens?.access) {
-        webContents.send('chat:stream:error', { streamId, error: 'oauth_not_logged_in' });
-        return;
-      }
-      try {
-        const { tokens: fresh, refreshed } = await ensureFreshTokens(tokens);
-        if (refreshed) llmConfigStore.setOAuthTokens(provider.id, fresh);
-        apiKey = fresh.access;
-        accountId = fresh.accountId || null;
-      } catch (err) {
-        webContents.send('chat:stream:error', { streamId, error: 'oauth_token_refresh_failed' });
-        return;
-      }
-    } else {
-      apiKey = llmConfigStore.getDecryptedApiKey(provider.id);
-      if (!apiKey) {
-        webContents.send('chat:stream:error', { streamId, error: 'api_key_not_found' });
-        return;
-      }
     }
 
     const controller = new AbortController();
@@ -251,83 +260,127 @@ export function createLlmChatService({
     // 累积代理:拦截 delta/thinking 追加到记录,其余事件透传给真实 webContents。
     const accumulatingWebContents = wrapWebContentsForRuntimeEvents(webContents, streamRecord, { conversationStore });
 
-    const systemContext = buildSystemContext(activeWorkspacePath, {
-      contextAttachments,
-      runtimeReminders,
-      attachmentContext,
-      configInstructions,
-      contextExtensions,
-      continuityContext,
-      conversationId,
-      effort,
-      mode: 'chat',
-      provider: provider.provider,
-      model: provider.model,
-    });
-    const systemPrompt = renderSystemContext(systemContext);
-    recordPromptSnapshot(promptSnapshotStore, systemContext, {
-      streamId,
-      conversationId,
-      contextEpochId: getActiveContextEpochId(promptSnapshotStore, conversationId),
-      effort,
-      provider: provider.provider,
-      providerId: provider.id,
-      model: provider.model,
-      mode: 'chat',
-    });
     const toolContext = getConversationToolContext({ conversationId, workspacePath: activeWorkspacePath });
 
-    const contextWindow = provider.contextWindow || 0;
-    const onNativeReasoningFallback = (details) => noteNativeReasoningFallback(provider, details);
-
     try {
-      if (provider.provider === 'anthropic') {
-        await agentLoopAnthropic({
-          baseUrl: provider.baseUrl,
-          apiKey,
+      for (let attemptIndex = 0; attemptIndex < providerCandidates.length; attemptIndex += 1) {
+        const provider = providerCandidates[attemptIndex];
+        const credential = await resolveProviderCredential(provider, accumulatingWebContents, streamId);
+        if (!credential || streamRecord.terminalEventSent) return;
+
+        const systemContext = buildSystemContext(activeWorkspacePath, {
+          contextAttachments,
+          runtimeReminders,
+          attachmentContext,
+          configInstructions,
+          contextExtensions,
+          continuityContext,
+          conversationId,
+          effort,
+          mode: 'chat',
+          provider: provider.provider,
           model: provider.model,
-          systemPrompt,
-          messages,
-          tools: TOOLS_ANTHROPIC,
+        });
+        const systemPrompt = renderSystemContext(systemContext);
+        recordPromptSnapshot(promptSnapshotStore, systemContext, {
+          streamId,
+          conversationId,
+          contextEpochId: getActiveContextEpochId(promptSnapshotStore, conversationId),
+          effort,
+          provider: provider.provider,
+          providerId: provider.id,
+          model: provider.model,
+          mode: 'chat',
+          recoveryAttempt: attemptIndex + 1,
+        });
+
+        const attemptStream = createProviderAttemptStream({
           webContents: accumulatingWebContents,
           streamId,
-          signal: controller.signal,
-          effort,
-          supportsReasoning: Boolean(provider.supportsReasoning),
-          supportsPromptCaching: Boolean(provider.supportsPromptCaching),
-          contextWindow,
-          conversationId,
-          persistCompaction,
-          continuityContext,
-          toolContext,
-          workspacePath: activeWorkspacePath,
-          permissionGate,
-          onNativeReasoningFallback,
+          provider,
         });
-      } else {
-        await agentLoopOpenAI({
-          baseUrl: provider.baseUrl,
-          apiKey,
-          model: provider.model,
-          systemPrompt,
-          messages,
-          tools: TOOLS_OPENAI,
-          webContents: accumulatingWebContents,
-          streamId,
-          signal: controller.signal,
-          effort,
-          supportsReasoning: Boolean(provider.supportsReasoning),
-          contextWindow,
-          conversationId,
-          persistCompaction,
-          continuityContext,
-          toolContext,
-          workspacePath: activeWorkspacePath,
-          permissionGate,
-          onNativeReasoningFallback,
-          authMethod,
-          accountId,
-        });
+        const contextWindow = provider.contextWindow || 0;
+        const onNativeReasoningFallback = (details) => noteNativeReasoningFallback(provider, details);
+
+        try {
+          if (provider.provider === 'anthropic') {
+            await agentLoopAnthropic({
+              baseUrl: provider.baseUrl,
+              apiKey: credential.apiKey,
+              model: provider.model,
+              systemPrompt,
+              messages,
+              tools: TOOLS_ANTHROPIC,
+              webContents: attemptStream.webContents,
+              streamId,
+              signal: controller.signal,
+              effort,
+              supportsReasoning: Boolean(provider.supportsReasoning),
+              supportsPromptCaching: Boolean(provider.supportsPromptCaching),
+              contextWindow,
+              conversationId,
+              persistCompaction,
+              continuityContext,
+              toolContext,
+              workspacePath: activeWorkspacePath,
+              permissionGate,
+              onNativeReasoningFallback,
+            });
+          } else {
+            await agentLoopOpenAI({
+              baseUrl: provider.baseUrl,
+              apiKey: credential.apiKey,
+              model: provider.model,
+              systemPrompt,
+              messages,
+              tools: TOOLS_OPENAI,
+              webContents: attemptStream.webContents,
+              streamId,
+              signal: controller.signal,
+              effort,
+              supportsReasoning: Boolean(provider.supportsReasoning),
+              contextWindow,
+              conversationId,
+              persistCompaction,
+              continuityContext,
+              toolContext,
+              workspacePath: activeWorkspacePath,
+              permissionGate,
+              onNativeReasoningFallback,
+              authMethod: credential.authMethod,
+              accountId: credential.accountId,
+            });
+          }
+        } catch (err) {
+          if (err?.name === 'AbortError') throw err;
+          attemptStream.webContents.send('chat:stream:error', {
+            streamId,
+            error: describeFetchFailure(err),
+          });
+        }
+
+        const attemptResult = attemptStream.getResult();
+        if (!attemptResult.terminalError || attemptResult.terminalSent) return;
+
+        const nextProvider = providerCandidates[attemptIndex + 1] ?? null;
+        if (nextProvider && attemptResult.replayable) {
+          accumulatingWebContents.send('chat:stream:provider-recovery', {
+            streamId,
+            fromProviderId: provider.id,
+            fromProvider: describeProviderTarget(provider),
+            toProviderId: nextProvider.id,
+            toProvider: describeProviderTarget(nextProvider),
+            reason: attemptResult.errorText,
+            attempt: attemptIndex + 1,
+          });
+          console.warn(
+            `[llm-chat] provider recovery: ${describeProviderTarget(provider)} -> ${describeProviderTarget(nextProvider)} (${attemptResult.errorText})`
+          );
+          continue;
+        }
+
+        attemptStream.flushError();
+        return;
       }
     } catch (err) {
       console.error('[llm-chat] error:', err);
@@ -339,7 +392,7 @@ export function createLlmChatService({
       } else {
         accumulatingWebContents.send('chat:stream:error', {
           streamId,
-          error: err?.message || 'stream_failed',
+          error: describeFetchFailure(err),
         });
       }
     } finally {

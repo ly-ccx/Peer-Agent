@@ -748,6 +748,146 @@ describe('llm chat service tool materialization', () => {
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
   });
 
+  it('recovers a transport-blocked primary provider by replaying the turn on a fallback provider', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    const urls = [];
+    const providers = [
+      {
+        id: 'p-openai',
+        provider: 'openai',
+        authMethod: 'oauth_chatgpt',
+        baseUrl: 'https://chatgpt.com/backend-api/codex',
+        model: 'gpt-5.5',
+        name: 'ChatGPT 订阅',
+        isDefault: true,
+        apiKeyConfigured: true,
+      },
+      {
+        id: 'p-anthropic',
+        provider: 'anthropic',
+        baseUrl: 'https://example.test',
+        model: 'claude-test',
+        name: 'Anthropic',
+        isDefault: false,
+        apiKeyConfigured: true,
+      },
+    ];
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      if (urls.length === 1) {
+        return new Response(
+          '抱歉，您要访问的网站不在安全策略默认允许的范围内。Domain Blocking.',
+          { status: 403, statusText: 'Forbidden' },
+        );
+      }
+      return new Response(sse([
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'fallback ok' } },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
+      ]), { status: 200 });
+    };
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => providers,
+          getDecryptedApiKey: (id) => `key-${id}`,
+          getCredential: () => ({
+            tokens: {
+              access: 'oauth-access',
+              refresh: 'oauth-refresh',
+              expires: Date.now() + 3_600_000,
+              accountId: 'acct-1',
+            },
+          }),
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.deepEqual(urls, [
+      'https://chatgpt.com/backend-api/codex/responses',
+      'https://example.test/v1/messages',
+    ]);
+    const recovery = events.find((event) => event.channel === 'chat:stream:provider-recovery');
+    assert.ok(recovery);
+    assert.equal(recovery.payload.fromProviderId, 'p-openai');
+    assert.equal(recovery.payload.toProviderId, 'p-anthropic');
+    assert.match(recovery.payload.reason, /HTTP 403/);
+    assert.equal(events.find((event) => event.channel === 'chat:stream:delta')?.payload.content, 'fallback ok');
+    assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
+    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+  });
+
+  it('does not replay a provider failure after model output has reached the stream', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    let fetchCalls = 0;
+    const providers = [
+      {
+        id: 'p-openai',
+        provider: 'openai',
+        baseUrl: 'https://example.test/v1',
+        model: 'gpt-test',
+        isDefault: true,
+        apiKeyConfigured: true,
+      },
+      {
+        id: 'p-anthropic',
+        provider: 'anthropic',
+        baseUrl: 'https://fallback.test',
+        model: 'claude-test',
+        apiKeyConfigured: true,
+      },
+    ];
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(sse([
+        { choices: [{ delta: { content: 'partial' } }] },
+        { error: { message: 'upstream reset after output' } },
+      ]), { status: 200 });
+    };
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => providers,
+          getDecryptedApiKey: (id) => `key-${id}`,
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.equal(fetchCalls, 1);
+    assert.equal(events.find((event) => event.channel === 'chat:stream:delta')?.payload.content, 'partial');
+    assert.equal(events.some((event) => event.channel === 'chat:stream:provider-recovery'), false);
+    const error = events.find((event) => event.channel === 'chat:stream:error');
+    assert.ok(error);
+    assert.match(error.payload.error, /provider_stream_error/);
+  });
+
   it('reuses scope permission grants in the main runtime without renderer auto-approval state', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;

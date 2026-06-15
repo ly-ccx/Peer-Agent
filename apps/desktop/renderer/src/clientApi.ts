@@ -73,6 +73,8 @@ const unavailableApi: ClientApi = {
   onChatStreamToolResult: unavailableMethod('onChatStreamToolResult'),
   onChatStreamPermissionRequest: unavailableMethod('onChatStreamPermissionRequest'),
   onChatStreamError: unavailableMethod('onChatStreamError'),
+  onChatStreamProviderRecovery: unavailableMethod('onChatStreamProviderRecovery'),
+  onChatStreamConnectionRecovery: unavailableMethod('onChatStreamConnectionRecovery'),
   onChatCompaction: unavailableMethod('onChatCompaction'),
   onChatActiveStreamsChanged: unavailableMethod('onChatActiveStreamsChanged'),
   llmListProviders: unavailableMethod('llmListProviders'),
