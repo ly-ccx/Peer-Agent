@@ -498,8 +498,10 @@ function formatTokenCount(tokens: number): string {
 
 // 流式工具参数进度的展示文案。仅描述“正在接收/准备调用”这一过程,
 // 不声称工具已执行或文件已落地——真正的结果由后续 tool-call 段与本地能力 Evidence 接管。
+type ToolProgress = { tool: string; path: string | null; receivedLines: number };
+
 function toolProgressLabel(
-  progress: { tool: string; path: string | null; receivedLines: number },
+  progress: ToolProgress,
   isZh: boolean,
 ): string {
   const file = progress.path ? progress.path.split('/').pop() || progress.path : null;
@@ -674,9 +676,7 @@ export function ChatSurface({
   // 流式工具参数进度(Codex 式实时体感):工具调用参数(如 edit_file 的整文件内容)
   // 在落地为正式 tool-call 段之前会先以增量形式抵达,这里保存最近一次进度用于展示。
   // 仅为过程提示,不替代 Tool Result / Evidence。
-  const [toolProgress, setToolProgress] = useState<
-    { tool: string; path: string | null; receivedLines: number } | null
-  >(null);
+  const [toolProgress, setToolProgress] = useState<ToolProgress | null>(null);
   // 任务续传(ADR 21):防止同一 resumeTask 被自动发送多次的一次性闸门。
   const resumeFiredRef = useRef<string | null>(null);
   const streamIdRef = useRef<string | null>(null);
@@ -1364,6 +1364,7 @@ export function ChatSurface({
                   segments={msg.segments}
                   content={msg.content}
                   isStreaming={isStreaming && msg === messages[messages.length - 1]}
+                  toolProgress={isStreaming && msg === messages[messages.length - 1] ? toolProgress : null}
                   isZh={isZh}
                 />
               )}
@@ -1380,14 +1381,6 @@ export function ChatSurface({
             )}
           </div>
         ))}
-        {toolProgress ? (
-          <div className="tool-progress-notice">
-            <span className="tool-progress-spinner" aria-hidden="true" />
-            <div className="tool-progress-body">
-              {toolProgressLabel(toolProgress, isZh)}
-            </div>
-          </div>
-        ) : null}
         {providerRecoveryNotice ? (
           <div className="provider-recovery-notice">
             <div className="provider-recovery-body">
@@ -1637,15 +1630,34 @@ function AttachmentStrip({
   );
 }
 
-function AssistantContent({ segments, content, isStreaming, isZh }: {
+function ToolProgressInline({ progress, isZh }: { readonly progress: ToolProgress; readonly isZh: boolean }) {
+  return (
+    <div className="tool-progress-inline">
+      <span className="tool-progress-spinner" aria-hidden="true" />
+      <div className="tool-progress-body">
+        {toolProgressLabel(progress, isZh)}
+      </div>
+    </div>
+  );
+}
+
+function AssistantContent({ segments, content, isStreaming, toolProgress, isZh }: {
   readonly segments?: ContentSegment[];
   readonly content: string;
   readonly isStreaming: boolean;
+  readonly toolProgress?: ToolProgress | null;
   readonly isZh: boolean;
 }) {
   if (!segments?.length) {
-    if (content) return <MarkdownMessage content={content} />;
-    if (isStreaming) return <span className="streaming-cursor">▍</span>;
+    if (content || toolProgress || isStreaming) {
+      return (
+        <div className="assistant-segments">
+          {content ? <MarkdownMessage content={content} /> : null}
+          {toolProgress ? <ToolProgressInline progress={toolProgress} isZh={isZh} /> : null}
+          {!toolProgress && isStreaming ? <span className="streaming-cursor">▍</span> : null}
+        </div>
+      );
+    }
     return null;
   }
 
@@ -1659,7 +1671,7 @@ function AssistantContent({ segments, content, isStreaming, isZh }: {
     ((lastGroup.type === 'tool-call-group' && lastGroup.calls.some((c) => c.result === undefined)) ||
       lastGroup.type === 'thinking'),
   );
-  const showCursor = isStreaming && !lastGroupHasActiveIndicator;
+  const showCursor = isStreaming && !toolProgress && !lastGroupHasActiveIndicator;
 
   return (
     <div className="assistant-segments">
@@ -1691,6 +1703,7 @@ function AssistantContent({ segments, content, isStreaming, isZh }: {
           />
         );
       })}
+      {toolProgress ? <ToolProgressInline progress={toolProgress} isZh={isZh} /> : null}
       {showCursor ? <span className="streaming-cursor">▍</span> : null}
     </div>
   );

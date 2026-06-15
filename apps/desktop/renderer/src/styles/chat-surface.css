@@ -783,21 +783,19 @@
 }
 
 /* ── Tool argument streaming progress (Frost live feedback) ──
- * 气质对齐 .thinking-indicator:无蓝底/蓝边的轻状态行,呼吸点替代旋转圈,
- * azure 仅作微弱脉冲点缀(红线:单屏 azure ≤ 3 / azure 不上 CTA)。 */
-.tool-progress-notice {
+ * 临时工具参数进度属于当前 assistant 回答的 transient 子状态,
+ * 不作为消息列表末尾的独立行渲染。 */
+.tool-progress-inline {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) 0;
+  padding: var(--space-1) 0;
   background: transparent;
   border: none;
   font-size: 0.78rem;
   color: var(--graphite-soft);
   animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
-  max-width: 740px;
-  margin: 0 auto;
-  width: 100%;
+  max-width: 100%;
 }
 .tool-progress-spinner {
   width: 7px;
