@@ -120,7 +120,7 @@ export async function agentLoopOpenAI({
     if (!toolCalls.length) {
       if (
         effectiveSupportsReasoning &&
-        effort === 'high' &&
+        (effort === 'high' || effort === 'xhigh') &&
         !String(content || '').trim() &&
         !String(thinkingContent || '').trim()
       ) {

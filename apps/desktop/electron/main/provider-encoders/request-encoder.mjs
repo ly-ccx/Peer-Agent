@@ -3,9 +3,9 @@ import {
   normalizeOpenAIMessages,
 } from './message-normalizer.mjs';
 
-// OpenAI 原生 reasoning_effort 只接受 low/medium/high；UI 的 xhigh 是内部档位，
-// wire 层必须降级到 high，避免服务端拒绝后表现为流式无响应。
-const OPENAI_REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'high' };
+// OpenAI GPT-5.5 原生 reasoning_effort 支持 none/low/medium/high/xhigh。
+// Peer Agent 的 off 不发 reasoning_effort；其余档位按 provider wire 契约透传。
+const OPENAI_REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'xhigh' };
 const ANTHROPIC_THINKING_BUDGET = { low: 4096, default: 10240, high: 32768, xhigh: 32768 };
 // adaptive 格式下 output_config.effort 只接受 low/medium/high 三档。
 const ANTHROPIC_OUTPUT_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'high' };
@@ -29,7 +29,7 @@ export function encodeOpenAIChatRequest({
     tools,
   };
   // 思考档位: off(关闭) / low / default / high / xhigh。
-  // off 不发 reasoning_effort; 其余档位映射到 OpenAI 原生 low/medium/high。
+  // off 不发 reasoning_effort; 其余档位映射到 OpenAI 原生 low/medium/high/xhigh。
   if (supportsReasoning && effort && effort !== 'off') {
     body.reasoning_effort = OPENAI_REASONING_EFFORT[effort] ?? 'medium';
   }

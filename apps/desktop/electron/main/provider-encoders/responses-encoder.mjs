@@ -9,9 +9,9 @@
 
 import { normalizeOpenAIMessages } from './message-normalizer.mjs';
 
-// OpenAI Responses 原生 reasoning.effort 只接受 low/medium/high；UI 的 xhigh
-// 是内部档位，wire 层必须降级到 high，避免服务端拒绝后表现为流式无响应。
-const REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'high' };
+// OpenAI GPT-5.5 Responses reasoning.effort 支持 none/low/medium/high/xhigh。
+// Peer Agent 的 off 不发 reasoning；其余档位按 provider wire 契约透传。
+const REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'xhigh' };
 
 function textPart(text) {
   return { type: 'input_text', text };

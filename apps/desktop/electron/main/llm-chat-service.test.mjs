@@ -395,6 +395,59 @@ describe('llm chat service tool materialization', () => {
     assert.match(errorEvent.payload.error, /empty_model_response/);
   });
 
+  it('retries an empty OpenAI xhigh reasoning response without native reasoning for the same turn', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    const capturedBodies = [];
+    globalThis.fetch = async (_url, init) => {
+      capturedBodies.push(JSON.parse(init.body));
+      if (capturedBodies.length === 1) {
+        return new Response('data: [DONE]\n\n', { status: 200 });
+      }
+      return new Response(sse([
+        { choices: [{ delta: { content: 'ok' } }] },
+        '[DONE]',
+      ]), { status: 200 });
+    };
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'gpt-5.5',
+            isDefault: true,
+            apiKeyConfigured: true,
+            supportsReasoning: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        effort: 'xhigh',
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.equal(capturedBodies.length, 2);
+    assert.equal(capturedBodies[0].reasoning_effort, 'xhigh');
+    assert.equal(capturedBodies[1].reasoning_effort, undefined);
+    assert.equal(events.find((event) => event.channel === 'chat:stream:delta')?.payload.content, 'ok');
+    assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
+    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+  });
+
   it('completes an OpenAI-compatible reasoning-only response without empty response error', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;

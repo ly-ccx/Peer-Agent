@@ -60,10 +60,11 @@ Responses 传输"这一组合。
 - 新增 `provider-adapters/openai-responses-adapter.mjs` 与
   `provider-encoders` 中的 Responses 编码;**不在 chat-adapter 内加鉴权分支**。
 - `llm-chat-service` 按 `(provider, authMethod)` 选择 adapter,保持分发为薄层。
-- UI 的 `xhigh` 是 Peer Agent 内部推理档位，不等于 OpenAI wire 契约。
+- UI 的 `xhigh` 必须按 OpenAI GPT-5.5 wire 契约透传。
   OpenAI Chat Completions 的 `reasoning_effort` 与 Responses 的 `reasoning.effort`
-  只允许原生档位；provider encoder 必须把 `xhigh` 降级为 `high`，避免把
-  非法值发给服务端造成请求失败或流式无响应。
+  支持 `low` / `medium` / `high` / `xhigh`; Peer Agent 的 `off` 不发送
+  reasoning 字段。provider encoder 不得静默降级 `xhigh`，否则 UI 语义与
+  provider 请求不一致。
 
 ### 5. 订阅登录链路:先登录、成功才落盘;失败/取消不留痕
 

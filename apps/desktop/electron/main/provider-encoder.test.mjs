@@ -87,7 +87,7 @@ describe('Provider message encoders', () => {
     assert.equal(body.reasoning_effort, 'high');
   });
 
-  it('lowers OpenAI extra-high reasoning effort to native high', () => {
+  it('passes OpenAI extra-high reasoning effort through as xhigh', () => {
     const body = encodeOpenAIChatRequest({
       model: 'gpt-5.5',
       messages: [{ role: 'user', content: 'hello' }],
@@ -96,7 +96,7 @@ describe('Provider message encoders', () => {
       supportsReasoning: true,
     });
 
-    assert.equal(body.reasoning_effort, 'high');
+    assert.equal(body.reasoning_effort, 'xhigh');
   });
 
   it('keeps Anthropic high effort as prompt-level intent unless native reasoning is enabled', () => {
