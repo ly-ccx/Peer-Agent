@@ -73,13 +73,13 @@ describe('OpenAI Responses request encoder (ADR 28)', () => {
     assert.equal(on.reasoning.effort, 'high');
   });
 
-  it('passes OpenAI extra-high reasoning through as xhigh', () => {
+  it('lowers OpenAI extra-high reasoning to native high', () => {
     const body = encodeOpenAIResponsesRequest({
       model: 'gpt-5.5',
       messages: [{ role: 'user', content: 'x' }],
       supportsReasoning: true,
       effort: 'xhigh',
     });
-    assert.equal(body.reasoning.effort, 'xhigh');
+    assert.equal(body.reasoning.effort, 'high');
   });
 });

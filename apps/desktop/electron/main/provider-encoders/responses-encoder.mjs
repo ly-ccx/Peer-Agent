@@ -9,7 +9,9 @@
 
 import { normalizeOpenAIMessages } from './message-normalizer.mjs';
 
-const REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'xhigh' };
+// OpenAI Responses 原生 reasoning.effort 只接受 low/medium/high；UI 的 xhigh
+// 是内部档位，wire 层必须降级到 high，避免服务端拒绝后表现为流式无响应。
+const REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'high' };
 
 function textPart(text) {
   return { type: 'input_text', text };
