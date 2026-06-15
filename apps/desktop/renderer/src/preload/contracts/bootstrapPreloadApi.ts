@@ -24,7 +24,7 @@ import type {
  * - sessionId:中断时所在的会话 id。恢复时必须切回该会话才自动续发,
  *   避免把待办错误地塞进新建/其他会话。
  * - task:重启后要在该会话自动发出的指令。
- * - effort:可选的思考强度(low/default/high),保持中断时的设定。
+ * - effort:可选的思考强度(low/default/high/xhigh),保持中断时的设定。
  *
  * 旧的 v1 形状(顶层 `prompt`、无 sessionId)已废弃;store 通过版本号丢弃旧记录。
  */

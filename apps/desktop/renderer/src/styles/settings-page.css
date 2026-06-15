@@ -131,3 +131,66 @@
 .system-instructions-panel .llm-instructions-card textarea {
   min-height: 200px;
 }
+
+/* ── 通用分区 · 语言设置 ── */
+.general-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  padding-top: 52px;
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.general-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.general-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.general-setting-copy {
+  min-width: 0;
+}
+
+.general-setting-copy h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  color: var(--pa-text-primary);
+}
+
+.general-setting-copy p {
+  margin: 6px 0 0;
+  color: var(--graphite-soft);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.general-language-select {
+  flex: 0 0 180px;
+}
+
+.general-setting-error {
+  margin: 0;
+  color: var(--state-danger);
+  font-size: 0.78rem;
+}
+
+@media (max-width: 760px) {
+  .general-setting-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .general-language-select {
+    flex-basis: auto;
+  }
+}

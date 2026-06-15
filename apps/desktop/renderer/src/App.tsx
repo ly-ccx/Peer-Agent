@@ -21,7 +21,7 @@ function readSystemInstructions(settings: Record<string, unknown> | null | undef
 }
 
 export function App() {
-  const { initError, session } = useDesktopBootstrap();
+  const { availableLocales, initError, refreshBootstrap, session } = useDesktopBootstrap();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [activePage, setActivePage] = useState<AppPage>('chat');
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
@@ -86,7 +86,7 @@ export function App() {
         if (!sessionId || !task) return;
         const effort =
           record.effort === 'off' || record.effort === 'low'
-          || record.effort === 'default' || record.effort === 'high'
+          || record.effort === 'default' || record.effort === 'high' || record.effort === 'xhigh'
             ? record.effort
             : undefined;
         setActiveConversationId(sessionId);
@@ -164,12 +164,14 @@ export function App() {
     <main className="app-shell">
       {session && activePage === 'settings' ? (
         <SettingsPage
+          availableLocales={availableLocales}
           i18n={i18n}
           onBack={() => {
             setActivePage('chat');
             void refreshProviders();
             void refreshSettings();
           }}
+          onLocaleChanged={refreshBootstrap}
           onSystemInstructionsChanged={setSystemInstructions}
         />
       ) : session ? (
