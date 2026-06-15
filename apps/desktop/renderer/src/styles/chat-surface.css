@@ -369,11 +369,21 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-3);
   max-width: 740px;
   margin: var(--space-2) auto 0;
   padding: 0 var(--space-1);
 }
 
+.chat-composer-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.access-selector,
 .effort-selector {
   display: flex;
   gap: 1px;
@@ -381,6 +391,7 @@
   border-radius: var(--radius-sm);
   padding: 2px;
 }
+.access-btn,
 .effort-btn {
   background: none;
   border: none;
@@ -390,14 +401,20 @@
   border-radius: 4px;
   cursor: pointer;
   transition: all var(--za-motion-fast);
+  white-space: nowrap;
 }
+.access-btn:hover,
 .effort-btn:hover {
   color: var(--graphite-soft);
 }
+.access-btn.active,
 .effort-btn.active {
   background: var(--chrome-canvas);
   color: var(--graphite-base);
   box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+.access-btn.active {
+  color: var(--warning-ink, var(--graphite-base));
 }
 
 .token-usage-wrap {

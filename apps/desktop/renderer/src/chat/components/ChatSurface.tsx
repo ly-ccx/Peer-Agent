@@ -5,6 +5,7 @@ import type {
   ContextAttachmentItem,
   ContinuityContextItem,
   LlmProviderConfigView,
+  LocalAccessLevel,
 } from '@peer-agent/protocol';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -35,9 +36,37 @@ type EffortLevel = 'off' | 'low' | 'default' | 'high' | 'xhigh';
 
 const BASE_EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'low', 'default', 'high'];
 const OPENAI_EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'low', 'default', 'high', 'xhigh'];
+const ACCESS_LEVELS: readonly LocalAccessLevel[] = ['ask_before_local', 'session_local', 'full_local'];
 
 function isEffortLevel(value: unknown): value is EffortLevel {
   return value === 'off' || value === 'low' || value === 'default' || value === 'high' || value === 'xhigh';
+}
+
+function isLocalAccessLevel(value: unknown): value is LocalAccessLevel {
+  return value === 'ask_before_local'
+    || value === 'session_local'
+    || value === 'restricted_local'
+    || value === 'full_local';
+}
+
+function accessLevelLabel(level: LocalAccessLevel, isZh: boolean): string {
+  if (level === 'full_local') return isZh ? '完全访问' : 'Full access';
+  if (level === 'session_local') return isZh ? '帮我批准' : 'Approve for me';
+  if (level === 'restricted_local') return isZh ? '受限' : 'Restricted';
+  return isZh ? '每次询问' : 'Ask';
+}
+
+function accessLevelTitle(level: LocalAccessLevel, isZh: boolean): string {
+  if (level === 'full_local') {
+    return isZh ? '自动批准文件写入和低/中风险命令；高危命令仍会询问' : 'Auto-approve file writes and low/medium-risk commands; high-risk commands still ask';
+  }
+  if (level === 'session_local') {
+    return isZh ? '自动批准低/中风险命令；高风险动作仍会询问' : 'Auto-approve low/medium-risk commands; high-risk actions still ask';
+  }
+  if (level === 'restricted_local') {
+    return isZh ? '使用受限本地访问' : 'Use restricted local access';
+  }
+  return isZh ? '所有本地动作都先询问' : 'Ask before local actions';
 }
 
 type ChatApiContentPart =
@@ -608,6 +637,17 @@ export function ChatSurface({
   const changeEffort = useCallback((level: EffortLevel) => {
     setEffort(level);
     void clientApi.updateSettings({ effort: level });
+  }, []);
+  const [localAccessLevel, setLocalAccessLevel] = useState<LocalAccessLevel>(() => {
+    const stored = (clientApi.initialSettings as Record<string, unknown>)?.localAccessLevel;
+    return isLocalAccessLevel(stored) ? stored : 'ask_before_local';
+  });
+  const changeLocalAccessLevel = useCallback((level: LocalAccessLevel) => {
+    setLocalAccessLevel(level);
+    void clientApi.updateSettings({ localAccessLevel: level }).then((nextSettings) => {
+      const normalized = (nextSettings as Record<string, unknown>)?.localAccessLevel;
+      if (isLocalAccessLevel(normalized)) setLocalAccessLevel(normalized);
+    });
   }, []);
   const [tokenUsage, setTokenUsage] = useState<TokenUsageState | null>(null);
   const [activeUsage, setActiveUsage] = useState<TokenUsageState | null>(null);
@@ -1504,25 +1544,40 @@ export function ChatSurface({
           </button>
         </form>
         <div className="chat-composer-toolbar">
-          {activeProviderSupportsReasoning ? (
-            <div className="effort-selector">
-              {effortLevels.map((level) => (
+          <div className="chat-composer-toolbar-left">
+            <div className="access-selector" aria-label={isZh ? '本地访问模式' : 'Local access mode'}>
+              {ACCESS_LEVELS.map((level) => (
                 <button
                   key={level}
                   type="button"
-                  className={`effort-btn ${effort === level ? 'active' : ''}`}
-                  onClick={() => changeEffort(level)}
-                  title={level}
+                  className={`access-btn ${localAccessLevel === level ? 'active' : ''}`}
+                  onClick={() => changeLocalAccessLevel(level)}
+                  title={accessLevelTitle(level, isZh)}
                 >
-                  {level === 'off' ? (isZh ? '关闭' : 'Off')
-                    : level === 'low' ? (isZh ? '简洁' : 'Low')
-                    : level === 'high' ? (isZh ? '深度' : 'High')
-                    : level === 'xhigh' ? (isZh ? '超深度' : 'Extra High')
-                    : (isZh ? '标准' : 'Default')}
+                  {level === 'full_local' ? '⚠ ' : ''}{accessLevelLabel(level, isZh)}
                 </button>
               ))}
             </div>
-          ) : null}
+            {activeProviderSupportsReasoning ? (
+              <div className="effort-selector">
+                {effortLevels.map((level) => (
+                  <button
+                    key={level}
+                    type="button"
+                    className={`effort-btn ${effort === level ? 'active' : ''}`}
+                    onClick={() => changeEffort(level)}
+                    title={level}
+                  >
+                    {level === 'off' ? (isZh ? '关闭' : 'Off')
+                      : level === 'low' ? (isZh ? '简洁' : 'Low')
+                      : level === 'high' ? (isZh ? '深度' : 'High')
+                      : level === 'xhigh' ? (isZh ? '超深度' : 'Extra High')
+                      : (isZh ? '标准' : 'Default')}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <TokenUsageDisplay providers={providers} tokenUsage={tokenUsage} activeUsage={activeUsage} contextTokens={estimatedContextTokens} isStreaming={isStreaming} isZh={isZh} />
         </div>
       </div>
@@ -1824,15 +1879,16 @@ function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, 
   const billedTokens = input + output;
   const currentContextTokens = contextTokens ?? billedTokens;
 
+  const isSubscriptionProvider = defaultProvider?.authMethod === 'oauth_chatgpt';
   let costStr: string | null = null;
-  if (defaultProvider?.inputPrice != null && defaultProvider?.outputPrice != null) {
+  if (!isSubscriptionProvider && defaultProvider?.inputPrice != null && defaultProvider?.outputPrice != null) {
     const p = defaultProvider;
     const inputCost = (input / 1_000_000) * (p.inputPrice ?? 0);
     const outputCost = (output / 1_000_000) * (p.outputPrice ?? 0);
     const cwCost = cacheWrite && p.cacheWritePrice != null ? (cacheWrite / 1_000_000) * p.cacheWritePrice : 0;
     const crCost = cacheRead && p.cacheReadPrice != null ? (cacheRead / 1_000_000) * p.cacheReadPrice : 0;
     const cost = inputCost + outputCost + cwCost + crCost;
-    costStr = cost === 0 ? '$0.00' : cost < 0.001 ? '<$0.001' : cost < 0.01 ? `$${cost.toFixed(4)}` : `$${cost.toFixed(2)}`;
+    costStr = cost === 0 ? '$0.00' : cost < 0.001 ? '<$0.001' : cost < 0.01 ? '$' + cost.toFixed(4) : '$' + cost.toFixed(2);
   }
 
   const ctxWindow = defaultProvider?.contextWindow;
@@ -1864,8 +1920,8 @@ function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, 
             className="token-usage-cost"
             title={
               isZh
-                ? '按 API 单价估算的等价用量价值；订阅用户不会按此金额额外扣费。'
-                : 'Estimated equivalent API value. Subscription users are not billed this amount separately.'
+                ? '按 API 单价估算的等价用量价值。'
+                : 'Estimated equivalent API value.'
             }
           >
             {costStr}
@@ -1880,7 +1936,7 @@ function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, 
                 : 'Provider-reported cached input tokens / total input tokens. Cumulative for this conversation.'
             }
           >
-            {isZh ? '缓存命中' : 'cache hit'} {cacheHitRate.toFixed(0)}%
+            {cacheHitRate.toFixed(0)}%
           </span>
         ) : null}
         {isStreaming && !activeUsage ? <span className="token-usage-detail">{isZh ? '计费待返回' : 'usage pending'}</span> : null}

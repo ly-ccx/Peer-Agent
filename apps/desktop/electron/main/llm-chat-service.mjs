@@ -140,11 +140,18 @@ export function createLlmChatService({
   conversationStore = null,
   persistCompaction = null,
   promptSnapshotStore = null,
+  preferredAccessLevel = 'ask_before_local',
   // 全局活跃流广播宿主(由 main 注入):向所有渲染窗口推送当前正在运行的会话列表,
   // 使左侧列表无需"点进去"即可知道哪些会话在跑。表达层订阅,真值仍在 activeStreams。
   broadcast = null,
 }) {
+  permissionGate.setAccessLevel(preferredAccessLevel);
+
   function setWorkspacePath(wsPath) { activeWorkspacePath = wsPath; }
+
+  function setLocalAccessLevel(nextAccessLevel) {
+    return permissionGate.setAccessLevel(nextAccessLevel);
+  }
 
   // 当前正在流式运行的会话 id 去重列表(只读快照)。
   function listActiveConversationIds() {
@@ -470,6 +477,7 @@ export function createLlmChatService({
     sendMessage,
     abort,
     setWorkspacePath,
+    setLocalAccessLevel,
     resolvePermissionGrant,
     reattach,
     listActiveConversationIds,

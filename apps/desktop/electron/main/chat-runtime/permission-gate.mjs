@@ -1,5 +1,30 @@
 import { randomUUID } from 'node:crypto';
 
+const LOCAL_ACCESS_LEVELS = new Set([
+  'ask_before_local',
+  'session_local',
+  'restricted_local',
+  'full_local',
+]);
+
+const SHELL_RISK_ORDER = {
+  L0_inert: 0,
+  L1_local_read: 1,
+  L2_local_write: 2,
+  L3_external_write: 3,
+  L4_privileged: 4,
+  L5_destructive: 5,
+};
+
+function normalizeLocalAccessLevel(value) {
+  return typeof value === 'string' && LOCAL_ACCESS_LEVELS.has(value) ? value : 'ask_before_local';
+}
+
+function compareShellRisk(left, right) {
+  return (SHELL_RISK_ORDER[left] ?? SHELL_RISK_ORDER.L4_privileged) -
+    (SHELL_RISK_ORDER[right] ?? SHELL_RISK_ORDER.L4_privileged);
+}
+
 function buildFilePermissionCall({ tool, args, filePath, workspacePath, toolCallId }) {
   const action = tool === 'edit_file' ? 'edit' : 'write';
   return {
@@ -93,6 +118,44 @@ function buildPermissionScopeKey({ conversationId, workspacePath, call }) {
   return `${conversationScope}::${workspaceScope}::${buildPermissionSignature(call)}`;
 }
 
+function createAutoAccessGrant({ toolCallId, scope, reason }) {
+  return {
+    granted: true,
+    grant: {
+      grantId: `auto-${randomUUID()}`,
+      toolCallId,
+      granted: true,
+      duration: 'once',
+      scope,
+      decidedAt: new Date().toISOString(),
+    },
+    reason,
+  };
+}
+
+function maybeCreateAutoGrantForFile({ accessLevel, call }) {
+  if (accessLevel !== 'full_local') return null;
+  return createAutoAccessGrant({
+    toolCallId: call.toolCallId,
+    scope: call.capabilityId,
+    reason: 'local_access_level_full',
+  });
+}
+
+function shouldAutoApproveShellForAccessLevel(accessLevel, riskLevel) {
+  if (accessLevel !== 'session_local' && accessLevel !== 'full_local') return false;
+  return compareShellRisk(riskLevel, 'L3_external_write') <= 0;
+}
+
+function maybeCreateAutoGrantForShell({ accessLevel, permissionCall, classification }) {
+  if (!shouldAutoApproveShellForAccessLevel(accessLevel, classification?.riskLevel)) return null;
+  return createAutoAccessGrant({
+    toolCallId: permissionCall.toolCallId,
+    scope: permissionCall.capabilityId,
+    reason: accessLevel === 'full_local' ? 'local_access_level_full' : 'local_access_level_session',
+  });
+}
+
 function createAutoScopeGrant({ toolCallId, scope }) {
   return {
     grantId: `auto-${randomUUID()}`,
@@ -104,9 +167,15 @@ function createAutoScopeGrant({ toolCallId, scope }) {
   };
 }
 
-export function createChatPermissionGate({ activeStreams }) {
+export function createChatPermissionGate({ activeStreams, accessLevel: initialAccessLevel = 'ask_before_local' } = {}) {
   const pendingPermissionRequests = new Map();
   const approvedPermissionScopes = new Map();
+  let accessLevel = normalizeLocalAccessLevel(initialAccessLevel);
+
+  function setAccessLevel(nextAccessLevel) {
+    accessLevel = normalizeLocalAccessLevel(nextAccessLevel);
+    return accessLevel;
+  }
 
   function registerPendingPermission({ streamId, call, scopeKey, scope, resolve }) {
     pendingPermissionRequests.set(call.toolCallId, {
@@ -133,6 +202,11 @@ export function createChatPermissionGate({ activeStreams }) {
           grant: createAutoScopeGrant({ toolCallId: call.toolCallId, scope: scopedGrant.scope || call.capabilityId }),
           reason: 'local_user_approved_scope',
         });
+        return;
+      }
+      const accessGrant = maybeCreateAutoGrantForFile({ accessLevel, call });
+      if (accessGrant) {
+        resolvePermission(accessGrant);
         return;
       }
       registerPendingPermission({
@@ -170,6 +244,11 @@ export function createChatPermissionGate({ activeStreams }) {
           }),
           reason: 'local_user_approved_scope',
         });
+        return;
+      }
+      const accessGrant = maybeCreateAutoGrantForShell({ accessLevel, permissionCall, classification });
+      if (accessGrant) {
+        resolvePermission(accessGrant);
         return;
       }
       registerPendingPermission({
@@ -217,6 +296,7 @@ export function createChatPermissionGate({ activeStreams }) {
   return {
     createFilePermissionRequester,
     createShellApprovalDecider,
+    setAccessLevel,
     settlePermissionRequest,
     settleStreamPermissionRequests,
   };

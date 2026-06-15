@@ -22,7 +22,11 @@ The detailed governance baseline is in `docs/architecture/20-architecture-govern
 - `docs/architecture/16-skill-call-lifecycle.md`
 - `docs/architecture/19-system-prompt-context-architecture.md`
 
-These documents are part of the engineering contract, not background reading. When a code change touches chat runtime, prompt assembly, tool execution, permissions, Evidence, compaction, attachments, provider request lowering, or runtime projection, update the relevant architecture document in the same change unless the document already matches the new behavior.
+These documents are part of the engineering contract, not background reading. Treat them as read-only reference material by default.
+
+## User Repository Preference: Architecture Docs Are Read-Only
+
+Do not edit, unignore, stage, or submit `docs/architecture/*` unless the user explicitly asks for a specific architecture-document change. If a code change would normally require architecture documentation, explain the architecture impact in the response instead of modifying `docs/architecture/*`.
 
 ## Non-Negotiable Runtime Chain
 

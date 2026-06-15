@@ -2,6 +2,17 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
+const LOCAL_ACCESS_LEVELS = new Set([
+  'ask_before_local',
+  'session_local',
+  'restricted_local',
+  'full_local',
+]);
+
+export function resolveLocalAccessLevel(value) {
+  return typeof value === 'string' && LOCAL_ACCESS_LEVELS.has(value) ? value : 'ask_before_local';
+}
+
 /**
  * 设备级运行时身份：持久化随机 deviceId 到 userData，sessionId 由它派生。
  *
@@ -41,7 +52,7 @@ function resolveLocale(input) {
   return 'zh-CN';
 }
 
-export function createSessionStore({ workspaceRoot, userDataPath, listCapabilities, preferredLocale }) {
+export function createSessionStore({ workspaceRoot, userDataPath, listCapabilities, preferredLocale, preferredAccessLevel }) {
   // 懒解析 + memoize：createSessionStore 在 main.mjs 顶层执行（app ready 前），
   // 而 getSession 总在 ready 后才被调用，懒到首次取用时再读 userData，避开
   // app.getPath 的 ready 时序假设（与同仓 getDeveloperSettingsStore 等一致）。
@@ -54,6 +65,7 @@ export function createSessionStore({ workspaceRoot, userDataPath, listCapabiliti
   }
   let pendingReviewCount = 0;
   let locale = resolveLocale(preferredLocale ?? process.env.LANG);
+  let accessLevel = resolveLocalAccessLevel(preferredAccessLevel);
 
   function getSession() {
     const capabilityCount = listCapabilities().length;
@@ -61,7 +73,7 @@ export function createSessionStore({ workspaceRoot, userDataPath, listCapabiliti
     return {
       sessionId: getSessionId(),
       status: capabilityCount > 0 ? 'local_ready' : 'cloud_only',
-      accessLevel: 'ask_before_local',
+      accessLevel,
       capabilityCount,
       pendingReviewCount,
       locale,
@@ -77,9 +89,15 @@ export function createSessionStore({ workspaceRoot, userDataPath, listCapabiliti
     locale = resolveLocale(nextLocale);
   }
 
+  function setAccessLevel(nextAccessLevel) {
+    accessLevel = resolveLocalAccessLevel(nextAccessLevel);
+    return accessLevel;
+  }
+
   return {
     getSession,
     setPendingReviewCount,
     setLocale,
+    setAccessLevel,
   };
 }

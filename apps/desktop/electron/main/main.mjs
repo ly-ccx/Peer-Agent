@@ -7,7 +7,7 @@ import { createCapabilityRegistry } from './capability-registry.mjs';
 import { loadLocalEnv } from './env-loader.mjs';
 import { runHealthStub } from './core-health.mjs';
 import { readProjectIndex } from './project-index.mjs';
-import { createSessionStore } from './session-store.mjs';
+import { createSessionStore, resolveLocalAccessLevel } from './session-store.mjs';
 import { createLocalToolHost } from './runtime-gateway/local-tool-host.mjs';
 import { createLocalShellProvider } from './runtime-gateway/local-shell-provider.mjs';
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
@@ -79,13 +79,15 @@ const dataHome = getDataHome();
 }
 
 const settingsStore = createSettingsStore();
+const initialSettings = settingsStore.getAll();
 
 const capabilityRegistry = createCapabilityRegistry({ workspaceRoot: resourcesRoot });
 const sessionStore = createSessionStore({
   workspaceRoot: resourcesRoot,
   userDataPath: dataHome,
   listCapabilities: capabilityRegistry.listCapabilities,
-  preferredLocale: settingsStore.getAll().locale ?? process.env.PEER_AGENT_LOCALE,
+  preferredLocale: initialSettings.locale ?? process.env.PEER_AGENT_LOCALE,
+  preferredAccessLevel: initialSettings.localAccessLevel,
 });
 
 let skillStore;
@@ -198,6 +200,7 @@ const llmChatService = createLlmChatService({
   conversationStore,
   persistCompaction: persistCompactionToConversation,
   promptSnapshotStore,
+  preferredAccessLevel: initialSettings.localAccessLevel,
   broadcast: broadcastToAllWindows,
 });
 llmChatService.setWorkspacePath(settingsStore.getAll().activeWorkspace || null);
@@ -272,6 +275,20 @@ ipcMain.handle('settings:update', (_event, partial) => {
     && normalizeSystemInstructions(before.systemInstructions) !== normalizeSystemInstructions(next.systemInstructions)
   ) {
     recordInstructionBaseline(next.systemInstructions);
+  }
+  if (
+    partial
+    && typeof partial === 'object'
+    && !Array.isArray(partial)
+    && Object.prototype.hasOwnProperty.call(partial, 'localAccessLevel')
+  ) {
+    const accessLevel = resolveLocalAccessLevel(next.localAccessLevel);
+    sessionStore.setAccessLevel(accessLevel);
+    llmChatService.setLocalAccessLevel(accessLevel);
+    if (next.localAccessLevel !== accessLevel) {
+      settingsStore.merge({ localAccessLevel: accessLevel });
+      return { ...next, localAccessLevel: accessLevel };
+    }
   }
   return next;
 });

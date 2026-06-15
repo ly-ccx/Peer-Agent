@@ -118,4 +118,140 @@ describe('chat permission gate', () => {
     assert.equal(second.reason, 'local_user_approved_scope');
     assert.equal(events.length, 1);
   });
+
+  it('uses session local mode to auto-approve low and medium risk shell approvals only', async () => {
+    const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
+    const events = [];
+    const gate = createChatPermissionGate({ activeStreams, accessLevel: 'session_local' });
+    const webContents = createWebContents(events);
+    const decider = gate.createShellApprovalDecider({
+      webContents,
+      streamId: 's1',
+      toolCallId: 'shell-auto',
+      conversationId: 'c1',
+      workspacePath: '/workspace',
+    });
+
+    const lowRisk = await decider({
+      call: { toolCallId: 'local-shell-low' },
+      classification: {
+        command: 'pnpm test',
+        cwd: '/workspace',
+        category: 'project-command',
+        riskLevel: 'L2_local_write',
+        dataLevel: 'D1_internal',
+        reason: 'pnpm_project_command',
+      },
+      ruleDecision: { behavior: 'ask', reason: 'local_user_approval_required' },
+    });
+
+    assert.equal(lowRisk.granted, true);
+    assert.equal(lowRisk.reason, 'local_access_level_session');
+    assert.equal(events.length, 0);
+
+    const highRiskPromise = decider({
+      call: { toolCallId: 'local-shell-high' },
+      classification: {
+        command: 'sudo rm -rf /tmp/example',
+        cwd: '/workspace',
+        category: 'privileged',
+        riskLevel: 'L4_privileged',
+        dataLevel: 'D2_sensitive',
+        reason: 'privileged_command',
+      },
+      ruleDecision: { behavior: 'ask', reason: 'local_user_approval_required' },
+    });
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0].payload.call.toolCallId, 'chat-permission:shell-auto');
+    gate.settlePermissionRequest(events[0].payload.call.toolCallId, {
+      grantId: 'g-high',
+      toolCallId: events[0].payload.call.toolCallId,
+      granted: false,
+      duration: 'denied',
+      decidedAt: new Date().toISOString(),
+    });
+    const highRisk = await highRiskPromise;
+    assert.equal(highRisk.granted, false);
+    assert.equal(highRisk.reason, 'local_user_denied');
+  });
+
+  it('uses full local mode to auto-approve file writes and still ask for high-risk shell approvals', async () => {
+    const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
+    const events = [];
+    const gate = createChatPermissionGate({ activeStreams, accessLevel: 'full_local' });
+    const webContents = createWebContents(events);
+
+    const fileDecision = await gate.createFilePermissionRequester({
+      webContents,
+      streamId: 's1',
+      toolCallId: 'file-full',
+      conversationId: 'c1',
+    })({
+      tool: 'write_file',
+      args: { path: '/outside/full.txt', content: 'full' },
+      filePath: '/outside/full.txt',
+      workspacePath: '/workspace',
+    });
+
+    assert.equal(fileDecision.granted, true);
+    assert.equal(fileDecision.reason, 'local_access_level_full');
+    assert.equal(events.length, 0);
+
+    const highRiskPromise = gate.createShellApprovalDecider({
+      webContents,
+      streamId: 's1',
+      toolCallId: 'shell-full-high',
+      conversationId: 'c1',
+      workspacePath: '/workspace',
+    })({
+      call: { toolCallId: 'local-shell-full-high' },
+      classification: {
+        command: 'sudo launchctl unload system.plist',
+        cwd: '/workspace',
+        category: 'privileged',
+        riskLevel: 'L4_privileged',
+        dataLevel: 'D2_sensitive',
+        reason: 'privileged_command',
+      },
+      ruleDecision: { behavior: 'ask', reason: 'local_user_approval_required' },
+    });
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0].payload.call.capabilityId, 'local.shell.exec');
+    gate.settlePermissionRequest(events[0].payload.call.toolCallId, {
+      grantId: 'g-full-high',
+      toolCallId: events[0].payload.call.toolCallId,
+      granted: true,
+      duration: 'once',
+      decidedAt: new Date().toISOString(),
+    });
+    const highRisk = await highRiskPromise;
+    assert.equal(highRisk.granted, true);
+    assert.equal(highRisk.reason, 'local_user_approved_once');
+  });
+
+  it('updates access level at runtime through the main permission gate seam', async () => {
+    const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
+    const events = [];
+    const gate = createChatPermissionGate({ activeStreams });
+    const webContents = createWebContents(events);
+
+    assert.equal(gate.setAccessLevel('full_local'), 'full_local');
+    const fileDecision = await gate.createFilePermissionRequester({
+      webContents,
+      streamId: 's1',
+      toolCallId: 'file-runtime',
+      conversationId: 'c1',
+    })({
+      tool: 'write_file',
+      args: { path: '/outside/runtime.txt', content: 'runtime' },
+      filePath: '/outside/runtime.txt',
+      workspacePath: '/workspace',
+    });
+
+    assert.equal(fileDecision.granted, true);
+    assert.equal(fileDecision.reason, 'local_access_level_full');
+    assert.equal(events.length, 0);
+  });
 });
