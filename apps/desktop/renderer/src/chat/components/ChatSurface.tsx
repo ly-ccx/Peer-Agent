@@ -59,7 +59,7 @@ function accessLevelLabel(level: LocalAccessLevel, isZh: boolean): string {
 
 function accessLevelTitle(level: LocalAccessLevel, isZh: boolean): string {
   if (level === 'full_local') {
-    return isZh ? '自动批准文件写入和低/中风险命令；高危命令仍会询问' : 'Auto-approve file writes and low/medium-risk commands; high-risk commands still ask';
+    return isZh ? '自动批准所有本地工具调用；请只在信任当前任务时使用' : 'Auto-approve all local tool calls; use only when you trust the current task';
   }
   if (level === 'session_local') {
     return isZh ? '自动批准低/中风险命令；高风险动作仍会询问' : 'Auto-approve low/medium-risk commands; high-risk actions still ask';
@@ -671,12 +671,23 @@ export function ChatSurface({
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<ChatAttachment | null>(null);
   const [pendingPermissionCalls, setPendingPermissionCalls] = useState<ClientToolCall[]>([]);
   const [isThreadAtBottom, setIsThreadAtBottom] = useState(true);
   // 流式工具参数进度(Codex 式实时体感):工具调用参数(如 edit_file 的整文件内容)
   // 在落地为正式 tool-call 段之前会先以增量形式抵达,这里保存最近一次进度用于展示。
   // 仅为过程提示,不替代 Tool Result / Evidence。
   const [toolProgress, setToolProgress] = useState<ToolProgress | null>(null);
+
+  useEffect(() => {
+    if (!imagePreview) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setImagePreview(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [imagePreview]);
+
   // 任务续传(ADR 21):防止同一 resumeTask 被自动发送多次的一次性闸门。
   const resumeFiredRef = useRef<string | null>(null);
   const streamIdRef = useRef<string | null>(null);
@@ -704,9 +715,16 @@ export function ChatSurface({
       const last = prev[prev.length - 1];
       if (!last || last.role !== 'assistant') return prev;
       const segments = [...(last.segments || [])];
-      const lastSeg = segments[segments.length - 1];
-      if (lastSeg && lastSeg.type === 'thinking') {
-        segments[segments.length - 1] = { ...lastSeg, content: (lastSeg.content || '') + chunk };
+      let thinkingIndex = -1;
+      for (let index = segments.length - 1; index >= 0; index -= 1) {
+        if (segments[index]?.type === 'thinking') {
+          thinkingIndex = index;
+          break;
+        }
+      }
+      const thinkingSeg = thinkingIndex >= 0 ? segments[thinkingIndex] : null;
+      if (thinkingSeg?.type === 'thinking') {
+        segments[thinkingIndex] = { type: 'thinking', content: (thinkingSeg.content || '') + chunk };
       } else {
         segments.push({ type: 'thinking', content: chunk });
       }
@@ -715,7 +733,9 @@ export function ChatSurface({
   }, []);
 
   // 平滑打字机：网络 delta 进 buffer，rAF 泵匀速吐字，告别"一坨一坨"的生硬感。
-  const typewriter = useTypewriterStream(appendStreamText);
+  // 正文和深度思考分别用独立 buffer，避免两类 delta 在显示层互相串流。
+  const textTypewriter = useTypewriterStream(appendStreamText);
+  const thinkingTypewriter = useTypewriterStream(appendStreamThinking);
   const threadRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -795,7 +815,8 @@ export function ChatSurface({
     // 归零后由下方 reattach 按"新会话是否确有活跃流"重新点亮,仅以真值为准。
     setIsStreaming(false);
     streamIdRef.current = null;
-    typewriter.reset();
+    textTypewriter.reset();
+    thinkingTypewriter.reset();
     if (!conversationId) { setMessages([]); setTokenUsage(null); return; }
     setTokenUsage(null);
     let cancelled = false;
@@ -845,17 +866,18 @@ export function ChatSurface({
 
     const offDelta = clientApi.onChatStreamDelta(({ streamId, content }) => {
       if (streamId !== streamIdRef.current) return;
-      typewriter.push(content);
+      textTypewriter.push(content);
     });
 
     const offThinking = clientApi.onChatStreamThinking(({ streamId, content }) => {
       if (streamId !== streamIdRef.current) return;
-      appendStreamThinking(content);
+      thinkingTypewriter.push(content);
     });
 
     const offDone = clientApi.onChatStreamDone(({ streamId, usage, lifetimeUsage }) => {
       if (streamId !== streamIdRef.current) return;
-      typewriter.flush();
+      textTypewriter.flush();
+      thinkingTypewriter.flush();
       setIsStreaming(false);
       setIsCompacting(false);
       setActiveUsage(null);
@@ -914,7 +936,8 @@ export function ChatSurface({
 
     const offAborted = clientApi.onChatStreamAborted(({ streamId }) => {
       if (streamId !== streamIdRef.current) return;
-      typewriter.flush();
+      textTypewriter.flush();
+      thinkingTypewriter.flush();
       setIsStreaming(false);
       setIsCompacting(false);
       setActiveUsage(null);
@@ -942,7 +965,8 @@ export function ChatSurface({
       // Tool-call events can arrive while the typewriter still holds earlier text
       // deltas. Flush first so pre-call text is committed above the structured
       // tool-call segment instead of being appended below it later.
-      typewriter.flush();
+      textTypewriter.flush();
+      thinkingTypewriter.flush();
       // 参数已落地为正式 tool-call 段,过程提示让位给结构化段。
       setToolProgress(null);
       setMessages((prev) => {
@@ -985,7 +1009,8 @@ export function ChatSurface({
 
     const offError = clientApi.onChatStreamError(({ streamId, error, usage, lifetimeUsage }) => {
       if (streamId !== streamIdRef.current) return;
-      typewriter.flush();
+      textTypewriter.flush();
+      thinkingTypewriter.flush();
       setIsStreaming(false);
       setIsCompacting(false);
       setActiveUsage(null);
@@ -1356,7 +1381,7 @@ export function ChatSurface({
                 <>
                   {msg.content ? <p>{msg.content}</p> : null}
                   {msg.attachments?.length ? (
-                    <AttachmentStrip attachments={msg.attachments} readOnly isZh={isZh} />
+                    <AttachmentStrip attachments={msg.attachments} readOnly isZh={isZh} onPreviewImage={setImagePreview} />
                   ) : null}
                 </>
               ) : (
@@ -1468,6 +1493,7 @@ export function ChatSurface({
             <AttachmentStrip
               attachments={attachments}
               onRemove={removeAttachment}
+              onPreviewImage={setImagePreview}
               isZh={isZh}
             />
           ) : null}
@@ -1550,7 +1576,11 @@ export function ChatSurface({
             <Dropdown
               className="composer-dropdown composer-access-dropdown"
               value={localAccessLevel}
-              options={ACCESS_LEVELS.map((level) => ({ value: level, label: accessLevelLabel(level, isZh) }))}
+              options={ACCESS_LEVELS.map((level) => ({
+                value: level,
+                label: accessLevelLabel(level, isZh),
+                tone: level === 'full_local' ? 'danger' : undefined,
+              }))}
               onChange={(next) => {
                 if (isLocalAccessLevel(next)) changeLocalAccessLevel(next);
               }}
@@ -1572,6 +1602,9 @@ export function ChatSurface({
           />
         </div>
       </div>
+      {imagePreview?.kind === 'image' && imagePreview.dataUrl ? (
+        <ImagePreviewOverlay attachment={imagePreview} isZh={isZh} onClose={() => setImagePreview(null)} />
+      ) : null}
     </div>
   );
 }
@@ -1579,11 +1612,13 @@ export function ChatSurface({
 function AttachmentStrip({
   attachments,
   onRemove,
+  onPreviewImage,
   readOnly = false,
   isZh,
 }: {
   readonly attachments: readonly ChatAttachment[];
   readonly onRemove?: (id: string) => void;
+  readonly onPreviewImage?: (attachment: ChatAttachment) => void;
   readonly readOnly?: boolean;
   readonly isZh: boolean;
 }) {
@@ -1593,7 +1628,15 @@ function AttachmentStrip({
       {attachments.map((attachment) => (
         <div key={attachment.id} className={`attachment-chip ${attachment.kind}`}>
           {attachment.kind === 'image' && attachment.dataUrl ? (
-            <img src={attachment.dataUrl} alt={attachment.name} className="attachment-thumb" />
+            <button
+              type="button"
+              className="attachment-thumb-btn"
+              onClick={() => onPreviewImage?.(attachment)}
+              title={isZh ? '预览图片' : 'Preview image'}
+              aria-label={isZh ? `预览图片 ${attachment.name}` : `Preview image ${attachment.name}`}
+            >
+              <img src={attachment.dataUrl} alt="" className="attachment-thumb" />
+            </button>
           ) : (
             <span className="attachment-file-icon" aria-hidden="true">
               {attachment.kind === 'text' ? 'TXT' : 'FILE'}
@@ -1626,6 +1669,31 @@ function AttachmentStrip({
           ) : null}
         </div>
       ))}
+    </div>
+  );
+}
+
+function ImagePreviewOverlay({
+  attachment,
+  isZh,
+  onClose,
+}: {
+  readonly attachment: ChatAttachment;
+  readonly isZh: boolean;
+  readonly onClose: () => void;
+}) {
+  return (
+    <div className="image-preview-overlay" role="dialog" aria-modal="true" aria-label={attachment.name} onClick={onClose}>
+      <figure className="image-preview-card" onClick={(event) => event.stopPropagation()}>
+        <img src={attachment.dataUrl ?? ''} alt={attachment.name} className="image-preview-img" />
+        <figcaption className="image-preview-caption">
+          <span className="image-preview-name">{attachment.name}</span>
+          <span className="image-preview-size">{formatBytes(attachment.size)}</span>
+          <button type="button" className="image-preview-close" onClick={onClose} aria-label={isZh ? '关闭预览' : 'Close preview'}>
+            ×
+          </button>
+        </figcaption>
+      </figure>
     </div>
   );
 }

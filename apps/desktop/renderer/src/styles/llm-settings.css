@@ -449,6 +449,21 @@
 .pa-dropdown-item.selected {
   font-weight: 600;
 }
+.pa-dropdown-item.danger {
+  color: var(--state-danger);
+}
+.pa-dropdown-item.danger:hover,
+.pa-dropdown-item.danger.active {
+  background: var(--za-danger-soft);
+}
+.pa-dropdown-item.danger .pa-dropdown-check {
+  color: var(--state-danger);
+}
+.pa-dropdown-danger .pa-dropdown-trigger {
+  color: var(--state-danger);
+  border-color: rgba(122, 62, 80, 0.22);
+  background: var(--za-danger-soft);
+}
 .pa-dropdown-check {
   width: 14px;
   flex-shrink: 0;

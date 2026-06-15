@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 export interface DropdownOption {
   readonly value: string;
   readonly label: string;
+  readonly tone?: 'danger';
 }
 
 // 暗色自定义下拉，替代原生 <select>(原生在 macOS 会套系统皮，与暗色设计语言割裂)。
@@ -101,6 +102,7 @@ export function Dropdown({
   const rootClassName = [
     'pa-dropdown',
     menuPlacement === 'up' ? 'pa-dropdown-up' : '',
+    selected?.tone === 'danger' ? 'pa-dropdown-danger' : '',
     className ?? '',
   ]
     .filter(Boolean)
@@ -143,7 +145,7 @@ export function Dropdown({
               type="button"
               role="option"
               aria-selected={opt.value === value}
-              className={`pa-dropdown-item ${index === activeIndex ? 'active' : ''} ${opt.value === value ? 'selected' : ''}`}
+              className={`pa-dropdown-item ${index === activeIndex ? 'active' : ''} ${opt.value === value ? 'selected' : ''} ${opt.tone === 'danger' ? 'danger' : ''}`}
               onMouseEnter={() => setActiveIndex(index)}
               onMouseDown={(event) => {
                 event.preventDefault();
