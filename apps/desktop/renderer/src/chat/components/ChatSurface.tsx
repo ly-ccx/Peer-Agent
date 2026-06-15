@@ -19,6 +19,7 @@ import { useTypewriterStream } from '../hooks/useTypewriterStream';
 const MAX_ATTACHMENTS = 8;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_TEXT_FILE_BYTES = 512 * 1024;
+const SCROLL_BOTTOM_THRESHOLD_PX = 64;
 
 interface ChatAttachment {
   id: string;
@@ -620,6 +621,7 @@ export function ChatSurface({
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [pendingPermissionCalls, setPendingPermissionCalls] = useState<ClientToolCall[]>([]);
+  const [isThreadAtBottom, setIsThreadAtBottom] = useState(true);
   // 流式工具参数进度(Codex 式实时体感):工具调用参数(如 edit_file 的整文件内容)
   // 在落地为正式 tool-call 段之前会先以增量形式抵达,这里保存最近一次进度用于展示。
   // 仅为过程提示,不替代 Tool Result / Evidence。
@@ -666,8 +668,30 @@ export function ChatSurface({
   // 平滑打字机：网络 delta 进 buffer，rAF 泵匀速吐字，告别"一坨一坨"的生硬感。
   const typewriter = useTypewriterStream(appendStreamText);
   const threadRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const updateThreadBottomState = useCallback((container: HTMLDivElement | null) => {
+    if (!container) return true;
+    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const atBottom = distanceToBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
+    shouldAutoScrollRef.current = atBottom;
+    setIsThreadAtBottom(atBottom);
+    return atBottom;
+  }, []);
+
+  const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const container = threadRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior });
+    shouldAutoScrollRef.current = true;
+    setIsThreadAtBottom(true);
+  }, []);
+
+  const handleThreadScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    updateThreadBottomState(event.currentTarget);
+  }, [updateThreadBottomState]);
 
   // 表达层导航:点击右侧消息轨时,把对应用户消息滚动到视口并短暂高亮。
   // 仅操作已渲染的 DOM 锚点(data-msg-id),不触碰会话真值。
@@ -714,6 +738,8 @@ export function ChatSurface({
     setAttachmentError(null);
     setPendingPermissionCalls([]);
     setProviderRecoveryNotice(null);
+    shouldAutoScrollRef.current = true;
+    setIsThreadAtBottom(true);
     // 切换会话时,先把流式表达状态按会话归零,避免上一会话的 isStreaming/streamId 残留:
     // 否则从"正在输出的 A"切到"未运行的 B",B 会误显示运行中(左侧列表 Loading、
     // 右下角停止按钮误亮),且旧会话的 delta 仍匹配旧 streamIdRef 污染新会话消息。
@@ -979,8 +1005,12 @@ export function ChatSurface({
   }, [appendStreamThinking, conversationId, onConversationUpdated]);
 
   useEffect(() => {
-    if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
-  }, [messages]);
+    if (shouldAutoScrollRef.current) {
+      scrollThreadToBottom('auto');
+      return;
+    }
+    updateThreadBottomState(threadRef.current);
+  }, [messages, scrollThreadToBottom, updateThreadBottomState]);
 
   useEffect(() => {
     setActiveSlashIndex(0);
@@ -1228,10 +1258,12 @@ export function ChatSurface({
     else if (action === 'delete') void handleDeleteMessage(msgIndex);
   }, [handleRegenerate, handleBranch, handleDeleteMessage]);
 
+  const showScrollToBottom = messages.length > 0 && !isThreadAtBottom;
+
   if (!conversationId) {
     return (
       <div className="chat-surface">
-        <div className="chat-thread" ref={threadRef}>
+        <div className="chat-thread" ref={threadRef} onScroll={handleThreadScroll}>
           <div className="chat-empty-state">
             <h2>{isZh ? '有什么可以帮你的？' : 'How can I help you?'}</h2>
             {!hasProvider ? (
@@ -1253,7 +1285,7 @@ export function ChatSurface({
 
   return (
     <div className="chat-surface">
-      <div className="chat-thread" ref={threadRef}>
+      <div className="chat-thread" ref={threadRef} onScroll={handleThreadScroll}>
         {messages.length === 0 ? (
           <div className="chat-empty-state">
             <p>{isZh ? '输入消息开始对话' : 'Type a message to start'}</p>
@@ -1338,6 +1370,18 @@ export function ChatSurface({
       </div>
 
       <MessageRail items={railItems} onSelect={scrollToMessage} i18n={i18n} />
+
+      {showScrollToBottom ? (
+        <button
+          type="button"
+          className="chat-scroll-bottom-btn"
+          onClick={() => scrollThreadToBottom('smooth')}
+          aria-label={isZh ? '滚动到底部' : 'Scroll to bottom'}
+          title={isZh ? '滚动到底部' : 'Scroll to bottom'}
+        >
+          <span aria-hidden="true">↓</span>
+        </button>
+      ) : null}
 
       <div className="chat-composer-wrap">
         <PermissionGateStrip

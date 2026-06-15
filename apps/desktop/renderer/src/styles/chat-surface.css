@@ -61,6 +61,39 @@
   border-bottom-color: var(--azure-seal);
 }
 
+.chat-scroll-bottom-btn {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--space-5) + 116px);
+  transform: translateX(-50%);
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 999px;
+  background: var(--paper-sheet);
+  color: var(--graphite-base);
+  box-shadow: var(--shadow-popover);
+  cursor: pointer;
+  transition:
+    transform var(--za-motion-fast) var(--za-ease-standard),
+    border-color var(--za-motion-fast),
+    box-shadow var(--za-motion-fast);
+}
+
+.chat-scroll-bottom-btn:hover {
+  transform: translateX(-50%) translateY(-1px);
+  border-color: var(--azure-trace);
+}
+
+.chat-scroll-bottom-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--za-focus), var(--shadow-popover);
+}
+
 /* ── Messages ── */
 .chat-msg {
   max-width: 740px;
