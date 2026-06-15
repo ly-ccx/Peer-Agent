@@ -160,6 +160,11 @@ export function App() {
     await refreshConversations();
   }, [activeConversationId, refreshConversations]);
 
+  const handleRenameConversation = useCallback(async (id: string, title: string) => {
+    await clientApi.conversationsUpdateTitle({ id, title: title.trim() });
+    await refreshConversations();
+  }, [refreshConversations]);
+
   return (
     <main className="app-shell">
       {session && activePage === 'settings' ? (
@@ -186,6 +191,7 @@ export function App() {
             onNewChat={handleNewChat}
             onSelectConversation={handleSelectConversation}
             onDeleteConversation={handleDeleteConversation}
+            onRenameConversation={handleRenameConversation}
             onOpenSettings={() => setActivePage('settings')}
             onWorkspaceChanged={handleWorkspaceChanged}
           />

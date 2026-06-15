@@ -176,7 +176,7 @@ describe('chat permission gate', () => {
     assert.equal(highRisk.reason, 'local_user_denied');
   });
 
-  it('uses full local mode to auto-approve file writes and still ask for high-risk shell approvals', async () => {
+  it('uses full local mode to auto-approve file writes and all shell approvals', async () => {
     const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
     const events = [];
     const gate = createChatPermissionGate({ activeStreams, accessLevel: 'full_local' });
@@ -198,7 +198,7 @@ describe('chat permission gate', () => {
     assert.equal(fileDecision.reason, 'local_access_level_full');
     assert.equal(events.length, 0);
 
-    const highRiskPromise = gate.createShellApprovalDecider({
+    const highRisk = await gate.createShellApprovalDecider({
       webContents,
       streamId: 's1',
       toolCallId: 'shell-full-high',
@@ -207,28 +207,19 @@ describe('chat permission gate', () => {
     })({
       call: { toolCallId: 'local-shell-full-high' },
       classification: {
-        command: 'sudo launchctl unload system.plist',
+        command: 'sudo rm -rf /tmp/example',
         cwd: '/workspace',
-        category: 'privileged',
-        riskLevel: 'L4_privileged',
+        category: 'destructive',
+        riskLevel: 'L5_destructive',
         dataLevel: 'D2_sensitive',
-        reason: 'privileged_command',
+        reason: 'destructive_command',
       },
       ruleDecision: { behavior: 'ask', reason: 'local_user_approval_required' },
     });
 
-    assert.equal(events.length, 1);
-    assert.equal(events[0].payload.call.capabilityId, 'local.shell.exec');
-    gate.settlePermissionRequest(events[0].payload.call.toolCallId, {
-      grantId: 'g-full-high',
-      toolCallId: events[0].payload.call.toolCallId,
-      granted: true,
-      duration: 'once',
-      decidedAt: new Date().toISOString(),
-    });
-    const highRisk = await highRiskPromise;
     assert.equal(highRisk.granted, true);
-    assert.equal(highRisk.reason, 'local_user_approved_once');
+    assert.equal(highRisk.reason, 'local_access_level_full');
+    assert.equal(events.length, 0);
   });
 
   it('updates access level at runtime through the main permission gate seam', async () => {

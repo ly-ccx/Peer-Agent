@@ -17,8 +17,10 @@ const READ_ONLY_COMMANDS = new Set([
   'grep',
   'head',
   'ls',
+  'printf',
   'pwd',
   'rg',
+  'sed',
   'tail',
   'wc',
   'whoami',
@@ -32,7 +34,6 @@ const WRITE_COMMANDS = new Set([
   'mkdir',
   'mv',
   'perl',
-  'sed',
   'tee',
   'touch',
 ]);

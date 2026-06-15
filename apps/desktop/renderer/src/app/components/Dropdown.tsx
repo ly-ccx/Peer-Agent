@@ -16,6 +16,9 @@ export function Dropdown({
   disabled = false,
   placeholder,
   ariaLabel,
+  className,
+  title,
+  menuPlacement = 'down',
 }: {
   readonly value: string;
   readonly options: readonly DropdownOption[];
@@ -23,6 +26,9 @@ export function Dropdown({
   readonly disabled?: boolean;
   readonly placeholder?: string;
   readonly ariaLabel?: string;
+  readonly className?: string;
+  readonly title?: string;
+  readonly menuPlacement?: 'down' | 'up';
 }) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -92,8 +98,16 @@ export function Dropdown({
     }
   };
 
+  const rootClassName = [
+    'pa-dropdown',
+    menuPlacement === 'up' ? 'pa-dropdown-up' : '',
+    className ?? '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <div className="pa-dropdown" ref={rootRef}>
+    <div className={rootClassName} ref={rootRef} title={title}>
       <button
         type="button"
         className={`pa-dropdown-trigger ${open ? 'open' : ''}`}
@@ -106,9 +120,20 @@ export function Dropdown({
         onKeyDown={onTriggerKeyDown}
       >
         <span className="pa-dropdown-value">{triggerLabel}</span>
-        <span className="pa-dropdown-caret" aria-hidden>
-          ▾
-        </span>
+        <svg
+          className="pa-dropdown-caret"
+          aria-hidden
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
       </button>
       {open ? (
         <div className="pa-dropdown-menu" role="listbox" id={listId} aria-label={ariaLabel}>

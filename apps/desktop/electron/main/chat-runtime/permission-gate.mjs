@@ -143,7 +143,8 @@ function maybeCreateAutoGrantForFile({ accessLevel, call }) {
 }
 
 function shouldAutoApproveShellForAccessLevel(accessLevel, riskLevel) {
-  if (accessLevel !== 'session_local' && accessLevel !== 'full_local') return false;
+  if (accessLevel === 'full_local') return true;
+  if (accessLevel !== 'session_local') return false;
   return compareShellRisk(riskLevel, 'L3_external_write') <= 0;
 }
 

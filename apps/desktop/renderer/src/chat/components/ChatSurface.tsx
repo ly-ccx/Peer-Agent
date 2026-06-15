@@ -9,6 +9,7 @@ import type {
 } from '@peer-agent/protocol';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Dropdown, type DropdownOption } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import { MarkdownMessage } from './markdown/MarkdownMessage';
@@ -67,6 +68,14 @@ function accessLevelTitle(level: LocalAccessLevel, isZh: boolean): string {
     return isZh ? '使用受限本地访问' : 'Use restricted local access';
   }
   return isZh ? '所有本地动作都先询问' : 'Ask before local actions';
+}
+
+function effortLabel(level: EffortLevel, isZh: boolean): string {
+  if (level === 'off') return isZh ? '关闭思考' : 'Reasoning off';
+  if (level === 'low') return isZh ? '简洁思考' : 'Low reasoning';
+  if (level === 'high') return isZh ? '深度思考' : 'High reasoning';
+  if (level === 'xhigh') return isZh ? '超深度思考' : 'Extra-high reasoning';
+  return isZh ? '标准思考' : 'Default reasoning';
 }
 
 type ChatApiContentPart =
@@ -1545,40 +1554,29 @@ export function ChatSurface({
         </form>
         <div className="chat-composer-toolbar">
           <div className="chat-composer-toolbar-left">
-            <div className="access-selector" aria-label={isZh ? '本地访问模式' : 'Local access mode'}>
-              {ACCESS_LEVELS.map((level) => (
-                <button
-                  key={level}
-                  type="button"
-                  className={`access-btn ${localAccessLevel === level ? 'active' : ''}`}
-                  onClick={() => changeLocalAccessLevel(level)}
-                  title={accessLevelTitle(level, isZh)}
-                >
-                  {level === 'full_local' ? '⚠ ' : ''}{accessLevelLabel(level, isZh)}
-                </button>
-              ))}
-            </div>
-            {activeProviderSupportsReasoning ? (
-              <div className="effort-selector">
-                {effortLevels.map((level) => (
-                  <button
-                    key={level}
-                    type="button"
-                    className={`effort-btn ${effort === level ? 'active' : ''}`}
-                    onClick={() => changeEffort(level)}
-                    title={level}
-                  >
-                    {level === 'off' ? (isZh ? '关闭' : 'Off')
-                      : level === 'low' ? (isZh ? '简洁' : 'Low')
-                      : level === 'high' ? (isZh ? '深度' : 'High')
-                      : level === 'xhigh' ? (isZh ? '超深度' : 'Extra High')
-                      : (isZh ? '标准' : 'Default')}
-                  </button>
-                ))}
-              </div>
-            ) : null}
+            <Dropdown
+              className="composer-dropdown composer-access-dropdown"
+              value={localAccessLevel}
+              options={ACCESS_LEVELS.map((level) => ({ value: level, label: accessLevelLabel(level, isZh) }))}
+              onChange={(next) => {
+                if (isLocalAccessLevel(next)) changeLocalAccessLevel(next);
+              }}
+              ariaLabel={isZh ? '本地访问模式' : 'Local access mode'}
+              title={accessLevelTitle(localAccessLevel, isZh)}
+              menuPlacement="up"
+            />
           </div>
-          <TokenUsageDisplay providers={providers} tokenUsage={tokenUsage} activeUsage={activeUsage} contextTokens={estimatedContextTokens} isStreaming={isStreaming} isZh={isZh} />
+          <TokenUsageDisplay
+            providers={providers}
+            tokenUsage={tokenUsage}
+            activeUsage={activeUsage}
+            contextTokens={estimatedContextTokens}
+            isStreaming={isStreaming}
+            isZh={isZh}
+            effort={effort}
+            effortLevels={activeProviderSupportsReasoning ? effortLevels : []}
+            onEffortChange={changeEffort}
+          />
         </div>
       </div>
     </div>
@@ -1860,13 +1858,16 @@ function CompactionSummaryCard({ compaction, isZh }: { readonly compaction: Comp
   );
 }
 
-function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, isStreaming, isZh }: {
+function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, isStreaming, isZh, effort, effortLevels, onEffortChange }: {
   readonly providers: readonly LlmProviderConfigView[];
   readonly tokenUsage: TokenUsageState | null;
   readonly activeUsage?: TokenUsageState | null;
   readonly contextTokens?: number;
   readonly isStreaming?: boolean;
   readonly isZh: boolean;
+  readonly effort: EffortLevel;
+  readonly effortLevels: readonly EffortLevel[];
+  readonly onEffortChange: (level: EffortLevel) => void;
 }) {
   const defaultProvider = providers.find((p) => p.isDefault && p.apiKeyConfigured) || providers.find((p) => p.apiKeyConfigured);
   const hasInfo = tokenUsage || activeUsage || contextTokens || defaultProvider?.contextWindow || defaultProvider?.inputPrice != null;
@@ -1893,22 +1894,26 @@ function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, 
 
   const ctxWindow = defaultProvider?.contextWindow;
   const ctxPercent = ctxWindow ? Math.min((currentContextTokens / ctxWindow) * 100, 100) : null;
-
-  // ADR 23: 缓存命中率 = 缓存读取 token / 总输入 token(新输入 + 缓存读取)。
-  // 反映本次会话有多少输入是从 provider 缓存命中的,占比越高越省钱。
-  // 仅当该 provider 开启了 prompt caching 时才显示——未开启时缓存命中率恒为 0,
-  // 展示它只会误导(让人以为缓存没生效),所以直接隐藏。
-  const totalInputForCache = input + cacheRead;
-  const cacheHitRate =
-    defaultProvider?.supportsPromptCaching && totalInputForCache > 0
-      ? (cacheRead / totalInputForCache) * 100
-      : null;
+  const effortOptions: readonly DropdownOption[] = effortLevels.map((level) => ({ value: level, label: effortLabel(level, isZh) }));
 
   return (
     <div className="token-usage-wrap">
       <span className="token-usage">
         {defaultProvider?.model ? (
           <span className="token-usage-model" title={isZh ? '当前会话使用的模型' : 'Model used for this conversation'}>{defaultProvider.model}</span>
+        ) : null}
+        {effortOptions.length > 0 ? (
+          <Dropdown
+            className="composer-dropdown composer-effort-dropdown"
+            value={effort}
+            options={effortOptions}
+            onChange={(next) => {
+              if (isEffortLevel(next)) onEffortChange(next);
+            }}
+            ariaLabel={isZh ? '思考深度' : 'Reasoning effort'}
+            title={isZh ? '思考深度' : 'Reasoning effort'}
+            menuPlacement="up"
+          />
         ) : null}
         {ctxWindow ? (
           <>{isZh ? '上下文' : 'Ctx'} {formatTokenCount(currentContextTokens)}<span className="token-usage-detail"> / {formatTokenCount(ctxWindow)}</span></>
@@ -1925,18 +1930,6 @@ function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, 
             }
           >
             {costStr}
-          </span>
-        ) : null}
-        {cacheHitRate != null ? (
-          <span
-            className="token-usage-detail"
-            title={
-              isZh
-                ? '由模型服务返回的缓存读取 token / 总输入 token 计算；为当前会话累计值。'
-                : 'Provider-reported cached input tokens / total input tokens. Cumulative for this conversation.'
-            }
-          >
-            {cacheHitRate.toFixed(0)}%
           </span>
         ) : null}
         {isStreaming && !activeUsage ? <span className="token-usage-detail">{isZh ? '计费待返回' : 'usage pending'}</span> : null}

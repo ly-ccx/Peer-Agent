@@ -383,38 +383,59 @@
   flex-wrap: wrap;
 }
 
-.access-selector,
-.effort-selector {
-  display: flex;
-  gap: 1px;
-  background: var(--chrome-sunken);
-  border-radius: var(--radius-sm);
-  padding: 2px;
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
-.access-btn,
-.effort-btn {
-  background: none;
-  border: none;
-  color: var(--graphite-mute);
-  font-size: 0.7rem;
-  padding: 3px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all var(--za-motion-fast);
+
+.composer-dropdown.pa-dropdown {
+  min-width: 0;
+}
+
+.composer-dropdown .pa-dropdown-trigger {
+  min-height: 28px;
+  padding: 0 10px;
+  border-color: transparent;
+  border-radius: var(--radius-sm);
+  background: var(--chrome-sunken);
+  color: var(--graphite-soft);
+  font-size: 0.68rem;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.composer-dropdown .pa-dropdown-trigger:hover:not(:disabled),
+.composer-dropdown .pa-dropdown-trigger.open {
+  background: var(--control-composer);
+  border-color: var(--azure-trace);
+  color: var(--graphite-base);
+}
+
+.composer-dropdown .pa-dropdown-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.access-btn:hover,
-.effort-btn:hover {
-  color: var(--graphite-soft);
+
+.composer-access-dropdown {
+  width: 128px;
 }
-.access-btn.active,
-.effort-btn.active {
-  background: var(--chrome-canvas);
-  color: var(--graphite-base);
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+
+.composer-effort-dropdown {
+  width: 132px;
+  font-family: var(--font-mono);
 }
-.access-btn.active {
-  color: var(--warning-ink, var(--graphite-base));
+
+.composer-effort-dropdown .pa-dropdown-menu {
+  min-width: 132px;
 }
 
 .token-usage-wrap {

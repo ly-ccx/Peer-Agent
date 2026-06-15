@@ -1,5 +1,5 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 
 interface ConversationMeta {
@@ -31,6 +31,7 @@ export function Sidebar({
   onNewChat,
   onSelectConversation,
   onDeleteConversation,
+  onRenameConversation,
   onOpenSettings,
   onWorkspaceChanged,
 }: {
@@ -45,12 +46,17 @@ export function Sidebar({
   readonly onNewChat: () => void;
   readonly onSelectConversation: (id: string) => void;
   readonly onDeleteConversation: (id: string) => void;
+  readonly onRenameConversation: (id: string, title: string) => void | Promise<void>;
   readonly onOpenSettings: () => void;
   readonly onWorkspaceChanged?: () => Promise<void> | void;
 }) {
   const isZh = i18n.locale === 'zh-CN';
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const editingInputRef = useRef<HTMLInputElement | null>(null);
+  const isFinishingRenameRef = useRef(false);
   const [workspaces, setWorkspaces] = useState<readonly WorkspaceEntry[]>([]);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
   const [wsInfo, setWsInfo] = useState<WorkspaceInfo | null>(null);
@@ -99,6 +105,37 @@ export function Sidebar({
     await refreshWorkspaces();
     onWorkspaceChanged?.();
   }, [refreshWorkspaces, onWorkspaceChanged]);
+
+  useEffect(() => {
+    if (!editingConversationId) return;
+    editingInputRef.current?.focus();
+    editingInputRef.current?.select();
+  }, [editingConversationId]);
+
+  const beginRenameConversation = useCallback((conv: ConversationMeta) => {
+    isFinishingRenameRef.current = false;
+    setConfirmDeleteId(null);
+    setEditingConversationId(conv.id);
+    setEditingTitle(conv.title);
+  }, []);
+
+  const finishRenameConversation = useCallback(() => {
+    isFinishingRenameRef.current = true;
+    setEditingConversationId(null);
+    setEditingTitle('');
+  }, []);
+
+  const cancelRenameConversation = useCallback(() => {
+    finishRenameConversation();
+  }, [finishRenameConversation]);
+
+  const submitRenameConversation = useCallback(async (conv: ConversationMeta) => {
+    if (isFinishingRenameRef.current) return;
+    const nextTitle = editingTitle.trim();
+    finishRenameConversation();
+    if (!nextTitle || nextTitle === conv.title) return;
+    await onRenameConversation(conv.id, nextTitle);
+  }, [editingTitle, finishRenameConversation, onRenameConversation]);
 
   return (
     <aside className="app-sidebar">
@@ -193,7 +230,35 @@ export function Sidebar({
                 title={isZh ? '运行中' : 'Running'}
               />
             ) : null}
-            <span className="sidebar-conv-title">{conv.title || (isZh ? '新对话' : 'New Chat')}</span>
+            {editingConversationId === conv.id ? (
+              <input
+                ref={editingInputRef}
+                className="sidebar-conv-title-input"
+                value={editingTitle}
+                maxLength={80}
+                aria-label={isZh ? '编辑对话标题' : 'Edit conversation title'}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setEditingTitle(e.target.value)}
+                onBlur={() => { void submitRenameConversation(conv); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void submitRenameConversation(conv);
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelRenameConversation();
+                  }
+                }}
+              />
+            ) : (
+              <span
+                className="sidebar-conv-title"
+                title={isZh ? '双击编辑标题' : 'Double-click to edit title'}
+                onDoubleClick={(e) => { e.stopPropagation(); beginRenameConversation(conv); }}
+              >
+                {conv.title || (isZh ? '新对话' : 'New Chat')}
+              </span>
+            )}
             {confirmDeleteId === conv.id ? (
               <span className="sidebar-conv-confirm" onClick={(e) => e.stopPropagation()}>
                 <button type="button" className="confirm-yes" onClick={() => { setConfirmDeleteId(null); onDeleteConversation(conv.id); }}>
@@ -204,11 +269,26 @@ export function Sidebar({
                 </button>
               </span>
             ) : hoveredId === conv.id ? (
-              <button
-                type="button"
-                className="sidebar-conv-delete"
-                onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(conv.id); }}
-              >×</button>
+              <span className="sidebar-conv-actions" onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  className="sidebar-conv-edit"
+                  title={isZh ? '编辑标题' : 'Edit title'}
+                  aria-label={isZh ? '编辑标题' : 'Edit title'}
+                  onClick={() => beginRenameConversation(conv)}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className="sidebar-conv-delete"
+                  aria-label={isZh ? '删除对话' : 'Delete conversation'}
+                  onClick={() => setConfirmDeleteId(conv.id)}
+                >×</button>
+              </span>
             ) : null}
           </div>
         ))}
