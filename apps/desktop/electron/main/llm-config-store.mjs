@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { pathOf } from './data-store.mjs';
 import { deriveOAuthStatus, resolveSubscriptionTestResult } from './provider-connectivity.mjs';
+import { DEFAULT_SUBSCRIPTION_MODEL, SUBSCRIPTION_MODEL_IDS } from './provider-adapters/openai-model-catalog.mjs';
 
 function encrypt(plaintext) {
   if (!plaintext) return { encrypted: false, data: '' };
@@ -65,11 +66,39 @@ function oauthStatusOf(item) {
 }
 
 export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {}) {
+  // 订阅(codex 平面)provider 的就地迁移:
+  // - 旧版默认 model 是 gpt-5 / gpt-5-codex(按量计费命名),订阅平面已不适用;
+  //   非合法订阅 id 一律纠正为权威默认(gpt-5.5)。
+  // - 订阅链路原生支持思考强度(reasoning),历史记录里 supportsReasoning 多为 false,
+  //   统一开启,使聊天区出现思考强度档位。
+  // 返回是否发生改动,供 readAll 决定是否回写。
+  function migrateSubscriptionItem(item) {
+    if (!item || item.authMethod !== 'oauth_chatgpt') return false;
+    let changed = false;
+    if (!item.model || !SUBSCRIPTION_MODEL_IDS.has(item.model)) {
+      item.model = DEFAULT_SUBSCRIPTION_MODEL;
+      changed = true;
+    }
+    if (item.supportsReasoning !== true) {
+      item.supportsReasoning = true;
+      changed = true;
+    }
+    return changed;
+  }
+
   function readAll() {
     if (!existsSync(configFile)) return [];
     try {
       const parsed = JSON.parse(readFileSync(configFile, 'utf8'));
-      return Array.isArray(parsed) ? parsed : [];
+      if (!Array.isArray(parsed)) return [];
+      let migrated = false;
+      for (const item of parsed) {
+        if (migrateSubscriptionItem(item)) migrated = true;
+      }
+      if (migrated) {
+        try { writeAll(parsed); } catch { /* 回写失败不影响本次读取 */ }
+      }
+      return parsed;
     } catch {
       return [];
     }
@@ -126,7 +155,8 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       authMethod: method,
       name: isSubscription ? CHATGPT_SUBSCRIPTION_NAME : name || provider || 'Untitled',
       baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : baseUrl || defaults.baseUrl,
-      model: model || (isSubscription ? '' : defaults.model),
+      // 订阅默认落到权威清单的最新模型(gpt-5.5),非订阅沿用各家 preset。
+      model: model || (isSubscription ? DEFAULT_SUBSCRIPTION_MODEL : defaults.model),
       apiKey: encrypt(isSubscription ? '' : apiKey || ''),
       oauthTokens: encrypt(''),
       enabled: true,
@@ -138,7 +168,8 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       cacheWritePrice: cacheWritePrice ?? undefined,
       cacheReadPrice: cacheReadPrice ?? undefined,
       supportsVision: supportsVision ?? false,
-      supportsReasoning: supportsReasoning ?? false,
+      // 订阅链路(codex/responses)原生支持思考强度,默认开启。
+      supportsReasoning: isSubscription ? true : (supportsReasoning ?? false),
       supportsPromptCaching: supportsPromptCaching ?? false,
     };
     items.push(item);

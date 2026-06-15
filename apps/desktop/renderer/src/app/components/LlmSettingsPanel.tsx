@@ -61,7 +61,7 @@ export function LlmSettingsPanel({
   const [testResults, setTestResults] = useState<Record<string, LlmProviderTestResult>>({});
   const [testingId, setTestingId] = useState<string | null>(null);
   const [oauthBusyId, setOauthBusyId] = useState<string | null>(null);
-  // ADR 28(方案 B): 订阅 provider 的远程模型清单与加载态(按 provider id 维度)。
+  // ADR 28(方案 B): 订阅 provider 的模型清单与加载态(按 provider id 维度)。
   const [modelLists, setModelLists] = useState<Record<string, readonly LlmModelInfo[]>>({});
   const [modelLoadingId, setModelLoadingId] = useState<string | null>(null);
 

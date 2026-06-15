@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  SUBSCRIPTION_CATALOG,
   FALLBACK_MODELS,
+  DEFAULT_SUBSCRIPTION_MODEL,
+  SUBSCRIPTION_MODEL_IDS,
   isChatModel,
   isSubscriptionUsableModel,
   listSubscriptionModels,
@@ -9,7 +12,7 @@ import {
 } from './openai-model-catalog.mjs';
 
 test('isChatModel keeps gpt/o families, drops non-chat', () => {
-  assert.equal(isChatModel('gpt-5-codex'), true);
+  assert.equal(isChatModel('gpt-5.5'), true);
   assert.equal(isChatModel('gpt-4o'), true);
   assert.equal(isChatModel('o3'), true);
   assert.equal(isChatModel('chatgpt-4o-latest'), true);
@@ -30,65 +33,45 @@ test('sortNewestFirst orders by created desc, missing last', () => {
   assert.deepEqual(sorted.map((m) => m.id), ['c', 'd', 'a', 'b']);
 });
 
-test('listSubscriptionModels falls back when no access token', async () => {
-  const res = await listSubscriptionModels({});
-  assert.equal(res.source, 'fallback');
-  assert.equal(res.models[0].id, FALLBACK_MODELS[0].id);
+test('subscription catalog: default is newest (gpt-5.5) and first entry', () => {
+  assert.equal(DEFAULT_SUBSCRIPTION_MODEL, 'gpt-5.5');
+  assert.equal(SUBSCRIPTION_CATALOG[0].id, 'gpt-5.5');
+  // FALLBACK_MODELS 是同一份清单的兼容别名。
+  assert.equal(FALLBACK_MODELS, SUBSCRIPTION_CATALOG);
 });
 
-test('listSubscriptionModels falls back on non-ok response', async () => {
-  const fetchImpl = async () => ({ ok: false, status: 401, text: async () => 'unauthorized' });
-  const res = await listSubscriptionModels({ access: 'tok' }, { fetchImpl });
-  assert.equal(res.source, 'fallback');
-  assert.match(res.error, /401/);
+test('subscription model id set covers the catalog, excludes API-only ids', () => {
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.5'), true);
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.4'), true);
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.4-mini'), true);
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.3-codex-spark'), true);
+  // 旧的按量计费命名不在订阅集合内,触发迁移。
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5'), false);
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5-codex'), false);
+});
+
+test('listSubscriptionModels returns built-in authoritative catalog (no network)', async () => {
+  // codex 订阅平面无列模型接口:内置清单即权威目录,source='builtin',永不发起请求。
+  const res = await listSubscriptionModels({ access: 'tok', accountId: 'acct' });
+  assert.equal(res.source, 'builtin');
+  assert.equal(res.error, undefined);
+  assert.deepEqual(
+    res.models.map((m) => m.id),
+    ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
+  );
+});
+
+test('listSubscriptionModels returns a copy (caller cannot mutate catalog)', async () => {
+  const res = await listSubscriptionModels({});
+  res.models.push({ id: 'x', label: 'x' });
+  assert.equal(SUBSCRIPTION_CATALOG.length, 4);
 });
 
 test('isSubscriptionUsableModel keeps gpt-5 family, drops API-only models', () => {
-  assert.equal(isSubscriptionUsableModel('gpt-5'), true);
-  assert.equal(isSubscriptionUsableModel('gpt-5-codex'), true);
+  assert.equal(isSubscriptionUsableModel('gpt-5.5'), true);
+  assert.equal(isSubscriptionUsableModel('gpt-5.4-mini'), true);
   assert.equal(isSubscriptionUsableModel('gpt-4o'), false);
   assert.equal(isSubscriptionUsableModel('o3'), false);
   assert.equal(isSubscriptionUsableModel('o4-mini'), false);
   assert.equal(isSubscriptionUsableModel(undefined), false);
-});
-
-test('listSubscriptionModels keeps only subscription-usable models newest-first', async () => {
-  const fetchImpl = async () => ({
-    ok: true,
-    status: 200,
-    json: async () => ({
-      data: [
-        { id: 'gpt-4o', created: 100 },
-        { id: 'text-embedding-3-large', created: 999 },
-        { id: 'gpt-5-codex', created: 300 },
-        { id: 'o3', created: 200 },
-        { id: 'gpt-5', created: 250 },
-      ],
-    }),
-  });
-  const res = await listSubscriptionModels({ access: 'tok', accountId: 'acct' }, { fetchImpl });
-  assert.equal(res.source, 'remote');
-  // gpt-4o / o3 被订阅白名单过滤掉,只保留 gpt-5 家族,按 created 降序。
-  assert.deepEqual(res.models.map((m) => m.id), ['gpt-5-codex', 'gpt-5']);
-});
-
-test('listSubscriptionModels falls back when remote has no subscription-usable models', async () => {
-  const fetchImpl = async () => ({
-    ok: true,
-    status: 200,
-    json: async () => ({ data: [{ id: 'gpt-4o' }, { id: 'o3' }, { id: 'whisper-1' }] }),
-  });
-  const res = await listSubscriptionModels({ access: 'tok' }, { fetchImpl });
-  assert.equal(res.source, 'fallback');
-});
-
-test('listSubscriptionModels sends auth + account headers', async () => {
-  let seen = null;
-  const fetchImpl = async (_url, init) => {
-    seen = init;
-    return { ok: true, status: 200, json: async () => ({ data: [{ id: 'gpt-5', created: 1 }] }) };
-  };
-  await listSubscriptionModels({ access: 'tok123', accountId: 'acct9' }, { fetchImpl });
-  assert.equal(seen.headers.Authorization, 'Bearer tok123');
-  assert.equal(seen.headers['chatgpt-account-id'], 'acct9');
 });
