@@ -87,6 +87,18 @@ describe('Provider message encoders', () => {
     assert.equal(body.reasoning_effort, 'high');
   });
 
+  it('sends OpenAI extra-high reasoning effort as xhigh', () => {
+    const body = encodeOpenAIChatRequest({
+      model: 'gpt-5.5',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{ type: 'function', function: { name: 'bash' } }],
+      effort: 'xhigh',
+      supportsReasoning: true,
+    });
+
+    assert.equal(body.reasoning_effort, 'xhigh');
+  });
+
   it('keeps Anthropic high effort as prompt-level intent unless native reasoning is enabled', () => {
     const body = encodeAnthropicMessagesRequest({
       model: 'claude-test',
@@ -170,11 +182,13 @@ describe('Provider message encoders', () => {
     const low = make('low');
     const def = make('default');
     const high = make('high');
+    const xhigh = make('xhigh');
 
     assert.equal(low.thinking.budget_tokens, 4096);
     assert.equal(def.thinking.budget_tokens, 10240);
     assert.equal(high.thinking.budget_tokens, 32768);
-    // 三档严格递增, 确保"简洁/标准/深度"真正区分。
+    assert.equal(xhigh.thinking.budget_tokens, 32768);
+    // 基础三档严格递增, 确保"简洁/标准/深度"真正区分。
     assert.ok(low.thinking.budget_tokens < def.thinking.budget_tokens);
     assert.ok(def.thinking.budget_tokens < high.thinking.budget_tokens);
     // max_tokens 始终严格大于 budget_tokens。
@@ -196,6 +210,7 @@ describe('Provider message encoders', () => {
     assert.deepEqual(make('low').output_config, { effort: 'low' });
     assert.deepEqual(make('default').output_config, { effort: 'medium' });
     assert.deepEqual(make('high').output_config, { effort: 'high' });
+    assert.deepEqual(make('xhigh').output_config, { effort: 'high' });
     // off 档不发 thinking / output_config。
     const off = make('off');
     assert.equal(off.thinking, undefined);

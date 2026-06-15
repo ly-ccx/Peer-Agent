@@ -12,9 +12,51 @@
 // 订阅(codex 平面)权威模型清单。按"新→旧"排列,第一项即默认"最新"。
 // label 用 ChatGPT 客户端展示名,id 用 codex 端点接受的小写标识。
 const SUBSCRIPTION_CATALOG = [
-  { id: 'gpt-5.5', label: 'GPT-5.5' },
-  { id: 'gpt-5.4', label: 'GPT-5.4' },
-  { id: 'gpt-5.4-mini', label: 'GPT-5.4-Mini' },
+  {
+    id: 'gpt-5.5',
+    label: 'GPT-5.5',
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    inputPrice: 5,
+    outputPrice: 30,
+    cacheReadPrice: 0.5,
+    longContextInputThreshold: 272_000,
+    longContextInputPrice: 10,
+    longContextCacheReadPrice: 1,
+    longContextOutputPrice: 45,
+    standardPricing: {
+      shortContext: { inputPrice: 5, cacheReadPrice: 0.5, outputPrice: 30 },
+      longContext: { inputPrice: 10, cacheReadPrice: 1, outputPrice: 45 },
+      longContextInputThreshold: 272_000,
+    },
+  },
+  {
+    id: 'gpt-5.4',
+    label: 'GPT-5.4',
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    inputPrice: 2.5,
+    outputPrice: 15,
+    cacheReadPrice: 0.25,
+    longContextInputThreshold: 272_000,
+    longContextInputPrice: 5,
+    longContextCacheReadPrice: 0.5,
+    longContextOutputPrice: 22.5,
+    standardPricing: {
+      shortContext: { inputPrice: 2.5, cacheReadPrice: 0.25, outputPrice: 15 },
+      longContext: { inputPrice: 5, cacheReadPrice: 0.5, outputPrice: 22.5 },
+      longContextInputThreshold: 272_000,
+    },
+  },
+  {
+    id: 'gpt-5.4-mini',
+    label: 'GPT-5.4-Mini',
+    contextWindow: 400_000,
+    maxOutputTokens: 128_000,
+    inputPrice: 0.75,
+    outputPrice: 4.5,
+    cacheReadPrice: 0.075,
+  },
   { id: 'gpt-5.3-codex-spark', label: 'GPT-5.3-Codex-Spark' },
 ];
 
@@ -23,6 +65,7 @@ const DEFAULT_SUBSCRIPTION_MODEL = 'gpt-5.5';
 
 // 合法订阅模型 id 集合,用于迁移时判定旧值是否仍有效。
 const SUBSCRIPTION_MODEL_IDS = new Set(SUBSCRIPTION_CATALOG.map((m) => m.id));
+const SUBSCRIPTION_MODEL_METADATA = new Map(SUBSCRIPTION_CATALOG.map((m) => [m.id, m]));
 
 // 向后兼容别名:历史调用/测试以 FALLBACK_MODELS 引用同一份清单。
 const FALLBACK_MODELS = SUBSCRIPTION_CATALOG;
@@ -47,6 +90,10 @@ function sortNewestFirst(models) {
   return [...models].sort((a, b) => (b.created ?? 0) - (a.created ?? 0));
 }
 
+function getSubscriptionModelMetadata(id) {
+  return SUBSCRIPTION_MODEL_METADATA.get(id) || null;
+}
+
 /**
  * 列出订阅(ChatGPT OAuth)可用模型。
  *
@@ -65,6 +112,7 @@ export {
   FALLBACK_MODELS,
   DEFAULT_SUBSCRIPTION_MODEL,
   SUBSCRIPTION_MODEL_IDS,
+  getSubscriptionModelMetadata,
   isChatModel,
   isSubscriptionUsableModel,
   sortNewestFirst,

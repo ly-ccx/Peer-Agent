@@ -3,10 +3,10 @@ import {
   normalizeOpenAIMessages,
 } from './message-normalizer.mjs';
 
-const OPENAI_REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high' };
-const ANTHROPIC_THINKING_BUDGET = { low: 4096, default: 10240, high: 32768 };
+const OPENAI_REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'xhigh' };
+const ANTHROPIC_THINKING_BUDGET = { low: 4096, default: 10240, high: 32768, xhigh: 32768 };
 // adaptive 格式下 output_config.effort 只接受 low/medium/high 三档。
-const ANTHROPIC_OUTPUT_EFFORT = { low: 'low', default: 'medium', high: 'high' };
+const ANTHROPIC_OUTPUT_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'high' };
 // Anthropic 约束: max_tokens 必须 > thinking.budget_tokens。
 // max_tokens 是 (思考 token + 回复 token) 的总额，因此开启 thinking 时
 // 需要在 budget 之上额外预留回复预算，否则 API 返回 400 导致请求必挂。
@@ -26,8 +26,8 @@ export function encodeOpenAIChatRequest({
     stream_options: { include_usage: true },
     tools,
   };
-  // 思考四档: off(关闭) / low(简洁) / default(标准) / high(深度)。
-  // off 不发 reasoning_effort; 其余三档映射到原生 low/medium/high。
+  // 思考档位: off(关闭) / low / default / high / xhigh。
+  // off 不发 reasoning_effort; 其余档位映射到 OpenAI 原生 low/medium/high/xhigh。
   if (supportsReasoning && effort && effort !== 'off') {
     body.reasoning_effort = OPENAI_REASONING_EFFORT[effort] ?? 'medium';
   }
@@ -127,8 +127,8 @@ export function encodeAnthropicMessagesRequest({
     stream: true,
     tools,
   };
-  // 思考四档: off(关闭) / low(简洁) / default(标准) / high(深度)。
-  // off 不开 thinking; 其余三档按强度区分(adaptive 走 output_config.effort,
+  // 思考档位: off(关闭) / low / default / high / xhigh。
+  // off 不开 thinking; Anthropic 无 xhigh 原生档位时按 high 处理(adaptive 走 output_config.effort,
   // enabled 走不同的 budget_tokens)。
   if (supportsReasoning && effort && effort !== 'off') {
     if (reasoningFormat === 'adaptive') {

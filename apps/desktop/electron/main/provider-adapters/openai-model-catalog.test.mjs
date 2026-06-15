@@ -5,6 +5,7 @@ import {
   FALLBACK_MODELS,
   DEFAULT_SUBSCRIPTION_MODEL,
   SUBSCRIPTION_MODEL_IDS,
+  getSubscriptionModelMetadata,
   isChatModel,
   isSubscriptionUsableModel,
   listSubscriptionModels,
@@ -40,6 +41,20 @@ test('subscription catalog: default is newest (gpt-5.5) and first entry', () => 
   assert.equal(FALLBACK_MODELS, SUBSCRIPTION_CATALOG);
 });
 
+test('subscription catalog includes gpt-5.5 pricing and context metadata', () => {
+  const model = getSubscriptionModelMetadata('gpt-5.5');
+  assert.ok(model);
+  assert.equal(model.contextWindow, 1_050_000);
+  assert.equal(model.maxOutputTokens, 128_000);
+  assert.equal(model.inputPrice, 5);
+  assert.equal(model.cacheReadPrice, 0.5);
+  assert.equal(model.outputPrice, 30);
+  assert.equal(model.longContextInputThreshold, 272_000);
+  assert.equal(model.longContextInputPrice, 10);
+  assert.equal(model.longContextCacheReadPrice, 1);
+  assert.equal(model.longContextOutputPrice, 45);
+});
+
 test('subscription model id set covers the catalog, excludes API-only ids', () => {
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.5'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.4'), true);
@@ -55,6 +70,9 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
   const res = await listSubscriptionModels({ access: 'tok', accountId: 'acct' });
   assert.equal(res.source, 'builtin');
   assert.equal(res.error, undefined);
+  assert.equal(res.models[0].contextWindow, 1_050_000);
+  assert.equal(res.models[0].inputPrice, 5);
+  assert.equal(res.models[0].longContextOutputPrice, 45);
   assert.deepEqual(
     res.models.map((m) => m.id),
     ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],

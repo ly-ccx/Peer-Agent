@@ -1,10 +1,16 @@
-import { safeStorage } from 'electron';
+import electron from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { pathOf } from './data-store.mjs';
 import { deriveOAuthStatus, resolveSubscriptionTestResult } from './provider-connectivity.mjs';
-import { DEFAULT_SUBSCRIPTION_MODEL, SUBSCRIPTION_MODEL_IDS } from './provider-adapters/openai-model-catalog.mjs';
+import {
+  DEFAULT_SUBSCRIPTION_MODEL,
+  SUBSCRIPTION_MODEL_IDS,
+  getSubscriptionModelMetadata,
+} from './provider-adapters/openai-model-catalog.mjs';
+
+const { safeStorage } = electron;
 
 function encrypt(plaintext) {
   if (!plaintext) return { encrypted: false, data: '' };
@@ -72,6 +78,40 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
   // - 订阅链路原生支持思考强度(reasoning),历史记录里 supportsReasoning 多为 false,
   //   统一开启,使聊天区出现思考强度档位。
   // 返回是否发生改动,供 readAll 决定是否回写。
+  function applySubscriptionModelMetadata(item) {
+    const metadata = getSubscriptionModelMetadata(item?.model);
+    if (!metadata) return false;
+    let changed = false;
+    const fields = [
+      'contextWindow',
+      'inputPrice',
+      'outputPrice',
+      'cacheReadPrice',
+      'longContextInputThreshold',
+      'longContextInputPrice',
+      'longContextCacheReadPrice',
+      'longContextOutputPrice',
+    ];
+    for (const field of fields) {
+      if (metadata[field] !== undefined && item[field] !== metadata[field]) {
+        item[field] = metadata[field];
+        changed = true;
+      }
+    }
+    // OpenAI cached input pricing is represented by cacheReadPrice; there is no
+    // separate cache-write charge in the public pricing table.
+    if (item.cacheWritePrice !== undefined) {
+      item.cacheWritePrice = undefined;
+      changed = true;
+    }
+    const supportsPromptCaching = Boolean(metadata.cacheReadPrice);
+    if (item.supportsPromptCaching !== supportsPromptCaching) {
+      item.supportsPromptCaching = supportsPromptCaching;
+      changed = true;
+    }
+    return changed;
+  }
+
   function migrateSubscriptionItem(item) {
     if (!item || item.authMethod !== 'oauth_chatgpt') return false;
     let changed = false;
@@ -83,6 +123,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       item.supportsReasoning = true;
       changed = true;
     }
+    if (applySubscriptionModelMetadata(item)) changed = true;
     return changed;
   }
 
@@ -127,6 +168,10 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       outputPrice: item.outputPrice ?? undefined,
       cacheWritePrice: item.cacheWritePrice ?? undefined,
       cacheReadPrice: item.cacheReadPrice ?? undefined,
+      longContextInputThreshold: item.longContextInputThreshold ?? undefined,
+      longContextInputPrice: item.longContextInputPrice ?? undefined,
+      longContextCacheReadPrice: item.longContextCacheReadPrice ?? undefined,
+      longContextOutputPrice: item.longContextOutputPrice ?? undefined,
       supportsVision: item.supportsVision ?? false,
       supportsReasoning: item.supportsReasoning ?? false,
       supportsPromptCaching: item.supportsPromptCaching ?? false,
@@ -149,6 +194,8 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     const method = authMethod === 'oauth_chatgpt' ? 'oauth_chatgpt' : 'api_key';
     // 订阅(OAuth)身份写死:名称/baseURL 固定,不接受外部传入。model 留待登录后选择。
     const isSubscription = method === 'oauth_chatgpt';
+    const selectedModel = model || (isSubscription ? DEFAULT_SUBSCRIPTION_MODEL : defaults.model);
+    const subscriptionMetadata = isSubscription ? getSubscriptionModelMetadata(selectedModel) : null;
     const item = {
       id: randomUUID(),
       provider: provider || 'openai',
@@ -156,21 +203,25 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       name: isSubscription ? CHATGPT_SUBSCRIPTION_NAME : name || provider || 'Untitled',
       baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : baseUrl || defaults.baseUrl,
       // 订阅默认落到权威清单的最新模型(gpt-5.5),非订阅沿用各家 preset。
-      model: model || (isSubscription ? DEFAULT_SUBSCRIPTION_MODEL : defaults.model),
+      model: selectedModel,
       apiKey: encrypt(isSubscription ? '' : apiKey || ''),
       oauthTokens: encrypt(''),
       enabled: true,
       isDefault: items.length === 0,
       createdAt: new Date().toISOString(),
-      contextWindow: contextWindow || undefined,
-      inputPrice: inputPrice ?? undefined,
-      outputPrice: outputPrice ?? undefined,
-      cacheWritePrice: cacheWritePrice ?? undefined,
-      cacheReadPrice: cacheReadPrice ?? undefined,
+      contextWindow: isSubscription ? subscriptionMetadata?.contextWindow : (contextWindow || undefined),
+      inputPrice: isSubscription ? subscriptionMetadata?.inputPrice : (inputPrice ?? undefined),
+      outputPrice: isSubscription ? subscriptionMetadata?.outputPrice : (outputPrice ?? undefined),
+      cacheWritePrice: isSubscription ? undefined : (cacheWritePrice ?? undefined),
+      cacheReadPrice: isSubscription ? subscriptionMetadata?.cacheReadPrice : (cacheReadPrice ?? undefined),
+      longContextInputThreshold: isSubscription ? subscriptionMetadata?.longContextInputThreshold : undefined,
+      longContextInputPrice: isSubscription ? subscriptionMetadata?.longContextInputPrice : undefined,
+      longContextCacheReadPrice: isSubscription ? subscriptionMetadata?.longContextCacheReadPrice : undefined,
+      longContextOutputPrice: isSubscription ? subscriptionMetadata?.longContextOutputPrice : undefined,
       supportsVision: supportsVision ?? false,
       // 订阅链路(codex/responses)原生支持思考强度,默认开启。
       supportsReasoning: isSubscription ? true : (supportsReasoning ?? false),
-      supportsPromptCaching: supportsPromptCaching ?? false,
+      supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (supportsPromptCaching ?? false),
     };
     items.push(item);
     writeAll(items);
@@ -196,6 +247,13 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     if (patch.supportsVision !== undefined) item.supportsVision = patch.supportsVision;
     if (patch.supportsReasoning !== undefined) item.supportsReasoning = patch.supportsReasoning;
     if (patch.supportsPromptCaching !== undefined) item.supportsPromptCaching = patch.supportsPromptCaching;
+    if (item.authMethod === 'oauth_chatgpt') {
+      item.name = CHATGPT_SUBSCRIPTION_NAME;
+      item.baseUrl = CHATGPT_SUBSCRIPTION_BASE_URL;
+      item.provider = 'openai';
+      item.supportsReasoning = true;
+      applySubscriptionModelMetadata(item);
+    }
     items[idx] = item;
     writeAll(items);
     return toView(item);

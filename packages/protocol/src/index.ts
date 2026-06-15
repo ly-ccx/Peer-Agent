@@ -133,6 +133,10 @@ export interface LlmProviderConfig {
   readonly outputPrice?: number;
   readonly cacheWritePrice?: number;
   readonly cacheReadPrice?: number;
+  readonly longContextInputThreshold?: number;
+  readonly longContextInputPrice?: number;
+  readonly longContextCacheReadPrice?: number;
+  readonly longContextOutputPrice?: number;
   readonly supportsVision?: boolean;
   readonly supportsReasoning?: boolean;
   readonly supportsPromptCaching?: boolean;
@@ -151,6 +155,16 @@ export interface LlmModelInfo {
   readonly label: string;
   // 模型创建时间戳(秒),用于"最新"排序;远程未提供时缺省。
   readonly created?: number;
+  readonly contextWindow?: number;
+  readonly maxOutputTokens?: number;
+  // USD per 1M tokens unless otherwise noted by the provider.
+  readonly inputPrice?: number;
+  readonly outputPrice?: number;
+  readonly cacheReadPrice?: number;
+  readonly longContextInputThreshold?: number;
+  readonly longContextInputPrice?: number;
+  readonly longContextCacheReadPrice?: number;
+  readonly longContextOutputPrice?: number;
 }
 
 // 列模型结果。source 标明数据来源:

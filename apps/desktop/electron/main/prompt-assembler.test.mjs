@@ -160,17 +160,17 @@ describe('System Context assembly', () => {
 
     const compactContext = buildSystemContext('/tmp/workspace', {
       mode: 'compact',
-      effort: 'high',
-      provider: 'anthropic',
-      model: 'claude-test',
+      effort: 'xhigh',
+      provider: 'openai',
+      model: 'gpt-5.5',
     });
 
     const modeSection = compactContext.sections.find((section) => section.id === 'runtime.mode');
     assert.ok(modeSection);
     assert.equal(modeSection.layer, 'L6_MODE_REMINDER');
     assert.match(modeSection.content, /Mode: compact/);
-    assert.match(modeSection.content, /Reasoning effort: high/);
-    assert.equal(modeSection.source.provider, 'anthropic');
+    assert.match(modeSection.content, /Reasoning effort: xhigh/);
+    assert.equal(modeSection.source.provider, 'openai');
     assert.equal(compactContext.snapshot.mode, 'compact');
   });
 

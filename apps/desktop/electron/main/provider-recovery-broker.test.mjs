@@ -34,13 +34,14 @@ describe('provider recovery broker', () => {
     }), false);
   });
 
-  it('orders configured providers with the default provider first', () => {
+  it('orders configured same-model providers with the default provider first', () => {
     const ordered = orderProviderCandidates([
-      { id: 'disabled', isDefault: true, enabled: false, apiKeyConfigured: true },
-      { id: 'fallback', apiKeyConfigured: true },
-      { id: 'default', isDefault: true, apiKeyConfigured: true },
-      { id: 'missing-key', apiKeyConfigured: false },
+      { id: 'disabled', isDefault: true, enabled: false, apiKeyConfigured: true, model: 'gpt-5.5' },
+      { id: 'same-model-fallback', apiKeyConfigured: true, model: 'GPT-5.5' },
+      { id: 'different-model', apiKeyConfigured: true, model: 'claude-opus-4-8' },
+      { id: 'default', isDefault: true, apiKeyConfigured: true, model: 'gpt-5.5' },
+      { id: 'missing-key', apiKeyConfigured: false, model: 'gpt-5.5' },
     ]);
-    assert.deepEqual(ordered.map((provider) => provider.id), ['default', 'fallback']);
+    assert.deepEqual(ordered.map((provider) => provider.id), ['default', 'same-model-fallback']);
   });
 });

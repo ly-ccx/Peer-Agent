@@ -30,6 +30,15 @@ interface ChatAttachment {
   text?: string;
 }
 
+type EffortLevel = 'off' | 'low' | 'default' | 'high' | 'xhigh';
+
+const BASE_EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'low', 'default', 'high'];
+const OPENAI_EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'low', 'default', 'high', 'xhigh'];
+
+function isEffortLevel(value: unknown): value is EffortLevel {
+  return value === 'off' || value === 'low' || value === 'default' || value === 'high' || value === 'xhigh';
+}
+
 type ChatApiContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } };
@@ -585,17 +594,17 @@ export function ChatSurface({
     onStreamingChange?.(conversationId, isStreaming);
   }, [isStreaming, conversationId, onStreamingChange]);
   const [streamError, setStreamError] = useState<string | null>(null);
-  const [effort, setEffort] = useState<'off' | 'low' | 'default' | 'high'>(() => {
+  const [effort, setEffort] = useState<EffortLevel>(() => {
     // 思考强度是全局偏好,持久化在 settings-store(扁平 key),启动时同步注入到 initialSettings。
     // 表达层只读取/回写这一个偏好字段,不引入新的执行真值。
-    // 四档: off(关闭) / low(简洁) / default(标准) / high(深度)。
+    // 五档: off(关闭) / low / default / high / xhigh(Extra High, OpenAI).
     const stored = (clientApi.initialSettings as Record<string, unknown>)?.effort;
-    return stored === 'off' || stored === 'low' || stored === 'high' || stored === 'default'
+    return isEffortLevel(stored)
       ? stored
       : 'default';
   });
   // 切换思考强度时回写全局设置,使其跨会话/重启保持一致。
-  const changeEffort = useCallback((level: 'off' | 'low' | 'default' | 'high') => {
+  const changeEffort = useCallback((level: EffortLevel) => {
     setEffort(level);
     void clientApi.updateSettings({ effort: level });
   }, []);
@@ -677,11 +686,12 @@ export function ChatSurface({
 
   const hasProvider = providers.some((p) => p.apiKeyConfigured);
   // 当前激活 provider(默认且已配置 Key,否则取首个已配置)是否勾选了原生推理(reasoning/thinking)。
-  // 只有勾选时才显示思考强度选择器(简洁/标准/深度)。
-  const activeProviderSupportsReasoning = Boolean(
-    (providers.find((p) => p.isDefault && p.apiKeyConfigured)
-      || providers.find((p) => p.apiKeyConfigured))?.supportsReasoning,
-  );
+  // 只有勾选时才显示思考强度选择器；OpenAI 暴露额外 xhigh 档。
+  const activeProvider = providers.find((p) => p.isDefault && p.apiKeyConfigured)
+    || providers.find((p) => p.apiKeyConfigured)
+    || null;
+  const activeProviderSupportsReasoning = Boolean(activeProvider?.supportsReasoning);
+  const effortLevels = activeProvider?.provider === 'openai' ? OPENAI_EFFORT_LEVELS : BASE_EFFORT_LEVELS;
   const isZh = i18n.locale === 'zh-CN';
   const slashQuery = draft.startsWith('/') && !/\s/.test(draft) ? draft.toLowerCase() : null;
   const slashCommands = slashQuery
@@ -1150,8 +1160,7 @@ export function ChatSurface({
     if (resumeFiredRef.current === resumeTask.sessionId) return;
     resumeFiredRef.current = resumeTask.sessionId;
     const taskEffort =
-      resumeTask.effort === 'off' || resumeTask.effort === 'low'
-      || resumeTask.effort === 'default' || resumeTask.effort === 'high'
+      isEffortLevel(resumeTask.effort)
         ? resumeTask.effort
         : undefined;
     if (taskEffort) setEffort(taskEffort);
@@ -1449,7 +1458,7 @@ export function ChatSurface({
         <div className="chat-composer-toolbar">
           {activeProviderSupportsReasoning ? (
             <div className="effort-selector">
-              {(['off', 'low', 'default', 'high'] as const).map((level) => (
+              {effortLevels.map((level) => (
                 <button
                   key={level}
                   type="button"
@@ -1460,6 +1469,7 @@ export function ChatSurface({
                   {level === 'off' ? (isZh ? '关闭' : 'Off')
                     : level === 'low' ? (isZh ? '简洁' : 'Low')
                     : level === 'high' ? (isZh ? '深度' : 'High')
+                    : level === 'xhigh' ? (isZh ? '超深度' : 'Extra High')
                     : (isZh ? '标准' : 'Default')}
                 </button>
               ))}

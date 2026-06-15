@@ -27,7 +27,7 @@ function normalizeMode(value) {
 }
 
 function normalizeEffort(value) {
-  return ['low', 'default', 'high'].includes(value) ? value : 'default';
+  return ['low', 'default', 'high', 'xhigh'].includes(value) ? value : 'default';
 }
 
 function normalizeLayer(value, fallback = 'L6_MODE_REMINDER') {

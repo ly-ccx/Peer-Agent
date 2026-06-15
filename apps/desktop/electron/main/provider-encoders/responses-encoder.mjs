@@ -9,7 +9,7 @@
 
 import { normalizeOpenAIMessages } from './message-normalizer.mjs';
 
-const REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high' };
+const REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'xhigh' };
 
 function textPart(text) {
   return { type: 'input_text', text };

@@ -748,7 +748,7 @@ describe('llm chat service tool materialization', () => {
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
   });
 
-  it('recovers a transport-blocked primary provider by replaying the turn on a fallback provider', async () => {
+  it('does not recover a transport-blocked provider by switching to a different model', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;
     const events = [];
@@ -776,6 +776,87 @@ describe('llm chat service tool materialization', () => {
     ];
     globalThis.fetch = async (url) => {
       urls.push(String(url));
+      return new Response(
+        '抱歉，您要访问的网站不在安全策略默认允许的范围内。Domain Blocking.',
+        { status: 403, statusText: 'Forbidden' },
+      );
+    };
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => providers,
+          getDecryptedApiKey: (id) => `key-${id}`,
+          getCredential: () => ({
+            tokens: {
+              access: 'oauth-access',
+              refresh: 'oauth-refresh',
+              expires: Date.now() + 3_600_000,
+              accountId: 'acct-1',
+            },
+          }),
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.deepEqual(urls, [
+      'https://chatgpt.com/backend-api/codex/responses',
+    ]);
+    assert.equal(events.some((event) => event.channel === 'chat:stream:provider-recovery'), false);
+    const error = events.find((event) => event.channel === 'chat:stream:error');
+    assert.ok(error);
+    assert.match(error.payload.error, /HTTP 403/);
+    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), false);
+  });
+
+  it('recovers a transport-blocked primary provider only on a same-model fallback provider', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    const urls = [];
+    const providers = [
+      {
+        id: 'p-chatgpt',
+        provider: 'openai',
+        authMethod: 'oauth_chatgpt',
+        baseUrl: 'https://chatgpt.com/backend-api/codex',
+        model: 'gpt-5.5',
+        name: 'ChatGPT 订阅',
+        isDefault: true,
+        apiKeyConfigured: true,
+      },
+      {
+        id: 'p-compatible',
+        provider: 'openai',
+        baseUrl: 'https://compatible.example/v1',
+        model: 'gpt-5.5',
+        name: 'Compatible GPT-5.5',
+        isDefault: false,
+        apiKeyConfigured: true,
+      },
+      {
+        id: 'p-anthropic',
+        provider: 'anthropic',
+        baseUrl: 'https://example.test',
+        model: 'claude-test',
+        name: 'Anthropic',
+        isDefault: false,
+        apiKeyConfigured: true,
+      },
+    ];
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
       if (urls.length === 1) {
         return new Response(
           '抱歉，您要访问的网站不在安全策略默认允许的范围内。Domain Blocking.',
@@ -783,8 +864,8 @@ describe('llm chat service tool materialization', () => {
         );
       }
       return new Response(sse([
-        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'fallback ok' } },
-        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
+        { choices: [{ delta: { content: 'same model ok' } }] },
+        '[DONE]',
       ]), { status: 200 });
     };
 
@@ -818,14 +899,14 @@ describe('llm chat service tool materialization', () => {
 
     assert.deepEqual(urls, [
       'https://chatgpt.com/backend-api/codex/responses',
-      'https://example.test/v1/messages',
+      'https://compatible.example/v1/chat/completions',
     ]);
     const recovery = events.find((event) => event.channel === 'chat:stream:provider-recovery');
     assert.ok(recovery);
-    assert.equal(recovery.payload.fromProviderId, 'p-openai');
-    assert.equal(recovery.payload.toProviderId, 'p-anthropic');
+    assert.equal(recovery.payload.fromProviderId, 'p-chatgpt');
+    assert.equal(recovery.payload.toProviderId, 'p-compatible');
     assert.match(recovery.payload.reason, /HTTP 403/);
-    assert.equal(events.find((event) => event.channel === 'chat:stream:delta')?.payload.content, 'fallback ok');
+    assert.equal(events.find((event) => event.channel === 'chat:stream:delta')?.payload.content, 'same model ok');
     assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
   });

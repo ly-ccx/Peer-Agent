@@ -53,13 +53,22 @@ export function providerCanRun(provider) {
   return Boolean(provider && provider.enabled !== false && provider.apiKeyConfigured);
 }
 
+function modelKey(provider) {
+  return String(provider?.model || '').trim().toLowerCase();
+}
+
 export function orderProviderCandidates(providers = []) {
   const runnable = providers.filter(providerCanRun);
   const defaultProvider = runnable.find((provider) => provider.isDefault) ?? runnable[0] ?? null;
   if (!defaultProvider) return [];
+  const defaultModel = modelKey(defaultProvider);
   return [
     defaultProvider,
-    ...runnable.filter((provider) => provider.id !== defaultProvider.id),
+    ...runnable.filter((provider) => (
+      provider.id !== defaultProvider.id
+      && modelKey(provider)
+      && modelKey(provider) === defaultModel
+    )),
   ];
 }
 
