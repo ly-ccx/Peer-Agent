@@ -1811,10 +1811,28 @@ function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, 
         ) : currentContextTokens > 0 ? (
           <>{formatTokenCount(currentContextTokens)} tokens</>
         ) : null}
-        {costStr ? <span className="token-usage-cost">{costStr}</span> : null}
+        {costStr ? (
+          <span
+            className="token-usage-cost"
+            title={
+              isZh
+                ? '按 API 单价估算的等价用量价值；订阅用户不会按此金额额外扣费。'
+                : 'Estimated equivalent API value. Subscription users are not billed this amount separately.'
+            }
+          >
+            {costStr}
+          </span>
+        ) : null}
         {cacheHitRate != null ? (
-          <span className="token-usage-detail" title={isZh ? '缓存命中率(缓存读取 / 总输入)' : 'Cache hit rate (cache read / total input)'}>
-            {isZh ? '缓存' : 'cache'} {cacheHitRate.toFixed(0)}%
+          <span
+            className="token-usage-detail"
+            title={
+              isZh
+                ? '由模型服务返回的缓存读取 token / 总输入 token 计算；为当前会话累计值。'
+                : 'Provider-reported cached input tokens / total input tokens. Cumulative for this conversation.'
+            }
+          >
+            {isZh ? '缓存命中' : 'cache hit'} {cacheHitRate.toFixed(0)}%
           </span>
         ) : null}
         {isStreaming && !activeUsage ? <span className="token-usage-detail">{isZh ? '计费待返回' : 'usage pending'}</span> : null}
