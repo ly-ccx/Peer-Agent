@@ -14,6 +14,16 @@ const ANTHROPIC_OUTPUT_EFFORT = { low: 'low', default: 'medium', high: 'high', x
 // 需要在 budget 之上额外预留回复预算，否则 API 返回 400 导致请求必挂。
 const ANTHROPIC_REPLY_TOKENS = 16384;
 
+// Opus 4.8 / Fable 5 / Mythos 5 等新代际模型用 output_config.effort 控制思考强度，
+// 不再支持 manual extended thinking(thinking.budget_tokens)，强行发送会被 API 拒绝(400)。
+// 这里按 model id 识别这一代际，让 encoder 在 wire 层切到 effort 契约。
+const ANTHROPIC_EFFORT_NATIVE_PATTERNS = [/opus-4-8/, /opus-4\.8/, /fable/, /mythos/];
+function anthropicModelUsesEffortConfig(model) {
+  if (typeof model !== 'string') return false;
+  const id = model.toLowerCase();
+  return ANTHROPIC_EFFORT_NATIVE_PATTERNS.some((re) => re.test(id));
+}
+
 export function encodeOpenAIChatRequest({
   model,
   messages,
@@ -135,6 +145,10 @@ export function encodeAnthropicMessagesRequest({
   if (supportsReasoning && effort && effort !== 'off') {
     if (reasoningFormat === 'adaptive') {
       body.thinking = { type: 'adaptive' };
+      body.output_config = { effort: ANTHROPIC_OUTPUT_EFFORT[effort] ?? 'medium' };
+    } else if (anthropicModelUsesEffortConfig(model)) {
+      // Opus 4.8 等新代际: 不发 thinking.budget_tokens(会 400)，
+      // 改用 output_config.effort，max_tokens 保持纯回复预算。
       body.output_config = { effort: ANTHROPIC_OUTPUT_EFFORT[effort] ?? 'medium' };
     } else {
       const budgetTokens = ANTHROPIC_THINKING_BUDGET[effort] ?? ANTHROPIC_THINKING_BUDGET.default;

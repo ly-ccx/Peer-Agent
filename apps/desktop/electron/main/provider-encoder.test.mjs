@@ -196,6 +196,41 @@ describe('Provider message encoders', () => {
     assert.ok(high.max_tokens > high.thinking.budget_tokens);
   });
 
+  it('routes Opus 4.8 generation to output_config.effort without manual thinking budget', () => {
+    const make = (model, effort = 'high') => encodeAnthropicMessagesRequest({
+      model,
+      system: 'system prompt',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{ name: 'bash' }],
+      effort,
+      supportsReasoning: true,
+    });
+
+    for (const model of ['claude-opus-4-8', 'claude-opus-4.8', 'claude-fable-5', 'claude-mythos-5']) {
+      const body = make(model);
+      // 新代际: 必须用 output_config.effort，且绝不能带 manual extended thinking(会 400)。
+      assert.equal(body.thinking, undefined, `${model} must not send thinking`);
+      assert.deepEqual(body.output_config, { effort: 'high' }, `${model} must send effort`);
+      // max_tokens 退回纯回复预算，不再叠加思考 budget。
+      assert.equal(body.max_tokens, 16384);
+    }
+
+    // xhigh 折叠到 high（effort 仅 low/medium/high 三档）。
+    assert.deepEqual(make('claude-opus-4-8', 'xhigh').output_config, { effort: 'high' });
+    assert.deepEqual(make('claude-opus-4-8', 'low').output_config, { effort: 'low' });
+    assert.deepEqual(make('claude-opus-4-8', 'default').output_config, { effort: 'medium' });
+
+    // off 档位即便是新代际也不发思考相关字段。
+    const offBody = make('claude-opus-4-8', 'off');
+    assert.equal(offBody.thinking, undefined);
+    assert.equal(offBody.output_config, undefined);
+
+    // 旧代际仍走 manual thinking.budget_tokens，保持兼容。
+    const legacy = make('claude-sonnet-4-20250514');
+    assert.equal(legacy.output_config, undefined);
+    assert.equal(legacy.thinking.budget_tokens, 32768);
+  });
+
   it('maps each thinking tier to a distinct adaptive output effort', () => {
     const make = (effort) => encodeAnthropicMessagesRequest({
       model: 'claude-test',
