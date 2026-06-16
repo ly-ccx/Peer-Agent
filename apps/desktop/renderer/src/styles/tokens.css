@@ -111,6 +111,15 @@
   --space-8: 32px;
   --space-10: 40px;
   --space-16: 64px;
+
+  /* ─── 会话内容列宽 ───
+   * 旧实现把 740px 固定值直写在 chat-surface.css 的 7 处，窗口放大后内容列
+   * 不跟随增长，右侧留出大片空白。改为随视口动态伸展的单一 token：
+   *   下限 740px（窄窗/缩放后仍保证舒适行宽，配合 width:100% 不会溢出）
+   *   理想 64vw（跟随窗口放大）
+   *   上限 1080px（避免超宽屏行宽过长影响阅读）
+   */
+  --chat-content-max: clamp(740px, 64vw, 1080px);
   --radius-xs: 2px;
   --radius-sm: 6px;
   --radius-md: 8px;

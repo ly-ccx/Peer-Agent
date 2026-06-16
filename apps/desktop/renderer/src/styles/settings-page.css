@@ -318,6 +318,13 @@
   background: var(--za-accent-soft);
 }
 
+.mcp-server-list button strong,
+.mcp-server-list button span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .mcp-server-list span,
 .mcp-server-list small,
 .mcp-resource-list small {
@@ -791,6 +798,17 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-3);
+}
+
+.mcp-detail-header > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.mcp-detail-header h3,
+.mcp-detail-header p {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .mcp-section-header h3,
