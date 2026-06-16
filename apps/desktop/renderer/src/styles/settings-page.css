@@ -402,9 +402,291 @@
   white-space: pre-wrap;
 }
 
+/* ── MCP 设置页 · Codex-like overview/list/detail layout ── */
+.mcp-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.mcp-eyebrow {
+  display: inline-flex;
+  margin-bottom: 4px;
+  color: var(--pa-text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mcp-hero__actions,
+.mcp-detail-actions {
+  flex: 0 0 auto;
+}
+
+.mcp-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.mcp-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-4);
+  border: 1px solid var(--pa-border-subtle);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--pa-surface-panel) 92%, transparent);
+}
+
+.mcp-summary-card span,
+.mcp-summary-card small,
+.mcp-section-header p,
+.mcp-detail-header p,
+.mcp-detail-meta dt,
+.mcp-empty-state p,
+.mcp-credential-list em {
+  color: var(--pa-text-secondary);
+}
+
+.mcp-summary-card span {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mcp-summary-card strong {
+  color: var(--pa-text-primary);
+  font-size: 1.35rem;
+  line-height: 1.15;
+}
+
+.mcp-status {
+  padding: var(--space-3);
+  border: 1px solid var(--pa-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--pa-surface-muted);
+}
+
+.mcp-add-card {
+  border-color: color-mix(in srgb, var(--za-accent) 24%, var(--pa-border-subtle));
+}
+
+.mcp-main-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.mcp-sidebar-card,
+.mcp-detail-card {
+  min-width: 0;
+}
+
+.mcp-section-header,
+.mcp-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.mcp-section-header h3,
+.mcp-section-header p,
+.mcp-detail-header h3,
+.mcp-detail-header p {
+  margin: 0;
+}
+
+.mcp-section-header h3,
+.mcp-detail-header h3 {
+  color: var(--pa-text-primary);
+  font-size: 1rem;
+}
+
+.mcp-section-header p,
+.mcp-detail-header p {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.mcp-section-header--compact h3 {
+  font-size: 0.9rem;
+}
+
+.mcp-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px dashed var(--pa-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--pa-surface-muted);
+}
+
+.mcp-empty-state strong {
+  color: var(--pa-text-primary);
+}
+
+.mcp-empty-state p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.mcp-empty-state--detail {
+  min-height: 320px;
+  justify-content: center;
+}
+
+.mcp-credentials-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--pa-border-subtle);
+}
+
+.mcp-credential-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mcp-credential-list button {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  width: 100%;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--pa-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--pa-surface-muted);
+  text-align: left;
+}
+
+.mcp-credential-list span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mcp-credential-list strong,
+.mcp-credential-list small,
+.mcp-credential-list em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-credential-list em {
+  flex: 0 0 auto;
+  max-width: 120px;
+  font-size: 0.72rem;
+  font-style: normal;
+}
+
+.mcp-detail-card {
+  min-height: 520px;
+}
+
+.mcp-server-detail {
+  gap: var(--space-5);
+}
+
+.mcp-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.mcp-detail-meta div {
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--pa-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--pa-surface-muted);
+}
+
+.mcp-detail-meta dt {
+  margin-bottom: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mcp-detail-meta dd {
+  overflow: hidden;
+  margin: 0;
+  color: var(--pa-text-primary);
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-manifest-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.mcp-manifest-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.mcp-health--disabled {
+  background: color-mix(in srgb, var(--pa-text-secondary) 14%, transparent);
+  color: var(--pa-text-secondary);
+}
+
+@media (max-width: 1100px) {
+  .mcp-summary-grid,
+  .mcp-detail-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mcp-main-grid,
+  .mcp-manifest-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 900px) {
   .mcp-settings-layout,
   .settings-grid--two {
+    grid-template-columns: 1fr;
+  }
+
+  .mcp-hero {
+    flex-direction: column;
+  }
+
+  .mcp-hero__actions,
+  .mcp-detail-actions {
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .mcp-summary-grid,
+  .mcp-detail-meta {
     grid-template-columns: 1fr;
   }
 }

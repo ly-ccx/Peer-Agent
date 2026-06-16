@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
 
 type McpTransportKind = 'streamable_http' | 'sse' | 'stdio';
+type McpAuthMode = 'none' | 'http_bearer' | 'http_header' | 'stdio_env';
 
 type McpToolView = {
   readonly name?: string;
@@ -16,7 +17,6 @@ type McpResourceView = {
   readonly uri: string;
   readonly name?: string;
   readonly description?: string;
-  readonly mimeType?: string;
 };
 
 type McpPromptView = {
@@ -24,12 +24,11 @@ type McpPromptView = {
   readonly description?: string;
 };
 
-type McpAuthMode = 'none' | 'http_bearer' | 'http_header' | 'stdio_env';
-
 type McpCredentialView = {
   readonly credentialRef: string;
-  readonly label: string;
-  readonly kind: Exclude<McpAuthMode, 'none'>;
+  readonly label?: string;
+  readonly kind?: string;
+  readonly authMode?: string;
   readonly headerName?: string;
   readonly envName?: string;
   readonly lastFour?: string;
@@ -55,27 +54,47 @@ type McpServerView = {
   readonly tools?: readonly McpToolView[];
   readonly resources?: readonly McpResourceView[];
   readonly prompts?: readonly McpPromptView[];
-  readonly health?: { readonly status?: string; readonly checkedAt?: string | null; readonly message?: string };
+  readonly health?: { readonly status?: string; readonly lastCheckedAt?: string | null };
   readonly manifestUpdatedAt?: string | null;
   readonly lastError?: string | null;
 };
 
-function serverIdOf(server: McpServerView): string {
-  return String(server.id ?? server.mcpId ?? '');
-}
-
-function toolNameOf(tool: McpToolView): string {
-  return String(tool.name ?? tool.toolName ?? '');
+function serverIdOf(server: McpServerView): string | number {
+  return server.mcpId ?? server.id ?? server.name ?? server.displayName ?? '';
 }
 
 function labelForServer(server: McpServerView): string {
   return String(server.displayName ?? server.name ?? serverIdOf(server));
 }
 
+function toolNameOf(tool: McpToolView): string {
+  return String(tool.name ?? tool.toolName ?? 'unknown');
+}
+
 function transportLabel(transport?: McpTransportKind): string {
   if (transport === 'stdio') return 'stdio';
   if (transport === 'sse') return 'SSE';
   return 'streamable HTTP';
+}
+
+function authLabel(auth?: McpServerView['auth']): string {
+  if (!auth?.mode || auth.mode === 'none') return '无认证';
+  if (auth.mode === 'http_bearer') return 'HTTP Bearer';
+  if (auth.mode === 'http_header') return `HTTP Header${auth.headerName ? ` · ${auth.headerName}` : ''}`;
+  if (auth.mode === 'stdio_env') return `stdio env${auth.envName ? ` · ${auth.envName}` : ''}`;
+  return auth.mode;
+}
+
+function endpointForServer(server?: McpServerView): string {
+  if (!server) return '未选择连接';
+  return server.urlPreview || server.serverUrl || server.commandPreview || server.description || '本地 MCP server';
+}
+
+function formatDateTime(value?: string | null): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
 }
 
 export function McpSettingsPanel() {
@@ -92,16 +111,12 @@ export function McpSettingsPanel() {
   const [credentialSecret, setCredentialSecret] = useState('');
   const [authHeaderName, setAuthHeaderName] = useState('X-API-Key');
   const [authEnvName, setAuthEnvName] = useState('MCP_TOKEN');
-  const [selectedId, setSelectedId] = useState<string>('');
-  const [resourcePreview, setResourcePreview] = useState('');
-  const [promptPreview, setPromptPreview] = useState('');
-  const [status, setStatus] = useState('');
+  const [selectedId, setSelectedId] = useState<string | number | null>(null);
   const [busy, setBusy] = useState(false);
-
-  const selected = useMemo(
-    () => servers.find((server) => serverIdOf(server) === selectedId) ?? servers[0] ?? null,
-    [selectedId, servers],
-  );
+  const [status, setStatus] = useState<string | null>(null);
+  const [resourcePreview, setResourcePreview] = useState<string | null>(null);
+  const [promptPreview, setPromptPreview] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
 
   const load = useCallback(async () => {
     const [list, credentialList] = await Promise.all([
@@ -110,17 +125,31 @@ export function McpSettingsPanel() {
     ]);
     setServers(list);
     setCredentials(credentialList);
-    setSelectedId((current) => current || (list[0] ? serverIdOf(list[0]) : ''));
+    setSelectedId((current) => current ?? (list[0] ? serverIdOf(list[0]) : null));
   }, []);
 
-  useEffect(() => {
-    void load().catch((error) => setStatus(error?.message ?? '加载 MCP 连接失败'));
-  }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
     if (transport === 'stdio' && (authMode === 'http_bearer' || authMode === 'http_header')) setAuthMode('none');
     if (transport !== 'stdio' && authMode === 'stdio_env') setAuthMode('none');
   }, [authMode, transport]);
+
+  const selected = useMemo(
+    () => servers.find((server) => String(serverIdOf(server)) === String(selectedId)) ?? servers[0] ?? null,
+    [selectedId, servers],
+  );
+
+  const totals = useMemo(() => servers.reduce(
+    (summary, server) => ({
+      enabled: summary.enabled + (server.enabled !== false ? 1 : 0),
+      tools: summary.tools + (server.toolsCount ?? server.tools?.length ?? 0),
+      visibleTools: summary.visibleTools + (server.visibleToolsCount ?? server.tools?.filter((tool) => tool.visible !== false).length ?? 0),
+      resources: summary.resources + (server.resourcesCount ?? server.resources?.length ?? 0),
+      prompts: summary.prompts + (server.promptsCount ?? server.prompts?.length ?? 0),
+    }),
+    { enabled: 0, tools: 0, visibleTools: 0, resources: 0, prompts: 0 },
+  ), [servers]);
 
   const resetForm = useCallback(() => {
     setDisplayName('');
@@ -145,7 +174,7 @@ export function McpSettingsPanel() {
       if (authMode !== 'none') {
         if (!credentialSecret.trim()) throw new Error('请填写 MCP 凭证。');
         const credential = await clientApi.mcpPutCredential({
-          label: credentialLabel.trim() || `${displayName.trim() || 'MCP'} ${authMode}`,
+          label: credentialLabel.trim() || displayName.trim() || undefined,
           kind: authMode,
           secret: credentialSecret,
           headerName: authMode === 'http_header' ? authHeaderName.trim() : undefined,
@@ -177,20 +206,22 @@ export function McpSettingsPanel() {
           serverUrl: url.trim(),
           auth,
         };
-      await clientApi.mcpUpsertServer(item);
+      const saved = await clientApi.mcpUpsertServer(item);
       resetForm();
+      setShowAddForm(false);
       await load();
-      setStatus('MCP 连接和认证绑定已保存。点击“刷新 Manifest”后才会进入 Runtime Projection。');
+      setSelectedId(serverIdOf(saved as McpServerView));
+      setStatus('MCP 连接已保存。请刷新 Manifest 后再让模型使用工具。');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '保存 MCP 连接失败');
     } finally {
       setBusy(false);
     }
-  }, [argsText, authEnvName, authHeaderName, authMode, command, credentialLabel, credentialSecret, cwd, displayName, load, resetForm, transport, url]);
+  }, [argsText, authEnvName, authHeaderName, authMode, command, credentialLabel, credentialSecret, displayName, load, resetForm, transport, url]);
 
   const runServerAction = useCallback(async (message: string, action: () => Promise<unknown>) => {
     setBusy(true);
-    setStatus(`${message}…`);
+    setStatus(`${message}中…`);
     try {
       await action();
       await load();
@@ -232,190 +263,285 @@ export function McpSettingsPanel() {
     }
   }, [selected]);
 
+  const selectedTools = selected?.tools ?? [];
+  const selectedResources = selected?.resources ?? [];
+  const selectedPrompts = selected?.prompts ?? [];
+  const canSave = transport === 'stdio' ? Boolean(command.trim()) : Boolean(url.trim());
+
   return (
     <div className="settings-panel settings-panel--mcp">
-      <header className="settings-panel__header">
+      <header className="settings-panel__header mcp-hero">
         <div>
+          <span className="mcp-eyebrow">Local capability providers</span>
           <h2>MCP 连接</h2>
-          <p>管理本地 MCP server。工具必须先刷新 Manifest，再经 Runtime Projection、PermissionGrant 和 Evidence 链路执行。</p>
+          <p>管理本地 MCP server。工具先刷新 Manifest，再经 Runtime Projection、PermissionGrant 和 Evidence 链路执行。</p>
         </div>
-        <button type="button" onClick={() => void load()} disabled={busy}>刷新列表</button>
+        <div className="mcp-hero__actions">
+          <button type="button" onClick={() => setShowAddForm((value) => !value)}>
+            {showAddForm ? '收起添加' : '添加连接'}
+          </button>
+          <button type="button" onClick={() => void load()} disabled={busy}>刷新列表</button>
+        </div>
       </header>
 
-      <section className="settings-card">
-        <h3>新增本地 MCP server</h3>
-        <div className="settings-grid settings-grid--two">
-          <label>
-            名称
-            <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="filesystem / sentry / internal-tools" />
-          </label>
-          <label>
-            Transport
-            <select value={transport} onChange={(event) => setTransport(event.target.value as McpTransportKind)}>
-              <option value="streamable_http">streamable HTTP</option>
-              <option value="sse">SSE</option>
-              <option value="stdio">stdio</option>
-            </select>
-          </label>
-          {transport !== 'stdio' ? (
-            <label className="settings-grid__wide">
-              Server URL
-              <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="http://127.0.0.1:3000/mcp" />
+      <section className="mcp-summary-grid" aria-label="MCP summary">
+        <article className="mcp-summary-card">
+          <span>连接</span>
+          <strong>{servers.length}</strong>
+          <small>{totals.enabled} enabled</small>
+        </article>
+        <article className="mcp-summary-card">
+          <span>工具</span>
+          <strong>{totals.visibleTools}/{totals.tools}</strong>
+          <small>visible / discovered</small>
+        </article>
+        <article className="mcp-summary-card">
+          <span>资源</span>
+          <strong>{totals.resources}</strong>
+          <small>resources</small>
+        </article>
+        <article className="mcp-summary-card">
+          <span>Prompts</span>
+          <strong>{totals.prompts}</strong>
+          <small>user preview only</small>
+        </article>
+      </section>
+
+      {status ? <p className="settings-status mcp-status">{status}</p> : null}
+
+      {showAddForm ? (
+        <section className="settings-card mcp-add-card">
+          <header className="mcp-section-header">
+            <div>
+              <h3>新增本地 MCP server</h3>
+              <p>配置只保存连接元数据；Secret 会单独写入 main 进程凭证库。</p>
+            </div>
+          </header>
+          <div className="settings-grid settings-grid--two">
+            <label>
+              名称
+              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="filesystem / sentry / internal-tools" />
             </label>
-          ) : (
-            <>
-              <label>
-                Command
-                <input value={command} onChange={(event) => setCommand(event.target.value)} placeholder="npx / uvx / node" />
-              </label>
-              <label>
-                Args
-                <input value={argsText} onChange={(event) => setArgsText(event.target.value)} placeholder="-y @modelcontextprotocol/server-filesystem /tmp" />
-              </label>
+            <label>
+              Transport
+              <select value={transport} onChange={(event) => setTransport(event.target.value as McpTransportKind)}>
+                <option value="streamable_http">streamable HTTP</option>
+                <option value="sse">SSE</option>
+                <option value="stdio">stdio</option>
+              </select>
+            </label>
+            {transport !== 'stdio' ? (
               <label className="settings-grid__wide">
-                CWD（可选）
-                <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="/Users/me/project" />
+                Server URL
+                <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="http://127.0.0.1:3000/mcp" />
               </label>
-            </>
-          )}
-          <label>
-            认证方式
-            <select value={authMode} onChange={(event) => setAuthMode(event.target.value as McpAuthMode)}>
-              <option value="none">无需认证</option>
-              <option value="http_bearer" disabled={transport === 'stdio'}>HTTP Bearer Token</option>
-              <option value="http_header" disabled={transport === 'stdio'}>HTTP 自定义 Header</option>
-              <option value="stdio_env" disabled={transport !== 'stdio'}>stdio 环境变量</option>
-            </select>
-          </label>
-          {authMode !== 'none' ? (
-            <>
-              <label>
-                凭证名称
-                <input value={credentialLabel} onChange={(event) => setCredentialLabel(event.target.value)} placeholder="GitHub token / Sentry key" />
-              </label>
-              <label>
-                Secret（仅写入 main 进程凭证库）
-                <input type="password" value={credentialSecret} onChange={(event) => setCredentialSecret(event.target.value)} placeholder="不会保存到 renderer 状态以外的明文配置" />
-              </label>
-              {authMode === 'http_header' ? (
+            ) : (
+              <>
                 <label>
-                  Header Name
-                  <input value={authHeaderName} onChange={(event) => setAuthHeaderName(event.target.value)} placeholder="X-API-Key" />
+                  Command
+                  <input value={command} onChange={(event) => setCommand(event.target.value)} placeholder="npx / uvx / node" />
                 </label>
-              ) : null}
-              {authMode === 'stdio_env' ? (
                 <label>
-                  Env Name
-                  <input value={authEnvName} onChange={(event) => setAuthEnvName(event.target.value)} placeholder="GITHUB_PERSONAL_ACCESS_TOKEN" />
+                  Args
+                  <input value={argsText} onChange={(event) => setArgsText(event.target.value)} placeholder="-y @modelcontextprotocol/server-filesystem /tmp" />
                 </label>
-              ) : null}
-            </>
-          ) : null}
-        </div>
-        <p className="settings-muted">认证 Secret 只通过 IPC 送入 main 进程凭证库；registry 和 renderer 只保留 credentialRef、lastFour、authMode 等非密信息。</p>
-        <div className="settings-actions">
-          <button type="button" onClick={() => void handleSave()} disabled={busy || (!url.trim() && !command.trim())}>保存连接</button>
-        </div>
-      </section>
+                <label className="settings-grid__wide">
+                  Working directory
+                  <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="可选" />
+                </label>
+              </>
+            )}
+            <label>
+              认证方式
+              <select value={authMode} onChange={(event) => setAuthMode(event.target.value as McpAuthMode)}>
+                <option value="none">无认证</option>
+                {transport !== 'stdio' ? <option value="http_bearer">HTTP Bearer token</option> : null}
+                {transport !== 'stdio' ? <option value="http_header">HTTP custom header</option> : null}
+                {transport === 'stdio' ? <option value="stdio_env">stdio env secret</option> : null}
+              </select>
+            </label>
+            {authMode !== 'none' ? (
+              <>
+                <label>
+                  凭证标签
+                  <input value={credentialLabel} onChange={(event) => setCredentialLabel(event.target.value)} placeholder="prod token / staging key" />
+                </label>
+                <label>
+                  Secret
+                  <input value={credentialSecret} onChange={(event) => setCredentialSecret(event.target.value)} type="password" placeholder="不会保存到 renderer" />
+                </label>
+                {authMode === 'http_header' ? (
+                  <label>
+                    Header Name
+                    <input value={authHeaderName} onChange={(event) => setAuthHeaderName(event.target.value)} placeholder="X-API-Key" />
+                  </label>
+                ) : null}
+                {authMode === 'stdio_env' ? (
+                  <label>
+                    Env Name
+                    <input value={authEnvName} onChange={(event) => setAuthEnvName(event.target.value)} placeholder="GITHUB_PERSONAL_ACCESS_TOKEN" />
+                  </label>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+          <p className="settings-muted">认证 Secret 只通过 IPC 送入 main 进程凭证库；registry 和 renderer 只保留 credentialRef、lastFour、authMode 等非密信息。</p>
+          <div className="settings-actions">
+            <button type="button" onClick={() => void handleSave()} disabled={busy || !canSave}>保存连接</button>
+            <button type="button" onClick={() => { resetForm(); setShowAddForm(false); }} disabled={busy}>取消</button>
+          </div>
+        </section>
+      ) : null}
 
-      {status ? <p className="settings-status">{status}</p> : null}
-
-      <section className="settings-card">
-        <h3>本地 MCP 凭证库</h3>
-        {credentials.length === 0 ? (
-          <p className="settings-empty">还没有保存 MCP 凭证。保存带认证的连接时会自动创建凭证。</p>
-        ) : (
-          <ul className="mcp-server-list">
-            {credentials.map((credential) => (
-              <li key={credential.credentialRef}>
-                <button type="button" onClick={() => { void navigator.clipboard?.writeText(credential.credentialRef); }}>
-                  <strong>{credential.label}</strong>
-                  <span>{credential.kind} · {credential.storage ?? 'credential-store'} · ****{credential.lastFour ?? ''}</span>
-                  <small>{credential.headerName ? `header: ${credential.headerName}` : credential.envName ? `env: ${credential.envName}` : credential.credentialRef}</small>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="settings-card">
-        <h3>已配置连接</h3>
-        {servers.length === 0 ? (
-          <p className="settings-empty">还没有 MCP 连接。</p>
-        ) : (
-          <div className="mcp-settings-layout">
+      <div className="mcp-main-grid">
+        <aside className="settings-card mcp-sidebar-card">
+          <header className="mcp-section-header">
+            <div>
+              <h3>已配置连接</h3>
+              <p>{servers.length ? '选择一个连接查看 Manifest 和治理状态。' : '还没有 MCP 连接。'}</p>
+            </div>
+          </header>
+          {servers.length === 0 ? (
+            <div className="mcp-empty-state">
+              <strong>还没有 MCP 连接</strong>
+              <p>添加一个 streamable HTTP、SSE 或 stdio server 后刷新 Manifest。</p>
+              <button type="button" onClick={() => setShowAddForm(true)}>添加连接</button>
+            </div>
+          ) : (
             <ul className="mcp-server-list">
               {servers.map((server) => {
                 const id = serverIdOf(server);
-                const active = selected && serverIdOf(selected) === id;
+                const active = selected && String(serverIdOf(selected)) === String(id);
                 return (
-                  <li key={id} className={active ? 'is-active' : ''}>
-                    <button type="button" onClick={() => setSelectedId(id)}>
-                      <strong>{labelForServer(server)}</strong>
-                      <span>{transportLabel(server.transport)} · {server.enabled === false ? 'disabled' : 'enabled'}</span>
+                  <li key={String(id)}>
+                    <button type="button" className={active ? 'is-active' : ''} onClick={() => { setSelectedId(id); setResourcePreview(null); setPromptPreview(null); }}>
+                      <span>
+                        <strong>{labelForServer(server)}</strong>
+                        <em>{transportLabel(server.transport)}</em>
+                      </span>
                       <small>{server.toolsCount ?? server.tools?.length ?? 0} tools · {server.resourcesCount ?? server.resources?.length ?? 0} resources · {server.promptsCount ?? server.prompts?.length ?? 0} prompts</small>
                     </button>
                   </li>
                 );
               })}
             </ul>
+          )}
 
-            {selected ? (
-              <div className="mcp-server-detail">
-                <header>
-                  <div>
-                    <h4>{labelForServer(selected)}</h4>
-                    <p>{selected.urlPreview || selected.serverUrl || selected.commandPreview || selected.description || '本地 MCP server'}</p>
-                  </div>
-                  <span className={`mcp-health mcp-health--${selected.health?.status ?? 'unknown'}`}>{selected.health?.status ?? 'unknown'}</span>
-                </header>
-                {selected.health?.message ? <p className="settings-warning">{selected.health.message}</p> : null}
-                {selected.lastError ? <p className="settings-warning">{selected.lastError}</p> : null}
-                <p className="settings-muted">认证：{selected.auth?.mode ?? 'none'}{selected.auth?.credentialRef ? ` · ${selected.auth.credentialRef}` : ''}</p>
-                <div className="settings-actions settings-actions--wrap">
-                  <button type="button" disabled={busy} onClick={() => void runServerAction('测试连接', () => clientApi.mcpTestConnection({ serverId: serverIdOf(selected) }))}>测试连接</button>
-                  <button type="button" disabled={busy} onClick={() => void runServerAction('刷新 Manifest', () => clientApi.mcpRefreshManifest({ serverId: serverIdOf(selected) }))}>刷新 Manifest</button>
-                  <button type="button" disabled={busy} onClick={() => void runServerAction(selected.enabled === false ? '启用连接' : '禁用连接', () => clientApi.mcpSetEnabled({ serverId: serverIdOf(selected), enabled: selected.enabled === false }))}>{selected.enabled === false ? '启用' : '禁用'}</button>
-                  <button type="button" disabled={busy} onClick={() => void runServerAction('移除连接', () => clientApi.mcpUninstall({ serverId: serverIdOf(selected) }))}>移除</button>
+          <div className="mcp-credentials-box">
+            <header className="mcp-section-header mcp-section-header--compact">
+              <div>
+                <h3>凭证库</h3>
+                <p>只显示非密元数据。</p>
+              </div>
+            </header>
+            {credentials.length === 0 ? (
+              <p className="settings-empty">还没有保存 MCP 凭证。</p>
+            ) : (
+              <ul className="mcp-credential-list">
+                {credentials.map((credential) => (
+                  <li key={credential.credentialRef}>
+                    <button type="button" onClick={() => { void navigator.clipboard?.writeText(credential.credentialRef); setStatus('credentialRef 已复制。'); }}>
+                      <span>
+                        <strong>{credential.label || credential.credentialRef}</strong>
+                        <small>{credential.kind || credential.authMode || 'secret'}{credential.lastFour ? ` · ••••${credential.lastFour}` : ''}</small>
+                      </span>
+                      <em>{credential.envName ? `env: ${credential.envName}` : credential.headerName || credential.storage || 'local'}</em>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </aside>
+
+        <section className="settings-card mcp-detail-card">
+          {selected ? (
+            <div className="mcp-server-detail">
+              <header className="mcp-detail-header">
+                <div>
+                  <span className="mcp-eyebrow">Selected server</span>
+                  <h3>{labelForServer(selected)}</h3>
+                  <p>{endpointForServer(selected)}</p>
                 </div>
+                <span className={`mcp-health mcp-health--${selected.health?.status ?? (selected.enabled === false ? 'disabled' : 'unknown')}`}>
+                  {selected.enabled === false ? 'disabled' : selected.health?.status ?? 'unknown'}
+                </span>
+              </header>
 
-                <section>
-                  <h5>Tools（进入 Runtime Projection）</h5>
-                  {selected.tools?.length ? (
-                    <ul className="mcp-tool-list">
-                      {selected.tools.map((tool) => {
-                        const toolName = toolNameOf(tool);
-                        return (
-                          <li key={toolName}>
-                            <div>
-                              <strong>{toolName}</strong>
-                              <p>{tool.description ?? tool.toolDesc ?? 'No description'}</p>
-                            </div>
-                            <label className="mcp-toggle">
-                              <input
-                                type="checkbox"
-                                checked={tool.visible !== false}
-                                onChange={(event) => void runServerAction('更新工具可见性', () => clientApi.mcpSetToolVisibility({
-                                  serverId: serverIdOf(selected),
-                                  toolName,
-                                  visible: event.target.checked,
-                                }))}
-                              />
-                              visible
-                            </label>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  ) : <p className="settings-empty">尚未发现工具。请刷新 Manifest。</p>}
-                </section>
+              {selected.lastError ? <p className="settings-warning">{selected.lastError}</p> : null}
 
-                <section>
-                  <h5>Resources（只读管理预览）</h5>
-                  {selected.resources?.length ? (
+              <dl className="mcp-detail-meta">
+                <div>
+                  <dt>Transport</dt>
+                  <dd>{transportLabel(selected.transport)}</dd>
+                </div>
+                <div>
+                  <dt>Auth</dt>
+                  <dd>{authLabel(selected.auth)}</dd>
+                </div>
+                <div>
+                  <dt>Manifest</dt>
+                  <dd>{formatDateTime(selected.manifestUpdatedAt)}</dd>
+                </div>
+                <div>
+                  <dt>Tools</dt>
+                  <dd>{selected.visibleToolsCount ?? selectedTools.filter((tool) => tool.visible !== false).length}/{selected.toolsCount ?? selectedTools.length} visible</dd>
+                </div>
+              </dl>
+
+              <div className="settings-actions settings-actions--wrap mcp-detail-actions">
+                <button type="button" disabled={busy} onClick={() => void runServerAction('刷新 Manifest', () => clientApi.mcpRefreshManifest({ serverId: serverIdOf(selected) }))}>刷新 Manifest</button>
+                <button type="button" disabled={busy} onClick={() => void runServerAction(selected.enabled === false ? '启用连接' : '禁用连接', () => clientApi.mcpSetEnabled({ serverId: serverIdOf(selected), enabled: selected.enabled === false }))}>{selected.enabled === false ? '启用' : '禁用'}</button>
+                <button type="button" disabled={busy} onClick={() => void runServerAction('移除连接', () => clientApi.mcpUninstall({ serverId: serverIdOf(selected) }))}>移除</button>
+              </div>
+
+              <section className="mcp-manifest-section">
+                <header className="mcp-section-header">
+                  <div>
+                    <h3>Tools</h3>
+                    <p>只有 visible 的工具会进入 Runtime Projection。</p>
+                  </div>
+                </header>
+                {selectedTools.length ? (
+                  <ul className="mcp-tool-list">
+                    {selectedTools.map((tool) => {
+                      const toolName = toolNameOf(tool);
+                      return (
+                        <li key={toolName}>
+                          <div>
+                            <strong>{toolName}</strong>
+                            <p>{tool.description ?? tool.toolDesc ?? 'No description'}</p>
+                          </div>
+                          <label className="mcp-toggle">
+                            <input
+                              type="checkbox"
+                              checked={tool.visible !== false}
+                              onChange={(event) => void runServerAction('更新工具可见性', () => clientApi.mcpSetToolVisibility({
+                                serverId: serverIdOf(selected),
+                                toolName,
+                                visible: event.target.checked,
+                              }))}
+                            />
+                            visible
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : <p className="settings-empty">尚未发现工具。请刷新 Manifest。</p>}
+              </section>
+
+              <div className="mcp-manifest-grid">
+                <section className="mcp-manifest-section">
+                  <header className="mcp-section-header">
+                    <div>
+                      <h3>Resources</h3>
+                      <p>读取结果只作为用户可见预览。</p>
+                    </div>
+                  </header>
+                  {selectedResources.length ? (
                     <ul className="mcp-resource-list">
-                      {selected.resources.map((resource) => (
+                      {selectedResources.map((resource) => (
                         <li key={resource.uri}>
                           <button type="button" disabled={busy} onClick={() => void handleReadResource(resource.uri)}>{resource.name || resource.uri}</button>
                           <small>{resource.uri}</small>
@@ -426,14 +552,19 @@ export function McpSettingsPanel() {
                   {resourcePreview ? <pre className="mcp-preview">{resourcePreview}</pre> : null}
                 </section>
 
-                <section>
-                  <h5>Prompts（只做用户可见预览）</h5>
-                  {selected.prompts?.length ? (
+                <section className="mcp-manifest-section">
+                  <header className="mcp-section-header">
+                    <div>
+                      <h3>Prompts</h3>
+                      <p>不会自动提升为 system 指令。</p>
+                    </div>
+                  </header>
+                  {selectedPrompts.length ? (
                     <ul className="mcp-resource-list">
-                      {selected.prompts.map((prompt) => (
+                      {selectedPrompts.map((prompt) => (
                         <li key={prompt.name}>
                           <button type="button" disabled={busy} onClick={() => void handleGetPrompt(prompt.name)}>{prompt.name}</button>
-                          <small>{prompt.description ?? ''}</small>
+                          {prompt.description ? <small>{prompt.description}</small> : null}
                         </li>
                       ))}
                     </ul>
@@ -441,10 +572,15 @@ export function McpSettingsPanel() {
                   {promptPreview ? <pre className="mcp-preview">{promptPreview}</pre> : null}
                 </section>
               </div>
-            ) : null}
-          </div>
-        )}
-      </section>
+            </div>
+          ) : (
+            <div className="mcp-empty-state mcp-empty-state--detail">
+              <strong>选择或添加一个 MCP 连接</strong>
+              <p>连接保存后刷新 Manifest，即可在这里管理工具、资源和 prompts。</p>
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
