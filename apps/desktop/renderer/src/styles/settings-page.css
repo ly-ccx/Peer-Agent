@@ -423,6 +423,65 @@
 .mcp-hero__actions,
 .mcp-detail-actions {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* 设置页/MCP 面板的动作按钮：base.css 把 <button> 重置成无边框透明文本，
+   这里恢复成可识别、可点击的控件（次级=描边，主操作=石墨填充）。 */
+.mcp-hero__actions button,
+.mcp-detail-actions button,
+.settings-actions button,
+.settings-actions--wrap button,
+.mcp-empty-state button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--za-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--pa-surface-card);
+  color: var(--pa-text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: var(--za-shadow-1, 0 1px 2px rgba(15, 18, 22, 0.06));
+}
+
+.mcp-hero__actions button:hover:not(:disabled),
+.mcp-detail-actions button:hover:not(:disabled),
+.settings-actions button:hover:not(:disabled),
+.settings-actions--wrap button:hover:not(:disabled),
+.mcp-empty-state button:hover:not(:disabled) {
+  border-color: var(--za-line-strong);
+  background: var(--pa-surface-hover);
+}
+
+.mcp-hero__actions button:disabled,
+.mcp-detail-actions button:disabled,
+.settings-actions button:disabled,
+.settings-actions--wrap button:disabled,
+.mcp-empty-state button:disabled {
+  cursor: not-allowed;
+}
+
+/* 主操作：hero 第一个按钮（添加连接）+ empty-state 的 CTA 用石墨填充强调。
+   遵守红线 1：accent(azure) 不做 CTA 背景，主按钮用 graphite。 */
+.mcp-hero__actions button:first-child,
+.mcp-empty-state button {
+  border-color: var(--graphite-base);
+  background: var(--graphite-base);
+  color: var(--za-accent-ink);
+}
+
+.mcp-hero__actions button:first-child:hover:not(:disabled),
+.mcp-empty-state button:hover:not(:disabled) {
+  border-color: var(--graphite-base-hover);
+  background: var(--graphite-base-hover);
 }
 
 .mcp-summary-grid {
@@ -473,6 +532,245 @@
 
 .mcp-add-card {
   border-color: color-mix(in srgb, var(--za-accent) 24%, var(--pa-border-subtle));
+}
+
+/* ── 新增连接 · 浮层（对齐 image-preview-overlay 浮层范式 + Peer Frost token）── */
+.mcp-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: var(--space-8);
+  /* 与 image-preview-overlay 统一的冷调遮罩,而非纯黑/暗色硬编码 */
+  background: rgba(8, 12, 18, 0.46);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  animation: za-content-reveal var(--za-motion-medium) var(--za-ease-out) both;
+}
+
+.mcp-modal-card {
+  display: flex;
+  flex-direction: column;
+  width: min(620px, 100%);
+  max-height: calc(100vh - 2 * var(--space-8));
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--chrome-hairline);
+  background: var(--chrome-raised);
+  box-shadow: var(--shadow-drag);
+  animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
+}
+
+.mcp-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-5) var(--space-4);
+  border-bottom: 1px solid var(--chrome-hairline);
+}
+
+.mcp-modal-header h3 {
+  margin: 0 0 4px;
+  font-family: var(--font-serif-zh);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--graphite-base);
+}
+
+.mcp-modal-header p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--graphite-soft);
+}
+
+.mcp-modal-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--graphite-mute);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--za-motion-fast), background var(--za-motion-fast);
+}
+
+.mcp-modal-close:hover:not(:disabled) {
+  color: var(--graphite-base);
+  background: var(--chrome-hover);
+}
+
+.mcp-modal-close:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mcp-modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.mcp-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--chrome-hairline);
+  background: var(--chrome-canvas);
+}
+
+.mcp-modal-footer button {
+  padding: 8px 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--chrome-hairline);
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background var(--za-motion-fast), border-color var(--za-motion-fast), color var(--za-motion-fast);
+}
+
+.mcp-modal-cancel {
+  background: var(--chrome-raised);
+  color: var(--graphite-soft);
+}
+
+.mcp-modal-cancel:hover:not(:disabled) {
+  color: var(--graphite-base);
+  border-color: var(--graphite-mute);
+  background: var(--chrome-hover);
+}
+
+/* 主操作 = 石墨填充 CTA（红线 1：azure 不上 CTA），与 hero「添加连接」一致 */
+.mcp-modal-confirm {
+  border-color: var(--graphite-base);
+  background: var(--graphite-base);
+  color: var(--za-accent-ink);
+}
+
+.mcp-modal-confirm:hover:not(:disabled) {
+  border-color: var(--graphite-base-hover);
+  background: var(--graphite-base-hover);
+}
+
+.mcp-modal-footer button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mcp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mcp-field__label {
+  color: var(--pa-text-secondary);
+  font-size: 0.78rem;
+}
+
+.mcp-segment {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-md);
+  background: var(--pa-surface-muted);
+  border: 1px solid var(--pa-border-subtle);
+}
+
+.mcp-segment__btn {
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius-md) - 4px);
+  background: transparent;
+  color: var(--pa-text-secondary);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background var(--za-motion-fast), color var(--za-motion-fast);
+}
+
+.mcp-segment__btn:hover {
+  color: var(--pa-text-primary);
+}
+
+.mcp-segment__btn.is-active {
+  background: var(--pa-surface-card);
+  border-color: var(--pa-border-subtle);
+  color: var(--pa-text-primary);
+  font-weight: 600;
+  box-shadow: var(--shadow-popover);
+}
+
+.mcp-row {
+  display: grid;
+  gap: 8px;
+  align-items: center;
+}
+
+.mcp-row--single {
+  grid-template-columns: 1fr auto;
+}
+
+.mcp-row--pair {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
+.mcp-row input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--pa-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--pa-surface-card);
+  color: var(--pa-text-primary);
+  font-size: 0.84rem;
+}
+
+.mcp-row__remove {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--pa-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--pa-surface-muted);
+  color: var(--pa-text-secondary);
+  cursor: pointer;
+}
+
+.mcp-row__remove:hover {
+  color: var(--pa-text-primary);
+  border-color: color-mix(in srgb, var(--za-accent) 40%, var(--pa-border-subtle));
+}
+
+.mcp-row__add {
+  align-self: flex-start;
+  padding: 8px 14px;
+  border: 1px dashed var(--pa-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--pa-surface-muted);
+  color: var(--pa-text-secondary);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.mcp-row__add:hover {
+  color: var(--pa-text-primary);
+  border-color: var(--za-accent);
 }
 
 .mcp-main-grid {

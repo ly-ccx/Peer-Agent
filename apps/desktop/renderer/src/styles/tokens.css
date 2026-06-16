@@ -214,6 +214,21 @@
   --za-user-accent: #3B7FAB;
   --za-user-background: #FAFBFC;
   --za-user-foreground: #1A1D21;
+
+  /* ─────────────────────────────────────────────────────────────
+   *  --pa-* 别名层
+   *  设置页 / MCP 面板早期按 --pa-* 命名编写，但这套 token 从未定义，
+   *  导致 border / background / color 全部解析失败、控件塌成纯文本。
+   *  这里统一映射到 --za-* 语义层，随主题自动切换（var 在 use-site 解析）。
+   * ───────────────────────────────────────────────────────────── */
+  --pa-text-primary: var(--za-text);
+  --pa-text-secondary: var(--za-text-soft);
+  --pa-border-subtle: var(--za-line);
+  --pa-surface: var(--za-surface-0);
+  --pa-surface-card: var(--za-surface-0);
+  --pa-surface-panel: var(--za-surface-1);
+  --pa-surface-muted: var(--za-surface-1);
+  --pa-surface-hover: var(--za-hover);
 }
 
 /* ─────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 import type { LocalMcpServerUpsertRequest } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { Dropdown, type DropdownOption } from './Dropdown';
 
 type McpTransportKind = 'streamable_http' | 'sse' | 'stdio';
 type McpAuthMode = 'none' | 'http_bearer' | 'http_header' | 'stdio_env';
@@ -104,7 +105,10 @@ export function McpSettingsPanel() {
   const [transport, setTransport] = useState<McpTransportKind>('streamable_http');
   const [url, setUrl] = useState('');
   const [command, setCommand] = useState('');
-  const [argsText, setArgsText] = useState('');
+  const [argRows, setArgRows] = useState<readonly string[]>(['']);
+  const [envRows, setEnvRows] = useState<readonly { readonly key: string; readonly value: string }[]>([
+    { key: '', value: '' },
+  ]);
   const [cwd, setCwd] = useState('');
   const [authMode, setAuthMode] = useState<McpAuthMode>('none');
   const [credentialLabel, setCredentialLabel] = useState('');
@@ -135,6 +139,17 @@ export function McpSettingsPanel() {
     if (transport !== 'stdio' && authMode === 'stdio_env') setAuthMode('none');
   }, [authMode, transport]);
 
+  const authModeOptions = useMemo<DropdownOption[]>(() => {
+    const options: DropdownOption[] = [{ value: 'none', label: '无认证' }];
+    if (transport !== 'stdio') {
+      options.push({ value: 'http_bearer', label: 'HTTP Bearer token' });
+      options.push({ value: 'http_header', label: 'HTTP custom header' });
+    } else {
+      options.push({ value: 'stdio_env', label: 'stdio env secret' });
+    }
+    return options;
+  }, [transport]);
+
   const selected = useMemo(
     () => servers.find((server) => String(serverIdOf(server)) === String(selectedId)) ?? servers[0] ?? null,
     [selectedId, servers],
@@ -156,7 +171,8 @@ export function McpSettingsPanel() {
     setTransport('streamable_http');
     setUrl('');
     setCommand('');
-    setArgsText('');
+    setArgRows(['']);
+    setEnvRows([{ key: '', value: '' }]);
     setCwd('');
     setAuthMode('none');
     setCredentialLabel('');
@@ -165,11 +181,54 @@ export function McpSettingsPanel() {
     setAuthEnvName('MCP_TOKEN');
   }, []);
 
+  useEffect(() => {
+    if (!showAddForm) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) {
+        resetForm();
+        setShowAddForm(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showAddForm, busy, resetForm]);
+
+  const updateArgRow = useCallback((index: number, value: string) => {
+    setArgRows((rows) => rows.map((row, i) => (i === index ? value : row)));
+  }, []);
+  const addArgRow = useCallback(() => {
+    setArgRows((rows) => [...rows, '']);
+  }, []);
+  const removeArgRow = useCallback((index: number) => {
+    setArgRows((rows) => {
+      const next = rows.filter((_, i) => i !== index);
+      return next.length ? next : [''];
+    });
+  }, []);
+
+  const updateEnvRow = useCallback((index: number, patch: { readonly key?: string; readonly value?: string }) => {
+    setEnvRows((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  }, []);
+  const addEnvRow = useCallback(() => {
+    setEnvRows((rows) => [...rows, { key: '', value: '' }]);
+  }, []);
+  const removeEnvRow = useCallback((index: number) => {
+    setEnvRows((rows) => {
+      const next = rows.filter((_, i) => i !== index);
+      return next.length ? next : [{ key: '', value: '' }];
+    });
+  }, []);
+
   const handleSave = useCallback(async () => {
     setBusy(true);
     setStatus('保存 MCP 连接中…');
     try {
-      const args = argsText.split(/\s+/).map((item) => item.trim()).filter(Boolean);
+      const args = argRows.map((item) => item.trim()).filter(Boolean);
+      const env = envRows.reduce<Record<string, string>>((acc, row) => {
+        const key = row.key.trim();
+        if (key) acc[key] = row.value;
+        return acc;
+      }, {});
       let auth: LocalMcpServerUpsertRequest['auth'] = { mode: 'none' };
       if (authMode !== 'none') {
         if (!credentialSecret.trim()) throw new Error('请填写 MCP 凭证。');
@@ -197,6 +256,7 @@ export function McpSettingsPanel() {
           ...base,
           command: command.trim(),
           args,
+          env,
           cwd: cwd.trim() || null,
           auth,
         }
@@ -217,7 +277,7 @@ export function McpSettingsPanel() {
     } finally {
       setBusy(false);
     }
-  }, [argsText, authEnvName, authHeaderName, authMode, command, credentialLabel, credentialSecret, displayName, load, resetForm, transport, url]);
+  }, [argRows, authEnvName, authHeaderName, authMode, command, credentialLabel, credentialSecret, cwd, displayName, envRows, load, resetForm, transport, url]);
 
   const runServerAction = useCallback(async (message: string, action: () => Promise<unknown>) => {
     setBusy(true);
@@ -277,8 +337,8 @@ export function McpSettingsPanel() {
           <p>管理本地 MCP server。工具先刷新 Manifest，再经 Runtime Projection、PermissionGrant 和 Evidence 链路执行。</p>
         </div>
         <div className="mcp-hero__actions">
-          <button type="button" onClick={() => setShowAddForm((value) => !value)}>
-            {showAddForm ? '收起添加' : '添加连接'}
+          <button type="button" onClick={() => setShowAddForm(true)}>
+            添加连接
           </button>
           <button type="button" onClick={() => void load()} disabled={busy}>刷新列表</button>
         </div>
@@ -310,26 +370,63 @@ export function McpSettingsPanel() {
       {status ? <p className="settings-status mcp-status">{status}</p> : null}
 
       {showAddForm ? (
-        <section className="settings-card mcp-add-card">
-          <header className="mcp-section-header">
-            <div>
-              <h3>新增本地 MCP server</h3>
-              <p>配置只保存连接元数据；Secret 会单独写入 main 进程凭证库。</p>
-            </div>
-          </header>
-          <div className="settings-grid settings-grid--two">
+        <div
+          className="mcp-modal-overlay"
+          role="presentation"
+          onClick={() => { if (!busy) { resetForm(); setShowAddForm(false); } }}
+        >
+          <section
+            className="mcp-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="新增本地 MCP server"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="mcp-modal-header">
+              <div>
+                <h3>新增本地 MCP server</h3>
+                <p>配置只保存连接元数据；Secret 会单独写入 main 进程凭证库。</p>
+              </div>
+              <button
+                type="button"
+                className="mcp-modal-close"
+                aria-label="关闭"
+                onClick={() => { resetForm(); setShowAddForm(false); }}
+                disabled={busy}
+              >
+                ✕
+              </button>
+            </header>
+            <div className="mcp-modal-body">
+            <div className="settings-grid settings-grid--two">
             <label>
               名称
               <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="filesystem / sentry / internal-tools" />
             </label>
-            <label>
-              Transport
-              <select value={transport} onChange={(event) => setTransport(event.target.value as McpTransportKind)}>
-                <option value="streamable_http">streamable HTTP</option>
-                <option value="sse">SSE</option>
-                <option value="stdio">stdio</option>
-              </select>
-            </label>
+            <div className="settings-grid__wide mcp-field">
+              <span className="mcp-field__label">Transport</span>
+              <div className="mcp-segment" role="tablist" aria-label="Transport">
+                {([
+                  { value: 'stdio', label: 'STDIO' },
+                  { value: 'streamable_http', label: 'Streamable HTTP' },
+                  { value: 'sse', label: 'SSE' },
+                ] as const).map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="tab"
+                    aria-selected={transport === option.value}
+                    className={`mcp-segment__btn${transport === option.value ? ' is-active' : ''}`}
+                    onClick={() => {
+                      setTransport(option.value);
+                      setAuthMode('none');
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             {transport !== 'stdio' ? (
               <label className="settings-grid__wide">
                 Server URL
@@ -337,28 +434,75 @@ export function McpSettingsPanel() {
               </label>
             ) : (
               <>
-                <label>
-                  Command
+                <label className="settings-grid__wide">
+                  Command to launch
                   <input value={command} onChange={(event) => setCommand(event.target.value)} placeholder="npx / uvx / node" />
                 </label>
-                <label>
-                  Args
-                  <input value={argsText} onChange={(event) => setArgsText(event.target.value)} placeholder="-y @modelcontextprotocol/server-filesystem /tmp" />
-                </label>
+                <div className="settings-grid__wide mcp-field">
+                  <span className="mcp-field__label">Arguments</span>
+                  {argRows.map((arg, index) => (
+                    <div key={`arg-${index}`} className="mcp-row mcp-row--single">
+                      <input
+                        value={arg}
+                        onChange={(event) => updateArgRow(index, event.target.value)}
+                        placeholder="-y / @modelcontextprotocol/server-filesystem / /tmp"
+                      />
+                      <button
+                        type="button"
+                        className="mcp-row__remove"
+                        aria-label="删除参数"
+                        onClick={() => removeArgRow(index)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" className="mcp-row__add" onClick={addArgRow}>
+                    + 添加参数
+                  </button>
+                </div>
+                <div className="settings-grid__wide mcp-field">
+                  <span className="mcp-field__label">Environment variables</span>
+                  {envRows.map((row, index) => (
+                    <div key={`env-${index}`} className="mcp-row mcp-row--pair">
+                      <input
+                        value={row.key}
+                        onChange={(event) => updateEnvRow(index, { key: event.target.value })}
+                        placeholder="Key"
+                      />
+                      <input
+                        value={row.value}
+                        onChange={(event) => updateEnvRow(index, { value: event.target.value })}
+                        placeholder="Value"
+                      />
+                      <button
+                        type="button"
+                        className="mcp-row__remove"
+                        aria-label="删除环境变量"
+                        onClick={() => removeEnvRow(index)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" className="mcp-row__add" onClick={addEnvRow}>
+                    + 添加环境变量
+                  </button>
+                </div>
                 <label className="settings-grid__wide">
                   Working directory
-                  <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="可选" />
+                  <input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="~/code（可选）" />
                 </label>
               </>
             )}
             <label>
               认证方式
-              <select value={authMode} onChange={(event) => setAuthMode(event.target.value as McpAuthMode)}>
-                <option value="none">无认证</option>
-                {transport !== 'stdio' ? <option value="http_bearer">HTTP Bearer token</option> : null}
-                {transport !== 'stdio' ? <option value="http_header">HTTP custom header</option> : null}
-                {transport === 'stdio' ? <option value="stdio_env">stdio env secret</option> : null}
-              </select>
+              <Dropdown
+                value={authMode}
+                options={authModeOptions}
+                onChange={(value) => setAuthMode(value as McpAuthMode)}
+                ariaLabel="认证方式"
+              />
             </label>
             {authMode !== 'none' ? (
               <>
@@ -384,13 +528,15 @@ export function McpSettingsPanel() {
                 ) : null}
               </>
             ) : null}
-          </div>
-          <p className="settings-muted">认证 Secret 只通过 IPC 送入 main 进程凭证库；registry 和 renderer 只保留 credentialRef、lastFour、authMode 等非密信息。</p>
-          <div className="settings-actions">
-            <button type="button" onClick={() => void handleSave()} disabled={busy || !canSave}>保存连接</button>
-            <button type="button" onClick={() => { resetForm(); setShowAddForm(false); }} disabled={busy}>取消</button>
-          </div>
-        </section>
+            </div>
+            <p className="settings-muted">认证 Secret 只通过 IPC 送入 main 进程凭证库；registry 和 renderer 只保留 credentialRef、lastFour、authMode 等非密信息。</p>
+            </div>
+            <div className="mcp-modal-footer">
+              <button type="button" className="mcp-modal-cancel" onClick={() => { resetForm(); setShowAddForm(false); }} disabled={busy}>取消</button>
+              <button type="button" className="mcp-modal-confirm" onClick={() => void handleSave()} disabled={busy || !canSave}>保存连接</button>
+            </div>
+          </section>
+        </div>
       ) : null}
 
       <div className="mcp-main-grid">

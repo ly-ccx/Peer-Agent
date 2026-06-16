@@ -167,6 +167,7 @@ export interface LocalMcpServerUpsertRequest {
   readonly command?: string;
   readonly args?: readonly string[];
   readonly cwd?: string | null;
+  readonly env?: Record<string, string>;
   readonly url?: string;
   readonly serverUrl?: string;
   readonly headers?: Record<string, string>;
