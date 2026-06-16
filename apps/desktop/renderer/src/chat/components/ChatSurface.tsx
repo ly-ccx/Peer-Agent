@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Dropdown, type DropdownOption } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
+import { loadComposerEntry, saveComposerEntry } from '../state/composerPersistence';
 import { MarkdownMessage } from './markdown/MarkdownMessage';
 import { ChatFindBar } from './thread/ChatFindBar';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
@@ -718,6 +719,9 @@ export function ChatSurface({
   // 任务续传(ADR 21):防止同一 resumeTask 被自动发送多次的一次性闸门。
   const resumeFiredRef = useRef<string | null>(null);
   const streamIdRef = useRef<string | null>(null);
+  // 输入框持久化的「上次落盘会话」标记。初值用 undefined 哨兵(区别于真实 id 与 null),
+  // 使每次切到新会话的首遍只同步本 ref 并跳过保存,避免把旧会话草稿写到新会话名下。
+  const composerPersistConvRef = useRef<string | null | undefined>(undefined);
 
   // 把流式文本追加到最后一条 assistant 消息的尾部文本段。
   const appendStreamText = useCallback((chunk: string) => {
@@ -837,8 +841,12 @@ export function ChatSurface({
     setAttachmentError(null);
     setPendingPermissionCalls([]);
     setProviderRecoveryNotice(null);
-    // 切换会话时清空待发送队列:队列以「当前会话」为坐标,不应跨会话续发。
-    setMessageQueue([]);
+    // 切换会话时恢复「该会话」已持久化的输入框状态(草稿文本 + 待发送队列):
+    // 草稿与队列都以 conversationId 为坐标,二次打开应原样保留;无会话(新建未落库)则清空。
+    // 草稿区附件不持久化(见 composerPersistence 取舍说明),故切换会话后附件区始终清空。
+    const persisted = conversationId ? loadComposerEntry(conversationId) : null;
+    setDraft(persisted?.draft ?? '');
+    setMessageQueue(persisted?.queue ?? []);
     shouldAutoScrollRef.current = true;
     setIsThreadAtBottom(true);
     // 切换会话时,先把流式表达状态按会话归零,避免上一会话的 isStreaming/streamId 残留:
@@ -892,6 +900,28 @@ export function ChatSurface({
     })();
     return () => { cancelled = true; };
   }, [conversationId]);
+
+  // 输入框(草稿 + 待发送队列)按会话持久化。
+  // 时序坑:conversationId 变更的那一次提交里,上面的恢复 effect 才刚调用 setDraft/
+  // setMessageQueue,本 effect 同批运行时 draft/queue 仍是「上一个会话」的旧值。若此时
+  // 直接落盘,会把旧会话的草稿错写到新会话名下。用 ref 记录上次落盘的会话,切换发生的
+  // 那一遍只更新 ref 并跳过保存;待恢复完成后(及后续真实编辑)才以当前会话为坐标落盘。
+  useEffect(() => {
+    if (composerPersistConvRef.current !== conversationId) {
+      composerPersistConvRef.current = conversationId;
+      return;
+    }
+    if (!conversationId) return;
+    saveComposerEntry(conversationId, {
+      draft,
+      queue: messageQueue.map((item) => ({
+        id: item.id,
+        text: item.text,
+        attachments: item.attachments,
+        effort: item.effort,
+      })),
+    });
+  }, [conversationId, draft, messageQueue]);
 
   useEffect(() => {
     const persistMessages = (msgs: ChatMsg[]) => {
