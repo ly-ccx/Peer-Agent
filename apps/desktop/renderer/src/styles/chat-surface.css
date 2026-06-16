@@ -495,15 +495,15 @@
 
 .composer-dropdown.pa-dropdown-danger .pa-dropdown-trigger {
   color: var(--state-danger);
-  border-color: rgba(122, 62, 80, 0.18);
-  background: rgba(122, 62, 80, 0.07);
+  border-color: transparent;
+  background: transparent;
 }
 
 .composer-dropdown.pa-dropdown-danger .pa-dropdown-trigger:hover:not(:disabled),
 .composer-dropdown.pa-dropdown-danger .pa-dropdown-trigger.open {
   color: var(--state-danger);
-  border-color: rgba(122, 62, 80, 0.26);
-  background: var(--za-danger-soft);
+  border-color: var(--chrome-hairline);
+  background: var(--composer-addon-hover-bg);
 }
 
 .composer-dropdown .pa-dropdown-item.danger {
