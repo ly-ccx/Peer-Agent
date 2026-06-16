@@ -7,7 +7,10 @@ const MCP_CAPABILITY_PREFIX = 'local.mcp.';
 function parseMcpCapabilityId(capabilityId) {
   if (!String(capabilityId ?? '').startsWith(MCP_CAPABILITY_PREFIX)) return null;
   const rest = capabilityId.slice(MCP_CAPABILITY_PREFIX.length);
-  const dotIndex = rest.indexOf('.');
+  // capabilityId is built as `local.mcp.${server.id}.${toolName}` (see mcp-registry.mjs).
+  // server.id is derived from the server host and may contain dots, while toolName does not,
+  // so split on the LAST dot to keep the dotted server.id intact.
+  const dotIndex = rest.lastIndexOf('.');
   if (dotIndex < 0) return null;
   return { serverId: rest.slice(0, dotIndex), toolName: rest.slice(dotIndex + 1) };
 }

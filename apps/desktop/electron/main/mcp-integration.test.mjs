@@ -188,4 +188,68 @@ describe('MCP integration runtime chain', () => {
     assert.equal(execution.result.evidence.toolCallId, 'tc_mcp_1');
     assert.equal(execution.result.evidence.returnedToCloud, false);
   });
+
+  it('resolves a dotted server.id end-to-end (regression: DingTalk-style host id)', async () => {
+    // DingTalk-style server ids are derived from the host and contain dots, so the
+    // generated capabilityId is `local.mcp.<dotted.server.id>.<toolName>` with several
+    // dots. parseMcpCapabilityId must split on the LAST dot, otherwise the server
+    // lookup uses a truncated id (e.g. only `https-mcp-gw`) and fails with
+    // "MCP server not found", which is the original "can't connect" symptom.
+    const dottedServerId =
+      'https-mcp-gw.dingtalk.com-server-cb36f9198eefa69fad244089954ebe41451eddb20195e4e';
+    const registry = createMcpRegistry();
+    registry.upsertServer({
+      id: dottedServerId,
+      displayName: 'DingTalk MCP',
+      transport: 'streamable_http',
+      url: 'http://127.0.0.1:3932/mcp',
+      enabled: true,
+      policy: {
+        trusted: true,
+        visibleByDefault: true,
+        requirePermission: true,
+        maxRiskLevel: 'L4_privileged',
+      },
+      tools: [
+        {
+          name: 'get_document_info',
+          description: 'Get DingTalk document info',
+          inputSchema: { type: 'object' },
+        },
+      ],
+    });
+
+    const capabilityId = `local.mcp.${dottedServerId}.get_document_info`;
+    const manifest = registry
+      .listCapabilityManifests()
+      .find((entry) => entry.capabilityId === capabilityId);
+    assert.ok(manifest, 'manifest should be generated with the full dotted server.id');
+
+    const provider = createLocalMcpProvider({ mcpRegistry: registry });
+    const call = {
+      toolCallId: 'tc_mcp_dotted',
+      capabilityId,
+      arguments: { nodeId: 'demo' },
+    };
+    const permissionRequests = [];
+
+    const execution = await provider.executeCapability({ call }, {
+      locale: 'en-US',
+      requestPermission: async (request) => {
+        permissionRequests.push(request);
+        return { granted: false };
+      },
+    });
+
+    // The lookup must have reached the real server (not "MCP server not found"),
+    // proving the dotted server.id survived parsing. We stop at the permission gate.
+    assert.equal(permissionRequests.length, 1);
+    assert.equal(permissionRequests[0].scope.serverId, dottedServerId);
+    assert.equal(permissionRequests[0].scope.toolName, 'get_document_info');
+    assert.equal(execution.result.status, 'denied');
+    assert.notEqual(
+      execution.result.outputPreview.reason,
+      `MCP server not found: ${dottedServerId}`,
+    );
+  });
 });
