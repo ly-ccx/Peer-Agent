@@ -96,7 +96,7 @@
 
 /* ── Messages ── */
 .chat-msg {
-  max-width: 740px;
+  max-width: var(--chat-content-max);
   width: 100%;
   min-width: 0;
   margin: 0 auto;
@@ -165,7 +165,7 @@
 }
 
 .chat-stream-error {
-  max-width: 740px;
+  max-width: var(--chat-content-max);
   width: 100%;
   margin: 0 auto;
   padding: var(--space-3) var(--space-4);
@@ -370,7 +370,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  max-width: 740px;
+  max-width: var(--chat-content-max);
   margin: var(--space-2) auto 0;
   padding: 0 var(--space-1);
 }
@@ -568,7 +568,7 @@
   flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--space-2);
-  max-width: 740px;
+  max-width: var(--chat-content-max);
   margin: 0 auto;
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-lg);
@@ -754,6 +754,75 @@
   font-size: 0.68rem;
   padding: 0 4px;
 }
+
+/* ── 待发送消息队列(类似 Codex 队列) ── */
+.message-queue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: var(--chat-content-max);
+  margin: 0 auto var(--space-2);
+  padding: 0 var(--space-1);
+}
+.message-queue-label {
+  font-size: 0.68rem;
+  color: var(--graphite-mute);
+  user-select: none;
+}
+.message-queue-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 320px;
+  padding: 2px var(--space-1) 2px var(--space-2);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 999px;
+  background: var(--control-composer);
+  font-size: 0.72rem;
+  color: var(--graphite-base);
+}
+.message-queue-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--azure-soft);
+  color: var(--azure-seal);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+}
+.message-queue-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.message-queue-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--graphite-mute);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  transition: background var(--za-motion-fast), color var(--za-motion-fast);
+}
+.message-queue-remove:hover {
+  background: var(--state-danger-soft, rgba(220, 80, 80, 0.14));
+  color: var(--state-danger);
+}
+.message-queue-remove:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--za-focus);
+}
 .image-preview-overlay {
   position: fixed;
   inset: 0;
@@ -905,7 +974,7 @@
   font-size: 0.78rem;
   color: var(--graphite-soft);
   animation: compaction-notice-in var(--za-motion-medium) var(--za-ease-out) both;
-  max-width: 740px;
+  max-width: var(--chat-content-max);
   margin: 0 auto;
   width: 100%;
 }
@@ -976,7 +1045,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  max-width: 740px;
+  max-width: var(--chat-content-max);
   width: 100%;
   margin: 0 auto;
   padding: var(--space-2) 0;
@@ -1003,7 +1072,7 @@
   border: 1px solid var(--chrome-sunken);
   border-radius: var(--radius-md);
   overflow: hidden;
-  max-width: 740px;
+  max-width: var(--chat-content-max);
   margin: 0 auto;
   width: 100%;
   background: var(--paper-sheet);
@@ -1259,4 +1328,76 @@
     background: transparent;
     box-shadow: 0 0 0 6px transparent;
   }
+}
+
+/* ── In-conversation Find (cmd/ctrl+F) ── */
+.chat-find-bar {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-5);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  background: var(--paper-sheet);
+  box-shadow: var(--shadow-popover);
+}
+.chat-find-input {
+  width: 180px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--graphite-base);
+  font-size: 0.82rem;
+  padding: var(--space-1);
+}
+.chat-find-input::placeholder {
+  color: var(--graphite-mute);
+}
+.chat-find-count {
+  min-width: 44px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--graphite-mute);
+  user-select: none;
+}
+.chat-find-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--graphite-soft);
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background var(--za-motion-fast), color var(--za-motion-fast);
+}
+.chat-find-btn:hover:not(:disabled) {
+  background: var(--control-composer);
+  color: var(--graphite-base);
+}
+.chat-find-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.chat-find-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--za-focus);
+}
+
+/* 匹配高亮:CSS Custom Highlight API,不向消息 DOM 注入节点。 */
+::highlight(chat-find) {
+  background: var(--azure-soft);
+  color: var(--graphite-base);
+}
+::highlight(chat-find-active) {
+  background: var(--azure-seal);
+  color: var(--paper-sheet);
 }

@@ -13,6 +13,7 @@ import { Dropdown, type DropdownOption } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import { MarkdownMessage } from './markdown/MarkdownMessage';
+import { ChatFindBar } from './thread/ChatFindBar';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
 import { MessageRail, type MessageRailItem } from './thread/MessageRail';
@@ -34,6 +35,15 @@ interface ChatAttachment {
 }
 
 type EffortLevel = 'off' | 'low' | 'default' | 'high' | 'xhigh';
+
+// 待发送消息队列项:当一轮 agent turn 正在运行/压缩时,用户继续提交的消息先入队,
+// 待当前轮结束后由 dequeue effect 复用 submitMessage 自动发送下一条(不另造发送路径)。
+interface QueuedMessage {
+  id: string;
+  text: string;
+  attachments: ChatAttachment[];
+  effort: EffortLevel;
+}
 
 const BASE_EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'low', 'default', 'high'];
 const OPENAI_EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'low', 'default', 'high', 'xhigh'];
@@ -629,6 +639,9 @@ export function ChatSurface({
   const [draft, setDraft] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isCompacting, setIsCompacting] = useState(false);
+  // 待发送消息队列:当前轮(流式或压缩)进行中时用户继续提交的消息排队等候,
+  // 由 dequeue effect 在空闲且 provider 就绪时自动取队首发送。
+  const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
   // 把流式运行状态(含会话坐标)上报给上层,供左侧列表显示 Loading 图标。
   // 表达层只反映 isStreaming 真值,不引入新的执行真值。
   useEffect(() => {
@@ -678,6 +691,8 @@ export function ChatSurface({
   // 在落地为正式 tool-call 段之前会先以增量形式抵达,这里保存最近一次进度用于展示。
   // 仅为过程提示,不替代 Tool Result / Evidence。
   const [toolProgress, setToolProgress] = useState<ToolProgress | null>(null);
+  // 会话内查找(cmd/ctrl+F):仅在表达层对已渲染消息做高亮跳转,不触碰会话真值。
+  const [findOpen, setFindOpen] = useState(false);
 
   useEffect(() => {
     if (!imagePreview) return undefined;
@@ -687,6 +702,18 @@ export function ChatSurface({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [imagePreview]);
+
+  // cmd/ctrl+F 打开会话内查找。常驻监听,与图片预览的 Escape 监听相互独立。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        setFindOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   // 任务续传(ADR 21):防止同一 resumeTask 被自动发送多次的一次性闸门。
   const resumeFiredRef = useRef<string | null>(null);
@@ -801,12 +828,17 @@ export function ChatSurface({
     });
   const showSlashCommands = !isStreaming && !isCompacting && slashCommands.length > 0;
   const estimatedContextTokens = estimateConversationTokens(messages, draft, attachments);
+  // 当前轮进行中(流式/压缩)。此时主操作按钮含义:有草稿则"排队",无草稿则"停止"。
+  const isBusy = isStreaming || isCompacting;
+  const hasComposerContent = draft.trim().length > 0 || attachments.length > 0;
 
   useEffect(() => {
     setAttachments([]);
     setAttachmentError(null);
     setPendingPermissionCalls([]);
     setProviderRecoveryNotice(null);
+    // 切换会话时清空待发送队列:队列以「当前会话」为坐标,不应跨会话续发。
+    setMessageQueue([]);
     shouldAutoScrollRef.current = true;
     setIsThreadAtBottom(true);
     // 切换会话时,先把流式表达状态按会话归零,避免上一会话的 isStreaming/streamId 残留:
@@ -835,15 +867,23 @@ export function ChatSurface({
         const segments: ContentSegment[] = [];
         if (live.accumulatedThinking) segments.push({ type: 'thinking', content: live.accumulatedThinking });
         if (live.accumulatedText) segments.push({ type: 'text', content: live.accumulatedText });
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: nextId(),
+        // 重新打开会话时,loaded 末尾通常已是这一轮进行中的 assistant 消息
+        // (发送时已 appendMessage 落盘的占位/部分内容)。续接必须就地用快照覆盖它,
+        // 否则会在其后再追加一条几乎相同的消息,经 persistMessages 整体回写后被永久写重,
+        // 每重开一次叠加一条。仅当末尾不是 assistant 时才新建一条承接续流。
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          const liveMsg: ChatMsg = {
+            id: last && last.role === 'assistant' ? last.id : nextId(),
             role: 'assistant',
             content: live.accumulatedText ?? '',
             segments,
-          },
-        ]);
+          };
+          if (last && last.role === 'assistant') {
+            return [...prev.slice(0, -1), liveMsg];
+          }
+          return [...prev, liveMsg];
+        });
         streamIdRef.current = live.streamId;
         setIsStreaming(true);
       } catch {
@@ -1070,7 +1110,18 @@ export function ChatSurface({
       if (conversationId) {
         void (async () => {
           const { messages: loaded, tokenUsage: usage } = await loadConversationMessages(conversationId);
-          setMessages(loaded);
+          setMessages((prev) => {
+            // 压缩若在流式进行中完成,loadConversationMessages 会按常规把正在接收
+            // delta 的空 assistant 占位剥离(isEmptyAssistantPlaceholder)。一旦尾部
+            // 变成 user 消息,appendStreamText 因 last.role !== 'assistant' 直接丢弃后续
+            // delta,界面就会卡住、永远不出消息。这里在流仍活跃时把内存中的 assistant
+            // 尾消息接回压缩后的列表,保证 typewriter 的后续 delta 仍能落到这条消息上。
+            const liveTail = prev[prev.length - 1];
+            if (streamIdRef.current === streamId && liveTail && liveTail.role === 'assistant') {
+              return [...loaded, liveTail];
+            }
+            return loaded;
+          });
           if (usage) setTokenUsage(usage);
           onConversationUpdated?.();
         })();
@@ -1248,13 +1299,22 @@ export function ChatSurface({
 
   const handleSend = useCallback(async () => {
     const text = draft.trim();
-    if ((!text && attachments.length === 0) || isStreaming || !hasProvider || !conversationId) return;
+    if ((!text && attachments.length === 0) || !hasProvider || !conversationId) return;
     const sentAttachments = attachments;
     setDraft('');
     setAttachments([]);
     setAttachmentError(null);
+    // 当前轮(流式或压缩)进行中时,不丢弃也不阻塞输入:把消息排队,
+    // 由 dequeue effect 在空闲后复用 submitMessage 自动发出下一条(类似 Codex 队列)。
+    if (isStreaming || isCompacting) {
+      setMessageQueue((prev) => [
+        ...prev,
+        { id: nextId(), text, attachments: sentAttachments, effort },
+      ]);
+      return;
+    }
     await submitMessage(text, sentAttachments);
-  }, [draft, attachments, isStreaming, hasProvider, conversationId, submitMessage]);
+  }, [draft, attachments, isStreaming, isCompacting, hasProvider, conversationId, submitMessage, effort]);
 
   // 任务续传(ADR 21):就绪后在「正确的会话内」自动发送。
   // App.tsx 已 peek 到会话锚定的待办、切到 resumeTask.sessionId 并经 prop 传入;这里要求
@@ -1281,6 +1341,32 @@ export function ChatSurface({
   const handleStop = useCallback(() => {
     if (streamIdRef.current) void clientApi.chatAbort({ streamId: streamIdRef.current });
   }, []);
+
+  // 队列自动出队:当前轮结束(非流式、非压缩)且 provider/会话就绪时,取队首自动发送。
+  // 复用 submitMessage 同一发送路径;resumeTask 优先(避免与续传抢同一空闲窗口)。
+  useEffect(() => {
+    if (isStreaming || isCompacting || !hasProvider || !conversationId) return;
+    if (resumeTask) return;
+    if (messageQueue.length === 0) return;
+    const [head, ...rest] = messageQueue;
+    setMessageQueue(rest);
+    void submitMessage(head.text, head.attachments, head.effort);
+  }, [isStreaming, isCompacting, hasProvider, conversationId, resumeTask, messageQueue, submitMessage]);
+
+  const removeQueuedMessage = useCallback((id: string) => {
+    setMessageQueue((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
+  // 主操作按钮/回车键的统一入口:
+  // - 有草稿内容时:发送或排队(由 handleSend 内部判断是否当前轮进行中)。
+  // - 无草稿且当前轮进行中时:停止当前轮。
+  const handlePrimaryAction = useCallback(() => {
+    if (draft.trim() || attachments.length > 0) {
+      void handleSend();
+      return;
+    }
+    if (isStreaming) handleStop();
+  }, [draft, attachments, isStreaming, handleSend, handleStop]);
 
   const handleRegenerate = useCallback(async (msgIndex: number) => {
     if (isStreaming || !hasProvider || !conversationId) return;
@@ -1363,6 +1449,14 @@ export function ChatSurface({
 
   return (
     <div className="chat-surface">
+      {findOpen ? (
+        <ChatFindBar
+          containerRef={threadRef}
+          isZh={isZh}
+          onClose={() => setFindOpen(false)}
+          recomputeKey={messages.length}
+        />
+      ) : null}
       <div className="chat-thread" ref={threadRef} onScroll={handleThreadScroll}>
         {messages.length === 0 ? (
           <div className="chat-empty-state">
@@ -1462,9 +1556,34 @@ export function ChatSurface({
           onReject={denyPendingPermissionCall}
           i18n={i18n}
         />
+        {messageQueue.length > 0 ? (
+          <div className="message-queue" role="list" aria-label={isZh ? '待发送队列' : 'Queued messages'}>
+            <span className="message-queue-label">
+              {isZh ? `已排队 ${messageQueue.length} 条` : `${messageQueue.length} queued`}
+            </span>
+            {messageQueue.map((item, index) => {
+              const preview = item.text.trim() || (item.attachments.length ? (isZh ? '（附件）' : '(attachments)') : '');
+              return (
+                <div key={item.id} className="message-queue-item" role="listitem" title={item.text}>
+                  <span className="message-queue-index">{index + 1}</span>
+                  <span className="message-queue-text">{preview}</span>
+                  <button
+                    type="button"
+                    className="message-queue-remove"
+                    onClick={() => removeQueuedMessage(item.id)}
+                    aria-label={isZh ? '移除' : 'Remove'}
+                    title={isZh ? '移除' : 'Remove'}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
         <form
           className="chat-composer"
-          onSubmit={(e) => { e.preventDefault(); isStreaming ? handleStop() : void handleSend(); }}
+          onSubmit={(e) => { e.preventDefault(); handlePrimaryAction(); }}
         >
           {showSlashCommands ? (
             <div className="slash-command-menu" role="listbox" aria-label={isZh ? '命令' : 'Commands'}>
@@ -1502,7 +1621,7 @@ export function ChatSurface({
             ref={textareaRef}
             value={draft}
             disabled={!hasProvider}
-            placeholder={hasProvider ? (isZh ? '输入消息...' : 'Type a message...') : (isZh ? '请先配置模型' : 'Configure a model first')}
+            placeholder={hasProvider ? (isBusy ? (isZh ? '输入消息将在完成后自动发送...' : 'Message will auto-send when done...') : (isZh ? '输入消息...' : 'Type a message...')) : (isZh ? '请先配置模型' : 'Configure a model first')}
             rows={1}
             onPaste={handlePaste}
             onChange={(e) => setDraft(e.target.value)}
@@ -1531,7 +1650,7 @@ export function ChatSurface({
               }
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
-                isStreaming ? handleStop() : void handleSend();
+                handlePrimaryAction();
               }
             }}
           />
@@ -1559,10 +1678,24 @@ export function ChatSurface({
           </button>
           <button
             type="submit"
-            className={isStreaming ? 'streaming' : undefined}
-            disabled={!hasProvider || (!isStreaming && !draft.trim() && attachments.length === 0)}
+            className={isBusy && !hasComposerContent ? 'streaming' : undefined}
+            disabled={!hasProvider || (!isBusy && !hasComposerContent)}
+            title={
+              isBusy && !hasComposerContent
+                ? (isZh ? '停止' : 'Stop')
+                : isBusy
+                  ? (isZh ? '加入队列' : 'Add to queue')
+                  : (isZh ? '发送' : 'Send')
+            }
+            aria-label={
+              isBusy && !hasComposerContent
+                ? (isZh ? '停止' : 'Stop')
+                : isBusy
+                  ? (isZh ? '加入队列' : 'Add to queue')
+                  : (isZh ? '发送' : 'Send')
+            }
           >
-            {isStreaming ? (
+            {isBusy && !hasComposerContent ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
             ) : (
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
