@@ -1069,14 +1069,15 @@
 
 /* ── Compaction Summary Card (historical, from JSONL) ── */
 .compaction-summary-card {
-  border: 1px solid var(--chrome-sunken);
-  border-radius: var(--radius-md);
   overflow: hidden;
   max-width: var(--chat-content-max);
   margin: 0 auto;
   width: 100%;
-  background: var(--paper-sheet);
+  background: transparent;
 }
+/* Codex 风格:折叠态呈现为居中分隔条(两侧横线 + 中央标签),而非方框卡片。
+   ::before / ::after 作为左右可伸缩的分隔线(flex:1),真实子项(icon/label/
+   count/chevron)夹在中间自然居中。 */
 .compaction-summary-toggle {
   display: flex;
   align-items: center;
@@ -1086,11 +1087,22 @@
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   color: var(--graphite-mute);
-  transition: background var(--za-motion-fast);
+  transition: color var(--za-motion-fast);
+}
+.compaction-summary-toggle::before,
+.compaction-summary-toggle::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--chrome-hairline);
 }
 .compaction-summary-toggle:hover {
+  color: var(--graphite-soft);
+}
+.compaction-summary-toggle:hover::before,
+.compaction-summary-toggle:hover::after {
   background: var(--chrome-sunken);
 }
 .compaction-summary-icon {
@@ -1098,17 +1110,22 @@
   flex-shrink: 0;
 }
 .compaction-summary-label {
-  flex: 1;
-  text-align: left;
+  flex: 0 0 auto;
+  text-align: center;
   line-height: 1.4;
+  white-space: nowrap;
 }
 .compaction-summary-count {
   font-size: 0.7rem;
   color: var(--graphite-sub);
 }
+/* 展开态:分隔条不再是纯横线,需要一个轻框把摘要正文收拢成卡片,避免无边框漂浮。 */
 .compaction-summary-body {
+  margin: var(--space-1) 0 0;
   padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--chrome-sunken);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  background: var(--paper-sheet);
   font-size: 0.78rem;
   line-height: 1.6;
   color: var(--graphite-soft);

@@ -1260,6 +1260,8 @@ export function ChatSurface({
     if (text === '/compact' && sentAttachments.length === 0) {
       const streamId = `compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       streamIdRef.current = streamId;
+      const compactStartedAt = Date.now();
+      setCompactionNotice(null);
       setIsCompacting(true);
       try {
         const result = await clientApi.chatCompact({ conversationId, streamId });
@@ -1268,8 +1270,21 @@ export function ChatSurface({
           setMessages(loaded);
           if (usage) setTokenUsage(usage);
           onConversationUpdated?.();
+          // 直接用 invoke 返回的 notification 落地"已压缩"标记,不依赖 chat:compaction
+          // 的 done 事件(它与 invoke 响应之间存在到达顺序竞态:finally 会清空
+          // streamIdRef,导致 done 事件被 streamId 门控丢弃,标记永远不显示)。
+          if (result.notification) {
+            setCompactionNotice(result.notification);
+            setTimeout(() => setCompactionNotice(null), 10000);
+          }
         }
       } finally {
+        // 保证 spinner 至少可见 ~600ms,避免小会话瞬时完成导致"点了没任何反馈"。
+        const elapsed = Date.now() - compactStartedAt;
+        const minVisibleMs = 600;
+        if (elapsed < minVisibleMs) {
+          await new Promise((resolve) => setTimeout(resolve, minVisibleMs - elapsed));
+        }
         streamIdRef.current = null;
         setIsCompacting(false);
       }
