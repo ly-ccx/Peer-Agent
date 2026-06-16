@@ -39,7 +39,7 @@ Scope:
 - Add Chat Statistics local export snapshots through Electron save dialogs using real cloud statistics data.
 - Add Agent Studio panel for real OpenClaw scene, event, channel, channel session, and explicit enter APIs.
 - Add OpenClaw Governance read-only directory panel for real catalog, identity, capability, memory evolution, release, alert, remediation, and effective-config APIs.
-- Add Agent Memory Review panel for patch clues, memory candidates, simulation evals, training runs, Zeus backflow, and related Shadow execution review.
+- Add Agent Memory Review panel for patch clues, memory candidates, simulation evals, training runs, Peer Agent backflow, and related Shadow execution review.
 - Add read-only Channel Evidence panel for DingTalk, RoundTable, enterprise callback clues, and raw source metadata from real conversation/message data.
 - Expand OpenClaw Governance read-only parity for service refs, memory workspaces/snapshots, model/credential/eval policies, schedules, human takeovers, and upgrade jobs.
 - Add OpenClaw write-action gate matrix for real Governance and Studio POST surfaces, keeping high-risk writes blocked until policy, confirmation, audit, and Evidence contracts are wired.

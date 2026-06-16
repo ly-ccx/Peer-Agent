@@ -10,7 +10,7 @@ import { pathOf } from './data-store.mjs';
  * 新实例启动时主动读回、清除、并续发执行。
  *
  * 设计约束（对齐 data-store 的存储边界）：
- * - 路径不散拼：统一走 data-store 的 ZEUS_ENTRIES（key=pendingTask）。
+ * - 路径不散拼：统一走 data-store 的 DATA_STORE_ENTRIES（key=pendingTask）。
  * - scope=device：这是设备本地的运行时续传状态，不跨设备迁移/导出。
  * - 读后即清（read-and-clear）：任务是一次性的，消费后立即删除，避免重复执行。
  * - 原子写：先写临时文件再 rename，避免重启竞态下读到半截 JSON。

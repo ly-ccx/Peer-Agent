@@ -3,14 +3,14 @@ import os from 'node:os';
 import path from 'node:path';
 
 /**
- * 宙斯统一数据根 —— `~/.peer-agent/`。
+ * Peer Agent 统一数据根 —— `~/.peer-agent/`。
  *
  * 为什么不用 Electron `app.getPath('userData')`：那个路径绑 app 标识
  * （name/productName/appId），改名、升级、重装都可能换路径导致数据"消失"；
  * 且会跟 Chromium 运行时数据（Cache/Cookies/Local Storage/...）混在一起。
  *
  * `~/.peer-agent/` 是固定的、与 app 标识解耦的家目录（对标 .claude / .qoderwork）。
- * 所有宙斯业务数据 + 后续配置（settings.json 等）+ 一键配置迁移都收口到这里，
+ * 所有 Peer Agent 业务数据 + 后续配置（settings.json 等）+ 一键配置迁移都收口到这里，
  * 由本模块统一管理，不再让各 store 自己散拼路径。
  *
  * 本模块只依赖 os/fs/path（不 import electron），因此可被单测直接 import；
@@ -34,7 +34,7 @@ function resolveDataHome() {
  * - portable 可随用户迁移/导出（skill、设置、授权规则）
  * - cache    临时产物，不迁移不导出（可重建）
  */
-export const ZEUS_ENTRIES = {
+export const DATA_STORE_ENTRIES = {
   auth:              { rel: 'auth',                    kind: 'dir',  scope: 'device'   },
   deviceIdentity:    { rel: 'device-identity.json',    kind: 'file', scope: 'device'   },
   skills:            { rel: 'skills',                  kind: 'dir',  scope: 'portable' },
@@ -59,14 +59,14 @@ export function getDataHome() {
 
 /** 取某个数据项的绝对路径（目录型返回目录，文件型返回文件）。 */
 export function pathOf(key) {
-  const entry = ZEUS_ENTRIES[key];
+  const entry = DATA_STORE_ENTRIES[key];
   if (!entry) throw new Error(`[data-store] unknown entry: ${key}`);
   return path.join(getDataHome(), entry.rel);
 }
 
 /** 枚举数据项（可按 scope 过滤），供迁移 / 一键导出使用。 */
 export function listEntries(filter = {}) {
-  return Object.entries(ZEUS_ENTRIES)
+  return Object.entries(DATA_STORE_ENTRIES)
     .filter(([, entry]) => !filter.scope || entry.scope === filter.scope)
     .map(([key, entry]) => ({ key, ...entry, path: path.join(getDataHome(), entry.rel) }));
 }
@@ -76,14 +76,14 @@ export function listEntries(filter = {}) {
  *
  * - copy 不删：保留旧数据做回退，迁移出错不丢数据
  * - 幂等：目标已存在则跳过该项（靠 existsSync 判断，无需进程级 flag）
- * - 只搬 ZEUS_ENTRIES 里声明的项；Chromium 运行时数据不在其中，不迁
+ * - 只搬 DATA_STORE_ENTRIES 里声明的项；Chromium 运行时数据不在其中，不迁
  */
 export function migrateFromLegacy(legacyUserDataPath) {
   const home = getDataHome();
   if (!legacyUserDataPath || legacyUserDataPath === home) return { migrated: [] };
 
   const done = [];
-  for (const [key, entry] of Object.entries(ZEUS_ENTRIES)) {
+  for (const [key, entry] of Object.entries(DATA_STORE_ENTRIES)) {
     const from = path.join(legacyUserDataPath, entry.rel);
     const to = path.join(home, entry.rel);
     if (existsSync(from) && !existsSync(to)) {
@@ -123,7 +123,7 @@ export function exportBundle(targetDir) {
 
 /**
  * 一键导入：从来源目录把 portable 项恢复回 ~/.peer-agent（覆盖现有同名项）。
- * 只认 ZEUS_ENTRIES 里 portable 的项；来源目录里的其它内容忽略。
+ * 只认 DATA_STORE_ENTRIES 里 portable 的项；来源目录里的其它内容忽略。
  */
 export function importBundle(sourceDir) {
   if (!sourceDir) return { imported: [] };

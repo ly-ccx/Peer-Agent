@@ -1,5 +1,5 @@
 #!/bin/bash
-# Zeus Atlas 一键发布脚本
+# Peer Agent 一键发布脚本
 # 用法:
 #   ./scripts/publish.sh stable     — 发布正式版 (0.0.1)
 #   ./scripts/publish.sh beta       — 发布测试版 (0.0.1-beta.1, 递增)
@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DESKTOP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROOT_DIR="$(cd "$DESKTOP_DIR/../.." && pwd)"
 DIST_DIR="${ROOT_DIR}/dist-electron"
-BUCKET="oss://zeus-atlas"
+BUCKET="oss://peer-agent"
 
 # ── 参数解析 ──
 CHANNEL="${1:-stable}"
@@ -46,7 +46,7 @@ fi
 
 echo ""
 echo "╔══════════════════════════════════════════╗"
-echo "║       Zeus Atlas 发布流程                ║"
+echo "║       Peer Agent 发布流程                ║"
 echo "╠══════════════════════════════════════════╣"
 echo "║  通道:   ${CHANNEL}"
 echo "║  版本:   ${VERSION}"
@@ -114,5 +114,5 @@ echo "✅ 发布成功！"
 echo "   版本: ${VERSION}"
 echo "   Tag:  ${TAG_NAME}"
 echo "   通道: ${OSS_CHANNEL}"
-echo "   检测: https://zeus-atlas.oss-cn-beijing.aliyuncs.com/releases/${OSS_CHANNEL}/latest-mac.yml"
+echo "   检测: https://peer-agent.oss-cn-beijing.aliyuncs.com/releases/${OSS_CHANNEL}/latest-mac.yml"
 echo "═══════════════════════════════════════════"

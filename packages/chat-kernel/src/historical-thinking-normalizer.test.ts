@@ -27,7 +27,7 @@ test('iterationsFromBackendStepsData flattens steps + opens iteration per thinki
             toolName: 'local_shell_exec',
             toolDisplayName: '本地 Bash 执行',
           },
-          { iterationIndex: 3, type: 'observation', content: 'zeus local bash ok' },
+          { iterationIndex: 3, type: 'observation', content: 'peer-agent local bash ok' },
         ],
       },
       {
@@ -45,7 +45,7 @@ test('iterationsFromBackendStepsData flattens steps + opens iteration per thinki
   assert.equal(out[0].toolCards[0].toolCallId, 'tc-1');
   assert.equal(out[0].toolCards[0].displayName, '本地 Bash 执行');
   // observation 合并到上一个 toolCard 的 resultSummary
-  assert.equal(out[0].toolCards[0].resultSummary, 'zeus local bash ok');
+  assert.equal(out[0].toolCards[0].resultSummary, 'peer-agent local bash ok');
   assert.equal(out[1].thinkingContent, '看起来是测试文件');
   assert.equal(out[1].toolCards.length, 0);
 });

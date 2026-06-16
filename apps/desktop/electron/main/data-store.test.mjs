@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
-  ZEUS_ENTRIES,
+  DATA_STORE_ENTRIES,
   getDataHome,
   pathOf,
   listEntries,
@@ -55,7 +55,7 @@ test('pathOf throws on unknown entry', () => {
 
 test('listEntries filters by scope', () => {
   const portable = listEntries({ scope: 'portable' }).map((e) => e.key).sort();
-  const expectedPortable = Object.entries(ZEUS_ENTRIES)
+  const expectedPortable = Object.entries(DATA_STORE_ENTRIES)
     .filter(([, entry]) => entry.scope === 'portable')
     .map(([key]) => key)
     .sort();
@@ -64,7 +64,7 @@ test('listEntries filters by scope', () => {
   assert.ok(!portable.includes('auth'));
   assert.ok(!portable.includes('shellArtifacts'));
   // 不带 filter 返回全部
-  assert.equal(listEntries().length, Object.keys(ZEUS_ENTRIES).length);
+  assert.equal(listEntries().length, Object.keys(DATA_STORE_ENTRIES).length);
 });
 
 test('migrateFromLegacy copies declared entries, skips existing, keeps legacy intact', () => {

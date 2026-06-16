@@ -616,7 +616,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'chat.thread.empty': '选择一个会话，或直接发送消息创建真实云端会话。',
     'chat.thread.loading': '正在载入这段会话',
     'chat.empty.title': '今天要我先处理什么？',
-    'chat.empty.placeholder': '交给宙斯：安排会议、整理聊天、生成待办...',
+    'chat.empty.placeholder': '交给 Peer Agent：安排会议、整理聊天、生成待办...',
     'chat.empty.suggestionsLabel': '常用任务',
     'chat.empty.suggestion.focus': '帮我梳理今天的工作重点',
     'chat.empty.suggestion.todo': '把一段钉钉聊天整理成待办',
