@@ -4,10 +4,9 @@ This file governs the entire repository. All future code changes in this reposit
 
 ## Architecture Baseline
 
-Peer Agent follows the 端云能力代理设计原则:
+Peer Agent follows the 能力代理设计原则:
 
 ```text
-云端负责认知。
 本地负责能力。
 界面负责表达。
 契约负责边界。
@@ -45,7 +44,6 @@ Do not create separate execution paths for Bash, file operations, MCP, Plugin, S
 
 ## Layer Rules
 
-- Cloud Runtime owns cognition, planning, tool choice, governance, and execution ledger state.
 - The desktop client owns local discovery, local authorization, local execution, and Evidence return.
 - Renderer owns presentation and user interaction only.
 - Protocol owns cross-layer contracts.
