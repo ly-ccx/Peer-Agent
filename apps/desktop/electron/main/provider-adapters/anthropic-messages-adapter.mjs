@@ -1,6 +1,7 @@
 import { encodeAnthropicMessagesRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
+import { buildClaudeCliIdentityHeaders } from './anthropic-cli-identity.mjs';
 
 function resolveAnthropicReasoningFormat(baseUrl) {
   try {
@@ -193,7 +194,12 @@ export async function sendAnthropicMessagesStream({
 
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      ...buildClaudeCliIdentityHeaders(),
+    },
     body: JSON.stringify(body),
     signal,
   });

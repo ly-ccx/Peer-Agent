@@ -9,6 +9,7 @@ import {
   SUBSCRIPTION_MODEL_IDS,
   getSubscriptionModelMetadata,
 } from './provider-adapters/openai-model-catalog.mjs';
+import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli-identity.mjs';
 
 const { safeStorage } = electron;
 
@@ -366,6 +367,9 @@ async function testAnthropic(baseUrl, apiKey, model, start) {
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
+      // 与真实对话路径(anthropic-messages-adapter)共用同一组 CLI 身份头，
+      // 否则按客户端身份准入的网关(如 claude-1688-gateway)会对“测试”按钮返回 403。
+      ...buildClaudeCliIdentityHeaders(),
     },
     body: JSON.stringify({
       model,
