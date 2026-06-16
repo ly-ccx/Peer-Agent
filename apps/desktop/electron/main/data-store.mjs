@@ -39,6 +39,7 @@ export const ZEUS_ENTRIES = {
   deviceIdentity:    { rel: 'device-identity.json',    kind: 'file', scope: 'device'   },
   skills:            { rel: 'skills',                  kind: 'dir',  scope: 'portable' },
   mcpRegistry:       { rel: 'mcp-registry.json',       kind: 'file', scope: 'portable' },
+  mcpCredentials:    { rel: 'mcp-credentials.json',    kind: 'file', scope: 'device'   },
   permissions:       { rel: 'permissions',             kind: 'dir',  scope: 'portable' },
   developerSettings: { rel: 'developer-settings.json', kind: 'file', scope: 'portable' },
   settings:          { rel: 'settings.json',           kind: 'file', scope: 'portable' },

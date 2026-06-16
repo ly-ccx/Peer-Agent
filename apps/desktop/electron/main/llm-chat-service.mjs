@@ -1,8 +1,11 @@
 import {
   buildAnthropicTools,
+  buildAnthropicToolsFromRuntimeProjection,
   buildOpenAITools,
+  buildOpenAIToolsFromRuntimeProjection,
   buildSystemContext,
   buildSystemPrompt,
+  createRuntimeToolProjection,
   renderSystemContext,
 } from './llm-prompts.mjs';
 import {
@@ -28,8 +31,13 @@ const permissionGate = createChatPermissionGate({ activeStreams });
 const conversationToolContexts = new Map();
 let activeWorkspacePath = null;
 
-const TOOLS_OPENAI = buildOpenAITools();
-const TOOLS_ANTHROPIC = buildAnthropicTools();
+function buildRuntimeTools({ mcpRegistry, providerType }) {
+  const { registry, projection } = createRuntimeToolProjection({ mcpRegistry });
+  const tools = providerType === 'anthropic'
+    ? buildAnthropicToolsFromRuntimeProjection(projection, registry)
+    : buildOpenAIToolsFromRuntimeProjection(projection, registry);
+  return { registry, runtimeProjection: projection, tools };
+}
 
 export { buildAnthropicTools, buildOpenAITools, buildSystemPrompt };
 export { normalizeAnthropicMessages, normalizeOpenAIMessages };
@@ -141,6 +149,7 @@ export function createLlmChatService({
   persistCompaction = null,
   promptSnapshotStore = null,
   preferredAccessLevel = 'ask_before_local',
+  mcpRegistry = null,
   // 全局活跃流广播宿主(由 main 注入):向所有渲染窗口推送当前正在运行的会话列表,
   // 使左侧列表无需"点进去"即可知道哪些会话在跑。表达层订阅,真值仍在 activeStreams。
   broadcast = null,
@@ -308,6 +317,10 @@ export function createLlmChatService({
         });
         const contextWindow = provider.contextWindow || 0;
         const onNativeReasoningFallback = (details) => noteNativeReasoningFallback(provider, details);
+        const runtimeTools = buildRuntimeTools({
+          mcpRegistry,
+          providerType: provider.provider,
+        });
 
         try {
           if (provider.provider === 'anthropic') {
@@ -317,7 +330,7 @@ export function createLlmChatService({
               model: provider.model,
               systemPrompt,
               messages,
-              tools: TOOLS_ANTHROPIC,
+              tools: runtimeTools.tools,
               webContents: attemptStream.webContents,
               streamId,
               signal: controller.signal,
@@ -331,6 +344,9 @@ export function createLlmChatService({
               toolContext,
               workspacePath: activeWorkspacePath,
               permissionGate,
+              registry: runtimeTools.registry,
+              runtimeProjection: runtimeTools.runtimeProjection,
+              mcpRegistry,
               onNativeReasoningFallback,
             });
           } else {
@@ -340,7 +356,7 @@ export function createLlmChatService({
               model: provider.model,
               systemPrompt,
               messages,
-              tools: TOOLS_OPENAI,
+              tools: runtimeTools.tools,
               webContents: attemptStream.webContents,
               streamId,
               signal: controller.signal,
@@ -353,6 +369,9 @@ export function createLlmChatService({
               toolContext,
               workspacePath: activeWorkspacePath,
               permissionGate,
+              registry: runtimeTools.registry,
+              runtimeProjection: runtimeTools.runtimeProjection,
+              mcpRegistry,
               onNativeReasoningFallback,
               authMethod: credential.authMethod,
               accountId: credential.accountId,

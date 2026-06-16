@@ -1,4 +1,5 @@
 import { LEGACY_LOCAL_TOOL_DEFINITIONS } from './legacy-local-tool-definitions.mjs';
+import { createMcpToolDefinitionsFromRegistry } from './mcp-tool-definitions.mjs';
 import {
   buildAnthropicToolsFromRegistry,
   buildOpenAIToolsFromRegistry,
@@ -27,6 +28,24 @@ export function createDefaultToolRegistry() {
   return createToolRegistry({
     tools: LEGACY_LOCAL_TOOL_DEFINITIONS,
   });
+}
+
+export function createRuntimeToolRegistry({ mcpRegistry } = {}) {
+  return createToolRegistry({
+    tools: [
+      ...LEGACY_LOCAL_TOOL_DEFINITIONS,
+      ...createMcpToolDefinitionsFromRegistry(mcpRegistry),
+    ],
+  });
+}
+
+export function createRuntimeToolProjection({
+  mcpRegistry,
+  registry = createRuntimeToolRegistry({ mcpRegistry }),
+  projectionOptions = {},
+} = {}) {
+  const projection = createRuntimeProjectionFromToolRegistry(registry, projectionOptions);
+  return { registry, projection };
 }
 
 export const DEFAULT_TOOL_REGISTRY = createDefaultToolRegistry();

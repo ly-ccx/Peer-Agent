@@ -35,6 +35,9 @@ export async function agentLoopAnthropic({
   toolContext,
   workspacePath,
   permissionGate,
+  registry,
+  runtimeProjection,
+  mcpRegistry,
   onNativeReasoningFallback = null,
 }) {
   let effectiveSystem = systemPrompt;
@@ -174,6 +177,9 @@ export async function agentLoopAnthropic({
         streamId,
         conversationId,
         signal,
+        registry,
+        runtimeProjection,
+        mcpRegistry,
       });
       if (toolExecution.aborted) return;
       toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: toolExecution.output });

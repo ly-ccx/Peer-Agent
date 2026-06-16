@@ -75,6 +75,20 @@ function buildShellPermissionCall({ call, classification, ruleDecision, toolCall
   };
 }
 
+function buildLocalCapabilityPermissionCall({ request, toolCallId }) {
+  return {
+    toolCallId: `chat-permission:${toolCallId || request?.toolCallId || randomUUID()}`,
+    capabilityId: request?.capabilityId || 'local.capability',
+    displayName: request?.toolName || request?.displayName || request?.capabilityId || 'local capability',
+    reason: request?.reason || 'The assistant wants to use a local capability.',
+    arguments: request?.args ?? {},
+    argumentsPreview: request?.scope ?? request?.args ?? {},
+    riskLevel: request?.riskLevel ?? 'L3_external_write',
+    dataLevel: request?.dataLevel ?? 'D2_sensitive',
+    requestedAt: new Date().toISOString(),
+  };
+}
+
 function extractPermissionCommand(args) {
   if (!args || typeof args !== 'object') return '';
   const candidate =
@@ -221,6 +235,38 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
     });
   }
 
+  function createLocalCapabilityPermissionRequester({ webContents, streamId, toolCallId, conversationId = null, workspacePath = null }) {
+    return (request = {}) => new Promise((resolvePermission) => {
+      const call = buildLocalCapabilityPermissionCall({ request, toolCallId });
+      const scopeKey = buildPermissionScopeKey({ conversationId, workspacePath, call });
+      const scopedGrant = approvedPermissionScopes.get(scopeKey);
+      if (scopedGrant?.granted) {
+        resolvePermission({
+          granted: true,
+          grant: createAutoScopeGrant({ toolCallId: call.toolCallId, scope: scopedGrant.scope || call.capabilityId }),
+          reason: 'local_user_approved_scope',
+        });
+        return;
+      }
+      if (accessLevel === 'full_local') {
+        resolvePermission(createAutoAccessGrant({
+          toolCallId: call.toolCallId,
+          scope: call.capabilityId,
+          reason: 'local_access_level_full',
+        }));
+        return;
+      }
+      registerPendingPermission({
+        streamId,
+        call,
+        scopeKey,
+        scope: call.capabilityId,
+        resolve: resolvePermission,
+      });
+      webContents.send('chat:stream:permission-request', { streamId, call });
+    });
+  }
+
   function createShellApprovalDecider({
     webContents,
     streamId,
@@ -296,6 +342,7 @@ export function createChatPermissionGate({ activeStreams, accessLevel: initialAc
 
   return {
     createFilePermissionRequester,
+    createLocalCapabilityPermissionRequester,
     createShellApprovalDecider,
     setAccessLevel,
     settlePermissionRequest,

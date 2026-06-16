@@ -45,6 +45,12 @@ function evidencePolicyForTool(tool) {
 }
 
 function manifestFromTool(tool) {
+  if (tool.manifest && typeof tool.manifest === 'object') {
+    return Object.freeze({
+      health: 'available',
+      ...tool.manifest,
+    });
+  }
   const capabilityId = executorCapabilityId(tool);
   return {
     capabilityId,

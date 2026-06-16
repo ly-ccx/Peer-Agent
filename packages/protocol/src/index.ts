@@ -69,6 +69,131 @@ export interface RuntimeProjection {
   readonly createdAt: string;
 }
 
+export type McpTransportKind = 'streamable_http' | 'sse' | 'stdio';
+export type McpHealthStatus = 'unknown' | 'ok' | 'failed';
+export type McpAuthMode = 'none' | 'http_bearer' | 'http_header' | 'stdio_env';
+export type McpCredentialKind = Exclude<McpAuthMode, 'none'>;
+
+export interface McpAuthBindingView {
+  readonly mode: McpAuthMode;
+  readonly credentialRef?: string;
+  readonly headerName?: string;
+  readonly envName?: string;
+}
+
+export interface McpCredentialMetadataView {
+  readonly id: string;
+  readonly credentialRef: string;
+  readonly label: string;
+  readonly kind: McpCredentialKind;
+  readonly target: 'header' | 'env';
+  readonly headerName?: string;
+  readonly envName?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly lastFour?: string;
+  readonly storage?: 'safeStorage' | 'file-fallback';
+}
+
+export interface McpCredentialPutRequest {
+  readonly credentialRef?: string;
+  readonly label?: string;
+  readonly kind: McpCredentialKind;
+  readonly secret: string;
+  readonly headerName?: string;
+  readonly envName?: string;
+}
+
+export interface McpHealthView {
+  readonly status: McpHealthStatus;
+  readonly checkedAt?: string | null;
+  readonly message?: string;
+}
+
+export interface McpToolSummary {
+  readonly name: string;
+  readonly description?: string;
+  readonly visible?: boolean;
+  readonly inputSchema?: JsonSchemaLike;
+}
+
+export interface McpResourceSummary {
+  readonly uri: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly mimeType?: string;
+}
+
+export interface McpPromptSummary {
+  readonly name: string;
+  readonly description?: string;
+  readonly arguments?: readonly Record<string, unknown>[];
+}
+
+export interface LocalMcpServerView {
+  readonly id: string;
+  readonly mcpId: string;
+  readonly displayName: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly enabled: boolean;
+  readonly transport: McpTransportKind;
+  readonly commandPreview?: string;
+  readonly urlPreview?: string;
+  readonly serverUrl?: string;
+  readonly auth?: McpAuthBindingView;
+  readonly toolsCount: number;
+  readonly visibleToolsCount: number;
+  readonly resourcesCount: number;
+  readonly promptsCount: number;
+  readonly tools: readonly McpToolSummary[];
+  readonly resources: readonly McpResourceSummary[];
+  readonly prompts: readonly McpPromptSummary[];
+  readonly health: McpHealthView;
+  readonly manifestUpdatedAt?: string | null;
+  readonly lastError?: string | null;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+}
+
+export interface LocalMcpServerUpsertRequest {
+  readonly id?: string;
+  readonly mcpId?: string;
+  readonly displayName?: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly enabled?: boolean;
+  readonly transport: McpTransportKind;
+  readonly command?: string;
+  readonly args?: readonly string[];
+  readonly cwd?: string | null;
+  readonly url?: string;
+  readonly serverUrl?: string;
+  readonly headers?: Record<string, string>;
+  readonly auth?: McpAuthBindingView;
+}
+
+export interface McpConnectionTestResult {
+  readonly ok: boolean;
+  readonly health: McpHealthView;
+  readonly toolsCount: number;
+  readonly resourcesCount: number;
+  readonly promptsCount: number;
+  readonly errors?: readonly { readonly kind: string; readonly message: string }[];
+}
+
+export interface McpManifestRefreshResult {
+  readonly view: LocalMcpServerView;
+  readonly manifest: {
+    readonly discoveredAt: string;
+    readonly tools: readonly McpToolSummary[];
+    readonly resources: readonly McpResourceSummary[];
+    readonly prompts: readonly McpPromptSummary[];
+    readonly errors?: readonly { readonly kind: string; readonly message: string }[];
+    readonly health: McpHealthView;
+  };
+}
+
 export interface ClientSessionState {
   readonly sessionId: string;
   readonly status: 'local_ready' | 'hybrid_ready' | 'permission_required' | 'degraded' | 'offline';

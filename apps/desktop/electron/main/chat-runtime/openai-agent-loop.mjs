@@ -32,6 +32,9 @@ export async function agentLoopOpenAI({
   toolContext,
   workspacePath,
   permissionGate,
+  registry,
+  runtimeProjection,
+  mcpRegistry,
   onNativeReasoningFallback = null,
   // ADR 28: ChatGPT 订阅链路走 Responses 传输,需附带 accountId。
   authMethod = 'api_key',
@@ -162,6 +165,9 @@ export async function agentLoopOpenAI({
         streamId,
         conversationId,
         signal,
+        registry,
+        runtimeProjection,
+        mcpRegistry,
       });
       if (toolExecution.aborted) return;
       apiMessages.push({ role: 'tool', tool_call_id: tc.id, content: toolExecution.output });

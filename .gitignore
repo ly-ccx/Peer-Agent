@@ -14,3 +14,5 @@ target/
 
 # 设计文档（本地保留，不提交）
 docs/architecture/*
+!docs/architecture/31-mcp-connection-management.md
+!docs/architecture/32-mcp-authentication.md

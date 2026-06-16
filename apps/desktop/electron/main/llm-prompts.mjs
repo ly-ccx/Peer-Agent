@@ -7,9 +7,13 @@ import {
 export {
   buildAnthropicTools,
   buildAnthropicToolsFromRegistry,
+  buildAnthropicToolsFromRuntimeProjection,
   buildOpenAITools,
   buildOpenAIToolsFromRegistry,
+  buildOpenAIToolsFromRuntimeProjection,
   createDefaultToolRegistry,
+  createRuntimeToolProjection,
+  createRuntimeToolRegistry,
   createToolRegistry,
   getToolDefinition,
   listToolDefinitions,

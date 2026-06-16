@@ -194,3 +194,217 @@
     flex-basis: auto;
   }
 }
+
+/* ── MCP 连接分区 ── */
+.settings-panel--mcp {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  padding-top: 52px;
+  max-width: 1040px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.settings-panel__header,
+.settings-actions,
+.settings-actions--wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.settings-panel__header h2,
+.settings-card h3,
+.mcp-server-detail h4,
+.mcp-server-detail h5 {
+  margin: 0;
+  color: var(--pa-text-primary);
+}
+
+.settings-panel__header p,
+.settings-card p,
+.settings-empty,
+.settings-status,
+.settings-warning {
+  color: var(--graphite-soft);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--pa-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--pa-surface-card);
+}
+
+.settings-grid--two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.settings-grid label,
+.mcp-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--pa-text-secondary);
+  font-size: 0.78rem;
+}
+
+.settings-grid__wide {
+  grid-column: 1 / -1;
+}
+
+.settings-grid input,
+.settings-grid select {
+  min-width: 0;
+}
+
+.settings-status,
+.settings-warning {
+  margin: 0;
+}
+
+.settings-warning {
+  color: var(--state-warning);
+}
+
+.mcp-settings-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+.mcp-server-list,
+.mcp-tool-list,
+.mcp-resource-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mcp-server-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mcp-server-list button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--pa-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--pa-surface);
+  color: var(--pa-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mcp-server-list .is-active button {
+  border-color: var(--za-accent);
+  background: var(--za-accent-soft);
+}
+
+.mcp-server-list span,
+.mcp-server-list small,
+.mcp-resource-list small {
+  color: var(--graphite-soft);
+  font-size: 0.74rem;
+}
+
+.mcp-server-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.mcp-server-detail > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.mcp-health {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--pa-surface-muted);
+  color: var(--pa-text-secondary);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.mcp-health--ok {
+  background: color-mix(in srgb, var(--state-success) 16%, transparent);
+  color: var(--state-success);
+}
+
+.mcp-health--failed {
+  background: color-mix(in srgb, var(--state-danger) 14%, transparent);
+  color: var(--state-danger);
+}
+
+.settings-actions--wrap {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.mcp-tool-list,
+.mcp-resource-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mcp-tool-list li,
+.mcp-resource-list li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 10px 0;
+  border-top: 1px solid var(--pa-border-subtle);
+}
+
+.mcp-tool-list p {
+  margin: 4px 0 0;
+}
+
+.mcp-toggle {
+  flex-direction: row;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.mcp-preview {
+  max-height: 260px;
+  overflow: auto;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--pa-surface-muted);
+  color: var(--pa-text-primary);
+  font-size: 0.76rem;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 900px) {
+  .mcp-settings-layout,
+  .settings-grid--two {
+    grid-template-columns: 1fr;
+  }
+}

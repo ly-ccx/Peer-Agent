@@ -32,21 +32,35 @@ export async function executeModelToolCall({
   streamId,
   conversationId,
   signal,
+  registry,
+  runtimeProjection,
+  mcpRegistry,
 }) {
   const args = safeParseJson(rawArguments);
   webContents.send('chat:stream:tool-call', { streamId, tool: name, args, toolCallId });
+  const requestFilePermission = permissionGate.createFilePermissionRequester({
+    webContents,
+    streamId,
+    toolCallId,
+    conversationId,
+  });
+  const requestLocalCapabilityPermission = permissionGate.createLocalCapabilityPermissionRequester({
+    webContents,
+    streamId,
+    toolCallId,
+    conversationId,
+    workspacePath,
+  });
   const result = await executeProjectedModelTool({
     name,
     args,
     workspacePath,
     toolContext,
     toolCallId,
-    requestPermission: permissionGate.createFilePermissionRequester({
-      webContents,
-      streamId,
-      toolCallId,
-      conversationId,
-    }),
+    requestPermission: (request) => {
+      if (request?.filePath || request?.tool || request?.workspacePath) return requestFilePermission(request);
+      return requestLocalCapabilityPermission(request);
+    },
     shellApprovalDecider: permissionGate.createShellApprovalDecider({
       webContents,
       streamId,
@@ -54,6 +68,9 @@ export async function executeModelToolCall({
       conversationId,
       workspacePath,
     }),
+    registry,
+    runtimeProjection,
+    mcpRegistry,
   });
   if (signal?.aborted) return { aborted: true, args, output: '' };
   const output = materializeToolOutput(result);

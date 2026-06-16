@@ -55,7 +55,11 @@ test('pathOf throws on unknown entry', () => {
 
 test('listEntries filters by scope', () => {
   const portable = listEntries({ scope: 'portable' }).map((e) => e.key).sort();
-  assert.deepEqual(portable, ['developerSettings', 'permissions', 'settings', 'skills']);
+  const expectedPortable = Object.entries(ZEUS_ENTRIES)
+    .filter(([, entry]) => entry.scope === 'portable')
+    .map(([key]) => key)
+    .sort();
+  assert.deepEqual(portable, expectedPortable);
   // device / cache 不在 portable 里
   assert.ok(!portable.includes('auth'));
   assert.ok(!portable.includes('shellArtifacts'));

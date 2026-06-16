@@ -1,50 +1,228 @@
+import { randomUUID } from 'node:crypto';
 import { callMcpTool } from '../mcp-client.mjs';
+import { createFailedClientToolResult, createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 
 const MCP_CAPABILITY_PREFIX = 'local.mcp.';
 
 function parseMcpCapabilityId(capabilityId) {
+  if (!String(capabilityId ?? '').startsWith(MCP_CAPABILITY_PREFIX)) return null;
   const rest = capabilityId.slice(MCP_CAPABILITY_PREFIX.length);
   const dotIndex = rest.indexOf('.');
   if (dotIndex < 0) return null;
-  return { mcpId: rest.slice(0, dotIndex), toolName: rest.slice(dotIndex + 1) };
+  return { serverId: rest.slice(0, dotIndex), toolName: rest.slice(dotIndex + 1) };
 }
 
-export function createLocalMcpProvider({ mcpRegistry }) {
-  async function executeCapability(request) {
-    const call = request.call;
-    const capabilityId = call.capabilityId || '';
-    const parsed = parseMcpCapabilityId(capabilityId);
+function safeStringify(value) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function previewText(text, max = 4_000) {
+  const value = String(text ?? '');
+  return value.length > max ? `${value.slice(0, max)}\n...[truncated]` : value;
+}
+
+function getAuthContext(server) {
+  const auth = server?.auth && typeof server.auth === 'object' ? server.auth : { mode: 'none' };
+  return {
+    mode: typeof auth.mode === 'string' ? auth.mode : 'none',
+    credentialRef: typeof auth.credentialRef === 'string' ? auth.credentialRef : undefined,
+    headerName: typeof auth.headerName === 'string' ? auth.headerName : undefined,
+    envName: typeof auth.envName === 'string' ? auth.envName : undefined,
+    hasCredential: Boolean(auth.credentialRef),
+  };
+}
+
+function buildCallScope({ server, toolName }) {
+  return {
+    kind: 'mcp-tool',
+    serverId: server.id,
+    serverName: server.displayName,
+    toolName,
+    transport: server.transport,
+    authMode: getAuthContext(server).mode,
+    locality: 'local',
+  };
+}
+
+function isToolVisible(server, toolName) {
+  const tool = (server.tools ?? []).find((candidate) => (candidate.name ?? candidate.toolName) === toolName);
+  if (!tool) return false;
+  return (server.toolVisibility?.[toolName] ?? server.policy?.visibleByDefault ?? true) !== false;
+}
+
+function permissionGrantFromDecision({ decision, fallbackGrant, call, scope }) {
+  const candidate = decision?.permissionGrant ?? decision?.grant;
+  if (candidate && typeof candidate === 'object') {
+    return {
+      ...fallbackGrant,
+      ...candidate,
+      toolCallId: candidate.toolCallId ?? call.toolCallId,
+      scope: candidate.scope ?? scope,
+      granted: Boolean(candidate.granted),
+    };
+  }
+  if (decision && typeof decision === 'object' && Object.prototype.hasOwnProperty.call(decision, 'granted')) {
+    return createPermissionGrant({
+      toolCallId: call.toolCallId,
+      granted: Boolean(decision.granted),
+      scope,
+    });
+  }
+  return fallbackGrant;
+}
+
+function createMcpEvidence({ call, server, toolName, result, locale, authContext }) {
+  const isError = Boolean(result?.isError);
+  const auth = authContext ?? getAuthContext(server);
+  return {
+    evidenceId: randomUUID(),
+    toolCallId: call.toolCallId,
+    summary: locale === 'zh-CN'
+      ? `MCP 工具 ${server.displayName}/${toolName} 已${isError ? '返回错误' : '执行完成'}。`
+      : `MCP tool ${server.displayName}/${toolName} ${isError ? 'returned an error' : 'completed'}.`,
+    locale,
+    returnedToCloud: true,
+    dataLevel: 'D2_sensitive',
+    redactions: [],
+    artifactRefs: [],
+    origin: {
+      providerId: server.id,
+      transport: server.transport,
+      toolName,
+      authMode: auth.mode ?? 'none',
+      hasCredential: Boolean(auth.credentialRef || auth.hasCredential),
+    },
+  };
+}
+
+export function createLocalMcpProvider({ mcpRegistry, credentialResolver = null }) {
+  async function executeCapability(request, context = {}) {
+    const call = request?.call;
+    const locale = context.locale ?? 'en-US';
+    if (!call) return null;
+    const parsed = parseMcpCapabilityId(call.capabilityId);
     if (!parsed) {
-      return { call, result: { status: 'failed', error: `Invalid MCP capability: ${capabilityId}` } };
+      return {
+        call,
+        result: createFailedClientToolResult({
+          call,
+          locale,
+          reason: `Invalid MCP capability id: ${call.capabilityId}`,
+          dataLevel: 'D0_public',
+        }),
+      };
     }
 
-    const installed = mcpRegistry.listInstalled();
-    const server = installed.find((item) => String(item.mcpId) === parsed.mcpId);
+    const server = mcpRegistry?.getServer(parsed.serverId);
     if (!server) {
-      return { call, result: { status: 'failed', error: `MCP server ${parsed.mcpId} not installed` } };
+      return {
+        call,
+        result: createFailedClientToolResult({
+          call,
+          locale,
+          reason: `MCP server not found: ${parsed.serverId}`,
+          dataLevel: 'D0_public',
+        }),
+      };
+    }
+    if (server.enabled === false || server.policy?.trusted === false || server.health?.status === 'failed') {
+      return {
+        call,
+        result: createFailedClientToolResult({
+          call,
+          locale,
+          reason: `MCP server is not executable: ${server.displayName}`,
+          dataLevel: 'D0_public',
+          status: 'denied',
+        }),
+      };
+    }
+    if (!isToolVisible(server, parsed.toolName)) {
+      return {
+        call,
+        result: createFailedClientToolResult({
+          call,
+          locale,
+          reason: `MCP tool is not visible in Runtime Projection: ${parsed.toolName}`,
+          dataLevel: 'D0_public',
+          status: 'denied',
+        }),
+      };
     }
 
-    const serverUrl = server.serverUrl;
-    if (!serverUrl) {
-      return { call, result: { status: 'failed', error: `MCP server ${server.name} has no serverUrl` } };
+    const scope = buildCallScope({ server, toolName: parsed.toolName });
+    let permissionGrant = createPermissionGrant({
+      toolCallId: call.toolCallId,
+      granted: true,
+      scope,
+    });
+
+    if (server.policy?.requirePermission !== false && typeof context.requestPermission === 'function') {
+      const decision = await context.requestPermission({
+        toolCallId: call.toolCallId,
+        capabilityId: call.capabilityId,
+        toolName: parsed.toolName,
+        args: call.arguments ?? call.args ?? {},
+        scope,
+        riskLevel: 'L3_external_write',
+        dataLevel: 'D2_sensitive',
+        reason: `MCP tool ${server.displayName}/${parsed.toolName}`,
+      });
+      permissionGrant = permissionGrantFromDecision({ decision, fallbackGrant: permissionGrant, call, scope });
+      if (decision?.granted === false || permissionGrant?.granted === false) {
+        return {
+          call,
+          permissionGrant,
+          result: createFailedClientToolResult({
+            call,
+            locale,
+            reason: `Permission denied for MCP tool ${server.displayName}/${parsed.toolName}`,
+            dataLevel: 'D0_public',
+            status: 'denied',
+          }),
+        };
+      }
     }
 
     try {
-      const args = typeof call.arguments === 'string' ? JSON.parse(call.arguments) : (call.arguments || {});
-      const toolResult = await callMcpTool(serverUrl, parsed.toolName, args, 90000);
+      const result = await callMcpTool(server, parsed.toolName, call.arguments ?? call.args ?? {}, { credentialResolver });
+      const outputText = result?.text || safeStringify(result?.content ?? result?.raw ?? '');
+      const status = result?.isError ? 'failed' : 'success';
       return {
         call,
+        permissionGrant,
         result: {
-          status: 'success',
-          evidence: {
-            type: 'mcp_tool_result',
-            content: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult),
+          toolCallId: call.toolCallId,
+          status,
+          outputPreview: {
+            status,
+            text: previewText(outputText),
+            isError: Boolean(result?.isError),
+            structuredContent: result?.structuredContent ?? null,
+            capabilityId: call.capabilityId,
+            serverId: server.id,
+            toolName: parsed.toolName,
           },
-          outputPreview: typeof toolResult === 'string' ? toolResult.slice(0, 500) : JSON.stringify(toolResult).slice(0, 500),
+          output: result?.structuredContent ?? result?.raw ?? result?.content ?? outputText,
+          evidence: createMcpEvidence({ call, server, toolName: parsed.toolName, result, locale }),
+          completedAt: nowIso(),
         },
       };
-    } catch (err) {
-      return { call, result: { status: 'failed', error: err?.message || `MCP tool ${parsed.toolName} execution failed` } };
+    } catch (error) {
+      return {
+        call,
+        permissionGrant,
+        result: createFailedClientToolResult({
+          call,
+          locale,
+          reason: error?.message || `MCP tool ${parsed.toolName} execution failed`,
+          dataLevel: 'D2_sensitive',
+        }),
+      };
     }
   }
 

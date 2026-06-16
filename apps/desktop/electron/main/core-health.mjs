@@ -1,9 +1,19 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 
-import { app } from 'electron';
+const require = createRequire(import.meta.url);
+
+function getElectronApp() {
+  try {
+    const electron = require('electron');
+    return electron && typeof electron === 'object' ? electron.app : null;
+  } catch {
+    return null;
+  }
+}
 
 function localizeHealth(locale) {
   const zh = locale === 'zh-CN';
@@ -19,7 +29,8 @@ function localizeHealth(locale) {
 function coreBinaryPath(workspaceRoot) {
   const executable = process.platform === 'win32' ? 'cu-proxy-core.exe' : 'cu-proxy-core';
   // In packaged mode, binary is in extraResources/bin/; in dev mode, target/debug/
-  if (app.isPackaged) {
+  const electronApp = getElectronApp();
+  if (electronApp?.isPackaged) {
     return path.join(process.resourcesPath, 'bin', executable);
   }
   return path.join(workspaceRoot, 'target/debug', executable);

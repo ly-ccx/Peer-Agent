@@ -11,12 +11,13 @@ export function createLocalToolHost({
   sessionStore,
   runHealthStub,
   mcpRegistry,
+  mcpCredentialResolver = null,
   fileProvider = createLocalFileProvider({ workspaceRoot }),
   shellProvider = createLocalShellProvider({ workspaceRoot, userDataPath }),
   providers,
   extraProviders = [],
 }) {
-  const mcpProvider = mcpRegistry ? createLocalMcpProvider({ mcpRegistry }) : null;
+  const mcpProvider = mcpRegistry ? createLocalMcpProvider({ mcpRegistry, credentialResolver: mcpCredentialResolver }) : null;
   const providerRegistry = createCapabilityProviderRegistry({
     providers: providers ?? [
       createLocalHealthProvider({ workspaceRoot, runHealthStub }),

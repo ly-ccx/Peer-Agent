@@ -16,7 +16,8 @@ import { createShellEnvSnapshot } from './runtime-gateway/shell-env-snapshot.mjs
 import { getDataHome, migrateFromLegacy, exportBundle, importBundle } from './data-store.mjs';
 import { createSettingsStore } from './settings-store.mjs';
 import { createMcpRegistry } from './mcp-registry.mjs';
-import { listMcpTools, disconnectMcp } from './mcp-client.mjs';
+import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-credential-store.mjs';
+import { disconnectMcp, discoverMcpManifest, getMcpPrompt, readMcpResource, testMcpConnection } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
 import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
 import { listSubscriptionModels } from './provider-adapters/openai-model-catalog.mjs';
@@ -93,6 +94,8 @@ const sessionStore = createSessionStore({
 let skillStore;
 
 const mcpRegistry = createMcpRegistry();
+const mcpCredentialStore = createMcpCredentialStore();
+const mcpCredentialResolver = createMcpCredentialResolver(mcpCredentialStore);
 const llmConfigStore = createLlmConfigStore();
 const conversationStore = createConversationStore();
 const promptSnapshotStore = createPromptSnapshotStore();
@@ -201,6 +204,7 @@ const llmChatService = createLlmChatService({
   persistCompaction: persistCompactionToConversation,
   promptSnapshotStore,
   preferredAccessLevel: initialSettings.localAccessLevel,
+  mcpRegistry,
   broadcast: broadcastToAllWindows,
 });
 llmChatService.setWorkspacePath(settingsStore.getAll().activeWorkspace || null);
@@ -292,6 +296,29 @@ ipcMain.handle('settings:update', (_event, partial) => {
   }
   return next;
 });
+
+ipcMain.handle('developer-settings:get', () => settingsStore.getAll().developer ?? {});
+ipcMain.handle('developer-settings:update', (_event, partial) => {
+  const current = settingsStore.getAll().developer;
+  const currentDeveloper = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+  const nextPartial = partial && typeof partial === 'object' && !Array.isArray(partial) ? partial : {};
+  const next = { ...currentDeveloper, ...nextPartial };
+  settingsStore.merge({ developer: next });
+  return next;
+});
+ipcMain.handle('developer-settings:reset', () => {
+  settingsStore.merge({ developer: {} });
+  return {};
+});
+ipcMain.handle('developer-settings:diagnostics', () => ({
+  dataHome,
+  isDev,
+  isPackaged,
+  resourcesRoot,
+  workspaceRoot,
+  loadedEnvKeys,
+}));
+
 ipcMain.on('settings:get-sync', (event) => {
   event.returnValue = settingsStore.getAll();
 });
@@ -785,27 +812,54 @@ ipcMain.handle('pending-task:clear', () => {
 
 // ── MCP (local only) ──
 ipcMain.handle('mcp:list-installed', () => mcpRegistry.listInstalled());
+ipcMain.handle('mcp:list-capabilities', () => mcpRegistry.listCapabilityManifests());
+ipcMain.handle('mcp:list-credentials', () => mcpCredentialStore.listCredentials());
+ipcMain.handle('mcp:put-credential', (_, item) => mcpCredentialStore.putCredential(item));
+ipcMain.handle('mcp:delete-credential', (_, params) => mcpCredentialStore.deleteCredential(params?.credentialRef ?? params));
 ipcMain.handle('mcp:install', (_, item) => mcpRegistry.install(item));
-ipcMain.handle('mcp:uninstall', (_, params) => mcpRegistry.uninstall(params.mcpId));
-
-function stableHash(str) {
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
-  return Math.abs(h) + 100000;
-}
-
+ipcMain.handle('mcp:upsert-server', (_, item) => mcpRegistry.upsertServer(item));
+ipcMain.handle('mcp:uninstall', (_, params) => mcpRegistry.uninstall(params?.mcpId ?? params?.serverId));
+ipcMain.handle('mcp:set-enabled', (_, params) => mcpRegistry.setEnabled(params?.serverId ?? params?.mcpId, params?.enabled));
+ipcMain.handle('mcp:set-tool-visibility', (_, params) => mcpRegistry.setToolVisibility(params?.serverId ?? params?.mcpId, params?.toolName, params?.visible));
+ipcMain.handle('mcp:test-connection', async (_, params) => {
+  const server = params?.serverId || params?.mcpId ? mcpRegistry.getServer(params.serverId ?? params.mcpId) : params;
+  if (!server) throw new Error(`MCP server not found: ${params?.serverId ?? params?.mcpId ?? ''}`);
+  const result = await testMcpConnection(server, { credentialResolver: mcpCredentialResolver });
+  if (params?.serverId || params?.mcpId) mcpRegistry.updateHealth(server.id, result.health);
+  return result;
+});
+ipcMain.handle('mcp:refresh-manifest', async (_, params) => {
+  const server = mcpRegistry.getServer(params?.serverId ?? params?.mcpId);
+  if (!server) throw new Error(`MCP server not found: ${params?.serverId ?? params?.mcpId ?? ''}`);
+  const manifest = await discoverMcpManifest(server, { credentialResolver: mcpCredentialResolver });
+  const view = mcpRegistry.updateManifest(server.id, manifest);
+  disconnectMcp(server);
+  return { view, manifest };
+});
+ipcMain.handle('mcp:read-resource', async (_, params) => {
+  const server = mcpRegistry.getServer(params?.serverId ?? params?.mcpId);
+  if (!server) throw new Error(`MCP server not found: ${params?.serverId ?? params?.mcpId ?? ''}`);
+  return readMcpResource(server, params?.uri, { credentialResolver: mcpCredentialResolver });
+});
+ipcMain.handle('mcp:get-prompt', async (_, params) => {
+  const server = mcpRegistry.getServer(params?.serverId ?? params?.mcpId);
+  if (!server) throw new Error(`MCP server not found: ${params?.serverId ?? params?.mcpId ?? ''}`);
+  return getMcpPrompt(server, params?.name, params?.arguments ?? {}, { credentialResolver: mcpCredentialResolver });
+});
 ipcMain.handle('mcp:connect-and-register', async (_, { serverUrl, serverName }) => {
   if (!serverUrl || !serverName) throw new Error('serverUrl and serverName are required');
-  const tools = await listMcpTools(serverUrl);
-  mcpRegistry.install({
-    mcpId: stableHash(serverName),
+  const view = mcpRegistry.upsertServer({
+    displayName: serverName,
     name: serverName,
-    source: 'local',
+    transport: 'streamable_http',
+    url: serverUrl,
     serverUrl,
-    tools: tools.map((t) => ({ toolName: t.name, toolDesc: t.description })),
+    enabled: true,
   });
-  disconnectMcp(serverUrl);
-  return { success: true, toolCount: tools.length };
+  const manifest = await discoverMcpManifest(mcpRegistry.getServer(view.id), { credentialResolver: mcpCredentialResolver });
+  const refreshed = mcpRegistry.updateManifest(view.id, manifest);
+  disconnectMcp(mcpRegistry.getServer(view.id));
+  return { success: true, toolCount: manifest.tools.length, view: refreshed };
 });
 
 // ── Local Tool Host ──
@@ -830,6 +884,7 @@ app.whenReady().then(async () => {
     sessionStore,
     runHealthStub,
     mcpRegistry,
+    mcpCredentialResolver,
     shellProvider,
     extraProviders: skillStore ? [createLocalSkillProvider({ skillStore })] : [],
   });

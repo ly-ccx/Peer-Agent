@@ -150,6 +150,7 @@ export async function executeProjectedModelTool({
   toolContext = null,
   requestPermission,
   shellApprovalDecider,
+  mcpRegistry = null,
   registry = DEFAULT_TOOL_REGISTRY,
   runtimeProjection = DEFAULT_RUNTIME_PROJECTION,
   locale = 'zh-CN',
@@ -172,6 +173,7 @@ export async function executeProjectedModelTool({
     workspaceRoot: cwd,
     userDataPath,
     sessionStore: createSessionStore(locale),
+    mcpRegistry,
     shellProvider: createLocalShellProvider({
       workspaceRoot: cwd,
       userDataPath,
@@ -182,6 +184,7 @@ export async function executeProjectedModelTool({
   const execution = await host.execute({ call: projection.call }, {
     toolContext,
     requestPermission,
+    locale,
   });
   return {
     ...materializeProjectedToolExecution({

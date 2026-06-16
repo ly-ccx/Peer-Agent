@@ -8,7 +8,13 @@ import type {
   LlmModelListResult,
   LlmProviderConfigView,
   LlmProviderTestResult,
+  LocalMcpServerUpsertRequest,
+  LocalMcpServerView,
   LocaleCode,
+  McpConnectionTestResult,
+  McpCredentialMetadataView,
+  McpCredentialPutRequest,
+  McpManifestRefreshResult,
   PermissionGrant,
   PromptContextEpochEventRecord,
   PromptContextEpochRecord,
@@ -109,9 +115,20 @@ export interface BootstrapPreloadApi {
   readonly uploadSkill: (zipBase64: string) => Promise<SkillSummary | null>;
   readonly enableSkill: (skillId: string) => Promise<readonly SkillSummary[]>;
   readonly disableSkill: (skillId: string) => Promise<readonly SkillSummary[]>;
-  readonly mcpListInstalled: () => Promise<readonly Record<string, unknown>[]>;
-  readonly mcpInstall: (item: Record<string, unknown>) => Promise<unknown>;
-  readonly mcpUninstall: (params: { mcpId: string | number }) => Promise<unknown>;
+  readonly mcpListInstalled: () => Promise<readonly LocalMcpServerView[]>;
+  readonly mcpListCapabilities: () => Promise<readonly CapabilityManifest[]>;
+  readonly mcpListCredentials: () => Promise<readonly McpCredentialMetadataView[]>;
+  readonly mcpPutCredential: (item: McpCredentialPutRequest) => Promise<McpCredentialMetadataView>;
+  readonly mcpDeleteCredential: (params: { credentialRef: string } | string) => Promise<{ deleted: boolean; credentialRef: string }>;
+  readonly mcpInstall: (item: LocalMcpServerUpsertRequest) => Promise<LocalMcpServerView>;
+  readonly mcpUpsertServer: (item: LocalMcpServerUpsertRequest) => Promise<LocalMcpServerView>;
+  readonly mcpUninstall: (params: { mcpId?: string | number; serverId?: string | number }) => Promise<unknown>;
+  readonly mcpSetEnabled: (params: { mcpId?: string | number; serverId?: string | number; enabled: boolean }) => Promise<unknown>;
+  readonly mcpSetToolVisibility: (params: { mcpId?: string | number; serverId?: string | number; toolName: string; visible: boolean }) => Promise<unknown>;
+  readonly mcpTestConnection: (params: Record<string, unknown>) => Promise<McpConnectionTestResult>;
+  readonly mcpRefreshManifest: (params: { mcpId?: string | number; serverId?: string | number }) => Promise<McpManifestRefreshResult>;
+  readonly mcpReadResource: (params: { mcpId?: string | number; serverId?: string | number; uri: string }) => Promise<unknown>;
+  readonly mcpGetPrompt: (params: { mcpId?: string | number; serverId?: string | number; name: string; arguments?: Record<string, unknown> }) => Promise<unknown>;
   readonly mcpConnectAndRegister: (params: { serverUrl: string; serverName: string }) => Promise<{ success: boolean; toolCount: number }>;
   readonly workspaceList: () => Promise<{ workspaces: readonly { path: string; name: string; addedAt: string }[]; activeWorkspace: string | null }>;
   readonly workspaceEnsureDefault: () => Promise<{ path: string; name: string; created: boolean }>;

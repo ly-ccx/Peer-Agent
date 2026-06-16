@@ -4,9 +4,10 @@ import { useState } from 'react';
 import { AppearancePanel } from '../../appearance/AppearancePanel';
 import { GeneralPanel } from './GeneralPanel';
 import { LlmSettingsPanel } from './LlmSettingsPanel';
+import { McpSettingsPanel } from './McpSettingsPanel';
 import { SystemInstructionsPanel } from './SystemInstructionsPanel';
 
-type SettingsSection = 'general' | 'model' | 'instructions' | 'appearance';
+type SettingsSection = 'general' | 'model' | 'mcp' | 'instructions' | 'appearance';
 
 /**
  * SettingsPage 是设置入口的单一表达层:
@@ -36,11 +37,12 @@ export function SettingsPage({
   const [section, setSection] = useState<SettingsSection>('general');
   const localizedSettingsLabels =
     i18n.locale === 'en-US'
-      ? { model: 'Model configuration', instructions: 'System instructions' }
-      : { model: '模型配置', instructions: '系统指令' };
+      ? { model: 'Model configuration', mcp: 'MCP connections', instructions: 'System instructions' }
+      : { model: '模型配置', mcp: 'MCP 连接', instructions: '系统指令' };
   const items: ReadonlyArray<{ key: SettingsSection; label: string }> = [
     { key: 'general', label: i18n.t('settings.general') },
     { key: 'model', label: localizedSettingsLabels.model },
+    { key: 'mcp', label: localizedSettingsLabels.mcp },
     { key: 'instructions', label: localizedSettingsLabels.instructions },
     { key: 'appearance', label: i18n.t('appearance.title') },
   ];
@@ -80,6 +82,8 @@ export function SettingsPage({
           />
         ) : section === 'model' ? (
           <LlmSettingsPanel i18n={i18n} />
+        ) : section === 'mcp' ? (
+          <McpSettingsPanel />
         ) : section === 'instructions' ? (
           <SystemInstructionsPanel
             i18n={i18n}
