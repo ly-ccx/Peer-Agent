@@ -309,8 +309,13 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
         return (
           <section key={plan.planId} className="goal-plan-card">
             <header className="goal-plan-head">
+              {/* 状态徽章放标题左侧（最前），作为该计划的状态前缀。 */}
+              <span className={`goal-plan-status goal-plan-status--${plan.status}`}>
+                {planStatusLabel(plan.status, isZh)}
+              </span>
               <div className="goal-plan-title">{derivePlanTitle(plan, isZh)}</div>
-              {/* 批准/驳回放在 header 右侧、状态徽章旁，避免按钮被任务列表挤到卡片底部看不到。
+              {/* 批准/驳回放在 header 右侧；按钮尺寸与状态徽章对齐（小号 chip 风格），
+                  避免按钮被任务列表挤到卡片底部看不到。
                   治理事实写操作（带 confirmationId 的 HumanConfirmation）仅在 awaiting_approval 时出现。 */}
               {canDecide ? (
                 <div className="goal-plan-actions goal-plan-actions--inline">
@@ -322,9 +327,6 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
                   </button>
                 </div>
               ) : null}
-              <span className={`goal-plan-status goal-plan-status--${plan.status}`}>
-                {planStatusLabel(plan.status, isZh)}
-              </span>
             </header>
             {plan.goal ? <p className="goal-plan-goal">{plan.goal}</p> : null}
             <div className="goal-plan-progress" role="progressbar" aria-valuenow={progress.percent} aria-valuemin={0} aria-valuemax={100}>

@@ -148,7 +148,8 @@
   font-weight: 600;
   font-size: 14px;
   color: var(--za-text);
-  /* 标题撑开剩余空间，把 header 右侧的操作按钮组 + 状态徽章顶到最右。 */
+  /* 布局顺序：状态徽章（最左）→ 标题 → 操作按钮组（最右）。
+     标题用 margin-right:auto 撑开剩余空间，把 header 右侧的操作按钮组顶到最右。 */
   margin-right: auto;
   min-width: 0;
   overflow: hidden;
@@ -277,9 +278,13 @@
   padding-top: 0;
 }
 
+/* 内联按钮尺寸与状态徽章（.goal-plan-status）对齐：同样的 padding / 字号 / 圆角，
+   形成一致的小号 chip 风格，避免按钮在 header 里显得过大突兀。 */
 .goal-plan-actions--inline button {
-  padding: 4px 12px;
+  padding: 2px 10px;
   font-size: 12px;
+  line-height: 1.5;
+  border-radius: 999px;
   white-space: nowrap;
 }
 
