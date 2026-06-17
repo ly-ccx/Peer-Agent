@@ -15,6 +15,52 @@ import { Dropdown, type DropdownOption } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import { loadComposerEntry, saveComposerEntry } from '../state/composerPersistence';
+import { formatTime, formatDuration, formatBytes, formatTokenCount } from '../state/format';
+import {
+  estimateTextTokens,
+  estimateMessageTokens,
+  estimateAttachmentTokens,
+  estimateConversationTokens,
+} from '../state/tokenEstimate';
+import {
+  MAX_ATTACHMENTS,
+  MAX_IMAGE_BYTES,
+  MAX_TEXT_FILE_BYTES,
+  isTextLikeFile,
+  readAsDataUrl,
+  readAsText,
+} from '../state/attachmentIntake';
+import {
+  normalizeStreamSegment,
+  segmentsSignature,
+  mergeReattachedSegments,
+  contentFromSegments,
+  isEmptyAssistantPlaceholder,
+  groupSegments,
+  getTextContent,
+  migrateToSegments,
+  findNextSerializedToolCall,
+  parseSerializedToolSegments,
+} from '../state/streamSegments';
+import { toApiMessages } from '../state/apiMessageMapping';
+import {
+  buildConversationAttachmentContext,
+  buildConversationContinuityContext,
+  buildConfigInstructionContext,
+} from '../state/contextSources';
+import type {
+  ChatAttachment,
+  ChatApiContentPart,
+  ChatApiMessage,
+  ContentSegment,
+  ToolCallLegacy,
+  CompactionMeta,
+  ChatMsg,
+  TextGroup,
+  ThinkingGroup,
+  ToolCallGroup,
+  SegmentGroup,
+} from '../state/types';
 import { MarkdownMessage } from './markdown/MarkdownMessage';
 import { ChatFindBar } from './thread/ChatFindBar';
 import { GoalPlanPanel } from './GoalPlanPanel';
@@ -23,9 +69,6 @@ import { MessageActionBar, type MessageActionId } from './thread/MessageActionBa
 import { MessageRail, type MessageRailItem } from './thread/MessageRail';
 import { useTypewriterStream } from '../hooks/useTypewriterStream';
 
-const MAX_ATTACHMENTS = 8;
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-const MAX_TEXT_FILE_BYTES = 512 * 1024;
 const SCROLL_BOTTOM_THRESHOLD_PX = 64;
 
 // 交互上下文：把「选择 request_user_input 选项」的回调下沉给工具卡渲染，
@@ -36,16 +79,6 @@ interface InteractionControl {
   readonly isStreaming: boolean;
 }
 const InteractionContext = createContext<InteractionControl | null>(null);
-
-interface ChatAttachment {
-  id: string;
-  name: string;
-  mimeType: string;
-  size: number;
-  kind: 'image' | 'text' | 'unsupported';
-  dataUrl?: string;
-  text?: string;
-}
 
 type EffortLevel = 'off' | 'low' | 'default' | 'high' | 'xhigh';
 
@@ -125,256 +158,6 @@ function modeTitle(mode: ChatMode, isZh: boolean): string {
   return isZh ? '直接对话并按需调用工具' : 'Answer directly and call tools as needed';
 }
 
-type ChatApiContentPart =
-  | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string } };
-
-type ChatApiMessage = { role: string; content: string | ChatApiContentPart[] };
-
-type ContentSegment =
-  | { type: 'text'; content?: string }
-  | { type: 'thinking'; content?: string }
-  | {
-      type: 'tool-call';
-      tool?: string;
-      args?: Record<string, unknown>;
-      result?: string;
-      synthetic?: boolean;
-      toolCallId?: string;
-    };
-
-interface ToolCallLegacy {
-  tool: string;
-  args: Record<string, unknown>;
-  result?: string;
-  synthetic?: boolean;
-}
-
-function normalizeStreamSegment(segment: ContentSegment): ContentSegment {
-  if (segment.type === 'tool-call') {
-    return {
-      type: 'tool-call',
-      tool: segment.tool,
-      args: segment.args || {},
-      result: segment.result,
-      synthetic: segment.synthetic,
-      toolCallId: segment.toolCallId,
-    };
-  }
-  return { type: segment.type, content: segment.content || '' };
-}
-
-function segmentsSignature(segments: readonly ContentSegment[]): string {
-  return JSON.stringify(segments.map((segment) => {
-    if (segment.type === 'tool-call') {
-      return [segment.type, segment.toolCallId || '', segment.tool || '', JSON.stringify(segment.args || {}), segment.result || '', segment.synthetic ? '1' : '0'];
-    }
-    return [segment.type, segment.content || ''];
-  }));
-}
-
-function mergeReattachedSegments(
-  persistedSegments: readonly ContentSegment[] | undefined,
-  liveSegments: readonly ContentSegment[] | undefined
-): ContentSegment[] {
-  const persisted = (persistedSegments || []).map(normalizeStreamSegment);
-  const live = (liveSegments || []).map(normalizeStreamSegment);
-  if (persisted.length === 0) return live;
-  if (live.length === 0) return persisted;
-
-  const persistedSignature = segmentsSignature(persisted);
-  const liveSignature = segmentsSignature(live);
-  if (liveSignature === persistedSignature) return persisted;
-  if (live.length >= persisted.length && segmentsSignature(live.slice(0, persisted.length)) === persistedSignature) {
-    return live;
-  }
-  if (persisted.length > live.length && segmentsSignature(persisted.slice(0, live.length)) === liveSignature) {
-    return persisted;
-  }
-
-  // Reattach must never delete already persisted UI evidence.  If main's active-stream
-  // snapshot diverges, keep the visible history and append only the live suffix after the
-  // longest matching prefix we can prove locally.
-  let common = 0;
-  const max = Math.min(persisted.length, live.length);
-  while (common < max && segmentsSignature([persisted[common]]) === segmentsSignature([live[common]])) common += 1;
-  return [...persisted, ...live.slice(common)];
-}
-
-function contentFromSegments(segments: readonly ContentSegment[], fallback = ''): string {
-  const text = segments
-    .filter((segment): segment is Extract<ContentSegment, { type: 'text' }> => segment.type === 'text')
-    .map((segment) => segment.content || '')
-    .join('');
-  return text || fallback;
-}
-
-interface CompactionMeta {
-  method: string;
-  originalMessageCount: number;
-  deltaMessageCount?: number;
-  previousMessageCount?: number;
-  beforeTokens: number;
-  afterTokens: number;
-  summary?: string;
-}
-
-interface ChatMsg {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  segments?: ContentSegment[];
-  timestamp?: number;
-  usage?: { input: number; output: number; cacheWrite?: number; cacheRead?: number };
-  // 整轮 wall-clock 留痕(毫秒):从发送到本轮终结(done/aborted/error)。
-  // ADR 33:随消息走的表达层元数据,与 usage/timestamp 同级,经既有 replace-messages
-  // 开放袋持久化,重启后仍可见;不进入 main 拥有的累计账本(ADR 25 lifetimeUsage)。
-  durationMs?: number;
-  compaction?: CompactionMeta;
-  attachments?: ChatAttachment[];
-}
-
-function isEmptyAssistantPlaceholder(message: Pick<ChatMsg, 'role' | 'content' | 'segments'>): boolean {
-  return (
-    message.role === 'assistant' &&
-    message.content.trim() === '' &&
-    (!Array.isArray(message.segments) || message.segments.length === 0)
-  );
-}
-
-function getApiContent(message: ChatMsg): string {
-  if (!message.segments?.length) {
-    return message.role === 'assistant'
-      ? sanitizeAssistantHistoryTextForApi(message.content)
-      : message.content;
-  }
-  return message.segments
-    .map((segment) => {
-      if (segment.type === 'thinking') return '';
-      if (segment.type !== 'text') return formatHistoricalLocalRecordForApi(segment);
-      const content = segment.content || '';
-      return message.role === 'assistant' ? sanitizeAssistantHistoryTextForApi(content) : content;
-    })
-    .filter(Boolean)
-    .join('\n\n');
-}
-
-function buildAttachmentText(attachments: readonly ChatAttachment[]): string {
-  const blocks: string[] = [];
-  for (const attachment of attachments) {
-    if (attachment.kind === 'text') {
-      blocks.push([
-        `Attached file: ${attachment.name}`,
-        `MIME: ${attachment.mimeType || 'text/plain'}`,
-        `Size: ${formatBytes(attachment.size)}`,
-        'Content:',
-        '```',
-        attachment.text || '',
-        '```',
-      ].join('\n'));
-    } else if (attachment.kind === 'unsupported') {
-      blocks.push([
-        `Attached file: ${attachment.name}`,
-        `MIME: ${attachment.mimeType || 'application/octet-stream'}`,
-        `Size: ${formatBytes(attachment.size)}`,
-        'Content is not included because this file type is not supported yet.',
-      ].join('\n'));
-    }
-  }
-  return blocks.join('\n\n');
-}
-
-function buildAttachmentContext(attachments: readonly ChatAttachment[]): ContextAttachmentItem[] {
-  return attachments.map((attachment) => ({
-    id: attachment.id,
-    name: attachment.name,
-    mimeType: attachment.mimeType,
-    size: attachment.size,
-    kind: attachment.kind,
-    contentIncluded: attachment.kind !== 'unsupported',
-    transport: attachment.kind === 'image'
-      ? 'provider_image_part'
-      : attachment.kind === 'text'
-        ? 'user_text_part'
-        : 'metadata_only',
-    sourceKind: 'user_upload',
-    scope: 'conversation',
-    lifecycle: 'ephemeral',
-  }));
-}
-
-function buildConversationAttachmentContext(messages: readonly ChatMsg[]): ContextAttachmentItem[] {
-  return messages.flatMap((message) => (
-    message.role === 'user' && message.attachments?.length
-      ? buildAttachmentContext(message.attachments)
-      : []
-  ));
-}
-
-function getApiMessageContent(message: ChatMsg): string | ChatApiContentPart[] {
-  const text = getApiContent(message);
-  const attachments = message.attachments ?? [];
-  if (!attachments.length) return text;
-
-  const parts: ChatApiContentPart[] = [];
-  const attachmentText = buildAttachmentText(attachments);
-  const combinedText = [text, attachmentText].filter((value) => value.trim()).join('\n\n');
-  if (combinedText) parts.push({ type: 'text', text: combinedText });
-
-  for (const attachment of attachments) {
-    if (attachment.kind === 'image' && attachment.dataUrl) {
-      parts.push({ type: 'image_url', image_url: { url: attachment.dataUrl } });
-    }
-  }
-
-  return parts.length ? parts : text;
-}
-
-function hasApiMessageContent(content: string | ChatApiContentPart[]): boolean {
-  if (typeof content === 'string') return content.trim().length > 0;
-  return content.some((part) => {
-    if (part.type === 'image_url') return Boolean(part.image_url.url);
-    return part.text.trim().length > 0;
-  });
-}
-
-function toApiMessages(messages: readonly ChatMsg[]): ChatApiMessage[] {
-  const apiMessages: ChatApiMessage[] = [];
-  for (const message of messages) {
-    if (message.compaction) continue;
-    const content = getApiMessageContent(message);
-    if (message.role === 'assistant' && !hasApiMessageContent(content)) continue;
-    apiMessages.push({ role: message.role, content });
-  }
-  return apiMessages;
-}
-
-function buildConversationContinuityContext(messages: readonly ChatMsg[]): ContinuityContextItem[] {
-  return messages
-    .filter((message) => Boolean(message.compaction))
-    .map((message) => ({
-      id: message.id,
-      method: message.compaction?.method ?? 'unknown',
-      originalMessageCount: message.compaction?.originalMessageCount ?? 0,
-      beforeTokens: message.compaction?.beforeTokens ?? 0,
-      afterTokens: message.compaction?.afterTokens ?? 0,
-      summary: message.compaction?.summary || message.content,
-      content: message.content,
-    }));
-}
-
-function buildConfigInstructionContext(systemInstructions: string | null | undefined): ConfigInstructionContextItem[] {
-  const content = typeof systemInstructions === 'string' ? systemInstructions.trim() : '';
-  if (!content) return [];
-  return [{
-    id: 'settings.systemInstructions',
-    title: 'System Instructions',
-    content,
-    priority: 0,
-    source: 'settings.systemInstructions',
-  }];
-}
-
 interface TokenUsageState {
   input: number;
   output: number;
@@ -405,221 +188,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
 let msgSeq = 0;
 function nextId() { return `msg-${++msgSeq}-${Date.now()}`; }
 
-function formatTime(ts: number) {
-  const d = new Date(ts);
-  const now = new Date();
-  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  if (d.toDateString() === now.toDateString()) return time;
-  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
-}
 
-// 把毫秒时长格式化为简洁可读形式:1.2s / 45s / 3m12s / 1h03m。
-function formatDuration(ms: number): string {
-  if (ms < 0) ms = 0;
-  if (ms < 1000) return `${ms}ms`;
-  const totalSec = Math.floor(ms / 1000);
-  if (totalSec < 10) return `${(ms / 1000).toFixed(1)}s`;
-  if (totalSec < 60) return `${totalSec}s`;
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
-  if (min < 60) return `${min}m${String(sec).padStart(2, '0')}s`;
-  const hr = Math.floor(min / 60);
-  return `${hr}h${String(min % 60).padStart(2, '0')}m`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function isTextLikeFile(file: File): boolean {
-  if (file.type.startsWith('text/')) return true;
-  const lower = file.name.toLowerCase();
-  return [
-    '.txt', '.md', '.markdown', '.json', '.jsonl', '.csv', '.tsv', '.yaml', '.yml',
-    '.xml', '.html', '.css', '.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.go',
-    '.rs', '.c', '.cpp', '.h', '.hpp', '.sh', '.zsh', '.sql', '.log',
-  ].some((suffix) => lower.endsWith(suffix));
-}
-
-function readAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
-    reader.onerror = () => reject(reader.error ?? new Error('failed to read file'));
-    reader.readAsDataURL(file);
-  });
-}
-
-function readAsText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
-    reader.onerror = () => reject(reader.error ?? new Error('failed to read file'));
-    reader.readAsText(file);
-  });
-}
-
-interface TextGroup { type: 'text'; content: string }
-interface ThinkingGroup { type: 'thinking'; content: string }
-interface ToolCallGroup { type: 'tool-call-group'; calls: ToolCallLegacy[] }
-type SegmentGroup = TextGroup | ThinkingGroup | ToolCallGroup;
-
-function groupSegments(segments: ContentSegment[]): SegmentGroup[] {
-  const groups: SegmentGroup[] = [];
-  for (const seg of segments) {
-    if (seg.type === 'text') {
-      groups.push({ type: 'text', content: seg.content || '' });
-    } else if (seg.type === 'thinking') {
-      const last = groups[groups.length - 1];
-      if (last && last.type === 'thinking') {
-        last.content += seg.content || '';
-      } else {
-        groups.push({ type: 'thinking', content: seg.content || '' });
-      }
-    } else {
-      const last = groups[groups.length - 1];
-      if (last && last.type === 'tool-call-group') {
-        last.calls.push({ tool: seg.tool!, args: seg.args || {}, result: seg.result, synthetic: seg.synthetic });
-      } else {
-        groups.push({ type: 'tool-call-group', calls: [{ tool: seg.tool!, args: seg.args || {}, result: seg.result, synthetic: seg.synthetic }] });
-      }
-    }
-  }
-  return groups;
-}
-
-function getTextContent(segments: ContentSegment[]): string {
-  return segments.filter((s) => s.type === 'text').map((s) => s.content || '').join('');
-}
-
-function migrateToSegments(content: string, toolCalls?: ToolCallLegacy[]): ContentSegment[] | undefined {
-  if (!toolCalls?.length && !content) return undefined;
-  const segs: ContentSegment[] = [];
-  if (toolCalls?.length) {
-    for (const tc of toolCalls) {
-      segs.push({ type: 'tool-call', tool: tc.tool, args: tc.args, result: tc.result });
-    }
-  }
-  if (content) segs.push({ type: 'text', content });
-  return segs.length ? segs : undefined;
-}
-
-function findNextSerializedToolCall(content: string, fromIndex: number): number {
-  const match = content.slice(fromIndex).match(/\n\[Tool call:/);
-  return match?.index === undefined ? content.length : fromIndex + match.index + 1;
-}
-
-function parseSerializedToolSegments(content: string): ContentSegment[] | undefined {
-  if (!content.includes('[Tool call:')) return undefined;
-
-  const segments: ContentSegment[] = [];
-  let cursor = 0;
-  while (cursor < content.length) {
-    const start = content.indexOf('[Tool call:', cursor);
-    if (start < 0) {
-      const tail = content.slice(cursor);
-      if (tail) segments.push({ type: 'text', content: tail });
-      break;
-    }
-
-    const before = content.slice(cursor, start);
-    if (before) segments.push({ type: 'text', content: before });
-
-    const headerEnd = content.indexOf('\n', start);
-    if (headerEnd < 0) {
-      segments.push({ type: 'text', content: content.slice(start) });
-      break;
-    }
-
-    const header = content.slice(start, headerEnd).trim();
-    const headerMatch = header.match(/^\[Tool call:\s+(\S+)\s+(.+)\]$/);
-    const resultMarker = '\n[Tool result]\n';
-    const resultMarkerIndex = content.indexOf(resultMarker, headerEnd);
-    if (!headerMatch) {
-      segments.push({ type: 'text', content: content.slice(start) });
-      break;
-    }
-
-    let args: Record<string, unknown> = {};
-    try {
-      const parsed = JSON.parse(headerMatch[2]);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) args = parsed as Record<string, unknown>;
-    } catch {
-      args = { raw: headerMatch[2] };
-    }
-
-    if (resultMarkerIndex < 0) {
-      segments.push({
-        type: 'tool-call',
-        tool: headerMatch[1],
-        args,
-        result: undefined,
-        synthetic: true,
-      });
-      const rest = content.slice(headerEnd).trim();
-      if (rest) segments.push({ type: 'text', content: rest });
-      break;
-    }
-
-    const resultStart = resultMarkerIndex + resultMarker.length;
-    const nextStart = findNextSerializedToolCall(content, resultStart);
-    segments.push({
-      type: 'tool-call',
-      tool: headerMatch[1],
-      args,
-      result: content.slice(resultStart, nextStart).trim(),
-    });
-    cursor = nextStart;
-  }
-
-  return segments.some((segment) => segment.type === 'tool-call') ? segments : undefined;
-}
-
-function estimateTextTokens(value: unknown): number {
-  return Math.ceil(String(value ?? '').length / 4);
-}
-
-function estimateMessageTokens(message: ChatMsg): number {
-  let tokens = 10;
-  tokens += estimateTextTokens(message.content);
-  if (message.attachments?.length) {
-    for (const attachment of message.attachments) {
-      tokens += estimateTextTokens(attachment.name);
-      tokens += estimateTextTokens(attachment.text);
-      if (attachment.kind === 'image') tokens += 800;
-    }
-  }
-  if (message.segments?.length) {
-    for (const segment of message.segments) {
-      if (segment.type === 'tool-call') {
-        tokens += estimateTextTokens(segment.tool);
-        tokens += estimateTextTokens(JSON.stringify(segment.args ?? {}));
-        tokens += estimateTextTokens(segment.result);
-      } else if (segment.type === 'text') {
-        tokens += estimateTextTokens(segment.content);
-      }
-    }
-  }
-  return tokens;
-}
-
-function estimateAttachmentTokens(attachments: readonly ChatAttachment[]): number {
-  return attachments.reduce((sum, attachment) => {
-    return sum + estimateTextTokens(attachment.name) + estimateTextTokens(attachment.text) + (attachment.kind === 'image' ? 800 : 0);
-  }, 0);
-}
-
-function estimateConversationTokens(messages: readonly ChatMsg[], draft: string, draftAttachments: readonly ChatAttachment[]): number {
-  const messageTokens = messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
-  return Math.max(0, messageTokens + estimateTextTokens(draft) + estimateAttachmentTokens(draftAttachments));
-}
-
-function formatTokenCount(tokens: number): string {
-  if (tokens < 1000) return String(tokens);
-  return `${(tokens / 1000).toFixed(1)}k`;
-}
 
 // 流式工具参数进度的展示文案。仅描述“正在接收/准备调用”这一过程,
 // 不声称工具已执行或文件已落地——真正的结果由后续 tool-call 段与本地能力 Evidence 接管。
