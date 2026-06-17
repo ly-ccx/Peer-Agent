@@ -478,6 +478,7 @@ ipcMain.handle('conversations:list', (_, params) => {
 ipcMain.handle('conversations:create', (_, params) => conversationStore.createConversation(params));
 ipcMain.handle('conversations:get', (_, { id }) => conversationStore.getConversation(id));
 ipcMain.handle('conversations:update-title', (_, { id, title }) => conversationStore.updateTitle(id, title));
+ipcMain.handle('conversations:update-mode', (_, { id, mode }) => conversationStore.updateMode(id, mode));
 ipcMain.handle('conversations:append-message', (_, { id, message }) => conversationStore.appendMessage(id, message));
 ipcMain.handle('conversations:update-last-message', (_, { id, content }) => conversationStore.updateLastMessage(id, content));
 ipcMain.handle('conversations:replace-messages', (_, { id, messages }) => conversationStore.replaceMessages(id, messages));

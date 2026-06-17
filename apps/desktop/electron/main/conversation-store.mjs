@@ -42,16 +42,34 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
     return listConversations().filter((c) => (c.workspacePath || null) === (workspacePath || null));
   }
 
-  function createConversation({ title, workspacePath } = {}) {
+  // 对话模式（chat / goal）按会话持久化在会话 meta 上，而非全局设置：
+  // 模式是「每会话状态」，与计划数据同口径，切换会话各自独立、互不影响。
+  function normalizeMode(value) {
+    return value === 'goal' ? 'goal' : 'chat';
+  }
+
+  function createConversation({ title, workspacePath, mode } = {}) {
     const meta = {
       id: randomUUID(),
       title: title || '',
       workspacePath: workspacePath || null,
+      mode: normalizeMode(mode),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     appendJsonl(indexFile, meta);
     return { ...meta, messageCount: 0 };
+  }
+
+  function updateMode(id, mode) {
+    const index = readIndex();
+    const meta = index.find((c) => c.id === id);
+    if (!meta) return null;
+    meta.mode = normalizeMode(mode);
+    meta.updatedAt = new Date().toISOString();
+    writeJsonl(indexFile, index);
+    const msgs = existsSync(convFile(id)) ? readJsonl(convFile(id)) : [];
+    return { ...meta, messageCount: msgs.length };
   }
 
   function getConversation(id) {
@@ -160,5 +178,5 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
     }
   }
 
-  return { listConversations, listConversationsByWorkspace, createConversation, getConversation, updateTitle, appendMessage, updateLastMessage, replaceMessages, addUsage, deleteConversation };
+  return { listConversations, listConversationsByWorkspace, createConversation, getConversation, updateTitle, updateMode, appendMessage, updateLastMessage, replaceMessages, addUsage, deleteConversation };
 }

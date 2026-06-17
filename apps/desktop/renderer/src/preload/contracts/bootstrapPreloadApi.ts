@@ -141,9 +141,12 @@ export interface BootstrapPreloadApi {
   readonly workspaceRemove: (params: { path: string }) => Promise<unknown>;
   readonly workspaceInfo: (params: { path: string }) => Promise<{ name: string; absolutePath: string; git?: { branch?: string; isDirty?: boolean } } | null>;
   readonly conversationsList: (params?: { workspacePath?: string | null }) => Promise<readonly { id: string; title: string; workspacePath?: string | null; messageCount: number; createdAt: string; updatedAt: string }[]>;
-  readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null }) => Promise<{ id: string; title: string; messageCount: number; createdAt: string; updatedAt: string }>;
-  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage } | null>;
+  readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null; mode?: string }) => Promise<{ id: string; title: string; mode?: string; messageCount: number; createdAt: string; updatedAt: string }>;
+  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage } | null>;
   readonly conversationsUpdateTitle: (params: { id: string; title: string }) => Promise<unknown>;
+  // 对话模式按会话持久化在会话 meta 上（chat / goal）。模式真值仍经 chatSend → IPC →
+  // mode-source 进入 System Context 的 L6_MODE_REMINDER；此处仅负责「每会话存哪」。
+  readonly conversationsUpdateMode: (params: { id: string; mode: string }) => Promise<unknown>;
   readonly conversationsAppendMessage: (params: { id: string; message: Record<string, unknown> & { id: string; role: string; content: string } }) => Promise<unknown>;
   readonly conversationsUpdateLastMessage: (params: { id: string; content: string }) => Promise<unknown>;
   readonly conversationsReplaceMessages: (params: { id: string; messages: readonly Record<string, unknown>[] }) => Promise<unknown>;

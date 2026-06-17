@@ -106,6 +106,47 @@ test('messages without durationMs load cleanly (ADR 33)', () => {
   }
 });
 
+test('conversation mode is per-conversation: defaults to chat, persists, and isolates', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    // 默认会话模式为 chat,且写入 index meta(随会话持久化,非全局)。
+    const a = store.createConversation({ title: 'a' });
+    assert.equal(a.mode, 'chat');
+    assert.equal(store.getConversation(a.id).mode, 'chat');
+
+    // 创建时可显式指定 goal 模式。
+    const b = store.createConversation({ title: 'b', mode: 'goal' });
+    assert.equal(b.mode, 'goal');
+
+    // 改 b 不影响 a —— 模式按会话隔离(本次重构的核心命题)。
+    const updated = store.updateMode(b.id, 'chat');
+    assert.equal(updated.mode, 'chat');
+    assert.equal(store.getConversation(b.id).mode, 'chat');
+    assert.equal(store.getConversation(a.id).mode, 'chat');
+
+    // 把 a 切到 goal,b 仍为 chat。
+    store.updateMode(a.id, 'goal');
+    assert.equal(store.getConversation(a.id).mode, 'goal');
+    assert.equal(store.getConversation(b.id).mode, 'chat');
+  } finally {
+    cleanup();
+  }
+});
+
+test('updateMode normalizes unknown values to chat and returns null on missing conversation', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 't', mode: 'nonsense' });
+    // 未知模式入库时归一为 chat。
+    assert.equal(conv.mode, 'chat');
+    const updated = store.updateMode(conv.id, 'also-bogus');
+    assert.equal(updated.mode, 'chat');
+    assert.equal(store.updateMode('does-not-exist', 'goal'), null);
+  } finally {
+    cleanup();
+  }
+});
+
 test('addUsage on missing conversation returns null', () => {
   const { store, cleanup } = freshStore();
   try {

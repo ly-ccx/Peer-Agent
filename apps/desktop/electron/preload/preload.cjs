@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   conversationsCreate: (params) => ipcRenderer.invoke('conversations:create', params),
   conversationsGet: (params) => ipcRenderer.invoke('conversations:get', params),
   conversationsUpdateTitle: (params) => ipcRenderer.invoke('conversations:update-title', params),
+  conversationsUpdateMode: (params) => ipcRenderer.invoke('conversations:update-mode', params),
   conversationsAppendMessage: (params) => ipcRenderer.invoke('conversations:append-message', params),
   conversationsUpdateLastMessage: (params) => ipcRenderer.invoke('conversations:update-last-message', params),
   conversationsReplaceMessages: (params) => ipcRenderer.invoke('conversations:replace-messages', params),

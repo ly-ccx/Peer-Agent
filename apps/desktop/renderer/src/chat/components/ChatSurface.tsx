@@ -605,9 +605,12 @@ function usageFromLifetime(lifetime: {
 async function loadConversationMessages(conversationId: string): Promise<{
   messages: ChatMsg[];
   tokenUsage: { input: number; output: number; cacheWrite: number; cacheRead: number } | null;
+  mode: ChatMode;
 }> {
   const conv = await clientApi.conversationsGet({ id: conversationId });
-  if (!conv?.messages) return { messages: [], tokenUsage: null };
+  if (!conv?.messages) return { messages: [], tokenUsage: null, mode: 'chat' };
+  // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'。
+  const convMode: ChatMode = isChatMode(conv.mode) ? conv.mode : 'chat';
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0;
   const loaded = conv.messages.map((m: Record<string, unknown>) => {
     const msg: ChatMsg = {
@@ -659,6 +662,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
     return {
       messages: loaded,
       tokenUsage: usageFromLifetime(lifetime),
+      mode: convMode,
     };
   }
   return {
@@ -666,6 +670,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
     tokenUsage: totalInput > 0 || totalOutput > 0 || totalCacheWrite > 0 || totalCacheRead > 0
       ? { input: totalInput, output: totalOutput, cacheWrite: totalCacheWrite, cacheRead: totalCacheRead }
       : null,
+    mode: convMode,
   };
 }
 
@@ -735,17 +740,16 @@ export function ChatSurface({
     setEffort(level);
     void clientApi.updateSettings({ effort: level });
   }, []);
-  // 对话模式同样作为全局偏好持久化在 settings-store(扁平 key 'chatMode'),
-  // 表达层只读取/回写这一字段。模式真值最终经 chatSend → IPC → mode-source 进入
-  // System Context 的 L6_MODE_REMINDER 层(见 docs/proposals/0002-goal-mode.md)。
-  const [mode, setMode] = useState<ChatMode>(() => {
-    const stored = (clientApi.initialSettings as Record<string, unknown>)?.chatMode;
-    return isChatMode(stored) ? stored : 'chat';
-  });
+  // 对话模式按会话持久化在会话 meta 上(非全局设置):模式是「每会话状态」,切换会话
+  // 各自独立、互不影响,与计划数据同口径。初值给 'chat',真实值由会话加载 effect 按
+  // 当前会话 meta 覆盖(见下方 conversationId effect)。模式真值最终经 chatSend → IPC →
+  // mode-source 进入 System Context 的 L6_MODE_REMINDER 层(见 docs/proposals/0002-goal-mode.md)。
+  const [mode, setMode] = useState<ChatMode>('chat');
   const changeMode = useCallback((next: ChatMode) => {
     setMode(next);
-    void clientApi.updateSettings({ chatMode: next });
-  }, []);
+    // 回写到当前会话 meta;无活跃会话(理论上不会发生,UI 恒有会话)时仅更新本地态。
+    if (conversationId) void clientApi.conversationsUpdateMode({ id: conversationId, mode: next });
+  }, [conversationId]);
   const [localAccessLevel, setLocalAccessLevel] = useState<LocalAccessLevel>(() => {
     const stored = (clientApi.initialSettings as Record<string, unknown>)?.localAccessLevel;
     return isLocalAccessLevel(stored) ? stored : 'ask_before_local';
@@ -946,10 +950,12 @@ export function ChatSurface({
     setTokenUsage(null);
     let cancelled = false;
     void (async () => {
-      const { messages: loaded, tokenUsage: usage } = await loadConversationMessages(conversationId);
+      const { messages: loaded, tokenUsage: usage, mode: convMode } = await loadConversationMessages(conversationId);
       if (cancelled) return;
       setMessages(loaded);
       if (usage) setTokenUsage(usage);
+      // 对话模式随会话恢复:每会话各自独立,切换会话即切到该会话自己的模式。
+      setMode(convMode);
 
       // ADR 22: HMR 重载/重新打开后,main 进程的流式推理可能仍在进行。
       // 询问后端是否有本会话的活跃流;若有,把已累积的思考/正文接回 UI,
