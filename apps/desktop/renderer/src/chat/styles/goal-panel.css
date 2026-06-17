@@ -53,8 +53,8 @@
   min-width: 18px;
   padding: 0 6px;
   border-radius: 999px;
-  background: color-mix(in srgb, #b8860b 16%, transparent);
-  color: #b8860b;
+  background: var(--za-warn-soft);
+  color: var(--za-warn);
   font-size: 11px;
   line-height: 18px;
   text-align: center;
@@ -88,8 +88,8 @@
 .goal-panel-error {
   padding: 8px 12px;
   border-radius: var(--za-radius-sm);
-  background: color-mix(in srgb, var(--cinnabar-seal, #c0392b) 12%, transparent);
-  color: var(--cinnabar-seal, #c0392b);
+  background: var(--za-danger-soft);
+  color: var(--za-danger);
   font-size: 13px;
 }
 
@@ -125,11 +125,11 @@
   color: var(--za-text-soft);
 }
 
-.goal-plan-status--awaiting_approval { color: #b8860b; background: color-mix(in srgb, #b8860b 14%, transparent); }
-.goal-plan-status--executing { color: #2563eb; background: color-mix(in srgb, #2563eb 14%, transparent); }
-.goal-plan-status--completed { color: #15803d; background: color-mix(in srgb, #15803d 14%, transparent); }
+.goal-plan-status--awaiting_approval { color: var(--za-warn); background: var(--za-warn-soft); }
+.goal-plan-status--executing { color: var(--state-confirm); background: color-mix(in srgb, var(--state-confirm) 14%, transparent); }
+.goal-plan-status--completed { color: var(--za-good); background: var(--za-good-soft); }
 .goal-plan-status--failed,
-.goal-plan-status--cancelled { color: var(--cinnabar-seal, #c0392b); background: color-mix(in srgb, var(--cinnabar-seal, #c0392b) 14%, transparent); }
+.goal-plan-status--cancelled { color: var(--za-danger); background: var(--za-danger-soft); }
 
 .goal-plan-goal {
   margin: 0;
@@ -151,7 +151,7 @@
   height: 6px;
   border-radius: 999px;
   background: var(--za-hover);
-  background-image: linear-gradient(#2563eb, #2563eb);
+  background-image: linear-gradient(var(--state-confirm), var(--state-confirm));
   background-repeat: no-repeat;
   background-size: 0% 100%;
   transition: background-size var(--za-motion-medium, 200ms) var(--za-ease-standard, ease);
@@ -194,10 +194,10 @@
   color: var(--za-text-soft);
 }
 
-.goal-task-status--completed { color: #15803d; background: color-mix(in srgb, #15803d 14%, transparent); }
-.goal-task-status--running { color: #2563eb; background: color-mix(in srgb, #2563eb 14%, transparent); }
-.goal-task-status--failed { color: var(--cinnabar-seal, #c0392b); background: color-mix(in srgb, var(--cinnabar-seal, #c0392b) 14%, transparent); }
-.goal-task-status--waiting_user { color: #b8860b; background: color-mix(in srgb, #b8860b 14%, transparent); }
+.goal-task-status--completed { color: var(--za-good); background: var(--za-good-soft); }
+.goal-task-status--running { color: var(--state-confirm); background: color-mix(in srgb, var(--state-confirm) 14%, transparent); }
+.goal-task-status--failed { color: var(--za-danger); background: var(--za-danger-soft); }
+.goal-task-status--waiting_user { color: var(--za-warn); background: var(--za-warn-soft); }
 
 .goal-task-title {
   font-size: 13px;
@@ -217,8 +217,8 @@
   line-height: 1.4;
 }
 
-.goal-task-detail--error { color: var(--cinnabar-seal, #c0392b); }
-.goal-task-detail--warn { color: #b8860b; }
+.goal-task-detail--error { color: var(--za-danger); }
+.goal-task-detail--warn { color: var(--za-warn); }
 
 .goal-plan-empty-tasks {
   font-size: 12px;
@@ -246,13 +246,14 @@
 }
 
 .goal-plan-approve {
-  background: #2563eb;
-  color: #fff;
-  border-color: #2563eb !important;
+  background: var(--za-primary-control-bg);
+  color: var(--za-primary-control-ink);
+  border-color: var(--za-primary-control-bg) !important;
 }
 
 .goal-plan-approve:hover:not(:disabled) {
-  background: #1d4ed8;
+  background: var(--za-active);
+  color: var(--za-text);
 }
 
 .goal-plan-reject {
