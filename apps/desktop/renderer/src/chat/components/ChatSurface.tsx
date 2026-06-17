@@ -4,6 +4,7 @@ import type {
   ConfigInstructionContextItem,
   ContextAttachmentItem,
   ContinuityContextItem,
+  GoalPlan,
   LlmProviderConfigView,
   LocalAccessLevel,
 } from '@peer-agent/protocol';
@@ -1674,6 +1675,19 @@ export function ChatSurface({
     void submitMessage(text, [], effort);
   }, [isStreaming, hasProvider, conversationId, submitMessage, effort]);
 
+  // 计划获批后唤起「执行轮」：把"开始执行"作为一条用户消息，复用既有 submitMessage 发送路径
+  // （不另造旁路），让模型在 goal 闸门放行下按计划开始执行子任务。
+  // store 侧已落 GoalApproval Evidence（治理事实），此处只负责驱动执行。
+  // 见 docs/proposals/0002-goal-mode.md 时序图阶段二（批准）→阶段三（执行）。
+  const startGoalExecution = useCallback((plan: GoalPlan) => {
+    if (isStreaming || !hasProvider || !conversationId) return;
+    const planLabel = plan.title || plan.goal || '';
+    const text = isZh
+      ? `我已批准计划「${planLabel}」（planId=${plan.planId}）。请按计划开始执行：依据 dependsOn 拓扑序与先序遍历逐个执行叶子子任务，有副作用的步骤先申请权限，每个子任务完成后用 goal_update_task 以 Evidence 回写状态。`
+      : `I have approved the plan "${planLabel}" (planId=${plan.planId}). Please start executing it now: run leaf subtasks in dependsOn topological + pre-order, request permission before any side-effecting step, and write each subtask's status back via goal_update_task with Evidence.`;
+    void submitMessage(text, [], effort);
+  }, [isStreaming, hasProvider, conversationId, submitMessage, effort, isZh]);
+
   if (!conversationId) {
     return (
       <div className="chat-surface">
@@ -1808,7 +1822,7 @@ export function ChatSurface({
       ) : null}
 
       <div className="chat-composer-wrap">
-        {mode === 'goal' ? <GoalPlanPanel conversationId={conversationId} isZh={isZh} /> : null}
+        {mode === 'goal' ? <GoalPlanPanel conversationId={conversationId} isZh={isZh} onApproved={startGoalExecution} /> : null}
         <PermissionGateStrip
           pendingCalls={pendingPermissionCalls}
           onApprove={approvePendingPermissionCall}

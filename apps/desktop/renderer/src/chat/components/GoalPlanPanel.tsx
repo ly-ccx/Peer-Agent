@@ -23,6 +23,13 @@ function normalizeConversationId(value: string | number | null | undefined): str
 interface GoalPlanPanelProps {
   readonly conversationId: string | null;
   readonly isZh: boolean;
+  /**
+   * 批准成功后回调。由 ChatSurface 注入，用于唤起 chat runtime 发起「执行轮」
+   * （复用既有 submitMessage 发送路径，不另造旁路）。
+   * 缺省时面板仅落库 + 刷新，不驱动执行（保持向后兼容）。
+   * 见 docs/proposals/0002-goal-mode.md 时序图阶段二→阶段三。
+   */
+  readonly onApproved?: (plan: GoalPlan) => void;
 }
 
 function statusLabel(status: ExecutionStatus, isZh: boolean): string {
@@ -108,7 +115,7 @@ function TaskNode({ task, depth, isZh }: { task: GoalTask; depth: number; isZh: 
   );
 }
 
-export function GoalPlanPanel({ conversationId, isZh }: GoalPlanPanelProps): ReactElement | null {
+export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPanelProps): ReactElement | null {
   const [plans, setPlans] = useState<readonly GoalPlan[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -206,13 +213,19 @@ export function GoalPlanPanel({ conversationId, isZh }: GoalPlanPanelProps): Rea
           },
         });
         await reload();
+        // 批准成功后唤起 chat runtime 发起「执行轮」。落库（治理事实）与执行驱动分离：
+        // store 已记录 GoalApproval Evidence，这里再通过回调进入既有发送路径开始执行。
+        // 见 docs/proposals/0002-goal-mode.md 阶段二→阶段三。
+        if (decision === 'approve') {
+          onApproved?.(plan);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : isZh ? '操作失败' : 'Action failed');
       } finally {
         setBusyPlanId(null);
       }
     },
-    [reload, isZh],
+    [reload, isZh, onApproved],
   );
 
   // 面板位于输入框上方：没有计划时不占位，直接隐藏。
