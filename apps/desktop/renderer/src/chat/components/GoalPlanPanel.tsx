@@ -54,6 +54,23 @@ function statusClass(status: ExecutionStatus): string {
   return `goal-task-status goal-task-status--${status}`;
 }
 
+/**
+ * 计划标题兜底：goal_create_plan 的 title 多数情况下模型不传（为空字符串），
+ * 但 goal 通常有内容。此处用 goal 的首句/截断派生一个可读标题，
+ * 避免所有计划都显示「未命名计划」。仅 title 与 goal 均为空时才回退占位文案。
+ */
+function derivePlanTitle(plan: GoalPlan, isZh: boolean): string {
+  const title = typeof plan.title === 'string' ? plan.title.trim() : '';
+  if (title) return title;
+  const goal = typeof plan.goal === 'string' ? plan.goal.trim() : '';
+  if (goal) {
+    const firstLine = goal.split(/\r?\n/)[0]?.trim() ?? '';
+    const source = firstLine || goal;
+    return source.length > 40 ? `${source.slice(0, 40)}…` : source;
+  }
+  return isZh ? '未命名计划' : 'Untitled plan';
+}
+
 function planStatusLabel(status: GoalPlan['status'], isZh: boolean): string {
   const zh: Record<GoalPlan['status'], string> = {
     drafting: '草拟中',
@@ -265,7 +282,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
         return (
           <section key={plan.planId} className="goal-plan-card">
             <header className="goal-plan-head">
-              <div className="goal-plan-title">{plan.title || (isZh ? '未命名计划' : 'Untitled plan')}</div>
+              <div className="goal-plan-title">{derivePlanTitle(plan, isZh)}</div>
               <span className={`goal-plan-status goal-plan-status--${plan.status}`}>
                 {planStatusLabel(plan.status, isZh)}
               </span>

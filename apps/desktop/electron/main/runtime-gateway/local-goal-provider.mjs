@@ -30,6 +30,21 @@ function parseArgs(call) {
   return {};
 }
 
+/**
+ * 计划标题兜底：模型常省略 title（即便 schema 标注必填），落空串会让面板显示
+ * “未命名计划”。这里在落库前用 goal 首句（截断）兜底，保证浮条/面板有可读标题。
+ * 纯本地推导，不引入云端事实，符合“本地负责能力”。
+ */
+function deriveTitle(rawTitle, goal) {
+  const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+  if (title) return title;
+  const source = typeof goal === 'string' ? goal.trim() : '';
+  if (!source) return '';
+  const firstLine = source.split(/\r?\n/)[0].trim();
+  const firstSentence = firstLine.split(/(?<=[。．.!？?])/)[0].trim() || firstLine;
+  return firstSentence.length > 40 ? `${firstSentence.slice(0, 40)}…` : firstSentence;
+}
+
 /** 把模型给的精简子任务规范化为完整 GoalTask（补齐协议必填字段）。 */
 function normalizeTasks(rawTasks) {
   const list = Array.isArray(rawTasks) ? rawTasks : [];
@@ -68,7 +83,7 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
       try {
         const plan = goalPlanStore.createPlan({
           conversationId,
-          title: typeof args.title === 'string' ? args.title : '',
+          title: deriveTitle(args.title, args.goal),
           goal: args.goal,
           tasks: normalizeTasks(args.tasks),
           status: 'awaiting_approval',

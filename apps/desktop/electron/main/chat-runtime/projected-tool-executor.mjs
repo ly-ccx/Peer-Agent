@@ -9,6 +9,7 @@ import {
   resolveGoalPlanGate,
 } from './goal-mode-gate.mjs';
 import { createLocalToolHost } from '../runtime-gateway/local-tool-host.mjs';
+import { createLocalGoalProvider } from '../runtime-gateway/local-goal-provider.mjs';
 import { createLocalShellProvider } from '../runtime-gateway/local-shell-provider.mjs';
 import { createShellArtifactStore } from '../runtime-gateway/shell-artifacts.mjs';
 import { nowIso } from '../runtime-gateway/tool-result-factory.mjs';
@@ -196,6 +197,10 @@ export async function executeProjectedModelTool({
     userDataPath,
     sessionStore: createSessionStore(locale),
     mcpRegistry,
+    // AI 工具（goal_create_plan / goal_update_task）必须写到 main 注入的同一个
+    // goalPlanStore 实例（带 onChange → 广播）；否则用默认无 onChange 实例落库，
+    // 计划变更不会推送到渲染端，浮条只能靠切会话重挂载才更新。
+    ...(goalPlanStore ? { goalProvider: createLocalGoalProvider({ goalPlanStore }) } : {}),
     shellProvider: createLocalShellProvider({
       workspaceRoot: cwd,
       userDataPath,

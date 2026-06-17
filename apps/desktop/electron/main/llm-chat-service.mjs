@@ -181,6 +181,9 @@ export function createLlmChatService({
   promptSnapshotStore = null,
   preferredAccessLevel = 'ask_before_local',
   mcpRegistry = null,
+  // main 注入的带 onChange 的 goalPlanStore 单例。AI 工具(goal_create_plan/
+  // goal_update_task)必须写到它，变更才能广播到渲染端，浮条才会随流式更新。
+  goalPlanStore = null,
   // 全局活跃流广播宿主(由 main 注入):向所有渲染窗口推送当前正在运行的会话列表,
   // 使左侧列表无需"点进去"即可知道哪些会话在跑。表达层订阅,真值仍在 activeStreams。
   broadcast = null,
@@ -386,6 +389,7 @@ export function createLlmChatService({
               registry: runtimeTools.registry,
               runtimeProjection: runtimeTools.runtimeProjection,
               mcpRegistry,
+              goalPlanStore,
               onNativeReasoningFallback,
             });
           } else {
@@ -411,6 +415,7 @@ export function createLlmChatService({
               registry: runtimeTools.registry,
               runtimeProjection: runtimeTools.runtimeProjection,
               mcpRegistry,
+              goalPlanStore,
               onNativeReasoningFallback,
               authMethod: credential.authMethod,
               accountId: credential.accountId,

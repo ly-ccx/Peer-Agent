@@ -52,6 +52,7 @@ export async function executeModelToolCall({
   registry,
   runtimeProjection,
   mcpRegistry,
+  goalPlanStore,
 }) {
   const args = safeParseJson(rawArguments);
   webContents.send('chat:stream:tool-call', { streamId, tool: name, args, toolCallId });
@@ -88,6 +89,7 @@ export async function executeModelToolCall({
     registry,
     runtimeProjection,
     mcpRegistry,
+    goalPlanStore,
   });
   if (signal?.aborted) return { aborted: true, args, output: '' };
   const output = materializeToolOutput(result);

@@ -201,7 +201,8 @@ function continuityContextFromMessages(messages = []) {
 
 // 向所有渲染窗口广播一个事件(用于全局活跃流状态等不绑定单一 streamId 的通知)。
 function broadcastToAllWindows(channel, payload) {
-  for (const win of BrowserWindow.getAllWindows()) {
+  const wins = BrowserWindow.getAllWindows();
+  for (const win of wins) {
     if (!win.isDestroyed()) win.webContents.send(channel, payload);
   }
 }
@@ -213,6 +214,9 @@ const llmChatService = createLlmChatService({
   promptSnapshotStore,
   preferredAccessLevel: initialSettings.localAccessLevel,
   mcpRegistry,
+  // 注入带 onChange 的同一 goalPlanStore 单例，使 AI 工具写计划经唯一写路径广播，
+  // 浮条无需切会话即可随流式更新。见 docs/proposals/0002-goal-mode.md。
+  goalPlanStore,
   broadcast: broadcastToAllWindows,
 });
 llmChatService.setWorkspacePath(settingsStore.getAll().activeWorkspace || null);

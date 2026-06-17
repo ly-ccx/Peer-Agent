@@ -164,8 +164,9 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     if (typeof onChange !== 'function') return;
     try {
       onChange({ reason, planId: planId ?? null });
-    } catch {
-      // 通知失败不影响持久化事实（Evidence 已落盘）。
+    } catch (err) {
+      // 广播失败不影响写盘结果，但显式打印以便排查（不要静默吞）。
+      console.warn('[goal-plan-store] onChange broadcast failed:', err);
     }
   }
 

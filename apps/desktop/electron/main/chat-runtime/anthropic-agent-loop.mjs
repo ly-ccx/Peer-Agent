@@ -38,6 +38,7 @@ export async function agentLoopAnthropic({
   registry,
   runtimeProjection,
   mcpRegistry,
+  goalPlanStore,
   onNativeReasoningFallback = null,
 }) {
   let effectiveSystem = systemPrompt;
@@ -181,6 +182,7 @@ export async function agentLoopAnthropic({
         registry,
         runtimeProjection,
         mcpRegistry,
+        goalPlanStore,
       });
       if (toolExecution.aborted) return;
       toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: toolExecution.output });
