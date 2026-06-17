@@ -1637,9 +1637,6 @@ export function ChatSurface({
               <>
             {msg.timestamp ? <time className="chat-msg-time">{formatTime(msg.timestamp)}</time> : null}
             <span className="chat-msg-role-label">{msg.role === 'user' ? (isZh ? '你' : 'You') : 'Peer Agent'}</span>
-            {msg.role === 'assistant' && msg.durationMs != null ? (
-              <span className="chat-msg-duration" title={isZh ? '本轮工作时长' : 'Turn duration'}>{formatDuration(msg.durationMs)}</span>
-            ) : null}
             <div className="chat-msg-body">
               {msg.role === 'user' ? (
                 <>
@@ -1658,14 +1655,29 @@ export function ChatSurface({
                 />
               )}
             </div>
-            <MessageActionBar
-              role={msg.role}
-              content={msg.content}
-              canEdit={true}
-              isStreaming={isStreaming}
-              onAction={(action) => handleMessageAction(idx, action)}
-              i18n={i18n}
-            />
+            <div className="chat-msg-footer">
+              <MessageActionBar
+                role={msg.role}
+                content={msg.content}
+                canEdit={true}
+                isStreaming={isStreaming}
+                onAction={(action) => handleMessageAction(idx, action)}
+                i18n={i18n}
+              />
+              {msg.role === 'assistant' && (() => {
+                const isLiveTurn = isStreaming && msg === messages[messages.length - 1];
+                const shownMs = isLiveTurn ? elapsedMs : msg.durationMs;
+                if (shownMs == null) return null;
+                return (
+                  <span
+                    className={`chat-msg-duration${isLiveTurn ? ' chat-msg-duration-live' : ''}`}
+                    title={isLiveTurn ? (isZh ? '本轮已工作时长' : 'Elapsed this turn') : (isZh ? '本轮工作时长' : 'Turn duration')}
+                  >
+                    {formatDuration(shownMs)}
+                  </span>
+                );
+              })()}
+            </div>
               </>
             )}
           </div>
@@ -1905,7 +1917,6 @@ export function ChatSurface({
             activeUsage={activeUsage}
             contextTokens={estimatedContextTokens}
             isStreaming={isStreaming}
-            elapsedMs={elapsedMs}
             isZh={isZh}
             effort={effort}
             effortLevels={activeProviderSupportsReasoning ? effortLevels : []}
@@ -2292,13 +2303,12 @@ function CompactionSummaryCard({ compaction, isZh }: { readonly compaction: Comp
   );
 }
 
-function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, isStreaming, elapsedMs, isZh, effort, effortLevels, onEffortChange }: {
+function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, isStreaming, isZh, effort, effortLevels, onEffortChange }: {
   readonly providers: readonly LlmProviderConfigView[];
   readonly tokenUsage: TokenUsageState | null;
   readonly activeUsage?: TokenUsageState | null;
   readonly contextTokens?: number;
   readonly isStreaming?: boolean;
-  readonly elapsedMs?: number;
   readonly isZh: boolean;
   readonly effort: EffortLevel;
   readonly effortLevels: readonly EffortLevel[];
@@ -2368,9 +2378,6 @@ function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, 
           </span>
         ) : null}
         {isStreaming && !activeUsage ? <span className="token-usage-detail">{isZh ? '计费待返回' : 'usage pending'}</span> : null}
-        {isStreaming && elapsedMs != null ? (
-          <span className="token-usage-elapsed" title={isZh ? '本轮已工作时长' : 'Elapsed this turn'}>{formatDuration(elapsedMs)}</span>
-        ) : null}
       </span>
       {ctxPercent != null ? (
         <div className="ctx-bar">

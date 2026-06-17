@@ -126,14 +126,26 @@
   color: var(--graphite-mute);
 }
 
-/* 整轮工作时长留痕:跟在 Peer Agent 角色标签同一行,弱化呈现。 */
+/* 单条回复的页脚:动作条在左,工作时长在右下角。 */
+.chat-msg-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+/* 单条回复的工作时长:常显于卡片右下角,弱化呈现。 */
 .chat-msg-duration {
-  display: inline-block;
-  margin-left: var(--space-2);
+  margin-left: auto;
   font-size: 0.65rem;
   font-family: var(--font-mono);
   color: var(--graphite-fade);
-  vertical-align: baseline;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.chat-msg-duration-live {
+  color: var(--graphite-mute);
 }
 
 .chat-msg-user .chat-msg-body {
@@ -584,13 +596,6 @@
 .token-usage-detail {
   font-size: 0.62rem;
   color: var(--graphite-fade);
-}
-/* 本轮实时工作时长(跳秒),与计费信息并列于右下角状态栏。 */
-.token-usage-elapsed {
-  font-size: 0.62rem;
-  font-family: var(--font-mono);
-  color: var(--graphite-mute);
-  font-variant-numeric: tabular-nums;
 }
 .token-usage-model {
   display: inline-flex;
