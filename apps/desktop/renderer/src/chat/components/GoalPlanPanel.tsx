@@ -65,6 +65,10 @@ function planStatusLabel(status: GoalPlan['status'], isZh: boolean): string {
   return isZh ? zh[status] : en[status];
 }
 
+function safeProgress(plan: GoalPlan): GoalPlan['progress'] {
+  return plan.progress ?? { total: 0, completed: 0, failed: 0, blocked: 0, percent: 0 };
+}
+
 function TaskNode({ task, depth, isZh }: { task: GoalTask; depth: number; isZh: boolean }): ReactElement {
   const hasEvidence = task.evidenceRefs.length > 0;
   return (
@@ -180,6 +184,8 @@ export function GoalPlanPanel({ conversationId, isZh }: GoalPlanPanelProps): Rea
       {plans.map((plan) => {
         const canDecide = plan.status === 'awaiting_approval';
         const busy = busyPlanId === plan.planId;
+        const progress = safeProgress(plan);
+        const tasks = Array.isArray(plan.tasks) ? plan.tasks : [];
         return (
           <section key={plan.planId} className="goal-plan-card">
             <header className="goal-plan-head">
@@ -189,19 +195,19 @@ export function GoalPlanPanel({ conversationId, isZh }: GoalPlanPanelProps): Rea
               </span>
             </header>
             {plan.goal ? <p className="goal-plan-goal">{plan.goal}</p> : null}
-            <div className="goal-plan-progress" role="progressbar" aria-valuenow={plan.progress.percent} aria-valuemin={0} aria-valuemax={100}>
-              <div className="goal-plan-progress-bar" style={{ width: `${plan.progress.percent}%` }} />
+            <div className="goal-plan-progress" role="progressbar" aria-valuenow={progress.percent} aria-valuemin={0} aria-valuemax={100}>
+              <div className="goal-plan-progress-bar" style={{ width: `${progress.percent}%` }} />
               <span className="goal-plan-progress-text">
                 {isZh
-                  ? `${plan.progress.completed}/${plan.progress.total} 完成`
-                  : `${plan.progress.completed}/${plan.progress.total} done`}
-                {plan.progress.failed > 0 ? (isZh ? `，${plan.progress.failed} 失败` : `, ${plan.progress.failed} failed`) : ''}
-                {plan.progress.blocked > 0 ? (isZh ? `，${plan.progress.blocked} 阻塞` : `, ${plan.progress.blocked} blocked`) : ''}
+                  ? `${progress.completed}/${progress.total} 完成`
+                  : `${progress.completed}/${progress.total} done`}
+                {progress.failed > 0 ? (isZh ? `，${progress.failed} 失败` : `, ${progress.failed} failed`) : ''}
+                {progress.blocked > 0 ? (isZh ? `，${progress.blocked} 阻塞` : `, ${progress.blocked} blocked`) : ''}
               </span>
             </div>
-            {plan.tasks.length > 0 ? (
+            {tasks.length > 0 ? (
               <ul className="goal-task-list">
-                {plan.tasks.map((task) => (
+                {tasks.map((task) => (
                   <TaskNode key={task.taskId} task={task} depth={0} isZh={isZh} />
                 ))}
               </ul>

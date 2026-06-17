@@ -178,6 +178,22 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans') } = {}) {
     return listPlans().filter((m) => (m.conversationId ?? null) === (conversationId ?? null));
   }
 
+  function hydratePlanMeta(meta) {
+    if (!meta?.planId) return null;
+    const plan = getPlan(meta.planId);
+    if (!plan) return null;
+    if (plan.progress) return plan;
+    return { ...plan, progress: aggregateProgress(plan.tasks) };
+  }
+
+  function listPlanDetails() {
+    return listPlans().map(hydratePlanMeta).filter(Boolean);
+  }
+
+  function listPlanDetailsByConversation(conversationId) {
+    return listPlansByConversation(conversationId).map(hydratePlanMeta).filter(Boolean);
+  }
+
   function getPlan(planId) {
     return readJson(planFile(planId));
   }
@@ -350,6 +366,8 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans') } = {}) {
   return {
     listPlans,
     listPlansByConversation,
+    listPlanDetails,
+    listPlanDetailsByConversation,
     getPlan,
     createPlan,
     revisePlan,

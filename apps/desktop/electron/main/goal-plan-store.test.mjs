@@ -63,6 +63,20 @@ test('createPlan 落盘并派生 progress，默认 drafting/version=1', () => {
   assert.equal(got.progress.total, 3);
 });
 
+test('listPlanDetails 返回完整计划而不是轻量 index meta', () => {
+  const plan = store.createPlan({ ...draftWithTasks(), conversationId: 1 });
+  const metas = store.listPlansByConversation(1);
+  assert.equal(metas.length, 1);
+  assert.equal(metas[0].percent, 0);
+  assert.equal(metas[0].progress, undefined);
+
+  const details = store.listPlanDetailsByConversation(1);
+  assert.equal(details.length, 1);
+  assert.equal(details[0].planId, plan.planId);
+  assert.equal(details[0].progress.percent, 0);
+  assert.equal(details[0].tasks.length, 2);
+});
+
 test('recordTaskEvidence: completed 必须带 evidenceRefs，否则抛错', () => {
   const plan = store.createPlan(draftWithTasks());
   assert.throws(

@@ -490,8 +490,8 @@ ipcMain.handle('conversations:add-usage', (_, { id, usage }) => conversationStor
 // ── Goal Plans（goal 模式：先规划 → 批准 → 执行，计划为持久化 Evidence/artifact）──
 // 见 docs/proposals/0002-goal-mode.md。progress 由 store 自底向上聚合，调用方不可手填。
 ipcMain.handle('goalPlans:list', (_, params) => {
-  if (params?.conversationId !== undefined) return goalPlanStore.listPlansByConversation(params.conversationId);
-  return goalPlanStore.listPlans();
+  if (params?.conversationId !== undefined) return goalPlanStore.listPlanDetailsByConversation(params.conversationId);
+  return goalPlanStore.listPlanDetails();
 });
 ipcMain.handle('goalPlans:get', (_, { planId }) => goalPlanStore.getPlan(planId));
 ipcMain.handle('goalPlans:create', (_, { draft }) => goalPlanStore.createPlan(draft));
@@ -501,7 +501,10 @@ ipcMain.handle('goalPlans:approve', (_, { planId, approval }) => goalPlanStore.r
 ipcMain.handle('goalPlans:set-status', (_, { planId, status }) => goalPlanStore.setPlanStatus(planId, status));
 ipcMain.handle('goalPlans:record-task-evidence', (_, { planId, taskId, change }) =>
   goalPlanStore.recordTaskEvidence(planId, taskId, change));
-ipcMain.handle('goalPlans:delete', (_, { planId }) => goalPlanStore.deletePlan(planId));
+ipcMain.handle('goalPlans:delete', (_, { planId }) => {
+  goalPlanStore.deletePlan(planId);
+  return goalPlanStore.listPlanDetails();
+});
 
 // ── LLM Chat ──
 ipcMain.handle('chat:send', (event, {
