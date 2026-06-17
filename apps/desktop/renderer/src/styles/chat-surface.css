@@ -956,38 +956,41 @@
   color: var(--chrome-canvas);
 }
 
-/* ── Compaction Notice (real-time) ── */
+/* ── Compaction Notice · 居中分隔线(Codex 风格) ──
+ * 表达层:压缩是后台连续性事件,不是需要用户处置的告警。
+ * 用一条贯穿的细线 + 居中小灰字呈现,不填充、不描边、不抢视线。 */
 .compaction-notice {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  background: var(--azure-trace);
-  border: 1px solid var(--azure-soft);
-  border-radius: var(--radius-md);
-  font-size: 0.78rem;
-  color: var(--graphite-soft);
+  gap: var(--space-2);
+  font-size: 0.72rem;
+  color: var(--graphite-mute);
   animation: compaction-notice-in var(--za-motion-medium) var(--za-ease-out) both;
   max-width: var(--chat-content-max);
-  margin: 0 auto;
+  margin: var(--space-2) auto;
   width: 100%;
+  user-select: none;
 }
-.compaction-notice-active {
-  background: var(--paper-sheet);
-  border-color: var(--chrome-sunken);
+.compaction-notice::before,
+.compaction-notice::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--chrome-hairline);
 }
 @keyframes compaction-notice-in {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 .compaction-notice-icon {
-  font-size: 1rem;
+  font-size: 0.85rem;
   flex-shrink: 0;
+  opacity: 0.7;
 }
 .compaction-spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--chrome-sunken);
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--chrome-sunken);
   border-top-color: var(--azure-core);
   border-radius: 50%;
   flex-shrink: 0;
@@ -997,12 +1000,9 @@
   to { transform: rotate(360deg); }
 }
 .compaction-notice-body {
-  flex: 1;
+  flex: 0 0 auto;
   line-height: 1.4;
-}
-.compaction-notice-meta {
-  font-size: 0.7rem;
-  color: var(--graphite-mute);
+  white-space: nowrap;
 }
 
 /* ── Tool argument streaming progress (Frost live feedback) ──
@@ -1068,6 +1068,12 @@
   margin: 0 auto;
   width: 100%;
   background: transparent;
+  /* 压缩点就地出现时的入场动画:淡入 + 轻微上移,呼应"历史被折叠收拢"的语义。 */
+  animation: compaction-summary-in var(--za-motion-medium) var(--za-ease-out) both;
+}
+@keyframes compaction-summary-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 /* Codex 风格:折叠态呈现为居中分隔条(两侧横线 + 中央标签),而非方框卡片。
    ::before / ::after 作为左右可伸缩的分隔线(flex:1),真实子项(icon/label/
@@ -1098,10 +1104,6 @@
 .compaction-summary-toggle:hover::before,
 .compaction-summary-toggle:hover::after {
   background: var(--chrome-sunken);
-}
-.compaction-summary-icon {
-  font-size: 1rem;
-  flex-shrink: 0;
 }
 .compaction-summary-label {
   flex: 0 0 auto;

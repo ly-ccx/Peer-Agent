@@ -712,7 +712,6 @@ export function ChatSurface({
   }, []);
   const [tokenUsage, setTokenUsage] = useState<TokenUsageState | null>(null);
   const [activeUsage, setActiveUsage] = useState<TokenUsageState | null>(null);
-  const [compactionNotice, setCompactionNotice] = useState<{ method: string; beforeTokens: number; afterTokens: number; oldMessageCount: number; keptMessageCount: number } | null>(null);
   const [providerRecoveryNotice, setProviderRecoveryNotice] = useState<{
     fromProvider?: string;
     toProvider?: string;
@@ -1172,7 +1171,8 @@ export function ChatSurface({
       }
       setIsCompacting(false);
       if (!method || beforeTokens === undefined || afterTokens === undefined || oldMessageCount === undefined || keptMessageCount === undefined) return;
-      setCompactionNotice({ method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount });
+      // 完成态不再钉在底部横幅:重载会话后,压缩点会以 CompactionSummaryCard
+      // (msg.compaction)的形式就地出现在消息时间线的对应位置(Codex 风格分割线)。
       if (conversationId) {
         void (async () => {
           const { messages: loaded, tokenUsage: usage } = await loadConversationMessages(conversationId);
@@ -1192,8 +1192,6 @@ export function ChatSurface({
           onConversationUpdated?.();
         })();
       }
-      // Auto-dismiss after 10s
-      setTimeout(() => setCompactionNotice(null), 10000);
     });
 
     return () => { offDelta(); offThinking(); offDone(); offUsage(); offAborted(); offToolProgress(); offToolCall(); offToolResult(); offPermissionRequest(); offError(); offProviderRecovery(); offCompaction(); };
@@ -1327,7 +1325,6 @@ export function ChatSurface({
       const streamId = `compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       streamIdRef.current = streamId;
       const compactStartedAt = Date.now();
-      setCompactionNotice(null);
       setIsCompacting(true);
       try {
         const result = await clientApi.chatCompact({ conversationId, streamId });
@@ -1339,10 +1336,8 @@ export function ChatSurface({
           // 直接用 invoke 返回的 notification 落地"已压缩"标记,不依赖 chat:compaction
           // 的 done 事件(它与 invoke 响应之间存在到达顺序竞态:finally 会清空
           // streamIdRef,导致 done 事件被 streamId 门控丢弃,标记永远不显示)。
-          if (result.notification) {
-            setCompactionNotice(result.notification);
-            setTimeout(() => setCompactionNotice(null), 10000);
-          }
+          // 压缩点以时间线内的 CompactionSummaryCard 呈现(已由上方 setMessages 重载),
+          // 不再使用底部横幅通知。
         }
       } finally {
         // 保证 spinner 至少可见 ~600ms,避免小会话瞬时完成导致"点了没任何反馈"。
@@ -1596,19 +1591,12 @@ export function ChatSurface({
             ) : null}
           </div>
         ) : null}
-        {isCompacting || compactionNotice ? (
-          <div className={`compaction-notice ${isCompacting ? 'compaction-notice-active' : ''}`}>
-            {isCompacting ? <span className="compaction-spinner" aria-hidden="true" /> : <span className="compaction-notice-icon">📦</span>}
+        {isCompacting ? (
+          <div className="compaction-notice">
+            <span className="compaction-spinner" aria-hidden="true" />
             <div className="compaction-notice-body">
-              {isCompacting
-                ? (isZh ? '压缩上下文中' : 'Compacting context')
-                : (isZh ? '对话历史已自动压缩' : 'Conversation history compacted')}
+              {isZh ? '压缩上下文中' : 'Compacting context'}
             </div>
-            {!isCompacting && compactionNotice ? (
-              <span className="compaction-notice-meta">
-                {compactionNotice.oldMessageCount} msgs, {(compactionNotice.beforeTokens / 1000).toFixed(0)}k → {(compactionNotice.afterTokens / 1000).toFixed(0)}k tokens
-              </span>
-            ) : null}
           </div>
         ) : null}
         {streamError ? (
@@ -2144,7 +2132,6 @@ function CompactionSummaryCard({ compaction, isZh }: { readonly compaction: Comp
   return (
     <div className="compaction-summary-card">
       <button type="button" className="compaction-summary-toggle" onClick={() => setExpanded(!expanded)}>
-        <span className="compaction-summary-icon">📦</span>
         <span className="compaction-summary-label">
           {isZh ? '更早的对话（已压缩为摘要）' : 'Earlier conversation (compacted)'}
         </span>
