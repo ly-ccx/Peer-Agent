@@ -107,6 +107,7 @@ export function GoalPlanPanel({ conversationId, isZh }: GoalPlanPanelProps): Rea
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyPlanId, setBusyPlanId] = useState<string | null>(null);
+  const [manualCollapsed, setManualCollapsed] = useState<boolean | null>(null);
 
   const numericConversationId = useMemo(() => {
     if (conversationId === null) return undefined;
@@ -158,28 +159,34 @@ export function GoalPlanPanel({ conversationId, isZh }: GoalPlanPanelProps): Rea
     [reload, isZh],
   );
 
-  if (loading && plans.length === 0) {
-    return (
-      <div className="goal-panel goal-panel--empty">
-        {isZh ? '正在加载计划…' : 'Loading plans…'}
-      </div>
-    );
+  // 面板位于输入框上方：没有计划时不占位，直接隐藏。
+  if (plans.length === 0) {
+    return null;
   }
 
-  if (plans.length === 0) {
-    return (
-      <div className="goal-panel goal-panel--empty">
-        {error ? (
-          <span className="goal-panel-error">{error}</span>
-        ) : (
-          <span>{isZh ? '当前会话还没有目标计划。发送消息开始规划。' : 'No goal plan yet. Send a message to start planning.'}</span>
-        )}
-      </div>
-    );
-  }
+  const pendingCount = plans.filter((plan) => plan.status === 'awaiting_approval').length;
+  // 默认收起；有待批准计划时自动展开以免漏看，除非用户手动收起过。
+  const expanded = manualCollapsed === null ? pendingCount > 0 : !manualCollapsed;
+  const refreshing = loading ? (isZh ? ' · 刷新中…' : ' · refreshing…') : '';
+  const summary = isZh
+    ? `${plans.length} 个目标计划${pendingCount > 0 ? ` · ${pendingCount} 待批准` : ''}${refreshing}`
+    : `${plans.length} goal plan${plans.length > 1 ? 's' : ''}${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}${refreshing}`;
 
   return (
-    <div className="goal-panel">
+    <div className={`goal-panel goal-panel--docked${expanded ? ' goal-panel--expanded' : ''}`}>
+      <button
+        type="button"
+        className="goal-panel-toggle"
+        aria-expanded={expanded}
+        onClick={() => setManualCollapsed(expanded)}
+      >
+        <span className="goal-panel-toggle-label">{isZh ? '目标计划' : 'Goal plans'}</span>
+        <span className="goal-panel-toggle-summary">{summary}</span>
+        {pendingCount > 0 ? <span className="goal-panel-toggle-badge">{pendingCount}</span> : null}
+        <span className="goal-panel-toggle-caret" aria-hidden="true">{expanded ? '⌄' : '›'}</span>
+      </button>
+      {!expanded ? null : (
+      <div className="goal-panel-body">
       {error ? <div className="goal-panel-error">{error}</div> : null}
       {plans.map((plan) => {
         const canDecide = plan.status === 'awaiting_approval';
@@ -227,6 +234,8 @@ export function GoalPlanPanel({ conversationId, isZh }: GoalPlanPanelProps): Rea
           </section>
         );
       })}
+      </div>
+      )}
     </div>
   );
 }

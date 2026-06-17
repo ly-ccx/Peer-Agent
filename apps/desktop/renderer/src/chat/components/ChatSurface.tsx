@@ -1630,7 +1630,6 @@ export function ChatSurface({
         />
       ) : null}
       <div className="chat-thread" ref={threadRef} onScroll={handleThreadScroll}>
-        {mode === 'goal' ? <GoalPlanPanel conversationId={conversationId} isZh={isZh} /> : null}
         {messages.length === 0 ? (
           <div className="chat-empty-state">
             <p>{isZh ? '输入消息开始对话' : 'Type a message to start'}</p>
@@ -1730,6 +1729,7 @@ export function ChatSurface({
       ) : null}
 
       <div className="chat-composer-wrap">
+        {mode === 'goal' ? <GoalPlanPanel conversationId={conversationId} isZh={isZh} /> : null}
         <PermissionGateStrip
           pendingCalls={pendingPermissionCalls}
           onApprove={approvePendingPermissionCall}

@@ -8,6 +8,71 @@
   margin: 0 0 16px;
 }
 
+/* Docked variant: sits directly above the composer as a collapsible bar. */
+.goal-panel--docked {
+  gap: 0;
+  margin: 0 0 8px;
+  border: 1px solid var(--za-line);
+  border-radius: var(--za-radius);
+  background: var(--za-surface-1);
+  overflow: hidden;
+}
+
+.goal-panel-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--za-text-soft);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.goal-panel-toggle:hover {
+  background: var(--za-hover);
+}
+
+.goal-panel-toggle-label {
+  font-weight: 600;
+  color: var(--za-text);
+}
+
+.goal-panel-toggle-summary {
+  color: var(--za-text-muted);
+  font-size: 12px;
+}
+
+.goal-panel-toggle-badge {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #b8860b 16%, transparent);
+  color: #b8860b;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.goal-panel-toggle-caret {
+  margin-left: auto;
+  color: var(--za-text-faint);
+  font-size: 14px;
+}
+
+.goal-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 12px;
+  border-top: 1px solid var(--za-line);
+}
+
 .goal-panel--empty {
   padding: 16px;
   border: 1px dashed var(--za-line);
