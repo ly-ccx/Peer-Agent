@@ -286,6 +286,9 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
         {pendingCount > 0 ? <span className="goal-panel-toggle-badge">{pendingCount}</span> : null}
         {!expanded && activePlan ? (
           <span className="goal-panel-toggle-active">
+            {activePlan.status === 'executing' ? (
+              <span className="goal-panel-toggle-active-dot" aria-hidden="true" />
+            ) : null}
             <span className="goal-panel-toggle-active-title">{derivePlanTitle(activePlan, isZh)}</span>
             {activeProgress ? (
               <span className="goal-panel-toggle-active-progress">
@@ -330,7 +333,10 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
             </header>
             {plan.goal ? <p className="goal-plan-goal">{plan.goal}</p> : null}
             <div className="goal-plan-progress" role="progressbar" aria-valuenow={progress.percent} aria-valuemin={0} aria-valuemax={100}>
-              <div className="goal-plan-progress-bar" style={{ backgroundSize: `${progress.percent}% 100%` }} />
+              <div
+                className={`goal-plan-progress-bar${plan.status === 'executing' ? ' goal-plan-progress-bar--executing' : ''}`}
+                style={{ backgroundSize: `${progress.percent}% 100%` }}
+              />
               <span className="goal-plan-progress-text">
                 {isZh
                   ? `${progress.completed}/${progress.total} 完成`

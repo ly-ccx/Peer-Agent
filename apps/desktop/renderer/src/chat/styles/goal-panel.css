@@ -66,6 +66,13 @@
   font-size: 14px;
 }
 
+/* 当折叠态存在活跃计划块时，由 .goal-panel-toggle-active 的 margin-left:auto 负责把
+   「活跃标题 + caret」整组推到最右；此时 caret 不能再各自吸收一份剩余空间（否则两段
+   auto 会把活跃标题夹在中间），改用紧贴 active 的小间距。 */
+.goal-panel-toggle-active + .goal-panel-toggle-caret {
+  margin-left: 8px;
+}
+
 /* 锁定展开（有待批准计划）时，toggle 不可点击收起，去掉 hover/指针误导。 */
 .goal-panel-toggle:disabled {
   cursor: default;
@@ -82,6 +89,28 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+/* A：执行中(executing)计划在折叠浮条标题前的脉冲呼吸圆点，表现「正在推进」。 */
+.goal-panel-toggle-active-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--state-confirm);
+  animation: goal-panel-active-pulse 1.4s var(--za-ease-standard, ease) infinite;
+}
+
+@keyframes goal-panel-active-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.7);
+  }
 }
 
 .goal-panel-toggle-active-title {
@@ -189,13 +218,43 @@
 }
 
 .goal-plan-progress-bar {
+  position: relative;
   height: 6px;
   border-radius: 999px;
   background: var(--za-hover);
   background-image: linear-gradient(var(--state-confirm), var(--state-confirm));
   background-repeat: no-repeat;
   background-size: 0% 100%;
+  overflow: hidden;
   transition: background-size var(--za-motion-medium, 200ms) var(--za-ease-standard, ease);
+}
+
+/* B：执行中(executing)的计划，进度条叠一层横向流动的高光，
+   表现「正在推进」。高光透明度低，仅作微光扫过，不影响进度可读性。 */
+.goal-plan-progress-bar--executing::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.35) 50%,
+    transparent 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 40% 100%;
+  background-position: -60% 0;
+  animation: goal-plan-progress-sheen 1.6s var(--za-ease-standard, ease) infinite;
+}
+
+@keyframes goal-plan-progress-sheen {
+  0% {
+    background-position: -60% 0;
+  }
+  100% {
+    background-position: 160% 0;
+  }
 }
 
 .goal-plan-progress-text {
@@ -331,4 +390,16 @@
 
 .goal-plan-reject:hover:not(:disabled) {
   background: var(--za-hover);
+}
+
+/* 无障碍降级：用户偏好减少动效时，关闭执行中脉冲圆点与进度条流动高光。 */
+@media (prefers-reduced-motion: reduce) {
+  .goal-panel-toggle-active-dot {
+    animation: none;
+  }
+
+  .goal-plan-progress-bar--executing::after {
+    animation: none;
+    display: none;
+  }
 }
