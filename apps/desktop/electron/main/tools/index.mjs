@@ -1,3 +1,4 @@
+import { GOAL_TOOL_DEFINITIONS } from './goal-tool-definitions.mjs';
 import { LEGACY_LOCAL_TOOL_DEFINITIONS } from './legacy-local-tool-definitions.mjs';
 import { createMcpToolDefinitionsFromRegistry } from './mcp-tool-definitions.mjs';
 import {
@@ -34,6 +35,7 @@ export function createRuntimeToolRegistry({ mcpRegistry } = {}) {
   return createToolRegistry({
     tools: [
       ...LEGACY_LOCAL_TOOL_DEFINITIONS,
+      ...GOAL_TOOL_DEFINITIONS,
       ...createMcpToolDefinitionsFromRegistry(mcpRegistry),
     ],
   });

@@ -1,0 +1,194 @@
+/* Goal 模式计划面板样式 —— 见 docs/proposals/0002-goal-mode.md。
+   复用 --za-* 设计令牌，与 thread / permission-gate-strip 保持一致。 */
+
+.goal-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 16px;
+}
+
+.goal-panel--empty {
+  padding: 16px;
+  border: 1px dashed var(--za-line);
+  border-radius: var(--za-radius);
+  color: var(--za-text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.goal-panel-error {
+  padding: 8px 12px;
+  border-radius: var(--za-radius-sm);
+  background: color-mix(in srgb, var(--cinnabar-seal, #c0392b) 12%, transparent);
+  color: var(--cinnabar-seal, #c0392b);
+  font-size: 13px;
+}
+
+.goal-plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--za-line);
+  border-radius: var(--za-radius);
+  background: var(--za-surface-1);
+}
+
+.goal-plan-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.goal-plan-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--za-text);
+}
+
+.goal-plan-status {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--za-hover);
+  color: var(--za-text-soft);
+}
+
+.goal-plan-status--awaiting_approval { color: #b8860b; background: color-mix(in srgb, #b8860b 14%, transparent); }
+.goal-plan-status--executing { color: #2563eb; background: color-mix(in srgb, #2563eb 14%, transparent); }
+.goal-plan-status--completed { color: #15803d; background: color-mix(in srgb, #15803d 14%, transparent); }
+.goal-plan-status--failed,
+.goal-plan-status--cancelled { color: var(--cinnabar-seal, #c0392b); background: color-mix(in srgb, var(--cinnabar-seal, #c0392b) 14%, transparent); }
+
+.goal-plan-goal {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--za-text-soft);
+}
+
+.goal-plan-progress {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--za-hover);
+  overflow: visible;
+}
+
+.goal-plan-progress-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: #2563eb;
+  transition: width var(--za-motion-medium, 200ms) var(--za-ease-standard, ease);
+}
+
+.goal-plan-progress-text {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--za-text-muted);
+}
+
+.goal-task-list,
+.goal-task-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.goal-task-children {
+  margin-top: 6px;
+}
+
+.goal-task-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.goal-task-status {
+  flex: none;
+  min-width: 48px;
+  padding: 1px 6px;
+  border-radius: var(--za-radius-sm);
+  font-size: 11px;
+  text-align: center;
+  background: var(--za-hover);
+  color: var(--za-text-soft);
+}
+
+.goal-task-status--completed { color: #15803d; background: color-mix(in srgb, #15803d 14%, transparent); }
+.goal-task-status--running { color: #2563eb; background: color-mix(in srgb, #2563eb 14%, transparent); }
+.goal-task-status--failed { color: var(--cinnabar-seal, #c0392b); background: color-mix(in srgb, var(--cinnabar-seal, #c0392b) 14%, transparent); }
+.goal-task-status--waiting_user { color: #b8860b; background: color-mix(in srgb, #b8860b 14%, transparent); }
+
+.goal-task-title {
+  font-size: 13px;
+  color: var(--za-text);
+}
+
+.goal-task-evidence {
+  flex: none;
+  font-size: 11px;
+  color: var(--za-text-faint);
+  font-family: var(--font-mono, monospace);
+}
+
+.goal-task-detail {
+  margin-left: 56px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.goal-task-detail--error { color: var(--cinnabar-seal, #c0392b); }
+.goal-task-detail--warn { color: #b8860b; }
+
+.goal-plan-empty-tasks {
+  font-size: 12px;
+  color: var(--za-text-muted);
+}
+
+.goal-plan-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.goal-plan-actions button {
+  padding: 6px 14px;
+  border-radius: var(--za-radius-sm);
+  border: 1px solid var(--za-line);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
+}
+
+.goal-plan-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.goal-plan-approve {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb !important;
+}
+
+.goal-plan-approve:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.goal-plan-reject {
+  background: var(--za-surface-1);
+  color: var(--za-text-soft);
+}
+
+.goal-plan-reject:hover:not(:disabled) {
+  background: var(--za-hover);
+}

@@ -5,6 +5,10 @@ import type {
   ClientSessionState,
   ClientToolCall,
   ClientToolResult,
+  ExecutionStatus,
+  GoalApproval,
+  GoalPlan,
+  GoalPlanStatus,
   LlmModelListResult,
   LlmProviderConfigView,
   LlmProviderTestResult,
@@ -153,6 +157,25 @@ export interface BootstrapPreloadApi {
       cacheReadTokens?: number;
     };
   }) => Promise<LifetimeUsage>;
+  // Goal 模式计划（见 docs/proposals/0002-goal-mode.md）。
+  // 完成状态由 Evidence 自底向上聚合，渲染层只读展示 + 治理操作（批准/驳回/修订），不可手填进度。
+  readonly goalPlansList: (params?: { conversationId?: number }) => Promise<readonly GoalPlan[]>;
+  readonly goalPlansGet: (params: { planId: string }) => Promise<GoalPlan | null>;
+  readonly goalPlansCreate: (params: { draft: Partial<GoalPlan> }) => Promise<GoalPlan>;
+  readonly goalPlansRevise: (params: {
+    planId: string;
+    patch: Partial<GoalPlan>;
+    reason: string;
+    changedBy?: string;
+  }) => Promise<GoalPlan>;
+  readonly goalPlansApprove: (params: { planId: string; approval: GoalApproval }) => Promise<GoalPlan>;
+  readonly goalPlansSetStatus: (params: { planId: string; status: GoalPlanStatus }) => Promise<GoalPlan>;
+  readonly goalPlansRecordTaskEvidence: (params: {
+    planId: string;
+    taskId: string;
+    change: { status?: ExecutionStatus; evidenceRefs?: string[]; result?: string; failureReason?: string; blockedReason?: string };
+  }) => Promise<GoalPlan>;
+  readonly goalPlansDelete: (params: { planId: string }) => Promise<readonly GoalPlan[]>;
   readonly chatSend: (params: ChatSendRequest) => Promise<void>;
   readonly chatAbort: (params: { streamId: string }) => Promise<void>;
   readonly chatStreamReattach: (params?: { conversationId?: string }) => Promise<StreamReattachResult>;

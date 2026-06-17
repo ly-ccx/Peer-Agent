@@ -240,6 +240,7 @@ export function createLlmChatService({
     webContents,
     streamId,
     effort = 'default',
+    mode = 'chat',
     conversationId = null,
     contextAttachments = [],
     runtimeReminders = [],
@@ -293,7 +294,7 @@ export function createLlmChatService({
           continuityContext,
           conversationId,
           effort,
-          mode: 'chat',
+          mode,
           provider: provider.provider,
           model: provider.model,
         });
@@ -306,7 +307,7 @@ export function createLlmChatService({
           provider: provider.provider,
           providerId: provider.id,
           model: provider.model,
-          mode: 'chat',
+          mode,
           recoveryAttempt: attemptIndex + 1,
         });
 

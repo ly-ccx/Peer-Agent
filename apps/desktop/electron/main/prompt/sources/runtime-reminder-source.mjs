@@ -1,20 +1,11 @@
+import { MODE_COPY } from './mode-copy.mjs';
+
 const ALLOWED_REMINDER_LAYERS = new Set([
   'L2_RUNTIME',
   'L5_TOOL_RULES',
   'L6_MODE_REMINDER',
   'L7_CONTINUITY',
 ]);
-
-const MODE_COPY = {
-  chat: [
-    'Mode: chat.',
-    'Answer the user directly, and use tools only through structured tool calls when local evidence or local changes are needed.',
-  ],
-  compact: [
-    'Mode: compact.',
-    'Create or preserve continuity summaries only. Do not execute tools from compaction context.',
-  ],
-};
 
 function sanitizeId(value) {
   return String(value || 'reminder')

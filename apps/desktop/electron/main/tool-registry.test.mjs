@@ -7,6 +7,7 @@ import {
   buildOpenAIToolsFromRuntimeProjection,
   buildOpenAIToolsFromRegistry,
   createRuntimeProjectionFromToolRegistry,
+  createRuntimeToolRegistry,
   createToolRegistry,
   getToolDefinition,
   listToolDefinitions,
@@ -153,5 +154,27 @@ describe('Tool Registry', () => {
     const openAiTools = buildOpenAIToolsFromRuntimeProjection(limitedProjection, registry);
 
     assert.deepEqual(openAiTools.map((tool) => tool.function.name), ['bash']);
+  });
+});
+
+describe('Goal mode runtime tool exposure', () => {
+  it('exposes goal_update_task through the runtime tool registry and projection', () => {
+    const registry = createRuntimeToolRegistry();
+    const goalTool = registry.getTool('goal_update_task');
+    assert.ok(goalTool, 'goal_update_task should be registered in the runtime tool registry');
+    assert.equal(goalTool.runtime.executorCapabilityId, 'local.goal.update');
+
+    const projection = createRuntimeProjectionFromToolRegistry(registry);
+    const goalCapability = projection.capabilities.find(
+      (cap) => cap.capabilityId === 'local.goal.update',
+    );
+    assert.ok(goalCapability, 'local.goal.update should appear in the runtime projection');
+
+    const openAiTools = buildOpenAIToolsFromRuntimeProjection(projection, registry);
+    const names = openAiTools.map((tool) => tool.function.name);
+    assert.ok(
+      names.includes('goal_update_task'),
+      'goal_update_task should be materialized as a provider tool',
+    );
   });
 });

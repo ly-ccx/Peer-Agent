@@ -15,6 +15,7 @@ import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi }
 import { loadComposerEntry, saveComposerEntry } from '../state/composerPersistence';
 import { MarkdownMessage } from './markdown/MarkdownMessage';
 import { ChatFindBar } from './thread/ChatFindBar';
+import { GoalPlanPanel } from './GoalPlanPanel';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
 import { MessageRail, type MessageRailItem } from './thread/MessageRail';
@@ -36,6 +37,10 @@ interface ChatAttachment {
 }
 
 type EffortLevel = 'off' | 'low' | 'default' | 'high' | 'xhigh';
+
+// 对话模式:进入 System Context 的 L6_MODE_REMINDER 层(见 docs/proposals/0002-goal-mode.md)。
+// 'chat' 为默认直答模式;'goal' 为先规划后执行模式。
+type ChatMode = 'chat' | 'goal';
 
 // 待发送消息队列项:当一轮 agent turn 正在运行/压缩时,用户继续提交的消息先入队,
 // 待当前轮结束后由 dequeue effect 复用 submitMessage 自动发送下一条(不另造发送路径)。
@@ -87,6 +92,26 @@ function effortLabel(level: EffortLevel, isZh: boolean): string {
   if (level === 'high') return isZh ? '深度思考' : 'High reasoning';
   if (level === 'xhigh') return isZh ? '超深度思考' : 'Extra-high reasoning';
   return isZh ? '标准思考' : 'Default reasoning';
+}
+
+const CHAT_MODES: readonly ChatMode[] = ['chat', 'goal'];
+
+function isChatMode(value: unknown): value is ChatMode {
+  return value === 'chat' || value === 'goal';
+}
+
+function modeLabel(mode: ChatMode, isZh: boolean): string {
+  if (mode === 'goal') return isZh ? '目标模式' : 'Goal mode';
+  return isZh ? '对话模式' : 'Chat mode';
+}
+
+function modeTitle(mode: ChatMode, isZh: boolean): string {
+  if (mode === 'goal') {
+    return isZh
+      ? '先规划后执行：先与你共同产出结构化实现计划，批准后再执行'
+      : 'Plan before execute: co-author a structured plan, then execute after approval';
+  }
+  return isZh ? '直接对话并按需调用工具' : 'Answer directly and call tools as needed';
 }
 
 type ChatApiContentPart =
@@ -662,6 +687,17 @@ export function ChatSurface({
   const changeEffort = useCallback((level: EffortLevel) => {
     setEffort(level);
     void clientApi.updateSettings({ effort: level });
+  }, []);
+  // 对话模式同样作为全局偏好持久化在 settings-store(扁平 key 'chatMode'),
+  // 表达层只读取/回写这一字段。模式真值最终经 chatSend → IPC → mode-source 进入
+  // System Context 的 L6_MODE_REMINDER 层(见 docs/proposals/0002-goal-mode.md)。
+  const [mode, setMode] = useState<ChatMode>(() => {
+    const stored = (clientApi.initialSettings as Record<string, unknown>)?.chatMode;
+    return isChatMode(stored) ? stored : 'chat';
+  });
+  const changeMode = useCallback((next: ChatMode) => {
+    setMode(next);
+    void clientApi.updateSettings({ chatMode: next });
   }, []);
   const [localAccessLevel, setLocalAccessLevel] = useState<LocalAccessLevel>(() => {
     const stored = (clientApi.initialSettings as Record<string, unknown>)?.localAccessLevel;
@@ -1339,8 +1375,8 @@ export function ChatSurface({
     const contextAttachments = buildConversationAttachmentContext(contextMessages);
     const continuityContext = buildConversationContinuityContext(contextMessages);
     const configInstructions = buildConfigInstructionContext(systemInstructions);
-    void clientApi.chatSend({ messages: apiMessages, streamId, effort: turnEffort, conversationId, contextAttachments, continuityContext, configInstructions });
-  }, [isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, systemInstructions]);
+    void clientApi.chatSend({ messages: apiMessages, streamId, effort: turnEffort, mode, conversationId, contextAttachments, continuityContext, configInstructions });
+  }, [isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, mode, systemInstructions]);
 
   const handleSend = useCallback(async () => {
     const text = draft.trim();
@@ -1435,8 +1471,8 @@ export function ChatSurface({
     const contextAttachments = buildConversationAttachmentContext(contextMessages);
     const continuityContext = buildConversationContinuityContext(contextMessages);
     const configInstructions = buildConfigInstructionContext(systemInstructions);
-    void clientApi.chatSend({ messages: apiMessages, streamId, effort, conversationId, contextAttachments, continuityContext, configInstructions });
-  }, [isStreaming, hasProvider, conversationId, messages, effort, systemInstructions]);
+    void clientApi.chatSend({ messages: apiMessages, streamId, effort, mode, conversationId, contextAttachments, continuityContext, configInstructions });
+  }, [isStreaming, hasProvider, conversationId, messages, effort, mode, systemInstructions]);
 
   const handleBranch = useCallback(async (msgIndex: number) => {
     if (!conversationId || isStreaming) return;
@@ -1503,6 +1539,7 @@ export function ChatSurface({
         />
       ) : null}
       <div className="chat-thread" ref={threadRef} onScroll={handleThreadScroll}>
+        {mode === 'goal' ? <GoalPlanPanel conversationId={conversationId} isZh={isZh} /> : null}
         {messages.length === 0 ? (
           <div className="chat-empty-state">
             <p>{isZh ? '输入消息开始对话' : 'Type a message to start'}</p>
@@ -1751,6 +1788,20 @@ export function ChatSurface({
         </form>
         <div className="chat-composer-toolbar">
           <div className="chat-composer-toolbar-left">
+            <Dropdown
+              className="composer-dropdown composer-mode-dropdown"
+              value={mode}
+              options={CHAT_MODES.map((m) => ({
+                value: m,
+                label: modeLabel(m, isZh),
+              }))}
+              onChange={(next) => {
+                if (isChatMode(next)) changeMode(next);
+              }}
+              ariaLabel={isZh ? '对话模式' : 'Chat mode'}
+              title={modeTitle(mode, isZh)}
+              menuPlacement="up"
+            />
             <Dropdown
               className="composer-dropdown composer-access-dropdown"
               value={localAccessLevel}

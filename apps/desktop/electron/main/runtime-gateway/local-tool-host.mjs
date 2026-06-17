@@ -1,5 +1,6 @@
 import { createCapabilityProviderRegistry } from './capability-provider-registry.mjs';
 import { createLocalFileProvider } from './local-file-provider.mjs';
+import { createLocalGoalProvider } from './local-goal-provider.mjs';
 import { createLocalHealthProvider } from './local-health-provider.mjs';
 import { createLocalMcpProvider } from './local-mcp-provider.mjs';
 import { createLocalShellProvider } from './local-shell-provider.mjs';
@@ -14,6 +15,7 @@ export function createLocalToolHost({
   mcpCredentialResolver = null,
   fileProvider = createLocalFileProvider({ workspaceRoot }),
   shellProvider = createLocalShellProvider({ workspaceRoot, userDataPath }),
+  goalProvider = createLocalGoalProvider(),
   providers,
   extraProviders = [],
 }) {
@@ -23,6 +25,7 @@ export function createLocalToolHost({
       createLocalHealthProvider({ workspaceRoot, runHealthStub }),
       fileProvider,
       shellProvider,
+      goalProvider,
       ...(mcpProvider ? [mcpProvider] : []),
       ...extraProviders,
     ],

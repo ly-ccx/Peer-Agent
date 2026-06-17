@@ -28,6 +28,7 @@ import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
 import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
 import { createConversationStore } from './conversation-store.mjs';
+import { createGoalPlanStore } from './goal-plan-store.mjs';
 import { buildPersistedCompactedMessages } from './conversation-compaction-persistence.mjs';
 import { compactIfNeeded } from './context-compactor.mjs';
 
@@ -98,6 +99,7 @@ const mcpCredentialStore = createMcpCredentialStore();
 const mcpCredentialResolver = createMcpCredentialResolver(mcpCredentialStore);
 const llmConfigStore = createLlmConfigStore();
 const conversationStore = createConversationStore();
+const goalPlanStore = createGoalPlanStore();
 const promptSnapshotStore = createPromptSnapshotStore();
 const contextBaselineRecorder = createContextBaselineRecorder({
   promptSnapshotStore,
@@ -484,11 +486,28 @@ ipcMain.handle('conversations:delete', (_, { id }) => conversationStore.deleteCo
 // 压缩(replace-messages)只重写消息文件,不碰 meta,故 lifetimeUsage 不受压缩影响。
 ipcMain.handle('conversations:add-usage', (_, { id, usage }) => conversationStore.addUsage(id, usage));
 
+// ── Goal Plans（goal 模式：先规划 → 批准 → 执行，计划为持久化 Evidence/artifact）──
+// 见 docs/proposals/0002-goal-mode.md。progress 由 store 自底向上聚合，调用方不可手填。
+ipcMain.handle('goalPlans:list', (_, params) => {
+  if (params?.conversationId !== undefined) return goalPlanStore.listPlansByConversation(params.conversationId);
+  return goalPlanStore.listPlans();
+});
+ipcMain.handle('goalPlans:get', (_, { planId }) => goalPlanStore.getPlan(planId));
+ipcMain.handle('goalPlans:create', (_, { draft }) => goalPlanStore.createPlan(draft));
+ipcMain.handle('goalPlans:revise', (_, { planId, patch, reason, changedBy }) =>
+  goalPlanStore.revisePlan(planId, patch, { reason, changedBy }));
+ipcMain.handle('goalPlans:approve', (_, { planId, approval }) => goalPlanStore.recordApproval(planId, approval));
+ipcMain.handle('goalPlans:set-status', (_, { planId, status }) => goalPlanStore.setPlanStatus(planId, status));
+ipcMain.handle('goalPlans:record-task-evidence', (_, { planId, taskId, change }) =>
+  goalPlanStore.recordTaskEvidence(planId, taskId, change));
+ipcMain.handle('goalPlans:delete', (_, { planId }) => goalPlanStore.deletePlan(planId));
+
 // ── LLM Chat ──
 ipcMain.handle('chat:send', (event, {
   messages,
   streamId,
   effort,
+  mode,
   conversationId,
   contextAttachments,
   runtimeReminders,
@@ -502,6 +521,7 @@ ipcMain.handle('chat:send', (event, {
     webContents: event.sender,
     streamId,
     effort,
+    mode,
     conversationId,
     contextAttachments,
     runtimeReminders,

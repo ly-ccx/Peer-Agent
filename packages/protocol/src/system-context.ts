@@ -97,6 +97,7 @@ export interface ChatSendRequest {
   readonly messages: readonly ChatProviderMessage[];
   readonly streamId: string;
   readonly effort?: string;
+  readonly mode?: string;
   readonly conversationId?: string;
   readonly contextAttachments?: readonly ContextAttachmentItem[];
   readonly runtimeReminders?: readonly RuntimeReminderItem[];

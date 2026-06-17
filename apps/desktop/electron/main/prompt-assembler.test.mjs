@@ -174,6 +174,23 @@ describe('System Context assembly', () => {
     assert.equal(compactContext.snapshot.mode, 'compact');
   });
 
+  it('injects the goal mode plan-before-execute reminder into L6 (proposal 0002)', () => {
+    const goalContext = buildSystemContext('/tmp/workspace', {
+      mode: 'goal',
+      provider: 'anthropic',
+      model: 'claude-opus',
+    });
+
+    const modeSection = goalContext.sections.find((section) => section.id === 'runtime.mode');
+    assert.ok(modeSection, 'goal mode must produce a runtime.mode section');
+    assert.equal(modeSection.layer, 'L6_MODE_REMINDER');
+    assert.match(modeSection.content, /Mode: goal/);
+    // 先规划后执行 + Evidence 驱动完成 是 goal 模式的核心契约,必须出现在 reminder 中。
+    assert.match(modeSection.content, /Plan-before-execute/);
+    assert.match(modeSection.content, /Evidence/);
+    assert.equal(goalContext.snapshot.mode, 'goal');
+  });
+
   it('renders explicit runtime reminders without mixing them into user messages', () => {
     const context = buildSystemContext('/tmp/workspace', {
       runtimeReminders: [{

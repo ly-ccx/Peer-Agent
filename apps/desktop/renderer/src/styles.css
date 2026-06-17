@@ -14,6 +14,7 @@
 @import "./chat/styles/markdown.css";
 @import "./chat/styles/chat-composer.css";
 @import "./chat/styles/permission-gate-strip.css";
+@import "./chat/styles/goal-panel.css";
 @import "./styles/llm-settings.css";
 @import "./styles/settings-page.css";
 @import "./styles/chat-surface.css";

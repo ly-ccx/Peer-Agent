@@ -1,13 +1,8 @@
-const MODE_COPY = {
-  chat: [
-    'Mode: chat.',
-    'Answer the user directly, and use tools only through structured tool calls when local evidence or local changes are needed.',
-  ],
-  compact: [
-    'Mode: compact.',
-    'Create or preserve continuity summaries only. Do not execute tools from compaction context.',
-  ],
-};
+// 注意（接缝提示）：当前 assembleSystemContext 实际接入的是 runtime-reminder-source.mjs
+// 的 fromRuntimeMode；本文件的 createModePromptSource 虽从 prompt/index.mjs 导出，
+// 但未被 prompt-assembler 注册，故这里的渲染结果不进入生效的 System Context。
+// MODE_COPY 文案已收敛到单一来源 ./mode-copy.mjs，两个 source 共享同一份，消除重复债务。
+import { MODE_COPY } from './mode-copy.mjs';
 
 function normalizeMode(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : 'chat';
