@@ -3,6 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import { getDataHome } from '../data-store.mjs';
+import {
+  buildGoalModeDenial,
+  evaluateGoalModeGate,
+  resolveGoalPlanGate,
+} from './goal-mode-gate.mjs';
 import { createLocalToolHost } from '../runtime-gateway/local-tool-host.mjs';
 import { createLocalShellProvider } from '../runtime-gateway/local-shell-provider.mjs';
 import { createShellArtifactStore } from '../runtime-gateway/shell-artifacts.mjs';
@@ -155,6 +160,7 @@ export async function executeProjectedModelTool({
   runtimeProjection = DEFAULT_RUNTIME_PROJECTION,
   locale = 'zh-CN',
   toolCallId = null,
+  goalPlanStore = undefined,
 }) {
   const projection = resolveProjectedModelToolCall({
     name,
@@ -165,6 +171,22 @@ export async function executeProjectedModelTool({
   });
   if (!projection.ok) {
     return { success: false, error: projection.error };
+  }
+
+  // Goal 模式运行时闸门（见 docs/proposals/0004-goal-mode-runtime-gate.md）：
+  // 计划未获批准前，拒绝有副作用的能力，强制「先规划 → 批准 → 执行」。
+  // 这是 PermissionGrant 之前的能力准入判定，不绕过 Runtime Projection。
+  const gate = evaluateGoalModeGate({
+    mode: toolContext?.mode ?? 'chat',
+    toolName: name,
+    riskLevel: projection.capability?.riskLevel,
+    planGate: resolveGoalPlanGate(toolContext?.conversationId ?? null, goalPlanStore),
+  });
+  if (!gate.allowed) {
+    return {
+      ...buildGoalModeDenial({ name, reason: gate.reason, locale }),
+      projectionCapability: projection.capability,
+    };
   }
 
   const cwd = resolveSafeWorkspaceRoot(workspacePath);

@@ -165,6 +165,7 @@ export async function agentLoopAnthropic({
     apiMessages.push({ role: 'assistant', content: assistantContent });
 
     const toolResults = [];
+    let terminalControlSignal = null;
     for (const tu of effectiveToolUseBlocks) {
       const toolExecution = await executeModelToolCall({
         name: tu.name,
@@ -183,8 +184,18 @@ export async function agentLoopAnthropic({
       });
       if (toolExecution.aborted) return;
       toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: toolExecution.output });
+      if (toolExecution.controlSignal?.terminal) terminalControlSignal = toolExecution.controlSignal;
     }
+    // 必须先把所有 tool_use 配对的 tool_result 落回历史，再决定是否终止，
+    // 否则会留下悬空 tool_use 导致下一轮 Anthropic 请求被拒。
     apiMessages.push({ role: 'user', content: toolResults });
+
+    // 运行时护栏：当本回合调用了 request_user_input 这类「请求用户输入」能力时，
+    // 停止回灌、把控制权交还用户，而不是自行继续决策。详见 docs/proposals/0003-request-user-input.md。
+    if (terminalControlSignal) {
+      loop.sendDone();
+      return;
+    }
   }
 
   loop.sendLoopExhausted();

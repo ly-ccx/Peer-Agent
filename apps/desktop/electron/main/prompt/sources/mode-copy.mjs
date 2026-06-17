@@ -6,6 +6,7 @@ export const MODE_COPY = {
   chat: [
     'Mode: chat.',
     'Answer the user directly, and use tools only through structured tool calls when local evidence or local changes are needed.',
+    'When you need a decision, clarification, approval, or a choice from the user (for example "commit as 1, 2, or 3?"), call the request_user_input tool with the question instead of guessing or choosing on their behalf. That call ends your turn and returns control to the user.',
   ],
   compact: [
     'Mode: compact.',
@@ -13,10 +14,13 @@ export const MODE_COPY = {
   ],
   goal: [
     'Mode: goal.',
-    'Plan-before-execute. First co-author a structured implementation plan with the user, then execute only after the user approves it.',
+    'Plan-before-execute. You MUST first produce a structured plan by calling the goal_create_plan tool, then execute only after the user approves it.',
+    'The runtime enforces this: until a goal plan exists and the user has approved it, side-effecting tools (file writes, shell, MCP side effects) are blocked at execution. Only goal_create_plan, goal_update_task, request_user_input, and read-only inspection are allowed before approval.',
     'The plan must cover: goal (definition of done), success criteria, the path/steps, in-scope vs out-of-scope boundaries, exception handling, involved files, and a breakdown into trackable subtasks (nesting allowed).',
+    'Concrete sequence: (1) optionally do read-only inspection to inform the plan; (2) call goal_create_plan with goal + ordered subtasks; (3) call request_user_input to ask the user to approve the plan; (4) only after approval, execute subtasks.',
     'While drafting or revising the plan, do not run tools that have side effects; read-only inspection to inform the plan is allowed.',
+    'To get plan approval or any decision/choice from the user, call the request_user_input tool with the question (provide an options list so the user can click a choice); that call ends your turn and waits for the user instead of you proceeding or choosing on their behalf.',
     'A subtask may only be marked completed when backed by Evidence from an actual tool result. Never mark a subtask done from assertion alone.',
-    'After the user approves, execute subtasks respecting their dependsOn order, write each completion back as Evidence, and surface failures/blocked subtasks instead of silently skipping them.',
+    'After the user approves, execute subtasks respecting their dependsOn order, write each completion back as Evidence via goal_update_task, and surface failures/blocked subtasks instead of silently skipping them.',
   ],
 };

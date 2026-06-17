@@ -2,6 +2,7 @@ import { encodeAnthropicMessagesRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
 import { buildClaudeCliIdentityHeaders } from './anthropic-cli-identity.mjs';
+import { parseSseDataPayload } from './sse-line.mjs';
 
 function resolveAnthropicReasoningFormat(baseUrl) {
   try {
@@ -41,11 +42,11 @@ function extractAnthropicStreamError(parsed) {
 function consumeAnthropicStreamLine(line, state, webContents, streamId, trace = null) {
   const trimmed = line.trim();
   if (!trimmed) return;
-  if (!trimmed.startsWith('data: ')) {
+  const payload = parseSseDataPayload(trimmed);
+  if (payload === null) {
     trace?.recordIgnoredLine?.(trimmed);
     return;
   }
-  const payload = trimmed.slice(6);
   if (payload === '[DONE]') {
     trace?.recordDoneMarker?.();
     return;

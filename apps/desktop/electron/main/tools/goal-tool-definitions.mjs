@@ -12,8 +12,18 @@
  */
 
 export const GOAL_TOOL_NAMES = Object.freeze({
+  createPlan: 'goal_create_plan',
   updateTask: 'goal_update_task',
 });
+
+const GOAL_CREATE_PLAN_PROMPT = [
+  'Create a persistent, trackable goal plan (goal mode only). Call this FIRST in goal mode,',
+  'before doing any side-effecting work: in goal mode the runtime blocks side-effecting tools',
+  'until a plan exists and the user approves it. Provide a clear goal and a complete list of',
+  'ordered subtasks (each subtask: title, optional dependsOn). The plan is saved as a draft',
+  'awaiting approval; after creating it, ask the user to approve via request_user_input.',
+  'Do not start executing subtasks until the user approves.',
+].join(' ');
 
 const GOAL_TOOL_PROMPT = [
   'Record execution evidence for a goal-plan subtask (goal mode only).',
@@ -25,6 +35,57 @@ const GOAL_TOOL_PROMPT = [
 ].join(' ');
 
 export const GOAL_TOOL_DEFINITIONS = [
+  {
+    name: GOAL_TOOL_NAMES.createPlan,
+    capabilityId: 'local.goal.create',
+    prompt: () => GOAL_CREATE_PLAN_PROMPT,
+    runtime: Object.freeze({
+      adapter: 'runtime-gateway.local-goal-provider',
+      executorCapabilityId: 'local.goal.create',
+    }),
+    permissionPolicy: {
+      kind: 'goal-create',
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Short title for the plan.',
+        },
+        goal: {
+          type: 'string',
+          description: 'The concrete goal this plan aims to achieve, in one or two sentences.',
+        },
+        tasks: {
+          type: 'array',
+          description: 'Ordered list of subtasks that make up the plan.',
+          items: {
+            type: 'object',
+            properties: {
+              taskId: {
+                type: 'string',
+                description: 'Optional stable id for the subtask; generated if omitted.',
+              },
+              title: {
+                type: 'string',
+                description: 'What this subtask delivers.',
+              },
+              dependsOn: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'taskIds this subtask depends on (must run after them).',
+              },
+            },
+            required: ['title'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['goal', 'tasks'],
+      additionalProperties: false,
+    },
+  },
   {
     name: GOAL_TOOL_NAMES.updateTask,
     capabilityId: 'local.goal.update',

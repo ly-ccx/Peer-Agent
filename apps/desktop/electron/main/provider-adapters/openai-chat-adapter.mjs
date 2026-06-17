@@ -1,6 +1,7 @@
 import { encodeOpenAIChatRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
+import { parseSseDataPayload } from './sse-line.mjs';
 
 function extractTextLikeDelta(value) {
   if (typeof value === 'string') return value;
@@ -48,11 +49,11 @@ function extractOpenAIStreamError(parsed) {
 function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = null) {
   const trimmed = line.trim();
   if (!trimmed) return;
-  if (!trimmed.startsWith('data: ')) {
+  const payload = parseSseDataPayload(trimmed);
+  if (payload === null) {
     trace?.recordIgnoredLine?.(trimmed);
     return;
   }
-  const payload = trimmed.slice(6);
   if (payload === '[DONE]') {
     trace?.recordDoneMarker?.();
     return;

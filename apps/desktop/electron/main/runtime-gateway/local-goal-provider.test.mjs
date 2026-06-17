@@ -46,9 +46,59 @@ describe('local goal provider', () => {
     rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  it('declares the governed goal capability id', () => {
+  it('declares the governed goal capability ids', () => {
     assert.equal(provider.providerId, 'local.goal.update');
-    assert.deepEqual(provider.capabilityIds, ['local.goal.update']);
+    assert.deepEqual(provider.capabilityIds, ['local.goal.update', 'local.goal.create']);
+  });
+
+  it('creates an awaiting_approval plan via local.goal.create', async () => {
+    const execution = await provider.executeCapability(
+      {
+        call: {
+          toolCallId: 'local.goal.create:test',
+          capabilityId: 'local.goal.create',
+          arguments: {
+            title: '重构鉴权',
+            goal: '把鉴权抽到独立模块',
+            tasks: [{ title: '抽接口' }, { title: '迁移实现', dependsOn: ['task-1'] }],
+          },
+          occurredAt: new Date().toISOString(),
+        },
+      },
+      { locale: 'zh-CN', toolContext: { conversationId: 'conv-1' } },
+    );
+
+    assert.equal(execution.grant.granted, true);
+    assert.equal(execution.grant.scope, 'local.goal.create');
+    assert.equal(execution.result.status, 'success');
+
+    const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.status, 'awaiting_approval');
+    assert.equal(payload.taskCount, 2);
+
+    const persisted = store.getPlan(payload.planId);
+    assert.equal(persisted.status, 'awaiting_approval');
+    assert.equal(persisted.conversationId, 'conv-1');
+    assert.equal(persisted.tasks.length, 2);
+  });
+
+  it('rejects goal.create without goal or tasks', async () => {
+    const execution = await provider.executeCapability(
+      {
+        call: {
+          toolCallId: 'local.goal.create:bad',
+          capabilityId: 'local.goal.create',
+          arguments: { title: 'x' },
+          occurredAt: new Date().toISOString(),
+        },
+      },
+      { locale: 'en-US', toolContext: { conversationId: 'conv-1' } },
+    );
+    assert.equal(execution.result.status, 'failed');
+    assert.equal(execution.grant.granted, false);
+    const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
+    assert.equal(payload.ok, false);
   });
 
   it('writes evidence to a subtask and recomputes progress bottom-up', async () => {

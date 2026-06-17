@@ -359,6 +359,53 @@
   background: var(--chrome-sunken);
 }
 
+/* request_user_input 交互卡：问题 + 可点击选项 + 等待你输入。
+   见 docs/proposals/0004-goal-mode-runtime-gate.md。 */
+.tool-call-card.interaction-card {
+  cursor: default;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.tool-call-card.interaction-card.waiting {
+  border-color: var(--azure-soft);
+}
+.interaction-question {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--graphite-base);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.interaction-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.interaction-option-button {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--azure-soft);
+  border-radius: var(--radius-sm);
+  background: var(--paper-sheet);
+  color: var(--azure-seal);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background var(--za-motion-fast) var(--za-ease-out), border-color var(--za-motion-fast) var(--za-ease-out);
+}
+.interaction-option-button:hover:not(:disabled) {
+  background: var(--azure-trace);
+  border-color: var(--azure-seal);
+}
+.interaction-option-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.interaction-hint {
+  font-size: 0.72rem;
+  color: var(--graphite-mute);
+}
+
 /* ── Composer ── */
 .chat-composer-wrap {
   padding: var(--space-2) var(--space-6) var(--space-5);

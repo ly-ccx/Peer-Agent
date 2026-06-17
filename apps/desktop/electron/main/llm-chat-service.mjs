@@ -278,6 +278,9 @@ export function createLlmChatService({
     const accumulatingWebContents = wrapWebContentsForRuntimeEvents(webContents, streamRecord, { conversationStore });
 
     const toolContext = getConversationToolContext({ conversationId, workspacePath: activeWorkspacePath });
+    // 把本回合的交互模式写入（复用的）会话级 toolContext，供 goal 模式运行时闸门在工具
+    // 执行层判定准入。见 docs/proposals/0004-goal-mode-runtime-gate.md。
+    toolContext.mode = mode;
 
     try {
       for (let attemptIndex = 0; attemptIndex < providerCandidates.length; attemptIndex += 1) {

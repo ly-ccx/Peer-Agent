@@ -24,12 +24,17 @@ function riskForTool(tool) {
   if (policy.kind === 'shell') return 'L4_privileged';
   if (policy.kind === 'file-read') return 'L1_local_read';
   if (policy.kind === 'file-write') return 'L2_local_write';
+  // interaction: 无副作用（只向用户提问并终止回合），归为最低风险。
+  if (policy.kind === 'interaction') return 'L0_inert';
+  // goal 计划读写：只写本地计划草稿/回写 Evidence，无外部副作用，归为最低风险。
+  if (policy.kind === 'goal-create' || policy.kind === 'goal-update') return 'L0_inert';
   return 'L2_local_write';
 }
 
 function dataLevelForTool(tool) {
   const policy = tool.permissionPolicy ?? {};
   if (policy.kind === 'file-read') return 'D1_internal';
+  if (policy.kind === 'interaction') return 'D0_public';
   return 'D2_sensitive';
 }
 

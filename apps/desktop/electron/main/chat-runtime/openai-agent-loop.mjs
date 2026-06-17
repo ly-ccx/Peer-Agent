@@ -153,6 +153,7 @@ export async function agentLoopOpenAI({
       })),
     });
 
+    let terminalControlSignal = null;
     for (const tc of toolCalls) {
       const toolExecution = await executeModelToolCall({
         name: tc.name,
@@ -170,7 +171,17 @@ export async function agentLoopOpenAI({
         mcpRegistry,
       });
       if (toolExecution.aborted) return;
+      // 必须为每个 tool_call 写回配对的 tool message，再决定是否终止，
+      // 否则会留下未应答的 tool_call 导致下一轮 OpenAI 请求被拒。
       apiMessages.push({ role: 'tool', tool_call_id: tc.id, content: toolExecution.output });
+      if (toolExecution.controlSignal?.terminal) terminalControlSignal = toolExecution.controlSignal;
+    }
+
+    // 运行时护栏：当本回合调用了 request_user_input 这类「请求用户输入」能力时，
+    // 停止回灌、把控制权交还用户，而不是自行继续决策。详见 docs/proposals/0003-request-user-input.md。
+    if (terminalControlSignal) {
+      loop.sendDone();
+      return;
     }
   }
 

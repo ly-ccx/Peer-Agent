@@ -8,7 +8,8 @@ import type {
   LocalAccessLevel,
 } from '@peer-agent/protocol';
 import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { parseInteractionToolView } from '../state/interactionToolView';
 import { Dropdown, type DropdownOption } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
@@ -25,6 +26,15 @@ const MAX_ATTACHMENTS = 8;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_TEXT_FILE_BYTES = 512 * 1024;
 const SCROLL_BOTTOM_THRESHOLD_PX = 64;
+
+// 交互上下文：把「选择 request_user_input 选项」的回调下沉给工具卡渲染，
+// 避免一长串 props 透传。回调内部复用既有 submitMessage 发送路径（不另造路径）。
+// 见 docs/proposals/0004-goal-mode-runtime-gate.md。
+interface InteractionControl {
+  readonly onSelectOption: (text: string) => void;
+  readonly isStreaming: boolean;
+}
+const InteractionContext = createContext<InteractionControl | null>(null);
 
 interface ChatAttachment {
   id: string;
@@ -1500,6 +1510,13 @@ export function ChatSurface({
 
   const showScrollToBottom = messages.length > 0 && !isThreadAtBottom;
 
+  // 选择 request_user_input 的选项 = 把该选项作为用户消息，复用既有 submitMessage 发送路径。
+  // 见 docs/proposals/0004-goal-mode-runtime-gate.md。
+  const selectInteractionOption = useCallback((text: string) => {
+    if (!text || isStreaming || !hasProvider || !conversationId) return;
+    void submitMessage(text, [], effort);
+  }, [isStreaming, hasProvider, conversationId, submitMessage, effort]);
+
   if (!conversationId) {
     return (
       <div className="chat-surface">
@@ -1524,6 +1541,7 @@ export function ChatSurface({
   }
 
   return (
+    <InteractionContext.Provider value={{ onSelectOption: selectInteractionOption, isStreaming }}>
     <div className="chat-surface">
       {findOpen ? (
         <ChatFindBar
@@ -1823,6 +1841,7 @@ export function ChatSurface({
         <ImagePreviewOverlay attachment={imagePreview} isZh={isZh} onClose={() => setImagePreview(null)} />
       ) : null}
     </div>
+    </InteractionContext.Provider>
   );
 }
 
@@ -2070,6 +2089,48 @@ function ThinkingSection({ toolCalls, isActive, isZh }: { readonly toolCalls: To
 
 function ToolCallCard({ tc }: { readonly tc: ToolCallLegacy }) {
   const [expanded, setExpanded] = useState(false);
+  const [answered, setAnswered] = useState(false);
+  const interaction = useContext(InteractionContext);
+
+  // request_user_input：渲染为「问题 + 可点击选项 + 等待你输入」的交互卡，
+  // 而不是裸露 JSON。见 docs/proposals/0004-goal-mode-runtime-gate.md。
+  const interactionView = parseInteractionToolView(tc.tool, tc.result);
+  if (interactionView) {
+    const waiting = !(interaction?.isStreaming ?? false) && !answered;
+    const select = (text: string) => {
+      if (!waiting || !interaction) return;
+      setAnswered(true);
+      interaction.onSelectOption(text);
+    };
+    return (
+      <div className={`tool-call-card interaction-card ${waiting ? 'waiting' : 'answered'}`}>
+        <div className="interaction-question">{interactionView.question}</div>
+        {interactionView.options.length > 0 ? (
+          <div className="interaction-options">
+            {interactionView.options.map((option, idx) => (
+              <button
+                key={`${idx}-${option}`}
+                type="button"
+                className="interaction-option-button"
+                disabled={!waiting}
+                onClick={() => select(option)}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <div className="interaction-hint">
+          {answered
+            ? '已发送你的选择…'
+            : waiting
+              ? '等待你的输入：点击上方选项，或直接在下方输入框回复。'
+              : '处理中…'}
+        </div>
+      </div>
+    );
+  }
+
   const label = tc.tool === 'bash'
     ? (tc.args.command as string)
     : tc.tool === 'read_file'
