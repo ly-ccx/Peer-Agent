@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createGoalPlanStore, aggregateProgress } from './goal-plan-store.mjs';
+import { createGoalPlanStore, aggregateProgress, derivePlanStatus } from './goal-plan-store.mjs';
 
 let tmpRoot;
 let store;
@@ -49,6 +49,52 @@ test('aggregateProgress 只统计叶子任务（父任务不计数）', () => {
   assert.equal(p.total, 3);
   assert.equal(p.completed, 0);
   assert.equal(p.percent, 0);
+});
+
+test('derivePlanStatus: 执行前(awaiting_approval/approved)有活跃子任务 → executing', () => {
+  const running = [{ taskId: 't1', status: 'running' }];
+  assert.equal(derivePlanStatus('awaiting_approval', running), 'executing');
+  assert.equal(derivePlanStatus('approved', running), 'executing');
+  // 终态/阻塞也视为已开始执行
+  assert.equal(derivePlanStatus('awaiting_approval', [{ status: 'completed' }]), 'executing');
+  assert.equal(derivePlanStatus('awaiting_approval', [{ status: 'failed' }]), 'executing');
+  assert.equal(derivePlanStatus('awaiting_approval', [{ status: 'waiting_user' }]), 'executing');
+});
+
+test('derivePlanStatus: 嵌套子任务里有活跃叶子也能识别为已开始', () => {
+  const nested = [
+    { taskId: 't1', status: 'pending' },
+    { taskId: 't2', status: 'pending', subtasks: [{ taskId: 't2a', status: 'running' }] },
+  ];
+  assert.equal(derivePlanStatus('awaiting_approval', nested), 'executing');
+});
+
+test('derivePlanStatus: 全部 pending 时保持原状态（不前进）', () => {
+  const pending = [{ taskId: 't1', status: 'pending' }];
+  assert.equal(derivePlanStatus('awaiting_approval', pending), 'awaiting_approval');
+  assert.equal(derivePlanStatus('approved', pending), 'approved');
+});
+
+test('derivePlanStatus: 只前进，不干扰其它显式状态机', () => {
+  const running = [{ taskId: 't1', status: 'running' }];
+  // drafting/executing/completed/cancelled/paused 等都原样返回
+  assert.equal(derivePlanStatus('drafting', running), 'drafting');
+  assert.equal(derivePlanStatus('executing', running), 'executing');
+  assert.equal(derivePlanStatus('completed', running), 'completed');
+  assert.equal(derivePlanStatus('cancelled', running), 'cancelled');
+});
+
+test('recordTaskEvidence: 对话直接触发执行时，awaiting_approval 计划自动推进为 executing（收起审批按钮）', () => {
+  // 模拟 AI 路径：goal_create_plan 落盘后处于 awaiting_approval
+  const created = store.createPlan(draftWithTasks());
+  store.setPlanStatus(created.planId, 'awaiting_approval');
+  assert.equal(store.getPlan(created.planId).status, 'awaiting_approval');
+
+  // 用户在对话里直接触发执行：AI 调用 goal_update_task 把某子任务置 running
+  store.recordTaskEvidence(created.planId, 't1', { status: 'running' });
+
+  const after = store.getPlan(created.planId);
+  assert.equal(after.status, 'executing', '有子任务 running 后计划应自动推进为 executing');
 });
 
 test('createPlan 落盘并派生 progress，默认 drafting/version=1', () => {

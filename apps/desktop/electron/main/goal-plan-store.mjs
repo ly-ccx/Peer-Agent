@@ -108,6 +108,50 @@ export function aggregateProgress(tasks) {
 }
 
 /**
+ * 由子任务事实自底向上派生「计划整体状态」，与 aggregateProgress 同源（提案 §4/§6）。
+ *
+ * 仅负责一种「只前进」的派生：当计划尚处于「执行前」状态（awaiting_approval / approved），
+ * 但已有任意子任务进入活跃或终态（running / completed / failed / waiting_user）时，
+ * 说明执行已经开始（典型场景：用户在对话里直接触发执行，跳过了面板审批按钮），
+ * 此时把计划推进到 'executing'，从而让审批按钮（canDecide=awaiting_approval）正确消失。
+ *
+ * 不做任何回退或终态推断（completed/cancelled/paused/failed/drafting 等仍由显式写路径决定），
+ * 避免与 recordApproval / setPlanStatus 的显式状态机产生竞争。
+ *
+ * @param {string} currentStatus 当前 plan.status
+ * @param {Array} tasks 顶层子任务树
+ * @returns {string} 派生后的 plan.status
+ */
+export function derivePlanStatus(currentStatus, tasks) {
+  const PRE_EXECUTION = new Set(['awaiting_approval', 'approved']);
+  if (!PRE_EXECUTION.has(currentStatus)) return currentStatus;
+
+  let started = false;
+  const walk = (list) => {
+    for (const t of list || []) {
+      if (started) return;
+      const children = Array.isArray(t.subtasks) ? t.subtasks : [];
+      if (children.length > 0) {
+        walk(children);
+        continue;
+      }
+      if (
+        t.status === 'running' ||
+        t.status === TERMINAL_OK ||
+        t.status === TERMINAL_FAIL ||
+        t.status === BLOCKED
+      ) {
+        started = true;
+        return;
+      }
+    }
+  };
+  walk(tasks);
+
+  return started ? 'executing' : currentStatus;
+}
+
+/**
  * 在任务树里按 taskId 定位并以 updater 产生的新对象替换（不可变更新）。
  * @returns {{tasks:Array, found:boolean}}
  */
@@ -201,7 +245,13 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
   function persist(plan) {
     // progress 始终由子任务聚合派生，写入前强制重算覆盖（不可手填）。
     const normalized = normalizePlan(plan);
-    const next = { ...normalized, progress: aggregateProgress(normalized.tasks) };
+    const next = {
+      ...normalized,
+      // 计划整体状态与 progress 同源：仅「执行前 → executing」的只前进派生，
+      // 让对话直接触发执行的场景也能正确收起面板审批按钮。
+      status: derivePlanStatus(normalized.status, normalized.tasks),
+      progress: aggregateProgress(normalized.tasks),
+    };
     writeJsonAtomic(planFile(next.planId), next);
     syncIndex(next);
     notifyChanged('persist', next.planId);
