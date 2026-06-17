@@ -336,6 +336,8 @@ export function createLlmChatService({
           conversationId,
           effort,
           mode,
+          // goal-plan 事实上下文 Source（0006）：goal 模式下注入活动计划权威 taskId。
+          goalPlanStore,
           provider: provider.provider,
           model: provider.model,
         });

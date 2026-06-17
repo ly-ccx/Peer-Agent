@@ -14,6 +14,7 @@
 export const GOAL_TOOL_NAMES = Object.freeze({
   createPlan: 'goal_create_plan',
   updateTask: 'goal_update_task',
+  getPlan: 'goal_get_plan',
 });
 
 const GOAL_CREATE_PLAN_PROMPT = [
@@ -32,6 +33,15 @@ const GOAL_TOOL_PROMPT = [
   'evidenceRefs (artifact refs / tool-result refs) that prove it is done — the store',
   'rejects a "completed" status without evidenceRefs. Progress is recomputed bottom-up',
   'from leaf subtasks; do not hand-maintain progress.',
+].join(' ');
+
+const GOAL_GET_PLAN_PROMPT = [
+  'Read back an existing goal plan (goal mode only). Read-only and side-effect free.',
+  'Use this to recover the authoritative subtask taskId list and current statuses —',
+  'for example after a long conversation or context compaction when you are unsure of',
+  'the exact taskId to pass to goal_update_task. Pass planId to fetch one plan; omit',
+  'planId to list the active plans for the current conversation. Always trust the',
+  'taskId values returned here over any taskId you remember.',
 ].join(' ');
 
 export const GOAL_TOOL_DEFINITIONS = [
@@ -132,6 +142,30 @@ export const GOAL_TOOL_DEFINITIONS = [
         },
       },
       required: ['planId', 'taskId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: GOAL_TOOL_NAMES.getPlan,
+    capabilityId: 'local.goal.read',
+    prompt: () => GOAL_GET_PLAN_PROMPT,
+    runtime: Object.freeze({
+      adapter: 'runtime-gateway.local-goal-provider',
+      executorCapabilityId: 'local.goal.read',
+    }),
+    permissionPolicy: {
+      kind: 'goal-read',
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        planId: {
+          type: 'string',
+          description:
+            'Target goal plan id (planId) to read back. Omit to list the active plans for the current conversation.',
+        },
+      },
+      required: [],
       additionalProperties: false,
     },
   },

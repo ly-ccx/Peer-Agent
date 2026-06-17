@@ -27,7 +27,10 @@ function riskForTool(tool) {
   // interaction: 无副作用（只向用户提问并终止回合），归为最低风险。
   if (policy.kind === 'interaction') return 'L0_inert';
   // goal 计划读写：只写本地计划草稿/回写 Evidence，无外部副作用，归为最低风险。
-  if (policy.kind === 'goal-create' || policy.kind === 'goal-update') return 'L0_inert';
+  // goal-read：只读本地计划（恢复权威 taskId），无副作用，最低风险。
+  if (policy.kind === 'goal-create' || policy.kind === 'goal-update' || policy.kind === 'goal-read') {
+    return 'L0_inert';
+  }
   return 'L2_local_write';
 }
 

@@ -48,7 +48,11 @@ describe('local goal provider', () => {
 
   it('declares the governed goal capability ids', () => {
     assert.equal(provider.providerId, 'local.goal.update');
-    assert.deepEqual(provider.capabilityIds, ['local.goal.update', 'local.goal.create']);
+    assert.deepEqual(provider.capabilityIds, [
+      'local.goal.update',
+      'local.goal.create',
+      'local.goal.read',
+    ]);
   });
 
   it('creates an awaiting_approval plan via local.goal.create', async () => {
@@ -76,6 +80,14 @@ describe('local goal provider', () => {
     assert.equal(payload.ok, true);
     assert.equal(payload.status, 'awaiting_approval');
     assert.equal(payload.taskCount, 2);
+
+    // A（0006）：创建结果必须回显权威 taskId 清单，供后续 goal_update_task 使用。
+    assert.ok(Array.isArray(payload.tasks));
+    assert.equal(payload.tasks.length, 2);
+    assert.equal(payload.tasks[0].taskId, 'task-1');
+    assert.equal(payload.tasks[1].taskId, 'task-2');
+    assert.equal(payload.tasks[0].title, '抽接口');
+    assert.equal(payload.tasks[0].status, 'pending');
 
     const persisted = store.getPlan(payload.planId);
     assert.equal(persisted.status, 'awaiting_approval');
@@ -167,6 +179,92 @@ describe('local goal provider', () => {
   it('fails gracefully for an unknown plan', async () => {
     const execution = await provider.executeCapability(
       { call: createCall({ planId: 'nope', taskId: 't1', status: 'running' }) },
+      { locale: 'zh-CN' },
+    );
+    assert.equal(execution.result.status, 'failed');
+    const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
+    assert.equal(payload.ok, false);
+  });
+
+  it('reads back a plan with authoritative taskIds via local.goal.read', async () => {
+    const plan = seedPlan();
+    const execution = await provider.executeCapability(
+      {
+        call: {
+          toolCallId: 'local.goal.read:test',
+          capabilityId: 'local.goal.read',
+          arguments: { planId: plan.planId },
+          occurredAt: new Date().toISOString(),
+        },
+      },
+      { locale: 'zh-CN', toolContext: { conversationId: 'conv-1' } },
+    );
+
+    assert.equal(execution.result.status, 'success');
+    assert.equal(execution.grant.scope, 'local.goal.read');
+    assert.equal(execution.grant.granted, true);
+    const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.plan.planId, plan.planId);
+    assert.deepEqual(
+      payload.plan.tasks.map((t) => t.taskId),
+      ['t1', 't2'],
+    );
+  });
+
+  it('lists active plans by conversation when planId is omitted', async () => {
+    const created = await provider.executeCapability(
+      {
+        call: {
+          toolCallId: 'local.goal.create:conv',
+          capabilityId: 'local.goal.create',
+          arguments: {
+            title: '重构鉴权',
+            goal: '把鉴权抽到独立模块',
+            tasks: [{ title: '抽接口' }, { title: '迁移实现' }],
+          },
+          occurredAt: new Date().toISOString(),
+        },
+      },
+      { locale: 'zh-CN', toolContext: { conversationId: 'conv-7' } },
+    );
+    const createdPayload = JSON.parse(created.result.outputPreview.legacyResult.output);
+
+    const execution = await provider.executeCapability(
+      {
+        call: {
+          toolCallId: 'local.goal.read:conv',
+          capabilityId: 'local.goal.read',
+          arguments: {},
+          occurredAt: new Date().toISOString(),
+        },
+      },
+      { locale: 'zh-CN', toolContext: { conversationId: 'conv-7' } },
+    );
+
+    assert.equal(execution.result.status, 'success');
+    const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.conversationId, 'conv-7');
+    assert.ok(Array.isArray(payload.plans));
+    const found = payload.plans.find((p) => p.planId === createdPayload.planId);
+    assert.ok(found, 'created plan should be listed for its conversation');
+    assert.deepEqual(
+      found.tasks.map((t) => t.taskId),
+      ['task-1', 'task-2'],
+    );
+  });
+
+  it('fails read for an unknown planId', async () => {
+    const execution = await provider.executeCapability(
+      {
+        call: {
+          toolCallId: 'local.goal.read:missing',
+          capabilityId: 'local.goal.read',
+          arguments: { planId: 'does-not-exist' },
+          occurredAt: new Date().toISOString(),
+        },
+      },
       { locale: 'zh-CN' },
     );
     assert.equal(execution.result.status, 'failed');

@@ -4,6 +4,7 @@ import { createPromptSourceRegistry } from './prompt-source-registry.mjs';
 import { createAttachmentPromptSource } from './sources/attachment-source.mjs';
 import { createContinuityPromptSource } from './sources/continuity-source.mjs';
 import { createContextExtensionPromptSource } from './sources/context-extension-source.mjs';
+import { createGoalPlanPromptSource } from './sources/goal-plan-source.mjs';
 import { createCorePromptSource } from './sources/core-source.mjs';
 import { createProviderPromptSource } from './sources/provider-source.mjs';
 import { createProjectInstructionsPromptSource } from './sources/project-instructions-source.mjs';
@@ -72,6 +73,7 @@ export function createDefaultPromptSourceRegistry() {
       createProjectInstructionsPromptSource(),
       createContextExtensionPromptSource(),
       createRuntimeReminderPromptSource(),
+      createGoalPlanPromptSource(),
       createContinuityPromptSource(),
     ],
   });

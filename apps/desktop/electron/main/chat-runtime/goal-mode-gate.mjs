@@ -12,9 +12,9 @@
 
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
 
-// goal 模式下「无论计划是否获批」始终放行的工具（规划 / 回写 / 向用户提问）。
+// goal 模式下「无论计划是否获批」始终放行的工具（规划 / 回写 / 只读读回 / 向用户提问）。
 const GOAL_ALWAYS_ALLOWED_TOOLS = Object.freeze(
-  new Set(['goal_create_plan', 'goal_update_task', 'request_user_input']),
+  new Set(['goal_create_plan', 'goal_update_task', 'goal_get_plan', 'request_user_input']),
 );
 
 // 视为「无副作用」的风险等级：未获批准时也放行（只读 / 惰性）。
