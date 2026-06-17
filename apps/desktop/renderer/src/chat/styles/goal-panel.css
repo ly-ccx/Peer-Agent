@@ -278,16 +278,6 @@
   padding-top: 0;
 }
 
-/* 内联按钮尺寸与状态徽章（.goal-plan-status）对齐：同样的 padding / 字号 / 圆角，
-   形成一致的小号 chip 风格，避免按钮在 header 里显得过大突兀。 */
-.goal-plan-actions--inline button {
-  padding: 2px 10px;
-  font-size: 12px;
-  line-height: 1.5;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
 .goal-plan-actions button {
   padding: 6px 14px;
   border-radius: var(--za-radius-sm);
@@ -295,6 +285,22 @@
   font-size: 13px;
   cursor: pointer;
   transition: background var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
+}
+
+/* 内联按钮尺寸与状态徽章（.goal-plan-status）完全对齐：相同的盒模型（box-sizing
+   border-box）+ 相同 padding / 字号 / 行高 / 圆角，使「批准并执行 / 驳回」与左侧
+   「待批准」chip 呈现一致的小号高度。本规则放在 .goal-plan-actions button 之后，
+   且对每个属性都显式覆盖（含 border / line-height / font-weight），避免被前面的
+   基础规则或 .goal-plan-approve 的 !important 边框影响尺寸。 */
+.goal-plan-actions--inline button {
+  box-sizing: border-box;
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 400;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
 .goal-plan-actions button:disabled {
@@ -305,7 +311,12 @@
 .goal-plan-approve {
   background: var(--za-primary-control-bg);
   color: var(--za-primary-control-ink);
-  border-color: var(--za-primary-control-bg) !important;
+  border-color: var(--za-primary-control-bg);
+}
+
+/* 内联场景下，批准按钮也用透明边框，保证与徽章/驳回按钮等高（不被 primary 实色边框撑大）。 */
+.goal-plan-actions--inline .goal-plan-approve {
+  border-color: transparent;
 }
 
 .goal-plan-approve:hover:not(:disabled) {
