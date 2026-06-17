@@ -60,6 +60,52 @@ test('lifetimeUsage survives replaceMessages (compaction does NOT reset billing)
   }
 });
 
+/**
+ * ADR 33: 每条消息的整轮工作时长(durationMs)随消息持久化。
+ * 存储层是开放袋,无字段白名单,故 durationMs 经 append / replaceMessages 原样往返;
+ * 这是「重启后仍能看到每轮工作时长」的存储侧证据。
+ */
+test('durationMs round-trips through append and replaceMessages (ADR 33)', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 't' });
+    store.appendMessage(conv.id, { id: 'u1', role: 'user', content: 'hi' });
+    store.appendMessage(conv.id, {
+      id: 'a1',
+      role: 'assistant',
+      content: 'done',
+      durationMs: 8421,
+    });
+
+    const afterAppend = store.getConversation(conv.id);
+    const appendedAssistant = afterAppend.messages.find((m) => m.id === 'a1');
+    assert.equal(appendedAssistant.durationMs, 8421);
+
+    // 模拟 renderer 的 replace 投影(如删除其它消息后重写),durationMs 必须保留。
+    store.replaceMessages(conv.id, [
+      { id: 'a1', role: 'assistant', content: 'done', durationMs: 8421 },
+    ]);
+
+    const reloaded = store.getConversation(conv.id);
+    assert.equal(reloaded.messages.length, 1);
+    assert.equal(reloaded.messages[0].durationMs, 8421);
+  } finally {
+    cleanup();
+  }
+});
+
+test('messages without durationMs load cleanly (ADR 33)', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 't' });
+    store.appendMessage(conv.id, { id: 'u1', role: 'user', content: 'hi' });
+    const reloaded = store.getConversation(conv.id);
+    assert.equal(reloaded.messages[0].durationMs, undefined);
+  } finally {
+    cleanup();
+  }
+});
+
 test('addUsage on missing conversation returns null', () => {
   const { store, cleanup } = freshStore();
   try {

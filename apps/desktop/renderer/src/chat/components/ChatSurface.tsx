@@ -165,6 +165,10 @@ interface ChatMsg {
   segments?: ContentSegment[];
   timestamp?: number;
   usage?: { input: number; output: number; cacheWrite?: number; cacheRead?: number };
+  // 整轮 wall-clock 留痕(毫秒):从发送到本轮终结(done/aborted/error)。
+  // ADR 33:随消息走的表达层元数据,与 usage/timestamp 同级,经既有 replace-messages
+  // 开放袋持久化,重启后仍可见;不进入 main 拥有的累计账本(ADR 25 lifetimeUsage)。
+  durationMs?: number;
   compaction?: CompactionMeta;
   attachments?: ChatAttachment[];
 }
@@ -346,6 +350,20 @@ function formatTime(ts: number) {
   const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   if (d.toDateString() === now.toDateString()) return time;
   return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
+}
+
+// 把毫秒时长格式化为简洁可读形式:1.2s / 45s / 3m12s / 1h03m。
+function formatDuration(ms: number): string {
+  if (ms < 0) ms = 0;
+  if (ms < 1000) return `${ms}ms`;
+  const totalSec = Math.floor(ms / 1000);
+  if (totalSec < 10) return `${(ms / 1000).toFixed(1)}s`;
+  if (totalSec < 60) return `${totalSec}s`;
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  if (min < 60) return `${min}m${String(sec).padStart(2, '0')}s`;
+  const hr = Math.floor(min / 60);
+  return `${hr}h${String(min % 60).padStart(2, '0')}m`;
 }
 
 function formatBytes(bytes: number): string {
@@ -620,6 +638,10 @@ async function loadConversationMessages(conversationId: string): Promise<{
     if (Array.isArray(m.attachments)) {
       msg.attachments = m.attachments as ChatAttachment[];
     }
+    // ADR 33: 每条消息的整轮工作时长留痕,随消息持久化,重启后仍可见。
+    if (typeof m.durationMs === 'number' && Number.isFinite(m.durationMs)) {
+      msg.durationMs = m.durationMs;
+    }
     return msg;
   }).filter((message) => !isEmptyAssistantPlaceholder(message));
   // ADR 23: 计费优先读 index meta 的权威累计 lifetimeUsage(不受压缩影响)。
@@ -675,6 +697,21 @@ export function ChatSurface({
   const [draft, setDraft] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isCompacting, setIsCompacting] = useState(false);
+  // 整轮 wall-clock 计时:turnStartedAtRef 记录本轮起点(发送时), elapsedMs 驱动右下角实时跳秒。
+  const turnStartedAtRef = useRef<number | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  // 本轮运行时每秒刷新一次 elapsedMs(实时跳秒)。计时真值来自 turnStartedAtRef,
+  // 故定时器只负责"触发重渲染",即便 tick 漂移也以起点时间戳为准,不累积误差。
+  useEffect(() => {
+    if (!isStreaming) return;
+    const tick = () => {
+      const startedAt = turnStartedAtRef.current;
+      if (startedAt != null) setElapsedMs(Date.now() - startedAt);
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [isStreaming]);
   // 待发送消息队列:当前轮(流式或压缩)进行中时用户继续提交的消息排队等候,
   // 由 dequeue effect 在空闲且 provider 就绪时自动取队首发送。
   const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
@@ -900,6 +937,9 @@ export function ChatSurface({
     // 归零后由下方 reattach 按"新会话是否确有活跃流"重新点亮,仅以真值为准。
     setIsStreaming(false);
     streamIdRef.current = null;
+    // 切换会话时一并清掉本轮计时锚点,避免上一会话的实时跳秒残留到新会话。
+    turnStartedAtRef.current = null;
+    setElapsedMs(0);
     textTypewriter.reset();
     thinkingTypewriter.reset();
     if (!conversationId) { setMessages([]); setTokenUsage(null); return; }
@@ -974,7 +1014,7 @@ export function ChatSurface({
       void clientApi.conversationsReplaceMessages({
         id: conversationId,
         messages: msgs.map((m) => ({
-          id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, _compaction: m.compaction, attachments: m.attachments,
+          id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, durationMs: m.durationMs, _compaction: m.compaction, attachments: m.attachments,
         })),
       });
     };
@@ -1016,6 +1056,7 @@ export function ChatSurface({
           cacheRead: (prev?.cacheRead ?? 0) + msgUsage.cacheRead,
         }));
       }
+      const turnDurationMs = turnStartedAtRef.current != null ? Date.now() - turnStartedAtRef.current : undefined;
       if (conversationId) {
         setMessages((prev) => {
           const last = prev[prev.length - 1];
@@ -1024,18 +1065,22 @@ export function ChatSurface({
             persistMessages(next);
             return next;
           }
-          if (msgUsage) {
-            if (last?.role === 'assistant') {
-              const updated = [...prev.slice(0, -1), { ...last, usage: msgUsage }];
-              persistMessages(updated);
-              return updated;
-            }
+          if (last?.role === 'assistant') {
+            const patched: ChatMsg = {
+              ...last,
+              ...(msgUsage ? { usage: msgUsage } : {}),
+              ...(turnDurationMs != null ? { durationMs: turnDurationMs } : {}),
+            };
+            const updated = [...prev.slice(0, -1), patched];
+            persistMessages(updated);
+            return updated;
           }
           persistMessages(prev);
           return prev;
         });
         onConversationUpdated?.();
       }
+      turnStartedAtRef.current = null;
       streamIdRef.current = null;
     });
 
@@ -1058,15 +1103,27 @@ export function ChatSurface({
       setActiveUsage(null);
       setPendingPermissionCalls([]);
       setToolProgress(null);
+      const turnDurationMs = turnStartedAtRef.current != null ? Date.now() - turnStartedAtRef.current : undefined;
       if (conversationId) {
         setMessages((prev) => {
           const last = prev[prev.length - 1];
-          const next = last && isEmptyAssistantPlaceholder(last) ? prev.slice(0, -1) : prev;
-          persistMessages(next);
-          return next;
+          if (last && isEmptyAssistantPlaceholder(last)) {
+            const next = prev.slice(0, -1);
+            persistMessages(next);
+            return next;
+          }
+          // 停止时也留痕:把"已工作多久"记到这条 assistant 上,让用户看到中断前的整轮耗时。
+          if (last?.role === 'assistant' && turnDurationMs != null) {
+            const updated = [...prev.slice(0, -1), { ...last, durationMs: turnDurationMs }];
+            persistMessages(updated);
+            return updated;
+          }
+          persistMessages(prev);
+          return prev;
         });
         onConversationUpdated?.();
       }
+      turnStartedAtRef.current = null;
       streamIdRef.current = null;
     });
 
@@ -1148,14 +1205,25 @@ export function ChatSurface({
           cacheRead: (prev?.cacheRead ?? 0) + msgUsage.cacheRead,
         }));
       }
+      const turnDurationMs = turnStartedAtRef.current != null ? Date.now() - turnStartedAtRef.current : undefined;
       if (conversationId) {
         setMessages((prev) => {
           const last = prev[prev.length - 1];
-          const next = last && isEmptyAssistantPlaceholder(last) ? prev.slice(0, -1) : prev;
-          persistMessages(next);
-          return next;
+          if (last && isEmptyAssistantPlaceholder(last)) {
+            const next = prev.slice(0, -1);
+            persistMessages(next);
+            return next;
+          }
+          if (last?.role === 'assistant' && turnDurationMs != null) {
+            const updated = [...prev.slice(0, -1), { ...last, durationMs: turnDurationMs }];
+            persistMessages(updated);
+            return updated;
+          }
+          persistMessages(prev);
+          return prev;
         });
       }
+      turnStartedAtRef.current = null;
       streamIdRef.current = null;
     });
 
@@ -1373,6 +1441,8 @@ export function ChatSurface({
 
     const streamId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     streamIdRef.current = streamId;
+    turnStartedAtRef.current = Date.now();
+    setElapsedMs(0);
     setIsStreaming(true);
 
     const contextMessages = [...messages, userMsg];
@@ -1470,6 +1540,8 @@ export function ChatSurface({
 
     const streamId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     streamIdRef.current = streamId;
+    turnStartedAtRef.current = Date.now();
+    setElapsedMs(0);
     setIsStreaming(true);
 
     const apiMessages = toApiMessages(contextMessages);
@@ -1485,7 +1557,7 @@ export function ChatSurface({
     const branchTitle = contextMessages.find((m) => m.role === 'user')?.content.slice(0, 50) || 'Branch';
     const conv = await clientApi.conversationsCreate({ title: branchTitle }) as { id: string };
     for (const m of contextMessages) {
-      await clientApi.conversationsAppendMessage({ id: conv.id, message: { id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, timestamp: m.timestamp, _compaction: m.compaction, attachments: m.attachments } });
+      await clientApi.conversationsAppendMessage({ id: conv.id, message: { id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, durationMs: m.durationMs, timestamp: m.timestamp, _compaction: m.compaction, attachments: m.attachments } });
     }
     onConversationUpdated?.();
     onBranch?.(conv.id);
@@ -1497,7 +1569,7 @@ export function ChatSurface({
     setMessages(updated);
     await clientApi.conversationsReplaceMessages({
       id: conversationId,
-      messages: updated.map((m) => ({ id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, timestamp: m.timestamp, _compaction: m.compaction, attachments: m.attachments })),
+      messages: updated.map((m) => ({ id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, durationMs: m.durationMs, timestamp: m.timestamp, _compaction: m.compaction, attachments: m.attachments })),
     });
     onConversationUpdated?.();
   }, [conversationId, isStreaming, messages, onConversationUpdated]);
@@ -1565,6 +1637,9 @@ export function ChatSurface({
               <>
             {msg.timestamp ? <time className="chat-msg-time">{formatTime(msg.timestamp)}</time> : null}
             <span className="chat-msg-role-label">{msg.role === 'user' ? (isZh ? '你' : 'You') : 'Peer Agent'}</span>
+            {msg.role === 'assistant' && msg.durationMs != null ? (
+              <span className="chat-msg-duration" title={isZh ? '本轮工作时长' : 'Turn duration'}>{formatDuration(msg.durationMs)}</span>
+            ) : null}
             <div className="chat-msg-body">
               {msg.role === 'user' ? (
                 <>
@@ -1830,6 +1905,7 @@ export function ChatSurface({
             activeUsage={activeUsage}
             contextTokens={estimatedContextTokens}
             isStreaming={isStreaming}
+            elapsedMs={elapsedMs}
             isZh={isZh}
             effort={effort}
             effortLevels={activeProviderSupportsReasoning ? effortLevels : []}
@@ -2216,12 +2292,13 @@ function CompactionSummaryCard({ compaction, isZh }: { readonly compaction: Comp
   );
 }
 
-function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, isStreaming, isZh, effort, effortLevels, onEffortChange }: {
+function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, isStreaming, elapsedMs, isZh, effort, effortLevels, onEffortChange }: {
   readonly providers: readonly LlmProviderConfigView[];
   readonly tokenUsage: TokenUsageState | null;
   readonly activeUsage?: TokenUsageState | null;
   readonly contextTokens?: number;
   readonly isStreaming?: boolean;
+  readonly elapsedMs?: number;
   readonly isZh: boolean;
   readonly effort: EffortLevel;
   readonly effortLevels: readonly EffortLevel[];
@@ -2291,6 +2368,9 @@ function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, 
           </span>
         ) : null}
         {isStreaming && !activeUsage ? <span className="token-usage-detail">{isZh ? '计费待返回' : 'usage pending'}</span> : null}
+        {isStreaming && elapsedMs != null ? (
+          <span className="token-usage-elapsed" title={isZh ? '本轮已工作时长' : 'Elapsed this turn'}>{formatDuration(elapsedMs)}</span>
+        ) : null}
       </span>
       {ctxPercent != null ? (
         <div className="ctx-bar">

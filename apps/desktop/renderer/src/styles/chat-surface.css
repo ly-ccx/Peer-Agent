@@ -126,6 +126,16 @@
   color: var(--graphite-mute);
 }
 
+/* 整轮工作时长留痕:跟在 Peer Agent 角色标签同一行,弱化呈现。 */
+.chat-msg-duration {
+  display: inline-block;
+  margin-left: var(--space-2);
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  color: var(--graphite-fade);
+  vertical-align: baseline;
+}
+
 .chat-msg-user .chat-msg-body {
   color: var(--graphite-base);
   font-size: 0.9rem;
@@ -574,6 +584,13 @@
 .token-usage-detail {
   font-size: 0.62rem;
   color: var(--graphite-fade);
+}
+/* 本轮实时工作时长(跳秒),与计费信息并列于右下角状态栏。 */
+.token-usage-elapsed {
+  font-size: 0.62rem;
+  font-family: var(--font-mono);
+  color: var(--graphite-mute);
+  font-variant-numeric: tabular-nums;
 }
 .token-usage-model {
   display: inline-flex;
