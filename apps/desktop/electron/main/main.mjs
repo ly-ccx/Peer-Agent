@@ -29,6 +29,7 @@ import { createContextBaselineRecorder } from './prompt/context-baseline-recorde
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
 import { createConversationStore } from './conversation-store.mjs';
 import { createGoalPlanStore } from './goal-plan-store.mjs';
+import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
 import { buildPersistedCompactedMessages } from './conversation-compaction-persistence.mjs';
 import { compactIfNeeded } from './context-compactor.mjs';
 
@@ -99,7 +100,12 @@ const mcpCredentialStore = createMcpCredentialStore();
 const mcpCredentialResolver = createMcpCredentialResolver(mcpCredentialStore);
 const llmConfigStore = createLlmConfigStore();
 const conversationStore = createConversationStore();
-const goalPlanStore = createGoalPlanStore();
+const goalPlanStore = createGoalPlanStore({
+  // 任何写路径（IPC 或 AI 工具 local-goal-provider）改动计划后，广播给所有窗口，
+  // 让 GoalPlanPanel 实时重拉，无需切换会话/重挂载。详见方案 B。
+  // broadcastToAllWindows 是后文的函数声明（已提升），onChange 仅在运行时触发，引用安全。
+  onChange: (payload) => broadcastToAllWindows('goalPlans:changed', payload),
+});
 const promptSnapshotStore = createPromptSnapshotStore();
 const contextBaselineRecorder = createContextBaselineRecorder({
   promptSnapshotStore,
@@ -910,6 +916,9 @@ app.whenReady().then(async () => {
     mcpRegistry,
     mcpCredentialResolver,
     shellProvider,
+    // 让 AI 工具路径（goal_create_plan / goal_update_task）与 IPC 路径共享同一个
+    // goalPlanStore 实例，避免出现"两个实例指向同磁盘、需重挂载才同步"的 bug。
+    goalProvider: createLocalGoalProvider({ goalPlanStore }),
     extraProviders: skillStore ? [createLocalSkillProvider({ skillStore })] : [],
   });
 

@@ -180,6 +180,16 @@ export function GoalPlanPanel({ conversationId, isZh }: GoalPlanPanelProps): Rea
     };
   }, [normalizedConversationId, isZh]);
 
+  // 实时同步：任一写路径（IPC 或 AI 工具 goal_create_plan/goal_update_task）改动计划后，
+  // main 会广播 'goalPlans:changed'，这里据此重拉，无需用户切换会话/重挂载面板。
+  // 修复 bug：goal 模式下 AI 创建计划后面板不刷新、需切走再切回才显示。
+  useEffect(() => {
+    const unsubscribe = clientApi.onGoalPlansChanged(() => {
+      void reload();
+    });
+    return unsubscribe;
+  }, [reload]);
+
   const decide = useCallback(
     async (plan: GoalPlan, decision: 'approve' | 'reject') => {
       setBusyPlanId(plan.planId);

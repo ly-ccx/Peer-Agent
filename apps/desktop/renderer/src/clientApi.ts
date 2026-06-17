@@ -68,6 +68,7 @@ const unavailableApi: ClientApi = {
   goalPlansSetStatus: unavailableMethod('goalPlansSetStatus'),
   goalPlansRecordTaskEvidence: unavailableMethod('goalPlansRecordTaskEvidence'),
   goalPlansDelete: unavailableMethod('goalPlansDelete'),
+  onGoalPlansChanged: unavailableMethod('onGoalPlansChanged'),
   chatSend: unavailableMethod('chatSend'),
   chatAbort: unavailableMethod('chatAbort'),
   chatStreamReattach: unavailableMethod('chatStreamReattach'),

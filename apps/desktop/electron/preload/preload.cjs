@@ -64,6 +64,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
   goalPlansSetStatus: (params) => ipcRenderer.invoke('goalPlans:set-status', params),
   goalPlansRecordTaskEvidence: (params) => ipcRenderer.invoke('goalPlans:record-task-evidence', params),
   goalPlansDelete: (params) => ipcRenderer.invoke('goalPlans:delete', params),
+  onGoalPlansChanged: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('goalPlans:changed', handler);
+    return () => ipcRenderer.removeListener('goalPlans:changed', handler);
+  },
   chatSend: (params) => ipcRenderer.invoke('chat:send', params),
   chatAbort: (params) => ipcRenderer.invoke('chat:abort', params),
   chatStreamReattach: (params) => ipcRenderer.invoke('chat:stream:reattach', params),

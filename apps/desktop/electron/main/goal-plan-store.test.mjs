@@ -204,3 +204,45 @@ test('listPlansByConversation 按会话过滤，且空会话不退化为全量�
   assert.equal(store.listPlansByConversation(null).length, 0);
   assert.equal(store.listPlanDetailsByConversation(undefined).length, 0);
 });
+
+test('onChange: 每个写操作（含 AI 工具路径的 create/recordTaskEvidence）都触发一次变更通知', () => {
+  const events = [];
+  const watched = createGoalPlanStore({ onChange: (e) => events.push(e) });
+
+  const plan = watched.createPlan(draftWithTasks());
+  assert.equal(events.length, 1, 'createPlan 应触发一次');
+  assert.equal(events[0].reason, 'persist');
+  assert.equal(events[0].planId, plan.planId);
+
+  watched.recordTaskEvidence(plan.planId, 't1', {
+    status: 'completed',
+    evidenceRefs: ['artifact://x'],
+  });
+  assert.equal(events.length, 2, 'recordTaskEvidence 应再触发一次');
+
+  watched.recordApproval(plan.planId, { decision: 'approve' });
+  watched.setPlanStatus(plan.planId, 'executing');
+  watched.revisePlan(plan.planId, { goal: '新目标' });
+  assert.equal(events.length, 5, 'approve/setStatus/revise 各触发一次');
+
+  watched.deletePlan(plan.planId);
+  assert.equal(events.length, 6, 'deletePlan 也应触发');
+  assert.equal(events[5].reason, 'delete');
+  assert.equal(events[5].planId, plan.planId);
+});
+
+test('onChange: 回调抛错不影响写盘事实（Evidence 已落盘）', () => {
+  const watched = createGoalPlanStore({
+    onChange: () => {
+      throw new Error('listener boom');
+    },
+  });
+  // 不应抛出；计划仍然成功落盘可读回
+  const plan = watched.createPlan(draftWithTasks());
+  assert.equal(watched.getPlan(plan.planId)?.title, '重构鉴权');
+});
+
+test('onChange: 不传回调时所有写操作正常（向后兼容）', () => {
+  const plan = store.createPlan(draftWithTasks());
+  assert.equal(store.getPlan(plan.planId)?.version, 1);
+});

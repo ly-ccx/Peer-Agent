@@ -153,8 +153,21 @@ function isInactivePlan(plan) {
   return plan?.status === 'cancelled';
 }
 
-export function createGoalPlanStore({ storeDir = pathOf('goalPlans') } = {}) {
+export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange } = {}) {
   const indexFile = path.join(storeDir, 'index.jsonl');
+
+  // 变更通知 Seam：任何写操作（create/revise/approve/setStatus/recordTaskEvidence/delete）
+  // 完成后触发 onChange，使 main 进程可向 renderer 广播 'goalPlans:changed'。
+  // 收口于此，AI 工具路径（local-goal-provider）与 IPC 路径共享同一通知，
+  // 无需在每个调用点重复挂广播。回调异常被吞掉，绝不影响写盘结果。
+  function notifyChanged(reason, planId) {
+    if (typeof onChange !== 'function') return;
+    try {
+      onChange({ reason, planId: planId ?? null });
+    } catch {
+      // 通知失败不影响持久化事实（Evidence 已落盘）。
+    }
+  }
 
   function planFile(id) {
     return path.join(storeDir, `${id}.json`);
@@ -190,6 +203,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans') } = {}) {
     const next = { ...normalized, progress: aggregateProgress(normalized.tasks) };
     writeJsonAtomic(planFile(next.planId), next);
     syncIndex(next);
+    notifyChanged('persist', next.planId);
     return next;
   }
 
@@ -397,6 +411,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans') } = {}) {
     try {
       if (existsSync(planFile(planId))) unlinkSync(planFile(planId));
     } catch {}
+    notifyChanged('delete', planId);
     return listPlans();
   }
 

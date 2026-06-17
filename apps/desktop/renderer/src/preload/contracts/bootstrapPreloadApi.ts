@@ -191,6 +191,11 @@ export interface BootstrapPreloadApi {
     change: { status?: ExecutionStatus; evidenceRefs?: string[]; result?: string; failureReason?: string; blockedReason?: string };
   }) => Promise<GoalPlan>;
   readonly goalPlansDelete: (params: { planId: string }) => Promise<readonly GoalPlan[]>;
+  // 任一写路径（IPC 或 AI 工具）改动计划后由 main 推送，renderer 据此实时重拉，
+  // 无需切换会话/重挂载。reason: 'persist'（创建/修订/审批/状态/证据）或 'delete'。
+  readonly onGoalPlansChanged: (
+    listener: (payload: { reason: string; planId: string | null }) => void,
+  ) => () => void;
   readonly chatSend: (params: ChatSendRequest) => Promise<void>;
   readonly chatAbort: (params: { streamId: string }) => Promise<void>;
   readonly chatStreamReattach: (params?: { conversationId?: string }) => Promise<StreamReattachResult>;
