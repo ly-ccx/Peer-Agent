@@ -251,9 +251,19 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
   }
 
   const pendingCount = plans.filter((plan) => plan.status === 'awaiting_approval').length;
-  // 默认收起；有待批准计划时自动展开以免漏看，除非用户手动收起过。
-  const expanded = manualCollapsed === null ? pendingCount > 0 : !manualCollapsed;
+  // B：有待批准计划时强制展开且不可手动收起，确保「批准并执行/驳回」按钮永远可见；
+  // 折叠仅对「无待批准（全部已批准/执行中/完成）」的情况生效。
+  const lockedOpen = pendingCount > 0;
+  const expanded = lockedOpen ? true : manualCollapsed === null ? false : !manualCollapsed;
   const refreshing = loading ? (isZh ? ' · 刷新中…' : ' · refreshing…') : '';
+  // A：折叠态也要有信息密度——挑一个「活跃计划」（优先待批准，其次执行中，再次第一个），
+  // 在 header 上直接显示它的标题与 X/Y 迷你进度，避免「很长却什么都没有」。
+  const activePlan =
+    plans.find((plan) => plan.status === 'awaiting_approval') ??
+    plans.find((plan) => plan.status === 'executing') ??
+    plans[0] ??
+    null;
+  const activeProgress = activePlan ? safeProgress(activePlan) : null;
   const summary = isZh
     ? `${plans.length} 个目标计划${pendingCount > 0 ? ` · ${pendingCount} 待批准` : ''}${refreshing}`
     : `${plans.length} goal plan${plans.length > 1 ? 's' : ''}${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}${refreshing}`;
@@ -264,12 +274,29 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
         type="button"
         className="goal-panel-toggle"
         aria-expanded={expanded}
-        onClick={() => setManualCollapsed(expanded)}
+        disabled={lockedOpen}
+        title={lockedOpen ? (isZh ? '有待批准计划，需先处理' : 'Pending approval — resolve first') : undefined}
+        onClick={() => {
+          if (lockedOpen) return;
+          setManualCollapsed(expanded);
+        }}
       >
         <span className="goal-panel-toggle-label">{isZh ? '目标计划' : 'Goal plans'}</span>
         <span className="goal-panel-toggle-summary">{summary}</span>
         {pendingCount > 0 ? <span className="goal-panel-toggle-badge">{pendingCount}</span> : null}
-        <span className="goal-panel-toggle-caret" aria-hidden="true">{expanded ? '⌄' : '›'}</span>
+        {!expanded && activePlan ? (
+          <span className="goal-panel-toggle-active">
+            <span className="goal-panel-toggle-active-title">{derivePlanTitle(activePlan, isZh)}</span>
+            {activeProgress ? (
+              <span className="goal-panel-toggle-active-progress">
+                {`${activeProgress.completed}/${activeProgress.total}`}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+        {lockedOpen ? null : (
+          <span className="goal-panel-toggle-caret" aria-hidden="true">{expanded ? '⌄' : '›'}</span>
+        )}
       </button>
       {!expanded ? null : (
       <div className="goal-panel-body">
@@ -283,6 +310,18 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
           <section key={plan.planId} className="goal-plan-card">
             <header className="goal-plan-head">
               <div className="goal-plan-title">{derivePlanTitle(plan, isZh)}</div>
+              {/* 批准/驳回放在 header 右侧、状态徽章旁，避免按钮被任务列表挤到卡片底部看不到。
+                  治理事实写操作（带 confirmationId 的 HumanConfirmation）仅在 awaiting_approval 时出现。 */}
+              {canDecide ? (
+                <div className="goal-plan-actions goal-plan-actions--inline">
+                  <button type="button" className="goal-plan-approve" disabled={busy} onClick={() => void decide(plan, 'approve')}>
+                    {isZh ? '批准并执行' : 'Approve & run'}
+                  </button>
+                  <button type="button" className="goal-plan-reject" disabled={busy} onClick={() => void decide(plan, 'reject')}>
+                    {isZh ? '驳回' : 'Reject'}
+                  </button>
+                </div>
+              ) : null}
               <span className={`goal-plan-status goal-plan-status--${plan.status}`}>
                 {planStatusLabel(plan.status, isZh)}
               </span>
@@ -307,16 +346,6 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
             ) : (
               <div className="goal-plan-empty-tasks">{isZh ? '尚无拆解的子任务' : 'No tasks yet'}</div>
             )}
-            {canDecide ? (
-              <footer className="goal-plan-actions">
-                <button type="button" className="goal-plan-approve" disabled={busy} onClick={() => void decide(plan, 'approve')}>
-                  {isZh ? '批准并执行' : 'Approve & run'}
-                </button>
-                <button type="button" className="goal-plan-reject" disabled={busy} onClick={() => void decide(plan, 'reject')}>
-                  {isZh ? '驳回' : 'Reject'}
-                </button>
-              </footer>
-            ) : null}
           </section>
         );
       })}

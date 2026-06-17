@@ -66,6 +66,40 @@
   font-size: 14px;
 }
 
+/* 锁定展开（有待批准计划）时，toggle 不可点击收起，去掉 hover/指针误导。 */
+.goal-panel-toggle:disabled {
+  cursor: default;
+}
+
+.goal-panel-toggle:disabled:hover {
+  background: transparent;
+}
+
+/* A：折叠态在 header 直接显示活跃计划标题 + X/Y 迷你进度。 */
+.goal-panel-toggle-active {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.goal-panel-toggle-active-title {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--za-text-soft);
+  font-size: 12px;
+}
+
+.goal-panel-toggle-active-progress {
+  flex: none;
+  color: var(--za-text-faint);
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+}
+
 .goal-panel-body {
   display: flex;
   flex-direction: column;
@@ -114,6 +148,12 @@
   font-weight: 600;
   font-size: 14px;
   color: var(--za-text);
+  /* 标题撑开剩余空间，把 header 右侧的操作按钮组 + 状态徽章顶到最右。 */
+  margin-right: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .goal-plan-status {
@@ -229,6 +269,18 @@
   display: flex;
   gap: 8px;
   padding-top: 4px;
+}
+
+/* Header 内联操作组：跟在标题后、状态徽章前，按钮更紧凑以适配 header 行高。 */
+.goal-plan-actions--inline {
+  flex: none;
+  padding-top: 0;
+}
+
+.goal-plan-actions--inline button {
+  padding: 4px 12px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .goal-plan-actions button {
