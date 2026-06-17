@@ -135,6 +135,10 @@ export interface LocalMcpServerView {
   readonly mcpId: string;
   readonly displayName: string;
   readonly name: string;
+  /** Name the MCP server reports during the initialize handshake. */
+  readonly reportedName?: string | null;
+  /** Version the MCP server reports during the initialize handshake. */
+  readonly reportedVersion?: string | null;
   readonly description?: string;
   readonly enabled: boolean;
   readonly transport: McpTransportKind;
@@ -187,6 +191,10 @@ export interface McpManifestRefreshResult {
   readonly view: LocalMcpServerView;
   readonly manifest: {
     readonly discoveredAt: string;
+    readonly serverInfo?: {
+      readonly name?: string;
+      readonly version?: string;
+    };
     readonly tools: readonly McpToolSummary[];
     readonly resources: readonly McpResourceSummary[];
     readonly prompts: readonly McpPromptSummary[];

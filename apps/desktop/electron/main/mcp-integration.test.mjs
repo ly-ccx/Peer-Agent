@@ -252,4 +252,54 @@ describe('MCP integration runtime chain', () => {
       `MCP server not found: ${dottedServerId}`,
     );
   });
+
+  it('adopts the server-reported name on refresh only when displayName is an auto-fallback', () => {
+    const registry = createMcpRegistry();
+    // No displayName provided: it falls back to the id (an auto-fallback value).
+    const created = registry.upsertServer({
+      id: 'reported-demo',
+      transport: 'streamable_http',
+      url: 'http://127.0.0.1:3929/mcp',
+      enabled: true,
+    });
+    assert.equal(created.displayName, 'reported-demo');
+
+    const refreshed = registry.updateManifest('reported-demo', {
+      discoveredAt: new Date().toISOString(),
+      serverInfo: { name: 'DingTalk Docs MCP', version: '2.1.0' },
+      tools: [],
+      resources: [],
+      prompts: [],
+      health: { status: 'ok', checkedAt: new Date().toISOString(), message: '' },
+    });
+
+    // Server-reported name is persisted and adopted as the visible name.
+    assert.equal(refreshed.reportedName, 'DingTalk Docs MCP');
+    assert.equal(refreshed.reportedVersion, '2.1.0');
+    assert.equal(refreshed.displayName, 'DingTalk Docs MCP');
+  });
+
+  it('keeps a user-chosen displayName while still recording the server-reported name', () => {
+    const registry = createMcpRegistry();
+    registry.upsertServer({
+      id: 'named-demo',
+      displayName: 'My Custom Name',
+      transport: 'streamable_http',
+      url: 'http://127.0.0.1:3929/mcp',
+      enabled: true,
+    });
+
+    const refreshed = registry.updateManifest('named-demo', {
+      discoveredAt: new Date().toISOString(),
+      serverInfo: { name: 'DingTalk Docs MCP', version: '2.1.0' },
+      tools: [],
+      resources: [],
+      prompts: [],
+      health: { status: 'ok', checkedAt: new Date().toISOString(), message: '' },
+    });
+
+    // User-chosen name wins; reported name is still recorded for reference.
+    assert.equal(refreshed.displayName, 'My Custom Name');
+    assert.equal(refreshed.reportedName, 'DingTalk Docs MCP');
+  });
 });

@@ -111,6 +111,8 @@ function normalizeLegacyItem(item = {}) {
     mcpId: id,
     displayName: asString(item.displayName ?? item.name, id),
     name: asString(item.displayName ?? item.name, id),
+    reportedName: item.reportedName ? asString(item.reportedName) : null,
+    reportedVersion: item.reportedVersion ? asString(item.reportedVersion) : null,
     description: asString(item.description, ''),
     enabled: item.enabled !== false,
     transport,
@@ -159,6 +161,8 @@ function toRendererView(server) {
     mcpId: server.id,
     displayName: server.displayName,
     name: server.displayName,
+    reportedName: server.reportedName ?? null,
+    reportedVersion: server.reportedVersion ?? null,
     description: server.description,
     enabled: server.enabled,
     transport: server.transport,
@@ -286,8 +290,23 @@ export function createMcpRegistry() {
   function updateManifest(serverId, manifest) {
     const server = getServer(serverId);
     if (!server) throw new Error(`MCP server not found: ${serverId}`);
+    const reportedName = asString(manifest?.serverInfo?.name ?? '').trim();
+    const reportedVersion = asString(manifest?.serverInfo?.version ?? '').trim();
+    // Only adopt the server-reported name as the visible displayName when the
+    // current displayName is still an auto-fallback value (id / command / url),
+    // i.e. the user has never deliberately named this server. This keeps
+    // user-chosen names authoritative over server-reported ones.
+    const autoFallbacks = new Set(
+      [server.id, server.command, server.url].filter(Boolean).map((value) => String(value)),
+    );
+    const displayNameIsAuto = autoFallbacks.has(String(server.displayName ?? ''));
+    const nextDisplayName = reportedName && displayNameIsAuto ? reportedName : server.displayName;
     const next = upsertServer({
       ...server,
+      displayName: nextDisplayName,
+      name: nextDisplayName,
+      reportedName: reportedName || server.reportedName || null,
+      reportedVersion: reportedVersion || server.reportedVersion || null,
       tools: Array.isArray(manifest?.tools) ? manifest.tools : [],
       resources: Array.isArray(manifest?.resources) ? manifest.resources : [],
       prompts: Array.isArray(manifest?.prompts) ? manifest.prompts : [],

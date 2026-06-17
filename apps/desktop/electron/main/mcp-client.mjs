@@ -192,6 +192,24 @@ function normalizePrompt(prompt) {
   };
 }
 
+function readServerInfo(client) {
+  // serverInfo is reported by the server during the MCP initialize handshake
+  // and cached by the SDK. Treat it as factual metadata, never a secret.
+  try {
+    const info = client.getServerVersion?.();
+    if (!info || typeof info !== 'object') return undefined;
+    const name = typeof info.name === 'string' ? info.name.trim() : '';
+    const version = typeof info.version === 'string' ? info.version.trim() : '';
+    if (!name && !version) return undefined;
+    return {
+      ...(name ? { name } : {}),
+      ...(version ? { version } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function discoverMcpManifest(server, options = {}) {
   const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
   return withClient(server, async (client) => {
@@ -218,6 +236,7 @@ export async function discoverMcpManifest(server, options = {}) {
 
     return {
       discoveredAt: nowIso(),
+      serverInfo: readServerInfo(client),
       tools,
       resources,
       prompts,
