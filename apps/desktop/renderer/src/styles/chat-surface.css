@@ -445,32 +445,26 @@
   white-space: nowrap;
 }
 
-.composer-access-dropdown {
+/* 统一规范:模式 / 访问 / 思考深度三个 composer 下拉共用同一套尺寸。
+   触发器宽度自适应文字;不再为每个下拉单独拍 min/max 魔法数字。 */
+.composer-dropdown {
   width: auto;
-  min-width: 86px;
-  max-width: 118px;
-}
-
-.composer-effort-dropdown {
-  width: auto;
-  min-width: 88px;
-  max-width: 120px;
-}
-
-.composer-access-dropdown .pa-dropdown-menu {
-  min-width: 128px;
-}
-
-.composer-effort-dropdown .pa-dropdown-menu {
-  min-width: 132px;
+  min-width: 0;
+  max-width: 140px;
 }
 
 .composer-dropdown .pa-dropdown-menu {
   padding: 4px;
+  /* 菜单宽度贴合最宽选项,短选项不被强行撑宽留白;上限防止超长文案撑爆。 */
+  min-width: max-content;
+  max-width: 220px;
+  /* 单层浮层:显式覆盖全局 .pa-dropdown-menu 的 border/radius/背景,
+     避免实心底 + 半透明层 + 错位描边叠成"双层框"。 */
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--chrome-elevated) 88%, transparent);
+  background: color-mix(in srgb, var(--chrome-raised) 88%, transparent);
   backdrop-filter: blur(18px);
-  box-shadow: var(--shadow-pop);
+  box-shadow: var(--shadow-popover);
 }
 
 .composer-dropdown .pa-dropdown-item {
