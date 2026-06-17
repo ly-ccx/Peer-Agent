@@ -3,6 +3,12 @@ import type { ReactElement } from 'react';
 import type { ExecutionStatus, GoalPlan, GoalTask } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
 
+function normalizeConversationId(value: string | number | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
 /**
  * Goal 模式计划面板 —— 见 docs/proposals/0002-goal-mode.md。
  *
@@ -109,30 +115,70 @@ export function GoalPlanPanel({ conversationId, isZh }: GoalPlanPanelProps): Rea
   const [busyPlanId, setBusyPlanId] = useState<string | null>(null);
   const [manualCollapsed, setManualCollapsed] = useState<boolean | null>(null);
 
-  const numericConversationId = useMemo(() => {
-    if (conversationId === null) return undefined;
-    const parsed = Number(conversationId);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }, [conversationId]);
+  const normalizedConversationId = useMemo(
+    () => normalizeConversationId(conversationId),
+    [conversationId],
+  );
 
   const reload = useCallback(async () => {
+    if (normalizedConversationId === null) {
+      setPlans([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
-      const result = await clientApi.goalPlansList(
-        numericConversationId === undefined ? undefined : { conversationId: numericConversationId },
+      const result = await clientApi.goalPlansList({ conversationId: normalizedConversationId });
+      const scopedResult = result.filter(
+        (plan) => normalizeConversationId(plan.conversationId) === normalizedConversationId
+          && plan.status !== 'cancelled',
       );
-      setPlans(result);
+      setPlans(scopedResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : isZh ? '加载计划失败' : 'Failed to load plans');
     } finally {
       setLoading(false);
     }
-  }, [numericConversationId, isZh]);
+  }, [normalizedConversationId, isZh]);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    let cancelled = false;
+
+    const load = async () => {
+      if (normalizedConversationId === null) {
+        setPlans([]);
+        setLoading(false);
+        setError(null);
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await clientApi.goalPlansList({ conversationId: normalizedConversationId });
+        if (cancelled) return;
+        const scopedResult = result.filter(
+          (plan) => normalizeConversationId(plan.conversationId) === normalizedConversationId
+            && plan.status !== 'cancelled',
+        );
+        setPlans(scopedResult);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : isZh ? '加载计划失败' : 'Failed to load plans');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [normalizedConversationId, isZh]);
 
   const decide = useCallback(
     async (plan: GoalPlan, decision: 'approve' | 'reject') => {
@@ -203,7 +249,7 @@ export function GoalPlanPanel({ conversationId, isZh }: GoalPlanPanelProps): Rea
             </header>
             {plan.goal ? <p className="goal-plan-goal">{plan.goal}</p> : null}
             <div className="goal-plan-progress" role="progressbar" aria-valuenow={progress.percent} aria-valuemin={0} aria-valuemax={100}>
-              <div className="goal-plan-progress-bar" style={{ width: `${progress.percent}%` }} />
+              <div className="goal-plan-progress-bar" style={{ backgroundSize: `${progress.percent}% 100%` }} />
               <span className="goal-plan-progress-text">
                 {isZh
                   ? `${progress.completed}/${progress.total} 完成`

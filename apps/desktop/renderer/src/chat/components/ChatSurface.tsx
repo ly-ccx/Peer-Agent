@@ -139,6 +139,7 @@ type ContentSegment =
       args?: Record<string, unknown>;
       result?: string;
       synthetic?: boolean;
+      toolCallId?: string;
     };
 
 interface ToolCallLegacy {
@@ -146,6 +147,65 @@ interface ToolCallLegacy {
   args: Record<string, unknown>;
   result?: string;
   synthetic?: boolean;
+}
+
+function normalizeStreamSegment(segment: ContentSegment): ContentSegment {
+  if (segment.type === 'tool-call') {
+    return {
+      type: 'tool-call',
+      tool: segment.tool,
+      args: segment.args || {},
+      result: segment.result,
+      synthetic: segment.synthetic,
+      toolCallId: segment.toolCallId,
+    };
+  }
+  return { type: segment.type, content: segment.content || '' };
+}
+
+function segmentsSignature(segments: readonly ContentSegment[]): string {
+  return JSON.stringify(segments.map((segment) => {
+    if (segment.type === 'tool-call') {
+      return [segment.type, segment.toolCallId || '', segment.tool || '', JSON.stringify(segment.args || {}), segment.result || '', segment.synthetic ? '1' : '0'];
+    }
+    return [segment.type, segment.content || ''];
+  }));
+}
+
+function mergeReattachedSegments(
+  persistedSegments: readonly ContentSegment[] | undefined,
+  liveSegments: readonly ContentSegment[] | undefined
+): ContentSegment[] {
+  const persisted = (persistedSegments || []).map(normalizeStreamSegment);
+  const live = (liveSegments || []).map(normalizeStreamSegment);
+  if (persisted.length === 0) return live;
+  if (live.length === 0) return persisted;
+
+  const persistedSignature = segmentsSignature(persisted);
+  const liveSignature = segmentsSignature(live);
+  if (liveSignature === persistedSignature) return persisted;
+  if (live.length >= persisted.length && segmentsSignature(live.slice(0, persisted.length)) === persistedSignature) {
+    return live;
+  }
+  if (persisted.length > live.length && segmentsSignature(persisted.slice(0, live.length)) === liveSignature) {
+    return persisted;
+  }
+
+  // Reattach must never delete already persisted UI evidence.  If main's active-stream
+  // snapshot diverges, keep the visible history and append only the live suffix after the
+  // longest matching prefix we can prove locally.
+  let common = 0;
+  const max = Math.min(persisted.length, live.length);
+  while (common < max && segmentsSignature([persisted[common]]) === segmentsSignature([live[common]])) common += 1;
+  return [...persisted, ...live.slice(common)];
+}
+
+function contentFromSegments(segments: readonly ContentSegment[], fallback = ''): string {
+  const text = segments
+    .filter((segment): segment is Extract<ContentSegment, { type: 'text' }> => segment.type === 'text')
+    .map((segment) => segment.content || '')
+    .join('');
+  return text || fallback;
 }
 
 interface CompactionMeta {
@@ -705,6 +765,10 @@ export function ChatSurface({
   // 整轮 wall-clock 计时:turnStartedAtRef 记录本轮起点(发送时), elapsedMs 驱动右下角实时跳秒。
   const turnStartedAtRef = useRef<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
+  const setTurnStartedAt = useCallback((startedAt: number | null) => {
+    turnStartedAtRef.current = startedAt;
+    setElapsedMs(startedAt == null ? 0 : Math.max(0, Date.now() - startedAt));
+  }, []);
   // 本轮运行时每秒刷新一次 elapsedMs(实时跳秒)。计时真值来自 turnStartedAtRef,
   // 故定时器只负责"触发重渲染",即便 tick 漂移也以起点时间戳为准,不累积误差。
   useEffect(() => {
@@ -832,16 +896,12 @@ export function ChatSurface({
       const last = prev[prev.length - 1];
       if (!last || last.role !== 'assistant') return prev;
       const segments = [...(last.segments || [])];
-      let thinkingIndex = -1;
-      for (let index = segments.length - 1; index >= 0; index -= 1) {
-        if (segments[index]?.type === 'thinking') {
-          thinkingIndex = index;
-          break;
-        }
-      }
-      const thinkingSeg = thinkingIndex >= 0 ? segments[thinkingIndex] : null;
-      if (thinkingSeg?.type === 'thinking') {
-        segments[thinkingIndex] = { type: 'thinking', content: (thinkingSeg.content || '') + chunk };
+      const lastSeg = segments[segments.length - 1];
+      // Thinking must remain ordered with tool-call/text segments. Only merge with
+      // the active trailing thinking segment; after a tool call/result, start a
+      // new thinking segment instead of rewriting an earlier one.
+      if (lastSeg && lastSeg.type === 'thinking') {
+        segments[segments.length - 1] = { type: 'thinking', content: (lastSeg.content || '') + chunk };
       } else {
         segments.push({ type: 'thinking', content: chunk });
       }
@@ -850,7 +910,8 @@ export function ChatSurface({
   }, []);
 
   // 平滑打字机：网络 delta 进 buffer，rAF 泵匀速吐字，告别"一坨一坨"的生硬感。
-  // 正文和深度思考分别用独立 buffer，避免两类 delta 在显示层互相串流。
+  // 正文和深度思考使用独立 buffer，但跨类型切换时必须先 flush 另一侧，
+  // 否则两个独立 rAF 泵会打乱网络事件顺序，把正文/思考切成交错小段。
   const textTypewriter = useTypewriterStream(appendStreamText);
   const thinkingTypewriter = useTypewriterStream(appendStreamThinking);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -942,8 +1003,7 @@ export function ChatSurface({
     setIsStreaming(false);
     streamIdRef.current = null;
     // 切换会话时一并清掉本轮计时锚点,避免上一会话的实时跳秒残留到新会话。
-    turnStartedAtRef.current = null;
-    setElapsedMs(0);
+    setTurnStartedAt(null);
     textTypewriter.reset();
     thinkingTypewriter.reset();
     if (!conversationId) { setMessages([]); setTokenUsage(null); return; }
@@ -963,27 +1023,40 @@ export function ChatSurface({
       try {
         const live = await clientApi.chatStreamReattach({ conversationId });
         if (cancelled || !live || !live.isStreaming || !live.streamId) return;
-        const segments: ContentSegment[] = [];
-        if (live.accumulatedThinking) segments.push({ type: 'thinking', content: live.accumulatedThinking });
-        if (live.accumulatedText) segments.push({ type: 'text', content: live.accumulatedText });
-        // 重新打开会话时,loaded 末尾通常已是这一轮进行中的 assistant 消息
-        // (发送时已 appendMessage 落盘的占位/部分内容)。续接必须就地用快照覆盖它,
-        // 否则会在其后再追加一条几乎相同的消息,经 persistMessages 整体回写后被永久写重,
-        // 每重开一次叠加一条。仅当末尾不是 assistant 时才新建一条承接续流。
+        const liveStartedAt = typeof live.startedAt === 'number' && Number.isFinite(live.startedAt)
+          ? live.startedAt
+          : Date.now();
+        const liveSegments: ContentSegment[] = Array.isArray(live.segments) && live.segments.length > 0
+          ? live.segments.map((segment) => normalizeStreamSegment(segment as ContentSegment))
+          : [];
+        if (liveSegments.length === 0) {
+          if (live.accumulatedThinking) liveSegments.push({ type: 'thinking', content: live.accumulatedThinking });
+          if (live.accumulatedText) liveSegments.push({ type: 'text', content: live.accumulatedText });
+        }
+        // 重新打开会话时,loaded 末尾通常已是这一轮进行中的 assistant 消息。
+        // 续接不能用 main 的活跃流快照直接覆盖它:renderer 侧可能已经把更完整的
+        // 分段思考/工具调用记录落盘了。这里以 loaded/prev 中已有 segments
+        // 为证据基线,只接受可证明更完整的 live suffix,避免切回后历史段被清空。
         setMessages((prev) => {
-          const last = prev[prev.length - 1];
+          const base = prev.length > 0 ? prev : loaded;
+          const last = base[base.length - 1];
+          const persistedAssistant = last && last.role === 'assistant' ? last : null;
+          const segments = mergeReattachedSegments(persistedAssistant?.segments, liveSegments);
           const liveMsg: ChatMsg = {
-            id: last && last.role === 'assistant' ? last.id : nextId(),
+            ...(persistedAssistant || {}),
+            id: persistedAssistant?.id || nextId(),
             role: 'assistant',
-            content: live.accumulatedText ?? '',
+            content: contentFromSegments(segments, live.accumulatedText ?? persistedAssistant?.content ?? ''),
             segments,
+            timestamp: persistedAssistant?.timestamp || Date.now(),
           };
-          if (last && last.role === 'assistant') {
-            return [...prev.slice(0, -1), liveMsg];
+          if (persistedAssistant) {
+            return [...base.slice(0, -1), liveMsg];
           }
-          return [...prev, liveMsg];
+          return [...base, liveMsg];
         });
         streamIdRef.current = live.streamId;
+        setTurnStartedAt(liveStartedAt);
         setIsStreaming(true);
       } catch {
         // reattach 失败不影响正常加载;降级为无续接(用户可重新发送)。
@@ -1027,11 +1100,17 @@ export function ChatSurface({
 
     const offDelta = clientApi.onChatStreamDelta(({ streamId, content }) => {
       if (streamId !== streamIdRef.current) return;
+      // Preserve provider event order across independent typewriter buffers.
+      // If reasoning text is still buffered, commit it before appending answer text.
+      thinkingTypewriter.flush();
       textTypewriter.push(content);
     });
 
     const offThinking = clientApi.onChatStreamThinking(({ streamId, content }) => {
       if (streamId !== streamIdRef.current) return;
+      // Preserve provider event order across independent typewriter buffers.
+      // If answer text is still buffered, commit it before appending reasoning text.
+      textTypewriter.flush();
       thinkingTypewriter.push(content);
     });
 
@@ -1086,7 +1165,7 @@ export function ChatSurface({
         });
         onConversationUpdated?.();
       }
-      turnStartedAtRef.current = null;
+      setTurnStartedAt(null);
       streamIdRef.current = null;
     });
 
@@ -1129,7 +1208,7 @@ export function ChatSurface({
         });
         onConversationUpdated?.();
       }
-      turnStartedAtRef.current = null;
+      setTurnStartedAt(null);
       streamIdRef.current = null;
     });
 
@@ -1138,7 +1217,7 @@ export function ChatSurface({
       setToolProgress({ tool, path, receivedLines });
     });
 
-    const offToolCall = clientApi.onChatStreamToolCall(({ streamId, tool, args }) => {
+    const offToolCall = clientApi.onChatStreamToolCall(({ streamId, tool, args, toolCallId }) => {
       if (streamId !== streamIdRef.current) return;
       // Tool-call events can arrive while the typewriter still holds earlier text
       // deltas. Flush first so pre-call text is committed above the structured
@@ -1151,25 +1230,27 @@ export function ChatSurface({
         const last = prev[prev.length - 1];
         if (!last || last.role !== 'assistant') return prev;
         const segments = [...(last.segments || [])];
-        segments.push({ type: 'tool-call', tool, args, result: undefined });
+        segments.push({ type: 'tool-call', tool, args, toolCallId, result: undefined });
         const next = [...prev.slice(0, -1), { ...last, segments }];
         persistMessages(next);
         return next;
       });
     });
 
-    const offToolResult = clientApi.onChatStreamToolResult(({ streamId, result }) => {
+    const offToolResult = clientApi.onChatStreamToolResult(({ streamId, toolCallId, result }) => {
       if (streamId !== streamIdRef.current) return;
+      textTypewriter.flush();
+      thinkingTypewriter.flush();
       setMessages((prev) => {
         const last = prev[prev.length - 1];
         if (!last || last.role !== 'assistant') return prev;
         const segments = [...(last.segments || [])];
         for (let i = segments.length - 1; i >= 0; i--) {
           const segment = segments[i];
-          if (segment.type === 'tool-call' && segment.result === undefined) {
-            segments[i] = { ...segment, result };
-            break;
-          }
+          if (segment.type !== 'tool-call' || segment.result !== undefined) continue;
+          if (toolCallId && segment.toolCallId && segment.toolCallId !== toolCallId) continue;
+          segments[i] = { ...segment, result };
+          break;
         }
         const next = [...prev.slice(0, -1), { ...last, segments }];
         persistMessages(next);
@@ -1229,7 +1310,7 @@ export function ChatSurface({
           return prev;
         });
       }
-      turnStartedAtRef.current = null;
+      setTurnStartedAt(null);
       streamIdRef.current = null;
     });
 
@@ -1447,8 +1528,7 @@ export function ChatSurface({
 
     const streamId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     streamIdRef.current = streamId;
-    turnStartedAtRef.current = Date.now();
-    setElapsedMs(0);
+    setTurnStartedAt(Date.now());
     setIsStreaming(true);
 
     const contextMessages = [...messages, userMsg];
@@ -1546,8 +1626,7 @@ export function ChatSurface({
 
     const streamId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     streamIdRef.current = streamId;
-    turnStartedAtRef.current = Date.now();
-    setElapsedMs(0);
+    setTurnStartedAt(Date.now());
     setIsStreaming(true);
 
     const apiMessages = toApiMessages(contextMessages);

@@ -59,8 +59,20 @@ export type StreamReattachResult =
   | {
       readonly streamId: string;
       readonly conversationId: string | null;
+      readonly startedAt?: number | null;
       readonly accumulatedText: string;
       readonly accumulatedThinking: string;
+      readonly segments?: readonly (
+        | { readonly type: 'text'; readonly content?: string }
+        | { readonly type: 'thinking'; readonly content?: string }
+        | {
+            readonly type: 'tool-call';
+            readonly tool?: string;
+            readonly args?: Record<string, unknown>;
+            readonly result?: string;
+            readonly toolCallId?: string;
+          }
+      )[];
       readonly isStreaming: boolean;
     };
 
@@ -162,7 +174,7 @@ export interface BootstrapPreloadApi {
   }) => Promise<LifetimeUsage>;
   // Goal 模式计划（见 docs/proposals/0002-goal-mode.md）。
   // 完成状态由 Evidence 自底向上聚合，渲染层只读展示 + 治理操作（批准/驳回/修订），不可手填进度。
-  readonly goalPlansList: (params?: { conversationId?: number }) => Promise<readonly GoalPlan[]>;
+  readonly goalPlansList: (params?: { conversationId?: string }) => Promise<readonly GoalPlan[]>;
   readonly goalPlansGet: (params: { planId: string }) => Promise<GoalPlan | null>;
   readonly goalPlansCreate: (params: { draft: Partial<GoalPlan> }) => Promise<GoalPlan>;
   readonly goalPlansRevise: (params: {

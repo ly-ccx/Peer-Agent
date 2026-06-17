@@ -8,10 +8,13 @@
   margin: 0 0 16px;
 }
 
-/* Docked variant: sits directly above the composer as a collapsible bar. */
+/* Docked variant: sits directly above the composer as a collapsible bar.
+   Width/centering must match .chat-composer so the bar lines up with the input. */
 .goal-panel--docked {
   gap: 0;
-  margin: 0 0 8px;
+  width: 100%;
+  max-width: var(--chat-content-max);
+  margin: 0 auto 8px;
   border: 1px solid var(--za-line);
   border-radius: var(--za-radius);
   background: var(--za-surface-1);
@@ -135,24 +138,27 @@
   color: var(--za-text-soft);
 }
 
+/* Progress is a flow container: a fixed-height track row + a text row below it.
+   The track height is carried by an inner pseudo/child, NOT by this box, so the
+   text sits in normal flow and never overlaps the task list underneath. */
 .goal-plan-progress {
-  position: relative;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--za-hover);
-  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .goal-plan-progress-bar {
   height: 6px;
   border-radius: 999px;
-  background: #2563eb;
-  transition: width var(--za-motion-medium, 200ms) var(--za-ease-standard, ease);
+  background: var(--za-hover);
+  background-image: linear-gradient(#2563eb, #2563eb);
+  background-repeat: no-repeat;
+  background-size: 0% 100%;
+  transition: background-size var(--za-motion-medium, 200ms) var(--za-ease-standard, ease);
 }
 
 .goal-plan-progress-text {
   display: block;
-  margin-top: 6px;
   font-size: 12px;
   color: var(--za-text-muted);
 }

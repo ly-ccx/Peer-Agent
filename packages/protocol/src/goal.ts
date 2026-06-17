@@ -108,7 +108,7 @@ export interface GoalRevision {
 export interface GoalPlan {
   // 身份 & 归属
   readonly planId: string;
-  readonly conversationId?: number;
+  readonly conversationId?: string;
   readonly threadId?: string;
   readonly agentId?: number;
   readonly title: string;

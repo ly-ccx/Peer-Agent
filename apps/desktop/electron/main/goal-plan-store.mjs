@@ -129,6 +129,30 @@ function updateTaskInTree(tasks, taskId, updater) {
   return { tasks: next, found };
 }
 
+function normalizeConversationId(value) {
+  if (value === undefined || value === null) return null;
+  const normalized = String(value).trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizePlan(plan) {
+  if (!plan) return null;
+  const normalizedConversationId = normalizeConversationId(plan.conversationId);
+  const approvalDecision = plan.approval?.decision;
+  const normalizedStatus = approvalDecision === 'reject' && plan.status !== 'cancelled'
+    ? 'cancelled'
+    : plan.status;
+  return {
+    ...plan,
+    conversationId: normalizedConversationId ?? undefined,
+    status: normalizedStatus,
+  };
+}
+
+function isInactivePlan(plan) {
+  return plan?.status === 'cancelled';
+}
+
 export function createGoalPlanStore({ storeDir = pathOf('goalPlans') } = {}) {
   const indexFile = path.join(storeDir, 'index.jsonl');
 
@@ -162,26 +186,36 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans') } = {}) {
 
   function persist(plan) {
     // progress 始终由子任务聚合派生，写入前强制重算覆盖（不可手填）。
-    const next = { ...plan, progress: aggregateProgress(plan.tasks) };
+    const normalized = normalizePlan(plan);
+    const next = { ...normalized, progress: aggregateProgress(normalized.tasks) };
     writeJsonAtomic(planFile(next.planId), next);
     syncIndex(next);
     return next;
   }
 
+  function activeMeta(meta) {
+    return !isInactivePlan(meta);
+  }
+
   function listPlans() {
-    return readIndex().sort((a, b) =>
-      String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),
-    );
+    return readIndex()
+      .map(normalizePlan)
+      .filter((m) => m && activeMeta(m))
+      .sort((a, b) =>
+        String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),
+      );
   }
 
   function listPlansByConversation(conversationId) {
-    return listPlans().filter((m) => (m.conversationId ?? null) === (conversationId ?? null));
+    const normalizedConversationId = normalizeConversationId(conversationId);
+    if (normalizedConversationId === null) return [];
+    return listPlans().filter((m) => normalizeConversationId(m.conversationId) === normalizedConversationId);
   }
 
   function hydratePlanMeta(meta) {
     if (!meta?.planId) return null;
     const plan = getPlan(meta.planId);
-    if (!plan) return null;
+    if (!plan || isInactivePlan(plan)) return null;
     if (plan.progress) return plan;
     return { ...plan, progress: aggregateProgress(plan.tasks) };
   }
@@ -191,11 +225,13 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans') } = {}) {
   }
 
   function listPlanDetailsByConversation(conversationId) {
-    return listPlansByConversation(conversationId).map(hydratePlanMeta).filter(Boolean);
+    const normalizedConversationId = normalizeConversationId(conversationId);
+    if (normalizedConversationId === null) return [];
+    return listPlansByConversation(normalizedConversationId).map(hydratePlanMeta).filter(Boolean);
   }
 
   function getPlan(planId) {
-    return readJson(planFile(planId));
+    return normalizePlan(readJson(planFile(planId)));
   }
 
   /**
@@ -206,7 +242,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans') } = {}) {
     const tasks = Array.isArray(draft.tasks) ? draft.tasks : [];
     const plan = {
       planId: draft.planId || randomUUID(),
-      conversationId: draft.conversationId,
+      conversationId: normalizeConversationId(draft.conversationId) ?? undefined,
       threadId: draft.threadId,
       agentId: draft.agentId,
       title: draft.title || '',
@@ -270,7 +306,8 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans') } = {}) {
     const decision = approval.decision;
     let status = plan.status;
     if (decision === 'approve') status = 'approved';
-    else if (decision === 'reject' || decision === 'revise') status = 'drafting';
+    else if (decision === 'reject') status = 'cancelled';
+    else if (decision === 'revise') status = 'drafting';
     const next = {
       ...plan,
       approval: {

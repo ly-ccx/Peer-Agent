@@ -165,10 +165,19 @@ test('recordApproval: approve → approved，并落批准 Evidence', () => {
   assert.ok(approved.approval.decidedAt);
 });
 
-test('recordApproval: reject/revise 回到 drafting', () => {
+test('recordApproval: reject 取消计划并从活动列表隐藏', () => {
   const plan = store.createPlan(draftWithTasks());
   const rejected = store.recordApproval(plan.planId, { decision: 'reject', feedback: '范围太大' });
-  assert.equal(rejected.status, 'drafting');
+  assert.equal(rejected.status, 'cancelled');
+  assert.equal(store.getPlan(plan.planId)?.status, 'cancelled');
+  assert.equal(store.listPlans().length, 0);
+  assert.equal(store.listPlanDetails().length, 0);
+});
+
+test('recordApproval: revise 回到 drafting', () => {
+  const plan = store.createPlan(draftWithTasks());
+  const revised = store.recordApproval(plan.planId, { decision: 'revise', feedback: '范围太大' });
+  assert.equal(revised.status, 'drafting');
 });
 
 test('setPlanStatus 推进整体状态', () => {
@@ -186,9 +195,12 @@ test('deletePlan 移除索引与文件', () => {
   assert.equal(store.getPlan(plan.planId), null);
 });
 
-test('listPlansByConversation 按会话过滤', () => {
-  store.createPlan({ ...draftWithTasks(), conversationId: 1 });
-  store.createPlan({ ...draftWithTasks(), conversationId: 2 });
-  assert.equal(store.listPlansByConversation(1).length, 1);
-  assert.equal(store.listPlansByConversation(2).length, 1);
+test('listPlansByConversation 按会话过滤，且空会话不退化为全量列表', () => {
+  store.createPlan({ ...draftWithTasks(), conversationId: '1' });
+  store.createPlan({ ...draftWithTasks(), conversationId: '2' });
+  store.createPlan({ ...draftWithTasks(), conversationId: null });
+  assert.equal(store.listPlansByConversation('1').length, 1);
+  assert.equal(store.listPlansByConversation('2').length, 1);
+  assert.equal(store.listPlansByConversation(null).length, 0);
+  assert.equal(store.listPlanDetailsByConversation(undefined).length, 0);
 });

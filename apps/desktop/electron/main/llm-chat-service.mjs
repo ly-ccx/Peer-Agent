@@ -98,12 +98,43 @@ function noteNativeReasoningFallback(provider, details = {}) {
  * 累积逻辑集中在单一 seam。返回的对象只需实现 send()(adapter/loop 只用到 send)。
  */
 function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conversationStore = null } = {}) {
+  const appendTextSegment = (type, content) => {
+    if (!content) return;
+    const segments = streamRecord.segments;
+    const last = segments[segments.length - 1];
+    if (last?.type === type) {
+      last.content = `${last.content || ''}${content}`;
+    } else {
+      segments.push({ type, content });
+    }
+  };
+
   return {
     send(channel, payload) {
       if (channel === 'chat:stream:delta' && typeof payload?.content === 'string') {
         streamRecord.accumulatedText += payload.content;
+        appendTextSegment('text', payload.content);
       } else if (channel === 'chat:stream:thinking' && typeof payload?.content === 'string') {
         streamRecord.accumulatedThinking += payload.content;
+        appendTextSegment('thinking', payload.content);
+      } else if (channel === 'chat:stream:tool-call') {
+        streamRecord.segments.push({
+          type: 'tool-call',
+          tool: typeof payload?.tool === 'string' ? payload.tool : undefined,
+          args: payload?.args && typeof payload.args === 'object' ? payload.args : {},
+          toolCallId: typeof payload?.toolCallId === 'string' ? payload.toolCallId : undefined,
+          result: undefined,
+        });
+      } else if (channel === 'chat:stream:tool-result') {
+        const toolCallId = typeof payload?.toolCallId === 'string' ? payload.toolCallId : null;
+        for (let index = streamRecord.segments.length - 1; index >= 0; index -= 1) {
+          const segment = streamRecord.segments[index];
+          if (segment?.type !== 'tool-call') continue;
+          if (toolCallId && segment.toolCallId && segment.toolCallId !== toolCallId) continue;
+          if (segment.result !== undefined) continue;
+          segment.result = typeof payload?.result === 'string' ? payload.result : '';
+          break;
+        }
       } else if (channel === 'chat:stream:done' || channel === 'chat:stream:error') {
         const lifetimeUsage = recordConversationUsage({
           conversationStore,
@@ -265,9 +296,13 @@ export function createLlmChatService({
       // 入口快照 activeWorkspacePath 的语义一致),后续切换工作区不改变已在跑的流。
       // 供活跃流投影携带工作区维度,让"任务在其它工作区仍在跑"成为可见事实。
       workspacePath: activeWorkspacePath,
-      // ADR 22: 累积进行中的流式正文/思考,供 HMR 重载后 reattach 取快照续接。
+      // 整轮 wall-clock 起点属于运行时事实。renderer 切走/重开后通过 reattach 恢复该锚点，
+      // 避免重新进入会话时计时停住或从 0 重新开始。
+      startedAt: Date.now(),
+      // ADR 22: 累积进行中的流式正文/思考/工具段,供 HMR 重载后 reattach 取快照续接。
       accumulatedText: '',
       accumulatedThinking: '',
+      segments: [],
       usageRecorded: false,
       // 终态事件去重:保证 done/error/aborted 三选一恰好发一次,防止压缩等中间阶段抛错后界面悬挂。
       terminalEventSent: false,
@@ -490,8 +525,10 @@ export function createLlmChatService({
     return {
       streamId: id,
       conversationId: record.conversationId ?? null,
+      startedAt: typeof record.startedAt === 'number' ? record.startedAt : null,
       accumulatedText: record.accumulatedText ?? '',
       accumulatedThinking: record.accumulatedThinking ?? '',
+      segments: Array.isArray(record.segments) ? record.segments.map((segment) => ({ ...segment })) : [],
       isStreaming: true,
     };
   }
