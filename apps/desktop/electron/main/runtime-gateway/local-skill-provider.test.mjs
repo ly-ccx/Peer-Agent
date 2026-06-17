@@ -172,38 +172,42 @@ describe('createLocalSkillProvider', () => {
 
   // Phase 2.0（七层 prompt 约束落地）
   describe('seven-layer prompt constraints envelope', () => {
-    it('header includes BLOCKING REQUIREMENT (Layer 1)', async () => {
+    // 注：当前 baseline 的 envelope 已精简为「system-reminder + BLOCKING 约束
+    // + Skill 元信息 + --- 分隔 + body」。原上游的多层结构（prompt-injection
+    // 防御段、hook-feedback 提示、<skill-active> 末尾锚点）在 fork baseline 中
+    // 已被有意注释移除（见 local-skill-provider.mjs buildInstructionsEnvelope）。
+    // 下列测试断言与当前真实合约对齐；若将来恢复安全层，应同步恢复对应断言。
+    it('header includes BLOCKING behavioral constraint', async () => {
       const skills = [{ skillId: 's1', name: 'S1', instructions: 'body' }];
       const provider = createLocalSkillProvider({ skillStore: mockSkillStore(skills) });
       const zh = await provider.executeCapability(makeRequest('local.skill.s1', {}), { locale: 'zh-CN' });
       assert.match(zh.result.outputPreview, /BLOCKING/);
-      // 中文 header 约束核心措辞
-      assert.match(zh.result.outputPreview, /严格按照/);
-      assert.match(zh.result.outputPreview, /指定操作/);
+      // 中文 header 约束核心措辞（当前合约）
+      assert.match(zh.result.outputPreview, /严格按照技能指令执行/);
       const en = await provider.executeCapability(makeRequest('local.skill.s1', {}), { locale: 'en-US' });
-      assert.match(en.result.outputPreview, /BLOCKING REQUIREMENT/);
-      assert.match(en.result.outputPreview, /strictly follow/);
+      assert.match(en.result.outputPreview, /BLOCKING/);
+      assert.match(en.result.outputPreview, /execute the instructions below directly/);
     });
 
-    it('header includes prompt-injection defense and hook-feedback hint (Layer 3 / Layer 7)', async () => {
+    it('current baseline omits prompt-injection defense and hook-feedback layers', async () => {
+      // 这些安全层在 baseline 中被精简移除；此测试守护「确实不存在」，
+      // 以便将来若无意改变行为时能被发现。
       const skills = [{ skillId: 's2', name: 'S2', instructions: 'body' }];
       const provider = createLocalSkillProvider({ skillStore: mockSkillStore(skills) });
       const zh = await provider.executeCapability(makeRequest('local.skill.s2', {}), { locale: 'zh-CN' });
-      assert.match(zh.result.outputPreview, /Prompt Injection 防御/);
-      assert.match(zh.result.outputPreview, /<hook-feedback>/);
+      assert.doesNotMatch(zh.result.outputPreview, /Prompt Injection 防御/);
+      assert.doesNotMatch(zh.result.outputPreview, /<hook-feedback>/);
       const en = await provider.executeCapability(makeRequest('local.skill.s2', {}), { locale: 'en-US' });
-      assert.match(en.result.outputPreview, /Prompt Injection Defense/);
-      assert.match(en.result.outputPreview, /<hook-feedback>/);
+      assert.doesNotMatch(en.result.outputPreview, /Prompt Injection Defense/);
+      assert.doesNotMatch(en.result.outputPreview, /<hook-feedback>/);
     });
 
-    it('appends <skill-active id="..."/> anchor at the end (Layer 1)', async () => {
+    it('current baseline does not append <skill-active/> anchor', async () => {
       const skills = [{ skillId: 'anchor-skill', name: 'A', instructions: 'body content' }];
       const provider = createLocalSkillProvider({ skillStore: mockSkillStore(skills) });
       const result = await provider.executeCapability(makeRequest('local.skill.anchor-skill', {}));
       const text = result.result.outputPreview;
-      assert.match(text, /<skill-active id="anchor-skill"\/>/);
-      // 锚点应位于末尾
-      assert.ok(text.trimEnd().endsWith('<skill-active id="anchor-skill"/>'));
+      assert.doesNotMatch(text, /<skill-active/);
     });
 
     it('preserves header / separator / body structure (Layer 5)', async () => {
@@ -223,14 +227,16 @@ describe('createLocalSkillProvider', () => {
       const bodyIdx = text.indexOf('BODY_MARKER_XYZ');
       assert.ok(headerIdx >= 0 && sepIdx > headerIdx && bodyIdx > sepIdx,
         `unexpected ordering: header=${headerIdx} sep=${sepIdx} body=${bodyIdx}`);
-      // 锚点在最后
-      assert.ok(text.trimEnd().endsWith('<skill-active id="three-sec"/>'));
+      // body 位于末尾（当前合约无锚点）
+      assert.ok(text.trimEnd().endsWith('BODY_MARKER_XYZ'));
     });
   });
 
   // Phase 2.1: userInput 集成
   describe('userInput integration', () => {
-    it('includes userInput section when userMessage is in arguments', async () => {
+    // 当前合约：用户输入不再渲染为独立段，而是出现在 Skill Meta 的
+    // `invocation arguments:` 行（JSON 形式）。这里断言输入值可见即可。
+    it('surfaces userMessage value in invocation arguments (zh-CN)', async () => {
       const skills = [{ skillId: 'ui-test', name: 'UITest', instructions: 'do stuff' }];
       const provider = createLocalSkillProvider({ skillStore: mockSkillStore(skills) });
       const result = await provider.executeCapability(
@@ -238,11 +244,11 @@ describe('createLocalSkillProvider', () => {
         { locale: 'zh-CN' },
       );
       const text = result.result.outputPreview;
-      assert.match(text, /### 📋 用户输入/);
+      assert.match(text, /invocation arguments/);
       assert.match(text, /帮我部署应用/);
     });
 
-    it('includes userInput section (en-US) with input field', async () => {
+    it('surfaces input value in invocation arguments (en-US)', async () => {
       const skills = [{ skillId: 'ui-en', name: 'UIEn', instructions: 'do stuff' }];
       const provider = createLocalSkillProvider({ skillStore: mockSkillStore(skills) });
       const result = await provider.executeCapability(
@@ -250,7 +256,7 @@ describe('createLocalSkillProvider', () => {
         { locale: 'en-US' },
       );
       const text = result.result.outputPreview;
-      assert.match(text, /### 📋 User Input/);
+      assert.match(text, /invocation arguments/);
       assert.match(text, /deploy to prod/);
     });
 
