@@ -1,5 +1,5 @@
 /**
- * Goal 模式本地工具定义（Manifest）—— 见 docs/proposals/0002-goal-mode.md。
+ * Goal 模式本地工具定义（Manifest）—— 见 Goal 模式设计。
  *
  * 该工具经正规运行时链路暴露：
  *   Capability Provider(local.goal.update) → Manifest(本文件) → Runtime Projection
@@ -48,6 +48,9 @@ export const GOAL_TOOL_DEFINITIONS = [
   {
     name: GOAL_TOOL_NAMES.createPlan,
     capabilityId: 'local.goal.create',
+    // 仅在 goal 模式投影给模型（ADR 35）。mode 隔离在 Runtime Projection 层强制，
+    // 不依赖系统提示词或执行层闸门兜底。
+    availableInModes: ['goal'],
     prompt: () => GOAL_CREATE_PLAN_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-goal-provider',
@@ -99,6 +102,8 @@ export const GOAL_TOOL_DEFINITIONS = [
   {
     name: GOAL_TOOL_NAMES.updateTask,
     capabilityId: 'local.goal.update',
+    // 仅在 goal 模式投影给模型（ADR 35）。
+    availableInModes: ['goal'],
     prompt: () => GOAL_TOOL_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-goal-provider',
@@ -148,6 +153,8 @@ export const GOAL_TOOL_DEFINITIONS = [
   {
     name: GOAL_TOOL_NAMES.getPlan,
     capabilityId: 'local.goal.read',
+    // 仅在 goal 模式投影给模型（ADR 35）。
+    availableInModes: ['goal'],
     prompt: () => GOAL_GET_PLAN_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-goal-provider',

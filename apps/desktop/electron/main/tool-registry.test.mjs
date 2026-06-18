@@ -178,3 +178,64 @@ describe('Goal mode runtime tool exposure', () => {
     );
   });
 });
+
+describe('Mode-scoped tool projection (ADR 35)', () => {
+  const GOAL_TOOL_NAMES = ['goal_create_plan', 'goal_update_task', 'goal_get_plan'];
+
+  function materializedNames(mode) {
+    const registry = createRuntimeToolRegistry();
+    const projection = createRuntimeProjectionFromToolRegistry(registry, { mode });
+    return buildOpenAIToolsFromRuntimeProjection(projection, registry).map(
+      (tool) => tool.function.name,
+    );
+  }
+
+  it('projects goal tools when mode is goal', () => {
+    const names = materializedNames('goal');
+    for (const goalTool of GOAL_TOOL_NAMES) {
+      assert.ok(
+        names.includes(goalTool),
+        `${goalTool} should be materialized in goal mode`,
+      );
+    }
+  });
+
+  it('excludes goal tools when mode is chat', () => {
+    const names = materializedNames('chat');
+    for (const goalTool of GOAL_TOOL_NAMES) {
+      assert.ok(
+        !names.includes(goalTool),
+        `${goalTool} must not be materialized in chat mode`,
+      );
+    }
+  });
+
+  it('marks goal capabilities as mode_excluded in the chat projection', () => {
+    const registry = createRuntimeToolRegistry();
+    const projection = createRuntimeProjectionFromToolRegistry(registry, { mode: 'chat' });
+    const goalCapability = projection.capabilities.find(
+      (cap) => cap.capabilityId === 'local.goal.update',
+    );
+    assert.ok(goalCapability, 'goal capability should still appear in the projection');
+    assert.equal(goalCapability.health, 'mode_excluded');
+  });
+
+  it('keeps non-goal tools available in chat mode', () => {
+    const names = materializedNames('chat');
+    assert.ok(names.includes('bash'), 'bash should remain available in chat mode');
+  });
+
+  it('preserves the all-modes view when mode is omitted', () => {
+    const registry = createRuntimeToolRegistry();
+    const projection = createRuntimeProjectionFromToolRegistry(registry);
+    const names = buildOpenAIToolsFromRuntimeProjection(projection, registry).map(
+      (tool) => tool.function.name,
+    );
+    for (const goalTool of GOAL_TOOL_NAMES) {
+      assert.ok(
+        names.includes(goalTool),
+        `${goalTool} should be present when no mode is provided (backward compatibility)`,
+      );
+    }
+  });
+});

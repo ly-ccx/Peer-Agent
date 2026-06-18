@@ -31,8 +31,12 @@ const permissionGate = createChatPermissionGate({ activeStreams });
 const conversationToolContexts = new Map();
 let activeWorkspacePath = null;
 
-function buildRuntimeTools({ mcpRegistry, providerType }) {
-  const { registry, projection } = createRuntimeToolProjection({ mcpRegistry });
+function buildRuntimeTools({ mcpRegistry, providerType, mode }) {
+  // mode 作为运行时事实下传到 Runtime Projection，模式隔离工具暴露（ADR 35）。
+  const { registry, projection } = createRuntimeToolProjection({
+    mcpRegistry,
+    projectionOptions: { mode },
+  });
   const tools = providerType === 'anthropic'
     ? buildAnthropicToolsFromRuntimeProjection(projection, registry)
     : buildOpenAIToolsFromRuntimeProjection(projection, registry);
@@ -317,7 +321,7 @@ export function createLlmChatService({
 
     const toolContext = getConversationToolContext({ conversationId, workspacePath: activeWorkspacePath });
     // 把本回合的交互模式写入（复用的）会话级 toolContext，供 goal 模式运行时闸门在工具
-    // 执行层判定准入。见 docs/proposals/0004-goal-mode-runtime-gate.md。
+    // 执行层判定准入。见 Goal 模式运行时闸门设计。
     toolContext.mode = mode;
 
     try {
@@ -364,6 +368,7 @@ export function createLlmChatService({
         const runtimeTools = buildRuntimeTools({
           mcpRegistry,
           providerType: provider.provider,
+          mode,
         });
 
         try {
