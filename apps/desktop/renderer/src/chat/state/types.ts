@@ -52,6 +52,14 @@ export interface ToolCallLegacy {
 /** 压缩（compaction）留痕元数据：随消息走的表达层元数据。 */
 export interface CompactionMeta {
   method: string;
+  /**
+   * 当本次压缩未走 LLM 语义摘要、落到结构/截断兜底时，记录原因分类：
+   * no_provider / llm_empty / llm_prompt_too_long / llm_error / llm_unavailable / circuit_breaker。
+   * 走 LLM 成功时为空。让"为什么没走 LLM"在 Evidence 与压缩卡上可见。
+   */
+  fallbackReason?: string;
+  /** 兜底原因的明细（错误信息片段，截断到 500 字），仅诊断用。 */
+  fallbackDetail?: string;
   originalMessageCount: number;
   deltaMessageCount?: number;
   previousMessageCount?: number;
@@ -81,3 +89,18 @@ export interface TextGroup { type: 'text'; content: string }
 export interface ThinkingGroup { type: 'thinking'; content: string }
 export interface ToolCallGroup { type: 'tool-call-group'; calls: ToolCallLegacy[] }
 export type SegmentGroup = TextGroup | ThinkingGroup | ToolCallGroup;
+
+/** 表达层展示用的 token 用量累计（输入/输出/缓存写/缓存读）。 */
+export interface TokenUsageState {
+  input: number;
+  output: number;
+  cacheWrite?: number;
+  cacheRead?: number;
+}
+
+/**
+ * 流式工具参数进度（Codex 式实时体感）：工具调用参数在落地为正式 tool-call 段之前
+ * 会先以增量形式抵达，这里描述「正在接收/准备调用」这一过程，仅为过程提示，
+ * 不声称工具已执行或文件已落地——真正的结果由后续 tool-call 段与本地能力 Evidence 接管。
+ */
+export type ToolProgress = { tool: string; path: string | null; receivedLines: number };

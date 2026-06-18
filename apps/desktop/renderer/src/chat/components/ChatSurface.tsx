@@ -9,13 +9,26 @@ import type {
   LocalAccessLevel,
 } from '@peer-agent/protocol';
 import type React from 'react';
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { parseInteractionToolView } from '../state/interactionToolView';
-import { Dropdown, type DropdownOption } from '../../app/components/Dropdown';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Dropdown } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
+import {
+  BASE_EFFORT_LEVELS,
+  OPENAI_EFFORT_LEVELS,
+  CHAT_MODES,
+  isEffortLevel,
+  isLocalAccessLevel,
+  isChatMode,
+  type EffortLevel,
+  type ChatMode,
+} from '../state/preferences';
+import { useEffortPreference } from '../hooks/useEffortPreference';
+import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
+import { useConversationMode } from '../hooks/useConversationMode';
+import { useMessageQueue, type QueuedMessage } from '../hooks/useMessageQueue';
 import { loadComposerEntry, saveComposerEntry } from '../state/composerPersistence';
-import { formatTime, formatDuration, formatBytes, formatTokenCount } from '../state/format';
+import { formatTime, formatDuration, formatTokenCount } from '../state/format';
 import {
   estimateTextTokens,
   estimateMessageTokens,
@@ -60,55 +73,26 @@ import type {
   ThinkingGroup,
   ToolCallGroup,
   SegmentGroup,
+  ToolProgress,
 } from '../state/types';
 import { MarkdownMessage } from './markdown/MarkdownMessage';
+import { AssistantContent, CompactionSummaryCard } from './thread/AssistantContent';
+import { TokenUsageDisplay } from './thread/TokenUsageDisplay';
+import { AttachmentStrip, ImagePreviewOverlay } from './thread/AttachmentStrip';
+import { InteractionContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
 import { GoalPlanPanel } from './GoalPlanPanel';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
 import { MessageRail, type MessageRailItem } from './thread/MessageRail';
 import { useTypewriterStream } from '../hooks/useTypewriterStream';
+import { useElapsedTimer } from '../hooks/useElapsedTimer';
+import { useStreamingReport } from '../hooks/useStreamingReport';
+import { useChatStreamSubscription } from '../hooks/useChatStreamSubscription';
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 64;
 
-// 交互上下文：把「选择 request_user_input 选项」的回调下沉给工具卡渲染，
-// 避免一长串 props 透传。回调内部复用既有 submitMessage 发送路径（不另造路径）。
-// 见 docs/proposals/0004-goal-mode-runtime-gate.md。
-interface InteractionControl {
-  readonly onSelectOption: (text: string) => void;
-  readonly isStreaming: boolean;
-}
-const InteractionContext = createContext<InteractionControl | null>(null);
-
-type EffortLevel = 'off' | 'low' | 'default' | 'high' | 'xhigh';
-
-// 对话模式:进入 System Context 的 L6_MODE_REMINDER 层(见 docs/proposals/0002-goal-mode.md)。
-// 'chat' 为默认直答模式;'goal' 为先规划后执行模式。
-type ChatMode = 'chat' | 'goal';
-
-// 待发送消息队列项:当一轮 agent turn 正在运行/压缩时,用户继续提交的消息先入队,
-// 待当前轮结束后由 dequeue effect 复用 submitMessage 自动发送下一条(不另造发送路径)。
-interface QueuedMessage {
-  id: string;
-  text: string;
-  attachments: ChatAttachment[];
-  effort: EffortLevel;
-}
-
-const BASE_EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'low', 'default', 'high'];
-const OPENAI_EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'low', 'default', 'high', 'xhigh'];
 const ACCESS_LEVELS: readonly LocalAccessLevel[] = ['ask_before_local', 'session_local', 'full_local'];
-
-function isEffortLevel(value: unknown): value is EffortLevel {
-  return value === 'off' || value === 'low' || value === 'default' || value === 'high' || value === 'xhigh';
-}
-
-function isLocalAccessLevel(value: unknown): value is LocalAccessLevel {
-  return value === 'ask_before_local'
-    || value === 'session_local'
-    || value === 'restricted_local'
-    || value === 'full_local';
-}
 
 function accessLevelLabel(level: LocalAccessLevel, isZh: boolean): string {
   if (level === 'full_local') return isZh ? '完全访问' : 'Full access';
@@ -128,20 +112,6 @@ function accessLevelTitle(level: LocalAccessLevel, isZh: boolean): string {
     return isZh ? '使用受限本地访问' : 'Use restricted local access';
   }
   return isZh ? '所有本地动作都先询问' : 'Ask before local actions';
-}
-
-function effortLabel(level: EffortLevel, isZh: boolean): string {
-  if (level === 'off') return isZh ? '关闭思考' : 'Reasoning off';
-  if (level === 'low') return isZh ? '简洁思考' : 'Low reasoning';
-  if (level === 'high') return isZh ? '深度思考' : 'High reasoning';
-  if (level === 'xhigh') return isZh ? '超深度思考' : 'Extra-high reasoning';
-  return isZh ? '标准思考' : 'Default reasoning';
-}
-
-const CHAT_MODES: readonly ChatMode[] = ['chat', 'goal'];
-
-function isChatMode(value: unknown): value is ChatMode {
-  return value === 'chat' || value === 'goal';
 }
 
 function modeLabel(mode: ChatMode, isZh: boolean): string {
@@ -189,34 +159,6 @@ let msgSeq = 0;
 function nextId() { return `msg-${++msgSeq}-${Date.now()}`; }
 
 
-
-// 流式工具参数进度的展示文案。仅描述“正在接收/准备调用”这一过程,
-// 不声称工具已执行或文件已落地——真正的结果由后续 tool-call 段与本地能力 Evidence 接管。
-type ToolProgress = { tool: string; path: string | null; receivedLines: number };
-
-function toolProgressLabel(
-  progress: ToolProgress,
-  isZh: boolean,
-): string {
-  const file = progress.path ? progress.path.split('/').pop() || progress.path : null;
-  const verbZh =
-    progress.tool === 'edit_file' ? '编辑'
-      : progress.tool === 'write_file' ? '写入'
-        : progress.tool === 'read_file' ? '读取'
-          : '准备';
-  const verbEn =
-    progress.tool === 'edit_file' ? 'Editing'
-      : progress.tool === 'write_file' ? 'Writing'
-        : progress.tool === 'read_file' ? 'Reading'
-          : 'Preparing';
-  const lines = progress.receivedLines;
-  if (isZh) {
-    const target = file ? ` ${file}` : ` ${progress.tool}`;
-    return lines > 0 ? `正在${verbZh}${target} · 已接收 ${lines} 行` : `正在${verbZh}${target}…`;
-  }
-  const target = file ? ` ${file}` : ` ${progress.tool}`;
-  return lines > 0 ? `${verbEn}${target} · ${lines} lines received` : `${verbEn}${target}…`;
-}
 
 function usageFromLifetime(lifetime: {
   inputTokens?: number;
@@ -332,69 +274,32 @@ export function ChatSurface({
   const [draft, setDraft] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isCompacting, setIsCompacting] = useState(false);
-  // 整轮 wall-clock 计时:turnStartedAtRef 记录本轮起点(发送时), elapsedMs 驱动右下角实时跳秒。
-  const turnStartedAtRef = useRef<number | null>(null);
-  const [elapsedMs, setElapsedMs] = useState(0);
-  const setTurnStartedAt = useCallback((startedAt: number | null) => {
-    turnStartedAtRef.current = startedAt;
-    setElapsedMs(startedAt == null ? 0 : Math.max(0, Date.now() - startedAt));
-  }, []);
-  // 本轮运行时每秒刷新一次 elapsedMs(实时跳秒)。计时真值来自 turnStartedAtRef,
-  // 故定时器只负责"触发重渲染",即便 tick 漂移也以起点时间戳为准,不累积误差。
-  useEffect(() => {
-    if (!isStreaming) return;
-    const tick = () => {
-      const startedAt = turnStartedAtRef.current;
-      if (startedAt != null) setElapsedMs(Date.now() - startedAt);
-    };
-    tick();
-    const id = window.setInterval(tick, 1000);
-    return () => window.clearInterval(id);
-  }, [isStreaming]);
+  // 压缩进度（0-100）：流式收摘要时按已收字符/预期字符估算；null = 尚无进度。
+  const [compactionPercent, setCompactionPercent] = useState<number | null>(null);
+  // 压缩完成后保留的分隔标记：true 时底部条不消失，文案切到「从此处上文已被压缩」，
+  // 让用户清楚看到哪一侧（上文）已被压缩。新一轮压缩开始时复位。
+  const [compactionDone, setCompactionDone] = useState(false);
+  // 整轮 wall-clock 计时下沉到 useElapsedTimer：对外暴露 elapsedMs（实时跳秒）、
+  // turnStartedAtRef（供流事件计算 turnDurationMs）、setTurnStartedAt（发送时设起点）。
+  const { elapsedMs, turnStartedAtRef, setTurnStartedAt } = useElapsedTimer(isStreaming);
   // 待发送消息队列:当前轮(流式或压缩)进行中时用户继续提交的消息排队等候,
-  // 由 dequeue effect 在空闲且 provider 就绪时自动取队首发送。
-  const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
+  // 由下方 dequeue effect 在空闲且 provider 就绪时自动取队首发送。状态/增删见 hooks/useMessageQueue;
+  // 自动出队 effect 因依赖更晚声明的 submitMessage,仍内联在本组件(见下文)。
+  const { messageQueue, setMessageQueue, enqueue: enqueueMessage, removeQueuedMessage } = useMessageQueue();
   // 把流式运行状态(含会话坐标)上报给上层,供左侧列表显示 Loading 图标。
-  // 表达层只反映 isStreaming 真值,不引入新的执行真值。
-  useEffect(() => {
-    onStreamingChange?.(conversationId, isStreaming);
-  }, [isStreaming, conversationId, onStreamingChange]);
+  // 表达层只反映 isStreaming 真值,不引入新的执行真值。下沉到 useStreamingReport。
+  useStreamingReport(conversationId, isStreaming, onStreamingChange);
   const [streamError, setStreamError] = useState<string | null>(null);
-  const [effort, setEffort] = useState<EffortLevel>(() => {
-    // 思考强度是全局偏好,持久化在 settings-store(扁平 key),启动时同步注入到 initialSettings。
-    // 表达层只读取/回写这一个偏好字段,不引入新的执行真值。
-    // 五档: off(关闭) / low / default / high / xhigh(Extra High, OpenAI).
-    const stored = (clientApi.initialSettings as Record<string, unknown>)?.effort;
-    return isEffortLevel(stored)
-      ? stored
-      : 'default';
-  });
-  // 切换思考强度时回写全局设置,使其跨会话/重启保持一致。
-  const changeEffort = useCallback((level: EffortLevel) => {
-    setEffort(level);
-    void clientApi.updateSettings({ effort: level });
-  }, []);
+  // 思考强度全局偏好(读取/回写 settings-store,五档),逻辑见 hooks/useEffortPreference。
+  const { effort, setEffort, changeEffort } = useEffortPreference();
   // 对话模式按会话持久化在会话 meta 上(非全局设置):模式是「每会话状态」,切换会话
   // 各自独立、互不影响,与计划数据同口径。初值给 'chat',真实值由会话加载 effect 按
   // 当前会话 meta 覆盖(见下方 conversationId effect)。模式真值最终经 chatSend → IPC →
-  // mode-source 进入 System Context 的 L6_MODE_REMINDER 层(见 docs/proposals/0002-goal-mode.md)。
-  const [mode, setMode] = useState<ChatMode>('chat');
-  const changeMode = useCallback((next: ChatMode) => {
-    setMode(next);
-    // 回写到当前会话 meta;无活跃会话(理论上不会发生,UI 恒有会话)时仅更新本地态。
-    if (conversationId) void clientApi.conversationsUpdateMode({ id: conversationId, mode: next });
-  }, [conversationId]);
-  const [localAccessLevel, setLocalAccessLevel] = useState<LocalAccessLevel>(() => {
-    const stored = (clientApi.initialSettings as Record<string, unknown>)?.localAccessLevel;
-    return isLocalAccessLevel(stored) ? stored : 'ask_before_local';
-  });
-  const changeLocalAccessLevel = useCallback((level: LocalAccessLevel) => {
-    setLocalAccessLevel(level);
-    void clientApi.updateSettings({ localAccessLevel: level }).then((nextSettings) => {
-      const normalized = (nextSettings as Record<string, unknown>)?.localAccessLevel;
-      if (isLocalAccessLevel(normalized)) setLocalAccessLevel(normalized);
-    });
-  }, []);
+  // mode-source 进入 System Context 的 L6_MODE_REMINDER 层。逻辑见 hooks/useConversationMode。
+  const { mode, setMode, changeMode } = useConversationMode(conversationId);
+  // 本地访问授权级别全局偏好(读取/回写 settings-store,服务端归一化回执二次校正),
+  // 逻辑见 hooks/useLocalAccessPreference。注意:权限真值仍在主进程 PermissionGate,此处仅表达选择。
+  const { localAccessLevel, changeLocalAccessLevel } = useLocalAccessPreference();
   const [tokenUsage, setTokenUsage] = useState<TokenUsageState | null>(null);
   const [activeUsage, setActiveUsage] = useState<TokenUsageState | null>(null);
   const [providerRecoveryNotice, setProviderRecoveryNotice] = useState<{
@@ -657,280 +562,28 @@ export function ChatSurface({
     });
   }, [conversationId, draft, messageQueue]);
 
-  useEffect(() => {
-    const persistMessages = (msgs: ChatMsg[]) => {
-      if (!conversationId) return;
-      void clientApi.conversationsReplaceMessages({
-        id: conversationId,
-        messages: msgs.map((m) => ({
-          id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, durationMs: m.durationMs, _compaction: m.compaction, attachments: m.attachments,
-        })),
-      });
-    };
-
-    const offDelta = clientApi.onChatStreamDelta(({ streamId, content }) => {
-      if (streamId !== streamIdRef.current) return;
-      // Preserve provider event order across independent typewriter buffers.
-      // If reasoning text is still buffered, commit it before appending answer text.
-      thinkingTypewriter.flush();
-      textTypewriter.push(content);
-    });
-
-    const offThinking = clientApi.onChatStreamThinking(({ streamId, content }) => {
-      if (streamId !== streamIdRef.current) return;
-      // Preserve provider event order across independent typewriter buffers.
-      // If answer text is still buffered, commit it before appending reasoning text.
-      textTypewriter.flush();
-      thinkingTypewriter.push(content);
-    });
-
-    const offDone = clientApi.onChatStreamDone(({ streamId, usage, lifetimeUsage }) => {
-      if (streamId !== streamIdRef.current) return;
-      textTypewriter.flush();
-      thinkingTypewriter.flush();
-      setIsStreaming(false);
-      setIsCompacting(false);
-      setActiveUsage(null);
-      setPendingPermissionCalls([]);
-      setToolProgress(null);
-      const hasUsage = usage?.inputTokens || usage?.outputTokens || usage?.cacheWriteTokens || usage?.cacheReadTokens;
-      const msgUsage = hasUsage
-        ? { input: usage.inputTokens ?? 0, output: usage.outputTokens ?? 0, cacheWrite: usage.cacheWriteTokens ?? 0, cacheRead: usage.cacheReadTokens ?? 0 }
-        : null;
-      if (lifetimeUsage) {
-        // Usage ledger is owned by main/runtime; renderer only reflects the
-        // authoritative lifetimeUsage returned with the stream terminal event.
-        setTokenUsage(usageFromLifetime(lifetimeUsage));
-      } else if (msgUsage) {
-        // Compatibility fallback for older runtimes/tests that do not enrich
-        // terminal stream events with lifetimeUsage.
-        setTokenUsage((prev) => ({
-          input: (prev?.input ?? 0) + msgUsage.input,
-          output: (prev?.output ?? 0) + msgUsage.output,
-          cacheWrite: (prev?.cacheWrite ?? 0) + msgUsage.cacheWrite,
-          cacheRead: (prev?.cacheRead ?? 0) + msgUsage.cacheRead,
-        }));
-      }
-      const turnDurationMs = turnStartedAtRef.current != null ? Date.now() - turnStartedAtRef.current : undefined;
-      if (conversationId) {
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last && isEmptyAssistantPlaceholder(last)) {
-            const next = prev.slice(0, -1);
-            persistMessages(next);
-            return next;
-          }
-          if (last?.role === 'assistant') {
-            const patched: ChatMsg = {
-              ...last,
-              ...(msgUsage ? { usage: msgUsage } : {}),
-              ...(turnDurationMs != null ? { durationMs: turnDurationMs } : {}),
-            };
-            const updated = [...prev.slice(0, -1), patched];
-            persistMessages(updated);
-            return updated;
-          }
-          persistMessages(prev);
-          return prev;
-        });
-        onConversationUpdated?.();
-      }
-      setTurnStartedAt(null);
-      streamIdRef.current = null;
-    });
-
-    const offUsage = clientApi.onChatStreamUsage(({ streamId, usage }) => {
-      if (streamId !== streamIdRef.current || !usage) return;
-      setActiveUsage({
-        input: usage.inputTokens ?? 0,
-        output: usage.outputTokens ?? 0,
-        cacheWrite: usage.cacheWriteTokens ?? 0,
-        cacheRead: usage.cacheReadTokens ?? 0,
-      });
-    });
-
-    const offAborted = clientApi.onChatStreamAborted(({ streamId }) => {
-      if (streamId !== streamIdRef.current) return;
-      textTypewriter.flush();
-      thinkingTypewriter.flush();
-      setIsStreaming(false);
-      setIsCompacting(false);
-      setActiveUsage(null);
-      setPendingPermissionCalls([]);
-      setToolProgress(null);
-      const turnDurationMs = turnStartedAtRef.current != null ? Date.now() - turnStartedAtRef.current : undefined;
-      if (conversationId) {
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last && isEmptyAssistantPlaceholder(last)) {
-            const next = prev.slice(0, -1);
-            persistMessages(next);
-            return next;
-          }
-          // 停止时也留痕:把"已工作多久"记到这条 assistant 上,让用户看到中断前的整轮耗时。
-          if (last?.role === 'assistant' && turnDurationMs != null) {
-            const updated = [...prev.slice(0, -1), { ...last, durationMs: turnDurationMs }];
-            persistMessages(updated);
-            return updated;
-          }
-          persistMessages(prev);
-          return prev;
-        });
-        onConversationUpdated?.();
-      }
-      setTurnStartedAt(null);
-      streamIdRef.current = null;
-    });
-
-    const offToolProgress = clientApi.onChatStreamToolProgress(({ streamId, tool, path, receivedLines }) => {
-      if (streamId !== streamIdRef.current) return;
-      setToolProgress({ tool, path, receivedLines });
-    });
-
-    const offToolCall = clientApi.onChatStreamToolCall(({ streamId, tool, args, toolCallId }) => {
-      if (streamId !== streamIdRef.current) return;
-      // Tool-call events can arrive while the typewriter still holds earlier text
-      // deltas. Flush first so pre-call text is committed above the structured
-      // tool-call segment instead of being appended below it later.
-      textTypewriter.flush();
-      thinkingTypewriter.flush();
-      // 参数已落地为正式 tool-call 段,过程提示让位给结构化段。
-      setToolProgress(null);
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (!last || last.role !== 'assistant') return prev;
-        const segments = [...(last.segments || [])];
-        segments.push({ type: 'tool-call', tool, args, toolCallId, result: undefined });
-        const next = [...prev.slice(0, -1), { ...last, segments }];
-        persistMessages(next);
-        return next;
-      });
-    });
-
-    const offToolResult = clientApi.onChatStreamToolResult(({ streamId, toolCallId, result }) => {
-      if (streamId !== streamIdRef.current) return;
-      textTypewriter.flush();
-      thinkingTypewriter.flush();
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (!last || last.role !== 'assistant') return prev;
-        const segments = [...(last.segments || [])];
-        for (let i = segments.length - 1; i >= 0; i--) {
-          const segment = segments[i];
-          if (segment.type !== 'tool-call' || segment.result !== undefined) continue;
-          if (toolCallId && segment.toolCallId && segment.toolCallId !== toolCallId) continue;
-          segments[i] = { ...segment, result };
-          break;
-        }
-        const next = [...prev.slice(0, -1), { ...last, segments }];
-        persistMessages(next);
-        return next;
-      });
-    });
-
-    const offPermissionRequest = clientApi.onChatStreamPermissionRequest(({ streamId, call }) => {
-      if (streamId !== streamIdRef.current) return;
-      setPendingPermissionCalls((prev) => {
-        if (prev.some((item) => item.toolCallId === call.toolCallId)) return prev;
-        return [...prev, call];
-      });
-    });
-
-    const offError = clientApi.onChatStreamError(({ streamId, error, usage, lifetimeUsage }) => {
-      if (streamId !== streamIdRef.current) return;
-      textTypewriter.flush();
-      thinkingTypewriter.flush();
-      setIsStreaming(false);
-      setIsCompacting(false);
-      setActiveUsage(null);
-      setPendingPermissionCalls([]);
-      setToolProgress(null);
-      setStreamError(error);
-      if (lifetimeUsage) {
-        setTokenUsage(usageFromLifetime(lifetimeUsage));
-      } else if (usage?.inputTokens || usage?.outputTokens || usage?.cacheWriteTokens || usage?.cacheReadTokens) {
-        const msgUsage = {
-          input: usage.inputTokens ?? 0,
-          output: usage.outputTokens ?? 0,
-          cacheWrite: usage.cacheWriteTokens ?? 0,
-          cacheRead: usage.cacheReadTokens ?? 0,
-        };
-        setTokenUsage((prev) => ({
-          input: (prev?.input ?? 0) + msgUsage.input,
-          output: (prev?.output ?? 0) + msgUsage.output,
-          cacheWrite: (prev?.cacheWrite ?? 0) + msgUsage.cacheWrite,
-          cacheRead: (prev?.cacheRead ?? 0) + msgUsage.cacheRead,
-        }));
-      }
-      const turnDurationMs = turnStartedAtRef.current != null ? Date.now() - turnStartedAtRef.current : undefined;
-      if (conversationId) {
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last && isEmptyAssistantPlaceholder(last)) {
-            const next = prev.slice(0, -1);
-            persistMessages(next);
-            return next;
-          }
-          if (last?.role === 'assistant' && turnDurationMs != null) {
-            const updated = [...prev.slice(0, -1), { ...last, durationMs: turnDurationMs }];
-            persistMessages(updated);
-            return updated;
-          }
-          persistMessages(prev);
-          return prev;
-        });
-      }
-      setTurnStartedAt(null);
-      streamIdRef.current = null;
-    });
-
-    const offProviderRecovery = clientApi.onChatStreamProviderRecovery(({
-      streamId,
-      fromProvider,
-      toProvider,
-      reason,
-    }) => {
-      if (streamId !== streamIdRef.current) return;
-      setProviderRecoveryNotice({ fromProvider, toProvider, reason });
-    });
-
-    const offCompaction = clientApi.onChatCompaction(({ streamId, stage, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount }) => {
-      if (streamId !== streamIdRef.current) return;
-      if (stage === 'start') {
-        setIsCompacting(true);
-        return;
-      }
-      if (stage === 'idle') {
-        setIsCompacting(false);
-        return;
-      }
-      setIsCompacting(false);
-      if (!method || beforeTokens === undefined || afterTokens === undefined || oldMessageCount === undefined || keptMessageCount === undefined) return;
-      // 完成态不再钉在底部横幅:重载会话后,压缩点会以 CompactionSummaryCard
-      // (msg.compaction)的形式就地出现在消息时间线的对应位置(Codex 风格分割线)。
-      if (conversationId) {
-        void (async () => {
-          const { messages: loaded, tokenUsage: usage } = await loadConversationMessages(conversationId);
-          setMessages((prev) => {
-            // 压缩若在流式进行中完成,loadConversationMessages 会按常规把正在接收
-            // delta 的空 assistant 占位剥离(isEmptyAssistantPlaceholder)。一旦尾部
-            // 变成 user 消息,appendStreamText 因 last.role !== 'assistant' 直接丢弃后续
-            // delta,界面就会卡住、永远不出消息。这里在流仍活跃时把内存中的 assistant
-            // 尾消息接回压缩后的列表,保证 typewriter 的后续 delta 仍能落到这条消息上。
-            const liveTail = prev[prev.length - 1];
-            if (streamIdRef.current === streamId && liveTail && liveTail.role === 'assistant') {
-              return [...loaded, liveTail];
-            }
-            return loaded;
-          });
-          if (usage) setTokenUsage(usage);
-          onConversationUpdated?.();
-        })();
-      }
-    });
-
-    return () => { offDelta(); offThinking(); offDone(); offUsage(); offAborted(); offToolProgress(); offToolCall(); offToolResult(); offPermissionRequest(); offError(); offProviderRecovery(); offCompaction(); };
-  }, [appendStreamThinking, conversationId, onConversationUpdated]);
+  useChatStreamSubscription({
+    conversationId,
+    onConversationUpdated,
+    streamIdRef,
+    turnStartedAtRef,
+    setTurnStartedAt,
+    textTypewriter,
+    thinkingTypewriter,
+    appendStreamThinking,
+    setMessages,
+    setIsStreaming,
+    setIsCompacting,
+    setCompactionPercent,
+    setActiveUsage,
+    setTokenUsage,
+    setStreamError,
+    setPendingPermissionCalls,
+    setToolProgress,
+    setProviderRecoveryNotice,
+    usageFromLifetime,
+    loadConversationMessages,
+  });
 
   useEffect(() => {
     if (shouldAutoScrollRef.current) {
@@ -1061,9 +714,12 @@ export function ChatSurface({
       streamIdRef.current = streamId;
       const compactStartedAt = Date.now();
       setIsCompacting(true);
+      setCompactionDone(false);
+      let compactionSucceeded = false;
       try {
         const result = await clientApi.chatCompact({ conversationId, streamId });
         if (result.compacted) {
+          compactionSucceeded = true;
           const { messages: loaded, tokenUsage: usage } = await loadConversationMessages(conversationId);
           setMessages(loaded);
           if (usage) setTokenUsage(usage);
@@ -1083,6 +739,9 @@ export function ChatSurface({
         }
         streamIdRef.current = null;
         setIsCompacting(false);
+        // 完成态保留底部分隔条：压缩成功后不卸载，文案切到「从此处上文已被压缩」，
+        // 让用户清楚分界线位置（上方内容已压缩）。失败则不显示保留条。
+        if (compactionSucceeded) setCompactionDone(true);
       }
       return;
     }
@@ -1119,10 +778,7 @@ export function ChatSurface({
     // 当前轮(流式或压缩)进行中时,不丢弃也不阻塞输入:把消息排队,
     // 由 dequeue effect 在空闲后复用 submitMessage 自动发出下一条(类似 Codex 队列)。
     if (isStreaming || isCompacting) {
-      setMessageQueue((prev) => [
-        ...prev,
-        { id: nextId(), text, attachments: sentAttachments, effort },
-      ]);
+      enqueueMessage({ id: nextId(), text, attachments: sentAttachments, effort });
       return;
     }
     await submitMessage(text, sentAttachments);
@@ -1164,10 +820,6 @@ export function ChatSurface({
     setMessageQueue(rest);
     void submitMessage(head.text, head.attachments, head.effort);
   }, [isStreaming, isCompacting, hasProvider, conversationId, resumeTask, messageQueue, submitMessage]);
-
-  const removeQueuedMessage = useCallback((id: string) => {
-    setMessageQueue((prev) => prev.filter((item) => item.id !== id));
-  }, []);
 
   // 主操作按钮/回车键的统一入口:
   // - 有草稿内容时:发送或排队(由 handleSend 内部判断是否当前轮进行中)。
@@ -1367,7 +1019,33 @@ export function ChatSurface({
           <div className="compaction-notice">
             <span className="compaction-spinner" aria-hidden="true" />
             <div className="compaction-notice-body">
-              {isZh ? '压缩上下文中' : 'Compacting context'}
+              <div className="compaction-notice-label">
+                {isZh ? '压缩上下文中' : 'Compacting context'}
+                {compactionPercent !== null ? (
+                  <span className="compaction-notice-percent">{compactionPercent}%</span>
+                ) : null}
+              </div>
+              <div
+                className="compaction-progress"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={compactionPercent ?? undefined}
+              >
+                <div
+                  className={`compaction-progress-fill${compactionPercent === null ? ' compaction-progress-fill--indeterminate' : ''}`}
+                  style={compactionPercent !== null ? { width: `${compactionPercent}%` } : undefined}
+                />
+              </div>
+            </div>
+          </div>
+        ) : compactionDone ? (
+          <div className="compaction-notice compaction-notice--done">
+            <span className="compaction-done-mark" aria-hidden="true">✓</span>
+            <div className="compaction-notice-body">
+              <div className="compaction-notice-label">
+                {isZh ? '从此处上文已被压缩' : 'Context above is compacted'}
+              </div>
             </div>
           </div>
         ) : null}
@@ -1597,461 +1275,5 @@ export function ChatSurface({
       ) : null}
     </div>
     </InteractionContext.Provider>
-  );
-}
-
-function AttachmentStrip({
-  attachments,
-  onRemove,
-  onPreviewImage,
-  readOnly = false,
-  isZh,
-}: {
-  readonly attachments: readonly ChatAttachment[];
-  readonly onRemove?: (id: string) => void;
-  readonly onPreviewImage?: (attachment: ChatAttachment) => void;
-  readonly readOnly?: boolean;
-  readonly isZh: boolean;
-}) {
-  if (!attachments.length) return null;
-  return (
-    <div className={`attachment-strip ${readOnly ? 'readonly' : ''}`}>
-      {attachments.map((attachment) => (
-        <div key={attachment.id} className={`attachment-chip ${attachment.kind}`}>
-          {attachment.kind === 'image' && attachment.dataUrl ? (
-            <button
-              type="button"
-              className="attachment-thumb-btn"
-              onClick={() => onPreviewImage?.(attachment)}
-              title={isZh ? '预览图片' : 'Preview image'}
-              aria-label={isZh ? `预览图片 ${attachment.name}` : `Preview image ${attachment.name}`}
-            >
-              <img src={attachment.dataUrl} alt="" className="attachment-thumb" />
-            </button>
-          ) : (
-            <span className="attachment-file-icon" aria-hidden="true">
-              {attachment.kind === 'text' ? 'TXT' : 'FILE'}
-            </span>
-          )}
-          <span className="attachment-meta">
-            <span className="attachment-name" title={attachment.name}>{attachment.name}</span>
-            <span className="attachment-size">
-              {attachment.kind === 'image'
-                ? (isZh ? '图片' : 'Image')
-                : attachment.kind === 'text'
-                  ? (isZh ? '文本' : 'Text')
-                  : (isZh ? '未读取' : 'Metadata only')}
-              {' · '}
-              {formatBytes(attachment.size)}
-            </span>
-          </span>
-          {!readOnly && onRemove ? (
-            <button
-              type="button"
-              className="attachment-remove"
-              onClick={() => onRemove(attachment.id)}
-              aria-label={isZh ? `移除 ${attachment.name}` : `Remove ${attachment.name}`}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-                <path d="M18 6 6 18" />
-                <path d="m6 6 12 12" />
-              </svg>
-            </button>
-          ) : null}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ImagePreviewOverlay({
-  attachment,
-  isZh,
-  onClose,
-}: {
-  readonly attachment: ChatAttachment;
-  readonly isZh: boolean;
-  readonly onClose: () => void;
-}) {
-  return (
-    <div className="image-preview-overlay" role="dialog" aria-modal="true" aria-label={attachment.name} onClick={onClose}>
-      <figure className="image-preview-card" onClick={(event) => event.stopPropagation()}>
-        <img src={attachment.dataUrl ?? ''} alt={attachment.name} className="image-preview-img" />
-        <figcaption className="image-preview-caption">
-          <span className="image-preview-name">{attachment.name}</span>
-          <span className="image-preview-size">{formatBytes(attachment.size)}</span>
-          <button type="button" className="image-preview-close" onClick={onClose} aria-label={isZh ? '关闭预览' : 'Close preview'}>
-            ×
-          </button>
-        </figcaption>
-      </figure>
-    </div>
-  );
-}
-
-function ToolProgressInline({ progress, isZh }: { readonly progress: ToolProgress; readonly isZh: boolean }) {
-  return (
-    <div className="tool-progress-inline">
-      <span className="tool-progress-spinner" aria-hidden="true" />
-      <div className="tool-progress-body">
-        {toolProgressLabel(progress, isZh)}
-      </div>
-    </div>
-  );
-}
-
-function AssistantContent({ segments, content, isStreaming, toolProgress, isZh }: {
-  readonly segments?: ContentSegment[];
-  readonly content: string;
-  readonly isStreaming: boolean;
-  readonly toolProgress?: ToolProgress | null;
-  readonly isZh: boolean;
-}) {
-  if (!segments?.length) {
-    if (content || toolProgress || isStreaming) {
-      return (
-        <div className="assistant-segments">
-          {content ? <MarkdownMessage content={content} /> : null}
-          {toolProgress ? <ToolProgressInline progress={toolProgress} isZh={isZh} /> : null}
-          {!toolProgress && isStreaming ? <span className="streaming-cursor">▍</span> : null}
-        </div>
-      );
-    }
-    return null;
-  }
-
-  const groups = groupSegments(segments);
-  const lastGroup = groups[groups.length - 1];
-  // 流式期间始终保留一个“还在运行”的指示，避免工具执行间隙/文本结束等待下一步时
-  // 光标消失造成“卡住”的错觉。仅当末尾组本身已有 active 视觉（工具执行中的工具组、
-  // active 的思考文本组）时才省略底部光标，避免重复闪烁。
-  const lastGroupHasActiveIndicator = Boolean(
-    lastGroup &&
-    ((lastGroup.type === 'tool-call-group' && lastGroup.calls.some((c) => c.result === undefined)) ||
-      lastGroup.type === 'thinking'),
-  );
-  const showCursor = isStreaming && !toolProgress && !lastGroupHasActiveIndicator;
-
-  return (
-    <div className="assistant-segments">
-      {groups.map((group, i) => {
-        if (group.type === 'text') {
-          const afterTools = i > 0 && groups[i - 1].type === 'tool-call-group';
-          return (
-            <div key={i} className={afterTools ? 'segment-text-after-tools' : undefined}>
-              <MarkdownMessage content={group.content} />
-            </div>
-          );
-        }
-        if (group.type === 'thinking') {
-          return (
-            <ThinkingTextSection
-              key={i}
-              content={group.content}
-              isActive={isStreaming && i === groups.length - 1}
-              isZh={isZh}
-            />
-          );
-        }
-        return (
-          <ThinkingSection
-            key={i}
-            toolCalls={group.calls}
-            isActive={isStreaming && group.calls.some((c) => c.result === undefined)}
-            isZh={isZh}
-          />
-        );
-      })}
-      {toolProgress ? <ToolProgressInline progress={toolProgress} isZh={isZh} /> : null}
-      {showCursor ? <span className="streaming-cursor">▍</span> : null}
-    </div>
-  );
-}
-
-function ThinkingTextSection({ content, isActive, isZh }: { readonly content: string; readonly isActive: boolean; readonly isZh: boolean }) {
-  const [expanded, setExpanded] = useState(isActive);
-  const label = isActive
-    ? (isZh ? '深度思考中...' : 'Thinking...')
-    : (isZh ? '深度思考' : 'Thinking');
-
-  return (
-    <div className={`thinking-section ${isActive ? 'active' : 'done'}`}>
-      <button type="button" className="thinking-toggle" onClick={() => setExpanded(!expanded)}>
-        <span className="thinking-indicator" aria-hidden="true">
-          {isActive ? (
-            <svg className="thinking-indicator-svg" width="13" height="13" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.3" />
-              <path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" />
-            </svg>
-          ) : (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="9" fill="currentColor" />
-            </svg>
-          )}
-        </span>
-        <span className="thinking-label">{label}</span>
-        <svg className="thinking-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
-          <path d="m6 9 6 6 6-6" />
-        </svg>
-      </button>
-      {expanded ? (
-        <div className="thinking-body thinking-text">
-          <MarkdownMessage content={content} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function ThinkingSection({ toolCalls, isActive, isZh }: { readonly toolCalls: ToolCallLegacy[]; readonly isActive: boolean; readonly isZh: boolean }) {
-  const [expanded, setExpanded] = useState(isActive);
-  const doneCount = toolCalls.filter((tc) => tc.result !== undefined).length;
-  const total = toolCalls.length;
-  const label = isActive
-    ? (isZh ? `思考中... (${doneCount}/${total})` : `Thinking... (${doneCount}/${total})`)
-    : (isZh ? `${total} 次工具调用` : `${total} tool call${total > 1 ? 's' : ''}`);
-
-  return (
-    <div className={`thinking-section ${isActive ? 'active' : 'done'}`}>
-      <button type="button" className="thinking-toggle" onClick={() => setExpanded(!expanded)}>
-        <span className="thinking-indicator" aria-hidden="true">
-          {isActive ? (
-            <svg className="thinking-indicator-svg" width="13" height="13" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.3" />
-              <path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" />
-            </svg>
-          ) : (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="9" fill="currentColor" />
-            </svg>
-          )}
-        </span>
-        <span className="thinking-label">{label}</span>
-        <svg className="thinking-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
-          <path d="m6 9 6 6 6-6" />
-        </svg>
-      </button>
-      {expanded ? (
-        <div className="thinking-body">
-          {toolCalls.map((tc, i) => (
-            <ToolCallCard key={i} tc={tc} />
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function ToolCallCard({ tc }: { readonly tc: ToolCallLegacy }) {
-  const [expanded, setExpanded] = useState(false);
-  const [answered, setAnswered] = useState(false);
-  const interaction = useContext(InteractionContext);
-
-  // request_user_input：渲染为「问题 + 可点击选项 + 等待你输入」的交互卡，
-  // 而不是裸露 JSON。见 docs/proposals/0004-goal-mode-runtime-gate.md。
-  const interactionView = parseInteractionToolView(tc.tool, tc.result);
-  if (interactionView) {
-    const waiting = !(interaction?.isStreaming ?? false) && !answered;
-    const select = (text: string) => {
-      if (!waiting || !interaction) return;
-      setAnswered(true);
-      interaction.onSelectOption(text);
-    };
-    return (
-      <div className={`tool-call-card interaction-card ${waiting ? 'waiting' : 'answered'}`}>
-        <div className="interaction-question">{interactionView.question}</div>
-        {interactionView.options.length > 0 ? (
-          <div className="interaction-options">
-            {interactionView.options.map((option, idx) => (
-              <button
-                key={`${idx}-${option}`}
-                type="button"
-                className="interaction-option-button"
-                disabled={!waiting}
-                onClick={() => select(option)}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-        ) : null}
-        <div className="interaction-hint">
-          {answered
-            ? '已发送你的选择…'
-            : waiting
-              ? '等待你的输入：点击上方选项，或直接在下方输入框回复。'
-              : '处理中…'}
-        </div>
-      </div>
-    );
-  }
-
-  const label = tc.tool === 'bash'
-    ? (tc.args.command as string)
-    : tc.tool === 'read_file'
-      ? `read ${tc.args.path}`
-      : tc.tool === 'edit_file'
-        ? `edit ${tc.args.path}`
-        : tc.tool === 'write_file'
-          ? `write ${tc.args.path}`
-          : tc.tool;
-  const isSynthetic = tc.synthetic === true;
-  const isDone = tc.result !== undefined && !isSynthetic;
-
-  return (
-    <div className={`tool-call-card ${isSynthetic ? 'synthetic' : isDone ? 'done' : 'running'}`} onClick={() => setExpanded(!expanded)}>
-      <div className="tool-call-header">
-        <span className="tool-call-icon" aria-hidden="true">
-          {isSynthetic ? (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="8" x2="12" y2="13" />
-              <circle cx="12" cy="16.6" r="0.9" fill="currentColor" stroke="none" />
-            </svg>
-          ) : isDone ? (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m5 12.5 4.5 4.5L19 7" />
-            </svg>
-          ) : (
-            <svg className="tool-call-spinner-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-              <path d="M12 3a9 9 0 1 0 9 9" />
-            </svg>
-          )}
-        </span>
-        <span className="tool-call-label">{label}</span>
-        <svg className="tool-call-expand" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
-          <path d="m6 9 6 6 6-6" />
-        </svg>
-      </div>
-      {isSynthetic && expanded ? (
-        <pre className="tool-call-output">这不是一次真实工具调用记录，而是历史 assistant 文本中出现的伪 Tool Call 标记；没有收到对应的工具结果。</pre>
-      ) : null}
-      {expanded && tc.result ? (
-        <pre className="tool-call-output">{tc.result}</pre>
-      ) : null}
-    </div>
-  );
-}
-
-function CompactionSummaryCard({ compaction, isZh }: { readonly compaction: CompactionMeta; readonly isZh: boolean }) {
-  const [expanded, setExpanded] = useState(false);
-  const methodLabel =
-    compaction.method === 'llm' ? 'LLM'
-    : compaction.method === 'structural' ? (isZh ? '结构' : 'Structural')
-    : (isZh ? '截断' : 'Truncated');
-  const countLabel = compaction.deltaMessageCount !== undefined
-    && compaction.deltaMessageCount !== compaction.originalMessageCount
-    ? (isZh
-      ? `本次 ${compaction.deltaMessageCount} / 累计 ${compaction.originalMessageCount} 条`
-      : `${compaction.deltaMessageCount} this run / ${compaction.originalMessageCount} total`)
-    : `${compaction.originalMessageCount} msgs`;
-
-  return (
-    <div className="compaction-summary-card">
-      <button type="button" className="compaction-summary-toggle" onClick={() => setExpanded(!expanded)}>
-        <span className="compaction-summary-label">
-          {isZh ? '更早的对话（已压缩为摘要）' : 'Earlier conversation (compacted)'}
-        </span>
-        <span className="compaction-summary-count">
-          {countLabel} · {methodLabel}
-        </span>
-        <svg className="tool-call-expand" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
-          <path d="m6 9 6 6 6-6" />
-        </svg>
-      </button>
-      {expanded ? (
-        <div className="compaction-summary-body">
-          {(compaction as unknown as Record<string, unknown>).summary
-            ? (compaction as unknown as Record<string, unknown>).summary as string
-            : (isZh
-              ? `${compaction.originalMessageCount} 条早期消息已被压缩。\n\n压缩前: ${(compaction.beforeTokens / 1000).toFixed(0)}k tokens\n压缩后: ${(compaction.afterTokens / 1000).toFixed(0)}k tokens\n方法: ${methodLabel}`
-              : `${compaction.originalMessageCount} earlier messages compacted.\n\nBefore: ${(compaction.beforeTokens / 1000).toFixed(0)}k tokens\nAfter: ${(compaction.afterTokens / 1000).toFixed(0)}k tokens\nMethod: ${methodLabel}`)}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, isStreaming, isZh, effort, effortLevels, onEffortChange }: {
-  readonly providers: readonly LlmProviderConfigView[];
-  readonly tokenUsage: TokenUsageState | null;
-  readonly activeUsage?: TokenUsageState | null;
-  readonly contextTokens?: number;
-  readonly isStreaming?: boolean;
-  readonly isZh: boolean;
-  readonly effort: EffortLevel;
-  readonly effortLevels: readonly EffortLevel[];
-  readonly onEffortChange: (level: EffortLevel) => void;
-}) {
-  const defaultProvider = providers.find((p) => p.isDefault && p.apiKeyConfigured) || providers.find((p) => p.apiKeyConfigured);
-  const hasInfo = tokenUsage || activeUsage || contextTokens || defaultProvider?.contextWindow || defaultProvider?.inputPrice != null;
-  if (!hasInfo) return null;
-
-  const input = (tokenUsage?.input ?? 0) + (activeUsage?.input ?? 0);
-  const output = (tokenUsage?.output ?? 0) + (activeUsage?.output ?? 0);
-  const cacheWrite = (tokenUsage?.cacheWrite ?? 0) + (activeUsage?.cacheWrite ?? 0);
-  const cacheRead = (tokenUsage?.cacheRead ?? 0) + (activeUsage?.cacheRead ?? 0);
-  const billedTokens = input + output;
-  const currentContextTokens = contextTokens ?? billedTokens;
-
-  const isSubscriptionProvider = defaultProvider?.authMethod === 'oauth_chatgpt';
-  let costStr: string | null = null;
-  if (!isSubscriptionProvider && defaultProvider?.inputPrice != null && defaultProvider?.outputPrice != null) {
-    const p = defaultProvider;
-    const inputCost = (input / 1_000_000) * (p.inputPrice ?? 0);
-    const outputCost = (output / 1_000_000) * (p.outputPrice ?? 0);
-    const cwCost = cacheWrite && p.cacheWritePrice != null ? (cacheWrite / 1_000_000) * p.cacheWritePrice : 0;
-    const crCost = cacheRead && p.cacheReadPrice != null ? (cacheRead / 1_000_000) * p.cacheReadPrice : 0;
-    const cost = inputCost + outputCost + cwCost + crCost;
-    costStr = cost === 0 ? '$0.00' : cost < 0.001 ? '<$0.001' : cost < 0.01 ? '$' + cost.toFixed(4) : '$' + cost.toFixed(2);
-  }
-
-  const ctxWindow = defaultProvider?.contextWindow;
-  const ctxPercent = ctxWindow ? Math.min((currentContextTokens / ctxWindow) * 100, 100) : null;
-  const effortOptions: readonly DropdownOption[] = effortLevels.map((level) => ({ value: level, label: effortLabel(level, isZh) }));
-
-  return (
-    <div className="token-usage-wrap">
-      <span className="token-usage">
-        {defaultProvider?.model ? (
-          <span className="token-usage-model" title={isZh ? '当前会话使用的模型' : 'Model used for this conversation'}>{defaultProvider.model}</span>
-        ) : null}
-        {effortOptions.length > 0 ? (
-          <Dropdown
-            className="composer-dropdown composer-effort-dropdown"
-            value={effort}
-            options={effortOptions}
-            onChange={(next) => {
-              if (isEffortLevel(next)) onEffortChange(next);
-            }}
-            ariaLabel={isZh ? '思考深度' : 'Reasoning effort'}
-            title={isZh ? '思考深度' : 'Reasoning effort'}
-            menuPlacement="up"
-          />
-        ) : null}
-        {ctxWindow ? (
-          <>{isZh ? '上下文' : 'Ctx'} {formatTokenCount(currentContextTokens)}<span className="token-usage-detail"> / {formatTokenCount(ctxWindow)}</span></>
-        ) : currentContextTokens > 0 ? (
-          <>{formatTokenCount(currentContextTokens)} tokens</>
-        ) : null}
-        {costStr ? (
-          <span
-            className="token-usage-cost"
-            title={
-              isZh
-                ? '按 API 单价估算的等价用量价值。'
-                : 'Estimated equivalent API value.'
-            }
-          >
-            {costStr}
-          </span>
-        ) : null}
-        {isStreaming && !activeUsage ? <span className="token-usage-detail">{isZh ? '计费待返回' : 'usage pending'}</span> : null}
-      </span>
-      {ctxPercent != null ? (
-        <div className="ctx-bar">
-          <div className="ctx-bar-fill" style={{ width: `${ctxPercent}%` }} />
-        </div>
-      ) : null}
-    </div>
   );
 }

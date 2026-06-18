@@ -1,15 +1,4 @@
 @layer components {
-  .cloud-chat-conversations {
-    @apply flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden px-3.5 pb-4 pt-[52px];
-    position: relative;
-    z-index: 20;
-    border-right: 1px solid var(--za-line);
-    background: var(--za-sidebar-bg);
-    animation: za-panel-in var(--za-motion-medium) var(--za-ease-out) both;
-    -webkit-app-region: drag;
-    overflow: visible;
-  }
-
   /* 全局品牌印（Peer Vellum §6.1 白名单 #1）— 整个 App 唯一允许"高饱和朱砂"的位置 */
   .sidebar-brand {
     @apply flex items-center gap-2.5 pb-2;
