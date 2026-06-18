@@ -1039,27 +1039,40 @@ export function ChatSurface({
           </div>
         ) : null}
         {isCompacting ? (
-          <div className="compaction-notice">
-            <div className="compaction-notice-body">
-              <div className="compaction-notice-label">
+          <div
+            className="compaction-notice"
+            role="progressbar"
+            aria-label={isZh ? '压缩上下文进度' : 'Compaction progress'}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={compactionPercent ?? undefined}
+          >
+            <span
+              className={`compaction-wave${compactionPercent === null ? ' compaction-wave--indeterminate' : ''}`}
+              style={
+                compactionPercent !== null
+                  ? ({ '--compaction-fill': `${compactionPercent}%` } as React.CSSProperties)
+                  : undefined
+              }
+              aria-hidden="true"
+            />
+            <span className="compaction-notice-body">
+              <span className="compaction-notice-label">
                 {isZh ? '压缩上下文中' : 'Compacting context'}
                 {compactionPercent !== null ? (
                   <span className="compaction-notice-percent">{compactionPercent}%</span>
                 ) : null}
-              </div>
-              <div
-                className="compaction-progress"
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={compactionPercent ?? undefined}
-              >
-                <div
-                  className={`compaction-progress-fill${compactionPercent === null ? ' compaction-progress-fill--indeterminate' : ''}`}
-                  style={compactionPercent !== null ? { width: `${compactionPercent}%` } : undefined}
-                />
-              </div>
-            </div>
+              </span>
+            </span>
+            <span
+              className={`compaction-wave${compactionPercent === null ? ' compaction-wave--indeterminate' : ''}`}
+              style={
+                compactionPercent !== null
+                  ? ({ '--compaction-fill': `${compactionPercent}%` } as React.CSSProperties)
+                  : undefined
+              }
+              aria-hidden="true"
+            />
           </div>
         ) : null}
         {streamError ? (
