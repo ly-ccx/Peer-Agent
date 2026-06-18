@@ -613,6 +613,23 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
   ];
 
   event.sender.send('chat:compaction', { streamId, stage: 'start', manual: true });
+  // 字符级真实进度：压缩器流式收摘要时逐 chunk 回调，转发为 progress 事件。
+  let lastSentPercent = -1;
+  const onProgress = ({ receivedChars, estimatedTotalChars }) => {
+    const total = estimatedTotalChars > 0 ? estimatedTotalChars : 1;
+    const percent = Math.min(99, Math.round((receivedChars / total) * 100));
+    // 节流：百分比无变化时不重复发，减少 IPC 噪声。
+    if (percent === lastSentPercent) return;
+    lastSentPercent = percent;
+    event.sender.send('chat:compaction', {
+      streamId,
+      stage: 'progress',
+      manual: true,
+      receivedChars,
+      estimatedTotalChars,
+      percent,
+    });
+  };
   const result = await compactIfNeeded({
     messages: apiMessages,
     systemPrompt,
@@ -620,6 +637,7 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     providerConfig,
     force: true,
     continuityContext: priorContinuityContext,
+    onProgress,
   });
 
   if (!result.compacted) {

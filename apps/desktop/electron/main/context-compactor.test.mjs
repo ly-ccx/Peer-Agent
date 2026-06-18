@@ -184,3 +184,103 @@ describe('context compactor', () => {
     assert.equal(result.messages, messages);
   });
 });
+
+// ── 0007: 流式压缩字符级进度 ──
+
+// 用一段文本构造一个 SSE ReadableStream，模拟 LLM 流式响应。
+const makeSseResponse = (chunks) => ({
+  ok: true,
+  body: {
+    getReader() {
+      const encoder = new TextEncoder();
+      let i = 0;
+      return {
+        read() {
+          if (i >= chunks.length) return Promise.resolve({ done: true, value: undefined });
+          const value = encoder.encode(chunks[i]);
+          i += 1;
+          return Promise.resolve({ done: false, value });
+        },
+      };
+    },
+  },
+});
+
+describe('context compactor · streaming progress (0007)', () => {
+  let originalFetch;
+
+  beforeEach(() => {
+    resetCircuitBreaker();
+    originalFetch = globalThis.fetch;
+  });
+
+  const restoreFetch = () => {
+    globalThis.fetch = originalFetch;
+  };
+
+  it('reports incremental receivedChars via onProgress (anthropic stream) and uses LLM method', async () => {
+    // Anthropic SSE：每个 content_block_delta 增加摘要文本。
+    const deltas = ['## Summary', '\nfirst', '\nsecond', '\nthird'];
+    const sseChunks = deltas.map(
+      (t) => `data: ${JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: t } })}\n\n`,
+    );
+    sseChunks.push('data: [DONE]\n\n');
+    globalThis.fetch = async () => makeSseResponse(sseChunks);
+
+    const progressEvents = [];
+    const result = await compactIfNeeded({
+      messages: buildMessages(12, 20),
+      systemPrompt: 'system prompt',
+      contextWindow: 100_000,
+      providerConfig: {
+        provider: 'anthropic',
+        baseUrl: 'https://example.test',
+        apiKey: 'k',
+        model: 'claude-test',
+      },
+      force: true,
+      onProgress: (p) => progressEvents.push(p),
+    });
+
+    restoreFetch();
+
+    // 走了 LLM 语义压缩（非 structural 兜底）。
+    assert.equal(result.compacted, true);
+    assert.equal(result.messages[1]._compaction.method, 'llm');
+
+    // onProgress 至少被每个 delta 调用一次，receivedChars 单调递增。
+    assert.ok(progressEvents.length >= deltas.length);
+    const expectedFinal = deltas.join('').length;
+    assert.equal(progressEvents.at(-1).receivedChars, expectedFinal);
+    for (let i = 1; i < progressEvents.length; i += 1) {
+      assert.ok(progressEvents[i].receivedChars >= progressEvents[i - 1].receivedChars);
+    }
+    // estimatedTotalChars 为正，作为百分比分母。
+    assert.ok(progressEvents.at(-1).estimatedTotalChars > 0);
+  });
+
+  it('falls back to structural when the stream errors', async () => {
+    // body 不可读 → readSseStream 抛错 → catch 走 structural 兜底。
+    globalThis.fetch = async () => ({ ok: true, body: null });
+
+    const result = await compactIfNeeded({
+      messages: buildMessages(12, 20),
+      systemPrompt: 'system prompt',
+      contextWindow: 100_000,
+      providerConfig: {
+        provider: 'anthropic',
+        baseUrl: 'https://example.test',
+        apiKey: 'k',
+        model: 'claude-test',
+      },
+      force: true,
+      onProgress: () => {},
+    });
+
+    restoreFetch();
+
+    assert.equal(result.compacted, true);
+    assert.equal(result.messages[1]._compaction.method, 'structural');
+    assert.equal(result.messages[1]._compaction.fallbackReason, 'llm_error');
+  });
+});

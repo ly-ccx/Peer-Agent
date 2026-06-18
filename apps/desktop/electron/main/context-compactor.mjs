@@ -6,6 +6,8 @@
  * Layer 3: 手动 /compact 指令（通过 chat:compact IPC handler）
  */
 
+import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli-identity.mjs';
+
 const COMPACTION_CONFIG = {
   triggerRatio: 0.8,
   targetRatio: 0.5,
@@ -506,10 +508,41 @@ function formatCompactSummary(summary) {
 
 // ── LLM Semantic Summary（核心改进）──
 
+// 逐行读取一个 SSE（text/event-stream）响应体，对每个 `data:` 负载调用 onData。
+// 用于压缩的流式 LLM 调用：边读边累加字符，供 onProgress 估算真实进度。
+async function readSseStream(res, onData) {
+  const body = res.body;
+  if (!body || typeof body.getReader !== 'function') {
+    // 运行环境不支持流式读取（理论上不会发生在 Electron main 的 undici fetch）。
+    const text = await res.text().catch(() => '');
+    throw new Error(`summary stream unsupported (no readable body); fallback. raw=${text.slice(0, 120)}`);
+  }
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nlIndex;
+    while ((nlIndex = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, nlIndex).trim();
+      buffer = buffer.slice(nlIndex + 1);
+      if (!line || line.startsWith(':')) continue;
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (payload === '[DONE]') return;
+      onData(payload);
+    }
+  }
+}
+
 async function summarizeWithLLM({
   oldMessages,
   providerConfig,
   signal,
+  onProgress,
 }) {
   const { provider, baseUrl, apiKey, model } = providerConfig;
 
@@ -520,8 +553,21 @@ async function summarizeWithLLM({
     { role: 'user', content: COMPACT_PROMPT },
   ];
 
+  // 预期摘要总长（按 token 上限估算），用于进度百分比分母。
+  const estimatedTotalChars =
+    COMPACTION_CONFIG.summaryMaxTokens * COMPACTION_CONFIG.charsPerToken;
+  let accumulated = '';
+  const reportProgress = () => {
+    if (typeof onProgress !== 'function') return;
+    try {
+      onProgress({ receivedChars: accumulated.length, estimatedTotalChars });
+    } catch {
+      // 进度回调不应影响主流程
+    }
+  };
+
   if (provider === 'anthropic') {
-    // Anthropic: non-streaming for simpler handling
+    // Anthropic: 流式，按 content_block_delta 累加文本并上报进度。
     const url = `${baseUrl.replace(/\/+$/, '')}/v1/messages`;
     const body = {
       model,
@@ -531,8 +577,9 @@ async function summarizeWithLLM({
         { role: 'user', content: COMPACT_PROMPT },
       ],
       max_tokens: COMPACTION_CONFIG.summaryMaxTokens,
-      temperature: COMPACTION_CONFIG.summaryTemperature,
-      stream: false,
+      // 注意：当前 Anthropic 模型（Vertex 上的 Claude）已弃用 temperature，
+      // 传入会返回 400 invalid_request_error。与对话主路径对齐：不传 temperature。
+      stream: true,
     };
 
     const res = await fetch(url, {
@@ -541,6 +588,7 @@ async function summarizeWithLLM({
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
+        ...buildClaudeCliIdentityHeaders(),
       },
       body: JSON.stringify(body),
       signal,
@@ -551,20 +599,30 @@ async function summarizeWithLLM({
       throw new Error(`Anthropic summary HTTP ${res.status}: ${text.slice(0, 300)}`);
     }
 
-    const data = await res.json();
-    const content = data?.content || [];
-    const textBlock = content.find((b) => b.type === 'text');
-    return textBlock?.text || null;
+    await readSseStream(res, (payload) => {
+      let evt;
+      try {
+        evt = JSON.parse(payload);
+      } catch {
+        return;
+      }
+      if (evt?.type === 'content_block_delta' && typeof evt?.delta?.text === 'string') {
+        accumulated += evt.delta.text;
+        reportProgress();
+      }
+    });
+
+    return accumulated || null;
   }
 
-  // OpenAI: non-streaming
+  // OpenAI: 流式，按 choices[].delta.content 累加文本并上报进度。
   const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
   const body = {
     model,
     messages: summaryMessages,
     max_completion_tokens: COMPACTION_CONFIG.summaryMaxTokens,
     temperature: COMPACTION_CONFIG.summaryTemperature,
-    stream: false,
+    stream: true,
   };
 
   const res = await fetch(url, {
@@ -582,8 +640,21 @@ async function summarizeWithLLM({
     throw new Error(`OpenAI summary HTTP ${res.status}: ${text.slice(0, 300)}`);
   }
 
-  const data = await res.json();
-  return data?.choices?.[0]?.message?.content || null;
+  await readSseStream(res, (payload) => {
+    let evt;
+    try {
+      evt = JSON.parse(payload);
+    } catch {
+      return;
+    }
+    const delta = evt?.choices?.[0]?.delta?.content;
+    if (typeof delta === 'string' && delta.length > 0) {
+      accumulated += delta;
+      reportProgress();
+    }
+  });
+
+  return accumulated || null;
 }
 
 // ── Improved Structural Summary（Fallback Tier 1）──
@@ -750,6 +821,8 @@ function buildCompactedMessages({
   beforeTokens,
   afterTokens,
   continuityContext = [],
+  fallbackReason = null,
+  fallbackDetail = null,
 }) {
   const result = [{ role: 'system', content: systemPrompt }];
   const previousMessageCount = countContinuityMessages(continuityContext);
@@ -765,6 +838,8 @@ function buildCompactedMessages({
     content: buildHandoffContent({ compactSummary: mergedSummary, oldCount: representedMessageCount }),
     _compaction: {
       method,
+      fallbackReason: fallbackReason || undefined,
+      fallbackDetail: fallbackDetail || undefined,
       originalMessageCount: representedMessageCount,
       deltaMessageCount: oldCount,
       previousMessageCount,
@@ -844,6 +919,7 @@ export async function compactIfNeeded({
   signal,
   force = false,
   continuityContext = [],
+  onProgress,
 }) {
   const microcompactResult = microcompactMessagesForContext(messages);
   messages = microcompactResult.messages;
@@ -869,6 +945,8 @@ export async function compactIfNeeded({
         ...keep,
       ]),
       continuityContext,
+      fallbackReason: 'circuit_breaker',
+      fallbackDetail: 'LLM summary circuit breaker tripped after repeated failures',
     });
 
     console.warn(
@@ -880,6 +958,8 @@ export async function compactIfNeeded({
       messages: result,
       notification: {
         method: 'fallback_drop',
+        fallbackReason: 'circuit_breaker',
+        fallbackDetail: 'LLM summary circuit breaker tripped after repeated failures',
         beforeTokens,
         afterTokens: estimateTokensFromMessages(result),
         oldMessageCount: old.length,
@@ -910,6 +990,9 @@ export async function compactIfNeeded({
   const beforeTokens = estimated;
   let compactSummary = null;
   let method = 'structural';
+  // 记录"为什么没走 LLM / LLM 为什么失败"，让兜底原因在 Evidence 与 UI 可见。
+  let fallbackReason = providerConfig ? null : 'no_provider';
+  let fallbackDetail = providerConfig ? null : 'No LLM provider configured for summarization';
 
   // Tier 1: Try LLM semantic summary
   if (providerConfig) {
@@ -920,6 +1003,7 @@ export async function compactIfNeeded({
             oldMessages: old,
             providerConfig,
             signal,
+            onProgress,
           });
 
           if (rawSummary) {
@@ -959,9 +1043,24 @@ export async function compactIfNeeded({
         throw new Error('LLM summary returned empty');
       }
     } catch (err) {
+      const detail = err?.message || String(err);
       console.warn(
-        `[context-compactor] LLM summary failed: ${err?.message || err}, falling back to structural`,
+        `[context-compactor] LLM summary failed: ${detail}, falling back to structural`,
       );
+      // 归类失败原因：PTL（prompt 过长重试耗尽）/ 空返回 / 其它调用错误。
+      if (detail.includes('LLM summary returned empty')) {
+        fallbackReason = 'llm_empty';
+      } else if (
+        detail.includes('prompt_too_long') ||
+        detail.includes('context_length_exceeded') ||
+        detail.includes('413') ||
+        detail.includes('token')
+      ) {
+        fallbackReason = 'llm_prompt_too_long';
+      } else {
+        fallbackReason = 'llm_error';
+      }
+      fallbackDetail = detail.slice(0, 500);
       recordCompactionFailure();
     }
   }
@@ -970,6 +1069,10 @@ export async function compactIfNeeded({
   if (!compactSummary) {
     compactSummary = summarizeOldMessages(old);
     method = compactSummary ? 'structural' : 'fallback_drop';
+    if (!fallbackReason) {
+      // providerConfig 存在但 compactSummary 为空且未进 catch（理论兜底），标注未知。
+      fallbackReason = providerConfig ? 'llm_unavailable' : fallbackReason;
+    }
   }
 
   // Build result
@@ -982,6 +1085,8 @@ export async function compactIfNeeded({
     beforeTokens,
     afterTokens: 0, // computed below
     continuityContext,
+    fallbackReason,
+    fallbackDetail,
   });
 
   const afterTokens = estimateTokensFromMessages(result);
@@ -1010,6 +1115,8 @@ export async function compactIfNeeded({
         ...keep.slice(-5),
       ]),
       continuityContext,
+      fallbackReason,
+      fallbackDetail,
     });
     const trimmedAfterTokens = estimateTokensFromMessages(trimmedResult);
     setCompactionAfterTokens(trimmedResult, trimmedAfterTokens);
@@ -1019,6 +1126,8 @@ export async function compactIfNeeded({
       messages: trimmedResult,
       notification: {
         method,
+        fallbackReason,
+        fallbackDetail,
         beforeTokens,
         afterTokens: trimmedAfterTokens,
         oldMessageCount: old.length + Math.max(0, keep.length - 5),
@@ -1038,6 +1147,8 @@ export async function compactIfNeeded({
     messages: result,
     notification: {
       method,
+      fallbackReason,
+      fallbackDetail,
       beforeTokens,
       afterTokens,
       oldMessageCount: old.length,
