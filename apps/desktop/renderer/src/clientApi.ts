@@ -98,6 +98,7 @@ const unavailableApi: ClientApi = {
   onChatStreamConnectionRecovery: unavailableMethod('onChatStreamConnectionRecovery'),
   onChatCompaction: unavailableMethod('onChatCompaction'),
   onChatActiveStreamsChanged: unavailableMethod('onChatActiveStreamsChanged'),
+  onWindowFullscreenChanged: unavailableMethod('onWindowFullscreenChanged'),
   llmListProviders: unavailableMethod('llmListProviders'),
   llmAddProvider: unavailableMethod('llmAddProvider'),
   llmUpdateProvider: unavailableMethod('llmUpdateProvider'),

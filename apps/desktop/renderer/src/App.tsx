@@ -25,6 +25,7 @@ export function App() {
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [activePage, setActivePage] = useState<AppPage>('chat');
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [conversations, setConversations] = useState<readonly ConversationMeta[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   // 表达层状态:当前正在流式运行的会话 id 集合,用于左侧列表显示 Loading 图标。
@@ -104,6 +105,16 @@ export function App() {
     document.title = 'Peer Agent';
   }, []);
 
+  // 全屏时收掉为 macOS 交通灯预留的顶部留白。
+  // 真值来自 main 的 window:fullscreen-changed 广播(:fullscreen CSS 伪类在 Electron
+  // 原生全屏下不可靠),挂载后由 main 的 did-finish-load 补发一次初始状态。
+  useEffect(() => {
+    const unsubscribe = clientApi.onWindowFullscreenChanged(({ fullscreen }) => {
+      setIsFullscreen(Boolean(fullscreen));
+    });
+    return unsubscribe;
+  }, []);
+
   // 全局运行中会话:挂载时拉取当前活跃流快照,并订阅后续变更广播。
   // 这让左侧列表无需"点进去"即可知道哪些会话正在跑(含后台并行会话)。
   useEffect(() => {
@@ -166,7 +177,7 @@ export function App() {
   }, [refreshConversations]);
 
   return (
-    <main className="app-shell">
+    <main className={isFullscreen ? 'app-shell is-fullscreen' : 'app-shell'}>
       {session && activePage === 'settings' ? (
         <SettingsPage
           availableLocales={availableLocales}

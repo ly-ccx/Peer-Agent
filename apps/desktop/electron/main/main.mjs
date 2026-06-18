@@ -253,6 +253,20 @@ function createWindow() {
     },
   });
 
+  // 全屏状态作为窗口的权威事实，由主进程广播给渲染层。
+  // macOS 原生全屏会隐藏交通灯，但 :fullscreen CSS 伪类在 Electron 原生全屏下不可靠，
+  // 因此渲染层不能自行推断，必须以此事件为准来收掉为交通灯预留的顶部留白。
+  const sendFullscreenState = () => {
+    if (mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send('window:fullscreen-changed', {
+      fullscreen: mainWindow.isFullScreen(),
+    });
+  };
+  mainWindow.on('enter-full-screen', sendFullscreenState);
+  mainWindow.on('leave-full-screen', sendFullscreenState);
+  // 渲染层挂载完成后补发一次初始状态，避免错过加载期间的全屏切换。
+  mainWindow.webContents.on('did-finish-load', sendFullscreenState);
+
   if (isDev) {
     void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {

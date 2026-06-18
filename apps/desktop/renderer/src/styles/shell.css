@@ -45,6 +45,11 @@
     contain: layout;
   }
 
+  /* 全屏时 macOS 交通灯被系统隐藏,收掉为其预留的顶部留白(权威状态来自 main 广播)。 */
+  .app-shell.is-fullscreen .thread {
+    @apply pt-6;
+  }
+
   .cloud-thread-host {
     @apply gap-0 overflow-hidden p-0;
   }

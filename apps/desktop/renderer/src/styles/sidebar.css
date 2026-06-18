@@ -17,6 +17,11 @@
   overflow: hidden;
 }
 
+/* 全屏时 macOS 交通灯被系统隐藏,收掉侧栏为其预留的顶部留白(权威状态来自 main 广播)。 */
+.app-shell.is-fullscreen .app-sidebar {
+  padding-top: var(--space-3, 12px);
+}
+
 /* ── Brand ── */
 .sidebar-brand {
   display: flex;

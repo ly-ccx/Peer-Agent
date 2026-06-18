@@ -68,6 +68,7 @@ export type StreamReattachResult =
         | {
             readonly type: 'tool-call';
             readonly tool?: string;
+            readonly displayName?: string | null;
             readonly args?: Record<string, unknown>;
             readonly result?: string;
             readonly toolCallId?: string;
@@ -172,7 +173,7 @@ export interface BootstrapPreloadApi {
       cacheReadTokens?: number;
     };
   }) => Promise<LifetimeUsage>;
-  // Goal 模式计划（见 docs/proposals/0002-goal-mode.md）。
+  // Goal 模式计划（见 Goal 模式设计）。
   // 完成状态由 Evidence 自底向上聚合，渲染层只读展示 + 治理操作（批准/驳回/修订），不可手填进度。
   readonly goalPlansList: (params?: { conversationId?: string }) => Promise<readonly GoalPlan[]>;
   readonly goalPlansGet: (params: { planId: string }) => Promise<GoalPlan | null>;
@@ -233,7 +234,7 @@ export interface BootstrapPreloadApi {
   }) => void) => () => void;
   readonly onChatStreamAborted: (listener: (payload: { streamId: string }) => void) => () => void;
   readonly onChatStreamUsage: (listener: (payload: { streamId: string; usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number } }) => void) => () => void;
-  readonly onChatStreamToolCall: (listener: (payload: { streamId: string; tool: string; args: Record<string, unknown>; toolCallId: string }) => void) => () => void;
+  readonly onChatStreamToolCall: (listener: (payload: { streamId: string; tool: string; displayName?: string | null; args: Record<string, unknown>; toolCallId: string }) => void) => () => void;
   // 流式工具参数进度(Codex 式实时体感)。仅是 provider 流式提示,不替代 Tool Result / Evidence。
   readonly onChatStreamToolProgress: (listener: (payload: { streamId: string; toolCallId: string; tool: string; path: string | null; receivedChars: number; receivedLines: number }) => void) => () => void;
   readonly onChatStreamToolResult: (listener: (payload: { streamId: string; toolCallId: string; result: string }) => void) => () => void;
@@ -268,6 +269,11 @@ export interface BootstrapPreloadApi {
     // ADR 27: 带工作区维度的活跃流投影(与 conversationIds 并列,后者保留兼容)。
     streams: readonly ActiveStreamProjection[];
   }) => void) => () => void;
+  // 窗口全屏状态变更广播。fullscreen 为窗口当前是否处于原生全屏的权威事实，
+  // 渲染层据此收掉为 macOS 交通灯预留的顶部留白。
+  readonly onWindowFullscreenChanged: (
+    listener: (payload: { fullscreen: boolean }) => void,
+  ) => () => void;
   readonly llmListProviders: () => Promise<readonly LlmProviderConfigView[]>;
   readonly llmAddProvider: (config: Record<string, unknown>) => Promise<LlmProviderConfigView>;
   readonly llmUpdateProvider: (params: { id: string; [key: string]: unknown }) => Promise<LlmProviderConfigView>;
