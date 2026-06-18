@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { ExecutionStatus, GoalPlan, GoalTask } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
+import { InteractionContext } from './thread/interactionContext';
 
 function normalizeConversationId(value: string | number | null | undefined): string | null {
   if (value === null || value === undefined) return null;
@@ -138,6 +139,11 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
   const [error, setError] = useState<string | null>(null);
   const [busyPlanId, setBusyPlanId] = useState<string | null>(null);
   const [manualCollapsed, setManualCollapsed] = useState<boolean | null>(null);
+  // 本轮助手输出（streaming）期间，禁用「批准并执行 / 驳回」这两个治理事实写操作：
+  // 计划一落库面板就出现，但本轮 AI 会话尚未结束，此时点批准会被运行时丢弃（见 0004 提案）。
+  // 复用既有 InteractionContext（GoalPlanPanel 渲染在该 Provider 内），不新增 prop 透传。
+  const interaction = useContext(InteractionContext);
+  const isStreaming = interaction?.isStreaming ?? false;
 
   const normalizedConversationId = useMemo(
     () => normalizeConversationId(conversationId),
@@ -346,10 +352,22 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
                   治理事实写操作（带 confirmationId 的 HumanConfirmation）仅在 awaiting_approval 时出现。 */}
               {canDecide ? (
                 <div className="goal-plan-actions goal-plan-actions--inline">
-                  <button type="button" className="goal-plan-approve" disabled={busy} onClick={() => void decide(plan, 'approve')}>
+                  <button
+                    type="button"
+                    className="goal-plan-approve"
+                    disabled={busy || isStreaming}
+                    title={isStreaming ? (isZh ? '请等待本轮输出结束后再批准' : 'Wait until this turn finishes before approving') : undefined}
+                    onClick={() => void decide(plan, 'approve')}
+                  >
                     {isZh ? '批准并执行' : 'Approve & run'}
                   </button>
-                  <button type="button" className="goal-plan-reject" disabled={busy} onClick={() => void decide(plan, 'reject')}>
+                  <button
+                    type="button"
+                    className="goal-plan-reject"
+                    disabled={busy || isStreaming}
+                    title={isStreaming ? (isZh ? '请等待本轮输出结束后再操作' : 'Wait until this turn finishes') : undefined}
+                    onClick={() => void decide(plan, 'reject')}
+                  >
                     {isZh ? '驳回' : 'Reject'}
                   </button>
                 </div>
