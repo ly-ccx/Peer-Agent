@@ -1,5 +1,6 @@
 import { encodeAnthropicMessagesRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
+import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
 import { buildClaudeCliIdentityHeaders } from './anthropic-cli-identity.mjs';
 import { parseSseDataPayload } from './sse-line.mjs';
@@ -193,7 +194,7 @@ export async function sendAnthropicMessagesStream({
     requestBody: body,
   });
 
-  const res = await fetch(url, {
+  const res = await fetchWithConnectionRecovery(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -203,6 +204,11 @@ export async function sendAnthropicMessagesStream({
     },
     body: JSON.stringify(body),
     signal,
+  }, {
+    webContents,
+    streamId,
+    provider: 'anthropic',
+    model,
   });
   trace.recordResponse(res);
 

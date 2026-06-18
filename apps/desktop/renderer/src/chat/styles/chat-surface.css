@@ -1025,129 +1025,118 @@
   color: var(--chrome-canvas);
 }
 
-/* ── Compaction Notice · 居中分隔线(Codex 风格) ──
- * 表达层:压缩是后台连续性事件,不是需要用户处置的告警。
- * 用一条贯穿的细线 + 居中小灰字呈现,不填充、不描边、不抢视线。 */
+/* ── Compaction Notice · 居中分隔线 ──
+ * 表达层:压缩是后台连续性事件,不是需要用户处置的告警。 */
+/* ── 压缩进行时 notice：一条贯通全宽的单一流动进度 ──
+ * 整条 notice（波浪线 + 中间文案）是一个共享同一百分比的连续整体：
+ *   - 底层 .compaction-track--base 是「未填充全貌」：灰波浪 + 灰字，全宽铺满；
+ *   - 顶层 .compaction-track--fill 是「azure 全貌」，与底层逐像素重合，
+ *     用 clip-path 按 --compaction-fill 从左裁剪露出 —— 填充推进时，
+ *     波浪与文字一起从左到右被「染成 azure」，是一条贯通的连续进度。
+ * --compaction-fill 由 inline style 注入到 .compaction-notice（进行时=百分比，完成态=100%）。 */
 .compaction-notice {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
+  --compaction-fill: 0%;
+  --compaction-wave-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='7' viewBox='0 0 20 7'%3E%3Cpath d='M0 3.5 Q5 0.5 10 3.5 T20 3.5' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E");
+  position: relative;
   font-size: 0.72rem;
-  color: var(--graphite-mute);
   animation: compaction-notice-in var(--za-motion-medium) var(--za-ease-out) both;
   max-width: var(--chat-content-max);
   margin: var(--space-2) auto;
   width: 100%;
   user-select: none;
 }
-.compaction-notice-body {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--space-1);
-  line-height: 1.4;
-  white-space: nowrap;
-  order: 2;
-}
-.compaction-notice-label {
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--space-1);
-}
-.compaction-notice-percent {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  color: var(--azure-seal);
-  font-variant-numeric: tabular-nums;
-}
-/* 进行时波浪分割线：左右各一条 .compaction-wave，文案居中漂浮其上。
- * 波浪线本身是百分比的载体（见 .compaction-wave）。 */
-.compaction-notice .compaction-wave {
-  flex: 1;
-}
-.compaction-notice .compaction-wave:first-child { order: 1; }
-.compaction-notice .compaction-wave:last-child { order: 3; }
 @keyframes compaction-notice-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-
-/* ── 波浪渐变分割线（进行时 notice 与完成态 summary 共用） ──
- * 单一主体承载百分比：一条 7px 高的带子，用内联 SVG 正弦波 mask 裁成波浪形。
- *   - 底层 .compaction-wave 是未填充段：hairline 细波；
- *   - ::before 是按百分比填充层：width = var(--compaction-fill, 0%) 的 azure 渐变，
- *     末端叠 --azure-seal 高光；width 用更长缓动实现「缓冲感」；
- *   - ::after 是极缓慢的波形位移层，让填充「流动」起来。
- * --compaction-fill 由 inline style 注入（进行时=百分比，完成态=100%）。 */
-.compaction-wave {
-  --compaction-fill: 0%;
-  --compaction-wave-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='7' viewBox='0 0 20 7'%3E%3Cpath d='M0 3.5 Q5 0.5 10 3.5 T20 3.5' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E");
+/* 两层同构副本：base 撑起高度并占据布局，fill 绝对覆盖其上、逐像素对齐。 */
+.compaction-track {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  line-height: 1.4;
+}
+.compaction-track--base {
   position: relative;
+  color: var(--graphite-mute);
+}
+.compaction-track--fill {
+  position: absolute;
+  inset: 0;
+  /* 按百分比从左裁剪露出：右侧裁掉 (100% - fill)，painting 与 base 严格对齐。 */
+  clip-path: inset(0 calc(100% - var(--compaction-fill, 0%)) 0 0);
+  transition: clip-path var(--za-motion-slow) var(--za-ease-decelerate);
+  color: var(--azure-seal);
+}
+.compaction-track__inner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+}
+.compaction-notice-label {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+.compaction-notice-percent {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 波浪线：7px 高的带子，用内联 SVG 正弦波 mask 裁成波浪形，左右各一段占满剩余空间。
+ * base 层的波浪是灰 hairline；fill 层的波浪是 azure 渐变 —— 两层 mask 完全一致，
+ * 故裁剪后边缘的波形严丝合缝。 */
+.compaction-wave {
+  flex: 1;
   height: 7px;
   min-width: 24px;
-  background: var(--chrome-hairline);
   -webkit-mask: var(--compaction-wave-mask) repeat-x left center / 20px 7px;
   mask: var(--compaction-wave-mask) repeat-x left center / 20px 7px;
 }
-/* 百分比填充层：azure 渐变（soft→trace，末端 seal 高光），width 缓冲推进。 */
-.compaction-wave::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  width: var(--compaction-fill, 0%);
+.compaction-track--base .compaction-wave {
+  background: var(--chrome-hairline);
+}
+/* fill 层的 azure 波浪：渐变铺成 base 宽度的 2 倍并缓慢横移，
+ * 流动感只发生在已被波浪 mask 裁形的波浪本体上，绝不在文字段/波浪段底下透出矩形底。 */
+.compaction-track--fill .compaction-wave {
   background-image: linear-gradient(
     90deg,
     var(--azure-soft) 0%,
-    var(--azure-trace) 70%,
-    var(--azure-seal) 100%
-  );
-  transition: width var(--za-motion-slow) var(--za-ease-decelerate);
-}
-/* 流动层：极缓慢的水平位移高光，叠在填充上让其「活」起来。 */
-.compaction-wave::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  width: var(--compaction-fill, 0%);
-  background-image: linear-gradient(
-    90deg,
-    transparent 0%,
+    var(--azure-trace) 30%,
     var(--azure-seal) 50%,
-    transparent 100%
+    var(--azure-trace) 70%,
+    var(--azure-soft) 100%
   );
-  background-size: 60% 100%;
-  background-repeat: no-repeat;
-  opacity: 0.5;
-  transition: width var(--za-motion-slow) var(--za-ease-decelerate);
-  animation: compaction-wave-flow 2.4s var(--za-ease-standard) infinite;
+  background-size: 200% 100%;
+  background-repeat: repeat-x;
+  animation: compaction-wave-flow 2.6s var(--za-ease-standard) infinite;
 }
 @keyframes compaction-wave-flow {
-  0% { background-position: -60% 0; }
-  100% { background-position: 160% 0; }
+  0% { background-position: 0% 0; }
+  100% { background-position: 200% 0; }
 }
-/* 不定态（无百分比）：退回流光态，整条带子缓慢呼吸 + 高光掠过。 */
-.compaction-wave--indeterminate::before {
-  width: 100%;
-  opacity: 0.45;
+/* 不定态（无百分比）：整条贯通缓慢呼吸 + 高光掠过，clip 固定全宽。 */
+.compaction-notice--indeterminate .compaction-track--fill {
+  clip-path: none;
   animation: compaction-wave-breathe 1.8s var(--za-ease-standard) infinite;
 }
-.compaction-wave--indeterminate::after {
-  width: 100%;
-  opacity: 0.6;
-}
 @keyframes compaction-wave-breathe {
-  0%, 100% { opacity: 0.25; }
-  50% { opacity: 0.6; }
-}
-/* 完成态（永久分割线）：填满，去掉流动高光的强度，作为安静的分界标记。 */
-.compaction-wave--sealed::after {
-  opacity: 0.25;
-  animation: none;
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.7; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .compaction-wave::after,
-  .compaction-wave--indeterminate::before {
+  .compaction-track--fill .compaction-wave,
+  .compaction-notice--indeterminate .compaction-track--fill {
     animation: none;
+  }
+  .compaction-track--fill {
+    transition: none;
   }
 }
 
@@ -1192,6 +1181,9 @@
   color: var(--graphite-soft);
   font-size: 0.78rem;
   animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
+}
+.provider-recovery-notice--connection {
+  color: var(--za-warning-ink, var(--graphite-soft));
 }
 .provider-recovery-body {
   flex: 1;

@@ -1,5 +1,5 @@
 // Provider transport recovery: keep the same provider/model request, but retry
-// with a platform-native fetch implementation when Node's fetch cannot connect.
+// transient connection failures before surfacing a terminal stream error.
 
 const CONNECTION_FAILURE_PATTERNS = [
   /fetch failed/i,
@@ -13,6 +13,19 @@ const CONNECTION_FAILURE_PATTERNS = [
   /UND_ERR_|HeadersTimeoutError|ConnectTimeoutError|SocketError/i,
 ];
 
+export const DEFAULT_CONNECTION_RETRY_DELAYS_MS = [
+  10_000,
+  10_000,
+  10_000,
+  10_000,
+  10_000,
+  30_000,
+  30_000,
+  30_000,
+  30_000,
+  30_000,
+];
+
 function errorDetails(error) {
   const parts = [];
   if (error?.message) parts.push(String(error.message));
@@ -21,6 +34,25 @@ function errorDetails(error) {
   if (error?.cause?.code) parts.push(String(error.cause.code));
   if (error?.cause?.reason) parts.push(String(error.cause.reason));
   return parts.join(' ');
+}
+
+function createAbortError() {
+  const error = new Error('The operation was aborted.');
+  error.name = 'AbortError';
+  return error;
+}
+
+function sleep(ms, signal) {
+  if (signal?.aborted) return Promise.reject(createAbortError());
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    if (!signal) return;
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(createAbortError());
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 export function describeConnectionFailure(error) {
@@ -44,6 +76,10 @@ async function resolveElectronNetFetch() {
   }
 }
 
+function emitConnectionRecovery(webContents, payload) {
+  webContents?.send?.('chat:stream:connection-recovery', payload);
+}
+
 export async function fetchWithConnectionRecovery(url, init = {}, {
   webContents = null,
   streamId = null,
@@ -51,35 +87,79 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
   model = null,
   fetchImpl = globalThis.fetch,
   electronFetchImpl = null,
+  retryDelaysMs = DEFAULT_CONNECTION_RETRY_DELAYS_MS,
+  waitImpl = sleep,
 } = {}) {
-  try {
-    return await fetchImpl(url, init);
-  } catch (error) {
-    if (!isRecoverableConnectionFailure(error)) throw error;
+  const maxRetries = retryDelaysMs.length;
+  let lastError = null;
 
-    const platformFetch = electronFetchImpl || await resolveElectronNetFetch();
-    if (!platformFetch) throw error;
-
-    const reason = describeConnectionFailure(error);
-    let response;
+  for (let round = 0; round <= maxRetries; round += 1) {
+    if (init?.signal?.aborted) throw createAbortError();
     try {
-      response = await platformFetch(url, init);
-    } catch (fallbackError) {
-      const wrapped = new Error(
-        `${reason}; electron_net_fetch_failed: ${describeConnectionFailure(fallbackError)}`
-      );
-      wrapped.cause = error;
-      throw wrapped;
-    }
+      const response = await fetchImpl(url, init);
+      if (round > 0) {
+        emitConnectionRecovery(webContents, {
+          streamId,
+          provider,
+          model,
+          status: 'recovered',
+          connection: 'node-fetch',
+          attempt: round,
+          maxRetries,
+          reason: lastError ? describeConnectionFailure(lastError) : null,
+        });
+      }
+      return response;
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error;
+      if (!isRecoverableConnectionFailure(error)) throw error;
+      lastError = error;
 
-    webContents?.send?.('chat:stream:connection-recovery', {
-      streamId,
-      provider,
-      model,
-      fromConnection: 'node-fetch',
-      toConnection: 'electron-net-fetch',
-      reason,
-    });
-    return response;
+      const platformFetch = electronFetchImpl || await resolveElectronNetFetch();
+      if (platformFetch) {
+        try {
+          const response = await platformFetch(url, init);
+          emitConnectionRecovery(webContents, {
+            streamId,
+            provider,
+            model,
+            status: 'recovered',
+            fromConnection: 'node-fetch',
+            toConnection: 'electron-net-fetch',
+            connection: 'electron-net-fetch',
+            attempt: round,
+            maxRetries,
+            reason: describeConnectionFailure(error),
+          });
+          return response;
+        } catch (fallbackError) {
+          if (fallbackError?.name === 'AbortError') throw fallbackError;
+          if (!isRecoverableConnectionFailure(fallbackError)) {
+            const wrapped = new Error(
+              `${describeConnectionFailure(error)}; electron_net_fetch_failed: ${describeConnectionFailure(fallbackError)}`
+            );
+            wrapped.cause = error;
+            throw wrapped;
+          }
+          lastError = fallbackError;
+        }
+      }
+
+      if (round >= maxRetries) break;
+      const delayMs = retryDelaysMs[round];
+      emitConnectionRecovery(webContents, {
+        streamId,
+        provider,
+        model,
+        status: 'retrying',
+        attempt: round + 1,
+        maxRetries,
+        delayMs,
+        reason: describeConnectionFailure(lastError),
+      });
+      await waitImpl(delayMs, init?.signal);
+    }
   }
+
+  throw lastError;
 }

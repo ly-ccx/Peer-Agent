@@ -305,8 +305,18 @@ export function ChatSurface({
   const [tokenUsage, setTokenUsage] = useState<TokenUsageState | null>(null);
   const [activeUsage, setActiveUsage] = useState<TokenUsageState | null>(null);
   const [providerRecoveryNotice, setProviderRecoveryNotice] = useState<{
+    kind?: 'provider' | 'connection';
     fromProvider?: string;
     toProvider?: string;
+    provider?: string;
+    model?: string;
+    status?: 'retrying' | 'recovered';
+    fromConnection?: string;
+    toConnection?: string;
+    connection?: string;
+    attempt?: number;
+    maxRetries?: number;
+    delayMs?: number;
     reason?: string;
   } | null>(null);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
@@ -1025,54 +1035,68 @@ export function ChatSurface({
           </div>
         ))}
         {providerRecoveryNotice ? (
-          <div className="provider-recovery-notice">
+          <div className={`provider-recovery-notice${providerRecoveryNotice.kind === 'connection' ? ' provider-recovery-notice--connection' : ''}`}>
             <div className="provider-recovery-body">
-              {isZh
-                ? `主模型连接失败，已切换到 ${providerRecoveryNotice.toProvider || '备用模型'}`
-                : `Primary provider failed; switched to ${providerRecoveryNotice.toProvider || 'fallback provider'}`}
+              {providerRecoveryNotice.kind === 'connection'
+                ? providerRecoveryNotice.status === 'retrying'
+                  ? isZh
+                    ? `网络连接波动，正在重试连接（第 ${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10} 次，约 ${Math.round((providerRecoveryNotice.delayMs ?? 0) / 1000)}s 后重试）`
+                    : `Network connection interrupted; retrying (${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10}, in about ${Math.round((providerRecoveryNotice.delayMs ?? 0) / 1000)}s)`
+                  : isZh
+                    ? '连接已恢复，正在继续生成'
+                    : 'Connection recovered; continuing generation'
+                : isZh
+                  ? `主模型连接失败，已切换到 ${providerRecoveryNotice.toProvider || '备用模型'}`
+                  : `Primary provider failed; switched to ${providerRecoveryNotice.toProvider || 'fallback provider'}`}
             </div>
             {providerRecoveryNotice.reason ? (
               <span className="provider-recovery-meta">
-                {providerRecoveryNotice.fromProvider ? `${providerRecoveryNotice.fromProvider}: ` : ''}{providerRecoveryNotice.reason}
+                {providerRecoveryNotice.kind === 'connection'
+                  ? `${providerRecoveryNotice.provider || providerRecoveryNotice.model || 'connection'}: `
+                  : providerRecoveryNotice.fromProvider ? `${providerRecoveryNotice.fromProvider}: ` : ''}
+                {providerRecoveryNotice.reason}
               </span>
             ) : null}
           </div>
         ) : null}
         {isCompacting ? (
           <div
-            className="compaction-notice"
+            className={`compaction-notice${compactionPercent === null ? ' compaction-notice--indeterminate' : ''}`}
             role="progressbar"
             aria-label={isZh ? '压缩上下文进度' : 'Compaction progress'}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={compactionPercent ?? undefined}
+            style={
+              compactionPercent !== null
+                ? ({ '--compaction-fill': `${compactionPercent}%` } as React.CSSProperties)
+                : undefined
+            }
           >
-            <span
-              className={`compaction-wave${compactionPercent === null ? ' compaction-wave--indeterminate' : ''}`}
-              style={
-                compactionPercent !== null
-                  ? ({ '--compaction-fill': `${compactionPercent}%` } as React.CSSProperties)
-                  : undefined
-              }
-              aria-hidden="true"
-            />
-            <span className="compaction-notice-body">
+            {/* 底层：未填充全貌（灰波浪 + 灰字），全宽铺满 */}
+            <span className="compaction-track compaction-track--base" aria-hidden="true">
+              <span className="compaction-wave" />
               <span className="compaction-notice-label">
                 {isZh ? '压缩上下文中' : 'Compacting context'}
                 {compactionPercent !== null ? (
                   <span className="compaction-notice-percent">{compactionPercent}%</span>
                 ) : null}
               </span>
+              <span className="compaction-wave" />
             </span>
-            <span
-              className={`compaction-wave${compactionPercent === null ? ' compaction-wave--indeterminate' : ''}`}
-              style={
-                compactionPercent !== null
-                  ? ({ '--compaction-fill': `${compactionPercent}%` } as React.CSSProperties)
-                  : undefined
-              }
-              aria-hidden="true"
-            />
+            {/* 顶层：azure 全貌，按 --compaction-fill 从左裁剪露出（与底层逐像素对齐） */}
+            <span className="compaction-track compaction-track--fill" aria-hidden="true">
+              <span className="compaction-track__inner">
+                <span className="compaction-wave" />
+                <span className="compaction-notice-label">
+                  {isZh ? '压缩上下文中' : 'Compacting context'}
+                  {compactionPercent !== null ? (
+                    <span className="compaction-notice-percent">{compactionPercent}%</span>
+                  ) : null}
+                </span>
+                <span className="compaction-wave" />
+              </span>
+            </span>
           </div>
         ) : null}
         {streamError ? (
@@ -1090,7 +1114,20 @@ export function ChatSurface({
           aria-label={isZh ? '滚动到底部' : 'Scroll to bottom'}
           title={isZh ? '滚动到底部' : 'Scroll to bottom'}
         >
-          <span aria-hidden="true">↓</span>
+          <svg
+            aria-hidden="true"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 5v14" />
+            <path d="m19 12-7 7-7-7" />
+          </svg>
         </button>
       ) : null}
 

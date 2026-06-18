@@ -7,10 +7,20 @@ import { isEmptyAssistantPlaceholder } from '../state/streamSegments';
 import type { ChatMsg, TokenUsageState, ToolProgress } from '../state/types';
 import type { TypewriterController } from './useTypewriterStream';
 
-/** provider 故障切换提示（表达层横幅用）。 */
+/** provider/connection 恢复提示（表达层横幅用）。 */
 interface ProviderRecoveryNotice {
+  kind?: 'provider' | 'connection';
   fromProvider?: string;
   toProvider?: string;
+  provider?: string;
+  model?: string;
+  status?: 'retrying' | 'recovered';
+  fromConnection?: string;
+  toConnection?: string;
+  connection?: string;
+  attempt?: number;
+  maxRetries?: number;
+  delayMs?: number;
   reason?: string;
 }
 
@@ -212,7 +222,7 @@ export function useChatStreamSubscription(params: {
       setToolProgress({ tool, path, receivedLines });
     });
 
-    const offToolCall = clientApi.onChatStreamToolCall(({ streamId, tool, args, toolCallId }) => {
+    const offToolCall = clientApi.onChatStreamToolCall(({ streamId, tool, displayName, args, toolCallId }) => {
       if (streamId !== streamIdRef.current) return;
       // Tool-call events can arrive while the typewriter still holds earlier text
       // deltas. Flush first so pre-call text is committed above the structured
@@ -225,7 +235,7 @@ export function useChatStreamSubscription(params: {
         const last = prev[prev.length - 1];
         if (!last || last.role !== 'assistant') return prev;
         const segments = [...(last.segments || [])];
-        segments.push({ type: 'tool-call', tool, args, toolCallId, result: undefined });
+        segments.push({ type: 'tool-call', tool, displayName, args, toolCallId, result: undefined });
         const next = [...prev.slice(0, -1), { ...last, segments }];
         persistMessages(next);
         return next;
@@ -316,7 +326,36 @@ export function useChatStreamSubscription(params: {
       reason,
     }) => {
       if (streamId !== streamIdRef.current) return;
-      setProviderRecoveryNotice({ fromProvider, toProvider, reason });
+      setProviderRecoveryNotice({ kind: 'provider', fromProvider, toProvider, reason });
+    });
+
+    const offConnectionRecovery = clientApi.onChatStreamConnectionRecovery(({
+      streamId,
+      provider,
+      model,
+      status,
+      fromConnection,
+      toConnection,
+      connection,
+      attempt,
+      maxRetries,
+      delayMs,
+      reason,
+    }) => {
+      if (streamId !== streamIdRef.current) return;
+      setProviderRecoveryNotice({
+        kind: 'connection',
+        provider,
+        model,
+        status,
+        fromConnection,
+        toConnection,
+        connection,
+        attempt,
+        maxRetries,
+        delayMs,
+        reason,
+      });
     });
 
     const offCompaction = clientApi.onChatCompaction(({ streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount }) => {
@@ -362,6 +401,6 @@ export function useChatStreamSubscription(params: {
       }
     });
 
-    return () => { offDelta(); offThinking(); offDone(); offUsage(); offAborted(); offToolProgress(); offToolCall(); offToolResult(); offPermissionRequest(); offError(); offProviderRecovery(); offCompaction(); };
+    return () => { offDelta(); offThinking(); offDone(); offUsage(); offAborted(); offToolProgress(); offToolCall(); offToolResult(); offPermissionRequest(); offError(); offProviderRecovery(); offConnectionRecovery(); offCompaction(); };
   }, [appendStreamThinking, conversationId, onConversationUpdated]);
 }

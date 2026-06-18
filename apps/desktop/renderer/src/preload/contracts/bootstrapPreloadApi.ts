@@ -258,8 +258,13 @@ export interface BootstrapPreloadApi {
     streamId: string;
     provider?: string;
     model?: string;
+    status?: 'retrying' | 'recovered';
     fromConnection?: string;
     toConnection?: string;
+    connection?: string;
+    attempt?: number;
+    maxRetries?: number;
+    delayMs?: number;
     reason?: string;
   }) => void) => () => void;
   readonly onChatCompaction: (listener: (payload: { streamId: string; stage?: 'start' | 'progress' | 'done' | 'idle'; percent?: number; receivedChars?: number; estimatedTotalChars?: number; method?: string; beforeTokens?: number; afterTokens?: number; oldMessageCount?: number; keptMessageCount?: number }) => void) => () => void;

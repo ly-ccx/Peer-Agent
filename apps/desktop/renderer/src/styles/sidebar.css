@@ -115,7 +115,8 @@
   background: var(--za-sidebar-active-bg);
 }
 .ws-name {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 0.78rem;
   font-weight: 500;
   color: var(--graphite-base);
@@ -128,13 +129,18 @@
   font-weight: 400;
 }
 .ws-branch {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.65rem;
   color: var(--graphite-fade);
   background: var(--chrome-sunken);
   padding: 1px 6px;
   border-radius: var(--radius-xs);
   font-family: var(--font-mono);
-  flex-shrink: 0;
 }
 
 /* ADR 27: 工作区运行指示点。表示该工作区有运行中的流(任务仍在跑,未丢失)。
