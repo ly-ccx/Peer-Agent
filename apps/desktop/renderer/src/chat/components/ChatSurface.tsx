@@ -276,9 +276,6 @@ export function ChatSurface({
   const [isCompacting, setIsCompacting] = useState(false);
   // 压缩进度（0-100）：流式收摘要时按已收字符/预期字符估算；null = 尚无进度。
   const [compactionPercent, setCompactionPercent] = useState<number | null>(null);
-  // 压缩完成后保留的分隔标记：true 时底部条不消失，文案切到「从此处上文已被压缩」，
-  // 让用户清楚看到哪一侧（上文）已被压缩。新一轮压缩开始时复位。
-  const [compactionDone, setCompactionDone] = useState(false);
   // 整轮 wall-clock 计时下沉到 useElapsedTimer：对外暴露 elapsedMs（实时跳秒）、
   // turnStartedAtRef（供流事件计算 turnDurationMs）、setTurnStartedAt（发送时设起点）。
   const { elapsedMs, turnStartedAtRef, setTurnStartedAt } = useElapsedTimer(isStreaming);
@@ -714,12 +711,9 @@ export function ChatSurface({
       streamIdRef.current = streamId;
       const compactStartedAt = Date.now();
       setIsCompacting(true);
-      setCompactionDone(false);
-      let compactionSucceeded = false;
       try {
         const result = await clientApi.chatCompact({ conversationId, streamId });
         if (result.compacted) {
-          compactionSucceeded = true;
           const { messages: loaded, tokenUsage: usage } = await loadConversationMessages(conversationId);
           setMessages(loaded);
           if (usage) setTokenUsage(usage);
@@ -739,9 +733,6 @@ export function ChatSurface({
         }
         streamIdRef.current = null;
         setIsCompacting(false);
-        // 完成态保留底部分隔条：压缩成功后不卸载，文案切到「从此处上文已被压缩」，
-        // 让用户清楚分界线位置（上方内容已压缩）。失败则不显示保留条。
-        if (compactionSucceeded) setCompactionDone(true);
       }
       return;
     }
@@ -1017,7 +1008,6 @@ export function ChatSurface({
         ) : null}
         {isCompacting ? (
           <div className="compaction-notice">
-            <span className="compaction-spinner" aria-hidden="true" />
             <div className="compaction-notice-body">
               <div className="compaction-notice-label">
                 {isZh ? '压缩上下文中' : 'Compacting context'}
@@ -1036,15 +1026,6 @@ export function ChatSurface({
                   className={`compaction-progress-fill${compactionPercent === null ? ' compaction-progress-fill--indeterminate' : ''}`}
                   style={compactionPercent !== null ? { width: `${compactionPercent}%` } : undefined}
                 />
-              </div>
-            </div>
-          </div>
-        ) : compactionDone ? (
-          <div className="compaction-notice compaction-notice--done">
-            <span className="compaction-done-mark" aria-hidden="true">✓</span>
-            <div className="compaction-notice-body">
-              <div className="compaction-notice-label">
-                {isZh ? '从此处上文已被压缩' : 'Context above is compacted'}
               </div>
             </div>
           </div>
