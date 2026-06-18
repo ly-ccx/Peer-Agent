@@ -113,6 +113,97 @@
   }
 }
 
+/* A：折叠浮条「执行中」的横向流动扫光（浅色 · 慢速 · 极柔和）。
+   针对扁宽浮条优化：放弃绕圈描边（在极端宽高比上只亮一角、生硬），改为
+   一束沿水平方向极缓慢、平滑循环扫过整条的浅色柔光，对宽高比天然友好、连续无断裂。
+   颜色不再用蓝色 --state-confirm，而是接近白色的极低透明度高光，
+   过渡区间拉得很宽（大羽化），使光带边缘几乎看不出起止，呈现自然的「呼吸般流过」。
+   两层叠加：
+   1) ::before 横向平移的浅色 linear-gradient 高光带（约 6s，覆盖整条）；
+   2) 浮条自身 box-shadow 极轻、极慢的呼吸式浅色柔光晕，强调「正在推进」。
+   依赖 .goal-panel--docked 的 border-radius/overflow:hidden，高光被裁成圆角内。 */
+.goal-panel--executing {
+  position: relative;
+  animation: goal-panel-executing-glow 7.2s ease-in-out infinite;
+}
+
+.goal-panel--executing::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  /* 一束很宽、很淡的浅色高光夹在两侧透明之间，整条背景宽度为容器 3 倍，
+     通过 background-position 缓慢平移，形成连续、柔和、几乎无边界的扫光。
+     羽化区间从 25%→50%→75%，过渡极宽，使光带不出现硬切。 */
+  background-image: linear-gradient(
+    100deg,
+    transparent 0%,
+    transparent 25%,
+    color-mix(in srgb, white 22%, transparent) 42%,
+    color-mix(in srgb, white 34%, transparent) 50%,
+    color-mix(in srgb, white 22%, transparent) 58%,
+    transparent 75%,
+    transparent 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 300% 100%;
+  background-position: 150% 0;
+  pointer-events: none;
+  animation: goal-panel-sweep 6s ease-in-out infinite;
+}
+
+/* 浮条内部内容需要浮在扫光之上，避免被 ::before 覆盖。 */
+.goal-panel--executing > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* 高光带从右侧滑入、向左侧滑出，循环连续（首尾位置相接，无跳变）。
+   用 ease-in-out 让光带在两端略微减速，更像自然呼吸而非匀速划过。 */
+@keyframes goal-panel-sweep {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+
+@keyframes goal-panel-executing-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, white 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 12px 1px color-mix(in srgb, white 22%, transparent);
+  }
+}
+
+/* A：折叠浮条「完成」态——所有计划已完成（无执行中/待批准）时的静态完成视觉。
+   不带任何动画（停止扫光/呼吸），用完成色（--state-success 绿）做柔和描边，
+   传达「已完成、已停下」的稳定感，与执行中的流动光形成对比。 */
+.goal-panel--completed {
+  border-color: color-mix(in srgb, var(--state-success) 45%, var(--za-line));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--state-success) 22%, transparent);
+}
+
+/* 完成态的对勾标记：替代执行中的脉冲圆点，静止、完成色，传达「done」。 */
+.goal-panel-toggle-active-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--state-success) 18%, transparent);
+  color: var(--state-success);
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 700;
+}
+
 .goal-panel-toggle-active-title {
   max-width: 240px;
   overflow: hidden;
@@ -401,5 +492,26 @@
   .goal-plan-progress-bar--executing::after {
     animation: none;
     display: none;
+  }
+
+  /* 执行中浮条：关闭横向扫光与呼吸柔光，保留静态外观不出现位移/闪烁。 */
+  .goal-panel--executing {
+    animation: none;
+    box-shadow: none;
+  }
+
+  .goal-panel--executing::before {
+    animation: none;
+    display: none;
+  }
+
+  /* 完成态本就是静态（无扫光/呼吸），此处显式兜底：确保减少动效时
+     完成描边与对勾不引入任何动画/位移/闪烁，保持稳定的「已完成」外观。 */
+  .goal-panel--completed {
+    animation: none;
+  }
+
+  .goal-panel-toggle-active-check {
+    animation: none;
   }
 }

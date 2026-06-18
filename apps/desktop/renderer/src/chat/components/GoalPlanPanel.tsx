@@ -264,12 +264,28 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
     plans[0] ??
     null;
   const activeProgress = activePlan ? safeProgress(activePlan) : null;
+  // A：折叠态浮条「执行中」时给根节点附加状态 class，驱动边缘流动光效（见 goal-panel.css）。
+  // 仅当存在执行中的计划、且面板处于折叠态（浮条形态）时启用，避免展开后内部已有进度动效叠加干扰。
+  const hasExecutingPlan = plans.some((plan) => plan.status === 'executing');
+  const dockedExecuting = hasExecutingPlan && !expanded;
+  // A：折叠态浮条「完成」标志——当不存在执行中 / 待批准的计划，且至少有一个计划已完成时，
+  // 视为整体处于「完成态」，给浮条停止扫光并显示静态完成视觉（完成色描边 + 对勾）。
+  // 注意优先级：执行中 / 待批准会压过完成态（dockedExecuting 与 lockedOpen 优先），
+  // 避免「一个完成、另一个仍在跑」时误显示完成。
+  const hasAwaitingPlan = plans.some((plan) => plan.status === 'awaiting_approval');
+  const hasCompletedPlan = plans.some((plan) => plan.status === 'completed');
+  const dockedCompleted =
+    hasCompletedPlan && !hasExecutingPlan && !hasAwaitingPlan && !expanded;
   const summary = isZh
     ? `${plans.length} 个目标计划${pendingCount > 0 ? ` · ${pendingCount} 待批准` : ''}${refreshing}`
     : `${plans.length} goal plan${plans.length > 1 ? 's' : ''}${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}${refreshing}`;
 
   return (
-    <div className={`goal-panel goal-panel--docked${expanded ? ' goal-panel--expanded' : ''}`}>
+    <div
+      className={`goal-panel goal-panel--docked${expanded ? ' goal-panel--expanded' : ''}${
+        dockedExecuting ? ' goal-panel--executing' : ''
+      }${dockedCompleted ? ' goal-panel--completed' : ''}`}
+    >
       <button
         type="button"
         className="goal-panel-toggle"
@@ -288,6 +304,14 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
           <span className="goal-panel-toggle-active">
             {activePlan.status === 'executing' ? (
               <span className="goal-panel-toggle-active-dot" aria-hidden="true" />
+            ) : dockedCompleted ? (
+              <span
+                className="goal-panel-toggle-active-check"
+                aria-label={isZh ? '已完成' : 'Completed'}
+                role="img"
+              >
+                ✓
+              </span>
             ) : null}
             <span className="goal-panel-toggle-active-title">{derivePlanTitle(activePlan, isZh)}</span>
             {activeProgress ? (

@@ -287,6 +287,11 @@ export function ChatSurface({
   // 表达层只反映 isStreaming 真值,不引入新的执行真值。下沉到 useStreamingReport。
   useStreamingReport(conversationId, isStreaming, onStreamingChange);
   const [streamError, setStreamError] = useState<string | null>(null);
+  // 计划批准的「执行意图」暂存：当用户在本轮助手会话仍 streaming 时点「批准并执行」，
+  // 此时运行时被占用、直接发起执行轮会被丢弃（旧 bug）。改为把待执行 plan 暂存于此 ref，
+  // 由下方 effect 监听 isStreaming 由 true→false（本轮会话结束）后自动发起执行轮并清空。
+  // 用 ref 而非 state：避免额外渲染，且执行意图是「一次性副作用触发器」而非渲染数据。
+  const pendingGoalExecutionRef = useRef<GoalPlan | null>(null);
   // 思考强度全局偏好(读取/回写 settings-store,五档),逻辑见 hooks/useEffortPreference。
   const { effort, setEffort, changeEffort } = useEffortPreference();
   // 对话模式按会话持久化在会话 meta 上(非全局设置):模式是「每会话状态」,切换会话
@@ -891,14 +896,41 @@ export function ChatSurface({
   // （不另造旁路），让模型在 goal 闸门放行下按计划开始执行子任务。
   // store 侧已落 GoalApproval Evidence（治理事实），此处只负责驱动执行。
   // 见 docs/proposals/0002-goal-mode.md 时序图阶段二（批准）→阶段三（执行）。
-  const startGoalExecution = useCallback((plan: GoalPlan) => {
-    if (isStreaming || !hasProvider || !conversationId) return;
+  // 真正发起执行轮：把"开始执行"作为一条用户消息复用 submitMessage 路径。
+  // 该函数假设调用时已空闲（isStreaming=false）；空闲判定由调用方/effect 负责。
+  const dispatchGoalExecution = useCallback((plan: GoalPlan) => {
+    if (!hasProvider || !conversationId) return;
     const planLabel = plan.title || plan.goal || '';
     const text = isZh
       ? `我已批准计划「${planLabel}」（planId=${plan.planId}）。请按计划开始执行：依据 dependsOn 拓扑序与先序遍历逐个执行叶子子任务，有副作用的步骤先申请权限，每个子任务完成后用 goal_update_task 以 Evidence 回写状态。`
       : `I have approved the plan "${planLabel}" (planId=${plan.planId}). Please start executing it now: run leaf subtasks in dependsOn topological + pre-order, request permission before any side-effecting step, and write each subtask's status back via goal_update_task with Evidence.`;
     void submitMessage(text, [], effort);
-  }, [isStreaming, hasProvider, conversationId, submitMessage, effort, isZh]);
+  }, [hasProvider, conversationId, submitMessage, effort, isZh]);
+
+  // 计划获批的入口（GoalPlanPanel onApproved 回调）。
+  // 关键修复：若点击批准时本轮助手会话仍在 streaming（AI 还在输出 / 运行时被占用），
+  // 不再直接 return 丢弃执行意图（旧 bug：用户"点批准没反应"），而是把 plan 暂存到
+  // pendingGoalExecutionRef，待下方 effect 在 isStreaming 转 false（本轮结束）后自动发起执行轮。
+  // 即「计划创建后不抢，会话结束后批准才真正生效执行」。
+  const startGoalExecution = useCallback((plan: GoalPlan) => {
+    if (!hasProvider || !conversationId) return;
+    if (isStreaming) {
+      pendingGoalExecutionRef.current = plan;
+      return;
+    }
+    dispatchGoalExecution(plan);
+  }, [isStreaming, hasProvider, conversationId, dispatchGoalExecution]);
+
+  // 监听本轮会话结束：当 isStreaming 由 true→false 且存在暂存的执行意图时，
+  // 自动发起执行轮并清空暂存。这样在 streaming 中点的批准会"延后到会话结束"生效。
+  useEffect(() => {
+    if (isStreaming) return;
+    const pending = pendingGoalExecutionRef.current;
+    if (!pending) return;
+    if (!hasProvider || !conversationId) return;
+    pendingGoalExecutionRef.current = null;
+    dispatchGoalExecution(pending);
+  }, [isStreaming, hasProvider, conversationId, dispatchGoalExecution]);
 
   if (!conversationId) {
     return (
