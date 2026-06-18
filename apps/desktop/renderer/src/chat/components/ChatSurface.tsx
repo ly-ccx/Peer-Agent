@@ -1214,6 +1214,7 @@ export function ChatSurface({
               options={CHAT_MODES.map((m) => ({
                 value: m,
                 label: modeLabel(m, isZh),
+                tone: m === 'goal' ? 'danger' : undefined,
               }))}
               onChange={(next) => {
                 if (isChatMode(next)) changeMode(next);
