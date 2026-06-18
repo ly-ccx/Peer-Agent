@@ -45,10 +45,12 @@ describe('context compactor', () => {
     assert.equal(result.compacted, true);
     assert.equal(result.messages[0].role, 'system');
     assert.equal(result.messages[1].role, 'user');
-    assert.match(result.messages[1].content, /^\[上下文交接 - 共压缩 2 条消息\]/);
+    // 全量但保当前轮：buildMessages(12) 末尾 user=index10，当前轮=[user10, assistant11]=2 条，
+    // 其余 10 条全部进 old 摘要。
+    assert.match(result.messages[1].content, /^\[上下文交接 - 共压缩 10 条消息\]/);
     assert.equal(result.messages[1]._compaction.method, 'structural');
-    assert.equal(result.messages[1]._compaction.originalMessageCount, 2);
-    assert.equal(result.notification.keptMessageCount, 10);
+    assert.equal(result.messages[1]._compaction.originalMessageCount, 10);
+    assert.equal(result.notification.keptMessageCount, 2);
   });
 
   it('carries forward prior continuity while reporting only the delta message count', async () => {
@@ -69,20 +71,28 @@ describe('context compactor', () => {
     });
 
     assert.equal(result.compacted, true);
-    assert.equal(result.notification.oldMessageCount, 2);
+    // 全量但保当前轮：本轮 old=10（buildMessages(12) 仅当前轮 2 条留存）。
+    assert.equal(result.notification.oldMessageCount, 10);
     assert.equal(result.notification.previousMessageCount, 100);
-    assert.equal(result.notification.totalMessageCount, 102);
-    assert.equal(result.messages[1]._compaction.originalMessageCount, 102);
-    assert.equal(result.messages[1]._compaction.deltaMessageCount, 2);
+    assert.equal(result.notification.totalMessageCount, 110);
+    assert.equal(result.messages[1]._compaction.originalMessageCount, 110);
+    assert.equal(result.messages[1]._compaction.deltaMessageCount, 10);
     assert.equal(result.messages[1]._compaction.previousMessageCount, 100);
     assert.match(result.messages[1]._compaction.summary, /previous summary/);
-    assert.match(result.messages[1]._compaction.summary, /Delta summary since previous compaction \(2 messages\)/);
+    assert.match(result.messages[1]._compaction.summary, /Delta summary since previous compaction \(10 messages\)/);
   });
 
-  it('keeps the assistant tool call when the recent window starts with a tool result', async () => {
+  it('keeps the assistant tool call when the keep window starts with a tool result (no-user fallback)', async () => {
+    // 全量但保当前轮：正常路径 keep 首条恒为 user，不会悬空。
+    // 仅「尾段无 user」的回退路径才可能让 keep 首条为 tool_result，
+    // 此时 expandKeepForToolContinuity 应把对应 assistant tool_call 一并拉入 keep。
+    // 尾段全为 assistant/tool（无 user）→ lastUserIdx=-1 → 回退 cutIndex=末条(tool result)。
     const messages = [
       { role: 'system', content: 'system prompt' },
-      { role: 'user', content: 'old request' },
+      ...Array.from({ length: 8 }, (_, index) => ({
+        role: 'assistant',
+        content: `old-${index}`,
+      })),
       {
         role: 'assistant',
         content: null,
@@ -91,10 +101,6 @@ describe('context compactor', () => {
         ],
       },
       { role: 'tool', tool_call_id: 'tool-1', content: 'workspace path' },
-      ...Array.from({ length: 9 }, (_, index) => ({
-        role: index % 2 === 0 ? 'assistant' : 'user',
-        content: `recent-${index}`,
-      })),
     ];
 
     const result = await compactIfNeeded({
@@ -106,12 +112,70 @@ describe('context compactor', () => {
     });
 
     assert.equal(result.compacted, true);
-    assert.equal(result.notification.oldMessageCount, 1);
-    assert.equal(result.notification.keptMessageCount, 11);
+    // 回退 cutIndex=末条(tool result)，expand 把前一条 assistant(tool_call) 拉入 → keep=2 条。
+    assert.equal(result.notification.keptMessageCount, 2);
     assert.equal(result.messages[2].role, 'assistant');
     assert.equal(result.messages[2].tool_calls[0].id, 'tool-1');
     assert.equal(result.messages[3].role, 'tool');
     assert.equal(result.messages[3].tool_call_id, 'tool-1');
+  });
+
+  it('keeps only the current turn (last user to end) and summarizes everything earlier', async () => {
+    // 当前轮 = 最后一个 user 到末尾，其后多条 assistant/tool 全保留；更早消息全进 old。
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      ...Array.from({ length: 8 }, (_, index) => ({
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        content: `old-${index}`,
+      })),
+      { role: 'user', content: 'current turn question' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'tool-9', type: 'function', function: { name: 'bash', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'tool-9', content: 'tool output' },
+      { role: 'assistant', content: 'final answer' },
+    ];
+
+    const result = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      contextWindow: 100_000,
+      providerConfig: null,
+      force: true,
+    });
+
+    assert.equal(result.compacted, true);
+    // 当前轮 4 条全保留：user + assistant(tool_call) + tool + assistant
+    assert.equal(result.notification.keptMessageCount, 4);
+    // 更早 8 条全部摘要
+    assert.equal(result.notification.oldMessageCount, 8);
+    // keep 段原样保留，工具对不被拆散
+    assert.equal(result.messages[2].role, 'user');
+    assert.equal(result.messages[2].content, 'current turn question');
+    assert.equal(result.messages[result.messages.length - 1].content, 'final answer');
+  });
+
+  it('does not compact when there is no earlier message before the current turn', async () => {
+    // 仅当前轮（最后一个 user 为首条会话消息）→ old 为空 → 不压缩，避免空压缩。
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'only question' },
+      { role: 'assistant', content: 'only answer' },
+    ];
+
+    const result = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      contextWindow: 100_000,
+      providerConfig: null,
+      force: true,
+    });
+
+    assert.equal(result.compacted, false);
   });
 
   it('preflight compacts above threshold without throwing', async () => {

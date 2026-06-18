@@ -421,8 +421,13 @@ function shouldCompact(estimatedTokens, contextWindow) {
 
 function shouldRunCompaction({ force, estimatedTokens, contextWindow, messages }) {
   if (force) {
-    const convCount = messages.filter((m) => m.role !== 'system').length;
-    return convCount > COMPACTION_CONFIG.keepRecentCount;
+    // 全量但保当前轮：只要当前轮之前存在更早消息（old 非空）就值得压缩，
+    // 避免「只有当前轮」时产生空压缩。当前轮起点 = 最后一个 user 下标。
+    const convMsgs = messages.filter((m) => m.role !== 'system');
+    const lastUserIdx = findCurrentTurnStart(convMsgs);
+    // 无 user 时回退口径与 splitForCompaction 对齐：保留最后 1 条，其余可摘要。
+    const cutIndex = lastUserIdx < 0 ? Math.max(0, convMsgs.length - 1) : lastUserIdx;
+    return cutIndex > 0;
   }
   return shouldCompact(estimatedTokens, contextWindow);
 }
@@ -452,19 +457,38 @@ function expandKeepForToolContinuity({ keep, old }) {
   return { keep: expandedKeep, old: expandedOld };
 }
 
-function splitForCompaction(messages) {
-  const convMsgs = messages.filter((m) => m.role !== 'system');
-  if (convMsgs.length <= COMPACTION_CONFIG.keepRecentCount) {
-    return { keep: convMsgs, old: [], systemMsgs: messages.filter((m) => m.role === 'system') };
+// 定位「当前轮」起点：最后一个 user 消息的下标。
+// 当前轮 = 最近一次 user 提问 + 其后的 assistant / tool 消息。
+// 用语义边界界定「当前轮」，而非保留固定条数（见 docs/proposals/0010）。
+// 返回 -1 表示无 user 消息（异常路径，由调用方回退处理）。
+function findCurrentTurnStart(convMsgs) {
+  for (let i = convMsgs.length - 1; i >= 0; i--) {
+    if (convMsgs[i]?.role === 'user') return i;
   }
+  return -1;
+}
+
+function splitForCompaction(messages) {
+  const systemMsgs = messages.filter((m) => m.role === 'system');
+  const convMsgs = messages.filter((m) => m.role !== 'system');
+
+  // 全量但保当前轮：旧消息全部摘要，仅保留触发压缩时正在进行的当前轮原文。
+  // ⚠️ 不能用 slice(-keepRecentCount) / slice(-0)：slice(-0) ≡ slice(0) = 全部，
+  //    会把 keep 反转成全保留、old 反转成空，压缩失效。必须用显式索引切分。
+  const lastUserIdx = findCurrentTurnStart(convMsgs);
+
+  // 无 user 消息（异常）→ 回退为保留最后 1 条，其余进 old。
+  // 当前轮即首条（lastUserIdx <= 0）→ 无更早消息可摘要，old 为空、keep 全保留（不压缩）。
+  const cutIndex = lastUserIdx < 0 ? Math.max(0, convMsgs.length - 1) : lastUserIdx;
+
   const split = expandKeepForToolContinuity({
-    keep: convMsgs.slice(-COMPACTION_CONFIG.keepRecentCount),
-    old: convMsgs.slice(0, -COMPACTION_CONFIG.keepRecentCount),
+    keep: convMsgs.slice(cutIndex),
+    old: convMsgs.slice(0, cutIndex),
   });
   return {
     keep: split.keep,
     old: split.old,
-    systemMsgs: messages.filter((m) => m.role === 'system'),
+    systemMsgs,
   };
 }
 
