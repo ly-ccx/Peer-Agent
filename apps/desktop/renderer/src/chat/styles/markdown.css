@@ -172,14 +172,15 @@
     display: none;
   }
 
-  .historical-preview-card summary::before {
-    content: "▸";
+  .historical-preview-chevron {
+    flex: none;
     color: var(--za-text-muted);
+    transform: rotate(-90deg);
     transition: transform 0.15s;
   }
 
-  .historical-preview-card[open] summary::before {
-    transform: rotate(90deg);
+  .historical-preview-card[open] summary .historical-preview-chevron {
+    transform: rotate(0deg);
   }
 
   .historical-preview-meta {

@@ -13,6 +13,20 @@ function HistoricalPreviewBlock({ content }: { readonly content: string }) {
   return (
     <details className="historical-preview-card">
       <summary>
+        <svg
+          className="historical-preview-chevron"
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
         <span>历史长文本已压缩为预览</span>
         {originalChars ? <span className="historical-preview-meta">{Number(originalChars).toLocaleString()} chars</span> : null}
       </summary>
