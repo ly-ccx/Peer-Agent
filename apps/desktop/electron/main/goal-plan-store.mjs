@@ -110,12 +110,20 @@ export function aggregateProgress(tasks) {
 /**
  * 由子任务事实自底向上派生「计划整体状态」，与 aggregateProgress 同源（提案 §4/§6）。
  *
- * 仅负责一种「只前进」的派生：当计划尚处于「执行前」状态（awaiting_approval / approved），
- * 但已有任意子任务进入活跃或终态（running / completed / failed / waiting_user）时，
- * 说明执行已经开始（典型场景：用户在对话里直接触发执行，跳过了面板审批按钮），
- * 此时把计划推进到 'executing'，从而让审批按钮（canDecide=awaiting_approval）正确消失。
+ * 负责两种「只前进」的派生（均与 aggregateProgress 同源、由叶子事实驱动、纯函数、不回退）：
  *
- * 不做任何回退或终态推断（completed/cancelled/paused/failed/drafting 等仍由显式写路径决定），
+ * 1. 开工推进：当计划尚处于「执行前」状态（awaiting_approval / approved），
+ *    但已有任意子任务进入活跃或终态（running / completed / failed / waiting_user）时，
+ *    说明执行已经开始（典型场景：用户在对话里直接触发执行，跳过了面板审批按钮），
+ *    此时把计划推进到 'executing'，从而让审批按钮（canDecide=awaiting_approval）正确消失。
+ *
+ * 2. 自动收尾（见 docs/proposals/0008-goal-plan-auto-finalize.md）：当计划已 'executing'
+ *    且存在叶子、且所有叶子均为终态（completed / failed）时，把顶层推进到终态——
+ *    含任一 failed → 'failed'，否则全 completed → 'completed'。这修复了「子任务 100%
+ *    完成但顶层仍显示 executing」的现象。waiting_user（阻塞）叶子不算终态，存在它时不收尾；
+ *    空计划（无叶子）不收尾。
+ *
+ * 不做任何回退（已是 completed/failed/cancelled/paused 等终态/显式态不会被改回），
  * 避免与 recordApproval / setPlanStatus 的显式状态机产生竞争。
  *
  * @param {string} currentStatus 当前 plan.status
@@ -123,6 +131,31 @@ export function aggregateProgress(tasks) {
  * @returns {string} 派生后的 plan.status
  */
 export function derivePlanStatus(currentStatus, tasks) {
+  // 规则 2：executing + 全叶子终态 → 自动收尾（completed/failed）。
+  if (currentStatus === 'executing') {
+    let leafTotal = 0;
+    let allTerminal = true;
+    let hasFailed = false;
+    const walkLeaves = (list) => {
+      for (const t of list || []) {
+        const children = Array.isArray(t.subtasks) ? t.subtasks : [];
+        if (children.length > 0) {
+          walkLeaves(children);
+          continue;
+        }
+        leafTotal += 1;
+        if (t.status === TERMINAL_FAIL) hasFailed = true;
+        else if (t.status !== TERMINAL_OK) allTerminal = false;
+      }
+    };
+    walkLeaves(tasks);
+    if (leafTotal > 0 && allTerminal) {
+      return hasFailed ? TERMINAL_FAIL : TERMINAL_OK;
+    }
+    return currentStatus;
+  }
+
+  // 规则 1：执行前 → executing（一旦有叶子开工）。
   const PRE_EXECUTION = new Set(['awaiting_approval', 'approved']);
   if (!PRE_EXECUTION.has(currentStatus)) return currentStatus;
 

@@ -84,6 +84,94 @@ test('derivePlanStatus: 只前进，不干扰其它显式状态机', () => {
   assert.equal(derivePlanStatus('cancelled', running), 'cancelled');
 });
 
+test('derivePlanStatus: executing + 全叶子 completed → completed（自动收尾）', () => {
+  const tasks = [
+    { taskId: 't1', status: 'completed' },
+    { taskId: 't2', status: 'completed' },
+  ];
+  assert.equal(derivePlanStatus('executing', tasks), 'completed');
+});
+
+test('derivePlanStatus: executing + 含 failed（其余 completed）→ failed', () => {
+  const tasks = [
+    { taskId: 't1', status: 'completed' },
+    { taskId: 't2', status: 'failed' },
+  ];
+  assert.equal(derivePlanStatus('executing', tasks), 'failed');
+});
+
+test('derivePlanStatus: executing + 仍有 running/pending → 维持 executing（不前进）', () => {
+  assert.equal(
+    derivePlanStatus('executing', [
+      { taskId: 't1', status: 'completed' },
+      { taskId: 't2', status: 'running' },
+    ]),
+    'executing',
+  );
+  assert.equal(
+    derivePlanStatus('executing', [
+      { taskId: 't1', status: 'completed' },
+      { taskId: 't2', status: 'pending' },
+    ]),
+    'executing',
+  );
+});
+
+test('derivePlanStatus: executing + 含 waiting_user（阻塞）→ 维持 executing（不收尾）', () => {
+  const tasks = [
+    { taskId: 't1', status: 'completed' },
+    { taskId: 't2', status: 'waiting_user' },
+  ];
+  assert.equal(derivePlanStatus('executing', tasks), 'executing');
+});
+
+test('derivePlanStatus: executing + 空叶子 → 不前进（维持 executing）', () => {
+  assert.equal(derivePlanStatus('executing', []), 'executing');
+});
+
+test('derivePlanStatus: executing + 嵌套子树全终态 → 收尾（completed）', () => {
+  const tasks = [
+    { taskId: 't1', status: 'completed' },
+    {
+      taskId: 't2',
+      status: 'running', // 父任务自身状态不计入，只看叶子
+      subtasks: [
+        { taskId: 't2a', status: 'completed' },
+        { taskId: 't2b', status: 'completed' },
+      ],
+    },
+  ];
+  assert.equal(derivePlanStatus('executing', tasks), 'completed');
+});
+
+test('recordTaskEvidence: 最后一个子任务完成后，executing 计划自动收尾为 completed', () => {
+  const created = store.createPlan(draftWithTasks());
+  store.setPlanStatus(created.planId, 'executing');
+
+  // 叶子 = t1, t2a, t2b；逐个完成
+  store.recordTaskEvidence(created.planId, 't1', {
+    status: 'completed',
+    evidenceRefs: ['artifact://1'],
+  });
+  store.recordTaskEvidence(created.planId, 't2a', {
+    status: 'completed',
+    evidenceRefs: ['artifact://2'],
+  });
+  assert.equal(
+    store.getPlan(created.planId).status,
+    'executing',
+    '尚有未完成叶子时维持 executing',
+  );
+
+  store.recordTaskEvidence(created.planId, 't2b', {
+    status: 'completed',
+    evidenceRefs: ['artifact://3'],
+  });
+  const after = store.getPlan(created.planId);
+  assert.equal(after.status, 'completed', '全部叶子完成后应自动收尾为 completed');
+  assert.equal(after.progress.percent, 100);
+});
+
 test('recordTaskEvidence: 对话直接触发执行时，awaiting_approval 计划自动推进为 executing（收起审批按钮）', () => {
   // 模拟 AI 路径：goal_create_plan 落盘后处于 awaiting_approval
   const created = store.createPlan(draftWithTasks());
