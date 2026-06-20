@@ -1,6 +1,7 @@
 /* ── Settings Page · 左侧分区列表 + 右侧配置内容 ── */
 
 .settings-page {
+  --settings-panel-max-width: 1040px;
   display: grid;
   grid-template-columns: 220px 1fr;
   height: 100%;
@@ -99,17 +100,16 @@
   animation: za-content-reveal var(--za-motion-medium) var(--za-ease-out) both;
 }
 
-/* ── 外观分区在设置页内补齐内边距与收窄宽度 ──
+/* ── 外观分区在设置页内补齐内边距与统一内容宽度 ──
    .appearance-panel 原本设计在账户弹层(.sidebar-account-popover.appearance)
    里使用,自身只有 grid+gap、没有 padding/max-width。搬进设置页后会贴边撑满,
-   这里只在 .settings-content 作用域内补齐,与其它分区(.llm-settings-panel /
-   .system-instructions-panel)的内边距和居中宽度保持一致。
+   这里只在 .settings-content 作用域内补齐,与其它分区的内边距和居中宽度保持一致。
    (.llm-settings-panel 自身已带相同边距,无需在此重复。) */
 .settings-content > .appearance-panel {
   box-sizing: border-box;
   padding: var(--space-6);
   padding-top: 52px;
-  max-width: 640px;
+  max-width: var(--settings-panel-max-width);
   width: 100%;
   margin: 0 auto;
 }
@@ -121,7 +121,8 @@
   gap: var(--space-4);
   padding: var(--space-6);
   padding-top: 52px;
-  max-width: 640px;
+  box-sizing: border-box;
+  max-width: var(--settings-panel-max-width);
   width: 100%;
   margin: 0 auto;
 }
@@ -144,7 +145,8 @@
   gap: var(--space-4);
   padding: var(--space-6);
   padding-top: 52px;
-  max-width: 640px;
+  box-sizing: border-box;
+  max-width: var(--settings-panel-max-width);
   width: 100%;
   margin: 0 auto;
 }
@@ -208,7 +210,7 @@
   gap: var(--space-4);
   padding: var(--space-6);
   padding-top: 52px;
-  max-width: 1040px;
+  max-width: var(--settings-panel-max-width);
   width: 100%;
   margin: 0 auto;
 }

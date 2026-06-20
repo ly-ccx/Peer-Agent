@@ -58,18 +58,18 @@ export function SystemInstructionsPanel({
       {onBack ? (
         <header className="llm-settings-header">
           <button type="button" onClick={onBack} aria-label="Back">←</button>
-          <strong>{isZh ? '系统指令' : 'System Instructions'}</strong>
+          <strong>{isZh ? '个性化设置' : 'Personalization'}</strong>
         </header>
       ) : null}
 
       <section className="llm-instructions-card">
         <header className="llm-instructions-header">
-          <strong>{isZh ? '系统指令' : 'System Instructions'}</strong>
+          <strong>{isZh ? '个性化设置' : 'Personalization'}</strong>
         </header>
         <p className="llm-instructions-hint">
           {isZh
-            ? '这些指令会作为 System Context 注入对话,影响模型的回答偏好与约束。'
-            : 'These instructions enter the conversation as System Context, shaping the model’s response preferences and constraints.'}
+            ? '这些设置会作为 System Context 注入对话,影响模型的回答偏好与约束。'
+            : 'These settings enter the conversation as System Context, shaping the model’s response preferences and constraints.'}
         </p>
         <textarea
           value={systemInstructionsDraft}
@@ -91,7 +91,7 @@ export function SystemInstructionsPanel({
             onClick={handleSave}
             disabled={savingInstructions || systemInstructionsDraft === systemInstructions}
           >
-            {savingInstructions ? '...' : (isZh ? '保存指令' : 'Save Instructions')}
+            {savingInstructions ? '...' : (isZh ? '保存设置' : 'Save Settings')}
           </button>
         </div>
       </section>

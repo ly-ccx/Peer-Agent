@@ -11,7 +11,7 @@ type SettingsSection = 'general' | 'model' | 'mcp' | 'instructions' | 'appearanc
 
 /**
  * SettingsPage 是设置入口的单一表达层:
- *   - 左侧:设置分区列表(通用 / 模型配置 / 系统指令 / 外观)
+ *   - 左侧:设置分区列表(通用 / 模型配置 / 个性化设置 / 外观)
  *   - 右侧:当前选中分区的具体配置内容
  *
  * 它本身不承载任何能力执行,只负责在已有的配置面板
@@ -37,8 +37,8 @@ export function SettingsPage({
   const [section, setSection] = useState<SettingsSection>('general');
   const localizedSettingsLabels =
     i18n.locale === 'en-US'
-      ? { model: 'Model configuration', mcp: 'MCP connections', instructions: 'System instructions' }
-      : { model: '模型配置', mcp: 'MCP 连接', instructions: '系统指令' };
+      ? { model: 'Model configuration', mcp: 'MCP connections', instructions: 'Personalization' }
+      : { model: '模型配置', mcp: 'MCP 连接', instructions: '个性化设置' };
   const items: ReadonlyArray<{ key: SettingsSection; label: string }> = [
     { key: 'general', label: i18n.t('settings.general') },
     { key: 'model', label: localizedSettingsLabels.model },
