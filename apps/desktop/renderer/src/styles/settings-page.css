@@ -49,6 +49,47 @@
   color: var(--graphite-base);
 }
 
+/* 设置搜索框（借鉴 Codex 外观页顶部搜索）：仅过滤左侧分区导航项。 */
+.settings-nav-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 var(--space-2) var(--space-2);
+  padding: 6px 10px;
+  border: 1px solid var(--pa-border-subtle);
+  border-radius: 8px;
+  background: var(--pa-surface-muted);
+  color: var(--pa-text-secondary);
+  transition: border-color var(--za-motion-fast), background var(--za-motion-fast);
+}
+.settings-nav-search:focus-within {
+  border-color: var(--za-accent);
+  background: var(--pa-surface-hover);
+}
+.settings-nav-search svg {
+  flex: 0 0 auto;
+  color: var(--pa-text-secondary);
+}
+.settings-nav-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--pa-text-primary);
+  font-size: 13px;
+  outline: none;
+}
+.settings-nav-search input::placeholder {
+  color: var(--pa-text-secondary);
+}
+
+.settings-nav-empty {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--pa-text-secondary);
+  font-size: 12px;
+}
+
 .settings-nav-list {
   display: flex;
   flex-direction: column;

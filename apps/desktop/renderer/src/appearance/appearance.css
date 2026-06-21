@@ -5,8 +5,14 @@
   }
 
   .appearance-panel {
-    @apply grid gap-4;
+    @apply grid gap-5;
     color: var(--za-text-soft);
+  }
+
+  /* 分区编排（借鉴 Codex 外观页）：主题模式 / 配色 / 字体大小 各成一组。
+     组内字段紧凑（gap-2），组间留白由 panel 的 gap-5 提供，形成视觉层级。 */
+  .appearance-group {
+    @apply grid gap-2;
   }
 
   .appearance-panel-header {

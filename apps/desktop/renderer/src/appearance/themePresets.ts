@@ -55,6 +55,7 @@ export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
   mode: 'system',
   palette: 'frost',
   density: 'comfortable',
+  fontScale: 'medium',
 };
 
 /** 单个色板项：展示名 + 十六进制色值（从注册表 re-export）。 */

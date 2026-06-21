@@ -548,6 +548,25 @@
 }
 
 /* ─────────────────────────────────────────────────────────────
+ *  Font Scale: 界面字体大小（默认 medium）
+ *  纪律：
+ *    - 仅缩放根 font-size，全局 rem 字号随之等比缩放，零新增 token、不碰配色
+ *    - 写死 px 的字号不跟随（策略 A 的已知取舍）
+ *    - dataset.fontScale 由 themeTokens.applyAppearance 写到 <html>
+ * ───────────────────────────────────────────────────────────── */
+html[data-font-scale="small"] {
+  font-size: 87.5%;
+}
+
+html[data-font-scale="medium"] {
+  font-size: 100%;
+}
+
+html[data-font-scale="large"] {
+  font-size: 112.5%;
+}
+
+/* ─────────────────────────────────────────────────────────────
  *  焦点环（红线 6：键盘可达性）
  *  纪律：
  *    - 小尺寸交互原子（button / select / link）— azure outline

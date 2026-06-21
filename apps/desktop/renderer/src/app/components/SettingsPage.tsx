@@ -37,6 +37,7 @@ export function SettingsPage({
   readonly onSystemInstructionsChanged?: (value: string) => void;
 }) {
   const [section, setSection] = useState<SettingsSection>('general');
+  const [query, setQuery] = useState('');
   const localizedSettingsLabels =
     i18n.locale === 'en-US'
       ? { model: 'Model configuration', mcp: 'MCP connections', instructions: 'Personalization' }
@@ -48,6 +49,11 @@ export function SettingsPage({
     { key: 'instructions', label: localizedSettingsLabels.instructions },
     { key: 'appearance', label: i18n.t('appearance.title') },
   ];
+  // 搜索仅过滤左侧分区导航项（按 label 子串匹配），不做跨面板深搜。
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleItems = normalizedQuery
+    ? items.filter((item) => item.label.toLowerCase().includes(normalizedQuery))
+    : items;
 
   return (
     <div className="settings-page">
@@ -61,18 +67,35 @@ export function SettingsPage({
           </button>
           <strong>{i18n.t('app.settings')}</strong>
         </header>
+        <div className="settings-nav-search">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m21 21-4.3-4.3" />
+          </svg>
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={i18n.t('settings.search')}
+            aria-label={i18n.t('settings.search')}
+          />
+        </div>
         <nav className="settings-nav-list">
-          {items.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={`settings-nav-item ${section === item.key ? 'active' : ''}`}
-              aria-current={section === item.key}
-              onClick={() => setSection(item.key)}
-            >
-              {item.label}
-            </button>
-          ))}
+          {visibleItems.length === 0 ? (
+            <p className="settings-nav-empty">{i18n.t('settings.searchEmpty')}</p>
+          ) : (
+            visibleItems.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className={`settings-nav-item ${section === item.key ? 'active' : ''}`}
+                aria-current={section === item.key}
+                onClick={() => setSection(item.key)}
+              >
+                {item.label}
+              </button>
+            ))
+          )}
         </nav>
       </aside>
 

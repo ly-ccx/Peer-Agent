@@ -1,12 +1,13 @@
 /**
  * Peer Vellum 不再做 token 派生；token 全部固化在 styles/tokens.css。
  * 本文件只保留：
- *   - applyAppearance()：把 mode/density 写到 <html dataset>，让 CSS 切换生效
+ *   - applyAppearance()：把 mode/density/fontScale 写到 <html dataset>，让 CSS 切换生效
  *   - sanitizeSettings()：normalize loadSettings() 读到的 localStorage payload
  */
 
 import type {
   AppearanceDensity,
+  AppearanceFontScale,
   AppearanceMode,
   AppearanceScheme,
   AppearanceSettings,
@@ -22,6 +23,10 @@ function isDensity(value: unknown): value is AppearanceDensity {
   return value === 'comfortable' || value === 'compact';
 }
 
+function isFontScale(value: unknown): value is AppearanceFontScale {
+  return value === 'small' || value === 'medium' || value === 'large';
+}
+
 export function sanitizeSettings(raw: unknown): AppearanceSettings {
   if (!raw || typeof raw !== 'object') return DEFAULT_APPEARANCE_SETTINGS;
   const candidate = raw as Partial<AppearanceSettings>;
@@ -30,6 +35,9 @@ export function sanitizeSettings(raw: unknown): AppearanceSettings {
     // palette 合法性由配色注册表统一判定，新增配色自动生效
     palette: sanitizePalette(candidate.palette),
     density: isDensity(candidate.density) ? candidate.density : DEFAULT_APPEARANCE_SETTINGS.density,
+    fontScale: isFontScale(candidate.fontScale)
+      ? candidate.fontScale
+      : DEFAULT_APPEARANCE_SETTINGS.fontScale,
   };
 }
 
@@ -40,5 +48,6 @@ export function applyAppearance(scheme: AppearanceScheme, settings: AppearanceSe
   root.dataset.themeMode = settings.mode;
   root.dataset.palette = settings.palette;
   root.dataset.density = settings.density;
+  root.dataset.fontScale = settings.fontScale;
   root.style.colorScheme = scheme;
 }

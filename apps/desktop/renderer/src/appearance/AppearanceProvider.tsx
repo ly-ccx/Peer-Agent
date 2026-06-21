@@ -9,6 +9,7 @@ import {
 import type { ReactNode } from 'react';
 import type {
   AppearanceDensity,
+  AppearanceFontScale,
   AppearanceMode,
   AppearancePalette,
   AppearanceScheme,
@@ -26,6 +27,7 @@ interface AppearanceContextValue {
   readonly setMode: (mode: AppearanceMode) => void;
   readonly setPalette: (palette: AppearancePalette) => void;
   readonly setDensity: (density: AppearanceDensity) => void;
+  readonly setFontScale: (fontScale: AppearanceFontScale) => void;
   readonly reset: () => void;
 }
 
@@ -108,6 +110,10 @@ export function AppearanceProvider({
     setSettings((current) => ({ ...current, density }));
   }, []);
 
+  const setFontScale = useCallback((fontScale: AppearanceFontScale) => {
+    setSettings((current) => ({ ...current, fontScale }));
+  }, []);
+
   const reset = useCallback(() => setSettings(DEFAULT_APPEARANCE_SETTINGS), []);
 
   const value = useMemo<AppearanceContextValue>(() => ({
@@ -116,8 +122,9 @@ export function AppearanceProvider({
     setMode,
     setPalette,
     setDensity,
+    setFontScale,
     reset,
-  }), [activeScheme, reset, setDensity, setMode, setPalette, settings]);
+  }), [activeScheme, reset, setDensity, setFontScale, setMode, setPalette, settings]);
 
   return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
 }

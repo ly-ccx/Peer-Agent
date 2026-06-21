@@ -69,8 +69,14 @@ export type TranslationKey =
   | 'appearance.codeFont'
   | 'appearance.translucentSidebar'
   | 'appearance.contrast'
+  | 'appearance.fontScale'
+  | 'appearance.fontScale.small'
+  | 'appearance.fontScale.medium'
+  | 'appearance.fontScale.large'
   | 'appearance.reset'
   | 'appearance.language'
+  | 'settings.search'
+  | 'settings.searchEmpty'
   | 'settings.general'
   | 'settings.backToChat'
   | 'settings.appearance.description'
@@ -513,8 +519,14 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.codeFont': '代码字体',
     'appearance.translucentSidebar': '半透明侧栏',
     'appearance.contrast': '对比度',
+    'appearance.fontScale': '界面字体大小',
+    'appearance.fontScale.small': '小',
+    'appearance.fontScale.medium': '中',
+    'appearance.fontScale.large': '大',
     'appearance.reset': '重置外观',
     'appearance.language': '语言',
+    'settings.search': '搜索设置…',
+    'settings.searchEmpty': '无匹配的设置项',
     'settings.general': '通用',
     'settings.backToChat': '返回对话',
     'settings.appearance.description': '选择界面的浅色、深色模式或跟随系统偏好。',
@@ -975,8 +987,14 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.codeFont': 'Code font',
     'appearance.translucentSidebar': 'Translucent sidebar',
     'appearance.contrast': 'Contrast',
+    'appearance.fontScale': 'Interface font size',
+    'appearance.fontScale.small': 'Small',
+    'appearance.fontScale.medium': 'Medium',
+    'appearance.fontScale.large': 'Large',
     'appearance.reset': 'Reset appearance',
     'appearance.language': 'Language',
+    'settings.search': 'Search settings…',
+    'settings.searchEmpty': 'No matching settings',
     'settings.general': 'General',
     'settings.backToChat': 'Back to chat',
     'settings.appearance.description': 'Choose light, dark, or follow system preference.',

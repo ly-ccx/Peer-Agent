@@ -3,6 +3,7 @@
  *   - mode: 浅 / 深 / 跟随系统
  *   - palette: 配色方案（frost 默认；catppuccin 为可选第三方调色板）
  *   - density: 宽松 / 紧凑（Phase 2 启用 UI）
+ *   - fontScale: 界面字体大小 小 / 中 / 大（驱动根 font-size 百分比缩放，rem 字号跟随）
  *
  * 历史背景（红线 §6 的演化）：
  *   旧 Vellum/Frost 契约把三层 token 完全固化、禁止任何用户调色。
@@ -24,8 +25,14 @@ export type { AppearancePalette };
 
 export type AppearanceDensity = 'comfortable' | 'compact';
 
+// 界面字体大小：一条正交于 mode/palette/density 的外观轴。
+// 通过 <html dataset.fontScale> + tokens.css 根 font-size 百分比缩放生效，
+// 全局 rem 字号随之缩放（写死 px 的字号不跟随，属策略 A 的已知取舍）。
+export type AppearanceFontScale = 'small' | 'medium' | 'large';
+
 export interface AppearanceSettings {
   readonly mode: AppearanceMode;
   readonly palette: AppearancePalette;
   readonly density: AppearanceDensity;
+  readonly fontScale: AppearanceFontScale;
 }
