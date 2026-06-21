@@ -20,12 +20,17 @@ function readSystemInstructions(settings: Record<string, unknown> | null | undef
   return typeof settings?.systemInstructions === 'string' ? settings.systemInstructions : '';
 }
 
+function readReplyLanguage(settings: Record<string, unknown> | null | undefined): string {
+  return typeof settings?.replyLanguage === 'string' ? settings.replyLanguage : '';
+}
+
 export function App() {
   const { availableLocales, initError, refreshBootstrap, session } = useDesktopBootstrap();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [activePage, setActivePage] = useState<AppPage>('chat');
-  const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
+  // 窗口是否处于原生全屏。全屏时交通灯被系统隐藏,据此收掉顶部为其预留的留白。
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
   const [conversations, setConversations] = useState<readonly ConversationMeta[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   // 表达层状态:当前正在流式运行的会话 id 集合,用于左侧列表显示 Loading 图标。
@@ -44,6 +49,8 @@ export function App() {
   const [resumeTask, setResumeTask] = useState<{ sessionId: string; task: string; effort?: string } | null>(null);
   const [systemInstructions, setSystemInstructions] = useState(() =>
     readSystemInstructions(clientApi.initialSettings));
+  const [replyLanguage, setReplyLanguage] = useState(() =>
+    readReplyLanguage(clientApi.initialSettings));
 
   const refreshProviders = useCallback(async () => {
     try { setProviders(await clientApi.llmListProviders()); } catch {}
@@ -59,7 +66,9 @@ export function App() {
 
   const refreshSettings = useCallback(async () => {
     try {
-      setSystemInstructions(readSystemInstructions(await clientApi.getSettings()));
+      const settings = await clientApi.getSettings();
+      setSystemInstructions(readSystemInstructions(settings));
+      setReplyLanguage(readReplyLanguage(settings));
     } catch {}
   }, []);
 
@@ -188,6 +197,7 @@ export function App() {
             void refreshSettings();
           }}
           onLocaleChanged={refreshBootstrap}
+          onReplyLanguageChanged={setReplyLanguage}
           onSystemInstructionsChanged={setSystemInstructions}
         />
       ) : session ? (
@@ -213,6 +223,7 @@ export function App() {
                 providers={providers}
                 conversationId={activeConversationId}
                 systemInstructions={systemInstructions}
+                replyLanguage={replyLanguage}
                 resumeTask={resumeTask}
                 onResumeConsumed={() => {
                   setResumeTask(null);

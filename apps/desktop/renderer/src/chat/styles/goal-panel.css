@@ -393,6 +393,13 @@
 .goal-task-title {
   font-size: 13px;
   color: var(--za-text);
+  /* flex 子项默认 min-width:auto，不会窄于最长内容；窄栏(380px)里像
+     riskLevel/dataLevel/... 这种无断点长串会把整行撑宽并冒出横向滚动条。
+     允许收缩 + 任意处断行，约束在栏宽内。 */
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .goal-task-evidence {

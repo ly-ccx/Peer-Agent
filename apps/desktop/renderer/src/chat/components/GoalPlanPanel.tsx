@@ -1,4 +1,5 @@
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ReactElement } from 'react';
 import type { ExecutionStatus, GoalPlan, GoalTask } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
@@ -11,7 +12,7 @@ function normalizeConversationId(value: string | number | null | undefined): str
 }
 
 /**
- * Goal 模式计划面板 —— 见 docs/proposals/0002-goal-mode.md。
+ * Goal 模式计划面板 —— 见 Goal 模式设计。
  *
  * 治理红线（与提案 §3/§6 一致）：
  * - 完成状态由 Evidence 自底向上聚合，面板「只读展示」进度与子任务状态，绝不提供手动打勾完成的入口。
@@ -28,9 +29,16 @@ interface GoalPlanPanelProps {
    * 批准成功后回调。由 ChatSurface 注入，用于唤起 chat runtime 发起「执行轮」
    * （复用既有 submitMessage 发送路径，不另造旁路）。
    * 缺省时面板仅落库 + 刷新，不驱动执行（保持向后兼容）。
-   * 见 docs/proposals/0002-goal-mode.md 时序图阶段二→阶段三。
+   * 见 Goal 模式设计 时序图阶段二→阶段三。
    */
   readonly onApproved?: (plan: GoalPlan) => void;
+  /**
+   * 方案 B（右侧常驻分栏）：展开态的计划详情 body 通过 createPortal 投影到此容器，
+   * 由 ChatSurface 在主内容区右侧提供的 <aside> slot。
+   * 折叠浮条（toggle）仍渲染在原位（输入框上方）。
+   * 缺省（null/未注入）时回退为「就地内联展开」的旧行为，保持向后兼容与可测试性。
+   */
+  readonly sidePanelContainer?: HTMLElement | null;
 }
 
 function statusLabel(status: ExecutionStatus, isZh: boolean): string {
@@ -133,12 +141,21 @@ function TaskNode({ task, depth, isZh }: { task: GoalTask; depth: number; isZh: 
   );
 }
 
-export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPanelProps): ReactElement | null {
+// 重档过渡的卸载延迟（毫秒），必须与 CSS token --za-motion-medium 对齐（见
+// chat-surface.css 的 .chat-side-panel 过渡时长）。收起时 body 先随收缩动画播完
+// 再卸载，避免「内容瞬间消失、空壳再慢慢缩」的割裂感。
+const GOAL_PANEL_MOTION_MS = 200;
+
+export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelContainer }: GoalPlanPanelProps): ReactElement | null {
   const [plans, setPlans] = useState<readonly GoalPlan[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyPlanId, setBusyPlanId] = useState<string | null>(null);
   const [manualCollapsed, setManualCollapsed] = useState<boolean | null>(null);
+  // 重档过渡：bodyMounted 控制右栏 body 是否仍挂载（收起时延迟卸载，让收缩动画播完）；
+  // closing 标记正处于收起动画中，用于给 body 加退场样式、给右栏容器加 data-closing 提前收宽。
+  const [bodyMounted, setBodyMounted] = useState(false);
+  const [closing, setClosing] = useState(false);
   // 本轮助手输出（streaming）期间，禁用「批准并执行 / 驳回」这两个治理事实写操作：
   // 计划一落库面板就出现，但本轮 AI 会话尚未结束，此时点批准会被运行时丢弃（见 0004 提案）。
   // 复用既有 InteractionContext（GoalPlanPanel 渲染在该 Provider 内），不新增 prop 透传。
@@ -238,7 +255,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
         await reload();
         // 批准成功后唤起 chat runtime 发起「执行轮」。落库（治理事实）与执行驱动分离：
         // store 已记录 GoalApproval Evidence，这里再通过回调进入既有发送路径开始执行。
-        // 见 docs/proposals/0002-goal-mode.md 阶段二→阶段三。
+        // 见 Goal 模式设计 阶段二→阶段三。
         if (decision === 'approve') {
           onApproved?.(plan);
         }
@@ -251,16 +268,46 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
     [reload, isZh, onApproved],
   );
 
-  // 面板位于输入框上方：没有计划时不占位，直接隐藏。
-  if (plans.length === 0) {
-    return null;
-  }
-
   const pendingCount = plans.filter((plan) => plan.status === 'awaiting_approval').length;
   // B：有待批准计划时强制展开且不可手动收起，确保「批准并执行/驳回」按钮永远可见；
   // 折叠仅对「无待批准（全部已批准/执行中/完成）」的情况生效。
   const lockedOpen = pendingCount > 0;
   const expanded = lockedOpen ? true : manualCollapsed === null ? false : !manualCollapsed;
+
+  // 重档过渡（延迟卸载）：展开 → 立即挂载 body 并清除 closing；收起 → 先标记 closing
+  // 触发收缩动画，GOAL_PANEL_MOTION_MS 后再真正卸载 body。
+  // 注意：此 effect 必须在任何 early-return 之前，保证 Hook 调用顺序稳定（React Hooks 规则）。
+  useEffect(() => {
+    if (expanded) {
+      setClosing(false);
+      setBodyMounted(true);
+      return undefined;
+    }
+    if (!bodyMounted) return undefined;
+    setClosing(true);
+    const timer = window.setTimeout(() => {
+      setBodyMounted(false);
+      setClosing(false);
+    }, GOAL_PANEL_MOTION_MS);
+    return () => window.clearTimeout(timer);
+  }, [expanded, bodyMounted]);
+
+  // 把 closing 状态写到右栏容器（portal 宿主）上，让它在 body 卸载前就开始收宽，
+  // 消除「内容瞬间消失、空壳再慢慢缩」的割裂感。仅在注入了 sidePanelContainer 时生效。
+  useEffect(() => {
+    if (!sidePanelContainer) return undefined;
+    if (closing) {
+      sidePanelContainer.setAttribute('data-closing', 'true');
+    } else {
+      sidePanelContainer.removeAttribute('data-closing');
+    }
+    return undefined;
+  }, [closing, sidePanelContainer]);
+
+  // 面板位于输入框上方：没有计划时不占位，直接隐藏。
+  if (plans.length === 0) {
+    return null;
+  }
   const refreshing = loading ? (isZh ? ' · 刷新中…' : ' · refreshing…') : '';
   // A：折叠态也要有信息密度——挑一个「活跃计划」（优先待批准，其次执行中，再次第一个），
   // 在 header 上直接显示它的标题与 X/Y 迷你进度，避免「很长却什么都没有」。
@@ -331,8 +378,9 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
           <span className="goal-panel-toggle-caret" aria-hidden="true">{expanded ? '⌄' : '›'}</span>
         )}
       </button>
-      {!expanded ? null : (
-      <div className="goal-panel-body">
+      {!bodyMounted ? null : (() => {
+        const body = (
+      <div className={`goal-panel-body${closing ? ' goal-panel-body--closing' : ''}`}>
       {error ? <div className="goal-panel-error">{error}</div> : null}
       {plans.map((plan) => {
         const canDecide = plan.status === 'awaiting_approval';
@@ -400,7 +448,11 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved }: GoalPlanPane
         );
       })}
       </div>
-      )}
+        );
+        // 方案 B：注入了右栏容器则 portal 投影到主内容区右侧常驻分栏；
+        // 未注入（如单测/旧路径）回退为就地内联展开，保持向后兼容。
+        return sidePanelContainer ? createPortal(body, sidePanelContainer) : body;
+      })()}
     </div>
   );
 }
