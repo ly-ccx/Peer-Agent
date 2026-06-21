@@ -8,12 +8,16 @@ import { Sidebar } from './chat/components/Sidebar';
 import { clientApi } from './clientApi';
 
 type AppPage = 'chat' | 'settings';
+type ConversationStatus = 'active' | 'archived';
+type ConversationView = 'active' | 'archived';
 
 interface ConversationMeta {
   id: string;
   title: string;
   messageCount: number;
   updatedAt: string;
+  status?: ConversationStatus;
+  archivedAt?: string | null;
 }
 
 function readSystemInstructions(settings: Record<string, unknown> | null | undefined): string {
@@ -28,6 +32,7 @@ export function App() {
   const { availableLocales, initError, refreshBootstrap, session } = useDesktopBootstrap();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [activePage, setActivePage] = useState<AppPage>('chat');
+  const [conversationView, setConversationView] = useState<ConversationView>('active');
   // 窗口是否处于原生全屏。全屏时交通灯被系统隐藏,据此收掉顶部为其预留的留白。
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
@@ -44,8 +49,8 @@ export function App() {
   const [runningWorkspacePaths, setRunningWorkspacePaths] = useState<ReadonlySet<string>>(
     () => new Set());
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
-  // 任务续传(ADR 21):重启后 peek 回来的待办,带会话坐标。
-  // App 负责切到 sessionId(回到中断现场)后,把 task 下发给 ChatSurface 自动发出。
+  // ADR 21: main 进程可能已写入 PendingTask(例如重启恢复)。renderer 只负责
+  // 切到 task.sessionId(回到中断现场)后,把 task 下发给 ChatSurface 自动发出。
   const [resumeTask, setResumeTask] = useState<{ sessionId: string; task: string; effort?: string } | null>(null);
   const [systemInstructions, setSystemInstructions] = useState(() =>
     readSystemInstructions(clientApi.initialSettings));
@@ -56,13 +61,14 @@ export function App() {
     try { setProviders(await clientApi.llmListProviders()); } catch {}
   }, []);
 
-  const refreshConversations = useCallback(async (wsPath?: string | null) => {
+  const refreshConversations = useCallback(async (wsPath?: string | null, view?: ConversationView) => {
     const ws = wsPath !== undefined ? wsPath : activeWorkspace;
+    const status = view ?? conversationView;
     try {
-      const list = await clientApi.conversationsList({ workspacePath: ws }) as readonly ConversationMeta[];
+      const list = await clientApi.conversationsList({ workspacePath: ws, status }) as readonly ConversationMeta[];
       setConversations(list);
     } catch {}
-  }, [activeWorkspace]);
+  }, [activeWorkspace, conversationView]);
 
   const refreshSettings = useCallback(async () => {
     try {
@@ -77,9 +83,11 @@ export function App() {
     void refreshSettings();
     void clientApi.workspaceList().then((r) => {
       setActiveWorkspace(r.activeWorkspace);
-      void refreshConversations(r.activeWorkspace);
+      void clientApi.conversationsList({ workspacePath: r.activeWorkspace, status: 'active' })
+        .then((list) => { setConversations(list as readonly ConversationMeta[]); })
+        .catch(() => {});
     }).catch(() => {});
-  }, [refreshProviders, refreshSettings, refreshConversations]);
+  }, [refreshProviders, refreshSettings]);
 
   // 任务续传(ADR 21):重启后回到中断现场。
   // peek(只读不清)拿到会话锚定的待办 → 切到 sessionId(回到原会话)→ 存 resumeTask,
@@ -87,25 +95,18 @@ export function App() {
   // 用 peek 而非 consume:发送成功前不删文件,抗 StrictMode 双挂载与未就绪时序。
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      try {
-        const record = await clientApi.peekPendingTask();
-        if (cancelled || !record) return;
-        const sessionId = typeof record.sessionId === 'string' ? record.sessionId : null;
-        const task = typeof record.task === 'string' ? record.task.trim() : '';
-        if (!sessionId || !task) return;
-        const effort =
-          record.effort === 'off' || record.effort === 'low'
-          || record.effort === 'default' || record.effort === 'high' || record.effort === 'xhigh'
-            ? record.effort
-            : undefined;
+    void clientApi.peekPendingTask()
+      .then((task) => {
+        if (cancelled || !task) return;
+        const sessionId = typeof task.sessionId === 'string' ? task.sessionId : '';
+        const text = typeof task.task === 'string' ? task.task : '';
+        if (!sessionId || !text) return;
         setActiveConversationId(sessionId);
+        setConversationView('active');
         setActivePage('chat');
-        setResumeTask({ sessionId, task, effort });
-      } catch {
-        // 无任务 / 文件损坏 / workspace 不匹配:静默降级为正常空白启动。
-      }
-    })();
+        setResumeTask({ sessionId, task: text, effort: typeof task.effort === 'string' ? task.effort : undefined });
+      })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
@@ -152,7 +153,8 @@ export function App() {
     const r = await clientApi.workspaceList();
     setActiveWorkspace(r.activeWorkspace);
     setActiveConversationId(null);
-    void refreshConversations(r.activeWorkspace);
+    setConversationView('active');
+    await refreshConversations(r.activeWorkspace, 'active');
   }, [refreshConversations]);
 
   const handleNewChat = useCallback(async () => {
@@ -164,7 +166,8 @@ export function App() {
       setActiveWorkspace(ws);
     }
     const conv = await clientApi.conversationsCreate({ workspacePath: ws }) as ConversationMeta;
-    await refreshConversations(ws);
+    setConversationView('active');
+    await refreshConversations(ws, 'active');
     setActiveConversationId(conv.id);
     setActivePage('chat');
   }, [refreshConversations, activeWorkspace]);
@@ -174,16 +177,44 @@ export function App() {
     setActivePage('chat');
   }, []);
 
+  const handleShowArchivedConversations = useCallback(async () => {
+    setConversationView('archived');
+    setActiveConversationId(null);
+    setActivePage('chat');
+    setConversations([]);
+    await refreshConversations(activeWorkspace, 'archived');
+  }, [activeWorkspace, refreshConversations]);
+
+  const handleShowActiveConversations = useCallback(async () => {
+    setConversationView('active');
+    setActiveConversationId(null);
+    setActivePage('chat');
+    setConversations([]);
+    await refreshConversations(activeWorkspace, 'active');
+  }, [activeWorkspace, refreshConversations]);
+
+  const handleArchiveConversation = useCallback(async (id: string) => {
+    if (runningConversationIds.has(id)) return;
+    await clientApi.conversationsArchive({ id });
+    if (activeConversationId === id) setActiveConversationId(null);
+    await refreshConversations(activeWorkspace, conversationView);
+  }, [activeConversationId, activeWorkspace, conversationView, refreshConversations, runningConversationIds]);
+
+  const handleRestoreConversation = useCallback(async (id: string) => {
+    await clientApi.conversationsRestore({ id });
+    await refreshConversations(activeWorkspace, conversationView);
+  }, [activeWorkspace, conversationView, refreshConversations]);
+
   const handleDeleteConversation = useCallback(async (id: string) => {
     await clientApi.conversationsDelete({ id });
     if (activeConversationId === id) setActiveConversationId(null);
-    await refreshConversations();
-  }, [activeConversationId, refreshConversations]);
+    await refreshConversations(activeWorkspace, conversationView);
+  }, [activeConversationId, activeWorkspace, conversationView, refreshConversations]);
 
   const handleRenameConversation = useCallback(async (id: string, title: string) => {
     await clientApi.conversationsUpdateTitle({ id, title: title.trim() });
-    await refreshConversations();
-  }, [refreshConversations]);
+    await refreshConversations(activeWorkspace, conversationView);
+  }, [activeWorkspace, conversationView, refreshConversations]);
 
   return (
     <main className={isFullscreen ? 'app-shell is-fullscreen' : 'app-shell'}>
@@ -205,6 +236,7 @@ export function App() {
           <Sidebar
             conversations={conversations}
             activeConversationId={activeConversationId}
+            conversationView={conversationView}
             runningConversationIds={runningConversationIds}
             runningWorkspacePaths={runningWorkspacePaths}
             activePage={activePage}
@@ -213,6 +245,10 @@ export function App() {
             onSelectConversation={handleSelectConversation}
             onDeleteConversation={handleDeleteConversation}
             onRenameConversation={handleRenameConversation}
+            onArchiveConversation={handleArchiveConversation}
+            onRestoreConversation={handleRestoreConversation}
+            onShowArchivedConversations={handleShowArchivedConversations}
+            onShowActiveConversations={handleShowActiveConversations}
             onOpenSettings={() => setActivePage('settings')}
             onWorkspaceChanged={handleWorkspaceChanged}
           />
@@ -244,7 +280,7 @@ export function App() {
                     return next;
                   });
                 }}
-                onBranch={(id) => { setActiveConversationId(id); void refreshConversations(); }}
+                onBranch={(id) => { setConversationView('active'); setActiveConversationId(id); void refreshConversations(activeWorkspace, 'active'); }}
               />
             </section>
           </section>

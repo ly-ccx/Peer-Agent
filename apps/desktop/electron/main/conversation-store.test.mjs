@@ -212,3 +212,61 @@ test('listConversations falls back to createdAt when updatedAt missing', () => {
     cleanup();
   }
 });
+
+test('conversation archive status filters active and archived lists', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const active = store.createConversation({ title: 'active' });
+    const archived = store.createConversation({ title: 'archived' });
+
+    const archivedMeta = store.archiveConversation(archived.id);
+    assert.equal(archivedMeta.status, 'archived');
+    assert.ok(archivedMeta.archivedAt);
+
+    assert.deepEqual(store.listConversations({ status: 'active' }).map((c) => c.id), [active.id]);
+    assert.deepEqual(store.listConversations({ status: 'archived' }).map((c) => c.id), [archived.id]);
+
+    const restored = store.restoreConversation(archived.id);
+    assert.equal(restored.status, 'active');
+    assert.equal(restored.archivedAt, null);
+    assert.deepEqual(new Set(store.listConversations({ status: 'active' }).map((c) => c.id)), new Set([active.id, archived.id]));
+  } finally {
+    cleanup();
+  }
+});
+
+test('legacy conversations without status are treated as active', () => {
+  const { store, dir, cleanup } = freshStore();
+  try {
+    const rows = [
+      { id: 'legacy', title: 'legacy', mode: 'chat', createdAt: '2024-01-01T00:00:00.000Z', updatedAt: '2024-01-01T00:00:00.000Z' },
+      { id: 'archived', title: 'archived', mode: 'chat', status: 'archived', archivedAt: '2024-02-01T00:00:00.000Z', createdAt: '2024-02-01T00:00:00.000Z', updatedAt: '2024-02-01T00:00:00.000Z' },
+    ];
+    writeFileSync(path.join(dir, 'index.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+
+    assert.deepEqual(store.listConversations({ status: 'active' }).map((c) => c.id), ['legacy']);
+    assert.deepEqual(store.listConversations({ status: 'archived' }).map((c) => c.id), ['archived']);
+  } finally {
+    cleanup();
+  }
+});
+
+test('autoArchiveConversations archives old active conversations and skips excluded/running ids', () => {
+  const { store, dir, cleanup } = freshStore();
+  try {
+    const rows = [
+      { id: 'old', title: 'old', mode: 'chat', status: 'active', createdAt: '2024-01-01T00:00:00.000Z', updatedAt: '2024-01-01T00:00:00.000Z' },
+      { id: 'excluded', title: 'excluded', mode: 'chat', status: 'active', createdAt: '2024-01-01T00:00:00.000Z', updatedAt: '2024-01-02T00:00:00.000Z' },
+      { id: 'fresh', title: 'fresh', mode: 'chat', status: 'active', createdAt: '2024-03-01T00:00:00.000Z', updatedAt: '2024-03-01T00:00:00.000Z' },
+      { id: 'already', title: 'already', mode: 'chat', status: 'archived', archivedAt: '2024-01-03T00:00:00.000Z', createdAt: '2024-01-03T00:00:00.000Z', updatedAt: '2024-01-03T00:00:00.000Z' },
+    ];
+    writeFileSync(path.join(dir, 'index.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+
+    const result = store.autoArchiveConversations({ before: '2024-02-01T00:00:00.000Z', excludeIds: ['excluded'] });
+    assert.deepEqual(result, { archivedIds: ['old'], archivedCount: 1 });
+    assert.deepEqual(new Set(store.listConversations({ status: 'active' }).map((c) => c.id)), new Set(['excluded', 'fresh']));
+    assert.deepEqual(new Set(store.listConversations({ status: 'archived' }).map((c) => c.id)), new Set(['old', 'already']));
+  } finally {
+    cleanup();
+  }
+});

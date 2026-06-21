@@ -12,14 +12,37 @@ function readJsonl(filePath) {
     .filter(Boolean);
 }
 
-function appendJsonl(filePath, obj) {
+function writeJsonl(filePath, rows) {
   mkdirSync(path.dirname(filePath), { recursive: true });
-  appendFileSync(filePath, JSON.stringify(obj) + '\n', 'utf8');
+  writeFileSync(filePath, rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : ''), 'utf8');
 }
 
-function writeJsonl(filePath, items) {
+function appendJsonl(filePath, row) {
   mkdirSync(path.dirname(filePath), { recursive: true });
-  writeFileSync(filePath, items.map((item) => JSON.stringify(item)).join('\n') + '\n', 'utf8');
+  appendFileSync(filePath, JSON.stringify(row) + '\n', 'utf8');
+}
+
+function normalizeMode(value) {
+  return value === 'goal' ? 'goal' : 'chat';
+}
+
+function normalizeStatus(value) {
+  return value === 'archived' ? 'archived' : 'active';
+}
+
+function normalizeStatuses(status) {
+  if (Array.isArray(status)) return new Set(status.map(normalizeStatus));
+  if (typeof status === 'string') return new Set([normalizeStatus(status)]);
+  return null;
+}
+
+function normalizeMeta(meta) {
+  return {
+    ...meta,
+    mode: normalizeMode(meta?.mode),
+    status: normalizeStatus(meta?.status),
+    archivedAt: normalizeStatus(meta?.status) === 'archived' ? (meta?.archivedAt || meta?.updatedAt || meta?.createdAt || null) : null,
+  };
 }
 
 export function createConversationStore({ storeDir = pathOf('conversations') } = {}) {
@@ -27,10 +50,12 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
 
   function convFile(id) { return path.join(storeDir, `${id}.jsonl`); }
 
-  function readIndex() { return readJsonl(indexFile); }
+  function readIndex() { return readJsonl(indexFile).map(normalizeMeta); }
 
-  function listConversations() {
+  function listConversations(params = {}) {
+    const statuses = normalizeStatuses(params?.status);
     return readIndex()
+      .filter((meta) => !statuses || statuses.has(normalizeStatus(meta.status)))
       .map((meta) => {
         const msgs = existsSync(convFile(meta.id)) ? readJsonl(convFile(meta.id)) : [];
         return { ...meta, messageCount: msgs.length };
@@ -43,24 +68,23 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
       });
   }
 
-  function listConversationsByWorkspace(workspacePath) {
-    return listConversations().filter((c) => (c.workspacePath || null) === (workspacePath || null));
+  function listConversationsByWorkspace(workspacePath, params = {}) {
+    return listConversations(params).filter((c) => (c.workspacePath || null) === (workspacePath || null));
   }
 
   // 对话模式（chat / goal）按会话持久化在会话 meta 上，而非全局设置：
   // 模式是「每会话状态」，与计划数据同口径，切换会话各自独立、互不影响。
-  function normalizeMode(value) {
-    return value === 'goal' ? 'goal' : 'chat';
-  }
-
   function createConversation({ title, workspacePath, mode } = {}) {
+    const now = new Date().toISOString();
     const meta = {
       id: randomUUID(),
       title: title || '',
       workspacePath: workspacePath || null,
       mode: normalizeMode(mode),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      status: 'active',
+      archivedAt: null,
+      createdAt: now,
+      updatedAt: now,
     };
     appendJsonl(indexFile, meta);
     return { ...meta, messageCount: 0 };
@@ -103,9 +127,9 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
     appendJsonl(convFile(id), message);
     if (!meta.title && message.role === 'user') {
       meta.title = message.content.slice(0, 50);
-      meta.updatedAt = new Date().toISOString();
-      writeJsonl(indexFile, index);
     }
+    meta.updatedAt = new Date().toISOString();
+    writeJsonl(indexFile, index);
     return { ...meta, messages: readJsonl(convFile(id)) };
   }
 
@@ -154,6 +178,49 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
     return meta.lifetimeUsage;
   }
 
+  function setArchiveStatus(id, status) {
+    const index = readIndex();
+    const meta = index.find((c) => c.id === id);
+    if (!meta) return null;
+    const nextStatus = normalizeStatus(status);
+    const now = new Date().toISOString();
+    meta.status = nextStatus;
+    meta.archivedAt = nextStatus === 'archived' ? now : null;
+    meta.updatedAt = now;
+    writeJsonl(indexFile, index);
+    const msgs = existsSync(convFile(id)) ? readJsonl(convFile(id)) : [];
+    return { ...meta, messageCount: msgs.length };
+  }
+
+  function archiveConversation(id) {
+    return setArchiveStatus(id, 'archived');
+  }
+
+  function restoreConversation(id) {
+    return setArchiveStatus(id, 'active');
+  }
+
+  function autoArchiveConversations({ before, excludeIds = [] } = {}) {
+    const cutoff = before ? Date.parse(before) : Number.NaN;
+    if (!Number.isFinite(cutoff)) return { archivedIds: [], archivedCount: 0 };
+    const excluded = new Set(Array.isArray(excludeIds) ? excludeIds.filter(Boolean) : []);
+    const index = readIndex();
+    const now = new Date().toISOString();
+    const archivedIds = [];
+    for (const meta of index) {
+      if (normalizeStatus(meta.status) !== 'active') continue;
+      if (excluded.has(meta.id)) continue;
+      const updatedMs = Date.parse(meta.updatedAt || meta.createdAt || '');
+      if (!Number.isFinite(updatedMs) || updatedMs >= cutoff) continue;
+      meta.status = 'archived';
+      meta.archivedAt = now;
+      meta.updatedAt = now;
+      archivedIds.push(meta.id);
+    }
+    if (archivedIds.length) writeJsonl(indexFile, index);
+    return { archivedIds, archivedCount: archivedIds.length };
+  }
+
   function deleteConversation(id) {
     const index = readIndex().filter((c) => c.id !== id);
     writeJsonl(indexFile, index);
@@ -173,7 +240,7 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
         mkdirSync(storeDir, { recursive: true });
         for (const conv of legacy) {
           const { messages, ...meta } = conv;
-          appendJsonl(indexFile, meta);
+          appendJsonl(indexFile, normalizeMeta(meta));
           if (messages?.length) writeJsonl(convFile(meta.id), messages);
         }
         console.log(`[conversation-store] migrated ${legacy.length} conversations from JSON to JSONL`);
@@ -183,5 +250,20 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
     }
   }
 
-  return { listConversations, listConversationsByWorkspace, createConversation, getConversation, updateTitle, updateMode, appendMessage, updateLastMessage, replaceMessages, addUsage, deleteConversation };
+  return {
+    listConversations,
+    listConversationsByWorkspace,
+    createConversation,
+    getConversation,
+    updateTitle,
+    updateMode,
+    appendMessage,
+    updateLastMessage,
+    replaceMessages,
+    addUsage,
+    archiveConversation,
+    restoreConversation,
+    autoArchiveConversations,
+    deleteConversation,
+  };
 }

@@ -2,11 +2,15 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 
+type ConversationView = 'active' | 'archived';
+
 interface ConversationMeta {
   id: string;
   title: string;
   messageCount: number;
   updatedAt: string;
+  status?: ConversationView;
+  archivedAt?: string | null;
 }
 
 interface WorkspaceEntry {
@@ -24,6 +28,7 @@ interface WorkspaceInfo {
 export function Sidebar({
   conversations,
   activeConversationId,
+  conversationView,
   runningConversationIds,
   runningWorkspacePaths,
   activePage,
@@ -32,11 +37,16 @@ export function Sidebar({
   onSelectConversation,
   onDeleteConversation,
   onRenameConversation,
+  onArchiveConversation,
+  onRestoreConversation,
+  onShowArchivedConversations,
+  onShowActiveConversations,
   onOpenSettings,
   onWorkspaceChanged,
 }: {
   readonly conversations: readonly ConversationMeta[];
   readonly activeConversationId: string | null;
+  readonly conversationView: ConversationView;
   // 当前正在流式运行的会话 id 集合(表达层状态,真值来自 main 的 activeStreams 广播)。
   readonly runningConversationIds?: ReadonlySet<string>;
   // ADR 27: 有运行中流的工作区路径集合,用于在工作区入口/下拉项上提示"该工作区有任务在跑"。
@@ -47,10 +57,15 @@ export function Sidebar({
   readonly onSelectConversation: (id: string) => void;
   readonly onDeleteConversation: (id: string) => void;
   readonly onRenameConversation: (id: string, title: string) => void | Promise<void>;
+  readonly onArchiveConversation: (id: string) => void | Promise<void>;
+  readonly onRestoreConversation: (id: string) => void | Promise<void>;
+  readonly onShowArchivedConversations: () => void | Promise<void>;
+  readonly onShowActiveConversations: () => void | Promise<void>;
   readonly onOpenSettings: () => void;
   readonly onWorkspaceChanged?: () => Promise<void> | void;
 }) {
   const isZh = i18n.locale === 'zh-CN';
+  const isArchivedView = conversationView === 'archived';
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
@@ -113,11 +128,12 @@ export function Sidebar({
   }, [editingConversationId]);
 
   const beginRenameConversation = useCallback((conv: ConversationMeta) => {
+    if (isArchivedView) return;
     isFinishingRenameRef.current = false;
     setConfirmDeleteId(null);
     setEditingConversationId(conv.id);
-    setEditingTitle(conv.title);
-  }, []);
+    setEditingTitle(conv.title || (isZh ? '新对话' : 'New Chat'));
+  }, [isArchivedView, isZh]);
 
   const finishRenameConversation = useCallback(() => {
     isFinishingRenameRef.current = true;
@@ -168,7 +184,7 @@ export function Sidebar({
           ) : (
             <span className="ws-name ws-placeholder">{isZh ? '选择工作区...' : 'Select workspace...'}</span>
           )}
-          <svg className="ws-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={wsDropdownOpen ? { transform: 'rotate(180deg)' } : undefined}>
+          <svg className="ws-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={wsDropdownOpen ? { transform: 'rotate(180deg)' } : undefined}>
             <path d="m6 9 6 6 6-6" />
           </svg>
         </div>
@@ -201,103 +217,162 @@ export function Sidebar({
       </div>
 
       <div className="sidebar-top">
-        <button type="button" className="sidebar-new-chat" onClick={onNewChat}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 5v14" /><path d="M5 12h14" />
-          </svg>
-          <span>{isZh ? '新对话' : 'New Chat'}</span>
-        </button>
+        {isArchivedView ? (
+          <button type="button" className="sidebar-new-chat sidebar-return-chat" onClick={() => { void onShowActiveConversations(); }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m12 19-7-7 7-7" />
+              <path d="M19 12H5" />
+            </svg>
+            <span>{isZh ? '返回会话' : 'Back to Chats'}</span>
+          </button>
+        ) : (
+          <button type="button" className="sidebar-new-chat" onClick={onNewChat}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5v14" /><path d="M5 12h14" />
+            </svg>
+            <span>{isZh ? '新对话' : 'New Chat'}</span>
+          </button>
+        )}
       </div>
 
-      {/* ADR 27: key 绑定当前工作区,切换工作区时列表重新挂载,触发一次入场 reveal,
-          配合 sidebar.css 的 .sidebar-conversations 动画,避免硬切的卡顿观感。 */}
-      <div className="sidebar-conversations" key={activeWorkspace ?? 'none'}>
+      <div className={`channel-conversation-list ${isArchivedView ? 'is-archive-view' : ''}`}>
         {conversations.length === 0 ? (
-          <p className="sidebar-empty">{isZh ? '暂无对话' : 'No conversations'}</p>
-        ) : conversations.map((conv) => (
-          <div
-            key={conv.id}
-            className={`sidebar-conversation-item ${conv.id === activeConversationId && activePage === 'chat' ? 'active' : ''}`}
-            onClick={() => onSelectConversation(conv.id)}
-            onMouseEnter={() => setHoveredId(conv.id)}
-            onMouseLeave={() => setHoveredId(null)}
-          >
-            {runningConversationIds?.has(conv.id) ? (
-              <span
-                className="sidebar-conv-spinner"
-                role="img"
-                aria-label={isZh ? '运行中' : 'Running'}
-                title={isZh ? '运行中' : 'Running'}
-              />
-            ) : null}
-            {editingConversationId === conv.id ? (
-              <input
-                ref={editingInputRef}
-                className="sidebar-conv-title-input"
-                value={editingTitle}
-                maxLength={80}
-                aria-label={isZh ? '编辑对话标题' : 'Edit conversation title'}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) => setEditingTitle(e.target.value)}
-                onBlur={() => { void submitRenameConversation(conv); }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    void submitRenameConversation(conv);
-                  } else if (e.key === 'Escape') {
-                    e.preventDefault();
-                    cancelRenameConversation();
-                  }
-                }}
-              />
-            ) : (
-              <span
-                className="sidebar-conv-title"
-                title={isZh ? '双击编辑标题' : 'Double-click to edit title'}
-                onDoubleClick={(e) => { e.stopPropagation(); beginRenameConversation(conv); }}
-              >
-                {conv.title || (isZh ? '新对话' : 'New Chat')}
-              </span>
-            )}
-            {confirmDeleteId === conv.id ? (
-              <span className="sidebar-conv-confirm" onClick={(e) => e.stopPropagation()}>
-                <button type="button" className="confirm-yes" onClick={() => { setConfirmDeleteId(null); onDeleteConversation(conv.id); }}>
-                  {isZh ? '删除' : 'Del'}
-                </button>
-                <button type="button" className="confirm-no" onClick={() => setConfirmDeleteId(null)}>
-                  {isZh ? '取消' : 'No'}
-                </button>
-              </span>
-            ) : hoveredId === conv.id ? (
-              <span className="sidebar-conv-actions" onClick={(e) => e.stopPropagation()}>
-                <button
-                  type="button"
-                  className="sidebar-conv-edit"
-                  title={isZh ? '编辑标题' : 'Edit title'}
-                  aria-label={isZh ? '编辑标题' : 'Edit title'}
-                  onClick={() => beginRenameConversation(conv)}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M12 20h9" />
-                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  className="sidebar-conv-delete"
-                  aria-label={isZh ? '删除对话' : 'Delete conversation'}
-                  onClick={() => setConfirmDeleteId(conv.id)}
-                >×</button>
-              </span>
-            ) : null}
+          <div className="sidebar-empty-state">
+            {isArchivedView
+              ? (isZh ? '暂无已归档会话' : 'No archived chats')
+              : (isZh ? '暂无会话' : 'No chats yet')}
           </div>
-        ))}
+        ) : null}
+        {conversations.map((conv) => {
+          const isRunning = Boolean(runningConversationIds?.has(conv.id));
+          return (
+            <div
+              key={conv.id}
+              className={`conversation-row ${activeConversationId === conv.id ? 'active' : ''} ${isRunning ? 'is-running' : ''}`}
+              onClick={() => onSelectConversation(conv.id)}
+              onMouseEnter={() => setHoveredId(conv.id)}
+              onMouseLeave={() => setHoveredId(null)}
+            >
+              {isRunning ? (
+                <span
+                  className="sidebar-conv-spinner"
+                  role="img"
+                  aria-label={isZh ? '运行中' : 'Running'}
+                  title={isZh ? '运行中' : 'Running'}
+                />
+              ) : null}
+              {editingConversationId === conv.id ? (
+                <input
+                  ref={editingInputRef}
+                  className="sidebar-conv-title-input"
+                  value={editingTitle}
+                  maxLength={80}
+                  aria-label={isZh ? '编辑对话标题' : 'Edit conversation title'}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onBlur={() => { void submitRenameConversation(conv); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void submitRenameConversation(conv);
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      cancelRenameConversation();
+                    }
+                  }}
+                />
+              ) : (
+                <span
+                  className="sidebar-conv-title"
+                  title={isArchivedView ? undefined : (isZh ? '双击编辑标题' : 'Double-click to edit title')}
+                  onDoubleClick={(e) => { e.stopPropagation(); beginRenameConversation(conv); }}
+                >
+                  {conv.title || (isZh ? '新对话' : 'New Chat')}
+                </span>
+              )}
+              {confirmDeleteId === conv.id ? (
+                <span className="sidebar-conv-confirm" onClick={(e) => e.stopPropagation()}>
+                  <button type="button" className="confirm-yes" onClick={() => { setConfirmDeleteId(null); onDeleteConversation(conv.id); }}>
+                    {isZh ? '删除' : 'Del'}
+                  </button>
+                  <button type="button" className="confirm-no" onClick={() => setConfirmDeleteId(null)}>
+                    {isZh ? '取消' : 'No'}
+                  </button>
+                </span>
+              ) : hoveredId === conv.id ? (
+                <span className="sidebar-conv-actions" onClick={(e) => e.stopPropagation()}>
+                  {isArchivedView ? (
+                    <button
+                      type="button"
+                      className="sidebar-conv-restore"
+                      title={isZh ? '恢复会话' : 'Restore chat'}
+                      aria-label={isZh ? '恢复会话' : 'Restore chat'}
+                      onClick={() => { void onRestoreConversation(conv.id); }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M3 7v6h6" />
+                        <path d="M21 17a9 9 0 0 0-15-6.7L3 13" />
+                      </svg>
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="sidebar-conv-edit"
+                        title={isZh ? '编辑标题' : 'Edit title'}
+                        aria-label={isZh ? '编辑标题' : 'Edit title'}
+                        onClick={() => beginRenameConversation(conv)}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M12 20h9" />
+                          <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        className="sidebar-conv-archive"
+                        title={isRunning ? (isZh ? '运行中不可归档' : 'Cannot archive while running') : (isZh ? '归档会话' : 'Archive chat')}
+                        aria-label={isZh ? '归档会话' : 'Archive chat'}
+                        disabled={isRunning}
+                        onClick={() => { if (!isRunning) void onArchiveConversation(conv.id); }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <rect x="3" y="4" width="18" height="4" rx="1" />
+                          <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
+                          <path d="M10 12h4" />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    className="sidebar-conv-delete"
+                    aria-label={isZh ? '删除对话' : 'Delete conversation'}
+                    onClick={() => setConfirmDeleteId(conv.id)}
+                  >×</button>
+                </span>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
 
       <div className="sidebar-bottom">
+        <button
+          type="button"
+          className={`sidebar-nav-btn ${isArchivedView ? 'active' : ''}`}
+          onClick={() => { void onShowArchivedConversations(); }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="4" rx="1" />
+            <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
+            <path d="M10 12h4" />
+          </svg>
+          <span>{isZh ? '已归档会话' : 'Archived Chats'}</span>
+        </button>
         <button type="button" className={`sidebar-nav-btn ${activePage === 'settings' ? 'active' : ''}`} onClick={onOpenSettings}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
             <circle cx="12" cy="12" r="3" />
           </svg>
           <span>{isZh ? '设置' : 'Settings'}</span>

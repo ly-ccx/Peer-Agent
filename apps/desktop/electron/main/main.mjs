@@ -501,8 +501,9 @@ ipcMain.handle('workspace:info', (_, { path: wsPath }) => {
 
 // ── Conversations ──
 ipcMain.handle('conversations:list', (_, params) => {
-  if (params?.workspacePath !== undefined) return conversationStore.listConversationsByWorkspace(params.workspacePath);
-  return conversationStore.listConversations();
+  const listParams = { status: params?.status };
+  if (params?.workspacePath !== undefined) return conversationStore.listConversationsByWorkspace(params.workspacePath, listParams);
+  return conversationStore.listConversations(listParams);
 });
 ipcMain.handle('conversations:create', (_, params) => conversationStore.createConversation(params));
 ipcMain.handle('conversations:get', (_, { id }) => conversationStore.getConversation(id));
@@ -511,6 +512,12 @@ ipcMain.handle('conversations:update-mode', (_, { id, mode }) => conversationSto
 ipcMain.handle('conversations:append-message', (_, { id, message }) => conversationStore.appendMessage(id, message));
 ipcMain.handle('conversations:update-last-message', (_, { id, content }) => conversationStore.updateLastMessage(id, content));
 ipcMain.handle('conversations:replace-messages', (_, { id, messages }) => conversationStore.replaceMessages(id, messages));
+ipcMain.handle('conversations:archive', (_, { id }) => conversationStore.archiveConversation(id));
+ipcMain.handle('conversations:restore', (_, { id }) => conversationStore.restoreConversation(id));
+ipcMain.handle('conversations:auto-archive', (_, { before, excludeIds } = {}) => {
+  const activeStreamIds = llmChatService.listActiveConversationIds();
+  return conversationStore.autoArchiveConversations({ before, excludeIds: [...new Set([...(excludeIds || []), ...activeStreamIds])] });
+});
 ipcMain.handle('conversations:delete', (_, { id }) => {
   // IPC 层编排：删除会话后级联硬删除该会话名下的全部 Goal 计划（见 ADR 34）。
   // 两个 store 保持独立（互不 import），仅在此组合层互相知晓。

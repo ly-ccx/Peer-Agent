@@ -251,8 +251,53 @@
 .sidebar-new-chat:hover {
   background: var(--za-sidebar-active-bg);
 }
+.sidebar-return-chat {
+  color: var(--graphite-soft);
+}
 
 /* ── Conversation list ── */
+.channel-conversation-list {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 var(--space-2);
+  -webkit-app-region: no-drag;
+  animation: za-content-reveal var(--za-motion-medium) var(--za-ease-out) both;
+}
+.sidebar-empty-state {
+  color: var(--graphite-mute);
+  font-size: 0.78rem;
+  text-align: center;
+  padding: var(--space-8) var(--space-2);
+}
+.channel-conversation-list .conversation-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: color-mix(in srgb, var(--graphite-base) 88%, var(--graphite-soft));
+  transition: background var(--za-motion-fast), color var(--za-motion-fast);
+}
+.channel-conversation-list .conversation-row:hover {
+  background: var(--za-sidebar-active-bg);
+  color: var(--graphite-base);
+}
+.channel-conversation-list .conversation-row.active {
+  background: var(--za-sidebar-thread-active-bg);
+  color: var(--graphite-base);
+  font-weight: 500;
+}
+.channel-conversation-list .conversation-row.is-running {
+  color: var(--graphite-base);
+}
+
 .sidebar-conversations {
   flex: 1;
   overflow-y: auto;
@@ -272,25 +317,32 @@
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 0.82rem;
-  color: var(--graphite-base);
-  transition: background var(--za-motion-fast);
+  color: color-mix(in srgb, var(--graphite-base) 88%, var(--graphite-soft));
+  transition: background var(--za-motion-fast), color var(--za-motion-fast);
 }
 .sidebar-conversation-item:hover {
   background: var(--za-sidebar-active-bg);
+  color: var(--graphite-base);
 }
 .sidebar-conversation-item.active {
   background: var(--za-sidebar-thread-active-bg);
+  color: var(--graphite-base);
   font-weight: 500;
 }
 .sidebar-conv-title {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: inherit;
 }
 .sidebar-conv-title-input {
   flex: 1;
@@ -329,12 +381,14 @@
 }
 .sidebar-conv-actions {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 4px;
-  flex-shrink: 0;
   -webkit-app-region: no-drag;
 }
 .sidebar-conv-edit,
+.sidebar-conv-archive,
+.sidebar-conv-restore,
 .sidebar-conv-delete {
   display: inline-flex;
   align-items: center;
@@ -351,8 +405,14 @@
   border-radius: var(--radius-xs);
   flex-shrink: 0;
 }
-.sidebar-conv-edit:hover {
+.sidebar-conv-edit:hover,
+.sidebar-conv-archive:hover,
+.sidebar-conv-restore:hover {
   color: var(--azure-seal);
+}
+.sidebar-conv-archive:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 .sidebar-conv-delete:hover {
   color: var(--state-danger);
