@@ -48,6 +48,7 @@
 }
 
 .llm-provider-card {
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -56,10 +57,59 @@
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-md);
   background: var(--paper-sheet);
-  transition: border-color var(--za-motion-fast);
+  overflow: hidden;
+  transition: border-color var(--za-motion-fast), box-shadow var(--za-motion-fast);
 }
 .llm-provider-card.is-default {
-  border-left: 2px solid var(--azure-seal);
+  border-color: rgba(78, 163, 217, 0.5);
+  box-shadow:
+    0 0 0 1px rgba(78, 163, 217, 0.16),
+    0 0 22px rgba(78, 163, 217, 0.14),
+    inset 0 0 18px rgba(78, 163, 217, 0.06);
+}
+.llm-provider-card.is-default::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    115deg,
+    transparent 0%,
+    rgba(104, 201, 255, 0.18) 22%,
+    rgba(104, 201, 255, 0.72) 48%,
+    rgba(180, 231, 255, 0.48) 56%,
+    transparent 78%
+  );
+  background-size: 260% 260%;
+  opacity: 0.85;
+  pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: llm-active-flow 3.8s linear infinite;
+}
+.llm-provider-card.is-default::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle at 0% 50%, rgba(104, 201, 255, 0.18), transparent 34%);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+@keyframes llm-active-flow {
+  from { background-position: 180% 50%; }
+  to { background-position: -80% 50%; }
+}
+
+.llm-provider-info,
+.llm-provider-actions {
+  position: relative;
+  z-index: 1;
 }
 
 .llm-provider-info {

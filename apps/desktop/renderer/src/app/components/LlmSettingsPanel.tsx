@@ -632,7 +632,7 @@ export function LlmSettingsPanel({
                 <span className="llm-provider-chip">{descriptorFor(p.channelId || (p.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels).label}</span>
                 <span className="llm-provider-chip">{wireLabel(p.resolvedWire || descriptorFor(p.channelId || (p.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels).defaultWire, i18n.locale)}</span>
                 <span className="llm-provider-chip mono">{p.model}</span>
-                {p.isDefault ? <span className="llm-badge-default">{i18n.locale === 'zh-CN' ? '默认' : 'Default'}</span> : null}
+                {p.isDefault ? <span className="llm-badge-default">{i18n.locale === 'zh-CN' ? '已激活' : 'Active'}</span> : null}
               </span>
               {p.contextWindow || p.maxOutputTokens || p.inputPrice != null ? (
                 <span className="llm-provider-specs">
@@ -687,7 +687,7 @@ export function LlmSettingsPanel({
             <div className="llm-provider-actions">
               {!p.isDefault ? (
                 <button type="button" onClick={() => handleSetDefault(p.id)}>
-                  {i18n.locale === 'zh-CN' ? '设为默认' : 'Set Default'}
+                  {i18n.locale === 'zh-CN' ? '激活' : 'Activate'}
                 </button>
               ) : null}
               {isOAuthMethod(p.authMethod) && p.oauthStatus?.status !== 'connected' ? (
