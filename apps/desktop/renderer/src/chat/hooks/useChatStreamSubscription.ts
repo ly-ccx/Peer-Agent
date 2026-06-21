@@ -98,7 +98,7 @@ export function useChatStreamSubscription(params: {
       void clientApi.conversationsReplaceMessages({
         id: conversationId,
         messages: msgs.map((m) => ({
-          id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, durationMs: m.durationMs, _compaction: m.compaction, attachments: m.attachments,
+          id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, durationMs: m.durationMs, _compaction: m.compaction, attachments: m.attachments, interrupted: m.interrupted,
         })),
       });
     };
@@ -306,8 +306,17 @@ export function useChatStreamSubscription(params: {
             persistMessages(next);
             return next;
           }
-          if (last?.role === 'assistant' && turnDurationMs != null) {
-            const updated = [...prev.slice(0, -1), { ...last, durationMs: turnDurationMs }];
+          // (b) 长流中断保留：已产出内容的 assistant 消息因连接中断未自然收尾，
+          // 标记 interrupted=true，表达层据此显示"已中断"标记与"继续生成"入口。
+          if (last?.role === 'assistant') {
+            const updated = [
+              ...prev.slice(0, -1),
+              {
+                ...last,
+                interrupted: true,
+                ...(turnDurationMs != null ? { durationMs: turnDurationMs } : {}),
+              },
+            ];
             persistMessages(updated);
             return updated;
           }

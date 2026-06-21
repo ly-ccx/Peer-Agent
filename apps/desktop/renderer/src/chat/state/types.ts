@@ -35,6 +35,9 @@ export type ContentSegment =
   | {
       type: 'tool-call';
       tool?: string;
+      // 后端 Runtime Projection 注入的展示文案（MCP 工具为「服务名: 工具名」）。
+      // 仅作工具卡标题展示用；缺省时渲染层回退到裸 capability 名（tool）。
+      displayName?: string | null;
       args?: Record<string, unknown>;
       result?: string;
       synthetic?: boolean;
@@ -44,6 +47,8 @@ export type ContentSegment =
 /** 渲染分组时使用的工具调用形态（聚合相邻 tool-call 段后的展示模型）。 */
 export interface ToolCallLegacy {
   tool: string;
+  // 后端注入的展示文案（同 ContentSegment.displayName），渲染层优先用于标题。
+  displayName?: string | null;
   args: Record<string, unknown>;
   result?: string;
   synthetic?: boolean;
@@ -82,6 +87,10 @@ export interface ChatMsg {
   durationMs?: number;
   compaction?: CompactionMeta;
   attachments?: ChatAttachment[];
+  // (b) 长流中断保留：已产出内容的 assistant 消息因连接中断而未自然收尾时，
+  // 标记为 interrupted=true。表达层据此显示"已中断"标记与"继续生成"入口；
+  // 经既有 replace-messages 开放袋持久化，重启后仍可见。
+  interrupted?: boolean;
 }
 
 /** 渲染分组：连续正文 / 思考 / 工具调用组。 */

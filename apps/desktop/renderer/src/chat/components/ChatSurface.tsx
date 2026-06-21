@@ -60,6 +60,7 @@ import {
   buildConversationAttachmentContext,
   buildConversationContinuityContext,
   buildConfigInstructionContext,
+  buildReplyLanguageContext,
 } from '../state/contextSources';
 import type {
   ChatAttachment,
@@ -217,6 +218,10 @@ async function loadConversationMessages(conversationId: string): Promise<{
     if (typeof m.durationMs === 'number' && Number.isFinite(m.durationMs)) {
       msg.durationMs = m.durationMs;
     }
+    // (b) 长流中断保留：连接中断未自然收尾的 assistant 消息标记，重启后仍可见。
+    if (m.interrupted === true) {
+      msg.interrupted = true;
+    }
     return msg;
   }).filter((message) => !isEmptyAssistantPlaceholder(message));
   // ADR 23: 计费优先读 index meta 的权威累计 lifetimeUsage(不受压缩影响)。
@@ -251,6 +256,7 @@ export function ChatSurface({
   providers,
   conversationId,
   systemInstructions,
+  replyLanguage,
   resumeTask,
   onResumeConsumed,
   onOpenSettings,
@@ -262,6 +268,7 @@ export function ChatSurface({
   readonly providers: readonly LlmProviderConfigView[];
   readonly conversationId: string | null;
   readonly systemInstructions?: string;
+  readonly replyLanguage?: string;
   readonly resumeTask?: { sessionId: string; task: string; effort?: string } | null;
   readonly onResumeConsumed?: () => void;
   readonly onOpenSettings: () => void;
@@ -331,6 +338,14 @@ export function ChatSurface({
   const [toolProgress, setToolProgress] = useState<ToolProgress | null>(null);
   // 会话内查找(cmd/ctrl+F):仅在表达层对已渲染消息做高亮跳转,不触碰会话真值。
   const [findOpen, setFindOpen] = useState(false);
+
+  useEffect(() => {
+    if (!providerRecoveryNotice || providerRecoveryNotice.status !== 'recovered') return undefined;
+    const timeoutId = window.setTimeout(() => {
+      setProviderRecoveryNotice((current) => (current === providerRecoveryNotice ? null : current));
+    }, 3000);
+    return () => window.clearTimeout(timeoutId);
+  }, [providerRecoveryNotice]);
 
   useEffect(() => {
     if (!imagePreview) return undefined;
@@ -770,9 +785,12 @@ export function ChatSurface({
     const apiMessages = toApiMessages(contextMessages);
     const contextAttachments = buildConversationAttachmentContext(contextMessages);
     const continuityContext = buildConversationContinuityContext(contextMessages);
-    const configInstructions = buildConfigInstructionContext(systemInstructions);
+    const configInstructions = [
+      ...buildConfigInstructionContext(systemInstructions),
+      ...buildReplyLanguageContext(replyLanguage),
+    ];
     void clientApi.chatSend({ messages: apiMessages, streamId, effort: turnEffort, mode, conversationId, contextAttachments, continuityContext, configInstructions });
-  }, [isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, mode, systemInstructions]);
+  }, [isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, mode, systemInstructions, replyLanguage]);
 
   const handleSend = useCallback(async () => {
     const text = draft.trim();
@@ -860,9 +878,12 @@ export function ChatSurface({
     const apiMessages = toApiMessages(contextMessages);
     const contextAttachments = buildConversationAttachmentContext(contextMessages);
     const continuityContext = buildConversationContinuityContext(contextMessages);
-    const configInstructions = buildConfigInstructionContext(systemInstructions);
+    const configInstructions = [
+      ...buildConfigInstructionContext(systemInstructions),
+      ...buildReplyLanguageContext(replyLanguage),
+    ];
     void clientApi.chatSend({ messages: apiMessages, streamId, effort, mode, conversationId, contextAttachments, continuityContext, configInstructions });
-  }, [isStreaming, hasProvider, conversationId, messages, effort, mode, systemInstructions]);
+  }, [isStreaming, hasProvider, conversationId, messages, effort, mode, systemInstructions, replyLanguage]);
 
   const handleBranch = useCallback(async (msgIndex: number) => {
     if (!conversationId || isStreaming) return;
@@ -870,7 +891,7 @@ export function ChatSurface({
     const branchTitle = contextMessages.find((m) => m.role === 'user')?.content.slice(0, 50) || 'Branch';
     const conv = await clientApi.conversationsCreate({ title: branchTitle }) as { id: string };
     for (const m of contextMessages) {
-      await clientApi.conversationsAppendMessage({ id: conv.id, message: { id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, durationMs: m.durationMs, timestamp: m.timestamp, _compaction: m.compaction, attachments: m.attachments } });
+      await clientApi.conversationsAppendMessage({ id: conv.id, message: { id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, durationMs: m.durationMs, timestamp: m.timestamp, _compaction: m.compaction, attachments: m.attachments, interrupted: m.interrupted } });
     }
     onConversationUpdated?.();
     onBranch?.(conv.id);
@@ -882,7 +903,7 @@ export function ChatSurface({
     setMessages(updated);
     await clientApi.conversationsReplaceMessages({
       id: conversationId,
-      messages: updated.map((m) => ({ id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, durationMs: m.durationMs, timestamp: m.timestamp, _compaction: m.compaction, attachments: m.attachments })),
+      messages: updated.map((m) => ({ id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, durationMs: m.durationMs, timestamp: m.timestamp, _compaction: m.compaction, attachments: m.attachments, interrupted: m.interrupted })),
     });
     onConversationUpdated?.();
   }, [conversationId, isStreaming, messages, onConversationUpdated]);
@@ -896,7 +917,7 @@ export function ChatSurface({
   const showScrollToBottom = messages.length > 0 && !isThreadAtBottom;
 
   // 选择 request_user_input 的选项 = 把该选项作为用户消息，复用既有 submitMessage 发送路径。
-  // 见 docs/proposals/0004-goal-mode-runtime-gate.md。
+  // 见 Goal 模式运行时闸门设计。
   const selectInteractionOption = useCallback((text: string) => {
     if (!text || isStreaming || !hasProvider || !conversationId) return;
     void submitMessage(text, [], effort);
@@ -905,7 +926,7 @@ export function ChatSurface({
   // 计划获批后唤起「执行轮」：把"开始执行"作为一条用户消息，复用既有 submitMessage 发送路径
   // （不另造旁路），让模型在 goal 闸门放行下按计划开始执行子任务。
   // store 侧已落 GoalApproval Evidence（治理事实），此处只负责驱动执行。
-  // 见 docs/proposals/0002-goal-mode.md 时序图阶段二（批准）→阶段三（执行）。
+  // 见 Goal 模式设计 时序图阶段二（批准）→阶段三（执行）。
   // 真正发起执行轮：把"开始执行"作为一条用户消息复用 submitMessage 路径。
   // 该函数假设调用时已空闲（isStreaming=false）；空闲判定由调用方/effect 负责。
   const dispatchGoalExecution = useCallback((plan: GoalPlan) => {
@@ -942,6 +963,10 @@ export function ChatSurface({
     dispatchGoalExecution(pending);
   }, [isStreaming, hasProvider, conversationId, dispatchGoalExecution]);
 
+  // 方案 B：右侧常驻分栏的 portal 宿主。GoalPlanPanel 展开态 body 投影到此 <aside>。
+  // 用回调 ref 存 DOM，挂载后触发重渲染，确保首次展开就能拿到容器。
+  const [goalSideEl, setGoalSideEl] = useState<HTMLElement | null>(null);
+
   if (!conversationId) {
     return (
       <div className="chat-surface">
@@ -967,6 +992,7 @@ export function ChatSurface({
 
   return (
     <InteractionContext.Provider value={{ onSelectOption: selectInteractionOption, isStreaming }}>
+    <div className="chat-workspace">
     <div className="chat-surface">
       {findOpen ? (
         <ChatFindBar
@@ -1029,6 +1055,25 @@ export function ChatSurface({
                   </span>
                 );
               })()}
+              {msg.role === 'assistant' && msg.interrupted && !isStreaming && (
+                <span className="chat-msg-interrupted">
+                  <span
+                    className="chat-msg-interrupted-mark"
+                    title={isZh ? '连接中断，本轮未自然结束' : 'Connection interrupted; this turn did not finish'}
+                  >
+                    {isZh ? '已中断' : 'Interrupted'}
+                  </span>
+                  {hasProvider && (
+                    <button
+                      type="button"
+                      className="chat-msg-continue-btn"
+                      onClick={() => void handleRegenerate(idx)}
+                    >
+                      {isZh ? '继续生成' : 'Continue'}
+                    </button>
+                  )}
+                </span>
+              )}
             </div>
               </>
             )}
@@ -1132,7 +1177,7 @@ export function ChatSurface({
       ) : null}
 
       <div className="chat-composer-wrap">
-        {mode === 'goal' ? <GoalPlanPanel conversationId={conversationId} isZh={isZh} onApproved={startGoalExecution} /> : null}
+        {mode === 'goal' ? <GoalPlanPanel conversationId={conversationId} isZh={isZh} onApproved={startGoalExecution} sidePanelContainer={goalSideEl} /> : null}
         <PermissionGateStrip
           pendingCalls={pendingPermissionCalls}
           onApprove={approvePendingPermissionCall}
@@ -1337,6 +1382,10 @@ export function ChatSurface({
       {imagePreview?.kind === 'image' && imagePreview.dataUrl ? (
         <ImagePreviewOverlay attachment={imagePreview} isZh={isZh} onClose={() => setImagePreview(null)} />
       ) : null}
+    </div>
+    {/* 方案 B：右侧常驻分栏。GoalPlanPanel 展开态 body 经 portal 投影到此。
+        无 portal 内容时由 :empty 规则收为零宽，会话区自动占满。 */}
+    <aside className="chat-side-panel" ref={setGoalSideEl} />
     </div>
     </InteractionContext.Provider>
   );

@@ -13,6 +13,7 @@ import {
   normalizeOpenAIMessages,
 } from './provider-encoders/index.mjs';
 import { agentLoopAnthropic } from './chat-runtime/anthropic-agent-loop.mjs';
+import { agentLoopGemini } from './chat-runtime/gemini-agent-loop.mjs';
 import { agentLoopOpenAI } from './chat-runtime/openai-agent-loop.mjs';
 import { sanitizeApiMessages } from './chat-runtime/message-sanitizer.mjs';
 import { createChatPermissionGate } from './chat-runtime/permission-gate.mjs';
@@ -25,11 +26,37 @@ import {
 import { hasDanglingToolIntent, hasUnsupportedToolClaim } from './chat-runtime/response-guard.mjs';
 import { createToolContext } from './chat-runtime/tool-orchestrator.mjs';
 import { ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
+import { ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
+import { resolveChannel } from './provider-channels.mjs';
+import { DEFAULT_CONNECTION_RETRY_DELAYS_MS } from './provider-transports/recovering-fetch.mjs';
 
 const activeStreams = new Map();
 const permissionGate = createChatPermissionGate({ activeStreams });
 const conversationToolContexts = new Map();
 let activeWorkspacePath = null;
+
+// (a) 同 provider 流读取早期中断的自动重试退避：复用既有连接退避（10s×5 + 30s×5，
+// 共 10 次），保持单一来源，不另造一套重试参数。
+const SAME_PROVIDER_RETRY_DELAYS_MS = DEFAULT_CONNECTION_RETRY_DELAYS_MS;
+
+// 可被用户 abort 打断的退避等待：abort 时以 AbortError 拒绝，沿用既有
+// AbortError -> chat:stream:aborted 的结构化取消路径。
+function sleepWithSignal(ms, signal) {
+  const makeAbortError = () => {
+    const err = new Error('Aborted');
+    err.name = 'AbortError';
+    return err;
+  };
+  if (signal?.aborted) return Promise.reject(makeAbortError());
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    if (!signal) return;
+    signal.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(makeAbortError());
+    }, { once: true });
+  });
+}
 
 function buildRuntimeTools({ mcpRegistry, providerType, mode }) {
   // mode 作为运行时事实下传到 Runtime Projection，模式隔离工具暴露（ADR 35）。
@@ -264,6 +291,29 @@ export function createLlmChatService({
         return null;
       }
     }
+    if (authMethod === 'oauth_google') {
+      const credential = llmConfigStore.getCredential(provider.id);
+      const tokens = credential?.tokens || null;
+      if (!tokens?.access) {
+        webContents.send('chat:stream:error', { streamId, error: 'oauth_not_logged_in' });
+        return null;
+      }
+      try {
+        const { tokens: fresh, refreshed } = await ensureFreshGoogleTokens(tokens, {
+          clientId: credential.oauthClientId,
+          clientSecret: credential.oauthClientSecret,
+        });
+        if (refreshed) llmConfigStore.setOAuthTokens(provider.id, fresh);
+        return {
+          authMethod,
+          apiKey: fresh.access,
+          accountId: fresh.accountId || null,
+        };
+      } catch {
+        webContents.send('chat:stream:error', { streamId, error: 'oauth_token_refresh_failed' });
+        return null;
+      }
+    }
 
     const apiKey = llmConfigStore.getDecryptedApiKey(provider.id);
     if (!apiKey) {
@@ -329,6 +379,11 @@ export function createLlmChatService({
         const provider = providerCandidates[attemptIndex];
         const credential = await resolveProviderCredential(provider, accumulatingWebContents, streamId);
         if (!credential || streamRecord.terminalEventSent) return;
+        const resolvedChannel = resolveChannel({
+          ...provider,
+          apiKey: credential.apiKey,
+          accountId: credential.accountId,
+        });
 
         const systemContext = buildSystemContext(activeWorkspacePath, {
           contextAttachments,
@@ -342,7 +397,7 @@ export function createLlmChatService({
           mode,
           // goal-plan 事实上下文 Source（0006）：goal 模式下注入活动计划权威 taskId。
           goalPlanStore,
-          provider: provider.provider,
+          provider: resolvedChannel.legacyProvider,
           model: provider.model,
         });
         const systemPrompt = renderSystemContext(systemContext);
@@ -351,28 +406,32 @@ export function createLlmChatService({
           conversationId,
           contextEpochId: getActiveContextEpochId(promptSnapshotStore, conversationId),
           effort,
-          provider: provider.provider,
+          provider: resolvedChannel.legacyProvider,
           providerId: provider.id,
           model: provider.model,
           mode,
           recoveryAttempt: attemptIndex + 1,
         });
 
+        // (a) 同 provider 流读取早期中断的自动重试：把单次尝试封装为闭包，便于在
+        // replay-safe 且为可恢复传输失败时，从头重发同一请求（覆盖全部 wire）。
+        const runProviderAttempt = async () => {
         const attemptStream = createProviderAttemptStream({
           webContents: accumulatingWebContents,
           streamId,
           provider,
         });
         const contextWindow = provider.contextWindow || 0;
+        const maxOutputTokens = provider.maxOutputTokens || 0;
         const onNativeReasoningFallback = (details) => noteNativeReasoningFallback(provider, details);
         const runtimeTools = buildRuntimeTools({
           mcpRegistry,
-          providerType: provider.provider,
+          providerType: resolvedChannel.legacyProvider,
           mode,
         });
 
         try {
-          if (provider.provider === 'anthropic') {
+          if (resolvedChannel.wire === 'anthropic-messages') {
             await agentLoopAnthropic({
               baseUrl: provider.baseUrl,
               apiKey: credential.apiKey,
@@ -387,6 +446,7 @@ export function createLlmChatService({
               supportsReasoning: Boolean(provider.supportsReasoning),
               supportsPromptCaching: Boolean(provider.supportsPromptCaching),
               contextWindow,
+              maxOutputTokens,
               conversationId,
               persistCompaction,
               continuityContext,
@@ -398,6 +458,34 @@ export function createLlmChatService({
               mcpRegistry,
               goalPlanStore,
               onNativeReasoningFallback,
+              resolvedChannel,
+            });
+          } else if (resolvedChannel.wire === 'gemini') {
+            await agentLoopGemini({
+              baseUrl: provider.baseUrl,
+              apiKey: credential.apiKey,
+              model: provider.model,
+              systemPrompt,
+              messages,
+              tools: runtimeTools.tools,
+              webContents: attemptStream.webContents,
+              streamId,
+              signal: controller.signal,
+              effort,
+              supportsReasoning: Boolean(provider.supportsReasoning),
+              contextWindow,
+              maxOutputTokens,
+              conversationId,
+              persistCompaction,
+              continuityContext,
+              toolContext,
+              workspacePath: activeWorkspacePath,
+              permissionGate,
+              registry: runtimeTools.registry,
+              runtimeProjection: runtimeTools.runtimeProjection,
+              mcpRegistry,
+              goalPlanStore,
+              resolvedChannel,
             });
           } else {
             await agentLoopOpenAI({
@@ -412,7 +500,9 @@ export function createLlmChatService({
               signal: controller.signal,
               effort,
               supportsReasoning: Boolean(provider.supportsReasoning),
+              supportsPromptCaching: Boolean(provider.supportsPromptCaching),
               contextWindow,
+              maxOutputTokens,
               conversationId,
               persistCompaction,
               continuityContext,
@@ -426,6 +516,7 @@ export function createLlmChatService({
               onNativeReasoningFallback,
               authMethod: credential.authMethod,
               accountId: credential.accountId,
+              resolvedChannel,
             });
           }
         } catch (err) {
@@ -435,8 +526,54 @@ export function createLlmChatService({
             error: describeFetchFailure(err),
           });
         }
+          return attemptStream;
+        };
 
-        const attemptResult = attemptStream.getResult();
+        // (a) 同 provider 自动重试：仅在 replay-safe（未发出任何 delta/thinking/
+        // tool-call/usage 等）且为可恢复传输失败（ECONNRESET/terminated 等）时，从头
+        // 重发同一请求；复用既有连接退避与 chat:stream:connection-recovery 事件。
+        // 用户 abort（AbortError）与已产出内容的长流中断不在此自动重试范围内。
+        const sameProviderMax = SAME_PROVIDER_RETRY_DELAYS_MS.length;
+        let attemptStream;
+        let attemptResult;
+        for (let retry = 0; ; retry += 1) {
+          attemptStream = await runProviderAttempt();
+          attemptResult = attemptStream.getResult();
+          const canRetrySameProvider =
+            attemptResult.terminalError &&
+            !attemptResult.terminalSent &&
+            attemptResult.replayable &&
+            retry < sameProviderMax;
+          if (!canRetrySameProvider) {
+            if (retry > 0 && !attemptResult.terminalError) {
+              accumulatingWebContents.send('chat:stream:connection-recovery', {
+                streamId,
+                provider: describeProviderTarget(provider),
+                model: provider.model,
+                status: 'recovered',
+                attempt: retry,
+                maxRetries: sameProviderMax,
+              });
+            }
+            break;
+          }
+          const delayMs = SAME_PROVIDER_RETRY_DELAYS_MS[retry];
+          accumulatingWebContents.send('chat:stream:connection-recovery', {
+            streamId,
+            provider: describeProviderTarget(provider),
+            model: provider.model,
+            status: 'retrying',
+            attempt: retry + 1,
+            maxRetries: sameProviderMax,
+            delayMs,
+            reason: attemptResult.errorText,
+          });
+          console.warn(
+            `[llm-chat] same-provider stream retry ${retry + 1}/${sameProviderMax}: ${describeProviderTarget(provider)} (${attemptResult.errorText})`
+          );
+          await sleepWithSignal(delayMs, controller.signal);
+        }
+
         if (!attemptResult.terminalError || attemptResult.terminalSent) return;
 
         const nextProvider = providerCandidates[attemptIndex + 1] ?? null;
