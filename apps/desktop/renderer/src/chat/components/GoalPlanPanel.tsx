@@ -375,7 +375,18 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
           </span>
         ) : null}
         {lockedOpen ? null : (
-          <span className="goal-panel-toggle-caret" aria-hidden="true">{expanded ? '⌄' : '›'}</span>
+          <span className="goal-panel-toggle-caret" aria-hidden="true">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="m9 6 6 6-6 6" />
+            </svg>
+          </span>
         )}
       </button>
       {!bodyMounted ? null : (() => {

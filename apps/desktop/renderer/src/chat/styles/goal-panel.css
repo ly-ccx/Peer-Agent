@@ -62,8 +62,28 @@
 
 .goal-panel-toggle-caret {
   margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
   color: var(--za-text-faint);
-  font-size: 14px;
+  transform: rotate(0deg);
+  transform-origin: center center;
+  transition: transform 0.2s var(--za-ease-standard, ease);
+}
+
+.goal-panel-toggle-caret svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+/* 展开态：caret 由「指向右(›)」顺时针旋转 90° 变为「指向下」，
+   配合 transition 形成收起↔展开的过渡动画。 */
+.goal-panel--expanded .goal-panel-toggle-caret {
+  transform: rotate(90deg);
 }
 
 /* 当折叠态存在活跃计划块时，由 .goal-panel-toggle-active 的 margin-left:auto 负责把
@@ -520,5 +540,10 @@
 
   .goal-panel-toggle-active-check {
     animation: none;
+  }
+
+  /* 减少动效：caret 仍按展开态旋转到位，但去掉过渡动画，避免位移动画。 */
+  .goal-panel-toggle-caret {
+    transition: none;
   }
 }
