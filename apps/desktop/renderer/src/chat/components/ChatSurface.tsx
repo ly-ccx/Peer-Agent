@@ -620,6 +620,16 @@ export function ChatSurface({
     updateThreadBottomState(threadRef.current);
   }, [messages, scrollThreadToBottom, updateThreadBottomState]);
 
+  // 手动 /compact 不改 messages，上面的自动滚动 effect 不会重跑；而压缩进度横幅
+  // 渲染在滚动容器最底部。若用户此时已向上滚，横幅会落在视口外，造成"点了没反应"
+  // 的错觉。压缩一开始就强制平滑滚到底，让进度横幅立即进入视口。
+  useEffect(() => {
+    if (isCompacting) {
+      shouldAutoScrollRef.current = true;
+      scrollThreadToBottom('smooth');
+    }
+  }, [isCompacting, scrollThreadToBottom]);
+
   useEffect(() => {
     setActiveSlashIndex(0);
   }, [slashQuery]);
