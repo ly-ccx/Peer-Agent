@@ -21,6 +21,7 @@ export function MessageActionBar({
   i18n,
 }: MessageActionBarProps) {
   const [justCopied, setJustCopied] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const handleCopy = useCallback(() => {
     void navigator.clipboard.writeText(content).then(() => {
@@ -28,6 +29,16 @@ export function MessageActionBar({
       setTimeout(() => setJustCopied(false), 1500);
     });
   }, [content]);
+
+  // hover 离开操作条时重置确认态，避免确认态残留
+  const handleMouseLeave = useCallback(() => {
+    setConfirmingDelete(false);
+  }, []);
+
+  const handleConfirmDelete = useCallback(() => {
+    setConfirmingDelete(false);
+    onAction('delete');
+  }, [onAction]);
 
   const copyLabel = justCopied ? i18n.t('chat.message.action.copied') : i18n.t('chat.message.action.copy');
   const hasContent = content.trim().length > 0;
@@ -39,7 +50,7 @@ export function MessageActionBar({
   if (!canCopy && !canRegenerate && !canDelete && !canBranch) return null;
 
   return (
-    <div className="message-action-bar">
+    <div className="message-action-bar" onMouseLeave={handleMouseLeave}>
       {canCopy ? (
         <button type="button" onClick={handleCopy} title={copyLabel} aria-label={copyLabel}>
           {justCopied ? (
@@ -70,12 +81,23 @@ export function MessageActionBar({
         </button>
       ) : null}
       {canDelete ? (
-        <button type="button" className="danger" onClick={() => onAction('delete')} title={i18n.t('chat.message.action.delete')} aria-label={i18n.t('chat.message.action.delete')}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M3 6h18" /><path d="M8 6V4h8v2" />
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-          </svg>
-        </button>
+        confirmingDelete ? (
+          <span className="message-action-confirm" title={i18n.t('chat.message.confirmDelete')}>
+            <button type="button" className="confirm-yes" onClick={handleConfirmDelete}>
+              {i18n.t('chat.message.action.delete')}
+            </button>
+            <button type="button" className="confirm-no" onClick={() => setConfirmingDelete(false)}>
+              {i18n.t('share.cancel')}
+            </button>
+          </span>
+        ) : (
+          <button type="button" className="danger" onClick={() => setConfirmingDelete(true)} title={i18n.t('chat.message.action.delete')} aria-label={i18n.t('chat.message.action.delete')}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 6h18" /><path d="M8 6V4h8v2" />
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+            </svg>
+          </button>
+        )
       ) : null}
     </div>
   );

@@ -98,6 +98,35 @@
     color: #e55;
   }
 
+  /* 删除二次确认（内联，复用 Sidebar confirm 视觉风格） */
+  .message-action-confirm {
+    @apply flex items-center gap-1;
+    animation: za-details-in var(--za-motion-fast) var(--za-ease-out) both;
+  }
+  .message-action-confirm button {
+    @apply rounded-md px-1.5 py-0.5;
+    font-size: 11px;
+    line-height: 1.4;
+    background: transparent;
+    border: 1px solid var(--chrome-hairline);
+    cursor: pointer;
+    transition: color var(--za-motion-fast), background var(--za-motion-fast), border-color var(--za-motion-fast);
+  }
+  .message-action-confirm .confirm-yes {
+    color: var(--state-danger);
+    border-color: var(--state-danger);
+  }
+  .message-action-confirm .confirm-yes:hover {
+    background: var(--za-danger-soft);
+  }
+  .message-action-confirm .confirm-no {
+    color: var(--za-text-muted);
+  }
+  .message-action-confirm .confirm-no:hover {
+    color: var(--za-text);
+    background: var(--za-hover);
+  }
+
   /* 分享选择模式 */
   .cloud-chat-message.selection-mode {
     flex-direction: row;
