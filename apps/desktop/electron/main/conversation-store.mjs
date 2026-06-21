@@ -35,7 +35,12 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
         const msgs = existsSync(convFile(meta.id)) ? readJsonl(convFile(meta.id)) : [];
         return { ...meta, messageCount: msgs.length };
       })
-      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+      // 按「最近修改」降序：updatedAt 每次写操作（消息追加 / 改标题 / 改模式 / 计费）都会刷新，
+      // 因此最近活跃的对话冒泡到顶部；极旧数据若缺 updatedAt 则回退到 createdAt 兜底。
+      .sort((a, b) => {
+        const keyOf = (m) => String(m.updatedAt || m.createdAt || '');
+        return keyOf(b).localeCompare(keyOf(a));
+      });
   }
 
   function listConversationsByWorkspace(workspacePath) {

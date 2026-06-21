@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createConversationStore } from './conversation-store.mjs';
@@ -167,6 +167,47 @@ test('addUsage tolerates partial / missing usage fields', () => {
       cacheWriteTokens: 0,
       cacheReadTokens: 0,
     });
+  } finally {
+    cleanup();
+  }
+});
+
+/**
+ * 列表排序：应按「最近修改」(updatedAt) 降序，而非创建时间 (createdAt)。
+ * 直接写 index.jsonl 注入确定性时间戳，避免依赖真实时钟（同毫秒会导致排序 flaky）。
+ */
+test('listConversations sorts by updatedAt desc, not createdAt', () => {
+  const { store, dir, cleanup } = freshStore();
+  try {
+    // 故意让 createdAt 顺序与 updatedAt 顺序相反：
+    //   old 创建最早，但最近被修改 -> 应排在最前
+    //   new 创建最晚，但很久没动 -> 应排在最后
+    const rows = [
+      { id: 'old', title: 'old', mode: 'chat', createdAt: '2024-01-01T00:00:00.000Z', updatedAt: '2024-06-01T00:00:00.000Z' },
+      { id: 'mid', title: 'mid', mode: 'chat', createdAt: '2024-02-01T00:00:00.000Z', updatedAt: '2024-05-01T00:00:00.000Z' },
+      { id: 'new', title: 'new', mode: 'chat', createdAt: '2024-03-01T00:00:00.000Z', updatedAt: '2024-04-01T00:00:00.000Z' },
+    ];
+    writeFileSync(path.join(dir, 'index.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+
+    const list = store.listConversations();
+    assert.deepEqual(list.map((c) => c.id), ['old', 'mid', 'new']);
+  } finally {
+    cleanup();
+  }
+});
+
+test('listConversations falls back to createdAt when updatedAt missing', () => {
+  const { store, dir, cleanup } = freshStore();
+  try {
+    const rows = [
+      { id: 'a', title: 'a', mode: 'chat', createdAt: '2024-01-01T00:00:00.000Z' },
+      { id: 'b', title: 'b', mode: 'chat', createdAt: '2024-03-01T00:00:00.000Z' },
+      { id: 'c', title: 'c', mode: 'chat', createdAt: '2024-02-01T00:00:00.000Z' },
+    ];
+    writeFileSync(path.join(dir, 'index.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+
+    const list = store.listConversations();
+    assert.deepEqual(list.map((c) => c.id), ['b', 'c', 'a']);
   } finally {
     cleanup();
   }
