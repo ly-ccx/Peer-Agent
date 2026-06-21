@@ -470,3 +470,57 @@ test('deletePlanByConversation: no-op 时不广播 onChange', () => {
 
   assert.equal(events.length, before, 'no-op 不应广播');
 });
+
+test('单活跃草稿: 同会话二次 createPlan 时旧 awaiting_approval 草稿被作废为 cancelled', () => {
+  const first = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  // 把首个计划推进到 awaiting_approval（模拟提交审批但用户改方案另起新计划）
+  store.setPlanStatus(first.planId, 'awaiting_approval');
+  assert.equal(store.getPlan(first.planId)?.status, 'awaiting_approval');
+
+  const second = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+
+  // 旧草稿被作废
+  const firstAfter = store.getPlan(first.planId);
+  assert.equal(firstAfter?.status, 'cancelled');
+  // 审计：revisionHistory 追加了一条 supersede 记录
+  const lastRev = firstAfter.revisionHistory[firstAfter.revisionHistory.length - 1];
+  assert.equal(lastRev.changedBy, 'system:supersede');
+  // 新计划不受影响，且作废后从活跃会话列表中排除，仅剩新计划
+  assert.equal(store.getPlan(second.planId)?.status, 'drafting');
+  const active = store.listPlansByConversation('conv-A');
+  assert.equal(active.length, 1);
+  assert.equal(active[0].planId, second.planId);
+});
+
+test('单活跃草稿: 仅作废 awaiting_approval，drafting/executing 旧计划不受影响', () => {
+  const draftingOld = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  const executingOld = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  store.setPlanStatus(executingOld.planId, 'executing');
+
+  store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+
+  // drafting 与 executing 旧计划都不应被作废
+  assert.equal(store.getPlan(draftingOld.planId)?.status, 'drafting');
+  assert.equal(store.getPlan(executingOld.planId)?.status, 'executing');
+});
+
+test('单活跃草稿: 跨会话不互相作废', () => {
+  const convA = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  store.setPlanStatus(convA.planId, 'awaiting_approval');
+
+  // 另一个会话新建计划，不应影响 conv-A 的待批准草稿
+  store.createPlan({ ...draftWithTasks(), conversationId: 'conv-B' });
+
+  assert.equal(store.getPlan(convA.planId)?.status, 'awaiting_approval');
+});
+
+test('单活跃草稿: 无 conversationId 的草稿互不作废（绝不按 null===null 误伤）', () => {
+  const orphan1 = store.createPlan({ ...draftWithTasks() }); // 无 conversationId
+  store.setPlanStatus(orphan1.planId, 'awaiting_approval');
+
+  const orphan2 = store.createPlan({ ...draftWithTasks() }); // 无 conversationId
+
+  // 两个未关联会话的草稿应互不影响
+  assert.equal(store.getPlan(orphan1.planId)?.status, 'awaiting_approval');
+  assert.equal(store.getPlan(orphan2.planId)?.status, 'drafting');
+});

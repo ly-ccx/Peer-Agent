@@ -333,7 +333,58 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
   }
 
   /**
+   * 同会话「单活跃草稿」约束：新建草稿落库前，把同一会话下其它仍处于
+   * awaiting_approval 的旧草稿作废（cancelled），从源头杜绝「僵尸待批准草稿」
+   * 累积——否则用户中途改方案另起新计划时，旧草稿永远停在 awaiting_approval，
+   * 让浮条长期显示「待批准」、锁定展开且计划数虚高。
+   *
+   * 设计约束：
+   * - 仅在 conversationId 非空时生效（未关联会话的草稿互不影响，绝不按 null===null 误伤）。
+   * - exceptPlanId 排除新计划自身。
+   * - 走 persist 正规写盘 + onChange 广播（不旁路），并向 revisionHistory 追加一条
+   *   supersede 审计，保留可追溯事实。
+   *
+   * @param {string|null|undefined} conversationId
+   * @param {string|null|undefined} exceptPlanId
+   * @param {string} [reason]
+   * @returns {string[]} 被作废的 planId 列表
+   */
+  function supersedeAwaitingDrafts(conversationId, exceptPlanId, reason) {
+    const normalizedConversationId = normalizeConversationId(conversationId);
+    if (normalizedConversationId === null) return [];
+    const superseded = [];
+    for (const meta of listPlansByConversation(normalizedConversationId)) {
+      if (meta.planId === exceptPlanId) continue;
+      if (meta.status !== 'awaiting_approval') continue;
+      const plan = getPlan(meta.planId);
+      // 二次校验全量计划状态，避免 index 与计划文件偶发不一致时误作废。
+      if (!plan || plan.status !== 'awaiting_approval') continue;
+      const nextVersion = (plan.version || 1) + 1;
+      persist({
+        ...plan,
+        status: 'cancelled',
+        version: nextVersion,
+        revisionHistory: [
+          ...(plan.revisionHistory || []),
+          {
+            version: nextVersion,
+            reason: reason || 'superseded by a newer plan in the same conversation',
+            changedAt: new Date().toISOString(),
+            changedBy: 'system:supersede',
+          },
+        ],
+        updatedAt: new Date().toISOString(),
+      });
+      superseded.push(meta.planId);
+    }
+    return superseded;
+  }
+
+  /**
    * 创建草稿计划（status='drafting'）。progress 由 tasks 聚合派生。
+   *
+   * 同会话单活跃草稿：落库前先作废同会话其它 awaiting_approval 旧草稿
+   * （见 supersedeAwaitingDrafts），杜绝僵尸待批准草稿累积。
    */
   function createPlan(draft = {}) {
     const now = new Date().toISOString();
@@ -361,6 +412,8 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       updatedAt: now,
       createdBy: draft.createdBy,
     };
+    // 单活跃草稿：先作废同会话其它 awaiting_approval 旧草稿（排除自身），再落库新计划。
+    supersedeAwaitingDrafts(plan.conversationId, plan.planId);
     return persist(plan);
   }
 
