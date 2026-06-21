@@ -7,6 +7,7 @@
  */
 
 import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli-identity.mjs';
+import { logCompactionDiagnostic } from './compaction-diagnostic-log.mjs';
 
 const COMPACTION_CONFIG = {
   triggerRatio: 0.8,
@@ -548,21 +549,40 @@ async function readSseStream(res, onData) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let nlIndex;
-    while ((nlIndex = buffer.indexOf('\n')) >= 0) {
-      const line = buffer.slice(0, nlIndex).trim();
-      buffer = buffer.slice(nlIndex + 1);
-      if (!line || line.startsWith(':')) continue;
-      if (!line.startsWith('data:')) continue;
-      const payload = line.slice(5).trim();
-      if (payload === '[DONE]') return;
-      onData(payload);
+  let totalChars = 0;
+  let chunkCount = 0;
+  try {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      totalChars += chunk.length;
+      chunkCount += 1;
+      buffer += chunk;
+      let nlIndex;
+      while ((nlIndex = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, nlIndex).trim();
+        buffer = buffer.slice(nlIndex + 1);
+        if (!line || line.startsWith(':')) continue;
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (payload === '[DONE]') return;
+        onData(payload);
+      }
     }
+  } catch (err) {
+    // 读流循环中断（如 ECONNRESET）：记录已累计字符数与原始错误后 re-throw，
+    // 不改变控制流（仍交由上层 fallback 处理），但让根因可见。
+    logCompactionDiagnostic('readstream:error', {
+      totalChars,
+      chunkCount,
+      errorName: err?.name ?? null,
+      errorMessage: err?.message ?? String(err),
+      errorCode: err?.code ?? err?.cause?.code ?? null,
+      errorCause: err?.cause?.message ?? null,
+    });
+    throw err;
   }
 }
 
@@ -573,6 +593,11 @@ async function summarizeWithLLM({
   onProgress,
 }) {
   const { provider, baseUrl, apiKey, model } = providerConfig;
+
+  logCompactionDiagnostic('summarize:enter', {
+    providerConfig,
+    oldMessageCount: Array.isArray(oldMessages) ? oldMessages.length : null,
+  });
 
   const summaryInput = formatOldMessagesForSummary(oldMessages);
   const summaryMessages = [
@@ -624,6 +649,11 @@ async function summarizeWithLLM({
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
+      logCompactionDiagnostic('summarize:http_error', {
+        wire: 'anthropic',
+        status: res.status,
+        body: text.slice(0, 1000),
+      });
       throw new Error(`Anthropic summary HTTP ${res.status}: ${text.slice(0, 300)}`);
     }
 
@@ -640,6 +670,11 @@ async function summarizeWithLLM({
       }
     });
 
+    logCompactionDiagnostic('summarize:done', {
+      wire: 'anthropic',
+      accumulatedChars: accumulated.length,
+      empty: accumulated.length === 0,
+    });
     return accumulated || null;
   }
 
@@ -665,6 +700,11 @@ async function summarizeWithLLM({
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
+    logCompactionDiagnostic('summarize:http_error', {
+      wire: 'openai',
+      status: res.status,
+      body: text.slice(0, 1000),
+    });
     throw new Error(`OpenAI summary HTTP ${res.status}: ${text.slice(0, 300)}`);
   }
 
@@ -682,6 +722,11 @@ async function summarizeWithLLM({
     }
   });
 
+  logCompactionDiagnostic('summarize:done', {
+    wire: 'openai',
+    accumulatedChars: accumulated.length,
+    empty: accumulated.length === 0,
+  });
   return accumulated || null;
 }
 
@@ -1052,6 +1097,16 @@ export async function compactIfNeeded({
             errMsg.includes('400') ||
             errMsg.includes('token');
 
+          logCompactionDiagnostic('compact:attempt_error', {
+            attempt,
+            maxPtlRetries: COMPACTION_CONFIG.maxPtlRetries,
+            oldMessageCount: old.length,
+            isPromptTooLong,
+            errorName: err?.name ?? null,
+            errorMessage: errMsg.slice(0, 1000),
+            errorCode: err?.code ?? err?.cause?.code ?? null,
+          });
+
           if (isPromptTooLong && attempt < COMPACTION_CONFIG.maxPtlRetries) {
             // PTL retry: truncate head
             const truncated = truncateHeadForRetry(old);
@@ -1089,6 +1144,13 @@ export async function compactIfNeeded({
         fallbackReason = 'llm_error';
       }
       fallbackDetail = detail.slice(0, 500);
+      logCompactionDiagnostic('compact:fallback', {
+        fallbackReason,
+        errorName: err?.name ?? null,
+        errorMessage: detail,
+        errorCode: err?.code ?? err?.cause?.code ?? null,
+        errorCause: err?.cause?.message ?? null,
+      });
       recordCompactionFailure();
     }
   }
@@ -1169,6 +1231,15 @@ export async function compactIfNeeded({
   console.log(
     `[context-compactor] Compaction complete: ${beforeTokens} → ${afterTokens} tokens (method: ${method})`,
   );
+
+  logCompactionDiagnostic('compact:complete', {
+    method,
+    fallbackReason,
+    beforeTokens,
+    afterTokens,
+    oldMessageCount: old.length,
+    summaryChars: typeof compactSummary === 'string' ? compactSummary.length : 0,
+  });
 
   return {
     compacted: true,
