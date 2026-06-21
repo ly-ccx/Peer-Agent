@@ -163,7 +163,9 @@ function persistCompactionToConversation({
 }) {
   const conv = conversationStore.getConversation(conversationId);
   if (!conv) return null;
-  const keptCount = compactResult.notification?.keptMessageCount ?? 10;
+  // 默认 0 而非 10：keptMessageCount 缺失时保守保留 0 条，与「真·全量压缩」语义一致，
+  // 避免凭空多保留 10 条旧消息。注意下游 buildPersistedCompactedMessages 对 keptCount<=0 已有安全守卫。
+  const keptCount = compactResult.notification?.keptMessageCount ?? 0;
   const compactedMessages = buildPersistedCompactedMessages({
     compactedMessages: compactResult.messages,
     sourceMessages: sourceMessages ?? conv.messages,

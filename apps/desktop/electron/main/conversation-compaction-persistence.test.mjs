@@ -95,4 +95,65 @@ describe('conversation compaction persistence', () => {
     assert.deepEqual(persisted.slice(1), sourceMessages.slice(1));
     assert.equal(persisted.some((message) => message.id === 'previous-compaction'), false);
   });
+
+  it('keeps zero source messages when keptCount is 0 (guards against slice(-0) keeping all)', () => {
+    const sourceMessages = [
+      { id: 'm1', role: 'user', content: 'old 1' },
+      { id: 'm2', role: 'assistant', content: 'old 2' },
+      { id: 'm3', role: 'user', content: 'old 3' },
+      { id: 'm4', role: 'assistant', content: 'old 4' },
+    ];
+
+    const persisted = buildPersistedCompactedMessages({
+      compactedMessages,
+      sourceMessages,
+      keptCount: 0,
+      idFactory: () => 'compaction-id',
+    });
+
+    // 只应保留压缩交接消息，0 条旧消息；修复前 slice(-0) 会退化为保留全部 4 条。
+    assert.equal(persisted.length, 1);
+    assert.equal(persisted[0].id, 'compaction-id');
+    assert.equal(persisted[0]._compaction.method, 'structural');
+    assert.equal(persisted.some((message) => message.id?.startsWith('m')), false);
+  });
+
+  it('treats negative keptCount as zero kept source messages', () => {
+    const sourceMessages = [
+      { id: 'm1', role: 'user', content: 'old 1' },
+      { id: 'm2', role: 'assistant', content: 'old 2' },
+    ];
+
+    const persisted = buildPersistedCompactedMessages({
+      compactedMessages,
+      sourceMessages,
+      keptCount: -1,
+      idFactory: () => 'compaction-id',
+    });
+
+    assert.equal(persisted.length, 1);
+    assert.equal(persisted[0].id, 'compaction-id');
+  });
+
+  it('still preserves the pending assistant when keptCount is 0', () => {
+    const pendingAssistant = { id: 'pending', role: 'assistant', content: '', segments: [], timestamp: 1 };
+    const sourceMessages = [
+      { id: 'm1', role: 'user', content: 'old 1' },
+      { id: 'm2', role: 'assistant', content: 'old 2' },
+      pendingAssistant,
+    ];
+
+    const persisted = buildPersistedCompactedMessages({
+      compactedMessages,
+      sourceMessages,
+      keptCount: 0,
+      preservePendingAssistant: true,
+      idFactory: () => 'compaction-id',
+    });
+
+    // keptCount=0 不保留旧消息，但 pendingAssistant 仍须保留（工具/续写连续性兜底）。
+    assert.equal(persisted.length, 2);
+    assert.equal(persisted[0].id, 'compaction-id');
+    assert.deepEqual(persisted[1], pendingAssistant);
+  });
 });
