@@ -22,6 +22,7 @@ test('subscription provider creation applies gpt-5.5 pricing and context metadat
 
   assert.equal(provider.model, 'gpt-5.5');
   assert.equal(provider.contextWindow, 1_050_000);
+  assert.equal(provider.maxOutputTokens, 128_000);
   assert.equal(provider.inputPrice, 5);
   assert.equal(provider.cacheReadPrice, 0.5);
   assert.equal(provider.outputPrice, 30);
@@ -49,6 +50,7 @@ test('subscription provider migration backfills pricing and context metadata', (
       isDefault: true,
       createdAt: '2026-01-01T00:00:00.000Z',
       contextWindow: 0,
+      maxOutputTokens: 0,
       inputPrice: 0,
       outputPrice: 0,
       cacheWritePrice: 9,
@@ -61,6 +63,7 @@ test('subscription provider migration backfills pricing and context metadata', (
   const store = createLlmConfigStore({ configFile });
   const [provider] = store.listProviders();
   assert.equal(provider.contextWindow, 1_050_000);
+  assert.equal(provider.maxOutputTokens, 128_000);
   assert.equal(provider.inputPrice, 5);
   assert.equal(provider.cacheReadPrice, 0.5);
   assert.equal(provider.outputPrice, 30);
@@ -71,6 +74,159 @@ test('subscription provider migration backfills pricing and context metadata', (
 
   const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
   assert.equal(persisted.contextWindow, 1_050_000);
+  assert.equal(persisted.maxOutputTokens, 128_000);
   assert.equal(persisted.inputPrice, 5);
   assert.equal(persisted.cacheWritePrice, undefined);
+}));
+
+test('legacy provider entries migrate to channel fields without losing stored settings', () => withStore(({ configFile }) => {
+  writeFileSync(configFile, JSON.stringify([
+    {
+      id: 'p1',
+      provider: 'openai',
+      authMethod: 'api_key',
+      name: 'Custom gateway',
+      baseUrl: 'https://gateway.example/v1',
+      model: 'model-a',
+      apiKey: { encrypted: false, data: 'secret-key' },
+      oauthTokens: { encrypted: false, data: '' },
+      enabled: false,
+      isDefault: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      contextWindow: 1234,
+      maxOutputTokens: 5678,
+      inputPrice: 1,
+      outputPrice: 2,
+      cacheReadPrice: 0.5,
+      supportsVision: true,
+      supportsReasoning: true,
+      supportsPromptCaching: true,
+    },
+  ], null, 2));
+
+  const store = createLlmConfigStore({ configFile });
+  const [provider] = store.listProviders();
+
+  assert.equal(provider.channelId, 'openai-compatible');
+  assert.equal(provider.resolvedWire, 'openai-chat');
+  assert.equal(provider.name, 'Custom gateway');
+  assert.equal(provider.baseUrl, 'https://gateway.example/v1');
+  assert.equal(provider.model, 'model-a');
+  assert.equal(provider.enabled, false);
+  assert.equal(provider.isDefault, true);
+  assert.equal(provider.contextWindow, 1234);
+  assert.equal(provider.maxOutputTokens, 5678);
+  assert.equal(provider.inputPrice, 1);
+  assert.equal(provider.outputPrice, 2);
+  assert.equal(provider.cacheReadPrice, 0.5);
+  assert.equal(provider.supportsVision, true);
+  assert.equal(provider.supportsReasoning, true);
+  assert.equal(provider.supportsPromptCaching, true);
+  assert.equal(provider.apiKeyConfigured, true);
+
+  const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
+  assert.equal(persisted.channelId, 'openai-compatible');
+  assert.deepEqual(persisted.apiKey, { encrypted: false, data: 'secret-key' });
+}));
+
+test('manual provider creation and updates persist max output tokens', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const provider = store.addProvider({
+    provider: 'openai',
+    authMethod: 'api_key',
+    apiKey: 'secret-key',
+    maxOutputTokens: 8192,
+  });
+
+  assert.equal(provider.maxOutputTokens, 8192);
+
+  const updated = store.updateProvider(provider.id, { maxOutputTokens: 4096 });
+  assert.equal(updated.maxOutputTokens, 4096);
+
+  const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
+  assert.equal(persisted.maxOutputTokens, 4096);
+}));
+
+test('manual provider creation and updates persist reasoning effort maps', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const provider = store.addProvider({
+    provider: 'openai',
+    authMethod: 'api_key',
+    apiKey: 'secret-key',
+    supportsReasoning: true,
+    reasoningParamStyle: 'openai-effort',
+    reasoningEffortMap: {
+      minimal: 'high',
+      low: 'high',
+      medium: 'high',
+      high: 'high',
+      xhigh: 'max',
+    },
+  });
+
+  assert.deepEqual(provider.reasoningEffortMap, {
+    minimal: 'high',
+    low: 'high',
+    medium: 'high',
+    high: 'high',
+    xhigh: 'max',
+  });
+
+  const updated = store.updateProvider(provider.id, {
+    reasoningEffortMap: { medium: 'high', xhigh: 'max' },
+  });
+  assert.deepEqual(updated.reasoningEffortMap, { medium: 'high', xhigh: 'max' });
+
+  const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
+  assert.deepEqual(persisted.reasoningEffortMap, { medium: 'high', xhigh: 'max' });
+}));
+
+test('Gemini OAuth provider stores OAuth client metadata without API key', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const provider = store.addProvider({
+    provider: 'openai',
+    channelId: 'google-ai',
+    authMethod: 'oauth_google',
+    name: 'Gemini OAuth',
+    model: 'gemini-2.0-flash',
+    oauthClientId: 'google-client-id',
+    oauthClientSecret: 'google-client-secret',
+    oauthProjectId: 'my-project',
+  });
+
+  assert.equal(provider.channelId, 'google-ai');
+  assert.equal(provider.resolvedWire, 'gemini');
+  assert.equal(provider.authMethod, 'oauth_google');
+  assert.equal(provider.oauthClientId, 'google-client-id');
+  assert.equal(provider.oauthProjectId, 'my-project');
+  assert.equal(provider.apiKeyConfigured, false);
+  assert.equal(provider.apiKeyMasked, '');
+
+  const credential = store.getCredential(provider.id);
+  assert.equal(credential.oauthClientId, 'google-client-id');
+  assert.equal(credential.oauthClientSecret, 'google-client-secret');
+  assert.equal(credential.oauthProjectId, 'my-project');
+
+  const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
+  assert.deepEqual(persisted.apiKey, { encrypted: false, data: '' });
+  assert.deepEqual(persisted.oauthClientSecret, { encrypted: false, data: 'google-client-secret' });
+}));
+
+test('legacy provider updates also update channel identity when channelId is omitted', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const provider = store.addProvider({
+    provider: 'openai',
+    authMethod: 'api_key',
+    apiKey: 'secret-key',
+  });
+
+  const updated = store.updateProvider(provider.id, {
+    provider: 'anthropic',
+    baseUrl: 'https://api.anthropic.com',
+    model: 'claude-test',
+  });
+
+  assert.equal(updated.provider, 'anthropic');
+  assert.equal(updated.channelId, 'anthropic');
+  assert.equal(updated.resolvedWire, 'anthropic-messages');
 }));

@@ -20,7 +20,7 @@ const tool = (tool: string, over: Partial<Extract<ContentSegment, { type: 'tool-
 describe('normalizeStreamSegment', () => {
   it('fills default args and keeps structured fields for tool-call', () => {
     const out = normalizeStreamSegment({ type: 'tool-call', tool: 't' } as ContentSegment);
-    assert.deepEqual(out, { type: 'tool-call', tool: 't', args: {}, result: undefined, synthetic: undefined, toolCallId: undefined });
+    assert.deepEqual(out, { type: 'tool-call', tool: 't', displayName: undefined, args: {}, result: undefined, synthetic: undefined, toolCallId: undefined });
   });
   it('defaults content to empty string for text/thinking', () => {
     assert.deepEqual(normalizeStreamSegment({ type: 'text' } as ContentSegment), { type: 'text', content: '' });
@@ -83,6 +83,17 @@ describe('groupSegments', () => {
     assert.equal((groups[1] as { calls: unknown[] }).calls.length, 2);
     assert.deepEqual(groups[2], { type: 'text', content: 'done' });
   });
+  it('carries displayName through to the grouped tool call (MCP title passthrough)', () => {
+    // 回归：MCP 工具卡标题。后端注入的 displayName 必须经分组保留到 ToolCallLegacy，
+    // 渲染层才能显示「服务名: 工具名」而不是裸 capability 名 mcp__server__tool。
+    const groups = groupSegments([
+      tool('mcp__dingtalk__create_document', { displayName: '钉钉文档: create_document' }),
+    ]);
+    assert.equal(groups[0].type, 'tool-call-group');
+    const call = (groups[0] as { calls: Array<{ tool: string; displayName?: string | null }> }).calls[0];
+    assert.equal(call.tool, 'mcp__dingtalk__create_document');
+    assert.equal(call.displayName, '钉钉文档: create_document');
+  });
 });
 
 describe('getTextContent', () => {
@@ -97,8 +108,9 @@ describe('migrateToSegments', () => {
   });
   it('emits tool-call then text', () => {
     const out = migrateToSegments('body', [{ tool: 't', args: { a: 1 }, result: 'r' }]);
+    // displayName 随 tool-call 段透传；旧历史无此字段时为 undefined。
     assert.deepEqual(out, [
-      { type: 'tool-call', tool: 't', args: { a: 1 }, result: 'r' },
+      { type: 'tool-call', tool: 't', displayName: undefined, args: { a: 1 }, result: 'r' },
       { type: 'text', content: 'body' },
     ]);
   });

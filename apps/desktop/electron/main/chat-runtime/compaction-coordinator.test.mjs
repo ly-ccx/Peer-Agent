@@ -39,11 +39,12 @@ describe('chat compaction coordinator', () => {
   });
 
   it('settles the banner to idle when a started compaction does not compact', async () => {
-    // emergency 强制发出 start;force + 单条消息使 compactIfNeeded 走 compacted:false 分支。
-    // 回归点:发过 start 后必须补发 idle,否则压缩横幅悬挂、界面卡在运行中。
+    // emergency 强制发出 start；真·全量压缩（0011）下唯一的 compacted:false force 分支是
+    // 「无任何非 system 消息」（convMsgs.length===0）。回归点：发过 start 后必须补发 idle，
+    // 否则压缩横幅悬挂、界面卡在运行中。
     const events = [];
     const result = await runCompactionCheck({
-      messages: [{ role: 'user', content: 'hello' }],
+      messages: [{ role: 'system', content: 'system' }],
       systemPrompt: 'system',
       contextWindow: 0,
       providerConfig: null,

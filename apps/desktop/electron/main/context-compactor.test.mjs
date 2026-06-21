@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, it } from 'node:test';
 import {
   compactIfNeeded,
+  estimateTokensFromMessages,
   microcompactMessagesForContext,
   resetCircuitBreaker,
 } from './context-compactor.mjs';
+
+const COMPACTOR_SOURCE = readFileSync(
+  fileURLToPath(new URL('./context-compactor.mjs', import.meta.url)),
+  'utf8',
+);
 
 const buildMessages = (count, charsPerMessage = 20) => [
   { role: 'system', content: 'system prompt' },
@@ -33,6 +41,56 @@ describe('context compactor', () => {
     assert.equal(result.messages, messages);
   });
 
+  it('estimates image_url / input_image blocks as fixed cost, not their base64 length', () => {
+    // 模拟一张 ~3MB 图片的 data URL（base64 约 400 万字符）。
+    const hugeDataUrl = `data:image/png;base64,${'A'.repeat(4_000_000)}`;
+    const imageUrlMessage = {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'hello' },
+        { type: 'image_url', image_url: { url: hugeDataUrl } },
+      ],
+    };
+    const inputImageMessage = {
+      role: 'user',
+      content: [{ type: 'input_image', image_url: hugeDataUrl }],
+    };
+
+    // 修复前：image_url/input_image 会掉进 JSON.stringify(block) 分支，
+    // 估算 ≈ 400 万字符 / 4 ≈ 100 万 token，导致每轮误触发压缩。
+    // 修复后：按固定 2000 token/图计，两条消息合计应远低于阈值。
+    const estimated = estimateTokensFromMessages([imageUrlMessage, inputImageMessage]);
+    assert.ok(
+      estimated < 10_000,
+      `expected fixed image cost, got ${estimated} tokens`,
+    );
+  });
+
+  it('does not compact a small conversation that contains a large image', async () => {
+    const hugeDataUrl = `data:image/png;base64,${'A'.repeat(4_000_000)}`;
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '这个 MCP 的标题去哪了？' },
+          { type: 'image_url', image_url: { url: hugeDataUrl } },
+        ],
+      },
+      { role: 'assistant', content: 'short reply' },
+    ];
+
+    const result = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      contextWindow: 1_000_000,
+      providerConfig: null,
+    });
+
+    assert.equal(result.compacted, false);
+    assert.equal(result.messages, messages);
+  });
+
   it('force compacts and creates a user handoff message', async () => {
     const result = await compactIfNeeded({
       messages: buildMessages(12, 20),
@@ -45,12 +103,14 @@ describe('context compactor', () => {
     assert.equal(result.compacted, true);
     assert.equal(result.messages[0].role, 'system');
     assert.equal(result.messages[1].role, 'user');
-    // 全量但保当前轮：buildMessages(12) 末尾 user=index10，当前轮=[user10, assistant11]=2 条，
-    // 其余 10 条全部进 old 摘要。
-    assert.match(result.messages[1].content, /^\[上下文交接 - 共压缩 10 条消息\]/);
+    // 真·全量压缩（0011）：buildMessages(12) 的 12 条会话消息全部进 old 摘要，
+    // keep 为空、不保留任何原文。
+    assert.match(result.messages[1].content, /^\[上下文交接 - 共压缩 12 条消息\]/);
     assert.equal(result.messages[1]._compaction.method, 'structural');
-    assert.equal(result.messages[1]._compaction.originalMessageCount, 10);
-    assert.equal(result.notification.keptMessageCount, 2);
+    assert.equal(result.messages[1]._compaction.originalMessageCount, 12);
+    assert.equal(result.notification.keptMessageCount, 0);
+    // keep 为空 → 交接 user 后不再追加任何保留消息。
+    assert.equal(result.messages.length, 2);
   });
 
   it('carries forward prior continuity while reporting only the delta message count', async () => {
@@ -71,22 +131,20 @@ describe('context compactor', () => {
     });
 
     assert.equal(result.compacted, true);
-    // 全量但保当前轮：本轮 old=10（buildMessages(12) 仅当前轮 2 条留存）。
-    assert.equal(result.notification.oldMessageCount, 10);
+    // 真·全量压缩（0011）：本轮 old=12（buildMessages(12) 全部进 old、keep 为空）。
+    assert.equal(result.notification.oldMessageCount, 12);
     assert.equal(result.notification.previousMessageCount, 100);
-    assert.equal(result.notification.totalMessageCount, 110);
-    assert.equal(result.messages[1]._compaction.originalMessageCount, 110);
-    assert.equal(result.messages[1]._compaction.deltaMessageCount, 10);
+    assert.equal(result.notification.totalMessageCount, 112);
+    assert.equal(result.messages[1]._compaction.originalMessageCount, 112);
+    assert.equal(result.messages[1]._compaction.deltaMessageCount, 12);
     assert.equal(result.messages[1]._compaction.previousMessageCount, 100);
     assert.match(result.messages[1]._compaction.summary, /previous summary/);
-    assert.match(result.messages[1]._compaction.summary, /Delta summary since previous compaction \(10 messages\)/);
+    assert.match(result.messages[1]._compaction.summary, /Delta summary since previous compaction \(12 messages\)/);
   });
 
-  it('keeps the assistant tool call when the keep window starts with a tool result (no-user fallback)', async () => {
-    // 全量但保当前轮：正常路径 keep 首条恒为 user，不会悬空。
-    // 仅「尾段无 user」的回退路径才可能让 keep 首条为 tool_result，
-    // 此时 expandKeepForToolContinuity 应把对应 assistant tool_call 一并拉入 keep。
-    // 尾段全为 assistant/tool（无 user）→ lastUserIdx=-1 → 回退 cutIndex=末条(tool result)。
+  it('full-flush summarizes a trailing dangling tool pair without leaving an orphan tool message', async () => {
+    // 真·全量压缩（0011）：keep 恒为空，末尾的 assistant(tool_call)+tool 一并进 old 摘要，
+    // 交接后不留任何孤立 tool_result（不会让下一轮 provider 因配对缺失报错）。
     const messages = [
       { role: 'system', content: 'system prompt' },
       ...Array.from({ length: 8 }, (_, index) => ({
@@ -112,16 +170,18 @@ describe('context compactor', () => {
     });
 
     assert.equal(result.compacted, true);
-    // 回退 cutIndex=末条(tool result)，expand 把前一条 assistant(tool_call) 拉入 → keep=2 条。
-    assert.equal(result.notification.keptMessageCount, 2);
-    assert.equal(result.messages[2].role, 'assistant');
-    assert.equal(result.messages[2].tool_calls[0].id, 'tool-1');
-    assert.equal(result.messages[3].role, 'tool');
-    assert.equal(result.messages[3].tool_call_id, 'tool-1');
+    // keep 为空：10 条全部进 old 摘要、不保留原文。
+    assert.equal(result.notification.keptMessageCount, 0);
+    assert.equal(result.notification.oldMessageCount, 10);
+    // 结果只有 system + 交接 user，不残留任何 role==='tool' 的孤立消息。
+    assert.equal(result.messages.length, 2);
+    assert.equal(result.messages[0].role, 'system');
+    assert.equal(result.messages[1].role, 'user');
+    assert.equal(result.messages.some((m) => m.role === 'tool'), false);
   });
 
-  it('keeps only the current turn (last user to end) and summarizes everything earlier', async () => {
-    // 当前轮 = 最后一个 user 到末尾，其后多条 assistant/tool 全保留；更早消息全进 old。
+  it('flushes the current turn too — nothing original is kept (真·全量)', async () => {
+    // 真·全量压缩（0011）：连「当前轮」（最后一个 user 到末尾）也不保留，全部进 old 摘要。
     const messages = [
       { role: 'system', content: 'system prompt' },
       ...Array.from({ length: 8 }, (_, index) => ({
@@ -149,22 +209,19 @@ describe('context compactor', () => {
     });
 
     assert.equal(result.compacted, true);
-    // 当前轮 4 条全保留：user + assistant(tool_call) + tool + assistant
-    assert.equal(result.notification.keptMessageCount, 4);
-    // 更早 8 条全部摘要
-    assert.equal(result.notification.oldMessageCount, 8);
-    // keep 段原样保留，工具对不被拆散
-    assert.equal(result.messages[2].role, 'user');
-    assert.equal(result.messages[2].content, 'current turn question');
-    assert.equal(result.messages[result.messages.length - 1].content, 'final answer');
+    // 全部 12 条会话消息进 old、keep 为空。
+    assert.equal(result.notification.keptMessageCount, 0);
+    assert.equal(result.notification.oldMessageCount, 12);
+    // 当前轮的 user 与 final answer 都不再以原文留存。
+    assert.equal(result.messages.length, 2);
+    assert.equal(result.messages[1].role, 'user');
+    assert.match(result.messages[1].content, /^\[上下文交接/);
   });
 
-  it('does not compact when there is no earlier message before the current turn', async () => {
-    // 仅当前轮（最后一个 user 为首条会话消息）→ old 为空 → 不压缩，避免空压缩。
+  it('does not compact when there is no non-system message', async () => {
+    // 真·全量压缩（0011）：无任何非 system 消息 → 不压缩，避免空压缩。
     const messages = [
       { role: 'system', content: 'system prompt' },
-      { role: 'user', content: 'only question' },
-      { role: 'assistant', content: 'only answer' },
     ];
 
     const result = await compactIfNeeded({
@@ -176,6 +233,15 @@ describe('context compactor', () => {
     });
 
     assert.equal(result.compacted, false);
+  });
+
+  it('summary prompts require detailed user execution actions / operation steps (0011)', () => {
+    // 真·全量压缩后原文不再保留，连续性靠摘要承载 → 摘要 prompt 必须显式要求记录执行动作/操作步骤。
+    // SUMMARY_SYSTEM_PROMPT（中文 fallback 摘要）强调「执行动作/操作步骤」。
+    assert.match(COMPACTOR_SOURCE, /执行动作/);
+    assert.match(COMPACTOR_SOURCE, /操作步骤/);
+    // COMPACT_PROMPT（英文 9 章节）第 8 节强调 execution actions / operation steps。
+    assert.match(COMPACTOR_SOURCE, /concrete execution actions and operation steps/);
   });
 
   it('preflight compacts above threshold without throwing', async () => {

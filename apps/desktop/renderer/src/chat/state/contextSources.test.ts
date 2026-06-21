@@ -5,6 +5,7 @@ import {
   buildConversationAttachmentContext,
   buildConversationContinuityContext,
   buildConfigInstructionContext,
+  buildReplyLanguageContext,
 } from './contextSources.ts';
 import type { ChatAttachment, ChatMsg } from './types.ts';
 
@@ -75,5 +76,30 @@ describe('buildConfigInstructionContext', () => {
     assert.equal(out[0].content, 'be concise');
     assert.equal(out[0].id, 'settings.systemInstructions');
     assert.equal(out[0].source, 'settings.systemInstructions');
+  });
+});
+
+describe('buildReplyLanguageContext', () => {
+  it('returns empty when unset, blank, or auto (follow the question)', () => {
+    assert.deepEqual(buildReplyLanguageContext(''), []);
+    assert.deepEqual(buildReplyLanguageContext('   '), []);
+    assert.deepEqual(buildReplyLanguageContext(null), []);
+    assert.deepEqual(buildReplyLanguageContext(undefined), []);
+    assert.deepEqual(buildReplyLanguageContext('auto'), []);
+  });
+  it('returns empty for an unknown language code', () => {
+    assert.deepEqual(buildReplyLanguageContext('xx-YY'), []);
+  });
+  it('produces a stable reply-language instruction for a known code', () => {
+    const out = buildReplyLanguageContext('zh-CN');
+    assert.equal(out.length, 1);
+    assert.equal(out[0].id, 'settings.replyLanguage');
+    assert.equal(out[0].source, 'settings.replyLanguage');
+    assert.match(out[0].content, /Simplified Chinese/);
+  });
+  it('trims surrounding whitespace before matching', () => {
+    const out = buildReplyLanguageContext('  ja-JP  ');
+    assert.equal(out.length, 1);
+    assert.match(out[0].content, /Japanese/);
   });
 });

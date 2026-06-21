@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { sendAnthropicMessagesStream } from './provider-adapters/anthropic-messages-adapter.mjs';
+import { sendGeminiStream } from './provider-adapters/gemini-adapter.mjs';
 import { sendOpenAIChatStream } from './provider-adapters/openai-chat-adapter.mjs';
 
 function sse(frames) {
@@ -50,6 +51,7 @@ describe('Provider adapters', () => {
         tools: [{ type: 'function', function: { name: 'bash' } }],
         effort: 'high',
         supportsReasoning: true,
+        maxOutputTokens: 8192,
         webContents: { send: (channel, payload) => events.push({ channel, payload }) },
         streamId: 's1',
       });
@@ -58,6 +60,7 @@ describe('Provider adapters', () => {
       assert.equal(captured.init.headers.Authorization, 'Bearer key');
       assert.equal(captured.body.model, 'gpt-test');
       assert.equal(captured.body.reasoning_effort, 'high');
+      assert.equal(captured.body.max_tokens, 8192);
       assert.equal(result.ok, true);
       assert.equal(result.content, 'hello');
       assert.equal(result.toolCalls[0].name, 'bash');
@@ -65,6 +68,48 @@ describe('Provider adapters', () => {
       assert.equal(result.streamUsage.inputTokens, 10);
       assert.equal(events.find((event) => event.channel === 'chat:stream:delta').payload.content, 'hello');
       assert.equal(events.find((event) => event.channel === 'chat:stream:usage').payload.usage.cacheReadTokens, 3);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('maps DeepSeek prompt cache hit tokens from OpenAI-compatible usage', async () => {
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    globalThis.fetch = async () => {
+      return new Response(sse([
+        {
+          choices: [{ delta: { content: 'ok' } }],
+        },
+        {
+          choices: [{ delta: {} }],
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 5,
+            prompt_cache_hit_tokens: 80,
+            prompt_cache_miss_tokens: 20,
+          },
+        },
+        '[DONE]',
+      ]), { status: 200 });
+    };
+
+    try {
+      const result = await sendOpenAIChatStream({
+        baseUrl: 'https://api.deepseek.test/v1',
+        apiKey: 'key',
+        model: 'deepseek-chat',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [],
+        effort: 'off',
+        supportsReasoning: false,
+        webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        streamId: 'deepseek-cache',
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.streamUsage.cacheReadTokens, 80);
+      assert.equal(events.find((event) => event.channel === 'chat:stream:usage').payload.usage.cacheReadTokens, 80);
     } finally {
       globalThis.fetch = previousFetch;
     }
@@ -172,6 +217,7 @@ describe('Provider adapters', () => {
         effort: 'high',
         supportsReasoning: true,
         promptCaching: true,
+        maxOutputTokens: 4096,
         webContents: { send: (channel, payload) => events.push({ channel, payload }) },
         streamId: 's1',
       });
@@ -182,6 +228,7 @@ describe('Provider adapters', () => {
       assert.equal(captured.body.system[0].text, 'system');
       assert.equal(captured.body.system[0].cache_control.type, 'ephemeral');
       assert.equal(captured.body.thinking.type, 'enabled');
+      assert.equal(captured.body.max_tokens, 32768 + 4096);
       assert.equal(result.ok, true);
       assert.equal(result.textContent, 'hello');
       assert.equal(result.stopReason, 'tool_use');
@@ -230,7 +277,7 @@ describe('Provider adapters', () => {
     }
   });
 
-  it('uses adaptive Anthropic thinking for the idealab Anthropic gateway', async () => {
+  it('uses adaptive Anthropic thinking when descriptor reasoning style requests it', async () => {
     const previousFetch = globalThis.fetch;
     let captured = null;
     globalThis.fetch = async (url, init) => {
@@ -251,6 +298,7 @@ describe('Provider adapters', () => {
         tools: [],
         effort: 'high',
         supportsReasoning: true,
+        reasoningParamStyle: 'anthropic-adaptive-effort',
         webContents: { send: () => {} },
         streamId: 's1',
       });
@@ -377,6 +425,65 @@ describe('Provider adapters', () => {
       globalThis.fetch = previousFetch;
       if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
       else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
+  it('sends a Gemini stream request and parses text, function calls, and usage', async () => {
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    let captured = null;
+    globalThis.fetch = async (url, init) => {
+      captured = { url, init, body: JSON.parse(init.body) };
+      return new Response(sse([
+        {
+          candidates: [{
+            content: {
+              parts: [
+                { text: 'hello' },
+                { functionCall: { name: 'bash', args: { command: 'pwd' } } },
+              ],
+            },
+          }],
+        },
+        {
+          usageMetadata: {
+            promptTokenCount: 11,
+            candidatesTokenCount: 7,
+            cachedContentTokenCount: 3,
+          },
+        },
+      ]), { status: 200 });
+    };
+
+    try {
+      const result = await sendGeminiStream({
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+        endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse&key=key',
+        headers: { 'Content-Type': 'application/json' },
+        model: 'gemini-2.0-flash',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [{ type: 'function', function: { name: 'bash', parameters: { type: 'object' } } }],
+        effort: 'off',
+        supportsReasoning: false,
+        maxOutputTokens: 2048,
+        webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        streamId: 'g1',
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(captured.url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse&key=key');
+      assert.equal(captured.body.contents[0].parts[0].text, 'hi');
+      assert.equal(captured.body.generationConfig.maxOutputTokens, 2048);
+      assert.equal(captured.body.tools[0].functionDeclarations[0].name, 'bash');
+      assert.equal(result.content, 'hello');
+      assert.equal(result.toolCalls[0].name, 'bash');
+      assert.equal(result.toolCalls[0].arguments, '{"command":"pwd"}');
+      assert.equal(result.streamUsage.inputTokens, 11);
+      assert.equal(result.streamUsage.outputTokens, 7);
+      assert.equal(result.streamUsage.cacheReadTokens, 3);
+      assert.equal(events.find((event) => event.channel === 'chat:stream:delta').payload.content, 'hello');
+    } finally {
+      globalThis.fetch = previousFetch;
     }
   });
 });

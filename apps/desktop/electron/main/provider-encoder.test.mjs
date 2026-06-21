@@ -3,7 +3,9 @@ import { describe, it } from 'node:test';
 
 import {
   encodeAnthropicMessagesRequest,
+  encodeGeminiGenerateContentRequest,
   encodeOpenAIChatRequest,
+  encodeOpenAIResponsesRequest,
   normalizeAnthropicMessages,
   normalizeOpenAIMessages,
 } from './provider-encoders/index.mjs';
@@ -82,9 +84,32 @@ describe('Provider message encoders', () => {
       tools: [{ type: 'function', function: { name: 'bash' } }],
       effort: 'high',
       supportsReasoning: true,
+      maxOutputTokens: 8192,
     });
 
     assert.equal(body.reasoning_effort, 'high');
+    assert.equal(body.max_tokens, 8192);
+  });
+
+  it('maps max output tokens to the OpenAI Responses request field', () => {
+    const body = encodeOpenAIResponsesRequest({
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      maxOutputTokens: 4096,
+    });
+
+    assert.equal(body.max_output_tokens, 4096);
+  });
+
+  it('maps max output tokens to Gemini generation config', () => {
+    const body = encodeGeminiGenerateContentRequest({
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      maxOutputTokens: 2048,
+    });
+
+    assert.deepEqual(body.generationConfig, { maxOutputTokens: 2048 });
   });
 
   it('passes OpenAI extra-high reasoning effort through as xhigh', () => {
@@ -97,6 +122,35 @@ describe('Provider message encoders', () => {
     });
 
     assert.equal(body.reasoning_effort, 'xhigh');
+  });
+
+  it('maps OpenAI-compatible reasoning effort through provider-specific effort map', () => {
+    const reasoningEffortMap = {
+      minimal: 'high',
+      low: 'high',
+      medium: 'high',
+      high: 'high',
+      xhigh: 'max',
+    };
+    const medium = encodeOpenAIChatRequest({
+      model: 'deepseek-reasoner',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      effort: 'default',
+      supportsReasoning: true,
+      reasoningEffortMap,
+    });
+    const xhigh = encodeOpenAIChatRequest({
+      model: 'deepseek-reasoner',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      effort: 'xhigh',
+      supportsReasoning: true,
+      reasoningEffortMap,
+    });
+
+    assert.equal(medium.reasoning_effort, 'high');
+    assert.equal(xhigh.reasoning_effort, 'max');
   });
 
   it('keeps Anthropic high effort as prompt-level intent unless native reasoning is enabled', () => {
@@ -128,13 +182,14 @@ describe('Provider message encoders', () => {
       tools: [{ name: 'bash' }],
       effort: 'high',
       supportsReasoning: true,
+      maxOutputTokens: 8192,
     });
 
     assert.equal(body.thinking.type, 'enabled');
     assert.equal(body.thinking.budget_tokens, 32768);
     // 回归保护: 开启 thinking 时 max_tokens 必须严格大于 budget_tokens，
     // 否则 Anthropic API 返回 400，"深度"模式必挂。
-    assert.equal(body.max_tokens, 32768 + 16384);
+    assert.equal(body.max_tokens, 32768 + 8192);
     assert.ok(body.max_tokens > body.thinking.budget_tokens);
   });
 

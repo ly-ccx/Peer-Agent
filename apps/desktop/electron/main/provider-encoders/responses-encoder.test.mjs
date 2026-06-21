@@ -82,4 +82,18 @@ describe('OpenAI Responses request encoder (ADR 28)', () => {
     });
     assert.equal(body.reasoning.effort, 'xhigh');
   });
+
+  it('maps Responses reasoning effort through provider-specific effort map', () => {
+    const body = encodeOpenAIResponsesRequest({
+      model: 'deepseek-reasoner',
+      messages: [{ role: 'user', content: 'x' }],
+      supportsReasoning: true,
+      effort: 'xhigh',
+      reasoningEffortMap: {
+        medium: 'high',
+        xhigh: 'max',
+      },
+    });
+    assert.equal(body.reasoning.effort, 'max');
+  });
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test, beforeEach, afterEach } from 'node:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -379,4 +379,94 @@ test('onChange: 回调抛错不影响写盘事实（Evidence 已落盘）', () =
 test('onChange: 不传回调时所有写操作正常（向后兼容）', () => {
   const plan = store.createPlan(draftWithTasks());
   assert.equal(store.getPlan(plan.planId)?.version, 1);
+});
+
+// ---- deletePlanByConversation：删除会话级联硬删除计划（见 ADR 34） ----
+
+test('deletePlanByConversation: 只删目标会话的计划，其他会话/未关联计划保留', () => {
+  const a1 = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  const a2 = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  const b1 = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-B' });
+  const orphan = store.createPlan({ ...draftWithTasks(), conversationId: null });
+
+  const remaining = store.deletePlanByConversation('conv-A');
+
+  // conv-A 的两个计划被删，conv-B 与未关联计划保留
+  const remainingIds = remaining.map((m) => m.planId).sort();
+  assert.deepEqual(remainingIds, [b1.planId, orphan.planId].sort());
+  assert.equal(store.getPlan(a1.planId), null);
+  assert.equal(store.getPlan(a2.planId), null);
+  assert.equal(store.getPlan(b1.planId)?.planId, b1.planId);
+  assert.equal(store.getPlan(orphan.planId)?.planId, orphan.planId);
+  assert.equal(store.listPlansByConversation('conv-A').length, 0);
+  assert.equal(store.listPlansByConversation('conv-B').length, 1);
+});
+
+test('deletePlanByConversation: 计划文件被 unlink、索引行被移除', () => {
+  const storeDir = path.join(tmpRoot, 'goal-plans-store');
+  const s = createGoalPlanStore({ storeDir });
+  const a1 = s.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  const b1 = s.createPlan({ ...draftWithTasks(), conversationId: 'conv-B' });
+
+  // 删除前两个计划文件都在
+  assert.equal(existsSync(path.join(storeDir, `${a1.planId}.json`)), true);
+  assert.equal(existsSync(path.join(storeDir, `${b1.planId}.json`)), true);
+
+  s.deletePlanByConversation('conv-A');
+
+  // conv-A 的文件被 unlink，conv-B 的文件仍在
+  assert.equal(existsSync(path.join(storeDir, `${a1.planId}.json`)), false);
+  assert.equal(existsSync(path.join(storeDir, `${b1.planId}.json`)), true);
+  // 索引里不再有 a1
+  assert.equal(s.getPlan(a1.planId), null);
+  assert.equal(s.listPlans().some((m) => m.planId === a1.planId), false);
+});
+
+test('deletePlanByConversation: 空/null 会话 id 是 no-op，绝不误删未关联会话的计划', () => {
+  const orphan1 = store.createPlan({ ...draftWithTasks(), conversationId: null });
+  const orphan2 = store.createPlan({ ...draftWithTasks() }); // 不带 conversationId
+  const linked = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+
+  // null / undefined / 空白串都应 no-op，不删任何计划
+  assert.equal(store.deletePlanByConversation(null).length, 3);
+  assert.equal(store.deletePlanByConversation(undefined).length, 3);
+  assert.equal(store.deletePlanByConversation('   ').length, 3);
+
+  assert.equal(store.getPlan(orphan1.planId)?.planId, orphan1.planId);
+  assert.equal(store.getPlan(orphan2.planId)?.planId, orphan2.planId);
+  assert.equal(store.getPlan(linked.planId)?.planId, linked.planId);
+});
+
+test('deletePlanByConversation: 没有任何计划匹配的会话 id 是 no-op', () => {
+  const a1 = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  const remaining = store.deletePlanByConversation('conv-NOPE');
+  assert.equal(remaining.length, 1);
+  assert.equal(store.getPlan(a1.planId)?.planId, a1.planId);
+});
+
+test('deletePlanByConversation: 批量删除只广播一次 onChange（reason=delete）', () => {
+  const events = [];
+  const watched = createGoalPlanStore({ onChange: (e) => events.push(e) });
+  watched.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  watched.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  watched.createPlan({ ...draftWithTasks(), conversationId: 'conv-B' });
+  const before = events.length;
+
+  watched.deletePlanByConversation('conv-A');
+
+  // 删了 2 个计划，但只广播一次
+  assert.equal(events.length, before + 1, '批量级联删除应只广播一次');
+  assert.equal(events[events.length - 1].reason, 'delete');
+});
+
+test('deletePlanByConversation: no-op 时不广播 onChange', () => {
+  const events = [];
+  const watched = createGoalPlanStore({ onChange: (e) => events.push(e) });
+  watched.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  const before = events.length;
+
+  watched.deletePlanByConversation(null); // no-op
+  watched.deletePlanByConversation('conv-NOPE'); // 无匹配 no-op
+
+  assert.equal(events.length, before, 'no-op 不应广播');
 });
