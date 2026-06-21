@@ -102,6 +102,18 @@ describe('Provider message encoders', () => {
     assert.equal(body.max_output_tokens, 4096);
   });
 
+  it('can omit OpenAI Responses max output tokens for subscription-compatible endpoints', () => {
+    const body = encodeOpenAIResponsesRequest({
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      maxOutputTokens: 4096,
+      omitMaxOutputTokens: true,
+    });
+
+    assert.equal(body.max_output_tokens, undefined);
+  });
+
   it('maps max output tokens to Gemini generation config', () => {
     const body = encodeGeminiGenerateContentRequest({
       messages: [{ role: 'user', content: 'hello' }],

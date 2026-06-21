@@ -173,12 +173,13 @@ export async function sendOpenAIResponsesStream({
   reasoningParamStyle = 'openai-effort',
   maxOutputTokens,
   reasoningEffortMap,
+  omitMaxOutputTokens = false,
   signal,
   webContents,
   streamId,
 }) {
   const url = endpoint || `${baseUrl.replace(/\/+$/, '')}/responses`;
-  const body = encodeOpenAIResponsesRequest({ model, messages, tools, effort, supportsReasoning, reasoningParamStyle, maxOutputTokens, reasoningEffortMap });
+  const body = encodeOpenAIResponsesRequest({ model, messages, tools, effort, supportsReasoning, reasoningParamStyle, maxOutputTokens, reasoningEffortMap, omitMaxOutputTokens });
 
   const trace = createProviderStreamTrace({
     provider: 'openai-responses',

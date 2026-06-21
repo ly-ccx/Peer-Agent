@@ -801,6 +801,64 @@ describe('llm chat service tool materialization', () => {
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
   });
 
+  it('omits max_output_tokens for ChatGPT subscription Responses requests', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    let capturedUrl = null;
+    let capturedBody = null;
+    globalThis.fetch = async (url, init) => {
+      capturedUrl = String(url);
+      capturedBody = JSON.parse(init.body);
+      return new Response(sse([
+        { type: 'response.output_text.delta', delta: 'ok' },
+        { type: 'response.completed', response: { usage: { input_tokens: 1, output_tokens: 1 } } },
+      ]), { status: 200 });
+    };
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p-chatgpt',
+            provider: 'openai',
+            authMethod: 'oauth_chatgpt',
+            baseUrl: 'https://chatgpt.com/backend-api/codex',
+            model: 'gpt-5.5',
+            isDefault: true,
+            apiKeyConfigured: true,
+            maxOutputTokens: 4096,
+          }],
+          getCredential: () => ({
+            tokens: {
+              access: 'oauth-access',
+              refresh: 'oauth-refresh',
+              expires: Date.now() + 3_600_000,
+              accountId: 'acct-1',
+            },
+          }),
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.equal(capturedUrl, 'https://chatgpt.com/backend-api/codex/responses');
+    assert.equal(capturedBody.max_output_tokens, undefined);
+    assert.equal(events.find((event) => event.channel === 'chat:stream:delta')?.payload.content, 'ok');
+    assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
+    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+  });
+
   it('does not recover a transport-blocked provider by switching to a different model', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;

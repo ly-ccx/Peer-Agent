@@ -109,6 +109,7 @@ export function encodeOpenAIResponsesRequest({
   reasoningParamStyle = 'openai-effort',
   maxOutputTokens,
   reasoningEffortMap,
+  omitMaxOutputTokens = false,
 }) {
   const normalized = normalizeOpenAIMessages(messages);
 
@@ -134,7 +135,7 @@ export function encodeOpenAIResponsesRequest({
     tools: toResponsesTools(tools),
   };
   const outputLimit = positiveTokenLimit(maxOutputTokens);
-  if (outputLimit) body.max_output_tokens = outputLimit;
+  if (!omitMaxOutputTokens && outputLimit) body.max_output_tokens = outputLimit;
 
   if (supportsReasoning && reasoningParamStyle === 'openai-effort' && effort && effort !== 'off') {
     body.reasoning = { effort: mappedEffortValue(effort, reasoningEffortMap) ?? REASONING_EFFORT[effort] ?? 'medium', summary: 'auto' };
