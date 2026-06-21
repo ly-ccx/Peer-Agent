@@ -75,3 +75,44 @@ export function buildConfigInstructionContext(systemInstructions: string | null 
     source: 'settings.systemInstructions',
   }];
 }
+
+/**
+ * 回复语言 → 自然语言名称。值为 BCP-47 风格的语言代码；空串 / 'auto' 表示
+ * 「不固定，跟随提问语言」，此时不产出指令（保持模型默认行为）。
+ */
+const REPLY_LANGUAGE_NAMES: Record<string, string> = {
+  'zh-CN': 'Simplified Chinese (简体中文)',
+  'zh-TW': 'Traditional Chinese (繁體中文)',
+  'en-US': 'English',
+  'ja-JP': 'Japanese (日本語)',
+  'ko-KR': 'Korean (한국어)',
+  'fr-FR': 'French (Français)',
+  'de-DE': 'German (Deutsch)',
+  'es-ES': 'Spanish (Español)',
+  'ru-RU': 'Russian (Русский)',
+};
+
+export const REPLY_LANGUAGE_OPTIONS = Object.keys(REPLY_LANGUAGE_NAMES);
+
+/**
+ * 把用户配置的「回复语言」包装为 instruction 层 Context item。
+ *
+ * - 空串 / 'auto' / 未知代码：不产出（模型按默认行为，跟随提问语言）。
+ * - 已知代码：产出一条稳定的回复语言指令，收口"回复语言一会中文一会英语"的问题。
+ *
+ * 注意（System Context 治理）：回复语言是用户配置的指令型上下文，走既有
+ * configInstructions（instruction 层）通道纳入 System Context，不在组件里直接拼接系统提示词。
+ */
+export function buildReplyLanguageContext(replyLanguage: string | null | undefined): ConfigInstructionContextItem[] {
+  const code = typeof replyLanguage === 'string' ? replyLanguage.trim() : '';
+  if (!code || code === 'auto') return [];
+  const languageName = REPLY_LANGUAGE_NAMES[code];
+  if (!languageName) return [];
+  return [{
+    id: 'settings.replyLanguage',
+    title: 'Reply Language',
+    content: `Always write your replies to the user in ${languageName}, regardless of the language the user writes in. Keep code, file paths, identifiers, and quoted content unchanged.`,
+    priority: 0,
+    source: 'settings.replyLanguage',
+  }];
+}

@@ -1,5 +1,4 @@
-import { sendOpenAIChatStream } from '../provider-adapters/openai-chat-adapter.mjs';
-import { sendOpenAIResponsesStream } from '../provider-adapters/openai-responses-adapter.mjs';
+import { sendGeminiStream } from '../provider-adapters/gemini-adapter.mjs';
 import {
   createAgentLoopKernel,
   handleTerminalTextResponse,
@@ -13,7 +12,7 @@ import { sanitizeApiMessages } from './message-sanitizer.mjs';
 import * as responseGuard from './response-guard.mjs';
 import { executeModelToolCall } from './tool-orchestrator.mjs';
 
-export async function agentLoopOpenAI({
+export async function agentLoopGemini({
   baseUrl,
   apiKey,
   model,
@@ -25,7 +24,6 @@ export async function agentLoopOpenAI({
   signal,
   effort,
   supportsReasoning = false,
-  supportsPromptCaching = false,
   contextWindow,
   maxOutputTokens,
   conversationId,
@@ -38,21 +36,11 @@ export async function agentLoopOpenAI({
   runtimeProjection,
   mcpRegistry,
   goalPlanStore,
-  onNativeReasoningFallback = null,
   resolvedChannel = null,
-  // ADR 28: ChatGPT 订阅链路走 Responses 传输,需附带 accountId。
-  authMethod = 'api_key',
-  accountId = null,
 }) {
-  // 按鉴权方式选择 OpenAI 协议族的传输 adapter,保持循环逻辑统一。
-  const useResponses = resolvedChannel?.wire === 'openai-responses' || authMethod === 'oauth_chatgpt';
-  const sendStream = useResponses
-    ? (args) => sendOpenAIResponsesStream({ ...args, accountId })
-    : sendOpenAIChatStream;
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
   const loop = createAgentLoopKernel({ webContents, streamId });
-  const providerConfig = { provider: 'openai', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model };
-  let effectiveSupportsReasoning = Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning);
+  const providerConfig = { provider: 'gemini', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model };
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {
     const microcompactResult = applyMicrocompaction(apiMessages);
@@ -77,7 +65,7 @@ export async function agentLoopOpenAI({
     }
 
     apiMessages = sanitizeApiMessages(apiMessages);
-    const providerResponse = await sendStream({
+    const providerResponse = await sendGeminiStream({
       baseUrl,
       apiKey,
       endpoint: resolvedChannel?.endpoint,
@@ -86,10 +74,7 @@ export async function agentLoopOpenAI({
       messages: apiMessages,
       tools,
       effort,
-      supportsReasoning: effectiveSupportsReasoning,
-      reasoningParamStyle: resolvedChannel?.reasoningParamStyle || 'openai-effort',
-      reasoningEffortMap: resolvedChannel?.reasoningEffortMap,
-      promptCaching: resolvedChannel?.supportsPromptCaching ?? supportsPromptCaching,
+      supportsReasoning: Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning),
       maxOutputTokens,
       signal,
       webContents,
@@ -131,16 +116,6 @@ export async function agentLoopOpenAI({
     loop.addUsage(streamUsage);
 
     if (!toolCalls.length) {
-      if (
-        effectiveSupportsReasoning &&
-        (effort === 'high' || effort === 'xhigh') &&
-        !String(content || '').trim() &&
-        !String(thinkingContent || '').trim()
-      ) {
-        effectiveSupportsReasoning = false;
-        onNativeReasoningFallback?.({ provider: 'openai', reason: 'empty_response' });
-        continue;
-      }
       const terminalResponse = handleTerminalTextResponse({
         text: content,
         thinking: thinkingContent,
@@ -156,13 +131,21 @@ export async function agentLoopOpenAI({
     apiMessages.push({
       role: 'assistant',
       content: content || null,
-      tool_calls: toolCalls.map((tc) => ({
-        id: tc.id,
-        type: 'function',
-        function: { name: tc.name, arguments: tc.arguments },
-      })),
+      geminiContent: {
+        role: 'model',
+        parts: [
+          ...(content ? [{ text: content }] : []),
+          ...toolCalls.map((tc) => ({
+            functionCall: {
+              name: tc.name,
+              args: JSON.parse(tc.arguments || '{}'),
+            },
+          })),
+        ],
+      },
     });
 
+    const functionResponses = [];
     let terminalControlSignal = null;
     for (const tc of toolCalls) {
       const toolExecution = await executeModelToolCall({
@@ -182,14 +165,24 @@ export async function agentLoopOpenAI({
         goalPlanStore,
       });
       if (toolExecution.aborted) return;
-      // 必须为每个 tool_call 写回配对的 tool message，再决定是否终止，
-      // 否则会留下未应答的 tool_call 导致下一轮 OpenAI 请求被拒。
-      apiMessages.push({ role: 'tool', tool_call_id: tc.id, content: toolExecution.output });
+      functionResponses.push({
+        functionResponse: {
+          name: tc.name,
+          response: { result: toolExecution.output },
+        },
+      });
       if (toolExecution.controlSignal?.terminal) terminalControlSignal = toolExecution.controlSignal;
     }
 
-    // 运行时护栏：当本回合调用了 request_user_input 这类「请求用户输入」能力时，
-    // 停止回灌、把控制权交还用户，而不是自行继续决策。详见 request_user_input 设计。
+    apiMessages.push({
+      role: 'tool',
+      content: JSON.stringify(functionResponses),
+      geminiContent: {
+        role: 'user',
+        parts: functionResponses,
+      },
+    });
+
     if (terminalControlSignal) {
       loop.sendDone();
       return;

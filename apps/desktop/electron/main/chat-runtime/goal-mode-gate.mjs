@@ -1,5 +1,5 @@
 /**
- * Goal 模式运行时闸门 —— 见 docs/proposals/0004-goal-mode-runtime-gate.md。
+ * Goal 模式运行时闸门 —— 见 Goal 模式运行时闸门设计。
  *
  * 设计要点（与 AGENTS.md 非协商运行时链一致）：
  * - 闸门是 PermissionGrant 之前的「能力准入」判定，跑在 projected-tool 执行入口，

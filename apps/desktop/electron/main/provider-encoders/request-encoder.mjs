@@ -7,12 +7,34 @@ import {
 // Peer Agent 的 off 不发 reasoning_effort；其余档位按 provider wire 契约透传。
 const OPENAI_REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'xhigh' };
 const ANTHROPIC_THINKING_BUDGET = { low: 4096, default: 10240, high: 32768, xhigh: 32768 };
+const QWEN_THINKING_BUDGET = { low: 1024, default: 4096, high: 8192, xhigh: 16384 };
 // adaptive 格式下 output_config.effort 只接受 low/medium/high 三档。
 const ANTHROPIC_OUTPUT_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'high' };
 // Anthropic 约束: max_tokens 必须 > thinking.budget_tokens。
 // max_tokens 是 (思考 token + 回复 token) 的总额，因此开启 thinking 时
 // 需要在 budget 之上额外预留回复预算，否则 API 返回 400 导致请求必挂。
 const ANTHROPIC_REPLY_TOKENS = 16384;
+
+function positiveTokenLimit(value, fallback) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? Math.floor(num) : fallback;
+}
+
+function mappedEffortValue(effort, map, fallbackMap, fallbackKey = 'default') {
+  const key = effort === 'default' ? 'medium' : effort;
+  const candidates = effort === 'default' ? ['default', 'medium'] : [String(effort || '')];
+  for (const candidate of candidates) {
+    const value = map?.[candidate];
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return fallbackMap?.[effort] ?? fallbackMap?.[key] ?? fallbackMap?.[fallbackKey];
+}
+
+function mappedNumericEffort(effort, map, fallbackMap) {
+  const mapped = mappedEffortValue(effort, map, fallbackMap);
+  const num = Number(mapped);
+  return Number.isFinite(num) && num > 0 ? Math.floor(num) : undefined;
+}
 
 // Opus 4.8 / Fable 5 / Mythos 5 等新代际模型用 output_config.effort 控制思考强度，
 // 不再支持 manual extended thinking(thinking.budget_tokens)，强行发送会被 API 拒绝(400)。
@@ -30,6 +52,10 @@ export function encodeOpenAIChatRequest({
   tools,
   effort = 'default',
   supportsReasoning = false,
+  reasoningParamStyle = 'openai-effort',
+  promptCaching = false,
+  maxOutputTokens,
+  reasoningEffortMap,
 }) {
   const body = {
     model,
@@ -38,10 +64,19 @@ export function encodeOpenAIChatRequest({
     stream_options: { include_usage: true },
     tools,
   };
+  const outputLimit = positiveTokenLimit(maxOutputTokens, null);
+  if (outputLimit) body.max_tokens = outputLimit;
+  // OpenAI-compatible 协议（含 DeepSeek）的缓存为服务端自动检测，不需要客户端在
+  // content block 上打 cache_control 断点（与 Anthropic 不同）。promptCaching 仅
+  // 作为 UI 标志沿链路传递，后端 usage 解析已从 cached_tokens 字段提取命中量。
+  void promptCaching;
   // 思考档位: off(关闭) / low / default / high / xhigh。
   // off 不发 reasoning_effort; 其余档位映射到 OpenAI 原生 low/medium/high/xhigh。
-  if (supportsReasoning && effort && effort !== 'off') {
-    body.reasoning_effort = OPENAI_REASONING_EFFORT[effort] ?? 'medium';
+  if (supportsReasoning && reasoningParamStyle === 'openai-effort' && effort && effort !== 'off') {
+    body.reasoning_effort = mappedEffortValue(effort, reasoningEffortMap, OPENAI_REASONING_EFFORT, 'default') ?? 'medium';
+  } else if (supportsReasoning && reasoningParamStyle === 'qwen-enable' && effort && effort !== 'off') {
+    body.enable_thinking = true;
+    body.thinking_budget = mappedNumericEffort(effort, reasoningEffortMap, QWEN_THINKING_BUDGET) ?? QWEN_THINKING_BUDGET.default;
   }
   return body;
 }
@@ -128,36 +163,43 @@ export function encodeAnthropicMessagesRequest({
   tools,
   effort = 'default',
   supportsReasoning = false,
+  reasoningParamStyle = null,
   reasoningFormat = 'enabled',
   promptCaching = true,
+  maxOutputTokens,
+  reasoningEffortMap,
 }) {
+  const replyTokenLimit = positiveTokenLimit(maxOutputTokens, ANTHROPIC_REPLY_TOKENS);
   const body = {
     model,
     system,
     messages: normalizeAnthropicMessages(messages),
-    max_tokens: 16384,
+    max_tokens: replyTokenLimit,
     stream: true,
     tools,
   };
   // 思考档位: off(关闭) / low / default / high / xhigh。
   // off 不开 thinking; Anthropic 无 xhigh 原生档位时按 high 处理(adaptive 走 output_config.effort,
   // enabled 走不同的 budget_tokens)。
+  const paramStyle = reasoningParamStyle
+    ?? (reasoningFormat === 'adaptive' ? 'anthropic-adaptive-effort' : null)
+    ?? (anthropicModelUsesEffortConfig(model) ? 'anthropic-output-effort' : 'anthropic-enabled-budget');
   if (supportsReasoning && effort && effort !== 'off') {
-    if (reasoningFormat === 'adaptive') {
+    if (paramStyle === 'anthropic-adaptive-effort') {
       body.thinking = { type: 'adaptive' };
-      body.output_config = { effort: ANTHROPIC_OUTPUT_EFFORT[effort] ?? 'medium' };
-    } else if (anthropicModelUsesEffortConfig(model)) {
+      body.output_config = { effort: mappedEffortValue(effort, reasoningEffortMap, ANTHROPIC_OUTPUT_EFFORT, 'default') ?? 'medium' };
+    } else if (paramStyle === 'anthropic-output-effort') {
       // Opus 4.8 等新代际: 不发 thinking.budget_tokens(会 400)，
       // 改用 output_config.effort，max_tokens 保持纯回复预算。
-      body.output_config = { effort: ANTHROPIC_OUTPUT_EFFORT[effort] ?? 'medium' };
-    } else {
-      const budgetTokens = ANTHROPIC_THINKING_BUDGET[effort] ?? ANTHROPIC_THINKING_BUDGET.default;
+      body.output_config = { effort: mappedEffortValue(effort, reasoningEffortMap, ANTHROPIC_OUTPUT_EFFORT, 'default') ?? 'medium' };
+    } else if (paramStyle === 'anthropic-enabled-budget') {
+      const budgetTokens = mappedNumericEffort(effort, reasoningEffortMap, ANTHROPIC_THINKING_BUDGET) ?? ANTHROPIC_THINKING_BUDGET.default;
       body.thinking = {
         type: 'enabled',
         budget_tokens: budgetTokens,
       };
       // max_tokens 必须严格大于 budget_tokens，并额外预留回复 token。
-      body.max_tokens = budgetTokens + ANTHROPIC_REPLY_TOKENS;
+      body.max_tokens = budgetTokens + replyTokenLimit;
     }
   }
   // 部分网关(如 idealab adaptive 链路)只写缓存、从不返回 cache_read，

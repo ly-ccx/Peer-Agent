@@ -29,6 +29,7 @@ export async function agentLoopAnthropic({
   supportsReasoning = false,
   supportsPromptCaching = false,
   contextWindow,
+  maxOutputTokens,
   conversationId,
   persistCompaction,
   continuityContext = [],
@@ -40,12 +41,13 @@ export async function agentLoopAnthropic({
   mcpRegistry,
   goalPlanStore,
   onNativeReasoningFallback = null,
+  resolvedChannel = null,
 }) {
   let effectiveSystem = systemPrompt;
   let apiMessages = sanitizeApiMessages(messages);
   const loop = createAgentLoopKernel({ webContents, streamId });
-  const providerConfig = { provider: 'anthropic', baseUrl, apiKey, model };
-  let effectiveSupportsReasoning = Boolean(supportsReasoning);
+  const providerConfig = { provider: 'anthropic', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model };
+  let effectiveSupportsReasoning = Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning);
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {
     const microcompactResult = applyMicrocompaction(apiMessages);
@@ -77,13 +79,18 @@ export async function agentLoopAnthropic({
     const providerResponse = await sendAnthropicMessagesStream({
       baseUrl,
       apiKey,
+      endpoint: resolvedChannel?.endpoint,
+      headers: resolvedChannel?.headers,
       model,
       system: effectiveSystem,
       messages: apiMessages,
       tools,
       effort,
       supportsReasoning: effectiveSupportsReasoning,
-      promptCaching: supportsPromptCaching,
+      reasoningParamStyle: resolvedChannel?.reasoningParamStyle,
+      reasoningEffortMap: resolvedChannel?.reasoningEffortMap,
+      promptCaching: resolvedChannel?.supportsPromptCaching ?? supportsPromptCaching,
+      maxOutputTokens,
       signal,
       webContents,
       streamId,
@@ -193,7 +200,7 @@ export async function agentLoopAnthropic({
     apiMessages.push({ role: 'user', content: toolResults });
 
     // 运行时护栏：当本回合调用了 request_user_input 这类「请求用户输入」能力时，
-    // 停止回灌、把控制权交还用户，而不是自行继续决策。详见 docs/proposals/0003-request-user-input.md。
+    // 停止回灌、把控制权交还用户，而不是自行继续决策。详见 request_user_input 设计。
     if (terminalControlSignal) {
       loop.sendDone();
       return;

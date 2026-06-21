@@ -199,10 +199,12 @@ function readServerInfo(client) {
     const info = client.getServerVersion?.();
     if (!info || typeof info !== 'object') return undefined;
     const name = typeof info.name === 'string' ? info.name.trim() : '';
+    const title = typeof info.title === 'string' ? info.title.trim() : '';
     const version = typeof info.version === 'string' ? info.version.trim() : '';
-    if (!name && !version) return undefined;
+    if (!name && !title && !version) return undefined;
     return {
       ...(name ? { name } : {}),
+      ...(title ? { title } : {}),
       ...(version ? { version } : {}),
     };
   } catch {

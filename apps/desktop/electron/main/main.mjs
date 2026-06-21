@@ -19,8 +19,11 @@ import { createMcpRegistry } from './mcp-registry.mjs';
 import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-credential-store.mjs';
 import { disconnectMcp, discoverMcpManifest, getMcpPrompt, readMcpResource, testMcpConnection } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
+import { listChannelDescriptors } from './provider-channels.mjs';
 import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
+import { startGoogleBrowserLogin, ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
 import { listSubscriptionModels } from './provider-adapters/openai-model-catalog.mjs';
+import { listGeminiModels } from './provider-adapters/gemini-model-catalog.mjs';
 import { createHostRestarter } from './host-restart.mjs';
 import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
 import { createLlmChatService } from './llm-chat-service.mjs';
@@ -215,7 +218,7 @@ const llmChatService = createLlmChatService({
   preferredAccessLevel: initialSettings.localAccessLevel,
   mcpRegistry,
   // 注入带 onChange 的同一 goalPlanStore 单例，使 AI 工具写计划经唯一写路径广播，
-  // 浮条无需切会话即可随流式更新。见 docs/proposals/0002-goal-mode.md。
+  // 浮条无需切会话即可随流式更新。见 Goal 模式设计。
   goalPlanStore,
   broadcast: broadcastToAllWindows,
 });
@@ -506,13 +509,24 @@ ipcMain.handle('conversations:update-mode', (_, { id, mode }) => conversationSto
 ipcMain.handle('conversations:append-message', (_, { id, message }) => conversationStore.appendMessage(id, message));
 ipcMain.handle('conversations:update-last-message', (_, { id, content }) => conversationStore.updateLastMessage(id, content));
 ipcMain.handle('conversations:replace-messages', (_, { id, messages }) => conversationStore.replaceMessages(id, messages));
-ipcMain.handle('conversations:delete', (_, { id }) => conversationStore.deleteConversation(id));
+ipcMain.handle('conversations:delete', (_, { id }) => {
+  // IPC 层编排：删除会话后级联硬删除该会话名下的全部 Goal 计划（见 ADR 34）。
+  // 两个 store 保持独立（互不 import），仅在此组合层互相知晓。
+  const result = conversationStore.deleteConversation(id);
+  try {
+    goalPlanStore.deletePlanByConversation(id);
+  } catch (err) {
+    // 级联清理失败不回滚会话删除，但显式告警以便排查（不要静默吞）。
+    console.warn('[main] cascade deletePlanByConversation failed:', err);
+  }
+  return result;
+});
 // 累计计费账本:独立于消息/压缩,累加到 index meta 的 lifetimeUsage(见 ADR 23)。
 // 压缩(replace-messages)只重写消息文件,不碰 meta,故 lifetimeUsage 不受压缩影响。
 ipcMain.handle('conversations:add-usage', (_, { id, usage }) => conversationStore.addUsage(id, usage));
 
 // ── Goal Plans（goal 模式：先规划 → 批准 → 执行，计划为持久化 Evidence/artifact）──
-// 见 docs/proposals/0002-goal-mode.md。progress 由 store 自底向上聚合，调用方不可手填。
+// 见 Goal 模式设计。progress 由 store 自底向上聚合，调用方不可手填。
 ipcMain.handle('goalPlans:list', (_, params) => {
   if (params?.conversationId !== undefined) return goalPlanStore.listPlanDetailsByConversation(params.conversationId);
   return goalPlanStore.listPlanDetails();
@@ -713,6 +727,7 @@ ipcMain.handle('prompt-context-epochs:chain', (_event, params = {}) =>
   }));
 
 // ── LLM Providers ──
+ipcMain.handle('llm:channels:list', () => listChannelDescriptors());
 ipcMain.handle('llm:list', () => llmConfigStore.listProviders());
 ipcMain.handle('llm:add', (_, config) => {
   const provider = llmConfigStore.addProvider(config);
@@ -747,7 +762,7 @@ ipcMain.handle('llm:set-default', (_, { id }) => {
 });
 ipcMain.handle('llm:test', (_, { id }) => llmConfigStore.testConnection(id));
 
-// ── ChatGPT 订阅 OAuth(ADR 28) ──
+// ── Provider OAuth(ADR 28+) ──
 // 同一时刻只允许一个进行中的 browser 登录会话,便于取消。
 let activeOAuthLogin = null;
 
@@ -759,11 +774,22 @@ ipcMain.handle('llm:oauth:start', async (_event, params) => {
   const id = params?.id ?? null;
   const draft = params?.draft ?? null;
   if (!id && !draft) throw new Error('provider id or draft required');
+  const existing = id ? llmConfigStore.listProviders().find((provider) => provider.id === id) : null;
+  const credential = id ? llmConfigStore.getCredential(id) : null;
+  const authMethod = draft?.authMethod || existing?.authMethod || 'oauth_chatgpt';
+  if (authMethod !== 'oauth_chatgpt' && authMethod !== 'oauth_google') {
+    throw new Error(`unsupported_oauth_method:${authMethod}`);
+  }
   if (activeOAuthLogin) {
     try { activeOAuthLogin.cancel(); } catch {}
     activeOAuthLogin = null;
   }
-  const session = startBrowserLogin();
+  const session = authMethod === 'oauth_google'
+    ? startGoogleBrowserLogin({
+      clientId: draft?.oauthClientId ?? credential?.oauthClientId,
+      clientSecret: draft?.oauthClientSecret ?? credential?.oauthClientSecret,
+    })
+    : startBrowserLogin();
   activeOAuthLogin = session;
   let createdId = null;
   try {
@@ -771,7 +797,7 @@ ipcMain.handle('llm:oauth:start', async (_event, params) => {
     const tokens = await session.promise;
     // 新建订阅:授权成功后才原子创建 provider。
     const targetId = id
-      ?? (createdId = llmConfigStore.addProvider({ ...draft, authMethod: 'oauth_chatgpt' }).id);
+      ?? (createdId = llmConfigStore.addProvider({ ...draft, authMethod }).id);
     llmConfigStore.setOAuthTokens(targetId, tokens);
     const provider = llmConfigStore.listProviders().find((p) => p.id === targetId) ?? null;
     if (provider) recordProviderBaseline('oauth_login', provider);
@@ -804,9 +830,21 @@ ipcMain.handle('llm:models:list', async (_event, { id }) => {
     return { success: false, models: [], error: 'oauth_not_logged_in' };
   }
   try {
-    const { tokens: fresh, refreshed } = await ensureFreshTokens(tokens);
+    const provider = llmConfigStore.listProviders().find((p) => p.id === id) ?? null;
+    const authMethod = credential?.authMethod || provider?.authMethod || 'oauth_chatgpt';
+    const { tokens: fresh, refreshed } = authMethod === 'oauth_google'
+      ? await ensureFreshGoogleTokens(tokens, {
+        clientId: credential.oauthClientId,
+        clientSecret: credential.oauthClientSecret,
+      })
+      : await ensureFreshTokens(tokens);
     if (refreshed) llmConfigStore.setOAuthTokens(id, fresh);
-    const { models, source, error } = await listSubscriptionModels(fresh);
+    const { models, source, error } = authMethod === 'oauth_google'
+      ? await listGeminiModels(fresh, {
+        projectId: credential.oauthProjectId,
+        baseUrl: provider?.baseUrl,
+      })
+      : await listSubscriptionModels(fresh);
     return { success: true, models, source, error };
   } catch (err) {
     return { success: false, models: [], error: err?.message || 'models_list_failed' };

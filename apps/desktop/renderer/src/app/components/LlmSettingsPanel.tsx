@@ -1,18 +1,37 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import type { LlmAuthMethod, LlmModelInfo, LlmProviderConfigView, LlmProviderTestResult, LlmProviderType } from '@peer-agent/protocol';
+import type {
+  LlmAuthMethod,
+  LlmChannelDescriptor,
+  LlmModelInfo,
+  LlmProviderConfigView,
+  LlmProviderTestResult,
+  LlmProviderType,
+  LlmReasoningEffortMap,
+  LlmReasoningParamStyle,
+  LlmWireProtocol,
+} from '@peer-agent/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Dropdown } from './Dropdown';
 
 interface FormState {
   provider: LlmProviderType;
+  channelId: string;
+  wireOverride: LlmWireProtocol | '';
+  reasoningParamStyle: LlmReasoningParamStyle | '';
+  reasoningEffortMapText: string;
+  customHeadersText: string;
   // ADR 28: 鉴权方式(api_key | oauth_chatgpt),与协议族正交。
   authMethod: LlmAuthMethod;
   name: string;
   baseUrl: string;
   model: string;
   apiKey: string;
+  oauthClientId: string;
+  oauthClientSecret: string;
+  oauthProjectId: string;
   contextWindow: string;
+  maxOutputTokens: string;
   inputPrice: string;
   outputPrice: string;
   cacheWritePrice: string;
@@ -27,20 +46,299 @@ const PRESETS: Record<LlmProviderType, { baseUrl: string; model: string }> = {
   anthropic: { baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-20250514' },
 };
 
-function emptyForm(provider: LlmProviderType = 'openai'): FormState {
-  return { provider, authMethod: 'api_key', name: '', baseUrl: PRESETS[provider].baseUrl, model: PRESETS[provider].model, apiKey: '', contextWindow: '', inputPrice: '', outputPrice: '', cacheWritePrice: '', cacheReadPrice: '', supportsVision: false, supportsReasoning: false, supportsPromptCaching: false };
+const FALLBACK_CHANNELS: readonly LlmChannelDescriptor[] = [
+  {
+    id: 'openai',
+    label: 'OpenAI 官方',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    allowedWires: ['openai-chat', 'openai-responses'],
+    defaults: PRESETS.openai,
+    capabilities: { reasoning: { supported: true, paramStyle: 'openai-effort' }, promptCache: true, vision: true },
+    authMethods: { api_key: { wire: 'openai-chat' }, oauth_chatgpt: { wire: 'openai-responses' } },
+  },
+  {
+    id: 'anthropic',
+    label: 'Anthropic 官方',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    allowedWires: ['anthropic-messages'],
+    defaults: PRESETS.anthropic,
+    capabilities: { reasoning: { supported: true, paramStyle: 'anthropic-enabled-budget' }, promptCache: true, vision: true },
+    authMethods: { api_key: { wire: 'anthropic-messages' } },
+  },
+  {
+    id: 'openai-compatible',
+    label: 'OpenAI 兼容',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    allowedWires: ['openai-chat', 'openai-responses'],
+    defaults: PRESETS.openai,
+    capabilities: { reasoning: { supported: false, paramStyle: 'openai-effort' }, promptCache: false, vision: false },
+    authMethods: { api_key: { wire: 'openai-chat' } },
+  },
+  {
+    id: 'anthropic-compatible',
+    label: 'Anthropic 兼容',
+    legacyProvider: 'anthropic',
+    defaultWire: 'anthropic-messages',
+    allowedWires: ['anthropic-messages'],
+    defaults: PRESETS.anthropic,
+    capabilities: { reasoning: { supported: false, paramStyle: 'anthropic-enabled-budget' }, promptCache: false, vision: false },
+    authMethods: { api_key: { wire: 'anthropic-messages' } },
+  },
+  {
+    id: 'google-ai',
+    label: 'Google AI / Gemini',
+    legacyProvider: 'openai',
+    defaultWire: 'gemini',
+    allowedWires: ['gemini'],
+    defaults: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.0-flash' },
+    capabilities: { reasoning: { supported: false, paramStyle: 'none' }, promptCache: false, vision: true },
+    authMethods: { api_key: { wire: 'gemini' }, oauth_google: { wire: 'gemini' } },
+  },
+];
+
+function descriptorFor(channelId: string, channels: readonly LlmChannelDescriptor[]): LlmChannelDescriptor {
+  return channels.find((channel) => channel.id === channelId)
+    ?? channels.find((channel) => channel.id === 'openai-compatible')
+    ?? channels[0]
+    ?? FALLBACK_CHANNELS[2];
+}
+
+const PROTECTED_HEADER_NAMES = new Set([
+  'authorization',
+  'x-api-key',
+  'content-type',
+  'anthropic-version',
+  'openai-beta',
+  'x-goog-api-key',
+  'x-goog-user-project',
+  'chatgpt-account-id',
+]);
+
+function isOAuthMethod(method: LlmAuthMethod): boolean {
+  return method === 'oauth_chatgpt' || method === 'oauth_google';
+}
+
+function oauthLabel(method: LlmAuthMethod, locale: string): string {
+  const zh = locale === 'zh-CN';
+  if (method === 'oauth_google') return zh ? 'Google OAuth 登录' : 'Google OAuth';
+  if (method === 'oauth_chatgpt') return zh ? 'ChatGPT 订阅登录' : 'ChatGPT Subscription';
+  return 'API Key';
+}
+
+function wireLabel(wire: string | undefined, locale: string): string {
+  const zh = locale === 'zh-CN';
+  switch (wire) {
+    case 'openai-chat':
+      return zh ? 'Chat Completions' : 'Chat Completions';
+    case 'openai-responses':
+      return zh ? 'Responses API' : 'Responses API';
+    case 'anthropic-messages':
+      return zh ? 'Messages API' : 'Messages API';
+    case 'gemini':
+      return zh ? 'Gemini GenerateContent' : 'Gemini GenerateContent';
+    default:
+      return wire || (zh ? '未解析' : 'Unresolved');
+  }
+}
+
+function reasoningStyleLabel(style: string | undefined, locale: string): string {
+  const zh = locale === 'zh-CN';
+  switch (style) {
+    case 'openai-effort':
+      return zh ? 'OpenAI reasoning_effort' : 'OpenAI reasoning_effort';
+    case 'qwen-enable':
+      return zh ? 'Qwen enable_thinking' : 'Qwen enable_thinking';
+    case 'anthropic-enabled-budget':
+      return zh ? 'Anthropic thinking budget_tokens' : 'Anthropic thinking budget_tokens';
+    case 'anthropic-adaptive-effort':
+      return zh ? 'Anthropic adaptive effort' : 'Anthropic adaptive effort';
+    case 'anthropic-output-effort':
+      return zh ? 'Anthropic output reasoning_effort' : 'Anthropic output reasoning_effort';
+    case 'none':
+      return zh ? '不发送推理参数' : 'Do not send reasoning parameters';
+    default:
+      return style || (zh ? '不发送推理参数' : 'Do not send reasoning parameters');
+  }
+}
+
+function formatReasoningEffortMap(map: LlmReasoningEffortMap | undefined): string {
+  return map ? JSON.stringify(map, null, 2) : '';
+}
+
+function parseReasoningEffortMap(text: string): LlmReasoningEffortMap | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  const parsed: Record<string, string | number> = {};
+  const assign = (key: string, value: unknown) => {
+    const name = String(key || '').trim();
+    if (!name) throw new Error('reasoning_effort_map_invalid');
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      parsed[name] = value;
+      return;
+    }
+    if (typeof value === 'string' && value.trim()) {
+      const raw = value.trim();
+      const asNumber = Number(raw);
+      parsed[name] = Number.isFinite(asNumber) && /^-?\d+(\.\d+)?$/.test(raw) ? asNumber : raw;
+      return;
+    }
+    throw new Error('reasoning_effort_map_invalid');
+  };
+
+  if (trimmed.startsWith('{')) {
+    let value: unknown;
+    try {
+      value = JSON.parse(trimmed) as unknown;
+    } catch {
+      throw new Error('reasoning_effort_map_invalid');
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('reasoning_effort_map_invalid');
+    for (const [key, item] of Object.entries(value)) assign(key, item);
+  } else {
+    for (const rawLine of trimmed.split('\n')) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      const idx = line.indexOf(':');
+      if (idx <= 0) throw new Error('reasoning_effort_map_invalid');
+      assign(line.slice(0, idx), line.slice(idx + 1));
+    }
+  }
+  return Object.keys(parsed).length ? parsed : undefined;
+}
+
+function formatCustomHeaders(headers: Readonly<Record<string, string>> | undefined): string {
+  return Object.entries(headers || {}).map(([key, value]) => `${key}: ${value}`).join('\n');
+}
+
+function parseCustomHeaders(text: string): Record<string, string> | undefined {
+  const headers: Record<string, string> = {};
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const idx = line.indexOf(':');
+    if (idx <= 0) throw new Error('custom_header_invalid_line');
+    const key = line.slice(0, idx).trim();
+    const value = line.slice(idx + 1).trim();
+    if (!key || !value) throw new Error('custom_header_invalid_line');
+    const lowerKey = key.toLowerCase();
+    if (PROTECTED_HEADER_NAMES.has(lowerKey)) throw new Error(`custom_header_protected:${lowerKey}`);
+    headers[key] = value;
+  }
+  return Object.keys(headers).length ? headers : undefined;
+}
+
+function validateForm(
+  form: FormState,
+  editingId: string | null,
+  selectedChannel: LlmChannelDescriptor,
+): string | null {
+  if (!selectedChannel.id) return 'unknown_channel';
+  if (isOAuthMethod(form.authMethod)) {
+    if (!selectedChannel.authMethods?.[form.authMethod]) return 'unsupported_auth_method';
+    if (form.authMethod === 'oauth_google') {
+      if (!form.oauthClientId.trim()) return 'oauth_google_client_id_required';
+      if (!editingId && !form.oauthClientSecret.trim()) return 'oauth_google_client_secret_required';
+      if (!form.oauthProjectId.trim()) return 'oauth_google_project_required';
+      if (!form.model.trim()) return 'model_required';
+    }
+    return null;
+  }
+  if (!form.baseUrl.trim()) return 'base_url_required';
+  if (!form.model.trim()) return 'model_required';
+  if (!editingId && !form.apiKey.trim()) return 'api_key_required';
+  try {
+    parseCustomHeaders(form.customHeadersText);
+    if (form.supportsReasoning) parseReasoningEffortMap(form.reasoningEffortMapText);
+  } catch (err: unknown) {
+    return err instanceof Error ? err.message : 'custom_header_invalid_line';
+  }
+  const numberFields = [
+    form.contextWindow,
+    form.maxOutputTokens,
+    form.inputPrice,
+    form.outputPrice,
+    form.cacheWritePrice,
+    form.cacheReadPrice,
+  ];
+  if (numberFields.some((value) => value.trim() && (!Number.isFinite(Number(value)) || Number(value) < 0))) {
+    return 'number_field_invalid';
+  }
+  return null;
+}
+
+function emptyForm(channels: readonly LlmChannelDescriptor[] = FALLBACK_CHANNELS, channelId = 'openai-compatible'): FormState {
+  const channel = descriptorFor(channelId, channels);
+  const provider = channel.legacyProvider;
+  return {
+    provider,
+    channelId: channel.id,
+    wireOverride: '',
+    reasoningParamStyle: channel.capabilities?.reasoning?.paramStyle ?? '',
+    reasoningEffortMapText: '',
+    customHeadersText: '',
+    authMethod: 'api_key',
+    name: '',
+    baseUrl: channel.defaults.baseUrl,
+    model: channel.defaults.model,
+    apiKey: '',
+    oauthClientId: '',
+    oauthClientSecret: '',
+    oauthProjectId: '',
+    contextWindow: '',
+    maxOutputTokens: '',
+    inputPrice: '',
+    outputPrice: '',
+    cacheWritePrice: '',
+    cacheReadPrice: '',
+    supportsVision: channel.capabilities?.vision ?? false,
+    supportsReasoning: channel.capabilities?.reasoning?.supported ?? false,
+    supportsPromptCaching: channel.capabilities?.promptCache ?? false,
+  };
 }
 
 // 把后端连通性测试的错误码映射为可读文案；未知码原样透传(便于排障)。
 function friendlyTestError(error: string | undefined, locale: string): string {
   const zh = locale === 'zh-CN';
+  if (error?.startsWith('custom_header_protected:')) {
+    const name = error.slice('custom_header_protected:'.length);
+    return zh
+      ? `${name} 由渠道鉴权统一管理，不能放在自定义 Header`
+      : `${name} is managed by channel auth and cannot be set as a custom header`;
+  }
   switch (error) {
     case 'oauth_not_logged_in':
-      return zh ? '未登录，请先登录 ChatGPT' : 'Not logged in — please log in to ChatGPT';
+      return zh ? '未登录，请先完成 OAuth 登录' : 'Not logged in — please complete OAuth login';
     case 'oauth_session_expired':
       return zh ? '登录已过期，请重新登录' : 'Session expired — please re-login';
+    case 'oauth_google_client_id_required':
+      return zh ? '请填写 Google OAuth Client ID' : 'Please enter the Google OAuth Client ID';
+    case 'oauth_google_client_secret_required':
+      return zh ? '请填写 Google OAuth Client Secret' : 'Please enter the Google OAuth Client Secret';
+    case 'oauth_google_project_required':
+      return zh ? '请填写 Google Cloud Project ID' : 'Please enter the Google Cloud Project ID';
     case 'API key not configured':
       return zh ? '未配置 API Key' : 'API key not configured';
+    case 'api_key_required':
+      return zh ? '请填写 API Key' : 'Please enter an API key';
+    case 'base_url_required':
+      return zh ? '请填写 Base URL' : 'Please enter a Base URL';
+    case 'model_required':
+      return zh ? '请填写模型名称' : 'Please enter a model name';
+    case 'custom_header_invalid_line':
+      return zh ? '自定义 Header 应按 Name: value 每行填写一条' : 'Custom headers must be one Name: value pair per line';
+    case 'reasoning_effort_map_invalid':
+      return zh ? '思考强度映射应填写 JSON 对象，或每行一条 level: value' : 'Reasoning effort map must be a JSON object or one level: value pair per line';
+    case 'number_field_invalid':
+      return zh ? '数字字段必须是大于等于 0 的数值' : 'Number fields must be non-negative values';
+    case 'unknown_channel':
+      return zh ? '未知渠道，请重新选择' : 'Unknown channel. Please choose again';
+    case 'unsupported_wire':
+      return zh ? '该渠道不支持所选 Wire 协议' : 'This channel does not support the selected wire protocol';
+    case 'unsupported_auth_method':
+      return zh ? '该渠道不支持所选鉴权方式' : 'This channel does not support the selected auth method';
     default:
       return error || (zh ? '测试失败' : 'Test failed');
   }
@@ -54,10 +352,12 @@ export function LlmSettingsPanel({
   readonly onBack?: () => void;
 }) {
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
+  const [channels, setChannels] = useState<readonly LlmChannelDescriptor[]>(FALLBACK_CHANNELS);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, LlmProviderTestResult>>({});
   const [testingId, setTestingId] = useState<string | null>(null);
   const [oauthBusyId, setOauthBusyId] = useState<string | null>(null);
@@ -74,6 +374,16 @@ export function LlmSettingsPanel({
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void clientApi.llmListChannels()
+      .then((list) => {
+        if (!cancelled && list.length) setChannels(list);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   // 拉取某订阅 provider 的可用模型(远程,失败回退内置清单)。
   const loadModels = useCallback(async (id: string) => {
     setModelLoadingId(id);
@@ -88,7 +398,7 @@ export function LlmSettingsPanel({
   // 已登录(connected)的订阅 provider 自动加载一次模型清单。
   useEffect(() => {
     for (const p of providers) {
-      if (p.authMethod === 'oauth_chatgpt' && p.oauthStatus?.status === 'connected' && !modelLists[p.id]) {
+      if (isOAuthMethod(p.authMethod) && p.oauthStatus?.status === 'connected' && !modelLists[p.id]) {
         void loadModels(p.id);
       }
     }
@@ -102,27 +412,50 @@ export function LlmSettingsPanel({
     } catch { /* silent */ }
   };
 
-  const handleProviderTypeChange = (provider: LlmProviderType) => {
-    const preset = PRESETS[provider];
+  const handleChannelChange = (channelId: string) => {
+    const channel = descriptorFor(channelId, channels);
     setForm((prev) => ({
       ...prev,
-      provider,
-      baseUrl: prev.baseUrl === PRESETS[prev.provider].baseUrl ? preset.baseUrl : prev.baseUrl,
-      model: prev.model === PRESETS[prev.provider].model ? preset.model : prev.model,
+      channelId: channel.id,
+      provider: channel.legacyProvider,
+      wireOverride: '',
+      authMethod: channel.authMethods?.[prev.authMethod] ? prev.authMethod : 'api_key',
+      baseUrl: channel.defaults.baseUrl,
+      model: channel.defaults.model,
+      supportsVision: channel.capabilities?.vision ?? false,
+      supportsReasoning: channel.capabilities?.reasoning?.supported ?? false,
+      supportsPromptCaching: channel.capabilities?.promptCache ?? false,
+      reasoningParamStyle: channel.capabilities?.reasoning?.paramStyle ?? '',
+      reasoningEffortMapText: '',
     }));
   };
 
   const openAdd = () => {
     setEditingId(null);
-    setForm(emptyForm());
+    setForm(emptyForm(channels));
     setShowForm(true);
   };
 
   const openEdit = (p: LlmProviderConfigView) => {
     setEditingId(p.id);
+    const channel = descriptorFor(p.channelId || (p.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels);
     setForm({
-      provider: p.provider, authMethod: p.authMethod ?? 'api_key', name: p.name, baseUrl: p.baseUrl, model: p.model, apiKey: '',
+      provider: p.provider,
+      channelId: p.channelId || channel.id,
+      wireOverride: p.wireOverride ?? '',
+      reasoningParamStyle: p.reasoningParamStyle ?? channel.capabilities?.reasoning?.paramStyle ?? '',
+      reasoningEffortMapText: formatReasoningEffortMap(p.reasoningEffortMap),
+      customHeadersText: formatCustomHeaders(p.customHeaders),
+      authMethod: p.authMethod ?? 'api_key',
+      name: p.name,
+      baseUrl: p.baseUrl,
+      model: p.model,
+      apiKey: '',
+      oauthClientId: p.oauthClientId ?? '',
+      oauthClientSecret: '',
+      oauthProjectId: p.oauthProjectId ?? '',
       contextWindow: p.contextWindow ? String(p.contextWindow) : '',
+      maxOutputTokens: p.maxOutputTokens ? String(p.maxOutputTokens) : '',
       inputPrice: p.inputPrice != null ? String(p.inputPrice) : '',
       outputPrice: p.outputPrice != null ? String(p.outputPrice) : '',
       cacheWritePrice: p.cacheWritePrice != null ? String(p.cacheWritePrice) : '',
@@ -136,8 +469,12 @@ export function LlmSettingsPanel({
 
   const handleSave = async () => {
     setSaving(true);
+    setFormError(null);
     try {
+      const customHeaders = parseCustomHeaders(form.customHeadersText);
+      const reasoningEffortMap = form.supportsReasoning ? parseReasoningEffortMap(form.reasoningEffortMapText) : undefined;
       const ctxWin = form.contextWindow ? Number(form.contextWindow) : undefined;
+      const maxOut = form.maxOutputTokens ? Number(form.maxOutputTokens) : undefined;
       const inPrice = form.inputPrice ? Number(form.inputPrice) : undefined;
       const outPrice = form.outputPrice ? Number(form.outputPrice) : undefined;
       const cwPrice = form.cacheWritePrice ? Number(form.cacheWritePrice) : undefined;
@@ -146,10 +483,19 @@ export function LlmSettingsPanel({
         const patch: Record<string, unknown> = {
           id: editingId,
           provider: form.provider,
+          channelId: form.channelId,
+          wireOverride: form.wireOverride || undefined,
+          reasoningParamStyle: form.reasoningParamStyle || undefined,
+          reasoningEffortMap,
+          customHeaders,
           name: form.name,
           baseUrl: form.baseUrl,
           model: form.model,
+          oauthClientId: form.oauthClientId,
+          oauthClientSecret: form.oauthClientSecret || undefined,
+          oauthProjectId: form.oauthProjectId,
           contextWindow: ctxWin,
+          maxOutputTokens: maxOut,
           inputPrice: inPrice,
           outputPrice: outPrice,
           cacheWritePrice: cwPrice,
@@ -163,12 +509,21 @@ export function LlmSettingsPanel({
       } else {
         const draft = {
           provider: form.provider,
+          channelId: form.channelId,
+          wireOverride: form.wireOverride || undefined,
+          reasoningParamStyle: form.reasoningParamStyle || undefined,
+          reasoningEffortMap,
+          customHeaders,
           authMethod: form.authMethod,
           name: form.name || form.provider,
           baseUrl: form.baseUrl,
           model: form.model,
           apiKey: form.apiKey,
+          oauthClientId: form.oauthClientId,
+          oauthClientSecret: form.oauthClientSecret,
+          oauthProjectId: form.oauthProjectId,
           contextWindow: ctxWin,
+          maxOutputTokens: maxOut,
           inputPrice: inPrice,
           outputPrice: outPrice,
           cacheWritePrice: cwPrice,
@@ -180,7 +535,7 @@ export function LlmSettingsPanel({
         // ADR 28: 订阅链路必须"先登录、成功后才落盘"。
         // 不在这里 llmAddProvider —— 把草稿交给 OAuth,登录成功才由 main 创建 provider,
         // 失败/取消则什么都不留。
-        if (form.authMethod === 'oauth_chatgpt') {
+        if (isOAuthMethod(form.authMethod)) {
           await handleOAuthLogin({ draft });
           return;
         }
@@ -189,7 +544,9 @@ export function LlmSettingsPanel({
       setShowForm(false);
       setEditingId(null);
       await refresh();
-    } catch { /* silent */ } finally {
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : 'Save failed');
+    } finally {
       setSaving(false);
     }
   };
@@ -244,6 +601,17 @@ export function LlmSettingsPanel({
     }
   };
 
+  const selectedChannel = descriptorFor(form.channelId, channels);
+  const oauthMethods = (['oauth_chatgpt', 'oauth_google'] as const)
+    .filter((method) => Boolean(selectedChannel.authMethods?.[method]));
+  const canUseOAuth = oauthMethods.length > 0;
+  const canChooseWire = !isOAuthMethod(form.authMethod) && selectedChannel.allowedWires.length > 1;
+  const formValidationError = validateForm(form, editingId, selectedChannel);
+  const canSubmit = !saving && !oauthBusyId;
+  const reasoningStyles: readonly LlmReasoningParamStyle[] = selectedChannel.legacyProvider === 'anthropic'
+    ? ['anthropic-enabled-budget', 'anthropic-adaptive-effort', 'anthropic-output-effort', 'none']
+    : ['openai-effort', 'qwen-enable', 'none'];
+
   return (
     <div className="llm-settings-panel">
       {onBack ? (
@@ -261,17 +629,21 @@ export function LlmSettingsPanel({
             <div className="llm-provider-info">
               <strong>{p.name || p.provider}</strong>
               <span className="llm-provider-meta">
-                {p.provider.toUpperCase()} · {p.model}
+                <span className="llm-provider-chip">{descriptorFor(p.channelId || (p.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels).label}</span>
+                <span className="llm-provider-chip">{wireLabel(p.resolvedWire || descriptorFor(p.channelId || (p.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels).defaultWire, i18n.locale)}</span>
+                <span className="llm-provider-chip mono">{p.model}</span>
                 {p.isDefault ? <span className="llm-badge-default">{i18n.locale === 'zh-CN' ? '默认' : 'Default'}</span> : null}
               </span>
-              {p.contextWindow || p.inputPrice != null ? (
+              {p.contextWindow || p.maxOutputTokens || p.inputPrice != null ? (
                 <span className="llm-provider-specs">
                   {p.contextWindow ? `${(p.contextWindow / 1000).toFixed(0)}K ctx` : ''}
-                  {p.contextWindow && p.inputPrice != null ? ' · ' : ''}
+                  {p.contextWindow && p.maxOutputTokens ? ' · ' : ''}
+                  {p.maxOutputTokens ? `${(p.maxOutputTokens / 1000).toFixed(0)}K out` : ''}
+                  {(p.contextWindow || p.maxOutputTokens) && p.inputPrice != null ? ' · ' : ''}
                   {p.inputPrice != null ? `$${p.inputPrice}/${p.outputPrice ?? '?'}` : ''}
                 </span>
               ) : null}
-              {p.authMethod === 'oauth_chatgpt' ? (
+              {isOAuthMethod(p.authMethod) ? (
                 <small className={`llm-provider-key llm-oauth-status-${p.oauthStatus?.status ?? 'disconnected'}`}>
                   {p.oauthStatus?.status === 'connected'
                     ? (i18n.locale === 'zh-CN' ? `已登录${p.oauthStatus.accountId ? ` · ${p.oauthStatus.accountId}` : ''}` : `Connected${p.oauthStatus.accountId ? ` · ${p.oauthStatus.accountId}` : ''}`)
@@ -284,7 +656,7 @@ export function LlmSettingsPanel({
                   {p.apiKeyConfigured ? `Key: ${p.apiKeyMasked}` : (i18n.locale === 'zh-CN' ? '未配置 Key' : 'Key not set')}
                 </small>
               )}
-              {p.authMethod === 'oauth_chatgpt' && p.oauthStatus?.status === 'connected' ? (
+              {isOAuthMethod(p.authMethod) && p.oauthStatus?.status === 'connected' ? (
                 <div className="llm-model-select">
                   <span>{i18n.locale === 'zh-CN' ? '模型' : 'Model'}</span>
                   <Dropdown
@@ -318,7 +690,7 @@ export function LlmSettingsPanel({
                   {i18n.locale === 'zh-CN' ? '设为默认' : 'Set Default'}
                 </button>
               ) : null}
-              {p.authMethod === 'oauth_chatgpt' && p.oauthStatus?.status !== 'connected' ? (
+              {isOAuthMethod(p.authMethod) && p.oauthStatus?.status !== 'connected' ? (
                 <button type="button" className="primary" onClick={() => void handleOAuthLogin({ id: p.id })} disabled={oauthBusyId === p.id}>
                   {oauthBusyId === p.id ? '...' : (i18n.locale === 'zh-CN' ? '重新登录' : 'Re-login')}
                 </button>
@@ -346,20 +718,19 @@ export function LlmSettingsPanel({
           <h3>{editingId ? (i18n.locale === 'zh-CN' ? '编辑模型' : 'Edit Model') : (i18n.locale === 'zh-CN' ? '添加模型' : 'Add Model')}</h3>
 
           <label>
-            <span>{i18n.locale === 'zh-CN' ? '协议类型' : 'Protocol'}</span>
-            <div className="llm-radio-group">
-              <label>
-                <input type="radio" checked={form.provider === 'openai'} onChange={() => handleProviderTypeChange('openai')} />
-                OpenAI {i18n.locale === 'zh-CN' ? '兼容' : 'Compatible'}
-              </label>
-              <label>
-                <input type="radio" checked={form.provider === 'anthropic'} onChange={() => handleProviderTypeChange('anthropic')} />
-                Anthropic {i18n.locale === 'zh-CN' ? '兼容' : 'Compatible'}
-              </label>
-            </div>
+            <span>{i18n.locale === 'zh-CN' ? '渠道' : 'Channel'}</span>
+            <Dropdown
+              value={form.channelId}
+              ariaLabel={i18n.locale === 'zh-CN' ? '选择渠道' : 'Select channel'}
+              options={channels.map((channel) => ({
+                value: channel.id,
+                label: channel.label || channel.id,
+              }))}
+              onChange={handleChannelChange}
+            />
           </label>
 
-          {form.provider === 'openai' && !editingId ? (
+          {canUseOAuth && !editingId ? (
             <label>
               <span>{i18n.locale === 'zh-CN' ? '鉴权方式' : 'Auth Method'}</span>
               <div className="llm-radio-group">
@@ -367,15 +738,36 @@ export function LlmSettingsPanel({
                   <input type="radio" checked={form.authMethod === 'api_key'} onChange={() => setForm((prev) => ({ ...prev, authMethod: 'api_key' }))} />
                   API Key
                 </label>
-                <label>
-                  <input type="radio" checked={form.authMethod === 'oauth_chatgpt'} onChange={() => setForm((prev) => ({ ...prev, authMethod: 'oauth_chatgpt' }))} />
-                  {i18n.locale === 'zh-CN' ? 'ChatGPT 订阅登录' : 'ChatGPT Subscription'}
-                </label>
+                {oauthMethods.map((method) => (
+                  <label key={method}>
+                    <input
+                      type="radio"
+                      checked={form.authMethod === method}
+                      onChange={() => setForm((prev) => ({ ...prev, authMethod: method, wireOverride: '' }))}
+                    />
+                    {oauthLabel(method, i18n.locale)}
+                  </label>
+                ))}
               </div>
             </label>
           ) : null}
 
-          {/* ADR 28: 订阅(OAuth)模式下显示名称/baseUrl/模型/定价均由系统确定,表单折叠为"仅登录"。 */}
+          {canChooseWire ? (
+            <label>
+              <span>{i18n.locale === 'zh-CN' ? 'Wire 协议' : 'Wire Protocol'}</span>
+              <Dropdown
+                value={form.wireOverride || selectedChannel.defaultWire}
+                ariaLabel={i18n.locale === 'zh-CN' ? '选择 Wire 协议' : 'Select wire protocol'}
+                options={selectedChannel.allowedWires.map((wire) => ({ value: wire, label: wireLabel(wire, i18n.locale) }))}
+                onChange={(wire) => setForm((prev) => ({
+                  ...prev,
+                  wireOverride: wire === selectedChannel.defaultWire ? '' : wire as LlmWireProtocol,
+                }))}
+              />
+            </label>
+          ) : null}
+
+          {/* ADR 28: 订阅(OAuth)模式下先登录、成功后才落盘。 */}
           {form.authMethod === 'oauth_chatgpt' ? (
             <label>
               <span>{i18n.locale === 'zh-CN' ? '登录' : 'Login'}</span>
@@ -385,6 +777,39 @@ export function LlmSettingsPanel({
                   : 'Clicking login opens your browser to sign in with your ChatGPT subscription. The provider is saved only after a successful login — nothing is saved if login fails or is cancelled. Available models are fetched after login (latest selected by default).'}
               </p>
             </label>
+          ) : form.authMethod === 'oauth_google' ? (
+            <>
+              <label>
+                <span>Google OAuth Client ID</span>
+                <input value={form.oauthClientId} onChange={(e) => setForm((prev) => ({ ...prev, oauthClientId: e.target.value }))} />
+              </label>
+              <label>
+                <span>Google OAuth Client Secret</span>
+                <input
+                  type="password"
+                  value={form.oauthClientSecret}
+                  placeholder={editingId ? (i18n.locale === 'zh-CN' ? '留空则不修改' : 'Leave empty to keep') : ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, oauthClientSecret: e.target.value }))}
+                />
+              </label>
+              <label>
+                <span>Google Cloud Project ID</span>
+                <input value={form.oauthProjectId} onChange={(e) => setForm((prev) => ({ ...prev, oauthProjectId: e.target.value }))} />
+              </label>
+              <label>
+                <span>{i18n.locale === 'zh-CN' ? '显示名称' : 'Display Name'}</span>
+                <input value={form.name} placeholder="Gemini OAuth" onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+              </label>
+              <label>
+                <span>Base URL</span>
+                <input value={form.baseUrl} onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))} />
+              </label>
+              <p className="llm-oauth-hint">
+                {i18n.locale === 'zh-CN'
+                  ? '使用 Google Cloud OAuth Desktop Client 登录 Gemini API；登录成功后才会保存配置。Project ID 会作为 x-goog-user-project 发送。'
+                  : 'Uses a Google Cloud OAuth Desktop Client for the Gemini API. The provider is saved only after login; Project ID is sent as x-goog-user-project.'}
+              </p>
+            </>
           ) : (
             <>
               <label>
@@ -411,10 +836,16 @@ export function LlmSettingsPanel({
             <input value={form.model} onChange={(e) => setForm((prev) => ({ ...prev, model: e.target.value }))} />
           </label>
 
-          <label>
-            <span>{i18n.locale === 'zh-CN' ? '上下文窗口' : 'Context Window'}</span>
-            <input type="number" value={form.contextWindow} placeholder={i18n.locale === 'zh-CN' ? '如 200000' : 'e.g. 200000'} onChange={(e) => setForm((prev) => ({ ...prev, contextWindow: e.target.value }))} />
-          </label>
+          <div className="llm-token-row">
+            <label>
+              <span>{i18n.locale === 'zh-CN' ? '上下文窗口' : 'Context Window'}</span>
+              <input type="number" value={form.contextWindow} placeholder={i18n.locale === 'zh-CN' ? '如 200000' : 'e.g. 200000'} onChange={(e) => setForm((prev) => ({ ...prev, contextWindow: e.target.value }))} />
+            </label>
+            <label>
+              <span>{i18n.locale === 'zh-CN' ? '最大输出 tokens' : 'Max Output Tokens'}</span>
+              <input type="number" value={form.maxOutputTokens} placeholder={i18n.locale === 'zh-CN' ? '如 8192' : 'e.g. 8192'} onChange={(e) => setForm((prev) => ({ ...prev, maxOutputTokens: e.target.value }))} />
+            </label>
+          </div>
 
           <div className="llm-price-group">
             <span className="llm-price-group-label">{i18n.locale === 'zh-CN' ? '定价（$/百万 tokens）' : 'Pricing ($/M tokens)'}</span>
@@ -453,10 +884,43 @@ export function LlmSettingsPanel({
             <input
               type="checkbox"
               checked={form.supportsReasoning}
-              onChange={(e) => setForm((prev) => ({ ...prev, supportsReasoning: e.target.checked }))}
+              onChange={(e) => setForm((prev) => ({
+                ...prev,
+                supportsReasoning: e.target.checked,
+                reasoningEffortMapText: e.target.checked ? prev.reasoningEffortMapText : '',
+              }))}
             />
             <span>{i18n.locale === 'zh-CN' ? '支持原生推理参数（reasoning/thinking）' : 'Native reasoning/thinking parameters'}</span>
           </label>
+
+          {form.supportsReasoning ? (
+            <>
+              <label>
+                <span>{i18n.locale === 'zh-CN' ? '推理参数方言' : 'Reasoning Param Style'}</span>
+                <Dropdown
+                  value={form.reasoningParamStyle || selectedChannel.capabilities?.reasoning?.paramStyle || 'none'}
+                  ariaLabel={i18n.locale === 'zh-CN' ? '选择推理参数方言' : 'Select reasoning parameter style'}
+                  options={reasoningStyles.map((style) => ({ value: style, label: reasoningStyleLabel(style, i18n.locale) }))}
+                  onChange={(style) => setForm((prev) => ({ ...prev, reasoningParamStyle: style as LlmReasoningParamStyle }))}
+                />
+              </label>
+
+              <label>
+                <span>{i18n.locale === 'zh-CN' ? '思考强度映射' : 'Reasoning Effort Map'}</span>
+                <textarea
+                  value={form.reasoningEffortMapText}
+                  rows={4}
+                  placeholder={'{\n  "minimal": "high",\n  "low": "high",\n  "medium": "high",\n  "high": "high",\n  "xhigh": "max"\n}'}
+                  onChange={(e) => setForm((prev) => ({ ...prev, reasoningEffortMapText: e.target.value }))}
+                />
+                <small className="llm-field-hint">
+                  {i18n.locale === 'zh-CN'
+                    ? '可选。把统一思考档位映射成当前网关真正接受的值；default 会优先匹配 default，其次匹配 medium。'
+                    : 'Optional. Maps Peer Agent effort levels to values accepted by this gateway; default checks default first, then medium.'}
+                </small>
+              </label>
+            </>
+          ) : null}
 
           <label className="llm-vision-toggle">
             <input
@@ -466,15 +930,47 @@ export function LlmSettingsPanel({
             />
             <span>{i18n.locale === 'zh-CN' ? '启用 Prompt 缓存（仅当网关真正复用缓存时开启，否则纯增成本）' : 'Enable prompt caching (only if the gateway actually reuses cache; otherwise pure cost)'}</span>
           </label>
+
+          <label>
+            <span>{i18n.locale === 'zh-CN' ? '自定义 Header' : 'Custom Headers'}</span>
+            <textarea
+              value={form.customHeadersText}
+              rows={3}
+              placeholder={'X-Request-Source: peer-agent\nX-Gateway-Project: default'}
+              onChange={(e) => setForm((prev) => ({ ...prev, customHeadersText: e.target.value }))}
+            />
+            <small className="llm-field-hint">
+              {i18n.locale === 'zh-CN'
+                ? '每行一条 Header。Authorization、x-api-key、Content-Type 等鉴权与协议 Header 由渠道接管。'
+                : 'One header per line. Authorization, x-api-key, Content-Type, and protocol headers are managed by the channel.'}
+            </small>
+          </label>
           </>
           ) : null}
+
+          {formError ? <p className="llm-form-error">{friendlyTestError(formError, i18n.locale)}</p> : null}
 
           <div className="llm-form-actions">
             <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }}>
               {i18n.locale === 'zh-CN' ? '取消' : 'Cancel'}
             </button>
-            <button type="button" className="primary" onClick={handleSave} disabled={saving || Boolean(oauthBusyId) || (form.authMethod !== 'oauth_chatgpt' && !form.apiKey && !editingId)}>
-              {saving || oauthBusyId ? '...' : (form.authMethod === 'oauth_chatgpt' && !editingId ? (i18n.locale === 'zh-CN' ? '登录 ChatGPT' : 'Login with ChatGPT') : (i18n.locale === 'zh-CN' ? '保存' : 'Save'))}
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                if (formValidationError) {
+                  setFormError(formValidationError);
+                  return;
+                }
+                void handleSave();
+              }}
+              disabled={!canSubmit}
+            >
+              {saving || oauthBusyId
+                ? '...'
+                : (isOAuthMethod(form.authMethod) && !editingId
+                    ? (i18n.locale === 'zh-CN' ? `登录 ${form.authMethod === 'oauth_google' ? 'Google' : 'ChatGPT'}` : `Login with ${form.authMethod === 'oauth_google' ? 'Google' : 'ChatGPT'}`)
+                    : (i18n.locale === 'zh-CN' ? '保存' : 'Save'))}
             </button>
           </div>
         </div>

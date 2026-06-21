@@ -10,7 +10,7 @@ import type { ChatMode } from '../state/preferences';
  * - 初值 'chat'；切换会话时由调用方在 loadConversation effect 里通过 setMode(convMode) 恢复该会话自己的模式。
  * - changeMode 在本地 setState 后回写当前会话 meta（conversationsUpdateMode），无活跃会话时仅更新本地态。
  *   模式真值最终经 chatSend → IPC → mode-source 进入 System Context 的 L6_MODE_REMINDER 层
- *   （见 docs/proposals/0002-goal-mode.md）。
+ *   （见 Goal 模式设计）。
  *
  * 表达层只持有/回写这一个会话字段，不引入新的执行真值或发送路径。
  */

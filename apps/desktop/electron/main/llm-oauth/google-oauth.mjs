@@ -1,0 +1,233 @@
+// Google / Gemini OAuth (PKCE, browser mode).
+//
+// This uses a user-provided Google Cloud OAuth Desktop client. Tokens are
+// encrypted by llm-config-store as part of the provider record.
+
+import http from 'node:http';
+import { createHash, randomBytes } from 'node:crypto';
+
+async function openInBrowser(url) {
+  const { shell } = await import('electron');
+  await shell.openExternal(url);
+}
+
+const AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const CALLBACK_PORT = 1456;
+const CALLBACK_PATH = '/auth/google/callback';
+const REDIRECT_URI = `http://localhost:${CALLBACK_PORT}${CALLBACK_PATH}`;
+const SCOPE = 'openid email profile https://www.googleapis.com/auth/cloud-platform';
+
+function base64url(buf) {
+  return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function createPkce() {
+  const verifier = base64url(randomBytes(32));
+  const challenge = base64url(createHash('sha256').update(verifier).digest());
+  return { verifier, challenge };
+}
+
+function extractEmail(idToken) {
+  if (!idToken || typeof idToken !== 'string') return undefined;
+  const parts = idToken.split('.');
+  if (parts.length < 2) return undefined;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+    return payload.email || payload.sub || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function requireOAuthClient(config = {}) {
+  const clientId = String(config.clientId || '').trim();
+  const clientSecret = String(config.clientSecret || '').trim();
+  if (!clientId) throw new Error('oauth_google_client_id_required');
+  if (!clientSecret) throw new Error('oauth_google_client_secret_required');
+  return { clientId, clientSecret };
+}
+
+function toTokenSet(json) {
+  const expiresInMs = (Number(json.expires_in) || 3600) * 1000;
+  return {
+    provider: 'google',
+    access: json.access_token,
+    refresh: json.refresh_token,
+    expires: Date.now() + expiresInMs,
+    accountId: extractEmail(json.id_token),
+  };
+}
+
+async function exchangeCode({ code, verifier, clientId, clientSecret }) {
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      redirect_uri: REDIRECT_URI,
+      code_verifier: verifier,
+    }).toString(),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Google token exchange failed: HTTP ${res.status} ${text.slice(0, 200)}`);
+  }
+  return toTokenSet(await res.json());
+}
+
+export async function refreshGoogleAccessToken(tokens, oauthClient) {
+  if (!tokens?.refresh) throw new Error('No Google refresh token available');
+  const { clientId, clientSecret } = requireOAuthClient(oauthClient);
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: tokens.refresh,
+    }).toString(),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Google token refresh failed: HTTP ${res.status} ${text.slice(0, 200)}`);
+  }
+  const next = toTokenSet(await res.json());
+  return {
+    provider: 'google',
+    access: next.access,
+    refresh: next.refresh || tokens.refresh,
+    expires: next.expires,
+    accountId: next.accountId || tokens.accountId,
+  };
+}
+
+export async function ensureFreshGoogleTokens(tokens, oauthClient, { skewMs = 60_000 } = {}) {
+  if (!tokens?.access) throw new Error('Not logged in');
+  if (typeof tokens.expires === 'number' && tokens.expires - skewMs > Date.now()) {
+    return { tokens, refreshed: false };
+  }
+  const next = await refreshGoogleAccessToken(tokens, oauthClient);
+  return { tokens: next, refreshed: true };
+}
+
+const CALLBACK_HTML = (ok) => {
+  const accent = ok ? '#3E7A6B' : '#7A3E50';
+  const title = ok ? '登录成功' : '登录失败';
+  const desc = ok
+    ? 'Google 凭据已安全写入 Peer Agent，可以关闭此页面并返回应用。'
+    : 'Google 授权未完成，请关闭此页面并返回 Peer Agent 重试。';
+  const glyph = ok
+    ? '<path d="M5 13l4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>'
+    : '<path d="M7 7l10 10M17 7L7 17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>';
+  return (
+    `<!doctype html><html lang="zh"><head><meta charset="utf-8">` +
+    `<meta name="viewport" content="width=device-width, initial-scale=1">` +
+    `<title>Peer Agent</title>` +
+    `<style>*{margin:0;padding:0;box-sizing:border-box}` +
+    `body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#EDF1F6;` +
+    `font-family:"Inter",-apple-system,"PingFang SC","Noto Sans SC",system-ui,sans-serif;color:#1A1D21}` +
+    `.card{width:min(420px,calc(100vw - 48px));background:#F7F9FC;border:1px solid #DCE0E8;` +
+    `border-radius:16px;padding:40px 36px;text-align:center;box-shadow:0 2px 12px rgba(26,29,33,0.06)}` +
+    `.mark{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;` +
+    `margin:0 auto 24px;color:${accent};background:${ok ? 'rgba(62,122,107,0.10)' : 'rgba(122,62,80,0.10)'}}` +
+    `.mark svg{width:30px;height:30px}h1{font-size:20px;font-weight:600;margin-bottom:10px}` +
+    `p{font-size:14px;line-height:1.6;color:#525660}.brand{margin-top:28px;font-size:12px;letter-spacing:.08em;color:#878B95;text-transform:uppercase}` +
+    `</style></head><body><main class="card">` +
+    `<div class="mark"><svg viewBox="0 0 24 24" aria-hidden="true">${glyph}</svg></div>` +
+    `<h1>${title}</h1><p>${desc}</p><div class="brand">Peer Agent</div>` +
+    `</main></body></html>`
+  );
+};
+
+export function startGoogleBrowserLogin(oauthClient) {
+  const { clientId, clientSecret } = requireOAuthClient(oauthClient);
+  const { verifier, challenge } = createPkce();
+  const state = base64url(randomBytes(16));
+
+  let server = null;
+  let settled = false;
+  let resolveFn;
+  let rejectFn;
+
+  const promise = new Promise((resolve, reject) => {
+    resolveFn = resolve;
+    rejectFn = reject;
+  });
+
+  function cleanup() {
+    if (server) {
+      try { server.close(); } catch {}
+      server = null;
+    }
+  }
+
+  function finish(fn, value) {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    fn(value);
+  }
+
+  server = http.createServer(async (req, res) => {
+    const reqUrl = new URL(req.url, `http://localhost:${CALLBACK_PORT}`);
+    if (reqUrl.pathname !== CALLBACK_PATH) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    const code = reqUrl.searchParams.get('code');
+    const returnedState = reqUrl.searchParams.get('state');
+    const error = reqUrl.searchParams.get('error');
+
+    if (error) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(CALLBACK_HTML(false));
+      finish(rejectFn, new Error(`Google OAuth error: ${error}`));
+      return;
+    }
+    if (!code || returnedState !== state) {
+      res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(CALLBACK_HTML(false));
+      finish(rejectFn, new Error('Google OAuth callback missing code or state mismatch'));
+      return;
+    }
+
+    try {
+      const tokens = await exchangeCode({ code, verifier, clientId, clientSecret });
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(CALLBACK_HTML(true));
+      finish(resolveFn, tokens);
+    } catch (err) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(CALLBACK_HTML(false));
+      finish(rejectFn, err);
+    }
+  });
+
+  server.on('error', (err) => finish(rejectFn, err));
+
+  server.listen(CALLBACK_PORT, '127.0.0.1', () => {
+    const authorizeUrl = new URL(AUTHORIZE_URL);
+    authorizeUrl.searchParams.set('client_id', clientId);
+    authorizeUrl.searchParams.set('response_type', 'code');
+    authorizeUrl.searchParams.set('redirect_uri', REDIRECT_URI);
+    authorizeUrl.searchParams.set('scope', SCOPE);
+    authorizeUrl.searchParams.set('code_challenge', challenge);
+    authorizeUrl.searchParams.set('code_challenge_method', 'S256');
+    authorizeUrl.searchParams.set('state', state);
+    authorizeUrl.searchParams.set('access_type', 'offline');
+    authorizeUrl.searchParams.set('prompt', 'consent');
+    openInBrowser(authorizeUrl.toString()).catch((err) => finish(rejectFn, err));
+  });
+
+  function cancel() {
+    finish(rejectFn, new Error('Google OAuth login cancelled'));
+  }
+
+  return { promise, cancel };
+}

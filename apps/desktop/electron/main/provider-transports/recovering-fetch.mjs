@@ -1,5 +1,10 @@
 // Provider transport recovery: keep the same provider/model request, but retry
 // transient connection failures before surfacing a terminal stream error.
+//
+// Channel selection: when a proxy is detected (corporate / system proxy), the
+// Electron net.fetch transport is preferred first because it honors the OS proxy
+// configuration, with Node fetch kept as fallback. Without a proxy we keep the
+// original order (Node fetch first, Electron net.fetch as fallback).
 
 const CONNECTION_FAILURE_PATTERNS = [
   /fetch failed/i,
@@ -14,16 +19,11 @@ const CONNECTION_FAILURE_PATTERNS = [
 ];
 
 export const DEFAULT_CONNECTION_RETRY_DELAYS_MS = [
-  10_000,
-  10_000,
-  10_000,
-  10_000,
-  10_000,
-  30_000,
-  30_000,
-  30_000,
-  30_000,
-  30_000,
+  5_000,
+  5_000,
+  5_000,
+  5_000,
+  5_000,
 ];
 
 function errorDetails(error) {
@@ -76,6 +76,57 @@ async function resolveElectronNetFetch() {
   }
 }
 
+function readEnvProxy(url, env) {
+  let protocol = 'https:';
+  try {
+    protocol = new URL(url).protocol;
+  } catch {
+    protocol = 'https:';
+  }
+  const names = protocol === 'http:'
+    ? ['HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy']
+    : ['HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy'];
+  for (const name of names) {
+    const value = env?.[name];
+    if (value && String(value).trim()) return true;
+  }
+  return false;
+}
+
+async function resolveSystemProxy(url) {
+  try {
+    const electron = await import('electron');
+    const session = electron?.session || electron?.default?.session;
+    const resolver = session?.defaultSession?.resolveProxy;
+    if (typeof resolver !== 'function') return false;
+    const result = await session.defaultSession.resolveProxy(url);
+    if (!result || typeof result !== 'string') return false;
+    return !/^DIRECT/i.test(result.trim());
+  } catch {
+    return false;
+  }
+}
+
+// Proxy detection seam: environment variables first, system proxy (Electron
+// session.resolveProxy) as fallback. Returns false on any error so we safely
+// fall back to the original Node-fetch-first behavior.
+export async function defaultDetectProxy({
+  url,
+  env = (typeof process !== 'undefined' ? process.env : {}),
+  resolveSystemProxyImpl = resolveSystemProxy,
+} = {}) {
+  if (readEnvProxy(url, env)) return true;
+  try {
+    return Boolean(await resolveSystemProxyImpl(url));
+  } catch {
+    return false;
+  }
+}
+
+function channelFailLabel(label) {
+  return label === 'electron-net-fetch' ? 'electron_net_fetch_failed' : 'node_fetch_failed';
+}
+
 function emitConnectionRecovery(webContents, payload) {
   webContents?.send?.('chat:stream:connection-recovery', payload);
 }
@@ -89,76 +140,102 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
   electronFetchImpl = null,
   retryDelaysMs = DEFAULT_CONNECTION_RETRY_DELAYS_MS,
   waitImpl = sleep,
+  detectProxy = defaultDetectProxy,
 } = {}) {
   const maxRetries = retryDelaysMs.length;
   let lastError = null;
 
+  let proxyDetected = false;
+  try {
+    proxyDetected = Boolean(await detectProxy({ url, signal: init?.signal }));
+  } catch {
+    proxyDetected = false;
+  }
+
+  const nodeChannel = {
+    label: 'node-fetch',
+    resolve: async () => fetchImpl,
+  };
+  const electronChannel = {
+    label: 'electron-net-fetch',
+    resolve: async () => electronFetchImpl || await resolveElectronNetFetch(),
+  };
+  const [primaryChannel, secondaryChannel] = proxyDetected
+    ? [electronChannel, nodeChannel]
+    : [nodeChannel, electronChannel];
+
   for (let round = 0; round <= maxRetries; round += 1) {
     if (init?.signal?.aborted) throw createAbortError();
-    try {
-      const response = await fetchImpl(url, init);
-      if (round > 0) {
-        emitConnectionRecovery(webContents, {
-          streamId,
-          provider,
-          model,
-          status: 'recovered',
-          connection: 'node-fetch',
-          attempt: round,
-          maxRetries,
-          reason: lastError ? describeConnectionFailure(lastError) : null,
-        });
-      }
-      return response;
-    } catch (error) {
-      if (error?.name === 'AbortError') throw error;
-      if (!isRecoverableConnectionFailure(error)) throw error;
-      lastError = error;
 
-      const platformFetch = electronFetchImpl || await resolveElectronNetFetch();
-      if (platformFetch) {
-        try {
-          const response = await platformFetch(url, init);
+    let primaryError = null;
+    const primaryImpl = await primaryChannel.resolve();
+    if (primaryImpl) {
+      try {
+        const response = await primaryImpl(url, init);
+        if (round > 0) {
           emitConnectionRecovery(webContents, {
             streamId,
             provider,
             model,
             status: 'recovered',
-            fromConnection: 'node-fetch',
-            toConnection: 'electron-net-fetch',
-            connection: 'electron-net-fetch',
+            connection: primaryChannel.label,
             attempt: round,
             maxRetries,
-            reason: describeConnectionFailure(error),
+            reason: lastError ? describeConnectionFailure(lastError) : null,
           });
-          return response;
-        } catch (fallbackError) {
-          if (fallbackError?.name === 'AbortError') throw fallbackError;
-          if (!isRecoverableConnectionFailure(fallbackError)) {
-            const wrapped = new Error(
-              `${describeConnectionFailure(error)}; electron_net_fetch_failed: ${describeConnectionFailure(fallbackError)}`
-            );
-            wrapped.cause = error;
-            throw wrapped;
-          }
-          lastError = fallbackError;
         }
+        return response;
+      } catch (error) {
+        if (error?.name === 'AbortError') throw error;
+        if (!isRecoverableConnectionFailure(error)) throw error;
+        primaryError = error;
+        lastError = error;
       }
-
-      if (round >= maxRetries) break;
-      const delayMs = retryDelaysMs[round];
-      emitConnectionRecovery(webContents, {
-        streamId,
-        provider,
-        model,
-        status: 'retrying',
-        attempt: round + 1,
-        maxRetries,
-        delayMs,
-        reason: describeConnectionFailure(lastError),
-      });
-      await waitImpl(delayMs, init?.signal);
     }
+
+    const secondaryImpl = await secondaryChannel.resolve();
+    if (secondaryImpl) {
+      try {
+        const response = await secondaryImpl(url, init);
+        emitConnectionRecovery(webContents, {
+          streamId,
+          provider,
+          model,
+          status: 'recovered',
+          fromConnection: primaryChannel.label,
+          toConnection: secondaryChannel.label,
+          connection: secondaryChannel.label,
+          attempt: round,
+          maxRetries,
+          reason: describeConnectionFailure(primaryError || lastError),
+        });
+        return response;
+      } catch (fallbackError) {
+        if (fallbackError?.name === 'AbortError') throw fallbackError;
+        if (!isRecoverableConnectionFailure(fallbackError)) {
+          const wrapped = new Error(
+            `${describeConnectionFailure(primaryError || fallbackError)}; ${channelFailLabel(secondaryChannel.label)}: ${describeConnectionFailure(fallbackError)}`
+          );
+          wrapped.cause = primaryError || fallbackError;
+          throw wrapped;
+        }
+        lastError = fallbackError;
+      }
+    }
+
+    if (round >= maxRetries) break;
+    const delayMs = retryDelaysMs[round];
+    emitConnectionRecovery(webContents, {
+      streamId,
+      provider,
+      model,
+      status: 'retrying',
+      attempt: round + 1,
+      maxRetries,
+      delayMs,
+      reason: describeConnectionFailure(lastError),
+    });
+    await waitImpl(delayMs, init?.signal);
   }
 
   throw lastError;

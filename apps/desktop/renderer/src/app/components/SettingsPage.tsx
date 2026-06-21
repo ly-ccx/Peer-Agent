@@ -26,12 +26,14 @@ export function SettingsPage({
   i18n,
   onBack,
   onLocaleChanged,
+  onReplyLanguageChanged,
   onSystemInstructionsChanged,
 }: {
   readonly availableLocales: readonly LocaleCode[];
   readonly i18n: I18nRuntime;
   readonly onBack: () => void;
   readonly onLocaleChanged: () => Promise<void> | void;
+  readonly onReplyLanguageChanged?: (replyLanguage: string) => void;
   readonly onSystemInstructionsChanged?: (value: string) => void;
 }) {
   const [section, setSection] = useState<SettingsSection>('general');
@@ -82,6 +84,7 @@ export function SettingsPage({
             availableLocales={availableLocales}
             i18n={i18n}
             onLocaleChanged={onLocaleChanged}
+            onReplyLanguageChanged={onReplyLanguageChanged}
           />
         ) : section === 'model' ? (
           <LlmSettingsPanel i18n={i18n} />

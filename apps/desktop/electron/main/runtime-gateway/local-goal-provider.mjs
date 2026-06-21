@@ -2,7 +2,7 @@ import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 
 /**
- * 本地 Goal 能力 Provider —— 见 docs/proposals/0002-goal-mode.md（运行时自动回写）。
+ * 本地 Goal 能力 Provider —— 见 Goal 模式设计（运行时自动回写）。
  *
  * 设计要点（与 AGENTS.md 非协商运行时链一致）：
  * - goal 模式"先规划 → 批准 → 执行"时，agent 运行时在完成某子任务后，

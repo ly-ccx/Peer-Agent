@@ -14,6 +14,7 @@ export function normalizeStreamSegment(segment: ContentSegment): ContentSegment 
     return {
       type: 'tool-call',
       tool: segment.tool,
+      displayName: segment.displayName,
       args: segment.args || {},
       result: segment.result,
       synthetic: segment.synthetic,
@@ -100,9 +101,9 @@ export function groupSegments(segments: ContentSegment[]): SegmentGroup[] {
     } else {
       const last = groups[groups.length - 1];
       if (last && last.type === 'tool-call-group') {
-        last.calls.push({ tool: seg.tool!, args: seg.args || {}, result: seg.result, synthetic: seg.synthetic });
+        last.calls.push({ tool: seg.tool!, displayName: seg.displayName, args: seg.args || {}, result: seg.result, synthetic: seg.synthetic });
       } else {
-        groups.push({ type: 'tool-call-group', calls: [{ tool: seg.tool!, args: seg.args || {}, result: seg.result, synthetic: seg.synthetic }] });
+        groups.push({ type: 'tool-call-group', calls: [{ tool: seg.tool!, displayName: seg.displayName, args: seg.args || {}, result: seg.result, synthetic: seg.synthetic }] });
       }
     }
   }
@@ -120,7 +121,7 @@ export function migrateToSegments(content: string, toolCalls?: ToolCallLegacy[])
   const segs: ContentSegment[] = [];
   if (toolCalls?.length) {
     for (const tc of toolCalls) {
-      segs.push({ type: 'tool-call', tool: tc.tool, args: tc.args, result: tc.result });
+      segs.push({ type: 'tool-call', tool: tc.tool, displayName: tc.displayName, args: tc.args, result: tc.result });
     }
   }
   if (content) segs.push({ type: 'text', content });

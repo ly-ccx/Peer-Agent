@@ -28,7 +28,7 @@ const MICROCOMPACTION_CONFIG = {
 
 // 摘要专用 system prompt（对标 CC AGENT_CONTEXT_SUMMARY_SYSTEM_PROMPT）
 const SUMMARY_SYSTEM_PROMPT =
-  '你是对话摘要专家。请将以下对话历史压缩为详细摘要，保留关键信息：用户意图、重要决策、技术概念、文件变更、错误修复、待办事项。输出纯文本，不要用 markdown。';
+  '你是对话摘要专家。请将以下对话历史压缩为详细摘要，保留关键信息：用户意图、重要决策、技术概念、文件变更、错误修复、待办事项。特别要详细记录用户的具体执行动作与操作步骤——用户要求做了什么、实际改动了哪些文件、命令/操作执行到哪一步、当前停在何处——因为原文已全量压缩、不再保留，连续性完全依赖本摘要承载。输出纯文本，不要用 markdown。';
 
 // 9 章节 compaction prompt（对标 CC BASE_COMPACT_PROMPT）
 const COMPACT_PROMPT = `Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
@@ -52,7 +52,7 @@ Your summary should include the following sections:
 5. Problem Solving: Document problems solved and any ongoing troubleshooting efforts.
 6. All user messages: List ALL user messages that are not tool results.
 7. Pending Tasks: Outline any pending tasks that you have explicitly been asked to work on.
-8. Current Work: Describe in detail precisely what was being worked on immediately before this summary request.
+8. Current Work: Describe in detail precisely what was being worked on immediately before this summary request. CRITICAL — record the user's concrete execution actions and operation steps in detail: what the user asked to do, which files were actually changed, what commands/operations were run and to which step they progressed, and exactly where things currently stand. The original conversation is fully compacted and NOT retained, so continuity depends entirely on this summary capturing those execution details.
 9. Optional Next Step: List the next step related to the most recent work. Include direct quotes from the most recent conversation.
 
 CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
@@ -150,8 +150,14 @@ function estimateTokensFromMessages(messages) {
               : JSON.stringify(block.content ?? '').length;
         } else if (
           block.type === 'image' ||
+          block.type === 'image_url' ||
+          block.type === 'input_image' ||
           block.type === 'document'
         ) {
+          // 图片/文档以固定开销计。注意：未归一化前图片块的 type 可能是 'image_url'
+          // （renderer apiMessageMapping）或 'input_image'（OpenAI responses），其内部
+          // 携带的 base64 data URL 极大；若漏判会被 JSON.stringify 整段计入，导致几 MB
+          // 的图片被估成上百万 token，进而每轮都误触发压缩。
           chars += 2000 * COMPACTION_CONFIG.charsPerToken; // fixed 2000 tokens
         } else {
           chars += JSON.stringify(block).length;
@@ -421,13 +427,10 @@ function shouldCompact(estimatedTokens, contextWindow) {
 
 function shouldRunCompaction({ force, estimatedTokens, contextWindow, messages }) {
   if (force) {
-    // 全量但保当前轮：只要当前轮之前存在更早消息（old 非空）就值得压缩，
-    // 避免「只有当前轮」时产生空压缩。当前轮起点 = 最后一个 user 下标。
+    // 真·全量压缩（见 真·全量压缩设计）：只要存在非 system 消息即值得压缩，
+    // 全部进 old 摘要、keep 为空。避免空对话上强行压缩。
     const convMsgs = messages.filter((m) => m.role !== 'system');
-    const lastUserIdx = findCurrentTurnStart(convMsgs);
-    // 无 user 时回退口径与 splitForCompaction 对齐：保留最后 1 条，其余可摘要。
-    const cutIndex = lastUserIdx < 0 ? Math.max(0, convMsgs.length - 1) : lastUserIdx;
-    return cutIndex > 0;
+    return convMsgs.length > 0;
   }
   return shouldCompact(estimatedTokens, contextWindow);
 }
@@ -458,8 +461,8 @@ function expandKeepForToolContinuity({ keep, old }) {
 }
 
 // 定位「当前轮」起点：最后一个 user 消息的下标。
-// 当前轮 = 最近一次 user 提问 + 其后的 assistant / tool 消息。
-// 用语义边界界定「当前轮」，而非保留固定条数（见 docs/proposals/0010）。
+// 真·全量压缩下（见 真·全量压缩设计），切分本身不再依赖此函数选取 keep；
+// 仅保留以兜底回溯/可读性，并供 shouldRunCompaction 的 force 分支判断「是否有可摘要的消息」。
 // 返回 -1 表示无 user 消息（异常路径，由调用方回退处理）。
 function findCurrentTurnStart(convMsgs) {
   for (let i = convMsgs.length - 1; i >= 0; i--) {
@@ -472,15 +475,16 @@ function splitForCompaction(messages) {
   const systemMsgs = messages.filter((m) => m.role === 'system');
   const convMsgs = messages.filter((m) => m.role !== 'system');
 
-  // 全量但保当前轮：旧消息全部摘要，仅保留触发压缩时正在进行的当前轮原文。
-  // ⚠️ 不能用 slice(-keepRecentCount) / slice(-0)：slice(-0) ≡ slice(0) = 全部，
-  //    会把 keep 反转成全保留、old 反转成空，压缩失效。必须用显式索引切分。
-  const lastUserIdx = findCurrentTurnStart(convMsgs);
+  // 真·全量压缩（见 真·全量压缩设计）：旧消息全部摘要，连当前轮原文也不保留。
+  // cutIndex = convMsgs.length → keep = slice(len) = []、old = slice(0, len) = 全部。
+  // ⚠️ 显式用 length 而非负数：slice(-0) ≡ slice(0) = 全部，会把切分反转、压缩失效。
+  //    用 length 切分恒为「keep 空 / old 全部」，无 slice(-0) 歧义。
+  const cutIndex = convMsgs.length;
 
-  // 无 user 消息（异常）→ 回退为保留最后 1 条，其余进 old。
-  // 当前轮即首条（lastUserIdx <= 0）→ 无更早消息可摘要，old 为空、keep 全保留（不压缩）。
-  const cutIndex = lastUserIdx < 0 ? Math.max(0, convMsgs.length - 1) : lastUserIdx;
-
+  // 唯一保留：末尾若是悬空工具对（assistant tool_call 尚未闭合 / keep 首条为孤立
+  // tool_result），由 expandKeepForToolContinuity 兜底拉入最小未闭合工具尾，
+  // 避免下一轮 provider 因 tool_call/tool_result 配对缺失报错。这是协议正确性兜底，
+  // 非「保留对话」；正常路径 keep 为空、keptMessageCount=0。
   const split = expandKeepForToolContinuity({
     keep: convMsgs.slice(cutIndex),
     old: convMsgs.slice(0, cutIndex),
@@ -702,7 +706,7 @@ function summarizeOldMessages(oldMessages) {
 
       parts.push(`\n### Turn ${turnCounter}`);
       parts.push(
-        `**User**: ${userContent.slice(0, 300)}${userContent.length > 300 ? '...' : ''}`,
+        `**User**: ${userContent.slice(0, 800)}${userContent.length > 800 ? '...' : ''}`,
       );
 
       // Extract tool calls
@@ -723,7 +727,7 @@ function summarizeOldMessages(oldMessages) {
               tc.function?.arguments || tc.input || '';
             const argsStr =
               typeof args === 'string' ? args : JSON.stringify(args);
-            return `${name}(${argsStr.slice(0, 100)}${argsStr.length > 100 ? '...' : ''})`;
+            return `${name}(${argsStr.slice(0, 300)}${argsStr.length > 300 ? '...' : ''})`;
           })
           .join(', ');
         parts.push(`**Assistant**: Executed ${tools}`);
@@ -742,7 +746,7 @@ function summarizeOldMessages(oldMessages) {
 
       if (textContent && textContent.length > 5) {
         parts.push(
-          `  Response: ${textContent.slice(0, 200)}${textContent.length > 200 ? '...' : ''}`,
+          `  Response: ${textContent.slice(0, 500)}${textContent.length > 500 ? '...' : ''}`,
         );
       }
 
@@ -758,7 +762,7 @@ function summarizeOldMessages(oldMessages) {
         : JSON.stringify(currentUser.content);
     parts.push(`\n### Turn ${turnCounter + 1}`);
     parts.push(
-      `**User**: ${content.slice(0, 300)}${content.length > 300 ? '...' : ''}`,
+      `**User**: ${content.slice(0, 800)}${content.length > 800 ? '...' : ''}`,
     );
   }
 

@@ -1,5 +1,5 @@
 /**
- * Goal 模式协议类型 —— 见 docs/proposals/0002-goal-mode.md。
+ * Goal 模式协议类型 —— 见 Goal 模式设计。
  *
  * 设计要点（与提案一致）：
  * - 计划是持久化的 Evidence/artifact，采用「先规划 → 批准 → 执行」流程。

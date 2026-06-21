@@ -5,6 +5,7 @@ import { createLocalHealthProvider } from './local-health-provider.mjs';
 import { createLocalInteractionProvider } from './local-interaction-provider.mjs';
 import { createLocalMcpProvider } from './local-mcp-provider.mjs';
 import { createLocalShellProvider } from './local-shell-provider.mjs';
+import { createLocalWebProvider } from './local-web-provider.mjs';
 import { createFailedClientToolResult, createPermissionGrant } from './tool-result-factory.mjs';
 
 export function createLocalToolHost({
@@ -18,6 +19,7 @@ export function createLocalToolHost({
   shellProvider = createLocalShellProvider({ workspaceRoot, userDataPath }),
   goalProvider = createLocalGoalProvider(),
   interactionProvider = createLocalInteractionProvider(),
+  webProvider = createLocalWebProvider({ userDataPath }),
   providers,
   extraProviders = [],
 }) {
@@ -29,6 +31,7 @@ export function createLocalToolHost({
       shellProvider,
       goalProvider,
       interactionProvider,
+      webProvider,
       ...(mcpProvider ? [mcpProvider] : []),
       ...extraProviders,
     ],

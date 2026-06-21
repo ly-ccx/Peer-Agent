@@ -77,7 +77,22 @@
   font-size: 0.76rem;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.llm-provider-chip {
+  max-width: 100%;
+  padding: 2px 7px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-xs);
+  background: var(--chrome-sunken);
+  color: var(--graphite-soft);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+.llm-provider-chip.mono {
+  font-family: var(--font-mono);
 }
 .llm-badge-default {
   background: var(--azure-trace);
@@ -105,6 +120,9 @@
   display: flex;
   gap: var(--space-1);
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 220px;
 }
 .llm-provider-actions button {
   background: transparent;
@@ -245,10 +263,56 @@
   outline: none;
   border-color: var(--graphite-base);
 }
+.llm-form > label .pa-dropdown {
+  width: 100%;
+  min-width: 0;
+}
+.llm-form textarea {
+  min-height: 84px;
+  resize: vertical;
+  background: var(--chrome-canvas);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-sm);
+  color: var(--graphite-base);
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  font-family: var(--font-mono);
+}
+.llm-form textarea:focus {
+  outline: none;
+  border-color: var(--graphite-base);
+}
+.llm-field-hint {
+  color: var(--graphite-mute);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+.llm-token-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+.llm-token-row label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.llm-token-row label > span {
+  color: var(--graphite-soft);
+  font-size: 0.76rem;
+  font-weight: 500;
+}
+.llm-form-error {
+  margin: 0;
+  color: var(--state-danger);
+  font-size: 0.78rem;
+}
 
 .llm-radio-group {
   display: flex;
   gap: var(--space-5);
+  flex-wrap: wrap;
 }
 .llm-radio-group label {
   display: flex;
@@ -476,4 +540,24 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .llm-settings-panel {
+    padding-inline: var(--space-4);
+  }
+  .llm-provider-card {
+    flex-direction: column;
+  }
+  .llm-provider-actions {
+    justify-content: flex-start;
+    max-width: none;
+    width: 100%;
+  }
+  .llm-price-row {
+    grid-template-columns: 1fr;
+  }
+  .llm-token-row {
+    grid-template-columns: 1fr;
+  }
 }

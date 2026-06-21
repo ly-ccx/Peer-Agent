@@ -14,6 +14,7 @@ function executorCapabilityId(tool) {
 
 function sourceForCapability(capabilityId) {
   if (capabilityId === 'local.shell.exec') return 'shell';
+  if (capabilityId?.startsWith('local.web.')) return 'web';
   if (capabilityId?.startsWith('local.mcp.')) return 'mcp';
   if (capabilityId?.startsWith('local.skill.')) return 'plugin';
   return 'native';
@@ -31,6 +32,8 @@ function riskForTool(tool) {
   if (policy.kind === 'goal-create' || policy.kind === 'goal-update' || policy.kind === 'goal-read') {
     return 'L0_inert';
   }
+  // web-fetch: 联网读取外部网页，按 ADR 38 归为 L3_external_write（需联网授权）。
+  if (policy.kind === 'web-fetch') return 'L3_external_write';
   return 'L2_local_write';
 }
 
@@ -44,6 +47,10 @@ function dataLevelForTool(tool) {
 function evidencePolicyForTool(tool) {
   const policy = tool.permissionPolicy ?? {};
   if (policy.kind === 'shell') {
+    return { returnMode: 'artifact_ref', maxChars: 4_000, redactSensitive: true };
+  }
+  // web-fetch: 网页正文落本地 artifact，仅回灌摘要+ref（ADR 38）。
+  if (policy.kind === 'web-fetch') {
     return { returnMode: 'artifact_ref', maxChars: 4_000, redactSensitive: true };
   }
   if (policy.kind === 'file-write') {

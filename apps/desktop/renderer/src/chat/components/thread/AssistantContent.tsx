@@ -193,7 +193,7 @@ function ToolCallCard({ tc }: { readonly tc: ToolCallLegacy }) {
   const interaction = useContext(InteractionContext);
 
   // request_user_input：渲染为「问题 + 可点击选项 + 等待你输入」的交互卡，
-  // 而不是裸露 JSON。见 docs/proposals/0004-goal-mode-runtime-gate.md。
+  // 而不是裸露 JSON。见 Goal 模式运行时闸门设计。
   const interactionView = parseInteractionToolView(tc.tool, tc.result);
   if (interactionView) {
     const waiting = !(interaction?.isStreaming ?? false) && !answered;
@@ -239,7 +239,10 @@ function ToolCallCard({ tc }: { readonly tc: ToolCallLegacy }) {
         ? `edit ${tc.args.path}`
         : tc.tool === 'write_file'
           ? `write ${tc.args.path}`
-          : tc.tool;
+          // displayName 是后端 Runtime Projection 注入的展示文案（MCP 工具为
+          // 「服务名: 工具名」）。其它工具优先用它做标题，缺省时才回退到裸 capability 名，
+          // 避免出现 mcp__server__tool 这类裸名（即「标题不见了」的现象）。
+          : (tc.displayName ?? tc.tool);
   const isSynthetic = tc.synthetic === true;
   const isDone = tc.result !== undefined && !isSynthetic;
 

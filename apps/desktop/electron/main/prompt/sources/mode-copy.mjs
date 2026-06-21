@@ -1,6 +1,6 @@
 // 单一 mode 文案源（single source of truth）。
 // 历史上 mode-source.mjs 与 runtime-reminder-source.mjs 各自维护了一份重复的 MODE_COPY，
-// 新增模式文案时两处都要改，存在「改一处漏一处」的漂移风险（详见 docs/proposals/0002-goal-mode.md §5）。
+// 新增模式文案时两处都要改，存在「改一处漏一处」的漂移风险（详见 Goal 模式设计 §5）。
 // 现已收敛到本模块：两个 source 均从此处 import，新增/修改模式文案只改这一处。
 export const MODE_COPY = {
   chat: [

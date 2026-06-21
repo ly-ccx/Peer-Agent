@@ -12,7 +12,7 @@ import path from 'node:path';
 import { pathOf } from './data-store.mjs';
 
 /**
- * Goal 计划持久化 store —— 见 docs/proposals/0002-goal-mode.md。
+ * Goal 计划持久化 store —— 见 Goal 模式设计。
  *
  * 设计要点（与提案 §3/§4/§6 一致）：
  * - 计划是持久化的 Evidence/artifact，目录型多记录：index.jsonl（轻量元信息，
@@ -117,7 +117,7 @@ export function aggregateProgress(tasks) {
  *    说明执行已经开始（典型场景：用户在对话里直接触发执行，跳过了面板审批按钮），
  *    此时把计划推进到 'executing'，从而让审批按钮（canDecide=awaiting_approval）正确消失。
  *
- * 2. 自动收尾（见 docs/proposals/0008-goal-plan-auto-finalize.md）：当计划已 'executing'
+ * 2. 自动收尾（见 Goal 计划自动收尾设计）：当计划已 'executing'
  *    且存在叶子、且所有叶子均为终态（completed / failed）时，把顶层推进到终态——
  *    含任一 failed → 'failed'，否则全 completed → 'completed'。这修复了「子任务 100%
  *    完成但顶层仍显示 executing」的现象。waiting_user（阻塞）叶子不算终态，存在它时不收尾；
@@ -499,6 +499,46 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     return listPlans();
   }
 
+  /**
+   * 级联删除：硬删除某个会话名下的全部计划（见 ADR 34）。
+   *
+   * 用于「删除会话」时联动清理其计划，避免孤儿计划文件/索引行。
+   * 设计约束：
+   * - conversationId 归一化为 null（空/未传）时直接 no-op，绝不按 `null === null`
+   *   去匹配——否则会误删那些「未关联任何会话」的计划。
+   * - 基于 index 行的 conversationId 即可筛选，无需逐个读 plan 文件。
+   * - 原子重写 index（一次写盘），再逐个 unlink 计划文件；删除若干计划只广播一次
+   *   onChange，复用既有 Seam（renderer 仍走 goalPlans:changed 刷新）。
+   *
+   * @param {string|null|undefined} conversationId 目标会话 id
+   * @returns {Array} 删除后剩余的计划元信息列表（listPlans 形态）
+   */
+  function deletePlanByConversation(conversationId) {
+    const normalizedConversationId = normalizeConversationId(conversationId);
+    // 空会话 id 是 no-op：不删除任何计划（尤其不能误删未关联会话的计划）。
+    if (normalizedConversationId === null) return listPlans();
+
+    const index = readIndex();
+    const removed = index.filter(
+      (m) => normalizeConversationId(m.conversationId) === normalizedConversationId,
+    );
+    if (removed.length === 0) return listPlans();
+
+    const remaining = index.filter(
+      (m) => normalizeConversationId(m.conversationId) !== normalizedConversationId,
+    );
+    // 先原子重写 index（一次写盘），再删除各计划文件。
+    writeJsonl(indexFile, remaining);
+    for (const meta of removed) {
+      try {
+        if (existsSync(planFile(meta.planId))) unlinkSync(planFile(meta.planId));
+      } catch {}
+    }
+    // 批量删除只广播一次，避免抖动；planId 传 null 表示非单一计划变更。
+    notifyChanged('delete', null);
+    return listPlans();
+  }
+
   return {
     listPlans,
     listPlansByConversation,
@@ -511,5 +551,6 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     setPlanStatus,
     recordTaskEvidence,
     deletePlan,
+    deletePlanByConversation,
   };
 }

@@ -1,7 +1,7 @@
 import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 
 /**
- * 本地 Interaction 能力 Provider —— 见 docs/proposals/0003-request-user-input.md。
+ * 本地 Interaction 能力 Provider —— 见 request_user_input 设计。
  *
  * 设计要点（与 AGENTS.md 非协商运行时链一致）：
  * - 这是一个「无副作用」的本地能力：它不读写文件、不执行命令，只把 agent

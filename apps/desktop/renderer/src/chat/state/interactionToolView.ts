@@ -1,5 +1,5 @@
 /**
- * request_user_input 工具结果的「可交互视图」投影 —— 见 docs/proposals/0004-goal-mode-runtime-gate.md。
+ * request_user_input 工具结果的「可交互视图」投影 —— 见 Goal 模式运行时闸门设计。
  *
  * 表达层职责：把主进程返回的 factual tool result（JSON 字符串）规范化为一个只读视图，
  * 供 UI 渲染「问题 + 可点击选项 + 等待你输入」。它不持有权限/终止真相——那由主进程的

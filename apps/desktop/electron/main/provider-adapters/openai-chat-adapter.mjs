@@ -47,6 +47,14 @@ function extractOpenAIStreamError(parsed) {
   };
 }
 
+function extractCachedPromptTokens(usage) {
+  return usage?.prompt_tokens_details?.cached_tokens
+    ?? usage?.prompt_cache_hit_tokens
+    ?? usage?.prompt_cache_hit
+    ?? usage?.input_tokens_details?.cached_tokens
+    ?? 0;
+}
+
 function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = null) {
   const trimmed = line.trim();
   if (!trimmed) return;
@@ -98,7 +106,7 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
     }
     if (parsed.usage) {
       const u = parsed.usage;
-      const cachedTokens = u.prompt_tokens_details?.cached_tokens ?? 0;
+      const cachedTokens = extractCachedPromptTokens(u);
       state.usage = {
         inputTokens: u.prompt_tokens ?? 0,
         outputTokens: u.completion_tokens ?? 0,
@@ -144,22 +152,32 @@ async function consumeOpenAIStream(res, webContents, streamId, trace = null) {
 export async function sendOpenAIChatStream({
   baseUrl,
   apiKey,
+  endpoint,
+  headers,
   model,
   messages,
   tools,
   effort,
   supportsReasoning,
+  reasoningParamStyle = 'openai-effort',
+  promptCaching = false,
+  maxOutputTokens,
+  reasoningEffortMap,
   signal,
   webContents,
   streamId,
 }) {
-  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+  const url = endpoint || `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
   const body = encodeOpenAIChatRequest({
     model,
     messages,
     tools,
     effort,
     supportsReasoning,
+    reasoningParamStyle,
+    promptCaching,
+    maxOutputTokens,
+    reasoningEffortMap,
   });
   const trace = createProviderStreamTrace({
     provider: 'openai',
@@ -173,7 +191,7 @@ export async function sendOpenAIChatStream({
 
   const res = await fetchWithConnectionRecovery(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    headers: headers || { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify(body),
     signal,
   }, {

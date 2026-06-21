@@ -16,6 +16,14 @@ import { fetchWithConnectionRecovery } from '../provider-transports/recovering-f
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
 import { parseSseDataPayload } from './sse-line.mjs';
 
+function extractCachedInputTokens(usage) {
+  return usage?.input_tokens_details?.cached_tokens
+    ?? usage?.prompt_tokens_details?.cached_tokens
+    ?? usage?.prompt_cache_hit_tokens
+    ?? usage?.prompt_cache_hit
+    ?? 0;
+}
+
 function consumeResponsesEvent(parsed, state, webContents, streamId) {
   const type = parsed?.type;
   if (!type) return;
@@ -74,7 +82,7 @@ function consumeResponsesEvent(parsed, state, webContents, streamId) {
     case 'response.completed': {
       const usage = parsed.response?.usage;
       if (usage) {
-        const cachedTokens = usage.input_tokens_details?.cached_tokens ?? 0;
+        const cachedTokens = extractCachedInputTokens(usage);
         state.usage = {
           inputTokens: usage.input_tokens ?? 0,
           outputTokens: usage.output_tokens ?? 0,
@@ -155,17 +163,22 @@ export async function sendOpenAIResponsesStream({
   baseUrl,
   apiKey,
   accountId,
+  endpoint,
+  headers: resolvedHeaders,
   model,
   messages,
   tools,
   effort,
   supportsReasoning,
+  reasoningParamStyle = 'openai-effort',
+  maxOutputTokens,
+  reasoningEffortMap,
   signal,
   webContents,
   streamId,
 }) {
-  const url = `${baseUrl.replace(/\/+$/, '')}/responses`;
-  const body = encodeOpenAIResponsesRequest({ model, messages, tools, effort, supportsReasoning });
+  const url = endpoint || `${baseUrl.replace(/\/+$/, '')}/responses`;
+  const body = encodeOpenAIResponsesRequest({ model, messages, tools, effort, supportsReasoning, reasoningParamStyle, maxOutputTokens, reasoningEffortMap });
 
   const trace = createProviderStreamTrace({
     provider: 'openai-responses',
@@ -177,12 +190,12 @@ export async function sendOpenAIResponsesStream({
     requestBody: body,
   });
 
-  const headers = {
+  const headers = resolvedHeaders || {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${apiKey}`,
     'OpenAI-Beta': 'responses=experimental',
   };
-  if (accountId) headers['chatgpt-account-id'] = accountId;
+  if (!resolvedHeaders && accountId) headers['chatgpt-account-id'] = accountId;
 
   const res = await fetchWithConnectionRecovery(url, {
     method: 'POST',

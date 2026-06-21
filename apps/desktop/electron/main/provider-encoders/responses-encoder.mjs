@@ -13,6 +13,17 @@ import { normalizeOpenAIMessages } from './message-normalizer.mjs';
 // Peer Agent 的 off 不发 reasoning；其余档位按 provider wire 契约透传。
 const REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'xhigh' };
 
+function positiveTokenLimit(value) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? Math.floor(num) : null;
+}
+
+function mappedEffortValue(effort, map) {
+  if (!map || typeof map !== 'object') return undefined;
+  if (effort === 'default') return map.default ?? map.medium;
+  return map[effort];
+}
+
 function textPart(text) {
   return { type: 'input_text', text };
 }
@@ -95,6 +106,9 @@ export function encodeOpenAIResponsesRequest({
   tools,
   effort = 'default',
   supportsReasoning = false,
+  reasoningParamStyle = 'openai-effort',
+  maxOutputTokens,
+  reasoningEffortMap,
 }) {
   const normalized = normalizeOpenAIMessages(messages);
 
@@ -119,9 +133,11 @@ export function encodeOpenAIResponsesRequest({
     store: false,
     tools: toResponsesTools(tools),
   };
+  const outputLimit = positiveTokenLimit(maxOutputTokens);
+  if (outputLimit) body.max_output_tokens = outputLimit;
 
-  if (supportsReasoning && effort && effort !== 'off') {
-    body.reasoning = { effort: REASONING_EFFORT[effort] ?? 'medium', summary: 'auto' };
+  if (supportsReasoning && reasoningParamStyle === 'openai-effort' && effort && effort !== 'off') {
+    body.reasoning = { effort: mappedEffortValue(effort, reasoningEffortMap) ?? REASONING_EFFORT[effort] ?? 'medium', summary: 'auto' };
   }
   return body;
 }

@@ -1,0 +1,47 @@
+{
+  "capabilityId": "local.web.fetch",
+  "name": "Local web fetch",
+  "description": "Fetches a web page through a hidden local browser window, extracts the main readable content, and returns a summary plus an artifact reference after client-side network permission classification and enforcement.",
+  "localizedName": {
+    "zh-CN": "本地网页抓取",
+    "en-US": "Local web fetch"
+  },
+  "localizedDescription": {
+    "zh-CN": "在客户端完成联网权限分类与执行约束后，通过本地隐藏浏览器窗口加载网页、等待渲染并抽取正文，返回标题、正文摘要、最终 URL 及落盘的 artifact 引用。",
+    "en-US": "Fetches a web page through a hidden local browser window, extracts the main readable content, and returns a summary plus an artifact reference after client-side network permission classification and enforcement."
+  },
+  "source": "web",
+  "riskLevel": "L3_external_write",
+  "dataLevel": "D2_sensitive",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "The absolute http(s) URL of the page to fetch."
+      },
+      "waitForRender": {
+        "type": "boolean",
+        "description": "Whether to wait for client-side rendering (JS-driven pages) before extracting content. Defaults to true."
+      },
+      "timeoutMs": {
+        "type": "number",
+        "description": "Navigation timeout in milliseconds. Defaults to 30000."
+      }
+    },
+    "required": ["url"]
+  },
+  "evidencePolicy": {
+    "returnMode": "artifact_ref",
+    "maxChars": 4000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": false,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}

@@ -1,5 +1,5 @@
 /**
- * Interaction 模式本地工具定义（Manifest）—— 见 docs/proposals/0003-request-user-input.md。
+ * Interaction 模式本地工具定义（Manifest）—— 见 request_user_input 设计。
  *
  * 该工具经正规运行时链路暴露：
  *   Capability Provider(local.interaction.request_user_input) → Manifest(本文件)

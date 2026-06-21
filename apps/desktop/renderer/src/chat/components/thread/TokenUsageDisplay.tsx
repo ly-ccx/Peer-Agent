@@ -33,6 +33,10 @@ export function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextT
   const cacheRead = (tokenUsage?.cacheRead ?? 0) + (activeUsage?.cacheRead ?? 0);
   const billedTokens = input + output;
   const currentContextTokens = contextTokens ?? billedTokens;
+  const cacheDenominator = input + cacheRead;
+  const cacheHitPercent = cacheDenominator > 0 ? Math.round((cacheRead / cacheDenominator) * 100) : null;
+  // 仅当前选中模型支持 Prompt 缓存时才展示缓存命中率，避免切到无缓存模型后仍显示旧模型遗留的累计缓存数据。
+  const showCacheHit = defaultProvider?.supportsPromptCaching === true && cacheRead > 0;
 
   const isSubscriptionProvider = defaultProvider?.authMethod === 'oauth_chatgpt';
   let costStr: string | null = null;
@@ -73,6 +77,18 @@ export function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextT
           <>{isZh ? '上下文' : 'Ctx'} {formatTokenCount(currentContextTokens)}<span className="token-usage-detail"> / {formatTokenCount(ctxWindow)}</span></>
         ) : currentContextTokens > 0 ? (
           <>{formatTokenCount(currentContextTokens)} tokens</>
+        ) : null}
+        {showCacheHit ? (
+          <span
+            className="token-usage-detail"
+            title={
+              isZh
+                ? `缓存读取 ${formatTokenCount(cacheRead)} tokens${cacheWrite > 0 ? `，缓存写入 ${formatTokenCount(cacheWrite)} tokens` : ''}`
+                : `Cache read ${formatTokenCount(cacheRead)} tokens${cacheWrite > 0 ? `, cache write ${formatTokenCount(cacheWrite)} tokens` : ''}`
+            }
+          >
+            {isZh ? '缓存命中' : 'cache hit'} {cacheHitPercent}%
+          </span>
         ) : null}
         {costStr ? (
           <span

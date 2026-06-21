@@ -75,6 +75,10 @@ export type TranslationKey =
   | 'settings.backToChat'
   | 'settings.appearance.description'
   | 'settings.language.description'
+  | 'settings.replyLanguage'
+  | 'settings.replyLanguage.description'
+  | 'settings.replyLanguage.followInterface'
+  | 'settings.replyLanguage.auto'
   | 'settings.config'
   | 'settings.config.description'
   | 'settings.config.export'
@@ -515,6 +519,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.backToChat': '返回对话',
     'settings.appearance.description': '选择界面的浅色、深色模式或跟随系统偏好。',
     'settings.language.description': '选择界面显示语言。',
+    'settings.replyLanguage': '回复语言',
+    'settings.replyLanguage.description': '选择 AI 回复时使用的语言，避免回复语言混乱。',
+    'settings.replyLanguage.followInterface': '跟随界面语言',
+    'settings.replyLanguage.auto': '自动（跟随提问语言）',
     'settings.config': '配置管理',
     'settings.config.description': '导出技能、授权规则与界面设置，便于在其它设备恢复；登录态与设备身份不会被导出。',
     'settings.config.export': '导出配置',
@@ -973,6 +981,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.backToChat': 'Back to chat',
     'settings.appearance.description': 'Choose light, dark, or follow system preference.',
     'settings.language.description': 'Choose the display language for the interface.',
+    'settings.replyLanguage': 'Reply language',
+    'settings.replyLanguage.description': 'Choose the language the AI replies in, to avoid mixed-language responses.',
+    'settings.replyLanguage.followInterface': 'Follow interface language',
+    'settings.replyLanguage.auto': 'Auto (match the question)',
     'settings.config': 'Configuration',
     'settings.config.description': 'Export your skills, permission rules and UI settings to restore on another device. Login state and device identity are not exported.',
     'settings.config.export': 'Export',

@@ -1,4 +1,4 @@
-// Goal 计划事实上下文 Source —— 见 docs/proposals/0006-goal-plan-taskid-recovery.md。
+// Goal 计划事实上下文 Source —— 见 Goal 计划 taskId 恢复设计。
 //
 // 作用：goal 模式下，把「当前会话活动计划」的权威 taskId + 状态 + 进度，作为
 // 事实/续传上下文（factual context）注入 System Context。即便历史被 compaction

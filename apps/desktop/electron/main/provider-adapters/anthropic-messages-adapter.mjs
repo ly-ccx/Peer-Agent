@@ -2,20 +2,7 @@ import { encodeAnthropicMessagesRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
-import { buildClaudeCliIdentityHeaders } from './anthropic-cli-identity.mjs';
 import { parseSseDataPayload } from './sse-line.mjs';
-
-function resolveAnthropicReasoningFormat(baseUrl) {
-  try {
-    const url = new URL(baseUrl);
-    if (url.hostname === 'idealab.alibaba-inc.com' && url.pathname.includes('/api/anthropic')) {
-      return 'adaptive';
-    }
-  } catch {
-    /* fall through */
-  }
-  return 'enabled';
-}
 
 function parseNestedProviderErrorMessage(message) {
   if (typeof message !== 'string' || !message.trim()) return '';
@@ -161,19 +148,24 @@ async function consumeAnthropicStream(res, webContents, streamId, trace = null) 
 export async function sendAnthropicMessagesStream({
   baseUrl,
   apiKey,
+  endpoint,
+  headers,
   model,
   system,
   messages,
   tools,
   effort,
   supportsReasoning,
+  reasoningParamStyle = null,
   signal,
   webContents,
   streamId,
-  reasoningFormat = resolveAnthropicReasoningFormat(baseUrl),
+  reasoningFormat = 'enabled',
   promptCaching = false,
+  maxOutputTokens,
+  reasoningEffortMap,
 }) {
-  const url = `${baseUrl.replace(/\/+$/, '')}/v1/messages`;
+  const url = endpoint || `${baseUrl.replace(/\/+$/, '')}/v1/messages`;
   const body = encodeAnthropicMessagesRequest({
     model,
     system,
@@ -181,8 +173,11 @@ export async function sendAnthropicMessagesStream({
     tools,
     effort,
     supportsReasoning,
+    reasoningParamStyle,
     reasoningFormat,
     promptCaching,
+    maxOutputTokens,
+    reasoningEffortMap,
   });
   const trace = createProviderStreamTrace({
     provider: 'anthropic',
@@ -196,11 +191,10 @@ export async function sendAnthropicMessagesStream({
 
   const res = await fetchWithConnectionRecovery(url, {
     method: 'POST',
-    headers: {
+    headers: headers || {
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
-      ...buildClaudeCliIdentityHeaders(),
     },
     body: JSON.stringify(body),
     signal,

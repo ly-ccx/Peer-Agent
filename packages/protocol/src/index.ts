@@ -14,7 +14,7 @@ export type CapabilityRiskLevel =
 
 export type DataLevel = 'D0_public' | 'D1_internal' | 'D2_sensitive' | 'D3_private' | 'D4_regulated';
 
-export type CapabilitySource = 'native' | 'shell' | 'plugin' | 'mcp' | 'page_bridge' | 'private';
+export type CapabilitySource = 'native' | 'shell' | 'plugin' | 'mcp' | 'page_bridge' | 'private' | 'web';
 
 export type CapabilityHealth = 'available' | 'needs_permission' | 'policy_disabled' | 'local_disabled' | 'unhealthy';
 
@@ -236,12 +236,50 @@ export interface WorkspaceProject {
 }
 
 export type LlmProviderType = 'openai' | 'anthropic';
+export type LlmWireProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini';
+export type LlmChannelId = string;
+export type LlmReasoningParamStyle =
+  | 'openai-effort'
+  | 'anthropic-enabled-budget'
+  | 'anthropic-adaptive-effort'
+  | 'anthropic-output-effort'
+  | 'qwen-enable'
+  | 'none';
+export type LlmReasoningEffortMap = Readonly<Record<string, string | number>>;
+
+export interface LlmChannelDescriptor {
+  readonly id: LlmChannelId;
+  readonly label: string;
+  readonly legacyProvider: LlmProviderType;
+  readonly defaultWire: LlmWireProtocol;
+  readonly allowedWires: readonly LlmWireProtocol[];
+  readonly defaults: {
+    readonly baseUrl: string;
+    readonly model: string;
+  };
+  readonly capabilities?: {
+    readonly reasoning?: {
+      readonly supported: boolean;
+      readonly paramStyle: LlmReasoningParamStyle;
+      readonly effortLevels?: readonly string[];
+      readonly defaultEffort?: string;
+      readonly effortMap?: LlmReasoningEffortMap;
+    };
+    readonly promptCache?: boolean;
+    readonly vision?: boolean;
+    readonly toolUse?: boolean;
+    readonly temperature?: boolean;
+  };
+  readonly authMethods?: Partial<Readonly<Record<LlmAuthMethod, { readonly wire: LlmWireProtocol }>>>;
+}
 
 // 鉴权方式与协议族(provider)正交(ADR 28)。
 // - api_key: 用户手填 API Key,经 safeStorage 加密存储。
 // - oauth_chatgpt: ChatGPT 订阅账号 OAuth 登录,access/refresh token 存 main 进程,
 //   订阅模型走 OpenAI Responses 传输。
-export type LlmAuthMethod = 'api_key' | 'oauth_chatgpt';
+// - oauth_google: Google OAuth 登录,access/refresh token 存 main 进程,
+//   Gemini 模型走 Google Generative Language API 传输。
+export type LlmAuthMethod = 'api_key' | 'oauth_chatgpt' | 'oauth_google';
 
 // 订阅(OAuth)登录态投影。token 永不回传 renderer,仅以状态 + 账号标识表达。
 export type LlmOAuthConnectionStatus = 'connected' | 'expired' | 'disconnected';
@@ -255,6 +293,9 @@ export interface LlmOAuthStatus {
 export interface LlmProviderConfig {
   readonly id: string;
   readonly provider: LlmProviderType;
+  readonly channelId?: LlmChannelId;
+  readonly resolvedWire?: LlmWireProtocol;
+  readonly wireOverride?: LlmWireProtocol;
   readonly authMethod: LlmAuthMethod;
   readonly name: string;
   readonly baseUrl: string;
@@ -263,6 +304,7 @@ export interface LlmProviderConfig {
   readonly isDefault: boolean;
   readonly createdAt: string;
   readonly contextWindow?: number;
+  readonly maxOutputTokens?: number;
   readonly inputPrice?: number;
   readonly outputPrice?: number;
   readonly cacheWritePrice?: number;
@@ -274,6 +316,12 @@ export interface LlmProviderConfig {
   readonly supportsVision?: boolean;
   readonly supportsReasoning?: boolean;
   readonly supportsPromptCaching?: boolean;
+  readonly reasoningParamStyle?: LlmReasoningParamStyle;
+  readonly reasoningEffortMap?: LlmReasoningEffortMap;
+  readonly oauthClientId?: string;
+  readonly oauthProjectId?: string;
+  readonly customHeaders?: Readonly<Record<string, string>>;
+  readonly customHeadersInvalid?: boolean;
 }
 
 export interface LlmProviderConfigView extends LlmProviderConfig {

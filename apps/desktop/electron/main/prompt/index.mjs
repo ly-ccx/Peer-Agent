@@ -9,6 +9,7 @@ export { createContinuityPromptSource } from './sources/continuity-source.mjs';
 export { createContextExtensionPromptSource } from './sources/context-extension-source.mjs';
 export { createGoalPlanPromptSource } from './sources/goal-plan-source.mjs';
 export { renderSystemCorePrompt } from './sources/core-source.mjs';
+export { createBrainstormingPromptSource, renderBrainstormingPrompt } from './sources/brainstorming-source.mjs';
 export { createModePromptSource } from './sources/mode-source.mjs';
 export { createProviderPromptSource } from './sources/provider-source.mjs';
 export { createProjectInstructionsPromptSource } from './sources/project-instructions-source.mjs';

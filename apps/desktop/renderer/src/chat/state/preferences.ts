@@ -30,7 +30,7 @@ export function isLocalAccessLevel(value: unknown): value is LocalAccessLevel {
     || value === 'full_local';
 }
 
-// 对话模式:进入 System Context 的 L6_MODE_REMINDER 层(见 docs/proposals/0002-goal-mode.md)。
+// 对话模式:进入 System Context 的 L6_MODE_REMINDER 层(见 Goal 模式设计)。
 // 'chat' 为默认直答模式;'goal' 为先规划后执行模式。
 export type ChatMode = 'chat' | 'goal';
 

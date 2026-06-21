@@ -10,6 +10,7 @@ import type {
   GoalPlan,
   GoalPlanStatus,
   LlmModelListResult,
+  LlmChannelDescriptor,
   LlmProviderConfigView,
   LlmProviderTestResult,
   LocalMcpServerUpsertRequest,
@@ -280,6 +281,7 @@ export interface BootstrapPreloadApi {
     listener: (payload: { fullscreen: boolean }) => void,
   ) => () => void;
   readonly llmListProviders: () => Promise<readonly LlmProviderConfigView[]>;
+  readonly llmListChannels: () => Promise<readonly LlmChannelDescriptor[]>;
   readonly llmAddProvider: (config: Record<string, unknown>) => Promise<LlmProviderConfigView>;
   readonly llmUpdateProvider: (params: { id: string; [key: string]: unknown }) => Promise<LlmProviderConfigView>;
   readonly llmRemoveProvider: (params: { id: string }) => Promise<readonly LlmProviderConfigView[]>;

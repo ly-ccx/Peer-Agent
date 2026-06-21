@@ -174,7 +174,7 @@ export async function executeProjectedModelTool({
     return { success: false, error: projection.error };
   }
 
-  // Goal 模式运行时闸门（见 docs/proposals/0004-goal-mode-runtime-gate.md）：
+  // Goal 模式运行时闸门（见 Goal 模式运行时闸门设计）：
   // 计划未获批准前，拒绝有副作用的能力，强制「先规划 → 批准 → 执行」。
   // 这是 PermissionGrant 之前的能力准入判定，不绕过 Runtime Projection。
   const gate = evaluateGoalModeGate({

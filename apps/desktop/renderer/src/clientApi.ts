@@ -100,6 +100,7 @@ const unavailableApi: ClientApi = {
   onChatActiveStreamsChanged: unavailableMethod('onChatActiveStreamsChanged'),
   onWindowFullscreenChanged: unavailableMethod('onWindowFullscreenChanged'),
   llmListProviders: unavailableMethod('llmListProviders'),
+  llmListChannels: unavailableMethod('llmListChannels'),
   llmAddProvider: unavailableMethod('llmAddProvider'),
   llmUpdateProvider: unavailableMethod('llmUpdateProvider'),
   llmRemoveProvider: unavailableMethod('llmRemoveProvider'),
