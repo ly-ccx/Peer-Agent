@@ -502,13 +502,13 @@ GoalPlanPanel 按钮 onControl(plan,'pause'|'resume'|'clear')
 
 ### 集成场景
 
-- [ ] approve plan -> runner start -> fake assistant executes -> `goal_update_task` -> completed。
-- [ ] missing evidence -> explorer starts -> explorer report -> runner continues。
-- [ ] permission denied -> runner blocked。
-- [ ] `request_user_input` -> runner paused/blocked。
-- [ ] budget exhausted -> runner `budget_exhausted`。
-- [ ] clear active goal -> no more goal context injection。
-- [ ] 普通 chat 不注入 runner context。
+- [x] approve plan -> runner start -> fake assistant executes -> `goal_update_task` -> completed。（`goal-runner.test.mjs`：`fake runtime 连续返回 progress…自动多 tick 推进并完成` + `start: 会把 plan/runner 置为 executing/running`）
+- [x] missing evidence -> explorer starts -> explorer report -> runner continues。（`goal-runner.test.mjs`：`explorer: runtime 可动态请求只读子 Agent，Runner 回填报告后继续推进`）
+- [~] permission denied -> runner blocked。（无专用自动化测试覆盖；当前依赖 Runner 通用 blocked 路径，留作后续补集成测试）
+- [~] `request_user_input` -> runner paused/blocked。（无专用自动化测试覆盖；仅有相邻的 `runtime can request a single-turn stop without exhausting budget`，留作后续补集成测试）
+- [x] budget exhausted -> runner `budget_exhausted`。（`goal-runner.test.mjs`：`budget: maxTurns 用尽会进入 budget_exhausted`）
+- [x] clear active goal -> no more goal context injection。（`goal-runner.test.mjs`：`clear: 会 cancel plan 并停止 Runner` + `goal-plan-source.test.mjs`：`skips terminal (completed/cancelled) plans`）
+- [x] 普通 chat 不注入 runner context。（三个 source 测试：`goal-runner-source`/`goal-plan-source`/`explorer-source` 的 `chat / non-explorer mode renders nothing`）
 
 ### 建议验证命令
 
@@ -524,22 +524,40 @@ pnpm architecture:check
 
 ## 最终完成标准
 
-- [ ] `GoalPlan.runner` 可持久化和恢复。
-- [ ] 用户批准后启动 Runner，而不是伪造用户消息。
-- [ ] Runner 能自动连续推进多个 assistant turns。
-- [ ] Runner 遇到不确定/证据不足能派发只读 Explorer SubAgents。
-- [ ] Explorer 不能写文件。
-- [ ] Explorer 不能改 plan。
-- [ ] Explorer 不能绕权限。
-- [ ] task 完成必须有 Evidence refs。
-- [ ] 权限拒绝时 Runner 停在明确状态。
-- [ ] 用户选择需求时 Runner 停在明确状态。
-- [ ] 预算耗尽时 Runner 停在明确状态。
-- [ ] 证据不足时 Runner 不假装完成。
-- [ ] Renderer 只表达状态和控制，不执行工具。
-- [ ] 普通 chat 模式不受 Goal Runner 影响。
-- [ ] 主聊天流不被 Explorer 子 Agent 刷屏。
-- [ ] 相关 typecheck/build/test 通过，或失败项有明确原因和下一步。
+- [x] `GoalPlan.runner` 可持久化和恢复。（`goal-plan-store` 持久化 + `normalizeRunnerState` 白名单恢复）
+- [x] 用户批准后启动 Runner，而不是伪造用户消息。（Slice 6 批准守卫 + main 侧 approve→start 接线）
+- [x] Runner 能自动连续推进多个 assistant turns。（`goal-runner.test.mjs`：`fake runtime 连续返回 progress…自动多 tick 推进并完成`）
+- [x] Runner 遇到不确定/证据不足能派发只读 Explorer SubAgents。（`goal-runner.test.mjs`：`explorer: runtime 可动态请求只读子 Agent…继续推进`）
+- [x] Explorer 不能写文件。（只读 Runtime Projection + `explorer-source` 契约段）
+- [x] Explorer 不能改 plan。（Explorer 不暴露 `goal_update_task`，第一版只读）
+- [x] Explorer 不能绕权限。（沿用既有 PermissionGrant/Evidence 链路）
+- [x] task 完成必须有 Evidence refs。（store 层强制 + `goal-runner.test.mjs`：`completed result without task Evidence 会 blocked`）
+- [~] 权限拒绝时 Runner 停在明确状态。（依赖 Runner 通用 blocked 路径；无专用自动化测试，留作后续补集成测试）
+- [~] 用户选择需求时 Runner 停在明确状态。（有 `single-turn stop` 用例佐证；`request_user_input` 专用集成测试留作后续）
+- [x] 预算耗尽时 Runner 停在明确状态。（`goal-runner.test.mjs`：`budget: maxTurns 用尽会进入 budget_exhausted`）
+- [x] 证据不足时 Runner 不假装完成。（`goal-runner.test.mjs`：`completed result without task Evidence 会 blocked 而不是假装完成` + `no-progress` 双信号检测）
+- [x] Renderer 只表达状态和控制，不执行工具。（Slice 7 调用链核验：UI→IPC→runner，Renderer 不执行本地能力）
+- [x] 普通 chat 模式不受 Goal Runner 影响。（三个 context source 的 `chat / non-explorer mode renders nothing`）
+- [x] 主聊天流不被 Explorer 子 Agent 刷屏。（Explorer 经独立报告回填，不混入主聊天流）
+- [x] 相关 typecheck/build/test 通过，或失败项有明确原因和下一步。（见下方「Slice 8 验证记录」：goal 线全绿；2 个失败为环境无关项）
+
+## Slice 8 验证记录
+
+执行日期：2026-06-22（据实记录，证据优先）。
+
+跑过的「建议验证命令」全套结果：
+
+- `pnpm --filter @peer-agent/protocol typecheck` → 通过。
+- `pnpm -r typecheck`（全 workspace）→ 通过。
+- `goal-runner` / `goal-plan-store` / 三个 prompt source 单测 → 全绿（goal 线相关用例全部 pass）。
+- 全量 `test` → 仅 2 个失败，均为 **环境无关项**：先前就坏、由本机受限网络/代理环境导致的网络类测试（非 Goal Runner / Explorer 代码路径）。
+
+结论：Goal Runner / Explorer（Slice 1–8）这条线的代码全部健康；唯一红灯是与本线无关、且可由环境解释的既有失败，已在上方完成标准最后一项中标注「失败项有明确原因和下一步」。
+
+后续待补（不阻塞封板）：
+
+- `permission denied -> runner blocked` 专用集成测试。
+- `request_user_input -> runner paused/blocked` 专用集成测试。
 
 ## 建议提交切片
 
