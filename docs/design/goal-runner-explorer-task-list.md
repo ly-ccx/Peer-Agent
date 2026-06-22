@@ -263,7 +263,7 @@ pnpm --filter @peer-agent/protocol typecheck
 - [x] 实现 leaf task 提取与完成判定。
 - [x] 实现 successCriteria 检查入口。
 - [x] 实现 intent 决策：`execute | verify | explore | synthesize | block`。
-- [ ] 实现 no-progress 防护。（未实现独立的连续无进展检测；当前依赖 `maxTurns` / `maxToolCalls` 预算上限兜底防止死循环）
+- [x] 实现 no-progress 防护。（`pump` 闭包内双信号检测：`progress.completed` 计数 + 叶子 `evidenceRefs` 总数，任一增长即「有进展」；连续 3 轮无增长判 `blocked(no_progress)`，先于预算上限触发。局部计数随 `pump` 重新拉起而清零，匹配 resume「既往不咎」语义。提交 `9b916a3`）
 - [x] 实现权限拒绝后的 stop/block 策略。
 - [x] 实现 `request_user_input` 后的 stop/block 策略。
 - [x] 实现工具失败后的 exception policy 处理入口。
@@ -293,14 +293,20 @@ maxExplorers: 4
 - [x] 工具失败且 exception policy 要 pause/ask_user。
 - [x] budget 耗尽。
 - [x] Explorer 也无法补足证据。
-- [ ] 模型连续 N 轮未产生有效进展。（未实现独立检测，由预算上限兜底）
+- [x] 模型连续 N 轮未产生有效进展。（N=3 双信号无进展检测，判 `blocked(no_progress)`，提交 `9b916a3`）
 
 ### 验收标准
 
 - [x] 所有 leaf tasks completed 且有 evidenceRefs 时，Runner 可以进入 verify/complete 流程。
 - [x] 没有 evidenceRefs 时不允许目标完成。
-- [x] 连续无进展不会无限循环。（由 `maxTurns` / `maxToolCalls` 预算上限保证，非独立无进展检测）
+- [x] 连续无进展不会无限循环。（N=3 双信号无进展检测先于预算上限触发 `blocked(no_progress)`，预算上限作为最终兜底）
 - [x] 遇到用户选择需求时进入 blocked/paused，而不是继续跑。
+
+### 当前验证记录
+
+```bash
+node --test apps/desktop/electron/main/goal-runner.test.mjs
+```
 
 ## Slice 4：Explorer SubAgents 只读探索
 
