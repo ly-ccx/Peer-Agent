@@ -46,8 +46,67 @@ function createRunner({ runtime, explorerRunner = null, events = [], logger = nu
   });
 }
 
-test('start: 会把 plan/runner 置为 executing/running', async () => {
+/**
+ * 创建一个已获批准的 plan。Runner 的批准准入闸门要求 plan.approval.decision === 'approve'
+ * 才允许启动，绝大多数 start/pump 行为测试都需要先越过这道闸门。
+ */
+function createApprovedPlan(overrides = {}) {
+  const plan = store.createPlan(draftWithTasks(overrides));
+  store.recordApproval(plan.planId, { decision: 'approve', decidedBy: 'tester' });
+  return store.getPlan(plan.planId);
+}
+
+test('approval gate: 未批准的 plan 调 start 会被拦下且不推进', async () => {
   const plan = store.createPlan(draftWithTasks());
+  // 不调用 recordApproval —— plan 停在 awaiting_approval。
+  const events = [];
+  let calls = 0;
+  const runtime = {
+    async runGoalTurn() {
+      calls += 1;
+      return {};
+    },
+  };
+  const runner = createRunner({ runtime, events });
+
+  const result = await runner.start(plan.planId, { awaitIdle: true });
+
+  assert.equal(result, null);
+  assert.equal(calls, 0, 'runGoalTurn 不应被调用');
+
+  const got = store.getPlan(plan.planId);
+  assert.notEqual(got.status, 'executing');
+  assert.equal(got.runner.enabled, false);
+  assert.equal(got.runner.status, 'blocked');
+  assert.equal(got.runner.blockedReason, 'Goal Runner start blocked: plan is not approved');
+  assert.ok(
+    events.some((event) => event.type === 'goalRunner:blocked'),
+    '应发出 goalRunner:blocked 事件',
+  );
+  assert.ok(
+    !events.some((event) => event.type === 'goalRunner:started'),
+    '不应发出 goalRunner:started 事件',
+  );
+});
+
+test('approval gate: paused 状态的 plan 可被 start 放行（resume 场景）', async () => {
+  const plan = createApprovedPlan();
+  const runtime = {
+    async runGoalTurn() {
+      return { blocked: true, blockedReason: 'stop' };
+    },
+  };
+  const runner = createRunner({ runtime });
+  await runner.start(plan.planId, { awaitIdle: true });
+  // 模拟外部把 plan 置为 paused（已越过批准、可重入）。
+  store.setPlanStatus(plan.planId, 'paused');
+
+  const result = await runner.start(plan.planId, { awaitIdle: true });
+  assert.notEqual(result, null, 'paused 的 plan 应被放行');
+});
+
+test('start: 会把 plan/runner 置为 executing/running', async () => {
+  const plan = createApprovedPlan();
   const calls = [];
   const runtime = {
     async runGoalTurn({ plan: currentPlan, turnNumber }) {
@@ -70,7 +129,7 @@ test('start: 会把 plan/runner 置为 executing/running', async () => {
 });
 
 test('pause: 会停止后续 tick', async () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = createApprovedPlan();
   let release;
   const firstTurn = new Promise((resolve) => {
     release = resolve;
@@ -103,7 +162,7 @@ test('pause: 会停止后续 tick', async () => {
 });
 
 test('clear: 会 cancel plan 并停止 Runner', async () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = createApprovedPlan();
   const runtime = {
     async runGoalTurn() {
       return { blocked: true, blockedReason: 'should not matter' };
@@ -121,7 +180,7 @@ test('clear: 会 cancel plan 并停止 Runner', async () => {
 });
 
 test('budget: maxTurns 用尽会进入 budget_exhausted', async () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = createApprovedPlan();
   let calls = 0;
   const runtime = {
     async runGoalTurn() {
@@ -140,7 +199,7 @@ test('budget: maxTurns 用尽会进入 budget_exhausted', async () => {
 });
 
 test('no-progress: 连续 3 轮双信号无增长会 blocked(no_progress) 而非烧满预算', async () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = createApprovedPlan();
   let calls = 0;
   const runtime = {
     // 每轮都不产生任何进展：不完成任务、不补 Evidence。
@@ -161,7 +220,7 @@ test('no-progress: 连续 3 轮双信号无增长会 blocked(no_progress) 而非
 });
 
 test('no-progress: 每轮补充叶子 Evidence 视为有进展，不会被误判阻塞', async () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = createApprovedPlan();
   let calls = 0;
   const runtime = {
     // 每轮给叶子任务追加一条新的 Evidence：evidence 信号持续增长。
@@ -182,7 +241,7 @@ test('no-progress: 每轮补充叶子 Evidence 视为有进展，不会被误判
 });
 
 test('fake runtime 连续返回 progress 时，Runner 能自动多 tick 推进并完成', async () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = createApprovedPlan();
   const seenTurnNumbers = [];
   const runtime = {
     async runGoalTurn({ planId, turnNumber }) {
@@ -217,7 +276,7 @@ test('fake runtime 连续返回 progress 时，Runner 能自动多 tick 推进�
 });
 
 test('Runner 每轮重新读 store，不依赖旧内存 plan', async () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = createApprovedPlan();
   const observedStatuses = [];
   const runtime = {
     async runGoalTurn({ plan: currentPlan, planId, turnNumber }) {
@@ -244,7 +303,7 @@ test('Runner 每轮重新读 store，不依赖旧内存 plan', async () => {
 });
 
 test('runtime failed: 失败会进入 failed 状态', async () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = createApprovedPlan();
   const runtime = {
     async runGoalTurn() {
       throw new Error('runtime exploded');
@@ -261,7 +320,7 @@ test('runtime failed: 失败会进入 failed 状态', async () => {
 });
 
 test('completed result without task Evidence 会 blocked 而不是假装完成', async () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = createApprovedPlan();
   const runtime = {
     async runGoalTurn() {
       return { completed: true };
@@ -279,7 +338,7 @@ test('completed result without task Evidence 会 blocked 而不是假装完成',
 });
 
 test('runtime can request a single-turn stop without exhausting budget', async () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = createApprovedPlan();
   let calls = 0;
   const runtime = {
     async runGoalTurn() {
@@ -300,7 +359,7 @@ test('runtime can request a single-turn stop without exhausting budget', async (
 });
 
 test('explorer: runtime 可动态请求只读子 Agent，Runner 回填报告后继续推进', async () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = createApprovedPlan();
   const events = [];
   const turns = [];
   const runtime = {

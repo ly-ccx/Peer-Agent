@@ -55,6 +55,20 @@ function runnerIsStopped(runner) {
   return !runner?.enabled || STOPPED_RUNNER_STATUSES.has(runner.status);
 }
 
+/**
+ * 是否已获授权启动 Runner。批准是 Goal Runner 的准入闸门，必须在入口强制，
+ * 不能只靠调用方自觉（见 AGENTS.md：能力/权限边界不得仅由调用约定保证）。
+ *
+ * 放行条件（任一）：
+ * - plan.approval.decision === 'approve'：协议层的权威批准事实（最符合「证据负责治理」）。
+ * - status 已是 executing / paused：支持 Runner re-entry 与 resume，这些态只可能由既往批准启动而来。
+ */
+function isStartAuthorized(plan) {
+  if (!plan) return false;
+  if (plan.approval?.decision === 'approve') return true;
+  return plan.status === 'executing' || plan.status === 'paused';
+}
+
 function hasCompletedProgress(plan) {
   const progress = plan?.progress;
   return progress && progress.total > 0 && progress.completed === progress.total;
@@ -177,6 +191,20 @@ export function createGoalRunner({
     const current = goalPlanStore.getPlan(planId);
     if (!current) return null;
     if (TERMINAL_PLAN_STATUSES.has(current.status)) return current;
+
+    // 批准准入闸门：未获批准的 plan 不允许启动 Runner（边界由代码强制，不靠调用方自觉）。
+    if (!isStartAuthorized(current)) {
+      const reason = 'Goal Runner start blocked: plan is not approved';
+      goalPlanStore.setRunnerState(planId, {
+        enabled: false,
+        status: 'blocked',
+        intent: 'block',
+        blockedReason: reason,
+        updatedAt: now(),
+      });
+      emit('goalRunner:blocked', { planId, reason });
+      return null;
+    }
 
     const runner = current.runner ?? {};
     goalPlanStore.setPlanStatus(planId, 'executing');
