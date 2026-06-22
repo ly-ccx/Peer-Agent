@@ -43,6 +43,7 @@ import {
   getCompaction,
 } from './chat-runtime/compaction-registry.mjs';
 import { resolveProviderCredential } from './provider-credential-resolver.mjs';
+import { initAutoUpdater } from './auto-updater.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -1286,6 +1287,14 @@ app.whenReady().then(async () => {
   });
 
   createWindow();
+
+  // 自动更新（阶段一）：通道按当前版本号语义自动选择（beta / latest）。
+  // 开发态默认跳过，可用 PEER_AGENT_FORCE_UPDATER=1 强制联调。
+  try {
+    initAutoUpdater();
+  } catch (err) {
+    console.error('[updater] init failed:', err);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

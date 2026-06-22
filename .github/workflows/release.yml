@@ -1,0 +1,103 @@
+# Peer Agent — Release (tag-driven)
+#
+# 触发：推送符合 v* 的 tag。通道由 tag 名语义分流：
+#   - v1.2.3            → 正式 Release（latest 通道）
+#   - v1.2.3-beta.N     → 预发布 Release（beta 通道，prerelease=true）
+#
+# 链路：stamp 版本(来自 tag) → 构建 Rust native binary → 构建前端 → electron-builder
+#       --publish always 发布到 GitHub Releases（含 latest*.yml / beta*.yml 更新清单）。
+#
+# 阶段一：关闭强制代码签名 / 公证（electron-builder.yml notarize=false，
+#         CSC_IDENTITY_AUTO_DISCOVERY=false）。阶段二补齐证书后在此注入 secrets。
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# electron-builder 需要写 Releases 的权限（GITHUB_TOKEN 自动注入）。
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: mac
+            ebflags: --mac
+          - os: windows-latest
+            platform: win
+            ebflags: --win
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Derive version & channel from tag
+        id: meta
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          if [[ "$VERSION" == *-beta.* || "$VERSION" == *-alpha.* || "$VERSION" == *-rc.* ]]; then
+            CHANNEL=beta
+          else
+            CHANNEL=latest
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "Tag=$TAG Version=$VERSION Channel=$CHANNEL"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.22.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Stamp version from tag
+        shell: bash
+        run: node scripts/stamp-version.mjs "${{ steps.meta.outputs.version }}"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Rust native binary（host 架构）。electron-builder.yml extraResources
+      # 从 target/release/ 拷贝 cu-proxy-core / cu-proxy-core.exe。
+      # 注意（阶段一）：Windows arm64 安装包将打包 x64 native binary（在 win-arm64
+      # 上以模拟方式运行）；arm64-native 交叉编译留待阶段二。
+      - name: Build Rust core
+        run: cargo build --release --package cu-proxy-core
+
+      - name: Build frontend
+        run: pnpm --filter @peer-agent/desktop build
+
+      - name: Build & publish (electron-builder)
+        working-directory: apps/desktop
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 阶段一：禁用 mac 自动证书发现，走 ad-hoc 签名（after-sign.cjs）。
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm exec electron-builder ${{ matrix.ebflags }} --publish always

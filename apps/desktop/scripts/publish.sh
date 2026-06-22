@@ -1,118 +1,113 @@
 #!/bin/bash
-# Peer Agent 一键发布脚本
+# Peer Agent 发布入口（tag 驱动）
+#
+# 本脚本只负责：计算版本 → 回写版本事实源 → 提交 → 打 tag → 推送 tag。
+# 真正的跨平台构建与发布到 GitHub Releases 由 .github/workflows/release.yml
+# 在 CI 中完成（推送 tag 即触发）。本机不再出包、不再上传 OSS。
+#
 # 用法:
-#   ./scripts/publish.sh stable     — 发布正式版 (0.0.1)
-#   ./scripts/publish.sh beta       — 发布测试版 (0.0.1-beta.1, 递增)
-#   ./scripts/publish.sh beta 3     — 发布指定 beta 号 (0.0.1-beta.3)
+#   ./scripts/publish.sh stable        — 发布正式版（取 VERSION，如 v0.0.1）
+#   ./scripts/publish.sh beta          — 发布测试版（自动递增 beta 号，如 v0.0.1-beta.N）
+#   ./scripts/publish.sh beta 3        — 发布指定 beta 号（v0.0.1-beta.3）
+#
+# 通道分流（与 workflow / electron-builder 一致）：
+#   纯 vX.Y.Z      → latest 通道（正式 Release）
+#   vX.Y.Z-beta.N  → beta 通道（prerelease）
+#
+# 选项:
+#   DRY_RUN=1 ./scripts/publish.sh beta   — 只演练，不提交/不打 tag/不推送
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DESKTOP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROOT_DIR="$(cd "$DESKTOP_DIR/../.." && pwd)"
-DIST_DIR="${ROOT_DIR}/dist-electron"
-BUCKET="oss://peer-agent"
 
-# ── 参数解析 ──
 CHANNEL="${1:-stable}"
 BETA_NUM="${2:-}"
+DRY_RUN="${DRY_RUN:-0}"
 
 if [[ "$CHANNEL" != "stable" && "$CHANNEL" != "beta" ]]; then
   echo "❌ 用法: $0 [stable|beta] [beta号]"
-  echo "   示例: $0 stable       → 发布 0.0.1"
-  echo "   示例: $0 beta         → 发布 0.0.1-beta.N (自动递增)"
-  echo "   示例: $0 beta 3       → 发布 0.0.1-beta.3"
+  echo "   示例: $0 stable    → 发布 vX.Y.Z"
+  echo "   示例: $0 beta      → 发布 vX.Y.Z-beta.N（自动递增）"
+  echo "   示例: $0 beta 3    → 发布 vX.Y.Z-beta.3"
   exit 1
 fi
 
-# ── 版本号处理 ──
-cd "$DESKTOP_DIR"
-BASE_VERSION=$(node -p "require('./package.json').version" | sed 's/-beta.*//')
+cd "$ROOT_DIR"
+
+# ── 基线版本来自 VERSION（唯一事实源），去掉任何预发布后缀 ──
+BASE_VERSION="$(sed 's/-.*//' < "${ROOT_DIR}/VERSION" | tr -d '[:space:]')"
 
 if [[ "$CHANNEL" == "beta" ]]; then
-  OSS_CHANNEL="beta"
   if [[ -n "$BETA_NUM" ]]; then
-    VERSION="${BASE_VERSION}-beta.${BETA_NUM}"
+    NEXT_BETA="$BETA_NUM"
   else
-    # 自动递增: 从 OSS 获取当前最新 beta 号
-    CURRENT_BETA=$(node -p "require('./package.json').version" | grep -oP 'beta\.\K\d+' || echo "0")
-    NEXT_BETA=$((CURRENT_BETA + 1))
-    VERSION="${BASE_VERSION}-beta.${NEXT_BETA}"
+    # 自动递增：扫描已存在的 git tag，取当前 base 下最大的 beta 号 +1
+    LAST_BETA="$(git tag -l "v${BASE_VERSION}-beta.*" \
+      | sed -E "s/.*-beta\.([0-9]+)$/\1/" \
+      | sort -n | tail -1)"
+    NEXT_BETA=$(( ${LAST_BETA:-0} + 1 ))
   fi
+  VERSION="${BASE_VERSION}-beta.${NEXT_BETA}"
 else
-  OSS_CHANNEL="latest"
   VERSION="$BASE_VERSION"
 fi
 
+TAG_NAME="v${VERSION}"
+
 echo ""
 echo "╔══════════════════════════════════════════╗"
-echo "║       Peer Agent 发布流程                ║"
+echo "║       Peer Agent 发布（tag 驱动）         ║"
 echo "╠══════════════════════════════════════════╣"
 echo "║  通道:   ${CHANNEL}"
 echo "║  版本:   ${VERSION}"
-echo "║  OSS:    releases/${OSS_CHANNEL}/"
+echo "║  Tag:    ${TAG_NAME}"
+echo "║  DryRun: ${DRY_RUN}"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 
-# ── Step 1: 更新 package.json 版本号 ──
-echo "📝 Step 1/4: 设置版本号 → ${VERSION}"
-node -e "
-const fs = require('fs');
-const pkg = JSON.parse(fs.readFileSync('./package.json', 'utf8'));
-pkg.version = '${VERSION}';
-fs.writeFileSync('./package.json', JSON.stringify(pkg, null, 2) + '\n');
-"
-echo "   ✓ package.json version = ${VERSION}"
+if git tag -l "$TAG_NAME" | grep -qx "$TAG_NAME"; then
+  echo "❌ Tag ${TAG_NAME} 已存在。请换一个 beta 号或先删除旧 tag。"
+  exit 1
+fi
+
+# ── Step 1: 回写版本事实源（VERSION / package.json / Cargo.toml / Cargo.lock）──
+echo "📝 Step 1/4: stamp 版本 → ${VERSION}"
+node "${ROOT_DIR}/scripts/stamp-version.mjs" "${VERSION}"
+
+# ── Step 2: 校验一致性 ──
 echo ""
+echo "🔎 Step 2/4: 校验版本一致性"
+node "${ROOT_DIR}/scripts/check-version.mjs"
 
-# ── Step 2: 构建前端 ──
-echo "🔨 Step 2/4: 构建前端 (vite build)"
-npx vite build 2>&1 | tail -5
-echo "   ✓ 前端构建完成"
-echo ""
-
-# ── Step 3: 打包 Electron ──
-echo "📦 Step 3/4: 打包 Electron (arm64)"
-CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac --arm64 2>&1 | grep -E "•|✓" | grep -v "npm error" | tail -10
-echo "   ✓ Electron 打包完成"
-echo ""
-
-# ── Step 4: 上传到 OSS ──
-echo "☁️  Step 4/4: 上传到 OSS (ali-oss)"
-
-if [[ -z "$OSS_ACCESS_KEY_ID" || -z "$OSS_ACCESS_KEY_SECRET" ]]; then
+if [[ "$DRY_RUN" == "1" ]]; then
   echo ""
-  echo "⚠️  未设置 OSS 凭证环境变量，跳过上传步骤"
-  echo ""
-  echo "   请设置以下环境变量后重新运行:"
-  echo "   export OSS_ACCESS_KEY_ID=<your-ak>"
-  echo "   export OSS_ACCESS_KEY_SECRET=<your-sk>"
-  echo ""
-  echo "   或写入 ~/.zshrc 后 source ~/.zshrc"
-  echo ""
-  echo "   构建产物在: ${DIST_DIR}/"
+  echo "🧪 DRY_RUN=1：到此为止。已修改工作区版本文件，但不提交/不打 tag/不推送。"
+  echo "   可执行 'git checkout -- .' 还原。"
   exit 0
 fi
 
-node "${ROOT_DIR}/scripts/upload-to-oss.mjs" --channel "${OSS_CHANNEL}"
-
-# ── Step 5: Git Tag ──
+# ── Step 3: 提交版本变更 + 打 tag ──
 echo ""
-echo "🏷️  Step 5: 打 Git Tag"
-TAG_NAME="v${VERSION}"
-if git tag -l "$TAG_NAME" | grep -q "$TAG_NAME"; then
-  echo "   ⚠️  Tag ${TAG_NAME} 已存在，跳过"
-else
-  git tag -a "$TAG_NAME" -m "Release ${VERSION} (${CHANNEL})"
-  echo "   ✓ 已创建 Tag: ${TAG_NAME}"
-  echo "   💡 推送 Tag: git push origin ${TAG_NAME}"
-fi
+echo "🏷️  Step 3/4: 提交并打 tag"
+git add -A
+git commit -m "release: ${VERSION}" || echo "   （无版本文件变更，跳过 commit）"
+git tag -a "$TAG_NAME" -m "Release ${VERSION} (${CHANNEL})"
+echo "   ✓ 已创建 Tag: ${TAG_NAME}"
+
+# ── Step 4: 推送 commit 与 tag（触发 CI 发布）──
+echo ""
+echo "🚀 Step 4/4: 推送（将触发 GitHub Actions 发布）"
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+git push origin "$CURRENT_BRANCH"
+git push origin "$TAG_NAME"
 
 echo ""
 echo "═══════════════════════════════════════════"
-echo "✅ 发布成功！"
-echo "   版本: ${VERSION}"
-echo "   Tag:  ${TAG_NAME}"
-echo "   通道: ${OSS_CHANNEL}"
-echo "   检测: https://peer-agent.oss-cn-beijing.aliyuncs.com/releases/${OSS_CHANNEL}/latest-mac.yml"
+echo "✅ 已推送 Tag ${TAG_NAME}，CI 将自动构建并发布到 GitHub Releases。"
+echo "   通道:   ${CHANNEL}"
+echo "   进度:   https://github.com/yinLiangDream/Peer-Agent/actions"
+echo "   发布物: https://github.com/yinLiangDream/Peer-Agent/releases"
 echo "═══════════════════════════════════════════"

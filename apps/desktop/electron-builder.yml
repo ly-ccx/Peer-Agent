@@ -37,7 +37,9 @@ mac:
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
-  notarize: true
+  # 阶段一：关闭公证（无 Apple Developer ID 证书时开启会导致构建失败）。
+  # 阶段二补齐证书后改回 true，并在 CI 配置 APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID。
+  notarize: false
 
 afterSign: scripts/after-sign.cjs
 
@@ -63,8 +65,15 @@ nsis:
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
 
-# ── 发布 (TODO: configure release channel) ──
-# publish:
-#   provider: github
-#   owner: your-org
-#   repo: peer-agent
+# ── 发布 (GitHub Releases) ──
+# 通道分流由 tag 名驱动（见 .github/workflows/release.yml）：
+#   - 纯 vX.Y.Z         → 正式 Release（latest 通道，latest-mac.yml / latest.yml）
+#   - vX.Y.Z-beta.N     → 预发布 Release（beta 通道，beta-mac.yml / beta.yml）
+# generateUpdatesFilesForAllChannels 确保即使一次构建也按版本号语义写入对应通道清单。
+publish:
+  provider: github
+  owner: yinLiangDream
+  repo: Peer-Agent
+  releaseType: release
+
+generateUpdatesFilesForAllChannels: true
