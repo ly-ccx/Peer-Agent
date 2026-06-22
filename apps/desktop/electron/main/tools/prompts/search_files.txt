@@ -1,0 +1,13 @@
+Search file contents for a substring across the workspace and return matching file paths with line numbers.
+
+Use this tool when:
+- You need to locate where a symbol, string, config key, or message is defined or used.
+- You do not know the exact file path yet and need read-only discovery.
+- You are an Explorer sub-agent restricted to read-only investigation.
+
+Rules:
+- Search is scoped to the workspace; the optional path must stay inside the workspace root.
+- Matching is case-insensitive by default; set case_sensitive=true for exact case.
+- Results are capped (default 50, max 200 lines) and may be truncated; narrow the query or path to see more.
+- Dependency and build directories (node_modules, .git, dist, build, etc.) and binary/oversized files are skipped.
+- This is a read-only tool. Use read_file to open a specific match, and use edit_file or write_file to change files.

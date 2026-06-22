@@ -34,6 +34,7 @@ describe('Tool Registry', () => {
     assert.deepEqual(names, [
       TOOL_NAMES.bash,
       TOOL_NAMES.readFile,
+      TOOL_NAMES.searchFiles,
       TOOL_NAMES.editFile,
       TOOL_NAMES.writeFile,
     ]);
@@ -227,7 +228,7 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
 
   it('projects only explicitly allowed readonly tools in explorer mode', () => {
     const names = materializedNames('explorer');
-    assert.deepEqual(names, ['read_file']);
+    assert.deepEqual(names, ['read_file', 'search_files']);
   });
 
   it('marks write and goal capabilities as mode_excluded in explorer mode', () => {

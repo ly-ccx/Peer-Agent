@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 export const TOOL_NAMES = {
   bash: 'bash',
   readFile: 'read_file',
+  searchFiles: 'search_files',
   editFile: 'edit_file',
   writeFile: 'write_file',
 };
@@ -71,6 +72,42 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
         },
       },
       required: ['path'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: TOOL_NAMES.searchFiles,
+    capabilityId: 'legacy.local.file.search',
+    prompt: () => readPromptAsset('search_files.txt'),
+    // 只读搜索：Explorer 子 Agent 可用，用于在 workspace 内按内容定位文件。
+    availableInModes: ['chat', 'goal', 'explorer'],
+    runtime: legacyRuntime('local.file.search'),
+    permissionPolicy: {
+      kind: 'file-read',
+      requiresReviewForOutsideWorkspace: false,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Substring to search for in file contents.',
+        },
+        path: {
+          type: 'string',
+          description:
+            'Optional workspace-relative or absolute directory to scope the search. Must stay inside the workspace. Defaults to the workspace root.',
+        },
+        case_sensitive: {
+          type: 'boolean',
+          description: 'Set true for case-sensitive matching. Defaults to false.',
+        },
+        max_results: {
+          type: 'number',
+          description: 'Maximum number of matching lines to return (1-200, default 50).',
+        },
+      },
+      required: ['query'],
       additionalProperties: false,
     },
   },

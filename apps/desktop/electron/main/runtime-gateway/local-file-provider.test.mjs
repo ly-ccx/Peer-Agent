@@ -130,4 +130,55 @@ describe('local file provider', () => {
     assert.equal(requested.filePath, outsidePath);
     assert.equal(requested.workspacePath, workspaceDir);
   });
+
+  it('search_files finds matching lines without requesting permission', async () => {
+    writeFileSync(path.join(tmpDir, 'a.txt'), 'alpha\nNEEDLE here\n', 'utf8');
+    writeFileSync(path.join(tmpDir, 'b.txt'), 'no match\n', 'utf8');
+    const nested = path.join(tmpDir, 'sub');
+    mkdirSync(nested);
+    writeFileSync(path.join(nested, 'c.txt'), 'another needle line\n', 'utf8');
+
+    const provider = createLocalFileProvider({ workspaceRoot: tmpDir });
+    let requested = null;
+    const execution = await provider.executeCapability(
+      { call: createCall('local.file.search', { query: 'needle' }) },
+      {
+        workspaceRoot: tmpDir,
+        toolContext: { conversationId: 'c1', readFiles: new Map() },
+        requestPermission: async (request) => {
+          requested = request;
+          return { granted: true };
+        },
+        locale: 'zh-CN',
+      },
+    );
+
+    assert.equal(execution.grant.granted, true);
+    assert.equal(execution.result.status, 'success');
+    assert.equal(requested, null, 'read-only search must not request permission');
+    const output = JSON.parse(execution.result.outputPreview.fileResult.output);
+    assert.equal(output.tool, 'search_files');
+    assert.equal(output.matchCount, 2);
+    assert.equal(output.fileCount, 2);
+  });
+
+  it('search_files blocks paths outside the workspace', async () => {
+    const workspaceDir = path.join(tmpDir, 'workspace');
+    const outsideDir = path.join(tmpDir, 'outside');
+    mkdirSync(workspaceDir);
+    mkdirSync(outsideDir);
+    writeFileSync(path.join(outsideDir, 'secret.txt'), 'needle\n', 'utf8');
+
+    const provider = createLocalFileProvider({ workspaceRoot: workspaceDir });
+    const execution = await provider.executeCapability(
+      { call: createCall('local.file.search', { query: 'needle', path: outsideDir }) },
+      {
+        workspaceRoot: workspaceDir,
+        toolContext: { conversationId: 'c1', readFiles: new Map() },
+        locale: 'zh-CN',
+      },
+    );
+
+    assert.equal(execution.result.status, 'denied');
+  });
 });

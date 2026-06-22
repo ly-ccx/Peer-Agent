@@ -1,5 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 
@@ -9,7 +16,28 @@ const FILE_CAPABILITY_TO_TOOL = {
   'local.file.read': 'read_file',
   'local.file.edit': 'edit_file',
   'local.file.write': 'write_file',
+  'local.file.search': 'search_files',
 };
+
+// Explorer 只读搜索：限定在 workspace 内、跳过依赖/构建产物与二进制文件，
+// 避免遍历成本失控，同时保持与 read_file 一致的只读边界。
+const SEARCH_IGNORED_DIRS = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  'out',
+  'coverage',
+  '.next',
+  '.turbo',
+  '.cache',
+  '.idea',
+  '.vscode',
+]);
+const SEARCH_MAX_FILE_BYTES = 1_000_000;
+const SEARCH_DEFAULT_MAX_RESULTS = 50;
+const SEARCH_MAX_RESULTS_CAP = 200;
+const SEARCH_MAX_FILES_SCANNED = 5_000;
 
 function previewText(value, maxChars = MAX_TOOL_CONTEXT_CHARS) {
   const text = String(value ?? '');
@@ -241,6 +269,125 @@ function materializeFileRead({ filePath, content, readState }) {
   };
 }
 
+function* walkSearchFiles(rootDir) {
+  let scanned = 0;
+  const stack = [rootDir];
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const entryPath = resolve(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (SEARCH_IGNORED_DIRS.has(entry.name)) continue;
+        stack.push(entryPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      scanned += 1;
+      if (scanned > SEARCH_MAX_FILES_SCANNED) return;
+      yield entryPath;
+    }
+  }
+}
+
+function runFileSearch({ args, cwd }) {
+  const query = typeof args.query === 'string' ? args.query : '';
+  if (query.length === 0) {
+    return formatToolFailure('search_files', 'blocked', 'query must be a non-empty string');
+  }
+
+  const searchRoot = args.path ? resolveToolPath(args.path, cwd) : resolve(cwd);
+  if (!isInsidePath(searchRoot, cwd)) {
+    return formatToolFailure(
+      'search_files',
+      'blocked',
+      'search_files is restricted to the workspace; path must stay inside the workspace root.',
+      { path: searchRoot },
+    );
+  }
+  if (!existsSync(searchRoot)) {
+    return formatToolFailure('search_files', 'failed', `Path not found: ${searchRoot}`, {
+      path: searchRoot,
+    });
+  }
+
+  const maxResults = Math.min(
+    Math.max(Number.isInteger(args.max_results) ? args.max_results : SEARCH_DEFAULT_MAX_RESULTS, 1),
+    SEARCH_MAX_RESULTS_CAP,
+  );
+  const caseSensitive = args.case_sensitive === true;
+  const needle = caseSensitive ? query : query.toLowerCase();
+
+  const matches = [];
+  let filesWithMatches = 0;
+  let truncated = false;
+
+  for (const filePath of walkSearchFiles(searchRoot)) {
+    if (matches.length >= maxResults) {
+      truncated = true;
+      break;
+    }
+    let stat;
+    try {
+      stat = statSync(filePath);
+    } catch {
+      continue;
+    }
+    if (stat.size > SEARCH_MAX_FILE_BYTES) continue;
+
+    let content;
+    try {
+      content = readFileSync(filePath, 'utf8');
+    } catch {
+      continue;
+    }
+    if (content.includes('\u0000')) continue;
+
+    const lines = content.split('\n');
+    let fileMatched = false;
+    for (let i = 0; i < lines.length; i += 1) {
+      const haystack = caseSensitive ? lines[i] : lines[i].toLowerCase();
+      if (!haystack.includes(needle)) continue;
+      fileMatched = true;
+      matches.push({
+        path: relative(cwd, filePath) || filePath,
+        line: i + 1,
+        text: truncateText(lines[i].trim(), 240),
+      });
+      if (matches.length >= maxResults) {
+        truncated = true;
+        break;
+      }
+    }
+    if (fileMatched) filesWithMatches += 1;
+  }
+
+  const summaryLines = matches.map((m) => `${m.path}:${m.line}: ${m.text}`);
+  const headline = matches.length === 0
+    ? `No matches for "${query}".`
+    : `Found ${matches.length} match(es) in ${filesWithMatches} file(s)${truncated ? ' (truncated)' : ''}.`;
+
+  return {
+    success: true,
+    output: formatContextResult({
+      status: 'success',
+      tool: 'search_files',
+      query,
+      root: relative(cwd, searchRoot) || '.',
+      matchCount: matches.length,
+      fileCount: filesWithMatches,
+      truncated,
+      matches,
+      preview: [headline, ...summaryLines].join('\n'),
+    }),
+  };
+}
+
 async function runFileTool({ name, args, cwd, toolContext, requestPermission }) {
   try {
     if (name === 'read_file') {
@@ -249,6 +396,10 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
       const content = readFileSync(filePath, 'utf8');
       const readState = recordReadState(toolContext, { cwd, filePath, content, fullRead: true });
       return materializeFileRead({ filePath, content, readState });
+    }
+
+    if (name === 'search_files') {
+      return runFileSearch({ args, cwd });
     }
 
     if (name === 'edit_file') {
@@ -395,7 +546,8 @@ function statusFromFileResult(fileResult) {
 
 function buildFileCapabilityResult({ call, name, locale, fileResult }) {
   const status = statusFromFileResult(fileResult);
-  const dataLevel = name === 'read_file' ? 'D1_internal' : 'D2_sensitive';
+  const dataLevel =
+    name === 'read_file' || name === 'search_files' ? 'D1_internal' : 'D2_sensitive';
   return {
     toolCallId: call.toolCallId,
     status,
