@@ -407,18 +407,18 @@ Runner continuation turn 和 Explorer turn 都通过明确 Context Source/adapte
 
 ### 任务清单
 
-- [ ] 找到 `GoalPlanPanel.tsx` / ChatSurface 的批准链路。
-- [ ] 增加或复用 preload / IPC runner 控制接口。
-- [ ] main process 注册 `goalRunner:start`。
-- [ ] main process 注册 `goalRunner:pause`。
-- [ ] main process 注册 `goalRunner:resume`。
-- [ ] main process 注册 `goalRunner:clear`。
-- [ ] main process 注册 `goalRunner:getState`。
-- [ ] 批准后调用 store `recordApproval(...)`。
-- [ ] 批准后设置 `GoalPlan.status = executing`。
-- [ ] 批准后设置 `runner.enabled = true`。
-- [ ] 批准后启动 `goalRunner.start(planId)`。
-- [ ] 保留 reject/revise 流程。
+- [x] 找到 `GoalPlanPanel.tsx` / ChatSurface 的批准链路。（`GoalPlanPanel.tsx:464` decide → clientApi；`ChatSurface.tsx:1016` 批准后托管推进，不伪造用户消息）
+- [x] 增加或复用 preload / IPC runner 控制接口。（`clientApi.goalRunnerPause/Resume/Clear` 等已接线）
+- [x] main process 注册 `goalRunner:start`。（`main.mjs:754`）
+- [x] main process 注册 `goalRunner:pause`。（`main.mjs:755`）
+- [x] main process 注册 `goalRunner:resume`。（`main.mjs:756`）
+- [x] main process 注册 `goalRunner:clear`。（`main.mjs:757`）
+- [x] main process 注册 `goalRunner:getState`。（实现为 `goalRunner:get-state`，`main.mjs:753`）
+- [x] 批准后调用 store `recordApproval(...)`。（`main.mjs:746` goalPlans:approve handler）
+- [x] 批准后设置 `GoalPlan.status = executing`。（由 `start`→`initializeRunner` 内部推进，非 handler 内直写）
+- [x] 批准后设置 `runner.enabled = true`。（同上，`initializeRunner` 内部完成）
+- [x] 批准后启动 `goalRunner.start(planId)`。（`main.mjs:748`，仅 `approval.decision === 'approve'` 时）
+- [x] 保留 reject/revise 流程。（非 approve 分支不启动 Runner；`goalPlans:revise` 独立保留）
 
 ### 改造后事件流
 
@@ -432,10 +432,18 @@ approve GoalPlan
 
 ### 验收标准
 
-- [ ] 未批准 plan 不会启动 Runner。
-- [ ] 批准后启动 Runner。
-- [ ] Runner 自动推进，不需要用户每步发消息。
-- [ ] reject/revise 语义不被破坏。
+- [x] 未批准 plan 不会启动 Runner。（`initializeRunner` 批准守卫：仅 `approval.decision === 'approve'` 或已在 executing/paused 才放行）
+- [x] 批准后启动 Runner。（`goalPlans:approve` → `goalRunner.start`，`main.mjs:748`）
+- [x] Runner 自动推进，不需要用户每步发消息。（`pump` 循环托管，`ChatSurface.tsx:1016` 不再伪造用户消息）
+- [x] reject/revise 语义不被破坏。（非 approve 分支不启动；revise 链路独立保留）
+
+### 当前验证记录
+
+- 批准守卫：`apps/desktop/electron/main/goal-runner.mjs` `initializeRunner` 放行条件改为 `approval.decision === 'approve'` 或 plan 已在 executing/paused（resume 可重入）。
+- 测试：`node --test apps/desktop/electron/main/goal-runner.test.mjs` → 14 pass / 0 fail。
+- 类型：`pnpm -r typecheck` 通过。
+- 提交：`f68e1fb`（Slice 6 批准守卫）。
+- 级别：B 级（动 Runner 启动契约语义），不碰协议、不碰只读区。
 
 ## Slice 7：Renderer 状态表达
 
