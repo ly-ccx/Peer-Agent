@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { resolveCapabilityDisplayName } from './tool-orchestrator.mjs';
+import { formatToolResultForStream, resolveCapabilityDisplayName } from './tool-orchestrator.mjs';
 
 // 回归：MCP 工具卡标题透传。
 // 背景：tool-call 事件此前只发裸 capability 名（如 mcp__server__tool），
@@ -48,5 +48,26 @@ describe('resolveCapabilityDisplayName', () => {
   it('treats an empty-string displayName as absent (falls back to null)', () => {
     const p = { capabilities: [{ name: 't', displayName: '' }] };
     assert.equal(resolveCapabilityDisplayName(p, 't'), null);
+  });
+});
+
+describe('formatToolResultForStream', () => {
+  it('keeps non-interaction tool results bounded for the UI stream', () => {
+    const output = 'x'.repeat(4010);
+    const result = formatToolResultForStream({ name: 'bash', args: {}, output });
+    assert.equal(result.length, 4000);
+  });
+
+  it('streams a complete interaction projection for namespaced request_user_input', () => {
+    const question = `需要确认：${'很长'.repeat(1500)}`;
+    const result = formatToolResultForStream({
+      name: 'local.interaction.request_user_input',
+      args: { question, options: ['继续', '停止'], note: '请选择' },
+      output: JSON.stringify({ ok: true, question }),
+    });
+    const parsed = JSON.parse(result);
+    assert.equal(parsed.question, question);
+    assert.deepEqual(parsed.options, ['继续', '停止']);
+    assert.equal(parsed.note, '请选择');
   });
 });

@@ -24,6 +24,29 @@ export function materializeToolOutput(result) {
   return result.output || (result.success ? '' : `Error: ${result.error}${result.stderr ? '\n' + result.stderr : ''}`);
 }
 
+const REQUEST_USER_INPUT_TOOL = 'request_user_input';
+
+function isRequestUserInputTool(name) {
+  return name === REQUEST_USER_INPUT_TOOL || (typeof name === 'string' && name.endsWith(`.${REQUEST_USER_INPUT_TOOL}`));
+}
+
+export function formatToolResultForStream({ name, args, output }) {
+  if (!isRequestUserInputTool(name)) return output.slice(0, 4000);
+  const question = typeof args?.question === 'string' ? args.question.trim() : '';
+  if (!question) return output.slice(0, 4000);
+  const options = Array.isArray(args?.options)
+    ? args.options.filter((option) => typeof option === 'string' && option.trim()).map((option) => option.trim())
+    : [];
+  const note = typeof args?.note === 'string' ? args.note.trim() : undefined;
+  return JSON.stringify({
+    ok: true,
+    acknowledged: true,
+    question,
+    options,
+    ...(note ? { note } : {}),
+  });
+}
+
 /**
  * 从 Runtime Projection 按 capability name 反查后端注入的展示文案 displayName。
  * 用于把工具卡标题（尤其是 MCP 工具的「服务名: 工具名」）随 tool-call 事件透传给表达层。
@@ -110,7 +133,8 @@ export async function executeModelToolCall({
   });
   if (signal?.aborted) return { aborted: true, args, output: '' };
   const output = materializeToolOutput(result);
-  webContents.send('chat:stream:tool-result', { streamId, toolCallId, result: output.slice(0, 4000) });
+  const streamResult = formatToolResultForStream({ name, args, output });
+  webContents.send('chat:stream:tool-result', { streamId, toolCallId, result: streamResult });
   const controlSignal = extractToolControlSignal(result);
   return { aborted: false, args, output, result, controlSignal };
 }

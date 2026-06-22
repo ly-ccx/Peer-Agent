@@ -50,6 +50,66 @@ test('iterationsFromBackendStepsData flattens steps + opens iteration per thinki
   assert.equal(out[1].toolCards.length, 0);
 });
 
+test('iterationsFromBackendStepsData preserves full tool result content for interaction rendering', () => {
+  const result = {
+    ok: true,
+    acknowledged: true,
+    question: `请选择下一步：${'x'.repeat(240)}`,
+    options: ['继续', '暂停'],
+  };
+  const out = iterationsFromBackendStepsData({
+    steps: [
+      {
+        iterations: [
+          { iterationIndex: 1, type: 'thinking', content: 'ask user' },
+          {
+            iterationIndex: 2,
+            type: 'tool_call',
+            toolCallId: 'tc-request',
+            toolName: 'request_user_input',
+            result,
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(out.length, 1);
+  const tool = out[0].toolCards[0];
+  assert.equal(tool.toolId, 'request_user_input');
+  assert.equal(tool.resultContent, JSON.stringify(result));
+  assert.ok(tool.resultSummary?.endsWith('…'));
+});
+
+test('iterationsFromBackendStepsData preserves tool arguments for interaction rendering', () => {
+  const args = {
+    question: `请选择下一步：${'x'.repeat(240)}`,
+    options: ['继续', '暂停'],
+  };
+  const out = iterationsFromBackendStepsData({
+    steps: [
+      {
+        iterations: [
+          { iterationIndex: 1, type: 'thinking', content: 'ask user' },
+          {
+            iterationIndex: 2,
+            type: 'tool_call',
+            toolCallId: 'tc-request',
+            toolName: 'request_user_input',
+            arguments: args,
+            result: '{"ok":true,"question":"truncated',
+          },
+        ],
+      },
+    ],
+  });
+
+  const tool = out[0].toolCards[0];
+  assert.equal(tool.toolId, 'request_user_input');
+  assert.deepEqual(tool.inputArguments, args);
+  assert.equal(tool.resultContent, '{"ok":true,"question":"truncated');
+});
+
 test('iterationsFromBackendStepsData synthesizes a fallback iteration if first node is tool_call', () => {
   const out = iterationsFromBackendStepsData({
     steps: [

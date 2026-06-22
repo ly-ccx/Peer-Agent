@@ -1,7 +1,21 @@
 import type { I18nRuntime, TranslationKey } from '@peer-agent/i18n';
 import type { ThinkingProcess, ToolCard } from '@peer-agent/protocol';
+import { parseInteractionToolViewFromCandidates } from '../../state/interactionToolView';
+import { InteractionToolCard } from './InteractionToolCard';
+
+function parseToolCardInteractionView(tool: ToolCard) {
+  return parseInteractionToolViewFromCandidates(
+    [tool.toolId, tool.displayName, tool.capabilityId],
+    [tool.inputArguments, tool.resultContent, tool.resultSummary],
+  );
+}
 
 function renderToolResult(tool: ToolCard) {
+  const interactionView = parseToolCardInteractionView(tool);
+  if (interactionView) {
+    return <InteractionToolCard view={interactionView} className="timeline-interaction-card" />;
+  }
+
   const summary = tool.resultSummary || '';
   const content = tool.resultContent || '';
   const hasErrors = tool.errorCount || tool.warningCount;

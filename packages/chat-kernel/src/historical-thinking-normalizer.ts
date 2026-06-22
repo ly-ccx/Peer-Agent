@@ -33,6 +33,12 @@ interface BackendStepIteration {
   skillId?: string;
   skillName?: string;
   executionUuid?: string;
+  arguments?: unknown;
+  argumentsPreview?: unknown;
+  input?: unknown;
+  args?: unknown;
+  argsSource?: string;
+  argsNote?: string;
   result?: unknown;
 }
 
@@ -60,22 +66,33 @@ const readString = (value: unknown, keys: readonly string[]): string | undefined
   return undefined;
 };
 
-const summarizeResult = (result: unknown): string | undefined => {
+const stringifyResult = (result: unknown): string | undefined => {
   if (result == null) return undefined;
-  if (typeof result === 'string') {
-    return result.length > 200 ? `${result.slice(0, 200)}…` : result;
-  }
+  if (typeof result === 'string') return result;
   try {
-    const json = JSON.stringify(result);
-    if (!json) return undefined;
-    return json.length > 200 ? `${json.slice(0, 200)}…` : json;
+    return JSON.stringify(result);
   } catch {
     return undefined;
   }
 };
 
+const summarizeResult = (result: unknown): string | undefined => {
+  const content = stringifyResult(result);
+  if (!content) return undefined;
+  return content.length > 200 ? `${content.slice(0, 200)}…` : content;
+};
+
+function readInputArguments(it: BackendStepIteration): unknown {
+  if (it.arguments !== undefined) return it.arguments;
+  if (it.argumentsPreview !== undefined) return it.argumentsPreview;
+  if (isRecord(it.input) && Object.keys(it.input).length > 0) return it.input;
+  if (it.args !== undefined) return it.args;
+  return undefined;
+}
+
 function toToolCard(it: BackendStepIteration): ToolCard {
   const id = it.toolCallId ?? it.executionUuid ?? `tool_${Date.now()}_${Math.random()}`;
+  const inputArguments = readInputArguments(it);
   return {
     toolCallId: id,
     toolId: it.toolName ?? it.toolCallId ?? 'unknown_tool',
@@ -83,6 +100,10 @@ function toToolCard(it: BackendStepIteration): ToolCard {
     status: 'completed',
     executionUuid: it.executionUuid,
     steps: [],
+    ...(inputArguments !== undefined ? { inputArguments } : {}),
+    ...(it.argsSource ? { inputArgumentsSource: it.argsSource } : {}),
+    ...(it.argsNote ? { inputArgumentsNote: it.argsNote } : {}),
+    resultContent: stringifyResult(it.result),
     resultSummary: summarizeResult(it.result),
   };
 }

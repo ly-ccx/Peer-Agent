@@ -1,5 +1,5 @@
-import { useContext, useState } from 'react';
-import { parseInteractionToolView } from '../../state/interactionToolView';
+import { useEffect, useState } from 'react';
+import { parseInteractionToolViewFromCandidates } from '../../state/interactionToolView';
 import { groupSegments } from '../../state/streamSegments';
 import type {
   ContentSegment,
@@ -8,7 +8,7 @@ import type {
   ToolProgress,
 } from '../../state/types';
 import { MarkdownMessage } from '../markdown/MarkdownMessage';
-import { InteractionContext } from './interactionContext';
+import { InteractionToolCard } from './InteractionToolCard';
 
 function toolProgressLabel(
   progress: ToolProgress,
@@ -149,7 +149,14 @@ function ThinkingTextSection({ content, isActive, isZh }: { readonly content: st
 }
 
 function ThinkingSection({ toolCalls, isActive, isZh }: { readonly toolCalls: ToolCallLegacy[]; readonly isActive: boolean; readonly isZh: boolean }) {
-  const [expanded, setExpanded] = useState(isActive);
+  const hasInteractionCall = toolCalls.some((tc) => parseToolCallInteractionView(tc) !== null);
+  const shouldAutoExpand = isActive || hasInteractionCall;
+  const [expanded, setExpanded] = useState(shouldAutoExpand);
+
+  useEffect(() => {
+    if (shouldAutoExpand) setExpanded(true);
+  }, [shouldAutoExpand]);
+
   const doneCount = toolCalls.filter((tc) => tc.result !== undefined).length;
   const total = toolCalls.length;
   const label = isActive
@@ -187,48 +194,21 @@ function ThinkingSection({ toolCalls, isActive, isZh }: { readonly toolCalls: To
   );
 }
 
+function parseToolCallInteractionView(tc: ToolCallLegacy) {
+  return parseInteractionToolViewFromCandidates(
+    [tc.tool, tc.displayName],
+    [tc.args, tc.result],
+  );
+}
+
 function ToolCallCard({ tc }: { readonly tc: ToolCallLegacy }) {
   const [expanded, setExpanded] = useState(false);
-  const [answered, setAnswered] = useState(false);
-  const interaction = useContext(InteractionContext);
 
   // request_user_input：渲染为「问题 + 可点击选项 + 等待你输入」的交互卡，
   // 而不是裸露 JSON。见 Goal 模式运行时闸门设计。
-  const interactionView = parseInteractionToolView(tc.tool, tc.result);
+  const interactionView = parseToolCallInteractionView(tc);
   if (interactionView) {
-    const waiting = !(interaction?.isStreaming ?? false) && !answered;
-    const select = (text: string) => {
-      if (!waiting || !interaction) return;
-      setAnswered(true);
-      interaction.onSelectOption(text);
-    };
-    return (
-      <div className={`tool-call-card interaction-card ${waiting ? 'waiting' : 'answered'}`}>
-        <div className="interaction-question">{interactionView.question}</div>
-        {interactionView.options.length > 0 ? (
-          <div className="interaction-options">
-            {interactionView.options.map((option, idx) => (
-              <button
-                key={`${idx}-${option}`}
-                type="button"
-                className="interaction-option-button"
-                disabled={!waiting}
-                onClick={() => select(option)}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-        ) : null}
-        <div className="interaction-hint">
-          {answered
-            ? '已发送你的选择…'
-            : waiting
-              ? '等待你的输入：点击上方选项，或直接在下方输入框回复。'
-              : '处理中…'}
-        </div>
-      </div>
-    );
+    return <InteractionToolCard view={interactionView} />;
   }
 
   const label = tc.tool === 'bash'
