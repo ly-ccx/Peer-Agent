@@ -375,29 +375,29 @@ Runner continuation turn 和 Explorer turn 都通过明确 Context Source/adapte
 
 ### 任务清单
 
-- [ ] 查找当前 system context assembly seam。
-- [ ] 新增或接入 `GoalRunnerContextSource`。
-- [ ] 新增或接入 `ExplorerContextSource`。
-- [ ] 给 Runner turn 注入 active goal summary。
-- [ ] 给 Runner turn 注入当前 task、boundaries、successCriteria、budget、Evidence refs。
-- [ ] 给 Explorer turn 注入 brief、scope、只读约束、报告 schema。
-- [ ] 确保普通 chat 模式不注入 Goal Runner 上下文。
-- [ ] 确保 provider-specific message shape 不散落到 runner 中。
+- [x] 查找当前 system context assembly seam。（`prompt-assembler.mjs` registry + `buildSystemContext`，input 透传 observe）
+- [x] 新增或接入 `GoalRunnerContextSource`。（`prompt/sources/goal-runner-source.mjs`，已注册）
+- [x] 新增或接入 `ExplorerContextSource`。（`prompt/sources/explorer-source.mjs`，已注册）
+- [x] 给 Runner turn 注入 active goal summary。（goal 模式读 `getActivePlanByConversation`）
+- [x] 给 Runner turn 注入当前 task、boundaries、successCriteria、budget、Evidence refs。
+- [x] 给 Explorer turn 注入 brief、scope、只读约束、报告 schema。（source 就绪；需调用方在 explorer turn 传 `mode:'explorer'` + `explorerContext`，在 Slice 4/8 explorer turn 接线时透传）
+- [x] 确保普通 chat 模式不注入 Goal Runner 上下文。（mode!=='goal'/'explorer' 返回空，测试覆盖）
+- [x] 确保 provider-specific message shape 不散落到 runner 中。（仅产出 section content，shape 仍由 provider encoder seam 负责）
 
 ### Runner 必须注入的约束
 
-- [ ] 继续推进当前 goal，不重新规划无关目标。
-- [ ] 不确定时优先读 authoritative `goal_get_plan`。
-- [ ] 完成 task 后必须用 `goal_update_task` 回写 Evidence。
-- [ ] 不可越过 boundaries。
-- [ ] 需要用户决策时调用 `request_user_input` 并让 Runner 停止。
+- [x] 继续推进当前 goal，不重新规划无关目标。
+- [x] 不确定时优先读 authoritative `goal_get_plan`。
+- [x] 完成 task 后必须用 `goal_update_task` 回写 Evidence。
+- [x] 不可越过 boundaries。
+- [x] 需要用户决策时调用 `request_user_input` 并让 Runner 停止。
 
 ### 验收标准
 
-- [ ] Goal 模式 runner turn 有明确 goal context。
-- [ ] Explorer turn 有明确只读约束。
-- [ ] 普通 chat 模式不受影响。
-- [ ] Prompt/Context 注入不变成零散字符串拼接。
+- [x] Goal 模式 runner turn 有明确 goal context。（`goal-runner-source.test.mjs`）
+- [x] Explorer turn 有明确只读约束。（`explorer-source.test.mjs`）
+- [x] 普通 chat 模式不受影响。（测试覆盖 + chat 模式零额外 section）
+- [x] Prompt/Context 注入不变成零散字符串拼接。（统一走 Context Source）
 
 ## Slice 6：批准流程接 Runner
 
