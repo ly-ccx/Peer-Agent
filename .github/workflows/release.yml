@@ -36,7 +36,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Derive version & channel from tag
         id: meta
@@ -46,20 +46,23 @@ jobs:
           VERSION="${TAG#v}"
           if [[ "$VERSION" == *-beta.* || "$VERSION" == *-alpha.* || "$VERSION" == *-rc.* ]]; then
             CHANNEL=beta
+            RELEASE_TYPE=prerelease
           else
             CHANNEL=latest
+            RELEASE_TYPE=release
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
-          echo "Tag=$TAG Version=$VERSION Channel=$CHANNEL"
+          echo "releaseType=$RELEASE_TYPE" >> "$GITHUB_OUTPUT"
+          echo "Tag=$TAG Version=$VERSION Channel=$CHANNEL ReleaseType=$RELEASE_TYPE"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10.22.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
@@ -68,7 +71,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -100,4 +103,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 阶段一：禁用 mac 自动证书发现，走 ad-hoc 签名（after-sign.cjs）。
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: pnpm exec electron-builder ${{ matrix.ebflags }} --publish always
+        run: >-
+          pnpm exec electron-builder ${{ matrix.ebflags }} --publish always
+          --config.publish.channel=${{ steps.meta.outputs.channel }}
+          --config.publish.releaseType=${{ steps.meta.outputs.releaseType }}
