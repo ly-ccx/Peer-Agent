@@ -237,7 +237,9 @@ export function useChatStreamSubscription(params: {
         const segments = [...(last.segments || [])];
         segments.push({ type: 'tool-call', tool, displayName, args, toolCallId, result: undefined });
         const next = [...prev.slice(0, -1), { ...last, segments }];
-        persistMessages(next);
+        // 方案 3：正文/segments 的持久化真值已下沉主进程（累积代理在 tool-call 事件
+        // 节流落盘）。此处只更新表达层，不再 persistMessages，避免与主进程的
+        // updateMessageById 双写同一会话文件（且后台会话本就拿不到该事件）。
         return next;
       });
     });
@@ -258,7 +260,8 @@ export function useChatStreamSubscription(params: {
           break;
         }
         const next = [...prev.slice(0, -1), { ...last, segments }];
-        persistMessages(next);
+        // 方案 3：tool-result 的 segments 持久化同样由主进程累积代理负责，
+        // 渲染端仅更新表达层，避免与主进程双写。
         return next;
       });
     });

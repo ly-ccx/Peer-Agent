@@ -270,3 +270,76 @@ test('autoArchiveConversations archives old active conversations and skips exclu
     cleanup();
   }
 });
+
+/**
+ * 方案 3: updateMessageById 是「助手正文持久化真值下沉主进程」的落盘原语。
+ * 验证: 按 id 精确 patch、未命中回退最后一条 assistant、无目标返回 null、浅合并保字段。
+ */
+test('updateMessageById patches the message by id (shallow merge)', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 't' });
+    store.appendMessage(conv.id, { id: 'u1', role: 'user', content: 'hi' });
+    store.appendMessage(conv.id, { id: 'a1', role: 'assistant', content: '', timestamp: 111 });
+    const res = store.updateMessageById(conv.id, 'a1', {
+      content: 'hello world',
+      segments: [{ type: 'text', content: 'hello world' }],
+    });
+    const a1 = res.messages.find((m) => m.id === 'a1');
+    assert.equal(a1.content, 'hello world');
+    assert.deepEqual(a1.segments, [{ type: 'text', content: 'hello world' }]);
+    // 浅合并: 未在 patch 中的字段保留。
+    assert.equal(a1.timestamp, 111);
+    // 重新读取持久化结果，确认确实落盘。
+    const reloaded = store.getConversation(conv.id).messages.find((m) => m.id === 'a1');
+    assert.equal(reloaded.content, 'hello world');
+  } finally {
+    cleanup();
+  }
+});
+
+test('updateMessageById marks interrupted on terminal error patch', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 't' });
+    store.appendMessage(conv.id, { id: 'a1', role: 'assistant', content: '' });
+    store.updateMessageById(conv.id, 'a1', { content: 'partial', interrupted: true });
+    const a1 = store.getConversation(conv.id).messages.find((m) => m.id === 'a1');
+    assert.equal(a1.interrupted, true);
+    assert.equal(a1.content, 'partial');
+  } finally {
+    cleanup();
+  }
+});
+
+test('updateMessageById falls back to last assistant when id not found (regenerate path)', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 't' });
+    store.appendMessage(conv.id, { id: 'u1', role: 'user', content: 'hi' });
+    store.appendMessage(conv.id, { id: 'old-assistant', role: 'assistant', content: '' });
+    // renderer regenerate 用了新 id，但 store 仍是旧的 last-message id。
+    const res = store.updateMessageById(conv.id, 'brand-new-id', { content: 'regenerated' });
+    const last = res.messages[res.messages.length - 1];
+    assert.equal(last.id, 'old-assistant');
+    assert.equal(last.content, 'regenerated');
+  } finally {
+    cleanup();
+  }
+});
+
+test('updateMessageById returns null when there is no target message', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 't' });
+    // 只有 user 消息，无 assistant，且 id 不命中 → 不静默新建。
+    store.appendMessage(conv.id, { id: 'u1', role: 'user', content: 'hi' });
+    const res = store.updateMessageById(conv.id, 'nope', { content: 'x' });
+    assert.equal(res, null);
+    // 空会话同样返回 null。
+    const conv2 = store.createConversation({ title: 't2' });
+    assert.equal(store.updateMessageById(conv2.id, 'a', { content: 'x' }), null);
+  } finally {
+    cleanup();
+  }
+});

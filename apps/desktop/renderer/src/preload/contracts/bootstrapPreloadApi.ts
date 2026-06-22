@@ -76,6 +76,23 @@ export type StreamReattachResult =
           }
       )[];
       readonly isStreaming: boolean;
+      // 方案 3：流终结后保留的终态快照字段。isStreaming=false 时表示这是一条
+      // 已结束的轮次（切回回放用）；terminalStatus 区分 done/error/aborted，
+      // interrupted 标记是否异常中断，usage/lifetimeUsage 为终态用量快照。
+      readonly terminalStatus?: 'done' | 'error' | 'aborted' | null;
+      readonly interrupted?: boolean;
+      readonly usage?: {
+        readonly inputTokens?: number;
+        readonly outputTokens?: number;
+        readonly cacheWriteTokens?: number;
+        readonly cacheReadTokens?: number;
+      } | null;
+      readonly lifetimeUsage?: {
+        readonly inputTokens?: number;
+        readonly outputTokens?: number;
+        readonly cacheWriteTokens?: number;
+        readonly cacheReadTokens?: number;
+      } | null;
     };
 
 /**

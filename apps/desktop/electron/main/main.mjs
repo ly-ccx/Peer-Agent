@@ -769,6 +769,7 @@ ipcMain.handle('prompt-snapshots:list', (_event, params = {}) =>
   promptSnapshotStore.list({ limit: params?.limit }));
 ipcMain.handle('prompt-snapshots:get', (_event, { id }) =>
   promptSnapshotStore.get(id));
+  assistantMessageId,
 ipcMain.handle('prompt-context-epochs:list', (_event, params = {}) =>
   promptSnapshotStore.listContextEpochs({ limit: params?.limit }));
 ipcMain.handle('prompt-context-epochs:events', (_event, params = {}) =>
@@ -783,6 +784,7 @@ ipcMain.handle('prompt-context-epochs:chain', (_event, params = {}) =>
     contextEpochId: params?.contextEpochId ?? null,
     limit: params?.limit,
   }));
+    assistantMessageId,
 
 // ── LLM Providers ──
 ipcMain.handle('llm:channels:list', () => listChannelDescriptors());

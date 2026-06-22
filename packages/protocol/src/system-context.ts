@@ -96,6 +96,12 @@ export interface ChatProviderMessage {
 export interface ChatSendRequest {
   readonly messages: readonly ChatProviderMessage[];
   readonly streamId: string;
+  /**
+   * 助手消息的持久化主键（renderer 在发送前已 append 的空 assistant 占位消息 id）。
+   * 主进程据此把累积的正文/segments 落盘到 conversationStore，无需依赖 renderer
+   * 在终态事件时回写——这是「正文持久化真值下沉主进程」的链路锚点。
+   */
+  readonly assistantMessageId?: string;
   readonly effort?: string;
   readonly mode?: string;
   readonly conversationId?: string;

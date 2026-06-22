@@ -152,6 +152,34 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
     return meta ? { ...meta, messages: newMessages } : null;
   }
 
+  /**
+   * 按消息 id 局部更新一条消息（浅合并 patch）。这是「助手正文持久化真值下沉主进程」
+   * 的落盘原语：主进程在流式累积/终结时，用 streamRecord 的 content/segments/usage/
+   * interrupted 直接 patch 对应 assistant 消息，无需 renderer 在终态事件回写。
+   *
+   * 定位策略：先按 messageId 精确匹配；未命中时回退到「最后一条 assistant 消息」——
+   * 覆盖 regenerate 路径（renderer 新建了 newAssistant.id，但 store 侧仍是 updateLastMessage
+   * 置空的旧 last-message id）。两者都不存在时返回 null（不静默新建，避免脏写）。
+   */
+  function updateMessageById(id, messageId, patch) {
+    if (!patch || typeof patch !== 'object') return null;
+    const messages = readJsonl(convFile(id));
+    if (!messages.length) return null;
+    let targetIndex = messageId ? messages.findIndex((m) => m && m.id === messageId) : -1;
+    if (targetIndex < 0) {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        if (messages[i] && messages[i].role === 'assistant') { targetIndex = i; break; }
+      }
+    }
+    if (targetIndex < 0) return null;
+    messages[targetIndex] = { ...messages[targetIndex], ...patch };
+    writeJsonl(convFile(id), messages);
+    const index = readIndex();
+    const meta = index.find((c) => c.id === id);
+    if (meta) { meta.updatedAt = new Date().toISOString(); writeJsonl(indexFile, index); }
+    return meta ? { ...meta, messages } : null;
+  }
+
   // 会话级累计用量账本。独立挂在 index meta 上（不在消息 jsonl 里），
   // 因此压缩（replaceMessages 仅重写消息文件）不会触及它 —— 这是修复
   // "压缩后右下角计费被清零" 的核心：累计 usage 不再依附于会被删除的消息。
@@ -259,6 +287,7 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
     updateMode,
     appendMessage,
     updateLastMessage,
+    updateMessageById,
     replaceMessages,
     addUsage,
     archiveConversation,

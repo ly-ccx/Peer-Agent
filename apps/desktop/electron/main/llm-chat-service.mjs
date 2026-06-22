@@ -41,6 +41,11 @@ let activeWorkspacePath = null;
 // 共 10 次），保持单一来源，不另造一套重试参数。
 const SAME_PROVIDER_RETRY_DELAYS_MS = DEFAULT_CONNECTION_RETRY_DELAYS_MS;
 
+// 流终结后保留 streamRecord 的时长。done/error/aborted 后不立即删除记录，而是标记
+// terminal 并保留一段时间，使「切回已结束的后台轮次」仍能通过 reattach 回放完整终态
+// 快照（正文/segments/interrupted/usage）。保留期满后才硬删除，释放内存。
+const TERMINAL_RETENTION_MS = 5 * 60 * 1000;
+
 // 可被用户 abort 打断的退避等待：abort 时以 AbortError 拒绝，沿用既有
 // AbortError -> chat:stream:aborted 的结构化取消路径。
 function sleepWithSignal(ms, signal) {
@@ -142,14 +147,47 @@ function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conver
     }
   };
 
+  // 「正文持久化真值下沉主进程」：把累积的 content/segments 直接 patch 到 store 里
+  // 对应的 assistant 消息，不再依赖 renderer 在终态事件回写。后台会话（主界面已切走、
+  // 该会话的 ChatSurface 不再消费事件）也能落盘完整正文，根治「切走即丢 → 看似自我中断」。
+  // 流式期间按时间节流写盘（默认 500ms），终结态强制 flush；写盘失败不影响事件透传。
+  const PERSIST_THROTTLE_MS = 500;
+  let lastPersistAt = 0;
+  const persistStreamRecord = ({ final = false, interrupted = false } = {}) => {
+    if (!conversationStore?.updateMessageById) return;
+    if (!streamRecord?.conversationId) return;
+    const now = Date.now();
+    if (!final && now - lastPersistAt < PERSIST_THROTTLE_MS) return;
+    lastPersistAt = now;
+    const patch = {
+      content: streamRecord.accumulatedText || '',
+      segments: Array.isArray(streamRecord.segments)
+        ? streamRecord.segments.map((segment) => ({ ...segment }))
+        : [],
+    };
+    if (final && interrupted) patch.interrupted = true;
+    try {
+      conversationStore.updateMessageById(
+        streamRecord.conversationId,
+        streamRecord.assistantMessageId ?? null,
+        patch,
+      );
+    } catch (err) {
+      console.warn('[llm-chat] persist stream record failed:', err?.message || err);
+    }
+  };
+  streamRecord.persist = persistStreamRecord;
+
   return {
     send(channel, payload) {
       if (channel === 'chat:stream:delta' && typeof payload?.content === 'string') {
         streamRecord.accumulatedText += payload.content;
         appendTextSegment('text', payload.content);
+        persistStreamRecord();
       } else if (channel === 'chat:stream:thinking' && typeof payload?.content === 'string') {
         streamRecord.accumulatedThinking += payload.content;
         appendTextSegment('thinking', payload.content);
+        persistStreamRecord();
       } else if (channel === 'chat:stream:tool-call') {
         streamRecord.segments.push({
           type: 'tool-call',
@@ -158,6 +196,7 @@ function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conver
           toolCallId: typeof payload?.toolCallId === 'string' ? payload.toolCallId : undefined,
           result: undefined,
         });
+        persistStreamRecord();
       } else if (channel === 'chat:stream:tool-result') {
         const toolCallId = typeof payload?.toolCallId === 'string' ? payload.toolCallId : null;
         for (let index = streamRecord.segments.length - 1; index >= 0; index -= 1) {
@@ -168,6 +207,7 @@ function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conver
           segment.result = typeof payload?.result === 'string' ? payload.result : '';
           break;
         }
+        persistStreamRecord();
       } else if (channel === 'chat:stream:done' || channel === 'chat:stream:error') {
         const lifetimeUsage = recordConversationUsage({
           conversationStore,
@@ -178,8 +218,19 @@ function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conver
           payload = { ...payload, lifetimeUsage };
         }
         streamRecord.terminalEventSent = true;
+        // 终结态强制落盘：done 视为正常完成；error 标记 interrupted=true，
+        // 让切回时表达层能区分「完成」与「中断」。
+        const erroredTerminal = channel === 'chat:stream:error';
+        streamRecord.terminalStatus = erroredTerminal ? 'error' : 'done';
+        streamRecord.interrupted = erroredTerminal;
+        if (payload?.usage) streamRecord.finalUsage = payload.usage;
+        if (payload?.lifetimeUsage) streamRecord.lifetimeUsage = payload.lifetimeUsage;
+        persistStreamRecord({ final: true, interrupted: erroredTerminal });
       } else if (channel === 'chat:stream:aborted') {
         streamRecord.terminalEventSent = true;
+        streamRecord.terminalStatus = 'aborted';
+        streamRecord.interrupted = true;
+        persistStreamRecord({ final: true, interrupted: true });
       }
       return realWebContents.send(channel, payload);
     },
@@ -230,10 +281,30 @@ export function createLlmChatService({
   }
 
   // 当前正在流式运行的会话 id 去重列表(只读快照)。
+  // 流终结后保留记录（供切回回放），但终结后的记录不应再被视为「运行中」。
+  // 因此所有「活跃」投影/认领都以 terminalEventSent 为界：仅未终结的才算 running。
+  function isRunning(record) {
+    return Boolean(record) && !record.terminalEventSent;
+  }
+
+  // 流终态收口：标记保留、广播运行态变化（终态记录会从 running 投影中消失），
+  // 并安排保留期满后的硬删除。重复调用安全（计时器只设一次）。
+  function retireStream(streamId) {
+    const record = activeStreams.get(streamId);
+    if (!record) return;
+    record.retainedAt = Date.now();
+    emitActiveStreamsChanged();
+    if (record.cleanupTimer) return;
+    record.cleanupTimer = setTimeout(() => {
+      activeStreams.delete(streamId);
+    }, TERMINAL_RETENTION_MS);
+    if (typeof record.cleanupTimer?.unref === 'function') record.cleanupTimer.unref();
+  }
+
   function listActiveConversationIds() {
     const ids = new Set();
     for (const record of activeStreams.values()) {
-      if (record.conversationId) ids.add(record.conversationId);
+      if (isRunning(record) && record.conversationId) ids.add(record.conversationId);
     }
     return [...ids];
   }
@@ -243,6 +314,7 @@ export function createLlmChatService({
   function listActiveStreams() {
     const byConversation = new Map();
     for (const record of activeStreams.values()) {
+      if (!isRunning(record)) continue;
       if (!record.conversationId) continue;
       if (!byConversation.has(record.conversationId)) {
         byConversation.set(record.conversationId, {
@@ -278,6 +350,7 @@ export function createLlmChatService({
     effort = 'default',
     mode = 'chat',
     conversationId = null,
+    assistantMessageId = null,
     contextAttachments = [],
     runtimeReminders = [],
     attachmentContext = [],
@@ -297,6 +370,8 @@ export function createLlmChatService({
       webContents,
       permissionIds: new Set(),
       conversationId,
+      // 正文持久化主键：主进程据此把累积正文/segments patch 回 store 的 assistant 消息。
+      assistantMessageId,
       // ADR 27: 快照发起时的工作区。流的工作区归属在发起时固定(与 sendMessage
       // 入口快照 activeWorkspacePath 的语义一致),后续切换工作区不改变已在跑的流。
       // 供活跃流投影携带工作区维度,让"任务在其它工作区仍在跑"成为可见事实。
@@ -578,9 +653,14 @@ export function createLlmChatService({
           streamId,
           error: 'stream_terminated_without_result',
         });
+        streamRecord.terminalEventSent = true;
+        streamRecord.terminalStatus = 'error';
+        streamRecord.interrupted = true;
+        streamRecord.persist?.({ final: true, interrupted: true });
       }
-      activeStreams.delete(streamId);
-      emitActiveStreamsChanged();
+      // 方案 3：不立即删除，保留终态记录一段时间，使切回已结束的后台轮次可经
+      // reattach 回放完整终态快照；保留期满后由 retireStream 内的计时器硬删除。
+      retireStream(streamId);
     }
   }
 
@@ -593,8 +673,13 @@ export function createLlmChatService({
       reason: 'stream_aborted',
     });
     active.webContents.send('chat:stream:aborted', { streamId });
-    activeStreams.delete(streamId);
-    emitActiveStreamsChanged();
+    // abort 直接走真实 webContents，绕过累积代理；故在此显式收口终态并落盘，
+    // 再走保留期（不立即删除），让切回被中断的后台轮次也能回放已累积正文。
+    active.terminalEventSent = true;
+    active.terminalStatus = 'aborted';
+    active.interrupted = true;
+    active.persist?.({ final: true, interrupted: true });
+    retireStream(streamId);
     return { aborted: true };
   }
 
@@ -615,12 +700,25 @@ export function createLlmChatService({
     if (id != null) {
       record = activeStreams.get(id) ?? null;
     } else if (conversationId != null) {
+      // 方案 3：同一会话可能同时存在「正在运行的新流」与「已终结保留的旧流」。
+      // 切回时优先认领运行中的流；没有运行中的，再回退到最近一条保留的终态记录，
+      // 使切回已结束的后台轮次也能回放完整终态快照。
+      let runningMatch = null;
+      let retainedMatch = null;
       for (const [activeId, activeRecord] of activeStreams.entries()) {
-        if (activeRecord?.conversationId === conversationId) {
-          id = activeId;
-          record = activeRecord;
+        if (activeRecord?.conversationId !== conversationId) continue;
+        if (isRunning(activeRecord)) {
+          runningMatch = [activeId, activeRecord];
           break;
         }
+        if (!retainedMatch || (activeRecord.retainedAt ?? 0) > (retainedMatch[1].retainedAt ?? 0)) {
+          retainedMatch = [activeId, activeRecord];
+        }
+      }
+      const chosen = runningMatch ?? retainedMatch;
+      if (chosen) {
+        id = chosen[0];
+        record = chosen[1];
       }
     } else if (activeStreams.size === 1) {
       const only = activeStreams.entries().next().value;
@@ -628,6 +726,7 @@ export function createLlmChatService({
       record = only?.[1] ?? null;
     }
     if (!record || id == null) return null;
+    const running = isRunning(record);
     return {
       streamId: id,
       conversationId: record.conversationId ?? null,
@@ -635,7 +734,13 @@ export function createLlmChatService({
       accumulatedText: record.accumulatedText ?? '',
       accumulatedThinking: record.accumulatedThinking ?? '',
       segments: Array.isArray(record.segments) ? record.segments.map((segment) => ({ ...segment })) : [],
-      isStreaming: true,
+      isStreaming: running,
+      // 终态快照：切回已结束轮次时，表达层据此补齐完整正文/工具段并标注中断态，
+      // 而非重新挂一个「进行中」的假象。running=true 时这些字段为中性默认值。
+      terminalStatus: running ? null : (record.terminalStatus ?? null),
+      interrupted: running ? false : Boolean(record.interrupted),
+      usage: record.finalUsage ?? null,
+      lifetimeUsage: record.lifetimeUsage ?? null,
     };
   }
 

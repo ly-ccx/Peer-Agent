@@ -546,11 +546,17 @@ export function ChatSurface({
       // 并恢复 streamIdRef,使现有 delta 监听重新匹配、无缝续上(不重发、不打断)。
       try {
         const live = await clientApi.chatStreamReattach({ conversationId });
-        if (cancelled || !live || !live.isStreaming || !live.streamId) return;
+        if (cancelled || !live || !live.streamId) return;
+        // 方案 3：reattach 既可能返回「运行中的流」，也可能返回「已终结但保留的终态快照」。
+        // - running：接回 streamIdRef + isStreaming，使 delta 监听续上（既有无缝续接）。
+        // - terminal：不重新武装流式，只用终态快照补齐完整正文/工具段，并标注 interrupted，
+        //   让切回已结束的后台轮次也能无缝回放（正文真值已由主进程落盘，这里仅做表达补齐）。
+        const running = live.isStreaming === true;
         const liveStartedAt = typeof live.startedAt === 'number' && Number.isFinite(live.startedAt)
           ? live.startedAt
           : Date.now();
         const liveSegments: ContentSegment[] = Array.isArray(live.segments) && live.segments.length > 0
+        const terminalInterrupted = !running && live.interrupted === true;
           ? live.segments.map((segment) => normalizeStreamSegment(segment as ContentSegment))
           : [];
         if (liveSegments.length === 0) {
@@ -567,6 +573,8 @@ export function ChatSurface({
           const persistedAssistant = last && last.role === 'assistant' ? last : null;
           const segments = mergeReattachedSegments(persistedAssistant?.segments, liveSegments);
           const liveMsg: ChatMsg = {
+            // 终态回放：异常中断标记保留；正常完成则清除既有 interrupted（轮次确已完成）。
+            interrupted: running ? persistedAssistant?.interrupted : terminalInterrupted,
             ...(persistedAssistant || {}),
             id: persistedAssistant?.id || nextId(),
             role: 'assistant',
@@ -579,9 +587,11 @@ export function ChatSurface({
           }
           return [...base, liveMsg];
         });
-        streamIdRef.current = live.streamId;
-        setTurnStartedAt(liveStartedAt);
-        setIsStreaming(true);
+        if (running) {
+          streamIdRef.current = live.streamId;
+          setTurnStartedAt(liveStartedAt);
+          setIsStreaming(true);
+        }
       } catch {
         // reattach 失败不影响正常加载;降级为无续接(用户可重新发送)。
       }
@@ -837,7 +847,7 @@ export function ChatSurface({
       ...buildConfigInstructionContext(systemInstructions),
       ...buildReplyLanguageContext(replyLanguage),
     ];
-    void clientApi.chatSend({ messages: apiMessages, streamId, effort: turnEffort, mode, conversationId, contextAttachments, continuityContext, configInstructions });
+    void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId, contextAttachments, continuityContext, configInstructions });
   }, [isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, mode, systemInstructions, replyLanguage]);
 
   const handleSend = useCallback(async () => {
@@ -930,7 +940,7 @@ export function ChatSurface({
       ...buildConfigInstructionContext(systemInstructions),
       ...buildReplyLanguageContext(replyLanguage),
     ];
-    void clientApi.chatSend({ messages: apiMessages, streamId, effort, mode, conversationId, contextAttachments, continuityContext, configInstructions });
+    void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: newAssistant.id, effort, mode, conversationId, contextAttachments, continuityContext, configInstructions });
   }, [isStreaming, hasProvider, conversationId, messages, effort, mode, systemInstructions, replyLanguage]);
 
   const handleBranch = useCallback(async (msgIndex: number) => {

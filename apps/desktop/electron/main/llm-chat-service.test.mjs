@@ -1512,3 +1512,138 @@ describe('llm chat service tool materialization', () => {
     }
   });
 });
+
+// 方案 3：助手正文持久化真值下沉主进程 + 流终结后保留 streamRecord 供回放。
+describe('llm chat service main-side persistence (方案 3)', () => {
+  function openaiProviderStore() {
+    return {
+      listProviders: () => [{
+        id: 'p1',
+        provider: 'openai',
+        baseUrl: 'https://example.test/v1',
+        model: 'test-model',
+        isDefault: true,
+        apiKeyConfigured: true,
+      }],
+      getDecryptedApiKey: () => 'test-key',
+    };
+  }
+
+  it('persists assistant content+segments by id on done, even with no visible session (background turn)', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const patches = [];
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'hello ' } }] },
+      { choices: [{ delta: { content: 'world' } }] },
+      { choices: [{ delta: {} }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+      '[DONE]',
+    ]), { status: 200 });
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: openaiProviderStore(),
+        conversationStore: {
+          addUsage: () => null,
+          // 主进程权威落盘：捕获每次按 id 的 patch（节流期间可能多次，终态强制 flush）。
+          updateMessageById: (id, messageId, patch) => {
+            patches.push({ id, messageId, patch: JSON.parse(JSON.stringify(patch)) });
+            return { id };
+          },
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hi' }],
+        streamId: 's-bg',
+        conversationId: 'c-bg',
+        assistantMessageId: 'a-bg',
+        // 后台轮次：webContents 仍会收到事件，但没有可见会话消费（这正是「切走即丢」的场景）。
+        webContents: { send: () => {} },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.ok(patches.length > 0, 'expected at least one persistence patch');
+    // 都打到正确的会话与消息 id。
+    assert.ok(patches.every((p) => p.id === 'c-bg' && p.messageId === 'a-bg'));
+    const finalPatch = patches[patches.length - 1].patch;
+    assert.equal(finalPatch.content, 'hello world');
+    const textSeg = (finalPatch.segments || []).find((s) => s.type === 'text');
+    assert.ok(textSeg && textSeg.content === 'hello world');
+    // done（正常完成）不应标记 interrupted。
+    assert.notEqual(finalPatch.interrupted, true);
+  });
+
+  it('marks interrupted=true on terminal error persistence', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const patches = [];
+    // 空响应 → empty_model_response 错误终态（不触发慢速网络重试）。
+    globalThis.fetch = async () => new Response('data: [DONE]\n\n', { status: 200 });
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: openaiProviderStore(),
+        conversationStore: {
+          addUsage: () => null,
+          updateMessageById: (id, messageId, patch) => {
+            patches.push({ id, messageId, patch: JSON.parse(JSON.stringify(patch)) });
+            return { id };
+          },
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hi' }],
+        streamId: 's-err',
+        conversationId: 'c-err',
+        assistantMessageId: 'a-err',
+        webContents: { send: () => {} },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.ok(patches.length > 0, 'expected a terminal persistence patch');
+    const finalPatch = patches[patches.length - 1].patch;
+    assert.equal(finalPatch.interrupted, true);
+  });
+
+  it('reattach returns a terminal snapshot after done (retained for replay)', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'final answer' } }] },
+      { choices: [{ delta: {} }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+      '[DONE]',
+    ]), { status: 200 });
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: openaiProviderStore(),
+        conversationStore: { addUsage: () => null, updateMessageById: () => ({}) },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hi' }],
+        streamId: 's-keep',
+        conversationId: 'c-keep',
+        assistantMessageId: 'a-keep',
+        webContents: { send: () => {} },
+      });
+
+      // 终态后不再算「运行中」，但记录被保留供回放。
+      assert.deepEqual(service.listActiveStreams(), []);
+      const snap = service.reattach({ conversationId: 'c-keep' });
+      assert.ok(snap, 'expected a retained terminal snapshot');
+      assert.equal(snap.isStreaming, false);
+      assert.equal(snap.terminalStatus, 'done');
+      assert.equal(snap.interrupted, false);
+      assert.equal(snap.accumulatedText, 'final answer');
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+});
