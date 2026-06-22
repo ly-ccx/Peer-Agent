@@ -318,9 +318,9 @@ Runner 在证据不足、路径不确定、失败原因不明时，能自动派�
 
 - [x] 在 `packages/protocol/src/goal.ts` 新增 `GoalExplorerRun`。
 - [x] 在 `packages/protocol/src/goal.ts` 新增 `GoalExplorerReport`。（同时新增 `GoalExplorerRequest` / `GoalExplorerProfile` / `GoalExplorerStatus`）
-- [~] 新增 `apps/desktop/electron/main/goal-explorer-runner.mjs`。（实现偏离计划：未建独立文件，改为 `main.mjs` 注入 `explorerRunner.runExplorer` + `goal-plan-store` 的 `dispatchExplorer/reportExplorer` + `goal-runner` 循环编排）
-- [~] 新增 `apps/desktop/electron/main/goal-explorer-runner.test.mjs`。（覆盖改由 `goal-runner.test.mjs` 的 explorer 派发/回填用例承担，无独立测试文件）
-- [~] 设计 Explorer run/report 持久化位置，优先 sidecar，避免污染主 plan JSON。（实际落在 `plan.runner.explorers`，与「收窄版 GoalPlan + runner」状态模型一致；sidecar 暂未采用）
+- [x] Explorer runner 能力落地。（经评估确认为最终设计，不再拆分独立文件：explorer 三职责天然分属现有三层——`main.mjs` 注入 `explorerRunner.runExplorer`（传输/适配）、`goal-runner.mjs` `pump` 循环编排、`goal-plan-store.mjs` `dispatchExplorer/reportExplorer` 持久化。硬抽独立文件会形成跨三层的浅包装，违反 YAGNI 与「避免 shallow pass-through wrappers」）
+- [x] Explorer 行为测试覆盖。（经评估确认为最终设计，不再建独立测试文件：explorer 派发/回填/失败降级/预算行为本质是 `pump` 循环行为，由 `goal-runner.test.mjs` 端到端覆盖更真实；独立单测需 mock 三层，测的是包装而非行为）
+- [x] Explorer run/report 持久化位置确定。（经评估确认为最终设计，落在 `plan.runner.explorers`，与 Slice 1 已确认的「收窄版 GoalPlan + runner」状态模型一致；sidecar 会引入第二套持久化路径、与该决策冲突，故不采用）
 - [x] 实现只读 Runtime Projection 过滤。（`runtime-projection-tool-materializer.mjs` 按 `mode === 'explorer'` 过滤）
 - [x] 实现 Explorer 预算计数。（`maxExplorers` + explorer 工具调用计入预算）
 - [x] 实现 Explorer 失败后的主 Runner 降级处理。
