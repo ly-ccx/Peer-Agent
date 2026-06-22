@@ -134,6 +134,35 @@ export type ClientToolStatus =
   | 'timeout'
   | 'cancelled';
 
+/**
+ * 聚合检索类工具（如 batch_search / local.search.aggregate）的单条子路(lane)状态。
+ *
+ * 用于还原"批量并行检索"截图式 UI：一个搜索意图被拆成多条子查询并发执行，
+ * 每条子路独立显示阶段（检索中 / 已检索 · N 个结果）。所有字段对普通单卡工具
+ * 不适用 —— lane 仅在 ToolCard.lanes 上出现，普通工具该字段为 undefined。
+ *
+ * 进度事件时序：pending → running(started) → completed(+laneResultCount)
+ * 异常终态：failed / timeout / cancelled（单路隔离，不阻塞其余子路与最终聚合）。
+ */
+export interface ToolCardLane {
+  /** 子路稳定标识；同一 toolCallId 下唯一，作为 reducer 折叠 key 的一部分。 */
+  readonly laneId: string;
+  /** 子路 UI 标签（如"检索仓库"）。缺省时渲染层回退到 laneQuery。 */
+  readonly laneLabel?: string;
+  /** 子路当前阶段。 */
+  readonly lanePhase:
+    | 'pending'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'timeout'
+    | 'cancelled';
+  /** 该子路已检索到的结果数（截图中的"· N 个结果"）；仅 completed 后有意义。 */
+  readonly laneResultCount?: number;
+  /** 该子路对应的检索词，便于 UI 展示与无 label 时回退。 */
+  readonly laneQuery?: string;
+}
+
 export interface ToolCard {
   readonly toolCallId: string;
   readonly toolId: string;
@@ -165,6 +194,12 @@ export interface ToolCard {
   readonly stdout?: string;
   /** Client local tool 流式 stderr 累积；断线丢失不补，由 evidence 兜底。 */
   readonly stderr?: string;
+  /**
+   * 仅当 tool card 对应聚合检索类工具（如 batch_search）时填充。承载多条并发
+   * 子路(lane)的逐条状态，供 UI 还原截图式"分路检索"。普通单卡工具为 undefined，
+   * 行为不变（向后兼容）。断线丢失由最终聚合 evidence 兜底。
+   */
+  readonly lanes?: readonly ToolCardLane[];
 }
 
 export interface IterationNode {

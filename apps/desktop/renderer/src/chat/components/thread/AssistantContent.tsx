@@ -8,6 +8,7 @@ import type {
   ToolProgress,
 } from '../../state/types';
 import { MarkdownMessage } from '../markdown/MarkdownMessage';
+import { BatchSearchToolCard } from './BatchSearchToolCard';
 import { InteractionToolCard } from './InteractionToolCard';
 
 function toolProgressLabel(
@@ -209,6 +210,16 @@ function ToolCallCard({ tc }: { readonly tc: ToolCallLegacy }) {
   const interactionView = parseToolCallInteractionView(tc);
   if (interactionView) {
     return <InteractionToolCard view={interactionView} />;
+  }
+
+  // batch_search：渲染为「分路逐条检索状态 + 聚合结果面板」，而不是裸 JSON。
+  // 见 docs/design/batch-search-parallel-aggregation.md。
+  if (tc.tool === 'batch_search') {
+    const isZhLocale =
+      typeof navigator !== 'undefined' && typeof navigator.language === 'string'
+        ? navigator.language.toLowerCase().startsWith('zh')
+        : true;
+    return <BatchSearchToolCard args={tc.args} result={tc.result} isZh={isZhLocale} />;
   }
 
   const label = tc.tool === 'bash'

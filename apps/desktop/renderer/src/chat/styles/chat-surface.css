@@ -1683,3 +1683,80 @@
     animation: none;
   }
 }
+
+/* batch_search 分路检索卡（方案丙）。见 docs/design/batch-search-parallel-aggregation.md */
+.batch-search-card .batch-search-total {
+  margin-left: auto;
+  font-size: 0.85em;
+  color: var(--graphite-fade);
+}
+
+.batch-search-lanes {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.batch-search-lane {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: 0.85em;
+  padding: 2px var(--space-2);
+  border-radius: 4px;
+}
+
+.batch-search-lane-label {
+  color: var(--graphite-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-search-lane-status {
+  flex: none;
+  color: var(--graphite-fade);
+}
+
+.batch-search-lane.running .batch-search-lane-status {
+  color: var(--azure-seal);
+}
+
+.batch-search-lane.done .batch-search-lane-status {
+  color: var(--graphite-base);
+}
+
+.batch-search-lane.error .batch-search-lane-status {
+  color: var(--rust-base, #b4453a);
+}
+
+.batch-search-results {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8em;
+}
+
+.batch-search-result-row {
+  display: flex;
+  gap: var(--space-2);
+  overflow: hidden;
+}
+
+.batch-search-result-loc {
+  flex: none;
+  color: var(--azure-seal);
+}
+
+.batch-search-result-text {
+  color: var(--graphite-fade);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

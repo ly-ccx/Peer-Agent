@@ -295,7 +295,7 @@ function* walkSearchFiles(rootDir) {
   }
 }
 
-function runFileSearch({ args, cwd }) {
+export function runFileSearch({ args, cwd }) {
   const query = typeof args.query === 'string' ? args.query : '';
   if (query.length === 0) {
     return formatToolFailure('search_files', 'blocked', 'query must be a non-empty string');

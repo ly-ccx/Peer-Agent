@@ -4,6 +4,7 @@ import { createLocalGoalProvider } from './local-goal-provider.mjs';
 import { createLocalHealthProvider } from './local-health-provider.mjs';
 import { createLocalInteractionProvider } from './local-interaction-provider.mjs';
 import { createLocalMcpProvider } from './local-mcp-provider.mjs';
+import { createLocalSearchAggregateProvider } from './local-search-aggregate-provider.mjs';
 import { createLocalShellProvider } from './local-shell-provider.mjs';
 import { createLocalWebProvider } from './local-web-provider.mjs';
 import { createFailedClientToolResult, createPermissionGrant } from './tool-result-factory.mjs';
@@ -20,6 +21,7 @@ export function createLocalToolHost({
   goalProvider = createLocalGoalProvider(),
   interactionProvider = createLocalInteractionProvider(),
   webProvider = createLocalWebProvider({ userDataPath }),
+  searchAggregateProvider = createLocalSearchAggregateProvider({ workspaceRoot }),
   providers,
   extraProviders = [],
 }) {
@@ -32,6 +34,7 @@ export function createLocalToolHost({
       goalProvider,
       interactionProvider,
       webProvider,
+      searchAggregateProvider,
       ...(mcpProvider ? [mcpProvider] : []),
       ...extraProviders,
     ],

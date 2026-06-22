@@ -1,0 +1,21 @@
+Run multiple content searches in parallel over the workspace in a single call, then return one aggregated, de-duplicated, relevance-ranked result.
+
+Use this tool when:
+- You have several related search intents at once (e.g. find a symbol's definition, its usages, and a related config key) and want them executed together.
+- You want one consolidated result instead of issuing many separate search_files calls.
+
+How it works:
+- Provide a `queries` array (1-8 sub-queries). Each sub-query runs concurrently and reuses the same content-search engine as search_files (case-insensitive substring by default, scoped to the workspace, dependency/build dirs skipped).
+- Each sub-query reports its own progress (searching / done with N results), so the UI can show per-lane status.
+- Results are merged across lanes: matches at the same path:line are de-duplicated and ranked higher when hit by more sub-queries.
+
+Rules:
+- This is a read-only tool (no file changes). It only searches file contents inside the workspace.
+- Each sub-query needs a non-empty `query` substring. Optionally set `id`/`label` (for UI lanes), `path` (scope to a workspace-relative subdir), `case_sensitive`, and `max_results`.
+- This phase supports file/code content search only. Do not use it for semantic or memory retrieval.
+- Prefer this over many sequential search_files calls when the searches are independent.
+
+Input:
+- `queries` (required): array of { id?, label?, query, path?, case_sensitive?, max_results? }.
+- `max_concurrency` (optional): max lanes running at once (1-8, default 4).
+- `dedupe` (optional): merge identical path:line matches across lanes (default true).
