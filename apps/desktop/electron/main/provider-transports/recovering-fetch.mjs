@@ -18,13 +18,37 @@ const CONNECTION_FAILURE_PATTERNS = [
   /UND_ERR_|HeadersTimeoutError|ConnectTimeoutError|SocketError/i,
 ];
 
+// Fast-first, bounded backoff. Cold-connection blips (the common "first call"
+// failure) recover almost immediately on the 500ms retry, while the total
+// transport budget stays bounded (~10s across 4 retries) instead of the old
+// flat 5s x 5 = 25s. The first failed round still emits a `retrying`
+// connection-recovery event, so the "重连中" banner appears right away.
 export const DEFAULT_CONNECTION_RETRY_DELAYS_MS = [
-  5_000,
-  5_000,
-  5_000,
-  5_000,
+  500,
+  1_500,
+  3_000,
   5_000,
 ];
+
+// Connect/first-response timeout guard. A socket that hangs during DNS / TLS /
+// proxy cold start (returning neither headers nor an error) is aborted after
+// this bound and surfaced as a recoverable ConnectTimeoutError, so it enters
+// the backoff loop instead of blocking the turn forever.
+export const DEFAULT_CONNECT_TIMEOUT_MS = 12_000;
+
+function makeConnectTimeoutError(ms) {
+  // Message includes "ConnectTimeoutError" so isRecoverableConnectionFailure
+  // classifies it as a recoverable connection failure.
+  const error = new Error(`connect timeout after ${ms}ms (ConnectTimeoutError)`);
+  error.code = 'ConnectTimeoutError';
+  return error;
+}
+
+function defaultScheduleTimeout(cb, ms) {
+  const timer = setTimeout(cb, ms);
+  if (timer?.unref) timer.unref();
+  return () => clearTimeout(timer);
+}
 
 function errorDetails(error) {
   const parts = [];
@@ -141,6 +165,8 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
   retryDelaysMs = DEFAULT_CONNECTION_RETRY_DELAYS_MS,
   waitImpl = sleep,
   detectProxy = defaultDetectProxy,
+  connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS,
+  scheduleTimeout = defaultScheduleTimeout,
 } = {}) {
   const maxRetries = retryDelaysMs.length;
   let lastError = null;
@@ -164,6 +190,37 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
     ? [electronChannel, nodeChannel]
     : [nodeChannel, electronChannel];
 
+  // Guard the connect/first-response phase. fetch resolves once response headers
+  // arrive, so racing this await bounds time-to-headers (connect + TLS + proxy),
+  // not the streamed body. A hung socket is aborted and surfaced as a recoverable
+  // ConnectTimeoutError so it enters the backoff loop instead of blocking forever.
+  const callWithConnectTimeout = async (impl) => {
+    if (!connectTimeoutMs || connectTimeoutMs <= 0) {
+      return impl(url, init);
+    }
+    const controller = new AbortController();
+    let timedOut = false;
+    const cancelTimer = scheduleTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, connectTimeoutMs);
+    const upstreamSignal = init?.signal;
+    const onUpstreamAbort = () => controller.abort();
+    if (upstreamSignal) {
+      if (upstreamSignal.aborted) controller.abort();
+      else upstreamSignal.addEventListener('abort', onUpstreamAbort, { once: true });
+    }
+    try {
+      return await impl(url, { ...init, signal: controller.signal });
+    } catch (error) {
+      if (timedOut) throw makeConnectTimeoutError(connectTimeoutMs);
+      throw error;
+    } finally {
+      cancelTimer();
+      if (upstreamSignal) upstreamSignal.removeEventListener('abort', onUpstreamAbort);
+    }
+  };
+
   for (let round = 0; round <= maxRetries; round += 1) {
     if (init?.signal?.aborted) throw createAbortError();
 
@@ -171,7 +228,7 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
     const primaryImpl = await primaryChannel.resolve();
     if (primaryImpl) {
       try {
-        const response = await primaryImpl(url, init);
+        const response = await callWithConnectTimeout(primaryImpl);
         if (round > 0) {
           emitConnectionRecovery(webContents, {
             streamId,
@@ -196,7 +253,7 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
     const secondaryImpl = await secondaryChannel.resolve();
     if (secondaryImpl) {
       try {
-        const response = await secondaryImpl(url, init);
+        const response = await callWithConnectTimeout(secondaryImpl);
         emitConnectionRecovery(webContents, {
           streamId,
           provider,

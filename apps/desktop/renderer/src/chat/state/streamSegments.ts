@@ -203,3 +203,33 @@ export function parseSerializedToolSegments(content: string): ContentSegment[] |
 
   return segments.some((segment) => segment.type === 'tool-call') ? segments : undefined;
 }
+
+/**
+ * 终态兜底：把「已发出但未回填结果」的 tool-call 段标记为中断。
+ *
+ * 背景：tool-call 段在渲染层以 `result === undefined && !synthetic` 表达「执行中」
+ * （永久转圈）。当一轮在 done/error/aborted 终态结束时，若某个 tool-call 段始终没有
+ * 等到 tool-result（例如连接中断、被取消、后端未回传结果），该段会卡在转圈态。
+ * 本函数为这些残留段补写一个明确的「已中断」result 文本，使其脱离转圈态并向用户
+ * 说明原因。这是对既有视图模型的事实兜底，不声称工具已成功执行。
+ *
+ * 纯函数：当没有任何需要兜底的段时返回原数组引用（便于调用方据此跳过 setState）。
+ *
+ * @param segments 待处理的分段数组
+ * @param note 写入残留段 result 的中断说明文本
+ */
+export function markDanglingToolCallsInterrupted(
+  segments: readonly ContentSegment[] | undefined,
+  note: string
+): ContentSegment[] {
+  const list = segments || [];
+  let changed = false;
+  const next = list.map((segment) => {
+    if (segment.type === 'tool-call' && segment.result === undefined && segment.synthetic !== true) {
+      changed = true;
+      return { ...segment, result: note };
+    }
+    return segment;
+  });
+  return changed ? next : (list as ContentSegment[]);
+}

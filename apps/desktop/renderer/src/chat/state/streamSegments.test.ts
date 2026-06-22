@@ -10,6 +10,7 @@ import {
   getTextContent,
   migrateToSegments,
   parseSerializedToolSegments,
+  markDanglingToolCallsInterrupted,
 } from './streamSegments.ts';
 import type { ContentSegment } from './types.ts';
 
@@ -141,5 +142,56 @@ describe('parseSerializedToolSegments', () => {
     const out = parseSerializedToolSegments(content);
     const call = out!.find((s) => s.type === 'tool-call') as Extract<ContentSegment, { type: 'tool-call' }>;
     assert.deepEqual(call.args, { raw: 'not-json' });
+  });
+});
+
+describe('markDanglingToolCallsInterrupted', () => {
+  const toolOf = (segs: ContentSegment[], i: number) =>
+    segs[i] as Extract<ContentSegment, { type: 'tool-call' }>;
+
+  it('fills result on a tool-call still pending (result===undefined) so it leaves the spinner state', () => {
+    const input: ContentSegment[] = [txt('hi'), tool('bash')];
+    const out = markDanglingToolCallsInterrupted(input, 'INTERRUPTED');
+    assert.equal(toolOf(out, 1).result, 'INTERRUPTED');
+    // 文本段保持不变
+    assert.deepEqual(out[0], txt('hi'));
+  });
+
+  it('does not touch tool-call segments that already have a result', () => {
+    const input: ContentSegment[] = [tool('bash', { result: 'done' })];
+    const out = markDanglingToolCallsInterrupted(input, 'INTERRUPTED');
+    assert.equal(toolOf(out, 0).result, 'done');
+  });
+
+  it('skips synthetic tool-call segments (parsed from historical text, not live execution)', () => {
+    const input: ContentSegment[] = [tool('run', { synthetic: true })];
+    const out = markDanglingToolCallsInterrupted(input, 'INTERRUPTED');
+    assert.equal(toolOf(out, 0).result, undefined);
+  });
+
+  it('returns the same array reference when nothing needs patching (lets caller skip setState)', () => {
+    const input: ContentSegment[] = [txt('x'), tool('bash', { result: 'ok' })];
+    const out = markDanglingToolCallsInterrupted(input, 'INTERRUPTED');
+    assert.equal(out, input);
+  });
+
+  it('does not mutate the original segments (pure)', () => {
+    const original = tool('bash');
+    const input: ContentSegment[] = [original];
+    markDanglingToolCallsInterrupted(input, 'INTERRUPTED');
+    assert.equal((original as Extract<ContentSegment, { type: 'tool-call' }>).result, undefined);
+  });
+
+  it('handles undefined segments by returning an empty array', () => {
+    const out = markDanglingToolCallsInterrupted(undefined, 'INTERRUPTED');
+    assert.deepEqual(out, []);
+  });
+
+  it('patches multiple dangling tool-calls in one pass', () => {
+    const input: ContentSegment[] = [tool('a'), tool('b', { result: 'ok' }), tool('c')];
+    const out = markDanglingToolCallsInterrupted(input, 'X');
+    assert.equal(toolOf(out, 0).result, 'X');
+    assert.equal(toolOf(out, 1).result, 'ok');
+    assert.equal(toolOf(out, 2).result, 'X');
   });
 });

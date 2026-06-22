@@ -3,7 +3,7 @@ import type React from 'react';
 import type { ClientToolCall } from '@peer-agent/protocol';
 
 import { clientApi } from '../../clientApi';
-import { isEmptyAssistantPlaceholder } from '../state/streamSegments';
+import { isEmptyAssistantPlaceholder, markDanglingToolCallsInterrupted } from '../state/streamSegments';
 import type { ChatMsg, TokenUsageState, ToolProgress } from '../state/types';
 import type { TypewriterController } from './useTypewriterStream';
 
@@ -160,6 +160,9 @@ export function useChatStreamSubscription(params: {
               ...last,
               ...(msgUsage ? { usage: msgUsage } : {}),
               ...(turnDurationMs != null ? { durationMs: turnDurationMs } : {}),
+              // 终态兜底：正常 done 时一般所有 tool-call 段都已回填；若仍有残留段未拿到
+              // 结果（异常），补写中断标记，避免该段在结束后永久转圈。
+              segments: markDanglingToolCallsInterrupted(last.segments, '工具结果未返回（本轮已结束）'),
             };
             const updated = [...prev.slice(0, -1), patched];
             persistMessages(updated);
@@ -203,8 +206,14 @@ export function useChatStreamSubscription(params: {
             return next;
           }
           // 停止时也留痕:把"已工作多久"记到这条 assistant 上,让用户看到中断前的整轮耗时。
-          if (last?.role === 'assistant' && turnDurationMs != null) {
-            const updated = [...prev.slice(0, -1), { ...last, durationMs: turnDurationMs }];
+          // 同时给「已发出但未回填结果」的 tool-call 段补写中断标记,避免停止后该段永久转圈。
+          if (last?.role === 'assistant') {
+            const patched: ChatMsg = {
+              ...last,
+              ...(turnDurationMs != null ? { durationMs: turnDurationMs } : {}),
+              segments: markDanglingToolCallsInterrupted(last.segments, '工具调用已中断（生成停止）'),
+            };
+            const updated = [...prev.slice(0, -1), patched];
             persistMessages(updated);
             return updated;
           }
@@ -318,6 +327,8 @@ export function useChatStreamSubscription(params: {
                 ...last,
                 interrupted: true,
                 ...(turnDurationMs != null ? { durationMs: turnDurationMs } : {}),
+                // 连接/流出错时，给未回填结果的 tool-call 段补写中断标记，避免永久转圈。
+                segments: markDanglingToolCallsInterrupted(last.segments, '工具调用已中断（连接出错）'),
               },
             ];
             persistMessages(updated);

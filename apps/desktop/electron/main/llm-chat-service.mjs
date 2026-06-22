@@ -30,16 +30,20 @@ import {
   resolveProviderCredential,
 } from './provider-credential-resolver.mjs';
 import { resolveChannel } from './provider-channels.mjs';
-import { DEFAULT_CONNECTION_RETRY_DELAYS_MS } from './provider-transports/recovering-fetch.mjs';
 
 const activeStreams = new Map();
 const permissionGate = createChatPermissionGate({ activeStreams });
 const conversationToolContexts = new Map();
 let activeWorkspacePath = null;
 
-// (a) 同 provider 流读取早期中断的自动重试退避：复用既有连接退避（10s×5 + 30s×5，
-// 共 10 次），保持单一来源，不另造一套重试参数。
-const SAME_PROVIDER_RETRY_DELAYS_MS = DEFAULT_CONNECTION_RETRY_DELAYS_MS;
+// (a) 同 provider 流读取早期中断的自动重试退避。
+//
+// 注意：传输层 recovering-fetch 已经对「连接阶段」的瞬态失败做了自己的有界退避
+// （含 connect-timeout 兜底）。如果这里再复用传输层那一整组延迟，两层会相乘叠加，
+// 首发一旦失败用户要干等很久——这正是「第一次调用卡住」的主因之一。
+// 因此本层只负责「连接已建立、但流读取早期被掐断」(replay-safe) 的重试，使用独立的
+// 短而有界的快速退避（首轮快速重试 + 有界总时长 ~5s），与传输层退避解耦，避免乘积。
+const SAME_PROVIDER_RETRY_DELAYS_MS = [500, 1_500, 3_000];
 
 // 流终结后保留 streamRecord 的时长。done/error/aborted 后不立即删除记录，而是标记
 // terminal 并保留一段时间，使「切回已结束的后台轮次」仍能通过 reattach 回放完整终态
