@@ -4,8 +4,16 @@
 #   - v1.2.3            → 正式 Release（latest 通道）
 #   - v1.2.3-beta.N     → 预发布 Release（beta 通道，prerelease=true）
 #
-# 链路：stamp 版本(来自 tag) → 构建 Rust native binary → 构建前端 → electron-builder
-#       --publish always 发布到 GitHub Releases（含 latest*.yml / beta*.yml 更新清单）。
+# 链路（拆分 build / publish，消除并行发布竞态）：
+#   meta   → 从 tag 解析版本 / 通道 / releaseType / prerelease（单一事实源）
+#   build  → matrix（mac + win）各自构建，electron-builder --publish never
+#            只产出安装包与更新清单（*-mac.yml / *.yml），不直接发布，
+#            产物经 upload-artifact 上传。
+#   release→ 单个 job 下载全部平台产物，一次性创建/更新同一个 GitHub Release。
+#
+# 为什么拆分：mac、win 两个 matrix job 若各自 --publish 到同一 tag，会并发
+#   抢建 Release，导致同一 tag 出现多个 Release、产物被劈开（electron-builder
+#   + Actions matrix 的已知竞态）。集中到单个 release job 发布可彻底消除。
 #
 # 阶段一：关闭强制代码签名 / 公证（electron-builder.yml notarize=false，
 #         CSC_IDENTITY_AUTO_DISCOVERY=false）。阶段二补齐证书后在此注入 secrets。
@@ -16,12 +24,45 @@ on:
     tags:
       - 'v*'
 
-# electron-builder 需要写 Releases 的权限（GITHUB_TOKEN 自动注入）。
+# release job 需要写 Releases 的权限（GITHUB_TOKEN 自动注入）。
 permissions:
   contents: write
 
 jobs:
+  # ── 单一事实源：从 tag 解析版本与通道，供 build / release 复用 ──
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      channel: ${{ steps.meta.outputs.channel }}
+      releaseType: ${{ steps.meta.outputs.releaseType }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - name: Derive version & channel from tag
+        id: meta
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          if [[ "$VERSION" == *-beta.* || "$VERSION" == *-alpha.* || "$VERSION" == *-rc.* ]]; then
+            CHANNEL=beta
+            RELEASE_TYPE=prerelease
+            PRERELEASE=true
+          else
+            CHANNEL=latest
+            RELEASE_TYPE=release
+            PRERELEASE=false
+          fi
+          {
+            echo "version=$VERSION"
+            echo "channel=$CHANNEL"
+            echo "releaseType=$RELEASE_TYPE"
+            echo "prerelease=$PRERELEASE"
+          } >> "$GITHUB_OUTPUT"
+          echo "Tag=$TAG Version=$VERSION Channel=$CHANNEL ReleaseType=$RELEASE_TYPE Prerelease=$PRERELEASE"
+
   build:
+    needs: meta
     strategy:
       fail-fast: false
       matrix:
@@ -37,24 +78,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-
-      - name: Derive version & channel from tag
-        id: meta
-        shell: bash
-        run: |
-          TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#v}"
-          if [[ "$VERSION" == *-beta.* || "$VERSION" == *-alpha.* || "$VERSION" == *-rc.* ]]; then
-            CHANNEL=beta
-            RELEASE_TYPE=prerelease
-          else
-            CHANNEL=latest
-            RELEASE_TYPE=release
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
-          echo "releaseType=$RELEASE_TYPE" >> "$GITHUB_OUTPUT"
-          echo "Tag=$TAG Version=$VERSION Channel=$CHANNEL ReleaseType=$RELEASE_TYPE"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -81,7 +104,7 @@ jobs:
 
       - name: Stamp version from tag
         shell: bash
-        run: node scripts/stamp-version.mjs "${{ steps.meta.outputs.version }}"
+        run: node scripts/stamp-version.mjs "${{ needs.meta.outputs.version }}"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -96,14 +119,57 @@ jobs:
       - name: Build frontend
         run: pnpm --filter @peer-agent/desktop build
 
-      - name: Build & publish (electron-builder)
+      # 只构建、不发布（--publish never）。electron-builder 仍会按通道语义生成
+      # 更新清单（beta-mac.yml / beta.yml 或 latest-mac.yml / latest.yml）。
+      - name: Build (electron-builder, no publish)
         working-directory: apps/desktop
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 阶段一：禁用 mac 自动证书发现，走 ad-hoc 签名（after-sign.cjs）。
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: >-
-          pnpm exec electron-builder ${{ matrix.ebflags }} --publish always
-          --config.publish.channel=${{ steps.meta.outputs.channel }}
-          --config.publish.releaseType=${{ steps.meta.outputs.releaseType }}
+          pnpm exec electron-builder ${{ matrix.ebflags }} --publish never
+          --config.publish.channel=${{ needs.meta.outputs.channel }}
+          --config.publish.releaseType=${{ needs.meta.outputs.releaseType }}
+
+      # 上传各平台产物（安装包 + blockmap + 更新清单）给 release job 汇总。
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.platform }}
+          path: |
+            dist-electron/*.dmg
+            dist-electron/*.zip
+            dist-electron/*.exe
+            dist-electron/*.blockmap
+            dist-electron/*.yml
+          if-no-files-found: error
+          retention-days: 5
+
+  # ── 单 job 集中发布：下载所有平台产物，一次性写入同一个 Release ──
+  release:
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f -exec cp -f {} release-assets/ \;
+          echo "=== release-assets ==="
+          ls -la release-assets
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ needs.meta.outputs.version }}
+          body: "Release ${{ needs.meta.outputs.version }} (${{ needs.meta.outputs.channel }})"
+          prerelease: ${{ needs.meta.outputs.prerelease }}
+          files: release-assets/*
+          fail_on_unmatched_files: true
