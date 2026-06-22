@@ -67,10 +67,20 @@ contextBridge.exposeInMainWorld('peerAgent', {
   goalPlansSetStatus: (params) => ipcRenderer.invoke('goalPlans:set-status', params),
   goalPlansRecordTaskEvidence: (params) => ipcRenderer.invoke('goalPlans:record-task-evidence', params),
   goalPlansDelete: (params) => ipcRenderer.invoke('goalPlans:delete', params),
+  goalRunnerGetState: (params) => ipcRenderer.invoke('goalRunner:get-state', params),
+  goalRunnerStart: (params) => ipcRenderer.invoke('goalRunner:start', params),
+  goalRunnerPause: (params) => ipcRenderer.invoke('goalRunner:pause', params),
+  goalRunnerResume: (params) => ipcRenderer.invoke('goalRunner:resume', params),
+  goalRunnerClear: (params) => ipcRenderer.invoke('goalRunner:clear', params),
   onGoalPlansChanged: (listener) => {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('goalPlans:changed', handler);
     return () => ipcRenderer.removeListener('goalPlans:changed', handler);
+  },
+  onGoalRunnerChanged: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('goalRunner:changed', handler);
+    return () => ipcRenderer.removeListener('goalRunner:changed', handler);
   },
   chatSend: (params) => ipcRenderer.invoke('chat:send', params),
   chatAbort: (params) => ipcRenderer.invoke('chat:abort', params),

@@ -33,6 +33,8 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
     name: TOOL_NAMES.bash,
     capabilityId: 'legacy.local.shell.exec',
     prompt: () => readPromptAsset('bash.txt'),
+    // Explorer 第一版只允许结构化文件读取，不投影通用 shell。
+    availableInModes: ['chat', 'goal'],
     runtime: legacyRuntime('local.shell.exec'),
     permissionPolicy: {
       kind: 'shell',
@@ -54,6 +56,7 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
     name: TOOL_NAMES.readFile,
     capabilityId: 'legacy.local.file.read',
     prompt: () => readPromptAsset('read_file.txt'),
+    availableInModes: ['chat', 'goal', 'explorer'],
     runtime: legacyRuntime('local.file.read'),
     permissionPolicy: {
       kind: 'file-read',
@@ -75,6 +78,7 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
     name: TOOL_NAMES.editFile,
     capabilityId: 'legacy.local.file.edit',
     prompt: () => readPromptAsset('edit_file.txt'),
+    availableInModes: ['chat', 'goal'],
     runtime: legacyRuntime('local.file.edit'),
     permissionPolicy: {
       kind: 'file-write',
@@ -109,6 +113,7 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
     name: TOOL_NAMES.writeFile,
     capabilityId: 'legacy.local.file.write',
     prompt: () => readPromptAsset('write_file.txt'),
+    availableInModes: ['chat', 'goal'],
     runtime: legacyRuntime('local.file.write'),
     permissionPolicy: {
       kind: 'file-write',

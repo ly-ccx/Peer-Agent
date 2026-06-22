@@ -225,6 +225,22 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     assert.ok(names.includes('bash'), 'bash should remain available in chat mode');
   });
 
+  it('projects only explicitly allowed readonly tools in explorer mode', () => {
+    const names = materializedNames('explorer');
+    assert.deepEqual(names, ['read_file']);
+  });
+
+  it('marks write and goal capabilities as mode_excluded in explorer mode', () => {
+    const registry = createRuntimeToolRegistry();
+    const projection = createRuntimeProjectionFromToolRegistry(registry, { mode: 'explorer' });
+    const byName = new Map(projection.capabilities.map((capability) => [capability.name, capability]));
+    assert.equal(byName.get('read_file')?.health, 'available');
+    assert.equal(byName.get('bash')?.health, 'mode_excluded');
+    assert.equal(byName.get('edit_file')?.health, 'mode_excluded');
+    assert.equal(byName.get('write_file')?.health, 'mode_excluded');
+    assert.equal(byName.get('goal_update_task')?.health, 'mode_excluded');
+  });
+
   it('preserves the all-modes view when mode is omitted', () => {
     const registry = createRuntimeToolRegistry();
     const projection = createRuntimeProjectionFromToolRegistry(registry);

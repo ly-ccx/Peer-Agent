@@ -4,7 +4,6 @@ import type {
   ConfigInstructionContextItem,
   ContextAttachmentItem,
   ContinuityContextItem,
-  GoalPlan,
   LlmProviderConfigView,
   LocalAccessLevel,
 } from '@peer-agent/protocol';
@@ -294,11 +293,6 @@ export function ChatSurface({
   // 表达层只反映 isStreaming 真值,不引入新的执行真值。下沉到 useStreamingReport。
   useStreamingReport(conversationId, isStreaming, onStreamingChange);
   const [streamError, setStreamError] = useState<string | null>(null);
-  // 计划批准的「执行意图」暂存：当用户在本轮助手会话仍 streaming 时点「批准并执行」，
-  // 此时运行时被占用、直接发起执行轮会被丢弃（旧 bug）。改为把待执行 plan 暂存于此 ref，
-  // 由下方 effect 监听 isStreaming 由 true→false（本轮会话结束）后自动发起执行轮并清空。
-  // 用 ref 而非 state：避免额外渲染，且执行意图是「一次性副作用触发器」而非渲染数据。
-  const pendingGoalExecutionRef = useRef<GoalPlan | null>(null);
   // 思考强度全局偏好(读取/回写 settings-store,五档),逻辑见 hooks/useEffortPreference。
   const { effort, setEffort, changeEffort } = useEffortPreference();
   // 对话模式按会话持久化在会话 meta 上(非全局设置):模式是「每会话状态」,切换会话
@@ -556,13 +550,13 @@ export function ChatSurface({
           ? live.startedAt
           : Date.now();
         const liveSegments: ContentSegment[] = Array.isArray(live.segments) && live.segments.length > 0
-        const terminalInterrupted = !running && live.interrupted === true;
           ? live.segments.map((segment) => normalizeStreamSegment(segment as ContentSegment))
           : [];
         if (liveSegments.length === 0) {
           if (live.accumulatedThinking) liveSegments.push({ type: 'thinking', content: live.accumulatedThinking });
           if (live.accumulatedText) liveSegments.push({ type: 'text', content: live.accumulatedText });
         }
+        const terminalInterrupted = !running && live.interrupted === true;
         // 重新打开会话时,loaded 末尾通常已是这一轮进行中的 assistant 消息。
         // 续接不能用 main 的活跃流快照直接覆盖它:renderer 侧可能已经把更完整的
         // 分段思考/工具调用记录落盘了。这里以 loaded/prev 中已有 segments
@@ -573,14 +567,14 @@ export function ChatSurface({
           const persistedAssistant = last && last.role === 'assistant' ? last : null;
           const segments = mergeReattachedSegments(persistedAssistant?.segments, liveSegments);
           const liveMsg: ChatMsg = {
-            // 终态回放：异常中断标记保留；正常完成则清除既有 interrupted（轮次确已完成）。
-            interrupted: running ? persistedAssistant?.interrupted : terminalInterrupted,
             ...(persistedAssistant || {}),
             id: persistedAssistant?.id || nextId(),
             role: 'assistant',
             content: contentFromSegments(segments, live.accumulatedText ?? persistedAssistant?.content ?? ''),
             segments,
             timestamp: persistedAssistant?.timestamp || Date.now(),
+            // 终态回放：异常中断标记保留；正常完成则清除既有 interrupted（轮次确已完成）。
+            interrupted: running ? persistedAssistant?.interrupted : terminalInterrupted,
           };
           if (persistedAssistant) {
             return [...base.slice(0, -1), liveMsg];
@@ -620,6 +614,43 @@ export function ChatSurface({
       })),
     });
   }, [conversationId, draft, messageQueue]);
+
+  useEffect(() => {
+    return clientApi.onGoalRunnerChanged((payload) => {
+      if (payload?.type !== 'goalRunner:streamStarted') return;
+      if (!conversationId || payload.conversationId !== conversationId) return;
+      const streamId = typeof payload.streamId === 'string' ? payload.streamId : '';
+      if (!streamId) return;
+      const now = typeof payload.startedAt === 'number' ? payload.startedAt : Date.now();
+      const assistantMsg: ChatMsg = {
+        id: nextId(),
+        role: 'assistant',
+        content: '',
+        segments: [],
+        timestamp: now,
+      };
+      streamIdRef.current = streamId;
+      setTurnStartedAt(now);
+      setStreamError(null);
+      setActiveUsage(null);
+      setProviderRecoveryNotice(null);
+      setPendingPermissionCalls([]);
+      setToolProgress(null);
+      setIsStreaming(true);
+      setMessages((prev) => {
+        const tail = prev[prev.length - 1];
+        if (tail && isEmptyAssistantPlaceholder(tail)) {
+          return [...prev.slice(0, -1), assistantMsg];
+        }
+        return [...prev, assistantMsg];
+      });
+      void clientApi.conversationsAppendMessage({
+        id: conversationId,
+        message: { id: assistantMsg.id, role: 'assistant', content: '', timestamp: now },
+      });
+      onConversationUpdated?.();
+    });
+  }, [conversationId, onConversationUpdated]);
 
   useChatStreamSubscription({
     conversationId,
@@ -981,45 +1012,8 @@ export function ChatSurface({
     void submitMessage(text, [], effort);
   }, [isStreaming, hasProvider, conversationId, submitMessage, effort]);
 
-  // 计划获批后唤起「执行轮」：把"开始执行"作为一条用户消息，复用既有 submitMessage 发送路径
-  // （不另造旁路），让模型在 goal 闸门放行下按计划开始执行子任务。
-  // store 侧已落 GoalApproval Evidence（治理事实），此处只负责驱动执行。
-  // 见 Goal 模式设计 时序图阶段二（批准）→阶段三（执行）。
-  // 真正发起执行轮：把"开始执行"作为一条用户消息复用 submitMessage 路径。
-  // 该函数假设调用时已空闲（isStreaming=false）；空闲判定由调用方/effect 负责。
-  const dispatchGoalExecution = useCallback((plan: GoalPlan) => {
-    if (!hasProvider || !conversationId) return;
-    const planLabel = plan.title || plan.goal || '';
-    const text = isZh
-      ? `我已批准计划「${planLabel}」（planId=${plan.planId}）。请按计划开始执行：依据 dependsOn 拓扑序与先序遍历逐个执行叶子子任务，有副作用的步骤先申请权限，每个子任务完成后用 goal_update_task 以 Evidence 回写状态。`
-      : `I have approved the plan "${planLabel}" (planId=${plan.planId}). Please start executing it now: run leaf subtasks in dependsOn topological + pre-order, request permission before any side-effecting step, and write each subtask's status back via goal_update_task with Evidence.`;
-    void submitMessage(text, [], effort);
-  }, [hasProvider, conversationId, submitMessage, effort, isZh]);
-
-  // 计划获批的入口（GoalPlanPanel onApproved 回调）。
-  // 关键修复：若点击批准时本轮助手会话仍在 streaming（AI 还在输出 / 运行时被占用），
-  // 不再直接 return 丢弃执行意图（旧 bug：用户"点批准没反应"），而是把 plan 暂存到
-  // pendingGoalExecutionRef，待下方 effect 在 isStreaming 转 false（本轮结束）后自动发起执行轮。
-  // 即「计划创建后不抢，会话结束后批准才真正生效执行」。
-  const startGoalExecution = useCallback((plan: GoalPlan) => {
-    if (!hasProvider || !conversationId) return;
-    if (isStreaming) {
-      pendingGoalExecutionRef.current = plan;
-      return;
-    }
-    dispatchGoalExecution(plan);
-  }, [isStreaming, hasProvider, conversationId, dispatchGoalExecution]);
-
-  // 监听本轮会话结束：当 isStreaming 由 true→false 且存在暂存的执行意图时，
-  // 自动发起执行轮并清空暂存。这样在 streaming 中点的批准会"延后到会话结束"生效。
-  useEffect(() => {
-    if (isStreaming) return;
-    const pending = pendingGoalExecutionRef.current;
-    if (!pending) return;
-    if (!hasProvider || !conversationId) return;
-    pendingGoalExecutionRef.current = null;
-    dispatchGoalExecution(pending);
-  }, [isStreaming, hasProvider, conversationId, dispatchGoalExecution]);
+  // GoalPlanPanel 的批准动作只记录治理事实；真正执行由 main process Goal Runner
+  // 监听 goalPlans:approve 后托管推进，renderer 不再伪造一条用户消息来启动执行。
 
   // 方案 B：右侧常驻分栏的 portal 宿主。GoalPlanPanel 展开态 body 投影到此 <aside>。
   // 用回调 ref 存 DOM，挂载后触发重渲染，确保首次展开就能拿到容器。
@@ -1235,7 +1229,7 @@ export function ChatSurface({
       ) : null}
 
       <div className="chat-composer-wrap">
-        {mode === 'goal' ? <GoalPlanPanel conversationId={conversationId} isZh={isZh} onApproved={startGoalExecution} sidePanelContainer={goalSideEl} /> : null}
+        {mode === 'goal' ? <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSideEl} /> : null}
         <PermissionGateStrip
           pendingCalls={pendingPermissionCalls}
           onApprove={approvePendingPermissionCall}

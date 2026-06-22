@@ -95,6 +95,12 @@ export type StreamReattachResult =
       } | null;
     };
 
+export interface GoalRunnerStateView {
+  readonly planId: string;
+  readonly planStatus: GoalPlanStatus;
+  readonly runner: GoalPlan['runner'] | null;
+}
+
 /**
  * ADR 23: 会话累计用量(lifetime usage)。
  * 存于 index meta,独立于消息 jsonl,因此压缩(replaceMessages)不影响它。
@@ -207,6 +213,11 @@ export interface BootstrapPreloadApi {
   }) => Promise<GoalPlan>;
   readonly goalPlansApprove: (params: { planId: string; approval: GoalApproval }) => Promise<GoalPlan>;
   readonly goalPlansSetStatus: (params: { planId: string; status: GoalPlanStatus }) => Promise<GoalPlan>;
+  readonly goalRunnerGetState: (params: { planId: string }) => Promise<GoalRunnerStateView | null>;
+  readonly goalRunnerStart: (params: { planId: string; options?: Record<string, unknown> }) => Promise<GoalRunnerStateView | null>;
+  readonly goalRunnerPause: (params: { planId: string }) => Promise<GoalRunnerStateView | null>;
+  readonly goalRunnerResume: (params: { planId: string; options?: Record<string, unknown> }) => Promise<GoalRunnerStateView | null>;
+  readonly goalRunnerClear: (params: { planId: string }) => Promise<GoalRunnerStateView | null>;
   readonly goalPlansRecordTaskEvidence: (params: {
     planId: string;
     taskId: string;
@@ -217,6 +228,9 @@ export interface BootstrapPreloadApi {
   // 无需切换会话/重挂载。reason: 'persist'（创建/修订/审批/状态/证据）或 'delete'。
   readonly onGoalPlansChanged: (
     listener: (payload: { reason: string; planId: string | null }) => void,
+  ) => () => void;
+  readonly onGoalRunnerChanged: (
+    listener: (payload: { type?: string; planId?: string | null; [key: string]: unknown }) => void,
   ) => () => void;
   readonly chatSend: (params: ChatSendRequest) => Promise<void>;
   readonly chatAbort: (params: { streamId: string }) => Promise<void>;

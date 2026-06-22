@@ -60,12 +60,14 @@ function evidencePolicyForTool(tool) {
 }
 
 // 工具是否在当前会话模式下可投影（ADR 35）。
-// 未声明 availableInModes 的工具在所有模式可用（向后兼容）。
+// 未声明 availableInModes 的工具在 chat/goal 维持向后兼容；
+// explorer 是更受限的只读子 Agent profile，必须显式声明可用，避免默认暴露写入/MCP/Web 能力。
 // 传入 mode 为 null/undefined（无模式上下文）时不做模式过滤。
 function isToolAvailableInMode(tool, mode) {
   const modes = tool.availableInModes;
-  if (!Array.isArray(modes) || modes.length === 0) return true;
   if (mode == null) return true;
+  if (mode === 'explorer' && (!Array.isArray(modes) || modes.length === 0)) return false;
+  if (!Array.isArray(modes) || modes.length === 0) return true;
   return modes.includes(mode);
 }
 

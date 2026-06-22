@@ -32,6 +32,7 @@ import { createContextBaselineRecorder } from './prompt/context-baseline-recorde
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
 import { createConversationStore } from './conversation-store.mjs';
 import { createGoalPlanStore } from './goal-plan-store.mjs';
+import { createGoalRunner } from './goal-runner.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
 import { buildPersistedCompactedMessages } from './conversation-compaction-persistence.mjs';
 import { compactIfNeeded } from './context-compactor.mjs';
@@ -116,6 +117,7 @@ const goalPlanStore = createGoalPlanStore({
   // broadcastToAllWindows 是后文的函数声明（已提升），onChange 仅在运行时触发，引用安全。
   onChange: (payload) => broadcastToAllWindows('goalPlans:changed', payload),
 });
+let goalRunner = null;
 const promptSnapshotStore = createPromptSnapshotStore();
 const contextBaselineRecorder = createContextBaselineRecorder({
   promptSnapshotStore,
@@ -219,6 +221,115 @@ function broadcastToAllWindows(channel, payload) {
   }
 }
 
+function getRunnerWebContents() {
+  const wins = BrowserWindow.getAllWindows();
+  return wins.find((win) => !win.isDestroyed())?.webContents ?? null;
+}
+
+function toRuntimeMessages(messages = []) {
+  return (Array.isArray(messages) ? messages : [])
+    .filter((message) => message && (message.role === 'user' || message.role === 'assistant'))
+    .map((message) => ({
+      role: message.role,
+      content: typeof message.content === 'string' ? message.content : '',
+    }));
+}
+
+function buildGoalRunnerMessage(plan, turnNumber) {
+  const planLabel = plan?.title || plan?.goal || plan?.planId || 'goal';
+  return `Goal Runner tick ${turnNumber} for plan "${planLabel}" (planId=${plan?.planId || 'unknown'}). Continue from the approved GoalPlan state.`;
+}
+
+function buildGoalRunnerReminder(plan, turnNumber) {
+  return {
+    id: `goal-runner-${plan?.planId || 'unknown'}-${turnNumber}`,
+    title: 'Goal Runner execution contract',
+    kind: 'goal-runner',
+    scope: 'turn',
+    layer: 'L6_MODE_REMINDER',
+    content: 'Continue autonomously within the approved goal, boundaries, and success criteria. Use the existing tools and permission flow; when a subtask is completed, update it through the goal task evidence path. If you need user input, permission, or evidence is insufficient, stop and explain the blocker instead of pretending completion.',
+  };
+}
+
+function buildExplorerMessage({ plan, explorer }) {
+  const request = explorer?.request || {};
+  return `Explorer mission for plan "${plan?.title || plan?.goal || plan?.planId || 'goal'}".
+Question: ${request.question || 'Explore missing evidence for the active goal'}
+Reason: ${request.reason || 'The Goal Runner needs more evidence before continuing.'}
+Scope include: ${(request.scope?.include || []).join(', ') || '(not specified)'}
+Scope exclude: ${(request.scope?.exclude || []).join(', ') || '(not specified)'}
+Budget maxToolCalls: ${request.budget?.maxToolCalls || 4}`;
+}
+
+function buildExplorerReminder(explorer) {
+  return {
+    id: `goal-explorer-${explorer?.explorerId || 'unknown'}`,
+    title: 'Explorer readonly contract',
+    kind: 'goal-explorer',
+    scope: 'turn',
+    layer: 'L6_MODE_REMINDER',
+    content: `Profile: readonly_explorer. You are a dynamically created evidence explorer, not a fixed role.
+Use only the tools exposed to this explorer context. Do not modify files, do not update the goal plan, and do not claim evidence you did not inspect.
+Return a concise JSON object only with: summary, findings[{claim,evidenceRefs}], evidenceRefs, recommendedNextStep, confidence(low|medium|high).`,
+  };
+}
+
+function createCollectingWebContents() {
+  const events = [];
+  let text = '';
+  let terminal = null;
+  return {
+    send(channel, payload) {
+      events.push({ channel, payload });
+      if (channel === 'chat:stream:delta' && typeof payload?.content === 'string') {
+        text += payload.content;
+      }
+      if (channel === 'chat:stream:done' || channel === 'chat:stream:error' || channel === 'chat:stream:aborted') {
+        terminal = { channel, payload };
+      }
+    },
+    getText() {
+      return text;
+    },
+    getEvents() {
+      return events.slice();
+    },
+    getTerminal() {
+      return terminal;
+    },
+  };
+}
+
+function parseExplorerReport(rawText, fallback = {}) {
+  const text = typeof rawText === 'string' ? rawText.trim() : '';
+  let parsed = null;
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) {
+        try { parsed = JSON.parse(match[0]); } catch {}
+      }
+    }
+  }
+  const report = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed
+    : { summary: text || fallback.summary || 'Explorer finished without textual output.' };
+  const evidenceRefs = Array.isArray(report.evidenceRefs)
+    ? report.evidenceRefs.filter((ref) => typeof ref === 'string' && ref.trim()).map((ref) => ref.trim())
+    : [];
+  return {
+    summary: typeof report.summary === 'string' && report.summary.trim()
+      ? report.summary.trim()
+      : fallback.summary || 'Explorer completed.',
+    findings: Array.isArray(report.findings) ? report.findings : [],
+    evidenceRefs,
+    recommendedNextStep: typeof report.recommendedNextStep === 'string' ? report.recommendedNextStep : undefined,
+    confidence: ['low', 'medium', 'high'].includes(report.confidence) ? report.confidence : 'medium',
+  };
+}
+
 const llmChatService = createLlmChatService({
   llmConfigStore,
   conversationStore,
@@ -226,14 +337,92 @@ const llmChatService = createLlmChatService({
   promptSnapshotStore,
   preferredAccessLevel: initialSettings.localAccessLevel,
   mcpRegistry,
-  ensureFreshTokens,
-  ensureFreshGoogleTokens,
   // 注入带 onChange 的同一 goalPlanStore 单例，使 AI 工具写计划经唯一写路径广播，
   // 浮条无需切会话即可随流式更新。见 Goal 模式设计。
   goalPlanStore,
   broadcast: broadcastToAllWindows,
 });
 llmChatService.setWorkspacePath(settingsStore.getAll().activeWorkspace || null);
+
+goalRunner = createGoalRunner({
+  goalPlanStore,
+  chatRuntime: {
+    async runGoalTurn({ plan, turnNumber }) {
+      const webContents = getRunnerWebContents();
+      if (!webContents) {
+        return { blocked: true, blockedReason: 'No renderer window is available for Goal Runner' };
+      }
+      const conversation = conversationStore.getConversation(plan.conversationId);
+      if (!conversation) {
+        return { failed: true, failureReason: 'Goal conversation not found' };
+      }
+      const streamId = randomUUID();
+      broadcastToAllWindows('goalRunner:changed', {
+        type: 'goalRunner:streamStarted',
+        planId: plan.planId,
+        conversationId: plan.conversationId,
+        streamId,
+        turnNumber,
+        startedAt: Date.now(),
+      });
+      const messages = [
+        ...toRuntimeMessages(conversation.messages),
+        { role: 'user', content: buildGoalRunnerMessage(plan, turnNumber) },
+      ];
+      await llmChatService.sendMessage({
+        messages,
+        webContents,
+        streamId,
+        effort: 'default',
+        mode: 'goal',
+        conversationId: plan.conversationId,
+        runtimeReminders: [buildGoalRunnerReminder(plan, turnNumber)],
+      });
+      return { continue: false, intent: 'verify' };
+    },
+  },
+  explorerRunner: {
+    async runExplorer({ plan, explorer }) {
+      const streamId = randomUUID();
+      const webContents = createCollectingWebContents();
+      broadcastToAllWindows('goalRunner:changed', {
+        type: 'goalRunner:explorerStreamStarted',
+        planId: plan.planId,
+        explorerId: explorer.explorerId,
+        streamId,
+        startedAt: Date.now(),
+      });
+      await llmChatService.sendMessage({
+        messages: [{ role: 'user', content: buildExplorerMessage({ plan, explorer }) }],
+        webContents,
+        streamId,
+        effort: 'default',
+        mode: 'explorer',
+        conversationId: plan.conversationId,
+        runtimeReminders: [buildExplorerReminder(explorer)],
+      });
+      const terminal = webContents.getTerminal();
+      if (terminal?.channel === 'chat:stream:error') {
+        throw new Error(terminal.payload?.error || 'Explorer stream failed');
+      }
+      if (terminal?.channel === 'chat:stream:aborted') {
+        throw new Error('Explorer stream aborted');
+      }
+      const report = parseExplorerReport(webContents.getText(), {
+        summary: 'Explorer completed without a structured report.',
+      });
+      if (report.evidenceRefs.length === 0) {
+        report.evidenceRefs = [`goal-explorer://${explorer.explorerId}/stream/${streamId}`];
+      }
+      report.toolCallCount = webContents
+        .getEvents()
+        .filter((event) => event.channel === 'chat:stream:tool-call')
+        .length;
+      return report;
+    },
+  },
+  emitEvent: (payload) => broadcastToAllWindows('goalRunner:changed', payload),
+});
 
 function buildRuntimeProjection() {
   const session = sessionStore.getSession();
@@ -553,8 +742,19 @@ ipcMain.handle('goalPlans:get', (_, { planId }) => goalPlanStore.getPlan(planId)
 ipcMain.handle('goalPlans:create', (_, { draft }) => goalPlanStore.createPlan(draft));
 ipcMain.handle('goalPlans:revise', (_, { planId, patch, reason, changedBy }) =>
   goalPlanStore.revisePlan(planId, patch, { reason, changedBy }));
-ipcMain.handle('goalPlans:approve', (_, { planId, approval }) => goalPlanStore.recordApproval(planId, approval));
+ipcMain.handle('goalPlans:approve', (_, { planId, approval }) => {
+  const plan = goalPlanStore.recordApproval(planId, approval);
+  if (approval?.decision === 'approve') {
+    void goalRunner?.start(planId);
+  }
+  return plan;
+});
 ipcMain.handle('goalPlans:set-status', (_, { planId, status }) => goalPlanStore.setPlanStatus(planId, status));
+ipcMain.handle('goalRunner:get-state', (_, { planId }) => goalRunner?.getState(planId) ?? null);
+ipcMain.handle('goalRunner:start', (_, { planId, options } = {}) => goalRunner?.start(planId, options) ?? null);
+ipcMain.handle('goalRunner:pause', (_, { planId }) => goalRunner?.pause(planId) ?? null);
+ipcMain.handle('goalRunner:resume', (_, { planId, options } = {}) => goalRunner?.resume(planId, options) ?? null);
+ipcMain.handle('goalRunner:clear', (_, { planId }) => goalRunner?.clear(planId) ?? null);
 ipcMain.handle('goalPlans:record-task-evidence', (_, { planId, taskId, change }) =>
   goalPlanStore.recordTaskEvidence(planId, taskId, change));
 ipcMain.handle('goalPlans:delete', (_, { planId }) => {
@@ -569,6 +769,7 @@ ipcMain.handle('chat:send', (event, {
   effort,
   mode,
   conversationId,
+  assistantMessageId,
   contextAttachments,
   runtimeReminders,
   attachmentContext,
@@ -583,6 +784,7 @@ ipcMain.handle('chat:send', (event, {
     effort,
     mode,
     conversationId,
+    assistantMessageId,
     contextAttachments,
     runtimeReminders,
     attachmentContext,
@@ -769,7 +971,6 @@ ipcMain.handle('prompt-snapshots:list', (_event, params = {}) =>
   promptSnapshotStore.list({ limit: params?.limit }));
 ipcMain.handle('prompt-snapshots:get', (_event, { id }) =>
   promptSnapshotStore.get(id));
-  assistantMessageId,
 ipcMain.handle('prompt-context-epochs:list', (_event, params = {}) =>
   promptSnapshotStore.listContextEpochs({ limit: params?.limit }));
 ipcMain.handle('prompt-context-epochs:events', (_event, params = {}) =>
@@ -784,7 +985,6 @@ ipcMain.handle('prompt-context-epochs:chain', (_event, params = {}) =>
     contextEpochId: params?.contextEpochId ?? null,
     limit: params?.limit,
   }));
-    assistantMessageId,
 
 // ── LLM Providers ──
 ipcMain.handle('llm:channels:list', () => listChannelDescriptors());
