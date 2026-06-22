@@ -10,6 +10,8 @@
 const DEFAULT_MAX_TURNS = 8;
 const DEFAULT_MAX_TOOL_CALLS = 40;
 const DEFAULT_MAX_EXPLORERS = 3;
+/** 连续多少轮双信号（已完成数 + 叶子 Evidence 数）都不增长即判定 no-progress 阻塞。 */
+const DEFAULT_NO_PROGRESS_LIMIT = 3;
 
 const TERMINAL_PLAN_STATUSES = new Set(['completed', 'cancelled', 'failed']);
 const STOPPED_RUNNER_STATUSES = new Set(['paused', 'blocked', 'budget_exhausted', 'completed', 'failed']);
@@ -56,6 +58,43 @@ function runnerIsStopped(runner) {
 function hasCompletedProgress(plan) {
   const progress = plan?.progress;
   return progress && progress.total > 0 && progress.completed === progress.total;
+}
+
+/**
+ * 统计计划内所有叶子任务（无 subtasks）的 evidenceRefs 总数。
+ * 作为 no-progress 双信号之一：Evidence 增长视为有进展。
+ */
+function countLeafEvidence(plan) {
+  const roots = Array.isArray(plan?.tasks) ? plan.tasks : [];
+  let total = 0;
+  const stack = [...roots];
+  while (stack.length > 0) {
+    const task = stack.pop();
+    if (!task || typeof task !== 'object') continue;
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    if (subtasks.length > 0) {
+      for (const child of subtasks) stack.push(child);
+      continue;
+    }
+    if (Array.isArray(task.evidenceRefs)) total += task.evidenceRefs.length;
+  }
+  return total;
+}
+
+/**
+ * 计算 no-progress 双信号基线：已完成任务数 + 叶子 Evidence 总数。
+ * 任一信号相对上一轮增长，即视为「有进展」。
+ */
+function progressSignal(plan) {
+  const completed = Number.isFinite(plan?.progress?.completed)
+    ? Math.max(0, Math.trunc(plan.progress.completed))
+    : 0;
+  return { completed, evidence: countLeafEvidence(plan) };
+}
+
+function signalAdvanced(prev, next) {
+  if (!prev) return true;
+  return next.completed > prev.completed || next.evidence > prev.evidence;
 }
 
 export function createGoalRunner({
@@ -225,6 +264,10 @@ export function createGoalRunner({
   }
 
   async function pump(planId, session) {
+    // no-progress 双信号基线，仅存活于本次 pump 闭包内：
+    // resume 会重新拉起 pump，计数自然清零（既往不咎语义）。
+    let lastSignal = null;
+    let noProgressStreak = 0;
     while (!session.cancelled) {
       const plan = goalPlanStore.getPlan(planId);
       if (!plan) return null;
@@ -263,6 +306,27 @@ export function createGoalRunner({
           updatedAt: now(),
         });
         emit('goalRunner:budgetExhausted', { planId });
+        return getState(planId);
+      }
+
+      // no-progress 双信号护栏：基于截至目前的累计进展（含上一轮 runGoalTurn
+      // 写入与 explorer 回填）。连续 DEFAULT_NO_PROGRESS_LIMIT 轮无增长即阻塞。
+      const signal = progressSignal(plan);
+      if (signalAdvanced(lastSignal, signal)) {
+        noProgressStreak = 0;
+      } else {
+        noProgressStreak += 1;
+      }
+      lastSignal = signal;
+      if (noProgressStreak >= DEFAULT_NO_PROGRESS_LIMIT) {
+        goalPlanStore.setRunnerState(planId, {
+          enabled: true,
+          status: 'blocked',
+          intent: 'block',
+          blockedReason: 'no_progress',
+          updatedAt: now(),
+        });
+        emit('goalRunner:blocked', { planId, reason: 'no_progress' });
         return getState(planId);
       }
 

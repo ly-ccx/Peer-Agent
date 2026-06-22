@@ -260,14 +260,14 @@ pnpm --filter @peer-agent/protocol typecheck
 
 ### 任务清单
 
-- [ ] 实现 leaf task 提取与完成判定。
-- [ ] 实现 successCriteria 检查入口。
-- [ ] 实现 intent 决策：`execute | verify | explore | synthesize | block`。
-- [ ] 实现 no-progress 防护。
-- [ ] 实现权限拒绝后的 stop/block 策略。
-- [ ] 实现 `request_user_input` 后的 stop/block 策略。
-- [ ] 实现工具失败后的 exception policy 处理入口。
-- [ ] 实现预算耗尽后的 `budget_exhausted` 状态。
+- [x] 实现 leaf task 提取与完成判定。
+- [x] 实现 successCriteria 检查入口。
+- [x] 实现 intent 决策：`execute | verify | explore | synthesize | block`。
+- [ ] 实现 no-progress 防护。（未实现独立的连续无进展检测；当前依赖 `maxTurns` / `maxToolCalls` 预算上限兜底防止死循环）
+- [x] 实现权限拒绝后的 stop/block 策略。
+- [x] 实现 `request_user_input` 后的 stop/block 策略。
+- [x] 实现工具失败后的 exception policy 处理入口。
+- [x] 实现预算耗尽后的 `budget_exhausted` 状态。
 
 ### 默认预算建议
 
@@ -281,26 +281,26 @@ maxExplorers: 4
 
 ### 自动完成条件
 
-- [ ] 所有 leaf tasks 均为 `completed`。
-- [ ] 每个 completed task 均有 evidenceRefs。
-- [ ] successCriteria 有对应结果说明或 Evidence。
-- [ ] 完成状态由 Runner 写入 plan/runner 状态，但任务完成仍必须经 `goal_update_task` Evidence 回写。
+- [x] 所有 leaf tasks 均为 `completed`。
+- [x] 每个 completed task 均有 evidenceRefs。
+- [x] successCriteria 有对应结果说明或 Evidence。
+- [x] 完成状态由 Runner 写入 plan/runner 状态，但任务完成仍必须经 `goal_update_task` Evidence 回写。
 
 ### 阻塞条件
 
-- [ ] 权限被拒绝。
-- [ ] 需要用户选择或确认。
-- [ ] 工具失败且 exception policy 要 pause/ask_user。
-- [ ] budget 耗尽。
-- [ ] Explorer 也无法补足证据。
-- [ ] 模型连续 N 轮未产生有效进展。
+- [x] 权限被拒绝。
+- [x] 需要用户选择或确认。
+- [x] 工具失败且 exception policy 要 pause/ask_user。
+- [x] budget 耗尽。
+- [x] Explorer 也无法补足证据。
+- [ ] 模型连续 N 轮未产生有效进展。（未实现独立检测，由预算上限兜底）
 
 ### 验收标准
 
-- [ ] 所有 leaf tasks completed 且有 evidenceRefs 时，Runner 可以进入 verify/complete 流程。
-- [ ] 没有 evidenceRefs 时不允许目标完成。
-- [ ] 连续无进展不会无限循环。
-- [ ] 遇到用户选择需求时进入 blocked/paused，而不是继续跑。
+- [x] 所有 leaf tasks completed 且有 evidenceRefs 时，Runner 可以进入 verify/complete 流程。
+- [x] 没有 evidenceRefs 时不允许目标完成。
+- [x] 连续无进展不会无限循环。（由 `maxTurns` / `maxToolCalls` 预算上限保证，非独立无进展检测）
+- [x] 遇到用户选择需求时进入 blocked/paused，而不是继续跑。
 
 ## Slice 4：Explorer SubAgents 只读探索
 
@@ -310,14 +310,14 @@ Runner 在证据不足、路径不确定、失败原因不明时，能自动派�
 
 ### 任务清单
 
-- [ ] 在 `packages/protocol/src/goal.ts` 新增 `GoalExplorerRun`。
-- [ ] 在 `packages/protocol/src/goal.ts` 新增 `GoalExplorerReport`。
-- [ ] 新增 `apps/desktop/electron/main/goal-explorer-runner.mjs`。
-- [ ] 新增 `apps/desktop/electron/main/goal-explorer-runner.test.mjs`。
-- [ ] 设计 Explorer run/report 持久化位置，优先 sidecar，避免污染主 plan JSON。
-- [ ] 实现只读 Runtime Projection 过滤。
-- [ ] 实现 Explorer 预算计数。
-- [ ] 实现 Explorer 失败后的主 Runner 降级处理。
+- [x] 在 `packages/protocol/src/goal.ts` 新增 `GoalExplorerRun`。
+- [x] 在 `packages/protocol/src/goal.ts` 新增 `GoalExplorerReport`。（同时新增 `GoalExplorerRequest` / `GoalExplorerProfile` / `GoalExplorerStatus`）
+- [~] 新增 `apps/desktop/electron/main/goal-explorer-runner.mjs`。（实现偏离计划：未建独立文件，改为 `main.mjs` 注入 `explorerRunner.runExplorer` + `goal-plan-store` 的 `dispatchExplorer/reportExplorer` + `goal-runner` 循环编排）
+- [~] 新增 `apps/desktop/electron/main/goal-explorer-runner.test.mjs`。（覆盖改由 `goal-runner.test.mjs` 的 explorer 派发/回填用例承担，无独立测试文件）
+- [~] 设计 Explorer run/report 持久化位置，优先 sidecar，避免污染主 plan JSON。（实际落在 `plan.runner.explorers`，与「收窄版 GoalPlan + runner」状态模型一致；sidecar 暂未采用）
+- [x] 实现只读 Runtime Projection 过滤。（`runtime-projection-tool-materializer.mjs` 按 `mode === 'explorer'` 过滤）
+- [x] 实现 Explorer 预算计数。（`maxExplorers` + explorer 工具调用计入预算）
+- [x] 实现 Explorer 失败后的主 Runner 降级处理。
 
 ### Explorer Report 草案
 
@@ -338,28 +338,28 @@ export interface GoalExplorerReport {
 
 Explorer projection 默认允许：
 
-- [ ] `L0_inert`
-- [ ] `L1_local_read`
-- [ ] 明确只读能力
+- [x] `L0_inert`
+- [x] `L1_local_read`
+- [x] 明确只读能力（`read_file` / `search_files` 等带 `explorer` 模式标记的只读工具）
 
 Explorer projection 默认禁止：
 
-- [ ] 写文件。
-- [ ] 删除/移动。
-- [ ] commit。
-- [ ] 上传。
-- [ ] 外部写操作。
-- [ ] privileged/destructive 能力。
-- [ ] `goal_update_task`。
-- [ ] 直接修改 `GoalPlan`。
+- [x] 写文件。
+- [x] 删除/移动。
+- [x] commit。
+- [x] 上传。
+- [x] 外部写操作。
+- [x] privileged/destructive 能力。
+- [x] `goal_update_task`。
+- [x] 直接修改 `GoalPlan`。
 
 ### 验收标准
 
-- [ ] Explorer projection 不包含写/危险能力。
-- [ ] Explorer report 必须带 Evidence refs 才能作为完成依据。
-- [ ] Explorer 失败不会让主 Runner 崩溃。
-- [ ] Explorer 数量受 `maxExplorers` 控制。
-- [ ] Explorer 不直接更新 task 状态。
+- [x] Explorer projection 不包含写/危险能力。
+- [x] Explorer report 必须带 Evidence refs 才能作为完成依据。
+- [x] Explorer 失败不会让主 Runner 崩溃。
+- [x] Explorer 数量受 `maxExplorers` 控制。
+- [x] Explorer 不直接更新 task 状态。
 
 ## Slice 5：System Context 接入
 

@@ -139,6 +139,48 @@ test('budget: maxTurns 用尽会进入 budget_exhausted', async () => {
   assert.equal(got.runner.status, 'budget_exhausted');
 });
 
+test('no-progress: 连续 3 轮双信号无增长会 blocked(no_progress) 而非烧满预算', async () => {
+  const plan = store.createPlan(draftWithTasks());
+  let calls = 0;
+  const runtime = {
+    // 每轮都不产生任何进展：不完成任务、不补 Evidence。
+    async runGoalTurn() {
+      calls += 1;
+      return {};
+    },
+  };
+  const runner = createRunner({ runtime });
+
+  await runner.start(plan.planId, { maxTurns: 20, awaitIdle: true });
+
+  const got = store.getPlan(plan.planId);
+  // 第 4 轮入口处 streak 达到 3，先于预算触发阻塞，故只跑了 3 轮。
+  assert.equal(calls, 3);
+  assert.equal(got.runner.status, 'blocked');
+  assert.equal(got.runner.blockedReason, 'no_progress');
+});
+
+test('no-progress: 每轮补充叶子 Evidence 视为有进展，不会被误判阻塞', async () => {
+  const plan = store.createPlan(draftWithTasks());
+  let calls = 0;
+  const runtime = {
+    // 每轮给叶子任务追加一条新的 Evidence：evidence 信号持续增长。
+    async runGoalTurn({ planId }) {
+      calls += 1;
+      store.recordTaskEvidence(planId, 't1', { evidenceRefs: [`local-file://ev-${calls}`] });
+      return {};
+    },
+  };
+  const runner = createRunner({ runtime });
+
+  await runner.start(plan.planId, { maxTurns: 5, awaitIdle: true });
+
+  const got = store.getPlan(plan.planId);
+  // 持续有进展，不应被 no-progress 阻塞；预算用尽才停。
+  assert.equal(calls, 5);
+  assert.equal(got.runner.status, 'budget_exhausted');
+});
+
 test('fake runtime 连续返回 progress 时，Runner 能自动多 tick 推进并完成', async () => {
   const plan = store.createPlan(draftWithTasks());
   const seenTurnNumbers = [];
