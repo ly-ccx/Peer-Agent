@@ -61,11 +61,11 @@
   transition: border-color var(--za-motion-fast), box-shadow var(--za-motion-fast);
 }
 .llm-provider-card.is-default {
-  border-color: rgba(78, 163, 217, 0.5);
+  border-color: rgba(78, 163, 217, 0.62);
   box-shadow:
-    0 0 0 1px rgba(78, 163, 217, 0.16),
-    0 0 22px rgba(78, 163, 217, 0.14),
-    inset 0 0 18px rgba(78, 163, 217, 0.06);
+    0 0 0 1px rgba(78, 163, 217, 0.18),
+    0 0 26px rgba(78, 163, 217, 0.18),
+    inset 0 0 22px rgba(78, 163, 217, 0.07);
 }
 .llm-provider-card.is-default::before {
   content: '';
@@ -77,18 +77,20 @@
   background: linear-gradient(
     115deg,
     transparent 0%,
-    rgba(104, 201, 255, 0.18) 22%,
-    rgba(104, 201, 255, 0.72) 48%,
-    rgba(180, 231, 255, 0.48) 56%,
-    transparent 78%
+    rgba(104, 201, 255, 0.1) 16%,
+    rgba(104, 201, 255, 0.42) 34%,
+    rgba(232, 249, 255, 0.92) 48%,
+    rgba(104, 201, 255, 0.52) 60%,
+    transparent 80%
   );
-  background-size: 260% 260%;
-  opacity: 0.85;
+  background-size: 300% 300%;
+  opacity: 0.95;
   pointer-events: none;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  animation: llm-active-flow 3.8s linear infinite;
+  animation: llm-active-flow 4.6s linear infinite;
+  will-change: background-position;
 }
 .llm-provider-card.is-default::after {
   content: '';
@@ -96,14 +98,33 @@
   z-index: 0;
   inset: 0;
   border-radius: inherit;
-  background: radial-gradient(circle at 0% 50%, rgba(104, 201, 255, 0.18), transparent 34%);
+  background:
+    radial-gradient(circle at 0% 50%, rgba(104, 201, 255, 0.2), transparent 34%),
+    linear-gradient(115deg, transparent 22%, rgba(104, 201, 255, 0.08) 50%, transparent 72%);
+  background-size: 100% 100%, 240% 240%;
   opacity: 0.9;
   pointer-events: none;
+  animation: llm-active-card-sheen 7.2s ease-in-out infinite;
 }
 
 @keyframes llm-active-flow {
   from { background-position: 180% 50%; }
-  to { background-position: -80% 50%; }
+  to { background-position: -120% 50%; }
+}
+@keyframes llm-active-card-sheen {
+  0%, 100% { background-position: 0 0, 160% 50%; }
+  50% { background-position: 0 0, -60% 50%; }
+}
+@keyframes llm-active-badge-sheen {
+  0%, 34% {
+    opacity: 0;
+    transform: translateX(-130%) rotate(10deg);
+  }
+  46% { opacity: 0.9; }
+  68%, 100% {
+    opacity: 0;
+    transform: translateX(360%) rotate(10deg);
+  }
 }
 
 .llm-provider-info,
@@ -145,12 +166,32 @@
   font-family: var(--font-mono);
 }
 .llm-badge-default {
-  background: var(--azure-trace);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  background: linear-gradient(135deg, rgba(104, 201, 255, 0.18), var(--azure-trace) 56%, rgba(232, 249, 255, 0.24));
   color: var(--azure-seal);
   font-size: 0.62rem;
   padding: 1px 6px;
+  border: 1px solid rgba(78, 163, 217, 0.24);
   border-radius: var(--radius-xs);
+  box-shadow:
+    0 0 0 1px rgba(104, 201, 255, 0.08),
+    0 0 12px rgba(104, 201, 255, 0.14);
   font-weight: 600;
+}
+.llm-badge-default::after {
+  content: '';
+  position: absolute;
+  top: -60%;
+  bottom: -60%;
+  left: -70%;
+  width: 54%;
+  background: linear-gradient(105deg, transparent 0%, rgba(255, 255, 255, 0.78) 46%, rgba(104, 201, 255, 0.42) 58%, transparent 100%);
+  transform: translateX(-120%) rotate(10deg);
+  pointer-events: none;
+  animation: llm-active-badge-sheen 3.2s ease-in-out infinite;
 }
 .llm-provider-specs {
   color: var(--graphite-mute);
@@ -590,6 +631,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .llm-provider-card.is-default::before,
+  .llm-provider-card.is-default::after,
+  .llm-badge-default::after {
+    animation: none;
+  }
+  .llm-badge-default::after {
+    opacity: 0;
+  }
 }
 
 @media (max-width: 560px) {
