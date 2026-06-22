@@ -7,6 +7,8 @@
  */
 
 import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli-identity.mjs';
+import { encodeOpenAIResponsesRequest } from './provider-encoders/responses-encoder.mjs';
+import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 import { logCompactionDiagnostic } from './compaction-diagnostic-log.mjs';
 
 const COMPACTION_CONFIG = {
@@ -591,6 +593,9 @@ async function summarizeWithLLM({
   providerConfig,
   signal,
   onProgress,
+  webContents = null,
+  streamId = null,
+  connectionRecoveryOptions = {},
 }) {
   const { provider, baseUrl, apiKey, model } = providerConfig;
 
@@ -635,7 +640,7 @@ async function summarizeWithLLM({
       stream: true,
     };
 
-    const res = await fetch(url, {
+    const res = await fetchWithConnectionRecovery(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -645,6 +650,12 @@ async function summarizeWithLLM({
       },
       body: JSON.stringify(body),
       signal,
+    }, {
+      ...connectionRecoveryOptions,
+      webContents,
+      streamId,
+      provider,
+      model,
     });
 
     if (!res.ok) {
@@ -678,6 +689,69 @@ async function summarizeWithLLM({
     return accumulated || null;
   }
 
+  if (providerConfig.wire === 'openai-responses') {
+    // OpenAI Responses: GPT 订阅链路，按 response.output_text.delta 累加文本并上报进度。
+    const body = encodeOpenAIResponsesRequest({
+      model,
+      messages: summaryMessages,
+      tools: [],
+      maxOutputTokens: COMPACTION_CONFIG.summaryMaxTokens,
+      omitMaxOutputTokens: Boolean(providerConfig.omitMaxOutputTokens),
+    });
+
+    const res = await fetchWithConnectionRecovery(providerConfig.endpoint || `${baseUrl.replace(/\/+$/, '')}/responses`, {
+      method: 'POST',
+      headers: providerConfig.headers || {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'OpenAI-Beta': 'responses=experimental',
+      },
+      body: JSON.stringify(body),
+      signal,
+    }, {
+      ...connectionRecoveryOptions,
+      webContents,
+      streamId,
+      provider,
+      model,
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      logCompactionDiagnostic('summarize:http_error', {
+        wire: 'openai-responses',
+        status: res.status,
+        body: text.slice(0, 1000),
+      });
+      throw new Error(`OpenAI Responses summary HTTP ${res.status}: ${text.slice(0, 300)}`);
+    }
+
+    await readSseStream(res, (payload) => {
+      let evt;
+      try {
+        evt = JSON.parse(payload);
+      } catch {
+        return;
+      }
+      if (evt?.type === 'response.output_text.delta' && typeof evt?.delta === 'string') {
+        accumulated += evt.delta;
+        reportProgress();
+        return;
+      }
+      if (typeof evt?.response?.output_text === 'string') {
+        accumulated += evt.response.output_text;
+        reportProgress();
+      }
+    });
+
+    logCompactionDiagnostic('summarize:done', {
+      wire: 'openai-responses',
+      accumulatedChars: accumulated.length,
+      empty: accumulated.length === 0,
+    });
+    return accumulated || null;
+  }
+
   // OpenAI: 流式，按 choices[].delta.content 累加文本并上报进度。
   const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
   const body = {
@@ -688,7 +762,7 @@ async function summarizeWithLLM({
     stream: true,
   };
 
-  const res = await fetch(url, {
+  const res = await fetchWithConnectionRecovery(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -696,6 +770,12 @@ async function summarizeWithLLM({
     },
     body: JSON.stringify(body),
     signal,
+  }, {
+    ...connectionRecoveryOptions,
+    webContents,
+    streamId,
+    provider,
+    model,
   });
 
   if (!res.ok) {
@@ -993,6 +1073,9 @@ export async function compactIfNeeded({
   force = false,
   continuityContext = [],
   onProgress,
+  webContents = null,
+  streamId = null,
+  connectionRecoveryOptions = {},
 }) {
   const microcompactResult = microcompactMessagesForContext(messages);
   messages = microcompactResult.messages;
@@ -1077,6 +1160,9 @@ export async function compactIfNeeded({
             providerConfig,
             signal,
             onProgress,
+            webContents,
+            streamId,
+            connectionRecoveryOptions,
           });
 
           if (rawSummary) {

@@ -389,6 +389,122 @@ describe('context compactor · streaming progress (0007)', () => {
     assert.ok(progressEvents.at(-1).estimatedTotalChars > 0);
   });
 
+  it('uses OpenAI Responses wire for ChatGPT subscription compaction', async () => {
+    const sseChunks = [
+      `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'summary' })}\n\n`,
+      `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: ' text' })}\n\n`,
+      'data: [DONE]\n\n',
+    ];
+    const progressEvents = [];
+    let capturedUrl = null;
+    let capturedHeaders = null;
+    let capturedBody = null;
+
+    globalThis.fetch = async (url, init) => {
+      capturedUrl = url;
+      capturedHeaders = init?.headers;
+      capturedBody = JSON.parse(init?.body || '{}');
+      return makeSseResponse(sseChunks);
+    };
+
+    const result = await compactIfNeeded({
+      messages: buildMessages(12, 20),
+      systemPrompt: 'system prompt',
+      contextWindow: 100_000,
+      providerConfig: {
+        provider: 'openai',
+        baseUrl: 'https://chatgpt.com/backend-api/codex',
+        apiKey: 'oauth-access',
+        model: 'gpt-5.1-codex',
+        wire: 'openai-responses',
+        endpoint: 'https://chatgpt.com/backend-api/codex/responses',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer oauth-access',
+          'OpenAI-Beta': 'responses=experimental',
+          'chatgpt-account-id': 'acct-1',
+        },
+        omitMaxOutputTokens: true,
+      },
+      force: true,
+      onProgress: (p) => progressEvents.push(p),
+    });
+
+    restoreFetch();
+
+    assert.equal(capturedUrl, 'https://chatgpt.com/backend-api/codex/responses');
+    assert.equal(capturedHeaders.Authorization, 'Bearer oauth-access');
+    assert.equal(capturedHeaders['chatgpt-account-id'], 'acct-1');
+    assert.equal(capturedBody.stream, true);
+    assert.equal(capturedBody.max_output_tokens, undefined);
+    assert.equal(result.compacted, true);
+    assert.equal(result.messages[1]._compaction.method, 'llm');
+    assert.equal(progressEvents.at(-1).receivedChars, 'summary text'.length);
+  });
+
+  it('recovers compaction transport through Electron fetch when Node fetch hits corporate TLS', async () => {
+    const sseChunks = [
+      `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'recovered summary' })}\n\n`,
+      'data: [DONE]\n\n',
+    ];
+    const events = [];
+    const webContents = {
+      send(channel, payload) {
+        events.push({ channel, payload });
+      },
+    };
+    let nodeFetchCalls = 0;
+    let electronFetchCalls = 0;
+
+    const result = await compactIfNeeded({
+      messages: buildMessages(12, 20),
+      systemPrompt: 'system prompt',
+      contextWindow: 100_000,
+      providerConfig: {
+        provider: 'openai',
+        baseUrl: 'https://chatgpt.com/backend-api/codex',
+        apiKey: 'oauth-access',
+        model: 'gpt-5.1-codex',
+        wire: 'openai-responses',
+        endpoint: 'https://chatgpt.com/backend-api/codex/responses',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer [REDACTED_TOKEN]',
+          'OpenAI-Beta': 'responses=experimental',
+        },
+        omitMaxOutputTokens: true,
+      },
+      force: true,
+      webContents,
+      streamId: 'compact-1',
+      connectionRecoveryOptions: {
+        fetchImpl: async () => {
+          nodeFetchCalls += 1;
+          const error = new Error('self signed certificate in certificate chain');
+          error.code = 'SELF_SIGNED_CERT_IN_CHAIN';
+          throw error;
+        },
+        electronFetchImpl: async () => {
+          electronFetchCalls += 1;
+          return makeSseResponse(sseChunks);
+        },
+        waitImpl: async () => {},
+      },
+    });
+
+    assert.equal(nodeFetchCalls, 1);
+    assert.equal(electronFetchCalls, 1);
+    assert.equal(result.compacted, true);
+    assert.equal(result.messages[1]._compaction.method, 'llm');
+    assert.equal(result.messages[1].content.includes('recovered summary'), true);
+    assert.deepEqual(events.map((event) => event.payload.status), ['recovered']);
+    assert.equal(events[0].payload.streamId, 'compact-1');
+    assert.equal(events[0].payload.provider, 'openai');
+    assert.equal(events[0].payload.model, 'gpt-5.1-codex');
+    assert.equal(events[0].payload.fromConnection, 'node-fetch');
+    assert.equal(events[0].payload.toConnection, 'electron-net-fetch');
+  });
+
   it('falls back to structural when the stream errors', async () => {
     // body 不可读 → readSseStream 抛错 → catch 走 structural 兜底。
     globalThis.fetch = async () => ({ ok: true, body: null });

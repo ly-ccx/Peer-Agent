@@ -19,7 +19,7 @@ import { createMcpRegistry } from './mcp-registry.mjs';
 import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-credential-store.mjs';
 import { disconnectMcp, discoverMcpManifest, getMcpPrompt, readMcpResource, testMcpConnection } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
-import { listChannelDescriptors } from './provider-channels.mjs';
+import { listChannelDescriptors, resolveChannel } from './provider-channels.mjs';
 import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
 import { startGoogleBrowserLogin, ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
 import { listSubscriptionModels } from './provider-adapters/openai-model-catalog.mjs';
@@ -35,6 +35,7 @@ import { createGoalPlanStore } from './goal-plan-store.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
 import { buildPersistedCompactedMessages } from './conversation-compaction-persistence.mjs';
 import { compactIfNeeded } from './context-compactor.mjs';
+import { resolveProviderCredential } from './provider-credential-resolver.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -219,6 +220,8 @@ const llmChatService = createLlmChatService({
   promptSnapshotStore,
   preferredAccessLevel: initialSettings.localAccessLevel,
   mcpRegistry,
+  ensureFreshTokens,
+  ensureFreshGoogleTokens,
   // 注入带 onChange 的同一 goalPlanStore 单例，使 AI 工具写计划经唯一写路径广播，
   // 浮条无需切会话即可随流式更新。见 Goal 模式设计。
   goalPlanStore,
@@ -613,10 +616,18 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
 
   const workspacePath = settingsStore.getAll().activeWorkspace || null;
 
-  const provider = llmConfigStore.listProviders().find((p) => p.isDefault && p.apiKeyConfigured)
-    || llmConfigStore.listProviders().find((p) => p.apiKeyConfigured)
+  const compactProviders = llmConfigStore.listProviders().filter((p) => p.apiKeyConfigured);
+  const provider = compactProviders.find((p) => p.isDefault)
+    || compactProviders[0]
     || null;
-  const apiKey = provider ? llmConfigStore.getDecryptedApiKey(provider.id) : null;
+  let credential = null;
+  if (provider) {
+    try {
+      credential = await resolveProviderCredential({ provider, llmConfigStore });
+    } catch (error) {
+      console.warn('[main] compact credential unavailable:', error?.code || error?.message || error);
+    }
+  }
   const systemContext = buildSystemContext(workspacePath, {
     conversationId,
     continuityContext: priorContinuityContext,
@@ -639,9 +650,26 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     console.warn('[main] failed to record compact prompt snapshot:', error?.message || error);
   }
 
-  const providerConfig = provider && apiKey
-    ? { provider: provider.provider, baseUrl: provider.baseUrl, apiKey, model: provider.model }
-    : null;
+  let providerConfig = null;
+  if (provider && credential?.apiKey) {
+    const resolvedChannel = resolveChannel({
+      ...provider,
+      apiKey: credential.apiKey,
+      accountId: credential.accountId,
+    });
+    providerConfig = {
+      provider: resolvedChannel.legacyProvider,
+      baseUrl: resolvedChannel.baseUrl,
+      apiKey: credential.apiKey,
+      model: provider.model,
+      authMethod: credential.authMethod,
+      accountId: credential.accountId,
+      wire: resolvedChannel.wire,
+      endpoint: resolvedChannel.endpoint,
+      headers: resolvedChannel.headers,
+      omitMaxOutputTokens: credential.authMethod === 'oauth_chatgpt',
+    };
+  }
   const contextWindow = provider?.contextWindow || 0;
 
   const apiMessages = [
@@ -675,6 +703,8 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     force: true,
     continuityContext: priorContinuityContext,
     onProgress,
+    webContents: event.sender,
+    streamId,
   });
 
   if (!result.compacted) {

@@ -25,8 +25,10 @@ import {
 } from './chat-runtime/provider-recovery-broker.mjs';
 import { hasDanglingToolIntent, hasUnsupportedToolClaim } from './chat-runtime/response-guard.mjs';
 import { createToolContext } from './chat-runtime/tool-orchestrator.mjs';
-import { ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
-import { ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
+import {
+  getProviderCredentialErrorCode,
+  resolveProviderCredential,
+} from './provider-credential-resolver.mjs';
 import { resolveChannel } from './provider-channels.mjs';
 import { DEFAULT_CONNECTION_RETRY_DELAYS_MS } from './provider-transports/recovering-fetch.mjs';
 
@@ -269,60 +271,6 @@ export function createLlmChatService({
     return orderProviderCandidates(providers);
   }
 
-  async function resolveProviderCredential(provider, webContents, streamId) {
-    const authMethod = provider.authMethod || 'api_key';
-    if (authMethod === 'oauth_chatgpt') {
-      const credential = llmConfigStore.getCredential(provider.id);
-      const tokens = credential?.tokens || null;
-      if (!tokens?.access) {
-        webContents.send('chat:stream:error', { streamId, error: 'oauth_not_logged_in' });
-        return null;
-      }
-      try {
-        const { tokens: fresh, refreshed } = await ensureFreshTokens(tokens);
-        if (refreshed) llmConfigStore.setOAuthTokens(provider.id, fresh);
-        return {
-          authMethod,
-          apiKey: fresh.access,
-          accountId: fresh.accountId || null,
-        };
-      } catch {
-        webContents.send('chat:stream:error', { streamId, error: 'oauth_token_refresh_failed' });
-        return null;
-      }
-    }
-    if (authMethod === 'oauth_google') {
-      const credential = llmConfigStore.getCredential(provider.id);
-      const tokens = credential?.tokens || null;
-      if (!tokens?.access) {
-        webContents.send('chat:stream:error', { streamId, error: 'oauth_not_logged_in' });
-        return null;
-      }
-      try {
-        const { tokens: fresh, refreshed } = await ensureFreshGoogleTokens(tokens, {
-          clientId: credential.oauthClientId,
-          clientSecret: credential.oauthClientSecret,
-        });
-        if (refreshed) llmConfigStore.setOAuthTokens(provider.id, fresh);
-        return {
-          authMethod,
-          apiKey: fresh.access,
-          accountId: fresh.accountId || null,
-        };
-      } catch {
-        webContents.send('chat:stream:error', { streamId, error: 'oauth_token_refresh_failed' });
-        return null;
-      }
-    }
-
-    const apiKey = llmConfigStore.getDecryptedApiKey(provider.id);
-    if (!apiKey) {
-      webContents.send('chat:stream:error', { streamId, error: 'api_key_not_found' });
-      return null;
-    }
-    return { authMethod, apiKey, accountId: null };
-  }
-
   async function sendMessage({
     messages,
     webContents,
@@ -377,7 +325,16 @@ export function createLlmChatService({
     try {
       for (let attemptIndex = 0; attemptIndex < providerCandidates.length; attemptIndex += 1) {
         const provider = providerCandidates[attemptIndex];
-        const credential = await resolveProviderCredential(provider, accumulatingWebContents, streamId);
+        let credential;
+        try {
+          credential = await resolveProviderCredential({ provider, llmConfigStore });
+        } catch (credentialError) {
+          accumulatingWebContents.send('chat:stream:error', {
+            streamId,
+            error: getProviderCredentialErrorCode(credentialError),
+          });
+          return;
+        }
         if (!credential || streamRecord.terminalEventSent) return;
         const resolvedChannel = resolveChannel({
           ...provider,

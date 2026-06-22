@@ -53,7 +53,7 @@ describe('recovering provider fetch', () => {
         toConnection: 'electron-net-fetch',
         connection: 'electron-net-fetch',
         attempt: 0,
-        maxRetries: 10,
+        maxRetries: 5,
         reason: 'fetch failed (SELF_SIGNED_CERT_IN_CHAIN)',
       },
     }]);
