@@ -1,7 +1,14 @@
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactElement } from 'react';
-import type { ExecutionStatus, GoalPlan, GoalTask } from '@peer-agent/protocol';
+import type {
+  ExecutionStatus,
+  GoalExplorerRun,
+  GoalPlan,
+  GoalRunnerState,
+  GoalRunnerStatus,
+  GoalTask,
+} from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
 import { InteractionContext } from './thread/interactionContext';
 
@@ -108,6 +115,64 @@ function safeProgress(plan: GoalPlan): GoalPlan['progress'] {
   return plan.progress ?? { total: 0, completed: 0, failed: 0, blocked: 0, percent: 0 };
 }
 
+// Runner 状态文案；只表达托管编排状态，不代表工具执行 Evidence。
+function runnerStatusLabel(status: GoalRunnerStatus, isZh: boolean): string {
+  const zh: Record<GoalRunnerStatus, string> = {
+    idle: '空闲',
+    running: '推进中',
+    paused: '已暂停',
+    exploring: '探索中',
+    blocked: '已阻塞',
+    budget_exhausted: '预算耗尽',
+    completed: '已完成',
+    failed: '已失败',
+  };
+  const en: Record<GoalRunnerStatus, string> = {
+    idle: 'Idle',
+    running: 'Running',
+    paused: 'Paused',
+    exploring: 'Exploring',
+    blocked: 'Blocked',
+    budget_exhausted: 'Budget exhausted',
+    completed: 'Completed',
+    failed: 'Failed',
+  };
+  return isZh ? zh[status] : en[status];
+}
+
+function explorerStatusLabel(status: GoalExplorerRun['status'], isZh: boolean): string {
+  const zh: Record<GoalExplorerRun['status'], string> = {
+    queued: '排队中',
+    running: '探索中',
+    completed: '已完成',
+    failed: '已失败',
+    cancelled: '已取消',
+  };
+  const en: Record<GoalExplorerRun['status'], string> = {
+    queued: 'Queued',
+    running: 'Running',
+    completed: 'Completed',
+    failed: 'Failed',
+    cancelled: 'Cancelled',
+  };
+  return isZh ? zh[status] : en[status];
+}
+
+// Runner 处于活动态时才允许 pause；非终态可 clear；暂停/阻塞/预算耗尽可 resume。
+const RUNNER_ACTIVE_STATUSES: ReadonlySet<GoalRunnerStatus> = new Set([
+  'running',
+  'exploring',
+]);
+const RUNNER_RESUMABLE_STATUSES: ReadonlySet<GoalRunnerStatus> = new Set([
+  'paused',
+  'blocked',
+  'budget_exhausted',
+]);
+const RUNNER_TERMINAL_STATUSES: ReadonlySet<GoalRunnerStatus> = new Set([
+  'completed',
+  'failed',
+]);
+
 function TaskNode({ task, depth, isZh }: { task: GoalTask; depth: number; isZh: boolean }): ReactElement {
   const hasEvidence = task.evidenceRefs.length > 0;
   return (
@@ -136,6 +201,131 @@ function TaskNode({ task, depth, isZh }: { task: GoalTask; depth: number; isZh: 
             <TaskNode key={child.taskId} task={child} depth={depth + 1} isZh={isZh} />
           ))}
         </ul>
+      ) : null}
+    </li>
+  );
+}
+
+// Runner 托管状态区：展示状态/计数/控制按钮/Explorer 列表。
+// 只读表达 main 侧 runner 状态，所有控制经回调 → clientApi → IPC，renderer 不直接执行本地能力。
+function RunnerSection({
+  plan,
+  runner,
+  busy,
+  isZh,
+  onControl,
+}: {
+  plan: GoalPlan;
+  runner: GoalRunnerState;
+  busy: boolean;
+  isZh: boolean;
+  onControl: (plan: GoalPlan, action: 'pause' | 'resume' | 'clear') => void | Promise<void>;
+}): ReactElement {
+  const explorers = Array.isArray(runner.explorers) ? runner.explorers : [];
+  const canPause = RUNNER_ACTIVE_STATUSES.has(runner.status);
+  const canResume = RUNNER_RESUMABLE_STATUSES.has(runner.status);
+  const isTerminal = RUNNER_TERMINAL_STATUSES.has(runner.status);
+  const showAttention = runner.status === 'blocked' || runner.status === 'budget_exhausted';
+
+  return (
+    <div className={`goal-runner goal-runner--${runner.status}`}>
+      <div className="goal-runner-head">
+        <span className={`goal-runner-status goal-runner-status--${runner.status}`}>
+          {runnerStatusLabel(runner.status, isZh)}
+        </span>
+        <span className="goal-runner-counters">
+          {isZh
+            ? `轮次 ${runner.turnCount} · 工具 ${runner.toolCallCount} · 探索 ${runner.explorerCount}/${runner.maxExplorers}`
+            : `turns ${runner.turnCount} · tools ${runner.toolCallCount} · explorers ${runner.explorerCount}/${runner.maxExplorers}`}
+        </span>
+      </div>
+      {showAttention && runner.blockedReason ? (
+        <div className="goal-runner-attention">{runner.blockedReason}</div>
+      ) : null}
+      {runner.lastError ? (
+        <div className="goal-runner-attention goal-runner-attention--error">{runner.lastError}</div>
+      ) : null}
+      <div className="goal-runner-actions">
+        {canPause ? (
+          <button
+            type="button"
+            className="goal-runner-btn"
+            disabled={busy}
+            onClick={() => void onControl(plan, 'pause')}
+          >
+            {isZh ? '暂停' : 'Pause'}
+          </button>
+        ) : null}
+        {canResume ? (
+          <button
+            type="button"
+            className="goal-runner-btn goal-runner-btn--primary"
+            disabled={busy}
+            onClick={() => void onControl(plan, 'resume')}
+          >
+            {isZh ? '继续' : 'Resume'}
+          </button>
+        ) : null}
+        {!isTerminal ? (
+          <button
+            type="button"
+            className="goal-runner-btn goal-runner-btn--ghost"
+            disabled={busy}
+            onClick={() => void onControl(plan, 'clear')}
+          >
+            {isZh ? '清除' : 'Clear'}
+          </button>
+        ) : null}
+      </div>
+      {explorers.length > 0 ? (
+        <details className="goal-runner-explorers">
+          <summary>
+            {isZh ? `Explorer 子任务 ×${explorers.length}` : `Explorers ×${explorers.length}`}
+          </summary>
+          <ul className="goal-runner-explorer-list">
+            {explorers.map((explorer) => (
+              <ExplorerItem key={explorer.explorerId} explorer={explorer} isZh={isZh} />
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function ExplorerItem({
+  explorer,
+  isZh,
+}: {
+  explorer: GoalExplorerRun;
+  isZh: boolean;
+}): ReactElement {
+  const report = explorer.report;
+  const evidenceRefs = report?.evidenceRefs ?? [];
+  return (
+    <li className={`goal-runner-explorer goal-runner-explorer--${explorer.status}`}>
+      <div className="goal-runner-explorer-row">
+        <span className={`goal-runner-explorer-status goal-runner-explorer-status--${explorer.status}`}>
+          {explorerStatusLabel(explorer.status, isZh)}
+        </span>
+        <span className="goal-runner-explorer-question">{explorer.request.question}</span>
+      </div>
+      {report ? (
+        <div className="goal-runner-explorer-detail">
+          <span className="goal-runner-explorer-confidence">
+            {isZh ? `置信度：${report.confidence}` : `confidence: ${report.confidence}`}
+          </span>
+          {evidenceRefs.length > 0 ? (
+            <span className="goal-runner-explorer-evidence" title={evidenceRefs.join(', ')}>
+              {isZh ? `证据 ×${evidenceRefs.length}` : `evidence ×${evidenceRefs.length}`}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {explorer.failureReason ? (
+        <div className="goal-runner-explorer-detail goal-runner-explorer-detail--error">
+          {explorer.failureReason}
+        </div>
       ) : null}
     </li>
   );
@@ -236,6 +426,39 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     });
     return unsubscribe;
   }, [reload]);
+
+  // Runner 每个 tick 改动 plan.runner 后，main 同样广播 'goalRunner:changed'；
+  // runner 状态内嵌在 plan 内，这里据此重拉，托管状态实时反映在面板而不刷进聊天流。
+  useEffect(() => {
+    const unsubscribe = clientApi.onGoalRunnerChanged(() => {
+      void reload();
+    });
+    return unsubscribe;
+  }, [reload]);
+
+  // Runner 控制：pause/resume/clear。renderer 不直接执行本地能力，
+  // 全部经 clientApi → preload → IPC → goalRunner（main），再由广播驱动 reload。
+  const controlRunner = useCallback(
+    async (plan: GoalPlan, action: 'pause' | 'resume' | 'clear') => {
+      setBusyPlanId(plan.planId);
+      setError(null);
+      try {
+        if (action === 'pause') {
+          await clientApi.goalRunnerPause({ planId: plan.planId });
+        } else if (action === 'resume') {
+          await clientApi.goalRunnerResume({ planId: plan.planId });
+        } else {
+          await clientApi.goalRunnerClear({ planId: plan.planId });
+        }
+        await reload();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : isZh ? '操作失败' : 'Action failed');
+      } finally {
+        setBusyPlanId(null);
+      }
+    },
+    [reload, isZh],
+  );
 
   const decide = useCallback(
     async (plan: GoalPlan, decision: 'approve' | 'reject') => {
@@ -446,6 +669,15 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
                 {progress.blocked > 0 ? (isZh ? `，${progress.blocked} 阻塞` : `, ${progress.blocked} blocked`) : ''}
               </span>
             </div>
+            {plan.runner && plan.runner.enabled ? (
+              <RunnerSection
+                plan={plan}
+                runner={plan.runner}
+                busy={busy}
+                isZh={isZh}
+                onControl={controlRunner}
+              />
+            ) : null}
             {tasks.length > 0 ? (
               <ul className="goal-task-list">
                 {tasks.map((task) => (

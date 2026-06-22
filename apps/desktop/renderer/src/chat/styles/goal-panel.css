@@ -510,6 +510,164 @@
   background: var(--za-hover);
 }
 
+/* Goal Runner 托管状态区：表达 runner 编排状态，不替代任务 Evidence。 */
+.goal-runner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--za-line);
+  border-radius: var(--za-radius, 8px);
+  background: var(--za-surface-1);
+}
+
+.goal-runner-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.goal-runner-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--za-active);
+  color: var(--za-text);
+}
+
+.goal-runner-status--running,
+.goal-runner-status--exploring {
+  background: var(--za-primary-control-bg);
+  color: var(--za-primary-control-ink);
+}
+
+.goal-runner-status--blocked,
+.goal-runner-status--budget_exhausted,
+.goal-runner-status--failed {
+  background: var(--za-warn-soft);
+  color: var(--za-warn);
+}
+
+.goal-runner-status--completed {
+  background: var(--za-active);
+  color: var(--za-text);
+}
+
+.goal-runner-counters {
+  font-size: 12px;
+  color: var(--za-text-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.goal-runner-attention {
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--za-warn-soft);
+  color: var(--za-warn);
+}
+
+.goal-runner-attention--error {
+  background: var(--za-warn-soft);
+  color: var(--za-warn);
+}
+
+.goal-runner-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.goal-runner-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--za-line);
+  border-radius: 6px;
+  background: var(--za-surface-1);
+  color: var(--za-text-soft);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.goal-runner-btn:hover:not(:disabled) {
+  background: var(--za-hover);
+  color: var(--za-text);
+}
+
+.goal-runner-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.goal-runner-btn--primary {
+  border-color: var(--za-primary-control-bg);
+  background: var(--za-primary-control-bg);
+  color: var(--za-primary-control-ink);
+}
+
+.goal-runner-btn--ghost {
+  border-color: transparent;
+}
+
+.goal-runner-explorers {
+  font-size: 12px;
+}
+
+.goal-runner-explorers > summary {
+  cursor: pointer;
+  color: var(--za-text-soft);
+  user-select: none;
+}
+
+.goal-runner-explorer-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.goal-runner-explorer {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--za-hover);
+}
+
+.goal-runner-explorer-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.goal-runner-explorer-status {
+  flex: none;
+  font-size: 11px;
+  color: var(--za-text-soft);
+}
+
+.goal-runner-explorer-question {
+  color: var(--za-text);
+  line-height: 1.4;
+}
+
+.goal-runner-explorer-detail {
+  margin-top: 4px;
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--za-text-soft);
+}
+
+.goal-runner-explorer-detail--error {
+  color: var(--za-warn);
+}
+
 /* 无障碍降级：用户偏好减少动效时，关闭执行中脉冲圆点与进度条流动高光。 */
 @media (prefers-reduced-motion: reduce) {
   .goal-panel-toggle-active-dot {

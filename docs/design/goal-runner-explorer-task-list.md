@@ -439,16 +439,16 @@ UI 表达托管运行状态，而不是把每个 tick 刷进聊天流。
 
 ### 任务清单
 
-- [ ] 在 Goal 面板/浮条显示 Runner 状态。
-- [ ] 显示状态：running / exploring / blocked / paused / budget_exhausted / completed / failed。
-- [ ] 显示 counters：turns、tool calls、explorers。
-- [ ] 增加 pause 按钮。
-- [ ] 增加 resume 按钮。
-- [ ] 增加 clear 按钮。
-- [ ] 增加 blocked/budget_exhausted 提示。
-- [ ] 增加 Explorer 折叠列表。
-- [ ] Explorer 列表显示 question、confidence、Evidence refs。
-- [ ] 主聊天流保持干净，不把每个 tick 伪装成用户消息。
+- [x] 在 Goal 面板/浮条显示 Runner 状态。
+- [x] 显示状态：running / exploring / blocked / paused / budget_exhausted / completed / failed。
+- [x] 显示 counters：turns、tool calls、explorers。
+- [x] 增加 pause 按钮。
+- [x] 增加 resume 按钮。
+- [x] 增加 clear 按钮。
+- [x] 增加 blocked/budget_exhausted 提示。
+- [x] 增加 Explorer 折叠列表。
+- [x] Explorer 列表显示 question、confidence、Evidence refs。
+- [x] 主聊天流保持干净，不把每个 tick 伪装成用户消息。
 
 ### 验收标准
 
