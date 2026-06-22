@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   chatStreamReattach: (params) => ipcRenderer.invoke('chat:stream:reattach', params),
   chatStreamListActive: () => ipcRenderer.invoke('chat:stream:list-active'),
   chatCompact: (params) => ipcRenderer.invoke('chat:compact', params),
+  chatCompactionGet: (params) => ipcRenderer.invoke('chat:compaction:get', params),
   promptSnapshotsList: (params) => ipcRenderer.invoke('prompt-snapshots:list', params),
   promptSnapshotsGet: (params) => ipcRenderer.invoke('prompt-snapshots:get', params),
   promptContextEpochsList: (params) => ipcRenderer.invoke('prompt-context-epochs:list', params),

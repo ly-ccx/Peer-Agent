@@ -82,6 +82,7 @@ const unavailableApi: ClientApi = {
   peekPendingTask: unavailableMethod('peekPendingTask'),
   clearPendingTask: unavailableMethod('clearPendingTask'),
   chatCompact: unavailableMethod('chatCompact'),
+  chatCompactionGet: unavailableMethod('chatCompactionGet'),
   promptSnapshotsList: unavailableMethod('promptSnapshotsList'),
   promptSnapshotsGet: unavailableMethod('promptSnapshotsGet'),
   promptContextEpochsList: unavailableMethod('promptContextEpochsList'),

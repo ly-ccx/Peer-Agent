@@ -216,6 +216,8 @@ export interface BootstrapPreloadApi {
   readonly peekPendingTask: () => Promise<PendingTask | null>;
   readonly clearPendingTask: () => Promise<boolean>;
   readonly chatCompact: (params: { conversationId: string; streamId: string }) => Promise<{ compacted: boolean; notification?: { method: string; beforeTokens: number; afterTokens: number; oldMessageCount: number; keptMessageCount: number } }>;
+  // 按会话查询当前压缩态（切会话恢复横幅用）。压缩态真值在主进程登记表，渲染层只表达。
+  readonly chatCompactionGet: (params: { conversationId: string }) => Promise<{ compacting: true; streamId: string; percent: number | null; manual: boolean } | null>;
   readonly promptSnapshotsList: (params?: { limit?: number }) => Promise<readonly PromptSnapshotIndexEntry[]>;
   readonly promptSnapshotsGet: (params: { id: string }) => Promise<PromptSnapshotRecord | null>;
   readonly promptContextEpochsList: (params?: { limit?: number }) => Promise<readonly PromptContextEpochRecord[]>;

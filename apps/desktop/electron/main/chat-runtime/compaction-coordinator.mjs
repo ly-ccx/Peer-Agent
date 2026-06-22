@@ -4,6 +4,7 @@ import {
   estimateTokensFromMessages,
   microcompactMessagesForContext,
 } from '../context-compactor.mjs';
+import { beginCompaction, endCompaction } from './compaction-registry.mjs';
 
 export function isPromptTooLongResponse(status, text) {
   if (status === 413) return true;
@@ -46,6 +47,8 @@ async function persistAndNotifyCompaction({
   if (persistCompaction && conversationId) {
     await persistCompaction({ conversationId, compactResult, preservePendingAssistant: true });
   }
+  // 登记表收尾与事件 emit 单一来源：先清登记表再 emit done。
+  endCompaction({ conversationId, streamId });
   webContents.send('chat:compaction', { streamId, stage: 'done', emergency, ...compactResult.notification });
 }
 
@@ -91,6 +94,9 @@ export async function runCompactionCheck({
 
   const showStart = emergency || shouldShowCompactionStart(messages, contextWindow);
   if (showStart) {
+    // 登记表与事件 emit 单一来源：先登记会话压缩态再 emit start，
+    // 使切会话查询（chat:compaction:get）与横幅事件流一致。
+    beginCompaction({ conversationId, streamId, manual: false });
     webContents.send('chat:compaction', { streamId, stage: 'start', emergency });
   }
 
@@ -100,6 +106,7 @@ export async function runCompactionCheck({
   const settleBannerIdle = () => {
     if (settledBanner) return;
     settledBanner = true;
+    endCompaction({ conversationId, streamId });
     webContents.send('chat:compaction', { streamId, stage: 'idle', emergency });
   };
 

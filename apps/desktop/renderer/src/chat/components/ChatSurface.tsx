@@ -371,6 +371,10 @@ export function ChatSurface({
   // 任务续传(ADR 21):防止同一 resumeTask 被自动发送多次的一次性闸门。
   const resumeFiredRef = useRef<string | null>(null);
   const streamIdRef = useRef<string | null>(null);
+  // 当前显示的会话 id（实时镜像）。用于异步回调里判断"完成时是否仍停在发起会话",
+  // 避免手动 /compact 完成后把结果/横幅误作用到已切走的当前会话。
+  const conversationIdRef = useRef<string | null>(conversationId);
+  conversationIdRef.current = conversationId;
   // 输入框持久化的「上次落盘会话」标记。初值用 undefined 哨兵(区别于真实 id 与 null),
   // 使每次切到新会话的首遍只同步本 ref 并跳过保存,避免把旧会话草稿写到新会话名下。
   const composerPersistConvRef = useRef<string | null | undefined>(undefined);
@@ -504,6 +508,10 @@ export function ChatSurface({
     // 归零后由下方 reattach 按"新会话是否确有活跃流"重新点亮,仅以真值为准。
     setIsStreaming(false);
     streamIdRef.current = null;
+    // 压缩横幅真值在主进程登记表（按会话），切会话时先归零本地表达，避免上一会话的
+    // 压缩横幅/进度残留到新会话；随后由下方查询按"新会话是否确在压缩"重新点亮。
+    setIsCompacting(false);
+    setCompactionPercent(null);
     // 切换会话时一并清掉本轮计时锚点,避免上一会话的实时跳秒残留到新会话。
     setTurnStartedAt(null);
     textTypewriter.reset();
@@ -518,6 +526,20 @@ export function ChatSurface({
       if (usage) setTokenUsage(usage);
       // 对话模式随会话恢复:每会话各自独立,切换会话即切到该会话自己的模式。
       setMode(convMode);
+
+      // 压缩横幅按会话恢复:压缩态真值在主进程登记表,切回正在压缩的会话时恢复横幅与进度,
+      // 并把 streamIdRef 指向压缩流,使后续 progress/done 事件(按 streamId 门控)能继续匹配收尾。
+      try {
+        const comp = await clientApi.chatCompactionGet({ conversationId });
+        if (cancelled) return;
+        if (comp && comp.compacting && comp.streamId) {
+          streamIdRef.current = comp.streamId;
+          setIsCompacting(true);
+          setCompactionPercent(typeof comp.percent === 'number' ? comp.percent : null);
+        }
+      } catch {
+        // 查询失败不影响正常加载;降级为无横幅(压缩仍会在后台完成)。
+      }
 
       // ADR 22: HMR 重载/重新打开后,main 进程的流式推理可能仍在进行。
       // 询问后端是否有本会话的活跃流;若有,把已累积的思考/正文接回 UI,
@@ -747,22 +769,34 @@ export function ChatSurface({
 
     // /compact: run compaction in-place without an agent turn
     if (text === '/compact' && sentAttachments.length === 0) {
+      // 捕获发起会话:压缩为异步,完成时当前显示的会话可能已切走。完成回调里所有
+      // 影响"当前视图"的更新(messages/tokenUsage/横幅/streamIdRef)都必须先确认仍停在
+      // 发起会话,否则会把 A 的结果灌进当前显示的 B(横幅、消息时间线均会错位)。
+      // 切走时压缩仍在主进程后台进行,其登记表与 done 事件负责让 A 自身正确收尾,
+      // 切回 A 时由切会话 effect 的 chatCompactionGet 恢复/收尾横幅。
+      const compactConversationId = conversationId;
       const streamId = `compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       streamIdRef.current = streamId;
       const compactStartedAt = Date.now();
       setIsCompacting(true);
       try {
-        const result = await clientApi.chatCompact({ conversationId, streamId });
-        if (result.compacted) {
-          const { messages: loaded, tokenUsage: usage } = await loadConversationMessages(conversationId);
-          setMessages(loaded);
-          if (usage) setTokenUsage(usage);
+        const result = await clientApi.chatCompact({ conversationId: compactConversationId, streamId });
+        const stillHere = conversationIdRef.current === compactConversationId;
+        if (result.compacted && stillHere) {
+          const { messages: loaded, tokenUsage: usage } = await loadConversationMessages(compactConversationId);
+          if (conversationIdRef.current === compactConversationId) {
+            setMessages(loaded);
+            if (usage) setTokenUsage(usage);
+          }
           onConversationUpdated?.();
           // 直接用 invoke 返回的 notification 落地"已压缩"标记,不依赖 chat:compaction
           // 的 done 事件(它与 invoke 响应之间存在到达顺序竞态:finally 会清空
           // streamIdRef,导致 done 事件被 streamId 门控丢弃,标记永远不显示)。
           // 压缩点以时间线内的 CompactionSummaryCard 呈现(已由上方 setMessages 重载),
           // 不再使用底部横幅通知。
+        } else if (result.compacted) {
+          // 已切走:仅刷新会话列表,不触碰当前视图。
+          onConversationUpdated?.();
         }
       } finally {
         // 保证 spinner 至少可见 ~600ms,避免小会话瞬时完成导致"点了没任何反馈"。
@@ -771,8 +805,12 @@ export function ChatSurface({
         if (elapsed < minVisibleMs) {
           await new Promise((resolve) => setTimeout(resolve, minVisibleMs - elapsed));
         }
-        streamIdRef.current = null;
-        setIsCompacting(false);
+        // 仅当仍停在发起会话时才清理当前视图的横幅/streamId;已切走则交由目标会话自身
+        // 的切会话 effect 管理,避免误清当前显示会话(可能正自有压缩)的横幅。
+        if (conversationIdRef.current === compactConversationId) {
+          streamIdRef.current = null;
+          setIsCompacting(false);
+        }
       }
       return;
     }

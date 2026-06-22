@@ -35,6 +35,12 @@ import { createGoalPlanStore } from './goal-plan-store.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
 import { buildPersistedCompactedMessages } from './conversation-compaction-persistence.mjs';
 import { compactIfNeeded } from './context-compactor.mjs';
+import {
+  beginCompaction,
+  endCompaction,
+  updateCompactionProgress,
+  getCompaction,
+} from './chat-runtime/compaction-registry.mjs';
 import { resolveProviderCredential } from './provider-credential-resolver.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -677,6 +683,9 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     ...activeMessages.map((m) => ({ role: m.role, content: m.content })),
   ];
 
+  // 登记表与事件 emit 单一来源：先登记会话压缩态再 emit start，
+  // 使切会话查询（chat:compaction:get）能恢复手动 /compact 的横幅。
+  beginCompaction({ conversationId, streamId, manual: true });
   event.sender.send('chat:compaction', { streamId, stage: 'start', manual: true });
   // 字符级真实进度：压缩器流式收摘要时逐 chunk 回调，转发为 progress 事件。
   let lastSentPercent = -1;
@@ -686,6 +695,7 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     // 节流：百分比无变化时不重复发，减少 IPC 噪声。
     if (percent === lastSentPercent) return;
     lastSentPercent = percent;
+    updateCompactionProgress({ conversationId, streamId, percent });
     event.sender.send('chat:compaction', {
       streamId,
       stage: 'progress',
@@ -708,6 +718,7 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
   });
 
   if (!result.compacted) {
+    endCompaction({ conversationId, streamId });
     event.sender.send('chat:compaction', { streamId, stage: 'idle', manual: true });
     return { compacted: false };
   }
@@ -739,12 +750,20 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     console.warn('[main] failed to record compact baseline:', error?.message || error);
   }
 
+  // 无论是否有 notification，压缩已结束，先清登记表再 emit done，保证可查询真值收尾。
+  endCompaction({ conversationId, streamId });
   if (result.notification) {
     event.sender.send('chat:compaction', { streamId, stage: 'done', manual: true, ...result.notification });
   }
 
   return { compacted: true, notification: result.notification };
 });
+
+// ── 压缩态查询（按 conversationId）──
+// 渲染层切会话时调用：返回该会话当前是否正在压缩及进度，用于恢复横幅。
+// 压缩态真值落在主进程登记表，渲染层只负责表达，不再各自持有运行真值。
+ipcMain.handle('chat:compaction:get', (_event, { conversationId } = {}) =>
+  getCompaction(conversationId));
 
 ipcMain.handle('prompt-snapshots:list', (_event, params = {}) =>
   promptSnapshotStore.list({ limit: params?.limit }));
