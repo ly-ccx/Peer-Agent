@@ -466,11 +466,33 @@ UI 表达托管运行状态，而不是把每个 tick 刷进聊天流。
 
 ### 验收标准
 
-- [ ] 用户能看到 Runner 当前状态。
-- [ ] pause 后无新 tick。
-- [ ] resume 从当前 plan 状态继续。
-- [ ] clear 后不再注入 goal context。
-- [ ] Renderer 没有直接执行本地能力。
+- [x] 用户能看到 Runner 当前状态。
+- [x] pause 后无新 tick。
+- [x] resume 从当前 plan 状态继续。
+- [x] clear 后不再注入 goal context。
+- [x] Renderer 没有直接执行本地能力。
+
+### 当前验证记录（据实读码核验，未改代码）
+
+调用链（renderer 控制意图 → IPC → main runner，全程不在 renderer 执行本地能力）：
+
+```text
+GoalPlanPanel 按钮 onControl(plan,'pause'|'resume'|'clear')
+  → controlRunner (GoalPlanPanel.tsx:441) → clientApi.goalRunnerPause/Resume/Clear
+    → IPC goalRunner:pause/resume/clear (main.mjs:755-757)
+      → goalRunner.pause/resume/clear (goal-runner.mjs)
+        → 广播 goalRunner:changed → 面板 reload 重渲染
+```
+
+逐条核验：
+
+- 用户能看到 Runner 状态：`GoalPlanPanel.tsx` RunnerSection 渲染 status/counters/attention（running/exploring/blocked/paused/budget_exhausted/completed/failed）。
+- pause 后无新 tick：`pause` 置 `session.cancelled=true`（goal-runner.mjs:281），`pump` 以 `while(!session.cancelled)` 及多处 `if(session.cancelled) return` 守卫，下一 tick 不再启动。
+- resume 从当前 plan 状态继续：`resume`（goal-runner.mjs:244）读当前 plan、终态拒绝、置 `executing`/`running` 并新建 session 重启 `pump`，从 store 当前状态续推。
+- clear 后不再注入 goal context：clear 置 plan `cancelled` + runner `enabled:false`（goal-runner.mjs:282-284）；context source `normalizePlan` 对非 active 状态返回 null（goal-runner-source.mjs）；store `isActivePlan`/`ACTIVE_PLAN_STATUSES` 不含 cancelled（goal-plan-store.mjs:343,403）。双保险。
+- Renderer 不执行本地能力：`controlRunner` 仅经 `clientApi.goalRunner*` 发 IPC 控制意图，本地能力全部在 main 侧 runner 执行。
+
+结论：5 条验收标准均由代码强制成立，非仅靠约定。
 
 ## Slice 8：集成验证与收敛
 
