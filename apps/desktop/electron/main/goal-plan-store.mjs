@@ -206,10 +206,182 @@ function updateTaskInTree(tasks, taskId, updater) {
   return { tasks: next, found };
 }
 
+const RUNNER_STATUSES = new Set([
+  'idle',
+  'running',
+  'paused',
+  'exploring',
+  'blocked',
+  'budget_exhausted',
+  'completed',
+  'failed',
+]);
+const RUNNER_INTENTS = new Set(['execute', 'verify', 'explore', 'synthesize', 'block']);
+const EXPLORER_STATUSES = new Set(['queued', 'running', 'completed', 'failed', 'cancelled']);
+const EXPLORER_CONFIDENCE = new Set(['low', 'medium', 'high']);
+
+function normalizeStringArray(value) {
+  return Array.isArray(value)
+    ? value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
+    : [];
+}
+
+function normalizeExplorerRequest(request, fallback = {}) {
+  const now = new Date().toISOString();
+  const explorerId = typeof request?.explorerId === 'string' && request.explorerId.trim()
+    ? request.explorerId.trim()
+    : fallback.explorerId;
+  const planId = typeof request?.planId === 'string' && request.planId.trim()
+    ? request.planId.trim()
+    : fallback.planId;
+  if (!explorerId || !planId) return null;
+  const scope = request?.scope && typeof request.scope === 'object'
+    ? {
+        include: normalizeStringArray(request.scope.include),
+        exclude: normalizeStringArray(request.scope.exclude),
+      }
+    : undefined;
+  const normalized = {
+    explorerId,
+    planId,
+    question: typeof request?.question === 'string' && request.question.trim()
+      ? request.question.trim()
+      : 'Explore missing evidence for the active goal',
+    reason: typeof request?.reason === 'string' && request.reason.trim()
+      ? request.reason.trim()
+      : 'Goal Runner requested read-only exploration',
+    profile: 'readonly_explorer',
+    budget: {
+      maxToolCalls: Number.isFinite(request?.budget?.maxToolCalls)
+        ? Math.max(1, Math.trunc(request.budget.maxToolCalls))
+        : Number.isFinite(request?.maxToolCalls)
+          ? Math.max(1, Math.trunc(request.maxToolCalls))
+          : 8,
+      maxDurationMs: Number.isFinite(request?.budget?.maxDurationMs)
+        ? Math.max(1000, Math.trunc(request.budget.maxDurationMs))
+        : Number.isFinite(request?.maxDurationMs)
+          ? Math.max(1000, Math.trunc(request.maxDurationMs))
+          : 120000,
+    },
+    exitCriteria: normalizeStringArray(request?.exitCriteria),
+    createdAt: typeof request?.createdAt === 'string' && request.createdAt.trim()
+      ? request.createdAt
+      : now,
+  };
+  if (scope && (scope.include.length > 0 || scope.exclude.length > 0)) normalized.scope = scope;
+  return normalized;
+}
+
+function normalizeExplorerReport(report, fallback = {}) {
+  if (!report || typeof report !== 'object') return undefined;
+  const explorerId = typeof report.explorerId === 'string' && report.explorerId.trim()
+    ? report.explorerId.trim()
+    : fallback.explorerId;
+  const planId = typeof report.planId === 'string' && report.planId.trim()
+    ? report.planId.trim()
+    : fallback.planId;
+  if (!explorerId || !planId) return undefined;
+  const findings = Array.isArray(report.findings)
+    ? report.findings
+        .map((finding) => ({
+          claim: typeof finding?.claim === 'string' ? finding.claim.trim() : '',
+          evidenceRefs: normalizeStringArray(finding?.evidenceRefs),
+        }))
+        .filter((finding) => finding.claim && finding.evidenceRefs.length > 0)
+    : [];
+  const normalized = {
+    explorerId,
+    planId,
+    question: typeof report.question === 'string' && report.question.trim()
+      ? report.question.trim()
+      : fallback.question || '',
+    findings,
+    evidenceRefs: normalizeStringArray(report.evidenceRefs),
+    confidence: EXPLORER_CONFIDENCE.has(report.confidence) ? report.confidence : 'low',
+  };
+  if (typeof report.recommendedNextAction === 'string' && report.recommendedNextAction.trim()) {
+    normalized.recommendedNextAction = report.recommendedNextAction.trim();
+  }
+  if (typeof report.blockedReason === 'string' && report.blockedReason.trim()) {
+    normalized.blockedReason = report.blockedReason.trim();
+  }
+  return normalized;
+}
+
+function normalizeExplorerRun(run, fallback = {}) {
+  if (!run || typeof run !== 'object') return null;
+  const explorerId = typeof run.explorerId === 'string' && run.explorerId.trim()
+    ? run.explorerId.trim()
+    : fallback.explorerId;
+  const request = normalizeExplorerRequest(run.request, { explorerId, planId: fallback.planId });
+  if (!request) return null;
+  const now = new Date().toISOString();
+  const status = EXPLORER_STATUSES.has(run.status) ? run.status : 'queued';
+  const normalized = {
+    explorerId: request.explorerId,
+    status,
+    request,
+    createdAt: typeof run.createdAt === 'string' && run.createdAt.trim() ? run.createdAt : request.createdAt,
+    updatedAt: typeof run.updatedAt === 'string' && run.updatedAt.trim() ? run.updatedAt : now,
+  };
+  const report = normalizeExplorerReport(run.report, {
+    explorerId: request.explorerId,
+    planId: request.planId,
+    question: request.question,
+  });
+  if (report) normalized.report = report;
+  if (typeof run.failureReason === 'string' && run.failureReason.trim()) {
+    normalized.failureReason = run.failureReason.trim();
+  }
+  return normalized;
+}
+
+function countExplorerRuns(explorers) {
+  return Array.isArray(explorers) ? explorers.filter(Boolean).length : 0;
+}
+
+const ACTIVE_PLAN_STATUSES = new Set(['drafting', 'awaiting_approval', 'approved', 'executing', 'paused']);
+
 function normalizeConversationId(value) {
   if (value === undefined || value === null) return null;
   const normalized = String(value).trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeRunnerState(runner, planId) {
+  if (!runner || typeof runner !== 'object') return undefined;
+  const now = new Date().toISOString();
+  const status = RUNNER_STATUSES.has(runner.status) ? runner.status : 'idle';
+  const next = {
+    enabled: Boolean(runner.enabled),
+    status,
+    turnCount: Number.isFinite(runner.turnCount) ? Math.max(0, Math.trunc(runner.turnCount)) : 0,
+    toolCallCount: Number.isFinite(runner.toolCallCount) ? Math.max(0, Math.trunc(runner.toolCallCount)) : 0,
+    explorerCount: Number.isFinite(runner.explorerCount) ? Math.max(0, Math.trunc(runner.explorerCount)) : 0,
+    maxTurns: Number.isFinite(runner.maxTurns) ? Math.max(1, Math.trunc(runner.maxTurns)) : 8,
+    maxToolCalls: Number.isFinite(runner.maxToolCalls) ? Math.max(1, Math.trunc(runner.maxToolCalls)) : 40,
+    maxExplorers: Number.isFinite(runner.maxExplorers) ? Math.max(0, Math.trunc(runner.maxExplorers)) : 3,
+    updatedAt: typeof runner.updatedAt === 'string' && runner.updatedAt.trim() ? runner.updatedAt : now,
+  };
+  if (RUNNER_INTENTS.has(runner.intent)) {
+    next.intent = runner.intent;
+  }
+  if (typeof runner.currentTaskId === 'string' && runner.currentTaskId.trim()) {
+    next.currentTaskId = runner.currentTaskId.trim();
+  }
+  if (typeof runner.blockedReason === 'string' && runner.blockedReason.trim()) {
+    next.blockedReason = runner.blockedReason.trim();
+  }
+  if (Array.isArray(runner.explorers)) {
+    const explorers = runner.explorers
+      .map((run) => normalizeExplorerRun(run, { planId }))
+      .filter(Boolean);
+    if (explorers.length > 0) next.explorers = explorers;
+  }
+  if (typeof runner.lastError === 'string' && runner.lastError.trim()) {
+    next.lastError = runner.lastError.trim();
+  }
+  return next;
 }
 
 function normalizePlan(plan) {
@@ -219,11 +391,17 @@ function normalizePlan(plan) {
   const normalizedStatus = approvalDecision === 'reject' && plan.status !== 'cancelled'
     ? 'cancelled'
     : plan.status;
-  return {
+  const normalized = {
     ...plan,
     conversationId: normalizedConversationId ?? undefined,
     status: normalizedStatus,
   };
+  const runner = normalizeRunnerState(plan.runner, plan.planId);
+  return runner ? { ...normalized, runner } : normalized;
+}
+
+function isActivePlan(plan) {
+  return ACTIVE_PLAN_STATUSES.has(plan?.status);
 }
 
 function isInactivePlan(plan) {
@@ -326,6 +504,15 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     const normalizedConversationId = normalizeConversationId(conversationId);
     if (normalizedConversationId === null) return [];
     return listPlansByConversation(normalizedConversationId).map(hydratePlanMeta).filter(Boolean);
+  }
+
+  function getActivePlanByConversation(conversationId) {
+    const normalizedConversationId = normalizeConversationId(conversationId);
+    if (normalizedConversationId === null) return null;
+    const activePlans = listPlanDetailsByConversation(normalizedConversationId)
+      .filter(isActivePlan)
+      .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+    return activePlans[0] ?? null;
   }
 
   function getPlan(planId) {
@@ -481,6 +668,115 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     return persist({ ...plan, status, updatedAt: new Date().toISOString() });
   }
 
+  /** 更新 Goal Runner 托管推进状态；不允许借此改写任务状态或 evidence。 */
+  function setRunnerState(planId, patch = {}) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    const now = new Date().toISOString();
+    const current = normalizeRunnerState(plan.runner, planId) || {
+      enabled: false,
+      status: 'idle',
+      turnCount: 0,
+      toolCallCount: 0,
+      explorerCount: 0,
+      maxTurns: 8,
+      maxToolCalls: 40,
+      maxExplorers: 3,
+      updatedAt: now,
+    };
+    const nextRunner = normalizeRunnerState({ ...current, ...patch, updatedAt: patch.updatedAt || now }, planId);
+    return persist({ ...plan, runner: nextRunner, updatedAt: now });
+  }
+
+  /** 动态派发只读 Explorer 子 Agent 实例；只记录运行契约，不改写任务状态或 Evidence。 */
+  function dispatchExplorer(planId, request = {}) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    const now = new Date().toISOString();
+    const current = normalizeRunnerState(plan.runner, planId) || {
+      enabled: true,
+      status: 'idle',
+      turnCount: 0,
+      toolCallCount: 0,
+      explorerCount: 0,
+      maxTurns: 8,
+      maxToolCalls: 40,
+      maxExplorers: 3,
+      updatedAt: now,
+    };
+    const explorers = Array.isArray(current.explorers) ? current.explorers : [];
+    if (explorers.length >= current.maxExplorers) {
+      throw new Error(`[goal-plan-store] max explorers exhausted for plan ${planId}`);
+    }
+    const explorerId = typeof request.explorerId === 'string' && request.explorerId.trim()
+      ? request.explorerId.trim()
+      : randomUUID();
+    const explorerRun = normalizeExplorerRun({
+      explorerId,
+      status: request.status || 'queued',
+      request: { ...request, explorerId, planId },
+      createdAt: request.createdAt || now,
+      updatedAt: request.updatedAt || now,
+    }, { explorerId, planId });
+    if (!explorerRun) {
+      throw new Error(`[goal-plan-store] invalid explorer request for plan ${planId}`);
+    }
+    const nextExplorers = [...explorers, explorerRun];
+    const nextRunner = normalizeRunnerState({
+      ...current,
+      enabled: true,
+      status: 'exploring',
+      intent: 'explore',
+      explorerCount: countExplorerRuns(nextExplorers),
+      explorers: nextExplorers,
+      updatedAt: now,
+    }, planId);
+    return persist({ ...plan, runner: nextRunner, updatedAt: now });
+  }
+
+  /** 回填 Explorer 报告；完成态必须携带 evidenceRefs，且不允许借此改写任务状态。 */
+  function reportExplorer(planId, explorerId, report = {}) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    const now = new Date().toISOString();
+    const current = normalizeRunnerState(plan.runner, planId);
+    if (!current) return null;
+    const explorers = Array.isArray(current.explorers) ? current.explorers : [];
+    const index = explorers.findIndex((run) => run.explorerId === explorerId);
+    if (index < 0) return null;
+    const status = EXPLORER_STATUSES.has(report.status) ? report.status : 'completed';
+    const normalizedReport = normalizeExplorerReport({
+      ...report,
+      explorerId,
+      planId,
+      question: report.question || explorers[index].request?.question,
+      createdAt: report.createdAt || now,
+    });
+    if (status === 'completed' && (!normalizedReport || normalizedReport.evidenceRefs.length === 0)) {
+      throw new Error(
+        `[goal-plan-store] explorer ${explorerId} cannot be 'completed' without evidenceRefs`,
+      );
+    }
+    const nextRun = normalizeExplorerRun({
+      ...explorers[index],
+      status,
+      report: normalizedReport,
+      failureReason: report.failureReason,
+      updatedAt: report.updatedAt || now,
+    }, { explorerId, planId });
+    const nextExplorers = explorers.map((run, idx) => (idx === index ? nextRun : run));
+    const stillRunning = nextExplorers.some((run) => run.status === 'queued' || run.status === 'running');
+    const nextRunner = normalizeRunnerState({
+      ...current,
+      status: stillRunning ? 'exploring' : 'idle',
+      intent: stillRunning ? 'explore' : 'verify',
+      explorerCount: countExplorerRuns(nextExplorers),
+      explorers: nextExplorers,
+      updatedAt: now,
+    }, planId);
+    return persist({ ...plan, runner: nextRunner, updatedAt: now });
+  }
+
   /**
    * 由 Evidence 回写子任务状态。约束（提案 §6）：
    * - 置为 'completed' 必须提供非空 evidenceRefs，否则抛错。
@@ -597,11 +893,15 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     listPlansByConversation,
     listPlanDetails,
     listPlanDetailsByConversation,
+    getActivePlanByConversation,
     getPlan,
     createPlan,
     revisePlan,
     recordApproval,
     setPlanStatus,
+    setRunnerState,
+    dispatchExplorer,
+    reportExplorer,
     recordTaskEvidence,
     deletePlan,
     deletePlanByConversation,

@@ -104,6 +104,94 @@ export interface GoalRevision {
   readonly changedBy?: string;
 }
 
+/** Goal Runner 托管推进器状态。 */
+export type GoalRunnerStatus =
+  | 'idle'
+  | 'running'
+  | 'paused'
+  | 'exploring'
+  | 'blocked'
+  | 'budget_exhausted'
+  | 'completed'
+  | 'failed';
+
+/** Goal Runner 当前推进意图；只描述编排意图，不替代工具执行 Evidence。 */
+export type GoalRunnerIntent =
+  | 'execute'
+  | 'verify'
+  | 'explore'
+  | 'synthesize'
+  | 'block';
+
+/** 动态 Explorer 子 Agent 的能力边界。第一版只允许只读探索。 */
+export type GoalExplorerProfile = 'readonly_explorer';
+
+export type GoalExplorerStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+/** Runner 动态生成的 Explorer 子 Agent 请求；定义任务实例，不定义固定角色。 */
+export interface GoalExplorerRequest {
+  readonly explorerId: string;
+  readonly planId: string;
+  readonly question: string;
+  readonly reason: string;
+  readonly scope?: {
+    readonly include?: string[];
+    readonly exclude?: string[];
+  };
+  readonly profile: GoalExplorerProfile;
+  readonly budget: {
+    readonly maxToolCalls: number;
+    readonly maxDurationMs: number;
+  };
+  readonly exitCriteria: string[];
+  readonly createdAt: string;
+}
+
+export interface GoalExplorerFinding {
+  readonly claim: string;
+  readonly evidenceRefs: string[];
+}
+
+/** Explorer 子 Agent 的结构化报告；完成报告必须带 Evidence refs。 */
+export interface GoalExplorerReport {
+  readonly explorerId: string;
+  readonly planId: string;
+  readonly question: string;
+  readonly findings: GoalExplorerFinding[];
+  readonly evidenceRefs: string[];
+  readonly confidence: 'low' | 'medium' | 'high';
+  readonly recommendedNextAction?: string;
+  readonly blockedReason?: string;
+}
+
+export interface GoalExplorerRun {
+  readonly explorerId: string;
+  readonly status: GoalExplorerStatus;
+  readonly request: GoalExplorerRequest;
+  readonly report?: GoalExplorerReport;
+  readonly failureReason?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+/** GoalPlan 内嵌的轻量 runner 状态；不代表工具执行事实，任务完成仍必须由 Evidence 回写。 */
+export interface GoalRunnerState {
+  readonly enabled: boolean;
+  readonly status: GoalRunnerStatus;
+  readonly intent?: GoalRunnerIntent;
+  readonly currentTaskId?: string;
+  readonly turnCount: number;
+  readonly toolCallCount: number;
+  readonly explorerCount: number;
+  readonly maxTurns: number;
+  readonly maxToolCalls: number;
+  readonly maxExplorers: number;
+  readonly explorers?: GoalExplorerRun[];
+  readonly blockedReason?: string;
+  readonly lastError?: string;
+  readonly updatedAt: string;
+}
+
 /** 计划 Artifact 定型版，见提案 §3。 */
 export interface GoalPlan {
   // 身份 & 归属
@@ -128,6 +216,8 @@ export interface GoalPlan {
   readonly approval?: GoalApproval;
   /** 由子任务聚合，派生，不可手填 */
   readonly progress: GoalProgress;
+  /** Goal Runner 托管推进状态；旧计划可缺省。 */
+  readonly runner?: GoalRunnerState;
 
   // 溯源 & 治理
   readonly version: number;

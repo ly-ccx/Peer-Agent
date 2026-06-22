@@ -524,3 +524,162 @@ test('单活跃草稿: 无 conversationId 的草稿互不作废（绝不按 null
   assert.equal(store.getPlan(orphan1.planId)?.status, 'awaiting_approval');
   assert.equal(store.getPlan(orphan2.planId)?.status, 'drafting');
 });
+
+test('runner: 旧 plan 缺少 runner 字段时仍可读取', () => {
+  const plan = store.createPlan(draftWithTasks());
+  const got = store.getPlan(plan.planId);
+  assert.equal(got.runner, undefined);
+});
+
+test('runner: setRunnerState 可写入并读回 runner 状态', () => {
+  const plan = store.createPlan(draftWithTasks());
+  const updated = store.setRunnerState(plan.planId, {
+    enabled: true,
+    status: 'exploring',
+    intent: 'explore',
+    currentTaskId: 't1',
+    turnCount: 2,
+    toolCallCount: 3,
+    explorerCount: 1,
+    maxTurns: 12,
+    maxToolCalls: 60,
+    maxExplorers: 5,
+    blockedReason: 'need more evidence',
+    lastError: 'previous failure',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  });
+
+  assert.equal(updated.runner.enabled, true);
+  assert.equal(updated.runner.status, 'exploring');
+  assert.equal(updated.runner.intent, 'explore');
+  assert.equal(updated.runner.currentTaskId, 't1');
+  assert.equal(updated.runner.turnCount, 2);
+  assert.equal(updated.runner.toolCallCount, 3);
+  assert.equal(updated.runner.explorerCount, 1);
+  assert.equal(updated.runner.maxTurns, 12);
+  assert.equal(updated.runner.maxToolCalls, 60);
+  assert.equal(updated.runner.maxExplorers, 5);
+  assert.equal(updated.runner.blockedReason, 'need more evidence');
+  assert.equal(updated.runner.lastError, 'previous failure');
+  assert.equal(updated.runner.updatedAt, '2026-01-01T00:00:00.000Z');
+
+  const got = store.getPlan(plan.planId);
+  assert.deepEqual(got.runner, updated.runner);
+});
+
+test('runner: setRunnerState 归一化无效字段并补默认预算', () => {
+  const plan = store.createPlan(draftWithTasks());
+  const updated = store.setRunnerState(plan.planId, {
+    enabled: true,
+    status: 'unknown',
+    intent: 'invalid',
+    turnCount: -2,
+    toolCallCount: 1.8,
+    explorerCount: -3,
+    maxTurns: 0,
+    maxToolCalls: -10,
+    maxExplorers: -1,
+  });
+
+  assert.equal(updated.runner.enabled, true);
+  assert.equal(updated.runner.status, 'idle');
+  assert.equal(updated.runner.intent, undefined);
+  assert.equal(updated.runner.turnCount, 0);
+  assert.equal(updated.runner.toolCallCount, 1);
+  assert.equal(updated.runner.explorerCount, 0);
+  assert.equal(updated.runner.maxTurns, 1);
+  assert.equal(updated.runner.maxToolCalls, 1);
+  assert.equal(updated.runner.maxExplorers, 0);
+});
+
+test('runner: setRunnerState 只更新 runner，不绕过 task Evidence 约束', () => {
+  const plan = store.createPlan(draftWithTasks());
+  const updated = store.setRunnerState(plan.planId, {
+    enabled: true,
+    status: 'running',
+    currentTaskId: 't1',
+    // 即使 patch 携带 plan/task 形态字段，也只能落进 runner 归一化白名单。
+    tasks: [{ taskId: 't1', status: 'completed', evidenceRefs: [] }],
+    evidenceRefs: ['fake-evidence'],
+  });
+
+  assert.equal(updated.tasks[0].status, 'pending');
+  assert.deepEqual(updated.tasks[0].evidenceRefs, []);
+  assert.deepEqual(updated.evidenceRefs, []);
+  assert.equal(updated.runner.status, 'running');
+});
+
+test('runner: completed task 仍必须由 recordTaskEvidence 带 evidenceRefs 回写', () => {
+  const plan = store.createPlan(draftWithTasks());
+  store.setRunnerState(plan.planId, { enabled: true, status: 'running', currentTaskId: 't1' });
+
+  assert.throws(
+    () => store.recordTaskEvidence(plan.planId, 't1', { status: 'completed' }),
+    /cannot be 'completed' without evidenceRefs/,
+  );
+});
+
+test('explorer: dispatch/report 动态记录子 Agent 实例且不改写任务状态', () => {
+  const plan = store.createPlan(draftWithTasks());
+  store.setRunnerState(plan.planId, { enabled: true, maxExplorers: 1 });
+
+  const dispatched = store.dispatchExplorer(plan.planId, {
+    question: '确认 store runner 字段',
+    reason: '缺少本地证据',
+    scope: { include: ['apps/desktop/electron/main/goal-plan-store.mjs'] },
+    budget: { maxToolCalls: 4, maxDurationMs: 30000 },
+  });
+
+  assert.equal(dispatched.runner.status, 'exploring');
+  assert.equal(dispatched.runner.intent, 'explore');
+  assert.equal(dispatched.runner.explorerCount, 1);
+  assert.equal(dispatched.runner.explorers[0].request.profile, 'readonly_explorer');
+  assert.equal(dispatched.runner.explorers[0].request.question, '确认 store runner 字段');
+  assert.equal(dispatched.tasks[0].status, 'pending');
+
+  assert.throws(
+    () => store.reportExplorer(plan.planId, dispatched.runner.explorers[0].explorerId, { summary: '缺证据' }),
+    /cannot be 'completed' without evidenceRefs/,
+  );
+
+  const reported = store.reportExplorer(plan.planId, dispatched.runner.explorers[0].explorerId, {
+    summary: '已确认 runner 字段',
+    findings: [{ claim: 'runner 字段存在', evidenceRefs: ['local-file://goal-plan-store'] }],
+    evidenceRefs: ['local-file://goal-plan-store'],
+    confidence: 'high',
+  });
+
+  assert.equal(reported.runner.status, 'idle');
+  assert.equal(reported.runner.intent, 'verify');
+  assert.equal(reported.runner.explorers[0].status, 'completed');
+  assert.deepEqual(reported.runner.explorers[0].report.evidenceRefs, ['local-file://goal-plan-store']);
+  assert.equal(reported.tasks[0].status, 'pending');
+  assert.deepEqual(reported.evidenceRefs, []);
+});
+
+test('explorer: dispatch 遵守 maxExplorers 预算', () => {
+  const plan = store.createPlan(draftWithTasks());
+  store.setRunnerState(plan.planId, { enabled: true, maxExplorers: 1 });
+  store.dispatchExplorer(plan.planId, { question: 'first', reason: 'test' });
+
+  assert.throws(
+    () => store.dispatchExplorer(plan.planId, { question: 'second', reason: 'test' }),
+    /max explorers exhausted/,
+  );
+});
+
+test('getActivePlanByConversation 返回同会话最新活跃计划，忽略结束态', () => {
+  const older = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-active', title: 'older' });
+  store.setPlanStatus(older.planId, 'awaiting_approval');
+
+  const newer = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-active', title: 'newer' });
+  store.setPlanStatus(newer.planId, 'approved');
+
+  const done = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-active', title: 'done' });
+  store.setPlanStatus(done.planId, 'cancelled');
+
+  const active = store.getActivePlanByConversation('conv-active');
+  assert.equal(active.planId, newer.planId);
+  assert.equal(store.getActivePlanByConversation('missing'), null);
+  assert.equal(store.getActivePlanByConversation(''), null);
+});
