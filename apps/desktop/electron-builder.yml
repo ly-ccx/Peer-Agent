@@ -2,6 +2,13 @@ appId: com.peeragent.desktop
 productName: Peer Agent
 copyright: Copyright © 2026 Peer Agent
 
+# 产物文件名模板：强制无空格。
+# productName 带空格会导致 electron-builder 生成的更新清单（*-mac.yml）
+# 把 URL 里的空格转成连字符，而实际产物文件名保留空格，两端对不上 → 自动更新 404。
+# 这里固定为连字符命名，使「实际产物名」与「清单 URL」天然一致。
+# 注意：productName（应用显示名/Dock/菜单）保持 "Peer Agent" 不变，仅影响产物文件名。
+artifactName: Peer-Agent-${version}-${arch}.${ext}
+
 directories:
   output: ../../dist-electron
   buildResources: build
@@ -64,6 +71,8 @@ nsis:
   allowToChangeInstallationDirectory: true
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
+  # nsis 安装包为多架构合成的单一产物，不带 ${arch}（否则模板里 arch 为空会留下多余连字符）。
+  artifactName: Peer-Agent-Setup-${version}.${ext}
 
 # ── 发布 (GitHub Releases) ──
 # 通道分流由 tag 名驱动（见 .github/workflows/release.yml）：
