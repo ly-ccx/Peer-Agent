@@ -278,6 +278,13 @@
     color: var(--pa-text-primary);
   }
 
+  .updater-modal-ready {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--pa-text-primary);
+  }
+
   .updater-modal-error {
     margin: 0;
     font-size: 13px;

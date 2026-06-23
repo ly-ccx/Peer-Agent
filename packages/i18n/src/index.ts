@@ -489,6 +489,10 @@ export type TranslationKey =
   | 'updater.modal.installHint'
   | 'updater.modal.downloading'
   | 'updater.modal.restartNow'
+  | 'updater.modal.readyToOpen'
+  | 'updater.modal.openInstaller'
+  | 'updater.modal.openInstallerHint'
+  | 'updater.modal.openReleasePage'
   | 'updater.modal.upToDate'
   | 'updater.modal.checkAgain'
   | 'updater.modal.error'
@@ -991,6 +995,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.modal.installHint': '当前工作已保存。安装完成后将自动重启，通常需要 10–30 秒。',
     'updater.modal.downloading': '正在下载更新…',
     'updater.modal.restartNow': '立即重启安装',
+    'updater.modal.readyToOpen': '{version} 已下载完成。',
+    'updater.modal.openInstaller': '打开安装包',
+    'updater.modal.openInstallerHint':
+      '点击「打开安装包」后，在弹出的窗口中将 Peer Agent 拖入「应用程序」完成覆盖安装。',
+    'updater.modal.openReleasePage': '打开下载页面',
     'updater.modal.upToDate': '当前已是最新版本。',
     'updater.modal.checkAgain': '重新检查',
     'updater.modal.error': '更新出错：{message}',
@@ -1491,6 +1500,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
       'Your work is saved. The app will restart automatically after install, usually 10–30 seconds.',
     'updater.modal.downloading': 'Downloading update…',
     'updater.modal.restartNow': 'Restart & install',
+    'updater.modal.readyToOpen': '{version} has been downloaded.',
+    'updater.modal.openInstaller': 'Open installer',
+    'updater.modal.openInstallerHint':
+      'After clicking “Open installer”, drag Peer Agent into “Applications” to overwrite the current version.',
+    'updater.modal.openReleasePage': 'Open download page',
     'updater.modal.upToDate': 'You are on the latest version.',
     'updater.modal.checkAgain': 'Check again',
     'updater.modal.error': 'Update error: {message}',

@@ -50,6 +50,8 @@ import {
   checkForUpdates,
   downloadUpdate,
   quitAndInstall,
+  openInstaller,
+  openReleasePage,
 } from './auto-updater.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -511,6 +513,8 @@ ipcMain.handle('updater:download', async () => await downloadUpdate());
 ipcMain.handle('updater:install', () => {
   quitAndInstall();
 });
+ipcMain.handle('updater:open-installer', async () => await openInstaller());
+ipcMain.handle('updater:open-release-page', async () => await openReleasePage());
 ipcMain.handle('updater:set-channel', (_event, preference) => {
   // settings 是通道偏好的权限真相，先写回再切换运行时配置。
   const pref =

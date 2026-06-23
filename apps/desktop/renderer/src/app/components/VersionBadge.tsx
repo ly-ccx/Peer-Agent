@@ -14,7 +14,8 @@ import { UpdateModal } from './UpdateModal';
  * 能力真相在主进程，本组件通过 useUpdater 消费状态与动作。
  */
 export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
-  const { status, hasUpdate, check, download, install } = useUpdater();
+  const { status, hasUpdate, check, download, install, openInstaller, openReleasePage } =
+    useUpdater();
   const [modalOpen, setModalOpen] = useState(false);
 
   if (!status) return null;
@@ -50,6 +51,8 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
           status={status}
           onUpdate={() => void download()}
           onInstall={() => void install()}
+          onOpenInstaller={() => void openInstaller()}
+          onOpenReleasePage={() => void openReleasePage()}
           onRecheck={() => void check()}
           onClose={() => setModalOpen(false)}
         />

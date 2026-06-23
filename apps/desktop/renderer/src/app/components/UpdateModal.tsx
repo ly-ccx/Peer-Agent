@@ -20,6 +20,8 @@ export function UpdateModal({
   status,
   onUpdate,
   onInstall,
+  onOpenInstaller,
+  onOpenReleasePage,
   onRecheck,
   onClose,
 }: {
@@ -27,12 +29,17 @@ export function UpdateModal({
   readonly status: UpdaterStatus;
   readonly onUpdate: () => void;
   readonly onInstall: () => void;
+  /** mac 自管下载完成后打开 dmg 安装包（phase='ready-to-open'）。 */
+  readonly onOpenInstaller: () => void;
+  /** 错误兜底：打开 GitHub Release 页面（status.releaseUrl 存在时）。 */
+  readonly onOpenReleasePage: () => void;
   readonly onRecheck: () => void;
   readonly onClose: () => void;
 }) {
   const { phase } = status;
   const newVersion = status.availableVersion ?? '';
   const percent = Math.max(0, Math.min(100, status.percent ?? 0));
+  // ready-to-open 是 mac 完成态，允许关闭弹窗（dmg 已就绪，可稍后再打开）。
   const isBusy = phase === 'downloading' || phase === 'downloaded';
 
   return (
@@ -70,6 +77,22 @@ export function UpdateModal({
               </>
             ) : null}
           </div>
+        ) : phase === 'ready-to-open' ? (
+          <div className="updater-modal-body">
+            <h2 className="updater-modal-title">{i18n.t('updater.modal.title')}</h2>
+            <p className="updater-modal-ready">
+              {i18n.t('updater.modal.readyToOpen', { version: newVersion })}
+            </p>
+            <p className="updater-modal-hint">{i18n.t('updater.modal.openInstallerHint')}</p>
+            <div className="updater-modal-actions">
+              <button type="button" className="updater-btn primary" onClick={onOpenInstaller}>
+                {i18n.t('updater.modal.openInstaller')}
+              </button>
+              <button type="button" className="updater-btn ghost" onClick={onClose}>
+                {i18n.t('updater.modal.close')}
+              </button>
+            </div>
+          </div>
         ) : phase === 'not-available' ? (
           <div className="updater-modal-body">
             <h2 className="updater-modal-title">{i18n.t('updater.modal.title')}</h2>
@@ -90,6 +113,11 @@ export function UpdateModal({
               {i18n.t('updater.modal.error', { message: status.error ?? '' })}
             </p>
             <div className="updater-modal-actions">
+              {status.releaseUrl ? (
+                <button type="button" className="updater-btn primary" onClick={onOpenReleasePage}>
+                  {i18n.t('updater.modal.openReleasePage')}
+                </button>
+              ) : null}
               <button type="button" className="updater-btn" onClick={onRecheck}>
                 {i18n.t('updater.modal.checkAgain')}
               </button>

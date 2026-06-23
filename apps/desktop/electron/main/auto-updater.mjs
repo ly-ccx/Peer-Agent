@@ -20,12 +20,26 @@
  *     PEER_AGENT_FORCE_UPDATER=1 强制联调。
  */
 
-import { app } from 'electron';
+import { createWriteStream } from 'node:fs';
+import { mkdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { app, shell } from 'electron';
 import electronUpdater from 'electron-updater';
+import { buildDmgUrl, buildReleaseUrl, mapArch } from './mac-update-url.mjs';
+
+export { buildDmgUrl, buildReleaseUrl, mapArch };
 
 const { autoUpdater } = electronUpdater;
 
 const PRERELEASE_PATTERN = /-(beta|alpha|rc)\b/i;
+
+/** GitHub 发布源（与 electron-builder.yml 的 publish 配置保持一致）。 */
+const GITHUB_OWNER = 'yinLiangDream';
+const GITHUB_REPO = 'Peer-Agent';
+
+/** mac 自管下载的 dmg 存放子目录（位于系统临时目录下）。 */
+const MAC_UPDATE_DIR = 'peer-agent-updates';
 
 /** 模块级单例状态。渲染层通过 getUpdaterStatus() 读取快照。 */
 const state = {
@@ -41,6 +55,10 @@ const state = {
   percent: undefined,
   error: undefined,
   releaseNotes: undefined,
+  /** mac 自管下载完成的 dmg 本地路径（phase='ready-to-open' 时有值） */
+  installerPath: undefined,
+  /** 兜底用 GitHub Release 页面 URL（mac 下载失败时有值） */
+  releaseUrl: undefined,
   /** 事件回调（main 注入，转发到渲染窗口） */
   onEvent: undefined,
   /** 偏好读取器（main 注入，从 settingsStore 读取） */
@@ -128,6 +146,8 @@ export function getUpdaterStatus() {
     percent: state.percent,
     error: state.error,
     releaseNotes: state.releaseNotes,
+    installerPath: state.installerPath,
+    releaseUrl: state.releaseUrl,
   };
 }
 
@@ -169,6 +189,11 @@ export async function downloadUpdate() {
     log('downloadUpdate skipped (disabled).');
     return getUpdaterStatus();
   }
+  // mac 走自管下载链路：应用为 ad-hoc 签名，Squirrel 的「下载→签名校验→原子替换」
+  // 会在校验步骤失败（code requirement 不满足）。改为自管下载 dmg + 手动打开。
+  if (process.platform === 'darwin') {
+    return downloadUpdateMacManual();
+  }
   try {
     setPhase('downloading');
     state.percent = 0;
@@ -178,6 +203,146 @@ export async function downloadUpdate() {
     setPhase('error');
     log(`downloadUpdate failed: ${state.error}`);
   }
+  return getUpdaterStatus();
+}
+
+/**
+ * mac 自管下载：拼 dmg URL → HEAD 校验 → 流式下载到 temp → 完成置 ready-to-open。
+ * 任一步失败则置 error 并带上 Release 页面 URL，由渲染层提供「打开 Release 页面」兜底。
+ */
+async function downloadUpdateMacManual() {
+  const version = state.availableVersion;
+  const releaseUrl = buildReleaseUrl({
+    owner: GITHUB_OWNER,
+    repo: GITHUB_REPO,
+    version,
+  });
+  if (!version) {
+    state.error = 'No available version to download.';
+    state.releaseUrl = releaseUrl;
+    setPhase('error');
+    return getUpdaterStatus();
+  }
+
+  const arch = mapArch(process.arch);
+  const dmgUrl = buildDmgUrl({
+    owner: GITHUB_OWNER,
+    repo: GITHUB_REPO,
+    version,
+    arch,
+  });
+
+  try {
+    setPhase('downloading');
+    state.percent = 0;
+    state.error = undefined;
+    state.releaseUrl = undefined;
+    state.installerPath = undefined;
+    emit('download-progress', { percent: 0 });
+
+    // 1) HEAD 校验：资产缺失/命名漂移时尽早暴露并兜底。
+    const head = await fetch(dmgUrl, { method: 'HEAD', redirect: 'follow' });
+    if (!head.ok) {
+      throw new Error(`dmg not found (HTTP ${head.status})`);
+    }
+
+    // 2) 准备落盘目录（清空旧 dmg，避免堆积）。
+    const dir = path.join(tmpdir(), MAC_UPDATE_DIR);
+    await rm(dir, { recursive: true, force: true });
+    await mkdir(dir, { recursive: true });
+    const dest = path.join(dir, `Peer-Agent-${version}-${arch}.dmg`);
+
+    // 3) 流式下载并按 Content-Length 上报进度。
+    await downloadToFile(dmgUrl, dest, (percent) => {
+      state.percent = percent;
+      emit('download-progress', { percent });
+    });
+
+    // 4) 完成 → ready-to-open，由用户点击「打开安装包」。
+    //    注意：不广播 update-downloaded 事件——渲染层该事件处理器会把 phase 置为
+    //    'downloaded'（Windows 语义），与 mac 的 'ready-to-open' 冲突。mac 的终态
+    //    由 downloadUpdate() 的 await 返回快照承载（含 installerPath）。
+    //    进度事件均在 await 解析前触发，故不会反向覆盖终态。
+    state.installerPath = dest;
+    state.percent = 100;
+    setPhase('ready-to-open');
+  } catch (err) {
+    state.error = err?.message ?? String(err);
+    state.releaseUrl = releaseUrl;
+    setPhase('error');
+    log(`downloadUpdateMacManual failed: ${state.error}`);
+  }
+  return getUpdaterStatus();
+}
+
+/**
+ * 流式下载 url 到 dest，按 Content-Length 回报 0–100 整数进度。
+ * 无 Content-Length 时进度停留在已知上一值，完成时由调用方置 100。
+ */
+async function downloadToFile(url, dest, onProgress) {
+  const res = await fetch(url, { redirect: 'follow' });
+  if (!res.ok || !res.body) {
+    throw new Error(`download failed (HTTP ${res.status})`);
+  }
+  const total = Number(res.headers.get('content-length')) || 0;
+  let received = 0;
+  const fileStream = createWriteStream(dest);
+  try {
+    for await (const chunk of res.body) {
+      received += chunk.length;
+      fileStream.write(chunk);
+      if (total > 0 && typeof onProgress === 'function') {
+        onProgress(Math.min(99, Math.floor((received / total) * 100)));
+      }
+    }
+  } finally {
+    fileStream.end();
+  }
+  await new Promise((resolve, reject) => {
+    fileStream.on('finish', resolve);
+    fileStream.on('error', reject);
+  });
+}
+
+/**
+ * 打开已下载的 mac 安装包（dmg）。渲染层在 phase='ready-to-open' 时调用。
+ * 打开失败回退到打开 Release 页面。
+ */
+export async function openInstaller() {
+  const target = state.installerPath;
+  if (!target) {
+    log('openInstaller skipped (no installerPath).');
+    return getUpdaterStatus();
+  }
+  const result = await shell.openPath(target);
+  if (result) {
+    // openPath 返回非空字符串表示错误信息。
+    log(`openInstaller failed: ${result}`);
+    if (state.releaseUrl) {
+      await shell.openExternal(state.releaseUrl);
+    }
+  }
+  return getUpdaterStatus();
+}
+
+/**
+ * 兜底：打开当前版本的 GitHub Release 页面（mac 下载失败时由渲染层调用）。
+ */
+export async function openReleasePage() {
+  const url =
+    state.releaseUrl ||
+    (state.availableVersion
+      ? buildReleaseUrl({
+          owner: GITHUB_OWNER,
+          repo: GITHUB_REPO,
+          version: state.availableVersion,
+        })
+      : undefined);
+  if (!url) {
+    log('openReleasePage skipped (no releaseUrl).');
+    return getUpdaterStatus();
+  }
+  await shell.openExternal(url);
   return getUpdaterStatus();
 }
 
@@ -195,20 +360,23 @@ function setPhase(phase) {
   state.phase = phase;
 }
 
+/**
+ * 向渲染层广播更新事件。模块级函数，供 wireEvents 的监听器与 mac 自管下载链路共用。
+ */
+function emit(type, payload = {}) {
+  log(`event=${type}${payload && Object.keys(payload).length ? ' ' + safeJson(payload) : ''}`);
+  if (typeof state.onEvent === 'function') {
+    try {
+      state.onEvent({ type, ...payload });
+    } catch {
+      /* 回调异常不应影响更新主流程 */
+    }
+  }
+}
+
 function wireEvents() {
   if (state.wired) return;
   state.wired = true;
-
-  const emit = (type, payload = {}) => {
-    log(`event=${type}${payload && Object.keys(payload).length ? ' ' + safeJson(payload) : ''}`);
-    if (typeof state.onEvent === 'function') {
-      try {
-        state.onEvent({ type, ...payload });
-      } catch {
-        /* 回调异常不应影响更新主流程 */
-      }
-    }
-  };
 
   autoUpdater.on('checking-for-update', () => {
     setPhase('checking');

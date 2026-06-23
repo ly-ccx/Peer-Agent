@@ -23,6 +23,13 @@ export type UpdaterPhase =
   | 'not-available'
   | 'downloading'
   | 'downloaded'
+  /**
+   * mac 专用完成态：应用为 ad-hoc 签名，无法走 Squirrel 的「下载→签名校验→原子替换」
+   * 自动安装链路，因此主进程自管下载 dmg 后停在此态，由用户在弹窗点击「打开安装包」，
+   * 主进程 shell.openPath(dmg) 打开挂载，用户手动拖入「应用程序」覆盖安装。
+   * 与 'downloaded'（Windows 重启安装）语义互斥。
+   */
+  | 'ready-to-open'
   | 'error';
 
 /** 主进程向渲染层广播的更新事件（与 auto-updater 的 onEvent 一一对应）。 */
@@ -64,6 +71,16 @@ export interface UpdaterStatus {
   readonly error?: string;
   /** 更新说明 / release notes。 */
   readonly releaseNotes?: string;
+  /**
+   * mac 自管下载完成的安装包（dmg）本地绝对路径，仅 phase='ready-to-open' 时存在。
+   * 渲染层据此启用「打开安装包」按钮（实际打开动作仍在主进程 shell.openPath 执行）。
+   */
+  readonly installerPath?: string;
+  /**
+   * 兜底用的 GitHub Release 页面 URL。当 mac 自管下载因资产缺失/命名漂移失败时，
+   * 主进程置 phase='error' 并提供此链接，渲染层展示「打开 Release 页面」按钮。
+   */
+  readonly releaseUrl?: string;
 }
 
 /** settings:update / settings:get 中与更新相关的字段。 */

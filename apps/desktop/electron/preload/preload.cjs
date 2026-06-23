@@ -203,6 +203,8 @@ contextBridge.exposeInMainWorld('peerAgent', {
   updaterCheck: () => ipcRenderer.invoke('updater:check'),
   updaterDownload: () => ipcRenderer.invoke('updater:download'),
   updaterInstall: () => ipcRenderer.invoke('updater:install'),
+  updaterOpenInstaller: () => ipcRenderer.invoke('updater:open-installer'),
+  updaterOpenReleasePage: () => ipcRenderer.invoke('updater:open-release-page'),
   updaterSetChannel: (preference) => ipcRenderer.invoke('updater:set-channel', preference),
   onUpdaterEvent: (listener) => {
     const handler = (_event, payload) => listener(payload);
