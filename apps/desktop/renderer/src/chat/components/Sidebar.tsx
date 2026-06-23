@@ -1,6 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { VersionBadge } from '../../app/components/VersionBadge';
 
 type ConversationView = 'active' | 'archived';
 
@@ -163,6 +164,7 @@ export function Sidebar({
         <span className="sidebar-brand-copy">
           <span className="sidebar-brand-title">Peer Agent</span>
         </span>
+        <VersionBadge i18n={i18n} />
       </div>
 
       <div className="sidebar-workspace-wrap">

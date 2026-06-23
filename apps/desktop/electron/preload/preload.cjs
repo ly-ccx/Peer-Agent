@@ -198,4 +198,15 @@ contextBridge.exposeInMainWorld('peerAgent', {
   mcpReadResource: (params) => ipcRenderer.invoke('mcp:read-resource', params),
   mcpGetPrompt: (params) => ipcRenderer.invoke('mcp:get-prompt', params),
   mcpConnectAndRegister: (params) => ipcRenderer.invoke('mcp:connect-and-register', params),
+  // ── Updater ──
+  updaterGetStatus: () => ipcRenderer.invoke('updater:get-status'),
+  updaterCheck: () => ipcRenderer.invoke('updater:check'),
+  updaterDownload: () => ipcRenderer.invoke('updater:download'),
+  updaterInstall: () => ipcRenderer.invoke('updater:install'),
+  updaterSetChannel: (preference) => ipcRenderer.invoke('updater:set-channel', preference),
+  onUpdaterEvent: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('updater:event', handler);
+    return () => ipcRenderer.removeListener('updater:event', handler);
+  },
 });

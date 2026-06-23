@@ -6,8 +6,9 @@ import { GeneralPanel } from './GeneralPanel';
 import { LlmSettingsPanel } from './LlmSettingsPanel';
 import { McpSettingsPanel } from './McpSettingsPanel';
 import { SystemInstructionsPanel } from './SystemInstructionsPanel';
+import { UpdatesPanel } from './UpdatesPanel';
 
-type SettingsSection = 'general' | 'model' | 'mcp' | 'instructions' | 'appearance';
+type SettingsSection = 'general' | 'model' | 'mcp' | 'instructions' | 'appearance' | 'updates';
 
 /**
  * SettingsPage 是设置入口的单一表达层:
@@ -48,6 +49,7 @@ export function SettingsPage({
     { key: 'mcp', label: localizedSettingsLabels.mcp },
     { key: 'instructions', label: localizedSettingsLabels.instructions },
     { key: 'appearance', label: i18n.t('appearance.title') },
+    { key: 'updates', label: i18n.t('updater.settings.title') },
   ];
   // 搜索仅过滤左侧分区导航项（按 label 子串匹配），不做跨面板深搜。
   const normalizedQuery = query.trim().toLowerCase();
@@ -118,6 +120,8 @@ export function SettingsPage({
             i18n={i18n}
             onSystemInstructionsChanged={onSystemInstructionsChanged}
           />
+        ) : section === 'updates' ? (
+          <UpdatesPanel i18n={i18n} />
         ) : (
           <AppearancePanel i18n={i18n} />
         )}

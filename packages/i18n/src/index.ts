@@ -471,7 +471,37 @@ export type TranslationKey =
   | 'capability.localHealth.name'
   | 'capability.localHealth.description'
   | 'task.pinned.minimalLoop'
-  | 'task.pinned.reviewDesign';
+  | 'task.pinned.reviewDesign'
+  | 'updater.badge.upToDate'
+  | 'updater.badge.checking'
+  | 'updater.badge.updateAvailable'
+  | 'updater.badge.ariaHasUpdate'
+  | 'updater.modal.title'
+  | 'updater.modal.currentVersion'
+  | 'updater.modal.newVersion'
+  | 'updater.modal.releaseNotes'
+  | 'updater.modal.noReleaseNotes'
+  | 'updater.modal.update'
+  | 'updater.modal.later'
+  | 'updater.modal.close'
+  | 'updater.modal.installing'
+  | 'updater.modal.installHint'
+  | 'updater.modal.downloading'
+  | 'updater.modal.restartNow'
+  | 'updater.modal.upToDate'
+  | 'updater.modal.checkAgain'
+  | 'updater.modal.error'
+  | 'updater.settings.title'
+  | 'updater.settings.description'
+  | 'updater.settings.channel'
+  | 'updater.settings.channel.description'
+  | 'updater.settings.channel.auto'
+  | 'updater.settings.channel.beta'
+  | 'updater.settings.channel.stable'
+  | 'updater.settings.currentVersion'
+  | 'updater.settings.checkNow'
+  | 'updater.settings.checking'
+  | 'updater.settings.disabledHint';
 
 type TranslationValues = Record<string, string | number>;
 
@@ -943,6 +973,36 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'capability.localHealth.description': '检查本地能力核心是否可用，不读取本地文件。',
     'task.pinned.minimalLoop': '端云最小闭环',
     'task.pinned.reviewDesign': 'Review card 设计',
+    'updater.badge.upToDate': '已是最新',
+    'updater.badge.checking': '检查更新中…',
+    'updater.badge.updateAvailable': '有新版本',
+    'updater.badge.ariaHasUpdate': '有可用更新，点击查看',
+    'updater.modal.title': '发现新版本',
+    'updater.modal.currentVersion': '当前版本',
+    'updater.modal.newVersion': '新版本',
+    'updater.modal.releaseNotes': '更新内容',
+    'updater.modal.noReleaseNotes': '本次更新暂无详细说明。',
+    'updater.modal.update': '更新',
+    'updater.modal.later': '稍后',
+    'updater.modal.close': '关闭',
+    'updater.modal.installing': '正在安装 {version}',
+    'updater.modal.installHint': '当前工作已保存。安装完成后将自动重启，通常需要 10–30 秒。',
+    'updater.modal.downloading': '正在下载更新…',
+    'updater.modal.restartNow': '立即重启安装',
+    'updater.modal.upToDate': '当前已是最新版本。',
+    'updater.modal.checkAgain': '重新检查',
+    'updater.modal.error': '更新出错：{message}',
+    'updater.settings.title': '更新',
+    'updater.settings.description': '管理 Peer Agent 的更新通道与版本检查。',
+    'updater.settings.channel': '更新通道',
+    'updater.settings.channel.description': '选择 Beta 体验尝鲜版本，选择正式获取稳定版本。手动选择优先于按版本号自动判断。',
+    'updater.settings.channel.auto': '自动（跟随当前版本）',
+    'updater.settings.channel.beta': 'Beta（尝鲜版）',
+    'updater.settings.channel.stable': '正式（稳定版）',
+    'updater.settings.currentVersion': '当前版本',
+    'updater.settings.checkNow': '检查更新',
+    'updater.settings.checking': '检查中…',
+    'updater.settings.disabledHint': '开发环境下自动更新已禁用。',
   },
   'en-US': {
     'app.newTask': 'New task',
@@ -1411,6 +1471,38 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'capability.localHealth.description': 'Checks whether the local capability core is available without reading local files.',
     'task.pinned.minimalLoop': 'Cloud-client minimal loop',
     'task.pinned.reviewDesign': 'Review card design',
+    'updater.badge.upToDate': 'Up to date',
+    'updater.badge.checking': 'Checking…',
+    'updater.badge.updateAvailable': 'Update available',
+    'updater.badge.ariaHasUpdate': 'An update is available, click to view',
+    'updater.modal.title': 'Update available',
+    'updater.modal.currentVersion': 'Current version',
+    'updater.modal.newVersion': 'New version',
+    'updater.modal.releaseNotes': "What's new",
+    'updater.modal.noReleaseNotes': 'No release notes for this update.',
+    'updater.modal.update': 'Update',
+    'updater.modal.later': 'Later',
+    'updater.modal.close': 'Close',
+    'updater.modal.installing': 'Installing {version}',
+    'updater.modal.installHint':
+      'Your work is saved. The app will restart automatically after install, usually 10–30 seconds.',
+    'updater.modal.downloading': 'Downloading update…',
+    'updater.modal.restartNow': 'Restart & install',
+    'updater.modal.upToDate': 'You are on the latest version.',
+    'updater.modal.checkAgain': 'Check again',
+    'updater.modal.error': 'Update error: {message}',
+    'updater.settings.title': 'Updates',
+    'updater.settings.description': 'Manage the update channel and version checks for Peer Agent.',
+    'updater.settings.channel': 'Update channel',
+    'updater.settings.channel.description':
+      'Choose Beta for early features, or Stable for production builds. A manual choice overrides version-based detection.',
+    'updater.settings.channel.auto': 'Auto (follow current version)',
+    'updater.settings.channel.beta': 'Beta (early access)',
+    'updater.settings.channel.stable': 'Stable (production)',
+    'updater.settings.currentVersion': 'Current version',
+    'updater.settings.checkNow': 'Check for updates',
+    'updater.settings.checking': 'Checking…',
+    'updater.settings.disabledHint': 'Auto-update is disabled in development.',
   },
 };
 

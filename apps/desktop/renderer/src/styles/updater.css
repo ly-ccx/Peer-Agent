@@ -1,0 +1,210 @@
+@layer components {
+  /* ── 侧边栏版本徽标 ── */
+  .sidebar-version-badge {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    position: relative;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--za-line);
+    background: transparent;
+    color: var(--pa-text-secondary);
+    font-size: 11px;
+    line-height: 1.4;
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+    transition:
+      background 0.15s ease,
+      color 0.15s ease,
+      border-color 0.15s ease;
+  }
+
+  .sidebar-version-badge:hover {
+    background: var(--pa-surface-hover);
+    color: var(--pa-text-primary);
+  }
+
+  .sidebar-version-badge.has-update {
+    color: var(--cinnabar-seal);
+    border-color: color-mix(in srgb, var(--cinnabar-seal) 45%, transparent);
+  }
+
+  .sidebar-version-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--cinnabar-seal);
+    box-shadow: 0 0 0 2px var(--surface-vellum-base);
+  }
+
+  /* ── 更新弹窗 ── */
+  .updater-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    background: rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(2px);
+  }
+
+  .updater-modal {
+    width: min(440px, calc(100vw - 48px));
+    border-radius: 14px;
+    background: var(--pa-surface-card);
+    border: 1px solid var(--za-line);
+    box-shadow: var(--za-shadow-popover);
+    padding: 24px;
+    color: var(--pa-text-primary);
+  }
+
+  .updater-modal-body {
+    display: grid;
+    gap: 16px;
+  }
+
+  .updater-modal-title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--pa-text-primary);
+  }
+
+  .updater-modal-versions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: var(--pa-text-secondary);
+  }
+
+  .updater-version-to {
+    color: var(--cinnabar-seal);
+    font-weight: 600;
+  }
+
+  .updater-modal-notes {
+    display: grid;
+    gap: 6px;
+  }
+
+  .updater-modal-notes-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--pa-text-secondary);
+  }
+
+  .updater-modal-notes-body {
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--pa-text-primary);
+    background: var(--surface-vellum-sunken);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+
+  .updater-modal-notes-body pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: inherit;
+  }
+
+  .updater-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .updater-btn {
+    padding: 7px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--za-line-strong);
+    background: var(--pa-surface-hover);
+    color: var(--pa-text-primary);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .updater-btn:hover {
+    background: var(--surface-vellum-active);
+  }
+
+  .updater-btn.primary {
+    background: var(--cinnabar-seal);
+    border-color: var(--cinnabar-seal);
+    color: var(--za-accent-ink);
+  }
+
+  .updater-btn.primary:hover {
+    filter: brightness(1.08);
+  }
+
+  .updater-btn.ghost {
+    background: transparent;
+  }
+
+  /* ── 下载 / 安装态 ── */
+  .updater-modal-progress-view {
+    display: grid;
+    gap: 16px;
+    justify-items: center;
+    text-align: center;
+    padding: 8px 0;
+  }
+
+  .updater-modal-mascot img {
+    width: 72px;
+    height: 72px;
+    object-fit: contain;
+  }
+
+  .updater-progress-track {
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--surface-vellum-sunken);
+    overflow: hidden;
+  }
+
+  .updater-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--cinnabar-seal);
+    transition: width 0.25s ease;
+  }
+
+  .updater-modal-phase {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--pa-text-primary);
+  }
+
+  .updater-modal-hint {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--pa-text-secondary);
+  }
+
+  .updater-modal-uptodate {
+    margin: 0;
+    font-size: 14px;
+    color: var(--pa-text-primary);
+  }
+
+  .updater-modal-error {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--za-danger);
+    word-break: break-word;
+  }
+}

@@ -43,7 +43,14 @@ import {
   getCompaction,
 } from './chat-runtime/compaction-registry.mjs';
 import { resolveProviderCredential } from './provider-credential-resolver.mjs';
-import { initAutoUpdater } from './auto-updater.mjs';
+import {
+  initAutoUpdater,
+  getUpdaterStatus,
+  setChannelPreference,
+  checkForUpdates,
+  downloadUpdate,
+  quitAndInstall,
+} from './auto-updater.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -495,6 +502,25 @@ ipcMain.handle('session:get', () => sessionStore.getSession());
 ipcMain.handle('capabilities:list', () => capabilityRegistry.refreshCapabilities());
 ipcMain.handle('projects:list', () => readProjectIndex({ workspaceRoot: resourcesRoot }));
 ipcMain.handle('runtime-projection:get', () => buildRuntimeProjection());
+
+// ── Updater ──
+// 渲染层只表达；检查/下载/安装/通道切换都在主进程执行。
+ipcMain.handle('updater:get-status', () => getUpdaterStatus());
+ipcMain.handle('updater:check', async () => await checkForUpdates());
+ipcMain.handle('updater:download', async () => await downloadUpdate());
+ipcMain.handle('updater:install', () => {
+  quitAndInstall();
+});
+ipcMain.handle('updater:set-channel', (_event, preference) => {
+  // settings 是通道偏好的权限真相，先写回再切换运行时配置。
+  const pref =
+    preference === 'beta' || preference === 'stable' || preference === 'auto' ? preference : 'auto';
+  settingsStore.merge({ updateChannel: pref });
+  const status = setChannelPreference(pref);
+  // 切换通道后用新通道重新检查一次（事件会经 updater:event 广播给渲染层）。
+  void checkForUpdates();
+  return status;
+});
 
 // ── Settings ──
 ipcMain.handle('settings:get', () => settingsStore.getAll());
@@ -1288,10 +1314,14 @@ app.whenReady().then(async () => {
 
   createWindow();
 
-  // 自动更新（阶段一）：通道按当前版本号语义自动选择（beta / latest）。
+  // 自动更新：通道按「设置项优先，回退版本号语义」解析（beta / stable）。
+  // 渲染层负责表达（版本徽标红点 / 摘要弹窗 / 进度条），事件经 updater:event 广播。
   // 开发态默认跳过，可用 PEER_AGENT_FORCE_UPDATER=1 强制联调。
   try {
-    initAutoUpdater();
+    initAutoUpdater({
+      getPreference: () => settingsStore.getAll().updateChannel,
+      onEvent: (event) => broadcastToAllWindows('updater:event', event),
+    });
   } catch (err) {
     console.error('[updater] init failed:', err);
   }

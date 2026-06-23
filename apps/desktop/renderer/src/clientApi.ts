@@ -124,6 +124,12 @@ const unavailableApi: ClientApi = {
   updateSettings: unavailableMethod('updateSettings'),
   exportConfig: unavailableMethod('exportConfig'),
   importConfig: unavailableMethod('importConfig'),
+  updaterGetStatus: unavailableMethod('updaterGetStatus'),
+  updaterCheck: unavailableMethod('updaterCheck'),
+  updaterDownload: unavailableMethod('updaterDownload'),
+  updaterInstall: unavailableMethod('updaterInstall'),
+  updaterSetChannel: unavailableMethod('updaterSetChannel'),
+  onUpdaterEvent: unavailableMethod('onUpdaterEvent'),
 };
 
 export const clientApi: ClientApi = window.peerAgent ?? unavailableApi;

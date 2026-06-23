@@ -27,6 +27,9 @@ import type {
   PromptSnapshotRecord,
   RuntimeProjection,
   SkillSummary,
+  UpdateChannelPreference,
+  UpdaterEvent,
+  UpdaterStatus,
   WorkspaceProject,
 } from '@peer-agent/protocol';
 
@@ -341,4 +344,11 @@ export interface BootstrapPreloadApi {
   readonly updateSettings: (partial: Record<string, unknown>) => Promise<Record<string, unknown>>;
   readonly exportConfig: () => Promise<Record<string, unknown>>;
   readonly importConfig: () => Promise<Record<string, unknown>>;
+  // ── Updater ──（主进程负责能力，渲染层只表达）
+  readonly updaterGetStatus: () => Promise<UpdaterStatus>;
+  readonly updaterCheck: () => Promise<UpdaterStatus>;
+  readonly updaterDownload: () => Promise<UpdaterStatus>;
+  readonly updaterInstall: () => Promise<void>;
+  readonly updaterSetChannel: (preference: UpdateChannelPreference) => Promise<UpdaterStatus>;
+  readonly onUpdaterEvent: (listener: (payload: UpdaterEvent) => void) => () => void;
 }
