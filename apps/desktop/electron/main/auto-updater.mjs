@@ -44,6 +44,13 @@ const MAC_UPDATE_DIR = 'peer-agent-updates';
 /** 周期检测间隔：每 1 小时静默检查一次（不下载），让长期开着的应用也能发现新版本。 */
 const CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
+/**
+ * 打开 dmg 成功后到主动退出本程序之间的延迟（毫秒）。
+ * 给 Finder 一点时间弹出 dmg 挂载窗口，再退出自身——这样用户能直接把新版本
+ * 拖入「应用程序」覆盖安装（旧版仍在运行时 macOS 无法覆盖）。
+ */
+const QUIT_AFTER_OPEN_DELAY_MS = 1000;
+
 /** 模块级单例状态。渲染层通过 getUpdaterStatus() 读取快照。 */
 const state = {
   enabled: false,
@@ -343,12 +350,21 @@ export async function openInstaller() {
   }
   const result = await shell.openPath(target);
   if (result) {
-    // openPath 返回非空字符串表示错误信息。
+    // openPath 返回非空字符串表示错误信息。回退打开 Release 页面，且不退出本程序
+    // （没有可覆盖的本地包，退出只会打断用户）。
     log(`openInstaller failed: ${result}`);
     if (state.releaseUrl) {
       await shell.openExternal(state.releaseUrl);
     }
+    return getUpdaterStatus();
   }
+  // 成功打开 dmg：稍候让 Finder 弹出挂载窗口，再主动退出本程序，
+  // 使用户可直接把新版本拖入「应用程序」覆盖安装。退出复用既有
+  // before-quit → stopAutoUpdater() 清理链路。
+  log('openInstaller succeeded; quitting app to allow overwrite install.');
+  setTimeout(() => {
+    app.quit();
+  }, QUIT_AFTER_OPEN_DELAY_MS);
   return getUpdaterStatus();
 }
 
