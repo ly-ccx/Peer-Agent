@@ -98,7 +98,7 @@ export function UpdateModal({
               </button>
             </div>
           </div>
-        ) : (
+        ) : phase === 'available' && newVersion ? (
           <div className="updater-modal-body">
             <h2 className="updater-modal-title">{i18n.t('updater.modal.title')}</h2>
             <div className="updater-modal-versions">
@@ -131,6 +131,15 @@ export function UpdateModal({
               <button type="button" className="updater-btn ghost" onClick={onClose}>
                 {i18n.t('updater.modal.later')}
               </button>
+            </div>
+          </div>
+        ) : (
+          <div className="updater-modal-body">
+            <h2 className="updater-modal-title">{i18n.t('updater.modal.checking')}</h2>
+            <div className="updater-modal-versions">
+              <span className="updater-version-from">
+                {i18n.t('updater.modal.currentVersion')}: v{status.currentVersion}
+              </span>
             </div>
           </div>
         )}

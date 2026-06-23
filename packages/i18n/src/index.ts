@@ -477,6 +477,7 @@ export type TranslationKey =
   | 'updater.badge.updateAvailable'
   | 'updater.badge.ariaHasUpdate'
   | 'updater.modal.title'
+  | 'updater.modal.checking'
   | 'updater.modal.currentVersion'
   | 'updater.modal.newVersion'
   | 'updater.modal.releaseNotes'
@@ -978,6 +979,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.badge.updateAvailable': '有新版本',
     'updater.badge.ariaHasUpdate': '有可用更新，点击查看',
     'updater.modal.title': '发现新版本',
+    'updater.modal.checking': '正在检查更新…',
     'updater.modal.currentVersion': '当前版本',
     'updater.modal.newVersion': '新版本',
     'updater.modal.releaseNotes': '更新内容',
@@ -1476,6 +1478,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.badge.updateAvailable': 'Update available',
     'updater.badge.ariaHasUpdate': 'An update is available, click to view',
     'updater.modal.title': 'Update available',
+    'updater.modal.checking': 'Checking for updates…',
     'updater.modal.currentVersion': 'Current version',
     'updater.modal.newVersion': 'New version',
     'updater.modal.releaseNotes': "What's new",
