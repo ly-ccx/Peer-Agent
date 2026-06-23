@@ -644,8 +644,57 @@ function assertChatRuntimeAgentLoopsAreModular() {
   }
 }
 
+function assertOverlayMotionAdmission() {
+  // 设计语言：14-product-design-language.md §11.3「弹出层动效准入」。
+  // 所有模态浮层必须经由统一基座 Overlay 挂载，从而默认获得 backdrop 淡入 +
+  // 面板入场动效，避免每处手写 backdrop 而漏掉过渡（治理 "为什么每次都要提醒"）。
+  const overlayComponent = 'apps/desktop/renderer/src/app/components/Overlay.tsx';
+  const overlayStyles = 'apps/desktop/renderer/src/styles/overlay.css';
+  if (!existsSync(path.join(repoRoot, overlayComponent))) {
+    fail(`Overlay modal base is missing: ${overlayComponent}`);
+    return;
+  }
+  if (!existsSync(path.join(repoRoot, overlayStyles))) {
+    fail(`Overlay base styles are missing: ${overlayStyles}`);
+  } else {
+    const css = readText(overlayStyles);
+    for (const token of ['.pa-overlay-backdrop', '.pa-overlay-panel', 'za-panel-in']) {
+      if (!css.includes(token)) {
+        fail(`${overlayStyles} must define ${token} so overlays inherit unified motion.`);
+      }
+    }
+  }
+
+  // overlay.css 必须经由 styles.css 注册，否则基座动效不会生效。
+  const stylesEntry = readText('apps/desktop/renderer/src/styles.css');
+  if (!stylesEntry.includes('styles/overlay.css')) {
+    fail('apps/desktop/renderer/src/styles.css must @import "./styles/overlay.css" to register the overlay base.');
+  }
+
+  // 文档准入锚点必须存在。
+  const designDoc = readText('docs/architecture/14-product-design-language.md');
+  if (!designDoc.includes('弹出层动效准入')) {
+    fail('docs/architecture/14-product-design-language.md §11.3 must document the 弹出层动效准入 rule.');
+  }
+
+  // 防漏核心：renderer 中任何声明 aria-modal="true" 的模态，都必须经由 Overlay 基座。
+  const overlayAbsolute = path.join(repoRoot, overlayComponent);
+  const componentFiles = collectFiles('apps/desktop/renderer/src', ['.tsx']);
+  for (const filePath of componentFiles) {
+    if (filePath === overlayAbsolute) continue;
+    const content = readFileSync(filePath, 'utf8');
+    const declaresModal = content.includes('aria-modal="true"') || content.includes("aria-modal='true'");
+    if (!declaresModal) continue;
+    const usesOverlay = /from ['"]\.+\/(?:.*\/)?Overlay['"]/.test(content) || content.includes('<Overlay');
+    if (!usesOverlay) {
+      fail(`${relative(filePath)} declares a modal (aria-modal) but does not mount via the Overlay base. Route it through components/Overlay.tsx so it inherits §11.3 弹出层动效准入.`);
+    }
+  }
+}
+
 assertAgentRules();
 assertArchitectureDocsStayLocal();
+assertOverlayMotionAdmission();
 assertRendererHasNoHighPrivilegeImports();
 assertNoStreamReplaceChannel();
 assertSystemContextProtocolContracts();

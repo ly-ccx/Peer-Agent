@@ -1,5 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { UpdaterStatus } from '@peer-agent/protocol';
+import { Overlay } from './Overlay';
 
 /**
  * UpdateModal —— 更新摘要 / 下载进度 / 安装态的统一弹窗（表达层）。
@@ -34,14 +35,12 @@ export function UpdateModal({
   const isBusy = phase === 'downloading' || phase === 'downloaded';
 
   return (
-    <div className="updater-modal-backdrop" onClick={isBusy ? undefined : onClose}>
-      <div
-        className="updater-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={i18n.t('updater.modal.title')}
-        onClick={(event) => event.stopPropagation()}
-      >
+    <Overlay
+      onClose={onClose}
+      closeOnBackdrop={!isBusy}
+      ariaLabel={i18n.t('updater.modal.title')}
+      panelClassName="updater-modal"
+    >
         {phase === 'downloading' || phase === 'downloaded' ? (
           <div className="updater-modal-progress-view">
             <div className="updater-modal-mascot" aria-hidden="true">
@@ -143,7 +142,6 @@ export function UpdateModal({
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </Overlay>
   );
 }

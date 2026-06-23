@@ -914,17 +914,10 @@
   outline: none;
   box-shadow: 0 0 0 3px var(--za-focus);
 }
-.image-preview-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-8);
+/* 图片预览的重遮罩修饰类：仅加深背景观感，布局与入场动效继承 .pa-overlay-backdrop 基座。 */
+.image-preview-backdrop {
   background: rgba(8, 12, 18, 0.76);
   backdrop-filter: blur(14px);
-  animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
 }
 .image-preview-card {
   max-width: min(88vw, 1120px);

@@ -40,16 +40,7 @@
   }
 
   /* ── 更新弹窗 ── */
-  .updater-modal-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    display: grid;
-    place-items: center;
-    background: rgba(0, 0, 0, 0.42);
-    backdrop-filter: blur(2px);
-  }
-
+  /* 浮层基座由 .pa-overlay-backdrop / .pa-overlay-panel 统一提供（见 overlay.css）。 */
   .updater-modal {
     width: min(440px, calc(100vw - 48px));
     border-radius: 14px;

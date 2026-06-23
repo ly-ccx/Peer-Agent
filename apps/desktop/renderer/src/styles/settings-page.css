@@ -589,21 +589,7 @@
   border-color: color-mix(in srgb, var(--za-accent) 24%, var(--pa-border-subtle));
 }
 
-/* ── 新增连接 · 浮层（对齐 image-preview-overlay 浮层范式 + Peer Frost token）── */
-.mcp-modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: grid;
-  place-items: center;
-  padding: var(--space-8);
-  /* 与 image-preview-overlay 统一的冷调遮罩,而非纯黑/暗色硬编码 */
-  background: rgba(8, 12, 18, 0.46);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  animation: za-content-reveal var(--za-motion-medium) var(--za-ease-out) both;
-}
-
+/* ── 新增连接 · 面板（浮层基座由 .pa-overlay-backdrop / .pa-overlay-panel 统一提供）── */
 .mcp-modal-card {
   display: flex;
   flex-direction: column;
@@ -614,7 +600,6 @@
   border: 1px solid var(--chrome-hairline);
   background: var(--chrome-raised);
   box-shadow: var(--shadow-drag);
-  animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
 }
 
 .mcp-modal-header {

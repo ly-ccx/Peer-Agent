@@ -1,0 +1,27 @@
+@layer components {
+  /* ──────────────────────────────────────────────────────────────
+     统一模态浮层基座（配合 app/components/Overlay.tsx）。
+     设计语言：14-product-design-language.md §11.3「弹出层动效准入」。
+
+     所有模态必须复用本基座，从而默认获得：
+       - backdrop 冷调遮罩 + 淡入（za-content-reveal）。
+       - 面板入场动效（za-panel-in）。
+     prefers-reduced-motion 由 tokens.css 全局兜底降级，无需各处重写。
+     ────────────────────────────────────────────────────────────── */
+  .pa-overlay-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    padding: var(--space-8);
+    /* 统一冷调遮罩，而非纯黑硬编码 */
+    background: rgba(8, 12, 18, 0.46);
+    backdrop-filter: blur(2px);
+    animation: za-content-reveal var(--za-motion-medium) var(--za-ease-out) both;
+  }
+
+  .pa-overlay-panel {
+    animation: za-panel-in var(--za-motion-medium) var(--za-ease-out) both;
+  }
+}

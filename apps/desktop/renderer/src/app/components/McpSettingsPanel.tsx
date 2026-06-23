@@ -2,6 +2,7 @@ import type { LocalMcpServerUpsertRequest } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Dropdown, type DropdownOption } from './Dropdown';
+import { Overlay } from './Overlay';
 
 type McpTransportKind = 'streamable_http' | 'sse' | 'stdio';
 type McpAuthMode = 'none' | 'http_bearer' | 'http_header' | 'stdio_env';
@@ -370,18 +371,12 @@ export function McpSettingsPanel() {
       {status ? <p className="settings-status mcp-status">{status}</p> : null}
 
       {showAddForm ? (
-        <div
-          className="mcp-modal-overlay"
-          role="presentation"
-          onClick={() => { if (!busy) { resetForm(); setShowAddForm(false); } }}
+        <Overlay
+          onClose={() => { resetForm(); setShowAddForm(false); }}
+          closeOnBackdrop={!busy}
+          ariaLabel="新增本地 MCP server"
+          panelClassName="mcp-modal-card"
         >
-          <section
-            className="mcp-modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-label="新增本地 MCP server"
-            onClick={(event) => event.stopPropagation()}
-          >
             <header className="mcp-modal-header">
               <div>
                 <h3>新增本地 MCP server</h3>
@@ -535,8 +530,7 @@ export function McpSettingsPanel() {
               <button type="button" className="mcp-modal-cancel" onClick={() => { resetForm(); setShowAddForm(false); }} disabled={busy}>取消</button>
               <button type="button" className="mcp-modal-confirm" onClick={() => void handleSave()} disabled={busy || !canSave}>保存连接</button>
             </div>
-          </section>
-        </div>
+        </Overlay>
       ) : null}
 
       <div className="mcp-main-grid">

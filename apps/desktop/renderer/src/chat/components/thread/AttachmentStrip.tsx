@@ -1,3 +1,4 @@
+import { Overlay } from '../../../app/components/Overlay';
 import { formatBytes } from '../../state/format';
 import type { ChatAttachment } from '../../state/types';
 
@@ -75,17 +76,15 @@ export function ImagePreviewOverlay({
   readonly onClose: () => void;
 }) {
   return (
-    <div className="image-preview-overlay" role="dialog" aria-modal="true" aria-label={attachment.name} onClick={onClose}>
-      <figure className="image-preview-card" onClick={(event) => event.stopPropagation()}>
-        <img src={attachment.dataUrl ?? ''} alt={attachment.name} className="image-preview-img" />
-        <figcaption className="image-preview-caption">
-          <span className="image-preview-name">{attachment.name}</span>
-          <span className="image-preview-size">{formatBytes(attachment.size)}</span>
-          <button type="button" className="image-preview-close" onClick={onClose} aria-label={isZh ? '关闭预览' : 'Close preview'}>
-            ×
-          </button>
-        </figcaption>
-      </figure>
-    </div>
+    <Overlay onClose={onClose} ariaLabel={attachment.name} panelClassName="image-preview-card" backdropClassName="image-preview-backdrop">
+      <img src={attachment.dataUrl ?? ''} alt={attachment.name} className="image-preview-img" />
+      <figcaption className="image-preview-caption">
+        <span className="image-preview-name">{attachment.name}</span>
+        <span className="image-preview-size">{formatBytes(attachment.size)}</span>
+        <button type="button" className="image-preview-close" onClick={onClose} aria-label={isZh ? '关闭预览' : 'Close preview'}>
+          ×
+        </button>
+      </figcaption>
+    </Overlay>
   );
 }
