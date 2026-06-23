@@ -1,6 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { UpdaterStatus } from '@peer-agent/protocol';
 import { Overlay } from './Overlay';
+import { ReleaseNotesView } from './ReleaseNotesView';
 
 /**
  * UpdateModal —— 更新摘要 / 下载进度 / 安装态的统一弹窗（表达层）。
@@ -117,7 +118,7 @@ export function UpdateModal({
               </span>
               <div className="updater-modal-notes-body">
                 {status.releaseNotes ? (
-                  <pre>{status.releaseNotes}</pre>
+                  <ReleaseNotesView html={status.releaseNotes} />
                 ) : (
                   <p>{i18n.t('updater.modal.noReleaseNotes')}</p>
                 )}

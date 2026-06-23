@@ -106,6 +106,80 @@
     font-family: inherit;
   }
 
+  /* 富文本更新说明（ReleaseNotesView 渲染的白名单 HTML） */
+  .updater-notes-rich {
+    word-break: break-word;
+  }
+
+  .updater-notes-rich > :first-child {
+    margin-top: 0;
+  }
+
+  .updater-notes-rich > :last-child {
+    margin-bottom: 0;
+  }
+
+  .updater-notes-rich p {
+    margin: 0 0 8px;
+  }
+
+  .updater-notes-rich h1,
+  .updater-notes-rich h2,
+  .updater-notes-rich h3,
+  .updater-notes-rich h4,
+  .updater-notes-rich h5,
+  .updater-notes-rich h6 {
+    margin: 12px 0 6px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .updater-notes-rich ul,
+  .updater-notes-rich ol {
+    margin: 0 0 8px;
+    padding-left: 20px;
+  }
+
+  .updater-notes-rich li {
+    margin: 2px 0;
+  }
+
+  .updater-notes-rich a {
+    color: var(--cinnabar-seal);
+    text-decoration: none;
+  }
+
+  .updater-notes-rich a:hover {
+    text-decoration: underline;
+  }
+
+  .updater-notes-rich code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    background: var(--pa-surface-hover);
+    border-radius: 4px;
+    padding: 1px 4px;
+  }
+
+  .updater-notes-rich blockquote {
+    margin: 0 0 8px;
+    padding-left: 10px;
+    border-left: 2px solid var(--za-line-strong);
+    color: var(--pa-text-secondary);
+  }
+
+  .updater-notes-rich pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .updater-notes-plain {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: inherit;
+  }
+
   .updater-modal-actions {
     display: flex;
     justify-content: flex-end;
