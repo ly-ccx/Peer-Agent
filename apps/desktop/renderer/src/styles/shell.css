@@ -47,9 +47,19 @@
     contain: layout;
   }
 
+  /* 有顶部 header 的 thread 容器不再额外保留交通灯留白,由 ChatHeader 承担。 */
+  .thread.thread-has-header {
+    @apply px-0 pt-0 pb-0;
+    contain: layout;
+  }
+
   /* 全屏时 macOS 交通灯被系统隐藏,收掉为其预留的顶部留白(权威状态来自 main 广播)。 */
   .app-shell.is-fullscreen .thread {
     @apply pt-6;
+  }
+
+  .app-shell.is-fullscreen .thread.thread-has-header {
+    @apply pt-0;
   }
 
   .cloud-thread-host {

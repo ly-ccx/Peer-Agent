@@ -81,6 +81,7 @@ import { TokenUsageDisplay } from './thread/TokenUsageDisplay';
 import { AttachmentStrip, ImagePreviewOverlay } from './thread/AttachmentStrip';
 import { InteractionAnsweredContext, InteractionContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
+import { ChatHeader } from './thread/ChatHeader';
 import { GoalPlanPanel } from './GoalPlanPanel';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
@@ -254,6 +255,7 @@ export function ChatSurface({
   i18n,
   providers,
   conversationId,
+  conversationTitle,
   systemInstructions,
   replyLanguage,
   resumeTask,
@@ -262,11 +264,15 @@ export function ChatSurface({
   onConversationUpdated,
   onStreamingChange,
   onBranch,
+  onRenameConversation,
+  onArchiveConversation,
+  onDeleteConversation,
   workspacePath,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
   readonly conversationId: string | null;
+  readonly conversationTitle?: string;
   readonly systemInstructions?: string;
   readonly replyLanguage?: string;
   readonly resumeTask?: { sessionId: string; task: string; effort?: string } | null;
@@ -276,6 +282,9 @@ export function ChatSurface({
   // 把当前会话的流式运行状态上报给上层(App),供左侧列表显示 Loading 图标。
   readonly onStreamingChange?: (conversationId: string | null, isStreaming: boolean) => void;
   readonly onBranch?: (newConversationId: string) => void;
+  readonly onRenameConversation?: (id: string, title: string) => void;
+  readonly onArchiveConversation?: (id: string) => void;
+  readonly onDeleteConversation?: (id: string) => void;
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
   readonly workspacePath?: string | null;
 }) {
@@ -335,6 +344,10 @@ export function ChatSurface({
   const [toolProgress, setToolProgress] = useState<ToolProgress | null>(null);
   // 会话内查找(cmd/ctrl+F):仅在表达层对已渲染消息做高亮跳转,不触碰会话真值。
   const [findOpen, setFindOpen] = useState(false);
+  // 顶部 header 滚动感知:chat-thread 滚动后给 header 加底线区分。
+  const [threadScrolled, setThreadScrolled] = useState(false);
+  // 快捷键触发重命名:透传给 ChatHeader 让其进入编辑模式。
+  const headerEditTriggerRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!providerRecoveryNotice || providerRecoveryNotice.status !== 'recovered') return undefined;
@@ -364,6 +377,29 @@ export function ChatSurface({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  // 顶部 header 快捷键:⌥⌘R 重命名、⌥⇧A 归档。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      // ⌥⌘R → 重命名
+      if (event.altKey && event.metaKey && event.key.toLowerCase() === 'r') {
+        event.preventDefault();
+        if (conversationId && onRenameConversation) {
+          // 触发 header 内联编辑:设置标志让 ChatHeader 进入编辑模式
+          headerEditTriggerRef.current?.();
+        }
+      }
+      // ⌥⇧A → 归档
+      if (event.altKey && event.shiftKey && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        if (conversationId && onArchiveConversation && !isStreaming) {
+          onArchiveConversation(conversationId);
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [conversationId, onRenameConversation, onArchiveConversation, isStreaming]);
 
   // 任务续传(ADR 21):防止同一 resumeTask 被自动发送多次的一次性闸门。
   const resumeFiredRef = useRef<string | null>(null);
@@ -441,6 +477,7 @@ export function ChatSurface({
 
   const handleThreadScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     updateThreadBottomState(event.currentTarget);
+    setThreadScrolled(event.currentTarget.scrollTop > 4);
   }, [updateThreadBottomState]);
 
   // 表达层导航:点击右侧消息轨时,把对应用户消息滚动到视口并短暂高亮。
@@ -1006,6 +1043,13 @@ export function ChatSurface({
     else if (action === 'delete') void handleDeleteMessage(msgIndex);
   }, [handleRegenerate, handleBranch, handleDeleteMessage]);
 
+  // 顶部 header 级别的分叉:从当前最后一条消息分叉(复用已有 handleBranch)。
+  const handleHeaderBranch = useCallback(() => {
+    if (messages.length > 0) {
+      void handleBranch(messages.length - 1);
+    }
+  }, [messages, handleBranch]);
+
   const showScrollToBottom = messages.length > 0 && !isThreadAtBottom;
 
   // 选择 request_user_input 的选项 = 把该选项作为用户消息，复用既有 submitMessage 发送路径。
@@ -1049,6 +1093,24 @@ export function ChatSurface({
     <InteractionContext.Provider value={{ onSelectOption: selectInteractionOption, isStreaming }}>
     <div className="chat-workspace">
     <div className="chat-surface">
+      <ChatHeader
+        title={conversationTitle ?? ''}
+        isZh={isZh}
+        isStreaming={isStreaming}
+        hasScroll={threadScrolled}
+        editTriggerRef={headerEditTriggerRef}
+        onRename={onRenameConversation && conversationId
+          ? (newTitle) => onRenameConversation(conversationId, newTitle)
+          : undefined}
+        onArchive={onArchiveConversation && conversationId
+          ? () => onArchiveConversation(conversationId)
+          : undefined}
+        onBranch={messages.length > 0 ? handleHeaderBranch : undefined}
+        onFind={() => setFindOpen(true)}
+        onDelete={onDeleteConversation && conversationId
+          ? () => onDeleteConversation(conversationId)
+          : undefined}
+      />
       {findOpen ? (
         <ChatFindBar
           containerRef={threadRef}

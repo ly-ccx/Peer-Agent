@@ -253,11 +253,12 @@ export function App() {
             onWorkspaceChanged={handleWorkspaceChanged}
           />
           <section className="main-panel">
-            <section className="thread">
+            <section className="thread thread-has-header">
               <ChatSurface
                 i18n={i18n}
                 providers={providers}
                 conversationId={activeConversationId}
+                conversationTitle={conversations.find((c) => c.id === activeConversationId)?.title}
                 systemInstructions={systemInstructions}
                 replyLanguage={replyLanguage}
                 resumeTask={resumeTask}
@@ -281,6 +282,9 @@ export function App() {
                   });
                 }}
                 onBranch={(id) => { setConversationView('active'); setActiveConversationId(id); void refreshConversations(activeWorkspace, 'active'); }}
+                onRenameConversation={handleRenameConversation}
+                onArchiveConversation={handleArchiveConversation}
+                onDeleteConversation={handleDeleteConversation}
                 workspacePath={activeWorkspace}
               />
             </section>
