@@ -16,7 +16,8 @@ const COMPACTION_CONFIG = {
   targetRatio: 0.5,
   keepRecentCount: 10,
   charsPerToken: 4,
-  summaryMaxTokens: 4000,
+  // 摘要输出上限不再写死：在 summarizeWithLLM 内复用当前模型的 maxOutputTokens，
+  // 未配置时回退到 12000，避免长摘要被小上限截断（压缩后内容看不全）。
   summaryMaxInputTokens: 80_000,   // 摘要输入的上限（旧消息文本）
   summaryTemperature: 0.2,
   maxPtlRetries: 3,
@@ -599,8 +600,13 @@ async function summarizeWithLLM({
 }) {
   const { provider, baseUrl, apiKey, model } = providerConfig;
 
+  // 摘要输出上限复用「当前模型的 maxOutputTokens」，让压缩与模型真实能力对齐，
+  // 避免写死的小上限把长摘要截断（表现为压缩后内容看不全）。未配置时回退到 12000。
+  const summaryMaxTokens = providerConfig.maxOutputTokens || 12000;
+
   logCompactionDiagnostic('summarize:enter', {
     providerConfig,
+    summaryMaxTokens,
     oldMessageCount: Array.isArray(oldMessages) ? oldMessages.length : null,
   });
 
@@ -613,7 +619,7 @@ async function summarizeWithLLM({
 
   // 预期摘要总长（按 token 上限估算），用于进度百分比分母。
   const estimatedTotalChars =
-    COMPACTION_CONFIG.summaryMaxTokens * COMPACTION_CONFIG.charsPerToken;
+    summaryMaxTokens * COMPACTION_CONFIG.charsPerToken;
   let accumulated = '';
   const reportProgress = () => {
     if (typeof onProgress !== 'function') return;
@@ -634,7 +640,7 @@ async function summarizeWithLLM({
         { role: 'user', content: summaryInput.slice(0, COMPACTION_CONFIG.summaryMaxInputTokens * COMPACTION_CONFIG.charsPerToken) },
         { role: 'user', content: COMPACT_PROMPT },
       ],
-      max_tokens: COMPACTION_CONFIG.summaryMaxTokens,
+      max_tokens: summaryMaxTokens,
       // 注意：当前 Anthropic 模型（Vertex 上的 Claude）已弃用 temperature，
       // 传入会返回 400 invalid_request_error。与对话主路径对齐：不传 temperature。
       stream: true,
@@ -695,7 +701,7 @@ async function summarizeWithLLM({
       model,
       messages: summaryMessages,
       tools: [],
-      maxOutputTokens: COMPACTION_CONFIG.summaryMaxTokens,
+      maxOutputTokens: summaryMaxTokens,
       omitMaxOutputTokens: Boolean(providerConfig.omitMaxOutputTokens),
     });
 
@@ -757,7 +763,7 @@ async function summarizeWithLLM({
   const body = {
     model,
     messages: summaryMessages,
-    max_completion_tokens: COMPACTION_CONFIG.summaryMaxTokens,
+    max_completion_tokens: summaryMaxTokens,
     temperature: COMPACTION_CONFIG.summaryTemperature,
     stream: true,
   };

@@ -40,7 +40,7 @@ export async function agentLoopGemini({
 }) {
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
   const loop = createAgentLoopKernel({ webContents, streamId });
-  const providerConfig = { provider: 'gemini', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model };
+  const providerConfig = { provider: 'gemini', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model, maxOutputTokens };
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {
     const microcompactResult = applyMicrocompaction(apiMessages);

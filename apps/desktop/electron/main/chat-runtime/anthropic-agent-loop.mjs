@@ -46,7 +46,7 @@ export async function agentLoopAnthropic({
   let effectiveSystem = systemPrompt;
   let apiMessages = sanitizeApiMessages(messages);
   const loop = createAgentLoopKernel({ webContents, streamId });
-  const providerConfig = { provider: 'anthropic', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model };
+  const providerConfig = { provider: 'anthropic', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model, maxOutputTokens };
   let effectiveSupportsReasoning = Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning);
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {

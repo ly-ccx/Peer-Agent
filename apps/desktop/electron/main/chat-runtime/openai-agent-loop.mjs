@@ -51,7 +51,7 @@ export async function agentLoopOpenAI({
     : sendOpenAIChatStream;
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
   const loop = createAgentLoopKernel({ webContents, streamId });
-  const providerConfig = { provider: 'openai', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model };
+  const providerConfig = { provider: 'openai', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model, maxOutputTokens };
   let effectiveSupportsReasoning = Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning);
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {
