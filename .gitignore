@@ -5,6 +5,7 @@ dist-electron/
 .vite/
 coverage/
 *.log
+.qoder/
 
 target/
 
