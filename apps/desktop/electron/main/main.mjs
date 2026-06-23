@@ -45,6 +45,7 @@ import {
 import { resolveProviderCredential } from './provider-credential-resolver.mjs';
 import {
   initAutoUpdater,
+  stopAutoUpdater,
   getUpdaterStatus,
   setChannelPreference,
   checkForUpdates,
@@ -1340,5 +1341,14 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
+  }
+});
+
+// 退出前清理自动更新周期检测定时器，避免定时器泄漏。
+app.on('before-quit', () => {
+  try {
+    stopAutoUpdater();
+  } catch (err) {
+    console.error('[updater] stop failed:', err);
   }
 });

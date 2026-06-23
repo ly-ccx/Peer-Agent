@@ -41,6 +41,9 @@ const GITHUB_REPO = 'Peer-Agent';
 /** mac 自管下载的 dmg 存放子目录（位于系统临时目录下）。 */
 const MAC_UPDATE_DIR = 'peer-agent-updates';
 
+/** 周期检测间隔：每 1 小时静默检查一次（不下载），让长期开着的应用也能发现新版本。 */
+const CHECK_INTERVAL_MS = 60 * 60 * 1000;
+
 /** 模块级单例状态。渲染层通过 getUpdaterStatus() 读取快照。 */
 const state = {
   enabled: false,
@@ -64,6 +67,8 @@ const state = {
   /** 偏好读取器（main 注入，从 settingsStore 读取） */
   getPreference: undefined,
   wired: false,
+  /** 周期检测定时器 id（setInterval 返回值），应用退出时清理 */
+  checkTimer: undefined,
 };
 
 /**
@@ -127,7 +132,29 @@ export function initAutoUpdater(options = {}) {
   // 启动时静默检查一次（不下载）；失败不抛出，避免影响启动。
   void checkForUpdates();
 
+  // 周期检测：每 1 小时静默再查一次，让长期开着的应用也能发现新版本并亮红点。
+  // 复用 checkForUpdates（内部 enabled 守卫 + autoDownload=false），不新造下载路径。
+  if (state.checkTimer) {
+    clearInterval(state.checkTimer);
+  }
+  state.checkTimer = setInterval(() => {
+    void checkForUpdates();
+  }, CHECK_INTERVAL_MS);
+  // 不阻止进程退出（Node 定时器默认 ref，这里显式 unref 更稳妥）。
+  state.checkTimer.unref?.();
+
   return { channel: state.channel, enabled: true };
+}
+
+/**
+ * 停止周期检测并清理定时器。应在应用退出（before-quit/will-quit）时调用，避免泄漏。
+ */
+export function stopAutoUpdater() {
+  if (state.checkTimer) {
+    clearInterval(state.checkTimer);
+    state.checkTimer = undefined;
+    log('periodic update check stopped.');
+  }
 }
 
 function normalizePreference(pref) {

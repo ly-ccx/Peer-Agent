@@ -6,9 +6,9 @@
     align-items: center;
     gap: 4px;
     position: relative;
-    padding: 2px 8px;
-    border-radius: 999px;
-    border: 1px solid var(--za-line);
+    padding: 2px 6px;
+    border-radius: 6px;
+    border: none;
     background: transparent;
     color: var(--pa-text-secondary);
     font-size: 11px;
@@ -17,8 +17,7 @@
     -webkit-app-region: no-drag;
     transition:
       background 0.15s ease,
-      color 0.15s ease,
-      border-color 0.15s ease;
+      color 0.15s ease;
   }
 
   .sidebar-version-badge:hover {
@@ -28,7 +27,6 @@
 
   .sidebar-version-badge.has-update {
     color: var(--cinnabar-seal);
-    border-color: color-mix(in srgb, var(--cinnabar-seal) 45%, transparent);
   }
 
   .sidebar-version-dot {
