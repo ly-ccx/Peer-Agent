@@ -151,6 +151,11 @@ jobs:
     needs: [meta, build]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout (release notes source)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -169,7 +174,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ needs.meta.outputs.version }}
-          body: "Release ${{ needs.meta.outputs.version }} (${{ needs.meta.outputs.channel }})"
+          body_path: release-notes/v${{ needs.meta.outputs.version }}.md
           prerelease: ${{ needs.meta.outputs.prerelease }}
           files: release-assets/*
           fail_on_unmatched_files: true

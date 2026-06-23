@@ -73,6 +73,23 @@ if git tag -l "$TAG_NAME" | grep -qx "$TAG_NAME"; then
   exit 1
 fi
 
+# ── 发布前 gate：本版本的发布说明必须已提前写好 ──
+# 发布说明由人工（可借助 LLM）提前写入 release-notes/v<版本>.md，
+# CI 的 release job 会用它作为 GitHub Release 正文（body_path）。
+# 文件缺失或为空则拒绝发布，避免再次出现“更新内容只有一句话”的问题。
+RELEASE_NOTES_FILE="${ROOT_DIR}/release-notes/${TAG_NAME}.md"
+if [[ ! -f "$RELEASE_NOTES_FILE" ]] || [[ -z "$(tr -d '[:space:]' < "$RELEASE_NOTES_FILE")" ]]; then
+  echo "❌ 缺少本版本的发布说明：release-notes/${TAG_NAME}.md（不存在或为空）。"
+  echo ""
+  echo "   请先创建并填写该文件，再重新发布："
+  echo "     cp release-notes/TEMPLATE.md release-notes/${TAG_NAME}.md"
+  echo "     # 编辑 release-notes/${TAG_NAME}.md，写入本版本的更新内容（Markdown）"
+  echo ""
+  echo "   该文件将作为 GitHub Release 的正文，并在桌面端「发现新版本」弹窗中展示。"
+  exit 1
+fi
+echo "📄 发布说明: release-notes/${TAG_NAME}.md ✓"
+
 # ── Step 1: 回写版本事实源（VERSION / package.json / Cargo.toml / Cargo.lock）──
 echo "📝 Step 1/4: stamp 版本 → ${VERSION}"
 node "${ROOT_DIR}/scripts/stamp-version.mjs" "${VERSION}"
