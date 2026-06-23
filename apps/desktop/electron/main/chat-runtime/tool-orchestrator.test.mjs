@@ -70,4 +70,75 @@ describe('formatToolResultForStream', () => {
     assert.deepEqual(parsed.options, ['继续', '停止']);
     assert.equal(parsed.note, '请选择');
   });
+
+  // 回归（方案 B2）：batch_search 的聚合结果是一整段 JSON，超过字节上限时若按
+  // `slice` 字节截断会变成非法 JSON，导致渲染层 JSON.parse 失败、卡片永远卡在
+  // searching。这里断言：超限聚合结果经格式化后仍是**合法 JSON**，lanes 完整保留，
+  // matches 按条数封顶并标记 truncated，preview 纯文本副本被剔除。
+  it('keeps an oversized batch_search aggregate result as valid bounded JSON', () => {
+    const lanes = Array.from({ length: 6 }, (_, i) => ({
+      id: `lane${i}`,
+      label: `lane ${i}`,
+      query: 'q',
+      status: 'completed',
+      matchCount: 80,
+    }));
+    const matches = Array.from({ length: 80 }, (_, i) => ({
+      path: `apps/some/very/long/path/to/file-${i}.ts`,
+      line: i,
+      text: `match text ${'x'.repeat(80)} ${i}`,
+      laneIds: ['lane0'],
+      hitCount: 1,
+    }));
+    const output = JSON.stringify({
+      kind: 'local_capability_result_ref',
+      tool: 'batch_search',
+      capabilityId: 'local.search.aggregate',
+      status: 'success',
+      outputPreview: {
+        status: 'success',
+        tool: 'batch_search',
+        lanes,
+        aggregated: { totalUniqueMatches: 80, truncated: false, matches },
+        preview: 'PLAINTEXT '.repeat(500),
+      },
+    });
+    assert.ok(output.length > 4000, 'fixture must exceed the byte limit to exercise truncation');
+
+    const result = formatToolResultForStream({ name: 'batch_search', args: {}, output });
+
+    // 必须仍可被解析（旧实现在此处会抛错）。
+    const parsed = JSON.parse(result);
+    assert.equal(parsed.tool, 'batch_search');
+    assert.equal(parsed.outputPreview.status, 'success');
+    // lanes 全量保留，卡片才能逐路还原状态。
+    assert.equal(parsed.outputPreview.lanes.length, 6);
+    // matches 按条数封顶并标记 truncated。
+    assert.equal(parsed.outputPreview.aggregated.matches.length, 50);
+    assert.equal(parsed.outputPreview.aggregated.truncated, true);
+    // totalUniqueMatches 保留真实总数，不被裁剪条数覆盖。
+    assert.equal(parsed.outputPreview.aggregated.totalUniqueMatches, 80);
+    // 给模型看的 preview 纯文本副本不应出现在 UI 流里。
+    assert.equal(parsed.outputPreview.preview, undefined);
+  });
+
+  // 边界：聚合结果本身在条数上限内时，原样透传且保持合法 JSON、不误标 truncated。
+  it('passes through a small batch_search aggregate result unchanged', () => {
+    const output = JSON.stringify({
+      kind: 'local_capability_result_ref',
+      tool: 'batch_search',
+      status: 'success',
+      outputPreview: {
+        status: 'success',
+        lanes: [{ id: 'l0', query: 'q', status: 'completed', matchCount: 1 }],
+        aggregated: {
+          totalUniqueMatches: 1,
+          truncated: false,
+          matches: [{ path: 'a.ts', line: 1, text: 't', laneIds: ['l0'], hitCount: 1 }],
+        },
+      },
+    });
+    const result = formatToolResultForStream({ name: 'batch_search', args: {}, output });
+    assert.equal(result, output);
+  });
 });
