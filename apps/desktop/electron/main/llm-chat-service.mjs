@@ -84,6 +84,7 @@ function buildRuntimeTools({ mcpRegistry, providerType, mode }) {
 export { buildAnthropicTools, buildOpenAITools, buildSystemPrompt };
 export { normalizeAnthropicMessages, normalizeOpenAIMessages };
 export { hasDanglingToolIntent, hasUnsupportedToolClaim };
+export { finalizeDanglingToolSegments, terminalDanglingNote };
 export { sanitizeApiMessages };
 
 function recordPromptSnapshot(store, context, metadata) {
@@ -134,6 +135,33 @@ function noteNativeReasoningFallback(provider, details = {}) {
   );
 }
 
+// 终态落盘兜底：把「已发出但未回填结果」的 tool-call 段补写一个明确的中断 result，
+// 使其在持久化后脱离「执行中（永久转圈）」态。背景：渲染层三个终态 handler 已对 live
+// segments 做过同样收尾，但仅当终态事件 streamId 与当前会话匹配时才生效；后台会话（已
+// 切走）或事件 streamId 不匹配时，真值来源是这里的落盘 + 切回时的会话重载。因此必须在
+// 主进程的终态落盘汇聚点再兜一次，否则切回会话仍会看到永久转圈的工具段。
+// 与渲染层口径一致：result === undefined 且 synthetic !== true 视为悬空段。
+// 纯函数：无悬空段时返回原数组引用，调用方据此可跳过无谓写入。
+function terminalDanglingNote(terminalStatus) {
+  if (terminalStatus === 'aborted') return '工具调用已中断（生成停止）';
+  if (terminalStatus === 'error') return '工具调用已中断（连接出错）';
+  return '工具结果未返回（本轮已结束）';
+}
+
+function finalizeDanglingToolSegments(segments, terminalStatus) {
+  if (!Array.isArray(segments)) return segments;
+  const note = terminalDanglingNote(terminalStatus);
+  let changed = false;
+  const next = segments.map((segment) => {
+    if (segment?.type === 'tool-call' && segment.result === undefined && segment.synthetic !== true) {
+      changed = true;
+      return { ...segment, result: note };
+    }
+    return segment;
+  });
+  return changed ? next : segments;
+}
+
 /**
  * ADR 22: 累积代理。包裹真实 webContents,拦截流式正文/思考事件追加到 streamRecord,
  * 其余事件原样透传。这样两个 provider adapter / agent loop 都无需改动,
@@ -163,10 +191,14 @@ function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conver
     const now = Date.now();
     if (!final && now - lastPersistAt < PERSIST_THROTTLE_MS) return;
     lastPersistAt = now;
+    // 终态落盘时，把已发出但未回填结果的 tool-call 段补成中断态，避免切回会话后永久转圈。
+    const sourceSegments = final
+      ? finalizeDanglingToolSegments(streamRecord.segments, streamRecord.terminalStatus)
+      : streamRecord.segments;
     const patch = {
       content: streamRecord.accumulatedText || '',
-      segments: Array.isArray(streamRecord.segments)
-        ? streamRecord.segments.map((segment) => ({ ...segment }))
+      segments: Array.isArray(sourceSegments)
+        ? sourceSegments.map((segment) => ({ ...segment }))
         : [],
     };
     if (final && interrupted) patch.interrupted = true;

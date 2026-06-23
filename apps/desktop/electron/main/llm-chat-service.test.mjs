@@ -1647,3 +1647,40 @@ describe('llm chat service main-side persistence (方案 3)', () => {
     }
   });
 });
+
+describe('finalizeDanglingToolSegments (terminal persist fallback)', () => {
+  it('fills dangling tool-call segments with a terminal note per status', async () => {
+    const { finalizeDanglingToolSegments } = await loadService();
+    const segments = [
+      { type: 'text', content: 'hi' },
+      { type: 'tool-call', toolCallId: 't1', tool: 'bash', result: undefined },
+    ];
+
+    const aborted = finalizeDanglingToolSegments(segments, 'aborted');
+    assert.equal(aborted[1].result, '工具调用已中断（生成停止）');
+
+    const errored = finalizeDanglingToolSegments(segments, 'error');
+    assert.equal(errored[1].result, '工具调用已中断（连接出错）');
+
+    const done = finalizeDanglingToolSegments(segments, 'done');
+    assert.equal(done[1].result, '工具结果未返回（本轮已结束）');
+  });
+
+  it('leaves resolved and synthetic tool-call segments untouched', async () => {
+    const { finalizeDanglingToolSegments } = await loadService();
+    const segments = [
+      { type: 'tool-call', toolCallId: 't1', tool: 'bash', result: 'ok' },
+      { type: 'tool-call', toolCallId: 't2', tool: 'bash', result: undefined, synthetic: true },
+    ];
+    const next = finalizeDanglingToolSegments(segments, 'aborted');
+    assert.equal(next[0].result, 'ok');
+    assert.equal(next[1].result, undefined);
+  });
+
+  it('returns the same array reference when there is nothing to finalize', async () => {
+    const { finalizeDanglingToolSegments } = await loadService();
+    const segments = [{ type: 'text', content: 'hi' }];
+    assert.equal(finalizeDanglingToolSegments(segments, 'done'), segments);
+    assert.equal(finalizeDanglingToolSegments(null, 'done'), null);
+  });
+});
