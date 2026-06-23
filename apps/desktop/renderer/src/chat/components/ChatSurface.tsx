@@ -262,6 +262,7 @@ export function ChatSurface({
   onConversationUpdated,
   onStreamingChange,
   onBranch,
+  workspacePath,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
@@ -275,6 +276,8 @@ export function ChatSurface({
   // 把当前会话的流式运行状态上报给上层(App),供左侧列表显示 Loading 图标。
   readonly onStreamingChange?: (conversationId: string | null, isStreaming: boolean) => void;
   readonly onBranch?: (newConversationId: string) => void;
+  // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
+  readonly workspacePath?: string | null;
 }) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [draft, setDraft] = useState('');
@@ -978,13 +981,13 @@ export function ChatSurface({
     if (!conversationId || isStreaming) return;
     const contextMessages = messages.slice(0, msgIndex + 1);
     const branchTitle = contextMessages.find((m) => m.role === 'user')?.content.slice(0, 50) || 'Branch';
-    const conv = await clientApi.conversationsCreate({ title: branchTitle }) as { id: string };
+    const conv = await clientApi.conversationsCreate({ title: branchTitle, workspacePath }) as { id: string };
     for (const m of contextMessages) {
       await clientApi.conversationsAppendMessage({ id: conv.id, message: { id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, durationMs: m.durationMs, timestamp: m.timestamp, _compaction: m.compaction, attachments: m.attachments, interrupted: m.interrupted } });
     }
     onConversationUpdated?.();
     onBranch?.(conv.id);
-  }, [conversationId, isStreaming, messages, onConversationUpdated, onBranch]);
+  }, [conversationId, isStreaming, messages, onConversationUpdated, onBranch, workspacePath]);
 
   const handleDeleteMessage = useCallback(async (msgIndex: number) => {
     if (!conversationId || isStreaming) return;

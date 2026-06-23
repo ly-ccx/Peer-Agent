@@ -281,6 +281,7 @@ export function App() {
                   });
                 }}
                 onBranch={(id) => { setConversationView('active'); setActiveConversationId(id); void refreshConversations(activeWorkspace, 'active'); }}
+                workspacePath={activeWorkspace}
               />
             </section>
           </section>
