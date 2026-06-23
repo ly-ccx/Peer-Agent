@@ -9,6 +9,7 @@ import type {
 } from '../../state/types';
 import { MarkdownMessage } from '../markdown/MarkdownMessage';
 import { BatchSearchToolCard } from './BatchSearchToolCard';
+import { buildBatchSearchView } from '../../state/batchSearchLaneView';
 import { InteractionToolCard } from './InteractionToolCard';
 
 function toolProgressLabel(
@@ -214,8 +215,18 @@ function ToolCallCard({ tc, isZh }: { readonly tc: ToolCallLegacy; readonly isZh
 
   // batch_search：渲染为「分路逐条检索状态 + 聚合结果面板」，而不是裸 JSON。
   // 见 docs/design/batch-search-parallel-aggregation.md。
+  // 入参兜底（方向 B）：若 args.queries 解析不出任何分路、也没有聚合结果，
+  // 说明本次工具入参无效（常见于模型把 queries 写成畸形字符串），分路卡会卡在
+  // 「0 路 · 检索中…」的误导态。此时不渲染分路卡，回退到通用工具卡显示裸参数，
+  // 便于定位入参错误。args.queries 合法后重渲染会自动切回分路卡。
   if (tc.tool === 'batch_search') {
-    return <BatchSearchToolCard args={tc.args} result={tc.result} isZh={isZh} />;
+    const batchView = buildBatchSearchView(tc.args, tc.result);
+    const hasBatchContent =
+      batchView.lanes.length > 0 ||
+      (batchView.aggregate != null && batchView.aggregate.matches.length > 0);
+    if (hasBatchContent) {
+      return <BatchSearchToolCard args={tc.args} result={tc.result} isZh={isZh} />;
+    }
   }
 
   const label = tc.tool === 'bash'

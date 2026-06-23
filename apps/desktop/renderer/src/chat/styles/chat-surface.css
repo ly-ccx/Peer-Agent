@@ -1708,30 +1708,71 @@
   }
 }
 
-/* batch_search 分路检索卡（方向 B「优雅分路卡」）。见 docs/design/batch-search-parallel-aggregation.md */
-.batch-search-card .batch-search-total {
-  margin-left: auto;
-  font-size: 0.78em;
+/* batch_search 分路检索卡（方向甲「极简单行折叠」）。见 docs/design/batch-search-parallel-aggregation.md */
+.batch-search-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* 单行摘要：默认整张卡就这一行 */
+.batch-search-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.85em;
   line-height: 1.4;
-  padding: 1px var(--space-2);
-  border-radius: 999px;
-  white-space: nowrap;
 }
 
-.batch-search-card .batch-search-total.ready {
+.batch-search-summary-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--graphite-fade);
+}
+
+.batch-search-card.running .batch-search-summary-dot {
+  background: var(--azure-seal);
+  animation: batch-search-pulse 1.4s ease-in-out infinite;
+}
+
+.batch-search-card.done .batch-search-summary-dot {
+  background: var(--moss-base, #5a8f6e);
+}
+
+.batch-search-card.error .batch-search-summary-dot {
+  background: var(--rust-base, #b4453a);
+}
+
+.batch-search-summary-text {
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--graphite-base);
-  background: var(--graphite-veil, rgba(120, 120, 128, 0.1));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-.batch-search-card .batch-search-total.pending {
-  color: var(--azure-seal);
-  background: var(--azure-veil, rgba(64, 120, 220, 0.1));
+.batch-search-summary-caret {
+  flex: none;
+  color: var(--graphite-fade);
+  transition: transform 0.18s ease;
+}
+
+/* 展开区：lanes + results 收在卡片底部，仅展开时出现 */
+.batch-search-card.is-expanded .batch-search-lanes,
+.batch-search-card.is-expanded .batch-search-results {
+  border-top: 1px solid var(--graphite-veil, rgba(120, 120, 128, 0.12));
 }
 
 .batch-search-lanes {
   list-style: none;
-  margin: var(--space-2) 0 0;
-  padding: 0;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -1817,7 +1858,8 @@
 }
 
 .batch-search-results {
-  margin-top: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
   display: flex;
   flex-direction: column;
   gap: var(--space-1);

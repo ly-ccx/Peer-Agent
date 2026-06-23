@@ -6,11 +6,11 @@ import {
 } from '../../state/batchSearchLaneView';
 
 /**
- * batch_search 工具卡：还原截图式"批量并行检索"——逐条子路状态
- * （色点 + 标签 + 结果计数）+ 聚合结果面板。
+ * batch_search 工具卡：方向甲「极简单行折叠」。
  *
- * 设计：方向 B「优雅分路卡」。状态用色点表达，文案随 app i18n（isZh），
- * 结果区路径与代码文本分两行呼吸，带左缘色条分组。
+ * 默认只占一行：状态点 + 「批量检索 · N 路 · 共 M 条」+ 折叠箭头。
+ * 点击整行展开，才显示分路（lanes）与聚合结果（results）。
+ * 文案随 app i18n（isZh）。目标：克制、零留白、不抢戏。
  *
  * 设计文档：docs/design/batch-search-parallel-aggregation.md
  */
@@ -44,17 +44,18 @@ export function BatchSearchToolCard({
   const isRunning = view.status === 'running';
   const laneCount = view.lanes.length;
 
-  // 空壳兜底：lanes 尚未解析出来且运行中，显示"准备中"而不是"0 路"。
-  const title =
+  // 单行摘要：状态点 + 「批量检索 · N 路 · 共 M 条」。
+  // 空壳兜底：lanes 尚未解析且运行中，显示"准备中"而不是"0 路"。
+  const lanePart =
     laneCount === 0 && isRunning
       ? isZh
-        ? '批量检索 · 准备中…'
-        : 'Batch search · preparing…'
+        ? '准备中…'
+        : 'preparing…'
       : isZh
-        ? `批量检索 · ${laneCount} 路`
-        : `Batch search · ${laneCount} lane(s)`;
+        ? `${laneCount} 路`
+        : `${laneCount} lane(s)`;
 
-  const totalChip =
+  const matchPart =
     view.aggregate != null
       ? isZh
         ? `共 ${view.aggregate.totalUniqueMatches} 条${view.aggregate.truncated ? '（截断）' : ''}`
@@ -63,21 +64,24 @@ export function BatchSearchToolCard({
         ? '检索中…'
         : 'searching…';
 
+  const lead = isZh ? '批量检索' : 'Batch search';
+  const summary = `${lead} · ${lanePart} · ${matchPart}`;
+
+  const phaseState = isRunning ? 'running' : view.status === 'failed' ? 'error' : 'done';
   const hasResults = view.aggregate != null && view.aggregate.matches.length > 0;
+  const expandable = laneCount > 0 || hasResults;
 
   return (
     <div
-      className={`tool-call-card batch-search-card ${isRunning ? 'running' : 'done'}`}
-      onClick={() => setExpanded(!expanded)}
+      className={`tool-call-card batch-search-card ${phaseState}${expanded ? ' is-expanded' : ''}`}
+      onClick={() => expandable && setExpanded(!expanded)}
     >
-      <div className="tool-call-header">
-        <span className="tool-call-label">{title}</span>
-        <span className={`batch-search-total ${view.aggregate != null ? 'ready' : 'pending'}`}>
-          {totalChip}
-        </span>
-        {hasResults ? (
+      <div className="batch-search-summary">
+        <span className="batch-search-summary-dot" aria-hidden="true" />
+        <span className="batch-search-summary-text">{summary}</span>
+        {expandable ? (
           <svg
-            className="tool-call-expand"
+            className="batch-search-summary-caret"
             width="12"
             height="12"
             viewBox="0 0 24 24"
@@ -93,7 +97,7 @@ export function BatchSearchToolCard({
         ) : null}
       </div>
 
-      {laneCount > 0 ? (
+      {expanded && laneCount > 0 ? (
         <ul className="batch-search-lanes">
           {view.lanes.map((lane) => {
             const cls = phaseClass(lane.phase);
