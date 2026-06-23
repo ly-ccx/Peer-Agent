@@ -1708,11 +1708,24 @@
   }
 }
 
-/* batch_search 分路检索卡（方案丙）。见 docs/design/batch-search-parallel-aggregation.md */
+/* batch_search 分路检索卡（方向 B「优雅分路卡」）。见 docs/design/batch-search-parallel-aggregation.md */
 .batch-search-card .batch-search-total {
   margin-left: auto;
-  font-size: 0.85em;
-  color: var(--graphite-fade);
+  font-size: 0.78em;
+  line-height: 1.4;
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.batch-search-card .batch-search-total.ready {
+  color: var(--graphite-base);
+  background: var(--graphite-veil, rgba(120, 120, 128, 0.1));
+}
+
+.batch-search-card .batch-search-total.pending {
+  color: var(--azure-seal);
+  background: var(--azure-veil, rgba(64, 120, 220, 0.1));
 }
 
 .batch-search-lanes {
@@ -1721,40 +1734,85 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 1px;
 }
 
 .batch-search-lane {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
+  align-items: center;
+  gap: var(--space-2);
   font-size: 0.85em;
-  padding: 2px var(--space-2);
-  border-radius: 4px;
+  padding: 3px var(--space-2);
+  border-radius: 5px;
+}
+
+.batch-search-lane:hover {
+  background: var(--graphite-veil, rgba(120, 120, 128, 0.06));
+}
+
+.batch-search-lane-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--graphite-fade);
+}
+
+.batch-search-lane.running .batch-search-lane-dot {
+  background: var(--azure-seal);
+  animation: batch-search-pulse 1.4s ease-in-out infinite;
+}
+
+.batch-search-lane.done .batch-search-lane-dot {
+  background: var(--moss-base, #5a8f6e);
+}
+
+.batch-search-lane.error .batch-search-lane-dot {
+  background: var(--rust-base, #b4453a);
+}
+
+@keyframes batch-search-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 
 .batch-search-lane-label {
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--graphite-base);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.batch-search-lane-status {
+.batch-search-lane-count {
   flex: none;
+  min-width: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82em;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  color: var(--graphite-base);
+  background: var(--graphite-veil, rgba(120, 120, 128, 0.1));
+}
+
+.batch-search-lane-state {
+  flex: none;
+  font-size: 0.92em;
   color: var(--graphite-fade);
 }
 
-.batch-search-lane.running .batch-search-lane-status {
+.batch-search-lane.running .batch-search-lane-state {
   color: var(--azure-seal);
 }
 
-.batch-search-lane.done .batch-search-lane-status {
-  color: var(--graphite-base);
-}
-
-.batch-search-lane.error .batch-search-lane-status {
+.batch-search-lane.error .batch-search-lane-state {
   color: var(--rust-base, #b4453a);
 }
 
@@ -1762,23 +1820,31 @@
   margin-top: var(--space-2);
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  font-family: var(--font-mono, monospace);
-  font-size: 0.8em;
+  gap: var(--space-1);
 }
 
 .batch-search-result-row {
-  display: flex;
-  gap: var(--space-2);
+  padding: var(--space-1) 0 var(--space-1) var(--space-3);
+  border-left: 2px solid var(--graphite-veil, rgba(120, 120, 128, 0.18));
   overflow: hidden;
 }
 
 .batch-search-result-loc {
-  flex: none;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.78em;
   color: var(--azure-seal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-search-result-hits {
+  color: var(--graphite-fade);
 }
 
 .batch-search-result-text {
+  margin-top: 1px;
+  font-size: 0.82em;
   color: var(--graphite-fade);
   overflow: hidden;
   text-overflow: ellipsis;

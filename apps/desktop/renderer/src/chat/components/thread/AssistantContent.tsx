@@ -187,7 +187,7 @@ function ThinkingSection({ toolCalls, isActive, isZh }: { readonly toolCalls: To
       {expanded ? (
         <div className="thinking-body">
           {toolCalls.map((tc, i) => (
-            <ToolCallCard key={i} tc={tc} />
+            <ToolCallCard key={i} tc={tc} isZh={isZh} />
           ))}
         </div>
       ) : null}
@@ -202,7 +202,7 @@ function parseToolCallInteractionView(tc: ToolCallLegacy) {
   );
 }
 
-function ToolCallCard({ tc }: { readonly tc: ToolCallLegacy }) {
+function ToolCallCard({ tc, isZh }: { readonly tc: ToolCallLegacy; readonly isZh: boolean }) {
   const [expanded, setExpanded] = useState(false);
 
   // request_user_input：渲染为「问题 + 可点击选项 + 等待你输入」的交互卡，
@@ -215,11 +215,7 @@ function ToolCallCard({ tc }: { readonly tc: ToolCallLegacy }) {
   // batch_search：渲染为「分路逐条检索状态 + 聚合结果面板」，而不是裸 JSON。
   // 见 docs/design/batch-search-parallel-aggregation.md。
   if (tc.tool === 'batch_search') {
-    const isZhLocale =
-      typeof navigator !== 'undefined' && typeof navigator.language === 'string'
-        ? navigator.language.toLowerCase().startsWith('zh')
-        : true;
-    return <BatchSearchToolCard args={tc.args} result={tc.result} isZh={isZhLocale} />;
+    return <BatchSearchToolCard args={tc.args} result={tc.result} isZh={isZh} />;
   }
 
   const label = tc.tool === 'bash'
