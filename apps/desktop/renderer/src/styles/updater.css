@@ -230,6 +230,19 @@
     object-fit: contain;
   }
 
+  /* 亮/暗主题各显示一张吉祥物，避免两张图叠加（对齐 sidebar 徽标做法） */
+  .updater-modal-mascot img.dark {
+    display: none;
+  }
+
+  [data-theme="dark"] .updater-modal-mascot img.light {
+    display: none;
+  }
+
+  [data-theme="dark"] .updater-modal-mascot img.dark {
+    display: block;
+  }
+
   .updater-progress-track {
     width: 100%;
     height: 6px;
