@@ -79,7 +79,7 @@ import { MarkdownMessage } from './markdown/MarkdownMessage';
 import { AssistantContent, CompactionSummaryCard } from './thread/AssistantContent';
 import { TokenUsageDisplay } from './thread/TokenUsageDisplay';
 import { AttachmentStrip, ImagePreviewOverlay } from './thread/AttachmentStrip';
-import { InteractionContext } from './thread/interactionContext';
+import { InteractionAnsweredContext, InteractionContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
 import { GoalPlanPanel } from './GoalPlanPanel';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
@@ -1076,13 +1076,24 @@ export function ChatSurface({
                   ) : null}
                 </>
               ) : (
-                <AssistantContent
-                  segments={msg.segments}
-                  content={msg.content}
-                  isStreaming={isStreaming && msg === messages[messages.length - 1]}
-                  toolProgress={isStreaming && msg === messages[messages.length - 1] ? toolProgress : null}
-                  isZh={isZh}
-                />
+                <InteractionAnsweredContext.Provider
+                  value={
+                    // 这张交互卡是否已被回复：取紧邻其后的 user 消息文本（点选项或
+                    // 输入框自由输入都会成为这条 user 消息）。没有后续回复则为 null，
+                    // 卡片据此判断锁定与「已选」高亮，不再依赖卡片本地一次性 state。
+                    messages[idx + 1]?.role === 'user'
+                      ? (messages[idx + 1]?.content ?? null)
+                      : null
+                  }
+                >
+                  <AssistantContent
+                    segments={msg.segments}
+                    content={msg.content}
+                    isStreaming={isStreaming && msg === messages[messages.length - 1]}
+                    toolProgress={isStreaming && msg === messages[messages.length - 1] ? toolProgress : null}
+                    isZh={isZh}
+                  />
+                </InteractionAnsweredContext.Provider>
               )}
             </div>
             <div className="chat-msg-footer">

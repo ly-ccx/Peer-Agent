@@ -428,28 +428,59 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* 选项从上到下竖排，单列铺满，便于阅读与点击。 */
 .interaction-options {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  flex-direction: column;
+  gap: var(--space-1);
 }
 .interaction-option-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--azure-soft);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-sm);
   background: var(--paper-sheet);
-  color: var(--azure-seal);
+  color: var(--graphite-base);
   font-size: 0.8rem;
+  line-height: 1.4;
   cursor: pointer;
   transition: background var(--za-motion-fast) var(--za-ease-out), border-color var(--za-motion-fast) var(--za-ease-out);
 }
+.interaction-option-text {
+  flex: 1;
+  min-width: 0;
+}
 .interaction-option-button:hover:not(:disabled) {
   background: var(--azure-trace);
+  border-color: var(--azure-soft);
+}
+/* 已选项：高亮标记。即便整组已置灰不可点，已选项仍保持可读的强调态。 */
+.interaction-option-button.selected {
   border-color: var(--azure-seal);
+  color: var(--azure-seal);
+  background: var(--azure-trace);
+  font-weight: 600;
+}
+.interaction-option-badge {
+  flex: none;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--azure-seal);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--azure-soft);
 }
 .interaction-option-button:disabled {
-  opacity: 0.5;
   cursor: not-allowed;
+}
+/* 已回复后整组置灰，但已选项不被灰掉，保证「选了哪个」一眼可辨。 */
+.interaction-option-button:disabled:not(.selected) {
+  opacity: 0.45;
 }
 .interaction-hint {
   font-size: 0.72rem;
