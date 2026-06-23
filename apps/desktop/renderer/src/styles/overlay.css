@@ -24,4 +24,14 @@
   .pa-overlay-panel {
     animation: za-panel-in var(--za-motion-medium) var(--za-ease-out) both;
   }
+
+  /* 退场态：onClose 时先播退场动画，动画结束后才真正卸载（详见 Overlay.tsx 状态机）。
+     退场比入场更利落（fast 档），位移与入场对称（下移淡出）。 */
+  .pa-overlay-backdrop.is-closing {
+    animation: za-fade-out var(--za-motion-fast) var(--za-ease-in-out) both;
+  }
+
+  .pa-overlay-panel.is-closing {
+    animation: za-slide-down-out var(--za-motion-fast) var(--za-ease-in-out) both;
+  }
 }
