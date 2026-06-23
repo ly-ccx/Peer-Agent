@@ -124,16 +124,27 @@ export function buildBatchSearchView(
   const parsed = parseMaybeJson(result);
   const resultRecord = isRecord(parsed) ? parsed : undefined;
 
+  // 后端会把聚合 Provider 结果包裹成 local_capability_result_ref：
+  // { kind, tool, status: 'completed', outputPreview: { status, lanes, aggregated } }。
+  // 真实的 lanes/aggregated/status 位于 outputPreview 内层；此处下钻一层，
+  // 同时兼容历史「裸结构」（直接是 { status, lanes, aggregated }）。
+  const innerRecord =
+    resultRecord && isRecord(resultRecord.outputPreview)
+      ? resultRecord.outputPreview
+      : resultRecord;
+
   // blocked / 无结果（运行中）处理。
   const status = ((): BatchSearchView['status'] => {
-    const s = resultRecord?.status;
+    const s = innerRecord?.status;
     if (s === 'blocked') return 'blocked';
+    // 后端能力包裹层用 'completed' 表达成功终态，归一为视图的 'success'。
+    if (s === 'completed') return 'success';
     if (s === 'success' || s === 'partial' || s === 'failed' || s === 'cancelled') return s;
     return 'running';
   })();
 
   // 2) result.lanes 按 laneId 覆盖最新阶段（取最新）。
-  const resultLanes = resultRecord && Array.isArray(resultRecord.lanes) ? resultRecord.lanes : [];
+  const resultLanes = innerRecord && Array.isArray(innerRecord.lanes) ? innerRecord.lanes : [];
   for (const rl of resultLanes) {
     if (!isRecord(rl)) continue;
     const laneId = typeof rl.id === 'string' ? rl.id : typeof rl.laneId === 'string' ? rl.laneId : undefined;
@@ -166,7 +177,7 @@ export function buildBatchSearchView(
   }
 
   const lanes = order.map((id) => baseLanes.get(id)).filter((l): l is BatchSearchLaneView => Boolean(l));
-  const aggregate = normalizeAggregate(resultRecord?.aggregated);
+  const aggregate = normalizeAggregate(innerRecord?.aggregated);
 
   return { lanes, aggregate, status };
 }

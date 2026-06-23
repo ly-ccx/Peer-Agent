@@ -42,6 +42,49 @@ test('completed state: result.lanes overrides base lanes by laneId (latest wins)
   assert.equal(view.aggregate?.matches[0].path, 'x.ts');
 });
 
+test('wrapped result: outputPreview envelope drills down and completed→success', () => {
+  // 后端能力包裹层：真实 lanes/aggregated/status 在 outputPreview 内层，
+  // 且 envelope.status 为 'completed'。回归用例守护「lane 卡死在 searching」。
+  const result = JSON.stringify({
+    kind: 'local_capability_result_ref',
+    tool: 'batch_search',
+    status: 'completed',
+    outputPreview: {
+      status: 'success',
+      lanes: [
+        { id: 'a', status: 'completed', matchCount: 3 },
+        { id: 'b', status: 'completed', matchCount: 0 },
+      ],
+      aggregated: {
+        totalUniqueMatches: 3,
+        truncated: false,
+        matches: [{ path: 'x.ts', line: 1, text: 'hit', hitCount: 1, laneIds: ['a'] }],
+      },
+    },
+  });
+  const view = buildBatchSearchView(
+    { queries: [{ id: 'a', label: 'lane A', query: 'foo' }, { id: 'b', label: 'lane B', query: 'bar' }] },
+    result,
+  );
+  assert.equal(view.status, 'success');
+  const a = view.lanes.find((l) => l.laneId === 'a');
+  assert.equal(a?.phase, 'completed');
+  assert.equal(a?.resultCount, 3);
+  assert.equal(view.aggregate?.totalUniqueMatches, 3);
+});
+
+test('bare envelope status completed (no inner status) normalizes to success', () => {
+  // 兜底：历史「裸结构」可能直接以 completed 表达终态而无内层 success。
+  const result = {
+    status: 'completed',
+    lanes: [{ id: 'a', status: 'completed', matchCount: 1, query: 'q' }],
+    aggregated: { totalUniqueMatches: 1, matches: [] },
+  };
+  const view = buildBatchSearchView({ queries: [{ id: 'a', query: 'q' }] }, result);
+  assert.equal(view.status, 'success');
+  assert.equal(view.lanes[0].phase, 'completed');
+});
+
 test('partial state: failed lane carries errorMessage', () => {
   const result = {
     status: 'partial',
