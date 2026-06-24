@@ -163,8 +163,12 @@ export async function agentLoopAnthropic({
 
     const assistantContent = [];
     // Anthropic 要求多轮回传时 thinking block 在 content 数组最前，且带 signature。
-    if (thinkingContent && thinkingSignature) {
-      assistantContent.push({ type: 'thinking', thinking: thinkingContent, signature: thinkingSignature });
+    // 判定以 signature 为准而非 thinkingContent: 新代际(如 Opus 4.8)默认 display:"omitted"，
+    // 返回的 thinking 字段恒为空但 signature 携带加密思维，服务端靠 signature 解密重建。
+    // 若按 thinkingContent 判定会漏发 thinking block，违反工具多轮的强制回传要求，
+    // 并触发 mid-turn thinking 冲突(thinking 被静默禁用 + prompt cache 失效)。
+    if (thinkingSignature) {
+      assistantContent.push({ type: 'thinking', thinking: thinkingContent || '', signature: thinkingSignature });
     }
     if (textContent) assistantContent.push({ type: 'text', text: textContent });
     for (const tu of effectiveToolUseBlocks) {
