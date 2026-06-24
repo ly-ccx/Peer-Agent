@@ -1840,6 +1840,12 @@
   height: 36px;
 }
 
+/* 侧栏自动折叠且非全屏时,主面板顶到窗口最左,需为 macOS 交通灯预留左侧空间,
+   避免会话标题与红绿灯重叠。 */
+:root[data-sidebar-collapsed='true'] .app-shell:not(.is-fullscreen) .chat-header {
+  padding-left: 78px;
+}
+
 .chat-header.has-scroll {
   border-bottom-color: var(--chrome-hairline);
 }
