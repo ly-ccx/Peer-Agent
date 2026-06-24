@@ -226,6 +226,8 @@
     width: 72px;
     height: 72px;
     object-fit: contain;
+    border-radius: 16px;
+    overflow: hidden;
   }
 
   /* 亮/暗主题各显示一张吉祥物，避免两张图叠加（对齐 sidebar 徽标做法） */
