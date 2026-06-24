@@ -8,8 +8,10 @@ import {
 const OPENAI_REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'xhigh' };
 const ANTHROPIC_THINKING_BUDGET = { low: 4096, default: 10240, high: 32768, xhigh: 32768 };
 const QWEN_THINKING_BUDGET = { low: 1024, default: 4096, high: 8192, xhigh: 16384 };
-// adaptive 格式下 output_config.effort 只接受 low/medium/high 三档。
-const ANTHROPIC_OUTPUT_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'high' };
+// Anthropic output_config.effort 原生枚举为 low/medium/high/xhigh/max（与 thinking 是
+// adaptive 还是 enabled 无关，effort 始终属于顶层 output_config）。Peer Agent 的 xhigh
+// 忠实映射到原生 xhigh；max 无对应 UI 档位，按 YAGNI 不引入。
+const ANTHROPIC_OUTPUT_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'xhigh' };
 // Anthropic 约束: max_tokens 必须 > thinking.budget_tokens。
 // max_tokens 是 (思考 token + 回复 token) 的总额，因此开启 thinking 时
 // 需要在 budget 之上额外预留回复预算，否则 API 返回 400 导致请求必挂。
@@ -179,8 +181,8 @@ export function encodeAnthropicMessagesRequest({
     tools,
   };
   // 思考档位: off(关闭) / low / default / high / xhigh。
-  // off 不开 thinking; Anthropic 无 xhigh 原生档位时按 high 处理(adaptive 走 output_config.effort,
-  // enabled 走不同的 budget_tokens)。
+  // off 不开 thinking; output_config.effort 原生支持 xhigh，直接透传(adaptive/output-effort
+  // 两条链路都走 output_config.effort)。enabled-budget 旧代际无 effort，按 budget_tokens 折算。
   const paramStyle = reasoningParamStyle
     ?? (reasoningFormat === 'adaptive' ? 'anthropic-adaptive-effort' : null)
     ?? (anthropicModelUsesEffortConfig(model) ? 'anthropic-output-effort' : 'anthropic-enabled-budget');

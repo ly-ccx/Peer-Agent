@@ -282,8 +282,8 @@ describe('Provider message encoders', () => {
       assert.equal(body.max_tokens, 16384);
     }
 
-    // xhigh 折叠到 high（effort 仅 low/medium/high 三档）。
-    assert.deepEqual(make('claude-opus-4-8', 'xhigh').output_config, { effort: 'high' });
+    // xhigh 忠实映射到原生 output_config.effort=xhigh（不再折叠到 high）。
+    assert.deepEqual(make('claude-opus-4-8', 'xhigh').output_config, { effort: 'xhigh' });
     assert.deepEqual(make('claude-opus-4-8', 'low').output_config, { effort: 'low' });
     assert.deepEqual(make('claude-opus-4-8', 'default').output_config, { effort: 'medium' });
 
@@ -312,7 +312,7 @@ describe('Provider message encoders', () => {
     assert.deepEqual(make('low').output_config, { effort: 'low' });
     assert.deepEqual(make('default').output_config, { effort: 'medium' });
     assert.deepEqual(make('high').output_config, { effort: 'high' });
-    assert.deepEqual(make('xhigh').output_config, { effort: 'high' });
+    assert.deepEqual(make('xhigh').output_config, { effort: 'xhigh' });
     // off 档不发 thinking / output_config。
     const off = make('off');
     assert.equal(off.thinking, undefined);
