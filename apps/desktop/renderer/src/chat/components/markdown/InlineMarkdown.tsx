@@ -1,5 +1,6 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import { clientApi } from '../../../clientApi';
+import { useWorkbenchOptional } from '../../../workbench/WorkbenchContext';
 
 /**
  * 透传当前会话的 workspacePath，作为聊天消息内"相对文件路径"的解析基准。
@@ -93,6 +94,7 @@ function resolveAbsolutePath(
 
 function FilePathCode({ raw }: { raw: string }) {
   const workspacePath = useContext(WorkspacePathContext);
+  const workbench = useWorkbenchOptional();
   const parsed = parseFilePathToken(raw);
   const absPath = parsed ? resolveAbsolutePath(parsed, workspacePath) : null;
 
@@ -102,6 +104,12 @@ function FilePathCode({ raw }: { raw: string }) {
   }
 
   const handleOpen = () => {
+    // 优先：打开右侧 Workbench 的 Diff 视图展示该文件的 git diff。
+    if (workbench) {
+      workbench.openDiff(absPath, workspacePath ?? undefined);
+      return;
+    }
+    // 回退：无 Workbench 上下文时，用系统默认程序打开文件。
     void clientApi.openPath(absPath, workspacePath ?? undefined);
   };
 
@@ -110,7 +118,7 @@ function FilePathCode({ raw }: { raw: string }) {
       className="markdown-file-path"
       role="link"
       tabIndex={0}
-      title={`打开 ${absPath}`}
+      title={workbench ? `查看 ${absPath} 的改动` : `打开 ${absPath}`}
       onClick={handleOpen}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {

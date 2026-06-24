@@ -10,7 +10,12 @@ import {
 } from 'react';
 import { clientApi } from '../clientApi';
 
-export type WorkbenchTabId = 'goal' | 'terminal' | 'browser' | 'files';
+export type WorkbenchTabId = 'goal' | 'terminal' | 'browser' | 'files' | 'diff';
+
+export interface WorkbenchDiffTarget {
+  readonly absPath: string;
+  readonly workspaceRoot?: string;
+}
 
 export const WORKBENCH_DEFAULT_WIDTH = 420;
 export const WORKBENCH_MIN_WIDTH = 320;
@@ -31,6 +36,7 @@ interface WorkbenchState {
   goalSlot: HTMLElement | null;
   hasGoalPlan: boolean;
   sidebarAutoCollapsed: boolean;
+  diffTarget: WorkbenchDiffTarget | null;
 }
 
 interface WorkbenchActions {
@@ -41,6 +47,7 @@ interface WorkbenchActions {
   registerGoalSlot: (el: HTMLElement | null) => void;
   setHasGoalPlan: (has: boolean) => void;
   setSidebarAutoCollapsed: (collapsed: boolean) => void;
+  openDiff: (absPath: string, workspaceRoot?: string) => void;
 }
 
 type WorkbenchContextValue = WorkbenchState & WorkbenchActions & { conversationId: string | null };
@@ -64,7 +71,13 @@ function readWorkbenchSettings(raw: unknown): WorkbenchSettingsShape {
 }
 
 function isValidTab(value: unknown): value is WorkbenchTabId {
-  return value === 'goal' || value === 'terminal' || value === 'browser' || value === 'files';
+  return (
+    value === 'goal' ||
+    value === 'terminal' ||
+    value === 'browser' ||
+    value === 'files' ||
+    value === 'diff'
+  );
 }
 
 interface WorkbenchProviderProps {
@@ -82,6 +95,7 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
   const [goalSlot, setGoalSlotState] = useState<HTMLElement | null>(null);
   const [hasGoalPlan, setHasGoalPlanState] = useState<boolean>(false);
   const [sidebarAutoCollapsed, setSidebarAutoCollapsedState] = useState<boolean>(false);
+  const [diffTarget, setDiffTarget] = useState<WorkbenchDiffTarget | null>(null);
 
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestRef = useRef({ open, width, activeTabMap });
@@ -123,6 +137,14 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
       if (prev[key] === tab) return prev;
       return { ...prev, [key]: tab };
     });
+    schedulePersist();
+  }, [conversationId, schedulePersist]);
+
+  const openDiff = useCallback((absPath: string, workspaceRoot?: string) => {
+    setDiffTarget({ absPath, workspaceRoot });
+    const key = conversationId ?? '__none';
+    setActiveTabMap((prev) => (prev[key] === 'diff' ? prev : { ...prev, [key]: 'diff' }));
+    setOpenState(true);
     schedulePersist();
   }, [conversationId, schedulePersist]);
 
@@ -193,6 +215,7 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     goalSlot,
     hasGoalPlan,
     sidebarAutoCollapsed,
+    diffTarget,
     conversationId,
     setOpen,
     toggleOpen,
@@ -201,9 +224,10 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     registerGoalSlot,
     setHasGoalPlan,
     setSidebarAutoCollapsed,
+    openDiff,
   }), [
-    open, width, activeTab, goalSlot, hasGoalPlan, sidebarAutoCollapsed, conversationId,
-    setOpen, toggleOpen, setActiveTab, setWidth, registerGoalSlot, setHasGoalPlan, setSidebarAutoCollapsed,
+    open, width, activeTab, goalSlot, hasGoalPlan, sidebarAutoCollapsed, diffTarget, conversationId,
+    setOpen, toggleOpen, setActiveTab, setWidth, registerGoalSlot, setHasGoalPlan, setSidebarAutoCollapsed, openDiff,
   ]);
 
   return <WorkbenchContext.Provider value={value}>{children}</WorkbenchContext.Provider>;
@@ -213,4 +237,12 @@ export function useWorkbench(): WorkbenchContextValue {
   const ctx = useContext(WorkbenchContext);
   if (!ctx) throw new Error('useWorkbench must be used within a WorkbenchProvider');
   return ctx;
+}
+
+/**
+ * 可选版：在没有 WorkbenchProvider 时返回 null，而不是抛错。
+ * 供可能渲染在 Workbench 之外的组件（如聊天消息内的文件路径）安全消费。
+ */
+export function useWorkbenchOptional(): WorkbenchContextValue | null {
+  return useContext(WorkbenchContext);
 }

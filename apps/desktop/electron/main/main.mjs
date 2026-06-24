@@ -3,6 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 import { createCapabilityRegistry } from './capability-registry.mjs';
 import { loadLocalEnv } from './env-loader.mjs';
 import { runHealthStub } from './core-health.mjs';
@@ -776,6 +780,94 @@ ipcMain.handle('shell:open-path', async (_event, { absPath, workspaceRoot } = {}
     return { ok: true };
   } catch (err) {
     return { ok: false, reason: 'error', message: err?.message || String(err) };
+  }
+});
+
+// 计算指定文件的 git diff，供渲染层在 Workbench 的 Diff 视图中展示。
+// 入参 absPath 必须是绝对路径；workspaceRoot 为 git 仓库根（不传则用 absPath 所在目录）。
+// 策略：优先 working tree diff；为空时回退 staged diff；仍为空且文件被跟踪时回退 HEAD 对比；
+// 未跟踪文件用 git diff --no-index 与 /dev/null 对比。返回 { ok, diffText, status, error? }。
+ipcMain.handle('git:diff', async (_event, { absPath, workspaceRoot } = {}) => {
+  try {
+    if (!absPath || typeof absPath !== 'string') {
+      return { ok: false, status: 'invalid_path', diffText: '', error: 'invalid_path' };
+    }
+    const target = path.normalize(absPath);
+    if (!path.isAbsolute(target)) {
+      return { ok: false, status: 'invalid_path', diffText: '', error: 'not_absolute' };
+    }
+    if (!existsSync(target)) {
+      return { ok: false, status: 'not_found', diffText: '', error: 'file_not_found' };
+    }
+    const cwd = workspaceRoot && typeof workspaceRoot === 'string' && existsSync(workspaceRoot)
+      ? workspaceRoot
+      : path.dirname(target);
+
+    // 解析仓库根，确认是 git 仓库。
+    let repoRoot;
+    try {
+      const { stdout } = await execFileAsync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], {
+        maxBuffer: 1024 * 1024 * 16,
+      });
+      repoRoot = stdout.trim();
+    } catch {
+      return { ok: false, status: 'not_git_repo', diffText: '', error: 'not_a_git_repository' };
+    }
+
+    // 注意：此处的 repoRelPath 是相对「仓库根」的路径，与入参 relPath（相对调用方 workspace）不同名以避免遮蔽。
+    const repoRelPath = path.relative(repoRoot, target);
+
+    // 判断文件是否被 git 跟踪。
+    let tracked = true;
+    try {
+      await execFileAsync('git', ['-C', repoRoot, 'ls-files', '--error-unmatch', '--', repoRelPath], {
+        maxBuffer: 1024 * 1024 * 16,
+      });
+    } catch {
+      tracked = false;
+    }
+
+    const runGit = async (args) => {
+      try {
+        const { stdout } = await execFileAsync('git', ['-C', repoRoot, ...args], {
+          maxBuffer: 1024 * 1024 * 32,
+        });
+        return stdout;
+      } catch (err) {
+        // git diff --no-index 在有差异时以退出码 1 返回，stdout 仍含 diff。
+        if (err && typeof err.stdout === 'string' && err.stdout.length > 0) return err.stdout;
+        throw err;
+      }
+    };
+
+    if (!tracked) {
+      // 未跟踪文件：与空文件对比，展示为全新增内容。
+      const diffText = await runGit(['diff', '--no-index', '--', '/dev/null', target]);
+      return { ok: true, status: diffText.trim() ? 'untracked' : 'no_changes', diffText };
+    }
+
+    // 1) working tree 改动
+    let diffText = await runGit(['diff', '--', repoRelPath]);
+    if (diffText.trim()) {
+      return { ok: true, status: 'modified', diffText };
+    }
+    // 2) 已暂存改动
+    diffText = await runGit(['diff', '--staged', '--', repoRelPath]);
+    if (diffText.trim()) {
+      return { ok: true, status: 'staged', diffText };
+    }
+    // 3) 无未提交改动：回退展示与上一次提交（HEAD~1）的对比，便于查看最近一次改动。
+    try {
+      diffText = await runGit(['diff', 'HEAD~1', 'HEAD', '--', repoRelPath]);
+      if (diffText.trim()) {
+        return { ok: true, status: 'last_commit', diffText };
+      }
+    } catch {
+      // 仓库可能只有一次提交或无 HEAD~1，忽略。
+    }
+    return { ok: true, status: 'no_changes', diffText: '' };
+  } catch (err) {
+    return { ok: false, status: 'error', diffText: '', error: err?.message || String(err) };
   }
 });
 

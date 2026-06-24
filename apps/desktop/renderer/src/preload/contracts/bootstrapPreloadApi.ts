@@ -164,6 +164,31 @@ export interface BootstrapPreloadApi {
     readonly reason?: string;
     readonly message?: string;
   }>;
+  /**
+   * 计算并返回指定文件的 git diff（点击聊天消息中的文件路径时，在 Workbench 的 Diff 视图展示）。
+   * - absPath 必须是绝对路径；workspaceRoot 为 git 仓库根（不传则用 absPath 所在目录推断）。
+   * - status 表示 diff 来源/状态：modified（工作区改动）、staged（已暂存）、last_commit（回退到上一次提交对比）、
+   *   untracked（未跟踪文件，全量新增）、no_changes（无改动）、not_git_repo / not_found / invalid_path / error（异常）。
+   * - diffText 为统一 diff 文本（unified diff）；异常或无改动时为空串。
+   */
+  readonly gitDiff: (
+    absPath: string,
+    workspaceRoot?: string,
+  ) => Promise<{
+    readonly ok: boolean;
+    readonly status:
+      | 'modified'
+      | 'staged'
+      | 'last_commit'
+      | 'untracked'
+      | 'no_changes'
+      | 'not_git_repo'
+      | 'not_found'
+      | 'invalid_path'
+      | 'error';
+    readonly diffText: string;
+    readonly error?: string;
+  }>;
   readonly listShellTasks: () => Promise<readonly Record<string, unknown>[]>;
   readonly stopActiveShellTask: () => Promise<Record<string, unknown>>;
   readonly stopShellTask: (taskId: string) => Promise<Record<string, unknown>>;

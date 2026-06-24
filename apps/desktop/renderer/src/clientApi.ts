@@ -20,6 +20,7 @@ const unavailableApi: ClientApi = {
   executeClientToolCall: unavailableMethod('executeClientToolCall'),
   runHealthCheck: unavailableMethod('runHealthCheck'),
   openPath: unavailableMethod('openPath'),
+  gitDiff: unavailableMethod('gitDiff'),
   listShellTasks: unavailableMethod('listShellTasks'),
   stopActiveShellTask: unavailableMethod('stopActiveShellTask'),
   stopShellTask: unavailableMethod('stopShellTask'),

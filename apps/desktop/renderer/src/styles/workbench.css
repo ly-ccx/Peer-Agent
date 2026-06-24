@@ -185,6 +185,113 @@
     overflow-x: hidden;
   }
 
+  /* Diff 视图：文件 git diff 展示 */
+  .workbench-diff {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+  .workbench-diff-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--za-line);
+    flex: 0 0 auto;
+  }
+  .workbench-diff-titles {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .workbench-diff-filename {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ink-base, var(--za-text));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .workbench-diff-badge {
+    flex: 0 0 auto;
+    padding: 1px 6px;
+    font-size: 10.5px;
+    color: var(--za-text-muted);
+    background: var(--za-surface-1);
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius-sm);
+    white-space: nowrap;
+  }
+  .workbench-diff-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+  }
+  .workbench-diff-btn {
+    padding: 3px 8px;
+    font-size: 11.5px;
+    color: var(--graphite-mute);
+    background: transparent;
+    border: 1px solid var(--za-line);
+    border-radius: var(--radius-frost-sm, 6px);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background var(--za-motion-fast), color var(--za-motion-fast);
+  }
+  .workbench-diff-btn:hover {
+    background: var(--chrome-hover);
+    color: var(--graphite-base);
+  }
+  .workbench-diff-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+  }
+  .workbench-diff-status {
+    padding: 24px 16px;
+    text-align: center;
+  }
+  .workbench-diff-pre {
+    margin: 0;
+    padding: 8px 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.55;
+    tab-size: 2;
+  }
+  .workbench-diff-pre code {
+    display: block;
+    min-width: max-content;
+  }
+  .diff-line {
+    display: block;
+    padding: 0 12px;
+    white-space: pre;
+  }
+  .diff-line--add {
+    background: var(--za-diff-add-bg, rgba(46, 160, 67, 0.16));
+    color: var(--za-diff-add-fg, #1a7f37);
+  }
+  .diff-line--del {
+    background: var(--za-diff-del-bg, rgba(248, 81, 73, 0.16));
+    color: var(--za-diff-del-fg, #cf222e);
+  }
+  .diff-line--hunk {
+    color: var(--za-accent, #3b7fab);
+    background: var(--za-surface-1);
+  }
+  .diff-line--meta {
+    color: var(--za-text-muted);
+  }
+  .diff-line--ctx {
+    color: var(--ink-fade, var(--za-text-faint));
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .workbench-panel,
     .app-layout {

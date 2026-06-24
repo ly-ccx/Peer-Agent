@@ -3,6 +3,7 @@ import { useWorkbench, type WorkbenchTabId } from './WorkbenchContext';
 import { TerminalView } from './views/TerminalView';
 import { BrowserView } from './views/BrowserView';
 import { FilesView } from './views/FilesView';
+import { DiffView } from './views/DiffView';
 import {
   WORKBENCH_MIN_WIDTH,
   WORKBENCH_MAX_WIDTH,
@@ -75,6 +76,21 @@ const TABS: readonly TabDef[] = [
     icon: (
       <svg {...ICON_PROPS}>
         <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'diff',
+    labelZh: 'Diff',
+    labelEn: 'Diff',
+    icon: (
+      <svg {...ICON_PROPS}>
+        <path d="M12 3v6" />
+        <path d="M9 6h6" />
+        <path d="M12 15v6" />
+        <path d="M9 18h6" />
+        <path d="M5 9 3 12l2 3" />
+        <path d="m19 9 2 3-2 3" />
       </svg>
     ),
   },
@@ -252,6 +268,9 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
         </div>
         <div className="workbench-view" data-active={activeTab === 'files'}>
           <FilesView isZh={isZh} workspacePath={workspacePath} />
+        </div>
+        <div className="workbench-view" data-active={activeTab === 'diff'}>
+          <DiffView isZh={isZh} />
         </div>
       </div>
     </aside>
