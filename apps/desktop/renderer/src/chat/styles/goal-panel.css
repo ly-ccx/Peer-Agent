@@ -255,6 +255,14 @@
   border-top: 1px solid var(--za-line);
 }
 
+/* 直接子项（主卡 / 历史清单 / 错误条）保持自然高度，禁止被 flex 压缩。
+   子卡片自带 overflow:hidden（圆角 + executing 流光裁剪），会使其 min-height:auto
+   解析为 0，从而被 flexbox 压缩而非溢出，导致 body 永不产生滚动条。加 flex-shrink:0
+   让子项保持内容高度，使 body 正常溢出滚动。 */
+.goal-panel-body > * {
+  flex-shrink: 0;
+}
+
 .goal-panel--empty {
   padding: 16px;
   border: 1px dashed var(--za-line);
