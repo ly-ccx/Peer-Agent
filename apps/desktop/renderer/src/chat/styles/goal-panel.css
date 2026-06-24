@@ -454,8 +454,10 @@
   flex: 1 1 100%;
 }
 
-/* 下方一行：进度文本占主，caret 靠右。 */
+/* 进度条本体：必须 display:block，inline span 会忽略 height 导致 bar 不可见，
+   且其 line-box 会撑高 track 行、把下方文本行向下挤（视觉上不居中）。 */
 .goal-plan-progress-bar {
+  display: block;
   position: relative;
   height: 6px;
   border-radius: 999px;
