@@ -181,55 +181,63 @@
     color: var(--za-text-muted);
   }
 
+  /* 对齐 tool-call-card 普通命令卡：极简单行，无边框/背景/圆角，hover 才显底色。 */
   .historical-preview-card {
     box-sizing: border-box;
     min-width: 0;
     max-width: 100%;
-    border: 1px solid var(--za-line);
-    border-radius: var(--za-radius-md);
-    background: var(--za-surface-0);
-    overflow: hidden;
   }
 
-  .historical-preview-card summary {
+  .historical-preview-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 8px 11px;
+    gap: var(--space-2);
+    width: 100%;
+    padding: var(--space-1) var(--space-2);
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
     cursor: pointer;
-    color: var(--za-text-soft);
-    font-size: 12px;
+    text-align: left;
+    color: var(--graphite-soft);
+    font-size: 0.78rem;
     font-family: var(--font-mono);
-    list-style: none;
+    transition: background var(--za-motion-fast) var(--za-ease-out);
   }
 
-  .historical-preview-card summary::-webkit-details-marker {
-    display: none;
+  .historical-preview-header:disabled {
+    cursor: default;
+  }
+
+  .historical-preview-header:not(:disabled):hover {
+    background: var(--chrome-sunken);
   }
 
   .historical-preview-chevron {
     flex: none;
     color: var(--za-text-muted);
-    transform: rotate(-90deg);
-    transition: transform 0.15s;
+    transition: transform var(--za-motion-fast) var(--za-ease-out);
   }
 
-  .historical-preview-card[open] summary .historical-preview-chevron {
-    transform: rotate(0deg);
+  .historical-preview-card.expanded .historical-preview-chevron {
+    transform: rotate(90deg);
+  }
+
+  .historical-preview-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .historical-preview-meta {
+    flex: none;
     margin-left: auto;
     color: var(--za-text-muted);
   }
 
-  .historical-preview-card pre {
-    margin-top: 0;
-    border-right: 0;
-    border-bottom: 0;
-    border-left: 0;
-    border-radius: 0;
+  .historical-preview-body pre {
+    margin-top: var(--space-1);
   }
 
   .markdown-table-scroll {
