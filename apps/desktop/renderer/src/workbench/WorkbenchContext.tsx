@@ -19,7 +19,7 @@ export interface WorkbenchDiffTarget {
   readonly relPath?: string;
 }
 
-export const WORKBENCH_DEFAULT_WIDTH = 420;
+export const WORKBENCH_DEFAULT_WIDTH = 600;
 export const WORKBENCH_MIN_WIDTH = 320;
 export const WORKBENCH_MAX_WIDTH = 900;
 export const WORKBENCH_MAX_VW_RATIO = 0.55;
