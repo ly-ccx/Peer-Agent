@@ -133,10 +133,12 @@
   /* GoalView slot：portal target，避免内部多余 padding。
    * 外层 overflow:hidden，避免与内部投影的 .goal-panel-body 形成双层滚动嵌套
    * （双层 overflow-y:auto 会让滚轮焦点在内外层之间抢夺，导致右栏滚动卡顿）。
-   * 唯一滚动容器交给内层 .goal-panel-body（见下方 inset:0 + overflow-y:auto）。 */
+   * 唯一滚动容器交给内层 .goal-panel-body（见下方 flex:1 + min-height:0 + overflow-y:auto）。 */
   .workbench-view--goal {
     padding: 0;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
 
   /* 子视图占位骨架样式 */
@@ -177,8 +179,9 @@
 
   /* 当 Goal portal body 投影进 GoalView slot 时，铺满 */
   .workbench-view--goal > .goal-panel-body {
-    position: absolute;
-    inset: 0;
+    position: static;
+    flex: 1 1 auto;
+    min-height: 0;
     max-height: none;
     border-top: none;
     overflow-y: auto;
