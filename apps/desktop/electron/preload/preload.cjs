@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   denyLocalAction: (toolCallId) => ipcRenderer.invoke('permission:deny', { toolCallId }),
   executeClientToolCall: (call, grant) => ipcRenderer.invoke('client-tool:execute', { call, grant }),
   runHealthCheck: (toolCallId) => ipcRenderer.invoke('core:health', { toolCallId }),
+  openPath: (absPath, workspaceRoot) => ipcRenderer.invoke('shell:open-path', { absPath, workspaceRoot }),
   listShellTasks: () => ipcRenderer.invoke('shell:tasks:list'),
   stopActiveShellTask: () => ipcRenderer.invoke('shell:tasks:stop-active'),
   stopShellTask: (taskId) => ipcRenderer.invoke('shell:tasks:stop', { taskId }),

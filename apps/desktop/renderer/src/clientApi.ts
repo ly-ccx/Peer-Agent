@@ -19,6 +19,7 @@ const unavailableApi: ClientApi = {
   denyLocalAction: unavailableMethod('denyLocalAction'),
   executeClientToolCall: unavailableMethod('executeClientToolCall'),
   runHealthCheck: unavailableMethod('runHealthCheck'),
+  openPath: unavailableMethod('openPath'),
   listShellTasks: unavailableMethod('listShellTasks'),
   stopActiveShellTask: unavailableMethod('stopActiveShellTask'),
   stopShellTask: unavailableMethod('stopShellTask'),

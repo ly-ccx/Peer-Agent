@@ -88,6 +88,26 @@
     white-space: break-spaces;
   }
 
+  /* 可点击的文件路径：在普通 inline code 基础上加链接化的提示，但不喧宾夺主。 */
+  .markdown-content code.markdown-file-path {
+    color: var(--za-accent);
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--za-accent) 40%, transparent);
+    text-underline-offset: 2px;
+    transition: background 0.12s, text-decoration-color 0.12s;
+  }
+
+  .markdown-content code.markdown-file-path:hover {
+    background: color-mix(in srgb, var(--za-accent) 14%, var(--za-surface-1));
+    text-decoration-color: var(--za-accent);
+  }
+
+  .markdown-content code.markdown-file-path:focus-visible {
+    outline: 2px solid var(--za-accent);
+    outline-offset: 1px;
+  }
+
   .cloud-chat-message pre,
   .markdown-content pre {
     @apply m-0 mt-2 max-w-full overflow-auto p-2 text-[11px] leading-5;

@@ -149,6 +149,21 @@ export interface BootstrapPreloadApi {
     readonly result: ClientToolResult;
   }>;
   readonly runHealthCheck: (toolCallId: string) => Promise<ClientToolResult>;
+  /**
+   * 用系统默认方式打开指定文件/目录（点击聊天消息中的文件路径时调用）。
+   * - absPath 必须是绝对路径；相对路径需调用方先基于 workspacePath 解析。
+   * - 可选 workspaceRoot 用于越界校验：目标必须位于该根目录内。
+   * - 主进程优先 shell.openPath，失败回退 showItemInFolder。
+   */
+  readonly openPath: (
+    absPath: string,
+    workspaceRoot?: string,
+  ) => Promise<{
+    readonly ok: boolean;
+    readonly fallback?: string;
+    readonly reason?: string;
+    readonly message?: string;
+  }>;
   readonly listShellTasks: () => Promise<readonly Record<string, unknown>[]>;
   readonly stopActiveShellTask: () => Promise<Record<string, unknown>>;
   readonly stopShellTask: (taskId: string) => Promise<Record<string, unknown>>;

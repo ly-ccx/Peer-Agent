@@ -1,6 +1,6 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createCapabilityRegistry } from './capability-registry.mjs';
@@ -727,6 +727,56 @@ ipcMain.handle('workspace:remove', (_, { path: wsPath }) => {
 ipcMain.handle('workspace:info', (_, { path: wsPath }) => {
   if (!wsPath) return null;
   return readProjectIndex({ workspaceRoot: wsPath })?.[0] || { name: path.basename(wsPath), absolutePath: wsPath };
+});
+
+// 打开渲染层点击的文件路径：优先用系统默认程序打开，失败回退到在文件管理器中定位。
+// 入参 absPath 必须是绝对路径（相对路径由渲染层基于 workspacePath 解析后再传入）。
+// 做基本的存在性校验；可选 workspaceRoot 用于越界校验，越界则拒绝。
+ipcMain.handle('shell:open-path', async (_event, { absPath, workspaceRoot } = {}) => {
+  try {
+    if (!absPath || typeof absPath !== 'string') {
+      return { ok: false, reason: 'invalid_path' };
+    }
+    const target = path.normalize(absPath);
+    if (!path.isAbsolute(target)) {
+      return { ok: false, reason: 'not_absolute' };
+    }
+    // 越界校验：若提供了 workspaceRoot，目标必须位于其内部。
+    if (workspaceRoot && typeof workspaceRoot === 'string') {
+      const root = path.resolve(workspaceRoot);
+      const rel = path.relative(root, target);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) {
+        return { ok: false, reason: 'out_of_workspace' };
+      }
+    }
+    if (!existsSync(target)) {
+      return { ok: false, reason: 'not_found' };
+    }
+    let isDirectory = false;
+    try {
+      isDirectory = statSync(target).isDirectory();
+    } catch {
+      isDirectory = false;
+    }
+    // 目录直接在文件管理器中打开；文件优先用默认程序打开。
+    if (isDirectory) {
+      const err = await shell.openPath(target);
+      if (err) {
+        shell.showItemInFolder(target);
+        return { ok: true, fallback: 'show-in-folder' };
+      }
+      return { ok: true };
+    }
+    const err = await shell.openPath(target);
+    if (err) {
+      // openPath 失败（无关联程序等）：回退到在文件管理器中定位高亮。
+      shell.showItemInFolder(target);
+      return { ok: true, fallback: 'show-in-folder' };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: 'error', message: err?.message || String(err) };
+  }
 });
 
 // ── Conversations ──
