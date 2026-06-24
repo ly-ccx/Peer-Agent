@@ -76,6 +76,7 @@ import type {
   ToolProgress,
 } from '../state/types';
 import { MarkdownMessage } from './markdown/MarkdownMessage';
+import { WorkspacePathContext } from './markdown/InlineMarkdown';
 import { AssistantContent, CompactionSummaryCard } from './thread/AssistantContent';
 import { TokenUsageDisplay } from './thread/TokenUsageDisplay';
 import { AttachmentStrip, ImagePreviewOverlay } from './thread/AttachmentStrip';
@@ -1083,6 +1084,13 @@ export function ChatSurface({
     setWorkbenchTab('goal');
     if (!workbenchOpen) setWorkbenchOpen(true);
   }, [workbenchOpen, workbenchActiveTab, setWorkbenchOpen, setWorkbenchTab]);
+  // 仅当「本会话内真正新建了计划」（plans 0→N，由 GoalPlanPanel 的广播 reload 路径判定）
+  // 时自动展开工作台并切到 Goal tab。切换到一个本来就有计划的会话不会触发，
+  // 因为 GoalPlanPanel 的 load 路径只刷新基线、不回调。
+  const handleGoalPlanCreated = useCallback(() => {
+    setWorkbenchTab('goal');
+    setWorkbenchOpen(true);
+  }, [setWorkbenchTab, setWorkbenchOpen]);
   useEffect(() => {
     if (mode !== 'goal') setHasGoalPlan(false);
   }, [mode, setHasGoalPlan]);
@@ -1111,6 +1119,7 @@ export function ChatSurface({
   }
 
   return (
+    <WorkspacePathContext.Provider value={workspacePath ?? null}>
     <InteractionContext.Provider value={{ onSelectOption: selectInteractionOption, isStreaming }}>
     <div className="chat-workspace">
     <div className="chat-surface">
@@ -1326,7 +1335,7 @@ export function ChatSurface({
       ) : null}
 
       <div className="chat-composer-wrap">
-        <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onRequestHostFocus={handleGoalRequestFocus} />
+        <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onGoalPlanCreated={handleGoalPlanCreated} onRequestHostFocus={handleGoalRequestFocus} />
         <PermissionGateStrip
           pendingCalls={pendingPermissionCalls}
           onApprove={approvePendingPermissionCall}
@@ -1534,5 +1543,6 @@ export function ChatSurface({
     </div>
     </div>
     </InteractionContext.Provider>
+    </WorkspacePathContext.Provider>
   );
 }

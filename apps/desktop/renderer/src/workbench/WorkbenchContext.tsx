@@ -138,18 +138,13 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     setSidebarAutoCollapsedState((prev) => (prev === collapsed ? prev : collapsed));
   }, []);
 
-  // 自动展开 + 切到 Goal tab：仅在 GoalPlan 从无到有的瞬间触发一次。
-  const lastHasGoalPlanRef = useRef<boolean>(false);
-  useEffect(() => {
-    if (hasGoalPlan && !lastHasGoalPlanRef.current && conversationId) {
-      lastHasGoalPlanRef.current = true;
-      setOpenState(true);
-      setActiveTabMap((prev) => ({ ...prev, [conversationId]: 'goal' }));
-      schedulePersist();
-    } else if (!hasGoalPlan) {
-      lastHasGoalPlanRef.current = false;
-    }
-  }, [hasGoalPlan, conversationId, schedulePersist]);
+  // 注：「自动展开 + 切到 Goal tab」的逻辑已移出本 Provider。
+  // 旧实现基于 hasGoalPlan 的 false→true 跳变触发，但它无法区分
+  // 「当前会话内真正新建计划」与「切换到一个本来就有计划的会话」——
+  // 后者在切会话时同样会产生 false→true 跳变，导致误自动弹开侧栏。
+  // 现改由 GoalPlanPanel 仅在广播驱动的 reload 路径检测 plans 0→N（真正新建），
+  // 经 onGoalPlanCreated 回调到 ChatSurface 再调用 setOpen/setActiveTab。
+  // hasGoalPlan 状态本身保留，仍供其它判断使用。
 
   // ⌘\ 全局快捷键
   useEffect(() => {

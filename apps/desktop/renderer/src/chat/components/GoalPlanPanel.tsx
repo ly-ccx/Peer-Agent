@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactElement } from 'react';
 import type {
@@ -51,6 +51,13 @@ interface GoalPlanPanelProps {
    * 用于让右侧 Workbench 切换 Goal tab 的可点状态、并在 0→N 瞬间自动展开 + 选中 Goal。
    */
   readonly onPlansCountChange?: (count: number) => void;
+  /**
+   * 「本会话内真正新建了计划」时触发（plans 由 0→N，且只在 goalPlans:changed 广播驱动的
+   * reload 路径检测；切换会话的 load 路径只刷新基线、绝不触发）。
+   * 由 ChatSurface 接住用于自动展开 Workbench 并切到 Goal tab。
+   * 这样「切到一个本来就有计划的会话」不会被误判为新建而自动弹开侧栏。
+   */
+  readonly onGoalPlanCreated?: () => void;
   /**
    * docked 灯条被点击。当面板已迁到 Workbench 时，由上层负责展开 Workbench 并切到 Goal tab。
    */
@@ -541,7 +548,7 @@ function PlanCard({ plan, defaultExpanded, isZh, isStreaming, busy, isMain, onDe
 // 再卸载，避免「内容瞬间消失、空壳再慢慢缩」的割裂感。
 const GOAL_PANEL_MOTION_MS = 200;
 
-export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelContainer, onPlansCountChange, onRequestHostFocus }: GoalPlanPanelProps): ReactElement | null {
+export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelContainer, onPlansCountChange, onGoalPlanCreated, onRequestHostFocus }: GoalPlanPanelProps): ReactElement | null {
   const [plans, setPlans] = useState<readonly GoalPlan[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -551,6 +558,12 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   useEffect(() => {
     if (onPlansCountChange) onPlansCountChange(plans.length);
   }, [plans.length, onPlansCountChange]);
+
+  // 「真正新建计划」检测基线：记录上一次已知的本会话计划数。
+  // - load（切换会话）路径：只把基线刷成新会话的真实数量，绝不触发 onGoalPlanCreated；
+  // - reload（goalPlans:changed 广播）路径：若基线为 0 且新数量 > 0，判定为本会话内真正新建，触发一次。
+  // 切换会话时一并重置为 0（见下方 load effect），避免跨会话的脏基线导致误判。
+  const prevPlanCountRef = useRef<number>(0);
 
   // 重档过渡：bodyMounted 控制右栏 body 是否仍挂载（收起时延迟卸载，让收缩动画播完）；
   // closing 标记正处于收起动画中，用于给 body 加退场样式、给右栏容器加 data-closing 提前收宽。
@@ -570,6 +583,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   const reload = useCallback(async () => {
     if (normalizedConversationId === null) {
       setPlans([]);
+      prevPlanCountRef.current = 0;
       setLoading(false);
       setError(null);
       return;
@@ -583,20 +597,32 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         (plan) => normalizeConversationId(plan.conversationId) === normalizedConversationId
           && plan.status !== 'cancelled',
       );
+      // 仅 reload（广播驱动，同一会话内的实时变更）路径检测「真正新建」：
+      // 基线为 0 且新数量 > 0 → 本会话内刚创建了第一个计划，触发一次自动展开。
+      // 切换会话由下方 load effect 处理（只刷基线、不触发），故这里不会被切会话误触。
+      if (prevPlanCountRef.current === 0 && scopedResult.length > 0) {
+        onGoalPlanCreated?.();
+      }
+      prevPlanCountRef.current = scopedResult.length;
       setPlans(scopedResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : isZh ? '加载计划失败' : 'Failed to load plans');
     } finally {
       setLoading(false);
     }
-  }, [normalizedConversationId, isZh]);
+  }, [normalizedConversationId, isZh, onGoalPlanCreated]);
 
   useEffect(() => {
     let cancelled = false;
 
+    // 切换会话：先把基线重置为 0，避免上一个会话的脏基线影响判断；
+    // 加载完成后只把基线刷成新会话的真实数量，绝不触发 onGoalPlanCreated。
+    // 这是「切到一个本来就有计划的会话不自动弹开侧栏」的关键所在。
+    prevPlanCountRef.current = 0;
     const load = async () => {
       if (normalizedConversationId === null) {
         setPlans([]);
+        prevPlanCountRef.current = 0;
         setLoading(false);
         setError(null);
         return;
@@ -611,6 +637,8 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
           (plan) => normalizeConversationId(plan.conversationId) === normalizedConversationId
             && plan.status !== 'cancelled',
         );
+        // load 路径只刷新基线，不触发新建回调（切换会话不应被视为「新建计划」）。
+        prevPlanCountRef.current = scopedResult.length;
         setPlans(scopedResult);
       } catch (err) {
         if (!cancelled) {
