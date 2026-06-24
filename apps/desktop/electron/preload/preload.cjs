@@ -174,6 +174,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   llmListChannels: () => ipcRenderer.invoke('llm:channels:list'),
   llmAddProvider: (config) => ipcRenderer.invoke('llm:add', config),
   llmUpdateProvider: (params) => ipcRenderer.invoke('llm:update', params),
+  llmDuplicateProvider: (params) => ipcRenderer.invoke('llm:duplicate', params),
   llmRemoveProvider: (params) => ipcRenderer.invoke('llm:remove', params),
   llmSetDefault: (params) => ipcRenderer.invoke('llm:set-default', params),
   llmTestConnection: (params) => ipcRenderer.invoke('llm:test', params),

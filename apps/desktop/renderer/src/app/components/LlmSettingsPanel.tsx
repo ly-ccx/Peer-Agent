@@ -361,6 +361,7 @@ export function LlmSettingsPanel({
   const [testResults, setTestResults] = useState<Record<string, LlmProviderTestResult>>({});
   const [testingId, setTestingId] = useState<string | null>(null);
   const [oauthBusyId, setOauthBusyId] = useState<string | null>(null);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   // ADR 28(方案 B): 订阅 provider 的模型清单与加载态(按 provider id 维度)。
   const [modelLists, setModelLists] = useState<Record<string, readonly LlmModelInfo[]>>({});
   const [modelLoadingId, setModelLoadingId] = useState<string | null>(null);
@@ -557,6 +558,19 @@ export function LlmSettingsPanel({
     await refresh();
   };
 
+  // 复制一个非订阅 provider，副本由 main 进程生成（新 id、名称追加「副本」/「(Copy)」、密钥一并复制）。
+  const handleDuplicate = async (id: string) => {
+    setDuplicatingId(id);
+    try {
+      await clientApi.llmDuplicateProvider({ id });
+      await refresh();
+    } catch (err: unknown) {
+      setTestResults((prev) => ({ ...prev, [id]: { success: false, error: err instanceof Error ? err.message : 'Duplicate failed' } }));
+    } finally {
+      setDuplicatingId(null);
+    }
+  };
+
   const handleSetDefault = async (id: string) => {
     await clientApi.llmSetDefault({ id });
     await refresh();
@@ -698,6 +712,11 @@ export function LlmSettingsPanel({
               <button type="button" onClick={() => handleTest(p.id)} disabled={testingId === p.id}>
                 {testingId === p.id ? '...' : (i18n.locale === 'zh-CN' ? '测试' : 'Test')}
               </button>
+              {!isOAuthMethod(p.authMethod) ? (
+                <button type="button" onClick={() => handleDuplicate(p.id)} disabled={duplicatingId === p.id}>
+                  {duplicatingId === p.id ? '...' : (i18n.locale === 'zh-CN' ? '复制' : 'Duplicate')}
+                </button>
+              ) : null}
               <button type="button" onClick={() => openEdit(p)}>
                 {i18n.locale === 'zh-CN' ? '编辑' : 'Edit'}
               </button>

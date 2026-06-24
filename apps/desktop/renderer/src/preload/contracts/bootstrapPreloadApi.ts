@@ -369,6 +369,8 @@ export interface BootstrapPreloadApi {
   readonly llmListChannels: () => Promise<readonly LlmChannelDescriptor[]>;
   readonly llmAddProvider: (config: Record<string, unknown>) => Promise<LlmProviderConfigView>;
   readonly llmUpdateProvider: (params: { id: string; [key: string]: unknown }) => Promise<LlmProviderConfigView>;
+  // 复制一个已有 provider（订阅类型不支持），返回复制后的完整列表。
+  readonly llmDuplicateProvider: (params: { id: string }) => Promise<readonly LlmProviderConfigView[]>;
   readonly llmRemoveProvider: (params: { id: string }) => Promise<readonly LlmProviderConfigView[]>;
   readonly llmSetDefault: (params: { id: string }) => Promise<readonly LlmProviderConfigView[]>;
   readonly llmTestConnection: (params: { id: string }) => Promise<LlmProviderTestResult>;

@@ -52,6 +52,33 @@ function maskApiKey(key) {
   return key.slice(0, 4) + '...' + key.slice(-4);
 }
 
+// 为复制出的副本生成不重名的名称：中文用「副本」后缀，英文用「(Copy)」后缀，
+// 已存在同名时智能追加序号(副本、副本 2、副本 3…)。复制副本时先剥离已有后缀，
+// 避免「x 副本 副本」叠加。
+function nextCopyName(rawName, existingNames) {
+  const taken = new Set((existingNames || []).map((n) => String(n)));
+  const name = String(rawName || '').trim() || 'Untitled';
+  const isCJK = /[\u4e00-\u9fff]/.test(name);
+  if (isCJK) {
+    const base = name.replace(/\s*副本(\s*\d+)?$/, '').trim() || name;
+    let candidate = `${base} 副本`;
+    let n = 2;
+    while (taken.has(candidate)) {
+      candidate = `${base} 副本 ${n}`;
+      n += 1;
+    }
+    return candidate;
+  }
+  const base = name.replace(/\s*\(Copy(\s*\d+)?\)$/i, '').trim() || name;
+  let candidate = `${base} (Copy)`;
+  let n = 2;
+  while (taken.has(candidate)) {
+    candidate = `${base} (Copy ${n})`;
+    n += 1;
+  }
+  return candidate;
+}
+
 const PROVIDER_DEFAULTS = {
   openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o' },
   anthropic: { baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-20250514' },
@@ -415,6 +442,33 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     return items.map(toView);
   }
 
+  // 复制一个已有 provider，生成可独立编辑的副本。
+  // 订阅(OAuth)类型不允许复制：其身份绑定登录态/token，复制无意义且有安全风险。
+  // 副本：新 id、不继承默认标记、不复制 OAuth token，名称智能去重。
+  // apiKey 按产品决策随副本一起复制(密文深拷贝)，副本开箱即用。
+  function duplicateProvider(id) {
+    const items = readAll();
+    const source = items.find((i) => i.id === id);
+    if (!source) throw new Error(`Provider ${id} not found`);
+    if (source.authMethod === 'oauth_chatgpt' || source.authMethod === 'oauth_google') {
+      throw new Error('Subscription providers cannot be duplicated');
+    }
+    const copy = {
+      ...source,
+      id: randomUUID(),
+      name: nextCopyName(source.name, items.map((i) => i.name)),
+      apiKey: source.apiKey ? { ...source.apiKey } : encrypt(''),
+      oauthClientSecret: source.oauthClientSecret ? { ...source.oauthClientSecret } : encrypt(''),
+      oauthTokens: encrypt(''),
+      isDefault: false,
+      enabled: true,
+      createdAt: new Date().toISOString(),
+    };
+    items.push(copy);
+    writeAll(items);
+    return toView(copy);
+  }
+
   function getDecryptedApiKey(id) {
     const items = readAll();
     const item = items.find((i) => i.id === id);
@@ -480,7 +534,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     }
   }
 
-  return { listProviders, addProvider, updateProvider, removeProvider, setDefault, getDecryptedApiKey, getCredential, setOAuthTokens, testConnection };
+  return { listProviders, addProvider, updateProvider, duplicateProvider, removeProvider, setDefault, getDecryptedApiKey, getCredential, setOAuthTokens, testConnection };
 }
 
 async function testOpenAI(resolved, model, start) {

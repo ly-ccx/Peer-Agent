@@ -1206,6 +1206,10 @@ ipcMain.handle('llm:update', (_, { id, ...patch }) => {
   }
   return updated;
 });
+ipcMain.handle('llm:duplicate', (_, { id }) => {
+  llmConfigStore.duplicateProvider(id);
+  return llmConfigStore.listProviders();
+});
 ipcMain.handle('llm:remove', (_, { id }) => {
   const beforeDefault = llmConfigStore.listProviders().find((provider) => provider.isDefault) ?? null;
   const providers = llmConfigStore.removeProvider(id);

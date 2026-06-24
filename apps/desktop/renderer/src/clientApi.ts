@@ -115,6 +115,7 @@ const unavailableApi: ClientApi = {
   llmListChannels: unavailableMethod('llmListChannels'),
   llmAddProvider: unavailableMethod('llmAddProvider'),
   llmUpdateProvider: unavailableMethod('llmUpdateProvider'),
+  llmDuplicateProvider: unavailableMethod('llmDuplicateProvider'),
   llmRemoveProvider: unavailableMethod('llmRemoveProvider'),
   llmSetDefault: unavailableMethod('llmSetDefault'),
   llmTestConnection: unavailableMethod('llmTestConnection'),
