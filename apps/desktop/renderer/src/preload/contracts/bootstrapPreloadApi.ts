@@ -174,6 +174,7 @@ export interface BootstrapPreloadApi {
   readonly gitDiff: (
     absPath: string,
     workspaceRoot?: string,
+    relPath?: string,
   ) => Promise<{
     readonly ok: boolean;
     readonly status:
@@ -188,6 +189,11 @@ export interface BootstrapPreloadApi {
       | 'error';
     readonly diffText: string;
     readonly error?: string;
+    /**
+     * 当 absPath 在当前 workspace 找不到、但通过 relPath 在其他已知 workspace 命中时，
+     * 标注实际命中的仓库根目录，便于在 UI 上提示「已在其他仓库找到该文件」。
+     */
+    readonly resolvedFrom?: string;
   }>;
   readonly listShellTasks: () => Promise<readonly Record<string, unknown>[]>;
   readonly stopActiveShellTask: () => Promise<Record<string, unknown>>;

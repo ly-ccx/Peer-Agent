@@ -15,6 +15,8 @@ export type WorkbenchTabId = 'goal' | 'terminal' | 'browser' | 'files' | 'diff';
 export interface WorkbenchDiffTarget {
   readonly absPath: string;
   readonly workspaceRoot?: string;
+  /** 原始相对路径（解析前），用于主进程跨已知 workspace 回退查找。 */
+  readonly relPath?: string;
 }
 
 export const WORKBENCH_DEFAULT_WIDTH = 420;
@@ -47,7 +49,7 @@ interface WorkbenchActions {
   registerGoalSlot: (el: HTMLElement | null) => void;
   setHasGoalPlan: (has: boolean) => void;
   setSidebarAutoCollapsed: (collapsed: boolean) => void;
-  openDiff: (absPath: string, workspaceRoot?: string) => void;
+  openDiff: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
 }
 
 type WorkbenchContextValue = WorkbenchState & WorkbenchActions & { conversationId: string | null };
@@ -140,8 +142,8 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     schedulePersist();
   }, [conversationId, schedulePersist]);
 
-  const openDiff = useCallback((absPath: string, workspaceRoot?: string) => {
-    setDiffTarget({ absPath, workspaceRoot });
+  const openDiff = useCallback((absPath: string, workspaceRoot?: string, relPath?: string) => {
+    setDiffTarget({ absPath, workspaceRoot, relPath });
     const key = conversationId ?? '__none';
     setActiveTabMap((prev) => (prev[key] === 'diff' ? prev : { ...prev, [key]: 'diff' }));
     setOpenState(true);

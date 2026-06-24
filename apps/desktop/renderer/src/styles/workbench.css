@@ -256,6 +256,28 @@
     padding: 24px 16px;
     text-align: center;
   }
+  .workbench-diff-path {
+    margin-top: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    word-break: break-all;
+    opacity: 0.75;
+  }
+  .workbench-diff-hint {
+    margin-top: 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    text-align: left;
+    opacity: 0.8;
+  }
+  .workbench-diff-resolved {
+    padding: 6px 12px;
+    font-size: 12px;
+    line-height: 1.4;
+    word-break: break-all;
+    border-bottom: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.2));
+    opacity: 0.85;
+  }
   .workbench-diff-pre {
     margin: 0;
     padding: 8px 0;

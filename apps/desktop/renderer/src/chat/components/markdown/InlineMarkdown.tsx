@@ -106,7 +106,10 @@ function FilePathCode({ raw }: { raw: string }) {
   const handleOpen = () => {
     // 优先：打开右侧 Workbench 的 Diff 视图展示该文件的 git diff。
     if (workbench) {
-      workbench.openDiff(absPath, workspacePath ?? undefined);
+      // 透传原始相对路径：当 absPath 在当前 workspace 解析不到时，
+      // 主进程可用它跨已知 workspace 回退查找（跨仓库引用场景）。
+      const relPath = parsed.isAbsolute ? undefined : parsed.path;
+      workbench.openDiff(absPath, workspacePath ?? undefined, relPath);
       return;
     }
     // 回退：无 Workbench 上下文时，用系统默认程序打开文件。

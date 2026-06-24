@@ -73,7 +73,7 @@ export function DiffView({ isZh }: DiffViewProps) {
     }
     setState({ loading: true, result: null, error: null });
     try {
-      const result = await clientApi.gitDiff(diffTarget.absPath, diffTarget.workspaceRoot);
+      const result = await clientApi.gitDiff(diffTarget.absPath, diffTarget.workspaceRoot, diffTarget.relPath);
       setState({ loading: false, result, error: null });
     } catch (err) {
       setState({
@@ -146,6 +146,13 @@ export function DiffView({ isZh }: DiffViewProps) {
       </div>
 
       <div className="workbench-diff-body">
+        {result && result.ok && result.resolvedFrom ? (
+          <div className="workbench-diff-resolved">
+            {isZh
+              ? `已在其他仓库找到该文件：${result.resolvedFrom}`
+              : `Found this file in another repository: ${result.resolvedFrom}`}
+          </div>
+        ) : null}
         {state.loading ? (
           <div className="workbench-empty-hint workbench-diff-status">
             {isZh ? '正在加载 diff…' : 'Loading diff…'}
@@ -157,13 +164,26 @@ export function DiffView({ isZh }: DiffViewProps) {
         ) : !result ? null : !result.ok ? (
           <div className="workbench-empty-hint workbench-diff-status">
             {result.status === 'not_git_repo' ? (
-              <div>
-                {isZh
-                  ? '该文件不在 git 仓库中，无法显示 diff。'
-                  : 'This file is not inside a git repository.'}
-              </div>
+              <>
+                <div>
+                  {isZh
+                    ? '该文件不在 git 仓库中，无法显示 diff。'
+                    : 'This file is not inside a git repository.'}
+                </div>
+                <div className="workbench-diff-path">{diffTarget.absPath}</div>
+              </>
             ) : result.status === 'not_found' ? (
-              <div>{isZh ? '文件不存在。' : 'File not found.'}</div>
+              <>
+                <div>{isZh ? '文件不存在。' : 'File not found.'}</div>
+                <div className="workbench-diff-path">{diffTarget.absPath}</div>
+                {diffTarget.relPath ? (
+                  <div className="workbench-diff-hint">
+                    {isZh
+                      ? '可能是跨仓库的相对路径：上面的绝对路径是按当前会话工作区解析出来的，但该文件可能在另一个仓库里。请确认会话工作区是否与文件所属仓库一致，或在引用时使用绝对路径。'
+                      : 'This may be a cross-repository relative path: the absolute path above was resolved against the current conversation workspace, but the file may live in another repository. Check that the workspace matches, or use an absolute path.'}
+                  </div>
+                ) : null}
+              </>
             ) : (
               <div>
                 {isZh

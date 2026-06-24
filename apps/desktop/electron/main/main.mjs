@@ -787,21 +787,51 @@ ipcMain.handle('shell:open-path', async (_event, { absPath, workspaceRoot } = {}
 // 入参 absPath 必须是绝对路径；workspaceRoot 为 git 仓库根（不传则用 absPath 所在目录）。
 // 策略：优先 working tree diff；为空时回退 staged diff；仍为空且文件被跟踪时回退 HEAD 对比；
 // 未跟踪文件用 git diff --no-index 与 /dev/null 对比。返回 { ok, diffText, status, error? }。
-ipcMain.handle('git:diff', async (_event, { absPath, workspaceRoot } = {}) => {
+ipcMain.handle('git:diff', async (_event, { absPath, workspaceRoot, relPath } = {}) => {
   try {
     if (!absPath || typeof absPath !== 'string') {
       return { ok: false, status: 'invalid_path', diffText: '', error: 'invalid_path' };
     }
-    const target = path.normalize(absPath);
+    let target = path.normalize(absPath);
     if (!path.isAbsolute(target)) {
       return { ok: false, status: 'invalid_path', diffText: '', error: 'not_absolute' };
     }
+    // 跨仓库回退：absPath 在当前 workspace 找不到，但调用方提供了原始相对路径时，
+    // 遍历所有已知 workspace 拼 relPath 查找，命中则改用该路径并标注实际命中的仓库。
+    let resolvedFrom;
     if (!existsSync(target)) {
-      return { ok: false, status: 'not_found', diffText: '', error: 'file_not_found' };
+      let recovered = false;
+      const cleanRel = typeof relPath === 'string' && relPath.trim()
+        ? relPath.replace(/^[/\\]+/, '').replace(/^(\.\.?[/\\])+/, '')
+        : '';
+      if (cleanRel) {
+        const all = settingsStore.getAll();
+        const candidates = [
+          ...(all.workspaces || []).map((w) => (w && typeof w === 'object' ? w.path : w)),
+          all.activeWorkspace,
+        ].filter((p) => typeof p === 'string' && p);
+        const seen = new Set();
+        for (const ws of candidates) {
+          if (seen.has(ws)) continue;
+          seen.add(ws);
+          const candidate = path.normalize(path.join(ws, cleanRel));
+          if (existsSync(candidate)) {
+            target = candidate;
+            resolvedFrom = ws;
+            recovered = true;
+            break;
+          }
+        }
+      }
+      if (!recovered) {
+        return { ok: false, status: 'not_found', diffText: '', error: 'file_not_found' };
+      }
     }
-    const cwd = workspaceRoot && typeof workspaceRoot === 'string' && existsSync(workspaceRoot)
-      ? workspaceRoot
-      : path.dirname(target);
+    const cwd = resolvedFrom
+      ? resolvedFrom
+      : (workspaceRoot && typeof workspaceRoot === 'string' && existsSync(workspaceRoot)
+        ? workspaceRoot
+        : path.dirname(target));
 
     // 解析仓库根，确认是 git 仓库。
     let repoRoot;
@@ -843,29 +873,29 @@ ipcMain.handle('git:diff', async (_event, { absPath, workspaceRoot } = {}) => {
     if (!tracked) {
       // 未跟踪文件：与空文件对比，展示为全新增内容。
       const diffText = await runGit(['diff', '--no-index', '--', '/dev/null', target]);
-      return { ok: true, status: diffText.trim() ? 'untracked' : 'no_changes', diffText };
+      return { ok: true, status: diffText.trim() ? 'untracked' : 'no_changes', diffText, resolvedFrom };
     }
 
     // 1) working tree 改动
     let diffText = await runGit(['diff', '--', repoRelPath]);
     if (diffText.trim()) {
-      return { ok: true, status: 'modified', diffText };
+      return { ok: true, status: 'modified', diffText, resolvedFrom };
     }
     // 2) 已暂存改动
     diffText = await runGit(['diff', '--staged', '--', repoRelPath]);
     if (diffText.trim()) {
-      return { ok: true, status: 'staged', diffText };
+      return { ok: true, status: 'staged', diffText, resolvedFrom };
     }
     // 3) 无未提交改动：回退展示与上一次提交（HEAD~1）的对比，便于查看最近一次改动。
     try {
       diffText = await runGit(['diff', 'HEAD~1', 'HEAD', '--', repoRelPath]);
       if (diffText.trim()) {
-        return { ok: true, status: 'last_commit', diffText };
+        return { ok: true, status: 'last_commit', diffText, resolvedFrom };
       }
     } catch {
       // 仓库可能只有一次提交或无 HEAD~1，忽略。
     }
-    return { ok: true, status: 'no_changes', diffText: '' };
+    return { ok: true, status: 'no_changes', diffText: '', resolvedFrom };
   } catch (err) {
     return { ok: false, status: 'error', diffText: '', error: err?.message || String(err) };
   }
