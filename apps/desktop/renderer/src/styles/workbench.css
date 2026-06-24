@@ -1,0 +1,231 @@
+/* Workbench Panel · Frost
+ * 右侧可展开/收起 + 可拖拽宽度的工作台。当前承载 Goal/Terminal/Browser/Files 四个 tab。
+ */
+
+@layer components {
+  .workbench-panel {
+    position: relative;
+    display: flex;
+    flex-direction: row;
+    height: 100%;
+    min-height: 0;
+    background: var(--za-surface-1);
+    border-left: 1px solid var(--za-line);
+    overflow: hidden;
+    transition: width var(--za-motion-medium, 200ms) var(--za-ease-out, ease);
+    -webkit-app-region: no-drag;
+  }
+
+  .workbench-panel:not(.workbench-panel--open) {
+    width: 0 !important;
+    border-left: none;
+  }
+
+  /* 拖拽分隔线：6px hit area，hover 时露出 2px 主色细条 */
+  .workbench-resizer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 5;
+    background: transparent;
+    transition: background var(--za-motion-fast);
+  }
+  .workbench-resizer::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 2px;
+    width: 2px;
+    height: 100%;
+    background: transparent;
+    transition: background var(--za-motion-fast);
+  }
+  .workbench-resizer:hover::after,
+  .workbench-resizer:focus-visible::after {
+    background: var(--za-focus, rgba(59, 127, 171, 0.5));
+  }
+  .workbench-resizer:focus-visible {
+    outline: none;
+  }
+
+  /* TabRail：左侧 56px 竖向 tab 列 */
+  .workbench-tab-rail {
+    flex: 0 0 56px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 60px 4px 8px;
+    background: var(--za-sidebar-bg);
+    border-right: 1px solid var(--chrome-hairline);
+  }
+
+  .workbench-tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    width: 48px;
+    height: 56px;
+    padding: 6px 4px;
+    border: none;
+    border-radius: var(--radius-frost-sm, 6px);
+    background: transparent;
+    color: var(--graphite-mute);
+    cursor: pointer;
+    transition: background var(--za-motion-fast), color var(--za-motion-fast);
+  }
+
+  .workbench-tab:hover:not(.workbench-tab--disabled) {
+    background: var(--chrome-hover);
+    color: var(--graphite-base);
+  }
+
+  .workbench-tab--active {
+    background: var(--za-active, rgba(0, 0, 0, 0.06));
+    color: var(--graphite-base);
+  }
+
+  .workbench-tab--disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .workbench-tab-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .workbench-tab-label {
+    font-size: 10.5px;
+    line-height: 1;
+    letter-spacing: 0.02em;
+  }
+
+  /* ViewSlot：right pane，承载子视图。多个视图同时挂载，靠 data-active 显隐。 */
+  .workbench-view-slot {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+    padding-top: 52px;
+  }
+
+  .workbench-view {
+    position: absolute;
+    inset: 52px 0 0 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .workbench-view[data-active='true'] {
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  /* GoalView slot：portal target，避免内部多余 padding。
+   * 外层 overflow:hidden，避免与内部投影的 .goal-panel-body 形成双层滚动嵌套
+   * （双层 overflow-y:auto 会让滚轮焦点在内外层之间抢夺，导致右栏滚动卡顿）。
+   * 唯一滚动容器交给内层 .goal-panel-body（见下方 inset:0 + overflow-y:auto）。 */
+  .workbench-view--goal {
+    padding: 0;
+    overflow: hidden;
+  }
+
+  /* 子视图占位骨架样式 */
+  .workbench-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 32px 24px;
+    height: 100%;
+    text-align: center;
+  }
+  .workbench-empty-title {
+    font-family: var(--font-serif-zh, inherit);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink-base, var(--za-text));
+  }
+  .workbench-empty-hint {
+    margin: 0;
+    max-width: 280px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--ink-fade, var(--za-text-faint));
+  }
+  .workbench-empty-meta {
+    max-width: 280px;
+    padding: 4px 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--za-text-muted);
+    background: var(--za-surface-1);
+    border: 1px solid var(--za-line);
+    border-radius: var(--za-radius-sm);
+    word-break: break-all;
+  }
+
+  /* 当 Goal portal body 投影进 GoalView slot 时，铺满 */
+  .workbench-view--goal > .goal-panel-body {
+    position: absolute;
+    inset: 0;
+    max-height: none;
+    border-top: none;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .workbench-panel,
+    .app-layout {
+      transition: none;
+    }
+  }
+}
+
+@layer components {
+  /* WorkbenchToggle：与 ChatHeader 内 Find 按钮同规格 */
+  .workbench-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: var(--radius-frost-sm, 6px);
+    background: transparent;
+    color: var(--graphite-mute);
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+    transition: background var(--za-motion-fast), color var(--za-motion-fast);
+  }
+  .workbench-toggle:hover {
+    background: var(--chrome-hover);
+    color: var(--graphite-base);
+  }
+  .workbench-toggle--active {
+    background: var(--za-active, rgba(0, 0, 0, 0.06));
+    color: var(--graphite-base);
+  }
+  .workbench-toggle:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--za-focus);
+  }
+
+  .header-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    -webkit-app-region: no-drag;
+  }
+}

@@ -46,6 +46,15 @@ interface GoalPlanPanelProps {
    * 缺省（null/未注入）时回退为「就地内联展开」的旧行为，保持向后兼容与可测试性。
    */
   readonly sidePanelContainer?: HTMLElement | null;
+  /**
+   * 计划数量变更时通知（包括从 0 到 N、N 到 0）。
+   * 用于让右侧 Workbench 切换 Goal tab 的可点状态、并在 0→N 瞬间自动展开 + 选中 Goal。
+   */
+  readonly onPlansCountChange?: (count: number) => void;
+  /**
+   * docked 灯条被点击。当面板已迁到 Workbench 时，由上层负责展开 Workbench 并切到 Goal tab。
+   */
+  readonly onRequestHostFocus?: () => void;
 }
 
 function statusLabel(status: ExecutionStatus, isZh: boolean): string {
@@ -175,25 +184,74 @@ const RUNNER_TERMINAL_STATUSES: ReadonlySet<GoalRunnerStatus> = new Set([
 
 function TaskNode({ task, depth, isZh }: { task: GoalTask; depth: number; isZh: boolean }): ReactElement {
   const hasEvidence = task.evidenceRefs.length > 0;
+  const [expanded, setExpanded] = useState(false);
+  const evidenceCount = task.evidenceRefs.length;
+  const summaryText = task.failureReason
+    ? task.failureReason
+    : task.blockedReason
+      ? task.blockedReason
+      : task.status === 'completed' && hasEvidence
+        ? isZh
+          ? `证据 ${evidenceCount} 条`
+          : `${evidenceCount} evidence`
+        : null;
+  const canExpand =
+    !!task.failureReason ||
+    !!task.blockedReason ||
+    (task.status === 'completed' && hasEvidence) ||
+    (task.subtasks?.length ?? 0) > 0;
   return (
-    <li className="goal-task" style={{ marginInlineStart: depth * 16 }}>
-      <div className="goal-task-row">
+    <li
+      className={`goal-task goal-task--card${expanded ? ' goal-task--expanded' : ''}`}
+      style={{ marginInlineStart: depth * 12 }}
+    >
+      <button
+        type="button"
+        className="goal-task-head"
+        onClick={() => canExpand && setExpanded((v) => !v)}
+        aria-expanded={canExpand ? expanded : undefined}
+        disabled={!canExpand}
+      >
         <span className={statusClass(task.status)} aria-label={statusLabel(task.status, isZh)}>
           {statusLabel(task.status, isZh)}
         </span>
         <span className="goal-task-title">{task.title}</span>
-        {/* 完成状态以 Evidence 为准：仅当任务 completed 时提示其证据数量，面板不提供手动勾选 */}
-        {task.status === 'completed' && hasEvidence ? (
-          <span className="goal-task-evidence" title={task.evidenceRefs.join(', ')}>
-            {isZh ? `证据 ×${task.evidenceRefs.length}` : `evidence ×${task.evidenceRefs.length}`}
+        {canExpand ? (
+          <span className="goal-task-caret" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m9 6 6 6-6 6" />
+            </svg>
           </span>
         ) : null}
-      </div>
-      {task.failureReason ? (
-        <div className="goal-task-detail goal-task-detail--error">{task.failureReason}</div>
+      </button>
+      {summaryText ? (
+        <div
+          className={`goal-task-summary${
+            task.failureReason ? ' goal-task-summary--error' : task.blockedReason ? ' goal-task-summary--warn' : ''
+          }`}
+        >
+          {summaryText}
+        </div>
       ) : null}
-      {task.blockedReason ? (
-        <div className="goal-task-detail goal-task-detail--warn">{task.blockedReason}</div>
+      {expanded ? (
+        <div className="goal-task-detail-wrap">
+          {task.failureReason ? (
+            <div className="goal-task-detail goal-task-detail--error">{task.failureReason}</div>
+          ) : null}
+          {task.blockedReason ? (
+            <div className="goal-task-detail goal-task-detail--warn">{task.blockedReason}</div>
+          ) : null}
+          {hasEvidence ? (
+            <div className="goal-task-detail">
+              <div className="goal-task-detail-label">{isZh ? '证据' : 'Evidence'}</div>
+              <ul className="goal-task-evidence-list">
+                {task.evidenceRefs.map((ref) => (
+                  <li key={ref} className="goal-task-evidence-item">{ref}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
       ) : null}
       {task.subtasks && task.subtasks.length > 0 ? (
         <ul className="goal-task-children">
@@ -331,17 +389,169 @@ function ExplorerItem({
   );
 }
 
+interface PlanCardProps {
+  readonly plan: GoalPlan;
+  readonly defaultExpanded: boolean;
+  readonly isZh: boolean;
+  readonly isStreaming: boolean;
+  readonly busy: boolean;
+  readonly isMain?: boolean;
+  readonly onDecide: (plan: GoalPlan, decision: 'approve' | 'reject') => void | Promise<void>;
+  readonly onRunnerControl: (plan: GoalPlan, action: 'pause' | 'resume' | 'clear') => void | Promise<void>;
+}
+
+function PlanCard({ plan, defaultExpanded, isZh, isStreaming, busy, isMain, onDecide, onRunnerControl }: PlanCardProps): ReactElement {
+  // 待批准计划强制展开，确保「批准 / 驳回」按钮永远可见。
+  const awaitingLock = plan.status === 'awaiting_approval';
+  // 主卡（当前计划）永远展开；待批准计划同样强制展开。两者都隐藏 caret、禁用折叠。
+  const lockedOpen = awaitingLock || !!isMain;
+  const [expanded, setExpanded] = useState<boolean>(defaultExpanded || lockedOpen);
+  const effectiveExpanded = lockedOpen || expanded;
+  // 子任务明细默认收起：主卡进入时只显示「标题 + 描述 + 进度条」，
+  // 点进度条才展开 goal-task-list。
+  const [tasksExpanded, setTasksExpanded] = useState(false);
+  const canDecide = plan.status === 'awaiting_approval';
+  const progress = safeProgress(plan);
+  const tasks = Array.isArray(plan.tasks) ? plan.tasks : [];
+  const title = derivePlanTitle(plan, isZh);
+
+  return (
+    <section
+      className={`goal-plan-card${effectiveExpanded ? ' goal-plan-card--expanded' : ''}${isMain ? ' goal-plan-card--main' : ''}`}
+    >
+      <header className="goal-plan-head">
+        <button
+          type="button"
+          className="goal-plan-head-toggle"
+          onClick={() => {
+            if (lockedOpen) return;
+            setExpanded((v) => !v);
+          }}
+          disabled={lockedOpen}
+          aria-expanded={effectiveExpanded}
+          title={awaitingLock ? (isZh ? '有待批准，需先处理' : 'Pending approval — resolve first') : undefined}
+        >
+          <span className={`goal-plan-status goal-plan-status--${plan.status}`}>
+            {planStatusLabel(plan.status, isZh)}
+          </span>
+          <span className="goal-plan-title">{title}</span>
+          <span className="goal-plan-head-progress">
+            {`${progress.completed}/${progress.total}`}
+          </span>
+          {lockedOpen ? null : (
+            <span className="goal-plan-head-caret" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m9 6 6 6-6 6" />
+              </svg>
+            </span>
+          )}
+        </button>
+        {canDecide ? (
+          <div className="goal-plan-actions goal-plan-actions--inline">
+            <button
+              type="button"
+              className="goal-plan-approve"
+              disabled={busy || isStreaming}
+              title={isStreaming ? (isZh ? '请等待本轮输出结束后再批准' : 'Wait until this turn finishes before approving') : undefined}
+              onClick={() => void onDecide(plan, 'approve')}
+            >
+              {isZh ? '批准并执行' : 'Approve & run'}
+            </button>
+            <button
+              type="button"
+              className="goal-plan-reject"
+              disabled={busy || isStreaming}
+              title={isStreaming ? (isZh ? '请等待本轮输出结束后再操作' : 'Wait until this turn finishes') : undefined}
+              onClick={() => void onDecide(plan, 'reject')}
+            >
+              {isZh ? '驳回' : 'Reject'}
+            </button>
+          </div>
+        ) : null}
+      </header>
+      {effectiveExpanded ? (
+        <div className="goal-plan-body">
+          {/* 排序：标题(header) → 描述(默认可见) → 进度条(可点击开关) → 子任务清单(默认收起) → Runner。 */}
+          {plan.goal ? (
+            <div className="goal-plan-goal-block">
+              <p className="goal-plan-goal">{plan.goal}</p>
+            </div>
+          ) : null}
+          {/* 进度条即「展开/收起子任务」的开关：点它切换下方 goal-task-list 显隐。 */}
+          <button
+            type="button"
+            className={`goal-plan-progress${tasksExpanded ? ' goal-plan-progress--open' : ''}`}
+            onClick={() => setTasksExpanded((v) => !v)}
+            aria-expanded={tasksExpanded}
+            aria-label={isZh ? '展开或收起子任务' : 'Toggle subtasks'}
+          >
+            <span
+              className="goal-plan-progress-track"
+              role="progressbar"
+              aria-valuenow={progress.percent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <span
+                className={`goal-plan-progress-bar${plan.status === 'executing' ? ' goal-plan-progress-bar--executing' : ''}`}
+                style={{ backgroundSize: `${progress.percent}% 100%` }}
+              />
+            </span>
+            <span className="goal-plan-progress-text">
+              {isZh
+                ? `${progress.completed}/${progress.total} 完成`
+                : `${progress.completed}/${progress.total} done`}
+              {progress.failed > 0 ? (isZh ? `，${progress.failed} 失败` : `, ${progress.failed} failed`) : ''}
+              {progress.blocked > 0 ? (isZh ? `，${progress.blocked} 阻塞` : `, ${progress.blocked} blocked`) : ''}
+            </span>
+            <span className="goal-plan-progress-caret" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </span>
+          </button>
+          {tasksExpanded ? (
+            tasks.length > 0 ? (
+              <ul className="goal-task-list">
+                {tasks.map((task) => (
+                  <TaskNode key={task.taskId} task={task} depth={0} isZh={isZh} />
+                ))}
+              </ul>
+            ) : (
+              <div className="goal-plan-empty-tasks">{isZh ? '尚无拆解的子任务' : 'No tasks yet'}</div>
+            )
+          ) : null}
+          {plan.runner && plan.runner.enabled ? (
+            <RunnerSection
+              plan={plan}
+              runner={plan.runner}
+              busy={busy}
+              isZh={isZh}
+              onControl={onRunnerControl}
+            />
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 // 重档过渡的卸载延迟（毫秒），必须与 CSS token --za-motion-medium 对齐（见
 // chat-surface.css 的 .chat-side-panel 过渡时长）。收起时 body 先随收缩动画播完
 // 再卸载，避免「内容瞬间消失、空壳再慢慢缩」的割裂感。
 const GOAL_PANEL_MOTION_MS = 200;
 
-export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelContainer }: GoalPlanPanelProps): ReactElement | null {
+export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelContainer, onPlansCountChange, onRequestHostFocus }: GoalPlanPanelProps): ReactElement | null {
   const [plans, setPlans] = useState<readonly GoalPlan[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyPlanId, setBusyPlanId] = useState<string | null>(null);
   const [manualCollapsed, setManualCollapsed] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (onPlansCountChange) onPlansCountChange(plans.length);
+  }, [plans.length, onPlansCountChange]);
+
   // 重档过渡：bodyMounted 控制右栏 body 是否仍挂载（收起时延迟卸载，让收缩动画播完）；
   // closing 标记正处于收起动画中，用于给 body 加退场样式、给右栏容器加 data-closing 提前收宽。
   const [bodyMounted, setBodyMounted] = useState(false);
@@ -492,10 +702,19 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   );
 
   const pendingCount = plans.filter((plan) => plan.status === 'awaiting_approval').length;
+  // 推到右侧 Workbench Goal slot 后，折叠/展开由 Workbench tab 接管，
+  // 面板内容始终视为展开（无 docked toggle 形态）。
+  const dockedToWorkbench = !!sidePanelContainer;
   // B：有待批准计划时强制展开且不可手动收起，确保「批准并执行/驳回」按钮永远可见；
   // 折叠仅对「无待批准（全部已批准/执行中/完成）」的情况生效。
   const lockedOpen = pendingCount > 0;
-  const expanded = lockedOpen ? true : manualCollapsed === null ? false : !manualCollapsed;
+  const expanded = dockedToWorkbench
+    ? true
+    : lockedOpen
+      ? true
+      : manualCollapsed === null
+        ? false
+        : !manualCollapsed;
 
   // 重档过渡（延迟卸载）：展开 → 立即挂载 body 并清除 closing；收起 → 先标记 closing
   // 触发收缩动画，GOAL_PANEL_MOTION_MS 后再真正卸载 body。
@@ -540,6 +759,14 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     plans[0] ??
     null;
   const activeProgress = activePlan ? safeProgress(activePlan) : null;
+  // 主卡 = 仅「待批准 / 执行中」的计划才置顶强制展开；没有进行中的计划时为 null，
+  // 此时不再把第一个（可能已完成）计划钉在顶部，全部计划进入下方折叠清单。
+  const mainPlan =
+    plans.find((plan) => plan.status === 'awaiting_approval') ??
+    plans.find((plan) => plan.status === 'executing') ??
+    null;
+  // 清单计划 = 除主卡外的其余计划，保持原顺序；mainPlan 为 null 时即全部计划。
+  const listPlans = mainPlan ? plans.filter((plan) => plan.planId !== mainPlan.planId) : plans;
   // A：折叠态浮条「执行中」时给根节点附加状态 class，驱动边缘流动光效（见 goal-panel.css）。
   // 仅当存在执行中的计划、且面板处于折叠态（浮条形态）时启用，避免展开后内部已有进度动效叠加干扰。
   const hasExecutingPlan = plans.some((plan) => plan.status === 'executing');
@@ -560,15 +787,27 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     <div
       className={`goal-panel goal-panel--docked${expanded ? ' goal-panel--expanded' : ''}${
         dockedExecuting ? ' goal-panel--executing' : ''
-      }${dockedCompleted ? ' goal-panel--completed' : ''}`}
+      }${dockedCompleted ? ' goal-panel--completed' : ''}${
+        dockedToWorkbench ? ' goal-panel--hosted' : ''
+      }`}
     >
       <button
         type="button"
         className="goal-panel-toggle"
-        aria-expanded={expanded}
-        disabled={lockedOpen}
-        title={lockedOpen ? (isZh ? '有待批准计划，需先处理' : 'Pending approval — resolve first') : undefined}
+        aria-expanded={dockedToWorkbench ? undefined : expanded}
+        disabled={lockedOpen && !dockedToWorkbench}
+        title={
+          dockedToWorkbench
+            ? (isZh ? '在工作台中查看' : 'View in workbench')
+            : lockedOpen
+              ? (isZh ? '有待批准计划，需先处理' : 'Pending approval — resolve first')
+              : undefined
+        }
         onClick={() => {
+          if (dockedToWorkbench) {
+            onRequestHostFocus?.();
+            return;
+          }
           if (lockedOpen) return;
           setManualCollapsed(expanded);
         }}
@@ -576,7 +815,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         <span className="goal-panel-toggle-label">{isZh ? '目标计划' : 'Goal plans'}</span>
         <span className="goal-panel-toggle-summary">{summary}</span>
         {pendingCount > 0 ? <span className="goal-panel-toggle-badge">{pendingCount}</span> : null}
-        {!expanded && activePlan ? (
+        {(dockedToWorkbench || !expanded) && activePlan ? (
           <span className="goal-panel-toggle-active">
             {activePlan.status === 'executing' ? (
               <span className="goal-panel-toggle-active-dot" aria-hidden="true" />
@@ -597,7 +836,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
             ) : null}
           </span>
         ) : null}
-        {lockedOpen ? null : (
+        {lockedOpen && !dockedToWorkbench ? null : (
           <span className="goal-panel-toggle-caret" aria-hidden="true">
             <svg
               viewBox="0 0 24 24"
@@ -616,80 +855,46 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         const body = (
       <div className={`goal-panel-body${closing ? ' goal-panel-body--closing' : ''}`}>
       {error ? <div className="goal-panel-error">{error}</div> : null}
-      {plans.map((plan) => {
-        const canDecide = plan.status === 'awaiting_approval';
-        const busy = busyPlanId === plan.planId;
-        const progress = safeProgress(plan);
-        const tasks = Array.isArray(plan.tasks) ? plan.tasks : [];
-        return (
-          <section key={plan.planId} className="goal-plan-card">
-            <header className="goal-plan-head">
-              {/* 状态徽章放标题左侧（最前），作为该计划的状态前缀。 */}
-              <span className={`goal-plan-status goal-plan-status--${plan.status}`}>
-                {planStatusLabel(plan.status, isZh)}
-              </span>
-              <div className="goal-plan-title">{derivePlanTitle(plan, isZh)}</div>
-              {/* 批准/驳回放在 header 右侧；按钮尺寸与状态徽章对齐（小号 chip 风格），
-                  避免按钮被任务列表挤到卡片底部看不到。
-                  治理事实写操作（带 confirmationId 的 HumanConfirmation）仅在 awaiting_approval 时出现。 */}
-              {canDecide ? (
-                <div className="goal-plan-actions goal-plan-actions--inline">
-                  <button
-                    type="button"
-                    className="goal-plan-approve"
-                    disabled={busy || isStreaming}
-                    title={isStreaming ? (isZh ? '请等待本轮输出结束后再批准' : 'Wait until this turn finishes before approving') : undefined}
-                    onClick={() => void decide(plan, 'approve')}
-                  >
-                    {isZh ? '批准并执行' : 'Approve & run'}
-                  </button>
-                  <button
-                    type="button"
-                    className="goal-plan-reject"
-                    disabled={busy || isStreaming}
-                    title={isStreaming ? (isZh ? '请等待本轮输出结束后再操作' : 'Wait until this turn finishes') : undefined}
-                    onClick={() => void decide(plan, 'reject')}
-                  >
-                    {isZh ? '驳回' : 'Reject'}
-                  </button>
-                </div>
-              ) : null}
-            </header>
-            {plan.goal ? <p className="goal-plan-goal">{plan.goal}</p> : null}
-            <div className="goal-plan-progress" role="progressbar" aria-valuenow={progress.percent} aria-valuemin={0} aria-valuemax={100}>
-              <div
-                className={`goal-plan-progress-bar${plan.status === 'executing' ? ' goal-plan-progress-bar--executing' : ''}`}
-                style={{ backgroundSize: `${progress.percent}% 100%` }}
-              />
-              <span className="goal-plan-progress-text">
-                {isZh
-                  ? `${progress.completed}/${progress.total} 完成`
-                  : `${progress.completed}/${progress.total} done`}
-                {progress.failed > 0 ? (isZh ? `，${progress.failed} 失败` : `, ${progress.failed} failed`) : ''}
-                {progress.blocked > 0 ? (isZh ? `，${progress.blocked} 阻塞` : `, ${progress.blocked} blocked`) : ''}
-              </span>
-            </div>
-            {plan.runner && plan.runner.enabled ? (
-              <RunnerSection
-                plan={plan}
-                runner={plan.runner}
-                busy={busy}
-                isZh={isZh}
-                onControl={controlRunner}
-              />
-            ) : null}
-            {tasks.length > 0 ? (
-              <ul className="goal-task-list">
-                {tasks.map((task) => (
-                  <TaskNode key={task.taskId} task={task} depth={0} isZh={isZh} />
-                ))}
-              </ul>
-            ) : (
-              <div className="goal-plan-empty-tasks">{isZh ? '尚无拆解的子任务' : 'No tasks yet'}</div>
-            )}
-          </section>
-        );
-      })}
+      {/* 主卡 = mainPlan（仅待批准 / 执行中）才置顶强制展开。
+          没有进行中的计划时 mainPlan 为 null，不钉主卡，全部计划进入下方折叠清单。 */}
+      {mainPlan ? (
+        <PlanCard
+          key={mainPlan.planId}
+          plan={mainPlan}
+          defaultExpanded
+          isMain
+          isZh={isZh}
+          isStreaming={isStreaming}
+          busy={busyPlanId === mainPlan.planId}
+          onDecide={decide}
+          onRunnerControl={controlRunner}
+        />
+      ) : null}
+      {listPlans.length > 0 ? (
+        <div className="goal-plan-history">
+          <div className="goal-plan-history-title">
+            {mainPlan
+              ? isZh
+                ? `历史计划 ${listPlans.length}`
+                : `History ${listPlans.length}`
+              : isZh
+                ? `目标计划 ${listPlans.length}`
+                : `Plans ${listPlans.length}`}
+          </div>
+          {listPlans.map((plan) => (
+            <PlanCard
+              key={plan.planId}
+              plan={plan}
+              defaultExpanded={false}
+              isZh={isZh}
+              isStreaming={isStreaming}
+              busy={busyPlanId === plan.planId}
+              onDecide={decide}
+              onRunnerControl={controlRunner}
+            />
+          ))}
+        </div>
+      ) : null}
       </div>
         );
         // 方案 B：注入了右栏容器则 portal 投影到主内容区右侧常驻分栏；

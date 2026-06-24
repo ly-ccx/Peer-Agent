@@ -90,6 +90,7 @@ import { useTypewriterStream } from '../hooks/useTypewriterStream';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { useStreamingReport } from '../hooks/useStreamingReport';
 import { useChatStreamSubscription } from '../hooks/useChatStreamSubscription';
+import { useWorkbench } from '../../workbench/WorkbenchContext';
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 64;
 
@@ -1062,9 +1063,29 @@ export function ChatSurface({
   // GoalPlanPanel 的批准动作只记录治理事实；真正执行由 main process Goal Runner
   // 监听 goalPlans:approve 后托管推进，renderer 不再伪造一条用户消息来启动执行。
 
-  // 方案 B：右侧常驻分栏的 portal 宿主。GoalPlanPanel 展开态 body 投影到此 <aside>。
-  // 用回调 ref 存 DOM，挂载后触发重渲染，确保首次展开就能拿到容器。
-  const [goalSideEl, setGoalSideEl] = useState<HTMLElement | null>(null);
+  // Workbench Goal slot：portal target 由右侧工作台 GoalView 提供。
+  const {
+    goalSlot,
+    setHasGoalPlan,
+    open: workbenchOpen,
+    activeTab: workbenchActiveTab,
+    setOpen: setWorkbenchOpen,
+    setActiveTab: setWorkbenchTab,
+  } = useWorkbench();
+  const handleGoalPlansCountChange = useCallback((count: number) => {
+    setHasGoalPlan(count > 0);
+  }, [setHasGoalPlan]);
+  const handleGoalRequestFocus = useCallback(() => {
+    if (workbenchOpen && workbenchActiveTab === 'goal') {
+      setWorkbenchOpen(false);
+      return;
+    }
+    setWorkbenchTab('goal');
+    if (!workbenchOpen) setWorkbenchOpen(true);
+  }, [workbenchOpen, workbenchActiveTab, setWorkbenchOpen, setWorkbenchTab]);
+  useEffect(() => {
+    if (mode !== 'goal') setHasGoalPlan(false);
+  }, [mode, setHasGoalPlan]);
 
   if (!conversationId) {
     return (
@@ -1305,7 +1326,7 @@ export function ChatSurface({
       ) : null}
 
       <div className="chat-composer-wrap">
-        {mode === 'goal' ? <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSideEl} /> : null}
+        <GoalPlanPanel conversationId={conversationId} isZh={isZh} sidePanelContainer={goalSlot} onPlansCountChange={handleGoalPlansCountChange} onRequestHostFocus={handleGoalRequestFocus} />
         <PermissionGateStrip
           pendingCalls={pendingPermissionCalls}
           onApprove={approvePendingPermissionCall}
@@ -1511,9 +1532,6 @@ export function ChatSurface({
         <ImagePreviewOverlay attachment={imagePreview} isZh={isZh} onClose={() => setImagePreview(null)} />
       ) : null}
     </div>
-    {/* 方案 B：右侧常驻分栏。GoalPlanPanel 展开态 body 经 portal 投影到此。
-        无 portal 内容时由 :empty 规则收为零宽，会话区自动占满。 */}
-    <aside className="chat-side-panel" ref={setGoalSideEl} />
     </div>
     </InteractionContext.Provider>
   );

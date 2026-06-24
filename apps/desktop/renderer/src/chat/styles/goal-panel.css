@@ -21,6 +21,12 @@
   overflow: hidden;
 }
 
+/* Hosted variant: body 已 portal 到右侧 Workbench Goal slot；原位仍保留 docked
+   toggle 灯条作为入口（点击会展开 Workbench + 切到 Goal tab）。 */
+.goal-panel--hosted {
+  /* 与 .goal-panel--docked 同款灯条，保持视觉一致；本变体当前不额外覆盖样式。 */
+}
+
 .goal-panel-toggle {
   display: flex;
   align-items: center;
@@ -244,7 +250,6 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-height: 46vh;
   overflow-y: auto;
   padding: 12px;
   border-top: 1px solid var(--za-line);
@@ -270,26 +275,71 @@
 .goal-plan-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px 16px;
   border: 1px solid var(--za-line);
   border-radius: var(--za-radius);
   background: var(--za-surface-1);
+  overflow: hidden;
 }
 
 .goal-plan-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
+  padding: 10px 12px;
+}
+
+.goal-plan-head-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.goal-plan-head-toggle:disabled {
+  cursor: default;
+}
+.goal-plan-head-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--za-focus);
+  border-radius: 4px;
+}
+
+.goal-plan-head-progress {
+  flex: none;
+  font-size: 11px;
+  color: var(--za-text-muted);
+  font-variant-numeric: tabular-nums;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--za-hover);
+}
+
+.goal-plan-head-caret {
+  flex: none;
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  color: var(--za-text-faint);
+  transition: transform 160ms var(--za-ease-standard, ease);
+}
+.goal-plan-head-caret svg {
+  width: 100%;
+  height: 100%;
+}
+.goal-plan-card--expanded .goal-plan-head-caret {
+  transform: rotate(90deg);
 }
 
 .goal-plan-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13.5px;
   color: var(--za-text);
-  /* 布局顺序：状态徽章（最左）→ 标题 → 操作按钮组（最右）。
-     标题用 margin-right:auto 撑开剩余空间，把 header 右侧的操作按钮组顶到最右。 */
   margin-right: auto;
   min-width: 0;
   overflow: hidden;
@@ -301,7 +351,7 @@
   flex: none;
   padding: 2px 8px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 11.5px;
   background: var(--za-hover);
   color: var(--za-text-soft);
 }
@@ -312,6 +362,16 @@
 .goal-plan-status--failed,
 .goal-plan-status--cancelled { color: var(--za-danger); background: var(--za-danger-soft); }
 
+/* body：折叠态不渲染，展开态出现在 head 下方 */
+.goal-plan-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--za-line);
+  padding-top: 12px;
+}
+
 .goal-plan-goal {
   margin: 0;
   font-size: 13px;
@@ -319,15 +379,82 @@
   color: var(--za-text-soft);
 }
 
-/* Progress is a flow container: a fixed-height track row + a text row below it.
-   The track height is carried by an inner pseudo/child, NOT by this box, so the
-   text sits in normal flow and never overlaps the task list underneath. */
-.goal-plan-progress {
+/* 描述块：默认完整可见，位于进度条上方。 */
+.goal-plan-goal-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 主卡：当前计划永远置顶展开，给一点强调描边与背景与历史区拉开层级。 */
+.goal-plan-card--main {
+  border-color: var(--za-line-strong, var(--za-line));
+  background: var(--za-surface-1);
+}
+.goal-plan-card--main .goal-plan-head-caret {
+  display: none;
+}
+
+/* 历史计划：底部安静清单，等高对齐单行、可读、可就地展开。 */
+.goal-plan-history {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
+.goal-plan-history-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--za-text-muted);
+  padding: 2px 2px 0;
+}
+
+/* 折叠态历史项的头部统一行高、对齐；标题色提到可读，不发灰到看不清。 */
+.goal-plan-history .goal-plan-card:not(.goal-plan-card--expanded) .goal-plan-head {
+  min-height: 36px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.goal-plan-history .goal-plan-card:not(.goal-plan-card--expanded) .goal-plan-title {
+  color: var(--za-text-soft);
+  font-weight: 500;
+}
+
+/* 进度条是「展开/收起子任务」的可点击开关（button）。
+   布局：上方进度条轨道(track) + 下方一行(文本 + caret)。
+   track 高度由内部子元素承载，文本在正常流中，永不与子任务清单重叠。 */
+.goal-plan-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  margin: 0 -8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--za-motion-fast, 120ms) var(--za-ease-standard, ease);
+}
+.goal-plan-progress:hover {
+  background: var(--za-hover);
+}
+.goal-plan-progress:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--za-focus);
+}
+
+/* track 强制独占一行（flex-basis 100%），承载进度条本体。 */
+.goal-plan-progress-track {
+  display: block;
+  flex: 1 1 100%;
+}
+
+/* 下方一行：进度文本占主，caret 靠右。 */
 .goal-plan-progress-bar {
   position: relative;
   height: 6px;
@@ -368,10 +495,21 @@
   }
 }
 
+/* track 下方一行：进度文本占满剩余宽度（把 caret 挤到最右），caret 居右。 */
 .goal-plan-progress-text {
-  display: block;
+  flex: 1 1 auto;
   font-size: 12px;
   color: var(--za-text-muted);
+}
+.goal-plan-progress-caret {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--za-text-muted);
+  transition: transform var(--za-motion-medium, 200ms) var(--za-ease-standard, ease);
+}
+.goal-plan-progress--open .goal-plan-progress-caret {
+  transform: rotate(180deg);
 }
 
 .goal-task-list,
@@ -381,17 +519,38 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .goal-task-children {
-  margin-top: 6px;
+  margin-top: 8px;
 }
 
-.goal-task-row {
+.goal-task--card {
+  border: 1px solid var(--za-line);
+  border-radius: var(--za-radius-sm);
+  background: var(--za-surface-1);
+  overflow: hidden;
+}
+
+.goal-task-head {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.goal-task-head:disabled {
+  cursor: default;
+}
+.goal-task-head:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--za-focus);
 }
 
 .goal-task-status {
@@ -413,30 +572,87 @@
 .goal-task-title {
   font-size: 13px;
   color: var(--za-text);
-  /* flex 子项默认 min-width:auto，不会窄于最长内容；窄栏(380px)里像
-     riskLevel/dataLevel/... 这种无断点长串会把整行撑宽并冒出横向滚动条。
-     允许收缩 + 任意处断行，约束在栏宽内。 */
   min-width: 0;
   flex: 1 1 auto;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
-.goal-task-evidence {
+.goal-task-caret {
   flex: none;
-  font-size: 11px;
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
   color: var(--za-text-faint);
-  font-family: var(--font-mono, monospace);
+  transition: transform 160ms var(--za-ease-standard, ease);
+}
+.goal-task-caret svg {
+  width: 100%;
+  height: 100%;
+}
+.goal-task--expanded .goal-task-caret {
+  transform: rotate(90deg);
+}
+
+.goal-task-summary {
+  margin: 0 10px 8px;
+  padding: 4px 8px;
+  border-radius: var(--za-radius-sm);
+  background: var(--za-hover);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--za-text-muted);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.goal-task-summary--error {
+  background: var(--za-danger-soft);
+  color: var(--za-danger);
+}
+.goal-task-summary--warn {
+  background: var(--za-warn-soft);
+  color: var(--za-warn);
+}
+
+.goal-task-detail-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 10px 10px;
 }
 
 .goal-task-detail {
-  margin-left: 56px;
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.5;
+  color: var(--za-text-soft);
 }
-
 .goal-task-detail--error { color: var(--za-danger); }
 .goal-task-detail--warn { color: var(--za-warn); }
+
+.goal-task-detail-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--za-text-faint);
+  margin-bottom: 4px;
+}
+
+.goal-task-evidence-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.goal-task-evidence-item {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--za-text-muted);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
 
 .goal-plan-empty-tasks {
   font-size: 12px;
