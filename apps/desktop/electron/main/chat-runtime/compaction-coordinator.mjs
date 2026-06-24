@@ -83,7 +83,7 @@ export async function runCompactionCheck({
     console.log(
       `[compaction-trigger] path=${path} est=${estimatedTokens} window=${contextWindow || 'unset'} ` +
         `triggerRatio=${COMPACTION_CONFIG.triggerRatio} threshold=${threshold != null ? Math.round(threshold) : 'n/a'} ` +
-        `overThreshold=${overThreshold} nonSystemMsgs=${nonSystemCount} keepRecent=${COMPACTION_CONFIG.keepRecentCount} ` +
+        `overThreshold=${overThreshold} nonSystemMsgs=${nonSystemCount} ` +
         `streamId=${streamId || 'n/a'} conversationId=${conversationId || 'n/a'}`,
     );
   }

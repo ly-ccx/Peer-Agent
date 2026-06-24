@@ -13,8 +13,6 @@ import { logCompactionDiagnostic } from './compaction-diagnostic-log.mjs';
 
 const COMPACTION_CONFIG = {
   triggerRatio: 0.8,
-  targetRatio: 0.5,
-  keepRecentCount: 10,
   charsPerToken: 4,
   // 摘要输出上限不再写死：在 summarizeWithLLM 内复用当前模型的 maxOutputTokens，
   // 未配置时回退到 12000，避免长摘要被小上限截断（压缩后内容看不全）。
@@ -1023,20 +1021,6 @@ function setCompactionAfterTokens(messages, afterTokens) {
   }
 }
 
-// ── Verify Compact Result ──
-
-function verifyCompactResult(messages, contextWindow) {
-  const afterTokens = estimateTokensFromMessages(messages);
-  if (!contextWindow) return { afterTokens, belowTarget: true, target: 0 };
-  const target = contextWindow * COMPACTION_CONFIG.targetRatio;
-
-  return {
-    afterTokens,
-    belowTarget: afterTokens <= target,
-    target,
-  };
-}
-
 // ── PTL Truncation ──
 
 function truncateHeadForRetry(messages) {
@@ -1273,52 +1257,6 @@ export async function compactIfNeeded({
 
   const afterTokens = estimateTokensFromMessages(result);
   setCompactionAfterTokens(result, afterTokens);
-
-  // Verify: if still over target, trim more aggressively
-  const verification = verifyCompactResult(result, contextWindow);
-  if (!verification.belowTarget) {
-    console.warn(
-      `[context-compactor] Post-compact ${afterTokens} tokens still above target ${verification.target} — trimming keep to 5`,
-    );
-    // Override keep with even fewer messages
-    const trimmedResult = buildCompactedMessages({
-      systemPrompt,
-      compactSummary,
-      oldCount: old.length + Math.max(0, keep.length - 5),
-      keepMessages: keep.slice(-5),
-      method,
-      beforeTokens,
-      afterTokens: estimateTokensFromMessages([
-        { role: 'system', content: systemPrompt },
-        {
-          role: 'user',
-          content: buildHandoffContent({ compactSummary, oldCount: old.length }),
-        },
-        ...keep.slice(-5),
-      ]),
-      continuityContext,
-      fallbackReason,
-      fallbackDetail,
-    });
-    const trimmedAfterTokens = estimateTokensFromMessages(trimmedResult);
-    setCompactionAfterTokens(trimmedResult, trimmedAfterTokens);
-
-    return {
-      compacted: true,
-      messages: trimmedResult,
-      notification: {
-        method,
-        fallbackReason,
-        fallbackDetail,
-        beforeTokens,
-        afterTokens: trimmedAfterTokens,
-        oldMessageCount: old.length + Math.max(0, keep.length - 5),
-        previousMessageCount,
-        totalMessageCount: previousMessageCount + old.length + Math.max(0, keep.length - 5),
-        keptMessageCount: Math.min(5, keep.length),
-      },
-    };
-  }
 
   console.log(
     `[context-compactor] Compaction complete: ${beforeTokens} → ${afterTokens} tokens (method: ${method})`,
