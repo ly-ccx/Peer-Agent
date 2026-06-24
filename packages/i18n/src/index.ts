@@ -51,6 +51,7 @@ export type TranslationKey =
   | 'appearance.quick.black'
   | 'appearance.quick.white'
   | 'appearance.swatches'
+  | 'appearance.codePreview'
   | 'appearance.editTheme'
   | 'appearance.scheme.light'
   | 'appearance.scheme.dark'
@@ -539,6 +540,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.quick.black': '黑',
     'appearance.quick.white': '白',
     'appearance.swatches': '色板',
+    'appearance.codePreview': '代码预览',
     'appearance.editTheme': '编辑主题',
     'appearance.scheme.light': '浅色主题',
     'appearance.scheme.dark': '深色主题',
@@ -1046,6 +1048,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.quick.black': 'Black',
     'appearance.quick.white': 'White',
     'appearance.swatches': 'Palette colors',
+    'appearance.codePreview': 'Code preview',
     'appearance.editTheme': 'Edit theme',
     'appearance.scheme.light': 'Light theme',
     'appearance.scheme.dark': 'Dark theme',

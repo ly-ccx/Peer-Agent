@@ -278,4 +278,59 @@
     background: var(--za-control-fill-hover);
     border-color: var(--za-line);
   }
+
+  /* 代码预览：复用当前主题语义 token 做近似语法高亮（参考 Catppuccin 风格指南）。
+     不引入新 token，随 mode/palette/custom 自动跟随。 */
+  .appearance-code-preview {
+    @apply m-0 grid gap-0 overflow-x-auto rounded-[6px];
+    padding: 8px 10px;
+    background: var(--za-surface-1);
+    border: 1px solid var(--za-line);
+    font-family: var(--za-font-code);
+    font-size: 12px;
+    line-height: 1.7;
+  }
+
+  .appearance-code-line {
+    @apply grid items-baseline;
+    grid-template-columns: 1.75em 1fr;
+    column-gap: 12px;
+    white-space: pre;
+  }
+
+  .appearance-code-ln {
+    color: var(--za-text-faint);
+    text-align: right;
+    user-select: none;
+  }
+
+  .appearance-code-text {
+    color: var(--za-text);
+    white-space: pre;
+  }
+
+  /* Catppuccin 语义 → 现有 token 近似映射 */
+  .appearance-code-preview .tok-keyword {
+    color: var(--za-accent);
+  }
+  .appearance-code-preview .tok-string {
+    color: var(--za-good);
+  }
+  .appearance-code-preview .tok-number {
+    color: var(--za-warn);
+  }
+  .appearance-code-preview .tok-type {
+    color: var(--za-danger);
+  }
+  .appearance-code-preview .tok-property,
+  .appearance-code-preview .tok-variable {
+    color: var(--za-text-soft);
+  }
+  .appearance-code-preview .tok-punct {
+    color: var(--za-text-muted);
+  }
+  .appearance-code-preview .tok-comment {
+    color: var(--za-text-faint);
+    font-style: italic;
+  }
 }

@@ -108,6 +108,67 @@ export function AppearancePanel({
             </div>
           ))}
         </div>
+
+        {/* 代码预览：用当前主题语义 token 近似映射语法高亮（参考 Catppuccin 风格指南），
+            让用户切换/自定义配色时直观看到代码高亮的实际观感。纯展示，不新增高亮 token。 */}
+        <div className="appearance-field-label">{i18n.t('appearance.codePreview')}</div>
+        <pre
+          className="appearance-code-preview"
+          aria-label={i18n.t('appearance.codePreview')}
+        >
+          <code>
+            <span className="appearance-code-line">
+              <span className="appearance-code-ln">1</span>
+              <span className="appearance-code-text">
+                <span className="tok-comment">{'// theme config'}</span>
+              </span>
+            </span>
+            <span className="appearance-code-line">
+              <span className="appearance-code-ln">2</span>
+              <span className="appearance-code-text">
+                <span className="tok-keyword">const</span>
+                {' '}
+                <span className="tok-variable">theme</span>
+                <span className="tok-punct">:</span>
+                {' '}
+                <span className="tok-type">ThemeConfig</span>
+                {' '}
+                <span className="tok-punct">=</span>
+                {' '}
+                <span className="tok-punct">{'{'}</span>
+              </span>
+            </span>
+            <span className="appearance-code-line">
+              <span className="appearance-code-ln">3</span>
+              <span className="appearance-code-text">
+                {'  '}
+                <span className="tok-property">accent</span>
+                <span className="tok-punct">:</span>
+                {' '}
+                <span className="tok-string">{'"#5d9cbf"'}</span>
+                <span className="tok-punct">,</span>
+              </span>
+            </span>
+            <span className="appearance-code-line">
+              <span className="appearance-code-ln">4</span>
+              <span className="appearance-code-text">
+                {'  '}
+                <span className="tok-property">contrast</span>
+                <span className="tok-punct">:</span>
+                {' '}
+                <span className="tok-number">68</span>
+                <span className="tok-punct">,</span>
+              </span>
+            </span>
+            <span className="appearance-code-line">
+              <span className="appearance-code-ln">5</span>
+              <span className="appearance-code-text">
+                <span className="tok-punct">{'}'}</span>
+                <span className="tok-punct">;</span>
+              </span>
+            </span>
+          </code>
+        </pre>
       </section>
 
       <section className="appearance-group">
