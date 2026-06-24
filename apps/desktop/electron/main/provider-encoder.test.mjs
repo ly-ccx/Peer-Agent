@@ -216,7 +216,8 @@ describe('Provider message encoders', () => {
       reasoningFormat: 'adaptive',
     });
 
-    assert.deepEqual(body.thinking, { type: 'adaptive' });
+    // display:'summarized' 让摘要思维链回流，否则新代际默认 omitted 不可见。
+    assert.deepEqual(body.thinking, { type: 'adaptive', display: 'summarized' });
     assert.deepEqual(body.output_config, { effort: 'high' });
     assert.equal(body.max_tokens, 16384);
   });
@@ -275,8 +276,9 @@ describe('Provider message encoders', () => {
 
     for (const model of ['claude-opus-4-8', 'claude-opus-4.8', 'claude-fable-5', 'claude-mythos-5']) {
       const body = make(model);
-      // 新代际: 必须用 output_config.effort，且绝不能带 manual extended thinking(会 400)。
-      assert.equal(body.thinking, undefined, `${model} must not send thinking`);
+      // 新代际: 用 output_config.effort 表达强度；thinking 走 adaptive(绝不能带
+      // manual budget_tokens，会 400)，并显式 display:'summarized' 让摘要思维链可见。
+      assert.deepEqual(body.thinking, { type: 'adaptive', display: 'summarized' }, `${model} must send adaptive summarized thinking`);
       assert.deepEqual(body.output_config, { effort: 'high' }, `${model} must send effort`);
       // max_tokens 退回纯回复预算，不再叠加思考 budget。
       assert.equal(body.max_tokens, 16384);

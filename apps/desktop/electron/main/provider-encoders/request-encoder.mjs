@@ -188,11 +188,16 @@ export function encodeAnthropicMessagesRequest({
     ?? (anthropicModelUsesEffortConfig(model) ? 'anthropic-output-effort' : 'anthropic-enabled-budget');
   if (supportsReasoning && effort && effort !== 'off') {
     if (paramStyle === 'anthropic-adaptive-effort') {
-      body.thinking = { type: 'adaptive' };
+      // display:'summarized' 让思维链以摘要形式回流，否则新代际默认 omitted
+      // (thinking 字段恒空、仅 signature)，UI 的思考区永远无内容可渲染。
+      body.thinking = { type: 'adaptive', display: 'summarized' };
       body.output_config = { effort: mappedEffortValue(effort, reasoningEffortMap, ANTHROPIC_OUTPUT_EFFORT, 'default') ?? 'medium' };
     } else if (paramStyle === 'anthropic-output-effort') {
       // Opus 4.8 等新代际: 不发 thinking.budget_tokens(会 400)，
       // 改用 output_config.effort，max_tokens 保持纯回复预算。
+      // display 默认 omitted(只回加密 signature)，必须显式 summarized 才会流式回传
+      // 可见的摘要思考；type:'adaptive' 是这一代际的推荐用法，与 effort 配套不冲突。
+      body.thinking = { type: 'adaptive', display: 'summarized' };
       body.output_config = { effort: mappedEffortValue(effort, reasoningEffortMap, ANTHROPIC_OUTPUT_EFFORT, 'default') ?? 'medium' };
     } else if (paramStyle === 'anthropic-enabled-budget') {
       const budgetTokens = mappedNumericEffort(effort, reasoningEffortMap, ANTHROPIC_THINKING_BUDGET) ?? ANTHROPIC_THINKING_BUDGET.default;
