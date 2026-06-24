@@ -39,12 +39,28 @@
 
   .markdown-content ul,
   .markdown-content ol {
-    @apply my-0 grid gap-1 pl-5;
+    @apply my-0 pl-5;
+    /* 用标准块级流而非 grid：grid 容器会吞掉列表项的圆点/序号 marker。 */
+    display: block;
+  }
+
+  .markdown-content ul {
+    list-style: disc outside;
+  }
+
+  .markdown-content ol {
+    list-style: decimal outside;
   }
 
   .markdown-content li {
     @apply min-w-0 leading-6;
     color: var(--za-text-soft);
+    /* 等价还原原 gap-1 的紧凑行距。 */
+    margin: 2px 0;
+  }
+
+  .markdown-content li::marker {
+    color: var(--za-text-muted);
   }
 
   .markdown-content strong {
