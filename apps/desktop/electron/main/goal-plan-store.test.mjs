@@ -592,6 +592,16 @@ test('runner: setRunnerState 归一化无效字段并补默认预算', () => {
   assert.equal(updated.runner.maxExplorers, 0);
 });
 
+test('runner: maxExplorers 超过硬上限会被钳到上限（防失控派发）', () => {
+  const plan = store.createPlan(draftWithTasks());
+  const updated = store.setRunnerState(plan.planId, { enabled: true, maxExplorers: 9999 });
+  // 上限为 10：超大值被钳住，正常值（≤10）原样保留。
+  assert.equal(updated.runner.maxExplorers, 10);
+
+  const within = store.setRunnerState(plan.planId, { enabled: true, maxExplorers: 5 });
+  assert.equal(within.runner.maxExplorers, 5);
+});
+
 test('runner: setRunnerState 只更新 runner，不绕过 task Evidence 约束', () => {
   const plan = store.createPlan(draftWithTasks());
   const updated = store.setRunnerState(plan.planId, {

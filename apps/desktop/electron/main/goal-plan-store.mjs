@@ -25,6 +25,12 @@ import { pathOf } from './data-store.mjs';
  * 不 import electron，可被单测直接 import。
  */
 
+// maxExplorers 的硬上限护栏。每个 explorer 是一个完整的只读子 Agent loop，
+// 直接是 token / 时间成本的乘数。maxExplorers 可经外部（IPC options / runner 状态）
+// 传入，校验侧此前只钳下限（负数→0）而无上限，传入超大值会让单个计划失控派发。
+// 此处补一个对称的上限挡住异常值；默认 3 远低于上限，正常使用不受影响。
+const MAX_EXPLORERS_HARD_CAP = 10;
+
 function readJsonl(filePath) {
   if (!existsSync(filePath)) return [];
   return readFileSync(filePath, 'utf8')
@@ -360,7 +366,9 @@ function normalizeRunnerState(runner, planId) {
     explorerCount: Number.isFinite(runner.explorerCount) ? Math.max(0, Math.trunc(runner.explorerCount)) : 0,
     maxTurns: Number.isFinite(runner.maxTurns) ? Math.max(1, Math.trunc(runner.maxTurns)) : 8,
     maxToolCalls: Number.isFinite(runner.maxToolCalls) ? Math.max(1, Math.trunc(runner.maxToolCalls)) : 40,
-    maxExplorers: Number.isFinite(runner.maxExplorers) ? Math.max(0, Math.trunc(runner.maxExplorers)) : 3,
+    maxExplorers: Number.isFinite(runner.maxExplorers)
+      ? Math.min(MAX_EXPLORERS_HARD_CAP, Math.max(0, Math.trunc(runner.maxExplorers)))
+      : 3,
     updatedAt: typeof runner.updatedAt === 'string' && runner.updatedAt.trim() ? runner.updatedAt : now,
   };
   if (RUNNER_INTENTS.has(runner.intent)) {
