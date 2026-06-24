@@ -13,8 +13,7 @@ import { Dropdown } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import {
-  BASE_EFFORT_LEVELS,
-  OPENAI_EFFORT_LEVELS,
+  normalizeEffortLevels,
   CHAT_MODES,
   isEffortLevel,
   isLocalAccessLevel,
@@ -504,7 +503,9 @@ export function ChatSurface({
     || providers.find((p) => p.apiKeyConfigured)
     || null;
   const activeProviderSupportsReasoning = Boolean(activeProvider?.supportsReasoning);
-  const effortLevels = activeProvider?.provider === 'openai' ? OPENAI_EFFORT_LEVELS : BASE_EFFORT_LEVELS;
+  // 档位列表以后端透传的 provider 原生能力（reasoningEffortLevels）为准，经归一化后渲染；
+  // 后端未提供时回退到通用四档。不再按 provider 名硬编码（旧逻辑只认 openai，导致 Anthropic 等被降级到四档）。
+  const effortLevels = normalizeEffortLevels(activeProvider?.reasoningEffortLevels);
   const isZh = i18n.locale === 'zh-CN';
   const slashQuery = draft.startsWith('/') && !/\s/.test(draft) ? draft.toLowerCase() : null;
   const slashCommands = slashQuery

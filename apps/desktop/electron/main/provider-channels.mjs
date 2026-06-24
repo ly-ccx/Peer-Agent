@@ -341,6 +341,7 @@ export function resolveChannel(config = {}) {
     legacyProvider: legacyProviderForWire(wire),
     reasoningParamStyle: capabilities.reasoning?.paramStyle || 'none',
     reasoningEffortMap: capabilities.reasoning?.effortMap || undefined,
+    reasoningEffortLevels: capabilities.reasoning?.effortLevels || undefined,
     supportsReasoning: Boolean(capabilities.reasoning?.supported),
     supportsPromptCaching: Boolean(capabilities.promptCache),
   };

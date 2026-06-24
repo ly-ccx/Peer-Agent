@@ -17,6 +17,28 @@ export const BASE_EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'low', 'defaul
 /** OpenAI 系 provider 的思考强度档位（五档，含 xhigh）。 */
 export const OPENAI_EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'low', 'default', 'high', 'xhigh'];
 
+/**
+ * 把后端透传的 provider 原生档位（reasoningEffortLevels）归一化成 UI 可直接渲染的档位列表。
+ *
+ * 归一化规则（解决 channel 各自档位口径不一致的问题）：
+ * - 过滤掉非法值（非 EffortLevel 的字符串一律丢弃）。
+ * - 强制把 'off'（关闭思考）放到列表首位：它是通用开关，部分 channel（如 Anthropic/OpenAI）
+ *   的 effortLevels 并不含 off，需要补齐；含 off 的（如 Google）则去重后归位。
+ * - 按 EffortLevel 的标准顺序（off→low→default→high→xhigh）排序，确保 UI 档位顺序稳定。
+ * - 入参为空 / 全部非法 / 未提供时，回退到通用四档 BASE_EFFORT_LEVELS。
+ */
+export function normalizeEffortLevels(raw: readonly string[] | undefined | null): readonly EffortLevel[] {
+  const ORDER: readonly EffortLevel[] = ['off', 'low', 'default', 'high', 'xhigh'];
+  if (!raw || raw.length === 0) return BASE_EFFORT_LEVELS;
+  const valid = new Set<EffortLevel>();
+  for (const item of raw) {
+    if (isEffortLevel(item)) valid.add(item);
+  }
+  valid.add('off'); // off 是通用开关，始终提供。
+  const result = ORDER.filter((level) => valid.has(level));
+  return result.length > 1 ? result : BASE_EFFORT_LEVELS;
+}
+
 /** EffortLevel 类型守卫。 */
 export function isEffortLevel(value: unknown): value is EffortLevel {
   return value === 'off' || value === 'low' || value === 'default' || value === 'high' || value === 'xhigh';

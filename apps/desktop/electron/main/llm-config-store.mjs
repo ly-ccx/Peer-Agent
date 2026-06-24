@@ -263,6 +263,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       supportsPromptCaching: item.supportsPromptCaching ?? false,
       reasoningParamStyle: item.reasoningParamStyle ?? resolved?.reasoningParamStyle,
       reasoningEffortMap: item.reasoningEffortMap ?? resolved?.reasoningEffortMap ?? undefined,
+      reasoningEffortLevels: item.reasoningEffortLevels ?? resolved?.reasoningEffortLevels ?? undefined,
       oauthClientId: item.oauthClientId ?? undefined,
       oauthProjectId: item.oauthProjectId ?? undefined,
       customHeaders: item.customHeaders ?? undefined,
