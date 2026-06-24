@@ -15,13 +15,22 @@
   }
 
   .header {
-    @apply absolute top-0 right-0 z-20 flex h-11 items-center justify-end pr-6;
+    @apply absolute top-0 z-30 flex h-11 items-center justify-end pr-3;
     left: var(--za-sidebar-width, 300px);
-    border-bottom: 1px solid var(--za-line);
-    background: var(--za-header-bg);
-    backdrop-filter: blur(18px);
+    right: 0;
+    border-bottom: none;
+    background: transparent;
     -webkit-app-region: drag;
+    pointer-events: none;
     animation: za-fade-rise var(--za-motion-medium) var(--za-ease-out) both;
+  }
+
+  :root[data-sidebar-collapsed='true'] .header {
+    left: 0;
+  }
+
+  .header > * {
+    pointer-events: auto;
   }
 
   .profile-chip {

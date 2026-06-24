@@ -1618,9 +1618,9 @@
   color: var(--paper-sheet);
 }
 
-/* ── 方案 B：目标计划右侧常驻分栏 ──
-   .chat-workspace 把会话面板与右栏并排成横向布局；右栏由 GoalPlanPanel
-   展开态 body 经 portal 注入。无内容时 :empty 收为零宽，会话区自动占满。 */
+/* ── chat workspace 横向布局 ──
+   原方案 B 在右侧挂常驻 aside；现已迁移到右侧 Workbench Panel。
+   .chat-workspace 仍保留作为 chat-surface 的 flex 容器，主区独占可弹性宽度。 */
 .chat-workspace {
   display: flex;
   flex-direction: row;
@@ -1630,82 +1630,6 @@
 .chat-workspace > .chat-surface {
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.chat-side-panel {
-  flex: 0 0 auto;
-  width: 380px;
-  height: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid var(--za-line);
-  background: var(--za-surface-1);
-  overflow: hidden;
-  /* 重档过渡：展开 0→380px 顺滑滑开；收起时由 data-closing 提前收宽。 */
-  transition:
-    width var(--za-motion-medium) var(--za-ease-out),
-    border-color var(--za-motion-medium) var(--za-ease-out);
-}
-/* 空容器（无 portal 内容）收为零宽并隐藏分隔线，不占主内容区。 */
-.chat-side-panel:empty {
-  width: 0;
-  border-left: none;
-}
-/* 收起动画进行中：body 尚未卸载（容器非 empty），但提前收宽到 0，
-   与 body 的退场动画同步，消除「空壳再慢慢缩」的割裂感。 */
-.chat-side-panel[data-closing='true'] {
-  width: 0;
-  border-left-color: transparent;
-}
-
-/* portal 到右栏后的计划 body：铺满整栏高度，
-   去掉 docked 浮层形态遗留的 46vh 限高与顶部边框。 */
-.chat-side-panel > .goal-panel-body {
-  flex: 1 1 auto;
-  max-height: none;
-  border-top: none;
-  overflow-y: auto;
-  /* 兜底：右栏固定 380px，禁止任何子内容横向溢出冒出横向滚动条；
-     真正的断行收缩由 .goal-task-title 的 min-width:0 + break-word 负责。 */
-  overflow-x: hidden;
-  /* 展开入场：淡入 + 轻微右滑入。 */
-  animation: goal-side-panel-in var(--za-motion-medium) var(--za-ease-out);
-}
-/* 收起退场：淡出 + 轻微右滑出，时长与容器收宽一致。 */
-.chat-side-panel > .goal-panel-body.goal-panel-body--closing {
-  animation: goal-side-panel-out var(--za-motion-medium) var(--za-ease-out) forwards;
-}
-
-@keyframes goal-side-panel-in {
-  from {
-    opacity: 0;
-    transform: translateX(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-@keyframes goal-side-panel-out {
-  from {
-    opacity: 1;
-    transform: translateX(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateX(12px);
-  }
-}
-
-/* 无障碍：用户偏好减少动效时，关闭右栏的过渡与入场/退场动画。 */
-@media (prefers-reduced-motion: reduce) {
-  .chat-side-panel,
-  .chat-side-panel > .goal-panel-body,
-  .chat-side-panel > .goal-panel-body.goal-panel-body--closing {
-    transition: none;
-    animation: none;
-  }
 }
 
 /* batch_search 分路检索卡（方向甲「极简单行折叠」）。见 docs/design/batch-search-parallel-aggregation.md */

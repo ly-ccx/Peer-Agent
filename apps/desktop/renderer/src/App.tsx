@@ -1,11 +1,14 @@
 import { createI18n } from '@peer-agent/i18n';
 import type { LlmProviderConfigView } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AppHeader } from './app/components/AppHeader';
 import { SettingsPage } from './app/components/SettingsPage';
 import { useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { ChatSurface } from './chat/components/ChatSurface';
 import { Sidebar } from './chat/components/Sidebar';
 import { clientApi } from './clientApi';
+import { WorkbenchPanel } from './workbench/WorkbenchPanel';
+import { WorkbenchProvider } from './workbench/WorkbenchContext';
 
 type AppPage = 'chat' | 'settings';
 type ConversationStatus = 'active' | 'archived';
@@ -216,6 +219,8 @@ export function App() {
     await refreshConversations(activeWorkspace, conversationView);
   }, [activeWorkspace, conversationView, refreshConversations]);
 
+  const isZh = (session?.locale ?? '').toLowerCase().startsWith('zh');
+
   return (
     <main className={isFullscreen ? 'app-shell is-fullscreen' : 'app-shell'}>
       {session && activePage === 'settings' ? (
@@ -232,64 +237,66 @@ export function App() {
           onSystemInstructionsChanged={setSystemInstructions}
         />
       ) : session ? (
-        <div className="app-layout">
-          <Sidebar
-            conversations={conversations}
-            activeConversationId={activeConversationId}
-            conversationView={conversationView}
-            runningConversationIds={runningConversationIds}
-            runningWorkspacePaths={runningWorkspacePaths}
-            activePage={activePage}
-            i18n={i18n}
-            onNewChat={handleNewChat}
-            onSelectConversation={handleSelectConversation}
-            onDeleteConversation={handleDeleteConversation}
-            onRenameConversation={handleRenameConversation}
-            onArchiveConversation={handleArchiveConversation}
-            onRestoreConversation={handleRestoreConversation}
-            onShowArchivedConversations={handleShowArchivedConversations}
-            onShowActiveConversations={handleShowActiveConversations}
-            onOpenSettings={() => setActivePage('settings')}
-            onWorkspaceChanged={handleWorkspaceChanged}
-          />
-          <section className="main-panel">
-            <section className="thread thread-has-header">
-              <ChatSurface
-                i18n={i18n}
-                providers={providers}
-                conversationId={activeConversationId}
-                conversationTitle={conversations.find((c) => c.id === activeConversationId)?.title}
-                systemInstructions={systemInstructions}
-                replyLanguage={replyLanguage}
-                resumeTask={resumeTask}
-                onResumeConsumed={() => {
-                  setResumeTask(null);
-                  void clientApi.clearPendingTask().catch(() => {});
-                }}
-                onOpenSettings={() => setActivePage('settings')}
-                onConversationUpdated={refreshConversations}
-                onStreamingChange={(convId, streaming) => {
-                  // 本会话即时信号:合并/移除到全局运行集合,作为广播之外的更快反馈。
-                  // 权威真值仍由 main 的 active-changed 广播覆盖,二者最终一致。
-                  if (!convId) return;
-                  setRunningConversationIds((prev) => {
-                    const has = prev.has(convId);
-                    if (streaming === has) return prev;
-                    const next = new Set(prev);
-                    if (streaming) next.add(convId);
-                    else next.delete(convId);
-                    return next;
-                  });
-                }}
-                onBranch={(id) => { setConversationView('active'); setActiveConversationId(id); void refreshConversations(activeWorkspace, 'active'); }}
-                onRenameConversation={handleRenameConversation}
-                onArchiveConversation={handleArchiveConversation}
-                onDeleteConversation={handleDeleteConversation}
-                workspacePath={activeWorkspace}
-              />
+        <WorkbenchProvider conversationId={activeConversationId}>
+          <div className="app-layout">
+            <Sidebar
+              conversations={conversations}
+              activeConversationId={activeConversationId}
+              conversationView={conversationView}
+              runningConversationIds={runningConversationIds}
+              runningWorkspacePaths={runningWorkspacePaths}
+              activePage={activePage}
+              i18n={i18n}
+              onNewChat={handleNewChat}
+              onSelectConversation={handleSelectConversation}
+              onDeleteConversation={handleDeleteConversation}
+              onRenameConversation={handleRenameConversation}
+              onArchiveConversation={handleArchiveConversation}
+              onRestoreConversation={handleRestoreConversation}
+              onShowArchivedConversations={handleShowArchivedConversations}
+              onShowActiveConversations={handleShowActiveConversations}
+              onOpenSettings={() => setActivePage('settings')}
+              onWorkspaceChanged={handleWorkspaceChanged}
+            />
+            <section className="main-panel">
+              <section className="thread thread-has-header">
+                <ChatSurface
+                  i18n={i18n}
+                  providers={providers}
+                  conversationId={activeConversationId}
+                  conversationTitle={conversations.find((c) => c.id === activeConversationId)?.title}
+                  systemInstructions={systemInstructions}
+                  replyLanguage={replyLanguage}
+                  resumeTask={resumeTask}
+                  onResumeConsumed={() => {
+                    setResumeTask(null);
+                    void clientApi.clearPendingTask().catch(() => {});
+                  }}
+                  onOpenSettings={() => setActivePage('settings')}
+                  onConversationUpdated={refreshConversations}
+                  onStreamingChange={(convId, streaming) => {
+                    if (!convId) return;
+                    setRunningConversationIds((prev) => {
+                      const has = prev.has(convId);
+                      if (streaming === has) return prev;
+                      const next = new Set(prev);
+                      if (streaming) next.add(convId);
+                      else next.delete(convId);
+                      return next;
+                    });
+                  }}
+                  onBranch={(id) => { setConversationView('active'); setActiveConversationId(id); void refreshConversations(activeWorkspace, 'active'); }}
+                  onRenameConversation={handleRenameConversation}
+                  onArchiveConversation={handleArchiveConversation}
+                  onDeleteConversation={handleDeleteConversation}
+                  workspacePath={activeWorkspace}
+                />
+              </section>
             </section>
-          </section>
-        </div>
+            <WorkbenchPanel isZh={isZh} workspacePath={activeWorkspace} />
+            <AppHeader isZh={isZh} />
+          </div>
+        </WorkbenchProvider>
       ) : (
         <section className="main-panel">
           <section className="thread">

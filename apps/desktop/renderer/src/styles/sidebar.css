@@ -2,9 +2,26 @@
 
 .app-layout {
   display: grid;
-  grid-template-columns: var(--za-sidebar-width) minmax(0, 1fr);
+  grid-template-columns:
+    var(--za-sidebar-width)
+    minmax(0, 1fr)
+    var(--za-workbench-current-width, 0px);
   height: 100vh;
   min-height: 0;
+  transition: grid-template-columns var(--za-motion-medium, 200ms) var(--za-ease-out, ease);
+}
+
+:root[data-workbench-open='true'] .app-layout {
+  --za-workbench-current-width: var(--za-workbench-width, 420px);
+}
+
+:root[data-sidebar-collapsed='true'] .app-layout {
+  grid-template-columns: 0 minmax(0, 1fr) var(--za-workbench-current-width, 0px);
+}
+
+:root[data-sidebar-collapsed='true'] .app-sidebar {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .app-sidebar {
