@@ -14,6 +14,8 @@ import type {
   AppearancePalette,
   AppearanceScheme,
   AppearanceSettings,
+  CustomSchemeColors,
+  DiffMarkerMode,
 } from './appearanceTypes';
 import { DEFAULT_APPEARANCE_SETTINGS } from './themePresets';
 import { applyAppearance, sanitizeSettings } from './themeTokens';
@@ -28,6 +30,14 @@ interface AppearanceContextValue {
   readonly setPalette: (palette: AppearancePalette) => void;
   readonly setDensity: (density: AppearanceDensity) => void;
   readonly setFontScale: (fontScale: AppearanceFontScale) => void;
+  // 更新 custom palette 下某一明暗方案的单个颜色键（accent/background/foreground）。
+  readonly setCustomColor: (
+    scheme: 'light' | 'dark',
+    key: keyof CustomSchemeColors,
+    value: string,
+  ) => void;
+  readonly setCodeFontSize: (size: number) => void;
+  readonly setDiffMarkerMode: (mode: DiffMarkerMode) => void;
   readonly reset: () => void;
 }
 
@@ -114,6 +124,27 @@ export function AppearanceProvider({
     setSettings((current) => ({ ...current, fontScale }));
   }, []);
 
+  const setCustomColor = useCallback(
+    (scheme: 'light' | 'dark', key: keyof CustomSchemeColors, value: string) => {
+      setSettings((current) => ({
+        ...current,
+        customColors: {
+          ...current.customColors,
+          [scheme]: { ...current.customColors[scheme], [key]: value },
+        },
+      }));
+    },
+    [],
+  );
+
+  const setCodeFontSize = useCallback((size: number) => {
+    setSettings((current) => ({ ...current, codeFontSize: size }));
+  }, []);
+
+  const setDiffMarkerMode = useCallback((mode: DiffMarkerMode) => {
+    setSettings((current) => ({ ...current, diffMarkerMode: mode }));
+  }, []);
+
   const reset = useCallback(() => setSettings(DEFAULT_APPEARANCE_SETTINGS), []);
 
   const value = useMemo<AppearanceContextValue>(() => ({
@@ -123,8 +154,22 @@ export function AppearanceProvider({
     setPalette,
     setDensity,
     setFontScale,
+    setCustomColor,
+    setCodeFontSize,
+    setDiffMarkerMode,
     reset,
-  }), [activeScheme, reset, setDensity, setFontScale, setMode, setPalette, settings]);
+  }), [
+    activeScheme,
+    reset,
+    setCodeFontSize,
+    setCustomColor,
+    setDensity,
+    setDiffMarkerMode,
+    setFontScale,
+    setMode,
+    setPalette,
+    settings,
+  ]);
 
   return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
 }

@@ -2,6 +2,11 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { useAppearance } from './AppearanceProvider';
 import { PALETTE_LABELS, PALETTE_SWATCHES } from './themePresets';
 import { PaletteSelect } from './PaletteSelect';
+import {
+  CODE_FONT_SIZE_MAX,
+  CODE_FONT_SIZE_MIN,
+  type CustomSchemeColors,
+} from './appearanceTypes';
 
 /**
  * AppearancePanel 负责切换：
@@ -24,9 +29,32 @@ export function AppearancePanel({
   readonly i18n: I18nRuntime;
   readonly onBack?: () => void;
 }) {
-  const { settings, activeScheme, setMode, setPalette, setFontScale, reset } = useAppearance();
+  const {
+    settings,
+    activeScheme,
+    setMode,
+    setPalette,
+    setFontScale,
+    setCustomColor,
+    setCodeFontSize,
+    setDiffMarkerMode,
+    reset,
+  } = useAppearance();
   const activePaletteLabel = PALETTE_LABELS[settings.palette];
   const swatches = PALETTE_SWATCHES[settings.palette][activeScheme];
+  const isCustom = settings.palette === 'custom';
+
+  // 自定义三色控件：浅/深各一组（accent/background/foreground）。
+  const customColorKeys: readonly (keyof CustomSchemeColors)[] = [
+    'accent',
+    'background',
+    'foreground',
+  ];
+  const customColorLabel: Record<keyof CustomSchemeColors, string> = {
+    accent: i18n.t('appearance.accent'),
+    background: i18n.t('appearance.background'),
+    foreground: i18n.t('appearance.foreground'),
+  };
 
   return (
     <div className="appearance-panel">
@@ -93,6 +121,77 @@ export function AppearancePanel({
               onClick={() => setFontScale(fontScale)}
             >
               {i18n.t(`appearance.fontScale.${fontScale}`)}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {isCustom ? (
+        <section className="appearance-group">
+          <div className="appearance-field-label">{i18n.t('appearance.custom')}</div>
+          {(['light', 'dark'] as const).map((scheme) => (
+            <div key={scheme} className="appearance-custom-scheme">
+              <div className="appearance-custom-scheme-label">
+                {i18n.t(`appearance.scheme.${scheme}`)}
+              </div>
+              <div className="appearance-custom-colors">
+                {customColorKeys.map((key) => (
+                  <label key={key} className="appearance-custom-color">
+                    <input
+                      type="color"
+                      value={settings.customColors[scheme][key]}
+                      onChange={(e) => setCustomColor(scheme, key, e.target.value)}
+                      aria-label={`${i18n.t(`appearance.scheme.${scheme}`)} ${customColorLabel[key]}`}
+                    />
+                    <span className="appearance-custom-color-name">{customColorLabel[key]}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          ))}
+        </section>
+      ) : null}
+
+      <section className="appearance-group">
+        <div className="appearance-field-label">{i18n.t('appearance.codeFont')}</div>
+        <div className="appearance-code-font">
+          <input
+            type="range"
+            min={CODE_FONT_SIZE_MIN}
+            max={CODE_FONT_SIZE_MAX}
+            step={1}
+            value={settings.codeFontSize}
+            onChange={(e) => setCodeFontSize(Number(e.target.value))}
+            aria-label={i18n.t('appearance.codeFont')}
+          />
+          <input
+            type="number"
+            min={CODE_FONT_SIZE_MIN}
+            max={CODE_FONT_SIZE_MAX}
+            step={1}
+            value={settings.codeFontSize}
+            onChange={(e) => setCodeFontSize(Number(e.target.value))}
+            aria-label={i18n.t('appearance.codeFont')}
+          />
+          <span className="appearance-code-font-unit">px</span>
+        </div>
+      </section>
+
+      <section className="appearance-group">
+        <div className="appearance-field-label">{i18n.t('appearance.diffMarker')}</div>
+        <div
+          className="appearance-segmented appearance-segmented--two"
+          role="group"
+          aria-label={i18n.t('appearance.diffMarker')}
+        >
+          {(['color', 'sign'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className={settings.diffMarkerMode === mode ? 'active' : ''}
+              onClick={() => setDiffMarkerMode(mode)}
+            >
+              {i18n.t(`appearance.diffMarker.${mode}`)}
             </button>
           ))}
         </div>

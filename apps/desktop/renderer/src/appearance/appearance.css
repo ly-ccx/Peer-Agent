@@ -202,6 +202,67 @@
     color: var(--za-text-faint);
   }
 
+  /* 自定义三色（仅 palette=custom 时渲染）：浅/深各一组色块 */
+  .appearance-custom-scheme {
+    @apply grid gap-1.5 rounded-[8px] p-2;
+    border: 1px solid var(--za-line);
+    background: var(--za-bg-1);
+  }
+
+  .appearance-custom-scheme + .appearance-custom-scheme {
+    margin-top: 0.5rem;
+  }
+
+  .appearance-custom-scheme-label {
+    @apply text-[11px] font-medium;
+    color: var(--za-text-muted);
+  }
+
+  .appearance-custom-colors {
+    @apply grid gap-2;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .appearance-custom-color {
+    @apply grid items-center gap-1 text-[10px];
+    justify-items: center;
+    cursor: pointer;
+  }
+
+  .appearance-custom-color input[type='color'] {
+    @apply h-7 w-full rounded-[6px] p-0;
+    border: 1px solid var(--za-line);
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .appearance-custom-color-name {
+    color: var(--za-text-faint);
+  }
+
+  /* 代码字号：滑块 + 数字输入 + 单位 */
+  .appearance-code-font {
+    @apply grid items-center gap-2;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .appearance-code-font input[type='number'] {
+    @apply w-14 rounded-[6px] px-2 py-1 text-[12px] tabular-nums;
+    border: 1px solid var(--za-line);
+    background: var(--za-surface-1);
+    color: var(--za-text);
+  }
+
+  .appearance-code-font-unit {
+    @apply text-[11px];
+    color: var(--za-text-faint);
+  }
+
+  /* 差异标记：两段分段控件（复用 segmented 视觉，列数改 2） */
+  .appearance-segmented.appearance-segmented--two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .appearance-reset {
     @apply w-fit justify-self-end rounded-[4px] px-2.5 py-1.5 text-[12px] font-normal;
     color: var(--za-text-faint);

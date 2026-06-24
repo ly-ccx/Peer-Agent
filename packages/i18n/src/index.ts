@@ -67,6 +67,9 @@ export type TranslationKey =
   | 'appearance.foreground'
   | 'appearance.uiFont'
   | 'appearance.codeFont'
+  | 'appearance.diffMarker'
+  | 'appearance.diffMarker.color'
+  | 'appearance.diffMarker.sign'
   | 'appearance.translucentSidebar'
   | 'appearance.contrast'
   | 'appearance.fontScale'
@@ -552,6 +555,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.foreground': '文字',
     'appearance.uiFont': '界面字体',
     'appearance.codeFont': '代码字体',
+    'appearance.diffMarker': '差异标记',
+    'appearance.diffMarker.color': '颜色',
+    'appearance.diffMarker.sign': '+/- 符号',
     'appearance.translucentSidebar': '半透明侧栏',
     'appearance.contrast': '对比度',
     'appearance.fontScale': '界面字体大小',
@@ -1056,6 +1062,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.foreground': 'Foreground',
     'appearance.uiFont': 'UI font',
     'appearance.codeFont': 'Code font',
+    'appearance.diffMarker': 'Diff markers',
+    'appearance.diffMarker.color': 'Color',
+    'appearance.diffMarker.sign': '+/- signs',
     'appearance.translucentSidebar': 'Translucent sidebar',
     'appearance.contrast': 'Contrast',
     'appearance.fontScale': 'Interface font size',

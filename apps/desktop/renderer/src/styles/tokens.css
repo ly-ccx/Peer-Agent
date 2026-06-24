@@ -224,6 +224,25 @@
   --za-user-background: #FAFBFC;
   --za-user-foreground: #1A1D21;
 
+  /* ─── 代码字号（px）───
+   *  默认值；AppearanceProvider 在 <html style 上注入同名变量覆盖。
+   *  编辑器 / 代码块 / Diff 视图统一引用 var(--za-code-font-size)。 */
+  --za-code-font-size: 12px;
+
+  /* ─── Diff 语义 token（浅色）───
+   *  以现有语义层派生；catppuccin / custom 因重定义了底层
+   *  --za-good/danger/accent/surface，这些 var() 在 use-site 解析即自动跟随，
+   *  无需在每个 palette 块重复定义。
+   *    add → 新增行；del → 删除行；gutter → 行号列；hunk → @@ 区段头 */
+  --za-diff-add-fg: var(--za-good);
+  --za-diff-add-bg: var(--za-good-soft);
+  --za-diff-del-fg: var(--za-danger);
+  --za-diff-del-bg: var(--za-danger-soft);
+  --za-diff-gutter-bg: var(--za-surface-1);
+  --za-diff-gutter-fg: var(--za-text-faint);
+  --za-diff-hunk-fg: var(--za-accent);
+  --za-diff-hunk-bg: var(--za-accent-soft);
+
   /* ─────────────────────────────────────────────────────────────
    *  --pa-* 别名层
    *  设置页 / MCP 面板早期按 --pa-* 命名编写，但这套 token 从未定义，
@@ -538,6 +557,50 @@
   --za-user-accent: #89B4FA;
   --za-user-background: #1E1E2E;
   --za-user-foreground: #CDD6F4;
+}
+
+/* ─────────────────────────────────────────────────────────────
+ *  Palette: Custom（用户自定义三色）
+ *  策略：以 Frost 中性阶为兜底骨架——本块不重定义 chrome/paper/graphite，
+ *  让它们继承 :root（浅）/ [data-theme="dark"]（深）的 Frost 中性值；
+ *  仅把 强调 / 背景 / 前景 三个语义锚点改为引用运行时注入变量：
+ *    --za-custom-accent / --za-custom-bg / --za-custom-fg
+ *  （由 AppearanceProvider 在 <html style 上按当前 scheme 注入，
+ *   未注入时回退到 Frost 默认，保证无 JS 兜底也不崩。）
+ * ───────────────────────────────────────────────────────────── */
+[data-palette="custom"]:root,
+[data-palette="custom"][data-theme="light"] {
+  color-scheme: light;
+
+  --za-accent: var(--za-custom-accent, #3B7FAB);
+  --za-accent-soft: var(--za-custom-accent, #3B7FAB);
+  --za-user-accent: var(--za-custom-accent, #3B7FAB);
+
+  --za-bg-0: var(--za-custom-bg, #FAFBFC);
+  --za-bg-1: var(--za-custom-bg, #F3F5F8);
+  --za-app-bg: var(--za-custom-bg, #FAFBFC);
+  --za-thread-bg: var(--za-custom-bg, #FAFBFC);
+  --za-user-background: var(--za-custom-bg, #FAFBFC);
+
+  --za-text: var(--za-custom-fg, #1A1D21);
+  --za-user-foreground: var(--za-custom-fg, #1A1D21);
+}
+
+[data-palette="custom"][data-theme="dark"] {
+  color-scheme: dark;
+
+  --za-accent: var(--za-custom-accent, #5D9CBF);
+  --za-accent-soft: var(--za-custom-accent, #5D9CBF);
+  --za-user-accent: var(--za-custom-accent, #5D9CBF);
+
+  --za-bg-0: var(--za-custom-bg, #11141A);
+  --za-bg-1: var(--za-custom-bg, #161A21);
+  --za-app-bg: var(--za-custom-bg, #11141A);
+  --za-thread-bg: var(--za-custom-bg, #11141A);
+  --za-user-background: var(--za-custom-bg, #11141A);
+
+  --za-text: var(--za-custom-fg, #EDF1F6);
+  --za-user-foreground: var(--za-custom-fg, #EDF1F6);
 }
 
 /* ─────────────────────────────────────────────────────────────

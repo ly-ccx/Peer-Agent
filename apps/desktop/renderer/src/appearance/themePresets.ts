@@ -14,7 +14,9 @@ import type {
   AppearancePalette,
   AppearanceSettings,
   AppearanceScheme,
+  CustomColors,
 } from './appearanceTypes';
+import { DEFAULT_CODE_FONT_SIZE, DEFAULT_DIFF_MARKER_MODE } from './appearanceTypes';
 import { PALETTE_REGISTRY } from './paletteRegistry';
 
 export const DESIGN_SYSTEM_NAME = 'Peer Frost';
@@ -51,11 +53,32 @@ export const PEER_FROST_TOKENS: Readonly<Record<AppearanceScheme, ThemeSnapshot>
   },
 };
 
+/**
+ * custom palette 的默认三色（浅/深各一套）。
+ * 取 Peer Frost 的核心三色锚点作为初值，保证用户首次切到 custom 时观感与 frost 接近，
+ * 再在此基础上自定义。必须与 paletteRegistry 中 custom 记录的 swatches 保持一致。
+ */
+export const DEFAULT_CUSTOM_COLORS: CustomColors = {
+  light: {
+    accent: '#3B7FAB',
+    background: '#EDF1F6',
+    foreground: '#1A1D21',
+  },
+  dark: {
+    accent: '#5D9CBF',
+    background: '#11141A',
+    foreground: '#EDF1F6',
+  },
+};
+
 export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
   mode: 'system',
   palette: 'frost',
   density: 'comfortable',
   fontScale: 'medium',
+  customColors: DEFAULT_CUSTOM_COLORS,
+  codeFontSize: DEFAULT_CODE_FONT_SIZE,
+  diffMarkerMode: DEFAULT_DIFF_MARKER_MODE,
 };
 
 /** 单个色板项：展示名 + 十六进制色值（从注册表 re-export）。 */

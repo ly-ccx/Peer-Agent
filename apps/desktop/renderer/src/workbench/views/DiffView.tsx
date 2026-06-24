@@ -25,6 +25,67 @@ function basename(p: string): string {
 
 type LineKind = 'add' | 'del' | 'hunk' | 'meta' | 'ctx';
 
+// 单个渲染行：除内容/类型外，携带双列行号（旧文件号 / 新文件号）。
+// 删除行只有 oldNo，新增行只有 newNo，上下文行两者都有，hunk/meta 行均无。
+interface DiffLine {
+  readonly kind: LineKind;
+  readonly text: string;
+  readonly oldNo: number | null;
+  readonly newNo: number | null;
+}
+
+// 解析 hunk 头 "@@ -oldStart,oldCount +newStart,newCount @@" 的起始行号。
+// 返回 [oldStart, newStart]；解析失败返回 null。
+function parseHunkHeader(line: string): readonly [number, number] | null {
+  const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2])];
+}
+
+// 把 unified diff 文本逐行解析为带双列行号的 DiffLine[]。
+// 通过跟踪当前 hunk 的旧/新游标，对 ctx/add/del 行分别推进对应游标。
+function buildDiffLines(text: string): DiffLine[] {
+  if (!text) return [];
+  const out: DiffLine[] = [];
+  let oldCursor = 0;
+  let newCursor = 0;
+  for (const raw of text.replace(/\n$/, '').split('\n')) {
+    const kind = classifyLine(raw);
+    if (kind === 'hunk') {
+      const parsed = parseHunkHeader(raw);
+      if (parsed) {
+        oldCursor = parsed[0];
+        newCursor = parsed[1];
+      }
+      out.push({ kind, text: raw, oldNo: null, newNo: null });
+      continue;
+    }
+    if (kind === 'meta') {
+      out.push({ kind, text: raw, oldNo: null, newNo: null });
+      continue;
+    }
+    // add/del/ctx 行：剥掉 git 的首字符标记（+/-/空格），
+    // 让内容列只放纯代码；增删的视觉区分交给配色（color 模式）
+    // 或 CSS ::before 注入的 +/- 符号（sign 模式）。
+    const body = raw.slice(1);
+    if (kind === 'add') {
+      out.push({ kind, text: body, oldNo: null, newNo: newCursor });
+      newCursor += 1;
+      continue;
+    }
+    if (kind === 'del') {
+      out.push({ kind, text: body, oldNo: oldCursor, newNo: null });
+      oldCursor += 1;
+      continue;
+    }
+    // ctx：旧/新都推进
+    out.push({ kind, text: body, oldNo: oldCursor, newNo: newCursor });
+    oldCursor += 1;
+    newCursor += 1;
+  }
+  return out;
+}
+
 function classifyLine(line: string): LineKind {
   if (line.startsWith('@@')) return 'hunk';
   if (
@@ -88,11 +149,7 @@ export function DiffView({ isZh }: DiffViewProps) {
     void load();
   }, [load]);
 
-  const lines = useMemo(() => {
-    const text = state.result?.diffText ?? '';
-    if (!text) return [] as { kind: LineKind; text: string }[];
-    return text.replace(/\n$/, '').split('\n').map((text) => ({ kind: classifyLine(text), text }));
-  }, [state.result]);
+  const lines = useMemo(() => buildDiffLines(state.result?.diffText ?? ''), [state.result]);
 
   if (!diffTarget) {
     return (
@@ -201,8 +258,15 @@ export function DiffView({ isZh }: DiffViewProps) {
             <code>
               {lines.map((line, i) => (
                 <span key={i} className={`diff-line diff-line--${line.kind}`}>
-                  {line.text === '' ? '\u00a0' : line.text}
-                  {'\n'}
+                  <span className="diff-gutter diff-gutter--old" aria-hidden="true">
+                    {line.oldNo ?? ''}
+                  </span>
+                  <span className="diff-gutter diff-gutter--new" aria-hidden="true">
+                    {line.newNo ?? ''}
+                  </span>
+                  <span className="diff-line-text">
+                    {line.text === '' ? '\u00a0' : line.text}
+                  </span>
                 </span>
               ))}
             </code>
