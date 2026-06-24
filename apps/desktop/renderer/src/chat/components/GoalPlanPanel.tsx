@@ -598,9 +598,9 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
           && plan.status !== 'cancelled',
       );
       // 仅 reload（广播驱动，同一会话内的实时变更）路径检测「真正新建」：
-      // 基线为 0 且新数量 > 0 → 本会话内刚创建了第一个计划，触发一次自动展开。
+      // 新数量 > 基线 → 本会话内新建了计划（含同会话第 2/3/N 个），触发一次自动展开。
       // 切换会话由下方 load effect 处理（只刷基线、不触发），故这里不会被切会话误触。
-      if (prevPlanCountRef.current === 0 && scopedResult.length > 0) {
+      if (scopedResult.length > prevPlanCountRef.current) {
         onGoalPlanCreated?.();
       }
       prevPlanCountRef.current = scopedResult.length;
