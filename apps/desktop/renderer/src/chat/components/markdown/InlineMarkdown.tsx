@@ -57,12 +57,17 @@ export function parseFilePathToken(
   const isPosixAbs = pathPart.startsWith('/');
   const isHomeAbs = pathPart.startsWith('~/');
   const isAbsolute = isWindowsAbs || isPosixAbs || isHomeAbs;
+  const hasExplicitRelPrefix = pathPart.startsWith('./') || pathPart.startsWith('../');
+  // 裸相对路径（无 ./ 或 ../ 前缀）易与 "org/repo" 这类非路径文本混淆。
+  // 仅当它"像文件"时才放行：末段带扩展名，或含 ≥2 个斜杠（更深的目录结构）。
+  // 例：chat-runtime/foo.mjs ✓（带扩展名）、a/b/c ✓（≥2 斜杠）、yinLiangDream/Peer-Agent ✗。
+  const slashCount = (pathPart.match(/\//g) ?? []).length;
+  const lastSegment = pathPart.slice(pathPart.lastIndexOf('/') + 1);
+  const lastSegmentHasExt = /\.[A-Za-z0-9]+$/.test(lastSegment);
+  const looksLikeBareFilePath =
+    pathPart.includes('/') && (lastSegmentHasExt || slashCount >= 2);
   const isRelative =
-    !isAbsolute &&
-    (pathPart.startsWith('./') ||
-      pathPart.startsWith('../') ||
-      // 形如 a/b/c.ext：至少包含一个斜杠
-      pathPart.includes('/'));
+    !isAbsolute && (hasExplicitRelPrefix || looksLikeBareFilePath);
 
   if (!isAbsolute && !isRelative) return null;
 
