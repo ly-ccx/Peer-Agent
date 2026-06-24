@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { clientApi } from '../../../clientApi';
 import { useWorkbenchOptional } from '../../../workbench/WorkbenchContext';
 
@@ -58,16 +58,13 @@ export function parseFilePathToken(
   const isHomeAbs = pathPart.startsWith('~/');
   const isAbsolute = isWindowsAbs || isPosixAbs || isHomeAbs;
   const hasExplicitRelPrefix = pathPart.startsWith('./') || pathPart.startsWith('../');
-  // 裸相对路径（无 ./ 或 ../ 前缀）易与 "org/repo" 这类非路径文本混淆。
-  // 仅当它"像文件"时才放行：末段带扩展名，或含 ≥2 个斜杠（更深的目录结构）。
-  // 例：chat-runtime/foo.mjs ✓（带扩展名）、a/b/c ✓（≥2 斜杠）、yinLiangDream/Peer-Agent ✗。
-  const slashCount = (pathPart.match(/\//g) ?? []).length;
-  const lastSegment = pathPart.slice(pathPart.lastIndexOf('/') + 1);
-  const lastSegmentHasExt = /\.[A-Za-z0-9]+$/.test(lastSegment);
-  const looksLikeBareFilePath =
-    pathPart.includes('/') && (lastSegmentHasExt || slashCount >= 2);
+  // 裸相对路径（无 ./ 或 ../ 前缀）只要含 `/` 即视为「候选」，这里只做字符/格式初筛。
+  // 是否真的是文件，交由 FilePathCode 的磁盘存在性校验权威判定：git 分支名/仓库名/
+  // 版本号（dev/0.0.1、origin/main、org/repo）因磁盘上不存在，不会被升级为可点链接，
+  // 无需在此用正则去猜「它像不像文件 / 是不是 git」。
+  const looksLikeBareRelPath = pathPart.includes('/');
   const isRelative =
-    !isAbsolute && (hasExplicitRelPrefix || looksLikeBareFilePath);
+    !isAbsolute && (hasExplicitRelPrefix || looksLikeBareRelPath);
 
   if (!isAbsolute && !isRelative) return null;
 
@@ -102,18 +99,42 @@ function FilePathCode({ raw }: { raw: string }) {
   const workbench = useWorkbenchOptional();
   const parsed = parseFilePathToken(raw);
   const absPath = parsed ? resolveAbsolutePath(parsed, workspacePath) : null;
+  // 透传原始相对路径：当 absPath 在当前 workspace 解析不到时，
+  // 主进程可用它跨已知 workspace 回退查找（跨仓库引用场景）。
+  const relPath = parsed && !parsed.isAbsolute ? parsed.path : undefined;
 
-  if (!parsed || !absPath) {
-    // 不是路径，或相对路径但无 workspacePath 解析基准 → 保持普通 inline code 行为
+  // 存在性校验：候选路径只有在磁盘上真实存在时才升级为可点链接。
+  // git 分支名/仓库名/版本号（dev/0.0.1、origin/main、org/repo）因磁盘上没有对应文件
+  // 而保持普通文本——以「是不是真文件」为权威判据，而非去识别「它是不是 git」。
+  const [exists, setExists] = useState(false);
+  useEffect(() => {
+    if (!absPath) {
+      setExists(false);
+      return;
+    }
+    let cancelled = false;
+    setExists(false);
+    Promise.resolve()
+      .then(() => clientApi.fileExists(absPath, workspacePath ?? undefined, relPath))
+      .then((result) => {
+        if (!cancelled) setExists(Boolean(result?.exists));
+      })
+      .catch(() => {
+        if (!cancelled) setExists(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [absPath, workspacePath, relPath]);
+
+  if (!parsed || !absPath || !exists) {
+    // 不是路径 / 无 workspacePath 解析基准 / 磁盘上不存在 → 保持普通 inline code 行为
     return <code>{raw}</code>;
   }
 
   const handleOpen = () => {
     // 优先：打开右侧 Workbench 的 Diff 视图展示该文件的 git diff。
     if (workbench) {
-      // 透传原始相对路径：当 absPath 在当前 workspace 解析不到时，
-      // 主进程可用它跨已知 workspace 回退查找（跨仓库引用场景）。
-      const relPath = parsed.isAbsolute ? undefined : parsed.path;
       workbench.openDiff(absPath, workspacePath ?? undefined, relPath);
       return;
     }

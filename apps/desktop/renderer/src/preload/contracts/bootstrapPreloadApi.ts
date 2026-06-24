@@ -195,6 +195,17 @@ export interface BootstrapPreloadApi {
      */
     readonly resolvedFrom?: string;
   }>;
+  /**
+   * 校验给定路径是否对应磁盘上真实存在的文件，供渲染层判断聊天消息中的「路径样式文本」
+   * 是否为真实文件引用（而非 git 分支名/仓库名/版本号等）。
+   * - absPath 必须是绝对路径；在当前 workspace 找不到时，会用 relPath 在其他已知 workspace 回退查找。
+   * - resolvedFrom 标注实际命中的 workspace（跨仓库引用场景）。
+   */
+  readonly fileExists: (
+    absPath: string,
+    workspaceRoot?: string,
+    relPath?: string,
+  ) => Promise<{ readonly exists: boolean; readonly resolvedFrom?: string }>;
   readonly listShellTasks: () => Promise<readonly Record<string, unknown>[]>;
   readonly stopActiveShellTask: () => Promise<Record<string, unknown>>;
   readonly stopShellTask: (taskId: string) => Promise<Record<string, unknown>>;

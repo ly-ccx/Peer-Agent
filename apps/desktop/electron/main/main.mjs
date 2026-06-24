@@ -901,6 +901,41 @@ ipcMain.handle('git:diff', async (_event, { absPath, workspaceRoot, relPath } = 
   }
 });
 
+// 校验给定路径是否对应磁盘上真实存在的文件。供渲染层判断聊天中的「路径样式文本」
+// 是否为真实文件引用：git 分支名/仓库名/版本号（dev/0.0.1、origin/main、org/repo）
+// 因磁盘上不存在而返回 exists:false，从而不被升级为可点链接——无需去识别「它是不是 git」。
+// absPath 在当前 workspace 找不到时，复用 git:diff 的跨 workspace 回退：用 relPath 逐一拼接已知 workspace。
+ipcMain.handle('fs:exists', (_event, { absPath, workspaceRoot, relPath } = {}) => {
+  try {
+    if (!absPath || typeof absPath !== 'string') return { exists: false };
+    const target = path.normalize(absPath);
+    if (!path.isAbsolute(target)) return { exists: false };
+    if (existsSync(target)) return { exists: true };
+    const cleanRel = typeof relPath === 'string' && relPath.trim()
+      ? relPath.replace(/^[/\\]+/, '').replace(/^(\.\.?[/\\])+/, '')
+      : '';
+    if (cleanRel) {
+      const all = settingsStore.getAll();
+      const candidates = [
+        ...(all.workspaces || []).map((w) => (w && typeof w === 'object' ? w.path : w)),
+        all.activeWorkspace,
+        workspaceRoot,
+      ].filter((p) => typeof p === 'string' && p);
+      const seen = new Set();
+      for (const ws of candidates) {
+        if (seen.has(ws)) continue;
+        seen.add(ws);
+        if (existsSync(path.normalize(path.join(ws, cleanRel)))) {
+          return { exists: true, resolvedFrom: ws };
+        }
+      }
+    }
+    return { exists: false };
+  } catch {
+    return { exists: false };
+  }
+});
+
 // ── Conversations ──
 ipcMain.handle('conversations:list', (_, params) => {
   const listParams = { status: params?.status };

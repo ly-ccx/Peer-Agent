@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   runHealthCheck: (toolCallId) => ipcRenderer.invoke('core:health', { toolCallId }),
   openPath: (absPath, workspaceRoot) => ipcRenderer.invoke('shell:open-path', { absPath, workspaceRoot }),
   gitDiff: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('git:diff', { absPath, workspaceRoot, relPath }),
+  fileExists: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:exists', { absPath, workspaceRoot, relPath }),
   listShellTasks: () => ipcRenderer.invoke('shell:tasks:list'),
   stopActiveShellTask: () => ipcRenderer.invoke('shell:tasks:stop-active'),
   stopShellTask: (taskId) => ipcRenderer.invoke('shell:tasks:stop', { taskId }),
