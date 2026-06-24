@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { WorkbenchToggle } from '../../../workbench/WorkbenchToggle';
 
 export interface ChatHeaderAction {
   readonly id: string;
@@ -208,6 +209,7 @@ export function ChatHeader({
             </svg>
           </button>
         ) : null}
+        <WorkbenchToggle isZh={isZh} />
       </div>
     </header>
   );

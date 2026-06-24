@@ -14,25 +14,6 @@
     border-radius: var(--radius-lg);
   }
 
-  .header {
-    @apply absolute top-0 z-30 flex h-11 items-center justify-end pr-3;
-    left: var(--za-sidebar-width, 300px);
-    right: 0;
-    border-bottom: none;
-    background: transparent;
-    -webkit-app-region: drag;
-    pointer-events: none;
-    animation: za-fade-rise var(--za-motion-medium) var(--za-ease-out) both;
-  }
-
-  :root[data-sidebar-collapsed='true'] .header {
-    left: 0;
-  }
-
-  .header > * {
-    pointer-events: auto;
-  }
-
   .profile-chip {
     @apply flex items-center gap-2;
     -webkit-app-region: no-drag;

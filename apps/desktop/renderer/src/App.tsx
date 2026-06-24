@@ -1,7 +1,6 @@
 import { createI18n } from '@peer-agent/i18n';
 import type { LlmProviderConfigView } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppHeader } from './app/components/AppHeader';
 import { SettingsPage } from './app/components/SettingsPage';
 import { useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { ChatSurface } from './chat/components/ChatSurface';
@@ -294,7 +293,6 @@ export function App() {
               </section>
             </section>
             <WorkbenchPanel isZh={isZh} workspacePath={activeWorkspace} />
-            <AppHeader isZh={isZh} />
           </div>
         </WorkbenchProvider>
       ) : (
