@@ -314,7 +314,7 @@
 .tool-calls-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-1);
   min-width: 0;
   max-width: 100%;
 }
@@ -339,6 +339,27 @@
 .tool-call-card.synthetic {
   border-color: var(--za-warn-soft);
   background: var(--za-surface-0);
+}
+/* 普通命令卡极简单行：去掉边框/背景/圆角与运行态脉冲，压扁为一行文字。
+   交互卡(.interaction-card)仍保留卡片外观，故用 :not 排除。 */
+.tool-call-card:not(.interaction-card) {
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  overflow: visible;
+  transition: background var(--za-motion-fast) var(--za-ease-out);
+}
+.tool-call-card:not(.interaction-card).running,
+.tool-call-card:not(.interaction-card).synthetic {
+  border-color: transparent;
+  background: transparent;
+  animation: tool-card-in var(--za-motion-medium) var(--za-ease-out) both;
+}
+.tool-call-card:not(.interaction-card):hover {
+  background: var(--chrome-sunken);
+}
+.tool-call-card:not(.interaction-card) .tool-call-header {
+  padding: var(--space-1) var(--space-2);
 }
 @keyframes tool-card-in {
   from { opacity: 0; transform: translateX(-8px); }
