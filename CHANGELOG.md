@@ -2,6 +2,26 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.0.1-beta.11 - 2026-06-24
+
+### Added
+
+- Workbench diff view resolves and opens cross-repo file paths; file path links in chat are clickable.
+- Model configuration supports duplication for non-subscription providers.
+- Anthropic xhigh reasoning tier maps faithfully to native `output_config.effort=xhigh` instead of folding into high.
+
+### Changed
+
+- Default workbench width increased from 420 to 600.
+- Workbench auto-expands when a follow-up plan is created within the same conversation.
+- Rounded corners on the updater modal mascot icon.
+- Removed dead `targetRatio` / `keepRecentCount` code from context compaction (no behavior change).
+
+### Fixed
+
+- Path links are resolved by actual file existence, no longer mistaking git branch names or `org/repo` strings for clickable local paths.
+- Goal plan panel scrolling: cards are no longer compressed, the body scrolls correctly, and the progress bar shows in the main card.
+
 ## 0.0.1 - Unreleased
 
 Status: active development.
