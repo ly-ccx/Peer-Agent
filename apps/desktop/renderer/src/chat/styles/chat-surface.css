@@ -1069,6 +1069,7 @@
   padding: 6px 8px;
   outline: none;
   max-height: 120px;
+  overflow-y: auto;
   font-family: var(--font-sans);
 }
 .chat-composer textarea::placeholder {

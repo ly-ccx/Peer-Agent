@@ -459,6 +459,15 @@ export function ChatSurface({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // textarea 自适应高度:随内容从单行增高,到 CSS max-height(120px) 后内部滚动。
+  // 监听 draft 而非只在 onChange 处理,可同时覆盖恢复草稿/slash 命令/清空等编程式赋值路径。
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [draft]);
+
   const updateThreadBottomState = useCallback((container: HTMLDivElement | null) => {
     if (!container) return true;
     const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
