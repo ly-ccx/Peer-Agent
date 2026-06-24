@@ -299,7 +299,7 @@
     align-items: stretch;
     white-space: pre;
   }
-  /* 双列行号 gutter：右对齐、等宽、不可选中（aria-hidden），配色走 diff token */
+  /* 双列行号 gutter：右对齐、等宽、不可选中（aria-hidden），透明底融入整行色块（对齐 Codex） */
   .diff-gutter {
     flex: 0 0 auto;
     box-sizing: content-box;
@@ -307,28 +307,33 @@
     padding: 0 6px;
     text-align: right;
     color: var(--za-diff-gutter-fg, var(--za-text-faint));
-    background: var(--za-diff-gutter-bg, var(--za-surface-1));
+    background: transparent;
+    opacity: 0.7;
     user-select: none;
     -webkit-user-select: none;
-  }
-  .diff-gutter--new {
-    border-right: 1px solid var(--za-line);
   }
   .diff-line-text {
     flex: 1 1 auto;
     padding: 0 12px;
   }
-  .diff-line--add .diff-line-text {
+  /* 增/删/hunk 色块铺满整行（含行号列）：背景挂在行容器上，文字色留在内容列 */
+  .diff-line--add {
     background: var(--za-diff-add-bg, rgba(46, 160, 67, 0.16));
+  }
+  .diff-line--add .diff-line-text {
     color: var(--za-diff-add-fg, #1a7f37);
   }
-  .diff-line--del .diff-line-text {
+  .diff-line--del {
     background: var(--za-diff-del-bg, rgba(248, 81, 73, 0.16));
+  }
+  .diff-line--del .diff-line-text {
     color: var(--za-diff-del-fg, #cf222e);
+  }
+  .diff-line--hunk {
+    background: var(--za-diff-hunk-bg, var(--za-surface-1));
   }
   .diff-line--hunk .diff-line-text {
     color: var(--za-diff-hunk-fg, var(--za-accent, #3b7fab));
-    background: var(--za-diff-hunk-bg, var(--za-surface-1));
   }
   .diff-line--meta .diff-line-text {
     color: var(--za-text-muted);
