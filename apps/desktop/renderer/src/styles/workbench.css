@@ -130,6 +130,11 @@
     inset-block-start: 0;
   }
 
+  /* 浏览器视图：工具栏上提贴顶，消除工具栏上方的空白安全区（镜像 Diff 范式） */
+  .workbench-view--browser {
+    inset-block-start: 0;
+  }
+
   .workbench-view[data-active='true'] {
     visibility: visible;
     pointer-events: auto;
@@ -473,5 +478,262 @@
   .workbench-toggle:focus-visible {
     outline: none;
     box-shadow: 0 0 0 2px var(--za-focus);
+  }
+}
+
+/* BrowserView · 内嵌可见浏览器（webview 载体）
+ * 结构：toolbar（导航按钮 + 地址栏）/ progress / stage（webview + 错误/空白态）/ statusbar
+ */
+@layer components {
+  .browser-view {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--za-surface-1);
+  }
+
+  /* 工具条：导航按钮组 + 地址栏 */
+  .browser-toolbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--chrome-hairline);
+    background: var(--za-sidebar-bg);
+    /* 工具栏空白处作窗口拖拽区（镜像 Diff 标题栏）；按钮/地址栏单独 no-drag 保持可交互 */
+    -webkit-app-region: drag;
+  }
+
+  .browser-nav-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .browser-nav-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: var(--radius-frost-sm, 6px);
+    background: transparent;
+    color: var(--graphite-mute);
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+    transition: background var(--za-motion-fast), color var(--za-motion-fast);
+  }
+  .browser-nav-btn svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    display: block;
+  }
+  .browser-nav-btn:hover:not(:disabled) {
+    background: var(--chrome-hover);
+    color: var(--graphite-base);
+  }
+  .browser-nav-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  .browser-nav-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--za-focus);
+  }
+
+  /* 地址栏：填满剩余空间 */
+  .browser-address {
+    position: relative;
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    -webkit-app-region: no-drag;
+  }
+  .browser-address-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 28px;
+    padding: 0 36px 0 12px;
+    border: 1px solid var(--chrome-hairline);
+    border-radius: 999px;
+    background: var(--surface-vellum-sunken, var(--za-surface-2));
+    color: var(--graphite-base);
+    font-size: 13px;
+    outline: none;
+    -webkit-app-region: no-drag;
+    transition: border-color var(--za-motion-fast), box-shadow var(--za-motion-fast);
+  }
+  .browser-address-input::placeholder {
+    color: var(--za-text-faint);
+  }
+  .browser-address-input:focus {
+    border-color: var(--za-focus);
+    box-shadow: 0 0 0 2px var(--za-focus);
+  }
+  .browser-go-btn {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--graphite-mute);
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+    transition: background var(--za-motion-fast), color var(--za-motion-fast);
+  }
+  .browser-go-btn svg {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
+    display: block;
+  }
+  .browser-go-btn:hover {
+    background: var(--chrome-hover);
+    color: var(--graphite-base);
+  }
+
+  /* 加载进度条：顶部 2px 不确定态滑动 */
+  .browser-progress {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    z-index: 2;
+    pointer-events: none;
+    background: transparent;
+    overflow: hidden;
+  }
+  .browser-progress--active::before {
+    content: "";
+    display: block;
+    height: 100%;
+    width: 40%;
+    background: var(--za-focus, #3b7fab);
+    border-radius: 2px;
+    animation: browser-progress-slide 1.1s ease-in-out infinite;
+  }
+  @keyframes browser-progress-slide {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(320%);
+    }
+  }
+
+  /* 舞台：webview 填满 + 覆盖层（错误/空白） */
+  .browser-stage {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    background: #fff;
+  }
+  .browser-webview {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: none;
+  }
+
+  /* 错误兜底页 */
+  .browser-error {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 24px;
+    text-align: center;
+    background: var(--za-surface-1);
+  }
+  .browser-error-icon {
+    font-size: 32px;
+  }
+  .browser-error-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--graphite-base);
+  }
+  .browser-error-desc {
+    font-size: 13px;
+    color: var(--graphite-mute);
+  }
+  .browser-error-url {
+    max-width: 80%;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--za-text-faint);
+    word-break: break-all;
+  }
+  .browser-error-retry {
+    margin-top: 8px;
+    padding: 6px 16px;
+    border: 1px solid var(--chrome-hairline);
+    border-radius: var(--radius-frost-sm, 6px);
+    background: var(--za-surface-2);
+    color: var(--graphite-base);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background var(--za-motion-fast);
+  }
+  .browser-error-retry:hover {
+    background: var(--chrome-hover);
+  }
+
+  /* 空白页提示 */
+  .browser-blank {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--za-text-faint);
+    font-size: 13px;
+    pointer-events: none;
+  }
+
+  /* 状态栏：URL/标题/加载态 */
+  .browser-statusbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 12px;
+    border-top: 1px solid var(--chrome-hairline);
+    background: var(--za-sidebar-bg);
+    overflow: hidden;
+  }
+  .browser-status-text {
+    flex: 1 1 auto;
+    color: var(--za-text-faint);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .browser-progress--active::before {
+      animation: none;
+      width: 100%;
+      opacity: 0.6;
+    }
   }
 }

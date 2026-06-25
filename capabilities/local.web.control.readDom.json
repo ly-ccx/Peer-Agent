@@ -1,0 +1,43 @@
+{
+  "capabilityId": "local.web.control.readDom",
+  "name": "Browser read DOM",
+  "description": "Reads the rendered DOM (text and/or HTML) of the visible in-app browser, stores the full content as an artifact, and returns a truncated summary plus reference.",
+  "localizedName": {
+    "zh-CN": "浏览器读取DOM",
+    "en-US": "Browser read DOM"
+  },
+  "localizedDescription": {
+    "zh-CN": "读取用户眼前可见的内嵌浏览器已渲染的 DOM（文本或 HTML），可按 CSS 选择器限定范围；完整内容以 artifact 落盘，仅返回截断摘要与引用。",
+    "en-US": "Reads the rendered DOM (text and/or HTML) of the visible in-app browser, stores the full content as an artifact, and returns a truncated summary plus reference."
+  },
+  "source": "web",
+  "riskLevel": "L2_external_read",
+  "dataLevel": "D2_sensitive",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "selector": {
+        "type": "string",
+        "description": "Optional CSS selector to scope the read to a subtree (first match)."
+      },
+      "format": {
+        "type": "string",
+        "enum": ["text", "html"],
+        "description": "Whether to read visible text or raw HTML. Defaults to text."
+      }
+    }
+  },
+  "evidencePolicy": {
+    "returnMode": "artifact_ref",
+    "maxChars": 4000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": false,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}

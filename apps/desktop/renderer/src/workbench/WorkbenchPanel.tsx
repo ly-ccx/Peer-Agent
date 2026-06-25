@@ -263,7 +263,10 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
         <div className="workbench-view" data-active={activeTab === 'terminal'}>
           <TerminalView isZh={isZh} />
         </div>
-        <div className="workbench-view" data-active={activeTab === 'browser'}>
+        <div
+          className="workbench-view workbench-view--browser"
+          data-active={activeTab === 'browser'}
+        >
           <BrowserView isZh={isZh} />
         </div>
         <div className="workbench-view" data-active={activeTab === 'files'}>

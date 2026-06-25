@@ -13,6 +13,10 @@ import { runHealthStub } from './core-health.mjs';
 import { readProjectIndex } from './project-index.mjs';
 import { createSessionStore, resolveLocalAccessLevel } from './session-store.mjs';
 import { createLocalToolHost } from './runtime-gateway/local-tool-host.mjs';
+import {
+  registerBrowserWebContents,
+  unregisterBrowserWebContents,
+} from './runtime-gateway/browser-control-registry.mjs';
 import { createLocalShellProvider } from './runtime-gateway/local-shell-provider.mjs';
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
 import { createSkillStore } from './skill-store.mjs';
@@ -1023,6 +1027,18 @@ ipcMain.handle('file:read', async (_event, { absPath, workspaceRoot, relPath } =
     return { ok: false, status: 'error', content: '', error: err?.message || 'read_failed' };
   }
 });
+
+// ── 内嵌浏览器控制句柄注册（见 ADR 40）──
+// renderer 的 <webview> 在 dom-ready 后上报自己的 webContentsId，main 记下当前活跃
+// 句柄；Agent 的 browser_* 工具由 provider 用 webContents.fromId(id) 直接操控同一个
+// 可见 webview。webview 卸载时注销。
+ipcMain.handle('browser:register-webcontents', (_event, { webContentsId, url, title } = {}) => {
+  const result = registerBrowserWebContents({ webContentsId, url, title });
+  return result;
+});
+ipcMain.handle('browser:unregister-webcontents', (_event, { webContentsId } = {}) =>
+  unregisterBrowserWebContents(webContentsId),
+);
 
 // ── Conversations ──
 ipcMain.handle('conversations:list', (_, params) => {

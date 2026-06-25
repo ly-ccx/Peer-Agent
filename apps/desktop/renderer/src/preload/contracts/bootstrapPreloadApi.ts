@@ -232,6 +232,19 @@ export interface BootstrapPreloadApi {
     readonly resolvedFrom?: string;
     readonly error?: string;
   }>;
+  /**
+   * 内嵌浏览器（Workbench「浏览器」面板 <webview>）控制句柄注册 —— 见 ADR 40。
+   * renderer 在 webview `dom-ready` 后上报其 `getWebContentsId()`，main 记下当前
+   * 活跃句柄，供 Agent 的 browser_* 工具经 webContents.fromId 直接操控。
+   */
+  readonly registerBrowserWebContents: (
+    webContentsId: number,
+    url?: string,
+    title?: string,
+  ) => Promise<{ readonly ok: boolean; readonly webContentsId?: number; readonly error?: string }>;
+  readonly unregisterBrowserWebContents: (
+    webContentsId: number,
+  ) => Promise<{ readonly ok: boolean; readonly cleared: boolean }>;
   readonly listShellTasks: () => Promise<readonly Record<string, unknown>[]>;
   readonly stopActiveShellTask: () => Promise<Record<string, unknown>>;
   readonly stopShellTask: (taskId: string) => Promise<Record<string, unknown>>;

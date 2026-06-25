@@ -34,6 +34,9 @@ function riskForTool(tool) {
   }
   // web-fetch: 联网读取外部网页，按 ADR 38 归为 L3_external_write（需联网授权）。
   if (policy.kind === 'web-fetch') return 'L3_external_write';
+  // browser-control: 操控可见内嵌浏览器（导航/点击/输入/截图/读DOM），按 ADR 40 归为
+  // L3_external_write（导航联网 + 页面副作用，需授权）。
+  if (policy.kind === 'browser-control') return 'L3_external_write';
   return 'L2_local_write';
 }
 
@@ -51,6 +54,10 @@ function evidencePolicyForTool(tool) {
   }
   // web-fetch: 网页正文落本地 artifact，仅回灌摘要+ref（ADR 38）。
   if (policy.kind === 'web-fetch') {
+    return { returnMode: 'artifact_ref', maxChars: 4_000, redactSensitive: true };
+  }
+  // browser-control: 截图(PNG)/DOM 文本落本地 artifact，仅回灌摘要+ref（ADR 40）。
+  if (policy.kind === 'browser-control') {
     return { returnMode: 'artifact_ref', maxChars: 4_000, redactSensitive: true };
   }
   if (policy.kind === 'file-write') {

@@ -1,0 +1,39 @@
+{
+  "capabilityId": "local.web.control.navigate",
+  "name": "Browser navigate",
+  "description": "Navigates the visible in-app browser panel (Workbench Browser tab) to an absolute http(s) URL, in the same webview the user is watching.",
+  "localizedName": {
+    "zh-CN": "浏览器导航",
+    "en-US": "Browser navigate"
+  },
+  "localizedDescription": {
+    "zh-CN": "把用户眼前可见的内嵌浏览器（工作台「浏览器」面板）导航到指定 http(s) 网址，加载发生在用户正在观看的同一个 webview 中，需用户授权联网。",
+    "en-US": "Navigates the visible in-app browser panel (Workbench Browser tab) to an absolute http(s) URL, in the same webview the user is watching."
+  },
+  "source": "web",
+  "riskLevel": "L3_external_write",
+  "dataLevel": "D2_sensitive",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "The absolute http(s) URL to load in the visible browser."
+      }
+    },
+    "required": ["url"]
+  },
+  "evidencePolicy": {
+    "returnMode": "artifact_ref",
+    "maxChars": 4000,
+    "redactSensitive": true
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": false,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}

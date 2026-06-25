@@ -7,6 +7,7 @@ import { createLocalMcpProvider } from './local-mcp-provider.mjs';
 import { createLocalSearchAggregateProvider } from './local-search-aggregate-provider.mjs';
 import { createLocalShellProvider } from './local-shell-provider.mjs';
 import { createLocalWebProvider } from './local-web-provider.mjs';
+import { createLocalBrowserControlProvider } from './local-browser-control-provider.mjs';
 import { createFailedClientToolResult, createPermissionGrant } from './tool-result-factory.mjs';
 
 export function createLocalToolHost({
@@ -21,6 +22,7 @@ export function createLocalToolHost({
   goalProvider = createLocalGoalProvider(),
   interactionProvider = createLocalInteractionProvider(),
   webProvider = createLocalWebProvider({ userDataPath }),
+  browserControlProvider = createLocalBrowserControlProvider({ userDataPath }),
   searchAggregateProvider = createLocalSearchAggregateProvider({ workspaceRoot }),
   providers,
   extraProviders = [],
@@ -34,6 +36,7 @@ export function createLocalToolHost({
       goalProvider,
       interactionProvider,
       webProvider,
+      browserControlProvider,
       searchAggregateProvider,
       ...(mcpProvider ? [mcpProvider] : []),
       ...extraProviders,

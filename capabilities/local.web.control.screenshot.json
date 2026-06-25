@@ -1,0 +1,33 @@
+{
+  "capabilityId": "local.web.control.screenshot",
+  "name": "Browser screenshot",
+  "description": "Captures the current visual state of the visible in-app browser and stores it as an artifact, returning a summary plus reference.",
+  "localizedName": {
+    "zh-CN": "浏览器截图",
+    "en-US": "Browser screenshot"
+  },
+  "localizedDescription": {
+    "zh-CN": "对用户眼前可见的内嵌浏览器当前画面截图，结果以 artifact 落盘，仅返回摘要与引用，不直接回灌大图。",
+    "en-US": "Captures the current visual state of the visible in-app browser and stores it as an artifact, returning a summary plus reference."
+  },
+  "source": "web",
+  "riskLevel": "L2_external_read",
+  "dataLevel": "D2_sensitive",
+  "health": "needs_permission",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "evidencePolicy": {
+    "returnMode": "artifact_ref",
+    "maxChars": 2000,
+    "redactSensitive": false
+  },
+  "projectionPolicy": {
+    "cwdScope": "none",
+    "defaultBehavior": "ask",
+    "readOnlyAutoAllow": false,
+    "backgroundTasks": false,
+    "sandboxAvailable": false
+  }
+}

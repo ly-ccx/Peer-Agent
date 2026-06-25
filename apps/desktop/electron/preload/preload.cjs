@@ -34,6 +34,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
   gitDiff: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('git:diff', { absPath, workspaceRoot, relPath }),
   fileExists: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:exists', { absPath, workspaceRoot, relPath }),
   readFile: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('file:read', { absPath, workspaceRoot, relPath }),
+  // 内嵌浏览器（Workbench「浏览器」面板 <webview>）控制句柄注册（见 ADR 40）。
+  registerBrowserWebContents: (webContentsId, url, title) =>
+    ipcRenderer.invoke('browser:register-webcontents', { webContentsId, url, title }),
+  unregisterBrowserWebContents: (webContentsId) =>
+    ipcRenderer.invoke('browser:unregister-webcontents', { webContentsId }),
   listShellTasks: () => ipcRenderer.invoke('shell:tasks:list'),
   stopActiveShellTask: () => ipcRenderer.invoke('shell:tasks:stop-active'),
   stopShellTask: (taskId) => ipcRenderer.invoke('shell:tasks:stop', { taskId }),

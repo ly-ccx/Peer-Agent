@@ -4,6 +4,7 @@ import { LEGACY_LOCAL_TOOL_DEFINITIONS } from './legacy-local-tool-definitions.m
 import { createMcpToolDefinitionsFromRegistry } from './mcp-tool-definitions.mjs';
 import { SEARCH_TOOL_DEFINITIONS } from './search-tool-definitions.mjs';
 import { WEB_TOOL_DEFINITIONS } from './web-tool-definitions.mjs';
+import { BROWSER_TOOL_DEFINITIONS } from './browser-tool-definitions.mjs';
 import {
   buildAnthropicToolsFromRegistry,
   buildOpenAIToolsFromRegistry,
@@ -42,6 +43,7 @@ export function createRuntimeToolRegistry({ mcpRegistry } = {}) {
       ...GOAL_TOOL_DEFINITIONS,
       ...INTERACTION_TOOL_DEFINITIONS,
       ...WEB_TOOL_DEFINITIONS,
+      ...BROWSER_TOOL_DEFINITIONS,
       ...createMcpToolDefinitionsFromRegistry(mcpRegistry),
     ],
   });
