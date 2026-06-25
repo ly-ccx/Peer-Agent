@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, it } from 'node:test';
 import {
+  COMPACTION_CONFIG,
   compactIfNeeded,
+  estimateSummaryChars,
   estimateTokensFromMessages,
   microcompactMessagesForContext,
   resetCircuitBreaker,
@@ -21,6 +23,94 @@ const buildMessages = (count, charsPerMessage = 20) => [
     content: `message-${index}-${'x'.repeat(charsPerMessage)}`,
   })),
 ];
+
+describe('estimateSummaryChars (progress denominator)', () => {
+  // 物理上限 = maxOutputTokens(12000) * charsPerToken(4) = 48000。
+  const maxSummaryChars = 12_000 * COMPACTION_CONFIG.charsPerToken;
+
+  it('does not let a typical summary finish at ~30% of the denominator', () => {
+    // 典型场景：~120k 字符输入对话。旧逻辑分母恒为 48000，
+    // 真实摘要 ~14k 字符收完时 percent≈29% 即 done 跳满。
+    const inputChars = 120_000;
+    const denom = estimateSummaryChars({ inputChars, maxSummaryChars, receivedChars: 0 });
+
+    // 新分母应按 input*0.12 ≈ 14400 估计，而不是 48000。
+    assert.ok(
+      denom < maxSummaryChars,
+      `denominator should be below physical cap, got ${denom}`,
+    );
+
+    // 当真实摘要约 14k 字符收完时，percent 应已接近 100%（>=80%），
+    // 而不是旧逻辑的 ~30%。
+    const realSummaryChars = 14_000;
+    const denomAtEnd = estimateSummaryChars({
+      inputChars,
+      maxSummaryChars,
+      receivedChars: realSummaryChars,
+    });
+    const percent = (realSummaryChars / denomAtEnd) * 100;
+    assert.ok(
+      percent >= 80,
+      `expected near-complete percent at stream end, got ${percent.toFixed(1)}%`,
+    );
+  });
+
+  it('stays monotonic and never reaches 100% before done when output overshoots estimate', () => {
+    // 低估场景：输入很短（基准估计被夹到下限），但实际产出远超估计。
+    const inputChars = 2_000; // 估计基准 = 240 → 夹到 minEstimatedSummaryChars
+    let prevPercent = -1;
+    for (let received = 0; received <= 30_000; received += 1_000) {
+      const denom = estimateSummaryChars({
+        inputChars,
+        maxSummaryChars,
+        receivedChars: received,
+      });
+      const percent = Math.min(99, Math.round((received / denom) * 100));
+      // 单调不回退
+      assert.ok(
+        percent >= prevPercent,
+        `percent regressed: ${percent} < ${prevPercent} at received=${received}`,
+      );
+      prevPercent = percent;
+      // 在物理上限内时，分母始终大于接收量 → 真实占比 < 100%
+      if (received > 0 && denom < maxSummaryChars) {
+        assert.ok(
+          received < denom,
+          `denominator should stay ahead of received (${received} >= ${denom})`,
+        );
+      }
+    }
+  });
+
+  it('clamps to [min, maxSummaryChars] and handles invalid input', () => {
+    // 下限夹逼：极短输入。
+    assert.equal(
+      estimateSummaryChars({ inputChars: 0, maxSummaryChars, receivedChars: 0 }),
+      COMPACTION_CONFIG.minEstimatedSummaryChars,
+    );
+    // 上限夹逼：超大输入 × 压缩比会超过物理上限 → 夹到 maxSummaryChars。
+    assert.equal(
+      estimateSummaryChars({ inputChars: 10_000_000, maxSummaryChars, receivedChars: 0 }),
+      maxSummaryChars,
+    );
+    // 动态扩张也不得突破物理上限。
+    assert.equal(
+      estimateSummaryChars({
+        inputChars: 10_000_000,
+        maxSummaryChars,
+        receivedChars: maxSummaryChars,
+      }),
+      maxSummaryChars,
+    );
+    // 异常 maxSummaryChars 入参：回退到合理正数上限，结果仍为正。
+    const denom = estimateSummaryChars({
+      inputChars: 50_000,
+      maxSummaryChars: NaN,
+      receivedChars: 0,
+    });
+    assert.ok(denom > 0 && Number.isFinite(denom), `expected positive finite denom, got ${denom}`);
+  });
+});
 
 describe('context compactor', () => {
   beforeEach(() => {

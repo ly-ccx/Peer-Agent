@@ -4,7 +4,7 @@ import {
   estimateTokensFromMessages,
   microcompactMessagesForContext,
 } from '../context-compactor.mjs';
-import { beginCompaction, endCompaction } from './compaction-registry.mjs';
+import { beginCompaction, endCompaction, updateCompactionProgress } from './compaction-registry.mjs';
 
 export function isPromptTooLongResponse(status, text) {
   if (status === 413) return true;
@@ -93,11 +93,31 @@ export async function runCompactionCheck({
   }
 
   const showStart = emergency || shouldShowCompactionStart(messages, contextWindow);
+  // 字符级真实进度：仅在展示横幅时构造回调，压缩器流式收摘要时逐 chunk 回调，
+  // 转发为 progress 事件。载荷与节流策略与手动 /compact 路径（main.mjs）保持一致。
+  let onProgress;
   if (showStart) {
     // 登记表与事件 emit 单一来源：先登记会话压缩态再 emit start，
     // 使切会话查询（chat:compaction:get）与横幅事件流一致。
     beginCompaction({ conversationId, streamId, manual: false });
     webContents.send('chat:compaction', { streamId, stage: 'start', emergency });
+    let lastSentPercent = -1;
+    onProgress = ({ receivedChars, estimatedTotalChars }) => {
+      const total = estimatedTotalChars > 0 ? estimatedTotalChars : 1;
+      const percent = Math.min(99, Math.round((receivedChars / total) * 100));
+      // 节流：百分比无变化时不重复发，减少 IPC 噪声。
+      if (percent === lastSentPercent) return;
+      lastSentPercent = percent;
+      updateCompactionProgress({ conversationId, streamId, percent });
+      webContents.send('chat:compaction', {
+        streamId,
+        stage: 'progress',
+        emergency,
+        receivedChars,
+        estimatedTotalChars,
+        percent,
+      });
+    };
   }
 
   // 横幅去悬挂:一旦发过 start,任何抛错/中断路径都必须收尾为 idle,
@@ -119,6 +139,9 @@ export async function runCompactionCheck({
       signal,
       force,
       continuityContext,
+      onProgress,
+      webContents,
+      streamId,
     });
 
     if (compactResult.compacted) {

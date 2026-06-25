@@ -20,6 +20,12 @@ const COMPACTION_CONFIG = {
   summaryTemperature: 0.2,
   maxPtlRetries: 3,
   circuitBreakerThreshold: 3,
+  // ── 进度估算（进度条分母）──
+  // 摘要产出长度 ≈ 输入对话长度 × 压缩比。经验值：语义摘要约把原文压到 ~12%。
+  // 用它而非「模型最大输出容量(maxOutputTokens*4)」作分母，避免进度收尾约 30% 即跳满。
+  summaryCompressionRatio: 0.12,
+  // 估算下限，避免极短对话时分母过小导致进度瞬间满。
+  minEstimatedSummaryChars: 1_200,
 };
 
 const MICROCOMPACTION_CONFIG = {
@@ -587,6 +593,47 @@ async function readSseStream(res, onData) {
   }
 }
 
+/**
+ * 估算压缩摘要的产出字符数，用作进度条分母。
+ *
+ * 设计目标：让进度平稳爬升、结尾跳变很小（而不是收尾约 30% 即跳满）。
+ * - 基准 = 输入对话字符数 × 压缩比（summaryCompressionRatio）。
+ * - 夹逼到 [minEstimatedSummaryChars, maxSummaryChars]，其中 maxSummaryChars
+ *   为模型最大输出容量（maxOutputTokens*4），保证不会超过物理上限。
+ * - 动态扩张：当真实接收量 receivedChars 已逼近/超过估计值时，把分母抬到
+ *   receivedChars 之上（×expandFactor），保证 percent 单调不回退、且在 done
+ *   之前不会提前到 100%。
+ *
+ * @param {object} params
+ * @param {number} params.inputChars 摘要输入（旧消息文本）字符数
+ * @param {number} params.maxSummaryChars 物理上限 = summaryMaxTokens * charsPerToken
+ * @param {number} [params.receivedChars=0] 已流式接收的摘要字符数
+ * @returns {number} 估计的摘要总字符数（分母），恒为正整数
+ */
+function estimateSummaryChars({ inputChars, maxSummaryChars, receivedChars = 0 }) {
+  const safeInput = Number.isFinite(inputChars) && inputChars > 0 ? inputChars : 0;
+  const minChars = COMPACTION_CONFIG.minEstimatedSummaryChars;
+  // 物理上限兜底：异常入参时退回到一个合理的正数上限。
+  const upperBound =
+    Number.isFinite(maxSummaryChars) && maxSummaryChars > minChars
+      ? maxSummaryChars
+      : Math.max(minChars, COMPACTION_CONFIG.charsPerToken * 12000);
+
+  // 基准估计：输入 × 压缩比，夹逼到 [min, upperBound]。
+  const base = Math.round(safeInput * COMPACTION_CONFIG.summaryCompressionRatio);
+  let estimate = Math.min(upperBound, Math.max(minChars, base));
+
+  // 动态扩张：真实产出逼近估计值时，把分母抬到接收量之上，避免提前到满，
+  // 同时仍不超过物理上限。expandFactor 留出 ~15% 余量让进度继续平滑爬升。
+  if (receivedChars > 0) {
+    const expandFactor = 1.15;
+    const expanded = Math.ceil(receivedChars * expandFactor);
+    estimate = Math.min(upperBound, Math.max(estimate, expanded));
+  }
+
+  return Math.max(minChars, estimate);
+}
+
 async function summarizeWithLLM({
   oldMessages,
   providerConfig,
@@ -615,13 +662,20 @@ async function summarizeWithLLM({
     { role: 'user', content: COMPACT_PROMPT },
   ];
 
-  // 预期摘要总长（按 token 上限估算），用于进度百分比分母。
-  const estimatedTotalChars =
-    summaryMaxTokens * COMPACTION_CONFIG.charsPerToken;
+  // 进度百分比分母：用「对实际摘要产出长度的估计」而非「模型最大输出容量」，
+  // 避免进度收尾约 30% 即跳满。物理上限仍为 maxOutputTokens*4。
+  const maxSummaryChars = summaryMaxTokens * COMPACTION_CONFIG.charsPerToken;
+  const inputChars = summaryInput.length;
   let accumulated = '';
   const reportProgress = () => {
     if (typeof onProgress !== 'function') return;
     try {
+      // 分母随真实接收量动态扩张，保证 percent 单调、平滑、done 前不提前到满。
+      const estimatedTotalChars = estimateSummaryChars({
+        inputChars,
+        maxSummaryChars,
+        receivedChars: accumulated.length,
+      });
       onProgress({ receivedChars: accumulated.length, estimatedTotalChars });
     } catch {
       // 进度回调不应影响主流程
@@ -1288,4 +1342,9 @@ export async function compactIfNeeded({
   };
 }
 
-export { COMPACTION_CONFIG, estimateTokensFromMessages, formatCompactSummary };
+export {
+  COMPACTION_CONFIG,
+  estimateTokensFromMessages,
+  estimateSummaryChars,
+  formatCompactSummary,
+};
