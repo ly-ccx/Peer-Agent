@@ -799,6 +799,49 @@ textarea:focus-visible,
   }
 }
 
+/* 更新弹窗退场：向「左上角版本徽标」收缩 + 淡出，把用户视线引导到进度落点。
+ * 替代通用的 za-slide-down-out（仅下移），让「进度缩到左上角」可被感知。
+ * transform-origin 由 .updater-modal.is-closing 设为左上；位移仍克制（< 24px）。 */
+@keyframes za-collapse-to-corner {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(-20px, -16px, 0) scale(0.82);
+  }
+}
+
+/* 左上角进度环出现时的一次性「注意力脉冲」：轻微放大回弹，把视线钉在徽标。 */
+@keyframes za-badge-attention {
+  0% {
+    transform: scale(0.6);
+  }
+
+  55% {
+    transform: scale(1.18);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* 进度环外扩柔光环：从徽标向外扩散后淡出，强化「进度落在这里」的指向。 */
+@keyframes za-badge-halo {
+  from {
+    opacity: 0.9;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--cinnabar-seal) 55%, transparent);
+  }
+
+  to {
+    opacity: 0;
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--cinnabar-seal) 0%, transparent);
+  }
+}
+
 /* 流式进行态扫光（高性能）：transform 平移遮罩缝,只动合成层不触发 repaint。
  * 行程足够大让缝两端完全移出文字,循环 reset 发生在文字全暗瞬间 → 看不到位置突变。 */
 @keyframes za-text-sweep {

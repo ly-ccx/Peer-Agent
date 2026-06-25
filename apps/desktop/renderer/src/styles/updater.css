@@ -40,6 +40,11 @@
   /* 下载中：红点原地升级为 mini 环形进度，按 --pa-update-pct(0~100) 顺时针填充。
      conic-gradient 描出进度弧，中心镂空成环；变量缺省 0 时为空环。 */
   .sidebar-version-dot.is-progress {
+    /* position:relative 必须显式声明：否则下方 ::after 镂空圆会以含
+       position:relative 的祖先 .sidebar-version-badge 为定位参照，被 inset:3px
+       撑成与徽标同宽的不透明圆角横条，盖住左上角品牌区（下载态遮挡 bug）。
+       这里把定位上下文收回到 12px 圆点本身。 */
+    position: relative;
     width: 12px;
     height: 12px;
     background:
@@ -49,6 +54,9 @@
       );
     box-shadow: none;
     transition: background 0.25s ease;
+    /* 进度环首次出现时播一次「注意力脉冲」，把视线钉到左上角；
+       prefers-reduced-motion 由 tokens.css 全局兜底降级。 */
+    animation: za-badge-attention var(--za-motion-slow) var(--za-ease-out) both;
   }
 
   .sidebar-version-dot.is-progress::after {
@@ -57,6 +65,17 @@
     inset: 3px;
     border-radius: 50%;
     background: var(--surface-vellum-base);
+  }
+
+  /* 进度环出现时的一次性强调：从徽标向外扩散的柔光环（不占布局、不挡点击）。 */
+  .sidebar-version-dot.is-progress::before {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    pointer-events: none;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--cinnabar-seal) 55%, transparent);
+    animation: za-badge-halo var(--za-motion-slow) var(--za-ease-out) 2 both;
   }
 
   /* ── 右下角「下载完成」完成卡片（UpdateToast） ── */
@@ -142,6 +161,16 @@
     box-shadow: var(--za-shadow-popover);
     padding: 24px;
     color: var(--pa-text-primary);
+  }
+
+  /* 点「更新」后弹窗退场：覆写 Overlay 通用的 za-slide-down-out（仅下移），
+     改为向左上角版本徽标方向收缩淡出，把用户视线引导到进度落点。
+     时长 medium=200ms < Overlay 兜底定时 240ms，保证 onAnimationEnd 先触发。
+     特异度 3 类 > overlay.css 的 .pa-overlay-panel.is-closing(2 类)，稳定生效。
+     prefers-reduced-motion 由 tokens.css 全局兜底降级。 */
+  .pa-overlay-panel.updater-modal.is-closing {
+    transform-origin: top left;
+    animation: za-collapse-to-corner var(--za-motion-medium) var(--za-ease-in-out) both;
   }
 
   .updater-modal-body {
