@@ -181,4 +181,36 @@ describe('local file provider', () => {
 
     assert.equal(execution.result.status, 'denied');
   });
+
+  it('search_files allows outside-workspace paths when permission is granted', async () => {
+    const workspaceDir = path.join(tmpDir, 'workspace');
+    const outsideDir = path.join(tmpDir, 'outside');
+    mkdirSync(workspaceDir);
+    mkdirSync(outsideDir);
+    writeFileSync(path.join(outsideDir, 'secret.txt'), 'NEEDLE here\n', 'utf8');
+
+    const provider = createLocalFileProvider({ workspaceRoot: workspaceDir });
+    let requested = null;
+    const execution = await provider.executeCapability(
+      { call: createCall('local.file.search', { query: 'needle', path: outsideDir }) },
+      {
+        workspaceRoot: workspaceDir,
+        toolContext: { conversationId: 'c1', readFiles: new Map() },
+        requestPermission: async (request) => {
+          requested = request;
+          return { granted: true, reason: 'test_approved' };
+        },
+        locale: 'zh-CN',
+      },
+    );
+
+    assert.equal(execution.grant.granted, true);
+    assert.equal(execution.result.status, 'success');
+    assert.equal(requested.tool, 'search_files');
+    assert.equal(requested.filePath, outsideDir);
+    assert.equal(requested.workspacePath, workspaceDir);
+    const output = JSON.parse(execution.result.outputPreview.fileResult.output);
+    assert.equal(output.tool, 'search_files');
+    assert.equal(output.matchCount, 1);
+  });
 });

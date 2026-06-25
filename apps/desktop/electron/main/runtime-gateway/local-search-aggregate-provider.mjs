@@ -124,6 +124,7 @@ async function runLane(lane, { cwd, signal, context }) {
             max_results: lane.maxResults,
           },
           cwd,
+          requestPermission: context.requestPermission,
         }),
       DEFAULT_LANE_TIMEOUT_MS,
       signal,

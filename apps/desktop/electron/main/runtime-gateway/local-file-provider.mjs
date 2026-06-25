@@ -98,6 +98,29 @@ async function ensureWritablePathAllowed({ tool, args, filePath, workspacePath, 
   };
 }
 
+// 只读检索的越界判定：与 ensureWritablePathAllowed 对称。
+// workspace 内直接放行；越界时走同一套 requestPermission 网关（full_local 自动放行，
+// 其它 accessLevel 弹窗确认）。requestPermission 缺失时回退到原有 workspace 限制文案，
+// 保证未接权限管道的调用方行为不变。
+async function ensureReadablePathAllowed({ tool, args, filePath, workspacePath, requestPermission }) {
+  if (isInsidePath(filePath, workspacePath)) return { granted: true };
+  if (typeof requestPermission !== 'function') {
+    return {
+      granted: false,
+      reason: `${tool} is restricted to the workspace; path must stay inside the workspace root.`,
+    };
+  }
+  const approval = await requestPermission({ tool, args, filePath, workspacePath });
+  if (approval?.granted) {
+    return { granted: true, approval };
+  }
+  return {
+    granted: false,
+    approval,
+    reason: `User denied ${tool} outside the active workspace: ${filePath}`,
+  };
+}
+
 function getFileSnapshot(filePath, content = null) {
   const stats = statSync(filePath);
   const currentContent = content === null ? readFileSync(filePath, 'utf8') : content;
@@ -295,20 +318,26 @@ function* walkSearchFiles(rootDir) {
   }
 }
 
-export function runFileSearch({ args, cwd }) {
+export async function runFileSearch({ args, cwd, requestPermission }) {
   const query = typeof args.query === 'string' ? args.query : '';
   if (query.length === 0) {
     return formatToolFailure('search_files', 'blocked', 'query must be a non-empty string');
   }
 
   const searchRoot = args.path ? resolveToolPath(args.path, cwd) : resolve(cwd);
-  if (!isInsidePath(searchRoot, cwd)) {
-    return formatToolFailure(
-      'search_files',
-      'blocked',
-      'search_files is restricted to the workspace; path must stay inside the workspace root.',
-      { path: searchRoot },
-    );
+  const pathPermission = await ensureReadablePathAllowed({
+    tool: 'search_files',
+    args,
+    filePath: searchRoot,
+    workspacePath: cwd,
+    requestPermission,
+  });
+  if (!pathPermission.granted) {
+    return formatToolFailure('search_files', 'blocked', pathPermission.reason, {
+      path: searchRoot,
+      workspacePath: cwd,
+      permission: pathPermission.approval?.reason || 'not_granted',
+    });
   }
   if (!existsSync(searchRoot)) {
     return formatToolFailure('search_files', 'failed', `Path not found: ${searchRoot}`, {
@@ -399,7 +428,7 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
     }
 
     if (name === 'search_files') {
-      return runFileSearch({ args, cwd });
+      return runFileSearch({ args, cwd, requestPermission });
     }
 
     if (name === 'edit_file') {
