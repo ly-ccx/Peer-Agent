@@ -1582,6 +1582,10 @@
   border-radius: var(--radius-md);
   background: var(--paper-sheet);
   box-shadow: var(--shadow-popover);
+  /* 查找框浮于 .chat-header 的 -webkit-app-region:drag 拖拽区之上，
+     必须显式声明 no-drag，否则 macOS 会把未被 header 右侧 no-drag 区
+     覆盖的左半部分（输入框/上一个按钮）点击吞掉。 */
+  -webkit-app-region: no-drag;
 }
 .chat-find-input {
   width: 180px;
