@@ -230,7 +230,8 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     const key = conversationId ?? '__none';
     const stored = activeTabMap[key];
     if (isValidTab(stored)) return stored;
-    return 'terminal';
+    // 兜底默认 Goal：从未手动切过 tab 的会话停在 Goal 视图（而非 terminal）。
+    return 'goal';
   }, [conversationId, activeTabMap]);
 
   const value = useMemo<WorkbenchContextValue>(() => ({
