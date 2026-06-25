@@ -3,12 +3,13 @@ import type { LocaleCode } from '@peer-agent/protocol';
 import { useState } from 'react';
 import { AppearancePanel } from '../../appearance/AppearancePanel';
 import { GeneralPanel } from './GeneralPanel';
+import { GitPanel } from './GitPanel';
 import { LlmSettingsPanel } from './LlmSettingsPanel';
 import { McpSettingsPanel } from './McpSettingsPanel';
 import { SystemInstructionsPanel } from './SystemInstructionsPanel';
 import { UpdatesPanel } from './UpdatesPanel';
 
-type SettingsSection = 'general' | 'model' | 'mcp' | 'instructions' | 'appearance' | 'updates';
+type SettingsSection = 'general' | 'model' | 'mcp' | 'instructions' | 'git' | 'appearance' | 'updates';
 
 /**
  * SettingsPage 是设置入口的单一表达层:
@@ -48,6 +49,7 @@ export function SettingsPage({
     { key: 'model', label: localizedSettingsLabels.model },
     { key: 'mcp', label: localizedSettingsLabels.mcp },
     { key: 'instructions', label: localizedSettingsLabels.instructions },
+    { key: 'git', label: i18n.t('settings.git') },
     { key: 'appearance', label: i18n.t('appearance.title') },
     { key: 'updates', label: i18n.t('updater.settings.title') },
   ];
@@ -120,6 +122,8 @@ export function SettingsPage({
             i18n={i18n}
             onSystemInstructionsChanged={onSystemInstructionsChanged}
           />
+        ) : section === 'git' ? (
+          <GitPanel i18n={i18n} />
         ) : section === 'updates' ? (
           <UpdatesPanel i18n={i18n} />
         ) : (

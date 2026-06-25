@@ -89,6 +89,9 @@ export type TranslationKey =
   | 'settings.replyLanguage.description'
   | 'settings.replyLanguage.followInterface'
   | 'settings.replyLanguage.auto'
+  | 'settings.git'
+  | 'settings.git.branchPrefix'
+  | 'settings.git.branchPrefix.description'
   | 'settings.config'
   | 'settings.config.description'
   | 'settings.config.export'
@@ -597,6 +600,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.replyLanguage.description': '选择 AI 回复时使用的语言，避免回复语言混乱。',
     'settings.replyLanguage.followInterface': '跟随界面语言',
     'settings.replyLanguage.auto': '自动（跟随提问语言）',
+    'settings.git': 'Git',
+    'settings.git.branchPrefix': '分支前缀',
+    'settings.git.branchPrefix.description': 'Agent 创建 Git 分支时使用的名称前缀，例如 PeerAgent/。',
     'settings.config': '配置管理',
     'settings.config.description': '导出技能、授权规则与界面设置，便于在其它设备恢复；登录态与设备身份不会被导出。',
     'settings.config.export': '导出配置',
@@ -1124,6 +1130,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.replyLanguage.description': 'Choose the language the AI replies in, to avoid mixed-language responses.',
     'settings.replyLanguage.followInterface': 'Follow interface language',
     'settings.replyLanguage.auto': 'Auto (match the question)',
+    'settings.git': 'Git',
+    'settings.git.branchPrefix': 'Branch prefix',
+    'settings.git.branchPrefix.description': 'Name prefix used when the agent creates Git branches, e.g. PeerAgent/.',
     'settings.config': 'Configuration',
     'settings.config.description': 'Export your skills, permission rules and UI settings to restore on another device. Login state and device identity are not exported.',
     'settings.config.export': 'Export',
