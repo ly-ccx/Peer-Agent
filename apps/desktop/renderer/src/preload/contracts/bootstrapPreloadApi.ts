@@ -233,6 +233,28 @@ export interface BootstrapPreloadApi {
     readonly error?: string;
   }>;
   /**
+   * 列出指定目录的单层子条目，供 Workbench「文件」视图的文件树懒加载/逐层展开。
+   * - absPath 必须是绝对目录路径；在当前 workspace 找不到时，会用 relPath 在其他已知 workspace 回退查找。
+   * - status：ok（成功）、not_found（不存在）、not_dir（非目录）、invalid_path / error（异常）。
+   * - entries 按「目录在前、同类按名称不区分大小写」排序；隐藏点文件一并返回，由调用方决定是否显示。
+   * - resolvedFrom 标注跨仓库命中的仓库根。
+   */
+  readonly readDir: (
+    absPath: string,
+    workspaceRoot?: string,
+    relPath?: string,
+  ) => Promise<{
+    readonly ok: boolean;
+    readonly status: 'ok' | 'not_found' | 'not_dir' | 'invalid_path' | 'error';
+    readonly entries: readonly {
+      readonly name: string;
+      readonly isDir: boolean;
+      readonly absPath: string;
+    }[];
+    readonly resolvedFrom?: string;
+    readonly error?: string;
+  }>;
+  /**
    * 内嵌浏览器（Workbench「浏览器」面板 <webview>）控制句柄注册 —— 见 ADR 40。
    * renderer 在 webview `dom-ready` 后上报其 `getWebContentsId()`，main 记下当前
    * 活跃句柄，供 Agent 的 browser_* 工具经 webContents.fromId 直接操控。

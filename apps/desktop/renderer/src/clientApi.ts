@@ -23,6 +23,7 @@ const unavailableApi: ClientApi = {
   gitDiff: unavailableMethod('gitDiff'),
   fileExists: unavailableMethod('fileExists'),
   readFile: unavailableMethod('readFile'),
+  readDir: unavailableMethod('readDir'),
   registerBrowserWebContents: unavailableMethod('registerBrowserWebContents'),
   unregisterBrowserWebContents: unavailableMethod('unregisterBrowserWebContents'),
   listShellTasks: unavailableMethod('listShellTasks'),

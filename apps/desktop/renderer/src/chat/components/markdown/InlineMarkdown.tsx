@@ -102,6 +102,9 @@ function FilePathCode({ raw }: { raw: string }) {
   // 透传原始相对路径：当 absPath 在当前 workspace 解析不到时，
   // 主进程可用它跨已知 workspace 回退查找（跨仓库引用场景）。
   const relPath = parsed && !parsed.isAbsolute ? parsed.path : undefined;
+  // 路径以 / 或 \ 结尾视为「目录」chip（如 archive/deprecated-architecture/）：
+  // 点击时打开右侧「文件」视图并定位到该目录，而非走文件的 Diff 视图。
+  const isDir = !!parsed && /[/\\]$/.test(parsed.path);
 
   // 存在性校验：候选路径只有在磁盘上真实存在时才升级为可点链接。
   // git 分支名/仓库名/版本号（dev/0.0.1、origin/main、org/repo）因磁盘上没有对应文件
@@ -133,21 +136,30 @@ function FilePathCode({ raw }: { raw: string }) {
   }
 
   const handleOpen = () => {
-    // 优先：打开右侧 Workbench 的 Diff 视图展示该文件的 git diff。
     if (workbench) {
-      workbench.openDiff(absPath, workspacePath ?? undefined, relPath);
+      if (isDir) {
+        // 目录：打开右侧 Workbench 的「文件」视图并定位/展开到该目录。
+        workbench.revealInFiles(absPath, workspacePath ?? undefined, relPath);
+      } else {
+        // 文件：打开右侧 Workbench 的 Diff 视图展示该文件的 git diff。
+        workbench.openDiff(absPath, workspacePath ?? undefined, relPath);
+      }
       return;
     }
-    // 回退：无 Workbench 上下文时，用系统默认程序打开文件。
+    // 回退：无 Workbench 上下文时，用系统默认程序打开文件/目录。
     void clientApi.openPath(absPath, workspacePath ?? undefined);
   };
+
+  const title = workbench
+    ? (isDir ? `在文件视图中打开 ${absPath}` : `查看 ${absPath} 的改动`)
+    : `打开 ${absPath}`;
 
   return (
     <code
       className="markdown-file-path"
       role="link"
       tabIndex={0}
-      title={workbench ? `查看 ${absPath} 的改动` : `打开 ${absPath}`}
+      title={title}
       onClick={handleOpen}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {

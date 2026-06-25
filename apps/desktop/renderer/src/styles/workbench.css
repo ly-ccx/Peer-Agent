@@ -721,6 +721,61 @@
     text-overflow: ellipsis;
   }
 
+  /* 文件树（「文件」视图）：跟随会话工作目录、懒加载、可点目录展开/文件查看 diff。 */
+  .workbench-tree {
+    height: 100%;
+    overflow: auto;
+    padding: 6px 0;
+    font-size: 13px;
+    user-select: none;
+  }
+  .workbench-tree-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 24px;
+    padding-right: 8px;
+    color: var(--graphite-base, var(--za-text));
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background var(--za-motion-fast);
+  }
+  .workbench-tree-row:hover {
+    background: var(--chrome-hover, var(--za-active, rgba(0, 0, 0, 0.06)));
+  }
+  .workbench-tree-row:focus-visible {
+    outline: none;
+    background: var(--chrome-hover, var(--za-active, rgba(0, 0, 0, 0.06)));
+  }
+  .workbench-tree-row[data-selected='true'] {
+    background: color-mix(in srgb, var(--za-accent) 16%, transparent);
+    box-shadow: inset 2px 0 0 var(--za-accent);
+  }
+  .workbench-tree-twisty {
+    flex: 0 0 auto;
+    width: 12px;
+    text-align: center;
+    font-size: 10px;
+    color: var(--za-text-muted, var(--graphite-mute));
+  }
+  .workbench-tree-icon {
+    flex: 0 0 auto;
+    font-size: 12px;
+  }
+  .workbench-tree-name {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .workbench-tree-hint {
+    min-height: 22px;
+    display: flex;
+    align-items: center;
+    color: var(--za-text-faint);
+    font-size: 12px;
+    font-style: italic;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .browser-progress--active::before {
       animation: none;

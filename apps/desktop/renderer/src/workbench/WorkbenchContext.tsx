@@ -19,6 +19,16 @@ export interface WorkbenchDiffTarget {
   readonly relPath?: string;
 }
 
+export interface WorkbenchFilesTarget {
+  /** 要在「文件」视图中展开并高亮定位的目录绝对路径。 */
+  readonly absPath: string;
+  readonly workspaceRoot?: string;
+  /** 原始相对路径（解析前），用于主进程跨已知 workspace 回退查找。 */
+  readonly relPath?: string;
+  /** 单调递增令牌：即使重复点击同一目录也能触发「文件」视图重新定位。 */
+  readonly nonce: number;
+}
+
 export const WORKBENCH_DEFAULT_WIDTH = 600;
 export const WORKBENCH_MIN_WIDTH = 320;
 export const WORKBENCH_MAX_WIDTH = 900;
@@ -39,6 +49,7 @@ interface WorkbenchState {
   hasGoalPlan: boolean;
   sidebarAutoCollapsed: boolean;
   diffTarget: WorkbenchDiffTarget | null;
+  filesTarget: WorkbenchFilesTarget | null;
 }
 
 interface WorkbenchActions {
@@ -50,6 +61,7 @@ interface WorkbenchActions {
   setHasGoalPlan: (has: boolean) => void;
   setSidebarAutoCollapsed: (collapsed: boolean) => void;
   openDiff: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
+  revealInFiles: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
 }
 
 type WorkbenchContextValue = WorkbenchState & WorkbenchActions & { conversationId: string | null };
@@ -98,6 +110,8 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
   const [hasGoalPlan, setHasGoalPlanState] = useState<boolean>(false);
   const [sidebarAutoCollapsed, setSidebarAutoCollapsedState] = useState<boolean>(false);
   const [diffTarget, setDiffTarget] = useState<WorkbenchDiffTarget | null>(null);
+  const [filesTarget, setFilesTarget] = useState<WorkbenchFilesTarget | null>(null);
+  const filesNonceRef = useRef(0);
 
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestRef = useRef({ open, width, activeTabMap });
@@ -146,6 +160,15 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     setDiffTarget({ absPath, workspaceRoot, relPath });
     const key = conversationId ?? '__none';
     setActiveTabMap((prev) => (prev[key] === 'diff' ? prev : { ...prev, [key]: 'diff' }));
+    setOpenState(true);
+    schedulePersist();
+  }, [conversationId, schedulePersist]);
+
+  const revealInFiles = useCallback((absPath: string, workspaceRoot?: string, relPath?: string) => {
+    filesNonceRef.current += 1;
+    setFilesTarget({ absPath, workspaceRoot, relPath, nonce: filesNonceRef.current });
+    const key = conversationId ?? '__none';
+    setActiveTabMap((prev) => (prev[key] === 'files' ? prev : { ...prev, [key]: 'files' }));
     setOpenState(true);
     schedulePersist();
   }, [conversationId, schedulePersist]);
@@ -218,6 +241,7 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     hasGoalPlan,
     sidebarAutoCollapsed,
     diffTarget,
+    filesTarget,
     conversationId,
     setOpen,
     toggleOpen,
@@ -227,9 +251,10 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     setHasGoalPlan,
     setSidebarAutoCollapsed,
     openDiff,
+    revealInFiles,
   }), [
-    open, width, activeTab, goalSlot, hasGoalPlan, sidebarAutoCollapsed, diffTarget, conversationId,
-    setOpen, toggleOpen, setActiveTab, setWidth, registerGoalSlot, setHasGoalPlan, setSidebarAutoCollapsed, openDiff,
+    open, width, activeTab, goalSlot, hasGoalPlan, sidebarAutoCollapsed, diffTarget, filesTarget, conversationId,
+    setOpen, toggleOpen, setActiveTab, setWidth, registerGoalSlot, setHasGoalPlan, setSidebarAutoCollapsed, openDiff, revealInFiles,
   ]);
 
   return <WorkbenchContext.Provider value={value}>{children}</WorkbenchContext.Provider>;

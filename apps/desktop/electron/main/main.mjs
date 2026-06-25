@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
@@ -974,6 +974,77 @@ ipcMain.handle('fs:exists', (_event, { absPath, workspaceRoot, relPath } = {}) =
     return { exists: false };
   } catch {
     return { exists: false };
+  }
+});
+
+// 列出指定目录的单层子条目，供 Workbench「文件」视图的文件树懒加载/逐层展开。
+// 入参 absPath 必须是绝对目录路径；absPath 在当前 workspace 找不到时复用 fs:exists/file:read
+// 的跨 workspace 回退逻辑（用 relPath 逐一拼接已知 workspace）。
+// 返回 { ok, status, entries:[{ name, isDir, absPath }], resolvedFrom?, error? }。
+// entries 按「目录在前、同类按名称不区分大小写」排序；隐藏点文件（. 开头）一并返回，由渲染层决定是否显示。
+ipcMain.handle('fs:read-dir', (_event, { absPath, workspaceRoot, relPath } = {}) => {
+  try {
+    if (!absPath || typeof absPath !== 'string') {
+      return { ok: false, status: 'invalid_path', entries: [], error: 'invalid_path' };
+    }
+    let target = path.normalize(absPath);
+    if (!path.isAbsolute(target)) {
+      return { ok: false, status: 'invalid_path', entries: [], error: 'not_absolute' };
+    }
+    // 跨 workspace 回退：absPath 不存在但提供了 relPath 时，逐一拼接已知 workspace 查找。
+    let resolvedFrom;
+    if (!existsSync(target)) {
+      let recovered = false;
+      const cleanRel = typeof relPath === 'string' && relPath.trim()
+        ? relPath.replace(/^[/\\]+/, '').replace(/^(\.\.?[/\\])+/, '')
+        : '';
+      if (cleanRel) {
+        const all = settingsStore.getAll();
+        const candidates = [
+          ...(all.workspaces || []).map((w) => (w && typeof w === 'object' ? w.path : w)),
+          all.activeWorkspace,
+          workspaceRoot,
+        ].filter((p) => typeof p === 'string' && p);
+        const seen = new Set();
+        for (const ws of candidates) {
+          if (seen.has(ws)) continue;
+          seen.add(ws);
+          const candidate = path.normalize(path.join(ws, cleanRel));
+          if (existsSync(candidate)) {
+            target = candidate;
+            resolvedFrom = ws;
+            recovered = true;
+            break;
+          }
+        }
+      }
+      if (!recovered) {
+        return { ok: false, status: 'not_found', entries: [], error: 'dir_not_found' };
+      }
+    }
+    let stat;
+    try {
+      stat = statSync(target);
+    } catch {
+      return { ok: false, status: 'not_found', entries: [], error: 'stat_failed' };
+    }
+    if (!stat.isDirectory()) {
+      return { ok: false, status: 'not_dir', entries: [], resolvedFrom, error: 'not_a_directory' };
+    }
+    const dirents = readdirSync(target, { withFileTypes: true });
+    const entries = dirents
+      .map((d) => ({
+        name: d.name,
+        isDir: d.isDirectory(),
+        absPath: path.join(target, d.name),
+      }))
+      .sort((a, b) => {
+        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'accent' });
+      });
+    return { ok: true, status: 'ok', entries, resolvedFrom };
+  } catch {
+    return { ok: false, status: 'error', entries: [], error: 'read_dir_failed' };
   }
 });
 
