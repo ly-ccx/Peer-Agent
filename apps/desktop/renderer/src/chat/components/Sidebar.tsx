@@ -77,6 +77,9 @@ export function Sidebar({
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
   const [wsInfo, setWsInfo] = useState<WorkspaceInfo | null>(null);
   const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
+  // 退场动画态:关闭时先置 closing 播退场动画,动画结束(onAnimationEnd)再真正卸载下拉。
+  const [wsClosing, setWsClosing] = useState(false);
+  const wsWrapRef = useRef<HTMLDivElement>(null);
 
   const refreshWorkspaces = useCallback(async () => {
     try {
@@ -94,16 +97,44 @@ export function Sidebar({
 
   useEffect(() => { void refreshWorkspaces(); }, [refreshWorkspaces]);
 
+  // 请求关闭下拉:置 closing 播退场动画,真正卸载交给 onAnimationEnd。
+  const requestCloseDropdown = useCallback(() => {
+    setWsDropdownOpen((open) => {
+      if (open) setWsClosing(true);
+      return open;
+    });
+  }, []);
+
+  // 点击头部:已展开则走退场关闭,未展开则直接打开。
+  const toggleDropdown = useCallback(() => {
+    if (wsDropdownOpen) {
+      if (!wsClosing) setWsClosing(true);
+    } else {
+      setWsClosing(false);
+      setWsDropdownOpen(true);
+    }
+  }, [wsDropdownOpen, wsClosing]);
+
+  // 点击下拉外部时关闭(走退场)。
+  useEffect(() => {
+    if (!wsDropdownOpen || wsClosing) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!wsWrapRef.current?.contains(e.target as Node)) requestCloseDropdown();
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [wsDropdownOpen, wsClosing, requestCloseDropdown]);
+
   const handleAddWorkspace = useCallback(async () => {
-    setWsDropdownOpen(false);
+    requestCloseDropdown();
     const result = await clientApi.workspaceAdd();
     if (result) { await refreshWorkspaces(); onWorkspaceChanged?.(); }
-  }, [refreshWorkspaces, onWorkspaceChanged]);
+  }, [requestCloseDropdown, refreshWorkspaces, onWorkspaceChanged]);
 
   const handleSwitchWorkspace = useCallback(async (wsPath: string) => {
     // ADR 27: 去阻塞切换。先乐观回填当前工作区名称(用已知的 workspaces 条目),
     // 避免等待 git(workspaceInfo)阻塞 UI;git 分支等信息由后续 refresh 异步补齐。
-    setWsDropdownOpen(false);
+    requestCloseDropdown();
     const known = workspaces.find((w) => w.path === wsPath);
     setActiveWorkspace(wsPath);
     setWsInfo(known ? { name: known.name, absolutePath: wsPath } : null);
@@ -113,7 +144,7 @@ export function Sidebar({
       Promise.resolve(onWorkspaceChanged?.()),
       refreshWorkspaces(),
     ]);
-  }, [workspaces, refreshWorkspaces, onWorkspaceChanged]);
+  }, [workspaces, requestCloseDropdown, refreshWorkspaces, onWorkspaceChanged]);
 
   const handleRemoveWorkspace = useCallback(async (wsPath: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -167,8 +198,8 @@ export function Sidebar({
         <VersionBadge i18n={i18n} />
       </div>
 
-      <div className="sidebar-workspace-wrap">
-        <div className="sidebar-workspace" onClick={() => setWsDropdownOpen(!wsDropdownOpen)}>
+      <div className="sidebar-workspace-wrap" ref={wsWrapRef}>
+        <div className="sidebar-workspace" onClick={toggleDropdown}>
           {/* ADR 27: 折叠态下,若有"非当前工作区"存在运行中的流,显示一个运行点,
               提示用户切走的工作区任务仍在跑——展开下拉可定位到具体工作区。 */}
           {[...(runningWorkspacePaths ?? [])].some((p) => p !== activeWorkspace) ? (
@@ -186,13 +217,22 @@ export function Sidebar({
           ) : (
             <span className="ws-name ws-placeholder">{isZh ? '选择工作区...' : 'Select workspace...'}</span>
           )}
-          <svg className="ws-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={wsDropdownOpen ? { transform: 'rotate(180deg)' } : undefined}>
+          <svg className="ws-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={wsDropdownOpen && !wsClosing ? { transform: 'rotate(180deg)' } : undefined}>
             <path d="m6 9 6 6 6-6" />
           </svg>
         </div>
 
         {wsDropdownOpen ? (
-          <div className="ws-dropdown">
+          <div
+            className={`ws-dropdown${wsClosing ? ' closing' : ''}`}
+            onAnimationEnd={(e) => {
+              // 退场动画结束后才真正卸载下拉,避免关闭瞬间无过渡。
+              if (wsClosing && e.target === e.currentTarget) {
+                setWsDropdownOpen(false);
+                setWsClosing(false);
+              }
+            }}
+          >
             {workspaces.map((ws) => (
               <div
                 key={ws.path}

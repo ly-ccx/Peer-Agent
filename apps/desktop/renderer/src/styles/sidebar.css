@@ -205,6 +205,15 @@
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+/* 退场:对称于进场,淡出并上移 4px;动画结束由 onAnimationEnd 卸载。
+   prefers-reduced-motion 由 tokens.css 全局降级(animation-duration:1ms)兜底。 */
+.ws-dropdown.closing {
+  animation: ws-dropdown-out 0.15s var(--za-ease-out) both;
+}
+@keyframes ws-dropdown-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-4px); }
+}
 .ws-dropdown-item {
   display: flex;
   align-items: center;
