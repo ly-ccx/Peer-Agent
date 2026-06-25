@@ -492,16 +492,54 @@ test('单活跃草稿: 同会话二次 createPlan 时旧 awaiting_approval 草�
   assert.equal(active[0].planId, second.planId);
 });
 
-test('单活跃草稿: 仅作废 awaiting_approval，drafting/executing 旧计划不受影响', () => {
-  const draftingOld = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+test('单活跃计划: executing 旧计划仍有未完成叶子时，新建计划令其作废为 cancelled(superseded)', () => {
   const executingOld = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
   store.setPlanStatus(executingOld.planId, 'executing');
+  // 只完成部分叶子（t1 完成，t2a/t2b 仍 pending）→ 存在未完成叶子，维持 executing
+  store.recordTaskEvidence(executingOld.planId, 't1', {
+    status: 'completed',
+    evidenceRefs: ['local-file://done-t1'],
+  });
+  assert.equal(store.getPlan(executingOld.planId)?.status, 'executing');
 
   store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
 
-  // drafting 与 executing 旧计划都不应被作废
+  // 仍有未完成叶子 → 作废而非伪造完成
+  const after = store.getPlan(executingOld.planId);
+  assert.equal(after?.status, 'cancelled');
+  const lastRev = after.revisionHistory[after.revisionHistory.length - 1];
+  assert.equal(lastRev.changedBy, 'system:supersede');
+});
+
+test('单活跃计划: executing 旧计划全叶子终态时，新建计划令其如实收尾为 completed', () => {
+  const executingOld = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  store.setPlanStatus(executingOld.planId, 'executing');
+  // 把全部叶子（t1/t2a/t2b）置为终态 completed
+  for (const taskId of ['t1', 't2a', 't2b']) {
+    store.recordTaskEvidence(executingOld.planId, taskId, {
+      status: 'completed',
+      evidenceRefs: [`local-file://done-${taskId}`],
+    });
+  }
+  // 全叶子终态后，persist 的 derivePlanStatus 已把它收尾为 completed
+  assert.equal(store.getPlan(executingOld.planId)?.status, 'completed');
+
+  // 即便已是 completed（终态），新建计划也不应回退或误伤它
+  store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+  assert.equal(store.getPlan(executingOld.planId)?.status, 'completed');
+});
+
+test('单活跃计划: drafting 旧计划（无活跃叶子）被新建计划作废为 cancelled', () => {
+  const draftingOld = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
   assert.equal(store.getPlan(draftingOld.planId)?.status, 'drafting');
-  assert.equal(store.getPlan(executingOld.planId)?.status, 'executing');
+
+  store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
+
+  // drafting 仍有未完成叶子 → 作废
+  const after = store.getPlan(draftingOld.planId);
+  assert.equal(after?.status, 'cancelled');
+  const lastRev = after.revisionHistory[after.revisionHistory.length - 1];
+  assert.equal(lastRev.changedBy, 'system:supersede');
 });
 
 test('单活跃草稿: 跨会话不互相作废', () => {
@@ -679,17 +717,16 @@ test('explorer: dispatch 遵守 maxExplorers 预算', () => {
 });
 
 test('getActivePlanByConversation 返回同会话最新活跃计划，忽略结束态', () => {
-  const older = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-active', title: 'older' });
-  store.setPlanStatus(older.planId, 'awaiting_approval');
-
-  const newer = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-active', title: 'newer' });
-  store.setPlanStatus(newer.planId, 'approved');
-
+  // 注意：同会话新建计划会触发 supersede 收尾旧活跃计划，因此这里只保留
+  // 「一个活跃计划 + 一个已结束计划」的组合来验证「忽略结束态、返回活跃」。
   const done = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-active', title: 'done' });
   store.setPlanStatus(done.planId, 'cancelled');
 
-  const active = store.getActivePlanByConversation('conv-active');
-  assert.equal(active.planId, newer.planId);
+  const active = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-active', title: 'active' });
+  store.setPlanStatus(active.planId, 'approved');
+
+  const got = store.getActivePlanByConversation('conv-active');
+  assert.equal(got.planId, active.planId);
   assert.equal(store.getActivePlanByConversation('missing'), null);
   assert.equal(store.getActivePlanByConversation(''), null);
 });

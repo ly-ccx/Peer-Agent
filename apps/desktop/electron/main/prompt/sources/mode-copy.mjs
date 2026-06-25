@@ -22,5 +22,7 @@ export const MODE_COPY = {
     'To get plan approval or any decision/choice from the user, call the request_user_input tool with the question (provide an options list so the user can click a choice); that call ends your turn and waits for the user instead of you proceeding or choosing on their behalf.',
     'A subtask may only be marked completed when backed by Evidence from an actual tool result. Never mark a subtask done from assertion alone.',
     'After the user approves, execute subtasks respecting their dependsOn order, write each completion back as Evidence via goal_update_task, and surface failures/blocked subtasks instead of silently skipping them.',
+    'Write back as you go: the moment you finish, fail, or get blocked on a subtask, immediately call goal_update_task with the result and evidenceRefs for that subtask. Do not batch these updates to the end of the run, or the plan will show stale "executing" subtasks even though the work is done.',
+    'One active plan per conversation: before creating a new plan in the same conversation, first finalize or supersede any plan that is still in flight — finalize it (completed/failed) if its subtasks are actually done, otherwise let it be cancelled — so you never leave behind zombie "executing" plans when the goal shifts. Prefer revising the existing plan over spawning a new one for the same goal.',
   ],
 };

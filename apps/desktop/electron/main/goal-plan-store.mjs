@@ -528,21 +528,29 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
   }
 
   /**
-   * 同会话「单活跃草稿」约束：新建草稿落库前，把同一会话下其它仍处于
-   * awaiting_approval 的旧草稿作废（cancelled），从源头杜绝「僵尸待批准草稿」
-   * 累积——否则用户中途改方案另起新计划时，旧草稿永远停在 awaiting_approval，
-   * 让浮条长期显示「待批准」、锁定展开且计划数虚高。
+   * 同会话「单活跃计划」约束：新建计划落库前，把同一会话下其它仍处于活跃态
+   * （drafting / awaiting_approval / approved / executing / paused）的旧计划做收尾或作废，
+   * 从源头杜绝「僵尸计划」累积——否则用户中途改方案另起新计划时，旧计划永远停在
+   * awaiting_approval 或 executing，让浮条长期显示「待批准 / 执行中」、锁定展开且计划数虚高。
+   *
+   * 收尾策略（按旧计划当前状态分流）：
+   * - awaiting_approval：尚未批准的草稿，直接作废为 cancelled（既有行为，保持不变）。
+   * - 其它活跃态（drafting / approved / executing / paused）：
+   *   · 若旧计划存在叶子且全部叶子均为终态（completed/failed），按 derivePlanStatus
+   *     如实收尾为 completed/failed（不谎报、保留真实完成度）；
+   *   · 否则仍有未完成叶子，作废为 cancelled，并在审计原因里标注 superseded。
    *
    * 设计约束：
-   * - 仅在 conversationId 非空时生效（未关联会话的草稿互不影响，绝不按 null===null 误伤）。
+   * - 仅在 conversationId 非空时生效（未关联会话的计划互不影响，绝不按 null===null 误伤）。
    * - exceptPlanId 排除新计划自身。
    * - 走 persist 正规写盘 + onChange 广播（不旁路），并向 revisionHistory 追加一条
    *   supersede 审计，保留可追溯事实。
+   * - 只对活跃态计划生效；已是 completed/failed/cancelled 等终态的旧计划不再触碰。
    *
    * @param {string|null|undefined} conversationId
    * @param {string|null|undefined} exceptPlanId
    * @param {string} [reason]
-   * @returns {string[]} 被作废的 planId 列表
+   * @returns {string[]} 被收尾或作废的 planId 列表
    */
   function supersedeAwaitingDrafts(conversationId, exceptPlanId, reason) {
     const normalizedConversationId = normalizeConversationId(conversationId);
@@ -550,20 +558,43 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     const superseded = [];
     for (const meta of listPlansByConversation(normalizedConversationId)) {
       if (meta.planId === exceptPlanId) continue;
-      if (meta.status !== 'awaiting_approval') continue;
+      // 仅处理仍处于活跃态的旧计划；终态计划不再触碰。
+      if (!isActivePlan(meta)) continue;
       const plan = getPlan(meta.planId);
       // 二次校验全量计划状态，避免 index 与计划文件偶发不一致时误作废。
-      if (!plan || plan.status !== 'awaiting_approval') continue;
+      if (!plan || !isActivePlan(plan)) continue;
+
+      let nextStatus;
+      let reasonText;
+      if (plan.status === 'awaiting_approval') {
+        // 未批准草稿：保持既有行为，直接作废。
+        nextStatus = 'cancelled';
+        reasonText = reason || 'superseded by a newer plan in the same conversation';
+      } else {
+        // 其它活跃态：能 derive 到终态的如实收尾，否则作废。
+        // 以 'executing' 为基准探测叶子终态（derivePlanStatus 仅在 executing 分支做收尾派生）。
+        const derived = derivePlanStatus('executing', plan.tasks);
+        if (derived === TERMINAL_OK || derived === TERMINAL_FAIL) {
+          nextStatus = derived;
+          reasonText =
+            'auto-finalized on supersede: all subtasks reached terminal state';
+        } else {
+          nextStatus = 'cancelled';
+          reasonText =
+            reason || 'superseded by a newer active plan in the same conversation';
+        }
+      }
+
       const nextVersion = (plan.version || 1) + 1;
       persist({
         ...plan,
-        status: 'cancelled',
+        status: nextStatus,
         version: nextVersion,
         revisionHistory: [
           ...(plan.revisionHistory || []),
           {
             version: nextVersion,
-            reason: reason || 'superseded by a newer plan in the same conversation',
+            reason: reasonText,
             changedAt: new Date().toISOString(),
             changedBy: 'system:supersede',
           },
@@ -578,8 +609,9 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
   /**
    * 创建草稿计划（status='drafting'）。progress 由 tasks 聚合派生。
    *
-   * 同会话单活跃草稿：落库前先作废同会话其它 awaiting_approval 旧草稿
-   * （见 supersedeAwaitingDrafts），杜绝僵尸待批准草稿累积。
+   * 同会话单活跃计划：落库前先对同会话其它仍处于活跃态（drafting / awaiting_approval /
+   * approved / executing / paused）的旧计划做收尾或作废（见 supersedeAwaitingDrafts）——
+   * 全叶子终态的如实收尾为 completed/failed，否则作废为 cancelled，杜绝「僵尸 executing 计划」累积。
    */
   function createPlan(draft = {}) {
     const now = new Date().toISOString();
@@ -607,7 +639,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       updatedAt: now,
       createdBy: draft.createdBy,
     };
-    // 单活跃草稿：先作废同会话其它 awaiting_approval 旧草稿（排除自身），再落库新计划。
+    // 单活跃计划：先收尾/作废同会话其它活跃态旧计划（排除自身），再落库新计划。
     supersedeAwaitingDrafts(plan.conversationId, plan.planId);
     return persist(plan);
   }
