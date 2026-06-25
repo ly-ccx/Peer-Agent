@@ -256,6 +256,13 @@
   margin: 0 auto;
 }
 
+/* 嵌入能力工作台时，清除独立设置页的顶部留白与居中约束，贴合工作台已有间距 */
+.settings-panel--mcp.settings-panel--embedded {
+  padding: 0;
+  max-width: none;
+  margin: 0;
+}
+
 .settings-panel__header,
 .settings-actions,
 .settings-actions--wrap {

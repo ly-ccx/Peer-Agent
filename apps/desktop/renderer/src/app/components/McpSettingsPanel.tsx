@@ -338,16 +338,16 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
   const canSave = transport === 'stdio' ? Boolean(command.trim()) : Boolean(url.trim());
 
   return (
-    <div className="settings-panel settings-panel--mcp">
+    <div className={`settings-panel settings-panel--mcp${embedded ? ' settings-panel--embedded' : ''}`}>
       <header className="settings-panel__header mcp-hero">
         <div>
           {!embedded ? (
             <>
               <span className="mcp-eyebrow">Local capability providers</span>
               <h2>MCP 连接</h2>
+              <p>管理本地 MCP server。工具先刷新 Manifest，再经 Runtime Projection、PermissionGrant 和 Evidence 链路执行。</p>
             </>
           ) : null}
-          <p>管理本地 MCP server。工具先刷新 Manifest，再经 Runtime Projection、PermissionGrant 和 Evidence 链路执行。</p>
         </div>
         <div className="mcp-hero__actions">
           <button type="button" onClick={() => setShowAddForm(true)}>
