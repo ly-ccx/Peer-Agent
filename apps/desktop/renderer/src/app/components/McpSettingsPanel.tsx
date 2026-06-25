@@ -99,7 +99,14 @@ function formatDateTime(value?: string | null): string {
   return date.toLocaleString();
 }
 
-export function McpSettingsPanel() {
+type McpSettingsPanelProps = {
+  /** 嵌入到能力工作台等容器时隐藏自带 eyebrow + 大标题，避免双标题。 */
+  readonly embedded?: boolean;
+  /** server 列表加载后回传数量，供外部（如标签页计数）使用。 */
+  readonly onServersCountChange?: (count: number) => void;
+};
+
+export function McpSettingsPanel({ embedded = false, onServersCountChange }: McpSettingsPanelProps = {}) {
   const [servers, setServers] = useState<readonly McpServerView[]>([]);
   const [credentials, setCredentials] = useState<readonly McpCredentialView[]>([]);
   const [displayName, setDisplayName] = useState('');
@@ -131,7 +138,8 @@ export function McpSettingsPanel() {
     setServers(list);
     setCredentials(credentialList);
     setSelectedId((current) => current ?? (list[0] ? serverIdOf(list[0]) : null));
-  }, []);
+    onServersCountChange?.(list.length);
+  }, [onServersCountChange]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -333,8 +341,12 @@ export function McpSettingsPanel() {
     <div className="settings-panel settings-panel--mcp">
       <header className="settings-panel__header mcp-hero">
         <div>
-          <span className="mcp-eyebrow">Local capability providers</span>
-          <h2>MCP 连接</h2>
+          {!embedded ? (
+            <>
+              <span className="mcp-eyebrow">Local capability providers</span>
+              <h2>MCP 连接</h2>
+            </>
+          ) : null}
           <p>管理本地 MCP server。工具先刷新 Manifest，再经 Runtime Projection、PermissionGrant 和 Evidence 链路执行。</p>
         </div>
         <div className="mcp-hero__actions">

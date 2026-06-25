@@ -2,14 +2,14 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LocaleCode } from '@peer-agent/protocol';
 import { useState } from 'react';
 import { AppearancePanel } from '../../appearance/AppearancePanel';
+import { CapabilitiesPanel } from './CapabilitiesPanel';
 import { GeneralPanel } from './GeneralPanel';
 import { GitPanel } from './GitPanel';
 import { LlmSettingsPanel } from './LlmSettingsPanel';
-import { McpSettingsPanel } from './McpSettingsPanel';
 import { SystemInstructionsPanel } from './SystemInstructionsPanel';
 import { UpdatesPanel } from './UpdatesPanel';
 
-type SettingsSection = 'general' | 'model' | 'mcp' | 'instructions' | 'git' | 'appearance' | 'updates';
+type SettingsSection = 'general' | 'model' | 'skills' | 'instructions' | 'git' | 'appearance' | 'updates';
 
 /**
  * SettingsPage 是设置入口的单一表达层:
@@ -44,12 +44,12 @@ export function SettingsPage({
   const [query, setQuery] = useState('');
   const localizedSettingsLabels =
     i18n.locale === 'en-US'
-      ? { model: 'Model configuration', mcp: 'MCP connections', instructions: 'Personalization' }
-      : { model: '模型配置', mcp: 'MCP 连接', instructions: '个性化设置' };
+      ? { model: 'Model configuration', skills: 'Capabilities', instructions: 'Personalization' }
+      : { model: '模型配置', skills: '能力', instructions: '个性化设置' };
   const items: ReadonlyArray<{ key: SettingsSection; label: string }> = [
     { key: 'general', label: i18n.t('settings.general') },
     { key: 'model', label: localizedSettingsLabels.model },
-    { key: 'mcp', label: localizedSettingsLabels.mcp },
+    { key: 'skills', label: localizedSettingsLabels.skills },
     { key: 'instructions', label: localizedSettingsLabels.instructions },
     { key: 'git', label: i18n.t('settings.git') },
     { key: 'appearance', label: i18n.t('appearance.title') },
@@ -117,8 +117,8 @@ export function SettingsPage({
           />
         ) : section === 'model' ? (
           <LlmSettingsPanel i18n={i18n} />
-        ) : section === 'mcp' ? (
-          <McpSettingsPanel />
+        ) : section === 'skills' ? (
+          <CapabilitiesPanel />
         ) : section === 'instructions' ? (
           <SystemInstructionsPanel
             i18n={i18n}

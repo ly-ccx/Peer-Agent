@@ -11,7 +11,7 @@ import { CapabilityDetailPanel } from './CapabilityDetailPanel';
 import { CapabilityEmptyState } from './CapabilityEmptyState';
 import { CapabilitySection } from './CapabilitySection';
 import { CapabilityTabs } from './CapabilityTabs';
-import { McpPanel } from './McpPanel';
+import { McpSettingsPanel } from '../../app/components/McpSettingsPanel';
 import { SkillsPanel } from './SkillsPanel';
 
 const TAB_DESCRIPTIONS: Record<CapabilityWorkbenchTab, string> = {
@@ -54,11 +54,6 @@ export function CapabilityWorkbench({
   return (
     <section className={`capability-workbench ${activeTab === 'skills' || activeTab === 'mcp' ? 'skills-active' : ''}`}>
       <main className="capability-workbench-main">
-        <header className="capability-hero">
-          <p><span aria-hidden="true" />卷三 · 插件能力</p>
-          <h2>能力管理</h2>
-        </header>
-
         <div className="capability-tabs-row">
           <CapabilityTabs activeTab={activeTab} counts={counts} onChange={changeTab} />
           {activeTab === 'skills' && (
@@ -82,7 +77,7 @@ export function CapabilityWorkbench({
               onSkillsCountChange={setSkillsCount}
             />
           ) : activeTab === 'mcp' ? (
-            <McpPanel onMcpCountChange={setMcpCount} />
+            <McpSettingsPanel embedded onServersCountChange={setMcpCount} />
           ) : sections.length === 0 ? (
             <CapabilityEmptyState tab={activeTab} />
           ) : sections.map((section) => (
