@@ -93,6 +93,11 @@ export function useChatStreamSubscription(params: {
   } = params;
 
   useEffect(() => {
+    // 压缩完成时先把进度钉到 100% 短暂停顿再隐藏横幅，给一个"到顶"收尾反馈，
+    // 避免末段停在 ~95% 后横幅瞬间消失的跳变观感。该 timer 在 cleanup 中清理，
+    // 防止组件卸载后仍触发 setState。
+    let compactionDoneTimer: ReturnType<typeof setTimeout> | null = null;
+
     const persistMessages = (msgs: ChatMsg[]) => {
       if (!conversationId) return;
       void clientApi.conversationsReplaceMessages({
@@ -398,8 +403,14 @@ export function useChatStreamSubscription(params: {
         setCompactionPercent?.(null);
         return;
       }
-      setIsCompacting(false);
-      setCompactionPercent?.(null);
+      // 完成：先把进度钉到 100% 给"到顶"反馈，停顿 ~150ms 再隐藏横幅。
+      setCompactionPercent?.(100);
+      if (compactionDoneTimer) clearTimeout(compactionDoneTimer);
+      compactionDoneTimer = setTimeout(() => {
+        setIsCompacting(false);
+        setCompactionPercent?.(null);
+        compactionDoneTimer = null;
+      }, 150);
       if (!method || beforeTokens === undefined || afterTokens === undefined || oldMessageCount === undefined || keptMessageCount === undefined) return;
       // 完成态不再钉在底部横幅:重载会话后,压缩点会以 CompactionSummaryCard
       // (msg.compaction)的形式就地出现在消息时间线的对应位置(Codex 风格分割线)。
@@ -424,6 +435,6 @@ export function useChatStreamSubscription(params: {
       }
     });
 
-    return () => { offDelta(); offThinking(); offDone(); offUsage(); offAborted(); offToolProgress(); offToolCall(); offToolResult(); offPermissionRequest(); offError(); offProviderRecovery(); offConnectionRecovery(); offCompaction(); };
+    return () => { if (compactionDoneTimer) { clearTimeout(compactionDoneTimer); compactionDoneTimer = null; } offDelta(); offThinking(); offDone(); offUsage(); offAborted(); offToolProgress(); offToolCall(); offToolResult(); offPermissionRequest(); offError(); offProviderRecovery(); offConnectionRecovery(); offCompaction(); };
   }, [appendStreamThinking, conversationId, onConversationUpdated]);
 }

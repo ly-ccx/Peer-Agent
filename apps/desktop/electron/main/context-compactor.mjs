@@ -624,9 +624,10 @@ function estimateSummaryChars({ inputChars, maxSummaryChars, receivedChars = 0 }
   let estimate = Math.min(upperBound, Math.max(minChars, base));
 
   // 动态扩张：真实产出逼近估计值时，把分母抬到接收量之上，避免提前到满，
-  // 同时仍不超过物理上限。expandFactor 留出 ~15% 余量让进度继续平滑爬升。
+  // 同时仍不超过物理上限。expandFactor 留出 ~5% 余量让进度继续平滑爬升：
+  // 末段比值 ≈ 1/expandFactor ≈ 95%（而非 1.15 时的 ≈87%），减小收尾跳变。
   if (receivedChars > 0) {
-    const expandFactor = 1.15;
+    const expandFactor = 1.05;
     const expanded = Math.ceil(receivedChars * expandFactor);
     estimate = Math.min(upperBound, Math.max(estimate, expanded));
   }
