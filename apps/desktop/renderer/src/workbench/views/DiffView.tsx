@@ -9,13 +9,25 @@ interface DiffViewProps {
 type GitDiffResult = Awaited<ReturnType<typeof clientApi.gitDiff>>;
 type DiffStatus = GitDiffResult['status'];
 
+type FileReadResult = Awaited<ReturnType<typeof clientApi.readFile>>;
+
+// Diff 视图的两种展示模式：git diff（默认）或文件完整内容。
+type ViewMode = 'diff' | 'content';
+
 interface LoadState {
   readonly loading: boolean;
   readonly result: GitDiffResult | null;
   readonly error: string | null;
 }
 
+interface ContentState {
+  readonly loading: boolean;
+  readonly result: FileReadResult | null;
+  readonly error: string | null;
+}
+
 const INITIAL: LoadState = { loading: false, result: null, error: null };
+const CONTENT_INITIAL: ContentState = { loading: false, result: null, error: null };
 
 function basename(p: string): string {
   const norm = p.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -123,9 +135,33 @@ function statusLabel(status: DiffStatus, isZh: boolean): string {
   }
 }
 
+// 「文件内容」模式下，把后端返回的失败 status 翻译成用户可读的友好文案。
+function contentErrorLabel(status: FileReadResult['status'], size: number | undefined, isZh: boolean): string {
+  switch (status) {
+    case 'not_found':
+      return isZh ? '文件不存在或无权访问。' : 'File not found or not accessible.';
+    case 'not_file':
+      return isZh ? '该路径不是文件（可能是目录）。' : 'This path is not a file (it may be a directory).';
+    case 'too_large': {
+      const mb = typeof size === 'number' ? (size / (1024 * 1024)).toFixed(1) : '';
+      return isZh
+        ? `文件过大${mb ? `（${mb} MB）` : ''}，无法预览，请在编辑器中打开。`
+        : `File too large${mb ? ` (${mb} MB)` : ''} to preview. Open it in the editor instead.`;
+    }
+    case 'binary':
+      return isZh ? '这是二进制文件，无法预览内容。' : 'This is a binary file and cannot be previewed.';
+    case 'invalid_path':
+      return isZh ? '文件路径无效。' : 'Invalid file path.';
+    default:
+      return isZh ? '无法读取文件内容。' : 'Unable to read file content.';
+  }
+}
+
 export function DiffView({ isZh }: DiffViewProps) {
   const { diffTarget } = useWorkbench();
   const [state, setState] = useState<LoadState>(INITIAL);
+  const [mode, setMode] = useState<ViewMode>('diff');
+  const [content, setContent] = useState<ContentState>(CONTENT_INITIAL);
 
   const load = useCallback(async () => {
     if (!diffTarget) {
@@ -145,11 +181,46 @@ export function DiffView({ isZh }: DiffViewProps) {
     }
   }, [diffTarget]);
 
+  const loadContent = useCallback(async () => {
+    if (!diffTarget) {
+      setContent(CONTENT_INITIAL);
+      return;
+    }
+    setContent({ loading: true, result: null, error: null });
+    try {
+      const result = await clientApi.readFile(diffTarget.absPath, diffTarget.workspaceRoot, diffTarget.relPath);
+      setContent({ loading: false, result, error: null });
+    } catch (err) {
+      setContent({
+        loading: false,
+        result: null,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [diffTarget]);
+
+  // 切换 diffTarget 时重置回 diff 模式，避免沿用上一个文件的内容态。
+  useEffect(() => {
+    setMode('diff');
+    setContent(CONTENT_INITIAL);
+  }, [diffTarget]);
+
   useEffect(() => {
     void load();
   }, [load]);
 
+  // 仅在进入「文件内容」模式且尚未加载时按需读取文件，避免无谓 IPC。
+  useEffect(() => {
+    if (mode === 'content' && diffTarget && !content.loading && content.result === null && content.error === null) {
+      void loadContent();
+    }
+  }, [mode, diffTarget, content.loading, content.result, content.error, loadContent]);
+
   const lines = useMemo(() => buildDiffLines(state.result?.diffText ?? ''), [state.result]);
+  const contentLines = useMemo(
+    () => (content.result?.ok ? content.result.content.split('\n') : []),
+    [content.result],
+  );
 
   if (!diffTarget) {
     return (
@@ -171,6 +242,14 @@ export function DiffView({ isZh }: DiffViewProps) {
     void clientApi.openPath(diffTarget.absPath, diffTarget.workspaceRoot);
   };
 
+  const refresh = () => {
+    if (mode === 'content') {
+      void loadContent();
+    } else {
+      void load();
+    }
+  };
+
   return (
     <div className="workbench-diff">
       <div className="workbench-diff-header">
@@ -178,15 +257,39 @@ export function DiffView({ isZh }: DiffViewProps) {
           <span className="workbench-diff-filename" title={diffTarget.absPath}>
             {fileName}
           </span>
-          {result && result.ok && statusLabel(result.status, isZh) ? (
+          {mode === 'diff' && result && result.ok && statusLabel(result.status, isZh) ? (
             <span className="workbench-diff-badge">{statusLabel(result.status, isZh)}</span>
           ) : null}
         </div>
         <div className="workbench-diff-actions">
+          <div
+            className="workbench-diff-segmented"
+            role="tablist"
+            aria-label={isZh ? '查看模式' : 'View mode'}
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'diff'}
+              className={`workbench-diff-segment${mode === 'diff' ? ' is-active' : ''}`}
+              onClick={() => setMode('diff')}
+            >
+              Diff
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'content'}
+              className={`workbench-diff-segment${mode === 'content' ? ' is-active' : ''}`}
+              onClick={() => setMode('content')}
+            >
+              {isZh ? '文件内容' : 'File'}
+            </button>
+          </div>
           <button
             type="button"
             className="workbench-diff-btn"
-            onClick={() => void load()}
+            onClick={refresh}
             title={isZh ? '刷新' : 'Refresh'}
           >
             {isZh ? '刷新' : 'Refresh'}
@@ -203,6 +306,56 @@ export function DiffView({ isZh }: DiffViewProps) {
       </div>
 
       <div className="workbench-diff-body">
+        {mode === 'content' ? (
+          content.loading ? (
+            <div className="workbench-empty-hint workbench-diff-status">
+              {isZh ? '正在加载文件内容…' : 'Loading file content…'}
+            </div>
+          ) : content.error ? (
+            <div className="workbench-empty-hint workbench-diff-status">
+              {isZh ? `加载失败：${content.error}` : `Failed to load: ${content.error}`}
+            </div>
+          ) : !content.result ? null : !content.result.ok ? (
+            <div className="workbench-empty-hint workbench-diff-status">
+              <div>{contentErrorLabel(content.result.status, content.result.size, isZh)}</div>
+              <div className="workbench-diff-path">{diffTarget.absPath}</div>
+              {content.result.status === 'too_large' || content.result.status === 'binary' ? (
+                <button type="button" className="workbench-diff-btn" onClick={openInEditor}>
+                  {isZh ? '在编辑器中打开' : 'Open in editor'}
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              {content.result.resolvedFrom ? (
+                <div className="workbench-diff-resolved">
+                  {isZh
+                    ? `已在其他仓库找到该文件：${content.result.resolvedFrom}`
+                    : `Found this file in another repository: ${content.result.resolvedFrom}`}
+                </div>
+              ) : null}
+              {content.result.content === '' ? (
+                <div className="workbench-empty-hint workbench-diff-status">
+                  {isZh ? '（空文件）' : '(Empty file)'}
+                </div>
+              ) : (
+                <pre className="workbench-content-pre">
+                  <code>
+                    {contentLines.map((text, i) => (
+                      <span key={i} className="content-line">
+                        <span className="content-gutter" aria-hidden="true">
+                          {i + 1}
+                        </span>
+                        <span className="content-line-text">{text === '' ? '\u00a0' : text}</span>
+                      </span>
+                    ))}
+                  </code>
+                </pre>
+              )}
+            </>
+          )
+        ) : (
+          <>
         {result && result.ok && result.resolvedFrom ? (
           <div className="workbench-diff-resolved">
             {isZh
@@ -271,6 +424,8 @@ export function DiffView({ isZh }: DiffViewProps) {
               ))}
             </code>
           </pre>
+        )}
+          </>
         )}
       </div>
     </div>

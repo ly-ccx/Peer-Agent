@@ -364,6 +364,80 @@
     font-weight: 600;
   }
 
+  /* Diff | 文件内容 分段切换：与 .workbench-diff-btn 同栏，pill 容器内两段 */
+  .workbench-diff-segmented {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px;
+    gap: 2px;
+    background: var(--za-surface-2, var(--chrome-hover));
+    border: 1px solid var(--za-line);
+    border-radius: var(--radius-frost-sm, 6px);
+    -webkit-app-region: no-drag;
+  }
+  .workbench-diff-segment {
+    padding: 2px 9px;
+    font-size: 11.5px;
+    color: var(--graphite-mute);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-frost-xs, 4px);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background var(--za-motion-fast), color var(--za-motion-fast);
+  }
+  .workbench-diff-segment:hover {
+    color: var(--graphite-base);
+  }
+  .workbench-diff-segment.is-active {
+    color: var(--graphite-base);
+    background: var(--za-surface-1, #fff);
+    box-shadow: var(--za-shadow-xs, 0 1px 2px rgba(0, 0, 0, 0.08));
+  }
+  .workbench-diff-segment:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--za-focus);
+  }
+
+  /* 文件内容视图：带行号槽的只读等宽代码视图（复用 diff 的排版语汇） */
+  .workbench-content-pre {
+    margin: 0;
+    padding: 8px 0;
+    font-family: var(--font-mono);
+    font-size: var(--za-code-font-size, 12px);
+    line-height: 1.55;
+    tab-size: 2;
+  }
+  .workbench-content-pre code {
+    display: block;
+    min-width: max-content;
+  }
+  .content-line {
+    display: flex;
+    align-items: stretch;
+    white-space: pre;
+  }
+  .content-line:hover {
+    background: var(--chrome-hover);
+  }
+  .content-gutter {
+    flex: 0 0 auto;
+    box-sizing: content-box;
+    min-width: 2.5em;
+    padding: 0 12px 0 8px;
+    text-align: right;
+    color: var(--za-diff-gutter-fg, var(--za-text-faint));
+    background: transparent;
+    opacity: 0.7;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .content-line-text {
+    flex: 1 1 auto;
+    padding: 0 12px;
+    color: var(--graphite-base);
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .workbench-panel,
     .app-layout {

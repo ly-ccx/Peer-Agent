@@ -206,6 +206,32 @@ export interface BootstrapPreloadApi {
     workspaceRoot?: string,
     relPath?: string,
   ) => Promise<{ readonly exists: boolean; readonly resolvedFrom?: string }>;
+  /**
+   * 读取指定文件的完整文本内容，供 Workbench 的 Diff 视图「文件内容」分段查看。
+   * - absPath 必须是绝对路径；在当前 workspace 找不到时，会用 relPath 在其他已知 workspace 回退查找。
+   * - status：ok（读取成功）、not_found（不存在）、not_file（是目录等非普通文件）、too_large（超过 2MB 上限）、
+   *   binary（检测到二进制内容，不预览）、invalid_path / error（异常）。
+   * - content 为 UTF-8 文本（仅 status=ok 时有内容，其余为空串）；size 为字节数；resolvedFrom 标注跨仓库命中的仓库根。
+   */
+  readonly readFile: (
+    absPath: string,
+    workspaceRoot?: string,
+    relPath?: string,
+  ) => Promise<{
+    readonly ok: boolean;
+    readonly status:
+      | 'ok'
+      | 'not_found'
+      | 'not_file'
+      | 'too_large'
+      | 'binary'
+      | 'invalid_path'
+      | 'error';
+    readonly content: string;
+    readonly size?: number;
+    readonly resolvedFrom?: string;
+    readonly error?: string;
+  }>;
   readonly listShellTasks: () => Promise<readonly Record<string, unknown>[]>;
   readonly stopActiveShellTask: () => Promise<Record<string, unknown>>;
   readonly stopShellTask: (taskId: string) => Promise<Record<string, unknown>>;

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
@@ -948,6 +948,79 @@ ipcMain.handle('fs:exists', (_event, { absPath, workspaceRoot, relPath } = {}) =
     return { exists: false };
   } catch {
     return { exists: false };
+  }
+});
+
+// 读取指定文件的完整文本内容，供 Workbench 的 Diff 视图「文件内容」分段查看。
+// 入参 absPath 必须是绝对路径；absPath 在当前 workspace 找不到时复用 git:diff/fs:exists 的
+// 跨 workspace 回退逻辑（用 relPath 逐一拼接已知 workspace）。
+// 兜底：> 2MB 返回 too_large；检测到 NUL 字节判定二进制返回 binary；不存在返回 not_found。
+// 返回 { ok, status, content, size?, resolvedFrom?, error? }。
+ipcMain.handle('file:read', async (_event, { absPath, workspaceRoot, relPath } = {}) => {
+  const MAX_BYTES = 2 * 1024 * 1024; // 2MB 上限
+  try {
+    if (!absPath || typeof absPath !== 'string') {
+      return { ok: false, status: 'invalid_path', content: '', error: 'invalid_path' };
+    }
+    let target = path.normalize(absPath);
+    if (!path.isAbsolute(target)) {
+      return { ok: false, status: 'invalid_path', content: '', error: 'not_absolute' };
+    }
+    // 跨 workspace 回退：absPath 不存在但提供了 relPath 时，逐一拼接已知 workspace 查找。
+    let resolvedFrom;
+    if (!existsSync(target)) {
+      let recovered = false;
+      const cleanRel = typeof relPath === 'string' && relPath.trim()
+        ? relPath.replace(/^[/\\]+/, '').replace(/^(\.\.?[/\\])+/, '')
+        : '';
+      if (cleanRel) {
+        const all = settingsStore.getAll();
+        const candidates = [
+          ...(all.workspaces || []).map((w) => (w && typeof w === 'object' ? w.path : w)),
+          all.activeWorkspace,
+          workspaceRoot,
+        ].filter((p) => typeof p === 'string' && p);
+        const seen = new Set();
+        for (const ws of candidates) {
+          if (seen.has(ws)) continue;
+          seen.add(ws);
+          const candidate = path.normalize(path.join(ws, cleanRel));
+          if (existsSync(candidate)) {
+            target = candidate;
+            resolvedFrom = ws;
+            recovered = true;
+            break;
+          }
+        }
+      }
+      if (!recovered) {
+        return { ok: false, status: 'not_found', content: '', error: 'file_not_found' };
+      }
+    }
+    // 必须是文件（拒绝目录）。
+    let stat;
+    try {
+      stat = statSync(target);
+    } catch {
+      return { ok: false, status: 'not_found', content: '', error: 'stat_failed' };
+    }
+    if (!stat.isFile()) {
+      return { ok: false, status: 'not_file', content: '', error: 'not_a_file', resolvedFrom };
+    }
+    if (stat.size > MAX_BYTES) {
+      return { ok: false, status: 'too_large', content: '', size: stat.size, resolvedFrom, error: 'file_too_large' };
+    }
+    const buf = readFileSync(target);
+    // 二进制检测：扫描前 8KB 是否含 NUL 字节。
+    const sniffLen = Math.min(buf.length, 8192);
+    for (let i = 0; i < sniffLen; i += 1) {
+      if (buf[i] === 0) {
+        return { ok: false, status: 'binary', content: '', size: stat.size, resolvedFrom, error: 'binary_file' };
+      }
+    }
+    return { ok: true, status: 'ok', content: buf.toString('utf8'), size: stat.size, resolvedFrom };
+  } catch (err) {
+    return { ok: false, status: 'error', content: '', error: err?.message || 'read_failed' };
   }
 });
 
