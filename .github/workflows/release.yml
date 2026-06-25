@@ -134,7 +134,7 @@ jobs:
 
       # 上传各平台产物（安装包 + blockmap + 更新清单）给 release job 汇总。
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.platform }}
           path: |
@@ -152,12 +152,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (release notes source)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.ref }}
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
