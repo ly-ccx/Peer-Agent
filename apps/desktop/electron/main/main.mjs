@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -16,7 +16,9 @@ import { createLocalToolHost } from './runtime-gateway/local-tool-host.mjs';
 import {
   registerBrowserWebContents,
   unregisterBrowserWebContents,
+  getActiveWebContentsId,
 } from './runtime-gateway/browser-control-registry.mjs';
+import { buildAppMenu } from './app-menu.mjs';
 import { createLocalShellProvider } from './runtime-gateway/local-shell-provider.mjs';
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
 import { createSkillStore } from './skill-store.mjs';
@@ -623,10 +625,30 @@ ipcMain.handle('settings:import', async () => {
   return { canceled: false, ...importBundle(filePaths[0]) };
 });
 
+// ── 应用菜单（方案 B：⌘R 收归刷新内嵌浏览器页）──
+// 替换 Electron 默认菜单，移除生产环境的整窗 Reload/Force Reload；
+// ⌘R 改为刷新当前活跃 webview，无活动浏览器页时置灰。需在「语言切换」「浏览器页
+// 注册/注销」时重建，使 label 跟随语言、enabled 态跟随是否有活动浏览器页。
+function rebuildAppMenu() {
+  const menu = buildAppMenu({
+    isDev,
+    locale: sessionStore.getSession().locale,
+    hasActiveBrowser: getActiveWebContentsId() != null,
+    onReloadBrowser: () => {
+      const id = getActiveWebContentsId();
+      if (id == null) return;
+      const wc = webContents.fromId(id);
+      if (wc && !wc.isDestroyed()) wc.reload();
+    },
+  });
+  Menu.setApplicationMenu(menu);
+}
+
 // ── Locale ──
 ipcMain.handle('locale:set', (_event, payload) => {
   sessionStore.setLocale(payload.locale);
   settingsStore.merge({ locale: payload.locale });
+  rebuildAppMenu();
   return sessionStore.getSession();
 });
 
@@ -1034,11 +1056,14 @@ ipcMain.handle('file:read', async (_event, { absPath, workspaceRoot, relPath } =
 // 可见 webview。webview 卸载时注销。
 ipcMain.handle('browser:register-webcontents', (_event, { webContentsId, url, title } = {}) => {
   const result = registerBrowserWebContents({ webContentsId, url, title });
+  rebuildAppMenu(); // 有活动浏览器页 → ⌘R「刷新浏览器页」由置灰转可用
   return result;
 });
-ipcMain.handle('browser:unregister-webcontents', (_event, { webContentsId } = {}) =>
-  unregisterBrowserWebContents(webContentsId),
-);
+ipcMain.handle('browser:unregister-webcontents', (_event, { webContentsId } = {}) => {
+  const result = unregisterBrowserWebContents(webContentsId);
+  rebuildAppMenu(); // 无活动浏览器页 → ⌘R 置灰禁用
+  return result;
+});
 
 // ── Conversations ──
 ipcMain.handle('conversations:list', (_, params) => {
@@ -1633,6 +1658,10 @@ app.whenReady().then(async () => {
   });
 
   createWindow();
+
+  // 自定义应用菜单替换 Electron 默认菜单：移除生产环境整窗 Reload/Force Reload，
+  // ⌘R 收归为「刷新内嵌浏览器页」（初始无活动浏览器页时置灰）。
+  rebuildAppMenu();
 
   // 自动更新：通道按「设置项优先，回退版本号语义」解析（beta / stable）。
   // 渲染层负责表达（版本徽标红点 / 摘要弹窗 / 进度条），事件经 updater:event 广播。
