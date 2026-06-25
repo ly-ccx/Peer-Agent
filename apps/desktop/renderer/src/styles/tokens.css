@@ -773,6 +773,32 @@ textarea:focus-visible,
   }
 }
 
+/* 右下角完成卡片（UpdateToast）：从下方滑入 / 利落滑出。位移 < 16px，遵守动效准入；
+ * prefers-reduced-motion 由本文件末尾的全局兜底（animation-duration:1ms）降级。 */
+@keyframes za-toast-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes za-toast-out {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+  }
+}
+
 /* 流式进行态扫光（高性能）：transform 平移遮罩缝,只动合成层不触发 repaint。
  * 行程足够大让缝两端完全移出文字,循环 reset 发生在文字全暗瞬间 → 看不到位置突变。 */
 @keyframes za-text-sweep {

@@ -480,6 +480,12 @@ export type TranslationKey =
   | 'updater.badge.checking'
   | 'updater.badge.updateAvailable'
   | 'updater.badge.ariaHasUpdate'
+  | 'updater.badge.downloading'
+  | 'updater.toast.title'
+  | 'updater.toast.ready'
+  | 'updater.toast.install'
+  | 'updater.toast.openInstaller'
+  | 'updater.toast.dismiss'
   | 'updater.modal.title'
   | 'updater.modal.checking'
   | 'updater.modal.currentVersion'
@@ -990,6 +996,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.badge.checking': '检查更新中…',
     'updater.badge.updateAvailable': '有新版本',
     'updater.badge.ariaHasUpdate': '有可用更新，点击查看',
+    'updater.badge.downloading': '正在后台下载更新…{percent}%',
+    'updater.toast.title': '下载完成',
+    'updater.toast.ready': '新版本 v{version} 已就绪',
+    'updater.toast.install': '立即安装',
+    'updater.toast.openInstaller': '打开安装包',
+    'updater.toast.dismiss': '收起',
     'updater.modal.title': '发现新版本',
     'updater.modal.checking': '正在检查更新…',
     'updater.modal.currentVersion': '当前版本',
@@ -1498,6 +1510,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.badge.checking': 'Checking…',
     'updater.badge.updateAvailable': 'Update available',
     'updater.badge.ariaHasUpdate': 'An update is available, click to view',
+    'updater.badge.downloading': 'Downloading update… {percent}%',
+    'updater.toast.title': 'Download complete',
+    'updater.toast.ready': 'Version v{version} is ready',
+    'updater.toast.install': 'Install now',
+    'updater.toast.openInstaller': 'Open installer',
+    'updater.toast.dismiss': 'Dismiss',
     'updater.modal.title': 'Update available',
     'updater.modal.checking': 'Checking for updates…',
     'updater.modal.currentVersion': 'Current version',

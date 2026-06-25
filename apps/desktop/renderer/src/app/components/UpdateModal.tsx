@@ -4,33 +4,34 @@ import { Overlay } from './Overlay';
 import { ReleaseNotesView } from './ReleaseNotesView';
 
 /**
- * UpdateModal —— 更新摘要 / 下载进度 / 安装态的统一弹窗（表达层）。
+ * UpdateModal —— 更新摘要弹窗（表达层）。
  *
- * 按确认的产品设计分阶段呈现：
- *   - available：展示当前版本 / 新版本 / 更新内容 + 「更新」「稍后」。
- *   - downloading：吉祥物 + 进度条 +「正在下载更新…」。
- *   - downloaded：进度条满 +「正在安装 {version}」+「当前工作已保存…」+「立即重启安装」。
+ * 职责（按确认的产品设计，下载阶段不再霸屏）：
+ *   - available：展示当前版本 / 新版本 / 更新内容 +「更新」「稍后」。
+ *     点「更新」= 触发后台下载并带动画收起弹窗，进度改由版本徽标的环形进度表达，
+ *     下载完成由右下角 UpdateToast 承接「立即安装」。
+ *   - checking：正在检查更新…
  *   - not-available：已是最新 +「重新检查」。
- *   - error：错误信息 +「重新检查」。
+ *   - error：错误信息 +（可选）打开 Release 页 +「重新检查」。
  *
- * 能力真相在主进程；本组件仅触发 onUpdate/onInstall/onRecheck/onClose 回调。
+ * 下载中 / 已下载 / 待打开（downloading / downloaded / ready-to-open）不再由本弹窗呈现，
+ * 分别交给「徽标环形进度」与「右下角完成卡片（UpdateToast）」。
+ *
+ * 能力真相在主进程；本组件仅触发 onUpdate/onOpenReleasePage/onRecheck/onClose 回调。
+ * 关闭统一经 Overlay 的 requestClose 走退场动画，不再直接卸载。
  */
 export function UpdateModal({
   i18n,
   status,
   onUpdate,
-  onInstall,
-  onOpenInstaller,
   onOpenReleasePage,
   onRecheck,
   onClose,
 }: {
   readonly i18n: I18nRuntime;
   readonly status: UpdaterStatus;
+  /** 触发后台下载（download）。调用后弹窗会带动画收起。 */
   readonly onUpdate: () => void;
-  readonly onInstall: () => void;
-  /** mac 自管下载完成后打开 dmg 安装包（phase='ready-to-open'）。 */
-  readonly onOpenInstaller: () => void;
   /** 错误兜底：打开 GitHub Release 页面（status.releaseUrl 存在时）。 */
   readonly onOpenReleasePage: () => void;
   readonly onRecheck: () => void;
@@ -38,62 +39,15 @@ export function UpdateModal({
 }) {
   const { phase } = status;
   const newVersion = status.availableVersion ?? '';
-  const percent = Math.max(0, Math.min(100, status.percent ?? 0));
-  // ready-to-open 是 mac 完成态，允许关闭弹窗（dmg 已就绪，可稍后再打开）。
-  const isBusy = phase === 'downloading' || phase === 'downloaded';
 
   return (
     <Overlay
       onClose={onClose}
-      closeOnBackdrop={!isBusy}
       ariaLabel={i18n.t('updater.modal.title')}
       panelClassName="updater-modal"
     >
-        {phase === 'downloading' || phase === 'downloaded' ? (
-          <div className="updater-modal-progress-view">
-            <div className="updater-modal-mascot" aria-hidden="true">
-              <img src="./logo-light.png" alt="" className="light" />
-              <img src="./logo-dark.png" alt="" className="dark" />
-            </div>
-            <div className="updater-progress-track">
-              <div
-                className="updater-progress-fill"
-                style={{ width: `${phase === 'downloaded' ? 100 : percent}%` }}
-              />
-            </div>
-            <p className="updater-modal-phase">
-              {phase === 'downloaded'
-                ? i18n.t('updater.modal.installing', { version: newVersion })
-                : i18n.t('updater.modal.downloading')}
-            </p>
-            {phase === 'downloaded' ? (
-              <>
-                <p className="updater-modal-hint">{i18n.t('updater.modal.installHint')}</p>
-                <div className="updater-modal-actions">
-                  <button type="button" className="updater-btn primary" onClick={onInstall}>
-                    {i18n.t('updater.modal.restartNow')}
-                  </button>
-                </div>
-              </>
-            ) : null}
-          </div>
-        ) : phase === 'ready-to-open' ? (
-          <div className="updater-modal-body">
-            <h2 className="updater-modal-title">{i18n.t('updater.modal.title')}</h2>
-            <p className="updater-modal-ready">
-              {i18n.t('updater.modal.readyToOpen', { version: newVersion })}
-            </p>
-            <p className="updater-modal-hint">{i18n.t('updater.modal.openInstallerHint')}</p>
-            <div className="updater-modal-actions">
-              <button type="button" className="updater-btn primary" onClick={onOpenInstaller}>
-                {i18n.t('updater.modal.openInstaller')}
-              </button>
-              <button type="button" className="updater-btn ghost" onClick={onClose}>
-                {i18n.t('updater.modal.close')}
-              </button>
-            </div>
-          </div>
-        ) : phase === 'not-available' ? (
+      {({ requestClose }) =>
+        phase === 'not-available' ? (
           <div className="updater-modal-body">
             <h2 className="updater-modal-title">{i18n.t('updater.modal.title')}</h2>
             <p className="updater-modal-uptodate">{i18n.t('updater.modal.upToDate')}</p>
@@ -101,7 +55,7 @@ export function UpdateModal({
               <button type="button" className="updater-btn" onClick={onRecheck}>
                 {i18n.t('updater.modal.checkAgain')}
               </button>
-              <button type="button" className="updater-btn ghost" onClick={onClose}>
+              <button type="button" className="updater-btn ghost" onClick={requestClose}>
                 {i18n.t('updater.modal.close')}
               </button>
             </div>
@@ -121,7 +75,7 @@ export function UpdateModal({
               <button type="button" className="updater-btn" onClick={onRecheck}>
                 {i18n.t('updater.modal.checkAgain')}
               </button>
-              <button type="button" className="updater-btn ghost" onClick={onClose}>
+              <button type="button" className="updater-btn ghost" onClick={requestClose}>
                 {i18n.t('updater.modal.close')}
               </button>
             </div>
@@ -153,10 +107,18 @@ export function UpdateModal({
               </div>
             </div>
             <div className="updater-modal-actions">
-              <button type="button" className="updater-btn primary" onClick={onUpdate}>
+              <button
+                type="button"
+                className="updater-btn primary"
+                onClick={() => {
+                  // 先触发后台下载，再带动画收起弹窗：进度交由徽标环形进度表达。
+                  onUpdate();
+                  requestClose();
+                }}
+              >
                 {i18n.t('updater.modal.update')}
               </button>
-              <button type="button" className="updater-btn ghost" onClick={onClose}>
+              <button type="button" className="updater-btn ghost" onClick={requestClose}>
                 {i18n.t('updater.modal.later')}
               </button>
             </div>
@@ -170,7 +132,8 @@ export function UpdateModal({
               </span>
             </div>
           </div>
-        )}
+        )
+      }
     </Overlay>
   );
 }

@@ -33,7 +33,11 @@ export function Overlay({
    * 入场 / 退场动效仍由基座 .pa-overlay-backdrop 统一提供，不得在修饰类里改动效。
    */
   readonly backdropClassName?: string;
-  readonly children: ReactNode;
+  /**
+   * children 可为普通 ReactNode，或 render-prop。后者会收到 { requestClose }，
+   * 使浮层内部的按钮（如「稍后」「更新」）也能复用统一退场动画，而非直接卸载。
+   */
+  readonly children: ReactNode | ((api: { readonly requestClose: () => void }) => ReactNode);
 }) {
   const [closing, setClosing] = useState(false);
   // 退场动画兜底定时器：防止 animationend 事件因故丢失导致浮层卡死不卸载。
@@ -92,7 +96,7 @@ export function Overlay({
         onClick={(event) => event.stopPropagation()}
         onAnimationEnd={closing ? finishClose : undefined}
       >
-        {children}
+        {typeof children === 'function' ? children({ requestClose }) : children}
       </div>
     </div>
   );

@@ -37,6 +37,101 @@
     box-shadow: 0 0 0 2px var(--surface-vellum-base);
   }
 
+  /* 下载中：红点原地升级为 mini 环形进度，按 --pa-update-pct(0~100) 顺时针填充。
+     conic-gradient 描出进度弧，中心镂空成环；变量缺省 0 时为空环。 */
+  .sidebar-version-dot.is-progress {
+    width: 12px;
+    height: 12px;
+    background:
+      conic-gradient(
+        var(--cinnabar-seal) calc(var(--pa-update-pct, 0) * 1%),
+        var(--surface-vellum-sunken) 0
+      );
+    box-shadow: none;
+    transition: background 0.25s ease;
+  }
+
+  .sidebar-version-dot.is-progress::after {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border-radius: 50%;
+    background: var(--surface-vellum-base);
+  }
+
+  /* ── 右下角「下载完成」完成卡片（UpdateToast） ── */
+  .updater-toast {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 60;
+    width: min(320px, calc(100vw - 40px));
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: var(--pa-surface-card);
+    border: 1px solid var(--za-line);
+    box-shadow: var(--za-shadow-popover);
+    color: var(--pa-text-primary);
+    animation: za-toast-in var(--za-motion-medium) var(--za-ease-out) both;
+  }
+
+  .updater-toast.is-closing {
+    animation: za-toast-out var(--za-motion-fast) var(--za-ease-in-out) both;
+  }
+
+  .updater-toast-body {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .updater-toast-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--pa-text-primary);
+  }
+
+  .updater-toast-version {
+    font-size: 12px;
+    color: var(--pa-text-secondary);
+    word-break: break-word;
+  }
+
+  .updater-toast-actions {
+    display: flex;
+    align-items: center;
+  }
+
+  .updater-toast-dismiss {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    width: 18px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--pa-text-secondary);
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+    transition: background 0.15s ease;
+  }
+
+  .updater-toast-dismiss:hover {
+    background: var(--surface-vellum-active);
+    color: var(--pa-text-primary);
+  }
+
   /* ── 更新弹窗 ── */
   /* 浮层基座由 .pa-overlay-backdrop / .pa-overlay-panel 统一提供（见 overlay.css）。 */
   .updater-modal {
@@ -213,75 +308,9 @@
     background: transparent;
   }
 
-  /* ── 下载 / 安装态 ── */
-  .updater-modal-progress-view {
-    display: grid;
-    gap: 16px;
-    justify-items: center;
-    text-align: center;
-    padding: 8px 0;
-  }
-
-  .updater-modal-mascot img {
-    width: 72px;
-    height: 72px;
-    object-fit: contain;
-    border-radius: 16px;
-    overflow: hidden;
-  }
-
-  /* 亮/暗主题各显示一张吉祥物，避免两张图叠加（对齐 sidebar 徽标做法） */
-  .updater-modal-mascot img.dark {
-    display: none;
-  }
-
-  [data-theme="dark"] .updater-modal-mascot img.light {
-    display: none;
-  }
-
-  [data-theme="dark"] .updater-modal-mascot img.dark {
-    display: block;
-  }
-
-  .updater-progress-track {
-    width: 100%;
-    height: 6px;
-    border-radius: 999px;
-    background: var(--surface-vellum-sunken);
-    overflow: hidden;
-  }
-
-  .updater-progress-fill {
-    height: 100%;
-    border-radius: 999px;
-    background: var(--cinnabar-seal);
-    transition: width 0.25s ease;
-  }
-
-  .updater-modal-phase {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--pa-text-primary);
-  }
-
-  .updater-modal-hint {
-    margin: 0;
-    font-size: 13px;
-    line-height: 1.6;
-    color: var(--pa-text-secondary);
-  }
-
   .updater-modal-uptodate {
     margin: 0;
     font-size: 14px;
-    color: var(--pa-text-primary);
-  }
-
-  .updater-modal-ready {
-    margin: 0;
-    font-size: 14px;
-    font-weight: 600;
     color: var(--pa-text-primary);
   }
 
