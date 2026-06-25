@@ -1136,9 +1136,12 @@ export function ChatSurface({
       <ChatHeader
         title={conversationTitle ?? ''}
         isZh={isZh}
+        i18n={i18n}
         isStreaming={isStreaming}
         hasScroll={threadScrolled}
+        localAccessLevel={localAccessLevel}
         editTriggerRef={headerEditTriggerRef}
+        onOpenSettings={onOpenSettings}
         onRename={onRenameConversation && conversationId
           ? (newTitle) => onRenameConversation(conversationId, newTitle)
           : undefined}

@@ -516,7 +516,20 @@ export type TranslationKey =
   | 'updater.settings.currentVersion'
   | 'updater.settings.checkNow'
   | 'updater.settings.checking'
-  | 'updater.settings.disabledHint';
+  | 'updater.settings.disabledHint'
+  | 'header.capabilities.label'
+  | 'header.capabilities.title'
+  | 'header.capabilities.group.skill'
+  | 'header.capabilities.group.mcp'
+  | 'header.capabilities.group.plugin'
+  | 'header.capabilities.group.builtin'
+  | 'header.capabilities.empty'
+  | 'header.capabilities.manage'
+  | 'header.capabilities.aria'
+  | 'header.capabilities.status.available'
+  | 'header.capabilities.status.needsAuth'
+  | 'header.capabilities.status.disabled'
+  | 'header.capabilities.status.unavailable';
 
 type TranslationValues = Record<string, string | number>;
 
@@ -1034,6 +1047,19 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.settings.checkNow': '检查更新',
     'updater.settings.checking': '检查中…',
     'updater.settings.disabledHint': '开发环境下自动更新已禁用。',
+    'header.capabilities.label': '能力',
+    'header.capabilities.title': '已挂载能力',
+    'header.capabilities.group.skill': '技能',
+    'header.capabilities.group.mcp': 'MCP',
+    'header.capabilities.group.plugin': '插件',
+    'header.capabilities.group.builtin': '内置',
+    'header.capabilities.empty': '暂无已挂载的能力',
+    'header.capabilities.manage': '管理',
+    'header.capabilities.aria': '已挂载 {count} 项能力',
+    'header.capabilities.status.available': '可用',
+    'header.capabilities.status.needsAuth': '调用前询问',
+    'header.capabilities.status.disabled': '已停用',
+    'header.capabilities.status.unavailable': '不可用',
   },
   'en-US': {
     'app.newTask': 'New task',
@@ -1550,6 +1576,19 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.settings.checkNow': 'Check for updates',
     'updater.settings.checking': 'Checking…',
     'updater.settings.disabledHint': 'Auto-update is disabled in development.',
+    'header.capabilities.label': 'Capabilities',
+    'header.capabilities.title': 'Mounted capabilities',
+    'header.capabilities.group.skill': 'Skills',
+    'header.capabilities.group.mcp': 'MCP',
+    'header.capabilities.group.plugin': 'Plugins',
+    'header.capabilities.group.builtin': 'Built-in',
+    'header.capabilities.empty': 'No capabilities mounted',
+    'header.capabilities.manage': 'Manage',
+    'header.capabilities.aria': '{count} capabilities mounted',
+    'header.capabilities.status.available': 'Available',
+    'header.capabilities.status.needsAuth': 'Asks first',
+    'header.capabilities.status.disabled': 'Disabled',
+    'header.capabilities.status.unavailable': 'Unavailable',
   },
 };
 

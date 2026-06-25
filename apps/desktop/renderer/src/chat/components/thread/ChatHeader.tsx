@@ -1,5 +1,8 @@
+import type { I18nRuntime } from '@peer-agent/i18n';
+import type { LocalAccessLevel } from '@peer-agent/protocol';
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { WorkbenchToggle } from '../../../workbench/WorkbenchToggle';
+import { ChatHeaderCapabilities } from './ChatHeaderCapabilities';
 
 export interface ChatHeaderAction {
   readonly id: string;
@@ -21,25 +24,31 @@ export interface ChatHeaderAction {
 export function ChatHeader({
   title,
   isZh,
+  i18n,
   isStreaming,
   hasScroll,
+  localAccessLevel,
   editTriggerRef,
   onRename,
   onArchive,
   onBranch,
   onFind,
   onDelete,
+  onOpenSettings,
 }: {
   readonly title: string;
   readonly isZh: boolean;
+  readonly i18n: I18nRuntime;
   readonly isStreaming: boolean;
   readonly hasScroll?: boolean;
+  readonly localAccessLevel: LocalAccessLevel;
   readonly editTriggerRef?: MutableRefObject<(() => void) | null>;
   readonly onRename?: (newTitle: string) => void;
   readonly onArchive?: () => void;
   readonly onBranch?: () => void;
   readonly onFind?: () => void;
   readonly onDelete?: () => void;
+  readonly onOpenSettings?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -195,6 +204,11 @@ export function ChatHeader({
       </div>
 
       <div className="chat-header-right">
+        <ChatHeaderCapabilities
+          i18n={i18n}
+          localAccessLevel={localAccessLevel}
+          onOpenSettings={onOpenSettings}
+        />
         {onFind ? (
           <button
             type="button"
