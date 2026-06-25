@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { useWorkbench } from '../WorkbenchContext';
 
@@ -162,6 +162,9 @@ export function DiffView({ isZh }: DiffViewProps) {
   const [state, setState] = useState<LoadState>(INITIAL);
   const [mode, setMode] = useState<ViewMode>('diff');
   const [content, setContent] = useState<ContentState>(CONTENT_INITIAL);
+  // 记录已经自动落到「文件内容」的 diffTarget，避免刷新/用户手动切回 diff 后又被自动弹走。
+  // 用 absPath 作为 key：每个文件只在首次 diff 加载完成且判定无改动时自动切一次。
+  const autoSwitchedRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     if (!diffTarget) {
@@ -200,14 +203,31 @@ export function DiffView({ isZh }: DiffViewProps) {
   }, [diffTarget]);
 
   // 切换 diffTarget 时重置回 diff 模式，避免沿用上一个文件的内容态。
+  // 同时清空自动切换守卫，让新文件能重新参与「无改动自动落到文件内容」判定。
   useEffect(() => {
     setMode('diff');
     setContent(CONTENT_INITIAL);
+    autoSwitchedRef.current = null;
   }, [diffTarget]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 方案 B：diff 加载完成后，若该文件没有未提交改动（无 diff），自动落到「文件内容」子视图；
+  // 有改动则保持 diff。每个 diffTarget 只自动切一次（autoSwitchedRef 守卫），
+  // 这样用户刷新或手动切回 diff 后不会再被弹走。
+  useEffect(() => {
+    if (!diffTarget) return;
+    const result = state.result;
+    if (state.loading || !result) return;
+    if (autoSwitchedRef.current === diffTarget.absPath) return;
+    const noChanges = result.ok && (result.status === 'no_changes' || !result.diffText.trim());
+    if (noChanges) {
+      autoSwitchedRef.current = diffTarget.absPath;
+      setMode('content');
+    }
+  }, [diffTarget, state.loading, state.result]);
 
   // 仅在进入「文件内容」模式且尚未加载时按需读取文件，避免无谓 IPC。
   useEffect(() => {
