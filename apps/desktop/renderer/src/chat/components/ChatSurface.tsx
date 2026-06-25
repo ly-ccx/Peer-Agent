@@ -59,6 +59,7 @@ import {
   buildConversationContinuityContext,
   buildConfigInstructionContext,
   buildReplyLanguageContext,
+  buildGitBranchPrefixContext,
 } from '../state/contextSources';
 import type {
   ChatAttachment,
@@ -259,6 +260,7 @@ export function ChatSurface({
   conversationTitle,
   systemInstructions,
   replyLanguage,
+  gitBranchPrefix,
   resumeTask,
   onResumeConsumed,
   onOpenSettings,
@@ -276,6 +278,7 @@ export function ChatSurface({
   readonly conversationTitle?: string;
   readonly systemInstructions?: string;
   readonly replyLanguage?: string;
+  readonly gitBranchPrefix?: string;
   readonly resumeTask?: { sessionId: string; task: string; effort?: string } | null;
   readonly onResumeConsumed?: () => void;
   readonly onOpenSettings: () => void;
@@ -929,9 +932,10 @@ export function ChatSurface({
     const configInstructions = [
       ...buildConfigInstructionContext(systemInstructions),
       ...buildReplyLanguageContext(replyLanguage),
+      ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
     void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId, contextAttachments, continuityContext, configInstructions });
-  }, [isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, mode, systemInstructions, replyLanguage]);
+  }, [isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, mode, systemInstructions, replyLanguage, gitBranchPrefix]);
 
   const handleSend = useCallback(async () => {
     const text = draft.trim();
@@ -1022,9 +1026,10 @@ export function ChatSurface({
     const configInstructions = [
       ...buildConfigInstructionContext(systemInstructions),
       ...buildReplyLanguageContext(replyLanguage),
+      ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
     void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: newAssistant.id, effort, mode, conversationId, contextAttachments, continuityContext, configInstructions });
-  }, [isStreaming, hasProvider, conversationId, messages, effort, mode, systemInstructions, replyLanguage]);
+  }, [isStreaming, hasProvider, conversationId, messages, effort, mode, systemInstructions, replyLanguage, gitBranchPrefix]);
 
   const handleBranch = useCallback(async (msgIndex: number) => {
     if (!conversationId || isStreaming) return;

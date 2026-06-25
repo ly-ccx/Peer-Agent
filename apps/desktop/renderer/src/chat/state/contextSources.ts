@@ -116,3 +116,24 @@ export function buildReplyLanguageContext(replyLanguage: string | null | undefin
     source: 'settings.replyLanguage',
   }];
 }
+
+/**
+ * 把用户配置的「Git 分支前缀」包装为 instruction 层 Context item。
+ *
+ * - 空串 / 未配置：不产出（不约束分支命名，保持默认行为）。
+ * - 非空：产出一条稳定的指令，要求 Agent 在创建 git 分支时以该前缀命名。
+ *
+ * 注意（System Context 治理）：分支前缀是用户配置的指令型上下文，走既有
+ * configInstructions（instruction 层）通道纳入 System Context，不在组件里直接拼接系统提示词。
+ */
+export function buildGitBranchPrefixContext(gitBranchPrefix: string | null | undefined): ConfigInstructionContextItem[] {
+  const prefix = typeof gitBranchPrefix === 'string' ? gitBranchPrefix.trim() : '';
+  if (!prefix) return [];
+  return [{
+    id: 'settings.gitBranchPrefix',
+    title: 'Git Branch Prefix',
+    content: `When you create a new git branch (e.g. via \`git checkout -b\` or \`git switch -c\`), always name it with the prefix "${prefix}". For example, a feature branch should be named like "${prefix}my-feature". Do not apply this prefix to existing branches you only check out.`,
+    priority: 0,
+    source: 'settings.gitBranchPrefix',
+  }];
+}

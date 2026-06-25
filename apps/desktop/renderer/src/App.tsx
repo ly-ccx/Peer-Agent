@@ -30,6 +30,10 @@ function readReplyLanguage(settings: Record<string, unknown> | null | undefined)
   return typeof settings?.replyLanguage === 'string' ? settings.replyLanguage : '';
 }
 
+function readGitBranchPrefix(settings: Record<string, unknown> | null | undefined): string {
+  return typeof settings?.gitBranchPrefix === 'string' ? settings.gitBranchPrefix : '';
+}
+
 export function App() {
   const { availableLocales, initError, refreshBootstrap, session } = useDesktopBootstrap();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
@@ -58,6 +62,8 @@ export function App() {
     readSystemInstructions(clientApi.initialSettings));
   const [replyLanguage, setReplyLanguage] = useState(() =>
     readReplyLanguage(clientApi.initialSettings));
+  const [gitBranchPrefix, setGitBranchPrefix] = useState(() =>
+    readGitBranchPrefix(clientApi.initialSettings));
 
   const refreshProviders = useCallback(async () => {
     try { setProviders(await clientApi.llmListProviders()); } catch {}
@@ -77,6 +83,7 @@ export function App() {
       const settings = await clientApi.getSettings();
       setSystemInstructions(readSystemInstructions(settings));
       setReplyLanguage(readReplyLanguage(settings));
+      setGitBranchPrefix(readGitBranchPrefix(settings));
     } catch {}
   }, []);
 
@@ -243,6 +250,7 @@ export function App() {
           onLocaleChanged={refreshBootstrap}
           onReplyLanguageChanged={setReplyLanguage}
           onSystemInstructionsChanged={setSystemInstructions}
+          onGitBranchPrefixChanged={setGitBranchPrefix}
         />
       ) : session ? (
         <WorkbenchProvider conversationId={activeConversationId}>
@@ -275,6 +283,7 @@ export function App() {
                   conversationTitle={conversations.find((c) => c.id === activeConversationId)?.title}
                   systemInstructions={systemInstructions}
                   replyLanguage={replyLanguage}
+                  gitBranchPrefix={gitBranchPrefix}
                   resumeTask={resumeTask}
                   onResumeConsumed={() => {
                     setResumeTask(null);

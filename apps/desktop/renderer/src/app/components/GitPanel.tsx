@@ -11,6 +11,8 @@ function readBranchPrefix(settings: Record<string, unknown> | null | undefined):
 
 export interface GitPanelProps {
   readonly i18n: I18nRuntime;
+  /** 保存成功后回调通知上层（App），使 gitBranchPrefix 热生效、无需重启。 */
+  readonly onGitBranchPrefixChanged?: (value: string) => void;
 }
 
 /**
@@ -20,7 +22,7 @@ export interface GitPanelProps {
  * 分支时的名称前缀（默认 PeerAgent/）。复用通用的 clientApi.updateSettings
  * 链路，失焦即保存，保存失败回滚到上一次成功值。
  */
-export function GitPanel({ i18n }: GitPanelProps) {
+export function GitPanel({ i18n, onGitBranchPrefixChanged }: GitPanelProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [branchPrefix, setBranchPrefix] = useState(() => readBranchPrefix(clientApi.initialSettings));
@@ -40,6 +42,7 @@ export function GitPanel({ i18n }: GitPanelProps) {
     setError(null);
     try {
       await clientApi.updateSettings({ gitBranchPrefix: next });
+      onGitBranchPrefixChanged?.(next);
     } catch (err) {
       setBranchPrefix(previous);
       setSavedPrefix(previous);

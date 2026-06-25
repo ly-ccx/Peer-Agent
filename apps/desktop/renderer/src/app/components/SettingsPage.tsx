@@ -30,6 +30,7 @@ export function SettingsPage({
   onLocaleChanged,
   onReplyLanguageChanged,
   onSystemInstructionsChanged,
+  onGitBranchPrefixChanged,
 }: {
   readonly availableLocales: readonly LocaleCode[];
   readonly i18n: I18nRuntime;
@@ -37,6 +38,7 @@ export function SettingsPage({
   readonly onLocaleChanged: () => Promise<void> | void;
   readonly onReplyLanguageChanged?: (replyLanguage: string) => void;
   readonly onSystemInstructionsChanged?: (value: string) => void;
+  readonly onGitBranchPrefixChanged?: (value: string) => void;
 }) {
   const [section, setSection] = useState<SettingsSection>('general');
   const [query, setQuery] = useState('');
@@ -123,7 +125,7 @@ export function SettingsPage({
             onSystemInstructionsChanged={onSystemInstructionsChanged}
           />
         ) : section === 'git' ? (
-          <GitPanel i18n={i18n} />
+          <GitPanel i18n={i18n} onGitBranchPrefixChanged={onGitBranchPrefixChanged} />
         ) : section === 'updates' ? (
           <UpdatesPanel i18n={i18n} />
         ) : (
