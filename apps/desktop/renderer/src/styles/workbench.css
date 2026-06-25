@@ -57,7 +57,7 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    padding: 60px 4px 8px;
+    padding: 6px 4px 8px;
     background: var(--za-sidebar-bg);
     border-right: 1px solid var(--chrome-hairline);
   }
@@ -113,16 +113,21 @@
     min-width: 0;
     height: 100%;
     overflow: hidden;
-    padding-top: 52px;
+    padding-top: 24px;
   }
 
   .workbench-view {
     position: absolute;
-    inset: 52px 0 0 0;
+    inset: 24px 0 0 0;
     overflow-y: auto;
     overflow-x: hidden;
     visibility: hidden;
     pointer-events: none;
+  }
+
+  /* Diff 视图：标题栏上提铺满顶部安全区，消除顶部纯空白 */
+  .workbench-view--diff {
+    inset-block-start: 0;
   }
 
   .workbench-view[data-active='true'] {
@@ -200,9 +205,12 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 10px 12px;
+    min-height: 52px;
+    padding: 0 12px;
     border-bottom: 1px solid var(--za-line);
     flex: 0 0 auto;
+    /* 上提铺满顶部安全区后，标题栏同时充当窗口拖拽区 */
+    -webkit-app-region: drag;
   }
   .workbench-diff-titles {
     display: flex;
@@ -234,6 +242,8 @@
     align-items: center;
     gap: 4px;
     flex: 0 0 auto;
+    /* 标题栏为拖拽区，按钮需恢复可点击 */
+    -webkit-app-region: no-drag;
   }
   .workbench-diff-btn {
     padding: 3px 8px;

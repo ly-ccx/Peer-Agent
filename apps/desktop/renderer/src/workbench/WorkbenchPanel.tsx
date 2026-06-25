@@ -269,7 +269,10 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
         <div className="workbench-view" data-active={activeTab === 'files'}>
           <FilesView isZh={isZh} workspacePath={workspacePath} />
         </div>
-        <div className="workbench-view" data-active={activeTab === 'diff'}>
+        <div
+          className="workbench-view workbench-view--diff"
+          data-active={activeTab === 'diff'}
+        >
           <DiffView isZh={isZh} />
         </div>
       </div>
