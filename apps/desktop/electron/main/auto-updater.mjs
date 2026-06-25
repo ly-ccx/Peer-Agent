@@ -275,7 +275,7 @@ async function downloadUpdateMacManual() {
     emit('download-progress', { percent: 0 });
 
     // 1) HEAD 校验：资产缺失/命名漂移时尽早暴露并兜底。
-    const head = await fetch(dmgUrl, { method: 'HEAD', redirect: 'follow' });
+    const head = await fetchWithProxyFallback(dmgUrl, { method: 'HEAD', redirect: 'follow' });
     if (!head.ok) {
       throw new Error(`dmg not found (HTTP ${head.status})`);
     }
@@ -310,21 +310,57 @@ async function downloadUpdateMacManual() {
 }
 
 /**
+ * 解析 Electron 的 net.fetch（基于 Chromium 网络栈，自动遵循系统/环境代理）。
+ * 取不到时返回 null，由调用方回退到 Node 全局 fetch。
+ */
+async function getElectronNetFetch() {
+  try {
+    const electron = await import('electron');
+    const net = electron?.net || electron?.default?.net;
+    return typeof net?.fetch === 'function' ? net.fetch.bind(net) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 带代理回退的 fetch：优先用 Electron net.fetch（走系统/环境代理，国内代理下更快），
+ * 失败再回退到 Node 全局 fetch 重试一次（undici 不读代理，作为直连兜底）。
+ * net.fetch 不可用时直接用 Node fetch。
+ */
+async function fetchWithProxyFallback(url, init = {}) {
+  const netFetch = await getElectronNetFetch();
+  if (!netFetch) return fetch(url, init);
+  try {
+    return await netFetch(url, init);
+  } catch (err) {
+    log(`net.fetch failed, falling back to node fetch: ${err?.message ?? err}`);
+    return fetch(url, init);
+  }
+}
+
+/**
  * 流式下载 url 到 dest，按 Content-Length 回报 0–100 整数进度。
  * 无 Content-Length 时进度停留在已知上一值，完成时由调用方置 100。
  */
 async function downloadToFile(url, dest, onProgress) {
-  const res = await fetch(url, { redirect: 'follow' });
+  const res = await fetchWithProxyFallback(url, { redirect: 'follow' });
   if (!res.ok || !res.body) {
     throw new Error(`download failed (HTTP ${res.status})`);
   }
   const total = Number(res.headers.get('content-length')) || 0;
   let received = 0;
   const fileStream = createWriteStream(dest);
+  // 用 getReader() 而非 for-await：Electron net.fetch 返回的 Web ReadableStream
+  // 在当前版本不支持异步迭代，全库流式读取（provider adapters）均用此范式，
+  // 对 net.fetch 与 Node fetch 两种 body 都兼容。
+  const reader = res.body.getReader();
   try {
-    for await (const chunk of res.body) {
-      received += chunk.length;
-      fileStream.write(chunk);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.length;
+      fileStream.write(value);
       if (total > 0 && typeof onProgress === 'function') {
         onProgress(Math.min(99, Math.floor((received / total) * 100)));
       }
