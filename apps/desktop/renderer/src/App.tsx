@@ -154,10 +154,19 @@ export function App() {
   const handleWorkspaceChanged = useCallback(async () => {
     const r = await clientApi.workspaceList();
     setActiveWorkspace(r.activeWorkspace);
-    setActiveConversationId(null);
     setConversationView('active');
-    await refreshConversations(r.activeWorkspace, 'active');
-  }, [refreshConversations]);
+    // 切换工作区后自动选激活会话:优先第一个"进行中"的会话,否则第一个会话,
+    // 空工作区(无任何会话)则保持空态。需 list 返回值当场计算,故内联拉取而非走
+    // refreshConversations(后者只 setState、不回传列表)。
+    let list: readonly ConversationMeta[] = [];
+    try {
+      list = await clientApi.conversationsList({ workspacePath: r.activeWorkspace, status: 'active' }) as readonly ConversationMeta[];
+    } catch {}
+    setConversations(list);
+    const firstRunning = list.find((c) => runningConversationIds.has(c.id));
+    const next = firstRunning ?? list[0] ?? null;
+    setActiveConversationId(next ? next.id : null);
+  }, [runningConversationIds]);
 
   const handleNewChat = useCallback(async () => {
     // 没有工作区时不允许把对话落到根目录:先确保有一个工作区(必要时默认初始化)。
