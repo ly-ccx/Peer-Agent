@@ -384,6 +384,20 @@ goalRunner = createGoalRunner({
         ...toRuntimeMessages(conversation.messages),
         { role: 'user', content: buildGoalRunnerMessage(plan, turnNumber) },
       ];
+      // Goal Runner 实时计数 sink：把「模型每轮」和「每次工具调用」即时写回 store。
+      // setRunnerState 内部 persist→notifyChanged 会广播 goalRunner:changed，
+      // 渲染层据此实时刷新底部「轮次 / 工具」数字（roundCount 为展示计数，与预算 turnCount 解耦）。
+      const planId = plan.planId;
+      const bumpRunnerCount = (field) => {
+        const current = goalPlanStore.getPlan(planId)?.runner;
+        if (!current) return;
+        const prev = Number.isFinite(current[field]) ? current[field] : 0;
+        goalPlanStore.setRunnerState(planId, { [field]: prev + 1 });
+      };
+      const agentProgress = {
+        onRound: () => bumpRunnerCount('roundCount'),
+        onToolCall: () => bumpRunnerCount('toolCallCount'),
+      };
       await llmChatService.sendMessage({
         messages,
         webContents,
@@ -392,6 +406,7 @@ goalRunner = createGoalRunner({
         mode: 'goal',
         conversationId: plan.conversationId,
         runtimeReminders: [buildGoalRunnerReminder(plan, turnNumber)],
+        agentProgress,
       });
       return { continue: false, intent: 'verify' };
     },

@@ -37,9 +37,11 @@ export async function agentLoopGemini({
   mcpRegistry,
   goalPlanStore,
   resolvedChannel = null,
+  // Goal Runner 进度 sink：{ onRound } 每轮模型响应回调一次，用于实时轮次计数。
+  agentProgress = null,
 }) {
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
-  const loop = createAgentLoopKernel({ webContents, streamId });
+  const loop = createAgentLoopKernel({ webContents, streamId, onRound: agentProgress?.onRound });
   const providerConfig = { provider: 'gemini', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model, maxOutputTokens };
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {

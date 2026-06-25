@@ -1,12 +1,15 @@
 import { executeProjectedModelTool } from './projected-tool-executor.mjs';
 
-export function createToolContext({ conversationId = null, workspacePath = null, mode = 'chat' } = {}) {
+export function createToolContext({ conversationId = null, workspacePath = null, mode = 'chat', onToolCall = null } = {}) {
   return {
     conversationId,
     workspacePath,
     // 当前回合的交互模式（chat/goal/...）。由 llm-chat-service 在每次 run 时写入，
     // 供 goal 模式运行时闸门在工具执行层判定准入。见 Goal 模式运行时闸门设计。
     mode,
+    // Goal Runner 进度 sink：每次工具调用派发时回调一次，用于实时工具计数。
+    // 经 toolContext 透传，是覆盖所有 provider 的单一接缝。
+    onToolCall,
     readFiles: new Map(),
   };
 }
@@ -162,6 +165,14 @@ export async function executeModelToolCall({
   // tool-call 事件透传，避免渲染层只能显示裸 capability 名（如 mcp__server__tool）。
   const displayName = resolveCapabilityDisplayName(runtimeProjection, name);
   webContents.send('chat:stream:tool-call', { streamId, tool: name, displayName, args, toolCallId });
+  // Goal Runner 实时工具计数：在工具派发处经 toolContext 透传单一接缝触发，覆盖所有 provider。
+  if (typeof toolContext?.onToolCall === 'function') {
+    try {
+      toolContext.onToolCall({ tool: name, toolCallId });
+    } catch {
+      // 进度回调失败不得影响工具执行。
+    }
+  }
   const requestFilePermission = permissionGate.createFilePermissionRequester({
     webContents,
     streamId,

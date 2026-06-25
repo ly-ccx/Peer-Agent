@@ -180,7 +180,10 @@ export interface GoalRunnerState {
   readonly status: GoalRunnerStatus;
   readonly intent?: GoalRunnerIntent;
   readonly currentTaskId?: string;
+  /** 预算计数：Runner tick 次数，用于 maxTurns 熔断判定。 */
   readonly turnCount: number;
+  /** 展示计数：模型内部对话轮次，随执行实时爬升；与 turnCount（预算）解耦，仅用于 UI 呈现。 */
+  readonly roundCount: number;
   readonly toolCallCount: number;
   readonly explorerCount: number;
   readonly maxTurns: number;

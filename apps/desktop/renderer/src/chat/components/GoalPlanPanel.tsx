@@ -131,31 +131,6 @@ function safeProgress(plan: GoalPlan): GoalPlan['progress'] {
   return plan.progress ?? { total: 0, completed: 0, failed: 0, blocked: 0, percent: 0 };
 }
 
-// Runner 状态文案；只表达托管编排状态，不代表工具执行 Evidence。
-function runnerStatusLabel(status: GoalRunnerStatus, isZh: boolean): string {
-  const zh: Record<GoalRunnerStatus, string> = {
-    idle: '空闲',
-    running: '推进中',
-    paused: '已暂停',
-    exploring: '探索中',
-    blocked: '已阻塞',
-    budget_exhausted: '预算耗尽',
-    completed: '已完成',
-    failed: '已失败',
-  };
-  const en: Record<GoalRunnerStatus, string> = {
-    idle: 'Idle',
-    running: 'Running',
-    paused: 'Paused',
-    exploring: 'Exploring',
-    blocked: 'Blocked',
-    budget_exhausted: 'Budget exhausted',
-    completed: 'Completed',
-    failed: 'Failed',
-  };
-  return isZh ? zh[status] : en[status];
-}
-
 function explorerStatusLabel(status: GoalExplorerRun['status'], isZh: boolean): string {
   const zh: Record<GoalExplorerRun['status'], string> = {
     queued: '排队中',
@@ -294,24 +269,20 @@ function RunnerSection({
 
   return (
     <div className={`goal-runner goal-runner--${runner.status}`}>
-      <div className="goal-runner-head">
-        <span className={`goal-runner-status goal-runner-status--${runner.status}`}>
-          {runnerStatusLabel(runner.status, isZh)}
-        </span>
-        <span className="goal-runner-counters">
-          {isZh
-            ? `轮次 ${runner.turnCount} · 工具 ${runner.toolCallCount} · 探索 ${runner.explorerCount}/${runner.maxExplorers}`
-            : `turns ${runner.turnCount} · tools ${runner.toolCallCount} · explorers ${runner.explorerCount}/${runner.maxExplorers}`}
-        </span>
-      </div>
       {showAttention && runner.blockedReason ? (
         <div className="goal-runner-attention">{runner.blockedReason}</div>
       ) : null}
       {runner.lastError ? (
         <div className="goal-runner-attention goal-runner-attention--error">{runner.lastError}</div>
       ) : null}
-      <div className="goal-runner-actions">
-        {canPause ? (
+      <div className="goal-runner-bar">
+        <span className="goal-runner-counters">
+          {isZh
+            ? `轮次 ${runner.roundCount} · 工具 ${runner.toolCallCount} · 探索 ${runner.explorerCount}/${runner.maxExplorers}`
+            : `turns ${runner.roundCount} · tools ${runner.toolCallCount} · explorers ${runner.explorerCount}/${runner.maxExplorers}`}
+        </span>
+        <div className="goal-runner-actions">
+          {canPause ? (
           <button
             type="button"
             className="goal-runner-btn"
@@ -341,6 +312,7 @@ function RunnerSection({
             {isZh ? '清除' : 'Clear'}
           </button>
         ) : null}
+        </div>
       </div>
       {explorers.length > 0 ? (
         <details className="goal-runner-explorers">

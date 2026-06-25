@@ -41,6 +41,9 @@ export function createAgentLoopKernel({
   maxTurns = defaultAgentLoopMaxTurns(),
   maxUnsupportedToolRetries = 1,
   maxEmptyResponseRetries = 1,
+  // provider 无关的「模型轮次」信号：每次 addUsage（每轮恰好一次）回调一次。
+  // 用于 Goal Runner 展示用的实时轮次计数，与具体 provider 解耦。
+  onRound = null,
 } = {}) {
   const normalizedMaxTurns = normalizeAgentLoopMaxTurns(maxTurns);
   const usage = {
@@ -53,6 +56,15 @@ export function createAgentLoopKernel({
   let emptyResponseRetries = 0;
 
   function addUsage(streamUsage = null) {
+    // 每轮模型响应恰好调用一次 addUsage，故在此回调 onRound 作为「轮次」信号。
+    // 放在 streamUsage 空判定之前，确保无计费 usage 的轮次也被计入。
+    if (typeof onRound === 'function') {
+      try {
+        onRound();
+      } catch {
+        // 进度回调失败不得影响主循环。
+      }
+    }
     if (!streamUsage) return usage;
     usage.inputTokens += streamUsage.inputTokens || 0;
     usage.outputTokens += streamUsage.outputTokens || 0;

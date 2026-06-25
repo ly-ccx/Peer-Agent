@@ -48,6 +48,36 @@ describe('agent loop kernel', () => {
     }]);
   });
 
+  it('invokes onRound exactly once per addUsage, including when usage is null', () => {
+    let rounds = 0;
+    const loop = createAgentLoopKernel({
+      webContents: makeWebContents(),
+      streamId: 's1r',
+      onRound: () => {
+        rounds += 1;
+      },
+    });
+
+    loop.addUsage({ inputTokens: 2, outputTokens: 3 });
+    loop.addUsage(null); // 无计费 usage 的轮次也应计入。
+    loop.addUsage({ inputTokens: 1 });
+
+    assert.equal(rounds, 3);
+  });
+
+  it('does not let an onRound callback failure break the loop', () => {
+    const loop = createAgentLoopKernel({
+      webContents: makeWebContents(),
+      streamId: 's1rf',
+      onRound: () => {
+        throw new Error('sink boom');
+      },
+    });
+
+    assert.doesNotThrow(() => loop.addUsage({ inputTokens: 5 }));
+    assert.equal(loop.usage.inputTokens, 5);
+  });
+
   it('caps unsupported tool retries and formats stream errors', () => {
     const webContents = makeWebContents();
     const loop = createAgentLoopKernel({

@@ -42,10 +42,12 @@ export async function agentLoopAnthropic({
   goalPlanStore,
   onNativeReasoningFallback = null,
   resolvedChannel = null,
+  // Goal Runner 进度 sink：{ onRound } 每轮模型响应回调一次，用于实时轮次计数。
+  agentProgress = null,
 }) {
   let effectiveSystem = systemPrompt;
   let apiMessages = sanitizeApiMessages(messages);
-  const loop = createAgentLoopKernel({ webContents, streamId });
+  const loop = createAgentLoopKernel({ webContents, streamId, onRound: agentProgress?.onRound });
   const providerConfig = { provider: 'anthropic', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model, maxOutputTokens };
   let effectiveSupportsReasoning = Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning);
 

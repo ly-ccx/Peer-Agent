@@ -393,10 +393,11 @@ export function createGoalRunner({
       const afterTurnPlan = goalPlanStore.getPlan(planId);
       if (!afterTurnPlan) return null;
       const afterTurnRunner = afterTurnPlan.runner ?? {};
+      // turnCount 仅作预算/tick 计数（maxTurns 熔断依据），每 tick +1。
+      // 展示用的「工具」计数（toolCallCount）已由 runGoalTurn 注入的实时 sink 在工具
+      // 派发处拥有并累加，这里不再重复累加，避免双重计数。
       goalPlanStore.setRunnerState(planId, {
         turnCount: toPositiveInteger(afterTurnRunner.turnCount, 0, { allowZero: true }) + 1,
-        toolCallCount:
-          toPositiveInteger(afterTurnRunner.toolCallCount, 0, { allowZero: true }) + countToolCalls(result),
         updatedAt: now(),
       });
 

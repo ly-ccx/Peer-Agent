@@ -393,6 +393,9 @@ export function createLlmChatService({
     continuityContext = [],
     configInstructions = [],
     contextExtensions = [],
+    // Goal Runner 进度 sink：{ onRound, onToolCall }。onRound 经各 provider loop 透传，
+    // onToolCall 经 toolContext 透传，分别用于实时轮次/工具计数。普通 chat 不传。
+    agentProgress = null,
   }) {
     const providerCandidates = getProviderCandidates();
     if (!providerCandidates.length) {
@@ -432,6 +435,9 @@ export function createLlmChatService({
     // 把本回合的交互模式写入（复用的）会话级 toolContext，供 goal 模式运行时闸门在工具
     // 执行层判定准入。见 Goal 模式运行时闸门设计。
     toolContext.mode = mode;
+    // 把本回合的工具计数 sink 写入会话级 toolContext，供工具派发处实时回调。
+    // 仅本回合有效，回合结束后由下一次 sendMessage 覆盖（无 sink 时复位为 null）。
+    toolContext.onToolCall = agentProgress?.onToolCall ?? null;
 
     try {
       for (let attemptIndex = 0; attemptIndex < providerCandidates.length; attemptIndex += 1) {
@@ -519,6 +525,7 @@ export function createLlmChatService({
               persistCompaction,
               continuityContext,
               toolContext,
+              agentProgress,
               workspacePath: activeWorkspacePath,
               permissionGate,
               registry: runtimeTools.registry,
@@ -547,6 +554,7 @@ export function createLlmChatService({
               persistCompaction,
               continuityContext,
               toolContext,
+              agentProgress,
               workspacePath: activeWorkspacePath,
               permissionGate,
               registry: runtimeTools.registry,
@@ -575,6 +583,7 @@ export function createLlmChatService({
               persistCompaction,
               continuityContext,
               toolContext,
+              agentProgress,
               workspacePath: activeWorkspacePath,
               permissionGate,
               registry: runtimeTools.registry,

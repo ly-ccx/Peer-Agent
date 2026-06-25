@@ -272,7 +272,11 @@ test('fake runtime 连续返回 progress 时，Runner 能自动多 tick 推进�
   assert.equal(got.progress.completed, 2);
   assert.equal(got.runner.status, 'completed');
   assert.equal(got.runner.enabled, false);
-  assert.equal(got.runner.toolCallCount, 2);
+  // 方案 B：tick 写回不再从 runGoalTurn 返回值累加 toolCallCount；展示用工具计数改由
+  // main runGoalTurn 注入的实时 sink（onToolCall）拥有。此 fake runtime 未走该 sink，
+  // 故 toolCallCount 保持初始 0。turnCount 仍按 tick 数累加。
+  assert.equal(got.runner.toolCallCount, 0);
+  assert.equal(got.runner.turnCount, 2);
 });
 
 test('Runner 每轮重新读 store，不依赖旧内存 plan', async () => {

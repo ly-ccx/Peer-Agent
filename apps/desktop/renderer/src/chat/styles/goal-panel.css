@@ -748,48 +748,13 @@
   background: var(--za-surface-1);
 }
 
-.goal-runner-head {
+/* 底部栏：左侧计数（轮次/工具/探索），右侧控制按钮（暂停/继续/清除），单行两端对齐。 */
+.goal-runner-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-}
-
-/* 状态指示器：轻量「圆点 + 文字」，而非实心高亮 pill，避免被误认为可点按钮。
-   颜色由 currentColor 驱动圆点，文字用 soft 色，弱化存在感。 */
-.goal-runner-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0;
-  font-size: 12px;
-  font-weight: 500;
-  background: transparent;
-  color: var(--za-text-soft);
-}
-
-.goal-runner-status::before {
-  content: "";
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: currentColor;
-}
-
-.goal-runner-status--running,
-.goal-runner-status--exploring {
-  color: var(--za-primary-control-bg);
-}
-
-.goal-runner-status--blocked,
-.goal-runner-status--budget_exhausted,
-.goal-runner-status--failed {
-  color: var(--za-warn);
-}
-
-.goal-runner-status--completed {
-  color: var(--za-text-soft);
+  flex-wrap: wrap;
 }
 
 .goal-runner-counters {
