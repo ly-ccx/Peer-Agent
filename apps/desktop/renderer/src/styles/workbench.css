@@ -12,7 +12,8 @@
     background: var(--za-surface-1);
     border-left: 1px solid var(--za-line);
     overflow: hidden;
-    transition: width var(--za-motion-medium, 200ms) var(--za-ease-out, ease);
+    transition: width var(--za-motion-medium, 200ms) var(--za-ease-out, ease),
+      border-color var(--za-motion-fast);
     -webkit-app-region: no-drag;
   }
 
@@ -21,7 +22,8 @@
     border-left: none;
   }
 
-  /* 拖拽分隔线：6px hit area，hover 时露出 2px 主色细条 */
+  /* 拖拽分隔线：6px hit area，无独立指示条；hover/聚焦时让面板自身的
+   * 1px border-left 变为强调色，始终呈现为一条干净的线（无加粗、无缝）。 */
   .workbench-resizer {
     position: absolute;
     top: 0;
@@ -31,24 +33,14 @@
     cursor: col-resize;
     z-index: 5;
     background: transparent;
-    transition: background var(--za-motion-fast);
-  }
-  .workbench-resizer::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 2px;
-    width: 2px;
-    height: 100%;
-    background: transparent;
-    transition: background var(--za-motion-fast);
-  }
-  .workbench-resizer:hover::after,
-  .workbench-resizer:focus-visible::after {
-    background: var(--za-focus, rgba(59, 127, 171, 0.5));
   }
   .workbench-resizer:focus-visible {
     outline: none;
+  }
+  /* hover 或键盘聚焦拖拽手柄时，整条面板左边框高亮变色。 */
+  .workbench-panel:has(.workbench-resizer:hover),
+  .workbench-panel:has(.workbench-resizer:focus-visible) {
+    border-left-color: var(--za-accent);
   }
 
   /* TabRail：左侧 56px 竖向 tab 列 */
