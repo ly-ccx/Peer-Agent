@@ -935,4 +935,57 @@
     opacity: 0.4;
     cursor: not-allowed;
   }
+
+  /* ── 从 a1 公共仓借用技能（软链投影）── */
+  .skill-panel {
+    @apply grid gap-6;
+  }
+
+  .skill-link-error {
+    @apply m-0 rounded-lg px-3 py-2 text-[13px];
+    color: var(--za-danger);
+    background: var(--za-panel-1);
+    border: 1px solid var(--za-line);
+  }
+
+  .skill-borrow-section {
+    @apply grid gap-3 pt-2;
+    border-top: 1px solid var(--za-line);
+  }
+
+  .skill-borrow-header {
+    @apply flex items-baseline gap-3 pt-3;
+  }
+
+  .skill-borrow-header strong {
+    @apply text-[14px] font-semibold;
+    color: var(--za-text);
+  }
+
+  .skill-borrow-hint {
+    @apply text-[12px];
+    color: var(--za-text-muted);
+  }
+
+  .skill-card.borrowable {
+    opacity: 0.92;
+  }
+
+  .skill-borrow-btn {
+    @apply h-7 shrink-0 rounded-full px-3 text-[12px] font-medium leading-none;
+    color: var(--za-primary-control-ink);
+    background: var(--za-primary-control-bg);
+    border: none;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+
+  .skill-borrow-btn:hover {
+    opacity: 0.85;
+  }
+
+  .skill-borrow-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }

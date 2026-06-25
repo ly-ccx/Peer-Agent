@@ -60,6 +60,29 @@ export interface SkillSummary {
   readonly enabled: boolean;
 }
 
+/**
+ * 可从外部「借用来源」（如 a1 公共 skill 仓 ~/.agents/skills）借用的技能条目。
+ * linked=true 表示已在本地 userData/skills 下建立软链。
+ */
+export interface AvailableSkillSummary {
+  readonly skillId: string;
+  readonly name: string;
+  readonly description: string;
+  readonly version: string;
+  readonly dataLevel: DataLevel;
+  readonly sourceRoot: string;
+  readonly sourceDir: string;
+  readonly linked: boolean;
+}
+
+/** linkSkill / unlinkSkill 的返回结果。 */
+export interface SkillLinkResult {
+  readonly ok: boolean;
+  readonly error?: string;
+  readonly detail?: string;
+  readonly alreadyLinked?: boolean;
+}
+
 export interface RuntimeProjection {
   readonly projectionId: string;
   readonly sessionId: string;

@@ -89,12 +89,22 @@ export function ChatHeaderCapabilities({
     let cancelled = false;
     void (async () => {
       try {
-        const [caps, sks] = await Promise.all([
+        const [caps, mcpCaps, sks] = await Promise.all([
           clientApi.listCapabilities(),
+          // MCP 动态能力（source:'mcp'）来自独立 IPC，需并入后 MCP 分组才会出现。
+          clientApi.mcpListCapabilities().catch(() => [] as readonly CapabilityManifest[]),
           clientApi.listSkills(),
         ]);
         if (!cancelled) {
-          setCapabilities(caps);
+          // 按 capabilityId 去重合并（静态清单优先，避免与 MCP 同 id 项重复）。
+          const seen = new Set<string>();
+          const merged: CapabilityManifest[] = [];
+          for (const cap of [...caps, ...mcpCaps]) {
+            if (seen.has(cap.capabilityId)) continue;
+            seen.add(cap.capabilityId);
+            merged.push(cap);
+          }
+          setCapabilities(merged);
           setSkills(sks);
         }
       } catch {

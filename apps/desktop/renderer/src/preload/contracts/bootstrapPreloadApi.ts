@@ -27,6 +27,8 @@ import type {
   PromptSnapshotRecord,
   RuntimeProjection,
   SkillSummary,
+  AvailableSkillSummary,
+  SkillLinkResult,
   UpdateChannelPreference,
   UpdaterEvent,
   UpdaterStatus,
@@ -277,6 +279,12 @@ export interface BootstrapPreloadApi {
   readonly uploadSkill: (zipBase64: string) => Promise<SkillSummary | null>;
   readonly enableSkill: (skillId: string) => Promise<readonly SkillSummary[]>;
   readonly disableSkill: (skillId: string) => Promise<readonly SkillSummary[]>;
+  /** 列出 a1 公共仓等借用来源中的可借技能（含 linked 标记）。 */
+  readonly listAvailableSkills: () => Promise<readonly AvailableSkillSummary[]>;
+  /** 在本地 userData/skills 下建软链，借用指定来源技能。 */
+  readonly linkSkill: (skillId: string) => Promise<SkillLinkResult>;
+  /** 解除借用：仅删除本地软链，不影响来源目录。 */
+  readonly unlinkSkill: (skillId: string) => Promise<SkillLinkResult>;
   readonly mcpListInstalled: () => Promise<readonly LocalMcpServerView[]>;
   readonly mcpListCapabilities: () => Promise<readonly CapabilityManifest[]>;
   readonly mcpListCredentials: () => Promise<readonly McpCredentialMetadataView[]>;

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import os from 'node:os';
 
 const execFileAsync = promisify(execFile);
 import { createCapabilityRegistry } from './capability-registry.mjs';
@@ -1676,7 +1677,10 @@ app.whenReady().then(async () => {
   setDockIcon();
   const userDataPath = dataHome;
   const disableLocalSkill = process.env.PEER_AGENT_DISABLE_LOCAL_SKILL === '1';
-  skillStore = disableLocalSkill ? null : createSkillStore({ userDataPath });
+  // a1 公共 skill 仓（~/.agents/skills）作为「借用来源」：不再自动合并，只用于
+  // listAvailableSkills 列举候选，用户显式 link 后才在 userData/skills 下建软链。
+  const sourceRoots = [path.join(os.homedir(), '.agents', 'skills')];
+  skillStore = disableLocalSkill ? null : createSkillStore({ userDataPath, sourceRoots });
 
   await createShellEnvSnapshot();
 
@@ -1726,6 +1730,16 @@ app.whenReady().then(async () => {
   ipcMain.handle('skills:disable', (_event, { skillId }) => {
     if (!skillStore) throw new Error('skill_store_not_available');
     return skillStore.disableSkill(skillId);
+  });
+  // ── 从 a1 公共仓借用技能（软链投影）──
+  ipcMain.handle('skills:list-available', () => skillStore?.listAvailableSkills() ?? []);
+  ipcMain.handle('skills:link', (_event, { skillId }) => {
+    if (!skillStore) throw new Error('skill_store_not_available');
+    return skillStore.linkSkill(skillId);
+  });
+  ipcMain.handle('skills:unlink', (_event, { skillId }) => {
+    if (!skillStore) throw new Error('skill_store_not_available');
+    return skillStore.unlinkSkill(skillId);
   });
 
   createWindow();

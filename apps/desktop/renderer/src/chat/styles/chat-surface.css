@@ -2034,7 +2034,8 @@
   gap: 4px;
   height: 28px;
   padding: 0 8px;
-  border: 1px solid var(--chrome-hairline);
+  /* 去掉可见描边：用透明边框保持盒模型尺寸，hover/active 切到背景不抖动。 */
+  border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
   color: var(--graphite-mute);
