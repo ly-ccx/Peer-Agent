@@ -102,25 +102,32 @@ function FilePathCode({ raw }: { raw: string }) {
   // 透传原始相对路径：当 absPath 在当前 workspace 解析不到时，
   // 主进程可用它跨已知 workspace 回退查找（跨仓库引用场景）。
   const relPath = parsed && !parsed.isAbsolute ? parsed.path : undefined;
-  // 路径以 / 或 \ 结尾视为「目录」chip（如 archive/deprecated-architecture/）：
-  // 点击时打开右侧「文件」视图并定位到该目录，而非走文件的 Diff 视图。
-  const isDir = !!parsed && /[/\\]$/.test(parsed.path);
+  // 路径以 / 或 \ 结尾时先按「目录」预判（如 archive/deprecated-architecture/），
+  // 但这只是初始 hint；最终以磁盘真实类型为准（见下方 fileExists 返回的 isDir），
+  // 避免不带结尾斜杠的文件夹路径被误判为文件而走 Diff 视图并报 access 错误。
+  const hintDir = !!parsed && /[/\\]$/.test(parsed.path);
 
   // 存在性校验：候选路径只有在磁盘上真实存在时才升级为可点链接。
   // git 分支名/仓库名/版本号（dev/0.0.1、origin/main、org/repo）因磁盘上没有对应文件
   // 而保持普通文本——以「是不是真文件」为权威判据，而非去识别「它是不是 git」。
   const [exists, setExists] = useState(false);
+  // isDir 以主进程 fs.stat 的真实类型为权威；未返回时回退到结尾斜杠预判 hintDir。
+  const [isDir, setIsDir] = useState(hintDir);
   useEffect(() => {
     if (!absPath) {
       setExists(false);
+      setIsDir(hintDir);
       return;
     }
     let cancelled = false;
     setExists(false);
+    setIsDir(hintDir);
     Promise.resolve()
       .then(() => clientApi.fileExists(absPath, workspacePath ?? undefined, relPath))
       .then((result) => {
-        if (!cancelled) setExists(Boolean(result?.exists));
+        if (cancelled) return;
+        setExists(Boolean(result?.exists));
+        setIsDir(typeof result?.isDir === 'boolean' ? result.isDir : hintDir);
       })
       .catch(() => {
         if (!cancelled) setExists(false);
@@ -128,7 +135,7 @@ function FilePathCode({ raw }: { raw: string }) {
     return () => {
       cancelled = true;
     };
-  }, [absPath, workspacePath, relPath]);
+  }, [absPath, workspacePath, relPath, hintDir]);
 
   if (!parsed || !absPath || !exists) {
     // 不是路径 / 无 workspacePath 解析基准 / 磁盘上不存在 → 保持普通 inline code 行为

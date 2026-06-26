@@ -952,7 +952,9 @@ ipcMain.handle('fs:exists', (_event, { absPath, workspaceRoot, relPath } = {}) =
     if (!absPath || typeof absPath !== 'string') return { exists: false };
     const target = path.normalize(absPath);
     if (!path.isAbsolute(target)) return { exists: false };
-    if (existsSync(target)) return { exists: true };
+    if (existsSync(target)) {
+      return { exists: true, isDir: statSync(target).isDirectory() };
+    }
     const cleanRel = typeof relPath === 'string' && relPath.trim()
       ? relPath.replace(/^[/\\]+/, '').replace(/^(\.\.?[/\\])+/, '')
       : '';
@@ -967,8 +969,9 @@ ipcMain.handle('fs:exists', (_event, { absPath, workspaceRoot, relPath } = {}) =
       for (const ws of candidates) {
         if (seen.has(ws)) continue;
         seen.add(ws);
-        if (existsSync(path.normalize(path.join(ws, cleanRel)))) {
-          return { exists: true, resolvedFrom: ws };
+        const candidate = path.normalize(path.join(ws, cleanRel));
+        if (existsSync(candidate)) {
+          return { exists: true, isDir: statSync(candidate).isDirectory(), resolvedFrom: ws };
         }
       }
     }

@@ -207,7 +207,7 @@ export interface BootstrapPreloadApi {
     absPath: string,
     workspaceRoot?: string,
     relPath?: string,
-  ) => Promise<{ readonly exists: boolean; readonly resolvedFrom?: string }>;
+  ) => Promise<{ readonly exists: boolean; readonly isDir?: boolean; readonly resolvedFrom?: string }>;
   /**
    * 读取指定文件的完整文本内容，供 Workbench 的 Diff 视图「文件内容」分段查看。
    * - absPath 必须是绝对路径；在当前 workspace 找不到时，会用 relPath 在其他已知 workspace 回退查找。
