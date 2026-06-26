@@ -2,13 +2,20 @@
 
 .app-layout {
   display: grid;
+  /* 第 1 列：左栏当前宽度（可被 Resizer 拖拽时直接覆盖 --za-sidebar-current-width；
+     缺省回落到写死基准 token --za-sidebar-width）。 */
   grid-template-columns:
-    var(--za-sidebar-width)
+    var(--za-sidebar-current-width, var(--za-sidebar-width))
     minmax(0, 1fr)
     var(--za-workbench-current-width, 0px);
   height: 100vh;
   min-height: 0;
   transition: grid-template-columns var(--za-motion-medium, 200ms) var(--za-ease-out, ease);
+}
+
+/* 拖拽进行中：关掉 grid 过渡，保证左栏跟手无延迟。 */
+:root[data-sidebar-resizing='true'] .app-layout {
+  transition: none;
 }
 
 :root[data-workbench-open='true'] .app-layout {
@@ -19,12 +26,14 @@
   grid-template-columns: 0 minmax(0, 1fr) var(--za-workbench-current-width, 0px);
 }
 
-:root[data-sidebar-collapsed='true'] .app-sidebar {
+:root[data-sidebar-collapsed='true'] .app-sidebar,
+:root[data-sidebar-collapsed='true'] .sidebar-resizer {
   visibility: hidden;
   pointer-events: none;
 }
 
 .app-sidebar {
+  position: relative;
   display: flex;
   flex-direction: column;
   background: var(--za-sidebar-bg);
@@ -32,6 +41,45 @@
   padding-top: 52px;
   -webkit-app-region: drag;
   overflow: hidden;
+}
+
+/* ── Sidebar Resizer（左栏右缘拖拽条，镜像右侧 workbench-resizer）── */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* 贴在左栏右缘内侧（父级 overflow:hidden，不能外溢，否则被裁切）。 */
+  right: 0;
+  width: 6px;
+  z-index: 5;
+  cursor: col-resize;
+  -webkit-app-region: no-drag;
+  background: transparent;
+  transition: background var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
+  touch-action: none;
+}
+.sidebar-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
+}
+.sidebar-resizer:hover::after,
+.sidebar-resizer:focus-visible::after,
+.sidebar-resizer[data-active='true']::after {
+  background: var(--za-accent, #4c8dff);
+}
+.sidebar-resizer:focus-visible {
+  outline: none;
+}
+/* 阻尼区视觉提示：宽度已拖到最小展开宽度以下、即将触发收起。 */
+.sidebar-resizer[data-damping='true']::after {
+  background: var(--za-warning, #f0a020);
 }
 
 /* 全屏时 macOS 交通灯被系统隐藏,收掉侧栏为其预留的顶部留白(权威状态来自 main 广播)。 */

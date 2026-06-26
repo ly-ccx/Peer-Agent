@@ -10,6 +10,7 @@ import {
   WORKBENCH_MAX_VW_RATIO,
   WORKBENCH_DEFAULT_WIDTH,
   MAIN_MIN_WIDTH,
+  MAIN_RESTORE_WIDTH,
 } from './WorkbenchContext';
 
 interface TabDef {
@@ -112,6 +113,8 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
     registerGoalSlot,
     sidebarAutoCollapsed,
     setSidebarAutoCollapsed,
+    sidebarOpen,
+    sidebarWidth,
   } = useWorkbench();
 
   const goalSlotRef = useRef<HTMLDivElement | null>(null);
@@ -138,9 +141,10 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
       return Math.max(WORKBENCH_MIN_WIDTH, vwLimit);
     };
 
-    const SIDEBAR_WIDTH = 264;
-    const SIDEBAR_THRESHOLD = MAIN_MIN_WIDTH;
-    const RESTORE_PAD = 24;
+    // 左栏当前占用的宽度（用户主动收起则为 0，否则用实时拖拽宽度）。
+    const liveSidebarWidth = () => (sidebarOpen ? sidebarWidth : 0);
+    // 拖拽期间本地跟踪「右侧挤压自动收起」态，避免每帧 setState；仅在阈值穿越时落 React 状态。
+    let autoCollapsed = sidebarAutoCollapsed;
 
     const onMove = (e: PointerEvent) => {
       if (!draggingRef.current) return;
@@ -152,14 +156,24 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
       // 直接改 CSS 变量，避免 re-render
       document.documentElement.style.setProperty('--za-workbench-width', `${next}px`);
 
-      // 临界吸附：判断主区可见宽度
-      const sidebarPresent = document.documentElement.dataset.sidebarCollapsed !== 'true';
-      const mainAvailable = window.innerWidth - (sidebarPresent ? SIDEBAR_WIDTH : 0) - next;
-      if (sidebarPresent && mainAvailable < SIDEBAR_THRESHOLD) {
-        document.documentElement.dataset.sidebarCollapsed = 'true';
-      } else if (!sidebarPresent && mainAvailable >= SIDEBAR_THRESHOLD + RESTORE_PAD + SIDEBAR_WIDTH) {
-        // 反向：拖小让出 sidebar 空间后自动恢复
-        document.documentElement.dataset.sidebarCollapsed = 'false';
+      // 临界吸附：仅当用户未「主动收起」左栏时，右侧挤压才有权自动收/展左栏。
+      // 用户主动收起（sidebarOpen=false）时这里完全不插手，避免和 toggle/拖窄打架。
+      if (!sidebarOpen) return;
+      const sbWidth = liveSidebarWidth();
+      if (!autoCollapsed) {
+        // 当前左栏可见：主区被挤到 MAIN_MIN_WIDTH 以下则自动收起。
+        const mainAvailable = window.innerWidth - sbWidth - next;
+        if (mainAvailable < MAIN_MIN_WIDTH) {
+          autoCollapsed = true;
+          setSidebarAutoCollapsed(true);
+        }
+      } else {
+        // 当前左栏已自动收起：主区恢复到 MAIN_RESTORE_WIDTH（含左栏宽度）以上才展开（滞回防横跳）。
+        const mainIfRestored = window.innerWidth - sidebarWidth - next;
+        if (mainIfRestored >= MAIN_RESTORE_WIDTH) {
+          autoCollapsed = false;
+          setSidebarAutoCollapsed(false);
+        }
       }
     };
 
@@ -171,8 +185,7 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
       const finalWidthStr = document.documentElement.style.getPropertyValue('--za-workbench-width');
       const finalWidth = parseInt(finalWidthStr, 10);
       if (Number.isFinite(finalWidth)) setWidth(finalWidth);
-      const collapsed = document.documentElement.dataset.sidebarCollapsed === 'true';
-      if (collapsed !== sidebarAutoCollapsed) setSidebarAutoCollapsed(collapsed);
+      // sidebarAutoCollapsed 已在 onMove 的阈值穿越处实时落定，这里无需再读 DOM。
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };

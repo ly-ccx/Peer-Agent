@@ -471,6 +471,35 @@
     outline: none;
     box-shadow: 0 0 0 2px var(--za-focus);
   }
+
+  /* SidebarToggle：与右侧 WorkbenchToggle 对称、同规格，挂在 ChatHeader 左侧最前。 */
+  .sidebar-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin-right: var(--space-1, 4px);
+    flex: 0 0 auto;
+    border: none;
+    border-radius: var(--radius-frost-sm, 6px);
+    background: transparent;
+    color: var(--graphite-mute);
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+    transition: background var(--za-motion-fast), color var(--za-motion-fast);
+  }
+  .sidebar-toggle:hover {
+    background: var(--chrome-hover);
+    color: var(--graphite-base);
+  }
+  .sidebar-toggle--active {
+    color: var(--graphite-base);
+  }
+  .sidebar-toggle:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--za-focus);
+  }
 }
 
 /* BrowserView · 内嵌可见浏览器（webview 载体）

@@ -2,6 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LocalAccessLevel } from '@peer-agent/protocol';
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { WorkbenchToggle } from '../../../workbench/WorkbenchToggle';
+import { SidebarToggle } from '../../../workbench/SidebarToggle';
 import { ChatHeaderCapabilities } from './ChatHeaderCapabilities';
 
 export interface ChatHeaderAction {
@@ -141,6 +142,7 @@ export function ChatHeader({
   return (
     <header className={`chat-header${hasScroll ? ' has-scroll' : ''}`} aria-label={isZh ? '对话标题栏' : 'Conversation header'}>
       <div className="chat-header-left">
+        <SidebarToggle isZh={isZh} />
         {editing ? (
           <input
             ref={inputRef}

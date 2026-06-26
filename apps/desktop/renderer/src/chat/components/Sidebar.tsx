@@ -2,6 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { VersionBadge } from '../../app/components/VersionBadge';
+import { SidebarResizer } from '../../workbench/SidebarResizer';
 
 type ConversationView = 'active' | 'archived';
 
@@ -420,6 +421,7 @@ export function Sidebar({
           <span>{isZh ? '设置' : 'Settings'}</span>
         </button>
       </div>
+      <SidebarResizer isZh={isZh} />
     </aside>
   );
 }
