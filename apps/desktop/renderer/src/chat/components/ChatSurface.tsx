@@ -934,8 +934,8 @@ export function ChatSurface({
       ...buildReplyLanguageContext(replyLanguage),
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
-    void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId, contextAttachments, continuityContext, configInstructions });
-  }, [isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, mode, systemInstructions, replyLanguage, gitBranchPrefix]);
+    void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId, workspacePath, contextAttachments, continuityContext, configInstructions });
+  }, [isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, mode, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
 
   const handleSend = useCallback(async () => {
     const text = draft.trim();
@@ -1028,8 +1028,8 @@ export function ChatSurface({
       ...buildReplyLanguageContext(replyLanguage),
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
-    void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: newAssistant.id, effort, mode, conversationId, contextAttachments, continuityContext, configInstructions });
-  }, [isStreaming, hasProvider, conversationId, messages, effort, mode, systemInstructions, replyLanguage, gitBranchPrefix]);
+    void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: newAssistant.id, effort, mode, conversationId, workspacePath, contextAttachments, continuityContext, configInstructions });
+  }, [isStreaming, hasProvider, conversationId, messages, effort, mode, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
 
   const handleBranch = useCallback(async (msgIndex: number) => {
     if (!conversationId || isStreaming) return;

@@ -105,6 +105,12 @@ export interface ChatSendRequest {
   readonly effort?: string;
   readonly mode?: string;
   readonly conversationId?: string;
+  /**
+   * 渲染端当前活跃工作区路径（B2 兜底通道）。仅在主进程无法按 conversationId 从
+   * conversation-store 解析到会话绑定的 workspacePath 时，作为兜底/校验来源使用，
+   * 不作为运行根目录的主真值。详见 llm-chat-service.resolveRunWorkspacePath。
+   */
+  readonly workspacePath?: string | null;
   readonly contextAttachments?: readonly ContextAttachmentItem[];
   readonly runtimeReminders?: readonly RuntimeReminderItem[];
   readonly attachmentContext?: readonly AttachmentContextItem[];

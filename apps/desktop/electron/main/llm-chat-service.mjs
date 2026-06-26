@@ -86,6 +86,37 @@ export { normalizeAnthropicMessages, normalizeOpenAIMessages };
 export { hasDanglingToolIntent, hasUnsupportedToolClaim };
 export { finalizeDanglingToolSegments, terminalDanglingNote };
 export { sanitizeApiMessages };
+export { resolveRunWorkspacePath };
+
+/**
+ * 解析「本轮运行的工作根目录」。一轮 agent 运行的 cwd / 系统上下文以「该会话绑定的
+ * workspacePath」为唯一真值，不再依赖全局可变的 activeWorkspacePath，从根上消除
+ * 「新用户首条消息跑错根目录」这一类全局态滞后导致的 bug。兜底链（按优先级）：
+ *   B1 主真值：按 conversationId 从 conversation-store 读取会话绑定的 workspacePath；
+ *   B2 兜底/校验：渲染端经 chat:send 透传的 incomingWorkspacePath（仅当会话无绑定时启用）；
+ *   兜底：全局活跃工作区 activeWorkspacePath（历史会话无 workspacePath / conversationId 为空时）；
+ *   最终兜底：process.cwd()。
+ * 提为模块级纯函数（依赖经参数注入）以便单测，闭包内由 createLlmChatService 透传捕获的状态。
+ */
+function resolveRunWorkspacePath({
+  conversationStore = null,
+  conversationId = null,
+  incomingWorkspacePath = null,
+  activeWorkspacePath = null,
+} = {}) {
+  if (conversationId && conversationStore?.getConversation) {
+    try {
+      const conv = conversationStore.getConversation(conversationId);
+      const bound = conv?.workspacePath;
+      if (bound && typeof bound === 'string') return bound;
+    } catch {
+      // 读取失败时落到兜底链，不阻断本轮运行。
+    }
+  }
+  if (incomingWorkspacePath && typeof incomingWorkspacePath === 'string') return incomingWorkspacePath;
+  if (activeWorkspacePath && typeof activeWorkspacePath === 'string') return activeWorkspacePath;
+  return process.cwd();
+}
 
 function recordPromptSnapshot(store, context, metadata) {
   try {
@@ -312,6 +343,17 @@ export function createLlmChatService({
 
   function setWorkspacePath(wsPath) { activeWorkspacePath = wsPath; }
 
+  // 闭包薄封装：把当前捕获的 conversationStore / activeWorkspacePath 注入模块级纯函数
+  // resolveRunWorkspacePath（见文件顶部，含完整兜底链说明与单测）。
+  function resolveRunWorkspacePathForRun(conversationId = null, incomingWorkspacePath = null) {
+    return resolveRunWorkspacePath({
+      conversationStore,
+      conversationId,
+      incomingWorkspacePath,
+      activeWorkspacePath,
+    });
+  }
+
   function setLocalAccessLevel(nextAccessLevel) {
     return permissionGate.setAccessLevel(nextAccessLevel);
   }
@@ -386,6 +428,9 @@ export function createLlmChatService({
     effort = 'default',
     mode = 'chat',
     conversationId = null,
+    // B2 兜底：渲染端经 chat:send 透传的工作区路径，仅在会话未绑定 workspacePath 时作为兜底/校验，
+    // 不作为主真值（主真值由 resolveRunWorkspacePath 按 conversationId 从 store 解析）。
+    workspacePath: incomingWorkspacePath = null,
     assistantMessageId = null,
     contextAttachments = [],
     runtimeReminders = [],
@@ -403,6 +448,11 @@ export function createLlmChatService({
       return;
     }
 
+    // 本轮运行的工作根目录：以会话绑定的 workspacePath 为唯一真值（见 resolveRunWorkspacePath）。
+    // 入口处一次性算出并全程线程化，替代对全局 activeWorkspacePath 的直接读取，保证整轮 cwd /
+    // 系统上下文一致，且与后续用户切换工作区解耦（流的工作区在发起时固定）。
+    const runWorkspacePath = resolveRunWorkspacePathForRun(conversationId, incomingWorkspacePath);
+
     const controller = new AbortController();
     const streamRecord = {
       controller,
@@ -414,7 +464,7 @@ export function createLlmChatService({
       // ADR 27: 快照发起时的工作区。流的工作区归属在发起时固定(与 sendMessage
       // 入口快照 activeWorkspacePath 的语义一致),后续切换工作区不改变已在跑的流。
       // 供活跃流投影携带工作区维度,让"任务在其它工作区仍在跑"成为可见事实。
-      workspacePath: activeWorkspacePath,
+      workspacePath: runWorkspacePath,
       // 整轮 wall-clock 起点属于运行时事实。renderer 切走/重开后通过 reattach 恢复该锚点，
       // 避免重新进入会话时计时停住或从 0 重新开始。
       startedAt: Date.now(),
@@ -431,7 +481,7 @@ export function createLlmChatService({
     // 累积代理:拦截 delta/thinking 追加到记录,其余事件透传给真实 webContents。
     const accumulatingWebContents = wrapWebContentsForRuntimeEvents(webContents, streamRecord, { conversationStore });
 
-    const toolContext = getConversationToolContext({ conversationId, workspacePath: activeWorkspacePath });
+    const toolContext = getConversationToolContext({ conversationId, workspacePath: runWorkspacePath });
     // 把本回合的交互模式写入（复用的）会话级 toolContext，供 goal 模式运行时闸门在工具
     // 执行层判定准入。见 Goal 模式运行时闸门设计。
     toolContext.mode = mode;
@@ -459,7 +509,7 @@ export function createLlmChatService({
           accountId: credential.accountId,
         });
 
-        const systemContext = buildSystemContext(activeWorkspacePath, {
+        const systemContext = buildSystemContext(runWorkspacePath, {
           contextAttachments,
           runtimeReminders,
           attachmentContext,
@@ -526,7 +576,7 @@ export function createLlmChatService({
               continuityContext,
               toolContext,
               agentProgress,
-              workspacePath: activeWorkspacePath,
+              workspacePath: runWorkspacePath,
               permissionGate,
               registry: runtimeTools.registry,
               runtimeProjection: runtimeTools.runtimeProjection,
@@ -555,7 +605,7 @@ export function createLlmChatService({
               continuityContext,
               toolContext,
               agentProgress,
-              workspacePath: activeWorkspacePath,
+              workspacePath: runWorkspacePath,
               permissionGate,
               registry: runtimeTools.registry,
               runtimeProjection: runtimeTools.runtimeProjection,
@@ -584,7 +634,7 @@ export function createLlmChatService({
               continuityContext,
               toolContext,
               agentProgress,
-              workspacePath: activeWorkspacePath,
+              workspacePath: runWorkspacePath,
               permissionGate,
               registry: runtimeTools.registry,
               runtimeProjection: runtimeTools.runtimeProjection,

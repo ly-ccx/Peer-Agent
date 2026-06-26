@@ -774,10 +774,15 @@ ipcMain.handle('workspace:add', async (event) => {
   const workspaces = all.workspaces || [];
   if (workspaces.some((w) => w.path === dir)) {
     settingsStore.merge({ activeWorkspace: dir });
+    // 与 workspace:set-active 对齐：选中工作区后同步全局兜底态，避免「新增/选中后
+    // 全局 activeWorkspacePath 滞后」导致兜底链取到旧值（运行根目录主真值已按会话解析，
+    // 此处仅保证兜底一致性）。
+    llmChatService.setWorkspacePath(dir);
     return { path: dir, name, existing: true };
   }
   workspaces.push({ path: dir, name, addedAt: new Date().toISOString() });
   settingsStore.merge({ workspaces, activeWorkspace: dir });
+  llmChatService.setWorkspacePath(dir);
   return { path: dir, name, existing: false };
 });
 
@@ -1237,6 +1242,7 @@ ipcMain.handle('chat:send', (event, {
   effort,
   mode,
   conversationId,
+  workspacePath,
   assistantMessageId,
   contextAttachments,
   runtimeReminders,
@@ -1252,6 +1258,9 @@ ipcMain.handle('chat:send', (event, {
     effort,
     mode,
     conversationId,
+    // B2 兜底：透传渲染端当前工作区，仅在会话未绑定 workspacePath 时由
+    // resolveRunWorkspacePath 作为兜底/校验使用，主真值仍按 conversationId 从 store 解析。
+    workspacePath,
     assistantMessageId,
     contextAttachments,
     runtimeReminders,

@@ -1684,3 +1684,72 @@ describe('finalizeDanglingToolSegments (terminal persist fallback)', () => {
     assert.equal(finalizeDanglingToolSegments(null, 'done'), null);
   });
 });
+
+describe('resolveRunWorkspacePath (per-run workspace truth)', () => {
+  it('uses the conversation-bound workspacePath even when global state is null or differs', async () => {
+    const { resolveRunWorkspacePath } = await loadService();
+    // 会话 X 绑定 /ws/X；全局态为 null（新用户首条消息：activeWorkspacePath 尚未同步）。
+    const storeNullGlobal = { getConversation: (id) => (id === 'conv-X' ? { workspacePath: '/ws/X' } : null) };
+    assert.equal(
+      resolveRunWorkspacePath({ conversationStore: storeNullGlobal, conversationId: 'conv-X', activeWorkspacePath: null }),
+      '/ws/X',
+    );
+    // 全局态为另一个工作区 /ws/Y（用户后续切走）；会话绑定仍应胜出。
+    assert.equal(
+      resolveRunWorkspacePath({ conversationStore: storeNullGlobal, conversationId: 'conv-X', activeWorkspacePath: '/ws/Y' }),
+      '/ws/X',
+    );
+    // 渲染端透传了 /ws/incoming（B2）；会话绑定（B1）优先级更高。
+    assert.equal(
+      resolveRunWorkspacePath({ conversationStore: storeNullGlobal, conversationId: 'conv-X', incomingWorkspacePath: '/ws/incoming', activeWorkspacePath: '/ws/Y' }),
+      '/ws/X',
+    );
+  });
+
+  it('falls back to incoming workspacePath when conversation has no bound path', async () => {
+    const { resolveRunWorkspacePath } = await loadService();
+    const storeNoBinding = { getConversation: () => ({ workspacePath: null }) };
+    // 历史会话无 workspacePath：B1 落空 → B2 渲染端透传胜出。
+    assert.equal(
+      resolveRunWorkspacePath({ conversationStore: storeNoBinding, conversationId: 'conv-old', incomingWorkspacePath: '/ws/incoming', activeWorkspacePath: '/ws/Y' }),
+      '/ws/incoming',
+    );
+    // B1、B2 均落空 → 全局兜底 activeWorkspacePath。
+    assert.equal(
+      resolveRunWorkspacePath({ conversationStore: storeNoBinding, conversationId: 'conv-old', activeWorkspacePath: '/ws/Y' }),
+      '/ws/Y',
+    );
+  });
+
+  it('falls back through the chain when conversationId is empty', async () => {
+    const { resolveRunWorkspacePath } = await loadService();
+    const store = { getConversation: () => ({ workspacePath: '/ws/should-not-be-read' }) };
+    // conversationId 为空：不读 store，直接走 B2 → 全局 → cwd。
+    assert.equal(
+      resolveRunWorkspacePath({ conversationStore: store, conversationId: null, incomingWorkspacePath: '/ws/incoming' }),
+      '/ws/incoming',
+    );
+    assert.equal(
+      resolveRunWorkspacePath({ conversationStore: store, conversationId: null, activeWorkspacePath: '/ws/Y' }),
+      '/ws/Y',
+    );
+  });
+
+  it('does not throw and falls back when store read fails', async () => {
+    const { resolveRunWorkspacePath } = await loadService();
+    const throwingStore = { getConversation: () => { throw new Error('store boom'); } };
+    assert.equal(
+      resolveRunWorkspacePath({ conversationStore: throwingStore, conversationId: 'conv-X', activeWorkspacePath: '/ws/Y' }),
+      '/ws/Y',
+    );
+  });
+
+  it('uses process.cwd() as the final fallback', async () => {
+    const { resolveRunWorkspacePath } = await loadService();
+    assert.equal(resolveRunWorkspacePath({}), process.cwd());
+    assert.equal(
+      resolveRunWorkspacePath({ conversationStore: null, conversationId: null, incomingWorkspacePath: null, activeWorkspacePath: null }),
+      process.cwd(),
+    );
+  });
+});
