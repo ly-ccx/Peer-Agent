@@ -15,6 +15,7 @@ export const GOAL_TOOL_NAMES = Object.freeze({
   createPlan: 'goal_create_plan',
   updateTask: 'goal_update_task',
   getPlan: 'goal_get_plan',
+  requestExplorer: 'request_explorer',
 });
 
 const GOAL_CREATE_PLAN_PROMPT = [
@@ -42,6 +43,18 @@ const GOAL_GET_PLAN_PROMPT = [
   'the exact taskId to pass to goal_update_task. Pass planId to fetch one plan; omit',
   'planId to list the active plans for the current conversation. Always trust the',
   'taskId values returned here over any taskId you remember.',
+].join(' ');
+
+const REQUEST_EXPLORER_PROMPT = [
+  'Request a read-only Explorer sub-agent to investigate a focused question (goal mode only).',
+  'Use this during the execute phase when you need to gather evidence in parallel without',
+  'spending your own turn budget — for example mapping where a symbol is used, confirming a',
+  'config value, or scanning a subtree. The Explorer is strictly read-only (no writes, shell',
+  'side effects, or MCP mutations) and returns findings with evidence refs. Provide a clear',
+  '"question" (what to find out) and a short "reason" (why it helps the goal); optionally',
+  'scope it with include/exclude path hints. Calling this only registers the request; the',
+  'Goal Runner dispatches and runs the Explorer after the turn. There is a hard cap on',
+  'concurrent explorers per run, so only request what materially advances the goal.',
 ].join(' ');
 
 export const GOAL_TOOL_DEFINITIONS = [
@@ -173,6 +186,54 @@ export const GOAL_TOOL_DEFINITIONS = [
         },
       },
       required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: GOAL_TOOL_NAMES.requestExplorer,
+    capabilityId: 'local.goal.explore',
+    // 仅在 goal 模式投影给模型（ADR 35）。Explorer 是 Runner 编排的只读子 Agent，
+    // 登记式：本工具仅把请求记入回合，由 Goal Runner 在回合结束后派发执行。
+    availableInModes: ['goal'],
+    prompt: () => REQUEST_EXPLORER_PROMPT,
+    runtime: Object.freeze({
+      adapter: 'runtime-gateway.local-goal-provider',
+      executorCapabilityId: 'local.goal.explore',
+    }),
+    permissionPolicy: {
+      kind: 'goal-explore',
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question: {
+          type: 'string',
+          description:
+            'The focused, read-only question the Explorer should answer (what to find out).',
+        },
+        reason: {
+          type: 'string',
+          description: 'Why answering this question helps advance the current goal.',
+        },
+        scope: {
+          type: 'object',
+          description: 'Optional path hints to scope the read-only investigation.',
+          properties: {
+            include: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Path globs / directories the Explorer should focus on.',
+            },
+            exclude: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Path globs / directories the Explorer should avoid.',
+            },
+          },
+          additionalProperties: false,
+        },
+      },
+      required: ['question'],
       additionalProperties: false,
     },
   },

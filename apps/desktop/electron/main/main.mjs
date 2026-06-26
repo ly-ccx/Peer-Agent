@@ -401,9 +401,29 @@ goalRunner = createGoalRunner({
         const prev = Number.isFinite(current[field]) ? current[field] : 0;
         goalPlanStore.setRunnerState(planId, { [field]: prev + 1 });
       };
+      // per-run Explorer 请求收集器：模型在本回合内调用 request_explorer 工具时，
+      // 经 agentProgress.onToolCall 带上的 input（question/reason/scope）登记到这里。
+      // sendMessage 结束后组装成 result.explorers 返回，交给 goal-runner 既有派发循环
+      // （normalizeExploreRequests → dispatchExplorer → runExplorer）真正执行，
+      // 使底部「explorers x/3」随真实派发增长。explorerId/planId 由 store 兜底补齐。
+      const collectedExplorers = [];
       const agentProgress = {
         onRound: () => bumpRunnerCount('roundCount'),
-        onToolCall: () => bumpRunnerCount('toolCallCount'),
+        onToolCall: ({ tool, input } = {}) => {
+          bumpRunnerCount('toolCallCount');
+          if (tool === 'request_explorer') {
+            const req = input && typeof input === 'object' ? input : {};
+            const question = typeof req.question === 'string' ? req.question.trim() : '';
+            if (!question) return;
+            const scope = req.scope && typeof req.scope === 'object' ? req.scope : undefined;
+            collectedExplorers.push({
+              planId,
+              question,
+              reason: typeof req.reason === 'string' ? req.reason.trim() : undefined,
+              ...(scope ? { scope } : {}),
+            });
+          }
+        },
       };
       await llmChatService.sendMessage({
         messages,
@@ -415,6 +435,11 @@ goalRunner = createGoalRunner({
         runtimeReminders: [buildGoalRunnerReminder(plan, turnNumber)],
         agentProgress,
       });
+      // 有 Explorer 请求时返回 explorers，让 Runner 进入 explore 派发分支；
+      // 否则维持原有 verify 收尾语义。
+      if (collectedExplorers.length > 0) {
+        return { continue: false, intent: 'explore', explorers: collectedExplorers };
+      }
       return { continue: false, intent: 'verify' };
     },
   },

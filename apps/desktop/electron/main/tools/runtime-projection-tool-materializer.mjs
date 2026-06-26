@@ -32,6 +32,12 @@ function riskForTool(tool) {
   if (policy.kind === 'goal-create' || policy.kind === 'goal-update' || policy.kind === 'goal-read') {
     return 'L0_inert';
   }
+  // goal-explore：仅登记一个只读 Explorer 子 Agent 请求（不直接执行探查、无副作用），
+  // 归为最低风险，使其在 goal 模式计划批准前后均可放行。实际探查由 Runner 派发的
+  // 只读 Explorer 在其自身权限边界内执行。
+  if (policy.kind === 'goal-explore') {
+    return 'L0_inert';
+  }
   // web-fetch: 联网读取外部网页，按 ADR 38 归为 L3_external_write（需联网授权）。
   if (policy.kind === 'web-fetch') return 'L3_external_write';
   // browser-control: 操控可见内嵌浏览器（导航/点击/输入/截图/读DOM），按 ADR 40 归为

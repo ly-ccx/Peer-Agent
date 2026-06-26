@@ -412,3 +412,86 @@ test('explorer: runtime 可动态请求只读子 Agent，Runner 回填报告后�
   assert.ok(events.some((event) => event.type === 'goalRunner:explorerStarted'));
   assert.ok(events.some((event) => event.type === 'goalRunner:explorerCompleted'));
 });
+
+test('explorer: runtime 返回 result.explorers 数组时全部派发并累加计数', async () => {
+  const plan = createApprovedPlan();
+  const events = [];
+  const runtime = {
+    async runGoalTurn({ turnNumber }) {
+      if (turnNumber === 1) {
+        // 模拟 runGoalTurn 收集到模型本回合发起的两个 request_explorer 请求。
+        return {
+          intent: 'explore',
+          explorers: [
+            { planId: plan.planId, question: 'Q1：符号在哪被使用', reason: 'r1' },
+            { planId: plan.planId, question: 'Q2：确认配置项默认值', reason: 'r2' },
+          ],
+        };
+      }
+      return { continue: false, intent: 'verify' };
+    },
+  };
+  const explored = [];
+  const explorerRunner = {
+    async runExplorer({ explorer }) {
+      explored.push(explorer.request.question);
+      return {
+        summary: 'done',
+        findings: [{ claim: 'ok', evidenceRefs: ['local-file://x'] }],
+        evidenceRefs: ['local-file://x'],
+        confidence: 'medium',
+        toolCallCount: 1,
+      };
+    },
+  };
+  const runner = createRunner({ runtime, explorerRunner, events });
+
+  await runner.start(plan.planId, { maxTurns: 3, awaitIdle: true });
+
+  const got = store.getPlan(plan.planId);
+  assert.deepEqual(explored, ['Q1：符号在哪被使用', 'Q2：确认配置项默认值']);
+  assert.equal(got.runner.explorerCount, 2);
+  assert.equal(got.runner.explorers.length, 2);
+  assert.ok(got.runner.explorers.every((e) => e.status === 'completed'));
+});
+
+test('explorer: 单回合请求数超过 maxExplorers 时被 store 上限兜底', async () => {
+  const plan = createApprovedPlan();
+  const events = [];
+  const runtime = {
+    async runGoalTurn({ turnNumber }) {
+      if (turnNumber === 1) {
+        // 一次性请求 4 个，超过默认 maxExplorers=3。
+        return {
+          intent: 'explore',
+          explorers: [1, 2, 3, 4].map((n) => ({
+            planId: plan.planId,
+            question: `Q${n}`,
+            reason: `r${n}`,
+          })),
+        };
+      }
+      return { continue: false, intent: 'verify' };
+    },
+  };
+  const explorerRunner = {
+    async runExplorer() {
+      return {
+        summary: 'done',
+        findings: [{ claim: 'ok', evidenceRefs: ['local-file://x'] }],
+        evidenceRefs: ['local-file://x'],
+        confidence: 'low',
+        toolCallCount: 0,
+      };
+    },
+  };
+  const runner = createRunner({ runtime, explorerRunner, events });
+
+  await runner.start(plan.planId, { maxTurns: 3, awaitIdle: true });
+
+  const got = store.getPlan(plan.planId);
+  // store dispatchExplorer 在 explorers.length >= maxExplorers 时抛错，
+  // Runner 不应突破上限：派发的 explorer 数受 maxExplorers 约束。
+  assert.ok(got.runner.explorerCount <= got.runner.maxExplorers);
+  assert.equal(got.runner.maxExplorers, 3);
+});

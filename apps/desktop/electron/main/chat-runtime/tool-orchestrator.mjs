@@ -168,7 +168,10 @@ export async function executeModelToolCall({
   // Goal Runner 实时工具计数：在工具派发处经 toolContext 透传单一接缝触发，覆盖所有 provider。
   if (typeof toolContext?.onToolCall === 'function') {
     try {
-      toolContext.onToolCall({ tool: name, toolCallId });
+      // 透传已解析的工具入参（args），供 Goal Runner 等消费者按工具语义收集请求
+      // （如 request_explorer 的 question/scope）。仅用 {tool,toolCallId} 的旧消费者
+      // 不受影响——多传字段向后兼容。
+      toolContext.onToolCall({ tool: name, toolCallId, input: args });
     } catch {
       // 进度回调失败不得影响工具执行。
     }

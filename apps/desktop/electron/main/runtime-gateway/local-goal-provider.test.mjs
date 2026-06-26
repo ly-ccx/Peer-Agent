@@ -52,7 +52,52 @@ describe('local goal provider', () => {
       'local.goal.update',
       'local.goal.create',
       'local.goal.read',
+      'local.goal.explore',
     ]);
+  });
+
+  it('acks a request_explorer registration via local.goal.explore', async () => {
+    const execution = await provider.executeCapability(
+      {
+        call: {
+          toolCallId: 'local.goal.explore:test',
+          capabilityId: 'local.goal.explore',
+          arguments: {
+            question: '确认 explorerCount 计数链路',
+            reason: '主 Runner 证据不足',
+            scope: { include: ['apps/desktop'] },
+          },
+          occurredAt: new Date().toISOString(),
+        },
+      },
+      { locale: 'zh-CN', toolContext: { conversationId: 'conv-explore' } },
+    );
+
+    assert.equal(execution.result.status, 'success');
+    assert.equal(execution.grant.granted, true);
+    const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.accepted, true);
+    assert.equal(payload.question, '确认 explorerCount 计数链路');
+  });
+
+  it('fails request_explorer when question is missing', async () => {
+    const execution = await provider.executeCapability(
+      {
+        call: {
+          toolCallId: 'local.goal.explore:empty',
+          capabilityId: 'local.goal.explore',
+          arguments: { reason: '没有 question' },
+          occurredAt: new Date().toISOString(),
+        },
+      },
+      { locale: 'zh-CN' },
+    );
+
+    assert.equal(execution.result.status, 'failed');
+    assert.equal(execution.grant.granted, false);
+    const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
+    assert.equal(payload.ok, false);
   });
 
   it('creates an awaiting_approval plan via local.goal.create', async () => {

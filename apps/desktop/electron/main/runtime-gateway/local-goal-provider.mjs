@@ -17,6 +17,7 @@ import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 const GOAL_CAPABILITY_ID = 'local.goal.update';
 const GOAL_CREATE_CAPABILITY_ID = 'local.goal.create';
 const GOAL_READ_CAPABILITY_ID = 'local.goal.read';
+const GOAL_EXPLORE_CAPABILITY_ID = 'local.goal.explore';
 
 function parseArgs(call) {
   const raw = call?.arguments;
@@ -344,6 +345,72 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
     };
   }
 
+  /**
+   * request_explorer：登记一个只读 Explorer 子 Agent 请求。
+   * 本执行器不直接做探查——它只把模型给的 question/reason/scope 回灌为一次成功的
+   * 工具结果（ack）。真正的派发/执行由 Goal Runner 在回合结束后，经
+   * agentProgress.onToolCall 收集到的请求做 dispatchExplorer → runExplorer。
+   * 因此本能力无外部副作用（L0_inert）。
+   */
+  async function executeRequestExplorer(request, context = {}) {
+    const call = request.call;
+    const locale = context.locale ?? 'zh-CN';
+    const args = parseArgs(call);
+    const question = typeof args.question === 'string' ? args.question.trim() : '';
+    let status = 'success';
+    let payload;
+    if (!question) {
+      status = 'failed';
+      payload = {
+        ok: false,
+        error: locale === 'zh-CN'
+          ? 'request_explorer 需要提供 question（要探查的只读问题）。'
+          : 'request_explorer requires a question (the read-only question to investigate).',
+      };
+    } else {
+      payload = {
+        ok: true,
+        accepted: true,
+        question,
+        message: locale === 'zh-CN'
+          ? 'Explorer 请求已登记，将由 Goal Runner 在本回合结束后派发执行。'
+          : 'Explorer request registered; the Goal Runner will dispatch it after this turn.',
+      };
+    }
+
+    const output = JSON.stringify(payload);
+    return {
+      call,
+      grant: createPermissionGrant({
+        toolCallId: call.toolCallId,
+        granted: status === 'success',
+        scope: GOAL_EXPLORE_CAPABILITY_ID,
+      }),
+      result: {
+        toolCallId: call.toolCallId,
+        status,
+        outputPreview: {
+          status,
+          tool: 'request_explorer',
+          legacyResult: { success: status === 'success', output },
+        },
+        evidence: {
+          evidenceId: `goal-explore-${call.toolCallId}`,
+          toolCallId: call.toolCallId,
+          summary: locale === 'zh-CN'
+            ? `Explorer 请求登记：${question || '(缺少 question)'}。`
+            : `Explorer request registered: ${question || '(missing question)'}.`,
+          locale,
+          returnedToCloud: false,
+          dataLevel: 'D1_internal',
+          redactions: [],
+          artifactRefs: [],
+        },
+        completedAt: nowIso(),
+      },
+    };
+  }
+
   async function executeCapability(request, context = {}) {
     if (request?.call?.capabilityId === GOAL_CREATE_CAPABILITY_ID) {
       return executeCreatePlan(request, context);
@@ -351,12 +418,20 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
     if (request?.call?.capabilityId === GOAL_READ_CAPABILITY_ID) {
       return executeGetPlan(request, context);
     }
+    if (request?.call?.capabilityId === GOAL_EXPLORE_CAPABILITY_ID) {
+      return executeRequestExplorer(request, context);
+    }
     return executeUpdateTask(request, context);
   }
 
   return {
     providerId: GOAL_CAPABILITY_ID,
-    capabilityIds: [GOAL_CAPABILITY_ID, GOAL_CREATE_CAPABILITY_ID, GOAL_READ_CAPABILITY_ID],
+    capabilityIds: [
+      GOAL_CAPABILITY_ID,
+      GOAL_CREATE_CAPABILITY_ID,
+      GOAL_READ_CAPABILITY_ID,
+      GOAL_EXPLORE_CAPABILITY_ID,
+    ],
     executeCapability,
   };
 }
