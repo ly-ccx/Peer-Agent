@@ -528,6 +528,7 @@ export type TranslationKey =
   | 'header.capabilities.group.builtin'
   | 'header.capabilities.empty'
   | 'header.capabilities.manage'
+  | 'header.capabilities.toolCount'
   | 'header.capabilities.aria'
   | 'header.capabilities.status.available'
   | 'header.capabilities.status.needsAuth'
@@ -1061,6 +1062,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'header.capabilities.group.builtin': '内置',
     'header.capabilities.empty': '暂无已挂载的能力',
     'header.capabilities.manage': '管理',
+    'header.capabilities.toolCount': '{count} 个工具',
     'header.capabilities.aria': '已挂载 {count} 项能力',
     'header.capabilities.status.available': '可用',
     'header.capabilities.status.needsAuth': '调用前询问',
@@ -1593,6 +1595,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'header.capabilities.group.builtin': 'Built-in',
     'header.capabilities.empty': 'No capabilities mounted',
     'header.capabilities.manage': 'Manage',
+    'header.capabilities.toolCount': '{count} tools',
     'header.capabilities.aria': '{count} capabilities mounted',
     'header.capabilities.status.available': 'Available',
     'header.capabilities.status.needsAuth': 'Asks first',

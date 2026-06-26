@@ -49,6 +49,21 @@ export interface CapabilityManifest {
   readonly health: CapabilityHealth;
   readonly inputSchema: JsonSchemaLike;
   readonly evidencePolicy: EvidencePolicy;
+  /**
+   * Optional human-readable label. For MCP tools this is `${serverName}: ${toolName}`,
+   * used by the header capabilities popover to render tool rows.
+   */
+  readonly displayName?: string;
+  /**
+   * Optional provider grouping key. For MCP capabilities this is the MCP server id,
+   * letting the UI aggregate every tool of one server under a single collapsible node.
+   */
+  readonly providerId?: string;
+  /**
+   * Optional provider display label (e.g. the MCP server's display name), shown as the
+   * service node title when capabilities are grouped by provider.
+   */
+  readonly providerLabel?: string;
 }
 
 export interface SkillSummary {

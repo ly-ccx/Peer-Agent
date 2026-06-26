@@ -2186,6 +2186,67 @@
   color: var(--graphite-mute);
 }
 
+/* ── 服务聚合节点（MCP 分组的「服务 → 工具」折叠层）── */
+.chat-header-cap-service-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--radius-frost-sm);
+  background: transparent;
+  color: var(--graphite-base);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--za-motion-fast);
+}
+
+.chat-header-cap-service-head:hover {
+  background: var(--chrome-hover);
+}
+
+.chat-header-cap-service-head:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--za-focus);
+}
+
+.chat-header-cap-service-caret {
+  flex: none;
+  color: var(--graphite-mute);
+  transition: transform var(--za-motion-fast) var(--za-ease-standard);
+}
+
+.chat-header-cap-service-caret.expanded {
+  transform: rotate(90deg);
+}
+
+.chat-header-cap-service-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--graphite-base);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-header-cap-service-count {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--chrome-hover);
+  font-size: 0.66rem;
+  color: var(--graphite-mute);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 展开后的工具列表：左缩进对齐服务名，与 caret 形成层级感。 */
+.chat-header-cap-service-tools {
+  padding-left: 16px;
+}
+
 .chat-header-cap-manage {
   display: flex;
   align-items: center;

@@ -342,6 +342,13 @@ export function createMcpRegistry() {
         if (!toolName) continue;
         const visible = server.toolVisibility?.[toolName] ?? server.policy?.visibleByDefault ?? true;
         if (!visible) continue;
+        // Health is derived from the live server state + permission policy.
+        // `failed` servers are already filtered out above, so a reachable tool is
+        // either ready to use (`available`) or gated behind a permission prompt
+        // (`needs_permission`). Previously this field was omitted entirely, which
+        // made the renderer fall back to `unavailable` for every MCP capability.
+        const requiresPermission = server.policy?.requirePermission !== false;
+        const health = requiresPermission ? 'needs_permission' : 'available';
         manifests.push({
           capabilityId: `local.mcp.${server.id}.${toolName}`,
           name: `mcp__${server.id.replace(/[^a-zA-Z0-9_-]/g, '_')}__${String(toolName).replace(/[^a-zA-Z0-9_-]/g, '_')}`,
@@ -349,6 +356,9 @@ export function createMcpRegistry() {
           description: tool.description ?? tool.toolDesc ?? `MCP tool ${toolName} from ${server.displayName}.`,
           source: 'mcp',
           locality: 'local',
+          health,
+          providerId: server.id,
+          providerLabel: server.displayName,
           riskLevel: tool.riskLevel ?? 'L3_external_write',
           dataLevel: tool.dataLevel ?? 'D2_sensitive',
           inputSchema: tool.inputSchema && typeof tool.inputSchema === 'object'

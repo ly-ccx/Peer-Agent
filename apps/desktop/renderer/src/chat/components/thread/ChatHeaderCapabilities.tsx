@@ -16,6 +16,17 @@ interface CapabilityRow {
   readonly tone: StatusTone;
 }
 
+/**
+ * 服务节点：把同一来源（如同一个 MCP server）的多个工具聚合成一个可折叠节点，
+ * 默认折叠，仅显示服务名 + 工具数 + 聚合状态点，点击才展开工具列表，节省纵向空间。
+ */
+interface CapabilityService {
+  readonly id: string;
+  readonly name: string;
+  readonly tone: StatusTone;
+  readonly rows: readonly CapabilityRow[];
+}
+
 interface CapabilityGroup {
   readonly key: 'skill' | 'mcp' | 'plugin' | 'builtin';
   readonly labelKey:
@@ -24,6 +35,29 @@ interface CapabilityGroup {
     | 'header.capabilities.group.plugin'
     | 'header.capabilities.group.builtin';
   readonly rows: readonly CapabilityRow[];
+  /**
+   * 可选的服务聚合层（仅 MCP 分组使用）。存在时浮层渲染「服务 → 工具」两级，
+   * rows 仍保留全部工具用于计数/兜底。
+   */
+  readonly services?: readonly CapabilityService[];
+}
+
+/**
+ * 聚合多行状态为服务节点的代表状态：取「最需要关注」的一个，
+ * 优先级 unavailable > disabled > needsAuth > available。
+ */
+function aggregateTone(rows: readonly CapabilityRow[]): StatusTone {
+  let result: StatusTone = 'available';
+  const rank: Record<StatusTone, number> = {
+    available: 0,
+    needsAuth: 1,
+    disabled: 2,
+    unavailable: 3,
+  };
+  for (const row of rows) {
+    if (rank[row.tone] > rank[result]) result = row.tone;
+  }
+  return result;
 }
 
 const STATUS_KEY: Record<StatusTone,
@@ -82,7 +116,18 @@ export function ChatHeaderCapabilities({
   const [open, setOpen] = useState(false);
   const [capabilities, setCapabilities] = useState<readonly CapabilityManifest[]>([]);
   const [skills, setSkills] = useState<readonly SkillSummary[]>([]);
+  // 已展开的服务节点 id 集合；默认空集合 = 全部折叠（仅显示服务名 + 工具数）。
+  const [expandedServices, setExpandedServices] = useState<ReadonlySet<string>>(() => new Set());
   const anchorRef = useRef<HTMLDivElement | null>(null);
+
+  const toggleService = useCallback((serviceId: string) => {
+    setExpandedServices((prev) => {
+      const next = new Set(prev);
+      if (next.has(serviceId)) next.delete(serviceId);
+      else next.add(serviceId);
+      return next;
+    });
+  }, []);
 
   // 实时拉取能力与技能；失败静默兜底为空态。
   useEffect(() => {
@@ -140,6 +185,9 @@ export function ChatHeaderCapabilities({
     const mcpRows: CapabilityRow[] = [];
     const pluginRows: CapabilityRow[] = [];
     const builtinRows: CapabilityRow[] = [];
+    // 按服务（providerId）聚合 MCP 工具，保持首次出现顺序。
+    const mcpServiceOrder: string[] = [];
+    const mcpServiceMap = new Map<string, { label: string; rows: CapabilityRow[] }>();
     for (const cap of capabilities) {
       const row: CapabilityRow = {
         id: cap.capabilityId,
@@ -148,15 +196,34 @@ export function ChatHeaderCapabilities({
       };
       if (cap.source === 'mcp') {
         mcpRows.push(row);
+        // providerId 缺失时退化为「每工具一个服务」，至少不丢失条目。
+        const serviceId = cap.providerId ?? cap.capabilityId;
+        const serviceLabel = cap.providerLabel ?? row.name;
+        let bucket = mcpServiceMap.get(serviceId);
+        if (!bucket) {
+          bucket = { label: serviceLabel, rows: [] };
+          mcpServiceMap.set(serviceId, bucket);
+          mcpServiceOrder.push(serviceId);
+        }
+        bucket.rows.push(row);
       } else if (cap.source === 'plugin') {
         pluginRows.push(row);
       } else {
         builtinRows.push(row);
       }
     }
+    const mcpServices: CapabilityService[] = mcpServiceOrder.map((serviceId) => {
+      const bucket = mcpServiceMap.get(serviceId)!;
+      return {
+        id: serviceId,
+        name: bucket.label,
+        tone: aggregateTone(bucket.rows),
+        rows: bucket.rows,
+      };
+    });
     return [
       { key: 'skill', labelKey: 'header.capabilities.group.skill', rows: skillRows },
-      { key: 'mcp', labelKey: 'header.capabilities.group.mcp', rows: mcpRows },
+      { key: 'mcp', labelKey: 'header.capabilities.group.mcp', rows: mcpRows, services: mcpServices },
       { key: 'plugin', labelKey: 'header.capabilities.group.plugin', rows: pluginRows },
       { key: 'builtin', labelKey: 'header.capabilities.group.builtin', rows: builtinRows },
     ];
@@ -213,17 +280,68 @@ export function ChatHeaderCapabilities({
                   <span className="chat-header-cap-group-name">{i18n.t(group.labelKey)}</span>
                   <span className="chat-header-cap-group-count">{group.rows.length}</span>
                 </div>
-                {group.rows.map((row) => (
-                  <div className="chat-header-cap-item" key={`${group.key}:${row.id}`}>
-                    <span className={`chat-header-cap-dot tone-${row.tone}`} aria-hidden="true" />
-                    <span className="chat-header-cap-item-name" title={row.name}>
-                      {row.name}
-                    </span>
-                    <span className="chat-header-cap-item-status">
-                      {i18n.t(STATUS_KEY[row.tone])}
-                    </span>
-                  </div>
-                ))}
+                {group.services
+                  ? group.services.map((service) => {
+                      const isExpanded = expandedServices.has(service.id);
+                      return (
+                        <div className="chat-header-cap-service" key={`${group.key}:svc:${service.id}`}>
+                          <button
+                            type="button"
+                            className="chat-header-cap-service-head"
+                            aria-expanded={isExpanded}
+                            onClick={() => toggleService(service.id)}
+                          >
+                            <svg
+                              className={`chat-header-cap-service-caret${isExpanded ? ' expanded' : ''}`}
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="m9 18 6-6-6-6" />
+                            </svg>
+                            <span className={`chat-header-cap-dot tone-${service.tone}`} aria-hidden="true" />
+                            <span className="chat-header-cap-service-name" title={service.name}>
+                              {service.name}
+                            </span>
+                            <span className="chat-header-cap-service-count">
+                              {i18n.t('header.capabilities.toolCount', { count: service.rows.length })}
+                            </span>
+                          </button>
+                          {isExpanded ? (
+                            <div className="chat-header-cap-service-tools">
+                              {service.rows.map((row) => (
+                                <div className="chat-header-cap-item" key={`${group.key}:${row.id}`}>
+                                  <span className={`chat-header-cap-dot tone-${row.tone}`} aria-hidden="true" />
+                                  <span className="chat-header-cap-item-name" title={row.name}>
+                                    {row.name}
+                                  </span>
+                                  <span className="chat-header-cap-item-status">
+                                    {i18n.t(STATUS_KEY[row.tone])}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  : group.rows.map((row) => (
+                      <div className="chat-header-cap-item" key={`${group.key}:${row.id}`}>
+                        <span className={`chat-header-cap-dot tone-${row.tone}`} aria-hidden="true" />
+                        <span className="chat-header-cap-item-name" title={row.name}>
+                          {row.name}
+                        </span>
+                        <span className="chat-header-cap-item-status">
+                          {i18n.t(STATUS_KEY[row.tone])}
+                        </span>
+                      </div>
+                    ))}
               </div>
             ))
           )}
