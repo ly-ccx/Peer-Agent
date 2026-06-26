@@ -302,6 +302,47 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     }
   }, [load]);
 
+  const refreshAll = useCallback(async () => {
+    setBusy(true);
+    const targets = servers.filter((server) => server.enabled !== false);
+    if (targets.length === 0) {
+      try {
+        await load();
+        setStatus('暂无启用的 MCP 连接，已重读列表。');
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : '刷新列表失败');
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    const failures: string[] = [];
+    let done = 0;
+    for (const server of targets) {
+      const name = labelForServer(server);
+      setStatus(`刷新 Manifest 中…（${done + 1}/${targets.length}）${name}`);
+      try {
+        await clientApi.mcpRefreshManifest({ serverId: serverIdOf(server) });
+      } catch (error) {
+        failures.push(`${name}：${error instanceof Error ? error.message : '刷新失败'}`);
+      }
+      done += 1;
+    }
+    try {
+      await load();
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : '重读列表失败');
+    }
+    if (failures.length === 0) {
+      setStatus(`已刷新全部 ${targets.length} 个连接的 Manifest。`);
+    } else if (failures.length === targets.length) {
+      setStatus(`刷新失败：${failures.join('；')}`);
+    } else {
+      setStatus(`已刷新 ${targets.length - failures.length}/${targets.length} 个连接，部分失败：${failures.join('；')}`);
+    }
+    setBusy(false);
+  }, [load, servers]);
+
   const handleReadResource = useCallback(async (uri: string) => {
     if (!selected) return;
     setBusy(true);
@@ -353,7 +394,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
           <button type="button" onClick={() => setShowAddForm(true)}>
             添加连接
           </button>
-          <button type="button" onClick={() => void load()} disabled={busy}>刷新列表</button>
+          <button type="button" onClick={() => void refreshAll()} disabled={busy}>{busy ? '刷新中…' : '刷新列表'}</button>
         </div>
       </header>
 
