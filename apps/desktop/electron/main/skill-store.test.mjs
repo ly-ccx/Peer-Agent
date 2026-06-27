@@ -65,6 +65,7 @@ describe('createSkillStore', () => {
     writeSkill(userDataPath, 'my-skill', [
       '---',
       'name: My Skill',
+      'description: A skill without explicit skillId',
       '---',
       '',
       'Some instructions',
@@ -80,7 +81,7 @@ describe('createSkillStore', () => {
   });
 
   it('findSkill returns skill object for known skillId', () => {
-    writeSkill(userDataPath, 'test-skill', '---\nskillId: test-skill\nname: Test\n---\nBody');
+    writeSkill(userDataPath, 'test-skill', '---\nskillId: test-skill\nname: Test\ndescription: A test skill\n---\nBody');
     const store = createSkillStore({ userDataPath });
     const skill = store.findSkill('test-skill');
     assert.ok(skill);
@@ -125,21 +126,33 @@ describe('createSkillStore', () => {
     assert.equal(store.readSkillContext('nope'), null);
   });
 
-  it('handles missing frontmatter gracefully', () => {
+  it('filters out skill with missing frontmatter (no description)', () => {
+    // 无 frontmatter 即无 description，按通用规则应被过滤，不再容错加载。
     writeSkill(userDataPath, 'no-fm', 'Just plain markdown without frontmatter');
     const store = createSkillStore({ userDataPath });
-    const skills = store.listSkills();
-    assert.equal(skills.length, 1);
-    assert.equal(skills[0].skillId, 'no-fm');
-    assert.equal(skills[0].name, 'no-fm');
+    assert.equal(store.listSkills().length, 0);
   });
 
-  it('handles invalid YAML frontmatter gracefully', () => {
+  it('filters out skill with invalid YAML frontmatter (no description)', () => {
+    // 坏 YAML 解析后拿不到 description，按通用规则应被过滤。
     writeSkill(userDataPath, 'bad-yaml', '---\n: invalid: [yaml\n---\nBody');
+    const store = createSkillStore({ userDataPath });
+    assert.equal(store.listSkills().length, 0);
+  });
+
+  it('filters out skill with blank (whitespace-only) description', () => {
+    writeSkill(userDataPath, 'blank-desc', '---\nskillId: blank-desc\nname: Blank\ndescription: "   "\n---\nBody');
+    const store = createSkillStore({ userDataPath });
+    assert.equal(store.listSkills().length, 0);
+  });
+
+  it('loads skill with a non-empty description', () => {
+    writeSkill(userDataPath, 'with-desc', '---\nskillId: with-desc\nname: With Desc\ndescription: A real description\n---\nBody');
     const store = createSkillStore({ userDataPath });
     const skills = store.listSkills();
     assert.equal(skills.length, 1);
-    assert.equal(skills[0].skillId, 'bad-yaml');
+    assert.equal(skills[0].skillId, 'with-desc');
+    assert.equal(skills[0].description, 'A real description');
   });
 
   // Layer 2 支撑：whenToUse 字段读取与透传
@@ -165,6 +178,7 @@ describe('createSkillStore', () => {
       '---',
       'skillId: s-kebab',
       'name: Kebab Skill',
+      'description: A kebab when-to-use skill',
       'when-to-use: Triggered for kebab',
       '---',
       'body',
@@ -174,7 +188,7 @@ describe('createSkillStore', () => {
   });
 
   it('whenToUse defaults to empty string when not declared', () => {
-    writeSkill(userDataPath, 's-empty', '---\nskillId: s-empty\nname: Empty\n---\nbody');
+    writeSkill(userDataPath, 's-empty', '---\nskillId: s-empty\nname: Empty\ndescription: A skill without whenToUse\n---\nbody');
     const store = createSkillStore({ userDataPath });
     assert.equal(store.listSkills()[0].whenToUse, '');
   });
@@ -183,7 +197,7 @@ describe('createSkillStore', () => {
     const store = createSkillStore({ userDataPath });
     assert.equal(store.listSkills().length, 0);
 
-    writeSkill(userDataPath, 'new-skill', '---\nskillId: new-skill\nname: New\n---\nNew body');
+    writeSkill(userDataPath, 'new-skill', '---\nskillId: new-skill\nname: New\ndescription: A newly added skill\n---\nNew body');
     store.refresh();
     assert.equal(store.listSkills().length, 1);
     assert.equal(store.listSkills()[0].skillId, 'new-skill');
@@ -192,7 +206,7 @@ describe('createSkillStore', () => {
   it('ignores non-directory entries in skills folder', () => {
     mkdirSync(path.join(userDataPath, 'skills'), { recursive: true });
     writeFileSync(path.join(userDataPath, 'skills', 'stray-file.txt'), 'not a skill');
-    writeSkill(userDataPath, 'real-skill', '---\nskillId: real-skill\nname: Real\n---\nBody');
+    writeSkill(userDataPath, 'real-skill', '---\nskillId: real-skill\nname: Real\ndescription: A real skill\n---\nBody');
 
     const store = createSkillStore({ userDataPath });
     assert.equal(store.listSkills().length, 1);
@@ -201,7 +215,7 @@ describe('createSkillStore', () => {
 
   it('ignores directories without SKILL.md', () => {
     mkdirSync(path.join(userDataPath, 'skills', 'empty-dir'), { recursive: true });
-    writeSkill(userDataPath, 'valid', '---\nskillId: valid\nname: Valid\n---\nBody');
+    writeSkill(userDataPath, 'valid', '---\nskillId: valid\nname: Valid\ndescription: A valid skill\n---\nBody');
 
     const store = createSkillStore({ userDataPath });
     assert.equal(store.listSkills().length, 1);

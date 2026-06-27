@@ -114,6 +114,11 @@ function loadSingleSkill(skillDir, dirName) {
   // 对齐 Claude Code SKILL.md frontmatter。license 可能是字符串、文件路径引用、或不写。
   const license = typeof frontmatter.license === 'string' ? frontmatter.license : null;
 
+  // 通用过滤规则：description 为空（缺失/纯空白）的 skill 视为无效噪音，直接丢弃。
+  // 该判定只看 description，不针对任何特定前缀；由于 loadSingleSkill 是唯一解析入口，
+  // 此处 return null 会让「本地加载」(loadSkillsFromRoot) 与「借用列表」(listAvailableSkills) 两条路径同时跳过。
+  if (description.trim() === '') return null;
+
   return {
     skillId,
     name,
