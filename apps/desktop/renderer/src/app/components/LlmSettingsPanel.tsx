@@ -372,10 +372,28 @@ export function LlmSettingsPanel({
   const [modelLists, setModelLists] = useState<Record<string, readonly LlmModelInfo[]>>({});
   const [modelLoadingId, setModelLoadingId] = useState<string | null>(null);
 
+  const clearTestResult = useCallback((id: string) => {
+    setTestResults((prev) => {
+      if (!prev[id]) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
       const list = await clientApi.llmListProviders();
       setProviders(list);
+      setTestResults((prev) => {
+        let next: Record<string, LlmProviderTestResult> | null = null;
+        for (const provider of list) {
+          if (!isOAuthMethod(provider.authMethod) || provider.oauthStatus?.status !== 'connected' || !prev[provider.id]) continue;
+          next ??= { ...prev };
+          delete next[provider.id];
+        }
+        return next ?? prev;
+      });
     } catch { /* silent */ }
   }, []);
 
@@ -611,6 +629,7 @@ export function LlmSettingsPanel({
         // 登录失败:保持表单打开,让用户可重试或取消。
         return;
       }
+      clearTestResult(busyKey);
       setShowForm(false);
       setEditingId(null);
       await refresh();
