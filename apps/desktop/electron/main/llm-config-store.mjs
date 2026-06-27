@@ -436,6 +436,15 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
 
   function setDefault(id) {
     const items = readAll();
+    // 防御:OAuth(订阅)类型且会话非 connected(过期/未登录)时,禁止设为默认。
+    // 激活了也无法发起对话,只会在真正请求时才报错;前端已禁用按钮,此处兜住其它入口。
+    const target = items.find((i) => i.id === id);
+    if (target && (target.authMethod === 'oauth_chatgpt' || target.authMethod === 'oauth_google')) {
+      const status = oauthStatusOf(target)?.status;
+      if (status !== 'connected') {
+        throw new Error('OAUTH_SESSION_NOT_CONNECTED');
+      }
+    }
     for (const item of items) {
       item.isDefault = item.id === id;
     }

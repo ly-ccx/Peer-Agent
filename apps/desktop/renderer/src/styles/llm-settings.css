@@ -233,9 +233,13 @@
   padding: 3px 8px;
   transition: all var(--za-motion-fast);
 }
-.llm-provider-actions button:hover {
+.llm-provider-actions button:hover:not(:disabled) {
   background: var(--chrome-hover);
   color: var(--graphite-base);
+}
+.llm-provider-actions button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 .llm-provider-actions button.danger:hover {
   color: var(--state-danger);

@@ -706,9 +706,19 @@ export function LlmSettingsPanel({
             </div>
             <div className="llm-provider-actions">
               {!p.isDefault ? (
-                <button type="button" onClick={() => handleSetDefault(p.id)}>
-                  {i18n.locale === 'zh-CN' ? '激活' : 'Activate'}
-                </button>
+                (() => {
+                  const oauthNotConnected = isOAuthMethod(p.authMethod) && p.oauthStatus?.status !== 'connected';
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => handleSetDefault(p.id)}
+                      disabled={oauthNotConnected}
+                      title={oauthNotConnected ? (i18n.locale === 'zh-CN' ? '会话已过期，请先重新登录' : 'Session expired — please re-login first') : undefined}
+                    >
+                      {i18n.locale === 'zh-CN' ? '激活' : 'Activate'}
+                    </button>
+                  );
+                })()
               ) : null}
               {isOAuthMethod(p.authMethod) && p.oauthStatus?.status !== 'connected' ? (
                 <button type="button" className="primary" onClick={() => void handleOAuthLogin({ id: p.id })} disabled={oauthBusyId === p.id}>
