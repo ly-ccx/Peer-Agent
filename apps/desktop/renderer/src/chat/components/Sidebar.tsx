@@ -27,6 +27,30 @@ interface WorkspaceInfo {
   git?: { branch?: string; isDirty?: boolean };
 }
 
+// 将 ISO 时间戳格式化为简洁的相对时间（跟随设计稿风格：纯「X 单位」，不带「前」字）。
+// 粒度：刚刚 / X 分钟 / X 小时 / X 天 / X 周 / X 个月 / X 年。
+// 兜底：空值 / 非法日期 / 未来时间均返回「刚刚」(Now)，避免出现负数或 NaN。
+function formatRelativeTime(iso: string | null | undefined, isZh: boolean): string {
+  if (!iso) return isZh ? '刚刚' : 'Now';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return isZh ? '刚刚' : 'Now';
+  const diffMs = Date.now() - then;
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 60) return isZh ? '刚刚' : 'Now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return isZh ? `${min} 分钟` : `${min}m`;
+  const hour = Math.floor(min / 60);
+  if (hour < 24) return isZh ? `${hour} 小时` : `${hour}h`;
+  const day = Math.floor(hour / 24);
+  if (day < 7) return isZh ? `${day} 天` : `${day}d`;
+  const week = Math.floor(day / 7);
+  if (week < 5) return isZh ? `${week} 周` : `${week}w`;
+  const month = Math.floor(day / 30);
+  if (month < 12) return isZh ? `${month} 个月` : `${month}mo`;
+  const year = Math.floor(day / 365);
+  return isZh ? `${year} 年` : `${year}y`;
+}
+
 export function Sidebar({
   conversations,
   activeConversationId,
@@ -394,7 +418,15 @@ export function Sidebar({
                     onClick={() => setConfirmDeleteId(conv.id)}
                   >×</button>
                 </span>
-              ) : null}
+              ) : (
+                <time
+                  className="sidebar-conv-time"
+                  dateTime={conv.updatedAt}
+                  title={conv.updatedAt ? new Date(conv.updatedAt).toLocaleString() : undefined}
+                >
+                  {formatRelativeTime(conv.updatedAt, isZh)}
+                </time>
+              )}
             </div>
           );
         })}

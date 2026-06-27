@@ -18,6 +18,13 @@
   transition: none;
 }
 
+/* 拖拽进行中：给中列消息容器加 paint 隔离，把每帧重绘范围限制在 .thread 子树内，
+   减少左栏变宽引发的整列 repaint 开销（.thread 常态为 contain: layout，
+   拖拽态升级为 layout paint）。松手后规则自动失效，恢复常态。 */
+:root[data-sidebar-resizing='true'] .thread {
+  contain: layout paint;
+}
+
 :root[data-workbench-open='true'] .app-layout {
   --za-workbench-current-width: var(--za-workbench-width, 420px);
 }
@@ -452,6 +459,15 @@
     opacity: 0.95;
     box-shadow: 0 0 0 0 transparent;
   }
+}
+.sidebar-conv-time {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  font-size: 0.65rem;
+  line-height: 1;
+  color: var(--graphite-mute);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .sidebar-conv-actions {
   display: flex;
