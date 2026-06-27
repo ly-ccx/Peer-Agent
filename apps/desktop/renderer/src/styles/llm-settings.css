@@ -207,6 +207,14 @@
 .llm-test-result.success { color: var(--state-success); }
 .llm-test-result.fail { color: var(--state-danger); }
 
+/* OAuth 会话状态：已登录用成功色，过期用警示色并加粗，让“需重新登录”
+   一眼可辨，而不是与正文同色的灰字。disconnected 保持默认弱化色。 */
+.llm-oauth-status-connected { color: var(--state-success); }
+.llm-oauth-status-expired {
+  color: var(--state-warn);
+  font-weight: 600;
+}
+
 .llm-provider-actions {
   display: flex;
   gap: var(--space-1);

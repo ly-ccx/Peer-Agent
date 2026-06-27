@@ -209,9 +209,7 @@ export function startGoogleBrowserLogin(oauthClient) {
     }
   });
 
-  server.on('error', (err) => finish(rejectFn, err));
-
-  server.listen(CALLBACK_PORT, '127.0.0.1', () => {
+  function onListening() {
     const authorizeUrl = new URL(AUTHORIZE_URL);
     authorizeUrl.searchParams.set('client_id', clientId);
     authorizeUrl.searchParams.set('response_type', 'code');
@@ -223,7 +221,40 @@ export function startGoogleBrowserLogin(oauthClient) {
     authorizeUrl.searchParams.set('access_type', 'offline');
     authorizeUrl.searchParams.set('prompt', 'consent');
     openInBrowser(authorizeUrl.toString()).catch((err) => finish(rejectFn, err));
-  });
+  }
+
+  // Port 1456 is the registered OAuth callback port and cannot be swapped.
+  // A conflict usually comes from a leftover callback server of a previous
+  // login (close() releases the port asynchronously, so an immediate listen
+  // may still fail). On EADDRINUSE, close the current handle, wait briefly,
+  // and retry once; if it still fails, reject with a structured error code
+  // oauth_port_in_use:<port> that the renderer turns into an actionable
+  // message instead of surfacing the raw node error string.
+  let portRetried = false;
+  function onServerError(err) {
+    if (err?.code === 'EADDRINUSE' && !portRetried) {
+      portRetried = true;
+      try { server.close(); } catch {}
+      setTimeout(() => {
+        if (settled) return;
+        try {
+          server.listen(CALLBACK_PORT, '127.0.0.1', onListening);
+        } catch (retryErr) {
+          finish(rejectFn, retryErr);
+        }
+      }, 350);
+      return;
+    }
+    if (err?.code === 'EADDRINUSE') {
+      finish(rejectFn, new Error(`oauth_port_in_use:${CALLBACK_PORT}`));
+      return;
+    }
+    finish(rejectFn, err);
+  }
+
+  server.on('error', onServerError);
+
+  server.listen(CALLBACK_PORT, '127.0.0.1', onListening);
 
   function cancel() {
     finish(rejectFn, new Error('Google OAuth login cancelled'));

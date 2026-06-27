@@ -308,6 +308,12 @@ function friendlyTestError(error: string | undefined, locale: string): string {
       ? `${name} 由渠道鉴权统一管理，不能放在自定义 Header`
       : `${name} is managed by channel auth and cannot be set as a custom header`;
   }
+  if (error?.startsWith('oauth_port_in_use:')) {
+    const port = error.slice('oauth_port_in_use:'.length);
+    return zh
+      ? `本地登录回调端口 ${port} 被占用，请关闭可能占用该端口的程序（或上一次未完成的登录窗口）后重试`
+      : `Local login callback port ${port} is in use. Close the program occupying it (or a leftover login window) and try again`;
+  }
   switch (error) {
     case 'oauth_not_logged_in':
       return zh ? '未登录，请先完成 OAuth 登录' : 'Not logged in — please complete OAuth login';
@@ -662,7 +668,7 @@ export function LlmSettingsPanel({
                   {p.oauthStatus?.status === 'connected'
                     ? (i18n.locale === 'zh-CN' ? `已登录${p.oauthStatus.accountId ? ` · ${p.oauthStatus.accountId}` : ''}` : `Connected${p.oauthStatus.accountId ? ` · ${p.oauthStatus.accountId}` : ''}`)
                     : p.oauthStatus?.status === 'expired'
-                      ? (i18n.locale === 'zh-CN' ? '登录已过期,请重新登录' : 'Session expired, please re-login')
+                      ? (i18n.locale === 'zh-CN' ? '⚠ 登录已过期，请点击右侧“重新登录”' : '⚠ Session expired — click “Re-login”')
                       : (i18n.locale === 'zh-CN' ? '未登录' : 'Not logged in')}
                 </small>
               ) : (

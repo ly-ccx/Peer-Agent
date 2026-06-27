@@ -228,9 +228,7 @@ export function startBrowserLogin() {
     }
   });
 
-  server.on('error', (err) => finish(rejectFn, err));
-
-  server.listen(CALLBACK_PORT, '127.0.0.1', () => {
+  function onListening() {
     const authorizeUrl = new URL(AUTHORIZE_URL);
     authorizeUrl.searchParams.set('client_id', CLIENT_ID);
     authorizeUrl.searchParams.set('response_type', 'code');
@@ -241,7 +239,38 @@ export function startBrowserLogin() {
     authorizeUrl.searchParams.set('state', state);
     authorizeUrl.searchParams.set('id_token_add_organizations', 'true');
     openInBrowser(authorizeUrl.toString()).catch((err) => finish(rejectFn, err));
-  });
+  }
+
+  // 端口 1455 是注册死的 OAuth 回调端口,不能换。占用多半来自上一次
+  // 登录残留的本地回调 server(close 是异步释放,紧接着 listen 可能仍抢不到)。
+  // 故命中 EADDRINUSE 时先关掉当前句柄、短暂等待后重试一次;仍失败再抛
+  // 结构化错误码 oauth_port_in_use:<port>,由前端翻译成可操作的中文提示,
+  // 不再把裸 node 错误串透传到界面。
+  let portRetried = false;
+  function onServerError(err) {
+    if (err?.code === 'EADDRINUSE' && !portRetried) {
+      portRetried = true;
+      try { server.close(); } catch {}
+      setTimeout(() => {
+        if (settled) return;
+        try {
+          server.listen(CALLBACK_PORT, '127.0.0.1', onListening);
+        } catch (retryErr) {
+          finish(rejectFn, retryErr);
+        }
+      }, 350);
+      return;
+    }
+    if (err?.code === 'EADDRINUSE') {
+      finish(rejectFn, new Error(`oauth_port_in_use:${CALLBACK_PORT}`));
+      return;
+    }
+    finish(rejectFn, err);
+  }
+
+  server.on('error', onServerError);
+
+  server.listen(CALLBACK_PORT, '127.0.0.1', onListening);
 
   function cancel() {
     finish(rejectFn, new Error('OAuth login cancelled'));

@@ -1524,6 +1524,10 @@ ipcMain.handle('llm:oauth:start', async (_event, params) => {
   if (activeOAuthLogin) {
     try { activeOAuthLogin.cancel(); } catch {}
     activeOAuthLogin = null;
+    // cancel() 触发的本地回调 server.close() 是异步释放端口的,
+    // 稍等一拍再起新登录,避免立刻 listen 撞上尚未释放的回调端口
+    // (EADDRINUSE)。oauth 模块内部还有一次重试兜底。
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
   const session = authMethod === 'oauth_google'
     ? startGoogleBrowserLogin({
