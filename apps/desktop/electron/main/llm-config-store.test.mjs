@@ -21,7 +21,7 @@ test('subscription provider creation applies gpt-5.5 pricing and context metadat
   const provider = store.addProvider({ provider: 'openai', authMethod: 'oauth_chatgpt' });
 
   assert.equal(provider.model, 'gpt-5.5');
-  assert.equal(provider.contextWindow, 1_050_000);
+  assert.equal(provider.contextWindow, 272_000);
   assert.equal(provider.maxOutputTokens, 128_000);
   assert.equal(provider.inputPrice, 5);
   assert.equal(provider.cacheReadPrice, 0.5);
@@ -62,7 +62,7 @@ test('subscription provider migration backfills pricing and context metadata', (
 
   const store = createLlmConfigStore({ configFile });
   const [provider] = store.listProviders();
-  assert.equal(provider.contextWindow, 1_050_000);
+  assert.equal(provider.contextWindow, 272_000);
   assert.equal(provider.maxOutputTokens, 128_000);
   assert.equal(provider.inputPrice, 5);
   assert.equal(provider.cacheReadPrice, 0.5);
@@ -73,7 +73,7 @@ test('subscription provider migration backfills pricing and context metadata', (
   assert.equal(provider.supportsPromptCaching, true);
 
   const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
-  assert.equal(persisted.contextWindow, 1_050_000);
+  assert.equal(persisted.contextWindow, 272_000);
   assert.equal(persisted.maxOutputTokens, 128_000);
   assert.equal(persisted.inputPrice, 5);
   assert.equal(persisted.cacheWritePrice, undefined);

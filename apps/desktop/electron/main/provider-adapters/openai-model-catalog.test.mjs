@@ -44,7 +44,7 @@ test('subscription catalog: default is newest (gpt-5.5) and first entry', () => 
 test('subscription catalog includes gpt-5.5 pricing and context metadata', () => {
   const model = getSubscriptionModelMetadata('gpt-5.5');
   assert.ok(model);
-  assert.equal(model.contextWindow, 1_050_000);
+  assert.equal(model.contextWindow, 272_000);
   assert.equal(model.maxOutputTokens, 128_000);
   assert.equal(model.inputPrice, 5);
   assert.equal(model.cacheReadPrice, 0.5);
@@ -70,7 +70,7 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
   const res = await listSubscriptionModels({ access: 'tok', accountId: 'acct' });
   assert.equal(res.source, 'builtin');
   assert.equal(res.error, undefined);
-  assert.equal(res.models[0].contextWindow, 1_050_000);
+  assert.equal(res.models[0].contextWindow, 272_000);
   assert.equal(res.models[0].inputPrice, 5);
   assert.equal(res.models[0].longContextOutputPrice, 45);
   assert.deepEqual(

@@ -15,7 +15,7 @@ const SUBSCRIPTION_CATALOG = [
   {
     id: 'gpt-5.5',
     label: 'GPT-5.5',
-    contextWindow: 1_050_000,
+    contextWindow: 272_000,
     maxOutputTokens: 128_000,
     inputPrice: 5,
     outputPrice: 30,
@@ -33,7 +33,7 @@ const SUBSCRIPTION_CATALOG = [
   {
     id: 'gpt-5.4',
     label: 'GPT-5.4',
-    contextWindow: 1_050_000,
+    contextWindow: 272_000,
     maxOutputTokens: 128_000,
     inputPrice: 2.5,
     outputPrice: 15,
