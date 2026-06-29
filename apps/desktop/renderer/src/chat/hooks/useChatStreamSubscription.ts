@@ -44,6 +44,20 @@ export function useChatStreamSubscription(params: {
   onConversationUpdated?: () => void;
   /** 当 Agent 发起内置浏览器工具（browser_*）调用时触发，供上层自动打开并切到 Browser Tab。 */
   onBrowserToolActivity?: (tool: string) => void;
+  /**
+   * 回合结束时，把主进程随 done 下发的权威上下文用量快照（与压缩触发同口径）反映到表达层。
+   * 口径统一：进度条分子改用该权威 contextTokens，消除「进度条到 80% 但主进程不压缩」的偏差。
+   * contextWindow 为 null 表示未知（不渲染百分比）；snapshot 为 null 表示本回合主进程未下发快照。
+   */
+  setAuthoritativeContext?: (
+    snapshot: { contextTokens: number; contextWindow: number | null } | null,
+  ) => void;
+  /**
+   * 回合结束时，若主进程判定已达压缩阈值（compactionSuggested），请求上层在回合结束后
+   * 触发一次自动压缩。复用手动 /compact 的安全链路（主进程按 shouldCompact 自门控），
+   * 上层需自带防重入/防抖护栏，避免与下一次发送前检查、emergency 压缩重复触发。
+   */
+  onCompactionSuggested?: () => void;
   streamIdRef: React.MutableRefObject<string | null>;
   turnStartedAtRef: React.MutableRefObject<number | null>;
   setTurnStartedAt: (startedAt: number | null) => void;
@@ -74,6 +88,8 @@ export function useChatStreamSubscription(params: {
   const {
     conversationId,
     onConversationUpdated,
+    setAuthoritativeContext,
+    onCompactionSuggested,
     onBrowserToolActivity,
     streamIdRef,
     turnStartedAtRef,
@@ -127,7 +143,7 @@ export function useChatStreamSubscription(params: {
       thinkingTypewriter.push(content);
     });
 
-    const offDone = clientApi.onChatStreamDone(({ streamId, usage, lifetimeUsage }) => {
+    const offDone = clientApi.onChatStreamDone(({ streamId, usage, lifetimeUsage, contextTokens, contextWindow, compactionSuggested }) => {
       if (streamId !== streamIdRef.current) return;
       textTypewriter.flush();
       thinkingTypewriter.flush();
@@ -183,6 +199,21 @@ export function useChatStreamSubscription(params: {
       }
       setTurnStartedAt(null);
       streamIdRef.current = null;
+      // 口径统一：把主进程随 done 下发的权威上下文用量快照反映到表达层，供进度条对齐。
+      // 仅当主进程确有下发 contextTokens 时覆盖；否则置 null 让上层回退到本地估算，
+      // 避免旧 runtime/测试无该字段时把进度条清零。
+      if (typeof contextTokens === 'number') {
+        setAuthoritativeContext?.({
+          contextTokens,
+          contextWindow: typeof contextWindow === 'number' ? contextWindow : null,
+        });
+      } else {
+        setAuthoritativeContext?.(null);
+      }
+      // 触发时机解耦：回合自然结束后，若主进程判定已越过压缩阈值，请求上层在回合
+      // 结束后跑一次自动压缩（复用手动 /compact 的安全链路，主进程按 shouldCompact
+      // 自门控）。防重入/防抖由上层护栏负责。
+      if (compactionSuggested) onCompactionSuggested?.();
     });
 
     const offUsage = clientApi.onChatStreamUsage(({ streamId, usage }) => {
@@ -442,5 +473,5 @@ export function useChatStreamSubscription(params: {
     });
 
     return () => { if (compactionDoneTimer) { clearTimeout(compactionDoneTimer); compactionDoneTimer = null; } offDelta(); offThinking(); offDone(); offUsage(); offAborted(); offToolProgress(); offToolCall(); offToolResult(); offPermissionRequest(); offError(); offProviderRecovery(); offConnectionRecovery(); offCompaction(); };
-  }, [appendStreamThinking, conversationId, onConversationUpdated, onBrowserToolActivity]);
+  }, [appendStreamThinking, conversationId, onConversationUpdated, onBrowserToolActivity, setAuthoritativeContext, onCompactionSuggested]);
 }

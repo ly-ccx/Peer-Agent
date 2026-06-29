@@ -6,6 +6,7 @@ import {
 } from './agent-loop-kernel.mjs';
 import {
   applyMicrocompaction,
+  computeContextInfo,
   isPromptTooLongResponse,
   runCompactionCheck,
 } from './compaction-coordinator.mjs';
@@ -52,7 +53,13 @@ export async function agentLoopOpenAI({
     ? (args) => sendOpenAIResponsesStream({ ...args, accountId, omitMaxOutputTokens: authMethod === 'oauth_chatgpt' })
     : sendOpenAIChatStream;
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
-  const loop = createAgentLoopKernel({ webContents, streamId, onRound: agentProgress?.onRound });
+  const loop = createAgentLoopKernel({
+    webContents,
+    streamId,
+    onRound: agentProgress?.onRound,
+    // apiMessages 已含 system，回合结束按当前真实消息算权威用量，与压缩触发同口径。
+    getContextInfo: () => computeContextInfo({ messages: apiMessages, contextWindow }),
+  });
   const providerConfig = { provider: 'openai', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model, maxOutputTokens };
   let effectiveSupportsReasoning = Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning);
 

@@ -36,6 +36,20 @@ function shouldShowCompactionStart(messages, contextWindow) {
   return estimateTokensFromMessages(messages) > contextWindow * COMPACTION_CONFIG.triggerRatio;
 }
 
+// 口径统一单一来源：进度条用量、压缩触发判定都从这里取数，避免「进度条到 80%
+// 但主进程不压缩」这类两套估算打架的偏差。contextTokens 用与压缩触发完全相同的
+// estimateTokensFromMessages（含图片固定 token、tool 块 JSON 体积、每条 +overhead），
+// compactionSuggested 用与 shouldCompact 完全相同的 triggerRatio 阈值。
+export function computeContextInfo({ messages, contextWindow }) {
+  const contextTokens = estimateTokensFromMessages(Array.isArray(messages) ? messages : []);
+  const normalizedWindow = Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null;
+  const triggerRatio = COMPACTION_CONFIG.triggerRatio;
+  const compactionSuggested = normalizedWindow
+    ? contextTokens > normalizedWindow * triggerRatio
+    : false;
+  return { contextTokens, contextWindow: normalizedWindow, triggerRatio, compactionSuggested };
+}
+
 async function persistAndNotifyCompaction({
   persistCompaction,
   conversationId,

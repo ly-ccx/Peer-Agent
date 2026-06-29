@@ -44,6 +44,10 @@ export function createAgentLoopKernel({
   // provider 无关的「模型轮次」信号：每次 addUsage（每轮恰好一次）回调一次。
   // 用于 Goal Runner 展示用的实时轮次计数，与具体 provider 解耦。
   onRound = null,
+  // 口径统一：回合自然结束时，由各 loop 注入的闭包返回「权威上下文用量」快照
+  // （{ contextTokens, contextWindow, compactionSuggested }），随 done 事件下发，
+  // 让渲染端进度条与主进程压缩触发用同一份估算与阈值。返回 null 表示不附带。
+  getContextInfo = null,
 } = {}) {
   const normalizedMaxTurns = normalizeAgentLoopMaxTurns(maxTurns);
   const usage = {
@@ -86,7 +90,25 @@ export function createAgentLoopKernel({
   }
 
   function sendDone() {
-    webContents?.send?.('chat:stream:done', { streamId, usage });
+    // 回合自然结束：附带权威上下文用量快照（与压缩触发同口径），供渲染端进度条对齐
+    // 并据 compactionSuggested 在回合结束后触发自动压缩。闭包取数失败不得影响收尾。
+    let contextInfo = null;
+    if (typeof getContextInfo === 'function') {
+      try {
+        contextInfo = getContextInfo();
+      } catch {
+        contextInfo = null;
+      }
+    }
+    const payload = { streamId, usage };
+    if (contextInfo && typeof contextInfo === 'object') {
+      if (typeof contextInfo.contextTokens === 'number') payload.contextTokens = contextInfo.contextTokens;
+      if (typeof contextInfo.contextWindow === 'number') payload.contextWindow = contextInfo.contextWindow;
+      if (typeof contextInfo.compactionSuggested === 'boolean') {
+        payload.compactionSuggested = contextInfo.compactionSuggested;
+      }
+    }
+    webContents?.send?.('chat:stream:done', payload);
   }
 
   function sendError(error) {

@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  computeContextInfo,
   isPromptTooLongResponse,
   runCompactionCheck,
 } from './compaction-coordinator.mjs';
+import { COMPACTION_CONFIG, estimateTokensFromMessages } from '../context-compactor.mjs';
 
 describe('chat compaction coordinator', () => {
   it('detects provider prompt-too-long responses', () => {
@@ -105,5 +107,45 @@ describe('chat compaction coordinator', () => {
       .map((e) => e.payload.stage);
     // done 既是 start 的收尾,catch 分支不应再补发 idle。
     assert.equal(stages.includes('idle'), false);
+  });
+});
+
+describe('computeContextInfo（进度条用量与压缩触发口径单一来源）', () => {
+  const messages = [
+    { role: 'system', content: 'system prompt' },
+    { role: 'user', content: 'x'.repeat(4000) },
+    { role: 'assistant', content: 'y'.repeat(4000) },
+  ];
+
+  it('contextTokens 与压缩触发使用同一估算函数（estimateTokensFromMessages）', () => {
+    const info = computeContextInfo({ messages, contextWindow: 100_000 });
+    // 口径统一的核心：进度条分子必须 === 压缩触发判定所用的估算，逐字节相等。
+    assert.equal(info.contextTokens, estimateTokensFromMessages(messages));
+  });
+
+  it('compactionSuggested 用与 shouldCompact 完全相同的 triggerRatio 阈值线', () => {
+    const tokens = estimateTokensFromMessages(messages);
+    const ratio = COMPACTION_CONFIG.triggerRatio;
+    // 阈值线正下方（未越线）：不建议压缩。+1 是为了避开恰好相等的边界。
+    const windowBelow = Math.ceil(tokens / ratio) + 1;
+    // 阈值线正上方（已越线）：建议压缩。
+    const windowAbove = Math.floor(tokens / ratio) - 1;
+    assert.equal(computeContextInfo({ messages, contextWindow: windowBelow }).compactionSuggested, false);
+    assert.equal(computeContextInfo({ messages, contextWindow: windowAbove }).compactionSuggested, true);
+    // 回执里必须带回 triggerRatio，渲染端无需自己猜阈值。
+    assert.equal(computeContextInfo({ messages, contextWindow: windowAbove }).triggerRatio, ratio);
+  });
+
+  it('无有效上下文窗口时归一化为 null 且不建议压缩', () => {
+    for (const contextWindow of [0, -1, undefined, Number.NaN]) {
+      const info = computeContextInfo({ messages, contextWindow });
+      assert.equal(info.contextWindow, null);
+      assert.equal(info.compactionSuggested, false);
+    }
+  });
+
+  it('messages 非数组时安全降级为 0 token', () => {
+    assert.equal(computeContextInfo({ messages: null, contextWindow: 100_000 }).contextTokens, 0);
+    assert.equal(computeContextInfo({ messages: undefined, contextWindow: 100_000 }).contextTokens, 0);
   });
 });

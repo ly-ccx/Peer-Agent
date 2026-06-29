@@ -5,6 +5,7 @@ import {
 } from './agent-loop-kernel.mjs';
 import {
   applyMicrocompaction,
+  computeContextInfo,
   isPromptTooLongResponse,
   runCompactionCheck,
 } from './compaction-coordinator.mjs';
@@ -47,7 +48,16 @@ export async function agentLoopAnthropic({
 }) {
   let effectiveSystem = systemPrompt;
   let apiMessages = sanitizeApiMessages(messages);
-  const loop = createAgentLoopKernel({ webContents, streamId, onRound: agentProgress?.onRound });
+  const loop = createAgentLoopKernel({
+    webContents,
+    streamId,
+    onRound: agentProgress?.onRound,
+    // 回合结束时按「当前真实 apiMessages + system」算权威用量，与压缩触发同口径。
+    getContextInfo: () => computeContextInfo({
+      messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
+      contextWindow,
+    }),
+  });
   const providerConfig = { provider: 'anthropic', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model, maxOutputTokens };
   let effectiveSupportsReasoning = Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning);
 

@@ -48,6 +48,80 @@ describe('agent loop kernel', () => {
     }]);
   });
 
+  it('attaches authoritative context info from getContextInfo onto the done payload', () => {
+    const webContents = makeWebContents();
+    const loop = createAgentLoopKernel({
+      webContents,
+      streamId: 's1ctx',
+      // 口径统一 + 回合结束触发：loop 注入返回权威上下文快照的闭包，
+      // sendDone 必须把 contextTokens/contextWindow/compactionSuggested 透传到 done 事件。
+      getContextInfo: () => ({ contextTokens: 84_000, contextWindow: 100_000, compactionSuggested: true }),
+    });
+
+    loop.sendDone();
+
+    assert.deepEqual(webContents.events, [{
+      channel: 'chat:stream:done',
+      payload: {
+        streamId: 's1ctx',
+        usage: loop.usage,
+        contextTokens: 84_000,
+        contextWindow: 100_000,
+        compactionSuggested: true,
+      },
+    }]);
+  });
+
+  it('omits context fields when getContextInfo is absent (backward compatible done payload)', () => {
+    const webContents = makeWebContents();
+    const loop = createAgentLoopKernel({ webContents, streamId: 's1noctx' });
+
+    loop.sendDone();
+
+    // 无 getContextInfo 的旧路径：done 负载不得凭空冒出 context 字段，避免渲染端误判。
+    assert.deepEqual(webContents.events, [{
+      channel: 'chat:stream:done',
+      payload: { streamId: 's1noctx', usage: loop.usage },
+    }]);
+  });
+
+  it('keeps the done payload clean when getContextInfo throws', () => {
+    const webContents = makeWebContents();
+    const loop = createAgentLoopKernel({
+      webContents,
+      streamId: 's1throw',
+      // 闭包取数失败不得影响回合收尾：吞掉异常，done 照常发出且不带半成品 context 字段。
+      getContextInfo: () => {
+        throw new Error('context probe failed');
+      },
+    });
+
+    loop.sendDone();
+
+    assert.deepEqual(webContents.events, [{
+      channel: 'chat:stream:done',
+      payload: { streamId: 's1throw', usage: loop.usage },
+    }]);
+  });
+
+  it('only forwards context fields of the expected primitive types', () => {
+    const webContents = makeWebContents();
+    const loop = createAgentLoopKernel({
+      webContents,
+      streamId: 's1partial',
+      // 类型守卫：非 number 的 contextTokens / 非 boolean 的 compactionSuggested 应被丢弃，
+      // 只透传形状正确的字段，避免脏数据污染渲染端进度条与自动压缩判定。
+      getContextInfo: () => ({ contextTokens: 1234, contextWindow: 'oops', compactionSuggested: 'yes' }),
+    });
+
+    loop.sendDone();
+
+    assert.deepEqual(webContents.events, [{
+      channel: 'chat:stream:done',
+      payload: { streamId: 's1partial', usage: loop.usage, contextTokens: 1234 },
+    }]);
+  });
+
   it('invokes onRound exactly once per addUsage, including when usage is null', () => {
     let rounds = 0;
     const loop = createAgentLoopKernel({

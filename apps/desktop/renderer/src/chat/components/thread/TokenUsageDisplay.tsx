@@ -12,11 +12,13 @@ function effortLabel(level: EffortLevel, isZh: boolean): string {
   return isZh ? '标准思考' : 'Default reasoning';
 }
 
-export function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, isStreaming, isZh, effort, effortLevels, onEffortChange }: {
+export function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, contextWindow, isStreaming, isZh, effort, effortLevels, onEffortChange }: {
   readonly providers: readonly LlmProviderConfigView[];
   readonly tokenUsage: TokenUsageState | null;
   readonly activeUsage?: TokenUsageState | null;
   readonly contextTokens?: number;
+  /** 权威上下文窗口（与压缩触发同窗口）。传入时优先于 provider 配置窗口，消除百分比偏差。 */
+  readonly contextWindow?: number;
   readonly isStreaming?: boolean;
   readonly isZh: boolean;
   readonly effort: EffortLevel;
@@ -50,7 +52,9 @@ export function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextT
     costStr = cost === 0 ? '$0.00' : cost < 0.001 ? '<$0.001' : cost < 0.01 ? '$' + cost.toFixed(4) : '$' + cost.toFixed(2);
   }
 
-  const ctxWindow = defaultProvider?.contextWindow;
+  // 口径统一：分母优先用调用方传入的权威上下文窗口（与压缩触发同窗口），
+  // 仅在未提供（>0 校验）时回退到 provider 配置窗口，避免两套窗口导致百分比与触发线不符。
+  const ctxWindow = (typeof contextWindow === 'number' && contextWindow > 0) ? contextWindow : defaultProvider?.contextWindow;
   const ctxPercent = ctxWindow ? Math.min((currentContextTokens / ctxWindow) * 100, 100) : null;
   const effortOptions: readonly DropdownOption[] = effortLevels.map((level) => ({ value: level, label: effortLabel(level, isZh) }));
 

@@ -321,6 +321,11 @@ export function ChatSurface({
   const { localAccessLevel, changeLocalAccessLevel } = useLocalAccessPreference();
   const [tokenUsage, setTokenUsage] = useState<TokenUsageState | null>(null);
   const [activeUsage, setActiveUsage] = useState<TokenUsageState | null>(null);
+  // 口径统一：主进程随回合结束（done）下发的权威上下文用量快照（与压缩触发同口径）。
+  // 进度条优先用它，回退到本地估算；null = 本会话尚无权威快照（如刚切入未跑过回合）。
+  const [authoritativeContext, setAuthoritativeContext] = useState<
+    { contextTokens: number; contextWindow: number | null } | null
+  >(null);
   const [providerRecoveryNotice, setProviderRecoveryNotice] = useState<{
     kind?: 'provider' | 'connection';
     fromProvider?: string;
@@ -412,6 +417,9 @@ export function ChatSurface({
   // 避免手动 /compact 完成后把结果/横幅误作用到已切走的当前会话。
   const conversationIdRef = useRef<string | null>(conversationId);
   conversationIdRef.current = conversationId;
+  // 回合结束自动压缩的防重入闸：压缩进行中置 true，避免 done 抖动/多 loop 收尾重复触发，
+  // 也避免与手动 /compact、下一次发送前检查叠加。压缩 settle 后复位。
+  const autoCompactingRef = useRef(false);
   // 输入框持久化的「上次落盘会话」标记。初值用 undefined 哨兵(区别于真实 id 与 null),
   // 使每次切到新会话的首遍只同步本 ref 并跳过保存,避免把旧会话草稿写到新会话名下。
   const composerPersistConvRef = useRef<string | null | undefined>(undefined);
@@ -533,7 +541,15 @@ export function ChatSurface({
       return { id: msg.id, text };
     });
   const showSlashCommands = !isStreaming && !isCompacting && slashCommands.length > 0;
-  const estimatedContextTokens = estimateConversationTokens(messages, draft, attachments);
+  // 口径统一：进度条分子优先用主进程随回合结束下发的权威 contextTokens（与压缩触发同口径），
+  // 再叠加当前草稿/附件的实时增量，使「正在输入」仍能推动进度条；无权威快照时（如刚切入
+  // 会话尚未跑过回合）回退到纯本地估算，保证总有数可显示。
+  const estimatedContextTokens = authoritativeContext
+    ? authoritativeContext.contextTokens + estimateTextTokens(draft) + estimateAttachmentTokens(attachments)
+    : estimateConversationTokens(messages, draft, attachments);
+  // 进度条分母优先用权威 contextWindow（与触发判定同窗口），消除 provider 配置窗口与
+  // 主进程实际所用窗口不一致时的百分比偏差；权威窗口未知时回退到 provider 配置窗口。
+  const authoritativeContextWindow = authoritativeContext?.contextWindow ?? undefined;
   // 当前轮进行中(流式/压缩)。此时主操作按钮含义:有草稿则"排队",无草稿则"停止"。
   const isBusy = isStreaming || isCompacting;
   const hasComposerContent = draft.trim().length > 0 || attachments.length > 0;
@@ -561,6 +577,11 @@ export function ChatSurface({
     // 压缩横幅/进度残留到新会话；随后由下方查询按"新会话是否确在压缩"重新点亮。
     setIsCompacting(false);
     setCompactionPercent(null);
+    // 切换会话时清掉权威上下文用量快照，避免上一会话的进度条分子/分母残留到新会话；
+    // 新会话由其首个回合结束的 done 重新下发权威快照，在此之前回退到本地估算。
+    setAuthoritativeContext(null);
+    // 切会话即放弃上一会话尚未发起的自动压缩意图，避免闸门长期占用导致新会话压缩被吞。
+    autoCompactingRef.current = false;
     // 切换会话时一并清掉本轮计时锚点,避免上一会话的实时跳秒残留到新会话。
     setTurnStartedAt(null);
     textTypewriter.reset();
@@ -723,10 +744,81 @@ export function ChatSurface({
     setWorkbenchOpen(true);
   }, [setWorkbenchTab, setWorkbenchOpen]);
 
+  // 压缩执行核心：手动 /compact 与回合结束自动压缩共用同一条安全链路。
+  // 复用主进程 chatCompact（按 shouldCompact 自门控），完成后仅当仍停留发起会话时
+  // 回灌视图（messages/tokenUsage），切走则只刷新列表，避免把结果灌进已切换的当前会话。
+  // 返回是否真的发生了压缩，供调用方决定后续（如清空权威用量快照）。
+  const runCompaction = useCallback(async (compactConversationId: string): Promise<boolean> => {
+    const streamId = `compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    streamIdRef.current = streamId;
+    const compactStartedAt = Date.now();
+    setIsCompacting(true);
+    try {
+      const result = await clientApi.chatCompact({ conversationId: compactConversationId, streamId });
+      const stillHere = conversationIdRef.current === compactConversationId;
+      if (result.compacted && stillHere) {
+        const { messages: loaded, tokenUsage: usage } = await loadConversationMessages(compactConversationId);
+        if (conversationIdRef.current === compactConversationId) {
+          setMessages(loaded);
+          if (usage) setTokenUsage(usage);
+        }
+        onConversationUpdated?.();
+        // 直接用 invoke 返回的 notification 落地"已压缩"标记,不依赖 chat:compaction
+        // 的 done 事件(它与 invoke 响应之间存在到达顺序竞态:finally 会清空
+        // streamIdRef,导致 done 事件被 streamId 门控丢弃,标记永远不显示)。
+        // 压缩点以时间线内的 CompactionSummaryCard 呈现(已由上方 setMessages 重载)。
+      } else if (result.compacted) {
+        // 已切走:仅刷新会话列表,不触碰当前视图。
+        onConversationUpdated?.();
+      }
+      return result.compacted;
+    } finally {
+      // 保证 spinner 至少可见 ~600ms,避免小会话瞬时完成导致"点了没任何反馈"。
+      const elapsed = Date.now() - compactStartedAt;
+      const minVisibleMs = 600;
+      if (elapsed < minVisibleMs) {
+        await new Promise((resolve) => setTimeout(resolve, minVisibleMs - elapsed));
+      }
+      // 仅当仍停在发起会话时才清理当前视图的横幅/streamId;已切走则交由目标会话自身
+      // 的切会话 effect 管理,避免误清当前显示会话(可能正自有压缩)的横幅。
+      if (conversationIdRef.current === compactConversationId) {
+        streamIdRef.current = null;
+        setIsCompacting(false);
+      }
+    }
+  }, [onConversationUpdated, setIsCompacting, setMessages, setTokenUsage, streamIdRef]);
+
+  // 回合结束自动压缩：主进程在 done 里判定 compactionSuggested 后请求触发。
+  // 三道护栏：① autoCompactingRef 防重入（多 loop 收尾/done 抖动只压一次）；
+  // ② 捕获发起会话并要求完成时仍停留，避免灌进已切走的会话；
+  // ③ macrotask defer(setTimeout 0)——排到渲染端 done 收尾的落库
+  //    （conversations:replace-messages）之后再压缩，避免迟到的整段覆盖把压缩结果冲掉。
+  const handleCompactionSuggested = useCallback(() => {
+    if (autoCompactingRef.current) return;
+    const compactConversationId = conversationIdRef.current;
+    if (!compactConversationId) return;
+    autoCompactingRef.current = true;
+    setTimeout(() => {
+      void (async () => {
+        try {
+          const compacted = await runCompaction(compactConversationId);
+          // 压缩完成后清空权威用量快照，让进度条回落到（已变小的）本地估算，避免停在高位。
+          if (compacted && conversationIdRef.current === compactConversationId) {
+            setAuthoritativeContext(null);
+          }
+        } finally {
+          autoCompactingRef.current = false;
+        }
+      })();
+    }, 0);
+  }, [runCompaction, setAuthoritativeContext]);
+
   useChatStreamSubscription({
     conversationId,
     onConversationUpdated,
     onBrowserToolActivity: handleBrowserToolActivity,
+    setAuthoritativeContext,
+    onCompactionSuggested: handleCompactionSuggested,
     streamIdRef,
     turnStartedAtRef,
     setTurnStartedAt,
@@ -880,50 +972,15 @@ export function ChatSurface({
     setProviderRecoveryNotice(null);
     const turnEffort = submitEffort ?? effort;
 
-    // /compact: run compaction in-place without an agent turn
+    // /compact: run compaction in-place without an agent turn。
+    // 捕获发起会话并复用共享的 runCompaction 安全链路（完成时校验仍停留发起会话、
+    // 否则只刷新列表，与回合结束自动压缩同一条路径）。手动压缩后同样清空权威用量快照，
+    // 让进度条回落到压缩后的本地估算。
     if (text === '/compact' && sentAttachments.length === 0) {
-      // 捕获发起会话:压缩为异步,完成时当前显示的会话可能已切走。完成回调里所有
-      // 影响"当前视图"的更新(messages/tokenUsage/横幅/streamIdRef)都必须先确认仍停在
-      // 发起会话,否则会把 A 的结果灌进当前显示的 B(横幅、消息时间线均会错位)。
-      // 切走时压缩仍在主进程后台进行,其登记表与 done 事件负责让 A 自身正确收尾,
-      // 切回 A 时由切会话 effect 的 chatCompactionGet 恢复/收尾横幅。
       const compactConversationId = conversationId;
-      const streamId = `compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      streamIdRef.current = streamId;
-      const compactStartedAt = Date.now();
-      setIsCompacting(true);
-      try {
-        const result = await clientApi.chatCompact({ conversationId: compactConversationId, streamId });
-        const stillHere = conversationIdRef.current === compactConversationId;
-        if (result.compacted && stillHere) {
-          const { messages: loaded, tokenUsage: usage } = await loadConversationMessages(compactConversationId);
-          if (conversationIdRef.current === compactConversationId) {
-            setMessages(loaded);
-            if (usage) setTokenUsage(usage);
-          }
-          onConversationUpdated?.();
-          // 直接用 invoke 返回的 notification 落地"已压缩"标记,不依赖 chat:compaction
-          // 的 done 事件(它与 invoke 响应之间存在到达顺序竞态:finally 会清空
-          // streamIdRef,导致 done 事件被 streamId 门控丢弃,标记永远不显示)。
-          // 压缩点以时间线内的 CompactionSummaryCard 呈现(已由上方 setMessages 重载),
-          // 不再使用底部横幅通知。
-        } else if (result.compacted) {
-          // 已切走:仅刷新会话列表,不触碰当前视图。
-          onConversationUpdated?.();
-        }
-      } finally {
-        // 保证 spinner 至少可见 ~600ms,避免小会话瞬时完成导致"点了没任何反馈"。
-        const elapsed = Date.now() - compactStartedAt;
-        const minVisibleMs = 600;
-        if (elapsed < minVisibleMs) {
-          await new Promise((resolve) => setTimeout(resolve, minVisibleMs - elapsed));
-        }
-        // 仅当仍停在发起会话时才清理当前视图的横幅/streamId;已切走则交由目标会话自身
-        // 的切会话 effect 管理,避免误清当前显示会话(可能正自有压缩)的横幅。
-        if (conversationIdRef.current === compactConversationId) {
-          streamIdRef.current = null;
-          setIsCompacting(false);
-        }
+      const compacted = await runCompaction(compactConversationId);
+      if (compacted && conversationIdRef.current === compactConversationId) {
+        setAuthoritativeContext(null);
       }
       return;
     }
@@ -1555,6 +1612,7 @@ export function ChatSurface({
             tokenUsage={tokenUsage}
             activeUsage={activeUsage}
             contextTokens={estimatedContextTokens}
+            contextWindow={authoritativeContextWindow}
             isStreaming={isStreaming}
             isZh={isZh}
             effort={effort}
