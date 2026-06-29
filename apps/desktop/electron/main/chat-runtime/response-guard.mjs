@@ -28,8 +28,21 @@ export function hasDanglingToolIntent(text) {
   return DANGLING_TOOL_INTENT_PATTERNS.some((pattern) => pattern.test(value));
 }
 
+// 模型把工具调用吐进 text 通道的症状：正文里出现 Claude 原生 tool_use 协议的字面量
+// （<function_calls> / <invoke ...> / <parameter ...>，含 antml: 命名空间变体），但这一轮
+// stop_reason 并非 tool_use，于是不会被当成真实调用执行。命中时应触发静默重试纠偏，
+// 而不是 sendDone 直接断流。注意：此处检测的是模型本轮新生成、尚未经发送侧中和的输出，
+// 故匹配未转义的 < 形态，与 message-sanitizer 产出的 &lt; 不冲突。
+const LITERAL_TOOL_CALL_SYNTAX_PATTERN = /<(?:\/?)(?:antml:)?(?:function_calls|invoke|parameter)\b/i;
+
+export function hasLiteralToolCallSyntax(text) {
+  const value = String(text || '');
+  if (value.indexOf('<') === -1) return false;
+  return LITERAL_TOOL_CALL_SYNTAX_PATTERN.test(value);
+}
+
 export function shouldRetryNoToolResponse(text) {
-  return hasUnsupportedToolClaim(text) || hasDanglingToolIntent(text);
+  return hasUnsupportedToolClaim(text) || hasDanglingToolIntent(text) || hasLiteralToolCallSyntax(text);
 }
 
 export function unsupportedToolResponseCorrection() {
