@@ -7,7 +7,11 @@ import {
   isPromptTooLongResponse,
   runCompactionCheck,
 } from './compaction-coordinator.mjs';
-import { COMPACTION_CONFIG, estimateTokensFromMessages } from '../context-compactor.mjs';
+import {
+  COMPACTION_CONFIG,
+  estimateTokensFromMessages,
+  estimateToolsTokens,
+} from '../context-compactor.mjs';
 
 describe('chat compaction coordinator', () => {
   it('builds compaction provider config from the resolved chat channel', () => {
@@ -175,6 +179,26 @@ describe('computeContextInfo（进度条用量与压缩触发口径单一来源�
     const info = computeContextInfo({ messages, contextWindow: 100_000 });
     // 口径统一的核心：进度条分子必须 === 压缩触发判定所用的估算，逐字节相等。
     assert.equal(info.contextTokens, estimateTokensFromMessages(messages));
+  });
+
+  it('contextTokens 计入工具 schema（tools 每次请求都全量发送）', () => {
+    const tools = [
+      {
+        name: 'search_files',
+        description: 'Search file contents across the workspace',
+        input_schema: {
+          type: 'object',
+          properties: { query: { type: 'string' } },
+          required: ['query'],
+        },
+      },
+    ];
+    const withoutTools = computeContextInfo({ messages, contextWindow: 100_000 });
+    const withTools = computeContextInfo({ messages, contextWindow: 100_000, tools });
+    const toolTokens = estimateToolsTokens(tools);
+    assert.ok(toolTokens > 0, 'tool schema should cost tokens');
+    // 进度条分子 = messages + tools，二者口径单一来源。
+    assert.equal(withTools.contextTokens, withoutTools.contextTokens + toolTokens);
   });
 
   it('compactionSuggested 用与 shouldCompact 完全相同的 triggerRatio 阈值线', () => {

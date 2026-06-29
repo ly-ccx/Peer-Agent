@@ -14,6 +14,19 @@ import { logCompactionDiagnostic } from './compaction-diagnostic-log.mjs';
 const COMPACTION_CONFIG = {
   triggerRatio: 0.8,
   charsPerToken: 4,
+  // 中文/日文/韩文等 CJK 字符的分词密度远高于英文：英文约 4 字符/token，
+  // CJK 约 1.7 字符/token（实测一段中文按 /4 会被低估约 2 倍）。两段分别估算，
+  // 避免把大量中文按 /4 系统性腰斩，导致进度条远低于 provider 实际计入的 input tokens。
+  cjkCharsPerToken: 1.7,
+  // 图片/文档块的固定 token 近似开销。
+  imageTokens: 2000,
+  // 每条消息的框架开销（role / 分隔符等结构性 token），对标 provider 计费口径。
+  // 旧实现按「+10 字符 / 4」≈ 2.5 token，偏小，这里直接以 token 计 4。
+  messageFramingTokens: 4,
+  // 每个 tool_use / tool_result 块除正文外的固定结构开销（块头、id、type 等）。
+  toolCallBlockOverhead: 8,
+  // 每个工具 schema 定义除 JSON 文本外的固定开销（名称包装、分隔等）。
+  toolDefinitionOverhead: 16,
   // 摘要输出上限不再写死：在 summarizeWithLLM 内复用当前模型的 maxOutputTokens，
   // 未配置时回退到 12000，避免长摘要被小上限截断（压缩后内容看不全）。
   summaryMaxInputTokens: 80_000,   // 摘要输入的上限（旧消息文本）
@@ -139,23 +152,48 @@ function recordCompactionFailure() {
 
 // ── Token Estimation （对标 CC roughTokenCountEstimationForMessages）──
 
+// CJK 字符范围（中日韩统一表意文字、扩展 A、兼容表意、假名、谚文、全角标点）。
+// 命中这些字符的部分按 cjkCharsPerToken 估，其余按 charsPerToken 估，
+// 避免中文被「/4」系统性低估约 2 倍。
+const CJK_REGEX =
+  /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef\uac00-\ud7af]/g;
+
+/**
+ * CJK 感知的文本 token 估算：CJK 字符按更高权重（约 1.7 字符/token），
+ * 其余字符按英文权重（约 4 字符/token）。返回 token 数（未取整，便于累加）。
+ */
+function estimateTextTokens(text) {
+  if (!text) return 0;
+  const str = typeof text === 'string' ? text : String(text);
+  const cjkMatches = str.match(CJK_REGEX);
+  const cjkCount = cjkMatches ? cjkMatches.length : 0;
+  const otherCount = str.length - cjkCount;
+  return (
+    cjkCount / COMPACTION_CONFIG.cjkCharsPerToken +
+    otherCount / COMPACTION_CONFIG.charsPerToken
+  );
+}
+
 function estimateTokensFromMessages(messages) {
-  let chars = 0;
+  let tokens = 0;
   for (const m of messages) {
     if (typeof m.content === 'string') {
-      chars += m.content.length;
+      tokens += estimateTextTokens(m.content);
     } else if (Array.isArray(m.content)) {
       for (const block of m.content) {
         if (block.type === 'text' && block.text) {
-          chars += block.text.length;
+          tokens += estimateTextTokens(block.text);
         } else if (block.type === 'tool_use') {
-          chars += (block.name || '').length;
-          chars += JSON.stringify(block.input || {}).length;
+          tokens += estimateTextTokens(block.name || '');
+          tokens += estimateTextTokens(JSON.stringify(block.input || {}));
+          tokens += COMPACTION_CONFIG.toolCallBlockOverhead;
         } else if (block.type === 'tool_result') {
-          chars +=
+          tokens += estimateTextTokens(
             typeof block.content === 'string'
-              ? block.content.length
-              : JSON.stringify(block.content ?? '').length;
+              ? block.content
+              : JSON.stringify(block.content ?? ''),
+          );
+          tokens += COMPACTION_CONFIG.toolCallBlockOverhead;
         } else if (
           block.type === 'image' ||
           block.type === 'image_url' ||
@@ -166,15 +204,62 @@ function estimateTokensFromMessages(messages) {
           // （renderer apiMessageMapping）或 'input_image'（OpenAI responses），其内部
           // 携带的 base64 data URL 极大；若漏判会被 JSON.stringify 整段计入，导致几 MB
           // 的图片被估成上百万 token，进而每轮都误触发压缩。
-          chars += 2000 * COMPACTION_CONFIG.charsPerToken; // fixed 2000 tokens
+          tokens += COMPACTION_CONFIG.imageTokens; // fixed image tokens
         } else {
-          chars += JSON.stringify(block).length;
+          tokens += estimateTextTokens(JSON.stringify(block));
         }
       }
     }
-    chars += 10; // message overhead
+    tokens += COMPACTION_CONFIG.messageFramingTokens; // 每条消息框架开销
   }
-  return Math.ceil(chars / COMPACTION_CONFIG.charsPerToken);
+  return Math.ceil(tokens);
+}
+
+/**
+ * 估算工具 schema 在每次请求里占用的 token。
+ *
+ * 工具定义（名称 + 描述 + JSON Schema 参数）是每次请求都全量发送给 provider 的，
+ * 但旧实现的进度条/压缩触发完全没算它们。47 个工具的 schema 实测可达上万 token，
+ * 是「进度条只有 ~100k 但 provider 报 input exceeds context window」的最大缺口。
+ *
+ * 兼容多种工具结构：
+ * - Anthropic: { name, description, input_schema }
+ * - OpenAI chat: { type:'function', function:{ name, description, parameters } }
+ * - OpenAI responses / 扁平: { name, description, parameters }
+ * - Gemini: { functionDeclarations: [{ name, description, parameters }] }
+ *
+ * @param {Array|object} tools 工具定义列表（或包含 functionDeclarations 的对象）
+ * @returns {number} 估算 token 数
+ */
+function estimateToolsTokens(tools) {
+  if (!tools) return 0;
+  // Gemini 形态：{ functionDeclarations: [...] } 或其数组
+  let list = tools;
+  if (!Array.isArray(list)) {
+    if (Array.isArray(tools.functionDeclarations)) {
+      list = tools.functionDeclarations;
+    } else {
+      list = [tools];
+    }
+  }
+  let tokens = 0;
+  for (const tool of list) {
+    if (!tool || typeof tool !== 'object') continue;
+    if (Array.isArray(tool.functionDeclarations)) {
+      tokens += estimateToolsTokens(tool.functionDeclarations);
+      continue;
+    }
+    const fn = tool.function && typeof tool.function === 'object' ? tool.function : tool;
+    const name = fn.name || tool.name || '';
+    const description = fn.description || tool.description || '';
+    const schema =
+      fn.parameters ?? fn.input_schema ?? tool.parameters ?? tool.input_schema ?? {};
+    tokens += estimateTextTokens(name);
+    tokens += estimateTextTokens(description);
+    tokens += estimateTextTokens(JSON.stringify(schema ?? {}));
+    tokens += COMPACTION_CONFIG.toolDefinitionOverhead;
+  }
+  return Math.ceil(tokens);
 }
 
 // ── Historical Tool Result Microcompaction ──
@@ -1121,6 +1206,7 @@ export async function compactIfNeeded({
   webContents = null,
   streamId = null,
   connectionRecoveryOptions = {},
+  tools = null,
 }) {
   const microcompactResult = microcompactMessagesForContext(messages);
   messages = microcompactResult.messages;
@@ -1171,8 +1257,9 @@ export async function compactIfNeeded({
     };
   }
 
-  // Estimate current tokens
-  const estimated = estimateTokensFromMessages(messages);
+  // Estimate current tokens（含工具 schema：tools 每次请求都全量发送，必须计入触发口径，
+  // 否则会出现「进度条/触发器都没算工具，但 provider 已超窗」）。
+  const estimated = estimateTokensFromMessages(messages) + estimateToolsTokens(tools);
 
   if (!shouldRunCompaction({ force, estimatedTokens: estimated, contextWindow, messages })) {
     return { compacted: false, messages };
@@ -1346,6 +1433,8 @@ export async function compactIfNeeded({
 export {
   COMPACTION_CONFIG,
   estimateTokensFromMessages,
+  estimateTextTokens,
+  estimateToolsTokens,
   estimateSummaryChars,
   formatCompactSummary,
 };

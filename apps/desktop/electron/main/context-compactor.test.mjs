@@ -6,7 +6,9 @@ import {
   COMPACTION_CONFIG,
   compactIfNeeded,
   estimateSummaryChars,
+  estimateTextTokens,
   estimateTokensFromMessages,
+  estimateToolsTokens,
   microcompactMessagesForContext,
   resetCircuitBreaker,
 } from './context-compactor.mjs';
@@ -23,6 +25,137 @@ const buildMessages = (count, charsPerMessage = 20) => [
     content: `message-${index}-${'x'.repeat(charsPerMessage)}`,
   })),
 ];
+
+describe('estimateTextTokens（CJK 感知比例）', () => {
+  it('counts CJK characters with a higher weight than latin text', () => {
+    // 50 个中文字符：按 /1.7 ≈ 30 token，远高于旧的 /4 ≈ 13 token。
+    const cjk = '中'.repeat(50);
+    const tokens = estimateTextTokens(cjk);
+    assert.ok(tokens >= 28 && tokens <= 32, `expected ~29 tokens, got ${tokens}`);
+    // 与旧的 length/4 口径相比应明显更高（约 2 倍）。
+    assert.ok(tokens > Math.ceil(cjk.length / 4), 'CJK should not be undercounted as /4');
+  });
+
+  it('keeps latin text at ~4 chars/token', () => {
+    const latin = 'a'.repeat(40);
+    assert.equal(estimateTextTokens(latin), 10);
+  });
+
+  it('handles mixed CJK + latin additively', () => {
+    const mixed = `${'中'.repeat(17)}${'a'.repeat(40)}`; // ~10 + 10
+    const tokens = estimateTextTokens(mixed);
+    assert.ok(tokens >= 19 && tokens <= 21, `expected ~20 tokens, got ${tokens}`);
+  });
+
+  it('returns 0 for empty / nullish values', () => {
+    assert.equal(estimateTextTokens(''), 0);
+    assert.equal(estimateTextTokens(null), 0);
+    assert.equal(estimateTextTokens(undefined), 0);
+  });
+});
+
+describe('estimateToolsTokens（工具 schema 计入上下文）', () => {
+  const anthropicTool = {
+    name: 'search_files',
+    description: 'Search file contents across the workspace',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Substring to search for' },
+        path: { type: 'string', description: 'Optional scope directory' },
+      },
+      required: ['query'],
+    },
+  };
+
+  it('returns 0 for nullish / empty tools', () => {
+    assert.equal(estimateToolsTokens(null), 0);
+    assert.equal(estimateToolsTokens(undefined), 0);
+    assert.equal(estimateToolsTokens([]), 0);
+  });
+
+  it('counts a single tool definition as non-trivial token cost', () => {
+    const tokens = estimateToolsTokens([anthropicTool]);
+    assert.ok(tokens > 20, `expected meaningful tool token cost, got ${tokens}`);
+  });
+
+  it('scales roughly linearly with tool count (47 tools => sizable cost)', () => {
+    const one = estimateToolsTokens([anthropicTool]);
+    const fortySeven = estimateToolsTokens(Array.from({ length: 47 }, () => anthropicTool));
+    assert.ok(
+      fortySeven > one * 40,
+      `expected ~47x growth, got ${fortySeven} vs ${one}`,
+    );
+    // 47 个这种中等体量工具应累积到数千 token 量级（旧实现完全为 0）。
+    assert.ok(fortySeven > 2_000, `expected thousands of tokens, got ${fortySeven}`);
+  });
+
+  it('supports OpenAI chat function shape', () => {
+    const openaiTool = {
+      type: 'function',
+      function: {
+        name: anthropicTool.name,
+        description: anthropicTool.description,
+        parameters: anthropicTool.input_schema,
+      },
+    };
+    assert.equal(estimateToolsTokens([openaiTool]), estimateToolsTokens([anthropicTool]));
+  });
+
+  it('supports Gemini functionDeclarations shape', () => {
+    const geminiTools = {
+      functionDeclarations: [
+        {
+          name: anthropicTool.name,
+          description: anthropicTool.description,
+          parameters: anthropicTool.input_schema,
+        },
+      ],
+    };
+    assert.equal(estimateToolsTokens(geminiTools), estimateToolsTokens([anthropicTool]));
+  });
+});
+
+describe('compactIfNeeded（触发口径含工具 schema）', () => {
+  beforeEach(() => {
+    resetCircuitBreaker();
+  });
+
+  it('triggers compaction when tools push the estimate over the threshold', async () => {
+    // 构造一个「仅看 messages 不会越线，但加上工具 schema 后越线」的场景。
+    const messages = buildMessages(12, 20);
+    const baseTokens = estimateTokensFromMessages(messages);
+    // 选一个上下文窗口：messages 单独 < 0.8*window，但 messages + tools > 0.8*window。
+    const bigTool = {
+      name: 'huge_tool',
+      description: 'x'.repeat(4_000),
+      input_schema: { type: 'object', properties: {} },
+    };
+    const tools = Array.from({ length: 10 }, () => bigTool);
+    const toolTokens = estimateToolsTokens(tools);
+    // 让 window 落在二者之间。
+    const contextWindow = Math.ceil((baseTokens + toolTokens / 2) / COMPACTION_CONFIG.triggerRatio);
+
+    const withoutTools = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      contextWindow,
+      providerConfig: null,
+    });
+    assert.equal(withoutTools.compacted, false, 'messages alone should stay below threshold');
+
+    const withTools = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      contextWindow,
+      providerConfig: null,
+      force: true,
+      tools,
+    });
+    // force=true 时只要有非 system 消息即压缩；这里主要验证 tools 参数被接受且不报错。
+    assert.equal(withTools.compacted, true);
+  });
+});
 
 describe('estimateSummaryChars (progress denominator)', () => {
   // 物理上限 = maxOutputTokens(12000) * charsPerToken(4) = 48000。

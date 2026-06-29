@@ -32,6 +32,17 @@ describe('estimateTextTokens', () => {
   it('stringifies non-strings', () => {
     assert.equal(estimateTextTokens(1234), 1); // "1234" => ceil(4/4)=1
   });
+  it('counts CJK with higher weight than latin (~1.7 chars/token)', () => {
+    // 17 个中文字符：按 /1.7 ≈ 10 token，明显高于旧的 /4 ≈ 5 token。
+    const tokens = estimateTextTokens('中'.repeat(17));
+    assert.ok(tokens >= 9 && tokens <= 11, `expected ~10 tokens, got ${tokens}`);
+    assert.ok(tokens > Math.ceil(17 / 4), 'CJK must not be undercounted as /4');
+  });
+  it('adds CJK and latin segments additively', () => {
+    // 17 中文(~10) + 40 latin(10) ≈ 20
+    const tokens = estimateTextTokens(`${'中'.repeat(17)}${'a'.repeat(40)}`);
+    assert.ok(tokens >= 19 && tokens <= 21, `expected ~20 tokens, got ${tokens}`);
+  });
 });
 
 describe('estimateMessageTokens', () => {

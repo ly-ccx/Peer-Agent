@@ -4,9 +4,21 @@
 
 import type { ChatAttachment, ChatMsg } from './types';
 
-/** 估算任意值序列化后的 token 数（约 4 字符 ≈ 1 token）。 */
+// 英文约 4 字符/token；中日韩等 CJK 字符分词密度更高，约 1.7 字符/token。
+// 与主进程 context-compactor.mjs 的 charsPerToken / cjkCharsPerToken 保持一致，
+// 避免渲染端进度条把大量中文按 /4 系统性低估约 2 倍。
+const CHARS_PER_TOKEN = 4;
+const CJK_CHARS_PER_TOKEN = 1.7;
+const CJK_REGEX =
+  /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef\uac00-\ud7af]/g;
+
+/** 估算任意值序列化后的 token 数（CJK 感知：中文按更高权重，其余约 4 字符 ≈ 1 token）。 */
 export function estimateTextTokens(value: unknown): number {
-  return Math.ceil(String(value ?? '').length / 4);
+  const str = String(value ?? '');
+  if (!str) return 0;
+  const cjkCount = (str.match(CJK_REGEX) || []).length;
+  const otherCount = str.length - cjkCount;
+  return Math.ceil(cjkCount / CJK_CHARS_PER_TOKEN + otherCount / CHARS_PER_TOKEN);
 }
 
 /** 估算单条消息的 token：基础开销 + 正文 + 附件 + 各分段（工具调用/正文）。 */

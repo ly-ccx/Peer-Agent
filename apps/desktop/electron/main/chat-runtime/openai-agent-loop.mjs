@@ -59,7 +59,7 @@ export async function agentLoopOpenAI({
     streamId,
     onRound: agentProgress?.onRound,
     // apiMessages 已含 system，回合结束按当前真实消息算权威用量，与压缩触发同口径。
-    getContextInfo: () => computeContextInfo({ messages: apiMessages, contextWindow }),
+    getContextInfo: () => computeContextInfo({ messages: apiMessages, contextWindow, tools }),
   });
   const providerConfig = buildCompactionProviderConfig({
     provider: 'openai',
@@ -90,6 +90,7 @@ export async function agentLoopOpenAI({
       streamId,
       webContents,
       continuityContext,
+      tools,
     });
     if (compaction.compacted) {
       apiMessages = compaction.messages;
@@ -136,6 +137,7 @@ export async function agentLoopOpenAI({
           emergency: true,
           force: true,
           continuityContext,
+          tools,
         });
         if (emergencyCompaction.compacted) {
           apiMessages = emergencyCompaction.messages;

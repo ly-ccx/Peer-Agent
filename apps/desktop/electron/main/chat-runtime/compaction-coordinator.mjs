@@ -2,6 +2,7 @@ import {
   COMPACTION_CONFIG,
   compactIfNeeded,
   estimateTokensFromMessages,
+  estimateToolsTokens,
   microcompactMessagesForContext,
 } from '../context-compactor.mjs';
 import { beginCompaction, endCompaction, updateCompactionProgress } from './compaction-registry.mjs';
@@ -63,8 +64,12 @@ function shouldShowCompactionStart(messages, contextWindow) {
 // 但主进程不压缩」这类两套估算打架的偏差。contextTokens 用与压缩触发完全相同的
 // estimateTokensFromMessages（含图片固定 token、tool 块 JSON 体积、每条 +overhead），
 // compactionSuggested 用与 shouldCompact 完全相同的 triggerRatio 阈值。
-export function computeContextInfo({ messages, contextWindow }) {
-  const contextTokens = estimateTokensFromMessages(Array.isArray(messages) ? messages : []);
+export function computeContextInfo({ messages, contextWindow, tools = null }) {
+  // 工具 schema（tools）每次请求都全量发送给 provider，必须计入上下文用量；
+  // 否则进度条只算 messages，会远低于 provider 实际计入的 input tokens。
+  const contextTokens =
+    estimateTokensFromMessages(Array.isArray(messages) ? messages : []) +
+    estimateToolsTokens(tools);
   const normalizedWindow = Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null;
   const triggerRatio = COMPACTION_CONFIG.triggerRatio;
   const compactionSuggested = normalizedWindow
@@ -102,11 +107,13 @@ export async function runCompactionCheck({
   emergency = false,
   force = false,
   continuityContext = [],
+  tools = null,
 }) {
   // 压缩时机诊断:在唯一入口打印触发判定的全部输入,便于定位"何时/因何压缩"。
   // path 区分: emergency(provider 报超长) / force(手动 /compact) / threshold(比例越线) / skip。
   {
-    const estimatedTokens = estimateTokensFromMessages(messages);
+    // 含工具 schema：与 compactIfNeeded 的触发口径保持一致。
+    const estimatedTokens = estimateTokensFromMessages(messages) + estimateToolsTokens(tools);
     const threshold = contextWindow ? contextWindow * COMPACTION_CONFIG.triggerRatio : null;
     const overThreshold = threshold != null && estimatedTokens > threshold;
     const nonSystemCount = messages.filter((m) => m.role !== 'system').length;
@@ -179,6 +186,7 @@ export async function runCompactionCheck({
       onProgress,
       webContents,
       streamId,
+      tools,
     });
 
     if (compactResult.compacted) {

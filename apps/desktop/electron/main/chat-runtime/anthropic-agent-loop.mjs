@@ -57,6 +57,7 @@ export async function agentLoopAnthropic({
     getContextInfo: () => computeContextInfo({
       messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
       contextWindow,
+      tools,
     }),
   });
   const providerConfig = buildCompactionProviderConfig({
@@ -86,6 +87,7 @@ export async function agentLoopAnthropic({
       streamId,
       webContents,
       continuityContext,
+      tools,
     });
     if (compaction.compacted) {
       effectiveSystem = compaction.messages
@@ -137,6 +139,7 @@ export async function agentLoopAnthropic({
           emergency: true,
           force: true,
           continuityContext,
+          tools,
         });
         if (emergencyCompaction.compacted) {
           effectiveSystem = emergencyCompaction.messages
