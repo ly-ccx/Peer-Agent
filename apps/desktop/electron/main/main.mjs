@@ -28,7 +28,7 @@ import { getDataHome, migrateFromLegacy, exportBundle, importBundle } from './da
 import { createSettingsStore } from './settings-store.mjs';
 import { createMcpRegistry } from './mcp-registry.mjs';
 import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-credential-store.mjs';
-import { disconnectMcp, discoverMcpManifest, getMcpPrompt, readMcpResource, testMcpConnection } from './mcp-client.mjs';
+import { disconnectMcp, discoverMcpManifest, finishMcpOAuth, getMcpPrompt, readMcpResource, testMcpConnection } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
 import { listChannelDescriptors, resolveChannel } from './provider-channels.mjs';
 import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
@@ -130,7 +130,14 @@ let skillStore;
 
 const mcpRegistry = createMcpRegistry();
 const mcpCredentialStore = createMcpCredentialStore();
-const mcpCredentialResolver = createMcpCredentialResolver(mcpCredentialStore);
+const baseMcpCredentialResolver = createMcpCredentialResolver(mcpCredentialStore);
+const mcpCredentialResolver = async (auth, server) => {
+  const injection = await baseMcpCredentialResolver(auth, server);
+  if (injection?.authProviderConfig) {
+    injection.authProviderConfig.openAuthorizationUrl = (url) => shell.openExternal(String(url));
+  }
+  return injection;
+};
 const llmConfigStore = createLlmConfigStore();
 const conversationStore = createConversationStore();
 const goalPlanStore = createGoalPlanStore({
@@ -1684,6 +1691,13 @@ ipcMain.handle('mcp:refresh-manifest', async (_, params) => {
   const view = mcpRegistry.updateManifest(server.id, manifest);
   disconnectMcp(server);
   return { view, manifest };
+});
+ipcMain.handle('mcp:finish-oauth', async (_, params) => {
+  const server = mcpRegistry.getServer(params?.serverId ?? params?.mcpId);
+  if (!server) throw new Error(`MCP server not found: ${params?.serverId ?? params?.mcpId ?? ''}`);
+  const result = await finishMcpOAuth(server, params?.authorizationCode ?? params?.code, { credentialResolver: mcpCredentialResolver });
+  disconnectMcp(server);
+  return result;
 });
 ipcMain.handle('mcp:read-resource', async (_, params) => {
   const server = mcpRegistry.getServer(params?.serverId ?? params?.mcpId);

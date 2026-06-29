@@ -109,14 +109,25 @@ export interface RuntimeProjection {
 
 export type McpTransportKind = 'streamable_http' | 'sse' | 'stdio';
 export type McpHealthStatus = 'unknown' | 'ok' | 'failed';
-export type McpAuthMode = 'none' | 'http_bearer' | 'http_header' | 'stdio_env';
+export type McpAuthMode = 'none' | 'http_bearer' | 'http_header' | 'stdio_env' | 'oauth2';
 export type McpCredentialKind = Exclude<McpAuthMode, 'none'>;
+
+export interface McpOAuthConfigView {
+  readonly authorizationServerUrl?: string;
+  readonly clientId?: string;
+  readonly clientSecretConfigured?: boolean;
+  readonly scopes?: readonly string[];
+  readonly redirectUrl?: string;
+  readonly tokenStatus?: 'missing' | 'available';
+  readonly expiresAt?: string;
+}
 
 export interface McpAuthBindingView {
   readonly mode: McpAuthMode;
   readonly credentialRef?: string;
   readonly headerName?: string;
   readonly envName?: string;
+  readonly oauth?: McpOAuthConfigView;
 }
 
 export interface McpCredentialMetadataView {
@@ -124,9 +135,10 @@ export interface McpCredentialMetadataView {
   readonly credentialRef: string;
   readonly label: string;
   readonly kind: McpCredentialKind;
-  readonly target: 'header' | 'env';
+  readonly target: 'header' | 'env' | 'oauth';
   readonly headerName?: string;
   readonly envName?: string;
+  readonly oauth?: McpOAuthConfigView;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly lastFour?: string;
@@ -137,9 +149,26 @@ export interface McpCredentialPutRequest {
   readonly credentialRef?: string;
   readonly label?: string;
   readonly kind: McpCredentialKind;
-  readonly secret: string;
+  readonly secret?: string;
   readonly headerName?: string;
   readonly envName?: string;
+  readonly oauth?: {
+    readonly authorizationServerUrl?: string;
+    readonly clientId?: string;
+    readonly clientSecret?: string;
+    readonly scopes?: readonly string[];
+    readonly redirectUrl?: string;
+  };
+}
+
+export interface McpOAuthLoginRequest {
+  readonly serverId: string;
+}
+
+export interface McpOAuthLoginResult {
+  readonly ok: boolean;
+  readonly credential?: McpCredentialMetadataView;
+  readonly error?: string;
 }
 
 export interface McpHealthView {

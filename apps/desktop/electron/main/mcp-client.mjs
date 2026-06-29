@@ -6,6 +6,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 const CLIENT_INFO = { name: 'peer-agent', version: '1.0.0' };
 const CLIENT_CAPABILITIES = { capabilities: {} };
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_OAUTH_REDIRECT_URL = 'http://127.0.0.1:33418/mcp/oauth/callback';
 
 const pool = new Map();
 
@@ -30,6 +31,8 @@ function normalizeAuthContext(value) {
     credentialUpdatedAt: typeof value.credentialUpdatedAt === 'string' ? value.credentialUpdatedAt : undefined,
     headerName: typeof value.headerName === 'string' ? value.headerName : undefined,
     envName: typeof value.envName === 'string' ? value.envName : undefined,
+    oauth: value.oauth && typeof value.oauth === 'object' ? value.oauth : undefined,
+    authProviderConfig: value.authProviderConfig && typeof value.authProviderConfig === 'object' ? value.authProviderConfig : undefined,
     hasCredential: Boolean(value.hasCredential),
   };
 }
@@ -44,6 +47,11 @@ function authCacheKey(authContext) {
     auth.credentialUpdatedAt ?? '',
     auth.headerName ?? '',
     auth.envName ?? '',
+    auth.mode === 'oauth2' ? JSON.stringify({
+      tokenStatus: auth.oauth?.tokenStatus ?? '',
+      expiresAt: auth.oauth?.expiresAt ?? '',
+      clientId: auth.oauth?.clientId ?? '',
+    }) : '',
   ].join(':');
 }
 
@@ -119,6 +127,77 @@ async function prepareServerConfig(server, options = {}) {
   };
 }
 
+function createOAuthProvider(server) {
+  const authContext = normalizeAuthContext(server?.__authContext);
+  const providerConfig = authContext.authProviderConfig;
+  if (authContext.mode !== 'oauth2' || !providerConfig?.oauth || !providerConfig?.credentialRef) return undefined;
+  const oauth = providerConfig.oauth;
+  const redirectUrl = typeof oauth.redirectUrl === 'string' && oauth.redirectUrl ? oauth.redirectUrl : DEFAULT_OAUTH_REDIRECT_URL;
+  const scopes = Array.isArray(oauth.scopes) ? oauth.scopes.filter((scope) => typeof scope === 'string' && scope.trim()) : [];
+  const updateOAuth = typeof providerConfig.updateOAuth === 'function' ? providerConfig.updateOAuth : async () => {};
+  const clientMetadata = {
+    client_name: CLIENT_INFO.name,
+    redirect_uris: [redirectUrl],
+    grant_types: ['authorization_code', 'refresh_token'],
+    response_types: ['code'],
+    token_endpoint_auth_method: oauth.clientSecret ? 'client_secret_post' : 'none',
+    scope: scopes.join(' '),
+    ...(oauth.clientId ? { client_id: oauth.clientId } : {}),
+    ...(oauth.clientSecret ? { client_secret: oauth.clientSecret } : {}),
+  };
+  let codeVerifier = typeof oauth.codeVerifier === 'string' ? oauth.codeVerifier : '';
+  return {
+    get redirectUrl() { return redirectUrl; },
+    get clientMetadata() { return clientMetadata; },
+    state() { return undefined; },
+    clientInformation() { return oauth.clientInformation; },
+    async saveClientInformation(clientInformation) {
+      oauth.clientInformation = clientInformation;
+      await updateOAuth({ clientInformation });
+    },
+    tokens() { return oauth.tokens; },
+    async saveTokens(tokens) {
+      oauth.tokens = tokens;
+      await updateOAuth({ tokens });
+    },
+    async redirectToAuthorization(authorizationUrl) {
+      if (typeof providerConfig.openAuthorizationUrl === 'function') {
+        await providerConfig.openAuthorizationUrl(String(authorizationUrl));
+        return;
+      }
+      throw new Error(`MCP OAuth authorization required: ${authorizationUrl}`);
+    },
+    async saveCodeVerifier(nextCodeVerifier) {
+      codeVerifier = String(nextCodeVerifier ?? '');
+      oauth.codeVerifier = codeVerifier;
+      await updateOAuth({ codeVerifier });
+    },
+    codeVerifier() {
+      if (!codeVerifier) throw new Error('MCP OAuth code verifier is missing.');
+      return codeVerifier;
+    },
+    discoveryState() { return oauth.discoveryState ?? undefined; },
+    async saveDiscoveryState(discoveryState) {
+      oauth.discoveryState = discoveryState;
+      await updateOAuth({ discoveryState });
+    },
+    async invalidateCredentials(scope) {
+      if (scope === 'tokens' || scope === 'all') {
+        oauth.tokens = undefined;
+        await updateOAuth({ tokens: null });
+      }
+      if (scope === 'client' || scope === 'all') {
+        oauth.clientInformation = undefined;
+        await updateOAuth({ clientInformation: null });
+      }
+      if (scope === 'discovery' || scope === 'all') {
+        oauth.discoveryState = undefined;
+        await updateOAuth({ discoveryState: null });
+      }
+    },
+  };
+}
+
 function createTransport(server) {
   const config = normalizeServerConfig(server);
   if (config.transport === 'stdio') {
@@ -135,10 +214,13 @@ function createTransport(server) {
   const requestInit = Object.keys(config.headers ?? {}).length > 0
     ? { headers: config.headers }
     : undefined;
+  const transportOptions = { requestInit };
+  const authProvider = createOAuthProvider(config);
+  if (authProvider) transportOptions.authProvider = authProvider;
   if (config.transport === 'sse') {
-    return new SSEClientTransport(new URL(config.url), { requestInit });
+    return new SSEClientTransport(new URL(config.url), transportOptions);
   }
-  return new StreamableHTTPClientTransport(new URL(config.url), { requestInit });
+  return new StreamableHTTPClientTransport(new URL(config.url), transportOptions);
 }
 
 async function connect(server, options = {}) {
@@ -310,6 +392,18 @@ export async function getMcpPrompt(server, name, args = {}, options = {}) {
   if (!name) throw new Error('MCP prompt name is required.');
   const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
   return withClient(server, async (client) => client.getPrompt({ name, arguments: args ?? {} }, { timeout }), options);
+}
+
+export async function finishMcpOAuth(server, authorizationCode, options = {}) {
+  const code = typeof authorizationCode === 'string' ? authorizationCode.trim() : '';
+  if (!code) throw new Error('MCP OAuth authorization code is required.');
+  const entry = await connect(server, options);
+  if (typeof entry.transport?.finishAuth !== 'function') {
+    throw new Error('MCP transport does not support OAuth finishAuth.');
+  }
+  await entry.transport.finishAuth(code);
+  disconnectMcp(server);
+  return { ok: true };
 }
 
 function textFromContentItem(item) {

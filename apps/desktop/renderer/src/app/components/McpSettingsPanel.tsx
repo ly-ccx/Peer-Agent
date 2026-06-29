@@ -5,7 +5,7 @@ import { Dropdown, type DropdownOption } from './Dropdown';
 import { Overlay } from './Overlay';
 
 type McpTransportKind = 'streamable_http' | 'sse' | 'stdio';
-type McpAuthMode = 'none' | 'http_bearer' | 'http_header' | 'stdio_env';
+type McpAuthMode = 'none' | 'http_bearer' | 'http_header' | 'stdio_env' | 'oauth2';
 
 type McpToolView = {
   readonly name?: string;
@@ -26,6 +26,16 @@ type McpPromptView = {
   readonly description?: string;
 };
 
+type McpOAuthConfigView = {
+  readonly authorizationServerUrl?: string;
+  readonly clientId?: string;
+  readonly clientSecretConfigured?: boolean;
+  readonly scopes?: readonly string[];
+  readonly redirectUrl?: string;
+  readonly tokenStatus?: 'missing' | 'available';
+  readonly expiresAt?: string;
+};
+
 type McpCredentialView = {
   readonly credentialRef: string;
   readonly label?: string;
@@ -33,6 +43,7 @@ type McpCredentialView = {
   readonly authMode?: string;
   readonly headerName?: string;
   readonly envName?: string;
+  readonly oauth?: McpOAuthConfigView;
   readonly lastFour?: string;
   readonly storage?: string;
 };
@@ -48,7 +59,7 @@ type McpServerView = {
   readonly commandPreview?: string;
   readonly urlPreview?: string;
   readonly serverUrl?: string;
-  readonly auth?: { readonly mode?: McpAuthMode; readonly credentialRef?: string; readonly headerName?: string; readonly envName?: string };
+  readonly auth?: { readonly mode?: McpAuthMode; readonly credentialRef?: string; readonly headerName?: string; readonly envName?: string; readonly oauth?: McpOAuthConfigView };
   readonly toolsCount?: number;
   readonly visibleToolsCount?: number;
   readonly resourcesCount?: number;
@@ -84,6 +95,7 @@ function authLabel(auth?: McpServerView['auth']): string {
   if (auth.mode === 'http_bearer') return 'HTTP Bearer';
   if (auth.mode === 'http_header') return `HTTP Header${auth.headerName ? ` · ${auth.headerName}` : ''}`;
   if (auth.mode === 'stdio_env') return `stdio env${auth.envName ? ` · ${auth.envName}` : ''}`;
+  if (auth.mode === 'oauth2') return `OAuth 2.0${auth.oauth?.tokenStatus === 'available' ? ' · 已登录' : ''}`;
   return auth.mode;
 }
 
@@ -123,6 +135,12 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
   const [credentialSecret, setCredentialSecret] = useState('');
   const [authHeaderName, setAuthHeaderName] = useState('X-API-Key');
   const [authEnvName, setAuthEnvName] = useState('MCP_TOKEN');
+  const [oauthAuthorizationServerUrl, setOauthAuthorizationServerUrl] = useState('');
+  const [oauthClientId, setOauthClientId] = useState('');
+  const [oauthClientSecret, setOauthClientSecret] = useState('');
+  const [oauthScopes, setOauthScopes] = useState('');
+  const [oauthRedirectUrl, setOauthRedirectUrl] = useState('http://127.0.0.1:33418/mcp/oauth/callback');
+  const [oauthAuthorizationCode, setOauthAuthorizationCode] = useState('');
   const [selectedId, setSelectedId] = useState<string | number | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -144,7 +162,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
-    if (transport === 'stdio' && (authMode === 'http_bearer' || authMode === 'http_header')) setAuthMode('none');
+    if (transport === 'stdio' && (authMode === 'http_bearer' || authMode === 'http_header' || authMode === 'oauth2')) setAuthMode('none');
     if (transport !== 'stdio' && authMode === 'stdio_env') setAuthMode('none');
   }, [authMode, transport]);
 
@@ -153,6 +171,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     if (transport !== 'stdio') {
       options.push({ value: 'http_bearer', label: 'HTTP Bearer token' });
       options.push({ value: 'http_header', label: 'HTTP custom header' });
+      options.push({ value: 'oauth2', label: 'OAuth 2.0' });
     } else {
       options.push({ value: 'stdio_env', label: 'stdio env secret' });
     }
@@ -188,6 +207,12 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     setCredentialSecret('');
     setAuthHeaderName('X-API-Key');
     setAuthEnvName('MCP_TOKEN');
+    setOauthAuthorizationServerUrl('');
+    setOauthClientId('');
+    setOauthClientSecret('');
+    setOauthScopes('');
+    setOauthRedirectUrl('http://127.0.0.1:33418/mcp/oauth/callback');
+    setOauthAuthorizationCode('');
   }, []);
 
   useEffect(() => {
@@ -240,20 +265,41 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
       }, {});
       let auth: LocalMcpServerUpsertRequest['auth'] = { mode: 'none' };
       if (authMode !== 'none') {
-        if (!credentialSecret.trim()) throw new Error('请填写 MCP 凭证。');
-        const credential = await clientApi.mcpPutCredential({
-          label: credentialLabel.trim() || displayName.trim() || undefined,
-          kind: authMode,
-          secret: credentialSecret,
-          headerName: authMode === 'http_header' ? authHeaderName.trim() : undefined,
-          envName: authMode === 'stdio_env' ? authEnvName.trim() : undefined,
-        });
-        auth = {
-          mode: authMode,
-          credentialRef: credential.credentialRef,
-          headerName: authMode === 'http_header' ? authHeaderName.trim() : undefined,
-          envName: authMode === 'stdio_env' ? authEnvName.trim() : undefined,
-        };
+        if (authMode === 'oauth2') {
+          if (!oauthAuthorizationServerUrl.trim()) throw new Error('请填写 OAuth Authorization Server URL。');
+          const scopes = oauthScopes.split(/[\s,]+/).map((scope) => scope.trim()).filter(Boolean);
+          const credential = await clientApi.mcpPutCredential({
+            label: credentialLabel.trim() || displayName.trim() || undefined,
+            kind: 'oauth2',
+            oauth: {
+              authorizationServerUrl: oauthAuthorizationServerUrl.trim(),
+              clientId: oauthClientId.trim() || undefined,
+              clientSecret: oauthClientSecret || undefined,
+              scopes,
+              redirectUrl: oauthRedirectUrl.trim() || undefined,
+            },
+          });
+          auth = {
+            mode: 'oauth2',
+            credentialRef: credential.credentialRef,
+            oauth: credential.oauth,
+          };
+        } else {
+          if (!credentialSecret.trim()) throw new Error('请填写 MCP 凭证。');
+          const credential = await clientApi.mcpPutCredential({
+            label: credentialLabel.trim() || displayName.trim() || undefined,
+            kind: authMode,
+            secret: credentialSecret,
+            headerName: authMode === 'http_header' ? authHeaderName.trim() : undefined,
+            envName: authMode === 'stdio_env' ? authEnvName.trim() : undefined,
+          });
+          auth = {
+            mode: authMode,
+            credentialRef: credential.credentialRef,
+            headerName: authMode === 'http_header' ? authHeaderName.trim() : undefined,
+            envName: authMode === 'stdio_env' ? authEnvName.trim() : undefined,
+          };
+        }
       }
       const base = {
         displayName: displayName.trim() || (transport === 'stdio' ? command.trim() : url.trim()),
@@ -286,7 +332,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     } finally {
       setBusy(false);
     }
-  }, [argRows, authEnvName, authHeaderName, authMode, command, credentialLabel, credentialSecret, cwd, displayName, envRows, load, resetForm, transport, url]);
+  }, [argRows, authEnvName, authHeaderName, authMode, command, credentialLabel, credentialSecret, cwd, displayName, envRows, load, oauthAuthorizationServerUrl, oauthClientId, oauthClientSecret, oauthRedirectUrl, oauthScopes, resetForm, transport, url]);
 
   const runServerAction = useCallback(async (message: string, action: () => Promise<unknown>) => {
     setBusy(true);
@@ -301,6 +347,18 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
       setBusy(false);
     }
   }, [load]);
+
+  const handleFinishOAuth = useCallback(async (server: McpServerView) => {
+    const code = oauthAuthorizationCode.trim();
+    if (!code) {
+      setStatus('请先粘贴 OAuth authorization code。');
+      return;
+    }
+    await runServerAction('完成 OAuth 授权', async () => {
+      await clientApi.mcpFinishOAuth({ serverId: serverIdOf(server), authorizationCode: code });
+      setOauthAuthorizationCode('');
+    });
+  }, [oauthAuthorizationCode, runServerAction]);
 
   const refreshAll = useCallback(async () => {
     setBusy(true);
@@ -558,22 +616,49 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                   凭证标签
                   <input value={credentialLabel} onChange={(event) => setCredentialLabel(event.target.value)} placeholder="prod token / staging key" />
                 </label>
-                <label>
-                  Secret
-                  <input value={credentialSecret} onChange={(event) => setCredentialSecret(event.target.value)} type="password" placeholder="不会保存到 renderer" />
-                </label>
-                {authMode === 'http_header' ? (
-                  <label>
-                    Header Name
-                    <input value={authHeaderName} onChange={(event) => setAuthHeaderName(event.target.value)} placeholder="X-API-Key" />
-                  </label>
-                ) : null}
-                {authMode === 'stdio_env' ? (
-                  <label>
-                    Env Name
-                    <input value={authEnvName} onChange={(event) => setAuthEnvName(event.target.value)} placeholder="GITHUB_PERSONAL_ACCESS_TOKEN" />
-                  </label>
-                ) : null}
+                {authMode === 'oauth2' ? (
+                  <>
+                    <label className="settings-grid__wide">
+                      Authorization Server URL
+                      <input value={oauthAuthorizationServerUrl} onChange={(event) => setOauthAuthorizationServerUrl(event.target.value)} placeholder="https://auth.example.com" />
+                    </label>
+                    <label>
+                      Client ID
+                      <input value={oauthClientId} onChange={(event) => setOauthClientId(event.target.value)} placeholder="可选；留空则尝试动态注册" />
+                    </label>
+                    <label>
+                      Client Secret
+                      <input value={oauthClientSecret} onChange={(event) => setOauthClientSecret(event.target.value)} type="password" placeholder="可选；不会保存到 renderer" />
+                    </label>
+                    <label>
+                      Scopes
+                      <input value={oauthScopes} onChange={(event) => setOauthScopes(event.target.value)} placeholder="以空格或逗号分隔" />
+                    </label>
+                    <label>
+                      Redirect URL
+                      <input value={oauthRedirectUrl} onChange={(event) => setOauthRedirectUrl(event.target.value)} placeholder="http://127.0.0.1:33418/mcp/oauth/callback" />
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <label>
+                      Secret
+                      <input value={credentialSecret} onChange={(event) => setCredentialSecret(event.target.value)} type="password" placeholder="不会保存到 renderer" />
+                    </label>
+                    {authMode === 'http_header' ? (
+                      <label>
+                        Header Name
+                        <input value={authHeaderName} onChange={(event) => setAuthHeaderName(event.target.value)} placeholder="X-API-Key" />
+                      </label>
+                    ) : null}
+                    {authMode === 'stdio_env' ? (
+                      <label>
+                        Env Name
+                        <input value={authEnvName} onChange={(event) => setAuthEnvName(event.target.value)} placeholder="GITHUB_PERSONAL_ACCESS_TOKEN" />
+                      </label>
+                    ) : null}
+                  </>
+                )}
               </>
             ) : null}
             </div>
@@ -636,9 +721,9 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                     <button type="button" onClick={() => { void navigator.clipboard?.writeText(credential.credentialRef); setStatus('credentialRef 已复制。'); }}>
                       <span>
                         <strong>{credential.label || credential.credentialRef}</strong>
-                        <small>{credential.kind || credential.authMode || 'secret'}{credential.lastFour ? ` · ••••${credential.lastFour}` : ''}</small>
+                        <small>{credential.kind || credential.authMode || 'secret'}{credential.lastFour ? ` · ••••${credential.lastFour}` : ''}{credential.oauth ? ` · ${credential.oauth.tokenStatus === 'available' ? 'OAuth 已登录' : 'OAuth 未登录'}` : ''}</small>
                       </span>
-                      <em>{credential.envName ? `env: ${credential.envName}` : credential.headerName || credential.storage || 'local'}</em>
+                      <em>{credential.envName ? `env: ${credential.envName}` : credential.headerName || credential.oauth?.expiresAt || credential.storage || 'local'}</em>
                     </button>
                   </li>
                 ))}
@@ -687,6 +772,17 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                 <button type="button" disabled={busy} onClick={() => void runServerAction(selected.enabled === false ? '启用连接' : '禁用连接', () => clientApi.mcpSetEnabled({ serverId: serverIdOf(selected), enabled: selected.enabled === false }))}>{selected.enabled === false ? '启用' : '禁用'}</button>
                 <button type="button" disabled={busy} onClick={() => void runServerAction('移除连接', () => clientApi.mcpUninstall({ serverId: serverIdOf(selected) }))}>移除</button>
               </div>
+
+              {selected.auth?.mode === 'oauth2' ? (
+                <div className="settings-inline-form mcp-oauth-finish">
+                  <label>
+                    OAuth authorization code
+                    <input value={oauthAuthorizationCode} onChange={(event) => setOauthAuthorizationCode(event.target.value)} placeholder="浏览器授权完成后粘贴 code" />
+                  </label>
+                  <button type="button" disabled={busy || !oauthAuthorizationCode.trim()} onClick={() => void handleFinishOAuth(selected)}>完成 OAuth 授权</button>
+                  <p className="settings-help">先点击“刷新 Manifest”或测试连接触发浏览器登录；授权完成后将 code 粘贴到这里。access token 只会写入 main 进程凭证库。</p>
+                </div>
+              ) : null}
 
               <section className="mcp-manifest-section">
                 <header className="mcp-section-header">

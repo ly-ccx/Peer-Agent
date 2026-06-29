@@ -6,7 +6,7 @@ import { pathOf } from './data-store.mjs';
 
 const VERSION = 1;
 const CREDENTIAL_PREFIX = 'mcp-cred:';
-const SUPPORTED_KINDS = new Set(['http_bearer', 'http_header', 'stdio_env']);
+const SUPPORTED_KINDS = new Set(['http_bearer', 'http_header', 'stdio_env', 'oauth2']);
 const SAFE_STORAGE_SCHEME = 'electron.safeStorage';
 const PLAINTEXT_FALLBACK_SCHEME = 'plaintext-fallback';
 
@@ -54,7 +54,68 @@ function normalizeKind(value) {
 }
 
 function targetForKind(kind) {
-  return kind === 'stdio_env' ? 'env' : 'header';
+  if (kind === 'stdio_env') return 'env';
+  if (kind === 'oauth2') return 'oauth';
+  return 'header';
+}
+
+function normalizeScopes(value) {
+  if (Array.isArray(value)) return value.map(asString).filter(Boolean);
+  return asString(value).split(/[\s,]+/).map((scope) => scope.trim()).filter(Boolean);
+}
+
+function normalizeUrl(value) {
+  const raw = asString(value);
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Unsupported protocol');
+    return url.toString();
+  } catch {
+    throw new Error('Invalid MCP OAuth URL.');
+  }
+}
+
+function normalizeOAuthConfig(input = {}, existing = {}, safeStorage = null) {
+  const authorizationServerUrl = Object.prototype.hasOwnProperty.call(input, 'authorizationServerUrl')
+    ? normalizeUrl(input.authorizationServerUrl)
+    : asString(existing.authorizationServerUrl);
+  const clientId = Object.prototype.hasOwnProperty.call(input, 'clientId') ? asString(input.clientId) : asString(existing.clientId);
+  const hasClientSecret = Object.prototype.hasOwnProperty.call(input, 'clientSecret');
+  const clientSecret = hasClientSecret ? String(input.clientSecret ?? '') : existing.clientSecret;
+  const scopes = Object.prototype.hasOwnProperty.call(input, 'scopes') ? normalizeScopes(input.scopes) : normalizeScopes(existing.scopes);
+  const redirectUrl = Object.prototype.hasOwnProperty.call(input, 'redirectUrl')
+    ? normalizeUrl(input.redirectUrl)
+    : asString(existing.redirectUrl);
+  return {
+    authorizationServerUrl,
+    clientId,
+    clientSecret,
+    scopes,
+    redirectUrl,
+    tokens: Object.prototype.hasOwnProperty.call(input, 'tokens') ? secureJson(input.tokens, safeStorage) : existing.tokens ?? null,
+    clientInformation: Object.prototype.hasOwnProperty.call(input, 'clientInformation')
+      ? secureJson(input.clientInformation, safeStorage)
+      : existing.clientInformation ?? null,
+    codeVerifier: asString(input.codeVerifier ?? existing.codeVerifier),
+    discoveryState: input.discoveryState && typeof input.discoveryState === 'object'
+      ? input.discoveryState
+      : existing.discoveryState && typeof existing.discoveryState === 'object' ? existing.discoveryState : null,
+  };
+}
+
+function oauthView(config = {}, safeStorage = null) {
+  const tokens = revealJson(config.tokens, safeStorage);
+  const tokenExpiresAt = Number(tokens?.expires_at ?? tokens?.expiresAt ?? 0);
+  return {
+    authorizationServerUrl: asString(config.authorizationServerUrl) || undefined,
+    clientId: asString(config.clientId) || undefined,
+    clientSecretConfigured: Boolean(config.clientSecret),
+    scopes: normalizeScopes(config.scopes),
+    redirectUrl: asString(config.redirectUrl) || undefined,
+    tokenStatus: tokens?.access_token ? 'available' : 'missing',
+    expiresAt: tokenExpiresAt > 0 ? new Date(tokenExpiresAt).toISOString() : undefined,
+  };
 }
 
 function getSafeStorage(adapter) {
@@ -94,6 +155,26 @@ function decryptSecret(stored, safeStorage) {
   return safeStorage.decryptString(Buffer.from(String(stored.data ?? ''), 'base64'));
 }
 
+function secureJson(value, safeStorage) {
+  if (value == null) return null;
+  if (typeof value === 'object' && (value.encrypted !== undefined || Object.prototype.hasOwnProperty.call(value, 'data'))) return value;
+  return encryptSecret(JSON.stringify(value), safeStorage);
+}
+
+function revealJson(stored, safeStorage) {
+  if (!stored || typeof stored !== 'object') return undefined;
+  if (stored.encrypted !== undefined || Object.prototype.hasOwnProperty.call(stored, 'data')) {
+    const raw = decryptSecret(stored, safeStorage);
+    if (!raw) return undefined;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return undefined;
+    }
+  }
+  return stored;
+}
+
 function loadCredentialFile(file) {
   if (!existsSync(file)) return { version: VERSION, credentials: [] };
   try {
@@ -112,11 +193,12 @@ function writeCredentialFile(file, data) {
   writeFileSync(file, `${JSON.stringify({ version: VERSION, credentials: data.credentials ?? [] }, null, 2)}\n`, 'utf8');
 }
 
-function normalizeStoredCredential(entry) {
+function normalizeStoredCredential(entry, safeStorage = null) {
   const id = asString(entry?.id) || randomUUID();
   const kind = SUPPORTED_KINDS.has(entry?.kind) ? entry.kind : 'http_bearer';
   const createdAt = asString(entry?.createdAt) || nowIso();
   const updatedAt = asString(entry?.updatedAt) || createdAt;
+  const oauth = kind === 'oauth2' ? normalizeOAuthConfig(entry?.oauth ?? {}, {}, safeStorage) : undefined;
   return {
     id,
     credentialRef: normalizeRef(entry?.credentialRef ?? id),
@@ -125,6 +207,7 @@ function normalizeStoredCredential(entry) {
     target: targetForKind(kind),
     headerName: kind === 'http_header' ? validateHeaderName(entry?.headerName) : undefined,
     envName: kind === 'stdio_env' ? validateEnvName(entry?.envName) : undefined,
+    oauth,
     secret: entry?.secret && typeof entry.secret === 'object' ? entry.secret : encryptSecret('', null),
     lastFour: asString(entry?.lastFour),
     storage: entry?.secret?.scheme === SAFE_STORAGE_SCHEME ? 'safeStorage' : 'file-fallback',
@@ -133,7 +216,7 @@ function normalizeStoredCredential(entry) {
   };
 }
 
-function metadataFromStored(entry) {
+function metadataFromStored(entry, safeStorage = null) {
   return {
     id: entry.id,
     credentialRef: entry.credentialRef,
@@ -142,6 +225,7 @@ function metadataFromStored(entry) {
     target: entry.target,
     headerName: entry.headerName,
     envName: entry.envName,
+    oauth: entry.kind === 'oauth2' ? oauthView(entry.oauth, safeStorage) : undefined,
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
     lastFour: entry.lastFour,
@@ -154,10 +238,11 @@ function normalizeCredentialInput(input = {}, existing = null, safeStorage = nul
   const now = nowIso();
   const id = idFromRef(input.credentialRef ?? input.id ?? existing?.credentialRef ?? existing?.id ?? randomUUID());
   const label = asString(input.label) || existing?.label || 'MCP credential';
+  const isOAuth = kind === 'oauth2';
   const hasSecret = Object.prototype.hasOwnProperty.call(input, 'secret');
-  if (!hasSecret && !existing) throw new Error('MCP credential secret is required.');
+  if (!isOAuth && !hasSecret && !existing) throw new Error('MCP credential secret is required.');
   const secretValue = hasSecret ? String(input.secret ?? '') : null;
-  if (hasSecret && secretValue.length === 0) throw new Error('MCP credential secret is required.');
+  if (!isOAuth && hasSecret && secretValue.length === 0) throw new Error('MCP credential secret is required.');
   const headerName = kind === 'http_header'
     ? validateHeaderName(input.headerName ?? existing?.headerName)
     : undefined;
@@ -167,7 +252,9 @@ function normalizeCredentialInput(input = {}, existing = null, safeStorage = nul
   if (kind === 'http_header' && !headerName) throw new Error('MCP HTTP header credential requires headerName.');
   if (kind === 'stdio_env' && !envName) throw new Error('MCP stdio env credential requires envName.');
 
-  const encryptedSecret = hasSecret ? encryptSecret(secretValue, safeStorage) : existing.secret;
+  const oauth = isOAuth ? normalizeOAuthConfig(input.oauth ?? {}, existing?.oauth ?? {}, safeStorage) : undefined;
+  if (isOAuth && !oauth.authorizationServerUrl) throw new Error('MCP OAuth 2.0 requires authorizationServerUrl.');
+  const encryptedSecret = isOAuth ? (existing?.secret ?? encryptSecret('', safeStorage)) : (hasSecret ? encryptSecret(secretValue, safeStorage) : existing.secret);
   return {
     id,
     credentialRef: normalizeRef(id),
@@ -176,6 +263,7 @@ function normalizeCredentialInput(input = {}, existing = null, safeStorage = nul
     target: targetForKind(kind),
     headerName,
     envName,
+    oauth,
     secret: encryptedSecret,
     lastFour: hasSecret ? secretValue.slice(-4) : existing?.lastFour,
     storage: encryptedSecret.scheme === SAFE_STORAGE_SCHEME ? 'safeStorage' : 'file-fallback',
@@ -199,7 +287,7 @@ function normalizeAuthBinding(auth = {}) {
 function ensureCompatible(kind, auth, server) {
   if (kind !== auth.mode) throw new Error(`MCP credential kind ${kind} is incompatible with auth mode ${auth.mode}.`);
   const transport = server?.transport === 'stdio' ? 'stdio' : server?.transport === 'sse' ? 'sse' : 'streamable_http';
-  if ((kind === 'http_bearer' || kind === 'http_header') && transport === 'stdio') {
+  if ((kind === 'http_bearer' || kind === 'http_header' || kind === 'oauth2') && transport === 'stdio') {
     throw new Error(`MCP auth mode ${kind} requires an HTTP MCP transport.`);
   }
   if (kind === 'stdio_env' && transport !== 'stdio') {
@@ -209,7 +297,7 @@ function ensureCompatible(kind, auth, server) {
 
 export function createMcpCredentialStore({ credentialFile = pathOf('mcpCredentials'), safeStorage = getSafeStorage() } = {}) {
   function readAll() {
-    return loadCredentialFile(credentialFile).credentials.map(normalizeStoredCredential);
+    return loadCredentialFile(credentialFile).credentials.map((entry) => normalizeStoredCredential(entry, safeStorage));
   }
 
   function writeAll(credentials) {
@@ -217,7 +305,7 @@ export function createMcpCredentialStore({ credentialFile = pathOf('mcpCredentia
   }
 
   function listCredentials() {
-    return readAll().map(metadataFromStored);
+    return readAll().map((entry) => metadataFromStored(entry, safeStorage));
   }
 
   function putCredential(input = {}) {
@@ -231,7 +319,7 @@ export function createMcpCredentialStore({ credentialFile = pathOf('mcpCredentia
     if (index >= 0) updated[index] = next;
     else updated.push(next);
     writeAll(updated);
-    return metadataFromStored(next);
+    return metadataFromStored(next, safeStorage);
   }
 
   function deleteCredential(ref) {
@@ -252,7 +340,7 @@ export function createMcpCredentialStore({ credentialFile = pathOf('mcpCredentia
     const credential = getCredential(ref);
     if (!credential) throw new Error(`MCP credential not found: ${ref}`);
     return {
-      metadata: metadataFromStored(credential),
+      metadata: metadataFromStored(credential, safeStorage),
       secret: decryptSecret(credential.secret, safeStorage),
     };
   }
@@ -263,9 +351,40 @@ export function createMcpCredentialStore({ credentialFile = pathOf('mcpCredentia
     deleteCredential,
     getCredential: (ref) => {
       const credential = getCredential(ref);
-      return credential ? metadataFromStored(credential) : null;
+      return credential ? metadataFromStored(credential, safeStorage) : null;
     },
     resolveSecret,
+    getOAuthCredential(ref) {
+      const credential = getCredential(ref);
+      if (!credential) throw new Error(`MCP credential not found: ${ref}`);
+      if (credential.kind !== 'oauth2') throw new Error(`MCP credential ${ref} is not OAuth 2.0.`);
+      const oauth = credential.oauth ?? {};
+      return {
+        metadata: metadataFromStored(credential, safeStorage),
+        oauth: {
+          ...oauth,
+          tokens: revealJson(oauth.tokens, safeStorage),
+          clientInformation: revealJson(oauth.clientInformation, safeStorage),
+        },
+      };
+    },
+    updateOAuthCredential(ref, patch = {}) {
+      const credential = getCredential(ref);
+      if (!credential) throw new Error(`MCP credential not found: ${ref}`);
+      if (credential.kind !== 'oauth2') throw new Error(`MCP credential ${ref} is not OAuth 2.0.`);
+      const credentials = readAll();
+      const index = credentials.findIndex((entry) => entry.id === credential.id);
+      if (index < 0) throw new Error(`MCP credential not found: ${ref}`);
+      const updated = {
+        ...credential,
+        oauth: normalizeOAuthConfig(patch, credential.oauth ?? {}, safeStorage),
+        updatedAt: nowIso(),
+      };
+      const next = [...credentials];
+      next[index] = updated;
+      writeAll(next);
+      return metadataFromStored(updated, safeStorage);
+    },
   };
 }
 
@@ -277,6 +396,29 @@ export async function resolveMcpCredentialInjection(credentialStore, auth = {}, 
   if (!credentialStore || typeof credentialStore.resolveSecret !== 'function') {
     throw new Error('MCP credential resolver is not configured.');
   }
+
+  if (binding.mode === 'oauth2') {
+    if (typeof credentialStore.getOAuthCredential !== 'function') throw new Error('MCP OAuth credential resolver is not configured.');
+    const { metadata, oauth } = credentialStore.getOAuthCredential(binding.credentialRef);
+    ensureCompatible(metadata.kind, binding, server);
+    return {
+      headers: {},
+      env: {},
+      authProviderConfig: {
+        credentialRef: metadata.credentialRef,
+        oauth,
+        updateOAuth: (patch) => credentialStore.updateOAuthCredential(metadata.credentialRef, patch),
+      },
+      authContext: {
+        mode: binding.mode,
+        credentialRef: metadata.credentialRef,
+        credentialUpdatedAt: metadata.updatedAt,
+        hasCredential: true,
+        oauth: metadata.oauth,
+      },
+    };
+  }
+
   const { metadata, secret } = credentialStore.resolveSecret(binding.credentialRef);
   ensureCompatible(metadata.kind, binding, server);
 

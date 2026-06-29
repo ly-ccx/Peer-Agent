@@ -119,4 +119,72 @@ describe('MCP credential store', () => {
       /requires a stdio MCP transport/,
     );
   });
+
+  it('stores OAuth tokens encrypted and exposes only token status in metadata', async () => {
+    const store = createStore();
+    const credential = store.putCredential({
+      label: 'OAuth MCP',
+      kind: 'oauth2',
+      oauth: {
+        authorizationServerUrl: 'https://auth.example.com',
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        scopes: ['mcp.read'],
+        redirectUrl: 'http://127.0.0.1:33418/mcp/oauth/callback',
+      },
+    });
+
+    assert.equal(credential.kind, 'oauth2');
+    assert.equal(credential.oauth.authorizationServerUrl, 'https://auth.example.com/');
+    assert.equal(credential.oauth.clientSecretConfigured, true);
+    assert.equal(credential.oauth.tokenStatus, 'missing');
+    assert.equal('secret' in credential, false);
+
+    store.updateOAuthCredential(credential.credentialRef, {
+      tokens: { access_token: 'access-secret', refresh_token: 'refresh-secret', expires_at: 4102444800000 },
+      clientInformation: { client_id: 'client-id', client_secret: 'registered-secret' },
+      codeVerifier: 'pkce-secret',
+    });
+
+    const metadata = store.getCredential(credential.credentialRef);
+    assert.equal(metadata.oauth.tokenStatus, 'available');
+    assert.equal(metadata.oauth.expiresAt, new Date(4102444800000).toISOString());
+    assert.equal(JSON.stringify(metadata).includes('access-secret'), false);
+    assert.equal(JSON.stringify(metadata).includes('refresh-secret'), false);
+
+    const persisted = readFileSync(path.join(tmpDir, 'mcp-credentials.json'), 'utf8');
+    assert.equal(persisted.includes('access-secret'), false);
+    assert.equal(persisted.includes('refresh-secret'), false);
+    assert.equal(persisted.includes('registered-secret'), false);
+
+    const oauthCredential = store.getOAuthCredential(credential.credentialRef);
+    assert.equal(oauthCredential.oauth.tokens.access_token, 'access-secret');
+    assert.equal(oauthCredential.oauth.clientInformation.client_secret, 'registered-secret');
+  });
+
+  it('injects OAuth authProvider config without headers or env', async () => {
+    const store = createStore();
+    const credential = store.putCredential({
+      label: 'OAuth MCP',
+      kind: 'oauth2',
+      oauth: {
+        authorizationServerUrl: 'https://auth.example.com',
+        clientId: 'client-id',
+        scopes: ['mcp.read'],
+      },
+    });
+
+    const injection = await resolveMcpCredentialInjection(store, {
+      mode: 'oauth2',
+      credentialRef: credential.credentialRef,
+    }, { transport: 'streamable_http' });
+
+    assert.deepEqual(injection.headers, {});
+    assert.deepEqual(injection.env, {});
+    assert.equal(injection.authContext.mode, 'oauth2');
+    assert.equal(injection.authContext.hasCredential, true);
+    assert.equal(injection.authProviderConfig.credentialRef, credential.credentialRef);
+    assert.equal(injection.authProviderConfig.oauth.clientId, 'client-id');
+    assert.equal(typeof injection.authProviderConfig.updateOAuth, 'function');
+  });
 });
