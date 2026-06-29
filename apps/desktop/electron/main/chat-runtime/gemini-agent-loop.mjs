@@ -60,11 +60,8 @@ export async function agentLoopGemini({
   });
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {
-    const microcompactResult = applyMicrocompaction(apiMessages);
-    if (microcompactResult.stats.compactedCount > 0) {
-      apiMessages = microcompactResult.messages;
-    }
-
+    // 方案 A（完整会话量口径）：压缩触发按「完整 apiMessages」判定，与进度条分子、
+    // 回合结束权威快照（getContextInfo）同口径，避免回合结束后数值从 ~200k 跳到 ~100k。
     const compaction = await runCompactionCheck({
       messages: apiMessages,
       systemPrompt,
@@ -82,14 +79,16 @@ export async function agentLoopGemini({
       apiMessages = compaction.messages;
     }
 
-    apiMessages = sanitizeApiMessages(apiMessages);
+    // 发送副本：仅对「发出去的消息」做微压缩 + 清洗，不回写 apiMessages，
+    // 使 apiMessages 始终保持完整会话量（与进度条分子/压缩触发器同口径）。
+    const sendMessages = sanitizeApiMessages(applyMicrocompaction(apiMessages).messages);
     const providerResponse = await sendGeminiStream({
       baseUrl,
       apiKey,
       endpoint: resolvedChannel?.endpoint,
       headers: resolvedChannel?.headers,
       model,
-      messages: apiMessages,
+      messages: sendMessages,
       tools,
       effort,
       supportsReasoning: Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning),
@@ -98,7 +97,8 @@ export async function agentLoopGemini({
       webContents,
       streamId,
     });
-    apiMessages = providerResponse.messages;
+    // 不再用发送副本回写 apiMessages：assistant 回合与 tool 结果会在下方
+    // 显式 push 回完整的 apiMessages，保持完整会话量口径。
 
     if (!providerResponse.ok) {
       const text = providerResponse.errorText || '';

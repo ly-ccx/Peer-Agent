@@ -541,12 +541,19 @@ export function ChatSurface({
       return { id: msg.id, text };
     });
   const showSlashCommands = !isStreaming && !isCompacting && slashCommands.length > 0;
-  // 口径统一：进度条分子优先用主进程随回合结束下发的权威 contextTokens（与压缩触发同口径），
-  // 再叠加当前草稿/附件的实时增量，使「正在输入」仍能推动进度条；无权威快照时（如刚切入
-  // 会话尚未跑过回合）回退到纯本地估算，保证总有数可显示。
-  const estimatedContextTokens = authoritativeContext
+  // 口径统一（方案 A：完整会话量）：进度条分子取「权威快照口径」与「实时本地估算」的较大值。
+  // - 权威快照口径 = 主进程回合结束下发的 contextTokens（完整会话量 + 工具 schema，与压缩触发同口径）
+  //   叠加当前草稿/附件的实时增量；无快照时记 0。
+  // - 实时本地估算 = 对完整 messages + 草稿 + 附件的本地估算，流式期间随对话增长实时推进。
+  // 两者现已同为「完整会话量」口径，取 max 可保证：流式→结束→再次发起数值连续、绝不无故突降
+  // （旧 bug：流式 ~200k 结束瞬间掉到 ~100k 再发起又回 200k，源于权威快照曾按微压缩后口径计算）；
+  // 同时保留权威值与压缩触发严格一致（bar ≡ trigger）。真·压缩发生时会清空权威快照、messages 也已替换为
+  // 压缩后集合，故 max 自然回落到压缩后的本地估算，不会把已压缩的用量错误地维持在高位。
+  const liveContextTokens = estimateConversationTokens(messages, draft, attachments);
+  const authoritativeContextTokens = authoritativeContext
     ? authoritativeContext.contextTokens + estimateTextTokens(draft) + estimateAttachmentTokens(attachments)
-    : estimateConversationTokens(messages, draft, attachments);
+    : 0;
+  const estimatedContextTokens = Math.max(authoritativeContextTokens, liveContextTokens);
   // 进度条分母优先用权威 contextWindow（与触发判定同窗口），消除 provider 配置窗口与
   // 主进程实际所用窗口不一致时的百分比偏差；权威窗口未知时回退到 provider 配置窗口。
   const authoritativeContextWindow = authoritativeContext?.contextWindow ?? undefined;

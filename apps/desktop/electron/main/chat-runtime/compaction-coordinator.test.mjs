@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  applyMicrocompaction,
   buildCompactionProviderConfig,
   computeContextInfo,
   isPromptTooLongResponse,
@@ -225,5 +226,71 @@ describe('computeContextInfo（进度条用量与压缩触发口径单一来源�
   it('messages 非数组时安全降级为 0 token', () => {
     assert.equal(computeContextInfo({ messages: null, contextWindow: 100_000 }).contextTokens, 0);
     assert.equal(computeContextInfo({ messages: undefined, contextWindow: 100_000 }).contextTokens, 0);
+  });
+});
+
+// 方案 A（完整会话量口径）回归：进度条分子 / 压缩触发 / done 权威快照统一按「完整会话量」计算，
+// 不再按微压缩后的发送副本计算。这些用例锁定 agent-loop 重构所依赖的两条不变量，防止回归到
+// 「流式 ~200k 结束瞬间掉到 ~100k」的旧 bug。
+describe('方案 A：完整会话量口径不变量', () => {
+  // 构造一个含「大块旧工具结果」的会话：微压缩会把旧 tool_result 截断成预览，
+  // 因此完整集合的估算必然显著大于微压缩后集合的估算。
+  function buildConversationWithBigToolResults() {
+    const big = 'x'.repeat(8000);
+    const messages = [{ role: 'system', content: 'sys' }];
+    for (let i = 0; i < 6; i++) {
+      messages.push({ role: 'assistant', content: null, tool_calls: [{ id: `t${i}`, type: 'function', function: { name: 'read', arguments: '{}' } }] });
+      messages.push({ role: 'tool', tool_call_id: `t${i}`, content: `result-${i}-${big}` });
+    }
+    // 末尾留几条「近因」消息，确保旧工具结果落入可微压缩区间。
+    messages.push({ role: 'user', content: 'recent-1' });
+    messages.push({ role: 'assistant', content: 'recent-2' });
+    messages.push({ role: 'user', content: 'recent-3' });
+    return messages;
+  }
+
+  it('applyMicrocompaction 不修改入参（原始完整集合可继续用于权威估算）', () => {
+    const messages = buildConversationWithBigToolResults();
+    const snapshot = JSON.stringify(messages);
+
+    const result = applyMicrocompaction(messages);
+
+    // 入参对象与每个元素都不被原地改动：方案 A 据此保留完整 apiMessages 仅作度量，
+    // 另用返回的发送副本发给 provider。
+    assert.equal(JSON.stringify(messages), snapshot, 'applyMicrocompaction 不应原地修改入参 messages');
+    assert.notEqual(result.messages, messages, '应返回新的数组而非原数组');
+    assert.ok(result.stats.compactedCount > 0, '本样本应至少触发一次微压缩，用例才有意义');
+  });
+
+  it('完整集合的 contextTokens 显著大于微压缩后集合（这正是旧 bug 跳变的来源）', () => {
+    const full = buildConversationWithBigToolResults();
+    const sent = applyMicrocompaction(full).messages;
+
+    const fullInfo = computeContextInfo({ messages: full, contextWindow: 200_000 });
+    const sentInfo = computeContextInfo({ messages: sent, contextWindow: 200_000 });
+
+    // 方案 A：进度条与触发都按 full 计算（更大、更安全）；旧实现误按 sent 计算，
+    // 于是回合结束 done 快照从 full 掉到 sent，产生用户观察到的瞬间下降。
+    assert.ok(
+      fullInfo.contextTokens > sentInfo.contextTokens,
+      `完整集合估算(${fullInfo.contextTokens}) 应大于微压缩后(${sentInfo.contextTokens})`,
+    );
+  });
+
+  it('bar ≡ trigger：done 权威 contextTokens 与压缩触发判定来自同一完整集合', () => {
+    const full = buildConversationWithBigToolResults();
+    // 选一个窗口，使完整集合刚好越过触发线：证明「进度条所用数值」与「是否触发压缩」同源。
+    const fullTokens = computeContextInfo({ messages: full, contextWindow: 200_000 }).contextTokens;
+    const ratio = COMPACTION_CONFIG.triggerRatio;
+    const windowAbove = Math.floor(fullTokens / ratio) - 1; // 阈值 < fullTokens ⇒ 触发
+    const windowBelow = Math.ceil(fullTokens / ratio) + 1; // 阈值 > fullTokens ⇒ 不触发
+
+    const above = computeContextInfo({ messages: full, contextWindow: windowAbove });
+    const below = computeContextInfo({ messages: full, contextWindow: windowBelow });
+
+    assert.equal(above.contextTokens, fullTokens, '触发判定所用的 contextTokens 必须就是进度条分子');
+    assert.equal(above.compactionSuggested, true);
+    assert.equal(below.contextTokens, fullTokens);
+    assert.equal(below.compactionSuggested, false);
   });
 });
