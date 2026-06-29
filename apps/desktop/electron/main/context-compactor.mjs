@@ -685,7 +685,7 @@ async function summarizeWithLLM({
 
   if (provider === 'anthropic') {
     // Anthropic: 流式，按 content_block_delta 累加文本并上报进度。
-    const url = `${baseUrl.replace(/\/+$/, '')}/v1/messages`;
+    const url = providerConfig.endpoint || `${baseUrl.replace(/\/+$/, '')}/v1/messages`;
     const body = {
       model,
       system: SUMMARY_SYSTEM_PROMPT,
@@ -701,7 +701,7 @@ async function summarizeWithLLM({
 
     const res = await fetchWithConnectionRecovery(url, {
       method: 'POST',
-      headers: {
+      headers: providerConfig.headers || {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
@@ -812,7 +812,7 @@ async function summarizeWithLLM({
   }
 
   // OpenAI: 流式，按 choices[].delta.content 累加文本并上报进度。
-  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+  const url = providerConfig.endpoint || `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
   const body = {
     model,
     messages: summaryMessages,
@@ -823,7 +823,7 @@ async function summarizeWithLLM({
 
   const res = await fetchWithConnectionRecovery(url, {
     method: 'POST',
-    headers: {
+    headers: providerConfig.headers || {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },

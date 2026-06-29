@@ -5,6 +5,7 @@ import {
 } from './agent-loop-kernel.mjs';
 import {
   applyMicrocompaction,
+  buildCompactionProviderConfig,
   computeContextInfo,
   isPromptTooLongResponse,
   runCompactionCheck,
@@ -58,7 +59,14 @@ export async function agentLoopAnthropic({
       contextWindow,
     }),
   });
-  const providerConfig = { provider: 'anthropic', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model, maxOutputTokens };
+  const providerConfig = buildCompactionProviderConfig({
+    provider: 'anthropic',
+    baseUrl,
+    apiKey,
+    model,
+    maxOutputTokens,
+    resolvedChannel,
+  });
   let effectiveSupportsReasoning = Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning);
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {

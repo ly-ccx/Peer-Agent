@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  buildCompactionProviderConfig,
   computeContextInfo,
   isPromptTooLongResponse,
   runCompactionCheck,
@@ -9,6 +10,59 @@ import {
 import { COMPACTION_CONFIG, estimateTokensFromMessages } from '../context-compactor.mjs';
 
 describe('chat compaction coordinator', () => {
+  it('builds compaction provider config from the resolved chat channel', () => {
+    const headers = { Authorization: 'Bearer session-token', 'chatgpt-account-id': 'acct_1' };
+    const config = buildCompactionProviderConfig({
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'legacy-key',
+      model: 'gpt-5.5',
+      maxOutputTokens: 128000,
+      resolvedChannel: {
+        baseUrl: 'https://chatgpt.com/backend-api/codex',
+        wire: 'openai-responses',
+        endpoint: 'https://chatgpt.com/backend-api/codex/responses',
+        headers,
+      },
+      useResponses: true,
+      authMethod: 'oauth_chatgpt',
+    });
+
+    assert.deepEqual(config, {
+      provider: 'openai',
+      baseUrl: 'https://chatgpt.com/backend-api/codex',
+      apiKey: 'legacy-key',
+      model: 'gpt-5.5',
+      maxOutputTokens: 128000,
+      wire: 'openai-responses',
+      endpoint: 'https://chatgpt.com/backend-api/codex/responses',
+      headers,
+      omitMaxOutputTokens: true,
+    });
+  });
+
+  it('keeps legacy provider config when no resolved channel is available', () => {
+    const config = buildCompactionProviderConfig({
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'key',
+      model: 'gpt-4.1',
+      maxOutputTokens: 12000,
+    });
+
+    assert.deepEqual(config, {
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'key',
+      model: 'gpt-4.1',
+      maxOutputTokens: 12000,
+      wire: undefined,
+      endpoint: undefined,
+      headers: undefined,
+      omitMaxOutputTokens: false,
+    });
+  });
+
   it('detects provider prompt-too-long responses', () => {
     assert.equal(isPromptTooLongResponse(413, ''), true);
     assert.equal(isPromptTooLongResponse(400, 'context_length_exceeded'), true);

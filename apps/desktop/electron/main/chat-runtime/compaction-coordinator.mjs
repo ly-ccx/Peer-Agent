@@ -6,6 +6,29 @@ import {
 } from '../context-compactor.mjs';
 import { beginCompaction, endCompaction, updateCompactionProgress } from './compaction-registry.mjs';
 
+export function buildCompactionProviderConfig({
+  provider,
+  baseUrl,
+  apiKey,
+  model,
+  maxOutputTokens,
+  resolvedChannel = null,
+  useResponses = false,
+  authMethod = 'api_key',
+} = {}) {
+  return {
+    provider,
+    baseUrl: resolvedChannel?.baseUrl || baseUrl,
+    apiKey,
+    model,
+    maxOutputTokens,
+    wire: useResponses ? 'openai-responses' : resolvedChannel?.wire,
+    endpoint: resolvedChannel?.endpoint,
+    headers: resolvedChannel?.headers,
+    omitMaxOutputTokens: authMethod === 'oauth_chatgpt',
+  };
+}
+
 export function isPromptTooLongResponse(status, text) {
   if (status === 413) return true;
   const value = String(text || '').toLowerCase();

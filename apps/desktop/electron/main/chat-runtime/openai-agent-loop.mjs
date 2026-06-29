@@ -6,6 +6,7 @@ import {
 } from './agent-loop-kernel.mjs';
 import {
   applyMicrocompaction,
+  buildCompactionProviderConfig,
   computeContextInfo,
   isPromptTooLongResponse,
   runCompactionCheck,
@@ -60,7 +61,16 @@ export async function agentLoopOpenAI({
     // apiMessages 已含 system，回合结束按当前真实消息算权威用量，与压缩触发同口径。
     getContextInfo: () => computeContextInfo({ messages: apiMessages, contextWindow }),
   });
-  const providerConfig = { provider: 'openai', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model, maxOutputTokens };
+  const providerConfig = buildCompactionProviderConfig({
+    provider: 'openai',
+    baseUrl,
+    apiKey,
+    model,
+    maxOutputTokens,
+    resolvedChannel,
+    useResponses,
+    authMethod,
+  });
   let effectiveSupportsReasoning = Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning);
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {

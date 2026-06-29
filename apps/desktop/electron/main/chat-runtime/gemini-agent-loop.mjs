@@ -5,6 +5,7 @@ import {
 } from './agent-loop-kernel.mjs';
 import {
   applyMicrocompaction,
+  buildCompactionProviderConfig,
   computeContextInfo,
   isPromptTooLongResponse,
   runCompactionCheck,
@@ -49,7 +50,14 @@ export async function agentLoopGemini({
     // apiMessages 已含 system，回合结束按当前真实消息算权威用量，与压缩触发同口径。
     getContextInfo: () => computeContextInfo({ messages: apiMessages, contextWindow }),
   });
-  const providerConfig = { provider: 'gemini', baseUrl: resolvedChannel?.baseUrl || baseUrl, apiKey, model, maxOutputTokens };
+  const providerConfig = buildCompactionProviderConfig({
+    provider: 'gemini',
+    baseUrl,
+    apiKey,
+    model,
+    maxOutputTokens,
+    resolvedChannel,
+  });
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {
     const microcompactResult = applyMicrocompaction(apiMessages);
