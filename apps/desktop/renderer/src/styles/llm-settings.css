@@ -57,7 +57,7 @@
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-md);
   background: var(--paper-sheet);
-  overflow: hidden;
+  overflow: visible;
   transition: border-color var(--za-motion-fast), box-shadow var(--za-motion-fast);
 }
 .llm-provider-card.is-default {
