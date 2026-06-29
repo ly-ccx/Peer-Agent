@@ -42,6 +42,8 @@ interface ProviderRecoveryNotice {
 export function useChatStreamSubscription(params: {
   conversationId: string | null;
   onConversationUpdated?: () => void;
+  /** 当 Agent 发起内置浏览器工具（browser_*）调用时触发，供上层自动打开并切到 Browser Tab。 */
+  onBrowserToolActivity?: (tool: string) => void;
   streamIdRef: React.MutableRefObject<string | null>;
   turnStartedAtRef: React.MutableRefObject<number | null>;
   setTurnStartedAt: (startedAt: number | null) => void;
@@ -72,6 +74,7 @@ export function useChatStreamSubscription(params: {
   const {
     conversationId,
     onConversationUpdated,
+    onBrowserToolActivity,
     streamIdRef,
     turnStartedAtRef,
     setTurnStartedAt,
@@ -238,6 +241,9 @@ export function useChatStreamSubscription(params: {
 
     const offToolCall = clientApi.onChatStreamToolCall(({ streamId, tool, displayName, args, toolCallId }) => {
       if (streamId !== streamIdRef.current) return;
+      // 内置浏览器工具（browser_*）调用时，通知上层自动展开 Workbench 并切到 Browser Tab，
+      // 避免 Agent 已在隐藏的 webview 中操作、用户却看不到的割裂感。
+      if (tool.startsWith('browser_')) onBrowserToolActivity?.(tool);
       // Tool-call events can arrive while the typewriter still holds earlier text
       // deltas. Flush first so pre-call text is committed above the structured
       // tool-call segment instead of being appended below it later.
@@ -436,5 +442,5 @@ export function useChatStreamSubscription(params: {
     });
 
     return () => { if (compactionDoneTimer) { clearTimeout(compactionDoneTimer); compactionDoneTimer = null; } offDelta(); offThinking(); offDone(); offUsage(); offAborted(); offToolProgress(); offToolCall(); offToolResult(); offPermissionRequest(); offError(); offProviderRecovery(); offConnectionRecovery(); offCompaction(); };
-  }, [appendStreamThinking, conversationId, onConversationUpdated]);
+  }, [appendStreamThinking, conversationId, onConversationUpdated, onBrowserToolActivity]);
 }

@@ -707,9 +707,26 @@ export function ChatSurface({
     });
   }, [conversationId, onConversationUpdated]);
 
+  // Workbench Goal slot：portal target 由右侧工作台 GoalView 提供。
+  const {
+    goalSlot,
+    setHasGoalPlan,
+    open: workbenchOpen,
+    activeTab: workbenchActiveTab,
+    setOpen: setWorkbenchOpen,
+    setActiveTab: setWorkbenchTab,
+  } = useWorkbench();
+  // Agent 调用内置浏览器工具（browser_*）时自动展开工作台并切到 Browser Tab，
+  // 复用 Goal 计划创建时的自动切 Tab 先例，避免 webview 隐藏导致用户看不到 Agent 操作。
+  const handleBrowserToolActivity = useCallback(() => {
+    setWorkbenchTab('browser');
+    setWorkbenchOpen(true);
+  }, [setWorkbenchTab, setWorkbenchOpen]);
+
   useChatStreamSubscription({
     conversationId,
     onConversationUpdated,
+    onBrowserToolActivity: handleBrowserToolActivity,
     streamIdRef,
     turnStartedAtRef,
     setTurnStartedAt,
@@ -1079,15 +1096,6 @@ export function ChatSurface({
   // GoalPlanPanel 的批准动作只记录治理事实；真正执行由 main process Goal Runner
   // 监听 goalPlans:approve 后托管推进，renderer 不再伪造一条用户消息来启动执行。
 
-  // Workbench Goal slot：portal target 由右侧工作台 GoalView 提供。
-  const {
-    goalSlot,
-    setHasGoalPlan,
-    open: workbenchOpen,
-    activeTab: workbenchActiveTab,
-    setOpen: setWorkbenchOpen,
-    setActiveTab: setWorkbenchTab,
-  } = useWorkbench();
   const handleGoalPlansCountChange = useCallback((count: number) => {
     setHasGoalPlan(count > 0);
   }, [setHasGoalPlan]);
