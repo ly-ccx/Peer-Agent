@@ -48,9 +48,12 @@
   padding-top: 52px;
   -webkit-app-region: drag;
   overflow: hidden;
+  transition: border-color var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
 }
 
 /* ── Sidebar Resizer（左栏右缘拖拽条，镜像右侧 workbench-resizer）── */
+/* 拖拽分隔线：6px hit area，无独立指示条；hover/聚焦/拖拽时让侧栏自身的
+   1px border-right 变为强调色，始终呈现为一条干净的线（无双线）。 */
 .sidebar-resizer {
   position: absolute;
   top: 0;
@@ -62,31 +65,19 @@
   cursor: col-resize;
   -webkit-app-region: no-drag;
   background: transparent;
-  transition: background var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
   touch-action: none;
-}
-.sidebar-resizer::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
-  transform: translateX(-50%);
-  background: transparent;
-  transition: background var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
-}
-.sidebar-resizer:hover::after,
-.sidebar-resizer:focus-visible::after,
-.sidebar-resizer[data-active='true']::after {
-  background: var(--za-accent, #4c8dff);
 }
 .sidebar-resizer:focus-visible {
   outline: none;
 }
+.app-sidebar:has(.sidebar-resizer:hover),
+.app-sidebar:has(.sidebar-resizer:focus-visible),
+.app-sidebar:has(.sidebar-resizer[data-active='true']) {
+  border-right-color: var(--za-accent, #4c8dff);
+}
 /* 阻尼区视觉提示：宽度已拖到最小展开宽度以下、即将触发收起。 */
-.sidebar-resizer[data-damping='true']::after {
-  background: var(--za-warning, #f0a020);
+.app-sidebar:has(.sidebar-resizer[data-damping='true']) {
+  border-right-color: var(--za-warning, #f0a020);
 }
 
 /* 全屏时 macOS 交通灯被系统隐藏,收掉侧栏为其预留的顶部留白(权威状态来自 main 广播)。 */
