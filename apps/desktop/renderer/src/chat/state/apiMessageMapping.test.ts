@@ -73,16 +73,32 @@ describe('hasApiMessageContent', () => {
 });
 
 describe('toApiMessages', () => {
-  it('skips compaction messages and empty assistant messages', () => {
+  it('skips empty assistant messages when there is no compaction boundary', () => {
     const out = toApiMessages([
       msg({ role: 'user', content: 'q' }),
       msg({ role: 'assistant', content: '' }),
       msg({ role: 'assistant', content: 'a' }),
-      msg({ role: 'assistant', content: 'ignored', compaction: { method: 'm', originalMessageCount: 1, beforeTokens: 1, afterTokens: 1 } }),
     ]);
     assert.deepEqual(out, [
       { role: 'user', content: 'q' },
       { role: 'assistant', content: 'a' },
+    ]);
+  });
+
+  it('sends only messages after the last compaction boundary', () => {
+    const out = toApiMessages([
+      msg({ role: 'user', content: 'old q' }),
+      msg({ role: 'assistant', content: 'old a' }),
+      msg({ role: 'assistant', content: 'summary 1', compaction: { method: 'm1', originalMessageCount: 2, beforeTokens: 10, afterTokens: 3 } }),
+      msg({ role: 'user', content: 'middle q' }),
+      msg({ role: 'assistant', content: 'summary 2', compaction: { method: 'm2', originalMessageCount: 3, beforeTokens: 20, afterTokens: 4 } }),
+      msg({ role: 'assistant', content: '' }),
+      msg({ role: 'user', content: 'new q' }),
+      msg({ role: 'assistant', content: 'new a' }),
+    ]);
+    assert.deepEqual(out, [
+      { role: 'user', content: 'new q' },
+      { role: 'assistant', content: 'new a' },
     ]);
   });
 });

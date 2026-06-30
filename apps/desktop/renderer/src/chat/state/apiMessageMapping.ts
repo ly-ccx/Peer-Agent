@@ -5,7 +5,8 @@
 // - assistant 历史正文经 sanitizeAssistantHistoryTextForApi 清洗，剥离仅供本地展示的
 //   「[Tool call:]/[Tool result]」痕迹，避免把展示态文本当成可执行内容回灌给模型。
 // - 结构化工具调用段经 formatHistoricalLocalRecordForApi 转成只读的历史事实记录文本。
-// - compaction 消息不进入 API 序列（属于连续性上下文，由独立 Context Source 表达）。
+// - compaction 消息不进入 API 序列；最后一条 compaction 之前的原文也不进入 API 序列，
+//   仅留给 UI 回看，模型连续性由独立 Context Source 的压缩摘要表达。
 // 这些都属于「事实/用户上下文」的映射，不会把任何内容提升为 system 指令。
 
 import type { ChatApiContentPart, ChatApiMessage, ChatAttachment, ChatMsg } from './types';
@@ -85,10 +86,16 @@ export function hasApiMessageContent(content: string | ChatApiContentPart[]): bo
   });
 }
 
-/** 把会话映射为 API 消息序列：跳过 compaction 消息与空 assistant 消息。 */
+/** 把会话映射为 API 消息序列：跳过最后一条 compaction 之前的 UI 原文、compaction 消息与空 assistant 消息。 */
 export function toApiMessages(messages: readonly ChatMsg[]): ChatApiMessage[] {
+  const lastCompactionIndex = messages.reduce(
+    (latest, message, index) => (message.compaction ? index : latest),
+    -1,
+  );
+  const activeMessages = lastCompactionIndex >= 0 ? messages.slice(lastCompactionIndex + 1) : messages;
+
   const apiMessages: ChatApiMessage[] = [];
-  for (const message of messages) {
+  for (const message of activeMessages) {
     if (message.compaction) continue;
     const content = getApiMessageContent(message);
     if (message.role === 'assistant' && !hasApiMessageContent(content)) continue;

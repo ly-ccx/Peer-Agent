@@ -23,7 +23,18 @@ export function buildPersistedCompactedMessages({
   const sourceWithoutPending = pendingAssistant ? sourceMessages.slice(0, -1) : sourceMessages;
   const activeSourceMessages = sourceWithoutPending.filter((message) => !isCompactionMessage(message));
 
-  const persisted = [];
+  // ⚠️ slice(-keptCount) 陷阱：JS 中 -0 === 0，slice(-0) ≡ slice(0) = 返回整个数组。
+  // keptCount 表示 compaction 分界线之后仍作为活跃上下文保留的最近消息数；
+  // keptCount<=0 时，所有原始消息都位于分界线之前，仅用于 UI 原文回看。
+  const safeKeptCount = Number.isFinite(keptCount) && keptCount > 0 ? Math.floor(keptCount) : 0;
+  const compressedSourceMessages = safeKeptCount > 0
+    ? activeSourceMessages.slice(0, -safeKeptCount)
+    : activeSourceMessages;
+  const keptSourceMessages = safeKeptCount > 0
+    ? activeSourceMessages.slice(-safeKeptCount)
+    : [];
+
+  const persisted = [...compressedSourceMessages];
   for (const message of compactedMessages) {
     if (!message?._compaction) continue;
     persisted.push({
@@ -34,13 +45,7 @@ export function buildPersistedCompactedMessages({
     });
   }
 
-  // ⚠️ slice(-keptCount) 陷阱：JS 中 -0 === 0，slice(-0) ≡ slice(0) = 返回整个数组。
-  // 真·全量压缩正常路径 keptCount=0（一条不留），若直接 slice(-0) 会退化为「保留全部旧消息」，
-  // 导致压缩落盘后上下文完全没下降。这里用显式守卫：keptCount<=0 时保留 0 条。
-  const safeKeptCount = Number.isFinite(keptCount) && keptCount > 0 ? Math.floor(keptCount) : 0;
-  if (safeKeptCount > 0) {
-    persisted.push(...activeSourceMessages.slice(-safeKeptCount));
-  }
+  persisted.push(...keptSourceMessages);
   if (pendingAssistant) persisted.push(pendingAssistant);
   return persisted;
 }

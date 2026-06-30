@@ -19,7 +19,7 @@ const compactedMessages = [
 ];
 
 describe('conversation compaction persistence', () => {
-  it('persists handoff plus the last kept source messages', () => {
+  it('persists original messages, then handoff, then the last kept source messages', () => {
     const sourceMessages = [
       { id: 'm1', role: 'user', content: 'old 1' },
       { id: 'm2', role: 'assistant', content: 'old 2' },
@@ -34,11 +34,12 @@ describe('conversation compaction persistence', () => {
       idFactory: () => 'compaction-id',
     });
 
-    assert.equal(persisted.length, 3);
-    assert.equal(persisted[0].id, 'compaction-id');
-    assert.equal(persisted[0].role, 'user');
-    assert.equal(persisted[0]._compaction.method, 'structural');
-    assert.deepEqual(persisted.slice(1), sourceMessages.slice(-2));
+    assert.equal(persisted.length, 5);
+    assert.deepEqual(persisted.slice(0, 2), sourceMessages.slice(0, 2));
+    assert.equal(persisted[2].id, 'compaction-id');
+    assert.equal(persisted[2].role, 'user');
+    assert.equal(persisted[2]._compaction.method, 'structural');
+    assert.deepEqual(persisted.slice(3), sourceMessages.slice(-2));
   });
 
   it('preserves the pending assistant placeholder during automatic compaction', () => {
@@ -58,10 +59,11 @@ describe('conversation compaction persistence', () => {
       idFactory: () => 'compaction-id',
     });
 
-    assert.equal(persisted.length, 3);
-    assert.equal(persisted[0].id, 'compaction-id');
-    assert.deepEqual(persisted[1], sourceMessages[2]);
-    assert.deepEqual(persisted[2], pendingAssistant);
+    assert.equal(persisted.length, 5);
+    assert.deepEqual(persisted.slice(0, 2), sourceMessages.slice(0, 2));
+    assert.equal(persisted[2].id, 'compaction-id');
+    assert.deepEqual(persisted[3], sourceMessages[2]);
+    assert.deepEqual(persisted[4], pendingAssistant);
   });
 
   it('does not keep an older compaction handoff as a recent source message', () => {
@@ -96,7 +98,7 @@ describe('conversation compaction persistence', () => {
     assert.equal(persisted.some((message) => message.id === 'previous-compaction'), false);
   });
 
-  it('keeps zero source messages when keptCount is 0 (guards against slice(-0) keeping all)', () => {
+  it('places all source messages before the handoff when keptCount is 0 (guards against slice(-0) active tail)', () => {
     const sourceMessages = [
       { id: 'm1', role: 'user', content: 'old 1' },
       { id: 'm2', role: 'assistant', content: 'old 2' },
@@ -111,14 +113,14 @@ describe('conversation compaction persistence', () => {
       idFactory: () => 'compaction-id',
     });
 
-    // 只应保留压缩交接消息，0 条旧消息；修复前 slice(-0) 会退化为保留全部 4 条。
-    assert.equal(persisted.length, 1);
-    assert.equal(persisted[0].id, 'compaction-id');
-    assert.equal(persisted[0]._compaction.method, 'structural');
-    assert.equal(persisted.some((message) => message.id?.startsWith('m')), false);
+    // keptCount=0 时，所有原文仍留给 UI 回看，但没有任何旧消息位于 compaction 之后的活跃尾部。
+    assert.equal(persisted.length, 5);
+    assert.deepEqual(persisted.slice(0, 4), sourceMessages);
+    assert.equal(persisted[4].id, 'compaction-id');
+    assert.equal(persisted[4]._compaction.method, 'structural');
   });
 
-  it('treats negative keptCount as zero kept source messages', () => {
+  it('treats negative keptCount as zero active source messages after the handoff', () => {
     const sourceMessages = [
       { id: 'm1', role: 'user', content: 'old 1' },
       { id: 'm2', role: 'assistant', content: 'old 2' },
@@ -131,8 +133,9 @@ describe('conversation compaction persistence', () => {
       idFactory: () => 'compaction-id',
     });
 
-    assert.equal(persisted.length, 1);
-    assert.equal(persisted[0].id, 'compaction-id');
+    assert.equal(persisted.length, 3);
+    assert.deepEqual(persisted.slice(0, 2), sourceMessages);
+    assert.equal(persisted[2].id, 'compaction-id');
   });
 
   it('still preserves the pending assistant when keptCount is 0', () => {
@@ -151,9 +154,10 @@ describe('conversation compaction persistence', () => {
       idFactory: () => 'compaction-id',
     });
 
-    // keptCount=0 不保留旧消息，但 pendingAssistant 仍须保留（工具/续写连续性兜底）。
-    assert.equal(persisted.length, 2);
-    assert.equal(persisted[0].id, 'compaction-id');
-    assert.deepEqual(persisted[1], pendingAssistant);
+    // pendingAssistant 不参与压缩边界切分，仍保留在分界线之后作为工具/续写连续性兜底。
+    assert.equal(persisted.length, 4);
+    assert.deepEqual(persisted.slice(0, 2), sourceMessages.slice(0, 2));
+    assert.equal(persisted[2].id, 'compaction-id');
+    assert.deepEqual(persisted[3], pendingAssistant);
   });
 });
