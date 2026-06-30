@@ -75,9 +75,6 @@
   width: 16px;
   height: 16px;
   color: var(--za-text-faint);
-  transform: rotate(0deg);
-  transform-origin: center center;
-  transition: transform 0.2s var(--za-ease-standard, ease);
 }
 
 .goal-panel-toggle-caret svg {
@@ -86,11 +83,8 @@
   display: block;
 }
 
-/* 展开态：caret 由「指向右(›)」顺时针旋转 90° 变为「指向下」，
-   配合 transition 形成收起↔展开的过渡动画。 */
-.goal-panel--expanded .goal-panel-toggle-caret {
-  transform: rotate(90deg);
-}
+/* caret 固定指向右(›)，作为「点击进入/查看」指示符，不随展开态旋转。
+   展开/收起状态由右侧 Workbench 分栏是否出现来表达，无需箭头方向反馈。 */
 
 /* 当折叠态存在活跃计划块时，由 .goal-panel-toggle-active 的 margin-left:auto 负责把
    「活跃标题 + caret」整组推到最右；此时 caret 不能再各自吸收一份剩余空间（否则两段
@@ -898,11 +892,6 @@
 
   .goal-panel-toggle-active-check {
     animation: none;
-  }
-
-  /* 减少动效：caret 仍按展开态旋转到位，但去掉过渡动画，避免位移动画。 */
-  .goal-panel-toggle-caret {
-    transition: none;
   }
 }
 
