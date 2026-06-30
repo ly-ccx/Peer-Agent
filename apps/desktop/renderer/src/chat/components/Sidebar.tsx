@@ -350,13 +350,12 @@ export function Sidebar({
         onMouseEnter={() => setHoveredId(conv.id)}
         onMouseLeave={() => setHoveredId(null)}
       >
-        {!isArchivedView ? (
+        {canTogglePin ? (
           <button
             type="button"
             className={`sidebar-conv-pin sidebar-conv-pin-leading ${isPinned ? 'active' : ''}`}
             title={isPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}
             aria-label={isPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}
-            disabled={!canTogglePin}
             onClick={(e) => {
               e.stopPropagation();
               void (isPinned ? onUnpinConversation(conv.id) : onPinConversation(conv.id));
