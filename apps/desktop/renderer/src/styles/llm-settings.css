@@ -565,7 +565,7 @@
 .pa-dropdown-menu {
   /* 菜单经 createPortal 投到 document.body，用 fixed 按触发器位置定位(left/top 由 JS 内联注入)，
      彻底脱离祖先滚动容器(如 .mcp-modal-body)的溢出计算，展开时不会撑高容器/冒出滚动条。
-     宽度默认贴合触发器宽度(JS 注入的 --pa-dropdown-menu-width)。 */
+     作为全局 portal 浮层，层级必须高于设置页 provider 卡片、默认卡片发光伪元素与普通 modal 内容。 */
   position: fixed;
   width: var(--pa-dropdown-menu-width, auto);
   display: flex;
@@ -576,7 +576,8 @@
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-md);
   box-shadow: 0 12px 30px rgba(16, 24, 40, 0.28);
-  z-index: 1200;
+  isolation: isolate;
+  z-index: var(--z-dropdown-portal, 10000);
   max-height: 280px;
   overflow-y: auto;
   animation: pa-dropdown-in var(--za-motion-fast) var(--za-ease-out) both;
