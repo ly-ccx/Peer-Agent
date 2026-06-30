@@ -53,13 +53,36 @@ function formatRelativeTime(iso: string | null | undefined, isZh: boolean): stri
   return isZh ? `${year} 年` : `${year}y`;
 }
 
-function PinIcon({ size = 13 }: { readonly size?: number }) {
+function PinIcon({ size = 13, filled = false }: { readonly size?: number; readonly filled?: boolean }) {
+  if (filled) {
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        aria-hidden="true"
+      >
+        <path d="M8 3a1 1 0 0 0-.99 1.14L7.8 9.7l-2.5 2.5A1 1 0 0 0 5 12.9V15a1 1 0 0 0 1 1h5v6a1 1 0 1 0 2 0v-6h5a1 1 0 0 0 1-1v-2.1a1 1 0 0 0-.3-.7l-2.5-2.5 1.79-5.56A1 1 0 0 0 17 3H8Z" />
+      </svg>
+    );
+  }
+
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M12 17v5" />
-      <path d="M5 17h14" />
-      <path d="M7 9h10" />
-      <path d="M9 9V3h6v6l3 8H6l3-8Z" />
+      <path d="M8 3h8" />
+      <path d="m9 3 1 7-3 3v2h10v-2l-3-3 1-7" />
     </svg>
   );
 }
@@ -327,6 +350,21 @@ export function Sidebar({
         onMouseEnter={() => setHoveredId(conv.id)}
         onMouseLeave={() => setHoveredId(null)}
       >
+        {!isArchivedView ? (
+          <button
+            type="button"
+            className={`sidebar-conv-pin sidebar-conv-pin-leading ${isPinned ? 'active' : ''}`}
+            title={isPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}
+            aria-label={isPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}
+            disabled={!canTogglePin}
+            onClick={(e) => {
+              e.stopPropagation();
+              void (isPinned ? onUnpinConversation(conv.id) : onPinConversation(conv.id));
+            }}
+          >
+            <PinIcon filled={isPinned} />
+          </button>
+        ) : null}
         {isRunning ? (
           <span
             className="sidebar-conv-spinner"
@@ -403,16 +441,6 @@ export function Sidebar({
               </button>
             ) : (
               <>
-                <button
-                  type="button"
-                  className={`sidebar-conv-pin ${isPinned ? 'active' : ''}`}
-                  title={isPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}
-                  aria-label={isPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}
-                  disabled={!canTogglePin}
-                  onClick={() => { void (isPinned ? onUnpinConversation(conv.id) : onPinConversation(conv.id)); }}
-                >
-                  <PinIcon />
-                </button>
                 <button
                   type="button"
                   className="sidebar-conv-edit"
@@ -577,7 +605,20 @@ export function Sidebar({
               aria-expanded={!pinnedCollapsed}
               onClick={() => setPinnedCollapsed((collapsed) => !collapsed)}
             >
-              <span className={`sidebar-section-chevron ${pinnedCollapsed ? 'is-collapsed' : ''}`}>⌄</span>
+              <svg
+                className={`sidebar-section-chevron ${pinnedCollapsed ? 'is-collapsed' : ''}`}
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="m6 9 6 6 6-6" />
+              </svg>
               <span>{isZh ? '置顶' : 'Pinned'}</span>
               <span className="sidebar-section-count">{pinnedConversations.length}</span>
             </button>
@@ -605,7 +646,7 @@ export function Sidebar({
                 void (contextIsPinned ? onUnpinConversation(contextConv.id) : onPinConversation(contextConv.id));
               }}
             >
-              <PinIcon />
+              <PinIcon filled={contextIsPinned} />
               <span>{contextIsPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}</span>
             </button>
           ) : null}

@@ -344,6 +344,8 @@
   padding: var(--space-8) var(--space-2);
 }
 .channel-conversation-list .conversation-row {
+  --sidebar-conv-leading-gutter: calc(18px + var(--space-1));
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-1);
@@ -355,7 +357,14 @@
   cursor: pointer;
   font-size: 0.82rem;
   color: color-mix(in srgb, var(--graphite-base) 88%, var(--graphite-soft));
-  transition: background var(--za-motion-fast), color var(--za-motion-fast);
+  transition:
+    background var(--za-motion-fast),
+    color var(--za-motion-fast),
+    padding-left var(--za-motion-fast);
+}
+.channel-conversation-list .conversation-row:hover,
+.channel-conversation-list .conversation-row:focus-within {
+  padding-left: calc(var(--space-3) + var(--sidebar-conv-leading-gutter));
 }
 .channel-conversation-list .conversation-row:hover {
   background: var(--za-sidebar-active-bg);
@@ -389,7 +398,9 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-  margin: var(--space-1) 0 var(--space-2);
+  margin: var(--space-1) 0 var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid color-mix(in srgb, var(--chrome-hairline) 82%, transparent);
 }
 .sidebar-section-heading {
   display: flex;
@@ -413,10 +424,11 @@
   color: var(--graphite-base);
 }
 .sidebar-section-chevron {
-  display: inline-flex;
+  flex: 0 0 auto;
   width: 12px;
-  justify-content: center;
+  height: 12px;
   transition: transform var(--za-motion-fast);
+  transform-origin: center;
 }
 .sidebar-section-chevron.is-collapsed {
   transform: rotate(-90deg);
@@ -601,6 +613,23 @@
   align-items: center;
   gap: 4px;
   -webkit-app-region: no-drag;
+}
+.sidebar-conv-pin-leading {
+  position: absolute;
+  top: 50%;
+  left: var(--space-3);
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity var(--za-motion-fast);
+  -webkit-app-region: no-drag;
+}
+.channel-conversation-list .conversation-row:hover .sidebar-conv-pin-leading,
+.channel-conversation-list .conversation-row:focus-within .sidebar-conv-pin-leading,
+.sidebar-conv-pin-leading:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 .sidebar-conv-edit,
 .sidebar-conv-pin,
