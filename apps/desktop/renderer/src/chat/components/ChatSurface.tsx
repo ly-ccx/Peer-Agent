@@ -982,6 +982,50 @@ export function ChatSurface({
     void addFiles(fileItems);
   }, [addFiles]);
 
+  const [isFileDropActive, setIsFileDropActive] = useState(false);
+  const fileDragDepthRef = useRef(0);
+  const canAcceptFileDrop = Boolean(conversationId) && hasProvider && !isStreaming;
+  const hasFileTransfer = useCallback((dataTransfer: DataTransfer | null) => {
+    if (!dataTransfer) return false;
+    if (Array.from(dataTransfer.types ?? []).includes('Files')) return true;
+    return Array.from(dataTransfer.items ?? []).some((item) => item.kind === 'file');
+  }, []);
+  const resetFileDropState = useCallback(() => {
+    fileDragDepthRef.current = 0;
+    setIsFileDropActive(false);
+  }, []);
+  const handleSurfaceDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!canAcceptFileDrop || !hasFileTransfer(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    fileDragDepthRef.current += 1;
+    event.dataTransfer.dropEffect = 'copy';
+    setIsFileDropActive(true);
+  }, [canAcceptFileDrop, hasFileTransfer]);
+  const handleSurfaceDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!canAcceptFileDrop || !hasFileTransfer(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+    setIsFileDropActive(true);
+  }, [canAcceptFileDrop, hasFileTransfer]);
+  const handleSurfaceDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!canAcceptFileDrop || !hasFileTransfer(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+    if (fileDragDepthRef.current === 0) setIsFileDropActive(false);
+  }, [canAcceptFileDrop, hasFileTransfer]);
+  const handleSurfaceDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!canAcceptFileDrop || !hasFileTransfer(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const droppedFiles = event.dataTransfer.files;
+    resetFileDropState();
+    if (!droppedFiles.length) return;
+    void addFiles(droppedFiles);
+  }, [addFiles, canAcceptFileDrop, hasFileTransfer, resetFileDropState]);
+
   // 核心发送路径:给定文本(+ 可选附件)就执行一次 agent turn。
   // handleSend(用户输入)与 pending-task 续传(跨重启)都复用它,避免另造发送路径。
   const submitMessage = useCallback(async (text: string, sentAttachments: ChatAttachment[], submitEffort?: string) => {
@@ -1221,7 +1265,22 @@ export function ChatSurface({
     <WorkspacePathContext.Provider value={workspacePath ?? null}>
     <InteractionContext.Provider value={{ onSelectOption: selectInteractionOption, isStreaming }}>
     <div className="chat-workspace">
-    <div className="chat-surface">
+    <div
+      className="chat-surface"
+      onDragEnter={handleSurfaceDragEnter}
+      onDragOver={handleSurfaceDragOver}
+      onDragLeave={handleSurfaceDragLeave}
+      onDrop={handleSurfaceDrop}
+    >
+      {isFileDropActive ? (
+        <div className="chat-file-drop-overlay" aria-hidden="true">
+          <div className="chat-file-drop-card">
+            <div className="chat-file-drop-icon">＋</div>
+            <div className="chat-file-drop-title">{isZh ? '松手添加到当前对话' : 'Drop to attach to this chat'}</div>
+            <div className="chat-file-drop-subtitle">{isZh ? '文件会复用现有附件规则加入输入区' : 'Files will be added with the existing attachment rules'}</div>
+          </div>
+        </div>
+      ) : null}
       <ChatHeader
         title={conversationTitle ?? ''}
         isZh={isZh}
