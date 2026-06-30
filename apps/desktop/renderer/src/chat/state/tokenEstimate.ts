@@ -53,8 +53,35 @@ export function estimateAttachmentTokens(attachments: readonly ChatAttachment[])
   }, 0);
 }
 
-/** 估算整段会话（历史消息 + 草稿 + 草稿附件）的上下文 token 总量。 */
+/**
+ * 估算整段会话（历史消息 + 草稿 + 草稿附件）的上下文 token 总量。
+ *
+ * 压缩感知（与 toApiMessages 同口径）：发送给模型的内容并非全部 UI 消息，而是
+ * - 「最后一条 compaction 之后」的活跃消息（更早的原文仅供 UI 回看，不回灌模型）；
+ * - 各 compaction 的连续性摘要（summary || content，对齐 buildConversationContinuityContext
+ *   实际经 continuity 通道注入的文本）。
+ * 因此估算只统计这部分，使压缩完成瞬间显示值随之回落，避免被压缩前原文长期顶高。
+ * 无 compaction 时退化为「全部消息求和」的原行为，保证向后兼容。
+ */
 export function estimateConversationTokens(messages: readonly ChatMsg[], draft: string, draftAttachments: readonly ChatAttachment[]): number {
-  const messageTokens = messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
-  return Math.max(0, messageTokens + estimateTextTokens(draft) + estimateAttachmentTokens(draftAttachments));
+  const lastCompactionIndex = messages.reduce(
+    (latest, message, index) => (message.compaction ? index : latest),
+    -1,
+  );
+  const activeMessages = lastCompactionIndex >= 0 ? messages.slice(lastCompactionIndex + 1) : messages;
+
+  let messageTokens = 0;
+  for (const message of activeMessages) {
+    if (message.compaction) continue;
+    messageTokens += estimateMessageTokens(message);
+  }
+
+  // 计入所有 compaction 的连续性摘要（无论是否在活跃区间内，摘要都会被注入连续性上下文）。
+  let continuityTokens = 0;
+  for (const message of messages) {
+    if (!message.compaction) continue;
+    continuityTokens += estimateTextTokens(message.compaction.summary || message.content);
+  }
+
+  return Math.max(0, messageTokens + continuityTokens + estimateTextTokens(draft) + estimateAttachmentTokens(draftAttachments));
 }

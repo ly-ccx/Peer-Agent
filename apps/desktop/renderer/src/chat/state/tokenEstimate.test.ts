@@ -88,4 +88,47 @@ describe('estimateConversationTokens', () => {
   it('is 0 for empty conversation', () => {
     assert.equal(estimateConversationTokens([], '', []), 0);
   });
+
+  // 压缩感知：与 toApiMessages 同口径——只统计最后一条 compaction 之后的活跃消息 + 各 compaction 摘要。
+  const compaction = (summary?: string) => ({
+    method: 'rolling',
+    originalMessageCount: 3,
+    beforeTokens: 100,
+    afterTokens: 20,
+    ...(summary === undefined ? {} : { summary }),
+  });
+
+  it('counts only active messages after the last compaction boundary (pre-boundary originals excluded)', () => {
+    const total = estimateConversationTokens([
+      msg({ content: 'abcd' }), // 压缩点之前的原文：不计入
+      msg({ content: 'summary', compaction: compaction() }), // compaction 本体跳过，摘要按 content 回退计入 ceil(7/4)=2
+      msg({ content: 'abcd' }), // 活跃消息：10+1=11
+    ], '', []);
+    assert.equal(total, 11 + 2);
+  });
+
+  it('counts the compaction summary (prefers summary over content)', () => {
+    const total = estimateConversationTokens([
+      msg({ content: 'this-original-must-be-ignored' }), // 压缩点之前的原文：不计入
+      msg({ content: 'xxxx', compaction: compaction('abcd') }), // 摘要 'abcd' => 1（优先于 content）
+    ], '', []);
+    assert.equal(total, 1);
+  });
+
+  it('matches the original full-sum behavior when there is no compaction', () => {
+    const messages = [msg({ content: 'abcd' }), msg({ content: 'abcd' })];
+    // 无 compaction：退化为全部消息求和 = 11 + 11
+    assert.equal(estimateConversationTokens(messages, '', []), 22);
+  });
+
+  it('counts all compaction summaries but only originals after the last boundary', () => {
+    const total = estimateConversationTokens([
+      msg({ content: 'abcd' }), // 第一个压缩点之前：不计入
+      msg({ content: 'x', compaction: compaction('ab') }), // 摘要 'ab' => 1
+      msg({ content: 'abcd' }), // 两个压缩点之间：不计入
+      msg({ content: 'x', compaction: compaction('abcdefgh') }), // 摘要 8 字符 => 2
+      msg({ content: 'abcd' }), // 最后一条压缩之后的活跃消息：11
+    ], '', []);
+    assert.equal(total, 11 + 1 + 2);
+  });
 });
