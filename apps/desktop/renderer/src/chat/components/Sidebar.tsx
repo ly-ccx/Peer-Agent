@@ -56,6 +56,7 @@ export function Sidebar({
   activeConversationId,
   conversationView,
   runningConversationIds,
+  compactingConversations,
   runningWorkspacePaths,
   activePage,
   i18n,
@@ -75,6 +76,8 @@ export function Sidebar({
   readonly conversationView: ConversationView;
   // 当前正在流式运行的会话 id 集合(表达层状态,真值来自 main 的 activeStreams 广播)。
   readonly runningConversationIds?: ReadonlySet<string>;
+  // 当前正在执行上下文压缩的会话 -> 进度百分比(可为 null)。仅由前台活跃会话即时上报维护。
+  readonly compactingConversations?: ReadonlyMap<string, number | null>;
   // ADR 27: 有运行中流的工作区路径集合,用于在工作区入口/下拉项上提示"该工作区有任务在跑"。
   readonly runningWorkspacePaths?: ReadonlySet<string>;
   readonly activePage: string;
@@ -312,10 +315,17 @@ export function Sidebar({
         ) : null}
         {conversations.map((conv) => {
           const isRunning = Boolean(runningConversationIds?.has(conv.id));
+          // 上下文压缩状态(含进度百分比)：与运行状态独立，区别于运行点单独显示压缩指示。
+          const isCompacting = Boolean(compactingConversations?.has(conv.id));
+          const compactPercent = isCompacting ? compactingConversations?.get(conv.id) ?? null : null;
+          const compactLabel = isZh ? '压缩中' : 'Compacting';
+          const compactPercentText =
+            typeof compactPercent === 'number' ? `${Math.round(compactPercent)}%` : null;
+          const compactTitle = compactPercentText ? `${compactLabel} ${compactPercentText}` : compactLabel;
           return (
             <div
               key={conv.id}
-              className={`conversation-row ${activeConversationId === conv.id ? 'active' : ''} ${isRunning ? 'is-running' : ''}`}
+              className={`conversation-row ${activeConversationId === conv.id ? 'active' : ''} ${isRunning ? 'is-running' : ''} ${isCompacting ? 'is-compacting' : ''}`}
               onClick={() => onSelectConversation(conv.id)}
               onMouseEnter={() => setHoveredId(conv.id)}
               onMouseLeave={() => setHoveredId(null)}
@@ -327,6 +337,18 @@ export function Sidebar({
                   aria-label={isZh ? '运行中' : 'Running'}
                   title={isZh ? '运行中' : 'Running'}
                 />
+              ) : null}
+              {!isRunning && isCompacting ? (
+                <span className="sidebar-conv-compacting" title={compactTitle}>
+                  <span
+                    className="sidebar-conv-compacting-dot"
+                    role="img"
+                    aria-label={compactTitle}
+                  />
+                  {compactPercentText ? (
+                    <span className="sidebar-conv-compacting-pct">{compactPercentText}</span>
+                  ) : null}
+                </span>
               ) : null}
               {editingConversationId === conv.id ? (
                 <input
@@ -398,10 +420,10 @@ export function Sidebar({
                       <button
                         type="button"
                         className="sidebar-conv-archive"
-                        title={isRunning ? (isZh ? '运行中不可归档' : 'Cannot archive while running') : (isZh ? '归档会话' : 'Archive chat')}
+                        title={isRunning ? (isZh ? '运行中不可归档' : 'Cannot archive while running') : isCompacting ? (isZh ? '压缩中不可归档' : 'Cannot archive while compacting') : (isZh ? '归档会话' : 'Archive chat')}
                         aria-label={isZh ? '归档会话' : 'Archive chat'}
-                        disabled={isRunning}
-                        onClick={() => { if (!isRunning) void onArchiveConversation(conv.id); }}
+                        disabled={isRunning || isCompacting}
+                        onClick={() => { if (!isRunning && !isCompacting) void onArchiveConversation(conv.id); }}
                       >
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                           <rect x="3" y="4" width="18" height="4" rx="1" />

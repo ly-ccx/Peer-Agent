@@ -89,7 +89,7 @@ import { MessageActionBar, type MessageActionId } from './thread/MessageActionBa
 import { MessageRail, type MessageRailItem } from './thread/MessageRail';
 import { useTypewriterStream } from '../hooks/useTypewriterStream';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
-import { useStreamingReport } from '../hooks/useStreamingReport';
+import { useStreamingReport, useCompactingReport } from '../hooks/useStreamingReport';
 import { useChatStreamSubscription } from '../hooks/useChatStreamSubscription';
 import { useWorkbench } from '../../workbench/WorkbenchContext';
 
@@ -266,6 +266,7 @@ export function ChatSurface({
   onOpenSettings,
   onConversationUpdated,
   onStreamingChange,
+  onCompactingChange,
   onBranch,
   onRenameConversation,
   onArchiveConversation,
@@ -285,6 +286,12 @@ export function ChatSurface({
   readonly onConversationUpdated?: () => void;
   // 把当前会话的流式运行状态上报给上层(App),供左侧列表显示 Loading 图标。
   readonly onStreamingChange?: (conversationId: string | null, isStreaming: boolean) => void;
+  // 把当前会话的上下文压缩状态(含进度百分比)上报给上层(App),供左侧列表显示压缩指示。
+  readonly onCompactingChange?: (
+    conversationId: string | null,
+    isCompacting: boolean,
+    percent: number | null,
+  ) => void;
   readonly onBranch?: (newConversationId: string) => void;
   readonly onRenameConversation?: (id: string, title: string) => void;
   readonly onArchiveConversation?: (id: string) => void;
@@ -308,6 +315,8 @@ export function ChatSurface({
   // 把流式运行状态(含会话坐标)上报给上层,供左侧列表显示 Loading 图标。
   // 表达层只反映 isStreaming 真值,不引入新的执行真值。下沉到 useStreamingReport。
   useStreamingReport(conversationId, isStreaming, onStreamingChange);
+  // 把上下文压缩状态(含会话坐标 + 进度百分比)上报给上层,供左侧列表显示压缩指示。
+  useCompactingReport(conversationId, isCompacting, compactionPercent, onCompactingChange);
   const [streamError, setStreamError] = useState<string | null>(null);
   // 思考强度全局偏好(读取/回写 settings-store,五档),逻辑见 hooks/useEffortPreference。
   const { effort, setEffort, changeEffort } = useEffortPreference();

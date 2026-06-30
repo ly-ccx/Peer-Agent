@@ -378,6 +378,9 @@
 .channel-conversation-list .conversation-row.is-running {
   color: var(--graphite-base);
 }
+.channel-conversation-list .conversation-row.is-compacting {
+  color: var(--graphite-base);
+}
 
 .sidebar-conversations {
   flex: 1;
@@ -466,6 +469,47 @@
   font-size: 0.65rem;
   line-height: 1;
   color: var(--graphite-mute);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 会话「压缩中」指示（区别于运行点：采用 azure 色调脉冲 + 百分比）── */
+.sidebar-conv-compacting {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+.sidebar-conv-compacting-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--azure-seal);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--azure-seal) 45%, transparent);
+  animation: sidebar-conv-compacting-pulse 1.4s var(--za-ease-standard) infinite;
+}
+@keyframes sidebar-conv-compacting-pulse {
+  0% {
+    opacity: 0.95;
+    transform: scale(1);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--azure-seal) 45%, transparent);
+  }
+  60% {
+    opacity: 0.6;
+    transform: scale(0.82);
+    box-shadow: 0 0 0 5px transparent;
+  }
+  100% {
+    opacity: 0.95;
+    transform: scale(1);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.sidebar-conv-compacting-pct {
+  font-size: 0.62rem;
+  line-height: 1;
+  color: var(--azure-seal);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }

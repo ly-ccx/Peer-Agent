@@ -50,6 +50,11 @@ export function App() {
   // 另外 ChatSurface 的 onStreamingChange 作为本会话的即时信号合并进集合(更快反馈)。
   const [runningConversationIds, setRunningConversationIds] = useState<ReadonlySet<string>>(
     () => new Set());
+  // 表达层状态:当前正在执行上下文压缩的会话 -> 进度百分比(可为 null)。
+  // 仅由前台活跃会话 ChatSurface 的 onCompactingChange 即时上报维护(压缩只发生在前台,无需 main 广播)。
+  const [compactingConversations, setCompactingConversations] = useState<
+    ReadonlyMap<string, number | null>
+  >(() => new Map());
   // ADR 27: 有运行中流的工作区路径集合,由活跃流投影的 streams 维度派生。
   // 让侧栏能提示"其它工作区仍有任务在跑",避免切换工作区后误以为任务丢失。
   const [runningWorkspacePaths, setRunningWorkspacePaths] = useState<ReadonlySet<string>>(
@@ -260,6 +265,7 @@ export function App() {
               activeConversationId={activeConversationId}
               conversationView={conversationView}
               runningConversationIds={runningConversationIds}
+              compactingConversations={compactingConversations}
               runningWorkspacePaths={runningWorkspacePaths}
               activePage={activePage}
               i18n={i18n}
@@ -298,6 +304,21 @@ export function App() {
                       if (streaming === has) return prev;
                       const next = new Set(prev);
                       if (streaming) next.add(convId);
+                      else next.delete(convId);
+                      return next;
+                    });
+                  }}
+                  onCompactingChange={(convId, compacting, percent) => {
+                    if (!convId) return;
+                    setCompactingConversations((prev) => {
+                      const has = prev.has(convId);
+                      const prevPercent = prev.get(convId) ?? null;
+                      // 状态与百分比均未变化时复用旧引用,避免无谓重渲染。
+                      if (compacting === has && (!compacting || prevPercent === (percent ?? null))) {
+                        return prev;
+                      }
+                      const next = new Map(prev);
+                      if (compacting) next.set(convId, percent ?? null);
                       else next.delete(convId);
                       return next;
                     });
