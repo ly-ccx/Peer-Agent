@@ -37,11 +37,16 @@ function normalizeStatuses(status) {
 }
 
 function normalizeMeta(meta) {
+  const status = normalizeStatus(meta?.status);
+  const pinnedAt = typeof meta?.pinnedAt === 'string' && meta.pinnedAt.trim() ? meta.pinnedAt : null;
+  const pinnedOrder = pinnedAt && Number.isFinite(Number(meta?.pinnedOrder)) ? Number(meta.pinnedOrder) : null;
   return {
     ...meta,
     mode: normalizeMode(meta?.mode),
-    status: normalizeStatus(meta?.status),
-    archivedAt: normalizeStatus(meta?.status) === 'archived' ? (meta?.archivedAt || meta?.updatedAt || meta?.createdAt || null) : null,
+    status,
+    archivedAt: status === 'archived' ? (meta?.archivedAt || meta?.updatedAt || meta?.createdAt || null) : null,
+    pinnedAt,
+    pinnedOrder,
   };
 }
 
@@ -83,6 +88,8 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
       mode: normalizeMode(mode),
       status: 'active',
       archivedAt: null,
+      pinnedAt: null,
+      pinnedOrder: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -214,6 +221,10 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
     const now = new Date().toISOString();
     meta.status = nextStatus;
     meta.archivedAt = nextStatus === 'archived' ? now : null;
+    if (nextStatus === 'archived') {
+      meta.pinnedAt = null;
+      meta.pinnedOrder = null;
+    }
     meta.updatedAt = now;
     writeJsonl(indexFile, index);
     const msgs = existsSync(convFile(id)) ? readJsonl(convFile(id)) : [];
@@ -226,6 +237,65 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
 
   function restoreConversation(id) {
     return setArchiveStatus(id, 'active');
+  }
+
+  function getPinnedOrderSeed(index) {
+    const orders = index
+      .filter((meta) => meta.pinnedAt && meta.pinnedOrder !== null && meta.pinnedOrder !== undefined)
+      .map((meta) => Number(meta.pinnedOrder))
+      .filter((order) => Number.isFinite(order));
+    return orders.length ? Math.min(...orders) - 1 : 0;
+  }
+
+  function withMessageCount(meta) {
+    const msgs = existsSync(convFile(meta.id)) ? readJsonl(convFile(meta.id)) : [];
+    return { ...meta, messageCount: msgs.length };
+  }
+
+  function pinConversation(id) {
+    const index = readIndex();
+    const meta = index.find((c) => c.id === id);
+    if (!meta) return null;
+    if (normalizeStatus(meta.status) === 'archived') return withMessageCount(meta);
+    const now = new Date().toISOString();
+    if (!meta.pinnedAt) {
+      meta.pinnedAt = now;
+      meta.pinnedOrder = getPinnedOrderSeed(index);
+    }
+    meta.updatedAt = now;
+    writeJsonl(indexFile, index);
+    return withMessageCount(meta);
+  }
+
+  function unpinConversation(id) {
+    const index = readIndex();
+    const meta = index.find((c) => c.id === id);
+    if (!meta) return null;
+    const now = new Date().toISOString();
+    meta.pinnedAt = null;
+    meta.pinnedOrder = null;
+    meta.updatedAt = now;
+    writeJsonl(indexFile, index);
+    return withMessageCount(meta);
+  }
+
+  function reorderPinnedConversations(ids = []) {
+    const orderedIds = Array.isArray(ids) ? ids.filter(Boolean) : [];
+    const index = readIndex();
+    const pinned = index
+      .filter((meta) => meta.pinnedAt && normalizeStatus(meta.status) === 'active')
+      .sort((a, b) => Number(a.pinnedOrder ?? 0) - Number(b.pinnedOrder ?? 0));
+    const pinnedIds = new Set(pinned.map((meta) => meta.id));
+    const nextIds = [
+      ...orderedIds.filter((id) => pinnedIds.has(id)),
+      ...pinned.map((meta) => meta.id).filter((id) => !orderedIds.includes(id)),
+    ];
+    const orderById = new Map(nextIds.map((id, index) => [id, index]));
+    for (const meta of index) {
+      if (orderById.has(meta.id)) meta.pinnedOrder = orderById.get(meta.id);
+    }
+    writeJsonl(indexFile, index);
+    return listConversations({ status: 'active' });
   }
 
   function autoArchiveConversations({ before, excludeIds = [] } = {}) {
@@ -242,6 +312,8 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
       if (!Number.isFinite(updatedMs) || updatedMs >= cutoff) continue;
       meta.status = 'archived';
       meta.archivedAt = now;
+      meta.pinnedAt = null;
+      meta.pinnedOrder = null;
       meta.updatedAt = now;
       archivedIds.push(meta.id);
     }
@@ -292,6 +364,9 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
     addUsage,
     archiveConversation,
     restoreConversation,
+    pinConversation,
+    unpinConversation,
+    reorderPinnedConversations,
     autoArchiveConversations,
     deleteConversation,
   };

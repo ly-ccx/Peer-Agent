@@ -343,3 +343,62 @@ test('updateMessageById returns null when there is no target message', () => {
     cleanup();
   }
 });
+
+test('pinConversation persists pinned metadata and unpinConversation clears it', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'pin me' });
+    const pinned = store.pinConversation(conv.id);
+    assert.equal(typeof pinned.pinnedAt, 'string');
+    assert.equal(pinned.pinnedOrder, 0);
+
+    const reloaded = store.listConversations({ status: 'active' }).find((item) => item.id === conv.id);
+    assert.equal(reloaded.pinnedAt, pinned.pinnedAt);
+    assert.equal(reloaded.pinnedOrder, 0);
+
+    const unpinned = store.unpinConversation(conv.id);
+    assert.equal(unpinned.pinnedAt, null);
+    assert.equal(unpinned.pinnedOrder, null);
+  } finally {
+    cleanup();
+  }
+});
+
+test('reorderPinnedConversations updates only active pinned conversations order', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const a = store.createConversation({ title: 'a' });
+    const b = store.createConversation({ title: 'b' });
+    const c = store.createConversation({ title: 'c' });
+    store.pinConversation(a.id);
+    store.pinConversation(b.id);
+    store.pinConversation(c.id);
+
+    store.reorderPinnedConversations([a.id, c.id, b.id]);
+    const pinned = store.listConversations({ status: 'active' })
+      .filter((conv) => conv.pinnedAt)
+      .sort((left, right) => left.pinnedOrder - right.pinnedOrder);
+    assert.deepEqual(pinned.map((conv) => conv.id), [a.id, c.id, b.id]);
+    assert.deepEqual(pinned.map((conv) => conv.pinnedOrder), [0, 1, 2]);
+  } finally {
+    cleanup();
+  }
+});
+
+test('archiving a pinned conversation clears pinned metadata', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'pinned' });
+    store.pinConversation(conv.id);
+    const archived = store.archiveConversation(conv.id);
+    assert.equal(archived.status, 'archived');
+    assert.equal(archived.pinnedAt, null);
+    assert.equal(archived.pinnedOrder, null);
+
+    const reloaded = store.listConversations({ status: 'archived' }).find((item) => item.id === conv.id);
+    assert.equal(reloaded.pinnedAt, null);
+    assert.equal(reloaded.pinnedOrder, null);
+  } finally {
+    cleanup();
+  }
+});

@@ -20,6 +20,8 @@ interface ConversationMeta {
   updatedAt: string;
   status?: ConversationStatus;
   archivedAt?: string | null;
+  pinnedAt?: string | null;
+  pinnedOrder?: number | null;
 }
 
 function readSystemInstructions(settings: Record<string, unknown> | null | undefined): string {
@@ -228,6 +230,21 @@ export function App() {
     await refreshConversations(activeWorkspace, conversationView);
   }, [activeWorkspace, conversationView, refreshConversations]);
 
+  const handlePinConversation = useCallback(async (id: string) => {
+    await clientApi.conversationsPin({ id });
+    await refreshConversations(activeWorkspace, conversationView);
+  }, [activeWorkspace, conversationView, refreshConversations]);
+
+  const handleUnpinConversation = useCallback(async (id: string) => {
+    await clientApi.conversationsUnpin({ id });
+    await refreshConversations(activeWorkspace, conversationView);
+  }, [activeWorkspace, conversationView, refreshConversations]);
+
+  const handleReorderPinnedConversations = useCallback(async (ids: readonly string[]) => {
+    await clientApi.conversationsReorderPinned({ ids });
+    await refreshConversations(activeWorkspace, conversationView);
+  }, [activeWorkspace, conversationView, refreshConversations]);
+
   const handleDeleteConversation = useCallback(async (id: string) => {
     await clientApi.conversationsDelete({ id });
     if (activeConversationId === id) setActiveConversationId(null);
@@ -275,6 +292,9 @@ export function App() {
               onRenameConversation={handleRenameConversation}
               onArchiveConversation={handleArchiveConversation}
               onRestoreConversation={handleRestoreConversation}
+              onPinConversation={handlePinConversation}
+              onUnpinConversation={handleUnpinConversation}
+              onReorderPinnedConversations={handleReorderPinnedConversations}
               onShowArchivedConversations={handleShowArchivedConversations}
               onShowActiveConversations={handleShowActiveConversations}
               onOpenSettings={() => setActivePage('settings')}

@@ -1,5 +1,5 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { VersionBadge } from '../../app/components/VersionBadge';
 import { SidebarResizer } from '../../workbench/SidebarResizer';
@@ -13,6 +13,8 @@ interface ConversationMeta {
   updatedAt: string;
   status?: ConversationView;
   archivedAt?: string | null;
+  pinnedAt?: string | null;
+  pinnedOrder?: number | null;
 }
 
 interface WorkspaceEntry {
@@ -51,6 +53,17 @@ function formatRelativeTime(iso: string | null | undefined, isZh: boolean): stri
   return isZh ? `${year} 年` : `${year}y`;
 }
 
+function PinIcon({ size = 13 }: { readonly size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 17v5" />
+      <path d="M5 17h14" />
+      <path d="M7 9h10" />
+      <path d="M9 9V3h6v6l3 8H6l3-8Z" />
+    </svg>
+  );
+}
+
 export function Sidebar({
   conversations,
   activeConversationId,
@@ -66,6 +79,9 @@ export function Sidebar({
   onRenameConversation,
   onArchiveConversation,
   onRestoreConversation,
+  onPinConversation,
+  onUnpinConversation,
+  onReorderPinnedConversations,
   onShowArchivedConversations,
   onShowActiveConversations,
   onOpenSettings,
@@ -88,6 +104,9 @@ export function Sidebar({
   readonly onRenameConversation: (id: string, title: string) => void | Promise<void>;
   readonly onArchiveConversation: (id: string) => void | Promise<void>;
   readonly onRestoreConversation: (id: string) => void | Promise<void>;
+  readonly onPinConversation: (id: string) => void | Promise<void>;
+  readonly onUnpinConversation: (id: string) => void | Promise<void>;
+  readonly onReorderPinnedConversations: (ids: readonly string[]) => void | Promise<void>;
   readonly onShowArchivedConversations: () => void | Promise<void>;
   readonly onShowActiveConversations: () => void | Promise<void>;
   readonly onOpenSettings: () => void;
@@ -97,9 +116,11 @@ export function Sidebar({
   const isArchivedView = conversationView === 'archived';
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; conversation: ConversationMeta } | null>(null);
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const editingInputRef = useRef<HTMLInputElement | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const isFinishingRenameRef = useRef(false);
   const [workspaces, setWorkspaces] = useState<readonly WorkspaceEntry[]>([]);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
@@ -108,6 +129,8 @@ export function Sidebar({
   // 退场动画态:关闭时先置 closing 播退场动画,动画结束(onAnimationEnd)再真正卸载下拉。
   const [wsClosing, setWsClosing] = useState(false);
   const wsWrapRef = useRef<HTMLDivElement>(null);
+  const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
+  const [draggingPinnedId, setDraggingPinnedId] = useState<string | null>(null);
 
   const refreshWorkspaces = useCallback(async () => {
     try {
@@ -191,6 +214,7 @@ export function Sidebar({
     if (isArchivedView) return;
     isFinishingRenameRef.current = false;
     setConfirmDeleteId(null);
+    setContextMenu(null);
     setEditingConversationId(conv.id);
     setEditingTitle(conv.title || (isZh ? '新对话' : 'New Chat'));
   }, [isArchivedView, isZh]);
@@ -212,6 +236,238 @@ export function Sidebar({
     if (!nextTitle || nextTitle === conv.title) return;
     await onRenameConversation(conv.id, nextTitle);
   }, [editingTitle, finishRenameConversation, onRenameConversation]);
+
+  const pinnedConversations = useMemo(() => conversations
+    .filter((conv) => !isArchivedView && conv.pinnedAt)
+    .sort((a, b) => Number(a.pinnedOrder ?? 0) - Number(b.pinnedOrder ?? 0)), [conversations, isArchivedView]);
+  const normalConversations = useMemo(
+    () => isArchivedView ? conversations : conversations.filter((conv) => !conv.pinnedAt),
+    [conversations, isArchivedView],
+  );
+  const pinnedIds = useMemo(() => pinnedConversations.map((conv) => conv.id), [pinnedConversations]);
+
+  const movePinnedConversation = useCallback((dragId: string, targetId: string) => {
+    if (dragId === targetId) return;
+    const from = pinnedIds.indexOf(dragId);
+    const to = pinnedIds.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    const nextIds = [...pinnedIds];
+    const [moved] = nextIds.splice(from, 1);
+    nextIds.splice(to, 0, moved);
+    void onReorderPinnedConversations(nextIds);
+  }, [onReorderPinnedConversations, pinnedIds]);
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!contextMenuRef.current?.contains(e.target as Node)) closeContextMenu();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeContextMenu();
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [closeContextMenu, contextMenu]);
+
+  const renderConversationRow = (conv: ConversationMeta, options: { pinnedGroup?: boolean } = {}) => {
+    const isRunning = Boolean(runningConversationIds?.has(conv.id));
+    // 上下文压缩状态(含进度百分比)：与运行状态独立，区别于运行点单独显示压缩指示。
+    const isCompacting = Boolean(compactingConversations?.has(conv.id));
+    const compactPercent = isCompacting ? compactingConversations?.get(conv.id) ?? null : null;
+    const compactLabel = isZh ? '压缩中' : 'Compacting';
+    const compactPercentText = typeof compactPercent === 'number' ? `${Math.round(compactPercent)}%` : null;
+    const compactTitle = compactPercentText ? `${compactLabel} ${compactPercentText}` : compactLabel;
+    const isPinned = Boolean(conv.pinnedAt);
+    const canTogglePin = !isArchivedView && !isRunning && !isCompacting;
+    const rowClasses = [
+      'conversation-row',
+      activeConversationId === conv.id ? 'active' : '',
+      isRunning ? 'is-running' : '',
+      isCompacting ? 'is-compacting' : '',
+      isPinned ? 'is-pinned' : '',
+      options.pinnedGroup ? 'is-in-pinned-group' : '',
+      draggingPinnedId === conv.id ? 'is-dragging' : '',
+    ].filter(Boolean).join(' ');
+
+    return (
+      <div
+        key={conv.id}
+        className={rowClasses}
+        draggable={Boolean(options.pinnedGroup && canTogglePin)}
+        onDragStart={(e) => {
+          if (!options.pinnedGroup || !canTogglePin) return;
+          setDraggingPinnedId(conv.id);
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', conv.id);
+        }}
+        onDragOver={(e) => {
+          if (!options.pinnedGroup || !draggingPinnedId || draggingPinnedId === conv.id) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+        }}
+        onDrop={(e) => {
+          if (!options.pinnedGroup) return;
+          e.preventDefault();
+          const dragId = e.dataTransfer.getData('text/plain') || draggingPinnedId;
+          if (dragId) movePinnedConversation(dragId, conv.id);
+          setDraggingPinnedId(null);
+        }}
+        onDragEnd={() => setDraggingPinnedId(null)}
+        onClick={() => onSelectConversation(conv.id)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setContextMenu({ x: e.clientX, y: e.clientY, conversation: conv });
+        }}
+        onMouseEnter={() => setHoveredId(conv.id)}
+        onMouseLeave={() => setHoveredId(null)}
+      >
+        {isRunning ? (
+          <span
+            className="sidebar-conv-spinner"
+            role="img"
+            aria-label={isZh ? '运行中' : 'Running'}
+            title={isZh ? '运行中' : 'Running'}
+          />
+        ) : null}
+        {!isRunning && isCompacting ? (
+          <span className="sidebar-conv-compacting" title={compactTitle}>
+            <span
+              className="sidebar-conv-compacting-dot"
+              role="img"
+              aria-label={compactTitle}
+            />
+            {compactPercentText ? (
+              <span className="sidebar-conv-compacting-pct">{compactPercentText}</span>
+            ) : null}
+          </span>
+        ) : null}
+        {editingConversationId === conv.id ? (
+          <input
+            ref={editingInputRef}
+            className="sidebar-conv-title-input"
+            value={editingTitle}
+            maxLength={80}
+            aria-label={isZh ? '编辑对话标题' : 'Edit conversation title'}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => setEditingTitle(e.target.value)}
+            onBlur={() => { void submitRenameConversation(conv); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void submitRenameConversation(conv);
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelRenameConversation();
+              }
+            }}
+          />
+        ) : (
+          <span
+            className="sidebar-conv-title"
+            title={isArchivedView ? undefined : (isZh ? '双击编辑标题' : 'Double-click to edit title')}
+            onDoubleClick={(e) => { e.stopPropagation(); beginRenameConversation(conv); }}
+          >
+            {conv.title || (isZh ? '新对话' : 'New Chat')}
+          </span>
+        )}
+        {confirmDeleteId === conv.id ? (
+          <span className="sidebar-conv-confirm" onClick={(e) => e.stopPropagation()}>
+            <span>{isZh ? '确认？' : 'Delete?'}</span>
+            <button type="button" className="confirm-yes" onClick={() => { setConfirmDeleteId(null); onDeleteConversation(conv.id); }}>
+              {isZh ? '删除' : 'Del'}
+            </button>
+            <button type="button" className="confirm-no" onClick={() => setConfirmDeleteId(null)}>
+              {isZh ? '取消' : 'No'}
+            </button>
+          </span>
+        ) : hoveredId === conv.id ? (
+          <span className="sidebar-conv-actions" onClick={(e) => e.stopPropagation()}>
+            {isArchivedView ? (
+              <button
+                type="button"
+                className="sidebar-conv-restore"
+                title={isZh ? '恢复会话' : 'Restore chat'}
+                aria-label={isZh ? '恢复会话' : 'Restore chat'}
+                onClick={() => { void onRestoreConversation(conv.id); }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 12a9 9 0 1 0 3-6.7" />
+                  <path d="M3 4v6h6" />
+                </svg>
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className={`sidebar-conv-pin ${isPinned ? 'active' : ''}`}
+                  title={isPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}
+                  aria-label={isPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}
+                  disabled={!canTogglePin}
+                  onClick={() => { void (isPinned ? onUnpinConversation(conv.id) : onPinConversation(conv.id)); }}
+                >
+                  <PinIcon />
+                </button>
+                <button
+                  type="button"
+                  className="sidebar-conv-edit"
+                  title={isZh ? '编辑标题' : 'Edit title'}
+                  aria-label={isZh ? '编辑标题' : 'Edit title'}
+                  onClick={() => beginRenameConversation(conv)}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className="sidebar-conv-archive"
+                  title={isRunning ? (isZh ? '运行中不可归档' : 'Cannot archive while running') : isCompacting ? (isZh ? '压缩中不可归档' : 'Cannot archive while compacting') : (isZh ? '归档会话' : 'Archive chat')}
+                  aria-label={isZh ? '归档会话' : 'Archive chat'}
+                  disabled={isRunning || isCompacting}
+                  onClick={() => { if (!isRunning && !isCompacting) void onArchiveConversation(conv.id); }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="4" rx="1" />
+                    <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
+                    <path d="M10 12h4" />
+                  </svg>
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              className="sidebar-conv-delete"
+              aria-label={isZh ? '删除对话' : 'Delete conversation'}
+              onClick={() => setConfirmDeleteId(conv.id)}
+            >
+              ×
+            </button>
+          </span>
+        ) : (
+          <time
+            className="sidebar-conv-time"
+            dateTime={conv.updatedAt}
+            title={conv.updatedAt ? new Date(conv.updatedAt).toLocaleString() : undefined}
+          >
+            {formatRelativeTime(conv.updatedAt, isZh)}
+          </time>
+        )}
+      </div>
+    );
+  };
+
+  const contextConv = contextMenu?.conversation ?? null;
+  const contextIsPinned = Boolean(contextConv?.pinnedAt);
+  const contextIsRunning = Boolean(contextConv && runningConversationIds?.has(contextConv.id));
+  const contextIsCompacting = Boolean(contextConv && compactingConversations?.has(contextConv.id));
+  const contextCanTogglePin = Boolean(contextConv && !isArchivedView && !contextIsRunning && !contextIsCompacting);
 
   return (
     <aside className="app-sidebar">
@@ -313,146 +569,73 @@ export function Sidebar({
               : (isZh ? '暂无会话' : 'No chats yet')}
           </div>
         ) : null}
-        {conversations.map((conv) => {
-          const isRunning = Boolean(runningConversationIds?.has(conv.id));
-          // 上下文压缩状态(含进度百分比)：与运行状态独立，区别于运行点单独显示压缩指示。
-          const isCompacting = Boolean(compactingConversations?.has(conv.id));
-          const compactPercent = isCompacting ? compactingConversations?.get(conv.id) ?? null : null;
-          const compactLabel = isZh ? '压缩中' : 'Compacting';
-          const compactPercentText =
-            typeof compactPercent === 'number' ? `${Math.round(compactPercent)}%` : null;
-          const compactTitle = compactPercentText ? `${compactLabel} ${compactPercentText}` : compactLabel;
-          return (
-            <div
-              key={conv.id}
-              className={`conversation-row ${activeConversationId === conv.id ? 'active' : ''} ${isRunning ? 'is-running' : ''} ${isCompacting ? 'is-compacting' : ''}`}
-              onClick={() => onSelectConversation(conv.id)}
-              onMouseEnter={() => setHoveredId(conv.id)}
-              onMouseLeave={() => setHoveredId(null)}
+        {!isArchivedView && pinnedConversations.length > 0 ? (
+          <section className="sidebar-pinned-section" aria-label={isZh ? '置顶会话' : 'Pinned chats'}>
+            <button
+              type="button"
+              className="sidebar-section-heading"
+              aria-expanded={!pinnedCollapsed}
+              onClick={() => setPinnedCollapsed((collapsed) => !collapsed)}
             >
-              {isRunning ? (
-                <span
-                  className="sidebar-conv-spinner"
-                  role="img"
-                  aria-label={isZh ? '运行中' : 'Running'}
-                  title={isZh ? '运行中' : 'Running'}
-                />
-              ) : null}
-              {!isRunning && isCompacting ? (
-                <span className="sidebar-conv-compacting" title={compactTitle}>
-                  <span
-                    className="sidebar-conv-compacting-dot"
-                    role="img"
-                    aria-label={compactTitle}
-                  />
-                  {compactPercentText ? (
-                    <span className="sidebar-conv-compacting-pct">{compactPercentText}</span>
-                  ) : null}
-                </span>
-              ) : null}
-              {editingConversationId === conv.id ? (
-                <input
-                  ref={editingInputRef}
-                  className="sidebar-conv-title-input"
-                  value={editingTitle}
-                  maxLength={80}
-                  aria-label={isZh ? '编辑对话标题' : 'Edit conversation title'}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => setEditingTitle(e.target.value)}
-                  onBlur={() => { void submitRenameConversation(conv); }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      void submitRenameConversation(conv);
-                    } else if (e.key === 'Escape') {
-                      e.preventDefault();
-                      cancelRenameConversation();
-                    }
-                  }}
-                />
-              ) : (
-                <span
-                  className="sidebar-conv-title"
-                  title={isArchivedView ? undefined : (isZh ? '双击编辑标题' : 'Double-click to edit title')}
-                  onDoubleClick={(e) => { e.stopPropagation(); beginRenameConversation(conv); }}
-                >
-                  {conv.title || (isZh ? '新对话' : 'New Chat')}
-                </span>
-              )}
-              {confirmDeleteId === conv.id ? (
-                <span className="sidebar-conv-confirm" onClick={(e) => e.stopPropagation()}>
-                  <button type="button" className="confirm-yes" onClick={() => { setConfirmDeleteId(null); onDeleteConversation(conv.id); }}>
-                    {isZh ? '删除' : 'Del'}
-                  </button>
-                  <button type="button" className="confirm-no" onClick={() => setConfirmDeleteId(null)}>
-                    {isZh ? '取消' : 'No'}
-                  </button>
-                </span>
-              ) : hoveredId === conv.id ? (
-                <span className="sidebar-conv-actions" onClick={(e) => e.stopPropagation()}>
-                  {isArchivedView ? (
-                    <button
-                      type="button"
-                      className="sidebar-conv-restore"
-                      title={isZh ? '恢复会话' : 'Restore chat'}
-                      aria-label={isZh ? '恢复会话' : 'Restore chat'}
-                      onClick={() => { void onRestoreConversation(conv.id); }}
-                    >
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M3 7v6h6" />
-                        <path d="M21 17a9 9 0 0 0-15-6.7L3 13" />
-                      </svg>
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        className="sidebar-conv-edit"
-                        title={isZh ? '编辑标题' : 'Edit title'}
-                        aria-label={isZh ? '编辑标题' : 'Edit title'}
-                        onClick={() => beginRenameConversation(conv)}
-                      >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <path d="M12 20h9" />
-                          <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        className="sidebar-conv-archive"
-                        title={isRunning ? (isZh ? '运行中不可归档' : 'Cannot archive while running') : isCompacting ? (isZh ? '压缩中不可归档' : 'Cannot archive while compacting') : (isZh ? '归档会话' : 'Archive chat')}
-                        aria-label={isZh ? '归档会话' : 'Archive chat'}
-                        disabled={isRunning || isCompacting}
-                        onClick={() => { if (!isRunning && !isCompacting) void onArchiveConversation(conv.id); }}
-                      >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <rect x="3" y="4" width="18" height="4" rx="1" />
-                          <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
-                          <path d="M10 12h4" />
-                        </svg>
-                      </button>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    className="sidebar-conv-delete"
-                    aria-label={isZh ? '删除对话' : 'Delete conversation'}
-                    onClick={() => setConfirmDeleteId(conv.id)}
-                  >×</button>
-                </span>
-              ) : (
-                <time
-                  className="sidebar-conv-time"
-                  dateTime={conv.updatedAt}
-                  title={conv.updatedAt ? new Date(conv.updatedAt).toLocaleString() : undefined}
-                >
-                  {formatRelativeTime(conv.updatedAt, isZh)}
-                </time>
-              )}
-            </div>
-          );
-        })}
+              <span className={`sidebar-section-chevron ${pinnedCollapsed ? 'is-collapsed' : ''}`}>⌄</span>
+              <span>{isZh ? '置顶' : 'Pinned'}</span>
+              <span className="sidebar-section-count">{pinnedConversations.length}</span>
+            </button>
+            {!pinnedCollapsed ? pinnedConversations.map((conv) => renderConversationRow(conv, { pinnedGroup: true })) : null}
+          </section>
+        ) : null}
+        {normalConversations.map((conv) => renderConversationRow(conv))}
       </div>
+
+      {contextMenu && contextConv ? (
+        <div
+          ref={contextMenuRef}
+          className="sidebar-context-menu"
+          role="menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          {!isArchivedView ? (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!contextCanTogglePin}
+              onClick={() => {
+                closeContextMenu();
+                if (!contextCanTogglePin) return;
+                void (contextIsPinned ? onUnpinConversation(contextConv.id) : onPinConversation(contextConv.id));
+              }}
+            >
+              <PinIcon />
+              <span>{contextIsPinned ? (isZh ? '取消置顶' : 'Unpin chat') : (isZh ? '置顶会话' : 'Pin chat')}</span>
+            </button>
+          ) : null}
+          {!isArchivedView ? (
+            <button type="button" role="menuitem" onClick={() => { closeContextMenu(); beginRenameConversation(contextConv); }}>
+              <span>{isZh ? '编辑标题' : 'Edit title'}</span>
+            </button>
+          ) : null}
+          {isArchivedView ? (
+            <button type="button" role="menuitem" onClick={() => { closeContextMenu(); void onRestoreConversation(contextConv.id); }}>
+              <span>{isZh ? '恢复会话' : 'Restore chat'}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={contextIsRunning || contextIsCompacting}
+              onClick={() => {
+                closeContextMenu();
+                if (!contextIsRunning && !contextIsCompacting) void onArchiveConversation(contextConv.id);
+              }}
+            >
+              <span>{isZh ? '归档会话' : 'Archive chat'}</span>
+            </button>
+          )}
+          <button type="button" role="menuitem" className="danger" onClick={() => { closeContextMenu(); setConfirmDeleteId(contextConv.id); }}>
+            <span>{isZh ? '删除会话' : 'Delete chat'}</span>
+          </button>
+        </div>
+      ) : null}
 
       <div className="sidebar-bottom">
         <button

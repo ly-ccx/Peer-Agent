@@ -1192,6 +1192,9 @@ ipcMain.handle('conversations:update-last-message', (_, { id, content }) => conv
 ipcMain.handle('conversations:replace-messages', (_, { id, messages }) => conversationStore.replaceMessages(id, messages));
 ipcMain.handle('conversations:archive', (_, { id }) => conversationStore.archiveConversation(id));
 ipcMain.handle('conversations:restore', (_, { id }) => conversationStore.restoreConversation(id));
+ipcMain.handle('conversations:pin', (_, { id }) => conversationStore.pinConversation(id));
+ipcMain.handle('conversations:unpin', (_, { id }) => conversationStore.unpinConversation(id));
+ipcMain.handle('conversations:reorder-pinned', (_, { ids }) => conversationStore.reorderPinnedConversations(ids));
 ipcMain.handle('conversations:auto-archive', (_, { before, excludeIds } = {}) => {
   const activeStreamIds = llmChatService.listActiveConversationIds();
   return conversationStore.autoArchiveConversations({ before, excludeIds: [...new Set([...(excludeIds || []), ...activeStreamIds])] });
