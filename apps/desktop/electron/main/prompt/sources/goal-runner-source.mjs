@@ -152,6 +152,7 @@ function formatContract() {
     '- After completing a subtask, write evidence back through goal_update_task; do not mark completion without evidenceRefs.',
     '- Do not cross the declared boundaries.',
     '- If you need user input, permission, or evidence is insufficient, call request_user_input (or stop) and explain the blocker instead of pretending completion.',
+    '- Do not use request_user_input to re-ask for plan approval once a plan is awaiting approval; that binary approve/reject decision is owned by the governed approval card / Goal panel (goalPlansApprove). Reserve request_user_input for substantive follow-ups only.',
     '- Use the existing tools and permission flow; do not fabricate Tool Result or Evidence.',
   ].join('\n');
 }

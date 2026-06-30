@@ -84,6 +84,7 @@ import { InteractionAnsweredContext, InteractionContext } from './thread/interac
 import { ChatFindBar } from './thread/ChatFindBar';
 import { ChatHeader } from './thread/ChatHeader';
 import { GoalPlanPanel } from './GoalPlanPanel';
+import { ChatGoalApprovalCard } from './goal/ChatGoalApprovalCard';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
 import { MessageRail, type MessageRailItem } from './thread/MessageRail';
@@ -1441,6 +1442,15 @@ export function ChatSurface({
           onApproveAlways={approveAlwaysPendingPermissionCall}
           onReject={denyPendingPermissionCall}
           i18n={i18n}
+        />
+        {/* 聊天侧镜像受治理批准卡：仅 goal 模式且存在 awaiting_approval 计划时显示，
+            点击复用与右侧面板同一条 goalPlansApprove 治理链路，状态互相消解。
+            实质性追问（request_user_input）仍走对话流，二者正交。 */}
+        <ChatGoalApprovalCard
+          conversationId={conversationId}
+          isZh={isZh}
+          isStreaming={isStreaming}
+          enabled={mode === 'goal'}
         />
         {messageQueue.length > 0 ? (
           <div className="message-queue" role="list" aria-label={isZh ? '待发送队列' : 'Queued messages'}>

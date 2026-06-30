@@ -905,3 +905,102 @@
     transition: none;
   }
 }
+
+/* 聊天侧镜像受治理批准卡（ChatGoalApprovalCard）。
+   与右侧 GoalPlanPanel 共用同一条 goalPlansApprove 治理链路，仅表达层位置不同。
+   视觉沿用 goal-plan-approve / goal-plan-reject 的设计 token，保证两处一致。 */
+.chat-goal-approval {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.chat-goal-approval-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--za-line);
+  border-radius: var(--za-radius-md, 10px);
+  background: var(--za-surface-1);
+}
+
+.chat-goal-approval-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-goal-approval-badge {
+  flex: none;
+  box-sizing: border-box;
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  border-radius: 999px;
+  background: var(--za-warn-soft);
+  color: var(--za-warn);
+}
+
+.chat-goal-approval-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--za-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-goal-approval-goal {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--za-text-muted);
+}
+
+.chat-goal-approval-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.chat-goal-approval-btn {
+  box-sizing: border-box;
+  padding: 6px 14px;
+  border-radius: var(--za-radius-sm);
+  border: 1px solid transparent;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
+}
+
+.chat-goal-approval-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-goal-approval-btn--approve {
+  background: var(--za-primary-control-bg);
+  color: var(--za-primary-control-ink);
+  border-color: var(--za-primary-control-bg);
+}
+
+.chat-goal-approval-btn--approve:hover:not(:disabled) {
+  background: var(--za-active);
+  color: var(--za-text);
+}
+
+.chat-goal-approval-btn--reject {
+  background: var(--za-surface-1);
+  color: var(--za-text-soft);
+  border-color: var(--za-line);
+}
+
+.chat-goal-approval-btn--reject:hover:not(:disabled) {
+  background: var(--za-hover);
+}
+
+.chat-goal-approval-error {
+  font-size: 12px;
+  color: var(--za-warn, #c0392b);
+}

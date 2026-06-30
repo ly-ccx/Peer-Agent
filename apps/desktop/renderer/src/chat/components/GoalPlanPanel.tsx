@@ -11,6 +11,7 @@ import type {
 } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
 import { InteractionContext } from './thread/interactionContext';
+import { useGoalPlanApproval } from './goal/useGoalPlanApproval';
 
 function normalizeConversationId(value: string | number | null | undefined): string | null {
   if (value === null || value === undefined) return null;
@@ -670,36 +671,19 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     [reload, isZh],
   );
 
-  const decide = useCallback(
-    async (plan: GoalPlan, decision: 'approve' | 'reject') => {
-      setBusyPlanId(plan.planId);
-      setError(null);
-      try {
-        await clientApi.goalPlansApprove({
-          planId: plan.planId,
-          approval: {
-            decision,
-            // 治理事实：confirmationId 绑定一次人工确认。此处用前端生成的占位，
-            // 真正的执行链路会以运行时 HumanConfirmation 的 id 覆盖。
-            confirmationId: `ui-${Date.now()}`,
-            decidedAt: new Date().toISOString(),
-          },
-        });
-        await reload();
-        // 批准成功后唤起 chat runtime 发起「执行轮」。落库（治理事实）与执行驱动分离：
-        // store 已记录 GoalApproval Evidence，这里再通过回调进入既有发送路径开始执行。
-        // 见 Goal 模式设计 阶段二→阶段三。
-        if (decision === 'approve') {
-          onApproved?.(plan);
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : isZh ? '操作失败' : 'Action failed');
-      } finally {
-        setBusyPlanId(null);
-      }
-    },
-    [reload, isZh, onApproved],
-  );
+  // 批准 / 驳回收敛到共享 hook（单一事实源）：右侧面板与聊天侧批准卡共用同一条
+  // goalPlansApprove（带 confirmationId 的二元治理事实）链路，状态经 goalPlans:changed
+  // 广播互相消解。见 Goal 模式运行时闸门设计。
+  const {
+    busyPlanId: approvalBusyPlanId,
+    error: approvalError,
+    decide,
+  } = useGoalPlanApproval({ isZh, onApproved, onSettled: reload });
+
+  // 渲染态合并：批准/驳回的 busy/error 来自共享 hook，runner 控制（pause/resume/clear）
+  // 仍用面板自身的 busyPlanId/error。任一来源 busy 即视为该计划 busy。
+  const effectiveBusyPlanId = approvalBusyPlanId ?? busyPlanId;
+  const effectiveError = approvalError ?? error;
 
   const pendingCount = plans.filter((plan) => plan.status === 'awaiting_approval').length;
   // 推到右侧 Workbench Goal slot 后，折叠/展开由 Workbench tab 接管，
@@ -854,7 +838,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
       {!bodyMounted ? null : (() => {
         const body = (
       <div className={`goal-panel-body${closing ? ' goal-panel-body--closing' : ''}`}>
-      {error ? <div className="goal-panel-error">{error}</div> : null}
+      {effectiveError ? <div className="goal-panel-error">{effectiveError}</div> : null}
       {/* 主卡 = mainPlan（仅待批准 / 执行中）才置顶强制展开。
           没有进行中的计划时 mainPlan 为 null，不钉主卡，全部计划进入下方折叠清单。 */}
       {mainPlan ? (
@@ -865,7 +849,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
           isMain
           isZh={isZh}
           isStreaming={isStreaming}
-          busy={busyPlanId === mainPlan.planId}
+          busy={effectiveBusyPlanId === mainPlan.planId}
           onDecide={decide}
           onRunnerControl={controlRunner}
         />
@@ -888,7 +872,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
               defaultExpanded={false}
               isZh={isZh}
               isStreaming={isStreaming}
-              busy={busyPlanId === plan.planId}
+              busy={effectiveBusyPlanId === plan.planId}
               onDecide={decide}
               onRunnerControl={controlRunner}
             />
