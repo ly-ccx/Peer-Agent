@@ -265,23 +265,62 @@
   line-height: 0;
   flex-shrink: 0;
 }
-.thinking-indicator svg {
-  display: block;
+/* 三点波动:思考中三点依次上浮明灭(azure 蓝),完成态收成一颗静态实心圆点(mute 隐入)。 */
+.thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.thinking-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
 }
 .thinking-section.active .thinking-indicator {
   color: var(--azure-seal);
-  animation: thinking-pulse 1.8s ease-in-out infinite;
 }
-.thinking-section.done .thinking-indicator {
-  color: var(--state-success);
+.thinking-section.active .thinking-dot {
+  animation: thinking-dot-wave 1.4s var(--za-ease-in-out, ease-in-out) infinite;
+}
+.thinking-section.active .thinking-dot:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.thinking-section.active .thinking-dot:nth-child(3) {
+  animation-delay: 0.32s;
+}
+.thinking-dot--done {
+  width: 5px;
+  height: 5px;
   animation: thinking-pop 0.3s var(--za-ease-spring) both;
 }
+.thinking-section.done .thinking-indicator {
+  color: var(--graphite-mute);
+}
 .thinking-label {
-  font-family: var(--font-mono);
+  position: relative;
+}
+/* 思考中:文字底色 soft,一道高光从左到右循环扫过(shimmer)。 */
+.thinking-section.active .thinking-label {
+  background: linear-gradient(
+    100deg,
+    var(--graphite-soft) 0%,
+    var(--graphite-soft) 35%,
+    var(--graphite-base) 50%,
+    var(--graphite-soft) 65%,
+    var(--graphite-soft) 100%
+  );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: thinking-shimmer 1.8s linear infinite;
 }
 .thinking-chevron {
   color: var(--graphite-mute);
   flex-shrink: 0;
+  margin-left: auto;
   transition: transform var(--za-motion-fast) var(--za-ease-out);
 }
 .thinking-body {
@@ -308,6 +347,14 @@
   0% { transform: scale(0.6); opacity: 0; }
   60% { transform: scale(1.2); }
   100% { transform: scale(1); opacity: 1; }
+}
+@keyframes thinking-dot-wave {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+@keyframes thinking-shimmer {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
 }
 
 /* ── Tool call cards ── */
@@ -1215,6 +1262,20 @@
   }
   .compaction-track--fill {
     transition: none;
+  }
+  /* thinking 折叠头部:关闭三点浮动与文字 shimmer,退化为静态一行。 */
+  .thinking-section.active .thinking-dot,
+  .thinking-dot--done {
+    animation: none;
+  }
+  .thinking-section.active .thinking-dot {
+    opacity: 1;
+  }
+  .thinking-section.active .thinking-label {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    color: var(--graphite-soft);
   }
 }
 

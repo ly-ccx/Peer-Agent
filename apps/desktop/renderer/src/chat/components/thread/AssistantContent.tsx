@@ -126,14 +126,13 @@ function ThinkingTextSection({ content, isActive, isZh }: { readonly content: st
       <button type="button" className="thinking-toggle" onClick={() => setExpanded(!expanded)}>
         <span className="thinking-indicator" aria-hidden="true">
           {isActive ? (
-            <svg className="thinking-indicator-svg" width="13" height="13" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.3" />
-              <path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" />
-            </svg>
+            <span className="thinking-dots">
+              <span className="thinking-dot" />
+              <span className="thinking-dot" />
+              <span className="thinking-dot" />
+            </span>
           ) : (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="9" fill="currentColor" />
-            </svg>
+            <span className="thinking-dot thinking-dot--done" />
           )}
         </span>
         <span className="thinking-label">{label}</span>
@@ -170,14 +169,13 @@ function ThinkingSection({ toolCalls, isActive, isZh }: { readonly toolCalls: To
       <button type="button" className="thinking-toggle" onClick={() => setExpanded(!expanded)}>
         <span className="thinking-indicator" aria-hidden="true">
           {isActive ? (
-            <svg className="thinking-indicator-svg" width="13" height="13" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.3" />
-              <path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" />
-            </svg>
+            <span className="thinking-dots">
+              <span className="thinking-dot" />
+              <span className="thinking-dot" />
+              <span className="thinking-dot" />
+            </span>
           ) : (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="9" fill="currentColor" />
-            </svg>
+            <span className="thinking-dot thinking-dot--done" />
           )}
         </span>
         <span className="thinking-label">{label}</span>
