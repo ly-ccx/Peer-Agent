@@ -45,4 +45,11 @@ describe('MCP client OAuth transport integration', () => {
     await provider.redirectToAuthorization('https://auth.example.com/authorize');
     assert.deepEqual(updates.at(-1), { opened: 'https://auth.example.com/authorize' });
   });
+
+  it('classifies auth challenge errors for MCP probe state', () => {
+    assert.equal(__mcpClientInternals.isAuthRequiredError({ status: 401, message: 'Unauthorized' }), true);
+    assert.equal(__mcpClientInternals.isAuthRequiredError(new Error('HTTP 403 Forbidden')), true);
+    assert.equal(__mcpClientInternals.isAuthRequiredError(new Error('www-authenticate: Bearer')), true);
+    assert.equal(__mcpClientInternals.isAuthRequiredError(new Error('ECONNREFUSED')), false);
+  });
 });

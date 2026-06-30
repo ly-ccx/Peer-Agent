@@ -77,7 +77,7 @@ function normalizeEnvName(value) {
 function normalizeAuthBinding(auth = {}) {
   const mode = asString(auth?.mode).trim() || 'none';
   if (mode === 'none') return { mode: 'none' };
-  if (!['http_bearer', 'http_header', 'stdio_env'].includes(mode)) throw new Error(`Unsupported MCP auth mode: ${mode}`);
+  if (!['http_bearer', 'http_header', 'stdio_env', 'oauth2'].includes(mode)) throw new Error(`Unsupported MCP auth mode: ${mode}`);
   const credentialRef = normalizeCredentialRef(auth.credentialRef);
   if (!credentialRef) throw new Error(`MCP auth mode ${mode} requires credentialRef.`);
   const binding = { mode, credentialRef };

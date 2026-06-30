@@ -1,4 +1,4 @@
-import type { LocalMcpServerUpsertRequest } from '@peer-agent/protocol';
+import type { LocalMcpServerUpsertRequest, McpConnectionProbeResult } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Dropdown, type DropdownOption } from './Dropdown';
@@ -147,6 +147,8 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
   const [resourcePreview, setResourcePreview] = useState<string | null>(null);
   const [promptPreview, setPromptPreview] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [lastProbe, setLastProbe] = useState<McpConnectionProbeResult | null>(null);
 
   const load = useCallback(async () => {
     const [list, credentialList] = await Promise.all([
@@ -182,6 +184,12 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     () => servers.find((server) => String(serverIdOf(server)) === String(selectedId)) ?? servers[0] ?? null,
     [selectedId, servers],
   );
+  const selectedNeedsAuth = Boolean(
+    selected
+      && lastProbe?.state === 'needs_auth'
+      && lastProbe.view
+      && String(serverIdOf(lastProbe.view as McpServerView)) === String(serverIdOf(selected)),
+  );
 
   const totals = useMemo(() => servers.reduce(
     (summary, server) => ({
@@ -213,6 +221,8 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     setOauthScopes('');
     setOauthRedirectUrl('http://127.0.0.1:33418/mcp/oauth/callback');
     setOauthAuthorizationCode('');
+    setShowAdvancedSettings(false);
+    setLastProbe(null);
   }, []);
 
   useEffect(() => {
@@ -321,18 +331,36 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
           serverUrl: url.trim(),
           auth,
         };
-      const saved = await clientApi.mcpUpsertServer(item);
+      let saved: McpServerView;
+      if (transport === 'streamable_http' && authMode === 'none' && !showAdvancedSettings) {
+        const probe = await clientApi.mcpConnectAndRegister({
+          serverName: item.displayName ?? (displayName.trim() || url.trim()),
+          serverUrl: url.trim(),
+        });
+        setLastProbe(probe);
+        saved = (probe.view ?? await clientApi.mcpUpsertServer(item)) as McpServerView;
+        if (probe.state === 'connected') {
+          setStatus(`MCP 已连接，发现 ${probe.toolsCount} 个工具、${probe.resourcesCount} 个资源、${probe.promptsCount} 个 Prompt。`);
+        } else if (probe.state === 'needs_auth') {
+          setStatus(probe.auth?.message ?? '此 MCP 服务需要身份验证，请点击“进行身份验证”。');
+        } else {
+          setStatus(probe.message ?? 'MCP 连接失败，请检查 URL 或展开高级设置。');
+        }
+      } else {
+        saved = await clientApi.mcpUpsertServer(item) as McpServerView;
+        setLastProbe(null);
+        setStatus('MCP 连接已保存。请刷新 Manifest 后再让模型使用工具。');
+      }
       resetForm();
       setShowAddForm(false);
       await load();
       setSelectedId(serverIdOf(saved as McpServerView));
-      setStatus('MCP 连接已保存。请刷新 Manifest 后再让模型使用工具。');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '保存 MCP 连接失败');
     } finally {
       setBusy(false);
     }
-  }, [argRows, authEnvName, authHeaderName, authMode, command, credentialLabel, credentialSecret, cwd, displayName, envRows, load, oauthAuthorizationServerUrl, oauthClientId, oauthClientSecret, oauthRedirectUrl, oauthScopes, resetForm, transport, url]);
+  }, [argRows, authEnvName, authHeaderName, authMode, command, credentialLabel, credentialSecret, cwd, displayName, envRows, load, oauthAuthorizationServerUrl, oauthClientId, oauthClientSecret, oauthRedirectUrl, oauthScopes, resetForm, showAdvancedSettings, transport, url]);
 
   const runServerAction = useCallback(async (message: string, action: () => Promise<unknown>) => {
     setBusy(true);
@@ -509,6 +537,24 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
               名称
               <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="filesystem / sentry / internal-tools" />
             </label>
+            {transport !== 'stdio' ? (
+              <label>
+                URL
+                <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://mcp.example.com/mcp" />
+              </label>
+            ) : null}
+            <div className="settings-grid__wide mcp-field">
+              <button
+                type="button"
+                className="mcp-row__add"
+                onClick={() => setShowAdvancedSettings((value) => !value)}
+              >
+                {showAdvancedSettings ? '收起高级设置' : '高级设置'}
+              </button>
+              <small>默认使用 Streamable HTTP；保存时会自动检测连接与认证状态。</small>
+            </div>
+            {showAdvancedSettings ? (
+            <>
             <div className="settings-grid__wide mcp-field">
               <span className="mcp-field__label">Transport</span>
               <div className="mcp-segment" role="tablist" aria-label="Transport">
@@ -661,12 +707,14 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                 )}
               </>
             ) : null}
+            </>
+            ) : null}
             </div>
-            <p className="settings-muted">认证 Secret 只通过 IPC 送入 main 进程凭证库；registry 和 renderer 只保留 credentialRef、lastFour、authMode 等非密信息。</p>
+            <p className="settings-muted">默认保存会立即连接并检测认证状态；认证 Secret 只通过 IPC 送入 main 进程凭证库，renderer 不保存密钥。</p>
             </div>
             <div className="mcp-modal-footer">
               <button type="button" className="mcp-modal-cancel" onClick={() => { resetForm(); setShowAddForm(false); }} disabled={busy}>取消</button>
-              <button type="button" className="mcp-modal-confirm" onClick={() => void handleSave()} disabled={busy || !canSave}>保存连接</button>
+              <button type="button" className="mcp-modal-confirm" onClick={() => void handleSave()} disabled={busy || !canSave}>{showAdvancedSettings ? '保存连接' : '连接'}</button>
             </div>
         </Overlay>
       ) : null}
@@ -769,6 +817,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
 
               <div className="settings-actions settings-actions--wrap mcp-detail-actions">
                 <button type="button" disabled={busy} onClick={() => void runServerAction('刷新 Manifest', () => clientApi.mcpRefreshManifest({ serverId: serverIdOf(selected) }))}>刷新 Manifest</button>
+                {selectedNeedsAuth ? <button type="button" disabled={busy} onClick={() => setStatus('已检测到该 MCP 需要身份验证。请展开高级设置配置 OAuth 后完成授权；自动 OAuth 回调将在后续补齐。')}>进行身份验证</button> : null}
                 <button type="button" disabled={busy} onClick={() => void runServerAction(selected.enabled === false ? '启用连接' : '禁用连接', () => clientApi.mcpSetEnabled({ serverId: serverIdOf(selected), enabled: selected.enabled === false }))}>{selected.enabled === false ? '启用' : '禁用'}</button>
                 <button type="button" disabled={busy} onClick={() => void runServerAction('移除连接', () => clientApi.mcpUninstall({ serverId: serverIdOf(selected) }))}>移除</button>
               </div>

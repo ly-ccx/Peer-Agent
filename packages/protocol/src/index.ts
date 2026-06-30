@@ -254,6 +254,28 @@ export interface McpConnectionTestResult {
   readonly errors?: readonly { readonly kind: string; readonly message: string }[];
 }
 
+export type McpConnectionProbeState = 'connected' | 'needs_auth' | 'failed';
+
+export interface McpConnectionProbeAuthAction {
+  readonly type: 'oauth' | 'unknown';
+  readonly authorizationUrl?: string;
+  readonly message?: string;
+}
+
+export interface McpConnectionProbeResult {
+  readonly state: McpConnectionProbeState;
+  readonly ok: boolean;
+  readonly view?: LocalMcpServerView;
+  readonly manifest?: McpManifestRefreshResult['manifest'];
+  readonly health: McpHealthView;
+  readonly toolsCount: number;
+  readonly resourcesCount: number;
+  readonly promptsCount: number;
+  readonly auth?: McpConnectionProbeAuthAction;
+  readonly message?: string;
+  readonly errors?: readonly { readonly kind: string; readonly message: string }[];
+}
+
 export interface McpManifestRefreshResult {
   readonly view: LocalMcpServerView;
   readonly manifest: {

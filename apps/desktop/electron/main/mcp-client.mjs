@@ -341,6 +341,79 @@ function entryAuthMetadata(client) {
   return undefined;
 }
 
+function errorMessage(error) {
+  return error?.message ?? String(error);
+}
+
+function isAuthRequiredError(error) {
+  const message = errorMessage(error).toLowerCase();
+  const status = error?.status ?? error?.statusCode ?? error?.response?.status ?? error?.cause?.status ?? error?.cause?.statusCode;
+  if (status === 401 || status === 403) return true;
+  return message.includes('401')
+    || message.includes('403')
+    || message.includes('unauthorized')
+    || message.includes('forbidden')
+    || message.includes('authorization required')
+    || message.includes('authentication required')
+    || message.includes('invalid_token')
+    || message.includes('www-authenticate');
+}
+
+function authRequiredProbe(error) {
+  const message = errorMessage(error);
+  return {
+    state: 'needs_auth',
+    ok: false,
+    health: {
+      status: 'failed',
+      checkedAt: nowIso(),
+      message,
+    },
+    toolsCount: 0,
+    resourcesCount: 0,
+    promptsCount: 0,
+    auth: {
+      type: 'oauth',
+      message: '此 MCP 服务要求身份验证。',
+    },
+    message,
+    errors: [{ kind: 'auth', message }],
+  };
+}
+
+export async function probeMcpConnection(server, options = {}) {
+  try {
+    const manifest = await discoverMcpManifest(server, options);
+    return {
+      state: manifest.health.status === 'failed' ? 'failed' : 'connected',
+      ok: manifest.health.status !== 'failed',
+      manifest,
+      health: manifest.health,
+      toolsCount: manifest.tools.length,
+      resourcesCount: manifest.resources.length,
+      promptsCount: manifest.prompts.length,
+      errors: manifest.errors,
+    };
+  } catch (error) {
+    if (isAuthRequiredError(error)) return authRequiredProbe(error);
+    const message = errorMessage(error);
+    return {
+      state: 'failed',
+      ok: false,
+      health: {
+        status: 'failed',
+        checkedAt: nowIso(),
+        message,
+      },
+      toolsCount: 0,
+      resourcesCount: 0,
+      promptsCount: 0,
+      message,
+      errors: [{ kind: 'connection', message }],
+    };
+  }
+}
+
 export async function testMcpConnection(server, options = {}) {
   try {
     const manifest = await discoverMcpManifest(server, options);
@@ -471,4 +544,5 @@ export const __mcpClientInternals = {
   prepareServerConfig,
   serverKey,
   createTransport,
+  isAuthRequiredError,
 };

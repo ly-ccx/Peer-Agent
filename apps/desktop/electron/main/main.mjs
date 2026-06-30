@@ -28,7 +28,7 @@ import { getDataHome, migrateFromLegacy, exportBundle, importBundle } from './da
 import { createSettingsStore } from './settings-store.mjs';
 import { createMcpRegistry } from './mcp-registry.mjs';
 import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-credential-store.mjs';
-import { disconnectMcp, discoverMcpManifest, finishMcpOAuth, getMcpPrompt, readMcpResource, testMcpConnection } from './mcp-client.mjs';
+import { disconnectMcp, discoverMcpManifest, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMcpResource, testMcpConnection } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
 import { listChannelDescriptors, resolveChannel } from './provider-channels.mjs';
 import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
@@ -1717,12 +1717,24 @@ ipcMain.handle('mcp:connect-and-register', async (_, { serverUrl, serverName }) 
     transport: 'streamable_http',
     url: serverUrl,
     serverUrl,
+    auth: { mode: 'none' },
     enabled: true,
   });
-  const manifest = await discoverMcpManifest(mcpRegistry.getServer(view.id), { credentialResolver: mcpCredentialResolver });
-  const refreshed = mcpRegistry.updateManifest(view.id, manifest);
+  const server = mcpRegistry.getServer(view.id);
+  const probe = await probeMcpConnection(server, { credentialResolver: mcpCredentialResolver });
+  let refreshed = view;
+  if (probe.state === 'connected' && probe.manifest) {
+    refreshed = mcpRegistry.updateManifest(view.id, probe.manifest);
+  } else {
+    refreshed = mcpRegistry.updateHealth(view.id, probe.health);
+  }
   disconnectMcp(mcpRegistry.getServer(view.id));
-  return { success: true, toolCount: manifest.tools.length, view: refreshed };
+  return {
+    ...probe,
+    success: probe.state === 'connected',
+    toolCount: probe.toolsCount,
+    view: refreshed,
+  };
 });
 
 // ── Local Tool Host ──

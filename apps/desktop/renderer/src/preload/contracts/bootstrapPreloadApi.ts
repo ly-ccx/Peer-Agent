@@ -16,6 +16,7 @@ import type {
   LocalMcpServerUpsertRequest,
   LocalMcpServerView,
   LocaleCode,
+  McpConnectionProbeResult,
   McpConnectionTestResult,
   McpCredentialMetadataView,
   McpCredentialPutRequest,
@@ -300,7 +301,7 @@ export interface BootstrapPreloadApi {
   readonly mcpFinishOAuth: (params: { mcpId?: string | number; serverId?: string | number; authorizationCode: string }) => Promise<{ ok: boolean }>;
   readonly mcpReadResource: (params: { mcpId?: string | number; serverId?: string | number; uri: string }) => Promise<unknown>;
   readonly mcpGetPrompt: (params: { mcpId?: string | number; serverId?: string | number; name: string; arguments?: Record<string, unknown> }) => Promise<unknown>;
-  readonly mcpConnectAndRegister: (params: { serverUrl: string; serverName: string }) => Promise<{ success: boolean; toolCount: number }>;
+  readonly mcpConnectAndRegister: (params: { serverUrl: string; serverName: string }) => Promise<McpConnectionProbeResult & { readonly success: boolean; readonly toolCount: number }>;
   readonly workspaceList: () => Promise<{ workspaces: readonly { path: string; name: string; addedAt: string }[]; activeWorkspace: string | null }>;
   readonly workspaceEnsureDefault: () => Promise<{ path: string; name: string; created: boolean }>;
   readonly workspaceAdd: () => Promise<{ path: string; name: string; existing: boolean } | null>;

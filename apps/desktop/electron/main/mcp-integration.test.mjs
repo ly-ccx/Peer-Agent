@@ -279,6 +279,21 @@ describe('MCP integration runtime chain', () => {
     assert.equal(refreshed.displayName, 'DingTalk Docs MCP');
   });
 
+  it('accepts OAuth auth bindings for automatically detected auth flows', () => {
+    const registry = createMcpRegistry();
+    const created = registry.upsertServer({
+      id: 'oauth-demo',
+      displayName: 'OAuth Demo',
+      transport: 'streamable_http',
+      url: 'https://mcp.example.com/mcp',
+      enabled: true,
+      auth: { mode: 'oauth2', credentialRef: 'mcp-cred:oauth-demo' },
+    });
+
+    assert.equal(created.auth.mode, 'oauth2');
+    assert.equal(created.auth.credentialRef, 'mcp-cred:oauth-demo');
+  });
+
   it('prefers the server-reported title over the protocol name on refresh', () => {
     const registry = createMcpRegistry();
     registry.upsertServer({
