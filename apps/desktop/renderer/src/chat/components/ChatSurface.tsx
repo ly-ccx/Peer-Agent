@@ -576,6 +576,8 @@ export function ChatSurface({
     setAttachmentError(null);
     setPendingPermissionCalls([]);
     setProviderRecoveryNotice(null);
+    // 切换会话时清掉上一会话的流式错误横幅，避免错误提示跨会话残留。
+    setStreamError(null);
     // 切换会话时恢复「该会话」已持久化的输入框状态(草稿文本 + 待发送队列):
     // 草稿与队列都以 conversationId 为坐标,二次打开应原样保留;无会话(新建未落库)则清空。
     // 草稿区附件不持久化(见 composerPersistence 取舍说明),故切换会话后附件区始终清空。
