@@ -470,12 +470,13 @@ export async function getMcpPrompt(server, name, args = {}, options = {}) {
 export async function finishMcpOAuth(server, authorizationCode, options = {}) {
   const code = typeof authorizationCode === 'string' ? authorizationCode.trim() : '';
   if (!code) throw new Error('MCP OAuth authorization code is required.');
-  const entry = await connect(server, options);
-  if (typeof entry.transport?.finishAuth !== 'function') {
+  const config = await prepareServerConfig(server, options);
+  const transport = createTransport(config);
+  if (typeof transport?.finishAuth !== 'function') {
     throw new Error('MCP transport does not support OAuth finishAuth.');
   }
-  await entry.transport.finishAuth(code);
-  disconnectMcp(server);
+  await transport.finishAuth(code);
+  try { await transport.close?.(); } catch {}
   return { ok: true };
 }
 

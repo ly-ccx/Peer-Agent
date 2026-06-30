@@ -37,9 +37,28 @@ export function isPromptTooLongResponse(status, text) {
     value.includes('prompt_too_long') ||
     value.includes('context_length_exceeded') ||
     value.includes('maximum context length') ||
+    value.includes('context window') ||
+    value.includes('context too long') ||
+    value.includes('input is too long') ||
+    value.includes('exceeds model context') ||
     value.includes('too many tokens') ||
     value.includes('token limit')
   );
+}
+
+export function buildPromptTooLongRecoveryError({ text = '', providerTracePath = null, retryUsed = false } = {}) {
+  const detail = String(text || '').trim().slice(0, 300);
+  const reason = retryUsed
+    ? 'Automatic compaction was retried once, but the provider still rejected the request as too long.'
+    : 'Automatic compaction could not reduce the conversation enough to safely retry.';
+  return [
+    `Context window exceeded. ${reason}`,
+    'Please run /compact manually or shorten the conversation before continuing.',
+    detail ? `provider_error=${detail}` : '',
+    providerTracePath ? `provider_trace=${providerTracePath}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
 export function applyMicrocompaction(messages, { log = console.log } = {}) {
@@ -55,16 +74,20 @@ export function applyMicrocompaction(messages, { log = console.log } = {}) {
   return result;
 }
 
-function shouldShowCompactionStart(messages, contextWindow) {
-  if (!contextWindow) return false;
-  return estimateTokensFromMessages(messages) > contextWindow * COMPACTION_CONFIG.triggerRatio;
+function shouldShowCompactionStart(messages, budget) {
+  if (budget?.shouldCompact) return true;
+  if (!budget?.contextWindow) return false;
+  return estimateTokensFromMessages(messages) > budget.contextWindow * budget.triggerRatio;
 }
 
-// 口径统一单一来源：进度条用量、压缩触发判定都从这里取数，避免「进度条到 80%
-// 但主进程不压缩」这类两套估算打架的偏差。contextTokens 用与压缩触发完全相同的
-// estimateTokensFromMessages（含图片固定 token、tool 块 JSON 体积、每条 +overhead），
-// compactionSuggested 用与 shouldCompact 完全相同的 triggerRatio 阈值。
-export function computeContextInfo({ messages, contextWindow, tools = null }) {
+// 发送前预算守卫（方案 A 最小闭环）：soft 线沿用既有自动压缩触发线，hard 线
+// 是 provider 请求前的硬拦截线。方案 C 的完整 Context Budget Manager 会把这里抽象为
+// 跨 provider 的预算规划器；本轮只在 coordinator 内集中计算，避免扩大 adapter 改动面。
+export const CONTEXT_BUDGET_GUARD = Object.freeze({
+  hardRatio: 0.95,
+});
+
+export function computeContextBudget({ messages, contextWindow, tools = null }) {
   // 工具 schema（tools）每次请求都全量发送给 provider，必须计入上下文用量；
   // 否则进度条只算 messages，会远低于 provider 实际计入的 input tokens。
   const contextTokens =
@@ -72,10 +95,52 @@ export function computeContextInfo({ messages, contextWindow, tools = null }) {
     estimateToolsTokens(tools);
   const normalizedWindow = Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null;
   const triggerRatio = COMPACTION_CONFIG.triggerRatio;
-  const compactionSuggested = normalizedWindow
-    ? contextTokens > normalizedWindow * triggerRatio
-    : false;
-  return { contextTokens, contextWindow: normalizedWindow, triggerRatio, compactionSuggested };
+  const hardRatio = Math.max(triggerRatio, CONTEXT_BUDGET_GUARD.hardRatio);
+  const softLimit = normalizedWindow ? Math.floor(normalizedWindow * triggerRatio) : null;
+  const hardLimit = normalizedWindow ? Math.floor(normalizedWindow * hardRatio) : null;
+  const overSoftLimit = softLimit != null && contextTokens > softLimit;
+  const overHardLimit = hardLimit != null && contextTokens > hardLimit;
+  const overContextWindow = normalizedWindow != null && contextTokens > normalizedWindow;
+  const force = overHardLimit || overContextWindow;
+  const emergency = force;
+  const shouldCompact = overSoftLimit || force;
+  const mode = overContextWindow
+    ? 'overflow'
+    : overHardLimit
+      ? 'hard'
+      : overSoftLimit
+        ? 'soft'
+        : 'ok';
+
+  return {
+    contextTokens,
+    contextWindow: normalizedWindow,
+    triggerRatio,
+    softLimit,
+    hardRatio,
+    hardLimit,
+    overSoftLimit,
+    overHardLimit,
+    overContextWindow,
+    shouldCompact,
+    force,
+    emergency,
+    mode,
+  };
+}
+
+// 口径统一单一来源：进度条用量、压缩触发判定都从这里取数，避免「进度条到 80%
+// 但主进程不压缩」这类两套估算打架的偏差。contextTokens 用与压缩触发完全相同的
+// estimateTokensFromMessages（含图片固定 token、tool 块 JSON 体积、每条 +overhead），
+// compactionSuggested 用与发送前预算守卫完全相同的 soft 阈值。
+export function computeContextInfo({ messages, contextWindow, tools = null }) {
+  const budget = computeContextBudget({ messages, contextWindow, tools });
+  return {
+    contextTokens: budget.contextTokens,
+    contextWindow: budget.contextWindow,
+    triggerRatio: budget.triggerRatio,
+    compactionSuggested: budget.overSoftLimit,
+  };
 }
 
 async function persistAndNotifyCompaction({
@@ -109,34 +174,35 @@ export async function runCompactionCheck({
   continuityContext = [],
   tools = null,
 }) {
+  const budget = computeContextBudget({ messages, contextWindow, tools });
+  force = Boolean(force || budget.force);
+  emergency = Boolean(emergency || budget.emergency);
+
   // 压缩时机诊断:在唯一入口打印触发判定的全部输入,便于定位"何时/因何压缩"。
-  // path 区分: emergency(provider 报超长) / force(手动 /compact) / threshold(比例越线) / skip。
+  // path 区分: emergency(provider 报超长或已越过 hard/window) / force(手动 /compact) / threshold(soft 比例越线) / skip。
   {
-    // 含工具 schema：与 compactIfNeeded 的触发口径保持一致。
-    const estimatedTokens = estimateTokensFromMessages(messages) + estimateToolsTokens(tools);
-    const threshold = contextWindow ? contextWindow * COMPACTION_CONFIG.triggerRatio : null;
-    const overThreshold = threshold != null && estimatedTokens > threshold;
     const nonSystemCount = messages.filter((m) => m.role !== 'system').length;
     const path = emergency
       ? 'emergency'
       : force
         ? 'force'
-        : overThreshold
+        : budget.overSoftLimit
           ? 'threshold'
           : 'skip';
     console.log(
-      `[compaction-trigger] path=${path} est=${estimatedTokens} window=${contextWindow || 'unset'} ` +
-        `triggerRatio=${COMPACTION_CONFIG.triggerRatio} threshold=${threshold != null ? Math.round(threshold) : 'n/a'} ` +
-        `overThreshold=${overThreshold} nonSystemMsgs=${nonSystemCount} ` +
-        `streamId=${streamId || 'n/a'} conversationId=${conversationId || 'n/a'}`,
+      `[compaction-trigger] path=${path} mode=${budget.mode} est=${budget.contextTokens} window=${budget.contextWindow || 'unset'} ` +
+        `triggerRatio=${budget.triggerRatio} threshold=${budget.softLimit != null ? Math.round(budget.softLimit) : 'n/a'} ` +
+        `hardRatio=${budget.hardRatio} hardLimit=${budget.hardLimit != null ? Math.round(budget.hardLimit) : 'n/a'} ` +
+        `overThreshold=${budget.overSoftLimit} overHard=${budget.overHardLimit} overWindow=${budget.overContextWindow} ` +
+        `nonSystemMsgs=${nonSystemCount} streamId=${streamId || 'n/a'} conversationId=${conversationId || 'n/a'}`,
     );
   }
 
-  if (!contextWindow && !force) {
+  if (!budget.contextWindow && !force) {
     return { compacted: false, messages };
   }
 
-  const showStart = emergency || shouldShowCompactionStart(messages, contextWindow);
+  const showStart = emergency || shouldShowCompactionStart(messages, budget);
   // 字符级真实进度：仅在展示横幅时构造回调，压缩器流式收摘要时逐 chunk 回调，
   // 转发为 progress 事件。载荷与节流策略与手动 /compact 路径（main.mjs）保持一致。
   let onProgress;

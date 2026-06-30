@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
+import http from 'node:http';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,7 +29,7 @@ import { getDataHome, migrateFromLegacy, exportBundle, importBundle } from './da
 import { createSettingsStore } from './settings-store.mjs';
 import { createMcpRegistry } from './mcp-registry.mjs';
 import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-credential-store.mjs';
-import { disconnectMcp, discoverMcpManifest, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMcpResource, testMcpConnection } from './mcp-client.mjs';
+import { disconnectMcp, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMcpResource, testMcpConnection } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
 import { listChannelDescriptors, resolveChannel } from './provider-channels.mjs';
 import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
@@ -138,6 +139,76 @@ const mcpCredentialResolver = async (auth, server) => {
   }
   return injection;
 };
+const MCP_OAUTH_CALLBACK_PORT = 33418;
+const MCP_OAUTH_CALLBACK_PATH = '/mcp/oauth/callback';
+const MCP_OAUTH_CALLBACK_URL = `http://127.0.0.1:${MCP_OAUTH_CALLBACK_PORT}${MCP_OAUTH_CALLBACK_PATH}`;
+const MCP_OAUTH_CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
+let activeMcpOAuthCallback = null;
+
+function closeMcpOAuthCallback() {
+  if (activeMcpOAuthCallback?.server) {
+    try { activeMcpOAuthCallback.server.close(); } catch {}
+  }
+  if (activeMcpOAuthCallback?.timer) clearTimeout(activeMcpOAuthCallback.timer);
+  activeMcpOAuthCallback = null;
+}
+
+function waitForMcpOAuthCallback(expectedState) {
+  closeMcpOAuthCallback();
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      try {
+        const callbackUrl = new URL(req.url ?? '/', MCP_OAUTH_CALLBACK_URL);
+        if (callbackUrl.pathname !== MCP_OAUTH_CALLBACK_PATH) {
+          res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+          res.end('Not found');
+          return;
+        }
+        const state = callbackUrl.searchParams.get('state') ?? '';
+        const code = callbackUrl.searchParams.get('code') ?? '';
+        const error = callbackUrl.searchParams.get('error') ?? '';
+        if (expectedState && state && state !== expectedState) throw new Error('MCP OAuth state mismatch.');
+        if (error) throw new Error(`MCP OAuth failed: ${error}`);
+        if (!code) throw new Error('MCP OAuth callback missing authorization code.');
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        res.end('<!doctype html><meta charset="utf-8"><title>Peer Agent MCP OAuth</title><p>授权已完成，可以回到 Peer Agent。</p>');
+        resolve(code);
+      } catch (error) {
+        res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
+        res.end('<!doctype html><meta charset="utf-8"><title>Peer Agent MCP OAuth</title><p>授权失败，请回到 Peer Agent 重试。</p>');
+        reject(error);
+      } finally {
+        closeMcpOAuthCallback();
+      }
+    });
+    server.once('error', (error) => {
+      closeMcpOAuthCallback();
+      reject(error);
+    });
+    server.listen(MCP_OAUTH_CALLBACK_PORT, '127.0.0.1', () => {
+      const timer = setTimeout(() => {
+        closeMcpOAuthCallback();
+        reject(new Error('MCP OAuth authorization timed out.'));
+      }, MCP_OAUTH_CALLBACK_TIMEOUT_MS);
+      activeMcpOAuthCallback = { server, timer };
+    });
+  });
+}
+
+function createMcpProbeResponse(probe, view) {
+  return {
+    ...probe,
+    success: probe.state === 'connected',
+    toolCount: probe.toolsCount,
+    view,
+  };
+}
+
+function persistMcpProbeResult(serverId, probe) {
+  if (probe.state === 'connected' && probe.manifest) return mcpRegistry.updateManifest(serverId, probe.manifest);
+  return mcpRegistry.updateHealth(serverId, probe.health);
+}
+
 const llmConfigStore = createLlmConfigStore();
 const conversationStore = createConversationStore();
 const goalPlanStore = createGoalPlanStore({
@@ -1690,10 +1761,10 @@ ipcMain.handle('mcp:test-connection', async (_, params) => {
 ipcMain.handle('mcp:refresh-manifest', async (_, params) => {
   const server = mcpRegistry.getServer(params?.serverId ?? params?.mcpId);
   if (!server) throw new Error(`MCP server not found: ${params?.serverId ?? params?.mcpId ?? ''}`);
-  const manifest = await discoverMcpManifest(server, { credentialResolver: mcpCredentialResolver });
-  const view = mcpRegistry.updateManifest(server.id, manifest);
-  disconnectMcp(server);
-  return { view, manifest };
+  const probe = await probeMcpConnection(server, { credentialResolver: mcpCredentialResolver });
+  const view = persistMcpProbeResult(server.id, probe);
+  disconnectMcp(mcpRegistry.getServer(server.id));
+  return createMcpProbeResponse(probe, view);
 });
 ipcMain.handle('mcp:finish-oauth', async (_, params) => {
   const server = mcpRegistry.getServer(params?.serverId ?? params?.mcpId);

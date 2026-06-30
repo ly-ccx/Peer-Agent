@@ -4,7 +4,10 @@ import { describe, it } from 'node:test';
 import {
   applyMicrocompaction,
   buildCompactionProviderConfig,
+  buildPromptTooLongRecoveryError,
+  computeContextBudget,
   computeContextInfo,
+  CONTEXT_BUDGET_GUARD,
   isPromptTooLongResponse,
   runCompactionCheck,
 } from './compaction-coordinator.mjs';
@@ -72,7 +75,44 @@ describe('chat compaction coordinator', () => {
     assert.equal(isPromptTooLongResponse(413, ''), true);
     assert.equal(isPromptTooLongResponse(400, 'context_length_exceeded'), true);
     assert.equal(isPromptTooLongResponse(400, 'Maximum context length exceeded'), true);
+    assert.equal(isPromptTooLongResponse(400, 'context window exceeded'), true);
+    assert.equal(isPromptTooLongResponse(400, 'input is too long for this model'), true);
+    assert.equal(isPromptTooLongResponse(400, 'exceeds model context window'), true);
     assert.equal(isPromptTooLongResponse(500, 'temporary outage'), false);
+  });
+
+  it('builds explicit prompt-too-long recovery errors', () => {
+    const message = buildPromptTooLongRecoveryError({
+      text: 'Maximum context length exceeded',
+      providerTracePath: '/tmp/provider-trace.json',
+      retryUsed: true,
+    });
+
+    assert.match(message, /Context window exceeded/);
+    assert.match(message, /retried once/);
+    assert.match(message, /provider_error=Maximum context length exceeded/);
+    assert.match(message, /provider_trace=\/tmp\/provider-trace\.json/);
+  });
+
+  it('computes hard budget guard modes from messages plus tools', () => {
+    const messages = [{ role: 'user', content: 'hello' }];
+    const tools = [
+      {
+        name: 'large_tool',
+        description: 'x'.repeat(2000),
+        input_schema: { type: 'object', properties: { query: { type: 'string' } } },
+      },
+    ];
+    const totalTokens = estimateTokensFromMessages(messages) + estimateToolsTokens(tools);
+    const hardWindow = Math.floor(totalTokens / CONTEXT_BUDGET_GUARD.hardRatio) - 1;
+    const budget = computeContextBudget({ messages, tools, contextWindow: hardWindow });
+
+    assert.equal(budget.contextTokens, totalTokens);
+    assert.equal(budget.overHardLimit, true);
+    assert.equal(budget.force, true);
+    assert.equal(budget.emergency, true);
+    assert.equal(budget.shouldCompact, true);
+    assert.ok(['hard', 'overflow'].includes(budget.mode));
   });
 
   it('does not emit compaction events when no context window is configured', async () => {

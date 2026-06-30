@@ -253,7 +253,6 @@ function normalizeCredentialInput(input = {}, existing = null, safeStorage = nul
   if (kind === 'stdio_env' && !envName) throw new Error('MCP stdio env credential requires envName.');
 
   const oauth = isOAuth ? normalizeOAuthConfig(input.oauth ?? {}, existing?.oauth ?? {}, safeStorage) : undefined;
-  if (isOAuth && !oauth.authorizationServerUrl) throw new Error('MCP OAuth 2.0 requires authorizationServerUrl.');
   const encryptedSecret = isOAuth ? (existing?.secret ?? encryptSecret('', safeStorage)) : (hasSecret ? encryptSecret(secretValue, safeStorage) : existing.secret);
   return {
     id,

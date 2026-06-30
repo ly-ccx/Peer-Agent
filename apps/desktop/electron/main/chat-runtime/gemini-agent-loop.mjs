@@ -6,6 +6,7 @@ import {
 import {
   applyMicrocompaction,
   buildCompactionProviderConfig,
+  buildPromptTooLongRecoveryError,
   computeContextInfo,
   isPromptTooLongResponse,
   runCompactionCheck,
@@ -58,6 +59,7 @@ export async function agentLoopGemini({
     maxOutputTokens,
     resolvedChannel,
   });
+  let promptTooLongRetryUsed = false;
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {
     // 方案 A（完整会话量口径）：压缩触发按「完整 apiMessages」判定，与进度条分子、
@@ -102,16 +104,13 @@ export async function agentLoopGemini({
 
     if (!providerResponse.ok) {
       const text = providerResponse.errorText || '';
-      if (providerResponse.providerError) {
-        loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
-        return;
-      }
-      if (isPromptTooLongResponse(providerResponse.status, text)) {
+      const promptTooLong = isPromptTooLongResponse(providerResponse.status, text);
+      if (promptTooLong && !promptTooLongRetryUsed) {
         const emergencyCompaction = await runCompactionCheck({
           messages: apiMessages,
           systemPrompt,
           contextWindow,
-          providerConfig: null,
+          providerConfig,
           signal,
           persistCompaction,
           conversationId,
@@ -124,12 +123,28 @@ export async function agentLoopGemini({
         });
         if (emergencyCompaction.compacted) {
           apiMessages = emergencyCompaction.messages;
+          promptTooLongRetryUsed = true;
           continue;
         }
+      }
+      if (promptTooLong) {
+        loop.sendError(
+          buildPromptTooLongRecoveryError({
+            text,
+            providerTracePath: providerResponse.providerTracePath,
+            retryUsed: promptTooLongRetryUsed,
+          }),
+        );
+        return;
+      }
+      if (providerResponse.providerError) {
+        loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
+        return;
       }
       loop.sendHttpError(providerResponse.status, text);
       return;
     }
+    promptTooLongRetryUsed = false;
 
     const { content, thinkingContent, toolCalls, streamUsage } = providerResponse;
     loop.addUsage(streamUsage);
