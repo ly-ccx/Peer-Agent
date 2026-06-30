@@ -29,7 +29,7 @@ import { getDataHome, migrateFromLegacy, exportBundle, importBundle } from './da
 import { createSettingsStore } from './settings-store.mjs';
 import { createMcpRegistry } from './mcp-registry.mjs';
 import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-credential-store.mjs';
-import { disconnectMcp, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMcpResource, testMcpConnection } from './mcp-client.mjs';
+import { disconnectMcp, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMcpResource, startMcpOAuth, testMcpConnection } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
 import { listChannelDescriptors, resolveChannel } from './provider-channels.mjs';
 import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
@@ -1766,6 +1766,37 @@ ipcMain.handle('mcp:refresh-manifest', async (_, params) => {
   disconnectMcp(mcpRegistry.getServer(server.id));
   return createMcpProbeResponse(probe, view);
 });
+ipcMain.handle('mcp:start-oauth', async (_, params) => {
+  const serverId = params?.serverId ?? params?.mcpId;
+  const server = mcpRegistry.getServer(serverId);
+  if (!server) throw new Error(`MCP server not found: ${serverId ?? ''}`);
+  // 一键 OAuth：先挂起 loopback 回调监听，再触发授权发现并打开系统浏览器。
+  const callbackPromise = waitForMcpOAuthCallback();
+  let start;
+  try {
+    start = await startMcpOAuth(server, { credentialResolver: mcpCredentialResolver });
+  } catch (error) {
+    closeMcpOAuthCallback();
+    throw error;
+  }
+  // 已持有有效 token（无需浏览器交互）：直接收尾，重新探测并持久化 manifest/health。
+  if (start?.status === 'authorized' || start?.redirected === false) {
+    closeMcpOAuthCallback();
+    const probe = await probeMcpConnection(server, { credentialResolver: mcpCredentialResolver });
+    const view = persistMcpProbeResult(server.id, probe);
+    disconnectMcp(mcpRegistry.getServer(server.id));
+    return { ...createMcpProbeResponse(probe, view), oauth: 'authorized' };
+  }
+  // 已打开浏览器：等待用户在浏览器完成授权后 loopback 回调带回的 code，再交换 token。
+  const code = await callbackPromise;
+  await finishMcpOAuth(server, code, { credentialResolver: mcpCredentialResolver });
+  disconnectMcp(mcpRegistry.getServer(server.id));
+  const probe = await probeMcpConnection(server, { credentialResolver: mcpCredentialResolver });
+  const view = persistMcpProbeResult(server.id, probe);
+  disconnectMcp(mcpRegistry.getServer(server.id));
+  return { ...createMcpProbeResponse(probe, view), oauth: 'connected' };
+});
+
 ipcMain.handle('mcp:finish-oauth', async (_, params) => {
   const server = mcpRegistry.getServer(params?.serverId ?? params?.mcpId);
   if (!server) throw new Error(`MCP server not found: ${params?.serverId ?? params?.mcpId ?? ''}`);

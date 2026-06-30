@@ -1,4 +1,5 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { auth, UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -112,7 +113,13 @@ async function prepareServerConfig(server, options = {}) {
     throw new Error('MCP credential resolver is required for authenticated server.');
   }
   const injection = await options.credentialResolver(auth, config);
-  const authContext = normalizeAuthContext(injection?.authContext);
+  // OAuth 凭据解析器把 authProviderConfig 作为 authContext 的兄弟字段返回（其中携带
+  // oauth/updateOAuth/openAuthorizationUrl）。若不在此处合并进 authContext，
+  // createOAuthProvider 永远拿不到 provider 配置，OAuth 流程会被静默跳过。
+  const authContext = normalizeAuthContext({
+    ...(injection?.authContext ?? {}),
+    authProviderConfig: injection?.authProviderConfig ?? injection?.authContext?.authProviderConfig,
+  });
   return {
     ...config,
     headers: {
@@ -465,6 +472,44 @@ export async function getMcpPrompt(server, name, args = {}, options = {}) {
   if (!name) throw new Error('MCP prompt name is required.');
   const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
   return withClient(server, async (client) => client.getPrompt({ name, arguments: args ?? {} }, { timeout }), options);
+}
+
+export async function startMcpOAuth(server, options = {}) {
+  const config = await prepareServerConfig(server, options);
+  if (config.transport === 'stdio') {
+    throw new Error('MCP_OAUTH_UNSUPPORTED_TRANSPORT');
+  }
+  if (config.__authContext?.mode !== 'oauth2') {
+    throw new Error('MCP_OAUTH_NOT_CONFIGURED');
+  }
+  if (!config.url) throw new Error('MCP HTTP server requires url.');
+  const provider = createOAuthProvider(config);
+  if (!provider) {
+    // 进入这里说明 oauth2 模式下凭据/Provider 配置缺失，给出可读错误而非静默无认证。
+    throw new Error('MCP_OAUTH_NOT_CONFIGURED');
+  }
+  if (typeof provider.redirectToAuthorization !== 'function') {
+    throw new Error('MCP_OAUTH_NO_BROWSER');
+  }
+  // auth() 会按 MCP Authorization 规范发现授权服务器 / 受保护资源元数据，必要时执行动态
+  // 注册，生成 PKCE code_verifier（通过 provider.saveCodeVerifier 持久化），随后调用
+  // provider.redirectToAuthorization 打开系统浏览器。返回值：
+  //   'AUTHORIZED' —— 已有有效 token（或刷新成功），无需浏览器交互。
+  //   'REDIRECT'   —— 已打开浏览器，等待 loopback 回调拿 code 再交换 token。
+  let result;
+  try {
+    result = await auth(provider, { serverUrl: config.url });
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      // SDK 在无法完成发现/注册时抛出 UnauthorizedError；归一成可读错误码。
+      throw new Error('MCP_OAUTH_DISCOVERY_FAILED');
+    }
+    throw error;
+  }
+  return {
+    status: result === 'AUTHORIZED' ? 'authorized' : 'redirect',
+    redirected: result !== 'AUTHORIZED',
+  };
 }
 
 export async function finishMcpOAuth(server, authorizationCode, options = {}) {

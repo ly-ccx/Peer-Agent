@@ -212,6 +212,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   mcpSetToolVisibility: (params) => ipcRenderer.invoke('mcp:set-tool-visibility', params),
   mcpTestConnection: (params) => ipcRenderer.invoke('mcp:test-connection', params),
   mcpRefreshManifest: (params) => ipcRenderer.invoke('mcp:refresh-manifest', params),
+  mcpStartOAuth: (params) => ipcRenderer.invoke('mcp:start-oauth', params),
   mcpFinishOAuth: (params) => ipcRenderer.invoke('mcp:finish-oauth', params),
   mcpReadResource: (params) => ipcRenderer.invoke('mcp:read-resource', params),
   mcpGetPrompt: (params) => ipcRenderer.invoke('mcp:get-prompt', params),

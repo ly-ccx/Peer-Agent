@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { __mcpClientInternals } from './mcp-client.mjs';
+import { __mcpClientInternals, startMcpOAuth } from './mcp-client.mjs';
 
 describe('MCP client OAuth transport integration', () => {
   it('injects an OAuth authProvider for HTTP transports and persists token updates', async () => {
@@ -51,5 +51,48 @@ describe('MCP client OAuth transport integration', () => {
     assert.equal(__mcpClientInternals.isAuthRequiredError(new Error('HTTP 403 Forbidden')), true);
     assert.equal(__mcpClientInternals.isAuthRequiredError(new Error('www-authenticate: Bearer')), true);
     assert.equal(__mcpClientInternals.isAuthRequiredError(new Error('ECONNREFUSED')), false);
+  });
+
+  it('forwards sibling authProviderConfig from resolver injection into the transport (root-bug regression)', async () => {
+    // 凭据解析器把 authProviderConfig 作为 authContext 的兄弟字段返回，
+    // prepareServerConfig 必须把它合并进 __authContext，否则 OAuth provider 丢失。
+    const credentialResolver = async () => ({
+      headers: {},
+      env: {},
+      authProviderConfig: {
+        credentialRef: 'mcp-cred:test',
+        oauth: {
+          authorizationServerUrl: 'https://auth.example.com/',
+          clientId: 'client-id',
+          scopes: ['mcp.read'],
+          redirectUrl: 'http://127.0.0.1:33418/mcp/oauth/callback',
+        },
+        updateOAuth: async () => {},
+        openAuthorizationUrl: async () => {},
+      },
+      authContext: {
+        mode: 'oauth2',
+        credentialRef: 'mcp-cred:test',
+        hasCredential: true,
+      },
+    });
+    const server = { transport: 'streamable_http', url: 'https://mcp.example.com/mcp', auth: { mode: 'oauth2', credentialRef: 'mcp-cred:test' } };
+    const config = await __mcpClientInternals.prepareServerConfig(server, { credentialResolver });
+    assert.equal(config.__authContext.mode, 'oauth2');
+    assert.ok(config.__authContext.authProviderConfig, 'authProviderConfig must survive into __authContext');
+    const transport = __mcpClientInternals.createTransport(config);
+    assert.ok(transport._authProvider, 'transport should receive an OAuth authProvider after the fix');
+  });
+
+  it('startMcpOAuth throws readable error codes for unsupported/unconfigured servers', async () => {
+    await assert.rejects(
+      () => startMcpOAuth({ transport: 'stdio', command: 'foo', auth: { mode: 'none' } }, { credentialResolver: async () => ({}) }),
+      /MCP_OAUTH_NOT_CONFIGURED|MCP_OAUTH_UNSUPPORTED_TRANSPORT/,
+    );
+    // HTTP 但非 oauth2 模式：应报“未配置”，绝不静默成功。
+    await assert.rejects(
+      () => startMcpOAuth({ transport: 'streamable_http', url: 'https://mcp.example.com/mcp', auth: { mode: 'none' } }),
+      /MCP_OAUTH_NOT_CONFIGURED/,
+    );
   });
 });

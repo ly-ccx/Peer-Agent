@@ -95,7 +95,7 @@ function authLabel(auth?: McpServerView['auth']): string {
   if (auth.mode === 'http_bearer') return 'HTTP Bearer';
   if (auth.mode === 'http_header') return `HTTP Header${auth.headerName ? ` · ${auth.headerName}` : ''}`;
   if (auth.mode === 'stdio_env') return `stdio env${auth.envName ? ` · ${auth.envName}` : ''}`;
-  if (auth.mode === 'oauth2') return `OAuth 2.0${auth.oauth?.tokenStatus === 'available' ? ' · 已登录' : ''}`;
+  if (auth.mode === 'oauth2') return `OAuth 2.0${auth.oauth?.tokenStatus === 'available' ? ' · 已登录' : ' · 需要登录'}`;
   return auth.mode;
 }
 
@@ -387,6 +387,34 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
       setOauthAuthorizationCode('');
     });
   }, [oauthAuthorizationCode, runServerAction]);
+
+  const handleStartOAuth = useCallback(async (server: McpServerView) => {
+    setBusy(true);
+    setStatus('正在打开浏览器进行 OAuth 授权，请在浏览器中完成登录…');
+    try {
+      await clientApi.mcpStartOAuth({ serverId: serverIdOf(server) });
+      setOauthAuthorizationCode('');
+      await load();
+      setStatus('OAuth 授权完成，已刷新连接状态。');
+    } catch (error) {
+      // 把后端归一化错误码翻译成用户可读提示，避免再退化成“无认证”。
+      const raw = error instanceof Error ? error.message : String(error);
+      const message = raw.includes('MCP_OAUTH_NOT_CONFIGURED')
+        ? '该服务未配置 OAuth 凭据，请先在高级设置中填写授权服务器 / Client 信息。'
+        : raw.includes('MCP_OAUTH_UNSUPPORTED_TRANSPORT')
+          ? '当前仅支持 HTTP / Streamable HTTP 类型的 MCP 进行 OAuth 登录。'
+          : raw.includes('MCP_OAUTH_DISCOVERY_FAILED')
+            ? '无法按 MCP 授权规范发现授权服务器（服务端可能未提供元数据或不支持动态注册），请改用手动粘贴 code 方式或联系服务方。'
+            : raw.includes('MCP_OAUTH_NO_BROWSER')
+              ? '无法打开系统浏览器完成授权。'
+              : raw.includes('timed out')
+                ? 'OAuth 授权超时，请重试。'
+                : raw;
+      setStatus(`OAuth 授权失败：${message}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [load]);
 
   const refreshAll = useCallback(async () => {
     setBusy(true);
@@ -803,7 +831,13 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                 </div>
                 <div>
                   <dt>Auth</dt>
-                  <dd>{authLabel(selected.auth)}</dd>
+                  <dd>
+                    {selected.auth?.mode === 'oauth2'
+                      ? authLabel(selected.auth)
+                      : selectedNeedsAuth
+                        ? '需要认证（请配置 OAuth）'
+                        : authLabel(selected.auth)}
+                  </dd>
                 </div>
                 <div>
                   <dt>Manifest</dt>
@@ -817,19 +851,25 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
 
               <div className="settings-actions settings-actions--wrap mcp-detail-actions">
                 <button type="button" disabled={busy} onClick={() => void runServerAction('刷新 Manifest', () => clientApi.mcpRefreshManifest({ serverId: serverIdOf(selected) }))}>刷新 Manifest</button>
-                {selectedNeedsAuth ? <button type="button" disabled={busy} onClick={() => setStatus('已检测到该 MCP 需要身份验证。请展开高级设置配置 OAuth 后完成授权；自动 OAuth 回调将在后续补齐。')}>进行身份验证</button> : null}
+                {selected.auth?.mode === 'oauth2' ? (
+                  <button type="button" disabled={busy} onClick={() => void handleStartOAuth(selected)}>
+                    {selected.auth?.oauth?.tokenStatus === 'available' ? '重新认证' : '登录授权'}
+                  </button>
+                ) : selectedNeedsAuth ? (
+                  <button type="button" disabled={busy} onClick={() => setStatus('已检测到该 MCP 需要身份验证。请展开高级设置将认证方式配置为 OAuth 2.0 后再点击“登录授权”。')}>进行身份验证</button>
+                ) : null}
                 <button type="button" disabled={busy} onClick={() => void runServerAction(selected.enabled === false ? '启用连接' : '禁用连接', () => clientApi.mcpSetEnabled({ serverId: serverIdOf(selected), enabled: selected.enabled === false }))}>{selected.enabled === false ? '启用' : '禁用'}</button>
                 <button type="button" disabled={busy} onClick={() => void runServerAction('移除连接', () => clientApi.mcpUninstall({ serverId: serverIdOf(selected) }))}>移除</button>
               </div>
 
               {selected.auth?.mode === 'oauth2' ? (
                 <div className="settings-inline-form mcp-oauth-finish">
+                  <p className="settings-help">推荐直接点击上方“{selected.auth?.oauth?.tokenStatus === 'available' ? '重新认证' : '登录授权'}”：会自动打开浏览器并完成回调换取 token，无需手动粘贴。access token 只会写入 main 进程凭证库。</p>
                   <label>
-                    OAuth authorization code
-                    <input value={oauthAuthorizationCode} onChange={(event) => setOauthAuthorizationCode(event.target.value)} placeholder="浏览器授权完成后粘贴 code" />
+                    手动粘贴 authorization code（备用）
+                    <input value={oauthAuthorizationCode} onChange={(event) => setOauthAuthorizationCode(event.target.value)} placeholder="若自动回调不可用，浏览器授权后粘贴 code" />
                   </label>
                   <button type="button" disabled={busy || !oauthAuthorizationCode.trim()} onClick={() => void handleFinishOAuth(selected)}>完成 OAuth 授权</button>
-                  <p className="settings-help">先点击“刷新 Manifest”或测试连接触发浏览器登录；授权完成后将 code 粘贴到这里。access token 只会写入 main 进程凭证库。</p>
                 </div>
               ) : null}
 

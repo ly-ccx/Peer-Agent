@@ -298,6 +298,7 @@ export interface BootstrapPreloadApi {
   readonly mcpSetToolVisibility: (params: { mcpId?: string | number; serverId?: string | number; toolName: string; visible: boolean }) => Promise<unknown>;
   readonly mcpTestConnection: (params: Record<string, unknown>) => Promise<McpConnectionTestResult>;
   readonly mcpRefreshManifest: (params: { mcpId?: string | number; serverId?: string | number }) => Promise<McpManifestRefreshResult>;
+  readonly mcpStartOAuth: (params: { mcpId?: string | number; serverId?: string | number }) => Promise<McpConnectionProbeResult & { readonly success: boolean; readonly toolCount: number; readonly oauth?: 'authorized' | 'connected' }>;
   readonly mcpFinishOAuth: (params: { mcpId?: string | number; serverId?: string | number; authorizationCode: string }) => Promise<{ ok: boolean }>;
   readonly mcpReadResource: (params: { mcpId?: string | number; serverId?: string | number; uri: string }) => Promise<unknown>;
   readonly mcpGetPrompt: (params: { mcpId?: string | number; serverId?: string | number; name: string; arguments?: Record<string, unknown> }) => Promise<unknown>;

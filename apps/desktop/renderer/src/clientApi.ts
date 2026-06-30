@@ -51,6 +51,7 @@ const unavailableApi: ClientApi = {
   mcpSetToolVisibility: unavailableMethod('mcpSetToolVisibility'),
   mcpTestConnection: unavailableMethod('mcpTestConnection'),
   mcpRefreshManifest: unavailableMethod('mcpRefreshManifest'),
+  mcpStartOAuth: unavailableMethod('mcpStartOAuth'),
   mcpFinishOAuth: unavailableMethod('mcpFinishOAuth'),
   mcpReadResource: unavailableMethod('mcpReadResource'),
   mcpGetPrompt: unavailableMethod('mcpGetPrompt'),
