@@ -10,7 +10,9 @@ import {
 } from 'react';
 import { clientApi } from '../clientApi';
 
-export type WorkbenchTabId = 'goal' | 'terminal' | 'browser' | 'files' | 'diff';
+// 历史 'goal' tab 已正名为 'plan'（与对话 plan 模式同口径）。持久化里的旧 'goal'
+// 值经 normalizeTab 归一为 'plan'，确保旧设置不丢、不回落到 terminal。
+export type WorkbenchTabId = 'plan' | 'terminal' | 'browser' | 'files' | 'diff';
 
 export interface WorkbenchDiffTarget {
   readonly absPath: string;
@@ -112,12 +114,31 @@ function readWorkbenchSettings(raw: unknown): WorkbenchSettingsShape {
 
 function isValidTab(value: unknown): value is WorkbenchTabId {
   return (
-    value === 'goal' ||
+    value === 'plan' ||
     value === 'terminal' ||
     value === 'browser' ||
     value === 'files' ||
     value === 'diff'
   );
+}
+
+/** 把持久化/历史输入归一为当前 tab 值：旧 'goal' 等价于当前 'plan'。 */
+function normalizeTab(value: unknown): WorkbenchTabId | null {
+  if (value === 'goal') return 'plan';
+  return isValidTab(value) ? value : null;
+}
+
+/** 对整份 activeTab 持久化映射做归一（旧 'goal' → 'plan'），并丢弃非法值。 */
+function normalizeActiveTabMap(
+  map: Record<string, WorkbenchTabId> | undefined,
+): Record<string, WorkbenchTabId> {
+  if (!map || typeof map !== 'object') return {};
+  const out: Record<string, WorkbenchTabId> = {};
+  for (const [key, raw] of Object.entries(map)) {
+    const tab = normalizeTab(raw);
+    if (tab) out[key] = tab;
+  }
+  return out;
 }
 
 interface WorkbenchProviderProps {
@@ -130,7 +151,7 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
   const [open, setOpenState] = useState<boolean>(initial.open === true);
   const [width, setWidthState] = useState<number>(clampWidth(initial.width ?? WORKBENCH_DEFAULT_WIDTH));
   const [activeTabMap, setActiveTabMap] = useState<Record<string, WorkbenchTabId>>(
-    initial.activeTab && typeof initial.activeTab === 'object' ? { ...initial.activeTab } : {},
+    normalizeActiveTabMap(initial.activeTab),
   );
   const [goalSlot, setGoalSlotState] = useState<HTMLElement | null>(null);
   const [hasGoalPlan, setHasGoalPlanState] = useState<boolean>(false);
@@ -309,10 +330,10 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
 
   const activeTab: WorkbenchTabId = useMemo(() => {
     const key = conversationId ?? '__none';
-    const stored = activeTabMap[key];
-    if (isValidTab(stored)) return stored;
-    // 兜底默认 Goal：从未手动切过 tab 的会话停在 Goal 视图（而非 terminal）。
-    return 'goal';
+    const stored = normalizeTab(activeTabMap[key]);
+    if (stored) return stored;
+    // 兜底默认 Plan：从未手动切过 tab 的会话停在 Plan 视图（而非 terminal）。
+    return 'plan';
   }, [conversationId, activeTabMap]);
 
   const value = useMemo<WorkbenchContextValue>(() => ({

@@ -5,7 +5,9 @@
 import { MODE_COPY } from './mode-copy.mjs';
 
 function normalizeMode(value) {
-  return typeof value === 'string' && value.trim() ? value.trim() : 'chat';
+  const mode = typeof value === 'string' && value.trim() ? value.trim() : 'chat';
+  // 历史 'goal' 模式别名按当前 'plan' 处理（正名兼容），确保 MODE_COPY 命中。
+  return mode === 'goal' ? 'plan' : mode;
 }
 
 function normalizeEffort(value) {

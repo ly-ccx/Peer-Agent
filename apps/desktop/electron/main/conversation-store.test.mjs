@@ -114,9 +114,13 @@ test('conversation mode is per-conversation: defaults to chat, persists, and iso
     assert.equal(a.mode, 'chat');
     assert.equal(store.getConversation(a.id).mode, 'chat');
 
-    // 创建时可显式指定 goal 模式。
-    const b = store.createConversation({ title: 'b', mode: 'goal' });
-    assert.equal(b.mode, 'goal');
+    // 创建时可显式指定 plan 模式。
+    const b = store.createConversation({ title: 'b', mode: 'plan' });
+    assert.equal(b.mode, 'plan');
+
+    // 历史 'goal' 值入库时归一为 'plan'（正名兼容）。
+    const legacy = store.createConversation({ title: 'legacy', mode: 'goal' });
+    assert.equal(legacy.mode, 'plan');
 
     // 改 b 不影响 a —— 模式按会话隔离(本次重构的核心命题)。
     const updated = store.updateMode(b.id, 'chat');
@@ -124,9 +128,9 @@ test('conversation mode is per-conversation: defaults to chat, persists, and iso
     assert.equal(store.getConversation(b.id).mode, 'chat');
     assert.equal(store.getConversation(a.id).mode, 'chat');
 
-    // 把 a 切到 goal,b 仍为 chat。
-    store.updateMode(a.id, 'goal');
-    assert.equal(store.getConversation(a.id).mode, 'goal');
+    // 把 a 切到 plan,b 仍为 chat。
+    store.updateMode(a.id, 'plan');
+    assert.equal(store.getConversation(a.id).mode, 'plan');
     assert.equal(store.getConversation(b.id).mode, 'chat');
   } finally {
     cleanup();

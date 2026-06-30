@@ -18,6 +18,7 @@ import {
   isEffortLevel,
   isLocalAccessLevel,
   isChatMode,
+  normalizeChatMode,
   type EffortLevel,
   type ChatMode,
 } from '../state/preferences';
@@ -119,12 +120,12 @@ function accessLevelTitle(level: LocalAccessLevel, isZh: boolean): string {
 }
 
 function modeLabel(mode: ChatMode, isZh: boolean): string {
-  if (mode === 'goal') return isZh ? '目标模式' : 'Goal mode';
+  if (mode === 'plan') return isZh ? '计划模式' : 'Plan mode';
   return isZh ? '对话模式' : 'Chat mode';
 }
 
 function modeTitle(mode: ChatMode, isZh: boolean): string {
-  if (mode === 'goal') {
+  if (mode === 'plan') {
     return isZh
       ? '先规划后执行：先与你共同产出结构化实现计划，批准后再执行'
       : 'Plan before execute: co-author a structured plan, then execute after approval';
@@ -185,8 +186,8 @@ async function loadConversationMessages(conversationId: string): Promise<{
 }> {
   const conv = await clientApi.conversationsGet({ id: conversationId });
   if (!conv?.messages) return { messages: [], tokenUsage: null, mode: 'chat' };
-  // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'。
-  const convMode: ChatMode = isChatMode(conv.mode) ? conv.mode : 'chat';
+  // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'，历史 'goal' 归一化为 'plan'。
+  const convMode: ChatMode = normalizeChatMode(conv.mode);
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0;
   const loaded = conv.messages.map((m: Record<string, unknown>) => {
     const msg: ChatMsg = {
@@ -1221,22 +1222,22 @@ export function ChatSurface({
     setHasGoalPlan(count > 0);
   }, [setHasGoalPlan]);
   const handleGoalRequestFocus = useCallback(() => {
-    if (workbenchOpen && workbenchActiveTab === 'goal') {
+    if (workbenchOpen && workbenchActiveTab === 'plan') {
       setWorkbenchOpen(false);
       return;
     }
-    setWorkbenchTab('goal');
+    setWorkbenchTab('plan');
     if (!workbenchOpen) setWorkbenchOpen(true);
   }, [workbenchOpen, workbenchActiveTab, setWorkbenchOpen, setWorkbenchTab]);
   // 仅当「本会话内真正新建了计划」（plans 0→N，由 GoalPlanPanel 的广播 reload 路径判定）
-  // 时自动展开工作台并切到 Goal tab。切换到一个本来就有计划的会话不会触发，
+  // 时自动展开工作台并切到 Plan tab。切换到一个本来就有计划的会话不会触发，
   // 因为 GoalPlanPanel 的 load 路径只刷新基线、不回调。
   const handleGoalPlanCreated = useCallback(() => {
-    setWorkbenchTab('goal');
+    setWorkbenchTab('plan');
     setWorkbenchOpen(true);
   }, [setWorkbenchTab, setWorkbenchOpen]);
   useEffect(() => {
-    if (mode !== 'goal') setHasGoalPlan(false);
+    if (mode !== 'plan') setHasGoalPlan(false);
   }, [mode, setHasGoalPlan]);
 
   if (!conversationId) {
@@ -1505,14 +1506,14 @@ export function ChatSurface({
           onReject={denyPendingPermissionCall}
           i18n={i18n}
         />
-        {/* 聊天侧镜像受治理批准卡：仅 goal 模式且存在 awaiting_approval 计划时显示，
+        {/* 聊天侧镜像受治理批准卡：仅 Plan 模式且存在 awaiting_approval 计划时显示，
             点击复用与右侧面板同一条 goalPlansApprove 治理链路，状态互相消解。
             实质性追问（request_user_input）仍走对话流，二者正交。 */}
         <ChatGoalApprovalCard
           conversationId={conversationId}
           isZh={isZh}
           isStreaming={isStreaming}
-          enabled={mode === 'goal'}
+          enabled={mode === 'plan'}
         />
         {messageQueue.length > 0 ? (
           <div className="message-queue" role="list" aria-label={isZh ? '待发送队列' : 'Queued messages'}>
@@ -1670,7 +1671,7 @@ export function ChatSurface({
               options={CHAT_MODES.map((m) => ({
                 value: m,
                 label: modeLabel(m, isZh),
-                tone: m === 'goal' ? 'danger' : undefined,
+                tone: m === 'plan' ? 'danger' : undefined,
               }))}
               onChange={(next) => {
                 if (isChatMode(next)) changeMode(next);

@@ -1,10 +1,10 @@
 /**
- * Goal 模式运行时闸门 —— 见 Goal 模式运行时闸门设计。
+ * Plan 模式运行时闸门 —— 见 Plan 模式设计。
  *
  * 设计要点（与 AGENTS.md 非协商运行时链一致）：
  * - 闸门是 PermissionGrant 之前的「能力准入」判定，跑在 projected-tool 执行入口，
  *   不新增旁路执行路径，也不依赖 prompt 作为唯一执行手段。
- * - goal 模式「先规划 → 批准 → 执行」：计划未获批准前，只放行规划 / 回写 / 提问 / 惰性只读
+ * - plan 模式「先规划 → 批准 → 执行」：计划未获批准前，只放行规划 / 回写 / 提问 / 惰性只读
  *   能力；一切有副作用的能力（写文件、shell、MCP 副作用）被结构化拒绝。
  * - 计划状态是「活事实」，从 goal-plan-store 按 conversationId 实时读取，避免用流开始时的
  *   静态快照（模型可能在回合中途才 goal_create_plan）。
@@ -12,8 +12,8 @@
 
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
 
-// goal 模式下「无论计划是否获批」始终放行的工具（规划 / 回写 / 只读读回 / 向用户提问）。
-const GOAL_ALWAYS_ALLOWED_TOOLS = Object.freeze(
+// Plan 模式下「无论计划是否获批」始终放行的工具（规划 / 回写 / 只读读回 / 向用户提问）。
+const PLAN_ALWAYS_ALLOWED_TOOLS = Object.freeze(
   new Set(['goal_create_plan', 'goal_update_task', 'goal_get_plan', 'request_user_input']),
 );
 
@@ -57,11 +57,12 @@ export function evaluateGoalModeGate({
   riskLevel = 'L2_local_write',
   planGate = { hasPlan: false, hasApprovedPlan: false },
 } = {}) {
-  // 非 goal 模式不施加任何额外闸门。
-  if (mode !== 'goal') return { allowed: true };
+  const normalizedMode = mode === 'goal' ? 'plan' : mode;
+  // 非 plan 模式不施加任何额外闸门。历史 'goal' 输入按 'plan' 兼容处理。
+  if (normalizedMode !== 'plan') return { allowed: true };
 
   // 规划 / 回写 / 提问：始终放行（这正是产出计划与求批准的手段）。
-  if (GOAL_ALWAYS_ALLOWED_TOOLS.has(toolName)) return { allowed: true };
+  if (PLAN_ALWAYS_ALLOWED_TOOLS.has(toolName)) return { allowed: true };
 
   // 计划已就绪：按既有权限链继续，闸门放行。
   if (planGate?.hasApprovedPlan) return { allowed: true };
@@ -80,12 +81,12 @@ function denialMessage(reason, locale) {
   const zh = locale !== 'en-US';
   if (reason === 'goal_plan_not_approved') {
     return zh
-      ? 'Goal 模式：已有计划但尚未获批准。请先用 request_user_input 向用户征求批准，获批后再执行有副作用的操作。'
-      : 'Goal mode: a plan exists but is not approved yet. Ask the user for approval via request_user_input before running side-effecting actions.';
+      ? 'Plan 模式：已有计划但尚未获批准。请通过右侧计划面板/批准卡取得用户批准，获批后再执行有副作用的操作。'
+      : 'Plan mode: a plan exists but is not approved yet. Get user approval via the Plan panel/approval card before running side-effecting actions.';
   }
   return zh
-    ? 'Goal 模式：必须先用 goal_create_plan 产出目标与完整计划，并经用户批准，才能执行有副作用的操作。'
-    : 'Goal mode: you must first produce a goal and full plan via goal_create_plan and get user approval before running side-effecting actions.';
+    ? 'Plan 模式：必须先用 goal_create_plan 产出目标与完整计划，并经用户批准，才能执行有副作用的操作。'
+    : 'Plan mode: you must first produce a goal and full plan via goal_create_plan and get user approval before running side-effecting actions.';
 }
 
 /**

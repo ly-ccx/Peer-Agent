@@ -23,7 +23,8 @@ function appendJsonl(filePath, row) {
 }
 
 function normalizeMode(value) {
-  return value === 'goal' ? 'goal' : 'chat';
+  if (value === 'plan' || value === 'goal') return 'plan';
+  return 'chat';
 }
 
 function normalizeStatus(value) {
@@ -77,7 +78,7 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
     return listConversations(params).filter((c) => (c.workspacePath || null) === (workspacePath || null));
   }
 
-  // 对话模式（chat / goal）按会话持久化在会话 meta 上，而非全局设置：
+  // 对话模式（chat / plan）按会话持久化在会话 meta 上，而非全局设置：
   // 模式是「每会话状态」，与计划数据同口径，切换会话各自独立、互不影响。
   function createConversation({ title, workspacePath, mode } = {}) {
     const now = new Date().toISOString();

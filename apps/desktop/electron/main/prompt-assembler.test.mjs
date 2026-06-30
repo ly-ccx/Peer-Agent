@@ -176,21 +176,35 @@ describe('System Context assembly', () => {
     assert.equal(compactContext.snapshot.mode, 'compact');
   });
 
-  it('injects the goal mode plan-before-execute reminder into L6 (proposal 0002)', () => {
-    const goalContext = buildSystemContext('/tmp/workspace', {
+  it('injects the plan mode plan-before-execute reminder into L6 (proposal 0002)', () => {
+    const planContext = buildSystemContext('/tmp/workspace', {
+      mode: 'plan',
+      provider: 'anthropic',
+      model: 'claude-opus',
+    });
+
+    const modeSection = planContext.sections.find((section) => section.id === 'runtime.mode');
+    assert.ok(modeSection, 'plan mode must produce a runtime.mode section');
+    assert.equal(modeSection.layer, 'L6_MODE_REMINDER');
+    assert.match(modeSection.content, /Mode: plan/);
+    // 先规划后执行 + Evidence 驱动完成 是 plan 模式的核心契约,必须出现在 reminder 中。
+    assert.match(modeSection.content, /Plan-before-execute/);
+    assert.match(modeSection.content, /Evidence/);
+    assert.equal(planContext.snapshot.mode, 'plan');
+  });
+
+  it('normalizes the legacy goal mode alias to the plan reminder (backward compat)', () => {
+    const legacyContext = buildSystemContext('/tmp/workspace', {
       mode: 'goal',
       provider: 'anthropic',
       model: 'claude-opus',
     });
 
-    const modeSection = goalContext.sections.find((section) => section.id === 'runtime.mode');
-    assert.ok(modeSection, 'goal mode must produce a runtime.mode section');
-    assert.equal(modeSection.layer, 'L6_MODE_REMINDER');
-    assert.match(modeSection.content, /Mode: goal/);
-    // 先规划后执行 + Evidence 驱动完成 是 goal 模式的核心契约,必须出现在 reminder 中。
+    const modeSection = legacyContext.sections.find((section) => section.id === 'runtime.mode');
+    assert.ok(modeSection, 'legacy goal mode must still produce a runtime.mode section');
+    // 历史 'goal' 输入应渲染为 plan 文案，而不是回落到裸 'Mode: goal.'。
+    assert.match(modeSection.content, /Mode: plan/);
     assert.match(modeSection.content, /Plan-before-execute/);
-    assert.match(modeSection.content, /Evidence/);
-    assert.equal(goalContext.snapshot.mode, 'goal');
   });
 
   it('renders explicit runtime reminders without mixing them into user messages', () => {

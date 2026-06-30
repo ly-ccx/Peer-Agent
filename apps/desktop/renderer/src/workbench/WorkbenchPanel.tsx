@@ -34,9 +34,9 @@ const ICON_PROPS = {
 
 const TABS: readonly TabDef[] = [
   {
-    id: 'goal',
-    labelZh: '目标',
-    labelEn: 'Goal',
+    id: 'plan',
+    labelZh: '计划',
+    labelEn: 'Plan',
     icon: (
       <svg {...ICON_PROPS}>
         <circle cx="12" cy="12" r="9" />
@@ -237,7 +237,7 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
 
       <div className="workbench-tab-rail" role="tablist" aria-orientation="vertical">
         {TABS.map((tab) => {
-          const disabled = tab.id === 'goal' && !hasGoalPlan;
+          const disabled = tab.id === 'plan' && !hasGoalPlan;
           const selected = activeTab === tab.id;
           return (
             <button
@@ -252,7 +252,7 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
               tabIndex={selected ? 0 : -1}
               title={
                 disabled
-                  ? isZh ? '暂无 Goal' : 'No active goal'
+                  ? isZh ? '暂无计划' : 'No active plan'
                   : isZh ? tab.labelZh : tab.labelEn
               }
               onClick={() => {
@@ -270,7 +270,7 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
       <div className="workbench-view-slot">
         <div
           className="workbench-view workbench-view--goal"
-          data-active={activeTab === 'goal'}
+          data-active={activeTab === 'plan'}
           ref={goalSlotRef}
         />
         <div className="workbench-view" data-active={activeTab === 'terminal'}>

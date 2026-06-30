@@ -52,14 +52,20 @@ export function isLocalAccessLevel(value: unknown): value is LocalAccessLevel {
     || value === 'full_local';
 }
 
-// 对话模式:进入 System Context 的 L6_MODE_REMINDER 层(见 Goal 模式设计)。
-// 'chat' 为默认直答模式;'goal' 为先规划后执行模式。
-export type ChatMode = 'chat' | 'goal';
+// 对话模式:进入 System Context 的 L6_MODE_REMINDER 层(见 Plan 模式设计)。
+// 'chat' 为默认直答模式;'plan' 为先规划后执行模式。历史 'goal' 输入归一化为 'plan'。
+export type ChatMode = 'chat' | 'plan';
 
 /** 合法对话模式枚举。 */
-export const CHAT_MODES: readonly ChatMode[] = ['chat', 'goal'];
+export const CHAT_MODES: readonly ChatMode[] = ['chat', 'plan'];
 
-/** ChatMode 类型守卫。 */
+/** ChatMode 类型守卫（只接受当前 wire 值，不把历史别名视为当前合法值）。 */
 export function isChatMode(value: unknown): value is ChatMode {
-  return value === 'chat' || value === 'goal';
+  return value === 'chat' || value === 'plan';
+}
+
+/** 对持久化/跨进程输入做兼容归一化：旧版 'goal' 等价于当前 'plan'。 */
+export function normalizeChatMode(value: unknown): ChatMode {
+  if (value === 'plan' || value === 'goal') return 'plan';
+  return 'chat';
 }

@@ -1,6 +1,6 @@
 // Goal Runner 上下文 Source —— 见 docs/design/goal-runner-explorer-task-list.md Slice 5。
 //
-// 作用：goal 模式下，Runner 托管推进 turn 通过明确的 Context Source 注入「续推上下文」，
+// 作用：plan 模式下，Runner 托管推进 turn 通过明确的 Context Source 注入「续推上下文」，
 // 而不是把目标/边界/预算等实质内容塞进一条伪造的 user message。
 //
 // 本 Source 产出两类 section：
@@ -10,7 +10,7 @@
 //   完成必须回写 Evidence、不越界、需用户决策时停止）。
 //
 // 治理（与 AGENTS.md 一致）：
-// - 仅在 mode==='goal' 且存在活动计划时渲染；chat 模式零额外 token。
+// - 仅在 mode==='plan'（历史别名 'goal'）且存在活动计划时渲染；chat 模式零额外 token。
 // - 只读 goal-plan-store，不写盘、不触发授权、不伪造 Tool Result/Evidence。
 // - 事实与指令分属不同 section，trust 边界清晰。
 
@@ -164,8 +164,10 @@ export function createGoalRunnerPromptSource() {
     priority: 1,
     trust: 'runtime',
     observe(input = {}) {
-      const mode = asString(input.mode) || 'chat';
-      if (mode !== 'goal') return { plan: null };
+      const rawMode = asString(input.mode) || 'chat';
+      // 历史 'goal' 模式别名按当前 'plan' 处理（正名兼容）。
+      const mode = rawMode === 'goal' ? 'plan' : rawMode;
+      if (mode !== 'plan') return { plan: null };
       const store = input.goalPlanStore;
       const conversationId = input.conversationId ?? null;
       if (!store || typeof store.getActivePlanByConversation !== 'function') {

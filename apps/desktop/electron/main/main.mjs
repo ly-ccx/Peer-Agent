@@ -508,7 +508,7 @@ goalRunner = createGoalRunner({
         webContents,
         streamId,
         effort: 'default',
-        mode: 'goal',
+        mode: 'plan',
         conversationId: plan.conversationId,
         runtimeReminders: [buildGoalRunnerReminder(plan, turnNumber)],
         agentProgress,
