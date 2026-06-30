@@ -586,12 +586,13 @@ export function ChatSurface({
     setMessageQueue(persisted?.queue ?? []);
     shouldAutoScrollRef.current = true;
     setIsThreadAtBottom(true);
-    // 切换会话时,先把流式表达状态按会话归零,避免上一会话的 isStreaming/streamId 残留:
+    // 切换会话时,先把流式表达状态按会话归零,避免上一会话的 isStreaming/streamId/toolProgress 残留:
     // 否则从"正在输出的 A"切到"未运行的 B",B 会误显示运行中(左侧列表 Loading、
-    // 右下角停止按钮误亮),且旧会话的 delta 仍匹配旧 streamIdRef 污染新会话消息。
+    // 右下角停止按钮误亮),也会让"正在准备工具参数"残留到新会话。
     // 归零后由下方 reattach 按"新会话是否确有活跃流"重新点亮,仅以真值为准。
     setIsStreaming(false);
     streamIdRef.current = null;
+    setToolProgress(null);
     // 压缩横幅真值在主进程登记表（按会话），切会话时先归零本地表达，避免上一会话的
     // 压缩横幅/进度残留到新会话；随后由下方查询按"新会话是否确在压缩"重新点亮。
     setIsCompacting(false);
