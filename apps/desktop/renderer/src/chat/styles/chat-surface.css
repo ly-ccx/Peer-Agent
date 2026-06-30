@@ -602,9 +602,13 @@
   max-width: 140px;
 }
 
-.composer-dropdown .pa-dropdown-menu {
+/* 菜单经 portal 投到 body 后，消费方 className(composer-dropdown) 被透传到菜单自身，
+   故由原来的后代选择器改为复合选择器 .pa-dropdown-menu.composer-dropdown。 */
+.pa-dropdown-menu.composer-dropdown {
   padding: 4px;
-  /* 菜单宽度贴合最宽选项,短选项不被强行撑宽留白;上限防止超长文案撑爆。 */
+  /* 菜单宽度贴合最宽选项,短选项不被强行撑宽留白;上限防止超长文案撑爆。
+     覆盖全局 fixed 菜单的 width:var(--pa-dropdown-menu-width)，改回内容自适应。 */
+  width: auto;
   min-width: max-content;
   max-width: 220px;
   /* 单层浮层:显式覆盖全局 .pa-dropdown-menu 的 border/radius/背景,

@@ -563,10 +563,11 @@
   transform: rotate(180deg);
 }
 .pa-dropdown-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
+  /* 菜单经 createPortal 投到 document.body，用 fixed 按触发器位置定位(left/top 由 JS 内联注入)，
+     彻底脱离祖先滚动容器(如 .mcp-modal-body)的溢出计算，展开时不会撑高容器/冒出滚动条。
+     宽度默认贴合触发器宽度(JS 注入的 --pa-dropdown-menu-width)。 */
+  position: fixed;
+  width: var(--pa-dropdown-menu-width, auto);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -575,14 +576,12 @@
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-md);
   box-shadow: 0 12px 30px rgba(16, 24, 40, 0.28);
-  z-index: 40;
+  z-index: 1200;
   max-height: 280px;
   overflow-y: auto;
   animation: pa-dropdown-in var(--za-motion-fast) var(--za-ease-out) both;
 }
-.pa-dropdown-up .pa-dropdown-menu {
-  top: auto;
-  bottom: calc(100% + 4px);
+.pa-dropdown-menu.is-up {
   animation-name: pa-dropdown-up-in;
 }
 .pa-dropdown-up .pa-dropdown-caret {
