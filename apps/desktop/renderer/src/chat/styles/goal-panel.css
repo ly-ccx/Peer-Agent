@@ -902,7 +902,9 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 8px 0;
+  width: 100%;
+  max-width: var(--chat-content-max);
+  margin: 8px auto;
 }
 
 .chat-goal-approval-card {
