@@ -73,12 +73,16 @@ function evidencePolicyForTool(tool) {
 }
 
 // 工具是否在当前会话模式下可投影（ADR 35）。
-// 未声明 availableInModes 的工具在 chat/plan 维持向后兼容；
+// wire 值迁移后（见 ADR 41 / goal-mode-ultrathink-workflow 设计文档）:'goal' 是独立的自驱
+// 目标模式,投影层不再把它归一为 'plan',而是按 goal 独立过滤工具可用性。规划/回写工具
+// (goal_* 系列)在 goal-tool-definitions 中声明 availableInModes:['plan','goal'],故两模式均可用。
+// 未声明 availableInModes 的工具在 chat/plan/goal 维持向后兼容；
 // explorer 是更受限的只读子 Agent profile，必须显式声明可用，避免默认暴露写入/MCP/Web 能力。
 // 传入 mode 为 null/undefined（无模式上下文）时不做模式过滤。
-// 历史 'goal' 模式别名在投影层按 'plan' 处理，保证旧会话不丢工具能力。
+// wire 值迁移后 'goal' 独立成模式,不再按 'plan' 归一;存量历史 'goal'（旧 plan 语义）已由
+// conversation-store 的一次性数据迁移改写为 'plan',不会到达此处。
 function normalizeProjectionMode(mode) {
-  return mode === 'goal' ? 'plan' : mode;
+  return mode;
 }
 
 function isToolAvailableInMode(tool, mode) {

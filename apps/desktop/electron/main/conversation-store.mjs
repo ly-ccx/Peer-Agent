@@ -22,8 +22,13 @@ function appendJsonl(filePath, row) {
   appendFileSync(filePath, JSON.stringify(row) + '\n', 'utf8');
 }
 
+// 对话模式归一化。wire 值迁移后（见 ADR 41 / goal-mode-ultrathink-workflow 设计文档）:
+// 'plan' = 审批门模式;'goal' = 自驱目标模式。存量会话里历史的 'goal'（旧 plan 语义）
+// 已由 store 初始化时的一次性数据迁移（migrateLegacyGoalMode）改写为 'plan',因此这里
+// 不再把 'goal' 兼容映射为 'plan',而是按新的自驱语义原样保留。
 function normalizeMode(value) {
-  if (value === 'plan' || value === 'goal') return 'plan';
+  if (value === 'plan') return 'plan';
+  if (value === 'goal') return 'goal';
   return 'chat';
 }
 
@@ -51,8 +56,37 @@ function normalizeMeta(meta) {
   };
 }
 
+// 一次性数据迁移（wire 值迁移，见 ADR 41 / goal-mode-ultrathink-workflow 设计文档）:
+// 把存量会话 index 里历史的 mode==='goal'（旧 plan 语义）改写为 'plan'。
+//
+// 为何必须直接读写原始 index、绕过 normalizeMode:撤销兼容映射后,normalizeMode 会把
+// 'goal' 当作新的自驱语义,若先经 normalizeMeta 再迁移就无法区分「历史旧 plan 语义的
+// goal」与「用户新建的自驱 goal」。故此迁移读原始行、按字面量 'goal' 改写,并写入
+// marker 文件确保只跑一次;marker 存在后新建的 'goal' 会话不会再被回写。
+function migrateLegacyGoalMode(storeDir, indexFile) {
+  try {
+    const markerFile = path.join(storeDir, '.goal-to-plan-migrated');
+    if (existsSync(markerFile)) return;
+    if (existsSync(indexFile)) {
+      const rows = readJsonl(indexFile);
+      let changed = false;
+      for (const row of rows) {
+        if (row && row.mode === 'goal') { row.mode = 'plan'; changed = true; }
+      }
+      if (changed) writeJsonl(indexFile, rows);
+    }
+    if (!existsSync(storeDir)) mkdirSync(storeDir, { recursive: true });
+    writeFileSync(markerFile, new Date().toISOString(), 'utf8');
+  } catch {
+    // 迁移失败不应阻断 store 初始化;下次启动 marker 不存在会重试。
+  }
+}
+
 export function createConversationStore({ storeDir = pathOf('conversations') } = {}) {
   const indexFile = path.join(storeDir, 'index.jsonl');
+
+  // 撤销 'goal'→'plan' 兼容映射前,先对存量数据做一次性迁移,避免历史 'goal' 被误判为自驱语义。
+  migrateLegacyGoalMode(storeDir, indexFile);
 
   function convFile(id) { return path.join(storeDir, `${id}.jsonl`); }
 

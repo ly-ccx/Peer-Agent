@@ -111,6 +111,116 @@ function signalAdvanced(prev, next) {
   return next.completed > prev.completed || next.evidence > prev.evidence;
 }
 
+// ── 防偏航系统（见 goal-mode-ultrathink-workflow 设计文档第六、八章）──────────────
+//
+// Goal 模式允许 Agent 自主执行,但不允许自主改目标。以下为纯函数护栏,便于单测:
+// - re-anchor:周期性重申原始目标+成功标准,频率自适应任务规模(设计文档开放问题6拍板)。
+// - drift 检测:范围/文件/任务膨胀超阈值即判定漂移,交由 pump 暂停问人。
+// - verification gate:完成前要求所有叶子任务已完成且带 Evidence,阻断"无证据的口头完成"。
+
+const REANCHOR_MIN_INTERVAL = 2;
+const REANCHOR_MAX_INTERVAL = 6;
+/** 任务/文件相对基线的膨胀比阈值(超过即视为范围漂移)。 */
+const DRIFT_INFLATION_RATIO = 2;
+/** 允许的绝对增量下限(小规模计划避免比值误报:未超过该增量不算漂移)。 */
+const DRIFT_MIN_ABSOLUTE_DELTA = 3;
+
+/**
+ * re-anchor 间隔:clamp(ceil(taskCount/3), 2, 6)。
+ * 小任务不浪费、大任务防漂移(设计文档开放问题6)。
+ */
+export function computeReanchorInterval(taskCount) {
+  const n = Number.isFinite(taskCount) ? Math.max(0, Math.trunc(taskCount)) : 0;
+  const base = Math.ceil(n / 3);
+  return Math.min(REANCHOR_MAX_INTERVAL, Math.max(REANCHOR_MIN_INTERVAL, base || REANCHOR_MIN_INTERVAL));
+}
+
+/**
+ * 是否应在本轮 re-anchor。forced=true(如计划修订后、长 Explorer 批次返回后)立即触发;
+ * 否则每 interval 轮触发一次(turnNumber 从 1 起)。
+ */
+export function shouldReanchor(turnNumber, interval, forced = false) {
+  if (forced) return true;
+  const t = Number.isFinite(turnNumber) ? Math.trunc(turnNumber) : 0;
+  const step = Number.isFinite(interval) && interval > 0 ? Math.trunc(interval) : REANCHOR_MIN_INTERVAL;
+  if (t <= 0) return false;
+  return t % step === 0;
+}
+
+/** 计划范围快照:任务总数(含嵌套)+ 去重后的 involvedFiles 数。用于 drift 基线与比较。 */
+export function computePlanScopeSnapshot(plan) {
+  const roots = Array.isArray(plan?.tasks) ? plan.tasks : [];
+  const files = new Set();
+  let taskCount = 0;
+  const stack = [...roots];
+  while (stack.length > 0) {
+    const task = stack.pop();
+    if (!task || typeof task !== 'object') continue;
+    taskCount += 1;
+    if (Array.isArray(task.involvedFiles)) {
+      for (const f of task.involvedFiles) if (typeof f === 'string' && f.trim()) files.add(f.trim());
+    }
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    for (const child of subtasks) stack.push(child);
+  }
+  return { taskCount, fileCount: files.size };
+}
+
+/**
+ * 范围漂移检测:相对基线,任务数或文件数膨胀既超过比值阈值(×DRIFT_INFLATION_RATIO)
+ * 又超过绝对增量下限(+DRIFT_MIN_ABSOLUTE_DELTA)时判定漂移。两个条件同时满足才报,
+ * 避免小规模计划因比值敏感而误报。
+ */
+export function detectPlanDrift(baseline, current) {
+  const reasons = [];
+  if (!baseline || !current) return { drifted: false, reasons };
+  const check = (label, base, cur) => {
+    const b = Number.isFinite(base) ? base : 0;
+    const c = Number.isFinite(cur) ? cur : 0;
+    const delta = c - b;
+    if (delta >= DRIFT_MIN_ABSOLUTE_DELTA && c >= b * DRIFT_INFLATION_RATIO && b >= 1) {
+      reasons.push(`${label} inflated from ${b} to ${c}`);
+    }
+  };
+  check('task count', baseline.taskCount, current.taskCount);
+  check('involved files', baseline.fileCount, current.fileCount);
+  return { drifted: reasons.length > 0, reasons };
+}
+
+/**
+ * 完成前验证门:遍历所有叶子任务,要求全部 status==='completed' 且 evidenceRefs 非空。
+ * 任一叶子未完成或缺 Evidence 即不放行完成,返回 { passed:false, unmet:[...] }。
+ * 这是"完成以证据为准、不能仅凭口头声明"的机器化落地。
+ */
+export function evaluateVerificationGate(plan) {
+  const roots = Array.isArray(plan?.tasks) ? plan.tasks : [];
+  const unmet = [];
+  let leaves = 0;
+  const stack = [...roots];
+  while (stack.length > 0) {
+    const task = stack.pop();
+    if (!task || typeof task !== 'object') continue;
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    if (subtasks.length > 0) {
+      for (const child of subtasks) stack.push(child);
+      continue;
+    }
+    leaves += 1;
+    const done = task.status === 'completed';
+    const hasEvidence = Array.isArray(task.evidenceRefs) && task.evidenceRefs.length > 0;
+    if (!done || !hasEvidence) {
+      unmet.push({
+        taskId: task.taskId ?? null,
+        status: task.status ?? null,
+        reason: !done ? 'not_completed' : 'missing_evidence',
+      });
+    }
+  }
+  // 无叶子任务(空计划)不视为通过——完成需要有可验证的证据基础。
+  if (leaves === 0) return { passed: false, unmet: [], reason: 'no_leaf_tasks' };
+  return { passed: unmet.length === 0, unmet };
+}
+
 export function createGoalRunner({
   goalPlanStore,
   chatRuntime,
@@ -296,6 +406,9 @@ export function createGoalRunner({
     // resume 会重新拉起 pump，计数自然清零（既往不咎语义）。
     let lastSignal = null;
     let noProgressStreak = 0;
+    // 防偏航:范围基线在本次 pump 首轮建立,后续轮次相对它检测 drift（任务/文件膨胀）。
+    let scopeBaseline = null;
+    let reanchorInterval = REANCHOR_MIN_INTERVAL;
     while (!session.cancelled) {
       const plan = goalPlanStore.getPlan(planId);
       if (!plan) return null;
@@ -352,13 +465,42 @@ export function createGoalRunner({
       }
 
       const turnNumber = runner.turnCount + 1;
+
+      // ── 防偏航:drift 检测 + 周期性 re-anchor（设计文档第六章）─────────────
+      // 首轮建立范围基线;后续轮相对基线检测任务/文件膨胀,漂移即暂停问人,不带病推进。
+      const scopeNow = computePlanScopeSnapshot(plan);
+      if (!scopeBaseline) {
+        scopeBaseline = scopeNow;
+        reanchorInterval = computeReanchorInterval(scopeNow.taskCount);
+      } else {
+        const drift = detectPlanDrift(scopeBaseline, scopeNow);
+        if (drift.drifted) {
+          goalPlanStore.setRunnerState(planId, {
+            enabled: true,
+            status: 'blocked',
+            intent: 'block',
+            blockedReason: `scope_drift: ${drift.reasons.join('; ')}`,
+            updatedAt: now(),
+          });
+          emit('goalRunner:blocked', { planId, reason: 'scope_drift', reasons: drift.reasons });
+          return getState(planId);
+        }
+      }
+      // re-anchor:达到自适应间隔即发信号,提示续推上下文重申原始目标+成功标准。
+      // 计数以 turnNumber 为准;实际重申文案由 goal-runner-source 的续推上下文承载。
+      const reanchor = shouldReanchor(turnNumber, reanchorInterval);
+      if (reanchor) {
+        emit('goalRunner:reanchor', { planId, turnNumber, interval: reanchorInterval });
+      }
+
       goalPlanStore.setRunnerState(planId, {
         enabled: true,
         status: 'running',
         intent: runner.intent ?? 'execute',
+        reanchor,
         updatedAt: now(),
       });
-      emit('goalRunner:tickStarted', { planId, turnNumber });
+      emit('goalRunner:tickStarted', { planId, turnNumber, reanchor });
 
       let result;
       try {
@@ -508,19 +650,29 @@ export function createGoalRunner({
         return getState(planId);
       }
 
-      if (result?.completed && !hasCompletedProgress(latest)) {
-        goalPlanStore.setRunnerState(planId, {
-          enabled: true,
-          status: 'blocked',
-          intent: 'verify',
-          blockedReason: 'Completion requested without sufficient task Evidence',
-          updatedAt: now(),
-        });
-        emit('goalRunner:blocked', {
-          planId,
-          reason: 'Completion requested without sufficient task Evidence',
-        });
-        return getState(planId);
+      // 完成前验证门(设计文档第八章):模型声明完成时,要求所有叶子任务均已完成且带 Evidence。
+      // 这比旧的 hasCompletedProgress（仅需部分进展）更严,机器化落地「完成以证据为准」,
+      // 阻断「无证据的口头完成」。任一叶子未达标即转 blocked/verify,附未达标清单。
+      if (result?.completed) {
+        const gate = evaluateVerificationGate(latest);
+        if (!gate.passed) {
+          const summary = gate.reason === 'no_leaf_tasks'
+            ? 'no verifiable leaf tasks'
+            : gate.unmet.map((u) => `${u.taskId ?? '?'}:${u.reason}`).join('; ');
+          goalPlanStore.setRunnerState(planId, {
+            enabled: true,
+            status: 'blocked',
+            intent: 'verify',
+            blockedReason: `Verification gate failed: ${summary}`,
+            updatedAt: now(),
+          });
+          emit('goalRunner:blocked', {
+            planId,
+            reason: 'verification_gate_failed',
+            unmet: gate.unmet,
+          });
+          return getState(planId);
+        }
       }
     }
     return getState(planId);

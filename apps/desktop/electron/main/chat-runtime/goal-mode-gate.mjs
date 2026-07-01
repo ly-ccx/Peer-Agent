@@ -57,9 +57,13 @@ export function evaluateGoalModeGate({
   riskLevel = 'L2_local_write',
   planGate = { hasPlan: false, hasApprovedPlan: false },
 } = {}) {
-  const normalizedMode = mode === 'goal' ? 'plan' : mode;
-  // 非 plan 模式不施加任何额外闸门。历史 'goal' 输入按 'plan' 兼容处理。
-  if (normalizedMode !== 'plan') return { allowed: true };
+  // wire 值迁移后（见 ADR 41 / goal-mode-ultrathink-workflow 设计文档十一章）:
+  // - plan 模式:审批门。计划获批前拒绝一切有副作用能力(下方逻辑)。
+  // - goal 模式:自驱目标模式,不施加「计划审批门」。Runner 托管 explore→plan→act→verify
+  //   闭环、默认推进、最小打扰;高风险/不可逆动作由后续 hooks(on-irreversible)逐动作确认,
+  //   而非整模式审批。故 goal 模式在本闸门直接放行。
+  // - 其余模式(chat 等)不施加任何额外闸门。
+  if (mode !== 'plan') return { allowed: true };
 
   // 规划 / 回写 / 提问：始终放行（这正是产出计划与求批准的手段）。
   if (PLAN_ALWAYS_ALLOWED_TOOLS.has(toolName)) return { allowed: true };

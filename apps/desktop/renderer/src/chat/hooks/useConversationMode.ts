@@ -4,7 +4,7 @@ import { clientApi } from '../../clientApi';
 import type { ChatMode } from '../state/preferences';
 
 /**
- * useConversationMode —— 每会话独立的对话模式（chat / plan）。
+ * useConversationMode —— 每会话独立的对话模式（chat / plan / goal）。
  *
  * 行为与原 ChatSurface 内联逻辑逐字一致：
  * - 初值 'chat'；切换会话时由调用方在 loadConversation effect 里通过 setMode(convMode) 恢复该会话自己的模式。

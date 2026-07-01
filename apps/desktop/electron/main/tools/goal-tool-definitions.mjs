@@ -63,9 +63,9 @@ export const GOAL_TOOL_DEFINITIONS = [
   {
     name: GOAL_TOOL_NAMES.createPlan,
     capabilityId: 'local.goal.create',
-    // 仅在 goal 模式投影给模型（ADR 35）。mode 隔离在 Runtime Projection 层强制，
-    // 不依赖系统提示词或执行层闸门兜底。
-    availableInModes: ['plan'],
+    // 在 plan 与 goal 模式投影给模型（ADR 35）。plan 用于产出/求批准计划,goal 用于自驱规划;
+    // mode 隔离在 Runtime Projection 层强制,不依赖系统提示词或执行层闸门兜底。
+    availableInModes: ['plan', 'goal'],
     prompt: () => GOAL_CREATE_PLAN_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-goal-provider',
@@ -119,8 +119,8 @@ export const GOAL_TOOL_DEFINITIONS = [
   {
     name: GOAL_TOOL_NAMES.updateTask,
     capabilityId: 'local.goal.update',
-    // 仅在 goal 模式投影给模型（ADR 35）。
-    availableInModes: ['plan'],
+    // 在 plan 与 goal 模式投影给模型（ADR 35）。
+    availableInModes: ['plan', 'goal'],
     prompt: () => GOAL_TOOL_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-goal-provider',
@@ -170,8 +170,8 @@ export const GOAL_TOOL_DEFINITIONS = [
   {
     name: GOAL_TOOL_NAMES.getPlan,
     capabilityId: 'local.goal.read',
-    // 仅在 goal 模式投影给模型（ADR 35）。
-    availableInModes: ['plan'],
+    // 在 plan 与 goal 模式投影给模型（ADR 35）。
+    availableInModes: ['plan', 'goal'],
     prompt: () => GOAL_GET_PLAN_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-goal-provider',
@@ -198,7 +198,7 @@ export const GOAL_TOOL_DEFINITIONS = [
     capabilityId: 'local.goal.explore',
     // 仅在 goal 模式投影给模型（ADR 35）。Explorer 是 Runner 编排的只读子 Agent，
     // 登记式：本工具仅把请求记入回合，由 Goal Runner 在回合结束后派发执行。
-    availableInModes: ['plan'],
+    availableInModes: ['plan', 'goal'],
     prompt: () => REQUEST_EXPLORER_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-goal-provider',

@@ -522,7 +522,9 @@ goalRunner = createGoalRunner({
         webContents,
         streamId,
         effort: 'default',
-        mode: 'plan',
+        // Runner 归 goal 模式独占(A1):托管推进的 turn 以 goal 模式驱动,使 goal-runner-source
+        // 注入续推上下文、goal-mode-gate 放行自驱。plan 为纯审批门,不再托管续推。
+        mode: 'goal',
         conversationId: plan.conversationId,
         continuityContext: goalContinuityContext,
         runtimeReminders: [buildGoalRunnerReminder(plan, turnNumber)],
@@ -1313,8 +1315,14 @@ ipcMain.handle('goalPlans:revise', (_, { planId, patch, reason, changedBy }) =>
   goalPlanStore.revisePlan(planId, patch, { reason, changedBy }));
 ipcMain.handle('goalPlans:approve', (_, { planId, approval }) => {
   const plan = goalPlanStore.recordApproval(planId, approval);
+  // Runner 归 goal 模式独占(A1):仅当该会话处于 goal 模式时,批准才自动启动 Runner 托管推进。
+  // plan 模式下,批准是纯审批门——放行后续执行,但不自动续推(由用户在会话中逐步驱动)。
   if (approval?.decision === 'approve') {
-    void goalRunner?.start(planId);
+    const conversationId = plan?.conversationId ?? null;
+    const conv = conversationId ? conversationStore.getConversation(conversationId) : null;
+    if (conv?.mode === 'goal') {
+      void goalRunner?.start(planId);
+    }
   }
   return plan;
 });

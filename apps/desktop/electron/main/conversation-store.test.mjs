@@ -118,9 +118,10 @@ test('conversation mode is per-conversation: defaults to chat, persists, and iso
     const b = store.createConversation({ title: 'b', mode: 'plan' });
     assert.equal(b.mode, 'plan');
 
-    // 历史 'goal' 值入库时归一为 'plan'（正名兼容）。
-    const legacy = store.createConversation({ title: 'legacy', mode: 'goal' });
-    assert.equal(legacy.mode, 'plan');
+    // wire 值迁移后:'goal' 是自驱目标模式的当前合法值,新建时原样保留(不再兼容映射为 plan)。
+    const g = store.createConversation({ title: 'g', mode: 'goal' });
+    assert.equal(g.mode, 'goal');
+    assert.equal(store.getConversation(g.id).mode, 'goal');
 
     // 改 b 不影响 a —— 模式按会话隔离(本次重构的核心命题)。
     const updated = store.updateMode(b.id, 'chat');
@@ -134,6 +135,38 @@ test('conversation mode is per-conversation: defaults to chat, persists, and iso
     assert.equal(store.getConversation(b.id).mode, 'chat');
   } finally {
     cleanup();
+  }
+});
+
+test('one-time migration rewrites pre-existing legacy goal-mode index rows to plan', () => {
+  // wire 值迁移(ADR 41):撤销 goal→plan 兼容映射前,存量 index 里历史的 mode='goal'
+  // (旧 plan 语义)必须在 store 初始化时被一次性改写为 'plan',否则会被误判为新自驱语义。
+  const dir = mkdtempSync(path.join(tmpdir(), 'conv-store-migrate-'));
+  try {
+    const indexFile = path.join(dir, 'index.jsonl');
+    const now = new Date().toISOString();
+    // 直接写入原始 index:一条历史 goal(旧 plan 语义)、一条 chat。
+    writeFileSync(
+      indexFile,
+      [
+        JSON.stringify({ id: 'legacy-goal', title: 'lg', mode: 'goal', status: 'active', createdAt: now, updatedAt: now }),
+        JSON.stringify({ id: 'plain-chat', title: 'pc', mode: 'chat', status: 'active', createdAt: now, updatedAt: now }),
+      ].join('\n') + '\n',
+      'utf8',
+    );
+
+    // 首次初始化触发迁移:历史 goal → plan。
+    const store = createConversationStore({ storeDir: dir });
+    assert.equal(store.getConversation('legacy-goal').mode, 'plan');
+    assert.equal(store.getConversation('plain-chat').mode, 'chat');
+
+    // 迁移后新建的自驱 goal 会话不受影响(marker 已写,不再回写)。
+    const fresh = store.createConversation({ title: 'fresh-goal', mode: 'goal' });
+    assert.equal(fresh.mode, 'goal');
+    const store2 = createConversationStore({ storeDir: dir });
+    assert.equal(store2.getConversation(fresh.id).mode, 'goal');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

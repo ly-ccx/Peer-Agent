@@ -7,8 +7,11 @@ import {
   resolveGoalPlanGate,
 } from './goal-mode-gate.mjs';
 
+// wire 值迁移后（见 ADR 41 / goal-mode-ultrathink-workflow 设计文档十一章）:审批门归 plan
+// 模式独占;goal 是自驱目标模式,不施加「计划审批门」——有副作用能力由 Runner 托管、高风险
+// 动作走逐动作 hooks 确认,故在本闸门直接放行。
 describe('evaluateGoalModeGate', () => {
-  it('does not gate non-goal modes', () => {
+  it('does not gate chat mode', () => {
     const r = evaluateGoalModeGate({
       mode: 'chat',
       toolName: 'bash',
@@ -18,10 +21,25 @@ describe('evaluateGoalModeGate', () => {
     assert.equal(r.allowed, true);
   });
 
-  it('always allows planning/interaction tools in goal mode without a plan', () => {
-    for (const toolName of ['goal_create_plan', 'goal_update_task', 'request_user_input']) {
+  it('does not gate goal mode (self-driven): side-effecting tools allowed without an approved plan', () => {
+    for (const [toolName, riskLevel] of [
+      ['write_file', 'L2_local_write'],
+      ['bash', 'L4_privileged'],
+    ]) {
       const r = evaluateGoalModeGate({
         mode: 'goal',
+        toolName,
+        riskLevel,
+        planGate: { hasPlan: false, hasApprovedPlan: false },
+      });
+      assert.equal(r.allowed, true, `${toolName} should be allowed in goal mode`);
+    }
+  });
+
+  it('always allows planning/interaction tools in plan mode without a plan', () => {
+    for (const toolName of ['goal_create_plan', 'goal_update_task', 'request_user_input']) {
+      const r = evaluateGoalModeGate({
+        mode: 'plan',
         toolName,
         riskLevel: 'L2_local_write',
         planGate: { hasPlan: false, hasApprovedPlan: false },
@@ -30,10 +48,10 @@ describe('evaluateGoalModeGate', () => {
     }
   });
 
-  it('allows inert/read-only tools before approval', () => {
+  it('allows inert/read-only tools before approval in plan mode', () => {
     for (const riskLevel of ['L0_inert', 'L1_local_read']) {
       const r = evaluateGoalModeGate({
-        mode: 'goal',
+        mode: 'plan',
         toolName: 'read_file',
         riskLevel,
         planGate: { hasPlan: false, hasApprovedPlan: false },
@@ -42,9 +60,9 @@ describe('evaluateGoalModeGate', () => {
     }
   });
 
-  it('blocks side-effecting tools when no plan exists', () => {
+  it('blocks side-effecting tools in plan mode when no plan exists', () => {
     const r = evaluateGoalModeGate({
-      mode: 'goal',
+      mode: 'plan',
       toolName: 'write_file',
       riskLevel: 'L2_local_write',
       planGate: { hasPlan: false, hasApprovedPlan: false },
@@ -53,9 +71,9 @@ describe('evaluateGoalModeGate', () => {
     assert.equal(r.reason, 'goal_plan_required');
   });
 
-  it('blocks side-effecting tools when a plan exists but is not approved', () => {
+  it('blocks side-effecting tools in plan mode when a plan exists but is not approved', () => {
     const r = evaluateGoalModeGate({
-      mode: 'goal',
+      mode: 'plan',
       toolName: 'bash',
       riskLevel: 'L4_privileged',
       planGate: { hasPlan: true, hasApprovedPlan: false },
@@ -64,9 +82,9 @@ describe('evaluateGoalModeGate', () => {
     assert.equal(r.reason, 'goal_plan_not_approved');
   });
 
-  it('allows side-effecting tools once a plan is approved', () => {
+  it('allows side-effecting tools in plan mode once a plan is approved', () => {
     const r = evaluateGoalModeGate({
-      mode: 'goal',
+      mode: 'plan',
       toolName: 'write_file',
       riskLevel: 'L2_local_write',
       planGate: { hasPlan: true, hasApprovedPlan: true },

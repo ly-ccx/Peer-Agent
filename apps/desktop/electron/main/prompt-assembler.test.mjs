@@ -193,18 +193,20 @@ describe('System Context assembly', () => {
     assert.equal(planContext.snapshot.mode, 'plan');
   });
 
-  it('normalizes the legacy goal mode alias to the plan reminder (backward compat)', () => {
-    const legacyContext = buildSystemContext('/tmp/workspace', {
+  it('renders the self-driven goal reminder for goal mode (wire 值迁移后 goal 独立成模式)', () => {
+    const goalContext = buildSystemContext('/tmp/workspace', {
       mode: 'goal',
       provider: 'anthropic',
       model: 'claude-opus',
     });
 
-    const modeSection = legacyContext.sections.find((section) => section.id === 'runtime.mode');
-    assert.ok(modeSection, 'legacy goal mode must still produce a runtime.mode section');
-    // 历史 'goal' 输入应渲染为 plan 文案，而不是回落到裸 'Mode: goal.'。
-    assert.match(modeSection.content, /Mode: plan/);
-    assert.match(modeSection.content, /Plan-before-execute/);
+    const modeSection = goalContext.sections.find((section) => section.id === 'runtime.mode');
+    assert.ok(modeSection, 'goal mode must produce a runtime.mode section');
+    // wire 值迁移后:'goal' 是独立的自驱目标模式,渲染自己的 MODE_COPY.goal 文案,不再回落到 plan。
+    assert.match(modeSection.content, /Mode: goal/);
+    assert.match(modeSection.content, /Self-driven goal mode/);
+    // 且不应再渲染成 plan 审批门文案。
+    assert.doesNotMatch(modeSection.content, /Mode: plan/);
   });
 
   it('renders explicit runtime reminders without mixing them into user messages', () => {

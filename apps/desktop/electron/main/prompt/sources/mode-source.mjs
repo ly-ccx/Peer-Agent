@@ -6,8 +6,8 @@ import { MODE_COPY } from './mode-copy.mjs';
 
 function normalizeMode(value) {
   const mode = typeof value === 'string' && value.trim() ? value.trim() : 'chat';
-  // 历史 'goal' 模式别名按当前 'plan' 处理（正名兼容），确保 MODE_COPY 命中。
-  return mode === 'goal' ? 'plan' : mode;
+  // wire 值迁移后 'goal' 是独立的自驱目标模式,拥有自己的 MODE_COPY.goal 文案,不再归一为 'plan'。
+  return mode;
 }
 
 function normalizeEffort(value) {

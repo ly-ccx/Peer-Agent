@@ -52,20 +52,31 @@ export function isLocalAccessLevel(value: unknown): value is LocalAccessLevel {
     || value === 'full_local';
 }
 
-// 对话模式:进入 System Context 的 L6_MODE_REMINDER 层(见 Plan 模式设计)。
-// 'chat' 为默认直答模式;'plan' 为先规划后执行模式。历史 'goal' 输入归一化为 'plan'。
-export type ChatMode = 'chat' | 'plan';
+// 对话模式:进入 System Context 的 L6_MODE_REMINDER 层。
+// 'chat' 为默认直答模式;'plan' 为先规划后执行的审批门模式;'goal' 为自驱目标模式
+// (用户给目标+边界,Runner 托管 explore→plan→act→verify 闭环,最小打扰)。
+//
+// wire 值迁移(见 ADR 41 与 goal-mode-ultrathink-workflow 设计文档十六章):历史 'goal'
+// (旧 plan 语义)已由 conversation-store 的一次性数据迁移改写为 'plan','goal' 字面量
+// 腾空后重新承载自驱语义。因此这里不再把 'goal' 兼容映射为 'plan'。
+export type ChatMode = 'chat' | 'plan' | 'goal';
 
 /** 合法对话模式枚举。 */
-export const CHAT_MODES: readonly ChatMode[] = ['chat', 'plan'];
+export const CHAT_MODES: readonly ChatMode[] = ['chat', 'plan', 'goal'];
 
-/** ChatMode 类型守卫（只接受当前 wire 值，不把历史别名视为当前合法值）。 */
+/** ChatMode 类型守卫（只接受当前 wire 值）。 */
 export function isChatMode(value: unknown): value is ChatMode {
-  return value === 'chat' || value === 'plan';
+  return value === 'chat' || value === 'plan' || value === 'goal';
 }
 
-/** 对持久化/跨进程输入做兼容归一化：旧版 'goal' 等价于当前 'plan'。 */
+/**
+ * 对持久化/跨进程输入做归一化。
+ *
+ * 注意:存量会话里历史的 'goal'（旧 plan 语义）由 conversation-store 初始化时的一次性
+ * 数据迁移改写为 'plan';迁移完成后,'goal' 一律按新的自驱语义处理,不再兼容映射。
+ */
 export function normalizeChatMode(value: unknown): ChatMode {
-  if (value === 'plan' || value === 'goal') return 'plan';
+  if (value === 'plan') return 'plan';
+  if (value === 'goal') return 'goal';
   return 'chat';
 }

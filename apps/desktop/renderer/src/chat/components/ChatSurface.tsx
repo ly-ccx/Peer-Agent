@@ -122,6 +122,7 @@ function accessLevelTitle(level: LocalAccessLevel, isZh: boolean): string {
 
 function modeLabel(mode: ChatMode, isZh: boolean): string {
   if (mode === 'plan') return isZh ? '计划模式' : 'Plan mode';
+  if (mode === 'goal') return isZh ? '目标模式' : 'Goal mode';
   return isZh ? '对话模式' : 'Chat mode';
 }
 
@@ -130,6 +131,11 @@ function modeTitle(mode: ChatMode, isZh: boolean): string {
     return isZh
       ? '先规划后执行：先与你共同产出结构化实现计划，批准后再执行'
       : 'Plan before execute: co-author a structured plan, then execute after approval';
+  }
+  if (mode === 'goal') {
+    return isZh
+      ? '自驱目标模式：你给目标和边界，Agent 自主推进到可验证完成，只在高风险或需决策时打扰你'
+      : 'Self-driven goal mode: give a goal and boundaries; the agent drives to a verifiable done state, interrupting only for high-risk or decision points';
   }
   return isZh ? '直接对话并按需调用工具' : 'Answer directly and call tools as needed';
 }
@@ -1503,14 +1509,16 @@ export function ChatSurface({
           onReject={denyPendingPermissionCall}
           i18n={i18n}
         />
-        {/* 聊天侧镜像受治理批准卡：仅 Plan 模式且存在 awaiting_approval 计划时显示，
+        {/* 聊天侧镜像受治理批准卡：在 Plan 与 Goal 模式且存在 awaiting_approval 计划时显示。
+            - plan:批准即放行后续执行(审批门)。
+            - goal:批准即冻结目标契约并自动启动 Runner 托管自驱(A1)。
             点击复用与右侧面板同一条 goalPlansApprove 治理链路，状态互相消解。
             实质性追问（request_user_input）仍走对话流，二者正交。 */}
         <ChatGoalApprovalCard
           conversationId={conversationId}
           isZh={isZh}
           isStreaming={isStreaming}
-          enabled={mode === 'plan'}
+          enabled={mode === 'plan' || mode === 'goal'}
         />
         {messageQueue.length > 0 ? (
           <div className="message-queue" role="list" aria-label={isZh ? '待发送队列' : 'Queued messages'}>
@@ -1668,7 +1676,8 @@ export function ChatSurface({
               options={CHAT_MODES.map((m) => ({
                 value: m,
                 label: modeLabel(m, isZh),
-                tone: m === 'plan' ? 'danger' : undefined,
+                // plan(审批门)与 goal(自驱)均为非默认的强模式,用 danger 色标注以示区别。
+                tone: m === 'plan' || m === 'goal' ? 'danger' : undefined,
               }))}
               onChange={(next) => {
                 if (isChatMode(next)) changeMode(next);

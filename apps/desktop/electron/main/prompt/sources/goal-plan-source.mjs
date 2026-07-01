@@ -1,12 +1,12 @@
 // Goal 计划事实上下文 Source —— 见 Goal 计划 taskId 恢复设计。
 //
-// 作用：plan 模式下，把「当前会话活动计划」的权威 taskId + 状态 + 进度，作为
+// 作用：plan 与 goal 模式下，把「当前会话活动计划」的权威 taskId + 状态 + 进度，作为
 // 事实/续传上下文（factual context）注入 System Context。即便历史被 compaction
 // 压成预览，每轮仍会重新注入权威 taskId，从源头消除「丢 task」。
 //
 // 治理（与 AGENTS.md 一致）：
 // - 这是事实上下文（L7_CONTINUITY / trust=runtime），不是系统指令；taskId 以此为准。
-// - 仅在 mode==='plan'（历史别名 'goal'）且存在活动计划时渲染；chat 模式零额外 token。
+// - 在 mode==='plan' 或 mode==='goal' 且存在活动计划时渲染；chat 模式零额外 token。
 // - 只读 goal-plan-store，不写盘、不触发授权。
 
 const MAX_PLANS = 4;
@@ -93,10 +93,10 @@ export function createGoalPlanPromptSource() {
     priority: 1,
     trust: 'runtime',
     observe(input = {}) {
-      const rawMode = typeof input.mode === 'string' ? input.mode : 'chat';
-      // 历史 'goal' 模式别名按当前 'plan' 处理（正名兼容）。
-      const mode = rawMode === 'goal' ? 'plan' : rawMode;
-      if (mode !== 'plan') return { plans: [] };
+      const mode = typeof input.mode === 'string' ? input.mode : 'chat';
+      // 计划事实上下文在 plan 与 goal 两模式都需要:plan 用于产出/审批计划,goal 用于自驱执行
+      // 中的活动计划权威 taskId(见 ADR 41 / goal-mode-ultrathink-workflow)。chat 模式零额外 token。
+      if (mode !== 'plan' && mode !== 'goal') return { plans: [] };
       const store = input.goalPlanStore;
       const conversationId = input.conversationId ?? null;
       if (!store || typeof store.listPlanDetailsByConversation !== 'function') {
