@@ -256,14 +256,35 @@
     font-weight: 600;
   }
 
+  /* Tailwind preflight 会全局 list-style:none，这里显式还原更新说明里的列表符号，
+     否则每条修复/新功能都没有前导点，视觉上糊成一片、读起来累。 */
   .updater-notes-rich ul,
   .updater-notes-rich ol {
-    margin: 0 0 8px;
-    padding-left: 20px;
+    margin: 0 0 10px;
+    padding-left: 22px;
+  }
+
+  .updater-notes-rich ul {
+    list-style: disc outside;
+  }
+
+  .updater-notes-rich ol {
+    list-style: decimal outside;
   }
 
   .updater-notes-rich li {
-    margin: 2px 0;
+    /* display:list-item + list-style:inherit：抵消 preflight 对 li 的重置，
+       让上面 ul/ol 的符号真正落到每个条目上。 */
+    display: list-item;
+    list-style: inherit;
+    margin: 4px 0;
+    padding-left: 2px;
+  }
+
+  /* 嵌套列表收紧上下留白，避免层级之间出现过大空档。 */
+  .updater-notes-rich li > ul,
+  .updater-notes-rich li > ol {
+    margin: 4px 0 2px;
   }
 
   .updater-notes-rich a {
