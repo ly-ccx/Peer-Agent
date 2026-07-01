@@ -42,6 +42,17 @@ function draftWithTasks() {
   };
 }
 
+// 创建并批准一个计划，返回已批准（approved）的计划。
+// 批准闸门（见 goal-plan-store recordTaskEvidence 的 Layer B 护栏与
+// derivePlanStatus 规则 1）要求：只有 approved 之后，子任务才能进入执行态
+// （running / completed / failed / waiting_user）。凡是需要把任务标成执行态的
+// 测试，都应先经过本辅助批准，模拟真实的「先批准、再开工」调用路径。
+function approvedPlanWithTasks() {
+  const plan = store.createPlan(draftWithTasks());
+  store.recordApproval(plan.planId, { decision: 'approve' });
+  return store.getPlan(plan.planId);
+}
+
 test('aggregateProgress 只统计叶子任务（父任务不计数）', () => {
   const { tasks } = draftWithTasks();
   const p = aggregateProgress(tasks);
@@ -51,22 +62,34 @@ test('aggregateProgress 只统计叶子任务（父任务不计数）', () => {
   assert.equal(p.percent, 0);
 });
 
-test('derivePlanStatus: 执行前(awaiting_approval/approved)有活跃子任务 → executing', () => {
+test('derivePlanStatus: 已批准(approved)有活跃子任务 → executing', () => {
   const running = [{ taskId: 't1', status: 'running' }];
-  assert.equal(derivePlanStatus('awaiting_approval', running), 'executing');
   assert.equal(derivePlanStatus('approved', running), 'executing');
   // 终态/阻塞也视为已开始执行
-  assert.equal(derivePlanStatus('awaiting_approval', [{ status: 'completed' }]), 'executing');
-  assert.equal(derivePlanStatus('awaiting_approval', [{ status: 'failed' }]), 'executing');
-  assert.equal(derivePlanStatus('awaiting_approval', [{ status: 'waiting_user' }]), 'executing');
+  assert.equal(derivePlanStatus('approved', [{ status: 'completed' }]), 'executing');
+  assert.equal(derivePlanStatus('approved', [{ status: 'failed' }]), 'executing');
+  assert.equal(derivePlanStatus('approved', [{ status: 'waiting_user' }]), 'executing');
 });
 
-test('derivePlanStatus: 嵌套子任务里有活跃叶子也能识别为已开始', () => {
+test('derivePlanStatus: 未批准(awaiting_approval)即便有活跃子任务也不推进为 executing', () => {
+  // 批准闸门：未批准计划不允许被派生成 executing，避免「顶层 executing 但从未批准、
+  // Runner 未启动」的僵死态。真实链路里，任务能进入 running 之前必先经 recordApproval。
+  const running = [{ taskId: 't1', status: 'running' }];
+  assert.equal(derivePlanStatus('awaiting_approval', running), 'awaiting_approval');
+  assert.equal(derivePlanStatus('awaiting_approval', [{ status: 'completed' }]), 'awaiting_approval');
+  assert.equal(derivePlanStatus('awaiting_approval', [{ status: 'failed' }]), 'awaiting_approval');
+  assert.equal(
+    derivePlanStatus('awaiting_approval', [{ status: 'waiting_user' }]),
+    'awaiting_approval',
+  );
+});
+
+test('derivePlanStatus: 已批准计划嵌套子任务里有活跃叶子也能识别为已开始', () => {
   const nested = [
     { taskId: 't1', status: 'pending' },
     { taskId: 't2', status: 'pending', subtasks: [{ taskId: 't2a', status: 'running' }] },
   ];
-  assert.equal(derivePlanStatus('awaiting_approval', nested), 'executing');
+  assert.equal(derivePlanStatus('approved', nested), 'executing');
 });
 
 test('derivePlanStatus: 全部 pending 时保持原状态（不前进）', () => {
@@ -172,17 +195,29 @@ test('recordTaskEvidence: 最后一个子任务完成后，executing 计划自�
   assert.equal(after.progress.percent, 100);
 });
 
-test('recordTaskEvidence: 对话直接触发执行时，awaiting_approval 计划自动推进为 executing（收起审批按钮）', () => {
+test('recordTaskEvidence: 未批准计划把子任务标 running 被护栏拒绝（批准闸门守在源头）', () => {
   // 模拟 AI 路径：goal_create_plan 落盘后处于 awaiting_approval
   const created = store.createPlan(draftWithTasks());
   store.setPlanStatus(created.planId, 'awaiting_approval');
   assert.equal(store.getPlan(created.planId).status, 'awaiting_approval');
 
-  // 用户在对话里直接触发执行：AI 调用 goal_update_task 把某子任务置 running
+  // 未批准时 AI 想直接把子任务置 running → Layer B 护栏抛错，杜绝绕过审批开工。
+  assert.throws(
+    () => store.recordTaskEvidence(created.planId, 't1', { status: 'running' }),
+    /before plan .* is approved/,
+  );
+  // 计划状态不被污染，仍停留在 awaiting_approval（未被派生成 executing）。
+  assert.equal(store.getPlan(created.planId).status, 'awaiting_approval');
+});
+
+test('recordTaskEvidence: 批准后把子任务标 running，计划自动推进为 executing', () => {
+  const created = approvedPlanWithTasks();
+  assert.equal(created.status, 'approved');
+
   store.recordTaskEvidence(created.planId, 't1', { status: 'running' });
 
   const after = store.getPlan(created.planId);
-  assert.equal(after.status, 'executing', '有子任务 running 后计划应自动推进为 executing');
+  assert.equal(after.status, 'executing', '批准后有子任务 running，计划应自动推进为 executing');
 });
 
 test('createPlan 落盘并派生 progress，默认 drafting/version=1', () => {
@@ -212,7 +247,7 @@ test('listPlanDetails 返回完整计划而不是轻量 index meta', () => {
 });
 
 test('recordTaskEvidence: completed 必须带 evidenceRefs，否则抛错', () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = approvedPlanWithTasks();
   assert.throws(
     () => store.recordTaskEvidence(plan.planId, 't1', { status: 'completed' }),
     /without evidenceRefs/,
@@ -220,7 +255,7 @@ test('recordTaskEvidence: completed 必须带 evidenceRefs，否则抛错', () =
 });
 
 test('recordTaskEvidence: 带 evidence 完成叶子任务后进度自底向上聚合', () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = approvedPlanWithTasks();
   const r1 = store.recordTaskEvidence(plan.planId, 't1', {
     status: 'completed',
     evidenceRefs: ['local-shell-artifact://x/stdout'],
@@ -240,7 +275,7 @@ test('recordTaskEvidence: 带 evidence 完成叶子任务后进度自底向上�
 });
 
 test('recordTaskEvidence: failed / blocked 分别计数且写入原因', () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = approvedPlanWithTasks();
   const rf = store.recordTaskEvidence(plan.planId, 't1', {
     status: 'failed',
     failureReason: '依赖缺失',
@@ -255,7 +290,7 @@ test('recordTaskEvidence: failed / blocked 分别计数且写入原因', () => {
 });
 
 test('recordTaskEvidence: 未知 taskId 抛错', () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = approvedPlanWithTasks();
   assert.throws(
     () => store.recordTaskEvidence(plan.planId, 'nope', { status: 'running' }),
     /not found/,
@@ -348,16 +383,19 @@ test('onChange: 每个写操作（含 AI 工具路径的 create/recordTaskEviden
   assert.equal(events[0].reason, 'persist');
   assert.equal(events[0].planId, plan.planId);
 
+  // 批准闸门：必须先批准，子任务才能进入执行态并回写 evidence。
+  watched.recordApproval(plan.planId, { decision: 'approve' });
+  assert.equal(events.length, 2, 'approve 应再触发一次');
+
   watched.recordTaskEvidence(plan.planId, 't1', {
     status: 'completed',
     evidenceRefs: ['artifact://x'],
   });
-  assert.equal(events.length, 2, 'recordTaskEvidence 应再触发一次');
+  assert.equal(events.length, 3, 'recordTaskEvidence 应再触发一次');
 
-  watched.recordApproval(plan.planId, { decision: 'approve' });
   watched.setPlanStatus(plan.planId, 'executing');
   watched.revisePlan(plan.planId, { goal: '新目标' });
-  assert.equal(events.length, 5, 'approve/setStatus/revise 各触发一次');
+  assert.equal(events.length, 5, 'setStatus/revise 各触发一次');
 
   watched.deletePlan(plan.planId);
   assert.equal(events.length, 6, 'deletePlan 也应触发');
@@ -658,7 +696,7 @@ test('runner: setRunnerState 只更新 runner，不绕过 task Evidence 约束',
 });
 
 test('runner: completed task 仍必须由 recordTaskEvidence 带 evidenceRefs 回写', () => {
-  const plan = store.createPlan(draftWithTasks());
+  const plan = approvedPlanWithTasks();
   store.setRunnerState(plan.planId, { enabled: true, status: 'running', currentTaskId: 't1' });
 
   assert.throws(

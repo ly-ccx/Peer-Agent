@@ -118,10 +118,13 @@ export function aggregateProgress(tasks) {
  *
  * 负责两种「只前进」的派生（均与 aggregateProgress 同源、由叶子事实驱动、纯函数、不回退）：
  *
- * 1. 开工推进：当计划尚处于「执行前」状态（awaiting_approval / approved），
+ * 1. 开工推进：当计划已处于「已批准」状态（approved），
  *    但已有任意子任务进入活跃或终态（running / completed / failed / waiting_user）时，
- *    说明执行已经开始（典型场景：用户在对话里直接触发执行，跳过了面板审批按钮），
- *    此时把计划推进到 'executing'，从而让审批按钮（canDecide=awaiting_approval）正确消失。
+ *    说明执行已经开始，此时把计划推进到 'executing'，从而让审批相关 UI 正确收敛。
+ *    注意：'awaiting_approval'（未批准）不在此规则的推进范围内——未批准计划即便
+ *    出现活跃叶子，也不会被派生成 'executing'，以杜绝「顶层 executing 但从未批准、
+ *    Runner 未启动」的僵死态（详见规则 1 实现处的说明）。批准闸门只能由显式
+ *    recordApproval 打开。
  *
  * 2. 自动收尾（见 Goal 计划自动收尾设计）：当计划已 'executing'
  *    且存在叶子、且所有叶子均为终态（completed / failed）时，把顶层推进到终态——
@@ -162,7 +165,12 @@ export function derivePlanStatus(currentStatus, tasks) {
   }
 
   // 规则 1：执行前 → executing（一旦有叶子开工）。
-  const PRE_EXECUTION = new Set(['awaiting_approval', 'approved']);
+  // 注意：PRE_EXECUTION 只含 'approved'，不含 'awaiting_approval'。
+  // 未批准的计划即便出现了 running/终态叶子，也不允许被派生成 'executing'——
+  // 否则会产生「顶层 executing 但从未批准、Runner 未启动」的僵死态
+  // （审批按钮消失、探查也永远派发不出去）。批准闸门必须由显式 recordApproval
+  // 把 status 推进到 'approved' 后，本规则才接手推进到 'executing'。
+  const PRE_EXECUTION = new Set(['approved']);
   if (!PRE_EXECUTION.has(currentStatus)) return currentStatus;
 
   let started = false;
@@ -833,6 +841,27 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     const plan = getPlan(planId);
     if (!plan) return null;
     const { status } = change;
+    // Layer B 护栏：批准闸门守在源头。
+    // 计划在批准前（drafting / awaiting_approval）不允许把任何子任务标成
+    // 「开工/终结」态（running / completed / failed / waiting_user）——否则会绕过
+    // 面板审批直接触发执行语义，并与 derivePlanStatus 规则 1 一起制造僵死态。
+    // 只有 recordApproval 把计划推进到 approved 之后，任务才能进入这些状态。
+    const PRE_APPROVAL_PLAN = new Set(['drafting', 'awaiting_approval']);
+    const EXECUTION_TASK_STATUS = new Set([
+      'running',
+      TERMINAL_OK,
+      TERMINAL_FAIL,
+      'waiting_user',
+    ]);
+    if (
+      status !== undefined &&
+      EXECUTION_TASK_STATUS.has(status) &&
+      PRE_APPROVAL_PLAN.has(plan.status)
+    ) {
+      throw new Error(
+        `[goal-plan-store] task ${taskId} cannot enter '${status}' before plan ${planId} is approved (plan status: '${plan.status}')`,
+      );
+    }
     const mergedRefs = (refs, add) => {
       const set = new Set([...(refs || []), ...(add || [])]);
       return [...set];

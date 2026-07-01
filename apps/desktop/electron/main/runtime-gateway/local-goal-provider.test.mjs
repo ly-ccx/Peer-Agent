@@ -22,7 +22,7 @@ function createCall(args = {}, toolCallId = 'local.goal.update:test') {
 }
 
 function seedPlan() {
-  return store.createPlan({
+  const plan = store.createPlan({
     title: '重构鉴权',
     goal: '把鉴权抽到独立模块',
     successCriteria: ['全部测试通过'],
@@ -31,6 +31,11 @@ function seedPlan() {
       { taskId: 't2', order: 1, title: '迁移实现', status: 'pending', evidenceRefs: [] },
     ],
   });
+  // 批准闸门：provider 执行 goal_update_task（把任务标 running/completed）本就发生在
+  // 批准之后。store 侧 Layer B 护栏会拒绝「未批准计划标执行态」，故此处先批准，
+  // 模拟真实的「先批准、再回写任务」调用路径。
+  store.recordApproval(plan.planId, { decision: 'approve' });
+  return store.getPlan(plan.planId);
 }
 
 describe('local goal provider', () => {
