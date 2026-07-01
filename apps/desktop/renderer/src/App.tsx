@@ -5,6 +5,7 @@ import { SettingsPage } from './app/components/SettingsPage';
 import { useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { ChatSurface } from './chat/components/ChatSurface';
 import { Sidebar } from './chat/components/Sidebar';
+import { conversationStore } from './chat/state/conversationStore';
 import { clientApi } from './clientApi';
 import { WorkbenchPanel } from './workbench/WorkbenchPanel';
 import { WorkbenchProvider } from './workbench/WorkbenchContext';
@@ -53,7 +54,7 @@ export function App() {
   const [runningConversationIds, setRunningConversationIds] = useState<ReadonlySet<string>>(
     () => new Set());
   // 表达层状态:当前正在执行上下文压缩的会话 -> 进度百分比(可为 null)。
-  // 仅由前台活跃会话 ChatSurface 的 onCompactingChange 即时上报维护(压缩只发生在前台,无需 main 广播)。
+  // 由 conversationStore 按侧栏会话订阅派生,避免切换 tab/会话后依赖已卸载 ChatSurface 上报而停止刷新。
   const [compactingConversations, setCompactingConversations] = useState<
     ReadonlyMap<string, number | null>
   >(() => new Map());
@@ -164,6 +165,38 @@ export function App() {
     });
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    const conversationIds = Array.from(new Set(conversations.map((conversation) => conversation.id)));
+    const syncCompactingConversations = () => {
+      const next = new Map<string, number | null>();
+      for (const conversationId of conversationIds) {
+        const snapshot = conversationStore.getSnapshot(conversationId);
+        if (snapshot.isCompacting) {
+          next.set(conversationId, snapshot.compactionPercent ?? null);
+        }
+      }
+      setCompactingConversations((prev) => {
+        if (prev.size === next.size) {
+          let unchanged = true;
+          for (const [conversationId, percent] of next) {
+            if (prev.get(conversationId) !== percent) {
+              unchanged = false;
+              break;
+            }
+          }
+          if (unchanged) return prev;
+        }
+        return next;
+      });
+    };
+
+    syncCompactingConversations();
+    const unsubs = conversationIds.map((conversationId) =>
+      conversationStore.subscribe(conversationId, syncCompactingConversations),
+    );
+    return () => { unsubs.forEach((unsub) => unsub()); };
+  }, [conversations]);
 
   const handleWorkspaceChanged = useCallback(async () => {
     const r = await clientApi.workspaceList();
@@ -324,21 +357,6 @@ export function App() {
                       if (streaming === has) return prev;
                       const next = new Set(prev);
                       if (streaming) next.add(convId);
-                      else next.delete(convId);
-                      return next;
-                    });
-                  }}
-                  onCompactingChange={(convId, compacting, percent) => {
-                    if (!convId) return;
-                    setCompactingConversations((prev) => {
-                      const has = prev.has(convId);
-                      const prevPercent = prev.get(convId) ?? null;
-                      // 状态与百分比均未变化时复用旧引用,避免无谓重渲染。
-                      if (compacting === has && (!compacting || prevPercent === (percent ?? null))) {
-                        return prev;
-                      }
-                      const next = new Map(prev);
-                      if (compacting) next.set(convId, percent ?? null);
                       else next.delete(convId);
                       return next;
                     });
