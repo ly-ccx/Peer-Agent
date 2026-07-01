@@ -336,11 +336,14 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       conversationStore.setState(cid, (prev) => {
         const msgs = prev.messages as ChatMsg[];
         const last = msgs[msgs.length - 1];
-        if (!last || last.role !== 'assistant') return {};
+        // 工具结果已回填即视为该工具收尾：清空「正在…」进度行，避免它一直残留到
+        // 下一条进度事件覆盖或回合结束（done/aborted/error）才消失。toolProgress 是
+        // 单值最新态，收尾即清不会误伤后续工具（后续工具会再次 set 新的进度）。
+        if (!last || last.role !== 'assistant') return { toolProgress: null };
         const segments = (last.segments || []).map((seg) =>
           seg.type === 'tool-call' && seg.toolCallId === toolCallId ? { ...seg, result } : seg,
         );
-        return { messages: [...msgs.slice(0, -1), { ...last, segments }] };
+        return { messages: [...msgs.slice(0, -1), { ...last, segments }], toolProgress: null };
       });
     });
 
