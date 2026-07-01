@@ -325,17 +325,10 @@ export function createGoalRunner({
       const runner = plan.runner ?? {};
       if (runnerIsStopped(runner)) return getState(planId);
 
-      if (runner.turnCount >= runner.maxTurns || runner.toolCallCount >= runner.maxToolCalls) {
-        goalPlanStore.setRunnerState(planId, {
-          enabled: true,
-          status: 'budget_exhausted',
-          intent: 'block',
-          blockedReason: 'Goal Runner budget exhausted',
-          updatedAt: now(),
-        });
-        emit('goalRunner:budgetExhausted', { planId });
-        return getState(planId);
-      }
+      // 次数/轮次预算熔断已移除：Runner 不再因 turnCount/toolCallCount 达到上限
+      // 而进入 budget_exhausted。turnCount/toolCallCount/maxTurns/maxToolCalls 仅
+      // 保留为展示用计数，不再作为停止判定。防失控依赖下方 no-progress 双信号护栏
+      // 以及权限拒绝 / blocked / Evidence 回写等其它护栏。
 
       // no-progress 双信号护栏：基于截至目前的累计进展（含上一轮 runGoalTurn
       // 写入与 explorer 回填）。连续 DEFAULT_NO_PROGRESS_LIMIT 轮无增长即阻塞。

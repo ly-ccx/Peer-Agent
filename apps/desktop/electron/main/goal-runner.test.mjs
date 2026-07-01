@@ -179,7 +179,7 @@ test('clear: 会 cancel plan 并停止 Runner', async () => {
   assert.equal(cleared.runner.blockedReason, 'user clear');
 });
 
-test('budget: maxTurns 用尽会进入 budget_exhausted', async () => {
+test('budget: 次数/轮次预算已移除，不再进入 budget_exhausted', async () => {
   const plan = createApprovedPlan();
   let calls = 0;
   const runtime = {
@@ -190,12 +190,16 @@ test('budget: maxTurns 用尽会进入 budget_exhausted', async () => {
   };
   const runner = createRunner({ runtime });
 
+  // 即便 maxTurns 设得很小，Runner 也不再因 turnCount/toolCallCount 达到上限而停止。
+  // 无进展时改由 no-progress 双信号护栏在连续 3 轮后阻塞，而非 budget_exhausted。
   await runner.start(plan.planId, { maxTurns: 2, awaitIdle: true });
 
   const got = store.getPlan(plan.planId);
-  assert.equal(calls, 2);
-  assert.equal(got.runner.turnCount, 2);
-  assert.equal(got.runner.status, 'budget_exhausted');
+  assert.notEqual(got.runner.status, 'budget_exhausted');
+  assert.equal(got.runner.status, 'blocked');
+  assert.equal(got.runner.blockedReason, 'no_progress');
+  // no-progress 在第 4 轮入口触发，故只跑了 3 轮，未受 maxTurns=2 约束。
+  assert.equal(calls, 3);
 });
 
 test('no-progress: 连续 3 轮双信号无增长会 blocked(no_progress) 而非烧满预算', async () => {
@@ -227,6 +231,8 @@ test('no-progress: 每轮补充叶子 Evidence 视为有进展，不会被误判
     async runGoalTurn({ planId }) {
       calls += 1;
       store.recordTaskEvidence(planId, 't1', { evidenceRefs: [`local-file://ev-${calls}`] });
+      // 预算熔断已移除，持续有进展会无限推进；这里主动在第 5 轮请求停止收尾。
+      if (calls >= 5) return { continue: false, intent: 'verify' };
       return {};
     },
   };
@@ -235,9 +241,11 @@ test('no-progress: 每轮补充叶子 Evidence 视为有进展，不会被误判
   await runner.start(plan.planId, { maxTurns: 5, awaitIdle: true });
 
   const got = store.getPlan(plan.planId);
-  // 持续有进展，不应被 no-progress 阻塞；预算用尽才停。
+  // 持续有进展，不应被 no-progress 阻塞；也不再有 budget_exhausted。
   assert.equal(calls, 5);
-  assert.equal(got.runner.status, 'budget_exhausted');
+  assert.notEqual(got.runner.status, 'budget_exhausted');
+  assert.notEqual(got.runner.status, 'blocked');
+  assert.equal(got.runner.status, 'idle');
 });
 
 test('fake runtime 连续返回 progress 时，Runner 能自动多 tick 推进并完成', async () => {
