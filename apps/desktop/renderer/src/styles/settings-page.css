@@ -321,6 +321,21 @@
   grid-column: 1 / -1;
 }
 
+.settings-readonly-field {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.settings-readonly-field input {
+  flex: 1 1 auto;
+  color: var(--pa-text-secondary);
+}
+
+.settings-readonly-field button {
+  flex: 0 0 auto;
+}
+
 .settings-grid input,
 .settings-grid select {
   min-width: 0;

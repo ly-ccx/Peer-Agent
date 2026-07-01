@@ -7,6 +7,10 @@ import { Overlay } from './Overlay';
 type McpTransportKind = 'streamable_http' | 'sse' | 'stdio';
 type McpAuthMode = 'none' | 'http_bearer' | 'http_header' | 'stdio_env' | 'oauth2';
 
+// 回调地址由应用固定（与 main 进程 DEFAULT_OAUTH_REDIRECT_URL 保持一致），
+// 仅作展示/复制用途，不再让用户手填。
+const OAUTH_REDIRECT_URL = 'http://127.0.0.1:33418/mcp/oauth/callback';
+
 type McpToolView = {
   readonly name?: string;
   readonly toolName?: string;
@@ -159,7 +163,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
   const [oauthClientId, setOauthClientId] = useState('');
   const [oauthClientSecret, setOauthClientSecret] = useState('');
   const [oauthScopes, setOauthScopes] = useState('');
-  const [oauthRedirectUrl, setOauthRedirectUrl] = useState('http://127.0.0.1:33418/mcp/oauth/callback');
+  const oauthRedirectUrl = OAUTH_REDIRECT_URL;
   const [oauthAuthorizationCode, setOauthAuthorizationCode] = useState('');
   const [selectedId, setSelectedId] = useState<string | number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -248,7 +252,6 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     setOauthClientId('');
     setOauthClientSecret('');
     setOauthScopes('');
-    setOauthRedirectUrl('http://127.0.0.1:33418/mcp/oauth/callback');
     setOauthAuthorizationCode('');
     setShowAdvancedSettings(false);
     setLastProbe(null);
@@ -305,17 +308,18 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
       let auth: LocalMcpServerUpsertRequest['auth'] = { mode: 'none' };
       if (authMode !== 'none') {
         if (authMode === 'oauth2') {
-          if (!oauthAuthorizationServerUrl.trim()) throw new Error('请填写 OAuth Authorization Server URL。');
           const scopes = oauthScopes.split(/[\s,]+/).map((scope) => scope.trim()).filter(Boolean);
           const credential = await clientApi.mcpPutCredential({
             label: credentialLabel.trim() || displayName.trim() || undefined,
             kind: 'oauth2',
             oauth: {
-              authorizationServerUrl: oauthAuthorizationServerUrl.trim(),
+              // 授权服务器地址通常留空：后端会按 MCP Authorization 规范自动发现
+              // （.well-known + 动态注册）。仅在自动发现失败时才由用户手填。
+              authorizationServerUrl: oauthAuthorizationServerUrl.trim() || undefined,
               clientId: oauthClientId.trim() || undefined,
               clientSecret: oauthClientSecret || undefined,
               scopes,
-              redirectUrl: oauthRedirectUrl.trim() || undefined,
+              // 回调地址由应用固定、后端有默认常量兜底，不再从可编辑输入透传。
             },
           });
           auth = {
@@ -371,7 +375,11 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
         if (probe.state === 'connected') {
           setStatus(`MCP 已连接，发现 ${probe.toolsCount} 个工具、${probe.resourcesCount} 个资源、${probe.promptsCount} 个 Prompt。`);
         } else if (probe.state === 'needs_auth') {
-          setStatus(probe.auth?.message ?? '此 MCP 服务需要身份验证，请点击“进行身份验证”。');
+          // 探测到需 OAuth：自动切换认证方式为 OAuth 2.0 并展开高级设置，
+          // 用户无需再手动去高级设置里改认证方式，再点“登录授权”即可。
+          setAuthMode('oauth2');
+          setShowAdvancedSettings(true);
+          setStatus('已检测到需 OAuth，已自动切换为 OAuth 2.0，请点击“登录授权”完成登录。');
         } else {
           setStatus(probe.message ?? 'MCP 连接失败，请检查 URL 或展开高级设置。');
         }
@@ -416,6 +424,32 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
       setOauthAuthorizationCode('');
     });
   }, [oauthAuthorizationCode, runServerAction]);
+
+  // 已保存但探测到需认证的服务器：一键将其认证方式提升为 OAuth 2.0。
+  // 授权服务器地址留空交后端自动发现；提升后展示“登录授权”按钮，
+  // 由用户再点一次完成登录（保留确认步骤）。
+  const handlePromoteToOAuth = useCallback(async (server: McpServerView) => {
+    setBusy(true);
+    setStatus('正在切换为 OAuth 2.0…');
+    try {
+      const credential = await clientApi.mcpPutCredential({
+        label: labelForServer(server),
+        kind: 'oauth2',
+        oauth: { scopes: [] },
+      });
+      await clientApi.mcpUpsertServer({
+        id: String(serverIdOf(server)),
+        transport: server.transport ?? 'streamable_http',
+        auth: { mode: 'oauth2', credentialRef: credential.credentialRef, oauth: credential.oauth },
+      });
+      await load();
+      setStatus('已切换为 OAuth 2.0，请点击“登录授权”完成登录。');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '切换为 OAuth 2.0 失败');
+    } finally {
+      setBusy(false);
+    }
+  }, [load]);
 
   const handleStartOAuth = useCallback(async (server: McpServerView) => {
     setBusy(true);
@@ -722,8 +756,8 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                 {authMode === 'oauth2' ? (
                   <>
                     <label className="settings-grid__wide">
-                      Authorization Server URL
-                      <input value={oauthAuthorizationServerUrl} onChange={(event) => setOauthAuthorizationServerUrl(event.target.value)} placeholder="https://auth.example.com" />
+                      Authorization Server URL（可选）
+                      <input value={oauthAuthorizationServerUrl} onChange={(event) => setOauthAuthorizationServerUrl(event.target.value)} placeholder="通常留空自动发现，仅自动发现失败时手动填" />
                     </label>
                     <label>
                       Client ID
@@ -737,9 +771,17 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                       Scopes
                       <input value={oauthScopes} onChange={(event) => setOauthScopes(event.target.value)} placeholder="以空格或逗号分隔" />
                     </label>
-                    <label>
-                      Redirect URL
-                      <input value={oauthRedirectUrl} onChange={(event) => setOauthRedirectUrl(event.target.value)} placeholder="http://127.0.0.1:33418/mcp/oauth/callback" />
+                    <label className="settings-grid__wide">
+                      回调地址（应用固定，如认证服务器要求登记请复制加白名单）
+                      <div className="settings-readonly-field">
+                        <input value={oauthRedirectUrl} readOnly onFocus={(event) => event.currentTarget.select()} />
+                        <button
+                          type="button"
+                          onClick={() => void navigator.clipboard?.writeText(oauthRedirectUrl).then(() => setStatus('已复制回调地址。'))}
+                        >
+                          复制
+                        </button>
+                      </div>
                     </label>
                   </>
                 ) : (
@@ -885,7 +927,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                     {selected.auth?.oauth?.tokenStatus === 'available' ? '重新认证' : '登录授权'}
                   </button>
                 ) : selectedNeedsAuth ? (
-                  <button type="button" disabled={busy} onClick={() => setStatus('已检测到该 MCP 需要身份验证。请展开高级设置将认证方式配置为 OAuth 2.0 后再点击“登录授权”。')}>进行身份验证</button>
+                  <button type="button" disabled={busy} onClick={() => void handlePromoteToOAuth(selected)}>进行身份验证</button>
                 ) : null}
                 <button type="button" disabled={busy} onClick={() => void runServerAction(selected.enabled === false ? '启用连接' : '禁用连接', () => clientApi.mcpSetEnabled({ serverId: serverIdOf(selected), enabled: selected.enabled === false }))}>{selected.enabled === false ? '启用' : '禁用'}</button>
                 <button type="button" disabled={busy} onClick={() => void runServerAction('移除连接', () => clientApi.mcpUninstall({ serverId: serverIdOf(selected) }))}>移除</button>
