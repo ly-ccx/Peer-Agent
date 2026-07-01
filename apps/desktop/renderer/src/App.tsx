@@ -349,7 +349,7 @@ export function App() {
                     void clientApi.clearPendingTask().catch(() => {});
                   }}
                   onOpenSettings={() => setActivePage('settings')}
-                  onConversationUpdated={refreshConversations}
+                  onConversationUpdated={() => { void refreshConversations(); }}
                   onStreamingChange={(convId, streaming) => {
                     if (!convId) return;
                     setRunningConversationIds((prev) => {
