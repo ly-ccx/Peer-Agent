@@ -4,7 +4,8 @@
     grid-template-columns: minmax(0, 1fr) minmax(340px, 30vw);
     color: var(--za-text);
     background: var(--za-thread-bg);
-    animation: za-fade-rise var(--za-motion-medium) var(--za-ease-out) both;
+    --motion-enter-from: 8px;
+    animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
   }
 
   .capability-workbench.skills-active {
@@ -211,7 +212,8 @@
     gap: 22px;
     border-left: 1px solid var(--za-line);
     background: var(--za-sidebar-bg);
-    animation: za-panel-in var(--za-motion-medium) var(--za-ease-out) both;
+    --motion-enter-from: 10px;
+    animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
   }
 
   .capability-detail-panel header {

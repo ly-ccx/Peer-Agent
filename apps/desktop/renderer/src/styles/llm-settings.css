@@ -89,7 +89,10 @@
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  animation: llm-active-flow 4.6s linear infinite;
+  --motion-shimmer-from: 180%;
+  --motion-shimmer-x: -120%;
+  --motion-shimmer-y: 50%;
+  animation: motion-shimmer 4.6s linear infinite;
   will-change: background-position;
 }
 .llm-provider-card.is-default::after {
@@ -107,14 +110,16 @@
   animation: llm-active-card-sheen 7.2s ease-in-out infinite;
 }
 
-@keyframes llm-active-flow {
-  from { background-position: 180% 50%; }
-  to { background-position: -120% 50%; }
-}
+/* motion-allow-local: 品牌「默认服务商」卡片的双层背景强调高光。
+   第一层径向光晕固定、第二层斜向掠光横移，机制无法用单值 motion-shimmer 表达，
+   属精心设计的一次性艺术效果，故作为受控组件级例外保留（治理脚本白名单登记）。 */
 @keyframes llm-active-card-sheen {
   0%, 100% { background-position: 0 0, 160% 50%; }
   50% { background-position: 0 0, -60% 50%; }
 }
+/* motion-allow-local: 品牌「默认」徽章的斜掠反光。带停顿节奏的一次性艺术反光
+   （translateX + rotate + opacity 时序），与匀速无旋转的 motion-sheen 机制不同，
+   故作为受控组件级例外保留（治理脚本白名单登记）。 */
 @keyframes llm-active-badge-sheen {
   0%, 34% {
     opacity: 0;
@@ -580,21 +585,14 @@
   z-index: var(--z-dropdown-portal, 10000);
   max-height: 280px;
   overflow-y: auto;
-  animation: pa-dropdown-in var(--za-motion-fast) var(--za-ease-out) both;
+  --motion-enter-from: calc(-1 * var(--za-motion-shift-sm));
+  animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
 }
 .pa-dropdown-menu.is-up {
-  animation-name: pa-dropdown-up-in;
+  --motion-enter-from: var(--za-motion-shift-sm);
 }
 .pa-dropdown-up .pa-dropdown-caret {
   transform: rotate(180deg);
-}
-@keyframes pa-dropdown-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes pa-dropdown-up-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
 }
 .pa-dropdown-item {
   display: flex;

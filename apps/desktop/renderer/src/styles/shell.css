@@ -3,7 +3,8 @@
     @apply grid h-screen min-h-0 w-screen overflow-hidden;
     grid-template-columns: minmax(0, 1fr);
     background: var(--za-app-bg);
-    animation: za-fade-rise var(--za-motion-slow) var(--za-ease-out) both;
+    --motion-enter-from: 8px;
+    animation: motion-enter-rise var(--za-motion-slow) var(--za-ease-out) both;
   }
 
   .main-panel {
@@ -174,7 +175,8 @@
     flex: 1;
     min-height: 100%;
     padding: 24px 24px 32px;
-    animation: za-fade-rise var(--za-motion-slow) var(--za-ease-out) both;
+    --motion-enter-from: 8px;
+    animation: motion-enter-rise var(--za-motion-slow) var(--za-ease-out) both;
   }
 
   /* hero 区垂直居中占据剩余空间 */

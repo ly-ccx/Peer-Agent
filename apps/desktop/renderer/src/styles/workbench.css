@@ -645,15 +645,8 @@
     width: 40%;
     background: var(--za-focus, #3b7fab);
     border-radius: 2px;
-    animation: browser-progress-slide 1.1s ease-in-out infinite;
-  }
-  @keyframes browser-progress-slide {
-    0% {
-      transform: translateX(-100%);
-    }
-    100% {
-      transform: translateX(320%);
-    }
+    --motion-progress-to: 320%;
+    animation: motion-progress-slide 1.1s ease-in-out infinite;
   }
 
   /* 舞台：webview 填满 + 覆盖层（错误/空白） */

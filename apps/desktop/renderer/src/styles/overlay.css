@@ -4,8 +4,9 @@
      设计语言：14-product-design-language.md §11.3「弹出层动效准入」。
 
      所有模态必须复用本基座，从而默认获得：
-       - backdrop 冷调遮罩 + 淡入（za-content-reveal）。
-       - 面板入场动效（za-panel-in）。
+       - backdrop 冷调遮罩 + 淡入（motion-enter-fade）。
+       - 面板入场动效（motion-enter-rise）。
+     动效一律走 motion.css 语义基元，禁止在此散写 @keyframes。
      prefers-reduced-motion 由 tokens.css 全局兜底降级，无需各处重写。
      ────────────────────────────────────────────────────────────── */
   .pa-overlay-backdrop {
@@ -18,20 +19,22 @@
     /* 统一冷调遮罩，而非纯黑硬编码 */
     background: rgba(8, 12, 18, 0.46);
     backdrop-filter: blur(2px);
-    animation: za-content-reveal var(--za-motion-medium) var(--za-ease-out) both;
+    /* 动效基元（motion.css）：backdrop 只淡入，位移交给面板。 */
+    animation: motion-enter-fade var(--za-motion-medium) var(--za-ease-out) both;
   }
 
   .pa-overlay-panel {
-    animation: za-panel-in var(--za-motion-medium) var(--za-ease-out) both;
+    /* 动效基元：淡入 + 上移（enter-rise）。 */
+    animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
   }
 
   /* 退场态：onClose 时先播退场动画，动画结束后才真正卸载（详见 Overlay.tsx 状态机）。
      退场比入场更利落（fast 档），位移与入场对称（下移淡出）。 */
   .pa-overlay-backdrop.is-closing {
-    animation: za-fade-out var(--za-motion-fast) var(--za-ease-in-out) both;
+    animation: motion-exit-fade var(--za-motion-fast) var(--za-ease-accelerate) both;
   }
 
   .pa-overlay-panel.is-closing {
-    animation: za-slide-down-out var(--za-motion-fast) var(--za-ease-in-out) both;
+    animation: motion-exit-sink var(--za-motion-fast) var(--za-ease-accelerate) both;
   }
 }

@@ -1,0 +1,346 @@
+/* ============================================================================
+ * motion.css — 全局动效语义基元层（Single Source of Motion）
+ * ----------------------------------------------------------------------------
+ * 定位：把散落在各组件 CSS 的 keyframes 收敛为一组「语义命名」基元。
+ *   - 5 组 / 13 个基元：入场 enter / 退场 exit / 脉冲 pulse / 流光 sheen / 进度 progress
+ *   - 每个基元 = 一个 @keyframes motion-* + 一个 utility class .motion-*
+ *   - 时长 / 缓动 / 位移一律引用 tokens.css 的 --za-motion-* 变量，禁止 magic number
+ *   - 组件只需挂 class（或引用 animation-name），不再自定义时长曲线
+ *
+ * 命名空间：统一 `motion-` 前缀（新命名空间，与旧 `za-` keyframes 解耦），
+ *          便于治理脚本 check-architecture-governance.mjs 识别与强制准入。
+ *
+ * reduced-motion：由 tokens.css 末尾的全局兜底（animation-duration:1ms）统一降级，
+ *                本文件不重复写媒体查询（见准入纪律 §4：reduced-motion 收敛到全局）。
+ *
+ * 依赖 token（tokens.css）：
+ *   时长  --za-motion-fast/medium/slow = 120/200/320ms
+ *   缓动  --za-ease-out/standard/spring/decelerate/accelerate
+ *   位移  --za-motion-shift-sm/shift/shift-lg = 6/12/24px
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+ * 入场 enter — 元素挂载时的呈现（收敛自 ~15 个旧 keyframes）
+ * ------------------------------------------------------------------------- */
+
+/* 纯淡入：最克制的入场，用于不需要位移的覆盖层内容 */
+@keyframes motion-enter-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* 淡入 + 位移入场：默认从下方升入（+shift），覆盖 panel / message / toast /
+ * dropdown / tool-card 等。方向由 --motion-enter-from 定制：向下展开的菜单传
+ * 负值（如从上方落下）即可镜像，无需另立 keyframe。默认值保持向后兼容。 */
+@keyframes motion-enter-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, var(--motion-enter-from, var(--za-motion-shift)), 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* 淡入 + 缩放回弹（spring）：强调型入场，覆盖 thinking-pop 等 */
+@keyframes motion-enter-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+
+  60% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.motion-enter-fade {
+  animation: motion-enter-fade var(--za-motion-medium) var(--za-ease-out) both;
+}
+
+.motion-enter-rise {
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
+}
+
+.motion-enter-pop {
+  animation: motion-enter-pop var(--za-motion-medium) var(--za-ease-spring) both;
+}
+
+/* ---------------------------------------------------------------------------
+ * 退场 exit — 元素卸载前的收场（收敛自 6 个旧 keyframes）
+ * 需配合 JS 编排 helper（useMotionPresence）在 animationend 后再卸载。
+ * ------------------------------------------------------------------------- */
+
+/* 纯淡出 */
+@keyframes motion-exit-fade {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+/* 淡出 + 下移：与 enter-rise 对称，用于 toast / dropdown 收起 */
+@keyframes motion-exit-sink {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(0, var(--za-motion-shift), 0);
+  }
+}
+
+/* 淡出 + 缩小，支持方向变量（--motion-collapse-x / -y）：
+ * 默认原地收缩；升级弹窗「飞向左上角」即传入负向 x/y 的定向实例。
+ * 位移上限受 --za-motion-shift-lg（24px）约束，transform-origin 由调用点设定。 */
+@keyframes motion-exit-collapse {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(var(--motion-collapse-x, 0), var(--motion-collapse-y, 0), 0) scale(0.82);
+  }
+}
+
+.motion-exit-fade {
+  animation: motion-exit-fade var(--za-motion-fast) var(--za-ease-accelerate) both;
+}
+
+.motion-exit-sink {
+  animation: motion-exit-sink var(--za-motion-fast) var(--za-ease-accelerate) both;
+}
+
+.motion-exit-collapse {
+  /* 默认方向变量，可被调用点覆盖为定向收缩（如左上角 -20px / -16px） */
+  --motion-collapse-x: 0px;
+  --motion-collapse-y: 0px;
+  animation: motion-exit-collapse var(--za-motion-medium) var(--za-ease-accelerate) both;
+}
+
+/* ---------------------------------------------------------------------------
+ * 脉冲 / 呼吸 pulse — 状态提示（收敛自 ~11 个旧 keyframes）
+ * ------------------------------------------------------------------------- */
+
+/* 循环呼吸：thinking / running / active 等持续态 */
+@keyframes motion-pulse-soft {
+  0%,
+  100% {
+    opacity: var(--motion-pulse-ceil, 1);
+  }
+
+  50% {
+    opacity: var(--motion-pulse-floor, 0.55);
+  }
+}
+
+/* 一次性注意力脉冲：徽标出现、消息闪现（放大回弹后归位） */
+@keyframes motion-pulse-attention {
+  0% {
+    transform: scale(0.6);
+  }
+
+  55% {
+    transform: scale(1.18);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+.motion-pulse-soft {
+  animation: motion-pulse-soft var(--za-motion-slow) var(--za-ease-standard) infinite;
+}
+
+.motion-pulse-attention {
+  animation: motion-pulse-attention var(--za-motion-slow) var(--za-ease-spring) both;
+}
+
+/* ---------------------------------------------------------------------------
+ * 流光 / 微光 sheen — 进行态光泽（收敛自 ~12 个旧 keyframes）
+ * ------------------------------------------------------------------------- */
+
+/* 斜向扫光：进行态文字 / 进度条光泽。高性能——只平移遮罩，走合成层。
+ * 行程 ±25% 让缝两端完全移出，循环 reset 发生在文字全暗瞬间，看不到突变。 */
+@keyframes motion-sheen {
+  from {
+    transform: translate3d(-25%, 0, 0);
+  }
+
+  to {
+    transform: translate3d(25%, 0, 0);
+  }
+}
+
+/* 外扩柔光环：徽标 halo / executing-glow，从元素向外扩散后淡出。
+ * 扩散色由调用点通过 --motion-halo-color 提供（默认取品牌印泥红）。 */
+@keyframes motion-halo {
+  from {
+    opacity: 0.9;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--motion-halo-color, var(--cinnabar-seal)) 55%, transparent);
+  }
+
+  to {
+    opacity: 0;
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--motion-halo-color, var(--cinnabar-seal)) 0%, transparent);
+  }
+}
+
+.motion-sheen {
+  animation: motion-sheen var(--za-motion-slow) var(--za-ease-standard) infinite;
+}
+
+.motion-halo {
+  animation: motion-halo var(--za-motion-slow) var(--za-ease-decelerate) both;
+}
+
+/* 圆环心跳 ripple — box-shadow 硬边圆环往返扩散（收敛自 ws-running-pulse /
+ * sidebar-conv-pulse / sidebar-conv-compacting-pulse）。与 motion-halo（单次
+ * 扩散淡出，both）互补：此基元反复"心跳"，spread 0→满→0 循环，营造"进行中"
+ * 的持续脉动。颜色/半径/透明度低谷由调用点通过 --motion-ripple-* 定制。
+ * 需要额外缩放的调用点可叠加自身 transform，不在本基元内表达。 */
+@keyframes motion-ripple {
+  0% {
+    opacity: var(--motion-ripple-peak, 0.95);
+    box-shadow: 0 0 0 0
+      color-mix(in srgb, var(--motion-ripple-color, var(--azure-seal)) var(--motion-ripple-strength, 50%), transparent);
+  }
+
+  70% {
+    opacity: var(--motion-ripple-floor, 0.55);
+    box-shadow: 0 0 0 var(--motion-ripple-radius, 6px) transparent;
+  }
+
+  100% {
+    opacity: var(--motion-ripple-peak, 0.95);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+/* 发光呼吸 glow — box-shadow 模糊光晕对称明灭（收敛自 goal-panel-executing-glow）。
+ * 与 motion-halo（硬边 spread 圆环扩散淡出）互补：此基元驱动 box-shadow 的
+ * blur 半径做对称往返（0→满→0），营造"正在推进"的柔和呼吸感，恒定 opacity。
+ * 颜色/强度/模糊/扩散由调用点通过 --motion-glow-* 定制，默认接近白的低透高光。 */
+@keyframes motion-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--motion-glow-color, white) 0%, transparent);
+  }
+
+  50% {
+    box-shadow: 0 0 var(--motion-glow-blur, 12px) var(--motion-glow-spread, 1px)
+      color-mix(in srgb, var(--motion-glow-color, white) var(--motion-glow-strength, 22%), transparent);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 进度 / 加载 progress — 等待反馈（收敛自 ~6 个旧 keyframes）
+ * ------------------------------------------------------------------------- */
+
+/* 旋转：spinner */
+@keyframes motion-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 加载点波动：三点依次起伏（配合 animation-delay 错峰） */
+@keyframes motion-dots {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translate3d(0, calc(-1 * var(--za-motion-shift-sm)), 0);
+  }
+}
+
+/* 不定长进度条滑动：browser-progress / skeleton 的左右穿梭。
+ * 终点位移由 --motion-progress-to 定制（默认 100%），窄高亮条穿越宽容器时
+ * 需传更大值（如 320%）让光条完全滑出右缘。 */
+@keyframes motion-progress-slide {
+  from {
+    transform: translate3d(var(--motion-progress-from, -100%), 0, 0);
+  }
+
+  to {
+    transform: translate3d(var(--motion-progress-to, 100%), 0, 0);
+  }
+}
+
+.motion-spin {
+  animation: motion-spin var(--za-motion-slow) linear infinite;
+}
+
+.motion-dots {
+  animation: motion-dots var(--za-motion-slow) var(--za-ease-standard) infinite;
+}
+
+.motion-progress-slide {
+  animation: motion-progress-slide var(--za-motion-slow) var(--za-ease-standard) infinite;
+}
+
+/* ---------------------------------------------------------------------------
+ * 变色 flash — 背景/发光高亮（收敛自 tool-card-pulse / chat-msg-flash 等变色效果）
+ * 变量驱动：调用点通过 --motion-flash-from / --motion-flash-to / --motion-flash-glow
+ * 定制起止背景与外发光；不设时长在 keyframe 上，由 utility（一次性）或调用点（循环）指定。
+ *   - 一次性高亮淡出：挂 .motion-flash（默认品牌蓝底 + 外发光 → 透明）
+ *   - 循环背景呼吸：调用点写 `animation: motion-flash <dur> ... infinite alternate`
+ *     并把 --motion-flash-glow 设为 transparent 以关闭发光。
+ * ------------------------------------------------------------------------- */
+@keyframes motion-flash {
+  from {
+    background-color: var(--motion-flash-from, var(--azure-soft));
+    box-shadow: 0 0 0 6px var(--motion-flash-glow, var(--azure-soft));
+  }
+
+  to {
+    background-color: var(--motion-flash-to, transparent);
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+.motion-flash {
+  animation: motion-flash var(--za-motion-slow) var(--za-ease-decelerate) both;
+}
+
+/* ---------------------------------------------------------------------------
+ * 背景位移扫光 shimmer — 文字/波浪的渐变横移（收敛自 thinking-shimmer /
+ * compaction-wave-flow）。与 motion-sheen（transform 遮罩）互补：此基元驱动
+ * background-position，用于 background-clip:text 或 mask 裁形的流光，无法用
+ * transform 表达。位移终点由 --motion-shimmer-x 定制（默认 200%，配合
+ * background-size 的 2 倍铺底实现无缝循环）。循环节奏由调用点指定。
+ * ------------------------------------------------------------------------- */
+@keyframes motion-shimmer {
+  from {
+    background-position: var(--motion-shimmer-from, 0%) var(--motion-shimmer-y, 0);
+  }
+
+  to {
+    background-position: var(--motion-shimmer-x, 200%) var(--motion-shimmer-y, 0);
+  }
+}

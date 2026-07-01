@@ -14,7 +14,8 @@
     color: var(--ink-base);
     font-size: 13px;
     line-height: 1.4;
-    animation: za-fade-rise var(--za-motion-medium) var(--za-ease-out) both;
+    --motion-enter-from: 8px;
+    animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
   }
 
   .permission-gate-strip .badge {
@@ -91,7 +92,7 @@
   }
 
   .permission-gate-strip.exiting {
-    animation: za-slide-down-out 180ms var(--za-ease-accelerate) forwards;
+    animation: motion-exit-sink 180ms var(--za-ease-accelerate) forwards;
     pointer-events: none;
   }
 

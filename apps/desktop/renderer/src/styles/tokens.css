@@ -217,6 +217,11 @@
   --za-motion-fast: 120ms;
   --za-motion-medium: 200ms;
   --za-motion-slow: 320ms;
+  /* 位移上限（克制原则：位移类基元 ≤ 24px，见动效规范准入纪律 §4.3）
+   * 语义基元的入场上移 / 退场下移统一引用，禁止在组件里写 magic number。 */
+  --za-motion-shift-sm: 6px;
+  --za-motion-shift: 12px;
+  --za-motion-shift-lg: 24px;
   --za-font-ui: var(--font-sans);
   --za-font-code: var(--font-mono);
   /* 用户偏好快照（Frost 模式下永远固定为 canonical 值，不再可改） */
@@ -657,71 +662,15 @@ textarea:focus-visible,
 }
 
 /* ─────────────────────────────────────────────────────────────
- *  既有动画（保留）
+ *  受控例外动画（governance 白名单登记）
+ *  以下 3 个 keyframe 表达 motion.css 语义基元无法覆盖的机制：
+ *    - za-loading-skeleton：双背景层扫过（基元 motion-shimmer 仅单层）
+ *    - za-message-shimmer / za-content-shimmer：一次性 opacity 淡出
+ *      （基元为无限循环、无淡出）
+ *  除此之外的入场/退场/脉冲/流光/进度一律使用 motion.css 基元，
+ *  禁止在此新增散写 keyframe。
  * ───────────────────────────────────────────────────────────── */
-@keyframes za-fade-rise {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 8px, 0);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
-@keyframes za-panel-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 10px, 0) scale(0.995);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-@keyframes za-message-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 12px, 0);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
-@keyframes za-details-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, -4px, 0);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
-@keyframes za-loading-dot {
-
-  0%,
-  80%,
-  100% {
-    opacity: 0.34;
-    transform: translate3d(0, 0, 0);
-  }
-
-  40% {
-    opacity: 0.92;
-    transform: translate3d(0, -2px, 0);
-  }
-}
-
+/* 受控例外：加载骨架屏双背景层扫过 */
 @keyframes za-loading-skeleton {
   from {
     background-position: 180% 0, 0 0;
@@ -732,6 +681,7 @@ textarea:focus-visible,
   }
 }
 
+/* 受控例外：消息骨架一次性 shimmer 淡出 */
 @keyframes za-message-shimmer {
   from {
     background-position: 200% 0;
@@ -744,114 +694,11 @@ textarea:focus-visible,
   }
 }
 
-@keyframes za-content-reveal {
-  from { opacity: 0; transform: translate3d(0, 6px, 0); }
-  to { opacity: 1; transform: translate3d(0, 0, 0); }
-}
+/* 受控例外：思考完成内容揭示的一次性 shimmer 淡出 */
 @keyframes za-content-shimmer {
   from { background-position: 200% 0; opacity: 0.8; }
   60% { opacity: 0.6; }
   to { background-position: -100% 0; opacity: 0; }
-}
-@keyframes za-fade-out {
-  to {
-    opacity: 0;
-  }
-}
-
-@keyframes za-slide-down-out {
-  to {
-    opacity: 0;
-    transform: translate3d(0, 8px, 0);
-  }
-}
-
-@keyframes za-scale-out {
-  to {
-    opacity: 0;
-    transform: scale(0.96);
-  }
-}
-
-/* 右下角完成卡片（UpdateToast）：从下方滑入 / 利落滑出。位移 < 16px，遵守动效准入；
- * prefers-reduced-motion 由本文件末尾的全局兜底（animation-duration:1ms）降级。 */
-@keyframes za-toast-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 12px, 0);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
-@keyframes za-toast-out {
-  from {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-
-  to {
-    opacity: 0;
-    transform: translate3d(0, 12px, 0);
-  }
-}
-
-/* 更新弹窗退场：向「左上角版本徽标」收缩 + 淡出，把用户视线引导到进度落点。
- * 替代通用的 za-slide-down-out（仅下移），让「进度缩到左上角」可被感知。
- * transform-origin 由 .updater-modal.is-closing 设为左上；位移仍克制（< 24px）。 */
-@keyframes za-collapse-to-corner {
-  from {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-
-  to {
-    opacity: 0;
-    transform: translate3d(-20px, -16px, 0) scale(0.82);
-  }
-}
-
-/* 左上角进度环出现时的一次性「注意力脉冲」：轻微放大回弹，把视线钉在徽标。 */
-@keyframes za-badge-attention {
-  0% {
-    transform: scale(0.6);
-  }
-
-  55% {
-    transform: scale(1.18);
-  }
-
-  100% {
-    transform: scale(1);
-  }
-}
-
-/* 进度环外扩柔光环：从徽标向外扩散后淡出，强化「进度落在这里」的指向。 */
-@keyframes za-badge-halo {
-  from {
-    opacity: 0.9;
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--cinnabar-seal) 55%, transparent);
-  }
-
-  to {
-    opacity: 0;
-    box-shadow: 0 0 0 7px color-mix(in srgb, var(--cinnabar-seal) 0%, transparent);
-  }
-}
-
-/* 流式进行态扫光（高性能）：transform 平移遮罩缝,只动合成层不触发 repaint。
- * 行程足够大让缝两端完全移出文字,循环 reset 发生在文字全暗瞬间 → 看不到位置突变。 */
-@keyframes za-text-sweep {
-  from {
-    transform: translate3d(-25%, 0, 0);
-  }
-
-  to {
-    transform: translate3d(25%, 0, 0);
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

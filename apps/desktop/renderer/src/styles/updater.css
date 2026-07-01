@@ -55,8 +55,9 @@
     box-shadow: none;
     transition: background 0.25s ease;
     /* 进度环首次出现时播一次「注意力脉冲」，把视线钉到左上角；
+       动效基元 motion-pulse-attention（motion.css）。
        prefers-reduced-motion 由 tokens.css 全局兜底降级。 */
-    animation: za-badge-attention var(--za-motion-slow) var(--za-ease-out) both;
+    animation: motion-pulse-attention var(--za-motion-slow) var(--za-ease-spring) both;
   }
 
   .sidebar-version-dot.is-progress::after {
@@ -75,7 +76,8 @@
     border-radius: 50%;
     pointer-events: none;
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--cinnabar-seal) 55%, transparent);
-    animation: za-badge-halo var(--za-motion-slow) var(--za-ease-out) 2 both;
+    /* 动效基元 motion-halo（motion.css），扩散色默认取品牌印泥红。 */
+    animation: motion-halo var(--za-motion-slow) var(--za-ease-decelerate) 2 both;
   }
 
   /* ── 右下角「下载完成」完成卡片（UpdateToast） ── */
@@ -95,11 +97,11 @@
     border: 1px solid var(--za-line);
     box-shadow: var(--za-shadow-popover);
     color: var(--pa-text-primary);
-    animation: za-toast-in var(--za-motion-medium) var(--za-ease-out) both;
+    animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
   }
 
   .updater-toast.is-closing {
-    animation: za-toast-out var(--za-motion-fast) var(--za-ease-in-out) both;
+    animation: motion-exit-sink var(--za-motion-fast) var(--za-ease-accelerate) both;
   }
 
   .updater-toast-body {
@@ -163,14 +165,18 @@
     color: var(--pa-text-primary);
   }
 
-  /* 点「更新」后弹窗退场：覆写 Overlay 通用的 za-slide-down-out（仅下移），
-     改为向左上角版本徽标方向收缩淡出，把用户视线引导到进度落点。
+  /* 点「更新」后弹窗退场：覆写 Overlay 通用的 motion-exit-sink（仅下移），
+     改为向左上角版本徽标方向收缩淡出，把用户视线引导到进度落点（C1 连续性样板）。
+     复用 motion-exit-collapse 基元，通过方向变量 --motion-collapse-x/y 指定飞向左上角，
+     位移仍受 --za-motion-shift-lg（24px）克制，transform-origin 设为左上。
      时长 medium=200ms < Overlay 兜底定时 240ms，保证 onAnimationEnd 先触发。
      特异度 3 类 > overlay.css 的 .pa-overlay-panel.is-closing(2 类)，稳定生效。
      prefers-reduced-motion 由 tokens.css 全局兜底降级。 */
   .pa-overlay-panel.updater-modal.is-closing {
     transform-origin: top left;
-    animation: za-collapse-to-corner var(--za-motion-medium) var(--za-ease-in-out) both;
+    --motion-collapse-x: calc(-1 * var(--za-motion-shift-lg));
+    --motion-collapse-y: -16px;
+    animation: motion-exit-collapse var(--za-motion-medium) var(--za-ease-accelerate) both;
   }
 
   .updater-modal-body {

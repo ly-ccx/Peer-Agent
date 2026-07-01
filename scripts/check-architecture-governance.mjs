@@ -658,7 +658,10 @@ function assertOverlayMotionAdmission() {
     fail(`Overlay base styles are missing: ${overlayStyles}`);
   } else {
     const css = readText(overlayStyles);
-    for (const token of ['.pa-overlay-backdrop', '.pa-overlay-panel', 'za-panel-in']) {
+    // 锚点校验真实动画基元（motion.css 语义基元），而非旧的散写 keyframe 名。
+    // 历史教训：曾锚定 za-panel-in，实际动画早已迁到 motion-enter-rise，
+    // 断言靠注释里的残留字符串蒙混通过 —— 锚点必须指向真实生效的基元。
+    for (const token of ['.pa-overlay-backdrop', '.pa-overlay-panel', 'motion-enter-rise']) {
       if (!css.includes(token)) {
         fail(`${overlayStyles} must define ${token} so overlays inherit unified motion.`);
       }
@@ -671,10 +674,16 @@ function assertOverlayMotionAdmission() {
     fail('apps/desktop/renderer/src/styles.css must @import "./styles/overlay.css" to register the overlay base.');
   }
 
-  // 文档准入锚点必须存在。
-  const designDoc = readText('docs/architecture/14-product-design-language.md');
-  if (!designDoc.includes('弹出层动效准入')) {
-    fail('docs/architecture/14-product-design-language.md §11.3 must document the 弹出层动效准入 rule.');
+  // 文档准入锚点校验。设计语言文档（14-product-design-language.md）已按 .gitignore
+  // docs/architecture/* 规则设为 local-only，并迁移到 peer-knowledge 知识库统一维护，
+  // 因此在全新 clone / CI 环境中代码仓内可能不存在该文件。此处用 existsSync 保护：
+  // 存在时校验锚点内容；缺失时跳过（降级），避免整个治理脚本因 ENOENT 崩溃。
+  const designDocPath = 'docs/architecture/14-product-design-language.md';
+  if (existsSync(path.join(repoRoot, designDocPath))) {
+    const designDoc = readText(designDocPath);
+    if (!designDoc.includes('弹出层动效准入')) {
+      fail(`${designDocPath} §11.3 must document the 弹出层动效准入 rule.`);
+    }
   }
 
   // 防漏核心：renderer 中任何声明 aria-modal="true" 的模态，都必须经由 Overlay 基座。
@@ -692,9 +701,64 @@ function assertOverlayMotionAdmission() {
   }
 }
 
+function assertMotionPrimitivesAreCentralized() {
+  // 全局动效体系（design：全局动效体系治理）。动画的「单一真相」是 motion.css 的
+  // 语义基元层（motion-* keyframes + utility class）。组件 CSS 一律引用基元，
+  // 禁止各处散写 @keyframes —— 否则又回到 48 个重复 keyframe 散落 6 个文件的旧态。
+  //
+  // 允许定义 @keyframes 的文件（白名单）：
+  //   - styles/motion.css：语义基元层，唯一的通用动画定义源。
+  //   - styles/tokens.css：3 个受控例外（loading-skeleton / message-shimmer /
+  //     content-shimmer），表达基元无法覆盖的机制（双背景层 / 一次性 opacity 淡出）。
+  //   - styles/llm-settings.css：2 个受控例外（card-sheen / badge-sheen），
+  //     品牌默认卡/徽章艺术高光，机制不可通用化。
+  // 新增受控例外必须同时更新本白名单，确保「例外」是被治理登记的、而非随手散写。
+  const motionCss = 'apps/desktop/renderer/src/styles/motion.css';
+  if (!existsSync(path.join(repoRoot, motionCss))) {
+    fail(`Motion primitive layer is missing: ${motionCss}`);
+    return;
+  }
+
+  // motion.css 必须经由 styles.css 注册，否则基元不会生效。
+  const stylesEntry = readText('apps/desktop/renderer/src/styles.css');
+  if (!stylesEntry.includes('styles/motion.css')) {
+    fail('apps/desktop/renderer/src/styles.css must @import "./styles/motion.css" to register the motion primitive layer.');
+  }
+
+  // motion.css 必须真正定义语义基元（防止空壳文件蒙混）。
+  const motionContent = readText(motionCss);
+  for (const primitive of ['@keyframes motion-enter-rise', '@keyframes motion-exit-sink']) {
+    if (!motionContent.includes(primitive)) {
+      fail(`${motionCss} must define ${primitive} as part of the semantic motion primitive layer.`);
+    }
+  }
+
+  // 白名单：允许出现 @keyframes 的文件（相对 repoRoot）。
+  const keyframeAllowlist = new Set([
+    'apps/desktop/renderer/src/styles/motion.css',
+    'apps/desktop/renderer/src/styles/tokens.css',
+    'apps/desktop/renderer/src/styles/llm-settings.css',
+  ]);
+
+  const cssFiles = collectFiles('apps/desktop/renderer/src', ['.css']);
+  for (const filePath of cssFiles) {
+    const rel = relative(filePath);
+    if (keyframeAllowlist.has(rel)) continue;
+    const content = readFileSync(filePath, 'utf8');
+    if (/@keyframes\s/.test(content)) {
+      fail(
+        `${rel} defines a local @keyframes. Animations must reuse motion.css semantic primitives (motion-*). ` +
+          `If a genuinely new mechanism is needed, add the keyframe to styles/motion.css, or register a controlled ` +
+          `exception in the keyframeAllowlist of assertMotionPrimitivesAreCentralized.`,
+      );
+    }
+  }
+}
+
 assertAgentRules();
 assertArchitectureDocsStayLocal();
 assertOverlayMotionAdmission();
+assertMotionPrimitivesAreCentralized();
 assertRendererHasNoHighPrivilegeImports();
 assertNoStreamReplaceChannel();
 assertSystemContextProtocolContracts();

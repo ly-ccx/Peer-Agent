@@ -22,7 +22,7 @@
   box-shadow: inset 0 0 0 1px color-mix(in srgb, white 62%, transparent), 0 18px 48px color-mix(in srgb, var(--azure-seal) 16%, transparent);
   pointer-events: none;
   backdrop-filter: blur(8px) saturate(1.05);
-  animation: chat-file-drop-overlay-in 140ms var(--za-ease-standard);
+  animation: motion-enter-fade 140ms var(--za-ease-standard);
 }
 
 .chat-file-drop-card {
@@ -62,16 +62,6 @@
   font-size: 0.82rem;
 }
 
-@keyframes chat-file-drop-overlay-in {
-  from {
-    opacity: 0;
-    transform: scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
 
 /* ── Thread ── */
 .chat-thread {
@@ -163,7 +153,7 @@
   width: 100%;
   min-width: 0;
   margin: 0 auto;
-  animation: za-message-in var(--za-motion-slow) var(--za-ease-decelerate) both;
+  animation: motion-enter-rise var(--za-motion-slow) var(--za-ease-decelerate) both;
 }
 
 .chat-msg-time {
@@ -270,11 +260,8 @@
 .streaming-cursor {
   display: inline-block;
   color: var(--azure-seal);
-  animation: cursor-breathe 1.2s ease-in-out infinite;
-}
-@keyframes cursor-breathe {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  --motion-pulse-floor: 0.3;
+  animation: motion-pulse-soft 1.2s ease-in-out infinite;
 }
 
 .chat-stream-error {
@@ -344,7 +331,7 @@
   color: var(--azure-seal);
 }
 .thinking-section.active .thinking-dot {
-  animation: thinking-dot-wave 1.4s var(--za-ease-in-out, ease-in-out) infinite;
+  animation: motion-dots 1.4s var(--za-ease-in-out, ease-in-out) infinite;
 }
 .thinking-section.active .thinking-dot:nth-child(2) {
   animation-delay: 0.16s;
@@ -355,7 +342,7 @@
 .thinking-dot--done {
   width: 5px;
   height: 5px;
-  animation: thinking-pop 0.3s var(--za-ease-spring) both;
+  animation: motion-enter-pop 0.3s var(--za-ease-spring) both;
 }
 .thinking-section.done .thinking-indicator {
   color: var(--graphite-mute);
@@ -378,7 +365,9 @@
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  animation: thinking-shimmer 1.8s linear infinite;
+  --motion-shimmer-from: 120%;
+  --motion-shimmer-x: -120%;
+  animation: motion-shimmer 1.8s linear infinite;
 }
 .thinking-chevron {
   color: var(--graphite-mute);
@@ -391,7 +380,8 @@
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-2) 0 0;
-  animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
+  --motion-enter-from: -4px;
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
 }
 .thinking-text {
   color: var(--graphite-soft);
@@ -402,23 +392,6 @@
   overflow-wrap: anywhere;
 }
 
-@keyframes thinking-pulse {
-  0%, 100% { opacity: 0.4; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.15); }
-}
-@keyframes thinking-pop {
-  0% { transform: scale(0.6); opacity: 0; }
-  60% { transform: scale(1.2); }
-  100% { transform: scale(1); opacity: 1; }
-}
-@keyframes thinking-dot-wave {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
-  30% { transform: translateY(-3px); opacity: 1; }
-}
-@keyframes thinking-shimmer {
-  0% { background-position: 120% 0; }
-  100% { background-position: -120% 0; }
-}
 
 /* ── Tool call cards ── */
 .tool-calls-list {
@@ -437,14 +410,17 @@
   min-width: 0;
   max-width: 100%;
   transition: border-color var(--za-motion-medium), background var(--za-motion-medium);
-  animation: tool-card-in var(--za-motion-medium) var(--za-ease-out) both;
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
 }
 .tool-call-card.running {
   border-color: var(--azure-soft);
-  animation: tool-card-in var(--za-motion-medium) var(--za-ease-out) both, tool-card-pulse 2s ease-in-out infinite;
+  --motion-flash-from: var(--paper-sheet);
+  --motion-flash-to: var(--azure-trace);
+  --motion-flash-glow: transparent;
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both, motion-flash 2s ease-in-out infinite alternate;
 }
 .tool-call-card.done {
-  animation: tool-card-in var(--za-motion-medium) var(--za-ease-out) both;
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
 }
 .tool-call-card.synthetic {
   border-color: var(--za-warn-soft);
@@ -463,21 +439,13 @@
 .tool-call-card:not(.interaction-card).synthetic {
   border-color: transparent;
   background: transparent;
-  animation: tool-card-in var(--za-motion-medium) var(--za-ease-out) both;
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
 }
 .tool-call-card:not(.interaction-card):hover {
   background: var(--chrome-sunken);
 }
 .tool-call-card:not(.interaction-card) .tool-call-header {
   padding: var(--space-1) var(--space-2);
-}
-@keyframes tool-card-in {
-  from { opacity: 0; transform: translateX(-8px); }
-  to { opacity: 1; transform: translateX(0); }
-}
-@keyframes tool-card-pulse {
-  0%, 100% { background: var(--paper-sheet); }
-  50% { background: var(--azure-trace); }
 }
 .tool-call-header {
   display: flex;
@@ -502,7 +470,7 @@
 .tool-call-card.running .tool-call-spinner-svg {
   transform-box: fill-box;
   transform-origin: center;
-  animation: spin 0.9s linear infinite;
+  animation: motion-spin 0.9s linear infinite;
 }
 .tool-call-card.done .tool-call-icon {
   color: var(--state-success);
@@ -510,7 +478,6 @@
 .tool-call-card.synthetic .tool-call-icon {
   color: var(--za-warn);
 }
-@keyframes spin { to { transform: rotate(360deg); } }
 .tool-call-label {
   flex: 1;
   font-family: var(--font-mono);
@@ -866,11 +833,7 @@
   border-radius: var(--radius-md);
   box-shadow: 0 12px 30px rgba(16, 24, 40, 0.14);
   z-index: 20;
-  animation: slash-command-in var(--za-motion-fast) var(--za-ease-out) both;
-}
-@keyframes slash-command-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
 }
 .slash-command-item {
   display: flex;
@@ -1241,15 +1204,11 @@
   --compaction-wave-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='7' viewBox='0 0 20 7'%3E%3Cpath d='M0 3.5 Q5 0.5 10 3.5 T20 3.5' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E");
   position: relative;
   font-size: 0.72rem;
-  animation: compaction-notice-in var(--za-motion-medium) var(--za-ease-out) both;
+  animation: motion-enter-fade var(--za-motion-medium) var(--za-ease-out) both;
   max-width: var(--chat-content-max);
   margin: var(--space-2) auto;
   width: 100%;
   user-select: none;
-}
-@keyframes compaction-notice-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
 }
 /* 两层同构副本：base 撑起高度并占据布局，fill 绝对覆盖其上、逐像素对齐。 */
 .compaction-track {
@@ -1317,20 +1276,14 @@
   );
   background-size: 200% 100%;
   background-repeat: repeat-x;
-  animation: compaction-wave-flow 2.6s var(--za-ease-standard) infinite;
-}
-@keyframes compaction-wave-flow {
-  0% { background-position: 0% 0; }
-  100% { background-position: 200% 0; }
+  animation: motion-shimmer 2.6s var(--za-ease-standard) infinite;
 }
 /* 不定态（无百分比）：整条贯通缓慢呼吸 + 高光掠过，clip 固定全宽。 */
 .compaction-notice--indeterminate .compaction-track--fill {
   clip-path: none;
-  animation: compaction-wave-breathe 1.8s var(--za-ease-standard) infinite;
-}
-@keyframes compaction-wave-breathe {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 0.7; }
+  --motion-pulse-floor: 0.3;
+  --motion-pulse-ceil: 0.7;
+  animation: motion-pulse-soft 1.8s var(--za-ease-standard) infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   .compaction-track--fill .compaction-wave,
@@ -1368,7 +1321,8 @@
   border: none;
   font-size: 0.78rem;
   color: var(--graphite-soft);
-  animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
+  --motion-enter-from: -4px;
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
   max-width: 100%;
 }
 .tool-progress-spinner {
@@ -1377,7 +1331,8 @@
   border-radius: 50%;
   background: var(--azure-seal);
   flex-shrink: 0;
-  animation: thinking-pulse 1.8s ease-in-out infinite;
+  --motion-pulse-floor: 0.4;
+  animation: motion-pulse-soft 1.8s ease-in-out infinite;
 }
 .tool-progress-body {
   flex: 1;
@@ -1396,7 +1351,8 @@
   padding: var(--space-2) 0;
   color: var(--graphite-soft);
   font-size: 0.78rem;
-  animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
+  --motion-enter-from: -4px;
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
 }
 .provider-recovery-notice--connection {
   color: var(--za-warning-ink, var(--graphite-soft));
@@ -1423,11 +1379,7 @@
   width: 100%;
   background: transparent;
   /* 压缩点就地出现时的入场动画:淡入 + 轻微上移,呼应"历史被折叠收拢"的语义。 */
-  animation: compaction-summary-in var(--za-motion-medium) var(--za-ease-out) both;
-}
-@keyframes compaction-summary-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
 }
 /* Codex 风格:折叠态呈现为居中分隔条(两侧横线 + 中央标签),而非方框卡片。
    ::before / ::after 作为左右可伸缩的分隔线(flex:1),真实子项(icon/label/
@@ -1515,7 +1467,7 @@
   background: var(--paper-sheet);
   font-size: 13px;
   color: var(--graphite-base);
-  animation: slash-command-in var(--za-motion-fast) var(--za-ease-out) both;
+  animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
 }
 .pending-resume-text {
   display: flex;
@@ -1697,18 +1649,9 @@
 
 /* 导航高亮:scrollToMessage 命中后短暂闪烁目标消息。 */
 .chat-msg-flash {
-  animation: chat-msg-flash var(--za-motion-slow) var(--za-ease-decelerate);
+  animation: motion-flash var(--za-motion-slow) var(--za-ease-decelerate);
 }
-@keyframes chat-msg-flash {
-  0% {
-    background: var(--azure-soft);
-    box-shadow: 0 0 0 6px var(--azure-soft);
-  }
-  100% {
-    background: transparent;
-    box-shadow: 0 0 0 6px transparent;
-  }
-}
+
 
 /* ── In-conversation Find (cmd/ctrl+F) ── */
 .chat-find-bar {
@@ -1828,7 +1771,8 @@
 
 .batch-search-card.running .batch-search-summary-dot {
   background: var(--azure-seal);
-  animation: batch-search-pulse 1.4s ease-in-out infinite;
+  --motion-pulse-floor: 0.3;
+  animation: motion-pulse-soft 1.4s ease-in-out infinite;
 }
 
 .batch-search-card.done .batch-search-summary-dot {
@@ -1893,7 +1837,8 @@
 
 .batch-search-lane.running .batch-search-lane-dot {
   background: var(--azure-seal);
-  animation: batch-search-pulse 1.4s ease-in-out infinite;
+  --motion-pulse-floor: 0.3;
+  animation: motion-pulse-soft 1.4s ease-in-out infinite;
 }
 
 .batch-search-lane.done .batch-search-lane-dot {
@@ -1904,15 +1849,6 @@
   background: var(--rust-base, #b4453a);
 }
 
-@keyframes batch-search-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.3;
-  }
-}
 
 .batch-search-lane-label {
   flex: 1 1 auto;
@@ -2117,7 +2053,8 @@
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-frost);
   box-shadow: var(--shadow-popover);
-  animation: za-content-reveal var(--za-motion-fast) var(--za-ease-out) both;
+  --motion-enter-from: 6px;
+  animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
 }
 
 .chat-header-menu-item {
@@ -2228,7 +2165,8 @@
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-frost);
   box-shadow: var(--shadow-popover);
-  animation: za-content-reveal var(--za-motion-fast) var(--za-ease-out) both;
+  --motion-enter-from: 6px;
+  animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
 }
 
 .chat-header-cap-popover-title {

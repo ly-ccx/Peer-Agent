@@ -113,7 +113,8 @@
 
   .channel-conversation-list {
     @apply flex flex-col gap-0.5 py-1 pl-0;
-    animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
+    --motion-enter-from: -4px;
+    animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
   }
 
   .pinned-conversation-list {
@@ -257,7 +258,8 @@
     color: var(--za-text-soft);
     background: var(--za-popover-bg);
     box-shadow: var(--za-shadow-popover);
-    animation: za-details-in var(--za-motion-medium) var(--za-ease-out) both;
+    --motion-enter-from: -4px;
+    animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
   }
 
   .sidebar-account-popover > button,

@@ -1,6 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { CSSProperties } from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useUpdater } from '../state/useUpdater';
 import { UpdateModal } from './UpdateModal';
 import { UpdateToast } from './UpdateToast';
@@ -26,16 +26,40 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
   const [modalOpen, setModalOpen] = useState(false);
   // ✕ 收起记忆：记录被收起的完成态版本号，避免同一版本反复弹出；新版本会重新弹。
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
+  // 跨组件连续性（C1 时序衔接）：点「更新」后 download() 是异步转调主进程，
+  // phase 要等主进程首个 download-progress 事件才变 downloading。若不处理，
+  // 弹窗已朝左上角收缩消失、而进度环尚未挂载，中间出现空窗、视线断裂。
+  // pendingDownload 让徽标在点击瞬间立即显示 0% 进度环（脉冲+光环就绪），
+  // 正好接住飞来的弹窗；真实 downloading/终态到来后即清除。
+  const [pendingDownload, setPendingDownload] = useState(false);
+
+  const phase = status?.phase;
+  // 一旦进入下载中或任一终态，pending 使命完成，清除以交还真相给主进程状态。
+  useEffect(() => {
+    if (!pendingDownload) return;
+    if (
+      phase === 'downloading' ||
+      phase === 'downloaded' ||
+      phase === 'ready-to-open' ||
+      phase === 'error'
+    ) {
+      setPendingDownload(false);
+    }
+  }, [phase, pendingDownload]);
 
   if (!status) return null;
 
-  const { phase } = status;
   const isDownloading = phase === 'downloading';
   const isReady = phase === 'downloaded' || phase === 'ready-to-open';
   const readyVersion = status.availableVersion ?? '';
   // 完成卡片可见：处于完成态、有版本号、且该版本未被收起。
   const toastVisible = isReady && readyVersion !== '' && dismissedVersion !== readyVersion;
+  // 进度环可见：真实下载中，或点「更新」后的过渡期（pendingDownload），
+  // 使弹窗收缩落点始终有一个正在脉冲的进度环承接（C1 连续性）。
+  const showProgress = isDownloading || pendingDownload;
   const percent = Math.max(0, Math.min(100, Math.round(status.percent ?? 0)));
+  // 过渡期还没有真实进度，显示 0%，让进度环以「起步脉冲」形态接住视线。
+  const progressPercent = isDownloading ? percent : 0;
 
   const handleClick = () => {
     // 完成态但卡片已收起：点徽标重新唤出卡片，不开弹窗。
@@ -67,10 +91,10 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
         onClick={handleClick}
       >
         <span className="sidebar-version-text">v{status.currentVersion}</span>
-        {isDownloading ? (
+        {showProgress ? (
           <span
             className="sidebar-version-dot is-progress"
-            style={{ '--pa-update-pct': percent } as CSSProperties}
+            style={{ '--pa-update-pct': progressPercent } as CSSProperties}
             aria-hidden="true"
           />
         ) : hasUpdate ? (
@@ -81,7 +105,12 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
         <UpdateModal
           i18n={i18n}
           status={status}
-          onUpdate={() => void download()}
+          onUpdate={() => {
+            // 点「更新」瞬间即点亮进度环（0%），与弹窗朝左上角收缩同拍启动，
+            // 弹窗飞抵时进度环已在脉冲，视线不断链（C1 时序衔接）。
+            setPendingDownload(true);
+            void download();
+          }}
           onOpenReleasePage={() => void openReleasePage()}
           onRecheck={() => void check()}
           onClose={() => setModalOpen(false)}

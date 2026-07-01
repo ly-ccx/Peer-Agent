@@ -8,7 +8,8 @@
     border: 1px solid var(--za-line);
     border-radius: var(--za-radius);
     background: var(--za-composer-bg);
-    animation: za-fade-rise var(--za-motion-medium) var(--za-ease-out) both;
+    --motion-enter-from: 8px;
+    animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
     transition: border-color var(--za-motion-fast) var(--za-ease-standard);
   }
 
@@ -116,7 +117,8 @@
     background: var(--za-surface-2);
     border: 1px solid var(--za-line);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-    animation: za-fade-rise var(--za-motion-fast) var(--za-ease-out) both;
+    --motion-enter-from: 8px;
+    animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
     z-index: 10;
   }
   .agent-picker-dropdown button {

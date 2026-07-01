@@ -215,18 +215,18 @@
   border-radius: 50%;
   background: var(--state-success, #3a9d6e);
   box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-success, #3a9d6e) 60%, transparent);
-  animation: ws-running-pulse 1.6s var(--za-ease-standard) infinite;
+  --motion-ripple-color: var(--state-success, #3a9d6e);
+  --motion-ripple-strength: 55%;
+  --motion-ripple-radius: 5px;
+  --motion-ripple-peak: 1;
+  --motion-ripple-floor: 1;
+  animation: motion-ripple 1.6s var(--za-ease-standard) infinite;
 }
 /* 折叠态、提示"其它工作区"时用警示色,和当前工作区的运行点区分。 */
 .ws-running-dot-other {
   background: var(--state-warning, #c8861a);
   box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-warning, #c8861a) 60%, transparent);
   margin-right: var(--space-1);
-}
-@keyframes ws-running-pulse {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-success, #3a9d6e) 55%, transparent); }
-  70% { box-shadow: 0 0 0 5px transparent; }
-  100% { box-shadow: 0 0 0 0 transparent; }
 }
 .ws-chevron {
   color: var(--graphite-mute);
@@ -245,20 +245,12 @@
   background: var(--za-popover-bg);
   overflow: hidden;
   box-shadow: var(--shadow-popover);
-  animation: ws-dropdown-in 0.15s var(--za-ease-out) both;
+  animation: motion-enter-rise 0.15s var(--za-ease-out) both;
 }
-@keyframes ws-dropdown-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-/* 退场:对称于进场,淡出并上移 4px;动画结束由 onAnimationEnd 卸载。
+/* 退场:对称于进场,淡出并上移;动画结束由 onAnimationEnd 卸载。
    prefers-reduced-motion 由 tokens.css 全局降级(animation-duration:1ms)兜底。 */
 .ws-dropdown.closing {
-  animation: ws-dropdown-out 0.15s var(--za-ease-out) both;
-}
-@keyframes ws-dropdown-out {
-  from { opacity: 1; transform: translateY(0); }
-  to { opacity: 0; transform: translateY(-4px); }
+  animation: motion-exit-sink 0.15s var(--za-ease-out) both;
 }
 .ws-dropdown-item {
   display: flex;
@@ -335,7 +327,8 @@
   overflow-x: hidden;
   padding: 0 var(--space-2);
   -webkit-app-region: no-drag;
-  animation: za-content-reveal var(--za-motion-medium) var(--za-ease-out) both;
+  --motion-enter-from: 6px;
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
 }
 .sidebar-empty-state {
   color: var(--graphite-mute);
@@ -483,7 +476,8 @@
   -webkit-app-region: no-drag;
   /* ADR 27: 工作区切换时(key 变化重新挂载)做一次轻量入场 reveal,
      复用既有动效 token,避免列表硬切的卡顿观感;reduced-motion 全局降级兜底。 */
-  animation: za-content-reveal var(--za-motion-medium) var(--za-ease-out) both;
+  --motion-enter-from: 6px;
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
 }
 .sidebar-empty {
   color: var(--graphite-mute);
@@ -541,21 +535,12 @@
   border-radius: 50%;
   background: var(--azure-seal);
   box-shadow: 0 0 0 0 color-mix(in srgb, var(--azure-seal) 50%, transparent);
-  animation: sidebar-conv-pulse 1.6s var(--za-ease-standard) infinite;
-}
-@keyframes sidebar-conv-pulse {
-  0% {
-    opacity: 0.95;
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--azure-seal) 50%, transparent);
-  }
-  70% {
-    opacity: 0.55;
-    box-shadow: 0 0 0 6px transparent;
-  }
-  100% {
-    opacity: 0.95;
-    box-shadow: 0 0 0 0 transparent;
-  }
+  --motion-ripple-color: var(--azure-seal);
+  --motion-ripple-strength: 50%;
+  --motion-ripple-radius: 6px;
+  --motion-ripple-peak: 0.95;
+  --motion-ripple-floor: 0.55;
+  animation: motion-ripple 1.6s var(--za-ease-standard) infinite;
 }
 .sidebar-conv-time {
   flex: 0 0 auto;
@@ -581,24 +566,12 @@
   border-radius: 50%;
   background: var(--azure-seal);
   box-shadow: 0 0 0 0 color-mix(in srgb, var(--azure-seal) 45%, transparent);
-  animation: sidebar-conv-compacting-pulse 1.4s var(--za-ease-standard) infinite;
-}
-@keyframes sidebar-conv-compacting-pulse {
-  0% {
-    opacity: 0.95;
-    transform: scale(1);
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--azure-seal) 45%, transparent);
-  }
-  60% {
-    opacity: 0.6;
-    transform: scale(0.82);
-    box-shadow: 0 0 0 5px transparent;
-  }
-  100% {
-    opacity: 0.95;
-    transform: scale(1);
-    box-shadow: 0 0 0 0 transparent;
-  }
+  --motion-ripple-color: var(--azure-seal);
+  --motion-ripple-strength: 45%;
+  --motion-ripple-radius: 5px;
+  --motion-ripple-peak: 0.95;
+  --motion-ripple-floor: 0.6;
+  animation: motion-ripple 1.4s var(--za-ease-standard) infinite;
 }
 .sidebar-conv-compacting-pct {
   font-size: 0.62rem;
@@ -671,7 +644,8 @@
   display: flex;
   gap: 2px;
   flex-shrink: 0;
-  animation: za-details-in var(--za-motion-fast) var(--za-ease-out) both;
+  --motion-enter-from: -4px;
+  animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
 }
 .sidebar-conv-confirm button {
   background: none;

@@ -118,19 +118,8 @@
   height: 7px;
   border-radius: 999px;
   background: var(--state-confirm);
-  animation: goal-panel-active-pulse 1.4s var(--za-ease-standard, ease) infinite;
-}
-
-@keyframes goal-panel-active-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.4;
-    transform: scale(0.7);
-  }
+  --motion-pulse-floor: 0.4;
+  animation: motion-pulse-soft 1.4s var(--za-ease-standard, ease) infinite;
 }
 
 /* A：折叠浮条「执行中」的横向流动扫光（浅色 · 慢速 · 极柔和）。
@@ -144,7 +133,11 @@
    依赖 .goal-panel--docked 的 border-radius/overflow:hidden，高光被裁成圆角内。 */
 .goal-panel--executing {
   position: relative;
-  animation: goal-panel-executing-glow 7.2s ease-in-out infinite;
+  --motion-glow-color: white;
+  --motion-glow-strength: 22%;
+  --motion-glow-blur: 12px;
+  --motion-glow-spread: 1px;
+  animation: motion-glow 7.2s ease-in-out infinite;
 }
 
 .goal-panel--executing::before {
@@ -170,7 +163,9 @@
   background-size: 300% 100%;
   background-position: 150% 0;
   pointer-events: none;
-  animation: goal-panel-sweep 6s ease-in-out infinite;
+  --motion-shimmer-from: 150%;
+  --motion-shimmer-x: -150%;
+  animation: motion-shimmer 6s ease-in-out infinite;
 }
 
 /* 浮条内部内容需要浮在扫光之上，避免被 ::before 覆盖。 */
@@ -181,25 +176,6 @@
 
 /* 高光带从右侧滑入、向左侧滑出，循环连续（首尾位置相接，无跳变）。
    用 ease-in-out 让光带在两端略微减速，更像自然呼吸而非匀速划过。 */
-@keyframes goal-panel-sweep {
-  from {
-    background-position: 150% 0;
-  }
-  to {
-    background-position: -150% 0;
-  }
-}
-
-@keyframes goal-panel-executing-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, white 0%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 12px 1px color-mix(in srgb, white 22%, transparent);
-  }
-}
-
 /* A：折叠浮条「完成」态——所有计划已完成（无执行中/待批准）时的静态完成视觉。
    不带任何动画（停止扫光/呼吸），用完成色（--state-success 绿）做柔和描边，
    传达「已完成、已停下」的稳定感，与执行中的流动光形成对比。 */
@@ -487,16 +463,9 @@
   background-repeat: no-repeat;
   background-size: 40% 100%;
   background-position: -60% 0;
-  animation: goal-plan-progress-sheen 1.6s var(--za-ease-standard, ease) infinite;
-}
-
-@keyframes goal-plan-progress-sheen {
-  0% {
-    background-position: -60% 0;
-  }
-  100% {
-    background-position: 160% 0;
-  }
+  --motion-shimmer-from: -60%;
+  --motion-shimmer-x: 160%;
+  animation: motion-shimmer 1.6s var(--za-ease-standard, ease) infinite;
 }
 
 /* track 下方一行：进度文本占满剩余宽度（把 caret 挤到最右），caret 居右。 */
