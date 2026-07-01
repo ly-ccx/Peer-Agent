@@ -804,6 +804,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.composer-model-dropdown .pa-dropdown-trigger {
+  max-width: 160px;
+}
+
+.composer-model-dropdown .pa-dropdown-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .token-usage-cost {
   font-size: 0.62rem;
   color: var(--azure-seal);

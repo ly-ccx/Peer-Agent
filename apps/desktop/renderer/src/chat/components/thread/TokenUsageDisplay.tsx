@@ -12,7 +12,22 @@ function effortLabel(level: EffortLevel, isZh: boolean): string {
   return isZh ? '标准思考' : 'Default reasoning';
 }
 
-export function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextTokens, contextWindow, isStreaming, isZh, effort, effortLevels, onEffortChange }: {
+export function TokenUsageDisplay({
+  providers,
+  tokenUsage,
+  activeUsage,
+  contextTokens,
+  contextWindow,
+  isStreaming,
+  isZh,
+  effort,
+  effortLevels,
+  onEffortChange,
+  modelOptions = [],
+  modelLoading = false,
+  canSwitchModel = false,
+  onModelChange,
+}: {
   readonly providers: readonly LlmProviderConfigView[];
   readonly tokenUsage: TokenUsageState | null;
   readonly activeUsage?: TokenUsageState | null;
@@ -24,6 +39,10 @@ export function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextT
   readonly effort: EffortLevel;
   readonly effortLevels: readonly EffortLevel[];
   readonly onEffortChange: (level: EffortLevel) => void;
+  readonly modelOptions?: readonly DropdownOption[];
+  readonly modelLoading?: boolean;
+  readonly canSwitchModel?: boolean;
+  readonly onModelChange?: (model: string) => void;
 }) {
   const defaultProvider = providers.find((p) => p.isDefault && p.apiKeyConfigured) || providers.find((p) => p.apiKeyConfigured);
   const hasInfo = tokenUsage || activeUsage || contextTokens || defaultProvider?.contextWindow || defaultProvider?.inputPrice != null;
@@ -57,12 +76,27 @@ export function TokenUsageDisplay({ providers, tokenUsage, activeUsage, contextT
   const ctxWindow = (typeof contextWindow === 'number' && contextWindow > 0) ? contextWindow : defaultProvider?.contextWindow;
   const ctxPercent = ctxWindow ? Math.min((currentContextTokens / ctxWindow) * 100, 100) : null;
   const effortOptions: readonly DropdownOption[] = effortLevels.map((level) => ({ value: level, label: effortLabel(level, isZh) }));
+  const shouldShowModelDropdown = Boolean(defaultProvider?.model && canSwitchModel && onModelChange && modelOptions.length > 0);
+  const modelTitle = isZh ? '当前会话使用的模型' : 'Model used for this conversation';
 
   return (
     <div className="token-usage-wrap">
       <span className="token-usage">
         {defaultProvider?.model ? (
-          <span className="token-usage-model" title={isZh ? '当前会话使用的模型' : 'Model used for this conversation'}>{defaultProvider.model}</span>
+          shouldShowModelDropdown ? (
+            <Dropdown
+              className="composer-dropdown composer-model-dropdown"
+              value={defaultProvider.model}
+              options={modelOptions}
+              onChange={(next) => onModelChange?.(next)}
+              ariaLabel={isZh ? '切换模型' : 'Switch model'}
+              title={modelLoading ? (isZh ? '正在加载模型列表' : 'Loading models') : modelTitle}
+              menuPlacement="up"
+              disabled={isStreaming || modelLoading}
+            />
+          ) : (
+            <span className="token-usage-model" title={modelTitle}>{defaultProvider.model}</span>
+          )
         ) : null}
         {effortOptions.length > 0 ? (
           <Dropdown
