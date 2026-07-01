@@ -33,9 +33,9 @@ function parseArgs(call) {
 }
 
 /**
- * 计划标题兜底：模型常省略 title（即便 schema 标注必填），落空串会让面板显示
- * “未命名计划”。这里在落库前用 goal 首句（截断）兜底，保证浮条/面板有可读标题。
- * 纯本地推导，不引入云端事实，符合“本地负责能力”。
+ * 计划标题兜底：title 在 schema 中已标为 required 且 prompt 明确要求，模型正常都会给；
+ * 本函数仅为极端情况下模型仍漏传 title 的兜底，避免落空串让面板显示“未命名计划”。
+ * 兜底时用 goal 首句（截断）凑一个可读标题。纯本地推导，不引入云端事实，符合“本地负责能力”。
  */
 function deriveTitle(rawTitle, goal) {
   const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';

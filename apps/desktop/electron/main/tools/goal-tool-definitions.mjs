@@ -22,7 +22,9 @@ const GOAL_CREATE_PLAN_PROMPT = [
   'Create a persistent, trackable goal plan (goal mode only). Call this FIRST in goal mode,',
   'before doing any side-effecting work: in goal mode the runtime blocks side-effecting tools',
   'until a plan exists and the user approves it. Provide a clear goal and a complete list of',
-  'ordered subtasks (each subtask: title, optional dependsOn). The plan is saved as a draft',
+  'ordered subtasks (each subtask: title, optional dependsOn). Always provide a short,',
+  'human-readable title for the plan itself (a few words) — it is required and shown',
+  'verbatim in the plan panel; do not leave it empty. The plan is saved as a draft',
   'awaiting approval; after creating it, ask the user to approve via request_user_input.',
   'Do not start executing subtasks until the user approves.',
 ].join(' ');
@@ -77,7 +79,9 @@ export const GOAL_TOOL_DEFINITIONS = [
       properties: {
         title: {
           type: 'string',
-          description: 'Short title for the plan.',
+          description:
+            'Short, human-readable plan title (a few words). Required — do not omit; '
+            + 'the plan panel and floating bar surface this verbatim.',
         },
         goal: {
           type: 'string',
@@ -108,7 +112,7 @@ export const GOAL_TOOL_DEFINITIONS = [
           },
         },
       },
-      required: ['goal', 'tasks'],
+      required: ['title', 'goal', 'tasks'],
       additionalProperties: false,
     },
   },
