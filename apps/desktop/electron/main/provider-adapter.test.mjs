@@ -1,12 +1,22 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
 import { sendAnthropicMessagesStream } from './provider-adapters/anthropic-messages-adapter.mjs';
 import { sendGeminiStream } from './provider-adapters/gemini-adapter.mjs';
 import { sendOpenAIChatStream } from './provider-adapters/openai-chat-adapter.mjs';
+import { sendOpenAIResponsesStream } from './provider-adapters/openai-responses-adapter.mjs';
 
 function sse(frames) {
   return frames.map((frame) => `data: ${typeof frame === 'string' ? frame : JSON.stringify(frame)}\n\n`).join('');
+}
+
+async function readJsonl(filePath) {
+  const text = await fs.readFile(filePath, 'utf8');
+  return text.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
 }
 
 describe('Provider adapters', () => {
@@ -304,7 +314,7 @@ describe('Provider adapters', () => {
       });
 
       assert.equal(result.ok, true);
-      assert.deepEqual(captured.body.thinking, { type: 'adaptive' });
+      assert.deepEqual(captured.body.thinking, { type: 'adaptive', display: 'summarized' });
       assert.deepEqual(captured.body.output_config, { effort: 'high' });
       assert.equal(captured.body.max_tokens, 16384);
     } finally {
@@ -425,6 +435,64 @@ describe('Provider adapters', () => {
       globalThis.fetch = previousFetch;
       if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
       else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
+  it('records an OpenAI Responses anomaly trace when output_text delta contains pseudo tool-call text', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousHome = process.env.PEER_AGENT_HOME;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'peer-provider-trace-'));
+    const events = [];
+    let captured = null;
+
+    process.env.PEER_AGENT_HOME = tempHome;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '1';
+    globalThis.fetch = async (url, init) => {
+      captured = { url, init, body: JSON.parse(init.body) };
+      return new Response(sse([
+        { type: 'response.output_text.delta', delta: '<functions.bash agext={{"command":"pwd"}} />' },
+        '[DONE]',
+      ]), { status: 200 });
+    };
+
+    try {
+      const result = await sendOpenAIResponsesStream({
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'key',
+        accountId: 'acct_1',
+        model: 'gpt-responses',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [{ type: 'function', function: { name: 'bash', parameters: { type: 'object' } } }],
+        effort: 'medium',
+        supportsReasoning: true,
+        webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        streamId: 'responses-pseudo-tool',
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.pseudoToolTextDetected, true);
+      assert.equal(captured.url, 'https://example.test/v1/responses');
+      assert.equal(captured.init.headers['chatgpt-account-id'], 'acct_1');
+      assert.equal(events.find((event) => event.channel === 'chat:stream:delta').payload.content, '<functions.bash agext={{"command":"pwd"}} />');
+      assert.ok(result.providerTracePath);
+
+      const traces = await readJsonl(result.providerTracePath);
+      const trace = traces.at(-1);
+      assert.equal(trace.provider, 'openai-responses');
+      assert.equal(trace.anomaly, 'pseudo_tool_text_delta');
+      assert.equal(trace.result.pseudoToolTextDetected, true);
+      const deltaEvent = trace.events.find((event) => event.summary?.type === 'response.output_text.delta');
+      assert.ok(deltaEvent);
+      assert.match(deltaEvent.rawPreview, /<functions\.bash/);
+      assert.equal(deltaEvent.summary.deltaChars, '<functions.bash agext={{"command":"pwd"}} />'.length);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousHome === undefined) delete process.env.PEER_AGENT_HOME;
+      else process.env.PEER_AGENT_HOME = previousHome;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+      await fs.rm(tempHome, { recursive: true, force: true });
     }
   });
 

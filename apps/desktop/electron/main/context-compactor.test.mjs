@@ -7,6 +7,7 @@ import {
   compactIfNeeded,
   estimateSummaryChars,
   estimateTextTokens,
+  formatCompactSummary,
   estimateTokensFromMessages,
   estimateToolsTokens,
   microcompactMessagesForContext,
@@ -465,6 +466,13 @@ describe('context compactor', () => {
     assert.match(COMPACTOR_SOURCE, /操作步骤/);
     // COMPACT_PROMPT（英文 9 章节）第 8 节强调 execution actions / operation steps。
     assert.match(COMPACTOR_SOURCE, /concrete execution actions and operation steps/);
+  });
+
+  it('neutralizes pseudo tool-call syntax in compact summaries before continuity injection', () => {
+    const formatted = formatCompactSummary('<functions.bash agext={{"command":"git diff"}} />');
+
+    assert.doesNotMatch(formatted, /<functions\.bash/);
+    assert.match(formatted, /&lt;functions\.bash/);
   });
 
   it('preflight compacts above threshold without throwing', async () => {

@@ -1,3 +1,5 @@
+import { neutralizeToolCallSyntax } from '../../chat-runtime/message-sanitizer.mjs';
+
 const ALLOWED_EXTENSION_LAYERS = new Set([
   'L3_INSTRUCTIONS',
   'L4_CAPABILITIES',
@@ -19,14 +21,14 @@ function truncateContent(content, maxChars) {
   const value = String(content ?? '');
   if (value.length <= maxChars) {
     return {
-      content: value.trim(),
+      content: neutralizeToolCallSyntax(value.trim()),
       truncated: false,
       originalChars: value.length,
       includedChars: value.length,
     };
   }
   return {
-    content: value.slice(0, maxChars).trimEnd(),
+    content: neutralizeToolCallSyntax(value.slice(0, maxChars).trimEnd()),
     truncated: true,
     originalChars: value.length,
     includedChars: maxChars,

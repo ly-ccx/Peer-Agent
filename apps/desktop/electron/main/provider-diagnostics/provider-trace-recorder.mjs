@@ -127,6 +127,18 @@ function summarizeOpenAIFrame(parsed) {
   };
 }
 
+function summarizeOpenAIResponsesFrame(parsed) {
+  const delta = typeof parsed?.delta === 'string' ? parsed.delta : '';
+  return {
+    type: parsed?.type ?? null,
+    itemType: parsed?.item?.type ?? null,
+    deltaChars: delta.length,
+    hasDelta: delta.length > 0,
+    usage: summarizeUsage(parsed?.response?.usage ?? parsed?.usage),
+    keys: parsed && typeof parsed === 'object' ? Object.keys(parsed).sort() : [],
+  };
+}
+
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -219,6 +231,14 @@ export function createProviderStreamTrace({
           frame: 'sse_data',
           rawPreview: truncate(payload),
           summary: parsed ? summarizeOpenAIFrame(parsed) : null,
+        });
+        return;
+      }
+      if (provider === 'openai-responses') {
+        pushEvent({
+          frame: 'sse_data',
+          rawPreview: truncate(payload),
+          summary: parsed ? summarizeOpenAIResponsesFrame(parsed) : null,
         });
         return;
       }

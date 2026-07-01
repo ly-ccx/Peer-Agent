@@ -17,6 +17,12 @@ describe('hasLiteralToolCallSyntax', () => {
     assert.equal(hasLiteralToolCallSyntax('<invoke name="x">'), true);
   });
 
+  it('detects OpenAI-compatible pseudo function tags leaked as text', () => {
+    const text = '<functions.bash agext={{"command":"cd /tmp && git diff"}} />';
+    assert.equal(hasLiteralToolCallSyntax(text), true);
+    assert.equal(shouldRetryNoToolResponse(text), true);
+  });
+
   it('does not fire on neutralized (&lt;) content', () => {
     assert.equal(hasLiteralToolCallSyntax('already &lt;invoke escaped'), false);
   });

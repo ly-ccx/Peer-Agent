@@ -15,17 +15,32 @@ describe('neutralizeToolCallSyntax', () => {
     assert.ok(out.includes('&lt;invoke'));
   });
 
-  it('covers function_calls and antml: namespace variants', () => {
-    const input = '<function_calls> and <invoke name="x"> and </invoke>';
+  it('covers function_calls, antml: namespace variants, and OpenAI-compatible functions tags', () => {
+    const input = '<function_calls> and <invoke name="x"> and </invoke> and <functions.bash agext={{"command":"ls"}} />';
     const out = neutralizeToolCallSyntax(input);
     assert.equal(/<(?:\/?)(?:antml:)?(?:function_calls|invoke|parameter)\b/i.test(out), false);
+    assert.equal(/<functions\.[a-zA-Z0-9_.-]+\b/i.test(out), false);
     assert.ok(out.includes('&lt;function_calls'));
     assert.ok(out.includes('&lt;invoke'));
     assert.ok(out.includes('&lt;/invoke'));
+    assert.ok(out.includes('&lt;functions.bash'));
     // antml: 命名空间变体单独验证。用拼接构造，避免源码里出现相邻的命名空间标签字面量。
     const ns = 'antml:';
     const nsInput = `<${ns}invoke name="z">`;
     assert.equal(neutralizeToolCallSyntax(nsInput), `&lt;${ns}invoke name="z">`);
+  });
+
+  it('neutralizes screenshot-style pseudo function calls with common tool names', () => {
+    const input = [
+      '<functions.search_files agext={{"query":".chat-goal-approval-actions","path":"/tmp","case_sensitive":true}} />',
+      '<functions.edit_file agext={{"path":"a.css","old_string":"x","new_string":"y","replace_all":false}} />',
+      '<functions.bash agext={{"command":"git diff -- a.css"}} />',
+    ].join('\n');
+    const out = neutralizeToolCallSyntax(input);
+    assert.equal(/<functions\.[a-zA-Z0-9_.-]+\b/i.test(out), false);
+    assert.ok(out.includes('&lt;functions.search_files'));
+    assert.ok(out.includes('&lt;functions.edit_file'));
+    assert.ok(out.includes('&lt;functions.bash'));
   });
 
   it('is idempotent', () => {

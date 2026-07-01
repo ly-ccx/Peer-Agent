@@ -23,6 +23,13 @@ export function sanitizeAssistantHistoryTextForApi(content: string): string {
     .replace(/\[Tool result\]/gi, '[Legacy assistant local observation marker]');
 }
 
+const DISPLAY_TOOL_CALL_SYNTAX_PATTERN = /<(\/?)(?:(antml:)?(function_calls|invoke|parameter)|(functions\.[a-zA-Z0-9_.-]+))\b/gi;
+
+export function neutralizeToolCallSyntaxForDisplay(content: string): string {
+  if (!content || !content.includes('<')) return content;
+  return content.replace(DISPLAY_TOOL_CALL_SYNTAX_PATTERN, '&lt;$1$2$3$4');
+}
+
 /**
  * Strip historical-local-record wrappers and stray tool-call fragments from any
  * text that is about to be rendered into a chat bubble.
@@ -61,5 +68,5 @@ export function stripHistoricalLocalRecordForDisplay(content: string): string {
     })
     .join('\n');
 
-  return result.replace(/\n{3,}/g, '\n\n').trim();
+  return neutralizeToolCallSyntaxForDisplay(result.replace(/\n{3,}/g, '\n\n').trim());
 }

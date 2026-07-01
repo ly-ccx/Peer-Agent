@@ -10,6 +10,7 @@ import type {
 import { MarkdownMessage } from '../markdown/MarkdownMessage';
 import { BatchSearchToolCard } from './BatchSearchToolCard';
 import { buildBatchSearchView } from '../../state/batchSearchLaneView';
+import { neutralizeToolCallSyntaxForDisplay } from '../../state/historicalLocalRecord';
 import { InteractionToolCard } from './InteractionToolCard';
 
 function toolProgressLabel(
@@ -142,7 +143,7 @@ function ThinkingTextSection({ content, isActive, isZh }: { readonly content: st
       </button>
       {expanded ? (
         <div className="thinking-body thinking-text">
-          <MarkdownMessage content={content} />
+          <MarkdownMessage content={neutralizeToolCallSyntaxForDisplay(content)} />
         </div>
       ) : null}
     </div>
@@ -324,11 +325,11 @@ export function CompactionSummaryCard({ compaction, isZh }: { readonly compactio
       </button>
       {expanded ? (
         <div className="compaction-summary-body">
-          {(compaction as unknown as Record<string, unknown>).summary
+          {neutralizeToolCallSyntaxForDisplay((compaction as unknown as Record<string, unknown>).summary
             ? (compaction as unknown as Record<string, unknown>).summary as string
             : (isZh
               ? `${compaction.originalMessageCount} 条早期消息已被压缩。\n\n压缩前: ${(compaction.beforeTokens / 1000).toFixed(0)}k tokens\n压缩后: ${(compaction.afterTokens / 1000).toFixed(0)}k tokens\n方法: ${methodLabel}${fallbackReasonLabel ? `\n未走 LLM 原因: ${fallbackReasonLabel}` : ''}${compaction.fallbackDetail ? `\n明细: ${compaction.fallbackDetail}` : ''}`
-              : `${compaction.originalMessageCount} earlier messages compacted.\n\nBefore: ${(compaction.beforeTokens / 1000).toFixed(0)}k tokens\nAfter: ${(compaction.afterTokens / 1000).toFixed(0)}k tokens\nMethod: ${methodLabel}${fallbackReasonLabel ? `\nFallback reason: ${fallbackReasonLabel}` : ''}${compaction.fallbackDetail ? `\nDetail: ${compaction.fallbackDetail}` : ''}`)}
+              : `${compaction.originalMessageCount} earlier messages compacted.\n\nBefore: ${(compaction.beforeTokens / 1000).toFixed(0)}k tokens\nAfter: ${(compaction.afterTokens / 1000).toFixed(0)}k tokens\nMethod: ${methodLabel}${fallbackReasonLabel ? `\nFallback reason: ${fallbackReasonLabel}` : ''}${compaction.fallbackDetail ? `\nDetail: ${compaction.fallbackDetail}` : ''}`))}
         </div>
       ) : null}
     </div>

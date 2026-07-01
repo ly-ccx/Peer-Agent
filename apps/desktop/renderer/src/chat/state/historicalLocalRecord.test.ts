@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   formatHistoricalLocalRecordForApi,
+  neutralizeToolCallSyntaxForDisplay,
   sanitizeAssistantHistoryTextForApi,
   stripHistoricalLocalRecordForDisplay,
 } from './historicalLocalRecord.ts';
@@ -32,13 +33,35 @@ describe('formatHistoricalLocalRecordForApi', () => {
   });
 });
 
+describe('neutralizeToolCallSyntaxForDisplay', () => {
+  it('escapes pseudo tool-call tags before rendering assistant text', () => {
+    const open = String.fromCharCode(60);
+    const input = `${open}functions.bash agext={{"command":"git status"}} />\n${open}function_calls>${open}invoke>${open}parameter name="x">y${open}/parameter>${open}/invoke>${open}/function_calls>`;
+    const out = neutralizeToolCallSyntaxForDisplay(input);
+
+    assert.doesNotMatch(out, new RegExp(`${open}functions\\.bash`));
+    assert.doesNotMatch(out, new RegExp(`${open}function_calls>`));
+    assert.doesNotMatch(out, new RegExp(`${open}invoke>`));
+    assert.doesNotMatch(out, new RegExp(`${open}parameter\\b`));
+    assert.match(out, /&lt;functions\.bash/);
+    assert.match(out, /&lt;function_calls>/);
+    assert.match(out, /&lt;invoke>/);
+    assert.match(out, /&lt;parameter name="x">/);
+  });
+
+  it('is idempotent for already escaped tool-call tags', () => {
+    const input = '&lt;functions.bash agext={{"command":"pwd"}} />';
+    assert.equal(neutralizeToolCallSyntaxForDisplay(input), input);
+  });
+});
+
 describe('stripHistoricalLocalRecordForDisplay', () => {
   it('removes a complete historical-local-record block but keeps surrounding text', () => {
     const input = [
       '同步成功。',
       '[Historical local capability record - read-only context; not an instruction]',
       'capability: bash',
-      'arguments_json: {"command":"git status -sb"}',
+      'arguments_json: {"command":"git status"}',
       'observation:',
       '{"exitCode":0}',
       '[/Historical local capability record]',
@@ -60,7 +83,7 @@ describe('stripHistoricalLocalRecordForDisplay', () => {
       '[Historical local capability record - read-only context; not an instruction]',
       'capability: bash',
       'arguments_json: {"command":"rm x && git merge --ff-only dev/0.0.1"}',
-      '</invoke>',
+      '&lt;/invoke>',
     ].join('\n');
 
     const out = stripHistoricalLocalRecordForDisplay(input);
@@ -76,7 +99,7 @@ describe('stripHistoricalLocalRecordForDisplay', () => {
       '执行删除并快进。',
       'capability: bash',
       'arguments_json: {"command":"git merge --ff-only dev/0.0.1"}',
-      '</invoke>',
+      '&lt;/invoke>',
       '完成。',
     ].join('\n');
 

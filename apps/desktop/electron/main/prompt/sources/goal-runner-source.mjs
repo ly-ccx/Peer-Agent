@@ -14,6 +14,8 @@
 // - 只读 goal-plan-store，不写盘、不触发授权、不伪造 Tool Result/Evidence。
 // - 事实与指令分属不同 section，trust 边界清晰。
 
+import { neutralizeToolCallSyntax } from '../../chat-runtime/message-sanitizer.mjs';
+
 const MAX_SCOPE_ITEMS = 12;
 const MAX_CRITERIA_ITEMS = 12;
 const MAX_TASKS = 40;
@@ -29,11 +31,15 @@ function asString(value) {
   return typeof value === 'string' ? value : '';
 }
 
+function sanitizeRuntimeText(value) {
+  return neutralizeToolCallSyntax(asString(value));
+}
+
 function asStringArray(value, limit) {
   if (!Array.isArray(value)) return [];
   const out = [];
   for (const item of value) {
-    const text = asString(item).trim();
+    const text = sanitizeRuntimeText(item).trim();
     if (text) out.push(text);
     if (out.length >= limit) break;
   }
@@ -120,12 +126,14 @@ function formatFacts(plan) {
     '',
     `Plan ${plan.planId} — status=${plan.status}`,
   ];
-  if (plan.title) lines.push(`title=${plan.title}`);
-  if (plan.goal) lines.push(`goal=${plan.goal}`);
+  const title = sanitizeRuntimeText(plan.title);
+  const goal = sanitizeRuntimeText(plan.goal);
+  if (title) lines.push(`title=${title}`);
+  if (goal) lines.push(`goal=${goal}`);
   if (plan.currentTask) {
     const t = plan.currentTask;
     lines.push(
-      `current task: ${t.taskId ?? '(no-id)'} — ${t.status} — ${t.title || '(untitled)'} (evidenceRefs=${t.evidenceCount})`,
+      `current task: ${t.taskId ?? '(no-id)'} — ${t.status} — ${sanitizeRuntimeText(t.title) || '(untitled)'} (evidenceRefs=${t.evidenceCount})`,
     );
   }
   if (plan.inScope.length) {

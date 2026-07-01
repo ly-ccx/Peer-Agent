@@ -1,13 +1,15 @@
+import { neutralizeToolCallSyntax } from '../../chat-runtime/message-sanitizer.mjs';
+
 const MAX_CONTINUITY_SUMMARIES = 3;
 const MAX_SUMMARY_CHARS = 12_000;
 
 function normalizeContinuityItem(item, index) {
   if (!item || typeof item !== 'object') return null;
-  const summary = typeof item.summary === 'string' && item.summary.trim()
+  const summary = neutralizeToolCallSyntax(typeof item.summary === 'string' && item.summary.trim()
     ? item.summary.trim()
     : typeof item.content === 'string'
       ? item.content.trim()
-      : '';
+      : '');
   if (!summary) return null;
   return {
     id: typeof item.id === 'string' ? item.id : `continuity-${index}`,

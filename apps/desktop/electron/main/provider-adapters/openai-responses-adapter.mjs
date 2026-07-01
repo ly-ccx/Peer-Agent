@@ -10,6 +10,7 @@
 // - 鉴权用 Bearer access_token + chatgpt-account-id 头。
 // - 流式事件为 typed SSE events,需要按事件类型解析。
 
+import { hasLiteralToolCallSyntax } from '../chat-runtime/response-guard.mjs';
 import { encodeOpenAIResponsesRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
@@ -33,6 +34,9 @@ function consumeResponsesEvent(parsed, state, webContents, streamId) {
       const delta = parsed.delta || '';
       if (delta) {
         state.content += delta;
+        if (hasLiteralToolCallSyntax(delta)) {
+          state.pseudoToolTextDetected = true;
+        }
         webContents.send('chat:stream:delta', { streamId, content: delta });
       }
       break;
@@ -156,6 +160,7 @@ async function consumeResponsesStream(res, webContents, streamId, trace = null) 
     toolCalls: Object.values(state.toolCallsById).filter((tc) => tc && tc.name),
     streamUsage: state.usage,
     streamError: state.streamError,
+    pseudoToolTextDetected: Boolean(state.pseudoToolTextDetected),
   };
 }
 
@@ -229,6 +234,7 @@ export async function sendOpenAIResponsesStream({
   }
 
   const streamResult = await consumeResponsesStream(res, webContents, streamId, trace);
+  const pseudoToolTextAnomaly = Boolean(streamResult.pseudoToolTextDetected);
   if (streamResult.streamError) {
     const errorText = `provider_stream_error: ${streamResult.streamError.message}`;
     const tracePath = await trace.finish({
@@ -245,18 +251,24 @@ export async function sendOpenAIResponsesStream({
     };
   }
 
-  const anomaly =
+  const emptyStreamAnomaly =
     !streamResult.content && !streamResult.toolCalls.length && !streamResult.thinkingContent;
+  const anomaly = pseudoToolTextAnomaly
+    ? 'pseudo_tool_text_delta'
+    : emptyStreamAnomaly
+      ? 'empty_stream'
+      : null;
   const tracePath = await trace.finish({
-    anomaly: anomaly ? 'empty_stream' : null,
+    anomaly,
     result: {
       ok: true,
       hasContent: Boolean(streamResult.content),
       toolCallCount: streamResult.toolCalls.length,
       hasUsage: Boolean(streamResult.streamUsage),
+      pseudoToolTextDetected: pseudoToolTextAnomaly,
     },
   });
-  if (tracePath && anomaly) console.warn(`[provider-trace] wrote OpenAI Responses empty stream trace: ${tracePath}`);
+  if (tracePath && anomaly) console.warn(`[provider-trace] wrote OpenAI Responses anomaly trace (${anomaly}): ${tracePath}`);
 
   return {
     ok: true,

@@ -10,6 +10,7 @@ import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli
 import { encodeOpenAIResponsesRequest } from './provider-encoders/responses-encoder.mjs';
 import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 import { logCompactionDiagnostic } from './compaction-diagnostic-log.mjs';
+import { neutralizeToolCallSyntax } from './chat-runtime/message-sanitizer.mjs';
 
 const COMPACTION_CONFIG = {
   triggerRatio: 0.8,
@@ -606,7 +607,7 @@ function formatOldMessagesForSummary(messages) {
 // ── formatCompactSummary（对标 CC formatCompactSummary）──
 
 function formatCompactSummary(summary) {
-  let formatted = summary;
+  let formatted = neutralizeToolCallSyntax(summary);
 
   // Strip <analysis>...</analysis> — drafting scratchpad
   formatted = formatted.replace(/<analysis>[\s\S]*?<\/analysis>/gi, '');

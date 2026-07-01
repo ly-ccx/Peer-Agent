@@ -33,7 +33,7 @@ export function hasDanglingToolIntent(text) {
 // stop_reason 并非 tool_use，于是不会被当成真实调用执行。命中时应触发静默重试纠偏，
 // 而不是 sendDone 直接断流。注意：此处检测的是模型本轮新生成、尚未经发送侧中和的输出，
 // 故匹配未转义的 < 形态，与 message-sanitizer 产出的 &lt; 不冲突。
-const LITERAL_TOOL_CALL_SYNTAX_PATTERN = /<(?:\/?)(?:antml:)?(?:function_calls|invoke|parameter)\b/i;
+const LITERAL_TOOL_CALL_SYNTAX_PATTERN = /<(?:\/?)(?:(?:antml:)?(?:function_calls|invoke|parameter)|functions\.[a-zA-Z0-9_.-]+)\b/i;
 
 export function hasLiteralToolCallSyntax(text) {
   const value = String(text || '');
