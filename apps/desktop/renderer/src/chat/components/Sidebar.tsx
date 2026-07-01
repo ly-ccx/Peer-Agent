@@ -307,7 +307,7 @@ export function Sidebar({
     const compactPercentText = typeof compactPercent === 'number' ? `${Math.round(compactPercent)}%` : null;
     const compactTitle = compactPercentText ? `${compactLabel} ${compactPercentText}` : compactLabel;
     const isPinned = Boolean(conv.pinnedAt);
-    const canTogglePin = !isArchivedView && !isRunning && !isCompacting;
+    const canTogglePin = !isArchivedView;
     const rowClasses = [
       'conversation-row',
       activeConversationId === conv.id ? 'active' : '',
