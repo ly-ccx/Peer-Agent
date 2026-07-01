@@ -362,6 +362,14 @@ function normalizeConversationId(value) {
   return normalized.length > 0 ? normalized : null;
 }
 
+// 目标要改动的代码仓绝对路径（可与会话工作区不同，例如"知识库驱动代码库"场景）。
+// 归一化镜像 normalizeConversationId：trim 后空串归一为 null，供 Explorer 派发时注入。
+function normalizeWorkspacePath(value) {
+  if (value === undefined || value === null) return null;
+  const normalized = String(value).trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
 function normalizeRunnerState(runner, planId) {
   if (!runner || typeof runner !== 'object') return undefined;
   const now = new Date().toISOString();
@@ -411,6 +419,7 @@ function normalizePlan(plan) {
   const normalized = {
     ...plan,
     conversationId: normalizedConversationId ?? undefined,
+    targetWorkspacePath: normalizeWorkspacePath(plan.targetWorkspacePath) ?? undefined,
     status: normalizedStatus,
   };
   const runner = normalizeRunnerState(plan.runner, plan.planId);
@@ -630,6 +639,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       conversationId: normalizeConversationId(draft.conversationId) ?? undefined,
       threadId: draft.threadId,
       agentId: draft.agentId,
+      targetWorkspacePath: normalizeWorkspacePath(draft.targetWorkspacePath) ?? undefined,
       title: draft.title || '',
       goal: draft.goal || '',
       successCriteria: draft.successCriteria || [],

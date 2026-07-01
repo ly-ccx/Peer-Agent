@@ -67,7 +67,7 @@ export const SEARCH_TOOL_DEFINITIONS = [
               path: {
                 type: 'string',
                 description:
-                  'Optional workspace-relative directory to scope this sub-query. Must stay inside the workspace.',
+                  'Optional workspace-relative directory to scope this sub-query. May point outside the workspace (absolute path) when the access level permits it, e.g. cross-repository investigation. Defaults to the workspace root.',
               },
               case_sensitive: {
                 type: 'boolean',

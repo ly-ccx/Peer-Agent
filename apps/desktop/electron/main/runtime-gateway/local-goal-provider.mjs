@@ -124,6 +124,7 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
           conversationId,
           title: deriveTitle(args.title, args.goal),
           goal: args.goal,
+          targetWorkspacePath: args.targetWorkspacePath,
           tasks: normalizeTasks(args.tasks),
           status: 'awaiting_approval',
           createdBy: 'agent',

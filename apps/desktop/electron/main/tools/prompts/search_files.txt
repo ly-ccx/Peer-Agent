@@ -6,7 +6,7 @@ Use this tool when:
 - You are an Explorer sub-agent restricted to read-only investigation.
 
 Rules:
-- Search is scoped to the workspace; the optional path must stay inside the workspace root.
+- Defaults to the workspace root. The optional path may point outside the workspace (absolute path) when the access level permits it — useful for cross-repository investigation.
 - Matching is case-insensitive by default; set case_sensitive=true for exact case.
 - Results are capped (default 50, max 200 lines) and may be truncated; narrow the query or path to see more.
 - Dependency and build directories (node_modules, .git, dist, build, etc.) and binary/oversized files are skipped.

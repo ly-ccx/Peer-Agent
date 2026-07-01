@@ -96,7 +96,7 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
         path: {
           type: 'string',
           description:
-            'Optional workspace-relative or absolute directory to scope the search. Must stay inside the workspace. Defaults to the workspace root.',
+            'Optional workspace-relative or absolute directory to scope the search. May point outside the workspace (absolute path) when the access level permits it, e.g. cross-repository investigation. Defaults to the workspace root.',
         },
         case_sensitive: {
           type: 'boolean',

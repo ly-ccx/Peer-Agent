@@ -363,9 +363,20 @@ function buildGoalRunnerReminder(plan, turnNumber) {
 
 function buildExplorerMessage({ plan, explorer }) {
   const request = explorer?.request || {};
+  const targetWorkspacePath =
+    typeof plan?.targetWorkspacePath === 'string' && plan.targetWorkspacePath.trim().length > 0
+      ? plan.targetWorkspacePath.trim()
+      : null;
+  // 跨仓提示：当目标要改的代码仓与会话工作区不同（如"知识库驱动代码库"），
+  // 显式告知 Explorer 目标仓绝对路径，并声明它有权用绝对路径跨仓检索/读取，
+  // 避免 Explorer 因默认 cwd 在会话工作区而误判"读不到目标代码"。
+  const targetWorkspaceLine = targetWorkspacePath
+    ? `\nTarget code repository (may differ from the current workspace): ${targetWorkspacePath}`
+      + `\nYou may search and read files under this absolute path across repositories; do not assume you are limited to the current workspace.`
+    : '';
   return `Explorer mission for plan "${plan?.title || plan?.goal || plan?.planId || 'goal'}".
 Question: ${request.question || 'Explore missing evidence for the active goal'}
-Reason: ${request.reason || 'The Goal Runner needs more evidence before continuing.'}
+Reason: ${request.reason || 'The Goal Runner needs more evidence before continuing.'}${targetWorkspaceLine}
 Scope include: ${(request.scope?.include || []).join(', ') || '(not specified)'}
 Scope exclude: ${(request.scope?.exclude || []).join(', ') || '(not specified)'}
 Budget maxToolCalls: ${request.budget?.maxToolCalls || 4}`;

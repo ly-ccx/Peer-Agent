@@ -87,6 +87,15 @@ export const GOAL_TOOL_DEFINITIONS = [
           type: 'string',
           description: 'The concrete goal this plan aims to achieve, in one or two sentences.',
         },
+        targetWorkspacePath: {
+          type: 'string',
+          description:
+            'Optional absolute path of the code repository this plan will modify, when it '
+            + 'differs from the current conversation workspace (e.g. a knowledge-base workspace '
+            + 'driving changes in a separate code repo). If the workspace AGENTS.md documents a '
+            + 'linked/associated repository path, extract and pass it here so explorers can locate '
+            + 'the target code across repositories. Omit when the goal targets the current workspace.',
+        },
         tasks: {
           type: 'array',
           description: 'Ordered list of subtasks that make up the plan.',
