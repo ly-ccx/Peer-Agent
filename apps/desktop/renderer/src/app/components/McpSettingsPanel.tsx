@@ -99,6 +99,26 @@ function authLabel(auth?: McpServerView['auth']): string {
   return auth.mode;
 }
 
+// Heuristic: does an error message look like an unauthorized / needs-auth failure?
+// Used so the auth guidance button can be derived from persisted health/lastError,
+// not only from the transient in-session probe result.
+function isAuthRequiredMessage(message?: string | null): boolean {
+  if (!message) return false;
+  const text = String(message).toLowerCase();
+  return (
+    text.includes('401')
+    || text.includes('403')
+    || text.includes('unauthorized')
+    || text.includes('forbidden')
+    || text.includes('www-authenticate')
+    || text.includes('needs_auth')
+    || text.includes('需要身份验证')
+    || text.includes('缺少有效的身份凭证')
+    || text.includes('身份凭证')
+    || text.includes('未授权')
+  );
+}
+
 function endpointForServer(server?: McpServerView): string {
   if (!server) return '未选择连接';
   return server.urlPreview || server.serverUrl || server.commandPreview || server.description || '本地 MCP server';
@@ -184,12 +204,21 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     () => servers.find((server) => String(serverIdOf(server)) === String(selectedId)) ?? servers[0] ?? null,
     [selectedId, servers],
   );
-  const selectedNeedsAuth = Boolean(
+  const selectedProbeNeedsAuth = Boolean(
     selected
       && lastProbe?.state === 'needs_auth'
       && lastProbe.view
       && String(serverIdOf(lastProbe.view as McpServerView)) === String(serverIdOf(selected)),
   );
+  // Derive "needs auth" from persisted health/lastError too, so the guidance
+  // button stays visible after reload/reselect (when the transient lastProbe is
+  // gone) whenever the server last failed with an unauthorized-style error.
+  const selectedPersistedNeedsAuth = Boolean(
+    selected
+      && selected.health?.status === 'failed'
+      && isAuthRequiredMessage(selected.lastError),
+  );
+  const selectedNeedsAuth = selectedProbeNeedsAuth || selectedPersistedNeedsAuth;
 
   const totals = useMemo(() => servers.reduce(
     (summary, server) => ({
