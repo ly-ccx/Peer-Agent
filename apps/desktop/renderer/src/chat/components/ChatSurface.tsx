@@ -89,12 +89,11 @@ import { ChatGoalApprovalCard } from './goal/ChatGoalApprovalCard';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
 import { MessageRail, type MessageRailItem } from './thread/MessageRail';
-import { useTypewriterStream } from '../hooks/useTypewriterStream';
 import { useConversationState } from '../hooks/useConversationState';
-import type { ConversationRuntimeState } from '../state/conversationStore';
+import { conversationStore, type ConversationRuntimeState } from '../state/conversationStore';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { useStreamingReport, useCompactingReport } from '../hooks/useStreamingReport';
-import { useChatStreamSubscription } from '../hooks/useChatStreamSubscription';
+import { useConversationStreamRouter } from '../hooks/useConversationStreamRouter';
 import { useWorkbench } from '../../workbench/WorkbenchContext';
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 64;
@@ -334,8 +333,9 @@ export function ChatSurface({
   const setCompactionPercent = useMemo(() => makeSetter('compactionPercent'), [makeSetter]);
   const [draft, setDraft] = useState('');
   // 整轮 wall-clock 计时下沉到 useElapsedTimer：对外暴露 elapsedMs（实时跳秒）、
-  // turnStartedAtRef（供流事件计算 turnDurationMs）、setTurnStartedAt（发送时设起点）。
-  const { elapsedMs, turnStartedAtRef, setTurnStartedAt } = useElapsedTimer(isStreaming);
+  // setTurnStartedAt（发送时设起点，驱动右下角实时跳秒）。回合时长（turnDurationMs）的真值
+  // 已上移到会话桶的 turnStartedAt，由 useConversationStreamRouter 在 done/aborted/error 时读取。
+  const { elapsedMs, setTurnStartedAt } = useElapsedTimer(isStreaming);
   // 待发送消息队列:当前轮(流式或压缩)进行中时用户继续提交的消息排队等候,
   // 由下方 dequeue effect 在空闲且 provider 就绪时自动取队首发送。状态/增删见 hooks/useMessageQueue;
   // 自动出队 effect 因依赖更晚声明的 submitMessage,仍内联在本组件(见下文)。
@@ -478,47 +478,9 @@ export function ChatSurface({
   // 使每次切到新会话的首遍只同步本 ref 并跳过保存,避免把旧会话草稿写到新会话名下。
   const composerPersistConvRef = useRef<string | null | undefined>(undefined);
 
-  // 把流式文本追加到最后一条 assistant 消息的尾部文本段。
-  const appendStreamText = useCallback((chunk: string) => {
-    if (!chunk) return;
-    setMessages((prev) => {
-      const last = prev[prev.length - 1];
-      if (!last || last.role !== 'assistant') return prev;
-      const segments = [...(last.segments || [])];
-      const lastSeg = segments[segments.length - 1];
-      if (lastSeg && lastSeg.type === 'text') {
-        segments[segments.length - 1] = { ...lastSeg, content: (lastSeg.content || '') + chunk };
-      } else {
-        segments.push({ type: 'text', content: chunk });
-      }
-      return [...prev.slice(0, -1), { ...last, content: getTextContent(segments), segments }];
-    });
-  }, []);
+  // 正文/思考 delta 的追加逻辑已上移到 useConversationStreamRouter（应用级单例流路由器），
+  // 由它按 streamId→conversationId 路由到对应会话桶。本组件不再持有本地 append 逻辑与打字机。
 
-  const appendStreamThinking = useCallback((chunk: string) => {
-    if (!chunk) return;
-    setMessages((prev) => {
-      const last = prev[prev.length - 1];
-      if (!last || last.role !== 'assistant') return prev;
-      const segments = [...(last.segments || [])];
-      const lastSeg = segments[segments.length - 1];
-      // Thinking must remain ordered with tool-call/text segments. Only merge with
-      // the active trailing thinking segment; after a tool call/result, start a
-      // new thinking segment instead of rewriting an earlier one.
-      if (lastSeg && lastSeg.type === 'thinking') {
-        segments[segments.length - 1] = { type: 'thinking', content: (lastSeg.content || '') + chunk };
-      } else {
-        segments.push({ type: 'thinking', content: chunk });
-      }
-      return [...prev.slice(0, -1), { ...last, segments }];
-    });
-  }, []);
-
-  // 平滑打字机：网络 delta 进 buffer，rAF 泵匀速吐字，告别"一坨一坨"的生硬感。
-  // 正文和深度思考使用独立 buffer，但跨类型切换时必须先 flush 另一侧，
-  // 否则两个独立 rAF 泵会打乱网络事件顺序，把正文/思考切成交错小段。
-  const textTypewriter = useTypewriterStream(appendStreamText);
-  const thinkingTypewriter = useTypewriterStream(appendStreamThinking);
   const threadRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -648,9 +610,8 @@ export function ChatSurface({
     // 切会话即放弃上一会话尚未发起的自动压缩意图，避免闸门长期占用导致新会话压缩被吞。
     autoCompactingRef.current = false;
     // 切换会话时一并清掉本轮计时锚点,避免上一会话的实时跳秒残留到新会话。
+    // 打字机缓冲的清空已上移到 useConversationStreamRouter（随前台会话切换自动 reset）。
     setTurnStartedAt(null);
-    textTypewriter.reset();
-    thinkingTypewriter.reset();
     if (!conversationId) { setMessages([]); setTokenUsage(null); return; }
     setTokenUsage(null);
     let cancelled = false;
@@ -669,6 +630,8 @@ export function ChatSurface({
         if (cancelled) return;
         if (comp && comp.compacting && comp.streamId) {
           streamIdRef.current = comp.streamId;
+          conversationStore.routeStream(comp.streamId, conversationId);
+          conversationStore.setState(conversationId, { streamId: comp.streamId });
           setIsCompacting(true);
           setCompactionPercent(typeof comp.percent === 'number' ? comp.percent : null);
         }
@@ -725,6 +688,8 @@ export function ChatSurface({
         if (running) {
           streamIdRef.current = live.streamId;
           setTurnStartedAt(liveStartedAt);
+          conversationStore.routeStream(live.streamId, conversationId);
+          conversationStore.setState(conversationId, { streamId: live.streamId, turnStartedAt: liveStartedAt });
           setIsStreaming(true);
         }
       } catch {
@@ -772,6 +737,8 @@ export function ChatSurface({
       };
       streamIdRef.current = streamId;
       setTurnStartedAt(now);
+      conversationStore.routeStream(streamId, conversationId);
+      conversationStore.setState(conversationId, { streamId, turnStartedAt: now });
       setStreamError(null);
       setActiveUsage(null);
       setProviderRecoveryNotice(null);
@@ -817,6 +784,8 @@ export function ChatSurface({
     const streamId = `compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     streamIdRef.current = streamId;
     const compactStartedAt = Date.now();
+    conversationStore.routeStream(streamId, compactConversationId);
+    conversationStore.setState(compactConversationId, { streamId, turnStartedAt: compactStartedAt });
     setIsCompacting(true);
     try {
       const result = await clientApi.chatCompact({ conversationId: compactConversationId, streamId });
@@ -878,30 +847,15 @@ export function ChatSurface({
     }, 0);
   }, [runCompaction, setAuthoritativeContext]);
 
-  useChatStreamSubscription({
-    conversationId,
+  // 应用级单例流路由器（方案 C / 甲-1）：订阅全部 chatStream 事件，按 streamId→conversationId
+  // 路由到对应会话桶。前台会话（=当前 conversationId）的 delta 走打字机平滑吐字，后台会话的
+  // delta 直接整段写入其桶。因 App 只渲染单个稳定的 ChatSurface 实例（切会话只改 conversationId
+  // 这个 prop、不重挂载），此处挂载即「全应用唯一一份」订阅，终结了旧的 streamIdRef 单流过滤。
+  useConversationStreamRouter({
+    activeConversationId: conversationId,
     onConversationUpdated,
     onBrowserToolActivity: handleBrowserToolActivity,
-    setAuthoritativeContext,
     onCompactionSuggested: handleCompactionSuggested,
-    streamIdRef,
-    turnStartedAtRef,
-    setTurnStartedAt,
-    textTypewriter,
-    thinkingTypewriter,
-    appendStreamThinking,
-    setMessages,
-    setIsStreaming,
-    setIsCompacting,
-    setCompactionPercent,
-    setActiveUsage,
-    setTokenUsage,
-    setStreamError,
-    setPendingPermissionCalls,
-    setToolProgress,
-    setProviderRecoveryNotice,
-    usageFromLifetime,
-    loadConversationMessages,
   });
 
   useEffect(() => {
@@ -1104,8 +1058,13 @@ export function ChatSurface({
     onConversationUpdated?.();
 
     const streamId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const turnStartedAt = Date.now();
     streamIdRef.current = streamId;
-    setTurnStartedAt(Date.now());
+    setTurnStartedAt(turnStartedAt);
+    // 应用级路由器凭 streamId 反查会话桶：登记归属并把 streamId/turnStartedAt 写入本会话桶，
+    // 使后台流事件（delta/done/…）即使 ChatSurface 已切走也能落到正确的桶。
+    conversationStore.routeStream(streamId, conversationId);
+    conversationStore.setState(conversationId, { streamId, turnStartedAt });
     setIsStreaming(true);
 
     const contextMessages = [...messages, userMsg];
@@ -1199,8 +1158,11 @@ export function ChatSurface({
     await clientApi.conversationsUpdateLastMessage({ id: conversationId, content: '' });
 
     const streamId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const turnStartedAt = Date.now();
     streamIdRef.current = streamId;
-    setTurnStartedAt(Date.now());
+    setTurnStartedAt(turnStartedAt);
+    conversationStore.routeStream(streamId, conversationId);
+    conversationStore.setState(conversationId, { streamId, turnStartedAt });
     setIsStreaming(true);
 
     const apiMessages = toApiMessages(contextMessages);
