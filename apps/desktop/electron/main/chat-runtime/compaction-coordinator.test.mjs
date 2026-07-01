@@ -7,6 +7,7 @@ import {
   buildPromptTooLongRecoveryError,
   computeContextBudget,
   computeContextInfo,
+  contextTokensFromUsageSnapshot,
   CONTEXT_BUDGET_GUARD,
   isPromptTooLongResponse,
   runCompactionCheck,
@@ -332,5 +333,88 @@ describe('方案 A：完整会话量口径不变量', () => {
     assert.equal(above.compactionSuggested, true);
     assert.equal(below.contextTokens, fullTokens);
     assert.equal(below.compactionSuggested, false);
+  });
+});
+
+describe('ADR 42：显示口径与压缩触发口径分离', () => {
+  // 本地构造一段「完整会话量很大」的消息（含多条大 tool 结果），用于对比显示口径与触发口径。
+  function buildBigConversation() {
+    const big = 'x'.repeat(8000);
+    const messages = [{ role: 'system', content: 'sys' }];
+    for (let i = 0; i < 6; i++) {
+      messages.push({ role: 'assistant', content: null, tool_calls: [{ id: `t${i}`, type: 'function', function: { name: 'read', arguments: '{}' } }] });
+      messages.push({ role: 'tool', tool_call_id: `t${i}`, content: `result-${i}-${big}` });
+    }
+    return messages;
+  }
+
+  it('contextTokensFromUsageSnapshot 取 input + cacheRead（不含 output/cacheWrite）', () => {
+    assert.equal(
+      contextTokensFromUsageSnapshot({
+        inputTokens: 1000,
+        outputTokens: 500,
+        cacheWriteTokens: 200,
+        cacheReadTokens: 300,
+      }),
+      1300,
+      '显示口径 = input(1000) + cacheRead(300)，与 output/cacheWrite 无关',
+    );
+  });
+
+  it('contextTokensFromUsageSnapshot 无有效快照时返回 null（由上层回退估算）', () => {
+    assert.equal(contextTokensFromUsageSnapshot(null), null);
+    assert.equal(contextTokensFromUsageSnapshot({}), null);
+    assert.equal(contextTokensFromUsageSnapshot({ outputTokens: 999 }), null, '仅 output 不算上下文');
+  });
+
+  it('显示口径优先采用 provider usage 快照，且远小于完整会话触发口径', () => {
+    const full = buildBigConversation();
+    // 真实场景：压缩后实际发送量很小，provider usage 快照体现这一点。
+    const usageSnapshot = { inputTokens: 800, outputTokens: 100, cacheWriteTokens: 0, cacheReadTokens: 200 };
+    const info = computeContextInfo({ messages: full, contextWindow: 200_000, usageSnapshot });
+
+    // 显示口径 = usage 快照的 input+cacheRead = 1000，反映实际发送上下文（压缩后回落）。
+    assert.equal(info.contextTokens, 1000, '有 usage 快照时 contextTokens 必须采用显示口径');
+    // 触发口径仍按完整会话集合估算，显著大于显示口径。
+    const fullTokens = estimateTokensFromMessages(full);
+    assert.ok(
+      info.triggerTokens >= fullTokens,
+      `触发口径(${info.triggerTokens}) 应基于完整会话(${fullTokens})，不受 usage 快照影响`,
+    );
+    assert.ok(
+      info.contextTokens < info.triggerTokens,
+      `显示口径(${info.contextTokens}) 应远小于触发口径(${info.triggerTokens})——这正是压缩后能回落的关键`,
+    );
+  });
+
+  it('无 usage 快照但有 displayMessages 时，显示口径按发送切片估算（小于完整集合）', () => {
+    const full = buildBigConversation();
+    const sent = applyMicrocompaction(full).messages;
+    const info = computeContextInfo({ messages: full, contextWindow: 200_000, displayMessages: sent });
+
+    assert.equal(
+      info.contextTokens,
+      estimateTokensFromMessages(sent),
+      '无 usage 时显示口径 = 对发送切片 displayMessages 的估算',
+    );
+    assert.ok(
+      info.contextTokens < info.triggerTokens,
+      '发送切片显示口径应小于完整会话触发口径',
+    );
+  });
+
+  it('压缩触发判定只看触发口径：显示口径再小也不能压制该压缩的建议', () => {
+    const full = buildBigConversation();
+    const fullTokens = estimateTokensFromMessages(full);
+    const ratio = COMPACTION_CONFIG.triggerRatio;
+    const windowAbove = Math.floor(fullTokens / ratio) - 1; // 完整集合越过触发线
+    // 即便显示口径很小（usage 快照仅 500），compactionSuggested 仍必须为 true。
+    const info = computeContextInfo({
+      messages: full,
+      contextWindow: windowAbove,
+      usageSnapshot: { inputTokens: 500, cacheReadTokens: 0 },
+    });
+    assert.equal(info.contextTokens, 500, '显示口径采用 usage 快照');
+    assert.equal(info.compactionSuggested, true, '触发判定按完整会话口径，不被小显示口径压制');
   });
 });

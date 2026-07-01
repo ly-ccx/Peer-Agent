@@ -129,17 +129,57 @@ export function computeContextBudget({ messages, contextWindow, tools = null }) 
   };
 }
 
-// 口径统一单一来源：进度条用量、压缩触发判定都从这里取数，避免「进度条到 80%
-// 但主进程不压缩」这类两套估算打架的偏差。contextTokens 用与压缩触发完全相同的
-// estimateTokensFromMessages（含图片固定 token、tool 块 JSON 体积、每条 +overhead），
-// compactionSuggested 用与发送前预算守卫完全相同的 soft 阈值。
-export function computeContextInfo({ messages, contextWindow, tools = null }) {
+// 从 provider 真实 usage 快照折算「实际发送的上下文 token」。
+// 取「最后一轮请求」的 input + cacheRead（不含 output），这正是 provider 计入的输入上下文大小。
+// ⚠️ 必须是「最后一轮快照」而非跨轮累加值（kernel.usage 是 lifetime 累加，用于计费 ledger，
+// 不能当上下文大小用）。无可用快照时返回 null，由上层回退到发送切片估算。
+export function contextTokensFromUsageSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  const input = Number(snapshot.inputTokens) || 0;
+  const cacheRead = Number(snapshot.cacheReadTokens) || 0;
+  const total = input + cacheRead;
+  return total > 0 ? total : null;
+}
+
+// 口径分离（ADR 42）：
+// - 显示口径（contextTokens）：界面进度条分子，表示「本回合实际发送给模型的上下文大小」，
+//   压缩后应自然回落。取值优先级：
+//     1) provider 真实 usage 快照（最后一轮 input + cacheRead）；
+//     2) 回退为对「实际发送切片 displayMessages」的估算；
+//     3) 再回退为对完整会话 messages 的估算（兼容未传 displayMessages 的旧调用）。
+// - 触发口径（compactionSuggested / triggerRatio）：始终基于「将要发送 / 完整会话 messages」
+//   的估算与 soft 阈值，语义不变，确保压缩触发时机不被显示口径改动带偏。
+// - 分母口径（contextWindow）：与触发判定同一 normalizedWindow，不变。
+export function computeContextInfo({
+  messages,
+  contextWindow,
+  tools = null,
+  displayMessages = null,
+  usageSnapshot = null,
+}) {
+  // 触发口径：完整会话 messages（单一来源，不变）。
   const budget = computeContextBudget({ messages, contextWindow, tools });
+
+  // 显示口径：优先真实 usage 快照，其次发送切片估算，最后回退完整会话估算。
+  const usageTokens = contextTokensFromUsageSnapshot(usageSnapshot);
+  let displayTokens;
+  if (usageTokens != null) {
+    displayTokens = usageTokens;
+  } else if (Array.isArray(displayMessages)) {
+    displayTokens = estimateTokensFromMessages(displayMessages) + estimateToolsTokens(tools);
+  } else {
+    displayTokens = budget.contextTokens;
+  }
+
   return {
-    contextTokens: budget.contextTokens,
+    // 进度条分子：实际发送上下文（压缩后回落）。
+    contextTokens: displayTokens,
     contextWindow: budget.contextWindow,
     triggerRatio: budget.triggerRatio,
+    // 触发判定：仍按完整会话量越过 soft 阈值，与显示口径解耦。
     compactionSuggested: budget.overSoftLimit,
+    // 触发口径快照，供诊断 / 测试核对（进度条不使用）。
+    triggerTokens: budget.contextTokens,
   };
 }
 

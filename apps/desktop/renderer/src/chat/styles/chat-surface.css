@@ -715,6 +715,10 @@
 /* 菜单经 portal 投到 body 后，消费方 className(composer-dropdown) 被透传到菜单自身，
    故由原来的后代选择器改为复合选择器 .pa-dropdown-menu.composer-dropdown。 */
 .pa-dropdown-menu.composer-dropdown {
+  /* 菜单经 portal 投到 body 后脱离 .chat-composer-toolbar,无法继承其上定义的
+     --composer-addon-font-size,导致菜单项 font-size 回退到全局 .pa-dropdown-item
+     (0.82rem) 偏大。此处在菜单根上重新声明该变量,使菜单项字号恢复设计值,与触发器一致。 */
+  --composer-addon-font-size: 0.68rem;
   padding: 4px;
   /* 菜单宽度贴合最宽选项,短选项不被强行撑宽留白;上限防止超长文案撑爆。
      覆盖全局 fixed 菜单的 width:var(--pa-dropdown-menu-width)，改回内容自适应。 */

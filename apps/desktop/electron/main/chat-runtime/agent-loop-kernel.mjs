@@ -56,6 +56,10 @@ export function createAgentLoopKernel({
     cacheWriteTokens: 0,
     cacheReadTokens: 0,
   };
+  // 最后一轮 usage 快照（每轮覆盖，非累加）。显示口径需要「最后一轮请求实际发送的
+  // input + cacheRead」来反映真实上下文大小；上面的 usage 是 lifetime 累加（计费 ledger），
+  // 不能当上下文大小用。详见 ADR 42。null 表示尚无可用的 provider usage。
+  let lastTurnUsage = null;
   let unsupportedToolRetries = 0;
   let emptyResponseRetries = 0;
 
@@ -74,6 +78,16 @@ export function createAgentLoopKernel({
     usage.outputTokens += streamUsage.outputTokens || 0;
     usage.cacheWriteTokens += streamUsage.cacheWriteTokens || 0;
     usage.cacheReadTokens += streamUsage.cacheReadTokens || 0;
+    // 记录本轮快照（覆盖式）：仅当本轮带到了真实 input/cacheRead 才更新，
+    // 避免无计费 usage 的轮次把上一轮有效快照清掉。
+    if ((streamUsage.inputTokens || 0) > 0 || (streamUsage.cacheReadTokens || 0) > 0) {
+      lastTurnUsage = {
+        inputTokens: streamUsage.inputTokens || 0,
+        outputTokens: streamUsage.outputTokens || 0,
+        cacheWriteTokens: streamUsage.cacheWriteTokens || 0,
+        cacheReadTokens: streamUsage.cacheReadTokens || 0,
+      };
+    }
     return usage;
   }
 
@@ -90,12 +104,14 @@ export function createAgentLoopKernel({
   }
 
   function sendDone() {
-    // 回合自然结束：附带权威上下文用量快照（与压缩触发同口径），供渲染端进度条对齐
-    // 并据 compactionSuggested 在回合结束后触发自动压缩。闭包取数失败不得影响收尾。
+    // 回合自然结束：附带权威上下文用量快照，供渲染端进度条对齐，并据 compactionSuggested
+    // 在回合结束后触发自动压缩。闭包取数失败不得影响收尾。
+    // 口径分离（ADR 42）：把「最后一轮 usage 快照」传给 getContextInfo，使显示口径
+    // 优先采用 provider 真实 input+cacheRead（压缩后回落），触发口径仍按完整会话量判定。
     let contextInfo = null;
     if (typeof getContextInfo === 'function') {
       try {
-        contextInfo = getContextInfo();
+        contextInfo = getContextInfo({ usageSnapshot: lastTurnUsage });
       } catch {
         contextInfo = null;
       }

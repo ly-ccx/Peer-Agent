@@ -327,7 +327,17 @@ function getRunnerWebContents() {
 }
 
 function toRuntimeMessages(messages = []) {
-  return (Array.isArray(messages) ? messages : [])
+  const list = Array.isArray(messages) ? messages : [];
+  // 口径分离（ADR 42）：按最后一条 _compaction 边界切片，只保留压缩点之后的尾部原文，
+  // 丢弃压缩点之前的原文（那部分仅供 UI 回看，摘要经 continuityContext 注入 system）。
+  // 与对话模式发送口径（renderer apiMessageMapping.ts 的 lastCompactionIndex+slice）对齐，
+  // 避免目标模式每 tick 把压缩前全量历史重复喂回、上下文停在高位并触发重复压缩。
+  let lastCompactionIndex = -1;
+  for (let i = 0; i < list.length; i += 1) {
+    if (list[i]?._compaction) lastCompactionIndex = i;
+  }
+  const active = lastCompactionIndex >= 0 ? list.slice(lastCompactionIndex + 1) : list;
+  return active
     .filter((message) => message && (message.role === 'user' || message.role === 'assistant'))
     .map((message) => ({
       role: message.role,
@@ -469,6 +479,10 @@ goalRunner = createGoalRunner({
         ...toRuntimeMessages(conversation.messages),
         { role: 'user', content: buildGoalRunnerMessage(plan, turnNumber) },
       ];
+      // 口径分离（ADR 42）：toRuntimeMessages 已按 _compaction 边界切掉压缩点前原文，
+      // 这里把压缩摘要（handoff）经 continuityContext 注入 system，避免历史丢失。
+      // 与对话模式发送链路（main.mjs priorContinuityContext）同口径。
+      const goalContinuityContext = continuityContextFromMessages(conversation.messages);
       // Goal Runner 实时计数 sink：把「模型每轮」和「每次工具调用」即时写回 store。
       // setRunnerState 内部 persist→notifyChanged 会广播 goalRunner:changed，
       // 渲染层据此实时刷新底部「轮次 / 工具」数字（roundCount 为展示计数，与预算 turnCount 解耦）。
@@ -510,6 +524,7 @@ goalRunner = createGoalRunner({
         effort: 'default',
         mode: 'plan',
         conversationId: plan.conversationId,
+        continuityContext: goalContinuityContext,
         runtimeReminders: [buildGoalRunnerReminder(plan, turnNumber)],
         agentProgress,
       });

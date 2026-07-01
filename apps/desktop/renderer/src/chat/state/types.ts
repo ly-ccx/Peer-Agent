@@ -113,3 +113,26 @@ export interface TokenUsageState {
  * 不声称工具已执行或文件已落地——真正的结果由后续 tool-call 段与本地能力 Evidence 接管。
  */
 export type ToolProgress = { tool: string; path: string | null; receivedLines: number };
+
+/**
+ * provider / connection 恢复提示（表达层横幅用）。
+ *
+ * 原私有定义在 useChatStreamSubscription.ts 内；为支撑「按会话分桶的运行态 store」
+ * （conversationStore）需要一个共享的规范类型，下沉到 state/types.ts，与其它表达层
+ * 视图模型同级。store 与 hook 都从这里 import，避免重复定义导致的结构漂移。
+ */
+export interface ProviderRecoveryNotice {
+  kind?: 'provider' | 'connection';
+  fromProvider?: string;
+  toProvider?: string;
+  provider?: string;
+  model?: string;
+  status?: 'retrying' | 'recovered';
+  fromConnection?: string;
+  toConnection?: string;
+  connection?: string;
+  attempt?: number;
+  maxRetries?: number;
+  delayMs?: number;
+  reason?: string;
+}

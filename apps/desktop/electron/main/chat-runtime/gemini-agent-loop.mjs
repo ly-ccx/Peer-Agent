@@ -44,12 +44,23 @@ export async function agentLoopGemini({
   agentProgress = null,
 }) {
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
+  // 最后一轮「实际发送切片」（微压缩+清洗后真正发给 provider 的消息，已含 system）。供
+  // getContextInfo 显示口径在 provider usage 缺失时回退估算之用；不参与压缩触发判定。
+  let lastSentMessages = null;
   const loop = createAgentLoopKernel({
     webContents,
     streamId,
     onRound: agentProgress?.onRound,
-    // apiMessages 已含 system，回合结束按当前真实消息算权威用量，与压缩触发同口径。
-    getContextInfo: () => computeContextInfo({ messages: apiMessages, contextWindow, tools }),
+    // 口径分离（ADR 42）：触发口径仍按「完整会话 apiMessages」（已含 system）判定，保持压缩时机不变；
+    // 显示口径优先采用 kernel 传入的 provider 真实 usage 快照（最后一轮 input+cacheRead，压缩后回落），
+    // 其次回退到对「最后一轮实际发送切片」的估算，最后回退完整会话估算。
+    getContextInfo: ({ usageSnapshot = null } = {}) => computeContextInfo({
+      messages: apiMessages,
+      contextWindow,
+      tools,
+      displayMessages: lastSentMessages,
+      usageSnapshot,
+    }),
   });
   const providerConfig = buildCompactionProviderConfig({
     provider: 'gemini',
@@ -84,6 +95,8 @@ export async function agentLoopGemini({
     // 发送副本：仅对「发出去的消息」做微压缩 + 清洗，不回写 apiMessages，
     // 使 apiMessages 始终保持完整会话量（与进度条分子/压缩触发器同口径）。
     const sendMessages = sanitizeApiMessages(applyMicrocompaction(apiMessages).messages);
+    // 记录本轮实际发送切片，供回合结束 getContextInfo 的显示口径在 provider usage 缺失时回退估算。
+    lastSentMessages = sendMessages;
     const providerResponse = await sendGeminiStream({
       baseUrl,
       apiKey,

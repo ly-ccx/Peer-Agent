@@ -8,7 +8,7 @@ import type {
   LocalAccessLevel,
 } from '@peer-agent/protocol';
 import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
@@ -90,6 +90,8 @@ import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
 import { MessageRail, type MessageRailItem } from './thread/MessageRail';
 import { useTypewriterStream } from '../hooks/useTypewriterStream';
+import { useConversationState } from '../hooks/useConversationState';
+import type { ConversationRuntimeState } from '../state/conversationStore';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { useStreamingReport, useCompactingReport } from '../hooks/useStreamingReport';
 import { useChatStreamSubscription } from '../hooks/useChatStreamSubscription';
@@ -301,12 +303,36 @@ export function ChatSurface({
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
   readonly workspacePath?: string | null;
 }) {
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [draft, setDraft] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [isCompacting, setIsCompacting] = useState(false);
+  // 会话运行时状态的真值已上移到 conversationStore（按 conversationId 分桶的外部 store）。
+  // 本组件不再持有 messages/isStreaming/... 的 useState 槽位，改为订阅当前会话切片；
+  // 切会话 = 换订阅 key，物理上不存在「被复用的共享 messages 槽位」，跨会话串内容在架构层不可能发生。
+  const { state: convState, actions: convActions } = useConversationState(conversationId);
+  // 策略甲（薄适配）：保留组件内原有的 setXxx 调用点名字不变，底层改写为对 store 的 patch。
+  // makeSetter 把某个会话级字段包装成 React 风格的 Dispatch<SetStateAction<T>>（支持函数式更新）。
+  const convStateRef = useRef<ConversationRuntimeState>(convState);
+  convStateRef.current = convState;
+  const makeSetter = useCallback(
+    <K extends keyof ConversationRuntimeState>(key: K): Dispatch<SetStateAction<ConversationRuntimeState[K]>> =>
+      (value) => {
+        const prev = convStateRef.current[key];
+        const next =
+          typeof value === 'function'
+            ? (value as (p: ConversationRuntimeState[K]) => ConversationRuntimeState[K])(prev)
+            : value;
+        convActions.set({ [key]: next } as Partial<ConversationRuntimeState>);
+      },
+    [convActions],
+  );
+  const messages = convState.messages as ChatMsg[];
+  const setMessages = useMemo(() => makeSetter('messages'), [makeSetter]) as Dispatch<SetStateAction<ChatMsg[]>>;
+  const isStreaming = convState.isStreaming;
+  const setIsStreaming = useMemo(() => makeSetter('isStreaming'), [makeSetter]);
+  const isCompacting = convState.isCompacting;
+  const setIsCompacting = useMemo(() => makeSetter('isCompacting'), [makeSetter]);
   // 压缩进度（0-100）：流式收摘要时按已收字符/预期字符估算；null = 尚无进度。
-  const [compactionPercent, setCompactionPercent] = useState<number | null>(null);
+  const compactionPercent = convState.compactionPercent;
+  const setCompactionPercent = useMemo(() => makeSetter('compactionPercent'), [makeSetter]);
+  const [draft, setDraft] = useState('');
   // 整轮 wall-clock 计时下沉到 useElapsedTimer：对外暴露 elapsedMs（实时跳秒）、
   // turnStartedAtRef（供流事件计算 turnDurationMs）、setTurnStartedAt（发送时设起点）。
   const { elapsedMs, turnStartedAtRef, setTurnStartedAt } = useElapsedTimer(isStreaming);
@@ -319,7 +345,8 @@ export function ChatSurface({
   useStreamingReport(conversationId, isStreaming, onStreamingChange);
   // 把上下文压缩状态(含会话坐标 + 进度百分比)上报给上层,供左侧列表显示压缩指示。
   useCompactingReport(conversationId, isCompacting, compactionPercent, onCompactingChange);
-  const [streamError, setStreamError] = useState<string | null>(null);
+  const streamError = convState.streamError;
+  const setStreamError = useMemo(() => makeSetter('streamError'), [makeSetter]);
   // 思考强度全局偏好(读取/回写 settings-store,五档),逻辑见 hooks/useEffortPreference。
   const { effort, setEffort, changeEffort } = useEffortPreference();
   // 对话模式按会话持久化在会话 meta 上(非全局设置):模式是「每会话状态」,切换会话
@@ -330,38 +357,54 @@ export function ChatSurface({
   // 本地访问授权级别全局偏好(读取/回写 settings-store,服务端归一化回执二次校正),
   // 逻辑见 hooks/useLocalAccessPreference。注意:权限真值仍在主进程 PermissionGate,此处仅表达选择。
   const { localAccessLevel, changeLocalAccessLevel } = useLocalAccessPreference();
-  const [tokenUsage, setTokenUsage] = useState<TokenUsageState | null>(null);
-  const [activeUsage, setActiveUsage] = useState<TokenUsageState | null>(null);
+  const tokenUsage = convState.tokenUsage;
+  const setTokenUsage = useMemo(() => makeSetter('tokenUsage'), [makeSetter]) as Dispatch<
+    SetStateAction<TokenUsageState | null>
+  >;
+  const activeUsage = convState.activeUsage;
+  const setActiveUsage = useMemo(() => makeSetter('activeUsage'), [makeSetter]) as Dispatch<
+    SetStateAction<TokenUsageState | null>
+  >;
   // 口径统一：主进程随回合结束（done）下发的权威上下文用量快照（与压缩触发同口径）。
   // 进度条优先用它，回退到本地估算；null = 本会话尚无权威快照（如刚切入未跑过回合）。
-  const [authoritativeContext, setAuthoritativeContext] = useState<
-    { contextTokens: number; contextWindow: number | null } | null
-  >(null);
-  const [providerRecoveryNotice, setProviderRecoveryNotice] = useState<{
-    kind?: 'provider' | 'connection';
-    fromProvider?: string;
-    toProvider?: string;
-    provider?: string;
-    model?: string;
-    status?: 'retrying' | 'recovered';
-    fromConnection?: string;
-    toConnection?: string;
-    connection?: string;
-    attempt?: number;
-    maxRetries?: number;
-    delayMs?: number;
-    reason?: string;
-  } | null>(null);
+  const authoritativeContext = convState.authoritativeContext;
+  const setAuthoritativeContext = useMemo(() => makeSetter('authoritativeContext'), [makeSetter]) as Dispatch<
+    SetStateAction<{ contextTokens: number; contextWindow: number | null } | null>
+  >;
+  const providerRecoveryNotice = convState.providerRecoveryNotice;
+  const setProviderRecoveryNotice = useMemo(() => makeSetter('providerRecoveryNotice'), [makeSetter]) as Dispatch<
+    SetStateAction<{
+      kind?: 'provider' | 'connection';
+      fromProvider?: string;
+      toProvider?: string;
+      provider?: string;
+      model?: string;
+      status?: 'retrying' | 'recovered';
+      fromConnection?: string;
+      toConnection?: string;
+      connection?: string;
+      attempt?: number;
+      maxRetries?: number;
+      delayMs?: number;
+      reason?: string;
+    } | null>
+  >;
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<ChatAttachment | null>(null);
-  const [pendingPermissionCalls, setPendingPermissionCalls] = useState<ClientToolCall[]>([]);
+  const pendingPermissionCalls = convState.pendingPermissionCalls as ClientToolCall[];
+  const setPendingPermissionCalls = useMemo(() => makeSetter('pendingPermissionCalls'), [makeSetter]) as Dispatch<
+    SetStateAction<ClientToolCall[]>
+  >;
   const [isThreadAtBottom, setIsThreadAtBottom] = useState(true);
   // 流式工具参数进度(Codex 式实时体感):工具调用参数(如 edit_file 的整文件内容)
   // 在落地为正式 tool-call 段之前会先以增量形式抵达,这里保存最近一次进度用于展示。
   // 仅为过程提示,不替代 Tool Result / Evidence。
-  const [toolProgress, setToolProgress] = useState<ToolProgress | null>(null);
+  const toolProgress = convState.toolProgress as ToolProgress | null;
+  const setToolProgress = useMemo(() => makeSetter('toolProgress'), [makeSetter]) as Dispatch<
+    SetStateAction<ToolProgress | null>
+  >;
   // 会话内查找(cmd/ctrl+F):仅在表达层对已渲染消息做高亮跳转,不触碰会话真值。
   const [findOpen, setFindOpen] = useState(false);
   // 顶部 header 滚动感知:chat-thread 滚动后给 header 加底线区分。
@@ -552,14 +595,15 @@ export function ChatSurface({
       return { id: msg.id, text };
     });
   const showSlashCommands = !isStreaming && !isCompacting && slashCommands.length > 0;
-  // 口径统一（方案 A：完整会话量）：进度条分子取「权威快照口径」与「实时本地估算」的较大值。
-  // - 权威快照口径 = 主进程回合结束下发的 contextTokens（完整会话量 + 工具 schema，与压缩触发同口径）
-  //   叠加当前草稿/附件的实时增量；无快照时记 0。
-  // - 实时本地估算 = 对完整 messages + 草稿 + 附件的本地估算，流式期间随对话增长实时推进。
-  // 两者现已同为「完整会话量」口径，取 max 可保证：流式→结束→再次发起数值连续、绝不无故突降
-  // （旧 bug：流式 ~200k 结束瞬间掉到 ~100k 再发起又回 200k，源于权威快照曾按微压缩后口径计算）；
-  // 同时保留权威值与压缩触发严格一致（bar ≡ trigger）。真·压缩发生时会清空权威快照、messages 也已替换为
-  // 压缩后集合，故 max 自然回落到压缩后的本地估算，不会把已压缩的用量错误地维持在高位。
+  // 口径分离（ADR 42：显示口径 ≠ 压缩触发口径）：进度条分子取「权威快照口径」与「实时本地估算」的较大值。
+  // - 权威快照口径 = 主进程回合结束下发的 contextTokens，现已改为「显示口径」= 实际发送给模型的上下文
+  //   （优先 provider 真实 usage 的 input+cacheRead，回退为对最后一轮实际发送切片的估算），
+  //   叠加当前草稿/附件的实时增量；无快照时记 0。注意它不再等于压缩触发口径（后者仍按完整会话量判定）。
+  // - 实时本地估算 = 对「按 _compaction 边界切片后的活跃 messages」+ 草稿 + 附件的本地估算
+  //   （tokenEstimate 已按最后一条 _compaction 切片），压缩后随之回落。
+  // 两者现已同为「实际发送量」口径，取 max 仅用于消除「流式→结束」瞬时抖动，保证数值连续、不无故突降。
+  // 压缩发生时：onChatCompaction 完成分支已清空 authoritativeContext（置 null）、messages 也替换为压缩后
+  // 集合，故 max 自然回落到压缩后的本地估算，不会把已压缩的用量错误地锁在压缩前高位（本次 bug 的修复点）。
   const liveContextTokens = estimateConversationTokens(messages, draft, attachments);
   const authoritativeContextTokens = authoritativeContext
     ? authoritativeContext.contextTokens + estimateTextTokens(draft) + estimateAttachmentTokens(attachments)
