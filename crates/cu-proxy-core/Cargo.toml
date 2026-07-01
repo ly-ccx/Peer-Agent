@@ -1,6 +1,6 @@
 [package]
 name = "cu-proxy-core"
-version = "0.0.1-beta.19"
+version = "0.0.1-beta.20"
 edition = "2024"
 
 [dependencies]
