@@ -1,5 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { UpdaterStatus } from '@peer-agent/protocol';
+import type { CSSProperties } from 'react';
 import { Overlay } from './Overlay';
 import { ReleaseNotesView } from './ReleaseNotesView';
 
@@ -47,7 +48,36 @@ export function UpdateModal({
       panelClassName="updater-modal"
     >
       {({ requestClose }) =>
-        phase === 'not-available' ? (
+        phase === 'downloading' ? (
+          <div className="updater-modal-body">
+            <h2 className="updater-modal-title">{i18n.t('updater.modal.title')}</h2>
+            <p className="updater-modal-downloading">
+              {i18n.t('updater.modal.downloading')}{' '}
+              {Math.max(0, Math.min(100, Math.round(status.percent ?? 0)))}%
+            </p>
+            <div
+              className="updater-modal-progress"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.max(0, Math.min(100, Math.round(status.percent ?? 0)))}
+            >
+              <span
+                className="updater-modal-progress-fill"
+                style={
+                  {
+                    '--pa-update-pct': Math.max(0, Math.min(100, Math.round(status.percent ?? 0))),
+                  } as CSSProperties
+                }
+              />
+            </div>
+            <div className="updater-modal-actions">
+              <button type="button" className="updater-btn ghost" onClick={requestClose}>
+                {i18n.t('updater.modal.close')}
+              </button>
+            </div>
+          </div>
+        ) : phase === 'not-available' ? (
           <div className="updater-modal-body">
             <h2 className="updater-modal-title">{i18n.t('updater.modal.title')}</h2>
             <p className="updater-modal-uptodate">{i18n.t('updater.modal.upToDate')}</p>

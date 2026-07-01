@@ -377,4 +377,29 @@
     color: var(--za-danger);
     word-break: break-word;
   }
+
+  /* ── 下载进度弹窗（下载中点击徽标唤出） ── */
+  .updater-modal-downloading {
+    margin: 0;
+    font-size: 14px;
+    color: var(--pa-text-primary);
+  }
+
+  .updater-modal-progress {
+    margin-top: 12px;
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--surface-vellum-sunken);
+    overflow: hidden;
+  }
+
+  .updater-modal-progress-fill {
+    display: block;
+    height: 100%;
+    width: calc(var(--pa-update-pct, 0) * 1%);
+    border-radius: inherit;
+    background: var(--cinnabar-seal);
+    transition: width 0.25s ease;
+  }
 }

@@ -67,6 +67,11 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
       setDismissedVersion(null);
       return;
     }
+    // 下载中：打开下载进度弹窗，绝不触发检测（进度由弹窗内进度条 + 徽标环形进度表达）。
+    if (isDownloading) {
+      setModalOpen(true);
+      return;
+    }
     setModalOpen(true);
     if (!hasUpdate) {
       void check();
