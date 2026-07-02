@@ -1,6 +1,7 @@
 import type { LocalMcpServerUpsertRequest, McpConnectionProbeResult } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { useConfirm } from './ConfirmProvider';
 import { Dropdown, type DropdownOption } from './Dropdown';
 import { Overlay } from './Overlay';
 
@@ -143,6 +144,7 @@ type McpSettingsPanelProps = {
 };
 
 export function McpSettingsPanel({ embedded = false, onServersCountChange }: McpSettingsPanelProps = {}) {
+  const confirm = useConfirm();
   const [servers, setServers] = useState<readonly McpServerView[]>([]);
   const [credentials, setCredentials] = useState<readonly McpCredentialView[]>([]);
   const [displayName, setDisplayName] = useState('');
@@ -181,11 +183,33 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     ]);
     setServers(list);
     setCredentials(credentialList);
-    setSelectedId((current) => current ?? (list[0] ? serverIdOf(list[0]) : null));
+    // 不自动选中任何 server：Drawer 只由用户点击卡片打开，避免进入 MCP tab 时自动弹出。
     onServersCountChange?.(list.length);
   }, [onServersCountChange]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const handleDeleteCredential = useCallback(async (credentialRef: string, label?: string) => {
+    if (!credentialRef) return;
+    const ok = await confirm({
+      title: '删除凭证',
+      message: `确认删除凭证「${label || credentialRef}」？此操作不可撤销。`,
+      confirmText: '删除',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setBusy(true);
+    setStatus('正在删除凭证…');
+    try {
+      await clientApi.mcpDeleteCredential({ credentialRef });
+      await load();
+      setStatus('凭证已删除。');
+    } catch (error) {
+      setStatus(`删除凭证失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [confirm, load]);
 
   useEffect(() => {
     if (transport === 'stdio' && (authMode === 'http_bearer' || authMode === 'http_header' || authMode === 'oauth2')) setAuthMode('none');
@@ -205,7 +229,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
   }, [transport]);
 
   const selected = useMemo(
-    () => servers.find((server) => String(serverIdOf(server)) === String(selectedId)) ?? servers[0] ?? null,
+    () => (selectedId == null ? null : servers.find((server) => String(serverIdOf(server)) === String(selectedId)) ?? null),
     [selectedId, servers],
   );
   const selectedProbeNeedsAuth = Boolean(
@@ -223,17 +247,6 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
       && isAuthRequiredMessage(selected.lastError),
   );
   const selectedNeedsAuth = selectedProbeNeedsAuth || selectedPersistedNeedsAuth;
-
-  const totals = useMemo(() => servers.reduce(
-    (summary, server) => ({
-      enabled: summary.enabled + (server.enabled !== false ? 1 : 0),
-      tools: summary.tools + (server.toolsCount ?? server.tools?.length ?? 0),
-      visibleTools: summary.visibleTools + (server.visibleToolsCount ?? server.tools?.filter((tool) => tool.visible !== false).length ?? 0),
-      resources: summary.resources + (server.resourcesCount ?? server.resources?.length ?? 0),
-      prompts: summary.prompts + (server.promptsCount ?? server.prompts?.length ?? 0),
-    }),
-    { enabled: 0, tools: 0, visibleTools: 0, resources: 0, prompts: 0 },
-  ), [servers]);
 
   const resetForm = useCallback(() => {
     setDisplayName('');
@@ -309,7 +322,14 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
       if (authMode !== 'none') {
         if (authMode === 'oauth2') {
           const scopes = oauthScopes.split(/[\s,]+/).map((scope) => scope.trim()).filter(Boolean);
+          // 按 label 兜底复用已有 oauth 凭证：避免移除后重新添加同名 server 时
+          // 又新建一条重复凭证（历史遗留孤儿的防御路径）。
+          const reuseLabel = credentialLabel.trim() || displayName.trim();
+          const existing = reuseLabel
+            ? credentials.find((c) => (c.kind === 'oauth2' || c.authMode === 'oauth2') && c.label === reuseLabel)
+            : undefined;
           const credential = await clientApi.mcpPutCredential({
+            ...(existing ? { credentialRef: existing.credentialRef } : {}),
             label: credentialLabel.trim() || displayName.trim() || undefined,
             kind: 'oauth2',
             oauth: {
@@ -432,7 +452,10 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
     setBusy(true);
     setStatus('正在切换为 OAuth 2.0…');
     try {
+      // 复用 server 已绑定的 credentialRef，避免每次点击都新建一条孤儿 oauth 凭证。
+      const existingRef = server.auth?.credentialRef;
       const credential = await clientApi.mcpPutCredential({
+        ...(existingRef ? { credentialRef: existingRef } : {}),
         label: labelForServer(server),
         kind: 'oauth2',
         oauth: { scopes: [] },
@@ -574,29 +597,6 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
           <button type="button" onClick={() => void refreshAll()} disabled={busy}>{busy ? '刷新中…' : '刷新列表'}</button>
         </div>
       </header>
-
-      <section className="mcp-summary-grid" aria-label="MCP summary">
-        <article className="mcp-summary-card">
-          <span>连接</span>
-          <strong>{servers.length}</strong>
-          <small>{totals.enabled} enabled</small>
-        </article>
-        <article className="mcp-summary-card">
-          <span>工具</span>
-          <strong>{totals.visibleTools}/{totals.tools}</strong>
-          <small>visible / discovered</small>
-        </article>
-        <article className="mcp-summary-card">
-          <span>资源</span>
-          <strong>{totals.resources}</strong>
-          <small>resources</small>
-        </article>
-        <article className="mcp-summary-card">
-          <span>Prompts</span>
-          <strong>{totals.prompts}</strong>
-          <small>user preview only</small>
-        </article>
-      </section>
 
       {status ? <p className="settings-status mcp-status">{status}</p> : null}
 
@@ -818,69 +818,61 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
         </Overlay>
       ) : null}
 
-      <div className="mcp-main-grid">
-        <aside className="settings-card mcp-sidebar-card">
-          <header className="mcp-section-header">
-            <div>
-              <h3>已配置连接</h3>
-              <p>{servers.length ? '选择一个连接查看 Manifest 和治理状态。' : '还没有 MCP 连接。'}</p>
-            </div>
-          </header>
-          {servers.length === 0 ? (
-            <div className="mcp-empty-state">
-              <strong>还没有 MCP 连接</strong>
-              <p>添加一个 streamable HTTP、SSE 或 stdio server 后刷新 Manifest。</p>
-              <button type="button" onClick={() => setShowAddForm(true)}>添加连接</button>
-            </div>
-          ) : (
-            <ul className="mcp-server-list">
-              {servers.map((server) => {
-                const id = serverIdOf(server);
-                const active = selected && String(serverIdOf(selected)) === String(id);
-                return (
-                  <li key={String(id)}>
-                    <button type="button" className={active ? 'is-active' : ''} onClick={() => { setSelectedId(id); setResourcePreview(null); setPromptPreview(null); }}>
-                      <span>
-                        <strong>{labelForServer(server)}</strong>
-                        <em>{transportLabel(server.transport)}</em>
-                      </span>
-                      <small>{server.toolsCount ?? server.tools?.length ?? 0} tools · {server.resourcesCount ?? server.resources?.length ?? 0} resources · {server.promptsCount ?? server.prompts?.length ?? 0} prompts</small>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-
-          <div className="mcp-credentials-box">
-            <header className="mcp-section-header mcp-section-header--compact">
-              <div>
-                <h3>凭证库</h3>
-                <p>只显示非密元数据。</p>
-              </div>
-            </header>
-            {credentials.length === 0 ? (
-              <p className="settings-empty">还没有保存 MCP 凭证。</p>
-            ) : (
-              <ul className="mcp-credential-list">
-                {credentials.map((credential) => (
-                  <li key={credential.credentialRef}>
-                    <button type="button" onClick={() => { void navigator.clipboard?.writeText(credential.credentialRef); setStatus('credentialRef 已复制。'); }}>
-                      <span>
-                        <strong>{credential.label || credential.credentialRef}</strong>
-                        <small>{credential.kind || credential.authMode || 'secret'}{credential.lastFour ? ` · ••••${credential.lastFour}` : ''}{credential.oauth ? ` · ${credential.oauth.tokenStatus === 'available' ? 'OAuth 已登录' : 'OAuth 未登录'}` : ''}</small>
-                      </span>
-                      <em>{credential.envName ? `env: ${credential.envName}` : credential.headerName || credential.oauth?.expiresAt || credential.storage || 'local'}</em>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+      <div className="mcp-grid-wrap">
+        {servers.length === 0 ? (
+          <div className="mcp-empty-state">
+            <strong>还没有 MCP 连接</strong>
+            <p>点击右上角「添加连接」保存 server 后刷新 Manifest。</p>
           </div>
-        </aside>
+        ) : (
+          <div className="skill-grid mcp-card-grid">
+            {servers.map((server) => {
+              const id = serverIdOf(server);
+              const failed = server.enabled !== false && (server.health?.status === 'error' || Boolean(server.lastError));
+              return (
+                <div
+                  key={String(id)}
+                  className={`skill-card mcp-card${server.enabled === false ? ' disabled' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => { setSelectedId(id); setResourcePreview(null); setPromptPreview(null); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedId(id); setResourcePreview(null); setPromptPreview(null); } }}
+                >
+                  <span className="skill-avatar" aria-hidden="true">{labelForServer(server).charAt(0).toUpperCase()}</span>
+                  <div className="skill-card-body">
+                    <div className="skill-card-title-row">
+                      <strong className="skill-card-name">{labelForServer(server)}</strong>
+                      <span className="skill-card-actions">
+                        {failed ? <span className="mcp-card-badge">FAILED</span> : null}
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={server.enabled !== false}
+                          className={`skill-toggle ${server.enabled !== false ? 'on' : 'off'}`}
+                          disabled={busy}
+                          onClick={(e) => { e.stopPropagation(); void runServerAction(server.enabled === false ? '启用连接' : '禁用连接', () => clientApi.mcpSetEnabled({ serverId: serverIdOf(server), enabled: server.enabled === false })); }}
+                        >
+                          <span className="skill-toggle-thumb" />
+                        </button>
+                      </span>
+                    </div>
+                    <span className="skill-card-desc">{endpointForServer(server)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
-        <section className="settings-card mcp-detail-card">
-          {selected ? (
+      {selected ? (
+        <Overlay
+          onClose={() => setSelectedId(null)}
+          ariaLabel={`MCP 详情：${labelForServer(selected)}`}
+          panelClassName="mcp-drawer"
+          backdropClassName="pa-overlay-backdrop--drawer"
+        >
+          <div className="mcp-drawer-body">
             <div className="mcp-server-detail">
               <header className="mcp-detail-header">
                 <div>
@@ -980,6 +972,44 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                 ) : <p className="settings-empty">尚未发现工具。请刷新 Manifest。</p>}
               </section>
 
+              {(() => {
+                const bound = credentials.filter((c) => (
+                  selected.auth?.credentialRef
+                    ? c.credentialRef === selected.auth.credentialRef
+                    : (c.label && c.label === labelForServer(selected))
+                ));
+                if (bound.length === 0) return null;
+                return (
+                  <section className="mcp-manifest-section mcp-drawer-credentials">
+                    <header className="mcp-section-header">
+                      <div>
+                        <h3>凭证</h3>
+                        <p>该连接绑定的凭证，只显示非密元数据。</p>
+                      </div>
+                    </header>
+                    <ul className="mcp-credential-list">
+                      {bound.map((credential) => (
+                        <li key={credential.credentialRef} className="mcp-credential-item">
+                          <span className="mcp-credential-meta">
+                            <strong>{credential.label || credential.credentialRef}</strong>
+                            <small>{credential.kind || credential.authMode || 'secret'}{credential.lastFour ? ` · ••••${credential.lastFour}` : ''}{credential.oauth ? ` · ${credential.oauth.tokenStatus === 'available' ? 'OAuth 已登录' : 'OAuth 未登录'}` : ''}</small>
+                          </span>
+                          <button
+                            type="button"
+                            className="mcp-credential-delete"
+                            disabled={busy}
+                            title="删除该凭证"
+                            onClick={() => { void handleDeleteCredential(credential.credentialRef, credential.label); }}
+                          >
+                            删除
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                );
+              })()}
+
               <div className="mcp-manifest-grid">
                 <section className="mcp-manifest-section">
                   <header className="mcp-section-header">
@@ -1022,14 +1052,9 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
                 </section>
               </div>
             </div>
-          ) : (
-            <div className="mcp-empty-state mcp-empty-state--detail">
-              <strong>选择或添加一个 MCP 连接</strong>
-              <p>连接保存后刷新 Manifest，即可在这里管理工具、资源和 prompts。</p>
-            </div>
-          )}
-        </section>
-      </div>
+          </div>
+        </Overlay>
+      ) : null}
     </div>
   );
 }

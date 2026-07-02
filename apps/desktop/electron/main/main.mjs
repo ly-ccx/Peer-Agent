@@ -1782,7 +1782,26 @@ ipcMain.handle('mcp:put-credential', (_, item) => mcpCredentialStore.putCredenti
 ipcMain.handle('mcp:delete-credential', (_, params) => mcpCredentialStore.deleteCredential(params?.credentialRef ?? params));
 ipcMain.handle('mcp:install', (_, item) => mcpRegistry.install(item));
 ipcMain.handle('mcp:upsert-server', (_, item) => mcpRegistry.upsertServer(item));
-ipcMain.handle('mcp:uninstall', (_, params) => mcpRegistry.uninstall(params?.mcpId ?? params?.serverId));
+ipcMain.handle('mcp:uninstall', (_, params) => {
+  const serverId = params?.mcpId ?? params?.serverId;
+  // 卸载前取出该 server 绑定的 credentialRef，卸载后连带删除，
+  // 避免凭证变成孤儿留在库里（重新添加同名 server 时会再堆一条重复凭证）。
+  let boundCredentialRef = null;
+  try {
+    boundCredentialRef = mcpRegistry.getServer(serverId)?.auth?.credentialRef ?? null;
+  } catch {
+    boundCredentialRef = null;
+  }
+  const result = mcpRegistry.uninstall(serverId);
+  if (boundCredentialRef) {
+    try {
+      mcpCredentialStore.deleteCredential(boundCredentialRef);
+    } catch (err) {
+      console.error('[mcp] delete bound credential on uninstall failed:', err);
+    }
+  }
+  return result;
+});
 ipcMain.handle('mcp:set-enabled', (_, params) => mcpRegistry.setEnabled(params?.serverId ?? params?.mcpId, params?.enabled));
 ipcMain.handle('mcp:set-tool-visibility', (_, params) => mcpRegistry.setToolVisibility(params?.serverId ?? params?.mcpId, params?.toolName, params?.visible));
 ipcMain.handle('mcp:test-connection', async (_, params) => {

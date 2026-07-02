@@ -1,0 +1,93 @@
+@layer components {
+  /* ── 统一确认弹窗（ConfirmProvider / useConfirm） ── */
+  /* 浮层基座由 .pa-overlay-backdrop / .pa-overlay-panel 统一提供（见 overlay.css）。 */
+  /* 视觉对齐 .updater-modal：卡片化容器 + Peer Frost 变量，替代原生 window.confirm。 */
+  .pa-confirm-dialog {
+    width: min(400px, calc(100vw - 48px));
+    border-radius: 14px;
+    background: var(--pa-surface-card);
+    border: 1px solid var(--za-line);
+    box-shadow: var(--za-shadow-popover);
+    overflow: hidden;
+  }
+
+  .pa-confirm-body {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .pa-confirm-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--pa-text-primary);
+  }
+
+  .pa-confirm-message {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--pa-text-secondary);
+    word-break: break-word;
+  }
+
+  .pa-confirm-actions {
+    margin-top: 8px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .pa-confirm-btn {
+    min-width: 72px;
+    padding: 7px 16px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    cursor: pointer;
+    transition:
+      background var(--za-motion-fast, 120ms) var(--za-ease-out, ease),
+      border-color var(--za-motion-fast, 120ms) var(--za-ease-out, ease),
+      color var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
+  }
+
+  .pa-confirm-btn.ghost {
+    background: transparent;
+    border-color: var(--za-line);
+    color: var(--pa-text-secondary);
+  }
+
+  .pa-confirm-btn.ghost:hover {
+    background: var(--surface-vellum-active);
+    color: var(--pa-text-primary);
+  }
+
+  .pa-confirm-btn.primary {
+    background: var(--pa-text-primary);
+    color: var(--pa-surface-card);
+  }
+
+  .pa-confirm-btn.primary:hover {
+    opacity: 0.88;
+  }
+
+  /* 危险态：朱砂红实心，用于删除等不可撤销操作。 */
+  .pa-confirm-btn.danger {
+    background: var(--cinnabar-seal, #c8503c);
+    color: #fff;
+  }
+
+  .pa-confirm-btn.danger:hover {
+    opacity: 0.9;
+  }
+
+  .pa-confirm-btn:focus-visible {
+    outline: 2px solid var(--za-focus);
+    outline-offset: 2px;
+  }
+}

@@ -37,4 +37,42 @@
   .pa-overlay-panel.is-closing {
     animation: motion-exit-sink var(--za-motion-fast) var(--za-ease-accelerate) both;
   }
+
+  /* ──────────────────────────────────────────────────────────────
+     Drawer 修饰：贴右、全高的抽屉面板（配合 McpSettingsPanel Drawer）。
+     backdrop 从居中改为靠右对齐；面板走横向入场（右侧滑入）。
+     ────────────────────────────────────────────────────────────── */
+  .pa-overlay-backdrop--drawer {
+    place-items: stretch end;
+    padding: 0;
+  }
+
+  .pa-overlay-backdrop--drawer .pa-overlay-panel,
+  .mcp-drawer {
+    width: min(480px, 92vw);
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    /* 抽屉需自带不透明背景：基座 .pa-overlay-panel 本身不带背景色。 */
+    background: var(--chrome-raised);
+    border-left: 1px solid var(--chrome-hairline);
+    box-shadow: var(--shadow-drag);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    /* 复用既有语义基元（禁止散写 @keyframes）：抽屉沿用统一的淡入+位移入场。 */
+    animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
+  }
+
+  .pa-overlay-backdrop--drawer .pa-overlay-panel.is-closing,
+  .mcp-drawer.is-closing {
+    animation: motion-exit-sink var(--za-motion-fast) var(--za-ease-accelerate) both;
+  }
+
+  .mcp-drawer-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--space-6, 20px);
+  }
 }
