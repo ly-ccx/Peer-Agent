@@ -990,4 +990,62 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
+
+  /* ── MCP 卡片网格 + Drawer（对齐 Skills 视觉语言） ── */
+  .mcp-grid-wrap {
+    @apply min-w-0;
+  }
+
+  .mcp-card {
+    cursor: pointer;
+  }
+
+  .mcp-card .skill-card-desc {
+    word-break: break-all;
+  }
+
+  .mcp-card-badge {
+    @apply inline-flex items-center rounded-full px-2 text-[10px] font-medium uppercase leading-[18px];
+    color: var(--za-danger, #d92d20);
+    background: color-mix(in srgb, var(--za-danger, #d92d20) 14%, transparent);
+  }
+
+  .mcp-drawer-credentials .mcp-credential-list {
+    @apply flex flex-col gap-2 p-0;
+    list-style: none;
+  }
+
+  .mcp-drawer-credentials .mcp-credential-item {
+    @apply flex items-center justify-between gap-3 px-3 py-2;
+    border: 1px solid var(--za-line);
+    border-radius: 8px;
+    background: var(--za-panel-1);
+  }
+
+  .mcp-drawer-credentials .mcp-credential-meta {
+    @apply flex min-w-0 flex-col gap-0.5;
+  }
+
+  .mcp-drawer-credentials .mcp-credential-meta strong {
+    @apply truncate text-[13px];
+  }
+
+  .mcp-drawer-credentials .mcp-credential-meta small {
+    @apply text-[11px];
+    color: var(--za-text-muted);
+  }
+
+  .mcp-drawer-credentials .mcp-credential-delete {
+    @apply shrink-0 rounded-md px-2 py-1 text-[12px];
+    color: var(--za-danger, #d92d20);
+    background: transparent;
+    border: 1px solid var(--za-line);
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+
+  .mcp-drawer-credentials .mcp-credential-delete:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
