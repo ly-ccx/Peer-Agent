@@ -261,8 +261,10 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       const cid = conversationStore.resolveConversation(streamId);
       if (!cid) return;
       if (cid === activeRef.current) {
-        textTypewriter.flush();
-        thinkingTypewriter.flush();
+        // 中断时丢弃打字机积压缓冲（而非 flush 吐完），否则用户点停止后
+        // 已入队的 delta 仍会继续「涌出」。正文以主进程落盘的快照为准。
+        textTypewriter.reset();
+        thinkingTypewriter.reset();
       }
       const snap = conversationStore.getSnapshot(cid);
       const turnDurationMs = snap.turnStartedAt != null ? Date.now() - snap.turnStartedAt : undefined;
@@ -360,8 +362,9 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       const cid = conversationStore.resolveConversation(streamId);
       if (!cid) return;
       if (cid === activeRef.current) {
-        textTypewriter.flush();
-        thinkingTypewriter.flush();
+        // 异常终止（含复读兜底自动 error）同样丢弃积压缓冲，避免残留 delta 继续涌出。
+        textTypewriter.reset();
+        thinkingTypewriter.reset();
       }
       conversationStore.setState(cid, {
         isStreaming: false,

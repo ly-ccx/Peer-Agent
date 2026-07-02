@@ -30,6 +30,7 @@ import {
   resolveProviderCredential,
 } from './provider-credential-resolver.mjs';
 import { resolveChannel } from './provider-channels.mjs';
+import { detectTailRepetition } from './repetition-detector.mjs';
 
 const activeStreams = new Map();
 const permissionGate = createChatPermissionGate({ activeStreams });
@@ -247,10 +248,45 @@ function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conver
 
   return {
     send(channel, payload) {
+      // 终态守卫：一旦本轮已发出终态（done/error/aborted，含复读兜底自动 error），
+      // 丢弃所有后续在途的正文/思考 delta，避免「已收口却仍继续转发残留」导致刷屏。
+      if (
+        streamRecord.terminalEventSent &&
+        (channel === 'chat:stream:delta' || channel === 'chat:stream:thinking')
+      ) {
+        return false;
+      }
       if (channel === 'chat:stream:delta' && typeof payload?.content === 'string') {
         streamRecord.accumulatedText += payload.content;
         appendTextSegment('text', payload.content);
         persistStreamRecord();
+        // 复读兜底：命中尾部周期检测即视为模型卡死，主动 abort 并以 error 收口本轮。
+        // delta 属于 REPLAY_UNSAFE 通道，terminalEventSent 置位后不会触发重试/切 provider。
+        const repetition = detectTailRepetition(streamRecord.accumulatedText);
+        if (repetition) {
+          console.warn(
+            `[llm-chat] repetition detected (period=${repetition.period}, repeats=${repetition.repeats}); aborting stream ${streamRecord.streamId}`,
+          );
+          const lifetimeUsage = recordConversationUsage({
+            conversationStore,
+            streamRecord,
+            usage: undefined,
+          });
+          const errorPayload = { streamId: streamRecord.streamId, error: 'repetition_detected' };
+          if (lifetimeUsage) errorPayload.lifetimeUsage = lifetimeUsage;
+          streamRecord.terminalEventSent = true;
+          streamRecord.terminalStatus = 'error';
+          streamRecord.interrupted = true;
+          if (lifetimeUsage) streamRecord.lifetimeUsage = lifetimeUsage;
+          persistStreamRecord({ final: true, interrupted: true });
+          try {
+            streamRecord.controller?.abort();
+          } catch {
+            /* 已中断时忽略 */
+          }
+          realWebContents.send('chat:stream:delta', payload);
+          return realWebContents.send('chat:stream:error', errorPayload);
+        }
       } else if (channel === 'chat:stream:thinking' && typeof payload?.content === 'string') {
         streamRecord.accumulatedThinking += payload.content;
         appendTextSegment('thinking', payload.content);
@@ -468,6 +504,8 @@ export function createLlmChatService({
       // 整轮 wall-clock 起点属于运行时事实。renderer 切走/重开后通过 reattach 恢复该锚点，
       // 避免重新进入会话时计时停住或从 0 重新开始。
       startedAt: Date.now(),
+      // 复读兜底：命中尾部周期检测时需在 send 收口点自行构造 error payload，故留存 streamId。
+      streamId,
       // ADR 22: 累积进行中的流式正文/思考/工具段,供 HMR 重载后 reattach 取快照续接。
       accumulatedText: '',
       accumulatedThinking: '',

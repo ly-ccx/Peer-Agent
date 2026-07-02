@@ -1469,7 +1469,16 @@ export function ChatSurface({
           </div>
         ) : null}
         {streamError ? (
-          <div className="chat-stream-error"><span>⚠ {streamError}</span></div>
+          <div className="chat-stream-error">
+            <span>
+              ⚠{' '}
+              {streamError === 'repetition_detected'
+                ? isZh
+                  ? '检测到重复输出，已自动停止本轮回复。'
+                  : 'Repetitive output detected; this reply was stopped automatically.'
+                : streamError}
+            </span>
+          </div>
         ) : null}
       </div>
 

@@ -105,7 +105,7 @@ function consumeAnthropicStreamLine(line, state, webContents, streamId, trace = 
   }
 }
 
-async function consumeAnthropicStream(res, webContents, streamId, trace = null) {
+async function consumeAnthropicStream(res, webContents, streamId, trace = null, signal = null) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -122,6 +122,16 @@ async function consumeAnthropicStream(res, webContents, streamId, trace = null) 
   };
 
   while (true) {
+    // 用户中断（含复读兜底触发的 abort）后立即停止读流，避免继续消费并
+    // 向渲染进程转发已在途的 delta，这是「点停止后仍有内容涌出」的根因之一。
+    if (signal?.aborted) {
+      try {
+        await reader.cancel();
+      } catch {
+        /* reader 已关闭时忽略 */
+      }
+      break;
+    }
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
@@ -223,7 +233,7 @@ export async function sendAnthropicMessagesStream({
     };
   }
 
-  const streamResult = await consumeAnthropicStream(res, webContents, streamId, trace);
+  const streamResult = await consumeAnthropicStream(res, webContents, streamId, trace, signal);
   if (streamResult.streamError) {
     const errorText = `provider_stream_error: ${streamResult.streamError.message}`;
     const tracePath = await trace.finish({
