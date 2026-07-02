@@ -278,9 +278,24 @@ function RunnerSection({
       ) : null}
       <div className="goal-runner-bar">
         <span className="goal-runner-counters">
-          {isZh
-            ? `轮次 ${runner.roundCount} · 工具 ${runner.toolCallCount} · 探索 ${runner.explorerCount}/${runner.maxExplorers}`
-            : `turns ${runner.roundCount} · tools ${runner.toolCallCount} · explorers ${runner.explorerCount}/${runner.maxExplorers}`}
+          {(() => {
+            const base = isZh
+              ? `轮次 ${runner.roundCount} · 工具 ${runner.toolCallCount}`
+              : `turns ${runner.roundCount} · tools ${runner.toolCallCount}`;
+            // 并发模型：优先展示「本轮」进度（explorerBatch = 最近一批并发 Explorer 的
+            // 已完成/总数）；无进行中批次时回退为累计已派发数（无分母）。
+            const batch = runner.explorerBatch;
+            const explore = batch && batch.total > 0
+              ? isZh
+                ? ` · 探索 ${batch.done}/${batch.total}`
+                : ` · explorers ${batch.done}/${batch.total}`
+              : runner.explorerCount > 0
+                ? isZh
+                  ? ` · 探索 ×${runner.explorerCount}`
+                  : ` · explorers ×${runner.explorerCount}`
+                : '';
+            return `${base}${explore}`;
+          })()}
         </span>
         <div className="goal-runner-actions">
           {canPause ? (

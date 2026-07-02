@@ -9,7 +9,12 @@
 
 const DEFAULT_MAX_TURNS = 8;
 const DEFAULT_MAX_TOOL_CALLS = 40;
+/** @deprecated 语义已弃用（不再作为每计划累计 Explorer 总数上限）；保留仅为兼容旧状态。 */
 const DEFAULT_MAX_EXPLORERS = 3;
+/** 每个 turn 内 Explorer 的并发上限（并发池大小）。 */
+const DEFAULT_EXPLORER_CONCURRENCY = 5;
+/** explorerConcurrency 的硬上限，防止某轮请求过多把上游限流打爆。 */
+const EXPLORER_CONCURRENCY_HARD_CAP = 8;
 /** 连续多少轮双信号（已完成数 + 叶子 Evidence 数）都不增长即判定 no-progress 阻塞。 */
 const DEFAULT_NO_PROGRESS_LIMIT = 3;
 
@@ -336,6 +341,13 @@ export function createGoalRunner({
         toPositiveInteger(runner.maxExplorers, DEFAULT_MAX_EXPLORERS, { allowZero: true }),
         { allowZero: true },
       ),
+      explorerConcurrency: Math.min(
+        EXPLORER_CONCURRENCY_HARD_CAP,
+        toPositiveInteger(
+          options.explorerConcurrency,
+          toPositiveInteger(runner.explorerConcurrency, DEFAULT_EXPLORER_CONCURRENCY),
+        ),
+      ),
       blockedReason: undefined,
       lastError: undefined,
       updatedAt: now(),
@@ -566,17 +578,33 @@ export function createGoalRunner({
           });
           return getState(planId);
         }
-        let explorerToolCalls = 0;
+        // 每 turn 并发池：先把本轮请求整批派发（共享同一 batchId，供 UI 精确统计
+        // 「本轮已完成/本轮总数」），再用大小为 N 的并发池并行执行 runExplorer。
+        // N = explorerConcurrency（默认 5、硬上限 8）；不再受「每计划累计上限」约束，
+        // 计划总数由 maxTurns 天然兜底。
+        const concurrency = Math.min(
+          EXPLORER_CONCURRENCY_HARD_CAP,
+          toPositiveInteger(latest?.runner?.explorerConcurrency, DEFAULT_EXPLORER_CONCURRENCY),
+        );
+        const batchId = `${planId}:t${turnNumber}`;
+        const dispatched = [];
         for (const request of exploreRequests) {
-          if (session.cancelled) return getState(planId);
-          const withRequest = goalPlanStore.dispatchExplorer(planId, request);
+          const withRequest = goalPlanStore.dispatchExplorer(planId, { ...request, batchId });
           const explorer = withRequest?.runner?.explorers?.at(-1);
           if (!explorer) continue;
+          dispatched.push({ explorer, plan: withRequest });
           emit('goalRunner:explorerStarted', {
             planId,
             explorerId: explorer.explorerId,
             question: explorer.request?.question,
           });
+        }
+
+        // 并发安全：JS 单线程，await 之间无抢占，故共享累加器 explorerToolCalls
+        // 与游标 cursor 的自增均为原子操作，无需额外锁。
+        let explorerToolCalls = 0;
+        let cursor = 0;
+        const runOne = async ({ explorer, plan: withRequest }) => {
           try {
             const report = await explorerRunner.runExplorer({
               plan: withRequest,
@@ -591,6 +619,8 @@ export function createGoalRunner({
             });
             emit('goalRunner:explorerCompleted', { planId, explorerId: explorer.explorerId });
           } catch (error) {
+            // fail-soft：单个 Explorer 失败只记 failed 并广播，不中止本轮其它并发任务，
+            // 也不 early return；失败信息留待下一轮由模型自行判断是否重试/换向。
             const message = errorMessage(error);
             goalPlanStore.reportExplorer(planId, explorer.explorerId, {
               status: 'failed',
@@ -599,9 +629,22 @@ export function createGoalRunner({
               confidence: 'low',
             });
             emit('goalRunner:explorerFailed', { planId, explorerId: explorer.explorerId, error: message });
-            return getState(planId);
           }
+        };
+        const worker = async () => {
+          while (true) {
+            if (session.cancelled) return;
+            const index = cursor;
+            cursor += 1;
+            if (index >= dispatched.length) return;
+            await runOne(dispatched[index]);
+          }
+        };
+        const poolSize = Math.max(1, Math.min(concurrency, dispatched.length));
+        if (poolSize > 0) {
+          await Promise.all(Array.from({ length: poolSize }, () => worker()));
         }
+        if (session.cancelled) return getState(planId);
         if (explorerToolCalls > 0) {
           const afterExplore = goalPlanStore.getPlan(planId);
           goalPlanStore.setRunnerState(planId, {

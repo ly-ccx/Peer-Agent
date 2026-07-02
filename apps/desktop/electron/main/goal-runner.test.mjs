@@ -463,16 +463,18 @@ test('explorer: runtime 返回 result.explorers 数组时全部派发并累加�
   assert.ok(got.runner.explorers.every((e) => e.status === 'completed'));
 });
 
-test('explorer: 单回合请求数超过 maxExplorers 时被 store 上限兜底', async () => {
+test('explorer: 单回合请求数超过并发上限时全部执行（并发池分批消化）', async () => {
   const plan = createApprovedPlan();
   const events = [];
+  let maxInFlight = 0;
+  let inFlight = 0;
   const runtime = {
     async runGoalTurn({ turnNumber }) {
       if (turnNumber === 1) {
-        // 一次性请求 4 个，超过默认 maxExplorers=3。
+        // 一次性请求 6 个，超过并发上限（此处配置 concurrency=2）。
         return {
           intent: 'explore',
-          explorers: [1, 2, 3, 4].map((n) => ({
+          explorers: [1, 2, 3, 4, 5, 6].map((n) => ({
             planId: plan.planId,
             question: `Q${n}`,
             reason: `r${n}`,
@@ -484,6 +486,58 @@ test('explorer: 单回合请求数超过 maxExplorers 时被 store 上限兜底'
   };
   const explorerRunner = {
     async runExplorer() {
+      // 观测同时在飞的并发度，验证并发池不超过设定上限。
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return {
+        summary: 'done',
+        findings: [{ claim: 'ok', evidenceRefs: ['local-file://x'] }],
+        evidenceRefs: ['local-file://x'],
+        confidence: 'low',
+        toolCallCount: 0,
+      };
+    },
+  };
+  const runner = createRunner({ runtime, explorerRunner, events });
+
+  await runner.start(plan.planId, { maxTurns: 3, explorerConcurrency: 2, awaitIdle: true });
+
+  const got = store.getPlan(plan.planId);
+  // 不再有累计上限：6 个请求全部被派发并执行完成。
+  assert.equal(got.runner.explorerCount, 6);
+  assert.equal(got.runner.explorers.length, 6);
+  assert.ok(got.runner.explorers.every((e) => e.status === 'completed'));
+  // 并发池大小被 explorerConcurrency=2 约束：同时在飞不超过 2。
+  assert.ok(maxInFlight <= 2, `maxInFlight=${maxInFlight} 应 <= 2`);
+  assert.equal(got.runner.explorerConcurrency, 2);
+});
+
+test('explorer: 单个失败时 fail-soft，不中止同批其余 explorer', async () => {
+  const plan = createApprovedPlan();
+  const events = [];
+  const runtime = {
+    async runGoalTurn({ turnNumber }) {
+      if (turnNumber === 1) {
+        return {
+          intent: 'explore',
+          explorers: [1, 2, 3].map((n) => ({
+            planId: plan.planId,
+            question: `Q${n}`,
+            reason: `r${n}`,
+          })),
+        };
+      }
+      return { continue: false, intent: 'verify' };
+    },
+  };
+  const explorerRunner = {
+    async runExplorer({ explorer }) {
+      // 第二个 explorer 抛错，其余应正常完成。
+      if (explorer.request?.question === 'Q2') {
+        throw new Error('boom');
+      }
       return {
         summary: 'done',
         findings: [{ claim: 'ok', evidenceRefs: ['local-file://x'] }],
@@ -498,8 +552,13 @@ test('explorer: 单回合请求数超过 maxExplorers 时被 store 上限兜底'
   await runner.start(plan.planId, { maxTurns: 3, awaitIdle: true });
 
   const got = store.getPlan(plan.planId);
-  // store dispatchExplorer 在 explorers.length >= maxExplorers 时抛错，
-  // Runner 不应突破上限：派发的 explorer 数受 maxExplorers 约束。
-  assert.ok(got.runner.explorerCount <= got.runner.maxExplorers);
-  assert.equal(got.runner.maxExplorers, 3);
+  assert.equal(got.runner.explorers.length, 3);
+  const byStatus = got.runner.explorers.reduce((acc, e) => {
+    acc[e.status] = (acc[e.status] || 0) + 1;
+    return acc;
+  }, {});
+  // fail-soft：1 个 failed、2 个 completed，不因单个失败中止整批。
+  assert.equal(byStatus.failed, 1);
+  assert.equal(byStatus.completed, 2);
+  assert.ok(events.some((e) => e.type === 'goalRunner:explorerFailed'));
 });

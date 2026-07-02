@@ -25,11 +25,15 @@ import { pathOf } from './data-store.mjs';
  * 不 import electron，可被单测直接 import。
  */
 
-// maxExplorers 的硬上限护栏。每个 explorer 是一个完整的只读子 Agent loop，
-// 直接是 token / 时间成本的乘数。maxExplorers 可经外部（IPC options / runner 状态）
-// 传入，校验侧此前只钳下限（负数→0）而无上限，传入超大值会让单个计划失控派发。
-// 此处补一个对称的上限挡住异常值；默认 3 远低于上限，正常使用不受影响。
+// maxExplorers 的硬上限护栏。历史语义为「每计划累计可派发 Explorer 总数」，现已弃用
+// （不再作为累计闸），仅为兼容旧持久化数据保留字段。此上限继续对异常值做对称钳制。
 const MAX_EXPLORERS_HARD_CAP = 10;
+
+// explorerConcurrency 的硬上限护栏。每个 explorer 是一个完整的只读子 Agent loop，
+// 直接是 token / 时间成本的乘数。并发上限可经外部（IPC options / runner 状态）传入，
+// 此处补一个对称的上限挡住异常值（例如某轮请求几十个时把限流打爆）；默认 5 远低于上限。
+const EXPLORER_CONCURRENCY_HARD_CAP = 8;
+const DEFAULT_EXPLORER_CONCURRENCY = 5;
 
 function readJsonl(filePath) {
   if (!existsSync(filePath)) return [];
@@ -347,11 +351,30 @@ function normalizeExplorerRun(run, fallback = {}) {
   if (typeof run.failureReason === 'string' && run.failureReason.trim()) {
     normalized.failureReason = run.failureReason.trim();
   }
+  const batchId = typeof run.batchId === 'string' && run.batchId.trim()
+    ? run.batchId.trim()
+    : (typeof fallback.batchId === 'string' && fallback.batchId.trim() ? fallback.batchId.trim() : undefined);
+  if (batchId) normalized.batchId = batchId;
   return normalized;
 }
 
 function countExplorerRuns(explorers) {
   return Array.isArray(explorers) ? explorers.filter(Boolean).length : 0;
+}
+
+const EXPLORER_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+
+// 依据某个 batchId，从 explorers 列表推导「本轮」并发进度：
+// total = 属于该 batch 的 Explorer 总数（分母），done = 其中已进入终止态的数量（分子）。
+// 幂等：dispatch / report 任意时刻调用都能得到与当前列表一致的进度。
+function computeExplorerBatch(explorers, batchId) {
+  if (!batchId) return undefined;
+  const runs = (Array.isArray(explorers) ? explorers : []).filter(
+    (run) => run && run.batchId === batchId,
+  );
+  if (runs.length === 0) return undefined;
+  const done = runs.filter((run) => EXPLORER_TERMINAL_STATUSES.has(run.status)).length;
+  return { batchId, total: runs.length, done };
 }
 
 const ACTIVE_PLAN_STATUSES = new Set(['drafting', 'awaiting_approval', 'approved', 'executing', 'paused']);
@@ -386,6 +409,9 @@ function normalizeRunnerState(runner, planId) {
     maxExplorers: Number.isFinite(runner.maxExplorers)
       ? Math.min(MAX_EXPLORERS_HARD_CAP, Math.max(0, Math.trunc(runner.maxExplorers)))
       : 3,
+    explorerConcurrency: Number.isFinite(runner.explorerConcurrency)
+      ? Math.min(EXPLORER_CONCURRENCY_HARD_CAP, Math.max(1, Math.trunc(runner.explorerConcurrency)))
+      : DEFAULT_EXPLORER_CONCURRENCY,
     updatedAt: typeof runner.updatedAt === 'string' && runner.updatedAt.trim() ? runner.updatedAt : now,
   };
   if (RUNNER_INTENTS.has(runner.intent)) {
@@ -402,6 +428,20 @@ function normalizeRunnerState(runner, planId) {
       .map((run) => normalizeExplorerRun(run, { planId }))
       .filter(Boolean);
     if (explorers.length > 0) next.explorers = explorers;
+  }
+  if (runner.explorerBatch && typeof runner.explorerBatch === 'object') {
+    const batchId = typeof runner.explorerBatch.batchId === 'string' && runner.explorerBatch.batchId.trim()
+      ? runner.explorerBatch.batchId.trim()
+      : undefined;
+    const total = Number.isFinite(runner.explorerBatch.total)
+      ? Math.max(0, Math.trunc(runner.explorerBatch.total))
+      : 0;
+    const done = Number.isFinite(runner.explorerBatch.done)
+      ? Math.max(0, Math.min(total, Math.trunc(runner.explorerBatch.done)))
+      : 0;
+    if (batchId && total > 0) {
+      next.explorerBatch = { batchId, total, done };
+    }
   }
   if (typeof runner.lastError === 'string' && runner.lastError.trim()) {
     next.lastError = runner.lastError.trim();
@@ -742,6 +782,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       maxTurns: 8,
       maxToolCalls: 40,
       maxExplorers: 3,
+      explorerConcurrency: DEFAULT_EXPLORER_CONCURRENCY,
       updatedAt: now,
     };
     const nextRunner = normalizeRunnerState({ ...current, ...patch, updatedAt: patch.updatedAt || now }, planId);
@@ -762,12 +803,16 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       maxTurns: 8,
       maxToolCalls: 40,
       maxExplorers: 3,
+      explorerConcurrency: DEFAULT_EXPLORER_CONCURRENCY,
       updatedAt: now,
     };
+    // 并发模型：不再对「每计划累计 Explorer 总数」设闸（该累计上限语义已弃用），
+    // 计划总数由 runner 的 maxTurns 天然兜底；每 turn 的并发上限由 goal-runner 侧的
+    // explorerConcurrency 并发池控制。此处只负责登记本次派发。
     const explorers = Array.isArray(current.explorers) ? current.explorers : [];
-    if (explorers.length >= current.maxExplorers) {
-      throw new Error(`[goal-plan-store] max explorers exhausted for plan ${planId}`);
-    }
+    const batchId = typeof request.batchId === 'string' && request.batchId.trim()
+      ? request.batchId.trim()
+      : undefined;
     const explorerId = typeof request.explorerId === 'string' && request.explorerId.trim()
       ? request.explorerId.trim()
       : randomUUID();
@@ -775,9 +820,10 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       explorerId,
       status: request.status || 'queued',
       request: { ...request, explorerId, planId },
+      batchId,
       createdAt: request.createdAt || now,
       updatedAt: request.updatedAt || now,
-    }, { explorerId, planId });
+    }, { explorerId, planId, batchId });
     if (!explorerRun) {
       throw new Error(`[goal-plan-store] invalid explorer request for plan ${planId}`);
     }
@@ -789,6 +835,9 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       intent: 'explore',
       explorerCount: countExplorerRuns(nextExplorers),
       explorers: nextExplorers,
+      // 本轮进度：属于同一 batchId 的 Explorer 归集为一批（total 递增、done 从 0 起）。
+      // 无 batchId（旧单发路径）时保持既有 batch 不变。
+      explorerBatch: batchId ? computeExplorerBatch(nextExplorers, batchId) : current.explorerBatch,
       updatedAt: now,
     }, planId);
     return persist({ ...plan, runner: nextRunner, updatedAt: now });
@@ -826,12 +875,18 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     }, { explorerId, planId });
     const nextExplorers = explorers.map((run, idx) => (idx === index ? nextRun : run));
     const stillRunning = nextExplorers.some((run) => run.status === 'queued' || run.status === 'running');
+    // 本轮进度：以被回填 Explorer 所属 batch 重算 done/total；该 explorer 不属于任何
+    // batch（旧单发路径）时保持既有 batch 不变。
+    const reportedBatchId = nextRun.batchId;
     const nextRunner = normalizeRunnerState({
       ...current,
       status: stillRunning ? 'exploring' : 'idle',
       intent: stillRunning ? 'explore' : 'verify',
       explorerCount: countExplorerRuns(nextExplorers),
       explorers: nextExplorers,
+      explorerBatch: reportedBatchId
+        ? computeExplorerBatch(nextExplorers, reportedBatchId)
+        : current.explorerBatch,
       updatedAt: now,
     }, planId);
     return persist({ ...plan, runner: nextRunner, updatedAt: now });

@@ -170,8 +170,19 @@ export interface GoalExplorerRun {
   readonly request: GoalExplorerRequest;
   readonly report?: GoalExplorerReport;
   readonly failureReason?: string;
+  /** 同一 turn 内并发派发的一批 Explorer 共享同一 batchId；用于 UI 精确统计「本轮」进度。 */
+  readonly batchId?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+/** 本轮（最近一批）Explorer 并发进度；供 UI 展示「已完成 / 本轮总数」。 */
+export interface GoalExplorerBatch {
+  readonly batchId: string;
+  /** 本批派发的 Explorer 总数（分母）。 */
+  readonly total: number;
+  /** 本批已进入终止态（completed/failed/cancelled）的数量（分子）。 */
+  readonly done: number;
 }
 
 /** GoalPlan 内嵌的轻量 runner 状态；不代表工具执行事实，任务完成仍必须由 Evidence 回写。 */
@@ -188,8 +199,17 @@ export interface GoalRunnerState {
   readonly explorerCount: number;
   readonly maxTurns: number;
   readonly maxToolCalls: number;
+  /**
+   * @deprecated 语义已弃用：不再作为「每计划累计可派发 Explorer 总数」的闸。
+   * 保留字段仅为向后兼容旧持久化数据；并发上限改由 explorerConcurrency 表达，
+   * 计划总数由 maxTurns 天然兜底。
+   */
   readonly maxExplorers: number;
+  /** 每个 turn 内 Explorer 的并发上限（并发池大小）。默认 5，硬上限 8。 */
+  readonly explorerConcurrency: number;
   readonly explorers?: GoalExplorerRun[];
+  /** 最近一批并发 Explorer 的进度；无进行中批次时可缺省。 */
+  readonly explorerBatch?: GoalExplorerBatch;
   readonly blockedReason?: string;
   readonly lastError?: string;
   readonly updatedAt: string;

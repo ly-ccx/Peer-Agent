@@ -743,15 +743,47 @@ test('explorer: dispatch/report 动态记录子 Agent 实例且不改写任务�
   assert.deepEqual(reported.evidenceRefs, []);
 });
 
-test('explorer: dispatch 遵守 maxExplorers 预算', () => {
+test('explorer: dispatch 不再受累计上限限制（并发模型）', () => {
   const plan = store.createPlan(draftWithTasks());
+  // maxExplorers 语义已弃用；即便设为 1，也不再对累计派发数设闸。
   store.setRunnerState(plan.planId, { enabled: true, maxExplorers: 1 });
   store.dispatchExplorer(plan.planId, { question: 'first', reason: 'test' });
+  const after = store.dispatchExplorer(plan.planId, { question: 'second', reason: 'test' });
+  // 第二次派发不再抛错，两个 explorer 都被登记。
+  assert.equal(after.runner.explorers.length, 2);
+  assert.equal(after.runner.explorerCount, 2);
+});
 
-  assert.throws(
-    () => store.dispatchExplorer(plan.planId, { question: 'second', reason: 'test' }),
-    /max explorers exhausted/,
-  );
+test('explorer: 同一 batchId 的派发汇总为本轮进度 explorerBatch', () => {
+  const plan = store.createPlan(draftWithTasks());
+  store.setRunnerState(plan.planId, { enabled: true });
+  const batchId = `${plan.planId}:t1`;
+  store.dispatchExplorer(plan.planId, { question: 'a', reason: 'test', batchId });
+  const dispatched = store.dispatchExplorer(plan.planId, { question: 'b', reason: 'test', batchId });
+  // 本轮总数 2、已完成 0。
+  assert.equal(dispatched.runner.explorerBatch.batchId, batchId);
+  assert.equal(dispatched.runner.explorerBatch.total, 2);
+  assert.equal(dispatched.runner.explorerBatch.done, 0);
+
+  // 回填第一个 explorer 完成后，本轮进度 done 递增到 1。
+  const firstId = dispatched.runner.explorers[0].explorerId;
+  const reported = store.reportExplorer(plan.planId, firstId, {
+    summary: 'done a',
+    findings: [{ claim: 'x', evidenceRefs: ['local-file://x'] }],
+    evidenceRefs: ['local-file://x'],
+    confidence: 'high',
+  });
+  assert.equal(reported.runner.explorerBatch.total, 2);
+  assert.equal(reported.runner.explorerBatch.done, 1);
+});
+
+test('explorer: explorerConcurrency 被钳制在硬上限 8 内', () => {
+  const plan = store.createPlan(draftWithTasks());
+  const over = store.setRunnerState(plan.planId, { enabled: true, explorerConcurrency: 50 });
+  assert.equal(over.runner.explorerConcurrency, 8);
+  const under = store.setRunnerState(plan.planId, { enabled: true, explorerConcurrency: 0 });
+  // 至少为 1（并发池不可为 0）。
+  assert.equal(under.runner.explorerConcurrency, 1);
 });
 
 test('getActivePlanByConversation 返回同会话最新活跃计划，忽略结束态', () => {
