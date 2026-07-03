@@ -3,8 +3,10 @@
 // 作用：goal 模式下，Runner 托管推进 turn 通过明确的 Context Source 注入「续推上下文」，
 // 而不是把目标/边界/预算等实质内容塞进一条伪造的 user message。
 //
-// wire 值迁移后（见 ADR 41 / goal-mode-ultrathink-workflow 设计文档）:Runner 归 goal 模式
-// 独占(A1)。plan 回归纯审批门,批准后不再自动托管续推;goal 才是自驱目标运行模式。
+// wire 值迁移后（见 ADR 41 / goal-mode-ultrathink-workflow 设计文档）:plan/goal 执行段合一
+// (修订 ADR 41,见 B2-b)。plan 与 goal 批准后共用同一自驱 Runner 托管续推,差异仅在批准前
+// 的规划把关粒度。Runner 驱动的 turn 一律以 mode:'goal' 执行,故本 Source 按 mode==='goal'
+// 渲染时,对 plan 批准后启动的 Runner 同样注入护栏上下文。
 //
 // 本 Source 产出两类 section：
 // - L7_CONTINUITY（trust=runtime，事实上下文）：活动目标摘要、当前 task、boundaries、
@@ -176,7 +178,8 @@ export function createGoalRunnerPromptSource() {
     trust: 'runtime',
     observe(input = {}) {
       const mode = asString(input.mode) || 'chat';
-      // Runner 归 goal 模式独占(A1):仅 goal 模式注入续推上下文;plan 为纯审批门,不托管续推。
+      // 按 turn 的执行模式渲染:Runner 驱动的 turn(含 plan 批准后启动的)一律 mode:'goal',
+      // 故仍以 mode==='goal' 为准注入续推上下文;chat 及未托管的 plan turn 零额外 token。
       if (mode !== 'goal') return { plan: null };
       const store = input.goalPlanStore;
       const conversationId = input.conversationId ?? null;

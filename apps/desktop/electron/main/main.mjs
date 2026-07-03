@@ -1326,14 +1326,12 @@ ipcMain.handle('goalPlans:revise', (_, { planId, patch, reason, changedBy }) =>
   goalPlanStore.revisePlan(planId, patch, { reason, changedBy }));
 ipcMain.handle('goalPlans:approve', (_, { planId, approval }) => {
   const plan = goalPlanStore.recordApproval(planId, approval);
-  // Runner 归 goal 模式独占(A1):仅当该会话处于 goal 模式时,批准才自动启动 Runner 托管推进。
-  // plan 模式下,批准是纯审批门——放行后续执行,但不自动续推(由用户在会话中逐步驱动)。
+  // plan/goal 执行段合一(修订 ADR 41,见 B2-b):批准即自动启动 Runner 托管推进,
+  // 兑现「批准并执行」按钮的字面语义。plan 与 goal 的差异收敛到「批准前的规划把关粒度」;
+  // 批准后二者共用同一自驱 Runner,且因 runGoalTurn 写死 mode:'goal',续推上下文注入、
+  // 防偏航 re-anchor、Verification Gate 三大护栏对 plan 同样生效。
   if (approval?.decision === 'approve') {
-    const conversationId = plan?.conversationId ?? null;
-    const conv = conversationId ? conversationStore.getConversation(conversationId) : null;
-    if (conv?.mode === 'goal') {
-      void goalRunner?.start(planId);
-    }
+    void goalRunner?.start(planId);
   }
   return plan;
 });
