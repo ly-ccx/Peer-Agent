@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { VersionBadge } from '../../app/components/VersionBadge';
 import { SidebarResizer } from '../../workbench/SidebarResizer';
+import { useAwaitingGoalPlanCounts } from './goal/useAwaitingGoalPlans';
 
 type ConversationView = 'active' | 'archived';
 
@@ -137,6 +138,7 @@ export function Sidebar({
 }) {
   const isZh = i18n.locale === 'zh-CN';
   const isArchivedView = conversationView === 'archived';
+  const awaitingGoalPlanCounts = useAwaitingGoalPlanCounts(true);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; conversation: ConversationMeta } | null>(null);
@@ -306,6 +308,11 @@ export function Sidebar({
     const compactLabel = isZh ? '压缩中' : 'Compacting';
     const compactPercentText = typeof compactPercent === 'number' ? `${Math.round(compactPercent)}%` : null;
     const compactTitle = compactPercentText ? `${compactLabel} ${compactPercentText}` : compactLabel;
+    const awaitingGoalPlanCount = awaitingGoalPlanCounts.get(conv.id) ?? 0;
+    const awaitingGoalPlanLabel = isZh ? '待批准' : 'Pending';
+    const awaitingGoalPlanText = awaitingGoalPlanCount > 1
+      ? `${awaitingGoalPlanLabel} · ${awaitingGoalPlanCount}`
+      : awaitingGoalPlanLabel;
     const isPinned = Boolean(conv.pinnedAt);
     const canTogglePin = !isArchivedView;
     const rowClasses = [
@@ -382,6 +389,11 @@ export function Sidebar({
             {compactPercentText ? (
               <span className="sidebar-conv-compacting-pct">{compactPercentText}</span>
             ) : null}
+          </span>
+        ) : null}
+        {awaitingGoalPlanCount > 0 ? (
+          <span className="sidebar-conv-awaiting" title={awaitingGoalPlanText}>
+            {awaitingGoalPlanText}
           </span>
         ) : null}
         {editingConversationId === conv.id ? (

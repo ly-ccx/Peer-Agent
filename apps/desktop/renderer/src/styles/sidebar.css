@@ -580,6 +580,22 @@
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+.sidebar-conv-awaiting {
+  flex: 0 1 auto;
+  max-width: 76px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: var(--radius-pill);
+  padding: 2px 7px;
+  background: var(--za-warn-soft);
+  color: var(--za-warn);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+}
 .sidebar-conv-actions {
   display: flex;
   flex: 0 0 auto;

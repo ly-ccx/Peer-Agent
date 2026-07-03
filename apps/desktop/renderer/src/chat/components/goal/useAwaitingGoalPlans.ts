@@ -58,3 +58,48 @@ export function useAwaitingGoalPlans(
 
   return awaitingPlans;
 }
+
+/**
+ * 左侧会话列表的只读待批准聚合视图。
+ *
+ * 为避免改动 conversationsList 主进程契约，这里在渲染端拉取全量 GoalPlan，
+ * 仅按 status === 'awaiting_approval' + conversationId 聚合计数。任何批准/驳回/
+ * 新建计划都会触发 goalPlans:changed 广播并重拉，因此列表徽标会和右侧面板同步消解。
+ */
+export function useAwaitingGoalPlanCounts(enabled = true): ReadonlyMap<string, number> {
+  const [counts, setCounts] = useState<ReadonlyMap<string, number>>(() => new Map());
+
+  const reload = useCallback(async () => {
+    if (!enabled) {
+      setCounts(new Map());
+      return;
+    }
+    try {
+      const result = await clientApi.goalPlansList({});
+      const next = new Map<string, number>();
+      for (const plan of result) {
+        const conversationId = normalizeConversationId(plan.conversationId);
+        if (!conversationId || plan.status !== 'awaiting_approval') continue;
+        next.set(conversationId, (next.get(conversationId) ?? 0) + 1);
+      }
+      setCounts(next);
+    } catch {
+      // 只读列表徽标：拉取失败时不阻断左侧会话列表。
+      setCounts(new Map());
+    }
+  }, [enabled]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const unsubscribe = clientApi.onGoalPlansChanged(() => {
+      void reload();
+    });
+    return unsubscribe;
+  }, [enabled, reload]);
+
+  return counts;
+}
