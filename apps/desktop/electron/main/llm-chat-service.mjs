@@ -265,7 +265,7 @@ function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conver
         const repetition = detectTailRepetition(streamRecord.accumulatedText);
         if (repetition) {
           console.warn(
-            `[llm-chat] repetition detected (period=${repetition.period}, repeats=${repetition.repeats}); aborting stream ${streamRecord.streamId}`,
+            `[llm-chat] repetition detected (period=${repetition.period}, repeats=${repetition.repeats}, reason=${repetition.reason}, substantiveChars=${repetition.substantiveChars}, unit=${JSON.stringify(repetition.unitPreview)}); aborting stream ${streamRecord.streamId}`,
           );
           const lifetimeUsage = recordConversationUsage({
             conversationStore,

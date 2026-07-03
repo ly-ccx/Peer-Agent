@@ -19,11 +19,17 @@ test('detects tail repetition when a short unit repeats many times', () => {
   assert.equal(hit.unit, REPLAY_UNIT);
 });
 
-test('detects single-character flooding (e.g. runaway newlines)', () => {
+test('detects single-character flooding only after the stricter flood threshold', () => {
   const text = 'a'.repeat(DEFAULT_REPETITION_OPTIONS.minLength) + '\n'.repeat(500);
   const hit = detectTailRepetition(text);
   assert.ok(hit, 'expected a repetition hit for single-char flood');
   assert.equal(hit.period, 1);
+  assert.equal(hit.reason, 'single_char_flood');
+});
+
+test('does not flag short single-character formatting tails', () => {
+  const text = 'a'.repeat(DEFAULT_REPETITION_OPTIONS.minLength) + '\n'.repeat(50);
+  assert.equal(detectTailRepetition(text), null);
 });
 
 test('does not flag normal long prose without runaway repetition', () => {
@@ -34,6 +40,23 @@ test('does not flag normal long prose without runaway repetition', () => {
   while (text.length < DEFAULT_REPETITION_OPTIONS.minLength + 2000) {
     text += sentence + Math.random().toString(36).slice(2) + ' ';
   }
+  assert.equal(detectTailRepetition(text), null);
+});
+
+test('does not flag low-substance Markdown separator tails', () => {
+  const separator = '|---|---|\n';
+  const text = 'a'.repeat(DEFAULT_REPETITION_OPTIONS.minLength) + separator.repeat(80);
+  assert.equal(detectTailRepetition(text), null);
+});
+
+test('does not flag punctuation-only formatting tails', () => {
+  const text = 'a'.repeat(DEFAULT_REPETITION_OPTIONS.minLength) + '—— '.repeat(80);
+  assert.equal(detectTailRepetition(text), null);
+});
+
+test('does not flag repeated empty list markers as substantive repetition', () => {
+  const marker = '- \n';
+  const text = 'a'.repeat(DEFAULT_REPETITION_OPTIONS.minLength) + marker.repeat(80);
   assert.equal(detectTailRepetition(text), null);
 });
 
@@ -50,7 +73,7 @@ test('does not detect when text is shorter than minLength', () => {
 });
 
 test('respects custom thresholds', () => {
-  const unit = 'ab';
+  const unit = 'abcdef';
   const text = 'z'.repeat(100) + unit.repeat(10);
   // 默认 minLength 太大不会命中；放宽后应命中。
   assert.equal(detectTailRepetition(text), null);
