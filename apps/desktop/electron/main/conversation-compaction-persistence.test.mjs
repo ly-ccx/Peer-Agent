@@ -160,4 +160,66 @@ describe('conversation compaction persistence', () => {
     assert.equal(persisted[2].id, 'compaction-id');
     assert.deepEqual(persisted[3], pendingAssistant);
   });
+
+  it('preserves a non-empty in-flight assistant after automatic compaction', () => {
+    const inFlightAssistant = {
+      id: 'streaming-assistant',
+      role: 'assistant',
+      content: 'partial answer',
+      segments: [
+        { type: 'tool', name: 'read_file', status: 'running' },
+        { type: 'reasoning', content: 'thinking' },
+      ],
+      timestamp: 2,
+    };
+    const sourceMessages = [
+      { id: 'm1', role: 'user', content: 'old 1' },
+      { id: 'm2', role: 'assistant', content: 'old 2' },
+      { id: 'm3', role: 'user', content: 'recent 1' },
+      inFlightAssistant,
+    ];
+
+    const persisted = buildPersistedCompactedMessages({
+      compactedMessages,
+      sourceMessages,
+      keptCount: 2,
+      preservePendingAssistant: true,
+      idFactory: () => 'compaction-id',
+    });
+
+    assert.equal(persisted.length, 5);
+    assert.deepEqual(persisted[0], sourceMessages[0]);
+    assert.equal(persisted[1].id, 'compaction-id');
+    assert.deepEqual(persisted.slice(2, 4), sourceMessages.slice(1, 3));
+    assert.deepEqual(persisted[4], inFlightAssistant);
+  });
+
+  it('does not move the last completed assistant when preservePendingAssistant is disabled', () => {
+    const completedAssistant = {
+      id: 'completed-assistant',
+      role: 'assistant',
+      content: 'completed answer',
+      segments: [{ type: 'text', content: 'completed answer' }],
+      timestamp: 3,
+    };
+    const sourceMessages = [
+      { id: 'm1', role: 'user', content: 'old 1' },
+      { id: 'm2', role: 'assistant', content: 'old 2' },
+      { id: 'm3', role: 'user', content: 'recent 1' },
+      completedAssistant,
+    ];
+
+    const persisted = buildPersistedCompactedMessages({
+      compactedMessages,
+      sourceMessages,
+      keptCount: 2,
+      preservePendingAssistant: false,
+      idFactory: () => 'compaction-id',
+    });
+
+    assert.equal(persisted.length, 5);
+    assert.deepEqual(persisted.slice(0, 2), sourceMessages.slice(0, 2));
+    assert.equal(persisted[2].id, 'compaction-id');
+    assert.deepEqual(persisted.slice(3), sourceMessages.slice(-2));
+  });
 });

@@ -21,6 +21,7 @@ import { useCallback, useEffect, useRef } from 'react';
 
 import { clientApi } from '../../clientApi';
 import { conversationStore } from '../state/conversationStore';
+import { mergeLoadedMessagesWithLiveTail } from '../state/compactionLiveTailMerge';
 import { loadConversationMessages, usageFromLifetime } from '../state/conversationLoad';
 import {
   getTextContent,
@@ -496,10 +497,11 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
             // assistant 占位。这里在流仍活跃时把内存中的 assistant 尾消息接回压缩后的列表，
             // 保证 typewriter 的后续 delta 仍能落到这条消息上，避免界面卡住不出消息。
             const liveTail = prev.messages[prev.messages.length - 1];
-            if (prev.streamId === streamId && liveTail && liveTail.role === 'assistant') {
-              return { messages: [...loaded, liveTail] };
-            }
-            return { messages: loaded };
+            return {
+              messages: mergeLoadedMessagesWithLiveTail(loaded, liveTail, {
+                streamMatches: prev.streamId === streamId,
+              }),
+            };
           });
           // 口径分离（ADR 42）：压缩完成即让旧的权威上下文快照失效。authoritativeContext 是
           // 上一回合 done 下发的「压缩前」显示口径，若不清空，ChatSurface 的

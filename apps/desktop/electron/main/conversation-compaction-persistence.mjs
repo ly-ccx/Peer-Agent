@@ -1,9 +1,5 @@
 export function isPendingAssistantMessage(message) {
-  return (
-    message?.role === 'assistant' &&
-    String(message?.content ?? '') === '' &&
-    (!Array.isArray(message?.segments) || message.segments.length === 0)
-  );
+  return message?.role === 'assistant';
 }
 
 export function isCompactionMessage(message) {
