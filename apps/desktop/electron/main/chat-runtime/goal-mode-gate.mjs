@@ -226,8 +226,8 @@ function denialMessage(reason, locale) {
   }
   if (reason === 'goal_scope_out_of_bounds') {
     return zh
-      ? 'Goal 模式：目标路径命中计划的 outOfScope 边界，已拒绝。如需变更范围，请更新计划边界。'
-      : 'Goal mode: target path matches the plan\'s outOfScope boundary and was denied. Update the plan boundaries to change scope.';
+      ? 'Goal 模式：目标路径命中目标的 out-of-scope 边界，已拒绝。如需变更范围，请更新目标边界。'
+      : 'Goal mode: target path matches the goal\'s out-of-scope boundary and was denied. Update the goal boundaries to change scope.';
   }
   if (reason === 'goal_irreversible_denied') {
     return zh

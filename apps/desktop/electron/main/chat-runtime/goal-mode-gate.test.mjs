@@ -154,6 +154,16 @@ describe('buildGoalModeDenial', () => {
     assert.equal(parsed.reason, 'goal_scope_out_of_workspace');
     assert.equal(parsed.detail, '/etc/passwd');
   });
+
+  it('describes goal out-of-scope boundaries without reverting to plan wording', () => {
+    const denial = buildGoalModeDenial({
+      name: 'write_file',
+      reason: 'goal_scope_out_of_bounds',
+      locale: 'en-US',
+    });
+    assert.match(denial.output, /goal's out-of-scope boundary/);
+    assert.doesNotMatch(denial.output, /plan's outOfScope boundary/);
+  });
 });
 
 // ── Slice B：goal 模式确定性 hooks·阶段一（写盘范围守卫 + 不可逆动作确认） ──

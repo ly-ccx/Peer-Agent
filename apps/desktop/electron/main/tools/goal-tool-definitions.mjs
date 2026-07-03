@@ -1,11 +1,12 @@
 /**
- * Goal 模式本地工具定义（Manifest）—— 见 Goal 模式设计。
+ * Plan / Goal 目标追踪工具定义（Manifest）—— 见 Plan 模式设计与 Goal 模式设计。
  *
  * 该工具经正规运行时链路暴露：
  *   Capability Provider(local.goal.update) → Manifest(本文件) → Runtime Projection
  *     → Tool Call(goal_update_task) → PermissionGrant → Evidence
  *
- * 用途：goal 模式"先规划 → 批准 → 执行"阶段，agent 运行时在完成（或失败/受阻）
+ * 用途：Plan 模式用这些工具建立审批前的持久计划；Goal 模式用同一套
+ * plan/task/evidence 结构做自驱目标追踪。agent 运行时在完成（或失败/受阻）
  * 某个子任务后，显式调用本工具，把刚产生的 evidenceRefs 回写到对应子任务，由
  * goal-plan-store 落盘并自底向上重算进度。"completed 必须带 evidenceRefs" 的治理
  * 约束在 store 层强制。
@@ -19,27 +20,27 @@ export const GOAL_TOOL_NAMES = Object.freeze({
 });
 
 const GOAL_CREATE_PLAN_PROMPT = [
-  'Create a persistent, trackable goal plan (goal mode only). Call this FIRST in goal mode,',
-  'before doing any side-effecting work: in goal mode the runtime blocks side-effecting tools',
-  'until a plan exists and the user approves it. Provide a clear goal and a complete list of',
-  'ordered subtasks (each subtask: title, optional dependsOn). Always provide a short,',
-  'human-readable title for the plan itself (a few words) — it is required and shown',
-  'verbatim in the plan panel; do not leave it empty. The plan is saved as a draft',
-  'awaiting approval; after creating it, ask the user to approve via request_user_input.',
-  'Do not start executing subtasks until the user approves.',
+  'Create a persistent, trackable goal/plan. In Plan mode, call this before side-effecting work',
+  'so the user can review and approve the draft plan. In Goal mode, use it to establish',
+  'the objective, success criteria, boundaries, and trackable subtasks for autonomous execution;',
+  'Goal mode does not require a plan-approval gate before every side-effecting step.',
+  'Provide a clear goal and a complete list of ordered subtasks (each subtask: title, optional dependsOn).',
+  'Always provide a short, human-readable title for the plan itself (a few words) — it is required',
+  'and shown verbatim in the plan panel; do not leave it empty.',
 ].join(' ');
 
 const GOAL_TOOL_PROMPT = [
-  'Record execution evidence for a goal-plan subtask (goal mode only).',
-  'Call this after you finish, fail, or get blocked on a subtask during the execute phase',
-  'of an approved goal plan. Mark a subtask "completed" only when you can supply the',
-  'evidenceRefs (artifact refs / tool-result refs) that prove it is done — the store',
-  'rejects a "completed" status without evidenceRefs. Progress is recomputed bottom-up',
+  'Record execution evidence for a goal/plan subtask (Plan and Goal modes).',
+  'Call this after you finish, fail, or get blocked on a subtask during execution.',
+  'In Plan mode this usually happens after the approved plan starts running; in Goal mode it',
+  'is the normal progress ledger for autonomous work. Mark a subtask "completed" only when',
+  'you can supply the evidenceRefs (artifact refs / tool-result refs) that prove it is done —',
+  'the store rejects a "completed" status without evidenceRefs. Progress is recomputed bottom-up',
   'from leaf subtasks; do not hand-maintain progress.',
 ].join(' ');
 
 const GOAL_GET_PLAN_PROMPT = [
-  'Read back an existing goal plan (goal mode only). Read-only and side-effect free.',
+  'Read back an existing goal/plan (Plan and Goal modes). Read-only and side-effect free.',
   'Use this to recover the authoritative subtask taskId list and current statuses —',
   'for example after a long conversation or context compaction when you are unsure of',
   'the exact taskId to pass to goal_update_task. Pass planId to fetch one plan; omit',
@@ -48,8 +49,8 @@ const GOAL_GET_PLAN_PROMPT = [
 ].join(' ');
 
 const REQUEST_EXPLORER_PROMPT = [
-  'Request a read-only Explorer sub-agent to investigate a focused question (goal mode only).',
-  'Use this during the execute phase when you need to gather evidence in parallel without',
+  'Request a read-only Explorer sub-agent to investigate a focused question (Plan and Goal modes).',
+  'Use this during execution when you need to gather evidence in parallel without',
   'spending your own turn budget — for example mapping where a symbol is used, confirming a',
   'config value, or scanning a subtree. The Explorer is strictly read-only (no writes, shell',
   'side effects, or MCP mutations) and returns findings with evidence refs. Provide a clear',

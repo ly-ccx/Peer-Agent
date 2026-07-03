@@ -1314,8 +1314,8 @@ ipcMain.handle('conversations:delete', (_, { id }) => {
 // 压缩(replace-messages)只重写消息文件,不碰 meta,故 lifetimeUsage 不受压缩影响。
 ipcMain.handle('conversations:add-usage', (_, { id, usage }) => conversationStore.addUsage(id, usage));
 
-// ── Goal Plans（goal 模式：先规划 → 批准 → 执行，计划为持久化 Evidence/artifact）──
-// 见 Goal 模式设计。progress 由 store 自底向上聚合，调用方不可手填。
+// ── Goal Plans（Plan 审批计划 / Goal 自驱目标追踪，均持久化为 Evidence/artifact）──
+// 见 Plan / Goal 模式设计。progress 由 store 自底向上聚合，调用方不可手填。
 ipcMain.handle('goalPlans:list', (_, params) => {
   if (params?.conversationId !== undefined) return goalPlanStore.listPlanDetailsByConversation(params.conversationId);
   return goalPlanStore.listPlanDetails();

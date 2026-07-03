@@ -201,6 +201,16 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     }
   });
 
+  it('projects goal tools when mode is plan', () => {
+    const names = materializedNames('plan');
+    for (const goalTool of GOAL_TOOL_NAMES) {
+      assert.ok(
+        names.includes(goalTool),
+        `${goalTool} should be materialized in plan mode`,
+      );
+    }
+  });
+
   it('projects execution tools so goal mode can self-drive (explore→act→verify)', () => {
     const names = materializedNames('goal');
     for (const execTool of ['bash', 'read_file', 'search_files', 'edit_file', 'write_file', 'batch_search']) {

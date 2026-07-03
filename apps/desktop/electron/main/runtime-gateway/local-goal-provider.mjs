@@ -2,10 +2,11 @@ import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 
 /**
- * 本地 Goal 能力 Provider —— 见 Goal 模式设计（运行时自动回写）。
+ * 本地 Plan / Goal 目标追踪能力 Provider —— 见 Plan 模式设计与 Goal 模式设计（运行时自动回写）。
  *
  * 设计要点（与 AGENTS.md 非协商运行时链一致）：
- * - goal 模式"先规划 → 批准 → 执行"时，agent 运行时在完成某子任务后，
+ * - Plan 模式使用这些能力建立审批前持久计划；Goal 模式使用同一套
+ *   plan/task/evidence 结构做自驱目标追踪。agent 运行时在完成某子任务后，
  *   显式调用 `goal_update_task` 工具，把刚产生的 evidenceRefs 回写到对应子任务。
  * - 回写经正规链路：Capability Provider → Manifest → Runtime Projection → Tool Call
  *   → PermissionGrant → Evidence；不在中央工具链路里嗅探"当前活跃子任务"（那会污染
