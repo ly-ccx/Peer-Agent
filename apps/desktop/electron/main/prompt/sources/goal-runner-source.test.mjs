@@ -67,7 +67,9 @@ test('goal mode renders facts + contract sections', () => {
   assert.match(facts.content, /explorers 1\/4/);
   assert.match(facts.content, /in scope:/);
   assert.match(facts.content, /out of scope:/);
-  assert.match(facts.content, /success criteria:/);
+  // DoD-as-Code：section 标题升级，字符串成功标准向后兼容渲染为结构化 [manual] (manual)。
+  assert.match(facts.content, /success criteria \(Definition of Done\):/);
+  assert.match(facts.content, /- \[manual\] \(manual\) tests pass/);
 
   assert.equal(contract.layer, 'L6_MODE_REMINDER');
   assert.match(contract.content, /do not re-plan/);

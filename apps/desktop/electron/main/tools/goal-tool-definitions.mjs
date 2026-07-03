@@ -120,6 +120,57 @@ export const GOAL_TOOL_DEFINITIONS = [
             additionalProperties: false,
           },
         },
+        successCriteria: {
+          type: 'array',
+          description:
+            'Optional Definition-of-Done for the goal. Each item is a verifiable success '
+            + 'criterion. Prefer machine-verifiable kinds (command/test/file-contains/file-exists) '
+            + 'so the runtime can auto-verify after acting; use "manual" only when no automated '
+            + 'check exists. Plain strings are accepted for backward compatibility and treated as '
+            + 'manual criteria. When you can express the goal as executable checks, do so — the '
+            + 'completion gate requires non-manual criteria to have a passed verification result '
+            + 'with an evidence ref before the plan can complete.',
+          items: {
+            oneOf: [
+              { type: 'string' },
+              {
+                type: 'object',
+                properties: {
+                  id: {
+                    type: 'string',
+                    description: 'Optional stable id for this criterion; generated if omitted.',
+                  },
+                  kind: {
+                    type: 'string',
+                    enum: ['command', 'test', 'file-contains', 'file-exists', 'manual'],
+                    description:
+                      'How this criterion is verified. command: run a shell command (exit 0 = pass). '
+                      + 'test: run a test command. file-contains: a file must contain expect text. '
+                      + 'file-exists: a path must exist. manual: needs human confirmation.',
+                  },
+                  description: {
+                    type: 'string',
+                    description: 'Human-readable statement of what "done" means for this criterion.',
+                  },
+                  command: {
+                    type: 'string',
+                    description: 'Shell/test command to run (for kind=command/test).',
+                  },
+                  path: {
+                    type: 'string',
+                    description: 'Target file path (for kind=file-contains/file-exists).',
+                  },
+                  expect: {
+                    type: 'string',
+                    description: 'Expected substring the file must contain (for kind=file-contains).',
+                  },
+                },
+                required: ['kind'],
+                additionalProperties: false,
+              },
+            ],
+          },
+        },
       },
       required: ['title', 'goal', 'tasks'],
       additionalProperties: false,
@@ -170,6 +221,38 @@ export const GOAL_TOOL_DEFINITIONS = [
         blockedReason: {
           type: 'string',
           description: 'Why the subtask is blocked / waiting (when status=waiting_user).',
+        },
+        criterionResults: {
+          type: 'array',
+          description:
+            'Optional verification results for the plan\'s success criteria (DoD-as-Code). '
+            + 'After acting, run each auto-verifiable criterion\'s check (command/test/file) and '
+            + 'record the outcome here so the completion gate can pass. Each result references a '
+            + 'criterion id declared in the plan\'s successCriteria; unknown ids are ignored.',
+          items: {
+            type: 'object',
+            properties: {
+              criterionId: {
+                type: 'string',
+                description: 'The id of the success criterion this result verifies.',
+              },
+              passed: {
+                type: 'boolean',
+                description: 'Whether the criterion check passed.',
+              },
+              evidenceRef: {
+                type: 'string',
+                description:
+                  'Artifact/tool-result ref proving the check outcome (e.g. the shell result ref).',
+              },
+              detail: {
+                type: 'string',
+                description: 'Short human-readable detail of what was checked / observed.',
+              },
+            },
+            required: ['criterionId', 'passed'],
+            additionalProperties: false,
+          },
         },
       },
       required: ['planId', 'taskId'],

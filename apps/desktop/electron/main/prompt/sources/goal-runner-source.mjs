@@ -51,6 +51,53 @@ function asStringArray(value, limit) {
   return out;
 }
 
+// 可自动验证的成功标准类型（与 goal-plan-store / goal-runner 对齐）。
+const AUTO_CRITERION_KINDS_SET = new Set(['command', 'test', 'file-contains', 'file-exists']);
+
+/**
+ * 归一成功标准为渲染友好的结构化视图，并关联验证结果，计算每条的 verify 状态：
+ * - passed：有 CriterionResult.passed===true
+ * - failed：有结果但未通过
+ * - pending：可自动验证但还没验证结果
+ * - manual：需人工确认（不参与自动完成门）
+ * 向后兼容：字符串或缺 kind 的存量标准归一为 manual。
+ */
+function summarizeCriteria(rawCriteria, rawResults, limit) {
+  if (!Array.isArray(rawCriteria)) return [];
+  const resultById = new Map(
+    (Array.isArray(rawResults) ? rawResults : [])
+      .filter((r) => r && typeof r.criterionId === 'string')
+      .map((r) => [r.criterionId, r]),
+  );
+  const out = [];
+  for (let i = 0; i < rawCriteria.length; i += 1) {
+    const raw = rawCriteria[i];
+    let id = null;
+    let kind = 'manual';
+    let description = '';
+    if (typeof raw === 'string') {
+      description = sanitizeRuntimeText(raw).trim();
+    } else if (raw && typeof raw === 'object') {
+      id = asString(raw.id) || null;
+      kind = AUTO_CRITERION_KINDS_SET.has(asString(raw.kind)) || asString(raw.kind) === 'manual'
+        ? asString(raw.kind)
+        : 'manual';
+      description = sanitizeRuntimeText(raw.description || raw.command || raw.path).trim();
+    }
+    if (!description) continue;
+    let verify;
+    if (AUTO_CRITERION_KINDS_SET.has(kind)) {
+      const result = id ? resultById.get(id) : null;
+      verify = !result ? 'pending' : result.passed === true ? 'passed' : 'failed';
+    } else {
+      verify = 'manual';
+    }
+    out.push({ id, kind, description, verify });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 /** 统计叶子任务（无 subtasks）的 Evidence 总数与完成数，作为事实信号。 */
 function summarizeTasks(tasks) {
   const leaves = [];
@@ -96,7 +143,11 @@ function normalizePlan(plan) {
     status: status ?? 'unknown',
     inScope: asStringArray(plan.boundaries?.inScope, MAX_SCOPE_ITEMS),
     outOfScope: asStringArray(plan.boundaries?.outOfScope, MAX_SCOPE_ITEMS),
-    successCriteria: asStringArray(plan.successCriteria, MAX_CRITERIA_ITEMS),
+    successCriteria: summarizeCriteria(
+      plan.successCriteria,
+      plan.criterionResults,
+      MAX_CRITERIA_ITEMS,
+    ),
     progress: plan.progress && typeof plan.progress === 'object' ? plan.progress : null,
     leaves,
     currentTask: pickCurrentTask(leaves, asString(runner?.currentTaskId) || null),
@@ -150,8 +201,23 @@ function formatFacts(plan) {
     for (const item of plan.outOfScope) lines.push(`- ${item}`);
   }
   if (plan.successCriteria.length) {
-    lines.push('success criteria:');
-    for (const item of plan.successCriteria) lines.push(`- ${item}`);
+    lines.push('success criteria (Definition of Done):');
+    for (const c of plan.successCriteria) {
+      // 形如： - [pending] (command) run npm test —— 让模型看到每条 DoD 的验证状态。
+      lines.push(`- [${c.verify}] (${c.kind}) ${c.description}`);
+    }
+    const pendingAuto = plan.successCriteria.filter((c) => c.verify === 'pending');
+    const failedAuto = plan.successCriteria.filter((c) => c.verify === 'failed');
+    if (failedAuto.length) {
+      lines.push(
+        `NOTE: ${failedAuto.length} auto-verifiable criterion(s) currently FAILED — fix and re-verify before completing.`,
+      );
+    }
+    if (pendingAuto.length) {
+      lines.push(
+        `NOTE: ${pendingAuto.length} auto-verifiable criterion(s) not yet verified — after acting, run the check and record the result via goal_update_task so the completion gate can pass.`,
+      );
+    }
   }
   lines.push(`runner budget: ${formatBudget(plan.budget)}`);
   return lines.join('\n');
@@ -163,6 +229,13 @@ function formatContract() {
     '- Continue advancing the current goal; do not re-plan unrelated goals.',
     '- When uncertain, prefer reading authoritative state via goal_get_plan.',
     '- After completing a subtask, write evidence back through goal_update_task; do not mark completion without evidenceRefs.',
+    '- Verify against the Definition of Done: for each auto-verifiable success criterion '
+      + '(command/test/file-contains/file-exists), actually run its check after acting, then record '
+      + 'the outcome via goal_update_task.criterionResults (criterionId + passed + evidenceRef, '
+      + 'using the check\'s Tool Result as evidence). The completion gate blocks until every '
+      + 'auto-verifiable criterion has a passed result with evidence.',
+    '- Do not self-report a criterion as passed without a real check Tool Result; manual criteria '
+      + 'are confirmed once with the user before finishing.',
     '- Do not cross the declared boundaries.',
     '- If you need user input, permission, or evidence is insufficient, call request_user_input (or stop) and explain the blocker instead of pretending completion.',
     '- Do not use request_user_input to re-ask for plan approval once a plan is awaiting approval; that binary approve/reject decision is owned by the governed approval card / Goal panel (goalPlansApprove). Reserve request_user_input for substantive follow-ups only.',

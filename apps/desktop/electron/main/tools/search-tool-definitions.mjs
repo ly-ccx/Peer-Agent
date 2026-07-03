@@ -31,7 +31,7 @@ export const SEARCH_TOOL_DEFINITIONS = [
     // explorer 子 Agent 的只读工具是 ADR 35 的显式 allowlist（read_file/search_files），
     // 将 batch_search 纳入 explorer 属于对该 allowlist 契约的扩展（A 级），超出本方案边界，
     // 暂不纳入；后续如需可单独评估。见 docs/design/batch-search-parallel-aggregation.md。
-    availableInModes: ['chat', 'plan'],
+    availableInModes: ['chat', 'plan', 'goal'],
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-search-aggregate-provider',
       executorCapabilityId: 'local.search.aggregate',

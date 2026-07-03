@@ -6,6 +6,7 @@ import { getDataHome } from '../data-store.mjs';
 import {
   buildGoalModeDenial,
   evaluateGoalModeGate,
+  resolveActivePlanBoundaries,
   resolveGoalPlanGate,
 } from './goal-mode-gate.mjs';
 import { createLocalToolHost } from '../runtime-gateway/local-tool-host.mjs';
@@ -174,23 +175,54 @@ export async function executeProjectedModelTool({
     return { success: false, error: projection.error };
   }
 
-  // Goal 模式运行时闸门（见 Goal 模式运行时闸门设计）：
-  // 计划未获批准前，拒绝有副作用的能力，强制「先规划 → 批准 → 执行」。
+  const cwd = resolveSafeWorkspaceRoot(workspacePath);
+
+  // 运行时闸门（见 goal-mode-gate.mjs / goal-mode-ultrathink-workflow 设计文档）：
+  // - plan 模式：计划未获批准前，拒绝有副作用能力，强制「先规划 → 批准 → 执行」。
+  // - goal 模式：pre-act 写盘范围守卫（越界 DENY）+ 不可逆动作逐动作确认。
   // 这是 PermissionGrant 之前的能力准入判定，不绕过 Runtime Projection。
+  const mode = toolContext?.mode ?? 'chat';
+  const conversationId = toolContext?.conversationId ?? null;
   const gate = evaluateGoalModeGate({
-    mode: toolContext?.mode ?? 'chat',
+    mode,
     toolName: name,
     riskLevel: projection.capability?.riskLevel,
-    planGate: resolveGoalPlanGate(toolContext?.conversationId ?? null, goalPlanStore),
+    planGate: resolveGoalPlanGate(conversationId, goalPlanStore),
+    args,
+    workspacePath: cwd,
+    boundaries: mode === 'goal' ? resolveActivePlanBoundaries(conversationId, goalPlanStore) : null,
   });
   if (!gate.allowed) {
     return {
-      ...buildGoalModeDenial({ name, reason: gate.reason, locale }),
+      ...buildGoalModeDenial({ name, reason: gate.reason, locale, detail: gate.detail ?? null }),
       projectionCapability: projection.capability,
     };
   }
+  // goal 模式不可逆动作（删除/覆盖/git 强制/push/release）：逐动作确认后放行，拒绝则结构化失败。
+  if (gate.requiresConfirmation) {
+    let approval = null;
+    if (typeof requestPermission === 'function') {
+      approval = await requestPermission({
+        tool: name,
+        args,
+        workspacePath: cwd,
+        reason: 'goal_irreversible_action',
+        confirmation: gate.confirmation ?? null,
+      });
+    }
+    if (!approval?.granted) {
+      return {
+        ...buildGoalModeDenial({
+          name,
+          reason: 'goal_irreversible_denied',
+          locale,
+          detail: gate.confirmation?.kind ?? null,
+        }),
+        projectionCapability: projection.capability,
+      };
+    }
+  }
 
-  const cwd = resolveSafeWorkspaceRoot(workspacePath);
   const userDataPath = getDataHome();
   const host = createLocalToolHost({
     workspaceRoot: cwd,

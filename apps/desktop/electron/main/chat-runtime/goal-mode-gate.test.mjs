@@ -3,7 +3,10 @@ import { describe, it } from 'node:test';
 
 import {
   buildGoalModeDenial,
+  detectIrreversibleAction,
   evaluateGoalModeGate,
+  evaluateWriteScope,
+  resolveActivePlanBoundaries,
   resolveGoalPlanGate,
 } from './goal-mode-gate.mjs';
 
@@ -138,5 +141,210 @@ describe('buildGoalModeDenial', () => {
     assert.equal(parsed.kind, 'goal_mode_gate_denied');
     assert.equal(parsed.tool, 'write_file');
     assert.equal(parsed.reason, 'goal_plan_required');
+  });
+
+  it('carries an optional detail into the structured output', () => {
+    const denial = buildGoalModeDenial({
+      name: 'write_file',
+      reason: 'goal_scope_out_of_workspace',
+      locale: 'zh-CN',
+      detail: '/etc/passwd',
+    });
+    const parsed = JSON.parse(denial.output);
+    assert.equal(parsed.reason, 'goal_scope_out_of_workspace');
+    assert.equal(parsed.detail, '/etc/passwd');
+  });
+});
+
+// ── Slice B：goal 模式确定性 hooks·阶段一（写盘范围守卫 + 不可逆动作确认） ──
+
+describe('evaluateWriteScope', () => {
+  const workspacePath = '/ws';
+
+  it('allows writes inside the workspace', () => {
+    const r = evaluateWriteScope({ args: { path: 'src/a.ts' }, workspacePath, boundaries: null });
+    assert.equal(r.allowed, true);
+  });
+
+  it('allows absolute paths inside the workspace', () => {
+    const r = evaluateWriteScope({ args: { path: '/ws/src/a.ts' }, workspacePath, boundaries: null });
+    assert.equal(r.allowed, true);
+  });
+
+  it('denies writes outside the workspace (absolute)', () => {
+    const r = evaluateWriteScope({ args: { path: '/etc/passwd' }, workspacePath, boundaries: null });
+    assert.equal(r.allowed, false);
+    assert.equal(r.reason, 'goal_scope_out_of_workspace');
+  });
+
+  it('denies writes escaping the workspace via ..', () => {
+    const r = evaluateWriteScope({ args: { path: '../outside/x.ts' }, workspacePath, boundaries: null });
+    assert.equal(r.allowed, false);
+    assert.equal(r.reason, 'goal_scope_out_of_workspace');
+  });
+
+  it('denies paths matching an outOfScope glob', () => {
+    const r = evaluateWriteScope({
+      args: { path: 'dist/bundle.js' },
+      workspacePath,
+      boundaries: { outOfScope: ['dist/*'] },
+    });
+    assert.equal(r.allowed, false);
+    assert.equal(r.reason, 'goal_scope_out_of_bounds');
+  });
+
+  it('denies paths matching an outOfScope path segment', () => {
+    const r = evaluateWriteScope({
+      args: { path: 'packages/secrets/key.pem' },
+      workspacePath,
+      boundaries: { outOfScope: ['secrets'] },
+    });
+    assert.equal(r.allowed, false);
+    assert.equal(r.reason, 'goal_scope_out_of_bounds');
+  });
+
+  it('ignores purely descriptive (non-path-like) outOfScope entries', () => {
+    const r = evaluateWriteScope({
+      args: { path: 'src/a.ts' },
+      workspacePath,
+      boundaries: { outOfScope: ['不改审批语义', 'do not touch chat mode'] },
+    });
+    assert.equal(r.allowed, true);
+  });
+
+  it('is permissive when no path is present', () => {
+    assert.equal(evaluateWriteScope({ args: {}, workspacePath }).allowed, true);
+  });
+});
+
+describe('detectIrreversibleAction', () => {
+  it('flags write_file overwrite', () => {
+    const r = detectIrreversibleAction({ toolName: 'write_file', args: { path: 'a.ts', allow_overwrite: true } });
+    assert.equal(r?.kind, 'file_overwrite');
+  });
+
+  it('does not flag a plain (non-overwrite) write_file', () => {
+    assert.equal(detectIrreversibleAction({ toolName: 'write_file', args: { path: 'a.ts' } }), null);
+  });
+
+  it('flags rm -rf', () => {
+    assert.equal(detectIrreversibleAction({ toolName: 'bash', args: { command: 'rm -rf build' } })?.kind, 'shell_delete');
+  });
+
+  it('flags git push', () => {
+    assert.equal(detectIrreversibleAction({ toolName: 'bash', args: { command: 'git push origin main' } })?.kind, 'git_push');
+  });
+
+  it('flags git reset --hard', () => {
+    assert.equal(detectIrreversibleAction({ toolName: 'bash', args: { command: 'git reset --hard HEAD~1' } })?.kind, 'git_reset_hard');
+  });
+
+  it('flags npm publish', () => {
+    assert.equal(detectIrreversibleAction({ toolName: 'bash', args: { command: 'npm publish' } })?.kind, 'release_publish');
+  });
+
+  it('does not flag a benign read command', () => {
+    assert.equal(detectIrreversibleAction({ toolName: 'bash', args: { command: 'ls -la && cat file' } }), null);
+  });
+});
+
+describe('evaluateGoalModeGate (goal mode, Slice B)', () => {
+  it('denies edit_file writing outside the workspace', () => {
+    const r = evaluateGoalModeGate({
+      mode: 'goal',
+      toolName: 'edit_file',
+      riskLevel: 'L2_local_write',
+      args: { path: '/etc/hosts' },
+      workspacePath: '/ws',
+    });
+    assert.equal(r.allowed, false);
+    assert.equal(r.reason, 'goal_scope_out_of_workspace');
+  });
+
+  it('denies write_file matching outOfScope boundary', () => {
+    const r = evaluateGoalModeGate({
+      mode: 'goal',
+      toolName: 'write_file',
+      riskLevel: 'L2_local_write',
+      args: { path: 'dist/x.js' },
+      workspacePath: '/ws',
+      boundaries: { outOfScope: ['dist/*'] },
+    });
+    assert.equal(r.allowed, false);
+    assert.equal(r.reason, 'goal_scope_out_of_bounds');
+  });
+
+  it('allows in-scope write_file', () => {
+    const r = evaluateGoalModeGate({
+      mode: 'goal',
+      toolName: 'write_file',
+      riskLevel: 'L2_local_write',
+      args: { path: 'src/x.ts' },
+      workspacePath: '/ws',
+      boundaries: { outOfScope: ['dist/*'] },
+    });
+    assert.equal(r.allowed, true);
+    assert.notEqual(r.requiresConfirmation, true);
+  });
+
+  it('requires confirmation for an irreversible bash action', () => {
+    const r = evaluateGoalModeGate({
+      mode: 'goal',
+      toolName: 'bash',
+      riskLevel: 'L4_privileged',
+      args: { command: 'git push origin dev' },
+      workspacePath: '/ws',
+    });
+    assert.equal(r.allowed, true);
+    assert.equal(r.requiresConfirmation, true);
+    assert.equal(r.confirmation?.kind, 'git_push');
+  });
+
+  it('allows read-only tools without confirmation', () => {
+    const r = evaluateGoalModeGate({
+      mode: 'goal',
+      toolName: 'read_file',
+      riskLevel: 'L1_local_read',
+      args: { path: '/etc/hosts' },
+      workspacePath: '/ws',
+    });
+    assert.equal(r.allowed, true);
+    assert.notEqual(r.requiresConfirmation, true);
+  });
+
+  it('does not impose a plan-approval gate in goal mode', () => {
+    const r = evaluateGoalModeGate({
+      mode: 'goal',
+      toolName: 'bash',
+      riskLevel: 'L4_privileged',
+      args: { command: 'node build.js' },
+      planGate: { hasPlan: false, hasApprovedPlan: false },
+      workspacePath: '/ws',
+    });
+    assert.equal(r.allowed, true);
+  });
+});
+
+describe('resolveActivePlanBoundaries', () => {
+  it('returns null when conversationId is missing', () => {
+    assert.equal(resolveActivePlanBoundaries(null, {}), null);
+  });
+
+  it('reads boundaries from the active plan', () => {
+    const store = {
+      getActivePlanByConversation: (id) =>
+        id === 'c1' ? { boundaries: { inScope: ['x'], outOfScope: ['dist/*'] } } : null,
+    };
+    assert.deepEqual(resolveActivePlanBoundaries('c1', store), { inScope: ['x'], outOfScope: ['dist/*'] });
+    assert.equal(resolveActivePlanBoundaries('c2', store), null);
+  });
+
+  it('is resilient when the store throws', () => {
+    const store = {
+      getActivePlanByConversation() {
+        throw new Error('boom');
+      },
+    };
+    assert.equal(resolveActivePlanBoundaries('c1', store), null);
   });
 });

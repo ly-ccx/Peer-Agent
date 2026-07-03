@@ -149,3 +149,89 @@ describe('evaluateVerificationGate', () => {
     assert.equal(gate.reason, 'no_leaf_tasks');
   });
 });
+
+// DoD-as-Code：成功标准（successCriteria）参与完成门。
+describe('evaluateVerificationGate with successCriteria (DoD-as-Code)', () => {
+  const doneLeaf = { taskId: 'a', status: 'completed', evidenceRefs: ['ref://1'] };
+
+  it('blocks completion when an auto-verifiable criterion is unverified', () => {
+    const plan = {
+      tasks: [doneLeaf],
+      successCriteria: [{ id: 'c1', kind: 'command', description: 'npm test' }],
+      criterionResults: [],
+    };
+    const gate = evaluateVerificationGate(plan);
+    assert.equal(gate.passed, false);
+    const unmet = gate.unmet.find((u) => u.criterionId === 'c1');
+    assert.ok(unmet);
+    assert.equal(unmet.reason, 'criterion_unverified');
+  });
+
+  it('blocks when an auto criterion has a result but did not pass', () => {
+    const plan = {
+      tasks: [doneLeaf],
+      successCriteria: [{ id: 'c1', kind: 'test', description: 'unit tests' }],
+      criterionResults: [{ criterionId: 'c1', passed: false, evidenceRef: 'ref://run' }],
+    };
+    const gate = evaluateVerificationGate(plan);
+    assert.equal(gate.passed, false);
+    assert.equal(gate.unmet.find((u) => u.criterionId === 'c1').reason, 'criterion_failed');
+  });
+
+  it('blocks when an auto criterion passed but has no evidenceRef', () => {
+    const plan = {
+      tasks: [doneLeaf],
+      successCriteria: [{ id: 'c1', kind: 'file-exists', description: 'dist exists' }],
+      criterionResults: [{ criterionId: 'c1', passed: true }],
+    };
+    const gate = evaluateVerificationGate(plan);
+    assert.equal(gate.passed, false);
+    assert.equal(
+      gate.unmet.find((u) => u.criterionId === 'c1').reason,
+      'criterion_missing_evidence',
+    );
+  });
+
+  it('passes when every auto criterion passed with evidence', () => {
+    const plan = {
+      tasks: [doneLeaf],
+      successCriteria: [{ id: 'c1', kind: 'command', description: 'npm test' }],
+      criterionResults: [{ criterionId: 'c1', passed: true, evidenceRef: 'ref://run' }],
+    };
+    const gate = evaluateVerificationGate(plan);
+    assert.equal(gate.passed, true);
+    assert.equal(gate.unmet.length, 0);
+  });
+
+  it('does not block on manual criteria but records a manual warning', () => {
+    const plan = {
+      tasks: [doneLeaf],
+      successCriteria: [{ id: 'c1', kind: 'manual', description: 'user confirms UX' }],
+      criterionResults: [],
+    };
+    const gate = evaluateVerificationGate(plan);
+    assert.equal(gate.passed, true);
+    assert.ok(gate.warnings.some((w) => w.reason === 'manual_confirmation_required'));
+  });
+
+  it('flags weak DoD when all criteria are manual', () => {
+    const plan = {
+      tasks: [doneLeaf],
+      successCriteria: [
+        { id: 'c1', kind: 'manual', description: 'looks good' },
+        { id: 'c2', kind: 'manual', description: 'user signs off' },
+      ],
+      criterionResults: [],
+    };
+    const gate = evaluateVerificationGate(plan);
+    assert.equal(gate.passed, true);
+    assert.ok(gate.warnings.some((w) => w.reason === 'weak_dod_all_manual'));
+  });
+
+  it('is backward compatible: no successCriteria means gate ignores DoD', () => {
+    const plan = { tasks: [doneLeaf] };
+    const gate = evaluateVerificationGate(plan);
+    assert.equal(gate.passed, true);
+    assert.deepEqual(gate.warnings, []);
+  });
+});

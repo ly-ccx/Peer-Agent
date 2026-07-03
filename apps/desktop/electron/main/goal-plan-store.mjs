@@ -244,6 +244,74 @@ function normalizeStringArray(value) {
     : [];
 }
 
+// 成功标准（DoD）的可选类型。command/test/file-contains/file-exists 可被机器自动
+// 验证；manual 需人工确认。见 goal-mode-ultrathink-workflow 设计文档「DoD-as-Code」。
+const CRITERION_KINDS = new Set(['command', 'test', 'file-contains', 'file-exists', 'manual']);
+// 可自动验证的标准类型（完成门要求带 passed=true 的 CriterionResult）。
+const AUTO_CRITERION_KINDS = new Set(['command', 'test', 'file-contains', 'file-exists']);
+
+/**
+ * 规范化单条成功标准（SuccessCriterion）。两种输入形态均向后兼容：
+ * - 纯字符串 → 归一为 { id, kind:'manual', description }（旧计划/口头 DoD）
+ * - 结构化对象 → 按 kind 保留可自动验证所需字段（command/path/expect）
+ * 非法/空输入返回 null，由调用方过滤。
+ */
+function normalizeSuccessCriterion(value, index = 0) {
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return null;
+    return { id: `c${index + 1}`, kind: 'manual', description: text };
+  }
+  if (!value || typeof value !== 'object') return null;
+  const rawKind = typeof value.kind === 'string' ? value.kind.trim() : '';
+  const kind = CRITERION_KINDS.has(rawKind) ? rawKind : 'manual';
+  const id = typeof value.id === 'string' && value.id.trim() ? value.id.trim() : `c${index + 1}`;
+  let description = typeof value.description === 'string' ? value.description.trim() : '';
+  const command = typeof value.command === 'string' ? value.command.trim() : '';
+  const targetPath = typeof value.path === 'string' ? value.path.trim() : '';
+  const expect = typeof value.expect === 'string' ? value.expect.trim() : '';
+  if (!description) {
+    // 无描述时用可用字段兜底，保证渲染/审计可读。
+    description = command || targetPath || '(unnamed criterion)';
+  }
+  const criterion = { id, kind, description };
+  if (command) criterion.command = command;
+  if (targetPath) criterion.path = targetPath;
+  if (expect) criterion.expect = expect;
+  return criterion;
+}
+
+function normalizeSuccessCriteria(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item, index) => normalizeSuccessCriterion(item, index)).filter(Boolean);
+}
+
+/**
+ * 规范化单条验证结果（CriterionResult）。每条对应一个 successCriterion.id，
+ * 记录该标准是否通过、佐证的 evidenceRef 与检查详情。缺 criterionId 视为非法。
+ */
+function normalizeCriterionResult(value) {
+  if (!value || typeof value !== 'object') return null;
+  const criterionId = typeof value.criterionId === 'string' ? value.criterionId.trim() : '';
+  if (!criterionId) return null;
+  const result = { criterionId, passed: value.passed === true };
+  if (typeof value.evidenceRef === 'string' && value.evidenceRef.trim()) {
+    result.evidenceRef = value.evidenceRef.trim();
+  }
+  if (typeof value.detail === 'string' && value.detail.trim()) {
+    result.detail = value.detail.trim();
+  }
+  if (typeof value.checkedAt === 'string' && value.checkedAt.trim()) {
+    result.checkedAt = value.checkedAt.trim();
+  }
+  return result;
+}
+
+function normalizeCriterionResults(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => normalizeCriterionResult(item)).filter(Boolean);
+}
+
 function normalizeExplorerRequest(request, fallback = {}) {
   const now = new Date().toISOString();
   const explorerId = typeof request?.explorerId === 'string' && request.explorerId.trim()
@@ -461,6 +529,11 @@ function normalizePlan(plan) {
     conversationId: normalizedConversationId ?? undefined,
     targetWorkspacePath: normalizeWorkspacePath(plan.targetWorkspacePath) ?? undefined,
     status: normalizedStatus,
+    // 读路径降级：存量计划的 successCriteria 可能是纯字符串数组或缺字段，
+    // 统一归一为结构化 SuccessCriterion[]；criterionResults 缺失时补空数组。
+    // 不破坏旧计划，保证下游（完成门 / 提示词渲染）拿到一致形态。
+    successCriteria: normalizeSuccessCriteria(plan.successCriteria),
+    criterionResults: normalizeCriterionResults(plan.criterionResults),
   };
   const runner = normalizeRunnerState(plan.runner, plan.planId);
   return runner ? { ...normalized, runner } : normalized;
@@ -682,7 +755,10 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       targetWorkspacePath: normalizeWorkspacePath(draft.targetWorkspacePath) ?? undefined,
       title: draft.title || '',
       goal: draft.goal || '',
-      successCriteria: draft.successCriteria || [],
+      // 成功标准规范化为结构化 SuccessCriterion[]（字符串向后兼容归一为 manual）。
+      successCriteria: normalizeSuccessCriteria(draft.successCriteria),
+      // 验证结果：post-act 由 goal_update_task 回写，创建时默认空。
+      criterionResults: normalizeCriterionResults(draft.criterionResults),
       boundaries: draft.boundaries || { inScope: [], outOfScope: [] },
       exceptionPolicies: draft.exceptionPolicies || [],
       involvedFiles: draft.involvedFiles || [],
@@ -712,6 +788,14 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     const plan = getPlan(planId);
     if (!plan) return null;
     const { progress: _ignore, version: _v, revisionHistory: _rh, ...safePatch } = patch;
+    // 修订若携带成功标准/验证结果，同样走结构化规范化（与 createPlan 一致，
+    // 避免修订路径把结构化 DoD 退化成未校验的裸对象）。
+    if ('successCriteria' in safePatch) {
+      safePatch.successCriteria = normalizeSuccessCriteria(safePatch.successCriteria);
+    }
+    if ('criterionResults' in safePatch) {
+      safePatch.criterionResults = normalizeCriterionResults(safePatch.criterionResults);
+    }
     const nextVersion = (plan.version || 1) + 1;
     const next = {
       ...plan,
@@ -974,6 +1058,42 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     return persist({ ...plan, tasks, updatedAt: now });
   }
 
+  /**
+   * 回写成功标准（DoD）的验证结果 —— DoD-as-Code 的落盘入口。
+   *
+   * post-act 阶段，Runner 对可自动验证的 successCriterion 跑验证（命令/测试/文件检查），
+   * 把 Tool Result 作为 evidenceRef 连同 passed 一并回写。按 criterionId 合并：同一
+   * criterionId 的新结果覆盖旧结果，其余保留。仅接受计划已声明的 criterionId，避免
+   * 凭空造标准绕过完成门。
+   *
+   * @param {string} planId
+   * @param {Array} results CriterionResult[]（criterionId/passed/evidenceRef/detail）
+   */
+  function recordCriterionResults(planId, results = []) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    const incoming = normalizeCriterionResults(results);
+    if (incoming.length === 0) return plan;
+    const now = new Date().toISOString();
+    // 只接受计划已声明的 criterionId，防止捏造标准。
+    const knownIds = new Set(
+      (Array.isArray(plan.successCriteria) ? plan.successCriteria : [])
+        .map((c) => (c && typeof c.id === 'string' ? c.id : null))
+        .filter(Boolean),
+    );
+    const byId = new Map(
+      (Array.isArray(plan.criterionResults) ? plan.criterionResults : []).map((r) => [
+        r.criterionId,
+        r,
+      ]),
+    );
+    for (const r of incoming) {
+      if (!knownIds.has(r.criterionId)) continue;
+      byId.set(r.criterionId, { ...r, checkedAt: r.checkedAt || now });
+    }
+    return persist({ ...plan, criterionResults: [...byId.values()], updatedAt: now });
+  }
+
   function deletePlan(planId) {
     const index = readIndex().filter((m) => m.planId !== planId);
     writeJsonl(indexFile, index);
@@ -1039,6 +1159,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     dispatchExplorer,
     reportExplorer,
     recordTaskEvidence,
+    recordCriterionResults,
     deletePlan,
     deletePlanByConversation,
   };

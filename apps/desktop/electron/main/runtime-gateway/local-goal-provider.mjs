@@ -126,6 +126,9 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
           goal: args.goal,
           targetWorkspacePath: args.targetWorkspacePath,
           tasks: normalizeTasks(args.tasks),
+          // 可选的结构化成功标准（DoD）。store 层会规范化（字符串→manual 向后兼容），
+          // 缺省时归一为空数组，不影响既有仅传 goal/tasks 的调用。
+          successCriteria: args.successCriteria,
           status: 'awaiting_approval',
           createdBy: 'agent',
         });
@@ -206,7 +209,14 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
         if (args.result !== undefined) change.result = args.result;
         if (args.failureReason !== undefined) change.failureReason = args.failureReason;
         if (args.blockedReason !== undefined) change.blockedReason = args.blockedReason;
-        const plan = goalPlanStore.recordTaskEvidence(planId, taskId, change);
+        let plan = goalPlanStore.recordTaskEvidence(planId, taskId, change);
+        // DoD-as-Code：若本次回写附带成功标准的验证结果，路由到 store 落盘。
+        // 与任务证据回写同调用完成，让模型 post-act 验证后一步回写（不新开旁路）。
+        if (plan && args.criterionResults !== undefined
+          && typeof goalPlanStore.recordCriterionResults === 'function') {
+          const afterCriteria = goalPlanStore.recordCriterionResults(planId, args.criterionResults);
+          if (afterCriteria) plan = afterCriteria;
+        }
         if (!plan) {
           // store 在 plan 不存在时静默返回 null —— 视为失败，绝不伪装成功。
           status = 'failed';
@@ -224,6 +234,7 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
             taskStatus: change.status ?? null,
             progress: plan.progress ?? null,
             planStatus: plan.status ?? null,
+            criterionResults: Array.isArray(plan.criterionResults) ? plan.criterionResults : [],
           };
         }
       } catch (err) {

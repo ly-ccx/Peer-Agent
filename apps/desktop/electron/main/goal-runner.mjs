@@ -192,14 +192,33 @@ export function detectPlanDrift(baseline, current) {
   return { drifted: reasons.length > 0, reasons };
 }
 
+// 可自动验证的成功标准类型（与 goal-plan-store 的 AUTO_CRITERION_KINDS 对齐）。
+// 这些 kind 的标准必须有 passed=true 且带 evidenceRef 的验证结果才放行完成；
+// 'manual' 则降级为 pre-finish 人工确认，不在此硬门拦截。
+const AUTO_VERIFIABLE_CRITERION_KINDS = new Set([
+  'command',
+  'test',
+  'file-contains',
+  'file-exists',
+]);
+
 /**
  * 完成前验证门:遍历所有叶子任务,要求全部 status==='completed' 且 evidenceRefs 非空。
  * 任一叶子未完成或缺 Evidence 即不放行完成,返回 { passed:false, unmet:[...] }。
  * 这是"完成以证据为准、不能仅凭口头声明"的机器化落地。
+ *
+ * DoD-as-Code 增强（见 goal-mode-ultrathink-workflow 设计文档）：
+ * - 若计划声明了 successCriteria，则在叶子证据之外，追加对成功标准的机器化校验：
+ *   非 manual 的标准（command/test/file-contains/file-exists）必须有一条 passed=true
+ *   且带 evidenceRef 的 CriterionResult，否则计入 unmet（reason=criterion_*）。
+ * - manual 标准不在此拦截（由 pre-finish 一次人工确认承接），但会体现在 warnings。
+ * - 若成功标准全为 manual（无任何可自动验证项），返回 weakDoD=true 告警，提示 DoD
+ *   缺乏可执行验证——不阻断完成（向后兼容纯字符串 DoD），但让上层可感知并提示补强。
  */
 export function evaluateVerificationGate(plan) {
   const roots = Array.isArray(plan?.tasks) ? plan.tasks : [];
   const unmet = [];
+  const warnings = [];
   let leaves = 0;
   const stack = [...roots];
   while (stack.length > 0) {
@@ -222,8 +241,49 @@ export function evaluateVerificationGate(plan) {
     }
   }
   // 无叶子任务(空计划)不视为通过——完成需要有可验证的证据基础。
-  if (leaves === 0) return { passed: false, unmet: [], reason: 'no_leaf_tasks' };
-  return { passed: unmet.length === 0, unmet };
+  if (leaves === 0) return { passed: false, unmet: [], warnings, reason: 'no_leaf_tasks' };
+
+  // DoD-as-Code：成功标准校验（有声明才检查，向后兼容无 successCriteria 的旧计划）。
+  const criteria = Array.isArray(plan?.successCriteria) ? plan.successCriteria : [];
+  if (criteria.length > 0) {
+    const resultById = new Map(
+      (Array.isArray(plan?.criterionResults) ? plan.criterionResults : [])
+        .filter((r) => r && typeof r.criterionId === 'string')
+        .map((r) => [r.criterionId, r]),
+    );
+    let autoCount = 0;
+    for (const criterion of criteria) {
+      if (!criterion || typeof criterion !== 'object') continue;
+      const kind = typeof criterion.kind === 'string' ? criterion.kind : 'manual';
+      const criterionId = typeof criterion.id === 'string' ? criterion.id : null;
+      if (AUTO_VERIFIABLE_CRITERION_KINDS.has(kind)) {
+        autoCount += 1;
+        const result = criterionId ? resultById.get(criterionId) : null;
+        const passed = result?.passed === true;
+        const hasRef = typeof result?.evidenceRef === 'string' && result.evidenceRef.trim();
+        if (!passed || !hasRef) {
+          unmet.push({
+            criterionId,
+            kind,
+            reason: !result
+              ? 'criterion_unverified'
+              : !passed
+                ? 'criterion_failed'
+                : 'criterion_missing_evidence',
+          });
+        }
+      } else {
+        // manual 标准：不硬拦，转 pre-finish 人工确认，记 warning。
+        warnings.push({ criterionId, kind, reason: 'manual_confirmation_required' });
+      }
+    }
+    // 全 manual（无任何可自动验证项）：弱 DoD 告警——完成不阻断，但提示补强可执行验证。
+    if (autoCount === 0) {
+      warnings.push({ reason: 'weak_dod_all_manual' });
+    }
+  }
+
+  return { passed: unmet.length === 0, unmet, warnings };
 }
 
 export function createGoalRunner({
@@ -701,7 +761,10 @@ export function createGoalRunner({
         if (!gate.passed) {
           const summary = gate.reason === 'no_leaf_tasks'
             ? 'no verifiable leaf tasks'
-            : gate.unmet.map((u) => `${u.taskId ?? '?'}:${u.reason}`).join('; ');
+            // 兼容两类未达标项：叶子任务（taskId）与成功标准（criterionId）。
+            : gate.unmet
+              .map((u) => `${u.taskId ?? u.criterionId ?? '?'}:${u.reason}`)
+              .join('; ');
           goalPlanStore.setRunnerState(planId, {
             enabled: true,
             status: 'blocked',
@@ -713,8 +776,16 @@ export function createGoalRunner({
             planId,
             reason: 'verification_gate_failed',
             unmet: gate.unmet,
+            warnings: gate.warnings ?? [],
           });
           return getState(planId);
+        }
+        // 完成放行，但若存在弱 DoD / 待人工确认的 manual 标准，透出告警供上层提示。
+        if (Array.isArray(gate.warnings) && gate.warnings.length > 0) {
+          emit('goalRunner:verificationWarnings', {
+            planId,
+            warnings: gate.warnings,
+          });
         }
       }
     }

@@ -800,3 +800,89 @@ test('getActivePlanByConversation 返回同会话最新活跃计划，忽略结�
   assert.equal(store.getActivePlanByConversation('missing'), null);
   assert.equal(store.getActivePlanByConversation(''), null);
 });
+
+// ===== DoD-as-Code：successCriteria 结构化 + 向后兼容 + criterionResults 回写 =====
+
+test('successCriteria: 纯字符串向后兼容归一为 manual 结构化标准', () => {
+  // draftWithTasks 用的是 ['所有测试通过'] 字符串形态（存量/口头 DoD）。
+  const plan = store.createPlan(draftWithTasks());
+  assert.equal(Array.isArray(plan.successCriteria), true);
+  assert.equal(plan.successCriteria.length, 1);
+  const c = plan.successCriteria[0];
+  assert.equal(c.kind, 'manual');
+  assert.equal(c.description, '所有测试通过');
+  assert.ok(typeof c.id === 'string' && c.id.length > 0);
+  // criterionResults 缺省归一为空数组。
+  assert.deepEqual(plan.criterionResults, []);
+});
+
+test('successCriteria: 结构化对象保留 kind/command 等字段', () => {
+  const plan = store.createPlan({
+    ...draftWithTasks(),
+    successCriteria: [
+      { id: 'c1', kind: 'command', description: '跑单测', command: 'npm test' },
+      { kind: 'file-exists', path: 'dist/index.js' },
+      'ship it', // 混合字符串也接受
+    ],
+  });
+  const [c1, c2, c3] = plan.successCriteria;
+  assert.equal(c1.id, 'c1');
+  assert.equal(c1.kind, 'command');
+  assert.equal(c1.command, 'npm test');
+  assert.equal(c2.kind, 'file-exists');
+  assert.equal(c2.path, 'dist/index.js');
+  assert.equal(c3.kind, 'manual');
+  assert.equal(c3.description, 'ship it');
+});
+
+test('successCriteria: 非法 kind 归一为 manual', () => {
+  const plan = store.createPlan({
+    ...draftWithTasks(),
+    successCriteria: [{ kind: 'bogus', description: '乱写的类型' }],
+  });
+  assert.equal(plan.successCriteria[0].kind, 'manual');
+});
+
+test('recordCriterionResults: 只接受已声明的 criterionId 并按 id 合并', () => {
+  const plan = store.createPlan({
+    ...draftWithTasks(),
+    successCriteria: [
+      { id: 'c1', kind: 'command', description: 'build', command: 'npm run build' },
+      { id: 'c2', kind: 'test', description: 'tests', command: 'npm test' },
+    ],
+  });
+  // 写入 c1 通过 + 一个未声明的 cX（应被忽略）。
+  const after = store.recordCriterionResults(plan.planId, [
+    { criterionId: 'c1', passed: true, evidenceRef: 'ref://build' },
+    { criterionId: 'cX', passed: true, evidenceRef: 'ref://ghost' },
+  ]);
+  assert.equal(after.criterionResults.length, 1);
+  assert.equal(after.criterionResults[0].criterionId, 'c1');
+  assert.equal(after.criterionResults[0].passed, true);
+  assert.equal(after.criterionResults[0].evidenceRef, 'ref://build');
+  assert.ok(after.criterionResults[0].checkedAt);
+
+  // 再写 c1（覆盖）+ c2（新增）。
+  const after2 = store.recordCriterionResults(plan.planId, [
+    { criterionId: 'c1', passed: false, detail: 'build broke' },
+    { criterionId: 'c2', passed: true, evidenceRef: 'ref://test' },
+  ]);
+  const byId = Object.fromEntries(after2.criterionResults.map((r) => [r.criterionId, r]));
+  assert.equal(after2.criterionResults.length, 2);
+  assert.equal(byId.c1.passed, false);
+  assert.equal(byId.c1.detail, 'build broke');
+  assert.equal(byId.c2.passed, true);
+  assert.equal(byId.c2.evidenceRef, 'ref://test');
+});
+
+test('recordCriterionResults: 计划不存在返回 null', () => {
+  assert.equal(store.recordCriterionResults('missing', [{ criterionId: 'c1', passed: true }]), null);
+});
+
+test('normalizePlan 读路径：存量计划的字符串 successCriteria 读时被归一', () => {
+  const plan = store.createPlan(draftWithTasks());
+  // 重新读取（走 getPlan → normalizePlan）应拿到结构化形态。
+  const reread = store.getPlan(plan.planId);
+  assert.equal(reread.successCriteria[0].kind, 'manual');
+  assert.equal(Array.isArray(reread.criterionResults), true);
+});

@@ -201,6 +201,29 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     }
   });
 
+  it('projects execution tools so goal mode can self-drive (explore→act→verify)', () => {
+    const names = materializedNames('goal');
+    for (const execTool of ['bash', 'read_file', 'search_files', 'edit_file', 'write_file', 'batch_search']) {
+      assert.ok(
+        names.includes(execTool),
+        `${execTool} should be materialized in goal mode so it can execute, not just plan`,
+      );
+    }
+  });
+
+  it('marks execution capabilities as available (not mode_excluded) in the goal projection', () => {
+    const registry = createRuntimeToolRegistry();
+    const projection = createRuntimeProjectionFromToolRegistry(registry, { mode: 'goal' });
+    const byName = new Map(projection.capabilities.map((capability) => [capability.name, capability]));
+    for (const execTool of ['bash', 'read_file', 'search_files', 'edit_file', 'write_file', 'batch_search']) {
+      assert.equal(
+        byName.get(execTool)?.health,
+        'available',
+        `${execTool} should be available (not mode_excluded) in goal mode`,
+      );
+    }
+  });
+
   it('excludes goal tools when mode is chat', () => {
     const names = materializedNames('chat');
     for (const goalTool of GOAL_TOOL_NAMES) {
