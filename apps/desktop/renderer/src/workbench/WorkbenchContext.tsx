@@ -10,9 +10,9 @@ import {
 } from 'react';
 import { clientApi } from '../clientApi';
 
-// 历史 'goal' tab 已正名为 'plan'（与对话 plan 模式同口径）。持久化里的旧 'goal'
-// 值经 normalizeTab 归一为 'plan'，确保旧设置不丢、不回落到 terminal。
-export type WorkbenchTabId = 'plan' | 'terminal' | 'browser' | 'files' | 'diff';
+// 历史 'goal' tab 已正名为 'plan'（与对话 plan 模式同口径），历史 'terminal'
+// 占位 tab 已移除。持久化里的旧值经 normalizeTab 归一为 'plan'，确保旧设置不丢。
+export type WorkbenchTabId = 'plan' | 'browser' | 'files' | 'diff';
 
 export type WorkbenchFileMode = 'preview' | 'source' | 'diff';
 
@@ -128,20 +128,19 @@ function readWorkbenchSettings(raw: unknown): WorkbenchSettingsShape {
 function isValidTab(value: unknown): value is WorkbenchTabId {
   return (
     value === 'plan' ||
-    value === 'terminal' ||
     value === 'browser' ||
     value === 'files' ||
     value === 'diff'
   );
 }
 
-/** 把持久化/历史输入归一为当前 tab 值：旧 'goal' 等价于当前 'plan'。 */
+/** 把持久化/历史输入归一为当前 tab 值：旧 'goal' / 'terminal' 等价于当前 'plan'。 */
 function normalizeTab(value: unknown): WorkbenchTabId | null {
-  if (value === 'goal') return 'plan';
+  if (value === 'goal' || value === 'terminal') return 'plan';
   return isValidTab(value) ? value : null;
 }
 
-/** 对整份 activeTab 持久化映射做归一（旧 'goal' → 'plan'），并丢弃非法值。 */
+/** 对整份 activeTab 持久化映射做归一（旧值 → 'plan'），并丢弃非法值。 */
 function normalizeActiveTabMap(
   map: Record<string, WorkbenchTabId> | undefined,
 ): Record<string, WorkbenchTabId> {
@@ -354,7 +353,7 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     const key = conversationId ?? '__none';
     const stored = normalizeTab(activeTabMap[key]);
     if (stored) return stored;
-    // 兜底默认 Plan：从未手动切过 tab 的会话停在 Plan 视图（而非 terminal）。
+    // 兜底默认 Plan：从未手动切过 tab 的会话停在 Plan 视图。
     return 'plan';
   }, [conversationId, activeTabMap]);
 

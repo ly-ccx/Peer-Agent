@@ -1,6 +1,5 @@
 import { useEffect, useRef, type ReactElement } from 'react';
 import { useWorkbench, type WorkbenchTabId } from './WorkbenchContext';
-import { TerminalView } from './views/TerminalView';
 import { BrowserView } from './views/BrowserView';
 import { FilesView } from './views/FilesView';
 import { DiffView } from './views/DiffView';
@@ -42,18 +41,6 @@ const TABS: readonly TabDef[] = [
         <circle cx="12" cy="12" r="9" />
         <circle cx="12" cy="12" r="5" />
         <circle cx="12" cy="12" r="1.5" />
-      </svg>
-    ),
-  },
-  {
-    id: 'terminal',
-    labelZh: '终端',
-    labelEn: 'Terminal',
-    icon: (
-      <svg {...ICON_PROPS}>
-        <rect x="3" y="4" width="18" height="16" rx="2" />
-        <path d="m7 9 3 3-3 3" />
-        <path d="M13 15h4" />
       </svg>
     ),
   },
@@ -273,9 +260,6 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
           data-active={activeTab === 'plan'}
           ref={goalSlotRef}
         />
-        <div className="workbench-view" data-active={activeTab === 'terminal'}>
-          <TerminalView isZh={isZh} />
-        </div>
         <div
           className="workbench-view workbench-view--browser"
           data-active={activeTab === 'browser'}
