@@ -726,18 +726,139 @@
   font-variant-numeric: tabular-nums;
 }
 
-.goal-runner-attention {
-  padding: 6px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  line-height: 1.5;
+.goal-runner-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.goal-runner-phase {
+  flex: none;
+  max-width: 100%;
+  padding: 2px 7px;
+  border: 1px solid var(--za-line);
+  border-radius: 999px;
+  background: var(--za-surface-2);
+  color: var(--za-text);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.goal-runner-phase--blocked {
+  border-color: var(--za-warn);
   background: var(--za-warn-soft);
   color: var(--za-warn);
 }
 
-.goal-runner-attention--error {
+.goal-runner-phase--verify,
+.goal-runner-phase--synthesize {
+  border-color: var(--za-primary-control-bg);
+  color: var(--za-primary-control-bg);
+}
+
+.goal-runner-status-strip {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 8px;
+  border-left: 3px solid var(--za-line);
+  border-radius: 6px;
+  background: var(--za-surface-2);
+}
+
+.goal-runner-status-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.goal-runner-status-kicker {
+  font-size: 10px;
+  line-height: 1.3;
+  text-transform: uppercase;
+  color: var(--za-text-soft);
+}
+
+.goal-runner-status-text {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--za-text);
+  overflow-wrap: anywhere;
+}
+
+.goal-runner-status-meta {
+  flex: none;
+  font-size: 11px;
+  color: var(--za-text-soft);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.goal-runner-status-strip--verifier {
+  border-left-color: var(--za-primary-control-bg);
+}
+
+.goal-runner-status-strip--passed {
+  border-left-color: var(--za-primary-control-bg);
+}
+
+.goal-runner-status-strip--blocker,
+.goal-runner-status-strip--failed,
+.goal-runner-status-strip--blocked,
+.goal-runner-status-strip--error {
+  border-left-color: var(--za-warn);
   background: var(--za-warn-soft);
-  color: var(--za-warn);
+}
+
+.goal-manual-dod {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--za-primary-control-bg);
+  border-radius: 6px;
+  background: var(--za-surface-2);
+}
+
+.goal-manual-dod-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.goal-manual-dod-title {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--za-text);
+}
+
+.goal-manual-dod-count,
+.goal-manual-dod-note {
+  font-size: 12px;
+  color: var(--za-text-soft);
+}
+
+.goal-manual-dod-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--za-text-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.goal-manual-dod-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .goal-runner-actions {
@@ -829,6 +950,71 @@
 
 .goal-runner-explorer-detail--error {
   color: var(--za-warn);
+}
+
+.goal-runner-verifiers {
+  font-size: 12px;
+}
+
+.goal-runner-verifiers > summary {
+  cursor: pointer;
+  color: var(--za-text-soft);
+  user-select: none;
+}
+
+.goal-runner-verifier-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.goal-runner-verifier {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--za-hover);
+}
+
+.goal-runner-verifier-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.goal-runner-verifier-status {
+  flex: none;
+  font-size: 11px;
+  color: var(--za-text-soft);
+}
+
+.goal-runner-verifier-status--passed {
+  color: var(--za-primary-control-bg);
+}
+
+.goal-runner-verifier-status--failed,
+.goal-runner-verifier-status--blocked {
+  color: var(--za-warn);
+}
+
+.goal-runner-verifier-target {
+  color: var(--za-text);
+  line-height: 1.4;
+}
+
+.goal-runner-verifier-detail {
+  margin-top: 4px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--za-text-soft);
+}
+
+.goal-runner-verifier-summary {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* 无障碍降级：用户偏好减少动效时，关闭执行中脉冲圆点与进度条流动高光。 */

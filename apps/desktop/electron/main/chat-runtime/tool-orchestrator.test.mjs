@@ -1,7 +1,19 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-import { formatToolResultForStream, resolveCapabilityDisplayName } from './tool-orchestrator.mjs';
+import {
+  appendEvidenceRefsToToolOutput,
+  collectToolEvidenceRefs,
+  createToolContext,
+  executeModelToolCall,
+  formatToolResultForStream,
+  resolveCapabilityDisplayName,
+} from './tool-orchestrator.mjs';
+import { createGoalPlanStore } from '../goal-plan-store.mjs';
+import { createRuntimeToolProjection } from '../tools/index.mjs';
 
 // 回归：MCP 工具卡标题透传。
 // 背景：tool-call 事件此前只发裸 capability 名（如 mcp__server__tool），
@@ -48,6 +60,143 @@ describe('resolveCapabilityDisplayName', () => {
   it('treats an empty-string displayName as absent (falls back to null)', () => {
     const p = { capabilities: [{ name: 't', displayName: '' }] };
     assert.equal(resolveCapabilityDisplayName(p, 't'), null);
+  });
+});
+
+describe('tool evidence refs', () => {
+  it('registers the tool-result ref and provider artifact refs from execution evidence', () => {
+    const refs = collectToolEvidenceRefs({
+      toolCallId: 'call_1',
+      execution: {
+        result: {
+          evidence: { artifactRefs: ['local-shell-artifact://a'] },
+          outputPreview: {
+            artifactRef: 'local-browser-artifact://b',
+            localToolResultRef: { artifactRefs: ['local-shell-artifact://c'] },
+          },
+        },
+      },
+    });
+
+    assert.deepEqual(refs, [
+      'tool-result://call_1',
+      'local-shell-artifact://a',
+      'local-browser-artifact://b',
+      'local-shell-artifact://c',
+    ]);
+  });
+
+  it('adds evidenceRefs to JSON tool output so the model can cite real refs', () => {
+    const output = appendEvidenceRefsToToolOutput(
+      JSON.stringify({ kind: 'file_read_result', path: 'a.ts' }),
+      ['tool-result://call_1'],
+    );
+    const parsed = JSON.parse(output);
+    assert.equal(parsed.kind, 'file_read_result');
+    assert.deepEqual(parsed.evidenceRefs, ['tool-result://call_1']);
+  });
+
+  it('registers projected tool evidence refs in the Goal EvidenceIndex', async () => {
+    const tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'tool-orchestrator-'));
+    try {
+      const goalPlanStore = createGoalPlanStore({ storeDir: path.join(tmpRoot, 'goal-plans') });
+      const plan = goalPlanStore.createPlan({
+        conversationId: 'conv-tools',
+        title: 'read plan',
+        goal: 'read a plan through the projected tool path',
+        successCriteria: ['plan can be read'],
+        tasks: [{ taskId: 't1', order: 0, title: 'Read', status: 'pending', evidenceRefs: [] }],
+      });
+      const sent = [];
+      const permissionGate = {
+        createFilePermissionRequester: () => async () => ({ granted: true }),
+        createLocalCapabilityPermissionRequester: () => async () => ({ granted: true }),
+        createShellApprovalDecider: () => async () => ({ approved: true }),
+      };
+      const { registry, projection } = createRuntimeToolProjection({
+        projectionOptions: { mode: 'plan' },
+      });
+
+      const toolExecution = await executeModelToolCall({
+        name: 'goal_get_plan',
+        rawArguments: JSON.stringify({ planId: plan.planId }),
+        toolCallId: 'call_read_plan',
+        workspacePath: tmpRoot,
+        toolContext: createToolContext({ conversationId: 'conv-tools', mode: 'plan' }),
+        permissionGate,
+        webContents: { send: (channel, payload) => sent.push({ channel, payload }) },
+        streamId: 'stream_read_plan',
+        conversationId: 'conv-tools',
+        registry,
+        runtimeProjection: projection,
+        goalPlanStore,
+      });
+
+      assert.equal(toolExecution.aborted, false);
+      const refs = goalPlanStore.listEvidenceIndex();
+      assert.ok(refs.some((ref) => ref.evidenceRef === 'tool-result://call_read_plan'));
+      assert.ok(refs.some((ref) => ref.evidenceRef === `goal-plan://${plan.planId}`));
+      assert.ok(refs.every((ref) => ref.planId === plan.planId));
+      assert.ok(sent.some((event) => event.channel === 'chat:stream:tool-result'));
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('routes Goal confirmation requests through local capability permission, not file permission', async () => {
+    const tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'tool-orchestrator-confirmation-'));
+    try {
+      const goalPlanStore = createGoalPlanStore({ storeDir: path.join(tmpRoot, 'goal-plans') });
+      goalPlanStore.createGoalContract({
+        conversationId: 'conv-confirm',
+        title: 'scope confirmation',
+        goal: 'write only under src',
+        boundaries: { inScope: ['src/*'], outOfScope: [] },
+        tasks: [{ taskId: 't1', order: 0, title: 'Write', status: 'pending', evidenceRefs: [] }],
+      });
+      let filePermissionCalled = false;
+      const localPermissionRequests = [];
+      const permissionGate = {
+        createFilePermissionRequester: () => async () => {
+          filePermissionCalled = true;
+          return { granted: false };
+        },
+        createLocalCapabilityPermissionRequester: () => async (request) => {
+          localPermissionRequests.push(request);
+          return { granted: false };
+        },
+        createShellApprovalDecider: () => async () => ({ approved: true }),
+      };
+      const sent = [];
+      const { registry, projection } = createRuntimeToolProjection({
+        projectionOptions: { mode: 'goal' },
+      });
+
+      const toolExecution = await executeModelToolCall({
+        name: 'write_file',
+        rawArguments: JSON.stringify({ path: 'tests/new.test.ts', content: 'test' }),
+        toolCallId: 'call_scope_confirm',
+        workspacePath: tmpRoot,
+        toolContext: createToolContext({ conversationId: 'conv-confirm', mode: 'goal' }),
+        permissionGate,
+        webContents: { send: (channel, payload) => sent.push({ channel, payload }) },
+        streamId: 'stream_scope_confirm',
+        conversationId: 'conv-confirm',
+        registry,
+        runtimeProjection: projection,
+        goalPlanStore,
+      });
+
+      assert.equal(filePermissionCalled, false);
+      assert.equal(localPermissionRequests.length, 1);
+      assert.equal(localPermissionRequests[0].capabilityId, 'goal.scope.expand');
+      assert.equal(localPermissionRequests[0].confirmation.kind, 'scope_expansion');
+      assert.equal(toolExecution.result.goalModeDenied, true);
+      assert.match(toolExecution.output, /goal_scope_expansion_denied/);
+      assert.ok(sent.some((event) => event.channel === 'chat:stream:tool-result'));
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true });
+    }
   });
 });
 

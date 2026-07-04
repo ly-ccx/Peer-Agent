@@ -21,11 +21,41 @@ export type GoalPlanStatus =
   | 'drafting'
   | 'awaiting_approval'
   | 'approved'
+  | 'accepted'
   | 'executing'
   | 'paused'
   | 'completed'
   | 'cancelled'
   | 'failed';
+
+/** Goal artifact 的工作流语义：Plan 审批门 vs Goal 自驱契约。 */
+export type GoalWorkflowKind = 'plan_approval' | 'goal_self_driven';
+
+/** Goal/Plan 的执行准入事实。 */
+export interface GoalActivation {
+  readonly kind: 'approval_required' | 'approved_plan' | 'accepted_goal';
+  readonly sourceMessageId?: string;
+  readonly acceptedAt?: string;
+  readonly acceptedBy?: string;
+}
+
+export type GoalAskUserReason =
+  | 'ambiguous_goal'
+  | 'product_decision'
+  | 'high_risk'
+  | 'irreversible'
+  | 'missing_permission'
+  | 'missing_credentials'
+  | 'verification_conflict'
+  | 'scope_drift';
+
+/** 执行策略：权限仍由 Runtime Projection / PermissionGrant / adapter enforcement 负责。 */
+export interface GoalExecutionPolicy {
+  readonly autonomy: 'approval_gated' | 'self_driven';
+  readonly irreversibleRequiresConfirmation: boolean;
+  readonly writeScope: 'workspace_and_boundaries';
+  readonly askUserOn: readonly GoalAskUserReason[];
+}
 
 /** 异常处理策略动作。rollback 的 schema 先落地，执行器可后置。 */
 export type ExceptionPolicyAction = 'pause' | 'rollback' | 'skip' | 'ask_user';
@@ -76,6 +106,19 @@ export interface GoalTask {
   readonly subtasks?: GoalTask[];
 }
 
+/** Goal 模式的全局 Evidence 索引记录；任务完成只允许引用这里登记过的 refs。 */
+export interface EvidenceIndexRecord {
+  readonly evidenceRef: string;
+  readonly planId?: string;
+  readonly conversationId?: string;
+  readonly streamId?: string;
+  readonly toolCallId?: string;
+  readonly capabilityId?: string;
+  readonly toolName?: string;
+  readonly createdAt: string;
+  readonly artifactRefs?: readonly string[];
+}
+
 /** 批准事实（Evidence）。 */
 export interface GoalApproval {
   readonly decision: HumanConfirmationDecision;
@@ -123,6 +166,24 @@ export type GoalRunnerIntent =
   | 'synthesize'
   | 'block';
 
+export type GoalRunnerPhase =
+  | 'orient'
+  | 'inspect'
+  | 'plan_scaffold'
+  | 'act'
+  | 'verify'
+  | 'repair'
+  | 'synthesize'
+  | 'blocked';
+
+export interface GoalBlockerAudit {
+  readonly fingerprint: string;
+  readonly occurrences: number;
+  readonly firstSeenAt: string;
+  readonly lastSeenAt: string;
+  readonly reason: string;
+}
+
 /** 动态 Explorer 子 Agent 的能力边界。第一版只允许只读探索。 */
 export type GoalExplorerProfile = 'readonly_explorer';
 
@@ -168,6 +229,8 @@ export interface GoalExplorerRun {
   readonly explorerId: string;
   readonly status: GoalExplorerStatus;
   readonly request: GoalExplorerRequest;
+  /** Evidence refs produced by this Explorer's projected tool executions. */
+  readonly evidenceRefs?: string[];
   readonly report?: GoalExplorerReport;
   readonly failureReason?: string;
   /** 同一 turn 内并发派发的一批 Explorer 共享同一 batchId；用于 UI 精确统计「本轮」进度。 */
@@ -185,11 +248,109 @@ export interface GoalExplorerBatch {
   readonly done: number;
 }
 
+export interface GoalExploreQuestion {
+  readonly question: string;
+  readonly reason: string;
+  readonly scope?: {
+    readonly include?: string[];
+    readonly exclude?: string[];
+  };
+  readonly budget?: {
+    readonly maxToolCalls?: number;
+    readonly maxDurationMs?: number;
+  };
+}
+
+export interface GoalExplorePlan {
+  readonly requiredBeforeAct: boolean;
+  readonly questions: readonly GoalExploreQuestion[];
+  readonly exitCriteria: readonly string[];
+  readonly generatedAt: string;
+}
+
+export type GoalVerifierStatus = 'queued' | 'running' | 'passed' | 'failed' | 'blocked';
+
+export type GoalVerifierTargetKind = 'plan' | 'task' | 'success_criterion';
+
+export interface GoalVerifierTarget {
+  readonly kind: GoalVerifierTargetKind;
+  readonly taskId?: string;
+  readonly criterionId?: string;
+}
+
+export interface GoalVerifierIssue {
+  readonly taskId?: string;
+  readonly criterionId?: string;
+  readonly reason: string;
+  readonly evidenceRefs: string[];
+}
+
+export interface GoalVerifierReport {
+  readonly passed: boolean;
+  readonly failedCriteria: readonly GoalVerifierIssue[];
+  readonly missingEvidence: readonly GoalVerifierIssue[];
+  readonly risks: readonly string[];
+  readonly evidenceRefs: readonly string[];
+  readonly recommendedNextAction?: string;
+}
+
+/** Verifier 运行事实；记录验证动作与证据，不替代任务 Evidence 或 CriterionResult。 */
+export interface GoalVerifierRun {
+  readonly verifierRunId: string;
+  readonly planId: string;
+  readonly target: GoalVerifierTarget;
+  readonly status: GoalVerifierStatus;
+  readonly evidenceRefs: string[];
+  readonly report?: GoalVerifierReport;
+  readonly summary?: string;
+  readonly failureReason?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly completedAt?: string;
+}
+
+export type GoalSuccessCriterionKind =
+  | 'command'
+  | 'test'
+  | 'file-contains'
+  | 'file-exists'
+  | 'manual';
+
+export interface GoalSuccessCriterion {
+  readonly id: string;
+  readonly kind: GoalSuccessCriterionKind;
+  readonly description: string;
+  readonly command?: string;
+  readonly path?: string;
+  readonly expect?: string;
+}
+
+export interface GoalCriterionResult {
+  readonly criterionId: string;
+  readonly passed: boolean;
+  readonly evidenceRef?: string;
+  readonly detail?: string;
+  readonly checkedAt?: string;
+}
+
+export type GoalManualConfirmationKind = 'manual_dod';
+
+export interface GoalManualConfirmation {
+  readonly confirmationId: string;
+  readonly kind: GoalManualConfirmationKind;
+  readonly decision: HumanConfirmationDecision;
+  readonly criterionIds: readonly string[];
+  readonly decidedBy?: string;
+  readonly decidedAt: string;
+  readonly feedback?: string;
+}
+
 /** GoalPlan 内嵌的轻量 runner 状态；不代表工具执行事实，任务完成仍必须由 Evidence 回写。 */
 export interface GoalRunnerState {
   readonly enabled: boolean;
   readonly status: GoalRunnerStatus;
   readonly intent?: GoalRunnerIntent;
+  readonly phase?: GoalRunnerPhase;
   readonly currentTaskId?: string;
   /** 预算计数：Runner tick 次数，用于 maxTurns 熔断判定。 */
   readonly turnCount: number;
@@ -210,6 +371,13 @@ export interface GoalRunnerState {
   readonly explorers?: GoalExplorerRun[];
   /** 最近一批并发 Explorer 的进度；无进行中批次时可缺省。 */
   readonly explorerBatch?: GoalExplorerBatch;
+  /** Deterministic inspect planner output for the current inspect phase. */
+  readonly inspectPlan?: GoalExplorePlan;
+  /** Verifier 运行历史；用于追踪验证事实，不作为任务完成的唯一事实源。 */
+  readonly verifierRuns?: GoalVerifierRun[];
+  readonly blockerAudit?: GoalBlockerAudit;
+  readonly tokenBudget?: number;
+  readonly tokenUsed?: number;
   readonly blockedReason?: string;
   readonly lastError?: string;
   readonly updatedAt: string;
@@ -226,7 +394,9 @@ export interface GoalPlan {
 
   // 计划实质
   readonly goal: string;
-  readonly successCriteria: string[];
+  readonly successCriteria: readonly GoalSuccessCriterion[];
+  readonly criterionResults: readonly GoalCriterionResult[];
+  readonly manualConfirmations?: readonly GoalManualConfirmation[];
   readonly boundaries: GoalBoundaries;
   readonly exceptionPolicies: ExceptionPolicy[];
   /** 顶层汇总（来源于子任务） */
@@ -234,7 +404,10 @@ export interface GoalPlan {
   /** 拆出的子事项（树形） */
   readonly tasks: GoalTask[];
 
-  // 状态机 & 批准
+  // 状态机 & 执行准入
+  readonly workflowKind?: GoalWorkflowKind;
+  readonly activation?: GoalActivation;
+  readonly executionPolicy?: GoalExecutionPolicy;
   readonly status: GoalPlanStatus;
   readonly approval?: GoalApproval;
   /** 由子任务聚合，派生，不可手填 */

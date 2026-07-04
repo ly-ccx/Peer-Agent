@@ -59,6 +59,81 @@ describe('projected model tool executor', () => {
     assert.match(parsed.preview, /hello projection/);
   });
 
+  it('requires Goal scope expansion confirmation before projected writes outside inScope', async () => {
+    const permissionRequests = [];
+    const result = await executeProjectedModelTool({
+      name: 'write_file',
+      args: { path: 'tests/new.test.ts', content: 'test' },
+      workspacePath: tmpDir,
+      toolContext: { mode: 'goal', conversationId: 'c-scope' },
+      toolCallId: 'tc_scope_expansion',
+      goalPlanStore: {
+        listPlansByConversation: () => [{ status: 'accepted' }],
+        getActivePlanByConversation: () => ({
+          boundaries: { inScope: ['src/*'], outOfScope: [] },
+        }),
+      },
+      requestPermission: async (request) => {
+        permissionRequests.push(request);
+        return { granted: false };
+      },
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(permissionRequests.length, 1);
+    assert.equal(permissionRequests[0].reason, 'goal_scope_expansion_confirmation');
+    assert.equal(permissionRequests[0].confirmation.kind, 'scope_expansion');
+    const parsed = JSON.parse(result.output);
+    assert.equal(parsed.reason, 'goal_scope_expansion_denied');
+    assert.equal(existsSync(path.join(tmpDir, 'tests', 'new.test.ts')), false);
+  });
+
+  it('requires Goal irreversible confirmation with a dedicated capability id', async () => {
+    const permissionRequests = [];
+    const result = await executeProjectedModelTool({
+      name: 'bash',
+      args: { command: 'git push origin dev' },
+      workspacePath: tmpDir,
+      toolContext: { mode: 'goal', conversationId: 'c-irreversible' },
+      toolCallId: 'tc_irreversible',
+      requestPermission: async (request) => {
+        permissionRequests.push(request);
+        return { granted: false };
+      },
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(permissionRequests.length, 1);
+    assert.equal(permissionRequests[0].capabilityId, 'goal.irreversible.action');
+    assert.equal(permissionRequests[0].reason, 'goal_irreversible_action');
+    assert.equal(permissionRequests[0].confirmation.kind, 'git_push');
+    const parsed = JSON.parse(result.output);
+    assert.equal(parsed.reason, 'goal_irreversible_denied');
+  });
+
+  it('requires Goal high-risk confirmation with a dedicated capability id', async () => {
+    const permissionRequests = [];
+    const result = await executeProjectedModelTool({
+      name: 'bash',
+      args: { command: 'node build.js' },
+      workspacePath: tmpDir,
+      toolContext: { mode: 'goal', conversationId: 'c-high-risk' },
+      toolCallId: 'tc_high_risk',
+      requestPermission: async (request) => {
+        permissionRequests.push(request);
+        return { granted: false };
+      },
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(permissionRequests.length, 1);
+    assert.equal(permissionRequests[0].capabilityId, 'goal.high_risk.action');
+    assert.equal(permissionRequests[0].reason, 'goal_high_risk_confirmation');
+    assert.equal(permissionRequests[0].confirmation.kind, 'high_risk');
+    const parsed = JSON.parse(result.output);
+    assert.equal(parsed.reason, 'goal_high_risk_denied');
+  });
+
   it('propagates abort signals to projected shell execution', async () => {
     const markerPath = path.join(tmpDir, 'late.txt');
     const command = [

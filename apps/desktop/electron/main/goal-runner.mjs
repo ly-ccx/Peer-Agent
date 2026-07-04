@@ -7,6 +7,8 @@
  * - 工具执行、权限、Evidence 仍由注入的 chatRuntime 及既有能力链路负责。
  */
 
+import { goalPlanIsSelfDriven } from './goal-plan-store.mjs';
+
 const DEFAULT_MAX_TURNS = 8;
 const DEFAULT_MAX_TOOL_CALLS = 40;
 /** @deprecated 语义已弃用（不再作为每计划累计 Explorer 总数上限）；保留仅为兼容旧状态。 */
@@ -17,6 +19,10 @@ const DEFAULT_EXPLORER_CONCURRENCY = 5;
 const EXPLORER_CONCURRENCY_HARD_CAP = 8;
 /** 连续多少轮双信号（已完成数 + 叶子 Evidence 数）都不增长即判定 no-progress 阻塞。 */
 const DEFAULT_NO_PROGRESS_LIMIT = 3;
+/** 同一可恢复 blocker 连续出现多少次才真正交还用户。 */
+const DEFAULT_BLOCKER_AUDIT_LIMIT = 3;
+const INSPECT_EXPLORER_MAX_TOOL_CALLS = 4;
+const INSPECT_EXPLORER_MAX_DURATION_MS = 120000;
 
 const TERMINAL_PLAN_STATUSES = new Set(['completed', 'cancelled', 'failed']);
 const STOPPED_RUNNER_STATUSES = new Set(['paused', 'blocked', 'budget_exhausted', 'completed', 'failed']);
@@ -52,6 +58,127 @@ function normalizeExploreRequests(result) {
   return raw.filter((request) => request && typeof request === 'object');
 }
 
+function collectLeafTasks(plan) {
+  const out = [];
+  const stack = Array.isArray(plan?.tasks) ? [...plan.tasks] : [];
+  while (stack.length > 0) {
+    const task = stack.shift();
+    if (!task || typeof task !== 'object') continue;
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    if (subtasks.length > 0) {
+      for (const child of subtasks) stack.push(child);
+      continue;
+    }
+    out.push(task);
+  }
+  return out;
+}
+
+function collectStringSet(values) {
+  const refs = new Set();
+  for (const value of Array.isArray(values) ? values : []) {
+    if (typeof value === 'string' && value.trim()) refs.add(value.trim());
+  }
+  return refs;
+}
+
+function collectKnownInvolvedFiles(plan, leafTasks = collectLeafTasks(plan)) {
+  const files = collectStringSet(plan?.involvedFiles);
+  for (const task of leafTasks) {
+    for (const file of collectStringSet(task?.involvedFiles)) files.add(file);
+  }
+  return Array.from(files);
+}
+
+function hasCompletedExplorerReport(plan) {
+  return (Array.isArray(plan?.runner?.explorers) ? plan.runner.explorers : [])
+    .some((run) => run?.status === 'completed' && run.report);
+}
+
+function collectAutoSuccessCriteria(plan) {
+  return (Array.isArray(plan?.successCriteria) ? plan.successCriteria : [])
+    .filter((criterion) => (
+      criterion &&
+      typeof criterion === 'object' &&
+      typeof criterion.kind === 'string' &&
+      criterion.kind !== 'manual'
+    ));
+}
+
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function buildInspectScope(plan, knownFiles) {
+  const include = [];
+  if (typeof plan?.targetWorkspacePath === 'string' && plan.targetWorkspacePath.trim()) {
+    include.push(plan.targetWorkspacePath.trim());
+  }
+  for (const item of collectStringSet(plan?.boundaries?.inScope)) include.push(item);
+  for (const file of knownFiles) include.push(file);
+
+  const exclude = Array.from(collectStringSet(plan?.boundaries?.outOfScope));
+  return {
+    ...(include.length > 0 ? { include: Array.from(new Set(include)).slice(0, 12) } : {}),
+    ...(exclude.length > 0 ? { exclude: Array.from(new Set(exclude)).slice(0, 12) } : {}),
+  };
+}
+
+export function createDeterministicExplorePlan(plan, { generatedAt = new Date().toISOString() } = {}) {
+  const leafTasks = collectLeafTasks(plan);
+  const knownFiles = collectKnownInvolvedFiles(plan, leafTasks);
+  const autoCriteria = collectAutoSuccessCriteria(plan);
+  const hasTargetWorkspace =
+    typeof plan?.targetWorkspacePath === 'string' && plan.targetWorkspacePath.trim().length > 0;
+  const hasCompletedExplorer = hasCompletedExplorerReport(plan);
+  const missingTaskFileScope =
+    leafTasks.length > 0 && leafTasks.some((task) => !Array.isArray(task.involvedFiles) || task.involvedFiles.length === 0);
+  const complexEnoughForDeterministicInspect =
+    hasTargetWorkspace || autoCriteria.length > 0 || leafTasks.length >= 4;
+  const questions = [];
+
+  if (!hasCompletedExplorer && complexEnoughForDeterministicInspect && missingTaskFileScope) {
+    const scope = buildInspectScope(plan, knownFiles);
+    const target = firstNonEmptyString(plan?.targetWorkspacePath, plan?.title, plan?.goal, 'the target workspace');
+    questions.push({
+      question: `Identify the primary files, modules, and existing implementation paths needed before acting on: ${target}`,
+      reason: 'Deterministic inspect requires repository context and task-to-file grounding before act.',
+      ...(Object.keys(scope).length > 0 ? { scope } : {}),
+      budget: {
+        maxToolCalls: INSPECT_EXPLORER_MAX_TOOL_CALLS,
+        maxDurationMs: INSPECT_EXPLORER_MAX_DURATION_MS,
+      },
+    });
+  }
+
+  if (!hasCompletedExplorer && autoCriteria.length > 0 && knownFiles.length === 0) {
+    const scope = buildInspectScope(plan, knownFiles);
+    questions.push({
+      question: 'Identify the read-only verification path for the automatic success criteria before acting.',
+      reason: 'Deterministic inspect requires a verifiable test/check path before act.',
+      ...(Object.keys(scope).length > 0 ? { scope } : {}),
+      budget: {
+        maxToolCalls: INSPECT_EXPLORER_MAX_TOOL_CALLS,
+        maxDurationMs: INSPECT_EXPLORER_MAX_DURATION_MS,
+      },
+    });
+  }
+
+  return {
+    requiredBeforeAct: questions.length > 0,
+    questions,
+    exitCriteria: [
+      'primary modules/files identified or an Explorer report explains why they cannot be identified yet',
+      'automatic verification path identified when automatic success criteria exist',
+      'remaining unknowns are explicit and acceptable before act',
+    ],
+    generatedAt,
+  };
+}
+
 function shouldStopForPlan(plan) {
   return !plan || TERMINAL_PLAN_STATUSES.has(plan.status) || plan.status === 'paused';
 }
@@ -61,15 +188,20 @@ function runnerIsStopped(runner) {
 }
 
 /**
- * 是否已获授权启动 Runner。批准是 Goal Runner 的准入闸门，必须在入口强制，
- * 不能只靠调用方自觉（见 AGENTS.md：能力/权限边界不得仅由调用约定保证）。
+ * 是否已获授权启动 Runner。Plan 继续使用批准准入；Goal 自驱契约使用 accepted_goal
+ * 作为准入事实，不能继续复用 Plan 的审批门。
  *
  * 放行条件（任一）：
+ * - workflowKind === 'goal_self_driven' 且 activation.kind === 'accepted_goal'：Goal 自驱契约。
  * - plan.approval.decision === 'approve'：协议层的权威批准事实（最符合「证据负责治理」）。
  * - status 已是 executing / paused：支持 Runner re-entry 与 resume，这些态只可能由既往批准启动而来。
  */
 function isStartAuthorized(plan) {
   if (!plan) return false;
+  if (goalPlanIsSelfDriven(plan)) {
+    if (plan.activation?.kind === 'accepted_goal') return true;
+    return plan.status === 'accepted' || plan.status === 'executing' || plan.status === 'paused';
+  }
   if (plan.approval?.decision === 'approve') return true;
   return plan.status === 'executing' || plan.status === 'paused';
 }
@@ -114,6 +246,45 @@ function progressSignal(plan) {
 function signalAdvanced(prev, next) {
   if (!prev) return true;
   return next.completed > prev.completed || next.evidence > prev.evidence;
+}
+
+function nextPhaseAfterTurn(phase) {
+  switch (phase) {
+    case 'orient':
+      return 'inspect';
+    case 'inspect':
+      return 'plan_scaffold';
+    case 'plan_scaffold':
+      return 'act';
+    case 'verify':
+      return 'repair';
+    case 'repair':
+      return 'act';
+    case 'blocked':
+      return 'repair';
+    case 'synthesize':
+      return 'synthesize';
+    case 'act':
+    default:
+      return 'act';
+  }
+}
+
+function phaseForIntent(intent, fallback = 'act') {
+  switch (intent) {
+    case 'explore':
+      return 'inspect';
+    case 'verify':
+      return 'verify';
+    case 'synthesize':
+      return 'synthesize';
+    case 'block':
+      return 'blocked';
+    case 'execute':
+      return 'act';
+    default:
+      return fallback;
+  }
 }
 
 // ── 防偏航系统（见 goal-mode-ultrathink-workflow 设计文档第六、八章）──────────────
@@ -202,6 +373,55 @@ const AUTO_VERIFIABLE_CRITERION_KINDS = new Set([
   'file-exists',
 ]);
 
+function normalizeEvidenceRefSet(value) {
+  if (!value) return null;
+  const refs = value instanceof Set ? Array.from(value) : value;
+  if (!Array.isArray(refs)) return null;
+  return new Set(
+    refs
+      .filter((ref) => typeof ref === 'string' && ref.trim())
+      .map((ref) => ref.trim()),
+  );
+}
+
+function taskHasIndexedEvidence(task, indexedEvidenceRefs) {
+  if (!indexedEvidenceRefs) return true;
+  const refs = Array.isArray(task?.evidenceRefs) ? task.evidenceRefs : [];
+  return refs.some((ref) => typeof ref === 'string' && indexedEvidenceRefs.has(ref.trim()));
+}
+
+function criterionEvidenceIsIndexed(evidenceRef, indexedEvidenceRefs) {
+  if (!indexedEvidenceRefs) return true;
+  return typeof evidenceRef === 'string' && indexedEvidenceRefs.has(evidenceRef.trim());
+}
+
+function collectManualCriteria(plan) {
+  return (Array.isArray(plan?.successCriteria) ? plan.successCriteria : [])
+    .filter((criterion) => criterion && typeof criterion === 'object')
+    .filter((criterion) => !AUTO_VERIFIABLE_CRITERION_KINDS.has(criterion.kind))
+    .filter((criterion) => typeof criterion.id === 'string' && criterion.id.trim());
+}
+
+function latestManualDodConfirmation(plan, manualCriterionIds) {
+  const expected = new Set(manualCriterionIds);
+  if (expected.size === 0) return null;
+  return (Array.isArray(plan?.manualConfirmations) ? plan.manualConfirmations : [])
+    .filter((confirmation) => confirmation?.kind === 'manual_dod')
+    .filter((confirmation) => Array.isArray(confirmation.criterionIds))
+    .filter((confirmation) => {
+      const ids = new Set(
+        confirmation.criterionIds
+          .filter((id) => typeof id === 'string' && id.trim())
+          .map((id) => id.trim()),
+      );
+      for (const id of expected) {
+        if (!ids.has(id)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => String(b.decidedAt || '').localeCompare(String(a.decidedAt || '')))[0] ?? null;
+}
+
 /**
  * 完成前验证门:遍历所有叶子任务,要求全部 status==='completed' 且 evidenceRefs 非空。
  * 任一叶子未完成或缺 Evidence 即不放行完成,返回 { passed:false, unmet:[...] }。
@@ -215,7 +435,9 @@ const AUTO_VERIFIABLE_CRITERION_KINDS = new Set([
  * - 若成功标准全为 manual（无任何可自动验证项），返回 weakDoD=true 告警，提示 DoD
  *   缺乏可执行验证——不阻断完成（向后兼容纯字符串 DoD），但让上层可感知并提示补强。
  */
-export function evaluateVerificationGate(plan) {
+export function evaluateVerificationGate(plan, options = {}) {
+  const indexedEvidenceRefs = normalizeEvidenceRefSet(options.indexedEvidenceRefs);
+  const requireManualConfirmation = options.requireManualConfirmation === true;
   const roots = Array.isArray(plan?.tasks) ? plan.tasks : [];
   const unmet = [];
   const warnings = [];
@@ -232,11 +454,16 @@ export function evaluateVerificationGate(plan) {
     leaves += 1;
     const done = task.status === 'completed';
     const hasEvidence = Array.isArray(task.evidenceRefs) && task.evidenceRefs.length > 0;
-    if (!done || !hasEvidence) {
+    const hasIndexedEvidence = hasEvidence && taskHasIndexedEvidence(task, indexedEvidenceRefs);
+    if (!done || !hasEvidence || !hasIndexedEvidence) {
       unmet.push({
         taskId: task.taskId ?? null,
         status: task.status ?? null,
-        reason: !done ? 'not_completed' : 'missing_evidence',
+        reason: !done
+          ? 'not_completed'
+          : !hasEvidence
+            ? 'missing_evidence'
+            : 'unindexed_evidence',
       });
     }
   }
@@ -252,6 +479,7 @@ export function evaluateVerificationGate(plan) {
         .map((r) => [r.criterionId, r]),
     );
     let autoCount = 0;
+    const manualCriteria = [];
     for (const criterion of criteria) {
       if (!criterion || typeof criterion !== 'object') continue;
       const kind = typeof criterion.kind === 'string' ? criterion.kind : 'manual';
@@ -261,7 +489,8 @@ export function evaluateVerificationGate(plan) {
         const result = criterionId ? resultById.get(criterionId) : null;
         const passed = result?.passed === true;
         const hasRef = typeof result?.evidenceRef === 'string' && result.evidenceRef.trim();
-        if (!passed || !hasRef) {
+        const hasIndexedRef = hasRef && criterionEvidenceIsIndexed(result.evidenceRef, indexedEvidenceRefs);
+        if (!passed || !hasRef || !hasIndexedRef) {
           unmet.push({
             criterionId,
             kind,
@@ -269,11 +498,14 @@ export function evaluateVerificationGate(plan) {
               ? 'criterion_unverified'
               : !passed
                 ? 'criterion_failed'
-                : 'criterion_missing_evidence',
+                : !hasRef
+                  ? 'criterion_missing_evidence'
+                  : 'criterion_unindexed_evidence',
           });
         }
       } else {
         // manual 标准：不硬拦，转 pre-finish 人工确认，记 warning。
+        if (criterionId) manualCriteria.push(criterion);
         warnings.push({ criterionId, kind, reason: 'manual_confirmation_required' });
       }
     }
@@ -281,15 +513,77 @@ export function evaluateVerificationGate(plan) {
     if (autoCount === 0) {
       warnings.push({ reason: 'weak_dod_all_manual' });
     }
+    if (requireManualConfirmation && manualCriteria.length > 0) {
+      const criterionIds = manualCriteria
+        .map((criterion) => criterion.id)
+        .filter((id) => typeof id === 'string' && id.trim());
+      const confirmation = latestManualDodConfirmation(plan, criterionIds);
+      const status = confirmation?.decision === 'approve'
+        ? 'approved'
+        : confirmation?.decision === 'reject'
+          ? 'rejected'
+          : confirmation?.decision === 'revise'
+            ? 'revise'
+            : 'missing';
+      const manualConfirmation = {
+        required: true,
+        status,
+        criterionIds,
+        ...(confirmation?.confirmationId ? { confirmationId: confirmation.confirmationId } : {}),
+      };
+      if (status !== 'approved') {
+        unmet.push({
+          criterionId: criterionIds.join(','),
+          kind: 'manual',
+          reason: status === 'missing'
+            ? 'manual_confirmation_required'
+            : 'manual_confirmation_not_approved',
+          manualConfirmation,
+        });
+      }
+      return { passed: unmet.length === 0, unmet, warnings, manualConfirmation };
+    }
   }
 
   return { passed: unmet.length === 0, unmet, warnings };
+}
+
+function collectVerificationEvidenceRefs(plan) {
+  const refs = new Set();
+  const stack = Array.isArray(plan?.tasks) ? [...plan.tasks] : [];
+  while (stack.length > 0) {
+    const task = stack.pop();
+    if (!task || typeof task !== 'object') continue;
+    if (Array.isArray(task.evidenceRefs)) {
+      for (const ref of task.evidenceRefs) {
+        if (typeof ref === 'string' && ref.trim()) refs.add(ref.trim());
+      }
+    }
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    for (const child of subtasks) stack.push(child);
+  }
+  for (const result of Array.isArray(plan?.criterionResults) ? plan.criterionResults : []) {
+    if (typeof result?.evidenceRef === 'string' && result.evidenceRef.trim()) {
+      refs.add(result.evidenceRef.trim());
+    }
+  }
+  return [...refs];
+}
+
+function summarizeVerificationGate(gate) {
+  if (gate?.passed) return 'Verification gate passed';
+  if (gate?.reason === 'no_leaf_tasks') return 'Verification gate failed: no verifiable leaf tasks';
+  const summary = Array.isArray(gate?.unmet)
+    ? gate.unmet.map((u) => `${u.taskId ?? u.criterionId ?? '?'}:${u.reason}`).join('; ')
+    : '';
+  return `Verification gate failed${summary ? `: ${summary}` : ''}`;
 }
 
 export function createGoalRunner({
   goalPlanStore,
   chatRuntime,
   explorerRunner = null,
+  verifierRunner = null,
   emitEvent = null,
   now = () => new Date().toISOString(),
   logger = console,
@@ -308,6 +602,184 @@ export function createGoalRunner({
     } catch (error) {
       logger?.warn?.('[goal-runner] emitEvent failed:', error);
     }
+  }
+
+  function collectIndexedEvidenceRefsForPlan(plan) {
+    if (!plan || typeof goalPlanStore.listEvidenceIndex !== 'function') return null;
+    const conversationId = typeof plan.conversationId === 'string' && plan.conversationId.trim()
+      ? plan.conversationId.trim()
+      : null;
+    const refs = [];
+    for (const record of goalPlanStore.listEvidenceIndex()) {
+      if (!record || typeof record.evidenceRef !== 'string') continue;
+      if (record.planId === plan.planId || (conversationId && record.conversationId === conversationId)) {
+        refs.push(record.evidenceRef);
+      }
+    }
+    return refs;
+  }
+
+  function evaluatePlanVerificationGate(plan) {
+    return evaluateVerificationGate(plan, {
+      indexedEvidenceRefs: collectIndexedEvidenceRefsForPlan(plan),
+      requireManualConfirmation: goalPlanIsSelfDriven(plan),
+    });
+  }
+
+  function gateNeedsManualDodConfirmation(gate) {
+    const unmet = Array.isArray(gate?.unmet) ? gate.unmet : [];
+    return gate?.manualConfirmation?.required === true
+      && gate.manualConfirmation.status === 'missing'
+      && unmet.length > 0
+      && unmet.every((item) => item?.reason === 'manual_confirmation_required');
+  }
+
+  function blockForManualDodConfirmation(planId, plan, gate) {
+    if (plan?.status === 'completed') goalPlanStore.setPlanStatus(planId, 'executing');
+    const criterionIds = Array.isArray(gate?.manualConfirmation?.criterionIds)
+      ? gate.manualConfirmation.criterionIds
+      : [];
+    goalPlanStore.setRunnerState(planId, {
+      enabled: true,
+      status: 'blocked',
+      intent: 'verify',
+      phase: 'blocked',
+      blockedReason: 'manual_dod_confirmation_required',
+      ...blockerPatch(plan, 'manual_dod_confirmation_required', { phase: 'blocked' }),
+      updatedAt: now(),
+    });
+    emit('goalRunner:manualDodConfirmationRequired', {
+      planId,
+      criterionIds,
+      warnings: gate?.warnings ?? [],
+    });
+    emit('goalRunner:blocked', {
+      planId,
+      reason: 'manual_dod_confirmation_required',
+      criterionIds,
+      manualDodConfirmationRequired: true,
+    });
+    return getState(planId);
+  }
+
+  function blockerPatch(plan, reason, { phase = 'blocked', occurrences = null } = {}) {
+    const nowIso = now();
+    const fingerprint = `${phase}:${reason}`;
+    const previous = plan?.runner?.blockerAudit;
+    const same = previous?.fingerprint === fingerprint;
+    return {
+      phase,
+      blockerAudit: {
+        fingerprint,
+        reason,
+        occurrences: Number.isFinite(occurrences)
+          ? Math.max(1, Math.trunc(occurrences))
+          : same
+            ? Math.max(1, Math.trunc(previous.occurrences || 1)) + 1
+            : 1,
+        firstSeenAt: same && previous?.firstSeenAt ? previous.firstSeenAt : nowIso,
+        lastSeenAt: nowIso,
+      },
+    };
+  }
+
+  function recordVerificationRun(plan, gate) {
+    if (!plan || typeof goalPlanStore.recordVerifierRun !== 'function') return;
+    try {
+      goalPlanStore.recordVerifierRun(plan.planId, {
+        target: { kind: 'plan' },
+        status: gate?.passed ? 'passed' : 'failed',
+        evidenceRefs: collectVerificationEvidenceRefs(plan),
+        summary: summarizeVerificationGate(gate),
+        failureReason: gate?.passed ? undefined : summarizeVerificationGate(gate),
+      });
+    } catch (error) {
+      logger?.warn?.('[goal-runner] record verifier run failed:', error);
+    }
+  }
+
+  async function runVerifierIfAvailable(plan, gate) {
+    if (!gate?.passed) {
+      recordVerificationRun(plan, gate);
+      return { passed: false, reason: summarizeVerificationGate(gate), report: null };
+    }
+    if (!verifierRunner || typeof verifierRunner.runVerifier !== 'function') {
+      recordVerificationRun(plan, gate);
+      return { passed: true, reason: 'verification_gate_passed_without_verifier_runner', report: null };
+    }
+    const verifierRunId = `verifier:${plan.planId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    goalPlanStore.recordVerifierRun?.(plan.planId, {
+      verifierRunId,
+      target: { kind: 'plan' },
+      status: 'running',
+      summary: 'Verifier started',
+    });
+    emit('goalRunner:verifierStarted', { planId: plan.planId, verifierRunId });
+    let report;
+    try {
+      report = await verifierRunner.runVerifier({
+        plan,
+        planId: plan.planId,
+        verifierRunId,
+        gate,
+      });
+    } catch (error) {
+      const message = errorMessage(error);
+      goalPlanStore.recordVerifierRun?.(plan.planId, {
+        verifierRunId,
+        target: { kind: 'plan' },
+        status: 'failed',
+        summary: message,
+        failureReason: message,
+        report: {
+          passed: false,
+          failedCriteria: [],
+          missingEvidence: [],
+          risks: [message],
+          evidenceRefs: [],
+          recommendedNextAction: 'repair',
+        },
+      });
+      emit('goalRunner:verifierFailed', { planId: plan.planId, verifierRunId, error: message });
+      return { passed: false, reason: message, report: null };
+    }
+    const failedCriteria = Array.isArray(report?.failedCriteria) ? report.failedCriteria : [];
+    const missingEvidence = Array.isArray(report?.missingEvidence) ? report.missingEvidence : [];
+    const risks = Array.isArray(report?.risks) ? report.risks : [];
+    const evidenceRefs = Array.isArray(report?.evidenceRefs)
+      ? report.evidenceRefs.filter((ref) => typeof ref === 'string' && ref.trim()).map((ref) => ref.trim())
+      : [];
+    const passed = report?.passed === true
+      && failedCriteria.length === 0
+      && missingEvidence.length === 0
+      && evidenceRefs.length > 0;
+    const summary = typeof report?.summary === 'string' && report.summary.trim()
+      ? report.summary.trim()
+      : passed
+        ? 'Verifier passed'
+        : 'Verifier failed';
+    goalPlanStore.recordVerifierRun?.(plan.planId, {
+      verifierRunId,
+      target: { kind: 'plan' },
+      status: passed ? 'passed' : 'failed',
+      evidenceRefs,
+      summary,
+      failureReason: passed ? undefined : summary,
+      report: {
+        passed,
+        failedCriteria,
+        missingEvidence,
+        risks,
+        evidenceRefs,
+        recommendedNextAction: report?.recommendedNextAction,
+      },
+    });
+    emit(passed ? 'goalRunner:verifierCompleted' : 'goalRunner:verifierFailed', {
+      planId: plan.planId,
+      verifierRunId,
+      ...(passed ? {} : { reason: summary }),
+    });
+    return { passed, reason: summary, report };
   }
 
   function getState(planId) {
@@ -388,6 +860,7 @@ export function createGoalRunner({
       status: 'running',
       intent: options.intent ?? runner.intent ?? 'execute',
       currentTaskId: options.currentTaskId ?? runner.currentTaskId,
+      phase: options.phase ?? runner.phase ?? 'orient',
       turnCount: toPositiveInteger(runner.turnCount, 0, { allowZero: true }),
       toolCallCount: toPositiveInteger(runner.toolCallCount, 0, { allowZero: true }),
       explorerCount: toPositiveInteger(runner.explorerCount, 0, { allowZero: true }),
@@ -408,6 +881,7 @@ export function createGoalRunner({
           toPositiveInteger(runner.explorerConcurrency, DEFAULT_EXPLORER_CONCURRENCY),
         ),
       ),
+      blockerAudit: null,
       blockedReason: undefined,
       lastError: undefined,
       updatedAt: now(),
@@ -425,12 +899,21 @@ export function createGoalRunner({
 
   async function resume(planId, options = {}) {
     const plan = goalPlanStore.getPlan(planId);
-    if (!plan || TERMINAL_PLAN_STATUSES.has(plan.status)) return null;
-    goalPlanStore.setPlanStatus(planId, 'executing');
+    if (!plan) return null;
+    const canResumeVerificationBlock =
+      plan.status === 'completed'
+      && plan.runner?.status === 'blocked'
+      && plan.runner?.intent === 'verify';
+    if (TERMINAL_PLAN_STATUSES.has(plan.status) && !canResumeVerificationBlock) return null;
+    if (plan.status !== 'completed') goalPlanStore.setPlanStatus(planId, 'executing');
     goalPlanStore.setRunnerState(planId, {
       enabled: true,
       status: 'running',
       intent: options.intent ?? plan.runner?.intent ?? 'execute',
+      phase: options.phase ?? (plan.runner?.phase === 'blocked' ? 'repair' : plan.runner?.phase) ?? 'orient',
+      blockerAudit: null,
+      blockedReason: undefined,
+      lastError: undefined,
       updatedAt: now(),
     });
     emit('goalRunner:resumed', { planId });
@@ -473,6 +956,117 @@ export function createGoalRunner({
     return getState(planId);
   }
 
+  async function runExplorerBatch({
+    planId,
+    requests,
+    batchId,
+    session,
+    missingRunnerReason = 'Explorer requested but no explorer runner is available',
+    afterExplorePhase = 'plan_scaffold',
+  }) {
+    const current = goalPlanStore.getPlan(planId);
+    if (!current) return { terminal: true, state: null };
+    if (!Array.isArray(requests) || requests.length === 0) return { terminal: false };
+
+    if (!explorerRunner || typeof explorerRunner.runExplorer !== 'function') {
+      goalPlanStore.setRunnerState(planId, {
+        enabled: true,
+        status: 'blocked',
+        intent: 'explore',
+        blockedReason: missingRunnerReason,
+        ...blockerPatch(current, 'explorer_runner_missing', { phase: 'blocked' }),
+        updatedAt: now(),
+      });
+      emit('goalRunner:blocked', {
+        planId,
+        reason: missingRunnerReason,
+      });
+      return { terminal: true, state: getState(planId) };
+    }
+
+    const concurrency = Math.min(
+      EXPLORER_CONCURRENCY_HARD_CAP,
+      toPositiveInteger(current?.runner?.explorerConcurrency, DEFAULT_EXPLORER_CONCURRENCY),
+    );
+    goalPlanStore.setRunnerState(planId, {
+      enabled: true,
+      status: 'exploring',
+      intent: 'explore',
+      phase: 'inspect',
+      updatedAt: now(),
+    });
+    const dispatched = [];
+    for (const request of requests) {
+      const withRequest = goalPlanStore.dispatchExplorer(planId, { ...request, batchId });
+      const explorer = withRequest?.runner?.explorers?.at(-1);
+      if (!explorer) continue;
+      dispatched.push({ explorer, plan: withRequest });
+      emit('goalRunner:explorerStarted', {
+        planId,
+        explorerId: explorer.explorerId,
+        question: explorer.request?.question,
+      });
+    }
+
+    let explorerToolCalls = 0;
+    let cursor = 0;
+    const runOne = async ({ explorer, plan: withRequest }) => {
+      try {
+        const report = await explorerRunner.runExplorer({
+          plan: withRequest,
+          planId,
+          runner: withRequest.runner,
+          explorer,
+        });
+        explorerToolCalls += countToolCalls(report);
+        goalPlanStore.reportExplorer(planId, explorer.explorerId, {
+          ...report,
+          status: report?.status || 'completed',
+        });
+        emit('goalRunner:explorerCompleted', { planId, explorerId: explorer.explorerId });
+      } catch (error) {
+        const message = errorMessage(error);
+        goalPlanStore.reportExplorer(planId, explorer.explorerId, {
+          status: 'failed',
+          failureReason: message,
+          summary: message,
+          confidence: 'low',
+        });
+        emit('goalRunner:explorerFailed', { planId, explorerId: explorer.explorerId, error: message });
+      }
+    };
+    const worker = async () => {
+      while (true) {
+        if (session.cancelled) return;
+        const index = cursor;
+        cursor += 1;
+        if (index >= dispatched.length) return;
+        await runOne(dispatched[index]);
+      }
+    };
+    const poolSize = Math.max(1, Math.min(concurrency, dispatched.length));
+    if (poolSize > 0) {
+      await Promise.all(Array.from({ length: poolSize }, () => worker()));
+    }
+    if (session.cancelled) return { terminal: true, state: getState(planId) };
+    if (explorerToolCalls > 0) {
+      const afterExplore = goalPlanStore.getPlan(planId);
+      goalPlanStore.setRunnerState(planId, {
+        toolCallCount:
+          toPositiveInteger(afterExplore?.runner?.toolCallCount, 0, { allowZero: true }) + explorerToolCalls,
+        updatedAt: now(),
+      });
+    }
+    goalPlanStore.setRunnerState(planId, {
+      enabled: true,
+      status: 'running',
+      intent: 'execute',
+      phase: afterExplorePhase,
+      updatedAt: now(),
+    });
+    return { terminal: false };
+  }
+
   async function pump(planId, session) {
     // no-progress 双信号基线，仅存活于本次 pump 闭包内：
     // resume 会重新拉起 pump，计数自然清零（既往不咎语义）。
@@ -486,10 +1080,64 @@ export function createGoalRunner({
       if (!plan) return null;
 
       if (plan.status === 'completed' || hasCompletedProgress(plan)) {
+        const gate = evaluatePlanVerificationGate(plan);
+        if (!gate.passed) {
+          if (gateNeedsManualDodConfirmation(gate)) {
+            return blockForManualDodConfirmation(planId, plan, gate);
+          }
+          await runVerifierIfAvailable(plan, gate);
+          const summary = gate.reason === 'no_leaf_tasks'
+            ? 'no verifiable leaf tasks'
+            : gate.unmet
+              .map((u) => `${u.taskId ?? u.criterionId ?? '?'}:${u.reason}`)
+              .join('; ');
+          if (plan.status === 'completed') goalPlanStore.setPlanStatus(planId, 'executing');
+          goalPlanStore.setRunnerState(planId, {
+            enabled: true,
+            status: 'blocked',
+            intent: 'verify',
+            blockedReason: `Verification gate failed: ${summary}`,
+            ...blockerPatch(plan, 'verification_gate_failed', { phase: 'blocked' }),
+            updatedAt: now(),
+          });
+          emit('goalRunner:blocked', {
+            planId,
+            reason: 'verification_gate_failed',
+            unmet: gate.unmet,
+            warnings: gate.warnings ?? [],
+          });
+          return getState(planId);
+        }
+        if (Array.isArray(gate.warnings) && gate.warnings.length > 0) {
+          emit('goalRunner:verificationWarnings', {
+            planId,
+            warnings: gate.warnings,
+          });
+        }
+        const verifier = await runVerifierIfAvailable(plan, gate);
+        if (!verifier.passed) {
+          if (plan.status === 'completed') goalPlanStore.setPlanStatus(planId, 'executing');
+          goalPlanStore.setRunnerState(planId, {
+            enabled: true,
+            status: 'blocked',
+            intent: 'verify',
+            blockedReason: `Verifier failed: ${verifier.reason}`,
+            ...blockerPatch(plan, 'verifier_failed', { phase: 'repair' }),
+            updatedAt: now(),
+          });
+          emit('goalRunner:blocked', {
+            planId,
+            reason: 'verifier_failed',
+            detail: verifier.reason,
+          });
+          return getState(planId);
+        }
+        if (plan.status !== 'completed') goalPlanStore.setPlanStatus(planId, 'completed');
         goalPlanStore.setRunnerState(planId, {
           enabled: false,
           status: 'completed',
           intent: 'synthesize',
+          phase: 'synthesize',
           updatedAt: now(),
         });
         emit('goalRunner:completed', { planId });
@@ -500,6 +1148,7 @@ export function createGoalRunner({
           enabled: false,
           status: 'failed',
           intent: 'block',
+          phase: 'blocked',
           updatedAt: now(),
         });
         emit('goalRunner:failed', { planId });
@@ -520,6 +1169,14 @@ export function createGoalRunner({
       const signal = progressSignal(plan);
       if (signalAdvanced(lastSignal, signal)) {
         noProgressStreak = 0;
+        if (plan.runner?.blockerAudit) {
+          goalPlanStore.setRunnerState(planId, {
+            blockerAudit: null,
+            blockedReason: undefined,
+            lastError: undefined,
+            updatedAt: now(),
+          });
+        }
       } else {
         noProgressStreak += 1;
       }
@@ -530,6 +1187,10 @@ export function createGoalRunner({
           status: 'blocked',
           intent: 'block',
           blockedReason: 'no_progress',
+          ...blockerPatch(plan, 'no_progress', {
+            phase: 'blocked',
+            occurrences: noProgressStreak,
+          }),
           updatedAt: now(),
         });
         emit('goalRunner:blocked', { planId, reason: 'no_progress' });
@@ -552,6 +1213,7 @@ export function createGoalRunner({
             status: 'blocked',
             intent: 'block',
             blockedReason: `scope_drift: ${drift.reasons.join('; ')}`,
+            ...blockerPatch(plan, 'scope_drift', { phase: 'blocked' }),
             updatedAt: now(),
           });
           emit('goalRunner:blocked', { planId, reason: 'scope_drift', reasons: drift.reasons });
@@ -565,10 +1227,37 @@ export function createGoalRunner({
         emit('goalRunner:reanchor', { planId, turnNumber, interval: reanchorInterval });
       }
 
+      if ((runner.phase ?? 'orient') === 'inspect') {
+        const inspectPlan = createDeterministicExplorePlan(plan, { generatedAt: now() });
+        goalPlanStore.setRunnerState(planId, {
+          inspectPlan,
+          updatedAt: now(),
+        });
+        emit('goalRunner:inspectPlan', {
+          planId,
+          turnNumber,
+          requiredBeforeAct: inspectPlan.requiredBeforeAct,
+          questionCount: inspectPlan.questions.length,
+        });
+        if (inspectPlan.requiredBeforeAct) {
+          const exploreResult = await runExplorerBatch({
+            planId,
+            requests: inspectPlan.questions,
+            batchId: `${planId}:inspect:${turnNumber}`,
+            session,
+            missingRunnerReason: 'Deterministic inspect requires Explorer before act, but no explorer runner is available',
+            afterExplorePhase: 'plan_scaffold',
+          });
+          if (exploreResult.terminal) return exploreResult.state;
+          continue;
+        }
+      }
+
       goalPlanStore.setRunnerState(planId, {
         enabled: true,
         status: 'running',
         intent: runner.intent ?? 'execute',
+        phase: runner.phase ?? 'orient',
         reanchor,
         updatedAt: now(),
       });
@@ -590,6 +1279,7 @@ export function createGoalRunner({
           enabled: true,
           status: 'failed',
           intent: 'block',
+          phase: 'blocked',
           lastError: message,
           updatedAt: now(),
         });
@@ -624,96 +1314,59 @@ export function createGoalRunner({
 
       const exploreRequests = normalizeExploreRequests(result);
       if (exploreRequests.length > 0) {
-        if (!explorerRunner || typeof explorerRunner.runExplorer !== 'function') {
-          goalPlanStore.setRunnerState(planId, {
-            enabled: true,
-            status: 'blocked',
-            intent: 'explore',
-            blockedReason: 'Explorer requested but no explorer runner is available',
-            updatedAt: now(),
-          });
-          emit('goalRunner:blocked', {
-            planId,
-            reason: 'Explorer requested but no explorer runner is available',
-          });
-          return getState(planId);
-        }
-        // 每 turn 并发池：先把本轮请求整批派发（共享同一 batchId，供 UI 精确统计
-        // 「本轮已完成/本轮总数」），再用大小为 N 的并发池并行执行 runExplorer。
-        // N = explorerConcurrency（默认 5、硬上限 8）；不再受「每计划累计上限」约束，
-        // 计划总数由 maxTurns 天然兜底。
-        const concurrency = Math.min(
-          EXPLORER_CONCURRENCY_HARD_CAP,
-          toPositiveInteger(latest?.runner?.explorerConcurrency, DEFAULT_EXPLORER_CONCURRENCY),
-        );
-        const batchId = `${planId}:t${turnNumber}`;
-        const dispatched = [];
-        for (const request of exploreRequests) {
-          const withRequest = goalPlanStore.dispatchExplorer(planId, { ...request, batchId });
-          const explorer = withRequest?.runner?.explorers?.at(-1);
-          if (!explorer) continue;
-          dispatched.push({ explorer, plan: withRequest });
-          emit('goalRunner:explorerStarted', {
-            planId,
-            explorerId: explorer.explorerId,
-            question: explorer.request?.question,
-          });
-        }
-
-        // 并发安全：JS 单线程，await 之间无抢占，故共享累加器 explorerToolCalls
-        // 与游标 cursor 的自增均为原子操作，无需额外锁。
-        let explorerToolCalls = 0;
-        let cursor = 0;
-        const runOne = async ({ explorer, plan: withRequest }) => {
-          try {
-            const report = await explorerRunner.runExplorer({
-              plan: withRequest,
-              planId,
-              runner: withRequest.runner,
-              explorer,
-            });
-            explorerToolCalls += countToolCalls(report);
-            goalPlanStore.reportExplorer(planId, explorer.explorerId, {
-              ...report,
-              status: report?.status || 'completed',
-            });
-            emit('goalRunner:explorerCompleted', { planId, explorerId: explorer.explorerId });
-          } catch (error) {
-            // fail-soft：单个 Explorer 失败只记 failed 并广播，不中止本轮其它并发任务，
-            // 也不 early return；失败信息留待下一轮由模型自行判断是否重试/换向。
-            const message = errorMessage(error);
-            goalPlanStore.reportExplorer(planId, explorer.explorerId, {
-              status: 'failed',
-              failureReason: message,
-              summary: message,
-              confidence: 'low',
-            });
-            emit('goalRunner:explorerFailed', { planId, explorerId: explorer.explorerId, error: message });
-          }
-        };
-        const worker = async () => {
-          while (true) {
-            if (session.cancelled) return;
-            const index = cursor;
-            cursor += 1;
-            if (index >= dispatched.length) return;
-            await runOne(dispatched[index]);
-          }
-        };
-        const poolSize = Math.max(1, Math.min(concurrency, dispatched.length));
-        if (poolSize > 0) {
-          await Promise.all(Array.from({ length: poolSize }, () => worker()));
-        }
-        if (session.cancelled) return getState(planId);
-        if (explorerToolCalls > 0) {
-          const afterExplore = goalPlanStore.getPlan(planId);
-          goalPlanStore.setRunnerState(planId, {
-            toolCallCount:
-              toPositiveInteger(afterExplore?.runner?.toolCallCount, 0, { allowZero: true }) + explorerToolCalls,
-            updatedAt: now(),
-          });
-        }
+        const exploreResult = await runExplorerBatch({
+          planId,
+          requests: exploreRequests,
+          batchId: `${planId}:t${turnNumber}`,
+          session,
+        });
+        if (exploreResult.terminal) return exploreResult.state;
         continue;
+      }
+
+      if (result?.requestedUserInput) {
+        const reason = result.blockedReason || 'requested_user_input';
+        goalPlanStore.setRunnerState(planId, {
+          enabled: true,
+          status: 'blocked',
+          intent: 'block',
+          phase: 'blocked',
+          blockedReason: reason,
+          ...blockerPatch(latest, reason, { phase: 'blocked' }),
+          updatedAt: now(),
+        });
+        emit('goalRunner:blocked', { planId, reason, requestedUserInput: true });
+        return getState(planId);
+      }
+
+      if (result?.terminalStatus === 'error') {
+        const message = result.failureReason || 'Goal Runner turn stream failed';
+        goalPlanStore.setPlanStatus(planId, 'failed');
+        goalPlanStore.setRunnerState(planId, {
+          enabled: true,
+          status: 'failed',
+          intent: 'block',
+          phase: 'blocked',
+          lastError: message,
+          updatedAt: now(),
+        });
+        emit('goalRunner:failed', { planId, error: message });
+        return getState(planId);
+      }
+
+      if (result?.terminalStatus === 'aborted') {
+        const reason = result.blockedReason || 'Goal Runner turn aborted';
+        goalPlanStore.setRunnerState(planId, {
+          enabled: true,
+          status: 'blocked',
+          intent: 'block',
+          phase: 'blocked',
+          blockedReason: reason,
+          ...blockerPatch(latest, reason, { phase: 'blocked' }),
+          updatedAt: now(),
+        });
+        emit('goalRunner:blocked', { planId, reason });
+        return getState(planId);
       }
 
       if (result?.continue === false) {
@@ -721,6 +1374,7 @@ export function createGoalRunner({
           enabled: true,
           status: 'idle',
           intent: result.intent ?? latestRunner?.intent ?? 'execute',
+          phase: phaseForIntent(result.intent ?? latestRunner?.intent, latestRunner?.phase ?? 'act'),
           updatedAt: now(),
         });
         emit('goalRunner:tickCompleted', { planId, turnNumber, continue: false });
@@ -728,14 +1382,37 @@ export function createGoalRunner({
       }
 
       if (result?.blocked) {
+        const reason = result.blockedReason || 'Goal Runner blocked';
+        const observedPhase = latestRunner?.phase ?? runner.phase ?? 'act';
+        const auditPatch = blockerPatch(latest, reason, { phase: observedPhase });
+        if (auditPatch.blockerAudit.occurrences < DEFAULT_BLOCKER_AUDIT_LIMIT) {
+          goalPlanStore.setRunnerState(planId, {
+            enabled: true,
+            status: 'running',
+            intent: result.intent ?? latestRunner?.intent ?? 'execute',
+            phase: observedPhase,
+            blockerAudit: auditPatch.blockerAudit,
+            blockedReason: undefined,
+            updatedAt: now(),
+          });
+          emit('goalRunner:blockerObserved', {
+            planId,
+            reason,
+            occurrences: auditPatch.blockerAudit.occurrences,
+            threshold: DEFAULT_BLOCKER_AUDIT_LIMIT,
+          });
+          continue;
+        }
         goalPlanStore.setRunnerState(planId, {
           enabled: true,
           status: 'blocked',
           intent: 'block',
-          blockedReason: result.blockedReason || 'Goal Runner blocked',
+          phase: 'blocked',
+          blockedReason: reason,
+          blockerAudit: auditPatch.blockerAudit,
           updatedAt: now(),
         });
-        emit('goalRunner:blocked', { planId, reason: result.blockedReason || 'Goal Runner blocked' });
+        emit('goalRunner:blocked', { planId, reason, occurrences: auditPatch.blockerAudit.occurrences });
         return getState(planId);
       }
 
@@ -746,6 +1423,7 @@ export function createGoalRunner({
           enabled: true,
           status: 'failed',
           intent: 'block',
+          phase: 'blocked',
           lastError: message,
           updatedAt: now(),
         });
@@ -757,8 +1435,19 @@ export function createGoalRunner({
       // 这比旧的 hasCompletedProgress（仅需部分进展）更严,机器化落地「完成以证据为准」,
       // 阻断「无证据的口头完成」。任一叶子未达标即转 blocked/verify,附未达标清单。
       if (result?.completed) {
-        const gate = evaluateVerificationGate(latest);
+        goalPlanStore.setRunnerState(planId, {
+          enabled: true,
+          status: 'running',
+          intent: 'verify',
+          phase: 'verify',
+          updatedAt: now(),
+        });
+        const gate = evaluatePlanVerificationGate(latest);
         if (!gate.passed) {
+          if (gateNeedsManualDodConfirmation(gate)) {
+            return blockForManualDodConfirmation(planId, latest, gate);
+          }
+          await runVerifierIfAvailable(latest, gate);
           const summary = gate.reason === 'no_leaf_tasks'
             ? 'no verifiable leaf tasks'
             // 兼容两类未达标项：叶子任务（taskId）与成功标准（criterionId）。
@@ -770,6 +1459,7 @@ export function createGoalRunner({
             status: 'blocked',
             intent: 'verify',
             blockedReason: `Verification gate failed: ${summary}`,
+            ...blockerPatch(latest, 'verification_gate_failed', { phase: 'blocked' }),
             updatedAt: now(),
           });
           emit('goalRunner:blocked', {
@@ -787,7 +1477,43 @@ export function createGoalRunner({
             warnings: gate.warnings,
           });
         }
+        const verifier = await runVerifierIfAvailable(latest, gate);
+        if (!verifier.passed) {
+          if (latest.status === 'completed') goalPlanStore.setPlanStatus(planId, 'executing');
+          goalPlanStore.setRunnerState(planId, {
+            enabled: true,
+            status: 'blocked',
+            intent: 'verify',
+            blockedReason: `Verifier failed: ${verifier.reason}`,
+            ...blockerPatch(latest, 'verifier_failed', { phase: 'repair' }),
+            updatedAt: now(),
+          });
+          emit('goalRunner:blocked', {
+            planId,
+            reason: 'verifier_failed',
+            detail: verifier.reason,
+          });
+          return getState(planId);
+        }
+        goalPlanStore.setPlanStatus(planId, 'completed');
+        goalPlanStore.setRunnerState(planId, {
+          enabled: false,
+          status: 'completed',
+          intent: 'synthesize',
+          phase: 'synthesize',
+          updatedAt: now(),
+        });
+        emit('goalRunner:completed', { planId });
+        return getState(planId);
       }
+
+      goalPlanStore.setRunnerState(planId, {
+        enabled: true,
+        status: 'running',
+        intent: latestRunner?.intent ?? 'execute',
+        phase: nextPhaseAfterTurn(latestRunner?.phase ?? runner.phase ?? 'orient'),
+        updatedAt: now(),
+      });
     }
     return getState(planId);
   }

@@ -199,25 +199,53 @@ export async function executeProjectedModelTool({
       projectionCapability: projection.capability,
     };
   }
-  // goal 模式不可逆动作（删除/覆盖/git 强制/push/release）：逐动作确认后放行，拒绝则结构化失败。
+  // goal 模式高风险动作：不可逆动作或 scope expansion 逐动作确认后放行，拒绝则结构化失败。
   if (gate.requiresConfirmation) {
+    const confirmationKind = gate.confirmation?.kind ?? 'unknown';
+    const isScopeExpansion = confirmationKind === 'scope_expansion';
+    const isHighRisk = confirmationKind === 'high_risk';
+    const confirmationCapabilityId = isScopeExpansion
+      ? 'goal.scope.expand'
+      : isHighRisk
+        ? 'goal.high_risk.action'
+        : 'goal.irreversible.action';
+    const confirmationReason = isScopeExpansion
+      ? 'goal_scope_expansion_confirmation'
+      : isHighRisk
+        ? 'goal_high_risk_confirmation'
+        : 'goal_irreversible_action';
+    const denialReason = isScopeExpansion
+      ? 'goal_scope_expansion_denied'
+      : isHighRisk
+        ? 'goal_high_risk_denied'
+        : 'goal_irreversible_denied';
     let approval = null;
     if (typeof requestPermission === 'function') {
       approval = await requestPermission({
         tool: name,
+        toolName: name,
+        capabilityId: confirmationCapabilityId,
         args,
         workspacePath: cwd,
-        reason: 'goal_irreversible_action',
+        reason: confirmationReason,
         confirmation: gate.confirmation ?? null,
+        scope: {
+          kind: 'goal-confirmation',
+          confirmationKind,
+          tool: name,
+          workspacePath: cwd,
+        },
+        riskLevel: isScopeExpansion ? 'L2_local_write' : gate.confirmation?.riskLevel ?? 'L5_destructive',
+        dataLevel: 'D2_sensitive',
       });
     }
     if (!approval?.granted) {
       return {
         ...buildGoalModeDenial({
           name,
-          reason: 'goal_irreversible_denied',
+          reason: denialReason,
           locale,
-          detail: gate.confirmation?.kind ?? null,
+          detail: confirmationKind,
         }),
         projectionCapability: projection.capability,
       };

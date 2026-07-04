@@ -174,7 +174,7 @@ export function derivePlanStatus(currentStatus, tasks) {
   // 否则会产生「顶层 executing 但从未批准、Runner 未启动」的僵死态
   // （审批按钮消失、探查也永远派发不出去）。批准闸门必须由显式 recordApproval
   // 把 status 推进到 'approved' 后，本规则才接手推进到 'executing'。
-  const PRE_EXECUTION = new Set(['approved']);
+  const PRE_EXECUTION = new Set(['approved', 'accepted']);
   if (!PRE_EXECUTION.has(currentStatus)) return currentStatus;
 
   let started = false;
@@ -224,6 +224,34 @@ function updateTaskInTree(tasks, taskId, updater) {
   return { tasks: next, found };
 }
 
+function taskExistsInTree(tasks, taskId) {
+  if (!taskId) return false;
+  const stack = Array.isArray(tasks) ? [...tasks] : [];
+  while (stack.length > 0) {
+    const task = stack.shift();
+    if (!task || typeof task !== 'object') continue;
+    if (task.taskId === taskId) return true;
+    if (Array.isArray(task.subtasks)) {
+      for (const child of task.subtasks) stack.push(child);
+    }
+  }
+  return false;
+}
+
+function findTaskInTree(tasks, taskId) {
+  if (!taskId) return null;
+  const stack = Array.isArray(tasks) ? [...tasks] : [];
+  while (stack.length > 0) {
+    const task = stack.shift();
+    if (!task || typeof task !== 'object') continue;
+    if (task.taskId === taskId) return task;
+    if (Array.isArray(task.subtasks)) {
+      for (const child of task.subtasks) stack.push(child);
+    }
+  }
+  return null;
+}
+
 const RUNNER_STATUSES = new Set([
   'idle',
   'running',
@@ -237,11 +265,192 @@ const RUNNER_STATUSES = new Set([
 const RUNNER_INTENTS = new Set(['execute', 'verify', 'explore', 'synthesize', 'block']);
 const EXPLORER_STATUSES = new Set(['queued', 'running', 'completed', 'failed', 'cancelled']);
 const EXPLORER_CONFIDENCE = new Set(['low', 'medium', 'high']);
+const VERIFIER_STATUSES = new Set(['queued', 'running', 'passed', 'failed', 'blocked']);
+const VERIFIER_TERMINAL_STATUSES = new Set(['passed', 'failed', 'blocked']);
+const VERIFIER_TARGET_KINDS = new Set(['plan', 'task', 'success_criterion']);
+const WORKFLOW_KINDS = new Set(['plan_approval', 'goal_self_driven']);
+const ACTIVATION_KINDS = new Set(['approval_required', 'approved_plan', 'accepted_goal']);
+const AUTONOMY_KINDS = new Set(['approval_gated', 'self_driven']);
+const WRITE_SCOPES = new Set(['workspace_and_boundaries']);
+const CONFIRMATION_DECISIONS = new Set(['approve', 'reject', 'revise']);
+const MANUAL_CONFIRMATION_KINDS = new Set(['manual_dod']);
+const GOAL_RUNNER_PHASES = new Set([
+  'orient',
+  'inspect',
+  'plan_scaffold',
+  'act',
+  'verify',
+  'repair',
+  'synthesize',
+  'blocked',
+]);
+const ASK_USER_REASONS = new Set([
+  'ambiguous_goal',
+  'product_decision',
+  'high_risk',
+  'irreversible',
+  'missing_permission',
+  'missing_credentials',
+  'verification_conflict',
+  'scope_drift',
+]);
+
+const DEFAULT_APPROVAL_GATED_POLICY = Object.freeze({
+  autonomy: 'approval_gated',
+  irreversibleRequiresConfirmation: true,
+  writeScope: 'workspace_and_boundaries',
+  askUserOn: [
+    'ambiguous_goal',
+    'product_decision',
+    'high_risk',
+    'irreversible',
+    'missing_permission',
+    'missing_credentials',
+    'verification_conflict',
+    'scope_drift',
+  ],
+});
+
+const DEFAULT_SELF_DRIVEN_POLICY = Object.freeze({
+  autonomy: 'self_driven',
+  irreversibleRequiresConfirmation: true,
+  writeScope: 'workspace_and_boundaries',
+  askUserOn: [
+    'ambiguous_goal',
+    'product_decision',
+    'high_risk',
+    'irreversible',
+    'missing_permission',
+    'missing_credentials',
+    'verification_conflict',
+    'scope_drift',
+  ],
+});
 
 function normalizeStringArray(value) {
   return Array.isArray(value)
     ? value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
     : [];
+}
+
+function normalizeOptionalString(value) {
+  if (value === undefined || value === null) return null;
+  const normalized = String(value).trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeEvidenceRefList(value) {
+  if (typeof value === 'string') return normalizeStringArray([value]);
+  return normalizeStringArray(value);
+}
+
+function normalizeEvidenceIndexRecord(value) {
+  if (!value || typeof value !== 'object') return null;
+  const evidenceRef = normalizeOptionalString(value.evidenceRef);
+  if (!evidenceRef) return null;
+  const createdAt = normalizeOptionalString(value.createdAt) || new Date().toISOString();
+  const record = { evidenceRef, createdAt };
+  const optionalFields = [
+    'planId',
+    'conversationId',
+    'streamId',
+    'toolCallId',
+    'capabilityId',
+    'toolName',
+  ];
+  for (const field of optionalFields) {
+    const normalized = normalizeOptionalString(value[field]);
+    if (normalized) record[field] = normalized;
+  }
+  const artifactRefs = normalizeEvidenceRefList(value.artifactRefs);
+  if (artifactRefs.length > 0) record.artifactRefs = artifactRefs;
+  return record;
+}
+
+function normalizeWorkflowKind(value) {
+  return WORKFLOW_KINDS.has(value) ? value : 'plan_approval';
+}
+
+function isSelfDrivenGoal(plan) {
+  return plan?.workflowKind === 'goal_self_driven'
+    || plan?.executionPolicy?.autonomy === 'self_driven'
+    || plan?.activation?.kind === 'accepted_goal';
+}
+
+export function goalPlanIsSelfDriven(plan) {
+  return isSelfDrivenGoal(plan);
+}
+
+export function goalPlanRequiresApproval(plan) {
+  return !isSelfDrivenGoal(plan);
+}
+
+function defaultExecutionPolicyForWorkflow(workflowKind) {
+  return workflowKind === 'goal_self_driven'
+    ? DEFAULT_SELF_DRIVEN_POLICY
+    : DEFAULT_APPROVAL_GATED_POLICY;
+}
+
+function normalizeActivation(value, workflowKind, status) {
+  const now = new Date().toISOString();
+  if (value && typeof value === 'object') {
+    const kind = ACTIVATION_KINDS.has(value.kind) ? value.kind : null;
+    if (kind) {
+      const activation = { kind };
+      if (typeof value.sourceMessageId === 'string' && value.sourceMessageId.trim()) {
+        activation.sourceMessageId = value.sourceMessageId.trim();
+      }
+      if (typeof value.acceptedAt === 'string' && value.acceptedAt.trim()) {
+        activation.acceptedAt = value.acceptedAt.trim();
+      }
+      if (typeof value.acceptedBy === 'string' && value.acceptedBy.trim()) {
+        activation.acceptedBy = value.acceptedBy.trim();
+      }
+      return activation;
+    }
+  }
+  if (workflowKind === 'goal_self_driven') {
+    return { kind: 'accepted_goal', acceptedAt: now, acceptedBy: 'user' };
+  }
+  if (status === 'approved' || status === 'executing' || status === 'paused') {
+    return { kind: 'approved_plan' };
+  }
+  return { kind: 'approval_required' };
+}
+
+function normalizeExecutionPolicy(value, workflowKind) {
+  const fallback = defaultExecutionPolicyForWorkflow(workflowKind);
+  if (!value || typeof value !== 'object') return { ...fallback };
+  const autonomy = AUTONOMY_KINDS.has(value.autonomy) ? value.autonomy : fallback.autonomy;
+  const writeScope = WRITE_SCOPES.has(value.writeScope) ? value.writeScope : fallback.writeScope;
+  const askUserOn = Array.isArray(value.askUserOn)
+    ? value.askUserOn.filter((reason) => ASK_USER_REASONS.has(reason))
+    : fallback.askUserOn;
+  return {
+    autonomy,
+    irreversibleRequiresConfirmation:
+      typeof value.irreversibleRequiresConfirmation === 'boolean'
+        ? value.irreversibleRequiresConfirmation
+        : fallback.irreversibleRequiresConfirmation,
+    writeScope,
+    askUserOn: askUserOn.length > 0 ? askUserOn : fallback.askUserOn,
+  };
+}
+
+function makeDefaultGoalTask(goal) {
+  return {
+    taskId: 'orient',
+    order: 0,
+    title: goal
+      ? 'Orient to the goal and establish a verifiable task scaffold'
+      : 'Orient to the goal',
+    path: [],
+    dependsOn: [],
+    acceptanceCriteria: [],
+    involvedFiles: [],
+    status: 'pending',
+    evidenceRefs: [],
+  };
 }
 
 // 成功标准（DoD）的可选类型。command/test/file-contains/file-exists 可被机器自动
@@ -310,6 +519,47 @@ function normalizeCriterionResult(value) {
 function normalizeCriterionResults(value) {
   if (!Array.isArray(value)) return [];
   return value.map((item) => normalizeCriterionResult(item)).filter(Boolean);
+}
+
+function normalizeManualConfirmation(value) {
+  if (!value || typeof value !== 'object') return null;
+  const kind = MANUAL_CONFIRMATION_KINDS.has(value.kind) ? value.kind : null;
+  const decision = CONFIRMATION_DECISIONS.has(value.decision) ? value.decision : null;
+  const criterionIds = normalizeStringArray(value.criterionIds);
+  if (!kind || !decision || criterionIds.length === 0) return null;
+  const confirmationId = typeof value.confirmationId === 'string' && value.confirmationId.trim()
+    ? value.confirmationId.trim()
+    : randomUUID();
+  const decidedAt = typeof value.decidedAt === 'string' && value.decidedAt.trim()
+    ? value.decidedAt.trim()
+    : new Date().toISOString();
+  const confirmation = {
+    confirmationId,
+    kind,
+    decision,
+    criterionIds,
+    decidedAt,
+  };
+  if (typeof value.decidedBy === 'string' && value.decidedBy.trim()) {
+    confirmation.decidedBy = value.decidedBy.trim();
+  }
+  if (typeof value.feedback === 'string' && value.feedback.trim()) {
+    confirmation.feedback = value.feedback.trim();
+  }
+  return confirmation;
+}
+
+function normalizeManualConfirmations(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => normalizeManualConfirmation(item)).filter(Boolean);
+}
+
+function collectManualCriterionIds(plan) {
+  return (Array.isArray(plan?.successCriteria) ? plan.successCriteria : [])
+    .filter((criterion) => criterion && typeof criterion === 'object')
+    .filter((criterion) => !AUTO_CRITERION_KINDS.has(criterion.kind))
+    .map((criterion) => (typeof criterion.id === 'string' ? criterion.id.trim() : ''))
+    .filter(Boolean);
 }
 
 function normalizeExplorerRequest(request, fallback = {}) {
@@ -394,6 +644,45 @@ function normalizeExplorerReport(report, fallback = {}) {
   return normalized;
 }
 
+function collectExplorerReportEvidenceRefs(report) {
+  const refs = new Set();
+  for (const ref of normalizeStringArray(report?.evidenceRefs)) refs.add(ref);
+  for (const finding of Array.isArray(report?.findings) ? report.findings : []) {
+    for (const ref of normalizeStringArray(finding?.evidenceRefs)) refs.add(ref);
+  }
+  return Array.from(refs);
+}
+
+function normalizeExplorerRegistryRefs(report, existingRun = {}) {
+  const explicit =
+    report?.allowedEvidenceRefs ??
+    report?.registeredEvidenceRefs ??
+    report?.toolEvidenceRefs ??
+    report?.evidenceRegistry;
+  const refs = explicit !== undefined ? explicit : existingRun.evidenceRefs;
+  return normalizeStringArray(refs);
+}
+
+function assertExplorerReportEvidenceRegistered({ explorerId, report, registeredRefs }) {
+  if (!report || report.evidenceRefs.length === 0) {
+    throw new Error(
+      `[goal-plan-store] explorer ${explorerId} cannot be 'completed' without evidenceRefs`,
+    );
+  }
+  if (registeredRefs.length === 0) {
+    throw new Error(
+      `[goal-plan-store] explorer ${explorerId} cannot be 'completed' without registered tool evidenceRefs`,
+    );
+  }
+  const registered = new Set(registeredRefs);
+  const unknown = collectExplorerReportEvidenceRefs(report).filter((ref) => !registered.has(ref));
+  if (unknown.length > 0) {
+    throw new Error(
+      `[goal-plan-store] explorer ${explorerId} reported unregistered evidenceRefs: ${unknown.join(', ')}`,
+    );
+  }
+}
+
 function normalizeExplorerRun(run, fallback = {}) {
   if (!run || typeof run !== 'object') return null;
   const explorerId = typeof run.explorerId === 'string' && run.explorerId.trim()
@@ -416,6 +705,8 @@ function normalizeExplorerRun(run, fallback = {}) {
     question: request.question,
   });
   if (report) normalized.report = report;
+  const evidenceRefs = normalizeStringArray(run.evidenceRefs);
+  if (evidenceRefs.length > 0) normalized.evidenceRefs = evidenceRefs;
   if (typeof run.failureReason === 'string' && run.failureReason.trim()) {
     normalized.failureReason = run.failureReason.trim();
   }
@@ -424,6 +715,52 @@ function normalizeExplorerRun(run, fallback = {}) {
     : (typeof fallback.batchId === 'string' && fallback.batchId.trim() ? fallback.batchId.trim() : undefined);
   if (batchId) normalized.batchId = batchId;
   return normalized;
+}
+
+function normalizeExploreQuestion(question) {
+  if (!question || typeof question !== 'object') return null;
+  const text = typeof question.question === 'string' && question.question.trim()
+    ? question.question.trim()
+    : '';
+  if (!text) return null;
+  const reason = typeof question.reason === 'string' && question.reason.trim()
+    ? question.reason.trim()
+    : 'Deterministic inspect requires more read-only evidence before acting';
+  const normalized = { question: text, reason };
+  const include = normalizeStringArray(question.scope?.include);
+  const exclude = normalizeStringArray(question.scope?.exclude);
+  if (include.length > 0 || exclude.length > 0) {
+    normalized.scope = {
+      ...(include.length > 0 ? { include } : {}),
+      ...(exclude.length > 0 ? { exclude } : {}),
+    };
+  }
+  const budget = question.budget && typeof question.budget === 'object' ? question.budget : {};
+  const normalizedBudget = {};
+  if (Number.isFinite(budget.maxToolCalls)) {
+    normalizedBudget.maxToolCalls = Math.max(1, Math.trunc(budget.maxToolCalls));
+  }
+  if (Number.isFinite(budget.maxDurationMs)) {
+    normalizedBudget.maxDurationMs = Math.max(1000, Math.trunc(budget.maxDurationMs));
+  }
+  if (Object.keys(normalizedBudget).length > 0) normalized.budget = normalizedBudget;
+  return normalized;
+}
+
+function normalizeExplorePlan(plan) {
+  if (!plan || typeof plan !== 'object') return undefined;
+  const questions = Array.isArray(plan.questions)
+    ? plan.questions.map(normalizeExploreQuestion).filter(Boolean)
+    : [];
+  const generatedAt = typeof plan.generatedAt === 'string' && plan.generatedAt.trim()
+    ? plan.generatedAt.trim()
+    : new Date().toISOString();
+  return {
+    requiredBeforeAct: Boolean(plan.requiredBeforeAct) && questions.length > 0,
+    questions,
+    exitCriteria: normalizeStringArray(plan.exitCriteria),
+    generatedAt,
+  };
 }
 
 function countExplorerRuns(explorers) {
@@ -445,7 +782,115 @@ function computeExplorerBatch(explorers, batchId) {
   return { batchId, total: runs.length, done };
 }
 
-const ACTIVE_PLAN_STATUSES = new Set(['drafting', 'awaiting_approval', 'approved', 'executing', 'paused']);
+function normalizeVerifierTarget(target, fallback = {}) {
+  const source = target && typeof target === 'object' ? target : {};
+  const rawKind = typeof source.kind === 'string' && source.kind.trim()
+    ? source.kind.trim()
+    : fallback.kind;
+  const inferredKind = typeof source.criterionId === 'string' && source.criterionId.trim()
+    ? 'success_criterion'
+    : typeof source.taskId === 'string' && source.taskId.trim()
+      ? 'task'
+      : 'plan';
+  const kind = VERIFIER_TARGET_KINDS.has(rawKind) ? rawKind : inferredKind;
+  const normalized = { kind };
+  if (kind === 'task') {
+    const taskId = typeof source.taskId === 'string' && source.taskId.trim()
+      ? source.taskId.trim()
+      : fallback.taskId;
+    if (!taskId) return null;
+    normalized.taskId = taskId;
+  } else if (kind === 'success_criterion') {
+    const criterionId = typeof source.criterionId === 'string' && source.criterionId.trim()
+      ? source.criterionId.trim()
+      : fallback.criterionId;
+    if (!criterionId) return null;
+    normalized.criterionId = criterionId;
+  }
+  return normalized;
+}
+
+function normalizeVerifierIssue(issue) {
+  if (!issue || typeof issue !== 'object') return null;
+  const reason = typeof issue.reason === 'string' && issue.reason.trim()
+    ? issue.reason.trim()
+    : '';
+  if (!reason) return null;
+  const normalized = {
+    reason,
+    evidenceRefs: normalizeStringArray(issue.evidenceRefs),
+  };
+  if (typeof issue.taskId === 'string' && issue.taskId.trim()) {
+    normalized.taskId = issue.taskId.trim();
+  }
+  if (typeof issue.criterionId === 'string' && issue.criterionId.trim()) {
+    normalized.criterionId = issue.criterionId.trim();
+  }
+  return normalized;
+}
+
+function normalizeVerifierReport(report) {
+  if (!report || typeof report !== 'object') return undefined;
+  return {
+    passed: report.passed === true,
+    failedCriteria: Array.isArray(report.failedCriteria)
+      ? report.failedCriteria.map(normalizeVerifierIssue).filter(Boolean)
+      : [],
+    missingEvidence: Array.isArray(report.missingEvidence)
+      ? report.missingEvidence.map(normalizeVerifierIssue).filter(Boolean)
+      : [],
+    risks: normalizeStringArray(report.risks),
+    evidenceRefs: normalizeStringArray(report.evidenceRefs),
+    ...(typeof report.recommendedNextAction === 'string' && report.recommendedNextAction.trim()
+      ? { recommendedNextAction: report.recommendedNextAction.trim() }
+      : {}),
+  };
+}
+
+function normalizeVerifierRun(run, fallback = {}) {
+  if (!run || typeof run !== 'object') return null;
+  const verifierRunId = typeof run.verifierRunId === 'string' && run.verifierRunId.trim()
+    ? run.verifierRunId.trim()
+    : fallback.verifierRunId;
+  const planId = typeof run.planId === 'string' && run.planId.trim()
+    ? run.planId.trim()
+    : fallback.planId;
+  if (!verifierRunId || !planId) return null;
+  const now = new Date().toISOString();
+  const target = normalizeVerifierTarget(run.target ?? run, fallback.target);
+  if (!target) return null;
+  const status = VERIFIER_STATUSES.has(run.status) ? run.status : 'queued';
+  const normalized = {
+    verifierRunId,
+    planId,
+    target,
+    status,
+    evidenceRefs: normalizeStringArray(run.evidenceRefs),
+    createdAt: typeof run.createdAt === 'string' && run.createdAt.trim() ? run.createdAt : now,
+    updatedAt: typeof run.updatedAt === 'string' && run.updatedAt.trim() ? run.updatedAt : now,
+  };
+  const report = normalizeVerifierReport(run.report);
+  if (report) {
+    normalized.report = report;
+    if (normalized.evidenceRefs.length === 0 && report.evidenceRefs.length > 0) {
+      normalized.evidenceRefs = report.evidenceRefs;
+    }
+  }
+  if (typeof run.summary === 'string' && run.summary.trim()) {
+    normalized.summary = run.summary.trim();
+  }
+  if (typeof run.failureReason === 'string' && run.failureReason.trim()) {
+    normalized.failureReason = run.failureReason.trim();
+  }
+  if (typeof run.completedAt === 'string' && run.completedAt.trim()) {
+    normalized.completedAt = run.completedAt.trim();
+  } else if (VERIFIER_TERMINAL_STATUSES.has(status)) {
+    normalized.completedAt = now;
+  }
+  return normalized;
+}
+
+const ACTIVE_PLAN_STATUSES = new Set(['drafting', 'awaiting_approval', 'approved', 'accepted', 'executing', 'paused']);
 
 function normalizeConversationId(value) {
   if (value === undefined || value === null) return null;
@@ -485,8 +930,40 @@ function normalizeRunnerState(runner, planId) {
   if (RUNNER_INTENTS.has(runner.intent)) {
     next.intent = runner.intent;
   }
+  if (GOAL_RUNNER_PHASES.has(runner.phase)) {
+    next.phase = runner.phase;
+  }
   if (typeof runner.currentTaskId === 'string' && runner.currentTaskId.trim()) {
     next.currentTaskId = runner.currentTaskId.trim();
+  }
+  if (runner.blockerAudit && typeof runner.blockerAudit === 'object') {
+    const fingerprint = typeof runner.blockerAudit.fingerprint === 'string'
+      ? runner.blockerAudit.fingerprint.trim()
+      : '';
+    const reason = typeof runner.blockerAudit.reason === 'string'
+      ? runner.blockerAudit.reason.trim()
+      : '';
+    if (fingerprint && reason) {
+      next.blockerAudit = {
+        fingerprint,
+        reason,
+        occurrences: Number.isFinite(runner.blockerAudit.occurrences)
+          ? Math.max(1, Math.trunc(runner.blockerAudit.occurrences))
+          : 1,
+        firstSeenAt: typeof runner.blockerAudit.firstSeenAt === 'string' && runner.blockerAudit.firstSeenAt.trim()
+          ? runner.blockerAudit.firstSeenAt.trim()
+          : now,
+        lastSeenAt: typeof runner.blockerAudit.lastSeenAt === 'string' && runner.blockerAudit.lastSeenAt.trim()
+          ? runner.blockerAudit.lastSeenAt.trim()
+          : now,
+      };
+    }
+  }
+  if (Number.isFinite(runner.tokenBudget)) {
+    next.tokenBudget = Math.max(0, Math.trunc(runner.tokenBudget));
+  }
+  if (Number.isFinite(runner.tokenUsed)) {
+    next.tokenUsed = Math.max(0, Math.trunc(runner.tokenUsed));
   }
   if (typeof runner.blockedReason === 'string' && runner.blockedReason.trim()) {
     next.blockedReason = runner.blockedReason.trim();
@@ -496,6 +973,12 @@ function normalizeRunnerState(runner, planId) {
       .map((run) => normalizeExplorerRun(run, { planId }))
       .filter(Boolean);
     if (explorers.length > 0) next.explorers = explorers;
+  }
+  if (Array.isArray(runner.verifierRuns)) {
+    const verifierRuns = runner.verifierRuns
+      .map((run) => normalizeVerifierRun(run, { planId }))
+      .filter(Boolean);
+    if (verifierRuns.length > 0) next.verifierRuns = verifierRuns;
   }
   if (runner.explorerBatch && typeof runner.explorerBatch === 'object') {
     const batchId = typeof runner.explorerBatch.batchId === 'string' && runner.explorerBatch.batchId.trim()
@@ -511,6 +994,8 @@ function normalizeRunnerState(runner, planId) {
       next.explorerBatch = { batchId, total, done };
     }
   }
+  const inspectPlan = normalizeExplorePlan(runner.inspectPlan);
+  if (inspectPlan) next.inspectPlan = inspectPlan;
   if (typeof runner.lastError === 'string' && runner.lastError.trim()) {
     next.lastError = runner.lastError.trim();
   }
@@ -524,16 +1009,21 @@ function normalizePlan(plan) {
   const normalizedStatus = approvalDecision === 'reject' && plan.status !== 'cancelled'
     ? 'cancelled'
     : plan.status;
+  const workflowKind = normalizeWorkflowKind(plan.workflowKind);
   const normalized = {
     ...plan,
     conversationId: normalizedConversationId ?? undefined,
     targetWorkspacePath: normalizeWorkspacePath(plan.targetWorkspacePath) ?? undefined,
+    workflowKind,
+    activation: normalizeActivation(plan.activation, workflowKind, normalizedStatus),
+    executionPolicy: normalizeExecutionPolicy(plan.executionPolicy, workflowKind),
     status: normalizedStatus,
     // 读路径降级：存量计划的 successCriteria 可能是纯字符串数组或缺字段，
     // 统一归一为结构化 SuccessCriterion[]；criterionResults 缺失时补空数组。
     // 不破坏旧计划，保证下游（完成门 / 提示词渲染）拿到一致形态。
     successCriteria: normalizeSuccessCriteria(plan.successCriteria),
     criterionResults: normalizeCriterionResults(plan.criterionResults),
+    manualConfirmations: normalizeManualConfirmations(plan.manualConfirmations),
   };
   const runner = normalizeRunnerState(plan.runner, plan.planId);
   return runner ? { ...normalized, runner } : normalized;
@@ -549,6 +1039,7 @@ function isInactivePlan(plan) {
 
 export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange } = {}) {
   const indexFile = path.join(storeDir, 'index.jsonl');
+  const evidenceIndexFile = path.join(storeDir, 'evidence-index.jsonl');
 
   // 变更通知 Seam：任何写操作（create/revise/approve/setStatus/recordTaskEvidence/delete）
   // 完成后触发 onChange，使 main 进程可向 renderer 广播 'goalPlans:changed'。
@@ -572,11 +1063,87 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     return readJsonl(indexFile);
   }
 
+  function readEvidenceIndex() {
+    return readJsonl(evidenceIndexFile)
+      .map(normalizeEvidenceIndexRecord)
+      .filter(Boolean);
+  }
+
+  function inferEvidencePlanId(planId, conversationId) {
+    const normalizedPlanId = normalizeOptionalString(planId);
+    if (normalizedPlanId) return normalizedPlanId;
+    const normalizedConversationId = normalizeConversationId(conversationId);
+    if (!normalizedConversationId) return null;
+    return getActivePlanByConversation(normalizedConversationId)?.planId ?? null;
+  }
+
+  function recordEvidenceRefs(entry = {}) {
+    const refs = normalizeEvidenceRefList(entry.evidenceRefs ?? entry.evidenceRef);
+    if (refs.length === 0) return [];
+    const conversationId = normalizeConversationId(entry.conversationId);
+    const planId = inferEvidencePlanId(entry.planId, conversationId);
+    const artifactRefs = normalizeEvidenceRefList(entry.artifactRefs);
+    const createdAt = normalizeOptionalString(entry.createdAt) || new Date().toISOString();
+    const base = { createdAt };
+    if (planId) base.planId = planId;
+    if (conversationId) base.conversationId = conversationId;
+    for (const field of ['streamId', 'toolCallId', 'capabilityId', 'toolName']) {
+      const normalized = normalizeOptionalString(entry[field]);
+      if (normalized) base[field] = normalized;
+    }
+    if (artifactRefs.length > 0) base.artifactRefs = artifactRefs;
+    const records = refs
+      .map((evidenceRef) => normalizeEvidenceIndexRecord({ ...base, evidenceRef }))
+      .filter(Boolean);
+    for (const record of records) appendJsonl(evidenceIndexFile, record);
+    return records;
+  }
+
+  function evidenceRecordMatchesPlan(record, plan) {
+    if (!record || !plan) return false;
+    if (record.planId && record.planId === plan.planId) return true;
+    const planConversationId = normalizeConversationId(plan.conversationId);
+    return Boolean(
+      planConversationId
+        && normalizeConversationId(record.conversationId) === planConversationId,
+    );
+  }
+
+  function indexedEvidenceRefsForPlan(plan, refs) {
+    const wanted = new Set(normalizeEvidenceRefList(refs));
+    if (!plan || wanted.size === 0) return new Set();
+    const found = new Set();
+    for (const record of readEvidenceIndex()) {
+      if (!wanted.has(record.evidenceRef)) continue;
+      if (evidenceRecordMatchesPlan(record, plan)) found.add(record.evidenceRef);
+    }
+    return found;
+  }
+
+  function assertAnyEvidenceRefIndexed(plan, refs, context) {
+    const normalizedRefs = normalizeEvidenceRefList(refs);
+    if (normalizedRefs.length === 0) return;
+    if (indexedEvidenceRefsForPlan(plan, normalizedRefs).size > 0) return;
+    throw new Error(
+      `[goal-plan-store] ${context} evidenceRefs are not registered in EvidenceIndex: ${normalizedRefs.join(', ')}`,
+    );
+  }
+
+  function assertEvidenceRefIndexed(plan, ref, context) {
+    const normalizedRef = normalizeOptionalString(ref);
+    if (!normalizedRef) return;
+    if (indexedEvidenceRefsForPlan(plan, [normalizedRef]).size > 0) return;
+    throw new Error(
+      `[goal-plan-store] ${context} evidenceRef is not registered in EvidenceIndex: ${normalizedRef}`,
+    );
+  }
+
   function toMeta(plan) {
     return {
       planId: plan.planId,
       title: plan.title,
       status: plan.status,
+      workflowKind: plan.workflowKind,
       conversationId: plan.conversationId ?? null,
       threadId: plan.threadId ?? null,
       version: plan.version,
@@ -747,6 +1314,8 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
   function createPlan(draft = {}) {
     const now = new Date().toISOString();
     const tasks = Array.isArray(draft.tasks) ? draft.tasks : [];
+    const workflowKind = normalizeWorkflowKind(draft.workflowKind);
+    const status = draft.status || (workflowKind === 'goal_self_driven' ? 'accepted' : 'drafting');
     const plan = {
       planId: draft.planId || randomUUID(),
       conversationId: normalizeConversationId(draft.conversationId) ?? undefined,
@@ -759,11 +1328,16 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       successCriteria: normalizeSuccessCriteria(draft.successCriteria),
       // 验证结果：post-act 由 goal_update_task 回写，创建时默认空。
       criterionResults: normalizeCriterionResults(draft.criterionResults),
+      // Manual DoD 的治理确认事实。它不是 plan approval，只服务完成前人工验收。
+      manualConfirmations: normalizeManualConfirmations(draft.manualConfirmations),
       boundaries: draft.boundaries || { inScope: [], outOfScope: [] },
       exceptionPolicies: draft.exceptionPolicies || [],
       involvedFiles: draft.involvedFiles || [],
       tasks,
-      status: draft.status || 'drafting',
+      workflowKind,
+      activation: normalizeActivation(draft.activation, workflowKind, status),
+      executionPolicy: normalizeExecutionPolicy(draft.executionPolicy, workflowKind),
+      status,
       approval: draft.approval,
       progress: aggregateProgress(tasks),
       version: 1,
@@ -777,6 +1351,80 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     // 单活跃计划：先收尾/作废同会话其它活跃态旧计划（排除自身），再落库新计划。
     supersedeAwaitingDrafts(plan.conversationId, plan.planId);
     return persist(plan);
+  }
+
+  function createGoalContract(draft = {}) {
+    const goal = typeof draft.goal === 'string' ? draft.goal : '';
+    const tasks = Array.isArray(draft.tasks) && draft.tasks.length > 0
+      ? draft.tasks
+      : [makeDefaultGoalTask(goal)];
+    const acceptedAt = typeof draft.activation?.acceptedAt === 'string' && draft.activation.acceptedAt.trim()
+      ? draft.activation.acceptedAt.trim()
+      : new Date().toISOString();
+    return createPlan({
+      ...draft,
+      tasks,
+      status: draft.status || 'accepted',
+      workflowKind: 'goal_self_driven',
+      activation: {
+        kind: 'accepted_goal',
+        sourceMessageId: draft.activation?.sourceMessageId,
+        acceptedAt,
+        acceptedBy: draft.activation?.acceptedBy || draft.createdBy || 'user',
+      },
+      executionPolicy: {
+        ...DEFAULT_SELF_DRIVEN_POLICY,
+        ...(draft.executionPolicy && typeof draft.executionPolicy === 'object'
+          ? draft.executionPolicy
+          : {}),
+        autonomy: 'self_driven',
+      },
+      createdBy: draft.createdBy || 'user',
+    });
+  }
+
+  function upsertGoalContract(conversationId, draft = {}) {
+    const normalizedConversationId = normalizeConversationId(conversationId);
+    const {
+      revisionReason,
+      changedBy,
+      createdBy,
+      ...planPatch
+    } = draft;
+    const activeGoal = normalizedConversationId
+      ? listPlanDetailsByConversation(normalizedConversationId)
+        .filter((plan) => isActivePlan(plan) && isSelfDrivenGoal(plan))
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0]
+      : null;
+    if (!activeGoal) {
+      return createGoalContract({ ...draft, conversationId: normalizedConversationId ?? draft.conversationId });
+    }
+
+    const safeStatus = activeGoal.status === 'accepted' || activeGoal.status === 'executing' || activeGoal.status === 'paused'
+      ? activeGoal.status
+      : 'accepted';
+    const tasks = Array.isArray(planPatch.tasks) && planPatch.tasks.length > 0 ? planPatch.tasks : activeGoal.tasks;
+    return revisePlan(activeGoal.planId, {
+      ...planPatch,
+      conversationId: normalizedConversationId ?? activeGoal.conversationId,
+      tasks,
+      status: planPatch.status || safeStatus,
+      workflowKind: 'goal_self_driven',
+      activation: {
+        ...(activeGoal.activation || {}),
+        ...(planPatch.activation || {}),
+        kind: 'accepted_goal',
+        acceptedAt: activeGoal.activation?.acceptedAt || planPatch.activation?.acceptedAt || new Date().toISOString(),
+      },
+      executionPolicy: {
+        ...(activeGoal.executionPolicy || DEFAULT_SELF_DRIVEN_POLICY),
+        ...(planPatch.executionPolicy || {}),
+        autonomy: 'self_driven',
+      },
+    }, {
+      reason: revisionReason || 'updated self-driven Goal contract',
+      changedBy: changedBy || createdBy || 'agent',
+    });
   }
 
   /**
@@ -795,6 +1443,9 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     }
     if ('criterionResults' in safePatch) {
       safePatch.criterionResults = normalizeCriterionResults(safePatch.criterionResults);
+    }
+    if ('manualConfirmations' in safePatch) {
+      safePatch.manualConfirmations = normalizeManualConfirmations(safePatch.manualConfirmations);
     }
     const nextVersion = (plan.version || 1) + 1;
     const next = {
@@ -829,6 +1480,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     if (decision === 'approve') status = 'approved';
     else if (decision === 'reject') status = 'cancelled';
     else if (decision === 'revise') status = 'drafting';
+    const workflowKind = plan.workflowKind || 'plan_approval';
     const next = {
       ...plan,
       approval: {
@@ -838,6 +1490,10 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
         decidedAt: approval.decidedAt || new Date().toISOString(),
         feedback: approval.feedback,
       },
+      activation: decision === 'approve'
+        ? { kind: 'approved_plan' }
+        : normalizeActivation(plan.activation, workflowKind, status),
+      executionPolicy: normalizeExecutionPolicy(plan.executionPolicy, workflowKind),
       status,
       updatedAt: new Date().toISOString(),
     };
@@ -927,7 +1583,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     return persist({ ...plan, runner: nextRunner, updatedAt: now });
   }
 
-  /** 回填 Explorer 报告；完成态必须携带 evidenceRefs，且不允许借此改写任务状态。 */
+  /** 回填 Explorer 报告；完成态必须引用本次 Explorer 工具执行产生的 evidenceRefs。 */
   function reportExplorer(planId, explorerId, report = {}) {
     const plan = getPlan(planId);
     if (!plan) return null;
@@ -945,15 +1601,19 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       question: report.question || explorers[index].request?.question,
       createdAt: report.createdAt || now,
     });
-    if (status === 'completed' && (!normalizedReport || normalizedReport.evidenceRefs.length === 0)) {
-      throw new Error(
-        `[goal-plan-store] explorer ${explorerId} cannot be 'completed' without evidenceRefs`,
-      );
+    const registeredEvidenceRefs = normalizeExplorerRegistryRefs(report, explorers[index]);
+    if (status === 'completed') {
+      assertExplorerReportEvidenceRegistered({
+        explorerId,
+        report: normalizedReport,
+        registeredRefs: registeredEvidenceRefs,
+      });
     }
     const nextRun = normalizeExplorerRun({
       ...explorers[index],
       status,
       report: normalizedReport,
+      evidenceRefs: registeredEvidenceRefs,
       failureReason: report.failureReason,
       updatedAt: report.updatedAt || now,
     }, { explorerId, planId });
@@ -971,6 +1631,75 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       explorerBatch: reportedBatchId
         ? computeExplorerBatch(nextExplorers, reportedBatchId)
         : current.explorerBatch,
+      updatedAt: now,
+    }, planId);
+    return persist({ ...plan, runner: nextRunner, updatedAt: now });
+  }
+
+  /**
+   * 记录 Verifier 运行事实。VerifierRun 是验证动作的审计轨迹，不替代任务 Evidence
+   * 或 CriterionResult；实际完成/通过仍分别由 recordTaskEvidence / recordCriterionResults
+   * 明确回写。
+   */
+  function recordVerifierRun(planId, run = {}) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    const now = new Date().toISOString();
+    const verifierRunId = typeof run.verifierRunId === 'string' && run.verifierRunId.trim()
+      ? run.verifierRunId.trim()
+      : randomUUID();
+    const nextRun = normalizeVerifierRun({
+      ...run,
+      verifierRunId,
+      planId,
+      updatedAt: run.updatedAt || now,
+    }, { verifierRunId, planId });
+    if (!nextRun) {
+      throw new Error(`[goal-plan-store] invalid verifier run for plan ${planId}`);
+    }
+    if (nextRun.target.kind === 'task' && !taskExistsInTree(plan.tasks, nextRun.target.taskId)) {
+      throw new Error(
+        `[goal-plan-store] verifier target task ${nextRun.target.taskId} not found in plan ${planId}`,
+      );
+    }
+    if (nextRun.target.kind === 'success_criterion') {
+      const knownIds = new Set(
+        (Array.isArray(plan.successCriteria) ? plan.successCriteria : [])
+          .map((c) => (c && typeof c.id === 'string' ? c.id : null))
+          .filter(Boolean),
+      );
+      if (!knownIds.has(nextRun.target.criterionId)) {
+        throw new Error(
+          `[goal-plan-store] verifier target criterion ${nextRun.target.criterionId} not found in plan ${planId}`,
+        );
+      }
+    }
+    if (nextRun.status === 'passed' && nextRun.evidenceRefs.length === 0) {
+      throw new Error(
+        `[goal-plan-store] verifier run ${verifierRunId} cannot be 'passed' without evidenceRefs`,
+      );
+    }
+    const current = normalizeRunnerState(plan.runner, planId) || {
+      enabled: false,
+      status: 'idle',
+      turnCount: 0,
+      roundCount: 0,
+      toolCallCount: 0,
+      explorerCount: 0,
+      maxTurns: 8,
+      maxToolCalls: 40,
+      maxExplorers: 3,
+      explorerConcurrency: DEFAULT_EXPLORER_CONCURRENCY,
+      updatedAt: now,
+    };
+    const verifierRuns = Array.isArray(current.verifierRuns) ? current.verifierRuns : [];
+    const index = verifierRuns.findIndex((item) => item.verifierRunId === verifierRunId);
+    const nextVerifierRuns = index >= 0
+      ? verifierRuns.map((item, idx) => (idx === index ? nextRun : item))
+      : [...verifierRuns, nextRun];
+    const nextRunner = normalizeRunnerState({
+      ...current,
+      verifierRuns: nextVerifierRuns,
       updatedAt: now,
     }, planId);
     return persist({ ...plan, runner: nextRunner, updatedAt: now });
@@ -1005,6 +1734,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     if (
       status !== undefined &&
       EXECUTION_TASK_STATUS.has(status) &&
+      goalPlanRequiresApproval(plan) &&
       PRE_APPROVAL_PLAN.has(plan.status)
     ) {
       throw new Error(
@@ -1012,30 +1742,25 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       );
     }
     const mergedRefs = (refs, add) => {
-      const set = new Set([...(refs || []), ...(add || [])]);
+      const set = new Set([
+        ...normalizeEvidenceRefList(refs),
+        ...normalizeEvidenceRefList(add),
+      ]);
       return [...set];
     };
+    const existingTask = findTaskInTree(plan.tasks, taskId);
+    if (!existingTask) {
+      throw new Error(`[goal-plan-store] task ${taskId} not found in plan ${planId}`);
+    }
     if (status === TERMINAL_OK) {
-      const incoming = change.evidenceRefs || [];
-      if (incoming.length === 0) {
-        // 也允许任务已有历史 evidenceRefs 的情况，但 completed 必须有至少一条。
-        const existing = (() => {
-          let found = null;
-          const walk = (list) => {
-            for (const t of list || []) {
-              if (t.taskId === taskId) found = t;
-              else if (t.subtasks) walk(t.subtasks);
-            }
-          };
-          walk(plan.tasks);
-          return found?.evidenceRefs || [];
-        })();
-        if (existing.length === 0) {
-          throw new Error(
-            `[goal-plan-store] task ${taskId} cannot be 'completed' without evidenceRefs`,
-          );
-        }
+      const incoming = normalizeEvidenceRefList(change.evidenceRefs);
+      const evidenceRefs = mergedRefs(existingTask.evidenceRefs, incoming);
+      if (evidenceRefs.length === 0) {
+        throw new Error(
+          `[goal-plan-store] task ${taskId} cannot be 'completed' without evidenceRefs`,
+        );
       }
+      assertAnyEvidenceRefIndexed(plan, evidenceRefs, `task ${taskId}`);
     }
     const now = new Date().toISOString();
     const { tasks, found } = updateTaskInTree(plan.tasks, taskId, (t) => {
@@ -1052,9 +1777,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       if (status === TERMINAL_OK || status === TERMINAL_FAIL) updated.completedAt = now;
       return updated;
     });
-    if (!found) {
-      throw new Error(`[goal-plan-store] task ${taskId} not found in plan ${planId}`);
-    }
+    if (!found) throw new Error(`[goal-plan-store] task ${taskId} not found in plan ${planId}`);
     return persist({ ...plan, tasks, updatedAt: now });
   }
 
@@ -1076,9 +1799,9 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     if (incoming.length === 0) return plan;
     const now = new Date().toISOString();
     // 只接受计划已声明的 criterionId，防止捏造标准。
-    const knownIds = new Set(
+    const knownCriteria = new Map(
       (Array.isArray(plan.successCriteria) ? plan.successCriteria : [])
-        .map((c) => (c && typeof c.id === 'string' ? c.id : null))
+        .map((c) => (c && typeof c.id === 'string' ? [c.id, c] : null))
         .filter(Boolean),
     );
     const byId = new Map(
@@ -1088,10 +1811,67 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       ]),
     );
     for (const r of incoming) {
-      if (!knownIds.has(r.criterionId)) continue;
+      const criterion = knownCriteria.get(r.criterionId);
+      if (!criterion) continue;
+      if (r.passed && AUTO_CRITERION_KINDS.has(criterion.kind) && !r.evidenceRef) {
+        throw new Error(
+          `[goal-plan-store] criterion ${r.criterionId} cannot be passed without evidenceRef`,
+        );
+      }
+      if (r.evidenceRef) {
+        assertEvidenceRefIndexed(plan, r.evidenceRef, `criterion ${r.criterionId}`);
+      }
       byId.set(r.criterionId, { ...r, checkedAt: r.checkedAt || now });
     }
     return persist({ ...plan, criterionResults: [...byId.values()], updatedAt: now });
+  }
+
+  /**
+   * 记录 Manual DoD 的人工确认事实。
+   *
+   * 这条链路不同于 plan approval：它只在完成门前确认无法自动验证的成功标准，
+   * 不授予执行权限，也不替代任务 Evidence / 自动 CriterionResult。
+   */
+  function recordManualConfirmation(planId, confirmation = {}) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    const decision = CONFIRMATION_DECISIONS.has(confirmation.decision)
+      ? confirmation.decision
+      : null;
+    if (!decision) {
+      throw new Error(`[goal-plan-store] manual confirmation for plan ${planId} requires a valid decision`);
+    }
+    const manualCriterionIds = collectManualCriterionIds(plan);
+    if (manualCriterionIds.length === 0) {
+      throw new Error(`[goal-plan-store] plan ${planId} has no manual success criteria to confirm`);
+    }
+    const manualSet = new Set(manualCriterionIds);
+    const requestedIds = normalizeStringArray(confirmation.criterionIds);
+    const criterionIds = requestedIds.length > 0 ? requestedIds : manualCriterionIds;
+    const unknownIds = criterionIds.filter((id) => !manualSet.has(id));
+    if (unknownIds.length > 0) {
+      throw new Error(
+        `[goal-plan-store] manual confirmation references unknown manual criteria: ${unknownIds.join(', ')}`,
+      );
+    }
+    const record = normalizeManualConfirmation({
+      ...confirmation,
+      kind: 'manual_dod',
+      decision,
+      criterionIds,
+      decidedAt: confirmation.decidedAt || new Date().toISOString(),
+    });
+    if (!record) {
+      throw new Error(`[goal-plan-store] invalid manual confirmation for plan ${planId}`);
+    }
+    return persist({
+      ...plan,
+      manualConfirmations: [
+        ...(Array.isArray(plan.manualConfirmations) ? plan.manualConfirmations : []),
+        record,
+      ],
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   function deletePlan(planId) {
@@ -1152,14 +1932,20 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     getActivePlanByConversation,
     getPlan,
     createPlan,
+    createGoalContract,
+    upsertGoalContract,
     revisePlan,
     recordApproval,
     setPlanStatus,
     setRunnerState,
     dispatchExplorer,
     reportExplorer,
+    recordVerifierRun,
+    recordEvidenceRefs,
+    listEvidenceIndex: readEvidenceIndex,
     recordTaskEvidence,
     recordCriterionResults,
+    recordManualConfirmation,
     deletePlan,
     deletePlanByConversation,
   };

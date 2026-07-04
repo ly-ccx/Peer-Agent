@@ -225,6 +225,37 @@ describe('evaluateWriteScope', () => {
   it('is permissive when no path is present', () => {
     assert.equal(evaluateWriteScope({ args: {}, workspacePath }).allowed, true);
   });
+
+  it('requires confirmation when a write expands beyond path-like inScope', () => {
+    const r = evaluateWriteScope({
+      args: { path: 'tests/a.test.ts' },
+      workspacePath,
+      boundaries: { inScope: ['src/*'], outOfScope: [] },
+    });
+    assert.equal(r.allowed, true);
+    assert.equal(r.requiresConfirmation, true);
+    assert.equal(r.reason, 'goal_scope_expansion_confirmation');
+  });
+
+  it('does not require scope expansion confirmation for matching inScope paths', () => {
+    const r = evaluateWriteScope({
+      args: { path: 'src/a.ts' },
+      workspacePath,
+      boundaries: { inScope: ['src/*'], outOfScope: [] },
+    });
+    assert.equal(r.allowed, true);
+    assert.notEqual(r.requiresConfirmation, true);
+  });
+
+  it('does not require scope expansion confirmation for descriptive inScope entries', () => {
+    const r = evaluateWriteScope({
+      args: { path: 'src/a.ts' },
+      workspacePath,
+      boundaries: { inScope: ['只改登录体验', 'do not change billing'], outOfScope: [] },
+    });
+    assert.equal(r.allowed, true);
+    assert.notEqual(r.requiresConfirmation, true);
+  });
 });
 
 describe('detectIrreversibleAction', () => {
@@ -297,6 +328,20 @@ describe('evaluateGoalModeGate (goal mode, Slice B)', () => {
     assert.notEqual(r.requiresConfirmation, true);
   });
 
+  it('requires confirmation for scope expansion inside the workspace', () => {
+    const r = evaluateGoalModeGate({
+      mode: 'goal',
+      toolName: 'write_file',
+      riskLevel: 'L2_local_write',
+      args: { path: 'tests/x.test.ts' },
+      workspacePath: '/ws',
+      boundaries: { inScope: ['src/*'], outOfScope: [] },
+    });
+    assert.equal(r.allowed, true);
+    assert.equal(r.requiresConfirmation, true);
+    assert.equal(r.confirmation?.kind, 'scope_expansion');
+  });
+
   it('requires confirmation for an irreversible bash action', () => {
     const r = evaluateGoalModeGate({
       mode: 'goal',
@@ -308,6 +353,32 @@ describe('evaluateGoalModeGate (goal mode, Slice B)', () => {
     assert.equal(r.allowed, true);
     assert.equal(r.requiresConfirmation, true);
     assert.equal(r.confirmation?.kind, 'git_push');
+  });
+
+  it('requires confirmation for high-risk non-irreversible actions', () => {
+    const r = evaluateGoalModeGate({
+      mode: 'goal',
+      toolName: 'bash',
+      riskLevel: 'L4_privileged',
+      args: { command: 'node build.js' },
+      workspacePath: '/ws',
+    });
+    assert.equal(r.allowed, true);
+    assert.equal(r.requiresConfirmation, true);
+    assert.equal(r.confirmation?.kind, 'high_risk');
+    assert.equal(r.confirmation?.reason, 'goal_high_risk_confirmation');
+  });
+
+  it('does not require high-risk confirmation for medium-risk side effects', () => {
+    const r = evaluateGoalModeGate({
+      mode: 'goal',
+      toolName: 'write_file',
+      riskLevel: 'L2_local_write',
+      args: { path: 'src/x.ts' },
+      workspacePath: '/ws',
+    });
+    assert.equal(r.allowed, true);
+    assert.notEqual(r.requiresConfirmation, true);
   });
 
   it('allows read-only tools without confirmation', () => {
@@ -326,7 +397,7 @@ describe('evaluateGoalModeGate (goal mode, Slice B)', () => {
     const r = evaluateGoalModeGate({
       mode: 'goal',
       toolName: 'bash',
-      riskLevel: 'L4_privileged',
+      riskLevel: 'L3_external_write',
       args: { command: 'node build.js' },
       planGate: { hasPlan: false, hasApprovedPlan: false },
       workspacePath: '/ws',

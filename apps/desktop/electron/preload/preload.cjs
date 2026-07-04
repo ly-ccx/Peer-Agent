@@ -81,6 +81,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   goalPlansRevise: (params) => ipcRenderer.invoke('goalPlans:revise', params),
   goalPlansApprove: (params) => ipcRenderer.invoke('goalPlans:approve', params),
   goalPlansSetStatus: (params) => ipcRenderer.invoke('goalPlans:set-status', params),
+  goalPlansRecordManualConfirmation: (params) => ipcRenderer.invoke('goalPlans:record-manual-confirmation', params),
   goalPlansRecordTaskEvidence: (params) => ipcRenderer.invoke('goalPlans:record-task-evidence', params),
   goalPlansDelete: (params) => ipcRenderer.invoke('goalPlans:delete', params),
   goalRunnerGetState: (params) => ipcRenderer.invoke('goalRunner:get-state', params),

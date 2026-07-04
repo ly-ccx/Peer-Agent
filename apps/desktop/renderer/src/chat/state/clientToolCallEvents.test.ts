@@ -18,6 +18,12 @@ test('normalizeClientToolCall extracts ClientToolCall from v3 client_tool_dispat
       occurredAt: '2026-05-27T11:30:00.000Z',
       displayName: '本地 Shell 执行',
       argumentsPreview: { command: 'cat /tmp/x.txt' },
+      confirmation: {
+        kind: 'high_risk',
+        detail: 'local_shell_exec',
+        reason: 'goal_high_risk_confirmation',
+        riskLevel: 'L4_privileged',
+      },
       policyContext: {
         dataLevel: 'D1_internal',
         riskLevel: 'L2_destructive',
@@ -33,6 +39,8 @@ test('normalizeClientToolCall extracts ClientToolCall from v3 client_tool_dispat
   assert.equal(call!.capabilityId, 'local.shell.exec');
   assert.equal(call!.displayName, '本地 Shell 执行');
   assert.deepEqual(call!.argumentsPreview, { command: 'cat /tmp/x.txt' });
+  assert.equal(call!.confirmation?.kind, 'high_risk');
+  assert.equal(call!.confirmation?.reason, 'goal_high_risk_confirmation');
   assert.equal(call!.riskLevel, 'L2_destructive');
   assert.equal(call!.dataLevel, 'D1_internal');
   assert.equal(call!.requestedAt, '2026-05-27T11:30:00.000Z');

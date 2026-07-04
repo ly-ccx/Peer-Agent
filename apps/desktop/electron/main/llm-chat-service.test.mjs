@@ -377,7 +377,7 @@ describe('llm chat service tool materialization', () => {
         },
       });
 
-      await service.sendMessage({
+      const outcome = await service.sendMessage({
         messages: [{ role: 'user', content: 'hello' }],
         streamId: 's1',
         conversationId: 'c1',
@@ -385,6 +385,10 @@ describe('llm chat service tool materialization', () => {
           send: (channel, payload) => events.push({ channel, payload }),
         },
       });
+      assert.equal(outcome.terminalStatus, 'error');
+      assert.equal(outcome.requestedUserInput, false);
+      assert.equal(outcome.toolCallCount, 0);
+      assert.equal(outcome.usage, undefined);
     } finally {
       globalThis.fetch = previousFetch;
     }
@@ -427,7 +431,7 @@ describe('llm chat service tool materialization', () => {
         },
       });
 
-      await service.sendMessage({
+      const outcome = await service.sendMessage({
         messages: [{ role: 'user', content: 'hello' }],
         streamId: 's1',
         conversationId: 'c1',
@@ -436,6 +440,10 @@ describe('llm chat service tool materialization', () => {
           send: (channel, payload) => events.push({ channel, payload }),
         },
       });
+      assert.equal(outcome.terminalStatus, 'done');
+      assert.equal(outcome.requestedUserInput, false);
+      assert.equal(outcome.toolCallCount, 0);
+      assert.equal(outcome.usage, undefined);
     } finally {
       globalThis.fetch = previousFetch;
     }
@@ -624,6 +632,125 @@ describe('llm chat service tool materialization', () => {
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
   });
 
+  it('threads explorerContext into the system prompt for explorer turns', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    let capturedBody = null;
+    globalThis.fetch = async (_url, init) => {
+      capturedBody = JSON.parse(init.body);
+      return new Response(sse([
+        { choices: [{ delta: { content: '{"summary":"ok","findings":[],"evidenceRefs":["local-file://x"],"confidence":"high"}' } }] },
+        '[DONE]',
+      ]), { status: 200 });
+    };
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'explore' }],
+        streamId: 's-explorer',
+        conversationId: 'c-explorer',
+        mode: 'explorer',
+        explorerContext: {
+          explorerId: 'exp-ctx-1',
+          planId: 'plan-ctx-1',
+          planTitle: 'Ship explorer source',
+          request: {
+            question: 'Where is explorer-source wired?',
+            reason: 'The Runner needs factual context for a read-only subagent.',
+            scope: { include: ['apps/desktop/electron/main'], exclude: ['dist'] },
+            budget: { maxToolCalls: 5 },
+            exitCriteria: ['source appears in prompt'],
+          },
+        },
+        webContents: { send: () => {} },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    const systemMessage = capturedBody?.messages?.find((message) => message.role === 'system');
+    assert.ok(systemMessage, 'expected a system message');
+    assert.match(systemMessage.content, /Explorer mission context/);
+    assert.match(systemMessage.content, /explorerId=exp-ctx-1/);
+    assert.match(systemMessage.content, /Where is explorer-source wired/);
+    assert.match(systemMessage.content, /readonly_explorer/);
+    assert.match(systemMessage.content, /scope include:/);
+  });
+
+  it('threads verifierContext into the system prompt for verifier turns', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    let capturedBody = null;
+    globalThis.fetch = async (_url, init) => {
+      capturedBody = JSON.parse(init.body);
+      return new Response(sse([
+        { choices: [{ delta: { content: '{"passed":true,"failedCriteria":[],"missingEvidence":[],"risks":[],"evidenceRefs":["tool-result://tests"]}' } }] },
+        '[DONE]',
+      ]), { status: 200 });
+    };
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'verify' }],
+        streamId: 's-verifier',
+        conversationId: 'c-verifier',
+        mode: 'explorer',
+        verifierContext: {
+          verifierRunId: 'verifier-ctx-1',
+          planId: 'plan-ctx-1',
+          plan: {
+            planId: 'plan-ctx-1',
+            title: 'Ship verifier source',
+            goal: 'Add verifier context source',
+            successCriteria: [{ id: 'c1', kind: 'test', description: 'tests pass' }],
+            criterionResults: [{ criterionId: 'c1', passed: true, evidenceRef: 'tool-result://tests' }],
+          },
+          tasks: [{ taskId: 't1', title: 'implement', status: 'completed', evidenceRefs: ['local-file://x'] }],
+        },
+        webContents: { send: () => {} },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    const systemMessage = capturedBody?.messages?.find((message) => message.role === 'system');
+    assert.ok(systemMessage, 'expected a system message');
+    assert.match(systemMessage.content, /Verifier mission context/);
+    assert.match(systemMessage.content, /verifierRunId=verifier-ctx-1/);
+    assert.match(systemMessage.content, /Ship verifier source/);
+    assert.match(systemMessage.content, /t1 \[completed\]/);
+    assert.match(systemMessage.content, /Verifier readonly contract/);
+    assert.match(systemMessage.content, /Do not modify files/);
+  });
+
   it('does not send Anthropic native thinking for high effort unless the provider declares reasoning support', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;
@@ -791,13 +918,22 @@ describe('llm chat service tool materialization', () => {
         },
       });
 
-      await service.sendMessage({
+      const outcome = await service.sendMessage({
         messages: [{ role: 'user', content: 'hello' }],
         streamId: 's1',
         conversationId: 'c1',
         webContents: {
           send: (channel, payload) => events.push({ channel, payload }),
         },
+      });
+      assert.equal(outcome.terminalStatus, 'done');
+      assert.equal(outcome.requestedUserInput, false);
+      assert.equal(outcome.toolCallCount, 0);
+      assert.deepEqual(outcome.usage, {
+        inputTokens: 12,
+        outputTokens: 3,
+        cacheWriteTokens: 0,
+        cacheReadTokens: 5,
       });
     } finally {
       globalThis.fetch = previousFetch;
@@ -1355,7 +1491,7 @@ describe('llm chat service tool materialization', () => {
       });
       service.setWorkspacePath(tmpDir);
 
-      await service.sendMessage({
+      const outcome = await service.sendMessage({
         messages: [{ role: 'user', content: 'run command' }],
         streamId: 's1',
         conversationId: 'c1',
@@ -1376,6 +1512,9 @@ describe('llm chat service tool materialization', () => {
           },
         },
       });
+      assert.equal(outcome.terminalStatus, 'done');
+      assert.equal(outcome.toolCallCount, 1);
+      assert.equal(outcome.requestedUserInput, false);
     } finally {
       globalThis.fetch = previousFetch;
     }
@@ -1387,6 +1526,61 @@ describe('llm chat service tool materialization', () => {
       event.channel === 'chat:stream:tool-result' &&
       String(event.payload.result).includes('"stdoutPreview": "ok"')
     )), true);
+    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+  });
+
+  it('returns requestedUserInput in AgentRunOutcome when request_user_input ends the turn', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    const frame = JSON.stringify({
+      choices: [{
+        delta: {
+          tool_calls: [{
+            index: 0,
+            id: 'tool-question',
+            type: 'function',
+            function: {
+              name: 'request_user_input',
+              arguments: JSON.stringify({ question: 'Which option?' }),
+            },
+          }],
+        },
+      }],
+    });
+    globalThis.fetch = async () => new Response(`data: ${frame}\n\ndata: [DONE]\n\n`, { status: 200 });
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+      });
+
+      const outcome = await service.sendMessage({
+        messages: [{ role: 'user', content: 'ask me' }],
+        streamId: 's1',
+        conversationId: 'c1',
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+      });
+
+      assert.equal(outcome.terminalStatus, 'done');
+      assert.equal(outcome.toolCallCount, 1);
+      assert.equal(outcome.requestedUserInput, true);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
   });
 

@@ -3,6 +3,14 @@ import { callMcpTool } from '../mcp-client.mjs';
 import { createFailedClientToolResult, createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 
 const MCP_CAPABILITY_PREFIX = 'local.mcp.';
+const MCP_RISK_ORDER = {
+  L0_inert: 0,
+  L1_local_read: 1,
+  L2_local_write: 2,
+  L3_external_write: 3,
+  L4_privileged: 4,
+  L5_destructive: 5,
+};
 
 function parseMcpCapabilityId(capabilityId) {
   if (!String(capabilityId ?? '').startsWith(MCP_CAPABILITY_PREFIX)) return null;
@@ -39,7 +47,22 @@ function getAuthContext(server) {
   };
 }
 
-function buildCallScope({ server, toolName }) {
+function findMcpTool(server, toolName) {
+  return (server?.tools ?? []).find((candidate) => (candidate.name ?? candidate.toolName) === toolName) ?? null;
+}
+
+function normalizeRiskLevel(value, fallback = 'L3_external_write') {
+  return Object.prototype.hasOwnProperty.call(MCP_RISK_ORDER, value) ? value : fallback;
+}
+
+function mcpEffectForRisk(riskLevel) {
+  return (MCP_RISK_ORDER[riskLevel] ?? MCP_RISK_ORDER.L3_external_write) >= MCP_RISK_ORDER.L3_external_write
+    ? 'mutation'
+    : 'read';
+}
+
+function buildCallScope({ server, toolName, tool }) {
+  const riskLevel = normalizeRiskLevel(tool?.riskLevel);
   return {
     kind: 'mcp-tool',
     serverId: server.id,
@@ -48,11 +71,13 @@ function buildCallScope({ server, toolName }) {
     transport: server.transport,
     authMode: getAuthContext(server).mode,
     locality: 'local',
+    riskLevel,
+    effect: mcpEffectForRisk(riskLevel),
   };
 }
 
 function isToolVisible(server, toolName) {
-  const tool = (server.tools ?? []).find((candidate) => (candidate.name ?? candidate.toolName) === toolName);
+  const tool = findMcpTool(server, toolName);
   if (!tool) return false;
   return (server.toolVisibility?.[toolName] ?? server.policy?.visibleByDefault ?? true) !== false;
 }
@@ -157,7 +182,12 @@ export function createLocalMcpProvider({ mcpRegistry, credentialResolver = null 
       };
     }
 
-    const scope = buildCallScope({ server, toolName: parsed.toolName });
+    const toolManifest = findMcpTool(server, parsed.toolName);
+    const riskLevel = normalizeRiskLevel(toolManifest?.riskLevel);
+    const dataLevel = typeof toolManifest?.dataLevel === 'string' && toolManifest.dataLevel.trim()
+      ? toolManifest.dataLevel.trim()
+      : 'D2_sensitive';
+    const scope = buildCallScope({ server, toolName: parsed.toolName, tool: toolManifest });
     let permissionGrant = createPermissionGrant({
       toolCallId: call.toolCallId,
       granted: true,
@@ -171,9 +201,11 @@ export function createLocalMcpProvider({ mcpRegistry, credentialResolver = null 
         toolName: parsed.toolName,
         args: call.arguments ?? call.args ?? {},
         scope,
-        riskLevel: 'L3_external_write',
-        dataLevel: 'D2_sensitive',
-        reason: `MCP tool ${server.displayName}/${parsed.toolName}`,
+        riskLevel,
+        dataLevel,
+        reason: scope.effect === 'mutation'
+          ? `MCP mutation tool ${server.displayName}/${parsed.toolName}`
+          : `MCP read tool ${server.displayName}/${parsed.toolName}`,
       });
       permissionGrant = permissionGrantFromDecision({ decision, fallbackGrant: permissionGrant, call, scope });
       if (decision?.granted === false || permissionGrant?.granted === false) {

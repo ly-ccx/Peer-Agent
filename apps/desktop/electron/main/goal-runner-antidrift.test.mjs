@@ -118,6 +118,20 @@ describe('evaluateVerificationGate', () => {
     assert.equal(gate.unmet.length, 0);
   });
 
+  it('blocks when completed leaf evidence is not indexed for the plan', () => {
+    const plan = {
+      tasks: [
+        { taskId: 'a', status: 'completed', evidenceRefs: ['ref://1'] },
+        { taskId: 'b', status: 'completed', evidenceRefs: ['ref://2'] },
+      ],
+    };
+    const gate = evaluateVerificationGate(plan, { indexedEvidenceRefs: ['ref://1'] });
+    assert.equal(gate.passed, false);
+    assert.equal(gate.unmet.length, 1);
+    assert.equal(gate.unmet[0].taskId, 'b');
+    assert.equal(gate.unmet[0].reason, 'unindexed_evidence');
+  });
+
   it('blocks when a leaf is completed but has no evidence', () => {
     const plan = {
       tasks: [
@@ -203,6 +217,17 @@ describe('evaluateVerificationGate with successCriteria (DoD-as-Code)', () => {
     assert.equal(gate.unmet.length, 0);
   });
 
+  it('blocks when an auto criterion evidenceRef is not indexed', () => {
+    const plan = {
+      tasks: [doneLeaf],
+      successCriteria: [{ id: 'c1', kind: 'command', description: 'npm test' }],
+      criterionResults: [{ criterionId: 'c1', passed: true, evidenceRef: 'ref://run' }],
+    };
+    const gate = evaluateVerificationGate(plan, { indexedEvidenceRefs: ['ref://1'] });
+    assert.equal(gate.passed, false);
+    assert.equal(gate.unmet.find((u) => u.criterionId === 'c1').reason, 'criterion_unindexed_evidence');
+  });
+
   it('does not block on manual criteria but records a manual warning', () => {
     const plan = {
       tasks: [doneLeaf],
@@ -212,6 +237,37 @@ describe('evaluateVerificationGate with successCriteria (DoD-as-Code)', () => {
     const gate = evaluateVerificationGate(plan);
     assert.equal(gate.passed, true);
     assert.ok(gate.warnings.some((w) => w.reason === 'manual_confirmation_required'));
+  });
+
+  it('blocks manual criteria when manual confirmation is required', () => {
+    const plan = {
+      tasks: [doneLeaf],
+      successCriteria: [{ id: 'c1', kind: 'manual', description: 'user confirms UX' }],
+      criterionResults: [],
+      manualConfirmations: [],
+    };
+    const gate = evaluateVerificationGate(plan, { requireManualConfirmation: true });
+    assert.equal(gate.passed, false);
+    assert.equal(gate.manualConfirmation.status, 'missing');
+    assert.equal(gate.unmet.find((u) => u.criterionId === 'c1').reason, 'manual_confirmation_required');
+  });
+
+  it('passes manual criteria after a matching Manual DoD confirmation', () => {
+    const plan = {
+      tasks: [doneLeaf],
+      successCriteria: [{ id: 'c1', kind: 'manual', description: 'user confirms UX' }],
+      criterionResults: [],
+      manualConfirmations: [{
+        confirmationId: 'm1',
+        kind: 'manual_dod',
+        decision: 'approve',
+        criterionIds: ['c1'],
+        decidedAt: '2026-01-01T00:00:00.000Z',
+      }],
+    };
+    const gate = evaluateVerificationGate(plan, { requireManualConfirmation: true });
+    assert.equal(gate.passed, true);
+    assert.equal(gate.manualConfirmation.status, 'approved');
   });
 
   it('flags weak DoD when all criteria are manual', () => {

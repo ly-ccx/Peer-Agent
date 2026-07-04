@@ -38,6 +38,19 @@ function seedPlan() {
   return store.getPlan(plan.planId);
 }
 
+function registerEvidenceRefs(planId, refs) {
+  const plan = store.getPlan(planId);
+  return store.recordEvidenceRefs({
+    planId,
+    conversationId: plan?.conversationId,
+    streamId: 'test-stream',
+    toolCallId: `test-${String(planId).slice(0, 8)}`,
+    toolName: 'test_evidence_source',
+    evidenceRefs: refs,
+    artifactRefs: refs,
+  });
+}
+
 describe('local goal provider', () => {
   beforeEach(() => {
     tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'local-goal-provider-'));
@@ -145,6 +158,42 @@ describe('local goal provider', () => {
     assert.equal(persisted.tasks.length, 2);
   });
 
+  it('creates an accepted self-driven Goal contract in goal mode', async () => {
+    const execution = await provider.executeCapability(
+      {
+        call: {
+          toolCallId: 'local.goal.create:goal-mode',
+          capabilityId: 'local.goal.create',
+          arguments: {
+            title: '修复失败测试',
+            goal: '定位并修复失败测试',
+            tasks: [{ title: '定位失败' }, { title: '修复并验证' }],
+          },
+          occurredAt: new Date().toISOString(),
+        },
+      },
+      { locale: 'zh-CN', toolContext: { conversationId: 'conv-goal', mode: 'goal' } },
+    );
+
+    assert.equal(execution.grant.granted, true);
+    assert.equal(execution.result.status, 'success');
+
+    const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.status, 'accepted');
+    assert.equal(payload.workflowKind, 'goal_self_driven');
+    assert.equal(payload.activation.kind, 'accepted_goal');
+    assert.equal(payload.taskCount, 2);
+    assert.match(payload.note, /Goal 契约已接受/);
+
+    const persisted = store.getPlan(payload.planId);
+    assert.equal(persisted.status, 'accepted');
+    assert.equal(persisted.workflowKind, 'goal_self_driven');
+    assert.equal(persisted.activation.kind, 'accepted_goal');
+    assert.equal(persisted.approval, undefined);
+    assert.equal(persisted.conversationId, 'conv-goal');
+  });
+
   it('rejects goal.create without goal or tasks', async () => {
     const execution = await provider.executeCapability(
       {
@@ -165,6 +214,7 @@ describe('local goal provider', () => {
 
   it('writes evidence to a subtask and recomputes progress bottom-up', async () => {
     const plan = seedPlan();
+    registerEvidenceRefs(plan.planId, ['local-shell-artifact://abc']);
     const execution = await provider.executeCapability(
       {
         call: createCall({

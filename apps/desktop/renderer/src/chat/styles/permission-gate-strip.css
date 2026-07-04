@@ -31,6 +31,32 @@
     text-transform: uppercase;
   }
 
+  .permission-gate-strip--goal-scope,
+  .permission-gate-strip--goal-irreversible,
+  .permission-gate-strip--goal-high-risk {
+    border-left-width: 4px;
+    background: var(--paper-sheet);
+  }
+
+  .permission-gate-strip--goal-scope {
+    border-left-color: var(--state-confirm);
+  }
+
+  .permission-gate-strip--goal-irreversible {
+    border-left-color: var(--state-danger);
+  }
+
+  .permission-gate-strip--goal-high-risk {
+    border-left-color: var(--state-warn);
+  }
+
+  .permission-gate-strip--goal-scope .badge,
+  .permission-gate-strip--goal-irreversible .badge,
+  .permission-gate-strip--goal-high-risk .badge {
+    border-color: var(--za-line-strong);
+    color: var(--ink-base);
+  }
+
   .permission-gate-strip .capability {
     flex-shrink: 0;
     color: var(--ink-base);
@@ -89,6 +115,18 @@
 
   .permission-gate-strip button.allow:hover {
     background: var(--za-hover);
+  }
+
+  .permission-gate-strip--goal-irreversible button.allow {
+    border-color: var(--state-danger);
+  }
+
+  .permission-gate-strip--goal-high-risk button.allow {
+    border-color: var(--state-warn);
+  }
+
+  .permission-gate-strip--goal-scope button.allow {
+    border-color: var(--state-confirm);
   }
 
   .permission-gate-strip.exiting {

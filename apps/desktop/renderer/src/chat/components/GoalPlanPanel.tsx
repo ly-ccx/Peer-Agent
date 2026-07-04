@@ -4,10 +4,14 @@ import type { ReactElement } from 'react';
 import type {
   ExecutionStatus,
   GoalExplorerRun,
+  GoalManualConfirmation,
   GoalPlan,
+  GoalRunnerPhase,
   GoalRunnerState,
   GoalRunnerStatus,
+  GoalSuccessCriterion,
   GoalTask,
+  GoalVerifierRun,
 } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
 import { InteractionContext } from './thread/interactionContext';
@@ -109,6 +113,7 @@ function planStatusLabel(status: GoalPlan['status'], isZh: boolean): string {
     drafting: '草拟中',
     awaiting_approval: '待批准',
     approved: '已批准',
+    accepted: '已接受',
     executing: '执行中',
     paused: '已暂停',
     completed: '已完成',
@@ -119,6 +124,7 @@ function planStatusLabel(status: GoalPlan['status'], isZh: boolean): string {
     drafting: 'Drafting',
     awaiting_approval: 'Awaiting approval',
     approved: 'Approved',
+    accepted: 'Accepted',
     executing: 'Executing',
     paused: 'Paused',
     completed: 'Completed',
@@ -150,6 +156,59 @@ function explorerStatusLabel(status: GoalExplorerRun['status'], isZh: boolean): 
   return isZh ? zh[status] : en[status];
 }
 
+function verifierStatusLabel(status: GoalVerifierRun['status'], isZh: boolean): string {
+  const zh: Record<GoalVerifierRun['status'], string> = {
+    queued: '排队中',
+    running: '复核中',
+    passed: '已通过',
+    failed: '未通过',
+    blocked: '阻塞',
+  };
+  const en: Record<GoalVerifierRun['status'], string> = {
+    queued: 'Queued',
+    running: 'Verifying',
+    passed: 'Passed',
+    failed: 'Failed',
+    blocked: 'Blocked',
+  };
+  return isZh ? zh[status] : en[status];
+}
+
+function verifierTargetLabel(verifier: GoalVerifierRun, isZh: boolean): string {
+  if (verifier.target.kind === 'task') {
+    return `${isZh ? '任务' : 'Task'} ${verifier.target.taskId ?? ''}`.trim();
+  }
+  if (verifier.target.kind === 'success_criterion') {
+    return `${isZh ? '标准' : 'Criterion'} ${verifier.target.criterionId ?? ''}`.trim();
+  }
+  return isZh ? '计划复核' : 'Plan verification';
+}
+
+function runnerPhaseLabel(phase: GoalRunnerPhase | undefined, isZh: boolean): string {
+  if (!phase) return isZh ? '未开始' : 'Not started';
+  const zh: Record<GoalRunnerPhase, string> = {
+    orient: '定向',
+    inspect: '探查',
+    plan_scaffold: '搭骨架',
+    act: '执行',
+    verify: '验证',
+    repair: '修复',
+    synthesize: '收束',
+    blocked: '阻塞',
+  };
+  const en: Record<GoalRunnerPhase, string> = {
+    orient: 'Orient',
+    inspect: 'Inspect',
+    plan_scaffold: 'Plan scaffold',
+    act: 'Act',
+    verify: 'Verify',
+    repair: 'Repair',
+    synthesize: 'Synthesize',
+    blocked: 'Blocked',
+  };
+  return isZh ? zh[phase] : en[phase];
+}
+
 // Runner 处于活动态时才允许 pause；非终态可 clear；暂停/阻塞/预算耗尽可 resume。
 const RUNNER_ACTIVE_STATUSES: ReadonlySet<GoalRunnerStatus> = new Set([
   'running',
@@ -164,6 +223,53 @@ const RUNNER_TERMINAL_STATUSES: ReadonlySet<GoalRunnerStatus> = new Set([
   'completed',
   'failed',
 ]);
+const AUTO_CRITERION_KINDS: ReadonlySet<string> = new Set([
+  'command',
+  'test',
+  'file-contains',
+  'file-exists',
+]);
+
+function manualDodCriteria(plan: GoalPlan): GoalSuccessCriterion[] {
+  return (Array.isArray(plan.successCriteria) ? plan.successCriteria : [])
+    .filter((criterion): criterion is GoalSuccessCriterion => (
+      !!criterion &&
+      typeof criterion === 'object' &&
+      typeof criterion.id === 'string' &&
+      criterion.id.trim().length > 0 &&
+      !AUTO_CRITERION_KINDS.has(criterion.kind)
+    ));
+}
+
+function latestManualDodConfirmation(plan: GoalPlan, criterionIds: readonly string[]): GoalManualConfirmation | null {
+  const expected = new Set(criterionIds);
+  if (expected.size === 0) return null;
+  const matches = (Array.isArray(plan.manualConfirmations) ? plan.manualConfirmations : [])
+    .filter((confirmation) => confirmation.kind === 'manual_dod')
+    .filter((confirmation) => {
+      const ids = new Set(confirmation.criterionIds);
+      for (const id of expected) {
+        if (!ids.has(id)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => String(b.decidedAt || '').localeCompare(String(a.decidedAt || '')));
+  return matches[0] ?? null;
+}
+
+function buildManualDodConfirmation(
+  plan: GoalPlan,
+  decision: GoalManualConfirmation['decision'],
+): GoalManualConfirmation {
+  const criterionIds = manualDodCriteria(plan).map((criterion) => criterion.id);
+  return {
+    confirmationId: `ui-manual-dod-${Date.now()}`,
+    kind: 'manual_dod',
+    decision,
+    criterionIds,
+    decidedAt: new Date().toISOString(),
+  };
+}
 
 function TaskNode({ task, depth, isZh }: { task: GoalTask; depth: number; isZh: boolean }): ReactElement {
   const hasEvidence = task.evidenceRefs.length > 0;
@@ -255,48 +361,144 @@ function RunnerSection({
   busy,
   isZh,
   onControl,
+  onManualConfirm,
 }: {
   plan: GoalPlan;
   runner: GoalRunnerState;
   busy: boolean;
   isZh: boolean;
   onControl: (plan: GoalPlan, action: 'pause' | 'resume' | 'clear') => void | Promise<void>;
+  onManualConfirm: (
+    plan: GoalPlan,
+    decision: GoalManualConfirmation['decision'],
+  ) => void | Promise<void>;
 }): ReactElement {
   const explorers = Array.isArray(runner.explorers) ? runner.explorers : [];
+  const verifierRuns = Array.isArray(runner.verifierRuns) ? runner.verifierRuns : [];
+  const latestVerifier = verifierRuns
+    .slice()
+    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0] ?? null;
+  const manualCriteria = manualDodCriteria(plan);
+  const manualCriterionIds = manualCriteria.map((criterion) => criterion.id);
+  const manualConfirmation = latestManualDodConfirmation(plan, manualCriterionIds);
+  const needsManualDodConfirmation =
+    runner.status === 'blocked' &&
+    runner.blockedReason === 'manual_dod_confirmation_required' &&
+    manualCriteria.length > 0 &&
+    manualConfirmation?.decision !== 'approve';
   const canPause = RUNNER_ACTIVE_STATUSES.has(runner.status);
-  const canResume = RUNNER_RESUMABLE_STATUSES.has(runner.status);
+  const canResume = RUNNER_RESUMABLE_STATUSES.has(runner.status) && !needsManualDodConfirmation;
   const isTerminal = RUNNER_TERMINAL_STATUSES.has(runner.status);
   const showAttention = runner.status === 'blocked' || runner.status === 'budget_exhausted';
+  const phaseLabel = runnerPhaseLabel(runner.phase, isZh);
 
   return (
     <div className={`goal-runner goal-runner--${runner.status}`}>
       {showAttention && runner.blockedReason ? (
-        <div className="goal-runner-attention">{runner.blockedReason}</div>
+        <div className="goal-runner-status-strip goal-runner-status-strip--blocker">
+          <div className="goal-runner-status-main">
+            <span className="goal-runner-status-kicker">{isZh ? 'Goal 阻塞' : 'Goal blocker'}</span>
+            <span className="goal-runner-status-text">{runner.blockedReason}</span>
+          </div>
+          {runner.blockerAudit ? (
+            <span className="goal-runner-status-meta">
+              {isZh
+                ? `重复 ${runner.blockerAudit.occurrences} 次`
+                : `${runner.blockerAudit.occurrences} occurrence${runner.blockerAudit.occurrences === 1 ? '' : 's'}`}
+            </span>
+          ) : null}
+        </div>
       ) : null}
       {runner.lastError ? (
-        <div className="goal-runner-attention goal-runner-attention--error">{runner.lastError}</div>
+        <div className="goal-runner-status-strip goal-runner-status-strip--error">
+          <div className="goal-runner-status-main">
+            <span className="goal-runner-status-kicker">{isZh ? 'Runner 错误' : 'Runner error'}</span>
+            <span className="goal-runner-status-text">{runner.lastError}</span>
+          </div>
+        </div>
+      ) : null}
+      {latestVerifier ? (
+        <div className={`goal-runner-status-strip goal-runner-status-strip--verifier goal-runner-status-strip--${latestVerifier.status}`}>
+          <div className="goal-runner-status-main">
+            <span className="goal-runner-status-kicker">{isZh ? 'Verifier 复核' : 'Verifier'}</span>
+            <span className="goal-runner-status-text">
+              {verifierStatusLabel(latestVerifier.status, isZh)} · {verifierTargetLabel(latestVerifier, isZh)}
+            </span>
+          </div>
+          <span className="goal-runner-status-meta">
+            {isZh
+              ? `证据 ×${latestVerifier.evidenceRefs?.length ?? 0}`
+              : `evidence ×${latestVerifier.evidenceRefs?.length ?? 0}`}
+          </span>
+        </div>
+      ) : null}
+      {needsManualDodConfirmation ? (
+        <div className="goal-manual-dod">
+          <div className="goal-manual-dod-head">
+            <span className="goal-manual-dod-title">
+              {isZh ? '完成前人工确认' : 'Manual completion check'}
+            </span>
+            <span className="goal-manual-dod-count">
+              {isZh ? `标准 ×${manualCriteria.length}` : `criteria ×${manualCriteria.length}`}
+            </span>
+          </div>
+          <ul className="goal-manual-dod-list">
+            {manualCriteria.map((criterion) => (
+              <li key={criterion.id}>{criterion.description}</li>
+            ))}
+          </ul>
+          {manualConfirmation ? (
+            <div className="goal-manual-dod-note">
+              {isZh ? '已记录需要调整，Runner 将保持阻塞。' : 'Needs-changes feedback recorded; runner remains blocked.'}
+            </div>
+          ) : (
+            <div className="goal-manual-dod-actions">
+              <button
+                type="button"
+                className="goal-runner-btn goal-runner-btn--primary"
+                disabled={busy}
+                onClick={() => void onManualConfirm(plan, 'approve')}
+              >
+                {isZh ? '确认已达成' : 'Confirm done'}
+              </button>
+              <button
+                type="button"
+                className="goal-runner-btn goal-runner-btn--ghost"
+                disabled={busy}
+                onClick={() => void onManualConfirm(plan, 'revise')}
+              >
+                {isZh ? '需要调整' : 'Needs changes'}
+              </button>
+            </div>
+          )}
+        </div>
       ) : null}
       <div className="goal-runner-bar">
-        <span className="goal-runner-counters">
-          {(() => {
-            const base = isZh
-              ? `轮次 ${runner.roundCount} · 工具 ${runner.toolCallCount}`
-              : `turns ${runner.roundCount} · tools ${runner.toolCallCount}`;
-            // 并发模型：优先展示「本轮」进度（explorerBatch = 最近一批并发 Explorer 的
-            // 已完成/总数）；无进行中批次时回退为累计已派发数（无分母）。
-            const batch = runner.explorerBatch;
-            const explore = batch && batch.total > 0
-              ? isZh
-                ? ` · 探索 ${batch.done}/${batch.total}`
-                : ` · explorers ${batch.done}/${batch.total}`
-              : runner.explorerCount > 0
+        <div className="goal-runner-meta">
+          <span className={`goal-runner-phase goal-runner-phase--${runner.phase ?? 'unknown'}`}>
+            {isZh ? `阶段：${phaseLabel}` : `Phase: ${phaseLabel}`}
+          </span>
+          <span className="goal-runner-counters">
+            {(() => {
+              const base = isZh
+                ? `轮次 ${runner.roundCount} · 工具 ${runner.toolCallCount}`
+                : `turns ${runner.roundCount} · tools ${runner.toolCallCount}`;
+              // 并发模型：优先展示「本轮」进度（explorerBatch = 最近一批并发 Explorer 的
+              // 已完成/总数）；无进行中批次时回退为累计已派发数（无分母）。
+              const batch = runner.explorerBatch;
+              const explore = batch && batch.total > 0
                 ? isZh
-                  ? ` · 探索 ×${runner.explorerCount}`
-                  : ` · explorers ×${runner.explorerCount}`
-                : '';
-            return `${base}${explore}`;
-          })()}
-        </span>
+                  ? ` · 探索 ${batch.done}/${batch.total}`
+                  : ` · explorers ${batch.done}/${batch.total}`
+                : runner.explorerCount > 0
+                  ? isZh
+                    ? ` · 探索 ×${runner.explorerCount}`
+                    : ` · explorers ×${runner.explorerCount}`
+                  : '';
+              return `${base}${explore}`;
+            })()}
+          </span>
+        </div>
         <div className="goal-runner-actions">
           {canPause ? (
           <button
@@ -342,7 +544,56 @@ function RunnerSection({
           </ul>
         </details>
       ) : null}
+      {verifierRuns.length > 0 ? (
+        <details className="goal-runner-verifiers">
+          <summary>
+            {isZh ? `Verifier 复核 ×${verifierRuns.length}` : `Verifiers ×${verifierRuns.length}`}
+          </summary>
+          <ul className="goal-runner-verifier-list">
+            {verifierRuns.map((verifier) => (
+              <VerifierItem key={verifier.verifierRunId} verifier={verifier} isZh={isZh} />
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </div>
+  );
+}
+
+function VerifierItem({
+  verifier,
+  isZh,
+}: {
+  verifier: GoalVerifierRun;
+  isZh: boolean;
+}): ReactElement {
+  const evidenceRefs = verifier.evidenceRefs ?? [];
+  const issueCount =
+    (verifier.report?.failedCriteria?.length ?? 0) +
+    (verifier.report?.missingEvidence?.length ?? 0);
+  const summary = verifier.failureReason || verifier.summary || verifier.report?.recommendedNextAction || '';
+  return (
+    <li className={`goal-runner-verifier goal-runner-verifier--${verifier.status}`}>
+      <div className="goal-runner-verifier-row">
+        <span className={`goal-runner-verifier-status goal-runner-verifier-status--${verifier.status}`}>
+          {verifierStatusLabel(verifier.status, isZh)}
+        </span>
+        <span className="goal-runner-verifier-target">
+          {verifierTargetLabel(verifier, isZh)}
+        </span>
+      </div>
+      <div className="goal-runner-verifier-detail">
+        {evidenceRefs.length > 0 ? (
+          <span title={evidenceRefs.join(', ')}>
+            {isZh ? `证据 ×${evidenceRefs.length}` : `evidence ×${evidenceRefs.length}`}
+          </span>
+        ) : null}
+        {issueCount > 0 ? (
+          <span>{isZh ? `问题 ×${issueCount}` : `issues ×${issueCount}`}</span>
+        ) : null}
+        {summary ? <span className="goal-runner-verifier-summary">{summary}</span> : null}
+      </div>
+    </li>
   );
 }
 
@@ -393,9 +644,23 @@ interface PlanCardProps {
   readonly isMain?: boolean;
   readonly onDecide: (plan: GoalPlan, decision: 'approve' | 'reject') => void | Promise<void>;
   readonly onRunnerControl: (plan: GoalPlan, action: 'pause' | 'resume' | 'clear') => void | Promise<void>;
+  readonly onManualConfirm: (
+    plan: GoalPlan,
+    decision: GoalManualConfirmation['decision'],
+  ) => void | Promise<void>;
 }
 
-function PlanCard({ plan, defaultExpanded, isZh, isStreaming, busy, isMain, onDecide, onRunnerControl }: PlanCardProps): ReactElement {
+function PlanCard({
+  plan,
+  defaultExpanded,
+  isZh,
+  isStreaming,
+  busy,
+  isMain,
+  onDecide,
+  onRunnerControl,
+  onManualConfirm,
+}: PlanCardProps): ReactElement {
   // 待批准计划强制展开，确保「批准 / 驳回」按钮永远可见。
   const awaitingLock = plan.status === 'awaiting_approval';
   // 主卡（当前计划）永远展开；待批准计划同样强制展开。两者都隐藏 caret、禁用折叠。
@@ -523,6 +788,7 @@ function PlanCard({ plan, defaultExpanded, isZh, isStreaming, busy, isMain, onDe
               busy={busy}
               isZh={isZh}
               onControl={onRunnerControl}
+              onManualConfirm={onManualConfirm}
             />
           ) : null}
         </div>
@@ -675,6 +941,31 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
           await clientApi.goalRunnerResume({ planId: plan.planId });
         } else {
           await clientApi.goalRunnerClear({ planId: plan.planId });
+        }
+        await reload();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : isZh ? '操作失败' : 'Action failed');
+      } finally {
+        setBusyPlanId(null);
+      }
+    },
+    [reload, isZh],
+  );
+
+  const recordManualDodConfirmation = useCallback(
+    async (plan: GoalPlan, decision: GoalManualConfirmation['decision']) => {
+      setBusyPlanId(plan.planId);
+      setError(null);
+      try {
+        await clientApi.goalPlansRecordManualConfirmation({
+          planId: plan.planId,
+          confirmation: buildManualDodConfirmation(plan, decision),
+        });
+        if (decision === 'approve') {
+          await clientApi.goalRunnerResume({
+            planId: plan.planId,
+            options: { intent: 'verify', phase: 'verify' },
+          });
         }
         await reload();
       } catch (err) {
@@ -867,6 +1158,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
           busy={effectiveBusyPlanId === mainPlan.planId}
           onDecide={decide}
           onRunnerControl={controlRunner}
+          onManualConfirm={recordManualDodConfirmation}
         />
       ) : null}
       {listPlans.length > 0 ? (
@@ -890,6 +1182,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
               busy={effectiveBusyPlanId === plan.planId}
               onDecide={decide}
               onRunnerControl={controlRunner}
+              onManualConfirm={recordManualDodConfirmation}
             />
           ))}
         </div>

@@ -48,6 +48,7 @@ test('explorer mode renders brief + contract', () => {
   assert.equal(contract.layer, 'L6_MODE_REMINDER');
   assert.match(contract.content, /readonly_explorer/);
   assert.match(contract.content, /Do not modify files/);
+  assert.match(contract.content, /Use only evidenceRefs shown in tool results/);
   assert.match(contract.content, /summary, findings/);
 });
 

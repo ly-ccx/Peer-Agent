@@ -53,6 +53,23 @@ function approvedPlanWithTasks() {
   return store.getPlan(plan.planId);
 }
 
+function registerEvidenceRefsFor(targetStore, planId, refs) {
+  const plan = targetStore.getPlan(planId);
+  return targetStore.recordEvidenceRefs({
+    planId,
+    conversationId: plan?.conversationId,
+    streamId: 'test-stream',
+    toolCallId: `test-${String(planId).slice(0, 8)}`,
+    toolName: 'test_evidence_source',
+    evidenceRefs: refs,
+    artifactRefs: refs,
+  });
+}
+
+function registerEvidenceRefs(planId, refs) {
+  return registerEvidenceRefsFor(store, planId, refs);
+}
+
 test('aggregateProgress 只统计叶子任务（父任务不计数）', () => {
   const { tasks } = draftWithTasks();
   const p = aggregateProgress(tasks);
@@ -172,6 +189,7 @@ test('recordTaskEvidence: 最后一个子任务完成后，executing 计划自�
   store.setPlanStatus(created.planId, 'executing');
 
   // 叶子 = t1, t2a, t2b；逐个完成
+  registerEvidenceRefs(created.planId, ['artifact://1', 'artifact://2', 'artifact://3']);
   store.recordTaskEvidence(created.planId, 't1', {
     status: 'completed',
     evidenceRefs: ['artifact://1'],
@@ -208,6 +226,67 @@ test('recordTaskEvidence: 未批准计划把子任务标 running 被护栏拒绝
   );
   // 计划状态不被污染，仍停留在 awaiting_approval（未被派生成 executing）。
   assert.equal(store.getPlan(created.planId).status, 'awaiting_approval');
+});
+
+test('recordTaskEvidence: accepted 的自驱 Goal 不走 Plan 批准闸门，可由 Evidence 推进', () => {
+  const created = store.createGoalContract({
+    conversationId: 'conv-goal',
+    title: '修复失败测试',
+    goal: '定位并修复失败测试',
+    tasks: [
+      { taskId: 'g1', order: 0, title: '定位失败', status: 'pending', evidenceRefs: [] },
+    ],
+  });
+
+  assert.equal(created.status, 'accepted');
+  assert.equal(created.workflowKind, 'goal_self_driven');
+  assert.equal(created.activation.kind, 'accepted_goal');
+  assert.equal(created.approval, undefined);
+
+  store.recordTaskEvidence(created.planId, 'g1', { status: 'running' });
+  assert.equal(store.getPlan(created.planId).status, 'executing');
+
+  registerEvidenceRefs(created.planId, ['local-test-artifact://goal-store']);
+  store.recordTaskEvidence(created.planId, 'g1', {
+    status: 'completed',
+    evidenceRefs: ['local-test-artifact://goal-store'],
+    result: '失败测试已修复',
+  });
+
+  const after = store.getPlan(created.planId);
+  assert.equal(after.status, 'completed');
+  assert.equal(after.progress.percent, 100);
+  assert.deepEqual(after.tasks[0].evidenceRefs, ['local-test-artifact://goal-store']);
+});
+
+test('upsertGoalContract: 复用同会话自驱 Goal，且不把调用控制字段写入 artifact', () => {
+  const first = store.upsertGoalContract('conv-upsert', {
+    title: '初始目标',
+    goal: '整理目标上下文',
+    createdBy: 'user',
+  });
+  const second = store.upsertGoalContract('conv-upsert', {
+    title: '更新目标',
+    goal: '整理目标上下文并补验证',
+    revisionReason: 'latest user goal message',
+    changedBy: 'user',
+    createdBy: 'agent',
+  });
+
+  assert.equal(second.planId, first.planId);
+  assert.equal(second.version, 2);
+  assert.equal(second.status, 'accepted');
+  assert.equal(second.workflowKind, 'goal_self_driven');
+  assert.equal(second.title, '更新目标');
+  assert.equal(second.goal, '整理目标上下文并补验证');
+  assert.equal(Object.hasOwn(second, 'revisionReason'), false);
+  assert.equal(Object.hasOwn(second, 'changedBy'), false);
+  assert.equal(second.createdBy, 'user');
+  assert.equal(second.revisionHistory.at(-1).reason, 'latest user goal message');
+  assert.equal(second.revisionHistory.at(-1).changedBy, 'user');
+
+  const plans = store.listPlanDetailsByConversation('conv-upsert');
+  assert.equal(plans.length, 1);
 });
 
 test('recordTaskEvidence: 批准后把子任务标 running，计划自动推进为 executing', () => {
@@ -254,8 +333,20 @@ test('recordTaskEvidence: completed 必须带 evidenceRefs，否则抛错', () =
   );
 });
 
+test('recordTaskEvidence: completed 不能引用未登记的 EvidenceIndex ref', () => {
+  const plan = approvedPlanWithTasks();
+  assert.throws(
+    () => store.recordTaskEvidence(plan.planId, 't1', {
+      status: 'completed',
+      evidenceRefs: ['artifact://forged'],
+    }),
+    /not registered in EvidenceIndex/,
+  );
+});
+
 test('recordTaskEvidence: 带 evidence 完成叶子任务后进度自底向上聚合', () => {
   const plan = approvedPlanWithTasks();
+  registerEvidenceRefs(plan.planId, ['local-shell-artifact://x/stdout', 'ev://2a']);
   const r1 = store.recordTaskEvidence(plan.planId, 't1', {
     status: 'completed',
     evidenceRefs: ['local-shell-artifact://x/stdout'],
@@ -387,6 +478,7 @@ test('onChange: 每个写操作（含 AI 工具路径的 create/recordTaskEviden
   watched.recordApproval(plan.planId, { decision: 'approve' });
   assert.equal(events.length, 2, 'approve 应再触发一次');
 
+  registerEvidenceRefsFor(watched, plan.planId, ['artifact://x']);
   watched.recordTaskEvidence(plan.planId, 't1', {
     status: 'completed',
     evidenceRefs: ['artifact://x'],
@@ -534,6 +626,7 @@ test('单活跃计划: executing 旧计划仍有未完成叶子时，新建计�
   const executingOld = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
   store.setPlanStatus(executingOld.planId, 'executing');
   // 只完成部分叶子（t1 完成，t2a/t2b 仍 pending）→ 存在未完成叶子，维持 executing
+  registerEvidenceRefs(executingOld.planId, ['local-file://done-t1']);
   store.recordTaskEvidence(executingOld.planId, 't1', {
     status: 'completed',
     evidenceRefs: ['local-file://done-t1'],
@@ -553,6 +646,7 @@ test('单活跃计划: executing 旧计划全叶子终态时，新建计划令�
   const executingOld = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-A' });
   store.setPlanStatus(executingOld.planId, 'executing');
   // 把全部叶子（t1/t2a/t2b）置为终态 completed
+  registerEvidenceRefs(executingOld.planId, ['local-file://done-t1', 'local-file://done-t2a', 'local-file://done-t2b']);
   for (const taskId of ['t1', 't2a', 't2b']) {
     store.recordTaskEvidence(executingOld.planId, taskId, {
       status: 'completed',
@@ -730,17 +824,50 @@ test('explorer: dispatch/report 动态记录子 Agent 实例且不改写任务�
 
   const reported = store.reportExplorer(plan.planId, dispatched.runner.explorers[0].explorerId, {
     summary: '已确认 runner 字段',
-    findings: [{ claim: 'runner 字段存在', evidenceRefs: ['local-file://goal-plan-store'] }],
-    evidenceRefs: ['local-file://goal-plan-store'],
+    findings: [{ claim: 'runner 字段存在', evidenceRefs: ['tool-result://read-runner'] }],
+    evidenceRefs: ['tool-result://read-runner'],
+    allowedEvidenceRefs: ['tool-result://read-runner'],
     confidence: 'high',
   });
 
   assert.equal(reported.runner.status, 'idle');
   assert.equal(reported.runner.intent, 'verify');
   assert.equal(reported.runner.explorers[0].status, 'completed');
-  assert.deepEqual(reported.runner.explorers[0].report.evidenceRefs, ['local-file://goal-plan-store']);
+  assert.deepEqual(reported.runner.explorers[0].evidenceRefs, ['tool-result://read-runner']);
+  assert.deepEqual(reported.runner.explorers[0].report.evidenceRefs, ['tool-result://read-runner']);
   assert.equal(reported.tasks[0].status, 'pending');
   assert.deepEqual(reported.evidenceRefs, []);
+});
+
+test('explorer: completed 报告只能引用本次 Explorer registry 中的 evidenceRefs', () => {
+  const plan = store.createPlan(draftWithTasks());
+  store.setRunnerState(plan.planId, { enabled: true });
+  const dispatched = store.dispatchExplorer(plan.planId, {
+    question: '确认证据索引',
+    reason: '防止伪造 ref',
+  });
+  const explorerId = dispatched.runner.explorers[0].explorerId;
+
+  assert.throws(
+    () => store.reportExplorer(plan.planId, explorerId, {
+      summary: '引用了未注册 ref',
+      findings: [{ claim: 'x', evidenceRefs: ['tool-result://forged'] }],
+      evidenceRefs: ['tool-result://forged'],
+      allowedEvidenceRefs: ['tool-result://real'],
+      confidence: 'high',
+    }),
+    /unregistered evidenceRefs: tool-result:\/\/forged/,
+  );
+
+  assert.throws(
+    () => store.reportExplorer(plan.planId, explorerId, {
+      summary: '没有 registry',
+      findings: [{ claim: 'x', evidenceRefs: ['tool-result://real'] }],
+      evidenceRefs: ['tool-result://real'],
+      confidence: 'high',
+    }),
+    /without registered tool evidenceRefs/,
+  );
 });
 
 test('explorer: dispatch 不再受累计上限限制（并发模型）', () => {
@@ -769,8 +896,9 @@ test('explorer: 同一 batchId 的派发汇总为本轮进度 explorerBatch', ()
   const firstId = dispatched.runner.explorers[0].explorerId;
   const reported = store.reportExplorer(plan.planId, firstId, {
     summary: 'done a',
-    findings: [{ claim: 'x', evidenceRefs: ['local-file://x'] }],
-    evidenceRefs: ['local-file://x'],
+    findings: [{ claim: 'x', evidenceRefs: ['tool-result://x'] }],
+    evidenceRefs: ['tool-result://x'],
+    allowedEvidenceRefs: ['tool-result://x'],
     confidence: 'high',
   });
   assert.equal(reported.runner.explorerBatch.total, 2);
@@ -784,6 +912,69 @@ test('explorer: explorerConcurrency 被钳制在硬上限 8 内', () => {
   const under = store.setRunnerState(plan.planId, { enabled: true, explorerConcurrency: 0 });
   // 至少为 1（并发池不可为 0）。
   assert.equal(under.runner.explorerConcurrency, 1);
+});
+
+test('verifier: recordVerifierRun 按 id upsert，且不替代 criterionResults', () => {
+  const plan = store.createPlan({
+    ...draftWithTasks(),
+    successCriteria: [{ id: 'c1', kind: 'command', description: 'build', command: 'npm run build' }],
+  });
+
+  const running = store.recordVerifierRun(plan.planId, {
+    verifierRunId: 'verifier-1',
+    target: { kind: 'success_criterion', criterionId: 'c1' },
+    status: 'running',
+    summary: 'running build verification',
+  });
+
+  assert.equal(running.runner.verifierRuns.length, 1);
+  assert.equal(running.runner.verifierRuns[0].status, 'running');
+  assert.equal(running.runner.verifierRuns[0].target.criterionId, 'c1');
+  assert.deepEqual(running.criterionResults, []);
+
+  const passed = store.recordVerifierRun(plan.planId, {
+    verifierRunId: 'verifier-1',
+    target: { kind: 'success_criterion', criterionId: 'c1' },
+    status: 'passed',
+    evidenceRefs: ['tool-result://build'],
+    summary: 'build passed',
+  });
+
+  assert.equal(passed.runner.verifierRuns.length, 1);
+  assert.equal(passed.runner.verifierRuns[0].status, 'passed');
+  assert.deepEqual(passed.runner.verifierRuns[0].evidenceRefs, ['tool-result://build']);
+  assert.ok(passed.runner.verifierRuns[0].completedAt);
+  // VerifierRun 是审计轨迹，不自动伪造 CriterionResult。
+  assert.deepEqual(passed.criterionResults, []);
+});
+
+test('verifier: passed 必须带 evidenceRefs，且目标必须引用真实 task/criterion', () => {
+  const plan = store.createPlan({
+    ...draftWithTasks(),
+    successCriteria: [{ id: 'c1', kind: 'test', description: 'tests', command: 'npm test' }],
+  });
+
+  assert.throws(
+    () => store.recordVerifierRun(plan.planId, {
+      target: { kind: 'success_criterion', criterionId: 'c1' },
+      status: 'passed',
+    }),
+    /cannot be 'passed' without evidenceRefs/,
+  );
+  assert.throws(
+    () => store.recordVerifierRun(plan.planId, {
+      target: { kind: 'success_criterion', criterionId: 'missing' },
+      status: 'running',
+    }),
+    /verifier target criterion missing not found/,
+  );
+  assert.throws(
+    () => store.recordVerifierRun(plan.planId, {
+      target: { kind: 'task', taskId: 'missing-task' },
+      status: 'running',
+    }),
+    /verifier target task missing-task not found/,
+  );
 });
 
 test('getActivePlanByConversation 返回同会话最新活跃计划，忽略结束态', () => {
@@ -843,6 +1034,61 @@ test('successCriteria: 非法 kind 归一为 manual', () => {
   assert.equal(plan.successCriteria[0].kind, 'manual');
 });
 
+test('recordManualConfirmation: Manual DoD 确认落为独立治理事实', () => {
+  const plan = store.createGoalContract({
+    ...draftWithTasks(),
+    successCriteria: [
+      { id: 'manual-1', kind: 'manual', description: '用户确认体验达标' },
+      { id: 'cmd-1', kind: 'command', description: '测试通过', command: 'npm test' },
+    ],
+  });
+
+  const after = store.recordManualConfirmation(plan.planId, {
+    confirmationId: 'confirm-1',
+    kind: 'manual_dod',
+    decision: 'approve',
+    decidedBy: 'tester',
+  });
+
+  assert.equal(after.manualConfirmations.length, 1);
+  assert.deepEqual(after.manualConfirmations[0], {
+    confirmationId: 'confirm-1',
+    kind: 'manual_dod',
+    decision: 'approve',
+    criterionIds: ['manual-1'],
+    decidedBy: 'tester',
+    decidedAt: after.manualConfirmations[0].decidedAt,
+  });
+  assert.equal(after.approval, undefined, 'Manual DoD 不能写成 Plan approval');
+});
+
+test('recordManualConfirmation: 只能确认计划内 manual successCriteria', () => {
+  const plan = store.createGoalContract({
+    ...draftWithTasks(),
+    successCriteria: [
+      { id: 'manual-1', kind: 'manual', description: '用户确认体验达标' },
+      { id: 'cmd-1', kind: 'command', description: '测试通过', command: 'npm test' },
+    ],
+  });
+
+  assert.throws(
+    () => store.recordManualConfirmation(plan.planId, {
+      kind: 'manual_dod',
+      decision: 'approve',
+      criterionIds: ['cmd-1'],
+    }),
+    /unknown manual criteria/,
+  );
+  assert.throws(
+    () => store.recordManualConfirmation(plan.planId, {
+      kind: 'manual_dod',
+      decision: 'approve',
+      criterionIds: ['missing'],
+    }),
+    /unknown manual criteria/,
+  );
+});
+
 test('recordCriterionResults: 只接受已声明的 criterionId 并按 id 合并', () => {
   const plan = store.createPlan({
     ...draftWithTasks(),
@@ -851,6 +1097,7 @@ test('recordCriterionResults: 只接受已声明的 criterionId 并按 id 合并
       { id: 'c2', kind: 'test', description: 'tests', command: 'npm test' },
     ],
   });
+  registerEvidenceRefs(plan.planId, ['ref://build', 'ref://test']);
   // 写入 c1 通过 + 一个未声明的 cX（应被忽略）。
   const after = store.recordCriterionResults(plan.planId, [
     { criterionId: 'c1', passed: true, evidenceRef: 'ref://build' },
@@ -873,6 +1120,21 @@ test('recordCriterionResults: 只接受已声明的 criterionId 并按 id 合并
   assert.equal(byId.c1.detail, 'build broke');
   assert.equal(byId.c2.passed, true);
   assert.equal(byId.c2.evidenceRef, 'ref://test');
+});
+
+test('recordCriterionResults: evidenceRef 必须来自 EvidenceIndex', () => {
+  const plan = store.createPlan({
+    ...draftWithTasks(),
+    successCriteria: [
+      { id: 'c1', kind: 'command', description: 'build', command: 'npm run build' },
+    ],
+  });
+  assert.throws(
+    () => store.recordCriterionResults(plan.planId, [
+      { criterionId: 'c1', passed: true, evidenceRef: 'ref://forged' },
+    ]),
+    /not registered in EvidenceIndex/,
+  );
 });
 
 test('recordCriterionResults: 计划不存在返回 null', () => {

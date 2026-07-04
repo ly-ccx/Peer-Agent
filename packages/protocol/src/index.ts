@@ -474,6 +474,14 @@ export interface CapabilitySelection {
   readonly argumentsPreview: Record<string, unknown>;
 }
 
+export interface ClientToolConfirmation {
+  readonly kind: string;
+  readonly detail?: string;
+  readonly reason?: string;
+  readonly riskLevel?: CapabilityRiskLevel;
+  readonly [key: string]: unknown;
+}
+
 export interface ClientToolCall {
   readonly toolCallId: string;
   readonly capabilityId: string;
@@ -481,6 +489,7 @@ export interface ClientToolCall {
   readonly reason: string;
   readonly arguments?: Record<string, unknown>;
   readonly argumentsPreview: Record<string, unknown>;
+  readonly confirmation?: ClientToolConfirmation;
   readonly riskLevel: CapabilityRiskLevel;
   readonly dataLevel: DataLevel;
   readonly requestedAt: string;

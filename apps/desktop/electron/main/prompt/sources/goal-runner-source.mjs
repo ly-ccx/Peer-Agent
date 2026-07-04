@@ -24,11 +24,14 @@ import { neutralizeToolCallSyntax } from '../../chat-runtime/message-sanitizer.m
 const MAX_SCOPE_ITEMS = 12;
 const MAX_CRITERIA_ITEMS = 12;
 const MAX_TASKS = 40;
+const MAX_VERIFIER_RUNS = 5;
+const MAX_INSPECT_QUESTIONS = 4;
 
 const ACTIVE_PLAN_STATUSES = new Set([
   'drafting',
   'awaiting_approval',
   'approved',
+  'accepted',
   'executing',
 ]);
 
@@ -129,6 +132,27 @@ function pickCurrentTask(leaves, currentTaskId) {
   return leaves.find((task) => task.status !== 'completed') ?? null;
 }
 
+function summarizeInspectPlan(plan) {
+  if (!plan || typeof plan !== 'object') return null;
+  const questions = Array.isArray(plan.questions)
+    ? plan.questions
+        .map((question) => ({
+          question: sanitizeRuntimeText(question?.question).trim(),
+          reason: sanitizeRuntimeText(question?.reason).trim(),
+        }))
+        .filter((question) => question.question)
+        .slice(0, MAX_INSPECT_QUESTIONS)
+    : [];
+  const exitCriteria = asStringArray(plan.exitCriteria, MAX_SCOPE_ITEMS);
+  if (questions.length === 0 && exitCriteria.length === 0) return null;
+  return {
+    requiredBeforeAct: Boolean(plan.requiredBeforeAct),
+    questions,
+    exitCriteria,
+    generatedAt: asString(plan.generatedAt) || null,
+  };
+}
+
 function normalizePlan(plan) {
   if (!plan || typeof plan !== 'object') return null;
   const status = asString(plan.status) || null;
@@ -151,9 +175,51 @@ function normalizePlan(plan) {
     progress: plan.progress && typeof plan.progress === 'object' ? plan.progress : null,
     leaves,
     currentTask: pickCurrentTask(leaves, asString(runner?.currentTaskId) || null),
+    runner: runner
+      ? {
+          status: asString(runner.status) || 'idle',
+          intent: asString(runner.intent) || null,
+          phase: asString(runner.phase) || null,
+          blockedReason: sanitizeRuntimeText(runner.blockedReason).trim(),
+          explorerBatch: runner.explorerBatch && typeof runner.explorerBatch === 'object'
+            ? {
+                batchId: asString(runner.explorerBatch.batchId) || null,
+                total: Number.isFinite(runner.explorerBatch.total) ? runner.explorerBatch.total : 0,
+                done: Number.isFinite(runner.explorerBatch.done) ? runner.explorerBatch.done : 0,
+              }
+            : null,
+          inspectPlan: summarizeInspectPlan(runner.inspectPlan),
+          blockerAudit: runner.blockerAudit && typeof runner.blockerAudit === 'object'
+            ? {
+                reason: sanitizeRuntimeText(runner.blockerAudit.reason).trim(),
+                occurrences: Number.isFinite(runner.blockerAudit.occurrences)
+                  ? runner.blockerAudit.occurrences
+                  : 0,
+                firstSeenAt: asString(runner.blockerAudit.firstSeenAt),
+                lastSeenAt: asString(runner.blockerAudit.lastSeenAt),
+              }
+            : null,
+          verifierRuns: Array.isArray(runner.verifierRuns)
+            ? runner.verifierRuns.slice(-MAX_VERIFIER_RUNS).map((run) => ({
+                verifierRunId: asString(run?.verifierRunId) || null,
+                status: asString(run?.status) || 'queued',
+                target: run?.target && typeof run.target === 'object'
+                  ? {
+                      kind: asString(run.target.kind) || 'plan',
+                      taskId: asString(run.target.taskId) || null,
+                      criterionId: asString(run.target.criterionId) || null,
+                    }
+                  : { kind: 'plan', taskId: null, criterionId: null },
+                evidenceCount: Array.isArray(run?.evidenceRefs) ? run.evidenceRefs.length : 0,
+                summary: sanitizeRuntimeText(run?.summary).trim(),
+              }))
+            : [],
+        }
+      : null,
     budget: runner
       ? {
           turnCount: Number.isFinite(runner.turnCount) ? runner.turnCount : 0,
+          roundCount: Number.isFinite(runner.roundCount) ? runner.roundCount : 0,
           maxTurns: Number.isFinite(runner.maxTurns) ? runner.maxTurns : null,
           toolCallCount: Number.isFinite(runner.toolCallCount) ? runner.toolCallCount : 0,
           maxToolCalls: Number.isFinite(runner.maxToolCalls) ? runner.maxToolCalls : null,
@@ -167,7 +233,8 @@ function normalizePlan(plan) {
 function formatBudget(budget) {
   if (!budget) return '(not started)';
   const parts = [
-    `turns ${budget.turnCount}${budget.maxTurns != null ? `/${budget.maxTurns}` : ''}`,
+    `ticks ${budget.turnCount}${budget.maxTurns != null ? `/${budget.maxTurns}` : ''}`,
+    `rounds ${budget.roundCount}`,
     `toolCalls ${budget.toolCallCount}${budget.maxToolCalls != null ? `/${budget.maxToolCalls}` : ''}`,
     `explorers ${budget.explorerCount}${budget.maxExplorers != null ? `/${budget.maxExplorers}` : ''}`,
   ];
@@ -186,6 +253,50 @@ function formatFacts(plan) {
   const goal = sanitizeRuntimeText(plan.goal);
   if (title) lines.push(`title=${title}`);
   if (goal) lines.push(`goal=${goal}`);
+  if (plan.runner) {
+    const state = [
+      `status=${plan.runner.status}`,
+      plan.runner.intent ? `intent=${plan.runner.intent}` : null,
+      plan.runner.phase ? `phase=${plan.runner.phase}` : null,
+    ].filter(Boolean).join('; ');
+    lines.push(`runner state: ${state}`);
+    if (plan.runner.blockedReason) {
+      lines.push(`runner blocked reason: ${plan.runner.blockedReason}`);
+    }
+    if (plan.runner.blockerAudit?.reason) {
+      const audit = plan.runner.blockerAudit;
+      lines.push(
+        `runner blocker audit: reason=${audit.reason}; occurrences=${audit.occurrences}; firstSeenAt=${audit.firstSeenAt}; lastSeenAt=${audit.lastSeenAt}`,
+      );
+    }
+    if (plan.runner.explorerBatch?.total > 0) {
+      const batch = plan.runner.explorerBatch;
+      lines.push(`runner explorer batch: ${batch.done}/${batch.total}${batch.batchId ? ` (${batch.batchId})` : ''}`);
+    }
+    if (plan.runner.inspectPlan) {
+      const inspect = plan.runner.inspectPlan;
+      lines.push(`inspect plan: requiredBeforeAct=${inspect.requiredBeforeAct}; questions=${inspect.questions.length}`);
+      for (const question of inspect.questions) {
+        const reason = question.reason ? ` — ${question.reason}` : '';
+        lines.push(`- ${question.question}${reason}`);
+      }
+      if (inspect.exitCriteria.length > 0) {
+        lines.push(`inspect exit criteria: ${inspect.exitCriteria.join('; ')}`);
+      }
+    }
+    if (plan.runner.verifierRuns.length > 0) {
+      lines.push('recent verifier runs:');
+      for (const run of plan.runner.verifierRuns) {
+        const target = run.target.kind === 'task'
+          ? `task:${run.target.taskId ?? '?'}`
+          : run.target.kind === 'success_criterion'
+            ? `criterion:${run.target.criterionId ?? '?'}`
+            : 'plan';
+        const summary = run.summary ? ` — ${run.summary}` : '';
+        lines.push(`- ${run.verifierRunId ?? '(no-id)'} ${target} ${run.status} (evidenceRefs=${run.evidenceCount})${summary}`);
+      }
+    }
+  }
   if (plan.currentTask) {
     const t = plan.currentTask;
     lines.push(
@@ -238,7 +349,7 @@ function formatContract() {
       + 'are confirmed once with the user before finishing.',
     '- Do not cross the declared boundaries.',
     '- If you need user input, permission, or evidence is insufficient, call request_user_input (or stop) and explain the blocker instead of pretending completion.',
-    '- Do not use request_user_input to re-ask for plan approval once a plan is awaiting approval; that binary approve/reject decision is owned by the governed approval card / Goal panel (goalPlansApprove). Reserve request_user_input for substantive follow-ups only.',
+    '- In Plan workflow, do not use request_user_input to duplicate the plan approve/reject card. In self-driven Goal workflow, do not ask for plan approval; ask only for substantive ambiguity, high-risk decisions, missing permission, or verification conflict.',
     '- Use the existing tools and permission flow; do not fabricate Tool Result or Evidence.',
   ].join('\n');
 }

@@ -107,6 +107,7 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
     const locale = context.locale ?? 'zh-CN';
     const args = parseArgs(call);
     const conversationId = context.toolContext?.conversationId ?? null;
+    const mode = context.toolContext?.mode ?? 'chat';
 
     let status = 'success';
     let payload;
@@ -121,7 +122,7 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
       };
     } else {
       try {
-        const plan = goalPlanStore.createPlan({
+        const draft = {
           conversationId,
           title: deriveTitle(args.title, args.goal),
           goal: args.goal,
@@ -130,21 +131,43 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
           // 可选的结构化成功标准（DoD）。store 层会规范化（字符串→manual 向后兼容），
           // 缺省时归一为空数组，不影响既有仅传 goal/tasks 的调用。
           successCriteria: args.successCriteria,
-          status: 'awaiting_approval',
           createdBy: 'agent',
-        });
+        };
+        const plan = mode === 'goal' && typeof goalPlanStore.upsertGoalContract === 'function'
+          ? goalPlanStore.upsertGoalContract(conversationId, {
+            ...draft,
+            status: 'accepted',
+            workflowKind: 'goal_self_driven',
+            activation: {
+              kind: 'accepted_goal',
+              acceptedAt: new Date().toISOString(),
+              acceptedBy: 'user',
+            },
+          })
+          : goalPlanStore.createPlan({
+            ...draft,
+            status: 'awaiting_approval',
+            workflowKind: 'plan_approval',
+            activation: { kind: 'approval_required' },
+          });
         payload = {
           ok: true,
           planId: plan.planId,
           status: plan.status,
+          workflowKind: plan.workflowKind,
+          activation: plan.activation,
           taskCount: plan.tasks?.length ?? 0,
           progress: plan.progress ?? null,
           // 权威 taskId 清单：第一时间把 store 生成的 taskId 经 Tool Result 回显给模型，
           // 避免后续 goal_update_task 凭记忆/被压缩历史猜 taskId（见 0006 提案根因 1）。
           tasks: summarizeTasks(plan.tasks),
-          note: locale === 'zh-CN'
-            ? '计划已创建并等待用户批准。请用 request_user_input 征求批准后再执行。回写子任务请使用上面 tasks[].taskId。'
-            : 'Plan created and awaiting approval. Ask the user to approve via request_user_input before executing. Use tasks[].taskId above when writing back subtasks.',
+          note: mode === 'goal'
+            ? (locale === 'zh-CN'
+              ? 'Goal 契约已接受。Runner 可在边界内自驱推进；子任务完成、失败或阻塞时请用上面 tasks[].taskId 回写 Evidence。'
+              : 'Goal contract accepted. The runner may continue autonomously within boundaries; use tasks[].taskId above when writing back evidence.')
+            : (locale === 'zh-CN'
+              ? '计划已创建并等待用户批准。请通过计划面板/批准卡取得批准后再执行。回写子任务请使用上面 tasks[].taskId。'
+              : 'Plan created and awaiting approval. Get approval via the Plan panel/approval card before executing. Use tasks[].taskId above when writing back subtasks.'),
         };
       } catch (err) {
         status = 'failed';

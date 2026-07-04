@@ -22,13 +22,31 @@ const samplePlan = {
     { taskId: 't2', title: 'implement', status: 'in_progress', evidenceRefs: [] },
   ],
   runner: {
+    status: 'running',
+    intent: 'execute',
+    phase: 'act',
     currentTaskId: 't2',
     turnCount: 3,
+    roundCount: 9,
     maxTurns: 20,
     toolCallCount: 7,
     maxToolCalls: 80,
     explorerCount: 1,
     maxExplorers: 4,
+    explorerBatch: { batchId: 'batch-1', total: 2, done: 1 },
+    inspectPlan: {
+      requiredBeforeAct: true,
+      questions: [{ question: 'Find runtime entry files', reason: 'Need file grounding before act' }],
+      exitCriteria: ['primary files identified'],
+      generatedAt: '2026-01-01T00:00:00.000Z',
+    },
+    verifierRuns: [{
+      verifierRunId: 'verifier-1',
+      target: { kind: 'success_criterion', criterionId: 'c1' },
+      status: 'passed',
+      evidenceRefs: ['tool-result://build'],
+      summary: 'build passed',
+    }],
   },
 };
 
@@ -62,9 +80,17 @@ test('goal mode renders facts + contract sections', () => {
   assert.equal(facts.layer, 'L7_CONTINUITY');
   assert.equal(facts.trust, 'runtime');
   assert.match(facts.content, /plan-1/);
+  assert.match(facts.content, /runner state: status=running; intent=execute; phase=act/);
   assert.match(facts.content, /current task: t2/);
-  assert.match(facts.content, /turns 3\/20/);
+  assert.match(facts.content, /ticks 3\/20/);
+  assert.match(facts.content, /rounds 9/);
   assert.match(facts.content, /explorers 1\/4/);
+  assert.match(facts.content, /runner explorer batch: 1\/2 \(batch-1\)/);
+  assert.match(facts.content, /inspect plan: requiredBeforeAct=true; questions=1/);
+  assert.match(facts.content, /Find runtime entry files/);
+  assert.match(facts.content, /inspect exit criteria: primary files identified/);
+  assert.match(facts.content, /recent verifier runs:/);
+  assert.match(facts.content, /verifier-1 criterion:c1 passed \(evidenceRefs=1\)/);
   assert.match(facts.content, /in scope:/);
   assert.match(facts.content, /out of scope:/);
   // DoD-as-Code：section 标题升级，字符串成功标准向后兼容渲染为结构化 [manual] (manual)。

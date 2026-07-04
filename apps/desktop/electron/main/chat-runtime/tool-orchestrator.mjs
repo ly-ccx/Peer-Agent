@@ -116,6 +116,65 @@ export function formatToolResultForStream({ name, args, output }) {
   return boundToolResultForStream(output);
 }
 
+function addStringRefs(target, value) {
+  if (typeof value === 'string' && value.trim()) {
+    target.add(value.trim());
+    return;
+  }
+  if (!Array.isArray(value)) return;
+  for (const item of value) {
+    if (typeof item === 'string' && item.trim()) target.add(item.trim());
+  }
+}
+
+export function collectToolEvidenceRefs({ toolCallId, execution } = {}) {
+  const refs = new Set();
+  if (typeof toolCallId === 'string' && toolCallId.trim()) {
+    refs.add(`tool-result://${toolCallId.trim()}`);
+  }
+
+  const result = execution?.result;
+  const evidence = result?.evidence;
+  addStringRefs(refs, evidence?.artifactRefs);
+
+  const outputPreview = result?.outputPreview;
+  addStringRefs(refs, outputPreview?.artifactRef);
+  addStringRefs(refs, outputPreview?.artifactRefs);
+  addStringRefs(refs, outputPreview?.localToolResultRef?.artifactRef);
+  addStringRefs(refs, outputPreview?.localToolResultRef?.artifactRefs);
+
+  return Array.from(refs);
+}
+
+function mergeEvidenceRefs(existing, incoming) {
+  const refs = new Set();
+  addStringRefs(refs, existing);
+  addStringRefs(refs, incoming);
+  return Array.from(refs);
+}
+
+export function appendEvidenceRefsToToolOutput(output, evidenceRefs) {
+  const refs = mergeEvidenceRefs([], evidenceRefs);
+  if (refs.length === 0) return output;
+
+  if (typeof output === 'string') {
+    try {
+      const parsed = JSON.parse(output);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return JSON.stringify({
+          ...parsed,
+          evidenceRefs: mergeEvidenceRefs(parsed.evidenceRefs, refs),
+        }, null, 2);
+      }
+    } catch {
+      // Fall through to plaintext annotation.
+    }
+    return `${output}\n\nEvidence refs: ${JSON.stringify(refs)}`;
+  }
+
+  return JSON.stringify({ output, evidenceRefs: refs }, null, 2);
+}
+
 /**
  * 从 Runtime Projection 按 capability name 反查后端注入的展示文案 displayName。
  * 用于把工具卡标题（尤其是 MCP 工具的「服务名: 工具名」）随 tool-call 事件透传给表达层。
@@ -196,6 +255,7 @@ export async function executeModelToolCall({
     toolContext,
     toolCallId,
     requestPermission: (request) => {
+      if (request?.confirmation) return requestLocalCapabilityPermission(request);
       if (request?.filePath || request?.tool || request?.workspacePath) return requestFilePermission(request);
       return requestLocalCapabilityPermission(request);
     },
@@ -213,9 +273,26 @@ export async function executeModelToolCall({
     goalPlanStore,
   });
   if (signal?.aborted) return { aborted: true, args, output: '' };
-  const output = materializeToolOutput(result);
+  const rawOutput = materializeToolOutput(result);
+  const evidenceRefs = collectToolEvidenceRefs({ toolCallId, execution: result.execution });
+  if (evidenceRefs.length > 0 && typeof goalPlanStore?.recordEvidenceRefs === 'function') {
+    try {
+      goalPlanStore.recordEvidenceRefs({
+        conversationId,
+        streamId,
+        toolCallId,
+        toolName: name,
+        capabilityId: result.execution?.call?.capabilityId,
+        evidenceRefs,
+        artifactRefs: evidenceRefs.filter((ref) => !ref.startsWith('tool-result://')),
+      });
+    } catch (err) {
+      console.warn('[tool-orchestrator] failed to register EvidenceIndex refs:', err);
+    }
+  }
+  const output = appendEvidenceRefsToToolOutput(rawOutput, evidenceRefs);
   const streamResult = formatToolResultForStream({ name, args, output });
-  webContents.send('chat:stream:tool-result', { streamId, toolCallId, result: streamResult });
+  webContents.send('chat:stream:tool-result', { streamId, toolCallId, result: streamResult, evidenceRefs });
   const controlSignal = extractToolControlSignal(result);
   return { aborted: false, args, output, result, controlSignal };
 }

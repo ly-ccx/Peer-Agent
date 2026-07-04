@@ -9,6 +9,12 @@ function readString(data: Record<string, unknown>, keys: readonly string[]): str
   return undefined;
 }
 
+function readConfirmation(data: Record<string, unknown>): ClientToolCall['confirmation'] | undefined {
+  const confirmation = data.confirmation;
+  if (!isRecord(confirmation) || typeof confirmation.kind !== 'string') return undefined;
+  return confirmation as ClientToolCall['confirmation'];
+}
+
 export function normalizeClientToolCall(event: ChatStreamEvent): ClientToolCall | null {
   // backend 实际推的事件名是 client_tool_dispatching(见 cbu-xiaoer-node-service
   // src/service/aiChat/runtime/ClientToolEventTypes.ts CLIENT_TOOL_EVENT_NAMES)。
@@ -43,6 +49,7 @@ export function normalizeClientToolCall(event: ChatStreamEvent): ClientToolCall 
     : isRecord(raw.args) ? raw.args
     : undefined;
   const preview = isRecord(raw.argumentsPreview) ? raw.argumentsPreview : {};
+  const confirmation = readConfirmation(raw);
 
   return {
     toolCallId,
@@ -54,6 +61,7 @@ export function normalizeClientToolCall(event: ChatStreamEvent): ClientToolCall 
     arguments: fullArguments,
     argumentsPreview: Object.keys(preview).length > 0 ? preview
       : fullArguments ?? {},
+    ...(confirmation ? { confirmation } : {}),
     riskLevel: readString(raw, ['riskLevel']) as ClientToolCall['riskLevel']
       ?? readString(policy, ['riskLevel', 'capabilityLevel']) as ClientToolCall['riskLevel']
       ?? 'L0_inert',

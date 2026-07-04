@@ -7,6 +7,7 @@ import { createContextExtensionPromptSource } from './sources/context-extension-
 import { createGoalPlanPromptSource } from './sources/goal-plan-source.mjs';
 import { createGoalRunnerPromptSource } from './sources/goal-runner-source.mjs';
 import { createExplorerPromptSource } from './sources/explorer-source.mjs';
+import { createVerifierPromptSource } from './sources/verifier-source.mjs';
 import { createCorePromptSource } from './sources/core-source.mjs';
 import { createBrainstormingPromptSource } from './sources/brainstorming-source.mjs';
 import { createProviderPromptSource } from './sources/provider-source.mjs';
@@ -80,6 +81,7 @@ export function createDefaultPromptSourceRegistry() {
       createGoalPlanPromptSource(),
       createGoalRunnerPromptSource(),
       createExplorerPromptSource(),
+      createVerifierPromptSource(),
       createContinuityPromptSource(),
     ],
   });

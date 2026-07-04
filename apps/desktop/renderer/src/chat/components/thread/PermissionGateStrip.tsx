@@ -1,6 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { ClientToolCall } from '@peer-agent/protocol';
 import { useExitAnimation } from '../../hooks/useExitAnimation';
+import { buildPermissionGateView } from '../../state/permissionGateView';
 
 interface PermissionGateStripProps {
   readonly pendingCalls: readonly ClientToolCall[];
@@ -33,7 +34,7 @@ export function PermissionGateStrip({
 
   const head = pendingCalls[0];
   const extra = pendingCalls.length - 1;
-  const preview = extractCommandPreview(head);
+  const view = buildPermissionGateView(head, i18n.locale);
 
   const handleAction = (action: (call: ClientToolCall) => void) => {
     exit(() => action(head));
@@ -48,22 +49,26 @@ export function PermissionGateStrip({
   };
 
   return (
-    <aside className={`permission-gate-strip ${exiting ? 'exiting' : ''}`} role="region" aria-live="polite">
-      <span className="badge">{i18n.t('review.badge')}</span>
-      <span className="capability">{head.capabilityId}</span>
+    <aside
+      className={`permission-gate-strip permission-gate-strip--${view.variant}${exiting ? ' exiting' : ''}`}
+      role="region"
+      aria-live="polite"
+    >
+      <span className="badge">{view.badge ?? i18n.t('review.badge')}</span>
+      <span className="capability">{view.capabilityLabel}</span>
       <span className="separator" aria-hidden="true">·</span>
-      {preview ? <span className="preview">{preview}</span> : null}
+      {view.preview ? <span className="preview">{view.preview}</span> : null}
       {extra > 0 ? (
         <span className="more">{i18n.t('review.morePending', { count: extra })}</span>
       ) : null}
       <div className="actions">
         <button type="button" className="deny" onClick={() => handleAction(onReject)}>
-          {i18n.t('review.deny')}
+          {view.denyLabel ?? i18n.t('review.deny')}
         </button>
         <button type="button" className="allow" onClick={() => handleAction(onApprove)}>
-          {i18n.t('review.allow')}
+          {view.allowLabel ?? i18n.t('review.allow')}
         </button>
-        {showApproveAlways ? (
+        {showApproveAlways && !view.isGoalConfirmation ? (
           <button type="button" className="allow-always" onClick={handleApproveAlways}>
             {i18n.t('review.allowAlways')}
           </button>
@@ -71,28 +76,4 @@ export function PermissionGateStrip({
       </div>
     </aside>
   );
-}
-
-const PREVIEW_MAX = 80;
-
-function extractCommandPreview(call: ClientToolCall): string {
-  const args = call.argumentsPreview;
-  if (!args || typeof args !== 'object') return '';
-  const command =
-    typeof args.command === 'string'
-      ? args.command
-      : typeof args.cmd === 'string'
-        ? args.cmd
-        : typeof args.script === 'string'
-          ? args.script
-          : pickFirstString(args);
-  if (!command) return '';
-  return command.length > PREVIEW_MAX ? `${command.slice(0, PREVIEW_MAX)}…` : command;
-}
-
-function pickFirstString(args: Record<string, unknown>): string | undefined {
-  for (const value of Object.values(args)) {
-    if (typeof value === 'string' && value.trim()) return value;
-  }
-  return undefined;
 }

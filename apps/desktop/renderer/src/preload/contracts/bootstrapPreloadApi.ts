@@ -7,6 +7,7 @@ import type {
   ClientToolResult,
   ExecutionStatus,
   GoalApproval,
+  GoalManualConfirmation,
   GoalPlan,
   GoalPlanStatus,
   LlmModelListResult,
@@ -348,6 +349,10 @@ export interface BootstrapPreloadApi {
   }) => Promise<GoalPlan>;
   readonly goalPlansApprove: (params: { planId: string; approval: GoalApproval }) => Promise<GoalPlan>;
   readonly goalPlansSetStatus: (params: { planId: string; status: GoalPlanStatus }) => Promise<GoalPlan>;
+  readonly goalPlansRecordManualConfirmation: (params: {
+    planId: string;
+    confirmation: GoalManualConfirmation;
+  }) => Promise<GoalPlan>;
   readonly goalRunnerGetState: (params: { planId: string }) => Promise<GoalRunnerStateView | null>;
   readonly goalRunnerStart: (params: { planId: string; options?: Record<string, unknown> }) => Promise<GoalRunnerStateView | null>;
   readonly goalRunnerPause: (params: { planId: string }) => Promise<GoalRunnerStateView | null>;

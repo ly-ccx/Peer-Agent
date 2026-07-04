@@ -83,6 +83,7 @@ function buildLocalCapabilityPermissionCall({ request, toolCallId }) {
     reason: request?.reason || 'The assistant wants to use a local capability.',
     arguments: request?.args ?? {},
     argumentsPreview: request?.scope ?? request?.args ?? {},
+    confirmation: request?.confirmation ?? undefined,
     riskLevel: request?.riskLevel ?? 'L3_external_write',
     dataLevel: request?.dataLevel ?? 'D2_sensitive',
     requestedAt: new Date().toISOString(),

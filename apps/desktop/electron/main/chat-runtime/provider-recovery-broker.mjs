@@ -18,6 +18,13 @@ const TRANSPORT_FAILURE_PATTERNS = [
   /Domain Blocking/i,
 ];
 
+const SAME_PROVIDER_RETRY_PATTERNS = [
+  /fetch failed/i,
+  /network/i,
+  /ECONNRESET|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN/i,
+  /UND_ERR_|HeadersTimeoutError|ConnectTimeoutError|SocketError/i,
+];
+
 const REPLAY_UNSAFE_CHANNELS = new Set([
   'chat:stream:delta',
   'chat:stream:thinking',
@@ -49,6 +56,11 @@ export function isProviderTransportFailure(errorText) {
   return TRANSPORT_FAILURE_PATTERNS.some((pattern) => pattern.test(text));
 }
 
+export function isSameProviderRetryableFailure(errorText) {
+  const text = String(errorText || '');
+  return SAME_PROVIDER_RETRY_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 export function providerCanRun(provider) {
   return Boolean(provider && provider.enabled !== false && provider.apiKeyConfigured);
 }
@@ -74,6 +86,10 @@ export function orderProviderCandidates(providers = []) {
 
 export function canReplayProviderAttempt({ errorText, observedReplayUnsafeEvent = false } = {}) {
   return !observedReplayUnsafeEvent && isProviderTransportFailure(errorText);
+}
+
+export function canRetrySameProviderAttempt({ errorText, observedReplayUnsafeEvent = false } = {}) {
+  return !observedReplayUnsafeEvent && isSameProviderRetryableFailure(errorText);
 }
 
 export function createProviderAttemptStream({ webContents, streamId, provider }) {
@@ -117,6 +133,10 @@ export function createProviderAttemptStream({ webContents, streamId, provider })
       errorText,
       observedReplayUnsafeEvent,
       replayable: Boolean(terminalError) && canReplayProviderAttempt({
+        errorText,
+        observedReplayUnsafeEvent,
+      }),
+      sameProviderRetryable: Boolean(terminalError) && canRetrySameProviderAttempt({
         errorText,
         observedReplayUnsafeEvent,
       }),

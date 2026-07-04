@@ -347,7 +347,7 @@ function toRuntimeMessages(messages = []) {
 
 function buildGoalRunnerMessage(plan, turnNumber) {
   const planLabel = plan?.title || plan?.goal || plan?.planId || 'goal';
-  return `Goal Runner tick ${turnNumber} for plan "${planLabel}" (planId=${plan?.planId || 'unknown'}). Continue from the approved GoalPlan state.`;
+  return `Goal Runner tick ${turnNumber} for goal "${planLabel}" (planId=${plan?.planId || 'unknown'}). Continue from the active GoalPlan state.`;
 }
 
 function buildGoalRunnerReminder(plan, turnNumber) {
@@ -357,7 +357,7 @@ function buildGoalRunnerReminder(plan, turnNumber) {
     kind: 'goal-runner',
     scope: 'turn',
     layer: 'L6_MODE_REMINDER',
-    content: 'Continue autonomously within the approved goal, boundaries, and success criteria. Use the existing tools and permission flow; when a subtask is completed, update it through the goal task evidence path. If you need user input, permission, or evidence is insufficient, stop and explain the blocker instead of pretending completion.',
+    content: 'Continue autonomously within the active goal, boundaries, and success criteria. Use the existing tools and permission flow; when a subtask is completed, update it through the goal task evidence path. If you need user input, permission, or evidence is insufficient, stop and explain the blocker instead of pretending completion.',
   };
 }
 
@@ -391,7 +391,82 @@ function buildExplorerReminder(explorer) {
     layer: 'L6_MODE_REMINDER',
     content: `Profile: readonly_explorer. You are a dynamically created evidence explorer, not a fixed role.
 Use only the tools exposed to this explorer context. Do not modify files, do not update the goal plan, and do not claim evidence you did not inspect.
+Use only evidenceRefs shown in your tool results; do not invent refs or cite paths as refs.
 Return a concise JSON object only with: summary, findings[{claim,evidenceRefs}], evidenceRefs, recommendedNextStep, confidence(low|medium|high).`,
+  };
+}
+
+function buildExplorerContext({ plan, explorer }) {
+  const request = explorer?.request && typeof explorer.request === 'object' ? explorer.request : {};
+  return {
+    explorerId: explorer?.explorerId,
+    planId: plan?.planId || request.planId,
+    planTitle: plan?.title || plan?.goal || null,
+    request: {
+      ...request,
+      explorerId: explorer?.explorerId || request.explorerId,
+      planId: plan?.planId || request.planId,
+    },
+  };
+}
+
+function collectLeafTaskSummaries(plan) {
+  const out = [];
+  const stack = Array.isArray(plan?.tasks) ? [...plan.tasks] : [];
+  while (stack.length > 0) {
+    const task = stack.shift();
+    if (!task || typeof task !== 'object') continue;
+    const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+    if (subtasks.length > 0) {
+      for (const child of subtasks) stack.push(child);
+      continue;
+    }
+    out.push({
+      taskId: task.taskId,
+      title: task.title,
+      status: task.status,
+      evidenceRefs: Array.isArray(task.evidenceRefs) ? task.evidenceRefs : [],
+    });
+  }
+  return out;
+}
+
+function collectExplorerReports(plan) {
+  return (Array.isArray(plan?.runner?.explorers) ? plan.runner.explorers : [])
+    .filter((run) => run?.status === 'completed' && run.report)
+    .map((run) => ({
+      explorerId: run.explorerId,
+      summary: run.report.summary,
+      evidenceRefs: Array.isArray(run.report.evidenceRefs) ? run.report.evidenceRefs : [],
+      confidence: run.report.confidence,
+    }));
+}
+
+function buildVerifierContext({ plan, verifierRunId }) {
+  return {
+    verifierRunId,
+    planId: plan?.planId,
+    plan,
+    tasks: collectLeafTaskSummaries(plan),
+    explorerReports: collectExplorerReports(plan),
+  };
+}
+
+function buildVerifierMessage({ plan, verifierRunId }) {
+  return `Verifier mission for plan "${plan?.title || plan?.goal || plan?.planId || 'goal'}" (verifierRunId=${verifierRunId}).
+Review the existing task evidence, success criteria, criterionResults, and explorer reports. Do not modify files or update the plan.
+Return JSON only with: passed, failedCriteria[{criterionId,reason,evidenceRefs}], missingEvidence[{taskId,reason}], risks[], evidenceRefs[], recommendedNextAction.`;
+}
+
+function buildVerifierReminder(verifierRunId) {
+  return {
+    id: `goal-verifier-${verifierRunId || 'unknown'}`,
+    title: 'Verifier readonly contract',
+    kind: 'goal-verifier',
+    scope: 'turn',
+    layer: 'L6_MODE_REMINDER',
+    content: `Profile: readonly_verifier. Use only read-only tools. Do not modify files, do not update the goal plan, and do not create completion evidence.
+Return JSON only with: passed, failedCriteria[{criterionId,reason,evidenceRefs}], missingEvidence[{taskId,reason}], risks[], evidenceRefs[], recommendedNextAction.`,
   };
 }
 
@@ -418,6 +493,105 @@ function createCollectingWebContents() {
     getTerminal() {
       return terminal;
     },
+  };
+}
+
+function addEvidenceRefs(target, value) {
+  if (typeof value === 'string' && value.trim()) {
+    target.add(value.trim());
+    return;
+  }
+  if (!Array.isArray(value)) return;
+  for (const item of value) {
+    if (typeof item === 'string' && item.trim()) target.add(item.trim());
+  }
+}
+
+function tryParseJsonObject(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function collectExplorerEvidenceRefs(events) {
+  const refs = new Set();
+  for (const event of Array.isArray(events) ? events : []) {
+    if (event?.channel !== 'chat:stream:tool-result') continue;
+    const payload = event.payload ?? {};
+    addEvidenceRefs(refs, payload.evidenceRefs);
+
+    const parsed = tryParseJsonObject(payload.result);
+    if (!parsed) continue;
+    addEvidenceRefs(refs, parsed.evidenceRefs);
+    addEvidenceRefs(refs, parsed.artifactRef);
+    addEvidenceRefs(refs, parsed.artifactRefs);
+    addEvidenceRefs(refs, parsed.outputPreview?.artifactRef);
+    addEvidenceRefs(refs, parsed.outputPreview?.artifactRefs);
+    addEvidenceRefs(refs, parsed.outputPreview?.localToolResultRef?.artifactRef);
+    addEvidenceRefs(refs, parsed.outputPreview?.localToolResultRef?.artifactRefs);
+  }
+  return Array.from(refs);
+}
+
+function normalizeVerifierIssues(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const reason = typeof item.reason === 'string' && item.reason.trim()
+        ? item.reason.trim()
+        : '';
+      if (!reason) return null;
+      return {
+        ...(typeof item.taskId === 'string' && item.taskId.trim() ? { taskId: item.taskId.trim() } : {}),
+        ...(typeof item.criterionId === 'string' && item.criterionId.trim() ? { criterionId: item.criterionId.trim() } : {}),
+        reason,
+        evidenceRefs: Array.isArray(item.evidenceRefs)
+          ? item.evidenceRefs.filter((ref) => typeof ref === 'string' && ref.trim()).map((ref) => ref.trim())
+          : [],
+      };
+    })
+    .filter(Boolean);
+}
+
+function parseVerifierReport(rawText, fallback = {}) {
+  const text = typeof rawText === 'string' ? rawText.trim() : '';
+  let parsed = null;
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) {
+        try { parsed = JSON.parse(match[0]); } catch {}
+      }
+    }
+  }
+  const report = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed
+    : { passed: false, risks: [text || fallback.summary || 'Verifier finished without structured output.'] };
+  return {
+    passed: report.passed === true,
+    failedCriteria: normalizeVerifierIssues(report.failedCriteria),
+    missingEvidence: normalizeVerifierIssues(report.missingEvidence),
+    risks: Array.isArray(report.risks)
+      ? report.risks.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
+      : [],
+    evidenceRefs: Array.isArray(report.evidenceRefs)
+      ? report.evidenceRefs.filter((ref) => typeof ref === 'string' && ref.trim()).map((ref) => ref.trim())
+      : [],
+    recommendedNextAction: typeof report.recommendedNextAction === 'string'
+      ? report.recommendedNextAction
+      : undefined,
+    summary: typeof report.summary === 'string' && report.summary.trim()
+      ? report.summary.trim()
+      : report.passed === true
+        ? 'Verifier passed.'
+        : fallback.summary || 'Verifier found issues.',
   };
 }
 
@@ -528,7 +702,7 @@ goalRunner = createGoalRunner({
           }
         },
       };
-      await llmChatService.sendMessage({
+      const outcome = await llmChatService.sendMessage({
         messages,
         webContents,
         streamId,
@@ -544,9 +718,42 @@ goalRunner = createGoalRunner({
       // 有 Explorer 请求时返回 explorers，让 Runner 进入 explore 派发分支；
       // 否则维持原有 verify 收尾语义。
       if (collectedExplorers.length > 0) {
-        return { continue: false, intent: 'explore', explorers: collectedExplorers };
+        return {
+          intent: 'explore',
+          explorers: collectedExplorers,
+          terminalStatus: outcome?.terminalStatus ?? null,
+          toolCallCount: outcome?.toolCallCount ?? 0,
+        };
       }
-      return { continue: false, intent: 'verify' };
+      if (outcome?.requestedUserInput) {
+        return {
+          requestedUserInput: true,
+          blockedReason: 'requested_user_input',
+          terminalStatus: outcome.terminalStatus,
+          toolCallCount: outcome.toolCallCount ?? 0,
+        };
+      }
+      if (outcome?.terminalStatus === 'error') {
+        return {
+          failed: true,
+          failureReason: 'Goal Runner turn stream failed',
+          terminalStatus: outcome.terminalStatus,
+          toolCallCount: outcome.toolCallCount ?? 0,
+        };
+      }
+      if (outcome?.terminalStatus === 'aborted') {
+        return {
+          blocked: true,
+          blockedReason: 'Goal Runner turn aborted',
+          terminalStatus: outcome.terminalStatus,
+          toolCallCount: outcome.toolCallCount ?? 0,
+        };
+      }
+      return {
+        terminalStatus: outcome?.terminalStatus ?? null,
+        toolCallCount: outcome?.toolCallCount ?? 0,
+        usage: outcome?.usage,
+      };
     },
   },
   explorerRunner: {
@@ -567,6 +774,7 @@ goalRunner = createGoalRunner({
         effort: 'default',
         mode: 'explorer',
         conversationId: plan.conversationId,
+        explorerContext: buildExplorerContext({ plan, explorer }),
         runtimeReminders: [buildExplorerReminder(explorer)],
       });
       const terminal = webContents.getTerminal();
@@ -579,14 +787,44 @@ goalRunner = createGoalRunner({
       const report = parseExplorerReport(webContents.getText(), {
         summary: 'Explorer completed without a structured report.',
       });
-      if (report.evidenceRefs.length === 0) {
-        report.evidenceRefs = [`goal-explorer://${explorer.explorerId}/stream/${streamId}`];
-      }
-      report.toolCallCount = webContents
-        .getEvents()
-        .filter((event) => event.channel === 'chat:stream:tool-call')
-        .length;
+      const events = webContents.getEvents();
+      report.toolCallCount = events.filter((event) => event.channel === 'chat:stream:tool-call').length;
+      report.allowedEvidenceRefs = collectExplorerEvidenceRefs(events);
       return report;
+    },
+  },
+  verifierRunner: {
+    async runVerifier({ plan, verifierRunId }) {
+      const streamId = randomUUID();
+      const webContents = createCollectingWebContents();
+      broadcastToAllWindows('goalRunner:changed', {
+        type: 'goalRunner:verifierStreamStarted',
+        planId: plan.planId,
+        verifierRunId,
+        streamId,
+        startedAt: Date.now(),
+      });
+      await llmChatService.sendMessage({
+        messages: [{ role: 'user', content: buildVerifierMessage({ plan, verifierRunId }) }],
+        webContents,
+        streamId,
+        effort: 'default',
+        // Verifier 复用 explorer 的只读工具投影；任务语义由 verifierContext Source 注入。
+        mode: 'explorer',
+        conversationId: plan.conversationId,
+        verifierContext: buildVerifierContext({ plan, verifierRunId }),
+        runtimeReminders: [buildVerifierReminder(verifierRunId)],
+      });
+      const terminal = webContents.getTerminal();
+      if (terminal?.channel === 'chat:stream:error') {
+        throw new Error(terminal.payload?.error || 'Verifier stream failed');
+      }
+      if (terminal?.channel === 'chat:stream:aborted') {
+        throw new Error('Verifier stream aborted');
+      }
+      return parseVerifierReport(webContents.getText(), {
+        summary: 'Verifier completed without a structured report.',
+      });
     },
   },
   emitEvent: (payload) => broadcastToAllWindows('goalRunner:changed', payload),
@@ -1336,6 +1574,8 @@ ipcMain.handle('goalPlans:approve', (_, { planId, approval }) => {
   return plan;
 });
 ipcMain.handle('goalPlans:set-status', (_, { planId, status }) => goalPlanStore.setPlanStatus(planId, status));
+ipcMain.handle('goalPlans:record-manual-confirmation', (_, { planId, confirmation }) =>
+  goalPlanStore.recordManualConfirmation(planId, confirmation));
 ipcMain.handle('goalRunner:get-state', (_, { planId }) => goalRunner?.getState(planId) ?? null);
 ipcMain.handle('goalRunner:start', (_, { planId, options } = {}) => goalRunner?.start(planId, options) ?? null);
 ipcMain.handle('goalRunner:pause', (_, { planId }) => goalRunner?.pause(planId) ?? null);
@@ -1349,6 +1589,24 @@ ipcMain.handle('goalPlans:delete', (_, { planId }) => {
 });
 
 // ── LLM Chat ──
+function latestUserTextFromProviderMessages(messages = []) {
+  const list = Array.isArray(messages) ? messages : [];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const message = list[i];
+    if (message?.role !== 'user') continue;
+    if (typeof message.content === 'string') return message.content.trim();
+    if (Array.isArray(message.content)) {
+      const text = message.content
+        .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+      if (text) return text;
+    }
+  }
+  return '';
+}
+
 ipcMain.handle('chat:send', (event, {
   messages,
   streamId,
@@ -1363,8 +1621,30 @@ ipcMain.handle('chat:send', (event, {
   continuityContext,
   configInstructions,
   contextExtensions,
-}) =>
-  llmChatService.sendMessage({
+}) => {
+  if (mode === 'goal' && conversationId && typeof goalPlanStore.upsertGoalContract === 'function') {
+    const goal = latestUserTextFromProviderMessages(messages);
+    if (goal) {
+      try {
+        goalPlanStore.upsertGoalContract(conversationId, {
+          conversationId,
+          title: goal.length > 48 ? `${goal.slice(0, 48)}...` : goal,
+          goal,
+          status: 'accepted',
+          workflowKind: 'goal_self_driven',
+          activation: {
+            kind: 'accepted_goal',
+            acceptedAt: new Date().toISOString(),
+            acceptedBy: 'user',
+          },
+          createdBy: 'user',
+        });
+      } catch (error) {
+        console.warn('[main] goal contract bootstrap failed:', error?.message || error);
+      }
+    }
+  }
+  return llmChatService.sendMessage({
     messages,
     webContents: event.sender,
     streamId,
@@ -1381,7 +1661,8 @@ ipcMain.handle('chat:send', (event, {
     continuityContext,
     configInstructions,
     contextExtensions,
-  }));
+  });
+});
 ipcMain.handle('chat:abort', (_, { streamId }) =>
   llmChatService.abort(streamId));
 

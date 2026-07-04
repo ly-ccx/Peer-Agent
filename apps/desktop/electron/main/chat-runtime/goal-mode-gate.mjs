@@ -24,6 +24,15 @@ const PLAN_ALWAYS_ALLOWED_TOOLS = Object.freeze(
 // 视为「无副作用」的风险等级：未获批准时也放行（只读 / 惰性）。
 const INERT_RISK_LEVELS = Object.freeze(new Set(['L0_inert', 'L1_local_read']));
 
+const RISK_ORDER = Object.freeze({
+  L0_inert: 0,
+  L1_local_read: 1,
+  L2_local_write: 2,
+  L3_external_write: 3,
+  L4_privileged: 4,
+  L5_destructive: 5,
+});
+
 // 视为「计划已就绪、可执行」的计划状态。
 const EXECUTABLE_PLAN_STATUSES = Object.freeze(new Set(['approved', 'executing', 'completed']));
 
@@ -50,14 +59,17 @@ function isInsideWorkspace(targetPath, workspaceRoot) {
 
 // outOfScope 模式匹配：仅对「像路径/glob」的条目做匹配（含 / . * 之一）；
 // 纯描述性文字（如「不改审批语义」）不参与路径匹配，避免误伤。
-function matchesScopePattern(targetPath, pattern) {
+function looksPathLikeScopePattern(pattern) {
   if (typeof pattern !== 'string' || !pattern.trim()) return false;
   const p = pattern.trim();
   // 「像路径/glob」判定：含 / 或 *；以 .ext 结尾；或是单个 word-like token（纯 ASCII 词字符 + . - ，无空格）。
   // 纯描述性文字（含空格 / CJK 等，如「不改审批语义」「do not touch chat mode」）不参与路径匹配，避免误伤。
-  const looksPathLike =
-    p.includes('/') || p.includes('*') || /\.[a-z0-9]+$/i.test(p) || /^[\w.-]+$/.test(p);
-  if (!looksPathLike) return false;
+  return p.includes('/') || p.includes('*') || /\.[a-z0-9]+$/i.test(p) || /^[\w.-]+$/.test(p);
+}
+
+function matchesScopePattern(targetPath, pattern) {
+  if (!looksPathLikeScopePattern(pattern)) return false;
+  const p = pattern.trim();
   const norm = String(targetPath).replace(/\\/g, '/');
   if (p.includes('*')) {
     // glob → regex：** 匹配任意（含分隔符），* 匹配任意非分隔字符。
@@ -89,6 +101,16 @@ export function evaluateWriteScope({ args, workspacePath, boundaries } = {}) {
       return { allowed: false, reason: 'goal_scope_out_of_bounds', detail: targetPath + ' ∈ outOfScope(' + pat + ')' };
     }
   }
+  const inScope = Array.isArray(boundaries?.inScope) ? boundaries.inScope : [];
+  const pathLikeInScope = inScope.filter(looksPathLikeScopePattern);
+  if (pathLikeInScope.length > 0 && !pathLikeInScope.some((pat) => matchesScopePattern(targetPath, pat))) {
+    return {
+      allowed: true,
+      requiresConfirmation: true,
+      reason: 'goal_scope_expansion_confirmation',
+      detail: targetPath,
+    };
+  }
   return { allowed: true };
 }
 
@@ -115,6 +137,10 @@ export function detectIrreversibleAction({ toolName, args } = {}) {
     }
   }
   return null;
+}
+
+function isHighRiskGoalAction(riskLevel) {
+  return (RISK_ORDER[riskLevel] ?? RISK_ORDER.L2_local_write) >= RISK_ORDER.L4_privileged;
 }
 
 let sharedGoalPlanStore = null;
@@ -185,11 +211,34 @@ export function evaluateGoalModeGate({
     if (PATH_WRITE_TOOLS.has(toolName)) {
       const scope = evaluateWriteScope({ args, workspacePath, boundaries });
       if (!scope.allowed) return { allowed: false, reason: scope.reason, detail: scope.detail };
+      if (scope.requiresConfirmation) {
+        return {
+          allowed: true,
+          requiresConfirmation: true,
+          confirmation: {
+            kind: 'scope_expansion',
+            detail: scope.detail ?? '',
+            reason: scope.reason,
+          },
+        };
+      }
     }
     // ② on-irreversible 不可逆动作 → 放行但要求逐动作确认。
     const irreversible = detectIrreversibleAction({ toolName, args });
     if (irreversible) {
       return { allowed: true, requiresConfirmation: true, confirmation: irreversible };
+    }
+    if (isHighRiskGoalAction(riskLevel)) {
+      return {
+        allowed: true,
+        requiresConfirmation: true,
+        confirmation: {
+          kind: 'high_risk',
+          detail: toolName ?? '',
+          reason: 'goal_high_risk_confirmation',
+          riskLevel,
+        },
+      };
     }
     return { allowed: true };
   }
@@ -233,6 +282,16 @@ function denialMessage(reason, locale) {
     return zh
       ? 'Goal 模式：不可逆动作（删除/覆盖/git 强制/push/release）未获用户确认，已拒绝执行。'
       : 'Goal mode: an irreversible action (delete/overwrite/git force/push/release) was not confirmed by the user and was denied.';
+  }
+  if (reason === 'goal_scope_expansion_denied') {
+    return zh
+      ? 'Goal 模式：目标路径不在当前 in-scope 边界内，且范围扩展未获用户确认，已拒绝执行。'
+      : 'Goal mode: the target path is outside the current in-scope boundary and scope expansion was not confirmed by the user.';
+  }
+  if (reason === 'goal_high_risk_denied') {
+    return zh
+      ? 'Goal 模式：高风险动作未获用户确认，已拒绝执行。'
+      : 'Goal mode: a high-risk action was not confirmed by the user and was denied.';
   }
   return zh
     ? 'Plan 模式：必须先用 goal_create_plan 产出目标与完整计划，并经用户批准，才能执行有副作用的操作。'

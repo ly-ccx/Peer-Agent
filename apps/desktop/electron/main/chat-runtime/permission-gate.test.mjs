@@ -176,6 +176,52 @@ describe('chat permission gate', () => {
     assert.equal(highRisk.reason, 'local_user_denied');
   });
 
+  it('preserves Goal confirmation metadata on local capability permission calls', async () => {
+    const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
+    const events = [];
+    const gate = createChatPermissionGate({ activeStreams });
+    const webContents = createWebContents(events);
+
+    const pending = gate.createLocalCapabilityPermissionRequester({
+      webContents,
+      streamId: 's1',
+      toolCallId: 'goal-confirm',
+      conversationId: 'c1',
+      workspacePath: '/workspace',
+    })({
+      capabilityId: 'goal.high_risk.action',
+      toolName: 'bash',
+      args: { command: 'node build.js' },
+      scope: { kind: 'goal-confirmation', confirmationKind: 'high_risk', tool: 'bash' },
+      confirmation: {
+        kind: 'high_risk',
+        detail: 'bash',
+        reason: 'goal_high_risk_confirmation',
+        riskLevel: 'L4_privileged',
+      },
+      reason: 'goal_high_risk_confirmation',
+      riskLevel: 'L4_privileged',
+      dataLevel: 'D2_sensitive',
+    });
+
+    assert.equal(events.length, 1);
+    const call = events[0].payload.call;
+    assert.equal(call.capabilityId, 'goal.high_risk.action');
+    assert.equal(call.confirmation.kind, 'high_risk');
+    assert.equal(call.confirmation.reason, 'goal_high_risk_confirmation');
+    assert.equal(call.arguments.command, 'node build.js');
+    assert.equal(call.argumentsPreview.confirmationKind, 'high_risk');
+
+    gate.settlePermissionRequest(call.toolCallId, {
+      grantId: 'g-goal-confirm',
+      toolCallId: call.toolCallId,
+      granted: false,
+      duration: 'denied',
+      decidedAt: new Date().toISOString(),
+    });
+    assert.equal((await pending).granted, false);
+  });
+
   it('uses full local mode to auto-approve file writes and all shell approvals', async () => {
     const activeStreams = new Map([['s1', { permissionIds: new Set() }]]);
     const events = [];

@@ -136,6 +136,22 @@ function hasBillableUsage(usage) {
   );
 }
 
+function isRequestUserInputToolName(toolName) {
+  return toolName === 'request_user_input'
+    || (typeof toolName === 'string' && toolName.endsWith('.request_user_input'));
+}
+
+function buildAgentRunOutcome(streamRecord = {}) {
+  return {
+    terminalStatus: streamRecord.terminalStatus || 'error',
+    requestedUserInput: Boolean(streamRecord.requestedUserInput),
+    toolCallCount: Number.isFinite(streamRecord.toolCallCount)
+      ? Math.max(0, Math.trunc(streamRecord.toolCallCount))
+      : 0,
+    ...(hasBillableUsage(streamRecord.finalUsage) ? { usage: streamRecord.finalUsage } : {}),
+  };
+}
+
 function recordConversationUsage({ conversationStore, streamRecord, usage }) {
   if (!conversationStore?.addUsage || !streamRecord?.conversationId || !hasBillableUsage(usage)) return null;
   if (streamRecord.usageRecorded) return null;
@@ -292,9 +308,12 @@ function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conver
         appendTextSegment('thinking', payload.content);
         persistStreamRecord();
       } else if (channel === 'chat:stream:tool-call') {
+        const toolName = typeof payload?.tool === 'string' ? payload.tool : undefined;
+        streamRecord.toolCallCount = Math.max(0, Math.trunc(streamRecord.toolCallCount || 0)) + 1;
+        if (isRequestUserInputToolName(toolName)) streamRecord.requestedUserInput = true;
         streamRecord.segments.push({
           type: 'tool-call',
-          tool: typeof payload?.tool === 'string' ? payload.tool : undefined,
+          tool: toolName,
           args: payload?.args && typeof payload.args === 'object' ? payload.args : {},
           toolCallId: typeof payload?.toolCallId === 'string' ? payload.toolCallId : undefined,
           result: undefined,
@@ -474,6 +493,8 @@ export function createLlmChatService({
     continuityContext = [],
     configInstructions = [],
     contextExtensions = [],
+    explorerContext = null,
+    verifierContext = null,
     // Goal Runner 进度 sink：{ onRound, onToolCall }。onRound 经各 provider loop 透传，
     // onToolCall 经 toolContext 透传，分别用于实时轮次/工具计数。普通 chat 不传。
     agentProgress = null,
@@ -481,7 +502,7 @@ export function createLlmChatService({
     const providerCandidates = getProviderCandidates();
     if (!providerCandidates.length) {
       webContents.send('chat:stream:error', { streamId, error: 'no_provider_configured' });
-      return;
+      return { terminalStatus: 'error', requestedUserInput: false, toolCallCount: 0 };
     }
 
     // 本轮运行的工作根目录：以会话绑定的 workspacePath 为唯一真值（见 resolveRunWorkspacePath）。
@@ -511,6 +532,8 @@ export function createLlmChatService({
       accumulatedThinking: '',
       segments: [],
       usageRecorded: false,
+      toolCallCount: 0,
+      requestedUserInput: false,
       // 终态事件去重:保证 done/error/aborted 三选一恰好发一次,防止压缩等中间阶段抛错后界面悬挂。
       terminalEventSent: false,
     };
@@ -553,6 +576,8 @@ export function createLlmChatService({
           attachmentContext,
           configInstructions,
           contextExtensions,
+          explorerContext,
+          verifierContext,
           continuityContext,
           conversationId,
           effort,
@@ -707,7 +732,7 @@ export function createLlmChatService({
           const canRetrySameProvider =
             attemptResult.terminalError &&
             !attemptResult.terminalSent &&
-            attemptResult.replayable &&
+            attemptResult.sameProviderRetryable &&
             retry < sameProviderMax;
           if (!canRetrySameProvider) {
             if (retry > 0 && !attemptResult.terminalError) {
@@ -794,6 +819,7 @@ export function createLlmChatService({
       // 方案 3：不立即删除，保留终态记录一段时间，使切回已结束的后台轮次可经
       // reattach 回放完整终态快照；保留期满后由 retireStream 内的计时器硬删除。
       retireStream(streamId);
+      return buildAgentRunOutcome(streamRecord);
     }
   }
 

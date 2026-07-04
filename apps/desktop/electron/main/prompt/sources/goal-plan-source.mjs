@@ -17,6 +17,7 @@ const ACTIVE_PLAN_STATUSES = new Set([
   'drafting',
   'awaiting_approval',
   'approved',
+  'accepted',
   'executing',
 ]);
 

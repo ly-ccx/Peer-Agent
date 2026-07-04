@@ -182,11 +182,64 @@ describe('MCP integration runtime chain', () => {
     assert.equal(permissionRequests[0].scope.kind, 'mcp-tool');
     assert.equal(permissionRequests[0].scope.serverId, 'demo');
     assert.equal(permissionRequests[0].scope.toolName, 'visibleTool');
+    assert.equal(permissionRequests[0].scope.effect, 'mutation');
+    assert.equal(permissionRequests[0].scope.riskLevel, 'L3_external_write');
+    assert.equal(permissionRequests[0].riskLevel, 'L3_external_write');
+    assert.match(permissionRequests[0].reason, /MCP mutation tool/);
     assert.equal(execution.permissionGrant.granted, false);
     assert.equal(execution.permissionGrant.scope.kind, 'mcp-tool');
     assert.equal(execution.result.status, 'denied');
     assert.equal(execution.result.evidence.toolCallId, 'tc_mcp_1');
     assert.equal(execution.result.evidence.returnedToCloud, false);
+  });
+
+  it('classifies read-only MCP tools without mutation wording', async () => {
+    const registry = createMcpRegistry();
+    registry.upsertServer({
+      id: 'reader',
+      displayName: 'Reader MCP',
+      transport: 'streamable_http',
+      url: 'http://127.0.0.1:3929/mcp',
+      enabled: true,
+      policy: {
+        trusted: true,
+        visibleByDefault: true,
+        requirePermission: true,
+      },
+      tools: [
+        {
+          name: 'lookup',
+          description: 'Read-only lookup',
+          riskLevel: 'L1_local_read',
+          dataLevel: 'D1_internal',
+          inputSchema: { type: 'object' },
+        },
+      ],
+    });
+
+    const provider = createLocalMcpProvider({ mcpRegistry: registry });
+    const permissionRequests = [];
+    const execution = await provider.executeCapability({
+      call: {
+        toolCallId: 'tc_mcp_read',
+        capabilityId: 'local.mcp.reader.lookup',
+        arguments: { id: '123' },
+      },
+    }, {
+      locale: 'en-US',
+      requestPermission: async (request) => {
+        permissionRequests.push(request);
+        return { granted: false };
+      },
+    });
+
+    assert.equal(permissionRequests.length, 1);
+    assert.equal(permissionRequests[0].scope.effect, 'read');
+    assert.equal(permissionRequests[0].scope.riskLevel, 'L1_local_read');
+    assert.equal(permissionRequests[0].riskLevel, 'L1_local_read');
+    assert.equal(permissionRequests[0].dataLevel, 'D1_internal');
+    assert.match(permissionRequests[0].reason, /MCP read tool/);
+    assert.equal(execution.result.status, 'denied');
   });
 
   it('resolves a dotted server.id end-to-end (regression: DingTalk-style host id)', async () => {
