@@ -157,6 +157,7 @@ export async function executeProjectedModelTool({
   toolContext = null,
   requestPermission,
   shellApprovalDecider,
+  signal,
   mcpRegistry = null,
   registry = DEFAULT_TOOL_REGISTRY,
   runtimeProjection = DEFAULT_RUNTIME_PROJECTION,
@@ -243,6 +244,7 @@ export async function executeProjectedModelTool({
   const execution = await host.execute({ call: projection.call }, {
     toolContext,
     requestPermission,
+    signal,
     locale,
   });
   return {

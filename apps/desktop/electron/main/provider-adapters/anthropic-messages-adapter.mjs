@@ -2,7 +2,7 @@ import { encodeAnthropicMessagesRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
-import { parseSseDataPayload } from './sse-line.mjs';
+import { parseSseDataPayload, throwIfSseReaderAborted } from './sse-line.mjs';
 
 function parseNestedProviderErrorMessage(message) {
   if (typeof message !== 'string' || !message.trim()) return '';
@@ -123,15 +123,9 @@ async function consumeAnthropicStream(res, webContents, streamId, trace = null, 
 
   while (true) {
     // 用户中断（含复读兜底触发的 abort）后立即停止读流，避免继续消费并
-    // 向渲染进程转发已在途的 delta，这是「点停止后仍有内容涌出」的根因之一。
-    if (signal?.aborted) {
-      try {
-        await reader.cancel();
-      } catch {
-        /* reader 已关闭时忽略 */
-      }
-      break;
-    }
+    // 向渲染进程转发已在途的 delta。抛 AbortError 让上层走结构化 aborted 收口，
+    // 而不是把 partial response 当作自然完成继续发送 done。
+    await throwIfSseReaderAborted(signal, reader);
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
@@ -140,8 +134,10 @@ async function consumeAnthropicStream(res, webContents, streamId, trace = null, 
 
     for (const line of lines) {
       consumeAnthropicStreamLine(line, state, webContents, streamId, trace);
+      await throwIfSseReaderAborted(signal, reader);
     }
   }
+  await throwIfSseReaderAborted(signal, reader);
   if (buffer.trim()) consumeAnthropicStreamLine(buffer, state, webContents, streamId, trace);
 
   return {

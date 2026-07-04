@@ -301,6 +301,29 @@ function shellStopResult({ call, locale, stopResult }) {
   };
 }
 
+function abortedTaskOutput({ taskId = null, toolCallId, startedAt = nowIso() } = {}) {
+  const completedAt = nowIso();
+  return {
+    taskId,
+    toolCallId,
+    status: 'cancelled',
+    exitCode: null,
+    stdout: '',
+    stderr: '',
+    timedOut: false,
+    interrupted: true,
+    promptDetected: false,
+    stopReason: 'user_stopped',
+    startedAt,
+    completedAt,
+    artifact: {
+      artifactRef: null,
+      artifactRefs: [],
+      truncated: false,
+    },
+  };
+}
+
 export function createLocalShellProvider({
   workspaceRoot,
   userDataPath = os.tmpdir(),
@@ -357,6 +380,18 @@ export function createLocalShellProvider({
       };
     }
 
+    if (context.signal?.aborted) {
+      return {
+        grant,
+        result: shellRunResult({
+          call,
+          locale,
+          classification,
+          taskOutput: abortedTaskOutput({ toolCallId: call.toolCallId }),
+        }),
+      };
+    }
+
     const task = taskManager.runTask({
       toolCallId: call.toolCallId,
       command,
@@ -365,8 +400,19 @@ export function createLocalShellProvider({
       description: typeof args.description === 'string' ? args.description : call.reason,
       classification,
     });
+    const stopOnAbort = () => {
+      taskManager.stopTask(task.taskId);
+    };
+    if (context.signal) {
+      if (context.signal.aborted) {
+        stopOnAbort();
+      } else {
+        context.signal.addEventListener('abort', stopOnAbort, { once: true });
+      }
+    }
 
     if (args.runInBackground === true) {
+      if (context.signal) context.signal.removeEventListener('abort', stopOnAbort);
       if (typeof context.emitFollowUpExecution === 'function') {
         task.completion
           .then((taskOutput) => context.emitFollowUpExecution({
@@ -390,7 +436,12 @@ export function createLocalShellProvider({
       };
     }
 
-    const taskOutput = await task.completion;
+    let taskOutput;
+    try {
+      taskOutput = await task.completion;
+    } finally {
+      if (context.signal) context.signal.removeEventListener('abort', stopOnAbort);
+    }
     return {
       grant,
       result: shellRunResult({ call, locale, classification, taskOutput }),

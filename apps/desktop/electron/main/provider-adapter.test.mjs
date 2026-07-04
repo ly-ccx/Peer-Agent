@@ -14,6 +14,35 @@ function sse(frames) {
   return frames.map((frame) => `data: ${typeof frame === 'string' ? frame : JSON.stringify(frame)}\n\n`).join('');
 }
 
+function streamFromChunks(chunks, { onCancel } = {}) {
+  const encoder = new TextEncoder();
+  let controllerRef = null;
+  let cancelled = false;
+  return {
+    stream: new ReadableStream({
+      start(controller) {
+        controllerRef = controller;
+        if (chunks.length > 0) {
+          controller.enqueue(encoder.encode(chunks.shift()));
+        }
+      },
+      cancel() {
+        cancelled = true;
+        onCancel?.();
+      },
+    }),
+    enqueueNext() {
+      if (!controllerRef || chunks.length === 0 || cancelled) return;
+      try {
+        controllerRef.enqueue(encoder.encode(chunks.shift()));
+        if (chunks.length === 0) controllerRef.close();
+      } catch {
+        // Abort-aware readers cancel the stream before this delayed chunk arrives.
+      }
+    },
+  };
+}
+
 async function readJsonl(filePath) {
   const text = await fs.readFile(filePath, 'utf8');
   return text.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
@@ -120,6 +149,62 @@ describe('Provider adapters', () => {
       assert.equal(result.ok, true);
       assert.equal(result.streamUsage.cacheReadTokens, 80);
       assert.equal(events.find((event) => event.channel === 'chat:stream:usage').payload.usage.cacheReadTokens, 80);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('cancels the OpenAI chat SSE reader when the chat stream is aborted', async () => {
+    const previousFetch = globalThis.fetch;
+    const abortController = new AbortController();
+    const events = [];
+    let readerCancelled = false;
+    let pendingStream = null;
+
+    globalThis.fetch = async () => {
+      pendingStream = streamFromChunks([
+        sse([{ choices: [{ delta: { content: 'first' } }] }]),
+        sse([{ choices: [{ delta: { content: 'late' } }] }, '[DONE]']),
+      ], {
+        onCancel: () => {
+          readerCancelled = true;
+        },
+      });
+      return new Response(pendingStream.stream, { status: 200 });
+    };
+
+    try {
+      await assert.rejects(
+        sendOpenAIChatStream({
+          baseUrl: 'https://example.test/v1',
+          apiKey: 'key',
+          model: 'gpt-test',
+          messages: [{ role: 'user', content: 'hi' }],
+          tools: [],
+          effort: 'off',
+          supportsReasoning: false,
+          signal: abortController.signal,
+          webContents: {
+            send: (channel, payload) => {
+              events.push({ channel, payload });
+              if (channel === 'chat:stream:delta' && payload.content === 'first') {
+                abortController.abort();
+                setTimeout(() => pendingStream?.enqueueNext(), 20);
+              }
+            },
+          },
+          streamId: 'openai-abort',
+        }),
+        { name: 'AbortError' },
+      );
+
+      assert.equal(readerCancelled, true);
+      assert.deepEqual(
+        events
+          .filter((event) => event.channel === 'chat:stream:delta')
+          .map((event) => event.payload.content),
+        ['first'],
+      );
     } finally {
       globalThis.fetch = previousFetch;
     }
@@ -496,6 +581,63 @@ describe('Provider adapters', () => {
     }
   });
 
+  it('cancels the OpenAI Responses SSE reader when the chat stream is aborted', async () => {
+    const previousFetch = globalThis.fetch;
+    const abortController = new AbortController();
+    const events = [];
+    let readerCancelled = false;
+    let pendingStream = null;
+
+    globalThis.fetch = async () => {
+      pendingStream = streamFromChunks([
+        sse([{ type: 'response.output_text.delta', delta: 'first' }]),
+        sse([{ type: 'response.output_text.delta', delta: 'late' }, '[DONE]']),
+      ], {
+        onCancel: () => {
+          readerCancelled = true;
+        },
+      });
+      return new Response(pendingStream.stream, { status: 200 });
+    };
+
+    try {
+      await assert.rejects(
+        sendOpenAIResponsesStream({
+          baseUrl: 'https://example.test/v1',
+          apiKey: 'key',
+          accountId: 'acct_1',
+          model: 'gpt-responses',
+          messages: [{ role: 'user', content: 'hi' }],
+          tools: [],
+          effort: 'off',
+          supportsReasoning: false,
+          signal: abortController.signal,
+          webContents: {
+            send: (channel, payload) => {
+              events.push({ channel, payload });
+              if (channel === 'chat:stream:delta' && payload.content === 'first') {
+                abortController.abort();
+                setTimeout(() => pendingStream?.enqueueNext(), 20);
+              }
+            },
+          },
+          streamId: 'responses-abort',
+        }),
+        { name: 'AbortError' },
+      );
+
+      assert.equal(readerCancelled, true);
+      assert.deepEqual(
+        events
+          .filter((event) => event.channel === 'chat:stream:delta')
+          .map((event) => event.payload.content),
+        ['first'],
+      );
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   it('sends a Gemini stream request and parses text, function calls, and usage', async () => {
     const previousFetch = globalThis.fetch;
     const events = [];
@@ -550,6 +692,63 @@ describe('Provider adapters', () => {
       assert.equal(result.streamUsage.outputTokens, 7);
       assert.equal(result.streamUsage.cacheReadTokens, 3);
       assert.equal(events.find((event) => event.channel === 'chat:stream:delta').payload.content, 'hello');
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('cancels the Gemini SSE reader when the chat stream is aborted', async () => {
+    const previousFetch = globalThis.fetch;
+    const abortController = new AbortController();
+    const events = [];
+    let readerCancelled = false;
+    let pendingStream = null;
+
+    globalThis.fetch = async () => {
+      pendingStream = streamFromChunks([
+        sse([{ candidates: [{ content: { parts: [{ text: 'first' }] } }] }]),
+        sse([{ candidates: [{ content: { parts: [{ text: 'late' }] } }] }, '[DONE]']),
+      ], {
+        onCancel: () => {
+          readerCancelled = true;
+        },
+      });
+      return new Response(pendingStream.stream, { status: 200 });
+    };
+
+    try {
+      await assert.rejects(
+        sendGeminiStream({
+          baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+          endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-test:streamGenerateContent?alt=sse&key=key',
+          headers: { 'Content-Type': 'application/json' },
+          model: 'gemini-test',
+          messages: [{ role: 'user', content: 'hi' }],
+          tools: [],
+          effort: 'off',
+          supportsReasoning: false,
+          signal: abortController.signal,
+          webContents: {
+            send: (channel, payload) => {
+              events.push({ channel, payload });
+              if (channel === 'chat:stream:delta' && payload.content === 'first') {
+                abortController.abort();
+                setTimeout(() => pendingStream?.enqueueNext(), 20);
+              }
+            },
+          },
+          streamId: 'gemini-abort',
+        }),
+        { name: 'AbortError' },
+      );
+
+      assert.equal(readerCancelled, true);
+      assert.deepEqual(
+        events
+          .filter((event) => event.channel === 'chat:stream:delta')
+          .map((event) => event.payload.content),
+        ['first'],
+      );
     } finally {
       globalThis.fetch = previousFetch;
     }

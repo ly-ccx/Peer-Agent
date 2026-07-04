@@ -24,3 +24,19 @@ export function parseSseDataPayload(trimmedLine) {
   if (payload.startsWith(' ')) payload = payload.slice(1);
   return payload;
 }
+
+export function createSseAbortError() {
+  const error = new Error('Aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
+export async function throwIfSseReaderAborted(signal, reader) {
+  if (!signal?.aborted) return;
+  try {
+    await reader?.cancel?.();
+  } catch {
+    // Reader may already be closed by the underlying transport.
+  }
+  throw createSseAbortError();
+}

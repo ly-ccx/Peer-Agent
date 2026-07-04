@@ -15,7 +15,7 @@ import { encodeOpenAIResponsesRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
-import { parseSseDataPayload } from './sse-line.mjs';
+import { parseSseDataPayload, throwIfSseReaderAborted } from './sse-line.mjs';
 
 function extractCachedInputTokens(usage) {
   return usage?.input_tokens_details?.cached_tokens
@@ -132,7 +132,7 @@ function consumeResponsesLine(line, state, webContents, streamId, trace = null) 
   }
 }
 
-async function consumeResponsesStream(res, webContents, streamId, trace = null) {
+async function consumeResponsesStream(res, webContents, streamId, trace = null, signal = null) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -145,13 +145,18 @@ async function consumeResponsesStream(res, webContents, streamId, trace = null) 
   };
 
   while (true) {
+    await throwIfSseReaderAborted(signal, reader);
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
     buffer = lines.pop() || '';
-    for (const line of lines) consumeResponsesLine(line, state, webContents, streamId, trace);
+    for (const line of lines) {
+      consumeResponsesLine(line, state, webContents, streamId, trace);
+      await throwIfSseReaderAborted(signal, reader);
+    }
   }
+  await throwIfSseReaderAborted(signal, reader);
   if (buffer.trim()) consumeResponsesLine(buffer, state, webContents, streamId, trace);
 
   return {
@@ -233,7 +238,7 @@ export async function sendOpenAIResponsesStream({
     };
   }
 
-  const streamResult = await consumeResponsesStream(res, webContents, streamId, trace);
+  const streamResult = await consumeResponsesStream(res, webContents, streamId, trace, signal);
   const pseudoToolTextAnomaly = Boolean(streamResult.pseudoToolTextDetected);
   if (streamResult.streamError) {
     const errorText = `provider_stream_error: ${streamResult.streamError.message}`;

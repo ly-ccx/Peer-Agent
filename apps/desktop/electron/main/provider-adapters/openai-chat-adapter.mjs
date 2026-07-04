@@ -2,7 +2,7 @@ import { encodeOpenAIChatRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
-import { parseSseDataPayload } from './sse-line.mjs';
+import { parseSseDataPayload, throwIfSseReaderAborted } from './sse-line.mjs';
 
 function extractTextLikeDelta(value) {
   if (typeof value === 'string') return value;
@@ -121,13 +121,14 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
   }
 }
 
-async function consumeOpenAIStream(res, webContents, streamId, trace = null) {
+async function consumeOpenAIStream(res, webContents, streamId, trace = null, signal = null) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   const state = { content: '', thinkingContent: '', toolCalls: [], usage: null, streamError: null };
 
   while (true) {
+    await throwIfSseReaderAborted(signal, reader);
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
@@ -136,8 +137,10 @@ async function consumeOpenAIStream(res, webContents, streamId, trace = null) {
 
     for (const line of lines) {
       consumeOpenAIStreamLine(line, state, webContents, streamId, trace);
+      await throwIfSseReaderAborted(signal, reader);
     }
   }
+  await throwIfSseReaderAborted(signal, reader);
   if (buffer.trim()) consumeOpenAIStreamLine(buffer, state, webContents, streamId, trace);
 
   return {
@@ -219,7 +222,7 @@ export async function sendOpenAIChatStream({
     };
   }
 
-  const streamResult = await consumeOpenAIStream(res, webContents, streamId, trace);
+  const streamResult = await consumeOpenAIStream(res, webContents, streamId, trace, signal);
   if (streamResult.streamError) {
     const errorText = `provider_stream_error: ${streamResult.streamError.message}`;
     const tracePath = await trace.finish({

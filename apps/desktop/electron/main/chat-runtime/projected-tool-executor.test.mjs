@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -57,5 +57,33 @@ describe('projected model tool executor', () => {
     assert.equal(parsed.tool, 'read_file');
     assert.equal(parsed.path, filePath);
     assert.match(parsed.preview, /hello projection/);
+  });
+
+  it('propagates abort signals to projected shell execution', async () => {
+    const markerPath = path.join(tmpDir, 'late.txt');
+    const command = [
+      'node -e',
+      JSON.stringify(
+        "setTimeout(()=>require('fs').writeFileSync('late.txt','late'),300); setTimeout(()=>{},1000);"
+      ),
+    ].join(' ');
+    const controller = new AbortController();
+
+    const run = executeProjectedModelTool({
+      name: 'bash',
+      args: { command, timeoutMs: 5000 },
+      workspacePath: tmpDir,
+      toolContext: { readFiles: new Map(), conversationId: 'c1' },
+      toolCallId: 'tc_shell_abort',
+      shellApprovalDecider: async () => ({ granted: true, reason: 'test_approved' }),
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 50);
+    const result = await run;
+
+    assert.equal(result.success, false);
+    assert.equal(result.execution.result.status, 'cancelled');
+    assert.equal(result.execution.result.outputPreview.interrupted, true);
+    assert.equal(existsSync(markerPath), false);
   });
 });

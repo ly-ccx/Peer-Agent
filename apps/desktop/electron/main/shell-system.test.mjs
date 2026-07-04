@@ -125,6 +125,38 @@ test('background shell tasks can be stopped through the task manager', async () 
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
+test('foreground shell task stops when execution context signal is aborted', async () => {
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'shell-system-abort-'));
+  const provider = createLocalShellProvider({ workspaceRoot: tmpDir, userDataPath: tmpDir });
+  provider.permissionReview.addShellRule({
+    behavior: 'allow',
+    match: { type: 'prefix', prefix: 'node -e' },
+    scope: { cwd: tmpDir, maxRiskLevel: 'L4_privileged' },
+  });
+  const controller = new AbortController();
+  const markerPath = path.join(tmpDir, 'late.txt');
+  const command = [
+    'node -e',
+    JSON.stringify(
+      "setTimeout(()=>require('fs').writeFileSync('late.txt','late'),300); setTimeout(()=>{},1000);"
+    ),
+  ].join(' ');
+
+  const run = provider.execute(
+    toolCall('shell-abort', command, { timeoutMs: 5000 }),
+    'zh-CN',
+    { signal: controller.signal },
+  );
+  setTimeout(() => controller.abort(), 50);
+  const { result } = await run;
+
+  assert.equal(result.status, 'cancelled');
+  assert.equal(result.outputPreview.interrupted, true);
+  assert.equal(existsSync(markerPath), false);
+
+  rmSync(tmpDir, { recursive: true, force: true });
+});
+
 test('permission review rejects overbroad shell allow rules', () => {
   const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'shell-system-rule-deny-'));
   const provider = createLocalShellProvider({ workspaceRoot: tmpDir, userDataPath: tmpDir });

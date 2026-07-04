@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { webContents as electronWebContents } from 'electron';
+import electron from 'electron';
 import { createFailedClientToolResult, createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 import { getActiveBrowserEntry, getActiveWebContentsId } from './browser-control-registry.mjs';
+
+const { webContents: electronWebContents } = electron;
 
 /**
  * 内嵌浏览器操控 Provider —— 见 ADR 40（local.web.control）。
