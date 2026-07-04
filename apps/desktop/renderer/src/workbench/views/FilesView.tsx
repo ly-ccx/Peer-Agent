@@ -111,11 +111,12 @@ function TreeNode({
           }
         }}
       >
-        <span className="workbench-tree-twisty" aria-hidden>
-          {entry.isDir ? (isOpen ? '▾' : '▸') : ''}
-        </span>
-        <span className="workbench-tree-icon" aria-hidden>
-          {entry.isDir ? '📁' : '📄'}
+        <span
+          className={`workbench-tree-twisty${entry.isDir ? ' workbench-tree-twisty--dir' : ''}`}
+          data-open={isOpen}
+          aria-hidden
+        >
+          {entry.isDir ? '›' : ''}
         </span>
         <span className="workbench-tree-name">{entry.name}</span>
       </div>
@@ -158,7 +159,7 @@ function TreeNode({
 }
 
 export function FilesView({ isZh, workspacePath }: FilesViewProps) {
-  const { filesTarget, openDiff } = useWorkbench();
+  const { filesTarget, openFile: openWorkbenchFile } = useWorkbench();
   const rootPath = workspacePath ? stripTrailingSep(workspacePath) : null;
 
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -215,9 +216,9 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
 
   const openFile = useCallback(
     (entry: DirEntry) => {
-      openDiff(entry.absPath, workspacePath ?? undefined);
+      openWorkbenchFile(entry.absPath, workspacePath ?? undefined);
     },
-    [openDiff, workspacePath],
+    [openWorkbenchFile, workspacePath],
   );
 
   // 工作目录变化：重置缓存并展开根目录。

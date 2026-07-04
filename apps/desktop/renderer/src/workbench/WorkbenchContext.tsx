@@ -14,12 +14,18 @@ import { clientApi } from '../clientApi';
 // 值经 normalizeTab 归一为 'plan'，确保旧设置不丢、不回落到 terminal。
 export type WorkbenchTabId = 'plan' | 'terminal' | 'browser' | 'files' | 'diff';
 
-export interface WorkbenchDiffTarget {
+export type WorkbenchFileMode = 'preview' | 'source' | 'diff';
+
+export interface WorkbenchFileTarget {
   readonly absPath: string;
   readonly workspaceRoot?: string;
   /** 原始相对路径（解析前），用于主进程跨已知 workspace 回退查找。 */
   readonly relPath?: string;
+  /** 入口期望的初始查看模式；用户切换后由视图本地状态接管。 */
+  readonly preferredMode?: WorkbenchFileMode;
 }
+
+export type WorkbenchDiffTarget = WorkbenchFileTarget;
 
 export interface WorkbenchFilesTarget {
   /** 要在「文件」视图中展开并高亮定位的目录绝对路径。 */
@@ -67,6 +73,7 @@ interface WorkbenchState {
   sidebarWidth: number;
   /** 左栏最终是否收起 = 用户主动收起 或 右侧挤压自动收起。 */
   sidebarCollapsed: boolean;
+  fileTarget: WorkbenchFileTarget | null;
   diffTarget: WorkbenchDiffTarget | null;
   filesTarget: WorkbenchFilesTarget | null;
 }
@@ -84,6 +91,12 @@ interface WorkbenchActions {
   toggleSidebar: () => void;
   /** 拖拽松手落定左栏宽度并持久化。 */
   setSidebarWidth: (width: number) => void;
+  openFile: (
+    absPath: string,
+    workspaceRoot?: string,
+    relPath?: string,
+    options?: { readonly preferredMode?: WorkbenchFileMode },
+  ) => void;
   openDiff: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
   revealInFiles: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
 }
@@ -162,7 +175,7 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
   );
   // 当前「有效收起」态的最新值（供 toggle/⌘B 在回调中读取，无需把状态加进依赖）。
   const collapsedRef = useRef<boolean>(initial.sidebarOpen === false);
-  const [diffTarget, setDiffTarget] = useState<WorkbenchDiffTarget | null>(null);
+  const [fileTarget, setFileTarget] = useState<WorkbenchFileTarget | null>(null);
   const [filesTarget, setFilesTarget] = useState<WorkbenchFilesTarget | null>(null);
   const filesNonceRef = useRef(0);
 
@@ -209,13 +222,22 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     schedulePersist();
   }, [conversationId, schedulePersist]);
 
-  const openDiff = useCallback((absPath: string, workspaceRoot?: string, relPath?: string) => {
-    setDiffTarget({ absPath, workspaceRoot, relPath });
+  const openFile = useCallback((
+    absPath: string,
+    workspaceRoot?: string,
+    relPath?: string,
+    options?: { readonly preferredMode?: WorkbenchFileMode },
+  ) => {
+    setFileTarget({ absPath, workspaceRoot, relPath, preferredMode: options?.preferredMode });
     const key = conversationId ?? '__none';
     setActiveTabMap((prev) => (prev[key] === 'diff' ? prev : { ...prev, [key]: 'diff' }));
     setOpenState(true);
     schedulePersist();
   }, [conversationId, schedulePersist]);
+
+  const openDiff = useCallback((absPath: string, workspaceRoot?: string, relPath?: string) => {
+    openFile(absPath, workspaceRoot, relPath, { preferredMode: 'diff' });
+  }, [openFile]);
 
   const revealInFiles = useCallback((absPath: string, workspaceRoot?: string, relPath?: string) => {
     filesNonceRef.current += 1;
@@ -346,7 +368,8 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     sidebarOpen,
     sidebarWidth,
     sidebarCollapsed,
-    diffTarget,
+    fileTarget,
+    diffTarget: fileTarget,
     filesTarget,
     conversationId,
     setOpen,
@@ -359,13 +382,14 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     setSidebarOpen,
     toggleSidebar,
     setSidebarWidth,
+    openFile,
     openDiff,
     revealInFiles,
   }), [
     open, width, activeTab, goalSlot, hasGoalPlan, sidebarAutoCollapsed, sidebarOpen, sidebarWidth, sidebarCollapsed,
-    diffTarget, filesTarget, conversationId,
+    fileTarget, filesTarget, conversationId,
     setOpen, toggleOpen, setActiveTab, setWidth, registerGoalSlot, setHasGoalPlan, setSidebarAutoCollapsed,
-    setSidebarOpen, toggleSidebar, setSidebarWidth, openDiff, revealInFiles,
+    setSidebarOpen, toggleSidebar, setSidebarWidth, openFile, openDiff, revealInFiles,
   ]);
 
   return <WorkbenchContext.Provider value={value}>{children}</WorkbenchContext.Provider>;

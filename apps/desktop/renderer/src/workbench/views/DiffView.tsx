@@ -1,6 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
-import { useWorkbench } from '../WorkbenchContext';
+import { DiffViewer } from '../file-preview/DiffViewer';
+import {
+  basename,
+  defaultModeForKind,
+  detectFileKind,
+  formatJsonForPreview,
+  type WorkbenchFileKind,
+} from '../file-preview/fileTypes';
+import { MarkdownDocument } from '../file-preview/MarkdownDocument';
+import { SourceViewer } from '../file-preview/SourceViewer';
+import { useWorkbench, type WorkbenchFileMode } from '../WorkbenchContext';
 
 interface DiffViewProps {
   readonly isZh: boolean;
@@ -8,13 +18,9 @@ interface DiffViewProps {
 
 type GitDiffResult = Awaited<ReturnType<typeof clientApi.gitDiff>>;
 type DiffStatus = GitDiffResult['status'];
-
 type FileReadResult = Awaited<ReturnType<typeof clientApi.readFile>>;
 
-// Diff 视图的两种展示模式：git diff（默认）或文件完整内容。
-type ViewMode = 'diff' | 'content';
-
-interface LoadState {
+interface DiffState {
   readonly loading: boolean;
   readonly result: GitDiffResult | null;
   readonly error: string | null;
@@ -26,99 +32,8 @@ interface ContentState {
   readonly error: string | null;
 }
 
-const INITIAL: LoadState = { loading: false, result: null, error: null };
-const CONTENT_INITIAL: ContentState = { loading: false, result: null, error: null };
-
-function basename(p: string): string {
-  const norm = p.replace(/\\/g, '/').replace(/\/+$/, '');
-  const idx = norm.lastIndexOf('/');
-  return idx >= 0 ? norm.slice(idx + 1) : norm;
-}
-
-type LineKind = 'add' | 'del' | 'hunk' | 'meta' | 'ctx';
-
-// 单个渲染行：除内容/类型外，携带双列行号（旧文件号 / 新文件号）。
-// 删除行只有 oldNo，新增行只有 newNo，上下文行两者都有，hunk/meta 行均无。
-interface DiffLine {
-  readonly kind: LineKind;
-  readonly text: string;
-  readonly oldNo: number | null;
-  readonly newNo: number | null;
-}
-
-// 解析 hunk 头 "@@ -oldStart,oldCount +newStart,newCount @@" 的起始行号。
-// 返回 [oldStart, newStart]；解析失败返回 null。
-function parseHunkHeader(line: string): readonly [number, number] | null {
-  const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
-  if (!m) return null;
-  return [Number(m[1]), Number(m[2])];
-}
-
-// 把 unified diff 文本逐行解析为带双列行号的 DiffLine[]。
-// 通过跟踪当前 hunk 的旧/新游标，对 ctx/add/del 行分别推进对应游标。
-function buildDiffLines(text: string): DiffLine[] {
-  if (!text) return [];
-  const out: DiffLine[] = [];
-  let oldCursor = 0;
-  let newCursor = 0;
-  for (const raw of text.replace(/\n$/, '').split('\n')) {
-    const kind = classifyLine(raw);
-    if (kind === 'hunk') {
-      const parsed = parseHunkHeader(raw);
-      if (parsed) {
-        oldCursor = parsed[0];
-        newCursor = parsed[1];
-      }
-      out.push({ kind, text: raw, oldNo: null, newNo: null });
-      continue;
-    }
-    if (kind === 'meta') {
-      out.push({ kind, text: raw, oldNo: null, newNo: null });
-      continue;
-    }
-    // add/del/ctx 行：剥掉 git 的首字符标记（+/-/空格），
-    // 让内容列只放纯代码；增删的视觉区分交给配色（color 模式）
-    // 或 CSS ::before 注入的 +/- 符号（sign 模式）。
-    const body = raw.slice(1);
-    if (kind === 'add') {
-      out.push({ kind, text: body, oldNo: null, newNo: newCursor });
-      newCursor += 1;
-      continue;
-    }
-    if (kind === 'del') {
-      out.push({ kind, text: body, oldNo: oldCursor, newNo: null });
-      oldCursor += 1;
-      continue;
-    }
-    // ctx：旧/新都推进
-    out.push({ kind, text: body, oldNo: oldCursor, newNo: newCursor });
-    oldCursor += 1;
-    newCursor += 1;
-  }
-  return out;
-}
-
-function classifyLine(line: string): LineKind {
-  if (line.startsWith('@@')) return 'hunk';
-  if (
-    line.startsWith('diff ') ||
-    line.startsWith('index ') ||
-    line.startsWith('--- ') ||
-    line.startsWith('+++ ') ||
-    line.startsWith('new file') ||
-    line.startsWith('deleted file') ||
-    line.startsWith('old mode') ||
-    line.startsWith('new mode') ||
-    line.startsWith('similarity ') ||
-    line.startsWith('rename ') ||
-    line.startsWith('Binary ')
-  ) {
-    return 'meta';
-  }
-  if (line.startsWith('+')) return 'add';
-  if (line.startsWith('-')) return 'del';
-  return 'ctx';
-}
+const INITIAL_DIFF: DiffState = { loading: false, result: null, error: null };
+const INITIAL_CONTENT: ContentState = { loading: false, result: null, error: null };
 
 function statusLabel(status: DiffStatus, isZh: boolean): string {
   switch (status) {
@@ -135,7 +50,6 @@ function statusLabel(status: DiffStatus, isZh: boolean): string {
   }
 }
 
-// 「文件内容」模式下，把后端返回的失败 status 翻译成用户可读的友好文案。
 function contentErrorLabel(status: FileReadResult['status'], size: number | undefined, isZh: boolean): string {
   switch (status) {
     case 'not_found':
@@ -157,41 +71,70 @@ function contentErrorLabel(status: FileReadResult['status'], size: number | unde
   }
 }
 
-export function DiffView({ isZh }: DiffViewProps) {
-  const { diffTarget } = useWorkbench();
-  const [state, setState] = useState<LoadState>(INITIAL);
-  const [mode, setMode] = useState<ViewMode>('diff');
-  const [content, setContent] = useState<ContentState>(CONTENT_INITIAL);
-  // 记录已经自动落到「文件内容」的 diffTarget，避免刷新/用户手动切回 diff 后又被自动弹走。
-  // 用 absPath 作为 key：每个文件只在首次 diff 加载完成且判定无改动时自动切一次。
-  const autoSwitchedRef = useRef<string | null>(null);
+function modeBadge(mode: WorkbenchFileMode, kind: WorkbenchFileKind, isZh: boolean): string {
+  if (mode === 'diff') return '';
+  if (mode === 'source') return isZh ? '源码' : 'Source';
+  switch (kind) {
+    case 'markdown':
+      return 'Markdown';
+    case 'json':
+      return 'JSON';
+    case 'image':
+      return isZh ? '图片' : 'Image';
+    default:
+      return isZh ? '预览' : 'Preview';
+  }
+}
 
-  const load = useCallback(async () => {
-    if (!diffTarget) {
-      setState(INITIAL);
+export function DiffView({ isZh }: DiffViewProps) {
+  const { fileTarget } = useWorkbench();
+  const [mode, setMode] = useState<WorkbenchFileMode>('preview');
+  const [diff, setDiff] = useState<DiffState>(INITIAL_DIFF);
+  const [content, setContent] = useState<ContentState>(INITIAL_CONTENT);
+
+  const kind = useMemo(
+    () => (fileTarget ? detectFileKind(fileTarget.absPath) : 'unknown'),
+    [fileTarget],
+  );
+
+  useEffect(() => {
+    if (!fileTarget) {
+      setMode('preview');
+      setDiff(INITIAL_DIFF);
+      setContent(INITIAL_CONTENT);
       return;
     }
-    setState({ loading: true, result: null, error: null });
+    setMode(fileTarget.preferredMode ?? defaultModeForKind(detectFileKind(fileTarget.absPath)));
+    setDiff(INITIAL_DIFF);
+    setContent(INITIAL_CONTENT);
+  }, [fileTarget]);
+
+  const loadDiff = useCallback(async () => {
+    if (!fileTarget) {
+      setDiff(INITIAL_DIFF);
+      return;
+    }
+    setDiff({ loading: true, result: null, error: null });
     try {
-      const result = await clientApi.gitDiff(diffTarget.absPath, diffTarget.workspaceRoot, diffTarget.relPath);
-      setState({ loading: false, result, error: null });
+      const result = await clientApi.gitDiff(fileTarget.absPath, fileTarget.workspaceRoot, fileTarget.relPath);
+      setDiff({ loading: false, result, error: null });
     } catch (err) {
-      setState({
+      setDiff({
         loading: false,
         result: null,
         error: err instanceof Error ? err.message : String(err),
       });
     }
-  }, [diffTarget]);
+  }, [fileTarget]);
 
   const loadContent = useCallback(async () => {
-    if (!diffTarget) {
-      setContent(CONTENT_INITIAL);
+    if (!fileTarget) {
+      setContent(INITIAL_CONTENT);
       return;
     }
     setContent({ loading: true, result: null, error: null });
     try {
-      const result = await clientApi.readFile(diffTarget.absPath, diffTarget.workspaceRoot, diffTarget.relPath);
+      const result = await clientApi.readFile(fileTarget.absPath, fileTarget.workspaceRoot, fileTarget.relPath);
       setContent({ loading: false, result, error: null });
     } catch (err) {
       setContent({
@@ -200,86 +143,249 @@ export function DiffView({ isZh }: DiffViewProps) {
         error: err instanceof Error ? err.message : String(err),
       });
     }
-  }, [diffTarget]);
-
-  // 切换 diffTarget 时重置回 diff 模式，避免沿用上一个文件的内容态。
-  // 同时清空自动切换守卫，让新文件能重新参与「无改动自动落到文件内容」判定。
-  useEffect(() => {
-    setMode('diff');
-    setContent(CONTENT_INITIAL);
-    autoSwitchedRef.current = null;
-  }, [diffTarget]);
+  }, [fileTarget]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (mode !== 'diff' || !fileTarget || diff.loading || diff.result || diff.error) return;
+    void loadDiff();
+  }, [mode, fileTarget, diff.loading, diff.result, diff.error, loadDiff]);
 
-  // 方案 B：diff 加载完成后，若该文件没有未提交改动（无 diff），自动落到「文件内容」子视图；
-  // 有改动则保持 diff。每个 diffTarget 只自动切一次（autoSwitchedRef 守卫），
-  // 这样用户刷新或手动切回 diff 后不会再被弹走。
   useEffect(() => {
-    if (!diffTarget) return;
-    const result = state.result;
-    if (state.loading || !result) return;
-    if (autoSwitchedRef.current === diffTarget.absPath) return;
-    const noChanges = result.ok && (result.status === 'no_changes' || !result.diffText.trim());
-    if (noChanges) {
-      autoSwitchedRef.current = diffTarget.absPath;
-      setMode('content');
-    }
-  }, [diffTarget, state.loading, state.result]);
+    if (mode === 'diff' || !fileTarget || content.loading || content.result || content.error) return;
+    void loadContent();
+  }, [mode, fileTarget, content.loading, content.result, content.error, loadContent]);
 
-  // 仅在进入「文件内容」模式且尚未加载时按需读取文件，避免无谓 IPC。
-  useEffect(() => {
-    if (mode === 'content' && diffTarget && !content.loading && content.result === null && content.error === null) {
-      void loadContent();
-    }
-  }, [mode, diffTarget, content.loading, content.result, content.error, loadContent]);
-
-  const lines = useMemo(() => buildDiffLines(state.result?.diffText ?? ''), [state.result]);
-  const contentLines = useMemo(
-    () => (content.result?.ok ? content.result.content.split('\n') : []),
-    [content.result],
-  );
-
-  if (!diffTarget) {
+  if (!fileTarget) {
     return (
       <div className="workbench-empty">
-        <div className="workbench-empty-title">{isZh ? 'Diff' : 'Diff'}</div>
+        <div className="workbench-empty-title">{isZh ? '文件预览' : 'File preview'}</div>
         <p className="workbench-empty-hint">
           {isZh
-            ? '点击聊天消息中的文件路径，这里会显示该文件的 git diff。'
-            : 'Click a file path in a chat message to see its git diff here.'}
+            ? '从文件树选择文件，或点击聊天消息中的文件路径。'
+            : 'Select a file from the tree, or click a file path in chat.'}
         </p>
       </div>
     );
   }
 
-  const fileName = basename(diffTarget.absPath);
-  const result = state.result;
+  const fileName = basename(fileTarget.absPath);
+  const statusBadge = mode === 'diff'
+    ? (diff.result?.ok ? statusLabel(diff.result.status, isZh) : '')
+    : modeBadge(mode, kind, isZh);
 
   const openInEditor = () => {
-    void clientApi.openPath(diffTarget.absPath, diffTarget.workspaceRoot);
+    void clientApi.openPath(fileTarget.absPath, fileTarget.workspaceRoot);
   };
 
   const refresh = () => {
-    if (mode === 'content') {
-      void loadContent();
-    } else {
-      void load();
+    if (mode === 'diff') {
+      void loadDiff();
+      return;
     }
+    void loadContent();
+  };
+
+  const renderContentError = (result: FileReadResult) => (
+    <div className="workbench-empty-hint workbench-diff-status">
+      <div>{contentErrorLabel(result.status, result.size, isZh)}</div>
+      <div className="workbench-diff-path">{fileTarget.absPath}</div>
+      {result.status === 'too_large' || result.status === 'binary' ? (
+        <button type="button" className="workbench-diff-btn" onClick={openInEditor}>
+          {isZh ? '在编辑器中打开' : 'Open in editor'}
+        </button>
+      ) : null}
+    </div>
+  );
+
+  const renderSource = () => {
+    if (content.loading) {
+      return (
+        <div className="workbench-empty-hint workbench-diff-status">
+          {isZh ? '正在加载文件内容…' : 'Loading file content…'}
+        </div>
+      );
+    }
+    if (content.error) {
+      return (
+        <div className="workbench-empty-hint workbench-diff-status">
+          {isZh ? `加载失败：${content.error}` : `Failed to load: ${content.error}`}
+        </div>
+      );
+    }
+    if (!content.result) return null;
+    if (!content.result.ok) return renderContentError(content.result);
+    return (
+      <>
+        {content.result.resolvedFrom ? (
+          <div className="workbench-diff-resolved">
+            {isZh
+              ? `已在其他仓库找到该文件：${content.result.resolvedFrom}`
+              : `Found this file in another repository: ${content.result.resolvedFrom}`}
+          </div>
+        ) : null}
+        <SourceViewer
+          content={content.result.content}
+          emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
+        />
+      </>
+    );
+  };
+
+  const renderPreview = () => {
+    if (content.loading) {
+      return (
+        <div className="workbench-empty-hint workbench-diff-status">
+          {isZh ? '正在加载文件内容…' : 'Loading file content…'}
+        </div>
+      );
+    }
+    if (content.error) {
+      return (
+        <div className="workbench-empty-hint workbench-diff-status">
+          {isZh ? `加载失败：${content.error}` : `Failed to load: ${content.error}`}
+        </div>
+      );
+    }
+    if (!content.result) return null;
+    if (!content.result.ok) return renderContentError(content.result);
+
+    const resolved = content.result.resolvedFrom ? (
+      <div className="workbench-diff-resolved">
+        {isZh
+          ? `已在其他仓库找到该文件：${content.result.resolvedFrom}`
+          : `Found this file in another repository: ${content.result.resolvedFrom}`}
+      </div>
+    ) : null;
+
+    if (kind === 'markdown') {
+      return (
+        <>
+          {resolved}
+          <MarkdownDocument
+            content={content.result.content}
+            emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
+            copyLabel={isZh ? '复制' : 'Copy'}
+            copiedLabel={isZh ? '已复制' : 'Copied'}
+          />
+        </>
+      );
+    }
+
+    if (kind === 'json') {
+      const formatted = formatJsonForPreview(content.result.content);
+      return (
+        <>
+          {resolved}
+          <SourceViewer
+            className="workbench-json-preview"
+            content={formatted ?? content.result.content}
+            emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
+          />
+          {!formatted && content.result.content !== '' ? (
+            <div className="workbench-diff-hint workbench-file-preview-hint">
+              {isZh ? 'JSON 解析失败，已按源码显示。' : 'JSON parsing failed; showing source text.'}
+            </div>
+          ) : null}
+        </>
+      );
+    }
+
+    return (
+      <>
+        {resolved}
+        <SourceViewer
+          content={content.result.content}
+          emptyLabel={isZh ? '（空文件）' : '(Empty file)'}
+        />
+      </>
+    );
+  };
+
+  const renderDiff = () => {
+    const result = diff.result;
+    if (result?.ok && result.resolvedFrom) {
+      return (
+        <>
+          <div className="workbench-diff-resolved">
+            {isZh
+              ? `已在其他仓库找到该文件：${result.resolvedFrom}`
+              : `Found this file in another repository: ${result.resolvedFrom}`}
+          </div>
+          {renderDiffBody(result)}
+        </>
+      );
+    }
+    return renderDiffBody(result);
+  };
+
+  const renderDiffBody = (result: GitDiffResult | null) => {
+    if (diff.loading) {
+      return (
+        <div className="workbench-empty-hint workbench-diff-status">
+          {isZh ? '正在加载 diff…' : 'Loading diff…'}
+        </div>
+      );
+    }
+    if (diff.error) {
+      return (
+        <div className="workbench-empty-hint workbench-diff-status">
+          {isZh ? `加载失败：${diff.error}` : `Failed to load: ${diff.error}`}
+        </div>
+      );
+    }
+    if (!result) return null;
+    if (!result.ok) {
+      return (
+        <div className="workbench-empty-hint workbench-diff-status">
+          {result.status === 'not_git_repo' ? (
+            <>
+              <div>
+                {isZh
+                  ? '该文件不在 git 仓库中，无法显示 diff。'
+                  : 'This file is not inside a git repository.'}
+              </div>
+              <div className="workbench-diff-path">{fileTarget.absPath}</div>
+            </>
+          ) : result.status === 'not_found' ? (
+            <>
+              <div>{isZh ? '文件不存在。' : 'File not found.'}</div>
+              <div className="workbench-diff-path">{fileTarget.absPath}</div>
+              {fileTarget.relPath ? (
+                <div className="workbench-diff-hint">
+                  {isZh
+                    ? '可能是跨仓库的相对路径：上面的绝对路径是按当前会话工作区解析出来的，但该文件可能在另一个仓库里。请确认会话工作区是否与文件所属仓库一致，或在引用时使用绝对路径。'
+                    : 'This may be a cross-repository relative path: the absolute path above was resolved against the current conversation workspace, but the file may live in another repository. Check that the workspace matches, or use an absolute path.'}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div>
+              {isZh
+                ? `无法获取 diff：${result.error ?? result.status}`
+                : `Unable to get diff: ${result.error ?? result.status}`}
+            </div>
+          )}
+        </div>
+      );
+    }
+    if (result.status === 'no_changes' || !result.diffText.trim()) {
+      return (
+        <div className="workbench-empty-hint workbench-diff-status">
+          {isZh ? '该文件没有未提交的改动。' : 'No uncommitted changes for this file.'}
+        </div>
+      );
+    }
+    return <DiffViewer diffText={result.diffText} />;
   };
 
   return (
-    <div className="workbench-diff">
+    <div className="workbench-diff workbench-file-preview">
       <div className="workbench-diff-header">
         <div className="workbench-diff-titles">
-          <span className="workbench-diff-filename" title={diffTarget.absPath}>
+          <span className="workbench-diff-filename" title={fileTarget.absPath}>
             {fileName}
           </span>
-          {mode === 'diff' && result && result.ok && statusLabel(result.status, isZh) ? (
-            <span className="workbench-diff-badge">{statusLabel(result.status, isZh)}</span>
-          ) : null}
+          {statusBadge ? <span className="workbench-diff-badge">{statusBadge}</span> : null}
         </div>
         <div className="workbench-diff-actions">
           <div
@@ -290,20 +396,29 @@ export function DiffView({ isZh }: DiffViewProps) {
             <button
               type="button"
               role="tab"
+              aria-selected={mode === 'preview'}
+              className={`workbench-diff-segment${mode === 'preview' ? ' is-active' : ''}`}
+              onClick={() => setMode('preview')}
+            >
+              {isZh ? '预览' : 'Preview'}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'source'}
+              className={`workbench-diff-segment${mode === 'source' ? ' is-active' : ''}`}
+              onClick={() => setMode('source')}
+            >
+              {isZh ? '源码' : 'Source'}
+            </button>
+            <button
+              type="button"
+              role="tab"
               aria-selected={mode === 'diff'}
               className={`workbench-diff-segment${mode === 'diff' ? ' is-active' : ''}`}
               onClick={() => setMode('diff')}
             >
               Diff
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === 'content'}
-              className={`workbench-diff-segment${mode === 'content' ? ' is-active' : ''}`}
-              onClick={() => setMode('content')}
-            >
-              {isZh ? '文件内容' : 'File'}
             </button>
           </div>
           <button
@@ -326,127 +441,7 @@ export function DiffView({ isZh }: DiffViewProps) {
       </div>
 
       <div className="workbench-diff-body">
-        {mode === 'content' ? (
-          content.loading ? (
-            <div className="workbench-empty-hint workbench-diff-status">
-              {isZh ? '正在加载文件内容…' : 'Loading file content…'}
-            </div>
-          ) : content.error ? (
-            <div className="workbench-empty-hint workbench-diff-status">
-              {isZh ? `加载失败：${content.error}` : `Failed to load: ${content.error}`}
-            </div>
-          ) : !content.result ? null : !content.result.ok ? (
-            <div className="workbench-empty-hint workbench-diff-status">
-              <div>{contentErrorLabel(content.result.status, content.result.size, isZh)}</div>
-              <div className="workbench-diff-path">{diffTarget.absPath}</div>
-              {content.result.status === 'too_large' || content.result.status === 'binary' ? (
-                <button type="button" className="workbench-diff-btn" onClick={openInEditor}>
-                  {isZh ? '在编辑器中打开' : 'Open in editor'}
-                </button>
-              ) : null}
-            </div>
-          ) : (
-            <>
-              {content.result.resolvedFrom ? (
-                <div className="workbench-diff-resolved">
-                  {isZh
-                    ? `已在其他仓库找到该文件：${content.result.resolvedFrom}`
-                    : `Found this file in another repository: ${content.result.resolvedFrom}`}
-                </div>
-              ) : null}
-              {content.result.content === '' ? (
-                <div className="workbench-empty-hint workbench-diff-status">
-                  {isZh ? '（空文件）' : '(Empty file)'}
-                </div>
-              ) : (
-                <pre className="workbench-content-pre">
-                  <code>
-                    {contentLines.map((text, i) => (
-                      <span key={i} className="content-line">
-                        <span className="content-gutter" aria-hidden="true">
-                          {i + 1}
-                        </span>
-                        <span className="content-line-text">{text === '' ? '\u00a0' : text}</span>
-                      </span>
-                    ))}
-                  </code>
-                </pre>
-              )}
-            </>
-          )
-        ) : (
-          <>
-        {result && result.ok && result.resolvedFrom ? (
-          <div className="workbench-diff-resolved">
-            {isZh
-              ? `已在其他仓库找到该文件：${result.resolvedFrom}`
-              : `Found this file in another repository: ${result.resolvedFrom}`}
-          </div>
-        ) : null}
-        {state.loading ? (
-          <div className="workbench-empty-hint workbench-diff-status">
-            {isZh ? '正在加载 diff…' : 'Loading diff…'}
-          </div>
-        ) : state.error ? (
-          <div className="workbench-empty-hint workbench-diff-status">
-            {isZh ? `加载失败：${state.error}` : `Failed to load: ${state.error}`}
-          </div>
-        ) : !result ? null : !result.ok ? (
-          <div className="workbench-empty-hint workbench-diff-status">
-            {result.status === 'not_git_repo' ? (
-              <>
-                <div>
-                  {isZh
-                    ? '该文件不在 git 仓库中，无法显示 diff。'
-                    : 'This file is not inside a git repository.'}
-                </div>
-                <div className="workbench-diff-path">{diffTarget.absPath}</div>
-              </>
-            ) : result.status === 'not_found' ? (
-              <>
-                <div>{isZh ? '文件不存在。' : 'File not found.'}</div>
-                <div className="workbench-diff-path">{diffTarget.absPath}</div>
-                {diffTarget.relPath ? (
-                  <div className="workbench-diff-hint">
-                    {isZh
-                      ? '可能是跨仓库的相对路径：上面的绝对路径是按当前会话工作区解析出来的，但该文件可能在另一个仓库里。请确认会话工作区是否与文件所属仓库一致，或在引用时使用绝对路径。'
-                      : 'This may be a cross-repository relative path: the absolute path above was resolved against the current conversation workspace, but the file may live in another repository. Check that the workspace matches, or use an absolute path.'}
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <div>
-                {isZh
-                  ? `无法获取 diff：${result.error ?? result.status}`
-                  : `Unable to get diff: ${result.error ?? result.status}`}
-              </div>
-            )}
-          </div>
-        ) : result.status === 'no_changes' || !result.diffText.trim() ? (
-          <div className="workbench-empty-hint workbench-diff-status">
-            {isZh ? '该文件没有未提交的改动。' : 'No uncommitted changes for this file.'}
-          </div>
-        ) : (
-          <pre className="workbench-diff-pre">
-            <code>
-              {lines.map((line, i) => (
-                <span key={i} className={`diff-line diff-line--${line.kind}`}>
-                  <span className="diff-gutter diff-gutter--old" aria-hidden="true">
-                    {line.oldNo ?? ''}
-                  </span>
-                  <span className="diff-gutter diff-gutter--new" aria-hidden="true">
-                    {line.newNo ?? ''}
-                  </span>
-                  <span className="diff-line-text">
-                    {line.text === '' ? '\u00a0' : line.text}
-                  </span>
-                </span>
-              ))}
-            </code>
-          </pre>
-        )}
-          </>
-        )}
+        {mode === 'diff' ? renderDiff() : mode === 'source' ? renderSource() : renderPreview()}
       </div>
     </div>
   );
