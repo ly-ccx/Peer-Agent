@@ -87,8 +87,8 @@ export async function agentLoopOpenAI({
   let promptTooLongRetryUsed = false;
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {
-    // 方案 A（完整会话量口径）：压缩触发按「完整 apiMessages」判定，与进度条分子、
-    // 回合结束权威快照（getContextInfo）同口径，避免回合结束后数值从 ~200k 跳到 ~100k。
+    // 自动 preflight 压缩：触发判定按完整 apiMessages 估算；切分时保留最新真人 user turn，
+    // 避免用户刚发送的原文被 compaction summary 代替。
     const compaction = await runCompactionCheck({
       messages: apiMessages,
       systemPrompt,
@@ -101,6 +101,7 @@ export async function agentLoopOpenAI({
       webContents,
       continuityContext,
       tools,
+      preserveLatestUserTurn: true,
     });
     if (compaction.compacted) {
       apiMessages = compaction.messages;
@@ -150,6 +151,7 @@ export async function agentLoopOpenAI({
           force: true,
           continuityContext,
           tools,
+          preserveLatestUserTurn: true,
         });
         if (emergencyCompaction.compacted) {
           apiMessages = emergencyCompaction.messages;

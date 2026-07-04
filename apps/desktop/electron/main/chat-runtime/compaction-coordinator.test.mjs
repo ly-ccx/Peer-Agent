@@ -170,9 +170,36 @@ describe('chat compaction coordinator', () => {
     assert.deepEqual(stages, ['start', 'idle']);
   });
 
-  it('rethrows when a compacted persist fails and does not double-settle the banner', async () => {
+  it('forwards preserveLatestUserTurn to automatic compaction', async () => {
+    const result = await runCompactionCheck({
+      messages: [
+        { role: 'system', content: 'system' },
+        { role: 'user', content: 'old question' },
+        { role: 'assistant', content: 'old answer' },
+        { role: 'user', content: 'current question' },
+      ],
+      systemPrompt: 'system',
+      contextWindow: 0,
+      providerConfig: null,
+      signal: new AbortController().signal,
+      persistCompaction: null,
+      conversationId: 'c1',
+      streamId: 's1',
+      force: true,
+      preserveLatestUserTurn: true,
+      webContents: { send() {} },
+    });
+
+    assert.equal(result.compacted, true);
+    assert.equal(result.compactResult.notification.oldMessageCount, 2);
+    assert.equal(result.compactResult.notification.keptMessageCount, 1);
+    assert.equal(result.messages.at(-1).role, 'user');
+    assert.equal(result.messages.at(-1).content, 'current question');
+  });
+
+  it('rethrows when a compacted persist fails and settles the banner to idle', async () => {
     // 大量消息 + force 触发结构化压缩 (compacted:true);persistCompaction 抛错。
-    // 回归点:错误必须向上抛出(交由 sendMessage 终态兜底),且 done 之后不再补发 idle。
+    // 回归点:错误必须向上抛出(交由 sendMessage 终态兜底),且失败路径必须补发 idle。
     const events = [];
     const messages = Array.from({ length: 14 }, (_, i) => ({
       role: i % 2 === 0 ? 'user' : 'assistant',
@@ -193,6 +220,7 @@ describe('chat compaction coordinator', () => {
           conversationId: 'c1',
           streamId: 's1',
           force: true,
+          emergency: true,
           webContents: {
             send(channel, payload) {
               events.push({ channel, payload });
@@ -205,8 +233,8 @@ describe('chat compaction coordinator', () => {
     const stages = events
       .filter((e) => e.channel === 'chat:compaction')
       .map((e) => e.payload.stage);
-    // done 既是 start 的收尾,catch 分支不应再补发 idle。
-    assert.equal(stages.includes('idle'), false);
+    assert.equal(stages.includes('done'), false);
+    assert.equal(stages.at(-1), 'idle');
   });
 });
 

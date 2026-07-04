@@ -448,6 +448,141 @@ describe('llm chat service tool materialization', () => {
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
   });
 
+  it('continues the same OpenAI turn after automatic compaction while preserving the latest user input', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    const capturedBodies = [];
+    const latestUser = 'please answer the latest request exactly';
+
+    globalThis.fetch = async (_url, init) => {
+      const body = JSON.parse(init.body);
+      capturedBodies.push(body);
+      if (capturedBodies.length === 1) {
+        return new Response(sse([
+          { choices: [{ delta: { content: 'summary of older context' } }] },
+          '[DONE]',
+        ]), { status: 200 });
+      }
+      return new Response(sse([
+        { choices: [{ delta: { content: 'ok after compact' } }] },
+        '[DONE]',
+      ]), { status: 200 });
+    };
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+            contextWindow: 400,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+      });
+
+      await service.sendMessage({
+        messages: [
+          { role: 'user', content: `old question ${'x'.repeat(4000)}` },
+          { role: 'assistant', content: `old answer ${'y'.repeat(4000)}` },
+          { role: 'user', content: latestUser },
+        ],
+        streamId: 's-compact-continue',
+        conversationId: 'c-compact-continue',
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.equal(capturedBodies.length, 2);
+    const summaryBodyText = JSON.stringify(capturedBodies[0]);
+    assert.doesNotMatch(summaryBodyText, new RegExp(latestUser));
+    const finalMessages = capturedBodies[1].messages || [];
+    assert.equal(
+      finalMessages.some((message) => message.role === 'user' && message.content === latestUser),
+      true,
+    );
+
+    const compactionDoneIndex = events.findIndex(
+      (event) => event.channel === 'chat:compaction' && event.payload.stage === 'done',
+    );
+    const deltaIndex = events.findIndex((event) => event.channel === 'chat:stream:delta');
+    const doneIndex = events.findIndex((event) => event.channel === 'chat:stream:done');
+    assert.ok(compactionDoneIndex >= 0, 'expected compaction done event');
+    assert.ok(deltaIndex > compactionDoneIndex, 'expected model delta after compaction done');
+    assert.ok(doneIndex > compactionDoneIndex, 'expected stream done after compaction done');
+    assert.equal(events.some((event, index) => index < compactionDoneIndex && event.channel === 'chat:stream:done'), false);
+    assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
+  });
+
+  it('emits a stream error instead of done when automatic compaction persistence fails', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    let fetchCount = 0;
+
+    globalThis.fetch = async () => {
+      fetchCount += 1;
+      return new Response(sse([
+        { choices: [{ delta: { content: 'summary before persist failure' } }] },
+        '[DONE]',
+      ]), { status: 200 });
+    };
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+            contextWindow: 400,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        persistCompaction: async () => {
+          throw new Error('persist failed for test');
+        },
+      });
+
+      await service.sendMessage({
+        messages: [
+          { role: 'user', content: `old question ${'x'.repeat(4000)}` },
+          { role: 'assistant', content: `old answer ${'y'.repeat(4000)}` },
+          { role: 'user', content: 'latest user survives only if compaction persists' },
+        ],
+        streamId: 's-compact-persist-fail',
+        conversationId: 'c-compact-persist-fail',
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.equal(fetchCount, 1, 'provider request should not run after failed compaction persistence');
+    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), false);
+    const errorEvent = events.find((event) => event.channel === 'chat:stream:error');
+    assert.ok(errorEvent, 'expected stream error');
+    assert.match(errorEvent.payload.error, /persist failed for test/);
+    const compactionStages = events
+      .filter((event) => event.channel === 'chat:compaction')
+      .map((event) => event.payload.stage);
+    assert.equal(compactionStages.includes('idle'), true);
+  });
+
   it('completes an OpenAI-compatible reasoning-only response without empty response error', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;

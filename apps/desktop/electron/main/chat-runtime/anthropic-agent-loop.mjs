@@ -82,8 +82,8 @@ export async function agentLoopAnthropic({
   let promptTooLongRetryUsed = false;
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {
-    // 方案 A（完整会话量口径）：压缩触发按「完整 apiMessages」判定，与进度条分子、
-    // 回合结束权威快照（getContextInfo）同口径，避免回合结束后数值从 ~200k 跳到 ~100k。
+    // 自动 preflight 压缩：触发判定按完整 apiMessages 估算；切分时保留最新真人 user turn，
+    // 避免用户刚发送的原文被 compaction summary 代替。
     const compaction = await runCompactionCheck({
       messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
       systemPrompt: effectiveSystem,
@@ -96,6 +96,7 @@ export async function agentLoopAnthropic({
       webContents,
       continuityContext,
       tools,
+      preserveLatestUserTurn: true,
     });
     if (compaction.compacted) {
       effectiveSystem = compaction.messages
@@ -150,6 +151,7 @@ export async function agentLoopAnthropic({
           force: true,
           continuityContext,
           tools,
+          preserveLatestUserTurn: true,
         });
         if (emergencyCompaction.compacted) {
           effectiveSystem = emergencyCompaction.messages

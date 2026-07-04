@@ -541,6 +541,13 @@ function messageHasToolUse(message) {
   return Array.isArray(message?.content) && message.content.some((block) => block?.type === 'tool_use');
 }
 
+function isHumanUserMessage(message) {
+  if (message?.role !== 'user') return false;
+  if (message?._compaction) return false;
+  if (!Array.isArray(message.content)) return true;
+  return message.content.some((block) => block?.type !== 'tool_result');
+}
+
 function expandKeepForToolContinuity({ keep, old }) {
   const expandedKeep = [...keep];
   const expandedOld = [...old];
@@ -554,31 +561,29 @@ function expandKeepForToolContinuity({ keep, old }) {
   return { keep: expandedKeep, old: expandedOld };
 }
 
-// 定位「当前轮」起点：最后一个 user 消息的下标。
-// 真·全量压缩下（见 真·全量压缩设计），切分本身不再依赖此函数选取 keep；
-// 仅保留以兜底回溯/可读性，并供 shouldRunCompaction 的 force 分支判断「是否有可摘要的消息」。
-// 返回 -1 表示无 user 消息（异常路径，由调用方回退处理）。
+// 定位「当前用户轮」起点：最后一个真人 user 消息的下标。
+// Anthropic 工具结果在 provider 历史里也是 role=user + tool_result blocks；它不是用户输入，
+// 不能被当成“最新用户原文”保留，否则会留下孤立 tool_result。
+// 返回 -1 表示无真人 user 消息（异常路径，由调用方回退处理）。
 function findCurrentTurnStart(convMsgs) {
   for (let i = convMsgs.length - 1; i >= 0; i--) {
-    if (convMsgs[i]?.role === 'user') return i;
+    if (isHumanUserMessage(convMsgs[i])) return i;
   }
   return -1;
 }
 
-function splitForCompaction(messages) {
+function splitForCompaction(messages, { preserveLatestUserTurn = false } = {}) {
   const systemMsgs = messages.filter((m) => m.role === 'system');
   const convMsgs = messages.filter((m) => m.role !== 'system');
 
-  // 真·全量压缩（见 真·全量压缩设计）：旧消息全部摘要，连当前轮原文也不保留。
-  // cutIndex = convMsgs.length → keep = slice(len) = []、old = slice(0, len) = 全部。
-  // ⚠️ 显式用 length 而非负数：slice(-0) ≡ slice(0) = 全部，会把切分反转、压缩失效。
-  //    用 length 切分恒为「keep 空 / old 全部」，无 slice(-0) 歧义。
-  const cutIndex = convMsgs.length;
+  // 默认保持手动 /compact 的“真·全量压缩”：旧消息全部摘要，连当前轮原文也不保留。
+  // 自动 preflight 压缩则必须保留最新真人 user turn：用户刚发送的原文不能被 summary 代替。
+  const currentTurnStart = preserveLatestUserTurn ? findCurrentTurnStart(convMsgs) : -1;
+  // ⚠️ 全量压缩时显式用 length 而非负数：slice(-0) ≡ slice(0) = 全部，会把切分反转。
+  const cutIndex = currentTurnStart >= 0 ? currentTurnStart : convMsgs.length;
 
-  // 唯一保留：末尾若是悬空工具对（assistant tool_call 尚未闭合 / keep 首条为孤立
-  // tool_result），由 expandKeepForToolContinuity 兜底拉入最小未闭合工具尾，
-  // 避免下一轮 provider 因 tool_call/tool_result 配对缺失报错。这是协议正确性兜底，
-  // 非「保留对话」；正常路径 keep 为空、keptMessageCount=0。
+  // 末尾若是悬空工具对（assistant tool_call 尚未闭合 / keep 首条为孤立 tool_result），
+  // 由 expandKeepForToolContinuity 兜底拉入最小未闭合工具尾，避免 provider 因配对缺失报错。
   const split = expandKeepForToolContinuity({
     keep: convMsgs.slice(cutIndex),
     old: convMsgs.slice(0, cutIndex),
@@ -1208,6 +1213,7 @@ export async function compactIfNeeded({
   streamId = null,
   connectionRecoveryOptions = {},
   tools = null,
+  preserveLatestUserTurn = false,
 }) {
   const microcompactResult = microcompactMessagesForContext(messages);
   messages = microcompactResult.messages;
@@ -1216,7 +1222,7 @@ export async function compactIfNeeded({
   // Circuit breaker: stop trying if we've failed too many times
   if (isCircuitBreakerTripped()) {
     // Still do basic structural compaction + drop as last resort
-    const { keep, old } = splitForCompaction(messages);
+    const { keep, old } = splitForCompaction(messages, { preserveLatestUserTurn });
     if (old.length === 0) return { compacted: false, messages };
 
     const beforeTokens = estimateTokensFromMessages(messages);
@@ -1267,7 +1273,7 @@ export async function compactIfNeeded({
   }
 
   // Split
-  const { keep, old } = splitForCompaction(messages);
+  const { keep, old } = splitForCompaction(messages, { preserveLatestUserTurn });
   if (old.length === 0) {
     return { compacted: false, messages };
   }

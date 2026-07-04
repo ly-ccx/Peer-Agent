@@ -442,6 +442,132 @@ describe('context compactor', () => {
     assert.match(result.messages[1].content, /^\[上下文交接/);
   });
 
+  it('preserves the latest human user turn when automatic preflight compaction requests it', async () => {
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'old question' },
+      { role: 'assistant', content: 'old answer' },
+      { role: 'user', content: 'current turn question' },
+    ];
+
+    const result = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      contextWindow: 100_000,
+      providerConfig: null,
+      force: true,
+      preserveLatestUserTurn: true,
+    });
+
+    assert.equal(result.compacted, true);
+    assert.equal(result.notification.oldMessageCount, 2);
+    assert.equal(result.notification.keptMessageCount, 1);
+    assert.equal(result.messages.length, 3);
+    assert.equal(result.messages[0].role, 'system');
+    assert.equal(result.messages[1].role, 'user');
+    assert.match(result.messages[1].content, /^\[上下文交接 - 共压缩 2 条消息\]/);
+    assert.equal(result.messages[2].role, 'user');
+    assert.equal(result.messages[2].content, 'current turn question');
+    assert.doesNotMatch(result.messages[1]._compaction.summary, /current turn question/);
+  });
+
+  it('preserves the latest human user turn together with its closed tool pair tail', async () => {
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'old question' },
+      { role: 'assistant', content: 'old answer' },
+      { role: 'user', content: 'current task' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'tool-9', type: 'function', function: { name: 'bash', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'tool-9', content: 'tool output' },
+    ];
+
+    const result = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      contextWindow: 100_000,
+      providerConfig: null,
+      force: true,
+      preserveLatestUserTurn: true,
+    });
+
+    assert.equal(result.compacted, true);
+    assert.equal(result.notification.oldMessageCount, 2);
+    assert.equal(result.notification.keptMessageCount, 3);
+    assert.deepEqual(result.messages.slice(2), messages.slice(3));
+  });
+
+  it('does not treat a pure Anthropic tool_result user message as latest human input', async () => {
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'tool-1', name: 'bash', input: { command: 'pwd' } },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'tool-1', content: 'workspace path' },
+        ],
+      },
+    ];
+
+    const result = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      contextWindow: 100_000,
+      providerConfig: null,
+      force: true,
+      preserveLatestUserTurn: true,
+    });
+
+    assert.equal(result.compacted, true);
+    assert.equal(result.notification.oldMessageCount, 2);
+    assert.equal(result.notification.keptMessageCount, 0);
+    assert.equal(result.messages.length, 2);
+    assert.equal(result.messages.some((m) => m.role === 'tool'), false);
+  });
+
+  it('does not treat a compaction handoff user message as latest human input', async () => {
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      {
+        role: 'user',
+        content: '[上下文交接 - 共压缩 100 条消息]\nsummary',
+        _compaction: {
+          method: 'structural',
+          originalMessageCount: 100,
+          beforeTokens: 1000,
+          afterTokens: 100,
+          summary: 'summary',
+        },
+      },
+      { role: 'assistant', content: 'continued from summary' },
+    ];
+
+    const result = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      contextWindow: 100_000,
+      providerConfig: null,
+      force: true,
+      preserveLatestUserTurn: true,
+    });
+
+    assert.equal(result.compacted, true);
+    assert.equal(result.notification.oldMessageCount, 2);
+    assert.equal(result.notification.keptMessageCount, 0);
+    assert.equal(result.messages.length, 2);
+    assert.equal(result.messages[1]._compaction.originalMessageCount, 2);
+  });
+
   it('does not compact when there is no non-system message', async () => {
     // 真·全量压缩（0011）：无任何非 system 消息 → 不压缩，避免空压缩。
     const messages = [

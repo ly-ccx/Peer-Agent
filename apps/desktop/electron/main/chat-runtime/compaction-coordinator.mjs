@@ -213,6 +213,7 @@ export async function runCompactionCheck({
   force = false,
   continuityContext = [],
   tools = null,
+  preserveLatestUserTurn = false,
 }) {
   const budget = computeContextBudget({ messages, contextWindow, tools });
   force = Boolean(force || budget.force);
@@ -293,11 +294,10 @@ export async function runCompactionCheck({
       webContents,
       streamId,
       tools,
+      preserveLatestUserTurn,
     });
 
     if (compactResult.compacted) {
-      // done 通知本身即为 start 的收尾,标记 banner 已结算,避免再补发 idle。
-      settledBanner = true;
       await persistAndNotifyCompaction({
         persistCompaction,
         conversationId,
@@ -306,6 +306,9 @@ export async function runCompactionCheck({
         webContents,
         emergency,
       });
+      // done 通知本身即为 start 的收尾。只有持久化与 done 都完成后才标记已结算；
+      // 若 persistCompaction 抛错，catch 分支必须还能补发 idle，避免压缩态悬挂。
+      settledBanner = true;
       return { compacted: true, messages: compactResult.messages, compactResult };
     }
 
