@@ -25,6 +25,13 @@ const GOAL_CREATE_PLAN_PROMPT = [
   'the objective, success criteria, boundaries, and trackable subtasks for autonomous execution;',
   'Goal mode does not require a plan-approval gate before every side-effecting step.',
   'Provide a clear goal and a complete list of ordered subtasks (each subtask: title, optional dependsOn).',
+  'Write every subtask title and the goal in plain language the user can skim: lead with what the step',
+  'is actually for, keep it to one action per subtask, and prefer everyday words over jargon.',
+  'Do not cram multiple points into one title with inline numbering like (1)(2)(3) or ①②③ — split them',
+  'into separate subtasks instead. Symbols, file paths, line numbers, function and field names may stay,',
+  'but as trailing detail in parentheses, never as the opening of the title. Avoid buzzwords such as',
+  '"byte-exact", "contract", "anchor", "invariant" when a plain phrase (e.g. "don\'t break the callers")',
+  'says the same thing. The reader should understand the point of each subtask from its first few words.',
   'Always provide a short, human-readable title for the plan itself (a few words) — it is required',
   'and shown verbatim in the plan panel; do not leave it empty.',
 ].join(' ');
@@ -109,7 +116,11 @@ export const GOAL_TOOL_DEFINITIONS = [
               },
               title: {
                 type: 'string',
-                description: 'What this subtask delivers.',
+                description:
+                  'What this subtask delivers, written in plain language. Lead with the point of the '
+                  + 'step in everyday words, keep it to one action, and put any file paths, line '
+                  + 'numbers, function or field names as trailing detail in parentheses rather than at '
+                  + 'the start. Do not pack several points into one title with ①②③ / (1)(2)(3).',
               },
               dependsOn: {
                 type: 'array',
