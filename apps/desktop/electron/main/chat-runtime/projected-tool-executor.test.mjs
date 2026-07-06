@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -86,6 +86,66 @@ describe('projected model tool executor', () => {
     const parsed = JSON.parse(result.output);
     assert.equal(parsed.reason, 'goal_scope_expansion_denied');
     assert.equal(existsSync(path.join(tmpDir, 'tests', 'new.test.ts')), false);
+  });
+
+  it('writes inside the active Goal target workspace even when the conversation originated elsewhere', async () => {
+    const originDir = path.join(tmpDir, 'peer-knowledge');
+    const targetDir = path.join(tmpDir, 'peer_agent');
+    mkdirSync(originDir, { recursive: true });
+    mkdirSync(targetDir, { recursive: true });
+    const outputPath = path.join(targetDir, 'src', 'goal-target.txt');
+
+    const result = await executeProjectedModelTool({
+      name: 'write_file',
+      args: { path: outputPath, content: 'target write' },
+      workspacePath: originDir,
+      toolContext: { mode: 'goal', conversationId: 'c-target', workspacePath: originDir },
+      toolCallId: 'tc_target_write',
+      goalPlanStore: {
+        listPlansByConversation: () => [{ status: 'accepted' }],
+        getActivePlanByConversation: () => ({
+          planId: 'plan-target',
+          originWorkspacePath: originDir,
+          targetWorkspacePath: targetDir,
+          boundaries: { inScope: ['src/*'], outOfScope: [] },
+        }),
+      },
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(readFileSync(outputPath, 'utf8'), 'target write');
+    const parsed = JSON.parse(result.output);
+    assert.equal(parsed.path, outputPath);
+  });
+
+  it('still denies Goal writes outside the active target workspace', async () => {
+    const originDir = path.join(tmpDir, 'peer-knowledge');
+    const targetDir = path.join(tmpDir, 'peer_agent');
+    const outsidePath = path.join(tmpDir, 'other', 'x.txt');
+    mkdirSync(originDir, { recursive: true });
+    mkdirSync(targetDir, { recursive: true });
+
+    const result = await executeProjectedModelTool({
+      name: 'write_file',
+      args: { path: outsidePath, content: 'nope' },
+      workspacePath: originDir,
+      toolContext: { mode: 'goal', conversationId: 'c-target', workspacePath: originDir },
+      toolCallId: 'tc_target_denied',
+      goalPlanStore: {
+        listPlansByConversation: () => [{ status: 'accepted' }],
+        getActivePlanByConversation: () => ({
+          planId: 'plan-target',
+          originWorkspacePath: originDir,
+          targetWorkspacePath: targetDir,
+          boundaries: { inScope: ['src/*'], outOfScope: [] },
+        }),
+      },
+    });
+
+    assert.equal(result.success, false);
+    const parsed = JSON.parse(result.output);
+    assert.equal(parsed.reason, 'goal_scope_out_of_workspace');
+    assert.equal(existsSync(outsidePath), false);
   });
 
   it('requires Goal irreversible confirmation with a dedicated capability id', async () => {

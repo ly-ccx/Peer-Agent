@@ -17,6 +17,7 @@ import { agentLoopGemini } from './chat-runtime/gemini-agent-loop.mjs';
 import { agentLoopOpenAI } from './chat-runtime/openai-agent-loop.mjs';
 import { sanitizeApiMessages } from './chat-runtime/message-sanitizer.mjs';
 import { createChatPermissionGate } from './chat-runtime/permission-gate.mjs';
+import { resolveActiveGoalExecutionBinding } from './chat-runtime/goal-mode-gate.mjs';
 import {
   createProviderAttemptStream,
   describeFetchFailure,
@@ -117,6 +118,27 @@ function resolveRunWorkspacePath({
   if (incomingWorkspacePath && typeof incomingWorkspacePath === 'string') return incomingWorkspacePath;
   if (activeWorkspacePath && typeof activeWorkspacePath === 'string') return activeWorkspacePath;
   return process.cwd();
+}
+
+function buildGoalWorkspaceBindingExtensions(binding) {
+  const origin = binding?.originWorkspacePath ?? null;
+  const target = binding?.targetWorkspacePath ?? null;
+  if (!origin || !target || origin === target) return [];
+  return [{
+    id: `goal-workspace-binding-${binding.planId || 'active'}`,
+    title: 'Goal workspace binding',
+    layer: 'L3_INSTRUCTIONS',
+    priority: 20,
+    sourceKind: 'runtime',
+    trust: 'runtime',
+    content: [
+      `Goal origin workspace: ${origin}`,
+      `Goal target workspace: ${target}`,
+      'Use the origin workspace as the knowledge and intent source.',
+      'Write, edit, run checks, and collect implementation evidence in the target workspace unless the Goal explicitly changes scope.',
+      'Do not treat the origin workspace as the write boundary for this Goal.',
+    ].join('\n'),
+  }];
 }
 
 function recordPromptSnapshot(store, context, metadata) {
@@ -505,10 +527,18 @@ export function createLlmChatService({
       return { terminalStatus: 'error', requestedUserInput: false, toolCallCount: 0 };
     }
 
-    // 本轮运行的工作根目录：以会话绑定的 workspacePath 为唯一真值（见 resolveRunWorkspacePath）。
-    // 入口处一次性算出并全程线程化，替代对全局 activeWorkspacePath 的直接读取，保证整轮 cwd /
-    // 系统上下文一致，且与后续用户切换工作区解耦（流的工作区在发起时固定）。
-    const runWorkspacePath = resolveRunWorkspacePathForRun(conversationId, incomingWorkspacePath);
+    // 会话 workspace 是本轮的 origin：用户从哪里发起、有哪些知识上下文。Goal 模式下，
+    // active Goal 可绑定 targetWorkspacePath；此时工具 cwd / 项目指令切换到 target，
+    // origin 作为 runtime context extension 注入，不再把 origin 当写入边界。
+    const conversationWorkspacePath = resolveRunWorkspacePathForRun(conversationId, incomingWorkspacePath);
+    const goalWorkspaceBinding = mode === 'goal'
+      ? resolveActiveGoalExecutionBinding(conversationId, conversationWorkspacePath, goalPlanStore)
+      : null;
+    const runWorkspacePath = goalWorkspaceBinding?.executionWorkspacePath || conversationWorkspacePath;
+    const effectiveContextExtensions = [
+      ...(Array.isArray(contextExtensions) ? contextExtensions : []),
+      ...buildGoalWorkspaceBindingExtensions(goalWorkspaceBinding),
+    ];
 
     const controller = new AbortController();
     const streamRecord = {
@@ -546,6 +576,11 @@ export function createLlmChatService({
     // 把本回合的交互模式写入（复用的）会话级 toolContext，供 goal 模式运行时闸门在工具
     // 执行层判定准入。见 Goal 模式运行时闸门设计。
     toolContext.mode = mode;
+    toolContext.workspacePath = runWorkspacePath;
+    toolContext.originWorkspacePath = goalWorkspaceBinding?.originWorkspacePath ?? conversationWorkspacePath;
+    toolContext.targetWorkspacePath = goalWorkspaceBinding?.targetWorkspacePath ?? null;
+    toolContext.readableRoots = goalWorkspaceBinding?.readableRoots ?? null;
+    toolContext.writableRoots = goalWorkspaceBinding?.writableRoots ?? null;
     // 把本回合的工具计数 sink 写入会话级 toolContext，供工具派发处实时回调。
     // 仅本回合有效，回合结束后由下一次 sendMessage 覆盖（无 sink 时复位为 null）。
     toolContext.onToolCall = agentProgress?.onToolCall ?? null;
@@ -575,7 +610,7 @@ export function createLlmChatService({
           runtimeReminders,
           attachmentContext,
           configInstructions,
-          contextExtensions,
+          contextExtensions: effectiveContextExtensions,
           explorerContext,
           verifierContext,
           continuityContext,

@@ -48,6 +48,10 @@ function deriveTitle(rawTitle, goal) {
   return firstSentence.length > 40 ? `${firstSentence.slice(0, 40)}…` : firstSentence;
 }
 
+function nonEmptyString(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 /** 把模型给的精简子任务规范化为完整 GoalTask（补齐协议必填字段）。 */
 function normalizeTasks(rawTasks) {
   const list = Array.isArray(rawTasks) ? rawTasks : [];
@@ -96,6 +100,8 @@ function summarizePlan(plan) {
     title: plan.title ?? '',
     goal: plan.goal ?? '',
     status: plan.status ?? null,
+    originWorkspacePath: plan.originWorkspacePath ?? null,
+    targetWorkspacePath: plan.targetWorkspacePath ?? null,
     progress: plan.progress ?? null,
     tasks: summarizeTasks(plan.tasks),
   };
@@ -108,6 +114,13 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
     const args = parseArgs(call);
     const conversationId = context.toolContext?.conversationId ?? null;
     const mode = context.toolContext?.mode ?? 'chat';
+    const originWorkspacePath =
+      nonEmptyString(args.originWorkspacePath) ||
+      nonEmptyString(context.toolContext?.originWorkspacePath) ||
+      nonEmptyString(context.toolContext?.workspacePath);
+    const targetWorkspacePath =
+      nonEmptyString(args.targetWorkspacePath) ||
+      nonEmptyString(context.toolContext?.targetWorkspacePath);
 
     let status = 'success';
     let payload;
@@ -126,7 +139,8 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
           conversationId,
           title: deriveTitle(args.title, args.goal),
           goal: args.goal,
-          targetWorkspacePath: args.targetWorkspacePath,
+          ...(originWorkspacePath ? { originWorkspacePath } : {}),
+          ...(targetWorkspacePath ? { targetWorkspacePath } : {}),
           tasks: normalizeTasks(args.tasks),
           // 可选的结构化成功标准（DoD）。store 层会规范化（字符串→manual 向后兼容），
           // 缺省时归一为空数组，不影响既有仅传 goal/tasks 的调用。
@@ -156,6 +170,8 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
           status: plan.status,
           workflowKind: plan.workflowKind,
           activation: plan.activation,
+          originWorkspacePath: plan.originWorkspacePath ?? null,
+          targetWorkspacePath: plan.targetWorkspacePath ?? null,
           taskCount: plan.tasks?.length ?? 0,
           progress: plan.progress ?? null,
           // 权威 taskId 清单：第一时间把 store 生成的 taskId 经 Tool Result 回显给模型，

@@ -1072,6 +1072,7 @@ function normalizePlan(plan) {
   const normalized = {
     ...plan,
     conversationId: normalizedConversationId ?? undefined,
+    originWorkspacePath: normalizeWorkspacePath(plan.originWorkspacePath) ?? undefined,
     targetWorkspacePath: normalizeWorkspacePath(plan.targetWorkspacePath) ?? undefined,
     workflowKind,
     activation: normalizeActivation(plan.activation, workflowKind, normalizedStatus),
@@ -1412,6 +1413,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       conversationId: normalizeConversationId(draft.conversationId) ?? undefined,
       threadId: draft.threadId,
       agentId: draft.agentId,
+      originWorkspacePath: normalizeWorkspacePath(draft.originWorkspacePath) ?? undefined,
       targetWorkspacePath: normalizeWorkspacePath(draft.targetWorkspacePath) ?? undefined,
       title: draft.title || '',
       goal: draft.goal || '',

@@ -432,6 +432,10 @@ export interface GoalPlan {
   readonly conversationId?: string;
   readonly threadId?: string;
   readonly agentId?: number;
+  /** Workspace where the Goal was initiated and where contextual knowledge came from. */
+  readonly originWorkspacePath?: string;
+  /** Workspace/repository where the Goal should write and verify changes. */
+  readonly targetWorkspacePath?: string;
   readonly title: string;
 
   // 计划实质

@@ -354,6 +354,39 @@ test('upsertGoalContract: 复用同会话自驱 Goal，且不把调用控制字�
   assert.equal(plans.length, 1);
 });
 
+test('upsertGoalContract: 可在知识仓发起后绑定目标代码仓，且后续 upsert 不清空 target', () => {
+  const originWorkspacePath = '/repo/peer-knowledge';
+  const targetWorkspacePath = '/repo/peer_agent';
+  const first = store.upsertGoalContract('conv-cross-workspace', {
+    title: '修复 Goal 工作区绑定',
+    goal: '从知识仓发起，落地到代码仓',
+    originWorkspacePath,
+    createdBy: 'user',
+  });
+
+  const bound = store.upsertGoalContract('conv-cross-workspace', {
+    title: '实现跨仓 Goal 绑定',
+    goal: '从知识仓读取上下文，在代码仓完成实现',
+    targetWorkspacePath,
+    createdBy: 'agent',
+  });
+
+  assert.equal(bound.planId, first.planId);
+  assert.equal(bound.originWorkspacePath, originWorkspacePath);
+  assert.equal(bound.targetWorkspacePath, targetWorkspacePath);
+
+  const revised = store.upsertGoalContract('conv-cross-workspace', {
+    title: '继续跨仓 Goal',
+    goal: '继续推进同一个跨仓目标',
+    originWorkspacePath,
+    createdBy: 'user',
+  });
+
+  assert.equal(revised.planId, first.planId);
+  assert.equal(revised.originWorkspacePath, originWorkspacePath);
+  assert.equal(revised.targetWorkspacePath, targetWorkspacePath);
+});
+
 test('recordTaskEvidence: 批准后把子任务标 running，计划自动推进为 executing', () => {
   const created = approvedPlanWithTasks();
   assert.equal(created.status, 'approved');

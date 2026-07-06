@@ -6,6 +6,7 @@ import {
   detectIrreversibleAction,
   evaluateGoalModeGate,
   evaluateWriteScope,
+  resolveActiveGoalExecutionBinding,
   resolveActivePlanBoundaries,
   resolveGoalPlanGate,
 } from './goal-mode-gate.mjs';
@@ -189,6 +190,27 @@ describe('evaluateWriteScope', () => {
 
   it('denies writes escaping the workspace via ..', () => {
     const r = evaluateWriteScope({ args: { path: '../outside/x.ts' }, workspacePath, boundaries: null });
+    assert.equal(r.allowed, false);
+    assert.equal(r.reason, 'goal_scope_out_of_workspace');
+  });
+
+  it('allows writes inside a Goal target writable root outside the origin workspace', () => {
+    const r = evaluateWriteScope({
+      args: { path: '/repo/peer_agent/src/a.ts' },
+      workspacePath: '/repo/peer-knowledge',
+      writableRoots: ['/repo/peer_agent'],
+      boundaries: null,
+    });
+    assert.equal(r.allowed, true);
+  });
+
+  it('denies writes outside both origin and Goal target writable roots', () => {
+    const r = evaluateWriteScope({
+      args: { path: '/repo/other/src/a.ts' },
+      workspacePath: '/repo/peer-knowledge',
+      writableRoots: ['/repo/peer_agent'],
+      boundaries: null,
+    });
     assert.equal(r.allowed, false);
     assert.equal(r.reason, 'goal_scope_out_of_workspace');
   });
@@ -427,5 +449,38 @@ describe('resolveActivePlanBoundaries', () => {
       },
     };
     assert.equal(resolveActivePlanBoundaries('c1', store), null);
+  });
+});
+
+describe('resolveActiveGoalExecutionBinding', () => {
+  it('uses active plan targetWorkspacePath as the execution and writable root', () => {
+    const store = {
+      getActivePlanByConversation: (id) =>
+        id === 'c1'
+          ? {
+            planId: 'plan-1',
+            originWorkspacePath: '/repo/peer-knowledge',
+            targetWorkspacePath: '/repo/peer_agent',
+            boundaries: { inScope: ['src/*'], outOfScope: [] },
+          }
+          : null,
+    };
+    const binding = resolveActiveGoalExecutionBinding('c1', '/repo/peer-knowledge', store);
+    assert.equal(binding.originWorkspacePath, '/repo/peer-knowledge');
+    assert.equal(binding.targetWorkspacePath, '/repo/peer_agent');
+    assert.equal(binding.executionWorkspacePath, '/repo/peer_agent');
+    assert.deepEqual(binding.writableRoots, ['/repo/peer_agent']);
+    assert.deepEqual(binding.readableRoots, ['/repo/peer-knowledge', '/repo/peer_agent']);
+    assert.deepEqual(binding.boundaries, { inScope: ['src/*'], outOfScope: [] });
+  });
+
+  it('falls back to the conversation workspace when no active target is bound', () => {
+    const binding = resolveActiveGoalExecutionBinding('c1', '/repo/current', {
+      getActivePlanByConversation: () => null,
+    });
+    assert.equal(binding.originWorkspacePath, '/repo/current');
+    assert.equal(binding.targetWorkspacePath, null);
+    assert.equal(binding.executionWorkspacePath, '/repo/current');
+    assert.deepEqual(binding.writableRoots, ['/repo/current']);
   });
 });

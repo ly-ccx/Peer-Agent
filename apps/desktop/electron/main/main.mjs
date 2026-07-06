@@ -1641,8 +1641,13 @@ ipcMain.handle('chat:send', (event, {
             },
           });
         } else {
+          const conversationWorkspacePath =
+            conversationStore.getConversation(conversationId)?.workspacePath ||
+            workspacePath ||
+            null;
           goalPlanStore.upsertGoalContract(conversationId, {
             conversationId,
+            ...(conversationWorkspacePath ? { originWorkspacePath: conversationWorkspacePath } : {}),
             title: goal.length > 48 ? `${goal.slice(0, 48)}...` : goal,
             goal,
             status: 'accepted',

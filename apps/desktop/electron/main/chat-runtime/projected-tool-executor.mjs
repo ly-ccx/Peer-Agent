@@ -6,6 +6,7 @@ import { getDataHome } from '../data-store.mjs';
 import {
   buildGoalModeDenial,
   evaluateGoalModeGate,
+  resolveActiveGoalExecutionBinding,
   resolveActivePlanBoundaries,
   resolveGoalPlanGate,
 } from './goal-mode-gate.mjs';
@@ -176,14 +177,28 @@ export async function executeProjectedModelTool({
     return { success: false, error: projection.error };
   }
 
-  const cwd = resolveSafeWorkspaceRoot(workspacePath);
+  const requestedCwd = resolveSafeWorkspaceRoot(workspacePath);
+  const mode = toolContext?.mode ?? 'chat';
+  const conversationId = toolContext?.conversationId ?? null;
+  const goalBinding = mode === 'goal'
+    ? resolveActiveGoalExecutionBinding(conversationId, requestedCwd, goalPlanStore)
+    : null;
+  const cwd = resolveSafeWorkspaceRoot(goalBinding?.executionWorkspacePath ?? requestedCwd);
+  const effectiveToolContext = toolContext
+    ? {
+      ...toolContext,
+      workspacePath: cwd,
+      originWorkspacePath: goalBinding?.originWorkspacePath ?? toolContext.originWorkspacePath ?? requestedCwd,
+      targetWorkspacePath: goalBinding?.targetWorkspacePath ?? toolContext.targetWorkspacePath ?? null,
+      readableRoots: goalBinding?.readableRoots ?? toolContext.readableRoots,
+      writableRoots: goalBinding?.writableRoots ?? toolContext.writableRoots,
+    }
+    : toolContext;
 
   // 运行时闸门（见 goal-mode-gate.mjs / goal-mode-ultrathink-workflow 设计文档）：
   // - plan 模式：计划未获批准前，拒绝有副作用能力，强制「先规划 → 批准 → 执行」。
   // - goal 模式：pre-act 写盘范围守卫（越界 DENY）+ 不可逆动作逐动作确认。
   // 这是 PermissionGrant 之前的能力准入判定，不绕过 Runtime Projection。
-  const mode = toolContext?.mode ?? 'chat';
-  const conversationId = toolContext?.conversationId ?? null;
   const gate = evaluateGoalModeGate({
     mode,
     toolName: name,
@@ -191,7 +206,8 @@ export async function executeProjectedModelTool({
     planGate: resolveGoalPlanGate(conversationId, goalPlanStore),
     args,
     workspacePath: cwd,
-    boundaries: mode === 'goal' ? resolveActivePlanBoundaries(conversationId, goalPlanStore) : null,
+    writableRoots: mode === 'goal' ? goalBinding?.writableRoots : null,
+    boundaries: mode === 'goal' ? (goalBinding?.boundaries ?? resolveActivePlanBoundaries(conversationId, goalPlanStore)) : null,
   });
   if (!gate.allowed) {
     return {
@@ -270,7 +286,7 @@ export async function executeProjectedModelTool({
     }),
   });
   const execution = await host.execute({ call: projection.call }, {
-    toolContext,
+    toolContext: effectiveToolContext,
     requestPermission,
     signal,
     locale,

@@ -7,7 +7,7 @@
  * - plan 模式「先规划 → 批准 → 执行」：计划未获批准前，只放行规划 / 回写 / 提问 / 惰性只读
  *   能力；一切有副作用的能力（写文件、shell、MCP 副作用）被结构化拒绝。
  * - goal 模式「自驱目标模式」：不施加整模式「计划审批门」，改用确定性 hooks·阶段一——
- *   ①pre-act 写盘范围守卫（越出 workspace 或命中 outOfScope 即 DENY）；
+ *   ①pre-act 写盘范围守卫（越出 Goal 绑定写入根或命中 outOfScope 即 DENY）；
  *   ②on-irreversible 不可逆动作（删除/覆盖/git 强制/push/release）逐动作确认。
  * - 计划状态 / 边界是「活事实」，从 goal-plan-store 按 conversationId 实时读取，避免用流开始时的
  *   静态快照（模型可能在回合中途才 goal_create_plan）。
@@ -46,15 +46,60 @@ function escapeRegExp(literal) {
   return literal.replace(/[.+^${}()|[\]\\]/g, (m) => '\\' + m);
 }
 
-// 判定 targetPath 是否落在 workspaceRoot 内（含 root 本身）。纯路径判定，不触碰磁盘。
-function isInsideWorkspace(targetPath, workspaceRoot) {
-  if (!targetPath || !workspaceRoot) return true; // 缺信息时不阻断，交后续 permission 网关裁决。
-  const abs = path.isAbsolute(targetPath)
+function normalizeWorkspacePath(value) {
+  return typeof value === 'string' && value.trim() ? path.resolve(value.trim()) : null;
+}
+
+function normalizeWorkspaceRoots(values) {
+  const out = [];
+  const seen = new Set();
+  for (const value of Array.isArray(values) ? values : []) {
+    const normalized = normalizeWorkspacePath(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function resolveTargetPath(targetPath, baseWorkspacePath) {
+  if (!targetPath) return null;
+  return path.isAbsolute(targetPath)
     ? path.normalize(targetPath)
-    : path.resolve(workspaceRoot, targetPath);
+    : path.resolve(baseWorkspacePath || process.cwd(), targetPath);
+}
+
+// 判定 absolutePath 是否落在 workspaceRoot 内（含 root 本身）。纯路径判定，不触碰磁盘。
+function isInsideWorkspace(absolutePath, workspaceRoot) {
+  if (!absolutePath || !workspaceRoot) return true; // 缺信息时不阻断，交后续 permission 网关裁决。
+  const abs = path.resolve(absolutePath);
   const root = path.resolve(workspaceRoot);
   const rel = path.relative(root, abs);
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+function isInsideAnyWorkspace(absolutePath, workspaceRoots) {
+  const roots = normalizeWorkspaceRoots(workspaceRoots);
+  if (roots.length === 0) return true;
+  return roots.some((root) => isInsideWorkspace(absolutePath, root));
+}
+
+function scopePathCandidates({ targetPath, absoluteTargetPath, writableRoots }) {
+  const candidates = new Set();
+  if (typeof targetPath === 'string' && targetPath.trim()) {
+    candidates.add(targetPath.trim().replace(/\\/g, '/'));
+  }
+  if (absoluteTargetPath) {
+    candidates.add(String(absoluteTargetPath).replace(/\\/g, '/'));
+  }
+  for (const root of normalizeWorkspaceRoots(writableRoots)) {
+    if (!absoluteTargetPath || !isInsideWorkspace(absoluteTargetPath, root)) continue;
+    const rel = path.relative(root, absoluteTargetPath);
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+      candidates.add(rel.replace(/\\/g, '/'));
+    }
+  }
+  return Array.from(candidates);
 }
 
 // outOfScope 模式匹配：仅对「像路径/glob」的条目做匹配（含 / . * 之一）；
@@ -88,22 +133,29 @@ function matchesScopePattern(targetPath, pattern) {
   return norm === seg || norm.endsWith('/' + seg) || norm.includes('/' + seg + '/') || norm.startsWith(seg + '/');
 }
 
-// pre-act 写盘范围守卫：目标路径越出 workspace 或命中 outOfScope → 拒绝。
-export function evaluateWriteScope({ args, workspacePath, boundaries } = {}) {
+// pre-act 写盘范围守卫：目标路径越出 Goal 绑定写入根或命中 outOfScope → 拒绝。
+export function evaluateWriteScope({ args, workspacePath, writableRoots = null, boundaries } = {}) {
   const targetPath = typeof args?.path === 'string' ? args.path : null;
   if (!targetPath) return { allowed: true }; // 无路径信息，保守放行。
-  if (workspacePath && !isInsideWorkspace(targetPath, workspacePath)) {
+  const baseWorkspacePath = normalizeWorkspacePath(workspacePath);
+  const roots = normalizeWorkspaceRoots(writableRoots && writableRoots.length > 0 ? writableRoots : [baseWorkspacePath]);
+  const absoluteTargetPath = resolveTargetPath(targetPath, baseWorkspacePath || roots[0]);
+  if (roots.length > 0 && !isInsideAnyWorkspace(absoluteTargetPath, roots)) {
     return { allowed: false, reason: 'goal_scope_out_of_workspace', detail: targetPath };
   }
+  const scopeCandidates = scopePathCandidates({ targetPath, absoluteTargetPath, writableRoots: roots });
   const outOfScope = Array.isArray(boundaries?.outOfScope) ? boundaries.outOfScope : [];
   for (const pat of outOfScope) {
-    if (matchesScopePattern(targetPath, pat)) {
+    if (scopeCandidates.some((candidate) => matchesScopePattern(candidate, pat))) {
       return { allowed: false, reason: 'goal_scope_out_of_bounds', detail: targetPath + ' ∈ outOfScope(' + pat + ')' };
     }
   }
   const inScope = Array.isArray(boundaries?.inScope) ? boundaries.inScope : [];
   const pathLikeInScope = inScope.filter(looksPathLikeScopePattern);
-  if (pathLikeInScope.length > 0 && !pathLikeInScope.some((pat) => matchesScopePattern(targetPath, pat))) {
+  if (
+    pathLikeInScope.length > 0 &&
+    !pathLikeInScope.some((pat) => scopeCandidates.some((candidate) => matchesScopePattern(candidate, pat)))
+  ) {
     return {
       allowed: true,
       requiresConfirmation: true,
@@ -183,6 +235,43 @@ export function resolveActivePlanBoundaries(conversationId, goalPlanStore = defa
 }
 
 /**
+ * Goal 执行绑定：当前会话 workspace 是认知起点(origin)，active Goal 的 targetWorkspacePath
+ * 是写入与验证目标。若没有 target，则保持旧行为：当前 workspace 即执行根。
+ */
+export function resolveActiveGoalExecutionBinding(
+  conversationId,
+  workspacePath = null,
+  goalPlanStore = defaultGoalPlanStore(),
+) {
+  const fallbackWorkspacePath = normalizeWorkspacePath(workspacePath);
+  let plan = null;
+  if (conversationId && typeof goalPlanStore?.getActivePlanByConversation === 'function') {
+    try {
+      plan = goalPlanStore.getActivePlanByConversation(conversationId);
+    } catch {
+      plan = null;
+    }
+  }
+  const originWorkspacePath =
+    normalizeWorkspacePath(plan?.originWorkspacePath) ||
+    fallbackWorkspacePath ||
+    null;
+  const targetWorkspacePath = normalizeWorkspacePath(plan?.targetWorkspacePath);
+  const executionWorkspacePath = targetWorkspacePath || fallbackWorkspacePath || originWorkspacePath || null;
+  const writableRoots = normalizeWorkspaceRoots([targetWorkspacePath || fallbackWorkspacePath || originWorkspacePath]);
+  const readableRoots = normalizeWorkspaceRoots([originWorkspacePath, targetWorkspacePath || fallbackWorkspacePath]);
+  return {
+    planId: typeof plan?.planId === 'string' ? plan.planId : null,
+    originWorkspacePath,
+    targetWorkspacePath,
+    executionWorkspacePath,
+    writableRoots,
+    readableRoots,
+    boundaries: plan?.boundaries ?? null,
+  };
+}
+
+/**
  * 纯函数：在给定 mode / 工具 / 风险等级 / 计划闸门事实 / 参数与边界下，决定是否放行。
  * 返回：
  * - { allowed: true }
@@ -196,6 +285,7 @@ export function evaluateGoalModeGate({
   planGate = { hasPlan: false, hasApprovedPlan: false },
   args = null,
   workspacePath = null,
+  writableRoots = null,
   boundaries = null,
 } = {}) {
   // wire 值迁移后（见 ADR 41 / goal-mode-ultrathink-workflow 设计文档十一章）：
@@ -209,7 +299,7 @@ export function evaluateGoalModeGate({
     if (INERT_RISK_LEVELS.has(riskLevel)) return { allowed: true };
     // ① pre-act 写盘范围守卫（write_file / edit_file）。
     if (PATH_WRITE_TOOLS.has(toolName)) {
-      const scope = evaluateWriteScope({ args, workspacePath, boundaries });
+      const scope = evaluateWriteScope({ args, workspacePath, writableRoots, boundaries });
       if (!scope.allowed) return { allowed: false, reason: scope.reason, detail: scope.detail };
       if (scope.requiresConfirmation) {
         return {
@@ -270,8 +360,8 @@ function denialMessage(reason, locale) {
   }
   if (reason === 'goal_scope_out_of_workspace') {
     return zh
-      ? 'Goal 模式：拒绝写入 workspace 之外的路径。请把写操作限制在当前工作区内。'
-      : 'Goal mode: refusing to write outside the active workspace. Keep write operations within the current workspace.';
+      ? 'Goal 模式：拒绝写入未绑定到当前目标的路径。请把写操作限制在 Goal 的目标执行范围内。'
+      : 'Goal mode: refusing to write outside the active Goal target. Keep write operations within the Goal execution scope.';
   }
   if (reason === 'goal_scope_out_of_bounds') {
     return zh

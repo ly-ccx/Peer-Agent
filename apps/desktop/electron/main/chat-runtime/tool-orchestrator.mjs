@@ -1,9 +1,22 @@
 import { executeProjectedModelTool } from './projected-tool-executor.mjs';
 
-export function createToolContext({ conversationId = null, workspacePath = null, mode = 'chat', onToolCall = null } = {}) {
+export function createToolContext({
+  conversationId = null,
+  workspacePath = null,
+  mode = 'chat',
+  onToolCall = null,
+  originWorkspacePath = null,
+  targetWorkspacePath = null,
+  readableRoots = null,
+  writableRoots = null,
+} = {}) {
   return {
     conversationId,
     workspacePath,
+    originWorkspacePath,
+    targetWorkspacePath,
+    readableRoots,
+    writableRoots,
     // 当前回合的交互模式（chat/goal/...）。由 llm-chat-service 在每次 run 时写入，
     // 供 goal 模式运行时闸门在工具执行层判定准入。见 Goal 模式运行时闸门设计。
     mode,
