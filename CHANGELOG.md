@@ -2,6 +2,23 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.0.1-beta.25 - 2026-07-06
+
+### Added
+
+- Goal auto-execution binds to the target repo workspace so cross-repo actions land in the right place, with run-trace tracking surfaced in the Goal panel.
+- New `--ui-*` semantic token layer; chat UI styles migrated onto it for theme consistency and easier future theming.
+
+### Changed
+
+- Add/edit model provider now opens a centered Overlay modal instead of an inline form at the bottom of the list.
+- Goal task breakdown wording is plainer: subtask titles drop jargon and packed numbering in favor of one plain sentence per step.
+
+### Fixed
+
+- Chat cancel now goes through the same-origin gateway instead of a bare cross-origin fetch, fixing cross-origin auth 401.
+- Thinking-state animation: removed the extra dots on the active "thinking" state and fixed the shimmer sweep.
+
 ## 0.0.1-beta.11 - 2026-06-24
 
 ### Added
