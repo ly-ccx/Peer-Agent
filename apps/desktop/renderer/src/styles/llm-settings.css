@@ -673,3 +673,101 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ── 添加 / 编辑模型 Modal（复用 Overlay 基座，风格对齐 mcp-modal）── */
+.llm-modal-card {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: calc(100vh - 2 * var(--space-8));
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--chrome-hairline);
+  background: var(--chrome-raised);
+  box-shadow: var(--shadow-drag);
+}
+
+.llm-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--chrome-hairline);
+}
+
+.llm-modal-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--graphite-base);
+}
+
+.llm-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--graphite-soft);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: color var(--za-motion-fast), background var(--za-motion-fast);
+}
+
+.llm-modal-close:hover {
+  background: var(--chrome-hairline);
+  color: var(--graphite-base);
+}
+
+/* body：复用 .llm-form 的表单布局，但在 modal 语境下中和其卡片外观并接管滚动 */
+.llm-form.llm-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-5);
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.llm-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--chrome-hairline);
+}
+
+.llm-modal-footer button {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--chrome-hairline);
+  background: var(--paper-sheet);
+  color: var(--graphite-base);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: opacity var(--za-motion-fast), background var(--za-motion-fast);
+}
+
+.llm-modal-cancel:hover:not(:disabled) {
+  background: var(--chrome-hairline);
+}
+
+.llm-modal-footer button.primary {
+  border-color: transparent;
+  background: var(--za-primary-control-bg);
+  color: var(--za-primary-control-ink);
+}
+
+.llm-modal-footer button.primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.llm-modal-footer button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}

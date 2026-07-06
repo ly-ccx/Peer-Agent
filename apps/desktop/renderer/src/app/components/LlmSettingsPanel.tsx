@@ -13,6 +13,7 @@ import type {
 import { useCallback, useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Dropdown } from './Dropdown';
+import { Overlay } from './Overlay';
 
 interface FormState {
   provider: LlmProviderType;
@@ -763,13 +764,31 @@ export function LlmSettingsPanel({
         ))}
       </div>
 
-      {!showForm ? (
-        <button type="button" className="llm-add-btn" onClick={openAdd}>
-          ＋ {i18n.locale === 'zh-CN' ? '添加模型' : 'Add Model'}
-        </button>
-      ) : (
-        <div className="llm-form">
-          <h3>{editingId ? (i18n.locale === 'zh-CN' ? '编辑模型' : 'Edit Model') : (i18n.locale === 'zh-CN' ? '添加模型' : 'Add Model')}</h3>
+      <button type="button" className="llm-add-btn" onClick={openAdd}>
+        ＋ {i18n.locale === 'zh-CN' ? '添加模型' : 'Add Model'}
+      </button>
+
+      {showForm ? (
+        <Overlay
+          onClose={() => { setShowForm(false); setEditingId(null); }}
+          closeOnBackdrop={!saving && !oauthBusyId}
+          ariaLabel={editingId ? (i18n.locale === 'zh-CN' ? '编辑模型' : 'Edit Model') : (i18n.locale === 'zh-CN' ? '添加模型' : 'Add Model')}
+          panelClassName="llm-modal-card"
+        >
+          {({ requestClose }) => (
+          <>
+            <header className="llm-modal-header">
+              <h3>{editingId ? (i18n.locale === 'zh-CN' ? '编辑模型' : 'Edit Model') : (i18n.locale === 'zh-CN' ? '添加模型' : 'Add Model')}</h3>
+              <button
+                type="button"
+                className="llm-modal-close"
+                aria-label={i18n.locale === 'zh-CN' ? '关闭' : 'Close'}
+                onClick={requestClose}
+              >
+                ✕
+              </button>
+            </header>
+            <div className="llm-form llm-modal-body">
 
           <label>
             <span>{i18n.locale === 'zh-CN' ? '渠道' : 'Channel'}</span>
@@ -1003,9 +1022,9 @@ export function LlmSettingsPanel({
           ) : null}
 
           {formError ? <p className="llm-form-error">{friendlyTestError(formError, i18n.locale)}</p> : null}
-
-          <div className="llm-form-actions">
-            <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }}>
+            </div>
+            <div className="llm-modal-footer">
+            <button type="button" className="llm-modal-cancel" onClick={requestClose}>
               {i18n.locale === 'zh-CN' ? '取消' : 'Cancel'}
             </button>
             <button
@@ -1026,9 +1045,11 @@ export function LlmSettingsPanel({
                     ? (i18n.locale === 'zh-CN' ? `登录 ${form.authMethod === 'oauth_google' ? 'Google' : 'ChatGPT'}` : `Login with ${form.authMethod === 'oauth_google' ? 'Google' : 'ChatGPT'}`)
                     : (i18n.locale === 'zh-CN' ? '保存' : 'Save'))}
             </button>
-          </div>
-        </div>
-      )}
+            </div>
+          </>
+          )}
+        </Overlay>
+      ) : null}
     </div>
   );
 }
