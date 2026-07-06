@@ -124,6 +124,71 @@ test('derivePlanStatus: 只前进，不干扰其它显式状态机', () => {
   assert.equal(derivePlanStatus('cancelled', running), 'cancelled');
 });
 
+test('appendRunEvent persists Goal / Plan / Run trace events without changing task progress', () => {
+  const plan = store.createGoalContract({
+    conversationId: 'conv-run-trace',
+    title: '网关开关与 AK 退场',
+    goal: '网关开关与 AK 退场',
+  });
+  assert.equal(plan.runTrace.events.length, 1);
+  assert.equal(plan.runTrace.events[0].type, 'goal_created');
+
+  const updated = store.appendRunEvent(plan.planId, {
+    type: 'goal_resumed',
+    summary: 'User resumed the current Goal: 继续',
+    payload: {
+      intent: 'resume',
+      messageText: '继续',
+    },
+  });
+
+  assert.equal(updated.planId, plan.planId);
+  assert.equal(updated.progress.total, plan.progress.total);
+  assert.equal(updated.progress.completed, plan.progress.completed);
+  assert.equal(updated.runTrace.events.length, 2);
+  const resumeEvent = updated.runTrace.events[1];
+  assert.equal(resumeEvent.type, 'goal_resumed');
+  assert.equal(resumeEvent.payload.intent, 'resume');
+
+  const reloaded = store.getPlan(plan.planId);
+  assert.equal(reloaded.runTrace.events.length, 2);
+  assert.equal(reloaded.runTrace.events[1].summary, 'User resumed the current Goal: 继续');
+});
+
+test('createPlan and revisePlan record plan lifecycle run trace events', () => {
+  const plan = store.createPlan(draftWithTasks());
+  assert.equal(plan.runTrace.events.length, 1);
+  assert.equal(plan.runTrace.events[0].type, 'plan_created');
+  assert.equal(plan.runTrace.events[0].payload.taskCount, 2);
+
+  const revised = store.revisePlan(plan.planId, {
+    title: 'revised plan',
+  }, {
+    reason: 'dynamic replanning',
+    changedBy: 'agent',
+  });
+  assert.equal(revised.runTrace.events.length, 2);
+  assert.equal(revised.runTrace.events[1].type, 'plan_revised');
+  assert.equal(revised.runTrace.events[1].payload.version, 2);
+});
+
+test('appendRunEvent records checkpoint resume coordinates when a node is supplied', () => {
+  const plan = store.createGoalContract({
+    conversationId: 'conv-checkpoint',
+    title: '恢复点测试',
+    goal: '恢复点测试',
+  });
+
+  const updated = store.appendRunEvent(plan.planId, {
+    type: 'checkpoint_created',
+    nodeId: 'node-verify-agent-binding',
+    summary: '恢复点：正在验证 agent binding 分支',
+  });
+
+  assert.equal(updated.runTrace.activeNodeId, 'node-verify-agent-binding');
+  assert.equal(updated.runTrace.lastCheckpointNodeId, 'node-verify-agent-binding');
+});
+
 test('derivePlanStatus: executing + 全叶子 completed → completed（自动收尾）', () => {
   const tasks = [
     { taskId: 't1', status: 'completed' },

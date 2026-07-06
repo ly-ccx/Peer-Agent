@@ -604,6 +604,31 @@ export function createGoalRunner({
     }
   }
 
+  function appendRunEvent(planId, event = {}) {
+    if (typeof goalPlanStore.appendRunEvent !== 'function') return null;
+    try {
+      return goalPlanStore.appendRunEvent(planId, event);
+    } catch (error) {
+      logger?.warn?.('[goal-runner] appendRunEvent failed:', error);
+      return null;
+    }
+  }
+
+  function appendCheckpoint(planId, reason, plan = goalPlanStore.getPlan(planId)) {
+    const nodeId = plan?.runner?.currentTaskId || plan?.runTrace?.activeNodeId;
+    return appendRunEvent(planId, {
+      type: 'checkpoint_created',
+      ...(nodeId ? { nodeId, activeNodeId: nodeId } : {}),
+      summary: `Checkpoint: ${reason}`,
+      payload: {
+        reason,
+        phase: plan?.runner?.phase ?? null,
+        runnerStatus: plan?.runner?.status ?? null,
+        planStatus: plan?.status ?? null,
+      },
+    });
+  }
+
   function collectIndexedEvidenceRefsForPlan(plan) {
     if (!plan || typeof goalPlanStore.listEvidenceIndex !== 'function') return null;
     const conversationId = typeof plan.conversationId === 'string' && plan.conversationId.trim()
@@ -648,6 +673,15 @@ export function createGoalRunner({
       ...blockerPatch(plan, 'manual_dod_confirmation_required', { phase: 'blocked' }),
       updatedAt: now(),
     });
+    appendRunEvent(planId, {
+      type: 'problem_found',
+      summary: 'Manual DoD confirmation is required before completion',
+      payload: {
+        reason: 'manual_dod_confirmation_required',
+        criterionIds,
+      },
+    });
+    appendCheckpoint(planId, 'manual_dod_confirmation_required', goalPlanStore.getPlan(planId));
     emit('goalRunner:manualDodConfirmationRequired', {
       planId,
       criterionIds,
@@ -692,6 +726,17 @@ export function createGoalRunner({
         evidenceRefs: collectVerificationEvidenceRefs(plan),
         summary: summarizeVerificationGate(gate),
         failureReason: gate?.passed ? undefined : summarizeVerificationGate(gate),
+      });
+      appendRunEvent(plan.planId, {
+        type: gate?.passed ? 'validation_passed' : 'validation_failed',
+        summary: summarizeVerificationGate(gate),
+        evidenceRefs: collectVerificationEvidenceRefs(plan),
+        payload: {
+          source: 'verification_gate',
+          passed: gate?.passed === true,
+          unmet: Array.isArray(gate?.unmet) ? gate.unmet : [],
+          warnings: Array.isArray(gate?.warnings) ? gate.warnings : [],
+        },
       });
     } catch (error) {
       logger?.warn?.('[goal-runner] record verifier run failed:', error);
@@ -824,6 +869,11 @@ export function createGoalRunner({
           lastError: message,
           updatedAt: now(),
         });
+        appendRunEvent(planId, {
+          type: 'problem_found',
+          summary: `Goal Runner failed: ${message}`,
+          payload: { source: 'pump', error: message },
+        });
         emit('goalRunner:failed', { planId, error: message });
       })
       .finally(() => {
@@ -891,6 +941,14 @@ export function createGoalRunner({
   async function start(planId, options = {}) {
     const initialized = initializeRunner(planId, options);
     if (!initialized) return null;
+    appendRunEvent(planId, {
+      type: 'action_started',
+      summary: 'Goal Runner started',
+      payload: {
+        intent: initialized.runner?.intent ?? null,
+        phase: initialized.runner?.phase ?? null,
+      },
+    });
     emit('goalRunner:started', { planId });
     const promise = schedulePump(planId);
     if (options.awaitIdle) await promise;
@@ -916,6 +974,15 @@ export function createGoalRunner({
       lastError: undefined,
       updatedAt: now(),
     });
+    appendRunEvent(planId, {
+      type: 'goal_resumed',
+      summary: 'Goal Runner resumed',
+      payload: {
+        checkpointNodeId: plan.runTrace?.lastCheckpointNodeId ?? null,
+        previousRunnerStatus: plan.runner?.status ?? null,
+        previousPhase: plan.runner?.phase ?? null,
+      },
+    });
     emit('goalRunner:resumed', { planId });
     const promise = schedulePump(planId);
     if (options.awaitIdle) await promise;
@@ -935,6 +1002,12 @@ export function createGoalRunner({
       blockedReason: reason,
       updatedAt: now(),
     });
+    appendRunEvent(planId, {
+      type: 'goal_paused',
+      summary: `Goal Runner paused: ${reason}`,
+      payload: { reason },
+    });
+    appendCheckpoint(planId, reason, goalPlanStore.getPlan(planId));
     emit('goalRunner:paused', { planId, reason });
     return getState(planId);
   }
@@ -1100,6 +1173,7 @@ export function createGoalRunner({
             ...blockerPatch(plan, 'verification_gate_failed', { phase: 'blocked' }),
             updatedAt: now(),
           });
+          appendCheckpoint(planId, 'verification_gate_failed', goalPlanStore.getPlan(planId));
           emit('goalRunner:blocked', {
             planId,
             reason: 'verification_gate_failed',
@@ -1125,6 +1199,12 @@ export function createGoalRunner({
             ...blockerPatch(plan, 'verifier_failed', { phase: 'repair' }),
             updatedAt: now(),
           });
+          appendRunEvent(planId, {
+            type: 'self_correction',
+            summary: `Verifier failed; returning to repair: ${verifier.reason}`,
+            payload: { trigger: 'validation_failed', correction: 'repair' },
+          });
+          appendCheckpoint(planId, 'verifier_failed', goalPlanStore.getPlan(planId));
           emit('goalRunner:blocked', {
             planId,
             reason: 'verifier_failed',
@@ -1140,6 +1220,11 @@ export function createGoalRunner({
           phase: 'synthesize',
           updatedAt: now(),
         });
+        appendRunEvent(planId, {
+          type: 'goal_completed',
+          summary: 'Goal Runner completed after verification passed',
+          evidenceRefs: collectVerificationEvidenceRefs(goalPlanStore.getPlan(planId)),
+        });
         emit('goalRunner:completed', { planId });
         return getState(planId);
       }
@@ -1150,6 +1235,11 @@ export function createGoalRunner({
           intent: 'block',
           phase: 'blocked',
           updatedAt: now(),
+        });
+        appendRunEvent(planId, {
+          type: 'problem_found',
+          summary: 'Goal Runner stopped because plan status is failed',
+          payload: { reason: 'plan_failed' },
         });
         emit('goalRunner:failed', { planId });
         return getState(planId);
@@ -1193,6 +1283,12 @@ export function createGoalRunner({
           }),
           updatedAt: now(),
         });
+        appendRunEvent(planId, {
+          type: 'problem_found',
+          summary: 'Goal Runner detected no progress',
+          payload: { reason: 'no_progress', noProgressStreak },
+        });
+        appendCheckpoint(planId, 'no_progress', goalPlanStore.getPlan(planId));
         emit('goalRunner:blocked', { planId, reason: 'no_progress' });
         return getState(planId);
       }
@@ -1216,6 +1312,12 @@ export function createGoalRunner({
             ...blockerPatch(plan, 'scope_drift', { phase: 'blocked' }),
             updatedAt: now(),
           });
+          appendRunEvent(planId, {
+            type: 'problem_found',
+            summary: `Scope drift detected: ${drift.reasons.join('; ')}`,
+            payload: { reason: 'scope_drift', reasons: drift.reasons },
+          });
+          appendCheckpoint(planId, 'scope_drift', goalPlanStore.getPlan(planId));
           emit('goalRunner:blocked', { planId, reason: 'scope_drift', reasons: drift.reasons });
           return getState(planId);
         }
@@ -1261,6 +1363,15 @@ export function createGoalRunner({
         reanchor,
         updatedAt: now(),
       });
+      appendRunEvent(planId, {
+        type: 'step_started',
+        summary: `Goal Runner turn ${turnNumber} started`,
+        payload: {
+          turnNumber,
+          phase: runner.phase ?? 'orient',
+          reanchor,
+        },
+      });
       emit('goalRunner:tickStarted', { planId, turnNumber, reanchor });
 
       let result;
@@ -1283,6 +1394,11 @@ export function createGoalRunner({
           lastError: message,
           updatedAt: now(),
         });
+        appendRunEvent(planId, {
+          type: 'problem_found',
+          summary: `Goal Runner turn failed: ${message}`,
+          payload: { source: 'runGoalTurn', error: message, turnNumber },
+        });
         emit('goalRunner:failed', { planId, error: message });
         return getState(planId);
       }
@@ -1296,6 +1412,17 @@ export function createGoalRunner({
       goalPlanStore.setRunnerState(planId, {
         turnCount: toPositiveInteger(afterTurnRunner.turnCount, 0, { allowZero: true }) + 1,
         updatedAt: now(),
+      });
+      appendRunEvent(planId, {
+        type: 'step_completed',
+        summary: `Goal Runner turn ${turnNumber} completed`,
+        payload: {
+          turnNumber,
+          terminalStatus: result?.terminalStatus ?? null,
+          intent: result?.intent ?? null,
+          completed: result?.completed === true,
+          blocked: result?.blocked === true,
+        },
       });
 
       const latest = goalPlanStore.getPlan(planId);
@@ -1335,6 +1462,12 @@ export function createGoalRunner({
           ...blockerPatch(latest, reason, { phase: 'blocked' }),
           updatedAt: now(),
         });
+        appendRunEvent(planId, {
+          type: 'problem_found',
+          summary: `Goal Runner requested user input: ${reason}`,
+          payload: { reason, requestedUserInput: true },
+        });
+        appendCheckpoint(planId, reason, goalPlanStore.getPlan(planId));
         emit('goalRunner:blocked', { planId, reason, requestedUserInput: true });
         return getState(planId);
       }
@@ -1349,6 +1482,11 @@ export function createGoalRunner({
           phase: 'blocked',
           lastError: message,
           updatedAt: now(),
+        });
+        appendRunEvent(planId, {
+          type: 'problem_found',
+          summary: `Goal Runner stream failed: ${message}`,
+          payload: { reason: 'stream_error' },
         });
         emit('goalRunner:failed', { planId, error: message });
         return getState(planId);
@@ -1365,6 +1503,12 @@ export function createGoalRunner({
           ...blockerPatch(latest, reason, { phase: 'blocked' }),
           updatedAt: now(),
         });
+        appendRunEvent(planId, {
+          type: 'network_interrupted',
+          summary: reason,
+          payload: { reason, terminalStatus: 'aborted' },
+        });
+        appendCheckpoint(planId, reason, goalPlanStore.getPlan(planId));
         emit('goalRunner:blocked', { planId, reason });
         return getState(planId);
       }
@@ -1412,6 +1556,12 @@ export function createGoalRunner({
           blockerAudit: auditPatch.blockerAudit,
           updatedAt: now(),
         });
+        appendRunEvent(planId, {
+          type: 'problem_found',
+          summary: `Goal Runner blocked: ${reason}`,
+          payload: { reason, occurrences: auditPatch.blockerAudit.occurrences },
+        });
+        appendCheckpoint(planId, reason, goalPlanStore.getPlan(planId));
         emit('goalRunner:blocked', { planId, reason, occurrences: auditPatch.blockerAudit.occurrences });
         return getState(planId);
       }
@@ -1426,6 +1576,11 @@ export function createGoalRunner({
           phase: 'blocked',
           lastError: message,
           updatedAt: now(),
+        });
+        appendRunEvent(planId, {
+          type: 'problem_found',
+          summary: `Goal Runner failed: ${message}`,
+          payload: { reason: 'runtime_failed' },
         });
         emit('goalRunner:failed', { planId, error: message });
         return getState(planId);

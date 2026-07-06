@@ -178,6 +178,9 @@ test('start: 会把 plan/runner 置为 executing/running', async () => {
   assert.equal(got.runner.turnCount, 1);
   assert.equal(got.runner.status, 'idle');
   assert.equal(got.runner.intent, 'verify');
+  assert.ok(got.runTrace.events.some((event) => event.type === 'action_started'));
+  assert.ok(got.runTrace.events.some((event) => event.type === 'step_started'));
+  assert.ok(got.runTrace.events.some((event) => event.type === 'step_completed'));
 });
 
 test('pause: 会停止后续 tick', async () => {
@@ -211,6 +214,53 @@ test('pause: 会停止后续 tick', async () => {
   assert.equal(got.status, 'paused');
   assert.equal(got.runner.status, 'paused');
   assert.equal(got.runner.blockedReason, 'manual pause');
+  assert.ok(got.runTrace.events.some((event) => event.type === 'goal_paused'));
+  assert.ok(got.runTrace.events.some((event) => event.type === 'checkpoint_created'));
+});
+
+test('resume: writes a goal_resumed event with checkpoint context', async () => {
+  const plan = createApprovedPlan();
+  store.appendRunEvent(plan.planId, {
+    type: 'checkpoint_created',
+    nodeId: 't1',
+    summary: 'Checkpoint before resume',
+  });
+  store.setPlanStatus(plan.planId, 'paused');
+  const runtime = {
+    async runGoalTurn() {
+      return { continue: false, intent: 'verify' };
+    },
+  };
+  const runner = createRunner({ runtime });
+
+  await runner.resume(plan.planId, { awaitIdle: true });
+
+  const got = store.getPlan(plan.planId);
+  const resumeEvent = got.runTrace.events.find((event) => event.type === 'goal_resumed');
+  assert.ok(resumeEvent);
+  assert.equal(resumeEvent.payload.checkpointNodeId, 't1');
+  assert.equal(got.runner.status, 'idle');
+});
+
+test('aborted turn writes network interruption and checkpoint events', async () => {
+  const plan = createApprovedPlan();
+  const runtime = {
+    async runGoalTurn() {
+      return {
+        terminalStatus: 'aborted',
+        blockedReason: 'Goal Runner turn aborted',
+      };
+    },
+  };
+  const runner = createRunner({ runtime });
+
+  await runner.start(plan.planId, { awaitIdle: true });
+
+  const got = store.getPlan(plan.planId);
+  assert.equal(got.runner.status, 'blocked');
+  assert.equal(got.runner.blockedReason, 'Goal Runner turn aborted');
+  assert.ok(got.runTrace.events.some((event) => event.type === 'network_interrupted'));
+  assert.ok(got.runTrace.events.some((event) => event.type === 'checkpoint_created'));
 });
 
 test('clear: 会 cancel plan 并停止 Runner', async () => {

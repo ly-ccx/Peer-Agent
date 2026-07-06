@@ -364,6 +364,294 @@
   gap: 4px;
 }
 
+/* Goal / Plan / Run 三段投影：同一计划卡内用分区标题表达语义层级，
+   不再把目标契约、任务拆解、执行账本混成一块。 */
+.goal-projection {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ui-border-subtle, var(--za-line));
+}
+
+.goal-plan-body > .goal-projection:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.goal-projection-head {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.goal-projection-title-wrap {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.goal-projection-kicker {
+  font-size: var(--ui-font-caption, 11px);
+  line-height: 1.2;
+  font-weight: 700;
+  color: var(--za-text);
+}
+
+.goal-projection-title {
+  min-width: 0;
+  font-size: var(--ui-font-meta, 12px);
+  line-height: 1.35;
+  color: var(--za-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.goal-projection-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 58%;
+  text-align: right;
+  font-size: var(--ui-font-caption, 11px);
+  line-height: 1.4;
+  color: var(--za-text-faint);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.goal-contract-text {
+  margin: 0;
+  font-size: var(--ui-font-control, 13px);
+  line-height: 1.55;
+  color: var(--za-text-soft);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.goal-contract-text--empty {
+  color: var(--za-text-faint);
+}
+
+.goal-criteria-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.goal-criterion-item {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: var(--ui-font-meta, 12px);
+  line-height: 1.45;
+}
+
+.goal-criterion-kind,
+.goal-criterion-result {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--ui-radius-control, 6px);
+  background: var(--ui-surface-hover, var(--za-hover));
+  color: var(--za-text-soft);
+  font-size: var(--ui-font-caption, 11px);
+  line-height: 1.4;
+}
+
+.goal-criterion-text {
+  flex: 1 1 150px;
+  min-width: 0;
+  color: var(--za-text-soft);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.goal-criterion-result--passed {
+  color: var(--za-good);
+  background: var(--za-good-soft);
+}
+
+.goal-criterion-result--failed {
+  color: var(--za-warn);
+  background: var(--za-warn-soft);
+}
+
+.goal-boundary-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: var(--ui-font-caption, 11px);
+  color: var(--za-text-faint);
+}
+
+.goal-boundary-meta span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.goal-projection--plan .goal-plan-progress {
+  margin: 0;
+}
+
+.goal-run-trace-summary {
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: var(--ui-font-caption, 11px);
+  color: var(--za-text-muted);
+}
+
+.goal-run-trace-summary span {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.goal-run-empty,
+.goal-run-event-note {
+  font-size: var(--ui-font-meta, 12px);
+  line-height: 1.45;
+  color: var(--za-text-faint);
+}
+
+.goal-run-trace-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.goal-run-event {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.goal-run-event-rail {
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: var(--ui-radius-round, 999px);
+  background: var(--za-text-faint);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-text-faint) 12%, transparent);
+}
+
+.goal-run-event-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.goal-run-event-head {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.goal-run-event-type {
+  min-width: 0;
+  color: var(--za-text);
+  font-size: var(--ui-font-meta, 12px);
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.goal-run-event-time {
+  flex: none;
+  color: var(--za-text-faint);
+  font-size: var(--ui-font-caption, 11px);
+  font-variant-numeric: tabular-nums;
+}
+
+.goal-run-event-summary {
+  min-width: 0;
+  color: var(--za-text-soft);
+  font-size: var(--ui-font-meta, 12px);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.goal-run-event-meta {
+  min-width: 0;
+  display: flex;
+  gap: 4px 6px;
+  flex-wrap: wrap;
+}
+
+.goal-run-event-meta span {
+  max-width: 100%;
+  padding: 1px 5px;
+  border-radius: var(--ui-radius-control, 6px);
+  background: var(--ui-surface-hover, var(--za-hover));
+  color: var(--za-text-faint);
+  font-size: var(--ui-font-caption, 11px);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.goal-run-event--success .goal-run-event-rail {
+  background: var(--za-good);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-good) 16%, transparent);
+}
+
+.goal-run-event--issue .goal-run-event-rail {
+  background: var(--za-warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-warn) 18%, transparent);
+}
+
+.goal-run-event--correction .goal-run-event-rail {
+  background: var(--za-danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-danger) 14%, transparent);
+}
+
+.goal-run-event--checkpoint .goal-run-event-rail {
+  background: var(--state-confirm);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-confirm) 14%, transparent);
+}
+
+.goal-run-event--validation .goal-run-event-rail {
+  background: var(--za-primary-control-bg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-primary-control-bg) 14%, transparent);
+}
+
+.goal-run-event--route .goal-run-event-rail {
+  background: var(--za-text-muted);
+}
+
+.goal-run-trace-toggle {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 3px 8px;
+  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border-radius: var(--ui-radius-control, 6px);
+  background: transparent;
+  color: var(--za-text-soft);
+  font-size: var(--ui-font-meta, 12px);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.goal-run-trace-toggle:hover {
+  background: var(--ui-surface-hover, var(--za-hover));
+  color: var(--za-text);
+}
+
 /* 主卡：当前计划永远置顶展开，给一点强调描边与背景与历史区拉开层级。 */
 .goal-plan-card--main {
   border-color: var(--za-line-strong, var(--za-line));

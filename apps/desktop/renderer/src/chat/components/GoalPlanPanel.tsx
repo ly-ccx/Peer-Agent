@@ -6,6 +6,7 @@ import type {
   GoalExplorerRun,
   GoalManualConfirmation,
   GoalPlan,
+  GoalRunEvent,
   GoalRunnerPhase,
   GoalRunnerState,
   GoalRunnerStatus,
@@ -269,6 +270,365 @@ function buildManualDodConfirmation(
     criterionIds,
     decidedAt: new Date().toISOString(),
   };
+}
+
+const RUN_TRACE_COLLAPSED_EVENT_COUNT = 12;
+
+const RUN_EVENT_ISSUE_TYPES = new Set<GoalRunEvent['type']>([
+  'validation_failed',
+  'problem_found',
+  'network_interrupted',
+]);
+
+const RUN_EVENT_CORRECTION_TYPES = new Set<GoalRunEvent['type']>([
+  'user_correction',
+  'requirement_override',
+  'self_correction',
+]);
+
+const RUN_EVENT_VALIDATION_TYPES = new Set<GoalRunEvent['type']>([
+  'validation_started',
+  'validation_passed',
+  'validation_failed',
+]);
+
+function runEventLabel(type: GoalRunEvent['type'], isZh: boolean): string {
+  const zh: Record<GoalRunEvent['type'], string> = {
+    message_routed: '消息路由',
+    goal_created: '目标创建',
+    plan_created: '计划生成',
+    plan_revised: '计划修订',
+    step_started: '步骤开始',
+    step_completed: '步骤完成',
+    action_started: '执行开始',
+    action_completed: '执行完成',
+    observation_recorded: '观察记录',
+    validation_started: '开始验证',
+    validation_passed: '验证通过',
+    validation_failed: '验证失败',
+    problem_found: '发现问题',
+    user_correction: '用户纠偏',
+    requirement_override: '需求覆盖',
+    self_correction: '自我修正',
+    checkpoint_created: '检查点',
+    network_interrupted: '网络中断',
+    goal_resumed: '目标恢复',
+    goal_paused: '目标暂停',
+    goal_completed: '目标完成',
+  };
+  const en: Record<GoalRunEvent['type'], string> = {
+    message_routed: 'Message routed',
+    goal_created: 'Goal created',
+    plan_created: 'Plan created',
+    plan_revised: 'Plan revised',
+    step_started: 'Step started',
+    step_completed: 'Step completed',
+    action_started: 'Action started',
+    action_completed: 'Action completed',
+    observation_recorded: 'Observation',
+    validation_started: 'Validation started',
+    validation_passed: 'Validation passed',
+    validation_failed: 'Validation failed',
+    problem_found: 'Problem found',
+    user_correction: 'User correction',
+    requirement_override: 'Requirement override',
+    self_correction: 'Self correction',
+    checkpoint_created: 'Checkpoint',
+    network_interrupted: 'Network interrupted',
+    goal_resumed: 'Goal resumed',
+    goal_paused: 'Goal paused',
+    goal_completed: 'Goal completed',
+  };
+  return isZh ? zh[type] : en[type];
+}
+
+function runEventTone(type: GoalRunEvent['type']): string {
+  if (type === 'goal_completed' || type === 'validation_passed') return 'success';
+  if (type === 'checkpoint_created' || type === 'goal_resumed' || type === 'goal_paused') return 'checkpoint';
+  if (RUN_EVENT_CORRECTION_TYPES.has(type)) return 'correction';
+  if (RUN_EVENT_ISSUE_TYPES.has(type)) return 'issue';
+  if (RUN_EVENT_VALIDATION_TYPES.has(type)) return 'validation';
+  if (type === 'message_routed' || type === 'goal_created') return 'route';
+  return 'progress';
+}
+
+function formatRunEventTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function payloadString(event: GoalRunEvent, key: string): string | null {
+  const value = event.payload?.[key];
+  if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return null;
+}
+
+function compactMeta(value: string): string {
+  return value.length > 52 ? `${value.slice(0, 52)}...` : value;
+}
+
+function runEventMetaItems(event: GoalRunEvent, isZh: boolean): string[] {
+  const items: string[] = [];
+  const nodeId = event.nodeId || payloadString(event, 'checkpointNodeId');
+  const turnNumber = payloadString(event, 'turnNumber');
+  const phase = payloadString(event, 'phase') || payloadString(event, 'previousPhase');
+  const intent = payloadString(event, 'intent');
+  const reason = payloadString(event, 'reason');
+
+  if (nodeId) items.push(`${isZh ? '节点' : 'node'} ${compactMeta(nodeId)}`);
+  if (turnNumber) items.push(`${isZh ? '轮次' : 'turn'} ${turnNumber}`);
+  if (phase) items.push(`${isZh ? '阶段' : 'phase'} ${compactMeta(phase)}`);
+  if (intent) items.push(`${isZh ? '意图' : 'intent'} ${compactMeta(intent)}`);
+  if (reason) items.push(`${isZh ? '原因' : 'reason'} ${compactMeta(reason)}`);
+  if (event.evidenceRefs.length > 0) {
+    items.push(isZh ? `证据 ×${event.evidenceRefs.length}` : `evidence ×${event.evidenceRefs.length}`);
+  }
+  return items;
+}
+
+function criterionKindLabel(kind: GoalSuccessCriterion['kind'], isZh: boolean): string {
+  const zh: Record<GoalSuccessCriterion['kind'], string> = {
+    command: '命令',
+    test: '测试',
+    'file-contains': '文件内容',
+    'file-exists': '文件存在',
+    manual: '人工确认',
+  };
+  const en: Record<GoalSuccessCriterion['kind'], string> = {
+    command: 'Command',
+    test: 'Test',
+    'file-contains': 'File contains',
+    'file-exists': 'File exists',
+    manual: 'Manual',
+  };
+  return isZh ? zh[kind] : en[kind];
+}
+
+function GoalContractSection({ plan, isZh }: { plan: GoalPlan; isZh: boolean }): ReactElement {
+  const criteria = Array.isArray(plan.successCriteria) ? plan.successCriteria : [];
+  const results = new Map(
+    (Array.isArray(plan.criterionResults) ? plan.criterionResults : [])
+      .map((result) => [result.criterionId, result] as const),
+  );
+  const inScopeCount = Array.isArray(plan.boundaries?.inScope) ? plan.boundaries.inScope.length : 0;
+  const outOfScopeCount = Array.isArray(plan.boundaries?.outOfScope) ? plan.boundaries.outOfScope.length : 0;
+
+  return (
+    <section className="goal-projection goal-projection--goal" aria-label={isZh ? '目标契约' : 'Goal contract'}>
+      <div className="goal-projection-head">
+        <div className="goal-projection-title-wrap">
+          <span className="goal-projection-kicker">{isZh ? '目标' : 'Goal'}</span>
+          <span className="goal-projection-title">{isZh ? '当前目标契约' : 'Current contract'}</span>
+        </div>
+        <span className="goal-projection-meta">
+          {isZh ? `标准 ${criteria.length}` : `${criteria.length} criteria`}
+        </span>
+      </div>
+      {plan.goal ? (
+        <p className="goal-contract-text">{plan.goal}</p>
+      ) : (
+        <p className="goal-contract-text goal-contract-text--empty">
+          {isZh ? '尚未写入目标描述' : 'No goal description recorded yet'}
+        </p>
+      )}
+      {criteria.length > 0 ? (
+        <ul className="goal-criteria-list">
+          {criteria.map((criterion) => {
+            const result = results.get(criterion.id);
+            return (
+              <li key={criterion.id} className="goal-criterion-item">
+                <span className="goal-criterion-kind">{criterionKindLabel(criterion.kind, isZh)}</span>
+                <span className="goal-criterion-text">{criterion.description}</span>
+                {result ? (
+                  <span className={`goal-criterion-result goal-criterion-result--${result.passed ? 'passed' : 'failed'}`}>
+                    {result.passed ? (isZh ? '已通过' : 'Passed') : (isZh ? '未通过' : 'Failed')}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      {inScopeCount > 0 || outOfScopeCount > 0 ? (
+        <div className="goal-boundary-meta">
+          {inScopeCount > 0 ? (
+            <span>{isZh ? `范围内 ${inScopeCount}` : `in scope ${inScopeCount}`}</span>
+          ) : null}
+          {outOfScopeCount > 0 ? (
+            <span>{isZh ? `范围外 ${outOfScopeCount}` : `out of scope ${outOfScopeCount}`}</span>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function PlanProjectionSection({
+  plan,
+  progress,
+  tasks,
+  tasksExpanded,
+  onToggleTasks,
+  isZh,
+}: {
+  plan: GoalPlan;
+  progress: GoalPlan['progress'];
+  tasks: readonly GoalTask[];
+  tasksExpanded: boolean;
+  onToggleTasks: () => void;
+  isZh: boolean;
+}): ReactElement {
+  return (
+    <section className="goal-projection goal-projection--plan" aria-label={isZh ? '任务计划' : 'Task plan'}>
+      <div className="goal-projection-head">
+        <div className="goal-projection-title-wrap">
+          <span className="goal-projection-kicker">{isZh ? '计划' : 'Plan'}</span>
+          <span className="goal-projection-title">{isZh ? '任务拆解与进度' : 'Tasks and progress'}</span>
+        </div>
+        <span className="goal-projection-meta">
+          {isZh ? `任务 ${tasks.length}` : `${tasks.length} tasks`}
+        </span>
+      </div>
+      {/* 进度条即「展开/收起子任务」的开关：点它切换下方 goal-task-list 显隐。 */}
+      <button
+        type="button"
+        className={`goal-plan-progress${tasksExpanded ? ' goal-plan-progress--open' : ''}`}
+        onClick={onToggleTasks}
+        aria-expanded={tasksExpanded}
+        aria-label={isZh ? '展开或收起子任务' : 'Toggle subtasks'}
+      >
+        <span
+          className="goal-plan-progress-track"
+          role="progressbar"
+          aria-valuenow={progress.percent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <span
+            className={`goal-plan-progress-bar${plan.status === 'executing' ? ' goal-plan-progress-bar--executing' : ''}`}
+            style={{ backgroundSize: `${progress.percent}% 100%` }}
+          />
+        </span>
+        <span className="goal-plan-progress-text">
+          {isZh
+            ? `${progress.completed}/${progress.total} 完成`
+            : `${progress.completed}/${progress.total} done`}
+          {progress.failed > 0 ? (isZh ? `，${progress.failed} 失败` : `, ${progress.failed} failed`) : ''}
+          {progress.blocked > 0 ? (isZh ? `，${progress.blocked} 阻塞` : `, ${progress.blocked} blocked`) : ''}
+        </span>
+        <span className="goal-plan-progress-caret" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </span>
+      </button>
+      {tasksExpanded ? (
+        tasks.length > 0 ? (
+          <ul className="goal-task-list">
+            {tasks.map((task) => (
+              <TaskNode key={task.taskId} task={task} depth={0} isZh={isZh} />
+            ))}
+          </ul>
+        ) : (
+          <div className="goal-plan-empty-tasks">{isZh ? '尚无拆解的子任务' : 'No tasks yet'}</div>
+        )
+      ) : null}
+    </section>
+  );
+}
+
+function RunTraceItem({ event, isZh }: { event: GoalRunEvent; isZh: boolean }): ReactElement {
+  const metaItems = runEventMetaItems(event, isZh);
+  return (
+    <li className={`goal-run-event goal-run-event--${runEventTone(event.type)}`}>
+      <span className="goal-run-event-rail" aria-hidden="true" />
+      <div className="goal-run-event-body">
+        <div className="goal-run-event-head">
+          <span className="goal-run-event-type">{runEventLabel(event.type, isZh)}</span>
+          <time className="goal-run-event-time" dateTime={event.createdAt}>
+            {formatRunEventTime(event.createdAt)}
+          </time>
+        </div>
+        <div className="goal-run-event-summary">{event.summary}</div>
+        {metaItems.length > 0 ? (
+          <div className="goal-run-event-meta">
+            {metaItems.map((item) => (
+              <span key={item}>{item}</span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
+function RunTraceSection({ plan, isZh }: { plan: GoalPlan; isZh: boolean }): ReactElement {
+  const events = Array.isArray(plan.runTrace?.events) ? plan.runTrace.events : [];
+  const [showAll, setShowAll] = useState(false);
+  const visibleEvents = showAll ? events : events.slice(-RUN_TRACE_COLLAPSED_EVENT_COUNT);
+  const hiddenCount = events.length - visibleEvents.length;
+  const validationCount = events.filter((event) => RUN_EVENT_VALIDATION_TYPES.has(event.type)).length;
+  const issueCount = events.filter((event) => RUN_EVENT_ISSUE_TYPES.has(event.type)).length;
+  const correctionCount = events.filter((event) => RUN_EVENT_CORRECTION_TYPES.has(event.type)).length;
+  const checkpoint = plan.runTrace?.lastCheckpointNodeId || null;
+
+  return (
+    <section className="goal-projection goal-projection--run" aria-label={isZh ? '执行流程' : 'Run trace'}>
+      <div className="goal-projection-head">
+        <div className="goal-projection-title-wrap">
+          <span className="goal-projection-kicker">{isZh ? '执行' : 'Run'}</span>
+          <span className="goal-projection-title">{isZh ? '执行流程与检查点' : 'Trace and checkpoints'}</span>
+        </div>
+        <span className="goal-projection-meta">
+          {isZh
+            ? `${events.length} 步 · 验证 ${validationCount} · 问题 ${issueCount}`
+            : `${events.length} events · ${validationCount} validations · ${issueCount} issues`}
+        </span>
+      </div>
+      {checkpoint || correctionCount > 0 ? (
+        <div className="goal-run-trace-summary">
+          {checkpoint ? (
+            <span>{isZh ? `最近检查点：${checkpoint}` : `latest checkpoint: ${checkpoint}`}</span>
+          ) : null}
+          {correctionCount > 0 ? (
+            <span>{isZh ? `纠偏 ${correctionCount}` : `corrections ${correctionCount}`}</span>
+          ) : null}
+        </div>
+      ) : null}
+      {events.length === 0 ? (
+        <div className="goal-run-empty">
+          {isZh ? '尚未记录执行事件' : 'No run events recorded yet'}
+        </div>
+      ) : (
+        <>
+          <ol className="goal-run-trace-list">
+            {hiddenCount > 0 && !showAll ? (
+              <li className="goal-run-event-note">
+                {isZh ? `已折叠前 ${hiddenCount} 步` : `${hiddenCount} earlier event${hiddenCount === 1 ? '' : 's'} hidden`}
+              </li>
+            ) : null}
+            {visibleEvents.map((event) => (
+              <RunTraceItem key={event.id} event={event} isZh={isZh} />
+            ))}
+          </ol>
+          {events.length > RUN_TRACE_COLLAPSED_EVENT_COUNT ? (
+            <button
+              type="button"
+              className="goal-run-trace-toggle"
+              onClick={() => setShowAll((value) => !value)}
+            >
+              {showAll
+                ? isZh ? '只看最近流程' : 'Show recent only'
+                : isZh ? `展开全部 ${events.length} 步` : `Show all ${events.length} events`}
+            </button>
+          ) : null}
+        </>
+      )}
+    </section>
+  );
 }
 
 function TaskNode({ task, depth, isZh }: { task: GoalTask; depth: number; isZh: boolean }): ReactElement {
@@ -731,56 +1091,16 @@ function PlanCard({
       </header>
       {effectiveExpanded ? (
         <div className="goal-plan-body">
-          {/* 排序：标题(header) → 描述(默认可见) → 进度条(可点击开关) → 子任务清单(默认收起) → Runner。 */}
-          {plan.goal ? (
-            <div className="goal-plan-goal-block">
-              <p className="goal-plan-goal">{plan.goal}</p>
-            </div>
-          ) : null}
-          {/* 进度条即「展开/收起子任务」的开关：点它切换下方 goal-task-list 显隐。 */}
-          <button
-            type="button"
-            className={`goal-plan-progress${tasksExpanded ? ' goal-plan-progress--open' : ''}`}
-            onClick={() => setTasksExpanded((v) => !v)}
-            aria-expanded={tasksExpanded}
-            aria-label={isZh ? '展开或收起子任务' : 'Toggle subtasks'}
-          >
-            <span
-              className="goal-plan-progress-track"
-              role="progressbar"
-              aria-valuenow={progress.percent}
-              aria-valuemin={0}
-              aria-valuemax={100}
-            >
-              <span
-                className={`goal-plan-progress-bar${plan.status === 'executing' ? ' goal-plan-progress-bar--executing' : ''}`}
-                style={{ backgroundSize: `${progress.percent}% 100%` }}
-              />
-            </span>
-            <span className="goal-plan-progress-text">
-              {isZh
-                ? `${progress.completed}/${progress.total} 完成`
-                : `${progress.completed}/${progress.total} done`}
-              {progress.failed > 0 ? (isZh ? `，${progress.failed} 失败` : `, ${progress.failed} failed`) : ''}
-              {progress.blocked > 0 ? (isZh ? `，${progress.blocked} 阻塞` : `, ${progress.blocked} blocked`) : ''}
-            </span>
-            <span className="goal-plan-progress-caret" aria-hidden="true">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </span>
-          </button>
-          {tasksExpanded ? (
-            tasks.length > 0 ? (
-              <ul className="goal-task-list">
-                {tasks.map((task) => (
-                  <TaskNode key={task.taskId} task={task} depth={0} isZh={isZh} />
-                ))}
-              </ul>
-            ) : (
-              <div className="goal-plan-empty-tasks">{isZh ? '尚无拆解的子任务' : 'No tasks yet'}</div>
-            )
-          ) : null}
+          <GoalContractSection plan={plan} isZh={isZh} />
+          <PlanProjectionSection
+            plan={plan}
+            progress={progress}
+            tasks={tasks}
+            tasksExpanded={tasksExpanded}
+            onToggleTasks={() => setTasksExpanded((v) => !v)}
+            isZh={isZh}
+          />
+          <RunTraceSection plan={plan} isZh={isZh} />
           {plan.runner && plan.runner.enabled ? (
             <RunnerSection
               plan={plan}

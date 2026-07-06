@@ -309,6 +309,48 @@ export interface GoalVerifierRun {
   readonly completedAt?: string;
 }
 
+export type GoalRunEventType =
+  | 'message_routed'
+  | 'goal_created'
+  | 'plan_created'
+  | 'plan_revised'
+  | 'step_started'
+  | 'step_completed'
+  | 'action_started'
+  | 'action_completed'
+  | 'observation_recorded'
+  | 'validation_started'
+  | 'validation_passed'
+  | 'validation_failed'
+  | 'problem_found'
+  | 'user_correction'
+  | 'requirement_override'
+  | 'self_correction'
+  | 'checkpoint_created'
+  | 'network_interrupted'
+  | 'goal_resumed'
+  | 'goal_paused'
+  | 'goal_completed';
+
+export interface GoalRunEvent {
+  readonly id: string;
+  readonly goalPlanId: string;
+  readonly nodeId?: string;
+  readonly parentNodeId?: string;
+  readonly type: GoalRunEventType;
+  readonly summary: string;
+  readonly payload?: Record<string, unknown>;
+  readonly evidenceRefs: readonly string[];
+  readonly createdAt: string;
+}
+
+/** Append-only execution ledger for Goal / Plan / Run projection. */
+export interface GoalRunTrace {
+  readonly activeNodeId?: string;
+  readonly lastCheckpointNodeId?: string;
+  readonly events: readonly GoalRunEvent[];
+}
+
 export type GoalSuccessCriterionKind =
   | 'command'
   | 'test'
@@ -414,6 +456,8 @@ export interface GoalPlan {
   readonly progress: GoalProgress;
   /** Goal Runner 托管推进状态；旧计划可缺省。 */
   readonly runner?: GoalRunnerState;
+  /** Execution/event ledger used by the Goal / Plan / Run right-panel projection. */
+  readonly runTrace?: GoalRunTrace;
 
   // 溯源 & 治理
   readonly version: number;

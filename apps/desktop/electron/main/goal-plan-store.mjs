@@ -268,6 +268,29 @@ const EXPLORER_CONFIDENCE = new Set(['low', 'medium', 'high']);
 const VERIFIER_STATUSES = new Set(['queued', 'running', 'passed', 'failed', 'blocked']);
 const VERIFIER_TERMINAL_STATUSES = new Set(['passed', 'failed', 'blocked']);
 const VERIFIER_TARGET_KINDS = new Set(['plan', 'task', 'success_criterion']);
+const GOAL_RUN_EVENT_TYPES = new Set([
+  'message_routed',
+  'goal_created',
+  'plan_created',
+  'plan_revised',
+  'step_started',
+  'step_completed',
+  'action_started',
+  'action_completed',
+  'observation_recorded',
+  'validation_started',
+  'validation_passed',
+  'validation_failed',
+  'problem_found',
+  'user_correction',
+  'requirement_override',
+  'self_correction',
+  'checkpoint_created',
+  'network_interrupted',
+  'goal_resumed',
+  'goal_paused',
+  'goal_completed',
+]);
 const WORKFLOW_KINDS = new Set(['plan_approval', 'goal_self_driven']);
 const ACTIVATION_KINDS = new Set(['approval_required', 'approved_plan', 'accepted_goal']);
 const AUTONOMY_KINDS = new Set(['approval_gated', 'self_driven']);
@@ -890,6 +913,42 @@ function normalizeVerifierRun(run, fallback = {}) {
   return normalized;
 }
 
+function normalizeRunEvent(event, fallback = {}) {
+  if (!event || typeof event !== 'object') return null;
+  const goalPlanId = normalizeOptionalString(event.goalPlanId) || normalizeOptionalString(fallback.goalPlanId);
+  const type = GOAL_RUN_EVENT_TYPES.has(event.type) ? event.type : null;
+  if (!goalPlanId || !type) return null;
+  const now = new Date().toISOString();
+  const normalized = {
+    id: normalizeOptionalString(event.id) || randomUUID(),
+    goalPlanId,
+    type,
+    summary: normalizeOptionalString(event.summary) || type,
+    evidenceRefs: normalizeEvidenceRefList(event.evidenceRefs),
+    createdAt: normalizeOptionalString(event.createdAt) || now,
+  };
+  const nodeId = normalizeOptionalString(event.nodeId);
+  if (nodeId) normalized.nodeId = nodeId;
+  const parentNodeId = normalizeOptionalString(event.parentNodeId);
+  if (parentNodeId) normalized.parentNodeId = parentNodeId;
+  if (event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)) {
+    normalized.payload = event.payload;
+  }
+  return normalized;
+}
+
+function normalizeRunTrace(trace, fallback = {}) {
+  const events = Array.isArray(trace?.events)
+    ? trace.events.map((event) => normalizeRunEvent(event, fallback)).filter(Boolean)
+    : [];
+  const normalized = { events };
+  const activeNodeId = normalizeOptionalString(trace?.activeNodeId);
+  if (activeNodeId) normalized.activeNodeId = activeNodeId;
+  const lastCheckpointNodeId = normalizeOptionalString(trace?.lastCheckpointNodeId);
+  if (lastCheckpointNodeId) normalized.lastCheckpointNodeId = lastCheckpointNodeId;
+  return normalized;
+}
+
 const ACTIVE_PLAN_STATUSES = new Set(['drafting', 'awaiting_approval', 'approved', 'accepted', 'executing', 'paused']);
 
 function normalizeConversationId(value) {
@@ -1026,7 +1085,38 @@ function normalizePlan(plan) {
     manualConfirmations: normalizeManualConfirmations(plan.manualConfirmations),
   };
   const runner = normalizeRunnerState(plan.runner, plan.planId);
-  return runner ? { ...normalized, runner } : normalized;
+  const runTrace = normalizeRunTrace(plan.runTrace, { goalPlanId: plan.planId });
+  const withRunTrace = runTrace.events.length > 0
+    || runTrace.activeNodeId
+    || runTrace.lastCheckpointNodeId
+    ? { ...normalized, runTrace }
+    : normalized;
+  return runner ? { ...withRunTrace, runner } : withRunTrace;
+}
+
+function withRunTraceEvent(plan, event = {}) {
+  if (!plan?.planId) return plan;
+  const current = normalizeRunTrace(plan.runTrace, { goalPlanId: plan.planId });
+  const normalizedEvent = normalizeRunEvent({
+    ...event,
+    goalPlanId: plan.planId,
+    createdAt: event.createdAt || plan.updatedAt || new Date().toISOString(),
+  }, { goalPlanId: plan.planId });
+  if (!normalizedEvent) {
+    return current.events.length > 0 || current.activeNodeId || current.lastCheckpointNodeId
+      ? { ...plan, runTrace: current }
+      : plan;
+  }
+  const nextTrace = {
+    ...current,
+    events: [...current.events, normalizedEvent],
+  };
+  const activeNodeId = normalizeOptionalString(event.activeNodeId) || normalizedEvent.nodeId;
+  if (activeNodeId) nextTrace.activeNodeId = activeNodeId;
+  if (normalizedEvent.type === 'checkpoint_created' && activeNodeId) {
+    nextTrace.lastCheckpointNodeId = activeNodeId;
+  }
+  return { ...plan, runTrace: nextTrace };
 }
 
 function isActivePlan(plan) {
@@ -1316,8 +1406,9 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     const tasks = Array.isArray(draft.tasks) ? draft.tasks : [];
     const workflowKind = normalizeWorkflowKind(draft.workflowKind);
     const status = draft.status || (workflowKind === 'goal_self_driven' ? 'accepted' : 'drafting');
+    const planId = draft.planId || randomUUID();
     const plan = {
-      planId: draft.planId || randomUUID(),
+      planId,
       conversationId: normalizeConversationId(draft.conversationId) ?? undefined,
       threadId: draft.threadId,
       agentId: draft.agentId,
@@ -1340,6 +1431,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       status,
       approval: draft.approval,
       progress: aggregateProgress(tasks),
+      runTrace: draft.runTrace,
       version: 1,
       revisionHistory: [],
       evidenceRefs: draft.evidenceRefs || [],
@@ -1350,7 +1442,16 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     };
     // 单活跃计划：先收尾/作废同会话其它活跃态旧计划（排除自身），再落库新计划。
     supersedeAwaitingDrafts(plan.conversationId, plan.planId);
-    return persist(plan);
+    return persist(withRunTraceEvent(plan, {
+      type: workflowKind === 'goal_self_driven' ? 'goal_created' : 'plan_created',
+      summary: workflowKind === 'goal_self_driven' ? 'Goal contract created' : 'Plan created',
+      payload: {
+        source: 'goal-plan-store:createPlan',
+        workflowKind,
+        status,
+        taskCount: tasks.length,
+      },
+    }));
   }
 
   function createGoalContract(draft = {}) {
@@ -1463,7 +1564,15 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       ],
       updatedAt: new Date().toISOString(),
     };
-    return persist(next);
+    return persist(withRunTraceEvent(next, {
+      type: 'plan_revised',
+      summary: reason ? `Plan revised: ${reason}` : 'Plan revised',
+      payload: {
+        reason: reason || null,
+        changedBy: changedBy || null,
+        version: nextVersion,
+      },
+    }));
   }
 
   /**
@@ -1527,6 +1636,32 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     };
     const nextRunner = normalizeRunnerState({ ...current, ...patch, updatedAt: patch.updatedAt || now }, planId);
     return persist({ ...plan, runner: nextRunner, updatedAt: now });
+  }
+
+  /** Append a structured Goal / Plan / Run execution event without changing task Evidence. */
+  function appendRunEvent(planId, event = {}) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    const now = new Date().toISOString();
+    const current = normalizeRunTrace(plan.runTrace, { goalPlanId: planId });
+    const normalizedEvent = normalizeRunEvent({
+      ...event,
+      goalPlanId: planId,
+      createdAt: event.createdAt || now,
+    }, { goalPlanId: planId });
+    if (!normalizedEvent) {
+      throw new Error(`[goal-plan-store] invalid run event for plan ${planId}`);
+    }
+    const nextTrace = {
+      ...current,
+      events: [...current.events, normalizedEvent],
+    };
+    const activeNodeId = normalizeOptionalString(event.activeNodeId) || normalizedEvent.nodeId;
+    if (activeNodeId) nextTrace.activeNodeId = activeNodeId;
+    if (normalizedEvent.type === 'checkpoint_created' && activeNodeId) {
+      nextTrace.lastCheckpointNodeId = activeNodeId;
+    }
+    return persist({ ...plan, runTrace: nextTrace, updatedAt: now });
   }
 
   /** 动态派发只读 Explorer 子 Agent 实例；只记录运行契约，不改写任务状态或 Evidence。 */
@@ -1938,6 +2073,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     recordApproval,
     setPlanStatus,
     setRunnerState,
+    appendRunEvent,
     dispatchExplorer,
     reportExplorer,
     recordVerifierRun,

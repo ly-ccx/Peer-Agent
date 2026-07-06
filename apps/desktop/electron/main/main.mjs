@@ -43,8 +43,9 @@ import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
 import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
 import { createConversationStore } from './conversation-store.mjs';
-import { createGoalPlanStore } from './goal-plan-store.mjs';
+import { createGoalPlanStore, goalPlanIsSelfDriven } from './goal-plan-store.mjs';
 import { createGoalRunner } from './goal-runner.mjs';
+import { routeGoalMessage } from './goal-message-router.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
 import { buildPersistedCompactedMessages } from './conversation-compaction-persistence.mjs';
 import { compactIfNeeded } from './context-compactor.mjs';
@@ -1626,19 +1627,34 @@ ipcMain.handle('chat:send', (event, {
     const goal = latestUserTextFromProviderMessages(messages);
     if (goal) {
       try {
-        goalPlanStore.upsertGoalContract(conversationId, {
-          conversationId,
-          title: goal.length > 48 ? `${goal.slice(0, 48)}...` : goal,
-          goal,
-          status: 'accepted',
-          workflowKind: 'goal_self_driven',
-          activation: {
-            kind: 'accepted_goal',
-            acceptedAt: new Date().toISOString(),
-            acceptedBy: 'user',
-          },
-          createdBy: 'user',
-        });
+        const activePlan = goalPlanStore.getActivePlanByConversation(conversationId);
+        const activeGoal = activePlan && goalPlanIsSelfDriven(activePlan) ? activePlan : null;
+        const route = routeGoalMessage({ messageText: goal, activeGoalPlan: activeGoal });
+        if (route.type === 'append_goal_event') {
+          goalPlanStore.appendRunEvent?.(route.goalPlanId, {
+            type: route.eventType,
+            summary: route.summary,
+            payload: {
+              source: 'chat:send',
+              intent: route.intent,
+              messageText: route.messageText,
+            },
+          });
+        } else {
+          goalPlanStore.upsertGoalContract(conversationId, {
+            conversationId,
+            title: goal.length > 48 ? `${goal.slice(0, 48)}...` : goal,
+            goal,
+            status: 'accepted',
+            workflowKind: 'goal_self_driven',
+            activation: {
+              kind: 'accepted_goal',
+              acceptedAt: new Date().toISOString(),
+              acceptedBy: 'user',
+            },
+            createdBy: 'user',
+          });
+        }
       } catch (error) {
         console.warn('[main] goal contract bootstrap failed:', error?.message || error);
       }
