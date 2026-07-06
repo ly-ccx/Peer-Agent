@@ -234,6 +234,53 @@
    *  编辑器 / 代码块 / Diff 视图统一引用 var(--za-code-font-size)。 */
   --za-code-font-size: 12px;
 
+  /* ─── App UI 语义层：组件新代码优先消费这里 ───
+   * 这一层不引入新调色板，只把 Frost / --za-* 归并成稳定的桌面工具语义：
+   * typography、radius、interaction、selection、focus。
+   */
+  /* 字号用 rem 表达：随 <html data-font-scale> 的根 font-size 等比缩放（外观-字体大小生效路径）。
+   * 基准 16px：0.6875rem=11 / 0.75rem=12 / 0.8125rem=13 / 0.875rem=14 / 0.9375rem=15 / 1rem=16 / 1.25rem=20 / 1.625rem=26。
+   * medium 档 100% 时与旧 px 完全等值，零视觉回归。 */
+  --ui-font-caption: 0.6875rem;
+  --ui-font-meta: 0.75rem;
+  --ui-font-control: 0.8125rem;
+  --ui-font-body: 0.875rem;
+  --ui-font-body-lg: 0.9375rem;
+  --ui-font-heading-sm: 1rem;
+  --ui-font-heading-md: 1.25rem;
+  --ui-font-heading-lg: 1.625rem;
+  --ui-line-tight: 1.25;
+  --ui-line-control: 1.35;
+  --ui-line-body: 1.68;
+
+  --ui-radius-chip: 4px;
+  --ui-radius-control: 6px;
+  --ui-radius-row: 8px;
+  --ui-radius-panel: 12px;
+  --ui-radius-modal: 16px;
+  --ui-radius-round: 999px;
+
+  --ui-accent: var(--za-user-accent, var(--za-accent));
+  --ui-accent-hover: color-mix(in srgb, var(--ui-accent) 86%, var(--za-text));
+  --ui-accent-soft: color-mix(in srgb, var(--ui-accent) 14%, transparent);
+  --ui-accent-muted: color-mix(in srgb, var(--ui-accent) 28%, var(--za-text-faint));
+  --ui-focus-ring: color-mix(in srgb, var(--ui-accent) 34%, transparent);
+  --ui-selected-bg: color-mix(in srgb, var(--ui-accent) 16%, transparent);
+  --ui-selected-border: color-mix(in srgb, var(--ui-accent) 72%, var(--za-line));
+  --ui-border-subtle: color-mix(in srgb, var(--za-line) 78%, transparent);
+  --ui-border-strong: var(--za-line-strong);
+  --ui-surface-hover: var(--za-hover);
+  --ui-surface-selected: var(--ui-selected-bg);
+  --ui-surface-raised: var(--za-surface-0);
+  --ui-surface-elevated: var(--za-popover-bg);
+  --ui-link: var(--ui-accent);
+
+  /* 兼容少量已出现但未正名的局部变量。 */
+  --border-subtle: var(--ui-border-subtle);
+  --za-link: var(--ui-link);
+  --za-shadow-xs: none;
+  --radius-frost-xs: var(--ui-radius-chip);
+
   /* ─── Diff 语义 token（浅色）───
    *  以现有语义层派生；catppuccin / custom 因重定义了底层
    *  --za-good/danger/accent/surface，这些 var() 在 use-site 解析即自动跟随，
