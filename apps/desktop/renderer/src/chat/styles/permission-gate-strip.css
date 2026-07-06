@@ -1,18 +1,14 @@
 @layer components {
-  /* PermissionGateStrip — Peer Vellum control 层
-   * 紧贴 ChatComposer 上方，跟 composer 同 control 家族保证视觉连续
-   * 单行布局：badge / capability / · / preview / [+N more] / [拒绝] [允许]
-   * 不要朱砂、不要光圈，仅用墨色发丝 + 暖灰底，符合 Peer Vellum 克制原则
-   */
+  /* PermissionGateStrip：紧贴 Composer 的 permission/evidence control surface。 */
   .permission-gate-strip {
     @apply flex flex-wrap items-center gap-2 px-3 py-2;
-    max-width: 740px;
+    max-width: var(--chat-content-max);
     margin: 0 auto 8px;
-    border: 1px solid var(--za-line);
-    border-radius: var(--za-radius);
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-panel, var(--za-radius));
     background: var(--za-control-fill);
     color: var(--ink-base);
-    font-size: 13px;
+    font-size: var(--ui-font-control, 13px);
     line-height: 1.4;
     --motion-enter-from: 8px;
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
@@ -21,39 +17,38 @@
   .permission-gate-strip .badge {
     flex-shrink: 0;
     padding: 1px 8px;
-    border: 1px solid var(--ink-hairline);
-    border-radius: 999px;
+    border: 1px solid var(--ui-border-subtle, var(--ink-hairline));
+    border-radius: var(--ui-radius-round, 999px);
     background: transparent;
     color: var(--ink-soft);
     font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.04em;
+    font-size: var(--ui-font-caption, 11px);
+    letter-spacing: 0;
     text-transform: uppercase;
   }
 
   .permission-gate-strip--goal-scope,
   .permission-gate-strip--goal-irreversible,
   .permission-gate-strip--goal-high-risk {
-    border-left-width: 4px;
-    background: var(--paper-sheet);
+    background: var(--ui-surface-raised, var(--paper-sheet));
   }
 
   .permission-gate-strip--goal-scope {
-    border-left-color: var(--state-confirm);
+    border-color: color-mix(in srgb, var(--state-confirm) 34%, var(--za-line));
   }
 
   .permission-gate-strip--goal-irreversible {
-    border-left-color: var(--state-danger);
+    border-color: color-mix(in srgb, var(--state-danger) 34%, var(--za-line));
   }
 
   .permission-gate-strip--goal-high-risk {
-    border-left-color: var(--state-warn);
+    border-color: color-mix(in srgb, var(--state-warn) 34%, var(--za-line));
   }
 
   .permission-gate-strip--goal-scope .badge,
   .permission-gate-strip--goal-irreversible .badge,
   .permission-gate-strip--goal-high-risk .badge {
-    border-color: var(--za-line-strong);
+    border-color: var(--ui-border-strong, var(--za-line-strong));
     color: var(--ink-base);
   }
 
@@ -61,7 +56,7 @@
     flex-shrink: 0;
     color: var(--ink-base);
     font-family: var(--font-mono);
-    font-size: 13px;
+    font-size: var(--ui-font-control, 13px);
   }
 
   .permission-gate-strip .separator {
@@ -74,13 +69,13 @@
     flex: 1 1 0%;
     color: var(--ink-soft);
     font-family: var(--font-mono);
-    font-size: 12.5px;
+    font-size: var(--ui-font-meta, 12px);
   }
 
   .permission-gate-strip .more {
     flex-shrink: 0;
     color: var(--ink-mute);
-    font-size: 11.5px;
+    font-size: var(--ui-font-caption, 11px);
   }
 
   .permission-gate-strip .actions {
@@ -91,8 +86,8 @@
 
   .permission-gate-strip button {
     padding: 4px 12px;
-    border: 1px solid var(--ink-hairline);
-    border-radius: var(--za-radius-sm);
+    border: 1px solid var(--ui-border-subtle, var(--ink-hairline));
+    border-radius: var(--ui-radius-control, var(--za-radius-sm));
     background: transparent;
     color: var(--ink-base);
     font-size: 12px;
@@ -104,17 +99,16 @@
   }
 
   .permission-gate-strip button:hover {
-    background: var(--za-hover);
+    background: var(--ui-surface-hover, var(--za-hover));
     border-color: var(--ink-soft);
   }
 
-  /* 「允许」是高频主操作：极浅墨填充作为弱强调，不刺眼 */
   .permission-gate-strip button.allow {
     background: var(--za-control-fill-hover);
   }
 
   .permission-gate-strip button.allow:hover {
-    background: var(--za-hover);
+    background: var(--ui-surface-hover, var(--za-hover));
   }
 
   .permission-gate-strip--goal-irreversible button.allow {
@@ -134,9 +128,8 @@
     pointer-events: none;
   }
 
-  /* 「一直允许」冰湖青描边 */
   .permission-gate-strip button.allow-always {
-    border-color: var(--za-accent, var(--azure-trace));
+    border-color: var(--ui-selected-border, var(--za-accent, var(--azure-trace)));
   }
 
   /* 点击即时反馈：按钮按下微缩 */

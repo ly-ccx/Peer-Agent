@@ -15,9 +15,9 @@
   width: 100%;
   max-width: var(--chat-content-max);
   margin: 0 auto 8px;
-  border: 1px solid var(--za-line);
-  border-radius: var(--za-radius);
-  background: var(--za-surface-1);
+  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border-radius: var(--ui-radius-panel, var(--za-radius));
+  background: var(--ui-surface-raised, var(--za-surface-1));
   overflow: hidden;
 }
 
@@ -36,13 +36,13 @@
   border: none;
   background: transparent;
   color: var(--za-text-soft);
-  font-size: 13px;
+  font-size: var(--ui-font-control, 13px);
   cursor: pointer;
   text-align: left;
 }
 
 .goal-panel-toggle:hover {
-  background: var(--za-hover);
+  background: var(--ui-surface-hover, var(--za-hover));
 }
 
 .goal-panel-toggle-label {
@@ -52,16 +52,16 @@
 
 .goal-panel-toggle-summary {
   color: var(--za-text-muted);
-  font-size: 12px;
+  font-size: var(--ui-font-meta, 12px);
 }
 
 .goal-panel-toggle-badge {
   min-width: 18px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-round, 999px);
   background: var(--za-warn-soft);
   color: var(--za-warn);
-  font-size: 11px;
+  font-size: var(--ui-font-caption, 11px);
   line-height: 18px;
   text-align: center;
 }
@@ -116,7 +116,7 @@
   flex: none;
   width: 7px;
   height: 7px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-round, 999px);
   background: var(--state-confirm);
   --motion-pulse-floor: 0.4;
   animation: motion-pulse-soft 1.4s var(--za-ease-standard, ease) infinite;
@@ -192,7 +192,7 @@
   width: 14px;
   height: 14px;
   flex: none;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-round, 50%);
   background: color-mix(in srgb, var(--state-success) 18%, transparent);
   color: var(--state-success);
   font-size: 10px;
@@ -206,13 +206,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--za-text-soft);
-  font-size: 12px;
+  font-size: var(--ui-font-meta, 12px);
 }
 
 .goal-panel-toggle-active-progress {
   flex: none;
   color: var(--za-text-faint);
-  font-size: 11px;
+  font-size: var(--ui-font-caption, 11px);
   font-family: var(--font-mono, monospace);
 }
 
@@ -222,7 +222,7 @@
   gap: 12px;
   overflow-y: auto;
   padding: 12px;
-  border-top: 1px solid var(--za-line);
+  border-top: 1px solid var(--ui-border-subtle, var(--za-line));
 }
 
 /* 直接子项（主卡 / 历史清单 / 错误条）保持自然高度，禁止被 flex 压缩。
@@ -235,27 +235,27 @@
 
 .goal-panel--empty {
   padding: 16px;
-  border: 1px dashed var(--za-line);
-  border-radius: var(--za-radius);
+  border: 1px dashed var(--ui-border-subtle, var(--za-line));
+  border-radius: var(--ui-radius-panel, var(--za-radius));
   color: var(--za-text-muted);
-  font-size: 13px;
+  font-size: var(--ui-font-control, 13px);
   text-align: center;
 }
 
 .goal-panel-error {
   padding: 8px 12px;
-  border-radius: var(--za-radius-sm);
+  border-radius: var(--ui-radius-control, var(--za-radius-sm));
   background: var(--za-danger-soft);
   color: var(--za-danger);
-  font-size: 13px;
+  font-size: var(--ui-font-control, 13px);
 }
 
 .goal-plan-card {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--za-line);
-  border-radius: var(--za-radius);
-  background: var(--za-surface-1);
+  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border-radius: var(--ui-radius-panel, var(--za-radius));
+  background: var(--ui-surface-raised, var(--za-surface-1));
   overflow: hidden;
 }
 
@@ -284,18 +284,18 @@
 }
 .goal-plan-head-toggle:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--za-focus);
-  border-radius: 4px;
+  box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
+  border-radius: var(--ui-radius-chip, 4px);
 }
 
 .goal-plan-head-progress {
   flex: none;
-  font-size: 11px;
+  font-size: var(--ui-font-caption, 11px);
   color: var(--za-text-muted);
   font-variant-numeric: tabular-nums;
   padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--za-hover);
+  border-radius: var(--ui-radius-round, 999px);
+  background: var(--ui-surface-hover, var(--za-hover));
 }
 
 .goal-plan-head-caret {
@@ -316,7 +316,7 @@
 
 .goal-plan-title {
   font-weight: 600;
-  font-size: 13.5px;
+  font-size: var(--ui-font-control, 13px);
   color: var(--za-text);
   margin-right: auto;
   min-width: 0;
@@ -328,9 +328,9 @@
 .goal-plan-status {
   flex: none;
   padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  background: var(--za-hover);
+  border-radius: var(--ui-radius-round, 999px);
+  font-size: var(--ui-font-caption, 11px);
+  background: var(--ui-surface-hover, var(--za-hover));
   color: var(--za-text-soft);
 }
 
@@ -346,13 +346,13 @@
   flex-direction: column;
   gap: 12px;
   padding: 0 14px 14px;
-  border-top: 1px solid var(--za-line);
+  border-top: 1px solid var(--ui-border-subtle, var(--za-line));
   padding-top: 12px;
 }
 
 .goal-plan-goal {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--ui-font-control, 13px);
   line-height: 1.5;
   color: var(--za-text-soft);
 }
@@ -654,7 +654,7 @@
 
 /* 主卡：当前计划永远置顶展开，给一点强调描边与背景与历史区拉开层级。 */
 .goal-plan-card--main {
-  border-color: var(--za-line-strong, var(--za-line));
+  border-color: var(--ui-border-strong, var(--za-line-strong, var(--za-line)));
   background: var(--za-surface-1);
 }
 .goal-plan-card--main .goal-plan-head-caret {
@@ -669,7 +669,7 @@
 }
 
 .goal-plan-history-title {
-  font-size: 11px;
+  font-size: var(--ui-font-caption, 11px);
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--za-text-muted);
@@ -700,18 +700,18 @@
   padding: 6px 8px;
   margin: 0 -8px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-row, 8px);
   background: transparent;
   text-align: left;
   cursor: pointer;
   transition: background var(--za-motion-fast, 120ms) var(--za-ease-standard, ease);
 }
 .goal-plan-progress:hover {
-  background: var(--za-hover);
+  background: var(--ui-surface-hover, var(--za-hover));
 }
 .goal-plan-progress:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--za-focus);
+  box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
 }
 
 /* track 强制独占一行（flex-basis 100%），承载进度条本体。 */
@@ -726,8 +726,8 @@
   display: block;
   position: relative;
   height: 6px;
-  border-radius: 999px;
-  background: var(--za-hover);
+  border-radius: var(--ui-radius-round, 999px);
+  background: var(--ui-surface-hover, var(--za-hover));
   background-image: linear-gradient(var(--state-confirm), var(--state-confirm));
   background-repeat: no-repeat;
   background-size: 0% 100%;
@@ -759,7 +759,7 @@
 /* track 下方一行：进度文本占满剩余宽度（把 caret 挤到最右），caret 居右。 */
 .goal-plan-progress-text {
   flex: 1 1 auto;
-  font-size: 12px;
+  font-size: var(--ui-font-meta, 12px);
   color: var(--za-text-muted);
 }
 .goal-plan-progress-caret {
@@ -788,9 +788,9 @@
 }
 
 .goal-task--card {
-  border: 1px solid var(--za-line);
-  border-radius: var(--za-radius-sm);
-  background: var(--za-surface-1);
+  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  background: var(--ui-surface-raised, var(--za-surface-1));
   overflow: hidden;
 }
 
@@ -811,15 +811,15 @@
 }
 .goal-task-head:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 2px var(--za-focus);
+  box-shadow: inset 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
 }
 
 .goal-task-status {
   flex: none;
   min-width: 48px;
   padding: 1px 6px;
-  border-radius: var(--za-radius-sm);
-  font-size: 11px;
+  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  font-size: var(--ui-font-caption, 11px);
   text-align: center;
   background: var(--za-hover);
   color: var(--za-text-soft);
@@ -831,7 +831,7 @@
 .goal-task-status--waiting_user { color: var(--za-warn); background: var(--za-warn-soft); }
 
 .goal-task-title {
-  font-size: 13px;
+  font-size: var(--ui-font-control, 13px);
   color: var(--za-text);
   min-width: 0;
   flex: 1 1 auto;
@@ -858,9 +858,9 @@
 .goal-task-summary {
   margin: 0 10px 8px;
   padding: 4px 8px;
-  border-radius: var(--za-radius-sm);
-  background: var(--za-hover);
-  font-size: 11.5px;
+  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  background: var(--ui-surface-hover, var(--za-hover));
+  font-size: var(--ui-font-caption, 11px);
   line-height: 1.5;
   color: var(--za-text-muted);
   overflow-wrap: anywhere;
@@ -883,7 +883,7 @@
 }
 
 .goal-task-detail {
-  font-size: 12px;
+  font-size: var(--ui-font-meta, 12px);
   line-height: 1.5;
   color: var(--za-text-soft);
 }
@@ -891,7 +891,7 @@
 .goal-task-detail--warn { color: var(--za-warn); }
 
 .goal-task-detail-label {
-  font-size: 11px;
+  font-size: var(--ui-font-caption, 11px);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--za-text-faint);
@@ -909,14 +909,14 @@
 
 .goal-task-evidence-item {
   font-family: var(--font-mono, monospace);
-  font-size: 11px;
+  font-size: var(--ui-font-caption, 11px);
   color: var(--za-text-muted);
   overflow-wrap: anywhere;
   word-break: break-all;
 }
 
 .goal-plan-empty-tasks {
-  font-size: 12px;
+  font-size: var(--ui-font-meta, 12px);
   color: var(--za-text-muted);
 }
 
@@ -934,9 +934,9 @@
 
 .goal-plan-actions button {
   padding: 6px 14px;
-  border-radius: var(--za-radius-sm);
-  border: 1px solid var(--za-line);
-  font-size: 13px;
+  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  font-size: var(--ui-font-control, 13px);
   cursor: pointer;
   transition: background var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
 }
@@ -949,11 +949,11 @@
 .goal-plan-actions--inline button {
   box-sizing: border-box;
   padding: 2px 8px;
-  font-size: 12px;
+  font-size: var(--ui-font-meta, 12px);
   line-height: 1.5;
   font-weight: 400;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-round, 999px);
   white-space: nowrap;
 }
 
@@ -984,7 +984,7 @@
 }
 
 .goal-plan-reject:hover:not(:disabled) {
-  background: var(--za-hover);
+  background: var(--ui-surface-hover, var(--za-hover));
 }
 
 /* Goal Runner 托管状态区：表达 runner 编排状态，不替代任务 Evidence。 */
@@ -994,9 +994,9 @@
   gap: 8px;
   margin-top: 10px;
   padding: 10px;
-  border: 1px solid var(--za-line);
-  border-radius: var(--za-radius, 8px);
-  background: var(--za-surface-1);
+  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border-radius: var(--ui-radius-panel, var(--za-radius, 8px));
+  background: var(--ui-surface-raised, var(--za-surface-1));
 }
 
 /* 底部栏：左侧计数（轮次/工具/探索），右侧控制按钮（暂停/继续/清除），单行两端对齐。 */
@@ -1009,7 +1009,7 @@
 }
 
 .goal-runner-counters {
-  font-size: 12px;
+  font-size: var(--ui-font-meta, 12px);
   color: var(--za-text-soft);
   font-variant-numeric: tabular-nums;
 }
@@ -1026,11 +1026,11 @@
   flex: none;
   max-width: 100%;
   padding: 2px 7px;
-  border: 1px solid var(--za-line);
-  border-radius: 999px;
+  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border-radius: var(--ui-radius-round, 999px);
   background: var(--za-surface-2);
   color: var(--za-text);
-  font-size: 11px;
+  font-size: var(--ui-font-caption, 11px);
   line-height: 1.4;
   white-space: nowrap;
 }
@@ -1053,8 +1053,8 @@
   justify-content: space-between;
   gap: 10px;
   padding: 7px 8px;
-  border-left: 3px solid var(--za-line);
-  border-radius: 6px;
+  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border-radius: var(--ui-radius-control, 6px);
   background: var(--za-surface-2);
 }
 
@@ -1089,18 +1089,18 @@
 }
 
 .goal-runner-status-strip--verifier {
-  border-left-color: var(--za-primary-control-bg);
+  border-color: color-mix(in srgb, var(--za-primary-control-bg) 34%, var(--za-line));
 }
 
 .goal-runner-status-strip--passed {
-  border-left-color: var(--za-primary-control-bg);
+  border-color: color-mix(in srgb, var(--za-primary-control-bg) 34%, var(--za-line));
 }
 
 .goal-runner-status-strip--blocker,
 .goal-runner-status-strip--failed,
 .goal-runner-status-strip--blocked,
 .goal-runner-status-strip--error {
-  border-left-color: var(--za-warn);
+  border-color: color-mix(in srgb, var(--za-warn) 34%, var(--za-line));
   background: var(--za-warn-soft);
 }
 

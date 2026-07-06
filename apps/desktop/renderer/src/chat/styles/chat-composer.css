@@ -1,12 +1,10 @@
 @layer components {
-  /* Composer — Peer Vellum 扁平风：只有 1px 发丝边线 + 暖纸沉色底
-   * 圆角与消息气泡保持一致（--za-radius = 12px），避免相邻视觉割裂
-   * 不要 inset 光影，不要 drop shadow（红线 §7：阴影仅限 popover / drag） */
+  /* Composer：底部 control surface，保持克制边线，不使用 accent 做 CTA。 */
   .cloud-chat-composer {
     @apply grid items-end gap-2 p-2;
     grid-template-columns: minmax(0, 1fr) auto auto;
-    border: 1px solid var(--za-line);
-    border-radius: var(--za-radius);
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-panel, var(--za-radius));
     background: var(--za-composer-bg);
     --motion-enter-from: 8px;
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
@@ -17,14 +15,14 @@
   .cloud-chat-composer.empty {
     @apply items-end p-4;
     min-height: 144px;
-    border-radius: var(--radius-xl);
+    border-radius: var(--ui-radius-modal, var(--radius-xl));
     background: var(--za-composer-empty-bg);
   }
 
   .cloud-chat-composer textarea {
     @apply min-w-0 resize-none border-0 bg-transparent px-3 py-2 font-normal outline-none;
     color: var(--za-text);
-    font-size: 13px;
+    font-size: var(--ui-font-control, 13px);
     line-height: 1.52;
   }
 
@@ -38,7 +36,7 @@
   .cloud-chat-composer.empty textarea {
     @apply min-h-[88px] px-4 py-3;
     color: var(--za-text);
-    font-size: 17px;
+    font-size: var(--ui-font-body-lg, 15px);
     line-height: 1.45;
   }
 
@@ -102,7 +100,7 @@
   }
   .agent-picker-trigger:hover {
     color: var(--za-text);
-    background: var(--za-hover);
+    background: var(--ui-surface-hover, var(--za-hover));
   }
   .agent-picker-caret {
     font-size: 10px;
@@ -114,9 +112,9 @@
     max-height: 280px;
     overflow-y: auto;
     color-scheme: dark;
-    background: var(--za-surface-2);
-    border: 1px solid var(--za-line);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    background: var(--ui-surface-elevated, var(--za-surface-2));
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    box-shadow: var(--za-shadow-popover);
     --motion-enter-from: 8px;
     animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
     z-index: 10;
@@ -129,16 +127,16 @@
     transition: background var(--za-motion-fast) var(--za-ease-standard);
   }
   .agent-picker-dropdown button:hover {
-    background: var(--za-hover);
+    background: var(--ui-surface-hover, var(--za-hover));
     color: var(--za-text);
   }
   .agent-picker-dropdown button.selected {
-    color: var(--za-accent);
+    color: var(--ui-accent, var(--za-accent));
   }
 
   .agent-picker-search {
     @apply mx-1.5 mb-1 rounded-md border px-2 py-1 text-xs;
-    border-color: var(--za-line);
+    border-color: var(--ui-border-subtle, var(--za-line));
     background: var(--za-bg-1);
     color: var(--za-text);
     outline: none;
@@ -161,7 +159,7 @@
   .image-preview-item {
     @apply relative shrink-0 overflow-hidden rounded-lg;
     height: 64px;
-    border: 1px solid var(--za-line);
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
     background: var(--za-surface-1);
   }
 
@@ -174,8 +172,8 @@
     @apply absolute right-0.5 top-0.5 grid place-items-center text-[9px] leading-none;
     width: 14px;
     height: 14px;
-    background: rgba(0, 0, 0, 0.45);
-    color: #fff;
+    background: color-mix(in srgb, var(--za-text) 74%, transparent);
+    color: var(--za-bg-0);
     border: none;
     border-radius: 50%;
     cursor: pointer;
@@ -188,7 +186,7 @@
   }
 
   .image-preview-remove:hover {
-    background: rgba(0, 0, 0, 0.7);
+    background: color-mix(in srgb, var(--za-text) 88%, transparent);
   }
 
   .image-preview-item.uploading {
@@ -203,7 +201,7 @@
 
   .image-preview-add {
     @apply grid h-16 w-16 shrink-0 place-items-center rounded-lg text-[18px];
-    border: 1px dashed var(--za-line);
+    border: 1px dashed var(--ui-border-subtle, var(--za-line));
     color: var(--za-text-muted);
     background: transparent;
     cursor: pointer;
@@ -223,7 +221,7 @@
 
   .message-image-thumb {
     @apply h-32 max-w-[200px] rounded-lg object-cover;
-    border: 1px solid var(--za-line);
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
     cursor: pointer;
   }
 

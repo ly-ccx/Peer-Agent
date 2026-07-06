@@ -22,13 +22,13 @@
   }
 
   .markdown-content h3 {
-    font-size: 15px;
+    font-size: var(--ui-font-body-lg, 0.9375rem);
   }
 
   .markdown-content h4,
   .markdown-content h5,
   .markdown-content h6 {
-    font-size: 13.5px;
+    font-size: 0.84375rem;
   }
 
   .markdown-content p {

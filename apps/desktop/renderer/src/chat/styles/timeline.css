@@ -12,7 +12,7 @@
   .timeline-summary {
     @apply flex flex-wrap items-center gap-2;
     font-family: var(--font-mono);
-    font-size: 11.5px;
+    font-size: 0.71875rem;
     letter-spacing: 0.02em;
     color: var(--ink-fade);
   }
@@ -38,7 +38,7 @@
   .timeline-tool>div {
     @apply flex items-center justify-between gap-2.5;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--ui-font-meta, 0.75rem);
     color: var(--ink-soft);
   }
 
@@ -46,7 +46,7 @@
   .timeline-tool strong {
     @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--ui-font-meta, 0.75rem);
     font-weight: 600;
     letter-spacing: 0;
     color: var(--ink-base);
@@ -56,7 +56,7 @@
   .timeline-iteration>p {
     @apply m-0;
     font-family: var(--font-sans-zh);
-    font-size: 13px;
+    font-size: var(--ui-font-control, 0.8125rem);
     line-height: 1.7;
     color: var(--ink-soft);
     overflow-wrap: anywhere;
@@ -76,14 +76,14 @@
 
   .timeline-tool li {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--ui-font-meta, 0.75rem);
     color: var(--ink-fade);
     line-height: 1.6;
   }
 
   .timeline-tool li small {
     @apply ml-2;
-    font-size: 11px;
+    font-size: var(--ui-font-caption, 0.6875rem);
     color: var(--ink-mute);
   }
 
@@ -91,7 +91,7 @@
   .timeline-tool>p {
     @apply m-0;
     font-family: var(--font-sans-zh);
-    font-size: 13px;
+    font-size: var(--ui-font-control, 0.8125rem);
     line-height: 1.65;
     color: var(--ink-soft);
     overflow-wrap: anywhere;
@@ -140,7 +140,7 @@
   .timeline-tool-stream-label {
     @apply uppercase tracking-wider;
     font-family: var(--font-mono);
-    font-size: 10.5px;
+    font-size: 0.65625rem;
     color: var(--ink-mute);
     cursor: pointer;
     list-style: none;
@@ -152,7 +152,7 @@
 
   .timeline-tool-stream-label::before {
     content: "▸ ";
-    font-size: 9px;
+    font-size: 0.5625rem;
   }
 
   details[open]>.timeline-tool-stream-label::before {
@@ -169,7 +169,7 @@
   .tool-result-summary {
     @apply m-0;
     font-family: var(--font-mono);
-    font-size: 11.5px;
+    font-size: 0.71875rem;
     color: var(--ink-soft);
     cursor: pointer;
     list-style: none;
@@ -191,7 +191,7 @@
 
   .tool-result-details>.tool-result-summary::before {
     content: "▸ ";
-    font-size: 9px;
+    font-size: 0.5625rem;
   }
 
   .tool-result-details[open]>.tool-result-summary::before {
@@ -205,7 +205,7 @@
     border-radius: 4px;
     background: var(--surface-paper-soft, transparent);
     font-family: var(--font-mono);
-    font-size: 11.5px;
+    font-size: 0.71875rem;
     line-height: 1.55;
     color: var(--ink-soft);
     white-space: pre-wrap;
@@ -223,7 +223,7 @@
     border-radius: 4px;
     background: var(--surface-paper-soft, transparent);
     font-family: var(--font-mono);
-    font-size: 11.5px;
+    font-size: 0.71875rem;
     line-height: 1.55;
     color: var(--ink-soft);
     white-space: pre;

@@ -1,11 +1,5 @@
 @layer components {
-  /* Peer Vellum · 卷轴文档式 chat（v0.1.4）
-   * 不是 IM 气泡，是连续的"卷轴文本"：
-   *   - 消息无 border / bg / radius，靠 hairline + 字号差 + 间距分章
-   *   - 用户消息：朱砂 2px 左竖线（白名单 #3 在左对齐场景的正当用法）
-   *   - Agent 消息：墨色头像 + Serif 名号 + 全宽段落
-   *   - 章节切换由 .section-heading 承担（每个新会话 = 新卷）
-   */
+  /* 旧消息流：继续保持文档式阅读，但视觉语义跟随当前 evidence surface。 */
   .cloud-chat-messages {
     @apply flex min-h-0 flex-1 flex-col overflow-y-auto pr-1;
     gap: 32px;
@@ -18,9 +12,9 @@
     gap: 8px;
     padding-left: 16px;
     color: var(--ink-base);
-    font-size: 14px;
+    font-size: var(--ui-font-body, 14px);
     font-weight: 400;
-    line-height: 1.72;
+    line-height: var(--ui-line-body, 1.68);
     animation: motion-enter-rise var(--za-motion-slow) var(--za-ease-decelerate) both;
   }
 
@@ -37,20 +31,9 @@
       transparent 100%
     );
     background-size: 200% 100%;
-    border-radius: var(--za-radius-sm);
+    border-radius: var(--ui-radius-control, var(--za-radius-sm));
     pointer-events: none;
     animation: za-message-shimmer 800ms var(--za-ease-decelerate) both;
-  }
-
-  /* 用户消息：朱砂 2px 左竖线（作者印记） */
-  .cloud-chat-message.user::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 2px;
-    background: var(--cinnabar-seal);
   }
 
   /* Agent / system / tool：默认无标记，靠头像 + 名号识别发送方 */
@@ -61,10 +44,9 @@
     @apply flex items-center gap-2;
   }
 
-  /* 角色名号 — 不再是小字 metadata，是"作者署名"级别 */
   .cloud-chat-message .role-label {
     font-family: var(--font-sans-zh);
-    font-size: 15px;
+    font-size: var(--ui-font-body-lg, 15px);
     font-weight: 600;
     color: var(--ink-base);
     letter-spacing: -0.005em;
@@ -92,10 +74,10 @@
   }
   .message-action-bar button:hover {
     color: var(--za-text);
-    background: var(--za-hover);
+    background: var(--ui-surface-hover, var(--za-hover));
   }
   .message-action-bar button.danger:hover {
-    color: #e55;
+    color: var(--state-danger);
   }
 
   /* 删除二次确认（内联，复用 Sidebar confirm 视觉风格） */
@@ -106,10 +88,10 @@
   }
   .message-action-confirm button {
     @apply rounded-md px-1.5 py-0.5;
-    font-size: 11px;
+    font-size: var(--ui-font-caption, 11px);
     line-height: 1.4;
     background: transparent;
-    border: 1px solid var(--chrome-hairline);
+    border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
     cursor: pointer;
     transition: color var(--za-motion-fast), background var(--za-motion-fast), border-color var(--za-motion-fast);
   }
@@ -125,7 +107,7 @@
   }
   .message-action-confirm .confirm-no:hover {
     color: var(--za-text);
-    background: var(--za-hover);
+    background: var(--ui-surface-hover, var(--za-hover));
   }
 
   /* 分享选择模式 */
@@ -134,16 +116,16 @@
     align-items: flex-start;
     gap: 10px;
     cursor: pointer;
-    border-radius: var(--za-radius);
+    border-radius: var(--ui-radius-row, var(--za-radius));
     padding: 12px 16px;
     transition: background var(--za-motion-fast) var(--za-ease-standard);
   }
   .cloud-chat-message.selection-mode:hover {
-    background: var(--za-hover);
+    background: var(--ui-surface-hover, var(--za-hover));
   }
   .cloud-chat-message.selection-mode.selected {
-    background: var(--za-hover);
-    outline: 1px solid var(--za-accent);
+    background: var(--ui-surface-selected, var(--za-hover));
+    outline: 1px solid var(--ui-selected-border, var(--za-accent));
   }
   .cloud-chat-message.selection-mode > *:not(.share-select-checkbox) {
     min-width: 0;
@@ -154,15 +136,15 @@
   }
   .share-select-checkbox input[type="checkbox"] {
     @apply h-4 w-4;
-    accent-color: var(--za-accent);
+    accent-color: var(--ui-accent, var(--za-accent));
     pointer-events: none;
   }
 
   .share-selection-bar {
     @apply flex items-center gap-3 px-4 py-2;
     background: var(--za-surface-1);
-    border-top: 1px solid var(--za-line);
-    font-size: 13px;
+    border-top: 1px solid var(--ui-border-subtle, var(--za-line));
+    font-size: var(--ui-font-control, 13px);
     color: var(--za-text-soft);
     --motion-enter-from: 8px;
     animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
@@ -172,7 +154,7 @@
   }
   .share-selection-bar button {
     @apply rounded-md border px-3 py-1.5 text-xs font-medium;
-    border-color: var(--za-line);
+    border-color: var(--ui-border-subtle, var(--za-line));
     background: var(--za-surface-1);
     color: var(--za-text-soft);
     cursor: pointer;
@@ -180,13 +162,13 @@
     transition: background var(--za-motion-fast), color var(--za-motion-fast);
   }
   .share-selection-bar button:hover {
-    background: var(--za-surface-2);
+    background: var(--ui-surface-hover, var(--za-surface-2));
     color: var(--za-text);
   }
   .share-selection-bar .share-btn-confirm {
-    border-color: var(--za-accent);
-    background: var(--za-accent);
-    color: #fff;
+    border-color: var(--za-primary-control-bg);
+    background: var(--za-primary-control-bg);
+    color: var(--za-primary-control-ink);
   }
   .share-selection-bar .share-btn-confirm:hover {
     opacity: 0.85;
@@ -198,7 +180,7 @@
 
   .cloud-chat-message summary {
     color: var(--za-text-faint);
-    font-size: 11.5px;
+    font-size: var(--ui-font-caption, 11px);
     cursor: pointer;
     transition: color var(--za-motion-fast) var(--za-ease-standard);
   }
@@ -210,20 +192,17 @@
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
   }
 
-  /* Agent 头像 — 仅墨色底 + 思源宋体字
-   * 朱砂角标已与"全局品牌印（侧栏顶部用户印章）"合并语义，本处不再叠朱砂点
-   * 这样整套 UI 朱砂落点收敛回 ≤ 4 个白名单位置（红线 §6.3）*/
   .cloud-chat-message .agent-avatar {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 28px;
     height: 28px;
-    border-radius: 50%;
-    background: var(--ink-soft);
-    color: var(--surface-vellum-base);
+    border-radius: var(--ui-radius-round, 50%);
+    background: var(--za-primary-control-bg);
+    color: var(--za-primary-control-ink);
     font-family: var(--font-serif-zh);
-    font-size: 13px;
+    font-size: var(--ui-font-control, 13px);
     font-weight: 600;
     line-height: 1;
     letter-spacing: 0;
@@ -253,14 +232,16 @@
   .message-images img {
     @apply w-full object-cover;
     max-height: 160px;
-    border: 1px solid var(--za-line);
-    border-radius: var(--za-radius);
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-panel, var(--za-radius));
     background: var(--za-surface-1);
   }
 
   .message-references article {
     @apply mt-2 grid gap-1 p-2;
     background: var(--za-surface-0);
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-control, 6px);
     box-shadow: none;
     --motion-enter-from: -4px;
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
@@ -268,7 +249,7 @@
 
   .message-references strong {
     color: var(--za-text-muted);
-    font-size: 11.5px;
+    font-size: var(--ui-font-caption, 11px);
   }
 
   .cloud-chat-message details {
@@ -285,8 +266,8 @@
     @apply inline-flex cursor-pointer select-none items-center gap-1.5;
     list-style: none;
     font-family: var(--font-mono);
-    font-size: 11.5px;
-    letter-spacing: 0.02em;
+    font-size: var(--ui-font-caption, 11px);
+    letter-spacing: 0;
     color: var(--ink-fade);
     transition: color var(--za-motion-fast) var(--za-ease-standard);
   }
@@ -339,7 +320,7 @@
   /* 「生成中…」答案占位：azure 脉冲点 + 扫光文字,与工具运行态同一信号语言 */
   .streaming-placeholder {
     @apply inline-flex items-center gap-2;
-    font-size: 14px;
+    font-size: var(--ui-font-body, 0.875rem);
     line-height: 1.72;
   }
   .streaming-placeholder::before {
@@ -377,31 +358,13 @@
     animation: za-content-shimmer 1s 200ms var(--za-ease-decelerate) both;
   }
 
-  /* Confirmation 行内卷轴 — Peer Vellum §7.6：上下 1px 古铜横线 + 右上方印
-   * 不是普通卡片，是"等用户阅读签字"的卷轴形态；border-radius 归零强调"打开的卷轴"语感 */
   .confirmation-inline {
     @apply flex min-h-9 items-center justify-between gap-2.5 px-2 py-2 text-xs;
     position: relative;
-    border: none;
-    border-top: 1px solid var(--state-confirm);
-    border-bottom: 1px solid var(--state-confirm);
-    border-radius: 0;
-    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--state-confirm) 34%, var(--za-line));
+    border-radius: var(--ui-radius-control, 6px);
+    background: var(--ui-surface-raised, var(--za-surface-0));
     color: var(--ink-base);
-  }
-
-  /* 古铜方印（"阅"印）— 卷轴右上角的状态标记 */
-  .confirmation-inline::before {
-    content: "等你确认";
-    position: absolute;
-    top: -8px;
-    left: 8px;
-    padding: 0 6px;
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    color: var(--state-confirm);
-    background: var(--za-thread-bg);
   }
 
   .confirmation-inline > span {

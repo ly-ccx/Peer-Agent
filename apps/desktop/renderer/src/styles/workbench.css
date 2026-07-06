@@ -10,7 +10,7 @@
     height: 100%;
     min-height: 0;
     background: var(--za-surface-1);
-    border-left: 1px solid var(--za-line);
+    border-left: 1px solid var(--ui-border-subtle, var(--za-line));
     overflow: hidden;
     transition: width var(--za-motion-medium, 200ms) var(--za-ease-out, ease),
       border-color var(--za-motion-fast);
@@ -22,8 +22,7 @@
     border-left: none;
   }
 
-  /* 拖拽分隔线：6px hit area，无独立指示条；hover/聚焦时让面板自身的
-   * 1px border-left 变为强调色，始终呈现为一条干净的线（无加粗、无缝）。 */
+  /* 拖拽分隔线：6px hit area，无独立指示条；不额外染色，避免形成左侧 accent rail。 */
   .workbench-resizer {
     position: absolute;
     top: 0;
@@ -37,12 +36,6 @@
   .workbench-resizer:focus-visible {
     outline: none;
   }
-  /* hover 或键盘聚焦拖拽手柄时，整条面板左边框高亮变色。 */
-  .workbench-panel:has(.workbench-resizer:hover),
-  .workbench-panel:has(.workbench-resizer:focus-visible) {
-    border-left-color: var(--za-accent);
-  }
-
   /* TabRail：左侧 56px 竖向 tab 列 */
   .workbench-tab-rail {
     flex: 0 0 56px;
@@ -51,7 +44,7 @@
     gap: 4px;
     padding: 6px 4px 8px;
     background: var(--za-sidebar-bg);
-    border-right: 1px solid var(--chrome-hairline);
+    border-right: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   }
 
   .workbench-tab {
@@ -64,7 +57,7 @@
     height: 56px;
     padding: 6px 4px;
     border: none;
-    border-radius: var(--radius-frost-sm, 6px);
+    border-radius: var(--ui-radius-control, 6px);
     background: transparent;
     color: var(--graphite-mute);
     cursor: pointer;
@@ -72,12 +65,12 @@
   }
 
   .workbench-tab:hover:not(.workbench-tab--disabled) {
-    background: var(--chrome-hover);
+    background: var(--ui-surface-hover, var(--chrome-hover));
     color: var(--graphite-base);
   }
 
   .workbench-tab--active {
-    background: var(--za-active, rgba(0, 0, 0, 0.06));
+    background: var(--ui-surface-selected, var(--za-active));
     color: var(--graphite-base);
   }
 
@@ -93,9 +86,9 @@
   }
 
   .workbench-tab-label {
-    font-size: 10.5px;
-    line-height: 1;
-    letter-spacing: 0.02em;
+    font-size: var(--ui-font-caption, 11px);
+    line-height: var(--ui-line-tight, 1.25);
+    letter-spacing: 0;
   }
 
   /* ViewSlot：right pane，承载子视图。多个视图同时挂载，靠 data-active 显隐。 */
@@ -156,14 +149,14 @@
   }
   .workbench-empty-title {
     font-family: var(--font-serif-zh, inherit);
-    font-size: 15px;
+    font-size: var(--ui-font-body-lg, 15px);
     font-weight: 600;
     color: var(--ink-base, var(--za-text));
   }
   .workbench-empty-hint {
     margin: 0;
     max-width: 280px;
-    font-size: 12.5px;
+    font-size: var(--ui-font-meta, 12px);
     line-height: 1.6;
     color: var(--ink-fade, var(--za-text-faint));
   }
@@ -171,11 +164,11 @@
     max-width: 280px;
     padding: 4px 8px;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--ui-font-caption, 11px);
     color: var(--za-text-muted);
     background: var(--za-surface-1);
-    border: 1px solid var(--za-line);
-    border-radius: var(--za-radius-sm);
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-control, var(--za-radius-sm));
     word-break: break-all;
   }
 
@@ -204,7 +197,7 @@
     gap: 8px;
     min-height: 52px;
     padding: 0 12px;
-    border-bottom: 1px solid var(--za-line);
+    border-bottom: 1px solid var(--ui-border-subtle, var(--za-line));
     flex: 0 0 auto;
     /* 上提铺满顶部安全区后，标题栏同时充当窗口拖拽区 */
     -webkit-app-region: drag;
@@ -217,7 +210,7 @@
   }
   .workbench-diff-filename {
     font-family: var(--font-mono);
-    font-size: 12.5px;
+    font-size: var(--ui-font-meta, 12px);
     font-weight: 600;
     color: var(--ink-base, var(--za-text));
     white-space: nowrap;
@@ -227,11 +220,11 @@
   .workbench-diff-badge {
     flex: 0 0 auto;
     padding: 1px 6px;
-    font-size: 10.5px;
+    font-size: var(--ui-font-caption, 11px);
     color: var(--za-text-muted);
     background: var(--za-surface-1);
-    border: 1px solid var(--za-line);
-    border-radius: var(--za-radius-sm);
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-control, var(--za-radius-sm));
     white-space: nowrap;
   }
   .workbench-diff-actions {
@@ -244,17 +237,17 @@
   }
   .workbench-diff-btn {
     padding: 3px 8px;
-    font-size: 11.5px;
+    font-size: var(--ui-font-meta, 12px);
     color: var(--graphite-mute);
     background: transparent;
-    border: 1px solid var(--za-line);
-    border-radius: var(--radius-frost-sm, 6px);
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-control, 6px);
     cursor: pointer;
     white-space: nowrap;
     transition: background var(--za-motion-fast), color var(--za-motion-fast);
   }
   .workbench-diff-btn:hover {
-    background: var(--chrome-hover);
+    background: var(--ui-surface-hover, var(--chrome-hover));
     color: var(--graphite-base);
   }
   .workbench-diff-body {
@@ -367,18 +360,18 @@
     align-items: center;
     padding: 2px;
     gap: 2px;
-    background: var(--za-surface-2, var(--chrome-hover));
-    border: 1px solid var(--za-line);
-    border-radius: var(--radius-frost-sm, 6px);
+    background: var(--za-control-fill, var(--chrome-hover));
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-control, 6px);
     -webkit-app-region: no-drag;
   }
   .workbench-diff-segment {
     padding: 2px 9px;
-    font-size: 11.5px;
+    font-size: var(--ui-font-meta, 12px);
     color: var(--graphite-mute);
     background: transparent;
-    border: none;
-    border-radius: var(--radius-frost-xs, 4px);
+    border: 1px solid transparent;
+    border-radius: var(--ui-radius-chip, 4px);
     cursor: pointer;
     white-space: nowrap;
     transition: background var(--za-motion-fast), color var(--za-motion-fast);
@@ -388,12 +381,13 @@
   }
   .workbench-diff-segment.is-active {
     color: var(--graphite-base);
-    background: var(--za-surface-1, #fff);
-    box-shadow: var(--za-shadow-xs, 0 1px 2px rgba(0, 0, 0, 0.08));
+    background: var(--ui-surface-raised, var(--za-surface-1));
+    border-color: var(--ui-border-subtle, var(--za-line));
+    box-shadow: none;
   }
   .workbench-diff-segment:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px var(--za-focus);
+    box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
   }
 
   /* 源码视图：带行号槽的只读等宽代码视图（复用 diff 的排版语汇） */
@@ -455,8 +449,8 @@
     margin: 0 auto;
     padding: 28px 28px 48px;
     color: var(--ink-base, var(--za-text));
-    font-size: 14px;
-    line-height: 1.72;
+    font-size: var(--ui-font-body, 14px);
+    line-height: var(--ui-line-body, 1.68);
   }
   .workbench-document > :first-child {
     margin-top: 0;
@@ -477,21 +471,21 @@
     line-height: 1.25;
   }
   .workbench-document h1 {
-    font-size: 26px;
+    font-size: var(--ui-font-heading-lg, 26px);
   }
   .workbench-document h2 {
     margin-top: 1.65em;
     padding-top: 0.85em;
-    border-top: 1px solid var(--za-line);
-    font-size: 20px;
+    border-top: 1px solid var(--ui-border-subtle, var(--za-line));
+    font-size: var(--ui-font-heading-md, 20px);
   }
   .workbench-document h3 {
-    font-size: 16px;
+    font-size: var(--ui-font-heading-sm, 16px);
   }
   .workbench-document h4,
   .workbench-document h5,
   .workbench-document h6 {
-    font-size: 14px;
+    font-size: var(--ui-font-body, 14px);
   }
   .workbench-document p,
   .workbench-document ul,
@@ -521,24 +515,26 @@
     font-size: 0.9em;
     color: var(--ink-base, var(--za-text));
     background: var(--za-surface-1);
-    border: 1px solid var(--za-line);
-    border-radius: var(--radius-frost-xs, 4px);
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-chip, 4px);
   }
   .workbench-document blockquote {
-    padding: 0.2em 0 0.2em 1em;
+    padding: 0.65em 0.85em;
     color: var(--za-text-muted);
-    border-left: 3px solid var(--za-line-strong, var(--za-line));
+    background: var(--za-surface-1);
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-control, 6px);
   }
   .workbench-document hr {
     margin: 1.6em 0;
     border: none;
-    border-top: 1px solid var(--za-line);
+    border-top: 1px solid var(--ui-border-subtle, var(--za-line));
   }
   .workbench-doc-code {
     overflow: hidden;
     background: var(--za-surface-1);
-    border: 1px solid var(--za-line);
-    border-radius: var(--radius-frost-sm, 6px);
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-control, 6px);
   }
   .workbench-doc-codebar {
     display: flex;
@@ -548,13 +544,13 @@
     min-height: 30px;
     padding: 0 10px;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--ui-font-caption, 11px);
     color: var(--za-text-muted);
-    border-bottom: 1px solid var(--za-line);
+    border-bottom: 1px solid var(--ui-border-subtle, var(--za-line));
   }
   .workbench-doc-codebar button {
     border: none;
-    border-radius: var(--radius-frost-xs, 4px);
+    border-radius: var(--ui-radius-chip, 4px);
     padding: 3px 7px;
     color: var(--graphite-mute);
     background: transparent;
@@ -562,7 +558,7 @@
   }
   .workbench-doc-codebar button:hover {
     color: var(--graphite-base);
-    background: var(--chrome-hover);
+    background: var(--ui-surface-hover, var(--chrome-hover));
   }
   .workbench-doc-code pre {
     margin: 0;
@@ -585,21 +581,21 @@
   }
   .workbench-doc-table-wrap {
     overflow: auto;
-    border: 1px solid var(--za-line);
-    border-radius: var(--radius-frost-sm, 6px);
+    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border-radius: var(--ui-radius-control, 6px);
   }
   .workbench-document table {
     width: 100%;
     min-width: max-content;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: var(--ui-font-control, 13px);
   }
   .workbench-document th,
   .workbench-document td {
     padding: 8px 10px;
     text-align: left;
     vertical-align: top;
-    border-bottom: 1px solid var(--za-line);
+    border-bottom: 1px solid var(--ui-border-subtle, var(--za-line));
   }
   .workbench-document th {
     color: var(--ink-base, var(--za-text));
@@ -627,7 +623,7 @@
     width: 28px;
     height: 28px;
     border: none;
-    border-radius: var(--radius-frost-sm, 6px);
+    border-radius: var(--ui-radius-control, 6px);
     background: transparent;
     color: var(--graphite-mute);
     cursor: pointer;
@@ -635,16 +631,16 @@
     transition: background var(--za-motion-fast), color var(--za-motion-fast);
   }
   .workbench-toggle:hover {
-    background: var(--chrome-hover);
+    background: var(--ui-surface-hover, var(--chrome-hover));
     color: var(--graphite-base);
   }
   .workbench-toggle--active {
-    background: var(--za-active, rgba(0, 0, 0, 0.06));
+    background: var(--ui-surface-selected, var(--za-active));
     color: var(--graphite-base);
   }
   .workbench-toggle:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px var(--za-focus);
+    box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
   }
 
   /* SidebarToggle：与右侧 WorkbenchToggle 对称、同规格，挂在 ChatHeader 左侧最前。 */
@@ -657,7 +653,7 @@
     margin-right: var(--space-1, 4px);
     flex: 0 0 auto;
     border: none;
-    border-radius: var(--radius-frost-sm, 6px);
+    border-radius: var(--ui-radius-control, 6px);
     background: transparent;
     color: var(--graphite-mute);
     cursor: pointer;
@@ -665,7 +661,7 @@
     transition: background var(--za-motion-fast), color var(--za-motion-fast);
   }
   .sidebar-toggle:hover {
-    background: var(--chrome-hover);
+    background: var(--ui-surface-hover, var(--chrome-hover));
     color: var(--graphite-base);
   }
   .sidebar-toggle--active {
@@ -673,7 +669,7 @@
   }
   .sidebar-toggle:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px var(--za-focus);
+    box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
   }
 }
 
@@ -697,7 +693,7 @@
     align-items: center;
     gap: 8px;
     padding: 6px 10px;
-    border-bottom: 1px solid var(--chrome-hairline);
+    border-bottom: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
     background: var(--za-sidebar-bg);
     /* 工具栏空白处作窗口拖拽区（镜像 Diff 标题栏）；按钮/地址栏单独 no-drag 保持可交互 */
     -webkit-app-region: drag;
@@ -716,7 +712,7 @@
     width: 28px;
     height: 28px;
     border: none;
-    border-radius: var(--radius-frost-sm, 6px);
+    border-radius: var(--ui-radius-control, 6px);
     background: transparent;
     color: var(--graphite-mute);
     cursor: pointer;
@@ -730,7 +726,7 @@
     display: block;
   }
   .browser-nav-btn:hover:not(:disabled) {
-    background: var(--chrome-hover);
+    background: var(--ui-surface-hover, var(--chrome-hover));
     color: var(--graphite-base);
   }
   .browser-nav-btn:disabled {
@@ -739,7 +735,7 @@
   }
   .browser-nav-btn:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px var(--za-focus);
+    box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
   }
 
   /* 地址栏：填满剩余空间 */
@@ -757,10 +753,10 @@
     height: 28px;
     padding: 0 36px 0 12px;
     border: 1px solid var(--chrome-hairline);
-    border-radius: 999px;
+    border-radius: var(--ui-radius-round, 999px);
     background: var(--surface-vellum-sunken, var(--za-surface-2));
     color: var(--graphite-base);
-    font-size: 13px;
+    font-size: var(--ui-font-control, 13px);
     outline: none;
     -webkit-app-region: no-drag;
     transition: border-color var(--za-motion-fast), box-shadow var(--za-motion-fast);
@@ -770,7 +766,7 @@
   }
   .browser-address-input:focus {
     border-color: var(--za-focus);
-    box-shadow: 0 0 0 2px var(--za-focus);
+    box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
   }
   .browser-go-btn {
     position: absolute;
@@ -797,7 +793,7 @@
     display: block;
   }
   .browser-go-btn:hover {
-    background: var(--chrome-hover);
+    background: var(--ui-surface-hover, var(--chrome-hover));
     color: var(--graphite-base);
   }
 
@@ -818,7 +814,7 @@
     display: block;
     height: 100%;
     width: 40%;
-    background: var(--za-focus, #3b7fab);
+    background: var(--ui-accent, var(--za-accent));
     border-radius: 2px;
     --motion-progress-to: 320%;
     animation: motion-progress-slide 1.1s ease-in-out infinite;
@@ -829,7 +825,7 @@
     position: relative;
     flex: 1 1 auto;
     min-height: 0;
-    background: #fff;
+    background: var(--za-bg-0);
   }
   .browser-webview {
     position: absolute;
@@ -905,14 +901,14 @@
     align-items: center;
     height: 22px;
     padding: 0 12px;
-    border-top: 1px solid var(--chrome-hairline);
+    border-top: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
     background: var(--za-sidebar-bg);
     overflow: hidden;
   }
   .browser-status-text {
     flex: 1 1 auto;
     color: var(--za-text-faint);
-    font-size: 11px;
+    font-size: var(--ui-font-caption, 11px);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -922,44 +918,51 @@
   .workbench-tree {
     height: 100%;
     overflow: auto;
-    padding: 8px 0;
-    font-size: 13px;
-    line-height: 1.35;
+    padding: 8px 6px;
+    font-size: var(--ui-font-control, 13px);
+    line-height: var(--ui-line-control, 1.35);
     user-select: none;
   }
   .workbench-tree-row {
     display: flex;
     align-items: center;
     gap: 6px;
-    min-height: 26px;
+    min-height: 28px;
+    margin: 1px 0;
     padding-right: 10px;
+    border: 1px solid transparent;
+    border-radius: var(--ui-radius-row, 8px);
     color: var(--za-text);
     cursor: pointer;
     white-space: nowrap;
     transition:
       background var(--za-motion-fast),
+      border-color var(--za-motion-fast),
+      box-shadow var(--za-motion-fast),
       color var(--za-motion-fast);
   }
   .workbench-tree-row:hover {
-    background: var(--chrome-hover, var(--za-active, rgba(0, 0, 0, 0.06)));
+    background: var(--ui-surface-hover, var(--chrome-hover));
   }
   .workbench-tree-row:focus-visible {
     outline: none;
-    background: var(--chrome-hover, var(--za-active, rgba(0, 0, 0, 0.06)));
+    background: var(--ui-surface-hover, var(--chrome-hover));
+    border-color: var(--ui-selected-border, var(--za-accent));
+    box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
   }
   .workbench-tree-row[data-selected='true'] {
-    background: color-mix(in srgb, var(--za-accent) 18%, transparent);
-    box-shadow: inset 2px 0 0 var(--za-accent);
+    background: var(--ui-surface-selected, var(--za-active));
+    border-color: var(--ui-selected-border, var(--za-accent));
   }
   .workbench-tree-twisty {
     flex: 0 0 auto;
-    width: 14px;
-    height: 18px;
+    width: 16px;
+    height: 20px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     text-align: center;
-    font-size: 20px;
+    font-size: 18px;
     line-height: 1;
     color: var(--za-text-faint);
     transform-origin: 50% 50%;
@@ -982,7 +985,7 @@
     display: flex;
     align-items: center;
     color: var(--za-text-faint);
-    font-size: 12px;
+    font-size: var(--ui-font-meta, 12px);
     font-style: italic;
   }
 

@@ -21,29 +21,6 @@
     -webkit-app-region: no-drag;
   }
 
-  .sidebar-drag-strip::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 5px;
-    width: 1px;
-    background: var(--za-line);
-    transition:
-      background-color var(--za-motion-fast) var(--za-ease-standard),
-      box-shadow var(--za-motion-fast) var(--za-ease-standard),
-      width var(--za-motion-fast) var(--za-ease-standard);
-  }
-
-  /* 拖拽条只在真正拖动时显示朱砂指示
-   * hover：依靠 col-resize cursor 反馈，不改边线视觉
-   * focus-visible：键盘走 arrow keys 操作，不画全高度焦点线
-   * 这是符合 Vellum「克制」的取舍 — 全屏垂直线在大窗口里是视觉污染 */
-  .cloud-chat-surface.resizing-sidebar .sidebar-drag-strip::before {
-    width: 2px;
-    background: var(--cinnabar-seal);
-  }
-
   .cloud-chat-thread {
     @apply flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden px-8 pb-7 pt-[52px];
     background: var(--za-thread-bg);
