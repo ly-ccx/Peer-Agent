@@ -315,29 +315,10 @@
   line-height: 0;
   flex-shrink: 0;
 }
-/* 三点波动:思考中三点依次上浮明灭(azure 蓝),完成态收成一颗静态实心圆点(mute 隐入)。 */
-.thinking-dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
+/* 完成态:折叠头部收成一颗静态实心圆点(mute 隐入);思考中不再显示圆点。 */
 .thinking-dot {
-  width: 4px;
-  height: 4px;
   border-radius: 50%;
   background: currentColor;
-}
-.thinking-section.active .thinking-indicator {
-  color: var(--azure-seal);
-}
-.thinking-section.active .thinking-dot {
-  animation: motion-dots 1.4s var(--za-ease-in-out, ease-in-out) infinite;
-}
-.thinking-section.active .thinking-dot:nth-child(2) {
-  animation-delay: 0.16s;
-}
-.thinking-section.active .thinking-dot:nth-child(3) {
-  animation-delay: 0.32s;
 }
 .thinking-dot--done {
   width: 5px;
@@ -360,13 +341,13 @@
     var(--graphite-soft) 65%,
     var(--graphite-soft) 100%
   );
-  background-size: 220% 100%;
+  background-size: 200% 100%;
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  --motion-shimmer-from: 120%;
-  --motion-shimmer-x: -120%;
+  --motion-shimmer-from: 100%;
+  --motion-shimmer-x: -100%;
   animation: motion-shimmer 1.8s linear infinite;
 }
 .thinking-chevron {
@@ -1293,13 +1274,9 @@
   .compaction-track--fill {
     transition: none;
   }
-  /* thinking 折叠头部:关闭三点浮动与文字 shimmer,退化为静态一行。 */
-  .thinking-section.active .thinking-dot,
+  /* thinking 折叠头部:关闭完成态圆点入场与文字 shimmer,退化为静态一行。 */
   .thinking-dot--done {
     animation: none;
-  }
-  .thinking-section.active .thinking-dot {
-    opacity: 1;
   }
   .thinking-section.active .thinking-label {
     animation: none;
