@@ -17,7 +17,7 @@
 // 真值边界：发送链路与用量账本真值仍在主进程；本路由器只把主进程下发的事件映射到表达层，
 //   并通过 conversationsReplaceMessages 把内存消息回写主进程的开放袋（与原 hook 一致）。
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 
 import { clientApi } from '../../clientApi';
 import { conversationStore } from '../state/conversationStore';
@@ -111,7 +111,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
   // 用 ref 持有「当前前台会话 / 最新回调」，让稳定的事件处理闭包始终读到最新值，
   // 从而把全部订阅放进一个「只挂载一次」的 effect，避免频繁解绑/重绑。
   const activeRef = useRef<string | null>(activeConversationId);
-  activeRef.current = activeConversationId;
   const onUpdatedRef = useRef(onConversationUpdated);
   onUpdatedRef.current = onConversationUpdated;
   const onBrowserRef = useRef(onBrowserToolActivity);
@@ -132,6 +131,17 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
   }, []);
   const textTypewriter = useTypewriterStream(appendActiveText);
   const thinkingTypewriter = useTypewriterStream(appendActiveThinking);
+  const flushTextTypewriter = textTypewriter.flush;
+  const flushThinkingTypewriter = thinkingTypewriter.flush;
+
+  useLayoutEffect(() => {
+    if (activeRef.current === activeConversationId) return;
+    // 切前台会话前，先把旧前台会话已收到但仍在打字机 buffer 里的 delta 落到旧桶。
+    // 不能 reset 丢弃，否则后台 done 可能用缺字的 renderer 快照回写主进程。
+    flushThinkingTypewriter();
+    flushTextTypewriter();
+    activeRef.current = activeConversationId;
+  }, [activeConversationId, flushTextTypewriter, flushThinkingTypewriter]);
 
   useEffect(() => {
     // 压缩「完成」时把进度钉到 100% 短暂停顿再隐藏横幅的收尾 timer（前台压缩，单例足够）。

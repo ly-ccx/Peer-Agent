@@ -99,12 +99,43 @@ function appendLiveSuffixWithoutDuplicateToolCalls(
   return [...base, ...suffix];
 }
 
+function mergeTextLikeReattachSegment(
+  persisted: ContentSegment,
+  live: ContentSegment
+): ContentSegment | null {
+  if (persisted.type === 'text' && live.type === 'text') {
+    const persistedContent = persisted.content || '';
+    const liveContent = live.content || '';
+    if (liveContent.startsWith(persistedContent)) return { type: 'text', content: liveContent };
+    if (persistedContent.startsWith(liveContent)) return { type: 'text', content: persistedContent };
+  }
+  if (persisted.type === 'thinking' && live.type === 'thinking') {
+    const persistedContent = persisted.content || '';
+    const liveContent = live.content || '';
+    if (liveContent.startsWith(persistedContent)) return { type: 'thinking', content: liveContent };
+    if (persistedContent.startsWith(liveContent)) return { type: 'thinking', content: persistedContent };
+  }
+  return null;
+}
+
+function mergeReattachPrefixSegment(
+  persisted: ContentSegment,
+  live: ContentSegment
+): ContentSegment | null {
+  if (segmentsSignature([persisted]) === segmentsSignature([live])) return persisted;
+  return mergeTextLikeReattachSegment(persisted, live);
+}
+
 /**
  * 重连（reattach）时合并「已持久化分段」与「main 活跃流快照」。
  * 不变量：绝不删除已经持久化展示过的 UI 证据；当两者分叉时保留可见历史，
  * 仅在可本地证明的最长公共前缀之后追加 live 后缀。同一个 toolCallId 的
  * pending/result 是同一条工具调用的状态推进，必须原地结算，避免重连时出现
  * 「一条一直 loading、一条已完成」的重复工具行。
+ *
+ * 流式正文/思考在两侧通常都是单个持续增长的 text/thinking 段。若只做整段签名
+ * 判等，"已显示前缀" 与 "main 完整快照" 会被误判为分叉，切回会话时拼成
+ * "前缀 + 前缀+后续"。因此 text/thinking 段需要额外做内容级前缀合并。
  */
 export function mergeReattachedSegments(
   persistedSegments: readonly ContentSegment[] | undefined,
@@ -116,23 +147,27 @@ export function mergeReattachedSegments(
   if (live.length === 0) return rawPersisted;
   const persisted = settlePersistedToolCalls(rawPersisted, live);
 
-  const persistedSignature = segmentsSignature(persisted);
-  const liveSignature = segmentsSignature(live);
-  if (liveSignature === persistedSignature) return persisted;
-  if (live.length >= persisted.length && segmentsSignature(live.slice(0, persisted.length)) === persistedSignature) {
-    return live;
-  }
-  if (persisted.length > live.length && segmentsSignature(persisted.slice(0, live.length)) === liveSignature) {
-    return persisted;
-  }
-
   // Reattach must never delete already persisted UI evidence.  If main's active-stream
   // snapshot diverges, keep the visible history and append only the live suffix after the
   // longest matching prefix we can prove locally.
   let common = 0;
+  const mergedPrefix: ContentSegment[] = [];
   const max = Math.min(persisted.length, live.length);
-  while (common < max && segmentsSignature([persisted[common]]) === segmentsSignature([live[common]])) common += 1;
-  return appendLiveSuffixWithoutDuplicateToolCalls(persisted, live.slice(common));
+  while (common < max) {
+    const merged = mergeReattachPrefixSegment(persisted[common], live[common]);
+    if (!merged) break;
+    mergedPrefix.push(merged);
+    common += 1;
+  }
+
+  if (common === 0) return appendLiveSuffixWithoutDuplicateToolCalls(persisted, live);
+  if (common === persisted.length && common === live.length) return mergedPrefix;
+  if (common === live.length) return [...mergedPrefix, ...persisted.slice(common)];
+
+  const base = common === persisted.length
+    ? mergedPrefix
+    : [...mergedPrefix, ...persisted.slice(common)];
+  return appendLiveSuffixWithoutDuplicateToolCalls(base, live.slice(common));
 }
 
 /** 从分段中提取拼接后的正文文本；为空时返回 fallback。 */

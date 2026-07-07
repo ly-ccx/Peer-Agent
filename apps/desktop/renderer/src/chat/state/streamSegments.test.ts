@@ -48,6 +48,25 @@ describe('mergeReattachedSegments', () => {
     const out = mergeReattachedSegments([txt('a')], [txt('a'), txt('b')]);
     assert.deepEqual(out, [txt('a'), txt('b')]);
   });
+  it('merges a growing single text segment without repeating the visible prefix', () => {
+    const out = mergeReattachedSegments(
+      [txt('几处关键事实读到了。')],
+      [txt('几处关键事实读到了。有一个架构冲突点必须先确认清楚。')]
+    );
+
+    assert.deepEqual(out, [txt('几处关键事实读到了。有一个架构冲突点必须先确认清楚。')]);
+    assert.equal(contentFromSegments(out), '几处关键事实读到了。有一个架构冲突点必须先确认清楚。');
+  });
+  it('keeps the longer local text segment when the live snapshot is stale', () => {
+    const out = mergeReattachedSegments([txt('partial answer')], [txt('partial')]);
+
+    assert.deepEqual(out, [txt('partial answer')]);
+  });
+  it('merges a growing single thinking segment without repeating the visible prefix', () => {
+    const out = mergeReattachedSegments([think('分析中')], [think('分析中，继续确认边界')]);
+
+    assert.deepEqual(out, [think('分析中，继续确认边界')]);
+  });
   it('never drops persisted evidence on divergence (keeps history + live suffix)', () => {
     const out = mergeReattachedSegments([txt('a'), txt('b')], [txt('a'), txt('c')]);
     // common prefix = [a]; append live suffix after index 1 => [a, b, c]
