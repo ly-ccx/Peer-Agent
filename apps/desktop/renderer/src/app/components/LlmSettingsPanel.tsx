@@ -702,7 +702,8 @@ export function LlmSettingsPanel({
     .filter((method) => Boolean(selectedChannel.authMethods?.[method]));
   const canUseOAuth = oauthMethods.length > 0;
   const canChooseWire = !isOAuthMethod(form.authMethod) && selectedChannel.allowedWires.length > 1;
-  const formValidationError = validateForm(form, editingId, selectedChannel, Boolean(addModelGroupId));
+  const isAddModel = Boolean(addModelGroupId);
+  const formValidationError = validateForm(form, editingId, selectedChannel, isAddModel);
   const canSubmit = !saving && !oauthBusyId;
   // B-2 手风琴：把打平的 provider×model 列表按 groupId 归组，保持原有顺序。
   // 每组的首条记录承载 provider 级展示信息(名称/凭证/协议)，其 models 为该组全部记录。
@@ -895,7 +896,11 @@ export function LlmSettingsPanel({
           {({ requestClose }) => (
           <>
             <header className="llm-modal-header">
-              <h3>{editingId ? (i18n.locale === 'zh-CN' ? '编辑模型' : 'Edit Model') : (i18n.locale === 'zh-CN' ? '添加模型' : 'Add Model')}</h3>
+              <h3>{editingId
+                ? (i18n.locale === 'zh-CN' ? '编辑模型' : 'Edit Model')
+                : isAddModel
+                  ? (i18n.locale === 'zh-CN' ? `给 ${form.name} 加模型` : `Add model to ${form.name}`)
+                  : (i18n.locale === 'zh-CN' ? '添加模型' : 'Add Model')}</h3>
               <button
                 type="button"
                 className="llm-modal-close"
@@ -907,6 +912,8 @@ export function LlmSettingsPanel({
             </header>
             <div className="llm-form llm-modal-body">
 
+          {!isAddModel && (
+          <>
           <label>
             <span>{i18n.locale === 'zh-CN' ? '渠道' : 'Channel'}</span>
             <Dropdown
@@ -1017,6 +1024,8 @@ export function LlmSettingsPanel({
                 <input type="password" value={form.apiKey} placeholder={editingId ? (i18n.locale === 'zh-CN' ? '留空则不修改' : 'Leave empty to keep') : ''} onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))} />
               </label>
             </>
+          )}
+          </>
           )}
 
           {form.authMethod !== 'oauth_chatgpt' ? (
