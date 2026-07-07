@@ -75,6 +75,7 @@ function qoderLastUserText(messages) {
 function qoderRemoteChatAsk({
   model,
   messages,
+  tools = [],
   maxOutputTokens,
   requestId,
   requestSetId,
@@ -131,7 +132,7 @@ function qoderRemoteChatAsk({
     custom_model: null,
     system: normalizedMessages.find((message) => message.role === 'system')?.content || '',
     messages: normalizedMessages,
-    tools: [],
+    tools: Array.isArray(tools) ? tools : [],
     parameters,
   };
 }
@@ -152,6 +153,7 @@ async function sendQoderPreparedStream({
   apiKey,
   model,
   messages,
+  tools,
   maxOutputTokens,
   signal,
   webContents,
@@ -163,6 +165,7 @@ async function sendQoderPreparedStream({
   const requestBody = qoderRemoteChatAsk({
     model,
     messages,
+    tools,
     maxOutputTokens,
     requestId,
     requestSetId: requestId,
@@ -187,6 +190,7 @@ async function sendQoderPreparedStream({
     requestBody: {
       model: requestBody.model_config.key,
       messages: requestBody.messages,
+      tools: requestBody.tools,
       stream: true,
       max_tokens: requestBody.parameters?.max_tokens,
     },
@@ -228,7 +232,7 @@ async function sendQoderPreparedStream({
     };
   }
 
-  const streamResult = await consumeOpenAIStream(res, webContents, streamId, trace, signal);
+  const streamResult = await consumeOpenAIStream(res, webContents, streamId, trace, signal, { bufferTextDeltas: true });
   if (streamResult.streamError) {
     const errorText = `provider_stream_error: ${streamResult.streamError.message}`;
     const tracePath = await trace.finish({
@@ -282,6 +286,7 @@ async function sendQoderPreparedStream({
 export function buildQoderPrivateRequestBody({
   model,
   messages = [],
+  tools = [],
   maxOutputTokens = 0,
   requestId = crypto.randomUUID(),
   requestSetId = requestId,
@@ -293,6 +298,7 @@ export function buildQoderPrivateRequestBody({
     messages: messages.map(qoderMessage).filter(Boolean),
     stream: true,
     stream_options: { include_usage: true },
+    tools: Array.isArray(tools) ? tools : [],
     metadata: {
       context: {
         request_id: requestId,
@@ -324,6 +330,7 @@ export async function sendQoderPrivateStream({
   apiKey,
   model,
   messages,
+  tools,
   maxOutputTokens,
   signal,
   webContents,
@@ -336,6 +343,7 @@ export async function sendQoderPrivateStream({
       apiKey,
       model,
       messages,
+      tools,
       maxOutputTokens,
       signal,
       webContents,
@@ -349,6 +357,7 @@ export async function sendQoderPrivateStream({
   const body = buildQoderPrivateRequestBody({
     model,
     messages,
+    tools,
     maxOutputTokens,
     requestId,
     requestSetId: requestId,
@@ -395,7 +404,7 @@ export async function sendQoderPrivateStream({
     };
   }
 
-  const streamResult = await consumeOpenAIStream(res, webContents, streamId, trace, signal);
+  const streamResult = await consumeOpenAIStream(res, webContents, streamId, trace, signal, { bufferTextDeltas: true });
   if (streamResult.streamError) {
     const errorText = `provider_stream_error: ${streamResult.streamError.message}`;
     const tracePath = await trace.finish({

@@ -3,6 +3,7 @@ import { createProviderStreamTrace } from '../provider-diagnostics/provider-trac
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
 import { parseSseDataPayload, throwIfSseReaderAborted } from './sse-line.mjs';
+import { hasLiteralToolCallSyntax } from '../chat-runtime/response-guard.mjs';
 
 function extractTextLikeDelta(value) {
   if (typeof value === 'string') return value;
@@ -83,7 +84,7 @@ function extractCachedPromptTokens(usage) {
     ?? 0;
 }
 
-function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = null) {
+function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = null, options = {}) {
   const trimmed = line.trim();
   if (!trimmed) return;
   const payload = parseSseDataPayload(trimmed);
@@ -108,7 +109,9 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
     const contentDelta = extractTextLikeDelta(delta?.content);
     if (contentDelta) {
       state.content += contentDelta;
-      webContents.send('chat:stream:delta', { streamId, content: contentDelta });
+      if (!options.bufferTextDeltas) {
+        webContents.send('chat:stream:delta', { streamId, content: contentDelta });
+      }
     }
     const reasoningDelta = extractOpenAIReasoningDelta(delta);
     if (reasoningDelta) {
@@ -150,7 +153,7 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
   }
 }
 
-export async function consumeOpenAIStream(res, webContents, streamId, trace = null, signal = null) {
+export async function consumeOpenAIStream(res, webContents, streamId, trace = null, signal = null, options = {}) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -165,12 +168,16 @@ export async function consumeOpenAIStream(res, webContents, streamId, trace = nu
     buffer = lines.pop() || '';
 
     for (const line of lines) {
-      consumeOpenAIStreamLine(line, state, webContents, streamId, trace);
+      consumeOpenAIStreamLine(line, state, webContents, streamId, trace, options);
       await throwIfSseReaderAborted(signal, reader);
     }
   }
   await throwIfSseReaderAborted(signal, reader);
-  if (buffer.trim()) consumeOpenAIStreamLine(buffer, state, webContents, streamId, trace);
+  if (buffer.trim()) consumeOpenAIStreamLine(buffer, state, webContents, streamId, trace, options);
+
+  if (options.bufferTextDeltas && state.content && !hasLiteralToolCallSyntax(state.content)) {
+    webContents.send('chat:stream:delta', { streamId, content: state.content });
+  }
 
   return {
     content: state.content,

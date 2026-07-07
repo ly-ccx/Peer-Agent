@@ -29,6 +29,7 @@ describe('qoder private adapter', () => {
         { role: 'system', content: 'system prompt' },
         { role: 'user', content: 'hello' },
       ],
+      tools: [{ type: 'function', function: { name: 'bash', parameters: { type: 'object' } } }],
     });
 
     assert.equal(body.model, 'auto');
@@ -46,6 +47,7 @@ describe('qoder private adapter', () => {
       { role: 'system', content: 'system prompt' },
       { role: 'user', content: 'hello' },
     ]);
+    assert.equal(body.tools[0].function.name, 'bash');
   });
 
   it('builds bearer headers for direct private API calls', () => {
@@ -124,5 +126,75 @@ describe('qoder private adapter', () => {
     });
     assert.equal(sent.some(([event]) => event === 'chat:stream:delta'), true);
     assert.equal(sent.some(([event]) => event === 'chat:stream:thinking'), true);
+  });
+
+  it('sends tools to Qoder private API and parses returned tool calls', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    let captured = null;
+    globalThis.fetch = async (url, init) => {
+      captured = { url, body: JSON.parse(init.body) };
+      return new Response([
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\\"command\\":\\"pwd\\"}"}}]}}]}',
+        'data: [DONE]',
+        '',
+      ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    };
+
+    try {
+      const result = await sendQoderPrivateStream({
+        baseUrl: 'https://example.test/model/v1',
+        apiKey: 'token',
+        model: 'auto',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [{ type: 'function', function: { name: 'bash', parameters: { type: 'object' } } }],
+        webContents: { send: () => {} },
+        streamId: 's-qoder-tool',
+      });
+
+      assert.equal(captured.url, 'https://example.test/model/v1/chat/completions');
+      assert.equal(captured.body.tools[0].function.name, 'bash');
+      assert.equal(result.ok, true);
+      assert.equal(result.toolCalls[0].id, 'call_1');
+      assert.equal(result.toolCalls[0].name, 'bash');
+      assert.equal(result.toolCalls[0].arguments, '{"command":"pwd"}');
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
+  it('does not stream literal tool_call text from Qoder into the UI', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    const events = [];
+    globalThis.fetch = async () => new Response([
+      'data: {"choices":[{"delta":{"content":"<tool_call>{\\"name\\":\\"bash\\"}</tool_call>"}}]}',
+      'data: [DONE]',
+      '',
+    ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+
+    try {
+      const result = await sendQoderPrivateStream({
+        baseUrl: 'https://example.test/model/v1',
+        apiKey: 'token',
+        model: 'auto',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [{ type: 'function', function: { name: 'bash', parameters: { type: 'object' } } }],
+        webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        streamId: 's-qoder-leaked-tool',
+      });
+
+      assert.equal(result.ok, true);
+      assert.match(result.content, /<tool_call>/);
+      assert.equal(events.some((event) => event.channel === 'chat:stream:delta'), false);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
   });
 });

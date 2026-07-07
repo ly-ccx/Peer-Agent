@@ -13,6 +13,7 @@ describe('hasLiteralToolCallSyntax', () => {
   });
 
   it('detects function_calls and antml: variants', () => {
+    assert.equal(hasLiteralToolCallSyntax('<tool_call>{"name":"bash"}</tool_call>'), true);
     assert.equal(hasLiteralToolCallSyntax('<function_calls>'), true);
     assert.equal(hasLiteralToolCallSyntax('<invoke name="x">'), true);
   });
