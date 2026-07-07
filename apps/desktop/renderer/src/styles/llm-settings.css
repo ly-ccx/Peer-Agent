@@ -674,17 +674,13 @@
   }
 }
 
-/* ── 添加 / 编辑模型 Modal（复用 Overlay 基座，风格对齐 mcp-modal）── */
-.llm-modal-card {
-  display: flex;
-  flex-direction: column;
-  width: min(560px, 100%);
-  max-height: calc(100vh - 2 * var(--space-8));
-  overflow: hidden;
-  border-radius: var(--radius-xl);
-  border: 1px solid var(--chrome-hairline);
-  background: var(--chrome-raised);
-  box-shadow: var(--shadow-drag);
+/* ── 添加 / 编辑模型 Drawer：尺寸与表面风格，遮罩/定位/动效由 Overlay drawer 基座统一提供。── */
+.pa-overlay-backdrop--drawer .pa-overlay-panel.llm-drawer {
+  --pa-drawer-width: 560px;
+  --pa-drawer-max-width: 92vw;
+  border: none;
+  background: var(--paper-sheet);
+  box-shadow: -18px 0 46px color-mix(in srgb, var(--graphite-base) 12%, transparent);
 }
 
 .llm-modal-header {
@@ -728,7 +724,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-5);
+  padding: var(--space-5) var(--space-6);
   border: none;
   border-radius: 0;
   background: transparent;
@@ -740,6 +736,7 @@
   gap: var(--space-2);
   padding: var(--space-4) var(--space-5);
   border-top: 1px solid var(--chrome-hairline);
+  background: var(--paper-sheet);
 }
 
 .llm-modal-footer button {

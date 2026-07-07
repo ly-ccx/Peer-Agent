@@ -230,3 +230,82 @@ test('legacy provider updates also update channel identity when channelId is omi
   assert.equal(updated.channelId, 'anthropic');
   assert.equal(updated.resolvedWire, 'anthropic-messages');
 }));
+
+// ── B-2 多模型分组(groupId) ────────────────────────────────
+
+test('addProvider without groupId makes each record its own group', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const p = store.addProvider({ provider: 'openai', authMethod: 'api_key', apiKey: 'k', model: 'model-a' });
+  assert.equal(p.groupId, p.id, 'new provider self-groups (groupId === id)');
+}));
+
+test('legacy records migrate to self groups (groupId backfilled to id) and persist', () => withStore(({ configFile }) => {
+  writeFileSync(configFile, JSON.stringify([
+    {
+      id: 'legacy-1',
+      provider: 'anthropic',
+      authMethod: 'api_key',
+      name: 'Legacy',
+      baseUrl: 'https://api.anthropic.com',
+      model: 'claude-x',
+      apiKey: { encrypted: false, data: 'sk-legacy' },
+      enabled: true,
+      isDefault: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+  ], null, 2));
+
+  const store = createLlmConfigStore({ configFile });
+  const [view] = store.listProviders();
+  assert.equal(view.groupId, 'legacy-1', 'legacy record self-groups by its id');
+
+  const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
+  assert.equal(persisted.groupId, 'legacy-1', 'groupId backfill is written to disk');
+}));
+
+test('addModel adds a second model to the same group sharing credentials without re-entering apiKey', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const base = store.addProvider({
+    provider: 'anthropic',
+    authMethod: 'api_key',
+    apiKey: 'shared-secret',
+    baseUrl: 'https://api.anthropic.com',
+    name: 'Anthropic',
+    model: 'claude-opus',
+  });
+
+  const second = store.addModel(base.groupId, { model: 'claude-haiku', name: 'Anthropic Haiku' });
+
+  // 同组、不同记录、不同模型
+  assert.equal(second.groupId, base.groupId);
+  assert.notEqual(second.id, base.id);
+  assert.equal(second.model, 'claude-haiku');
+  // provider 归属与凭证继承自组内首条:调用方未传 apiKey,底层密钥仍就绪
+  assert.equal(second.provider, base.provider);
+  assert.equal(second.baseUrl, base.baseUrl);
+  assert.equal(store.getDecryptedApiKey(second.id), 'shared-secret');
+
+  // 打平视图里同组现在有两条
+  const grouped = store.listProviders().filter((p) => p.groupId === base.groupId);
+  assert.equal(grouped.length, 2);
+}));
+
+test('addModel refuses subscription (OAuth) providers', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const sub = store.addProvider({ provider: 'openai', authMethod: 'oauth_chatgpt' });
+  assert.throws(() => store.addModel(sub.groupId, { model: 'gpt-x' }), /multiple models/);
+}));
+
+test('removeGroup deletes every model in the group and reassigns default', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const g1 = store.addProvider({ provider: 'anthropic', authMethod: 'api_key', apiKey: 'k1', model: 'm1' });
+  store.addModel(g1.groupId, { model: 'm2' });
+  const g2 = store.addProvider({ provider: 'openai', authMethod: 'api_key', apiKey: 'k2', model: 'm3' });
+  // g1 组是默认(首个创建),删掉整组后默认应转移到 g2
+  store.setDefault(g1.id);
+
+  const remaining = store.removeGroup(g1.groupId);
+  assert.equal(remaining.length, 1, 'both models of g1 removed');
+  assert.equal(remaining[0].groupId, g2.groupId);
+  assert.equal(remaining[0].isDefault, true, 'default reassigned to surviving group');
+}));

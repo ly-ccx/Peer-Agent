@@ -47,11 +47,15 @@
     padding: 0;
   }
 
-  .pa-overlay-backdrop--drawer .pa-overlay-panel,
-  .mcp-drawer {
-    width: min(480px, 92vw);
-    height: 100%;
-    max-height: 100%;
+  .pa-overlay-backdrop--drawer-soft {
+    background: rgba(8, 12, 18, 0.18);
+    backdrop-filter: blur(1px);
+  }
+
+  .pa-overlay-backdrop--drawer .pa-overlay-panel {
+    width: min(var(--pa-drawer-width, 480px), var(--pa-drawer-max-width, 92vw));
+    height: 100vh;
+    max-height: 100vh;
     border-radius: 0;
     /* 抽屉需自带不透明背景：基座 .pa-overlay-panel 本身不带背景色。 */
     background: var(--chrome-raised);
@@ -60,13 +64,12 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    /* 复用既有语义基元（禁止散写 @keyframes）：抽屉沿用统一的淡入+位移入场。 */
-    animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
+    /* 复用语义基元：抽屉从右侧横向滑入。 */
+    animation: motion-enter-slide-inline var(--za-motion-medium) var(--za-ease-decelerate) both;
   }
 
-  .pa-overlay-backdrop--drawer .pa-overlay-panel.is-closing,
-  .mcp-drawer.is-closing {
-    animation: motion-exit-sink var(--za-motion-fast) var(--za-ease-accelerate) both;
+  .pa-overlay-backdrop--drawer .pa-overlay-panel.is-closing {
+    animation: motion-exit-slide-inline var(--za-motion-fast) var(--za-ease-accelerate) both;
   }
 
   .mcp-drawer-body {

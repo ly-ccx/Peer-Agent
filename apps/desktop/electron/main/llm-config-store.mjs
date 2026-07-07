@@ -197,6 +197,16 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     return changed;
   }
 
+  // B-2 多模型分组迁移:旧数据每条记录都是独立的 provider+单模型,
+  // 缺 groupId。这里让每条旧记录自成一组(groupId = 自身 id),
+  // 语义与迁移前完全一致(一个 provider 一个模型),不动加密密钥、零风险。
+  function migrateGroupId(item) {
+    if (!item || typeof item !== 'object') return false;
+    if (typeof item.groupId === 'string' && item.groupId) return false;
+    item.groupId = item.id;
+    return true;
+  }
+
   function readAll() {
     if (!existsSync(configFile)) return [];
     try {
@@ -206,6 +216,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       for (const item of parsed) {
         if (migrateChannelItem(item)) migrated = true;
         if (migrateSubscriptionItem(item)) migrated = true;
+        if (migrateGroupId(item)) migrated = true;
       }
       if (migrated) {
         try { writeAll(parsed); } catch { /* 回写失败不影响本次读取 */ }
@@ -236,6 +247,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     })();
     return {
       id: item.id,
+      groupId: item.groupId || item.id,
       provider: item.provider,
       channelId: item.channelId || inferChannelId(item),
       resolvedWire: resolved?.wire,
@@ -282,7 +294,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     return readAll().map(toView);
   }
 
-  function addProvider({ provider, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, apiKey, contextWindow, maxOutputTokens, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthClientId, oauthClientSecret, oauthProjectId, customHeaders }) {
+  function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, apiKey, contextWindow, maxOutputTokens, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthClientId, oauthClientSecret, oauthProjectId, customHeaders }) {
     const items = readAll();
     const method = authMethod === 'oauth_chatgpt'
       ? 'oauth_chatgpt'
@@ -315,8 +327,12 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       oauthProjectId,
       customHeaders,
     });
+    const newId = randomUUID();
     const item = {
-      id: randomUUID(),
+      id: newId,
+      // 传了 groupId 则归入已有组(同组共享凭证,是该 provider 的又一个模型);
+      // 不传则自成一组。
+      groupId: (typeof rawGroupId === 'string' && rawGroupId) ? rawGroupId : newId,
       provider: provider || resolved.legacyProvider,
       channelId,
       wireOverride: isSubscription || isGoogleOAuth ? undefined : wireOverride,
@@ -434,6 +450,20 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     return items.map(toView);
   }
 
+  // B-2 删除整个 provider 组(同 groupId 的全部模型)。
+  // 若删掉的组里含当前默认模型,则把剩余首条记录设为默认(与 removeProvider 一致)。
+  function removeGroup(groupId) {
+    let items = readAll();
+    const removed = items.filter((i) => (i.groupId || i.id) === groupId);
+    const hadDefault = removed.some((i) => i.isDefault);
+    items = items.filter((i) => (i.groupId || i.id) !== groupId);
+    if (hadDefault && items.length > 0) {
+      items[0].isDefault = true;
+    }
+    writeAll(items);
+    return items.map(toView);
+  }
+
   function setDefault(id) {
     const items = readAll();
     // 防御:OAuth(订阅)类型且会话非 connected(过期/未登录)时,禁止设为默认。
@@ -477,6 +507,46 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     items.push(copy);
     writeAll(items);
     return toView(copy);
+  }
+
+  // B-2 在已有 provider 组内新增一个模型:凭证(apiKey/baseUrl/provider 归属)
+  // 继承自组内首条记录,调用方无需重填 apiKey;模型级参数由 patch 提供。
+  // 复用 addProvider 的完整 wire/channel/定价解析,保证路由字段正确。
+  // 订阅(OAuth)类型与 duplicateProvider 一致:不支持多模型,直接拒绝。
+  function addModel(groupId, patch = {}) {
+    if (!groupId) throw new Error('groupId is required');
+    const items = readAll();
+    const source = items.find((i) => (i.groupId || i.id) === groupId);
+    if (!source) throw new Error(`Provider group ${groupId} not found`);
+    if (source.authMethod === 'oauth_chatgpt' || source.authMethod === 'oauth_google') {
+      throw new Error('Subscription providers cannot host multiple models');
+    }
+    const inheritedApiKey = decrypt(source.apiKey);
+    return addProvider({
+      // 凭证与 provider 归属继承自组内首条记录
+      groupId,
+      provider: source.provider,
+      channelId: source.channelId,
+      wireOverride: source.wireOverride,
+      authMethod: source.authMethod || 'api_key',
+      baseUrl: source.baseUrl,
+      apiKey: inheritedApiKey,
+      // 模型级参数来自 patch(缺省回退到 source,保证必填字段有值)
+      name: patch.name || source.name,
+      model: patch.model || source.model,
+      contextWindow: patch.contextWindow,
+      maxOutputTokens: patch.maxOutputTokens,
+      inputPrice: patch.inputPrice,
+      outputPrice: patch.outputPrice,
+      cacheWritePrice: patch.cacheWritePrice,
+      cacheReadPrice: patch.cacheReadPrice,
+      supportsVision: patch.supportsVision,
+      supportsReasoning: patch.supportsReasoning,
+      supportsPromptCaching: patch.supportsPromptCaching,
+      reasoningParamStyle: patch.reasoningParamStyle,
+      reasoningEffortMap: patch.reasoningEffortMap,
+      customHeaders: patch.customHeaders,
+    });
   }
 
   function getDecryptedApiKey(id) {
@@ -544,7 +614,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     }
   }
 
-  return { listProviders, addProvider, updateProvider, duplicateProvider, removeProvider, setDefault, getDecryptedApiKey, getCredential, setOAuthTokens, testConnection };
+  return { listProviders, addProvider, addModel, updateProvider, duplicateProvider, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, setOAuthTokens, testConnection };
 }
 
 async function testOpenAI(resolved, model, start) {

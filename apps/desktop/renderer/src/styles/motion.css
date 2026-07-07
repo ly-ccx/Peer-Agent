@@ -49,6 +49,20 @@
   }
 }
 
+/* 淡入 + 横向滑入：用于侧边 Drawer。方向由 --motion-enter-inline-from 定制，
+ * 默认从右侧进入，位移仍使用全局 shift-lg 上限。 */
+@keyframes motion-enter-slide-inline {
+  from {
+    opacity: 0;
+    transform: translate3d(var(--motion-enter-inline-from, var(--za-motion-shift-lg)), 0, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
 /* 淡入 + 缩放回弹（spring）：强调型入场，覆盖 thinking-pop 等 */
 @keyframes motion-enter-pop {
   from {
@@ -73,6 +87,10 @@
 
 .motion-enter-rise {
   animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
+}
+
+.motion-enter-slide-inline {
+  animation: motion-enter-slide-inline var(--za-motion-medium) var(--za-ease-decelerate) both;
 }
 
 .motion-enter-pop {
@@ -108,6 +126,19 @@
   }
 }
 
+/* 淡出 + 横向滑出：与 motion-enter-slide-inline 对称，用于 Drawer 收起。 */
+@keyframes motion-exit-slide-inline {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(var(--motion-exit-inline-to, var(--za-motion-shift-lg)), 0, 0);
+  }
+}
+
 /* 淡出 + 缩小，支持方向变量（--motion-collapse-x / -y）：
  * 默认原地收缩；升级弹窗「飞向左上角」即传入负向 x/y 的定向实例。
  * 位移上限受 --za-motion-shift-lg（24px）约束，transform-origin 由调用点设定。 */
@@ -129,6 +160,10 @@
 
 .motion-exit-sink {
   animation: motion-exit-sink var(--za-motion-fast) var(--za-ease-accelerate) both;
+}
+
+.motion-exit-slide-inline {
+  animation: motion-exit-slide-inline var(--za-motion-fast) var(--za-ease-accelerate) both;
 }
 
 .motion-exit-collapse {

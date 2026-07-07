@@ -1898,11 +1898,27 @@ ipcMain.handle('llm:duplicate', (_, { id }) => {
   llmConfigStore.duplicateProvider(id);
   return llmConfigStore.listProviders();
 });
+// B-2 在已有 provider 组内新增一个模型:凭证继承自组内首条,无需重填 apiKey。
+ipcMain.handle('llm:add-model', (_, { groupId, ...patch }) => {
+  llmConfigStore.addModel(groupId, patch);
+  return llmConfigStore.listProviders();
+});
 ipcMain.handle('llm:remove', (_, { id }) => {
   const beforeDefault = llmConfigStore.listProviders().find((provider) => provider.isDefault) ?? null;
   const providers = llmConfigStore.removeProvider(id);
   const afterDefault = providers.find((provider) => provider.isDefault) ?? null;
   if (beforeDefault?.id === id && afterDefault) {
+    recordProviderBaseline('model_switch', afterDefault);
+  }
+  return providers;
+});
+// B-2 删除整个 provider 组(同 groupId 的全部模型)。若删掉的组含当前默认模型,
+// removeGroup 会把默认转移到剩余首条,这里据此记录 baseline。
+ipcMain.handle('llm:remove-group', (_, { groupId }) => {
+  const beforeDefault = llmConfigStore.listProviders().find((provider) => provider.isDefault) ?? null;
+  const providers = llmConfigStore.removeGroup(groupId);
+  const afterDefault = providers.find((provider) => provider.isDefault) ?? null;
+  if (beforeDefault && (beforeDefault.groupId ?? beforeDefault.id) === groupId && afterDefault) {
     recordProviderBaseline('model_switch', afterDefault);
   }
   return providers;

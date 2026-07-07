@@ -467,7 +467,11 @@ export interface BootstrapPreloadApi {
   readonly llmUpdateProvider: (params: { id: string; [key: string]: unknown }) => Promise<LlmProviderConfigView>;
   // 复制一个已有 provider（订阅类型不支持），返回复制后的完整列表。
   readonly llmDuplicateProvider: (params: { id: string }) => Promise<readonly LlmProviderConfigView[]>;
+  // B-2 在已有 provider 组内新增一个模型：凭证继承自组内首条，无需重填 apiKey。返回完整列表。
+  readonly llmAddModel: (params: { groupId: string; [key: string]: unknown }) => Promise<readonly LlmProviderConfigView[]>;
   readonly llmRemoveProvider: (params: { id: string }) => Promise<readonly LlmProviderConfigView[]>;
+  // B-2 删除整个 provider 组（同 groupId 的全部模型）。返回删除后的完整列表。
+  readonly llmRemoveGroup: (params: { groupId: string }) => Promise<readonly LlmProviderConfigView[]>;
   readonly llmSetDefault: (params: { id: string }) => Promise<readonly LlmProviderConfigView[]>;
   readonly llmTestConnection: (params: { id: string }) => Promise<LlmProviderTestResult>;
   // ADR 28: 启动 ChatGPT 订阅 OAuth 登录(browser 模式)。

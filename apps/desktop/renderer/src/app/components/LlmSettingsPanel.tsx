@@ -12,8 +12,8 @@ import type {
 } from '@peer-agent/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { Drawer } from './Drawer';
 import { Dropdown } from './Dropdown';
-import { Overlay } from './Overlay';
 
 interface FormState {
   provider: LlmProviderType;
@@ -769,11 +769,12 @@ export function LlmSettingsPanel({
       </button>
 
       {showForm ? (
-        <Overlay
+        <Drawer
           onClose={() => { setShowForm(false); setEditingId(null); }}
           closeOnBackdrop={!saving && !oauthBusyId}
           ariaLabel={editingId ? (i18n.locale === 'zh-CN' ? '编辑模型' : 'Edit Model') : (i18n.locale === 'zh-CN' ? '添加模型' : 'Add Model')}
-          panelClassName="llm-modal-card"
+          panelClassName="llm-drawer"
+          softBackdrop
         >
           {({ requestClose }) => (
           <>
@@ -1048,7 +1049,7 @@ export function LlmSettingsPanel({
             </div>
           </>
           )}
-        </Overlay>
+        </Drawer>
       ) : null}
     </div>
   );

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 /**
  * Overlay —— 统一的模态浮层基座（表达层）。
@@ -13,6 +14,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
  *   - 退场编排：ESC / 点击遮罩 / 调用方关闭统一先播退场动画，动画结束后才真正 onClose 卸载。
  *   - 交互：ESC 关闭、点击遮罩关闭、面板内点击不冒泡。
  *   - 可达性：role="dialog" + aria-modal。
+ *   - 全局挂载：portal 到 document.body，避免被页面容器 transform / overflow 限制。
  *
  * 本组件只负责表达与交互编排，不持有任何能力真相。
  */
@@ -82,7 +84,7 @@ export function Overlay({
   const backdropBase = closing ? 'pa-overlay-backdrop is-closing' : 'pa-overlay-backdrop';
   const panelBase = closing ? 'pa-overlay-panel is-closing' : 'pa-overlay-panel';
 
-  return (
+  const overlay = (
     <div
       className={backdropClassName ? `${backdropBase} ${backdropClassName}` : backdropBase}
       role="presentation"
@@ -100,4 +102,10 @@ export function Overlay({
       </div>
     </div>
   );
+
+  if (typeof document === 'undefined') {
+    return overlay;
+  }
+
+  return createPortal(overlay, document.body);
 }

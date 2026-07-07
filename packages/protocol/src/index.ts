@@ -381,6 +381,10 @@ export interface LlmOAuthStatus {
 
 export interface LlmProviderConfig {
   readonly id: string;
+  // B-2 多模型分组键：同 groupId 的扁平记录共享同一 provider 凭证（apiKey/baseUrl/OAuth），
+  // 各自是该 provider 下的一个模型。缺省时（旧数据迁移前）视为自成一组。
+  // 前端据此把同组记录折叠成一张手风琴卡；聊天区仍在打平的 provider×model 里平铺切换。
+  readonly groupId?: string;
   readonly provider: LlmProviderType;
   readonly channelId?: LlmChannelId;
   readonly resolvedWire?: LlmWireProtocol;
@@ -421,6 +425,66 @@ export interface LlmProviderConfigView extends LlmProviderConfig {
   readonly apiKeyConfigured: boolean;
   // 仅当 authMethod === 'oauth_chatgpt' 时存在,表达订阅登录态。
   readonly oauthStatus?: LlmOAuthStatus;
+}
+
+// ── Provider 多模型（父子）模型 ─────────────────────────────────────────────
+// 一个 provider（父）共享鉴权与接入信息（apiKey / baseUrl / OAuth），
+// 其下挂多个模型（子），每个模型各自持有模型级参数（上下文/定价/推理/自定义 Header）。
+// 存储层以此父子结构落盘，但 listProviders() 仍向下游打平成 provider×model 组合
+// （复合 id = groupId::modelId），以最小化聊天路由 / 凭证解析 / 聊天区的改动面。
+
+// 模型子项：仅承载模型级参数，不含任何鉴权字段。
+export interface LlmModelConfig {
+  // 模型子项在其 provider 组内的唯一标识（组内稳定，不含 provider 前缀）。
+  readonly id: string;
+  readonly model: string;
+  // 展示名（缺省时前端回退到 model 本身）。
+  readonly label?: string;
+  readonly enabled: boolean;
+  readonly createdAt: string;
+  readonly resolvedWire?: LlmWireProtocol;
+  readonly wireOverride?: LlmWireProtocol;
+  readonly contextWindow?: number;
+  readonly maxOutputTokens?: number;
+  readonly inputPrice?: number;
+  readonly outputPrice?: number;
+  readonly cacheWritePrice?: number;
+  readonly cacheReadPrice?: number;
+  readonly longContextInputThreshold?: number;
+  readonly longContextInputPrice?: number;
+  readonly longContextCacheReadPrice?: number;
+  readonly longContextOutputPrice?: number;
+  readonly supportsVision?: boolean;
+  readonly supportsReasoning?: boolean;
+  readonly supportsPromptCaching?: boolean;
+  readonly reasoningParamStyle?: LlmReasoningParamStyle;
+  readonly reasoningEffortMap?: LlmReasoningEffortMap;
+  readonly reasoningEffortLevels?: readonly string[];
+  readonly customHeaders?: Readonly<Record<string, string>>;
+  readonly customHeadersInvalid?: boolean;
+}
+
+// provider 组（父）：共享鉴权与接入信息，其下挂 models[]。
+export interface LlmProviderGroupConfig {
+  readonly id: string;
+  readonly provider: LlmProviderType;
+  readonly channelId?: LlmChannelId;
+  readonly authMethod: LlmAuthMethod;
+  readonly name: string;
+  readonly baseUrl: string;
+  readonly createdAt: string;
+  readonly oauthClientId?: string;
+  readonly oauthProjectId?: string;
+  readonly models: readonly LlmModelConfig[];
+}
+
+// provider 组视图：附带脱敏后的 apiKey 状态与订阅登录态。
+export interface LlmProviderGroupConfigView extends LlmProviderGroupConfig {
+  readonly apiKeyMasked: string;
+  readonly apiKeyConfigured: boolean;
+  readonly oauthStatus?: LlmOAuthStatus;
+  // 全局唯一默认模型的复合 id（groupId::modelId）；无默认时缺省。
+  readonly defaultComboId?: string;
 }
 
 // ADR 28: 订阅(OAuth)登录后从远程拉取的可用模型项。

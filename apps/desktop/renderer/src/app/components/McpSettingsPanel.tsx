@@ -2,6 +2,7 @@ import type { LocalMcpServerUpsertRequest, McpConnectionProbeResult } from '@pee
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { useConfirm } from './ConfirmProvider';
+import { Drawer } from './Drawer';
 import { Dropdown, type DropdownOption } from './Dropdown';
 import { Overlay } from './Overlay';
 
@@ -866,11 +867,10 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
       </div>
 
       {selected ? (
-        <Overlay
+        <Drawer
           onClose={() => setSelectedId(null)}
           ariaLabel={`MCP 详情：${labelForServer(selected)}`}
           panelClassName="mcp-drawer"
-          backdropClassName="pa-overlay-backdrop--drawer"
         >
           <div className="mcp-drawer-body">
             <div className="mcp-server-detail">
@@ -1053,7 +1053,7 @@ export function McpSettingsPanel({ embedded = false, onServersCountChange }: Mcp
               </div>
             </div>
           </div>
-        </Overlay>
+        </Drawer>
       ) : null}
     </div>
   );
