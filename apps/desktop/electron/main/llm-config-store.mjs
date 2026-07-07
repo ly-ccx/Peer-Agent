@@ -123,6 +123,7 @@ function isLocalCliAuthMethod(value) {
 
 function applyQoderModelMetadata(item) {
   const metadata = getQoderModelMetadata(item.model);
+  if (metadata?.label) item.modelLabel = metadata.label;
   item.contextWindow = metadata?.contextWindow ?? item.contextWindow;
   item.maxOutputTokens = metadata?.maxOutputTokens ?? item.maxOutputTokens;
   item.supportsVision = metadata?.supportsVision ?? false;
@@ -324,6 +325,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       name: item.name,
       baseUrl: item.baseUrl,
       model: item.model,
+      modelLabel: item.modelLabel || undefined,
       enabled: item.enabled,
       isDefault: item.isDefault,
       createdAt: item.createdAt,
@@ -458,7 +460,15 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     if (patch.wireOverride !== undefined) item.wireOverride = patch.wireOverride || undefined;
     if (patch.name !== undefined) item.name = patch.name;
     if (patch.baseUrl !== undefined) item.baseUrl = patch.baseUrl;
-    if (patch.model !== undefined) item.model = patch.model;
+    if (patch.model !== undefined) {
+      item.model = patch.model;
+      delete item.modelLabel;
+    }
+    if (patch.modelLabel !== undefined) {
+      const modelLabel = String(patch.modelLabel || '').trim();
+      if (modelLabel) item.modelLabel = modelLabel;
+      else delete item.modelLabel;
+    }
     if (patch.enabled !== undefined) item.enabled = patch.enabled;
     if (patch.apiKey !== undefined) item.apiKey = encrypt(patch.apiKey);
     if (patch.oauthClientId !== undefined) item.oauthClientId = patch.oauthClientId || undefined;

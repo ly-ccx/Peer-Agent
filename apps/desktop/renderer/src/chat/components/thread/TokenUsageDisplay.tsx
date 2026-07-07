@@ -77,7 +77,10 @@ export function TokenUsageDisplay({
   const ctxPercent = ctxWindow ? Math.min((currentContextTokens / ctxWindow) * 100, 100) : null;
   const effortOptions: readonly DropdownOption[] = effortLevels.map((level) => ({ value: level, label: effortLabel(level, isZh) }));
   const shouldShowModelDropdown = Boolean(defaultProvider?.model && canSwitchModel && onModelChange && modelOptions.length > 0);
-  const modelTitle = isZh ? '当前会话使用的模型' : 'Model used for this conversation';
+  const modelDisplayName = defaultProvider?.modelLabel || defaultProvider?.model;
+  const modelTitle = defaultProvider?.modelLabel && defaultProvider.modelLabel !== defaultProvider.model
+    ? `${isZh ? '当前会话使用的模型' : 'Model used for this conversation'}: ${defaultProvider.model}`
+    : (isZh ? '当前会话使用的模型' : 'Model used for this conversation');
 
   return (
     <div className="token-usage-wrap">
@@ -95,7 +98,7 @@ export function TokenUsageDisplay({
               disabled={isStreaming || modelLoading}
             />
           ) : (
-            <span className="token-usage-model" title={modelTitle}>{defaultProvider.model}</span>
+            <span className="token-usage-model" title={modelTitle}>{modelDisplayName}</span>
           )
         ) : null}
         {effortOptions.length > 0 ? (

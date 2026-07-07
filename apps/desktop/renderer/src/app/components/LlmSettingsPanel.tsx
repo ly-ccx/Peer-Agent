@@ -480,7 +480,8 @@ export function LlmSettingsPanel({
   // 切换订阅 provider 当前使用的模型。
   const handleSelectModel = async (id: string, model: string) => {
     try {
-      await clientApi.llmUpdateProvider({ id, model });
+      const modelLabel = modelLists[id]?.find((item) => item.id === model)?.label;
+      await clientApi.llmUpdateProvider({ id, model, modelLabel });
       await refresh();
     } catch { /* silent */ }
   };
@@ -865,8 +866,9 @@ export function LlmSettingsPanel({
                   const canSelectModel = (isOAuthMethod(p.authMethod) && p.oauthStatus?.status === 'connected') || isLocalCliMethod(p.authMethod);
                   const modelOptions = (modelLists[p.id] && modelLists[p.id].length > 0
                     ? modelLists[p.id]
-                    : [{ id: p.model, label: p.model } as LlmModelInfo]
+                    : [{ id: p.model, label: p.modelLabel || p.model } as LlmModelInfo]
                   ).map((m) => ({ value: m.id, label: m.label }));
+                  const modelDisplayName = p.modelLabel || p.model;
                   return (
                   <div key={p.id} className={`llm-model-row ${p.isDefault ? 'is-default' : ''}`}>
                     <div className="llm-model-row-info">
@@ -879,13 +881,13 @@ export function LlmSettingsPanel({
                           placeholder={
                             modelLoadingId === p.id && !modelLists[p.id]
                               ? (i18n.locale === 'zh-CN' ? '加载中…' : 'Loading…')
-                              : p.model
+                              : modelDisplayName
                           }
                           options={modelOptions}
                           onChange={(value) => void handleSelectModel(p.id, value)}
                         />
                       ) : (
-                        <span className="llm-provider-chip mono">{p.model}</span>
+                        <span className="llm-provider-chip mono" title={p.model}>{modelDisplayName}</span>
                       )}
                       {p.isDefault ? <span className="llm-badge-default">{i18n.locale === 'zh-CN' ? '已激活' : 'Active'}</span> : null}
                       {p.contextWindow || p.maxOutputTokens || p.inputPrice != null ? (

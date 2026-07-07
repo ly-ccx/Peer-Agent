@@ -395,6 +395,7 @@ export interface LlmProviderConfig {
   readonly name: string;
   readonly baseUrl: string;
   readonly model: string;
+  readonly modelLabel?: string;
   readonly enabled: boolean;
   readonly isDefault: boolean;
   readonly createdAt: string;

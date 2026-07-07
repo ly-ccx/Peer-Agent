@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -233,6 +233,7 @@ test('Qoder local auth provider does not require a stored API key', () => withSt
   assert.equal(provider.authMethod, 'qoder_local_auth');
   assert.equal(provider.baseUrl, 'https://api2-v2.qoder.sh/model/v1');
   assert.equal(provider.model, 'auto');
+  assert.equal(provider.modelLabel, 'Auto');
   assert.equal(provider.apiKeyConfigured, true);
   assert.equal(provider.apiKeyMasked, '');
   assert.equal(provider.contextWindow, 180000);
@@ -242,6 +243,46 @@ test('Qoder local auth provider does not require a stored API key', () => withSt
 
   const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
   assert.deepEqual(persisted.apiKey, { encrypted: false, data: '' });
+}));
+
+test('Qoder local auth provider exposes catalog display label without changing request model id', () => withStore(({ configFile, dir }) => {
+  const previousQoderConfigDir = process.env.QODER_CONFIG_DIR;
+  const qoderDir = path.join(dir, '.qoder');
+  mkdirSync(path.join(qoderDir, '.auth'), { recursive: true });
+  writeFileSync(path.join(qoderDir, '.auth/models'), JSON.stringify({
+    chat: [
+      {
+        key: 'gm51model',
+        display_name: 'GLM-5.2',
+        max_input_tokens: 1_000_000,
+        max_output_tokens: 32_768,
+        is_vl: true,
+        is_reasoning: true,
+      },
+    ],
+  }), 'utf8');
+  process.env.QODER_CONFIG_DIR = qoderDir;
+
+  try {
+    const store = createLlmConfigStore({ configFile });
+    const provider = store.addProvider({
+      provider: 'openai',
+      channelId: 'qoder',
+      authMethod: 'qoder_local_auth',
+      name: 'Qoder',
+      model: 'gm51model',
+    });
+
+    assert.equal(provider.model, 'gm51model');
+    assert.equal(provider.modelLabel, 'GLM-5.2');
+    assert.equal(provider.contextWindow, 1_000_000);
+    assert.equal(provider.maxOutputTokens, 32_768);
+    assert.equal(provider.supportsVision, true);
+    assert.equal(provider.supportsReasoning, true);
+  } finally {
+    if (previousQoderConfigDir === undefined) delete process.env.QODER_CONFIG_DIR;
+    else process.env.QODER_CONFIG_DIR = previousQoderConfigDir;
+  }
 }));
 
 test('Qoder connection test probes the selected private chat model', async () => withStore(async ({ configFile }) => {
