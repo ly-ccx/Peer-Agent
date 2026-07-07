@@ -44,6 +44,7 @@ import { createContextBaselineRecorder } from './prompt/context-baseline-recorde
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
 import { createConversationStore } from './conversation-store.mjs';
 import { createGoalPlanStore, goalPlanIsSelfDriven } from './goal-plan-store.mjs';
+import { decideIntakeConvergence } from './goal-intake-convergence.mjs';
 import { createGoalRunner } from './goal-runner.mjs';
 import { routeGoalMessage } from './goal-message-router.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
@@ -1608,6 +1609,30 @@ function latestUserTextFromProviderMessages(messages = []) {
   return '';
 }
 
+// 方案 C —— goal 模式 intake 判别收敛（首答回合结束后执行）。
+// 背景：goal 模式首答走普通 sendMessage（不经 Runner），而 Runner 里的
+// intake 三选一收敛此路径下不会触发，导致纯问答后 intake 契约永久残留“执行中 0/1”。
+// 本函数在首答回合结束后补齐同一套收敛，口径与 goal-runner.mjs 的 intake 收敛块保持一致：
+//   - 纯问答/咨询：仍是 intake 契约、未提问、回合正常结束 → deletePlan 静默移除，
+//     还原普通聊天体验（deletePlan 会 notifyChanged，面板随之清空）。
+//   - 模糊澄清：模型调用 request_user_input（outcome.requestedUserInput=true）→ 保留
+//     intake 契约，等待用户下一轮回复，不删。
+//   - 明确目标：模型调用 goal_create_plan → upsertGoalContract 已把本契约原地升级为
+//     accepted_goal（activation.kind 不再是 intake）→ 本函数直接跳过，落入正常自驱推进。
+//   - 出错/中止的回合不在此误删，保留契约交由既有失败链路处理。
+function convergeIntakeAfterGoalTurn(conversationId, outcome) {
+  try {
+    if (typeof goalPlanStore.getActivePlanByConversation !== 'function') return;
+    const active = goalPlanStore.getActivePlanByConversation(conversationId);
+    // 三分支决策抽到纯函数 decideIntakeConvergence（可单测）；main 只负责执行副作用。
+    if (decideIntakeConvergence(active, outcome) === 'remove') {
+      goalPlanStore.deletePlan(active.planId);
+    }
+  } catch (error) {
+    console.warn('[main] intake convergence failed:', error?.message || error);
+  }
+}
+
 ipcMain.handle('chat:send', (event, {
   messages,
   streamId,
@@ -1681,7 +1706,7 @@ ipcMain.handle('chat:send', (event, {
       }
     }
   }
-  return llmChatService.sendMessage({
+  const outcomePromise = llmChatService.sendMessage({
     messages,
     webContents: event.sender,
     streamId,
@@ -1699,6 +1724,15 @@ ipcMain.handle('chat:send', (event, {
     configInstructions,
     contextExtensions,
   });
+  // goal 模式首答回合结束后补 intake 判别收敛（方案 C）：不改变返回给渲染端的 outcome，
+  // 仅在回合 resolve 后按 outcome 决定是否静默移除残留的 intake 契约。
+  if (mode === 'goal' && conversationId) {
+    return Promise.resolve(outcomePromise).then((outcome) => {
+      convergeIntakeAfterGoalTurn(conversationId, outcome);
+      return outcome;
+    });
+  }
+  return outcomePromise;
 });
 ipcMain.handle('chat:abort', (_, { streamId }) =>
   llmChatService.abort(streamId));
