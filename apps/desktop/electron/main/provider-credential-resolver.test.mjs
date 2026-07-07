@@ -7,6 +7,23 @@ import {
 } from './provider-credential-resolver.mjs';
 
 describe('provider credential resolver', () => {
+  it('resolves local CLI providers without a stored API key', async () => {
+    const credential = await resolveProviderCredential({
+      provider: { id: 'qoder-1', authMethod: 'local_cli' },
+      llmConfigStore: {
+        getDecryptedApiKey: () => {
+          throw new Error('local CLI should not read api key');
+        },
+      },
+    });
+
+    assert.deepEqual(credential, {
+      authMethod: 'local_cli',
+      apiKey: '',
+      accountId: null,
+    });
+  });
+
   it('resolves ChatGPT subscription OAuth tokens and refreshes through the shared credential seam', async () => {
     const refreshedTokens = {
       access: 'fresh-access',

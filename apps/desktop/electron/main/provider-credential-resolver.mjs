@@ -24,6 +24,10 @@ export async function resolveProviderCredential({
 
   const authMethod = provider.authMethod || 'api_key';
 
+  if (authMethod === 'local_cli') {
+    return { authMethod, apiKey: '', accountId: null };
+  }
+
   if (authMethod === 'oauth_chatgpt') {
     const credential = llmConfigStore.getCredential(provider.id);
     const tokens = credential?.tokens || null;

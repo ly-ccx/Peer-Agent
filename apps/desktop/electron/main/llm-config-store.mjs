@@ -2,6 +2,8 @@ import electron from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { pathOf } from './data-store.mjs';
 import { deriveOAuthStatus, resolveSubscriptionTestResult } from './provider-connectivity.mjs';
 import {
@@ -13,14 +15,17 @@ import {
   CHATGPT_SUBSCRIPTION_BASE_URL,
   CHATGPT_SUBSCRIPTION_NAME,
   GEMINI_OAUTH_NAME,
+  QODER_CLI_NAME,
   defaultsForChannel,
   inferChannelId,
   legacyProviderForWire,
   resolveChannel,
   validateCustomHeaders,
 } from './provider-channels.mjs';
+import { resolveQoderCliCommand } from './provider-adapters/qoder-cli-command.mjs';
 
 const { safeStorage } = electron;
+const execFileAsync = promisify(execFile);
 
 function encrypt(plaintext) {
   if (!plaintext) return { encrypted: false, data: '' };
@@ -100,6 +105,21 @@ function decryptTokens(stored) {
 function oauthStatusOf(item) {
   if (item.authMethod !== 'oauth_chatgpt' && item.authMethod !== 'oauth_google') return undefined;
   return deriveOAuthStatus(decryptTokens(item.oauthTokens));
+}
+
+function normalizeAuthMethod(value) {
+  if (value === 'oauth_chatgpt') return 'oauth_chatgpt';
+  if (value === 'oauth_google') return 'oauth_google';
+  if (value === 'local_cli') return 'local_cli';
+  return 'api_key';
+}
+
+function isOAuthAuthMethod(value) {
+  return value === 'oauth_chatgpt' || value === 'oauth_google';
+}
+
+function isLocalCliAuthMethod(value) {
+  return value === 'local_cli';
 }
 
 export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {}) {
@@ -186,6 +206,20 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
         changed = true;
       }
     }
+    if (item.authMethod === 'local_cli') {
+      if (item.channelId !== 'qoder') {
+        item.channelId = 'qoder';
+        changed = true;
+      }
+      if (item.wireOverride !== undefined) {
+        delete item.wireOverride;
+        changed = true;
+      }
+      if (item.apiKey?.data) {
+        item.apiKey = encrypt('');
+        changed = true;
+      }
+    }
     if (item.customHeaders && typeof item.customHeaders === 'object') {
       try {
         validateCustomHeaders(item.customHeaders);
@@ -237,7 +271,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     const oauthClientSecret = decrypt(item.oauthClientSecret);
     const resolved = (() => {
       try {
-        const authToken = item.authMethod === 'oauth_chatgpt' || item.authMethod === 'oauth_google'
+        const authToken = isOAuthAuthMethod(item.authMethod)
           ? (decryptTokens(item.oauthTokens)?.access || '')
           : key;
         return resolveChannel({ ...item, apiKey: authToken, accountId: oauthStatusOf(item)?.accountId });
@@ -281,9 +315,12 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       customHeaders: item.customHeaders ?? undefined,
       customHeadersInvalid: item.customHeadersInvalid ?? undefined,
       apiKeyMasked: maskApiKey(key),
-      // 订阅链路无 API Key,凭据是否就绪以 OAuth 登录态(connected)为准。
+      // 订阅链路无 API Key,凭据是否就绪以 OAuth 登录态(connected)为准；
+      // 本机 CLI 链路的登录态由外部应用维护,Peer Agent 只检查命令与登录态是否可用。
       apiKeyConfigured:
-        item.authMethod === 'oauth_chatgpt' || item.authMethod === 'oauth_google'
+        isLocalCliAuthMethod(item.authMethod)
+          ? true
+          : isOAuthAuthMethod(item.authMethod)
           ? oauthStatusOf(item)?.status === 'connected'
           : Boolean(key),
       oauthClientSecretConfigured: Boolean(oauthClientSecret),
@@ -296,31 +333,30 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
 
   function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, apiKey, contextWindow, maxOutputTokens, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthClientId, oauthClientSecret, oauthProjectId, customHeaders }) {
     const items = readAll();
-    const method = authMethod === 'oauth_chatgpt'
-      ? 'oauth_chatgpt'
-      : authMethod === 'oauth_google'
-        ? 'oauth_google'
-        : 'api_key';
+    const method = normalizeAuthMethod(authMethod);
     const channelId = method === 'oauth_chatgpt'
       ? 'openai'
       : method === 'oauth_google'
         ? 'google-ai'
-        : (rawChannelId || inferChannelId({ provider, authMethod: method }));
+        : method === 'local_cli'
+          ? 'qoder'
+          : (rawChannelId || inferChannelId({ provider, authMethod: method }));
     const defaults = rawChannelId ? defaultsForChannel(channelId) : (PROVIDER_DEFAULTS[provider] || defaultsForChannel(channelId));
     if (customHeaders) validateCustomHeaders(customHeaders);
     // 订阅(OAuth)身份写死:名称/baseURL 固定,不接受外部传入。model 留待登录后选择。
     const isSubscription = method === 'oauth_chatgpt';
     const isGoogleOAuth = method === 'oauth_google';
+    const isLocalCli = method === 'local_cli';
     const selectedModel = model || (isSubscription ? DEFAULT_SUBSCRIPTION_MODEL : defaults.model);
     const subscriptionMetadata = isSubscription ? getSubscriptionModelMetadata(selectedModel) : null;
     const resolved = resolveChannel({
       channelId,
       wireOverride,
       authMethod: method,
-      baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : (baseUrl || defaults.baseUrl),
-      apiKey: isSubscription || isGoogleOAuth ? '' : (apiKey || ''),
-      supportsReasoning: isSubscription ? true : (supportsReasoning ?? false),
-      supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (supportsPromptCaching ?? false),
+      baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : (isLocalCli ? defaults.baseUrl : (baseUrl || defaults.baseUrl)),
+      apiKey: isSubscription || isGoogleOAuth || isLocalCli ? '' : (apiKey || ''),
+      supportsReasoning: isSubscription ? true : (isLocalCli ? false : (supportsReasoning ?? false)),
+      supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (isLocalCli ? false : (supportsPromptCaching ?? false)),
       supportsVision,
       reasoningParamStyle,
       reasoningEffortMap,
@@ -335,13 +371,13 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       groupId: (typeof rawGroupId === 'string' && rawGroupId) ? rawGroupId : newId,
       provider: provider || resolved.legacyProvider,
       channelId,
-      wireOverride: isSubscription || isGoogleOAuth ? undefined : wireOverride,
+      wireOverride: isSubscription || isGoogleOAuth || isLocalCli ? undefined : wireOverride,
       authMethod: method,
-      name: isSubscription ? CHATGPT_SUBSCRIPTION_NAME : isGoogleOAuth ? (name || GEMINI_OAUTH_NAME) : name || provider || 'Untitled',
-      baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : baseUrl || defaults.baseUrl,
+      name: isSubscription ? CHATGPT_SUBSCRIPTION_NAME : isGoogleOAuth ? (name || GEMINI_OAUTH_NAME) : isLocalCli ? (name || QODER_CLI_NAME) : name || provider || 'Untitled',
+      baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : isLocalCli ? defaults.baseUrl : baseUrl || defaults.baseUrl,
       // 订阅默认落到权威清单的最新模型(gpt-5.5),非订阅沿用各家 preset。
       model: selectedModel,
-      apiKey: encrypt(isSubscription || isGoogleOAuth ? '' : apiKey || ''),
+      apiKey: encrypt(isSubscription || isGoogleOAuth || isLocalCli ? '' : apiKey || ''),
       oauthClientId: isGoogleOAuth ? String(oauthClientId || '').trim() || undefined : undefined,
       oauthClientSecret: encrypt(isGoogleOAuth ? String(oauthClientSecret || '') : ''),
       oauthProjectId: isGoogleOAuth ? String(oauthProjectId || '').trim() || undefined : undefined,
@@ -353,16 +389,16 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       maxOutputTokens: isSubscription ? subscriptionMetadata?.maxOutputTokens : (maxOutputTokens || undefined),
       inputPrice: isSubscription ? subscriptionMetadata?.inputPrice : (inputPrice ?? undefined),
       outputPrice: isSubscription ? subscriptionMetadata?.outputPrice : (outputPrice ?? undefined),
-      cacheWritePrice: isSubscription ? undefined : (cacheWritePrice ?? undefined),
+      cacheWritePrice: isSubscription || isLocalCli ? undefined : (cacheWritePrice ?? undefined),
       cacheReadPrice: isSubscription ? subscriptionMetadata?.cacheReadPrice : (cacheReadPrice ?? undefined),
       longContextInputThreshold: isSubscription ? subscriptionMetadata?.longContextInputThreshold : undefined,
       longContextInputPrice: isSubscription ? subscriptionMetadata?.longContextInputPrice : undefined,
       longContextCacheReadPrice: isSubscription ? subscriptionMetadata?.longContextCacheReadPrice : undefined,
       longContextOutputPrice: isSubscription ? subscriptionMetadata?.longContextOutputPrice : undefined,
-      supportsVision: supportsVision ?? false,
+      supportsVision: isLocalCli ? false : (supportsVision ?? false),
       // 订阅链路(codex/responses)原生支持思考强度,默认开启。
-      supportsReasoning: isSubscription ? true : (supportsReasoning ?? false),
-      supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (supportsPromptCaching ?? false),
+      supportsReasoning: isSubscription ? true : (isLocalCli ? false : (supportsReasoning ?? false)),
+      supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (isLocalCli ? false : (supportsPromptCaching ?? false)),
       reasoningParamStyle: reasoningParamStyle || undefined,
       reasoningEffortMap: resolved.reasoningEffortMap || undefined,
       customHeaders: customHeaders || undefined,
@@ -425,9 +461,22 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       item.provider = 'openai';
       item.baseUrl = item.baseUrl || defaultsForChannel('google-ai').baseUrl;
     }
+    if (item.authMethod === 'local_cli') {
+      item.channelId = 'qoder';
+      delete item.wireOverride;
+      item.provider = 'openai';
+      item.baseUrl = defaultsForChannel('qoder').baseUrl;
+      item.apiKey = encrypt('');
+      item.supportsVision = false;
+      item.supportsReasoning = false;
+      item.supportsPromptCaching = false;
+      item.customHeaders = undefined;
+      item.reasoningParamStyle = undefined;
+      item.reasoningEffortMap = undefined;
+    }
     const resolved = resolveChannel({
       ...item,
-      apiKey: item.authMethod === 'oauth_chatgpt' || item.authMethod === 'oauth_google'
+      apiKey: isOAuthAuthMethod(item.authMethod)
         ? (decryptTokens(item.oauthTokens)?.access || '')
         : decrypt(item.apiKey),
       accountId: oauthStatusOf(item)?.accountId,
@@ -469,7 +518,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     // 防御:OAuth(订阅)类型且会话非 connected(过期/未登录)时,禁止设为默认。
     // 激活了也无法发起对话,只会在真正请求时才报错;前端已禁用按钮,此处兜住其它入口。
     const target = items.find((i) => i.id === id);
-    if (target && (target.authMethod === 'oauth_chatgpt' || target.authMethod === 'oauth_google')) {
+    if (target && isOAuthAuthMethod(target.authMethod)) {
       const status = oauthStatusOf(target)?.status;
       if (status !== 'connected') {
         throw new Error('OAUTH_SESSION_NOT_CONNECTED');
@@ -490,7 +539,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     const items = readAll();
     const source = items.find((i) => i.id === id);
     if (!source) throw new Error(`Provider ${id} not found`);
-    if (source.authMethod === 'oauth_chatgpt' || source.authMethod === 'oauth_google') {
+    if (isOAuthAuthMethod(source.authMethod)) {
       throw new Error('Subscription providers cannot be duplicated');
     }
     const copy = {
@@ -518,7 +567,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     const items = readAll();
     const source = items.find((i) => (i.groupId || i.id) === groupId);
     if (!source) throw new Error(`Provider group ${groupId} not found`);
-    if (source.authMethod === 'oauth_chatgpt' || source.authMethod === 'oauth_google') {
+    if (isOAuthAuthMethod(source.authMethod)) {
       throw new Error('Subscription providers cannot host multiple models');
     }
     const inheritedApiKey = decrypt(source.apiKey);
@@ -589,8 +638,12 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     // 订阅(ChatGPT OAuth)provider 不持有 apiKey；连通性以 OAuth 登录态为准。
     // 真正的远程模型探测走 `llm:models:list`(main 层,含 token 刷新)，此处只判定凭证有效性，
     // 避免存储层反向依赖 provider 网络适配器，也避免对订阅误报 "API key not configured"。
-    if (item.authMethod === 'oauth_chatgpt' || item.authMethod === 'oauth_google') {
+    if (isOAuthAuthMethod(item.authMethod)) {
       return resolveSubscriptionTestResult(oauthStatusOf(item), item.model);
+    }
+
+    if (isLocalCliAuthMethod(item.authMethod)) {
+      return testQoderCli(item.model);
     }
 
     const apiKey = decrypt(item.apiKey);
@@ -696,4 +749,18 @@ async function testGemini(resolved, model, start) {
   }
   await res.json().catch(() => ({}));
   return { success: true, model, latencyMs };
+}
+
+async function testQoderCli(model = 'Auto') {
+  const start = Date.now();
+  try {
+    await execFileAsync(resolveQoderCliCommand(), ['status'], {
+      timeout: 5000,
+      maxBuffer: 64 * 1024,
+    });
+    return { success: true, model: model || 'Auto', latencyMs: Date.now() - start };
+  } catch (err) {
+    const code = err?.code === 'ENOENT' ? 'qoder_cli_not_found' : 'qoder_cli_unavailable';
+    return { success: false, error: code, latencyMs: Date.now() - start };
+  }
 }

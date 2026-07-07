@@ -212,6 +212,30 @@ test('Gemini OAuth provider stores OAuth client metadata without API key', () =>
   assert.deepEqual(persisted.oauthClientSecret, { encrypted: false, data: 'google-client-secret' });
 }));
 
+test('Qoder local CLI provider does not require an API key', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const provider = store.addProvider({
+    provider: 'openai',
+    channelId: 'qoder',
+    authMethod: 'local_cli',
+    name: 'Qoder',
+    model: 'Auto',
+  });
+
+  assert.equal(provider.channelId, 'qoder');
+  assert.equal(provider.resolvedWire, 'qoder-cli');
+  assert.equal(provider.authMethod, 'local_cli');
+  assert.equal(provider.baseUrl, 'local://qodercli');
+  assert.equal(provider.model, 'Auto');
+  assert.equal(provider.apiKeyConfigured, true);
+  assert.equal(provider.apiKeyMasked, '');
+  assert.equal(provider.supportsVision, false);
+  assert.equal(provider.supportsReasoning, false);
+
+  const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
+  assert.deepEqual(persisted.apiKey, { encrypted: false, data: '' });
+}));
+
 test('legacy provider updates also update channel identity when channelId is omitted', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });
   const provider = store.addProvider({

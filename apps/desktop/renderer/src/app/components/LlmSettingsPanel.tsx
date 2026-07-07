@@ -98,6 +98,16 @@ const FALLBACK_CHANNELS: readonly LlmChannelDescriptor[] = [
     capabilities: { reasoning: { supported: false, paramStyle: 'none' }, promptCache: false, vision: true },
     authMethods: { api_key: { wire: 'gemini' }, oauth_google: { wire: 'gemini' } },
   },
+  {
+    id: 'qoder',
+    label: 'Qoder CLI',
+    legacyProvider: 'openai',
+    defaultWire: 'qoder-cli',
+    allowedWires: ['qoder-cli'],
+    defaults: { baseUrl: 'local://qodercli', model: 'Auto' },
+    capabilities: { reasoning: { supported: false, paramStyle: 'none' }, promptCache: false, vision: false },
+    authMethods: { local_cli: { wire: 'qoder-cli' } },
+  },
 ];
 
 function descriptorFor(channelId: string, channels: readonly LlmChannelDescriptor[]): LlmChannelDescriptor {
@@ -122,6 +132,17 @@ function isOAuthMethod(method: LlmAuthMethod): boolean {
   return method === 'oauth_chatgpt' || method === 'oauth_google';
 }
 
+function isLocalCliMethod(method: LlmAuthMethod): boolean {
+  return method === 'local_cli';
+}
+
+function defaultAuthMethod(channel: LlmChannelDescriptor): LlmAuthMethod {
+  if (channel.authMethods?.api_key) return 'api_key';
+  if (channel.authMethods?.local_cli) return 'local_cli';
+  const [first] = Object.keys(channel.authMethods || {});
+  return (first || 'api_key') as LlmAuthMethod;
+}
+
 function oauthLabel(method: LlmAuthMethod, locale: string): string {
   const zh = locale === 'zh-CN';
   if (method === 'oauth_google') return zh ? 'Google OAuth 登录' : 'Google OAuth';
@@ -140,6 +161,8 @@ function wireLabel(wire: string | undefined, locale: string): string {
       return zh ? 'Messages API' : 'Messages API';
     case 'gemini':
       return zh ? 'Gemini GenerateContent' : 'Gemini GenerateContent';
+    case 'qoder-cli':
+      return zh ? 'Qoder CLI' : 'Qoder CLI';
     default:
       return wire || (zh ? '未解析' : 'Unresolved');
   }
@@ -239,6 +262,11 @@ function validateForm(
   isAddModel = false,
 ): string | null {
   if (!selectedChannel.id) return 'unknown_channel';
+  if (isLocalCliMethod(form.authMethod)) {
+    if (!selectedChannel.authMethods?.local_cli) return 'unsupported_auth_method';
+    if (!form.model.trim()) return 'model_required';
+    return null;
+  }
   if (isOAuthMethod(form.authMethod)) {
     if (!selectedChannel.authMethods?.[form.authMethod]) return 'unsupported_auth_method';
     if (form.authMethod === 'oauth_google') {
@@ -275,6 +303,7 @@ function validateForm(
 function emptyForm(channels: readonly LlmChannelDescriptor[] = FALLBACK_CHANNELS, channelId = 'openai-compatible'): FormState {
   const channel = descriptorFor(channelId, channels);
   const provider = channel.legacyProvider;
+  const authMethod = defaultAuthMethod(channel);
   return {
     provider,
     channelId: channel.id,
@@ -282,7 +311,7 @@ function emptyForm(channels: readonly LlmChannelDescriptor[] = FALLBACK_CHANNELS
     reasoningParamStyle: channel.capabilities?.reasoning?.paramStyle ?? '',
     reasoningEffortMapText: '',
     customHeadersText: '',
-    authMethod: 'api_key',
+    authMethod,
     name: '',
     baseUrl: channel.defaults.baseUrl,
     model: channel.defaults.model,
@@ -332,6 +361,12 @@ function friendlyTestError(error: string | undefined, locale: string): string {
       return zh ? '未配置 API Key' : 'API key not configured';
     case 'api_key_required':
       return zh ? '请填写 API Key' : 'Please enter an API key';
+    case 'qoder_cli_not_found':
+      return zh ? '未找到 qodercli 命令，请先安装或把 qodercli 加入 PATH' : 'qodercli command not found. Install Qoder CLI or add qodercli to PATH';
+    case 'qoder_cli_unavailable':
+      return zh ? 'Qoder CLI 不可用，请确认已完成 qodercli 登录' : 'Qoder CLI is unavailable. Confirm qodercli is logged in';
+    case 'qoder_cli_empty_response':
+      return zh ? 'Qoder CLI 未返回内容' : 'Qoder CLI returned an empty response';
     case 'base_url_required':
       return zh ? '请填写 Base URL' : 'Please enter a Base URL';
     case 'model_required':
@@ -452,7 +487,7 @@ export function LlmSettingsPanel({
       channelId: channel.id,
       provider: channel.legacyProvider,
       wireOverride: '',
-      authMethod: channel.authMethods?.[prev.authMethod] ? prev.authMethod : 'api_key',
+      authMethod: channel.authMethods?.[prev.authMethod] ? prev.authMethod : defaultAuthMethod(channel),
       baseUrl: channel.defaults.baseUrl,
       model: channel.defaults.model,
       supportsVision: channel.capabilities?.vision ?? false,
@@ -460,6 +495,7 @@ export function LlmSettingsPanel({
       supportsPromptCaching: channel.capabilities?.promptCache ?? false,
       reasoningParamStyle: channel.capabilities?.reasoning?.paramStyle ?? '',
       reasoningEffortMapText: '',
+      customHeadersText: '',
     }));
   };
 
@@ -535,8 +571,9 @@ export function LlmSettingsPanel({
     setSaving(true);
     setFormError(null);
     try {
-      const customHeaders = parseCustomHeaders(form.customHeadersText);
-      const reasoningEffortMap = form.supportsReasoning ? parseReasoningEffortMap(form.reasoningEffortMapText) : undefined;
+      const localCli = isLocalCliMethod(form.authMethod);
+      const customHeaders = localCli ? undefined : parseCustomHeaders(form.customHeadersText);
+      const reasoningEffortMap = !localCli && form.supportsReasoning ? parseReasoningEffortMap(form.reasoningEffortMapText) : undefined;
       const ctxWin = form.contextWindow ? Number(form.contextWindow) : undefined;
       const maxOut = form.maxOutputTokens ? Number(form.maxOutputTokens) : undefined;
       const inPrice = form.inputPrice ? Number(form.inputPrice) : undefined;
@@ -579,7 +616,7 @@ export function LlmSettingsPanel({
           reasoningEffortMap,
           customHeaders,
           authMethod: form.authMethod,
-          name: form.name || form.provider,
+          name: form.name || (localCli ? 'Qoder CLI' : form.provider),
           baseUrl: form.baseUrl,
           model: form.model,
           apiKey: form.apiKey,
@@ -703,6 +740,7 @@ export function LlmSettingsPanel({
   const canUseOAuth = oauthMethods.length > 0;
   const canChooseWire = !isOAuthMethod(form.authMethod) && selectedChannel.allowedWires.length > 1;
   const isAddModel = Boolean(addModelGroupId);
+  const isLocalCliAuth = isLocalCliMethod(form.authMethod);
   const formValidationError = validateForm(form, editingId, selectedChannel, isAddModel);
   const canSubmit = !saving && !oauthBusyId;
   // B-2 手风琴：把打平的 provider×model 列表按 groupId 归组，保持原有顺序。
@@ -770,7 +808,11 @@ export function LlmSettingsPanel({
                 <span className="llm-provider-chip">{groupChannel.label}</span>
                 <span className="llm-provider-chip">{wireLabel(head.resolvedWire || groupChannel.defaultWire, i18n.locale)}</span>
               </span>
-              {isOAuthMethod(head.authMethod) ? (
+              {isLocalCliMethod(head.authMethod) ? (
+                <small className="llm-provider-key">
+                  {i18n.locale === 'zh-CN' ? '本机 Qoder CLI' : 'Local Qoder CLI'}
+                </small>
+              ) : isOAuthMethod(head.authMethod) ? (
                 <small className={`llm-provider-key llm-oauth-status-${head.oauthStatus?.status ?? 'disconnected'}`}>
                   {head.oauthStatus?.status === 'connected'
                     ? (i18n.locale === 'zh-CN' ? `已登录${head.oauthStatus.accountId ? ` · ${head.oauthStatus.accountId}` : ''}` : `Signed in${head.oauthStatus.accountId ? ` · ${head.oauthStatus.accountId}` : ''}`)
@@ -1007,6 +1049,13 @@ export function LlmSettingsPanel({
                   : 'Uses a Google Cloud OAuth Desktop Client for the Gemini API. The provider is saved only after login; Project ID is sent as x-goog-user-project.'}
               </p>
             </>
+          ) : isLocalCliAuth ? (
+            <>
+              <label>
+                <span>{i18n.locale === 'zh-CN' ? '显示名称' : 'Display Name'}</span>
+                <input value={form.name} placeholder="Qoder CLI" onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+              </label>
+            </>
           ) : (
             <>
               <label>
@@ -1031,10 +1080,12 @@ export function LlmSettingsPanel({
           {form.authMethod !== 'oauth_chatgpt' ? (
           <>
           <label>
-            <span>{i18n.locale === 'zh-CN' ? '模型名称' : 'Model'}</span>
+            <span>{isLocalCliAuth ? (i18n.locale === 'zh-CN' ? 'Qoder 模型' : 'Qoder Model') : (i18n.locale === 'zh-CN' ? '模型名称' : 'Model')}</span>
             <input value={form.model} onChange={(e) => setForm((prev) => ({ ...prev, model: e.target.value }))} />
           </label>
 
+          {!isLocalCliAuth ? (
+          <>
           <div className="llm-token-row">
             <label>
               <span>{i18n.locale === 'zh-CN' ? '上下文窗口' : 'Context Window'}</span>
@@ -1144,6 +1195,8 @@ export function LlmSettingsPanel({
                 : 'One header per line. Authorization, x-api-key, Content-Type, and protocol headers are managed by the channel.'}
             </small>
           </label>
+          </>
+          ) : null}
           </>
           ) : null}
 

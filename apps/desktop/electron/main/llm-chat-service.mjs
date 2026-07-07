@@ -15,6 +15,7 @@ import {
 import { agentLoopAnthropic } from './chat-runtime/anthropic-agent-loop.mjs';
 import { agentLoopGemini } from './chat-runtime/gemini-agent-loop.mjs';
 import { agentLoopOpenAI } from './chat-runtime/openai-agent-loop.mjs';
+import { agentLoopQoder } from './chat-runtime/qoder-agent-loop.mjs';
 import { sanitizeApiMessages } from './chat-runtime/message-sanitizer.mjs';
 import { createChatPermissionGate } from './chat-runtime/permission-gate.mjs';
 import { resolveActiveGoalExecutionBinding } from './chat-runtime/goal-mode-gate.mjs';
@@ -653,7 +654,20 @@ export function createLlmChatService({
         });
 
         try {
-          if (resolvedChannel.wire === 'anthropic-messages') {
+          if (resolvedChannel.wire === 'qoder-cli') {
+            await agentLoopQoder({
+              model: provider.model,
+              systemPrompt,
+              messages,
+              webContents: attemptStream.webContents,
+              streamId,
+              signal: controller.signal,
+              contextWindow,
+              maxOutputTokens,
+              agentProgress,
+              workspacePath: runWorkspacePath,
+            });
+          } else if (resolvedChannel.wire === 'anthropic-messages') {
             await agentLoopAnthropic({
               baseUrl: provider.baseUrl,
               apiKey: credential.apiKey,

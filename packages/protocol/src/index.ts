@@ -325,7 +325,7 @@ export interface WorkspaceProject {
 }
 
 export type LlmProviderType = 'openai' | 'anthropic';
-export type LlmWireProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini';
+export type LlmWireProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini' | 'qoder-cli';
 export type LlmChannelId = string;
 export type LlmReasoningParamStyle =
   | 'openai-effort'
@@ -368,7 +368,8 @@ export interface LlmChannelDescriptor {
 //   订阅模型走 OpenAI Responses 传输。
 // - oauth_google: Google OAuth 登录,access/refresh token 存 main 进程,
 //   Gemini 模型走 Google Generative Language API 传输。
-export type LlmAuthMethod = 'api_key' | 'oauth_chatgpt' | 'oauth_google';
+// - local_cli: 本机 CLI 已登录/可用,不在 Peer Agent 内保存远端密钥。
+export type LlmAuthMethod = 'api_key' | 'oauth_chatgpt' | 'oauth_google' | 'local_cli';
 
 // 订阅(OAuth)登录态投影。token 永不回传 renderer,仅以状态 + 账号标识表达。
 export type LlmOAuthConnectionStatus = 'connected' | 'expired' | 'disconnected';

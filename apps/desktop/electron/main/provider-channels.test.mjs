@@ -130,4 +130,18 @@ describe('provider channel registry', () => {
     assert.equal(resolved.headers.Authorization, 'Bearer oauth-access-token');
     assert.equal(resolved.headers['x-goog-user-project'], 'my-project');
   });
+
+  it('resolves Qoder through a local CLI wire without headers or API key', () => {
+    const resolved = resolveChannel({
+      channelId: 'qoder',
+      authMethod: 'local_cli',
+      model: 'Auto',
+    });
+
+    assert.equal(resolved.wire, 'qoder-cli');
+    assert.equal(resolved.endpoint, 'cli:qodercli');
+    assert.deepEqual(resolved.headers, {});
+    assert.equal(resolved.supportsReasoning, false);
+    assert.equal(resolved.descriptor.capabilities.toolUse, false);
+  });
 });
