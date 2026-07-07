@@ -427,7 +427,6 @@ export function Sidebar({
         )}
         {confirmDeleteId === conv.id ? (
           <span className="sidebar-conv-confirm" onClick={(e) => e.stopPropagation()}>
-            <span>{isZh ? '确认？' : 'Delete?'}</span>
             <button type="button" className="confirm-yes" onClick={() => { setConfirmDeleteId(null); onDeleteConversation(conv.id); }}>
               {isZh ? '删除' : 'Del'}
             </button>

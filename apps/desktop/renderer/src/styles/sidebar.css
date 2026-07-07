@@ -658,6 +658,7 @@
 
 .sidebar-conv-confirm {
   display: flex;
+  align-items: center;
   gap: 2px;
   flex-shrink: 0;
   --motion-enter-from: -4px;
