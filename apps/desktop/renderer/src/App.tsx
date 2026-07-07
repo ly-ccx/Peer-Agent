@@ -1,6 +1,6 @@
 import { createI18n } from '@peer-agent/i18n';
 import type { LlmProviderConfigView } from '@peer-agent/protocol';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SettingsPage } from './app/components/SettingsPage';
 import { useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { ChatSurface } from './chat/components/ChatSurface';
@@ -77,11 +77,15 @@ export function App() {
     try { setProviders(await clientApi.llmListProviders()); } catch {}
   }, []);
 
+  const refreshSeqRef = useRef(0);
   const refreshConversations = useCallback(async (wsPath?: string | null, view?: ConversationView) => {
     const ws = wsPath !== undefined ? wsPath : activeWorkspace;
     const status = view ?? conversationView;
+    const seq = ++refreshSeqRef.current;
     try {
       const list = await clientApi.conversationsList({ workspacePath: ws, status }) as readonly ConversationMeta[];
+      // 丢弃过期响应：只有最新一次请求的结果才允许写回，避免慢请求晚返回覆盖新视图。
+      if (seq !== refreshSeqRef.current) return;
       setConversations(list);
     } catch {}
   }, [activeWorkspace, conversationView]);
@@ -239,7 +243,7 @@ export function App() {
     setConversationView('archived');
     setActiveConversationId(null);
     setActivePage('chat');
-    setConversations([]);
+    // 保留旧列表直到新数据成功返回，避免切换期间闪现"暂无会话"。
     await refreshConversations(activeWorkspace, 'archived');
   }, [activeWorkspace, refreshConversations]);
 
@@ -247,7 +251,7 @@ export function App() {
     setConversationView('active');
     setActiveConversationId(null);
     setActivePage('chat');
-    setConversations([]);
+    // 保留旧列表直到新数据成功返回，避免切换期间闪现"暂无会话"。
     await refreshConversations(activeWorkspace, 'active');
   }, [activeWorkspace, refreshConversations]);
 
