@@ -106,6 +106,12 @@ export interface ChatSendRequest {
   readonly mode?: string;
   readonly conversationId?: string;
   /**
+   * 会话级绑定的模型 provider 复合 id（groupId::modelId）。渲染端从会话 meta 透传，
+   * 主进程据此把该 provider 排为本轮首选；若已失效则回退全局默认（强绑定回退）。
+   * 缺省时主进程会按 conversationId 从 conversation-store 兜底解析。
+   */
+  readonly modelProviderId?: string | null;
+  /**
    * 渲染端当前活跃工作区路径（B2 兜底通道）。仅在主进程无法按 conversationId 从
    * conversation-store 解析到会话绑定的 workspacePath 时，作为兜底/校验来源使用，
    * 不作为运行根目录的主真值。详见 llm-chat-service.resolveRunWorkspacePath。

@@ -184,6 +184,70 @@ test('updateMode normalizes unknown values to chat and returns null on missing c
   }
 });
 
+test('effort + modelProviderId are per-conversation: default, persist, isolate, and normalize', () => {
+  const { store, dir, cleanup } = freshStore();
+  try {
+    // 新会话默认 effort='default'、modelProviderId=null（未绑定，用全局默认 provider）。
+    const a = store.createConversation({ title: 'a' });
+    assert.equal(a.effort, 'default');
+    assert.equal(a.modelProviderId, null);
+    assert.equal(store.getConversation(a.id).effort, 'default');
+    assert.equal(store.getConversation(a.id).modelProviderId, null);
+
+    const b = store.createConversation({ title: 'b' });
+
+    // 只切 effort 不影响 modelProviderId。
+    const afterEffort = store.updateModelEffort(a.id, { effort: 'high' });
+    assert.equal(afterEffort.effort, 'high');
+    assert.equal(afterEffort.modelProviderId, null);
+
+    // 只切模型不影响 effort（两者各自独立）。
+    const afterModel = store.updateModelEffort(a.id, { modelProviderId: 'grp1::gpt-x' });
+    assert.equal(afterModel.effort, 'high');
+    assert.equal(afterModel.modelProviderId, 'grp1::gpt-x');
+
+    // 会话隔离：改 a 不影响 b。
+    assert.equal(store.getConversation(b.id).effort, 'default');
+    assert.equal(store.getConversation(b.id).modelProviderId, null);
+
+    // 非法 effort 归一为 default；空白 modelProviderId 归一为 null。
+    const normalized = store.updateModelEffort(a.id, { effort: 'bogus', modelProviderId: '   ' });
+    assert.equal(normalized.effort, 'default');
+    assert.equal(normalized.modelProviderId, null);
+
+    // 缺省会话返回 null。
+    assert.equal(store.updateModelEffort('nope', { effort: 'high' }), null);
+
+    // 跨重启（重建 store 读同目录）后绑定值保留。
+    store.updateModelEffort(a.id, { effort: 'low', modelProviderId: 'grp2::claude-y' });
+    const store2 = createConversationStore({ storeDir: dir });
+    assert.equal(store2.getConversation(a.id).effort, 'low');
+    assert.equal(store2.getConversation(a.id).modelProviderId, 'grp2::claude-y');
+  } finally {
+    cleanup();
+  }
+});
+
+test('legacy conversations without effort/modelProviderId load with safe fallbacks', () => {
+  // 老会话（index 无 effort/modelProviderId 字段）读取时应回退 default/null，不抛错。
+  const dir = mkdtempSync(path.join(tmpdir(), 'conv-store-legacy-me-'));
+  try {
+    const indexFile = path.join(dir, 'index.jsonl');
+    const now = new Date().toISOString();
+    writeFileSync(
+      indexFile,
+      JSON.stringify({ id: 'legacy', title: 'lg', mode: 'chat', status: 'active', createdAt: now, updatedAt: now }) + '\n',
+      'utf8',
+    );
+    const store = createConversationStore({ storeDir: dir });
+    const conv = store.getConversation('legacy');
+    assert.equal(conv.effort, 'default');
+    assert.equal(conv.modelProviderId, null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('addUsage on missing conversation returns null', () => {
   const { store, cleanup } = freshStore();
   try {

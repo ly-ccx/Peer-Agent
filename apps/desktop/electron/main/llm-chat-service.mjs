@@ -494,9 +494,9 @@ export function createLlmChatService({
     } catch {}
   }
 
-  function getProviderCandidates() {
+  function getProviderCandidates(preferredProviderId = null) {
     const providers = llmConfigStore.listProviders();
-    return orderProviderCandidates(providers);
+    return orderProviderCandidates(providers, preferredProviderId);
   }
 
   async function sendMessage({
@@ -506,6 +506,9 @@ export function createLlmChatService({
     effort = 'default',
     mode = 'chat',
     conversationId = null,
+    // 会话级首选 provider（会话 meta.modelProviderId 透传）。指定时排为本轮主 provider；
+    // 若该 provider 已失效/被删，orderProviderCandidates 会自动回退默认（强绑定回退）。
+    modelProviderId = null,
     // B2 兜底：渲染端经 chat:send 透传的工作区路径，仅在会话未绑定 workspacePath 时作为兜底/校验，
     // 不作为主真值（主真值由 resolveRunWorkspacePath 按 conversationId 从 store 解析）。
     workspacePath: incomingWorkspacePath = null,
@@ -522,7 +525,7 @@ export function createLlmChatService({
     // onToolCall 经 toolContext 透传，分别用于实时轮次/工具计数。普通 chat 不传。
     agentProgress = null,
   }) {
-    const providerCandidates = getProviderCandidates();
+    const providerCandidates = getProviderCandidates(modelProviderId);
     if (!providerCandidates.length) {
       webContents.send('chat:stream:error', { streamId, error: 'no_provider_configured' });
       return { terminalStatus: 'error', requestedUserInput: false, toolCallCount: 0 };

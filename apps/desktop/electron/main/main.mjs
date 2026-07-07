@@ -1527,6 +1527,7 @@ ipcMain.handle('conversations:create', (_, params) => conversationStore.createCo
 ipcMain.handle('conversations:get', (_, { id }) => conversationStore.getConversation(id));
 ipcMain.handle('conversations:update-title', (_, { id, title }) => conversationStore.updateTitle(id, title));
 ipcMain.handle('conversations:update-mode', (_, { id, mode }) => conversationStore.updateMode(id, mode));
+ipcMain.handle('conversations:update-model-effort', (_, { id, effort, modelProviderId }) => conversationStore.updateModelEffort(id, { effort, modelProviderId }));
 ipcMain.handle('conversations:append-message', (_, { id, message }) => conversationStore.appendMessage(id, message));
 ipcMain.handle('conversations:update-last-message', (_, { id, content }) => conversationStore.updateLastMessage(id, content));
 ipcMain.handle('conversations:replace-messages', (_, { id, messages }) => conversationStore.replaceMessages(id, messages));
@@ -1640,6 +1641,7 @@ ipcMain.handle('chat:send', (event, {
   effort,
   mode,
   conversationId,
+  modelProviderId,
   workspacePath,
   assistantMessageId,
   contextAttachments,
@@ -1707,6 +1709,11 @@ ipcMain.handle('chat:send', (event, {
       }
     }
   }
+  // 会话级首选 provider：渲染端透传优先，缺省时按 conversationId 从会话 meta 兜底解析，
+  // 保证「模型随会话绑定」在续传/重载等渲染端未带参场景下仍以后端 store 为真值。
+  const resolvedModelProviderId =
+    modelProviderId
+    ?? (conversationId ? conversationStore.getConversation(conversationId)?.modelProviderId ?? null : null);
   const outcomePromise = llmChatService.sendMessage({
     messages,
     webContents: event.sender,
@@ -1714,6 +1721,7 @@ ipcMain.handle('chat:send', (event, {
     effort,
     mode,
     conversationId,
+    modelProviderId: resolvedModelProviderId,
     // B2 兜底：透传渲染端当前工作区，仅在会话未绑定 workspacePath 时由
     // resolveRunWorkspacePath 作为兜底/校验使用，主真值仍按 conversationId 从 store 解析。
     workspacePath,

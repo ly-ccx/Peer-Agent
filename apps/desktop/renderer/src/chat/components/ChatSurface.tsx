@@ -22,7 +22,7 @@ import {
   type EffortLevel,
   type ChatMode,
 } from '../state/preferences';
-import { useEffortPreference } from '../hooks/useEffortPreference';
+import { useConversationModelEffort } from '../hooks/useConversationModelEffort';
 import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
 import { useMessageQueue, type QueuedMessage } from '../hooks/useMessageQueue';
@@ -195,11 +195,18 @@ async function loadConversationMessages(conversationId: string): Promise<{
   messages: ChatMsg[];
   tokenUsage: { input: number; output: number; cacheWrite: number; cacheRead: number } | null;
   mode: ChatMode;
+  effort: EffortLevel;
+  modelProviderId: string | null;
 }> {
   const conv = await clientApi.conversationsGet({ id: conversationId });
-  if (!conv?.messages) return { messages: [], tokenUsage: null, mode: 'chat' };
+  if (!conv?.messages) return { messages: [], tokenUsage: null, mode: 'chat', effort: 'default', modelProviderId: null };
   // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'，历史 'goal' 归一化为 'plan'。
   const convMode: ChatMode = normalizeChatMode(conv.mode);
+  // 思考强度 + 模型 provider 也按会话持久化在会话 meta 上（与 mode 同口径，每会话独立）。
+  // 老会话无字段时：effort 回退 'default'，modelProviderId 回退 null（用全局默认 provider）。
+  const convEffort: EffortLevel = isEffortLevel(conv.effort) ? conv.effort : 'default';
+  const convModelProviderId: string | null =
+    typeof conv.modelProviderId === 'string' && conv.modelProviderId ? conv.modelProviderId : null;
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0;
   const loaded = conv.messages.map((m: Record<string, unknown>) => {
     const msg: ChatMsg = {
@@ -256,6 +263,8 @@ async function loadConversationMessages(conversationId: string): Promise<{
       messages: loaded,
       tokenUsage: usageFromLifetime(lifetime),
       mode: convMode,
+      effort: convEffort,
+      modelProviderId: convModelProviderId,
     };
   }
   return {
@@ -264,6 +273,8 @@ async function loadConversationMessages(conversationId: string): Promise<{
       ? { input: totalInput, output: totalOutput, cacheWrite: totalCacheWrite, cacheRead: totalCacheRead }
       : null,
     mode: convMode,
+    effort: convEffort,
+    modelProviderId: convModelProviderId,
   };
 }
 
@@ -349,8 +360,13 @@ export function ChatSurface({
   useStreamingReport(conversationId, isStreaming, onStreamingChange);
   const streamError = convState.streamError;
   const setStreamError = useMemo(() => makeSetter('streamError'), [makeSetter]);
-  // 思考强度全局偏好(读取/回写 settings-store,五档),逻辑见 hooks/useEffortPreference。
-  const { effort, setEffort, changeEffort } = useEffortPreference();
+  // 思考强度 + 模型 provider 按会话持久化在会话 meta 上(与 mode 同口径,每会话独立)。
+  // effort 额外回写全局设置作为「新会话默认种子」;modelProviderId 只按会话绑定(null=全局默认
+  // provider)。初值给默认,真实值由会话加载 effect 按当前会话 meta 覆盖(见下方 conversationId
+  // effect)。真值最终经 chatSend → IPC → 会话 meta 兜底进入后端 provider 选择。逻辑见
+  // hooks/useConversationModelEffort。
+  const { effort, modelProviderId, setEffort, setModelProviderId, changeEffort, changeModelProviderId } =
+    useConversationModelEffort(conversationId);
   // 对话模式按会话持久化在会话 meta 上(非全局设置):模式是「每会话状态」,切换会话
   // 各自独立、互不影响,与计划数据同口径。初值给 'chat',真实值由会话加载 effect 按
   // 当前会话 meta 覆盖(见下方 conversationId effect)。模式真值最终经 chatSend → IPC →
@@ -556,7 +572,12 @@ export function ChatSurface({
   const hasProvider = providers.some((p) => p.apiKeyConfigured);
   // 当前激活 provider(默认且已配置 Key,否则取首个已配置)是否勾选了原生推理(reasoning/thinking)。
   // 只有勾选时才显示思考强度选择器；OpenAI 暴露额外 xhigh 档。
-  const activeProvider = providers.find((p) => p.isDefault && p.apiKeyConfigured)
+  // 优先取会话绑定的模型（modelProviderId 复合 id），使推理档位/思考强度随会话选中的模型走；
+  // 会话未绑定或绑定失效时回退全局默认 → 首个已配置 Key 的 provider（与后端强绑定回退同口径）。
+  const activeProvider = (modelProviderId
+    ? providers.find((p) => p.id === modelProviderId && p.apiKeyConfigured)
+    : null)
+    || providers.find((p) => p.isDefault && p.apiKeyConfigured)
     || providers.find((p) => p.apiKeyConfigured)
     || null;
   const activeProviderSupportsReasoning = Boolean(activeProvider?.supportsReasoning);
@@ -564,6 +585,19 @@ export function ChatSurface({
   // 后端未提供时回退到通用四档。不再按 provider 名硬编码（旧逻辑只认 openai，导致 Anthropic 等被降级到四档）。
   const effortLevels = normalizeEffortLevels(activeProvider?.reasoningEffortLevels);
   const isZh = i18n.locale === 'zh-CN';
+  // 模型下拉选项：以打平后的 provider×model（复合 id=groupId::modelId）为单位，仅列已配置 Key 的
+  // 可用模型。value=复合 id（会话据此绑定模型），label 优先取 modelLabel，回退分组名+模型名。
+  const modelOptions = useMemo(
+    () => providers
+      .filter((p) => p.apiKeyConfigured)
+      .map((p) => ({
+        value: p.id,
+        label: p.modelLabel || (p.name ? `${p.name} · ${p.model}` : p.model),
+      })),
+    [providers],
+  );
+  // 有两个及以上可用模型时才允许切换（单模型无切换意义）。
+  const canSwitchModel = modelOptions.length > 1;
   const slashQuery = draft.startsWith('/') && !/\s/.test(draft) ? draft.toLowerCase() : null;
   const slashCommands = slashQuery
     ? SLASH_COMMANDS.filter((command) => command.value.startsWith(slashQuery))
@@ -643,12 +677,16 @@ export function ChatSurface({
     setTokenUsage(null);
     let cancelled = false;
     void (async () => {
-      const { messages: loaded, tokenUsage: usage, mode: convMode } = await loadConversationMessages(conversationId);
+      const { messages: loaded, tokenUsage: usage, mode: convMode, effort: convEffort, modelProviderId: convModelProviderId } = await loadConversationMessages(conversationId);
       if (cancelled) return;
       setMessages(loaded);
       if (usage) setTokenUsage(usage);
       // 对话模式随会话恢复:每会话各自独立,切换会话即切到该会话自己的模式。
       setMode(convMode);
+      // 思考强度 + 模型 provider 随会话恢复:与 mode 同口径,切换会话即切到该会话自己的绑定值。
+      // 直接 setState(不触发回写),避免恢复动作被当成用户切换而反写 meta。
+      setEffort(convEffort);
+      setModelProviderId(convModelProviderId);
 
       // 压缩横幅按会话恢复:压缩态真值在主进程登记表,切回正在压缩的会话时恢复横幅与进度,
       // 并把 streamIdRef 指向压缩流,使后续 progress/done 事件(按 streamId 门控)能继续匹配收尾。
@@ -1128,8 +1166,8 @@ export function ChatSurface({
       ...buildReplyLanguageContext(replyLanguage),
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
-    void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId, workspacePath, contextAttachments, continuityContext, configInstructions });
-  }, [isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, mode, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
+    void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId, modelProviderId, workspacePath, contextAttachments, continuityContext, configInstructions });
+  }, [isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
 
   const handleSend = useCallback(async () => {
     const text = draft.trim();
@@ -1225,8 +1263,8 @@ export function ChatSurface({
       ...buildReplyLanguageContext(replyLanguage),
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
-    void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: newAssistant.id, effort, mode, conversationId, workspacePath, contextAttachments, continuityContext, configInstructions });
-  }, [isStreaming, hasProvider, conversationId, messages, effort, mode, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
+    void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: newAssistant.id, effort, mode, conversationId, modelProviderId, workspacePath, contextAttachments, continuityContext, configInstructions });
+  }, [isStreaming, hasProvider, conversationId, messages, effort, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
 
   const handleBranch = useCallback(async (msgIndex: number) => {
     if (!conversationId || isStreaming) return;
@@ -1777,6 +1815,10 @@ export function ChatSurface({
             effort={effort}
             effortLevels={activeProviderSupportsReasoning ? effortLevels : []}
             onEffortChange={changeEffort}
+            modelOptions={modelOptions}
+            canSwitchModel={canSwitchModel}
+            onModelChange={changeModelProviderId}
+            selectedModelProviderId={modelProviderId}
           />
         </div>
       </div>

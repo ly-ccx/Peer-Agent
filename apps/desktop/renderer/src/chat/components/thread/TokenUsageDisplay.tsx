@@ -27,6 +27,7 @@ export function TokenUsageDisplay({
   modelLoading = false,
   canSwitchModel = false,
   onModelChange,
+  selectedModelProviderId = null,
 }: {
   readonly providers: readonly LlmProviderConfigView[];
   readonly tokenUsage: TokenUsageState | null;
@@ -42,9 +43,19 @@ export function TokenUsageDisplay({
   readonly modelOptions?: readonly DropdownOption[];
   readonly modelLoading?: boolean;
   readonly canSwitchModel?: boolean;
-  readonly onModelChange?: (model: string) => void;
+  /** onModelChange 回传选中项的 provider 复合 id（groupId::modelId），会话据此绑定模型。 */
+  readonly onModelChange?: (providerId: string) => void;
+  /** 会话级绑定的 provider 复合 id；决定下拉选中项与展示的模型/价格/上下文窗口。null=用全局默认。 */
+  readonly selectedModelProviderId?: string | null;
 }) {
-  const defaultProvider = providers.find((p) => p.isDefault && p.apiKeyConfigured) || providers.find((p) => p.apiKeyConfigured);
+  // 当前展示的 provider：优先会话绑定的 modelProviderId（随会话切换模型），其次全局默认，
+  // 最后取首个已配置 Key 的 provider。这样价格/上下文窗口/模型名都跟随会话选中的模型走。
+  const selectedProvider = selectedModelProviderId
+    ? providers.find((p) => p.id === selectedModelProviderId && p.apiKeyConfigured)
+    : null;
+  const defaultProvider = selectedProvider
+    || providers.find((p) => p.isDefault && p.apiKeyConfigured)
+    || providers.find((p) => p.apiKeyConfigured);
   const hasInfo = tokenUsage || activeUsage || contextTokens || defaultProvider?.contextWindow || defaultProvider?.inputPrice != null;
   if (!hasInfo) return null;
 
@@ -89,7 +100,7 @@ export function TokenUsageDisplay({
           shouldShowModelDropdown ? (
             <Dropdown
               className="composer-dropdown composer-model-dropdown"
-              value={defaultProvider.model}
+              value={defaultProvider.id}
               options={modelOptions}
               onChange={(next) => onModelChange?.(next)}
               ariaLabel={isZh ? '切换模型' : 'Switch model'}

@@ -310,13 +310,17 @@ export interface BootstrapPreloadApi {
   readonly workspaceSetActive: (params: { path: string | null }) => Promise<{ activeWorkspace: string | null }>;
   readonly workspaceRemove: (params: { path: string }) => Promise<unknown>;
   readonly workspaceInfo: (params: { path: string }) => Promise<{ name: string; absolutePath: string; git?: { branch?: string; isDirty?: boolean } } | null>;
-  readonly conversationsList: (params?: { workspacePath?: string | null; status?: 'active' | 'archived' | readonly ('active' | 'archived')[] }) => Promise<readonly { id: string; title: string; workspacePath?: string | null; mode?: string; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }[]>;
-  readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null; mode?: string }) => Promise<{ id: string; title: string; mode?: string; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }>;
-  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage } | null>;
+  readonly conversationsList: (params?: { workspacePath?: string | null; status?: 'active' | 'archived' | readonly ('active' | 'archived')[] }) => Promise<readonly { id: string; title: string; workspacePath?: string | null; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }[]>;
+  readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null; mode?: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }>;
+  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage } | null>;
   readonly conversationsUpdateTitle: (params: { id: string; title: string }) => Promise<unknown>;
   // 对话模式按会话持久化在会话 meta 上（chat / goal）。模式真值仍经 chatSend → IPC →
   // mode-source 进入 System Context 的 L6_MODE_REMINDER；此处仅负责「每会话存哪」。
   readonly conversationsUpdateMode: (params: { id: string; mode: string }) => Promise<unknown>;
+  // 会话级模型 + 思考模式绑定（随会话持久化，同 mode 范式）。effort/modelProviderId
+  // 各自独立写入：用户可只切模型不切思考档，或反之。modelProviderId 为 null 表示回退
+  // 到全局默认 provider。provider 被删/失效时由发送层 orderProviderCandidates 自动回退。
+  readonly conversationsUpdateModelEffort: (params: { id: string; effort?: string; modelProviderId?: string | null }) => Promise<unknown>;
   readonly conversationsAppendMessage: (params: { id: string; message: Record<string, unknown> & { id: string; role: string; content: string } }) => Promise<unknown>;
   readonly conversationsUpdateLastMessage: (params: { id: string; content: string }) => Promise<unknown>;
   readonly conversationsReplaceMessages: (params: { id: string; messages: readonly Record<string, unknown>[] }) => Promise<unknown>;

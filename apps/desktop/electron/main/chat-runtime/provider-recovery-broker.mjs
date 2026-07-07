@@ -69,17 +69,27 @@ function modelKey(provider) {
   return String(provider?.model || '').trim().toLowerCase();
 }
 
-export function orderProviderCandidates(providers = []) {
+export function orderProviderCandidates(providers = [], preferredProviderId = null) {
   const runnable = providers.filter(providerCanRun);
-  const defaultProvider = runnable.find((provider) => provider.isDefault) ?? runnable[0] ?? null;
-  if (!defaultProvider) return [];
-  const defaultModel = modelKey(defaultProvider);
+  if (!runnable.length) return [];
+  // 会话级首选 provider（会话 meta 里的 modelProviderId）优先：若指定且该 provider 仍可运行，
+  // 就把它排首位作为本轮主 provider。
+  //
+  // 强绑定校验：这里是「provider 被删/失效时回退默认」的落点。指定的 preferredProviderId
+  // 若已被删除、禁用或未配置密钥，preferred 会落空（find 返回 undefined），主 provider 自动
+  // 回退到全局默认（isDefault）→ 首个可运行 provider，绝不因会话里残留的失效绑定而报错。
+  const preferred = preferredProviderId
+    ? runnable.find((provider) => provider.id === preferredProviderId) ?? null
+    : null;
+  const primary = preferred ?? runnable.find((provider) => provider.isDefault) ?? runnable[0] ?? null;
+  if (!primary) return [];
+  const primaryModel = modelKey(primary);
   return [
-    defaultProvider,
+    primary,
     ...runnable.filter((provider) => (
-      provider.id !== defaultProvider.id
+      provider.id !== primary.id
       && modelKey(provider)
-      && modelKey(provider) === defaultModel
+      && modelKey(provider) === primaryModel
     )),
   ];
 }

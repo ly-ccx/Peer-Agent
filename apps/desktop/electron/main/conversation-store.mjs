@@ -32,6 +32,22 @@ function normalizeMode(value) {
   return 'chat';
 }
 
+// 思考强度（reasoning effort）归一化。与前端 preferences.ts 的 EffortLevel 五档对齐：
+// off / low / default / high / xhigh。非法或缺失值回落 'default'，确保老会话无该字段时
+// 取全局默认档位，不会把脏值带到 provider 请求里。
+const VALID_EFFORT_LEVELS = new Set(['off', 'low', 'default', 'high', 'xhigh']);
+function normalizeEffort(value) {
+  return VALID_EFFORT_LEVELS.has(value) ? value : 'default';
+}
+
+// 会话绑定的模型 provider id 归一化。provider 是打平的 provider×model 组合（复合 id，
+// 形如 groupId::modelId）。这里只做存在性与类型校验，不校验该 provider 是否仍可用——
+// 可用性校验在发送时由 orderProviderCandidates 按首选优先 + 故障转移处理，删除 provider
+// 后会话里残留的 modelProviderId 会自动回退到全局默认 provider（强绑定校验）。
+function normalizeModelProviderId(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 function normalizeStatus(value) {
   return value === 'archived' ? 'archived' : 'active';
 }
@@ -49,6 +65,8 @@ function normalizeMeta(meta) {
   return {
     ...meta,
     mode: normalizeMode(meta?.mode),
+    effort: normalizeEffort(meta?.effort),
+    modelProviderId: normalizeModelProviderId(meta?.modelProviderId),
     status,
     archivedAt: status === 'archived' ? (meta?.archivedAt || meta?.updatedAt || meta?.createdAt || null) : null,
     pinnedAt,
@@ -121,6 +139,11 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
       title: title || '',
       workspacePath: workspacePath || null,
       mode: normalizeMode(mode),
+      // 会话级模型 + 思考模式绑定的初值（与 mode 同口径持久化）。默认 effort='default'、
+      // modelProviderId=null（未绑定 → 发送时用全局默认 provider）。写入落盘 meta 使
+      // createConversation 返回值与 getConversation（经 normalizeMeta）保持一致。
+      effort: 'default',
+      modelProviderId: null,
       status: 'active',
       archivedAt: null,
       pinnedAt: null,
@@ -137,6 +160,22 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
     const meta = index.find((c) => c.id === id);
     if (!meta) return null;
     meta.mode = normalizeMode(mode);
+    meta.updatedAt = new Date().toISOString();
+    writeJsonl(indexFile, index);
+    const msgs = existsSync(convFile(id)) ? readJsonl(convFile(id)) : [];
+    return { ...meta, messageCount: msgs.length };
+  }
+
+  // 会话级模型 + 思考模式绑定（随会话持久化，同 mode 范式）。两者各自独立写入，互不影响：
+  // 用户可只切模型不切思考档，或反之。modelProviderId 为 null 表示回退到全局默认 provider。
+  // 强绑定校验不在存储层做——发送时 orderProviderCandidates 会校验首选 provider 是否仍可用，
+  // 不可用则自动回退；这里只负责如实存取用户的选择。
+  function updateModelEffort(id, { effort, modelProviderId } = {}) {
+    const index = readIndex();
+    const meta = index.find((c) => c.id === id);
+    if (!meta) return null;
+    if (effort !== undefined) meta.effort = normalizeEffort(effort);
+    if (modelProviderId !== undefined) meta.modelProviderId = normalizeModelProviderId(modelProviderId);
     meta.updatedAt = new Date().toISOString();
     writeJsonl(indexFile, index);
     const msgs = existsSync(convFile(id)) ? readJsonl(convFile(id)) : [];
@@ -392,6 +431,7 @@ export function createConversationStore({ storeDir = pathOf('conversations') } =
     getConversation,
     updateTitle,
     updateMode,
+    updateModelEffort,
     appendMessage,
     updateLastMessage,
     updateMessageById,
