@@ -8,7 +8,7 @@ import type {
   LocalAccessLevel,
 } from '@peer-agent/protocol';
 import type React from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
 import { clientApi } from '../../clientApi';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
@@ -154,6 +154,11 @@ interface SlashCommand {
   labelEn: string;
   descriptionZh: string;
   descriptionEn: string;
+}
+
+interface ThreadScrollSnapshot {
+  top: number;
+  atBottom: boolean;
 }
 
 const SLASH_COMMANDS: SlashCommand[] = [
@@ -480,6 +485,11 @@ export function ChatSurface({
 
   const threadRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
+  const threadScrollSnapshotsRef = useRef(new Map<string, ThreadScrollSnapshot>());
+  const pendingThreadScrollRestoreRef = useRef<{
+    conversationId: string;
+    snapshot: ThreadScrollSnapshot | null;
+  } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -501,18 +511,32 @@ export function ChatSurface({
     return atBottom;
   }, []);
 
+  const saveThreadScrollSnapshot = useCallback((id: string | null, container: HTMLDivElement | null) => {
+    if (!id || !container) return;
+    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    threadScrollSnapshotsRef.current.set(id, {
+      top: container.scrollTop,
+      atBottom: distanceToBottom <= SCROLL_BOTTOM_THRESHOLD_PX,
+    });
+  }, []);
+
   const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     const container = threadRef.current;
     if (!container) return;
     container.scrollTo({ top: container.scrollHeight, behavior });
     shouldAutoScrollRef.current = true;
     setIsThreadAtBottom(true);
-  }, []);
+    saveThreadScrollSnapshot(conversationIdRef.current, container);
+  }, [saveThreadScrollSnapshot]);
 
   const handleThreadScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
-    updateThreadBottomState(event.currentTarget);
-    setThreadScrolled(event.currentTarget.scrollTop > 4);
-  }, [updateThreadBottomState]);
+    const container = event.currentTarget;
+    updateThreadBottomState(container);
+    if (pendingThreadScrollRestoreRef.current?.conversationId !== conversationId) {
+      saveThreadScrollSnapshot(conversationId, container);
+    }
+    setThreadScrolled(container.scrollTop > 4);
+  }, [conversationId, saveThreadScrollSnapshot, updateThreadBottomState]);
 
   // 表达层导航:点击右侧消息轨时,把对应用户消息滚动到视口并短暂高亮。
   // 仅操作已渲染的 DOM 锚点(data-msg-id),不触碰会话真值。
@@ -588,8 +612,14 @@ export function ChatSurface({
     const persisted = conversationId ? loadComposerEntry(conversationId) : null;
     setDraft(persisted?.draft ?? '');
     setMessageQueue(persisted?.queue ?? []);
-    shouldAutoScrollRef.current = true;
-    setIsThreadAtBottom(true);
+    const threadScrollSnapshot = conversationId
+      ? threadScrollSnapshotsRef.current.get(conversationId) ?? null
+      : null;
+    pendingThreadScrollRestoreRef.current = conversationId
+      ? { conversationId, snapshot: threadScrollSnapshot }
+      : null;
+    shouldAutoScrollRef.current = threadScrollSnapshot?.atBottom ?? true;
+    setIsThreadAtBottom(threadScrollSnapshot?.atBottom ?? true);
     // 切换会话时,先把流式表达状态按会话归零,避免上一会话的 isStreaming/streamId/toolProgress 残留:
     // 否则从"正在输出的 A"切到"未运行的 B",B 会误显示运行中(左侧列表 Loading、
     // 右下角停止按钮误亮),也会让"正在准备工具参数"残留到新会话。
@@ -854,6 +884,31 @@ export function ChatSurface({
     onBrowserToolActivity: handleBrowserToolActivity,
     onCompactionSuggested: handleCompactionSuggested,
   });
+
+  useLayoutEffect(() => {
+    const pending = pendingThreadScrollRestoreRef.current;
+    if (!pending || pending.conversationId !== conversationId) return;
+    const container = threadRef.current;
+    if (!container) return;
+    if (messages.length === 0 && pending.snapshot && pending.snapshot.top > 0) return;
+
+    if (pending.snapshot) {
+      if (pending.snapshot.atBottom) {
+        container.scrollTop = container.scrollHeight;
+      } else {
+        const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
+        container.scrollTop = Math.min(pending.snapshot.top, maxTop);
+      }
+      updateThreadBottomState(container);
+    } else {
+      container.scrollTop = container.scrollHeight;
+      shouldAutoScrollRef.current = true;
+      setIsThreadAtBottom(true);
+    }
+    setThreadScrolled(container.scrollTop > 4);
+    saveThreadScrollSnapshot(conversationId, container);
+    pendingThreadScrollRestoreRef.current = null;
+  }, [conversationId, messages, saveThreadScrollSnapshot, updateThreadBottomState]);
 
   useEffect(() => {
     if (shouldAutoScrollRef.current) {
