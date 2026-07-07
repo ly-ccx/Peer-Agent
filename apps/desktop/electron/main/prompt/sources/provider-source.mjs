@@ -7,6 +7,11 @@ const PROVIDER_RULES = {
     'Provider family: Anthropic-compatible messages.',
     'Use native tool_use blocks when a tool is needed. Do not write textual [Tool call] or [Tool result] claims.',
   ],
+  qoder: [
+    'Provider family: Qoder private API.',
+    'Use native function tool calls when accepted by the runtime. If the runtime asks for the Qoder literal tool-call dialect, follow that dialect exactly without adding prose around it.',
+    'Do not write textual [Tool call] or [Tool result] claims.',
+  ],
 };
 
 function normalizeProvider(value) {

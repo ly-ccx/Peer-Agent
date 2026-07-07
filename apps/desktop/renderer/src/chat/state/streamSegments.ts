@@ -126,6 +126,18 @@ function mergeReattachPrefixSegment(
   return mergeTextLikeReattachSegment(persisted, live);
 }
 
+function legacyToolCallFromSegment(seg: ToolCallSegment): ToolCallLegacy {
+  const call: ToolCallLegacy = {
+    tool: seg.tool!,
+    displayName: seg.displayName,
+    args: seg.args || {},
+    result: seg.result,
+    synthetic: seg.synthetic,
+  };
+  if (seg.toolCallId) call.toolCallId = seg.toolCallId;
+  return call;
+}
+
 /**
  * 重连（reattach）时合并「已持久化分段」与「main 活跃流快照」。
  * 不变量：绝不删除已经持久化展示过的 UI 证据；当两者分叉时保留可见历史，
@@ -204,9 +216,9 @@ export function groupSegments(segments: ContentSegment[]): SegmentGroup[] {
     } else {
       const last = groups[groups.length - 1];
       if (last && last.type === 'tool-call-group') {
-        last.calls.push({ tool: seg.tool!, displayName: seg.displayName, args: seg.args || {}, result: seg.result, synthetic: seg.synthetic });
+        last.calls.push(legacyToolCallFromSegment(seg));
       } else {
-        groups.push({ type: 'tool-call-group', calls: [{ tool: seg.tool!, displayName: seg.displayName, args: seg.args || {}, result: seg.result, synthetic: seg.synthetic }] });
+        groups.push({ type: 'tool-call-group', calls: [legacyToolCallFromSegment(seg)] });
       }
     }
   }
@@ -224,7 +236,15 @@ export function migrateToSegments(content: string, toolCalls?: ToolCallLegacy[])
   const segs: ContentSegment[] = [];
   if (toolCalls?.length) {
     for (const tc of toolCalls) {
-      segs.push({ type: 'tool-call', tool: tc.tool, displayName: tc.displayName, args: tc.args, result: tc.result });
+      const segment: Extract<ContentSegment, { type: 'tool-call' }> = {
+        type: 'tool-call',
+        tool: tc.tool,
+        displayName: tc.displayName,
+        args: tc.args,
+        result: tc.result,
+      };
+      if (tc.toolCallId) segment.toolCallId = tc.toolCallId;
+      segs.push(segment);
     }
   }
   if (content) segs.push({ type: 'text', content });

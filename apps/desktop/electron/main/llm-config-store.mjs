@@ -136,6 +136,18 @@ function applyQoderModelMetadata(item) {
   item.reasoningEffortMap = undefined;
 }
 
+function applyExplicitModelMetadataPatch(item, patch) {
+  if (patch.modelLabel !== undefined) {
+    const modelLabel = String(patch.modelLabel || '').trim();
+    if (modelLabel) item.modelLabel = modelLabel;
+    else delete item.modelLabel;
+  }
+  if (patch.contextWindow !== undefined) item.contextWindow = patch.contextWindow || undefined;
+  if (patch.maxOutputTokens !== undefined) item.maxOutputTokens = patch.maxOutputTokens || undefined;
+  if (patch.supportsVision !== undefined) item.supportsVision = patch.supportsVision;
+  if (patch.supportsReasoning !== undefined) item.supportsReasoning = patch.supportsReasoning;
+}
+
 export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {}) {
   // 订阅(codex 平面)provider 的就地迁移:
   // - 旧版默认 model 是 gpt-5 / gpt-5-codex(按量计费命名),订阅平面已不适用;
@@ -464,11 +476,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       item.model = patch.model;
       delete item.modelLabel;
     }
-    if (patch.modelLabel !== undefined) {
-      const modelLabel = String(patch.modelLabel || '').trim();
-      if (modelLabel) item.modelLabel = modelLabel;
-      else delete item.modelLabel;
-    }
+    applyExplicitModelMetadataPatch(item, patch);
     if (patch.enabled !== undefined) item.enabled = patch.enabled;
     if (patch.apiKey !== undefined) item.apiKey = encrypt(patch.apiKey);
     if (patch.oauthClientId !== undefined) item.oauthClientId = patch.oauthClientId || undefined;
@@ -513,6 +521,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       item.baseUrl = defaultsForChannel('qoder').baseUrl;
       item.apiKey = encrypt('');
       applyQoderModelMetadata(item);
+      applyExplicitModelMetadataPatch(item, patch);
     }
     const resolved = resolveChannel({
       ...item,

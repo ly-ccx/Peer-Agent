@@ -42,9 +42,11 @@ function extractOpenAIStreamError(parsed) {
   const error = parsed?.error ?? parsed?.choices?.[0]?.delta?.error;
   if (!error) return null;
   if (typeof error === 'string') return { type: 'provider_stream_error', message: error };
+  const details = typeof error.details === 'string' ? error.details : '';
+  const message = error.message || JSON.stringify(error);
   return {
     type: error.type || error.code || 'provider_stream_error',
-    message: error.message || JSON.stringify(error),
+    message: details ? `${message}: ${details}` : message,
   };
 }
 
@@ -53,11 +55,12 @@ function extractProviderTopLevelError(parsed) {
   const message = typeof parsed.message === 'string' ? parsed.message : '';
   const type = typeof parsed.type === 'string' ? parsed.type : '';
   const code = typeof parsed.code === 'string' ? parsed.code : '';
+  const details = typeof parsed.details === 'string' ? parsed.details : '';
   if (!message) return null;
   if (!type.toLowerCase().includes('error') && !code.toLowerCase().includes('error')) return null;
   return {
     type: type || code || 'provider_stream_error',
-    message,
+    message: details ? `${message}: ${details}` : message,
   };
 }
 

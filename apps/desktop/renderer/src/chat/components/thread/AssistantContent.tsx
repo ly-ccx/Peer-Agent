@@ -190,6 +190,20 @@ function parseToolCallInteractionView(tc: ToolCallLegacy) {
   );
 }
 
+function toolArgString(args: Record<string, unknown>, key: string): string | null {
+  const value = args[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function fallbackToolCallLabel(tc: ToolCallLegacy, fallback: string): string {
+  const value = fallback.trim();
+  if (value) return value;
+  if (tc.displayName?.trim()) return tc.displayName.trim();
+  if (tc.tool?.trim()) return tc.tool.trim();
+  if (tc.toolCallId?.trim()) return tc.toolCallId.trim();
+  return 'tool call';
+}
+
 function ToolCallCard({ tc, isZh }: { readonly tc: ToolCallLegacy; readonly isZh: boolean }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -217,17 +231,17 @@ function ToolCallCard({ tc, isZh }: { readonly tc: ToolCallLegacy; readonly isZh
   }
 
   const label = tc.tool === 'bash'
-    ? (tc.args.command as string)
+    ? fallbackToolCallLabel(tc, toolArgString(tc.args, 'command') ?? '')
     : tc.tool === 'read_file'
-      ? `read ${tc.args.path}`
+      ? fallbackToolCallLabel(tc, toolArgString(tc.args, 'path') ? `read ${toolArgString(tc.args, 'path')}` : '')
       : tc.tool === 'edit_file'
-        ? `edit ${tc.args.path}`
+        ? fallbackToolCallLabel(tc, toolArgString(tc.args, 'path') ? `edit ${toolArgString(tc.args, 'path')}` : '')
         : tc.tool === 'write_file'
-          ? `write ${tc.args.path}`
+          ? fallbackToolCallLabel(tc, toolArgString(tc.args, 'path') ? `write ${toolArgString(tc.args, 'path')}` : '')
           // displayName 是后端 Runtime Projection 注入的展示文案（MCP 工具为
           // 「服务名: 工具名」）。其它工具优先用它做标题，缺省时才回退到裸 capability 名，
           // 避免出现 mcp__server__tool 这类裸名（即「标题不见了」的现象）。
-          : (tc.displayName ?? tc.tool);
+          : fallbackToolCallLabel(tc, tc.displayName ?? tc.tool ?? '');
   const isSynthetic = tc.synthetic === true;
   const isDone = tc.result !== undefined && !isSynthetic;
 

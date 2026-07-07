@@ -24,8 +24,10 @@ describe('hasLiteralToolCallSyntax', () => {
     assert.equal(shouldRetryNoToolResponse(text), true);
   });
 
-  it('does not fire on neutralized (&lt;) content', () => {
-    assert.equal(hasLiteralToolCallSyntax('already &lt;invoke escaped'), false);
+  it('detects HTML-escaped tool protocol leaked as text', () => {
+    assert.equal(hasLiteralToolCallSyntax('&lt;tool_call&gt;{"name":"bash"}&lt;/tool_call&gt;'), true);
+    assert.equal(hasLiteralToolCallSyntax('already &lt;invoke escaped'), true);
+    assert.equal(shouldRetryNoToolResponse('&lt;tool_call&gt;{"name":"bash"}&lt;/tool_call&gt;'), true);
   });
 
   it('does not fire on normal prose or unrelated tags', () => {

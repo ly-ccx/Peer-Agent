@@ -17,7 +17,18 @@ async function withQoderConfig(fn) {
     writeFileSync(path.join(configDir, '.auth/models'), JSON.stringify({
       chat: [
         { key: 'auto', display_name: 'Auto', max_input_tokens: 180000, max_output_tokens: 32768, is_vl: true, is_reasoning: false },
-        { key: 'ultimate', display_name: 'Ultimate', max_input_tokens: 1000000, max_output_tokens: 32768, is_vl: true, is_reasoning: true },
+        {
+          key: 'ultimate',
+          display_name: 'Ultimate',
+          max_input_tokens: 1000000,
+          max_output_tokens: 32768,
+          is_vl: true,
+          is_reasoning: true,
+          context_config: {
+            '1M': { token_count: 1000000 },
+            '260K': { token_count: 260000, is_default: true },
+          },
+        },
       ],
       quest: [
         { key: 'quest-auto', display_name: 'Quest Auto', max_input_tokens: 1, max_output_tokens: 1 },
@@ -38,6 +49,7 @@ describe('qoder model catalog', () => {
     assert.equal(result.models[0].contextWindow, 180000);
     assert.equal(result.models[0].maxOutputTokens, 32768);
     assert.equal(result.models[0].supportsVision, true);
+    assert.equal(result.models[1].contextWindow, 1000000);
     assert.equal(result.models[1].supportsReasoning, true);
   }));
 
@@ -47,6 +59,14 @@ describe('qoder model catalog', () => {
     assert.equal(model.id, 'ultimate');
     assert.equal(model.contextWindow, 1000000);
     assert.equal(model.supportsReasoning, true);
+  }));
+
+  it('uses the maximum input window for Peer Agent context budget', async () => withQoderConfig(async (options) => {
+    const result = await listQoderModels(options);
+    const model = result.models.find((item) => item.id === 'ultimate');
+
+    assert.equal(model.contextWindow, 1000000);
+    assert.equal(model.raw.max_input_tokens, 1000000);
   }));
 
   it('falls back to auto when no local catalog exists', async () => {

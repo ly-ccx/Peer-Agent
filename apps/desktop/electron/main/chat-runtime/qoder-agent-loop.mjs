@@ -21,8 +21,104 @@ function normalizeLiteralToolArguments(raw) {
   return '{}';
 }
 
+function contentToFallbackText(content) {
+  if (typeof content === 'string') return content;
+  if (content === null || content === undefined) return '';
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part?.type === 'text' && typeof part.text === 'string') return part.text;
+        if (typeof part?.content === 'string') return part.content;
+        if (part?.type === 'tool_result') {
+          return `Tool result:\n${contentToFallbackText(part.content)}`;
+        }
+        if (part?.type === 'tool_use') {
+          return '';
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (content && typeof content === 'object') return JSON.stringify(content);
+  return '';
+}
+
+function functionToolName(tool) {
+  const fn = tool?.function && typeof tool.function === 'object' ? tool.function : tool;
+  return typeof fn?.name === 'string' ? fn.name.trim() : '';
+}
+
+function qoderFallbackToolList(tools) {
+  const names = Array.isArray(tools) ? tools.map(functionToolName).filter(Boolean) : [];
+  if (!names.length) return 'Available tools: none.';
+  return `Available tool names: ${names.join(', ')}.`;
+}
+
+function flattenMessagesForQoderLiteralTools(messages) {
+  if (!Array.isArray(messages)) return [];
+  const toolNamesById = new Map();
+  const flattened = [];
+  for (const message of messages) {
+    const role = String(message?.role || '').trim();
+    const text = contentToFallbackText(message?.content);
+    if (role === 'assistant') {
+      if (Array.isArray(message.tool_calls)) {
+        for (const tc of message.tool_calls) {
+          const id = typeof tc?.id === 'string' ? tc.id : '';
+          const name = tc?.function?.name || tc?.name || '';
+          if (id && name) toolNamesById.set(id, name);
+        }
+      }
+      if (text.trim()) flattened.push({ role: 'assistant', content: text });
+      continue;
+    }
+    if (role === 'tool') {
+      const name = toolNamesById.get(message?.tool_call_id) || 'tool';
+      flattened.push({
+        role: 'user',
+        content: `Result from ${name}:\n${text}`,
+      });
+      continue;
+    }
+    flattened.push({
+      role: ['system', 'user'].includes(role) ? role : 'user',
+      content: text,
+    });
+  }
+  return flattened.filter((message) => String(message.content || '').trim());
+}
+
+function qoderLiteralToolInstruction(tools = []) {
+  return [
+    'Tool calling for this Qoder channel uses the Qoder literal tool-call dialect.',
+    'Do not use native function calls.',
+    'When a tool is needed, emit exactly one or more pure tool-call blocks and no other text.',
+    'Each block must use an opening tag named tool_call, a compact JSON object with name and input fields, and the matching closing tag.',
+    qoderFallbackToolList(tools),
+    'Use only those tool names. If no tool is needed, answer normally.',
+  ].join(' ');
+}
+
+function withQoderLiteralToolInstruction(messages, tools) {
+  if (!Array.isArray(tools) || !tools.length) return messages;
+  const instruction = { role: 'user', content: qoderLiteralToolInstruction(tools) };
+  const firstNonSystemIndex = messages.findIndex((message) => message?.role !== 'system');
+  if (firstNonSystemIndex < 0) return [...messages, instruction];
+  return [
+    ...messages.slice(0, firstNonSystemIndex),
+    instruction,
+    ...messages.slice(firstNonSystemIndex),
+  ];
+}
+
 export function parseQoderLiteralToolCalls(text) {
-  const value = String(text || '').trim();
+  const value = String(text || '')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&')
+    .trim();
   if (!value || !value.includes('<tool_call')) return [];
   const calls = [];
   let remainder = value;
@@ -81,15 +177,20 @@ export async function agentLoopQoder({
       tools,
     }),
   });
+  const literalToolMode = tools.length > 0;
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {
+    const requestTools = literalToolMode ? [] : tools;
+    const requestMessages = literalToolMode
+      ? withQoderLiteralToolInstruction(flattenMessagesForQoderLiteralTools(sanitizeApiMessages(apiMessages)), tools)
+      : sanitizeApiMessages(apiMessages);
     const providerResponse = await sendStream({
       baseUrl,
       apiKey,
       endpoint: resolvedChannel?.endpoint,
       model,
-      messages: sanitizeApiMessages(apiMessages),
-      tools,
+      messages: requestMessages,
+      tools: requestTools,
       maxOutputTokens,
       signal,
       webContents,

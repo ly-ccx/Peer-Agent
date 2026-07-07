@@ -69,6 +69,37 @@ function parseQoderModelCatalogText(text) {
   return models;
 }
 
+function readLegacyModelCatalog(options = {}) {
+  try {
+    const models = parseQoderModelCatalogText(fs.readFileSync(modelPath(options), 'utf8'));
+    return models.length ? models : [];
+  } catch {
+    return [];
+  }
+}
+
+async function readLegacyModelCatalogAsync(options = {}) {
+  try {
+    const models = parseQoderModelCatalogText(await fsp.readFile(modelPath(options), 'utf8'));
+    return models.length ? models : [];
+  } catch {
+    return [];
+  }
+}
+
+function mergeModelCatalog(primary, fallback) {
+  const fallbackById = new Map((fallback || []).map((model) => [model.id.toLowerCase(), model]));
+  return (primary || []).map((model) => {
+    const fallbackModel = fallbackById.get(model.id.toLowerCase());
+    if (!fallbackModel) return model;
+    return {
+      ...fallbackModel,
+      ...model,
+      maxOutputTokens: model.maxOutputTokens ?? fallbackModel.maxOutputTokens,
+    };
+  });
+}
+
 async function readEncryptedCatalog(options = {}) {
   const defaultInfo = JSON.parse(await fsp.readFile(defaultModelPath(options), 'utf8'));
   const uid = String(defaultInfo?.uid || '').trim();
@@ -105,7 +136,7 @@ function readEncryptedCatalogSync(options = {}) {
 export function getQoderModelCatalog(options = {}) {
   try {
     const models = readEncryptedCatalogSync(options);
-    if (models.length) return models;
+    if (models.length) return mergeModelCatalog(models, readLegacyModelCatalog(options));
   } catch {}
   try {
     const models = parseQoderModelCatalogText(fs.readFileSync(modelPath(options), 'utf8'));
@@ -124,7 +155,7 @@ export function getQoderModelMetadata(modelId, options = {}) {
 export async function listQoderModels(options = {}) {
   try {
     const result = await readEncryptedCatalog(options);
-    return { models: result.models, source: result.source };
+    return { models: mergeModelCatalog(result.models, await readLegacyModelCatalogAsync(options)), source: result.source };
   } catch {}
   try {
     const text = await fsp.readFile(modelPath(options), 'utf8');

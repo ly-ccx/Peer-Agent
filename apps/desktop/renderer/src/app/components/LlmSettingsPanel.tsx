@@ -189,6 +189,24 @@ function reasoningStyleLabel(style: string | undefined, locale: string): string 
   }
 }
 
+function formatModelTokenLimit(tokens: number): string {
+  if (tokens > 0 && tokens % 1024 === 0 && tokens % 1000 !== 0) {
+    return `${Math.floor(tokens / 1024)}K`;
+  }
+  return `${(tokens / 1000).toFixed(0)}K`;
+}
+
+function modelMetadataPatch(model: LlmModelInfo | undefined): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  if (!model) return patch;
+  if (model.label) patch.modelLabel = model.label;
+  if (typeof model.contextWindow === 'number') patch.contextWindow = model.contextWindow;
+  if (typeof model.maxOutputTokens === 'number') patch.maxOutputTokens = model.maxOutputTokens;
+  if (typeof model.supportsVision === 'boolean') patch.supportsVision = model.supportsVision;
+  if (typeof model.supportsReasoning === 'boolean') patch.supportsReasoning = model.supportsReasoning;
+  return patch;
+}
+
 function formatReasoningEffortMap(map: LlmReasoningEffortMap | undefined): string {
   return map ? JSON.stringify(map, null, 2) : '';
 }
@@ -460,11 +478,21 @@ export function LlmSettingsPanel({
     setModelLoadingId(id);
     try {
       const res = await clientApi.llmListModels({ id });
-      if (res.success) setModelLists((prev) => ({ ...prev, [id]: res.models }));
+      if (res.success) {
+        setModelLists((prev) => ({ ...prev, [id]: res.models }));
+        const provider = providers.find((item) => item.id === id);
+        const selected = res.models.find((item) => item.id === provider?.model);
+        const patch = modelMetadataPatch(selected);
+        const shouldPatch = provider && Object.entries(patch).some(([key, value]) => (provider as unknown as Record<string, unknown>)[key] !== value);
+        if (shouldPatch) {
+          await clientApi.llmUpdateProvider({ id, ...patch });
+          await refresh();
+        }
+      }
     } catch { /* silent */ } finally {
       setModelLoadingId((cur) => (cur === id ? null : cur));
     }
-  }, []);
+  }, [providers, refresh]);
 
   // 已登录(connected)的订阅 provider 与本机 Qoder provider 自动加载一次模型清单。
   useEffect(() => {
@@ -480,8 +508,8 @@ export function LlmSettingsPanel({
   // 切换订阅 provider 当前使用的模型。
   const handleSelectModel = async (id: string, model: string) => {
     try {
-      const modelLabel = modelLists[id]?.find((item) => item.id === model)?.label;
-      await clientApi.llmUpdateProvider({ id, model, modelLabel });
+      const selected = modelLists[id]?.find((item) => item.id === model);
+      await clientApi.llmUpdateProvider({ id, model, ...modelMetadataPatch(selected) });
       await refresh();
     } catch { /* silent */ }
   };
@@ -868,6 +896,7 @@ export function LlmSettingsPanel({
                     ? modelLists[p.id]
                     : [{ id: p.model, label: p.modelLabel || p.model } as LlmModelInfo]
                   ).map((m) => ({ value: m.id, label: m.label }));
+                  const selectedModelMetadata = modelLists[p.id]?.find((item) => item.id === p.model);
                   const modelDisplayName = p.modelLabel || p.model;
                   return (
                   <div key={p.id} className={`llm-model-row ${p.isDefault ? 'is-default' : ''}`}>
@@ -890,12 +919,12 @@ export function LlmSettingsPanel({
                         <span className="llm-provider-chip mono" title={p.model}>{modelDisplayName}</span>
                       )}
                       {p.isDefault ? <span className="llm-badge-default">{i18n.locale === 'zh-CN' ? '已激活' : 'Active'}</span> : null}
-                      {p.contextWindow || p.maxOutputTokens || p.inputPrice != null ? (
+                      {selectedModelMetadata?.contextWindow || p.contextWindow || selectedModelMetadata?.maxOutputTokens || p.maxOutputTokens || p.inputPrice != null ? (
                         <span className="llm-provider-specs">
-                          {p.contextWindow ? `${(p.contextWindow / 1000).toFixed(0)}K ctx` : ''}
-                          {p.contextWindow && p.maxOutputTokens ? ' · ' : ''}
-                          {p.maxOutputTokens ? `${(p.maxOutputTokens / 1000).toFixed(0)}K out` : ''}
-                          {(p.contextWindow || p.maxOutputTokens) && p.inputPrice != null ? ' · ' : ''}
+                          {selectedModelMetadata?.contextWindow || p.contextWindow ? `${formatModelTokenLimit(selectedModelMetadata?.contextWindow ?? p.contextWindow ?? 0)} ctx` : ''}
+                          {(selectedModelMetadata?.contextWindow || p.contextWindow) && (selectedModelMetadata?.maxOutputTokens || p.maxOutputTokens) ? ' · ' : ''}
+                          {selectedModelMetadata?.maxOutputTokens || p.maxOutputTokens ? `${formatModelTokenLimit(selectedModelMetadata?.maxOutputTokens ?? p.maxOutputTokens ?? 0)} out` : ''}
+                          {((selectedModelMetadata?.contextWindow || p.contextWindow) || (selectedModelMetadata?.maxOutputTokens || p.maxOutputTokens)) && p.inputPrice != null ? ' · ' : ''}
                           {p.inputPrice != null ? `$${p.inputPrice}/${p.outputPrice ?? '?'}` : ''}
                         </span>
                       ) : null}

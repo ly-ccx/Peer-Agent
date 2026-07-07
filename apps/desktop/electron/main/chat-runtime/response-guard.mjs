@@ -32,12 +32,13 @@ export function hasDanglingToolIntent(text) {
 // （<tool_call> / <function_calls> / <invoke ...> / <parameter ...>，含 antml: 命名空间变体），但这一轮
 // stop_reason 并非 tool_use，于是不会被当成真实调用执行。命中时应触发静默重试纠偏，
 // 而不是 sendDone 直接断流。注意：此处检测的是模型本轮新生成、尚未经发送侧中和的输出，
-// 故匹配未转义的 < 形态，与 message-sanitizer 产出的 &lt; 不冲突。
-const LITERAL_TOOL_CALL_SYNTAX_PATTERN = /<(?:\/?)(?:(?:antml:)?(?:tool_call|function_calls|invoke|parameter)|functions\.[a-zA-Z0-9_.-]+)\b/i;
+// 故匹配未转义的 < 形态，也覆盖部分模型把标签 HTML-escape 成 &lt;tool_call&gt;
+// 的情况，避免转义后的协议文本进入 UI 正文。
+const LITERAL_TOOL_CALL_SYNTAX_PATTERN = /(?:<|&lt;)(?:\/?)(?:(?:antml:)?(?:tool_call|function_calls|invoke|parameter)|functions\.[a-zA-Z0-9_.-]+)\b/i;
 
 export function hasLiteralToolCallSyntax(text) {
   const value = String(text || '');
-  if (value.indexOf('<') === -1) return false;
+  if (value.indexOf('<') === -1 && !/&lt;/i.test(value)) return false;
   return LITERAL_TOOL_CALL_SYNTAX_PATTERN.test(value);
 }
 

@@ -5,6 +5,7 @@ import {
   buildQoderPrivateHeaders,
   buildQoderPrivateRequestBody,
   normalizeQoderModel,
+  normalizeQoderPreparedEndpoint,
   qoderModelServerBaseUrl,
   sendQoderPrivateStream,
 } from './qoder-private-adapter.mjs';
@@ -64,11 +65,129 @@ describe('qoder private adapter', () => {
     });
   });
 
+  it('normalizes complex tool schemas to a Qoder-compatible subset', () => {
+    const body = buildQoderPrivateRequestBody({
+      model: 'auto',
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [{
+        type: 'function',
+        function: {
+          name: 'complex_tool',
+          description: 'Complex tool.',
+          parameters: {
+            type: 'object',
+            properties: {
+              mode: { type: ['string', 'null'], enum: ['read', 'write', null], default: 'read' },
+              payload: {
+                anyOf: [
+                  { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+                  { type: 'string' },
+                ],
+              },
+              files: { type: 'array', items: { oneOf: [{ type: 'string' }, { type: 'number' }] } },
+            },
+            required: ['mode', 'payload', 'missing'],
+            unevaluatedProperties: false,
+          },
+        },
+      }],
+    });
+
+    const parameters = body.tools[0].function.parameters;
+    assert.deepEqual(parameters.required, ['mode', 'payload']);
+    assert.deepEqual(parameters.properties.mode, { type: 'string', enum: ['read', 'write'] });
+    assert.equal(parameters.properties.payload.type, 'object');
+    assert.deepEqual(parameters.properties.payload.required, ['path']);
+    assert.equal(parameters.properties.files.type, 'array');
+    assert.equal(parameters.properties.files.items.type, 'string');
+    assert.equal(Object.prototype.hasOwnProperty.call(parameters, 'unevaluatedProperties'), false);
+  });
+
+  it('normalizes historical tool-call arguments before sending them to Qoder', () => {
+    const body = buildQoderPrivateRequestBody({
+      model: 'auto',
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            { id: 'call_valid', type: 'function', function: { name: 'bash', arguments: '{"command":"pwd"}' } },
+            { id: 'call_bad', type: 'function', function: { name: 'bash', arguments: '{"command":"pwd"}{"extra":1}' } },
+            { id: 'call_object', type: 'function', function: { name: 'bash', arguments: { command: 'ls' } } },
+          ],
+        },
+      ],
+    });
+
+    const [valid, bad, objectArgs] = body.messages[0].tool_calls;
+    assert.deepEqual(JSON.parse(valid.function.arguments), { command: 'pwd' });
+    assert.deepEqual(JSON.parse(bad.function.arguments), { raw_arguments: '{"command":"pwd"}{"extra":1}' });
+    assert.deepEqual(JSON.parse(objectArgs.function.arguments), { command: 'ls' });
+  });
+
+  it('flattens Anthropic tool_use and tool_result blocks for Qoder history', () => {
+    const body = buildQoderPrivateRequestBody({
+      model: 'auto',
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'tool_call_0', name: 'bash', input: { command: 'pwd' } },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'tool_call_0',
+              content: [{ type: 'text', text: 'stdout: /tmp' }],
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.deepEqual(body.messages[0].content, [
+      { type: 'text', text: '[tool_use bash tool_call_0] {"command":"pwd"}' },
+    ]);
+    assert.deepEqual(body.messages[1].content, [
+      { type: 'text', text: '[tool_result tool_call_0] stdout: /tmp' },
+    ]);
+    assert.equal(body.messages.some((message) => (
+      Array.isArray(message.content) &&
+      message.content.some((block) => block.type === 'tool_use' || block.type === 'tool_result')
+    )), false);
+  });
+
   it('resolves the default model-server base URL', () => {
     assert.equal(qoderModelServerBaseUrl({}), 'https://api2-v2.qoder.sh/model/v1');
     assert.equal(
       qoderModelServerBaseUrl({ QODER_MODEL_SERVER_HOST: 'https://example.test/' }),
       'https://example.test/model/v1',
+    );
+  });
+
+  it('does not reuse legacy chat completion endpoints for prepared infer requests', () => {
+    assert.equal(
+      normalizeQoderPreparedEndpoint('https://api2-v2.qoder.sh/model/v1/chat/completions'),
+      null,
+    );
+    assert.equal(
+      normalizeQoderPreparedEndpoint('https://api2-v2.qoder.sh/model/v1'),
+      null,
+    );
+    assert.equal(
+      normalizeQoderPreparedEndpoint('https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation'),
+      null,
+    );
+    assert.equal(
+      normalizeQoderPreparedEndpoint('https://api3.qoder.sh/'),
+      'https://api3.qoder.sh',
+    );
+    assert.equal(
+      normalizeQoderPreparedEndpoint('https://proxy.example.test/qoder'),
+      'https://proxy.example.test/qoder',
     );
   });
 
@@ -78,7 +197,7 @@ describe('qoder private adapter', () => {
     process.env.PEER_AGENT_PROVIDER_TRACE = '0';
     globalThis.fetch = async () => new Response([
       'event: error',
-      'data: {"code":"invalid_model_error","message":"Unsupported model \\"gm51model\\"","type":"invalid_model_error"}',
+      'data: {"code":"provider_error","message":"Failed to convert request","type":"provider_error","details":"failed to parse tool arguments"}',
       '',
     ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
 
@@ -94,7 +213,7 @@ describe('qoder private adapter', () => {
 
       assert.equal(result.ok, false);
       assert.equal(result.providerError, true);
-      assert.match(result.errorText, /provider_stream_error: Unsupported model "gm51model"/);
+      assert.match(result.errorText, /provider_stream_error: Failed to convert request: failed to parse tool arguments/);
     } finally {
       globalThis.fetch = previousFetch;
       if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
@@ -146,7 +265,7 @@ describe('qoder private adapter', () => {
       const result = await sendQoderPrivateStream({
         baseUrl: 'https://example.test/model/v1',
         apiKey: 'token',
-        model: 'auto',
+        model: 'unsupported-model',
         messages: [{ role: 'user', content: 'hi' }],
         tools: [{ type: 'function', function: { name: 'bash', parameters: { type: 'object' } } }],
         webContents: { send: () => {} },
@@ -181,7 +300,7 @@ describe('qoder private adapter', () => {
       const result = await sendQoderPrivateStream({
         baseUrl: 'https://example.test/model/v1',
         apiKey: 'token',
-        model: 'auto',
+        model: 'unsupported-model',
         messages: [{ role: 'user', content: 'hi' }],
         tools: [{ type: 'function', function: { name: 'bash', parameters: { type: 'object' } } }],
         webContents: { send: (channel, payload) => events.push({ channel, payload }) },

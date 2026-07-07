@@ -258,6 +258,10 @@ test('Qoder local auth provider exposes catalog display label without changing r
         max_output_tokens: 32_768,
         is_vl: true,
         is_reasoning: true,
+        context_config: {
+          '1M': { token_count: 1_000_000 },
+          '200K': { token_count: 200_000, is_default: true },
+        },
       },
     ],
   }), 'utf8');

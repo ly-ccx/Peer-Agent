@@ -144,6 +144,14 @@ describe('groupSegments', () => {
     assert.equal(call.tool, 'mcp__dingtalk__create_document');
     assert.equal(call.displayName, '钉钉文档: create_document');
   });
+  it('carries toolCallId through to grouped tool calls for fallback diagnostics', () => {
+    const groups = groupSegments([
+      tool('bash', { toolCallId: 'tool_call_empty_args', args: {}, result: 'ok' }),
+    ]);
+    assert.equal(groups[0].type, 'tool-call-group');
+    const call = (groups[0] as { calls: Array<{ toolCallId?: string }> }).calls[0];
+    assert.equal(call.toolCallId, 'tool_call_empty_args');
+  });
 });
 
 describe('getTextContent', () => {
@@ -162,6 +170,12 @@ describe('migrateToSegments', () => {
     assert.deepEqual(out, [
       { type: 'tool-call', tool: 't', displayName: undefined, args: { a: 1 }, result: 'r' },
       { type: 'text', content: 'body' },
+    ]);
+  });
+  it('preserves legacy toolCallId when migrating old toolCalls', () => {
+    const out = migrateToSegments('', [{ tool: 'bash', args: {}, result: 'ok', toolCallId: 'call_1' }]);
+    assert.deepEqual(out, [
+      { type: 'tool-call', tool: 'bash', displayName: undefined, args: {}, result: 'ok', toolCallId: 'call_1' },
     ]);
   });
 });

@@ -18,6 +18,22 @@ export function qoderModelServerBaseUrl(env = process.env) {
   return `https://${qoderModelServerHost(env)}/model/v1`;
 }
 
+export function normalizeQoderPreparedEndpoint(endpoint) {
+  const raw = String(endpoint || '').trim().replace(/\/+$/, '');
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    const pathname = url.pathname.replace(/\/+$/, '');
+    if (!pathname) return url.origin;
+    if (/\/model\/v\d+(?:\/|$)/i.test(pathname)) return null;
+    if (/\/chat\/completions(?:\/|$)/i.test(pathname)) return null;
+    if (/\/algo\/api\/v\d+\/service\/pro\/sse\/agent_chat_generation(?:\/|$)/i.test(pathname)) return null;
+    return `${url.origin}${pathname}`;
+  } catch {
+    return null;
+  }
+}
+
 export function normalizeQoderModel(model) {
   const raw = String(model || '').trim();
   if (!raw || raw.toLowerCase() === 'auto') return 'auto';
@@ -31,8 +47,66 @@ function qoderContentPart(part) {
   if (part.type === 'image_url' && part.image_url?.url) {
     return { type: 'image_url', image_url: { url: part.image_url.url, detail: part.image_url.detail } };
   }
+  if (part.type === 'tool_use') {
+    const name = typeof part.name === 'string' ? part.name : 'tool';
+    const id = typeof part.id === 'string' ? part.id : '';
+    const input = part.input && typeof part.input === 'object' ? JSON.stringify(part.input) : '{}';
+    return { type: 'text', text: `[tool_use ${name}${id ? ` ${id}` : ''}] ${input}` };
+  }
+  if (part.type === 'tool_result') {
+    const id = typeof part.tool_use_id === 'string' ? part.tool_use_id : '';
+    return { type: 'text', text: `[tool_result${id ? ` ${id}` : ''}] ${qoderContentText(part.content)}` };
+  }
   if (typeof part.content === 'string') return { type: 'text', text: part.content };
   return null;
+}
+
+function qoderContentText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part?.type === 'text' && typeof part.text === 'string') return part.text;
+        if (typeof part?.content === 'string') return part.content;
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (content && typeof content === 'object') return JSON.stringify(content);
+  return '';
+}
+
+function qoderToolCallArguments(value) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return '{}';
+    try {
+      return JSON.stringify(JSON.parse(trimmed));
+    } catch {
+      return JSON.stringify({ raw_arguments: value });
+    }
+  }
+  if (value && typeof value === 'object') return JSON.stringify(value);
+  return '{}';
+}
+
+function qoderToolCall(toolCall, index) {
+  if (!toolCall || typeof toolCall !== 'object') return null;
+  const fn = toolCall.function && typeof toolCall.function === 'object' ? toolCall.function : {};
+  const name = typeof fn.name === 'string' && fn.name.trim()
+    ? fn.name.trim()
+    : typeof toolCall.name === 'string' ? toolCall.name.trim() : '';
+  if (!name) return null;
+  return {
+    id: String(toolCall.id || `qoder_history_tool_${index + 1}`),
+    type: 'function',
+    function: {
+      name,
+      arguments: qoderToolCallArguments(fn.arguments ?? toolCall.arguments ?? toolCall.input ?? {}),
+    },
+  };
 }
 
 function qoderMessage(message) {
@@ -53,7 +127,10 @@ function qoderMessage(message) {
   }
   if (message.name) output.name = message.name;
   if (message.tool_call_id) output.tool_call_id = message.tool_call_id;
-  if (message.tool_calls) output.tool_calls = message.tool_calls;
+  if (Array.isArray(message.tool_calls)) {
+    const toolCalls = message.tool_calls.map(qoderToolCall).filter(Boolean);
+    if (toolCalls.length) output.tool_calls = toolCalls;
+  }
   return output;
 }
 
@@ -70,6 +147,72 @@ function qoderLastUserText(messages) {
     }
   }
   return '';
+}
+
+function qoderPrimitiveType(type) {
+  if (typeof type === 'string') return type;
+  if (Array.isArray(type)) {
+    return type.find((entry) => typeof entry === 'string' && entry !== 'null') || 'string';
+  }
+  return null;
+}
+
+function qoderCompatibleSchema(schema, depth = 0) {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return { type: 'object' };
+  if (depth > 8) return { type: 'string' };
+  const variant = schema.oneOf?.[0] || schema.anyOf?.[0] || schema.allOf?.[0];
+  if (!schema.type && variant && typeof variant === 'object') {
+    return qoderCompatibleSchema({ ...variant, description: schema.description ?? variant.description }, depth + 1);
+  }
+  const type = qoderPrimitiveType(schema.type) || (schema.properties ? 'object' : schema.items ? 'array' : 'string');
+  const out = { type };
+  if (typeof schema.description === 'string' && schema.description.trim()) out.description = schema.description;
+  if (Array.isArray(schema.enum)) {
+    const enumValues = schema.enum.filter((entry) => {
+      if (entry === null) return false;
+      if (type === 'integer') return Number.isInteger(entry);
+      if (type === 'number') return typeof entry === 'number';
+      if (type === 'boolean') return typeof entry === 'boolean';
+      return typeof entry === 'string';
+    });
+    if (enumValues.length) out.enum = enumValues;
+  }
+  if (type === 'object') {
+    const properties = {};
+    for (const [key, value] of Object.entries(schema.properties || {})) {
+      if (/^[a-zA-Z0-9_.-]+$/.test(key)) properties[key] = qoderCompatibleSchema(value, depth + 1);
+    }
+    out.properties = properties;
+    const required = Array.isArray(schema.required)
+      ? schema.required.filter((key) => typeof key === 'string' && Object.prototype.hasOwnProperty.call(properties, key))
+      : [];
+    if (required.length) out.required = required;
+    out.additionalProperties = schema.additionalProperties === true ? true : false;
+  }
+  if (type === 'array') {
+    out.items = qoderCompatibleSchema(schema.items || { type: 'string' }, depth + 1);
+  }
+  return out;
+}
+
+function qoderCompatibleTool(tool) {
+  if (!tool || typeof tool !== 'object') return null;
+  const fn = tool.function && typeof tool.function === 'object' ? tool.function : tool;
+  const name = typeof fn.name === 'string' ? fn.name.trim() : '';
+  if (!name) return null;
+  return {
+    type: 'function',
+    function: {
+      name,
+      ...(typeof fn.description === 'string' ? { description: fn.description } : {}),
+      parameters: qoderCompatibleSchema(fn.parameters || fn.input_schema || { type: 'object' }),
+    },
+  };
+}
+
+function qoderCompatibleTools(tools) {
+  if (!Array.isArray(tools)) return [];
+  return tools.map(qoderCompatibleTool).filter(Boolean);
 }
 
 function qoderRemoteChatAsk({
@@ -132,7 +275,7 @@ function qoderRemoteChatAsk({
     custom_model: null,
     system: normalizedMessages.find((message) => message.role === 'system')?.content || '',
     messages: normalizedMessages,
-    tools: Array.isArray(tools) ? tools : [],
+    tools: qoderCompatibleTools(tools),
     parameters,
   };
 }
@@ -158,6 +301,7 @@ async function sendQoderPreparedStream({
   signal,
   webContents,
   streamId,
+  endpoint = null,
 } = {}) {
   const requestId = crypto.randomUUID();
   const sessionId = crypto.randomUUID();
@@ -173,12 +317,12 @@ async function sendQoderPreparedStream({
     taskId: streamId || 'peer-agent',
     metadata,
   });
-  const endpoint = await resolveQoderInferenceEndpoint();
+  const resolvedEndpoint = normalizeQoderPreparedEndpoint(endpoint) || await resolveQoderInferenceEndpoint();
   const prepared = await prepareQoderInferRequest({
     requestBody,
     modelKey: requestBody.model_config.key,
     modelSource: requestBody.model_config.source,
-    endpoint,
+    endpoint: resolvedEndpoint,
   });
   const trace = createProviderStreamTrace({
     provider: 'qoder',
@@ -298,7 +442,7 @@ export function buildQoderPrivateRequestBody({
     messages: messages.map(qoderMessage).filter(Boolean),
     stream: true,
     stream_options: { include_usage: true },
-    tools: Array.isArray(tools) ? tools : [],
+    tools: qoderCompatibleTools(tools),
     metadata: {
       context: {
         request_id: requestId,
@@ -338,7 +482,7 @@ export async function sendQoderPrivateStream({
   endpoint = null,
 } = {}) {
   const metadata = await getQoderModelMetadataForSend(model);
-  if (metadata?.isNew) {
+  if (metadata) {
     return sendQoderPreparedStream({
       apiKey,
       model,
@@ -348,6 +492,7 @@ export async function sendQoderPrivateStream({
       signal,
       webContents,
       streamId,
+      endpoint,
     });
   }
   const requestId = crypto.randomUUID();

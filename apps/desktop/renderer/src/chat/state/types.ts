@@ -52,6 +52,7 @@ export interface ToolCallLegacy {
   args: Record<string, unknown>;
   result?: string;
   synthetic?: boolean;
+  toolCallId?: string;
 }
 
 /** 压缩（compaction）留痕元数据：随消息走的表达层元数据。 */
