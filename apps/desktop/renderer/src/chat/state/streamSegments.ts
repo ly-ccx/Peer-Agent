@@ -8,6 +8,8 @@
 
 import type { ContentSegment, ChatMsg, ToolCallLegacy, SegmentGroup } from './types';
 
+type ToolCallSegment = Extract<ContentSegment, { type: 'tool-call' }>;
+
 /** 规范化单个分段：补齐 args/content 默认值，保留结构化字段。 */
 export function normalizeStreamSegment(segment: ContentSegment): ContentSegment {
   if (segment.type === 'tool-call') {
@@ -24,7 +26,7 @@ export function normalizeStreamSegment(segment: ContentSegment): ContentSegment 
   return { type: segment.type, content: segment.content || '' };
 }
 
-/** 为一组分段生成稳定签名，用于判等/前缀匹配（不含易变字段）。 */
+/** 为一组分段生成完整签名，用于精确判等/前缀匹配。 */
 export function segmentsSignature(segments: readonly ContentSegment[]): string {
   return JSON.stringify(segments.map((segment) => {
     if (segment.type === 'tool-call') {
@@ -34,19 +36,85 @@ export function segmentsSignature(segments: readonly ContentSegment[]): string {
   }));
 }
 
+function stableToolCallId(segment: ContentSegment): string | null {
+  if (segment.type !== 'tool-call') return null;
+  const id = typeof segment.toolCallId === 'string' ? segment.toolCallId.trim() : '';
+  return id || null;
+}
+
+function hasArgs(args: Record<string, unknown> | undefined): boolean {
+  return Boolean(args && Object.keys(args).length > 0);
+}
+
+function mergeSameToolCallSegment(persisted: ToolCallSegment, live: ToolCallSegment): ToolCallSegment {
+  const persistedArgs = persisted.args || {};
+  const liveArgs = live.args || {};
+  return {
+    type: 'tool-call',
+    tool: live.tool || persisted.tool,
+    displayName: live.displayName ?? persisted.displayName,
+    args: hasArgs(liveArgs) ? liveArgs : persistedArgs,
+    result: live.result !== undefined ? live.result : persisted.result,
+    synthetic: live.synthetic ?? persisted.synthetic,
+    toolCallId: live.toolCallId || persisted.toolCallId,
+  };
+}
+
+function settlePersistedToolCalls(
+  persisted: readonly ContentSegment[],
+  live: readonly ContentSegment[]
+): ContentSegment[] {
+  const liveByToolCallId = new Map<string, ToolCallSegment>();
+  for (const segment of live) {
+    const id = stableToolCallId(segment);
+    if (id && segment.type === 'tool-call') liveByToolCallId.set(id, segment);
+  }
+  if (liveByToolCallId.size === 0) return persisted as ContentSegment[];
+
+  let changed = false;
+  const next = persisted.map((segment) => {
+    const id = stableToolCallId(segment);
+    if (!id || segment.type !== 'tool-call') return segment;
+    const liveSegment = liveByToolCallId.get(id);
+    if (!liveSegment) return segment;
+    changed = true;
+    return mergeSameToolCallSegment(segment, liveSegment);
+  });
+  return changed ? next : (persisted as ContentSegment[]);
+}
+
+function appendLiveSuffixWithoutDuplicateToolCalls(
+  base: readonly ContentSegment[],
+  liveSuffix: readonly ContentSegment[]
+): ContentSegment[] {
+  const seenToolCallIds = new Set<string>();
+  for (const segment of base) {
+    const id = stableToolCallId(segment);
+    if (id) seenToolCallIds.add(id);
+  }
+  const suffix = liveSuffix.filter((segment) => {
+    const id = stableToolCallId(segment);
+    return !id || !seenToolCallIds.has(id);
+  });
+  return [...base, ...suffix];
+}
+
 /**
  * 重连（reattach）时合并「已持久化分段」与「main 活跃流快照」。
  * 不变量：绝不删除已经持久化展示过的 UI 证据；当两者分叉时保留可见历史，
- * 仅在可本地证明的最长公共前缀之后追加 live 后缀。
+ * 仅在可本地证明的最长公共前缀之后追加 live 后缀。同一个 toolCallId 的
+ * pending/result 是同一条工具调用的状态推进，必须原地结算，避免重连时出现
+ * 「一条一直 loading、一条已完成」的重复工具行。
  */
 export function mergeReattachedSegments(
   persistedSegments: readonly ContentSegment[] | undefined,
   liveSegments: readonly ContentSegment[] | undefined
 ): ContentSegment[] {
-  const persisted = (persistedSegments || []).map(normalizeStreamSegment);
+  const rawPersisted = (persistedSegments || []).map(normalizeStreamSegment);
   const live = (liveSegments || []).map(normalizeStreamSegment);
-  if (persisted.length === 0) return live;
-  if (live.length === 0) return persisted;
+  if (rawPersisted.length === 0) return live;
+  if (live.length === 0) return rawPersisted;
+  const persisted = settlePersistedToolCalls(rawPersisted, live);
 
   const persistedSignature = segmentsSignature(persisted);
   const liveSignature = segmentsSignature(live);
@@ -64,7 +132,7 @@ export function mergeReattachedSegments(
   let common = 0;
   const max = Math.min(persisted.length, live.length);
   while (common < max && segmentsSignature([persisted[common]]) === segmentsSignature([live[common]])) common += 1;
-  return [...persisted, ...live.slice(common)];
+  return appendLiveSuffixWithoutDuplicateToolCalls(persisted, live.slice(common));
 }
 
 /** 从分段中提取拼接后的正文文本；为空时返回 fallback。 */

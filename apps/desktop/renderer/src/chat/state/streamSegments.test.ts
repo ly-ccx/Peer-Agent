@@ -53,6 +53,36 @@ describe('mergeReattachedSegments', () => {
     // common prefix = [a]; append live suffix after index 1 => [a, b, c]
     assert.deepEqual(out, [txt('a'), txt('b'), txt('c')]);
   });
+  it('settles a reattached pending tool call with the live result instead of duplicating it', () => {
+    const pending = tool('read', { toolCallId: 'call_read', args: { path: '/tmp/a' } });
+    const completed = tool('read', { toolCallId: 'call_read', args: { path: '/tmp/a' }, result: 'ok' });
+
+    const out = mergeReattachedSegments([think('读取中'), pending], [think('读取中'), completed]);
+    const calls = out.filter((seg): seg is Extract<ContentSegment, { type: 'tool-call' }> => seg.type === 'tool-call' && seg.toolCallId === 'call_read');
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].result, 'ok');
+  });
+  it('keeps a persisted completed tool result when the live reattach snapshot is stale pending', () => {
+    const completed = tool('read', { toolCallId: 'call_read', args: { path: '/tmp/a' }, result: 'ok' });
+    const pending = tool('read', { toolCallId: 'call_read', args: { path: '/tmp/a' } });
+
+    const out = mergeReattachedSegments([completed], [pending]);
+    const calls = out.filter((seg): seg is Extract<ContentSegment, { type: 'tool-call' }> => seg.type === 'tool-call' && seg.toolCallId === 'call_read');
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].result, 'ok');
+  });
+  it('deduplicates a same-id tool call even when earlier reattach content diverges', () => {
+    const pending = tool('read', { toolCallId: 'call_read', args: { path: '/tmp/a' } });
+    const completed = tool('read', { toolCallId: 'call_read', args: { path: '/tmp/a' }, result: 'ok' });
+
+    const out = mergeReattachedSegments([think('旧进度'), pending], [think('新进度'), completed]);
+    const calls = out.filter((seg): seg is Extract<ContentSegment, { type: 'tool-call' }> => seg.type === 'tool-call' && seg.toolCallId === 'call_read');
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].result, 'ok');
+  });
 });
 
 describe('contentFromSegments', () => {
