@@ -270,6 +270,7 @@ const VERIFIER_TERMINAL_STATUSES = new Set(['passed', 'failed', 'blocked']);
 const VERIFIER_TARGET_KINDS = new Set(['plan', 'task', 'success_criterion']);
 const GOAL_RUN_EVENT_TYPES = new Set([
   'message_routed',
+  'goal_intake_started',
   'goal_created',
   'plan_created',
   'plan_revised',
@@ -1446,15 +1447,27 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       updatedAt: now,
       createdBy: draft.createdBy,
     };
+    const isGoalIntake = workflowKind === 'goal_self_driven' && plan.activation?.kind === 'intake';
+    const createEventType = isGoalIntake
+      ? 'goal_intake_started'
+      : workflowKind === 'goal_self_driven'
+        ? 'goal_created'
+        : 'plan_created';
+    const createEventSummary = isGoalIntake
+      ? 'Goal intake started'
+      : workflowKind === 'goal_self_driven'
+        ? 'Goal contract created'
+        : 'Plan created';
     // 单活跃计划：先收尾/作废同会话其它活跃态旧计划（排除自身），再落库新计划。
     supersedeAwaitingDrafts(plan.conversationId, plan.planId);
     return persist(withRunTraceEvent(plan, {
-      type: workflowKind === 'goal_self_driven' ? 'goal_created' : 'plan_created',
-      summary: workflowKind === 'goal_self_driven' ? 'Goal contract created' : 'Plan created',
+      type: createEventType,
+      summary: createEventSummary,
       payload: {
         source: 'goal-plan-store:createPlan',
         workflowKind,
         status,
+        activationKind: plan.activation?.kind,
         taskCount: tasks.length,
       },
     }));

@@ -24,6 +24,14 @@ function normalizeConversationId(value: string | number | null | undefined): str
   return normalized.length > 0 ? normalized : null;
 }
 
+function isIntakePlan(plan: GoalPlan): boolean {
+  return plan.activation?.kind === 'intake';
+}
+
+function isDisplayableGoalPlan(plan: GoalPlan): boolean {
+  return plan.status !== 'cancelled' && !isIntakePlan(plan);
+}
+
 /**
  * Goal 模式计划面板 —— 见 Goal 模式设计。
  *
@@ -295,6 +303,7 @@ const RUN_EVENT_VALIDATION_TYPES = new Set<GoalRunEvent['type']>([
 function runEventLabel(type: GoalRunEvent['type'], isZh: boolean): string {
   const zh: Record<GoalRunEvent['type'], string> = {
     message_routed: '消息路由',
+    goal_intake_started: '目标判别',
     goal_created: '目标创建',
     plan_created: '计划生成',
     plan_revised: '计划修订',
@@ -318,6 +327,7 @@ function runEventLabel(type: GoalRunEvent['type'], isZh: boolean): string {
   };
   const en: Record<GoalRunEvent['type'], string> = {
     message_routed: 'Message routed',
+    goal_intake_started: 'Goal intake',
     goal_created: 'Goal created',
     plan_created: 'Plan created',
     plan_revised: 'Plan revised',
@@ -348,7 +358,7 @@ function runEventTone(type: GoalRunEvent['type']): string {
   if (RUN_EVENT_CORRECTION_TYPES.has(type)) return 'correction';
   if (RUN_EVENT_ISSUE_TYPES.has(type)) return 'issue';
   if (RUN_EVENT_VALIDATION_TYPES.has(type)) return 'validation';
-  if (type === 'message_routed' || type === 'goal_created') return 'route';
+  if (type === 'message_routed' || type === 'goal_intake_started' || type === 'goal_created') return 'route';
   return 'progress';
 }
 
@@ -1169,7 +1179,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
       const result = await clientApi.goalPlansList({ conversationId: normalizedConversationId });
       const scopedResult = result.filter(
         (plan) => normalizeConversationId(plan.conversationId) === normalizedConversationId
-          && plan.status !== 'cancelled',
+          && isDisplayableGoalPlan(plan),
       );
       // 仅 reload（广播驱动，同一会话内的实时变更）路径检测「真正新建」：
       // 新数量 > 基线 → 本会话内新建了计划（含同会话第 2/3/N 个），触发一次自动展开。
@@ -1209,7 +1219,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         if (cancelled) return;
         const scopedResult = result.filter(
           (plan) => normalizeConversationId(plan.conversationId) === normalizedConversationId
-            && plan.status !== 'cancelled',
+            && isDisplayableGoalPlan(plan),
         );
         // load 路径只刷新基线，不触发新建回调（切换会话不应被视为「新建计划」）。
         prevPlanCountRef.current = scopedResult.length;

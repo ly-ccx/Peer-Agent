@@ -325,6 +325,7 @@ export interface GoalVerifierRun {
 
 export type GoalRunEventType =
   | 'message_routed'
+  | 'goal_intake_started'
   | 'goal_created'
   | 'plan_created'
   | 'plan_revised'
