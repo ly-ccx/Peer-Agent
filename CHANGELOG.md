@@ -2,6 +2,23 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.0.1-beta.26 - 2026-07-07
+
+### Added
+
+- Goal mode now runs an intake discrimination phase before creating a goal: a pure Q&A silently reverts to normal chat, an ambiguous ask triggers a clarifying question, and only a clear goal is accepted and self-driven — no more "turn every message into a goal".
+- New qoder CLI model provider: connect via local CLI auth without storing remote credentials in the app.
+- LLM model list is now a grouped accordion — models fold under their group, share credentials per group while keeping per-model params; model drawers and icons unified.
+
+### Fixed
+
+- Chat scroll position is now remembered per conversation when switching conversations.
+- Adding a model under a group no longer re-shows provider-level fields (channel/auth/BaseURL/APIKey) already inherited from the group.
+- Aligned the context window for ChatGPT subscription mode.
+- Fixed duplicated body text on stream reattach.
+- Fixed duplicated tool-call segments on stream reattach.
+- Conversation list no longer flashes an empty "no conversations" state during refresh; stale slow responses can no longer overwrite a newer view.
+
 ## 0.0.1-beta.25 - 2026-07-06
 
 ### Added
