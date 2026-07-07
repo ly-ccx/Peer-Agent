@@ -1246,3 +1246,52 @@ test('normalizePlan 读路径：存量计划的字符串 successCriteria 读时�
   assert.equal(reread.successCriteria[0].kind, 'manual');
   assert.equal(Array.isArray(reread.criterionResults), true);
 });
+
+// ── 方案乙：intake 判别契约（activation.kind='intake'）─────────────────────────
+
+test('createIntakeContract: 建出的契约是 activation=intake 的自驱 goal（executing、可读回）', () => {
+  const plan = store.createIntakeContract({
+    conversationId: 'conv-intake-1',
+    goal: '好了这个已经修复发布了，现在我想要知道我们现在的 ak 的管理机制',
+    createdBy: 'user',
+  });
+  assert.equal(plan.activation.kind, 'intake');
+  assert.equal(plan.workflowKind, 'goal_self_driven');
+  assert.equal(plan.status, 'executing');
+  // 归一化读回后仍保留 intake 授权类型。
+  const reread = store.getPlan(plan.planId);
+  assert.equal(reread.activation.kind, 'intake');
+});
+
+test('promoteIntakeToGoal: intake 契约就地升级为 accepted_goal（明确目标分支，不新建第二条）', () => {
+  const intake = store.createIntakeContract({
+    conversationId: 'conv-intake-2',
+    goal: '把发布流程整理成文档',
+  });
+  const promoted = store.promoteIntakeToGoal(intake.planId, {
+    goal: '把发布流程整理成一篇 SOP 文档并评审',
+    title: '整理发布 SOP',
+  });
+  assert.equal(promoted.planId, intake.planId, '必须原地升级，planId 不变');
+  assert.equal(promoted.activation.kind, 'accepted_goal');
+  assert.equal(promoted.activation.intakeResolution, 'goal_confirmed');
+  // 会话下仍只有一条契约（没有产生悬空的第二条）。
+  const plans = store.listPlansByConversation('conv-intake-2');
+  assert.equal(plans.length, 1);
+});
+
+test('upsertGoalContract: intake 轮调 goal_create_plan 命中当前 intake 契约并升级（A 方案信号）', () => {
+  const intake = store.createIntakeContract({
+    conversationId: 'conv-intake-3',
+    goal: '模糊目标占位',
+  });
+  // 模型在 intake 轮调用 goal_create_plan → provider 走 upsertGoalContract。
+  const upserted = store.upsertGoalContract('conv-intake-3', {
+    goal: '给鉴权模块补齐单测',
+    title: '补齐鉴权单测',
+    activation: { kind: 'accepted_goal' },
+  });
+  assert.equal(upserted.planId, intake.planId, 'upsert 应命中当前 intake 契约而非新建');
+  const plans = store.listPlansByConversation('conv-intake-3');
+  assert.equal(plans.length, 1, '不应产生第二条悬空契约');
+});

@@ -196,6 +196,15 @@ function runnerIsStopped(runner) {
  * - plan.approval.decision === 'approve'：协议层的权威批准事实（最符合「证据负责治理」）。
  * - status 已是 executing / paused：支持 Runner re-entry 与 resume，这些态只可能由既往批准启动而来。
  */
+/**
+ * intake 判别契约识别：activation.kind==='intake' 表示该自驱 goal 尚未确认是否为
+ * 一个真实目标，Runner 在此阶段只做只读/问答/澄清，回合结束后再三选一收敛
+ * （明确目标→升级、模糊→澄清、纯问答→静默移除）。见「方案乙」设计。
+ */
+function isIntakeContract(plan) {
+  return plan?.activation?.kind === 'intake';
+}
+
 function isStartAuthorized(plan) {
   if (!plan) return false;
   if (goalPlanIsSelfDriven(plan)) {
@@ -1449,6 +1458,37 @@ export function createGoalRunner({
         });
         if (exploreResult.terminal) return exploreResult.state;
         continue;
+      }
+
+      // intake 判别收敛（方案乙）：intake 契约在一个回合结束后三选一。
+      // - explore 已在上方处理：intake 轮允许只读调查，continue 进入下一判别轮。
+      // - 明确目标：模型调用 goal_create_plan → upsertGoalContract 已把本契约原地升级为
+      //   accepted_goal（activation.kind 不再是 intake），本块不触发，落入正常自驱推进。
+      // - 模糊澄清：模型调用 request_user_input → 交由下方通用 requestedUserInput 分支
+      //   保留契约并等待用户回复（intake 契约不删）。
+      // - 纯问答/咨询：既未升级、也未提问、回合正常结束 → 静默移除 intake 契约并终结 Runner，
+      //   还原成普通聊天体验（D2=deletePlan、D3=判别期面板静默）。
+      // 出错/中止的 intake 回合不在此误删，交由下方通用错误分支按失败处理。
+      if (isIntakeContract(latest)) {
+        const intakeTurnFailed = result?.failed
+          || result?.blocked
+          || result?.terminalStatus === 'error'
+          || result?.terminalStatus === 'aborted';
+        if (!result?.requestedUserInput && !intakeTurnFailed) {
+          appendRunEvent(planId, {
+            type: 'intake_resolved',
+            summary: 'Intake resolved as inquiry; goal contract removed',
+            payload: { resolution: 'inquiry', turnNumber },
+          });
+          emit('goalRunner:intakeResolved', {
+            planId,
+            turnNumber,
+            resolution: 'inquiry',
+          });
+          if (sessions.get(planId) === session) sessions.delete(planId);
+          goalPlanStore.deletePlan(planId);
+          return null;
+        }
       }
 
       if (result?.requestedUserInput) {

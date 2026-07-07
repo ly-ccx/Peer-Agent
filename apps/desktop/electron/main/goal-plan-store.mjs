@@ -292,7 +292,8 @@ const GOAL_RUN_EVENT_TYPES = new Set([
   'goal_completed',
 ]);
 const WORKFLOW_KINDS = new Set(['plan_approval', 'goal_self_driven']);
-const ACTIVATION_KINDS = new Set(['approval_required', 'approved_plan', 'accepted_goal']);
+const ACTIVATION_KINDS = new Set(['intake', 'approval_required', 'approved_plan', 'accepted_goal']);
+const INTAKE_RESOLUTIONS = new Set(['inquiry', 'clarifying', 'goal_confirmed']);
 const AUTONOMY_KINDS = new Set(['approval_gated', 'self_driven']);
 const WRITE_SCOPES = new Set(['workspace_and_boundaries']);
 const CONFIRMATION_DECISIONS = new Set(['approve', 'reject', 'revise']);
@@ -428,6 +429,9 @@ function normalizeActivation(value, workflowKind, status) {
       }
       if (typeof value.acceptedBy === 'string' && value.acceptedBy.trim()) {
         activation.acceptedBy = value.acceptedBy.trim();
+      }
+      if (INTAKE_RESOLUTIONS.has(value.intakeResolution)) {
+        activation.intakeResolution = value.intakeResolution;
       }
       return activation;
     }
@@ -1486,6 +1490,60 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     });
   }
 
+  /**
+   * 创建 intake 判别契约：工作流仍是自驱 goal（Runner 会驱动），但 activation.kind='intake'，
+   * 表示尚未确认是否为一个真实目标。Runner 在 intake 阶段只做只读/问答/澄清，禁副作用。
+   * 判定为纯问答由上层 deletePlan 静默移除；判定为明确目标则 promoteIntakeToGoal 升级。
+   */
+  function createIntakeContract(draft = {}) {
+    const goal = typeof draft.goal === 'string' ? draft.goal : '';
+    const tasks = Array.isArray(draft.tasks) && draft.tasks.length > 0
+      ? draft.tasks
+      : [makeDefaultGoalTask(goal)];
+    return createPlan({
+      ...draft,
+      tasks,
+      status: draft.status || 'executing',
+      workflowKind: 'goal_self_driven',
+      activation: {
+        kind: 'intake',
+        sourceMessageId: draft.activation?.sourceMessageId,
+      },
+      executionPolicy: {
+        ...DEFAULT_SELF_DRIVEN_POLICY,
+        ...(draft.executionPolicy && typeof draft.executionPolicy === 'object'
+          ? draft.executionPolicy
+          : {}),
+        autonomy: 'self_driven',
+      },
+      createdBy: draft.createdBy || 'user',
+    });
+  }
+
+  /**
+   * 把一条 intake 契约升级为正式的 accepted_goal（判定为明确目标时调用）。
+   * 允许传入判别后梳理出的结构化 goal/title/successCriteria/tasks/boundaries 覆盖原草稿。
+   */
+  function promoteIntakeToGoal(planId, patch = {}) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    const acceptedAt = new Date().toISOString();
+    return revisePlan(planId, {
+      ...patch,
+      status: 'executing',
+      workflowKind: 'goal_self_driven',
+      activation: {
+        kind: 'accepted_goal',
+        sourceMessageId: plan.activation?.sourceMessageId,
+        acceptedAt,
+        acceptedBy: 'user',
+        intakeResolution: 'goal_confirmed',
+      },
+      revisionReason: patch.revisionReason || 'intake:goal_confirmed',
+      changedBy: patch.changedBy || 'goal-runner:intake',
+    });
+  }
+
   function upsertGoalContract(conversationId, draft = {}) {
     const normalizedConversationId = normalizeConversationId(conversationId);
     const {
@@ -2070,6 +2128,8 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     getPlan,
     createPlan,
     createGoalContract,
+    createIntakeContract,
+    promoteIntakeToGoal,
     upsertGoalContract,
     revisePlan,
     recordApproval,

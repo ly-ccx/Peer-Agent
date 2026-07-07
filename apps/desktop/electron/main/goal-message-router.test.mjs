@@ -9,13 +9,14 @@ const activeGoalPlan = Object.freeze({
   workflowKind: 'goal_self_driven',
 });
 
-test('routeGoalMessage creates a Goal when no active Goal exists', () => {
+test('routeGoalMessage starts intake (not a Goal) when no active Goal exists', () => {
   const route = routeGoalMessage({
     messageText: '把右侧目标面板拆成 Goal Plan Run',
     activeGoalPlan: null,
   });
 
-  assert.equal(route.type, 'create_goal');
+  // 方案乙：隐式新目标先进 intake 判别，而不是无条件建 accepted 目标。
+  assert.equal(route.type, 'start_intake');
   assert.equal(route.intent, 'new_goal_implicit');
   assert.equal(route.objective, '把右侧目标面板拆成 Goal Plan Run');
 });
@@ -43,13 +44,15 @@ test('routeGoalMessage routes requirement overrides to the current Goal', () => 
   assert.equal(route.eventType, 'requirement_override');
 });
 
-test('routeGoalMessage only creates a new Goal when the user explicitly asks for one', () => {
+test('routeGoalMessage starts intake even when the user explicitly asks for a new Goal', () => {
   const route = routeGoalMessage({
     messageText: '新开一个目标：整理发布流程',
     activeGoalPlan,
   });
 
-  assert.equal(route.type, 'create_goal');
+  // 方案乙：显式「新建目标」也先进 intake 收敛出具体目标后再执行，
+  // 避免把一句宽泛的「新建目标做个 X」直接当成成型契约。
+  assert.equal(route.type, 'start_intake');
   assert.equal(route.intent, 'new_goal_explicit');
 });
 

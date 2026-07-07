@@ -31,13 +31,27 @@ export type GoalPlanStatus =
 /** Goal artifact 的工作流语义：Plan 审批门 vs Goal 自驱契约。 */
 export type GoalWorkflowKind = 'plan_approval' | 'goal_self_driven';
 
-/** Goal/Plan 的执行准入事实。 */
+/**
+ * Goal/Plan 的执行准入事实。
+ *
+ * `intake` 是 goal 模式下的「判别前置态」：用户首发消息先落成 intake 契约，
+ * Runner 在只读/问答/澄清的受限授权下判别真实意图，判定为明确目标后才升级为
+ * `accepted_goal` 进入正常自驱；判定为纯问答则由上层静默移除契约。
+ */
 export interface GoalActivation {
-  readonly kind: 'approval_required' | 'approved_plan' | 'accepted_goal';
+  readonly kind: 'intake' | 'approval_required' | 'approved_plan' | 'accepted_goal';
   readonly sourceMessageId?: string;
   readonly acceptedAt?: string;
   readonly acceptedBy?: string;
+  /** intake 阶段的判别结论；仅在 kind 从 intake 流转时写入，用于溯源。 */
+  readonly intakeResolution?: GoalIntakeResolution;
 }
+
+/** intake 判别的三种结论。 */
+export type GoalIntakeResolution =
+  | 'inquiry'        // 纯问答/咨询 —— 直接回答，契约静默移除
+  | 'clarifying'     // 目标模糊 —— 向用户澄清后重判
+  | 'goal_confirmed'; // 明确目标 —— 升级为 accepted_goal 进入自驱
 
 export type GoalAskUserReason =
   | 'ambiguous_goal'

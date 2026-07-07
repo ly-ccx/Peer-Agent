@@ -1640,25 +1640,41 @@ ipcMain.handle('chat:send', (event, {
               messageText: route.messageText,
             },
           });
-        } else {
+        } else if (route.type === 'start_intake') {
           const conversationWorkspacePath =
             conversationStore.getConversation(conversationId)?.workspacePath ||
             workspacePath ||
             null;
-          goalPlanStore.upsertGoalContract(conversationId, {
-            conversationId,
-            ...(conversationWorkspacePath ? { originWorkspacePath: conversationWorkspacePath } : {}),
-            title: goal.length > 48 ? `${goal.slice(0, 48)}...` : goal,
-            goal,
-            status: 'accepted',
-            workflowKind: 'goal_self_driven',
-            activation: {
-              kind: 'accepted_goal',
-              acceptedAt: new Date().toISOString(),
-              acceptedBy: 'user',
-            },
-            createdBy: 'user',
-          });
+          // 「先判别再建目标」：用户在 goal 模式下的首发消息不再无条件建成 accepted 目标。
+          // 若本会话尚无活跃自驱目标，则建一条 intake 判别契约（activation=intake），
+          // 由 Runner 在只读/问答/澄清的受限授权下判定这究竟是纯问答还是真实目标；
+          // 判为问答会被静默移除，判为明确目标才会 promoteIntakeToGoal 升级为 accepted_goal。
+          if (!activeGoal && typeof goalPlanStore.createIntakeContract === 'function') {
+            goalPlanStore.createIntakeContract({
+              conversationId,
+              ...(conversationWorkspacePath ? { originWorkspacePath: conversationWorkspacePath } : {}),
+              title: goal.length > 48 ? `${goal.slice(0, 48)}...` : goal,
+              goal,
+              createdBy: 'user',
+            });
+          } else {
+            // 已存在活跃目标时的显式「新建目标」属于边缘场景，沿用既有 upsert 语义，
+            // 避免在有目标进行中的情况下产生第二条悬空 intake 契约。
+            goalPlanStore.upsertGoalContract(conversationId, {
+              conversationId,
+              ...(conversationWorkspacePath ? { originWorkspacePath: conversationWorkspacePath } : {}),
+              title: goal.length > 48 ? `${goal.slice(0, 48)}...` : goal,
+              goal,
+              status: 'accepted',
+              workflowKind: 'goal_self_driven',
+              activation: {
+                kind: 'accepted_goal',
+                acceptedAt: new Date().toISOString(),
+                acceptedBy: 'user',
+              },
+              createdBy: 'user',
+            });
+          }
         }
       } catch (error) {
         console.warn('[main] goal contract bootstrap failed:', error?.message || error);

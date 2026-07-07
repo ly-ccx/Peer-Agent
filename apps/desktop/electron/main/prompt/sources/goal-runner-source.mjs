@@ -165,6 +165,9 @@ function normalizePlan(plan) {
     title: asString(plan.title),
     goal: asString(plan.goal),
     status: status ?? 'unknown',
+    // intake 判别阶段标记：activation.kind==='intake' 表示目标尚未确认，Runner 只做
+    // 只读/问答/澄清，prompt 据此注入三分支判别指令（见「方案乙」prompt 步）。
+    activationKind: asString(plan.activation?.kind) || null,
     inScope: asStringArray(plan.boundaries?.inScope, MAX_SCOPE_ITEMS),
     outOfScope: asStringArray(plan.boundaries?.outOfScope, MAX_SCOPE_ITEMS),
     successCriteria: summarizeCriteria(
@@ -334,6 +337,32 @@ function formatFacts(plan) {
   return lines.join('\n');
 }
 
+/**
+ * intake 判别阶段指令（方案乙）：goal 模式下用户首发消息先进入判别，Runner 必须先想清楚
+ * 「这到底是不是一个要执行的目标」，再三选一收敛——而不是把用户原话直接当目标去执行。
+ * 与 write-gate 对齐：intake 阶段禁止一切有副作用能力，只放行只读调查、提问与产出目标计划。
+ */
+function formatIntakeInstructions() {
+  return [
+    'Goal intake phase (goal not confirmed yet):',
+    '- This is the intake/triage turn. The user\'s message has NOT been accepted as a goal. '
+      + 'Do NOT treat the raw message as the goal and do NOT start executing it.',
+    '- First understand intent: do only read-only investigation (read files, search, request_explorer) '
+      + 'if needed to tell a question apart from an actionable goal. Side-effecting actions '
+      + '(write/edit files, shell with effects, MCP mutations) are blocked in this phase.',
+    '- Then choose exactly one of three outcomes:',
+    '  1) Pure question / consultation: just answer it directly in your reply. Do NOT call '
+      + 'goal_create_plan. The intake contract will be removed automatically and the panel stays clean.',
+    '  2) Ambiguous / underspecified goal: call request_user_input to ask a focused clarifying '
+      + 'question. Keep the intake contract open and wait for the user; do not guess the goal.',
+    '  3) Clear, actionable goal: call goal_create_plan to confirm it — write a crisp goal, '
+      + 'success criteria, and ordered subtasks. This promotes the intake contract into an accepted '
+      + 'goal and normal self-driven execution begins on the next turn.',
+    '- Prefer answering (outcome 1) or clarifying (outcome 2) when in doubt. Only promote to a goal '
+      + 'when the user clearly wants work executed, not merely an explanation.',
+  ].join('\n');
+}
+
 function formatContract() {
   return [
     'Goal Runner execution contract:',
@@ -381,6 +410,36 @@ export function createGoalRunnerPromptSource() {
     render(observation) {
       const plan = observation?.plan;
       if (!plan) return [];
+      const isIntake = plan.activationKind === 'intake';
+      // intake 判别阶段：注入三分支判别指令，替代执行期契约——避免让「继续推进目标 / 校验 DoD」
+      // 这类指令误导模型在目标尚未确认时直接开干（见「方案乙」prompt 步）。
+      const modeReminder = isIntake
+        ? {
+            id: 'runtime.goal-runner.intake',
+            layer: 'L6_MODE_REMINDER',
+            priority: 1,
+            title: 'Goal intake instructions',
+            content: formatIntakeInstructions(),
+            source: {
+              id: 'runtime.goal-runner',
+              kind: 'goal-runner-intake',
+              planId: plan.planId,
+            },
+            trust: 'runtime',
+          }
+        : {
+            id: 'runtime.goal-runner.contract',
+            layer: 'L6_MODE_REMINDER',
+            priority: 1,
+            title: 'Goal Runner execution contract',
+            content: formatContract(),
+            source: {
+              id: 'runtime.goal-runner',
+              kind: 'goal-runner-contract',
+              planId: plan.planId,
+            },
+            trust: 'runtime',
+          };
       return [
         {
           id: 'runtime.goal-runner.facts',
@@ -396,19 +455,7 @@ export function createGoalRunnerPromptSource() {
           },
           trust: 'runtime',
         },
-        {
-          id: 'runtime.goal-runner.contract',
-          layer: 'L6_MODE_REMINDER',
-          priority: 1,
-          title: 'Goal Runner execution contract',
-          content: formatContract(),
-          source: {
-            id: 'runtime.goal-runner',
-            kind: 'goal-runner-contract',
-            planId: plan.planId,
-          },
-          trust: 'runtime',
-        },
+        modeReminder,
       ];
     },
   };

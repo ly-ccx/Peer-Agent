@@ -1048,3 +1048,94 @@ test('explorer: 无真实 evidenceRefs 的报告不能 completed，会 fail-soft
   );
   assert.ok(events.some((event) => event.type === 'goalRunner:explorerFailed'));
 });
+
+// ── 方案乙：intake 判别三分支流转 ────────────────────────────────────────────
+
+test('intake·纯问答：回合只答文字（未升级/未提问）→ 静默移除 intake 契约并终结', async () => {
+  const intake = store.createIntakeContract({
+    conversationId: 'conv-intake-inquiry',
+    goal: '我们现在的 ak 是加密存储的吗？怎么解密？',
+  });
+  let calls = 0;
+  const runtime = {
+    // 模型判定这是纯问答：只输出文字回答，不调 goal_create_plan、不调 request_user_input。
+    async runGoalTurn() {
+      calls += 1;
+      return { terminalStatus: 'completed', toolCallCount: 0 };
+    },
+  };
+  const events = [];
+  const runner = createRunner({ runtime, events });
+
+  const result = await runner.start(intake.planId, { awaitIdle: true });
+
+  assert.equal(result, null, 'intake 收敛为问答后应返回 null');
+  assert.equal(calls, 1, '只应跑一个判别回合');
+  assert.equal(store.getPlan(intake.planId), null, 'intake 契约应被 deletePlan 静默移除');
+  assert.ok(
+    events.some((event) => event.type === 'goalRunner:intakeResolved'),
+    '应发出 goalRunner:intakeResolved 事件',
+  );
+});
+
+test('intake·模糊澄清：回合调 request_user_input → 保留 intake 契约并 blocked 等待用户', async () => {
+  const intake = store.createIntakeContract({
+    conversationId: 'conv-intake-clarify',
+    goal: '帮我优化一下',
+  });
+  const runtime = {
+    // 模型判定目标模糊：调 request_user_input 求澄清。
+    async runGoalTurn() {
+      return { requestedUserInput: true, blockedReason: 'need clarification', toolCallCount: 1 };
+    },
+  };
+  const events = [];
+  const runner = createRunner({ runtime, events });
+
+  await runner.start(intake.planId, { awaitIdle: true });
+
+  const got = store.getPlan(intake.planId);
+  assert.notEqual(got, null, '模糊澄清阶段不得删除 intake 契约');
+  assert.equal(got.activation.kind, 'intake', '仍停留在 intake 判别阶段');
+  assert.equal(got.runner.status, 'blocked');
+  assert.ok(events.some((event) => event.type === 'goalRunner:blocked'));
+});
+
+test('intake·明确目标：回合调 goal_create_plan 升级为 accepted_goal → 不删契约、继续自驱', async () => {
+  const intake = store.createIntakeContract({
+    conversationId: 'conv-intake-goal',
+    goal: '把发布流程整理成文档',
+  });
+  let turn = 0;
+  const runtime = {
+    async runGoalTurn() {
+      turn += 1;
+      if (turn === 1) {
+        // 模型判定这是明确目标：调 goal_create_plan → provider 侧走 upsertGoalContract，
+        // 把当前 intake 契约原地升级为 accepted_goal。这里直接调 store 模拟该副作用。
+        store.upsertGoalContract('conv-intake-goal', {
+          goal: '把发布流程整理成一篇 SOP 文档',
+          title: '整理发布 SOP',
+          activation: { kind: 'accepted_goal' },
+        });
+        return { continue: true, toolCallCount: 1 };
+      }
+      // 升级后进入正常自驱，第二回合收尾。
+      return { continue: false, intent: 'verify', toolCallCount: 0 };
+    },
+  };
+  const events = [];
+  const runner = createRunner({ runtime, events });
+
+  await runner.start(intake.planId, { maxTurns: 3, awaitIdle: true });
+
+  const got = store.getPlan(intake.planId);
+  assert.notEqual(got, null, '明确目标分支不得删除契约');
+  assert.equal(got.planId, intake.planId, '应原地升级，planId 不变');
+  assert.equal(got.activation.kind, 'accepted_goal', '已升级为正式目标');
+  assert.ok(
+    !events.some((event) => event.type === 'goalRunner:intakeResolved'
+      && event.resolution === 'inquiry'),
+    '明确目标分支不应触发 inquiry 收敛',
+  );
+});

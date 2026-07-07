@@ -147,3 +147,23 @@ test('store errors degrade to no sections', () => {
   });
   assert.deepEqual(source.render(observation), []);
 });
+
+test('intake contract renders intake instructions instead of execution contract', () => {
+  const source = createGoalRunnerPromptSource();
+  const intakePlan = {
+    ...samplePlan,
+    planId: 'plan-intake',
+    activation: { kind: 'intake' },
+  };
+  const observation = source.observe({ mode: 'goal', goalPlanStore: makeStore(intakePlan) });
+  const sections = source.render(observation);
+
+  // facts 仍在；mode-reminder 换成 intake 指令，而非执行期 contract。
+  const intake = sections.find((s) => s.id === 'runtime.goal-runner.intake');
+  const contract = sections.find((s) => s.id === 'runtime.goal-runner.contract');
+  assert.ok(intake, 'intake 阶段应注入 intake 指令 section');
+  assert.equal(contract, undefined, 'intake 阶段不应注入执行期 contract');
+  assert.match(intake.content, /intake/i);
+  assert.match(intake.content, /goal_create_plan/);
+  assert.match(intake.content, /request_user_input/);
+});

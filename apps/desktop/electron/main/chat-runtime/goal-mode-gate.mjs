@@ -35,6 +35,8 @@ const RISK_ORDER = Object.freeze({
 
 // 视为「计划已就绪、可执行」的计划状态。
 const EXECUTABLE_PLAN_STATUSES = Object.freeze(new Set(['approved', 'executing', 'completed']));
+// 终态计划状态：用于判定 intake 契约是否仍活跃（终态契约不再施加 intake 禁写闸门）。
+const GATE_TERMINAL_PLAN_STATUSES = Object.freeze(new Set(['completed', 'cancelled', 'failed']));
 
 // ── goal 模式确定性 hooks·阶段一（见设计文档第七章）：只硬编码两条规则，不建通用框架。 ──
 
@@ -206,7 +208,7 @@ function defaultGoalPlanStore() {
  */
 export function resolveGoalPlanGate(conversationId, goalPlanStore = defaultGoalPlanStore()) {
   if (!conversationId || typeof goalPlanStore?.listPlansByConversation !== 'function') {
-    return { hasPlan: false, hasApprovedPlan: false };
+    return { hasPlan: false, hasApprovedPlan: false, intakeActive: false };
   }
   let plans = [];
   try {
@@ -216,7 +218,12 @@ export function resolveGoalPlanGate(conversationId, goalPlanStore = defaultGoalP
   }
   const hasPlan = plans.length > 0;
   const hasApprovedPlan = plans.some((plan) => EXECUTABLE_PLAN_STATUSES.has(plan?.status));
-  return { hasPlan, hasApprovedPlan };
+  // intake 判别阶段事实：存在一条 activation.kind==='intake' 且仍活跃（非终态）的契约。
+  // intake 阶段只做只读/问答/澄清，闸门据此拒绝一切有副作用能力（见「方案乙」write-gate）。
+  const intakeActive = plans.some(
+    (plan) => plan?.activation?.kind === 'intake' && !GATE_TERMINAL_PLAN_STATUSES.has(plan?.status),
+  );
+  return { hasPlan, hasApprovedPlan, intakeActive };
 }
 
 /**
@@ -297,6 +304,12 @@ export function evaluateGoalModeGate({
     if (PLAN_ALWAYS_ALLOWED_TOOLS.has(toolName)) return { allowed: true };
     // 惰性 / 只读能力：直接放行。
     if (INERT_RISK_LEVELS.has(riskLevel)) return { allowed: true };
+    // intake 判别阶段（方案乙 write-gate）：目标尚未确认，Runner 只做只读/问答/澄清。
+    // 上方已放行规划/回写/提问与只读能力；到这里的都是有副作用能力（写文件、shell、
+    // MCP 副作用等），在 intake 阶段一律结构化拒绝，直到 intake 收敛为 accepted_goal。
+    if (planGate?.intakeActive) {
+      return { allowed: false, reason: 'goal_intake_write_blocked', detail: toolName ?? undefined };
+    }
     // ① pre-act 写盘范围守卫（write_file / edit_file）。
     if (PATH_WRITE_TOOLS.has(toolName)) {
       const scope = evaluateWriteScope({ args, workspacePath, writableRoots, boundaries });
@@ -353,6 +366,11 @@ export function evaluateGoalModeGate({
 
 function denialMessage(reason, locale) {
   const zh = locale !== 'en-US';
+  if (reason === 'goal_intake_write_blocked') {
+    return zh
+      ? 'Goal 模式 intake 判别阶段：当前尚未确认这是一个要执行的目标，仅允许只读调查、提问与产出目标计划。请先用 goal_create_plan 确认目标（升级为正式目标）后，再执行有副作用的操作；若这只是一次问答，直接回答即可。'
+      : 'Goal mode intake phase: the goal is not confirmed yet. Only read-only investigation, questions, and producing a goal plan are allowed. Confirm the goal via goal_create_plan (promote to an accepted goal) before running side-effecting actions; if this is just a question, answer directly.';
+  }
   if (reason === 'goal_plan_not_approved') {
     return zh
       ? 'Plan 模式：已有计划但尚未获批准。请通过右侧计划面板/批准卡取得用户批准，获批后再执行有副作用的操作。'

@@ -113,8 +113,10 @@ export function classifyGoalMessage(messageText) {
 export function routeGoalMessage({ messageText, activeGoalPlan } = {}) {
   const text = normalizeText(messageText);
   if (!activeGoalPlan) {
+    // 隐式新目标：用户没有显式说「新建目标」，只是在 goal 模式下发了一条消息。
+    // 不再无条件建 accepted 目标，而是先进 intake 判别阶段——判定是纯问答还是真实目标。
     return {
-      type: 'create_goal',
+      type: 'start_intake',
       objective: text,
       intent: 'new_goal_implicit',
     };
@@ -122,8 +124,10 @@ export function routeGoalMessage({ messageText, activeGoalPlan } = {}) {
 
   const classification = classifyGoalMessage(text);
   if (classification.intent === 'new_goal_explicit') {
+    // 显式「新建目标」是用户的明确指令，仍走 intake 收敛出具体目标后再执行，
+    // 避免把一句宽泛的「新建目标做个 X」直接当成成型契约。
     return {
-      type: 'create_goal',
+      type: 'start_intake',
       objective: text,
       intent: classification.intent,
     };

@@ -102,6 +102,7 @@ describe('resolveGoalPlanGate', () => {
     assert.deepEqual(resolveGoalPlanGate(null, {}), {
       hasPlan: false,
       hasApprovedPlan: false,
+      intakeActive: false,
     });
   });
 
@@ -115,10 +116,12 @@ describe('resolveGoalPlanGate', () => {
     assert.deepEqual(resolveGoalPlanGate('c1', fakeStore), {
       hasPlan: true,
       hasApprovedPlan: true,
+      intakeActive: false,
     });
     assert.deepEqual(resolveGoalPlanGate('c2', fakeStore), {
       hasPlan: false,
       hasApprovedPlan: false,
+      intakeActive: false,
     });
   });
 
@@ -129,7 +132,66 @@ describe('resolveGoalPlanGate', () => {
     assert.deepEqual(resolveGoalPlanGate('c1', fakeStore), {
       hasPlan: true,
       hasApprovedPlan: false,
+      intakeActive: false,
     });
+  });
+
+  it('flags intakeActive when an active intake contract exists', () => {
+    const fakeStore = {
+      listPlansByConversation: () => [
+        { status: 'executing', activation: { kind: 'intake' } },
+      ],
+    };
+    const gate = resolveGoalPlanGate('c1', fakeStore);
+    assert.equal(gate.intakeActive, true);
+  });
+
+  it('does not flag intakeActive for a terminal intake contract', () => {
+    const fakeStore = {
+      listPlansByConversation: () => [
+        { status: 'cancelled', activation: { kind: 'intake' } },
+      ],
+    };
+    const gate = resolveGoalPlanGate('c1', fakeStore);
+    assert.equal(gate.intakeActive, false);
+  });
+});
+
+// 方案乙 write-gate：intake 判别阶段禁止一切有副作用能力，只放行只读/提问/规划。
+describe('evaluateGoalModeGate · intake write-gate', () => {
+  it('blocks side-effecting tools during intake', () => {
+    for (const [toolName, riskLevel] of [
+      ['write_file', 'L2_local_write'],
+      ['bash', 'L4_privileged'],
+    ]) {
+      const r = evaluateGoalModeGate({
+        mode: 'goal',
+        toolName,
+        riskLevel,
+        planGate: { hasPlan: true, hasApprovedPlan: false, intakeActive: true },
+      });
+      assert.equal(r.allowed, false, `${toolName} should be blocked during intake`);
+      assert.equal(r.reason, 'goal_intake_write_blocked');
+    }
+  });
+
+  it('still allows read-only and planning/interaction tools during intake', () => {
+    const readOnly = evaluateGoalModeGate({
+      mode: 'goal',
+      toolName: 'read_file',
+      riskLevel: 'L1_local_read',
+      planGate: { hasPlan: true, hasApprovedPlan: false, intakeActive: true },
+    });
+    assert.equal(readOnly.allowed, true);
+    for (const toolName of ['goal_create_plan', 'request_user_input']) {
+      const r = evaluateGoalModeGate({
+        mode: 'goal',
+        toolName,
+        riskLevel: 'L2_local_write',
+        planGate: { hasPlan: true, hasApprovedPlan: false, intakeActive: true },
+      });
+      assert.equal(r.allowed, true, `${toolName} should be allowed during intake`);
+    }
   });
 });
 
