@@ -36,6 +36,7 @@ import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.m
 import { startGoogleBrowserLogin, ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
 import { listSubscriptionModels } from './provider-adapters/openai-model-catalog.mjs';
 import { listGeminiModels } from './provider-adapters/gemini-model-catalog.mjs';
+import { listQoderModels } from './provider-adapters/qoder-model-catalog.mjs';
 import { createHostRestarter } from './host-restart.mjs';
 import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
 import { createLlmChatService } from './llm-chat-service.mjs';
@@ -2051,13 +2052,17 @@ ipcMain.handle('llm:oauth:cancel', () => {
 ipcMain.handle('llm:models:list', async (_event, { id }) => {
   if (!id) throw new Error('provider id required');
   const credential = llmConfigStore.getCredential(id);
+  const provider = llmConfigStore.listProviders().find((p) => p.id === id) ?? null;
+  const authMethod = credential?.authMethod || provider?.authMethod || 'oauth_chatgpt';
+  if (authMethod === 'qoder_local_auth' || authMethod === 'local_cli') {
+    const { models, source, error } = await listQoderModels();
+    return { success: true, models, source, error };
+  }
   const tokens = credential?.tokens || null;
   if (!tokens?.access) {
     return { success: false, models: [], error: 'oauth_not_logged_in' };
   }
   try {
-    const provider = llmConfigStore.listProviders().find((p) => p.id === id) ?? null;
-    const authMethod = credential?.authMethod || provider?.authMethod || 'oauth_chatgpt';
     const { tokens: fresh, refreshed } = authMethod === 'oauth_google'
       ? await ensureFreshGoogleTokens(tokens, {
         clientId: credential.oauthClientId,

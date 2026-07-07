@@ -654,8 +654,10 @@ export function createLlmChatService({
         });
 
         try {
-          if (resolvedChannel.wire === 'qoder-cli') {
+          if (resolvedChannel.wire === 'qoder-private') {
             await agentLoopQoder({
+              baseUrl: provider.baseUrl,
+              apiKey: credential.apiKey,
               model: provider.model,
               systemPrompt,
               messages,
@@ -665,7 +667,7 @@ export function createLlmChatService({
               contextWindow,
               maxOutputTokens,
               agentProgress,
-              workspacePath: runWorkspacePath,
+              resolvedChannel,
             });
           } else if (resolvedChannel.wire === 'anthropic-messages') {
             await agentLoopAnthropic({

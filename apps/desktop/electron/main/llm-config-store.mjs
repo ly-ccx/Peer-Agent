@@ -2,8 +2,6 @@ import electron from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { pathOf } from './data-store.mjs';
 import { deriveOAuthStatus, resolveSubscriptionTestResult } from './provider-connectivity.mjs';
 import {
@@ -15,17 +13,18 @@ import {
   CHATGPT_SUBSCRIPTION_BASE_URL,
   CHATGPT_SUBSCRIPTION_NAME,
   GEMINI_OAUTH_NAME,
-  QODER_CLI_NAME,
+  QODER_PRIVATE_NAME,
   defaultsForChannel,
   inferChannelId,
   legacyProviderForWire,
   resolveChannel,
   validateCustomHeaders,
 } from './provider-channels.mjs';
-import { resolveQoderCliCommand } from './provider-adapters/qoder-cli-command.mjs';
+import { loadQoderAccessToken } from './provider-adapters/qoder-local-auth.mjs';
+import { getQoderModelMetadata } from './provider-adapters/qoder-model-catalog.mjs';
+import { sendQoderPrivateStream } from './provider-adapters/qoder-private-adapter.mjs';
 
 const { safeStorage } = electron;
-const execFileAsync = promisify(execFile);
 
 function encrypt(plaintext) {
   if (!plaintext) return { encrypted: false, data: '' };
@@ -110,7 +109,7 @@ function oauthStatusOf(item) {
 function normalizeAuthMethod(value) {
   if (value === 'oauth_chatgpt') return 'oauth_chatgpt';
   if (value === 'oauth_google') return 'oauth_google';
-  if (value === 'local_cli') return 'local_cli';
+  if (value === 'qoder_local_auth' || value === 'local_cli') return 'qoder_local_auth';
   return 'api_key';
 }
 
@@ -119,7 +118,21 @@ function isOAuthAuthMethod(value) {
 }
 
 function isLocalCliAuthMethod(value) {
-  return value === 'local_cli';
+  return value === 'qoder_local_auth' || value === 'local_cli';
+}
+
+function applyQoderModelMetadata(item) {
+  const metadata = getQoderModelMetadata(item.model);
+  item.contextWindow = metadata?.contextWindow ?? item.contextWindow;
+  item.maxOutputTokens = metadata?.maxOutputTokens ?? item.maxOutputTokens;
+  item.supportsVision = metadata?.supportsVision ?? false;
+  item.supportsReasoning = metadata?.supportsReasoning ?? false;
+  item.supportsPromptCaching = false;
+  item.cacheWritePrice = undefined;
+  item.cacheReadPrice = undefined;
+  item.customHeaders = undefined;
+  item.reasoningParamStyle = undefined;
+  item.reasoningEffortMap = undefined;
 }
 
 export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {}) {
@@ -207,6 +220,10 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       }
     }
     if (item.authMethod === 'local_cli') {
+      item.authMethod = 'qoder_local_auth';
+      changed = true;
+    }
+    if (item.authMethod === 'qoder_local_auth') {
       if (item.channelId !== 'qoder') {
         item.channelId = 'qoder';
         changed = true;
@@ -219,6 +236,22 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
         item.apiKey = encrypt('');
         changed = true;
       }
+      const before = JSON.stringify({
+        contextWindow: item.contextWindow,
+        maxOutputTokens: item.maxOutputTokens,
+        supportsVision: item.supportsVision,
+        supportsReasoning: item.supportsReasoning,
+        supportsPromptCaching: item.supportsPromptCaching,
+      });
+      applyQoderModelMetadata(item);
+      const after = JSON.stringify({
+        contextWindow: item.contextWindow,
+        maxOutputTokens: item.maxOutputTokens,
+        supportsVision: item.supportsVision,
+        supportsReasoning: item.supportsReasoning,
+        supportsPromptCaching: item.supportsPromptCaching,
+      });
+      if (before !== after) changed = true;
     }
     if (item.customHeaders && typeof item.customHeaders === 'object') {
       try {
@@ -338,7 +371,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       ? 'openai'
       : method === 'oauth_google'
         ? 'google-ai'
-        : method === 'local_cli'
+        : method === 'qoder_local_auth'
           ? 'qoder'
           : (rawChannelId || inferChannelId({ provider, authMethod: method }));
     const defaults = rawChannelId ? defaultsForChannel(channelId) : (PROVIDER_DEFAULTS[provider] || defaultsForChannel(channelId));
@@ -346,17 +379,17 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     // 订阅(OAuth)身份写死:名称/baseURL 固定,不接受外部传入。model 留待登录后选择。
     const isSubscription = method === 'oauth_chatgpt';
     const isGoogleOAuth = method === 'oauth_google';
-    const isLocalCli = method === 'local_cli';
+    const isLocalQoderAuth = method === 'qoder_local_auth';
     const selectedModel = model || (isSubscription ? DEFAULT_SUBSCRIPTION_MODEL : defaults.model);
     const subscriptionMetadata = isSubscription ? getSubscriptionModelMetadata(selectedModel) : null;
     const resolved = resolveChannel({
       channelId,
       wireOverride,
       authMethod: method,
-      baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : (isLocalCli ? defaults.baseUrl : (baseUrl || defaults.baseUrl)),
-      apiKey: isSubscription || isGoogleOAuth || isLocalCli ? '' : (apiKey || ''),
-      supportsReasoning: isSubscription ? true : (isLocalCli ? false : (supportsReasoning ?? false)),
-      supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (isLocalCli ? false : (supportsPromptCaching ?? false)),
+      baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : (isLocalQoderAuth ? defaults.baseUrl : (baseUrl || defaults.baseUrl)),
+      apiKey: isSubscription || isGoogleOAuth || isLocalQoderAuth ? '' : (apiKey || ''),
+      supportsReasoning: isSubscription ? true : (isLocalQoderAuth ? false : (supportsReasoning ?? false)),
+      supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (isLocalQoderAuth ? false : (supportsPromptCaching ?? false)),
       supportsVision,
       reasoningParamStyle,
       reasoningEffortMap,
@@ -371,13 +404,13 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       groupId: (typeof rawGroupId === 'string' && rawGroupId) ? rawGroupId : newId,
       provider: provider || resolved.legacyProvider,
       channelId,
-      wireOverride: isSubscription || isGoogleOAuth || isLocalCli ? undefined : wireOverride,
+      wireOverride: isSubscription || isGoogleOAuth || isLocalQoderAuth ? undefined : wireOverride,
       authMethod: method,
-      name: isSubscription ? CHATGPT_SUBSCRIPTION_NAME : isGoogleOAuth ? (name || GEMINI_OAUTH_NAME) : isLocalCli ? (name || QODER_CLI_NAME) : name || provider || 'Untitled',
-      baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : isLocalCli ? defaults.baseUrl : baseUrl || defaults.baseUrl,
+      name: isSubscription ? CHATGPT_SUBSCRIPTION_NAME : isGoogleOAuth ? (name || GEMINI_OAUTH_NAME) : isLocalQoderAuth ? (name || QODER_PRIVATE_NAME) : name || provider || 'Untitled',
+      baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : isLocalQoderAuth ? defaults.baseUrl : baseUrl || defaults.baseUrl,
       // 订阅默认落到权威清单的最新模型(gpt-5.5),非订阅沿用各家 preset。
       model: selectedModel,
-      apiKey: encrypt(isSubscription || isGoogleOAuth || isLocalCli ? '' : apiKey || ''),
+      apiKey: encrypt(isSubscription || isGoogleOAuth || isLocalQoderAuth ? '' : apiKey || ''),
       oauthClientId: isGoogleOAuth ? String(oauthClientId || '').trim() || undefined : undefined,
       oauthClientSecret: encrypt(isGoogleOAuth ? String(oauthClientSecret || '') : ''),
       oauthProjectId: isGoogleOAuth ? String(oauthProjectId || '').trim() || undefined : undefined,
@@ -389,20 +422,21 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       maxOutputTokens: isSubscription ? subscriptionMetadata?.maxOutputTokens : (maxOutputTokens || undefined),
       inputPrice: isSubscription ? subscriptionMetadata?.inputPrice : (inputPrice ?? undefined),
       outputPrice: isSubscription ? subscriptionMetadata?.outputPrice : (outputPrice ?? undefined),
-      cacheWritePrice: isSubscription || isLocalCli ? undefined : (cacheWritePrice ?? undefined),
+      cacheWritePrice: isSubscription || isLocalQoderAuth ? undefined : (cacheWritePrice ?? undefined),
       cacheReadPrice: isSubscription ? subscriptionMetadata?.cacheReadPrice : (cacheReadPrice ?? undefined),
       longContextInputThreshold: isSubscription ? subscriptionMetadata?.longContextInputThreshold : undefined,
       longContextInputPrice: isSubscription ? subscriptionMetadata?.longContextInputPrice : undefined,
       longContextCacheReadPrice: isSubscription ? subscriptionMetadata?.longContextCacheReadPrice : undefined,
       longContextOutputPrice: isSubscription ? subscriptionMetadata?.longContextOutputPrice : undefined,
-      supportsVision: isLocalCli ? false : (supportsVision ?? false),
+      supportsVision: isLocalQoderAuth ? false : (supportsVision ?? false),
       // 订阅链路(codex/responses)原生支持思考强度,默认开启。
-      supportsReasoning: isSubscription ? true : (isLocalCli ? false : (supportsReasoning ?? false)),
-      supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (isLocalCli ? false : (supportsPromptCaching ?? false)),
+      supportsReasoning: isSubscription ? true : (isLocalQoderAuth ? false : (supportsReasoning ?? false)),
+      supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (isLocalQoderAuth ? false : (supportsPromptCaching ?? false)),
       reasoningParamStyle: reasoningParamStyle || undefined,
       reasoningEffortMap: resolved.reasoningEffortMap || undefined,
       customHeaders: customHeaders || undefined,
     };
+    if (isLocalQoderAuth) applyQoderModelMetadata(item);
     item.provider = legacyProviderForWire(resolved.wire);
     items.push(item);
     writeAll(items);
@@ -461,18 +495,14 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       item.provider = 'openai';
       item.baseUrl = item.baseUrl || defaultsForChannel('google-ai').baseUrl;
     }
-    if (item.authMethod === 'local_cli') {
+    if (item.authMethod === 'qoder_local_auth' || item.authMethod === 'local_cli') {
+      item.authMethod = 'qoder_local_auth';
       item.channelId = 'qoder';
       delete item.wireOverride;
       item.provider = 'openai';
       item.baseUrl = defaultsForChannel('qoder').baseUrl;
       item.apiKey = encrypt('');
-      item.supportsVision = false;
-      item.supportsReasoning = false;
-      item.supportsPromptCaching = false;
-      item.customHeaders = undefined;
-      item.reasoningParamStyle = undefined;
-      item.reasoningEffortMap = undefined;
+      applyQoderModelMetadata(item);
     }
     const resolved = resolveChannel({
       ...item,
@@ -643,7 +673,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     }
 
     if (isLocalCliAuthMethod(item.authMethod)) {
-      return testQoderCli(item.model);
+      return testQoderPrivate(item.model);
     }
 
     const apiKey = decrypt(item.apiKey);
@@ -751,16 +781,29 @@ async function testGemini(resolved, model, start) {
   return { success: true, model, latencyMs };
 }
 
-async function testQoderCli(model = 'Auto') {
+async function testQoderPrivate(model = 'auto') {
   const start = Date.now();
   try {
-    await execFileAsync(resolveQoderCliCommand(), ['status'], {
-      timeout: 5000,
-      maxBuffer: 64 * 1024,
+    const token = await loadQoderAccessToken();
+    const result = await sendQoderPrivateStream({
+      apiKey: token,
+      model: model || 'auto',
+      messages: [{ role: 'user', content: 'hi' }],
+      maxOutputTokens: 8,
+      signal: AbortSignal.timeout(15000),
+      webContents: { send: () => {} },
+      streamId: `llm-test-qoder-${Date.now()}`,
     });
-    return { success: true, model: model || 'Auto', latencyMs: Date.now() - start };
+    const latencyMs = Date.now() - start;
+    if (!result.ok) {
+      const error = result.errorText || (result.status ? `HTTP ${result.status}` : 'qoder_private_error');
+      return { success: false, error, latencyMs };
+    }
+    if (!String(result.content || '').trim()) {
+      return { success: false, error: 'qoder_private_empty_response', latencyMs };
+    }
+    return { success: true, model: model || 'auto', latencyMs };
   } catch (err) {
-    const code = err?.code === 'ENOENT' ? 'qoder_cli_not_found' : 'qoder_cli_unavailable';
-    return { success: false, error: code, latencyMs: Date.now() - start };
+    return { success: false, error: err?.code || 'qoder_auth_unavailable', latencyMs: Date.now() - start };
   }
 }

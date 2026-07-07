@@ -9,10 +9,16 @@ import { createLlmConfigStore } from './llm-config-store.mjs';
 function withStore(fn) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'llm-config-store-'));
   const configFile = path.join(dir, 'llm-providers.json');
+  let cleanupNow = true;
   try {
-    return fn({ dir, configFile });
+    const result = fn({ dir, configFile });
+    if (result && typeof result.then === 'function') {
+      cleanupNow = false;
+      return result.finally(() => rmSync(dir, { recursive: true, force: true }));
+    }
+    return result;
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    if (cleanupNow) rmSync(dir, { recursive: true, force: true });
   }
 }
 
@@ -212,28 +218,74 @@ test('Gemini OAuth provider stores OAuth client metadata without API key', () =>
   assert.deepEqual(persisted.oauthClientSecret, { encrypted: false, data: 'google-client-secret' });
 }));
 
-test('Qoder local CLI provider does not require an API key', () => withStore(({ configFile }) => {
+test('Qoder local auth provider does not require a stored API key', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });
   const provider = store.addProvider({
     provider: 'openai',
     channelId: 'qoder',
-    authMethod: 'local_cli',
+    authMethod: 'qoder_local_auth',
     name: 'Qoder',
-    model: 'Auto',
+    model: 'auto',
   });
 
   assert.equal(provider.channelId, 'qoder');
-  assert.equal(provider.resolvedWire, 'qoder-cli');
-  assert.equal(provider.authMethod, 'local_cli');
-  assert.equal(provider.baseUrl, 'local://qodercli');
-  assert.equal(provider.model, 'Auto');
+  assert.equal(provider.resolvedWire, 'qoder-private');
+  assert.equal(provider.authMethod, 'qoder_local_auth');
+  assert.equal(provider.baseUrl, 'https://api2-v2.qoder.sh/model/v1');
+  assert.equal(provider.model, 'auto');
   assert.equal(provider.apiKeyConfigured, true);
   assert.equal(provider.apiKeyMasked, '');
-  assert.equal(provider.supportsVision, false);
+  assert.equal(provider.contextWindow, 180000);
+  assert.equal(provider.maxOutputTokens, 32768);
+  assert.equal(provider.supportsVision, true);
   assert.equal(provider.supportsReasoning, false);
 
   const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
   assert.deepEqual(persisted.apiKey, { encrypted: false, data: '' });
+}));
+
+test('Qoder connection test probes the selected private chat model', async () => withStore(async ({ configFile }) => {
+  const previousFetch = globalThis.fetch;
+  const previousToken = process.env.QODER_ACCESS_TOKEN;
+  const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+  const previousQoderConfigDir = process.env.QODER_CONFIG_DIR;
+  process.env.QODER_ACCESS_TOKEN = 'local-qoder-token';
+  process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+  process.env.QODER_CONFIG_DIR = path.dirname(configFile);
+  let capturedBody = null;
+  globalThis.fetch = async (_url, init) => {
+    capturedBody = JSON.parse(init.body);
+    return new Response([
+      'event: error',
+      'data: {"code":"invalid_model_error","message":"Unsupported model \\"gm51model\\"","type":"invalid_model_error"}',
+      '',
+    ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+  };
+
+  try {
+    const store = createLlmConfigStore({ configFile });
+    const provider = store.addProvider({
+      provider: 'openai',
+      channelId: 'qoder',
+      authMethod: 'qoder_local_auth',
+      name: 'Qoder',
+      model: 'gm51model',
+    });
+
+    const result = await store.testConnection(provider.id);
+
+    assert.equal(capturedBody.model, 'gm51model');
+    assert.equal(result.success, false);
+    assert.match(result.error, /Unsupported model "gm51model"/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousToken === undefined) delete process.env.QODER_ACCESS_TOKEN;
+    else process.env.QODER_ACCESS_TOKEN = previousToken;
+    if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+    else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    if (previousQoderConfigDir === undefined) delete process.env.QODER_CONFIG_DIR;
+    else process.env.QODER_CONFIG_DIR = previousQoderConfigDir;
+  }
 }));
 
 test('legacy provider updates also update channel identity when channelId is omitted', () => withStore(({ configFile }) => {

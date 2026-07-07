@@ -325,7 +325,7 @@ export interface WorkspaceProject {
 }
 
 export type LlmProviderType = 'openai' | 'anthropic';
-export type LlmWireProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini' | 'qoder-cli';
+export type LlmWireProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini' | 'qoder-private';
 export type LlmChannelId = string;
 export type LlmReasoningParamStyle =
   | 'openai-effort'
@@ -368,8 +368,9 @@ export interface LlmChannelDescriptor {
 //   订阅模型走 OpenAI Responses 传输。
 // - oauth_google: Google OAuth 登录,access/refresh token 存 main 进程,
 //   Gemini 模型走 Google Generative Language API 传输。
-// - local_cli: 本机 CLI 已登录/可用,不在 Peer Agent 内保存远端密钥。
-export type LlmAuthMethod = 'api_key' | 'oauth_chatgpt' | 'oauth_google' | 'local_cli';
+// - qoder_local_auth: 复用本机 Qoder 登录态/token,不在 Peer Agent 内保存远端密钥。
+// - local_cli: 旧配置兼容值,读取时迁移到 qoder_local_auth。
+export type LlmAuthMethod = 'api_key' | 'oauth_chatgpt' | 'oauth_google' | 'qoder_local_auth' | 'local_cli';
 
 // 订阅(OAuth)登录态投影。token 永不回传 renderer,仅以状态 + 账号标识表达。
 export type LlmOAuthConnectionStatus = 'connected' | 'expired' | 'disconnected';
@@ -496,6 +497,8 @@ export interface LlmModelInfo {
   readonly created?: number;
   readonly contextWindow?: number;
   readonly maxOutputTokens?: number;
+  readonly supportsVision?: boolean;
+  readonly supportsReasoning?: boolean;
   // USD per 1M tokens unless otherwise noted by the provider.
   readonly inputPrice?: number;
   readonly outputPrice?: number;
@@ -510,10 +513,11 @@ export interface LlmModelInfo {
 // - 'builtin' : 订阅(codex 平面)内置权威目录,平面无列模型接口,内置即真值。
 // - 'remote'  : 自带 API key 时从 /v1/models 动态拉取。
 // - 'fallback': 远程失败后的兜底(保留以兼容历史诊断语义)。
+// - 'local'   : 从本机 provider 登录态/cache 派生的目录。
 export interface LlmModelListResult {
   readonly success: boolean;
   readonly models: readonly LlmModelInfo[];
-  readonly source?: 'builtin' | 'remote' | 'fallback';
+  readonly source?: 'builtin' | 'remote' | 'fallback' | 'local';
   readonly error?: string;
 }
 

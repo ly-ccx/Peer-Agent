@@ -131,15 +131,15 @@ describe('provider channel registry', () => {
     assert.equal(resolved.headers['x-goog-user-project'], 'my-project');
   });
 
-  it('resolves Qoder through a local CLI wire without headers or API key', () => {
+  it('resolves Qoder through the private API wire without static headers or API key', () => {
     const resolved = resolveChannel({
       channelId: 'qoder',
-      authMethod: 'local_cli',
-      model: 'Auto',
+      authMethod: 'qoder_local_auth',
+      model: 'auto',
     });
 
-    assert.equal(resolved.wire, 'qoder-cli');
-    assert.equal(resolved.endpoint, 'cli:qodercli');
+    assert.equal(resolved.wire, 'qoder-private');
+    assert.equal(resolved.endpoint, 'https://api2-v2.qoder.sh/model/v1/chat/completions');
     assert.deepEqual(resolved.headers, {});
     assert.equal(resolved.supportsReasoning, false);
     assert.equal(resolved.descriptor.capabilities.toolUse, false);

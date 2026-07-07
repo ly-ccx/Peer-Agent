@@ -7,19 +7,20 @@ import {
 } from './provider-credential-resolver.mjs';
 
 describe('provider credential resolver', () => {
-  it('resolves local CLI providers without a stored API key', async () => {
+  it('resolves Qoder local auth providers without a stored API key', async () => {
     const credential = await resolveProviderCredential({
-      provider: { id: 'qoder-1', authMethod: 'local_cli' },
+      provider: { id: 'qoder-1', authMethod: 'qoder_local_auth' },
       llmConfigStore: {
         getDecryptedApiKey: () => {
-          throw new Error('local CLI should not read api key');
+          throw new Error('Qoder local auth should not read stored api key');
         },
       },
+      loadQoderToken: async () => 'qoder-token',
     });
 
     assert.deepEqual(credential, {
-      authMethod: 'local_cli',
-      apiKey: '',
+      authMethod: 'qoder_local_auth',
+      apiKey: 'qoder-token',
       accountId: null,
     });
   });

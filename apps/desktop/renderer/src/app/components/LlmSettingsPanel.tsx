@@ -100,13 +100,13 @@ const FALLBACK_CHANNELS: readonly LlmChannelDescriptor[] = [
   },
   {
     id: 'qoder',
-    label: 'Qoder CLI',
+    label: 'Qoder 私有接口',
     legacyProvider: 'openai',
-    defaultWire: 'qoder-cli',
-    allowedWires: ['qoder-cli'],
-    defaults: { baseUrl: 'local://qodercli', model: 'Auto' },
+    defaultWire: 'qoder-private',
+    allowedWires: ['qoder-private'],
+    defaults: { baseUrl: 'https://api2-v2.qoder.sh/model/v1', model: 'auto' },
     capabilities: { reasoning: { supported: false, paramStyle: 'none' }, promptCache: false, vision: false },
-    authMethods: { local_cli: { wire: 'qoder-cli' } },
+    authMethods: { qoder_local_auth: { wire: 'qoder-private' }, local_cli: { wire: 'qoder-private' } },
   },
 ];
 
@@ -133,11 +133,12 @@ function isOAuthMethod(method: LlmAuthMethod): boolean {
 }
 
 function isLocalCliMethod(method: LlmAuthMethod): boolean {
-  return method === 'local_cli';
+  return method === 'qoder_local_auth' || method === 'local_cli';
 }
 
 function defaultAuthMethod(channel: LlmChannelDescriptor): LlmAuthMethod {
   if (channel.authMethods?.api_key) return 'api_key';
+  if (channel.authMethods?.qoder_local_auth) return 'qoder_local_auth';
   if (channel.authMethods?.local_cli) return 'local_cli';
   const [first] = Object.keys(channel.authMethods || {});
   return (first || 'api_key') as LlmAuthMethod;
@@ -161,8 +162,8 @@ function wireLabel(wire: string | undefined, locale: string): string {
       return zh ? 'Messages API' : 'Messages API';
     case 'gemini':
       return zh ? 'Gemini GenerateContent' : 'Gemini GenerateContent';
-    case 'qoder-cli':
-      return zh ? 'Qoder CLI' : 'Qoder CLI';
+    case 'qoder-private':
+      return zh ? 'Qoder 私有接口' : 'Qoder Private API';
     default:
       return wire || (zh ? '未解析' : 'Unresolved');
   }
@@ -263,7 +264,7 @@ function validateForm(
 ): string | null {
   if (!selectedChannel.id) return 'unknown_channel';
   if (isLocalCliMethod(form.authMethod)) {
-    if (!selectedChannel.authMethods?.local_cli) return 'unsupported_auth_method';
+    if (!selectedChannel.authMethods?.qoder_local_auth && !selectedChannel.authMethods?.local_cli) return 'unsupported_auth_method';
     if (!form.model.trim()) return 'model_required';
     return null;
   }
@@ -361,12 +362,14 @@ function friendlyTestError(error: string | undefined, locale: string): string {
       return zh ? '未配置 API Key' : 'API key not configured';
     case 'api_key_required':
       return zh ? '请填写 API Key' : 'Please enter an API key';
-    case 'qoder_cli_not_found':
-      return zh ? '未找到 qodercli 命令，请先安装或把 qodercli 加入 PATH' : 'qodercli command not found. Install Qoder CLI or add qodercli to PATH';
-    case 'qoder_cli_unavailable':
-      return zh ? 'Qoder CLI 不可用，请确认已完成 qodercli 登录' : 'Qoder CLI is unavailable. Confirm qodercli is logged in';
-    case 'qoder_cli_empty_response':
-      return zh ? 'Qoder CLI 未返回内容' : 'Qoder CLI returned an empty response';
+    case 'qoder_auth_not_found':
+      return zh ? '未找到本机 Qoder 登录态，请先完成 Qoder 登录' : 'Local Qoder auth was not found. Please sign in to Qoder first';
+    case 'qoder_auth_expired':
+      return zh ? '本机 Qoder 登录态已过期，请重新登录 Qoder' : 'Local Qoder auth has expired. Please sign in to Qoder again';
+    case 'qoder_auth_unavailable':
+      return zh ? '无法读取本机 Qoder 登录态' : 'Unable to read local Qoder auth';
+    case 'qoder_private_empty_response':
+      return zh ? 'Qoder 私有接口未返回内容' : 'Qoder private API returned an empty response';
     case 'base_url_required':
       return zh ? '请填写 Base URL' : 'Please enter a Base URL';
     case 'model_required':
@@ -452,7 +455,7 @@ export function LlmSettingsPanel({
     return () => { cancelled = true; };
   }, []);
 
-  // 拉取某订阅 provider 的可用模型(远程,失败回退内置清单)。
+  // 拉取 provider 的可用模型: OAuth 走远程/内置目录,Qoder 走本机 catalog。
   const loadModels = useCallback(async (id: string) => {
     setModelLoadingId(id);
     try {
@@ -463,10 +466,12 @@ export function LlmSettingsPanel({
     }
   }, []);
 
-  // 已登录(connected)的订阅 provider 自动加载一次模型清单。
+  // 已登录(connected)的订阅 provider 与本机 Qoder provider 自动加载一次模型清单。
   useEffect(() => {
     for (const p of providers) {
-      if (isOAuthMethod(p.authMethod) && p.oauthStatus?.status === 'connected' && !modelLists[p.id]) {
+      const shouldLoad = (isOAuthMethod(p.authMethod) && p.oauthStatus?.status === 'connected')
+        || isLocalCliMethod(p.authMethod);
+      if (shouldLoad && !modelLists[p.id]) {
         void loadModels(p.id);
       }
     }
@@ -616,7 +621,7 @@ export function LlmSettingsPanel({
           reasoningEffortMap,
           customHeaders,
           authMethod: form.authMethod,
-          name: form.name || (localCli ? 'Qoder CLI' : form.provider),
+          name: form.name || (localCli ? 'Qoder 私有接口' : form.provider),
           baseUrl: form.baseUrl,
           model: form.model,
           apiKey: form.apiKey,
@@ -776,9 +781,24 @@ export function LlmSettingsPanel({
         </header>
       ) : null}
 
+      <div className="llm-list-toolbar">
+        <div className="llm-list-summary">
+          <strong>{i18n.locale === 'zh-CN' ? '渠道' : 'Channels'}</strong>
+          <span>{providers.length} {i18n.locale === 'zh-CN' ? '个渠道' : 'channels'} · {providers.length === 1 ? groups[0]?.models.length ?? 0 : groups.reduce((sum, group) => sum + group.models.length, 0)} {i18n.locale === 'zh-CN' ? '个模型' : 'models'}</span>
+        </div>
+        <button type="button" className="llm-add-channel-btn" onClick={openAdd}>
+          ＋ {i18n.locale === 'zh-CN' ? '添加渠道' : 'Add Channel'}
+        </button>
+      </div>
+
       <div className="llm-provider-list">
         {providers.length === 0 ? (
-          <p className="llm-empty">{i18n.locale === 'zh-CN' ? '尚未配置任何模型，点击下方按钮添加。' : 'No models configured. Add one below.'}</p>
+          <div className="llm-empty">
+            <p>{i18n.locale === 'zh-CN' ? '尚未配置任何模型渠道。' : 'No model channels configured.'}</p>
+            <button type="button" onClick={openAdd}>
+              ＋ {i18n.locale === 'zh-CN' ? '添加渠道' : 'Add Channel'}
+            </button>
+          </div>
         ) : groups.map((g) => {
           const head = g.head;
           const collapsed = collapsedGroups.has(g.groupId);
@@ -810,7 +830,7 @@ export function LlmSettingsPanel({
               </span>
               {isLocalCliMethod(head.authMethod) ? (
                 <small className="llm-provider-key">
-                  {i18n.locale === 'zh-CN' ? '本机 Qoder CLI' : 'Local Qoder CLI'}
+                  {i18n.locale === 'zh-CN' ? '本机 Qoder 登录态' : 'Local Qoder Auth'}
                 </small>
               ) : isOAuthMethod(head.authMethod) ? (
                 <small className={`llm-provider-key llm-oauth-status-${head.oauthStatus?.status ?? 'disconnected'}`}>
@@ -841,10 +861,32 @@ export function LlmSettingsPanel({
             </div>
             {!collapsed ? (
               <div className="llm-group-models">
-                {g.models.map((p) => (
+                {g.models.map((p) => {
+                  const canSelectModel = (isOAuthMethod(p.authMethod) && p.oauthStatus?.status === 'connected') || isLocalCliMethod(p.authMethod);
+                  const modelOptions = (modelLists[p.id] && modelLists[p.id].length > 0
+                    ? modelLists[p.id]
+                    : [{ id: p.model, label: p.model } as LlmModelInfo]
+                  ).map((m) => ({ value: m.id, label: m.label }));
+                  return (
                   <div key={p.id} className={`llm-model-row ${p.isDefault ? 'is-default' : ''}`}>
                     <div className="llm-model-row-info">
-                      <span className="llm-provider-chip mono">{p.model}</span>
+                      {canSelectModel ? (
+                        <Dropdown
+                          className="llm-model-picker"
+                          value={p.model}
+                          disabled={modelLoadingId === p.id && !modelLists[p.id]}
+                          ariaLabel={i18n.locale === 'zh-CN' ? '选择模型' : 'Select model'}
+                          placeholder={
+                            modelLoadingId === p.id && !modelLists[p.id]
+                              ? (i18n.locale === 'zh-CN' ? '加载中…' : 'Loading…')
+                              : p.model
+                          }
+                          options={modelOptions}
+                          onChange={(value) => void handleSelectModel(p.id, value)}
+                        />
+                      ) : (
+                        <span className="llm-provider-chip mono">{p.model}</span>
+                      )}
                       {p.isDefault ? <span className="llm-badge-default">{i18n.locale === 'zh-CN' ? '已激活' : 'Active'}</span> : null}
                       {p.contextWindow || p.maxOutputTokens || p.inputPrice != null ? (
                         <span className="llm-provider-specs">
@@ -854,26 +896,6 @@ export function LlmSettingsPanel({
                           {(p.contextWindow || p.maxOutputTokens) && p.inputPrice != null ? ' · ' : ''}
                           {p.inputPrice != null ? `$${p.inputPrice}/${p.outputPrice ?? '?'}` : ''}
                         </span>
-                      ) : null}
-                      {isOAuthMethod(p.authMethod) && p.oauthStatus?.status === 'connected' ? (
-                        <div className="llm-model-select">
-                          <span>{i18n.locale === 'zh-CN' ? '模型' : 'Model'}</span>
-                          <Dropdown
-                            value={p.model}
-                            disabled={modelLoadingId === p.id && !modelLists[p.id]}
-                            ariaLabel={i18n.locale === 'zh-CN' ? '选择模型' : 'Select model'}
-                            placeholder={
-                              modelLoadingId === p.id && !modelLists[p.id]
-                                ? (i18n.locale === 'zh-CN' ? '加载中…' : 'Loading…')
-                                : p.model
-                            }
-                            options={(modelLists[p.id] && modelLists[p.id].length > 0
-                              ? modelLists[p.id]
-                              : [{ id: p.model, label: p.model } as LlmModelInfo]
-                            ).map((m) => ({ value: m.id, label: m.label }))}
-                            onChange={(value) => void handleSelectModel(p.id, value)}
-                          />
-                        </div>
                       ) : null}
                       {testResults[p.id] ? (
                         <small className={`llm-test-result ${testResults[p.id].success ? 'success' : 'fail'}`}>
@@ -915,7 +937,8 @@ export function LlmSettingsPanel({
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             ) : null}
           </div>
@@ -923,15 +946,15 @@ export function LlmSettingsPanel({
         })}
       </div>
 
-      <button type="button" className="llm-add-btn" onClick={openAdd}>
-        ＋ {i18n.locale === 'zh-CN' ? '添加模型' : 'Add Model'}
-      </button>
-
       {showForm ? (
         <Drawer
           onClose={() => { setShowForm(false); setEditingId(null); }}
           closeOnBackdrop={!saving && !oauthBusyId}
-          ariaLabel={editingId ? (i18n.locale === 'zh-CN' ? '编辑模型' : 'Edit Model') : (i18n.locale === 'zh-CN' ? '添加模型' : 'Add Model')}
+          ariaLabel={editingId
+            ? (i18n.locale === 'zh-CN' ? '编辑模型' : 'Edit Model')
+            : isAddModel
+              ? (i18n.locale === 'zh-CN' ? '添加模型' : 'Add Model')
+              : (i18n.locale === 'zh-CN' ? '添加渠道' : 'Add Channel')}
           panelClassName="llm-drawer"
           softBackdrop
         >
@@ -942,7 +965,7 @@ export function LlmSettingsPanel({
                 ? (i18n.locale === 'zh-CN' ? '编辑模型' : 'Edit Model')
                 : isAddModel
                   ? (i18n.locale === 'zh-CN' ? `给 ${form.name} 加模型` : `Add model to ${form.name}`)
-                  : (i18n.locale === 'zh-CN' ? '添加模型' : 'Add Model')}</h3>
+                  : (i18n.locale === 'zh-CN' ? '添加渠道' : 'Add Channel')}</h3>
               <button
                 type="button"
                 className="llm-modal-close"
@@ -1053,7 +1076,7 @@ export function LlmSettingsPanel({
             <>
               <label>
                 <span>{i18n.locale === 'zh-CN' ? '显示名称' : 'Display Name'}</span>
-                <input value={form.name} placeholder="Qoder CLI" onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+                <input value={form.name} placeholder="Qoder 私有接口" onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
               </label>
             </>
           ) : (

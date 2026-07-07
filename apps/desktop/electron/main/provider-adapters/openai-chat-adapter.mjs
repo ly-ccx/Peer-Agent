@@ -47,6 +47,34 @@ function extractOpenAIStreamError(parsed) {
   };
 }
 
+function extractProviderTopLevelError(parsed) {
+  if (!parsed || typeof parsed !== 'object') return null;
+  const message = typeof parsed.message === 'string' ? parsed.message : '';
+  const type = typeof parsed.type === 'string' ? parsed.type : '';
+  const code = typeof parsed.code === 'string' ? parsed.code : '';
+  if (!message) return null;
+  if (!type.toLowerCase().includes('error') && !code.toLowerCase().includes('error')) return null;
+  return {
+    type: type || code || 'provider_stream_error',
+    message,
+  };
+}
+
+function unwrapProviderStreamEnvelope(parsed) {
+  if (!parsed || typeof parsed !== 'object') return parsed;
+  if (typeof parsed.body !== 'string') return parsed;
+  try {
+    const inner = JSON.parse(parsed.body);
+    if (
+      inner && typeof inner === 'object' &&
+      (Array.isArray(inner.choices) || inner.error || inner.usage)
+    ) {
+      return inner;
+    }
+  } catch {}
+  return parsed;
+}
+
 function extractCachedPromptTokens(usage) {
   return usage?.prompt_tokens_details?.cached_tokens
     ?? usage?.prompt_cache_hit_tokens
@@ -68,9 +96,10 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
     return;
   }
   try {
-    const parsed = JSON.parse(payload);
+    const parsedEnvelope = JSON.parse(payload);
+    const parsed = unwrapProviderStreamEnvelope(parsedEnvelope);
     trace?.recordSsePayload?.(payload, parsed);
-    const streamError = extractOpenAIStreamError(parsed);
+    const streamError = extractOpenAIStreamError(parsed) || extractProviderTopLevelError(parsed);
     if (streamError) {
       state.streamError = streamError;
       return;
@@ -121,7 +150,7 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
   }
 }
 
-async function consumeOpenAIStream(res, webContents, streamId, trace = null, signal = null) {
+export async function consumeOpenAIStream(res, webContents, streamId, trace = null, signal = null) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';

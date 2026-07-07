@@ -1,5 +1,6 @@
 import { ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
 import { ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
+import { loadQoderAccessToken } from './provider-adapters/qoder-local-auth.mjs';
 
 export function createProviderCredentialError(code, cause = null) {
   const error = new Error(code);
@@ -17,6 +18,7 @@ export async function resolveProviderCredential({
   llmConfigStore,
   ensureFreshChatGptTokens = ensureFreshTokens,
   ensureFreshGeminiTokens = ensureFreshGoogleTokens,
+  loadQoderToken = loadQoderAccessToken,
 }) {
   if (!provider?.id) {
     throw createProviderCredentialError('provider_not_found');
@@ -24,8 +26,13 @@ export async function resolveProviderCredential({
 
   const authMethod = provider.authMethod || 'api_key';
 
-  if (authMethod === 'local_cli') {
-    return { authMethod, apiKey: '', accountId: null };
+  if (authMethod === 'qoder_local_auth' || authMethod === 'local_cli') {
+    try {
+      const token = await loadQoderToken();
+      return { authMethod: 'qoder_local_auth', apiKey: token, accountId: null };
+    } catch (error) {
+      throw createProviderCredentialError(error?.code || 'qoder_auth_unavailable', error);
+    }
   }
 
   if (authMethod === 'oauth_chatgpt') {

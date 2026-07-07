@@ -3,7 +3,7 @@ import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli
 export const CHATGPT_SUBSCRIPTION_NAME = 'ChatGPT 订阅';
 export const CHATGPT_SUBSCRIPTION_BASE_URL = 'https://chatgpt.com/backend-api/codex';
 export const GEMINI_OAUTH_NAME = 'Gemini OAuth';
-export const QODER_CLI_NAME = 'Qoder CLI';
+export const QODER_PRIVATE_NAME = 'Qoder 私有接口';
 
 export const CHANNEL_IDS = {
   OPENAI: 'openai',
@@ -138,12 +138,15 @@ const CHANNEL_DESCRIPTORS = {
   },
   [CHANNEL_IDS.QODER]: {
     id: CHANNEL_IDS.QODER,
-    label: 'Qoder CLI',
+    label: QODER_PRIVATE_NAME,
     legacyProvider: 'openai',
-    defaultWire: 'qoder-cli',
-    allowedWires: ['qoder-cli'],
-    authMethods: { local_cli: { wire: 'qoder-cli' } },
-    defaults: { baseUrl: 'local://qodercli', model: 'Auto' },
+    defaultWire: 'qoder-private',
+    allowedWires: ['qoder-private'],
+    authMethods: {
+      qoder_local_auth: { wire: 'qoder-private' },
+      local_cli: { wire: 'qoder-private' },
+    },
+    defaults: { baseUrl: 'https://api2-v2.qoder.sh/model/v1', model: 'auto' },
     capabilities: {
       reasoning: {
         supported: false,
@@ -186,7 +189,7 @@ export function inferChannelId(config = {}) {
   if (typeof config.channelId === 'string' && config.channelId.trim()) return config.channelId;
   if (config.authMethod === 'oauth_chatgpt') return CHANNEL_IDS.OPENAI;
   if (config.authMethod === 'oauth_google') return CHANNEL_IDS.GOOGLE_AI;
-  if (config.authMethod === 'local_cli') return CHANNEL_IDS.QODER;
+  if (config.authMethod === 'qoder_local_auth' || config.authMethod === 'local_cli') return CHANNEL_IDS.QODER;
   if (config.provider === 'anthropic') return CHANNEL_IDS.ANTHROPIC;
   return CHANNEL_IDS.OPENAI_COMPATIBLE;
 }
@@ -235,7 +238,7 @@ function geminiModelPath(model) {
 
 function endpointForWire(baseUrl, wire, { model, apiKey, authMethod, stream = true } = {}) {
   const root = String(baseUrl || '').replace(/\/+$/, '');
-  if (wire === 'qoder-cli') return 'cli:qodercli';
+  if (wire === 'qoder-private') return `${root}/chat/completions`;
   if (wire === 'anthropic-messages') return `${root}/v1/messages`;
   if (wire === 'openai-responses') return `${root}/responses`;
   if (wire === 'gemini') {
@@ -249,7 +252,7 @@ function endpointForWire(baseUrl, wire, { model, apiKey, authMethod, stream = tr
 }
 
 function requiredHeadersFor({ wire, apiKey, accountId, authMethod, oauthProjectId }) {
-  if (wire === 'qoder-cli') return {};
+  if (wire === 'qoder-private') return {};
   if (wire === 'anthropic-messages') {
     return {
       'Content-Type': 'application/json',
@@ -283,8 +286,8 @@ export function resolveChannel(config = {}) {
     ? 'oauth_chatgpt'
     : config.authMethod === 'oauth_google'
       ? 'oauth_google'
-      : config.authMethod === 'local_cli'
-        ? 'local_cli'
+      : config.authMethod === 'qoder_local_auth' || config.authMethod === 'local_cli'
+        ? 'qoder_local_auth'
         : 'api_key';
   const authRule = descriptor.authMethods[authMethod];
   if (!authRule) throw new Error(`unsupported_auth_method:${channelId}:${authMethod}`);
@@ -305,7 +308,7 @@ export function resolveChannel(config = {}) {
   if (authMethod === 'oauth_google' && wireOverride && wireOverride !== wire) {
     throw new Error(`unsupported_wire:${channelId}:${wireOverride}`);
   }
-  if (authMethod === 'local_cli' && wireOverride && wireOverride !== wire) {
+  if (authMethod === 'qoder_local_auth' && wireOverride && wireOverride !== wire) {
     throw new Error(`unsupported_wire:${channelId}:${wireOverride}`);
   }
 
