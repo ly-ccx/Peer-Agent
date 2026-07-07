@@ -235,6 +235,8 @@ function validateForm(
   form: FormState,
   editingId: string | null,
   selectedChannel: LlmChannelDescriptor,
+  // B-2 组内加模型:凭证(apiKey/baseUrl)继承自组内首条,不要求用户重填。
+  isAddModel = false,
 ): string | null {
   if (!selectedChannel.id) return 'unknown_channel';
   if (isOAuthMethod(form.authMethod)) {
@@ -247,9 +249,9 @@ function validateForm(
     }
     return null;
   }
-  if (!form.baseUrl.trim()) return 'base_url_required';
+  if (!isAddModel && !form.baseUrl.trim()) return 'base_url_required';
   if (!form.model.trim()) return 'model_required';
-  if (!editingId && !form.apiKey.trim()) return 'api_key_required';
+  if (!editingId && !isAddModel && !form.apiKey.trim()) return 'api_key_required';
   try {
     parseCustomHeaders(form.customHeadersText);
     if (form.supportsReasoning) parseReasoningEffortMap(form.reasoningEffortMapText);
@@ -372,6 +374,11 @@ export function LlmSettingsPanel({
   // ADR 28(方案 B): 订阅 provider 的模型清单与加载态(按 provider id 维度)。
   const [modelLists, setModelLists] = useState<Record<string, readonly LlmModelInfo[]>>({});
   const [modelLoadingId, setModelLoadingId] = useState<string | null>(null);
+  // B-2 手风琴：给某个 provider 组「加模型」的模式(非 null 表示当前是加模型而非新建 provider)。
+  const [addModelGroupId, setAddModelGroupId] = useState<string | null>(null);
+  // B-2 手风琴：已折叠的组 groupId 集合(默认全部展开)。
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
+  const [removingGroupId, setRemovingGroupId] = useState<string | null>(null);
 
   const clearTestResult = useCallback((id: string) => {
     setTestResults((prev) => {
@@ -458,12 +465,43 @@ export function LlmSettingsPanel({
 
   const openAdd = () => {
     setEditingId(null);
+    setAddModelGroupId(null);
     setForm(emptyForm(channels));
     setShowForm(true);
   };
 
+  // B-2 给某个已有 provider 组「加模型」：预填该组的凭证/协议字段(只读展示用),
+  // 只让用户填模型名与模型级参数;apiKey 留空(继承组内首条)。
+  const openAddModel = (group: LlmProviderConfigView) => {
+    setEditingId(null);
+    setAddModelGroupId(group.groupId ?? group.id);
+    const channel = descriptorFor(group.channelId || (group.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels);
+    setForm({
+      ...emptyForm(channels, group.channelId || channel.id),
+      provider: group.provider,
+      channelId: group.channelId || channel.id,
+      wireOverride: group.wireOverride ?? '',
+      authMethod: group.authMethod ?? 'api_key',
+      baseUrl: group.baseUrl,
+      name: group.name,
+      model: '',
+      apiKey: '',
+    });
+    setShowForm(true);
+  };
+
+  const toggleGroup = (groupId: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  };
+
   const openEdit = (p: LlmProviderConfigView) => {
     setEditingId(p.id);
+    setAddModelGroupId(null);
     const channel = descriptorFor(p.channelId || (p.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels);
     setForm({
       provider: p.provider,
@@ -565,10 +603,16 @@ export function LlmSettingsPanel({
           await handleOAuthLogin({ draft });
           return;
         }
-        await clientApi.llmAddProvider(draft);
+        if (addModelGroupId) {
+          // B-2 组内加模型:凭证继承自组内首条,apiKey 由 main 复用,无需重填。
+          await clientApi.llmAddModel({ groupId: addModelGroupId, ...draft });
+        } else {
+          await clientApi.llmAddProvider(draft);
+        }
       }
       setShowForm(false);
       setEditingId(null);
+      setAddModelGroupId(null);
       await refresh();
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : 'Save failed');
@@ -581,6 +625,18 @@ export function LlmSettingsPanel({
     await clientApi.llmRemoveProvider({ id });
     if (editingId === id) { setShowForm(false); setEditingId(null); }
     await refresh();
+  };
+
+  // B-2 删除整个 provider 组(该 provider 及其下全部模型)。
+  const handleRemoveGroup = async (groupId: string) => {
+    setRemovingGroupId(groupId);
+    try {
+      await clientApi.llmRemoveGroup({ groupId });
+      if (showForm) { setShowForm(false); setEditingId(null); setAddModelGroupId(null); }
+      await refresh();
+    } finally {
+      setRemovingGroupId(null);
+    }
   };
 
   // 复制一个非订阅 provider，副本由 main 进程生成（新 id、名称追加「副本」/「(Copy)」、密钥一并复制）。
@@ -646,8 +702,23 @@ export function LlmSettingsPanel({
     .filter((method) => Boolean(selectedChannel.authMethods?.[method]));
   const canUseOAuth = oauthMethods.length > 0;
   const canChooseWire = !isOAuthMethod(form.authMethod) && selectedChannel.allowedWires.length > 1;
-  const formValidationError = validateForm(form, editingId, selectedChannel);
+  const formValidationError = validateForm(form, editingId, selectedChannel, Boolean(addModelGroupId));
   const canSubmit = !saving && !oauthBusyId;
+  // B-2 手风琴：把打平的 provider×model 列表按 groupId 归组，保持原有顺序。
+  // 每组的首条记录承载 provider 级展示信息(名称/凭证/协议)，其 models 为该组全部记录。
+  const groups: { groupId: string; head: LlmProviderConfigView; models: readonly LlmProviderConfigView[] }[] = (() => {
+    const order: string[] = [];
+    const byGroup = new Map<string, LlmProviderConfigView[]>();
+    for (const p of providers) {
+      const gid = p.groupId ?? p.id;
+      if (!byGroup.has(gid)) { byGroup.set(gid, []); order.push(gid); }
+      byGroup.get(gid)!.push(p);
+    }
+    return order.map((gid) => {
+      const models = byGroup.get(gid)!;
+      return { groupId: gid, head: models[0], models };
+    });
+  })();
   const reasoningStyles: readonly LlmReasoningParamStyle[] = selectedChannel.legacyProvider === 'anthropic'
     ? ['anthropic-enabled-budget', 'anthropic-adaptive-effort', 'anthropic-output-effort', 'none']
     : ['openai-effort', 'qwen-enable', 'none'];
@@ -656,7 +727,12 @@ export function LlmSettingsPanel({
     <div className="llm-settings-panel">
       {onBack ? (
         <header className="llm-settings-header">
-          <button type="button" onClick={onBack} aria-label="Back">←</button>
+          <button type="button" onClick={onBack} aria-label="Back">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M19 12H5" />
+              <path d="m12 19-7-7 7-7" />
+            </svg>
+          </button>
           <strong>{i18n.locale === 'zh-CN' ? '模型配置' : 'Model Settings'}</strong>
         </header>
       ) : null}
@@ -664,104 +740,144 @@ export function LlmSettingsPanel({
       <div className="llm-provider-list">
         {providers.length === 0 ? (
           <p className="llm-empty">{i18n.locale === 'zh-CN' ? '尚未配置任何模型，点击下方按钮添加。' : 'No models configured. Add one below.'}</p>
-        ) : providers.map((p) => (
-          <div key={p.id} className={`llm-provider-card ${p.isDefault ? 'is-default' : ''}`}>
-            <div className="llm-provider-info">
-              <strong>{p.name || p.provider}</strong>
+        ) : groups.map((g) => {
+          const head = g.head;
+          const collapsed = collapsedGroups.has(g.groupId);
+          const groupChannel = descriptorFor(head.channelId || (head.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels);
+          return (
+          <div key={g.groupId} className="llm-provider-group">
+            <div className="llm-group-header">
+              <button type="button" className="llm-group-toggle" onClick={() => toggleGroup(g.groupId)} aria-expanded={!collapsed}>
+                <svg
+                  className={`llm-group-caret ${collapsed ? 'is-collapsed' : ''}`}
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+                <strong>{head.name || head.provider}</strong>
+                <span className="llm-group-count">{g.models.length} {i18n.locale === 'zh-CN' ? '个模型' : 'models'}</span>
+              </button>
               <span className="llm-provider-meta">
-                <span className="llm-provider-chip">{descriptorFor(p.channelId || (p.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels).label}</span>
-                <span className="llm-provider-chip">{wireLabel(p.resolvedWire || descriptorFor(p.channelId || (p.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels).defaultWire, i18n.locale)}</span>
-                <span className="llm-provider-chip mono">{p.model}</span>
-                {p.isDefault ? <span className="llm-badge-default">{i18n.locale === 'zh-CN' ? '已激活' : 'Active'}</span> : null}
+                <span className="llm-provider-chip">{groupChannel.label}</span>
+                <span className="llm-provider-chip">{wireLabel(head.resolvedWire || groupChannel.defaultWire, i18n.locale)}</span>
               </span>
-              {p.contextWindow || p.maxOutputTokens || p.inputPrice != null ? (
-                <span className="llm-provider-specs">
-                  {p.contextWindow ? `${(p.contextWindow / 1000).toFixed(0)}K ctx` : ''}
-                  {p.contextWindow && p.maxOutputTokens ? ' · ' : ''}
-                  {p.maxOutputTokens ? `${(p.maxOutputTokens / 1000).toFixed(0)}K out` : ''}
-                  {(p.contextWindow || p.maxOutputTokens) && p.inputPrice != null ? ' · ' : ''}
-                  {p.inputPrice != null ? `$${p.inputPrice}/${p.outputPrice ?? '?'}` : ''}
-                </span>
-              ) : null}
-              {isOAuthMethod(p.authMethod) ? (
-                <small className={`llm-provider-key llm-oauth-status-${p.oauthStatus?.status ?? 'disconnected'}`}>
-                  {p.oauthStatus?.status === 'connected'
-                    ? (i18n.locale === 'zh-CN' ? `已登录${p.oauthStatus.accountId ? ` · ${p.oauthStatus.accountId}` : ''}` : `Connected${p.oauthStatus.accountId ? ` · ${p.oauthStatus.accountId}` : ''}`)
-                    : p.oauthStatus?.status === 'expired'
-                      ? (i18n.locale === 'zh-CN' ? '⚠ 登录已过期，请点击右侧“重新登录”' : '⚠ Session expired — click “Re-login”')
+              {isOAuthMethod(head.authMethod) ? (
+                <small className={`llm-provider-key llm-oauth-status-${head.oauthStatus?.status ?? 'disconnected'}`}>
+                  {head.oauthStatus?.status === 'connected'
+                    ? (i18n.locale === 'zh-CN' ? `已登录${head.oauthStatus.accountId ? ` · ${head.oauthStatus.accountId}` : ''}` : `Signed in${head.oauthStatus.accountId ? ` · ${head.oauthStatus.accountId}` : ''}`)
+                    : head.oauthStatus?.status === 'expired'
+                      ? (i18n.locale === 'zh-CN' ? '⚠ 登录已过期，请点击“重新登录”' : '⚠ Session expired — click “Re-login”')
                       : (i18n.locale === 'zh-CN' ? '未登录' : 'Not logged in')}
                 </small>
               ) : (
                 <small className="llm-provider-key">
-                  {p.apiKeyConfigured ? `Key: ${p.apiKeyMasked}` : (i18n.locale === 'zh-CN' ? '未配置 Key' : 'Key not set')}
+                  {head.apiKeyConfigured ? `Key: ${head.apiKeyMasked}` : (i18n.locale === 'zh-CN' ? '未配置 Key' : 'Key not set')}
                 </small>
               )}
-              {isOAuthMethod(p.authMethod) && p.oauthStatus?.status === 'connected' ? (
-                <div className="llm-model-select">
-                  <span>{i18n.locale === 'zh-CN' ? '模型' : 'Model'}</span>
-                  <Dropdown
-                    value={p.model}
-                    disabled={modelLoadingId === p.id && !modelLists[p.id]}
-                    ariaLabel={i18n.locale === 'zh-CN' ? '选择模型' : 'Select model'}
-                    placeholder={
-                      modelLoadingId === p.id && !modelLists[p.id]
-                        ? (i18n.locale === 'zh-CN' ? '加载中…' : 'Loading…')
-                        : p.model
-                    }
-                    options={(modelLists[p.id] && modelLists[p.id].length > 0
-                      ? modelLists[p.id]
-                      : [{ id: p.model, label: p.model } as LlmModelInfo]
-                    ).map((m) => ({ value: m.id, label: m.label }))}
-                    onChange={(value) => void handleSelectModel(p.id, value)}
-                  />
-                </div>
-              ) : null}
-              {testResults[p.id] ? (
-                <small className={`llm-test-result ${testResults[p.id].success ? 'success' : 'fail'}`}>
-                  {testResults[p.id].success
-                    ? `✓ ${testResults[p.id].model} (${testResults[p.id].latencyMs}ms)`
-                    : `✗ ${friendlyTestError(testResults[p.id].error, i18n.locale)}`}
-                </small>
-              ) : null}
-            </div>
-            <div className="llm-provider-actions">
-              {!p.isDefault ? (
-                (() => {
-                  const oauthNotConnected = isOAuthMethod(p.authMethod) && p.oauthStatus?.status !== 'connected';
-                  return (
-                    <button
-                      type="button"
-                      onClick={() => handleSetDefault(p.id)}
-                      disabled={oauthNotConnected}
-                      title={oauthNotConnected ? (i18n.locale === 'zh-CN' ? '会话已过期，请先重新登录' : 'Session expired — please re-login first') : undefined}
-                    >
-                      {i18n.locale === 'zh-CN' ? '激活' : 'Activate'}
-                    </button>
-                  );
-                })()
-              ) : null}
-              {isOAuthMethod(p.authMethod) && p.oauthStatus?.status !== 'connected' ? (
-                <button type="button" className="primary" onClick={() => void handleOAuthLogin({ id: p.id })} disabled={oauthBusyId === p.id}>
-                  {oauthBusyId === p.id ? '...' : (i18n.locale === 'zh-CN' ? '重新登录' : 'Re-login')}
+              <div className="llm-group-actions">
+                <button type="button" onClick={() => openAddModel(head)}>
+                  {i18n.locale === 'zh-CN' ? '+ 加模型' : '+ Add model'}
                 </button>
-              ) : null}
-              <button type="button" onClick={() => handleTest(p.id)} disabled={testingId === p.id}>
-                {testingId === p.id ? '...' : (i18n.locale === 'zh-CN' ? '测试' : 'Test')}
-              </button>
-              {!isOAuthMethod(p.authMethod) ? (
-                <button type="button" onClick={() => handleDuplicate(p.id)} disabled={duplicatingId === p.id}>
-                  {duplicatingId === p.id ? '...' : (i18n.locale === 'zh-CN' ? '复制' : 'Duplicate')}
+                {isOAuthMethod(head.authMethod) && head.oauthStatus?.status !== 'connected' ? (
+                  <button type="button" className="primary" onClick={() => void handleOAuthLogin({ id: head.id })} disabled={oauthBusyId === head.id}>
+                    {oauthBusyId === head.id ? '...' : (i18n.locale === 'zh-CN' ? '重新登录' : 'Re-login')}
+                  </button>
+                ) : null}
+                <button type="button" className="danger" onClick={() => handleRemoveGroup(g.groupId)} disabled={removingGroupId === g.groupId}>
+                  {removingGroupId === g.groupId ? '...' : (i18n.locale === 'zh-CN' ? '删除组' : 'Remove group')}
                 </button>
-              ) : null}
-              <button type="button" onClick={() => openEdit(p)}>
-                {i18n.locale === 'zh-CN' ? '编辑' : 'Edit'}
-              </button>
-              <button type="button" className="danger" onClick={() => handleDelete(p.id)}>
-                {i18n.locale === 'zh-CN' ? '删除' : 'Delete'}
-              </button>
+              </div>
             </div>
+            {!collapsed ? (
+              <div className="llm-group-models">
+                {g.models.map((p) => (
+                  <div key={p.id} className={`llm-model-row ${p.isDefault ? 'is-default' : ''}`}>
+                    <div className="llm-model-row-info">
+                      <span className="llm-provider-chip mono">{p.model}</span>
+                      {p.isDefault ? <span className="llm-badge-default">{i18n.locale === 'zh-CN' ? '已激活' : 'Active'}</span> : null}
+                      {p.contextWindow || p.maxOutputTokens || p.inputPrice != null ? (
+                        <span className="llm-provider-specs">
+                          {p.contextWindow ? `${(p.contextWindow / 1000).toFixed(0)}K ctx` : ''}
+                          {p.contextWindow && p.maxOutputTokens ? ' · ' : ''}
+                          {p.maxOutputTokens ? `${(p.maxOutputTokens / 1000).toFixed(0)}K out` : ''}
+                          {(p.contextWindow || p.maxOutputTokens) && p.inputPrice != null ? ' · ' : ''}
+                          {p.inputPrice != null ? `$${p.inputPrice}/${p.outputPrice ?? '?'}` : ''}
+                        </span>
+                      ) : null}
+                      {isOAuthMethod(p.authMethod) && p.oauthStatus?.status === 'connected' ? (
+                        <div className="llm-model-select">
+                          <span>{i18n.locale === 'zh-CN' ? '模型' : 'Model'}</span>
+                          <Dropdown
+                            value={p.model}
+                            disabled={modelLoadingId === p.id && !modelLists[p.id]}
+                            ariaLabel={i18n.locale === 'zh-CN' ? '选择模型' : 'Select model'}
+                            placeholder={
+                              modelLoadingId === p.id && !modelLists[p.id]
+                                ? (i18n.locale === 'zh-CN' ? '加载中…' : 'Loading…')
+                                : p.model
+                            }
+                            options={(modelLists[p.id] && modelLists[p.id].length > 0
+                              ? modelLists[p.id]
+                              : [{ id: p.model, label: p.model } as LlmModelInfo]
+                            ).map((m) => ({ value: m.id, label: m.label }))}
+                            onChange={(value) => void handleSelectModel(p.id, value)}
+                          />
+                        </div>
+                      ) : null}
+                      {testResults[p.id] ? (
+                        <small className={`llm-test-result ${testResults[p.id].success ? 'success' : 'fail'}`}>
+                          {testResults[p.id].success
+                            ? `✓ ${testResults[p.id].model} (${testResults[p.id].latencyMs}ms)`
+                            : `✗ ${friendlyTestError(testResults[p.id].error, i18n.locale)}`}
+                        </small>
+                      ) : null}
+                    </div>
+                    <div className="llm-provider-actions">
+                      {!p.isDefault ? (
+                        (() => {
+                          const oauthNotConnected = isOAuthMethod(p.authMethod) && p.oauthStatus?.status !== 'connected';
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => handleSetDefault(p.id)}
+                              disabled={oauthNotConnected}
+                              title={oauthNotConnected ? (i18n.locale === 'zh-CN' ? '会话已过期，请先重新登录' : 'Session expired — please re-login first') : undefined}
+                            >
+                              {i18n.locale === 'zh-CN' ? '激活' : 'Activate'}
+                            </button>
+                          );
+                        })()
+                      ) : null}
+                      <button type="button" onClick={() => handleTest(p.id)} disabled={testingId === p.id}>
+                        {testingId === p.id ? '...' : (i18n.locale === 'zh-CN' ? '测试' : 'Test')}
+                      </button>
+                      {!isOAuthMethod(p.authMethod) ? (
+                        <button type="button" onClick={() => handleDuplicate(p.id)} disabled={duplicatingId === p.id}>
+                          {duplicatingId === p.id ? '...' : (i18n.locale === 'zh-CN' ? '复制' : 'Duplicate')}
+                        </button>
+                      ) : null}
+                      <button type="button" onClick={() => openEdit(p)}>
+                        {i18n.locale === 'zh-CN' ? '编辑' : 'Edit'}
+                      </button>
+                      <button type="button" className="danger" onClick={() => handleDelete(p.id)}>
+                        {i18n.locale === 'zh-CN' ? '删除' : 'Delete'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <button type="button" className="llm-add-btn" onClick={openAdd}>

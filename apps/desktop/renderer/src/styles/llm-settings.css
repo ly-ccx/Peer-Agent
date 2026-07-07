@@ -768,3 +768,123 @@
   opacity: 0.3;
   cursor: not-allowed;
 }
+
+/* ── B-2 手风琴：provider 分组折叠 ── */
+.llm-provider-group {
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  background: var(--paper-sheet);
+  overflow: hidden;
+}
+
+.llm-group-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  flex-wrap: wrap;
+}
+
+.llm-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--graphite-base);
+  min-width: 0;
+}
+.llm-group-toggle strong {
+  font-size: 0.9rem;
+  color: var(--graphite-base);
+}
+
+.llm-group-caret {
+  display: inline-block;
+  flex-shrink: 0;
+  color: var(--graphite-soft);
+  transition: transform var(--za-motion-fast);
+}
+.llm-group-caret.is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.llm-group-count {
+  color: var(--graphite-mute);
+  font-size: 0.72rem;
+}
+
+.llm-group-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.llm-group-actions button {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--chrome-hairline);
+  background: var(--paper-sheet);
+  color: var(--graphite-base);
+  font-size: 0.76rem;
+  cursor: pointer;
+  transition: opacity var(--za-motion-fast), background var(--za-motion-fast);
+}
+.llm-group-actions button:hover:not(:disabled) {
+  background: var(--chrome-hairline);
+}
+.llm-group-actions button.primary {
+  border-color: transparent;
+  background: var(--za-primary-control-bg);
+  color: var(--za-primary-control-ink);
+}
+.llm-group-actions button.danger:hover:not(:disabled) {
+  color: var(--state-danger);
+}
+.llm-group-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.llm-group-models {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.llm-model-row {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--chrome-sunken);
+}
+.llm-model-row.is-default {
+  border-color: rgba(78, 163, 217, 0.62);
+  box-shadow:
+    0 0 0 1px rgba(78, 163, 217, 0.14),
+    inset 0 0 18px rgba(78, 163, 217, 0.06);
+}
+
+.llm-model-row-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.llm-model-select {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 0.72rem;
+  color: var(--graphite-soft);
+}

@@ -151,12 +151,21 @@
   }
 
   .timeline-tool-stream-label::before {
-    content: "▸ ";
-    font-size: 0.5625rem;
+    content: "";
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    margin-right: 4px;
+    vertical-align: middle;
+    background-color: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+    transform: rotate(-90deg);
+    transition: transform var(--za-motion-fast);
   }
 
   details[open]>.timeline-tool-stream-label::before {
-    content: "▾ ";
+    transform: rotate(0deg);
   }
 
   details.timeline-tool-stdout[open]>pre,
@@ -190,12 +199,21 @@
   }
 
   .tool-result-details>.tool-result-summary::before {
-    content: "▸ ";
-    font-size: 0.5625rem;
+    content: "";
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    margin-right: 4px;
+    vertical-align: middle;
+    background-color: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+    transform: rotate(-90deg);
+    transition: transform var(--za-motion-fast);
   }
 
   .tool-result-details[open]>.tool-result-summary::before {
-    content: "▾ ";
+    transform: rotate(0deg);
   }
 
   .tool-result-content {
