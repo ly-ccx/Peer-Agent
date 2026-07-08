@@ -147,9 +147,21 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     // 压缩「完成」时把进度钉到 100% 短暂停顿再隐藏横幅的收尾 timer（前台压缩，单例足够）。
     let compactionDoneTimer: ReturnType<typeof setTimeout> | null = null;
 
+    // 兜底清除“正在重试连接”横幅：连接若在 SSE 正文阶段恢复，recovering-fetch 已
+    // return，不会补发 recovered 事件，横幅会一直残留。收到真实数据/收尾事件即收敛。
+    const clearRecoveryNotice = (cid: string) => {
+      if (conversationStore.getSnapshot(cid).providerRecoveryNotice) {
+        conversationStore.setState(cid, { providerRecoveryNotice: null });
+      }
+    };
+
     const offDelta = clientApi.onChatStreamDelta(({ streamId, content }) => {
       const cid = conversationStore.resolveConversation(streamId);
       if (!cid) return;
+      // 兜底清除“正在重试连接”横幅：正文已在流式输出即证明连接已恢复。
+      // 恢复发生在 SSE 正文阶段时，recovering-fetch 已 return，不会补发 recovered
+      // 事件，横幅便会一直挂着（本次 bug 根因）。此处收到真实 delta 即收敛。
+      clearRecoveryNotice(cid);
       if (cid === activeRef.current) {
         // 保持 provider 事件顺序：另一侧 buffer 若有积压，先 flush 再追加本侧。
         thinkingTypewriter.flush();
@@ -162,6 +174,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     const offThinking = clientApi.onChatStreamThinking(({ streamId, content }) => {
       const cid = conversationStore.resolveConversation(streamId);
       if (!cid) return;
+      // 推理模型常先输出 thinking 再出正文，此处同样兜底清除重试横幅。
+      clearRecoveryNotice(cid);
       if (cid === activeRef.current) {
         textTypewriter.flush();
         thinkingTypewriter.push(content);
@@ -174,6 +188,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       ({ streamId, usage, lifetimeUsage, contextTokens, contextWindow, compactionSuggested }) => {
         const cid = conversationStore.resolveConversation(streamId);
         if (!cid) return;
+        // 流正常收尾，重试横幅若仍残留一并清除。
+        clearRecoveryNotice(cid);
         if (cid === activeRef.current) {
           textTypewriter.flush();
           thinkingTypewriter.flush();
@@ -384,6 +400,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         pendingPermissionCalls: [],
         toolProgress: null,
         streamError: error,
+        // 最终失败时清除“正在重试连接”横幅，避免与错误提示叠加残留。
+        providerRecoveryNotice: null,
       });
       if (lifetimeUsage) {
         conversationStore.setState(cid, { tokenUsage: usageFromLifetime(lifetimeUsage) });
