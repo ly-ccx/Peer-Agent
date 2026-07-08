@@ -1940,6 +1940,9 @@ ipcMain.handle('prompt-context-epochs:chain', (_event, params = {}) =>
 // ── LLM Providers ──
 ipcMain.handle('llm:channels:list', () => listChannelDescriptors());
 ipcMain.handle('llm:list', () => llmConfigStore.listProviders());
+// 聊天模型菜单专用：把 Qoder 本机记录按目录展开成多条虚拟模型记录（复合 id=groupId::modelId）。
+// 设置页仍走 llm:list（纯真实记录），因此 CRUD 不受展开影响。
+ipcMain.handle('llm:chat:list', () => llmConfigStore.listChatProviders());
 ipcMain.handle('llm:add', (_, config) => {
   const provider = llmConfigStore.addProvider(config);
   if (provider.isDefault) recordProviderBaseline('initial', provider);

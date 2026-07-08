@@ -1,5 +1,6 @@
 import type { LlmProviderConfigView } from '@peer-agent/protocol';
 import { Dropdown, type DropdownOption } from '../../../app/components/Dropdown';
+import { CascadingMenu, type CascadingMenuGroup } from '../../../app/components/CascadingMenu';
 import { isEffortLevel, type EffortLevel } from '../../state/preferences';
 import { formatTokenCount } from '../../state/format';
 import type { TokenUsageState } from '../../state/types';
@@ -88,6 +89,28 @@ export function TokenUsageDisplay({
   const ctxPercent = ctxWindow ? Math.min((currentContextTokens / ctxWindow) * 100, 100) : null;
   const effortOptions: readonly DropdownOption[] = effortLevels.map((level) => ({ value: level, label: effortLabel(level, isZh) }));
   const shouldShowModelDropdown = Boolean(defaultProvider?.model && canSwitchModel && onModelChange && modelOptions.length > 0);
+  // 级联菜单分组：一级 provider（按 groupId 折叠同一凭证下的多模型），二级为该 provider 下的模型。
+  // 每个 provider 恒有二级子菜单（哪怕只有一个模型），一级只负责展开、不直接选中。
+  // 未配置 API Key 的模型也一并列出，但置灰（disabled）不可选；整组模型都未配置时整组置灰。
+  const modelGroups: readonly CascadingMenuGroup[] = (() => {
+    const order: string[] = [];
+    const byGroup = new Map<string, { label: string; items: { id: string; label: string; disabled: boolean }[] }>();
+    for (const prov of providers) {
+      const key = prov.groupId || prov.id;
+      let bucket = byGroup.get(key);
+      if (!bucket) {
+        bucket = { label: prov.name || prov.model, items: [] };
+        byGroup.set(key, bucket);
+        order.push(key);
+      }
+      bucket.items.push({ id: prov.id, label: prov.modelLabel || prov.model, disabled: !prov.apiKeyConfigured });
+    }
+    return order.map((key) => {
+      const bucket = byGroup.get(key)!;
+      return { id: key, label: bucket.label, items: bucket.items, disabled: bucket.items.every((it) => it.disabled) };
+    });
+  })();
+
   const modelDisplayName = defaultProvider?.modelLabel || defaultProvider?.model;
   const modelTitle = defaultProvider?.modelLabel && defaultProvider.modelLabel !== defaultProvider.model
     ? `${isZh ? '当前会话使用的模型' : 'Model used for this conversation'}: ${defaultProvider.model}`
@@ -98,10 +121,10 @@ export function TokenUsageDisplay({
       <span className="token-usage">
         {defaultProvider?.model ? (
           shouldShowModelDropdown ? (
-            <Dropdown
-              className="composer-dropdown composer-model-dropdown"
+            <CascadingMenu
+              className="composer-cascading-menu composer-model-dropdown"
               value={defaultProvider.id}
-              options={modelOptions}
+              groups={modelGroups}
               onChange={(next) => onModelChange?.(next)}
               ariaLabel={isZh ? '切换模型' : 'Switch model'}
               title={modelLoading ? (isZh ? '正在加载模型列表' : 'Loading models') : modelTitle}

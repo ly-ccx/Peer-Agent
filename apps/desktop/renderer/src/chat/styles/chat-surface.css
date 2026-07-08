@@ -2331,3 +2331,192 @@
 .chat-header-cap-manage svg {
   display: block;
 }
+
+
+
+/* ── 模型下拉（单面板分组分段：provider 小标题 + 模型项）── */
+.composer-cascading-menu {
+  width: auto;
+  min-width: 0;
+}
+
+.pa-cascading-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--composer-addon-height);
+  min-height: var(--composer-addon-height);
+  max-width: 200px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--composer-addon-color);
+  font-size: var(--composer-addon-font-size);
+  font-weight: 500;
+  line-height: 1;
+  box-shadow: none;
+  padding: 0 8px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.pa-cascading-trigger:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.pa-cascading-trigger:hover:not(:disabled),
+.pa-cascading-trigger.open {
+  background: var(--composer-addon-hover-bg);
+  border-color: var(--chrome-hairline);
+  color: var(--graphite-soft);
+}
+
+.pa-cascading-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pa-cascading-caret {
+  width: 12px;
+  height: 12px;
+  opacity: 0.58;
+  flex-shrink: 0;
+}
+
+/* 一级面板：provider 列表浮层（portal 投影到 body） */
+.pa-cascading-menu-panel {
+  position: fixed;
+  z-index: 1200;
+  padding: 4px;
+  min-width: max-content;
+  max-width: 260px;
+  max-height: 360px;
+  overflow-y: auto;
+  background: var(--paper-sheet);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 30px rgba(16, 24, 40, 0.28);
+  isolation: isolate;
+}
+
+/* 二级子菜单：某个 provider 下的模型列表浮层，层级高于一级面板 */
+.pa-cascading-submenu-panel {
+  position: fixed;
+  z-index: 1201;
+  padding: 4px;
+  min-width: 180px;
+  max-width: 280px;
+  max-height: 360px;
+  overflow-y: auto;
+  background: var(--paper-sheet);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 30px rgba(16, 24, 40, 0.28);
+  isolation: isolate;
+}
+
+/* 一级 provider 行：可点、悬停展开右侧子菜单 */
+.pa-cascading-group-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--graphite-base);
+  font-size: 0.76rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.pa-cascading-group-row:hover,
+.pa-cascading-group-row.active {
+  background: var(--chrome-sunken);
+}
+
+.pa-cascading-group-row.selected {
+  color: var(--za-accent, var(--azure-seal));
+  font-weight: 600;
+}
+
+.pa-cascading-group-row.group-disabled {
+  color: var(--graphite-mute);
+}
+
+.pa-cascading-group-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pa-cascading-group-arrow {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+/* 模型项 */
+.pa-cascading-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--graphite-base);
+  font-size: 0.76rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.pa-cascading-item:hover:not(.disabled),
+.pa-cascading-item.active:not(.disabled) {
+  background: var(--chrome-sunken);
+}
+
+/* 未配置 Key 的模型：置灰不可选 */
+.pa-cascading-item.disabled {
+  color: var(--graphite-mute);
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* 选中项：强调色背景条 */
+.pa-cascading-item.selected {
+  background: var(--za-accent-soft, rgba(99, 179, 237, 0.16));
+  color: var(--za-accent, var(--azure-seal));
+  font-weight: 600;
+}
+
+.pa-cascading-item.selected:hover,
+.pa-cascading-item.selected.active {
+  background: var(--za-accent-soft, rgba(99, 179, 237, 0.22));
+}
+
+.pa-cascading-item-check {
+  width: 14px;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.pa-cascading-item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

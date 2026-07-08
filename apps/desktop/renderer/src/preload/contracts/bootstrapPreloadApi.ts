@@ -466,6 +466,11 @@ export interface BootstrapPreloadApi {
     listener: (payload: { fullscreen: boolean }) => void,
   ) => () => void;
   readonly llmListProviders: () => Promise<readonly LlmProviderConfigView[]>;
+  /**
+   * 聊天模型菜单专用列表：Qoder 本机记录已按目录展开成多条虚拟模型记录
+   * （复合 id=groupId::modelId，共享同一凭证）。设置页请用 llmListProviders（纯真实记录）。
+   */
+  readonly llmListChatProviders: () => Promise<readonly LlmProviderConfigView[]>;
   readonly llmListChannels: () => Promise<readonly LlmChannelDescriptor[]>;
   readonly llmAddProvider: (config: Record<string, unknown>) => Promise<LlmProviderConfigView>;
   readonly llmUpdateProvider: (params: { id: string; [key: string]: unknown }) => Promise<LlmProviderConfigView>;

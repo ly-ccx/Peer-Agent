@@ -74,7 +74,9 @@ export function App() {
     readGitBranchPrefix(clientApi.initialSettings));
 
   const refreshProviders = useCallback(async () => {
-    try { setProviders(await clientApi.llmListProviders()); } catch {}
+    // 聊天模型菜单用「展开后」列表：Qoder 本机记录会按目录展开成多条虚拟模型记录，
+    // 使菜单列出该 provider 的全部模型（设置页另有独立列表，走 llmListProviders）。
+    try { setProviders(await clientApi.llmListChatProviders()); } catch {}
   }, []);
 
   const refreshSeqRef = useRef(0);

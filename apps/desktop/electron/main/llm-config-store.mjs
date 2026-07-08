@@ -21,8 +21,9 @@ import {
   validateCustomHeaders,
 } from './provider-channels.mjs';
 import { loadQoderAccessToken } from './provider-adapters/qoder-local-auth.mjs';
-import { getQoderModelMetadata } from './provider-adapters/qoder-model-catalog.mjs';
+import { getQoderModelCatalog, getQoderModelMetadata } from './provider-adapters/qoder-model-catalog.mjs';
 import { sendQoderPrivateStream } from './provider-adapters/qoder-private-adapter.mjs';
+import { expandQoderProviders } from './provider-adapters/qoder-provider-expansion.mjs';
 
 const { safeStorage } = electron;
 
@@ -378,6 +379,13 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     return readAll().map(toView);
   }
 
+  // 聊天/路由专用列表：在真实记录基础上，把每条 Qoder 本机记录展开成「该 provider 目录下的
+  // 全部模型」多条虚拟记录（复合 id=groupId::modelId，共享同一凭证）。设置页仍走 listProviders()，
+  // 因此这里的展开不会污染 CRUD。catalog 读取失败时 expandQoderProviders 会保留原单条记录。
+  function listChatProviders() {
+    return expandQoderProviders(listProviders(), () => getQoderModelCatalog());
+  }
+
   function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, apiKey, contextWindow, maxOutputTokens, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthClientId, oauthClientSecret, oauthProjectId, customHeaders }) {
     const items = readAll();
     const method = normalizeAuthMethod(authMethod);
@@ -716,7 +724,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     }
   }
 
-  return { listProviders, addProvider, addModel, updateProvider, duplicateProvider, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, setOAuthTokens, testConnection };
+  return { listProviders, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, setOAuthTokens, testConnection };
 }
 
 async function testOpenAI(resolved, model, start) {

@@ -187,6 +187,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
     return () => ipcRenderer.removeListener('window:fullscreen-changed', handler);
   },
   llmListProviders: () => ipcRenderer.invoke('llm:list'),
+  llmListChatProviders: () => ipcRenderer.invoke('llm:chat:list'),
   llmListChannels: () => ipcRenderer.invoke('llm:channels:list'),
   llmAddProvider: (config) => ipcRenderer.invoke('llm:add', config),
   llmUpdateProvider: (params) => ipcRenderer.invoke('llm:update', params),
