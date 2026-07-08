@@ -623,6 +623,8 @@ export function createLlmChatService({
           mode,
           // goal-plan 事实上下文 Source（0006）：goal 模式下注入活动计划权威 taskId。
           goalPlanStore,
+          // mcp-host 自我认知 Source：注入「我自己是 MCP host + 注册表路径 + 已装清单」。
+          mcpRegistry,
           provider: resolvedChannel.legacyProvider,
           model: provider.model,
         });

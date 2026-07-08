@@ -397,5 +397,7 @@ export function createMcpRegistry() {
     updateManifest,
     updateHealth,
     listCapabilityManifests,
+    // 暴露注册表真实路径（只读），供 mcp-host prompt source 注入自我认知（B2b）。
+    path: registryPath,
   };
 }
