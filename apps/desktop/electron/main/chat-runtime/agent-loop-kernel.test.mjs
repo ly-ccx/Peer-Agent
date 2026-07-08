@@ -221,22 +221,45 @@ describe('agent loop kernel', () => {
     }]);
   });
 
-  it('emits done (not error) when text is empty but thinking is present', () => {
+  it('retries once when text is empty but thinking is present', () => {
     const webContents = makeWebContents();
     const loop = createAgentLoopKernel({ webContents, streamId: 's4b' });
+    const apiMessages = [];
 
     const result = handleTerminalTextResponse({
       text: '   ',
       thinking: 'deep reasoning happened here',
+      apiMessages,
+      loop,
+      responseGuard: makeResponseGuard(),
+    });
+
+    assert.deepEqual(result, { action: 'retry', reason: 'thinking-only-response' });
+    assert.deepEqual(apiMessages, [{ role: 'user', content: 'thinking-only retry correction' }]);
+    assert.deepEqual(webContents.events, []);
+  });
+
+  it('reports an error when the thinking-only retry budget is exhausted', () => {
+    const webContents = makeWebContents();
+    const loop = createAgentLoopKernel({
+      webContents,
+      streamId: 's4b2',
+      maxThinkingOnlyRetries: 0,
+    });
+
+    const result = handleTerminalTextResponse({
+      text: '',
+      thinking: 'deep reasoning happened here',
+      providerTracePath: '/tmp/thinking-only.jsonl',
       apiMessages: [],
       loop,
       responseGuard: makeResponseGuard(),
     });
 
-    assert.deepEqual(result, { action: 'done', reason: 'thinking-only' });
+    assert.deepEqual(result, { action: 'stop', reason: 'thinking-only-response-exhausted' });
     assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:done',
-      payload: { streamId: 's4b', usage: loop.usage },
+      channel: 'chat:stream:error',
+      payload: { streamId: 's4b2', error: 'thinking-only response /tmp/thinking-only.jsonl' },
     }]);
   });
 
@@ -325,7 +348,7 @@ describe('agent loop kernel', () => {
     assert.deepEqual(webContents.events, []);
   });
 
-  it('silently completes after the unsupported tool retry budget is exhausted', () => {
+  it('reports an error after the unsupported tool retry budget is exhausted', () => {
     const webContents = makeWebContents();
     const loop = createAgentLoopKernel({
       webContents,
@@ -335,6 +358,7 @@ describe('agent loop kernel', () => {
 
     const result = handleTerminalTextResponse({
       text: 'fake tool result',
+      providerTracePath: '/tmp/provider-trace.jsonl',
       apiMessages: [],
       loop,
       responseGuard: makeResponseGuard(),
@@ -344,10 +368,10 @@ describe('agent loop kernel', () => {
       action: 'stop',
       reason: 'unsupported-tool-claim-exhausted',
     });
-    // 不再向用户弹出守卫文案：以 done 静默收尾，不发 error。
+    // 重试耗尽不能伪装成正常 done，否则 UI 会表现为“思考完直接没了”。
     assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:done',
-      payload: { streamId: 's6', usage: loop.usage },
+      channel: 'chat:stream:error',
+      payload: { streamId: 's6', error: 'unsupported response /tmp/provider-trace.jsonl' },
     }]);
   });
 });
@@ -356,7 +380,10 @@ function makeResponseGuard() {
   return {
     emptyModelResponseError: () => 'empty response',
     emptyModelResponseCorrection: () => 'empty retry correction',
+    thinkingOnlyResponseError: ({ providerTracePath }) => `thinking-only response ${providerTracePath}`,
+    thinkingOnlyResponseCorrection: () => 'thinking-only retry correction',
     shouldRetryNoToolResponse: (text) => text.includes('fake tool result'),
     unsupportedToolResponseCorrection: () => 'retry correction',
+    unsupportedToolResponseError: ({ providerTracePath }) => `unsupported response ${providerTracePath}`,
   };
 }

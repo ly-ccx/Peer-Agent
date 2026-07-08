@@ -124,6 +124,45 @@ describe('Provider message encoders', () => {
     assert.deepEqual(body.generationConfig, { maxOutputTokens: 2048 });
   });
 
+  it('lowers canonical OpenAI-style tool history to Gemini function call and response parts', () => {
+    const body = encodeGeminiGenerateContentRequest({
+      messages: [
+        { role: 'user', content: 'inspect' },
+        {
+          role: 'assistant',
+          content: 'I will inspect.',
+          tool_calls: [{
+            id: 'tool_call_1',
+            type: 'function',
+            function: { name: 'bash', arguments: '{"command":"pwd"}' },
+          }],
+        },
+        { role: 'tool', tool_call_id: 'tool_call_1', name: 'bash', content: '/tmp/project' },
+      ],
+      tools: [{ type: 'function', function: { name: 'bash', parameters: { type: 'object' } } }],
+    });
+
+    assert.deepEqual(body.contents, [
+      { role: 'user', parts: [{ text: 'inspect' }] },
+      {
+        role: 'model',
+        parts: [
+          { text: 'I will inspect.' },
+          { functionCall: { name: 'bash', args: { command: 'pwd' } } },
+        ],
+      },
+      {
+        role: 'user',
+        parts: [{
+          functionResponse: {
+            name: 'bash',
+            response: { result: '/tmp/project' },
+          },
+        }],
+      },
+    ]);
+  });
+
   it('passes OpenAI extra-high reasoning effort through as xhigh', () => {
     const body = encodeOpenAIChatRequest({
       model: 'gpt-5.5',
@@ -402,6 +441,122 @@ describe('Provider message encoders', () => {
     assert.equal(markedText.cache_control.type, 'ephemeral');
     assert.equal(toolUse.cache_control, undefined);
     assert.equal(latestToolResult.cache_control, undefined);
+  });
+
+  it('lowers canonical OpenAI-style tool history to Anthropic tool_use/tool_result blocks', () => {
+    const body = encodeAnthropicMessagesRequest({
+      model: 'claude-test',
+      system: 'system',
+      messages: [
+        { role: 'user', content: 'inspect' },
+        {
+          role: 'assistant',
+          content: 'I will inspect.',
+          tool_calls: [{
+            id: 'tool_call_1',
+            type: 'function',
+            function: { name: 'bash', arguments: '{"command":"pwd"}' },
+          }],
+        },
+        { role: 'tool', tool_call_id: 'tool_call_1', name: 'bash', content: '/tmp/project' },
+      ],
+      tools: [{ name: 'bash' }],
+      effort: 'default',
+      promptCaching: false,
+    });
+
+    assert.deepEqual(body.messages, [
+      { role: 'user', content: 'inspect' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'I will inspect.' },
+          { type: 'tool_use', id: 'tool_call_1', name: 'bash', input: { command: 'pwd' } },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'tool_call_1', content: '/tmp/project' },
+        ],
+      },
+    ]);
+  });
+
+  it('does not lower orphan role:tool messages to Anthropic tool_result blocks', () => {
+    const body = encodeAnthropicMessagesRequest({
+      model: 'claude-test',
+      system: 'system',
+      messages: [
+        { role: 'user', content: 'continue' },
+        { role: 'tool', tool_call_id: 'missing_tool_use', name: 'bash', content: 'late output' },
+      ],
+      tools: [{ name: 'bash' }],
+      effort: 'default',
+      promptCaching: false,
+    });
+
+    assert.deepEqual(body.messages, [
+      { role: 'user', content: 'continue' },
+      {
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: [
+            '[Historical local tool result - unmatched; read-only context]',
+            'tool_call_id: missing_tool_use',
+            'late output',
+          ].join('\n'),
+        }],
+      },
+    ]);
+  });
+
+  it('groups consecutive canonical tool results into one Anthropic user message', () => {
+    const body = encodeAnthropicMessagesRequest({
+      model: 'claude-test',
+      system: 'system',
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'tool_call_1',
+              type: 'function',
+              function: { name: 'read_file', arguments: '{"path":"a.ts"}' },
+            },
+            {
+              id: 'tool_call_2',
+              type: 'function',
+              function: { name: 'read_file', arguments: '{"path":"b.ts"}' },
+            },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'tool_call_1', name: 'read_file', content: 'a' },
+        { role: 'tool', tool_call_id: 'tool_call_2', name: 'read_file', content: 'b' },
+      ],
+      tools: [{ name: 'read_file' }],
+      effort: 'default',
+      promptCaching: false,
+    });
+
+    assert.deepEqual(body.messages, [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'tool_call_1', name: 'read_file', input: { path: 'a.ts' } },
+          { type: 'tool_use', id: 'tool_call_2', name: 'read_file', input: { path: 'b.ts' } },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'tool_call_1', content: 'a' },
+          { type: 'tool_result', tool_use_id: 'tool_call_2', content: 'b' },
+        ],
+      },
+    ]);
   });
 
   it('walks backward to the nearest text block when the second-to-last message is tool-only', () => {

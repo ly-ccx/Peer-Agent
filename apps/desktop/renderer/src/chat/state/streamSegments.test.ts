@@ -133,6 +133,38 @@ describe('groupSegments', () => {
     assert.equal((groups[1] as { calls: unknown[] }).calls.length, 2);
     assert.deepEqual(groups[2], { type: 'text', content: 'done' });
   });
+  it('hoists late thinking before visible text so reasoning never appears after the answer', () => {
+    const groups = groupSegments([txt('请选择方案 A/B/C'), think('内部分析')]);
+
+    assert.deepEqual(groups[0], { type: 'thinking', content: '内部分析' });
+    assert.deepEqual(groups[1], { type: 'text', content: '请选择方案 A/B/C' });
+  });
+  it('preserves tool-call phase boundaries when hoisting split thinking blocks', () => {
+    const groups = groupSegments([tool('first'), think('a'), tool('second'), txt('done'), think('b')]);
+
+    assert.equal(groups.length, 5);
+    assert.equal(groups[0].type, 'tool-call-group');
+    assert.equal((groups[0] as { calls: Array<{ tool: string }> }).calls[0].tool, 'first');
+    assert.deepEqual(groups[1], { type: 'thinking', content: 'a' });
+    assert.equal(groups[2].type, 'tool-call-group');
+    assert.equal((groups[2] as { calls: Array<{ tool: string }> }).calls[0].tool, 'second');
+    assert.deepEqual(groups[3], { type: 'thinking', content: 'b' });
+    assert.deepEqual(groups[4], { type: 'text', content: 'done' });
+  });
+  it('does not merge thinking blocks across tool-call groups', () => {
+    const groups = groupSegments([
+      think('before tool'),
+      tool('read_file', { toolCallId: 'call_read', result: 'ok' }),
+      think('after tool'),
+      txt('final answer'),
+    ]);
+
+    assert.equal(groups.length, 4);
+    assert.deepEqual(groups[0], { type: 'thinking', content: 'before tool' });
+    assert.equal(groups[1].type, 'tool-call-group');
+    assert.deepEqual(groups[2], { type: 'thinking', content: 'after tool' });
+    assert.deepEqual(groups[3], { type: 'text', content: 'final answer' });
+  });
   it('carries displayName through to the grouped tool call (MCP title passthrough)', () => {
     // 回归：MCP 工具卡标题。后端注入的 displayName 必须经分组保留到 ToolCallLegacy，
     // 渲染层才能显示「服务名: 工具名」而不是裸 capability 名 mcp__server__tool。

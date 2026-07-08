@@ -25,8 +25,24 @@ export type ChatApiContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } };
 
-/** 发送给模型 API 的单条消息（content 可为纯文本或多模态分片数组）。 */
-export type ChatApiMessage = { role: string; content: string | ChatApiContentPart[] };
+/** OpenAI-style 工具调用记录：表达层统一用它回放本地工具历史，provider encoder 再降级到各自协议。 */
+export interface ChatApiToolCall {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+/** 发送给模型 API 的单条消息（content 可为空、纯文本或多模态分片数组）。 */
+export interface ChatApiMessage {
+  role: string;
+  content: string | ChatApiContentPart[] | null;
+  tool_calls?: ChatApiToolCall[];
+  tool_call_id?: string;
+  name?: string;
+}
 
 /** 流式内容分段：正文 / 思考 / 工具调用。 */
 export type ContentSegment =

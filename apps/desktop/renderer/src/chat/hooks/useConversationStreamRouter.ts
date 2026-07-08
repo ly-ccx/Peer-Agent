@@ -250,7 +250,10 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           if (last && isEmptyAssistantPlaceholder(last)) {
             const next = msgs.slice(0, -1);
             persistMessages(cid, next);
-            return { messages: next };
+            return {
+              messages: next,
+              streamError: 'empty_visible_model_response: 模型已结束，但没有返回任何可见文本、思考或工具调用。',
+            };
           }
           if (last?.role === 'assistant') {
             const patched: ChatMsg = {

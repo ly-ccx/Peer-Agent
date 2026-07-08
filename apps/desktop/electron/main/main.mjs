@@ -1664,6 +1664,7 @@ ipcMain.handle('chat:send', (event, {
             summary: route.summary,
             payload: {
               source: 'chat:send',
+              summaryCode: route.summaryCode,
               intent: route.intent,
               messageText: route.messageText,
             },

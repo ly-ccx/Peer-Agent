@@ -59,7 +59,8 @@ export function classifyGoalMessage(messageText) {
     return {
       intent: 'empty',
       eventType: 'message_routed',
-      summary: 'Empty user message routed to active Goal',
+      summaryCode: 'msg_empty',
+      summary: '收到一条空消息，已归入当前目标',
     };
   }
 
@@ -67,7 +68,8 @@ export function classifyGoalMessage(messageText) {
     return {
       intent: 'new_goal_explicit',
       eventType: 'goal_created',
-      summary: 'User explicitly requested a new Goal',
+      summaryCode: 'msg_new_goal_explicit',
+      summary: '用户要求开一个新目标',
     };
   }
 
@@ -75,7 +77,8 @@ export function classifyGoalMessage(messageText) {
     return {
       intent: 'pause',
       eventType: 'goal_paused',
-      summary: `User paused the current Goal: ${text}`,
+      summaryCode: 'msg_paused',
+      summary: `用户暂停了当前目标：${text}`,
     };
   }
 
@@ -83,7 +86,8 @@ export function classifyGoalMessage(messageText) {
     return {
       intent: 'resume',
       eventType: 'goal_resumed',
-      summary: `User resumed the current Goal: ${text}`,
+      summaryCode: 'msg_resumed',
+      summary: `用户让当前目标继续：${text}`,
     };
   }
 
@@ -91,7 +95,8 @@ export function classifyGoalMessage(messageText) {
     return {
       intent: 'requirement_override',
       eventType: 'requirement_override',
-      summary: `User updated the current Goal requirements: ${text}`,
+      summaryCode: 'msg_requirement_override',
+      summary: `用户更新了目标要求：${text}`,
     };
   }
 
@@ -99,14 +104,16 @@ export function classifyGoalMessage(messageText) {
     return {
       intent: 'correction',
       eventType: 'user_correction',
-      summary: `User corrected the current Goal path: ${text}`,
+      summaryCode: 'msg_correction',
+      summary: `用户纠正了执行方向：${text}`,
     };
   }
 
   return {
     intent: 'follow_up',
     eventType: 'message_routed',
-    summary: `User follow-up routed to current Goal: ${text}`,
+    summaryCode: 'msg_follow_up',
+    summary: `用户补充了一句，已归入当前目标：${text}`,
   };
 }
 
@@ -138,6 +145,7 @@ export function routeGoalMessage({ messageText, activeGoalPlan } = {}) {
     goalPlanId: activeGoalPlan.planId,
     intent: classification.intent,
     eventType: classification.eventType,
+    summaryCode: classification.summaryCode,
     summary: classification.summary,
     messageText: text,
   };

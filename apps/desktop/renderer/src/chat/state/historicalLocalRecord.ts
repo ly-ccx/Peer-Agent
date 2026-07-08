@@ -23,11 +23,18 @@ export function sanitizeAssistantHistoryTextForApi(content: string): string {
     .replace(/\[Tool result\]/gi, '[Legacy assistant local observation marker]');
 }
 
-const DISPLAY_TOOL_CALL_SYNTAX_PATTERN = /<(\/?)(?:(antml:)?(function_calls|invoke|parameter)|(functions\.[a-zA-Z0-9_.-]+))\b/gi;
+const DISPLAY_LITERAL_TOOL_CALL_BLOCK_PATTERN = /(?:<|&lt;)tool_call(?:>|&gt;)[\s\S]*?(?:(?:<|&lt;)\/tool_call(?:>|&gt;)|$)/gi;
+const DISPLAY_TOOL_CALL_SYNTAX_PATTERN = /(?:<|&lt;)(\/?)(?:(antml:)?(tool_call|function_calls|invoke|parameter)|(functions\.[a-zA-Z0-9_.-]+))\b/gi;
 
 export function neutralizeToolCallSyntaxForDisplay(content: string): string {
-  if (!content || !content.includes('<')) return content;
-  return content.replace(DISPLAY_TOOL_CALL_SYNTAX_PATTERN, '&lt;$1$2$3$4');
+  if (!content || (content.indexOf('<') === -1 && !/&lt;/i.test(content))) return content;
+  const neutralized = content
+    .replace(DISPLAY_LITERAL_TOOL_CALL_BLOCK_PATTERN, '')
+    .replace(DISPLAY_TOOL_CALL_SYNTAX_PATTERN, '&lt;$1$2$3$4');
+  if (neutralized === content) return content;
+  return neutralized
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 /**

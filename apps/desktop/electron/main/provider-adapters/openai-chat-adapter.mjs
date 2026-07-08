@@ -50,6 +50,38 @@ function extractOpenAIStreamError(parsed) {
   };
 }
 
+function parseJsonObject(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractProviderEnvelopeError(parsed) {
+  if (!parsed || typeof parsed !== 'object') return null;
+  const statusValue = Number(parsed.statusCodeValue ?? parsed.status);
+  const hasErrorStatus = Number.isFinite(statusValue) && statusValue >= 400;
+  const inner = parseJsonObject(parsed.body);
+  if (!hasErrorStatus && inner?.success !== false) return null;
+
+  const statusCode = typeof parsed.statusCode === 'string' ? parsed.statusCode : '';
+  const innerMessage = typeof inner?.message === 'string' ? inner.message : '';
+  const innerDetails = typeof inner?.details === 'string' ? inner.details : '';
+  const innerCode = typeof inner?.code === 'string' ? inner.code : '';
+  const innerType = typeof inner?.type === 'string' ? inner.type : '';
+  const outerMessage = typeof parsed.message === 'string' ? parsed.message : '';
+  const bodyText = typeof parsed.body === 'string' ? parsed.body : '';
+  const message = innerMessage || outerMessage || bodyText || statusCode || `HTTP ${statusValue}`;
+  return {
+    type: innerType || innerCode || statusCode || 'provider_stream_error',
+    message: innerDetails ? `${message}: ${innerDetails}` : message,
+  };
+}
+
 function extractProviderTopLevelError(parsed) {
   if (!parsed || typeof parsed !== 'object') return null;
   const message = typeof parsed.message === 'string' ? parsed.message : '';
@@ -57,11 +89,45 @@ function extractProviderTopLevelError(parsed) {
   const code = typeof parsed.code === 'string' ? parsed.code : '';
   const details = typeof parsed.details === 'string' ? parsed.details : '';
   if (!message) return null;
-  if (!type.toLowerCase().includes('error') && !code.toLowerCase().includes('error')) return null;
+  if (
+    parsed.success !== false &&
+    !type.toLowerCase().includes('error') &&
+    !code.toLowerCase().includes('error')
+  ) return null;
   return {
     type: type || code || 'provider_stream_error',
     message: details ? `${message}: ${details}` : message,
   };
+}
+
+function streamIdleTimeoutError(ms) {
+  const error = new Error(`provider_stream_idle_timeout: no SSE data received for ${ms}ms`);
+  error.type = 'provider_stream_idle_timeout';
+  return error;
+}
+
+async function readStreamChunk(reader, signal, idleTimeoutMs) {
+  const timeoutMs = Number(idleTimeoutMs);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return reader.read();
+  let timer = null;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(streamIdleTimeoutError(timeoutMs)), timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    if (error?.name === 'AbortError' || signal?.aborted) throw error;
+    try {
+      await reader.cancel(error);
+    } catch {
+      /* stream may already be closed */
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function unwrapProviderStreamEnvelope(parsed) {
@@ -71,12 +137,22 @@ function unwrapProviderStreamEnvelope(parsed) {
     const inner = JSON.parse(parsed.body);
     if (
       inner && typeof inner === 'object' &&
-      (Array.isArray(inner.choices) || inner.error || inner.usage)
+      (Array.isArray(inner.choices) || inner.error || inner.usage || inner.type)
     ) {
       return inner;
     }
   } catch {}
   return parsed;
+}
+
+function normalizeStreamToolCalls(toolCalls) {
+  return toolCalls
+    .filter(Boolean)
+    .map((tc) => ({
+      id: tc.id || '',
+      name: tc.name || '',
+      arguments: tc.arguments || '',
+    }));
 }
 
 function extractCachedPromptTokens(usage) {
@@ -101,11 +177,57 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
   }
   try {
     const parsedEnvelope = JSON.parse(payload);
-    const parsed = unwrapProviderStreamEnvelope(parsedEnvelope);
+    const envelopeError = extractProviderEnvelopeError(parsedEnvelope);
+    const parsed = envelopeError
+      ? { type: 'error', error: { type: envelopeError.type, message: envelopeError.message } }
+      : unwrapProviderStreamEnvelope(parsedEnvelope);
     trace?.recordSsePayload?.(payload, parsed);
-    const streamError = extractOpenAIStreamError(parsed) || extractProviderTopLevelError(parsed);
+    const streamError = envelopeError || extractOpenAIStreamError(parsed) || extractProviderTopLevelError(parsed);
     if (streamError) {
       state.streamError = streamError;
+      return;
+    }
+    if (parsed.type === 'content_block_start') {
+      if (parsed.content_block?.type === 'tool_use') {
+        state.currentAnthropicToolIndex = state.toolCalls.length;
+        state.toolCalls.push({
+          id: parsed.content_block.id || '',
+          name: parsed.content_block.name || '',
+          arguments: '',
+        });
+      } else {
+        state.currentAnthropicToolIndex = -1;
+      }
+      return;
+    }
+    if (parsed.type === 'content_block_delta') {
+      if (parsed.delta?.type === 'text_delta' && parsed.delta.text) {
+        state.content += parsed.delta.text;
+        if (!options.bufferTextDeltas) {
+          webContents.send('chat:stream:delta', { streamId, content: parsed.delta.text });
+        }
+      } else if (parsed.delta?.type === 'thinking_delta' && parsed.delta.thinking) {
+        state.thinkingContent += parsed.delta.thinking;
+        if (!options.bufferThinkingDeltas) {
+          webContents.send('chat:stream:thinking', { streamId, content: parsed.delta.thinking });
+        }
+      } else if (parsed.delta?.type === 'input_json_delta' && state.currentAnthropicToolIndex >= 0) {
+        const entry = state.toolCalls[state.currentAnthropicToolIndex];
+        if (entry) {
+          entry.arguments += parsed.delta.partial_json || '';
+          emitToolArgProgress(entry, {
+            webContents,
+            streamId,
+            toolCallId: entry.id,
+            toolName: entry.name,
+            argsJson: entry.arguments,
+          });
+        }
+      }
+      return;
+    }
+    if (parsed.type === 'content_block_stop') {
+      state.currentAnthropicToolIndex = -1;
       return;
     }
     const delta = parsed.choices?.[0]?.delta;
@@ -119,7 +241,9 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
     const reasoningDelta = extractOpenAIReasoningDelta(delta);
     if (reasoningDelta) {
       state.thinkingContent += reasoningDelta;
-      webContents.send('chat:stream:thinking', { streamId, content: reasoningDelta });
+      if (!options.bufferThinkingDeltas) {
+        webContents.send('chat:stream:thinking', { streamId, content: reasoningDelta });
+      }
     }
     if (delta?.tool_calls) {
       for (const tc of delta.tool_calls) {
@@ -160,11 +284,29 @@ export async function consumeOpenAIStream(res, webContents, streamId, trace = nu
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  const state = { content: '', thinkingContent: '', toolCalls: [], usage: null, streamError: null };
+  let stopReading = false;
+  const state = {
+    content: '',
+    thinkingContent: '',
+    toolCalls: [],
+    currentAnthropicToolIndex: -1,
+    usage: null,
+    streamError: null,
+  };
 
   while (true) {
     await throwIfSseReaderAborted(signal, reader);
-    const { done, value } = await reader.read();
+    let chunk;
+    try {
+      chunk = await readStreamChunk(reader, signal, options.streamIdleTimeoutMs);
+    } catch (error) {
+      state.streamError = {
+        type: error?.type || error?.name || 'provider_stream_error',
+        message: error?.message || String(error),
+      };
+      break;
+    }
+    const { done, value } = chunk;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
@@ -172,12 +314,38 @@ export async function consumeOpenAIStream(res, webContents, streamId, trace = nu
 
     for (const line of lines) {
       consumeOpenAIStreamLine(line, state, webContents, streamId, trace, options);
+      if (state.streamError) {
+        stopReading = true;
+        break;
+      }
       await throwIfSseReaderAborted(signal, reader);
+    }
+    if (stopReading) {
+      try {
+        await reader.cancel(state.streamError);
+      } catch {
+        /* stream may already be closed */
+      }
+      break;
     }
   }
   await throwIfSseReaderAborted(signal, reader);
-  if (buffer.trim()) consumeOpenAIStreamLine(buffer, state, webContents, streamId, trace, options);
+  if (!state.streamError && buffer.trim()) consumeOpenAIStreamLine(buffer, state, webContents, streamId, trace, options);
 
+  // Buffered streams may receive reasoning after final text from Qoder-compatible
+  // APIs. Emit the accumulated thinking first so the renderer never has to show
+  // a final answer before its reasoning block arrives.
+  const canEmitBufferedThinking =
+    state.content.trim() || state.toolCalls.filter(Boolean).length > 0;
+  if (
+    options.bufferThinkingDeltas &&
+    options.emitBufferedThinkingDeltas !== false &&
+    state.thinkingContent &&
+    canEmitBufferedThinking &&
+    !hasLiteralToolCallSyntax(state.thinkingContent)
+  ) {
+    webContents.send('chat:stream:thinking', { streamId, content: state.thinkingContent });
+  }
   if (options.bufferTextDeltas && state.content && !hasLiteralToolCallSyntax(state.content)) {
     webContents.send('chat:stream:delta', { streamId, content: state.content });
   }
@@ -185,7 +353,7 @@ export async function consumeOpenAIStream(res, webContents, streamId, trace = nu
   return {
     content: state.content,
     thinkingContent: state.thinkingContent,
-    toolCalls: state.toolCalls.filter(Boolean),
+    toolCalls: normalizeStreamToolCalls(state.toolCalls),
     streamUsage: state.usage,
     streamError: state.streamError,
   };

@@ -167,6 +167,7 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
   detectProxy = defaultDetectProxy,
   connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS,
   scheduleTimeout = defaultScheduleTimeout,
+  allowSecondaryFallback = true,
 } = {}) {
   const maxRetries = retryDelaysMs.length;
   let lastError = null;
@@ -250,7 +251,7 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
       }
     }
 
-    const secondaryImpl = await secondaryChannel.resolve();
+    const secondaryImpl = allowSecondaryFallback ? await secondaryChannel.resolve() : null;
     if (secondaryImpl) {
       try {
         const response = await callWithConnectTimeout(secondaryImpl);

@@ -49,8 +49,40 @@ describe('neutralizeToolCallSyntaxForDisplay', () => {
     assert.match(out, /&lt;parameter name="x">/);
   });
 
+  it('removes complete leaked tool_call blocks instead of rendering protocol text', () => {
+    const input = [
+      'before',
+      '<tool_call>',
+      '{"name":"bash","input":{"command":"pwd"}}',
+      '</tool_call>',
+      'after',
+    ].join('\n');
+    const out = neutralizeToolCallSyntaxForDisplay(input);
+
+    assert.doesNotMatch(out, /tool_call/i);
+    assert.doesNotMatch(out, /"command"/);
+    assert.match(out, /before/);
+    assert.match(out, /after/);
+  });
+
+  it('removes escaped and dangling leaked tool_call blocks', () => {
+    const escaped = 'before\n&lt;tool_call&gt;{"name":"bash"}&lt;/tool_call&gt;\nafter';
+    const dangling = 'before\n<tool_call>\n{"name":"bash","input":{"command":"pwd"}}';
+
+    const escapedOut = neutralizeToolCallSyntaxForDisplay(escaped);
+    assert.doesNotMatch(escapedOut, /tool_call/i);
+    assert.match(escapedOut, /before/);
+    assert.match(escapedOut, /after/);
+    assert.equal(neutralizeToolCallSyntaxForDisplay(dangling), 'before');
+  });
+
   it('is idempotent for already escaped tool-call tags', () => {
     const input = '&lt;functions.bash agext={{"command":"pwd"}} />';
+    assert.equal(neutralizeToolCallSyntaxForDisplay(input), input);
+  });
+
+  it('does not trim or rewrite ordinary angle-bracket text', () => {
+    const input = '  示例 <div>plain</div>\n\n\n保留  ';
     assert.equal(neutralizeToolCallSyntaxForDisplay(input), input);
   });
 });

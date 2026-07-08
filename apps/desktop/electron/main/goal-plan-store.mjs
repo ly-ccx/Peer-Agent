@@ -470,8 +470,8 @@ function makeDefaultGoalTask(goal) {
     taskId: 'orient',
     order: 0,
     title: goal
-      ? 'Orient to the goal and establish a verifiable task scaffold'
-      : 'Orient to the goal',
+      ? '理清目标，拆出能验收的小步骤'
+      : '理清目标',
     path: [],
     dependsOn: [],
     acceptanceCriteria: [],
@@ -610,10 +610,10 @@ function normalizeExplorerRequest(request, fallback = {}) {
     planId,
     question: typeof request?.question === 'string' && request.question.trim()
       ? request.question.trim()
-      : 'Explore missing evidence for the active goal',
+      : '为当前目标补齐缺失的信息',
     reason: typeof request?.reason === 'string' && request.reason.trim()
       ? request.reason.trim()
-      : 'Goal Runner requested read-only exploration',
+      : '需要先只读查一下资料',
     profile: 'readonly_explorer',
     budget: {
       maxToolCalls: Number.isFinite(request?.budget?.maxToolCalls)
@@ -1454,10 +1454,10 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
         ? 'goal_created'
         : 'plan_created';
     const createEventSummary = isGoalIntake
-      ? 'Goal intake started'
+      ? '开始判断这是不是一个目标'
       : workflowKind === 'goal_self_driven'
-        ? 'Goal contract created'
-        : 'Plan created';
+        ? '目标已建立'
+        : '计划已生成';
     // 单活跃计划：先收尾/作废同会话其它活跃态旧计划（排除自身），再落库新计划。
     supersedeAwaitingDrafts(plan.conversationId, plan.planId);
     return persist(withRunTraceEvent(plan, {
@@ -1465,6 +1465,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       summary: createEventSummary,
       payload: {
         source: 'goal-plan-store:createPlan',
+        summaryCode: createEventType,
         workflowKind,
         status,
         activationKind: plan.activation?.kind,
@@ -1596,7 +1597,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
         autonomy: 'self_driven',
       },
     }, {
-      reason: revisionReason || 'updated self-driven Goal contract',
+      reason: revisionReason || '更新了目标内容',
       changedBy: changedBy || createdBy || 'agent',
     });
   }
@@ -1639,8 +1640,9 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     };
     return persist(withRunTraceEvent(next, {
       type: 'plan_revised',
-      summary: reason ? `Plan revised: ${reason}` : 'Plan revised',
+      summary: reason ? `计划有调整：${reason}` : '计划有调整',
       payload: {
+        summaryCode: 'plan_revised',
         reason: reason || null,
         changedBy: changedBy || null,
         version: nextVersion,

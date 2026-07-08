@@ -1259,7 +1259,7 @@ test('createIntakeContract: 建出的契约是 activation=intake 的自驱 goal�
   assert.equal(plan.workflowKind, 'goal_self_driven');
   assert.equal(plan.status, 'executing');
   assert.equal(plan.runTrace.events[0].type, 'goal_intake_started');
-  assert.equal(plan.runTrace.events[0].summary, 'Goal intake started');
+  assert.equal(plan.runTrace.events[0].summary, '开始判断这是不是一个目标');
   // 归一化读回后仍保留 intake 授权类型。
   const reread = store.getPlan(plan.planId);
   assert.equal(reread.activation.kind, 'intake');

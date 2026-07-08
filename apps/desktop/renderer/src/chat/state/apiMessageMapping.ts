@@ -4,12 +4,20 @@
 // 边界与证据治理：
 // - assistant 历史正文经 sanitizeAssistantHistoryTextForApi 清洗，剥离仅供本地展示的
 //   「[Tool call:]/[Tool result]」痕迹，避免把展示态文本当成可执行内容回灌给模型。
-// - 结构化工具调用段经 formatHistoricalLocalRecordForApi 转成只读的历史事实记录文本。
+// - 完整 assistant 工具调用段回放为结构化 tool_calls + role:tool pair；不完整工具段才经
+//   formatHistoricalLocalRecordForApi 转成只读历史事实，避免生成孤儿 tool_result。
 // - compaction 消息不进入 API 序列；最后一条 compaction 之前的原文也不进入 API 序列，
 //   仅留给 UI 回看，模型连续性由独立 Context Source 的压缩摘要表达。
 // 这些都属于「事实/用户上下文」的映射，不会把任何内容提升为 system 指令。
 
-import type { ChatApiContentPart, ChatApiMessage, ChatAttachment, ChatMsg } from './types';
+import type {
+  ChatApiContentPart,
+  ChatApiMessage,
+  ChatApiToolCall,
+  ChatAttachment,
+  ChatMsg,
+  ContentSegment,
+} from './types';
 import { formatBytes } from './format.ts';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from './historicalLocalRecord.ts';
 
@@ -78,12 +86,102 @@ export function getApiMessageContent(message: ChatMsg): string | ChatApiContentP
 }
 
 /** 判定一条 API content 是否包含有效内容（文本非空或存在图片 URL）。 */
-export function hasApiMessageContent(content: string | ChatApiContentPart[]): boolean {
+export function hasApiMessageContent(content: string | ChatApiContentPart[] | null | undefined): boolean {
+  if (content === null || content === undefined) return false;
   if (typeof content === 'string') return content.trim().length > 0;
   return content.some((part) => {
     if (part.type === 'image_url') return Boolean(part.image_url.url);
     return part.text.trim().length > 0;
   });
+}
+
+function hasApiMessagePayload(message: ChatApiMessage): boolean {
+  return hasApiMessageContent(message.content) || Boolean(message.tool_calls?.length) || Boolean(message.tool_call_id);
+}
+
+function sanitizeToolCallId(value: string): string {
+  const safe = value.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+|_+$/g, '');
+  return safe || 'tool_call';
+}
+
+function stableToolCallId(message: ChatMsg, index: number, segment: ContentSegment): string | null {
+  if (segment.type !== 'tool-call') return null;
+  const existing = segment.toolCallId?.trim();
+  if (existing) return existing;
+  if (!segment.tool?.trim() || segment.result === undefined) return null;
+  return `tool_call_${sanitizeToolCallId(message.id)}_${index}`;
+}
+
+function safeToolArguments(args: unknown): string {
+  if (args === undefined || args === null) return '{}';
+  try {
+    const serialized = JSON.stringify(args);
+    return serialized && serialized !== 'undefined' ? serialized : '{}';
+  } catch {
+    return JSON.stringify({ raw: String(args) });
+  }
+}
+
+function structuredToolMessages(message: ChatMsg, index: number, segment: ContentSegment): ChatApiMessage[] | null {
+  if (message.role !== 'assistant' || segment.type !== 'tool-call') return null;
+  const name = segment.tool?.trim();
+  if (!name || segment.result === undefined) return null;
+  const id = stableToolCallId(message, index, segment);
+  if (!id) return null;
+  const toolCall: ChatApiToolCall = {
+    id,
+    type: 'function',
+    function: {
+      name,
+      arguments: safeToolArguments(segment.args ?? {}),
+    },
+  };
+  return [
+    { role: 'assistant', content: null, tool_calls: [toolCall] },
+    { role: 'tool', tool_call_id: id, name, content: segment.result ?? '' },
+  ];
+}
+
+function textMessage(role: ChatMsg['role'], text: string): ChatApiMessage | null {
+  const content = text.trim();
+  return content ? { role, content } : null;
+}
+
+function getStructuredApiMessages(message: ChatMsg): ChatApiMessage[] {
+  if (!message.segments?.length || message.role !== 'assistant') {
+    const content = getApiMessageContent(message);
+    return hasApiMessageContent(content) ? [{ role: message.role, content }] : [];
+  }
+
+  const apiMessages: ChatApiMessage[] = [];
+  const pendingText: string[] = [];
+  const flushText = () => {
+    const item = textMessage(message.role, pendingText.filter(Boolean).join('\n\n'));
+    pendingText.length = 0;
+    if (item) apiMessages.push(item);
+  };
+
+  message.segments.forEach((segment, index) => {
+    if (segment.type === 'thinking') return;
+    if (segment.type === 'text') {
+      const content = sanitizeAssistantHistoryTextForApi(segment.content || '');
+      if (content.trim()) pendingText.push(content);
+      return;
+    }
+
+    const toolMessages = structuredToolMessages(message, index, segment);
+    if (toolMessages) {
+      flushText();
+      apiMessages.push(...toolMessages);
+      return;
+    }
+
+    const historicalRecord = formatHistoricalLocalRecordForApi(segment);
+    if (historicalRecord.trim()) pendingText.push(historicalRecord);
+  });
+
+  flushText();
+  return apiMessages.filter(hasApiMessagePayload);
 }
 
 /** 把会话映射为 API 消息序列：跳过最后一条 compaction 之前的 UI 原文、compaction 消息与空 assistant 消息。 */
@@ -97,9 +195,10 @@ export function toApiMessages(messages: readonly ChatMsg[]): ChatApiMessage[] {
   const apiMessages: ChatApiMessage[] = [];
   for (const message of activeMessages) {
     if (message.compaction) continue;
-    const content = getApiMessageContent(message);
-    if (message.role === 'assistant' && !hasApiMessageContent(content)) continue;
-    apiMessages.push({ role: message.role, content });
+    for (const apiMessage of getStructuredApiMessages(message)) {
+      if (apiMessage.role === 'assistant' && !hasApiMessagePayload(apiMessage)) continue;
+      apiMessages.push(apiMessage);
+    }
   }
   return apiMessages;
 }

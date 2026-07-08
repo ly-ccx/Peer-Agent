@@ -591,14 +591,18 @@ describe('llm chat service tool materialization', () => {
     assert.equal(compactionStages.includes('idle'), true);
   });
 
-  it('completes an OpenAI-compatible reasoning-only response without empty response error', async () => {
+  it('retries an OpenAI-compatible reasoning-only response before surfacing an explicit error', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;
     const events = [];
-    globalThis.fetch = async () => new Response(sse([
-      { choices: [{ delta: { reasoning_content: '先分析问题' } }] },
-      '[DONE]',
-    ]), { status: 200 });
+    let fetchCount = 0;
+    globalThis.fetch = async () => {
+      fetchCount += 1;
+      return new Response(sse([
+        { choices: [{ delta: { reasoning_content: '先分析问题' } }] },
+        '[DONE]',
+      ]), { status: 200 });
+    };
 
     try {
       const service = createLlmChatService({
@@ -628,8 +632,10 @@ describe('llm chat service tool materialization', () => {
     }
 
     assert.equal(events.find((event) => event.channel === 'chat:stream:thinking')?.payload.content, '先分析问题');
-    assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
-    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+    assert.equal(fetchCount, 2);
+    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), false);
+    const errorEvent = events.find((event) => event.channel === 'chat:stream:error');
+    assert.match(errorEvent?.payload?.error, /thinking_only_response/);
   });
 
   it('threads explorerContext into the system prompt for explorer turns', async () => {
@@ -1715,16 +1721,6 @@ describe('llm chat service tool materialization', () => {
     assert.equal(hasUnsupportedToolClaim('I ran git status and confirmed the tree is clean.'), true);
     assert.equal(hasUnsupportedToolClaim('我接下来会检查文件，然后再给结论。'), false);
     assert.equal(hasUnsupportedToolClaim('This looks like a rendering issue based on your screenshot.'), false);
-  });
-
-  it('detects dangling tool-use preambles without tool calls', async () => {
-    const { hasDanglingToolIntent } = await loadService();
-
-    assert.equal(hasDanglingToolIntent('先一次性查全相关文件和关键代码：'), true);
-    assert.equal(hasDanglingToolIntent('我先用真实工具摸清现有输入区结构和消息发送链路，再动手——这次每步贴真实返回。'), true);
-    assert.equal(hasDanglingToolIntent('Let me inspect the composer and message send flow:'), true);
-    assert.equal(hasDanglingToolIntent('我接下来会检查文件，然后再给结论。'), false);
-    assert.equal(hasDanglingToolIntent('可以添加图片附件，方案是按钮、预览和模型消息三部分。'), false);
   });
 
   it('treats pseudo tool-call text as unsupported text rather than executable tool calls', async () => {

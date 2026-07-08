@@ -43,8 +43,35 @@ function openAIToolsToGeminiTools(tools = []) {
   return declarations.length ? [{ functionDeclarations: declarations }] : undefined;
 }
 
+function parseToolArguments(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function messageToGeminiContent(message) {
   if (message?.geminiContent) return message.geminiContent;
+  if (message?.role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length) {
+    const parts = openAIContentToGeminiParts(message.content);
+    for (const toolCall of message.tool_calls) {
+      const name = toolCall?.function?.name;
+      if (!name) continue;
+      parts.push({
+        functionCall: {
+          name,
+          args: parseToolArguments(toolCall.function?.arguments),
+        },
+      });
+    }
+    if (!parts.length) return null;
+    return { role: 'model', parts };
+  }
   if (message?.role === 'tool' && message.name) {
     return {
       role: 'user',

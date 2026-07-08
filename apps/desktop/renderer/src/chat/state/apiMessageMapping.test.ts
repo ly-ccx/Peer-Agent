@@ -101,4 +101,78 @@ describe('toApiMessages', () => {
       { role: 'assistant', content: 'new a' },
     ]);
   });
+
+  it('replays completed assistant tool-call segments as structured tool pairs', () => {
+    const out = toApiMessages([
+      msg({
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '',
+        segments: [
+          { type: 'text', content: 'I need to inspect.' },
+          {
+            type: 'tool-call',
+            tool: 'bash',
+            args: { command: 'pwd' },
+            result: '/tmp/project',
+            toolCallId: 'tool_call_1',
+          },
+          { type: 'text', content: 'Done.' },
+        ],
+      }),
+    ]);
+
+    assert.deepEqual(out, [
+      { role: 'assistant', content: 'I need to inspect.' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{
+          id: 'tool_call_1',
+          type: 'function',
+          function: { name: 'bash', arguments: '{"command":"pwd"}' },
+        }],
+      },
+      { role: 'tool', tool_call_id: 'tool_call_1', name: 'bash', content: '/tmp/project' },
+      { role: 'assistant', content: 'Done.' },
+    ]);
+  });
+
+  it('synthesizes a stable id for completed historical tool pairs without toolCallId', () => {
+    const out = toApiMessages([
+      msg({
+        id: 'assistant:old',
+        role: 'assistant',
+        content: '',
+        segments: [
+          { type: 'tool-call', tool: 'read_file', args: { path: 'a.ts' }, result: 'content' },
+        ],
+      }),
+    ]);
+
+    assert.equal(out.length, 2);
+    assert.equal(out[0].tool_calls?.[0]?.id, 'tool_call_assistant_old_0');
+    assert.equal(out[1].tool_call_id, 'tool_call_assistant_old_0');
+    assert.equal(out[1].name, 'read_file');
+  });
+
+  it('does not emit orphan structured tool calls for pending tool segments', () => {
+    const out = toApiMessages([
+      msg({
+        id: 'assistant-2',
+        role: 'assistant',
+        content: '',
+        segments: [
+          { type: 'text', content: 'About to inspect.' },
+          { type: 'tool-call', tool: 'bash', args: { command: 'pwd' }, toolCallId: 'tool_call_pending' },
+        ],
+      }),
+    ]);
+
+    assert.equal(out.some((message) => Boolean(message.tool_calls?.length)), false);
+    assert.equal(out.some((message) => message.role === 'tool'), false);
+    assert.equal(out.length, 1);
+    assert.match(String(out[0].content), /About to inspect/);
+    assert.match(String(out[0].content), /Historical local capability record/);
+  });
 });

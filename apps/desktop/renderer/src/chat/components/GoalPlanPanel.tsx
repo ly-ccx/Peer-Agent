@@ -302,27 +302,27 @@ const RUN_EVENT_VALIDATION_TYPES = new Set<GoalRunEvent['type']>([
 
 function runEventLabel(type: GoalRunEvent['type'], isZh: boolean): string {
   const zh: Record<GoalRunEvent['type'], string> = {
-    message_routed: '消息路由',
-    goal_intake_started: '目标判别',
-    goal_created: '目标创建',
-    plan_created: '计划生成',
-    plan_revised: '计划修订',
-    step_started: '步骤开始',
-    step_completed: '步骤完成',
-    action_started: '执行开始',
+    message_routed: '收到消息',
+    goal_intake_started: '判断是不是目标',
+    goal_created: '目标初始化',
+    plan_created: '制定计划',
+    plan_revised: '调整计划',
+    step_started: '开始一步',
+    step_completed: '完成一步',
+    action_started: '开始执行',
     action_completed: '执行完成',
-    observation_recorded: '观察记录',
-    validation_started: '开始验证',
-    validation_passed: '验证通过',
-    validation_failed: '验证失败',
+    observation_recorded: '记录发现',
+    validation_started: '开始检查',
+    validation_passed: '检查通过',
+    validation_failed: '检查没通过',
     problem_found: '发现问题',
-    user_correction: '用户纠偏',
-    requirement_override: '需求覆盖',
-    self_correction: '自我修正',
-    checkpoint_created: '检查点',
-    network_interrupted: '网络中断',
-    goal_resumed: '目标恢复',
-    goal_paused: '目标暂停',
+    user_correction: '用户纠正方向',
+    requirement_override: '用户更新目标',
+    self_correction: '自己纠正',
+    checkpoint_created: '存个进度点',
+    network_interrupted: '网络断了',
+    goal_resumed: '继续目标',
+    goal_paused: '暂停目标',
     goal_completed: '目标完成',
   };
   const en: Record<GoalRunEvent['type'], string> = {
@@ -380,6 +380,177 @@ function compactMeta(value: string): string {
   return value.length > 52 ? `${value.slice(0, 52)}...` : value;
 }
 
+// 事件详情里的 intent / phase 是后端下发的稳定机器码（如 follow_up、orient），
+// 直接展示会中英混杂。这里给它们各一张中英对照表，按当前语言查表显示；
+// 认不出的码回落为原值，保证向后兼容与新码的兜底展示。
+const INTENT_VALUE_LABELS: Record<string, { zh: string; en: string }> = {
+  // —— 消息路由 intent ——
+  empty: { zh: '空消息', en: 'empty' },
+  follow_up: { zh: '补充说明', en: 'follow-up' },
+  correction: { zh: '纠正方向', en: 'correction' },
+  requirement_override: { zh: '改需求', en: 'requirement override' },
+  new_goal_explicit: { zh: '明确开新目标', en: 'new goal (explicit)' },
+  new_goal_implicit: { zh: '疑似开新目标', en: 'new goal (implicit)' },
+  pause: { zh: '暂停', en: 'pause' },
+  resume: { zh: '继续', en: 'resume' },
+  // —— Runner intent ——
+  explore: { zh: '摸情况', en: 'explore' },
+  execute: { zh: '动手做', en: 'execute' },
+  verify: { zh: '检查', en: 'verify' },
+  synthesize: { zh: '收尾汇总', en: 'synthesize' },
+  block: { zh: '卡住了', en: 'blocked' },
+};
+
+const PHASE_VALUE_LABELS: Record<string, { zh: string; en: string }> = {
+  idle: { zh: '待命', en: 'idle' },
+  orient: { zh: '对齐目标', en: 'orient' },
+  plan_scaffold: { zh: '搭任务框架', en: 'plan scaffold' },
+  explore: { zh: '摸情况', en: 'explore' },
+  inspect: { zh: '排查', en: 'inspect' },
+  repair: { zh: '修复', en: 'repair' },
+  synthesize: { zh: '收尾汇总', en: 'synthesize' },
+  verify: { zh: '检查', en: 'verify' },
+  blocked: { zh: '卡住了', en: 'blocked' },
+};
+
+function codedValueLabel(
+  table: Record<string, { zh: string; en: string }>,
+  value: string,
+  isZh: boolean,
+): string {
+  const hit = table[value];
+  if (hit) return isZh ? hit.zh : hit.en;
+  return compactMeta(value);
+}
+
+// 事件详情文案：后端事件 payload 里带一个稳定的英文 summaryCode，前端按当前语言
+// 现算这句话，动态字段（原因/消息/报错/轮次）从 payload 取。认不出 code 时回落
+// 后端存的 event.summary，保证向后兼容与兜底。
+type RunEventSummaryBuilder = (get: (key: string) => string | null, isZh: boolean) => string;
+
+const RUN_EVENT_SUMMARY_BUILDERS: Record<string, RunEventSummaryBuilder> = {
+  // —— 消息路由（goal-message-router）——
+  msg_empty: (_g, isZh) =>
+    isZh ? '收到一条空消息，已归入当前目标' : 'Received an empty message; kept it under the current goal',
+  msg_new_goal_explicit: (_g, isZh) =>
+    isZh ? '用户要求开一个新目标' : 'You asked to start a new goal',
+  msg_paused: (g, isZh) => {
+    const t = g('messageText');
+    return isZh ? `已暂停当前目标${t ? `：${t}` : ''}` : `Paused the current goal${t ? `: ${t}` : ''}`;
+  },
+  msg_resumed: (g, isZh) => {
+    const t = g('messageText');
+    return isZh ? `继续当前目标${t ? `：${t}` : ''}` : `Resumed the current goal${t ? `: ${t}` : ''}`;
+  },
+  msg_requirement_override: (g, isZh) => {
+    const t = g('messageText');
+    return isZh ? `更新了目标要求${t ? `：${t}` : ''}` : `Updated the goal requirements${t ? `: ${t}` : ''}`;
+  },
+  msg_correction: (g, isZh) => {
+    const t = g('messageText');
+    return isZh ? `纠正了执行方向${t ? `：${t}` : ''}` : `Corrected the direction${t ? `: ${t}` : ''}`;
+  },
+  msg_follow_up: (g, isZh) => {
+    const t = g('messageText');
+    return isZh
+      ? `补充了一句，已归入当前目标${t ? `：${t}` : ''}`
+      : `Added a follow-up under the current goal${t ? `: ${t}` : ''}`;
+  },
+  // —— 目标/计划落库（goal-plan-store）——
+  goal_intake_started: (_g, isZh) =>
+    isZh ? '开始判断这是不是一个目标' : 'Checking whether this is a goal',
+  goal_created: (_g, isZh) => (isZh ? '目标已建立' : 'Goal established'),
+  plan_created: (_g, isZh) => (isZh ? '计划已生成' : 'Plan created'),
+  plan_revised: (g, isZh) => {
+    const r = g('reason');
+    return isZh ? `计划有调整${r ? `：${r}` : ''}` : `Plan updated${r ? `: ${r}` : ''}`;
+  },
+  // —— 执行过程（goal-runner）——
+  checkpoint_created: (g, isZh) => {
+    const r = g('reason');
+    return isZh ? `存了个进度点${r ? `：${r}` : ''}` : `Saved a checkpoint${r ? `: ${r}` : ''}`;
+  },
+  manual_dod_confirmation_required: (_g, isZh) =>
+    isZh ? '完成前需要你手动确认验收项' : 'Manual acceptance confirmation is required before finishing',
+  verifier_started: (_g, isZh) => (isZh ? '开始复核结果' : 'Verification started'),
+  verifier_failed: (g, isZh) => {
+    const m = g('message') || g('reason');
+    return isZh ? `复核没跑成${m ? `：${m}` : ''}` : `Verification failed${m ? `: ${m}` : ''}`;
+  },
+  runner_started: (_g, isZh) => (isZh ? '开始自动推进目标' : 'Goal runner started'),
+  runner_paused: (g, isZh) => {
+    const r = g('reason');
+    return isZh ? `已暂停自动推进${r ? `：${r}` : ''}` : `Goal runner paused${r ? `: ${r}` : ''}`;
+  },
+  runner_resumed: (_g, isZh) => (isZh ? '继续自动推进目标' : 'Goal runner resumed'),
+  turn_started: (g, isZh) => {
+    const n = g('turnNumber');
+    return isZh ? `开始第 ${n ?? ''} 轮` : `Turn ${n ?? ''} started`;
+  },
+  turn_completed: (g, isZh) => {
+    const n = g('turnNumber');
+    return isZh ? `第 ${n ?? ''} 轮完成` : `Turn ${n ?? ''} completed`;
+  },
+  turn_failed: (g, isZh) => {
+    const m = g('message') || g('reason');
+    return isZh ? `这一轮没跑成${m ? `：${m}` : ''}` : `This turn failed${m ? `: ${m}` : ''}`;
+  },
+  self_correction: (g, isZh) => {
+    const r = g('reason');
+    return isZh ? `复核没过，回去修${r ? `：${r}` : ''}` : `Verification failed; going back to repair${r ? `: ${r}` : ''}`;
+  },
+  requested_user_input: (g, isZh) => {
+    const r = g('reason');
+    return isZh ? `需要你补充信息${r ? `：${r}` : ''}` : `Needs your input${r ? `: ${r}` : ''}`;
+  },
+  intake_resolved_inquiry: (_g, isZh) =>
+    isZh ? '判断为一次咨询，已撤掉目标' : 'Resolved as an inquiry; goal removed',
+  network_interrupted: (g, isZh) => {
+    const r = g('reason');
+    return isZh ? `网络断了${r ? `：${r}` : ''}` : `Network interrupted${r ? `: ${r}` : ''}`;
+  },
+  stream_failed: (g, isZh) => {
+    const m = g('message') || g('reason');
+    return isZh ? `响应流出错${m ? `：${m}` : ''}` : `Response stream failed${m ? `: ${m}` : ''}`;
+  },
+  runner_blocked: (g, isZh) => {
+    const r = g('reason');
+    return isZh ? `被卡住了${r ? `：${r}` : ''}` : `Goal runner blocked${r ? `: ${r}` : ''}`;
+  },
+  runner_stopped_failed: (_g, isZh) =>
+    isZh ? '目标已是失败状态，停止推进' : 'Goal runner stopped because the goal already failed',
+  runner_failed: (g, isZh) => {
+    const m = g('message') || g('reason');
+    return isZh ? `推进失败${m ? `：${m}` : ''}` : `Goal runner failed${m ? `: ${m}` : ''}`;
+  },
+  goal_completed: (_g, isZh) =>
+    isZh ? '复核通过，目标完成' : 'Verification passed; goal completed',
+  no_progress: (_g, isZh) =>
+    isZh ? '连续几轮没进展，先停下来' : 'No progress for several turns; paused',
+  scope_drift: (g, isZh) => {
+    const r = g('reason');
+    return isZh ? `发现跑偏了${r ? `：${r}` : ''}` : `Scope drift detected${r ? `: ${r}` : ''}`;
+  },
+  validation_passed: (_g, isZh) => (isZh ? '复核通过' : 'Verification passed'),
+  validation_failed: (g, isZh) => {
+    const r = g('reason');
+    return isZh ? `复核没通过${r ? `：${r}` : ''}` : `Verification failed${r ? `: ${r}` : ''}`;
+  },
+};
+
+function runEventSummary(event: GoalRunEvent, isZh: boolean): string {
+  const code = payloadString(event, 'summaryCode');
+  if (code) {
+    const builder = RUN_EVENT_SUMMARY_BUILDERS[code];
+    if (builder) {
+      const text = builder((key) => payloadString(event, key), isZh).trim();
+      if (text) return text;
+    }
+  }
+  // 认不出 code：回落后端存的 summary，保证兜底与向后兼容。
+  return event.summary;
+}
+
 function runEventMetaItems(event: GoalRunEvent, isZh: boolean): string[] {
   const items: string[] = [];
   const nodeId = event.nodeId || payloadString(event, 'checkpointNodeId');
@@ -390,8 +561,8 @@ function runEventMetaItems(event: GoalRunEvent, isZh: boolean): string[] {
 
   if (nodeId) items.push(`${isZh ? '节点' : 'node'} ${compactMeta(nodeId)}`);
   if (turnNumber) items.push(`${isZh ? '轮次' : 'turn'} ${turnNumber}`);
-  if (phase) items.push(`${isZh ? '阶段' : 'phase'} ${compactMeta(phase)}`);
-  if (intent) items.push(`${isZh ? '意图' : 'intent'} ${compactMeta(intent)}`);
+  if (phase) items.push(`${isZh ? '阶段' : 'phase'} ${codedValueLabel(PHASE_VALUE_LABELS, phase, isZh)}`);
+  if (intent) items.push(`${isZh ? '意图' : 'intent'} ${codedValueLabel(INTENT_VALUE_LABELS, intent, isZh)}`);
   if (reason) items.push(`${isZh ? '原因' : 'reason'} ${compactMeta(reason)}`);
   if (event.evidenceRefs.length > 0) {
     items.push(isZh ? `证据 ×${event.evidenceRefs.length}` : `evidence ×${event.evidenceRefs.length}`);
@@ -562,7 +733,7 @@ function RunTraceItem({ event, isZh }: { event: GoalRunEvent; isZh: boolean }): 
             {formatRunEventTime(event.createdAt)}
           </time>
         </div>
-        <div className="goal-run-event-summary">{event.summary}</div>
+        <div className="goal-run-event-summary">{runEventSummary(event, isZh)}</div>
         {metaItems.length > 0 ? (
           <div className="goal-run-event-meta">
             {metaItems.map((item) => (
@@ -578,7 +749,9 @@ function RunTraceItem({ event, isZh }: { event: GoalRunEvent; isZh: boolean }): 
 function RunTraceSection({ plan, isZh }: { plan: GoalPlan; isZh: boolean }): ReactElement {
   const events = Array.isArray(plan.runTrace?.events) ? plan.runTrace.events : [];
   const [showAll, setShowAll] = useState(false);
-  const visibleEvents = showAll ? events : events.slice(-RUN_TRACE_COLLAPSED_EVENT_COUNT);
+  // 时间线按「最新在最上面」展示：先取最近 N 条，再整体反转为倒序。
+  const recentEvents = showAll ? events : events.slice(-RUN_TRACE_COLLAPSED_EVENT_COUNT);
+  const visibleEvents = recentEvents.slice().reverse();
   const hiddenCount = events.length - visibleEvents.length;
   const validationCount = events.filter((event) => RUN_EVENT_VALIDATION_TYPES.has(event.type)).length;
   const issueCount = events.filter((event) => RUN_EVENT_ISSUE_TYPES.has(event.type)).length;

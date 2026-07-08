@@ -918,7 +918,7 @@ export function LlmSettingsPanel({
                       ) : (
                         <span className="llm-provider-chip mono" title={p.model}>{modelDisplayName}</span>
                       )}
-                      {p.isDefault ? <span className="llm-badge-default">{i18n.locale === 'zh-CN' ? '已激活' : 'Active'}</span> : null}
+                      {p.isDefault ? <span className="llm-badge-default">{i18n.locale === 'zh-CN' ? '默认激活' : 'Default'}</span> : null}
                       {selectedModelMetadata?.contextWindow || p.contextWindow || selectedModelMetadata?.maxOutputTokens || p.maxOutputTokens || p.inputPrice != null ? (
                         <span className="llm-provider-specs">
                           {selectedModelMetadata?.contextWindow || p.contextWindow ? `${formatModelTokenLimit(selectedModelMetadata?.contextWindow ?? p.contextWindow ?? 0)} ctx` : ''}
@@ -947,7 +947,7 @@ export function LlmSettingsPanel({
                               disabled={oauthNotConnected}
                               title={oauthNotConnected ? (i18n.locale === 'zh-CN' ? '会话已过期，请先重新登录' : 'Session expired — please re-login first') : undefined}
                             >
-                              {i18n.locale === 'zh-CN' ? '激活' : 'Activate'}
+                              {i18n.locale === 'zh-CN' ? '设为默认' : 'Set default'}
                             </button>
                           );
                         })()

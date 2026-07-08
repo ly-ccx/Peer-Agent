@@ -200,7 +200,34 @@ export function isEmptyAssistantPlaceholder(message: Pick<ChatMsg, 'role' | 'con
   );
 }
 
-/** 把扁平分段聚合成渲染分组：连续 thinking 合并、连续 tool-call 归入同一组。 */
+function hoistThinkingWithinTextRuns(groups: SegmentGroup[]): SegmentGroup[] {
+  const result: SegmentGroup[] = [];
+  let run: SegmentGroup[] = [];
+
+  const flushRun = () => {
+    if (!run.length) return;
+    const thinkingContent = run
+      .filter((group): group is Extract<SegmentGroup, { type: 'thinking' }> => group.type === 'thinking')
+      .map((group) => group.content)
+      .join('');
+    if (thinkingContent) result.push({ type: 'thinking', content: thinkingContent });
+    result.push(...run.filter((group) => group.type !== 'thinking'));
+    run = [];
+  };
+
+  for (const group of groups) {
+    if (group.type === 'tool-call-group') {
+      flushRun();
+      result.push(group);
+      continue;
+    }
+    run.push(group);
+  }
+  flushRun();
+  return result;
+}
+
+/** 把扁平分段聚合成渲染分组：tool-call 作为硬边界，thinking 只在同一文本阶段内前置。 */
 export function groupSegments(segments: ContentSegment[]): SegmentGroup[] {
   const groups: SegmentGroup[] = [];
   for (const seg of segments) {
@@ -222,7 +249,8 @@ export function groupSegments(segments: ContentSegment[]): SegmentGroup[] {
       }
     }
   }
-  return groups;
+
+  return hoistThinkingWithinTextRuns(groups);
 }
 
 /** 仅提取 text 分段并拼接（不含 fallback 语义）。 */

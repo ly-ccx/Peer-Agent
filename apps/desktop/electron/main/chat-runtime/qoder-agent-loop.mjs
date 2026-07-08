@@ -8,138 +8,26 @@ import { sanitizeApiMessages } from './message-sanitizer.mjs';
 import * as responseGuard from './response-guard.mjs';
 import { executeModelToolCall } from './tool-orchestrator.mjs';
 
+const QODER_STREAM_IDLE_TIMEOUT_MS = 30_000;
+
 function makeAbortError() {
   const error = new Error('Aborted');
   error.name = 'AbortError';
   return error;
 }
 
-function normalizeLiteralToolArguments(raw) {
-  const args = raw?.input ?? raw?.args ?? raw?.arguments ?? raw?.parameters ?? raw?.function?.arguments ?? {};
-  if (typeof args === 'string') return args;
-  if (args && typeof args === 'object') return JSON.stringify(args);
-  return '{}';
+function qoderThinkingOnlyResponseError({ providerTracePath = null } = {}) {
+  const suffix = providerTracePath ? ` provider_trace=${providerTracePath}` : '';
+  return `qoder_thinking_only_response: Qoder returned reasoning-only output without final text or a valid tool call.${suffix}`;
 }
 
-function contentToFallbackText(content) {
-  if (typeof content === 'string') return content;
-  if (content === null || content === undefined) return '';
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === 'string') return part;
-        if (part?.type === 'text' && typeof part.text === 'string') return part.text;
-        if (typeof part?.content === 'string') return part.content;
-        if (part?.type === 'tool_result') {
-          return `Tool result:\n${contentToFallbackText(part.content)}`;
-        }
-        if (part?.type === 'tool_use') {
-          return '';
-        }
-        return '';
-      })
-      .filter(Boolean)
-      .join('\n');
-  }
-  if (content && typeof content === 'object') return JSON.stringify(content);
-  return '';
-}
-
-function functionToolName(tool) {
-  const fn = tool?.function && typeof tool.function === 'object' ? tool.function : tool;
-  return typeof fn?.name === 'string' ? fn.name.trim() : '';
-}
-
-function qoderFallbackToolList(tools) {
-  const names = Array.isArray(tools) ? tools.map(functionToolName).filter(Boolean) : [];
-  if (!names.length) return 'Available tools: none.';
-  return `Available tool names: ${names.join(', ')}.`;
-}
-
-function flattenMessagesForQoderLiteralTools(messages) {
-  if (!Array.isArray(messages)) return [];
-  const toolNamesById = new Map();
-  const flattened = [];
-  for (const message of messages) {
-    const role = String(message?.role || '').trim();
-    const text = contentToFallbackText(message?.content);
-    if (role === 'assistant') {
-      if (Array.isArray(message.tool_calls)) {
-        for (const tc of message.tool_calls) {
-          const id = typeof tc?.id === 'string' ? tc.id : '';
-          const name = tc?.function?.name || tc?.name || '';
-          if (id && name) toolNamesById.set(id, name);
-        }
-      }
-      if (text.trim()) flattened.push({ role: 'assistant', content: text });
-      continue;
-    }
-    if (role === 'tool') {
-      const name = toolNamesById.get(message?.tool_call_id) || 'tool';
-      flattened.push({
-        role: 'user',
-        content: `Result from ${name}:\n${text}`,
-      });
-      continue;
-    }
-    flattened.push({
-      role: ['system', 'user'].includes(role) ? role : 'user',
-      content: text,
-    });
-  }
-  return flattened.filter((message) => String(message.content || '').trim());
-}
-
-function qoderLiteralToolInstruction(tools = []) {
+function qoderThinkingOnlyResponseCorrection() {
   return [
-    'Tool calling for this Qoder channel uses the Qoder literal tool-call dialect.',
-    'Do not use native function calls.',
-    'When a tool is needed, emit exactly one or more pure tool-call blocks and no other text.',
-    'Each block must use an opening tag named tool_call, a compact JSON object with name and input fields, and the matching closing tag.',
-    qoderFallbackToolList(tools),
-    'Use only those tool names. If no tool is needed, answer normally.',
+    'The previous Qoder response contained only hidden reasoning and no final answer or valid tool call.',
+    'Discard that reasoning-only output.',
+    'If the task requires local filesystem, git, shell, build, runtime, or verification facts, emit an actual tool call now.',
+    'Otherwise provide a final text answer. Do not stop after a planning or tool-use preamble.',
   ].join(' ');
-}
-
-function withQoderLiteralToolInstruction(messages, tools) {
-  if (!Array.isArray(tools) || !tools.length) return messages;
-  const instruction = { role: 'user', content: qoderLiteralToolInstruction(tools) };
-  const firstNonSystemIndex = messages.findIndex((message) => message?.role !== 'system');
-  if (firstNonSystemIndex < 0) return [...messages, instruction];
-  return [
-    ...messages.slice(0, firstNonSystemIndex),
-    instruction,
-    ...messages.slice(firstNonSystemIndex),
-  ];
-}
-
-export function parseQoderLiteralToolCalls(text) {
-  const value = String(text || '')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&amp;/gi, '&')
-    .trim();
-  if (!value || !value.includes('<tool_call')) return [];
-  const calls = [];
-  let remainder = value;
-  const pattern = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi;
-  let match;
-  while ((match = pattern.exec(value)) !== null) {
-    remainder = remainder.replace(match[0], '');
-    try {
-      const parsed = JSON.parse(match[1]);
-      const name = String(parsed?.name || parsed?.tool || parsed?.function?.name || '').trim();
-      if (!name) return [];
-      calls.push({
-        id: String(parsed?.id || `qoder_literal_tool_${calls.length + 1}`),
-        name,
-        arguments: normalizeLiteralToolArguments(parsed),
-      });
-    } catch {
-      return [];
-    }
-  }
-  return calls.length > 0 && !remainder.trim() ? calls : [];
 }
 
 export async function agentLoopQoder({
@@ -177,24 +65,23 @@ export async function agentLoopQoder({
       tools,
     }),
   });
-  const literalToolMode = tools.length > 0;
 
   for (let turn = 0; turn < loop.maxTurns; turn++) {
-    const requestTools = literalToolMode ? [] : tools;
-    const requestMessages = literalToolMode
-      ? withQoderLiteralToolInstruction(flattenMessagesForQoderLiteralTools(sanitizeApiMessages(apiMessages)), tools)
-      : sanitizeApiMessages(apiMessages);
+    const requestMessages = sanitizeApiMessages(apiMessages);
     const providerResponse = await sendStream({
       baseUrl,
       apiKey,
       endpoint: resolvedChannel?.endpoint,
       model,
       messages: requestMessages,
-      tools: requestTools,
+      tools,
       maxOutputTokens,
       signal,
       webContents,
       streamId,
+      bufferThinkingDeltas: false,
+      emitBufferedThinkingDeltas: true,
+      streamIdleTimeoutMs: QODER_STREAM_IDLE_TIMEOUT_MS,
     });
 
     if (signal?.aborted) throw makeAbortError();
@@ -210,11 +97,22 @@ export async function agentLoopQoder({
 
     const content = providerResponse.content || '';
     const thinkingContent = providerResponse.thinkingContent || '';
-    const toolCalls = Array.isArray(providerResponse.toolCalls) && providerResponse.toolCalls.length
-      ? providerResponse.toolCalls
-      : parseQoderLiteralToolCalls(content);
+    const toolCalls = Array.isArray(providerResponse.toolCalls) ? providerResponse.toolCalls : [];
 
     if (!toolCalls.length) {
+      if (!content.trim() && thinkingContent.trim()) {
+        if (loop.claimEmptyResponseRetry()) {
+          apiMessages.push({
+            role: 'user',
+            content: qoderThinkingOnlyResponseCorrection(),
+          });
+          continue;
+        }
+        loop.sendError(qoderThinkingOnlyResponseError({
+          providerTracePath: providerResponse.providerTracePath,
+        }));
+        return;
+      }
       const terminalResponse = handleTerminalTextResponse({
         text: content,
         thinking: thinkingContent,

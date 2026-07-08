@@ -2,10 +2,18 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+const COMPACT_JSON_CHAR_LIMIT = 4000;
+const COMPACT_JSON_PREVIEW_CHARS = 3200;
+
 export function compactJson(value: unknown) {
   try {
     const text = JSON.stringify(value, null, 2);
-    return text.length > 4000 ? `${text.slice(0, 4000)}...` : text;
+    if (text.length <= COMPACT_JSON_CHAR_LIMIT) return text;
+    return JSON.stringify({
+      truncated: true,
+      originalChars: text.length,
+      preview: `${text.slice(0, COMPACT_JSON_PREVIEW_CHARS)}...`,
+    }, null, 2);
   } catch {
     return String(value);
   }

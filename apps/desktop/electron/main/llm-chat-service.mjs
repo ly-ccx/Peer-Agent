@@ -25,7 +25,7 @@ import {
   describeProviderTarget,
   orderProviderCandidates,
 } from './chat-runtime/provider-recovery-broker.mjs';
-import { hasDanglingToolIntent, hasUnsupportedToolClaim } from './chat-runtime/response-guard.mjs';
+import { hasUnsupportedToolClaim } from './chat-runtime/response-guard.mjs';
 import { createToolContext } from './chat-runtime/tool-orchestrator.mjs';
 import {
   getProviderCredentialErrorCode,
@@ -86,7 +86,7 @@ function buildRuntimeTools({ mcpRegistry, providerType, mode }) {
 
 export { buildAnthropicTools, buildOpenAITools, buildSystemPrompt };
 export { normalizeAnthropicMessages, normalizeOpenAIMessages };
-export { hasDanglingToolIntent, hasUnsupportedToolClaim };
+export { hasUnsupportedToolClaim };
 export { finalizeDanglingToolSegments, terminalDanglingNote };
 export { sanitizeApiMessages };
 export { resolveRunWorkspacePath };

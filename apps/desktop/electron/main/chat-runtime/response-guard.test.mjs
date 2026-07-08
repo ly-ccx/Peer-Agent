@@ -42,6 +42,35 @@ describe('shouldRetryNoToolResponse with literal tool-call syntax', () => {
     assert.equal(shouldRetryNoToolResponse(text), true);
   });
 
+  it('does not treat planning text as an unsupported tool response', () => {
+    const text = [
+      'Let me continue with the goal.',
+      'I need to read the full Dropdown.tsx and TokenUsageDisplay.tsx files.',
+      'Let me read the key files I need to modify.',
+    ].join(' ');
+    assert.equal(shouldRetryNoToolResponse(text), false);
+  });
+
+  it('does not treat Chinese file-read preambles as unsupported tool responses', () => {
+    const text = [
+      '好的，用户让我继续推进 task-3。我需要：',
+      '1. 修改 TokenUsageDisplay 组件。',
+      '2. 修改 ChatSurface 中 modelOptions 的构造方式。',
+      '让我先读取这两个文件的完整内容，然后做修改。',
+      '好，现在改调用方。先完整读两个文件。',
+    ].join('\n');
+    assert.equal(shouldRetryNoToolResponse(text), false);
+  });
+
+  it('does not treat command names in planning text as unsupported tool responses', () => {
+    assert.equal(shouldRetryNoToolResponse('Let me run pnpm test and then check git status.'), false);
+  });
+
+  it('does not hard-fail normal execution claims without protocol markup', () => {
+    assert.equal(shouldRetryNoToolResponse('I ran git status and checked the files.'), false);
+    assert.equal(shouldRetryNoToolResponse('OK，开始写代码。我会先写 CascadingMenu.tsx。'), false);
+  });
+
   it('still returns false for a clean normal answer', () => {
     assert.equal(shouldRetryNoToolResponse('Here is the explanation you asked for.'), false);
   });

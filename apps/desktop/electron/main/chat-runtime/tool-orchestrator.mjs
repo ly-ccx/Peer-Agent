@@ -48,6 +48,7 @@ const STREAM_RESULT_CHAR_LIMIT = 4000;
 // 结构化聚合结果（batch_search）在 UI 流里保留的最大命中条数。
 // 卡片只需展示概览，超出部分按条数裁剪并标记 truncated，而非按字节切断 JSON。
 const STREAM_AGGREGATE_MATCH_CAP = 50;
+const STREAM_JSON_PREVIEW_MIN_CHARS = 512;
 
 function isRequestUserInputTool(name) {
   return name === REQUEST_USER_INPUT_TOOL || (typeof name === 'string' && name.endsWith(`.${REQUEST_USER_INPUT_TOOL}`));
@@ -96,15 +97,64 @@ function boundAggregateStreamPayload(output) {
   return JSON.stringify(bounded);
 }
 
+function fitJsonPreviewWithinLimit({ makePayload, makePreview, limit = STREAM_RESULT_CHAR_LIMIT }) {
+  let previewChars = Math.max(STREAM_JSON_PREVIEW_MIN_CHARS, limit - 800);
+  while (previewChars >= STREAM_JSON_PREVIEW_MIN_CHARS) {
+    const payload = makePayload(makePreview(previewChars));
+    const text = JSON.stringify(payload);
+    if (text.length <= limit) return text;
+    const overflow = text.length - limit;
+    previewChars -= Math.max(128, overflow + 32);
+  }
+  return JSON.stringify(makePayload(makePreview(STREAM_JSON_PREVIEW_MIN_CHARS)));
+}
+
+function topLevelString(record, key) {
+  const value = record?.[key];
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function boundGenericJsonStreamPayload(output) {
+  let parsed;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+
+  const record = Array.isArray(parsed) ? {} : parsed;
+  return fitJsonPreviewWithinLimit({
+    makePreview: (previewChars) => output.slice(0, previewChars),
+    makePayload: (preview) => ({
+      kind: topLevelString(record, 'kind') || 'truncated_tool_result_preview',
+      tool: topLevelString(record, 'tool'),
+      capabilityId: topLevelString(record, 'capabilityId'),
+      status: topLevelString(record, 'status'),
+      evidenceRefs: Array.isArray(record.evidenceRefs) ? record.evidenceRefs : undefined,
+      truncated: true,
+      originalChars: output.length,
+      outputPreview: {
+        status: topLevelString(record.outputPreview, 'status') || topLevelString(record, 'status') || 'truncated',
+        truncated: true,
+        preview,
+      },
+    }),
+  });
+}
+
 /**
  * 给 UI 流的工具结果套上界：短结果原样透传；超限时，结构化聚合结果按条数裁剪并
- * 保持合法 JSON（方案 B2），其余（纯文本）回退到字节级截断以维持既有行为。
+ * 保持合法 JSON（方案 B2）。其它 JSON 结果改为合法 JSON preview wrapper；
+ * 非 JSON 纯文本才回退到字节级截断。
  */
 function boundToolResultForStream(output) {
   if (typeof output !== 'string') return '';
   if (output.length <= STREAM_RESULT_CHAR_LIMIT) return output;
   const bounded = boundAggregateStreamPayload(output);
   if (bounded !== null) return bounded;
+  const boundedJson = boundGenericJsonStreamPayload(output);
+  if (boundedJson !== null) return boundedJson;
   return output.slice(0, STREAM_RESULT_CHAR_LIMIT);
 }
 

@@ -7,6 +7,7 @@ import {
   normalizeQoderModel,
   normalizeQoderPreparedEndpoint,
   qoderModelServerBaseUrl,
+  qoderTurnTaskId,
   sendQoderPrivateStream,
 } from './qoder-private-adapter.mjs';
 import { consumeOpenAIStream } from './openai-chat-adapter.mjs';
@@ -247,6 +248,57 @@ describe('qoder private adapter', () => {
     assert.equal(sent.some(([event]) => event === 'chat:stream:thinking'), true);
   });
 
+  it('parses Anthropic-style Qoder SSE tool_use frames instead of dropping them as empty output', async () => {
+    const sent = [];
+    const frames = [
+      'event: content_block_start',
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_qoder_1","name":"bash","input":{}}}',
+      '',
+      'event: content_block_delta',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"com"}}',
+      '',
+      'event: content_block_delta',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"mand\\":\\"pwd\\"}"}}',
+      '',
+      'event: content_block_stop',
+      'data: {"type":"content_block_stop","index":0}',
+      '',
+      'event: message_delta',
+      'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":3}}',
+      '',
+    ];
+    const res = new Response(frames.join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+
+    const result = await consumeOpenAIStream(res, { send: (...args) => sent.push(args) }, 's-qoder-anthropic-tool');
+
+    assert.equal(result.content, '');
+    assert.deepEqual(result.toolCalls, [
+      { id: 'toolu_qoder_1', name: 'bash', arguments: '{"command":"pwd"}' },
+    ]);
+    assert.equal(sent.some(([event]) => event === 'chat:stream:tool-progress'), true);
+  });
+
+  it('unwraps Qoder envelopes that contain Anthropic-style SSE events', async () => {
+    const envelope = (inner) => JSON.stringify({
+      headers: { 'Content-Type': ['application/json'] },
+      body: JSON.stringify(inner),
+      statusCodeValue: 200,
+      statusCode: 'OK',
+    });
+    const res = new Response([
+      `data: ${envelope({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_qoder_2', name: 'bash', input: {} } })}`,
+      `data: ${envelope({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"command":"ls"}' } })}`,
+      `data: ${envelope({ type: 'content_block_stop', index: 0 })}`,
+      '',
+    ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+
+    const result = await consumeOpenAIStream(res, { send: () => {} }, 's-qoder-envelope-anthropic-tool');
+
+    assert.deepEqual(result.toolCalls, [
+      { id: 'toolu_qoder_2', name: 'bash', arguments: '{"command":"ls"}' },
+    ]);
+  });
+
   it('sends tools to Qoder private API and parses returned tool calls', async () => {
     const previousFetch = globalThis.fetch;
     const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
@@ -315,5 +367,258 @@ describe('qoder private adapter', () => {
       if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
       else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
     }
+  });
+
+  it('does not stream literal tool_call thinking deltas when buffering is requested', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    const events = [];
+    globalThis.fetch = async () => new Response([
+      'data: {"choices":[{"delta":{"reasoning_content":"<tool_call>{\\"name\\":\\"bash\\",\\"input\\":{\\"command\\":\\"pwd\\"}}</tool_call>"}}]}',
+      'data: [DONE]',
+      '',
+    ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+
+    try {
+      const result = await sendQoderPrivateStream({
+        baseUrl: 'https://example.test/model/v1',
+        apiKey: 'token',
+        model: 'unsupported-model',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [],
+        webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        streamId: 's-qoder-thinking-leaked-tool',
+        bufferThinkingDeltas: true,
+      });
+
+      assert.equal(result.ok, true);
+      assert.match(result.thinkingContent, /<tool_call>/);
+      assert.equal(events.some((event) => event.channel === 'chat:stream:thinking'), false);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
+  it('can suppress buffered Qoder thinking deltas before a terminal response is classified', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    const events = [];
+    globalThis.fetch = async () => new Response([
+      'data: {"choices":[{"delta":{"reasoning_content":"I need to inspect files before answering."}}]}',
+      'data: [DONE]',
+      '',
+    ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+
+    try {
+      const result = await sendQoderPrivateStream({
+        baseUrl: 'https://example.test/model/v1',
+        apiKey: 'token',
+        model: 'unsupported-model',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [],
+        webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        streamId: 's-qoder-suppressed-buffered-thinking',
+        bufferThinkingDeltas: true,
+        emitBufferedThinkingDeltas: false,
+      });
+
+      assert.equal(result.ok, true);
+      assert.match(result.thinkingContent, /inspect files/);
+      assert.equal(events.some((event) => event.channel === 'chat:stream:thinking'), false);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
+  it('does not emit buffered Qoder thinking when the stream has no final text or tool calls', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    const events = [];
+    globalThis.fetch = async () => new Response([
+      'data: {"choices":[{"delta":{"reasoning_content":"I will inspect the files before editing."}}]}',
+      'data: [DONE]',
+      '',
+    ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+
+    try {
+      const result = await sendQoderPrivateStream({
+        baseUrl: 'https://example.test/model/v1',
+        apiKey: 'token',
+        model: 'unsupported-model',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [],
+        webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        streamId: 's-qoder-thinking-only-buffered',
+        bufferThinkingDeltas: true,
+      });
+
+      assert.equal(result.ok, true);
+      assert.match(result.thinkingContent, /inspect the files/);
+      assert.equal(events.some((event) => event.channel === 'chat:stream:thinking'), false);
+      assert.equal(events.some((event) => event.channel === 'chat:stream:delta'), false);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
+  it('surfaces wrapped Qoder duplicate-request envelopes without waiting for idle timeout', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    const encoder = new TextEncoder();
+    let cancelled = false;
+    globalThis.fetch = async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode([
+          `data: ${JSON.stringify({
+            headers: { 'Content-Type': ['application/json'] },
+            body: JSON.stringify({ code: '103', message: 'Duplicate request' }),
+            statusCodeValue: 403,
+            statusCode: 'FORBIDDEN',
+          })}`,
+          '',
+        ].join('\n')));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+
+    try {
+      const result = await sendQoderPrivateStream({
+        baseUrl: 'https://example.test/model/v1',
+        apiKey: 'token',
+        model: 'unsupported-model',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [],
+        webContents: { send: () => {} },
+        streamId: 's-qoder-duplicate-request-envelope',
+        streamIdleTimeoutMs: 50,
+      });
+
+      assert.equal(result.ok, false);
+      assert.equal(result.providerError, true);
+      assert.match(result.errorText, /provider_stream_error: Duplicate request/);
+      assert.doesNotMatch(result.errorText, /provider_stream_idle_timeout/);
+      assert.equal(cancelled, true);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
+  it('reports a Qoder stream idle timeout when upstream stops sending after reasoning', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    const events = [];
+    const encoder = new TextEncoder();
+    let cancelled = false;
+    globalThis.fetch = async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          'data: {"choices":[{"delta":{"reasoning_content":"Writing CascadingDropdown component..."}}]}\n\n',
+        ));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+
+    try {
+      const result = await sendQoderPrivateStream({
+        baseUrl: 'https://example.test/model/v1',
+        apiKey: 'token',
+        model: 'unsupported-model',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [],
+        webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        streamId: 's-qoder-idle-timeout',
+        bufferThinkingDeltas: true,
+        streamIdleTimeoutMs: 5,
+      });
+
+      assert.equal(result.ok, false);
+      assert.equal(result.providerError, true);
+      assert.match(result.errorText, /provider_stream_error: provider_stream_idle_timeout/);
+      assert.equal(cancelled, true);
+      assert.equal(events.some((event) => event.channel === 'chat:stream:thinking'), false);
+      assert.equal(events.some((event) => event.channel === 'chat:stream:delta'), false);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
+  it('emits buffered Qoder thinking before buffered final text when enabled', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    const events = [];
+    globalThis.fetch = async () => new Response([
+      'data: {"choices":[{"delta":{"reasoning_content":"I should inspect the current state."}}]}',
+      'data: {"choices":[{"delta":{"content":"done"}}]}',
+      'data: [DONE]',
+      '',
+    ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+
+    try {
+      const result = await sendQoderPrivateStream({
+        baseUrl: 'https://example.test/model/v1',
+        apiKey: 'token',
+        model: 'unsupported-model',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [],
+        webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        streamId: 's-qoder-buffered-thinking-before-text',
+        bufferThinkingDeltas: true,
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.content, 'done');
+      assert.match(result.thinkingContent, /inspect/);
+      assert.deepEqual(
+        events
+          .filter((event) => event.channel === 'chat:stream:thinking' || event.channel === 'chat:stream:delta')
+          .map((event) => event.channel),
+        ['chat:stream:thinking', 'chat:stream:delta'],
+      );
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
+  it('derives a unique task_id per turn while keeping the streamId prefix', () => {
+    const streamId = 's-qoder-multi-turn';
+    const first = qoderTurnTaskId(streamId);
+    const second = qoderTurnTaskId(streamId);
+
+    // Each turn must produce a distinct task_id so the Qoder gateway does not
+    // reject follow-up turns (e.g. the edit_file call) with Duplicate request(103).
+    assert.notEqual(first, second);
+    assert.ok(first.startsWith(`${streamId}:`));
+    assert.ok(second.startsWith(`${streamId}:`));
+  });
+
+  it('falls back to a peer-agent prefixed unique task_id when streamId is missing', () => {
+    const first = qoderTurnTaskId(undefined);
+    const second = qoderTurnTaskId('');
+
+    assert.ok(first.startsWith('peer-agent:'));
+    assert.ok(second.startsWith('peer-agent:'));
+    assert.notEqual(first, second);
   });
 });

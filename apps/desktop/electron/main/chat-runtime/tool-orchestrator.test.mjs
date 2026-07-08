@@ -207,6 +207,34 @@ describe('formatToolResultForStream', () => {
     assert.equal(result.length, 4000);
   });
 
+  it('keeps oversized generic JSON tool results parseable for history replay', () => {
+    const output = JSON.stringify({
+      kind: 'local_tool_result_ref',
+      tool: 'bash',
+      status: 'success',
+      evidenceRefs: ['tool-result://call_json'],
+      outputPreview: {
+        status: 'success',
+        stdoutPreview: 'x'.repeat(6000),
+        stderrPreview: '',
+      },
+    });
+    assert.ok(output.length > 4000, 'fixture must exceed the byte limit to exercise truncation');
+
+    const result = formatToolResultForStream({ name: 'bash', args: {}, output });
+
+    assert.ok(result.length <= 4000);
+    const parsed = JSON.parse(result);
+    assert.equal(parsed.kind, 'local_tool_result_ref');
+    assert.equal(parsed.tool, 'bash');
+    assert.equal(parsed.status, 'success');
+    assert.equal(parsed.truncated, true);
+    assert.equal(parsed.originalChars, output.length);
+    assert.deepEqual(parsed.evidenceRefs, ['tool-result://call_json']);
+    assert.equal(parsed.outputPreview.truncated, true);
+    assert.match(parsed.outputPreview.preview, /stdoutPreview/);
+  });
+
   it('streams a complete interaction projection for namespaced request_user_input', () => {
     const question = `需要确认：${'很长'.repeat(1500)}`;
     const result = formatToolResultForStream({

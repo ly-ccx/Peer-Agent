@@ -41,6 +41,7 @@ export function createAgentLoopKernel({
   maxTurns = defaultAgentLoopMaxTurns(),
   maxUnsupportedToolRetries = 1,
   maxEmptyResponseRetries = 1,
+  maxThinkingOnlyRetries = 1,
   // provider 无关的「模型轮次」信号：每次 addUsage（每轮恰好一次）回调一次。
   // 用于 Goal Runner 展示用的实时轮次计数，与具体 provider 解耦。
   onRound = null,
@@ -62,6 +63,7 @@ export function createAgentLoopKernel({
   let lastTurnUsage = null;
   let unsupportedToolRetries = 0;
   let emptyResponseRetries = 0;
+  let thinkingOnlyRetries = 0;
 
   function addUsage(streamUsage = null) {
     // 每轮模型响应恰好调用一次 addUsage，故在此回调 onRound 作为「轮次」信号。
@@ -100,6 +102,12 @@ export function createAgentLoopKernel({
   function claimEmptyResponseRetry() {
     if (emptyResponseRetries >= maxEmptyResponseRetries) return false;
     emptyResponseRetries += 1;
+    return true;
+  }
+
+  function claimThinkingOnlyRetry() {
+    if (thinkingOnlyRetries >= maxThinkingOnlyRetries) return false;
+    thinkingOnlyRetries += 1;
     return true;
   }
 
@@ -150,6 +158,7 @@ export function createAgentLoopKernel({
     addUsage,
     claimUnsupportedToolRetry,
     claimEmptyResponseRetry,
+    claimThinkingOnlyRetry,
     sendDone,
     sendError,
     sendHttpError,
@@ -186,11 +195,18 @@ export function handleTerminalTextResponse({
   const content = String(text || '');
   const thinkingContent = String(thinking || '');
   if (!content.trim()) {
-    // 深度模式下模型可能只产出了 thinking 而正文为空。此时不是错误响应，
-    // 已通过 chat:stream:thinking 推送给渲染层，正常结束即可。
     if (thinkingContent.trim()) {
-      loop.sendDone();
-      return { action: 'done', reason: 'thinking-only' };
+      if (loop.claimThinkingOnlyRetry?.()) {
+        const correction = responseGuard.thinkingOnlyResponseCorrection?.()
+          || 'The previous response contained only hidden reasoning and no final answer or real tool call. Continue with a final answer or an actual tool call.';
+        appendUserCorrection(apiMessages, correction);
+        return { action: 'retry', reason: 'thinking-only-response' };
+      }
+      const error = typeof responseGuard.thinkingOnlyResponseError === 'function'
+        ? responseGuard.thinkingOnlyResponseError({ providerTracePath })
+        : `thinking_only_response: 模型只返回了思考内容，没有返回正文或可执行工具调用。${providerTracePath ? ` provider_trace=${providerTracePath}` : ''}`;
+      loop.sendError(error);
+      return { action: 'stop', reason: 'thinking-only-response-exhausted' };
     }
     if (
       Array.isArray(apiMessages) &&
@@ -214,9 +230,10 @@ export function handleTerminalTextResponse({
       });
       return { action: 'retry', reason: 'unsupported-tool-claim' };
     }
-    // 重试用尽后不再向用户弹出守卫文案；静默收尾，避免突兀的系统提示。
-    // 检测 + 静默重试（unsupportedToolResponseCorrection）仍保留，守卫骨架不变。
-    loop.sendDone();
+    const error = typeof responseGuard.unsupportedToolResponseError === 'function'
+      ? responseGuard.unsupportedToolResponseError({ providerTracePath })
+      : `unsupported_tool_response: 模型输出了工具调用意图或工具协议文本，但没有产生可执行工具调用；已重试后仍失败。${providerTracePath ? ` provider_trace=${providerTracePath}` : ''}`;
+    loop.sendError(error);
     return { action: 'stop', reason: 'unsupported-tool-claim-exhausted' };
   }
 

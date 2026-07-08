@@ -61,6 +61,43 @@ describe('recovering provider fetch', () => {
     }]);
   });
 
+  it('can disable same-body secondary fallback for non-idempotent provider requests', async () => {
+    const events = [];
+    let nodeCalls = 0;
+    let electronCalls = 0;
+    const error = new TypeError('fetch failed');
+    error.cause = { code: 'ECONNRESET' };
+
+    await assert.rejects(
+      fetchWithConnectionRecovery('https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation', {
+        method: 'POST',
+        body: '{"request_id":"req-1"}',
+      }, {
+        streamId: 's-qoder-non-idempotent',
+        provider: 'qoder',
+        model: 'qmodel_latest',
+        retryDelaysMs: [],
+        allowSecondaryFallback: false,
+        fetchImpl: async () => {
+          nodeCalls += 1;
+          throw error;
+        },
+        electronFetchImpl: async () => {
+          electronCalls += 1;
+          return new Response('duplicate', { status: 200 });
+        },
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+      }),
+      /fetch failed/,
+    );
+
+    assert.equal(nodeCalls, 1);
+    assert.equal(electronCalls, 0);
+    assert.deepEqual(events, []);
+  });
+
   it('emits scheduled retry progress before retrying Node fetch', async () => {
     const events = [];
     const waits = [];

@@ -1,4 +1,5 @@
 import {
+  normalizeAnthropicContent,
   normalizeAnthropicMessages,
   normalizeOpenAIMessages,
 } from './message-normalizer.mjs';
@@ -158,6 +159,111 @@ export function applyAnthropicCacheControl(body) {
   return body;
 }
 
+function parseToolArgumentsForAnthropic(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function contentToAnthropicBlocks(content) {
+  const normalized = normalizeAnthropicContent(content);
+  if (Array.isArray(normalized)) return normalized;
+  if (typeof normalized === 'string' && normalized.trim()) return [{ type: 'text', text: normalized }];
+  return [];
+}
+
+function toolResultContent(value) {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return '';
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
+ * Renderer/runtime canonical tool history is OpenAI-style:
+ * assistant.tool_calls[] followed by role:tool messages. Anthropic requires the
+ * same pair as assistant content tool_use blocks followed by user tool_result
+ * blocks, so convert at the provider boundary instead of textifying history.
+ */
+export function normalizeOpenAIToolHistoryForAnthropic(messages = []) {
+  const out = [];
+  let pendingToolResultIds = new Set();
+  const input = messages || [];
+  for (let index = 0; index < input.length; index += 1) {
+    const message = input[index];
+    if (message?.role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length) {
+      const content = contentToAnthropicBlocks(message.content);
+      const nextToolResultIds = new Set();
+      for (const toolCall of message.tool_calls) {
+        const name = toolCall?.function?.name;
+        const id = toolCall?.id;
+        if (!name || !id) continue;
+        nextToolResultIds.add(id);
+        content.push({
+          type: 'tool_use',
+          id,
+          name,
+          input: parseToolArgumentsForAnthropic(toolCall.function?.arguments),
+        });
+      }
+      const { tool_calls: _toolCalls, ...rest } = message;
+      pendingToolResultIds = nextToolResultIds;
+      out.push({ ...rest, content });
+      continue;
+    }
+    if (message?.role === 'tool') {
+      const toolResults = [];
+      const unmatchedToolTexts = [];
+      let cursor = index;
+      while (cursor < input.length && input[cursor]?.role === 'tool') {
+        const toolMessage = input[cursor];
+        const toolUseId = toolMessage.tool_call_id;
+        if (toolUseId && pendingToolResultIds.has(toolUseId)) {
+          pendingToolResultIds.delete(toolUseId);
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            content: toolResultContent(toolMessage.content),
+          });
+        } else {
+          unmatchedToolTexts.push([
+            '[Historical local tool result - unmatched; read-only context]',
+            toolUseId ? `tool_call_id: ${toolUseId}` : '',
+            toolResultContent(toolMessage.content),
+          ].filter(Boolean).join('\n'));
+        }
+        cursor += 1;
+      }
+      index = cursor - 1;
+      if (toolResults.length) {
+        out.push({
+          role: 'user',
+          content: toolResults,
+        });
+      }
+      for (const text of unmatchedToolTexts) {
+        out.push({
+          role: 'user',
+          content: [{ type: 'text', text }],
+        });
+      }
+      continue;
+    }
+    pendingToolResultIds = new Set();
+    out.push(message);
+  }
+  return out;
+}
+
 export function encodeAnthropicMessagesRequest({
   model,
   system,
@@ -172,10 +278,11 @@ export function encodeAnthropicMessagesRequest({
   reasoningEffortMap,
 }) {
   const replyTokenLimit = positiveTokenLimit(maxOutputTokens, ANTHROPIC_REPLY_TOKENS);
+  const anthropicMessages = normalizeOpenAIToolHistoryForAnthropic(messages);
   const body = {
     model,
     system,
-    messages: normalizeAnthropicMessages(messages),
+    messages: normalizeAnthropicMessages(anthropicMessages),
     max_tokens: replyTokenLimit,
     stream: true,
     tools,

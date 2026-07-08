@@ -9,7 +9,7 @@ const PROVIDER_RULES = {
   ],
   qoder: [
     'Provider family: Qoder private API.',
-    'Use native function tool calls when accepted by the runtime. If the runtime asks for the Qoder literal tool-call dialect, follow that dialect exactly without adding prose around it.',
+    'Use native function tool calls when a tool is needed. Do not print tool-call markup or provider wire-format details as text.',
     'Do not write textual [Tool call] or [Tool result] claims.',
   ],
 };

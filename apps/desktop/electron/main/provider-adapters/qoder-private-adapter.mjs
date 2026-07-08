@@ -292,6 +292,11 @@ async function getQoderModelMetadataForSend(model) {
   }
 }
 
+export function qoderTurnTaskId(streamId) {
+  const base = String(streamId || 'peer-agent').trim() || 'peer-agent';
+  return `${base}:${crypto.randomUUID()}`;
+}
+
 async function sendQoderPreparedStream({
   apiKey,
   model,
@@ -302,6 +307,9 @@ async function sendQoderPreparedStream({
   webContents,
   streamId,
   endpoint = null,
+  bufferThinkingDeltas = false,
+  emitBufferedThinkingDeltas = true,
+  streamIdleTimeoutMs = 0,
 } = {}) {
   const requestId = crypto.randomUUID();
   const sessionId = crypto.randomUUID();
@@ -314,7 +322,7 @@ async function sendQoderPreparedStream({
     requestId,
     requestSetId: requestId,
     sessionId,
-    taskId: streamId || 'peer-agent',
+    taskId: qoderTurnTaskId(streamId),
     metadata,
   });
   const resolvedEndpoint = normalizeQoderPreparedEndpoint(endpoint) || await resolveQoderInferenceEndpoint();
@@ -357,6 +365,8 @@ async function sendQoderPreparedStream({
     streamId,
     provider: 'qoder',
     model: requestBody.model_config.key,
+    retryDelaysMs: [],
+    allowSecondaryFallback: false,
   });
   trace.recordResponse(res);
 
@@ -376,7 +386,12 @@ async function sendQoderPreparedStream({
     };
   }
 
-  const streamResult = await consumeOpenAIStream(res, webContents, streamId, trace, signal, { bufferTextDeltas: true });
+  const streamResult = await consumeOpenAIStream(res, webContents, streamId, trace, signal, {
+    bufferTextDeltas: true,
+    bufferThinkingDeltas,
+    emitBufferedThinkingDeltas,
+    streamIdleTimeoutMs,
+  });
   if (streamResult.streamError) {
     const errorText = `provider_stream_error: ${streamResult.streamError.message}`;
     const tracePath = await trace.finish({
@@ -480,6 +495,9 @@ export async function sendQoderPrivateStream({
   webContents,
   streamId,
   endpoint = null,
+  bufferThinkingDeltas = false,
+  emitBufferedThinkingDeltas = true,
+  streamIdleTimeoutMs = 0,
 } = {}) {
   const metadata = await getQoderModelMetadataForSend(model);
   if (metadata) {
@@ -493,6 +511,9 @@ export async function sendQoderPrivateStream({
       webContents,
       streamId,
       endpoint,
+      bufferThinkingDeltas,
+      emitBufferedThinkingDeltas,
+      streamIdleTimeoutMs,
     });
   }
   const requestId = crypto.randomUUID();
@@ -507,7 +528,7 @@ export async function sendQoderPrivateStream({
     requestId,
     requestSetId: requestId,
     sessionId,
-    taskId: streamId || 'peer-agent',
+    taskId: qoderTurnTaskId(streamId),
   });
   const trace = createProviderStreamTrace({
     provider: 'qoder',
@@ -529,6 +550,8 @@ export async function sendQoderPrivateStream({
     streamId,
     provider: 'qoder',
     model: body.model,
+    retryDelaysMs: [],
+    allowSecondaryFallback: false,
   });
   trace.recordResponse(res);
 
@@ -549,7 +572,12 @@ export async function sendQoderPrivateStream({
     };
   }
 
-  const streamResult = await consumeOpenAIStream(res, webContents, streamId, trace, signal, { bufferTextDeltas: true });
+  const streamResult = await consumeOpenAIStream(res, webContents, streamId, trace, signal, {
+    bufferTextDeltas: true,
+    bufferThinkingDeltas,
+    emitBufferedThinkingDeltas,
+    streamIdleTimeoutMs,
+  });
   if (streamResult.streamError) {
     const errorText = `provider_stream_error: ${streamResult.streamError.message}`;
     const tracePath = await trace.finish({
