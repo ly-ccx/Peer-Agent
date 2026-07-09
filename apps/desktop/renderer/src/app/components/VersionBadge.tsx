@@ -10,13 +10,15 @@ import { UpdateToast } from './UpdateToast';
  *
  * 行为（按确认的产品设计）：
  *   - 始终展示当前版本号（vX.Y.Z）。
- *   - 有可用更新时（hasUpdate）在徽标上叠加红点。
- *   - 下载中（downloading）：红点原地升级为 mini 环形进度，按 percent 填充。
- *   - 下载完成（downloaded / ready-to-open）：右下角挂载 UpdateToast 完成卡片；
- *     ✕ 收起后徽标保留红点，点徽标可再次唤出卡片（dismissed 本地态记忆按版本）。
- *   - 点击徽标：
- *       · 完成态且卡片已收起 → 重新唤出完成卡片。
+ *   - 有可用更新时（available）：版本号旁显示文字 Tag「新版本」，比红点更直观。
+ *   - 下载中（downloading）：Tag 原地升级为 mini 环形进度 + 百分比文字。
+ *   - 下载完成（downloaded / ready-to-open）：版本号旁持久挂「安装」按钮
+ *     （Codex 模式），不再依赖右下角 toast；同时仍挂载 UpdateToast 作为
+ *     首次提示，✕ 收起后安装按钮保留。
+ *   - 点击版本号：
+ *       · 完成态且卡片已收起 → 重新唤出卡片。
  *       · 否则 → 打开更新摘要弹窗（无更新时顺带触发一次检查）。
+ *   - 点击「安装」按钮：直接触发安装，不打开弹窗。
  *
  * 能力真相在主进程，本组件通过 useUpdater 消费状态与动作。
  */
@@ -51,8 +53,10 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
 
   const isDownloading = phase === 'downloading';
   const isReady = phase === 'downloaded' || phase === 'ready-to-open';
+  const isAvailable = hasUpdate && !isDownloading && !isReady;
   const readyVersion = status.availableVersion ?? '';
   // 完成卡片可见：处于完成态、有版本号、且该版本未被收起。
+  // 首次下载完成时弹出提示，收起后不再弹（但安装按钮始终保留）。
   const toastVisible = isReady && readyVersion !== '' && dismissedVersion !== readyVersion;
   // 进度环可见：真实下载中，或点「更新」后的过渡期（pendingDownload），
   // 使弹窗收缩落点始终有一个正在脉冲的进度环承接（C1 连续性）。
@@ -78,34 +82,65 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
     }
   };
 
+  // 完成态安装按钮的 label：Windows = 重启安装；mac = 打开安装包。
+  const installLabel =
+    phase === 'ready-to-open'
+      ? i18n.t('updater.badge.openInstaller')
+      : i18n.t('updater.badge.install');
+
+  const handleInstall = () => {
+    if (phase === 'ready-to-open') {
+      void openInstaller();
+    } else {
+      void install();
+    }
+  };
+
   const title = isDownloading
     ? i18n.t('updater.badge.downloading', { percent })
-    : hasUpdate
-      ? i18n.t('updater.badge.updateAvailable')
-      : status.phase === 'checking'
-        ? i18n.t('updater.badge.checking')
-        : i18n.t('updater.badge.upToDate');
+    : isReady
+      ? i18n.t('updater.badge.ready', { version: readyVersion })
+      : hasUpdate
+        ? i18n.t('updater.badge.updateAvailable')
+        : status.phase === 'checking'
+          ? i18n.t('updater.badge.checking')
+          : i18n.t('updater.badge.upToDate');
 
   return (
     <>
-      <button
-        type="button"
-        className={`sidebar-version-badge ${hasUpdate ? 'has-update' : ''}`}
-        title={title}
-        aria-label={hasUpdate ? i18n.t('updater.badge.ariaHasUpdate') : title}
-        onClick={handleClick}
-      >
-        <span className="sidebar-version-text">v{status.currentVersion}</span>
+      <div className={`sidebar-version-badge ${hasUpdate ? 'has-update' : ''}`}>
+        <button
+          type="button"
+          className="sidebar-version-text-btn"
+          title={title}
+          aria-label={hasUpdate ? i18n.t('updater.badge.ariaHasUpdate') : title}
+          onClick={handleClick}
+        >
+          <span className="sidebar-version-text">v{status.currentVersion}</span>
+        </button>
         {showProgress ? (
-          <span
-            className="sidebar-version-dot is-progress"
-            style={{ '--pa-update-pct': progressPercent } as CSSProperties}
-            aria-hidden="true"
-          />
-        ) : hasUpdate ? (
-          <span className="sidebar-version-dot" aria-hidden="true" />
+          <span className="sidebar-version-progress">
+            <span
+              className="sidebar-version-dot is-progress"
+              style={{ '--pa-update-pct': progressPercent } as CSSProperties}
+              aria-hidden="true"
+            />
+            <span className="sidebar-version-percent">{percent}%</span>
+          </span>
+        ) : isReady ? (
+          <button
+            type="button"
+            className="sidebar-version-install-btn"
+            onClick={handleInstall}
+          >
+            {installLabel}
+          </button>
+        ) : isAvailable ? (
+          <span className="sidebar-version-tag" onClick={handleClick}>
+            {i18n.t('updater.badge.newVersion')}
+          </span>
         ) : null}
-      </button>
+      </div>
       {modalOpen ? (
         <UpdateModal
           i18n={i18n}

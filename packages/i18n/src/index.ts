@@ -484,6 +484,10 @@ export type TranslationKey =
   | 'updater.badge.updateAvailable'
   | 'updater.badge.ariaHasUpdate'
   | 'updater.badge.downloading'
+  | 'updater.badge.newVersion'
+  | 'updater.badge.install'
+  | 'updater.badge.openInstaller'
+  | 'updater.badge.ready'
   | 'updater.toast.title'
   | 'updater.toast.ready'
   | 'updater.toast.install'
@@ -1017,6 +1021,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.badge.updateAvailable': '有新版本',
     'updater.badge.ariaHasUpdate': '有可用更新，点击查看',
     'updater.badge.downloading': '正在后台下载更新…{percent}%',
+    'updater.badge.newVersion': '新版本',
+    'updater.badge.install': '安装',
+    'updater.badge.openInstaller': '打开安装包',
+    'updater.badge.ready': '新版本 v{version} 已就绪',
     'updater.toast.title': '下载完成',
     'updater.toast.ready': '新版本 v{version} 已就绪',
     'updater.toast.install': '立即安装',
@@ -1548,6 +1556,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.badge.updateAvailable': 'Update available',
     'updater.badge.ariaHasUpdate': 'An update is available, click to view',
     'updater.badge.downloading': 'Downloading update… {percent}%',
+    'updater.badge.newVersion': 'New',
+    'updater.badge.install': 'Install',
+    'updater.badge.openInstaller': 'Open installer',
+    'updater.badge.ready': 'Version v{version} is ready',
     'updater.toast.title': 'Download complete',
     'updater.toast.ready': 'Version v{version} is ready',
     'updater.toast.install': 'Install now',

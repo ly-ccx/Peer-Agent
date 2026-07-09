@@ -1,32 +1,97 @@
 @layer components {
   /* ── 侧边栏版本徽标 ── */
+  /* 容器：版本号 + 状态指示器（Tag / 进度环 / 安装按钮） */
   .sidebar-version-badge {
     margin-left: auto;
     display: inline-flex;
     align-items: center;
     gap: 4px;
     position: relative;
+    border-radius: 6px;
+    color: var(--pa-text-secondary);
+    font-size: 11px;
+    line-height: 1.4;
+    -webkit-app-region: no-drag;
+  }
+
+  /* 版本号按钮（可点击唤出弹窗） */
+  .sidebar-version-text-btn {
+    display: inline-flex;
+    align-items: center;
     padding: 2px 6px;
     border-radius: 6px;
     border: none;
     background: transparent;
-    color: var(--pa-text-secondary);
-    font-size: 11px;
-    line-height: 1.4;
+    color: inherit;
+    font-size: inherit;
+    line-height: inherit;
     cursor: pointer;
-    -webkit-app-region: no-drag;
     transition:
       background 0.15s ease,
       color 0.15s ease;
   }
 
-  .sidebar-version-badge:hover {
+  .sidebar-version-text-btn:hover {
     background: var(--pa-surface-hover);
     color: var(--pa-text-primary);
   }
 
-  .sidebar-version-badge.has-update {
+  .sidebar-version-badge.has-update .sidebar-version-text-btn {
     color: var(--cinnabar-seal);
+  }
+
+  /* 「新版本」文字 Tag：比红点更直观，印泥红底白字小胶囊 */
+  .sidebar-version-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--cinnabar-seal);
+    color: var(--za-accent-ink);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.4;
+    cursor: pointer;
+    white-space: nowrap;
+    animation: motion-pulse-attention var(--za-motion-slow) var(--za-ease-spring) both;
+  }
+
+  /* 下载中：进度环 + 百分比文字容器 */
+  .sidebar-version-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 0 2px;
+  }
+
+  .sidebar-version-percent {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--cinnabar-seal);
+    font-variant-numeric: tabular-nums;
+    min-width: 24px;
+  }
+
+  /* 完成态安装按钮：Codex 模式，版本号旁持久挂载 */
+  .sidebar-version-install-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    border-radius: 999px;
+    border: none;
+    background: var(--cinnabar-seal);
+    color: var(--za-accent-ink);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.4;
+    cursor: pointer;
+    white-space: nowrap;
+    animation: motion-pulse-attention var(--za-motion-slow) var(--za-ease-spring) both;
+    transition: filter 0.15s ease;
+  }
+
+  .sidebar-version-install-btn:hover {
+    filter: brightness(1.08);
   }
 
   .sidebar-version-dot {
@@ -362,6 +427,14 @@
 
   .updater-btn.ghost {
     background: transparent;
+  }
+
+  /* 设置页下载中行内进度文字 */
+  .updater-inline-progress {
+    font-size: 13px;
+    color: var(--cinnabar-seal);
+    font-weight: 600;
+    white-space: nowrap;
   }
 
   .updater-modal-uptodate {
