@@ -1,5 +1,25 @@
 @layer components {
 
+  /* 当前轮用户消息吸顶：长回复阅读时保留提问上下文。 */
+  .chat-thread>.chat-msg.chat-msg-user {
+    position: sticky;
+    top: var(--space-3);
+    z-index: 12;
+    box-sizing: border-box;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--ui-radius-panel, var(--radius-md));
+    background: color-mix(in srgb, var(--chrome-canvas) 88%, transparent);
+    border: 1px solid color-mix(in srgb, var(--ink-hairline) 70%, transparent);
+    box-shadow:
+      0 12px 28px color-mix(in srgb, var(--chrome-canvas) 78%, transparent),
+      0 1px 0 color-mix(in srgb, var(--ink-hairline) 45%, transparent);
+    backdrop-filter: blur(18px);
+  }
+
+  .chat-thread>.chat-msg.chat-msg-user+.chat-msg-assistant {
+    margin-top: calc(-1 * var(--space-2));
+  }
+
   /* Peer Vellum 思维链 — §7.5「thinking trace 区块」
    * 整个 trace 用上下发丝线包夹，去掉卡片背景；mono 风格用于工具调用，sans-zh 用于结论 */
   .thinking-timeline {
