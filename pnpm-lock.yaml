@@ -33,6 +33,9 @@ importers:
       '@peer-agent/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@peer-agent/runtime-core':
+        specifier: workspace:*
+        version: link:../../packages/runtime-core
       '@peer-agent/task-thread':
         specifier: workspace:*
         version: link:../../packages/task-thread

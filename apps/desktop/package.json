@@ -24,6 +24,7 @@
     "@peer-agent/chat-kernel": "workspace:*",
     "@peer-agent/i18n": "workspace:*",
     "@peer-agent/protocol": "workspace:*",
+    "@peer-agent/runtime-core": "workspace:*",
     "@peer-agent/task-thread": "workspace:*",
     "@peer-agent/ui": "workspace:*",
     "@vitejs/plugin-react": "^5.1.0",
