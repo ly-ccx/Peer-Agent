@@ -117,6 +117,12 @@ export function AssistantContent({ segments, content, isStreaming, toolProgress,
   const processingSummary = buildProcessingSummary(groups, durationMs, isZh);
   const processingGroups = groups.filter(isProcessingGroup);
   const firstProcessingIndex = groups.findIndex(isProcessingGroup);
+  // 交互卡（request_user_input）需要用户点击，单独抽出、始终渲染在折叠面板外。
+  const interactionCalls = groups.flatMap((group) =>
+    group.type === 'tool-call-group'
+      ? group.calls.filter((tc) => parseToolCallInteractionView(tc))
+      : [],
+  );
   // 只要整条消息仍在流式生成且存在思考/工具组，就保持“活跃”态。
   // 不再依据末尾组的类型逐组判定——流式期间末尾段会在 thinking / tool-call / 正文 text
   // 之间反复切换，逐组判定会让活跃态不断翻转，导致折叠面板“一会展开一会关闭”地跳动。
@@ -155,6 +161,10 @@ export function AssistantContent({ segments, content, isStreaming, toolProgress,
           />
         );
       })}
+      {/* 交互卡（request_user_input）始终渲染在折叠面板之外，默认折叠时也能看到并点击选项。 */}
+      {interactionCalls.map((tc, idx) => (
+        <ToolCallCard key={`interaction-${idx}`} tc={tc} isZh={isZh} />
+      ))}
       {toolProgress ? <ToolProgressInline progress={toolProgress} isZh={isZh} /> : null}
       {showCursor ? <span className="streaming-cursor">▍</span> : null}
     </div>
@@ -196,9 +206,12 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
                 </div>
               );
             }
-            return group.calls.map((tc, callIndex) => (
-              <ToolCallCard key={`tool-${groupIndex}-${callIndex}`} tc={tc} isZh={isZh} />
-            ));
+            return group.calls.map((tc, callIndex) => {
+              // 交互卡（request_user_input）需要用户点击操作，始终在折叠面板外渲染，
+              // 折叠体内跳过它，避免默认折叠时被藏起来看不见。
+              if (parseToolCallInteractionView(tc)) return null;
+              return <ToolCallCard key={`tool-${groupIndex}-${callIndex}`} tc={tc} isZh={isZh} />;
+            });
           })}
         </div>
       ) : null}
