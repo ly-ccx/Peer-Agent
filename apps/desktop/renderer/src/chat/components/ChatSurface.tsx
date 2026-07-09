@@ -25,7 +25,6 @@ import {
 import { useConversationModelEffort } from '../hooks/useConversationModelEffort';
 import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
-import { useMessageQueue, type QueuedMessage } from '../hooks/useMessageQueue';
 import { loadComposerEntry, saveComposerEntry } from '../state/composerPersistence';
 import { formatTime, formatDuration, formatTokenCount } from '../state/format';
 import {
@@ -70,6 +69,7 @@ import type {
   ToolCallLegacy,
   CompactionMeta,
   ChatMsg,
+  QueuedMessage,
   TextGroup,
   ThinkingGroup,
   ToolCallGroup,
@@ -97,8 +97,51 @@ import { useConversationStreamRouter } from '../hooks/useConversationStreamRoute
 import { useWorkbench } from '../../workbench/WorkbenchContext';
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 64;
+const CURRENT_TURN_CONTEXT_PROBE_PX = 96;
 
 const ACCESS_LEVELS: readonly LocalAccessLevel[] = ['ask_before_local', 'session_local', 'full_local'];
+
+interface ChatTurnMessage {
+  readonly msg: ChatMsg;
+  readonly index: number;
+}
+
+interface ChatTurn {
+  readonly id: string;
+  readonly messages: ChatTurnMessage[];
+}
+
+function groupMessagesIntoTurns(messages: readonly ChatMsg[]): ChatTurn[] {
+  const turns: ChatTurn[] = [];
+
+  messages.forEach((msg, index) => {
+    if (msg.role === 'user' || turns.length === 0) {
+      turns.push({ id: msg.id, messages: [] });
+    }
+
+    turns[turns.length - 1]?.messages.push({ msg, index });
+  });
+
+  return turns;
+}
+
+function getTurnUserMessage(turn: ChatTurn): ChatMsg | null {
+  return turn.messages.find(({ msg }) => msg.role === 'user')?.msg ?? null;
+}
+
+function summarizeUserMessageForContext(msg: ChatMsg, isZh: boolean): string {
+  const text = msg.content.trim().replace(/\s+/g, ' ');
+  if (text) return text;
+
+  const attachmentCount = msg.attachments?.length ?? 0;
+  if (attachmentCount > 0) {
+    return isZh
+      ? `${attachmentCount} 个附件`
+      : `${attachmentCount} attachment${attachmentCount === 1 ? '' : 's'}`;
+  }
+
+  return isZh ? '（空消息）' : '(empty message)';
+}
 
 function accessLevelLabel(level: LocalAccessLevel, isZh: boolean): string {
   if (level === 'full_local') return isZh ? '完全访问' : 'Full access';
@@ -338,6 +381,7 @@ export function ChatSurface({
     [convActions],
   );
   const messages = convState.messages as ChatMsg[];
+  const chatTurns = useMemo(() => groupMessagesIntoTurns(messages), [messages]);
   const setMessages = useMemo(() => makeSetter('messages'), [makeSetter]) as Dispatch<SetStateAction<ChatMsg[]>>;
   const isStreaming = convState.isStreaming;
   const setIsStreaming = useMemo(() => makeSetter('isStreaming'), [makeSetter]);
@@ -346,15 +390,17 @@ export function ChatSurface({
   // 压缩进度（0-100）：流式收摘要时按已收字符/预期字符估算；null = 尚无进度。
   const compactionPercent = convState.compactionPercent;
   const setCompactionPercent = useMemo(() => makeSetter('compactionPercent'), [makeSetter]);
-  const [draft, setDraft] = useState('');
+  // 输入草稿 + 待发送队列随 conversationStore 会话桶存放，避免切会话时复用上一会话 composer 状态。
+  const draft = convState.draft;
+  const setDraft = convActions.setDraft;
+  const messageQueue = convState.messageQueue;
+  const enqueueMessage = convActions.enqueueMessage;
+  const removeQueuedMessage = convActions.removeQueuedMessage;
+  const shiftQueuedMessage = convActions.shiftQueuedMessage;
   // 整轮 wall-clock 计时下沉到 useElapsedTimer：对外暴露 elapsedMs（实时跳秒）、
   // setTurnStartedAt（发送时设起点，驱动右下角实时跳秒）。回合时长（turnDurationMs）的真值
   // 已上移到会话桶的 turnStartedAt，由 useConversationStreamRouter 在 done/aborted/error 时读取。
   const { elapsedMs, setTurnStartedAt } = useElapsedTimer(isStreaming);
-  // 待发送消息队列:当前轮(流式或压缩)进行中时用户继续提交的消息排队等候,
-  // 由下方 dequeue effect 在空闲且 provider 就绪时自动取队首发送。状态/增删见 hooks/useMessageQueue;
-  // 自动出队 effect 因依赖更晚声明的 submitMessage,仍内联在本组件(见下文)。
-  const { messageQueue, setMessageQueue, enqueue: enqueueMessage, removeQueuedMessage } = useMessageQueue();
   // 把流式运行状态(含会话坐标)上报给上层,供左侧列表显示 Loading 图标。
   // 表达层只反映 isStreaming 真值,不引入新的执行真值。下沉到 useStreamingReport。
   useStreamingReport(conversationId, isStreaming, onStreamingChange);
@@ -427,6 +473,8 @@ export function ChatSurface({
   const [findOpen, setFindOpen] = useState(false);
   // 顶部 header 滚动感知:chat-thread 滚动后给 header 加底线区分。
   const [threadScrolled, setThreadScrolled] = useState(false);
+  // 当前问题条：只记录滚动位置对应的会话回合，不改变消息真值。
+  const [currentTurnId, setCurrentTurnId] = useState<string | null>(null);
   // 快捷键触发重命名:透传给 ChatHeader 让其进入编辑模式。
   const headerEditTriggerRef = useRef<(() => void) | null>(null);
 
@@ -644,8 +692,10 @@ export function ChatSurface({
     // 草稿与队列都以 conversationId 为坐标,二次打开应原样保留;无会话(新建未落库)则清空。
     // 草稿区附件不持久化(见 composerPersistence 取舍说明),故切换会话后附件区始终清空。
     const persisted = conversationId ? loadComposerEntry(conversationId) : null;
-    setDraft(persisted?.draft ?? '');
-    setMessageQueue(persisted?.queue ?? []);
+    convActions.set({
+      draft: persisted?.draft ?? '',
+      messageQueue: persisted?.queue ?? [],
+    });
     const threadScrollSnapshot = conversationId
       ? threadScrollSnapshotsRef.current.get(conversationId) ?? null
       : null;
@@ -762,13 +812,12 @@ export function ChatSurface({
       }
     })();
     return () => { cancelled = true; };
-  }, [conversationId]);
+  }, [conversationId, convActions]);
 
   // 输入框(草稿 + 待发送队列)按会话持久化。
-  // 时序坑:conversationId 变更的那一次提交里,上面的恢复 effect 才刚调用 setDraft/
-  // setMessageQueue,本 effect 同批运行时 draft/queue 仍是「上一个会话」的旧值。若此时
-  // 直接落盘,会把旧会话的草稿错写到新会话名下。用 ref 记录上次落盘的会话,切换发生的
-  // 那一遍只更新 ref 并跳过保存;待恢复完成后(及后续真实编辑)才以当前会话为坐标落盘。
+  // draft/queue 的运行态已经下沉到 conversationStore 会话桶,切会话时组件订阅的是目标会话桶,
+  // 不再存在「新 conversationId + 旧队列」的共享状态组合。这里保留切换首帧跳过保存的保护,
+  // 避免恢复落盘与用户真实编辑互相覆盖。
   useEffect(() => {
     if (composerPersistConvRef.current !== conversationId) {
       composerPersistConvRef.current = conversationId;
@@ -976,7 +1025,7 @@ export function ChatSurface({
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(command.value.length, command.value.length);
     });
-  }, []);
+  }, [setDraft]);
 
   const removePendingPermissionCall = useCallback((toolCallId: string) => {
     setPendingPermissionCalls((prev) => prev.filter((call) => call.toolCallId !== toolCallId));
@@ -1183,7 +1232,7 @@ export function ChatSurface({
       return;
     }
     await submitMessage(text, sentAttachments);
-  }, [draft, attachments, isStreaming, isCompacting, hasProvider, conversationId, submitMessage, effort]);
+  }, [draft, attachments, isStreaming, isCompacting, hasProvider, conversationId, submitMessage, effort, setDraft, enqueueMessage]);
 
   // 任务续传(ADR 21):就绪后在「正确的会话内」自动发送。
   // App.tsx 已 peek 到会话锚定的待办、切到 resumeTask.sessionId 并经 prop 传入;这里要求
@@ -1217,10 +1266,10 @@ export function ChatSurface({
     if (isStreaming || isCompacting || !hasProvider || !conversationId) return;
     if (resumeTask) return;
     if (messageQueue.length === 0) return;
-    const [head, ...rest] = messageQueue;
-    setMessageQueue(rest);
+    const head = shiftQueuedMessage();
+    if (!head) return;
     void submitMessage(head.text, head.attachments, head.effort);
-  }, [isStreaming, isCompacting, hasProvider, conversationId, resumeTask, messageQueue, submitMessage]);
+  }, [isStreaming, isCompacting, hasProvider, conversationId, resumeTask, messageQueue.length, shiftQueuedMessage, submitMessage]);
 
   // 主操作按钮/回车键的统一入口:
   // - 有草稿内容时:发送或排队(由 handleSend 内部判断是否当前轮进行中)。
@@ -1413,8 +1462,10 @@ export function ChatSurface({
           <div className="chat-empty-state">
             <p>{isZh ? '输入消息开始对话' : 'Type a message to start'}</p>
           </div>
-        ) : messages.map((msg, idx) => (
-          <div key={msg.id} data-msg-id={msg.id} className={`chat-msg chat-msg-${msg.role}`}>
+        ) : chatTurns.map((turn) => (
+          <section key={turn.id} className="chat-turn">
+            {turn.messages.map(({ msg, index: idx }) => (
+              <div key={msg.id} data-msg-id={msg.id} className={`chat-msg chat-msg-${msg.role}`}>
             {msg.compaction ? (
               <CompactionSummaryCard compaction={msg.compaction} isZh={isZh} />
             ) : (
@@ -1494,7 +1545,9 @@ export function ChatSurface({
             </div>
               </>
             )}
-          </div>
+              </div>
+            ))}
+          </section>
         ))}
         {providerRecoveryNotice ? (
           <div className={`provider-recovery-notice${providerRecoveryNotice.kind === 'connection' ? ' provider-recovery-notice--connection' : ''}`}>

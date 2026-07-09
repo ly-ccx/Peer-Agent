@@ -29,6 +29,7 @@ import type { ChatMode } from './preferences';
 import type {
   ChatMsg,
   ProviderRecoveryNotice,
+  QueuedMessage,
   TokenUsageState,
   ToolProgress,
 } from './types';
@@ -44,6 +45,10 @@ export interface ConversationRuntimeState {
   /** 会话内容加载阶段：判别式状态，把「旧内容配新 id」中间态显式化为 loading。 */
   readonly loadStatus: 'idle' | 'loading' | 'ready';
   readonly messages: readonly ChatMsg[];
+  /** 当前会话输入草稿。随会话桶存放，避免切会话时复用上一会话输入态。 */
+  readonly draft: string;
+  /** 当前会话待发送消息队列。随会话桶存放，避免队列在不同会话间串发。 */
+  readonly messageQueue: readonly QueuedMessage[];
   readonly isStreaming: boolean;
   readonly isCompacting: boolean;
   readonly compactionPercent: number | null;
@@ -68,6 +73,8 @@ export interface ConversationRuntimeState {
 export const EMPTY_CONVERSATION_STATE: ConversationRuntimeState = Object.freeze({
   loadStatus: 'idle',
   messages: Object.freeze([]) as readonly ChatMsg[],
+  draft: '',
+  messageQueue: Object.freeze([]) as readonly QueuedMessage[],
   isStreaming: false,
   isCompacting: false,
   compactionPercent: null,
@@ -144,6 +151,33 @@ export class ConversationStore {
     const next: ConversationRuntimeState = { ...prev, ...delta };
     this.buckets.set(conversationId, next);
     this.notify(conversationId);
+  }
+
+  /** 设置当前会话输入草稿。 */
+  setDraft(conversationId: string | null, draft: string): void {
+    this.setState(conversationId, { draft });
+  }
+
+  /** 在当前会话待发送队列末尾追加一条用户消息。 */
+  enqueueMessage(conversationId: string | null, item: QueuedMessage): void {
+    this.setState(conversationId, (prev) => ({ messageQueue: [...prev.messageQueue, item] }));
+  }
+
+  /** 从当前会话待发送队列中移除指定消息。 */
+  removeQueuedMessage(conversationId: string | null, id: string): void {
+    this.setState(conversationId, (prev) => ({
+      messageQueue: prev.messageQueue.filter((item) => item.id !== id),
+    }));
+  }
+
+  /** 当前会话待发送队列出队一条消息；队列为空时返回 null。 */
+  shiftQueuedMessage(conversationId: string | null): QueuedMessage | null {
+    if (!conversationId) return null;
+    const prev = this.buckets.get(conversationId) ?? EMPTY_CONVERSATION_STATE;
+    const [head, ...rest] = prev.messageQueue;
+    if (!head) return null;
+    this.setState(conversationId, { messageQueue: rest });
+    return head;
   }
 
   /** 进入加载阶段：归零内容并标记 loading（切会话时调用，消灭脏中间态）。 */

@@ -5,10 +5,14 @@ import {
   ConversationStore,
   EMPTY_CONVERSATION_STATE,
 } from './conversationStore.ts';
-import type { ChatMsg } from './types.ts';
+import type { ChatMsg, QueuedMessage } from './types.ts';
 
 function msg(id: string, content: string): ChatMsg {
   return { id, role: 'assistant', content, timestamp: 0 };
+}
+
+function queued(id: string, text: string): QueuedMessage {
+  return { id, text, attachments: [], effort: 'default' };
 }
 
 describe('conversationStore', () => {
@@ -84,17 +88,47 @@ describe('conversationStore', () => {
     assert.equal(count, 1);
   });
 
-  it('beginLoad zeroes content and marks loading; commitLoad marks ready', () => {
+  it('beginLoad zeroes content and marks loading; commitLoad marks ready without dropping composer state', () => {
     const store = new ConversationStore();
-    store.setState('A', { messages: [msg('old', 'stale')], isStreaming: true });
+    store.setState('A', {
+      messages: [msg('old', 'stale')],
+      isStreaming: true,
+      draft: 'draft A',
+      messageQueue: [queued('q-a', 'queued A')],
+    });
     store.beginLoad('A');
     assert.equal(store.getSnapshot('A').loadStatus, 'loading');
     assert.equal(store.getSnapshot('A').messages.length, 0);
     assert.equal(store.getSnapshot('A').isStreaming, false);
+    assert.equal(store.getSnapshot('A').draft, 'draft A');
+    assert.equal(store.getSnapshot('A').messageQueue[0]?.text, 'queued A');
 
     store.commitLoad('A', { messages: [msg('new', 'fresh')] });
     assert.equal(store.getSnapshot('A').loadStatus, 'ready');
     assert.equal(store.getSnapshot('A').messages[0].content, 'fresh');
+  });
+
+  it('keeps draft and queued user messages isolated per conversation', () => {
+    const store = new ConversationStore();
+    store.setDraft('A', 'draft A');
+    store.enqueueMessage('A', queued('q-a1', 'queued A 1'));
+    store.enqueueMessage('A', queued('q-a2', 'queued A 2'));
+    store.setDraft('B', 'draft B');
+    store.enqueueMessage('B', queued('q-b1', 'queued B 1'));
+
+    assert.equal(store.getSnapshot('A').draft, 'draft A');
+    assert.deepEqual(store.getSnapshot('A').messageQueue.map((item) => item.text), ['queued A 1', 'queued A 2']);
+    assert.equal(store.getSnapshot('B').draft, 'draft B');
+    assert.deepEqual(store.getSnapshot('B').messageQueue.map((item) => item.text), ['queued B 1']);
+
+    const fromB = store.shiftQueuedMessage('B');
+    assert.equal(fromB?.text, 'queued B 1');
+    assert.equal(store.getSnapshot('B').messageQueue.length, 0);
+    assert.deepEqual(store.getSnapshot('A').messageQueue.map((item) => item.text), ['queued A 1', 'queued A 2']);
+
+    store.removeQueuedMessage('A', 'q-a1');
+    assert.deepEqual(store.getSnapshot('A').messageQueue.map((item) => item.text), ['queued A 2']);
+    assert.equal(store.getSnapshot('B').messageQueue.length, 0);
   });
 
   it('routes streamId to its owning conversation and clears on finalize', () => {

@@ -20,6 +20,17 @@ export interface ChatAttachment {
   text?: string;
 }
 
+/**
+ * 待发送消息队列项：当一轮 agent turn 正在运行/压缩时，用户继续提交的消息先入队，
+ * 待当前轮结束后由 ChatSurface 的 dequeue effect 复用同一发送路径自动发送下一条。
+ */
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  attachments: ChatAttachment[];
+  effort: import('./preferences').EffortLevel;
+}
+
 /** 发送给模型 API 的内容分片：纯文本或图片 URL。 */
 export type ChatApiContentPart =
   | { type: 'text'; text: string }

@@ -16,6 +16,7 @@ import {
   conversationStore,
   type ConversationRuntimeState,
 } from '../state/conversationStore';
+import type { QueuedMessage } from '../state/types';
 
 /** 绑定到具体 conversationId 的运行态写入句柄。 */
 export interface ConversationActions {
@@ -31,6 +32,14 @@ export interface ConversationActions {
   commitLoad: (patch: Partial<ConversationRuntimeState>) => void;
   /** 丢弃当前会话桶。 */
   reset: () => void;
+  /** 设置当前会话输入草稿。 */
+  setDraft: (draft: string) => void;
+  /** 在当前会话待发送队列末尾追加一条用户消息。 */
+  enqueueMessage: (item: QueuedMessage) => void;
+  /** 从当前会话待发送队列中移除指定消息。 */
+  removeQueuedMessage: (id: string) => void;
+  /** 当前会话待发送队列出队一条消息；队列为空时返回 null。 */
+  shiftQueuedMessage: () => QueuedMessage | null;
   /** 登记 streamId 归属当前会话（发送/压缩/reattach 时调用）。 */
   routeStream: (streamId: string) => void;
 }
@@ -60,6 +69,10 @@ export function useConversationState(
       beginLoad: () => conversationStore.beginLoad(conversationId),
       commitLoad: (patch) => conversationStore.commitLoad(conversationId, patch),
       reset: () => conversationStore.reset(conversationId),
+      setDraft: (draft) => conversationStore.setDraft(conversationId, draft),
+      enqueueMessage: (item) => conversationStore.enqueueMessage(conversationId, item),
+      removeQueuedMessage: (id) => conversationStore.removeQueuedMessage(conversationId, id),
+      shiftQueuedMessage: () => conversationStore.shiftQueuedMessage(conversationId),
       routeStream: (streamId) => {
         if (conversationId) conversationStore.routeStream(streamId, conversationId);
       },
