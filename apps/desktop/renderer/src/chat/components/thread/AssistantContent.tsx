@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { parseInteractionToolViewFromCandidates } from '../../state/interactionToolView';
 import { groupSegments } from '../../state/streamSegments';
 import type {
@@ -46,6 +46,37 @@ export function ToolProgressInline({ progress, isZh }: { readonly progress: Tool
       </div>
     </div>
   );
+}
+
+function useAutoCollapsingExpanded(isActive: boolean, shouldAutoExpand: boolean = isActive) {
+  const [expanded, setExpanded] = useState(shouldAutoExpand);
+  const manuallyToggledRef = useRef(false);
+  const wasActiveRef = useRef(isActive);
+
+  useEffect(() => {
+    if (isActive) {
+      if (!manuallyToggledRef.current) setExpanded(true);
+      wasActiveRef.current = true;
+      return;
+    }
+
+    if (wasActiveRef.current) {
+      if (!manuallyToggledRef.current) setExpanded(false);
+      wasActiveRef.current = false;
+      return;
+    }
+
+    if (shouldAutoExpand && !manuallyToggledRef.current) {
+      setExpanded(true);
+    }
+  }, [isActive, shouldAutoExpand]);
+
+  const toggleExpanded = () => {
+    manuallyToggledRef.current = true;
+    setExpanded((current) => !current);
+  };
+
+  return { expanded, toggleExpanded };
 }
 
 export function AssistantContent({ segments, content, isStreaming, toolProgress, isZh }: {
@@ -117,14 +148,14 @@ export function AssistantContent({ segments, content, isStreaming, toolProgress,
 }
 
 function ThinkingTextSection({ content, isActive, isZh }: { readonly content: string; readonly isActive: boolean; readonly isZh: boolean }) {
-  const [expanded, setExpanded] = useState(isActive);
+  const { expanded, toggleExpanded } = useAutoCollapsingExpanded(isActive);
   const label = isActive
     ? (isZh ? '深度思考中...' : 'Thinking...')
     : (isZh ? '深度思考' : 'Thinking');
 
   return (
     <div className={`thinking-section ${isActive ? 'active' : 'done'}`}>
-      <button type="button" className="thinking-toggle" onClick={() => setExpanded(!expanded)}>
+      <button type="button" className="thinking-toggle" onClick={toggleExpanded}>
         {isActive ? null : (
           <span className="thinking-indicator" aria-hidden="true">
             <span className="thinking-dot thinking-dot--done" />
@@ -147,11 +178,7 @@ function ThinkingTextSection({ content, isActive, isZh }: { readonly content: st
 function ThinkingSection({ toolCalls, isActive, isZh }: { readonly toolCalls: ToolCallLegacy[]; readonly isActive: boolean; readonly isZh: boolean }) {
   const hasInteractionCall = toolCalls.some((tc) => parseToolCallInteractionView(tc) !== null);
   const shouldAutoExpand = isActive || hasInteractionCall;
-  const [expanded, setExpanded] = useState(shouldAutoExpand);
-
-  useEffect(() => {
-    if (shouldAutoExpand) setExpanded(true);
-  }, [shouldAutoExpand]);
+  const { expanded, toggleExpanded } = useAutoCollapsingExpanded(isActive, shouldAutoExpand);
 
   const doneCount = toolCalls.filter((tc) => tc.result !== undefined).length;
   const total = toolCalls.length;
@@ -161,7 +188,7 @@ function ThinkingSection({ toolCalls, isActive, isZh }: { readonly toolCalls: To
 
   return (
     <div className={`thinking-section ${isActive ? 'active' : 'done'}`}>
-      <button type="button" className="thinking-toggle" onClick={() => setExpanded(!expanded)}>
+      <button type="button" className="thinking-toggle" onClick={toggleExpanded}>
         {isActive ? null : (
           <span className="thinking-indicator" aria-hidden="true">
             <span className="thinking-dot thinking-dot--done" />
