@@ -50,28 +50,20 @@ export function ToolProgressInline({ progress, isZh }: { readonly progress: Tool
   );
 }
 
-function useAutoCollapsingExpanded(isActive: boolean, shouldAutoExpand: boolean = isActive) {
-  const [expanded, setExpanded] = useState(shouldAutoExpand);
+function useAutoCollapsingExpanded(isActive: boolean) {
+  // 默认折叠：思考进行中也不自动展开，只显示折叠头部（“正在思考”+ 光扫）。
+  // 用户手动点击后才展开/收起；一旦手动切换过，就完全交给用户控制。
+  const [expanded, setExpanded] = useState(false);
   const manuallyToggledRef = useRef(false);
   const wasActiveRef = useRef(isActive);
 
   useEffect(() => {
-    if (isActive) {
-      if (!manuallyToggledRef.current) setExpanded(true);
-      wasActiveRef.current = true;
-      return;
+    // active 结束时，如果用户没手动展开过，确保回到折叠态。
+    if (!isActive && wasActiveRef.current && !manuallyToggledRef.current) {
+      setExpanded(false);
     }
-
-    if (wasActiveRef.current) {
-      if (!manuallyToggledRef.current) setExpanded(false);
-      wasActiveRef.current = false;
-      return;
-    }
-
-    if (shouldAutoExpand && !manuallyToggledRef.current) {
-      setExpanded(true);
-    }
-  }, [isActive, shouldAutoExpand]);
+    wasActiveRef.current = isActive;
+  }, [isActive]);
 
   const toggleExpanded = () => {
     manuallyToggledRef.current = true;
@@ -125,7 +117,11 @@ export function AssistantContent({ segments, content, isStreaming, toolProgress,
   const processingSummary = buildProcessingSummary(groups, durationMs, isZh);
   const processingGroups = groups.filter(isProcessingGroup);
   const firstProcessingIndex = groups.findIndex(isProcessingGroup);
-  const processingIsActive = groups.some((group, i) => isProcessingGroup(group) && isProcessingGroupActive(group, i, groups, isStreaming));
+  // 只要整条消息仍在流式生成且存在思考/工具组，就保持“活跃”态。
+  // 不再依据末尾组的类型逐组判定——流式期间末尾段会在 thinking / tool-call / 正文 text
+  // 之间反复切换，逐组判定会让活跃态不断翻转，导致折叠面板“一会展开一会关闭”地跳动。
+  // 流结束后（isStreaming=false）活跃态一次性变为 false，自动折叠，保留原有交互意图。
+  const processingIsActive = isStreaming && processingGroups.length > 0;
   const lastGroup = groups[groups.length - 1];
   // 流式期间始终保留一个“还在运行”的指示，避免工具执行间隙/文本结束等待下一步时
   // 光标消失造成“卡住”的错觉。仅当末尾组本身已有 active 视觉（工具执行中的工具组、
@@ -171,17 +167,6 @@ function isProcessingGroup(group: SegmentGroup): group is ProcessingGroup {
   return group.type === 'thinking' || group.type === 'tool-call-group';
 }
 
-function isProcessingGroupActive(
-  group: ProcessingGroup,
-  index: number,
-  groups: SegmentGroup[],
-  isStreaming: boolean,
-): boolean {
-  if (!isStreaming) return false;
-  if (group.type === 'tool-call-group') return group.calls.some((tc) => tc.result === undefined);
-  return index === groups.length - 1;
-}
-
 function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZh }: {
   readonly groups: ProcessingGroup[];
   readonly isActive: boolean;
@@ -189,12 +174,8 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
   readonly isZh: boolean;
 }) {
   const { expanded, toggleExpanded } = useAutoCollapsingExpanded(isActive);
-  const toolCalls = groups.flatMap((group) => group.type === 'tool-call-group' ? group.calls : []);
-  const doneCount = toolCalls.filter((tc) => tc.result !== undefined).length;
   const label = isActive
-    ? (toolCalls.length > 0
-      ? (isZh ? `思考中... (${doneCount}/${toolCalls.length})` : `Thinking... (${doneCount}/${toolCalls.length})`)
-      : (isZh ? '深度思考中...' : 'Thinking...'))
+    ? (isZh ? '正在思考' : 'Thinking')
     : completedLabel;
 
   return (
