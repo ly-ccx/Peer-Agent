@@ -4,6 +4,7 @@ import {
   appendEvidenceRecords,
   appendHookEvidence,
   applyEvidenceRedactors,
+  createEvidenceBundle,
   sanitizeHookEvidenceRecord,
   type EvidenceRecord,
 } from './index.ts';
@@ -15,6 +16,37 @@ const baseRecord: EvidenceRecord = {
   createdAt: '2026-07-09T00:00:00.000Z',
   message: 'raw secret',
 };
+
+test('createEvidenceBundle normalizes portable evidence defaults', () => {
+  assert.deepEqual(createEvidenceBundle({
+    evidenceId: 'evidence-1',
+    toolCallId: 'call-1',
+    summary: 'summary',
+    locale: 'en-US',
+    dataLevel: 'D1_internal',
+    artifactRefs: ['artifact-1'],
+  }), {
+    evidenceId: 'evidence-1',
+    toolCallId: 'call-1',
+    summary: 'summary',
+    locale: 'en-US',
+    returnedToCloud: false,
+    dataLevel: 'D1_internal',
+    redactions: [],
+    artifactRefs: ['artifact-1'],
+  });
+
+  assert.deepEqual(createEvidenceBundle(), {
+    evidenceId: undefined,
+    toolCallId: undefined,
+    summary: undefined,
+    locale: undefined,
+    returnedToCloud: false,
+    dataLevel: 'D0_public',
+    redactions: [],
+    artifactRefs: [],
+  });
+});
 
 test('applyEvidenceRedactors applies redactors in order without side effects', () => {
   const redacted = applyEvidenceRedactors(baseRecord, [

@@ -9,6 +9,20 @@ export type EvidenceRedactor = (record: EvidenceRecord) => EvidenceRecord;
 
 export type RuntimeEvidenceObject = Readonly<Record<string, unknown>>;
 
+export interface CreateEvidenceBundleOptions {
+  readonly evidenceId?: string;
+  readonly toolCallId?: string;
+  readonly summary?: string;
+  readonly locale?: string;
+  readonly returnedToCloud?: boolean;
+  readonly dataLevel?: string;
+  readonly redactions?: readonly string[];
+  readonly artifactRefs?: readonly EvidenceRef[];
+  readonly records?: readonly EvidenceRecord[];
+  readonly refs?: readonly EvidenceRef[];
+  readonly metadata?: RuntimeJsonObject;
+}
+
 export interface AppendEvidenceRecordsOptions {
   readonly refs?: readonly EvidenceRef[];
   readonly metadata?: RuntimeJsonObject;
@@ -46,6 +60,24 @@ function isEvidenceObject(value: unknown): value is RuntimeEvidenceObject {
 
 function asReadonlyArray<T = unknown>(value: unknown): readonly T[] {
   return Array.isArray(value) ? value : [];
+}
+
+export function createEvidenceBundle(
+  options: CreateEvidenceBundleOptions = {},
+): RuntimeEvidenceObject {
+  return {
+    evidenceId: options.evidenceId,
+    toolCallId: options.toolCallId,
+    summary: options.summary,
+    locale: options.locale,
+    returnedToCloud: options.returnedToCloud ?? false,
+    dataLevel: options.dataLevel ?? 'D0_public',
+    redactions: [...asReadonlyArray<string>(options.redactions)],
+    artifactRefs: [...asReadonlyArray<EvidenceRef>(options.artifactRefs)],
+    ...(options.records ? { records: [...options.records] } : {}),
+    ...(options.refs ? { refs: [...options.refs] } : {}),
+    ...(options.metadata ? { metadata: options.metadata } : {}),
+  };
 }
 
 export function applyEvidenceRedactors(

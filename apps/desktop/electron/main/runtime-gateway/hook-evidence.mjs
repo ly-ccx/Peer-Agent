@@ -1,4 +1,7 @@
-import { appendHookEvidence as appendCoreHookEvidence } from '@peer-agent/runtime-core';
+import {
+  appendHookEvidence as appendCoreHookEvidence,
+  createEvidenceBundle,
+} from '@peer-agent/runtime-core';
 import { nowIso } from './tool-result-factory.mjs';
 
 function ensureHookEvidenceBase(result) {
@@ -6,16 +9,13 @@ function ensureHookEvidenceBase(result) {
 
   return {
     ...result,
-    evidence: {
+    evidence: createEvidenceBundle({
       evidenceId: `hook-${result.toolCallId ?? 'unknown'}`,
       toolCallId: result.toolCallId,
       summary: 'Hook decision evidence.',
       locale: result.locale ?? 'en-US',
-      returnedToCloud: false,
       dataLevel: result.dataLevel ?? 'D0_public',
-      redactions: [],
-      artifactRefs: [],
-    },
+    }),
   };
 }
 

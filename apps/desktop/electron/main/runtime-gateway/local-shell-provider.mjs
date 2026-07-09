@@ -1,5 +1,6 @@
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { createEvidenceBundle } from '@peer-agent/runtime-core';
 import { classifyShellCommand } from './shell-classifier.mjs';
 import { createShellArtifactStore } from './shell-artifacts.mjs';
 import { createPermissionReview } from './permission-review.mjs';
@@ -41,6 +42,25 @@ function createGrant({ toolCallId, granted, classification, decision }) {
     scope: `local.shell.exec:${classification?.category ?? 'unknown'}`,
     decidedAt: nowIso(),
   };
+}
+
+function createLocalEvidence({
+  toolCallId,
+  summary,
+  locale,
+  dataLevel = 'D0_public',
+  redactions = [],
+  artifactRefs = [],
+}) {
+  return createEvidenceBundle({
+    evidenceId: randomUUID(),
+    toolCallId,
+    summary,
+    locale,
+    dataLevel,
+    redactions,
+    artifactRefs,
+  });
 }
 
 function previewText(value, maxChars = MAX_CONTEXT_STREAM_CHARS) {
@@ -117,18 +137,14 @@ function deniedResult({ call, locale, classification, decision }) {
       cwd: classification.cwd,
       features: classification.features ?? [],
     },
-    evidence: {
-      evidenceId: randomUUID(),
+    evidence: createLocalEvidence({
       toolCallId: call.toolCallId,
       summary: locale === 'zh-CN'
         ? `本地 Shell 指令未执行：${reason}。`
         : `Local shell command was not executed: ${reason}.`,
       locale,
-      returnedToCloud: false,
       dataLevel: classification.dataLevel,
-      redactions: [],
-      artifactRefs: [],
-    },
+    }),
     completedAt: nowIso(),
   };
 }
@@ -150,18 +166,14 @@ function invalidCommandResult({ call, locale, reason }) {
         status: 'invalid_shell_call',
         reason,
       },
-      evidence: {
-        evidenceId: randomUUID(),
+      evidence: createLocalEvidence({
         toolCallId: call.toolCallId,
         summary: locale === 'zh-CN'
           ? `本地 Shell 指令无效：${reason}。`
           : `Local shell command is invalid: ${reason}.`,
         locale,
-        returnedToCloud: false,
         dataLevel: 'D0_public',
-        redactions: [],
-        artifactRefs: [],
-      },
+      }),
       completedAt: nowIso(),
     },
   };
@@ -220,16 +232,14 @@ function shellRunResult({ call, locale, classification, taskOutput, runMode = 'f
       runMode,
       backgroundCompleted: runMode === 'background',
     },
-    evidence: {
-      evidenceId: randomUUID(),
+    evidence: createLocalEvidence({
       toolCallId: call.toolCallId,
       summary,
       locale,
-      returnedToCloud: false,
       dataLevel: classification.dataLevel,
       redactions: [...new Set(redactions)],
       artifactRefs: taskOutput.artifact?.artifactRefs ?? [],
-    },
+    }),
     completedAt: taskOutput.completedAt ?? nowIso(),
   };
 }
@@ -257,16 +267,12 @@ function shellBackgroundStartedResult({ call, locale, classification, task }) {
       riskLevel: classification.riskLevel,
       cwd: classification.cwd,
     },
-    evidence: {
-      evidenceId: randomUUID(),
+    evidence: createLocalEvidence({
       toolCallId: call.toolCallId,
       summary,
       locale,
-      returnedToCloud: false,
       dataLevel: classification.dataLevel,
-      redactions: [],
-      artifactRefs: [],
-    },
+    }),
     completedAt: nowIso(),
   };
 }
@@ -286,18 +292,14 @@ function shellStopResult({ call, locale, stopResult }) {
       toolCallId: call.toolCallId,
       status: stopResult.stopped ? 'success' : 'failed',
       outputPreview: stopResult,
-      evidence: {
-        evidenceId: randomUUID(),
+      evidence: createLocalEvidence({
         toolCallId: call.toolCallId,
         summary: locale === 'zh-CN'
           ? `本地 Shell 停止请求结果：${stopResult.stopped ? '已发送停止信号' : stopResult.reason}。`
           : `Local shell stop result: ${stopResult.stopped ? 'stop signal sent' : stopResult.reason}.`,
         locale,
-        returnedToCloud: false,
         dataLevel: 'D1_internal',
-        redactions: [],
-        artifactRefs: [],
-      },
+      }),
       completedAt: nowIso(),
     },
   };

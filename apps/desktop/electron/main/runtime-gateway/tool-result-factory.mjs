@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { createEvidenceBundle } from '@peer-agent/runtime-core';
 
 export function nowIso() {
   return new Date().toISOString();
@@ -35,18 +36,15 @@ export function createFailedClientToolResult({
       reason,
       capabilityId: call.capabilityId,
     },
-    evidence: {
+    evidence: createEvidenceBundle({
       evidenceId: randomUUID(),
       toolCallId: call.toolCallId,
       summary: locale === 'zh-CN'
         ? `本地能力执行失败：${reason}。`
         : `Local capability failed: ${reason}.`,
       locale,
-      returnedToCloud: false,
       dataLevel,
-      redactions: [],
-      artifactRefs: [],
-    },
+    }),
     completedAt: nowIso(),
   };
 }
