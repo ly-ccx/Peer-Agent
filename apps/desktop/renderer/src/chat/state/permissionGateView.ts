@@ -4,7 +4,8 @@ export type PermissionGateVariant =
   | 'default'
   | 'goal-scope'
   | 'goal-irreversible'
-  | 'goal-high-risk';
+  | 'goal-high-risk'
+  | 'hook-approval';
 
 export interface PermissionGateView {
   readonly variant: PermissionGateVariant;
@@ -63,6 +64,10 @@ function extractPathPreview(call: ClientToolCall): string {
   return extractCommandPreview(call);
 }
 
+function isHookApproval(call: ClientToolCall): boolean {
+  return call.confirmation?.kind === 'hook-approval';
+}
+
 function isScopeConfirmation(call: ClientToolCall): boolean {
   return call.capabilityId === 'goal.scope.expand' || call.confirmation?.kind === 'scope_expansion';
 }
@@ -79,6 +84,17 @@ function isIrreversibleConfirmation(call: ClientToolCall): boolean {
 
 export function buildPermissionGateView(call: ClientToolCall, locale?: string): PermissionGateView {
   const zh = isZhLocale(locale);
+  if (isHookApproval(call)) {
+    return {
+      variant: 'hook-approval',
+      isGoalConfirmation: false,
+      badge: zh ? 'Hook 确认' : 'Hook check',
+      capabilityLabel: zh ? '生命周期 Hook 请求确认' : 'Lifecycle hook approval',
+      preview: extractCommandPreview(call) || extractPathPreview(call) || call.reason,
+      allowLabel: zh ? '确认执行' : 'Allow action',
+      denyLabel: zh ? '拒绝执行' : 'Deny action',
+    };
+  }
   if (isScopeConfirmation(call)) {
     return {
       variant: 'goal-scope',

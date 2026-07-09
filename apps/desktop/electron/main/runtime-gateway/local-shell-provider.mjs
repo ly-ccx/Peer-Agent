@@ -5,6 +5,8 @@ import { createShellArtifactStore } from './shell-artifacts.mjs';
 import { createPermissionReview } from './permission-review.mjs';
 import { redactShellOutput, outputRedactions } from './shell-redaction.mjs';
 import { createShellTaskManager } from './shell-task-manager.mjs';
+import { appendHookEvidence } from './hook-evidence.mjs';
+import { mostRestrictiveDecision } from './hook-runner.mjs';
 
 export { classifyShellCommand } from './shell-classifier.mjs';
 
@@ -331,6 +333,7 @@ export function createLocalShellProvider({
   permissionReview = createPermissionReview({ userDataPath, workspaceRoot, approvalDecider }),
   artifactStore = createShellArtifactStore({ userDataPath }),
   taskManager = createShellTaskManager({ artifactStore }),
+  hookRunner = null,
 } = {}) {
   async function execute(call, locale, context = {}) {
     const args = readShellArgs(call);
@@ -361,10 +364,36 @@ export function createLocalShellProvider({
       };
     }
 
+    const shellHookPayload = {
+      sessionId: context.sessionId,
+      projectionId: context.projectionId,
+      conversationId: context.conversationId,
+      call,
+      shell: {
+        command,
+        cwd: classification.cwd,
+        classification,
+      },
+    };
+    const hookRecords = hookRunner?.runPreToolUse
+      ? await hookRunner.runPreToolUse(shellHookPayload)
+      : [];
+    const hookFinalDecision = mostRestrictiveDecision(hookRecords);
+    const hookDecision = hookRecords.length > 0
+      ? {
+        behavior: hookFinalDecision,
+        reason: hookFinalDecision === 'allow'
+          ? 'hook_allowed'
+          : `hook_${hookFinalDecision}`,
+        records: hookRecords,
+      }
+      : undefined;
+
     const decision = await permissionReview.decideShellExecution({
       call,
       classification,
       localApproval: context.localApproval,
+      hookDecision,
     });
     const grant = createGrant({
       toolCallId: call.toolCallId,
@@ -374,21 +403,22 @@ export function createLocalShellProvider({
     });
 
     if (!decision.granted) {
+      const result = deniedResult({ call, locale, classification, decision });
       return {
         grant,
-        result: deniedResult({ call, locale, classification, decision }),
+        result: appendHookEvidence(result, hookRecords, hookDecision?.behavior),
       };
     }
 
     if (context.signal?.aborted) {
       return {
         grant,
-        result: shellRunResult({
+        result: appendHookEvidence(shellRunResult({
           call,
           locale,
           classification,
           taskOutput: abortedTaskOutput({ toolCallId: call.toolCallId }),
-        }),
+        }), hookRecords, hookDecision?.behavior),
       };
     }
 
@@ -418,13 +448,13 @@ export function createLocalShellProvider({
           .then((taskOutput) => context.emitFollowUpExecution({
             call,
             grant,
-            result: shellRunResult({
+            result: appendHookEvidence(shellRunResult({
               call,
               locale,
               classification,
               taskOutput,
               runMode: 'background',
-            }),
+            }), hookRecords, hookDecision?.behavior),
           }))
           .catch(() => undefined);
       } else {
@@ -444,7 +474,11 @@ export function createLocalShellProvider({
     }
     return {
       grant,
-      result: shellRunResult({ call, locale, classification, taskOutput }),
+      result: appendHookEvidence(
+        shellRunResult({ call, locale, classification, taskOutput }),
+        hookRecords,
+        hookDecision?.behavior,
+      ),
     };
   }
 

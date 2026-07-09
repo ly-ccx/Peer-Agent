@@ -76,8 +76,38 @@ function sanitizeShellRule(rule, { workspaceRoot }) {
   };
 }
 
-async function resolveShellDecision({ call, classification, ruleStore, approvalDecider, localApproval }) {
-  const ruleDecision = ruleStore.decide(classification);
+function mergeHookDecision(ruleDecision, hookDecision) {
+  if (!hookDecision?.behavior) return ruleDecision;
+  if (ruleDecision.behavior === 'deny' || hookDecision.behavior === 'deny') {
+    return {
+      ...ruleDecision,
+      hookDecision,
+      behavior: 'deny',
+      granted: false,
+      reason: ruleDecision.behavior === 'deny'
+        ? ruleDecision.reason
+        : hookDecision.reason || 'hook_denied',
+    };
+  }
+  if (ruleDecision.behavior === 'ask' || hookDecision.behavior === 'ask') {
+    return {
+      ...ruleDecision,
+      hookDecision,
+      behavior: 'ask',
+      granted: false,
+      reason: ruleDecision.behavior === 'ask'
+        ? ruleDecision.reason
+        : hookDecision.reason || 'hook_approval_required',
+    };
+  }
+  return {
+    ...ruleDecision,
+    hookDecision,
+  };
+}
+
+async function resolveShellDecision({ call, classification, ruleStore, approvalDecider, localApproval, hookDecision }) {
+  const ruleDecision = mergeHookDecision(ruleStore.decide(classification), hookDecision);
   if (ruleDecision.behavior === 'allow' || ruleDecision.behavior === 'deny') {
     return ruleDecision;
   }
@@ -112,13 +142,14 @@ export function createPermissionReview({
   shellRuleStore = createShellPermissionRuleStore({ userDataPath }),
   approvalDecider,
 } = {}) {
-  async function decideShellExecution({ call, classification, localApproval }) {
+  async function decideShellExecution({ call, classification, localApproval, hookDecision }) {
     return resolveShellDecision({
       call,
       classification,
       ruleStore: shellRuleStore,
       approvalDecider,
       localApproval,
+      hookDecision,
     });
   }
 
