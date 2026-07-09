@@ -585,7 +585,7 @@ export function ChatSurface({
     });
   }, []);
 
-  const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+  const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const container = threadRef.current;
     if (!container) return;
     container.scrollTo({ top: container.scrollHeight, behavior });
@@ -1008,11 +1008,11 @@ export function ChatSurface({
 
   // 手动 /compact 不改 messages，上面的自动滚动 effect 不会重跑；而压缩进度横幅
   // 渲染在滚动容器最底部。若用户此时已向上滚，横幅会落在视口外，造成"点了没反应"
-  // 的错觉。压缩一开始就强制平滑滚到底，让进度横幅立即进入视口。
+  // 的错觉。压缩一开始就强制滚到底，让进度横幅立即进入视口。
   useEffect(() => {
     if (isCompacting) {
       shouldAutoScrollRef.current = true;
-      scrollThreadToBottom('smooth');
+      scrollThreadToBottom();
     }
   }, [isCompacting, scrollThreadToBottom]);
 
@@ -1635,7 +1635,7 @@ export function ChatSurface({
         <button
           type="button"
           className="chat-scroll-bottom-btn"
-          onClick={() => scrollThreadToBottom('smooth')}
+          onClick={() => scrollThreadToBottom()}
           aria-label={isZh ? '滚动到底部' : 'Scroll to bottom'}
           title={isZh ? '滚动到底部' : 'Scroll to bottom'}
         >
