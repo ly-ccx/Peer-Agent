@@ -24,6 +24,10 @@ export async function resolveProviderCredential({
     throw createProviderCredentialError('provider_not_found');
   }
 
+  // 展开出的虚拟记录（订阅/多模型）其复合 id 在存储里不存在，凭证仍存于原始记录。
+  // credentialId 指向原始记录 id；普通记录无此字段时回退到 provider.id，行为不变。
+  const credentialId = provider.credentialId || provider.id;
+
   const authMethod = provider.authMethod || 'api_key';
 
   if (authMethod === 'qoder_local_auth' || authMethod === 'local_cli') {
@@ -36,14 +40,14 @@ export async function resolveProviderCredential({
   }
 
   if (authMethod === 'oauth_chatgpt') {
-    const credential = llmConfigStore.getCredential(provider.id);
+    const credential = llmConfigStore.getCredential(credentialId);
     const tokens = credential?.tokens || null;
     if (!tokens?.access) {
       throw createProviderCredentialError('oauth_not_logged_in');
     }
     try {
       const { tokens: fresh, refreshed } = await ensureFreshChatGptTokens(tokens);
-      if (refreshed) llmConfigStore.setOAuthTokens(provider.id, fresh);
+      if (refreshed) llmConfigStore.setOAuthTokens(credentialId, fresh);
       return {
         authMethod,
         apiKey: fresh.access,
@@ -55,7 +59,7 @@ export async function resolveProviderCredential({
   }
 
   if (authMethod === 'oauth_google') {
-    const credential = llmConfigStore.getCredential(provider.id);
+    const credential = llmConfigStore.getCredential(credentialId);
     const tokens = credential?.tokens || null;
     if (!tokens?.access) {
       throw createProviderCredentialError('oauth_not_logged_in');
@@ -65,7 +69,7 @@ export async function resolveProviderCredential({
         clientId: credential?.oauthClientId,
         clientSecret: credential?.oauthClientSecret,
       });
-      if (refreshed) llmConfigStore.setOAuthTokens(provider.id, fresh);
+      if (refreshed) llmConfigStore.setOAuthTokens(credentialId, fresh);
       return {
         authMethod,
         apiKey: fresh.access,
@@ -76,7 +80,7 @@ export async function resolveProviderCredential({
     }
   }
 
-  const apiKey = llmConfigStore.getDecryptedApiKey(provider.id);
+  const apiKey = llmConfigStore.getDecryptedApiKey(credentialId);
   if (!apiKey) {
     throw createProviderCredentialError('api_key_not_found');
   }

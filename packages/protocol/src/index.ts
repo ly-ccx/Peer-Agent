@@ -428,6 +428,9 @@ export interface LlmProviderConfigView extends LlmProviderConfig {
   readonly apiKeyConfigured: boolean;
   // 仅当 authMethod === 'oauth_chatgpt' 时存在,表达订阅登录态。
   readonly oauthStatus?: LlmOAuthStatus;
+  // 仅存在于「聊天列表展开」出的虚拟记录（订阅/多模型）：其复合 id 在存储里不存在，
+  // 凭证解析/刷新据此回退到原始记录 id 取 OAuth token / apiKey。普通记录不带此字段。
+  readonly credentialId?: string;
 }
 
 // ── Provider 多模型（父子）模型 ─────────────────────────────────────────────

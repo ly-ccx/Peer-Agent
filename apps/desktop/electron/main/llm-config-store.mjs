@@ -7,6 +7,7 @@ import { deriveOAuthStatus, resolveSubscriptionTestResult } from './provider-con
 import {
   DEFAULT_SUBSCRIPTION_MODEL,
   SUBSCRIPTION_MODEL_IDS,
+  SUBSCRIPTION_CATALOG,
   getSubscriptionModelMetadata,
 } from './provider-adapters/openai-model-catalog.mjs';
 import {
@@ -24,6 +25,7 @@ import { loadQoderAccessToken } from './provider-adapters/qoder-local-auth.mjs';
 import { getQoderModelCatalog, getQoderModelMetadata } from './provider-adapters/qoder-model-catalog.mjs';
 import { sendQoderPrivateStream } from './provider-adapters/qoder-private-adapter.mjs';
 import { expandQoderProviders } from './provider-adapters/qoder-provider-expansion.mjs';
+import { expandSubscriptionProviders } from './provider-adapters/subscription-provider-expansion.mjs';
 
 const { safeStorage } = electron;
 
@@ -383,7 +385,10 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
   // 全部模型」多条虚拟记录（复合 id=groupId::modelId，共享同一凭证）。设置页仍走 listProviders()，
   // 因此这里的展开不会污染 CRUD。catalog 读取失败时 expandQoderProviders 会保留原单条记录。
   function listChatProviders() {
-    return expandQoderProviders(listProviders(), () => getQoderModelCatalog());
+    // 先做订阅展开（ChatGPT OAuth 单记录 → 全部订阅模型多条虚拟记录，各带 credentialId 回退凭证），
+    // 再做 Qoder 展开；两者对彼此的记录都原样透传，互不影响。设置页仍走 listProviders()（不展开）。
+    const subscriptionExpanded = expandSubscriptionProviders(listProviders(), () => SUBSCRIPTION_CATALOG);
+    return expandQoderProviders(subscriptionExpanded, () => getQoderModelCatalog());
   }
 
   function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, apiKey, contextWindow, maxOutputTokens, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthClientId, oauthClientSecret, oauthProjectId, customHeaders }) {

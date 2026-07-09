@@ -73,4 +73,34 @@ describe('provider credential resolver', () => {
       },
     );
   });
+  it('虚拟记录用 credentialId 回退取/写 OAuth token（复合 id 在存储里不存在）', async () => {
+    const refreshedTokens = {
+      access: 'fresh-access',
+      refresh: 'fresh-refresh',
+      expires: Date.now() + 3_600_000,
+      accountId: 'acct-2',
+    };
+    const getCalls = [];
+    const setCalls = [];
+
+    const credential = await resolveProviderCredential({
+      // 展开出的订阅虚拟记录：id 是复合 id，credentialId 指向原始记录 id。
+      provider: { id: 'chatgpt-1::gpt-5.4', credentialId: 'chatgpt-1', authMethod: 'oauth_chatgpt', model: 'gpt-5.4' },
+      llmConfigStore: {
+        getCredential: (id) => {
+          getCalls.push(id);
+          return {
+            tokens: { access: 'old', refresh: 'old-r', expires: Date.now() - 1, accountId: 'acct-1' },
+          };
+        },
+        setOAuthTokens: (...args) => setCalls.push(args),
+      },
+      ensureFreshChatGptTokens: async () => ({ tokens: refreshedTokens, refreshed: true }),
+    });
+
+    assert.equal(credential.apiKey, 'fresh-access');
+    // 取 token 与回写都必须用 credentialId（原始记录 id），而非复合 id。
+    assert.deepEqual(getCalls, ['chatgpt-1']);
+    assert.deepEqual(setCalls, [['chatgpt-1', refreshedTokens]]);
+  });
 });

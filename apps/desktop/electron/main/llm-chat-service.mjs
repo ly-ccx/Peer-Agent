@@ -497,7 +497,12 @@ export function createLlmChatService({
   function getProviderCandidates(preferredProviderId = null) {
     // 用展开后的聊天列表：Qoder 记录已按目录展开成多条虚拟记录（复合 id=groupId::modelId），
     // 会话绑定的虚拟 id 才能在此被命中并取回带正确 model 的记录，从而真正切换到所选模型。
-    const providers = llmConfigStore.listChatProviders();
+    // listChatProviders 做订阅/Qoder 目录展开；旧调用方（或未实现该方法的 mock）回退到 listProviders，
+    // 保证无展开能力时仍按真实记录路由，行为与展开前一致。
+    const listChat = typeof llmConfigStore.listChatProviders === 'function'
+      ? llmConfigStore.listChatProviders
+      : llmConfigStore.listProviders;
+    const providers = listChat();
     return orderProviderCandidates(providers, preferredProviderId);
   }
 
