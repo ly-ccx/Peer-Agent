@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { parseInteractionToolViewFromCandidates } from '../../state/interactionToolView';
 import { groupSegments } from '../../state/streamSegments';
+import { formatDuration } from '../../state/format';
 import type {
   ContentSegment,
   ToolCallLegacy,
   CompactionMeta,
   ToolProgress,
+  SegmentGroup,
 } from '../../state/types';
 import { MarkdownMessage } from '../markdown/MarkdownMessage';
 import { BatchSearchToolCard } from './BatchSearchToolCard';
@@ -79,11 +81,31 @@ function useAutoCollapsingExpanded(isActive: boolean, shouldAutoExpand: boolean 
   return { expanded, toggleExpanded };
 }
 
-export function AssistantContent({ segments, content, isStreaming, toolProgress, isZh }: {
+function buildProcessingSummary(groups: SegmentGroup[], durationMs: number | undefined, isZh: boolean): string {
+  const prefix = isZh ? '已处理' : 'Processed';
+  if (typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs > 0) {
+    return `${prefix} ${formatDuration(durationMs)}`;
+  }
+
+  const toolCallCount = groups.reduce(
+    (count, group) => count + (group.type === 'tool-call-group' ? group.calls.length : 0),
+    0,
+  );
+  if (toolCallCount > 0) {
+    return isZh
+      ? `${prefix} ${toolCallCount} 次工具调用`
+      : `${prefix} ${toolCallCount} tool call${toolCallCount > 1 ? 's' : ''}`;
+  }
+
+  return prefix;
+}
+
+export function AssistantContent({ segments, content, isStreaming, toolProgress, durationMs, isZh }: {
   readonly segments?: ContentSegment[];
   readonly content: string;
   readonly isStreaming: boolean;
   readonly toolProgress?: ToolProgress | null;
+  readonly durationMs?: number;
   readonly isZh: boolean;
 }) {
   if (!segments?.length) {
@@ -100,6 +122,7 @@ export function AssistantContent({ segments, content, isStreaming, toolProgress,
   }
 
   const groups = groupSegments(segments);
+  const processingSummary = buildProcessingSummary(groups, durationMs, isZh);
   const lastGroup = groups[groups.length - 1];
   // 流式期间始终保留一个“还在运行”的指示，避免工具执行间隙/文本结束等待下一步时
   // 光标消失造成“卡住”的错觉。仅当末尾组本身已有 active 视觉（工具执行中的工具组、
@@ -128,6 +151,7 @@ export function AssistantContent({ segments, content, isStreaming, toolProgress,
               key={i}
               content={group.content}
               isActive={isStreaming && i === groups.length - 1}
+              summary={processingSummary}
               isZh={isZh}
             />
           );
@@ -137,6 +161,7 @@ export function AssistantContent({ segments, content, isStreaming, toolProgress,
             key={i}
             toolCalls={group.calls}
             isActive={isStreaming && group.calls.some((c) => c.result === undefined)}
+            summary={processingSummary}
             isZh={isZh}
           />
         );
@@ -147,14 +172,14 @@ export function AssistantContent({ segments, content, isStreaming, toolProgress,
   );
 }
 
-function ThinkingTextSection({ content, isActive, isZh }: { readonly content: string; readonly isActive: boolean; readonly isZh: boolean }) {
+function ThinkingTextSection({ content, isActive, summary, isZh }: { readonly content: string; readonly isActive: boolean; readonly summary: string; readonly isZh: boolean }) {
   const { expanded, toggleExpanded } = useAutoCollapsingExpanded(isActive);
   const label = isActive
     ? (isZh ? '深度思考中...' : 'Thinking...')
-    : (isZh ? '深度思考' : 'Thinking');
+    : summary;
 
   return (
-    <div className={`thinking-section ${isActive ? 'active' : 'done'}`}>
+    <div className={`thinking-section ${isActive ? 'active' : 'done'} ${expanded ? 'expanded' : 'collapsed'}`}>
       <button type="button" className="thinking-toggle" onClick={toggleExpanded}>
         {isActive ? null : (
           <span className="thinking-indicator" aria-hidden="true">
@@ -175,19 +200,17 @@ function ThinkingTextSection({ content, isActive, isZh }: { readonly content: st
   );
 }
 
-function ThinkingSection({ toolCalls, isActive, isZh }: { readonly toolCalls: ToolCallLegacy[]; readonly isActive: boolean; readonly isZh: boolean }) {
-  const hasInteractionCall = toolCalls.some((tc) => parseToolCallInteractionView(tc) !== null);
-  const shouldAutoExpand = isActive || hasInteractionCall;
-  const { expanded, toggleExpanded } = useAutoCollapsingExpanded(isActive, shouldAutoExpand);
+function ThinkingSection({ toolCalls, isActive, summary, isZh }: { readonly toolCalls: ToolCallLegacy[]; readonly isActive: boolean; readonly summary: string; readonly isZh: boolean }) {
+  const { expanded, toggleExpanded } = useAutoCollapsingExpanded(isActive);
 
   const doneCount = toolCalls.filter((tc) => tc.result !== undefined).length;
   const total = toolCalls.length;
   const label = isActive
     ? (isZh ? `思考中... (${doneCount}/${total})` : `Thinking... (${doneCount}/${total})`)
-    : (isZh ? `${total} 次工具调用` : `${total} tool call${total > 1 ? 's' : ''}`);
+    : summary;
 
   return (
-    <div className={`thinking-section ${isActive ? 'active' : 'done'}`}>
+    <div className={`thinking-section ${isActive ? 'active' : 'done'} ${expanded ? 'expanded' : 'collapsed'}`}>
       <button type="button" className="thinking-toggle" onClick={toggleExpanded}>
         {isActive ? null : (
           <span className="thinking-indicator" aria-hidden="true">

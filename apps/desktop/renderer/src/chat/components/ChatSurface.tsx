@@ -144,6 +144,31 @@ function summarizeUserMessageForContext(msg: ChatMsg, isZh: boolean): string {
   return isZh ? '（空消息）' : '(empty message)';
 }
 
+function findCurrentTurnIdForScroll(container: HTMLDivElement): string | null {
+  const probeY = container.getBoundingClientRect().top + CURRENT_TURN_CONTEXT_PROBE_PX;
+  const turnElements = Array.from(container.querySelectorAll<HTMLElement>('[data-chat-turn-id]'));
+  let candidate: HTMLElement | null = null;
+
+  for (const turnElement of turnElements) {
+    const rect = turnElement.getBoundingClientRect();
+    if (rect.top <= probeY && rect.bottom > probeY) {
+      candidate = turnElement;
+      break;
+    }
+    if (rect.top <= probeY) {
+      candidate = turnElement;
+    }
+  }
+
+  const turnId = candidate?.dataset.chatTurnId ?? null;
+  if (!turnId) return null;
+
+  const userMessage = candidate?.querySelector<HTMLElement>('.chat-msg-user');
+  if (userMessage && userMessage.getBoundingClientRect().bottom > probeY) return null;
+
+  return turnId;
+}
+
 function accessLevelLabel(level: LocalAccessLevel, isZh: boolean): string {
   if (level === 'full_local') return isZh ? '完全访问' : 'Full access';
   if (level === 'session_local') return isZh ? '帮我批准' : 'Approve for me';
@@ -585,6 +610,10 @@ export function ChatSurface({
     });
   }, []);
 
+  const updateCurrentTurnContext = useCallback((container: HTMLDivElement | null) => {
+    setCurrentTurnId(container ? findCurrentTurnIdForScroll(container) : null);
+  }, []);
+
   const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const container = threadRef.current;
     if (!container) return;
@@ -592,16 +621,18 @@ export function ChatSurface({
     shouldAutoScrollRef.current = true;
     setIsThreadAtBottom(true);
     saveThreadScrollSnapshot(conversationIdRef.current, container);
-  }, [saveThreadScrollSnapshot]);
+    updateCurrentTurnContext(container);
+  }, [saveThreadScrollSnapshot, updateCurrentTurnContext]);
 
   const handleThreadScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const container = event.currentTarget;
     updateThreadBottomState(container);
+    updateCurrentTurnContext(container);
     if (pendingThreadScrollRestoreRef.current?.conversationId !== conversationId) {
       saveThreadScrollSnapshot(conversationId, container);
     }
     setThreadScrolled(container.scrollTop > 4);
-  }, [conversationId, saveThreadScrollSnapshot, updateThreadBottomState]);
+  }, [conversationId, saveThreadScrollSnapshot, updateCurrentTurnContext, updateThreadBottomState]);
 
   // 表达层导航:点击右侧消息轨时,把对应用户消息滚动到视口并短暂高亮。
   // 仅操作已渲染的 DOM 锚点(data-msg-id),不触碰会话真值。
@@ -634,6 +665,12 @@ export function ChatSurface({
   // 后端未提供时回退到通用四档。不再按 provider 名硬编码（旧逻辑只认 openai，导致 Anthropic 等被降级到四档）。
   const effortLevels = normalizeEffortLevels(activeProvider?.reasoningEffortLevels);
   const isZh = i18n.locale === 'zh-CN';
+  const currentTurnContext = useMemo(() => {
+    if (!currentTurnId) return null;
+    const currentTurn = chatTurns.find((turn) => turn.id === currentTurnId);
+    const userMessage = currentTurn ? getTurnUserMessage(currentTurn) : null;
+    return userMessage ? summarizeUserMessageForContext(userMessage, isZh) : null;
+  }, [chatTurns, currentTurnId, isZh]);
   // 模型下拉选项：以打平后的 provider×model（复合 id=groupId::modelId）为单位，仅列已配置 Key 的
   // 可用模型。value=复合 id（会话据此绑定模型），label 优先取 modelLabel，回退分组名+模型名。
   const modelOptions = useMemo(
@@ -993,18 +1030,21 @@ export function ChatSurface({
       shouldAutoScrollRef.current = true;
       setIsThreadAtBottom(true);
     }
+    updateCurrentTurnContext(container);
     setThreadScrolled(container.scrollTop > 4);
     saveThreadScrollSnapshot(conversationId, container);
     pendingThreadScrollRestoreRef.current = null;
-  }, [conversationId, messages, saveThreadScrollSnapshot, updateThreadBottomState]);
+  }, [conversationId, messages, saveThreadScrollSnapshot, updateCurrentTurnContext, updateThreadBottomState]);
 
   useEffect(() => {
     if (shouldAutoScrollRef.current) {
       scrollThreadToBottom('auto');
       return;
     }
-    updateThreadBottomState(threadRef.current);
-  }, [messages, scrollThreadToBottom, updateThreadBottomState]);
+    const container = threadRef.current;
+    updateThreadBottomState(container);
+    updateCurrentTurnContext(container);
+  }, [messages, scrollThreadToBottom, updateCurrentTurnContext, updateThreadBottomState]);
 
   // 手动 /compact 不改 messages，上面的自动滚动 effect 不会重跑；而压缩进度横幅
   // 渲染在滚动容器最底部。若用户此时已向上滚，横幅会落在视口外，造成"点了没反应"
@@ -1458,13 +1498,19 @@ export function ChatSurface({
           recomputeKey={messages.length}
         />
       ) : null}
-      <div className="chat-thread" ref={threadRef} onScroll={handleThreadScroll}>
+      {currentTurnContext ? (
+        <div className="current-turn-context" aria-label={isZh ? '当前问题' : 'Current question'}>
+          <span className="current-turn-context-label">{isZh ? '当前问题' : 'Current'}</span>
+          <span className="current-turn-context-text">{currentTurnContext}</span>
+        </div>
+      ) : null}
+      <div className={`chat-thread${currentTurnContext ? ' chat-thread-has-context' : ''}`} ref={threadRef} onScroll={handleThreadScroll}>
         {messages.length === 0 ? (
           <div className="chat-empty-state">
             <p>{isZh ? '输入消息开始对话' : 'Type a message to start'}</p>
           </div>
         ) : chatTurns.map((turn) => (
-          <section key={turn.id} className="chat-turn">
+          <section key={turn.id} className="chat-turn" data-chat-turn-id={turn.id}>
             {turn.messages.map(({ msg, index: idx }) => (
               <div key={msg.id} data-msg-id={msg.id} className={`chat-msg chat-msg-${msg.role}`}>
             {msg.compaction ? (
@@ -1497,6 +1543,7 @@ export function ChatSurface({
                     content={msg.content}
                     isStreaming={isStreaming && msg === messages[messages.length - 1]}
                     toolProgress={isStreaming && msg === messages[messages.length - 1] ? toolProgress : null}
+                    durationMs={msg.durationMs}
                     isZh={isZh}
                   />
                 </InteractionAnsweredContext.Provider>

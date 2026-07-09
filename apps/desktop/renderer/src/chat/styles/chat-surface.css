@@ -76,6 +76,56 @@
   gap: var(--space-6);
 }
 
+.chat-thread.chat-thread-has-context {
+  padding-top: calc(52px + 48px);
+}
+
+.current-turn-context {
+  position: absolute;
+  top: calc(52px + var(--space-2));
+  left: var(--space-6);
+  right: var(--space-6);
+  z-index: 24;
+  max-width: var(--chat-content-max);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 34px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--ink-hairline) 55%, transparent);
+  border-radius: var(--ui-radius-panel, var(--radius-md));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--chrome-canvas) 90%, transparent),
+      color-mix(in srgb, var(--chrome-canvas) 74%, transparent)
+    );
+  box-shadow:
+    0 12px 28px color-mix(in srgb, var(--chrome-canvas) 50%, transparent),
+    0 1px 0 color-mix(in srgb, var(--ink-hairline) 40%, transparent);
+  backdrop-filter: blur(20px) saturate(1.12);
+  pointer-events: none;
+}
+
+.current-turn-context-label {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink-fade);
+}
+
+.current-turn-context-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ui-font-control, 0.8125rem);
+  font-weight: 600;
+  color: var(--ink-base);
+}
+
 .chat-empty-state {
   display: flex;
   flex-direction: column;
@@ -294,19 +344,36 @@
   margin-bottom: 0;
 }
 .thinking-toggle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: var(--space-2);
   background: none;
   border: none;
   cursor: pointer;
   padding: var(--space-1) 0;
+  max-width: 100%;
   color: var(--graphite-soft);
   font-size: var(--ui-font-meta, 12px);
-  transition: color var(--za-motion-fast);
+  transition:
+    color var(--za-motion-fast),
+    background var(--za-motion-fast),
+    border-color var(--za-motion-fast),
+    box-shadow var(--za-motion-fast);
+}
+.thinking-section.collapsed.done .thinking-toggle {
+  padding: 10px 14px;
+  min-width: 180px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--chrome-raised) 42%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
 }
 .thinking-toggle:hover {
   color: var(--graphite-base);
+}
+.thinking-section.collapsed.done .thinking-toggle:hover {
+  border-color: var(--ui-border-strong, var(--chrome-hairline));
+  background: color-mix(in srgb, var(--chrome-raised) 56%, transparent);
 }
 .thinking-indicator {
   display: inline-flex;
@@ -330,6 +397,10 @@
 }
 .thinking-label {
   position: relative;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* 思考中:文字底色 soft,一道高光从左到右循环扫过(shimmer)。 */
 .thinking-section.active .thinking-label {
@@ -355,6 +426,9 @@
   flex-shrink: 0;
   margin-left: auto;
   transition: transform var(--za-motion-fast) var(--za-ease-out);
+}
+.thinking-section.collapsed.done .thinking-chevron {
+  margin-left: 0;
 }
 .thinking-body {
   display: flex;
