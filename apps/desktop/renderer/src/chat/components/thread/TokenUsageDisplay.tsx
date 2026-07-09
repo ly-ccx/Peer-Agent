@@ -3,6 +3,7 @@ import { Dropdown, type DropdownOption } from '../../../app/components/Dropdown'
 import { CascadingMenu, type CascadingMenuGroup } from '../../../app/components/CascadingMenu';
 import { isEffortLevel, type EffortLevel } from '../../state/preferences';
 import { formatTokenCount } from '../../state/format';
+import { getProviderDisplayName } from '../../state/providerDisplay';
 import type { TokenUsageState } from '../../state/types';
 
 function effortLabel(level: EffortLevel, isZh: boolean): string {
@@ -99,7 +100,7 @@ export function TokenUsageDisplay({
       const key = prov.groupId || prov.id;
       let bucket = byGroup.get(key);
       if (!bucket) {
-        bucket = { label: prov.name || prov.model, items: [] };
+        bucket = { label: getProviderDisplayName(prov, isZh), items: [] };
         byGroup.set(key, bucket);
         order.push(key);
       }

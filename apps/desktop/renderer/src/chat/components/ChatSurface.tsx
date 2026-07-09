@@ -27,6 +27,7 @@ import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
 import { loadComposerEntry, saveComposerEntry } from '../state/composerPersistence';
 import { formatTime, formatDuration, formatTokenCount } from '../state/format';
+import { getProviderModelDisplayLabel } from '../state/providerDisplay';
 import {
   estimateTextTokens,
   estimateMessageTokens,
@@ -640,9 +641,9 @@ export function ChatSurface({
       .filter((p) => p.apiKeyConfigured)
       .map((p) => ({
         value: p.id,
-        label: p.modelLabel || (p.name ? `${p.name} · ${p.model}` : p.model),
+        label: getProviderModelDisplayLabel(p, isZh),
       })),
-    [providers],
+    [isZh, providers],
   );
   // 有两个及以上可用模型时才允许切换（单模型无切换意义）。
   const canSwitchModel = modelOptions.length > 1;
