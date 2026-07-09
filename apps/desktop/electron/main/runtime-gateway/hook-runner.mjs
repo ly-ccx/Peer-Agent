@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { mostRestrictiveHookDecision } from '@peer-agent/runtime-core';
 
 const DEFAULT_TIMEOUT_MS = 3000;
 
@@ -148,7 +149,5 @@ export function createHookRunner({ hooks = {}, cwd = process.cwd(), env = proces
 }
 
 export function mostRestrictiveDecision(records = []) {
-  if (records.some((record) => record.decision === 'deny')) return 'deny';
-  if (records.some((record) => record.decision === 'ask')) return 'ask';
-  return 'allow';
+  return mostRestrictiveHookDecision(records);
 }
