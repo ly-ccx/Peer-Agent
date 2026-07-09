@@ -123,6 +123,9 @@ export function AssistantContent({ segments, content, isStreaming, toolProgress,
 
   const groups = groupSegments(segments);
   const processingSummary = buildProcessingSummary(groups, durationMs, isZh);
+  const processingGroups = groups.filter(isProcessingGroup);
+  const firstProcessingIndex = groups.findIndex(isProcessingGroup);
+  const processingIsActive = groups.some((group, i) => isProcessingGroup(group) && isProcessingGroupActive(group, i, groups, isStreaming));
   const lastGroup = groups[groups.length - 1];
   // 流式期间始终保留一个“还在运行”的指示，避免工具执行间隙/文本结束等待下一步时
   // 光标消失造成“卡住”的错觉。仅当末尾组本身已有 active 视觉（工具执行中的工具组、
@@ -145,23 +148,13 @@ export function AssistantContent({ segments, content, isStreaming, toolProgress,
             </div>
           );
         }
-        if (group.type === 'thinking') {
-          return (
-            <ThinkingTextSection
-              key={i}
-              content={group.content}
-              isActive={isStreaming && i === groups.length - 1}
-              summary={processingSummary}
-              isZh={isZh}
-            />
-          );
-        }
+        if (i !== firstProcessingIndex) return null;
         return (
-          <ThinkingSection
-            key={i}
-            toolCalls={group.calls}
-            isActive={isStreaming && group.calls.some((c) => c.result === undefined)}
-            summary={processingSummary}
+          <ProcessingDetailsSection
+            key="processing-details"
+            groups={processingGroups}
+            isActive={processingIsActive}
+            label={processingSummary}
             isZh={isZh}
           />
         );
@@ -172,42 +165,37 @@ export function AssistantContent({ segments, content, isStreaming, toolProgress,
   );
 }
 
-function ThinkingTextSection({ content, isActive, summary, isZh }: { readonly content: string; readonly isActive: boolean; readonly summary: string; readonly isZh: boolean }) {
-  const { expanded, toggleExpanded } = useAutoCollapsingExpanded(isActive);
-  const label = isActive
-    ? (isZh ? '深度思考中...' : 'Thinking...')
-    : summary;
+type ProcessingGroup = Extract<SegmentGroup, { type: 'thinking' | 'tool-call-group' }>;
 
-  return (
-    <div className={`thinking-section ${isActive ? 'active' : 'done'} ${expanded ? 'expanded' : 'collapsed'}`}>
-      <button type="button" className="thinking-toggle" onClick={toggleExpanded}>
-        {isActive ? null : (
-          <span className="thinking-indicator" aria-hidden="true">
-            <span className="thinking-dot thinking-dot--done" />
-          </span>
-        )}
-        <span className="thinking-label">{label}</span>
-        <svg className="thinking-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
-          <path d="m6 9 6 6 6-6" />
-        </svg>
-      </button>
-      {expanded ? (
-        <div className="thinking-body thinking-text">
-          <MarkdownMessage content={neutralizeToolCallSyntaxForDisplay(content)} />
-        </div>
-      ) : null}
-    </div>
-  );
+function isProcessingGroup(group: SegmentGroup): group is ProcessingGroup {
+  return group.type === 'thinking' || group.type === 'tool-call-group';
 }
 
-function ThinkingSection({ toolCalls, isActive, summary, isZh }: { readonly toolCalls: ToolCallLegacy[]; readonly isActive: boolean; readonly summary: string; readonly isZh: boolean }) {
-  const { expanded, toggleExpanded } = useAutoCollapsingExpanded(isActive);
+function isProcessingGroupActive(
+  group: ProcessingGroup,
+  index: number,
+  groups: SegmentGroup[],
+  isStreaming: boolean,
+): boolean {
+  if (!isStreaming) return false;
+  if (group.type === 'tool-call-group') return group.calls.some((tc) => tc.result === undefined);
+  return index === groups.length - 1;
+}
 
+function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZh }: {
+  readonly groups: ProcessingGroup[];
+  readonly isActive: boolean;
+  readonly label: string;
+  readonly isZh: boolean;
+}) {
+  const { expanded, toggleExpanded } = useAutoCollapsingExpanded(isActive);
+  const toolCalls = groups.flatMap((group) => group.type === 'tool-call-group' ? group.calls : []);
   const doneCount = toolCalls.filter((tc) => tc.result !== undefined).length;
-  const total = toolCalls.length;
   const label = isActive
-    ? (isZh ? `思考中... (${doneCount}/${total})` : `Thinking... (${doneCount}/${total})`)
-    : summary;
+    ? (toolCalls.length > 0
+      ? (isZh ? `思考中... (${doneCount}/${toolCalls.length})` : `Thinking... (${doneCount}/${toolCalls.length})`)
+      : (isZh ? '深度思考中...' : 'Thinking...'))
+    : completedLabel;
 
   return (
     <div className={`thinking-section ${isActive ? 'active' : 'done'} ${expanded ? 'expanded' : 'collapsed'}`}>
@@ -224,9 +212,18 @@ function ThinkingSection({ toolCalls, isActive, summary, isZh }: { readonly tool
       </button>
       {expanded ? (
         <div className="thinking-body">
-          {toolCalls.map((tc, i) => (
-            <ToolCallCard key={i} tc={tc} isZh={isZh} />
-          ))}
+          {groups.map((group, groupIndex) => {
+            if (group.type === 'thinking') {
+              return (
+                <div key={`thinking-${groupIndex}`} className="thinking-text">
+                  <MarkdownMessage content={neutralizeToolCallSyntaxForDisplay(group.content)} />
+                </div>
+              );
+            }
+            return group.calls.map((tc, callIndex) => (
+              <ToolCallCard key={`tool-${groupIndex}-${callIndex}`} tc={tc} isZh={isZh} />
+            ));
+          })}
         </div>
       ) : null}
     </div>
