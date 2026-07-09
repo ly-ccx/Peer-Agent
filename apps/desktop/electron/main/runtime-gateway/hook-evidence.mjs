@@ -1,44 +1,25 @@
+import { appendHookEvidence as appendCoreHookEvidence } from '@peer-agent/runtime-core';
 import { nowIso } from './tool-result-factory.mjs';
 
-function sanitizeHookRecord(record) {
+function ensureHookEvidenceBase(result) {
+  if (result.evidence && typeof result.evidence === 'object') return result;
+
   return {
-    id: record.id,
-    event: record.event,
-    decision: record.decision,
-    reason: record.reason,
-    outcome: record.outcome,
-    durationMs: record.durationMs,
-    exitCode: record.exitCode,
+    ...result,
+    evidence: {
+      evidenceId: `hook-${result.toolCallId ?? 'unknown'}`,
+      toolCallId: result.toolCallId,
+      summary: 'Hook decision evidence.',
+      locale: result.locale ?? 'en-US',
+      returnedToCloud: false,
+      dataLevel: result.dataLevel ?? 'D0_public',
+      redactions: [],
+      artifactRefs: [],
+    },
   };
 }
 
 export function appendHookEvidence(result, hookRecords = [], finalDecision = undefined) {
   if (!result || !Array.isArray(hookRecords) || hookRecords.length === 0) return result;
-
-  const existingEvidence = result.evidence && typeof result.evidence === 'object'
-    ? result.evidence
-    : {
-        evidenceId: `hook-${result.toolCallId ?? 'unknown'}`,
-        toolCallId: result.toolCallId,
-        summary: 'Hook decision evidence.',
-        locale: result.locale ?? 'en-US',
-        returnedToCloud: false,
-        dataLevel: result.dataLevel ?? 'D0_public',
-        redactions: [],
-        artifactRefs: [],
-      };
-
-  const existingHooks = Array.isArray(existingEvidence.hooks) ? existingEvidence.hooks : [];
-  return {
-    ...result,
-    evidence: {
-      ...existingEvidence,
-      hooks: [
-        ...existingHooks,
-        ...hookRecords.map(sanitizeHookRecord),
-      ],
-      hookFinalDecision: finalDecision ?? existingEvidence.hookFinalDecision,
-      hookRecordedAt: nowIso(),
-    },
-  };
+  return appendCoreHookEvidence(ensureHookEvidenceBase(result), hookRecords, finalDecision, { now: nowIso });
 }
