@@ -18,6 +18,10 @@ files:
   - "dist/**/*"
   - "electron/**/*"
   - "!electron/**/*.test.*"
+  # workspace 包只需运行时的 dist 产物；排除源码与单测，避免 Node 原生加载器
+  # 读到 node_modules 下的 .ts 触发 ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING。
+  - "!node_modules/@peer-agent/*/src"
+  - "!node_modules/@peer-agent/*/tsconfig*.json"
 
 extraResources:
   # Rust native binary (must be pre-built for target platform)
