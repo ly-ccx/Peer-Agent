@@ -156,7 +156,8 @@
     grid-template-columns: 1fr auto;
     align-items: center;
     gap: 12px;
-    padding: 14px 16px;
+    /* 顶部留出 ✕ 关闭按钮的专属高度，避免主按钮与 ✕ 重叠 */
+    padding: 26px 16px 14px;
     border-radius: 12px;
     background: var(--pa-surface-card);
     border: 1px solid var(--za-line);
