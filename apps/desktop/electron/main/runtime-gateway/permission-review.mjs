@@ -1,3 +1,4 @@
+import { mergePermissionDecisions } from '@peer-agent/runtime-core';
 import { createShellPermissionRuleStore } from './shell-permission-rules.mjs';
 import { compareRisk, normalizeShellCwd, SHELL_RISK_ORDER } from './shell-classifier.mjs';
 
@@ -76,28 +77,34 @@ function sanitizeShellRule(rule, { workspaceRoot }) {
   };
 }
 
+function toPermissionDecision(decision, source, fallbackReason) {
+  if (!decision?.behavior) return null;
+  return {
+    decision: decision.behavior,
+    source,
+    reason: decision.reason || fallbackReason,
+  };
+}
+
+function hookFallbackReason(hookDecision) {
+  if (hookDecision?.behavior === 'deny') return 'hook_denied';
+  if (hookDecision?.behavior === 'ask') return 'hook_approval_required';
+  return undefined;
+}
+
 function mergeHookDecision(ruleDecision, hookDecision) {
   if (!hookDecision?.behavior) return ruleDecision;
-  if (ruleDecision.behavior === 'deny' || hookDecision.behavior === 'deny') {
+  const mergedDecision = mergePermissionDecisions([
+    toPermissionDecision(ruleDecision, 'shell_rule'),
+    toPermissionDecision(hookDecision, 'shell_hook', hookFallbackReason(hookDecision)),
+  ]);
+  if (mergedDecision.decision === 'deny' || mergedDecision.decision === 'ask') {
     return {
       ...ruleDecision,
       hookDecision,
-      behavior: 'deny',
+      behavior: mergedDecision.decision,
       granted: false,
-      reason: ruleDecision.behavior === 'deny'
-        ? ruleDecision.reason
-        : hookDecision.reason || 'hook_denied',
-    };
-  }
-  if (ruleDecision.behavior === 'ask' || hookDecision.behavior === 'ask') {
-    return {
-      ...ruleDecision,
-      hookDecision,
-      behavior: 'ask',
-      granted: false,
-      reason: ruleDecision.behavior === 'ask'
-        ? ruleDecision.reason
-        : hookDecision.reason || 'hook_approval_required',
+      reason: mergedDecision.reason,
     };
   }
   return {
