@@ -134,6 +134,157 @@ function qoderMessage(message) {
   return output;
 }
 
+function qoderMessageHasText(content) {
+  if (typeof content === 'string') return content.trim().length > 0;
+  if (Array.isArray(content)) {
+    return content.some((part) => {
+      if (!part || typeof part !== 'object') return false;
+      if (part.type === 'text') return typeof part.text === 'string' && part.text.trim().length > 0;
+      return true;
+    });
+  }
+  return false;
+}
+
+/**
+ * 修复 OpenAI 风格历史在 Anthropic 系模型（如 Qoder ultimate）上的工具消息配对问题。
+ *
+ * 背景：内部历史统一用 OpenAI 结构表达工具调用
+ *   - assistant: { tool_calls: [{ id, ... }] }
+ *   - tool:      { tool_call_id, content }
+ * 上游把它转成 Anthropic 的 tool_use / tool_result 块时，要求每个 tool_result 都有
+ * 紧邻的配对 tool_use。长历史被上下文裁剪后，常出现：
+ *   1) 孤儿 tool_result —— 对应的 assistant.tool_calls 头被裁掉（触发
+ *      "unexpected tool_use_id found in tool_result blocks" 报错）；
+ *   2) 悬空 tool_calls —— assistant 声明了调用但结果被裁掉（反向的
+ *      "tool_use without tool_result"）。
+ *
+ * 本函数按顺序做双向配对清洗：只保留“既被 assistant 声明、又有对应结果”的成对工具消息，
+ * 丢弃孤儿 tool_result 与悬空 tool_calls。对 OpenAI 系模型是无害的（只会让消息更规范）。
+ */
+export function sanitizeQoderToolPairing(messages) {
+  if (!Array.isArray(messages)) return [];
+  const resultIds = new Set();
+  for (const message of messages) {
+    if (String(message?.role || '').trim() !== 'tool') continue;
+    const id = message?.tool_call_id;
+    if (typeof id === 'string' && id) resultIds.add(id);
+  }
+
+  const lastIndex = messages.length - 1;
+  const declaredToolCallIds = new Set();
+  const output = [];
+  messages.forEach((message, index) => {
+    const role = String(message?.role || '').trim();
+
+    if (role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length) {
+      // 末尾 assistant 的 tool_use 是合法的“等待结果”态，予以保留；
+      // 中间的悬空 tool_use（结果被裁掉）会破坏 Anthropic 的成对约束，需剥离。
+      const isLast = index === lastIndex;
+      const keptCalls = message.tool_calls.filter((call) => {
+        const id = call?.id;
+        if (typeof id !== 'string' || !id) return false;
+        return resultIds.has(id) || isLast;
+      });
+      if (keptCalls.length) {
+        for (const call of keptCalls) declaredToolCallIds.add(call.id);
+        output.push(
+          keptCalls.length === message.tool_calls.length
+            ? message
+            : { ...message, tool_calls: keptCalls },
+        );
+      } else if (qoderMessageHasText(message.content)) {
+        // 所有调用都悬空：去掉 tool_calls，仅当仍有文本时保留该 assistant
+        const { tool_calls: _dropped, ...rest } = message;
+        output.push(rest);
+      }
+      // 否则整条丢弃（纯悬空调用、无实际内容）
+      return;
+    }
+
+    if (role === 'tool') {
+      const id = message?.tool_call_id;
+      // 仅保留“前面有配对 tool_use”的 tool_result，丢弃孤儿（正是上游报错的根因）。
+      if (typeof id === 'string' && declaredToolCallIds.has(id)) {
+        output.push(message);
+      }
+      return;
+    }
+
+    output.push(message);
+  });
+  return output;
+}
+
+function normalizeAssistantTextContent(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part && typeof part === 'object' && part.type === 'text' && typeof part.text === 'string') {
+          return part.text;
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  return '';
+}
+
+/**
+ * 合并相邻的 assistant 消息，修复 Anthropic 系模型（Qoder ultimate）的工具配对报错。
+ *
+ * 根因：内部历史把每个工具轮拆成两条连续的 assistant 消息：
+ *   1) 一条叙述文本 assistant（content 为文字）
+ *   2) 一条 { content: null, tool_calls: [...] } 的调用 assistant
+ * 上游把 OpenAI 结构转成 Anthropic 时，要求 user/assistant 角色严格交替；两条连续的
+ * assistant 会被合并，而 content:null 的那条在合并中丢掉了 tool_use 块，导致其后的
+ * tool_result 找不到配对的 tool_use（报错 "unexpected tool_use_id found in tool_result
+ * blocks"，指向 messages.2）。
+ *
+ * 修复：在发送前把相邻 assistant 合并为一条——文本拼接、tool_calls 合并，且当该 assistant
+ * 带 tool_calls 时绝不发送 content:null（回退为空字符串），产出规范的
+ * user → assistant(text + tool_use) → tool 结构。
+ */
+export function mergeConsecutiveAssistants(messages) {
+  if (!Array.isArray(messages)) return [];
+  const output = [];
+  for (const message of messages) {
+    const role = String(message?.role || '').trim();
+    const prev = output[output.length - 1];
+    if (role === 'assistant' && prev && String(prev.role || '').trim() === 'assistant') {
+      const prevText = normalizeAssistantTextContent(prev.content);
+      const curText = normalizeAssistantTextContent(message.content);
+      const mergedText = [prevText, curText].filter((t) => t && t.trim()).join('\n\n');
+      const mergedToolCalls = [
+        ...(Array.isArray(prev.tool_calls) ? prev.tool_calls : []),
+        ...(Array.isArray(message.tool_calls) ? message.tool_calls : []),
+      ];
+      const merged = { ...prev, ...message, role: 'assistant' };
+      if (mergedToolCalls.length) {
+        merged.tool_calls = mergedToolCalls;
+        // 带 tool_calls 的 assistant 绝不发 null，否则上游合并时会丢掉 tool_use 块
+        merged.content = mergedText;
+      } else {
+        merged.content = mergedText || message.content || prev.content || '';
+      }
+      output[output.length - 1] = merged;
+      continue;
+    }
+
+    // 单独的、带 tool_calls 但 content 为 null 的 assistant 也需回退为空串
+    if (role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length && message.content == null) {
+      output.push({ ...message, content: normalizeAssistantTextContent(message.content) });
+      continue;
+    }
+
+    output.push(message);
+  }
+  return output;
+}
+
 function qoderLastUserText(messages) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -226,7 +377,10 @@ function qoderRemoteChatAsk({
   taskId,
   metadata = null,
 } = {}) {
-  const normalizedMessages = messages.map(qoderMessage).filter(Boolean);
+  const sanitizedInput = mergeConsecutiveAssistants(sanitizeQoderToolPairing(messages));
+  const normalizedMessages = sanitizedInput.map(qoderMessage).filter(Boolean);
+  const systemPrompt = normalizedMessages.find((message) => message.role === 'system')?.content || '';
+  const conversationMessages = normalizedMessages.filter((message) => message.role !== 'system');
   const modelKey = metadata?.id || normalizeQoderModel(model);
   const source = metadata?.source || 'system';
   const isReasoning = Boolean(metadata?.supportsReasoning);
@@ -273,8 +427,8 @@ function qoderRemoteChatAsk({
       max_input_tokens: metadata?.contextWindow || 200000,
     },
     custom_model: null,
-    system: normalizedMessages.find((message) => message.role === 'system')?.content || '',
-    messages: normalizedMessages,
+    system: systemPrompt,
+    messages: conversationMessages,
     tools: qoderCompatibleTools(tools),
     parameters,
   };
@@ -454,7 +608,7 @@ export function buildQoderPrivateRequestBody({
 } = {}) {
   const body = {
     model: normalizeQoderModel(model),
-    messages: messages.map(qoderMessage).filter(Boolean),
+    messages: mergeConsecutiveAssistants(sanitizeQoderToolPairing(messages)).map(qoderMessage).filter(Boolean),
     stream: true,
     stream_options: { include_usage: true },
     tools: qoderCompatibleTools(tools),

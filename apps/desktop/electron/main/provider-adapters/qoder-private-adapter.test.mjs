@@ -6,8 +6,10 @@ import {
   buildQoderPrivateRequestBody,
   normalizeQoderModel,
   normalizeQoderPreparedEndpoint,
+  mergeConsecutiveAssistants,
   qoderModelServerBaseUrl,
   qoderTurnTaskId,
+  sanitizeQoderToolPairing,
   sendQoderPrivateStream,
 } from './qoder-private-adapter.mjs';
 import { consumeOpenAIStream } from './openai-chat-adapter.mjs';
@@ -620,5 +622,234 @@ describe('qoder private adapter', () => {
     assert.ok(first.startsWith('peer-agent:'));
     assert.ok(second.startsWith('peer-agent:'));
     assert.notEqual(first, second);
+  });
+
+  describe('sanitizeQoderToolPairing', () => {
+    it('drops orphan tool_result whose tool_use header was trimmed away', () => {
+      // Reproduces the ultimate/Anthropic error:
+      // "unexpected tool_use_id found in tool_result blocks".
+      const messages = [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: 'do it' },
+        { role: 'tool', tool_call_id: 'call_orphan', content: 'result without its call' },
+        { role: 'assistant', content: 'ok' },
+      ];
+
+      const sanitized = sanitizeQoderToolPairing(messages);
+
+      assert.deepEqual(sanitized, [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: 'do it' },
+        { role: 'assistant', content: 'ok' },
+      ]);
+      assert.equal(sanitized.some((m) => m.role === 'tool'), false);
+    });
+
+    it('keeps properly paired tool_use / tool_result messages', () => {
+      const messages = [
+        { role: 'user', content: 'run' },
+        { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', function: { name: 'bash', arguments: '{}' } }] },
+        { role: 'tool', tool_call_id: 'call_1', content: 'output' },
+        { role: 'assistant', content: 'done' },
+      ];
+
+      const sanitized = sanitizeQoderToolPairing(messages);
+
+      assert.equal(sanitized.length, 4);
+      const assistantCall = sanitized[1];
+      assert.equal(assistantCall.tool_calls.length, 1);
+      assert.equal(assistantCall.tool_calls[0].id, 'call_1');
+      assert.equal(sanitized[2].tool_call_id, 'call_1');
+    });
+
+    it('strips mid-conversation dangling tool_calls whose result was trimmed but keeps assistant text', () => {
+      const messages = [
+        { role: 'user', content: 'go' },
+        { role: 'assistant', content: 'let me check', tool_calls: [{ id: 'call_missing', function: { name: 'bash', arguments: '{}' } }] },
+        { role: 'user', content: 'next question' },
+      ];
+
+      const sanitized = sanitizeQoderToolPairing(messages);
+
+      assert.equal(sanitized.length, 3);
+      assert.equal(sanitized[1].content, 'let me check');
+      assert.equal(sanitized[1].tool_calls, undefined);
+    });
+
+    it('keeps a trailing assistant tool_call (pending result) untouched', () => {
+      // The last assistant may legitimately hold a tool_use awaiting its result;
+      // Anthropic only rejects orphan tool_result, not a trailing tool_use.
+      const messages = [
+        { role: 'user', content: 'go' },
+        { role: 'assistant', content: null, tool_calls: [{ id: 'call_pending', function: { name: 'bash', arguments: '{}' } }] },
+      ];
+
+      const sanitized = sanitizeQoderToolPairing(messages);
+
+      assert.equal(sanitized.length, 2);
+      assert.equal(sanitized[1].tool_calls.length, 1);
+      assert.equal(sanitized[1].tool_calls[0].id, 'call_pending');
+    });
+
+    it('drops assistant entirely when it only carries a dangling tool_call with no text', () => {
+      const messages = [
+        { role: 'user', content: 'go' },
+        { role: 'assistant', content: null, tool_calls: [{ id: 'call_missing', function: { name: 'bash', arguments: '{}' } }] },
+        { role: 'user', content: 'still there?' },
+      ];
+
+      const sanitized = sanitizeQoderToolPairing(messages);
+
+      assert.deepEqual(sanitized, [
+        { role: 'user', content: 'go' },
+        { role: 'user', content: 'still there?' },
+      ]);
+    });
+
+    it('keeps only the paired subset when one of several calls lost its result', () => {
+      const messages = [
+        { role: 'assistant', content: null, tool_calls: [
+          { id: 'call_a', function: { name: 'bash', arguments: '{}' } },
+          { id: 'call_b', function: { name: 'read', arguments: '{}' } },
+        ] },
+        { role: 'tool', tool_call_id: 'call_a', content: 'a-result' },
+      ];
+
+      const sanitized = sanitizeQoderToolPairing(messages);
+
+      assert.equal(sanitized.length, 2);
+      assert.equal(sanitized[0].tool_calls.length, 1);
+      assert.equal(sanitized[0].tool_calls[0].id, 'call_a');
+      assert.equal(sanitized[1].tool_call_id, 'call_a');
+    });
+
+    it('guarantees every remaining tool_result has a preceding tool_use (Anthropic invariant)', () => {
+      const messages = [
+        { role: 'system', content: 'sys' },
+        { role: 'tool', tool_call_id: 'call_orphan', content: 'orphan' },
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: null, tool_calls: [{ id: 'call_ok', function: { name: 'bash', arguments: '{}' } }] },
+        { role: 'tool', tool_call_id: 'call_ok', content: 'ok' },
+      ];
+
+      const sanitized = sanitizeQoderToolPairing(messages);
+      const declared = new Set();
+      for (const m of sanitized) {
+        if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+          for (const c of m.tool_calls) declared.add(c.id);
+        }
+        if (m.role === 'tool') {
+          assert.ok(declared.has(m.tool_call_id), `tool_result ${m.tool_call_id} must have a preceding tool_use`);
+        }
+      }
+    });
+  });
+
+  describe('mergeConsecutiveAssistants', () => {
+    it('merges a narration assistant + a content:null tool_calls assistant (the real ultimate bug)', () => {
+      // Reproduces the exact shape from the [qoder-debug] logs:
+      //   1:assistant(text) | 2:assistant(content:null, tc[call_d66750]) | 3:tool(call_d66750)
+      const messages = [
+        { role: 'user', content: 'do it' },
+        { role: 'assistant', content: '用户提出了一个清晰的改进目标' },
+        { role: 'assistant', content: null, tool_calls: [{ id: 'call_d66750', function: { name: 'batch_search', arguments: '{}' } }] },
+        { role: 'tool', tool_call_id: 'call_d66750', content: 'search result' },
+      ];
+
+      const merged = mergeConsecutiveAssistants(messages);
+
+      assert.equal(merged.length, 3);
+      assert.equal(merged[0].role, 'user');
+      assert.equal(merged[1].role, 'assistant');
+      // text preserved, tool_calls preserved, content is NOT null
+      assert.equal(merged[1].content, '用户提出了一个清晰的改进目标');
+      assert.equal(merged[1].tool_calls.length, 1);
+      assert.equal(merged[1].tool_calls[0].id, 'call_d66750');
+      assert.notEqual(merged[1].content, null);
+      assert.equal(merged[2].role, 'tool');
+    });
+
+    it('never emits content:null on a standalone tool-calling assistant', () => {
+      const messages = [
+        { role: 'user', content: 'go' },
+        { role: 'assistant', content: null, tool_calls: [{ id: 'call_x', function: { name: 'bash', arguments: '{}' } }] },
+        { role: 'tool', tool_call_id: 'call_x', content: 'ok' },
+      ];
+
+      const merged = mergeConsecutiveAssistants(messages);
+
+      assert.equal(merged[1].content, '');
+      assert.notEqual(merged[1].content, null);
+      assert.equal(merged[1].tool_calls[0].id, 'call_x');
+    });
+
+    it('concatenates text from two plain assistant messages', () => {
+      const messages = [
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: 'part one' },
+        { role: 'assistant', content: 'part two' },
+      ];
+
+      const merged = mergeConsecutiveAssistants(messages);
+
+      assert.equal(merged.length, 2);
+      assert.equal(merged[1].content, 'part one\n\npart two');
+    });
+
+    it('merges tool_calls from two consecutive tool-calling assistants', () => {
+      const messages = [
+        { role: 'assistant', content: 'first', tool_calls: [{ id: 'call_a', function: { name: 'bash', arguments: '{}' } }] },
+        { role: 'assistant', content: null, tool_calls: [{ id: 'call_b', function: { name: 'read', arguments: '{}' } }] },
+      ];
+
+      const merged = mergeConsecutiveAssistants(messages);
+
+      assert.equal(merged.length, 1);
+      assert.equal(merged[0].tool_calls.length, 2);
+      assert.deepEqual(merged[0].tool_calls.map((t) => t.id), ['call_a', 'call_b']);
+      assert.equal(merged[0].content, 'first');
+    });
+
+    it('leaves already-alternating conversations untouched in role order', () => {
+      const messages = [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: 'u1' },
+        { role: 'assistant', content: 'a1' },
+        { role: 'user', content: 'u2' },
+        { role: 'assistant', content: 'a2' },
+      ];
+
+      const merged = mergeConsecutiveAssistants(messages);
+
+      assert.deepEqual(merged.map((m) => m.role), ['system', 'user', 'assistant', 'user', 'assistant']);
+    });
+
+    it('collapses a full multi-tool-round history into strict user/assistant/tool alternation', () => {
+      const messages = [
+        { role: 'user', content: 'task' },
+        { role: 'assistant', content: 'narration 1' },
+        { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', function: { name: 'bash', arguments: '{}' } }] },
+        { role: 'tool', tool_call_id: 'call_1', content: 'r1' },
+        { role: 'assistant', content: 'narration 2' },
+        { role: 'assistant', content: null, tool_calls: [{ id: 'call_2', function: { name: 'bash', arguments: '{}' } }] },
+        { role: 'tool', tool_call_id: 'call_2', content: 'r2' },
+      ];
+
+      const merged = mergeConsecutiveAssistants(messages);
+
+      // No two consecutive assistant messages should remain.
+      for (let i = 1; i < merged.length; i += 1) {
+        assert.ok(
+          !(merged[i].role === 'assistant' && merged[i - 1].role === 'assistant'),
+          `messages ${i - 1} and ${i} are both assistant`,
+        );
+      }
+      // Every tool-calling assistant carries non-null content.
+      for (const m of merged) {
+        if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+          assert.notEqual(m.content, null);
+        }
+      }
+    });
   });
 });
