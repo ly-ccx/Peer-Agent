@@ -1,6 +1,6 @@
 {
   "name": "@peer-agent/protocol",
-  "version": "0.0.1-beta.28",
+  "version": "0.0.1-beta.29",
   "private": true,
   "type": "module",
   "exports": {
