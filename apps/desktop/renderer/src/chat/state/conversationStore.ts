@@ -26,8 +26,10 @@
 import type { ClientToolCall } from '@peer-agent/protocol';
 
 import type { ChatMode } from './preferences';
+import { IDLE_COMPACTION_STATE } from './types';
 import type {
   ChatMsg,
+  CompactionState,
   ProviderRecoveryNotice,
   QueuedMessage,
   TokenUsageState,
@@ -50,8 +52,7 @@ export interface ConversationRuntimeState {
   /** 当前会话待发送消息队列。随会话桶存放，避免队列在不同会话间串发。 */
   readonly messageQueue: readonly QueuedMessage[];
   readonly isStreaming: boolean;
-  readonly isCompacting: boolean;
-  readonly compactionPercent: number | null;
+  readonly compactionState: CompactionState;
   readonly streamError: string | null;
   readonly tokenUsage: TokenUsageState | null;
   readonly activeUsage: TokenUsageState | null;
@@ -76,8 +77,7 @@ export const EMPTY_CONVERSATION_STATE: ConversationRuntimeState = Object.freeze(
   draft: '',
   messageQueue: Object.freeze([]) as readonly QueuedMessage[],
   isStreaming: false,
-  isCompacting: false,
-  compactionPercent: null,
+  compactionState: IDLE_COMPACTION_STATE,
   streamError: null,
   tokenUsage: null,
   activeUsage: null,
@@ -187,8 +187,7 @@ export class ConversationStore {
       loadStatus: 'loading',
       messages: Object.freeze([]) as readonly ChatMsg[],
       isStreaming: false,
-      isCompacting: false,
-      compactionPercent: null,
+      compactionState: IDLE_COMPACTION_STATE,
       streamError: null,
       toolProgress: null,
       pendingPermissionCalls: Object.freeze([]) as readonly ClientToolCall[],

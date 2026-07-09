@@ -62,6 +62,11 @@ import {
   buildReplyLanguageContext,
   buildGitBranchPrefixContext,
 } from '../state/contextSources';
+import {
+  compactionProgressPercent as getCompactionProgressPercent,
+  compactionStateLabel,
+} from '../state/compactionStateView';
+import { IDLE_COMPACTION_STATE } from '../state/types';
 import type {
   ChatAttachment,
   ChatApiContentPart,
@@ -69,6 +74,7 @@ import type {
   ContentSegment,
   ToolCallLegacy,
   CompactionMeta,
+  CompactionState,
   ChatMsg,
   QueuedMessage,
   TextGroup,
@@ -411,11 +417,15 @@ export function ChatSurface({
   const setMessages = useMemo(() => makeSetter('messages'), [makeSetter]) as Dispatch<SetStateAction<ChatMsg[]>>;
   const isStreaming = convState.isStreaming;
   const setIsStreaming = useMemo(() => makeSetter('isStreaming'), [makeSetter]);
-  const isCompacting = convState.isCompacting;
-  const setIsCompacting = useMemo(() => makeSetter('isCompacting'), [makeSetter]);
+  const compactionState = convState.compactionState;
+  const setCompactionState = useMemo(() => makeSetter('compactionState'), [makeSetter]) as Dispatch<
+    SetStateAction<CompactionState>
+  >;
+  const isCompactionActive = compactionState.phase === 'running' || compactionState.phase === 'finalizing';
+  const isCompactionFailed = compactionState.phase === 'failed';
+  const showCompactionNotice = isCompactionActive || isCompactionFailed;
   // 压缩进度（0-100）：流式收摘要时按已收字符/预期字符估算；null = 尚无进度。
-  const compactionPercent = convState.compactionPercent;
-  const setCompactionPercent = useMemo(() => makeSetter('compactionPercent'), [makeSetter]);
+  const compactionProgressPercent = getCompactionProgressPercent(compactionState);
   // 输入草稿 + 待发送队列随 conversationStore 会话桶存放，避免切会话时复用上一会话 composer 状态。
   const draft = convState.draft;
   const setDraft = convActions.setDraft;
@@ -665,6 +675,7 @@ export function ChatSurface({
   // 后端未提供时回退到通用四档。不再按 provider 名硬编码（旧逻辑只认 openai，导致 Anthropic 等被降级到四档）。
   const effortLevels = normalizeEffortLevels(activeProvider?.reasoningEffortLevels);
   const isZh = i18n.locale === 'zh-CN';
+  const compactionNoticeLabel = compactionStateLabel(compactionState, isZh);
   const currentTurnContext = useMemo(() => {
     if (!currentTurnId) return null;
     const currentTurn = chatTurns.find((turn) => turn.id === currentTurnId);
@@ -697,7 +708,7 @@ export function ChatSurface({
       const text = raw.length > 80 ? `${raw.slice(0, 80)}…` : raw;
       return { id: msg.id, text };
     });
-  const showSlashCommands = !isStreaming && !isCompacting && slashCommands.length > 0;
+  const showSlashCommands = !isStreaming && !isCompactionActive && slashCommands.length > 0;
   // 口径分离（ADR 42：显示口径 ≠ 压缩触发口径）：进度条分子取「权威快照口径」与「实时本地估算」的较大值。
   // - 权威快照口径 = 主进程回合结束下发的 contextTokens，现已改为「显示口径」= 实际发送给模型的上下文
   //   （优先 provider 真实 usage 的 input+cacheRead，回退为对最后一轮实际发送切片的估算），
@@ -716,7 +727,7 @@ export function ChatSurface({
   // 主进程实际所用窗口不一致时的百分比偏差；权威窗口未知时回退到 provider 配置窗口。
   const authoritativeContextWindow = authoritativeContext?.contextWindow ?? undefined;
   // 当前轮进行中(流式/压缩)。此时主操作按钮含义:有草稿则"排队",无草稿则"停止"。
-  const isBusy = isStreaming || isCompacting;
+  const isBusy = isStreaming || isCompactionActive;
   const hasComposerContent = draft.trim().length > 0 || attachments.length > 0;
 
   useEffect(() => {
@@ -751,8 +762,7 @@ export function ChatSurface({
     setToolProgress(null);
     // 压缩横幅真值在主进程登记表（按会话），切会话时先归零本地表达，避免上一会话的
     // 压缩横幅/进度残留到新会话；随后由下方查询按"新会话是否确在压缩"重新点亮。
-    setIsCompacting(false);
-    setCompactionPercent(null);
+    setCompactionState(IDLE_COMPACTION_STATE);
     // 切换会话时清掉权威上下文用量快照，避免上一会话的进度条分子/分母残留到新会话；
     // 新会话由其首个回合结束的 done 重新下发权威快照，在此之前回退到本地估算。
     setAuthoritativeContext(null);
@@ -785,8 +795,12 @@ export function ChatSurface({
           streamIdRef.current = comp.streamId;
           conversationStore.routeStream(comp.streamId, conversationId);
           conversationStore.setState(conversationId, { streamId: comp.streamId });
-          setIsCompacting(true);
-          setCompactionPercent(typeof comp.percent === 'number' ? comp.percent : null);
+          setCompactionState({
+            phase: 'running',
+            percent: typeof comp.percent === 'number' ? comp.percent : null,
+            streamId: comp.streamId,
+            startedAt: Date.now(),
+          });
         }
       } catch {
         // 查询失败不影响正常加载;降级为无横幅(压缩仍会在后台完成)。
@@ -938,7 +952,7 @@ export function ChatSurface({
     const compactStartedAt = Date.now();
     conversationStore.routeStream(streamId, compactConversationId);
     conversationStore.setState(compactConversationId, { streamId, turnStartedAt: compactStartedAt });
-    setIsCompacting(true);
+    setCompactionState({ phase: 'running', percent: null, streamId, startedAt: compactStartedAt });
     try {
       const result = await clientApi.chatCompact({ conversationId: compactConversationId, streamId });
       const stillHere = conversationIdRef.current === compactConversationId;
@@ -969,10 +983,10 @@ export function ChatSurface({
       // 的切会话 effect 管理,避免误清当前显示会话(可能正自有压缩)的横幅。
       if (conversationIdRef.current === compactConversationId) {
         streamIdRef.current = null;
-        setIsCompacting(false);
+        setCompactionState(IDLE_COMPACTION_STATE);
       }
     }
-  }, [onConversationUpdated, setIsCompacting, setMessages, setTokenUsage, streamIdRef]);
+  }, [onConversationUpdated, setCompactionState, setMessages, setTokenUsage, streamIdRef]);
 
   // 回合结束自动压缩：主进程在 done 里判定 compactionSuggested 后请求触发。
   // 三道护栏：① autoCompactingRef 防重入（多 loop 收尾/done 抖动只压一次）；
@@ -1050,11 +1064,11 @@ export function ChatSurface({
   // 渲染在滚动容器最底部。若用户此时已向上滚，横幅会落在视口外，造成"点了没反应"
   // 的错觉。压缩一开始就强制滚到底，让进度横幅立即进入视口。
   useEffect(() => {
-    if (isCompacting) {
+    if (isCompactionActive) {
       shouldAutoScrollRef.current = true;
       scrollThreadToBottom();
     }
-  }, [isCompacting, scrollThreadToBottom]);
+  }, [isCompactionActive, scrollThreadToBottom]);
 
   useEffect(() => {
     setActiveSlashIndex(0);
@@ -1268,12 +1282,12 @@ export function ChatSurface({
     setAttachmentError(null);
     // 当前轮(流式或压缩)进行中时,不丢弃也不阻塞输入:把消息排队,
     // 由 dequeue effect 在空闲后复用 submitMessage 自动发出下一条(类似 Codex 队列)。
-    if (isStreaming || isCompacting) {
+    if (isStreaming || isCompactionActive) {
       enqueueMessage({ id: nextId(), text, attachments: sentAttachments, effort });
       return;
     }
     await submitMessage(text, sentAttachments);
-  }, [draft, attachments, isStreaming, isCompacting, hasProvider, conversationId, submitMessage, effort, setDraft, enqueueMessage]);
+  }, [draft, attachments, isStreaming, isCompactionActive, hasProvider, conversationId, submitMessage, effort, setDraft, enqueueMessage]);
 
   // 任务续传(ADR 21):就绪后在「正确的会话内」自动发送。
   // App.tsx 已 peek 到会话锚定的待办、切到 resumeTask.sessionId 并经 prop 传入;这里要求
@@ -1304,13 +1318,13 @@ export function ChatSurface({
   // 队列自动出队:当前轮结束(非流式、非压缩)且 provider/会话就绪时,取队首自动发送。
   // 复用 submitMessage 同一发送路径;resumeTask 优先(避免与续传抢同一空闲窗口)。
   useEffect(() => {
-    if (isStreaming || isCompacting || !hasProvider || !conversationId) return;
+    if (isStreaming || isCompactionActive || !hasProvider || !conversationId) return;
     if (resumeTask) return;
     if (messageQueue.length === 0) return;
     const head = shiftQueuedMessage();
     if (!head) return;
     void submitMessage(head.text, head.attachments, head.effort);
-  }, [isStreaming, isCompacting, hasProvider, conversationId, resumeTask, messageQueue.length, shiftQueuedMessage, submitMessage]);
+  }, [isStreaming, isCompactionActive, hasProvider, conversationId, resumeTask, messageQueue.length, shiftQueuedMessage, submitMessage]);
 
   // 主操作按钮/回车键的统一入口:
   // - 有草稿内容时:发送或排队(由 handleSend 内部判断是否当前轮进行中)。
@@ -1622,17 +1636,17 @@ export function ChatSurface({
             ) : null}
           </div>
         ) : null}
-        {isCompacting ? (
+        {showCompactionNotice ? (
           <div
-            className={`compaction-notice${compactionPercent === null ? ' compaction-notice--indeterminate' : ''}`}
+            className={`compaction-notice${compactionProgressPercent === null ? ' compaction-notice--indeterminate' : ''}${isCompactionFailed ? ' compaction-notice--failed' : ''}`}
             role="progressbar"
-            aria-label={isZh ? '压缩上下文进度' : 'Compaction progress'}
+            aria-label={isCompactionFailed ? compactionNoticeLabel : (isZh ? '压缩上下文进度' : 'Compaction progress')}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-valuenow={compactionPercent ?? undefined}
+            aria-valuenow={compactionProgressPercent ?? undefined}
             style={
-              compactionPercent !== null
-                ? ({ '--compaction-fill': `${compactionPercent}%` } as React.CSSProperties)
+              compactionProgressPercent !== null
+                ? ({ '--compaction-fill': `${compactionProgressPercent}%` } as React.CSSProperties)
                 : undefined
             }
           >
@@ -1640,9 +1654,9 @@ export function ChatSurface({
             <span className="compaction-track compaction-track--base" aria-hidden="true">
               <span className="compaction-wave" />
               <span className="compaction-notice-label">
-                {isZh ? '压缩上下文中' : 'Compacting context'}
-                {compactionPercent !== null ? (
-                  <span className="compaction-notice-percent">{compactionPercent}%</span>
+                {compactionNoticeLabel}
+                {compactionProgressPercent !== null ? (
+                  <span className="compaction-notice-percent">{compactionProgressPercent}%</span>
                 ) : null}
               </span>
               <span className="compaction-wave" />
@@ -1652,9 +1666,9 @@ export function ChatSurface({
               <span className="compaction-track__inner">
                 <span className="compaction-wave" />
                 <span className="compaction-notice-label">
-                  {isZh ? '压缩上下文中' : 'Compacting context'}
-                  {compactionPercent !== null ? (
-                    <span className="compaction-notice-percent">{compactionPercent}%</span>
+                  {compactionNoticeLabel}
+                  {compactionProgressPercent !== null ? (
+                    <span className="compaction-notice-percent">{compactionProgressPercent}%</span>
                   ) : null}
                 </span>
                 <span className="compaction-wave" />

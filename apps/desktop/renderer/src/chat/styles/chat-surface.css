@@ -334,8 +334,6 @@
   max-width: 100%;
 }
 .segment-text-after-tools {
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   min-width: 0;
 }
 
@@ -346,54 +344,21 @@
 .thinking-toggle {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: var(--space-1) 0;
+  gap: var(--space-1);
+  width: fit-content;
   max-width: 100%;
-  color: var(--graphite-soft);
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--graphite-mute);
   font-size: var(--ui-font-meta, 12px);
-  transition:
-    color var(--za-motion-fast),
-    background var(--za-motion-fast),
-    border-color var(--za-motion-fast),
-    box-shadow var(--za-motion-fast);
-}
-.thinking-section.collapsed.done .thinking-toggle {
-  padding: 10px 14px;
-  min-width: 180px;
-  border: 1px solid var(--chrome-hairline);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--chrome-raised) 42%, transparent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+  opacity: 0.72;
+  transition: color var(--za-motion-fast), opacity var(--za-motion-fast);
 }
 .thinking-toggle:hover {
-  color: var(--graphite-base);
-}
-.thinking-section.collapsed.done .thinking-toggle:hover {
-  border-color: var(--ui-border-strong, var(--chrome-hairline));
-  background: color-mix(in srgb, var(--chrome-raised) 56%, transparent);
-}
-.thinking-indicator {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 0;
-  flex-shrink: 0;
-}
-/* 完成态:折叠头部收成一颗静态实心圆点(mute 隐入);思考中不再显示圆点。 */
-.thinking-dot {
-  border-radius: 50%;
-  background: currentColor;
-}
-.thinking-dot--done {
-  width: 5px;
-  height: 5px;
-  animation: motion-enter-pop 0.3s var(--za-ease-spring) both;
-}
-.thinking-section.done .thinking-indicator {
-  color: var(--graphite-mute);
+  color: var(--graphite-soft);
+  opacity: 0.92;
 }
 .thinking-label {
   position: relative;
@@ -422,19 +387,19 @@
   animation: motion-shimmer 1.8s linear infinite;
 }
 .thinking-chevron {
-  color: var(--graphite-mute);
+  color: currentColor;
   flex-shrink: 0;
-  margin-left: auto;
-  transition: transform var(--za-motion-fast) var(--za-ease-out);
+  opacity: 0.68;
+  transition: transform var(--za-motion-fast) var(--za-ease-out), opacity var(--za-motion-fast);
 }
-.thinking-section.collapsed.done .thinking-chevron {
-  margin-left: 0;
+.thinking-toggle:hover .thinking-chevron {
+  opacity: 0.9;
 }
 .thinking-body {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-2) 0 0;
+  padding: var(--space-3) 0 0;
   --motion-enter-from: -4px;
   animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
 }

@@ -6,6 +6,7 @@ import { useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { ChatSurface } from './chat/components/ChatSurface';
 import { Sidebar } from './chat/components/Sidebar';
 import { conversationStore } from './chat/state/conversationStore';
+import type { CompactionState } from './chat/state/types';
 import { clientApi } from './clientApi';
 import { WorkbenchPanel } from './workbench/WorkbenchPanel';
 import { WorkbenchProvider } from './workbench/WorkbenchContext';
@@ -53,11 +54,10 @@ export function App() {
   // 另外 ChatSurface 的 onStreamingChange 作为本会话的即时信号合并进集合(更快反馈)。
   const [runningConversationIds, setRunningConversationIds] = useState<ReadonlySet<string>>(
     () => new Set());
-  // 表达层状态:当前正在执行上下文压缩的会话 -> 进度百分比(可为 null)。
+  // 表达层状态:当前正在执行上下文压缩的会话 -> 显式压缩状态机。
   // 由 conversationStore 按侧栏会话订阅派生,避免切换 tab/会话后依赖已卸载 ChatSurface 上报而停止刷新。
-  const [compactingConversations, setCompactingConversations] = useState<
-    ReadonlyMap<string, number | null>
-  >(() => new Map());
+  const [compactionStates, setCompactionStates] = useState<ReadonlyMap<string, CompactionState>>(
+    () => new Map());
   // ADR 27: 有运行中流的工作区路径集合,由活跃流投影的 streams 维度派生。
   // 让侧栏能提示"其它工作区仍有任务在跑",避免切换工作区后误以为任务丢失。
   const [runningWorkspacePaths, setRunningWorkspacePaths] = useState<ReadonlySet<string>>(
@@ -174,19 +174,19 @@ export function App() {
 
   useEffect(() => {
     const conversationIds = Array.from(new Set(conversations.map((conversation) => conversation.id)));
-    const syncCompactingConversations = () => {
-      const next = new Map<string, number | null>();
+    const syncCompactionStates = () => {
+      const next = new Map<string, CompactionState>();
       for (const conversationId of conversationIds) {
         const snapshot = conversationStore.getSnapshot(conversationId);
-        if (snapshot.isCompacting) {
-          next.set(conversationId, snapshot.compactionPercent ?? null);
+        if (snapshot.compactionState.phase !== 'idle') {
+          next.set(conversationId, snapshot.compactionState);
         }
       }
-      setCompactingConversations((prev) => {
+      setCompactionStates((prev) => {
         if (prev.size === next.size) {
           let unchanged = true;
-          for (const [conversationId, percent] of next) {
-            if (prev.get(conversationId) !== percent) {
+          for (const [conversationId, state] of next) {
+            if (prev.get(conversationId) !== state) {
               unchanged = false;
               break;
             }
@@ -197,9 +197,9 @@ export function App() {
       });
     };
 
-    syncCompactingConversations();
+    syncCompactionStates();
     const unsubs = conversationIds.map((conversationId) =>
-      conversationStore.subscribe(conversationId, syncCompactingConversations),
+      conversationStore.subscribe(conversationId, syncCompactionStates),
     );
     return () => { unsubs.forEach((unsub) => unsub()); };
   }, [conversations]);
@@ -321,7 +321,7 @@ export function App() {
               activeConversationId={activeConversationId}
               conversationView={conversationView}
               runningConversationIds={runningConversationIds}
-              compactingConversations={compactingConversations}
+              compactionStates={compactionStates}
               runningWorkspacePaths={runningWorkspacePaths}
               activePage={activePage}
               i18n={i18n}

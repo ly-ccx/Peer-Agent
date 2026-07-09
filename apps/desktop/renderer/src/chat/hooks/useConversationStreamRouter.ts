@@ -23,6 +23,7 @@ import { clientApi } from '../../clientApi';
 import { conversationStore } from '../state/conversationStore';
 import { mergeLoadedMessagesWithLiveTail } from '../state/compactionLiveTailMerge';
 import { loadConversationMessages, usageFromLifetime } from '../state/conversationLoad';
+import { IDLE_COMPACTION_STATE } from '../state/types';
 import {
   getTextContent,
   isEmptyAssistantPlaceholder,
@@ -210,7 +211,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         // 运行态收尾 + streamId 清理 + 回合计时清零。
         conversationStore.setState(cid, {
           isStreaming: false,
-          isCompacting: false,
           activeUsage: null,
           pendingPermissionCalls: [],
           toolProgress: null,
@@ -300,7 +300,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       const turnDurationMs = snap.turnStartedAt != null ? Date.now() - snap.turnStartedAt : undefined;
       conversationStore.setState(cid, {
         isStreaming: false,
-        isCompacting: false,
+        compactionState: IDLE_COMPACTION_STATE,
         activeUsage: null,
         pendingPermissionCalls: [],
         toolProgress: null,
@@ -398,7 +398,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       }
       conversationStore.setState(cid, {
         isStreaming: false,
-        isCompacting: false,
+        compactionState: IDLE_COMPACTION_STATE,
         activeUsage: null,
         pendingPermissionCalls: [],
         toolProgress: null,
@@ -490,27 +490,41 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         const cid = conversationStore.resolveConversation(streamId);
         if (!cid) return;
         if (stage === 'start') {
-          conversationStore.setState(cid, { isCompacting: true, compactionPercent: null });
-          return;
-        }
-        if (stage === 'progress') {
           conversationStore.setState(cid, {
-            isCompacting: true,
-            compactionPercent: typeof percent === 'number' ? percent : null,
+            compactionState: { phase: 'running', percent: null, streamId, startedAt: Date.now() },
           });
           return;
         }
-        if (stage === 'idle') {
-          conversationStore.setState(cid, { isCompacting: false, compactionPercent: null });
+        if (stage === 'progress') {
+          conversationStore.setState(cid, (prev) => ({
+            compactionState: {
+              phase: 'running',
+              percent: typeof percent === 'number' ? percent : null,
+              streamId,
+              startedAt: prev.compactionState.phase === 'running' ? prev.compactionState.startedAt : Date.now(),
+            },
+          }));
           return;
         }
-        // 完成：先钉到 100% 给"到顶"反馈，停顿 ~150ms 再隐藏横幅。
-        conversationStore.setState(cid, { compactionPercent: 100 });
+        if (stage === 'idle') {
+          if (compactionDoneTimer) {
+            clearTimeout(compactionDoneTimer);
+            compactionDoneTimer = null;
+          }
+          conversationStore.setState(cid, { compactionState: IDLE_COMPACTION_STATE });
+          return;
+        }
+        const completedAt = Date.now();
         if (compactionDoneTimer) clearTimeout(compactionDoneTimer);
-        compactionDoneTimer = setTimeout(() => {
-          conversationStore.setState(cid, { isCompacting: false, compactionPercent: null });
-          compactionDoneTimer = null;
-        }, 150);
+        conversationStore.setState(cid, {
+          // done 表示压缩服务侧已完成；renderer 仍需 reload/merge 压缩后的消息，期间保持 finalizing，
+          // 避免"压缩条已消失但上下文数字仍是旧快照"。
+          compactionState: { phase: 'finalizing', percent: 100, streamId, completedAt },
+          // 口径分离（ADR 42）：done 一到就让旧的权威上下文快照失效。authoritativeContext 是
+          // 上一回合 done 下发的「压缩前」显示口径，若不清空，ChatSurface 的
+          // Math.max(authoritative, live) 会把数字锁在压缩前高位。
+          authoritativeContext: null,
+        });
         if (
           !method ||
           beforeTokens === undefined ||
@@ -518,29 +532,49 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           oldMessageCount === undefined ||
           keptMessageCount === undefined
         ) {
+          conversationStore.setState(cid, {
+            compactionState: {
+              phase: 'failed',
+              percent: 100,
+              streamId,
+              error: 'Compaction done event missed required summary fields.',
+              failedAt: Date.now(),
+            },
+          });
           return;
         }
         // 完成态：重载会话，压缩点以 CompactionSummaryCard(msg.compaction) 就地出现在时间线。
         void (async () => {
-          const { messages: loaded, tokenUsage: usage } = await loadConversationMessages(cid);
-          conversationStore.setState(cid, (prev) => {
-            // 压缩若在流式进行中完成，loadConversationMessages 会剥离正在接收 delta 的空
-            // assistant 占位。这里在流仍活跃时把内存中的 assistant 尾消息接回压缩后的列表，
-            // 保证 typewriter 的后续 delta 仍能落到这条消息上，避免界面卡住不出消息。
-            const liveTail = prev.messages[prev.messages.length - 1];
-            return {
-              messages: mergeLoadedMessagesWithLiveTail(loaded, liveTail, {
-                streamMatches: prev.streamId === streamId,
-              }),
-            };
-          });
-          // 口径分离（ADR 42）：压缩完成即让旧的权威上下文快照失效。authoritativeContext 是
-          // 上一回合 done 下发的「压缩前」显示口径，若不清空，ChatSurface 的
-          // Math.max(authoritative, live) 会把数字锁在压缩前高位（本次 bug 的渲染层根因）。
-          // 清空后进度条回落到压缩后 live 估算；下个回合 done 会带来新口径的权威值。
-          conversationStore.setState(cid, { authoritativeContext: null });
-          if (usage) conversationStore.setState(cid, { tokenUsage: usage });
-          onUpdatedRef.current?.(cid);
+          try {
+            const { messages: loaded, tokenUsage: usage } = await loadConversationMessages(cid);
+            conversationStore.setState(cid, (prev) => {
+              // 压缩若在流式进行中完成，loadConversationMessages 会剥离正在接收 delta 的空
+              // assistant 占位。这里在流仍活跃时把内存中的 assistant 尾消息接回压缩后的列表，
+              // 保证 typewriter 的后续 delta 仍能落到这条消息上，避免界面卡住不出消息。
+              const liveTail = prev.messages[prev.messages.length - 1];
+              return {
+                messages: mergeLoadedMessagesWithLiveTail(loaded, liveTail, {
+                  streamMatches: prev.streamId === streamId,
+                }),
+                ...(usage ? { tokenUsage: usage } : {}),
+              };
+            });
+            onUpdatedRef.current?.(cid);
+            compactionDoneTimer = setTimeout(() => {
+              conversationStore.setState(cid, { compactionState: IDLE_COMPACTION_STATE });
+              compactionDoneTimer = null;
+            }, 300);
+          } catch (error) {
+            conversationStore.setState(cid, {
+              compactionState: {
+                phase: 'failed',
+                percent: 100,
+                streamId,
+                error: error instanceof Error ? error.message : String(error),
+                failedAt: Date.now(),
+              },
+            });
+          }
         })();
       },
     );

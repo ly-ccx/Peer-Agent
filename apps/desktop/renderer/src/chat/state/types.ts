@@ -101,6 +101,31 @@ export interface CompactionMeta {
   summary?: string;
 }
 
+/** 聊天上下文压缩过程的显式状态机。 */
+export type CompactionState =
+  | { phase: 'idle' }
+  | {
+      phase: 'running';
+      percent: number | null;
+      streamId?: string;
+      startedAt: number;
+    }
+  | {
+      phase: 'finalizing';
+      percent: 100;
+      streamId?: string;
+      completedAt: number;
+    }
+  | {
+      phase: 'failed';
+      percent: number | null;
+      streamId?: string;
+      error?: string;
+      failedAt: number;
+    };
+
+export const IDLE_COMPACTION_STATE: CompactionState = Object.freeze({ phase: 'idle' });
+
 /** 一条聊天消息的视图模型。 */
 export interface ChatMsg {
   id: string;
