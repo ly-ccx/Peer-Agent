@@ -57,6 +57,9 @@ test('subscription catalog includes gpt-5.5 pricing and context metadata', () =>
 
 test('subscription model id set covers the catalog, excludes API-only ids', () => {
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.5'), true);
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.6-sol'), true);
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.6-terra'), true);
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.6-luna'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.4'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.4-mini'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.3-codex-spark'), true);
@@ -75,14 +78,22 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
   assert.equal(res.models[0].longContextOutputPrice, 45);
   assert.deepEqual(
     res.models.map((m) => m.id),
-    ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'],
+    [
+      'gpt-5.5',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.3-codex-spark',
+    ],
   );
 });
 
 test('listSubscriptionModels returns a copy (caller cannot mutate catalog)', async () => {
   const res = await listSubscriptionModels({});
   res.models.push({ id: 'x', label: 'x' });
-  assert.equal(SUBSCRIPTION_CATALOG.length, 4);
+  assert.equal(SUBSCRIPTION_CATALOG.length, 7);
 });
 
 test('isSubscriptionUsableModel keeps gpt-5 family, drops API-only models', () => {

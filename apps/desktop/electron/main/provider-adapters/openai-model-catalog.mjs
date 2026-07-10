@@ -30,6 +30,28 @@ const SUBSCRIPTION_CATALOG = [
       longContextInputThreshold: 258_000,
     },
   },
+  // GPT-5.6 家族(预览): codex 端点模型 id 为 gpt-5.6-{sol,terra,luna}。
+  // reasoning 控制新增 max,Sol 另有 ultra 档。上下文窗口 353k tokens。
+  // 预览期官方未公开确切计费,价格类字段暂缺,由上层按缺省处理。
+  // 置于 gpt-5.5 之后:与 ChatGPT 客户端展示顺序一致,且不改变默认(仍为 gpt-5.5)。
+  {
+    id: 'gpt-5.6-sol',
+    label: 'GPT-5.6 Sol',
+    contextWindow: 353_000,
+    maxOutputTokens: 128_000,
+  },
+  {
+    id: 'gpt-5.6-terra',
+    label: 'GPT-5.6 Terra',
+    contextWindow: 353_000,
+    maxOutputTokens: 128_000,
+  },
+  {
+    id: 'gpt-5.6-luna',
+    label: 'GPT-5.6 Luna',
+    contextWindow: 353_000,
+    maxOutputTokens: 128_000,
+  },
   {
     id: 'gpt-5.4',
     label: 'GPT-5.4',
