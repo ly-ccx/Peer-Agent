@@ -700,14 +700,23 @@ export function ChatSurface({
     ? SLASH_COMMANDS.filter((command) => command.value.startsWith(slashQuery))
     : [];
 
-  // 右侧消息轨条目:仅取用户消息(排除压缩摘要),文本截断用于 hover 预览。
-  const railItems: MessageRailItem[] = messages
-    .filter((msg) => msg.role === 'user' && !msg.compaction)
-    .map((msg) => {
-      const raw = (msg.content ?? '').trim();
-      const text = raw.length > 80 ? `${raw.slice(0, 80)}…` : raw;
-      return { id: msg.id, text };
-    });
+  // 右侧消息轨按主时间线原始顺序投影用户消息与压缩节点；用户消息序号不受压缩节点影响。
+  let railMessageNumber = 0;
+  const railItems = messages.flatMap<MessageRailItem>((msg) => {
+    if (msg.compaction) {
+      return [{
+        kind: 'compaction' as const,
+        id: msg.id,
+        text: isZh ? '对话已压缩' : 'Conversation compacted',
+      }];
+    }
+    if (msg.role !== 'user') return [];
+
+    railMessageNumber += 1;
+    const raw = (msg.content ?? '').trim();
+    const text = raw.length > 80 ? `${raw.slice(0, 80)}…` : raw;
+    return [{ kind: 'message' as const, id: msg.id, text, messageNumber: railMessageNumber }];
+  });
   const showSlashCommands = !isStreaming && !isCompactionActive && slashCommands.length > 0;
   // 口径分离（ADR 42：显示口径 ≠ 压缩触发口径）：进度条分子取「权威快照口径」与「实时本地估算」的较大值。
   // - 权威快照口径 = 主进程回合结束下发的 contextTokens，现已改为「显示口径」= 实际发送给模型的上下文

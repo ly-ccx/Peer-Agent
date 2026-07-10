@@ -1567,6 +1567,14 @@
 .message-rail:hover .message-rail-tick {
   background: var(--graphite-mute);
 }
+.message-rail-tick.message-rail-tick-compaction {
+  flex-grow: 1.8;
+  max-height: 3px;
+  background: color-mix(in srgb, var(--azure-seal) 60%, var(--graphite-mute));
+}
+.message-rail:hover .message-rail-tick-compaction {
+  background: var(--azure-seal);
+}
 
 /* ── 展开态:hover/focus 时滑出的标题面板(默认隐藏) ── */
 .message-rail-panel {
@@ -1657,6 +1665,33 @@
   text-overflow: ellipsis;
   font-size: 0.74rem;
   line-height: 1.4;
+}
+.message-rail-item-compaction {
+  gap: var(--space-1);
+  padding-block: 5px;
+  color: var(--graphite-mute);
+  cursor: pointer;
+}
+.message-rail-compaction-line {
+  flex: 1 1 auto;
+  min-width: 12px;
+  height: 1px;
+  background: color-mix(in srgb, var(--azure-seal) 38%, var(--chrome-hairline));
+}
+.message-rail-compaction-label {
+  flex: 0 0 auto;
+  font-size: 0.62rem;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--azure-seal) 62%, var(--graphite-mute));
+}
+.message-rail-item-compaction:hover .message-rail-compaction-line,
+.message-rail-item-compaction:focus-visible .message-rail-compaction-line {
+  background: var(--azure-seal);
+}
+.message-rail-item-compaction:hover .message-rail-compaction-label,
+.message-rail-item-compaction:focus-visible .message-rail-compaction-label {
+  color: var(--azure-seal);
 }
 .message-rail-item:hover,
 .message-rail-item:focus-visible {
