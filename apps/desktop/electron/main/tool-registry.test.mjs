@@ -183,6 +183,15 @@ describe('Goal mode runtime tool exposure', () => {
 describe('Mode-scoped tool projection (ADR 35)', () => {
   const GOAL_TOOL_NAMES = ['goal_create_plan', 'goal_update_task', 'goal_get_plan'];
 
+  it('tells the agent to show explicit next steps after creating a plan', () => {
+    const registry = createRuntimeToolRegistry();
+    const createPlan = registry.getTool('goal_create_plan');
+    const prompt = createPlan?.prompt?.() ?? '';
+    assert.match(prompt, /start execution/);
+    assert.match(prompt, /adjust the plan/);
+    assert.match(prompt, /cancel the plan/);
+  });
+
   function materializedNames(mode) {
     const registry = createRuntimeToolRegistry();
     const projection = createRuntimeProjectionFromToolRegistry(registry, { mode });

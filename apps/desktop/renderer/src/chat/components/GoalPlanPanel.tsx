@@ -17,6 +17,7 @@ import type {
 import { clientApi } from '../../clientApi';
 import { InteractionContext } from './thread/interactionContext';
 import { useGoalPlanApproval } from './goal/useGoalPlanApproval';
+import { getGoalPlanNextStep, goalPlanNextStepCopy } from './goal/goalPlanNextActions';
 
 function normalizeConversationId(value: string | number | null | undefined): string | null {
   if (value === null || value === undefined) return null;
@@ -1185,7 +1186,7 @@ interface PlanCardProps {
   readonly isStreaming: boolean;
   readonly busy: boolean;
   readonly isMain?: boolean;
-  readonly onDecide: (plan: GoalPlan, decision: 'approve' | 'reject') => void | Promise<void>;
+  readonly onNextAction: (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => void | Promise<void>;
   readonly onRunnerControl: (plan: GoalPlan, action: 'pause' | 'resume' | 'clear') => void | Promise<void>;
   readonly onManualConfirm: (
     plan: GoalPlan,
@@ -1200,7 +1201,7 @@ function PlanCard({
   isStreaming,
   busy,
   isMain,
-  onDecide,
+  onNextAction,
   onRunnerControl,
   onManualConfirm,
 }: PlanCardProps): ReactElement {
@@ -1213,7 +1214,8 @@ function PlanCard({
   // 子任务明细默认收起：主卡进入时只显示「标题 + 描述 + 进度条」，
   // 点进度条才展开 goal-task-list。
   const [tasksExpanded, setTasksExpanded] = useState(false);
-  const canDecide = plan.status === 'awaiting_approval';
+  const nextStep = getGoalPlanNextStep(plan);
+  const nextStepCopy = goalPlanNextStepCopy(isZh);
   const progress = safeProgress(plan);
   const tasks = Array.isArray(plan.tasks) ? plan.tasks : [];
   const title = derivePlanTitle(plan, isZh);
@@ -1249,31 +1251,30 @@ function PlanCard({
             </span>
           )}
         </button>
-        {canDecide ? (
-          <div className="goal-plan-actions goal-plan-actions--inline">
-            <button
-              type="button"
-              className="goal-plan-approve"
-              disabled={busy || isStreaming}
-              title={isStreaming ? (isZh ? '请等待本轮输出结束后再批准' : 'Wait until this turn finishes before approving') : undefined}
-              onClick={() => void onDecide(plan, 'approve')}
-            >
-              {isZh ? '批准并执行' : 'Approve & run'}
-            </button>
-            <button
-              type="button"
-              className="goal-plan-reject"
-              disabled={busy || isStreaming}
-              title={isStreaming ? (isZh ? '请等待本轮输出结束后再操作' : 'Wait until this turn finishes') : undefined}
-              onClick={() => void onDecide(plan, 'reject')}
-            >
-              {isZh ? '驳回' : 'Reject'}
-            </button>
+        {nextStep ? (
+          <div className="goal-plan-actions goal-plan-actions--inline" data-goal-plan-next-actions>
+            {nextStep.actions.map((action) => (
+              <button
+                key={action}
+                type="button"
+                className={`goal-plan-action goal-plan-action--${action}`}
+                disabled={busy || isStreaming}
+                title={isStreaming ? (isZh ? '请等待本轮输出结束后再操作' : 'Wait until this turn finishes') : undefined}
+                onClick={() => void onNextAction(plan, action)}
+              >
+                {nextStepCopy[action]}
+              </button>
+            ))}
           </div>
         ) : null}
       </header>
       {effectiveExpanded ? (
         <div className="goal-plan-body">
+          {nextStep ? (
+            <div className="goal-plan-next-guidance" role="status">
+              {nextStepCopy.guidance}
+            </div>
+          ) : null}
           <GoalContractSection plan={plan} isZh={isZh} />
           <PlanProjectionSection
             plan={plan}
@@ -1489,6 +1490,36 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     decide,
   } = useGoalPlanApproval({ isZh, onApproved, onSettled: reload });
 
+  const handleNextAction = useCallback(
+    async (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => {
+      if (action === 'adjust') {
+        interaction?.onSelectOption(goalPlanNextStepCopy(isZh).adjustmentMessage);
+        onRequestHostFocus?.();
+        return;
+      }
+      if (plan.status === 'awaiting_approval') {
+        await decide(plan, action === 'start' ? 'approve' : 'reject');
+        return;
+      }
+
+      setBusyPlanId(plan.planId);
+      setError(null);
+      try {
+        if (action === 'start') {
+          await clientApi.goalRunnerStart({ planId: plan.planId, options: { intent: 'execute' } });
+        } else {
+          await clientApi.goalPlansSetStatus({ planId: plan.planId, status: 'cancelled' });
+        }
+        await reload();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : isZh ? '操作失败' : 'Action failed');
+      } finally {
+        setBusyPlanId(null);
+      }
+    },
+    [decide, interaction, isZh, onRequestHostFocus, reload],
+  );
+
   // 渲染态合并：批准/驳回的 busy/error 来自共享 hook，runner 控制（pause/resume/clear）
   // 仍用面板自身的 busyPlanId/error。任一来源 busy 即视为该计划 busy。
   const effectiveBusyPlanId = approvalBusyPlanId ?? busyPlanId;
@@ -1659,7 +1690,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
           isZh={isZh}
           isStreaming={isStreaming}
           busy={effectiveBusyPlanId === mainPlan.planId}
-          onDecide={decide}
+          onNextAction={handleNextAction}
           onRunnerControl={controlRunner}
           onManualConfirm={recordManualDodConfirmation}
         />
@@ -1683,7 +1714,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
               isZh={isZh}
               isStreaming={isStreaming}
               busy={effectiveBusyPlanId === plan.planId}
-              onDecide={decide}
+              onNextAction={handleNextAction}
               onRunnerControl={controlRunner}
               onManualConfirm={recordManualDodConfirmation}
             />

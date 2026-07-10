@@ -962,25 +962,44 @@
   cursor: not-allowed;
 }
 
-.goal-plan-approve {
+.goal-plan-approve,
+.goal-plan-action--start {
   background: var(--za-primary-control-bg);
   color: var(--za-primary-control-ink);
   border-color: var(--za-primary-control-bg);
 }
 
-/* 内联场景下，批准按钮也用透明边框，保证与徽章/驳回按钮等高（不被 primary 实色边框撑大）。 */
-.goal-plan-actions--inline .goal-plan-approve {
+/* 内联场景下，主按钮也用透明边框，保证与其他操作按钮等高。 */
+.goal-plan-actions--inline .goal-plan-approve,
+.goal-plan-actions--inline .goal-plan-action--start {
   border-color: transparent;
 }
 
-.goal-plan-approve:hover:not(:disabled) {
+.goal-plan-approve:hover:not(:disabled),
+.goal-plan-action--start:hover:not(:disabled) {
   background: var(--za-active);
   color: var(--za-text);
 }
 
-.goal-plan-reject {
+.goal-plan-reject,
+.goal-plan-action--adjust,
+.goal-plan-action--cancel {
   background: var(--za-surface-1);
   color: var(--za-text-soft);
+}
+
+.goal-plan-action--cancel {
+  color: var(--za-warn);
+}
+
+.goal-plan-next-guidance {
+  padding: 8px 10px;
+  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  background: var(--ui-surface-muted, var(--za-surface-2));
+  color: var(--za-text-soft);
+  font-size: var(--ui-font-meta, 12px);
+  line-height: 1.5;
 }
 
 .goal-plan-reject:hover:not(:disabled) {
@@ -1392,6 +1411,12 @@
   color: var(--za-text-muted);
 }
 
+.chat-goal-next-guidance {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--za-text-soft);
+}
+
 .chat-goal-approval-actions {
   display: flex;
   justify-content: flex-end;
@@ -1425,12 +1450,18 @@
   color: var(--za-text);
 }
 
+.chat-goal-approval-btn--adjust,
 .chat-goal-approval-btn--reject {
   background: var(--za-surface-1);
   color: var(--za-text-soft);
   border-color: var(--za-line);
 }
 
+.chat-goal-approval-btn--reject {
+  color: var(--za-warn);
+}
+
+.chat-goal-approval-btn--adjust:hover:not(:disabled),
 .chat-goal-approval-btn--reject:hover:not(:disabled) {
   background: var(--za-hover);
 }

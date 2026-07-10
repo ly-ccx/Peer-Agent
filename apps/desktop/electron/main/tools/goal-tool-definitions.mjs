@@ -34,6 +34,9 @@ const GOAL_CREATE_PLAN_PROMPT = [
   'says the same thing. The reader should understand the point of each subtask from its first few words.',
   'Always provide a short, human-readable title for the plan itself (a few words) — it is required',
   'and shown verbatim in the plan panel; do not leave it empty.',
+  'After the tool succeeds, end the user-facing reply with the available next steps in plain language:',
+  'start execution, adjust the plan, or cancel the plan. The plan panel provides the same governed',
+  'actions as clickable controls; do not replace these choices with a vague confirmation-only reply.',
 ].join(' ');
 
 const GOAL_TOOL_PROMPT = [

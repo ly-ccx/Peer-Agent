@@ -1,5 +1,8 @@
+import { useContext } from 'react';
 import type { ReactElement } from 'react';
 import type { GoalPlan } from '@peer-agent/protocol';
+import { InteractionContext } from '../thread/interactionContext';
+import { goalPlanNextStepCopy } from './goalPlanNextActions';
 import { useGoalPlanApproval } from './useGoalPlanApproval';
 import { useAwaitingGoalPlans } from './useAwaitingGoalPlans';
 
@@ -28,6 +31,8 @@ export function ChatGoalApprovalCard({
 }): ReactElement | null {
   const awaitingPlans = useAwaitingGoalPlans(conversationId, enabled);
   const { busyPlanId, error, decide } = useGoalPlanApproval({ isZh });
+  const interaction = useContext(InteractionContext);
+  const copy = goalPlanNextStepCopy(isZh);
 
   if (!enabled || awaitingPlans.length === 0) return null;
 
@@ -48,7 +53,8 @@ export function ChatGoalApprovalCard({
             {plan.goal ? (
               <div className="chat-goal-approval-goal">{plan.goal}</div>
             ) : null}
-            <div className="chat-goal-approval-actions">
+            <div className="chat-goal-next-guidance">{copy.guidance}</div>
+            <div className="chat-goal-approval-actions" data-goal-plan-next-actions>
               <button
                 type="button"
                 className="chat-goal-approval-btn chat-goal-approval-btn--approve"
@@ -64,7 +70,15 @@ export function ChatGoalApprovalCard({
                   void decide(plan, 'approve');
                 }}
               >
-                {isZh ? '批准并执行' : 'Approve & run'}
+                {copy.start}
+              </button>
+              <button
+                type="button"
+                className="chat-goal-approval-btn chat-goal-approval-btn--adjust"
+                disabled={disabled || !interaction}
+                onClick={() => interaction?.onSelectOption(copy.adjustmentMessage)}
+              >
+                {copy.adjust}
               </button>
               <button
                 type="button"
@@ -74,7 +88,7 @@ export function ChatGoalApprovalCard({
                   void decide(plan, 'reject');
                 }}
               >
-                {isZh ? '驳回' : 'Reject'}
+                {copy.cancel}
               </button>
             </div>
           </div>
