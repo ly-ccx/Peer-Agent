@@ -13,6 +13,10 @@ import {
 } from './compaction-coordinator.mjs';
 import { sanitizeApiMessages } from './message-sanitizer.mjs';
 import * as responseGuard from './response-guard.mjs';
+import {
+  createDesktopAbortError,
+  runDesktopRuntimePipeline,
+} from './runtime-pipeline-adapter.mjs';
 import { executeModelToolCall } from './tool-orchestrator.mjs';
 
 export async function agentLoopGemini({
@@ -42,6 +46,10 @@ export async function agentLoopGemini({
   resolvedChannel = null,
   // Goal Runner 进度 sink：{ onRound } 每轮模型响应回调一次，用于实时轮次计数。
   agentProgress = null,
+  emitRuntimeEvent = null,
+  runtimeEventState = undefined,
+  providerId = null,
+  runtimeMode = 'chat',
 }) {
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
   // 最后一轮「实际发送切片」（微压缩+清洗后真正发给 provider 的消息，已含 system）。供
@@ -72,55 +80,21 @@ export async function agentLoopGemini({
   });
   let promptTooLongRetryUsed = false;
 
-  for (let turn = 0; turn < loop.maxTurns; turn++) {
-    // 自动 preflight 压缩：触发判定按完整 apiMessages 估算；切分时保留最新真人 user turn，
-    // 避免用户刚发送的原文被 compaction summary 代替。
-    const compaction = await runCompactionCheck({
-      messages: apiMessages,
-      systemPrompt,
-      contextWindow,
-      providerConfig,
-      signal,
-      persistCompaction,
-      conversationId,
-      streamId,
-      webContents,
-      continuityContext,
-      tools,
-      preserveLatestUserTurn: true,
-    });
-    if (compaction.compacted) {
-      apiMessages = compaction.messages;
-    }
-
-    // 发送副本：仅对「发出去的消息」做微压缩 + 清洗，不回写 apiMessages，
-    // 使 apiMessages 始终保持完整会话量（与进度条分子/压缩触发器同口径）。
-    const sendMessages = sanitizeApiMessages(applyMicrocompaction(apiMessages).messages);
-    // 记录本轮实际发送切片，供回合结束 getContextInfo 的显示口径在 provider usage 缺失时回退估算。
-    lastSentMessages = sendMessages;
-    const providerResponse = await sendGeminiStream({
-      baseUrl,
-      apiKey,
-      endpoint: resolvedChannel?.endpoint,
-      headers: resolvedChannel?.headers,
-      model,
-      messages: sendMessages,
-      tools,
-      effort,
-      supportsReasoning: Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning),
-      maxOutputTokens,
-      signal,
-      webContents,
-      streamId,
-    });
-    // 不再用发送副本回写 apiMessages：assistant 回合与 tool 结果会在下方
-    // 显式 push 回完整的 apiMessages，保持完整会话量口径。
-
-    if (!providerResponse.ok) {
-      const text = providerResponse.errorText || '';
-      const promptTooLong = isPromptTooLongResponse(providerResponse.status, text);
-      if (promptTooLong && !promptTooLongRetryUsed) {
-        const emergencyCompaction = await runCompactionCheck({
+  await runDesktopRuntimePipeline({
+    sessionId: conversationId || streamId,
+    streamId,
+    conversationId,
+    mode: runtimeMode,
+    providerId,
+    modelId: model,
+    maxTurns: loop.maxTurns,
+    signal,
+    emitRuntimeEvent,
+    eventState: runtimeEventState,
+    model: {
+      initialize: () => ({ provider: 'gemini' }),
+      runTurn: async (state) => {
+        const compaction = await runCompactionCheck({
           messages: apiMessages,
           systemPrompt,
           contextWindow,
@@ -130,113 +104,161 @@ export async function agentLoopGemini({
           conversationId,
           streamId,
           webContents,
-          emergency: true,
-          force: true,
           continuityContext,
           tools,
           preserveLatestUserTurn: true,
         });
-        if (emergencyCompaction.compacted) {
-          apiMessages = emergencyCompaction.messages;
-          promptTooLongRetryUsed = true;
-          continue;
+        if (compaction.compacted) apiMessages = compaction.messages;
+
+        const sendMessages = sanitizeApiMessages(applyMicrocompaction(apiMessages).messages);
+        lastSentMessages = sendMessages;
+        const providerResponse = await sendGeminiStream({
+          baseUrl,
+          apiKey,
+          endpoint: resolvedChannel?.endpoint,
+          headers: resolvedChannel?.headers,
+          model,
+          messages: sendMessages,
+          tools,
+          effort,
+          supportsReasoning: Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning),
+          maxOutputTokens,
+          signal,
+          webContents,
+          streamId,
+        });
+
+        if (!providerResponse.ok) {
+          const text = providerResponse.errorText || '';
+          const promptTooLong = isPromptTooLongResponse(providerResponse.status, text);
+          if (promptTooLong && !promptTooLongRetryUsed) {
+            const emergencyCompaction = await runCompactionCheck({
+              messages: apiMessages,
+              systemPrompt,
+              contextWindow,
+              providerConfig,
+              signal,
+              persistCompaction,
+              conversationId,
+              streamId,
+              webContents,
+              emergency: true,
+              force: true,
+              continuityContext,
+              tools,
+              preserveLatestUserTurn: true,
+            });
+            if (emergencyCompaction.compacted) {
+              apiMessages = emergencyCompaction.messages;
+              promptTooLongRetryUsed = true;
+              return { kind: 'continue', state };
+            }
+          }
+          if (promptTooLong) {
+            loop.sendError(buildPromptTooLongRecoveryError({
+              text,
+              providerTracePath: providerResponse.providerTracePath,
+              retryUsed: promptTooLongRetryUsed,
+            }));
+          } else if (providerResponse.providerError) {
+            loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
+          } else {
+            loop.sendHttpError(providerResponse.status, text);
+          }
+          return { kind: 'completed', state, reason: 'provider_error' };
         }
-      }
-      if (promptTooLong) {
-        loop.sendError(
-          buildPromptTooLongRecoveryError({
-            text,
+        promptTooLongRetryUsed = false;
+
+        const { content, thinkingContent, toolCalls, streamUsage } = providerResponse;
+        loop.addUsage(streamUsage);
+        if (!toolCalls.length) {
+          const terminalResponse = handleTerminalTextResponse({
+            text: content,
+            thinking: thinkingContent,
             providerTracePath: providerResponse.providerTracePath,
-            retryUsed: promptTooLongRetryUsed,
-          }),
-        );
-        return;
-      }
-      if (providerResponse.providerError) {
-        loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
-        return;
-      }
-      loop.sendHttpError(providerResponse.status, text);
-      return;
-    }
-    promptTooLongRetryUsed = false;
+            apiMessages,
+            loop,
+            responseGuard,
+          });
+          return terminalResponse.action === 'retry'
+            ? { kind: 'continue', state }
+            : { kind: 'completed', state, reason: terminalResponse.reason };
+        }
 
-    const { content, thinkingContent, toolCalls, streamUsage } = providerResponse;
-    loop.addUsage(streamUsage);
-
-    if (!toolCalls.length) {
-      const terminalResponse = handleTerminalTextResponse({
-        text: content,
-        thinking: thinkingContent,
-        providerTracePath: providerResponse.providerTracePath,
-        apiMessages,
-        loop,
-        responseGuard,
-      });
-      if (terminalResponse.action === 'retry') continue;
-      return;
-    }
-
-    apiMessages.push({
-      role: 'assistant',
-      content: content || null,
-      geminiContent: {
-        role: 'model',
-        parts: [
-          ...(content ? [{ text: content }] : []),
-          ...toolCalls.map((tc) => ({
-            functionCall: {
-              name: tc.name,
-              args: JSON.parse(tc.arguments || '{}'),
-            },
+        apiMessages.push({
+          role: 'assistant',
+          content: content || null,
+          geminiContent: {
+            role: 'model',
+            parts: [
+              ...(content ? [{ text: content }] : []),
+              ...toolCalls.map((toolCall) => ({
+                functionCall: {
+                  name: toolCall.name,
+                  args: JSON.parse(toolCall.arguments || '{}'),
+                },
+              })),
+            ],
+          },
+        });
+        return {
+          kind: 'tool_calls',
+          state,
+          calls: toolCalls.map((toolCall) => ({
+            toolCallId: toolCall.id,
+            name: toolCall.name,
+            arguments: toolCall.arguments,
+            payload: toolCall,
           })),
-        ],
+        };
       },
-    });
-
-    const functionResponses = [];
-    let terminalControlSignal = null;
-    for (const tc of toolCalls) {
-      const toolExecution = await executeModelToolCall({
-        name: tc.name,
-        rawArguments: tc.arguments,
-        toolCallId: tc.id,
-        workspacePath,
-        toolContext,
-        permissionGate,
-        webContents,
-        streamId,
-        conversationId,
-        signal,
-        registry,
-        runtimeProjection,
-        mcpRegistry,
-        goalPlanStore,
-      });
-      if (toolExecution.aborted) return;
-      functionResponses.push({
-        functionResponse: {
-          name: tc.name,
-          response: { result: toolExecution.output },
-        },
-      });
-      if (toolExecution.controlSignal?.terminal) terminalControlSignal = toolExecution.controlSignal;
-    }
-
-    apiMessages.push({
-      role: 'tool',
-      content: JSON.stringify(functionResponses),
-      geminiContent: {
-        role: 'user',
-        parts: functionResponses,
+      applyToolResults: (state, executions) => {
+        const functionResponses = executions.map((execution) => {
+          const toolExecution = execution.result;
+          if (toolExecution.aborted) throw createDesktopAbortError();
+          return {
+            functionResponse: {
+              name: execution.call.name,
+              response: { result: toolExecution.output },
+            },
+          };
+        });
+        apiMessages.push({
+          role: 'tool',
+          content: JSON.stringify(functionResponses),
+          geminiContent: { role: 'user', parts: functionResponses },
+        });
+        return state;
       },
-    });
-
-    if (terminalControlSignal) {
-      loop.sendDone();
-      return;
-    }
-  }
-
-  loop.sendLoopExhausted();
+      onStopped: () => loop.sendDone(),
+      onExhausted: () => loop.sendLoopExhausted(),
+    },
+    tools: {
+      execute: async (call) => {
+        const toolExecution = await executeModelToolCall({
+          name: call.name,
+          rawArguments: call.arguments,
+          toolCallId: call.toolCallId,
+          workspacePath,
+          toolContext,
+          permissionGate,
+          webContents,
+          streamId,
+          conversationId,
+          signal,
+          registry,
+          runtimeProjection,
+          mcpRegistry,
+          goalPlanStore,
+        });
+        if (toolExecution.aborted) throw createDesktopAbortError();
+        return {
+          call,
+          result: toolExecution,
+          terminal: Boolean(toolExecution.controlSignal?.terminal),
+          terminalReason: toolExecution.controlSignal?.reason || 'waiting_user',
+        };
+      },
+    },
+  });
 }

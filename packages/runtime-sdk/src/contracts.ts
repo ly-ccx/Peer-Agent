@@ -5,6 +5,11 @@ export const RUNTIME_EVENT_PROTOCOL_VERSION = 1 as const;
 export type RuntimeEventProtocolVersion = typeof RUNTIME_EVENT_PROTOCOL_VERSION;
 
 export type RuntimeSdkEventType =
+  | 'session.started'
+  | 'message.delta'
+  | 'reasoning.delta'
+  | 'message.completed'
+  | 'runtime.error'
   | 'tool.started'
   | 'hook.completed'
   | 'permission.requested'
@@ -110,20 +115,64 @@ export interface RuntimeSdkHostAdapter {
 
 export interface RuntimeSdkEventBase {
   readonly protocolVersion: RuntimeEventProtocolVersion;
+  readonly eventId: string;
   readonly sequence: number;
   readonly occurredAt: string;
-  readonly toolCallId: string;
-  readonly capabilityId: string;
   readonly sessionId?: string;
+  readonly streamId?: string;
   readonly projectionId?: string;
   readonly conversationId?: string;
+  readonly toolCallId?: string;
+  readonly capabilityId?: string;
+}
+
+export interface RuntimeSdkSessionStartedEvent extends RuntimeSdkEventBase {
+  readonly type: 'session.started';
+  readonly sessionId: string;
+  readonly streamId?: string;
+  readonly mode?: string;
+  readonly providerId?: string;
+  readonly model?: string;
+}
+
+export interface RuntimeSdkMessageDeltaEvent extends RuntimeSdkEventBase {
+  readonly type: 'message.delta';
+  readonly streamId: string;
+  readonly content: string;
+}
+
+export interface RuntimeSdkReasoningDeltaEvent extends RuntimeSdkEventBase {
+  readonly type: 'reasoning.delta';
+  readonly streamId: string;
+  readonly content: string;
+}
+
+export interface RuntimeSdkMessageCompletedEvent extends RuntimeSdkEventBase {
+  readonly type: 'message.completed';
+  readonly streamId: string;
+  readonly content?: string;
+  readonly usage?: unknown;
+  readonly lifetimeUsage?: unknown;
+  readonly finishReason?: string;
+}
+
+export interface RuntimeSdkRuntimeErrorEvent extends RuntimeSdkEventBase {
+  readonly type: 'runtime.error';
+  readonly code: string;
+  readonly message?: string;
+  readonly recoverable?: boolean;
+  readonly details?: unknown;
 }
 
 export interface RuntimeSdkToolStartedEvent extends RuntimeSdkEventBase {
+  readonly toolCallId: string;
+  readonly capabilityId: string;
   readonly type: 'tool.started';
 }
 
 export interface RuntimeSdkHookCompletedEvent extends RuntimeSdkEventBase {
+  readonly toolCallId: string;
+  readonly capabilityId: string;
   readonly type: 'hook.completed';
   readonly phase: 'PreToolUse' | 'PostToolUse';
   readonly decision: RuntimeDecision;
@@ -131,27 +180,44 @@ export interface RuntimeSdkHookCompletedEvent extends RuntimeSdkEventBase {
 }
 
 export interface RuntimeSdkPermissionRequestedEvent extends RuntimeSdkEventBase {
+  readonly toolCallId: string;
+  readonly capabilityId: string;
   readonly type: 'permission.requested';
   readonly decision: 'ask';
 }
 
 export interface RuntimeSdkPermissionResolvedEvent extends RuntimeSdkEventBase {
+  readonly toolCallId: string;
+  readonly capabilityId: string;
   readonly type: 'permission.resolved';
   readonly decision: RuntimeDecision;
 }
 
 export interface RuntimeSdkToolCompletedEvent extends RuntimeSdkEventBase {
+  readonly toolCallId: string;
+  readonly capabilityId: string;
   readonly type: 'tool.completed';
   readonly decision: RuntimeDecision;
   readonly result: RuntimeSdkToolResult;
 }
 
 export type RuntimeSdkEvent =
+  | RuntimeSdkSessionStartedEvent
+  | RuntimeSdkMessageDeltaEvent
+  | RuntimeSdkReasoningDeltaEvent
+  | RuntimeSdkMessageCompletedEvent
+  | RuntimeSdkRuntimeErrorEvent
   | RuntimeSdkToolStartedEvent
   | RuntimeSdkHookCompletedEvent
   | RuntimeSdkPermissionRequestedEvent
   | RuntimeSdkPermissionResolvedEvent
   | RuntimeSdkToolCompletedEvent;
+
+export type RuntimeSdkEventInput = RuntimeSdkEvent extends infer Event
+  ? Event extends RuntimeSdkEvent
+    ? Omit<Event, 'protocolVersion' | 'eventId' | 'sequence' | 'occurredAt'>
+    : never
+  : never;
 
 export type RuntimeSdkEventListener = (event: RuntimeSdkEvent) => void;
 
@@ -166,5 +232,6 @@ export interface RuntimeSdk {
     request: RuntimeSdkExecuteRequest,
     context?: RuntimeSdkExecutionContext,
   ): Promise<RuntimeSdkProviderExecution>;
+  emit(event: RuntimeSdkEventInput): RuntimeSdkEvent;
   subscribe(listener: RuntimeSdkEventListener): () => void;
 }

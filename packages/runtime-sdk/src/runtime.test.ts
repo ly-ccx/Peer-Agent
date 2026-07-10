@@ -91,6 +91,8 @@ test('runs hooks, provider, evidence and events in the public execution order', 
   ]);
   assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3, 4]);
   assert.deepEqual(events.map((event) => event.protocolVersion), [1, 1, 1, 1]);
+  assert.equal(events.every((event) => event.eventId.startsWith('runtime-event-')), true);
+  assert.equal(new Set(events.map((event) => event.eventId)).size, events.length);
   assert.equal(events[0]?.sessionId, 'session-1');
   assert.equal(events[1]?.type === 'hook.completed' ? events[1].phase : undefined, 'PreToolUse');
   assert.equal(events[2]?.type === 'hook.completed' ? events[2].phase : undefined, 'PostToolUse');
@@ -187,7 +189,96 @@ test('ask fails closed when approval is unavailable', async () => {
   assert.equal((execution.result.evidence as { hookFinalDecision?: string }).hookFinalDecision, 'ask');
 });
 
-test('unsubscribe stops subsequent event delivery', async () => {
+test('emits correlated session and stream events with one monotonic sequence', () => {
+  const events: RuntimeSdkEvent[] = [];
+  const runtime = createRuntimeSdk({
+    host: createHost(),
+    now: () => '2026-07-10T00:00:00.000Z',
+  });
+  runtime.subscribe((event) => events.push(event));
+
+  runtime.emit({
+    type: 'session.started',
+    sessionId: 'session-1',
+    streamId: 'stream-1',
+    conversationId: 'conversation-1',
+    mode: 'chat',
+  });
+  runtime.emit({
+    type: 'message.delta',
+    sessionId: 'session-1',
+    streamId: 'stream-1',
+    conversationId: 'conversation-1',
+    content: 'Hello',
+  });
+  runtime.emit({
+    type: 'reasoning.delta',
+    sessionId: 'session-1',
+    streamId: 'stream-1',
+    conversationId: 'conversation-1',
+    content: 'Think',
+  });
+  runtime.emit({
+    type: 'message.completed',
+    sessionId: 'session-1',
+    streamId: 'stream-1',
+    conversationId: 'conversation-1',
+    content: 'Hello',
+    finishReason: 'stop',
+  });
+
+  assert.deepEqual(eventTypes(events), [
+    'session.started',
+    'message.delta',
+    'reasoning.delta',
+    'message.completed',
+  ]);
+  assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3, 4]);
+  assert.equal(events.every((event) => event.protocolVersion === 1), true);
+  assert.equal(events.every((event) => event.eventId.startsWith('runtime-event-')), true);
+  assert.equal(new Set(events.map((event) => event.eventId)).size, events.length);
+  assert.equal(events.every((event) => event.sessionId === 'session-1'), true);
+  assert.equal(events.every((event) => event.streamId === 'stream-1'), true);
+  assert.equal(events.every((event) => event.conversationId === 'conversation-1'), true);
+});
+
+test('subscriber failures do not interrupt event delivery or provider execution', async () => {
+  const events: RuntimeSdkEvent[] = [];
+  let providerCalls = 0;
+  const runtime = createRuntimeSdk({
+    host: createHost({
+      executeProvider: async () => {
+        providerCalls += 1;
+        return { result: completedResult(), grant: { granted: true } };
+      },
+    }),
+  });
+  runtime.subscribe(() => {
+    throw new Error('subscriber failed');
+  });
+  runtime.subscribe((event) => events.push(event));
+
+  const emitted = runtime.emit({
+    type: 'message.delta',
+    sessionId: 'session-1',
+    streamId: 'stream-1',
+    content: 'Hello',
+  });
+  const execution = await runtime.execute(request);
+
+  assert.equal(emitted.type, 'message.delta');
+  assert.equal(providerCalls, 1);
+  assert.equal(execution.result.status, 'completed');
+  assert.deepEqual(eventTypes(events), [
+    'message.delta',
+    'tool.started',
+    'hook.completed',
+    'hook.completed',
+    'tool.completed',
+  ]);
+});
+
+test('unsubscribe stops tool and stream event delivery', async () => {
   const events: RuntimeSdkEvent[] = [];
   const runtime = createRuntimeSdk({ host: createHost() });
   const unsubscribe = runtime.subscribe((event) => events.push(event));
@@ -195,6 +286,12 @@ test('unsubscribe stops subsequent event delivery', async () => {
   await runtime.execute(request);
   const firstRunCount = events.length;
   unsubscribe();
+  runtime.emit({
+    type: 'message.delta',
+    sessionId: 'session-1',
+    streamId: 'stream-2',
+    content: 'ignored',
+  });
   await runtime.execute({
     ...request,
     call: { ...request.call, toolCallId: 'tool-2' },

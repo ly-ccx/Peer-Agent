@@ -162,6 +162,41 @@ test('PreToolUse ask fails closed when approval is unavailable', async () => {
   assert.deepEqual(execution.result.evidence.hooks.map((hook) => hook.id), ['ask']);
 });
 
+test('Desktop host execution emits correlated Runtime Event v1 records', async () => {
+  const calls = { count: 0 };
+  const runtimeEvents = [];
+  const host = createLocalToolHost({
+    sessionStore: createSessionStore(),
+    workspaceRoot: process.cwd(),
+    userDataPath: process.cwd(),
+    providers: [createEchoProvider({ calls })],
+    hookRunner: {
+      runPreToolUse: async () => [{ id: 'pre', event: 'PreToolUse', decision: 'allow', outcome: 'ok', durationMs: 1 }],
+      runPostToolUse: async () => [{ id: 'post', event: 'PostToolUse', decision: 'allow', outcome: 'ok', durationMs: 2 }],
+    },
+    onRuntimeEvent: (event) => runtimeEvents.push(event),
+  });
+
+  const execution = await host.execute(createRequest());
+
+  assert.equal(execution.result.status, 'success');
+  assert.deepEqual(runtimeEvents.map((event) => event.type), [
+    'tool.started',
+    'hook.completed',
+    'hook.completed',
+    'tool.completed',
+  ]);
+  assert.deepEqual(runtimeEvents.map((event) => event.sequence), [1, 2, 3, 4]);
+  assert.equal(runtimeEvents.every((event) => event.protocolVersion === 1), true);
+  assert.equal(runtimeEvents.every((event) => event.eventId.startsWith('runtime-event-')), true);
+  assert.equal(new Set(runtimeEvents.map((event) => event.eventId)).size, runtimeEvents.length);
+  assert.equal(runtimeEvents.every((event) => event.sessionId === 'session-1'), true);
+  assert.equal(runtimeEvents.every((event) => event.projectionId === 'projection-1'), true);
+  assert.equal(runtimeEvents.every((event) => event.conversationId === 'conversation-1'), true);
+  assert.equal(runtimeEvents.every((event) => event.toolCallId === 'tool-call-1'), true);
+  assert.equal(runtimeEvents.every((event) => event.capabilityId === 'test.echo'), true);
+});
+
 test('PostToolUse runs after provider execution and records hook evidence', async () => {
   const calls = { count: 0 };
   const host = createLocalToolHost({

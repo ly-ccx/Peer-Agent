@@ -6,12 +6,16 @@ import { SEARCH_TOOL_DEFINITIONS } from './search-tool-definitions.mjs';
 import { WEB_TOOL_DEFINITIONS } from './web-tool-definitions.mjs';
 import { BROWSER_TOOL_DEFINITIONS } from './browser-tool-definitions.mjs';
 import {
+  buildAnthropicToolsFromModelProjection,
   buildAnthropicToolsFromRegistry,
+  buildOpenAIToolsFromModelProjection,
   buildOpenAIToolsFromRegistry,
+  createModelToolProjectionFromRegistry,
 } from './provider-tool-materializer.mjs';
 import {
   buildAnthropicToolsFromRuntimeProjection,
   buildOpenAIToolsFromRuntimeProjection,
+  createModelToolProjectionFromRuntimeProjection,
   createRuntimeProjectionFromToolRegistry,
 } from './runtime-projection-tool-materializer.mjs';
 import { createToolRegistry } from './tool-registry.mjs';
@@ -19,12 +23,18 @@ import { createToolRegistry } from './tool-registry.mjs';
 export { TOOL_NAMES } from './legacy-local-tool-definitions.mjs';
 export { createToolRegistry } from './tool-registry.mjs';
 export {
+  buildAnthropicToolsFromModelProjection,
   buildAnthropicToolsFromRegistry,
+  buildOpenAIToolsFromModelProjection,
   buildOpenAIToolsFromRegistry,
+  createModelToolProjectionFromRegistry,
+  createRuntimeToolDefinition,
+  createRuntimeToolDefinitionsFromRegistry,
 } from './provider-tool-materializer.mjs';
 export {
   buildAnthropicToolsFromRuntimeProjection,
   buildOpenAIToolsFromRuntimeProjection,
+  createModelToolProjectionFromRuntimeProjection,
   createProjectedToolRegistry,
   createRuntimeProjectionFromToolRegistry,
 } from './runtime-projection-tool-materializer.mjs';
@@ -55,7 +65,12 @@ export function createRuntimeToolProjection({
   projectionOptions = {},
 } = {}) {
   const projection = createRuntimeProjectionFromToolRegistry(registry, projectionOptions);
-  return { registry, projection };
+  const modelProjection = createModelToolProjectionFromRuntimeProjection(
+    projection,
+    registry,
+    { mode: projectionOptions.mode },
+  );
+  return { registry, projection, modelProjection };
 }
 
 export const DEFAULT_TOOL_REGISTRY = createDefaultToolRegistry();
@@ -71,11 +86,9 @@ export function getToolDefinition(name) {
 }
 
 export function buildOpenAITools(registry = DEFAULT_TOOL_REGISTRY) {
-  const projection = createRuntimeProjectionFromToolRegistry(registry);
-  return buildOpenAIToolsFromRuntimeProjection(projection, registry);
+  return buildOpenAIToolsFromModelProjection(createModelToolProjectionFromRegistry(registry));
 }
 
 export function buildAnthropicTools(registry = DEFAULT_TOOL_REGISTRY) {
-  const projection = createRuntimeProjectionFromToolRegistry(registry);
-  return buildAnthropicToolsFromRuntimeProjection(projection, registry);
+  return buildAnthropicToolsFromModelProjection(createModelToolProjectionFromRegistry(registry));
 }

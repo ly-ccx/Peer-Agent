@@ -14,6 +14,10 @@ import {
 import { sanitizeApiMessages } from './message-sanitizer.mjs';
 import * as responseGuard from './response-guard.mjs';
 import {
+  createDesktopAbortError,
+  runDesktopRuntimePipeline,
+} from './runtime-pipeline-adapter.mjs';
+import {
   executeModelToolCall,
   safeParseJson,
 } from './tool-orchestrator.mjs';
@@ -47,6 +51,10 @@ export async function agentLoopAnthropic({
   resolvedChannel = null,
   // Goal Runner 进度 sink：{ onRound } 每轮模型响应回调一次，用于实时轮次计数。
   agentProgress = null,
+  emitRuntimeEvent = null,
+  runtimeEventState = undefined,
+  providerId = null,
+  runtimeMode = 'chat',
 }) {
   let effectiveSystem = systemPrompt;
   let apiMessages = sanitizeApiMessages(messages);
@@ -81,63 +89,21 @@ export async function agentLoopAnthropic({
   let effectiveSupportsReasoning = Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning);
   let promptTooLongRetryUsed = false;
 
-  for (let turn = 0; turn < loop.maxTurns; turn++) {
-    // 自动 preflight 压缩：触发判定按完整 apiMessages 估算；切分时保留最新真人 user turn，
-    // 避免用户刚发送的原文被 compaction summary 代替。
-    const compaction = await runCompactionCheck({
-      messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
-      systemPrompt: effectiveSystem,
-      contextWindow,
-      providerConfig,
-      signal,
-      persistCompaction,
-      conversationId,
-      streamId,
-      webContents,
-      continuityContext,
-      tools,
-      preserveLatestUserTurn: true,
-    });
-    if (compaction.compacted) {
-      effectiveSystem = compaction.messages
-        .filter((m) => m.role === 'system')
-        .map((m) => m.content)
-        .join('\n\n');
-      apiMessages = compaction.messages.filter((m) => m.role !== 'system');
-    }
-
-    // 发送副本：仅对「发出去的消息」做微压缩 + 清洗，不回写 apiMessages，
-    // 使 apiMessages 始终保持完整会话量（与进度条分子/压缩触发器同口径）。
-    const sendMessages = sanitizeApiMessages(applyMicrocompaction(apiMessages).messages);
-    // 记录本轮实际发送切片，供回合结束 getContextInfo 的显示口径在 provider usage 缺失时回退估算。
-    lastSentMessages = sendMessages;
-    const providerResponse = await sendAnthropicMessagesStream({
-      baseUrl,
-      apiKey,
-      endpoint: resolvedChannel?.endpoint,
-      headers: resolvedChannel?.headers,
-      model,
-      system: effectiveSystem,
-      messages: sendMessages,
-      tools,
-      effort,
-      supportsReasoning: effectiveSupportsReasoning,
-      reasoningParamStyle: resolvedChannel?.reasoningParamStyle,
-      reasoningEffortMap: resolvedChannel?.reasoningEffortMap,
-      promptCaching: resolvedChannel?.supportsPromptCaching ?? supportsPromptCaching,
-      maxOutputTokens,
-      signal,
-      webContents,
-      streamId,
-    });
-    // 不再用发送副本回写 apiMessages：assistant 回合与 tool_result 会在下方
-    // 显式 push 回完整的 apiMessages，保持完整会话量口径。
-
-    if (!providerResponse.ok) {
-      const text = providerResponse.errorText || '';
-      const promptTooLong = isPromptTooLongResponse(providerResponse.status, text);
-      if (promptTooLong && !promptTooLongRetryUsed) {
-        const emergencyCompaction = await runCompactionCheck({
+  await runDesktopRuntimePipeline({
+    sessionId: conversationId || streamId,
+    streamId,
+    conversationId,
+    mode: runtimeMode,
+    providerId,
+    modelId: model,
+    maxTurns: loop.maxTurns,
+    signal,
+    emitRuntimeEvent,
+    eventState: runtimeEventState,
+    model: {
+      initialize: () => ({ provider: 'anthropic' }),
+      runTurn: async (state) => {
+        const compaction = await runCompactionCheck({
           messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
           systemPrompt: effectiveSystem,
           contextWindow,
@@ -147,120 +113,192 @@ export async function agentLoopAnthropic({
           conversationId,
           streamId,
           webContents,
-          emergency: true,
-          force: true,
           continuityContext,
           tools,
           preserveLatestUserTurn: true,
         });
-        if (emergencyCompaction.compacted) {
-          effectiveSystem = emergencyCompaction.messages
-            .filter((m) => m.role === 'system')
-            .map((m) => m.content)
+        if (compaction.compacted) {
+          effectiveSystem = compaction.messages
+            .filter((message) => message.role === 'system')
+            .map((message) => message.content)
             .join('\n\n');
-          apiMessages = emergencyCompaction.messages.filter((m) => m.role !== 'system');
-          promptTooLongRetryUsed = true;
-          continue;
+          apiMessages = compaction.messages.filter((message) => message.role !== 'system');
         }
-      }
-      if (promptTooLong) {
-        loop.sendError(
-          buildPromptTooLongRecoveryError({
-            text,
+
+        const sendMessages = sanitizeApiMessages(applyMicrocompaction(apiMessages).messages);
+        lastSentMessages = sendMessages;
+        const providerResponse = await sendAnthropicMessagesStream({
+          baseUrl,
+          apiKey,
+          endpoint: resolvedChannel?.endpoint,
+          headers: resolvedChannel?.headers,
+          model,
+          system: effectiveSystem,
+          messages: sendMessages,
+          tools,
+          effort,
+          supportsReasoning: effectiveSupportsReasoning,
+          reasoningParamStyle: resolvedChannel?.reasoningParamStyle,
+          reasoningEffortMap: resolvedChannel?.reasoningEffortMap,
+          promptCaching: resolvedChannel?.supportsPromptCaching ?? supportsPromptCaching,
+          maxOutputTokens,
+          signal,
+          webContents,
+          streamId,
+        });
+
+        if (!providerResponse.ok) {
+          const text = providerResponse.errorText || '';
+          const promptTooLong = isPromptTooLongResponse(providerResponse.status, text);
+          if (promptTooLong && !promptTooLongRetryUsed) {
+            const emergencyCompaction = await runCompactionCheck({
+              messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
+              systemPrompt: effectiveSystem,
+              contextWindow,
+              providerConfig,
+              signal,
+              persistCompaction,
+              conversationId,
+              streamId,
+              webContents,
+              emergency: true,
+              force: true,
+              continuityContext,
+              tools,
+              preserveLatestUserTurn: true,
+            });
+            if (emergencyCompaction.compacted) {
+              effectiveSystem = emergencyCompaction.messages
+                .filter((message) => message.role === 'system')
+                .map((message) => message.content)
+                .join('\n\n');
+              apiMessages = emergencyCompaction.messages.filter((message) => message.role !== 'system');
+              promptTooLongRetryUsed = true;
+              return { kind: 'continue', state };
+            }
+          }
+          if (promptTooLong) {
+            loop.sendError(buildPromptTooLongRecoveryError({
+              text,
+              providerTracePath: providerResponse.providerTracePath,
+              retryUsed: promptTooLongRetryUsed,
+            }));
+          } else if (providerResponse.providerError) {
+            loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
+          } else {
+            loop.sendHttpError(providerResponse.status, text);
+          }
+          return { kind: 'completed', state, reason: 'provider_error' };
+        }
+        promptTooLongRetryUsed = false;
+
+        const {
+          textContent,
+          thinkingContent,
+          thinkingSignature,
+          toolUseBlocks,
+          stopReason,
+          streamUsage,
+        } = providerResponse;
+        loop.addUsage(streamUsage);
+        const effectiveToolUseBlocks = stopReason === 'tool_use' ? toolUseBlocks : [];
+        if (!effectiveToolUseBlocks.length) {
+          if (
+            effectiveSupportsReasoning &&
+            effort === 'high' &&
+            !String(textContent || '').trim() &&
+            !String(thinkingContent || '').trim()
+          ) {
+            effectiveSupportsReasoning = false;
+            onNativeReasoningFallback?.({ provider: 'anthropic', reason: 'empty_response' });
+            return { kind: 'continue', state };
+          }
+          const terminalResponse = handleTerminalTextResponse({
+            text: textContent,
+            thinking: thinkingContent,
             providerTracePath: providerResponse.providerTracePath,
-            retryUsed: promptTooLongRetryUsed,
-          }),
-        );
-        return;
-      }
-      if (providerResponse.providerError) {
-        loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
-        return;
-      }
-      loop.sendHttpError(providerResponse.status, text);
-      return;
-    }
-    promptTooLongRetryUsed = false;
+            apiMessages,
+            loop,
+            responseGuard,
+          });
+          return terminalResponse.action === 'retry'
+            ? { kind: 'continue', state }
+            : { kind: 'completed', state, reason: terminalResponse.reason };
+        }
 
-    const { textContent, thinkingContent, thinkingSignature, toolUseBlocks, stopReason, streamUsage } = providerResponse;
-    loop.addUsage(streamUsage);
-
-    const effectiveToolUseBlocks = stopReason === 'tool_use' ? toolUseBlocks : [];
-
-    if (!effectiveToolUseBlocks.length) {
-      if (
-        effectiveSupportsReasoning &&
-        effort === 'high' &&
-        !String(textContent || '').trim() &&
-        !String(thinkingContent || '').trim()
-      ) {
-        effectiveSupportsReasoning = false;
-        onNativeReasoningFallback?.({ provider: 'anthropic', reason: 'empty_response' });
-        continue;
-      }
-      const terminalResponse = handleTerminalTextResponse({
-        text: textContent,
-        // 深度模式下正文可能为空但已产出 thinking；把 thinking 计入“非空”，
-        // 避免误报 empty_model_response。
-        thinking: thinkingContent,
-        providerTracePath: providerResponse.providerTracePath,
-        apiMessages,
-        loop,
-        responseGuard,
-      });
-      if (terminalResponse.action === 'retry') continue;
-      return;
-    }
-
-    const assistantContent = [];
-    // Anthropic 要求多轮回传时 thinking block 在 content 数组最前，且带 signature。
-    // 判定以 signature 为准而非 thinkingContent: 新代际(如 Opus 4.8)默认 display:"omitted"，
-    // 返回的 thinking 字段恒为空但 signature 携带加密思维，服务端靠 signature 解密重建。
-    // 若按 thinkingContent 判定会漏发 thinking block，违反工具多轮的强制回传要求，
-    // 并触发 mid-turn thinking 冲突(thinking 被静默禁用 + prompt cache 失效)。
-    if (thinkingSignature) {
-      assistantContent.push({ type: 'thinking', thinking: thinkingContent || '', signature: thinkingSignature });
-    }
-    if (textContent) assistantContent.push({ type: 'text', text: textContent });
-    for (const tu of effectiveToolUseBlocks) {
-      assistantContent.push({ type: 'tool_use', id: tu.id, name: tu.name, input: safeParseJson(tu.inputJson) });
-    }
-    apiMessages.push({ role: 'assistant', content: assistantContent });
-
-    const toolResults = [];
-    let terminalControlSignal = null;
-    for (const tu of effectiveToolUseBlocks) {
-      const toolExecution = await executeModelToolCall({
-        name: tu.name,
-        rawArguments: tu.inputJson,
-        toolCallId: tu.id,
-        workspacePath,
-        toolContext,
-        permissionGate,
-        webContents,
-        streamId,
-        conversationId,
-        signal,
-        registry,
-        runtimeProjection,
-        mcpRegistry,
-        goalPlanStore,
-      });
-      if (toolExecution.aborted) return;
-      toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: toolExecution.output });
-      if (toolExecution.controlSignal?.terminal) terminalControlSignal = toolExecution.controlSignal;
-    }
-    // 必须先把所有 tool_use 配对的 tool_result 落回历史，再决定是否终止，
-    // 否则会留下悬空 tool_use 导致下一轮 Anthropic 请求被拒。
-    apiMessages.push({ role: 'user', content: toolResults });
-
-    // 运行时护栏：当本回合调用了 request_user_input 这类「请求用户输入」能力时，
-    // 停止回灌、把控制权交还用户，而不是自行继续决策。详见 request_user_input 设计。
-    if (terminalControlSignal) {
-      loop.sendDone();
-      return;
-    }
-  }
-
-  loop.sendLoopExhausted();
+        const assistantContent = [];
+        // Anthropic 工具多轮要求带 signature 的 thinking block 位于 content 首位。
+        if (thinkingSignature) {
+          assistantContent.push({
+            type: 'thinking',
+            thinking: thinkingContent || '',
+            signature: thinkingSignature,
+          });
+        }
+        if (textContent) assistantContent.push({ type: 'text', text: textContent });
+        for (const toolUse of effectiveToolUseBlocks) {
+          assistantContent.push({
+            type: 'tool_use',
+            id: toolUse.id,
+            name: toolUse.name,
+            input: safeParseJson(toolUse.inputJson),
+          });
+        }
+        apiMessages.push({ role: 'assistant', content: assistantContent });
+        return {
+          kind: 'tool_calls',
+          state,
+          calls: effectiveToolUseBlocks.map((toolUse) => ({
+            toolCallId: toolUse.id,
+            name: toolUse.name,
+            arguments: toolUse.inputJson,
+            payload: toolUse,
+          })),
+        };
+      },
+      applyToolResults: (state, executions) => {
+        const toolResults = executions.map((execution) => {
+          const toolExecution = execution.result;
+          if (toolExecution.aborted) throw createDesktopAbortError();
+          return {
+            type: 'tool_result',
+            tool_use_id: execution.call.toolCallId,
+            content: toolExecution.output,
+          };
+        });
+        // 先配对所有 tool_use，再由 Pipeline 根据 terminal signal 决定是否停止。
+        apiMessages.push({ role: 'user', content: toolResults });
+        return state;
+      },
+      onStopped: () => loop.sendDone(),
+      onExhausted: () => loop.sendLoopExhausted(),
+    },
+    tools: {
+      execute: async (call) => {
+        const toolExecution = await executeModelToolCall({
+          name: call.name,
+          rawArguments: call.arguments,
+          toolCallId: call.toolCallId,
+          workspacePath,
+          toolContext,
+          permissionGate,
+          webContents,
+          streamId,
+          conversationId,
+          signal,
+          registry,
+          runtimeProjection,
+          mcpRegistry,
+          goalPlanStore,
+        });
+        if (toolExecution.aborted) throw createDesktopAbortError();
+        return {
+          call,
+          result: toolExecution,
+          terminal: Boolean(toolExecution.controlSignal?.terminal),
+          terminalReason: toolExecution.controlSignal?.reason || 'waiting_user',
+        };
+      },
+    },
+  });
 }

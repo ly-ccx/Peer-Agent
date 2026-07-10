@@ -405,6 +405,7 @@ describe('llm chat service tool materialization', () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;
     const events = [];
+    const runtimeEvents = [];
     const capturedBodies = [];
     globalThis.fetch = async (_url, init) => {
       capturedBodies.push(JSON.parse(init.body));
@@ -431,6 +432,7 @@ describe('llm chat service tool materialization', () => {
           }],
           getDecryptedApiKey: () => 'test-key',
         },
+        emitRuntimeEvent: (event) => runtimeEvents.push(event),
       });
 
       const outcome = await service.sendMessage({
@@ -456,6 +458,16 @@ describe('llm chat service tool materialization', () => {
     assert.equal(events.find((event) => event.channel === 'chat:stream:delta')?.payload.content, 'ok');
     assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+    assert.deepEqual(runtimeEvents.map((event) => event.type), [
+      'session.started',
+      'message.delta',
+      'message.completed',
+    ]);
+    assert.equal(runtimeEvents.every((event) => event.sessionId === 'c1'), true);
+    assert.equal(runtimeEvents.every((event) => event.streamId === 's1'), true);
+    assert.equal(runtimeEvents.every((event) => event.conversationId === 'c1'), true);
+    assert.equal(runtimeEvents[1]?.content, 'ok');
+    assert.equal(runtimeEvents[2]?.content, 'ok');
   });
 
   it('continues the same OpenAI turn after automatic compaction while preserving the latest user input', async () => {

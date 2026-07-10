@@ -4,3 +4,5 @@ export * from './evidence.ts';
 export * from './hooks.ts';
 export * from './permission.ts';
 export * from './capability-registry.ts';
+export * from './projection.ts';
+export * from './projection-materializers.ts';

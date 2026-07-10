@@ -6,8 +6,14 @@ export type {
   RuntimeSdkApprovalPort,
   RuntimeSdkEvent,
   RuntimeSdkEventBase,
+  RuntimeSdkEventInput,
   RuntimeSdkEventListener,
   RuntimeSdkEventType,
+  RuntimeSdkSessionStartedEvent,
+  RuntimeSdkMessageDeltaEvent,
+  RuntimeSdkReasoningDeltaEvent,
+  RuntimeSdkMessageCompletedEvent,
+  RuntimeSdkRuntimeErrorEvent,
   RuntimeSdkHookCompletedEvent,
   RuntimeSdkPermissionRequestedEvent,
   RuntimeSdkPermissionResolvedEvent,
@@ -25,4 +31,22 @@ export type {
   RuntimeSdkToolCall,
   RuntimeSdkToolResult,
 } from './contracts.ts';
+export type {
+  RuntimePipeline,
+  RuntimePipelineCompletedTurn,
+  RuntimePipelineContinueTurn,
+  RuntimePipelineEventSink,
+  RuntimePipelineModelAdapter,
+  RuntimePipelineOptions,
+  RuntimePipelineRunInput,
+  RuntimePipelineRunResult,
+  RuntimePipelineStatus,
+  RuntimePipelineToolCall,
+  RuntimePipelineToolCallsTurn,
+  RuntimePipelineToolExecution,
+  RuntimePipelineToolExecutor,
+  RuntimePipelineTurnContext,
+  RuntimePipelineTurnResult,
+} from './pipeline-contracts.ts';
+export { createRuntimePipeline } from './pipeline.ts';
 export { createRuntimeSdk } from './runtime.ts';

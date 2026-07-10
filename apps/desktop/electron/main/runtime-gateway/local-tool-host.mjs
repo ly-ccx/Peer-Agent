@@ -31,6 +31,7 @@ export function createLocalToolHost({
   providers,
   extraProviders = [],
   hookRunner = null,
+  onRuntimeEvent = null,
 }) {
   const activeHookRunner = hookRunner ?? createConfiguredHookRunner({ userDataPath, workspaceRoot });
   const activeShellProvider = shellProvider ?? createLocalShellProvider({
@@ -69,6 +70,9 @@ export function createLocalToolHost({
     workspaceRoot,
     host: hostAdapter,
   });
+  const unsubscribeRuntimeEvents = typeof onRuntimeEvent === 'function'
+    ? runtime.subscribe(onRuntimeEvent)
+    : () => {};
 
   async function execute(request, executionContext = {}) {
     return runtime.execute(request, { ...executionContext, workspaceRoot });
@@ -76,6 +80,8 @@ export function createLocalToolHost({
 
   return {
     execute,
+    runtime,
+    unsubscribeRuntimeEvents,
     providerRegistry,
     listShellTasks: activeShellProvider.listTasks,
     stopShellTask: activeShellProvider.stopTask,

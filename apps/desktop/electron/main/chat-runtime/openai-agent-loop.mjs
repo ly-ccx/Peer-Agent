@@ -14,6 +14,10 @@ import {
 } from './compaction-coordinator.mjs';
 import { sanitizeApiMessages } from './message-sanitizer.mjs';
 import * as responseGuard from './response-guard.mjs';
+import {
+  createDesktopAbortError,
+  runDesktopRuntimePipeline,
+} from './runtime-pipeline-adapter.mjs';
 import { executeModelToolCall } from './tool-orchestrator.mjs';
 
 export async function agentLoopOpenAI({
@@ -48,6 +52,10 @@ export async function agentLoopOpenAI({
   accountId = null,
   // Goal Runner 进度 sink：{ onRound } 每轮模型响应回调一次，用于实时轮次计数。
   agentProgress = null,
+  emitRuntimeEvent = null,
+  runtimeEventState = undefined,
+  providerId = null,
+  runtimeMode = 'chat',
 }) {
   // 按鉴权方式选择 OpenAI 协议族的传输 adapter,保持循环逻辑统一。
   const useResponses = resolvedChannel?.wire === 'openai-responses' || authMethod === 'oauth_chatgpt';
@@ -86,58 +94,23 @@ export async function agentLoopOpenAI({
   let effectiveSupportsReasoning = Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning);
   let promptTooLongRetryUsed = false;
 
-  for (let turn = 0; turn < loop.maxTurns; turn++) {
-    // 自动 preflight 压缩：触发判定按完整 apiMessages 估算；切分时保留最新真人 user turn，
-    // 避免用户刚发送的原文被 compaction summary 代替。
-    const compaction = await runCompactionCheck({
-      messages: apiMessages,
-      systemPrompt,
-      contextWindow,
-      providerConfig,
-      signal,
-      persistCompaction,
-      conversationId,
-      streamId,
-      webContents,
-      continuityContext,
-      tools,
-      preserveLatestUserTurn: true,
-    });
-    if (compaction.compacted) {
-      apiMessages = compaction.messages;
-    }
-
-    // 发送副本：仅对「发出去的消息」做微压缩 + 清洗，不回写 apiMessages，
-    // 使 apiMessages 始终保持完整会话量（与进度条分子/压缩触发器同口径）。
-    const sendMessages = sanitizeApiMessages(applyMicrocompaction(apiMessages).messages);
-    // 记录本轮实际发送切片，供回合结束 getContextInfo 的显示口径在 provider usage 缺失时回退估算。
-    lastSentMessages = sendMessages;
-    const providerResponse = await sendStream({
-      baseUrl,
-      apiKey,
-      endpoint: resolvedChannel?.endpoint,
-      headers: resolvedChannel?.headers,
-      model,
-      messages: sendMessages,
-      tools,
-      effort,
-      supportsReasoning: effectiveSupportsReasoning,
-      reasoningParamStyle: resolvedChannel?.reasoningParamStyle || 'openai-effort',
-      reasoningEffortMap: resolvedChannel?.reasoningEffortMap,
-      promptCaching: resolvedChannel?.supportsPromptCaching ?? supportsPromptCaching,
-      maxOutputTokens,
-      signal,
-      webContents,
-      streamId,
-    });
-    // 不再用发送副本回写 apiMessages：assistant 回合与 tool 结果会在下方
-    // 显式 push 回完整的 apiMessages，保持完整会话量口径。
-
-    if (!providerResponse.ok) {
-      const text = providerResponse.errorText || '';
-      const promptTooLong = isPromptTooLongResponse(providerResponse.status, text);
-      if (promptTooLong && !promptTooLongRetryUsed) {
-        const emergencyCompaction = await runCompactionCheck({
+  await runDesktopRuntimePipeline({
+    sessionId: conversationId || streamId,
+    streamId,
+    conversationId,
+    mode: runtimeMode,
+    providerId,
+    modelId: model,
+    maxTurns: loop.maxTurns,
+    signal,
+    emitRuntimeEvent,
+    eventState: runtimeEventState,
+    model: {
+      initialize: () => ({ provider: 'openai' }),
+      runTurn: async (state) => {
+        // 自动 preflight 压缩：触发判定按完整 apiMessages 估算；切分时保留最新真人 user turn，
+        // 避免用户刚发送的原文被 compaction summary 代替。
+        const compaction = await runCompactionCheck({
           messages: apiMessages,
           systemPrompt,
           contextWindow,
@@ -147,105 +120,163 @@ export async function agentLoopOpenAI({
           conversationId,
           streamId,
           webContents,
-          emergency: true,
-          force: true,
           continuityContext,
           tools,
           preserveLatestUserTurn: true,
         });
-        if (emergencyCompaction.compacted) {
-          apiMessages = emergencyCompaction.messages;
-          promptTooLongRetryUsed = true;
-          continue;
+        if (compaction.compacted) apiMessages = compaction.messages;
+
+        // Provider adapter 只接收实际发送切片；完整历史仍由 Desktop Model Adapter 持有。
+        const sendMessages = sanitizeApiMessages(applyMicrocompaction(apiMessages).messages);
+        lastSentMessages = sendMessages;
+        const providerResponse = await sendStream({
+          baseUrl,
+          apiKey,
+          endpoint: resolvedChannel?.endpoint,
+          headers: resolvedChannel?.headers,
+          model,
+          messages: sendMessages,
+          tools,
+          effort,
+          supportsReasoning: effectiveSupportsReasoning,
+          reasoningParamStyle: resolvedChannel?.reasoningParamStyle || 'openai-effort',
+          reasoningEffortMap: resolvedChannel?.reasoningEffortMap,
+          promptCaching: resolvedChannel?.supportsPromptCaching ?? supportsPromptCaching,
+          maxOutputTokens,
+          signal,
+          webContents,
+          streamId,
+        });
+
+        if (!providerResponse.ok) {
+          const text = providerResponse.errorText || '';
+          const promptTooLong = isPromptTooLongResponse(providerResponse.status, text);
+          if (promptTooLong && !promptTooLongRetryUsed) {
+            const emergencyCompaction = await runCompactionCheck({
+              messages: apiMessages,
+              systemPrompt,
+              contextWindow,
+              providerConfig,
+              signal,
+              persistCompaction,
+              conversationId,
+              streamId,
+              webContents,
+              emergency: true,
+              force: true,
+              continuityContext,
+              tools,
+              preserveLatestUserTurn: true,
+            });
+            if (emergencyCompaction.compacted) {
+              apiMessages = emergencyCompaction.messages;
+              promptTooLongRetryUsed = true;
+              return { kind: 'continue', state };
+            }
+          }
+          if (promptTooLong) {
+            loop.sendError(buildPromptTooLongRecoveryError({
+              text,
+              providerTracePath: providerResponse.providerTracePath,
+              retryUsed: promptTooLongRetryUsed,
+            }));
+          } else if (providerResponse.providerError) {
+            loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
+          } else {
+            loop.sendHttpError(providerResponse.status, text);
+          }
+          return { kind: 'completed', state, reason: 'provider_error' };
         }
-      }
-      if (promptTooLong) {
-        loop.sendError(
-          buildPromptTooLongRecoveryError({
-            text,
+        promptTooLongRetryUsed = false;
+
+        const { content, thinkingContent, toolCalls, streamUsage } = providerResponse;
+        loop.addUsage(streamUsage);
+        if (!toolCalls.length) {
+          if (
+            effectiveSupportsReasoning &&
+            (effort === 'high' || effort === 'xhigh') &&
+            !String(content || '').trim() &&
+            !String(thinkingContent || '').trim()
+          ) {
+            effectiveSupportsReasoning = false;
+            onNativeReasoningFallback?.({ provider: 'openai', reason: 'empty_response' });
+            return { kind: 'continue', state };
+          }
+          const terminalResponse = handleTerminalTextResponse({
+            text: content,
+            thinking: thinkingContent,
             providerTracePath: providerResponse.providerTracePath,
-            retryUsed: promptTooLongRetryUsed,
-          }),
-        );
-        return;
-      }
-      if (providerResponse.providerError) {
-        loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
-        return;
-      }
-      loop.sendHttpError(providerResponse.status, text);
-      return;
-    }
-    promptTooLongRetryUsed = false;
+            apiMessages,
+            loop,
+            responseGuard,
+          });
+          return terminalResponse.action === 'retry'
+            ? { kind: 'continue', state }
+            : { kind: 'completed', state, reason: terminalResponse.reason };
+        }
 
-    const { content, thinkingContent, toolCalls, streamUsage } = providerResponse;
-    loop.addUsage(streamUsage);
-
-    if (!toolCalls.length) {
-      if (
-        effectiveSupportsReasoning &&
-        (effort === 'high' || effort === 'xhigh') &&
-        !String(content || '').trim() &&
-        !String(thinkingContent || '').trim()
-      ) {
-        effectiveSupportsReasoning = false;
-        onNativeReasoningFallback?.({ provider: 'openai', reason: 'empty_response' });
-        continue;
-      }
-      const terminalResponse = handleTerminalTextResponse({
-        text: content,
-        thinking: thinkingContent,
-        providerTracePath: providerResponse.providerTracePath,
-        apiMessages,
-        loop,
-        responseGuard,
-      });
-      if (terminalResponse.action === 'retry') continue;
-      return;
-    }
-
-    apiMessages.push({
-      role: 'assistant',
-      content: content || null,
-      tool_calls: toolCalls.map((tc) => ({
-        id: tc.id,
-        type: 'function',
-        function: { name: tc.name, arguments: tc.arguments },
-      })),
-    });
-
-    let terminalControlSignal = null;
-    for (const tc of toolCalls) {
-      const toolExecution = await executeModelToolCall({
-        name: tc.name,
-        rawArguments: tc.arguments,
-        toolCallId: tc.id,
-        workspacePath,
-        toolContext,
-        permissionGate,
-        webContents,
-        streamId,
-        conversationId,
-        signal,
-        registry,
-        runtimeProjection,
-        mcpRegistry,
-        goalPlanStore,
-      });
-      if (toolExecution.aborted) return;
-      // 必须为每个 tool_call 写回配对的 tool message，再决定是否终止，
-      // 否则会留下未应答的 tool_call 导致下一轮 OpenAI 请求被拒。
-      apiMessages.push({ role: 'tool', tool_call_id: tc.id, content: toolExecution.output });
-      if (toolExecution.controlSignal?.terminal) terminalControlSignal = toolExecution.controlSignal;
-    }
-
-    // 运行时护栏：当本回合调用了 request_user_input 这类「请求用户输入」能力时，
-    // 停止回灌、把控制权交还用户，而不是自行继续决策。详见 request_user_input 设计。
-    if (terminalControlSignal) {
-      loop.sendDone();
-      return;
-    }
-  }
-
-  loop.sendLoopExhausted();
+        apiMessages.push({
+          role: 'assistant',
+          content: content || null,
+          tool_calls: toolCalls.map((toolCall) => ({
+            id: toolCall.id,
+            type: 'function',
+            function: { name: toolCall.name, arguments: toolCall.arguments },
+          })),
+        });
+        return {
+          kind: 'tool_calls',
+          state,
+          calls: toolCalls.map((toolCall) => ({
+            toolCallId: toolCall.id,
+            name: toolCall.name,
+            arguments: toolCall.arguments,
+            payload: toolCall,
+          })),
+        };
+      },
+      applyToolResults: (state, executions) => {
+        for (const execution of executions) {
+          const toolExecution = execution.result;
+          if (toolExecution.aborted) throw createDesktopAbortError();
+          // 必须为每个 tool_call 写回配对的 tool message，再决定是否终止。
+          apiMessages.push({
+            role: 'tool',
+            tool_call_id: execution.call.toolCallId,
+            content: toolExecution.output,
+          });
+        }
+        return state;
+      },
+      onStopped: () => loop.sendDone(),
+      onExhausted: () => loop.sendLoopExhausted(),
+    },
+    tools: {
+      execute: async (call) => {
+        const toolExecution = await executeModelToolCall({
+          name: call.name,
+          rawArguments: call.arguments,
+          toolCallId: call.toolCallId,
+          workspacePath,
+          toolContext,
+          permissionGate,
+          webContents,
+          streamId,
+          conversationId,
+          signal,
+          registry,
+          runtimeProjection,
+          mcpRegistry,
+          goalPlanStore,
+        });
+        if (toolExecution.aborted) throw createDesktopAbortError();
+        return {
+          call,
+          result: toolExecution,
+          terminal: Boolean(toolExecution.controlSignal?.terminal),
+          terminalReason: toolExecution.controlSignal?.reason || 'waiting_user',
+        };
+      },
+    },
+  });
 }

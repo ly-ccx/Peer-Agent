@@ -4,6 +4,7 @@ import {
   RUNTIME_EVENT_PROTOCOL_VERSION,
   type RuntimeSdk,
   type RuntimeSdkEvent,
+  type RuntimeSdkEventInput,
   type RuntimeSdkEventListener,
   type RuntimeSdkExecuteRequest,
   type RuntimeSdkExecutionContext,
@@ -12,14 +13,13 @@ import {
   type RuntimeSdkProviderExecution,
 } from './contracts.ts';
 
-type RuntimeSdkEventInput = RuntimeSdkEvent extends infer Event
-  ? Event extends RuntimeSdkEvent
-    ? Omit<Event, 'protocolVersion' | 'sequence' | 'occurredAt'>
-    : never
-  : never;
-
 function normalizeRecords(records: readonly RuntimeSdkHookRecord[] | null | undefined): readonly RuntimeSdkHookRecord[] {
   return Array.isArray(records) ? records : [];
+}
+
+function createRuntimeEventId(sequence: number): string {
+  const randomId = globalThis.crypto?.randomUUID?.();
+  return randomId ? `runtime-event-${randomId}` : `runtime-event-${Date.now()}-${sequence}`;
 }
 
 export function createRuntimeSdk(options: RuntimeSdkOptions): RuntimeSdk {
@@ -34,16 +34,23 @@ export function createRuntimeSdk(options: RuntimeSdkOptions): RuntimeSdk {
   const now = options.now ?? (() => new Date().toISOString());
   let sequence = 0;
 
-  function publish(event: RuntimeSdkEventInput): void {
+  function emit(event: RuntimeSdkEventInput): RuntimeSdkEvent {
+    const nextSequence = ++sequence;
     const nextEvent = {
       ...event,
       protocolVersion: RUNTIME_EVENT_PROTOCOL_VERSION,
-      sequence: ++sequence,
+      eventId: createRuntimeEventId(nextSequence),
+      sequence: nextSequence,
       occurredAt: now(),
     } as RuntimeSdkEvent;
     for (const listener of listeners) {
-      listener(nextEvent);
+      try {
+        listener(nextEvent);
+      } catch {
+        // Runtime events are observational. A broken subscriber must not interrupt execution.
+      }
     }
+    return nextEvent;
   }
 
   function subscribe(listener: RuntimeSdkEventListener): () => void {
@@ -74,7 +81,7 @@ export function createRuntimeSdk(options: RuntimeSdkOptions): RuntimeSdk {
       call,
     };
 
-    publish({ type: 'tool.started', ...eventBase });
+    emit({ type: 'tool.started', ...eventBase });
 
     const preRecords = normalizeRecords(
       options.host.hookRunner?.runPreToolUse
@@ -82,7 +89,7 @@ export function createRuntimeSdk(options: RuntimeSdkOptions): RuntimeSdk {
         : [],
     );
     const preDecision = mostRestrictiveHookDecision(preRecords);
-    publish({
+    emit({
       type: 'hook.completed',
       ...eventBase,
       phase: 'PreToolUse',
@@ -101,7 +108,7 @@ export function createRuntimeSdk(options: RuntimeSdkOptions): RuntimeSdk {
         ? options.host.appendHookEvidence(blocked.result, preRecords, preDecision)
         : blocked.result;
       const resolvedBlocked = { ...blocked, result };
-      publish({ type: 'tool.completed', ...eventBase, decision: 'deny', result });
+      emit({ type: 'tool.completed', ...eventBase, decision: 'deny', result });
       return resolvedBlocked;
     }
 
@@ -116,11 +123,11 @@ export function createRuntimeSdk(options: RuntimeSdkOptions): RuntimeSdk {
         workspacePath: context.workspaceRoot ?? options.workspaceRoot,
         reason: preRecords.find((record) => record.decision === 'ask')?.reason ?? 'hook_approval_required',
       };
-      publish({ type: 'permission.requested', ...eventBase, decision: 'ask' });
+      emit({ type: 'permission.requested', ...eventBase, decision: 'ask' });
       const approval = options.host.approvalPort
         ? await options.host.approvalPort.requestApproval(approvalRequest, context)
         : { decision: 'ask' as const };
-      publish({ type: 'permission.resolved', ...eventBase, decision: approval.decision });
+      emit({ type: 'permission.resolved', ...eventBase, decision: approval.decision });
 
       if (approval.decision !== 'allow') {
         const blocked = options.host.createBlockedExecution({
@@ -134,7 +141,7 @@ export function createRuntimeSdk(options: RuntimeSdkOptions): RuntimeSdk {
           ? options.host.appendHookEvidence(blocked.result, preRecords, preDecision)
           : blocked.result;
         const resolvedBlocked = { ...blocked, result };
-        publish({ type: 'tool.completed', ...eventBase, decision: approval.decision, result });
+        emit({ type: 'tool.completed', ...eventBase, decision: approval.decision, result });
         return resolvedBlocked;
       }
     }
@@ -148,7 +155,7 @@ export function createRuntimeSdk(options: RuntimeSdkOptions): RuntimeSdk {
           })
         : [],
     );
-    publish({
+    emit({
       type: 'hook.completed',
       ...eventBase,
       phase: 'PostToolUse',
@@ -164,9 +171,9 @@ export function createRuntimeSdk(options: RuntimeSdkOptions): RuntimeSdk {
         )
       : execution.result;
     const resolvedExecution = { ...execution, result };
-    publish({ type: 'tool.completed', ...eventBase, decision: preDecision, result });
+    emit({ type: 'tool.completed', ...eventBase, decision: preDecision, result });
     return resolvedExecution;
   }
 
-  return { execute, subscribe };
+  return { emit, execute, subscribe };
 }

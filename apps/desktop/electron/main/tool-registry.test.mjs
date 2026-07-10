@@ -3,10 +3,13 @@ import { describe, it } from 'node:test';
 
 import {
   buildAnthropicTools,
+  buildAnthropicToolsFromModelProjection,
   buildOpenAITools,
+  buildOpenAIToolsFromModelProjection,
   buildOpenAIToolsFromRuntimeProjection,
   buildOpenAIToolsFromRegistry,
   createRuntimeProjectionFromToolRegistry,
+  createRuntimeToolProjection,
   createRuntimeToolRegistry,
   createToolRegistry,
   getToolDefinition,
@@ -271,6 +274,32 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
   it('projects only explicitly allowed readonly tools in explorer mode', () => {
     const names = materializedNames('explorer');
     assert.deepEqual(names, ['read_file', 'search_files']);
+  });
+
+  it('keeps the public model projection aligned with the host capability projection', () => {
+    const { projection, modelProjection } = createRuntimeToolProjection({
+      projectionOptions: {
+        mode: 'explorer',
+        projectionId: 'host-projection-1',
+        createdAt: '2026-07-10T00:00:00.000Z',
+      },
+    });
+    const availableNames = projection.capabilities
+      .filter((capability) => capability.health !== 'mode_excluded')
+      .map((capability) => capability.name);
+
+    assert.deepEqual(modelProjection.tools.map((tool) => tool.name), availableNames);
+    assert.equal(modelProjection.mode, 'explorer');
+    assert.equal(modelProjection.createdAt, projection.createdAt);
+    assert.equal(modelProjection.metadata?.hostProjectionId, projection.projectionId);
+    assert.deepEqual(
+      buildOpenAIToolsFromModelProjection(modelProjection).map((tool) => tool.function.name),
+      availableNames,
+    );
+    assert.deepEqual(
+      buildAnthropicToolsFromModelProjection(modelProjection).map((tool) => tool.name),
+      availableNames,
+    );
   });
 
   it('marks write and goal capabilities as mode_excluded in explorer mode', () => {

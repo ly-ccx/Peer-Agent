@@ -1,7 +1,9 @@
+import { isRuntimeToolAvailableInMode } from '@peer-agent/runtime-core';
 import { createToolRegistry } from './tool-registry.mjs';
 import {
-  buildAnthropicToolsFromRegistry,
-  buildOpenAIToolsFromRegistry,
+  buildAnthropicToolsFromModelProjection,
+  buildOpenAIToolsFromModelProjection,
+  createModelToolProjectionFromRegistry,
 } from './provider-tool-materializer.mjs';
 
 function nowIso() {
@@ -72,30 +74,12 @@ function evidencePolicyForTool(tool) {
   return { returnMode: 'summary', maxChars: 4_000, redactSensitive: false };
 }
 
-// 工具是否在当前会话模式下可投影（ADR 35）。
-// wire 值迁移后（见 ADR 41 / goal-mode-ultrathink-workflow 设计文档）:'goal' 是独立的自驱
-// 目标模式,投影层不再把它归一为 'plan',而是按 goal 独立过滤工具可用性。规划/回写工具
-// (goal_* 系列)在 goal-tool-definitions 中声明 availableInModes:['plan','goal'],故两模式均可用。
-// 未声明 availableInModes 的工具在 chat/plan/goal 维持向后兼容；
-// explorer 是更受限的只读子 Agent profile，必须显式声明可用，避免默认暴露写入/MCP/Web 能力。
-// 传入 mode 为 null/undefined（无模式上下文）时不做模式过滤。
-// wire 值迁移后 'goal' 独立成模式,不再按 'plan' 归一;存量历史 'goal'（旧 plan 语义）已由
-// conversation-store 的一次性数据迁移改写为 'plan',不会到达此处。
-function normalizeProjectionMode(mode) {
-  return mode;
-}
-
-function isToolAvailableInMode(tool, mode) {
-  const normalizedMode = normalizeProjectionMode(mode);
-  const modes = tool.availableInModes;
-  if (normalizedMode == null) return true;
-  if (normalizedMode === 'explorer' && (!Array.isArray(modes) || modes.length === 0)) return false;
-  if (!Array.isArray(modes) || modes.length === 0) return true;
-  return modes.includes(normalizedMode);
-}
-
 function manifestFromTool(tool, mode) {
-  const modeExcluded = !isToolAvailableInMode(tool, mode);
+  const modeExcluded = !isRuntimeToolAvailableInMode({
+    name: tool.name,
+    capabilityId: executorCapabilityId(tool),
+    modeScopes: tool.availableInModes,
+  }, mode);
   if (tool.manifest && typeof tool.manifest === 'object') {
     return Object.freeze({
       health: modeExcluded ? 'mode_excluded' : 'available',
@@ -148,10 +132,31 @@ export function createProjectedToolRegistry(runtimeProjection, registry) {
   return createToolRegistry({ tools });
 }
 
+export function createModelToolProjectionFromRuntimeProjection(
+  runtimeProjection,
+  registry,
+  { mode } = {},
+) {
+  return createModelToolProjectionFromRegistry(
+    createProjectedToolRegistry(runtimeProjection, registry),
+    {
+      mode,
+      createdAt: runtimeProjection?.createdAt,
+      metadata: runtimeProjection?.projectionId
+        ? { hostProjectionId: runtimeProjection.projectionId }
+        : undefined,
+    },
+  );
+}
+
 export function buildOpenAIToolsFromRuntimeProjection(runtimeProjection, registry) {
-  return buildOpenAIToolsFromRegistry(createProjectedToolRegistry(runtimeProjection, registry));
+  return buildOpenAIToolsFromModelProjection(
+    createModelToolProjectionFromRuntimeProjection(runtimeProjection, registry),
+  );
 }
 
 export function buildAnthropicToolsFromRuntimeProjection(runtimeProjection, registry) {
-  return buildAnthropicToolsFromRegistry(createProjectedToolRegistry(runtimeProjection, registry));
+  return buildAnthropicToolsFromModelProjection(
+    createModelToolProjectionFromRuntimeProjection(runtimeProjection, registry),
+  );
 }

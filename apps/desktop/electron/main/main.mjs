@@ -631,6 +631,7 @@ function parseExplorerReport(rawText, fallback = {}) {
 const llmChatService = createLlmChatService({
   llmConfigStore,
   conversationStore,
+  emitRuntimeEvent,
   persistCompaction: persistCompactionToConversation,
   promptSnapshotStore,
   preferredAccessLevel: initialSettings.localAccessLevel,
@@ -2280,6 +2281,26 @@ ipcMain.handle('mcp:connect-and-register', async (_, { serverUrl, serverName }) 
 
 // ── Local Tool Host ──
 let localToolHost;
+const pendingRuntimeEvents = [];
+
+function forwardRuntimeEvent(event) {
+  broadcastToAllWindows('runtime:event', event);
+}
+
+function emitRuntimeEvent(event) {
+  if (localToolHost?.runtime) {
+    return localToolHost.runtime.emit(event);
+  }
+  pendingRuntimeEvents.push(event);
+  return null;
+}
+
+function flushPendingRuntimeEvents() {
+  if (!localToolHost?.runtime || pendingRuntimeEvents.length === 0) return;
+  for (const event of pendingRuntimeEvents.splice(0)) {
+    localToolHost.runtime.emit(event);
+  }
+}
 
 app.whenReady().then(async () => {
   setDockIcon();
@@ -2309,7 +2330,9 @@ app.whenReady().then(async () => {
     // goalPlanStore 实例，避免出现"两个实例指向同磁盘、需重挂载才同步"的 bug。
     goalProvider: createLocalGoalProvider({ goalPlanStore }),
     extraProviders: skillStore ? [createLocalSkillProvider({ skillStore })] : [],
+    onRuntimeEvent: forwardRuntimeEvent,
   });
+  flushPendingRuntimeEvents();
 
   ipcMain.handle('client-tool:execute', (_event, payload) => {
     if (!localToolHost) throw new Error('local_tool_host_not_ready');

@@ -1,8 +1,8 @@
 import {
   buildAnthropicTools,
-  buildAnthropicToolsFromRuntimeProjection,
+  buildAnthropicToolsFromModelProjection,
   buildOpenAITools,
-  buildOpenAIToolsFromRuntimeProjection,
+  buildOpenAIToolsFromModelProjection,
   buildSystemContext,
   buildSystemPrompt,
   createRuntimeToolProjection,
@@ -74,13 +74,13 @@ function sleepWithSignal(ms, signal) {
 
 function buildRuntimeTools({ mcpRegistry, providerType, mode }) {
   // mode 作为运行时事实下传到 Runtime Projection，模式隔离工具暴露（ADR 35）。
-  const { registry, projection } = createRuntimeToolProjection({
+  const { registry, projection, modelProjection } = createRuntimeToolProjection({
     mcpRegistry,
     projectionOptions: { mode },
   });
   const tools = providerType === 'anthropic'
-    ? buildAnthropicToolsFromRuntimeProjection(projection, registry)
-    : buildOpenAIToolsFromRuntimeProjection(projection, registry);
+    ? buildAnthropicToolsFromModelProjection(modelProjection)
+    : buildOpenAIToolsFromModelProjection(modelProjection);
   return { registry, runtimeProjection: projection, tools };
 }
 
@@ -238,7 +238,11 @@ function finalizeDanglingToolSegments(segments, terminalStatus) {
  * 其余事件原样透传。这样两个 provider adapter / agent loop 都无需改动,
  * 累积逻辑集中在单一 seam。返回的对象只需实现 send()(adapter/loop 只用到 send)。
  */
-function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conversationStore = null } = {}) {
+function wrapWebContentsForRuntimeEvents(
+  realWebContents,
+  streamRecord,
+  { conversationStore = null, emitRuntimeEvent = null } = {},
+) {
   const appendTextSegment = (type, content) => {
     if (!content) return;
     const segments = streamRecord.segments;
@@ -285,6 +289,21 @@ function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conver
   };
   streamRecord.persist = persistStreamRecord;
 
+  const emitStreamRuntimeEvent = (event) => {
+    if (typeof emitRuntimeEvent !== 'function') return null;
+    try {
+      return emitRuntimeEvent({
+        ...event,
+        sessionId: streamRecord.conversationId || streamRecord.streamId,
+        streamId: streamRecord.streamId,
+        conversationId: streamRecord.conversationId || undefined,
+      });
+    } catch (error) {
+      console.warn('[llm-chat] runtime event emission failed:', error?.message || error);
+      return null;
+    }
+  };
+
   return {
     send(channel, payload) {
       // 终态守卫：一旦本轮已发出终态（done/error/aborted，含复读兜底自动 error），
@@ -296,6 +315,7 @@ function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conver
         return false;
       }
       if (channel === 'chat:stream:delta' && typeof payload?.content === 'string') {
+        emitStreamRuntimeEvent({ type: 'message.delta', content: payload.content });
         streamRecord.accumulatedText += payload.content;
         appendTextSegment('text', payload.content);
         persistStreamRecord();
@@ -327,6 +347,7 @@ function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conver
           return realWebContents.send('chat:stream:error', errorPayload);
         }
       } else if (channel === 'chat:stream:thinking' && typeof payload?.content === 'string') {
+        emitStreamRuntimeEvent({ type: 'reasoning.delta', content: payload.content });
         streamRecord.accumulatedThinking += payload.content;
         appendTextSegment('thinking', payload.content);
         persistStreamRecord();
@@ -370,11 +391,34 @@ function wrapWebContentsForRuntimeEvents(realWebContents, streamRecord, { conver
         streamRecord.interrupted = erroredTerminal;
         if (payload?.usage) streamRecord.finalUsage = payload.usage;
         if (payload?.lifetimeUsage) streamRecord.lifetimeUsage = payload.lifetimeUsage;
+        if (erroredTerminal) {
+          emitStreamRuntimeEvent({
+            type: 'runtime.error',
+            code: typeof payload?.error === 'string' ? payload.error : 'stream_error',
+            message: typeof payload?.message === 'string' ? payload.message : undefined,
+            details: payload,
+          });
+        } else {
+          emitStreamRuntimeEvent({
+            type: 'message.completed',
+            content: streamRecord.accumulatedText || undefined,
+            usage: payload?.usage,
+            lifetimeUsage: payload?.lifetimeUsage,
+            finishReason: typeof payload?.finishReason === 'string' ? payload.finishReason : undefined,
+          });
+        }
         persistStreamRecord({ final: true, interrupted: erroredTerminal });
       } else if (channel === 'chat:stream:aborted') {
         streamRecord.terminalEventSent = true;
         streamRecord.terminalStatus = 'aborted';
         streamRecord.interrupted = true;
+        emitStreamRuntimeEvent({
+          type: 'runtime.error',
+          code: 'stream_aborted',
+          message: 'Stream aborted.',
+          recoverable: true,
+          details: payload,
+        });
         persistStreamRecord({ final: true, interrupted: true });
       }
       return realWebContents.send(channel, payload);
@@ -406,6 +450,7 @@ function getConversationToolContext({ conversationId = null, workspacePath = nul
 export function createLlmChatService({
   llmConfigStore,
   conversationStore = null,
+  emitRuntimeEvent = null,
   persistCompaction = null,
   promptSnapshotStore = null,
   preferredAccessLevel = 'ask_before_local',
@@ -575,13 +620,27 @@ export function createLlmChatService({
       usageRecorded: false,
       toolCallCount: 0,
       requestedUserInput: false,
+      // 多 provider fallback / 同 provider 重试共享一次 Runtime Pipeline session 事件状态。
+      runtimeEventState: { sessionStarted: true },
       // 终态事件去重:保证 done/error/aborted 三选一恰好发一次,防止压缩等中间阶段抛错后界面悬挂。
       terminalEventSent: false,
     };
     activeStreams.set(streamId, streamRecord);
     emitActiveStreamsChanged();
+    if (typeof emitRuntimeEvent === 'function') {
+      emitRuntimeEvent({
+        type: 'session.started',
+        sessionId: conversationId || streamId,
+        streamId,
+        conversationId: conversationId || undefined,
+        mode,
+      });
+    }
     // 累积代理:拦截 delta/thinking 追加到记录,其余事件透传给真实 webContents。
-    const accumulatingWebContents = wrapWebContentsForRuntimeEvents(webContents, streamRecord, { conversationStore });
+    const accumulatingWebContents = wrapWebContentsForRuntimeEvents(webContents, streamRecord, {
+      conversationStore,
+      emitRuntimeEvent,
+    });
 
     const toolContext = getConversationToolContext({ conversationId, workspacePath: runWorkspacePath });
     // 把本回合的交互模式写入（复用的）会话级 toolContext，供 goal 模式运行时闸门在工具
@@ -689,6 +748,10 @@ export function createLlmChatService({
               goalPlanStore,
               agentProgress,
               resolvedChannel,
+              emitRuntimeEvent,
+              runtimeEventState: streamRecord.runtimeEventState,
+              providerId: provider.id,
+              runtimeMode: mode,
             });
           } else if (resolvedChannel.wire === 'anthropic-messages') {
             await agentLoopAnthropic({
@@ -719,6 +782,10 @@ export function createLlmChatService({
               goalPlanStore,
               onNativeReasoningFallback,
               resolvedChannel,
+              emitRuntimeEvent,
+              runtimeEventState: streamRecord.runtimeEventState,
+              providerId: provider.id,
+              runtimeMode: mode,
             });
           } else if (resolvedChannel.wire === 'gemini') {
             await agentLoopGemini({
@@ -747,6 +814,10 @@ export function createLlmChatService({
               mcpRegistry,
               goalPlanStore,
               resolvedChannel,
+              emitRuntimeEvent,
+              runtimeEventState: streamRecord.runtimeEventState,
+              providerId: provider.id,
+              runtimeMode: mode,
             });
           } else {
             await agentLoopOpenAI({
@@ -779,6 +850,10 @@ export function createLlmChatService({
               authMethod: credential.authMethod,
               accountId: credential.accountId,
               resolvedChannel,
+              emitRuntimeEvent,
+              runtimeEventState: streamRecord.runtimeEventState,
+              providerId: provider.id,
+              runtimeMode: mode,
             });
           }
         } catch (err) {

@@ -6,9 +6,11 @@ import {
 } from './prompt/index.mjs';
 export {
   buildAnthropicTools,
+  buildAnthropicToolsFromModelProjection,
   buildAnthropicToolsFromRegistry,
   buildAnthropicToolsFromRuntimeProjection,
   buildOpenAITools,
+  buildOpenAIToolsFromModelProjection,
   buildOpenAIToolsFromRegistry,
   buildOpenAIToolsFromRuntimeProjection,
   createDefaultToolRegistry,
