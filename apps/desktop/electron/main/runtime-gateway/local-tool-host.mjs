@@ -1,3 +1,4 @@
+import { createRuntimeSdk } from '@peer-agent/runtime-sdk';
 import { createCapabilityProviderRegistry } from './capability-provider-registry.mjs';
 import { createLocalFileProvider } from './local-file-provider.mjs';
 import { createLocalGoalProvider } from './local-goal-provider.mjs';
@@ -10,7 +11,6 @@ import { createLocalWebProvider } from './local-web-provider.mjs';
 import { createLocalBrowserControlProvider } from './local-browser-control-provider.mjs';
 import { createConfiguredHookRunner } from './hook-config.mjs';
 import { appendHookEvidence } from './hook-evidence.mjs';
-import { mostRestrictiveDecision } from './hook-runner.mjs';
 import { createFailedClientToolResult, createPermissionGrant } from './tool-result-factory.mjs';
 
 export function createLocalToolHost({
@@ -53,110 +53,93 @@ export function createLocalToolHost({
     ],
   });
 
-  async function execute(request, executionContext = {}) {
-    const call = request.call;
-    const session = sessionStore.getSession();
-    const locale = session.locale;
-    const baseHookPayload = {
-      sessionId: request.sessionId,
-      projectionId: request.projectionId,
-      conversationId: request.conversationId,
-      call,
-    };
-
-    const preHookRecords = activeHookRunner?.runPreToolUse
-      ? await activeHookRunner.runPreToolUse(baseHookPayload)
-      : [];
-    const preDecision = mostRestrictiveDecision(preHookRecords);
-
-    if (preDecision === 'deny') {
-      const result = createFailedClientToolResult({
-        call,
-        locale,
-        reason: 'hook_denied',
-        dataLevel: call.dataLevel ?? 'D0_public',
-      });
-      return {
-        call,
-        grant: createPermissionGrant({ toolCallId: call.toolCallId, granted: false, scope: call.capabilityId }),
-        result: appendHookEvidence(result, preHookRecords, preDecision),
-      };
-    }
-
-    if (preDecision === 'ask') {
-      const requestPermission = executionContext.requestPermission;
-      const approval = typeof requestPermission === 'function'
-        ? await requestPermission({
-          tool: call.capabilityId,
-          toolName: call.displayName || call.capabilityId,
-          capabilityId: call.capabilityId,
-          args: call.arguments ?? call.argumentsPreview ?? {},
-          workspacePath: workspaceRoot,
-          reason: preHookRecords.find((record) => record.decision === 'ask')?.reason || 'hook_approval_required',
-          confirmation: {
-            kind: 'hook-approval',
-            reason: 'hook_approval_required',
-            hookEvent: 'PreToolUse',
-          },
-          scope: {
-            kind: 'hook-approval',
-            capabilityId: call.capabilityId,
-          },
-          riskLevel: call.riskLevel ?? 'L3_external_write',
-          dataLevel: call.dataLevel ?? 'D0_public',
-        })
-        : null;
-      if (!approval?.granted) {
-        const result = createFailedClientToolResult({
-          call,
+  const runtime = createRuntimeSdk({
+    workspaceRoot,
+    host: {
+      hookRunner: activeHookRunner,
+      executeProvider: async (request, context) => {
+        const call = request.call;
+        const session = sessionStore.getSession();
+        const locale = session.locale;
+        const execution = await providerRegistry.execute(request, {
+          ...context,
           locale,
-          reason: approval?.reason || 'hook_approval_required',
-          dataLevel: call.dataLevel ?? 'D0_public',
+          session,
+          workspaceRoot,
+          sessionId: request.sessionId,
+          projectionId: request.projectionId,
+          conversationId: request.conversationId,
         });
+        return execution ?? {
+          call,
+          grant: createPermissionGrant({ toolCallId: call.toolCallId, granted: false, scope: call.capabilityId }),
+          result: createFailedClientToolResult({
+            call,
+            locale,
+            reason: 'unsupported_local_capability',
+            dataLevel: call.dataLevel ?? 'D0_public',
+          }),
+        };
+      },
+      approvalPort: {
+        requestApproval: async (approvalRequest, context) => {
+          const call = approvalRequest.call;
+          const requestPermission = context.requestPermission;
+          const approval = typeof requestPermission === 'function'
+            ? await requestPermission({
+              tool: call.capabilityId,
+              toolName: call.displayName || call.capabilityId,
+              capabilityId: call.capabilityId,
+              args: approvalRequest.args,
+              workspacePath: approvalRequest.workspacePath,
+              reason: approvalRequest.reason,
+              confirmation: {
+                kind: 'hook-approval',
+                reason: 'hook_approval_required',
+                hookEvent: 'PreToolUse',
+              },
+              scope: {
+                kind: 'hook-approval',
+                capabilityId: call.capabilityId,
+              },
+              riskLevel: call.riskLevel ?? 'L3_external_write',
+              dataLevel: call.dataLevel ?? 'D0_public',
+            })
+            : null;
+          return {
+            decision: approval?.granted ? 'allow' : approval ? 'deny' : 'ask',
+            approval,
+          };
+        },
+      },
+      createBlockedExecution: ({ request, decision, reason, approval }) => {
+        const call = request.call;
+        const session = sessionStore.getSession();
+        const resolvedApproval = approval?.approval;
+        const failureReason = decision === 'deny' && !resolvedApproval
+          ? 'hook_denied'
+          : resolvedApproval?.reason || reason;
         return {
           call,
-          grant: approval?.grant ?? createPermissionGrant({ toolCallId: call.toolCallId, granted: false, scope: call.capabilityId }),
-          result: appendHookEvidence(result, preHookRecords, preDecision),
+          grant: resolvedApproval?.grant ?? createPermissionGrant({
+            toolCallId: call.toolCallId,
+            granted: false,
+            scope: call.capabilityId,
+          }),
+          result: createFailedClientToolResult({
+            call,
+            locale: session.locale,
+            reason: failureReason,
+            dataLevel: call.dataLevel ?? 'D0_public',
+          }),
         };
-      }
-    }
+      },
+      appendHookEvidence,
+    },
+  });
 
-    const execution = await providerRegistry.execute(request, {
-      ...executionContext,
-      locale,
-      session,
-      workspaceRoot,
-      sessionId: request.sessionId,
-      projectionId: request.projectionId,
-      conversationId: request.conversationId,
-    });
-
-    const resolvedExecution = execution ?? {
-      call,
-      grant: createPermissionGrant({ toolCallId: call.toolCallId, granted: false, scope: call.capabilityId }),
-      result: createFailedClientToolResult({
-        call,
-        locale,
-        reason: 'unsupported_local_capability',
-        dataLevel: call.dataLevel ?? 'D0_public',
-      }),
-    };
-
-    const postHookRecords = activeHookRunner?.runPostToolUse
-      ? await activeHookRunner.runPostToolUse({
-          ...baseHookPayload,
-          result: resolvedExecution.result,
-        })
-      : [];
-
-    return {
-      ...resolvedExecution,
-      result: appendHookEvidence(
-        resolvedExecution.result,
-        [...preHookRecords, ...postHookRecords],
-        mostRestrictiveDecision(preHookRecords),
-      ),
-    };
+  async function execute(request, executionContext = {}) {
+    return runtime.execute(request, { ...executionContext, workspaceRoot });
   }
 
   return {

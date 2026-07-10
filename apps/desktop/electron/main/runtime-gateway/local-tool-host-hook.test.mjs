@@ -111,6 +111,35 @@ test('PreToolUse ask enters permission flow and executes after approval', async 
   assert.deepEqual(execution.result.evidence.hooks.map((hook) => hook.id), ['ask', 'post']);
 });
 
+test('PreToolUse ask keeps denied approval fail-closed', async () => {
+  const calls = { count: 0 };
+  const deniedGrant = createPermissionGrant({ toolCallId: 'tool-call-1', granted: false, scope: 'test.echo' });
+  const host = createLocalToolHost({
+    sessionStore: createSessionStore(),
+    workspaceRoot: process.cwd(),
+    userDataPath: process.cwd(),
+    providers: [createEchoProvider({ calls })],
+    hookRunner: {
+      runPreToolUse: async () => [{ id: 'ask', event: 'PreToolUse', decision: 'ask', reason: 'needs approval', outcome: 'ok', durationMs: 1 }],
+      runPostToolUse: async () => [{ id: 'post', event: 'PostToolUse', decision: 'allow', outcome: 'ok', durationMs: 1 }],
+    },
+  });
+
+  const execution = await host.execute(createRequest(), {
+    requestPermission: async () => ({
+      granted: false,
+      grant: deniedGrant,
+      reason: 'local_user_denied',
+    }),
+  });
+
+  assert.equal(calls.count, 0);
+  assert.equal(execution.grant, deniedGrant);
+  assert.equal(execution.result.status, 'failed');
+  assert.equal(execution.result.outputPreview.reason, 'local_user_denied');
+  assert.equal(execution.result.evidence.hookFinalDecision, 'ask');
+});
+
 test('PreToolUse ask fails closed when approval is unavailable', async () => {
   const calls = { count: 0 };
   const host = createLocalToolHost({
