@@ -76,18 +76,15 @@
   gap: var(--space-6);
 }
 
-.chat-thread.chat-thread-has-context {
-  padding-top: calc(52px + 48px);
-}
-
 .current-turn-context {
-  position: absolute;
+  position: sticky;
   top: calc(52px + var(--space-2));
-  left: var(--space-6);
-  right: var(--space-6);
   z-index: 24;
-  max-width: var(--chat-content-max);
-  margin: 0 auto;
+  box-sizing: border-box;
+  width: min(calc(100% + 32px), calc(var(--chat-content-max) + 32px));
+  max-width: none;
+  margin: 0;
+  align-self: center;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -98,12 +95,13 @@
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--chrome-canvas) 90%, transparent),
-      color-mix(in srgb, var(--chrome-canvas) 74%, transparent)
+      color-mix(in srgb, var(--chrome-canvas) 68%, transparent),
+      color-mix(in srgb, var(--chrome-canvas) 56%, transparent)
     );
   box-shadow:
     0 12px 28px color-mix(in srgb, var(--chrome-canvas) 50%, transparent),
     0 1px 0 color-mix(in srgb, var(--ink-hairline) 40%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(1.12);
   backdrop-filter: blur(20px) saturate(1.12);
   pointer-events: none;
 }
@@ -1581,10 +1579,17 @@
   display: flex;
   flex-direction: column;
   padding: var(--space-2);
-  background: var(--paper-sheet);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--chrome-canvas) 68%, transparent),
+      color-mix(in srgb, var(--chrome-canvas) 56%, transparent)
+    );
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--radius-md);
   box-shadow: 0 12px 30px rgba(16, 24, 40, 0.14);
+  -webkit-backdrop-filter: blur(20px) saturate(1.12);
+  backdrop-filter: blur(20px) saturate(1.12);
   opacity: 0;
   transform: translate(8px, -50%);
   pointer-events: none;

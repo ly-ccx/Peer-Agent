@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { parseInteractionToolViewFromCandidates } from '../../state/interactionToolView';
-import { groupSegments } from '../../state/streamSegments';
+import { groupSegments, splitFinalTextGroup } from '../../state/streamSegments';
 import { formatDuration } from '../../state/format';
 import type {
   ContentSegment,
@@ -51,22 +51,15 @@ export function ToolProgressInline({ progress, isZh }: { readonly progress: Tool
 }
 
 function useAutoCollapsingExpanded(isActive: boolean) {
-  // 默认折叠：思考进行中也不自动展开，只显示折叠头部（“正在思考”+ 光扫）。
-  // 用户手动点击后才展开/收起；一旦手动切换过，就完全交给用户控制。
-  const [expanded, setExpanded] = useState(false);
-  const manuallyToggledRef = useRef(false);
-  const wasActiveRef = useRef(isActive);
+  // 流式输出和工具调度期间保持展开，让用户持续看到正在发生什么；
+  // 整条回复最终完成后再自动折叠。已完成的历史消息首次渲染时保持折叠。
+  const [expanded, setExpanded] = useState(isActive);
 
   useEffect(() => {
-    // active 结束时，如果用户没手动展开过，确保回到折叠态。
-    if (!isActive && wasActiveRef.current && !manuallyToggledRef.current) {
-      setExpanded(false);
-    }
-    wasActiveRef.current = isActive;
+    setExpanded(isActive);
   }, [isActive]);
 
   const toggleExpanded = () => {
-    manuallyToggledRef.current = true;
     setExpanded((current) => !current);
   };
 
@@ -115,19 +108,19 @@ export function AssistantContent({ segments, content, isStreaming, toolProgress,
 
   const groups = groupSegments(segments);
   const processingSummary = buildProcessingSummary(groups, durationMs, isZh);
-  const processingGroups = groups.filter(isProcessingGroup);
-  const firstProcessingIndex = groups.findIndex(isProcessingGroup);
+  const hasProcessingGroups = groups.some(isProcessingGroup);
+  const completedSplit = isStreaming ? undefined : splitFinalTextGroup(groups);
+  // 流式期间完整展示原始时间线；完成后只把最后正文留在折叠区外。
+  const timelineGroups = completedSplit?.historyGroups ?? groups;
+  const finalTextGroup = completedSplit?.finalTextGroup;
   // 交互卡（request_user_input）需要用户点击，单独抽出、始终渲染在折叠面板外。
   const interactionCalls = groups.flatMap((group) =>
     group.type === 'tool-call-group'
       ? group.calls.filter((tc) => parseToolCallInteractionView(tc))
       : [],
   );
-  // 只要整条消息仍在流式生成且存在思考/工具组，就保持“活跃”态。
-  // 不再依据末尾组的类型逐组判定——流式期间末尾段会在 thinking / tool-call / 正文 text
-  // 之间反复切换，逐组判定会让活跃态不断翻转，导致折叠面板“一会展开一会关闭”地跳动。
-  // 流结束后（isStreaming=false）活跃态一次性变为 false，自动折叠，保留原有交互意图。
-  const processingIsActive = isStreaming && processingGroups.length > 0;
+  // 活跃态只跟随整条回复的流式生命周期，避免中间段类型切换造成展开/折叠抖动。
+  const processingIsActive = isStreaming && hasProcessingGroups;
   const lastGroup = groups[groups.length - 1];
   // 流式期间始终保留一个“还在运行”的指示，避免工具执行间隙/文本结束等待下一步时
   // 光标消失造成“卡住”的错觉。仅当末尾组本身已有 active 视觉（工具执行中的工具组、
@@ -141,27 +134,22 @@ export function AssistantContent({ segments, content, isStreaming, toolProgress,
 
   return (
     <div className="assistant-segments">
-      {groups.map((group, i) => {
-        if (group.type === 'text') {
-          const afterTools = i > 0 && groups[i - 1].type === 'tool-call-group';
-          return (
-            <div key={i} className={afterTools ? 'segment-text-after-tools' : undefined}>
-              <MarkdownMessage content={group.content} />
-            </div>
-          );
-        }
-        if (i !== firstProcessingIndex) return null;
-        return (
-          <ProcessingDetailsSection
-            key="processing-details"
-            groups={processingGroups}
-            isActive={processingIsActive}
-            label={processingSummary}
-            isZh={isZh}
-          />
-        );
-      })}
-      {/* 交互卡（request_user_input）始终渲染在折叠面板之外，默认折叠时也能看到并点击选项。 */}
+      {hasProcessingGroups && timelineGroups.length > 0 ? (
+        <ProcessingDetailsSection
+          groups={timelineGroups}
+          isActive={processingIsActive}
+          label={processingSummary}
+          isZh={isZh}
+        />
+      ) : null}
+      {finalTextGroup ? (
+        <div className="segment-text-after-tools">
+          <MarkdownMessage content={finalTextGroup.content} />
+        </div>
+      ) : !hasProcessingGroups ? (
+        <TimelineGroups groups={groups} isZh={isZh} />
+      ) : null}
+      {/* 交互卡（request_user_input）始终渲染在折叠面板之外，折叠历史过程时也能看到并点击选项。 */}
       {interactionCalls.map((tc, idx) => (
         <ToolCallCard key={`interaction-${idx}`} tc={tc} isZh={isZh} />
       ))}
@@ -178,7 +166,7 @@ function isProcessingGroup(group: SegmentGroup): group is ProcessingGroup {
 }
 
 function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZh }: {
-  readonly groups: ProcessingGroup[];
+  readonly groups: SegmentGroup[];
   readonly isActive: boolean;
   readonly label: string;
   readonly isZh: boolean;
@@ -198,25 +186,38 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
       </button>
       {expanded ? (
         <div className="thinking-body">
-          {groups.map((group, groupIndex) => {
-            if (group.type === 'thinking') {
-              return (
-                <div key={`thinking-${groupIndex}`} className="thinking-text">
-                  <MarkdownMessage content={neutralizeToolCallSyntaxForDisplay(group.content)} />
-                </div>
-              );
-            }
-            return group.calls.map((tc, callIndex) => {
-              // 交互卡（request_user_input）需要用户点击操作，始终在折叠面板外渲染，
-              // 折叠体内跳过它，避免默认折叠时被藏起来看不见。
-              if (parseToolCallInteractionView(tc)) return null;
-              return <ToolCallCard key={`tool-${groupIndex}-${callIndex}`} tc={tc} isZh={isZh} />;
-            });
-          })}
+          <TimelineGroups groups={groups} isZh={isZh} />
         </div>
       ) : null}
     </div>
   );
+}
+
+function TimelineGroups({ groups, isZh }: {
+  readonly groups: SegmentGroup[];
+  readonly isZh: boolean;
+}) {
+  return groups.map((group, groupIndex) => {
+    if (group.type === 'thinking') {
+      return (
+        <div key={`thinking-${groupIndex}`} className="thinking-text">
+          <MarkdownMessage content={neutralizeToolCallSyntaxForDisplay(group.content)} />
+        </div>
+      );
+    }
+    if (group.type === 'text') {
+      return (
+        <div key={`text-${groupIndex}`} className="segment-text-after-tools">
+          <MarkdownMessage content={group.content} />
+        </div>
+      );
+    }
+    return group.calls.map((tc, callIndex) => {
+      // 交互卡需要用户点击，始终在折叠面板外渲染；时间线内跳过以免重复。
+      if (parseToolCallInteractionView(tc)) return null;
+      return <ToolCallCard key={`tool-${groupIndex}-${callIndex}`} tc={tc} isZh={isZh} />;
+    });
+  });
 }
 
 function parseToolCallInteractionView(tc: ToolCallLegacy) {

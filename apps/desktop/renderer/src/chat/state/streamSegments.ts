@@ -200,34 +200,7 @@ export function isEmptyAssistantPlaceholder(message: Pick<ChatMsg, 'role' | 'con
   );
 }
 
-function hoistThinkingWithinTextRuns(groups: SegmentGroup[]): SegmentGroup[] {
-  const result: SegmentGroup[] = [];
-  let run: SegmentGroup[] = [];
-
-  const flushRun = () => {
-    if (!run.length) return;
-    const thinkingContent = run
-      .filter((group): group is Extract<SegmentGroup, { type: 'thinking' }> => group.type === 'thinking')
-      .map((group) => group.content)
-      .join('');
-    if (thinkingContent) result.push({ type: 'thinking', content: thinkingContent });
-    result.push(...run.filter((group) => group.type !== 'thinking'));
-    run = [];
-  };
-
-  for (const group of groups) {
-    if (group.type === 'tool-call-group') {
-      flushRun();
-      result.push(group);
-      continue;
-    }
-    run.push(group);
-  }
-  flushRun();
-  return result;
-}
-
-/** 把扁平分段聚合成渲染分组：tool-call 作为硬边界，thinking 只在同一文本阶段内前置。 */
+/** 把扁平分段聚合成渲染分组，严格保留 thinking / text / tool-call 的原始时间顺序。 */
 export function groupSegments(segments: ContentSegment[]): SegmentGroup[] {
   const groups: SegmentGroup[] = [];
   for (const seg of segments) {
@@ -250,7 +223,25 @@ export function groupSegments(segments: ContentSegment[]): SegmentGroup[] {
     }
   }
 
-  return hoistThinkingWithinTextRuns(groups);
+  return groups;
+}
+
+/**
+ * 把已完成回复拆成「历史过程 + 最终正文」。
+ * 仅当时间线最后一组是非空正文时才将它留在折叠区外；其余组严格保持原顺序进入历史区。
+ */
+export function splitFinalTextGroup(groups: SegmentGroup[]): {
+  historyGroups: SegmentGroup[];
+  finalTextGroup?: Extract<SegmentGroup, { type: 'text' }>;
+} {
+  const last = groups[groups.length - 1];
+  if (!last || last.type !== 'text' || !last.content.trim()) {
+    return { historyGroups: groups };
+  }
+  return {
+    historyGroups: groups.slice(0, -1),
+    finalTextGroup: last,
+  };
 }
 
 /** 仅提取 text 分段并拼接（不含 fallback 语义）。 */

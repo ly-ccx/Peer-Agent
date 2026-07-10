@@ -325,10 +325,12 @@ describe('llm chat service tool materialization', () => {
       { role: 'assistant', content: 'real answer' },
     ]);
 
-    assert.deepEqual(messages.map((m) => m.role), ['system', 'user', 'user', 'assistant', 'assistant']);
+    assert.deepEqual(messages.map((m) => m.role), ['system', 'user', 'user', 'assistant', 'tool', 'assistant']);
     assert.equal(messages.some((m) => m.role === 'assistant' && m.content === ''), false);
     assert.equal(Array.isArray(messages[2].content), true);
     assert.equal(messages[3].tool_calls[0].id, 't1');
+    assert.equal(messages[4].tool_call_id, 't1');
+    assert.match(messages[4].content, /tool call did not complete/);
   });
 
   it('normalizes OpenAI and Anthropic multimodal user messages', async () => {

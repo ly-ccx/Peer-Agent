@@ -7,6 +7,7 @@ import {
   contentFromSegments,
   isEmptyAssistantPlaceholder,
   groupSegments,
+  splitFinalTextGroup,
   getTextContent,
   migrateToSegments,
   parseSerializedToolSegments,
@@ -133,13 +134,13 @@ describe('groupSegments', () => {
     assert.equal((groups[1] as { calls: unknown[] }).calls.length, 2);
     assert.deepEqual(groups[2], { type: 'text', content: 'done' });
   });
-  it('hoists late thinking before visible text so reasoning never appears after the answer', () => {
+  it('keeps thinking and visible text in their original timeline order', () => {
     const groups = groupSegments([txt('请选择方案 A/B/C'), think('内部分析')]);
 
-    assert.deepEqual(groups[0], { type: 'thinking', content: '内部分析' });
-    assert.deepEqual(groups[1], { type: 'text', content: '请选择方案 A/B/C' });
+    assert.deepEqual(groups[0], { type: 'text', content: '请选择方案 A/B/C' });
+    assert.deepEqual(groups[1], { type: 'thinking', content: '内部分析' });
   });
-  it('preserves tool-call phase boundaries when hoisting split thinking blocks', () => {
+  it('preserves the full thinking / text / tool-call sequence without reordering', () => {
     const groups = groupSegments([tool('first'), think('a'), tool('second'), txt('done'), think('b')]);
 
     assert.equal(groups.length, 5);
@@ -148,8 +149,8 @@ describe('groupSegments', () => {
     assert.deepEqual(groups[1], { type: 'thinking', content: 'a' });
     assert.equal(groups[2].type, 'tool-call-group');
     assert.equal((groups[2] as { calls: Array<{ tool: string }> }).calls[0].tool, 'second');
-    assert.deepEqual(groups[3], { type: 'thinking', content: 'b' });
-    assert.deepEqual(groups[4], { type: 'text', content: 'done' });
+    assert.deepEqual(groups[3], { type: 'text', content: 'done' });
+    assert.deepEqual(groups[4], { type: 'thinking', content: 'b' });
   });
   it('does not merge thinking blocks across tool-call groups', () => {
     const groups = groupSegments([
@@ -183,6 +184,28 @@ describe('groupSegments', () => {
     assert.equal(groups[0].type, 'tool-call-group');
     const call = (groups[0] as { calls: Array<{ toolCallId?: string }> }).calls[0];
     assert.equal(call.toolCallId, 'tool_call_empty_args');
+  });
+});
+
+describe('splitFinalTextGroup', () => {
+  it('keeps only the final text outside and preserves all earlier groups in timeline order', () => {
+    const groups = groupSegments([think('thinking-1'), txt('正文-1'), think('thinking-2'), txt('正文-2')]);
+    const split = splitFinalTextGroup(groups);
+
+    assert.deepEqual(split.historyGroups, [
+      { type: 'thinking', content: 'thinking-1' },
+      { type: 'text', content: '正文-1' },
+      { type: 'thinking', content: 'thinking-2' },
+    ]);
+    assert.deepEqual(split.finalTextGroup, { type: 'text', content: '正文-2' });
+  });
+
+  it('keeps the whole timeline in history when there is no final text', () => {
+    const groups = groupSegments([think('thinking'), tool('bash')]);
+    const split = splitFinalTextGroup(groups);
+
+    assert.equal(split.historyGroups, groups);
+    assert.equal(split.finalTextGroup, undefined);
   });
 });
 

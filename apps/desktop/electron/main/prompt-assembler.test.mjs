@@ -53,17 +53,24 @@ describe('System Context assembly', () => {
     });
 
     assert.equal(context.version, 1);
-    assert.deepEqual(context.sections.map((section) => section.id), ['core.identity', 'agent.brainstorming', 'runtime.workspace', 'runtime.provider']);
+    assert.deepEqual(context.sections.map((section) => section.id), [
+      'core.identity',
+      'agent.brainstorming',
+      'agent.mcp-host',
+      'runtime.workspace',
+      'runtime.provider',
+    ]);
     assert.equal(context.sections[0].layer, 'L0_CORE');
     assert.equal(context.sections[1].layer, 'L1_AGENT');
-    assert.equal(context.sections[2].layer, 'L2_RUNTIME');
+    assert.equal(context.sections[2].layer, 'L1_AGENT');
+    assert.equal(context.sections[3].layer, 'L2_RUNTIME');
     assert.match(context.sections[0].checksum, /^[a-f0-9]{64}$/);
     assert.match(context.snapshot.renderedHash, /^[a-f0-9]{64}$/);
     assert.equal(context.snapshot.conversationId, 'c1');
     assert.equal(context.snapshot.workspacePath, '/tmp/workspace');
     assert.equal(context.snapshot.provider, 'openai');
     assert.equal(context.snapshot.model, 'test-model');
-    assert.equal(context.snapshot.sectionRefs.length, 4);
+    assert.equal(context.snapshot.sectionRefs.length, 5);
     assert.match(renderSystemContext(context), /Evidence discipline/);
     assert.match(renderSystemContext(context), /Current workspace: \/tmp\/workspace/);
     assert.match(renderSystemContext(context), /Provider family: OpenAI-compatible chat/);
@@ -110,6 +117,7 @@ describe('System Context assembly', () => {
     assert.deepEqual(context.sections.map((section) => section.id), [
       'core.identity',
       'agent.brainstorming',
+      'agent.mcp-host',
       'runtime.workspace',
       'runtime.attachments',
     ]);
@@ -121,9 +129,9 @@ describe('System Context assembly', () => {
     assert.match(rendered, /user_text_part/);
     assert.doesNotMatch(rendered, /SHOULD_NOT_BE_IN_SYSTEM_PROMPT/);
     assert.doesNotMatch(rendered, /data:image\/png/);
-    assert.equal(context.snapshot.sectionRefs[3].source.attachmentCount, 2);
-    assert.equal(context.snapshot.sectionRefs[3].source.attachments[0].name, 'screen.png');
-    assert.equal(context.snapshot.sectionRefs[3].source.attachments[1].contentIncluded, true);
+    assert.equal(context.snapshot.sectionRefs[4].source.attachmentCount, 2);
+    assert.equal(context.snapshot.sectionRefs[4].source.attachments[0].name, 'screen.png');
+    assert.equal(context.snapshot.sectionRefs[4].source.attachments[1].contentIncluded, true);
   });
 
   it('renders first-class context attachments through the attachment source', () => {
@@ -245,6 +253,7 @@ describe('System Context assembly', () => {
     assert.deepEqual(context.sections.map((section) => section.id), [
       'core.identity',
       'agent.brainstorming',
+      'agent.mcp-host',
       'runtime.workspace',
       'runtime.continuity',
     ]);
@@ -252,8 +261,8 @@ describe('System Context assembly', () => {
     assert.match(rendered, /Continuity context from previous compaction/);
     assert.match(rendered, /not fresh evidence/);
     assert.match(rendered, /finish architecture governance/);
-    assert.equal(context.snapshot.sectionRefs[3].source.summaryCount, 1);
-    assert.equal(context.snapshot.sectionRefs[3].source.summaries[0].method, 'llm');
+    assert.equal(context.snapshot.sectionRefs[4].source.summaryCount, 1);
+    assert.equal(context.snapshot.sectionRefs[4].source.summaries[0].method, 'llm');
   });
 
   it('renders provider/model selection as runtime context instead of provider wire formatting', () => {
@@ -353,15 +362,16 @@ describe('System Context assembly', () => {
     assert.deepEqual(context.sections.map((section) => section.id), [
       'core.identity',
       'agent.brainstorming',
+      'agent.mcp-host',
       'runtime.workspace',
       'project.instructions.agents.md',
     ]);
-    assert.equal(context.sections[3].layer, 'L3_INSTRUCTIONS');
-    assert.equal(context.sections[3].trust, 'workspace');
-    assert.match(context.sections[3].content, /Project instructions from AGENTS\.md/);
-    assert.match(context.sections[3].content, /Follow repository-specific engineering rules/);
-    assert.equal(context.snapshot.sectionRefs[3].source.kind, 'workspace-file');
-    assert.equal(context.snapshot.sectionRefs[3].source.filename, 'AGENTS.md');
+    assert.equal(context.sections[4].layer, 'L3_INSTRUCTIONS');
+    assert.equal(context.sections[4].trust, 'workspace');
+    assert.match(context.sections[4].content, /Project instructions from AGENTS\.md/);
+    assert.match(context.sections[4].content, /Follow repository-specific engineering rules/);
+    assert.equal(context.snapshot.sectionRefs[4].source.kind, 'workspace-file');
+    assert.equal(context.snapshot.sectionRefs[4].source.filename, 'AGENTS.md');
   }));
 
   it('keeps project instructions after core evidence discipline even when they contain conflicting text', () => withTempWorkspace((workspacePath) => {

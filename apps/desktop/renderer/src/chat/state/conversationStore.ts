@@ -26,7 +26,7 @@
 import type { ClientToolCall } from '@peer-agent/protocol';
 
 import type { ChatMode } from './preferences';
-import { IDLE_COMPACTION_STATE } from './types';
+import { IDLE_COMPACTION_STATE } from './types.ts';
 import type {
   ChatMsg,
   CompactionState,
