@@ -66,7 +66,8 @@ export function createNodeRuntimeHostAdapter(
     approvalPort: {
       requestApproval: async (approvalRequest, context): Promise<RuntimeSdkApprovalDecision> => {
         const call = approvalRequest.call;
-        const requestPermission = (context as NodeRuntimeExecutionContext).requestPermission;
+        const requestPermission = (context as NodeRuntimeExecutionContext).requestPermission
+          ?? options.requestPermission;
         const approval: NodeRuntimePermissionResponse | null = typeof requestPermission === 'function'
           ? await requestPermission({
               tool: call.capabilityId,

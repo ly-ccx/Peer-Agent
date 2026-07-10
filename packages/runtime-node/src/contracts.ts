@@ -21,7 +21,7 @@ export interface NodeRuntimePermissionResponse {
   readonly [key: string]: unknown;
 }
 
-export interface NodeRuntimePermissionPrompt {
+export interface NodeRuntimeHookPermissionPrompt {
   readonly tool: string;
   readonly toolName: string;
   readonly capabilityId: string;
@@ -40,6 +40,32 @@ export interface NodeRuntimePermissionPrompt {
   readonly riskLevel: unknown;
   readonly dataLevel: unknown;
 }
+
+export interface NodeRuntimeCapabilityPermissionPrompt {
+  readonly tool: string;
+  readonly toolName: string;
+  readonly capabilityId: string;
+  readonly args: unknown;
+  readonly workspacePath: string;
+  readonly reason: string;
+  readonly confirmation: {
+    readonly kind: 'capability-approval';
+    readonly approvalKind: 'file-write' | 'shell-exec';
+    readonly reason: string;
+  };
+  readonly scope: {
+    readonly kind: 'capability-approval';
+    readonly capabilityId: string;
+    readonly workspaceRoot: string;
+  };
+  readonly riskLevel: string;
+  readonly dataLevel: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export type NodeRuntimePermissionPrompt =
+  | NodeRuntimeHookPermissionPrompt
+  | NodeRuntimeCapabilityPermissionPrompt;
 
 export interface NodeRuntimeExecutionContext extends RuntimeSdkExecutionContext {
   readonly requestPermission?: (
@@ -82,6 +108,7 @@ export interface CreateNodeRuntimeHostAdapterOptions {
     getSession(): NodeRuntimeSession;
   };
   readonly resultFactory: NodeRuntimeResultFactory;
+  readonly requestPermission?: NodeRuntimeExecutionContext['requestPermission'];
   readonly hookRunner?: RuntimeSdkHookRunner | null;
   readonly appendHookEvidence?: (
     result: RuntimeSdkToolResult,

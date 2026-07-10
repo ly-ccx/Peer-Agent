@@ -135,6 +135,9 @@ importers:
 
   packages/runtime-node:
     dependencies:
+      '@peer-agent/runtime-core':
+        specifier: workspace:*
+        version: link:../runtime-core
       '@peer-agent/runtime-sdk':
         specifier: workspace:*
         version: link:../runtime-sdk

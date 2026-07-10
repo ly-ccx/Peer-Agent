@@ -120,7 +120,10 @@ test('translates hook approval and preserves denied approval output', async () =
 
   assert.equal(prompt?.toolName, 'Test Tool');
   assert.equal(prompt?.workspacePath, '/workspace');
-  assert.equal(prompt?.confirmation.hookEvent, 'PreToolUse');
+  assert.equal(prompt?.confirmation.kind, 'hook-approval');
+  if (prompt?.confirmation.kind === 'hook-approval') {
+    assert.equal(prompt.confirmation.hookEvent, 'PreToolUse');
+  }
   assert.equal(prompt?.riskLevel, 'L2_local_write');
   assert.equal(decision.decision, 'deny');
   assert.equal(blocked.grant, deniedGrant);
