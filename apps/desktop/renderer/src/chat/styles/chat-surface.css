@@ -77,32 +77,33 @@
 }
 
 .current-turn-context {
-  position: sticky;
-  top: calc(52px + var(--space-2));
+  position: absolute;
+  top: 52px;
+  left: 0;
+  right: 0;
   z-index: 24;
   box-sizing: border-box;
-  width: min(calc(100% + 32px), calc(var(--chat-content-max) + 32px));
+  width: 100%;
   max-width: none;
-  margin: 0;
-  align-self: center;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 34px;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid color-mix(in srgb, var(--ink-hairline) 55%, transparent);
-  border-radius: var(--ui-radius-panel, var(--radius-md));
+  min-height: 42px;
+  padding: var(--space-2) var(--space-6);
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink-hairline) 58%, transparent);
+  border-radius: 0 0 var(--ui-radius-panel, var(--radius-md)) var(--ui-radius-panel, var(--radius-md));
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--chrome-canvas) 68%, transparent),
-      color-mix(in srgb, var(--chrome-canvas) 56%, transparent)
+      color-mix(in srgb, var(--chrome-canvas) 72%, transparent),
+      color-mix(in srgb, var(--chrome-canvas) 54%, transparent)
     );
   box-shadow:
-    0 12px 28px color-mix(in srgb, var(--chrome-canvas) 50%, transparent),
-    0 1px 0 color-mix(in srgb, var(--ink-hairline) 40%, transparent);
-  -webkit-backdrop-filter: blur(20px) saturate(1.12);
-  backdrop-filter: blur(20px) saturate(1.12);
+    0 14px 30px color-mix(in srgb, var(--chrome-canvas) 34%, transparent),
+    0 4px 12px color-mix(in srgb, var(--ink-base) 7%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(1.18);
+  backdrop-filter: blur(24px) saturate(1.18);
   pointer-events: none;
 }
 

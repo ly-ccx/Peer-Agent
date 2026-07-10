@@ -1521,13 +1521,13 @@ export function ChatSurface({
           recomputeKey={messages.length}
         />
       ) : null}
+      {currentTurnContext ? (
+        <div className="current-turn-context" aria-label={isZh ? '当前问题' : 'Current question'}>
+          <span className="current-turn-context-label">{isZh ? '当前问题' : 'Current'}</span>
+          <span className="current-turn-context-text">{currentTurnContext}</span>
+        </div>
+      ) : null}
       <div className="chat-thread" ref={threadRef} onScroll={handleThreadScroll}>
-        {currentTurnContext ? (
-          <div className="current-turn-context" aria-label={isZh ? '当前问题' : 'Current question'}>
-            <span className="current-turn-context-label">{isZh ? '当前问题' : 'Current'}</span>
-            <span className="current-turn-context-text">{currentTurnContext}</span>
-          </div>
-        ) : null}
         {messages.length === 0 ? (
           <div className="chat-empty-state">
             <p>{isZh ? '输入消息开始对话' : 'Type a message to start'}</p>
