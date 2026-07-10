@@ -1,10 +1,18 @@
+export { RUNTIME_EVENT_PROTOCOL_VERSION } from './contracts.ts';
 export type {
+  RuntimeEventProtocolVersion,
   RuntimeSdk,
   RuntimeSdkApprovalDecision,
   RuntimeSdkApprovalPort,
   RuntimeSdkEvent,
+  RuntimeSdkEventBase,
   RuntimeSdkEventListener,
   RuntimeSdkEventType,
+  RuntimeSdkHookCompletedEvent,
+  RuntimeSdkPermissionRequestedEvent,
+  RuntimeSdkPermissionResolvedEvent,
+  RuntimeSdkToolCompletedEvent,
+  RuntimeSdkToolStartedEvent,
   RuntimeSdkExecuteRequest,
   RuntimeSdkExecutionContext,
   RuntimeSdkHookPayload,

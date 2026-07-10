@@ -1,15 +1,22 @@
 import { mostRestrictiveHookDecision } from '@peer-agent/runtime-core';
 
-import type {
-  RuntimeSdk,
-  RuntimeSdkEvent,
-  RuntimeSdkEventListener,
-  RuntimeSdkExecuteRequest,
-  RuntimeSdkExecutionContext,
-  RuntimeSdkHookRecord,
-  RuntimeSdkOptions,
-  RuntimeSdkProviderExecution,
+import {
+  RUNTIME_EVENT_PROTOCOL_VERSION,
+  type RuntimeSdk,
+  type RuntimeSdkEvent,
+  type RuntimeSdkEventListener,
+  type RuntimeSdkExecuteRequest,
+  type RuntimeSdkExecutionContext,
+  type RuntimeSdkHookRecord,
+  type RuntimeSdkOptions,
+  type RuntimeSdkProviderExecution,
 } from './contracts.ts';
+
+type RuntimeSdkEventInput = RuntimeSdkEvent extends infer Event
+  ? Event extends RuntimeSdkEvent
+    ? Omit<Event, 'protocolVersion' | 'sequence' | 'occurredAt'>
+    : never
+  : never;
 
 function normalizeRecords(records: readonly RuntimeSdkHookRecord[] | null | undefined): readonly RuntimeSdkHookRecord[] {
   return Array.isArray(records) ? records : [];
@@ -27,12 +34,13 @@ export function createRuntimeSdk(options: RuntimeSdkOptions): RuntimeSdk {
   const now = options.now ?? (() => new Date().toISOString());
   let sequence = 0;
 
-  function publish(event: Omit<RuntimeSdkEvent, 'sequence' | 'occurredAt'>): void {
-    const nextEvent: RuntimeSdkEvent = {
+  function publish(event: RuntimeSdkEventInput): void {
+    const nextEvent = {
       ...event,
+      protocolVersion: RUNTIME_EVENT_PROTOCOL_VERSION,
       sequence: ++sequence,
       occurredAt: now(),
-    };
+    } as RuntimeSdkEvent;
     for (const listener of listeners) {
       listener(nextEvent);
     }
@@ -55,6 +63,9 @@ export function createRuntimeSdk(options: RuntimeSdkOptions): RuntimeSdk {
     const eventBase = {
       toolCallId: call.toolCallId,
       capabilityId: call.capabilityId,
+      sessionId: request.sessionId,
+      projectionId: request.projectionId,
+      conversationId: request.conversationId,
     };
     const hookPayload = {
       sessionId: request.sessionId,

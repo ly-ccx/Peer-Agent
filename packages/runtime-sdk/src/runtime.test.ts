@@ -90,8 +90,10 @@ test('runs hooks, provider, evidence and events in the public execution order', 
     'tool.completed',
   ]);
   assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3, 4]);
-  assert.equal(events[1]?.phase, 'PreToolUse');
-  assert.equal(events[2]?.phase, 'PostToolUse');
+  assert.deepEqual(events.map((event) => event.protocolVersion), [1, 1, 1, 1]);
+  assert.equal(events[0]?.sessionId, 'session-1');
+  assert.equal(events[1]?.type === 'hook.completed' ? events[1].phase : undefined, 'PreToolUse');
+  assert.equal(events[2]?.type === 'hook.completed' ? events[2].phase : undefined, 'PostToolUse');
   assert.equal((execution.result.evidence as { hookFinalDecision?: string }).hookFinalDecision, 'allow');
   assert.equal((execution.result.evidence as { hooks?: unknown[] }).hooks?.length, 2);
 });
@@ -122,7 +124,8 @@ test('deny is the most restrictive pre-hook decision and prevents provider execu
   assert.equal(execution.result.reason, 'blocked by policy');
   assert.equal((execution.result.evidence as { hookFinalDecision?: string }).hookFinalDecision, 'deny');
   assert.deepEqual(eventTypes(events), ['tool.started', 'hook.completed', 'tool.completed']);
-  assert.equal(events.at(-1)?.decision, 'deny');
+  const completedEvent = events.at(-1);
+  assert.equal(completedEvent?.type === 'tool.completed' ? completedEvent.decision : undefined, 'deny');
 });
 
 test('ask enters approval flow and runs provider only after allow', async () => {
@@ -160,7 +163,7 @@ test('ask enters approval flow and runs provider only after allow', async () => 
     'hook.completed',
     'tool.completed',
   ]);
-  assert.equal(events[3]?.decision, 'allow');
+  assert.equal(events[3]?.type === 'permission.resolved' ? events[3].decision : undefined, 'allow');
 });
 
 test('ask fails closed when approval is unavailable', async () => {

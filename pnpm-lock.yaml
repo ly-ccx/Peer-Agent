@@ -36,6 +36,9 @@ importers:
       '@peer-agent/runtime-core':
         specifier: workspace:*
         version: link:../../packages/runtime-core
+      '@peer-agent/runtime-node':
+        specifier: workspace:*
+        version: link:../../packages/runtime-node
       '@peer-agent/runtime-sdk':
         specifier: workspace:*
         version: link:../../packages/runtime-sdk
@@ -125,6 +128,16 @@ importers:
         version: 5.9.3
 
   packages/runtime-core:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/runtime-node:
+    dependencies:
+      '@peer-agent/runtime-sdk':
+        specifier: workspace:*
+        version: link:../runtime-sdk
     devDependencies:
       typescript:
         specifier: ^5.9.3

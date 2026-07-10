@@ -1,5 +1,9 @@
 import type { RuntimeDecision } from '@peer-agent/runtime-core';
 
+export const RUNTIME_EVENT_PROTOCOL_VERSION = 1 as const;
+
+export type RuntimeEventProtocolVersion = typeof RUNTIME_EVENT_PROTOCOL_VERSION;
+
 export type RuntimeSdkEventType =
   | 'tool.started'
   | 'hook.completed'
@@ -104,17 +108,50 @@ export interface RuntimeSdkHostAdapter {
   approvalPort?: RuntimeSdkApprovalPort | null;
 }
 
-export interface RuntimeSdkEvent {
+export interface RuntimeSdkEventBase {
+  readonly protocolVersion: RuntimeEventProtocolVersion;
   readonly sequence: number;
-  readonly type: RuntimeSdkEventType;
   readonly occurredAt: string;
   readonly toolCallId: string;
   readonly capabilityId: string;
-  readonly decision?: RuntimeDecision;
-  readonly phase?: 'PreToolUse' | 'PostToolUse';
-  readonly records?: readonly RuntimeSdkHookRecord[];
-  readonly result?: RuntimeSdkToolResult;
+  readonly sessionId?: string;
+  readonly projectionId?: string;
+  readonly conversationId?: string;
 }
+
+export interface RuntimeSdkToolStartedEvent extends RuntimeSdkEventBase {
+  readonly type: 'tool.started';
+}
+
+export interface RuntimeSdkHookCompletedEvent extends RuntimeSdkEventBase {
+  readonly type: 'hook.completed';
+  readonly phase: 'PreToolUse' | 'PostToolUse';
+  readonly decision: RuntimeDecision;
+  readonly records: readonly RuntimeSdkHookRecord[];
+}
+
+export interface RuntimeSdkPermissionRequestedEvent extends RuntimeSdkEventBase {
+  readonly type: 'permission.requested';
+  readonly decision: 'ask';
+}
+
+export interface RuntimeSdkPermissionResolvedEvent extends RuntimeSdkEventBase {
+  readonly type: 'permission.resolved';
+  readonly decision: RuntimeDecision;
+}
+
+export interface RuntimeSdkToolCompletedEvent extends RuntimeSdkEventBase {
+  readonly type: 'tool.completed';
+  readonly decision: RuntimeDecision;
+  readonly result: RuntimeSdkToolResult;
+}
+
+export type RuntimeSdkEvent =
+  | RuntimeSdkToolStartedEvent
+  | RuntimeSdkHookCompletedEvent
+  | RuntimeSdkPermissionRequestedEvent
+  | RuntimeSdkPermissionResolvedEvent
+  | RuntimeSdkToolCompletedEvent;
 
 export type RuntimeSdkEventListener = (event: RuntimeSdkEvent) => void;
 
