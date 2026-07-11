@@ -975,18 +975,25 @@ export function createGoalRunner({
       plan.status === 'completed'
       && plan.runner?.status === 'blocked'
       && plan.runner?.intent === 'verify';
-    if (TERMINAL_PLAN_STATUSES.has(plan.status) && !canResumeVerificationBlock) return null;
-    if (plan.status !== 'completed') goalPlanStore.setPlanStatus(planId, 'executing');
-    goalPlanStore.setRunnerState(planId, {
-      enabled: true,
-      status: 'running',
-      intent: options.intent ?? plan.runner?.intent ?? 'execute',
+    const canResumeFailedRun = plan.status === 'failed';
+    if (TERMINAL_PLAN_STATUSES.has(plan.status) && !canResumeVerificationBlock && !canResumeFailedRun) return null;
+    const runnerPatch = {
+      intent: options.intent ?? (canResumeFailedRun ? 'execute' : plan.runner?.intent) ?? 'execute',
       phase: options.phase ?? (plan.runner?.phase === 'blocked' ? 'repair' : plan.runner?.phase) ?? 'orient',
-      blockerAudit: null,
-      blockedReason: undefined,
-      lastError: undefined,
       updatedAt: now(),
-    });
+    };
+    if (plan.status === 'completed') {
+      goalPlanStore.setRunnerState(planId, {
+        ...runnerPatch,
+        enabled: true,
+        status: 'running',
+        blockerAudit: null,
+        blockedReason: undefined,
+        lastError: undefined,
+      });
+    } else {
+      goalPlanStore.resumeRunner(planId, runnerPatch);
+    }
     appendRunEvent(planId, {
       type: 'goal_resumed',
       summary: 'Goal Runner resumed',

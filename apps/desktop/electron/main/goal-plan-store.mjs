@@ -1691,6 +1691,40 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     return persist({ ...plan, status, updatedAt: new Date().toISOString() });
   }
 
+  /**
+   * 恢复 Goal Runner 执行：一次持久化同时恢复计划与 Runner，避免界面观察到中间态。
+   * 历史 runTrace / problems 保持不变；仅清理当前失败字段。
+   */
+  function resumeRunner(planId, patch = {}) {
+    const plan = getPlan(planId);
+    if (!plan) return null;
+    const now = new Date().toISOString();
+    const current = normalizeRunnerState(plan.runner, planId) || {
+      enabled: false,
+      status: 'idle',
+      turnCount: 0,
+      roundCount: 0,
+      toolCallCount: 0,
+      explorerCount: 0,
+      maxTurns: 8,
+      maxToolCalls: 40,
+      maxExplorers: 3,
+      explorerConcurrency: DEFAULT_EXPLORER_CONCURRENCY,
+      updatedAt: now,
+    };
+    const nextRunner = normalizeRunnerState({
+      ...current,
+      ...patch,
+      enabled: true,
+      status: 'running',
+      blockerAudit: null,
+      blockedReason: undefined,
+      lastError: undefined,
+      updatedAt: patch.updatedAt || now,
+    }, planId);
+    return persist({ ...plan, status: 'executing', runner: nextRunner, updatedAt: now });
+  }
+
   /** 更新 Goal Runner 托管推进状态；不允许借此改写任务状态或 evidence。 */
   function setRunnerState(planId, patch = {}) {
     const plan = getPlan(planId);
@@ -2149,6 +2183,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     revisePlan,
     recordApproval,
     setPlanStatus,
+    resumeRunner,
     setRunnerState,
     appendRunEvent,
     dispatchExplorer,

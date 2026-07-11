@@ -242,6 +242,54 @@ test('resume: writes a goal_resumed event with checkpoint context', async () => 
   assert.equal(got.runner.status, 'idle');
 });
 
+test('resume: restores a stream-failed plan immediately and preserves the failure event', async () => {
+  const plan = createApprovedPlan();
+  let calls = 0;
+  let releaseResumedTurn;
+  const resumedTurn = new Promise((resolve) => {
+    releaseResumedTurn = resolve;
+  });
+  const runtime = {
+    async runGoalTurn() {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          terminalStatus: 'error',
+          failureReason: 'provider stream disconnected',
+        };
+      }
+      await resumedTurn;
+      return { continue: false, intent: 'verify' };
+    },
+  };
+  const runner = createRunner({ runtime });
+
+  await runner.start(plan.planId, { awaitIdle: true });
+
+  const failed = store.getPlan(plan.planId);
+  const failureEvent = failed.runTrace.events.find(
+    (event) => event.type === 'problem_found' && event.payload?.summaryCode === 'stream_failed',
+  );
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.runner.status, 'failed');
+  assert.ok(failureEvent, '流式失败事件应被记录');
+
+  const resumePromise = runner.resume(plan.planId);
+  const resumed = store.getPlan(plan.planId);
+  assert.equal(resumed.status, 'executing', '继续执行时计划应立即恢复为 executing');
+  assert.equal(resumed.runner.status, 'running', '继续执行时 Runner 应立即恢复为 running');
+  assert.equal(resumed.runner.intent, 'execute');
+  assert.equal(resumed.runner.lastError, undefined);
+  assert.ok(
+    resumed.runTrace.events.some((event) => event.eventId === failureEvent.eventId),
+    '恢复执行不应删除历史失败事件',
+  );
+
+  releaseResumedTurn();
+  await resumePromise;
+  await runner.waitForIdle(plan.planId);
+});
+
 test('aborted turn writes network interruption and checkpoint events', async () => {
   const plan = createApprovedPlan();
   const runtime = {
