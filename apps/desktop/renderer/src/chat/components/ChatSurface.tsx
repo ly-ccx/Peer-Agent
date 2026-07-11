@@ -97,6 +97,7 @@ import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
 import { MessageRail, type MessageRailItem } from './thread/MessageRail';
 import { useConversationState } from '../hooks/useConversationState';
+import { scheduleAutomaticCompaction } from '../state/automaticCompaction';
 import { conversationStore, type ConversationRuntimeState } from '../state/conversationStore';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { useStreamingReport } from '../hooks/useStreamingReport';
@@ -573,9 +574,6 @@ export function ChatSurface({
   // 避免手动 /compact 完成后把结果/横幅误作用到已切走的当前会话。
   const conversationIdRef = useRef<string | null>(conversationId);
   conversationIdRef.current = conversationId;
-  // 回合结束自动压缩的防重入闸：压缩进行中置 true，避免 done 抖动/多 loop 收尾重复触发，
-  // 也避免与手动 /compact、下一次发送前检查叠加。压缩 settle 后复位。
-  const autoCompactingRef = useRef(false);
   // 输入框持久化的「上次落盘会话」标记。初值用 undefined 哨兵(区别于真实 id 与 null),
   // 使每次切到新会话的首遍只同步本 ref 并跳过保存,避免把旧会话草稿写到新会话名下。
   const composerPersistConvRef = useRef<string | null | undefined>(undefined);
@@ -775,8 +773,6 @@ export function ChatSurface({
     // 切换会话时清掉权威上下文用量快照，避免上一会话的进度条分子/分母残留到新会话；
     // 新会话由其首个回合结束的 done 重新下发权威快照，在此之前回退到本地估算。
     setAuthoritativeContext(null);
-    // 切会话即放弃上一会话尚未发起的自动压缩意图，避免闸门长期占用导致新会话压缩被吞。
-    autoCompactingRef.current = false;
     // 切换会话时一并清掉本轮计时锚点,避免上一会话的实时跳秒残留到新会话。
     // 打字机缓冲的清空已上移到 useConversationStreamRouter（随前台会话切换自动 reset）。
     setTurnStartedAt(null);
@@ -978,22 +974,8 @@ export function ChatSurface({
   // ② 捕获发起会话并要求完成时仍停留，避免灌进已切走的会话；
   // ③ macrotask defer(setTimeout 0)——排到渲染端 done 收尾的落库
   //    （conversations:replace-messages）之后再压缩，避免迟到的整段覆盖把压缩结果冲掉。
-  const handleCompactionSuggested = useCallback(() => {
-    if (autoCompactingRef.current) return;
-    const compactConversationId = conversationIdRef.current;
-    if (!compactConversationId) return;
-    autoCompactingRef.current = true;
-    setTimeout(() => {
-      void (async () => {
-        try {
-          await runCompaction(compactConversationId);
-        } catch (error) {
-          console.error('[chat] automatic compaction failed:', error);
-        } finally {
-          autoCompactingRef.current = false;
-        }
-      })();
-    }, 0);
+  const handleCompactionSuggested = useCallback((compactConversationId: string) => {
+    scheduleAutomaticCompaction(compactConversationId, runCompaction);
   }, [runCompaction]);
 
   // 应用级单例流路由器（方案 C / 甲-1）：订阅全部 chatStream 事件，按 streamId→conversationId
