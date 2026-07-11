@@ -253,10 +253,32 @@
 .goal-plan-card {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border: 1px solid color-mix(in srgb, var(--ui-border-subtle, var(--za-line)) 48%, transparent);
   border-radius: var(--ui-radius-panel, var(--za-radius));
   background: var(--ui-surface-raised, var(--za-surface-1));
+  box-shadow: var(--shadow-card);
   overflow: hidden;
+  transform: translateY(0);
+  transition:
+    transform 180ms var(--za-ease-standard, ease),
+    box-shadow 180ms var(--za-ease-standard, ease),
+    border-color 180ms var(--za-ease-standard, ease);
+}
+
+.goal-plan-card:hover {
+  border-color: color-mix(in srgb, var(--ui-border-subtle, var(--za-line)) 30%, transparent);
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-2px);
+}
+
+.goal-plan-card:focus-within {
+  border-color: color-mix(in srgb, var(--ui-focus-ring, var(--za-focus)) 52%, transparent);
+  box-shadow: var(--shadow-card-hover), 0 0 0 2px color-mix(in srgb, var(--ui-focus-ring, var(--za-focus)) 30%, transparent);
+}
+
+.goal-plan-card:active {
+  box-shadow: var(--shadow-card-active);
+  transform: translateY(0);
 }
 
 .goal-plan-head {
@@ -1333,6 +1355,13 @@
   .goal-plan-progress-bar--executing::after {
     animation: none;
     display: none;
+  }
+
+  .goal-plan-card,
+  .goal-plan-card:hover,
+  .goal-plan-card:active {
+    transform: none;
+    transition: none;
   }
 
   /* 执行中浮条：关闭横向扫光与呼吸柔光，保留静态外观不出现位移/闪烁。 */

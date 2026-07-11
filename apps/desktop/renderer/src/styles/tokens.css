@@ -125,6 +125,10 @@
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
+  /* 悬浮内容卡片：明显高于页面，仍低于 popover / drag 浮层。 */
+  --shadow-card: 0 1px 2px rgba(26, 29, 33, 0.08), 0 10px 28px rgba(26, 29, 33, 0.10);
+  --shadow-card-hover: 0 2px 4px rgba(26, 29, 33, 0.10), 0 16px 36px rgba(26, 29, 33, 0.14);
+  --shadow-card-active: 0 1px 3px rgba(26, 29, 33, 0.10), 0 8px 22px rgba(26, 29, 33, 0.12);
   --shadow-popover: 0 2px 12px rgba(26, 29, 33, 0.06);
   --shadow-drag: 0 4px 16px rgba(26, 29, 33, 0.10);
 
@@ -354,6 +358,9 @@
   --state-warn: #6B9FCB;
   --state-danger: #AA6E80;
   --state-denied: #8C8AA0;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.30), 0 12px 30px rgba(0, 0, 0, 0.34);
+  --shadow-card-hover: 0 2px 5px rgba(0, 0, 0, 0.34), 0 18px 42px rgba(0, 0, 0, 0.44);
+  --shadow-card-active: 0 1px 3px rgba(0, 0, 0, 0.34), 0 9px 24px rgba(0, 0, 0, 0.38);
   --shadow-popover: 0 2px 12px rgba(0, 0, 0, 0.40);
   --shadow-drag: 0 4px 16px rgba(0, 0, 0, 0.55);
 
