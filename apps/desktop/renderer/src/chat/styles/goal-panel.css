@@ -253,7 +253,7 @@
 .goal-plan-card {
   display: flex;
   flex-direction: column;
-  border: 1px solid color-mix(in srgb, var(--ui-border-subtle, var(--za-line)) 48%, transparent);
+  border: none;
   border-radius: var(--ui-radius-panel, var(--za-radius));
   background: var(--ui-surface-raised, var(--za-surface-1));
   box-shadow: var(--shadow-card);
@@ -261,18 +261,15 @@
   transform: translateY(0);
   transition:
     transform 180ms var(--za-ease-standard, ease),
-    box-shadow 180ms var(--za-ease-standard, ease),
-    border-color 180ms var(--za-ease-standard, ease);
+    box-shadow 180ms var(--za-ease-standard, ease);
 }
 
 .goal-plan-card:hover {
-  border-color: color-mix(in srgb, var(--ui-border-subtle, var(--za-line)) 30%, transparent);
   box-shadow: var(--shadow-card-hover);
   transform: translateY(-2px);
 }
 
 .goal-plan-card:focus-within {
-  border-color: color-mix(in srgb, var(--ui-focus-ring, var(--za-focus)) 52%, transparent);
   box-shadow: var(--shadow-card-hover), 0 0 0 2px color-mix(in srgb, var(--ui-focus-ring, var(--za-focus)) 30%, transparent);
 }
 
@@ -367,9 +364,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 0 14px 14px;
-  border-top: 1px solid var(--ui-border-subtle, var(--za-line));
-  padding-top: 12px;
+  padding: 4px 14px 14px;
 }
 
 .goal-plan-goal {
@@ -674,9 +669,8 @@
   color: var(--za-text);
 }
 
-/* 主卡：当前计划永远置顶展开，给一点强调描边与背景与历史区拉开层级。 */
+/* 主卡：当前计划永远置顶展开，只用表面反差与柔和阴影拉开层级。 */
 .goal-plan-card--main {
-  border-color: var(--ui-border-strong, var(--za-line-strong, var(--za-line)));
   background: var(--za-surface-1);
 }
 .goal-plan-card--main .goal-plan-head-caret {
