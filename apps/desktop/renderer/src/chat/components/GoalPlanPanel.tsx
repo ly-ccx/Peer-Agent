@@ -18,6 +18,7 @@ import { clientApi } from '../../clientApi';
 import { InteractionContext } from './thread/interactionContext';
 import { useGoalPlanApproval } from './goal/useGoalPlanApproval';
 import { getGoalPlanNextStep, goalPlanNextStepCopy } from './goal/goalPlanNextActions';
+import { selectPrimaryGoalPlan, shouldDefaultExpandGoalPlan } from './goal/goalPlanExpansion';
 
 function normalizeConversationId(value: string | number | null | undefined): string | null {
   if (value === null || value === undefined) return null;
@@ -1583,12 +1584,9 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     plans[0] ??
     null;
   const activeProgress = activePlan ? safeProgress(activePlan) : null;
-  // 主卡 = 仅「待批准 / 执行中」的计划才置顶强制展开；没有进行中的计划时为 null，
-  // 此时不再把第一个（可能已完成）计划钉在顶部，全部计划进入下方折叠清单。
-  const mainPlan =
-    plans.find((plan) => plan.status === 'awaiting_approval') ??
-    plans.find((plan) => plan.status === 'executing') ??
-    null;
+  // 主卡优先展示待批准和执行中计划；其他仍需用户处理的活跃计划也置顶展开。
+  // 只有已完成、已取消的历史计划留在下方并默认折叠。
+  const mainPlan = selectPrimaryGoalPlan(plans);
   // 清单计划 = 除主卡外的其余计划，保持原顺序；mainPlan 为 null 时即全部计划。
   const listPlans = mainPlan ? plans.filter((plan) => plan.planId !== mainPlan.planId) : plans;
   // A：折叠态浮条「执行中」时给根节点附加状态 class，驱动边缘流动光效（见 goal-panel.css）。
@@ -1710,7 +1708,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
             <PlanCard
               key={plan.planId}
               plan={plan}
-              defaultExpanded={false}
+              defaultExpanded={shouldDefaultExpandGoalPlan(plan)}
               isZh={isZh}
               isStreaming={isStreaming}
               busy={effectiveBusyPlanId === plan.planId}
