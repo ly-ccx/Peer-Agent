@@ -47,7 +47,7 @@ import { createConversationStore } from './conversation-store.mjs';
 import { createGoalPlanStore, goalPlanIsSelfDriven } from './goal-plan-store.mjs';
 import { decideIntakeConvergence } from './goal-intake-convergence.mjs';
 import { createGoalRunner } from './goal-runner.mjs';
-import { routeGoalMessage } from './goal-message-router.mjs';
+import { applyGoalMessageRoute, routeGoalMessage } from './goal-message-router.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
 import { buildPersistedCompactedMessages } from './conversation-compaction-persistence.mjs';
 import { compactIfNeeded, estimateTokensFromMessages } from './context-compactor.mjs';
@@ -1660,15 +1660,10 @@ ipcMain.handle('chat:send', (event, {
         const activeGoal = activePlan && goalPlanIsSelfDriven(activePlan) ? activePlan : null;
         const route = routeGoalMessage({ messageText: goal, activeGoalPlan: activeGoal });
         if (route.type === 'append_goal_event') {
-          goalPlanStore.appendRunEvent?.(route.goalPlanId, {
-            type: route.eventType,
-            summary: route.summary,
-            payload: {
-              source: 'chat:send',
-              summaryCode: route.summaryCode,
-              intent: route.intent,
-              messageText: route.messageText,
-            },
+          applyGoalMessageRoute({
+            route,
+            activeGoalPlan: activeGoal,
+            goalPlanStore,
           });
         } else if (route.type === 'start_intake') {
           const conversationWorkspacePath =

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { classifyGoalMessage, routeGoalMessage } from './goal-message-router.mjs';
+import { applyGoalMessageRoute, classifyGoalMessage, routeGoalMessage } from './goal-message-router.mjs';
 
 const activeGoalPlan = Object.freeze({
   planId: 'goal-1',
@@ -31,6 +31,46 @@ test('routeGoalMessage routes 继续 to the current Goal instead of creating a n
   assert.equal(route.goalPlanId, 'goal-1');
   assert.equal(route.intent, 'resume');
   assert.equal(route.eventType, 'goal_resumed');
+});
+
+test('applyGoalMessageRoute restores a failed Goal before recording the user resume event', () => {
+  const failedPlan = {
+    ...activeGoalPlan,
+    status: 'failed',
+    runner: { status: 'failed', phase: 'act', lastError: 'stream interrupted' },
+  };
+  const route = routeGoalMessage({ messageText: '继续', activeGoalPlan: failedPlan });
+  const calls = [];
+  const goalPlanStore = {
+    resumeRunner(planId, patch) {
+      calls.push(['resume', planId, patch]);
+    },
+    appendRunEvent(planId, event) {
+      calls.push(['event', planId, event]);
+      return event;
+    },
+  };
+
+  applyGoalMessageRoute({ route, activeGoalPlan: failedPlan, goalPlanStore });
+
+  assert.deepEqual(calls.map(([kind]) => kind), ['resume', 'event']);
+  assert.deepEqual(calls[0], ['resume', 'goal-1', { intent: 'execute', phase: 'act' }]);
+  assert.equal(calls[1][2].type, 'goal_resumed');
+  assert.equal(calls[1][2].payload.source, 'chat:send');
+});
+
+test('applyGoalMessageRoute does not reset a non-failed Goal', () => {
+  const route = routeGoalMessage({ messageText: '继续', activeGoalPlan });
+  let resumeCount = 0;
+  applyGoalMessageRoute({
+    route,
+    activeGoalPlan,
+    goalPlanStore: {
+      resumeRunner() { resumeCount += 1; },
+      appendRunEvent() {},
+    },
+  });
+  assert.equal(resumeCount, 0);
 });
 
 test('routeGoalMessage routes requirement overrides to the current Goal', () => {

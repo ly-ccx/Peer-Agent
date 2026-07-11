@@ -117,6 +117,30 @@ export function classifyGoalMessage(messageText) {
   };
 }
 
+export function applyGoalMessageRoute({ route, activeGoalPlan, goalPlanStore, source = 'chat:send' } = {}) {
+  if (route?.type !== 'append_goal_event' || !route.goalPlanId) return null;
+
+  // A user message starts a fresh chat stream directly; it does not pass through
+  // goalRunner.resume. Restore the persisted state before recording the new turn.
+  if (route.intent === 'resume' && activeGoalPlan?.status === 'failed') {
+    goalPlanStore?.resumeRunner?.(route.goalPlanId, {
+      intent: 'execute',
+      phase: activeGoalPlan.runner?.phase ?? 'orient',
+    });
+  }
+
+  return goalPlanStore?.appendRunEvent?.(route.goalPlanId, {
+    type: route.eventType,
+    summary: route.summary,
+    payload: {
+      source,
+      summaryCode: route.summaryCode,
+      intent: route.intent,
+      messageText: route.messageText,
+    },
+  }) ?? null;
+}
+
 export function routeGoalMessage({ messageText, activeGoalPlan } = {}) {
   const text = normalizeText(messageText);
   if (!activeGoalPlan) {
