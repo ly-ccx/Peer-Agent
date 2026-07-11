@@ -1996,9 +1996,18 @@
   transition: border-color var(--za-motion-fast);
 }
 
-/* 全屏时收窄(交通灯被系统隐藏,header 可稍矮) */
+/* 全屏时收窄(交通灯被系统隐藏,header 可稍矮)。
+   浮条与消息内容使用同一页头下沿，避免继续按普通模式的 52px 留白。 */
 .app-shell.is-fullscreen .chat-header {
   height: 36px;
+}
+
+.app-shell.is-fullscreen .current-turn-context {
+  top: 36px;
+}
+
+.app-shell.is-fullscreen .chat-thread {
+  padding-top: 36px;
 }
 
 /* 侧栏自动折叠且非全屏时,主面板顶到窗口最左,需为 macOS 交通灯预留左侧空间,
