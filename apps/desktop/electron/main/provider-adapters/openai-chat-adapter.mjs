@@ -266,8 +266,11 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
     if (parsed.usage) {
       const u = parsed.usage;
       const cachedTokens = extractCachedPromptTokens(u);
+      const promptTokens = u.prompt_tokens ?? 0;
       state.usage = {
-        inputTokens: u.prompt_tokens ?? 0,
+        // OpenAI-compatible prompt_tokens 已包含 cached_tokens。内部账本约定
+        // inputTokens 与 cacheReadTokens 互斥，避免显示层 input + cacheRead 重复计数。
+        inputTokens: Math.max(0, promptTokens - cachedTokens),
         outputTokens: u.completion_tokens ?? 0,
         cacheReadTokens: cachedTokens,
         cacheWriteTokens: 0,

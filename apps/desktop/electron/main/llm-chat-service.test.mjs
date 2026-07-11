@@ -950,7 +950,7 @@ describe('llm chat service tool materialization', () => {
       assert.equal(outcome.requestedUserInput, false);
       assert.equal(outcome.toolCallCount, 0);
       assert.deepEqual(outcome.usage, {
-        inputTokens: 12,
+        inputTokens: 7,
         outputTokens: 3,
         cacheWriteTokens: 0,
         cacheReadTokens: 5,
@@ -962,7 +962,7 @@ describe('llm chat service tool materialization', () => {
     assert.deepEqual(usageWrites, [{
       id: 'c1',
       usage: {
-        inputTokens: 12,
+        inputTokens: 7,
         outputTokens: 3,
         cacheWriteTokens: 0,
         cacheReadTokens: 5,
@@ -1036,7 +1036,7 @@ describe('llm chat service tool materialization', () => {
     assert.deepEqual(usageWrites, [{
       id: 'c1',
       usage: {
-        inputTokens: 30,
+        inputTokens: 20,
         outputTokens: 0,
         cacheWriteTokens: 0,
         cacheReadTokens: 10,

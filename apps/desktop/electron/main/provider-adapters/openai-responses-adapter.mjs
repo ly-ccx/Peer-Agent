@@ -87,8 +87,11 @@ function consumeResponsesEvent(parsed, state, webContents, streamId) {
       const usage = parsed.response?.usage;
       if (usage) {
         const cachedTokens = extractCachedInputTokens(usage);
+        const inputTokens = usage.input_tokens ?? 0;
         state.usage = {
-          inputTokens: usage.input_tokens ?? 0,
+          // Responses input_tokens 已包含 cached_tokens；内部账本字段必须互斥，
+          // 否则 context meter 做 input + cacheRead 时会把缓存命中重复计算。
+          inputTokens: Math.max(0, inputTokens - cachedTokens),
           outputTokens: usage.output_tokens ?? 0,
           cacheReadTokens: cachedTokens,
           cacheWriteTokens: 0,

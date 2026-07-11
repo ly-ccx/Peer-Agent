@@ -190,13 +190,29 @@ async function persistAndNotifyCompaction({
   streamId,
   webContents,
   emergency = false,
+  contextWindow = null,
+  tools = null,
 }) {
   if (persistCompaction && conversationId) {
     await persistCompaction({ conversationId, compactResult, preservePendingAssistant: true });
   }
   // 登记表收尾与事件 emit 单一来源：先清登记表再 emit done。
   endCompaction({ conversationId, streamId });
-  webContents.send('chat:compaction', { streamId, stage: 'done', emergency, ...compactResult.notification });
+  // notification.afterTokens 仅覆盖 system + messages；工具 schema 同样会在每次
+  // 请求全量发送，因此完成事件要沿用预算器口径给出可直接投影的完整快照。
+  const compactedBudget = computeContextBudget({
+    messages: compactResult.messages,
+    contextWindow,
+    tools,
+  });
+  webContents.send('chat:compaction', {
+    streamId,
+    stage: 'done',
+    emergency,
+    ...compactResult.notification,
+    contextTokens: compactedBudget.contextTokens,
+    contextWindow: compactedBudget.contextWindow,
+  });
 }
 
 export async function runCompactionCheck({
@@ -305,6 +321,8 @@ export async function runCompactionCheck({
         streamId,
         webContents,
         emergency,
+        contextWindow,
+        tools,
       });
       // done 通知本身即为 start 的收尾。只有持久化与 done 都完成后才标记已结算；
       // 若 persistCompaction 抛错，catch 分支必须还能补发 idle，避免压缩态悬挂。

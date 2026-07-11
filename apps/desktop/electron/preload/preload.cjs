@@ -235,4 +235,9 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.on('updater:event', handler);
     return () => ipcRenderer.removeListener('updater:event', handler);
   },
+  onRuntimeEvent: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('runtime:event', handler);
+    return () => ipcRenderer.removeListener('runtime:event', handler);
+  },
 });

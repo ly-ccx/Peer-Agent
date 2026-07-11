@@ -197,6 +197,60 @@ describe('chat compaction coordinator', () => {
     assert.equal(result.messages.at(-1).content, 'current question');
   });
 
+  it('emits the post-compaction context snapshot only after persistence succeeds', async () => {
+    const events = [];
+    const ordering = [];
+    const tools = [
+      {
+        type: 'function',
+        function: {
+          name: 'large_tool',
+          description: 'z'.repeat(400),
+          parameters: { type: 'object', properties: { query: { type: 'string' } } },
+        },
+      },
+    ];
+    const result = await runCompactionCheck({
+      messages: [
+        { role: 'system', content: 'system' },
+        { role: 'user', content: 'old question' },
+        { role: 'assistant', content: 'old answer' },
+        { role: 'user', content: 'current question' },
+      ],
+      systemPrompt: 'system',
+      contextWindow: 200_000,
+      providerConfig: null,
+      signal: new AbortController().signal,
+      persistCompaction: async () => {
+        ordering.push('persist');
+      },
+      conversationId: 'c1',
+      streamId: 's1',
+      force: true,
+      preserveLatestUserTurn: true,
+      tools,
+      webContents: {
+        send(channel, payload) {
+          events.push({ channel, payload });
+          if (channel === 'chat:compaction' && payload.stage === 'done') ordering.push('done');
+        },
+      },
+    });
+
+    const done = events.find(
+      (event) => event.channel === 'chat:compaction' && event.payload.stage === 'done',
+    )?.payload;
+    assert.ok(done, 'successful compaction must emit done');
+    assert.deepEqual(ordering, ['persist', 'done']);
+    assert.equal(done.contextWindow, 200_000);
+    assert.equal(
+      done.contextTokens,
+      estimateTokensFromMessages(result.messages) + estimateToolsTokens(tools),
+      'done snapshot must use the same messages + tool schema budget as the context meter',
+    );
+    assert.ok(done.contextTokens > done.afterTokens, 'tool schema tokens must not be omitted');
+  });
+
   it('rethrows when a compacted persist fails and settles the banner to idle', async () => {
     // 大量消息 + force 触发结构化压缩 (compacted:true);persistCompaction 抛错。
     // 回归点:错误必须向上抛出(交由 sendMessage 终态兜底),且失败路径必须补发 idle。

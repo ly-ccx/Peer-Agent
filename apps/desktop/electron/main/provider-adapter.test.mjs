@@ -104,7 +104,8 @@ describe('Provider adapters', () => {
       assert.equal(result.content, 'hello');
       assert.equal(result.toolCalls[0].name, 'bash');
       assert.equal(result.toolCalls[0].arguments, '{"command":"pwd"}');
-      assert.equal(result.streamUsage.inputTokens, 10);
+      assert.equal(result.streamUsage.inputTokens, 7);
+      assert.equal(result.streamUsage.inputTokens + result.streamUsage.cacheReadTokens, 10);
       assert.equal(events.find((event) => event.channel === 'chat:stream:delta').payload.content, 'hello');
       assert.equal(events.find((event) => event.channel === 'chat:stream:usage').payload.usage.cacheReadTokens, 3);
     } finally {
@@ -147,7 +148,9 @@ describe('Provider adapters', () => {
       });
 
       assert.equal(result.ok, true);
+      assert.equal(result.streamUsage.inputTokens, 20);
       assert.equal(result.streamUsage.cacheReadTokens, 80);
+      assert.equal(result.streamUsage.inputTokens + result.streamUsage.cacheReadTokens, 100);
       assert.equal(events.find((event) => event.channel === 'chat:stream:usage').payload.usage.cacheReadTokens, 80);
     } finally {
       globalThis.fetch = previousFetch;
@@ -520,6 +523,48 @@ describe('Provider adapters', () => {
       globalThis.fetch = previousFetch;
       if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
       else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
+  it('normalizes OpenAI Responses cached input without double counting context tokens', async () => {
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    globalThis.fetch = async () => new Response(sse([
+      { type: 'response.output_text.delta', delta: 'ok' },
+      {
+        type: 'response.completed',
+        response: {
+          usage: {
+            input_tokens: 100,
+            output_tokens: 7,
+            input_tokens_details: { cached_tokens: 80 },
+          },
+        },
+      },
+      '[DONE]',
+    ]), { status: 200 });
+
+    try {
+      const result = await sendOpenAIResponsesStream({
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'key',
+        accountId: 'acct_1',
+        model: 'gpt-responses',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [],
+        effort: 'off',
+        supportsReasoning: false,
+        webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        streamId: 'responses-cache',
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.streamUsage.inputTokens, 20);
+      assert.equal(result.streamUsage.cacheReadTokens, 80);
+      assert.equal(result.streamUsage.inputTokens + result.streamUsage.cacheReadTokens, 100);
+      assert.equal(events.find((event) => event.channel === 'chat:stream:usage').payload.usage.inputTokens, 20);
+    } finally {
+      globalThis.fetch = previousFetch;
     }
   });
 

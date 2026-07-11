@@ -21,6 +21,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 
 import { clientApi } from '../../clientApi';
 import { conversationStore } from '../state/conversationStore';
+import { reduceCompactionLifecycle } from '../state/compactionLifecycle';
 import { mergeLoadedMessagesWithLiveTail } from '../state/compactionLiveTailMerge';
 import { loadConversationMessages, usageFromLifetime } from '../state/conversationLoad';
 import { IDLE_COMPACTION_STATE } from '../state/types';
@@ -145,8 +146,18 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
   }, [activeConversationId, flushTextTypewriter, flushThinkingTypewriter]);
 
   useEffect(() => {
-    // 压缩「完成」时把进度钉到 100% 短暂停顿再隐藏横幅的收尾 timer（前台压缩，单例足够）。
-    let compactionDoneTimer: ReturnType<typeof setTimeout> | null = null;
+    // 按会话保存「完成后短暂停顿再隐藏」的 timer，并绑定触发它的 streamId。
+    // 单例 timer 会让会话 A / 旧压缩流的迟到收尾误清会话 B / 新压缩流。
+    const compactionDoneTimers = new Map<
+      string,
+      { streamId: string; timer: ReturnType<typeof setTimeout> }
+    >();
+    const cancelCompactionDoneTimer = (cid: string, streamId?: string) => {
+      const entry = compactionDoneTimers.get(cid);
+      if (!entry || (streamId && entry.streamId !== streamId)) return;
+      clearTimeout(entry.timer);
+      compactionDoneTimers.delete(cid);
+    };
 
     // 兜底清除“正在重试连接”横幅：连接若在 SSE 正文阶段恢复，recovering-fetch 已
     // return，不会补发 recovered 事件，横幅会一直残留。收到真实数据/收尾事件即收敛。
@@ -155,6 +166,13 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         conversationStore.setState(cid, { providerRecoveryNotice: null });
       }
     };
+
+    const offRuntimeEvent = clientApi.onRuntimeEvent((event) => {
+      if (event.protocolVersion !== 1) return;
+      if (event.type === 'session.started' && event.streamId && event.conversationId) {
+        conversationStore.routeStream(event.streamId, event.conversationId);
+      }
+    });
 
     const offDelta = clientApi.onChatStreamDelta(({ streamId, content }) => {
       const cid = conversationStore.resolveConversation(streamId);
@@ -486,45 +504,66 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     );
 
     const offCompaction = clientApi.onChatCompaction(
-      ({ streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount }) => {
+      ({ streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount, contextTokens, contextWindow }) => {
         const cid = conversationStore.resolveConversation(streamId);
         if (!cid) return;
         if (stage === 'start') {
-          conversationStore.setState(cid, {
-            compactionState: { phase: 'running', percent: null, streamId, startedAt: Date.now() },
-          });
+          conversationStore.setState(cid, (prev) => ({
+            compactionState: reduceCompactionLifecycle(prev.compactionState, {
+              stage: 'start',
+              streamId,
+              now: Date.now(),
+            }),
+          }));
           return;
         }
         if (stage === 'progress') {
           conversationStore.setState(cid, (prev) => ({
-            compactionState: {
-              phase: 'running',
-              percent: typeof percent === 'number' ? percent : null,
+            compactionState: reduceCompactionLifecycle(prev.compactionState, {
+              stage: 'progress',
               streamId,
-              startedAt: prev.compactionState.phase === 'running' ? prev.compactionState.startedAt : Date.now(),
-            },
+              percent: typeof percent === 'number' ? percent : null,
+              now: Date.now(),
+            }),
           }));
           return;
         }
         if (stage === 'idle') {
-          if (compactionDoneTimer) {
-            clearTimeout(compactionDoneTimer);
-            compactionDoneTimer = null;
-          }
-          conversationStore.setState(cid, { compactionState: IDLE_COMPACTION_STATE });
+          cancelCompactionDoneTimer(cid, streamId);
+          conversationStore.setState(cid, (prev) => ({
+            compactionState: reduceCompactionLifecycle(prev.compactionState, {
+              stage: 'idle',
+              streamId,
+            }),
+          }));
+          return;
+        }
+        const activeCompaction = conversationStore.getSnapshot(cid).compactionState;
+        if (
+          activeCompaction.phase !== 'idle'
+          && activeCompaction.streamId
+          && activeCompaction.streamId !== streamId
+        ) {
           return;
         }
         const completedAt = Date.now();
-        if (compactionDoneTimer) clearTimeout(compactionDoneTimer);
-        conversationStore.setState(cid, {
-          // done 表示压缩服务侧已完成；renderer 仍需 reload/merge 压缩后的消息，期间保持 finalizing，
-          // 避免"压缩条已消失但上下文数字仍是旧快照"。
-          compactionState: { phase: 'finalizing', percent: 100, streamId, completedAt },
-          // 口径分离（ADR 42）：done 一到就让旧的权威上下文快照失效。authoritativeContext 是
-          // 上一回合 done 下发的「压缩前」显示口径，若不清空，ChatSurface 的
-          // Math.max(authoritative, live) 会把数字锁在压缩前高位。
-          authoritativeContext: null,
-        });
+        cancelCompactionDoneTimer(cid);
+        conversationStore.setState(cid, (prev) => ({
+          // done 表示主进程已经完成压缩持久化；renderer 仍需 reload/merge 消息，期间保持 finalizing。
+          compactionState: reduceCompactionLifecycle(prev.compactionState, {
+            stage: 'finalizing',
+            streamId,
+            now: completedAt,
+          }),
+          // 原子替换压缩前快照。若旧 renderer 对接的是尚未携带快照的主进程，则清空旧值，
+          // 回退到消息切片的本地估算，绝不继续把底部数字锁在压缩前高位。
+          authoritativeContext: typeof contextTokens === 'number'
+            ? {
+                contextTokens,
+                contextWindow: typeof contextWindow === 'number' ? contextWindow : null,
+              }
+            : null,
+        }));
         if (
           !method ||
           beforeTokens === undefined ||
@@ -560,10 +599,17 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
               };
             });
             onUpdatedRef.current?.(cid);
-            compactionDoneTimer = setTimeout(() => {
-              conversationStore.setState(cid, { compactionState: IDLE_COMPACTION_STATE });
-              compactionDoneTimer = null;
+            const timer = setTimeout(() => {
+              conversationStore.setState(cid, (prev) => ({
+                compactionState: reduceCompactionLifecycle(prev.compactionState, {
+                  stage: 'idle',
+                  streamId,
+                }),
+              }));
+              const entry = compactionDoneTimers.get(cid);
+              if (entry?.streamId === streamId) compactionDoneTimers.delete(cid);
             }, 300);
+            compactionDoneTimers.set(cid, { streamId, timer });
           } catch (error) {
             conversationStore.setState(cid, {
               compactionState: {
@@ -580,10 +626,9 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     );
 
     return () => {
-      if (compactionDoneTimer) {
-        clearTimeout(compactionDoneTimer);
-        compactionDoneTimer = null;
-      }
+      for (const { timer } of compactionDoneTimers.values()) clearTimeout(timer);
+      compactionDoneTimers.clear();
+      offRuntimeEvent();
       offDelta();
       offThinking();
       offDone();

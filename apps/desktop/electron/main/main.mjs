@@ -50,7 +50,7 @@ import { createGoalRunner } from './goal-runner.mjs';
 import { routeGoalMessage } from './goal-message-router.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
 import { buildPersistedCompactedMessages } from './conversation-compaction-persistence.mjs';
-import { compactIfNeeded } from './context-compactor.mjs';
+import { compactIfNeeded, estimateTokensFromMessages } from './context-compactor.mjs';
 import {
   beginCompaction,
   endCompaction,
@@ -1860,58 +1860,73 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
       percent,
     });
   };
-  const result = await compactIfNeeded({
-    messages: apiMessages,
-    systemPrompt,
-    contextWindow,
-    providerConfig,
-    force: true,
-    continuityContext: priorContinuityContext,
-    onProgress,
-    webContents: event.sender,
-    streamId,
-  });
+  try {
+    const result = await compactIfNeeded({
+      messages: apiMessages,
+      systemPrompt,
+      contextWindow,
+      providerConfig,
+      force: true,
+      continuityContext: priorContinuityContext,
+      onProgress,
+      webContents: event.sender,
+      streamId,
+    });
 
-  if (!result.compacted) {
+    if (!result.compacted) {
+      endCompaction({ conversationId, streamId });
+      event.sender.send('chat:compaction', { streamId, stage: 'idle', manual: true });
+      return { compacted: false };
+    }
+
+    persistCompactionToConversation({
+      conversationId,
+      compactResult: result,
+      sourceMessages: activeMessages,
+    });
+
+    try {
+      const baselineContext = buildSystemContext(workspacePath, {
+        conversationId,
+        continuityContext: continuityContextFromCompactionResult(result),
+        mode: 'chat',
+        provider: provider?.provider ?? null,
+        model: provider?.model ?? null,
+      });
+      promptSnapshotStore.recordBaseline(baselineContext, {
+        streamId,
+        conversationId,
+        provider: provider?.provider ?? null,
+        providerId: provider?.id ?? null,
+        model: provider?.model ?? null,
+        mode: 'chat',
+        baselineReason: 'manual_compact',
+      });
+    } catch (error) {
+      console.warn('[main] failed to record compact baseline:', error?.message || error);
+    }
+
+    // 无论是否有 notification，压缩已结束，先清登记表再 emit done，保证可查询真值收尾。
+    endCompaction({ conversationId, streamId });
+    const notification = result.notification
+      ? {
+          ...result.notification,
+          // 手动压缩目前不经过会话 runtime projection，无法重建该会话当轮的工具 schema；
+          // 至少返回 system + 压缩后 messages 的可靠快照，renderer 的本地 live 估算会补齐实时增量。
+          contextTokens: estimateTokensFromMessages(result.messages),
+          contextWindow,
+        }
+      : undefined;
+    if (notification) {
+      event.sender.send('chat:compaction', { streamId, stage: 'done', manual: true, ...notification });
+    }
+
+    return { compacted: true, notification };
+  } catch (error) {
     endCompaction({ conversationId, streamId });
     event.sender.send('chat:compaction', { streamId, stage: 'idle', manual: true });
-    return { compacted: false };
+    throw error;
   }
-
-  persistCompactionToConversation({
-    conversationId,
-    compactResult: result,
-    sourceMessages: activeMessages,
-  });
-
-  try {
-    const baselineContext = buildSystemContext(workspacePath, {
-      conversationId,
-      continuityContext: continuityContextFromCompactionResult(result),
-      mode: 'chat',
-      provider: provider?.provider ?? null,
-      model: provider?.model ?? null,
-    });
-    promptSnapshotStore.recordBaseline(baselineContext, {
-      streamId,
-      conversationId,
-      provider: provider?.provider ?? null,
-      providerId: provider?.id ?? null,
-      model: provider?.model ?? null,
-      mode: 'chat',
-      baselineReason: 'manual_compact',
-    });
-  } catch (error) {
-    console.warn('[main] failed to record compact baseline:', error?.message || error);
-  }
-
-  // 无论是否有 notification，压缩已结束，先清登记表再 emit done，保证可查询真值收尾。
-  endCompaction({ conversationId, streamId });
-  if (result.notification) {
-    event.sender.send('chat:compaction', { streamId, stage: 'done', manual: true, ...result.notification });
-  }
-
-  return { compacted: true, notification: result.notification };
 });
 
 // ── 压缩态查询（按 conversationId）──
