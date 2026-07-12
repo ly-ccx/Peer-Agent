@@ -63,3 +63,25 @@ export {
   normalizeNodeShellCwd,
 } from './shell-classifier.ts';
 export { createNodeShellProvider, NODE_SHELL_CAPABILITY_MANIFESTS } from './shell-provider.ts';
+export type {
+  CreateNodeHookRunnerOptions,
+  NodeHookConfig,
+  NodeHookDefinition,
+  NodeHookEvent,
+  NodeHookFailureMode,
+} from './node-hook-runner.ts';
+export {
+  createNodeHookRunner,
+  matchesNodeHook,
+  mostRestrictiveNodeHookDecision,
+} from './node-hook-runner.ts';
+export type {
+  CreateConfiguredNodeHookRunnerOptions,
+  LoadNodeHookConfigOptions,
+} from './node-hook-config.ts';
+export {
+  createConfiguredNodeHookRunner,
+  getNodeHookConfigPaths,
+  loadNodeHookConfig,
+  mergeNodeHookConfigs,
+} from './node-hook-config.ts';

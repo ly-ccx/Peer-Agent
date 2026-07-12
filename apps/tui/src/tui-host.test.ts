@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -88,5 +88,113 @@ describe('TUI Runtime host', () => {
       (execution.result.permissionGrant as { decision?: string } | undefined)?.decision,
     ).toBe('deny');
     expect(await Bun.file(path.join(workspaceRoot, 'denied.txt')).exists()).toBe(false);
+  });
+
+  test('loads workspace hooks through the shared Node Hook Host and records evidence', async () => {
+    const workspaceRoot = await createWorkspace();
+    await mkdir(path.join(workspaceRoot, '.peer'), { recursive: true });
+    await Bun.write(
+      path.join(workspaceRoot, '.peer', 'hooks.json'),
+      JSON.stringify({
+        hooks: {
+          PreToolUse: [
+            {
+              match: { capabilityId: 'local.file.read' },
+              command: `node -e "process.stdin.resume(); process.stdin.on('end', () => console.log(JSON.stringify({ decision: 'deny', reason: 'blocked by shared hook' })))"`,
+            },
+          ],
+        },
+      }),
+    );
+    const host = createTuiHost(workspaceRoot);
+
+    const execution = await host.executeRead('missing.txt');
+
+    expect(execution.result.status).toBe('denied');
+    const evidence = execution.result.evidence as {
+      hooks?: Array<{ decision?: string; reason?: string }>;
+      hookFinalDecision?: string;
+    };
+    expect(evidence.hookFinalDecision).toBe('deny');
+    expect(evidence.hooks?.[0]?.decision).toBe('deny');
+    expect(evidence.hooks?.[0]?.reason).toBe('blocked by shared hook');
+  });
+
+  test('runs PostToolUse after capability execution and appends audit evidence', async () => {
+    const workspaceRoot = await createWorkspace();
+    await mkdir(path.join(workspaceRoot, '.peer'), { recursive: true });
+    await writeFile(path.join(workspaceRoot, 'post.txt'), 'post hook input', 'utf8');
+    const command = [
+      'let input="";',
+      'process.stdin.on("data", chunk => input += chunk);',
+      'process.stdin.on("end", () => {',
+      '  const payload = JSON.parse(input);',
+      '  const reason = payload.result?.status === "completed" ? "observed completed result" : "missing result";',
+      '  console.log(JSON.stringify({ decision: "allow", reason }));',
+      '});',
+    ].join(' ');
+    await Bun.write(
+      path.join(workspaceRoot, '.peer', 'hooks.json'),
+      JSON.stringify({
+        hooks: {
+          PostToolUse: [
+            {
+              match: { capabilityId: 'local.file.read' },
+              command: `node -e ${JSON.stringify(command)}`,
+            },
+          ],
+        },
+      }),
+    );
+    const host = createTuiHost(workspaceRoot);
+
+    const execution = await host.executeRead('post.txt');
+
+    expect(execution.result.status).toBe('completed');
+    const evidence = execution.result.evidence as {
+      hooks?: Array<{ event?: string; decision?: string; reason?: string }>;
+      hookFinalDecision?: string;
+    };
+    expect(evidence.hookFinalDecision).toBe('allow');
+    expect(evidence.hooks?.[0]?.event).toBe('PostToolUse');
+    expect(evidence.hooks?.[0]?.decision).toBe('allow');
+    expect(evidence.hooks?.[0]?.reason).toBe('observed completed result');
+  });
+
+  test('routes a hook ask decision through the TUI approval port', async () => {
+    const workspaceRoot = await createWorkspace();
+    await mkdir(path.join(workspaceRoot, '.peer'), { recursive: true });
+    await Bun.write(
+      path.join(workspaceRoot, '.peer', 'hooks.json'),
+      JSON.stringify({
+        hooks: {
+          PreToolUse: [
+            {
+              match: { capabilityId: 'local.file.read' },
+              command: `node -e "process.stdin.resume(); process.stdin.on('end', () => console.log(JSON.stringify({ decision: 'ask', reason: 'confirm shared hook' })))"`,
+            },
+          ],
+        },
+      }),
+    );
+    await writeFile(path.join(workspaceRoot, 'approved.txt'), 'approved by hook prompt', 'utf8');
+    const host = createTuiHost(workspaceRoot);
+    let promptSource: string | undefined;
+    const unsubscribe = host.subscribeApproval((approval) => {
+      if (approval) {
+        promptSource = approval.prompt.confirmation.kind;
+        approval.resolve('allow');
+      }
+    });
+
+    const execution = await host.executeRead('approved.txt');
+    unsubscribe();
+
+    expect(promptSource).toBe('hook-approval');
+    expect(execution.result.status).toBe('completed');
+    expect((execution.result.output as { content?: string }).content).toBe('approved by hook prompt');
+    expect(
+      (execution.result.evidence as { hookFinalDecision?: string }).hookFinalDecision,
+    ).toBe('ask');
   });
 });

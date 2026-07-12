@@ -2,6 +2,8 @@
 
 import { createCliRenderer } from '@opentui/core';
 import { createRoot } from '@opentui/react';
+import os from 'node:os';
+import path from 'node:path';
 import {
   createOpenAICompatibleProvider,
   resolveOpenAICompatibleProviderConfig,
@@ -19,7 +21,8 @@ import {
 import { createTuiHost } from './tui-host.ts';
 
 const workspaceRoot = process.env.PEER_WORKSPACE_ROOT ?? process.cwd();
-const host = createTuiHost(workspaceRoot);
+const userDataPath = process.env.PEER_USER_DATA_PATH ?? path.join(os.homedir(), '.peer-agent');
+const host = createTuiHost({ workspaceRoot, userDataPath });
 const modelConfig = resolveTuiModelConfig(process.env);
 const model = modelConfig.configured
   ? createProviderChatModel({

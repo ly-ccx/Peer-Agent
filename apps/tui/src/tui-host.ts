@@ -1,6 +1,14 @@
 import type { RuntimeToolDefinition } from '@peer-agent/runtime-core';
-import { createNodeProviderBundle, type NodeRuntimePermissionPrompt } from '@peer-agent/runtime-node';
-import type { RuntimeSdkEvent, RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
+import {
+  createConfiguredNodeHookRunner,
+  createNodeProviderBundle,
+  type NodeRuntimePermissionPrompt,
+} from '@peer-agent/runtime-node';
+import type {
+  RuntimeSdkEvent,
+  RuntimeSdkHookRunner,
+  RuntimeSdkProviderExecution,
+} from '@peer-agent/runtime-sdk';
 
 export type TuiApprovalDecision = 'allow' | 'deny';
 
@@ -20,7 +28,19 @@ export interface TuiHost {
   subscribeApproval(listener: (approval: PendingApproval | null) => void): () => void;
 }
 
-export function createTuiHost(workspaceRoot: string): TuiHost {
+export interface CreateTuiHostOptions {
+  readonly workspaceRoot: string;
+  readonly userDataPath?: string;
+  readonly hookRunner?: RuntimeSdkHookRunner | null;
+}
+
+export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
+  const resolvedOptions = typeof options === 'string' ? { workspaceRoot: options } : options;
+  const { workspaceRoot } = resolvedOptions;
+  const hookRunner = resolvedOptions.hookRunner ?? createConfiguredNodeHookRunner({
+    userDataPath: resolvedOptions.userDataPath,
+    workspaceRoot,
+  });
   const approvalListeners = new Set<(approval: PendingApproval | null) => void>();
   let activeApproval: PendingApproval | null = null;
 
@@ -31,6 +51,7 @@ export function createTuiHost(workspaceRoot: string): TuiHost {
 
   const bundle = createNodeProviderBundle({
     workspaceRoot,
+    hookRunner,
     requestPermission(prompt) {
       return new Promise((resolve) => {
         publishApproval({
