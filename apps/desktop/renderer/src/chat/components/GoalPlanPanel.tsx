@@ -1,6 +1,6 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ReactElement } from 'react';
+import type { CSSProperties, ReactElement } from 'react';
 import type {
   ExecutionStatus,
   GoalExplorerRun,
@@ -19,6 +19,7 @@ import { InteractionContext } from './thread/interactionContext';
 import { useGoalPlanApproval } from './goal/useGoalPlanApproval';
 import { getGoalPlanNextStep, goalPlanNextStepCopy } from './goal/goalPlanNextActions';
 import { selectPrimaryGoalPlan, shouldDefaultExpandGoalPlan } from './goal/goalPlanExpansion';
+import { buildGoalPlanTreeRows, goalPlanTreeDepth } from './goal/goalPlanTree';
 
 function normalizeConversationId(value: string | number | null | undefined): string | null {
   if (value === null || value === undefined) return null;
@@ -100,6 +101,23 @@ function statusLabel(status: ExecutionStatus, isZh: boolean): string {
 
 function statusClass(status: ExecutionStatus): string {
   return `goal-task-status goal-task-status--${status}`;
+}
+
+function planExecutionStatus(status: GoalPlan['status']): ExecutionStatus {
+  switch (status) {
+    case 'executing':
+      return 'running';
+    case 'completed':
+      return 'completed';
+    case 'failed':
+      return 'failed';
+    case 'cancelled':
+      return 'cancelled';
+    case 'drafting':
+    case 'awaiting_approval':
+    default:
+      return 'pending';
+  }
 }
 
 /**
@@ -656,6 +674,8 @@ function PlanProjectionSection({
   tasksExpanded,
   onToggleTasks,
   isZh,
+  childPlans,
+  onNavigateToPlan,
 }: {
   plan: GoalPlan;
   progress: GoalPlan['progress'];
@@ -663,6 +683,8 @@ function PlanProjectionSection({
   tasksExpanded: boolean;
   onToggleTasks: () => void;
   isZh: boolean;
+  childPlans: readonly GoalPlan[];
+  onNavigateToPlan?: (planId: string, taskId?: string) => void;
 }): ReactElement {
   return (
     <section className="goal-projection goal-projection--plan" aria-label={isZh ? '任务计划' : 'Task plan'}>
@@ -712,7 +734,14 @@ function PlanProjectionSection({
         tasks.length > 0 ? (
           <ul className="goal-task-list">
             {tasks.map((task) => (
-              <TaskNode key={task.taskId} task={task} depth={0} isZh={isZh} />
+              <TaskNode
+                key={task.taskId}
+                task={task}
+                depth={0}
+                isZh={isZh}
+                childPlans={childPlans}
+                onNavigateToPlan={onNavigateToPlan}
+              />
             ))}
           </ul>
         ) : (
@@ -816,7 +845,19 @@ function RunTraceSection({ plan, isZh }: { plan: GoalPlan; isZh: boolean }): Rea
   );
 }
 
-function TaskNode({ task, depth, isZh }: { task: GoalTask; depth: number; isZh: boolean }): ReactElement {
+function TaskNode({
+  task,
+  depth,
+  isZh,
+  childPlans,
+  onNavigateToPlan,
+}: {
+  task: GoalTask;
+  depth: number;
+  isZh: boolean;
+  childPlans: readonly GoalPlan[];
+  onNavigateToPlan?: (planId: string, taskId?: string) => void;
+}): ReactElement {
   const hasEvidence = task.evidenceRefs.length > 0;
   const [expanded, setExpanded] = useState(false);
   const evidenceCount = task.evidenceRefs.length;
@@ -829,15 +870,21 @@ function TaskNode({ task, depth, isZh }: { task: GoalTask; depth: number; isZh: 
           ? `证据 ${evidenceCount} 条`
           : `${evidenceCount} evidence`
         : null;
+  const delegatedPlans = (task.childPlanIds || [])
+    .map((planId) => childPlans.find((plan) => plan.planId === planId))
+    .filter((plan): plan is GoalPlan => !!plan);
   const canExpand =
     !!task.failureReason ||
     !!task.blockedReason ||
     (task.status === 'completed' && hasEvidence) ||
+    delegatedPlans.length > 0 ||
     (task.subtasks?.length ?? 0) > 0;
   return (
     <li
       className={`goal-task goal-task--card${expanded ? ' goal-task--expanded' : ''}`}
       style={{ marginInlineStart: depth * 12 }}
+      data-goal-task-id={task.taskId}
+      tabIndex={-1}
     >
       <button
         type="button"
@@ -885,12 +932,40 @@ function TaskNode({ task, depth, isZh }: { task: GoalTask; depth: number; isZh: 
               </ul>
             </div>
           ) : null}
+          {delegatedPlans.length > 0 ? (
+            <div className="goal-task-child-plans">
+              <div className="goal-task-detail-label">{isZh ? '派生子目标' : 'Derived goals'}</div>
+              {delegatedPlans.map((childPlan) => (
+                <button
+                  key={childPlan.planId}
+                  type="button"
+                  className="goal-task-child-plan"
+                  onClick={() => onNavigateToPlan?.(childPlan.planId)}
+                >
+                  <span className={statusClass(planExecutionStatus(childPlan.status))}>
+                    {statusLabel(planExecutionStatus(childPlan.status), isZh)}
+                  </span>
+                  <span className="goal-task-child-plan-title">{childPlan.title}</span>
+                  <span className="goal-task-child-plan-progress">
+                    {childPlan.progress.completed}/{childPlan.progress.total}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
       {task.subtasks && task.subtasks.length > 0 ? (
         <ul className="goal-task-children">
           {task.subtasks.map((child) => (
-            <TaskNode key={child.taskId} task={child} depth={depth + 1} isZh={isZh} />
+            <TaskNode
+              key={child.taskId}
+              task={child}
+              depth={depth + 1}
+              isZh={isZh}
+              childPlans={childPlans}
+              onNavigateToPlan={onNavigateToPlan}
+            />
           ))}
         </ul>
       ) : null}
@@ -1187,6 +1262,10 @@ interface PlanCardProps {
   readonly isStreaming: boolean;
   readonly busy: boolean;
   readonly isMain?: boolean;
+  readonly parentPlan?: GoalPlan;
+  readonly sourceTask?: GoalTask;
+  readonly childPlans?: readonly GoalPlan[];
+  readonly onNavigateToPlan?: (planId: string, taskId?: string) => void;
   readonly onNextAction: (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => void | Promise<void>;
   readonly onRunnerControl: (plan: GoalPlan, action: 'pause' | 'resume' | 'clear') => void | Promise<void>;
   readonly onManualConfirm: (
@@ -1202,6 +1281,10 @@ function PlanCard({
   isStreaming,
   busy,
   isMain,
+  parentPlan,
+  sourceTask,
+  childPlans = [],
+  onNavigateToPlan,
   onNextAction,
   onRunnerControl,
   onManualConfirm,
@@ -1224,6 +1307,8 @@ function PlanCard({
   return (
     <section
       className={`goal-plan-card${effectiveExpanded ? ' goal-plan-card--expanded' : ''}${isMain ? ' goal-plan-card--main' : ''}`}
+      data-goal-plan-id={plan.planId}
+      tabIndex={-1}
     >
       <header className="goal-plan-head">
         <button
@@ -1271,6 +1356,19 @@ function PlanCard({
       </header>
       {effectiveExpanded ? (
         <div className="goal-plan-body">
+          {parentPlan ? (
+            <div className="goal-plan-origin" data-goal-plan-origin>
+              <span className="goal-plan-origin-label">{isZh ? '子目标 · 来自' : 'Child goal · From'}</span>
+              <button
+                type="button"
+                className="goal-plan-origin-link"
+                onClick={() => onNavigateToPlan?.(parentPlan.planId, plan.sourceTaskId)}
+              >
+                <strong>{derivePlanTitle(parentPlan, isZh)}</strong>
+                {sourceTask ? <span>{isZh ? `任务：${sourceTask.title}` : `Task: ${sourceTask.title}`}</span> : null}
+              </button>
+            </div>
+          ) : null}
           {nextStep ? (
             <div className="goal-plan-next-guidance" role="status">
               {nextStepCopy.guidance}
@@ -1284,6 +1382,8 @@ function PlanCard({
             tasksExpanded={tasksExpanded}
             onToggleTasks={() => setTasksExpanded((v) => !v)}
             isZh={isZh}
+            childPlans={childPlans}
+            onNavigateToPlan={onNavigateToPlan}
           />
           <RunTraceSection plan={plan} isZh={isZh} />
           {plan.runner && plan.runner.enabled ? (
@@ -1587,8 +1687,31 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   // 主卡优先展示待批准和执行中计划；其他仍需用户处理的活跃计划也置顶展开。
   // 只有已完成、已取消的历史计划留在下方并默认折叠。
   const mainPlan = selectPrimaryGoalPlan(plans);
-  // 清单计划 = 除主卡外的其余计划，保持原顺序；mainPlan 为 null 时即全部计划。
+  // 清单计划按持久化父子关系组织；主卡仍置顶，但其余节点保留相对层级。
   const listPlans = mainPlan ? plans.filter((plan) => plan.planId !== mainPlan.planId) : plans;
+  const plansById = new Map(plans.map((plan) => [plan.planId, plan]));
+  const listPlanRows = mainPlan
+    ? buildGoalPlanTreeRows(listPlans).map(({ plan }) => ({
+        plan,
+        depth: goalPlanTreeDepth(plan, plansById),
+      }))
+    : buildGoalPlanTreeRows(listPlans);
+  const relationFor = (plan: GoalPlan) => {
+    const parentPlan = plan.parentPlanId ? plansById.get(plan.parentPlanId) : undefined;
+    const sourceTask = parentPlan && plan.sourceTaskId
+      ? parentPlan.tasks.find((task) => task.taskId === plan.sourceTaskId)
+      : undefined;
+    const childPlans = plans.filter((candidate) => candidate.parentPlanId === plan.planId);
+    return { parentPlan, sourceTask, childPlans };
+  };
+  const navigateToPlan = (planId: string, taskId?: string) => {
+    const element = document.querySelector<HTMLElement>(`[data-goal-plan-id="${CSS.escape(planId)}"]`);
+    element?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    element?.focus({ preventScroll: true });
+    if (taskId) {
+      document.querySelector<HTMLElement>(`[data-goal-task-id="${CSS.escape(taskId)}"]`)?.focus({ preventScroll: true });
+    }
+  };
   // A：折叠态浮条「执行中」时给根节点附加状态 class，驱动边缘流动光效（见 goal-panel.css）。
   // 仅当存在执行中的计划、且面板处于折叠态（浮条形态）时启用，避免展开后内部已有进度动效叠加干扰。
   const hasExecutingPlan = plans.some((plan) => plan.status === 'executing');
@@ -1688,6 +1811,8 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
           isZh={isZh}
           isStreaming={isStreaming}
           busy={effectiveBusyPlanId === mainPlan.planId}
+          {...relationFor(mainPlan)}
+          onNavigateToPlan={navigateToPlan}
           onNextAction={handleNextAction}
           onRunnerControl={controlRunner}
           onManualConfirm={recordManualDodConfirmation}
@@ -1704,18 +1829,27 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
                 ? `目标计划 ${listPlans.length}`
                 : `Plans ${listPlans.length}`}
           </div>
-          {listPlans.map((plan) => (
-            <PlanCard
+          {listPlanRows.map(({ plan, depth }) => (
+            <div
+              className="goal-plan-tree-row"
+              data-goal-tree-depth={depth}
               key={plan.planId}
-              plan={plan}
-              defaultExpanded={shouldDefaultExpandGoalPlan(plan)}
-              isZh={isZh}
-              isStreaming={isStreaming}
-              busy={effectiveBusyPlanId === plan.planId}
-              onNextAction={handleNextAction}
-              onRunnerControl={controlRunner}
-              onManualConfirm={recordManualDodConfirmation}
-            />
+              style={{ '--goal-tree-depth': depth } as CSSProperties}
+            >
+              {depth > 0 ? <span className="goal-plan-tree-branch" aria-hidden="true" /> : null}
+              <PlanCard
+                plan={plan}
+                defaultExpanded={shouldDefaultExpandGoalPlan(plan)}
+                isZh={isZh}
+                isStreaming={isStreaming}
+                busy={effectiveBusyPlanId === plan.planId}
+                {...relationFor(plan)}
+                onNavigateToPlan={navigateToPlan}
+                onNextAction={handleNextAction}
+                onRunnerControl={controlRunner}
+                onManualConfirm={recordManualDodConfirmation}
+              />
+            </div>
           ))}
         </div>
       ) : null}

@@ -669,6 +669,50 @@
   color: var(--za-text);
 }
 
+.goal-plan-origin {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--za-line);
+  border-radius: 10px;
+  background: var(--za-surface-2);
+}
+
+.goal-plan-origin-label {
+  color: var(--za-text-faint);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.goal-plan-origin-link {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--za-text);
+  text-align: start;
+  cursor: pointer;
+}
+
+.goal-plan-origin-link span {
+  color: var(--za-text-muted);
+  font-size: 12px;
+}
+
+.goal-plan-origin-link:hover strong,
+.goal-plan-origin-link:focus-visible strong {
+  color: var(--za-accent);
+  text-decoration: underline;
+}
+
+.goal-plan-card:focus-visible,
+.goal-task:focus-visible {
+  outline: 2px solid var(--za-accent);
+  outline-offset: 2px;
+}
+
 /* 主卡：当前计划永远置顶展开，只用表面反差与柔和阴影拉开层级。 */
 .goal-plan-card--main {
   background: var(--za-surface-1);
@@ -682,6 +726,27 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.goal-plan-tree-row {
+  position: relative;
+  margin-left: calc(min(var(--goal-tree-depth), 4) * 16px);
+}
+
+.goal-plan-tree-row > .goal-plan-card {
+  position: relative;
+  z-index: 1;
+}
+
+.goal-plan-tree-branch {
+  position: absolute;
+  top: -6px;
+  bottom: 50%;
+  left: -10px;
+  width: 9px;
+  border-left: 1px solid color-mix(in srgb, var(--za-text-muted) 35%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--za-text-muted) 35%, transparent);
+  border-bottom-left-radius: 6px;
 }
 
 .goal-plan-history-title {

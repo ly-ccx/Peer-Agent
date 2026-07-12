@@ -1283,6 +1283,52 @@ test('promoteIntakeToGoal: intake 契约就地升级为 accepted_goal（明确�
   assert.equal(plans.length, 1);
 });
 
+test('createPlan: 派生目标从父目标和来源任务计算并持久化关系', () => {
+  const parent = store.createPlan({
+    title: '父目标',
+    goal: '完成父目标',
+    tasks: [{ taskId: 'source-task', title: '派生子目标的任务' }],
+  });
+  const child = store.createPlan({
+    title: '子目标',
+    goal: '完成子目标',
+    parentPlanId: parent.planId,
+    sourceTaskId: 'source-task',
+    // 调用方不能伪造派生层级。
+    rootPlanId: 'forged-root',
+    depth: 99,
+    relationType: 'derived',
+    tasks: [],
+  });
+
+  assert.equal(child.parentPlanId, parent.planId);
+  assert.equal(child.sourceTaskId, 'source-task');
+  assert.equal(child.rootPlanId, parent.planId);
+  assert.equal(child.relationType, 'derived');
+  assert.equal(child.depth, 1);
+
+  const reread = store.getPlan(child.planId);
+  assert.equal(reread.parentPlanId, parent.planId);
+  assert.equal(reread.sourceTaskId, 'source-task');
+  assert.equal(reread.rootPlanId, parent.planId);
+  assert.equal(reread.depth, 1);
+});
+
+test('createPlan: 拒绝不存在的父目标或来源任务', () => {
+  assert.throws(
+    () => store.createPlan({ parentPlanId: 'missing', sourceTaskId: 'task', tasks: [] }),
+    /Parent goal not found/,
+  );
+  const parent = store.createPlan({
+    title: '父目标',
+    tasks: [{ taskId: 'known-task', title: '已知任务' }],
+  });
+  assert.throws(
+    () => store.createPlan({ parentPlanId: parent.planId, sourceTaskId: 'missing', tasks: [] }),
+    /Source task not found/,
+  );
+});
+
 test('upsertGoalContract: intake 轮调 goal_create_plan 命中当前 intake 契约并升级（A 方案信号）', () => {
   const intake = store.createIntakeContract({
     conversationId: 'conv-intake-3',
@@ -1297,4 +1343,39 @@ test('upsertGoalContract: intake 轮调 goal_create_plan 命中当前 intake 契
   assert.equal(upserted.planId, intake.planId, 'upsert 应命中当前 intake 契约而非新建');
   const plans = store.listPlansByConversation('conv-intake-3');
   assert.equal(plans.length, 1, '不应产生第二条悬空契约');
+});
+
+test('派生子目标会反向关联父任务并联动执行状态', () => {
+  const parent = store.createPlan({
+    conversationId: 'conv-parent-link',
+    title: '父目标',
+    goal: '完成父目标',
+    status: 'executing',
+    tasks: [{ taskId: 'delegate-task', title: '委派步骤', status: 'pending', evidenceRefs: [] }],
+  });
+  const child = store.createPlan({
+    conversationId: 'conv-child-link',
+    title: '子目标',
+    goal: '完成委派步骤',
+    status: 'executing',
+    parentPlanId: parent.planId,
+    sourceTaskId: 'delegate-task',
+    tasks: [{ taskId: 'child-work', title: '执行子目标', status: 'pending', evidenceRefs: [] }],
+  });
+
+  let sourceTask = store.getPlan(parent.planId).tasks[0];
+  assert.equal(sourceTask.executionMode, 'delegated');
+  assert.deepEqual(sourceTask.childPlanIds, [child.planId]);
+
+  store.recordTaskEvidence(child.planId, 'child-work', { status: 'running' });
+  sourceTask = store.getPlan(parent.planId).tasks[0];
+  assert.equal(sourceTask.status, 'running');
+
+  store.recordTaskEvidence(child.planId, 'child-work', {
+    status: 'failed',
+    failureReason: '子目标执行失败',
+  });
+  sourceTask = store.getPlan(parent.planId).tasks[0];
+  assert.equal(sourceTask.status, 'waiting_user');
+  assert.match(sourceTask.blockedReason, /派生子目标/);
 });

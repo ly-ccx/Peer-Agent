@@ -289,6 +289,11 @@ const GOAL_RUN_EVENT_TYPES = new Set([
   'checkpoint_created',
   'network_interrupted',
   'goal_resumed',
+  'child_goal_created',
+  'child_goal_started',
+  'child_goal_completed',
+  'child_goal_failed',
+  'parent_goal_resumed',
   'goal_paused',
   'goal_completed',
 ]);
@@ -1413,6 +1418,28 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     const workflowKind = normalizeWorkflowKind(draft.workflowKind);
     const status = draft.status || (workflowKind === 'goal_self_driven' ? 'accepted' : 'drafting');
     const planId = draft.planId || randomUUID();
+    const requestedParentPlanId = typeof draft.parentPlanId === 'string' && draft.parentPlanId.trim()
+      ? draft.parentPlanId.trim()
+      : undefined;
+    const requestedSourceTaskId = typeof draft.sourceTaskId === 'string' && draft.sourceTaskId.trim()
+      ? draft.sourceTaskId.trim()
+      : undefined;
+    const parentPlan = requestedParentPlanId ? getPlan(requestedParentPlanId) : null;
+    const sourceTask = parentPlan && requestedSourceTaskId
+      ? parentPlan.tasks?.find((task) => task.taskId === requestedSourceTaskId)
+      : null;
+    if (requestedParentPlanId && !parentPlan) {
+      throw new Error(`Parent goal not found: ${requestedParentPlanId}`);
+    }
+    if (requestedParentPlanId && !requestedSourceTaskId) {
+      throw new Error('sourceTaskId is required when parentPlanId is provided');
+    }
+    if (requestedSourceTaskId && !requestedParentPlanId) {
+      throw new Error('parentPlanId is required when sourceTaskId is provided');
+    }
+    if (requestedSourceTaskId && !sourceTask) {
+      throw new Error(`Source task not found in parent goal: ${requestedSourceTaskId}`);
+    }
     const plan = {
       planId,
       conversationId: normalizeConversationId(draft.conversationId) ?? undefined,
@@ -1420,6 +1447,11 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       agentId: draft.agentId,
       originWorkspacePath: normalizeWorkspacePath(draft.originWorkspacePath) ?? undefined,
       targetWorkspacePath: normalizeWorkspacePath(draft.targetWorkspacePath) ?? undefined,
+      parentPlanId: parentPlan?.planId,
+      sourceTaskId: sourceTask?.taskId,
+      rootPlanId: parentPlan ? (parentPlan.rootPlanId || parentPlan.planId) : undefined,
+      relationType: parentPlan ? 'derived' : undefined,
+      depth: parentPlan ? (Number.isInteger(parentPlan.depth) ? parentPlan.depth + 1 : 1) : undefined,
       title: draft.title || '',
       goal: draft.goal || '',
       // 成功标准规范化为结构化 SuccessCriterion[]（字符串向后兼容归一为 manual）。
@@ -1460,7 +1492,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
         : '计划已生成';
     // 单活跃计划：先收尾/作废同会话其它活跃态旧计划（排除自身），再落库新计划。
     supersedeAwaitingDrafts(plan.conversationId, plan.planId);
-    return persist(withRunTraceEvent(plan, {
+    const created = persist(withRunTraceEvent(plan, {
       type: createEventType,
       summary: createEventSummary,
       payload: {
@@ -1472,6 +1504,32 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
         taskCount: tasks.length,
       },
     }));
+    if (parentPlan && sourceTask) {
+      const now = new Date().toISOString();
+      const linked = updateTaskInTree(parentPlan.tasks, sourceTask.taskId, (task) => ({
+        ...task,
+        executionMode: 'delegated',
+        childPlanIds: [...new Set([...(task.childPlanIds || []), created.planId])],
+      }));
+      const relationPayload = {
+        parentPlanId: parentPlan.planId,
+        childPlanId: created.planId,
+        sourceTaskId: sourceTask.taskId,
+        rootPlanId: created.rootPlanId,
+      };
+      persist({ ...parentPlan, tasks: linked.tasks, updatedAt: now });
+      appendRunEvent(parentPlan.planId, {
+        type: 'child_goal_created',
+        taskId: sourceTask.taskId,
+        payload: relationPayload,
+      });
+      appendRunEvent(created.planId, {
+        type: 'child_goal_created',
+        taskId: sourceTask.taskId,
+        payload: relationPayload,
+      });
+    }
+    return created;
   }
 
   function createGoalContract(draft = {}) {
@@ -2022,7 +2080,71 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       return updated;
     });
     if (!found) throw new Error(`[goal-plan-store] task ${taskId} not found in plan ${planId}`);
-    return persist({ ...plan, tasks, updatedAt: now });
+    const updatedPlan = persist({ ...plan, tasks, updatedAt: now });
+    if (updatedPlan.parentPlanId && updatedPlan.sourceTaskId) {
+      const childTasks = [];
+      const collectChildLeaves = (tasks) => {
+        for (const task of tasks || []) {
+          if (Array.isArray(task.subtasks) && task.subtasks.length > 0) collectChildLeaves(task.subtasks);
+          else childTasks.push(task);
+        }
+      };
+      collectChildLeaves(updatedPlan.tasks);
+      const childFailed = childTasks.some((task) => task.status === TERMINAL_FAIL || task.status === BLOCKED);
+      const childComplete = childTasks.length > 0 && childTasks.every((task) => task.status === TERMINAL_OK);
+      const childStarted = childTasks.some((task) => task.status !== 'pending');
+      const delegatedStatus = childFailed
+        ? BLOCKED
+        : childComplete
+          ? 'waiting_user'
+          : childStarted
+            ? 'running'
+            : 'pending';
+      const parent = getPlan(updatedPlan.parentPlanId);
+      if (parent) {
+        const linked = updateTaskInTree(parent.tasks, updatedPlan.sourceTaskId, (task) => ({
+          ...task,
+          status: delegatedStatus,
+          executionMode: 'delegated',
+          childPlanIds: [...new Set([...(task.childPlanIds || []), updatedPlan.planId])],
+          ...(childFailed ? { blockedReason: `派生子目标 ${updatedPlan.title} 未成功完成` } : {}),
+        }));
+        if (linked.found) {
+          persist({ ...parent, tasks: linked.tasks, updatedAt: now });
+          const relationEventType = childFailed
+            ? 'child_goal_failed'
+            : childComplete
+              ? 'child_goal_completed'
+              : childStarted
+                ? 'child_goal_started'
+                : null;
+          if (relationEventType) {
+            const payload = {
+              parentPlanId: parent.planId,
+              childPlanId: updatedPlan.planId,
+              sourceTaskId: updatedPlan.sourceTaskId,
+              rootPlanId: updatedPlan.rootPlanId,
+            };
+            const previous = [...(updatedPlan.runTrace?.events || [])].reverse().find((event) =>
+              event.type === relationEventType && event.payload?.parentPlanId === parent.planId,
+            );
+            if (!previous) {
+              appendRunEvent(parent.planId, {
+                type: relationEventType,
+                taskId: updatedPlan.sourceTaskId,
+                payload,
+              });
+              appendRunEvent(updatedPlan.planId, {
+                type: relationEventType,
+                taskId,
+                payload,
+              });
+            }
+          }
+        }
+      }
+    }
+    return getPlan(updatedPlan.planId);
   }
 
   /**

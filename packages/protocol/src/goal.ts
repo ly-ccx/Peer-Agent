@@ -98,6 +98,9 @@ export interface GoalTask {
   /** 同层稳定排序 */
   readonly order: number;
   readonly title: string;
+  /** 子目标委派关系；历史任务可不含这些字段。 */
+  readonly childPlanIds?: readonly string[];
+  readonly executionMode?: 'direct' | 'delegated';
   /** 达成路径 / 步骤 */
   readonly path: string[];
   /** 依赖的 taskId（约束见提案 §4：同层或祖先链之外，禁止成环） */
@@ -451,6 +454,12 @@ export interface GoalPlan {
   readonly originWorkspacePath?: string;
   /** Workspace/repository where the Goal should write and verify changes. */
   readonly targetWorkspacePath?: string;
+  /** 派生目标关系；全部可选以兼容历史计划。 */
+  readonly parentPlanId?: string;
+  readonly sourceTaskId?: string;
+  readonly rootPlanId?: string;
+  readonly relationType?: 'derived';
+  readonly depth?: number;
   readonly title: string;
 
   // 计划实质
