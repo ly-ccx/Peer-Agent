@@ -7,7 +7,10 @@ import path from 'node:path';
 
 import { sendAnthropicMessagesStream } from './provider-adapters/anthropic-messages-adapter.mjs';
 import { sendGeminiStream } from './provider-adapters/gemini-adapter.mjs';
-import { sendOpenAIChatStream } from './provider-adapters/openai-chat-adapter.mjs';
+import {
+  sendOpenAIChatStream,
+  shouldUsePublicOpenAIChatStream,
+} from './provider-adapters/openai-chat-adapter.mjs';
 import { sendOpenAIResponsesStream } from './provider-adapters/openai-responses-adapter.mjs';
 
 function sse(frames) {
@@ -49,6 +52,14 @@ async function readJsonl(filePath) {
 }
 
 describe('Provider adapters', () => {
+  it('uses the public stream consumer only for the official OpenAI chat wire', () => {
+    assert.equal(shouldUsePublicOpenAIChatStream({ channelId: 'openai', wire: 'openai-chat' }), true);
+    assert.equal(shouldUsePublicOpenAIChatStream({ channelId: 'openai-compatible', wire: 'openai-chat' }), false);
+    assert.equal(shouldUsePublicOpenAIChatStream({ channelId: 'openai', wire: 'openai-responses' }), false);
+    assert.equal(shouldUsePublicOpenAIChatStream({ channelId: 'openai', wire: 'openai-chat' }, true), false);
+    assert.equal(shouldUsePublicOpenAIChatStream(null), false);
+  });
+
   it('sends an OpenAI chat request and parses deltas, tool calls, and usage', async () => {
     const previousFetch = globalThis.fetch;
     const events = [];
@@ -93,6 +104,7 @@ describe('Provider adapters', () => {
         maxOutputTokens: 8192,
         webContents: { send: (channel, payload) => events.push({ channel, payload }) },
         streamId: 's1',
+        usePublicStreamConsumer: true,
       });
 
       assert.equal(captured.url, 'https://example.test/v1/chat/completions');

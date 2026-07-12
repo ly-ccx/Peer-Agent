@@ -1,4 +1,7 @@
-import { sendOpenAIChatStream } from '../provider-adapters/openai-chat-adapter.mjs';
+import {
+  sendOpenAIChatStream,
+  shouldUsePublicOpenAIChatStream,
+} from '../provider-adapters/openai-chat-adapter.mjs';
 import { sendOpenAIResponsesStream } from '../provider-adapters/openai-responses-adapter.mjs';
 import {
   createAgentLoopKernel,
@@ -146,6 +149,7 @@ export async function agentLoopOpenAI({
           signal,
           webContents,
           streamId,
+          usePublicStreamConsumer: shouldUsePublicOpenAIChatStream(resolvedChannel, useResponses),
         });
 
         if (!providerResponse.ok) {

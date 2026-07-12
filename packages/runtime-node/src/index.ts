@@ -21,6 +21,39 @@ export type {
   NodeShellProviderOptions,
 } from './provider-contracts.ts';
 export { createNodeFileProvider, NODE_FILE_CAPABILITY_MANIFESTS } from './file-provider.ts';
+export type {
+  ModelCredential,
+  ModelCredentialPort,
+  ModelCredentialRequest,
+  ModelMessage,
+  ModelMessageRole,
+  ModelProvider,
+  ModelProviderRequest,
+  ModelProviderResult,
+  ModelStreamEvent,
+  ModelToolCall,
+  ModelToolDefinition,
+  ModelUsage,
+  OpenAICompatibleProviderConfig,
+} from './model-provider-contracts.ts';
+export {
+  ModelCredentialNotFoundError,
+  resolveOpenAICompatibleProviderConfig,
+} from './model-provider-contracts.ts';
+export type { CreateOpenAICompatibleProviderOptions } from './openai-compatible-provider.ts';
+export type {
+  ConsumeOpenAIChatStreamOptions,
+  OpenAIChatStreamError,
+  OpenAIChatStreamResult,
+} from './openai-chat-stream.ts';
+export {
+  consumeOpenAIChatStream,
+  ModelProviderStreamError,
+} from './openai-chat-stream.ts';
+export {
+  createOpenAICompatibleProvider,
+  ModelProviderHttpError,
+} from './openai-compatible-provider.ts';
 export { createNodeRuntimeHostAdapter } from './host-adapter.ts';
 export { createNodeProviderBundle } from './provider-bundle.ts';
 export {

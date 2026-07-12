@@ -1,9 +1,19 @@
+import { consumeOpenAIChatStream } from '@peer-agent/runtime-node';
+
 import { encodeOpenAIChatRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
 import { parseSseDataPayload, throwIfSseReaderAborted } from './sse-line.mjs';
 import { hasLiteralToolCallSyntax } from '../chat-runtime/response-guard.mjs';
+
+export function shouldUsePublicOpenAIChatStream(resolvedChannel, useResponses = false) {
+  return (
+    !useResponses &&
+    resolvedChannel?.channelId === 'openai' &&
+    resolvedChannel?.wire === 'openai-chat'
+  );
+}
 
 function extractTextLikeDelta(value) {
   if (typeof value === 'string') return value;
@@ -379,6 +389,7 @@ export async function sendOpenAIChatStream({
   signal,
   webContents,
   streamId,
+  usePublicStreamConsumer = false,
 }) {
   const url = endpoint || `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
   const body = encodeOpenAIChatRequest({
@@ -432,7 +443,56 @@ export async function sendOpenAIChatStream({
     };
   }
 
-  const streamResult = await consumeOpenAIStream(res, webContents, streamId, trace, signal);
+  const publicToolCalls = new Map();
+  const streamResult = usePublicStreamConsumer
+    ? await consumeOpenAIChatStream({
+        response: res,
+        providerId: 'openai',
+        signal,
+        malformedPayload: 'ignore',
+        streamErrorMode: 'return',
+        onPayload: (payload, parsed) => trace.recordSsePayload?.(payload, parsed),
+        onMalformedPayload: (payload, error) => trace.recordParseError?.(payload, error),
+        onIgnoredLine: (line) => trace.recordIgnoredLine?.(line),
+        onDone: () => trace.recordDoneMarker?.(),
+        onEvent: (event) => {
+          if (event.type === 'text.delta') {
+            webContents.send('chat:stream:delta', { streamId, content: event.content });
+            return;
+          }
+          if (event.type === 'reasoning.delta') {
+            webContents.send('chat:stream:thinking', { streamId, content: event.content });
+            return;
+          }
+          if (event.type === 'tool_call.delta') {
+            const call = publicToolCalls.get(event.index) ?? { id: '', name: '', arguments: '' };
+            if (event.id) call.id = event.id;
+            if (event.name) call.name += event.name;
+            if (event.arguments) call.arguments += event.arguments;
+            publicToolCalls.set(event.index, call);
+            if (event.arguments) {
+              emitToolArgProgress(call, {
+                webContents,
+                streamId,
+                toolCallId: call.id,
+                toolName: call.name,
+                argsJson: call.arguments,
+              });
+            }
+            return;
+          }
+          if (event.type === 'usage') {
+            webContents.send('chat:stream:usage', { streamId, usage: event.usage });
+          }
+        },
+      }).then((result) => ({
+        content: result.content,
+        thinkingContent: result.reasoningContent ?? '',
+        toolCalls: result.toolCalls,
+        streamUsage: result.usage ?? null,
+        streamError: result.streamError ?? null,
+      }))
+    : await consumeOpenAIStream(res, webContents, streamId, trace, signal);
   if (streamResult.streamError) {
     const errorText = `provider_stream_error: ${streamResult.streamError.message}`;
     const tracePath = await trace.finish({
