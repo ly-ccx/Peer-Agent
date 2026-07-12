@@ -32,10 +32,10 @@ function normalizeMode(value) {
   return 'chat';
 }
 
-// 思考强度（reasoning effort）归一化。与前端 preferences.ts 的 EffortLevel 五档对齐：
-// off / low / default / high / xhigh。非法或缺失值回落 'default'，确保老会话无该字段时
+// 思考强度（reasoning effort）归一化。与前端 preferences.ts 的 EffortLevel 集合对齐：
+// off / low / default / high / xhigh / max。非法或缺失值回落 'default'，确保老会话无该字段时
 // 取全局默认档位，不会把脏值带到 provider 请求里。
-const VALID_EFFORT_LEVELS = new Set(['off', 'low', 'default', 'high', 'xhigh']);
+const VALID_EFFORT_LEVELS = new Set(['off', 'low', 'default', 'high', 'xhigh', 'max']);
 function normalizeEffort(value) {
   return VALID_EFFORT_LEVELS.has(value) ? value : 'default';
 }

@@ -33,7 +33,7 @@ export interface PersistedAttachment {
   text?: string;
 }
 
-export type PersistedEffort = 'off' | 'low' | 'default' | 'high' | 'xhigh';
+export type PersistedEffort = 'off' | 'low' | 'default' | 'high' | 'xhigh' | 'max';
 
 export interface PersistedQueuedMessage {
   id: string;

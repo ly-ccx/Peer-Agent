@@ -11,6 +11,7 @@ function effortLabel(level: EffortLevel, isZh: boolean): string {
   if (level === 'low') return isZh ? '简洁思考' : 'Low reasoning';
   if (level === 'high') return isZh ? '深度思考' : 'High reasoning';
   if (level === 'xhigh') return isZh ? '超深度思考' : 'Extra-high reasoning';
+  if (level === 'max') return isZh ? '最大思考' : 'Max reasoning';
   return isZh ? '标准思考' : 'Default reasoning';
 }
 

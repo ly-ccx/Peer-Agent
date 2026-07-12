@@ -39,18 +39,21 @@ const SUBSCRIPTION_CATALOG = [
     label: 'GPT-5.6 Sol',
     contextWindow: 353_000,
     maxOutputTokens: 128_000,
+    reasoningEffortLevels: ['low', 'default', 'high', 'max'],
   },
   {
     id: 'gpt-5.6-terra',
     label: 'GPT-5.6 Terra',
     contextWindow: 353_000,
     maxOutputTokens: 128_000,
+    reasoningEffortLevels: ['low', 'default', 'high', 'max'],
   },
   {
     id: 'gpt-5.6-luna',
     label: 'GPT-5.6 Luna',
     contextWindow: 353_000,
     maxOutputTokens: 128_000,
+    reasoningEffortLevels: ['low', 'default', 'high', 'max'],
   },
   {
     id: 'gpt-5.4',

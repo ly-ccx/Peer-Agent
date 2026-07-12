@@ -201,9 +201,13 @@ test('effort + modelProviderId are per-conversation: default, persist, isolate, 
     assert.equal(afterEffort.effort, 'high');
     assert.equal(afterEffort.modelProviderId, null);
 
+    // GPT-5.6 等模型的原生 max 档可作为会话真值持久化。
+    const afterMaxEffort = store.updateModelEffort(a.id, { effort: 'max' });
+    assert.equal(afterMaxEffort.effort, 'max');
+
     // 只切模型不影响 effort（两者各自独立）。
     const afterModel = store.updateModelEffort(a.id, { modelProviderId: 'grp1::gpt-x' });
-    assert.equal(afterModel.effort, 'high');
+    assert.equal(afterModel.effort, 'max');
     assert.equal(afterModel.modelProviderId, 'grp1::gpt-x');
 
     // 会话隔离：改 a 不影响 b。

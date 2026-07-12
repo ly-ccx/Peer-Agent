@@ -83,6 +83,16 @@ describe('OpenAI Responses request encoder (ADR 28)', () => {
     assert.equal(body.reasoning.effort, 'xhigh');
   });
 
+  it('passes GPT-5.6 max reasoning through as max', () => {
+    const body = encodeOpenAIResponsesRequest({
+      model: 'gpt-5.6-sol',
+      messages: [{ role: 'user', content: 'hard problem' }],
+      effort: 'max',
+      supportsReasoning: true,
+    });
+    assert.equal(body.reasoning.effort, 'max');
+  });
+
   it('maps Responses reasoning effort through provider-specific effort map', () => {
     const body = encodeOpenAIResponsesRequest({
       model: 'deepseek-reasoner',

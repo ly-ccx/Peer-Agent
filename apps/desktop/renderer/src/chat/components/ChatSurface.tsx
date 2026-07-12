@@ -14,6 +14,7 @@ import { clientApi } from '../../clientApi';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import {
   normalizeEffortLevels,
+  resolveModelSwitchState,
   CHAT_MODES,
   isEffortLevel,
   isLocalAccessLevel,
@@ -672,6 +673,21 @@ export function ChatSurface({
   // 档位列表以后端透传的 provider 原生能力（reasoningEffortLevels）为准，经归一化后渲染；
   // 后端未提供时回退到通用四档。不再按 provider 名硬编码（旧逻辑只认 openai，导致 Anthropic 等被降级到四档）。
   const effortLevels = normalizeEffortLevels(activeProvider?.reasoningEffortLevels);
+  const handleModelChange = useCallback((providerId: string) => {
+    const targetProvider = providers.find((provider) => provider.id === providerId && provider.apiKeyConfigured);
+    const targetEffortLevels = normalizeEffortLevels(targetProvider?.reasoningEffortLevels);
+    const transition = resolveModelSwitchState({
+      providerId,
+      currentEffort: effort,
+      targetLevels: targetEffortLevels,
+    });
+
+    // done 事件里的窗口属于上一模型。切模型后必须立即失效，展示层才能回退到目标
+    // provider 的模型级 contextWindow；下一轮结束后再由新模型快照接管。
+    setAuthoritativeContext(transition.authoritativeContext);
+    changeModelProviderId(transition.modelProviderId);
+    if (transition.effort !== effort) changeEffort(transition.effort);
+  }, [changeEffort, changeModelProviderId, effort, providers, setAuthoritativeContext]);
   const isZh = i18n.locale === 'zh-CN';
   const compactionNoticeLabel = compactionStateLabel(compactionState, isZh);
   const currentTurnContext = useMemo(() => {
@@ -1892,7 +1908,7 @@ export function ChatSurface({
             onEffortChange={changeEffort}
             modelOptions={modelOptions}
             canSwitchModel={canSwitchModel}
-            onModelChange={changeModelProviderId}
+            onModelChange={handleModelChange}
             selectedModelProviderId={modelProviderId}
           />
         </div>

@@ -184,6 +184,17 @@ describe('System Context assembly', () => {
     assert.equal(compactContext.snapshot.mode, 'compact');
   });
 
+  it('preserves max reasoning in governed runtime context', () => {
+    const context = buildSystemContext('/tmp/workspace', {
+      effort: 'max',
+      provider: 'openai',
+      model: 'gpt-5.6-sol',
+    });
+    const modeSection = context.sections.find((section) => section.id === 'runtime.mode');
+    assert.ok(modeSection);
+    assert.match(modeSection.content, /Reasoning effort: max/);
+  });
+
   it('injects the plan mode plan-before-execute reminder into L6 (proposal 0002)', () => {
     const planContext = buildSystemContext('/tmp/workspace', {
       mode: 'plan',

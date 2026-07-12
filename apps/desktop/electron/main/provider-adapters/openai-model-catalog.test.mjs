@@ -55,6 +55,15 @@ test('subscription catalog includes gpt-5.5 pricing and context metadata', () =>
   assert.equal(model.longContextOutputPrice, 45);
 });
 
+test('GPT-5.6 subscription models expose 353k context and max reasoning', () => {
+  for (const id of ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
+    const model = getSubscriptionModelMetadata(id);
+    assert.ok(model);
+    assert.equal(model.contextWindow, 353_000);
+    assert.deepEqual(model.reasoningEffortLevels, ['low', 'default', 'high', 'max']);
+  }
+});
+
 test('subscription model id set covers the catalog, excludes API-only ids', () => {
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.5'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.6-sol'), true);

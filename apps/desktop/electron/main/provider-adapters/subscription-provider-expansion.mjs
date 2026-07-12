@@ -71,6 +71,7 @@ export function expandOneSubscriptionProvider(provider, catalog) {
     cacheWritePrice: model.cacheWritePrice ?? provider.cacheWritePrice,
     supportsVision: model.supportsVision ?? provider.supportsVision ?? false,
     supportsReasoning: model.supportsReasoning ?? provider.supportsReasoning ?? false,
+    reasoningEffortLevels: model.reasoningEffortLevels ?? provider.reasoningEffortLevels,
     supportsPromptCaching: model.supportsPromptCaching ?? provider.supportsPromptCaching ?? false,
     // isDefault 只由「原记录本就是默认」AND「本条是代表模型」共同决定，避免凭空制造全局默认。
     isDefault: Boolean(provider.isDefault) && model.id === primaryModelId,

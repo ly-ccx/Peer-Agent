@@ -9,9 +9,9 @@
 
 import { normalizeOpenAIMessages } from './message-normalizer.mjs';
 
-// OpenAI GPT-5.5 Responses reasoning.effort 支持 none/low/medium/high/xhigh。
-// Peer Agent 的 off 不发 reasoning；其余档位按 provider wire 契约透传。
-const REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'xhigh' };
+// OpenAI Responses reasoning.effort 随模型支持 none/low/medium/high/xhigh/max。
+// Peer Agent 的 off 不发 reasoning；其余档位按目标模型能力与 provider wire 契约透传。
+const REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' };
 
 function positiveTokenLimit(value) {
   const num = Number(value);

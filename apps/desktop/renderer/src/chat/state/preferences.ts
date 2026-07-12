@@ -8,8 +8,8 @@ import type { LocalAccessLevel } from '@peer-agent/protocol';
 //
 // 注意 LocalAccessLevel 跨进程契约类型仍来自 @peer-agent/protocol，不在此重复定义。
 
-/** 思考强度（reasoning effort）五档：off(关闭) / low / default / high / xhigh(Extra High, OpenAI)。 */
-export type EffortLevel = 'off' | 'low' | 'default' | 'high' | 'xhigh';
+/** 思考强度：通用五档 + GPT-5.6 等模型暴露的 max 档。 */
+export type EffortLevel = 'off' | 'low' | 'default' | 'high' | 'xhigh' | 'max';
 
 /** 通用 provider 的思考强度档位（四档）。 */
 export const BASE_EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'low', 'default', 'high'];
@@ -24,11 +24,11 @@ export const OPENAI_EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'low', 'defa
  * - 过滤掉非法值（非 EffortLevel 的字符串一律丢弃）。
  * - 强制把 'off'（关闭思考）放到列表首位：它是通用开关，部分 channel（如 Anthropic/OpenAI）
  *   的 effortLevels 并不含 off，需要补齐；含 off 的（如 Google）则去重后归位。
- * - 按 EffortLevel 的标准顺序（off→low→default→high→xhigh）排序，确保 UI 档位顺序稳定。
+ * - 按 EffortLevel 的标准顺序（off→low→default→high→xhigh→max）排序，确保 UI 档位顺序稳定。
  * - 入参为空 / 全部非法 / 未提供时，回退到通用四档 BASE_EFFORT_LEVELS。
  */
 export function normalizeEffortLevels(raw: readonly string[] | undefined | null): readonly EffortLevel[] {
-  const ORDER: readonly EffortLevel[] = ['off', 'low', 'default', 'high', 'xhigh'];
+  const ORDER: readonly EffortLevel[] = ['off', 'low', 'default', 'high', 'xhigh', 'max'];
   if (!raw || raw.length === 0) return BASE_EFFORT_LEVELS;
   const valid = new Set<EffortLevel>();
   for (const item of raw) {
@@ -41,7 +41,43 @@ export function normalizeEffortLevels(raw: readonly string[] | undefined | null)
 
 /** EffortLevel 类型守卫。 */
 export function isEffortLevel(value: unknown): value is EffortLevel {
-  return value === 'off' || value === 'low' || value === 'default' || value === 'high' || value === 'xhigh';
+  return value === 'off' || value === 'low' || value === 'default' || value === 'high' || value === 'xhigh' || value === 'max';
+}
+
+/**
+ * 切换模型时把会话当前档位投影到目标模型能力集。
+ * xhigh/max 都表达“该模型的最高强度”，跨模型切换时优先保持这一语义。
+ */
+export function resolveModelSwitchEffort(
+  current: EffortLevel,
+  targetLevels: readonly EffortLevel[],
+): EffortLevel {
+  if (targetLevels.includes(current)) return current;
+  if (current === 'xhigh' && targetLevels.includes('max')) return 'max';
+  if (current === 'max' && targetLevels.includes('xhigh')) return 'xhigh';
+  if (targetLevels.includes('default')) return 'default';
+  return targetLevels.find((level) => level !== 'off') ?? 'off';
+}
+
+/** 模型切换的表达层原子状态：绑定目标模型、投影思考档位、废弃旧模型窗口快照。 */
+export function resolveModelSwitchState({
+  providerId,
+  currentEffort,
+  targetLevels,
+}: {
+  providerId: string;
+  currentEffort: EffortLevel;
+  targetLevels: readonly EffortLevel[];
+}): {
+  modelProviderId: string;
+  effort: EffortLevel;
+  authoritativeContext: null;
+} {
+  return {
+    modelProviderId: providerId,
+    effort: resolveModelSwitchEffort(currentEffort, targetLevels),
+    authoritativeContext: null,
+  };
 }
 
 /** LocalAccessLevel 类型守卫（认 4 个合法值，含 restricted_local）。 */

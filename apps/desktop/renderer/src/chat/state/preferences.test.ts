@@ -4,6 +4,8 @@ import {
   BASE_EFFORT_LEVELS,
   OPENAI_EFFORT_LEVELS,
   normalizeEffortLevels,
+  resolveModelSwitchEffort,
+  resolveModelSwitchState,
 } from './preferences.ts';
 
 describe('normalizeEffortLevels', () => {
@@ -30,7 +32,7 @@ describe('normalizeEffortLevels', () => {
     assert.deepEqual(result, ['off', 'default']);
   });
 
-  it('always sorts to canonical order off→low→default→high→xhigh', () => {
+  it('always sorts to canonical order off→low→default→high→xhigh→max', () => {
     const result = normalizeEffortLevels(['xhigh', 'high', 'low', 'default']);
     assert.deepEqual(result, ['off', 'low', 'default', 'high', 'xhigh']);
   });
@@ -43,5 +45,40 @@ describe('normalizeEffortLevels', () => {
   it('drops invalid values but keeps valid ones', () => {
     const result = normalizeEffortLevels(['low', 'bogus', 'high']);
     assert.deepEqual(result, ['off', 'low', 'high']);
+  });
+
+  it('keeps the model-native max level after normalization', () => {
+    assert.deepEqual(
+      normalizeEffortLevels(['low', 'default', 'high', 'max']),
+      ['off', 'low', 'default', 'high', 'max'],
+    );
+  });
+});
+
+describe('resolveModelSwitchEffort', () => {
+  it('maps the previous highest xhigh level to a target model max level', () => {
+    assert.equal(resolveModelSwitchEffort('xhigh', ['off', 'low', 'default', 'high', 'max']), 'max');
+  });
+
+  it('preserves an effort level supported by the target model', () => {
+    assert.equal(resolveModelSwitchEffort('high', ['off', 'low', 'default', 'high', 'max']), 'high');
+  });
+
+  it('falls back to target default when the old level has no equivalent', () => {
+    assert.equal(resolveModelSwitchEffort('low', ['off', 'default']), 'default');
+  });
+});
+
+describe('resolveModelSwitchState', () => {
+  it('switches model capability state atomically and discards the previous context snapshot', () => {
+    assert.deepEqual(resolveModelSwitchState({
+      providerId: 'chatgpt::gpt-5.6-sol',
+      currentEffort: 'xhigh',
+      targetLevels: ['off', 'low', 'default', 'high', 'max'],
+    }), {
+      modelProviderId: 'chatgpt::gpt-5.6-sol',
+      effort: 'max',
+      authoritativeContext: null,
+    });
   });
 });
