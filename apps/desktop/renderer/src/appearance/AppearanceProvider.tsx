@@ -103,6 +103,15 @@ export function AppearanceProvider({
     return () => query.removeEventListener('change', onChange);
   }, []);
 
+  useEffect(() => window.peerAgent?.onAppearanceChanged((appearance) => {
+    if (appearance && typeof appearance === 'object') {
+      const next = sanitizeSettings(appearance);
+      setSettings((current) => (
+        JSON.stringify(current) === JSON.stringify(next) ? current : next
+      ));
+    }
+  }), []);
+
   useEffect(() => {
     saveSettings(settings);
     applyAppearance(activeScheme, settings);

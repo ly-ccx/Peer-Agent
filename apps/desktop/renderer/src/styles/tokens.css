@@ -41,6 +41,14 @@
   --color-azure-seal: #3B7FAB;
   --radius-frost: 12px;
   --radius-frost-sm: 6px;
+  --glass-chrome: hsla(215, 16%, 98%, 0.52);
+  --glass-chrome-hover: hsla(215, 16%, 96%, 0.62);
+  --glass-control: hsla(218, 18%, 96%, 0.56);
+  --glass-popover: hsla(212, 12%, 99%, 0.72);
+  --glass-edge-highlight: inset 0 1px 0 hsla(210, 30%, 100%, 0.55);
+  --blur-chrome: 24px;
+  --blur-control: 16px;
+  --blur-popover: 20px;
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -321,6 +329,11 @@
  * ───────────────────────────────────────────────────────────── */
 [data-theme="dark"] {
   color-scheme: dark;
+  --glass-chrome: hsla(220, 22%, 12%, 0.48);
+  --glass-chrome-hover: hsla(220, 20%, 16%, 0.58);
+  --glass-control: hsla(220, 18%, 18%, 0.52);
+  --glass-popover: hsla(220, 20%, 12%, 0.70);
+  --glass-edge-highlight: inset 0 1px 0 hsla(210, 30%, 100%, 0.14);
 
   /* ─── Frost 正名 token ─── */
   --chrome-canvas: #11141A;

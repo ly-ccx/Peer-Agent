@@ -5,7 +5,6 @@ import type {
   ContextAttachmentItem,
   ContinuityContextItem,
   LlmProviderConfigView,
-  LocalAccessLevel,
 } from '@peer-agent/protocol';
 import type React from 'react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
@@ -15,10 +14,15 @@ import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi }
 import {
   normalizeEffortLevels,
   resolveModelSwitchState,
+  ACCESS_LEVELS,
   CHAT_MODES,
+  accessLevelLabel,
+  accessLevelTitle,
   isEffortLevel,
   isLocalAccessLevel,
   isChatMode,
+  modeLabel,
+  modeTitle,
   normalizeChatMode,
   type EffortLevel,
   type ChatMode,
@@ -108,8 +112,6 @@ import { useWorkbench } from '../../workbench/WorkbenchContext';
 const SCROLL_BOTTOM_THRESHOLD_PX = 64;
 const CURRENT_TURN_CONTEXT_PROBE_PX = 96;
 
-const ACCESS_LEVELS: readonly LocalAccessLevel[] = ['ask_before_local', 'session_local', 'full_local'];
-
 interface ChatTurnMessage {
   readonly msg: ChatMsg;
   readonly index: number;
@@ -175,46 +177,6 @@ function findCurrentTurnIdForScroll(container: HTMLDivElement): string | null {
   if (userMessage && userMessage.getBoundingClientRect().bottom > probeY) return null;
 
   return turnId;
-}
-
-function accessLevelLabel(level: LocalAccessLevel, isZh: boolean): string {
-  if (level === 'full_local') return isZh ? '完全访问' : 'Full access';
-  if (level === 'session_local') return isZh ? '帮我批准' : 'Approve for me';
-  if (level === 'restricted_local') return isZh ? '受限' : 'Restricted';
-  return isZh ? '每次询问' : 'Ask';
-}
-
-function accessLevelTitle(level: LocalAccessLevel, isZh: boolean): string {
-  if (level === 'full_local') {
-    return isZh ? '自动批准所有本地工具调用；请只在信任当前任务时使用' : 'Auto-approve all local tool calls; use only when you trust the current task';
-  }
-  if (level === 'session_local') {
-    return isZh ? '自动批准低/中风险命令；高风险动作仍会询问' : 'Auto-approve low/medium-risk commands; high-risk actions still ask';
-  }
-  if (level === 'restricted_local') {
-    return isZh ? '使用受限本地访问' : 'Use restricted local access';
-  }
-  return isZh ? '所有本地动作都先询问' : 'Ask before local actions';
-}
-
-function modeLabel(mode: ChatMode, isZh: boolean): string {
-  if (mode === 'plan') return isZh ? '计划模式' : 'Plan mode';
-  if (mode === 'goal') return isZh ? '目标模式' : 'Goal mode';
-  return isZh ? '对话模式' : 'Chat mode';
-}
-
-function modeTitle(mode: ChatMode, isZh: boolean): string {
-  if (mode === 'plan') {
-    return isZh
-      ? '先规划后执行：先与你共同产出结构化实现计划，批准后再执行'
-      : 'Plan before execute: co-author a structured plan, then execute after approval';
-  }
-  if (mode === 'goal') {
-    return isZh
-      ? '自驱目标模式：你给目标和边界，Agent 自主推进到可验证完成，只在高风险或需决策时打扰你'
-      : 'Self-driven goal mode: give a goal and boundaries; the agent drives to a verifiable done state, interrupting only for high-risk or decision points';
-  }
-  return isZh ? '直接对话并按需调用工具' : 'Answer directly and call tools as needed';
 }
 
 interface TokenUsageState {

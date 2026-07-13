@@ -133,6 +133,27 @@ export interface ActiveStreamProjection {
   readonly workspacePath: string | null;
 }
 
+export type QuickChatPopoverKind = 'workspace' | 'model' | 'effort' | 'mode' | 'access';
+
+export interface QuickChatPopoverItem {
+  readonly value: string;
+  readonly label: string;
+  readonly detail?: string;
+}
+
+export interface QuickChatPopoverState {
+  readonly kind: QuickChatPopoverKind;
+  readonly items: readonly QuickChatPopoverItem[];
+  readonly selectedValue: string;
+}
+
+export interface QuickChatPopoverAnchorRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 export interface BootstrapPreloadApi {
   readonly getBootstrap: () => Promise<ClientBootstrap>;
   readonly getClientSession: () => Promise<ClientSessionState>;
@@ -306,6 +327,15 @@ export interface BootstrapPreloadApi {
   readonly mcpGetPrompt: (params: { mcpId?: string | number; serverId?: string | number; name: string; arguments?: Record<string, unknown> }) => Promise<unknown>;
   readonly mcpConnectAndRegister: (params: { serverUrl: string; serverName: string }) => Promise<McpConnectionProbeResult & { readonly success: boolean; readonly toolCount: number }>;
   readonly workspaceList: () => Promise<{ workspaces: readonly { path: string; name: string; addedAt: string }[]; activeWorkspace: string | null }>;
+  readonly quickChatHide: () => Promise<{ ok: true }>;
+  readonly quickChatShowPopover: (payload: QuickChatPopoverState & { anchorRect: QuickChatPopoverAnchorRect }) => Promise<{ ok: boolean }>;
+  readonly quickChatHidePopover: () => Promise<{ ok: true }>;
+  readonly quickChatSelectPopoverValue: (value: string) => Promise<{ ok: boolean }>;
+  readonly quickChatSubmit: (params: { conversationId: string; workspacePath: string; openMainWindow: boolean; streamId: string }) => Promise<{ ok: true }>;
+  readonly onQuickChatShown: (listener: () => void) => () => void;
+  readonly onQuickChatPopoverState: (listener: (payload: QuickChatPopoverState) => void) => () => void;
+  readonly onQuickChatPopoverSelected: (listener: (payload: { kind: QuickChatPopoverKind; value: string }) => void) => () => void;
+  readonly onQuickChatPopoverClosed: (listener: () => void) => () => void;
   readonly workspaceEnsureDefault: () => Promise<{ path: string; name: string; created: boolean }>;
   readonly workspaceAdd: () => Promise<{ path: string; name: string; existing: boolean } | null>;
   readonly workspaceSetActive: (params: { path: string | null }) => Promise<{ activeWorkspace: string | null }>;
@@ -500,6 +530,10 @@ export interface BootstrapPreloadApi {
   readonly initialSettings: Record<string, unknown>;
   readonly getSettings: () => Promise<Record<string, unknown>>;
   readonly updateSettings: (partial: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  readonly onAppearanceChanged: (listener: (appearance: unknown) => void) => () => void;
+  readonly getShortcutStatus: () => Promise<{ quickChat: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean } }>;
+  readonly updateShortcut: (accelerator: string) => Promise<{ success: boolean; error: string | null }>;
+  readonly resetShortcut: () => Promise<{ success: boolean; error: string | null }>;
   readonly exportConfig: () => Promise<Record<string, unknown>>;
   readonly importConfig: () => Promise<Record<string, unknown>>;
   // ── Updater ──（主进程负责能力，渲染层只表达）
@@ -513,5 +547,9 @@ export interface BootstrapPreloadApi {
   readonly updaterOpenReleasePage: () => Promise<UpdaterStatus>;
   readonly updaterSetChannel: (preference: UpdateChannelPreference) => Promise<UpdaterStatus>;
   readonly onUpdaterEvent: (listener: (payload: UpdaterEvent) => void) => () => void;
+  readonly onQuickChatOpenConversation: (listener: (payload: {
+    conversationId: string;
+    workspacePath: string;
+  }) => void) => () => void;
   readonly onRuntimeEvent: (listener: (payload: RuntimeSdkEvent) => void) => () => void;
 }

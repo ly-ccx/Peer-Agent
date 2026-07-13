@@ -1,0 +1,156 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  createQuickChatWindowController,
+  resolveQuickChatBounds,
+  resolveQuickChatPopoverBounds,
+  resolveQuickChatPopoverSize,
+  resolveQuickChatWindowBackground,
+} from './quick-chat-window.mjs';
+
+function createFakeWindow(initialBounds = { x: 100, y: 100, width: 720, height: 104 }) {
+  const handlers = new Map();
+  const calls = [];
+  let destroyed = false;
+  let visible = false;
+  let devtoolsOpen = false;
+  let bounds = { ...initialBounds };
+  return {
+    calls,
+    webContents: {
+      isDevToolsOpened: () => devtoolsOpen,
+      isLoading: () => false,
+      once: (event, handler) => handlers.set(`webContents:${event}`, handler),
+      send: (...args) => calls.push(['send', ...args]),
+    },
+    on: (event, handler) => handlers.set(event, handler),
+    emit: (event) => handlers.get(event)?.(),
+    isDestroyed: () => destroyed,
+    isVisible: () => visible,
+    getBounds: () => ({ ...bounds }),
+    setBounds: (nextBounds, animate) => { bounds = { ...bounds, ...nextBounds }; calls.push(['setBounds', nextBounds, animate]); },
+    setAlwaysOnTop: (...args) => calls.push(['setAlwaysOnTop', ...args]),
+    setVisibleOnAllWorkspaces: (...args) => calls.push(['setVisibleOnAllWorkspaces', ...args]),
+    show: () => { visible = true; calls.push(['show']); },
+    hide: () => { visible = false; calls.push(['hide']); },
+    focus: () => calls.push(['focus']),
+    close: () => { destroyed = true; handlers.get('closed')?.(); },
+    setDevtoolsOpen: (value) => { devtoolsOpen = value; },
+  };
+}
+
+const screen = {
+  getCursorScreenPoint: () => ({ x: 1200, y: 200 }),
+  getAllDisplays: () => [
+    { bounds: { x: 0, y: 0, width: 1000, height: 800 }, workArea: { x: 0, y: 0, width: 1000, height: 760 } },
+    { bounds: { x: 1000, y: 0, width: 1200, height: 900 }, workArea: { x: 1000, y: 20, width: 1200, height: 840 } },
+  ],
+  getDisplayMatching: () => ({ bounds: { x: 0, y: 0, width: 1000, height: 800 }, workArea: { x: 0, y: 0, width: 1000, height: 760 } }),
+};
+
+test('resolves a solid window background for light, dark, and system themes', () => {
+  assert.equal(resolveQuickChatWindowBackground({ mode: 'light' }, true), '#F7F8FA');
+  assert.equal(resolveQuickChatWindowBackground({ mode: 'dark' }, false), '#11141A');
+  assert.equal(resolveQuickChatWindowBackground({ mode: 'system' }, false), '#F7F8FA');
+  assert.equal(resolveQuickChatWindowBackground({ mode: 'system' }, true), '#11141A');
+});
+
+test('positions the floating window on the display containing the cursor', () => {
+  assert.deepEqual(resolveQuickChatBounds({
+    cursorPoint: screen.getCursorScreenPoint(), displays: screen.getAllDisplays(), size: { width: 600, height: 200 },
+  }), { x: 1300, y: 154, width: 600, height: 200 });
+});
+
+test('sizes the external popover from its item count instead of reserving an empty fixed panel', () => {
+  assert.deepEqual(resolveQuickChatPopoverSize({
+    kind: 'workspace',
+    items: [
+      { label: 'one', detail: '/workspaces/one' },
+      { label: 'two', detail: '/workspaces/two' },
+    ],
+  }), { width: 280, height: 100 });
+  assert.deepEqual(resolveQuickChatPopoverSize({
+    kind: 'effort',
+    items: [{ label: '标准思考' }, { label: '深度思考' }],
+  }), { width: 240, height: 72 });
+});
+
+test('positions the external popover below its button and flips above near the screen edge', () => {
+  const size = { width: 280, height: 100 };
+  assert.deepEqual(resolveQuickChatPopoverBounds(
+    { x: 100, y: 100, width: 720, height: 104 },
+    { x: 200, y: 72, width: 100, height: 24 },
+    { x: 0, y: 0, width: 1000, height: 760 },
+    size,
+  ), { x: 300, y: 202, width: 280, height: 100 });
+  assert.deepEqual(resolveQuickChatPopoverBounds(
+    { x: 100, y: 650, width: 720, height: 104 },
+    { x: 20, y: 72, width: 100, height: 24 },
+    { x: 0, y: 0, width: 1000, height: 760 },
+    size,
+  ), { x: 120, y: 544, width: 280, height: 100 });
+});
+
+test('creates one main window and toggles its visibility', () => {
+  let creations = 0;
+  const window = createFakeWindow();
+  const controller = createQuickChatWindowController({ screen, createWindow: () => { creations += 1; return window; }, createPopoverWindow: () => createFakeWindow() });
+  assert.equal(controller.toggle(), true);
+  assert.equal(controller.toggle(), false);
+  assert.equal(controller.show(), window);
+  assert.equal(creations, 1);
+  assert.equal(window.getBounds().height, 104);
+});
+
+test('shows one external popover and sends a validated selection to the main window', () => {
+  const parent = createFakeWindow();
+  const popover = createFakeWindow({ x: 0, y: 0, width: 420, height: 220 });
+  const controller = createQuickChatWindowController({ screen, createWindow: () => parent, createPopoverWindow: () => popover });
+  controller.show();
+  assert.equal(controller.showPopover({
+    kind: 'model', selectedValue: 'model-a', anchorRect: { x: 180, y: 72, width: 100, height: 24 },
+    items: [{ value: 'model-a', label: 'Model A' }, { value: 'model-b', label: 'Model B' }],
+  }), true);
+  assert.equal(parent.getBounds().height, 104);
+  assert.equal(popover.isVisible(), true);
+  assert.equal(popover.calls.some(([name, channel]) => name === 'send' && channel === 'quick-chat-popover:state'), true);
+  assert.equal(controller.selectPopoverValue('missing'), false);
+  assert.equal(controller.selectPopoverValue('model-b'), true);
+  assert.equal(popover.isVisible(), false);
+  assert.equal(parent.calls.some(([name, channel, payload]) => name === 'send' && channel === 'quick-chat:popover-selected' && payload.value === 'model-b'), true);
+});
+
+test('keeps the main window visible while focus moves to the popover', () => {
+  const parent = createFakeWindow();
+  const popover = createFakeWindow();
+  const controller = createQuickChatWindowController({ screen, createWindow: () => parent, createPopoverWindow: () => popover });
+  controller.show();
+  controller.showPopover({ kind: 'workspace', selectedValue: '/one', anchorRect: {}, items: [{ value: '/one', label: 'one' }] });
+  parent.emit('blur');
+  assert.equal(parent.isVisible(), true);
+  popover.emit('blur');
+  assert.equal(popover.isVisible(), false);
+  assert.equal(parent.isVisible(), true);
+});
+
+test('hides on blur but remains visible while devtools is open', () => {
+  const window = createFakeWindow();
+  const controller = createQuickChatWindowController({ screen, createWindow: () => window, createPopoverWindow: () => createFakeWindow() });
+  controller.show();
+  window.setDevtoolsOpen(true);
+  window.emit('blur');
+  assert.equal(window.isVisible(), true);
+  window.setDevtoolsOpen(false);
+  window.emit('blur');
+  assert.equal(window.isVisible(), false);
+});
+
+test('recreates the singleton after it is closed', () => {
+  const windows = [createFakeWindow(), createFakeWindow()];
+  let index = 0;
+  const controller = createQuickChatWindowController({ screen, createWindow: () => windows[index++], createPopoverWindow: () => createFakeWindow() });
+  controller.show();
+  windows[0].close();
+  assert.equal(controller.show(), windows[1]);
+  assert.equal(index, 2);
+});

@@ -2,6 +2,8 @@ import { createI18n } from '@peer-agent/i18n';
 import type { LlmProviderConfigView } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SettingsPage } from './app/components/SettingsPage';
+import { QuickChatPopover } from './app/components/QuickChatPopover';
+import { QuickChatWindow } from './app/components/QuickChatWindow';
 import { useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { ChatSurface } from './chat/components/ChatSurface';
 import { Sidebar } from './chat/components/Sidebar';
@@ -39,6 +41,14 @@ function readGitBranchPrefix(settings: Record<string, unknown> | null | undefine
 }
 
 export function App() {
+  const windowView = new URLSearchParams(window.location.search).get('window');
+  if (windowView === 'quick-chat') return <QuickChatWindow />;
+  if (windowView === 'quick-chat-popover') return <QuickChatPopover />;
+
+  return <MainApp />;
+}
+
+function MainApp() {
   const { availableLocales, initError, refreshBootstrap, session } = useDesktopBootstrap();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [activePage, setActivePage] = useState<AppPage>('chat');
@@ -104,6 +114,17 @@ export function App() {
       setGitBranchPrefix(readGitBranchPrefix(settings));
     } catch {}
   }, []);
+
+  useEffect(() => {
+    return clientApi.onQuickChatOpenConversation(({ conversationId, workspacePath }) => {
+      void (async () => {
+        await clientApi.workspaceSetActive({ path: workspacePath });
+        setActiveWorkspace(workspacePath);
+        await refreshConversations(workspacePath, conversationView);
+        setActiveConversationId(conversationId);
+      })().catch(() => {});
+    });
+  }, [conversationView, refreshConversations]);
 
   useEffect(() => {
     void refreshProviders();

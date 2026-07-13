@@ -7,9 +7,10 @@ import { GeneralPanel } from './GeneralPanel';
 import { GitPanel } from './GitPanel';
 import { LlmSettingsPanel } from './LlmSettingsPanel';
 import { SystemInstructionsPanel } from './SystemInstructionsPanel';
+import { ShortcutsPanel } from './ShortcutsPanel';
 import { UpdatesPanel } from './UpdatesPanel';
 
-type SettingsSection = 'general' | 'model' | 'skills' | 'instructions' | 'git' | 'appearance' | 'updates';
+type SettingsSection = 'general' | 'model' | 'skills' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates';
 
 /**
  * SettingsPage 是设置入口的单一表达层:
@@ -52,6 +53,7 @@ export function SettingsPage({
     { key: 'skills', label: localizedSettingsLabels.skills },
     { key: 'instructions', label: localizedSettingsLabels.instructions },
     { key: 'git', label: i18n.t('settings.git') },
+    { key: 'shortcuts', label: i18n.locale === 'zh-CN' ? '快捷键' : 'Keyboard shortcuts' },
     { key: 'appearance', label: i18n.t('appearance.title') },
     { key: 'updates', label: i18n.t('updater.settings.title') },
   ];
@@ -126,6 +128,8 @@ export function SettingsPage({
           />
         ) : section === 'git' ? (
           <GitPanel i18n={i18n} onGitBranchPrefixChanged={onGitBranchPrefixChanged} />
+        ) : section === 'shortcuts' ? (
+          <ShortcutsPanel />
         ) : section === 'updates' ? (
           <UpdatesPanel i18n={i18n} />
         ) : (

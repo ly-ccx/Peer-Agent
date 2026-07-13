@@ -97,6 +97,43 @@ export function isLocalAccessLevel(value: unknown): value is LocalAccessLevel {
 // 腾空后重新承载自驱语义。因此这里不再把 'goal' 兼容映射为 'plan'。
 export type ChatMode = 'chat' | 'plan' | 'goal';
 
+export const ACCESS_LEVELS: readonly LocalAccessLevel[] = ['ask_before_local', 'session_local', 'full_local'];
+
+export function accessLevelLabel(level: LocalAccessLevel, isZh: boolean): string {
+  if (level === 'full_local') return isZh ? '完全访问' : 'Full access';
+  if (level === 'session_local') return isZh ? '帮我批准' : 'Approve for me';
+  if (level === 'restricted_local') return isZh ? '受限' : 'Restricted';
+  return isZh ? '每次询问' : 'Ask';
+}
+
+export function accessLevelTitle(level: LocalAccessLevel, isZh: boolean): string {
+  if (level === 'full_local') return isZh ? '自动批准所有本地工具调用；请只在信任当前任务时使用' : 'Auto-approve all local tool calls; use only when you trust the current task';
+  if (level === 'session_local') return isZh ? '自动批准低/中风险命令；高风险动作仍会询问' : 'Auto-approve low/medium-risk commands; high-risk actions still ask';
+  if (level === 'restricted_local') return isZh ? '使用受限本地访问' : 'Use restricted local access';
+  return isZh ? '所有本地动作都先询问' : 'Ask before local actions';
+}
+
+export function modeLabel(mode: ChatMode, isZh: boolean): string {
+  if (mode === 'plan') return isZh ? '计划模式' : 'Plan mode';
+  if (mode === 'goal') return isZh ? '目标模式' : 'Goal mode';
+  return isZh ? '对话模式' : 'Chat mode';
+}
+
+export function modeTitle(mode: ChatMode, isZh: boolean): string {
+  if (mode === 'plan') return isZh ? '先规划后执行：先与你共同产出结构化实现计划，批准后再执行' : 'Plan before execute: co-author a structured plan, then execute after approval';
+  if (mode === 'goal') return isZh ? '自驱目标模式：你给目标和边界，Agent 自主推进到可验证完成，只在高风险或需决策时打扰你' : 'Self-driven goal mode: give a goal and boundaries; the agent drives to a verifiable done state, interrupting only for high-risk or decision points';
+  return isZh ? '直接对话并按需调用工具' : 'Answer directly and call tools as needed';
+}
+
+export function effortLabel(level: EffortLevel, isZh: boolean): string {
+  if (level === 'off') return isZh ? '关闭思考' : 'Reasoning off';
+  if (level === 'low') return isZh ? '简洁思考' : 'Low reasoning';
+  if (level === 'high') return isZh ? '深度思考' : 'High reasoning';
+  if (level === 'xhigh') return isZh ? '超深度思考' : 'Extra-high reasoning';
+  if (level === 'max') return isZh ? '超深度思考' : 'Extra-high reasoning';
+  return isZh ? '标准思考' : 'Default reasoning';
+}
+
 /** 合法对话模式枚举。 */
 export const CHAT_MODES: readonly ChatMode[] = ['chat', 'plan', 'goal'];
 

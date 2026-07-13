@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, webContents } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, screen, shell, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -27,6 +27,13 @@ import { createSkillStore } from './skill-store.mjs';
 import { createShellEnvSnapshot } from './runtime-gateway/shell-env-snapshot.mjs';
 import { getDataHome, migrateFromLegacy, exportBundle, importBundle } from './data-store.mjs';
 import { createSettingsStore } from './settings-store.mjs';
+import { createShortcutService } from './shortcut-service.mjs';
+import {
+  createQuickChatWindowController,
+  DEFAULT_SIZE as QUICK_CHAT_SIZE,
+  POPOVER_MAX_SIZE as QUICK_CHAT_POPOVER_SIZE,
+  resolveQuickChatWindowBackground,
+} from './quick-chat-window.mjs';
 import { createMcpRegistry } from './mcp-registry.mjs';
 import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-credential-store.mjs';
 import { disconnectMcp, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMcpResource, startMcpOAuth, testMcpConnection } from './mcp-client.mjs';
@@ -847,6 +854,115 @@ function buildRuntimeProjection() {
   };
 }
 
+function loadRendererWindow(targetWindow, query = {}) {
+  if (isDev) {
+    const url = new URL(process.env.VITE_DEV_SERVER_URL);
+    Object.entries(query).forEach(([key, value]) => url.searchParams.set(key, value));
+    void targetWindow.loadURL(url.toString());
+  } else {
+    const indexPath = isPackaged
+      ? path.join(__dirname, '../../dist/index.html')
+      : path.join(workspaceRoot, 'apps/desktop/dist/index.html');
+    void targetWindow.loadFile(indexPath, { query });
+  }
+}
+
+function createQuickChatWindow() {
+  const backgroundColor = resolveQuickChatWindowBackground(
+    settingsStore.getAll().appearance,
+    nativeTheme.shouldUseDarkColors,
+  );
+  const quickWindow = new BrowserWindow({
+    ...QUICK_CHAT_SIZE,
+    minWidth: QUICK_CHAT_SIZE.width,
+    maxWidth: QUICK_CHAT_SIZE.width,
+    minHeight: QUICK_CHAT_SIZE.height,
+    maxHeight: QUICK_CHAT_SIZE.height,
+    useContentSize: true,
+    backgroundColor,
+    show: false,
+    frame: false,
+    roundedCorners: true,
+    resizable: false,
+    hasShadow: true,
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/preload.cjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  loadRendererWindow(quickWindow, { window: 'quick-chat' });
+  return quickWindow;
+}
+
+function createQuickChatPopoverWindow(parentWindow) {
+  const backgroundColor = resolveQuickChatWindowBackground(
+    settingsStore.getAll().appearance,
+    nativeTheme.shouldUseDarkColors,
+  );
+  const popoverWindow = new BrowserWindow({
+    ...QUICK_CHAT_POPOVER_SIZE,
+    parent: parentWindow,
+    show: false,
+    frame: false,
+    roundedCorners: true,
+    resizable: false,
+    hasShadow: true,
+    backgroundColor,
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/preload.cjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  loadRendererWindow(popoverWindow, { window: 'quick-chat-popover' });
+  return popoverWindow;
+}
+
+const quickChatWindowController = createQuickChatWindowController({
+  screen,
+  createWindow: createQuickChatWindow,
+  createPopoverWindow: createQuickChatPopoverWindow,
+});
+const shortcutService = createShortcutService({
+  globalShortcut,
+  settingsStore,
+  onQuickChat: () => quickChatWindowController.toggle(),
+});
+
+ipcMain.handle('shortcuts:status', () => shortcutService.status());
+ipcMain.handle('shortcuts:update', (_event, accelerator) => shortcutService.update(accelerator));
+ipcMain.handle('shortcuts:reset', () => shortcutService.reset());
+
+ipcMain.handle('quick-chat:hide', () => {
+  quickChatWindowController.hide();
+  return { ok: true };
+});
+ipcMain.handle('quick-chat-popover:show', (_event, payload = {}) => ({
+  ok: quickChatWindowController.showPopover(payload),
+}));
+ipcMain.handle('quick-chat-popover:hide', () => {
+  quickChatWindowController.hidePopover({ restoreFocus: true });
+  return { ok: true };
+});
+ipcMain.handle('quick-chat-popover:select', (_event, value) => ({
+  ok: quickChatWindowController.selectPopoverValue(value),
+}));
+ipcMain.handle('quick-chat:submit', (_event, payload = {}) => {
+  quickChatWindowController.hide();
+  if (payload.openMainWindow) {
+    const mainWindow = BrowserWindow.getAllWindows().find((window) => window.__peerAgentMainWindow === true);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send('quick-chat:open-conversation', payload);
+    }
+  }
+  return { ok: true };
+});
+
 function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1280,
@@ -865,6 +981,7 @@ function createWindow() {
       webviewTag: true,
     },
   });
+  mainWindow.__peerAgentMainWindow = true;
 
   // 全屏状态作为窗口的权威事实，由主进程广播给渲染层。
   // macOS 原生全屏会隐藏交通灯，但 :fullscreen CSS 伪类在 Electron 原生全屏下不可靠，
@@ -931,6 +1048,23 @@ ipcMain.handle('settings:get', () => settingsStore.getAll());
 ipcMain.handle('settings:update', (_event, partial) => {
   const before = settingsStore.getAll();
   const next = settingsStore.merge(partial);
+  if (
+    partial
+    && typeof partial === 'object'
+    && !Array.isArray(partial)
+    && Object.prototype.hasOwnProperty.call(partial, 'appearance')
+  ) {
+    const backgroundColor = resolveQuickChatWindowBackground(
+      next.appearance,
+      nativeTheme.shouldUseDarkColors,
+    );
+    const quickWindow = quickChatWindowController.getWindow();
+    const popoverWindow = quickChatWindowController.getPopoverWindow();
+    quickWindow?.setBackgroundColor(backgroundColor);
+    popoverWindow?.setBackgroundColor(backgroundColor);
+    quickWindow?.webContents.send('appearance:changed', next.appearance);
+    popoverWindow?.webContents.send('appearance:changed', next.appearance);
+  }
   if (
     partial
     && typeof partial === 'object'
@@ -2314,6 +2448,13 @@ function flushPendingRuntimeEvents() {
 
 app.whenReady().then(async () => {
   setDockIcon();
+  nativeTheme.on('updated', () => {
+    const appearance = settingsStore.getAll().appearance;
+    if (appearance?.mode !== 'system') return;
+    const backgroundColor = resolveQuickChatWindowBackground(appearance, nativeTheme.shouldUseDarkColors);
+    quickChatWindowController.getWindow()?.setBackgroundColor(backgroundColor);
+    quickChatWindowController.getPopoverWindow()?.setBackgroundColor(backgroundColor);
+  });
   const userDataPath = dataHome;
   const disableLocalSkill = process.env.PEER_AGENT_DISABLE_LOCAL_SKILL === '1';
   // a1 公共 skill 仓（~/.agents/skills）作为「借用来源」：不再自动合并，只用于
@@ -2384,6 +2525,10 @@ app.whenReady().then(async () => {
   });
 
   createWindow();
+  const shortcutRegistration = shortcutService.register();
+  if (!shortcutRegistration.success) {
+    console.warn('[shortcuts] Quick Chat global shortcut unavailable:', shortcutRegistration.error);
+  }
 
   // 自定义应用菜单替换 Electron 默认菜单：移除生产环境整窗 Reload/Force Reload，
   // ⌘R 收归为「刷新内嵌浏览器页」（初始无活动浏览器页时置灰）。
@@ -2416,6 +2561,7 @@ app.on('window-all-closed', () => {
 
 // 退出前清理自动更新周期检测定时器，避免定时器泄漏。
 app.on('before-quit', () => {
+  shortcutService.dispose();
   try {
     stopAutoUpdater();
   } catch (err) {

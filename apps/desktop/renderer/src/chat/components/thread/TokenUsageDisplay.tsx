@@ -3,20 +3,11 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties
 import { createPortal } from 'react-dom';
 import type { DropdownOption } from '../../../app/components/Dropdown';
 import { CascadingMenu, type CascadingMenuGroup } from '../../../app/components/CascadingMenu';
-import { isEffortLevel, type EffortLevel } from '../../state/preferences';
+import { effortLabel, isEffortLevel, type EffortLevel } from '../../state/preferences';
 import { formatTokenCount } from '../../state/format';
 import { getProviderDisplayName } from '../../state/providerDisplay';
 import { effortIndexForLevel, effortIndexFromValue, effortLevelForDisplay, snapEffortValue } from './effortSlider';
 import type { TokenUsageState } from '../../state/types';
-
-function effortLabel(level: EffortLevel, isZh: boolean): string {
-  if (level === 'off') return isZh ? '关闭思考' : 'Reasoning off';
-  if (level === 'low') return isZh ? '简洁思考' : 'Low reasoning';
-  if (level === 'high') return isZh ? '深度思考' : 'High reasoning';
-  if (level === 'xhigh') return isZh ? '超深度思考' : 'Extra-high reasoning';
-  if (level === 'max') return isZh ? '最大思考' : 'Max reasoning';
-  return isZh ? '标准思考' : 'Default reasoning';
-}
 
 function ReasoningEffortSlider({
   effort,

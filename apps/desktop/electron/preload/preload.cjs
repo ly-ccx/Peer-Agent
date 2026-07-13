@@ -14,6 +14,14 @@ contextBridge.exposeInMainWorld('peerAgent', {
   initialSettings: readInitialSettings(),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (partial) => ipcRenderer.invoke('settings:update', partial),
+  onAppearanceChanged: (listener) => {
+    const handler = (_event, appearance) => listener(appearance);
+    ipcRenderer.on('appearance:changed', handler);
+    return () => ipcRenderer.removeListener('appearance:changed', handler);
+  },
+  getShortcutStatus: () => ipcRenderer.invoke('shortcuts:status'),
+  updateShortcut: (accelerator) => ipcRenderer.invoke('shortcuts:update', accelerator),
+  resetShortcut: () => ipcRenderer.invoke('shortcuts:reset'),
   getDeveloperSettings: () => ipcRenderer.invoke('developer-settings:get'),
   updateDeveloperSettings: (partial) => ipcRenderer.invoke('developer-settings:update', partial),
   resetDeveloperSettings: () => ipcRenderer.invoke('developer-settings:reset'),
@@ -54,6 +62,31 @@ contextBridge.exposeInMainWorld('peerAgent', {
   linkSkill: (skillId) => ipcRenderer.invoke('skills:link', { skillId }),
   unlinkSkill: (skillId) => ipcRenderer.invoke('skills:unlink', { skillId }),
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
+  quickChatHide: () => ipcRenderer.invoke('quick-chat:hide'),
+  quickChatShowPopover: (payload) => ipcRenderer.invoke('quick-chat-popover:show', payload),
+  quickChatHidePopover: () => ipcRenderer.invoke('quick-chat-popover:hide'),
+  quickChatSelectPopoverValue: (value) => ipcRenderer.invoke('quick-chat-popover:select', value),
+  quickChatSubmit: (params) => ipcRenderer.invoke('quick-chat:submit', params),
+  onQuickChatShown: (listener) => {
+    const handler = () => listener();
+    ipcRenderer.on('quick-chat:shown', handler);
+    return () => ipcRenderer.removeListener('quick-chat:shown', handler);
+  },
+  onQuickChatPopoverState: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('quick-chat-popover:state', handler);
+    return () => ipcRenderer.removeListener('quick-chat-popover:state', handler);
+  },
+  onQuickChatPopoverSelected: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('quick-chat:popover-selected', handler);
+    return () => ipcRenderer.removeListener('quick-chat:popover-selected', handler);
+  },
+  onQuickChatPopoverClosed: (listener) => {
+    const handler = () => listener();
+    ipcRenderer.on('quick-chat:popover-closed', handler);
+    return () => ipcRenderer.removeListener('quick-chat:popover-closed', handler);
+  },
   workspaceEnsureDefault: () => ipcRenderer.invoke('workspace:ensure-default'),
   workspaceAdd: () => ipcRenderer.invoke('workspace:add'),
   workspaceSetActive: (params) => ipcRenderer.invoke('workspace:set-active', params),
@@ -234,6 +267,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('updater:event', handler);
     return () => ipcRenderer.removeListener('updater:event', handler);
+  },
+  onQuickChatOpenConversation: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('quick-chat:open-conversation', handler);
+    return () => ipcRenderer.removeListener('quick-chat:open-conversation', handler);
   },
   onRuntimeEvent: (listener) => {
     const handler = (_event, payload) => listener(payload);
