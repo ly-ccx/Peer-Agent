@@ -95,17 +95,17 @@
 }
 .sidebar-brand-mark {
   position: relative;
-  width: 22px;
-  height: 22px;
-  flex: 0 0 22px;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
   display: block;
 }
 .sidebar-brand-icon {
   position: absolute;
   inset: 0;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   object-fit: cover;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--chrome-hairline) 70%, transparent);
 }
@@ -118,18 +118,27 @@
 [data-theme="dark"] .sidebar-brand-icon.dark {
   display: block;
 }
-.sidebar-brand-title {
-  font-family: var(--font-serif-zh);
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--graphite-base);
-  letter-spacing: 0.03em;
-}
 .sidebar-brand-copy {
   display: flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
+  flex: 0 1 136px;
+}
+.brand-wordmark {
+  display: block;
+  width: 136px;
+  height: 32px;
+  min-width: 0;
+  overflow: visible;
+}
+.brand-wordmark-text {
+  fill: var(--graphite-base);
+}
+[data-theme="dark"] .brand-wordmark-peer-arc {
+  stroke: #e18a75;
+}
+[data-theme="dark"] .brand-wordmark-agent-dot {
+  fill: #829bd4;
 }
 .sidebar-runtime-badge {
   display: inline-flex;

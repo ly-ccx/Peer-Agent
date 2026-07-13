@@ -1,6 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { BrandWordmark } from '../../app/components/BrandWordmark';
 import { VersionBadge } from '../../app/components/VersionBadge';
 import { SidebarResizer } from '../../workbench/SidebarResizer';
 import {
@@ -529,7 +530,7 @@ export function Sidebar({
           <img className="sidebar-brand-icon dark" src="./logo-dark.png" alt="" />
         </span>
         <span className="sidebar-brand-copy">
-          <span className="sidebar-brand-title">Peer Agent</span>
+          <BrandWordmark />
         </span>
         <VersionBadge i18n={i18n} />
       </div>
