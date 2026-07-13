@@ -111,6 +111,20 @@ test('shows one external popover and sends a validated selection to the main win
     kind: 'model', selectedValue: 'model-a', anchorRect: { x: 180, y: 72, width: 100, height: 24 },
     items: [{ value: 'model-a', label: 'Model A' }, { value: 'model-b', label: 'Model B' }],
   }), true);
+  const expectedWorkspaceOptions = {
+    visibleOnFullScreen: true,
+    skipTransformProcessType: true,
+  };
+  assert.equal(parent.calls.some(([name, visible, options]) => (
+    name === 'setVisibleOnAllWorkspaces'
+    && visible === true
+    && assert.deepEqual(options, expectedWorkspaceOptions) === undefined
+  )), true);
+  assert.equal(popover.calls.some(([name, visible, options]) => (
+    name === 'setVisibleOnAllWorkspaces'
+    && visible === true
+    && assert.deepEqual(options, expectedWorkspaceOptions) === undefined
+  )), true);
   assert.equal(parent.getBounds().height, 104);
   assert.equal(popover.isVisible(), true);
   assert.equal(popover.calls.some(([name, channel]) => name === 'send' && channel === 'quick-chat-popover:state'), true);

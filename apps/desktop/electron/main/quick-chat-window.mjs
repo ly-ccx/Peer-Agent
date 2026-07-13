@@ -135,7 +135,10 @@ export function createQuickChatWindowController({ screen, createWindow, createPo
     const picker = ensurePopoverWindow();
     positionPopover();
     picker.setAlwaysOnTop(true, 'floating');
-    picker.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    picker.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
     const sendState = () => picker.webContents.send('quick-chat-popover:state', popoverState);
     if (picker.webContents.isLoading?.()) picker.webContents.once?.('did-finish-load', sendState);
     else sendState();
@@ -161,7 +164,10 @@ export function createQuickChatWindowController({ screen, createWindow, createPo
     });
     win.setBounds(bounds, false);
     win.setAlwaysOnTop(true, 'floating');
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    win.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
     win.show();
     win.focus();
     win.webContents.send('quick-chat:shown');
