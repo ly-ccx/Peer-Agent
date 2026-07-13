@@ -27,6 +27,95 @@
   /* 与 .goal-panel--docked 同款灯条，保持视觉一致；本变体当前不额外覆盖样式。 */
 }
 
+/* 待审批只展示紧凑的一行摘要和决策，不在聊天底部投影完整计划详情。 */
+.goal-plan-compact-approval {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--ui-border-subtle, var(--za-line));
+  color: var(--za-text-soft);
+  font-size: var(--ui-font-meta, 12px);
+}
+
+.goal-plan-compact-approval-status {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: var(--ui-radius-round, 999px);
+  background: var(--za-warn-soft);
+  color: var(--za-warn);
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.goal-plan-compact-approval-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--za-text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goal-plan-compact-approval-progress {
+  flex: none;
+  color: var(--za-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.goal-plan-compact-approval-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.goal-plan-compact-approval-action {
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--ui-radius-control, var(--za-radius-sm));
+  background: transparent;
+  color: var(--za-text-soft);
+  font: inherit;
+  cursor: pointer;
+}
+
+.goal-plan-compact-approval-action:hover:not(:disabled) {
+  background: var(--ui-surface-hover, var(--za-hover));
+  color: var(--za-text);
+}
+
+.goal-plan-compact-approval-action--start {
+  background: var(--za-primary-control-bg);
+  color: var(--za-primary-control-ink);
+}
+
+.goal-plan-compact-approval-action--start:hover:not(:disabled) {
+  background: var(--za-active);
+}
+
+.goal-plan-compact-approval-action--cancel {
+  color: var(--za-warn);
+}
+
+.goal-plan-compact-approval-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+@media (max-width: 680px) {
+  .goal-plan-compact-approval {
+    flex-wrap: wrap;
+  }
+
+  .goal-plan-compact-approval-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
 .goal-panel-toggle {
   display: flex;
   align-items: center;

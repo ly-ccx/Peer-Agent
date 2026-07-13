@@ -1255,6 +1255,49 @@ function ExplorerItem({
   );
 }
 
+interface CompactApprovalBarProps {
+  readonly plan: GoalPlan;
+  readonly isZh: boolean;
+  readonly busy: boolean;
+  readonly isStreaming: boolean;
+  readonly onNextAction: (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => void | Promise<void>;
+}
+
+/** The chat-bottom approval surface deliberately stays to one compact row. */
+function CompactApprovalBar({
+  plan,
+  isZh,
+  busy,
+  isStreaming,
+  onNextAction,
+}: CompactApprovalBarProps): ReactElement {
+  const progress = safeProgress(plan);
+  const title = derivePlanTitle(plan, isZh);
+  const nextStepCopy = goalPlanNextStepCopy(isZh);
+
+  return (
+    <div className="goal-plan-compact-approval" role="status" data-goal-plan-compact-approval>
+      <span className="goal-plan-compact-approval-status">{isZh ? '待审批' : 'Pending'}</span>
+      <span className="goal-plan-compact-approval-title" title={title}>{title}</span>
+      <span className="goal-plan-compact-approval-progress">{`${progress.completed}/${progress.total}`}</span>
+      <div className="goal-plan-compact-approval-actions">
+        {(['start', 'adjust', 'cancel'] as const).map((action) => (
+          <button
+            key={action}
+            type="button"
+            className={`goal-plan-compact-approval-action goal-plan-compact-approval-action--${action}`}
+            disabled={busy || isStreaming}
+            title={isStreaming ? (isZh ? '请等待本轮输出结束后再操作' : 'Wait until this turn finishes') : undefined}
+            onClick={() => void onNextAction(plan, action)}
+          >
+            {nextStepCopy[action]}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 interface PlanCardProps {
   readonly plan: GoalPlan;
   readonly defaultExpanded: boolean;
@@ -1289,9 +1332,10 @@ function PlanCard({
   onRunnerControl,
   onManualConfirm,
 }: PlanCardProps): ReactElement {
-  // 待批准计划强制展开，确保「批准 / 驳回」按钮永远可见。
-  const awaitingLock = plan.status === 'awaiting_approval';
-  // 主卡（当前计划）永远展开；待批准计划同样强制展开。两者都隐藏 caret、禁用折叠。
+  // 所有等待用户决定的计划（含 Goal 模式的 accepted）都要强制展开，
+  // 使聊天底部的浮条本身成为可直接操作的审批入口。
+  const awaitingLock = hasPendingGoalApproval([plan]);
+  // 主卡（当前计划）永远展开；待审批计划同样强制展开。两者都隐藏 caret、禁用折叠。
   const lockedOpen = awaitingLock || !!isMain;
   const [expanded, setExpanded] = useState<boolean>(defaultExpanded || lockedOpen);
   const effectiveExpanded = lockedOpen || expanded;
@@ -1626,7 +1670,9 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   const effectiveBusyPlanId = approvalBusyPlanId ?? busyPlanId;
   const effectiveError = approvalError ?? error;
 
-  const pendingCount = plans.filter((plan) => plan.status === 'awaiting_approval').length;
+  // 采用同一判定口径：Goal 模式中已接受但尚未启动的计划，同样正在等待
+  // 用户选择「开始执行 / 调整计划 / 取消计划」，必须在列表摘要中显式标记为待审批。
+  const pendingCount = plans.filter((plan) => hasPendingGoalApproval([plan])).length;
   // 推到右侧 Workbench Goal slot 后，折叠/展开由 Workbench tab 接管，
   // 面板内容始终视为展开（无 docked toggle 形态）。
   const dockedToWorkbench = !!sidePanelContainer;
@@ -1720,7 +1766,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   // 视为整体处于「完成态」，给浮条停止扫光并显示静态完成视觉（完成色描边 + 对勾）。
   // 注意优先级：执行中 / 待批准会压过完成态（dockedExecuting 与 lockedOpen 优先），
   // 避免「一个完成、另一个仍在跑」时误显示完成。
-  const hasAwaitingPlan = plans.some((plan) => plan.status === 'awaiting_approval');
+  const hasAwaitingPlan = hasPendingGoalApproval(plans);
   const hasCompletedPlan = plans.some((plan) => plan.status === 'completed');
   const dockedCompleted =
     hasCompletedPlan && !hasExecutingPlan && !hasAwaitingPlan && !expanded;
@@ -1734,6 +1780,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         dockedExecuting ? ' goal-panel--executing' : ''
       }${dockedCompleted ? ' goal-panel--completed' : ''}${
         dockedToWorkbench ? ' goal-panel--hosted' : ''
+      }${hasPendingGoalApproval(plans) ? ' goal-panel--approval-inline' : ''
       }`}
     >
       <button
@@ -1855,8 +1902,21 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
       ) : null}
       </div>
         );
-        // 方案 B：注入了右栏容器则 portal 投影到主内容区右侧常驻分栏；
-        // 未注入（如单测/旧路径）回退为就地内联展开，保持向后兼容。
+        // 右侧始终承载完整计划详情；待审批时，聊天底部只渲染一行紧凑摘要和三个决策按钮。
+        if (sidePanelContainer && hasPendingGoalApproval(plans) && mainPlan) {
+          return (
+            <>
+              <CompactApprovalBar
+                plan={mainPlan}
+                isZh={isZh}
+                busy={effectiveBusyPlanId === mainPlan.planId}
+                isStreaming={isStreaming}
+                onNextAction={handleNextAction}
+              />
+              {createPortal(body, sidePanelContainer)}
+            </>
+          );
+        }
         return sidePanelContainer ? createPortal(body, sidePanelContainer) : body;
       })()}
     </div>

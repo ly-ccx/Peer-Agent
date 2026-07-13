@@ -25,7 +25,7 @@ export function UpdateToast({
   readonly i18n: I18nRuntime;
   /** 已就绪的新版本号（不含 v 前缀）。 */
   readonly version: string;
-  /** 完成态：downloaded=Windows 重启安装；ready-to-open=mac 打开安装包。 */
+  /** 完成态：downloaded=Windows 重启安装；ready-to-open=mac 安装。 */
   readonly phase: 'downloaded' | 'ready-to-open';
   readonly onInstall: () => void;
   readonly onOpenInstaller: () => void;

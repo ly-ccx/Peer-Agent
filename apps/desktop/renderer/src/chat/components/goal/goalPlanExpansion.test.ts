@@ -23,6 +23,15 @@ describe('goal plan default expansion', () => {
     );
   });
 
+  it('locks the bar open for a goal-mode plan waiting for the user to start it', () => {
+    const acceptedGoal = {
+      ...plan('accepted', 'accepted-goal'),
+      workflowKind: 'goal_self_driven' as const,
+    };
+    assert.equal(hasPendingGoalApproval([acceptedGoal]), true);
+    assert.equal(hasPendingGoalApproval([plan('accepted')]), false);
+  });
+
   it('expands every non-terminal plan that can still require attention', () => {
     const activeStatuses: GoalPlanStatus[] = [
       'drafting',
