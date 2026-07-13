@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { GoalPlan, GoalPlanStatus } from '@peer-agent/protocol';
 import {
+  hasPendingGoalApproval,
   selectPrimaryGoalPlan,
   shouldDefaultExpandGoalPlan,
 } from './goalPlanExpansion.ts';
@@ -11,6 +12,17 @@ function plan(status: GoalPlanStatus, planId: string = status): GoalPlan {
 }
 
 describe('goal plan default expansion', () => {
+  it('locks the bar open while any plan is awaiting approval', () => {
+    assert.equal(
+      hasPendingGoalApproval([plan('executing'), plan('awaiting_approval')]),
+      true,
+    );
+    assert.equal(
+      hasPendingGoalApproval([plan('executing'), plan('completed')]),
+      false,
+    );
+  });
+
   it('expands every non-terminal plan that can still require attention', () => {
     const activeStatuses: GoalPlanStatus[] = [
       'drafting',

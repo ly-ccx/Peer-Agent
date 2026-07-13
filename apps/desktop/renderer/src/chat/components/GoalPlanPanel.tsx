@@ -18,7 +18,7 @@ import { clientApi } from '../../clientApi';
 import { InteractionContext } from './thread/interactionContext';
 import { useGoalPlanApproval } from './goal/useGoalPlanApproval';
 import { getGoalPlanNextStep, goalPlanNextStepCopy } from './goal/goalPlanNextActions';
-import { selectPrimaryGoalPlan, shouldDefaultExpandGoalPlan } from './goal/goalPlanExpansion';
+import { hasPendingGoalApproval, selectPrimaryGoalPlan, shouldDefaultExpandGoalPlan } from './goal/goalPlanExpansion';
 import { buildGoalPlanTreeRows, goalPlanTreeDepth } from './goal/goalPlanTree';
 
 function normalizeConversationId(value: string | number | null | undefined): string | null {
@@ -1632,7 +1632,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   const dockedToWorkbench = !!sidePanelContainer;
   // B：有待批准计划时强制展开且不可手动收起，确保「批准并执行/驳回」按钮永远可见；
   // 折叠仅对「无待批准（全部已批准/执行中/完成）」的情况生效。
-  const lockedOpen = pendingCount > 0;
+  const lockedOpen = hasPendingGoalApproval(plans);
   const expanded = dockedToWorkbench
     ? true
     : lockedOpen

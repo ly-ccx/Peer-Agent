@@ -54,6 +54,10 @@ export function App() {
   // 另外 ChatSurface 的 onStreamingChange 作为本会话的即时信号合并进集合(更快反馈)。
   const [runningConversationIds, setRunningConversationIds] = useState<ReadonlySet<string>>(
     () => new Set());
+  // 所有敏感操作确认均来自 conversationStore 的受治理 pendingPermissionCalls。
+  // 在 App 层按会话投影给 Sidebar，列表不解析模型文本，也不复制审批事实。
+  const [pendingConfirmationCounts, setPendingConfirmationCounts] = useState<ReadonlyMap<string, number>>(
+    () => new Map());
   // 表达层状态:当前正在执行上下文压缩的会话 -> 显式压缩状态机。
   // 由 conversationStore 按侧栏会话订阅派生,避免切换 tab/会话后依赖已卸载 ChatSurface 上报而停止刷新。
   const [compactionStates, setCompactionStates] = useState<ReadonlyMap<string, CompactionState>>(
@@ -204,6 +208,29 @@ export function App() {
     return () => { unsubs.forEach((unsub) => unsub()); };
   }, [conversations]);
 
+  useEffect(() => {
+    const conversationIds = conversations.map((conversation) => conversation.id);
+    const syncPendingConfirmations = () => {
+      const next = new Map<string, number>();
+      for (const conversationId of conversationIds) {
+        const count = conversationStore.getSnapshot(conversationId).pendingPermissionCalls.length;
+        if (count > 0) next.set(conversationId, count);
+      }
+      setPendingConfirmationCounts((previous) => {
+        if (previous.size === next.size && [...next].every(([id, count]) => previous.get(id) === count)) {
+          return previous;
+        }
+        return next;
+      });
+    };
+
+    syncPendingConfirmations();
+    const unsubs = conversationIds.map((conversationId) =>
+      conversationStore.subscribe(conversationId, syncPendingConfirmations),
+    );
+    return () => { unsubs.forEach((unsub) => unsub()); };
+  }, [conversations]);
+
   const handleWorkspaceChanged = useCallback(async () => {
     const r = await clientApi.workspaceList();
     setActiveWorkspace(r.activeWorkspace);
@@ -322,6 +349,7 @@ export function App() {
               conversationView={conversationView}
               runningConversationIds={runningConversationIds}
               compactionStates={compactionStates}
+              pendingConfirmationCounts={pendingConfirmationCounts}
               runningWorkspacePaths={runningWorkspacePaths}
               activePage={activePage}
               i18n={i18n}

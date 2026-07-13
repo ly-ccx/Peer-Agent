@@ -116,6 +116,7 @@ export function Sidebar({
   onShowActiveConversations,
   onOpenSettings,
   onWorkspaceChanged,
+  pendingConfirmationCounts,
 }: {
   readonly conversations: readonly ConversationMeta[];
   readonly activeConversationId: string | null;
@@ -124,6 +125,8 @@ export function Sidebar({
   readonly runningConversationIds?: ReadonlySet<string>;
   // 当前正在执行上下文压缩的会话 -> 显式压缩状态机。
   readonly compactionStates?: ReadonlyMap<string, CompactionState>;
+  // 本地敏感操作确认数量；计划审批数量由 useAwaitingGoalPlanCounts 从同一后端事实投影。
+  readonly pendingConfirmationCounts?: ReadonlyMap<string, number>;
   // ADR 27: 有运行中流的工作区路径集合,用于在工作区入口/下拉项上提示"该工作区有任务在跑"。
   readonly runningWorkspacePaths?: ReadonlySet<string>;
   readonly activePage: string;
@@ -317,10 +320,12 @@ export function Sidebar({
     const compactPercentText = typeof compactPercent === 'number' ? `${Math.round(compactPercent)}%` : null;
     const compactTitle = compactPercentText ? `${compactLabel} ${compactPercentText}` : compactLabel;
     const awaitingGoalPlanCount = awaitingGoalPlanCounts.get(conv.id) ?? 0;
-    const awaitingGoalPlanLabel = isZh ? '待批准' : 'Pending';
-    const awaitingGoalPlanText = awaitingGoalPlanCount > 1
-      ? `${awaitingGoalPlanLabel} · ${awaitingGoalPlanCount}`
-      : awaitingGoalPlanLabel;
+    const pendingSensitiveCount = pendingConfirmationCounts?.get(conv.id) ?? 0;
+    const pendingApprovalCount = awaitingGoalPlanCount + pendingSensitiveCount;
+    const pendingApprovalLabel = isZh ? '待审批' : 'Pending approval';
+    const pendingApprovalText = pendingApprovalCount > 1
+      ? `${pendingApprovalLabel} · ${pendingApprovalCount}`
+      : pendingApprovalLabel;
     const isPinned = Boolean(conv.pinnedAt);
     const canTogglePin = !isArchivedView;
     const rowClasses = [
@@ -399,9 +404,9 @@ export function Sidebar({
             ) : null}
           </span>
         ) : null}
-        {awaitingGoalPlanCount > 0 ? (
-          <span className="sidebar-conv-awaiting" title={awaitingGoalPlanText}>
-            {awaitingGoalPlanText}
+        {pendingApprovalCount > 0 ? (
+          <span className="sidebar-conv-awaiting" title={pendingApprovalText}>
+            {pendingApprovalText}
           </span>
         ) : null}
         {editingConversationId === conv.id ? (

@@ -12,6 +12,13 @@ export function shouldDefaultExpandGoalPlan(
   return !TERMINAL_PLAN_STATUSES.has(plan.status);
 }
 
+/** A pending decision is actionable UI, so the bottom bar must stay open until it settles. */
+export function hasPendingGoalApproval(
+  plans: readonly Pick<GoalPlan, 'status'>[],
+): boolean {
+  return plans.some((plan) => plan.status === 'awaiting_approval');
+}
+
 export function selectPrimaryGoalPlan(
   plans: readonly GoalPlan[],
 ): GoalPlan | null {
