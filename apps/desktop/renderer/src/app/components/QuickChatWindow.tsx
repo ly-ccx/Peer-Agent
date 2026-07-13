@@ -27,6 +27,7 @@ import {
 } from '../../chat/state/preferences';
 import { getProviderModelDisplayLabel } from '../../chat/state/providerDisplay';
 import { getClipboardFiles, hasQuickChatContent } from '../../chat/state/quickChatAttachments';
+import { createCoalescedRefreshScheduler } from '../../chat/state/coalescedRefresh';
 import { mergeQuickChatTasks, projectQuickChatPlanTasks, projectQuickChatTasks, type QuickChatTask } from '../../chat/state/quickChatTasks';
 import type { ChatAttachment, ChatMsg } from '../../chat/state/types';
 import { loadConversationMessages } from '../../chat/state/conversationLoad';
@@ -235,10 +236,22 @@ export function QuickChatWindow() {
 
   useEffect(() => {
     if (!workspacePath) return;
-    void refreshTasks().catch(() => {});
-    const timer = window.setInterval(() => void refreshTasks().catch(() => {}), 2_500);
-    const unsubscribe = clientApi.onGoalPlansChanged(() => void refreshTasks().catch(() => {}));
-    return () => { window.clearInterval(timer); unsubscribe(); };
+
+    const refreshScheduler = createCoalescedRefreshScheduler(refreshTasks);
+    const scheduleRefresh = refreshScheduler.schedule;
+
+    if (document.visibilityState === 'visible') scheduleRefresh(0);
+    const unsubscribers = [
+      clientApi.onQuickChatShown(() => scheduleRefresh(0)),
+      clientApi.onGoalPlansChanged(() => scheduleRefresh()),
+      clientApi.onChatStreamToolCall(() => scheduleRefresh()),
+      clientApi.onChatStreamToolResult(() => scheduleRefresh()),
+      clientApi.onChatStreamDone(() => scheduleRefresh()),
+    ];
+    return () => {
+      refreshScheduler.dispose();
+      for (const unsubscribe of unsubscribers) unsubscribe();
+    };
   }, [refreshTasks, workspacePath]);
 
   const activeTask = tasks[taskIndex] ?? null;
