@@ -63,6 +63,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   unlinkSkill: (skillId) => ipcRenderer.invoke('skills:unlink', { skillId }),
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
   quickChatHide: () => ipcRenderer.invoke('quick-chat:hide'),
+  quickChatSetTaskCardVisible: (visible) => ipcRenderer.invoke('quick-chat:set-task-card-visible', { visible }),
   quickChatShowPopover: (payload) => ipcRenderer.invoke('quick-chat-popover:show', payload),
   quickChatHidePopover: () => ipcRenderer.invoke('quick-chat-popover:hide'),
   quickChatSelectPopoverValue: (value) => ipcRenderer.invoke('quick-chat-popover:select', value),

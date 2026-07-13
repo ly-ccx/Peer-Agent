@@ -1,4 +1,5 @@
 const DEFAULT_SIZE = Object.freeze({ width: 720, height: 104 });
+const TASK_SIZE = Object.freeze({ width: 720, height: 286 });
 const POPOVER_MAX_SIZE = Object.freeze({ width: 360, height: 280 });
 const POPOVER_GAP = 6;
 
@@ -189,6 +190,19 @@ export function createQuickChatWindowController({ screen, createWindow, createPo
     if (quickChatWindow && !quickChatWindow.isDestroyed()) quickChatWindow.hide();
   }
 
+  function setTaskCardVisible(visible) {
+    const win = quickChatWindow && !quickChatWindow.isDestroyed() ? quickChatWindow : null;
+    if (!win) return false;
+    const size = visible ? TASK_SIZE : DEFAULT_SIZE;
+    const bounds = resolveQuickChatBounds({
+      cursorPoint: screen.getCursorScreenPoint(),
+      displays: screen.getAllDisplays(),
+      size,
+    });
+    win.setBounds(bounds, true);
+    return true;
+  }
+
   function getWindow() {
     return quickChatWindow && !quickChatWindow.isDestroyed() ? quickChatWindow : null;
   }
@@ -201,6 +215,7 @@ export function createQuickChatWindowController({ screen, createWindow, createPo
     show,
     toggle,
     hide,
+    setTaskCardVisible,
     getWindow,
     getPopoverWindow,
     showPopover,

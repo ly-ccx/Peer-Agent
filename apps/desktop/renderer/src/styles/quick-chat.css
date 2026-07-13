@@ -493,6 +493,56 @@ body:has(.quick-chat-popover-shell) {
   box-shadow: 0 0 0 1px var(--za-line-strong);
 }
 
+.quick-chat-task-card {
+  margin: 0 9px 9px;
+  padding: 11px 12px;
+  border: 1px solid var(--quick-border);
+  border-radius: 10px;
+  background: var(--quick-control);
+  -webkit-app-region: no-drag;
+}
+
+.quick-chat-task-header,
+.quick-chat-task-footer,
+.quick-chat-task-title,
+.quick-chat-task-pager,
+.quick-chat-task-options {
+  display: flex;
+  align-items: center;
+}
+
+.quick-chat-task-header,
+.quick-chat-task-footer {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.quick-chat-task-title { min-width: 0; gap: 6px; font-size: 11px; font-weight: 650; }
+.quick-chat-task-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--state-warning); }
+.quick-chat-task-conversation { overflow: hidden; color: var(--quick-muted); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.quick-chat-task-question { margin: 9px 0; font-size: 13px; line-height: 1.45; }
+.quick-chat-task-options { flex-wrap: wrap; gap: 6px; }
+.quick-chat-task-options button,
+.quick-chat-task-footer button,
+.quick-chat-task-pager button {
+  border: 1px solid var(--quick-border);
+  border-radius: 7px;
+  color: var(--quick-text);
+  background: var(--quick-surface);
+  cursor: pointer;
+}
+.quick-chat-task-options button { padding: 6px 10px; font-size: 12px; }
+.quick-chat-task-options button:hover:not(:disabled),
+.quick-chat-task-options button.selected { border-color: var(--quick-border-strong); background: var(--quick-control-hover); }
+.quick-chat-task-options button:disabled { cursor: default; opacity: .65; }
+.quick-chat-task-pager { gap: 3px; color: var(--quick-muted); font-size: 10px; }
+.quick-chat-task-pager button { width: 22px; height: 22px; padding: 0; }
+.quick-chat-task-footer { margin-top: 9px; color: var(--quick-muted); font-size: 10px; }
+.quick-chat-task-footer button { padding: 4px 8px; font-size: 10px; }
+.quick-chat-task-hint { margin: 7px 0; color: var(--quick-muted); font-size: 11px; }
+.quick-chat-plan-steps { margin: 6px 0 9px; padding-left: 20px; color: var(--quick-muted); font-size: 10px; line-height: 1.45; }
+.quick-chat-plan-steps li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 @keyframes quick-chat-spin {
   to { transform: rotate(360deg); }
 }

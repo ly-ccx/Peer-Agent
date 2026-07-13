@@ -58,6 +58,7 @@ const unavailableApi: ClientApi = {
   mcpConnectAndRegister: unavailableMethod('mcpConnectAndRegister'),
   workspaceList: unavailableMethod('workspaceList'),
   quickChatHide: unavailableMethod('quickChatHide'),
+  quickChatSetTaskCardVisible: unavailableMethod('quickChatSetTaskCardVisible'),
   quickChatShowPopover: unavailableMethod('quickChatShowPopover'),
   quickChatHidePopover: unavailableMethod('quickChatHidePopover'),
   quickChatSelectPopoverValue: unavailableMethod('quickChatSelectPopoverValue'),

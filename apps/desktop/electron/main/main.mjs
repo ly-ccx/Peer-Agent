@@ -943,6 +943,9 @@ ipcMain.handle('quick-chat:hide', () => {
 ipcMain.handle('quick-chat-popover:show', (_event, payload = {}) => ({
   ok: quickChatWindowController.showPopover(payload),
 }));
+ipcMain.handle('quick-chat:set-task-card-visible', (_event, payload = {}) => ({
+  ok: quickChatWindowController.setTaskCardVisible(payload.visible === true),
+}));
 ipcMain.handle('quick-chat-popover:hide', () => {
   quickChatWindowController.hidePopover({ restoreFocus: true });
   return { ok: true };
