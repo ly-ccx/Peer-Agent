@@ -555,9 +555,35 @@ export interface ClientToolConfirmation {
   readonly [key: string]: unknown;
 }
 
-export interface ClientToolCall {
+export interface RuntimeToolCall {
   readonly toolCallId: string;
   readonly capabilityId: string;
+  readonly arguments?: unknown;
+  readonly argumentsPreview?: unknown;
+  readonly [key: string]: unknown;
+}
+
+export interface RuntimeToolResult {
+  readonly toolCallId?: string;
+  readonly status?: string;
+  readonly evidence?: unknown;
+  readonly [key: string]: unknown;
+}
+
+export interface RuntimeExecuteRequest {
+  readonly sessionId?: string;
+  readonly projectionId?: string;
+  readonly conversationId?: string;
+  readonly call: RuntimeToolCall;
+  readonly [key: string]: unknown;
+}
+
+export interface RuntimeExecutionContext {
+  readonly workspaceRoot?: string;
+  readonly [key: string]: unknown;
+}
+
+export interface ClientToolCall extends RuntimeToolCall {
   readonly displayName: string;
   readonly reason: string;
   readonly arguments?: Record<string, unknown>;

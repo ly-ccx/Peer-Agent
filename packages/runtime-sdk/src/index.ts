@@ -1,6 +1,10 @@
 export { RUNTIME_EVENT_PROTOCOL_VERSION } from './contracts.ts';
 export type {
   RuntimeEventProtocolVersion,
+  RuntimeExecuteRequest,
+  RuntimeExecutionContext,
+  RuntimeToolCall,
+  RuntimeToolResult,
   RuntimeSdk,
   RuntimeSdkApprovalDecision,
   RuntimeSdkApprovalPort,

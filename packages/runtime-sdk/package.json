@@ -21,6 +21,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@peer-agent/protocol": "workspace:*",
     "@peer-agent/runtime-core": "workspace:*"
   },
   "devDependencies": {

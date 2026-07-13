@@ -185,6 +185,9 @@ importers:
 
   packages/runtime-sdk:
     dependencies:
+      '@peer-agent/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@peer-agent/runtime-core':
         specifier: workspace:*
         version: link:../runtime-core

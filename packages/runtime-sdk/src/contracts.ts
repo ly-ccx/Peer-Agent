@@ -1,4 +1,17 @@
 import type { RuntimeDecision } from '@peer-agent/runtime-core';
+import type {
+  RuntimeExecuteRequest,
+  RuntimeExecutionContext,
+  RuntimeToolCall,
+  RuntimeToolResult,
+} from '@peer-agent/protocol';
+
+export type {
+  RuntimeExecuteRequest,
+  RuntimeExecutionContext,
+  RuntimeToolCall,
+  RuntimeToolResult,
+} from '@peer-agent/protocol';
 
 export const RUNTIME_EVENT_PROTOCOL_VERSION = 1 as const;
 
@@ -16,33 +29,10 @@ export type RuntimeSdkEventType =
   | 'permission.resolved'
   | 'tool.completed';
 
-export interface RuntimeSdkToolCall {
-  readonly toolCallId: string;
-  readonly capabilityId: string;
-  readonly arguments?: unknown;
-  readonly argumentsPreview?: unknown;
-  readonly [key: string]: unknown;
-}
-
-export interface RuntimeSdkExecuteRequest {
-  readonly sessionId?: string;
-  readonly projectionId?: string;
-  readonly conversationId?: string;
-  readonly call: RuntimeSdkToolCall;
-  readonly [key: string]: unknown;
-}
-
-export interface RuntimeSdkExecutionContext {
-  readonly workspaceRoot?: string;
-  readonly [key: string]: unknown;
-}
-
-export interface RuntimeSdkToolResult {
-  readonly toolCallId?: string;
-  readonly status?: string;
-  readonly evidence?: unknown;
-  readonly [key: string]: unknown;
-}
+export type RuntimeSdkToolCall = RuntimeToolCall;
+export type RuntimeSdkExecuteRequest = RuntimeExecuteRequest;
+export type RuntimeSdkExecutionContext = RuntimeExecutionContext;
+export type RuntimeSdkToolResult = RuntimeToolResult;
 
 export interface RuntimeSdkProviderExecution {
   readonly result: RuntimeSdkToolResult;

@@ -197,6 +197,53 @@ test('Desktop host execution emits correlated Runtime Event v1 records', async (
   assert.equal(runtimeEvents.every((event) => event.capabilityId === 'test.echo'), true);
 });
 
+test('Desktop SDK mainline governs Hook, permission, Provider, Evidence, and events', async () => {
+  const calls = { count: 0 };
+  const runtimeEvents = [];
+  const permissionRequests = [];
+  const host = createLocalToolHost({
+    sessionStore: createSessionStore(),
+    workspaceRoot: process.cwd(),
+    userDataPath: process.cwd(),
+    providers: [createEchoProvider({ calls })],
+    hookRunner: {
+      runPreToolUse: async () => [{ id: 'pre-ask', event: 'PreToolUse', decision: 'ask', reason: 'review required', outcome: 'ok', durationMs: 1 }],
+      runPostToolUse: async () => [{ id: 'post-allow', event: 'PostToolUse', decision: 'allow', outcome: 'ok', durationMs: 2 }],
+    },
+    onRuntimeEvent: (event) => runtimeEvents.push(event),
+  });
+
+  const execution = await host.execute(createRequest(), {
+    requestPermission: async (request) => {
+      permissionRequests.push(request);
+      return {
+        granted: true,
+        grant: createPermissionGrant({ toolCallId: 'tool-call-1', granted: true, scope: 'test.echo' }),
+        reason: 'local_user_approved_once',
+      };
+    },
+  });
+
+  assert.equal(calls.count, 1);
+  assert.equal(permissionRequests.length, 1);
+  assert.equal(permissionRequests[0].confirmation.kind, 'hook-approval');
+  assert.equal(execution.grant.granted, true);
+  assert.equal(execution.result.status, 'success');
+  assert.equal(execution.result.evidence.evidenceId, 'evidence-1');
+  assert.equal(execution.result.evidence.hookFinalDecision, 'ask');
+  assert.deepEqual(execution.result.evidence.hooks.map((hook) => hook.id), ['pre-ask', 'post-allow']);
+  assert.deepEqual(runtimeEvents.map((event) => event.type), [
+    'tool.started',
+    'hook.completed',
+    'permission.requested',
+    'permission.resolved',
+    'hook.completed',
+    'tool.completed',
+  ]);
+  assert.deepEqual(runtimeEvents.map((event) => event.sequence), [1, 2, 3, 4, 5, 6]);
+  assert.equal(runtimeEvents.at(-1).result, execution.result);
+});
+
 test('PostToolUse runs after provider execution and records hook evidence', async () => {
   const calls = { count: 0 };
   const host = createLocalToolHost({
