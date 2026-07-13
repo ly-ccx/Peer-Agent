@@ -102,6 +102,7 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
     setSidebarAutoCollapsed,
     sidebarOpen,
     sidebarWidth,
+    conversationId,
   } = useWorkbench();
 
   const goalSlotRef = useRef<HTMLDivElement | null>(null);
@@ -264,7 +265,11 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
           className="workbench-view workbench-view--browser"
           data-active={activeTab === 'browser'}
         >
-          <BrowserView isZh={isZh} />
+          <BrowserView
+            key={conversationId ?? '__none'}
+            isZh={isZh}
+            conversationId={conversationId}
+          />
         </div>
         <div className="workbench-view" data-active={activeTab === 'files'}>
           <FilesView isZh={isZh} workspacePath={workspacePath} />

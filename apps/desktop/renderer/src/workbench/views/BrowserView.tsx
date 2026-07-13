@@ -10,6 +10,7 @@ import {
   type Ref,
 } from 'react';
 import { clientApi } from '../../clientApi';
+import { getBrowserSessionUrl, setBrowserSessionUrl } from '../browserSessionState';
 
 // ── <webview> 类型声明 ────────────────────────────────────────────────
 // Electron 的 <webview> 标签不是标准 JSX 元素，这里补一个最小可用的内联声明，
@@ -47,6 +48,7 @@ declare global {
 
 interface BrowserViewProps {
   readonly isZh: boolean;
+  readonly conversationId: string | null;
 }
 
 // 会话隔离：浏览器面板使用独立的持久化分区，与主应用 cookie/storage 互不污染。
@@ -134,10 +136,11 @@ function IconGo() {
   );
 }
 
-export function BrowserView({ isZh }: BrowserViewProps) {
+export function BrowserView({ isZh, conversationId }: BrowserViewProps) {
+  const initialUrl = getBrowserSessionUrl(conversationId);
   const webviewRef = useRef<WebviewElement | null>(null);
-  const [address, setAddress] = useState('');
-  const [currentUrl, setCurrentUrl] = useState(HOME_URL);
+  const [address, setAddress] = useState(() => displayUrl(initialUrl));
+  const [currentUrl, setCurrentUrl] = useState(initialUrl);
   const [title, setTitle] = useState('');
   const [loading, setLoading] = useState(false);
   const [canBack, setCanBack] = useState(false);
@@ -223,6 +226,7 @@ export function BrowserView({ isZh }: BrowserViewProps) {
     const updateUrl = () => {
       const url = wv.getURL();
       setCurrentUrl(url);
+      setBrowserSessionUrl(conversationId, url);
       // 仅在用户未编辑地址栏时才回写，避免打断输入。
       if (!editingRef.current) setAddress(displayUrl(url));
       syncNavState();
@@ -285,7 +289,7 @@ export function BrowserView({ isZh }: BrowserViewProps) {
         }
       }
     };
-  }, [syncNavState]);
+  }, [conversationId, syncNavState]);
 
   return (
     <div className="browser-view">
@@ -369,7 +373,7 @@ export function BrowserView({ isZh }: BrowserViewProps) {
         <webview
           ref={webviewRef as unknown as Ref<HTMLElement>}
           className="browser-webview"
-          src={HOME_URL}
+          src={initialUrl}
           partition={BROWSER_PARTITION}
         />
 
