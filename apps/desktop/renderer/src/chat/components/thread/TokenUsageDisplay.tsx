@@ -1,9 +1,12 @@
 import type { LlmProviderConfigView } from '@peer-agent/protocol';
-import { Dropdown, type DropdownOption } from '../../../app/components/Dropdown';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
+import type { DropdownOption } from '../../../app/components/Dropdown';
 import { CascadingMenu, type CascadingMenuGroup } from '../../../app/components/CascadingMenu';
 import { isEffortLevel, type EffortLevel } from '../../state/preferences';
 import { formatTokenCount } from '../../state/format';
 import { getProviderDisplayName } from '../../state/providerDisplay';
+import { effortIndexForLevel, effortIndexFromValue, effortLevelForDisplay, snapEffortValue } from './effortSlider';
 import type { TokenUsageState } from '../../state/types';
 
 function effortLabel(level: EffortLevel, isZh: boolean): string {
@@ -13,6 +16,148 @@ function effortLabel(level: EffortLevel, isZh: boolean): string {
   if (level === 'xhigh') return isZh ? '超深度思考' : 'Extra-high reasoning';
   if (level === 'max') return isZh ? '最大思考' : 'Max reasoning';
   return isZh ? '标准思考' : 'Default reasoning';
+}
+
+function ReasoningEffortSlider({
+  effort,
+  effortLevels,
+  isZh,
+  disabled,
+  onChange,
+}: {
+  readonly effort: EffortLevel;
+  readonly effortLevels: readonly EffortLevel[];
+  readonly isZh: boolean;
+  readonly disabled: boolean;
+  readonly onChange: (level: EffortLevel) => void;
+}) {
+  const selectedIndex = effortIndexForLevel(effort, effortLevels);
+  const selectedValue = effortLevels.length > 1 ? (selectedIndex / (effortLevels.length - 1)) * 100 : 0;
+  const [open, setOpen] = useState(false);
+  const [dragValue, setDragValue] = useState(selectedValue);
+  const [dirty, setDirty] = useState(false);
+  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const panelId = useId();
+
+  useEffect(() => {
+    setDragValue(selectedValue);
+    setDirty(false);
+  }, [selectedValue]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const updatePosition = () => {
+      const trigger = triggerRef.current;
+      const panel = panelRef.current;
+      if (!trigger || !panel) return;
+      const rect = trigger.getBoundingClientRect();
+      setCoords({ left: rect.left, top: rect.top - panel.offsetHeight - 6 });
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!rootRef.current?.contains(target) && !panelRef.current?.contains(target)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener('pointerdown', closeOnPointerDown);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnPointerDown);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [open]);
+
+  const commit = (value: number) => {
+    if (!dirty) return;
+    const snapped = snapEffortValue(value, effortLevels.length);
+    const next = effortLevels[effortIndexFromValue(snapped, effortLevels.length)];
+    setDragValue(snapped);
+    setDirty(false);
+    if (next && isEffortLevel(next)) onChange(next);
+  };
+
+  const effectiveValue = dirty ? dragValue : selectedValue;
+  const displayedLevel = effortLevelForDisplay(effort, effortLevels, effectiveValue, dirty);
+  const label = effortLabel(effort, isZh);
+  const panel = open
+    ? createPortal(
+        <div
+          ref={panelRef}
+          id={panelId}
+          className="reasoning-effort-panel"
+          style={coords ? { left: coords.left, top: coords.top, visibility: 'visible' } : undefined}
+        >
+          <div className="reasoning-effort-panel-heading">
+            <span>{isZh ? '思考强度' : 'Reasoning effort'}</span>
+            <strong>{effortLabel(displayedLevel, isZh)}</strong>
+          </div>
+          <input
+            className="reasoning-effort-slider"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={effectiveValue}
+            aria-label={isZh ? '思考强度' : 'Reasoning effort'}
+            aria-valuetext={effortLabel(displayedLevel, isZh)}
+            style={{ '--effort-progress': `${effectiveValue}%` } as CSSProperties}
+            onInput={(event) => {
+              setDirty(true);
+              setDragValue(Number(event.currentTarget.value));
+            }}
+            onChange={(event) => {
+              setDirty(true);
+              setDragValue(Number(event.currentTarget.value));
+            }}
+            onPointerUp={(event) => commit(Number(event.currentTarget.value))}
+            onKeyUp={(event) => {
+              if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') {
+                commit(Number(event.currentTarget.value));
+              }
+            }}
+            onBlur={(event) => commit(Number(event.currentTarget.value))}
+          />
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <div ref={rootRef} className="reasoning-effort-control">
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`reasoning-effort-trigger ${open ? 'open' : ''}`}
+        disabled={disabled}
+        title={isZh ? '思考强度' : 'Reasoning effort'}
+        aria-label={`${isZh ? '思考强度' : 'Reasoning effort'}：${label}`}
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {label}
+      </button>
+      {panel}
+    </div>
+  );
 }
 
 export function TokenUsageDisplay({
@@ -89,7 +234,6 @@ export function TokenUsageDisplay({
   // 仅在未提供（>0 校验）时回退到 provider 配置窗口，避免两套窗口导致百分比与触发线不符。
   const ctxWindow = (typeof contextWindow === 'number' && contextWindow > 0) ? contextWindow : defaultProvider?.contextWindow;
   const ctxPercent = ctxWindow ? Math.min((currentContextTokens / ctxWindow) * 100, 100) : null;
-  const effortOptions: readonly DropdownOption[] = effortLevels.map((level) => ({ value: level, label: effortLabel(level, isZh) }));
   const shouldShowModelDropdown = Boolean(defaultProvider?.model && canSwitchModel && onModelChange && modelOptions.length > 0);
   // 级联菜单分组：一级 provider（按 groupId 折叠同一凭证下的多模型），二级为该 provider 下的模型。
   // 每个 provider 恒有二级子菜单（哪怕只有一个模型），一级只负责展开、不直接选中。
@@ -137,17 +281,13 @@ export function TokenUsageDisplay({
             <span className="token-usage-model" title={modelTitle}>{modelDisplayName}</span>
           )
         ) : null}
-        {effortOptions.length > 0 ? (
-          <Dropdown
-            className="composer-dropdown composer-effort-dropdown"
-            value={effort}
-            options={effortOptions}
-            onChange={(next) => {
-              if (isEffortLevel(next)) onEffortChange(next);
-            }}
-            ariaLabel={isZh ? '思考深度' : 'Reasoning effort'}
-            title={isZh ? '思考深度' : 'Reasoning effort'}
-            menuPlacement="up"
+        {effortLevels.length > 0 ? (
+          <ReasoningEffortSlider
+            effort={effort}
+            effortLevels={effortLevels}
+            isZh={isZh}
+            disabled={Boolean(isStreaming)}
+            onChange={onEffortChange}
           />
         ) : null}
         {ctxWindow ? (
