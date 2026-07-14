@@ -73,7 +73,6 @@
   padding-top: 52px;
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
 }
 
 .current-turn-context {
@@ -401,6 +400,19 @@
   padding: var(--space-3) 0 0;
   --motion-enter-from: -4px;
   animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
+}
+.thinking-history-toggle {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--graphite-mute);
+  background: var(--chrome-sunken);
+  font-size: var(--ui-font-meta, 12px);
+  cursor: pointer;
+}
+.thinking-history-toggle:hover {
+  color: var(--graphite-base);
+  background: var(--chrome-hover);
 }
 .thinking-text {
   color: var(--graphite-soft);

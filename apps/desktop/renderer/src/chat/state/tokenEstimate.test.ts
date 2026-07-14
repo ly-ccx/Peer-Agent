@@ -4,7 +4,10 @@ import {
   estimateTextTokens,
   estimateMessageTokens,
   estimateAttachmentTokens,
+  estimateConversationHistoryTokens,
+  estimateConversationHistoryTokensIncremental,
   estimateConversationTokens,
+  estimateDraftTokens,
 } from './tokenEstimate.ts';
 import type { ChatAttachment, ChatMsg } from './types.ts';
 
@@ -80,13 +83,30 @@ describe('estimateAttachmentTokens', () => {
 });
 
 describe('estimateConversationTokens', () => {
-  it('sums messages + draft + draft attachments, clamped to >= 0', () => {
-    const total = estimateConversationTokens([msg({ content: 'abcd' })], 'abcd', [txt({ text: 'abcd' })]);
-    // message: 10+1=11 ; draft: 1 ; draft attachment: 1
-    assert.equal(total, 13);
+  it('splits history from the frequently changing draft while preserving the total', () => {
+    const messages = [msg({ content: 'abcd' })];
+    const draftAttachments = [txt({ text: 'abcd' })];
+    const history = estimateConversationHistoryTokens(messages);
+    const draft = estimateDraftTokens('abcd', draftAttachments);
+
+    // history=10+1, draft text=1, attachment text=1 => 13
+    assert.equal(history, 11);
+    assert.equal(draft, 2);
+    assert.equal(estimateConversationTokens(messages, 'abcd', draftAttachments), history + draft);
   });
   it('is 0 for empty conversation', () => {
     assert.equal(estimateConversationTokens([], '', []), 0);
+  });
+
+  it('reuses unchanged message estimates during streaming tail updates', () => {
+    const stableUser = msg({ id: 'user', role: 'user', content: 'question' });
+    const firstTail = msg({ id: 'assistant', role: 'assistant', content: 'a' });
+    const first = estimateConversationHistoryTokensIncremental([stableUser, firstTail]);
+    const nextTail = { ...firstTail, content: 'abcd' };
+    const next = estimateConversationHistoryTokensIncremental([stableUser, nextTail], first, true);
+
+    assert.equal(next.messageCount, 2);
+    assert.equal(next.totalTokens, estimateConversationHistoryTokens([stableUser, nextTail]));
   });
 
   // 压缩感知：与 toApiMessages 同口径——只统计最后一条 compaction 之后的活跃消息 + 各 compaction 摘要。

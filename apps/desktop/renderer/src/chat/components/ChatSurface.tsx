@@ -31,13 +31,16 @@ import { useConversationModelEffort } from '../hooks/useConversationModelEffort'
 import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
 import { loadComposerEntry, saveComposerEntry } from '../state/composerPersistence';
-import { formatTime, formatDuration, formatTokenCount } from '../state/format';
+import { formatTokenCount } from '../state/format';
 import { getProviderModelDisplayLabel } from '../state/providerDisplay';
 import {
-  estimateTextTokens,
-  estimateMessageTokens,
-  estimateAttachmentTokens,
-  estimateConversationTokens,
+  buildMessageRailItemsIncremental,
+  type MessageRailItemCache,
+} from '../state/messageRailItems';
+import {
+  estimateConversationHistoryTokensIncremental,
+  estimateDraftTokens,
+  type ConversationTokenEstimateCache,
 } from '../state/tokenEstimate';
 import {
   MAX_ATTACHMENTS,
@@ -90,54 +93,41 @@ import type {
 } from '../state/types';
 import { MarkdownMessage } from './markdown/MarkdownMessage';
 import { WorkspacePathContext } from './markdown/InlineMarkdown';
-import { AssistantContent, CompactionSummaryCard } from './thread/AssistantContent';
 import { TokenUsageDisplay } from './thread/TokenUsageDisplay';
 import { AttachmentStrip, ImagePreviewOverlay } from './thread/AttachmentStrip';
-import { InteractionAnsweredContext, InteractionContext } from './thread/interactionContext';
+import { InteractionContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
 import { ChatHeader } from './thread/ChatHeader';
+import { ChatTurn } from './thread/ChatTurn';
 import { GoalPlanPanel } from './GoalPlanPanel';
 import { ChatGoalApprovalCard } from './goal/ChatGoalApprovalCard';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
-import { MessageRail, type MessageRailItem } from './thread/MessageRail';
+import { MessageRail } from './thread/MessageRail';
 import { useConversationState } from '../hooks/useConversationState';
 import { scheduleAutomaticCompaction } from '../state/automaticCompaction';
 import { conversationStore, type ConversationRuntimeState } from '../state/conversationStore';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { useStreamingReport } from '../hooks/useStreamingReport';
 import { useConversationStreamRouter } from '../hooks/useConversationStreamRouter';
+import { useVirtualChatTurns } from '../hooks/useVirtualChatTurns';
+import {
+  getTurnUserMessage,
+  groupMessagesIntoTurnsIncremental,
+  isLiveChatTurn,
+  type ChatTurnGroupCache,
+} from '../state/chatTurns';
 import { useWorkbench } from '../../workbench/WorkbenchContext';
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 64;
 const CURRENT_TURN_CONTEXT_PROBE_PX = 96;
 
-interface ChatTurnMessage {
-  readonly msg: ChatMsg;
-  readonly index: number;
-}
-
-interface ChatTurn {
-  readonly id: string;
-  readonly messages: ChatTurnMessage[];
-}
-
-function groupMessagesIntoTurns(messages: readonly ChatMsg[]): ChatTurn[] {
-  const turns: ChatTurn[] = [];
-
-  messages.forEach((msg, index) => {
-    if (msg.role === 'user' || turns.length === 0) {
-      turns.push({ id: msg.id, messages: [] });
-    }
-
-    turns[turns.length - 1]?.messages.push({ msg, index });
-  });
-
-  return turns;
-}
-
-function getTurnUserMessage(turn: ChatTurn): ChatMsg | null {
-  return turn.messages.find(({ msg }) => msg.role === 'user')?.msg ?? null;
+function useStableCallback<T extends (...args: never[]) => unknown>(callback: T): T {
+  const callbackRef = useRef(callback);
+  useLayoutEffect(() => {
+    callbackRef.current = callback;
+  }, [callback]);
+  return useCallback(((...args: Parameters<T>) => callbackRef.current(...args)) as T, []);
 }
 
 function summarizeUserMessageForContext(msg: ChatMsg, isZh: boolean): string {
@@ -198,6 +188,8 @@ interface SlashCommand {
 interface ThreadScrollSnapshot {
   top: number;
   atBottom: boolean;
+  turnId: string | null;
+  turnOffset: number;
 }
 
 const SLASH_COMMANDS: SlashCommand[] = [
@@ -377,9 +369,27 @@ export function ChatSurface({
     [convActions],
   );
   const messages = convState.messages as ChatMsg[];
-  const chatTurns = useMemo(() => groupMessagesIntoTurns(messages), [messages]);
-  const setMessages = useMemo(() => makeSetter('messages'), [makeSetter]) as Dispatch<SetStateAction<ChatMsg[]>>;
   const isStreaming = convState.isStreaming;
+  const turnGroupCacheRef = useRef<{
+    conversationId: string | null;
+    cache: ChatTurnGroupCache;
+  } | null>(null);
+  const turnGroupCache = useMemo(() => {
+    const previous = turnGroupCacheRef.current;
+    const sameConversationCache = previous?.conversationId === conversationId
+      ? previous.cache
+      : undefined;
+    const cache = groupMessagesIntoTurnsIncremental(
+      messages,
+      sameConversationCache,
+      isStreaming && Boolean(sameConversationCache),
+    );
+    turnGroupCacheRef.current = { conversationId, cache };
+    return cache;
+  }, [conversationId, isStreaming, messages]);
+  const chatTurns = turnGroupCache.turns;
+  const liveChatTurn = turnGroupCache.liveTurn;
+  const setMessages = useMemo(() => makeSetter('messages'), [makeSetter]) as Dispatch<SetStateAction<ChatMsg[]>>;
   const setIsStreaming = useMemo(() => makeSetter('isStreaming'), [makeSetter]);
   const compactionState = convState.compactionState;
   const setCompactionState = useMemo(() => makeSetter('compactionState'), [makeSetter]) as Dispatch<
@@ -397,10 +407,9 @@ export function ChatSurface({
   const enqueueMessage = convActions.enqueueMessage;
   const removeQueuedMessage = convActions.removeQueuedMessage;
   const shiftQueuedMessage = convActions.shiftQueuedMessage;
-  // 整轮 wall-clock 计时下沉到 useElapsedTimer：对外暴露 elapsedMs（实时跳秒）、
-  // setTurnStartedAt（发送时设起点，驱动右下角实时跳秒）。回合时长（turnDurationMs）的真值
-  // 已上移到会话桶的 turnStartedAt，由 useConversationStreamRouter 在 done/aborted/error 时读取。
-  const { elapsedMs, setTurnStartedAt } = useElapsedTimer(isStreaming);
+  // useElapsedTimer 只保留本轮起点 ref；回合时长真值由 useConversationStreamRouter
+  // 在 done/aborted/error 时读取。实时跳秒在末端 ChatTurn 内更新，避免每秒重渲染整页。
+  const { setTurnStartedAt } = useElapsedTimer();
   // 把流式运行状态(含会话坐标)上报给上层,供左侧列表显示 Loading 图标。
   // 表达层只反映 isStreaming 真值,不引入新的执行真值。下沉到 useStreamingReport。
   useStreamingReport(conversationId, isStreaming, onStreamingChange);
@@ -545,12 +554,26 @@ export function ChatSurface({
   // 由它按 streamId→conversationId 路由到对应会话桶。本组件不再持有本地 append 逻辑与打字机。
 
   const threadRef = useRef<HTMLDivElement>(null);
+  const messageTurnIndex = turnGroupCache.messageTurnIndex;
+  const virtualizeChatTurns = !findOpen && chatTurns.length > 20;
+  const {
+    range: virtualTurnRange,
+    measureElement: measureVirtualTurn,
+    scrollToTurn,
+    updateViewport: updateVirtualViewport,
+    resetMeasurements: resetVirtualMeasurements,
+  } = useVirtualChatTurns({
+    count: chatTurns.length,
+    scrollRef: threadRef,
+    enabled: virtualizeChatTurns,
+  });
   const shouldAutoScrollRef = useRef(true);
   const threadScrollSnapshotsRef = useRef(new Map<string, ThreadScrollSnapshot>());
   const pendingThreadScrollRestoreRef = useRef<{
     conversationId: string;
     snapshot: ThreadScrollSnapshot | null;
   } | null>(null);
+  const messageNavigationRequestRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -575,9 +598,15 @@ export function ChatSurface({
   const saveThreadScrollSnapshot = useCallback((id: string | null, container: HTMLDivElement | null) => {
     if (!id || !container) return;
     const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const turnId = findCurrentTurnIdForScroll(container);
+    const turnElement = turnId
+      ? container.querySelector<HTMLElement>(`[data-chat-turn-id="${CSS.escape(turnId)}"]`)
+      : null;
     threadScrollSnapshotsRef.current.set(id, {
       top: container.scrollTop,
       atBottom: distanceToBottom <= SCROLL_BOTTOM_THRESHOLD_PX,
+      turnId,
+      turnOffset: turnElement ? container.scrollTop - turnElement.offsetTop : 0,
     });
   }, []);
 
@@ -597,28 +626,44 @@ export function ChatSurface({
 
   const handleThreadScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const container = event.currentTarget;
+    updateVirtualViewport();
     updateThreadBottomState(container);
     updateCurrentTurnContext(container);
     if (pendingThreadScrollRestoreRef.current?.conversationId !== conversationId) {
       saveThreadScrollSnapshot(conversationId, container);
     }
     setThreadScrolled(container.scrollTop > 4);
-  }, [conversationId, saveThreadScrollSnapshot, updateCurrentTurnContext, updateThreadBottomState]);
+  }, [conversationId, saveThreadScrollSnapshot, updateCurrentTurnContext, updateThreadBottomState, updateVirtualViewport]);
 
-  // 表达层导航:点击右侧消息轨时,把对应用户消息滚动到视口并短暂高亮。
-  // 仅操作已渲染的 DOM 锚点(data-msg-id),不触碰会话真值。
+  // 表达层导航：虚拟轮次未挂载时先按 turn index 定位并强制挂载，再精确居中消息锚点。
   const scrollToMessage = useCallback((id: string) => {
     const container = threadRef.current;
     if (!container) return;
-    const target = container.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`);
-    if (!target) return;
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    target.classList.remove('chat-msg-flash');
-    // 强制重排以便重复点击同一条时动画可再次触发。
-    void target.offsetWidth;
-    target.classList.add('chat-msg-flash');
-    window.setTimeout(() => target.classList.remove('chat-msg-flash'), 1600);
-  }, []);
+    const turnIndex = messageTurnIndex.get(id);
+    if (turnIndex == null) return;
+
+    const requestId = messageNavigationRequestRef.current + 1;
+    messageNavigationRequestRef.current = requestId;
+    const requestConversationId = conversationIdRef.current;
+    shouldAutoScrollRef.current = false;
+    setIsThreadAtBottom(false);
+    scrollToTurn(turnIndex, { align: 'center' });
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        if (
+          messageNavigationRequestRef.current !== requestId
+          || conversationIdRef.current !== requestConversationId
+        ) return;
+        const target = container.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`);
+        if (!target) return;
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.remove('chat-msg-flash');
+        void target.offsetWidth;
+        target.classList.add('chat-msg-flash');
+        window.setTimeout(() => target.classList.remove('chat-msg-flash'), 1600);
+      });
+    });
+  }, [messageTurnIndex, scrollToTurn]);
 
   const hasProvider = providers.some((p) => p.apiKeyConfigured);
   // 当前激活 provider(默认且已配置 Key,否则取首个已配置)是否勾选了原生推理(reasoning/thinking)。
@@ -654,10 +699,12 @@ export function ChatSurface({
   const compactionNoticeLabel = compactionStateLabel(compactionState, isZh);
   const currentTurnContext = useMemo(() => {
     if (!currentTurnId) return null;
-    const currentTurn = chatTurns.find((turn) => turn.id === currentTurnId);
+    const currentTurn = liveChatTurn?.id === currentTurnId
+      ? liveChatTurn
+      : chatTurns.find((turn) => turn.id === currentTurnId);
     const userMessage = currentTurn ? getTurnUserMessage(currentTurn) : null;
     return userMessage ? summarizeUserMessageForContext(userMessage, isZh) : null;
-  }, [chatTurns, currentTurnId, isZh]);
+  }, [chatTurns, currentTurnId, isZh, liveChatTurn]);
   // 模型下拉选项：以打平后的 provider×model（复合 id=groupId::modelId）为单位，仅列已配置 Key 的
   // 可用模型。value=复合 id（会话据此绑定模型），label 优先取 modelLabel，回退分组名+模型名。
   const modelOptions = useMemo(
@@ -676,23 +723,26 @@ export function ChatSurface({
     ? SLASH_COMMANDS.filter((command) => command.value.startsWith(slashQuery))
     : [];
 
-  // 右侧消息轨按主时间线原始顺序投影用户消息与压缩节点；用户消息序号不受压缩节点影响。
-  let railMessageNumber = 0;
-  const railItems = messages.flatMap<MessageRailItem>((msg) => {
-    if (msg.compaction) {
-      return [{
-        kind: 'compaction' as const,
-        id: msg.id,
-        text: isZh ? '对话已压缩' : 'Conversation compacted',
-      }];
-    }
-    if (msg.role !== 'user') return [];
-
-    railMessageNumber += 1;
-    const raw = (msg.content ?? '').trim();
-    const text = raw.length > 80 ? `${raw.slice(0, 80)}…` : raw;
-    return [{ kind: 'message' as const, id: msg.id, text, messageNumber: railMessageNumber }];
-  });
+  // 右侧消息轨不依赖流式 assistant 内容；同会话流式尾部替换时复用上次投影。
+  const railItemsCacheRef = useRef<{
+    conversationId: string | null;
+    isZh: boolean;
+    cache: MessageRailItemCache;
+  } | null>(null);
+  const railItems = useMemo(() => {
+    const previous = railItemsCacheRef.current;
+    const sameProjection = previous?.conversationId === conversationId && previous.isZh === isZh
+      ? previous.cache
+      : undefined;
+    const cache = buildMessageRailItemsIncremental(
+      messages,
+      isZh ? '对话已压缩' : 'Conversation compacted',
+      sameProjection,
+      isStreaming && Boolean(sameProjection),
+    );
+    railItemsCacheRef.current = { conversationId, isZh, cache };
+    return cache.items;
+  }, [conversationId, isStreaming, isZh, messages]);
   const showSlashCommands = !isStreaming && !isCompactionActive && slashCommands.length > 0;
   // 口径分离（ADR 42：显示口径 ≠ 压缩触发口径）：进度条分子取「权威快照口径」与「实时本地估算」的较大值。
   // - 权威快照口径 = 主进程回合结束下发的 contextTokens，现已改为「显示口径」= 实际发送给模型的上下文
@@ -703,9 +753,30 @@ export function ChatSurface({
   // 两者现已同为「实际发送量」口径，取 max 仅用于消除「流式→结束」瞬时抖动，保证数值连续、不无故突降。
   // 压缩发生时：onChatCompaction 完成分支已清空 authoritativeContext（置 null）、messages 也替换为压缩后
   // 集合，故 max 自然回落到压缩后的本地估算，不会把已压缩的用量错误地锁在压缩前高位（本次 bug 的修复点）。
-  const liveContextTokens = estimateConversationTokens(messages, draft, attachments);
+  const historyTokenCacheRef = useRef<{
+    conversationId: string | null;
+    cache: ConversationTokenEstimateCache;
+  } | null>(null);
+  const historyContextTokens = useMemo(() => {
+    const previous = historyTokenCacheRef.current;
+    const sameConversationCache = previous?.conversationId === conversationId
+      ? previous.cache
+      : undefined;
+    const next = estimateConversationHistoryTokensIncremental(
+      messages,
+      sameConversationCache,
+      isStreaming && Boolean(sameConversationCache),
+    );
+    historyTokenCacheRef.current = { conversationId, cache: next };
+    return next.totalTokens;
+  }, [conversationId, isStreaming, messages]);
+  const draftContextTokens = useMemo(
+    () => estimateDraftTokens(draft, attachments),
+    [attachments, draft],
+  );
+  const liveContextTokens = historyContextTokens + draftContextTokens;
   const authoritativeContextTokens = authoritativeContext
-    ? authoritativeContext.contextTokens + estimateTextTokens(draft) + estimateAttachmentTokens(attachments)
+    ? authoritativeContext.contextTokens + draftContextTokens
     : 0;
   const estimatedContextTokens = Math.max(authoritativeContextTokens, liveContextTokens);
   // 进度条分母优先用权威 contextWindow（与触发判定同窗口），消除 provider 配置窗口与
@@ -970,28 +1041,86 @@ export function ChatSurface({
   useLayoutEffect(() => {
     const pending = pendingThreadScrollRestoreRef.current;
     if (!pending || pending.conversationId !== conversationId) return;
+    resetVirtualMeasurements();
     const container = threadRef.current;
     if (!container) return;
     if (messages.length === 0 && pending.snapshot && pending.snapshot.top > 0) return;
 
+    const finishRestore = () => {
+      if (
+        pendingThreadScrollRestoreRef.current !== pending
+        || conversationIdRef.current !== pending.conversationId
+      ) return;
+      updateVirtualViewport();
+      updateThreadBottomState(container);
+      updateCurrentTurnContext(container);
+      setThreadScrolled(container.scrollTop > 4);
+      saveThreadScrollSnapshot(conversationId, container);
+      pendingThreadScrollRestoreRef.current = null;
+    };
+
     if (pending.snapshot) {
       if (pending.snapshot.atBottom) {
         container.scrollTop = container.scrollHeight;
-      } else {
-        const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
-        container.scrollTop = Math.min(pending.snapshot.top, maxTop);
+        finishRestore();
+        return;
       }
-      updateThreadBottomState(container);
-    } else {
-      container.scrollTop = container.scrollHeight;
-      shouldAutoScrollRef.current = true;
-      setIsThreadAtBottom(true);
+
+      const anchoredTurnId = pending.snapshot.turnId;
+      const anchoredTurnIndex = anchoredTurnId
+        ? messageTurnIndex.get(anchoredTurnId)
+        : undefined;
+      if (anchoredTurnId && anchoredTurnIndex != null) {
+        scrollToTurn(anchoredTurnIndex);
+        let secondFrameId: number | null = null;
+        const firstFrameId = window.requestAnimationFrame(() => {
+          secondFrameId = window.requestAnimationFrame(() => {
+            if (
+              pendingThreadScrollRestoreRef.current !== pending
+              || conversationIdRef.current !== pending.conversationId
+            ) return;
+            const anchoredTurn = container.querySelector<HTMLElement>(
+              `[data-chat-turn-id="${CSS.escape(anchoredTurnId)}"]`,
+            );
+            if (anchoredTurn) {
+              container.scrollTop = Math.max(
+                0,
+                anchoredTurn.offsetTop + pending.snapshot!.turnOffset,
+              );
+            } else {
+              const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
+              container.scrollTop = Math.min(pending.snapshot!.top, maxTop);
+            }
+            finishRestore();
+          });
+        });
+        return () => {
+          window.cancelAnimationFrame(firstFrameId);
+          if (secondFrameId != null) window.cancelAnimationFrame(secondFrameId);
+        };
+      }
+
+      const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
+      container.scrollTop = Math.min(pending.snapshot.top, maxTop);
+      finishRestore();
+      return;
     }
-    updateCurrentTurnContext(container);
-    setThreadScrolled(container.scrollTop > 4);
-    saveThreadScrollSnapshot(conversationId, container);
-    pendingThreadScrollRestoreRef.current = null;
-  }, [conversationId, messages, saveThreadScrollSnapshot, updateCurrentTurnContext, updateThreadBottomState]);
+
+    container.scrollTop = container.scrollHeight;
+    shouldAutoScrollRef.current = true;
+    setIsThreadAtBottom(true);
+    finishRestore();
+  }, [
+    conversationId,
+    messageTurnIndex,
+    messages,
+    resetVirtualMeasurements,
+    saveThreadScrollSnapshot,
+    scrollToTurn,
+    updateCurrentTurnContext,
+    updateThreadBottomState,
+    updateVirtualViewport,
+  ]);
 
   useEffect(() => {
     if (shouldAutoScrollRef.current) {
@@ -1336,6 +1465,8 @@ export function ChatSurface({
     else if (action === 'branch') void handleBranch(msgIndex);
     else if (action === 'delete') void handleDeleteMessage(msgIndex);
   }, [handleRegenerate, handleBranch, handleDeleteMessage]);
+  const stableHandleMessageAction = useStableCallback(handleMessageAction);
+  const stableHandleRegenerate = useStableCallback(handleRegenerate);
 
   // 顶部 header 级别的分叉:从当前最后一条消息分叉(复用已有 handleBranch)。
   const handleHeaderBranch = useCallback(() => {
@@ -1461,94 +1592,43 @@ export function ChatSurface({
           <div className="chat-empty-state">
             <p>{isZh ? '输入消息开始对话' : 'Type a message to start'}</p>
           </div>
-        ) : chatTurns.map((turn) => (
-          <section key={turn.id} className="chat-turn" data-chat-turn-id={turn.id}>
-            {turn.messages.map(({ msg, index: idx }) => (
-              <div key={msg.id} data-msg-id={msg.id} className={`chat-msg chat-msg-${msg.role}`}>
-            {msg.compaction ? (
-              <CompactionSummaryCard compaction={msg.compaction} isZh={isZh} />
-            ) : (
-              <>
-            {msg.timestamp ? <time className="chat-msg-time">{formatTime(msg.timestamp)}</time> : null}
-            <span className="chat-msg-role-label">{msg.role === 'user' ? (isZh ? '你' : 'You') : 'Peer Agent'}</span>
-            <div className="chat-msg-body">
-              {msg.role === 'user' ? (
-                <>
-                  {msg.content ? <p>{msg.content}</p> : null}
-                  {msg.attachments?.length ? (
-                    <AttachmentStrip attachments={msg.attachments} readOnly isZh={isZh} onPreviewImage={setImagePreview} />
-                  ) : null}
-                </>
-              ) : (
-                <InteractionAnsweredContext.Provider
-                  value={
-                    // 这张交互卡是否已被回复：取紧邻其后的 user 消息文本（点选项或
-                    // 输入框自由输入都会成为这条 user 消息）。没有后续回复则为 null，
-                    // 卡片据此判断锁定与「已选」高亮，不再依赖卡片本地一次性 state。
-                    messages[idx + 1]?.role === 'user'
-                      ? (messages[idx + 1]?.content ?? null)
-                      : null
-                  }
-                >
-                  <AssistantContent
-                    segments={msg.segments}
-                    content={msg.content}
-                    isStreaming={isStreaming && msg === messages[messages.length - 1]}
-                    toolProgress={isStreaming && msg === messages[messages.length - 1] ? toolProgress : null}
-                    durationMs={msg.durationMs}
-                    isZh={isZh}
-                  />
-                </InteractionAnsweredContext.Provider>
-              )}
-            </div>
-            <div className="chat-msg-footer">
-              <MessageActionBar
-                role={msg.role}
-                content={msg.content}
-                canEdit={true}
-                isStreaming={isStreaming}
-                onAction={(action) => handleMessageAction(idx, action)}
-                i18n={i18n}
-              />
-              {msg.role === 'assistant' && (() => {
-                const isLiveTurn = isStreaming && msg === messages[messages.length - 1];
-                const shownMs = isLiveTurn ? elapsedMs : msg.durationMs;
-                if (shownMs == null) return null;
-                return (
-                  <span
-                    className={`chat-msg-duration${isLiveTurn ? ' chat-msg-duration-live' : ''}`}
-                    title={isLiveTurn ? (isZh ? '本轮已工作时长' : 'Elapsed this turn') : (isZh ? '本轮工作时长' : 'Turn duration')}
-                  >
-                    {formatDuration(shownMs)}
-                  </span>
-                );
-              })()}
-              {msg.role === 'assistant' && msg.interrupted && !isStreaming && (
-                <span className="chat-msg-interrupted">
-                  <span
-                    className="chat-msg-interrupted-mark"
-                    title={isZh ? '连接中断，本轮未自然结束' : 'Connection interrupted; this turn did not finish'}
-                  >
-                    {isZh ? '已中断' : 'Interrupted'}
-                  </span>
-                  {hasProvider && (
-                    <button
-                      type="button"
-                      className="chat-msg-continue-btn"
-                      onClick={() => void handleRegenerate(idx)}
-                    >
-                      {isZh ? '继续生成' : 'Continue'}
-                    </button>
-                  )}
-                </span>
-              )}
-            </div>
-              </>
-            )}
-              </div>
-            ))}
-          </section>
-        ))}
+        ) : (
+          <div
+            className="chat-turn-virtual-list"
+            role="list"
+            data-virtualized={virtualizeChatTurns ? 'true' : 'false'}
+          >
+            {virtualTurnRange.paddingStart > 0 ? (
+              <div aria-hidden="true" style={{ height: virtualTurnRange.paddingStart }} />
+            ) : null}
+            {virtualTurnRange.items.map(({ index: turnIndex }) => {
+              const turn = turnIndex === chatTurns.length - 1 && liveChatTurn
+                ? liveChatTurn
+                : chatTurns[turnIndex];
+              if (!turn) return null;
+              const live = isLiveChatTurn(turn, messages.at(-1), isStreaming);
+              return (
+                <ChatTurn
+                  key={turn.id}
+                  turn={turn}
+                  isLive={live}
+                  streamStartedAt={live ? convState.turnStartedAt : null}
+                  toolProgress={live ? toolProgress : null}
+                  isZh={isZh}
+                  i18n={i18n}
+                  onMessageAction={stableHandleMessageAction}
+                  onRegenerate={stableHandleRegenerate}
+                  onPreviewImage={setImagePreview}
+                  turnIndex={turnIndex}
+                  onMeasure={measureVirtualTurn}
+                />
+              );
+            })}
+            {virtualTurnRange.paddingEnd > 0 ? (
+              <div aria-hidden="true" style={{ height: virtualTurnRange.paddingEnd }} />
+            ) : null}
+          </div>
+        )}
         {providerRecoveryNotice ? (
           <div className={`provider-recovery-notice${providerRecoveryNotice.kind === 'connection' ? ' provider-recovery-notice--connection' : ''}`}>
             <div className="provider-recovery-body">

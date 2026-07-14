@@ -54,16 +54,15 @@ export function estimateAttachmentTokens(attachments: readonly ChatAttachment[])
 }
 
 /**
- * 估算整段会话（历史消息 + 草稿 + 草稿附件）的上下文 token 总量。
+ * 估算历史消息部分。单独导出是为了让 React 层只在 messages 引用变化时重算，
+ * 输入框每次敲键不再扫描整段长会话。
  *
  * 压缩感知（与 toApiMessages 同口径）：发送给模型的内容并非全部 UI 消息，而是
  * - 「最后一条 compaction 之后」的活跃消息（更早的原文仅供 UI 回看，不回灌模型）；
  * - 各 compaction 的连续性摘要（summary || content，对齐 buildConversationContinuityContext
  *   实际经 continuity 通道注入的文本）。
- * 因此估算只统计这部分，使压缩完成瞬间显示值随之回落，避免被压缩前原文长期顶高。
- * 无 compaction 时退化为「全部消息求和」的原行为，保证向后兼容。
  */
-export function estimateConversationTokens(messages: readonly ChatMsg[], draft: string, draftAttachments: readonly ChatAttachment[]): number {
+export function estimateConversationHistoryTokens(messages: readonly ChatMsg[]): number {
   const lastCompactionIndex = messages.reduce(
     (latest, message, index) => (message.compaction ? index : latest),
     -1,
@@ -83,5 +82,63 @@ export function estimateConversationTokens(messages: readonly ChatMsg[], draft: 
     continuityTokens += estimateTextTokens(message.compaction.summary || message.content);
   }
 
-  return Math.max(0, messageTokens + continuityTokens + estimateTextTokens(draft) + estimateAttachmentTokens(draftAttachments));
+  return Math.max(0, messageTokens + continuityTokens);
+}
+
+export interface ConversationTokenEstimateCache {
+  readonly messageCount: number;
+  readonly lastMessageId: string | null;
+  readonly totalTokens: number;
+  readonly lastMessageTokens: number;
+}
+
+/**
+ * 增量估算历史消息。流式路由器保留所有旧 ChatMsg 引用、只替换末尾消息，
+ * 因此可复用共同前缀的单条估算；压缩边界变化时回退到完整口径计算。
+ */
+export function estimateConversationHistoryTokensIncremental(
+  messages: readonly ChatMsg[],
+  previous?: ConversationTokenEstimateCache,
+  tailOnly: boolean = false,
+): ConversationTokenEstimateCache {
+  const nextLastMessage = messages.at(-1);
+  const canPatchTail = Boolean(
+    tailOnly
+    && previous
+    && messages.length === previous.messageCount
+    && nextLastMessage
+    && nextLastMessage.role === 'assistant'
+    && nextLastMessage.id === previous.lastMessageId
+    && !nextLastMessage.compaction,
+  );
+
+  if (canPatchTail && previous && nextLastMessage) {
+    const lastMessageTokens = estimateMessageTokens(nextLastMessage);
+    return {
+      messageCount: messages.length,
+      lastMessageId: nextLastMessage.id,
+      totalTokens: previous.totalTokens - previous.lastMessageTokens + lastMessageTokens,
+      lastMessageTokens,
+    };
+  }
+
+  return {
+    messageCount: messages.length,
+    lastMessageId: nextLastMessage?.id ?? null,
+    totalTokens: estimateConversationHistoryTokens(messages),
+    lastMessageTokens: nextLastMessage ? estimateMessageTokens(nextLastMessage) : 0,
+  };
+}
+
+/** 当前草稿部分独立估算，避免草稿变化使历史消息重复扫描。 */
+export function estimateDraftTokens(
+  draft: string,
+  draftAttachments: readonly ChatAttachment[],
+): number {
+  return Math.max(0, estimateTextTokens(draft) + estimateAttachmentTokens(draftAttachments));
+}
+
+/** 兼容既有调用者的组合入口。 */
+export function estimateConversationTokens(messages: readonly ChatMsg[], draft: string, draftAttachments: readonly ChatAttachment[]): number {
+  return estimateConversationHistoryTokens(messages) + estimateDraftTokens(draft, draftAttachments);
 }

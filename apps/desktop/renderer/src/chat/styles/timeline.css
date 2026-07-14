@@ -1,10 +1,30 @@
 @layer components {
 
+  .chat-turn-virtual-list {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  /* 虚拟列表自行补偿动态测量带来的高度变化，避免 Chromium 的滚动锚定重复修正。 */
+  .chat-turn-virtual-list[data-virtualized='true'] {
+    overflow-anchor: none;
+  }
+
   .chat-turn {
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
     width: 100%;
+    /* 原 chat-thread 的轮次间距移入测量盒，虚拟总高度与实际 DOM 保持一致。 */
+    padding-bottom: var(--space-6);
+  }
+
+  /* 非虚拟化（搜索开启/短会话）时，Chromium 仍可跳过离屏历史轮次的布局与绘制。
+   * 虚拟列表中的窗口项必须参与真实测量，不能让 contain-intrinsic-size 冒充高度。 */
+  .chat-turn-virtual-list:not([data-virtualized='true']) .chat-turn[data-settled='true'] {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 360px;
   }
 
   .chat-turn>.chat-msg.chat-msg-user+.chat-msg-assistant {

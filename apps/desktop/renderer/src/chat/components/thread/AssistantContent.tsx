@@ -1,7 +1,12 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { parseInteractionToolViewFromCandidates } from '../../state/interactionToolView';
 import { groupSegments, splitFinalTextGroup } from '../../state/streamSegments';
 import { formatDuration } from '../../state/format';
+import {
+  previewInlineText,
+  windowProcessingGroups,
+  windowProcessingText,
+} from '../../state/processingWindow';
 import type {
   ContentSegment,
   ToolCallLegacy,
@@ -85,7 +90,7 @@ function buildProcessingSummary(groups: SegmentGroup[], durationMs: number | und
   return prefix;
 }
 
-export function AssistantContent({ segments, content, isStreaming, toolProgress, durationMs, isZh }: {
+function AssistantContentImpl({ segments, content, isStreaming, toolProgress, durationMs, isZh }: {
   readonly segments?: ContentSegment[];
   readonly content: string;
   readonly isStreaming: boolean;
@@ -93,6 +98,15 @@ export function AssistantContent({ segments, content, isStreaming, toolProgress,
   readonly durationMs?: number;
   readonly isZh: boolean;
 }) {
+  const groups = useMemo(
+    () => (segments?.length ? groupSegments(segments) : []),
+    [segments],
+  );
+  const completedSplit = useMemo(
+    () => (isStreaming || groups.length === 0 ? undefined : splitFinalTextGroup(groups)),
+    [groups, isStreaming],
+  );
+
   if (!segments?.length) {
     if (content || toolProgress || isStreaming) {
       return (
@@ -106,10 +120,8 @@ export function AssistantContent({ segments, content, isStreaming, toolProgress,
     return null;
   }
 
-  const groups = groupSegments(segments);
   const processingSummary = buildProcessingSummary(groups, durationMs, isZh);
   const hasProcessingGroups = groups.some(isProcessingGroup);
-  const completedSplit = isStreaming ? undefined : splitFinalTextGroup(groups);
   // 流式期间完整展示原始时间线；完成后只把最后正文留在折叠区外。
   const timelineGroups = completedSplit?.historyGroups ?? groups;
   const finalTextGroup = completedSplit?.finalTextGroup;
@@ -172,6 +184,9 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
   readonly isZh: boolean;
 }) {
   const { expanded, toggleExpanded } = useAutoCollapsingExpanded(isActive);
+  const [showAll, setShowAll] = useState(false);
+  const processingWindow = useMemo(() => windowProcessingGroups(groups), [groups]);
+  const visibleGroups = showAll ? groups : processingWindow.groups;
   const label = isActive
     ? (isZh ? '正在思考' : 'Thinking')
     : completedLabel;
@@ -186,9 +201,52 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
       </button>
       {expanded ? (
         <div className="thinking-body">
-          <TimelineGroups groups={groups} isZh={isZh} />
+          {processingWindow.omittedCount > 0 ? (
+            <button
+              type="button"
+              className="thinking-history-toggle"
+              onClick={() => setShowAll((value) => !value)}
+            >
+              {showAll
+                ? (isZh ? '收起较早过程' : 'Hide earlier activity')
+                : (isZh
+                    ? `展开较早的 ${processingWindow.omittedCount} 个过程`
+                    : `Show ${processingWindow.omittedCount} earlier event${processingWindow.omittedCount === 1 ? '' : 's'}`)}
+            </button>
+          ) : null}
+          <TimelineGroups groups={visibleGroups} isZh={isZh} />
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ThinkingTextGroup({ content, isZh }: {
+  readonly content: string;
+  readonly isZh: boolean;
+}) {
+  const [expandedContentAnchor, setExpandedContentAnchor] = useState<string | null>(null);
+  const textWindow = useMemo(() => windowProcessingText(content), [content]);
+  const contentAnchor = content.slice(0, 128);
+  const showFullText = expandedContentAnchor === contentAnchor;
+  const visibleContent = showFullText ? content : textWindow.content;
+
+  return (
+    <div className="thinking-text">
+      {textWindow.omittedCharacterCount > 0 ? (
+        <button
+          type="button"
+          className="thinking-history-toggle thinking-text-window-toggle"
+          onClick={() => setExpandedContentAnchor(showFullText ? null : contentAnchor)}
+        >
+          {showFullText
+            ? (isZh ? '收起完整思考' : 'Hide full thinking')
+            : (isZh
+                ? `展开更早的 ${textWindow.omittedCharacterCount.toLocaleString()} 个字符`
+                : `Show ${textWindow.omittedCharacterCount.toLocaleString()} earlier characters`)}
+        </button>
+      ) : null}
+      <MarkdownMessage content={neutralizeToolCallSyntaxForDisplay(visibleContent)} />
     </div>
   );
 }
@@ -200,9 +258,11 @@ function TimelineGroups({ groups, isZh }: {
   return groups.map((group, groupIndex) => {
     if (group.type === 'thinking') {
       return (
-        <div key={`thinking-${groupIndex}`} className="thinking-text">
-          <MarkdownMessage content={neutralizeToolCallSyntaxForDisplay(group.content)} />
-        </div>
+        <ThinkingTextGroup
+          key={`thinking-${groupIndex}`}
+          content={group.content}
+          isZh={isZh}
+        />
       );
     }
     if (group.type === 'text') {
@@ -281,6 +341,7 @@ function ToolCallCard({ tc, isZh }: { readonly tc: ToolCallLegacy; readonly isZh
           : fallbackToolCallLabel(tc, tc.displayName ?? tc.tool ?? '');
   const isSynthetic = tc.synthetic === true;
   const isDone = tc.result !== undefined && !isSynthetic;
+  const labelPreview = previewInlineText(label).content;
 
   return (
     <div className={`tool-call-card ${isSynthetic ? 'synthetic' : isDone ? 'done' : 'running'}`} onClick={() => setExpanded(!expanded)}>
@@ -301,7 +362,7 @@ function ToolCallCard({ tc, isZh }: { readonly tc: ToolCallLegacy; readonly isZh
             </svg>
           )}
         </span>
-        <span className="tool-call-label">{label}</span>
+        <span className="tool-call-label">{labelPreview}</span>
         <svg className="tool-call-expand" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
           <path d="m6 9 6 6 6-6" />
         </svg>
@@ -315,6 +376,8 @@ function ToolCallCard({ tc, isZh }: { readonly tc: ToolCallLegacy; readonly isZh
     </div>
   );
 }
+
+export const AssistantContent = memo(AssistantContentImpl);
 
 export function CompactionSummaryCard({ compaction, isZh }: { readonly compaction: CompactionMeta; readonly isZh: boolean }) {
   const [expanded, setExpanded] = useState(false);
