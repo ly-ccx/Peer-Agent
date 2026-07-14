@@ -6,7 +6,7 @@
   .workbench-panel {
     position: relative;
     display: flex;
-    flex-direction: row;
+    flex-direction: column;
     height: 100%;
     min-height: 0;
     background: var(--za-surface-1);
@@ -36,26 +36,25 @@
   .workbench-resizer:focus-visible {
     outline: none;
   }
-  /* TabRail：左侧 56px 竖向 tab 列 */
+  /* TabRail：内容区顶部的横向纯图标 tab。文字由原生 title tooltip 提供。 */
   .workbench-tab-rail {
-    flex: 0 0 56px;
+    flex: 0 0 52px;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    align-items: center;
     gap: 4px;
-    padding: 6px 4px 8px;
+    padding: 4px 8px;
     background: var(--za-sidebar-bg);
-    border-right: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+    border-bottom: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   }
 
   .workbench-tab {
-    display: flex;
-    flex-direction: column;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
-    width: 48px;
-    height: 56px;
-    padding: 6px 4px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
     border: none;
     border-radius: var(--ui-radius-control, 6px);
     background: transparent;
@@ -85,18 +84,12 @@
     justify-content: center;
   }
 
-  .workbench-tab-label {
-    font-size: var(--ui-font-caption, 11px);
-    line-height: var(--ui-line-tight, 1.25);
-    letter-spacing: 0;
-  }
-
-  /* ViewSlot：right pane，承载子视图。多个视图同时挂载，靠 data-active 显隐。 */
+  /* ViewSlot：tab 下方的内容区。多个视图同时挂载，靠 data-active 显隐。 */
   .workbench-view-slot {
     position: relative;
     flex: 1 1 auto;
     min-width: 0;
-    height: 100%;
+    min-height: 0;
     overflow: hidden;
     padding-top: 24px;
   }

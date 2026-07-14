@@ -20,8 +20,6 @@ interface TabDef {
 }
 
 const ICON_PROPS = {
-  width: 18,
-  height: 18,
   viewBox: '0 0 24 24',
   fill: 'none',
   stroke: 'currentColor',
@@ -37,7 +35,7 @@ const TABS: readonly TabDef[] = [
     labelZh: '计划',
     labelEn: 'Plan',
     icon: (
-      <svg {...ICON_PROPS}>
+      <svg width="15" height="15" {...ICON_PROPS}>
         <circle cx="12" cy="12" r="9" />
         <circle cx="12" cy="12" r="5" />
         <circle cx="12" cy="12" r="1.5" />
@@ -49,7 +47,7 @@ const TABS: readonly TabDef[] = [
     labelZh: '浏览器',
     labelEn: 'Browser',
     icon: (
-      <svg {...ICON_PROPS}>
+      <svg width="15" height="15" {...ICON_PROPS}>
         <circle cx="12" cy="12" r="9" />
         <path d="M3 12h18" />
         <path d="M12 3a14 14 0 0 1 0 18" />
@@ -62,7 +60,7 @@ const TABS: readonly TabDef[] = [
     labelZh: '文件',
     labelEn: 'Files',
     icon: (
-      <svg {...ICON_PROPS}>
+      <svg width="15" height="15" {...ICON_PROPS}>
         <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
       </svg>
     ),
@@ -72,7 +70,7 @@ const TABS: readonly TabDef[] = [
     labelZh: 'Diff',
     labelEn: 'Diff',
     icon: (
-      <svg {...ICON_PROPS}>
+      <svg width="15" height="15" {...ICON_PROPS}>
         <path d="M12 3v6" />
         <path d="M9 6h6" />
         <path d="M12 15v6" />
@@ -223,10 +221,13 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
         />
       ) : null}
 
-      <div className="workbench-tab-rail" role="tablist" aria-orientation="vertical">
+      <div className="workbench-tab-rail" role="tablist" aria-orientation="horizontal">
         {TABS.map((tab) => {
           const disabled = tab.id === 'plan' && !hasGoalPlan;
           const selected = activeTab === tab.id;
+          const label = disabled
+            ? isZh ? '暂无计划' : 'No active plan'
+            : isZh ? tab.labelZh : tab.labelEn;
           return (
             <button
               key={tab.id}
@@ -235,21 +236,17 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
               className={`workbench-tab${selected ? ' workbench-tab--active' : ''}${
                 disabled ? ' workbench-tab--disabled' : ''
               }`}
+              aria-label={label}
               aria-selected={selected}
               aria-disabled={disabled}
               tabIndex={selected ? 0 : -1}
-              title={
-                disabled
-                  ? isZh ? '暂无计划' : 'No active plan'
-                  : isZh ? tab.labelZh : tab.labelEn
-              }
+              title={label}
               onClick={() => {
                 if (disabled) return;
                 setActiveTab(tab.id);
               }}
             >
-              <span className="workbench-tab-icon">{tab.icon}</span>
-              <span className="workbench-tab-label">{isZh ? tab.labelZh : tab.labelEn}</span>
+              <span className="workbench-tab-icon" aria-hidden="true">{tab.icon}</span>
             </button>
           );
         })}
