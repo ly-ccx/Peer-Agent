@@ -40,7 +40,6 @@ describe('goal plan default expansion', () => {
       'accepted',
       'executing',
       'paused',
-      'failed',
     ];
 
     for (const status of activeStatuses) {
@@ -52,8 +51,8 @@ describe('goal plan default expansion', () => {
     }
   });
 
-  it('collapses completed and cancelled history by default', () => {
-    for (const status of ['completed', 'cancelled'] as const) {
+  it('collapses completed, cancelled, and failed history by default', () => {
+    for (const status of ['completed', 'cancelled', 'failed'] as const) {
       assert.equal(
         shouldDefaultExpandGoalPlan(plan(status)),
         false,
@@ -85,7 +84,11 @@ describe('goal plan default expansion', () => {
 
   it('returns no primary plan when only terminal history remains', () => {
     assert.equal(
-      selectPrimaryGoalPlan([plan('completed'), plan('cancelled')]),
+      selectPrimaryGoalPlan([
+        plan('completed'),
+        plan('cancelled'),
+        plan('failed'),
+      ]),
       null,
     );
   });
