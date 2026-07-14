@@ -14,6 +14,12 @@ import {
   moveApprovalSelection,
   TUI_APPROVAL_OPTIONS,
 } from './approval-card.ts';
+import {
+  createPlanCoordinator,
+  movePlanSelection,
+  PLAN_APPROVAL_OPTIONS,
+  planDecisionForKey,
+} from './plan-mode.ts';
 import type { PendingApproval, TuiHost } from './tui-host.ts';
 import { cycleTuiMode, TUI_MODES, tuiModeForKey, tuiModeOption } from './tui-mode.ts';
 
@@ -76,10 +82,22 @@ export function App({ host, model, modelLabel }: {
   readonly modelLabel: string;
 }) {
   const renderer = useRenderer();
-  const controller = useMemo(() => createChatController({ host, model }), [host, model]);
+  let controller!: ChatController;
+  const planCoordinator = useMemo(() => createPlanCoordinator({
+    sessionId: 'tui-chat',
+    goalExecution: {
+      create: async ({ plan }) => {
+        // Goal execution re-enters through the same controller/SDK host path; approval grants no tool permission.
+        controller.setMode('goal');
+        await controller.send(`Execute approved plan ${plan.planId}: ${plan.goal}`);
+      },
+    },
+  }), []);
+  controller = useMemo(() => createChatController({ host, model, planCoordinator }), [host, model, planCoordinator]);
   const [snapshot, setSnapshot] = useState(() => controller.getSnapshot());
   const [approval, setApproval] = useState<PendingApproval | null>(null);
   const [approvalSelection, setApprovalSelection] = useState(0);
+  const [planSelection, setPlanSelection] = useState(0);
   const visibleTurn = snapshot.session?.activeTurn ?? snapshot.session?.lastTurn;
 
   useEffect(() => controller.subscribe(setSnapshot), [controller]);
@@ -100,6 +118,19 @@ export function App({ host, model, modelLabel }: {
       }
       const decision = approvalDecisionForKey(key.name, approvalSelection);
       if (decision) approval.resolve(decision);
+      return;
+    }
+    if (snapshot.plan?.status === 'awaiting_approval') {
+      if (key.name === 'left' || key.name === 'up') {
+        setPlanSelection((current) => movePlanSelection(current, -1));
+        return;
+      }
+      if (key.name === 'right' || key.name === 'down' || key.name === 'tab') {
+        setPlanSelection((current) => movePlanSelection(current, 1));
+        return;
+      }
+      const decision = planDecisionForKey(key.name, planSelection);
+      if (decision) void planCoordinator.decide(snapshot.plan.plan.planId, decision);
       return;
     }
     if (key.ctrl && key.name === 'c') {
@@ -154,6 +185,25 @@ export function App({ host, model, modelLabel }: {
 
       {snapshot.error ? <text fg="#fca5a5">{snapshot.error}</text> : null}
 
+      {snapshot.plan?.status === 'awaiting_approval' ? (
+        <box flexDirection="column" border borderColor="#60a5fa" padding={1}>
+          <text fg="#93c5fd"><strong>Plan approval</strong> · {snapshot.plan.plan.title}</text>
+          <text fg="#e2e8f0">{snapshot.plan.plan.goal}</text>
+          {snapshot.plan.plan.tasks.map((task, index) => (
+            <text key={task.taskId} fg="#94a3b8">{index + 1}. {task.title}</text>
+          ))}
+          <box flexDirection="row" gap={2}>
+            {PLAN_APPROVAL_OPTIONS.map((option, index) => (
+              <text key={option.decision} fg={option.color}>
+                {index === planSelection ? '▶ ' : '  '}
+                [{option.shortcut}] {option.label}
+              </text>
+            ))}
+          </box>
+          <text fg="#64748b">←/→ or Tab select · Enter confirm · Esc Reject</text>
+        </box>
+      ) : null}
+
       {approval ? (
         <box flexDirection="column" border borderColor="#fb7185" padding={1}>
           <text fg="#fecdd3"><strong>Permission required</strong></text>
@@ -176,7 +226,11 @@ export function App({ host, model, modelLabel }: {
         </box>
       ) : null}
 
-      <Composer controller={controller} snapshot={snapshot} disabled={Boolean(approval)} />
+      <Composer
+        controller={controller}
+        snapshot={snapshot}
+        disabled={Boolean(approval) || snapshot.plan?.status === 'awaiting_approval'}
+      />
       <text fg="#64748b">Enter send · Shift+Enter newline · Ctrl+1..4 mode · Ctrl+Tab cycle · Ctrl+C cancel / quit</text>
     </box>
   );

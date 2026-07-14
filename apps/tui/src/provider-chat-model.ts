@@ -51,6 +51,8 @@ function parseArguments(call: ModelToolCall): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+const PLAN_MODE_SYSTEM_PROMPT = `You are in read-only Plan mode. Investigate only with the projected read-only tools. Do not claim to modify files or execute the plan. End with exactly one JSON object (a fenced json block is allowed) using this shape: {"planId":"unique-id","title":"short title","goal":"goal statement","tasks":[{"taskId":"stable-id","title":"one action"}],"successCriteria":[{"description":"verifiable result"}]}. The plan remains a draft until the user chooses Approve and execute.`;
+
 function executionContent(execution: RuntimeSdkProviderExecution): string {
   const result = execution.result;
   const view = {
@@ -68,11 +70,14 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
     options.toolDefinitionsForMode?.(mode) ?? defaultToolDefinitions;
 
   return {
-    initialize(input) {
+    initialize(input, context) {
+      const mode = normalizeTuiMode(context.run.mode);
+      const systemPrompts = [options.systemPrompt, mode === 'plan' ? PLAN_MODE_SYSTEM_PROMPT : null]
+        .filter((prompt): prompt is string => Boolean(prompt));
       const modelMessages: ModelMessage[] = [
         ...input.input.modelMessages,
-        ...(input.input.modelMessages.length === 0 && options.systemPrompt
-          ? [{ role: 'system' as const, content: options.systemPrompt }]
+        ...(input.input.modelMessages.length === 0
+          ? systemPrompts.map((content) => ({ role: 'system' as const, content }))
           : []),
         { role: 'user', content: input.input.content },
       ];

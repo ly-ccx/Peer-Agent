@@ -10,6 +10,8 @@ import {
   type RuntimeSdkProviderExecution,
 } from '@peer-agent/runtime-sdk';
 
+import type { PlanCoordinator, PlanSnapshot } from './plan-mode.ts';
+import { parseRuntimePlanText } from './plan-mode.ts';
 import type { TuiHost } from './tui-host.ts';
 import { normalizeTuiMode, type TuiMode } from './tui-mode.ts';
 
@@ -28,6 +30,7 @@ export interface ChatSnapshot {
   readonly mode: TuiMode;
   readonly messages: readonly ChatMessage[];
   readonly session?: RuntimeSessionSnapshot;
+  readonly plan?: PlanSnapshot;
   readonly usage?: ModelUsage;
   readonly error?: string;
 }
@@ -80,6 +83,7 @@ export function createChatController(options: {
   readonly conversationId?: string;
   readonly initialMode?: TuiMode;
   readonly sessionController?: RuntimeSessionController;
+  readonly planCoordinator?: PlanCoordinator;
 }): ChatController {
   const listeners = new Set<(snapshot: ChatSnapshot) => void>();
   const sessionId = options.sessionId ?? 'tui-chat';
@@ -95,6 +99,11 @@ export function createChatController(options: {
     snapshot = next;
     for (const listener of listeners) listener(snapshot);
   };
+
+  options.planCoordinator?.subscribe((plan) => {
+    if (snapshot.plan === plan) return;
+    publish({ ...snapshot, plan: plan ?? undefined });
+  });
 
   const pipeline = createRuntimePipeline<
     ChatModelInput,
@@ -215,10 +224,16 @@ export function createChatController(options: {
         else if (result.status === 'exhausted') turn.fail('turn_limit_exhausted');
         else turn.complete();
 
+        if (turnMode === 'plan' && result.status === 'completed' && result.output) {
+          const plan = parseRuntimePlanText(result.output);
+          if (plan) options.planCoordinator?.publish(plan);
+        }
+
         publish({
           status: 'idle',
           mode: turnMode,
           session: sessions.get(sessionId) ?? undefined,
+          plan: options.planCoordinator?.getSnapshot() ?? undefined,
           usage: result.state?.usage,
           messages: snapshot.messages.map((message) =>
             message.pending ? { ...message, pending: false } : message,
