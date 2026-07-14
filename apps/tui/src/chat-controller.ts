@@ -1,12 +1,17 @@
 import type { ModelMessage, ModelToolCall, ModelUsage } from '@peer-agent/runtime-node';
 import {
   createRuntimePipeline,
+  createRuntimeSessionController,
   type RuntimePipelineModelAdapter,
   type RuntimePipelineToolCall,
+  type RuntimeSessionController,
+  type RuntimeSessionSnapshot,
+  type RuntimeSessionTurnHandle,
   type RuntimeSdkProviderExecution,
 } from '@peer-agent/runtime-sdk';
 
 import type { TuiHost } from './tui-host.ts';
+import { normalizeTuiMode, type TuiMode } from './tui-mode.ts';
 
 export type ChatRole = 'user' | 'assistant' | 'tool';
 export type ChatRunStatus = 'idle' | 'running' | 'cancelling';
@@ -20,7 +25,9 @@ export interface ChatMessage {
 
 export interface ChatSnapshot {
   readonly status: ChatRunStatus;
+  readonly mode: TuiMode;
   readonly messages: readonly ChatMessage[];
+  readonly session?: RuntimeSessionSnapshot;
   readonly usage?: ModelUsage;
   readonly error?: string;
 }
@@ -34,6 +41,8 @@ export interface ChatModelInput {
   readonly content: string;
   readonly history: readonly ChatMessage[];
   readonly modelMessages: readonly ModelMessage[];
+  readonly turnId: string;
+  readonly turnIndex: number;
 }
 
 export interface ChatModelState {
@@ -55,6 +64,7 @@ export interface ChatModelPort extends RuntimePipelineModelAdapter<
 export interface ChatController {
   getSnapshot(): ChatSnapshot;
   subscribe(listener: (snapshot: ChatSnapshot) => void): () => void;
+  setMode(mode: TuiMode): boolean;
   send(content: string): Promise<void>;
   cancel(): void;
 }
@@ -67,12 +77,19 @@ export function createChatController(options: {
   readonly host: TuiHost;
   readonly model: ChatModelPort;
   readonly sessionId?: string;
+  readonly conversationId?: string;
+  readonly initialMode?: TuiMode;
+  readonly sessionController?: RuntimeSessionController;
 }): ChatController {
   const listeners = new Set<(snapshot: ChatSnapshot) => void>();
-  let snapshot: ChatSnapshot = { status: 'idle', messages: [] };
-  let abortController: AbortController | null = null;
+  const sessionId = options.sessionId ?? 'tui-chat';
+  const conversationId = options.conversationId ?? sessionId;
+  const initialMode = normalizeTuiMode(options.initialMode);
+  let snapshot: ChatSnapshot = { status: 'idle', mode: initialMode, messages: [] };
+  let activeTurn: RuntimeSessionTurnHandle | null = null;
   let conversationModelMessages: readonly ModelMessage[] = [];
   let sequence = 0;
+  const sessions = options.sessionController ?? createRuntimeSessionController();
 
   const publish = (next: ChatSnapshot) => {
     snapshot = next;
@@ -88,8 +105,18 @@ export function createChatController(options: {
   >({
     model: options.model,
     tools: {
-      async execute(call) {
-        const execution = await options.host.execute(call.capabilityId, call.arguments);
+      async execute(call, context) {
+        const execution = await options.host.execute(call.capabilityId, call.arguments, {
+          sessionId: context.run.sessionId,
+          ...(context.run.conversationId
+            ? { conversationId: context.run.conversationId }
+            : {}),
+          ...(context.run.streamId ? { streamId: context.run.streamId } : {}),
+          mode: normalizeTuiMode(context.run.mode),
+          turnId: context.run.input.turnId,
+          turnIndex: context.run.input.turnIndex,
+          ...(context.signal ? { signal: context.signal } : {}),
+        });
         publish({
           ...snapshot,
           messages: [
@@ -133,14 +160,32 @@ export function createChatController(options: {
       listener(snapshot);
       return () => listeners.delete(listener);
     },
+    setMode(mode) {
+      if (snapshot.status !== 'idle') return false;
+      const nextMode = normalizeTuiMode(mode, snapshot.mode);
+      if (nextMode === snapshot.mode) return true;
+      publish({ ...snapshot, mode: nextMode });
+      return true;
+    },
     async send(content) {
       const trimmed = content.trim();
-      if (!trimmed || abortController) return;
+      if (!trimmed || activeTurn) return;
 
-      abortController = new AbortController();
+      const existingSession = sessions.get(sessionId);
+      activeTurn = existingSession
+        ? sessions.resume({ sessionId, streamId: `${sessionId}:stream:${existingSession.nextTurnIndex}` })
+        : sessions.start({
+            sessionId,
+            conversationId,
+            streamId: `${sessionId}:stream:0`,
+          });
+      const turn = activeTurn;
+      const turnMode = snapshot.mode;
       const history = snapshot.messages.filter((message) => !message.pending);
       publish({
         status: 'running',
+        mode: turnMode,
+        session: sessions.get(sessionId) ?? undefined,
         messages: [
           ...history,
           { id: `user-${++sequence}`, role: 'user', content: trimmed },
@@ -150,18 +195,30 @@ export function createChatController(options: {
       try {
         const result = await pipeline.run(
           {
-            sessionId: options.sessionId ?? 'tui-chat',
+            sessionId: turn.sessionId,
+            ...(turn.conversationId ? { conversationId: turn.conversationId } : {}),
+            ...(turn.streamId ? { streamId: turn.streamId } : {}),
+            mode: turnMode,
             input: {
               content: trimmed,
               history,
               modelMessages: conversationModelMessages,
+              turnId: turn.turnId,
+              turnIndex: turn.turnIndex,
             },
           },
-          { signal: abortController.signal },
+          { signal: turn.signal },
         );
         if (result.state) conversationModelMessages = result.state.modelMessages;
+
+        if (result.status === 'cancelled') turn.cancel(result.reason);
+        else if (result.status === 'exhausted') turn.fail('turn_limit_exhausted');
+        else turn.complete();
+
         publish({
           status: 'idle',
+          mode: turnMode,
+          session: sessions.get(sessionId) ?? undefined,
           usage: result.state?.usage,
           messages: snapshot.messages.map((message) =>
             message.pending ? { ...message, pending: false } : message,
@@ -169,21 +226,30 @@ export function createChatController(options: {
           error: result.status === 'exhausted' ? 'The model exhausted its turn limit.' : undefined,
         });
       } catch (error) {
+        const wasCancelled = turn.signal.aborted;
+        if (wasCancelled) turn.cancel(errorMessage(error));
+        else turn.fail(errorMessage(error));
         publish({
           status: 'idle',
+          mode: turnMode,
+          session: sessions.get(sessionId) ?? undefined,
           messages: snapshot.messages.map((message) =>
             message.pending ? { ...message, pending: false } : message,
           ),
-          error: errorMessage(error),
+          error: wasCancelled ? undefined : errorMessage(error),
         });
       } finally {
-        abortController = null;
+        if (activeTurn === turn) activeTurn = null;
       }
     },
     cancel() {
-      if (!abortController) return;
-      publish({ ...snapshot, status: 'cancelling' });
-      abortController.abort();
+      if (!activeTurn) return;
+      const session = sessions.cancel(sessionId, 'cancelled_in_tui');
+      publish({
+        ...snapshot,
+        status: 'cancelling',
+        ...(session ? { session } : {}),
+      });
     },
   };
 }

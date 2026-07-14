@@ -9,7 +9,13 @@ import {
   type ChatModelPort,
   type ChatSnapshot,
 } from './chat-controller.ts';
+import {
+  approvalDecisionForKey,
+  moveApprovalSelection,
+  TUI_APPROVAL_OPTIONS,
+} from './approval-card.ts';
 import type { PendingApproval, TuiHost } from './tui-host.ts';
+import { cycleTuiMode, TUI_MODES, tuiModeForKey, tuiModeOption } from './tui-mode.ts';
 
 function roleColor(role: ChatMessage['role']): string {
   if (role === 'user') return '#93c5fd';
@@ -73,19 +79,42 @@ export function App({ host, model, modelLabel }: {
   const controller = useMemo(() => createChatController({ host, model }), [host, model]);
   const [snapshot, setSnapshot] = useState(() => controller.getSnapshot());
   const [approval, setApproval] = useState<PendingApproval | null>(null);
+  const [approvalSelection, setApprovalSelection] = useState(0);
+  const visibleTurn = snapshot.session?.activeTurn ?? snapshot.session?.lastTurn;
 
   useEffect(() => controller.subscribe(setSnapshot), [controller]);
-  useEffect(() => host.subscribeApproval(setApproval), [host]);
+  useEffect(() => host.subscribeApproval((next) => {
+    setApprovalSelection(0);
+    setApproval(next);
+  }), [host]);
 
   useKeyboard((key) => {
     if (approval) {
-      if (key.name === 'y') approval.resolve('allow');
-      if (key.name === 'n' || key.name === 'escape') approval.resolve('deny');
+      if (key.name === 'left' || key.name === 'up') {
+        setApprovalSelection((current) => moveApprovalSelection(current, -1));
+        return;
+      }
+      if (key.name === 'right' || key.name === 'down' || key.name === 'tab') {
+        setApprovalSelection((current) => moveApprovalSelection(current, 1));
+        return;
+      }
+      const decision = approvalDecisionForKey(key.name, approvalSelection);
+      if (decision) approval.resolve(decision);
       return;
     }
     if (key.ctrl && key.name === 'c') {
       if (snapshot.status === 'running') controller.cancel();
       else renderer.destroy();
+      return;
+    }
+    if (snapshot.status !== 'idle') return;
+    const directMode = tuiModeForKey(key.name, Boolean(key.ctrl));
+    if (directMode) {
+      controller.setMode(directMode);
+      return;
+    }
+    if (key.ctrl && key.name === 'tab') {
+      controller.setMode(cycleTuiMode(snapshot.mode, key.shift ? -1 : 1));
     }
   });
 
@@ -99,6 +128,28 @@ export function App({ host, model, modelLabel }: {
         </text>
       </box>
 
+      <box flexDirection="column" border borderColor="#1e3a5f" padding={1}>
+        <box flexDirection="row" gap={2}>
+          {TUI_MODES.map((option) => (
+            <text key={option.mode} fg={option.mode === snapshot.mode ? '#67e8f9' : '#64748b'}>
+              {option.mode === snapshot.mode ? '▶ ' : '  '}
+              Ctrl+{option.shortcut} {option.label}
+              {option.readOnly ? ' · read-only' : ''}
+            </text>
+          ))}
+        </box>
+        <text fg="#94a3b8">
+          {tuiModeOption(snapshot.mode).description} · {(host.capabilitiesForMode?.(snapshot.mode) ?? host.capabilities).length} projected tools
+        </text>
+      </box>
+
+      {snapshot.session ? (
+        <text fg="#64748b">
+          session {snapshot.session.sessionId}
+          {visibleTurn ? ` · turn ${visibleTurn.turnIndex} · ${visibleTurn.status}` : ''}
+        </text>
+      ) : null}
+
       <ChatHistory snapshot={snapshot} />
 
       {snapshot.error ? <text fg="#fca5a5">{snapshot.error}</text> : null}
@@ -106,13 +157,27 @@ export function App({ host, model, modelLabel }: {
       {approval ? (
         <box flexDirection="column" border borderColor="#fb7185" padding={1}>
           <text fg="#fecdd3"><strong>Permission required</strong></text>
-          <text fg="#fda4af">{approval.prompt.capabilityId}</text>
-          <text fg="#fda4af">y allow · n/Esc deny</text>
+          <text fg="#fda4af">
+            {approval.prompt.capabilityId} · {approval.prompt.confirmation.kind}
+          </text>
+          <text fg="#94a3b8">{approval.prompt.reason}</text>
+          <text fg="#94a3b8">
+            scope {approval.sessionId ? `session ${approval.sessionId}` : 'this request only'}
+          </text>
+          <box flexDirection="row" gap={2}>
+            {TUI_APPROVAL_OPTIONS.map((option, index) => (
+              <text key={option.decision} fg={option.color}>
+                {index === approvalSelection ? '▶ ' : '  '}
+                [{option.shortcut}] {option.label}
+              </text>
+            ))}
+          </box>
+          <text fg="#64748b">←/→ or Tab select · Enter confirm · Esc deny</text>
         </box>
       ) : null}
 
       <Composer controller={controller} snapshot={snapshot} disabled={Boolean(approval)} />
-      <text fg="#64748b">Enter send · Shift+Enter newline · Ctrl+C cancel / quit</text>
+      <text fg="#64748b">Enter send · Shift+Enter newline · Ctrl+1..4 mode · Ctrl+Tab cycle · Ctrl+C cancel / quit</text>
     </box>
   );
 }

@@ -21,6 +21,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 2_000_000;
 const PREVIEW_CHARS = 4_000;
+const SHELL_MODE_SCOPES = Object.freeze(['chat', 'goal', 'compact', 'system'] as const);
 
 export const NODE_SHELL_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Object.freeze([
   {
@@ -28,6 +29,7 @@ export const NODE_SHELL_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Ob
     displayName: 'Run shell command',
     description: 'Run a shell command inside the active workspace with risk-based approval.',
     riskLevel: 'L3_sensitive',
+    modeScopes: SHELL_MODE_SCOPES,
     inputSchema: {
       type: 'object',
       properties: {

@@ -5,7 +5,11 @@ import path from 'node:path';
 
 import type { RuntimeSdkEvent } from '@peer-agent/runtime-sdk';
 
-import { createTuiHost, type PendingApproval } from './tui-host.ts';
+import {
+  createTuiHost,
+  type PendingApproval,
+  type TuiExecutionContext,
+} from './tui-host.ts';
 
 const workspaces: string[] = [];
 
@@ -15,11 +19,67 @@ async function createWorkspace(): Promise<string> {
   return workspaceRoot;
 }
 
+function sessionContext(sessionId: string, turnIndex = 0): TuiExecutionContext {
+  return {
+    sessionId,
+    conversationId: sessionId,
+    streamId: `${sessionId}:stream:${turnIndex}`,
+    turnId: `${sessionId}:turn:${turnIndex}`,
+    turnIndex,
+    signal: new AbortController().signal,
+  };
+}
+
 afterEach(async () => {
   await Promise.all(workspaces.splice(0).map((workspaceRoot) => rm(workspaceRoot, { recursive: true, force: true })));
 });
 
 describe('TUI Runtime host', () => {
+  test('projects read-only tools for plan and explorer while retaining write tools for chat and goal', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createTuiHost(workspaceRoot);
+    const capabilities = (mode: 'chat' | 'plan' | 'goal' | 'explorer') =>
+      host.capabilitiesForMode?.(mode) ?? [];
+
+    expect(capabilities('chat')).toEqual([
+      'local.file.read',
+      'local.file.list',
+      'local.file.write',
+      'local.shell.exec',
+    ]);
+    expect(capabilities('goal')).toEqual(capabilities('chat'));
+    expect(capabilities('plan')).toEqual(['local.file.read', 'local.file.list']);
+    expect(capabilities('explorer')).toEqual(['local.file.read', 'local.file.list']);
+  });
+
+  test('rejects non-projected write and shell capabilities before approval in plan and explorer', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createTuiHost(workspaceRoot);
+    let approvalCount = 0;
+    const unsubscribe = host.subscribeApproval((approval) => {
+      if (approval) approvalCount += 1;
+    });
+
+    const planWrite = await host.execute(
+      'local.file.write',
+      { path: 'blocked-plan.txt', content: 'blocked' },
+      { ...sessionContext('plan-session'), mode: 'plan' },
+    );
+    const explorerShell = await host.executeShell(
+      'touch blocked-explorer.txt',
+      { ...sessionContext('explorer-session'), mode: 'explorer' },
+    );
+    unsubscribe();
+
+    expect(planWrite.result.status).toBe('denied');
+    expect((planWrite.result.error as { code?: string } | undefined)?.code).toBe('capability_not_projected');
+    expect(explorerShell.result.status).toBe('denied');
+    expect((explorerShell.result.error as { code?: string } | undefined)?.code).toBe('capability_not_projected');
+    expect(approvalCount).toBe(0);
+    expect(await Bun.file(path.join(workspaceRoot, 'blocked-plan.txt')).exists()).toBe(false);
+    expect(await Bun.file(path.join(workspaceRoot, 'blocked-explorer.txt')).exists()).toBe(false);
+  });
+
   test('runs a real file capability through the governed Runtime and publishes events', async () => {
     const workspaceRoot = await createWorkspace();
     await writeFile(path.join(workspaceRoot, 'note.txt'), 'hello from Bun', 'utf8');
@@ -35,6 +95,34 @@ describe('TUI Runtime host', () => {
     expect(execution.result.evidence).toBeTruthy();
     expect(events.some((event) => event.type === 'tool.started')).toBe(true);
     expect(events.some((event) => event.type === 'tool.completed')).toBe(true);
+  });
+
+  test('uses the caller session context for Runtime events and Provider execution', async () => {
+    const workspaceRoot = await createWorkspace();
+    await writeFile(path.join(workspaceRoot, 'session.txt'), 'session scoped', 'utf8');
+    const host = createTuiHost(workspaceRoot);
+    const events: RuntimeSdkEvent[] = [];
+    const unsubscribe = host.subscribe((event) => events.push(event));
+    const signal = new AbortController().signal;
+
+    const execution = await host.executeRead('session.txt', {
+      sessionId: 'host-session',
+      conversationId: 'host-conversation',
+      streamId: 'host-stream',
+      turnId: 'host-session:turn:3',
+      turnIndex: 3,
+      signal,
+    });
+    unsubscribe();
+
+    expect(execution.result.status).toBe('completed');
+    expect((execution.result.output as { content?: string }).content).toBe('session scoped');
+    const toolEvents = events.filter((event) =>
+      event.type === 'tool.started' || event.type === 'tool.completed',
+    );
+    expect(toolEvents.length).toBeGreaterThanOrEqual(2);
+    expect(toolEvents.every((event) => event.sessionId === 'host-session')).toBe(true);
+    expect(toolEvents.every((event) => event.streamId === undefined)).toBe(true);
   });
 
   test('runs a read-only shell capability without approval', async () => {
@@ -60,7 +148,7 @@ describe('TUI Runtime host', () => {
     const unsubscribe = host.subscribeApproval((approval: PendingApproval | null) => {
       if (approval) {
         approvalObserved = true;
-        approval.resolve('allow');
+        approval.resolve('allow-once');
       }
     });
 
@@ -183,7 +271,7 @@ describe('TUI Runtime host', () => {
     const unsubscribe = host.subscribeApproval((approval) => {
       if (approval) {
         promptSource = approval.prompt.confirmation.kind;
-        approval.resolve('allow');
+        approval.resolve('allow-once');
       }
     });
 
@@ -196,5 +284,304 @@ describe('TUI Runtime host', () => {
     expect(
       (execution.result.evidence as { hookFinalDecision?: string }).hookFinalDecision,
     ).toBe('ask');
+  });
+
+  test('allow once asks again for the next matching call', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createTuiHost(workspaceRoot);
+    const context = sessionContext('once-session');
+    let approvalCount = 0;
+    const unsubscribe = host.subscribeApproval((approval) => {
+      if (!approval) return;
+      approvalCount += 1;
+      expect(approval.sessionId).toBe('once-session');
+      approval.resolve('allow-once');
+    });
+
+    const first = await host.executeShell('touch once-1.txt', context);
+    const second = await host.executeShell('touch once-2.txt', {
+      ...context,
+      turnId: 'once-session:turn:1',
+      turnIndex: 1,
+    });
+    unsubscribe();
+
+    expect(first.result.status).toBe('completed');
+    expect(second.result.status).toBe('completed');
+    expect(approvalCount).toBe(2);
+  });
+
+  test('allow for session reuses a capability grant only in the matching session', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createTuiHost(workspaceRoot);
+    let approvalCount = 0;
+    const unsubscribe = host.subscribeApproval((approval) => {
+      if (!approval) return;
+      approvalCount += 1;
+      approval.resolve(approvalCount === 1 ? 'allow-session' : 'deny');
+    });
+
+    const first = await host.executeShell('touch session-1.txt', sessionContext('session-a'));
+    const second = await host.executeShell(
+      'touch session-2.txt',
+      sessionContext('session-a', 1),
+    );
+    const isolated = await host.executeShell(
+      'touch session-b.txt',
+      sessionContext('session-b'),
+    );
+    unsubscribe();
+
+    expect(first.result.status).toBe('completed');
+    expect(second.result.status).toBe('completed');
+    expect(isolated.result.status).toBe('denied');
+    expect(approvalCount).toBe(2);
+    expect(await Bun.file(path.join(workspaceRoot, 'session-b.txt')).exists()).toBe(false);
+  });
+
+  test('clears session grants when the approval UI unmounts', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createTuiHost(workspaceRoot);
+    const context = sessionContext('remount-session');
+    const unsubscribeFirst = host.subscribeApproval((approval) => {
+      approval?.resolve('allow-session');
+    });
+
+    const first = await host.executeShell('touch remount-first.txt', context);
+    unsubscribeFirst();
+
+    let promptedAfterRemount = false;
+    const unsubscribeSecond = host.subscribeApproval((approval) => {
+      if (!approval) return;
+      promptedAfterRemount = true;
+      approval.resolve('deny');
+    });
+    const second = await host.executeShell(
+      'touch remount-second.txt',
+      sessionContext('remount-session', 1),
+    );
+    unsubscribeSecond();
+
+    expect(first.result.status).toBe('completed');
+    expect(second.result.status).toBe('denied');
+    expect(promptedAfterRemount).toBe(true);
+  });
+
+  test('session allow is isolated by capability within one session', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createTuiHost(workspaceRoot);
+    let approvalCount = 0;
+    const unsubscribe = host.subscribeApproval((approval) => {
+      if (!approval) return;
+      approvalCount += 1;
+      approval.resolve(approvalCount === 1 ? 'allow-session' : 'deny');
+    });
+    const context = sessionContext('capability-session');
+
+    const shell = await host.executeShell('touch shell-allowed.txt', context);
+    const fileWrite = await host.execute(
+      'local.file.write',
+      { path: 'file-denied.txt', content: 'must not write' },
+      {
+        ...context,
+        turnId: 'capability-session:turn:1',
+        turnIndex: 1,
+      },
+    );
+    unsubscribe();
+
+    expect(shell.result.status).toBe('completed');
+    expect(fileWrite.result.status).toBe('denied');
+    expect(approvalCount).toBe(2);
+    expect(await Bun.file(path.join(workspaceRoot, 'file-denied.txt')).exists()).toBe(false);
+  });
+
+  test('fails closed when no approval UI is subscribed', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createTuiHost(workspaceRoot);
+
+    const execution = await host.executeShell(
+      'touch unavailable.txt',
+      sessionContext('unavailable-session'),
+    );
+
+    expect(execution.result.status).toBe('denied');
+    expect(await Bun.file(path.join(workspaceRoot, 'unavailable.txt')).exists()).toBe(false);
+  });
+
+  test('denies active and queued approvals when the UI unsubscribes', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createTuiHost(workspaceRoot);
+    let firstApproval!: PendingApproval;
+    let notify!: () => void;
+    const shown = new Promise<void>((resolve) => { notify = resolve; });
+    const unsubscribe = host.subscribeApproval((approval) => {
+      if (!approval || firstApproval) return;
+      firstApproval = approval;
+      notify();
+    });
+
+    const executionA = host.executeShell('touch unmount-a.txt', sessionContext('unmount-a'));
+    const executionB = host.executeShell('touch unmount-b.txt', sessionContext('unmount-b'));
+    await shown;
+    unsubscribe();
+
+    const [resultA, resultB] = await Promise.all([executionA, executionB]);
+    expect(resultA.result.status).toBe('denied');
+    expect(resultB.result.status).toBe('denied');
+    expect(await Bun.file(path.join(workspaceRoot, 'unmount-a.txt')).exists()).toBe(false);
+    expect(await Bun.file(path.join(workspaceRoot, 'unmount-b.txt')).exists()).toBe(false);
+  });
+
+  test('queues concurrent approvals instead of replacing the active card', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createTuiHost(workspaceRoot);
+    const approvals: PendingApproval[] = [];
+    let notify!: () => void;
+    let nextApproval = new Promise<void>((resolve) => { notify = resolve; });
+    const unsubscribe = host.subscribeApproval((approval) => {
+      if (!approval) return;
+      approvals.push(approval);
+      notify();
+    });
+
+    const executionA = host.executeShell('touch queue-a.txt', sessionContext('queue-a'));
+    const executionB = host.executeShell('touch queue-b.txt', sessionContext('queue-b'));
+    await nextApproval;
+    expect(approvals.map(({ sessionId }) => sessionId)).toEqual(['queue-a']);
+
+    nextApproval = new Promise<void>((resolve) => { notify = resolve; });
+    approvals[0]?.resolve('allow-once');
+    await nextApproval;
+    expect(approvals.map(({ sessionId }) => sessionId)).toEqual(['queue-a', 'queue-b']);
+    approvals[1]?.resolve('allow-once');
+
+    const [resultA, resultB] = await Promise.all([executionA, executionB]);
+    unsubscribe();
+    expect(resultA.result.status).toBe('completed');
+    expect(resultB.result.status).toBe('completed');
+  });
+
+  test('keeps concurrent session approval contexts isolated', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createTuiHost(workspaceRoot);
+    const observedSessions: string[] = [];
+    const unsubscribe = host.subscribeApproval((approval) => {
+      if (!approval) return;
+      observedSessions.push(approval.sessionId ?? 'missing');
+      approval.resolve('allow-session');
+    });
+
+    const [sessionA, sessionB] = await Promise.all([
+      host.executeShell('touch concurrent-a.txt', sessionContext('concurrent-a')),
+      host.executeShell('touch concurrent-b.txt', sessionContext('concurrent-b')),
+    ]);
+    unsubscribe();
+
+    expect(sessionA.result.status).toBe('completed');
+    expect(sessionB.result.status).toBe('completed');
+    expect(observedSessions.sort()).toEqual(['concurrent-a', 'concurrent-b']);
+  });
+
+  test('session allow cannot loosen an explicit destructive deny', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createTuiHost(workspaceRoot);
+    let approvalCount = 0;
+    const unsubscribe = host.subscribeApproval((approval) => {
+      if (!approval) return;
+      approvalCount += 1;
+      approval.resolve('allow-session');
+    });
+    const context = sessionContext('deny-session');
+
+    const allowed = await host.executeShell('touch before-deny.txt', context);
+    const denied = await host.executeShell('rm -rf .', {
+      ...context,
+      turnId: 'deny-session:turn:1',
+      turnIndex: 1,
+    });
+    unsubscribe();
+
+    expect(allowed.result.status).toBe('completed');
+    expect(denied.result.status).toBe('denied');
+    expect(
+      (denied.result.permissionGrant as { decision?: string } | undefined)?.decision,
+    ).toBe('deny');
+    expect(approvalCount).toBe(1);
+  });
+
+  test('session allow cannot loosen a later explicit Hook deny', async () => {
+    const workspaceRoot = await createWorkspace();
+    let hookCalls = 0;
+    const host = createTuiHost({
+      workspaceRoot,
+      hookRunner: {
+        runPreToolUse() {
+          hookCalls += 1;
+          return hookCalls === 1
+            ? [{ hookId: 'ask-first', decision: 'ask', reason: 'approve first call' }]
+            : [{ hookId: 'deny-second', decision: 'deny', reason: 'block second call' }];
+        },
+      },
+    });
+    let approvalCount = 0;
+    const unsubscribe = host.subscribeApproval((approval) => {
+      if (!approval) return;
+      approvalCount += 1;
+      approval.resolve('allow-session');
+    });
+
+    const first = await host.executeShell('touch hook-first.txt', sessionContext('hook-deny'));
+    const second = await host.executeShell(
+      'touch hook-second.txt',
+      sessionContext('hook-deny', 1),
+    );
+    unsubscribe();
+
+    expect(first.result.status).toBe('completed');
+    expect(second.result.status).toBe('denied');
+    expect(approvalCount).toBe(1);
+    expect(
+      (second.result.evidence as { hookFinalDecision?: string }).hookFinalDecision,
+    ).toBe('deny');
+    expect(await Bun.file(path.join(workspaceRoot, 'hook-second.txt')).exists()).toBe(false);
+  });
+
+  test('one session grant unifies Hook ask and capability ask for a matching call', async () => {
+    const workspaceRoot = await createWorkspace();
+    await mkdir(path.join(workspaceRoot, '.peer'), { recursive: true });
+    await Bun.write(
+      path.join(workspaceRoot, '.peer', 'hooks.json'),
+      JSON.stringify({
+        hooks: {
+          PreToolUse: [
+            {
+              match: { capabilityId: 'local.shell.exec' },
+              command: `node -e "process.stdin.resume(); process.stdin.on('end', () => console.log(JSON.stringify({ decision: 'ask', reason: 'confirm hook and capability' })))"`,
+            },
+          ],
+        },
+      }),
+    );
+    const host = createTuiHost(workspaceRoot);
+    let approvalCount = 0;
+    let promptSource: string | undefined;
+    const unsubscribe = host.subscribeApproval((approval) => {
+      if (!approval) return;
+      approvalCount += 1;
+      promptSource = approval.prompt.confirmation.kind;
+      approval.resolve('allow-session');
+    });
+
+    const execution = await host.executeShell(
+      'touch unified.txt',
+      sessionContext('unified-session'),
+    );
+    unsubscribe();
+
+    expect(execution.result.status).toBe('completed');
+    expect(promptSource).toBe('hook-approval');
+    expect(approvalCount).toBe(1);
+    expect(await Bun.file(path.join(workspaceRoot, 'unified.txt')).exists()).toBe(true);
   });
 });

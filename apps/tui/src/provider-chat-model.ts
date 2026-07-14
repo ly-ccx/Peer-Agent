@@ -13,11 +13,13 @@ import type {
   ChatModelState,
   ChatModelToolCall,
 } from './chat-controller.ts';
+import { normalizeTuiMode, type TuiMode } from './tui-mode.ts';
 
 export interface CreateProviderChatModelOptions {
   readonly provider: ModelProvider;
   readonly model: string;
-  readonly toolDefinitions: readonly RuntimeToolDefinition[];
+  readonly toolDefinitions?: readonly RuntimeToolDefinition[];
+  readonly toolDefinitionsForMode?: (mode: TuiMode) => readonly RuntimeToolDefinition[];
   readonly systemPrompt?: string;
 }
 
@@ -61,8 +63,9 @@ function executionContent(execution: RuntimeSdkProviderExecution): string {
 }
 
 export function createProviderChatModel(options: CreateProviderChatModelOptions): ChatModelPort {
-  const toolsByName = new Map(options.toolDefinitions.map((tool) => [tool.name, tool]));
-  const tools = options.toolDefinitions.map(toModelTool);
+  const defaultToolDefinitions = options.toolDefinitions ?? [];
+  const toolDefinitionsForMode = (mode: TuiMode) =>
+    options.toolDefinitionsForMode?.(mode) ?? defaultToolDefinitions;
 
   return {
     initialize(input) {
@@ -83,6 +86,10 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
       };
     },
     async runTurn(state, context) {
+      const mode = normalizeTuiMode(context.run.mode);
+      const projectedToolDefinitions = toolDefinitionsForMode(mode);
+      const toolsByName = new Map(projectedToolDefinitions.map((tool) => [tool.name, tool]));
+      const tools = projectedToolDefinitions.map(toModelTool);
       const streamId = context.run.streamId ?? 'tui-chat';
       const result = await options.provider.stream({
         model: options.model,

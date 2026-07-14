@@ -33,7 +33,7 @@ const model = modelConfig.configured
         }),
       }),
       model: modelConfig.model,
-      toolDefinitions: host.toolDefinitions,
+      toolDefinitionsForMode: (mode) => host.toolDefinitionsForMode?.(mode) ?? host.toolDefinitions,
       systemPrompt: 'You are Peer Agent. Use the available governed tools when they help answer the user.',
     })
   : createUnavailableChatModel(missingModelConfigurationMessage());

@@ -35,6 +35,7 @@ function manifestToToolDefinition(manifest: CapabilityManifest): RuntimeToolDefi
     capabilityId: manifest.capabilityId,
     description: manifest.description ?? manifest.displayName,
     inputSchema: manifest.inputSchema,
+    ...(manifest.modeScopes ? { modeScopes: manifest.modeScopes } : {}),
     metadata: {
       provider: 'runtime-node',
       ...(manifest.riskLevel ? { riskLevel: manifest.riskLevel } : {}),

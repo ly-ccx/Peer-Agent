@@ -6,7 +6,7 @@ import {
   type ChatModelPort,
   type ChatModelState,
 } from './chat-controller.ts';
-import type { TuiHost } from './tui-host.ts';
+import type { TuiExecutionContext, TuiHost } from './tui-host.ts';
 
 function execution(outputPreview: string): RuntimeSdkProviderExecution {
   return {
@@ -18,13 +18,16 @@ function execution(outputPreview: string): RuntimeSdkProviderExecution {
   } as RuntimeSdkProviderExecution;
 }
 
-function host(run: (capabilityId: string, arguments_: Record<string, unknown>) => RuntimeSdkProviderExecution =
-  (capabilityId) => execution(capabilityId)): TuiHost {
+function host(run: (
+  capabilityId: string,
+  arguments_: Record<string, unknown>,
+  context?: TuiExecutionContext,
+) => RuntimeSdkProviderExecution = (capabilityId) => execution(capabilityId)): TuiHost {
   return {
     workspaceRoot: '/tmp/test',
     capabilities: ['local.file.read'],
     toolDefinitions: [{ name: 'read_file', capabilityId: 'local.file.read' }],
-    execute: async (capabilityId, arguments_) => run(capabilityId, arguments_),
+    execute: async (capabilityId, arguments_, context) => run(capabilityId, arguments_, context),
     executeRead: async () => execution('read'),
     executeShell: async () => execution('shell'),
     subscribe: () => () => {},
@@ -42,6 +45,77 @@ const initialState = (input: { content: string }): ChatModelState => ({
 });
 
 describe('chat controller', () => {
+  test('switches among four modes while idle and keeps the mode fixed during a turn', async () => {
+    let release!: () => void;
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => { started = resolve; });
+    const canFinish = new Promise<void>((resolve) => { release = resolve; });
+    const observedModes: Array<string | undefined> = [];
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state, context) {
+        observedModes.push(context.run.mode);
+        started();
+        await canFinish;
+        return { kind: 'completed', state, output: 'done' };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+
+    expect(controller.getSnapshot().mode).toBe('chat');
+    expect(controller.setMode('plan')).toBe(true);
+    expect(controller.getSnapshot().mode).toBe('plan');
+
+    const pending = controller.send('make a plan');
+    await didStart;
+    expect(controller.setMode('goal')).toBe(false);
+    expect(controller.getSnapshot().mode).toBe('plan');
+    release();
+    await pending;
+
+    expect(observedModes).toEqual(['plan']);
+    expect(controller.getSnapshot().mode).toBe('plan');
+    expect(controller.setMode('explorer')).toBe(true);
+    expect(controller.getSnapshot().mode).toBe('explorer');
+  });
+
+  test('passes the turn mode to governed tool execution', async () => {
+    let observedContext: TuiExecutionContext | undefined;
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        if (state.toolExecutions.length === 0) {
+          return {
+            kind: 'tool_calls',
+            state,
+            calls: [{
+              toolCallId: 'mode-call',
+              capabilityId: 'local.file.read',
+              arguments: { path: 'note.txt' },
+            }],
+          };
+        }
+        return { kind: 'completed', state };
+      },
+      applyToolResults(state, results) {
+        return { ...state, toolExecutions: results.map((item) => item.result) };
+      },
+    };
+    const controller = createChatController({
+      host: host((_capabilityId, _arguments, context) => {
+        observedContext = context;
+        return execution('contents');
+      }),
+      model,
+      initialMode: 'explorer',
+    });
+
+    await controller.send('inspect');
+
+    expect(observedContext?.mode).toBe('explorer');
+  });
+
   test('streams assistant deltas into one message', async () => {
     const model: ChatModelPort = {
       initialize: (input) => initialState(input.input),
@@ -125,5 +199,127 @@ describe('chat controller', () => {
 
     expect(controller.getSnapshot().status).toBe('idle');
     expect(controller.getSnapshot().error).toBeUndefined();
+    expect(controller.getSnapshot().session?.lastTurn?.status).toBe('cancelled');
+    expect(controller.getSnapshot().session?.lastTurn?.reason).toBe('cancelled_in_tui');
+  });
+
+  test('keeps cancellation terminal when a model completes late', async () => {
+    let started!: () => void;
+    let release!: () => void;
+    const isStarted = new Promise<void>((resolve) => { started = resolve; });
+    const canComplete = new Promise<void>((resolve) => { release = resolve; });
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        started();
+        await canComplete;
+        return { kind: 'completed', state };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+
+    const running = controller.send('wait for late completion');
+    await isStarted;
+    controller.cancel();
+    release();
+    await running;
+
+    expect(controller.getSnapshot().status).toBe('idle');
+    expect(controller.getSnapshot().session?.lastTurn?.status).toBe('cancelled');
+    expect(controller.getSnapshot().session?.lastTurn?.reason).toBe('cancelled_in_tui');
+  });
+
+  test('records a failed turn without losing the provider error', async () => {
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn() {
+        throw new Error('provider exploded');
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+
+    await controller.send('fail');
+
+    expect(controller.getSnapshot().status).toBe('idle');
+    expect(controller.getSnapshot().error).toBe('provider exploded');
+    expect(controller.getSnapshot().session?.lastTurn?.status).toBe('failed');
+    expect(controller.getSnapshot().session?.lastTurn?.reason).toBe('provider exploded');
+  });
+
+  test('starts the first turn and resumes the same session on later sends', async () => {
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        return { kind: 'completed', state };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({
+      host: host(),
+      model,
+      sessionId: 'stable-session',
+      conversationId: 'stable-conversation',
+    });
+
+    await controller.send('first');
+    const first = controller.getSnapshot().session;
+    await controller.send('second');
+    const second = controller.getSnapshot().session;
+
+    expect(first?.sessionId).toBe('stable-session');
+    expect(first?.conversationId).toBe('stable-conversation');
+    expect(first?.lastTurn?.turnId).toBe('stable-session:turn:0');
+    expect(first?.lastTurn?.turnIndex).toBe(0);
+    expect(first?.lastTurn?.status).toBe('completed');
+    expect(second?.sessionId).toBe(first?.sessionId);
+    expect(second?.createdAt).toBe(first?.createdAt);
+    expect(second?.lastTurn?.turnId).toBe('stable-session:turn:1');
+    expect(second?.lastTurn?.turnIndex).toBe(1);
+    expect(second?.lastTurn?.status).toBe('completed');
+    expect(second?.nextTurnIndex).toBe(2);
+  });
+
+  test('passes stable session and turn context to tool execution', async () => {
+    let observedContext: TuiExecutionContext | undefined;
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        if (state.toolExecutions.length === 0) {
+          return {
+            kind: 'tool_calls',
+            state,
+            calls: [{
+              toolCallId: 'call-1',
+              capabilityId: 'local.file.read',
+              arguments: { path: 'note.txt' },
+            }],
+          };
+        }
+        return { kind: 'completed', state };
+      },
+      applyToolResults(state, results) {
+        return { ...state, toolExecutions: results.map((item) => item.result) };
+      },
+    };
+    const controller = createChatController({
+      model,
+      sessionId: 'tool-session',
+      host: host((_capabilityId, _arguments, context) => {
+        observedContext = context;
+        return execution('file contents');
+      }),
+    });
+
+    await controller.send('read it');
+
+    expect(observedContext?.sessionId).toBe('tool-session');
+    expect(observedContext?.conversationId).toBe('tool-session');
+    expect(observedContext?.turnId).toBe('tool-session:turn:0');
+    expect(observedContext?.turnIndex).toBe(0);
+    expect(observedContext?.streamId).toBe('tool-session:stream:0');
+    expect(observedContext?.signal).toBeInstanceOf(AbortSignal);
+    expect(controller.getSnapshot().session?.lastTurn?.status).toBe('completed');
   });
 });

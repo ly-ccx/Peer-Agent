@@ -62,6 +62,35 @@ test('node provider bundle exposes a host-neutral projection and governed runtim
   );
 });
 
+test('node provider bundle materializes mode scopes into read-only plan and explorer projections', async (t) => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-runtime-node-mode-'));
+  t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
+
+  const plan = createNodeProviderBundle({ workspaceRoot, mode: 'plan', ...fixedClock() });
+  const explorer = createNodeProviderBundle({ workspaceRoot, mode: 'explorer', ...fixedClock() });
+  const goal = createNodeProviderBundle({ workspaceRoot, mode: 'goal', ...fixedClock() });
+  const compact = createNodeProviderBundle({ workspaceRoot, mode: 'compact', ...fixedClock() });
+  const system = createNodeProviderBundle({ workspaceRoot, mode: 'system', ...fixedClock() });
+
+  assert.deepEqual(
+    plan.projection.tools.map((tool) => tool.capabilityId),
+    ['local.file.read', 'local.file.list'],
+  );
+  assert.deepEqual(
+    explorer.projection.tools.map((tool) => tool.capabilityId),
+    ['local.file.read', 'local.file.list'],
+  );
+  const fullCapabilities = [
+    'local.file.read',
+    'local.file.list',
+    'local.file.write',
+    'local.shell.exec',
+  ];
+  assert.deepEqual(goal.projection.tools.map((tool) => tool.capabilityId), fullCapabilities);
+  assert.deepEqual(compact.projection.tools.map((tool) => tool.capabilityId), fullCapabilities);
+  assert.deepEqual(system.projection.tools.map((tool) => tool.capabilityId), fullCapabilities);
+});
+
 test('pipeline tool executor resolves only projected names and blocks unprojected calls', async (t) => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-runtime-node-projection-'));
   t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));

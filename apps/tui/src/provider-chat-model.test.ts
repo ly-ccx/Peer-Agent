@@ -60,6 +60,60 @@ function completed(content: string): ModelProviderResult {
 }
 
 describe('OpenAI-compatible TUI chat adapter', () => {
+  test('exposes only the tool definitions projected for the active mode', async () => {
+    const requests: ModelProviderRequest[] = [];
+    const writeTool: RuntimeToolDefinition = {
+      name: 'write_file',
+      capabilityId: 'local.file.write',
+      description: 'Write a workspace file',
+    };
+    const provider: ModelProvider = {
+      async stream(request) {
+        requests.push(request);
+        return completed('done');
+      },
+    };
+    const model = createProviderChatModel({
+      provider,
+      model: 'model-test',
+      toolDefinitionsForMode: (mode) => mode === 'goal'
+        ? [...toolDefinitions, writeTool]
+        : toolDefinitions,
+    });
+    const controller = createChatController({ host: host(), model, initialMode: 'explorer' });
+
+    await controller.send('inspect');
+    expect(requests[0]?.tools?.map((tool) => tool.name)).toEqual(['read_file']);
+
+    expect(controller.setMode('goal')).toBe(true);
+    await controller.send('execute');
+    expect(requests[1]?.tools?.map((tool) => tool.name)).toEqual(['read_file', 'write_file']);
+  });
+
+  test('rejects a model tool call that is absent from the active mode projection', async () => {
+    const provider: ModelProvider = {
+      async stream() {
+        return {
+          content: '',
+          toolCalls: [{ id: 'write-1', name: 'write_file', arguments: '{}' }],
+        };
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      initialMode: 'explorer',
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        toolDefinitionsForMode: () => toolDefinitions,
+      }),
+    });
+
+    await controller.send('write anyway');
+
+    expect(controller.getSnapshot().error).toContain('unavailable tool "write_file"');
+  });
+
   test('streams text through the chat controller and exposes projected tools', async () => {
     const requests: ModelProviderRequest[] = [];
     const provider: ModelProvider = {

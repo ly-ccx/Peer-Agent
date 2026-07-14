@@ -26,6 +26,15 @@ import {
 
 const DEFAULT_MAX_READ_BYTES = 2_000_000;
 const PREVIEW_CHARS = 4_000;
+const READ_MODE_SCOPES = Object.freeze([
+  'chat',
+  'plan',
+  'goal',
+  'compact',
+  'system',
+  'explorer',
+] as const);
+const WRITE_MODE_SCOPES = Object.freeze(['chat', 'goal', 'compact', 'system'] as const);
 
 export const NODE_FILE_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Object.freeze([
   {
@@ -33,6 +42,7 @@ export const NODE_FILE_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Obj
     displayName: 'Read file',
     description: 'Read a UTF-8 text file inside the active workspace.',
     riskLevel: 'L1_readonly',
+    modeScopes: READ_MODE_SCOPES,
     inputSchema: {
       type: 'object',
       properties: { path: { type: 'string' } },
@@ -45,6 +55,7 @@ export const NODE_FILE_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Obj
     displayName: 'List directory',
     description: 'List direct children of a directory inside the active workspace.',
     riskLevel: 'L1_readonly',
+    modeScopes: READ_MODE_SCOPES,
     inputSchema: {
       type: 'object',
       properties: { path: { type: 'string' } },
@@ -56,6 +67,7 @@ export const NODE_FILE_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Obj
     displayName: 'Write file',
     description: 'Write a UTF-8 text file inside the active workspace after approval.',
     riskLevel: 'L2_low_write',
+    modeScopes: WRITE_MODE_SCOPES,
     inputSchema: {
       type: 'object',
       properties: {
