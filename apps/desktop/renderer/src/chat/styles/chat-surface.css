@@ -1680,11 +1680,11 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  /* 方案 A:横杠等分压缩,始终铺满整条轨。gap 收窄以减少多条时的累计占用,
-   * overflow: hidden 仅作极端数量下的安全兜底。 */
+  /* 横杠等分压缩，但折叠态轨道最多占 420px，避免高窗口中贯穿整屏。
+   * 可用空间不足时仍随父级收缩；overflow 仅作极端数量下的安全兜底。 */
   gap: 4px;
   padding: var(--space-2) 4px;
-  height: 100%;
+  height: min(100%, 420px);
   overflow: hidden;
   pointer-events: auto;
   transition: opacity var(--za-motion-fast);
