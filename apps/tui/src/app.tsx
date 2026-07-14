@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { TextareaRenderable } from '@opentui/core';
 import { useKeyboard, useRenderer } from '@opentui/react';
+import type { RuntimeGoalSnapshot } from '@peer-agent/runtime-sdk';
 
 import {
   createChatController,
@@ -20,6 +21,7 @@ import {
   PLAN_APPROVAL_OPTIONS,
   planDecisionForKey,
 } from './plan-mode.ts';
+import { createTuiGoalRunner } from './goal-mode.ts';
 import type { PendingApproval, TuiHost } from './tui-host.ts';
 import { cycleTuiMode, TUI_MODES, tuiModeForKey, tuiModeOption } from './tui-mode.ts';
 
@@ -82,31 +84,59 @@ export function App({ host, model, modelLabel }: {
   readonly modelLabel: string;
 }) {
   const renderer = useRenderer();
-  let controller!: ChatController;
+  const controllerRef = useRef<ChatController | null>(null);
+  const goalRunner = useMemo(() => createTuiGoalRunner({
+    sessionId: 'tui-chat',
+    executeTask: async (task, context) => {
+      const active = controllerRef.current;
+      if (!active) return { status: 'blocked', reason: 'chat_controller_unavailable' };
+      return active.executeGoalTask(task, context);
+    },
+  }), []);
   const planCoordinator = useMemo(() => createPlanCoordinator({
     sessionId: 'tui-chat',
     goalExecution: {
       create: async ({ plan }) => {
-        // Goal execution re-enters through the same controller/SDK host path; approval grants no tool permission.
-        controller.setMode('goal');
-        await controller.send(`Execute approved plan ${plan.planId}: ${plan.goal}`);
+        const goal = goalRunner.create(plan);
+        void goalRunner.start(goal.goalId);
       },
     },
-  }), []);
-  controller = useMemo(() => createChatController({ host, model, planCoordinator }), [host, model, planCoordinator]);
+  }), [goalRunner]);
+  const controller = useMemo(
+    () => createChatController({ host, model, planCoordinator }),
+    [host, model, planCoordinator],
+  );
+  controllerRef.current = controller;
   const [snapshot, setSnapshot] = useState(() => controller.getSnapshot());
+  const [goal, setGoal] = useState<RuntimeGoalSnapshot | null>(null);
   const [approval, setApproval] = useState<PendingApproval | null>(null);
   const [approvalSelection, setApprovalSelection] = useState(0);
   const [planSelection, setPlanSelection] = useState(0);
   const visibleTurn = snapshot.session?.activeTurn ?? snapshot.session?.lastTurn;
 
   useEffect(() => controller.subscribe(setSnapshot), [controller]);
+  useEffect(() => goalRunner.subscribe(setGoal), [goalRunner]);
   useEffect(() => host.subscribeApproval((next) => {
     setApprovalSelection(0);
     setApproval(next);
   }), [host]);
 
   useKeyboard((key) => {
+    if (goal && !approval && snapshot.plan?.status !== 'awaiting_approval') {
+      if (key.name === 'p' && goal.status === 'running') {
+        goalRunner.pause(goal.goalId);
+        return;
+      }
+      if (key.name === 'r' && goal.status === 'paused') {
+        void goalRunner.resume(goal.goalId);
+        return;
+      }
+      if (key.name === 'c' && ['pending', 'running', 'paused'].includes(goal.status)) {
+        controller.cancel();
+        goalRunner.cancel(goal.goalId);
+        return;
+      }
+    }
     if (approval) {
       if (key.name === 'left' || key.name === 'up') {
         setApprovalSelection((current) => moveApprovalSelection(current, -1));
@@ -201,6 +231,20 @@ export function App({ host, model, modelLabel }: {
             ))}
           </box>
           <text fg="#64748b">←/→ or Tab select · Enter confirm · Esc Reject</text>
+        </box>
+      ) : null}
+
+      {goal ? (
+        <box flexDirection="column" border borderColor="#22c55e" padding={1}>
+          <text fg="#86efac"><strong>Goal</strong> · {goal.title} · {goal.status}</text>
+          <text fg="#94a3b8">source {goal.sourcePlanId} · {goal.tasks.filter((task) => task.status === 'completed').length}/{goal.tasks.length} tasks</text>
+          {goal.tasks.map((task) => (
+            <text key={task.taskId} fg={task.status === 'completed' ? '#86efac' : task.status === 'running' ? '#67e8f9' : '#94a3b8'}>
+              {task.status === 'completed' ? '✓' : task.status === 'running' ? '▶' : task.status === 'failed' || task.status === 'blocked' ? '!' : '○'} {task.title}
+              {task.reason ? ` · ${task.reason}` : ''}
+            </text>
+          ))}
+          <text fg="#64748b">[p] Pause · [r] Resume · [c] Cancel</text>
         </box>
       ) : null}
 

@@ -4,6 +4,9 @@ import {
   createRuntimeSessionController,
   type RuntimePipelineModelAdapter,
   type RuntimePipelineToolCall,
+  type RuntimeGoalTaskExecutionContext,
+  type RuntimeGoalTaskExecutionResult,
+  type RuntimeGoalTaskInput,
   type RuntimeSessionController,
   type RuntimeSessionSnapshot,
   type RuntimeSessionTurnHandle,
@@ -69,6 +72,10 @@ export interface ChatController {
   subscribe(listener: (snapshot: ChatSnapshot) => void): () => void;
   setMode(mode: TuiMode): boolean;
   send(content: string): Promise<void>;
+  executeGoalTask(
+    task: RuntimeGoalTaskInput,
+    context: RuntimeGoalTaskExecutionContext,
+  ): Promise<RuntimeGoalTaskExecutionResult>;
   cancel(): void;
 }
 
@@ -92,6 +99,7 @@ export function createChatController(options: {
   let snapshot: ChatSnapshot = { status: 'idle', mode: initialMode, messages: [] };
   let activeTurn: RuntimeSessionTurnHandle | null = null;
   let conversationModelMessages: readonly ModelMessage[] = [];
+  let executionEvidenceIds: string[] = [];
   let sequence = 0;
   const sessions = options.sessionController ?? createRuntimeSessionController();
 
@@ -126,6 +134,11 @@ export function createChatController(options: {
           turnIndex: context.run.input.turnIndex,
           ...(context.signal ? { signal: context.signal } : {}),
         });
+        const evidence = execution.result.evidence;
+        const evidenceId = evidence && typeof evidence === 'object' && 'evidenceId' in evidence
+          ? String(evidence.evidenceId)
+          : '';
+        if (evidenceId) executionEvidenceIds = [...executionEvidenceIds, evidenceId];
         publish({
           ...snapshot,
           messages: [
@@ -256,6 +269,33 @@ export function createChatController(options: {
       } finally {
         if (activeTurn === turn) activeTurn = null;
       }
+    },
+    async executeGoalTask(task, context) {
+      if (activeTurn) return { status: 'blocked', reason: 'chat_turn_active' };
+      const beforeMessages = snapshot.messages.length;
+      const beforeEvidenceCount = executionEvidenceIds.length;
+      this.setMode('goal');
+      await this.send(
+        `Execute only this approved goal task (${task.taskId}): ${task.title}\n` +
+        `Goal ${context.goalId} from plan ${context.sourcePlanId}\n` +
+        'Complete it through the existing Runtime Pipeline. Do not execute later tasks.',
+      );
+
+      if (context.signal.aborted) return { status: 'blocked', reason: 'goal_task_cancelled' };
+      if (snapshot.error) return { status: 'failed', reason: snapshot.error };
+
+      const evidenceRefs = executionEvidenceIds
+        .slice(beforeEvidenceCount)
+        .map((evidenceId) => `evidence://${evidenceId}`);
+      if (evidenceRefs.length === 0) {
+        return {
+          status: 'blocked',
+          reason: snapshot.messages.length > beforeMessages
+            ? 'goal_task_completed_without_evidence'
+            : 'goal_task_produced_no_result',
+        };
+      }
+      return { status: 'completed', evidenceRefs };
     },
     cancel() {
       if (!activeTurn) return;

@@ -66,3 +66,18 @@ export type {
   RuntimeTurnStatus,
 } from './session-contracts.ts';
 export { createRuntimeSessionController } from './session-controller.ts';
+export type {
+  RuntimeGoalController,
+  RuntimeGoalControllerOptions,
+  RuntimeGoalCreateOptions,
+  RuntimeGoalSnapshot,
+  RuntimeGoalStatus,
+  RuntimeGoalSuccessCriterion,
+  RuntimeGoalTaskExecutionContext,
+  RuntimeGoalTaskExecutionResult,
+  RuntimeGoalTaskExecutor,
+  RuntimeGoalTaskInput,
+  RuntimeGoalTaskSnapshot,
+  RuntimeGoalTaskStatus,
+} from './goal-contracts.ts';
+export { createRuntimeGoalController } from './goal-controller.ts';

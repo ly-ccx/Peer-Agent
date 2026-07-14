@@ -8,12 +8,20 @@ import {
 } from './chat-controller.ts';
 import type { TuiExecutionContext, TuiHost } from './tui-host.ts';
 
-function execution(outputPreview: string): RuntimeSdkProviderExecution {
+const goalContext = (goalId: string, sourcePlanId: string, sessionId: string) => ({
+  goalId,
+  sourcePlanId,
+  sessionId,
+  taskIndex: 0,
+  signal: new AbortController().signal,
+});
+
+function execution(outputPreview: string, evidenceId?: string): RuntimeSdkProviderExecution {
   return {
     result: {
       status: 'completed',
       outputPreview,
-      evidence: { source: 'test' },
+      evidence: evidenceId ? { source: 'test', evidenceId } : { source: 'test' },
     },
   } as RuntimeSdkProviderExecution;
 }
@@ -321,5 +329,110 @@ describe('chat controller', () => {
     expect(observedContext?.streamId).toBe('tool-session:stream:0');
     expect(observedContext?.signal).toBeInstanceOf(AbortSignal);
     expect(controller.getSnapshot().session?.lastTurn?.status).toBe('completed');
+  });
+
+  test('executes a goal task in its own session through the host and requires new Evidence', async () => {
+    const observedContexts: TuiExecutionContext[] = [];
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        if (state.toolExecutions.length === 0) {
+          return {
+            kind: 'tool_calls',
+            state,
+            calls: [{
+              toolCallId: 'goal-call',
+              capabilityId: 'local.file.read',
+              arguments: { path: 'goal.txt' },
+            }],
+          };
+        }
+        return { kind: 'completed', state, output: 'task complete' };
+      },
+      applyToolResults(state, results) {
+        return { ...state, toolExecutions: results.map((item) => item.result) };
+      },
+    };
+    const controller = createChatController({
+      model,
+      sessionId: 'goal-session-a',
+      host: host((_capabilityId, _arguments, context) => {
+        if (context) observedContexts.push(context);
+        return execution('goal contents', 'goal-a');
+      }),
+    });
+
+    const result = await controller.executeGoalTask(
+      { taskId: 'inspect', title: 'Inspect the goal file' },
+      goalContext('goal-a', 'plan-a', 'goal-session-a'),
+    );
+
+    expect(result).toEqual({ status: 'completed', evidenceRefs: ['evidence://goal-a'] });
+    expect(observedContexts).toHaveLength(1);
+    expect(observedContexts[0]?.sessionId).toBe('goal-session-a');
+    expect(observedContexts[0]?.mode).toBe('goal');
+  });
+
+  test('blocks goal completion when a model response produces no Runtime Evidence', async () => {
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        return { kind: 'completed', state, output: 'I finished without using a capability.' };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({
+      model,
+      sessionId: 'goal-session-no-evidence',
+      host: host(),
+    });
+
+    const result = await controller.executeGoalTask(
+      { taskId: 'claim', title: 'Claim completion' },
+      goalContext('goal-no-evidence', 'plan-no-evidence', 'goal-session-no-evidence'),
+    );
+
+    expect(result).toEqual({ status: 'blocked', reason: 'goal_task_completed_without_evidence' });
+  });
+
+  test('keeps goal task execution isolated between controller sessions', async () => {
+    const contexts: TuiExecutionContext[] = [];
+    const createModel = (): ChatModelPort => ({
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        if (state.toolExecutions.length === 0) {
+          return {
+            kind: 'tool_calls',
+            state,
+            calls: [{ toolCallId: 'call', capabilityId: 'local.file.read', arguments: {} }],
+          };
+        }
+        return { kind: 'completed', state };
+      },
+      applyToolResults(state, results) {
+        return { ...state, toolExecutions: results.map((item) => item.result) };
+      },
+    });
+    const sharedHost = host((_capabilityId, _arguments, context) => {
+      if (context) contexts.push(context);
+      return execution('contents', context?.sessionId);
+    });
+    const first = createChatController({ host: sharedHost, model: createModel(), sessionId: 'session-a' });
+    const second = createChatController({ host: sharedHost, model: createModel(), sessionId: 'session-b' });
+
+    const [firstResult, secondResult] = await Promise.all([
+      first.executeGoalTask(
+        { taskId: 'a', title: 'Task A' },
+        goalContext('goal-a', 'plan-a', 'session-a'),
+      ),
+      second.executeGoalTask(
+        { taskId: 'b', title: 'Task B' },
+        goalContext('goal-b', 'plan-b', 'session-b'),
+      ),
+    ]);
+
+    expect(firstResult.evidenceRefs).toEqual(['evidence://session-a']);
+    expect(secondResult.evidenceRefs).toEqual(['evidence://session-b']);
+    expect(contexts.map((context) => context.sessionId).sort()).toEqual(['session-a', 'session-b']);
   });
 });
