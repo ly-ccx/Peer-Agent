@@ -1,0 +1,459 @@
+{
+  "name": "Peer Agent",
+  "direction": "B3 · Signal",
+  "colors": {
+    "primary": "#e8e6e0",
+    "signal": "#7189c9",
+    "muted": "#777a83"
+  },
+  "matrix": {
+    "width": 23,
+    "height": 7,
+    "rows": [
+      ".......................",
+      "####...###...###..#.##.",
+      "#...#.#...#.#...#.##..#",
+      "#...#.===========.#....",
+      "####..#.....#.....#....",
+      "#......###...###..#....",
+      "#......................"
+    ],
+    "legend": {
+      ".": "empty",
+      "#": "primary",
+      "=": "signal"
+    },
+    "signalRow": 3,
+    "signalColumns": [
+      6,
+      16
+    ]
+  },
+  "variants": {
+    "full": {
+      "id": "full",
+      "label": "Full Block",
+      "description": "7 行高，逻辑像素使用两个全块字符，轮廓最接近 B3 网页稿。",
+      "width": 53,
+      "height": 7,
+      "lines": [
+        {
+          "segments": [
+            {
+              "text": "                                                     "
+            }
+          ],
+          "plain": "                                                     "
+        },
+        {
+          "segments": [
+            {
+              "text": "████████",
+              "fg": "primary"
+            },
+            {
+              "text": "      "
+            },
+            {
+              "text": "██████",
+              "fg": "primary"
+            },
+            {
+              "text": "      "
+            },
+            {
+              "text": "██████",
+              "fg": "primary"
+            },
+            {
+              "text": "    "
+            },
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "  "
+            },
+            {
+              "text": "████",
+              "fg": "primary"
+            },
+            {
+              "text": "         "
+            }
+          ],
+          "plain": "████████      ██████      ██████    ██  ████         "
+        },
+        {
+          "segments": [
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "      "
+            },
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "  "
+            },
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "      "
+            },
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "  "
+            },
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "      "
+            },
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "  "
+            },
+            {
+              "text": "████",
+              "fg": "primary"
+            },
+            {
+              "text": "    "
+            },
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "       "
+            }
+          ],
+          "plain": "██      ██  ██      ██  ██      ██  ████    ██       "
+        },
+        {
+          "segments": [
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "      "
+            },
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "  "
+            },
+            {
+              "text": "██████████████████████",
+              "fg": "signal"
+            },
+            {
+              "text": "  "
+            },
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "               "
+            }
+          ],
+          "plain": "██      ██  ██████████████████████  ██               "
+        },
+        {
+          "segments": [
+            {
+              "text": "████████",
+              "fg": "primary"
+            },
+            {
+              "text": "    "
+            },
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "          "
+            },
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "          "
+            },
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "               "
+            }
+          ],
+          "plain": "████████    ██          ██          ██               "
+        },
+        {
+          "segments": [
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "            "
+            },
+            {
+              "text": "██████",
+              "fg": "primary"
+            },
+            {
+              "text": "      "
+            },
+            {
+              "text": "██████",
+              "fg": "primary"
+            },
+            {
+              "text": "    "
+            },
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "          "
+            },
+            {
+              "text": "agent",
+              "fg": "muted"
+            }
+          ],
+          "plain": "██            ██████      ██████    ██          agent"
+        },
+        {
+          "segments": [
+            {
+              "text": "██",
+              "fg": "primary"
+            },
+            {
+              "text": "                                                   "
+            }
+          ],
+          "plain": "██                                                   "
+        }
+      ]
+    },
+    "half": {
+      "id": "half",
+      "label": "Half Block",
+      "description": "用 ▀ / ▄ / █ 将两行逻辑像素压进一行终端字符，保留蓝色信号桥。",
+      "width": 30,
+      "height": 4,
+      "lines": [
+        {
+          "segments": [
+            {
+              "text": "▄▄▄▄",
+              "fg": "primary"
+            },
+            {
+              "text": "   "
+            },
+            {
+              "text": "▄▄▄",
+              "fg": "primary"
+            },
+            {
+              "text": "   "
+            },
+            {
+              "text": "▄▄▄",
+              "fg": "primary"
+            },
+            {
+              "text": "  "
+            },
+            {
+              "text": "▄",
+              "fg": "primary"
+            },
+            {
+              "text": " "
+            },
+            {
+              "text": "▄▄",
+              "fg": "primary"
+            },
+            {
+              "text": "        "
+            }
+          ],
+          "plain": "▄▄▄▄   ▄▄▄   ▄▄▄  ▄ ▄▄        "
+        },
+        {
+          "segments": [
+            {
+              "text": "█",
+              "fg": "primary"
+            },
+            {
+              "text": "   "
+            },
+            {
+              "text": "█",
+              "fg": "primary"
+            },
+            {
+              "text": " "
+            },
+            {
+              "text": "▀",
+              "fg": "primary",
+              "bg": "signal"
+            },
+            {
+              "text": "▄▄▄",
+              "fg": "signal"
+            },
+            {
+              "text": "▀",
+              "fg": "primary",
+              "bg": "signal"
+            },
+            {
+              "text": "▄",
+              "fg": "signal"
+            },
+            {
+              "text": "▀",
+              "fg": "primary",
+              "bg": "signal"
+            },
+            {
+              "text": "▄▄▄",
+              "fg": "signal"
+            },
+            {
+              "text": "▀",
+              "fg": "primary",
+              "bg": "signal"
+            },
+            {
+              "text": " "
+            },
+            {
+              "text": "█▀",
+              "fg": "primary"
+            },
+            {
+              "text": "  "
+            },
+            {
+              "text": "▀",
+              "fg": "primary"
+            },
+            {
+              "text": "       "
+            }
+          ],
+          "plain": "█   █ ▀▄▄▄▀▄▀▄▄▄▀ █▀  ▀       "
+        },
+        {
+          "segments": [
+            {
+              "text": "█▀▀▀",
+              "fg": "primary"
+            },
+            {
+              "text": "  "
+            },
+            {
+              "text": "▀▄▄▄",
+              "fg": "primary"
+            },
+            {
+              "text": "  "
+            },
+            {
+              "text": "▀▄▄▄",
+              "fg": "primary"
+            },
+            {
+              "text": "  "
+            },
+            {
+              "text": "█",
+              "fg": "primary"
+            },
+            {
+              "text": "      "
+            },
+            {
+              "text": "agent",
+              "fg": "muted"
+            }
+          ],
+          "plain": "█▀▀▀  ▀▄▄▄  ▀▄▄▄  █      agent"
+        },
+        {
+          "segments": [
+            {
+              "text": "▀",
+              "fg": "primary"
+            },
+            {
+              "text": "                             "
+            }
+          ],
+          "plain": "▀                             "
+        }
+      ]
+    },
+    "narrow": {
+      "id": "narrow",
+      "label": "Narrow Fallback",
+      "description": "终端不足以容纳大字时主动降级，不挤压矩阵；蓝色横线继续表达连接。",
+      "width": 10,
+      "height": 1,
+      "lines": [
+        {
+          "segments": [
+            {
+              "text": "peer",
+              "fg": "primary"
+            },
+            {
+              "text": "━",
+              "fg": "signal"
+            },
+            {
+              "text": "agent",
+              "fg": "muted"
+            }
+          ],
+          "plain": "peer━agent"
+        }
+      ]
+    }
+  }
+}

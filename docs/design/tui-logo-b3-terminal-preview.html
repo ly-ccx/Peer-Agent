@@ -1,0 +1,1025 @@
+<!doctype html>
+<html lang="zh-CN" data-variant="full" data-view="scene">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>Peer Agent · B3 Terminal Character Preview</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page: #101115;
+      --panel: #191b20;
+      --panel-2: #1e2026;
+      --screen: #090a0c;
+      --ink: #efede7;
+      --primary: #e8e6e0;
+      --signal: #7189c9;
+      --muted: #777a83;
+      --muted-2: #51545d;
+      --line: rgba(255, 255, 255, 0.085);
+      --line-strong: rgba(255, 255, 255, 0.16);
+      --blue-soft: rgba(113, 137, 201, 0.13);
+      --green: #6ca987;
+      --shadow: 0 28px 84px rgba(0, 0, 0, 0.4);
+      --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      --mono: "SFMono-Regular", "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      min-width: 320px;
+      background: var(--page);
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: var(--sans);
+      background:
+        radial-gradient(circle at 18% -8%, rgba(113, 137, 201, 0.08), transparent 31rem),
+        linear-gradient(180deg, #15161a 0%, #101115 100%);
+    }
+
+    button { font: inherit; }
+
+    .page {
+      width: min(1500px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 38px 0 80px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 34px;
+      padding-bottom: 27px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--signal);
+      font: 600 10px/1 var(--mono);
+      letter-spacing: 0.17em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(29px, 3.1vw, 45px);
+      font-weight: 620;
+      line-height: 1.06;
+      letter-spacing: -0.045em;
+    }
+
+    .intro {
+      max-width: 770px;
+      margin: 13px 0 0;
+      color: #92959e;
+      font-size: 14px;
+      line-height: 1.75;
+    }
+
+    .source-badge {
+      min-width: 295px;
+      padding: 13px 15px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.018);
+    }
+
+    .source-badge span {
+      display: block;
+      color: #5d6069;
+      font: 9px/1 var(--mono);
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+
+    .source-badge code {
+      display: block;
+      overflow: hidden;
+      margin-top: 7px;
+      color: #aeb0b6;
+      font: 10px/1.4 var(--mono);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .source-state {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 9px;
+      color: #6f727a;
+      font: 9px/1 var(--mono);
+    }
+
+    .source-state::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+
+    .variant-tabs {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin: 23px 0 17px;
+    }
+
+    .variant-tab {
+      position: relative;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 13px;
+      min-width: 0;
+      padding: 15px 16px;
+      color: #999ca5;
+      text-align: left;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #181a1f;
+      cursor: pointer;
+      transition: 160ms ease;
+    }
+
+    .variant-tab:hover {
+      color: var(--ink);
+      border-color: var(--line-strong);
+      transform: translateY(-1px);
+    }
+
+    .variant-tab[aria-pressed="true"] {
+      color: var(--ink);
+      border-color: rgba(113, 137, 201, .54);
+      background: #1d2028;
+      box-shadow: inset 0 0 0 1px rgba(113, 137, 201, .07);
+    }
+
+    .variant-tab[aria-pressed="true"]::after {
+      content: "";
+      position: absolute;
+      right: 14px;
+      bottom: -1px;
+      left: 14px;
+      height: 2px;
+      background: var(--signal);
+    }
+
+    .tab-code {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      color: #aeb1b9;
+      border-radius: 9px;
+      background: rgba(255,255,255,.05);
+      font: 650 10px/1 var(--mono);
+    }
+
+    .tab-copy { min-width: 0; }
+    .tab-copy strong { display: block; font-size: 13px; font-weight: 610; }
+    .tab-copy small {
+      display: block;
+      overflow: hidden;
+      margin-top: 5px;
+      color: #646770;
+      font: 10px/1.25 var(--mono);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tab-size {
+      color: #575a63;
+      font: 10px/1 var(--mono);
+      white-space: nowrap;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 300px;
+      gap: 17px;
+      align-items: stretch;
+    }
+
+    .preview-panel,
+    .spec-panel {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(25, 27, 32, .94);
+      box-shadow: var(--shadow);
+    }
+
+    .preview-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #1b1d22;
+    }
+
+    .toolbar-group { display: flex; align-items: center; gap: 7px; }
+
+    .toolbar-label {
+      margin-right: 3px;
+      color: #595c65;
+      font: 9px/1 var(--mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .segmented {
+      display: inline-flex;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #141519;
+    }
+
+    .segmented button {
+      padding: 7px 10px;
+      color: #676a73;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      font: 10px/1 var(--mono);
+      cursor: pointer;
+    }
+
+    .segmented button:hover { color: #b8bac0; }
+    .segmented button[aria-pressed="true"] { color: var(--ink); background: #282a31; }
+
+    .stage-viewport {
+      display: grid;
+      min-height: 690px;
+      place-items: center;
+      padding: 24px;
+      overflow: auto;
+      background: #121318;
+    }
+
+    .terminal-frame {
+      position: relative;
+      width: min(100%, 1120px);
+      min-height: 500px;
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.075);
+      border-radius: 8px;
+      background: var(--screen);
+      box-shadow: 0 30px 75px rgba(0,0,0,.5);
+    }
+
+    .terminal-cap {
+      position: absolute;
+      top: 20px;
+      left: 22px;
+      z-index: 4;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #444750;
+      font: 9px/1 var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .terminal-cap::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 1px;
+      background: #4b4e56;
+    }
+
+    .terminal-status {
+      position: absolute;
+      right: 22px;
+      bottom: 18px;
+      left: 22px;
+      z-index: 4;
+      display: flex;
+      justify-content: space-between;
+      color: #41444c;
+      font: 9px/1 var(--mono);
+    }
+
+    .terminal-status .live::before {
+      content: "";
+      display: inline-block;
+      width: 5px;
+      height: 5px;
+      margin-right: 7px;
+      border-radius: 50%;
+      background: #547962;
+      vertical-align: 1px;
+    }
+
+    .view-board {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+    }
+
+    .view-scene {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 38px;
+      padding: 70px 48px 75px;
+    }
+
+    html[data-view="scene"] .view-scene { display: flex; }
+
+    .terminal-wordmark {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      max-width: 100%;
+      overflow: visible;
+      font-family: var(--mono);
+      font-size: clamp(13px, 1.18vw, 17px);
+      font-variant-ligatures: none;
+      font-feature-settings: "liga" 0, "calt" 0;
+      line-height: 1;
+      letter-spacing: 0;
+      white-space: pre;
+    }
+
+    .terminal-line {
+      display: block;
+      height: 1em;
+      white-space: pre;
+    }
+
+    .terminal-line span {
+      display: inline;
+      white-space: pre;
+    }
+
+    .composer {
+      position: relative;
+      display: flex;
+      width: min(78%, 780px);
+      min-height: 76px;
+      align-items: center;
+      padding: 0 25px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.022);
+    }
+
+    .composer::before {
+      content: "";
+      position: absolute;
+      top: -1px;
+      bottom: -1px;
+      left: -1px;
+      width: 2px;
+      background: var(--signal);
+    }
+
+    .cursor {
+      width: 2px;
+      height: 22px;
+      margin-right: 4px;
+      background: #ebe9e3;
+      animation: blink 1.25s step-end infinite;
+    }
+
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .placeholder {
+      color: #686b73;
+      font: 19px/1 var(--mono);
+      letter-spacing: -.03em;
+    }
+
+    .view-characters {
+      display: none;
+      grid-template-columns: minmax(0, 1fr) 220px;
+      gap: 18px;
+      padding: 70px 48px 58px;
+    }
+
+    html[data-view="characters"] .view-characters { display: grid; }
+
+    .character-stage {
+      display: grid;
+      place-items: center;
+      overflow: auto;
+      border: 1px solid rgba(255,255,255,.07);
+      background:
+        linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px),
+        #0b0c0f;
+      background-size: 18px 18px;
+    }
+
+    .character-stage .terminal-wordmark { font-size: 20px; }
+
+    .character-spec {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 17px;
+      border: 1px solid rgba(255,255,255,.07);
+      background: #0b0c0f;
+    }
+
+    .char-stat + .char-stat {
+      padding-top: 15px;
+      border-top: 1px solid rgba(255,255,255,.06);
+    }
+
+    .char-stat span {
+      display: block;
+      color: #4f525a;
+      font: 9px/1 var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .char-stat strong {
+      display: block;
+      margin-top: 7px;
+      color: #b8bac0;
+      font: 500 12px/1.4 var(--mono);
+    }
+
+    .char-stat p {
+      margin: 6px 0 0;
+      color: #676a73;
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .view-matrix {
+      display: none;
+      grid-template-columns: minmax(0, 1fr) 220px;
+      gap: 18px;
+      padding: 70px 48px 58px;
+    }
+
+    html[data-view="matrix"] .view-matrix { display: grid; }
+
+    .matrix-stage {
+      display: grid;
+      place-items: center;
+      overflow: auto;
+      border: 1px solid rgba(255,255,255,.07);
+      background: #0b0c0f;
+    }
+
+    .matrix-grid {
+      display: grid;
+      gap: 4px;
+      padding: 28px;
+    }
+
+    .matrix-cell {
+      width: 16px;
+      height: 16px;
+      border: 1px solid rgba(255,255,255,.035);
+      border-radius: 2px;
+      background: rgba(255,255,255,.018);
+    }
+
+    .matrix-cell.primary { border-color: transparent; background: var(--primary); }
+    .matrix-cell.signal { border-color: transparent; background: var(--signal); box-shadow: 0 0 11px rgba(113,137,201,.16); }
+
+    .matrix-legend {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 17px;
+      border: 1px solid rgba(255,255,255,.07);
+      background: #0b0c0f;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      color: #777a83;
+      font: 10px/1 var(--mono);
+    }
+
+    .legend-swatch { width: 12px; height: 12px; border-radius: 2px; background: rgba(255,255,255,.03); }
+    .legend-swatch.primary { background: var(--primary); }
+    .legend-swatch.signal { background: var(--signal); }
+
+    .spec-panel {
+      display: flex;
+      min-height: 100%;
+      flex-direction: column;
+    }
+
+    .spec-head {
+      padding: 18px 18px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .spec-kicker {
+      margin: 0 0 9px;
+      color: var(--signal);
+      font: 600 9px/1 var(--mono);
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    .spec-title { margin: 0; font-size: 21px; font-weight: 610; letter-spacing: -.035em; }
+
+    .spec-body { padding: 18px; }
+
+    .spec-description {
+      margin: 0 0 18px;
+      color: #91949d;
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 19px;
+    }
+
+    .metric {
+      padding: 11px;
+      border: 1px solid rgba(255,255,255,.065);
+      background: rgba(255,255,255,.018);
+    }
+
+    .metric span {
+      display: block;
+      color: #555861;
+      font: 8px/1 var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 8px;
+      color: #c1c3c8;
+      font: 500 11px/1.2 var(--mono);
+    }
+
+    .facts { margin: 0; padding: 0; list-style: none; }
+
+    .facts li {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,.055);
+      color: #6d7079;
+      font: 10px/1.3 var(--mono);
+    }
+
+    .facts strong { color: #bfc1c6; font-weight: 500; text-align: right; }
+
+    .verdict {
+      margin-top: auto;
+      padding: 17px 18px;
+      border-top: 1px solid var(--line);
+      background: rgba(255,255,255,.018);
+    }
+
+    .verdict span {
+      display: block;
+      margin-bottom: 7px;
+      color: #5c5f68;
+      font: 8px/1 var(--mono);
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+
+    .verdict p { margin: 0; color: #a7a9b0; font-size: 12px; line-height: 1.55; }
+
+    .comparison { margin-top: 54px; }
+
+    .section-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 16px;
+    }
+
+    .section-head h2 { margin: 0; font-size: 24px; font-weight: 610; letter-spacing: -.035em; }
+    .section-head p { margin: 0; color: #6c6f78; font: 10px/1.6 var(--mono); }
+
+    .mapping-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .mapping-card {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #181a1f;
+      cursor: pointer;
+      transition: 160ms ease;
+    }
+
+    .mapping-card:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+
+    html[data-variant="full"] .mapping-card[data-variant="full"],
+    html[data-variant="half"] .mapping-card[data-variant="half"],
+    html[data-variant="narrow"] .mapping-card[data-variant="narrow"] {
+      border-color: rgba(113,137,201,.52);
+      box-shadow: inset 0 0 0 1px rgba(113,137,201,.08);
+    }
+
+    .card-stage {
+      display: grid;
+      min-height: 230px;
+      place-items: center;
+      padding: 30px 18px;
+      overflow: auto;
+      background: #0b0c0f;
+    }
+
+    .card-stage .terminal-wordmark { font-size: 11px; }
+    .mapping-card[data-variant="narrow"] .card-stage .terminal-wordmark { font-size: 20px; }
+
+    .card-meta {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 12px;
+      padding: 15px;
+      border-top: 1px solid var(--line);
+    }
+
+    .card-code {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border-radius: 7px;
+      color: #888b94;
+      background: rgba(255,255,255,.05);
+      font: 650 9px/1 var(--mono);
+    }
+
+    .card-copy strong { display: block; color: #c5c7cc; font-size: 12px; font-weight: 610; }
+    .card-copy small { display: block; margin-top: 4px; color: #5f626b; font: 9px/1.5 var(--mono); }
+    .card-size { color: #53565f; font: 9px/1 var(--mono); }
+
+    .loading,
+    .error {
+      display: grid;
+      min-height: 420px;
+      place-items: center;
+      color: #777a83;
+      font: 12px/1.6 var(--mono);
+    }
+
+    .error { color: #d97964; }
+
+    @media (max-width: 1100px) {
+      .workspace { grid-template-columns: 1fr; }
+      .spec-panel { display: grid; grid-template-columns: 1fr 1.35fr auto; min-height: 0; }
+      .spec-head, .spec-body, .verdict { border: 0; }
+      .verdict { border-left: 1px solid var(--line); }
+      .mapping-grid { grid-template-columns: 1fr; }
+      .mapping-card { display: grid; grid-template-columns: minmax(320px, .9fr) 1fr; }
+      .card-meta { border-top: 0; border-left: 1px solid var(--line); }
+    }
+
+    @media (max-width: 760px) {
+      .page { width: min(100% - 24px, 680px); padding-top: 24px; }
+      .topbar { display: block; }
+      .source-badge { margin-top: 20px; }
+      .variant-tabs { grid-template-columns: 1fr; }
+      .preview-toolbar { align-items: flex-start; flex-direction: column; }
+      .stage-viewport { min-height: 600px; padding: 12px; }
+      .terminal-frame { min-height: 550px; aspect-ratio: 4 / 5; }
+      .view-scene { padding: 66px 18px 68px; }
+      .terminal-wordmark { font-size: 9px; }
+      .view-characters, .view-matrix { grid-template-columns: 1fr; padding: 58px 18px 50px; }
+      .character-spec, .matrix-legend { display: none; }
+      .matrix-cell { width: 11px; height: 11px; }
+      .matrix-grid { gap: 3px; padding: 16px; }
+      .spec-panel { display: block; }
+      .verdict { border-top: 1px solid var(--line); border-left: 0; }
+      .section-head { align-items: flex-start; flex-direction: column; }
+      .mapping-card { display: block; }
+      .card-meta { border-top: 1px solid var(--line); border-left: 0; }
+      .composer { width: 94%; }
+      .mapping-card[data-variant="full"] .card-stage .terminal-wordmark { font-size: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Peer Agent · B3 Signal terminal translation</p>
+        <h1>这次看的不是像素稿，是真实字符。</h1>
+        <p class="intro">网页从共享模块生成的 JSON 读取与 OpenTUI 完全相同的字符片段、前景色和背景色。这里比较的是 B3 在终端里的三种映射，而不是重新设计 Logo。</p>
+      </div>
+      <div class="source-badge">
+        <span>Shared manifest</span>
+        <code>apps/tui/src/b3-wordmark.preview.json</code>
+        <div class="source-state" id="source-state">正在读取共享矩阵…</div>
+      </div>
+    </header>
+
+    <nav class="variant-tabs" aria-label="终端字符映射">
+      <button class="variant-tab" type="button" data-select-variant="full" aria-pressed="true">
+        <span class="tab-code">01</span>
+        <span class="tab-copy"><strong>Full Block</strong><small>██ · 7 行 · 轮廓最完整</small></span>
+        <span class="tab-size" data-size-label="full">—</span>
+      </button>
+      <button class="variant-tab" type="button" data-select-variant="half" aria-pressed="false">
+        <span class="tab-code">02</span>
+        <span class="tab-copy"><strong>Half Block</strong><small>▀▄█ · 4 行 · 高度压缩</small></span>
+        <span class="tab-size" data-size-label="half">—</span>
+      </button>
+      <button class="variant-tab" type="button" data-select-variant="narrow" aria-pressed="false">
+        <span class="tab-code">03</span>
+        <span class="tab-copy"><strong>Narrow Fallback</strong><small>peer━agent · 1 行 · 主动降级</small></span>
+        <span class="tab-size" data-size-label="narrow">—</span>
+      </button>
+    </nav>
+
+    <div id="app" class="loading">loading shared terminal matrix…</div>
+
+    <section class="comparison" id="comparison" hidden>
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Exact characters · same source</p>
+          <h2>三种映射并排</h2>
+        </div>
+        <p>每个字符和颜色片段均来自同一份 manifest。</p>
+      </div>
+      <div class="mapping-grid" id="mapping-grid"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    const MANIFEST_URL = '../../apps/tui/src/b3-wordmark.preview.json';
+    const params = new URLSearchParams(location.search);
+    const requestedVariant = params.get('variant');
+    const requestedView = params.get('view');
+    const state = {
+      variant: ['full', 'half', 'narrow'].includes(requestedVariant) ? requestedVariant : 'full',
+      view: ['scene', 'characters', 'matrix'].includes(requestedView) ? requestedView : 'scene',
+    };
+    let manifest;
+
+    function color(role) {
+      return role ? manifest.colors[role] : undefined;
+    }
+
+    function renderWordmark(variant, className = '') {
+      const data = manifest.variants[variant];
+      const root = document.createElement('div');
+      root.className = `terminal-wordmark ${className}`.trim();
+      root.dataset.terminalVariant = variant;
+      root.setAttribute('role', 'img');
+      root.setAttribute('aria-label', `Peer Agent B3 ${data.label}`);
+
+      data.lines.forEach((line) => {
+        const lineNode = document.createElement('div');
+        lineNode.className = 'terminal-line';
+        line.segments.forEach((segment) => {
+          const span = document.createElement('span');
+          span.textContent = segment.text;
+          if (segment.fg) span.style.color = color(segment.fg);
+          if (segment.bg) span.style.backgroundColor = color(segment.bg);
+          lineNode.append(span);
+        });
+        root.append(lineNode);
+      });
+      return root;
+    }
+
+    function renderMatrix() {
+      const grid = document.createElement('div');
+      grid.className = 'matrix-grid';
+      grid.style.gridTemplateColumns = `repeat(${manifest.matrix.width}, 16px)`;
+      manifest.matrix.rows.forEach((row) => {
+        [...row].forEach((cell) => {
+          const node = document.createElement('span');
+          node.className = `matrix-cell ${cell === '#' ? 'primary' : cell === '=' ? 'signal' : ''}`.trim();
+          grid.append(node);
+        });
+      });
+      return grid;
+    }
+
+    function buildWorkspace() {
+      const variant = manifest.variants[state.variant];
+      const app = document.querySelector('#app');
+      app.className = 'workspace';
+      app.replaceChildren();
+
+      const panel = document.createElement('div');
+      panel.className = 'preview-panel';
+      panel.innerHTML = `
+        <div class="preview-toolbar">
+          <div class="toolbar-group">
+            <span class="toolbar-label">检查</span>
+            <div class="segmented" role="group" aria-label="查看模式">
+              <button type="button" data-set-view="scene">真实首屏</button>
+              <button type="button" data-set-view="characters">字符本体</button>
+              <button type="button" data-set-view="matrix">逻辑矩阵</button>
+            </div>
+          </div>
+          <div class="toolbar-group">
+            <span class="toolbar-label">自动阈值</span>
+            <span class="tab-size">full ≥76 · half ≥42 · narrow &lt;42</span>
+          </div>
+        </div>
+        <div class="stage-viewport">
+          <div class="terminal-frame">
+            <div class="terminal-cap">peer / b3 terminal lab</div>
+            <div class="view-board view-scene">
+              <div class="scene-logo"></div>
+              <div class="composer"><span class="cursor"></span><span class="placeholder">Ask anything…</span></div>
+            </div>
+            <div class="view-board view-characters">
+              <div class="character-stage"></div>
+              <div class="character-spec">
+                <div class="char-stat"><span>exact size</span><strong>${variant.width} columns × ${variant.height} rows</strong><p>尺寸来自终端字符串，而不是 CSS 估算。</p></div>
+                <div class="char-stat"><span>characters</span><strong>${state.variant === 'full' ? '██' : state.variant === 'half' ? '▀ / ▄ / █' : 'peer━agent'}</strong><p>关闭连字与上下文替换，保持等宽字符原样。</p></div>
+                <div class="char-stat"><span>signal</span><strong>foreground / background blue</strong><p>Half Block 在上下像素颜色不同处使用字符背景色。</p></div>
+              </div>
+            </div>
+            <div class="view-board view-matrix">
+              <div class="matrix-stage"></div>
+              <div class="matrix-legend">
+                <div class="legend-row"><span class="legend-swatch"></span> empty / .</div>
+                <div class="legend-row"><span class="legend-swatch primary"></span> primary / #</div>
+                <div class="legend-row"><span class="legend-swatch signal"></span> signal / =</div>
+                <div class="char-stat"><span>logical source</span><strong>${manifest.matrix.width} × ${manifest.matrix.height}</strong><p>三种映射都由这张逻辑矩阵生成。</p></div>
+              </div>
+            </div>
+            <div class="terminal-status"><span class="live">~/peer-agent</span><span>${variant.label} · ${variant.width}×${variant.height}</span></div>
+          </div>
+        </div>`;
+
+      panel.querySelector('.scene-logo').append(renderWordmark(state.variant));
+      panel.querySelector('.character-stage').append(renderWordmark(state.variant));
+      panel.querySelector('.matrix-stage').append(renderMatrix());
+
+      const spec = document.createElement('aside');
+      spec.className = 'spec-panel';
+      spec.innerHTML = `
+        <div class="spec-head"><p class="spec-kicker">当前终端映射</p><h2 class="spec-title">${variant.label}</h2></div>
+        <div class="spec-body">
+          <p class="spec-description">${variant.description}</p>
+          <div class="metrics">
+            <div class="metric"><span>Width</span><strong>${variant.width} columns</strong></div>
+            <div class="metric"><span>Height</span><strong>${variant.height} rows</strong></div>
+            <div class="metric"><span>Matrix</span><strong>${manifest.matrix.width} × ${manifest.matrix.height}</strong></div>
+            <div class="metric"><span>Bridge</span><strong>11 cells</strong></div>
+          </div>
+          <ul class="facts">
+            <li><span>数据来源</span><strong>共享 JSON</strong></li>
+            <li><span>终端渲染</span><strong>OpenTUI span</strong></li>
+            <li><span>字体要求</span><strong>标准等宽</strong></li>
+            <li><span>连字</span><strong>禁用</strong></li>
+          </ul>
+        </div>
+        <div class="verdict"><span>这一轮只判断字符翻译</span><p>选 Full、Half 或二者自动切换；Narrow 只作为空间不足时的保底，不与主 Logo 竞争。</p></div>`;
+
+      app.append(panel, spec);
+      bindViewButtons();
+      syncControls();
+    }
+
+    function buildComparison() {
+      const grid = document.querySelector('#mapping-grid');
+      grid.replaceChildren();
+      for (const key of ['full', 'half', 'narrow']) {
+        const variant = manifest.variants[key];
+        const card = document.createElement('article');
+        card.className = 'mapping-card';
+        card.dataset.variant = key;
+        card.tabIndex = 0;
+        card.setAttribute('role', 'button');
+        const stage = document.createElement('div');
+        stage.className = 'card-stage';
+        stage.append(renderWordmark(key));
+        const meta = document.createElement('div');
+        meta.className = 'card-meta';
+        meta.innerHTML = `<span class="card-code">${key === 'full' ? '01' : key === 'half' ? '02' : '03'}</span><span class="card-copy"><strong>${variant.label}</strong><small>${variant.description}</small></span><span class="card-size">${variant.width}×${variant.height}</span>`;
+        card.append(stage, meta);
+        const activate = () => selectVariant(key, true);
+        card.addEventListener('click', activate);
+        card.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(); }
+        });
+        grid.append(card);
+      }
+      document.querySelector('#comparison').hidden = false;
+    }
+
+    function bindViewButtons() {
+      document.querySelectorAll('[data-set-view]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.view = button.dataset.setView;
+          syncControls();
+          const url = new URL(location.href);
+          url.searchParams.set('variant', state.variant);
+          url.searchParams.set('view', state.view);
+          history.replaceState(null, '', url);
+        });
+      });
+    }
+
+    function syncControls() {
+      document.documentElement.dataset.variant = state.variant;
+      document.documentElement.dataset.view = state.view;
+      document.querySelectorAll('[data-select-variant]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.selectVariant === state.variant)));
+      document.querySelectorAll('[data-set-view]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.setView === state.view)));
+    }
+
+    function selectVariant(variant, scroll = false) {
+      state.variant = variant;
+      buildWorkspace();
+      syncControls();
+      const url = new URL(location.href);
+      url.searchParams.set('variant', state.variant);
+      url.searchParams.set('view', state.view);
+      history.replaceState(null, '', url);
+      if (scroll) document.querySelector('.workspace').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    async function runTerminalPreviewCheck() {
+      const original = { ...state };
+      const results = [];
+      for (const variant of ['full', 'half', 'narrow']) {
+        state.variant = variant;
+        buildWorkspace();
+        for (const view of ['scene', 'characters', 'matrix']) {
+          state.view = view;
+          syncControls();
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          const frame = document.querySelector('.terminal-frame').getBoundingClientRect();
+          const board = document.querySelector(`.view-${view}`);
+          const wordmarks = [...board.querySelectorAll('.terminal-wordmark')].map((node) => {
+            const rect = node.getBoundingClientRect();
+            return { width: +rect.width.toFixed(1), height: +rect.height.toFixed(1), inside: rect.left >= frame.left - 1 && rect.right <= frame.right + 1 && rect.top >= frame.top - 1 && rect.bottom <= frame.bottom + 1 };
+          });
+          results.push({ variant, view, wordmarks, pass: (view === 'matrix' || wordmarks.length > 0) && wordmarks.every((wordmark) => wordmark.inside) && board.scrollWidth <= board.clientWidth + 1 });
+        }
+      }
+      Object.assign(state, original);
+      buildWorkspace();
+      syncControls();
+      return results;
+    }
+
+    window.runTerminalPreviewCheck = runTerminalPreviewCheck;
+
+    document.querySelectorAll('[data-select-variant]').forEach((button) => {
+      button.addEventListener('click', () => selectVariant(button.dataset.selectVariant));
+    });
+
+    try {
+      const response = await fetch(`${MANIFEST_URL}?v=1`, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`manifest HTTP ${response.status}`);
+      manifest = await response.json();
+      document.documentElement.style.setProperty('--primary', manifest.colors.primary);
+      document.documentElement.style.setProperty('--signal', manifest.colors.signal);
+      document.documentElement.style.setProperty('--muted', manifest.colors.muted);
+      document.querySelector('#source-state').textContent = `${manifest.direction} · ${manifest.matrix.width}×${manifest.matrix.height} · synced`;
+      for (const key of ['full', 'half', 'narrow']) {
+        const variant = manifest.variants[key];
+        document.querySelector(`[data-size-label="${key}"]`).textContent = `${variant.width}×${variant.height}`;
+      }
+      buildWorkspace();
+      buildComparison();
+      syncControls();
+    } catch (error) {
+      const app = document.querySelector('#app');
+      app.className = 'error';
+      app.textContent = `无法读取共享矩阵：${error instanceof Error ? error.message : String(error)}`;
+      document.querySelector('#source-state').textContent = 'manifest unavailable';
+    }
+  </script>
+</body>
+</html>

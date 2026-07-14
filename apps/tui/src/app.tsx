@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { TextareaRenderable } from '@opentui/core';
-import { useKeyboard, useRenderer } from '@opentui/react';
+import { useKeyboard, useRenderer, useTerminalDimensions } from '@opentui/react';
 import type { RuntimeGoalSnapshot } from '@peer-agent/runtime-sdk';
 
+import { B3Wordmark } from './b3-wordmark-view.tsx';
 import {
   createChatController,
   type ChatController,
@@ -23,55 +24,90 @@ import {
 } from './plan-mode.ts';
 import { createTuiGoalRunner } from './goal-mode.ts';
 import type { PendingApproval, TuiHost } from './tui-host.ts';
-import { cycleTuiMode, TUI_MODES, tuiModeForKey, tuiModeOption } from './tui-mode.ts';
+import {
+  applyTuiCommand,
+  createTuiExperienceState,
+  escapeFooter,
+  filterTuiCommands,
+  openCommandPanel,
+  shouldOpenCommandPanel,
+  type TuiExperienceState,
+} from './tui-experience.ts';
+import { tuiModeOption } from './tui-mode.ts';
+
+const COLOR = {
+  background: '#0a0a0a',
+  panel: '#111111',
+  border: '#2a2a2a',
+  muted: '#737373',
+  text: '#e5e5e5',
+  accent: '#a3e635',
+  user: '#7dd3fc',
+  tool: '#facc15',
+  danger: '#fb7185',
+} as const;
 
 function roleColor(role: ChatMessage['role']): string {
-  if (role === 'user') return '#93c5fd';
-  if (role === 'tool') return '#fcd34d';
-  return '#a7f3d0';
+  if (role === 'user') return COLOR.user;
+  if (role === 'tool') return COLOR.tool;
+  return COLOR.text;
 }
 
 function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
-  if (snapshot.messages.length === 0) {
-    return <text fg="#64748b">Start a conversation. Model tool calls run through the governed Runtime.</text>;
-  }
+  if (snapshot.messages.length === 0) return null;
 
   return (
-    <scrollbox flexGrow={1} stickyScroll stickyStart="bottom" padding={1}>
+    <scrollbox flexGrow={1} stickyScroll stickyStart="bottom" paddingLeft={2} paddingRight={2}>
       {snapshot.messages.map((message) => (
         <box key={message.id} flexDirection="column" marginBottom={1}>
           <text fg={roleColor(message.role)}>
-            <strong>{message.role.toUpperCase()}</strong>
-            {message.pending ? ' · streaming' : ''}
+            <strong>{message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Peer' : 'Tool'}</strong>
+            {message.pending ? '  thinking…' : ''}
           </text>
-          <text fg="#e2e8f0">{message.content || ' '}</text>
+          <text fg={COLOR.text}>{message.content || ' '}</text>
         </box>
       ))}
     </scrollbox>
   );
 }
 
-function Composer({ controller, snapshot, disabled }: {
+function Composer({ controller, snapshot, disabled, onCommand, editorRef }: {
   readonly controller: ChatController;
   readonly snapshot: ChatSnapshot;
   readonly disabled: boolean;
+  readonly onCommand: () => void;
+  readonly editorRef: RefObject<TextareaRenderable | null>;
 }) {
-  const editor = useRef<TextareaRenderable | null>(null);
+  const editor = editorRef;
 
   const submit = () => {
     const value = editor.current?.plainText ?? '';
     if (!value.trim() || disabled || snapshot.status !== 'idle') return;
+    if (value.trim() === '/') {
+      editor.current?.clear();
+      onCommand();
+      return;
+    }
     editor.current?.clear();
     void controller.send(value);
   };
 
   return (
-    <box border borderColor={snapshot.status === 'idle' ? '#475569' : '#f59e0b'} height={6} padding={1}>
+    <box flexDirection="column" border borderColor={snapshot.status === 'idle' ? COLOR.border : COLOR.accent} height={5} paddingLeft={1} paddingRight={1} backgroundColor={COLOR.panel}>
       <textarea
         ref={editor}
         focused={!disabled}
-        placeholder={disabled ? 'Resolve the permission request first…' : 'Message Peer Agent…'}
+        placeholder={disabled ? 'Resolve the request above…' : 'Ask anything…'}
         wrapMode="word"
+        onKeyDown={(event) => {
+          const value = editor.current?.plainText ?? '';
+          if (!disabled && snapshot.status === 'idle' && shouldOpenCommandPanel(`${value}${event.sequence}`)) {
+            event.preventDefault();
+            event.stopPropagation();
+            editor.current?.clear();
+            onCommand();
+          }
+        }}
         onSubmit={submit}
       />
     </box>
@@ -84,7 +120,9 @@ export function App({ host, model, modelLabel }: {
   readonly modelLabel: string;
 }) {
   const renderer = useRenderer();
+  const terminal = useTerminalDimensions();
   const controllerRef = useRef<ChatController | null>(null);
+  const composerRef = useRef<TextareaRenderable | null>(null);
   const goalRunner = useMemo(() => createTuiGoalRunner({
     sessionId: 'tui-chat',
     executeTask: async (task, context) => {
@@ -112,7 +150,25 @@ export function App({ host, model, modelLabel }: {
   const [approval, setApproval] = useState<PendingApproval | null>(null);
   const [approvalSelection, setApprovalSelection] = useState(0);
   const [planSelection, setPlanSelection] = useState(0);
+  const [commandNotice, setCommandNotice] = useState<string | null>(null);
+  const [experience, setExperience] = useState<TuiExperienceState>(() => createTuiExperienceState());
   const visibleTurn = snapshot.session?.activeTurn ?? snapshot.session?.lastTurn;
+  const commandFooter = experience.footer.type === 'command' ? experience.footer : null;
+  const commandItems = commandFooter ? filterTuiCommands(commandFooter.query) : [];
+  const commandSelection = commandFooter?.selectedIndex ?? 0;
+  const toolCount = (host.capabilitiesForMode?.(snapshot.mode) ?? host.capabilities).length;
+  const composerMetadata = `${modelLabel}  ·  ${tuiModeOption(snapshot.mode).label.toLowerCase()}  ·  ${toolCount} tools`;
+  const wordmarkVariant = terminal.width >= 76
+    ? 'full'
+    : terminal.width >= 42
+      ? 'half'
+      : 'narrow';
+  const isWelcome = snapshot.messages.length === 0
+    && !approval
+    && snapshot.plan?.status !== 'awaiting_approval'
+    && !goal
+    && !snapshot.error
+    && experience.footer.type === 'composer';
 
   useEffect(() => controller.subscribe(setSnapshot), [controller]);
   useEffect(() => goalRunner.subscribe(setGoal), [goalRunner]);
@@ -122,6 +178,66 @@ export function App({ host, model, modelLabel }: {
   }), [host]);
 
   useKeyboard((key) => {
+    if (
+      experience.footer.type === 'composer'
+      && !approval
+      && snapshot.plan?.status !== 'awaiting_approval'
+      && snapshot.status === 'idle'
+      && shouldOpenCommandPanel(composerRef.current?.plainText ?? '', key.sequence)
+    ) {
+      key.preventDefault();
+      key.stopPropagation();
+      composerRef.current?.clear();
+      setCommandNotice(null);
+      setExperience((current) => openCommandPanel({ ...current, mode: snapshot.mode }));
+      return;
+    }
+    if (experience.footer.type === 'command') {
+      if (key.name === 'escape') {
+        setExperience((current) => escapeFooter(current));
+        return;
+      }
+      if (key.name === 'up' || key.name === 'down') {
+        const direction = key.name === 'up' ? -1 : 1;
+        setExperience((current) => current.footer.type === 'command'
+          ? { ...current, footer: { ...current.footer, selectedIndex: Math.max(0, Math.min(commandItems.length - 1, current.footer.selectedIndex + direction)) } }
+          : current);
+        return;
+      }
+      if ((key.name === 'return' || key.name === 'enter') && commandItems.length > 0) {
+        const command = commandItems[commandSelection] ?? commandItems[0];
+        if (!command) return;
+        const action = command.action;
+        if (action.type === 'set-mode') {
+          controller.setMode(action.mode);
+          setCommandNotice(`Mode changed to ${action.mode}`);
+        } else if (action.type === 'goal-control') {
+          if (!goal) setCommandNotice('No active goal');
+          else if (action.control === 'pause' && goal.status === 'running') {
+            goalRunner.pause(goal.goalId);
+            setCommandNotice('Goal paused');
+          } else if (action.control === 'resume' && goal.status === 'paused') {
+            void goalRunner.resume(goal.goalId);
+            setCommandNotice('Goal resumed');
+          } else if (action.control === 'cancel' && ['pending', 'running', 'paused'].includes(goal.status)) {
+            controller.cancel();
+            goalRunner.cancel(goal.goalId);
+            setCommandNotice('Goal cancelled');
+          } else setCommandNotice(`Goal is ${goal.status}`);
+        } else if (action.type === 'show-help') {
+          setCommandNotice('↵ send · shift+↵ newline · / commands · esc close · ctrl+c stop/quit');
+        } else if (action.type === 'select-model') {
+          setCommandNotice(`Using ${modelLabel}; model switching is configured in the desktop client`);
+        } else if (action.type === 'new-session') {
+          setCommandNotice('New session is unavailable while conversation persistence is being finalized');
+        } else if (action.type === 'quit') {
+          renderer.destroy();
+          return;
+        }
+        setExperience((current) => applyTuiCommand(current, command));
+      }
+      return;
+    }
     if (goal && !approval && snapshot.plan?.status !== 'awaiting_approval') {
       if (key.name === 'p' && goal.status === 'running') {
         goalRunner.pause(goal.goalId);
@@ -169,49 +285,49 @@ export function App({ host, model, modelLabel }: {
       return;
     }
     if (snapshot.status !== 'idle') return;
-    const directMode = tuiModeForKey(key.name, Boolean(key.ctrl));
-    if (directMode) {
-      controller.setMode(directMode);
-      return;
-    }
-    if (key.ctrl && key.name === 'tab') {
-      controller.setMode(cycleTuiMode(snapshot.mode, key.shift ? -1 : 1));
+    if ((key.ctrl && key.name === 'p') || (key.ctrl && key.name === 'k')) {
+      setExperience((current) => openCommandPanel({ ...current, mode: snapshot.mode }));
     }
   });
 
   return (
-    <box flexDirection="column" width="100%" height="100%" padding={1} gap={1} backgroundColor="#07111f">
-      <box justifyContent="space-between">
-        <text fg="#67e8f9"><strong>PEER AGENT</strong> · {modelLabel}</text>
-        <text fg={snapshot.status === 'idle' ? '#86efac' : '#fbbf24'}>
-          {snapshot.status}
-          {snapshot.usage?.totalTokens === undefined ? '' : ` · ${snapshot.usage.totalTokens} tokens`}
-        </text>
-      </box>
-
-      <box flexDirection="column" border borderColor="#1e3a5f" padding={1}>
-        <box flexDirection="row" gap={2}>
-          {TUI_MODES.map((option) => (
-            <text key={option.mode} fg={option.mode === snapshot.mode ? '#67e8f9' : '#64748b'}>
-              {option.mode === snapshot.mode ? '▶ ' : '  '}
-              Ctrl+{option.shortcut} {option.label}
-              {option.readOnly ? ' · read-only' : ''}
-            </text>
-          ))}
+    <box flexDirection="column" width="100%" height="100%" paddingLeft={2} paddingRight={2} gap={1} backgroundColor={COLOR.background}>
+      {isWelcome ? (
+        <box flexGrow={1} flexDirection="column" justifyContent="center" alignItems="center" paddingLeft={2} paddingRight={2}>
+          <box width="100%" flexDirection="column" alignItems="center" gap={2}>
+            <box width="100%" alignItems="center" justifyContent="center">
+              <B3Wordmark variant={wordmarkVariant} />
+            </box>
+            <box width="75%" maxWidth={88}>
+              <Composer
+                controller={controller}
+                snapshot={snapshot}
+                disabled={false}
+                editorRef={composerRef}
+                onCommand={() => {
+                  setCommandNotice(null);
+                  setExperience((current) => openCommandPanel({ ...current, mode: snapshot.mode }));
+                }}
+              />
+            </box>
+          </box>
         </box>
-        <text fg="#94a3b8">
-          {tuiModeOption(snapshot.mode).description} · {(host.capabilitiesForMode?.(snapshot.mode) ?? host.capabilities).length} projected tools
-        </text>
-      </box>
+      ) : (
+        <>
+          {snapshot.messages.length > 0 ? (
+            <box justifyContent="space-between">
+              <text fg={COLOR.text}><strong>peer</strong></text>
+              <text fg={COLOR.muted}>
+                {snapshot.usage?.totalTokens === undefined ? composerMetadata : `${composerMetadata}  ·  ${snapshot.usage.totalTokens} tokens`}
+              </text>
+            </box>
+          ) : null}
 
-      {snapshot.session ? (
-        <text fg="#64748b">
-          session {snapshot.session.sessionId}
-          {visibleTurn ? ` · turn ${visibleTurn.turnIndex} · ${visibleTurn.status}` : ''}
-        </text>
-      ) : null}
+          {snapshot.session && visibleTurn ? (
+            <text fg={COLOR.muted}>turn {visibleTurn.turnIndex} · {visibleTurn.status}</text>
+          ) : null}
 
-      <ChatHistory snapshot={snapshot} />
+          <ChatHistory snapshot={snapshot} />
 
       {snapshot.error ? <text fg="#fca5a5">{snapshot.error}</text> : null}
 
@@ -270,12 +386,37 @@ export function App({ host, model, modelLabel }: {
         </box>
       ) : null}
 
-      <Composer
-        controller={controller}
-        snapshot={snapshot}
-        disabled={Boolean(approval) || snapshot.plan?.status === 'awaiting_approval'}
-      />
-      <text fg="#64748b">Enter send · Shift+Enter newline · Ctrl+1..4 mode · Ctrl+Tab cycle · Ctrl+C cancel / quit</text>
+      {commandNotice && experience.footer.type !== 'command' ? (
+        <text fg={COLOR.accent}>{commandNotice}</text>
+      ) : null}
+
+      {experience.footer.type === 'command' ? (
+        <box flexDirection="column" border borderColor={COLOR.accent} backgroundColor={COLOR.panel} padding={1}>
+          <text fg={COLOR.accent}><strong>Commands</strong></text>
+          {commandItems.map((command, index) => (
+            <box key={command.id} justifyContent="space-between">
+              <text fg={index === commandSelection ? COLOR.text : COLOR.muted}>
+                {index === commandSelection ? '› ' : '  '}{command.label}
+              </text>
+              <text fg={COLOR.muted}>{command.description}</text>
+            </box>
+          ))}
+          <text fg={COLOR.muted}>↑↓ select  ·  enter run  ·  esc close</text>
+        </box>
+      ) : (
+        <Composer
+          controller={controller}
+          snapshot={snapshot}
+          disabled={Boolean(approval) || snapshot.plan?.status === 'awaiting_approval'}
+          editorRef={composerRef}
+          onCommand={() => {
+            setCommandNotice(null);
+            setExperience((current) => openCommandPanel({ ...current, mode: snapshot.mode }));
+          }}
+        />
+      )}
+        </>
+      )}
     </box>
   );
 }
