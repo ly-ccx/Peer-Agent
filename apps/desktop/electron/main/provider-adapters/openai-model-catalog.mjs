@@ -132,6 +132,108 @@ export async function listSubscriptionModels(_tokens) {
   return { models: [...SUBSCRIPTION_CATALOG], source: 'builtin' };
 }
 
+// api_key provider 的对话模型判定(排除式)。
+//
+// 与 isChatModel(包含式,仅认 gpt/o 家族)不同:自带 API key 的 provider 可能是任意
+// OpenAI 兼容后端(DeepSeek / Qwen / Kimi / 各类网关),模型 id 不遵循 openai 命名。
+// 若沿用 isChatModel 会把 deepseek-chat、qwen-max 等全部误杀,故这里改为"排除已知
+// 非对话类型(embedding / tts / 语音 / 图像 / 重排 等)",其余一律保留。
+function isLikelyChatModel(id) {
+  if (typeof id !== 'string' || !id) return false;
+  return !/embedding|whisper|tts|dall-?e|image|vision-encoder|moderation|audio|realtime|transcribe|speech|rerank|guard|stable-?diffusion|clip|bge|reranker/i.test(id);
+}
+
+// 将不同 OpenAI 兼容 / Anthropic / Gemini 后端的列模型响应归一为 LlmModelInfo[]。
+// - OpenAI 兼容: { data: [{ id, created }] }
+// - Anthropic:   { data: [{ id, display_name, created_at }] }
+// - Gemini:      { models: [{ name, displayName, inputTokenLimit, outputTokenLimit,
+//                             supportedGenerationMethods }] }
+function normalizeApiModelList(data, wire) {
+  if (wire === 'gemini') {
+    const arr = Array.isArray(data?.models) ? data.models : [];
+    return arr
+      .filter((m) => m?.name
+        && (!Array.isArray(m.supportedGenerationMethods)
+          || m.supportedGenerationMethods.includes('generateContent')))
+      .map((m) => {
+        const id = String(m.name).replace(/^models\//, '');
+        return {
+          id,
+          label: m.displayName || id,
+          contextWindow: m.inputTokenLimit,
+          maxOutputTokens: m.outputTokenLimit,
+        };
+      });
+  }
+  const arr = Array.isArray(data?.data)
+    ? data.data
+    : (Array.isArray(data?.models) ? data.models : []);
+  return arr
+    .map((m) => {
+      const id = String(m?.id ?? m?.name ?? '');
+      const createdRaw = typeof m?.created === 'number'
+        ? m.created
+        : (typeof m?.created_at === 'string' ? Date.parse(m.created_at) / 1000 : undefined);
+      return {
+        id,
+        label: m?.display_name || m?.name || id,
+        created: Number.isFinite(createdRaw) ? createdRaw : undefined,
+      };
+    })
+    .filter((m) => m.id);
+}
+
+/**
+ * 从自带 API key 的 provider 远程拉取可用模型(OpenAI /models 及兼容端点)。
+ *
+ * baseUrl 沿用 provider 已解析的根地址(与对话端点同源),按 wire 派生列模型路径:
+ * - openai-chat / openai-responses: `${root}/models`(root 通常已含 /v1)
+ * - anthropic-messages:             `${root}/v1/models`
+ * - gemini:                         `${root}/models?key=<apiKey>`
+ *
+ * headers 复用对话请求的鉴权头(Authorization / x-api-key / anthropic-version 等),
+ * 仅剔除只对 POST 有意义的 Content-Type。拉取成功返回 source='remote'。
+ *
+ * @param {{ baseUrl?: string, headers?: Record<string,string>, wire?: string,
+ *           apiKey?: string, timeoutMs?: number, fetchImpl?: typeof fetch }} params
+ * @returns {Promise<{ models: Array<{id:string,label:string}>, source: 'remote' }>}
+ */
+export async function listOpenAICompatibleModels({ baseUrl, headers = {}, wire, apiKey, timeoutMs = 15000, fetchImpl } = {}) {
+  const doFetch = fetchImpl || fetch;
+  const root = String(baseUrl || '').replace(/\/+$/, '');
+  if (!root) throw new Error('base_url_not_configured');
+
+  const reqHeaders = { ...headers };
+  // GET 列模型无请求体,去掉只对 POST 有意义的 Content-Type,避免部分网关校验报错。
+  for (const key of Object.keys(reqHeaders)) {
+    if (key.toLowerCase() === 'content-type') delete reqHeaders[key];
+  }
+
+  let url;
+  if (wire === 'gemini') {
+    url = `${root}/models${apiKey ? `?key=${encodeURIComponent(apiKey)}` : ''}`;
+  } else if (wire === 'anthropic-messages') {
+    url = `${root}/v1/models`;
+  } else {
+    url = `${root}/models`;
+  }
+
+  const res = await doFetch(url, {
+    method: 'GET',
+    headers: reqHeaders,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`models list failed: HTTP ${res.status} ${text.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const models = sortNewestFirst(
+    normalizeApiModelList(data, wire).filter((m) => isLikelyChatModel(m.id)),
+  );
+  return { models, source: 'remote' };
+}
+
 export {
   SUBSCRIPTION_CATALOG,
   FALLBACK_MODELS,
@@ -139,6 +241,8 @@ export {
   SUBSCRIPTION_MODEL_IDS,
   getSubscriptionModelMetadata,
   isChatModel,
+  isLikelyChatModel,
+  normalizeApiModelList,
   isSubscriptionUsableModel,
   sortNewestFirst,
 };

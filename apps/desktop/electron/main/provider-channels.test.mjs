@@ -112,23 +112,18 @@ describe('provider channel registry', () => {
     assert.deepEqual(resolved.headers, { 'Content-Type': 'application/json' });
   });
 
-  it('resolves Gemini OAuth with Bearer auth and no API key query', () => {
-    const resolved = resolveChannel({
-      channelId: 'google-ai',
-      authMethod: 'oauth_google',
-      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-      model: 'gemini-2.0-flash',
-      apiKey: 'oauth-access-token',
-      oauthProjectId: 'my-project',
-    });
-
-    assert.equal(resolved.wire, 'gemini');
-    assert.equal(
-      resolved.endpoint,
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse',
+  it('rejects Gemini OAuth because Google AI only supports API key', () => {
+    assert.throws(
+      () => resolveChannel({
+        channelId: 'google-ai',
+        authMethod: 'oauth_google',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+        model: 'gemini-2.0-flash',
+        apiKey: 'oauth-access-token',
+        oauthProjectId: 'my-project',
+      }),
+      /unsupported_auth_method:google-ai:oauth_google/,
     );
-    assert.equal(resolved.headers.Authorization, 'Bearer oauth-access-token');
-    assert.equal(resolved.headers['x-goog-user-project'], 'my-project');
   });
 
   it('resolves Qoder through the private API wire without static headers or API key', () => {

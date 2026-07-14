@@ -187,35 +187,56 @@ test('manual provider creation and updates persist reasoning effort maps', () =>
   assert.deepEqual(persisted.reasoningEffortMap, { medium: 'high', xhigh: 'max' });
 }));
 
-test('Gemini OAuth provider stores OAuth client metadata without API key', () => withStore(({ configFile }) => {
+test('Gemini OAuth can no longer be added', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });
-  const provider = store.addProvider({
-    provider: 'openai',
-    channelId: 'google-ai',
-    authMethod: 'oauth_google',
-    name: 'Gemini OAuth',
-    model: 'gemini-2.0-flash',
-    oauthClientId: 'google-client-id',
-    oauthClientSecret: 'google-client-secret',
-    oauthProjectId: 'my-project',
-  });
+  assert.throws(
+    () => store.addProvider({
+      provider: 'openai',
+      channelId: 'google-ai',
+      authMethod: 'oauth_google',
+      name: 'Gemini OAuth',
+      model: 'gemini-2.0-flash',
+      oauthClientId: 'google-client-id',
+      oauthClientSecret: 'google-client-secret',
+      oauthProjectId: 'my-project',
+    }),
+    /unsupported_auth_method:google-ai:oauth_google/,
+  );
+}));
 
+test('legacy Gemini OAuth records remain readable for migration or deletion', () => withStore(({ configFile }) => {
+  writeFileSync(configFile, JSON.stringify([
+    {
+      id: 'legacy-gemini-oauth',
+      provider: 'openai',
+      channelId: 'google-ai',
+      authMethod: 'oauth_google',
+      name: 'Gemini OAuth',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      model: 'gemini-2.0-flash',
+      apiKey: { encrypted: false, data: '' },
+      oauthTokens: { encrypted: false, data: '' },
+      oauthClientId: 'google-client-id',
+      oauthClientSecret: { encrypted: false, data: 'google-client-secret' },
+      oauthProjectId: 'my-project',
+      enabled: true,
+      isDefault: true,
+    },
+  ], null, 2));
+
+  const store = createLlmConfigStore({ configFile });
+  const [provider] = store.listProviders();
+  assert.equal(provider.id, 'legacy-gemini-oauth');
   assert.equal(provider.channelId, 'google-ai');
-  assert.equal(provider.resolvedWire, 'gemini');
   assert.equal(provider.authMethod, 'oauth_google');
   assert.equal(provider.oauthClientId, 'google-client-id');
+  assert.equal(provider.oauthClientSecretConfigured, true);
   assert.equal(provider.oauthProjectId, 'my-project');
-  assert.equal(provider.apiKeyConfigured, false);
-  assert.equal(provider.apiKeyMasked, '');
 
   const credential = store.getCredential(provider.id);
   assert.equal(credential.oauthClientId, 'google-client-id');
   assert.equal(credential.oauthClientSecret, 'google-client-secret');
   assert.equal(credential.oauthProjectId, 'my-project');
-
-  const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
-  assert.deepEqual(persisted.apiKey, { encrypted: false, data: '' });
-  assert.deepEqual(persisted.oauthClientSecret, { encrypted: false, data: 'google-client-secret' });
 }));
 
 test('Qoder local auth provider does not require a stored API key', () => withStore(({ configFile }) => {

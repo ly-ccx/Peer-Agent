@@ -96,7 +96,7 @@ const FALLBACK_CHANNELS: readonly LlmChannelDescriptor[] = [
     allowedWires: ['gemini'],
     defaults: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.0-flash' },
     capabilities: { reasoning: { supported: false, paramStyle: 'none' }, promptCache: false, vision: true },
-    authMethods: { api_key: { wire: 'gemini' }, oauth_google: { wire: 'gemini' } },
+    authMethods: { api_key: { wire: 'gemini' } },
   },
   {
     id: 'qoder',
@@ -432,9 +432,16 @@ export function LlmSettingsPanel({
   const [modelLoadingId, setModelLoadingId] = useState<string | null>(null);
   // B-2 手风琴：给某个 provider 组「加模型」的模式(非 null 表示当前是加模型而非新建 provider)。
   const [addModelGroupId, setAddModelGroupId] = useState<string | null>(null);
+  // 添加渠道表单:用临时配置拉取的候选模型列表 + 勾选集合。
+  const [fetchedModels, setFetchedModels] = useState<readonly LlmModelInfo[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchModelError, setFetchModelError] = useState<string | null>(null);
+  const [selectedModelIds, setSelectedModelIds] = useState<ReadonlySet<string>>(new Set());
   // B-2 手风琴：已折叠的组 groupId 集合(默认全部展开)。
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
   const [removingGroupId, setRemovingGroupId] = useState<string | null>(null);
+  // model 行折叠：展开的 model id 集合(默认折叠,只显示模型名/默认徽标;展开显示规格/定价/测试/操作)。
+  const [expandedModels, setExpandedModels] = useState<ReadonlySet<string>>(new Set());
 
   const clearTestResult = useCallback((id: string) => {
     setTestResults((prev) => {
@@ -494,11 +501,49 @@ export function LlmSettingsPanel({
     }
   }, [providers, refresh]);
 
-  // 已登录(connected)的订阅 provider 与本机 Qoder provider 自动加载一次模型清单。
+  // 用表单当前填的 channelId/baseUrl/apiKey/customHeaders 拉取候选模型(不落盘)。
+  // 供"添加渠道"弹窗在保存前预览可用模型、勾选多个模型一次性创建。
+  const fetchFormModels = useCallback(async () => {
+    setFetchingModels(true);
+    setFetchModelError(null);
+    try {
+      const parsedHeaders = parseCustomHeaders(form.customHeadersText);
+      const headers = parsedHeaders ?? {};
+      const res = await clientApi.llmFetchModels({
+        channelId: form.channelId,
+        wireOverride: form.wireOverride || undefined,
+        baseUrl: form.baseUrl,
+        apiKey: form.apiKey,
+        customHeaders: Object.keys(headers).length > 0 ? headers : undefined,
+      });
+      if (res.success && res.models.length > 0) {
+        setFetchedModels(res.models);
+        // 默认全不选,让用户自己勾;若当前 form.model 已填且在候选中则预选它。
+        setSelectedModelIds((prev) => {
+          const next = new Set(prev);
+          const current = form.model.trim();
+          if (current && res.models.some((m) => m.id === current)) next.add(current);
+          return next;
+        });
+      } else {
+        setFetchedModels([]);
+        setFetchModelError(res.error || 'models_fetch_empty');
+      }
+    } catch (err: unknown) {
+      setFetchedModels([]);
+      setFetchModelError(err instanceof Error ? err.message : 'models_fetch_failed');
+    } finally {
+      setFetchingModels(false);
+    }
+  }, [form.channelId, form.wireOverride, form.baseUrl, form.apiKey, form.customHeadersText, form.model]);
+
+  // 已登录(connected)的订阅 provider、本机 Qoder provider 与已配置 key 的 api_key
+  // provider 自动加载一次模型清单。
   useEffect(() => {
     for (const p of providers) {
       const shouldLoad = (isOAuthMethod(p.authMethod) && p.oauthStatus?.status === 'connected')
-        || isLocalCliMethod(p.authMethod);
+        || isLocalCliMethod(p.authMethod)
+        || (p.authMethod === 'api_key' && p.apiKeyConfigured);
       if (shouldLoad && !modelLists[p.id]) {
         void loadModels(p.id);
       }
@@ -537,6 +582,9 @@ export function LlmSettingsPanel({
     setEditingId(null);
     setAddModelGroupId(null);
     setForm(emptyForm(channels));
+    setFetchedModels([]);
+    setSelectedModelIds(new Set());
+    setFetchModelError(null);
     setShowForm(true);
   };
 
@@ -580,7 +628,9 @@ export function LlmSettingsPanel({
       reasoningParamStyle: p.reasoningParamStyle ?? channel.capabilities?.reasoning?.paramStyle ?? '',
       reasoningEffortMapText: formatReasoningEffortMap(p.reasoningEffortMap),
       customHeadersText: formatCustomHeaders(p.customHeaders),
-      authMethod: p.authMethod ?? 'api_key',
+      // Gemini 已停止提供 Google OAuth。历史 oauth_google 记录打开编辑时直接进入
+      // API Key 迁移表单，不再展示 Client ID/Secret/Project 或登录入口。
+      authMethod: p.authMethod === 'oauth_google' ? 'api_key' : (p.authMethod ?? 'api_key'),
       name: p.name,
       baseUrl: p.baseUrl,
       model: p.model,
@@ -678,12 +728,36 @@ export function LlmSettingsPanel({
           // B-2 组内加模型:凭证继承自组内首条,apiKey 由 main 复用,无需重填。
           await clientApi.llmAddModel({ groupId: addModelGroupId, ...draft });
         } else {
+          // api_key 新建渠道:若勾选了多个候选模型,先创建第一个(含 apiKey 落盘),
+          // 再对剩余模型逐个 llmAddModel(继承 groupId 凭证),实现"一次保存多模型"。
+          const selectedModels = fetchedModels.filter((m) => selectedModelIds.has(m.id));
+          const extraModels = selectedModels.filter((m) => m.id !== draft.model);
           await clientApi.llmAddProvider(draft);
+          if (extraModels.length > 0) {
+            // llmAddProvider 返回的是 listProviders() 全量,首条即新建组的 head。
+            const list = await clientApi.llmListProviders();
+            const created = list.find((p) => p.model === draft.model && p.apiKeyConfigured);
+            const groupId = created?.groupId ?? created?.id;
+            if (groupId) {
+              for (const m of extraModels) {
+                await clientApi.llmAddModel({
+                  groupId,
+                  ...draft,
+                  model: m.id,
+                  contextWindow: m.contextWindow ? String(m.contextWindow) : ctxWin,
+                  maxOutputTokens: m.maxOutputTokens ? String(m.maxOutputTokens) : maxOut,
+                });
+              }
+            }
+          }
         }
       }
       setShowForm(false);
       setEditingId(null);
       setAddModelGroupId(null);
+      setFetchedModels([]);
+      setSelectedModelIds(new Set());
+      setFetchModelError(null);
       await refresh();
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : 'Save failed');
@@ -891,7 +965,7 @@ export function LlmSettingsPanel({
             {!collapsed ? (
               <div className="llm-group-models">
                 {g.models.map((p) => {
-                  const canSelectModel = (isOAuthMethod(p.authMethod) && p.oauthStatus?.status === 'connected') || isLocalCliMethod(p.authMethod);
+                  const canSelectModel = (isOAuthMethod(p.authMethod) && p.oauthStatus?.status === 'connected') || isLocalCliMethod(p.authMethod) || (p.authMethod === 'api_key' && p.apiKeyConfigured);
                   const modelOptions = (modelLists[p.id] && modelLists[p.id].length > 0
                     ? modelLists[p.id]
                     : [{ id: p.model, label: p.modelLabel || p.model } as LlmModelInfo]
@@ -899,8 +973,36 @@ export function LlmSettingsPanel({
                   const selectedModelMetadata = modelLists[p.id]?.find((item) => item.id === p.model);
                   const modelDisplayName = p.modelLabel || p.model;
                   return (
-                  <div key={p.id} className={`llm-model-row ${p.isDefault ? 'is-default' : ''}`}>
+                  <div key={p.id} className={`llm-model-row ${p.isDefault ? 'is-default' : ''} ${expandedModels.has(p.id) ? 'is-expanded' : ''}`}>
                     <div className="llm-model-row-info">
+                      <button
+                        type="button"
+                        className="llm-model-toggle"
+                        onClick={() => {
+                          setExpandedModels((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(p.id)) next.delete(p.id);
+                            else next.add(p.id);
+                            return next;
+                          });
+                        }}
+                        aria-expanded={expandedModels.has(p.id)}
+                      >
+                        <svg
+                          className={`llm-model-caret ${expandedModels.has(p.id) ? '' : 'is-collapsed'}`}
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+                      </button>
                       {canSelectModel ? (
                         <Dropdown
                           className="llm-model-picker"
@@ -919,13 +1021,16 @@ export function LlmSettingsPanel({
                         <span className="llm-provider-chip mono" title={p.model}>{modelDisplayName}</span>
                       )}
                       {p.isDefault ? <span className="llm-badge-default">{i18n.locale === 'zh-CN' ? '默认激活' : 'Default'}</span> : null}
+                    </div>
+                    {expandedModels.has(p.id) ? (
+                    <div className="llm-model-row-detail">
                       {selectedModelMetadata?.contextWindow || p.contextWindow || selectedModelMetadata?.maxOutputTokens || p.maxOutputTokens || p.inputPrice != null ? (
                         <span className="llm-provider-specs">
                           {selectedModelMetadata?.contextWindow || p.contextWindow ? `${formatModelTokenLimit(selectedModelMetadata?.contextWindow ?? p.contextWindow ?? 0)} ctx` : ''}
                           {(selectedModelMetadata?.contextWindow || p.contextWindow) && (selectedModelMetadata?.maxOutputTokens || p.maxOutputTokens) ? ' · ' : ''}
                           {selectedModelMetadata?.maxOutputTokens || p.maxOutputTokens ? `${formatModelTokenLimit(selectedModelMetadata?.maxOutputTokens ?? p.maxOutputTokens ?? 0)} out` : ''}
                           {((selectedModelMetadata?.contextWindow || p.contextWindow) || (selectedModelMetadata?.maxOutputTokens || p.maxOutputTokens)) && p.inputPrice != null ? ' · ' : ''}
-                          {p.inputPrice != null ? `$${p.inputPrice}/${p.outputPrice ?? '?'}` : ''}
+                          {p.inputPrice != null ? `${p.inputPrice}/${p.outputPrice ?? '?'}` : ''}
                         </span>
                       ) : null}
                       {testResults[p.id] ? (
@@ -935,7 +1040,6 @@ export function LlmSettingsPanel({
                             : `✗ ${friendlyTestError(testResults[p.id].error, i18n.locale)}`}
                         </small>
                       ) : null}
-                    </div>
                     <div className="llm-provider-actions">
                       {!p.isDefault ? (
                         (() => {
@@ -967,6 +1071,8 @@ export function LlmSettingsPanel({
                         {i18n.locale === 'zh-CN' ? '删除' : 'Delete'}
                       </button>
                     </div>
+                    </div>
+                    ) : null}
                   </div>
                   );
                 })}
@@ -1070,39 +1176,6 @@ export function LlmSettingsPanel({
                   : 'Clicking login opens your browser to sign in with your ChatGPT subscription. The provider is saved only after a successful login — nothing is saved if login fails or is cancelled. Available models are fetched after login (latest selected by default).'}
               </p>
             </label>
-          ) : form.authMethod === 'oauth_google' ? (
-            <>
-              <label>
-                <span>Google OAuth Client ID</span>
-                <input value={form.oauthClientId} onChange={(e) => setForm((prev) => ({ ...prev, oauthClientId: e.target.value }))} />
-              </label>
-              <label>
-                <span>Google OAuth Client Secret</span>
-                <input
-                  type="password"
-                  value={form.oauthClientSecret}
-                  placeholder={editingId ? (i18n.locale === 'zh-CN' ? '留空则不修改' : 'Leave empty to keep') : ''}
-                  onChange={(e) => setForm((prev) => ({ ...prev, oauthClientSecret: e.target.value }))}
-                />
-              </label>
-              <label>
-                <span>Google Cloud Project ID</span>
-                <input value={form.oauthProjectId} onChange={(e) => setForm((prev) => ({ ...prev, oauthProjectId: e.target.value }))} />
-              </label>
-              <label>
-                <span>{i18n.locale === 'zh-CN' ? '显示名称' : 'Display Name'}</span>
-                <input value={form.name} placeholder="Gemini OAuth" onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
-              </label>
-              <label>
-                <span>Base URL</span>
-                <input value={form.baseUrl} onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))} />
-              </label>
-              <p className="llm-oauth-hint">
-                {i18n.locale === 'zh-CN'
-                  ? '使用 Google Cloud OAuth Desktop Client 登录 Gemini API；登录成功后才会保存配置。Project ID 会作为 x-goog-user-project 发送。'
-                  : 'Uses a Google Cloud OAuth Desktop Client for the Gemini API. The provider is saved only after login; Project ID is sent as x-goog-user-project.'}
-              </p>
-            </>
           ) : isLocalCliAuth ? (
             <>
               <label>
@@ -1137,6 +1210,77 @@ export function LlmSettingsPanel({
             <span>{isLocalCliAuth ? (i18n.locale === 'zh-CN' ? 'Qoder 模型' : 'Qoder Model') : (i18n.locale === 'zh-CN' ? '模型名称' : 'Model')}</span>
             <input value={form.model} onChange={(e) => setForm((prev) => ({ ...prev, model: e.target.value }))} />
           </label>
+
+          {/* api_key 新建渠道:拉取候选模型 + 多选,一次保存多个模型。 */}
+          {form.authMethod === 'api_key' && !editingId && !isAddModel ? (
+          <div className="llm-model-fetch">
+            <button
+              type="button"
+              className="llm-fetch-btn"
+              onClick={() => void fetchFormModels()}
+              disabled={fetchingModels || !form.baseUrl.trim() || !form.apiKey.trim()}
+            >
+              {fetchingModels
+                ? '...'
+                : (i18n.locale === 'zh-CN' ? '拉取可用模型' : 'Fetch available models')}
+            </button>
+            {fetchModelError ? (
+              <small className="llm-fetch-error">{friendlyTestError(fetchModelError, i18n.locale)}</small>
+            ) : null}
+            {fetchedModels.length > 0 ? (
+              <div className="llm-model-candidates">
+                <div className="llm-model-candidates-header">
+                  <span>{i18n.locale === 'zh-CN' ? `候选模型 (${fetchedModels.length})` : `Candidates (${fetchedModels.length})`}</span>
+                  <button
+                    type="button"
+                    className="llm-select-all"
+                    onClick={() => {
+                      if (selectedModelIds.size === fetchedModels.length) {
+                        setSelectedModelIds(new Set());
+                      } else {
+                        setSelectedModelIds(new Set(fetchedModels.map((m) => m.id)));
+                      }
+                    }}
+                  >
+                    {selectedModelIds.size === fetchedModels.length
+                      ? (i18n.locale === 'zh-CN' ? '取消全选' : 'Deselect all')
+                      : (i18n.locale === 'zh-CN' ? '全选' : 'Select all')}
+                  </button>
+                </div>
+                <div className="llm-model-candidates-list">
+                  {fetchedModels.map((m) => {
+                    const checked = selectedModelIds.has(m.id);
+                    return (
+                      <label key={m.id} className={`llm-model-candidate ${checked ? 'is-checked' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            setSelectedModelIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(m.id)) next.delete(m.id);
+                              else next.add(m.id);
+                              return next;
+                            });
+                          }}
+                        />
+                        <span className="llm-model-candidate-id mono">{m.id}</span>
+                        {m.contextWindow ? <span className="llm-model-candidate-ctx">{formatModelTokenLimit(m.contextWindow)} ctx</span> : null}
+                      </label>
+                    );
+                  })}
+                </div>
+                {selectedModelIds.size > 0 ? (
+                  <small className="llm-fetch-hint">
+                    {i18n.locale === 'zh-CN'
+                      ? `已选 ${selectedModelIds.size} 个模型，保存时将批量创建。未选则只创建上方填写的单个模型。`
+                      : `${selectedModelIds.size} selected. On save, all selected models will be created. If none selected, only the model above is created.`}
+                  </small>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          ) : null}
 
           {!isLocalCliAuth ? (
           <>
@@ -1274,8 +1418,8 @@ export function LlmSettingsPanel({
             >
               {saving || oauthBusyId
                 ? '...'
-                : (isOAuthMethod(form.authMethod) && !editingId
-                    ? (i18n.locale === 'zh-CN' ? `登录 ${form.authMethod === 'oauth_google' ? 'Google' : 'ChatGPT'}` : `Login with ${form.authMethod === 'oauth_google' ? 'Google' : 'ChatGPT'}`)
+                : (form.authMethod === 'oauth_chatgpt' && !editingId
+                    ? (i18n.locale === 'zh-CN' ? '登录 ChatGPT' : 'Login with ChatGPT')
                     : (i18n.locale === 'zh-CN' ? '保存' : 'Save'))}
             </button>
             </div>

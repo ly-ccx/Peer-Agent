@@ -234,6 +234,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   llmOAuthStart: (params) => ipcRenderer.invoke('llm:oauth:start', params),
   llmOAuthCancel: () => ipcRenderer.invoke('llm:oauth:cancel'),
   llmListModels: (params) => ipcRenderer.invoke('llm:models:list', params),
+  llmFetchModels: (params) => ipcRenderer.invoke('llm:models:fetch', params),
   restartHost: (options) => ipcRenderer.invoke('host:restart', options || {}),
   writePendingTask: (task) => ipcRenderer.invoke('pending-task:write', task || {}),
   consumePendingTask: () => ipcRenderer.invoke('pending-task:consume'),

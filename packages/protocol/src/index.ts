@@ -525,6 +525,17 @@ export interface LlmModelListResult {
   readonly error?: string;
 }
 
+// 用表单临时配置(未落盘的 provider)直接拉模型的请求参数。
+// 与 LlmModelListResult(按已落盘 provider id 拉)正交:这里传的是 channelId/baseUrl/apiKey
+// 等原始字段,main 层用 resolveChannel 解析后调 listOpenAICompatibleModels。
+export interface LlmModelFetchRequest {
+  readonly channelId?: string;
+  readonly wireOverride?: string;
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  readonly customHeaders?: Record<string, string>;
+}
+
 export interface LlmProviderTestResult {
   readonly success: boolean;
   readonly model?: string;

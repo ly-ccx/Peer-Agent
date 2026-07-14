@@ -41,7 +41,7 @@ import { createLlmConfigStore } from './llm-config-store.mjs';
 import { listChannelDescriptors, resolveChannel } from './provider-channels.mjs';
 import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
 import { startGoogleBrowserLogin, ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
-import { listSubscriptionModels } from './provider-adapters/openai-model-catalog.mjs';
+import { listSubscriptionModels, listOpenAICompatibleModels } from './provider-adapters/openai-model-catalog.mjs';
 import { listGeminiModels } from './provider-adapters/gemini-model-catalog.mjs';
 import { listQoderModels } from './provider-adapters/qoder-model-catalog.mjs';
 import { createHostRestarter } from './host-restart.mjs';
@@ -1989,7 +1989,7 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
   // 登记表与事件 emit 单一来源：先登记会话压缩态再 emit start，
   // 使切会话查询（chat:compaction:get）能恢复手动 /compact 的横幅。
   beginCompaction({ conversationId, streamId, manual: true });
-  event.sender.send('chat:compaction', { streamId, stage: 'start', manual: true });
+  event.sender.send('chat:compaction', { conversationId, streamId, stage: 'start', manual: true });
   // 字符级真实进度：压缩器流式收摘要时逐 chunk 回调，转发为 progress 事件。
   let lastSentPercent = -1;
   const onProgress = ({ receivedChars, estimatedTotalChars }) => {
@@ -2000,6 +2000,7 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     lastSentPercent = percent;
     updateCompactionProgress({ conversationId, streamId, percent });
     event.sender.send('chat:compaction', {
+      conversationId,
       streamId,
       stage: 'progress',
       manual: true,
@@ -2023,7 +2024,7 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
 
     if (!result.compacted) {
       endCompaction({ conversationId, streamId });
-      event.sender.send('chat:compaction', { streamId, stage: 'idle', manual: true });
+      event.sender.send('chat:compaction', { conversationId, streamId, stage: 'idle', manual: true });
       return { compacted: false };
     }
 
@@ -2066,13 +2067,13 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
         }
       : undefined;
     if (notification) {
-      event.sender.send('chat:compaction', { streamId, stage: 'done', manual: true, ...notification });
+      event.sender.send('chat:compaction', { conversationId, streamId, stage: 'done', manual: true, ...notification });
     }
 
     return { compacted: true, notification };
   } catch (error) {
     endCompaction({ conversationId, streamId });
-    event.sender.send('chat:compaction', { streamId, stage: 'idle', manual: true });
+    event.sender.send('chat:compaction', { conversationId, streamId, stage: 'idle', manual: true });
     throw error;
   }
 });
@@ -2234,6 +2235,22 @@ ipcMain.handle('llm:models:list', async (_event, { id }) => {
     const { models, source, error } = await listQoderModels();
     return { success: true, models, source, error };
   }
+  // 自带 API key 的 provider:从 /v1/models(及 Anthropic/Gemini 兼容端点)远程拉取。
+  // 复用 store 解析好的 wire/baseUrl/headers/apiKey。拉取失败时返回明确错误与空列表:
+  // 不套用订阅(gpt-5 家族)目录做兜底——那对 DeepSeek/Qwen 等第三方后端毫无意义且会误导,
+  // 用户可据错误改配置或手动填模型。
+  if (authMethod === 'api_key') {
+    const reqConfig = llmConfigStore.getApiKeyRequestConfig(id);
+    if (!reqConfig) {
+      return { success: false, models: [], error: 'api_key_not_configured' };
+    }
+    try {
+      const { models, source } = await listOpenAICompatibleModels(reqConfig);
+      return { success: true, models, source };
+    } catch (err) {
+      return { success: false, models: [], error: err?.message || 'models_list_failed' };
+    }
+  }
   const tokens = credential?.tokens || null;
   if (!tokens?.access) {
     return { success: false, models: [], error: 'oauth_not_logged_in' };
@@ -2255,6 +2272,31 @@ ipcMain.handle('llm:models:list', async (_event, { id }) => {
     return { success: true, models, source, error };
   } catch (err) {
     return { success: false, models: [], error: err?.message || 'models_list_failed' };
+  }
+});
+
+// 用表单里填的临时配置(baseUrl/apiKey/channelId 等)直接拉模型,不落盘、不需要 provider id。
+// 供"添加渠道"弹窗在保存前预览可用模型、勾选多个模型一次性创建。
+ipcMain.handle('llm:models:fetch', async (_event, config) => {
+  if (!config) return { success: false, models: [], error: 'config_required' };
+  try {
+    const resolved = resolveChannel({
+      channelId: config.channelId,
+      wireOverride: config.wireOverride,
+      authMethod: 'api_key',
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      customHeaders: config.customHeaders,
+    });
+    const { models, source } = await listOpenAICompatibleModels({
+      baseUrl: resolved.baseUrl,
+      headers: resolved.headers,
+      wire: resolved.wire,
+      apiKey: config.apiKey,
+    });
+    return { success: true, models, source };
+  } catch (err) {
+    return { success: false, models: [], error: err?.message || 'models_fetch_failed' };
   }
 });
 

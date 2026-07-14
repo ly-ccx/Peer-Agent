@@ -7,7 +7,10 @@ import {
   SUBSCRIPTION_MODEL_IDS,
   getSubscriptionModelMetadata,
   isChatModel,
+  isLikelyChatModel,
+  normalizeApiModelList,
   isSubscriptionUsableModel,
+  listOpenAICompatibleModels,
   listSubscriptionModels,
   sortNewestFirst,
 } from './openai-model-catalog.mjs';
@@ -112,4 +115,96 @@ test('isSubscriptionUsableModel keeps gpt-5 family, drops API-only models', () =
   assert.equal(isSubscriptionUsableModel('o3'), false);
   assert.equal(isSubscriptionUsableModel('o4-mini'), false);
   assert.equal(isSubscriptionUsableModel(undefined), false);
+});
+
+test('isLikelyChatModel keeps third-party chat ids, drops known non-chat ids', () => {
+  assert.equal(isLikelyChatModel('deepseek-chat'), true);
+  assert.equal(isLikelyChatModel('qwen-max'), true);
+  assert.equal(isLikelyChatModel('moonshot-v1-128k'), true);
+  assert.equal(isLikelyChatModel('text-embedding-3-large'), false);
+  assert.equal(isLikelyChatModel('bge-reranker-v2-m3'), false);
+  assert.equal(isLikelyChatModel('whisper-1'), false);
+});
+
+test('normalizeApiModelList handles OpenAI-compatible and Gemini payloads', () => {
+  assert.deepEqual(
+    normalizeApiModelList({ data: [{ id: 'deepseek-chat', created: 300 }, { id: 'text-embedding-3-large', created: 400 }] }, 'openai-chat'),
+    [
+      { id: 'deepseek-chat', label: 'deepseek-chat', created: 300 },
+      { id: 'text-embedding-3-large', label: 'text-embedding-3-large', created: 400 },
+    ],
+  );
+  assert.deepEqual(
+    normalizeApiModelList({
+      models: [
+        { name: 'models/gemini-2.5-pro', displayName: 'Gemini 2.5 Pro', inputTokenLimit: 100, outputTokenLimit: 20, supportedGenerationMethods: ['generateContent'] },
+        { name: 'models/gemini-embedding-001', supportedGenerationMethods: ['embedContent'] },
+      ],
+    }, 'gemini'),
+    [{ id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', contextWindow: 100, maxOutputTokens: 20 }],
+  );
+});
+
+test('listOpenAICompatibleModels fetches /models, strips content-type, filters non-chat and sorts newest', async () => {
+  let seenUrl = '';
+  let seenHeaders = null;
+  const res = await listOpenAICompatibleModels({
+    baseUrl: 'https://example.test/v1/',
+    wire: 'openai-chat',
+    headers: { Authorization: 'Bearer key', 'Content-Type': 'application/json', 'X-Custom': '1' },
+    fetchImpl: async (url, init) => {
+      seenUrl = url;
+      seenHeaders = init.headers;
+      return {
+        ok: true,
+        json: async () => ({
+          data: [
+            { id: 'old-chat', created: 100 },
+            { id: 'text-embedding-3-large', created: 999 },
+            { id: 'new-chat', created: 300 },
+          ],
+        }),
+      };
+    },
+  });
+  assert.equal(seenUrl, 'https://example.test/v1/models');
+  assert.equal(seenHeaders.Authorization, 'Bearer key');
+  assert.equal(seenHeaders['X-Custom'], '1');
+  assert.equal(seenHeaders['Content-Type'], undefined);
+  assert.equal(res.source, 'remote');
+  assert.deepEqual(res.models.map((m) => m.id), ['new-chat', 'old-chat']);
+});
+
+test('listOpenAICompatibleModels derives Anthropic and Gemini model endpoints', async () => {
+  const urls = [];
+  const okResponse = { ok: true, json: async () => ({ data: [{ id: 'claude-sonnet-4-5', created_at: '2025-01-01T00:00:00Z' }] }) };
+  await listOpenAICompatibleModels({
+    baseUrl: 'https://api.anthropic.com',
+    wire: 'anthropic-messages',
+    headers: { 'x-api-key': 'key' },
+    fetchImpl: async (url) => { urls.push(url); return okResponse; },
+  });
+  await listOpenAICompatibleModels({
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    wire: 'gemini',
+    apiKey: 'a b',
+    fetchImpl: async (url) => {
+      urls.push(url);
+      return { ok: true, json: async () => ({ models: [{ name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] }] }) };
+    },
+  });
+  assert.deepEqual(urls, [
+    'https://api.anthropic.com/v1/models',
+    'https://generativelanguage.googleapis.com/v1beta/models?key=a%20b',
+  ]);
+});
+
+test('listOpenAICompatibleModels throws clear HTTP error', async () => {
+  await assert.rejects(
+    listOpenAICompatibleModels({
+      baseUrl: 'https://example.test/v1',
+      fetchImpl: async () => ({ ok: false, status: 401, text: async () => 'bad key' }),
+    }),
+    /models list failed: HTTP 401 bad key/,
+  );
 });

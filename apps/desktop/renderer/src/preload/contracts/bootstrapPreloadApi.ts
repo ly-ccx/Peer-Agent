@@ -12,6 +12,7 @@ import type {
   GoalPlan,
   GoalPlanStatus,
   LlmModelListResult,
+  LlmModelFetchRequest,
   LlmChannelDescriptor,
   LlmProviderConfigView,
   LlmProviderTestResult,
@@ -485,7 +486,7 @@ export interface BootstrapPreloadApi {
     delayMs?: number;
     reason?: string;
   }) => void) => () => void;
-  readonly onChatCompaction: (listener: (payload: { streamId: string; stage?: 'start' | 'progress' | 'done' | 'idle'; percent?: number; receivedChars?: number; estimatedTotalChars?: number; method?: string; beforeTokens?: number; afterTokens?: number; oldMessageCount?: number; keptMessageCount?: number; contextTokens?: number; contextWindow?: number | null }) => void) => () => void;
+  readonly onChatCompaction: (listener: (payload: { conversationId: string; streamId: string; stage?: 'start' | 'progress' | 'done' | 'idle'; percent?: number; receivedChars?: number; estimatedTotalChars?: number; method?: string; beforeTokens?: number; afterTokens?: number; oldMessageCount?: number; keptMessageCount?: number; contextTokens?: number; contextWindow?: number | null }) => void) => () => void;
   // 全局活跃流变更广播:main 在任一会话开始/结束流式时推送最新运行中的会话 id 列表。
   readonly onChatActiveStreamsChanged: (listener: (payload: {
     conversationIds: readonly string[];
@@ -528,6 +529,8 @@ export interface BootstrapPreloadApi {
   readonly llmOAuthCancel: () => Promise<{ success: boolean }>;
   // ADR 28(方案 B): 列出订阅可用模型(远程拉取,失败回退内置清单)。
   readonly llmListModels: (params: { id: string }) => Promise<LlmModelListResult>;
+  // 用表单临时配置(未落盘)直接拉模型,供"添加渠道"弹窗预览/多选。
+  readonly llmFetchModels: (params: LlmModelFetchRequest) => Promise<LlmModelListResult>;
   readonly initialSettings: Record<string, unknown>;
   readonly getSettings: () => Promise<Record<string, unknown>>;
   readonly updateSettings: (partial: Record<string, unknown>) => Promise<Record<string, unknown>>;

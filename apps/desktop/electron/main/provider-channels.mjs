@@ -121,7 +121,7 @@ const CHANNEL_DESCRIPTORS = {
     legacyProvider: 'openai',
     defaultWire: 'gemini',
     allowedWires: ['gemini'],
-    authMethods: { api_key: { wire: 'gemini' }, oauth_google: { wire: 'gemini' } },
+    authMethods: { api_key: { wire: 'gemini' } },
     defaults: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.0-flash' },
     capabilities: {
       reasoning: {

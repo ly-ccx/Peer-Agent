@@ -681,6 +681,33 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     };
   }
 
+  // 返回 api_key provider 拉列模型所需的请求配置(wire / baseUrl / headers / apiKey)。
+  //
+  // 复用 resolveChannel 已经拼装好的 headers(含 Authorization / x-api-key /
+  // anthropic-version / customHeaders 等),避免在上层重复实现"如何认证 OpenAI 兼容
+  // 网关"这套散落逻辑。仅面向 authMethod='api_key';OAuth/本机 CLI provider 走各自
+  // 的适配器,不通过此方法。
+  //
+  // 返回 null 的三种情况:
+  // - provider 不存在
+  // - provider 不是 api_key 认证方式
+  // - apiKey 未配置(空字符串)
+  function getApiKeyRequestConfig(id) {
+    const items = readAll();
+    const item = items.find((i) => i.id === id);
+    if (!item) return null;
+    if (isOAuthAuthMethod(item.authMethod) || isLocalCliAuthMethod(item.authMethod)) return null;
+    const apiKey = decrypt(item.apiKey);
+    if (!apiKey) return null;
+    const resolved = resolveChannel({ ...item, apiKey });
+    return {
+      wire: resolved.wire,
+      baseUrl: resolved.baseUrl,
+      headers: resolved.headers,
+      apiKey,
+    };
+  }
+
   // 写入/刷新订阅 token 集合(整体加密存储)。tokens 形如
   // { access, refresh, expires, accountId }。
   function setOAuthTokens(id, tokens) {
@@ -729,7 +756,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     }
   }
 
-  return { listProviders, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, setOAuthTokens, testConnection };
+  return { listProviders, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, getApiKeyRequestConfig, setOAuthTokens, testConnection };
 }
 
 async function testOpenAI(resolved, model, start) {
