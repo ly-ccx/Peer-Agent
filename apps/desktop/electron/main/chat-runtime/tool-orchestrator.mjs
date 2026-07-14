@@ -253,9 +253,9 @@ export function resolveCapabilityDisplayName(runtimeProjection, name) {
 
 /**
  * 从一次工具执行结果中提取「回合控制信号」。
- * 目前唯一来源是无副作用的 interaction 能力（request_user_input），它在 Evidence 的
- * outputPreview.control 里标记 { terminal: true }，用于让 agent loop 在本回合收尾后
- * 停止回灌、把控制权交还给用户（而不是自行继续决策）。详见 local-interaction-provider.mjs。
+ * interaction 能力用它把控制权交还用户；Goal 创建能力用它结束 intake 工具回合，
+ * 让编排层把执行权交给 Goal Runner。信号必须来自 Provider 的结构化 Tool Result，
+ * 不能由 assistant 文本冒充。详见 local-interaction-provider.mjs 与 local-goal-provider.mjs。
  */
 export function extractToolControlSignal(result) {
   const control = result?.execution?.result?.outputPreview?.control;

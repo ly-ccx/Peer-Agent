@@ -185,6 +185,10 @@ describe('local goal provider', () => {
     assert.equal(payload.activation.kind, 'accepted_goal');
     assert.equal(payload.taskCount, 2);
     assert.match(payload.note, /Goal 契约已接受/);
+    assert.deepEqual(execution.result.outputPreview.control, {
+      terminal: true,
+      reason: 'goal_handoff',
+    });
 
     const persisted = store.getPlan(payload.planId);
     assert.equal(persisted.status, 'accepted');

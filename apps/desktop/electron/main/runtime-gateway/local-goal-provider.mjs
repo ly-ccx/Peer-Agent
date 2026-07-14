@@ -206,6 +206,12 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
           status,
           tool: 'goal_create_plan',
           legacyResult: { success: status === 'success', output },
+          // Goal 创建是 intake 与托管执行之间的明确边界：当前 agent loop 在工具结果
+          // 落证后停止回灌，再由 main 编排层于本回合结束后启动 Goal Runner。
+          // Plan 模式仍等待审批，因此不能携带此终止信号。
+          ...(status === 'success' && mode === 'goal'
+            ? { control: { terminal: true, reason: 'goal_handoff' } }
+            : {}),
         },
         evidence: {
           evidenceId: `goal-create-${call.toolCallId}`,

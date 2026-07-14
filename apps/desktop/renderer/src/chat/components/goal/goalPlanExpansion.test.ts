@@ -23,12 +23,12 @@ describe('goal plan default expansion', () => {
     );
   });
 
-  it('locks the bar open for a goal-mode plan waiting for the user to start it', () => {
+  it('does not treat an accepted self-driven goal as pending approval', () => {
     const acceptedGoal = {
       ...plan('accepted', 'accepted-goal'),
       workflowKind: 'goal_self_driven' as const,
     };
-    assert.equal(hasPendingGoalApproval([acceptedGoal]), true);
+    assert.equal(hasPendingGoalApproval([acceptedGoal]), false);
     assert.equal(hasPendingGoalApproval([plan('accepted')]), false);
   });
 

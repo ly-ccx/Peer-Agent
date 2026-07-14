@@ -3,28 +3,20 @@ import type { GoalPlan } from '@peer-agent/protocol';
 export type GoalPlanNextAction = 'start' | 'adjust' | 'cancel';
 
 export interface GoalPlanNextStep {
-  readonly kind: 'approval' | 'accepted_goal';
+  readonly kind: 'approval';
   readonly actions: readonly GoalPlanNextAction[];
 }
 
 const NEXT_ACTIONS = ['start', 'adjust', 'cancel'] as const;
 
 /**
- * 只在计划刚创建、还没有进入执行时给出下一步入口。
- * Plan 的开始/取消继续走批准治理链；Goal 的开始进入既有 Runner。
+ * 只有 Plan 审批流需要用户选择下一步。Goal 创建后会自动交给 Runner，
+ * 不应渲染“待审批/开始执行”入口来暗示还需要一次人工授权。
  */
 export function getGoalPlanNextStep(plan: GoalPlan): GoalPlanNextStep | null {
-  if (plan.status === 'awaiting_approval') {
-    return { kind: 'approval', actions: NEXT_ACTIONS };
-  }
-  if (
-    plan.workflowKind === 'goal_self_driven'
-    && plan.status === 'accepted'
-    && !plan.runner?.enabled
-  ) {
-    return { kind: 'accepted_goal', actions: NEXT_ACTIONS };
-  }
-  return null;
+  return plan.status === 'awaiting_approval'
+    ? { kind: 'approval', actions: NEXT_ACTIONS }
+    : null;
 }
 
 export function goalPlanNextStepCopy(isZh: boolean): {

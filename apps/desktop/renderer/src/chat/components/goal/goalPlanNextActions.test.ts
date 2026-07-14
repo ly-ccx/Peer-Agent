@@ -24,15 +24,14 @@ describe('goal plan next actions', () => {
     assert.deepEqual(getGoalPlanNextStep(plan({}))?.actions, ['start', 'adjust', 'cancel']);
   });
 
-  it('offers the same actions for an accepted goal before its runner starts', () => {
+  it('does not ask the user to start an accepted self-driven goal', () => {
     const nextStep = getGoalPlanNextStep(plan({
       status: 'accepted',
       workflowKind: 'goal_self_driven',
       activation: { kind: 'accepted_goal' },
       runner: { enabled: false } as GoalPlan['runner'],
     }));
-    assert.equal(nextStep?.kind, 'accepted_goal');
-    assert.deepEqual(nextStep?.actions, ['start', 'adjust', 'cancel']);
+    assert.equal(nextStep, null);
   });
 
   it('does not show creation actions after execution begins', () => {

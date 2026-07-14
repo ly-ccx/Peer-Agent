@@ -12,20 +12,11 @@ export function shouldDefaultExpandGoalPlan(
   return !TERMINAL_PLAN_STATUSES.has(plan.status);
 }
 
-/**
- * A plan that needs a user decision must stay visible in the bottom bar.
- * Goal-mode plans deliberately wait in `accepted` until the user starts,
- * adjusts, or cancels them, so they are actionable just like explicit
- * `awaiting_approval` plans.
- */
+/** A pending approval is exclusive to Plan mode; Goal mode starts its Runner automatically. */
 export function hasPendingGoalApproval(
-  plans: readonly Pick<GoalPlan, 'status' | 'workflowKind' | 'runner'>[],
+  plans: readonly Pick<GoalPlan, 'status'>[],
 ): boolean {
-  return plans.some(
-    (plan) =>
-      plan.status === 'awaiting_approval' ||
-      (plan.workflowKind === 'goal_self_driven' && plan.status === 'accepted' && !plan.runner?.enabled),
-  );
+  return plans.some((plan) => plan.status === 'awaiting_approval');
 }
 
 export function selectPrimaryGoalPlan(

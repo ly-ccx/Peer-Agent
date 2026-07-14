@@ -1872,6 +1872,21 @@ ipcMain.handle('chat:send', (event, {
   if (mode === 'goal' && conversationId) {
     return Promise.resolve(outcomePromise).then((outcome) => {
       convergeIntakeAfterGoalTurn(conversationId, outcome);
+      const acceptedGoal = goalPlanStore.getActivePlanByConversation(conversationId);
+      if (
+        acceptedGoal?.workflowKind === 'goal_self_driven' &&
+        acceptedGoal.activation?.kind === 'accepted_goal' &&
+        acceptedGoal.status === 'accepted'
+      ) {
+        // goal_create_plan 已用结构化 control signal 结束 intake 工具回合。
+        // 等该回合完全 resolve 后再启动唯一的托管执行入口，避免前台 agent loop
+        // 与 Goal Runner 同时推进同一目标。
+        queueMicrotask(() => {
+          void goalRunner?.start(acceptedGoal.planId).catch((error) => {
+            console.error('[main] auto-start goal runner failed:', error?.message || error);
+          });
+        });
+      }
       return outcome;
     });
   }
