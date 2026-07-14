@@ -269,6 +269,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.on('updater:event', handler);
     return () => ipcRenderer.removeListener('updater:event', handler);
   },
+  onQuickChatConversationCreated: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('quick-chat:conversation-created', handler);
+    return () => ipcRenderer.removeListener('quick-chat:conversation-created', handler);
+  },
   onQuickChatOpenConversation: (listener) => {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('quick-chat:open-conversation', handler);

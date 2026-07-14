@@ -167,6 +167,7 @@ const unavailableApi: ClientApi = {
   updaterOpenReleasePage: unavailableMethod('updaterOpenReleasePage'),
   updaterSetChannel: unavailableMethod('updaterSetChannel'),
   onUpdaterEvent: unavailableMethod('onUpdaterEvent'),
+  onQuickChatConversationCreated: unavailableMethod('onQuickChatConversationCreated'),
   onQuickChatOpenConversation: unavailableMethod('onQuickChatOpenConversation'),
   onRuntimeEvent: unavailableMethod('onRuntimeEvent'),
 };

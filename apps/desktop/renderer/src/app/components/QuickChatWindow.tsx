@@ -33,6 +33,7 @@ import type { ChatAttachment, ChatMsg } from '../../chat/state/types';
 import { loadConversationMessages } from '../../chat/state/conversationLoad';
 import { AttachmentStrip } from '../../chat/components/thread/AttachmentStrip';
 import { QuickChatTaskCard } from './QuickChatTaskCard';
+import { runQuickChatSubmission } from '../state/quickChatSubmission';
 import '../../styles/quick-chat.css';
 
 type Workspace = { path: string; name?: string };
@@ -327,7 +328,7 @@ export function QuickChatWindow() {
     if (!hasQuickChatContent(text, attachments) || !workspacePath || sending) return;
     setSending(true);
     setError('');
-    try {
+    await runQuickChatSubmission(async () => {
       const conversation = await clientApi.conversationsCreate({ title: text.slice(0, 48) || attachments[0]?.name || '新会话', workspacePath, mode });
       const now = Date.now();
       const userMessage: ChatMsg = { id: id('user'), role: 'user', content: text, attachments, timestamp: now };
@@ -350,11 +351,10 @@ export function QuickChatWindow() {
       setAttachments([]);
       localStorage.removeItem('quick-chat:draft');
       await clientApi.quickChatHide?.();
-    } catch (reason) {
+    }, (reason) => {
       setError(reason instanceof Error ? reason.message : String(reason));
-      setSending(false);
       inputRef.current?.focus();
-    }
+    }, () => setSending(false));
   }
 
   return (

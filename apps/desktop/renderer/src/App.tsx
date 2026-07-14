@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SettingsPage } from './app/components/SettingsPage';
 import { QuickChatPopover } from './app/components/QuickChatPopover';
 import { QuickChatWindow } from './app/components/QuickChatWindow';
+import { shouldRefreshQuickChatConversationList } from './app/state/quickChatSubmission';
 import { useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { ChatSurface } from './chat/components/ChatSurface';
 import { Sidebar } from './chat/components/Sidebar';
@@ -114,6 +115,12 @@ function MainApp() {
       setGitBranchPrefix(readGitBranchPrefix(settings));
     } catch {}
   }, []);
+
+  useEffect(() => clientApi.onQuickChatConversationCreated(({ workspacePath }) => {
+    if (shouldRefreshQuickChatConversationList(workspacePath, activeWorkspace)) {
+      void refreshConversations(workspacePath, conversationView);
+    }
+  }), [activeWorkspace, conversationView, refreshConversations]);
 
   useEffect(() => {
     return clientApi.onQuickChatOpenConversation(({ conversationId, workspacePath }) => {

@@ -548,6 +548,10 @@ export interface BootstrapPreloadApi {
   readonly updaterOpenReleasePage: () => Promise<UpdaterStatus>;
   readonly updaterSetChannel: (preference: UpdateChannelPreference) => Promise<UpdaterStatus>;
   readonly onUpdaterEvent: (listener: (payload: UpdaterEvent) => void) => () => void;
+  readonly onQuickChatConversationCreated: (listener: (payload: {
+    conversationId: string;
+    workspacePath: string;
+  }) => void) => () => void;
   readonly onQuickChatOpenConversation: (listener: (payload: {
     conversationId: string;
     workspacePath: string;

@@ -955,9 +955,10 @@ ipcMain.handle('quick-chat-popover:select', (_event, value) => ({
 }));
 ipcMain.handle('quick-chat:submit', (_event, payload = {}) => {
   quickChatWindowController.hide();
-  if (payload.openMainWindow) {
-    const mainWindow = BrowserWindow.getAllWindows().find((window) => window.__peerAgentMainWindow === true);
-    if (mainWindow && !mainWindow.isDestroyed()) {
+  const mainWindow = BrowserWindow.getAllWindows().find((window) => window.__peerAgentMainWindow === true);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('quick-chat:conversation-created', payload);
+    if (payload.openMainWindow) {
       mainWindow.show();
       mainWindow.focus();
       mainWindow.webContents.send('quick-chat:open-conversation', payload);
