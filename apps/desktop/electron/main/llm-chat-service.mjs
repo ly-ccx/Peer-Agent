@@ -26,6 +26,7 @@ import {
   orderProviderCandidates,
 } from './chat-runtime/provider-recovery-broker.mjs';
 import { hasUnsupportedToolClaim } from './chat-runtime/response-guard.mjs';
+import { createDesktopRuntimeSessionAdapter } from './chat-runtime/runtime-session-adapter.mjs';
 import { createToolContext } from './chat-runtime/tool-orchestrator.mjs';
 import {
   getProviderCredentialErrorCode,
@@ -241,7 +242,11 @@ function finalizeDanglingToolSegments(segments, terminalStatus) {
 function wrapWebContentsForRuntimeEvents(
   realWebContents,
   streamRecord,
-  { conversationStore = null, emitRuntimeEvent = null } = {},
+  {
+    conversationStore = null,
+    emitRuntimeEvent = null,
+    failRuntimeTurn = null,
+  } = {},
 ) {
   const appendTextSegment = (type, content) => {
     if (!content) return;
@@ -339,7 +344,7 @@ function wrapWebContentsForRuntimeEvents(
           if (lifetimeUsage) streamRecord.lifetimeUsage = lifetimeUsage;
           persistStreamRecord({ final: true, interrupted: true });
           try {
-            streamRecord.controller?.abort();
+            failRuntimeTurn?.('repetition_detected');
           } catch {
             /* 已中断时忽略 */
           }
@@ -461,8 +466,10 @@ export function createLlmChatService({
   // 全局活跃流广播宿主(由 main 注入):向所有渲染窗口推送当前正在运行的会话列表,
   // 使左侧列表无需"点进去"即可知道哪些会话在跑。表达层订阅,真值仍在 activeStreams。
   broadcast = null,
+  runtimeSessionAdapter = null,
 }) {
   permissionGate.setAccessLevel(preferredAccessLevel);
+  const runtimeSessions = runtimeSessionAdapter ?? createDesktopRuntimeSessionAdapter();
 
   function setWorkspacePath(wsPath) { activeWorkspacePath = wsPath; }
 
@@ -596,9 +603,10 @@ export function createLlmChatService({
       ...buildGoalWorkspaceBindingExtensions(goalWorkspaceBinding),
     ];
 
-    const controller = new AbortController();
+    const runtimeTurn = runtimeSessions.startStream({ streamId, conversationId });
     const streamRecord = {
-      controller,
+      runtimeSessionId: runtimeTurn.sessionId,
+      runtimeTurn,
       webContents,
       permissionIds: new Set(),
       conversationId,
@@ -625,37 +633,39 @@ export function createLlmChatService({
       // 终态事件去重:保证 done/error/aborted 三选一恰好发一次,防止压缩等中间阶段抛错后界面悬挂。
       terminalEventSent: false,
     };
-    activeStreams.set(streamId, streamRecord);
-    emitActiveStreamsChanged();
-    if (typeof emitRuntimeEvent === 'function') {
-      emitRuntimeEvent({
-        type: 'session.started',
-        sessionId: conversationId || streamId,
-        streamId,
-        conversationId: conversationId || undefined,
-        mode,
-      });
-    }
-    // 累积代理:拦截 delta/thinking 追加到记录,其余事件透传给真实 webContents。
-    const accumulatingWebContents = wrapWebContentsForRuntimeEvents(webContents, streamRecord, {
-      conversationStore,
-      emitRuntimeEvent,
-    });
-
-    const toolContext = getConversationToolContext({ conversationId, workspacePath: runWorkspacePath });
-    // 把本回合的交互模式写入（复用的）会话级 toolContext，供 goal 模式运行时闸门在工具
-    // 执行层判定准入。见 Goal 模式运行时闸门设计。
-    toolContext.mode = mode;
-    toolContext.workspacePath = runWorkspacePath;
-    toolContext.originWorkspacePath = goalWorkspaceBinding?.originWorkspacePath ?? conversationWorkspacePath;
-    toolContext.targetWorkspacePath = goalWorkspaceBinding?.targetWorkspacePath ?? null;
-    toolContext.readableRoots = goalWorkspaceBinding?.readableRoots ?? null;
-    toolContext.writableRoots = goalWorkspaceBinding?.writableRoots ?? null;
-    // 把本回合的工具计数 sink 写入会话级 toolContext，供工具派发处实时回调。
-    // 仅本回合有效，回合结束后由下一次 sendMessage 覆盖（无 sink 时复位为 null）。
-    toolContext.onToolCall = agentProgress?.onToolCall ?? null;
-
+    let accumulatingWebContents = webContents;
     try {
+      activeStreams.set(streamId, streamRecord);
+      emitActiveStreamsChanged();
+      if (typeof emitRuntimeEvent === 'function') {
+        emitRuntimeEvent({
+          type: 'session.started',
+          sessionId: conversationId || streamId,
+          streamId,
+          conversationId: conversationId || undefined,
+          mode,
+        });
+      }
+      // 累积代理:拦截 delta/thinking 追加到记录,其余事件透传给真实 webContents。
+      accumulatingWebContents = wrapWebContentsForRuntimeEvents(webContents, streamRecord, {
+        conversationStore,
+        emitRuntimeEvent,
+        failRuntimeTurn: (reason) => runtimeSessions.failStream(streamId, reason),
+      });
+
+      const toolContext = getConversationToolContext({ conversationId, workspacePath: runWorkspacePath });
+      // 把本回合的交互模式写入（复用的）会话级 toolContext，供 goal 模式运行时闸门在工具
+      // 执行层判定准入。见 Goal 模式运行时闸门设计。
+      toolContext.mode = mode;
+      toolContext.workspacePath = runWorkspacePath;
+      toolContext.originWorkspacePath = goalWorkspaceBinding?.originWorkspacePath ?? conversationWorkspacePath;
+      toolContext.targetWorkspacePath = goalWorkspaceBinding?.targetWorkspacePath ?? null;
+      toolContext.readableRoots = goalWorkspaceBinding?.readableRoots ?? null;
+      toolContext.writableRoots = goalWorkspaceBinding?.writableRoots ?? null;
+      // 把本回合的工具计数 sink 写入会话级 toolContext，供工具派发处实时回调。
+      // 仅本回合有效，回合结束后由下一次 sendMessage 覆盖（无 sink 时复位为 null）。
+      toolContext.onToolCall = agentProgress?.onToolCall ?? null;
+
       for (let attemptIndex = 0; attemptIndex < providerCandidates.length; attemptIndex += 1) {
         const provider = providerCandidates[attemptIndex];
         let credential;
@@ -735,7 +745,7 @@ export function createLlmChatService({
               tools: runtimeTools.tools,
               webContents: attemptStream.webContents,
               streamId,
-              signal: controller.signal,
+              signal: runtimeTurn.signal,
               contextWindow,
               maxOutputTokens,
               conversationId,
@@ -763,7 +773,7 @@ export function createLlmChatService({
               tools: runtimeTools.tools,
               webContents: attemptStream.webContents,
               streamId,
-              signal: controller.signal,
+              signal: runtimeTurn.signal,
               effort,
               supportsReasoning: Boolean(provider.supportsReasoning),
               supportsPromptCaching: Boolean(provider.supportsPromptCaching),
@@ -797,7 +807,7 @@ export function createLlmChatService({
               tools: runtimeTools.tools,
               webContents: attemptStream.webContents,
               streamId,
-              signal: controller.signal,
+              signal: runtimeTurn.signal,
               effort,
               supportsReasoning: Boolean(provider.supportsReasoning),
               contextWindow,
@@ -829,7 +839,7 @@ export function createLlmChatService({
               tools: runtimeTools.tools,
               webContents: attemptStream.webContents,
               streamId,
-              signal: controller.signal,
+              signal: runtimeTurn.signal,
               effort,
               supportsReasoning: Boolean(provider.supportsReasoning),
               supportsPromptCaching: Boolean(provider.supportsPromptCaching),
@@ -908,7 +918,7 @@ export function createLlmChatService({
           console.warn(
             `[llm-chat] same-provider stream retry ${retry + 1}/${sameProviderMax}: ${describeProviderTarget(provider)} (${attemptResult.errorText})`
           );
-          await sleepWithSignal(delayMs, controller.signal);
+          await sleepWithSignal(delayMs, runtimeTurn.signal);
         }
 
         if (!attemptResult.terminalError || attemptResult.terminalSent) return;
@@ -963,6 +973,12 @@ export function createLlmChatService({
         streamRecord.interrupted = true;
         streamRecord.persist?.({ final: true, interrupted: true });
       }
+      // Runtime SDK 持有 session/turn 终态真值；Desktop Adapter 只映射既有 UI 终态。
+      runtimeSessions.settleStream(
+        streamId,
+        streamRecord.terminalStatus || 'error',
+        streamRecord.terminalStatus || 'stream_error',
+      );
       // 方案 3：不立即删除，保留终态记录一段时间，使切回已结束的后台轮次可经
       // reattach 回放完整终态快照；保留期满后由 retireStream 内的计时器硬删除。
       retireStream(streamId);
@@ -973,7 +989,7 @@ export function createLlmChatService({
   function abort(streamId) {
     const active = activeStreams.get(streamId);
     if (!active) return { aborted: false };
-    active.controller.abort();
+    runtimeSessions.cancelStream(streamId, 'user_aborted');
     permissionGate.settleStreamPermissionRequests(streamId, {
       granted: false,
       reason: 'stream_aborted',

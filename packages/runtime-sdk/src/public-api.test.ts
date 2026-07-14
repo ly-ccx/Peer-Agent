@@ -5,6 +5,7 @@ import {
   RUNTIME_EVENT_PROTOCOL_VERSION,
   createRuntimePipeline,
   createRuntimeSdk,
+  createRuntimeSessionController,
   type RuntimeExecuteRequest,
   type RuntimeExecutionContext,
   type RuntimeSdkExecuteRequest,
@@ -21,6 +22,7 @@ test('exposes the stable runtime factories and event protocol version', () => {
   assert.equal(RUNTIME_EVENT_PROTOCOL_VERSION, 1);
   assert.equal(typeof createRuntimeSdk, 'function');
   assert.equal(typeof createRuntimePipeline, 'function');
+  assert.equal(typeof createRuntimeSessionController, 'function');
 });
 
 test('keeps legacy SDK contract names aligned with protocol-owned contracts', () => {

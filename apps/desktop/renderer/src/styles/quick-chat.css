@@ -366,7 +366,7 @@ body:has(.quick-chat-popover-shell) {
   border: 2px solid currentColor;
   border-right-color: transparent;
   border-radius: 999px;
-  animation: quick-chat-spin 700ms linear infinite;
+  animation: motion-spin 700ms linear infinite;
 }
 
 .quick-chat-popover-shell {
@@ -542,10 +542,6 @@ body:has(.quick-chat-popover-shell) {
 .quick-chat-task-hint { margin: 7px 0; color: var(--quick-muted); font-size: 11px; }
 .quick-chat-plan-steps { margin: 6px 0 9px; padding-left: 20px; color: var(--quick-muted); font-size: 10px; line-height: 1.45; }
 .quick-chat-plan-steps li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-@keyframes quick-chat-spin {
-  to { transform: rotate(360deg); }
-}
 
 @media (prefers-reduced-motion: reduce) {
   .quick-chat-spinner { animation: none; }

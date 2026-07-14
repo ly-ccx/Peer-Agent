@@ -54,3 +54,15 @@ export type {
 } from './pipeline-contracts.ts';
 export { createRuntimePipeline } from './pipeline.ts';
 export { createRuntimeSdk } from './runtime.ts';
+export type {
+  RuntimeSessionController,
+  RuntimeSessionControllerOptions,
+  RuntimeSessionResumeOptions,
+  RuntimeSessionSnapshot,
+  RuntimeSessionStartOptions,
+  RuntimeSessionStatus,
+  RuntimeSessionTurnHandle,
+  RuntimeSessionTurnSnapshot,
+  RuntimeTurnStatus,
+} from './session-contracts.ts';
+export { createRuntimeSessionController } from './session-controller.ts';
