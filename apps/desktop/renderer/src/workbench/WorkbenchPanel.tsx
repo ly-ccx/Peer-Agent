@@ -2,7 +2,7 @@ import { useEffect, useRef, type ReactElement } from 'react';
 import { useWorkbench, type WorkbenchTabId } from './WorkbenchContext';
 import { BrowserView } from './views/BrowserView';
 import { FilesView } from './views/FilesView';
-import { DiffView } from './views/DiffView';
+import { DocumentView } from './views/DocumentView';
 import {
   WORKBENCH_MIN_WIDTH,
   WORKBENCH_MAX_WIDTH,
@@ -66,17 +66,14 @@ const TABS: readonly TabDef[] = [
     ),
   },
   {
-    id: 'diff',
-    labelZh: 'Diff',
-    labelEn: 'Diff',
+    id: 'documents',
+    labelZh: '文档',
+    labelEn: 'Documents',
     icon: (
       <svg width="15" height="15" {...ICON_PROPS}>
-        <path d="M12 3v6" />
-        <path d="M9 6h6" />
-        <path d="M12 15v6" />
-        <path d="M9 18h6" />
-        <path d="M5 9 3 12l2 3" />
-        <path d="m19 9 2 3-2 3" />
+        <path d="M6 3h8l4 4v14H6z" />
+        <path d="M14 3v5h5" />
+        <path d="M9 13h6M9 17h6" />
       </svg>
     ),
   },
@@ -103,6 +100,8 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
     conversationId,
     browserSession,
     setBrowserSession,
+    documentSession,
+    setDocumentSession,
   } = useWorkbench();
 
   const goalSlotRef = useRef<HTMLDivElement | null>(null);
@@ -276,10 +275,15 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
           <FilesView isZh={isZh} workspacePath={workspacePath} />
         </div>
         <div
-          className="workbench-view workbench-view--diff"
-          data-active={activeTab === 'diff'}
+          className="workbench-view workbench-view--documents"
+          data-active={activeTab === 'documents'}
         >
-          <DiffView isZh={isZh} />
+          <DocumentView
+            isZh={isZh}
+            session={documentSession}
+            onSessionChange={setDocumentSession}
+            onBrowseFiles={() => setActiveTab('files')}
+          />
         </div>
       </div>
     </aside>

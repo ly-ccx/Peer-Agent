@@ -10,6 +10,7 @@ import {
   type Ref,
 } from 'react';
 import { clientApi } from '../../clientApi';
+import { ResourceTabStrip } from '../ResourceTabStrip';
 import {
   BROWSER_HOME_URL,
   activateBrowserTab,
@@ -170,10 +171,6 @@ function IconGlobe() {
       <path d="M12 3a14 14 0 0 0 0 18" />
     </svg>
   );
-}
-
-function IconClose() {
-  return <svg {...ICON_PROPS} width={13} height={13}><path d="m7 7 10 10M17 7 7 17" /></svg>;
 }
 
 function IconPlus() {
@@ -439,57 +436,23 @@ export function BrowserView({
     onSessionChange((current) => closeBrowserTab(current, tabId, replacement));
   }, [onSessionChange, session.tabs.length]);
 
+  const tabItems = useMemo(() => session.tabs.map((tab) => ({
+    id: tab.id,
+    label: tabLabel(tab, t.untitled),
+    icon: <IconGlobe />,
+  })), [session.tabs, t.untitled]);
+
   return (
     <div className="browser-view">
-      <div className="browser-tab-strip">
-        <div className="browser-tabs" role="tablist" aria-label={isZh ? '网页标签' : 'Browser tabs'}>
-          {session.tabs.map((tab) => {
-            const selected = tab.id === session.activeTabId;
-            const label = tabLabel(tab, t.untitled);
-            return (
-              <div
-                key={tab.id}
-                className={`browser-page-tab${selected ? ' browser-page-tab--active' : ''}`}
-                role="presentation"
-              >
-                <button
-                  type="button"
-                  className="browser-page-tab-select"
-                  role="tab"
-                  aria-selected={selected}
-                  tabIndex={selected ? 0 : -1}
-                  title={label}
-                  onClick={() => selectTab(tab.id)}
-                >
-                  <span className="browser-page-tab-icon" aria-hidden="true"><IconGlobe /></span>
-                  <span className="browser-page-tab-label">{label}</span>
-                </button>
-                <button
-                  type="button"
-                  className="browser-page-tab-close"
-                  aria-label={`${t.closeTab}: ${label}`}
-                  title={t.closeTab}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    removeTab(tab.id);
-                  }}
-                >
-                  <IconClose />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-        <button
-          type="button"
-          className="browser-new-tab-btn"
-          aria-label={t.newTab}
-          title={t.newTab}
-          onClick={createTab}
-        >
-          <IconPlus />
-        </button>
-      </div>
+      <ResourceTabStrip
+        ariaLabel={isZh ? '网页标签' : 'Browser tabs'}
+        items={tabItems}
+        activeId={session.activeTabId}
+        closeLabel={t.closeTab}
+        onActivate={selectTab}
+        onClose={removeTab}
+        action={{ label: t.newTab, icon: <IconPlus />, onClick: createTab }}
+      />
 
       <div className="browser-toolbar">
         <div className="browser-nav-group">

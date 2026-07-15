@@ -3,17 +3,36 @@ import { clientApi } from '../../clientApi';
 import { DiffViewer } from '../file-preview/DiffViewer';
 import {
   basename,
-  defaultModeForKind,
   detectFileKind,
   formatJsonForPreview,
   type WorkbenchFileKind,
 } from '../file-preview/fileTypes';
 import { MarkdownDocument } from '../file-preview/MarkdownDocument';
 import { SourceViewer } from '../file-preview/SourceViewer';
-import { useWorkbench, type WorkbenchFileMode } from '../WorkbenchContext';
+import { ResourceTabStrip } from '../ResourceTabStrip';
+import {
+  activateDocumentTab,
+  closeDocumentTab,
+  updateDocumentTabMode,
+  type DocumentSessionState,
+  type DocumentTabSession,
+  type WorkbenchFileMode,
+} from '../documentSessionState';
 
-interface DiffViewProps {
+interface DocumentViewProps {
   readonly isZh: boolean;
+  readonly session: DocumentSessionState;
+  readonly onSessionChange: (
+    next: DocumentSessionState | ((current: DocumentSessionState) => DocumentSessionState),
+  ) => void;
+  readonly onBrowseFiles: () => void;
+}
+
+interface DocumentPageProps {
+  readonly isZh: boolean;
+  readonly tab: DocumentTabSession;
+  readonly active: boolean;
+  readonly onModeChange: (tabId: string, mode: WorkbenchFileMode) => void;
 }
 
 type GitDiffResult = Awaited<ReturnType<typeof clientApi.gitDiff>>;
@@ -86,34 +105,113 @@ function modeBadge(mode: WorkbenchFileMode, kind: WorkbenchFileKind, isZh: boole
   }
 }
 
-export function DiffView({ isZh }: DiffViewProps) {
-  const { fileTarget } = useWorkbench();
-  const [mode, setMode] = useState<WorkbenchFileMode>('preview');
+const RESOURCE_ICON_PROPS = {
+  width: 14,
+  height: 14,
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 2,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+  'aria-hidden': true,
+};
+
+function DocumentIcon() {
+  return (
+    <svg {...RESOURCE_ICON_PROPS}>
+      <path d="M6 3h8l4 4v14H6z" />
+      <path d="M14 3v5h5" />
+    </svg>
+  );
+}
+
+function AddIcon() {
+  return <svg {...RESOURCE_ICON_PROPS}><path d="M12 5v14M5 12h14" /></svg>;
+}
+
+export function DocumentView({
+  isZh,
+  session,
+  onSessionChange,
+  onBrowseFiles,
+}: DocumentViewProps) {
+  const selectTab = useCallback((tabId: string) => {
+    onSessionChange((current) => activateDocumentTab(current, tabId));
+  }, [onSessionChange]);
+
+  const removeTab = useCallback((tabId: string) => {
+    onSessionChange((current) => closeDocumentTab(current, tabId));
+  }, [onSessionChange]);
+
+  const changeMode = useCallback((tabId: string, mode: WorkbenchFileMode) => {
+    onSessionChange((current) => updateDocumentTabMode(current, tabId, mode));
+  }, [onSessionChange]);
+
+  const items = useMemo(() => session.tabs.map((tab) => ({
+    id: tab.id,
+    label: basename(tab.absPath),
+    icon: <DocumentIcon />,
+  })), [session.tabs]);
+
+  return (
+    <div className="document-view">
+      <ResourceTabStrip
+        ariaLabel={isZh ? '文档标签' : 'Document tabs'}
+        items={items}
+        activeId={session.activeTabId}
+        closeLabel={isZh ? '关闭文档' : 'Close document'}
+        onActivate={selectTab}
+        onClose={removeTab}
+        action={{
+          label: isZh ? '打开文件' : 'Open file',
+          icon: <AddIcon />,
+          onClick: onBrowseFiles,
+        }}
+      />
+      <div className="document-stage">
+        {session.tabs.length === 0 ? (
+          <div className="workbench-empty">
+            <div className="workbench-empty-title">{isZh ? '文档' : 'Documents'}</div>
+            <p className="workbench-empty-hint">
+              {isZh
+                ? '从文件树选择文件，或点击聊天消息中的文件路径。'
+                : 'Select a file from the tree, or click a file path in chat.'}
+            </p>
+            <button type="button" className="workbench-diff-btn" onClick={onBrowseFiles}>
+              {isZh ? '浏览文件' : 'Browse files'}
+            </button>
+          </div>
+        ) : session.tabs.map((tab) => (
+          <DocumentPage
+            key={tab.id}
+            isZh={isZh}
+            tab={tab}
+            active={tab.id === session.activeTabId}
+            onModeChange={changeMode}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DocumentPage({ isZh, tab: fileTarget, active, onModeChange }: DocumentPageProps) {
+  const mode = fileTarget.mode;
   const [diff, setDiff] = useState<DiffState>(INITIAL_DIFF);
   const [content, setContent] = useState<ContentState>(INITIAL_CONTENT);
 
   const kind = useMemo(
-    () => (fileTarget ? detectFileKind(fileTarget.absPath) : 'unknown'),
-    [fileTarget],
+    () => detectFileKind(fileTarget.absPath),
+    [fileTarget.absPath],
   );
 
   useEffect(() => {
-    if (!fileTarget) {
-      setMode('preview');
-      setDiff(INITIAL_DIFF);
-      setContent(INITIAL_CONTENT);
-      return;
-    }
-    setMode(fileTarget.preferredMode ?? defaultModeForKind(detectFileKind(fileTarget.absPath)));
     setDiff(INITIAL_DIFF);
     setContent(INITIAL_CONTENT);
-  }, [fileTarget]);
+  }, [fileTarget.absPath, fileTarget.relPath, fileTarget.workspaceRoot]);
 
   const loadDiff = useCallback(async () => {
-    if (!fileTarget) {
-      setDiff(INITIAL_DIFF);
-      return;
-    }
     setDiff({ loading: true, result: null, error: null });
     try {
       const result = await clientApi.gitDiff(fileTarget.absPath, fileTarget.workspaceRoot, fileTarget.relPath);
@@ -125,13 +223,9 @@ export function DiffView({ isZh }: DiffViewProps) {
         error: err instanceof Error ? err.message : String(err),
       });
     }
-  }, [fileTarget]);
+  }, [fileTarget.absPath, fileTarget.relPath, fileTarget.workspaceRoot]);
 
   const loadContent = useCallback(async () => {
-    if (!fileTarget) {
-      setContent(INITIAL_CONTENT);
-      return;
-    }
     setContent({ loading: true, result: null, error: null });
     try {
       const result = await clientApi.readFile(fileTarget.absPath, fileTarget.workspaceRoot, fileTarget.relPath);
@@ -143,30 +237,17 @@ export function DiffView({ isZh }: DiffViewProps) {
         error: err instanceof Error ? err.message : String(err),
       });
     }
-  }, [fileTarget]);
+  }, [fileTarget.absPath, fileTarget.relPath, fileTarget.workspaceRoot]);
 
   useEffect(() => {
-    if (mode !== 'diff' || !fileTarget || diff.loading || diff.result || diff.error) return;
+    if (!active || mode !== 'diff' || diff.loading || diff.result || diff.error) return;
     void loadDiff();
-  }, [mode, fileTarget, diff.loading, diff.result, diff.error, loadDiff]);
+  }, [active, mode, diff.loading, diff.result, diff.error, loadDiff]);
 
   useEffect(() => {
-    if (mode === 'diff' || !fileTarget || content.loading || content.result || content.error) return;
+    if (!active || mode === 'diff' || content.loading || content.result || content.error) return;
     void loadContent();
-  }, [mode, fileTarget, content.loading, content.result, content.error, loadContent]);
-
-  if (!fileTarget) {
-    return (
-      <div className="workbench-empty">
-        <div className="workbench-empty-title">{isZh ? '文件预览' : 'File preview'}</div>
-        <p className="workbench-empty-hint">
-          {isZh
-            ? '从文件树选择文件，或点击聊天消息中的文件路径。'
-            : 'Select a file from the tree, or click a file path in chat.'}
-        </p>
-      </div>
-    );
-  }
+  }, [active, mode, content.loading, content.result, content.error, loadContent]);
 
   const fileName = basename(fileTarget.absPath);
   const statusBadge = mode === 'diff'
@@ -379,7 +460,11 @@ export function DiffView({ isZh }: DiffViewProps) {
   };
 
   return (
-    <div className="workbench-diff workbench-file-preview">
+    <div
+      className="document-page workbench-diff workbench-file-preview"
+      data-active={active}
+      aria-hidden={!active}
+    >
       <div className="workbench-diff-header">
         <div className="workbench-diff-titles">
           <span className="workbench-diff-filename" title={fileTarget.absPath}>
@@ -398,7 +483,7 @@ export function DiffView({ isZh }: DiffViewProps) {
               role="tab"
               aria-selected={mode === 'preview'}
               className={`workbench-diff-segment${mode === 'preview' ? ' is-active' : ''}`}
-              onClick={() => setMode('preview')}
+              onClick={() => onModeChange(fileTarget.id, 'preview')}
             >
               {isZh ? '预览' : 'Preview'}
             </button>
@@ -407,7 +492,7 @@ export function DiffView({ isZh }: DiffViewProps) {
               role="tab"
               aria-selected={mode === 'source'}
               className={`workbench-diff-segment${mode === 'source' ? ' is-active' : ''}`}
-              onClick={() => setMode('source')}
+              onClick={() => onModeChange(fileTarget.id, 'source')}
             >
               {isZh ? '源码' : 'Source'}
             </button>
@@ -416,7 +501,7 @@ export function DiffView({ isZh }: DiffViewProps) {
               role="tab"
               aria-selected={mode === 'diff'}
               className={`workbench-diff-segment${mode === 'diff' ? ' is-active' : ''}`}
-              onClick={() => setMode('diff')}
+              onClick={() => onModeChange(fileTarget.id, 'diff')}
             >
               Diff
             </button>

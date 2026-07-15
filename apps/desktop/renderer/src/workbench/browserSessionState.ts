@@ -1,5 +1,7 @@
 export const BROWSER_HOME_URL = 'about:blank';
-export const FALLBACK_BROWSER_SESSION_KEY = '__none';
+export const FALLBACK_WORKBENCH_SESSION_KEY = '__none';
+/** @deprecated 使用 FALLBACK_WORKBENCH_SESSION_KEY。 */
+export const FALLBACK_BROWSER_SESSION_KEY = FALLBACK_WORKBENCH_SESSION_KEY;
 
 export interface BrowserTabSession {
   readonly id: string;
@@ -16,9 +18,12 @@ export type BrowserSessionMap = Record<string, BrowserSessionState>;
 
 let fallbackId = 0;
 
-export function browserSessionKey(conversationId: string | null): string {
-  return conversationId ?? FALLBACK_BROWSER_SESSION_KEY;
+export function workbenchSessionKey(conversationId: string | null): string {
+  return conversationId ?? FALLBACK_WORKBENCH_SESSION_KEY;
 }
+
+/** @deprecated 新代码使用 workbenchSessionKey；保留别名兼容现有调用。 */
+export const browserSessionKey = workbenchSessionKey;
 
 export function createBrowserTabId(): string {
   if (typeof globalThis.crypto?.randomUUID === 'function') {

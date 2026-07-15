@@ -10,36 +10,40 @@ import {
 } from 'react';
 import { clientApi } from '../clientApi';
 import {
-  browserSessionKey,
   createBrowserSessionState,
   normalizeBrowserSessionMap,
   normalizeBrowserSessionState,
+  workbenchSessionKey,
   type BrowserSessionMap,
   type BrowserSessionState,
 } from './browserSessionState';
+import {
+  createDocumentSessionState,
+  createDocumentTabSession,
+  normalizeDocumentSessionMap,
+  normalizeDocumentSessionState,
+  openDocumentTab,
+  type DocumentSessionMap,
+  type DocumentSessionState,
+  type WorkbenchFileMode,
+} from './documentSessionState';
+import { defaultModeForKind, detectFileKind } from './file-preview/fileTypes';
 import {
   normalizeWorkbenchOpenMap,
   resolveWorkbenchOpen,
   updateWorkbenchOpen,
   type WorkbenchOpenMap,
 } from './workbenchOpenState';
+import {
+  normalizeWorkbenchTab,
+  normalizeWorkbenchTabMap,
+  type WorkbenchTabId,
+} from './workbenchTabState';
 
-// 历史 'goal' tab 已正名为 'plan'（与对话 plan 模式同口径），历史 'terminal'
-// 占位 tab 已移除。持久化里的旧值经 normalizeTab 归一为 'plan'，确保旧设置不丢。
-export type WorkbenchTabId = 'plan' | 'browser' | 'files' | 'diff';
-
-export type WorkbenchFileMode = 'preview' | 'source' | 'diff';
-
-export interface WorkbenchFileTarget {
-  readonly absPath: string;
-  readonly workspaceRoot?: string;
-  /** 原始相对路径（解析前），用于主进程跨已知 workspace 回退查找。 */
-  readonly relPath?: string;
-  /** 入口期望的初始查看模式；用户切换后由视图本地状态接管。 */
-  readonly preferredMode?: WorkbenchFileMode;
-}
-
-export type WorkbenchDiffTarget = WorkbenchFileTarget;
+// 历史 'goal' tab 已正名为 'plan'，历史 'terminal' 占位 tab 已移除；旧 'diff'
+// 一级入口迁移为 'documents'，Preview / Source / Diff 留在文档内部。
+export type { WorkbenchTabId } from './workbenchTabState';
+export type { WorkbenchFileMode } from './documentSessionState';
 
 export interface WorkbenchFilesTarget {
   /** 要在「文件」视图中展开并高亮定位的目录绝对路径。 */
@@ -73,6 +77,7 @@ interface WorkbenchSettingsShape {
   width?: number;
   activeTab?: Record<string, WorkbenchTabId>;
   browserSessions?: BrowserSessionMap;
+  documentSessions?: DocumentSessionMap;
   sidebarOpen?: boolean;
   sidebarWidth?: number;
 }
@@ -90,15 +95,18 @@ interface WorkbenchState {
   sidebarWidth: number;
   /** 左栏最终是否收起 = 用户主动收起 或 右侧挤压自动收起。 */
   sidebarCollapsed: boolean;
-  fileTarget: WorkbenchFileTarget | null;
-  diffTarget: WorkbenchDiffTarget | null;
   filesTarget: WorkbenchFilesTarget | null;
   browserSession: BrowserSessionState;
+  documentSession: DocumentSessionState;
 }
 
 type BrowserSessionUpdater =
   | BrowserSessionState
   | ((current: BrowserSessionState) => BrowserSessionState);
+
+type DocumentSessionUpdater =
+  | DocumentSessionState
+  | ((current: DocumentSessionState) => DocumentSessionState);
 
 interface WorkbenchActions {
   setOpen: (open: boolean) => void;
@@ -122,6 +130,7 @@ interface WorkbenchActions {
   openDiff: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
   revealInFiles: (absPath: string, workspaceRoot?: string, relPath?: string) => void;
   setBrowserSession: (next: BrowserSessionUpdater) => void;
+  setDocumentSession: (next: DocumentSessionUpdater) => void;
 }
 
 type WorkbenchContextValue = WorkbenchState & WorkbenchActions & { conversationId: string | null };
@@ -148,34 +157,6 @@ function readWorkbenchSettings(raw: unknown): WorkbenchSettingsShape {
   return wb as WorkbenchSettingsShape;
 }
 
-function isValidTab(value: unknown): value is WorkbenchTabId {
-  return (
-    value === 'plan' ||
-    value === 'browser' ||
-    value === 'files' ||
-    value === 'diff'
-  );
-}
-
-/** 把持久化/历史输入归一为当前 tab 值：旧 'goal' / 'terminal' 等价于当前 'plan'。 */
-function normalizeTab(value: unknown): WorkbenchTabId | null {
-  if (value === 'goal' || value === 'terminal') return 'plan';
-  return isValidTab(value) ? value : null;
-}
-
-/** 对整份 activeTab 持久化映射做归一（旧值 → 'plan'），并丢弃非法值。 */
-function normalizeActiveTabMap(
-  map: Record<string, WorkbenchTabId> | undefined,
-): Record<string, WorkbenchTabId> {
-  if (!map || typeof map !== 'object') return {};
-  const out: Record<string, WorkbenchTabId> = {};
-  for (const [key, raw] of Object.entries(map)) {
-    const tab = normalizeTab(raw);
-    if (tab) out[key] = tab;
-  }
-  return out;
-}
-
 interface WorkbenchProviderProps {
   readonly conversationId: string | null;
   readonly children: ReactNode;
@@ -189,12 +170,16 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
   );
   const [width, setWidthState] = useState<number>(clampWidth(initial.width ?? WORKBENCH_DEFAULT_WIDTH));
   const [activeTabMap, setActiveTabMap] = useState<Record<string, WorkbenchTabId>>(
-    normalizeActiveTabMap(initial.activeTab),
+    normalizeWorkbenchTabMap(initial.activeTab),
   );
   const [browserSessionMap, setBrowserSessionMap] = useState<BrowserSessionMap>(
     normalizeBrowserSessionMap(initial.browserSessions),
   );
   const defaultBrowserSessionsRef = useRef<BrowserSessionMap>({});
+  const [documentSessionMap, setDocumentSessionMap] = useState<DocumentSessionMap>(
+    normalizeDocumentSessionMap(initial.documentSessions),
+  );
+  const defaultDocumentSessionsRef = useRef<DocumentSessionMap>({});
   const [goalSlot, setGoalSlotState] = useState<HTMLElement | null>(null);
   const [hasGoalPlan, setHasGoalPlanState] = useState<boolean>(false);
   const [sidebarAutoCollapsed, setSidebarAutoCollapsedState] = useState<boolean>(false);
@@ -204,11 +189,10 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
   );
   // 当前「有效收起」态的最新值（供 toggle/⌘B 在回调中读取，无需把状态加进依赖）。
   const collapsedRef = useRef<boolean>(initial.sidebarOpen === false);
-  const [fileTarget, setFileTarget] = useState<WorkbenchFileTarget | null>(null);
   const [filesTarget, setFilesTarget] = useState<WorkbenchFilesTarget | null>(null);
   const filesNonceRef = useRef(0);
 
-  const currentSessionKey = browserSessionKey(conversationId);
+  const currentSessionKey = workbenchSessionKey(conversationId);
   const open = resolveWorkbenchOpen(openByConversation, conversationId, legacyOpenDefault);
   const openRef = useRef(open);
   openRef.current = open;
@@ -219,6 +203,7 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     width,
     activeTabMap,
     browserSessionMap,
+    documentSessionMap,
     sidebarOpen,
     sidebarWidth,
   });
@@ -227,6 +212,7 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     width,
     activeTabMap,
     browserSessionMap,
+    documentSessionMap,
     sidebarOpen,
     sidebarWidth,
   };
@@ -239,6 +225,7 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
         width: w,
         activeTabMap: m,
         browserSessionMap: b,
+        documentSessionMap: d,
         sidebarOpen: so,
         sidebarWidth: sw,
       } = latestRef.current;
@@ -251,6 +238,7 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
             width: w,
             activeTab: m,
             browserSessions: b,
+            documentSessions: d,
             sidebarOpen: so,
             sidebarWidth: sw,
           },
@@ -280,7 +268,7 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
   }, [schedulePersist]);
 
   const setActiveTab = useCallback((tab: WorkbenchTabId) => {
-    const key = browserSessionKey(conversationId);
+    const key = workbenchSessionKey(conversationId);
     setActiveTabMap((prev) => {
       if (prev[key] === tab) return prev;
       return { ...prev, [key]: tab };
@@ -289,7 +277,7 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
   }, [conversationId, schedulePersist]);
 
   const setBrowserSession = useCallback((next: BrowserSessionUpdater) => {
-    const key = browserSessionKey(conversationId);
+    const key = workbenchSessionKey(conversationId);
     setBrowserSessionMap((prev) => {
       const current = prev[key]
         ?? defaultBrowserSessionsRef.current[key]
@@ -303,18 +291,43 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     schedulePersist();
   }, [conversationId, schedulePersist]);
 
+  const setDocumentSession = useCallback((next: DocumentSessionUpdater) => {
+    const key = workbenchSessionKey(conversationId);
+    setDocumentSessionMap((prev) => {
+      const current = prev[key]
+        ?? defaultDocumentSessionsRef.current[key]
+        ?? createDocumentSessionState();
+      defaultDocumentSessionsRef.current[key] = current;
+      const resolved = typeof next === 'function' ? next(current) : next;
+      if (resolved === current) return prev;
+      const normalized = normalizeDocumentSessionState(resolved);
+      return { ...prev, [key]: normalized };
+    });
+    schedulePersist();
+  }, [conversationId, schedulePersist]);
+
   const openFile = useCallback((
     absPath: string,
     workspaceRoot?: string,
     relPath?: string,
     options?: { readonly preferredMode?: WorkbenchFileMode },
   ) => {
-    setFileTarget({ absPath, workspaceRoot, relPath, preferredMode: options?.preferredMode });
-    const key = browserSessionKey(conversationId);
-    setActiveTabMap((prev) => (prev[key] === 'diff' ? prev : { ...prev, [key]: 'diff' }));
+    const preferredMode = options?.preferredMode;
+    const tab = createDocumentTabSession(absPath, {
+      workspaceRoot,
+      relPath,
+      mode: preferredMode ?? defaultModeForKind(detectFileKind(absPath)),
+    });
+    setDocumentSession((current) => openDocumentTab(current, tab, {
+      replaceMode: preferredMode != null,
+    }));
+    const key = workbenchSessionKey(conversationId);
+    setActiveTabMap((prev) => (
+      prev[key] === 'documents' ? prev : { ...prev, [key]: 'documents' }
+    ));
     setOpenByConversation((prev) => updateWorkbenchOpen(prev, conversationId, true));
     schedulePersist();
-  }, [conversationId, schedulePersist]);
+  }, [conversationId, schedulePersist, setDocumentSession]);
 
   const openDiff = useCallback((absPath: string, workspaceRoot?: string, relPath?: string) => {
     openFile(absPath, workspaceRoot, relPath, { preferredMode: 'diff' });
@@ -323,7 +336,7 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
   const revealInFiles = useCallback((absPath: string, workspaceRoot?: string, relPath?: string) => {
     filesNonceRef.current += 1;
     setFilesTarget({ absPath, workspaceRoot, relPath, nonce: filesNonceRef.current });
-    const key = browserSessionKey(conversationId);
+    const key = workbenchSessionKey(conversationId);
     setActiveTabMap((prev) => (prev[key] === 'files' ? prev : { ...prev, [key]: 'files' }));
     setOpenByConversation((prev) => updateWorkbenchOpen(prev, conversationId, true));
     schedulePersist();
@@ -432,8 +445,8 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
   }, []);
 
   const activeTab: WorkbenchTabId = useMemo(() => {
-    const key = browserSessionKey(conversationId);
-    const stored = normalizeTab(activeTabMap[key]);
+    const key = workbenchSessionKey(conversationId);
+    const stored = normalizeWorkbenchTab(activeTabMap[key]);
     if (stored) return stored;
     // 兜底默认 Plan：从未手动切过 tab 的会话停在 Plan 视图。
     return 'plan';
@@ -449,6 +462,16 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     return created;
   }, [browserSessionMap, currentSessionKey]);
 
+  const documentSession = useMemo(() => {
+    const stored = documentSessionMap[currentSessionKey];
+    if (stored) return stored;
+    const existing = defaultDocumentSessionsRef.current[currentSessionKey];
+    if (existing) return existing;
+    const created = createDocumentSessionState();
+    defaultDocumentSessionsRef.current[currentSessionKey] = created;
+    return created;
+  }, [documentSessionMap, currentSessionKey]);
+
   const value = useMemo<WorkbenchContextValue>(() => ({
     open,
     width,
@@ -459,10 +482,9 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     sidebarOpen,
     sidebarWidth,
     sidebarCollapsed,
-    fileTarget,
-    diffTarget: fileTarget,
     filesTarget,
     browserSession,
+    documentSession,
     conversationId,
     setOpen,
     toggleOpen,
@@ -478,11 +500,13 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     openDiff,
     revealInFiles,
     setBrowserSession,
+    setDocumentSession,
   }), [
     open, width, activeTab, goalSlot, hasGoalPlan, sidebarAutoCollapsed, sidebarOpen, sidebarWidth, sidebarCollapsed,
-    fileTarget, filesTarget, browserSession, conversationId,
+    filesTarget, browserSession, documentSession, conversationId,
     setOpen, toggleOpen, setActiveTab, setWidth, registerGoalSlot, setHasGoalPlan, setSidebarAutoCollapsed,
     setSidebarOpen, toggleSidebar, setSidebarWidth, openFile, openDiff, revealInFiles, setBrowserSession,
+    setDocumentSession,
   ]);
 
   return <WorkbenchContext.Provider value={value}>{children}</WorkbenchContext.Provider>;

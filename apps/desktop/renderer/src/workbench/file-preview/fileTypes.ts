@@ -1,4 +1,4 @@
-import type { WorkbenchFileMode } from '../WorkbenchContext';
+import type { WorkbenchFileMode } from '../documentSessionState';
 
 export type WorkbenchFileKind =
   | 'markdown'

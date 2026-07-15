@@ -1,5 +1,5 @@
 /* Workbench Panel · Frost
- * 右侧可展开/收起 + 可拖拽宽度的工作台。当前承载 Goal/Terminal/Browser/Files 四个 tab。
+ * 右侧可展开/收起 + 可拖拽宽度的工作台。一级承载 Plan/Browser/Files/Documents。
  */
 
 @layer components {
@@ -103,12 +103,12 @@
     pointer-events: none;
   }
 
-  /* Diff 视图：标题栏上提铺满顶部安全区，消除顶部纯空白 */
-  .workbench-view--diff {
+  /* 文档视图：资源标签条上提铺满顶部安全区。 */
+  .workbench-view--documents {
     inset-block-start: 0;
   }
 
-  /* 浏览器视图：工具栏上提贴顶，消除工具栏上方的空白安全区（镜像 Diff 范式） */
+  /* 浏览器视图：资源标签条上提贴顶，消除上方空白安全区。 */
   .workbench-view--browser {
     inset-block-start: 0;
   }
@@ -679,8 +679,36 @@
     background: var(--za-surface-1);
   }
 
-  /* 会话内网页标签条：与 Workbench 的 Plan/Browser/Files/Diff 导航分层。 */
-  .browser-tab-strip {
+  .document-view {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--za-surface-1);
+  }
+
+  .document-stage {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .document-page {
+    position: absolute;
+    inset: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .document-page[data-active='true'] {
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  /* 会话内资源标签条：Browser 与 Documents 共用表达，不共用领域状态。 */
+  .resource-tab-strip {
     flex: 0 0 42px;
     display: flex;
     align-items: center;
@@ -692,7 +720,7 @@
     -webkit-app-region: drag;
   }
 
-  .browser-tabs {
+  .resource-tabs {
     flex: 1 1 auto;
     display: flex;
     align-items: center;
@@ -702,11 +730,11 @@
     scrollbar-width: none;
     -webkit-app-region: no-drag;
   }
-  .browser-tabs::-webkit-scrollbar {
+  .resource-tabs::-webkit-scrollbar {
     display: none;
   }
 
-  .browser-page-tab {
+  .resource-tab {
     flex: 1 1 150px;
     position: relative;
     min-width: 88px;
@@ -719,16 +747,16 @@
     -webkit-app-region: no-drag;
     transition: background var(--za-motion-fast), color var(--za-motion-fast), border-color var(--za-motion-fast);
   }
-  .browser-page-tab:hover {
+  .resource-tab:hover {
     background: var(--ui-surface-hover, var(--chrome-hover));
     color: var(--graphite-base);
   }
-  .browser-page-tab--active {
+  .resource-tab--active {
     border-color: var(--ui-border-subtle, var(--chrome-hairline));
     background: var(--za-surface-1);
     color: var(--graphite-base);
   }
-  .browser-page-tab-select {
+  .resource-tab-select {
     display: flex;
     align-items: center;
     gap: 7px;
@@ -744,20 +772,20 @@
     cursor: pointer;
     text-align: left;
   }
-  .browser-page-tab-select:focus-visible {
+  .resource-tab-select:focus-visible {
     box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
   }
-  .browser-page-tab-icon {
+  .resource-tab-icon {
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
     justify-content: center;
   }
-  .browser-page-tab-icon svg {
+  .resource-tab-icon svg {
     width: 14px;
     height: 14px;
   }
-  .browser-page-tab-label {
+  .resource-tab-label {
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
@@ -765,8 +793,8 @@
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-  .browser-page-tab-close,
-  .browser-new-tab-btn {
+  .resource-tab-close,
+  .resource-tab-action {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -780,7 +808,7 @@
     cursor: pointer;
     -webkit-app-region: no-drag;
   }
-  .browser-page-tab-close {
+  .resource-tab-close {
     position: absolute;
     top: 4px;
     right: 4px;
@@ -788,29 +816,29 @@
     height: 20px;
     opacity: 0;
   }
-  .browser-page-tab:hover .browser-page-tab-close,
-  .browser-page-tab--active .browser-page-tab-close,
-  .browser-page-tab-close:focus-visible {
+  .resource-tab:hover .resource-tab-close,
+  .resource-tab--active .resource-tab-close,
+  .resource-tab-close:focus-visible {
     opacity: 1;
   }
-  .browser-page-tab-close:hover,
-  .browser-new-tab-btn:hover {
+  .resource-tab-close:hover,
+  .resource-tab-action:hover {
     background: var(--ui-surface-hover, var(--chrome-hover));
     color: var(--graphite-base);
   }
-  .browser-page-tab-close:focus-visible,
-  .browser-new-tab-btn:focus-visible {
+  .resource-tab-close:focus-visible,
+  .resource-tab-action:focus-visible {
     outline: none;
     box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
   }
-  .browser-page-tab-close svg {
+  .resource-tab-close svg {
     width: 13px;
     height: 13px;
   }
-  .browser-new-tab-btn {
+  .resource-tab-action {
     flex: 0 0 auto;
   }
-  .browser-new-tab-btn svg {
+  .resource-tab-action svg {
     width: 16px;
     height: 16px;
   }
