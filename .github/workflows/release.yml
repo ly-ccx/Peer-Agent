@@ -109,12 +109,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Rust native binary（host 架构）。electron-builder.yml extraResources
-      # 从 target/release/ 拷贝 cu-proxy-core / cu-proxy-core.exe。
-      # 注意（阶段一）：Windows arm64 安装包将打包 x64 native binary（在 win-arm64
+      # Rust native binaries（host 架构）。electron-builder.yml extraResources
+      # 从 target/release/ 拷贝 cu-proxy-core 与 peer-credential-helper。
+      # 注意（阶段一）：Windows arm64 安装包将打包 x64 native binaries（在 win-arm64
       # 上以模拟方式运行）；arm64-native 交叉编译留待阶段二。
-      - name: Build Rust core
-        run: cargo build --release --package cu-proxy-core
+      - name: Build Rust native binaries
+        run: cargo build --locked --release --package cu-proxy-core --package peer-credential-helper
 
       - name: Build frontend
         run: pnpm --filter @peer-agent/desktop build

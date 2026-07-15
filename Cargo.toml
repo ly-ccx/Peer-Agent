@@ -1,3 +1,6 @@
 [workspace]
-members = ["crates/cu-proxy-core"]
+members = [
+  "crates/cu-proxy-core",
+  "crates/peer-credential-helper",
+]
 resolver = "3"

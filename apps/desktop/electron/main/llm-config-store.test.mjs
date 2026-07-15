@@ -1,24 +1,64 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { createLlmConfigStore } from './llm-config-store.mjs';
+import {
+  modelApiKeyCredentialKey,
+  modelOauthClientSecretCredentialKey,
+  modelOauthCredentialKey,
+} from '@peer-agent/credential-helper';
+import { createLlmConfigStore as createLlmConfigStoreImpl } from './llm-config-store.mjs';
+
+const credentialStores = new Map();
+
+function createMemoryCredentialClient(secrets) {
+  return {
+    getSecret(key) {
+      return secrets.has(key) ? secrets.get(key) : null;
+    },
+    setSecret(key, value) {
+      secrets.set(key, String(value));
+    },
+    deleteSecret(key) {
+      return secrets.delete(key);
+    },
+  };
+}
+
+function createLlmConfigStore(options = {}) {
+  const configFile = options.configFile;
+  let secrets = credentialStores.get(configFile);
+  if (!secrets) {
+    secrets = new Map();
+    credentialStores.set(configFile, secrets);
+  }
+  return createLlmConfigStoreImpl({
+    ...options,
+    credentialClient: options.credentialClient || createMemoryCredentialClient(secrets),
+  });
+}
 
 function withStore(fn) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'llm-config-store-'));
   const configFile = path.join(dir, 'llm-providers.json');
+  const credentialSecrets = new Map();
+  credentialStores.set(configFile, credentialSecrets);
+  const cleanup = () => {
+    credentialStores.delete(configFile);
+    rmSync(dir, { recursive: true, force: true });
+  };
   let cleanupNow = true;
   try {
-    const result = fn({ dir, configFile });
+    const result = fn({ dir, configFile, credentialSecrets });
     if (result && typeof result.then === 'function') {
       cleanupNow = false;
-      return result.finally(() => rmSync(dir, { recursive: true, force: true }));
+      return result.finally(cleanup);
     }
     return result;
   } finally {
-    if (cleanupNow) rmSync(dir, { recursive: true, force: true });
+    if (cleanupNow) cleanup();
   }
 }
 
@@ -85,7 +125,7 @@ test('subscription provider migration backfills pricing and context metadata', (
   assert.equal(persisted.cacheWritePrice, undefined);
 }));
 
-test('legacy provider entries migrate to channel fields without losing stored settings', () => withStore(({ configFile }) => {
+test('legacy provider entries migrate to channel fields without losing stored settings', () => withStore(({ configFile, credentialSecrets }) => {
   writeFileSync(configFile, JSON.stringify([
     {
       id: 'p1',
@@ -132,7 +172,12 @@ test('legacy provider entries migrate to channel fields without losing stored se
 
   const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
   assert.equal(persisted.channelId, 'openai-compatible');
-  assert.deepEqual(persisted.apiKey, { encrypted: false, data: 'secret-key' });
+  assert.equal(Object.hasOwn(persisted, 'apiKey'), false);
+  assert.equal(Object.hasOwn(persisted, 'oauthTokens'), false);
+  assert.equal(persisted.apiKeyConfigured, true);
+  assert.equal(persisted.apiKeyMasked, 'secr...-key');
+  assert.equal(credentialSecrets.get('model/p1/api-key'), 'secret-key');
+  assert.equal(store.getDecryptedApiKey('p1'), 'secret-key');
 }));
 
 test('manual provider creation and updates persist max output tokens', () => withStore(({ configFile }) => {
@@ -239,7 +284,7 @@ test('legacy Gemini OAuth records remain readable for migration or deletion', ()
   assert.equal(credential.oauthProjectId, 'my-project');
 }));
 
-test('Qoder local auth provider does not require a stored API key', () => withStore(({ configFile }) => {
+test('Qoder local auth provider does not require a stored API key', () => withStore(({ configFile, credentialSecrets }) => {
   const store = createLlmConfigStore({ configFile });
   const provider = store.addProvider({
     provider: 'openai',
@@ -263,7 +308,9 @@ test('Qoder local auth provider does not require a stored API key', () => withSt
   assert.equal(provider.supportsReasoning, false);
 
   const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
-  assert.deepEqual(persisted.apiKey, { encrypted: false, data: '' });
+  assert.equal(Object.hasOwn(persisted, 'apiKey'), false);
+  assert.equal(persisted.apiKeyConfigured, false);
+  assert.equal(credentialSecrets.has(`model/${provider.groupId}/api-key`), false);
 }));
 
 test('Qoder local auth provider exposes catalog display label without changing request model id', () => withStore(({ configFile, dir }) => {
@@ -432,6 +479,106 @@ test('addModel adds a second model to the same group sharing credentials without
   assert.equal(grouped.length, 2);
 }));
 
+test('addModel inherits connection fields without copying model metadata', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const base = store.addProvider({
+    provider: 'openai',
+    authMethod: 'api_key',
+    apiKey: 'shared-secret',
+    baseUrl: 'https://example.test/v1',
+    model: 'model-a',
+    contextWindow: 128_000,
+    inputPrice: 1,
+    supportsVision: true,
+    customHeaders: { 'X-Tenant': 'tenant-a' },
+    metadataSource: 'remote',
+    metadataSyncedAt: '2026-01-02T03:04:05.000Z',
+  });
+
+  const second = store.addModel(base.groupId, {
+    model: 'model-b',
+    metadataSource: 'remote',
+    metadataSyncedAt: '2026-01-02T03:04:05.000Z',
+  });
+
+  assert.equal(second.baseUrl, base.baseUrl);
+  assert.deepEqual(second.customHeaders, { 'X-Tenant': 'tenant-a' });
+  assert.equal(store.getDecryptedApiKey(second.id), 'shared-secret');
+  assert.equal(second.contextWindow, undefined);
+  assert.equal(second.inputPrice, undefined);
+  assert.equal(second.supportsVision, undefined);
+  assert.equal(second.supportsReasoning, undefined);
+  assert.equal(second.supportsPromptCaching, undefined);
+  assert.equal(second.metadataSource, 'remote');
+
+  const annotated = store.updateProvider(second.id, {
+    modelLabel: 'Model B',
+    contextWindow: 64_000,
+    maxOutputTokens: 8_192,
+    inputPrice: 1,
+    outputPrice: 2,
+    cacheWritePrice: 0.5,
+    cacheReadPrice: 0.1,
+    supportsVision: false,
+    supportsReasoning: true,
+    supportsPromptCaching: false,
+    reasoningParamStyle: 'openai-effort',
+    reasoningEffortMap: { low: 1024 },
+  });
+  assert.equal(annotated.supportsVision, false);
+  assert.equal(annotated.supportsReasoning, true);
+
+  const resetToUnknown = store.updateProvider(second.id, {
+    modelLabel: null,
+    contextWindow: null,
+    maxOutputTokens: null,
+    inputPrice: null,
+    outputPrice: null,
+    cacheWritePrice: null,
+    cacheReadPrice: null,
+    supportsVision: null,
+    supportsReasoning: null,
+    supportsPromptCaching: null,
+    reasoningParamStyle: null,
+    reasoningEffortMap: null,
+  });
+  assert.equal(resetToUnknown.modelLabel, undefined);
+  assert.equal(resetToUnknown.contextWindow, undefined);
+  assert.equal(resetToUnknown.maxOutputTokens, undefined);
+  assert.equal(resetToUnknown.inputPrice, undefined);
+  assert.equal(resetToUnknown.outputPrice, undefined);
+  assert.equal(resetToUnknown.cacheWritePrice, undefined);
+  assert.equal(resetToUnknown.cacheReadPrice, undefined);
+  assert.equal(resetToUnknown.supportsVision, undefined);
+  assert.equal(resetToUnknown.supportsReasoning, undefined);
+  assert.equal(resetToUnknown.supportsPromptCaching, undefined);
+  assert.equal(resetToUnknown.reasoningParamStyle, undefined);
+  assert.equal(resetToUnknown.reasoningEffortMap, undefined);
+
+  const persisted = JSON.parse(readFileSync(configFile, 'utf8')).find((item) => item.id === second.id);
+  for (const field of [
+    'modelLabel',
+    'contextWindow',
+    'maxOutputTokens',
+    'inputPrice',
+    'outputPrice',
+    'cacheWritePrice',
+    'cacheReadPrice',
+    'supportsVision',
+    'supportsReasoning',
+    'supportsPromptCaching',
+    'reasoningParamStyle',
+    'reasoningEffortMap',
+  ]) {
+    assert.equal(Object.hasOwn(persisted, field), false, `${field} removed from persisted record`);
+  }
+
+  assert.throws(
+    () => store.addModel(base.groupId, { model: 'model-b' }),
+    /already exists in provider group/,
+  );
+}));
+
 test('addModel refuses subscription (OAuth) providers', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });
   const sub = store.addProvider({ provider: 'openai', authMethod: 'oauth_chatgpt' });
@@ -450,4 +597,363 @@ test('removeGroup deletes every model in the group and reassigns default', () =>
   assert.equal(remaining.length, 1, 'both models of g1 removed');
   assert.equal(remaining[0].groupId, g2.groupId);
   assert.equal(remaining[0].isDefault, true, 'default reassigned to surviving group');
+}));
+
+test('legacy safeStorage secrets migrate to Vault before encrypted fields are removed', () => withStore(({
+  configFile,
+  credentialSecrets,
+}) => {
+  const expires = Date.now() + 60_000;
+  const tokens = {
+    access: 'legacy-access-token',
+    refresh: 'legacy-refresh-token',
+    expires,
+    accountId: 'acct-legacy',
+  };
+  const encode = (value) => ({
+    encrypted: true,
+    data: Buffer.from(value, 'utf8').toString('base64'),
+  });
+  writeFileSync(configFile, JSON.stringify([{
+    id: 'legacy-oauth',
+    provider: 'openai',
+    authMethod: 'oauth_google',
+    name: 'Legacy OAuth',
+    baseUrl: 'https://example.test/v1',
+    model: 'legacy-model',
+    apiKey: encode('legacy-api-key'),
+    oauthClientId: 'legacy-client-id',
+    oauthClientSecret: encode('legacy-client-secret'),
+    oauthTokens: encode(JSON.stringify(tokens)),
+    enabled: true,
+    isDefault: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  }], null, 2));
+
+  let decryptCount = 0;
+  const store = createLlmConfigStore({
+    configFile,
+    legacySecretDecryptor(stored) {
+      decryptCount += 1;
+      return Buffer.from(stored.data, 'base64').toString('utf8');
+    },
+  });
+
+  const [provider] = store.listProviders();
+  assert.equal(decryptCount, 3);
+  assert.equal(provider.oauthStatus.status, 'connected');
+  assert.equal(provider.oauthStatus.accountId, 'acct-legacy');
+  assert.equal(credentialSecrets.get(modelApiKeyCredentialKey('legacy-oauth')), 'legacy-api-key');
+  assert.equal(
+    credentialSecrets.get(modelOauthClientSecretCredentialKey('legacy-oauth')),
+    'legacy-client-secret',
+  );
+  assert.deepEqual(
+    JSON.parse(credentialSecrets.get(modelOauthCredentialKey('legacy-oauth'))),
+    tokens,
+  );
+
+  const persistedText = readFileSync(configFile, 'utf8');
+  const [persisted] = JSON.parse(persistedText);
+  for (const field of ['apiKey', 'oauthClientSecret', 'oauthTokens']) {
+    assert.equal(Object.hasOwn(persisted, field), false, `${field} removed after verified migration`);
+  }
+  for (const secret of ['legacy-api-key', 'legacy-client-secret', 'legacy-access-token', 'legacy-refresh-token']) {
+    assert.equal(persistedText.includes(secret), false, `${secret} absent from provider metadata`);
+  }
+  assert.equal(persisted.oauthConfigured, true);
+  assert.equal(persisted.oauthExpires, expires);
+  assert.equal(persisted.oauthAccountId, 'acct-legacy');
+  assert.deepEqual(store.getCredential('legacy-oauth'), {
+    tokens,
+    oauthClientId: 'legacy-client-id',
+    oauthClientSecret: 'legacy-client-secret',
+    oauthProjectId: undefined,
+    authMethod: 'oauth_google',
+  });
+
+  store.listProviders();
+  assert.equal(decryptCount, 3, 'migration is idempotent and legacy decrypt is not repeated');
+}));
+
+test('legacy credential migration failure preserves the source file and rolls Vault back', () => withStore(({
+  configFile,
+  credentialSecrets,
+}) => {
+  const original = JSON.stringify([{
+    id: 'legacy-failure',
+    provider: 'openai',
+    authMethod: 'api_key',
+    name: 'Legacy failure',
+    baseUrl: 'https://example.test/v1',
+    model: 'legacy-model',
+    apiKey: { encrypted: false, data: 'legacy-api-key' },
+    oauthClientSecret: { encrypted: false, data: 'legacy-client-secret' },
+    enabled: true,
+    isDefault: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  }], null, 2);
+  writeFileSync(configFile, original);
+
+  let failClientSecretWrite = true;
+  const credentialClient = {
+    getSecret(key) {
+      return credentialSecrets.has(key) ? credentialSecrets.get(key) : null;
+    },
+    setSecret(key, value) {
+      if (failClientSecretWrite && key === modelOauthClientSecretCredentialKey('legacy-failure')) {
+        failClientSecretWrite = false;
+        throw new Error('injected_credential_failure');
+      }
+      credentialSecrets.set(key, String(value));
+    },
+    deleteSecret(key) {
+      return credentialSecrets.delete(key);
+    },
+  };
+  const store = createLlmConfigStore({ configFile, credentialClient });
+
+  assert.throws(() => store.listProviders(), /injected_credential_failure/);
+  assert.equal(readFileSync(configFile, 'utf8'), original, 'legacy source remains byte-for-byte intact');
+  assert.equal(credentialSecrets.size, 0, 'partial Vault writes are rolled back');
+}));
+
+test('provider listing uses non-sensitive metadata without unsealing Vault secrets', () => withStore(({
+  configFile,
+}) => {
+  const secrets = new Map();
+  let secretReads = 0;
+  const credentialClient = {
+    getSecret(key) {
+      secretReads += 1;
+      return secrets.has(key) ? secrets.get(key) : null;
+    },
+    setSecret(key, value) {
+      secrets.set(key, String(value));
+    },
+    deleteSecret(key) {
+      return secrets.delete(key);
+    },
+  };
+  const store = createLlmConfigStore({ configFile, credentialClient });
+  const provider = store.addProvider({
+    provider: 'openai',
+    authMethod: 'api_key',
+    apiKey: 'render-secret',
+    model: 'model-a',
+  });
+  assert.equal(provider.apiKeyConfigured, true);
+
+  secretReads = 0;
+  const listed = store.listProviders();
+  assert.equal(secretReads, 0, 'listProviders must not ask the Helper to reveal secrets');
+  assert.equal(listed[0].apiKeyConfigured, true);
+  assert.equal(listed[0].apiKeyMasked, 'rend...cret');
+}));
+
+test('OAuth token updates store only Vault ciphertext references and non-sensitive status metadata', () => withStore(({
+  configFile,
+  credentialSecrets,
+}) => {
+  const store = createLlmConfigStore({ configFile });
+  const provider = store.addProvider({ provider: 'openai', authMethod: 'oauth_chatgpt' });
+  const tokens = {
+    access: 'oauth-access-secret',
+    refresh: 'oauth-refresh-secret',
+    expires: Date.now() + 60_000,
+    accountId: 'acct-oauth',
+  };
+
+  const connected = store.setOAuthTokens(provider.id, tokens);
+  assert.equal(connected.oauthStatus.status, 'connected');
+  assert.equal(connected.oauthStatus.accountId, 'acct-oauth');
+  assert.deepEqual(
+    JSON.parse(credentialSecrets.get(modelOauthCredentialKey(provider.groupId))),
+    tokens,
+  );
+  const persistedText = readFileSync(configFile, 'utf8');
+  const [persisted] = JSON.parse(persistedText);
+  assert.equal(Object.hasOwn(persisted, 'oauthTokens'), false);
+  assert.equal(persisted.oauthConfigured, true);
+  assert.equal(persisted.oauthExpires, tokens.expires);
+  assert.equal(persisted.oauthAccountId, 'acct-oauth');
+  assert.equal(persistedText.includes(tokens.access), false);
+  assert.equal(persistedText.includes(tokens.refresh), false);
+
+  const disconnected = store.setOAuthTokens(provider.id, null);
+  assert.equal(disconnected.oauthStatus.status, 'disconnected');
+  assert.equal(credentialSecrets.has(modelOauthCredentialKey(provider.groupId)), false);
+  const [cleared] = JSON.parse(readFileSync(configFile, 'utf8'));
+  assert.equal(cleared.oauthConfigured, false);
+  assert.equal(Object.hasOwn(cleared, 'oauthExpires'), false);
+  assert.equal(Object.hasOwn(cleared, 'oauthAccountId'), false);
+}));
+
+test('legacy Google OAuth group migrates to API key without changing per-model metadata', () => withStore(({
+  configFile,
+  credentialSecrets,
+}) => {
+  const groupId = 'legacy-google-group';
+  const createdAt = '2026-01-01T00:00:00.000Z';
+  writeFileSync(configFile, JSON.stringify([
+    {
+      id: 'legacy-google-a',
+      groupId,
+      provider: 'openai',
+      channelId: 'google-ai',
+      authMethod: 'oauth_google',
+      name: 'Legacy Gemini OAuth',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      model: 'gemini-a',
+      modelLabel: 'Gemini A',
+      contextWindow: 128_000,
+      supportsVision: true,
+      metadataSource: 'remote',
+      metadataSyncedAt: createdAt,
+      oauthConfigured: true,
+      oauthExpires: Date.now() + 60_000,
+      oauthAccountId: 'legacy-account',
+      oauthClientId: 'legacy-client',
+      oauthClientSecretConfigured: true,
+      oauthProjectId: 'legacy-project',
+      enabled: true,
+      isDefault: true,
+      createdAt,
+    },
+    {
+      id: 'legacy-google-b',
+      groupId,
+      provider: 'openai',
+      channelId: 'google-ai',
+      authMethod: 'oauth_google',
+      name: 'Legacy Gemini OAuth',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      model: 'gemini-b',
+      modelLabel: 'Gemini B',
+      maxOutputTokens: 8_192,
+      supportsReasoning: true,
+      metadataSource: 'manual',
+      metadataSyncedAt: createdAt,
+      oauthConfigured: true,
+      oauthExpires: Date.now() + 60_000,
+      oauthAccountId: 'legacy-account',
+      oauthClientId: 'legacy-client',
+      oauthClientSecretConfigured: true,
+      oauthProjectId: 'legacy-project',
+      enabled: true,
+      isDefault: false,
+      createdAt,
+    },
+  ], null, 2));
+  credentialSecrets.set(modelOauthClientSecretCredentialKey(groupId), 'legacy-client-secret');
+  credentialSecrets.set(modelOauthCredentialKey(groupId), JSON.stringify({
+    access: 'legacy-access',
+    refresh: 'legacy-refresh',
+    expires: Date.now() + 60_000,
+    accountId: 'legacy-account',
+  }));
+
+  const store = createLlmConfigStore({ configFile });
+  const connectionPatch = {
+    provider: 'openai',
+    channelId: 'google-ai',
+    authMethod: 'api_key',
+    name: 'Gemini API Key',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+  };
+  store.updateProvider('legacy-google-a', { ...connectionPatch, apiKey: 'gemini-api-key' });
+  store.updateProvider('legacy-google-b', connectionPatch);
+
+  const migrated = store.listProviders();
+  assert.equal(migrated.length, 2);
+  for (const provider of migrated) {
+    assert.equal(provider.authMethod, 'api_key');
+    assert.equal(provider.apiKeyConfigured, true);
+    assert.equal(provider.oauthStatus, undefined);
+    assert.equal(provider.oauthClientSecretConfigured, false);
+    assert.equal(store.getDecryptedApiKey(provider.id), 'gemini-api-key');
+  }
+  assert.equal(migrated[0].modelLabel, 'Gemini A');
+  assert.equal(migrated[0].contextWindow, 128_000);
+  assert.equal(migrated[0].supportsVision, true);
+  assert.equal(migrated[0].metadataSource, 'remote');
+  assert.equal(migrated[1].modelLabel, 'Gemini B');
+  assert.equal(migrated[1].maxOutputTokens, 8_192);
+  assert.equal(migrated[1].supportsReasoning, true);
+  assert.equal(migrated[1].metadataSource, 'manual');
+  assert.equal(credentialSecrets.has(modelOauthClientSecretCredentialKey(groupId)), false);
+  assert.equal(credentialSecrets.has(modelOauthCredentialKey(groupId)), false);
+
+  for (const persisted of JSON.parse(readFileSync(configFile, 'utf8'))) {
+    assert.equal(Object.hasOwn(persisted, 'oauthExpires'), false);
+    assert.equal(Object.hasOwn(persisted, 'oauthAccountId'), false);
+    assert.equal(Object.hasOwn(persisted, 'oauthClientId'), false);
+    assert.equal(Object.hasOwn(persisted, 'oauthProjectId'), false);
+  }
+}));
+
+test('group members share one Vault key while duplicates and deletion keep independent lifecycles', () => withStore(({
+  configFile,
+  credentialSecrets,
+}) => {
+  const store = createLlmConfigStore({ configFile });
+  const first = store.addProvider({
+    provider: 'openai',
+    authMethod: 'api_key',
+    apiKey: 'shared-original',
+    model: 'model-a',
+  });
+  const second = store.addModel(first.groupId, { model: 'model-b' });
+  const duplicate = store.duplicateProvider(first.id);
+
+  assert.equal(store.getDecryptedApiKey(first.id), 'shared-original');
+  assert.equal(store.getDecryptedApiKey(second.id), 'shared-original');
+  assert.equal(store.getDecryptedApiKey(duplicate.id), 'shared-original');
+  assert.notEqual(duplicate.groupId, first.groupId);
+
+  store.updateProvider(first.id, { apiKey: 'shared-updated' });
+  assert.equal(store.getDecryptedApiKey(second.id), 'shared-updated');
+  assert.equal(store.getDecryptedApiKey(duplicate.id), 'shared-original');
+
+  store.removeProvider(first.id);
+  assert.equal(
+    credentialSecrets.get(modelApiKeyCredentialKey(first.groupId)),
+    'shared-updated',
+    'removing one group member preserves the shared key',
+  );
+  store.removeGroup(first.groupId);
+  assert.equal(credentialSecrets.has(modelApiKeyCredentialKey(first.groupId)), false);
+  assert.equal(
+    credentialSecrets.get(modelApiKeyCredentialKey(duplicate.groupId)),
+    'shared-original',
+    'deleting the source group does not delete the duplicate key',
+  );
+  store.removeGroup(duplicate.groupId);
+  assert.equal(credentialSecrets.has(modelApiKeyCredentialKey(duplicate.groupId)), false);
+}));
+
+test('credential Helper failures abort writes without plaintext fallback', () => withStore(({ configFile }) => {
+  const credentialClient = {
+    getSecret() {
+      throw new Error('credential_helper_unavailable');
+    },
+    setSecret() {
+      throw new Error('credential_helper_unavailable');
+    },
+    deleteSecret() {
+      throw new Error('credential_helper_unavailable');
+    },
+  };
+  const store = createLlmConfigStore({ configFile, credentialClient });
+
+  assert.throws(
+    () => store.addProvider({
+      provider: 'openai',
+      authMethod: 'api_key',
+      apiKey: 'must-never-be-plaintext',
+      model: 'model-a',
+    }),
+    /credential_helper_unavailable/,
+  );
+  assert.equal(existsSync(configFile), false, 'provider metadata is not written after Helper failure');
 }));

@@ -7,8 +7,8 @@
     "peer": "./dist/peer"
   },
   "scripts": {
-    "dev": "bun run src/index.tsx",
-    "build": "bun build --compile --minify --outfile dist/peer src/index.tsx",
+    "dev": "node ../../scripts/build-credential-helper.mjs --profile debug && bun run src/index.tsx",
+    "build": "node ../../scripts/build-credential-helper.mjs --profile release --copy-to apps/tui/dist && bun build --compile --minify --outfile dist/peer src/index.tsx && node scripts/finalize-binary.mjs",
     "test": "bun test src",
     "test:runtime-node": "bun test ../../packages/runtime-node/src/file-provider.test.ts && bun test ../../packages/runtime-node/src/provider-bundle.test.ts && bun test ../../packages/runtime-node/src/shell-provider.test.ts",
     "typecheck": "tsc -p tsconfig.json"
@@ -16,6 +16,7 @@
   "dependencies": {
     "@opentui/core": "0.4.3",
     "@opentui/react": "0.4.3",
+    "@peer-agent/credential-helper": "workspace:*",
     "@peer-agent/runtime-core": "workspace:*",
     "@peer-agent/runtime-node": "workspace:*",
     "@peer-agent/runtime-sdk": "workspace:*",

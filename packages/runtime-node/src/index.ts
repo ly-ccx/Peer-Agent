@@ -97,3 +97,21 @@ export {
   loadNodeHookConfig,
   mergeNodeHookConfigs,
 } from './node-hook-config.ts';
+export type {
+  ChatGptOAuthTokens,
+  LoadSharedModelSelectionOptions,
+  SharedModelAuthMethod,
+  SharedModelCredentialStore,
+  SharedModelMetadata,
+  SharedModelSelection,
+  StoredModelProvider,
+} from './shared-model-config.ts';
+export {
+  getSharedModelConfigPath,
+  loadSharedModelMetadata,
+  loadSharedModelSelection,
+  selectDesktopDefaultProvider,
+} from './shared-model-config.ts';
+export type { CreateChatGptResponsesProviderOptions } from './chatgpt-responses-provider.ts';
+export { createChatGptResponsesProvider } from './chatgpt-responses-provider.ts';
+export { refreshChatGptOAuthTokens } from './chatgpt-oauth.ts';

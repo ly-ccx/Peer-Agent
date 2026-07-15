@@ -1,8 +1,15 @@
-import type {
-  ModelCredential,
-  ModelCredentialPort,
-  ModelCredentialRequest,
+import {
+  loadSharedModelMetadata,
+  loadSharedModelSelection,
+  type ModelCredential,
+  type ModelCredentialPort,
+  type ModelCredentialRequest,
+  type SharedModelCredentialStore,
+  type SharedModelMetadata,
+  type SharedModelSelection,
 } from '@peer-agent/runtime-node';
+
+import { createTuiSharedModelCredentialStore } from './model-credential-store.ts';
 
 export const TUI_MODEL_ENV = {
   apiKey: 'PEER_MODEL_API_KEY',
@@ -15,10 +22,14 @@ export interface TuiModelEnvironment {
 }
 
 export interface TuiModelConfig {
-  readonly providerId: 'openai-compatible';
+  readonly providerId: 'openai-compatible' | 'chatgpt-subscription';
   readonly model: string;
+  readonly modelLabel: string;
+  readonly source: 'environment' | 'desktop-default' | 'unconfigured';
   readonly configured: boolean;
   readonly credentials: ModelCredentialPort;
+  readonly sharedMetadata?: SharedModelMetadata;
+  readonly resolveSharedSelection?: () => SharedModelSelection | null;
 }
 
 function value(environment: TuiModelEnvironment, name: string): string | undefined {
@@ -44,12 +55,59 @@ export function createEnvironmentCredentialPort(
 
 export function resolveTuiModelConfig(
   environment: TuiModelEnvironment,
+  options: {
+    readonly userDataPath?: string;
+    readonly sharedCredentialStore?: SharedModelCredentialStore;
+    readonly loadSharedMetadata?: typeof loadSharedModelMetadata;
+    readonly loadSharedSelection?: typeof loadSharedModelSelection;
+  } = {},
 ): TuiModelConfig {
   const credentials = createEnvironmentCredentialPort(environment);
+  const environmentApiKey = value(environment, TUI_MODEL_ENV.apiKey);
+  if (environmentApiKey) {
+    const model = value(environment, TUI_MODEL_ENV.model) ?? 'gpt-4o-mini';
+    return {
+      providerId: 'openai-compatible',
+      model,
+      modelLabel: `${model} · env`,
+      source: 'environment',
+      configured: true,
+      credentials,
+    };
+  }
+
+  const sharedMetadata = (options.loadSharedMetadata ?? loadSharedModelMetadata)({
+    userDataPath: options.userDataPath,
+  });
+  if (sharedMetadata) {
+    const sharedCredentialStore = options.sharedCredentialStore
+      ?? (options.userDataPath
+        ? createTuiSharedModelCredentialStore({ dataHome: options.userDataPath })
+        : undefined);
+    return {
+      providerId: sharedMetadata.authMethod === 'oauth_chatgpt'
+        ? 'chatgpt-subscription'
+        : 'openai-compatible',
+      model: sharedMetadata.model,
+      modelLabel: `${sharedMetadata.model} · desktop default`,
+      source: 'desktop-default',
+      configured: sharedMetadata.credentialStored,
+      credentials,
+      sharedMetadata,
+      resolveSharedSelection: () => (options.loadSharedSelection ?? loadSharedModelSelection)({
+        userDataPath: options.userDataPath,
+        credentialStore: sharedCredentialStore,
+      }),
+    };
+  }
+
+  const model = value(environment, TUI_MODEL_ENV.model) ?? 'gpt-4o-mini';
   return {
     providerId: 'openai-compatible',
-    model: value(environment, TUI_MODEL_ENV.model) ?? 'gpt-4o-mini',
-    configured: Boolean(value(environment, TUI_MODEL_ENV.apiKey)),
+    model,
+    modelLabel: 'model not configured',
+    source: 'unconfigured',
+    configured: false,
     credentials,
   };
 }

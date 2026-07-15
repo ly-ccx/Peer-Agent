@@ -1,8 +1,24 @@
 import electron from 'electron';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
-import { pathOf } from './data-store.mjs';
+import {
+  modelApiKeyCredentialKey,
+  modelOauthClientSecretCredentialKey,
+  modelOauthCredentialKey,
+} from '@peer-agent/credential-helper';
+import { getDataHome, pathOf } from './data-store.mjs';
+import { createDesktopModelCredentialClient } from './model-credential-client.mjs';
 import { deriveOAuthStatus, resolveSubscriptionTestResult } from './provider-connectivity.mjs';
 import {
   DEFAULT_SUBSCRIPTION_MODEL,
@@ -29,28 +45,23 @@ import { expandSubscriptionProviders } from './provider-adapters/subscription-pr
 
 const { safeStorage } = electron;
 
-function encrypt(plaintext) {
-  if (!plaintext) return { encrypted: false, data: '' };
-  try {
-    if (safeStorage.isEncryptionAvailable()) {
-      const buf = safeStorage.encryptString(plaintext);
-      return { encrypted: true, data: buf.toString('base64') };
-    }
-  } catch {
-    console.warn('[llm-config] safeStorage unavailable, storing key in plaintext');
-  }
-  return { encrypted: false, data: plaintext };
-}
-
-function decrypt(stored) {
+function decryptLegacySecret(stored) {
   if (!stored || !stored.data) return '';
-  if (!stored.encrypted) return stored.data;
+  if (!stored.encrypted) return String(stored.data);
+  if (!safeStorage?.isEncryptionAvailable?.()) {
+    throw new Error('legacy_safe_storage_unavailable');
+  }
   try {
     return safeStorage.decryptString(Buffer.from(stored.data, 'base64'));
   } catch {
-    console.warn('[llm-config] failed to decrypt key, returning empty');
-    return '';
+    throw new Error('legacy_safe_storage_decrypt_failed');
   }
+}
+
+function secretsEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left || ''), 'utf8');
+  const rightBuffer = Buffer.from(String(right || ''), 'utf8');
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 function maskApiKey(key) {
@@ -91,22 +102,26 @@ const PROVIDER_DEFAULTS = {
   anthropic: { baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-20250514' },
 };
 
-// 订阅 token 集合以加密 JSON 形态存于 item.oauthTokens。
-function decryptTokens(stored) {
-  const raw = decrypt(stored);
+function parseLegacyTokens(stored, decryptSecret = decryptLegacySecret) {
+  const raw = decryptSecret(stored);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === 'object' ? parsed : null;
   } catch {
-    return null;
+    throw new Error('legacy_oauth_tokens_invalid');
   }
 }
 
-// 由存储的 token 推导对外可见的登录态(不泄漏 token 本身)。
+// 仅从非敏感元数据推导列表状态，避免渲染时访问平台安全存储。
 function oauthStatusOf(item) {
-  if (item.authMethod !== 'oauth_chatgpt' && item.authMethod !== 'oauth_google' && item.authMethod !== 'oauth_grok') return undefined;
-  return deriveOAuthStatus(decryptTokens(item.oauthTokens));
+  if (!isOAuthAuthMethod(item.authMethod)) return undefined;
+  if (!item.oauthConfigured) return { status: 'disconnected' };
+  return deriveOAuthStatus({
+    access: 'configured',
+    expires: typeof item.oauthExpires === 'number' ? item.oauthExpires : undefined,
+    accountId: item.oauthAccountId,
+  });
 }
 
 function normalizeAuthMethod(value) {
@@ -146,13 +161,155 @@ function applyExplicitModelMetadataPatch(item, patch) {
     if (modelLabel) item.modelLabel = modelLabel;
     else delete item.modelLabel;
   }
-  if (patch.contextWindow !== undefined) item.contextWindow = patch.contextWindow || undefined;
-  if (patch.maxOutputTokens !== undefined) item.maxOutputTokens = patch.maxOutputTokens || undefined;
-  if (patch.supportsVision !== undefined) item.supportsVision = patch.supportsVision;
-  if (patch.supportsReasoning !== undefined) item.supportsReasoning = patch.supportsReasoning;
+  if (patch.metadataSource !== undefined) {
+    const source = String(patch.metadataSource || '').trim();
+    if (['remote', 'builtin', 'local', 'manual'].includes(source)) item.metadataSource = source;
+    else delete item.metadataSource;
+  }
+  if (patch.metadataSyncedAt !== undefined) {
+    const syncedAt = String(patch.metadataSyncedAt || '').trim();
+    if (syncedAt) item.metadataSyncedAt = syncedAt;
+    else delete item.metadataSyncedAt;
+  }
+  const optionalFields = [
+    'contextWindow',
+    'maxOutputTokens',
+    'inputPrice',
+    'outputPrice',
+    'cacheWritePrice',
+    'cacheReadPrice',
+    'reasoningParamStyle',
+    'reasoningEffortMap',
+    'supportsPromptCaching',
+    'supportsVision',
+    'supportsReasoning',
+  ];
+  for (const field of optionalFields) {
+    if (patch[field] === undefined) continue;
+    if (patch[field] === null || patch[field] === '') delete item[field];
+    else item[field] = patch[field];
+  }
 }
 
-export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {}) {
+export function createLlmConfigStore({
+  configFile = pathOf('llmProviders'),
+  credentialClient: providedCredentialClient,
+  credentialDataHome,
+  legacySecretDecryptor = decryptLegacySecret,
+} = {}) {
+  let productionCredentialClient;
+  function credentials() {
+    if (providedCredentialClient) return providedCredentialClient;
+    productionCredentialClient ??= createDesktopModelCredentialClient({
+      dataHome: credentialDataHome || getDataHome(),
+    });
+    return productionCredentialClient;
+  }
+
+  function groupKey(item) {
+    return String(item?.groupId || item?.id || '').trim();
+  }
+
+  function readApiKey(item) {
+    const key = groupKey(item);
+    return key ? credentials().getSecret(modelApiKeyCredentialKey(key)) || '' : '';
+  }
+
+  function readOAuthClientSecret(item) {
+    const key = groupKey(item);
+    return key ? credentials().getSecret(modelOauthClientSecretCredentialKey(key)) || '' : '';
+  }
+
+  function readOAuthTokens(item) {
+    const key = groupKey(item);
+    if (!key) return null;
+    const raw = credentials().getSecret(modelOauthCredentialKey(key));
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      throw new Error('credential_oauth_tokens_invalid');
+    }
+  }
+
+  function writeVerifiedSecret(key, secret) {
+    if (!secret) {
+      credentials().deleteSecret(key);
+      if (credentials().getSecret(key) !== null) {
+        throw new Error('credential_delete_verify_failed');
+      }
+      return;
+    }
+    credentials().setSecret(key, secret);
+    const verify = credentials().getSecret(key);
+    if (!secretsEqual(secret, verify)) throw new Error('credential_migration_verify_failed');
+  }
+
+  function setGroupApiKey(groupId, value) {
+    writeVerifiedSecret(modelApiKeyCredentialKey(groupId), String(value || ''));
+  }
+
+  function setGroupOAuthClientSecret(groupId, value) {
+    writeVerifiedSecret(modelOauthClientSecretCredentialKey(groupId), String(value || ''));
+  }
+
+  function setGroupOAuthTokens(groupId, tokens) {
+    const serialized = tokens ? JSON.stringify(tokens) : '';
+    writeVerifiedSecret(modelOauthCredentialKey(groupId), serialized);
+  }
+
+  function removeGroupSecrets(groupId) {
+    if (!groupId) return;
+    writeVerifiedSecret(modelApiKeyCredentialKey(groupId), '');
+    writeVerifiedSecret(modelOauthClientSecretCredentialKey(groupId), '');
+    writeVerifiedSecret(modelOauthCredentialKey(groupId), '');
+  }
+
+  function syncGroupSecretMetadata(items, groupId, metadata) {
+    for (const item of items) {
+      if (groupKey(item) !== groupId) continue;
+      Object.assign(item, metadata);
+    }
+  }
+
+  function snapshotGroupSecrets(groupId) {
+    return {
+      apiKey: credentials().getSecret(modelApiKeyCredentialKey(groupId)),
+      oauthClientSecret: credentials().getSecret(
+        modelOauthClientSecretCredentialKey(groupId),
+      ),
+      oauthTokens: credentials().getSecret(modelOauthCredentialKey(groupId)),
+    };
+  }
+
+  function restoreGroupSecrets(groupId, snapshot) {
+    writeVerifiedSecret(modelApiKeyCredentialKey(groupId), snapshot.apiKey || '');
+    writeVerifiedSecret(
+      modelOauthClientSecretCredentialKey(groupId),
+      snapshot.oauthClientSecret || '',
+    );
+    writeVerifiedSecret(modelOauthCredentialKey(groupId), snapshot.oauthTokens || '');
+  }
+
+  function withGroupSecretTransaction(groupId, mutateSecrets, writeMetadata) {
+    const snapshot = snapshotGroupSecrets(groupId);
+    try {
+      mutateSecrets();
+      return writeMetadata();
+    } catch (error) {
+      try {
+        restoreGroupSecrets(groupId, snapshot);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          'credential_transaction_rollback_failed',
+        );
+      }
+      throw error;
+    }
+  }
+
   // 订阅(codex 平面)provider 的就地迁移:
   // - 旧版默认 model 是 gpt-5 / gpt-5-codex(按量计费命名),订阅平面已不适用;
   //   非合法订阅 id 一律纠正为权威默认(gpt-5.5)。
@@ -259,8 +416,10 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
         delete item.wireOverride;
         changed = true;
       }
-      if (item.apiKey?.data) {
-        item.apiKey = encrypt('');
+      if (item.apiKey !== undefined) {
+        delete item.apiKey;
+        item.apiKeyConfigured = false;
+        delete item.apiKeyMasked;
         changed = true;
       }
       const before = JSON.stringify({
@@ -301,40 +460,175 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     return true;
   }
 
+  function mergeLegacySecret(group, field, value) {
+    if (group[`${field}Present`]) {
+      const current = field === 'oauthTokens'
+        ? JSON.stringify(group[field] || null)
+        : String(group[field] || '');
+      const incoming = field === 'oauthTokens'
+        ? JSON.stringify(value || null)
+        : String(value || '');
+      if (!secretsEqual(current, incoming)) {
+        throw new Error(`legacy_credential_conflict:${group.groupId}:${field}`);
+      }
+      return;
+    }
+    group[`${field}Present`] = true;
+    group[field] = value;
+  }
+
+  function rollbackCredentialSnapshots(snapshots, cause) {
+    const rollbackErrors = [];
+    for (const [groupId, snapshot] of snapshots) {
+      try {
+        restoreGroupSecrets(groupId, snapshot);
+      } catch (error) {
+        rollbackErrors.push(error);
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError(
+        [cause, ...rollbackErrors],
+        'credential_migration_rollback_failed',
+      );
+    }
+    throw cause;
+  }
+
+  function migrateLegacyCredentials(items) {
+    const groups = new Map();
+    for (const item of items) {
+      const hasLegacySecret = item.apiKey !== undefined
+        || item.oauthClientSecret !== undefined
+        || item.oauthTokens !== undefined;
+      if (!hasLegacySecret) continue;
+      const groupId = groupKey(item);
+      if (!groupId) throw new Error('legacy_credential_group_missing');
+      const group = groups.get(groupId) || { groupId };
+      if (item.apiKey !== undefined) {
+        mergeLegacySecret(group, 'apiKey', legacySecretDecryptor(item.apiKey));
+      }
+      if (item.oauthClientSecret !== undefined) {
+        mergeLegacySecret(
+          group,
+          'oauthClientSecret',
+          legacySecretDecryptor(item.oauthClientSecret),
+        );
+      }
+      if (item.oauthTokens !== undefined) {
+        mergeLegacySecret(
+          group,
+          'oauthTokens',
+          parseLegacyTokens(item.oauthTokens, legacySecretDecryptor),
+        );
+      }
+      groups.set(groupId, group);
+    }
+    if (groups.size === 0) return null;
+
+    const snapshots = new Map();
+    for (const group of groups.values()) {
+      snapshots.set(group.groupId, snapshotGroupSecrets(group.groupId));
+    }
+    try {
+      for (const group of groups.values()) {
+        if (group.apiKeyPresent) setGroupApiKey(group.groupId, group.apiKey);
+        if (group.oauthClientSecretPresent) {
+          setGroupOAuthClientSecret(group.groupId, group.oauthClientSecret);
+        }
+        if (group.oauthTokensPresent) setGroupOAuthTokens(group.groupId, group.oauthTokens);
+      }
+    } catch (error) {
+      rollbackCredentialSnapshots(snapshots, error);
+    }
+
+    for (const item of items) {
+      const group = groups.get(groupKey(item));
+      if (!group) continue;
+      if (group.apiKeyPresent) {
+        item.apiKeyConfigured = Boolean(group.apiKey);
+        if (group.apiKey) item.apiKeyMasked = maskApiKey(group.apiKey);
+        else delete item.apiKeyMasked;
+      }
+      if (group.oauthClientSecretPresent) {
+        item.oauthClientSecretConfigured = Boolean(group.oauthClientSecret);
+      }
+      if (group.oauthTokensPresent) {
+        const tokens = group.oauthTokens;
+        item.oauthConfigured = Boolean(tokens?.access);
+        if (typeof tokens?.expires === 'number') item.oauthExpires = tokens.expires;
+        else delete item.oauthExpires;
+        if (tokens?.accountId) item.oauthAccountId = String(tokens.accountId);
+        else delete item.oauthAccountId;
+      }
+      delete item.apiKey;
+      delete item.oauthClientSecret;
+      delete item.oauthTokens;
+    }
+    return snapshots;
+  }
+
   function readAll() {
     if (!existsSync(configFile)) return [];
+    let parsed;
     try {
-      const parsed = JSON.parse(readFileSync(configFile, 'utf8'));
-      if (!Array.isArray(parsed)) return [];
-      let migrated = false;
-      for (const item of parsed) {
-        if (migrateChannelItem(item)) migrated = true;
-        if (migrateSubscriptionItem(item)) migrated = true;
-        if (migrateGroupId(item)) migrated = true;
-      }
-      if (migrated) {
-        try { writeAll(parsed); } catch { /* 回写失败不影响本次读取 */ }
-      }
-      return parsed;
+      parsed = JSON.parse(readFileSync(configFile, 'utf8'));
     } catch {
       return [];
     }
+    if (!Array.isArray(parsed)) return [];
+    let migrated = false;
+    for (const item of parsed) {
+      if (migrateChannelItem(item)) migrated = true;
+      if (migrateSubscriptionItem(item)) migrated = true;
+      if (migrateGroupId(item)) migrated = true;
+    }
+    const credentialSnapshots = migrateLegacyCredentials(parsed);
+    if (credentialSnapshots) migrated = true;
+    if (migrated) {
+      try {
+        writeAll(parsed);
+      } catch (error) {
+        if (credentialSnapshots) rollbackCredentialSnapshots(credentialSnapshots, error);
+        throw error;
+      }
+    }
+    return parsed;
   }
 
   function writeAll(items) {
-    mkdirSync(path.dirname(configFile), { recursive: true });
-    writeFileSync(configFile, JSON.stringify(items, null, 2), 'utf8');
+    const directory = path.dirname(configFile);
+    mkdirSync(directory, { recursive: true });
+    const temporaryFile = path.join(
+      directory,
+      `.${path.basename(configFile)}.${process.pid}.${randomUUID()}.tmp`,
+    );
+    let descriptor;
+    try {
+      descriptor = openSync(temporaryFile, 'wx', 0o600);
+      writeFileSync(descriptor, JSON.stringify(items, null, 2), 'utf8');
+      fsyncSync(descriptor);
+      closeSync(descriptor);
+      descriptor = undefined;
+      renameSync(temporaryFile, configFile);
+    } catch (error) {
+      if (descriptor !== undefined) {
+        try { closeSync(descriptor); } catch { /* best effort */ }
+      }
+      try { unlinkSync(temporaryFile); } catch { /* best effort */ }
+      throw error;
+    }
   }
 
   function toView(item) {
-    const key = decrypt(item.apiKey);
-    const oauthClientSecret = decrypt(item.oauthClientSecret);
+    const oauthStatus = oauthStatusOf(item);
     const resolved = (() => {
       try {
-        const authToken = isOAuthAuthMethod(item.authMethod)
-          ? (decryptTokens(item.oauthTokens)?.access || '')
-          : key;
-        return resolveChannel({ ...item, apiKey: authToken, accountId: oauthStatusOf(item)?.accountId });
+        return resolveChannel({
+          ...item,
+          apiKey: item.apiKeyConfigured || item.oauthConfigured ? 'configured' : '',
+          accountId: oauthStatus?.accountId,
+        });
       } catch {
         return null;
       }
@@ -347,11 +641,13 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       resolvedWire: resolved?.wire,
       wireOverride: item.wireOverride,
       authMethod: item.authMethod || 'api_key',
-      oauthStatus: oauthStatusOf(item),
+      oauthStatus,
       name: item.name,
       baseUrl: item.baseUrl,
       model: item.model,
       modelLabel: item.modelLabel || undefined,
+      metadataSource: item.metadataSource || undefined,
+      metadataSyncedAt: item.metadataSyncedAt || undefined,
       enabled: item.enabled,
       isDefault: item.isDefault,
       createdAt: item.createdAt,
@@ -365,26 +661,26 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       longContextInputPrice: item.longContextInputPrice ?? undefined,
       longContextCacheReadPrice: item.longContextCacheReadPrice ?? undefined,
       longContextOutputPrice: item.longContextOutputPrice ?? undefined,
-      supportsVision: item.supportsVision ?? false,
-      supportsReasoning: item.supportsReasoning ?? false,
-      supportsPromptCaching: item.supportsPromptCaching ?? false,
-      reasoningParamStyle: item.reasoningParamStyle ?? resolved?.reasoningParamStyle,
-      reasoningEffortMap: item.reasoningEffortMap ?? resolved?.reasoningEffortMap ?? undefined,
-      reasoningEffortLevels: item.reasoningEffortLevels ?? resolved?.reasoningEffortLevels ?? undefined,
+      supportsVision: item.supportsVision ?? undefined,
+      supportsReasoning: item.supportsReasoning ?? undefined,
+      supportsPromptCaching: item.supportsPromptCaching ?? undefined,
+      reasoningParamStyle: item.reasoningParamStyle ?? undefined,
+      reasoningEffortMap: item.reasoningEffortMap ?? undefined,
+      reasoningEffortLevels: item.reasoningEffortLevels ?? undefined,
       oauthClientId: item.oauthClientId ?? undefined,
       oauthProjectId: item.oauthProjectId ?? undefined,
       customHeaders: item.customHeaders ?? undefined,
       customHeadersInvalid: item.customHeadersInvalid ?? undefined,
-      apiKeyMasked: maskApiKey(key),
+      apiKeyMasked: item.apiKeyMasked || '',
       // 订阅链路无 API Key,凭据是否就绪以 OAuth 登录态(connected)为准；
       // 本机 CLI 链路的登录态由外部应用维护,Peer Agent 只检查命令与登录态是否可用。
       apiKeyConfigured:
         isLocalCliAuthMethod(item.authMethod)
           ? true
           : isOAuthAuthMethod(item.authMethod)
-          ? oauthStatusOf(item)?.status === 'connected'
-          : Boolean(key),
-      oauthClientSecretConfigured: Boolean(oauthClientSecret),
+          ? oauthStatus?.status === 'connected'
+          : Boolean(item.apiKeyConfigured),
+      oauthClientSecretConfigured: Boolean(item.oauthClientSecretConfigured),
     };
   }
 
@@ -402,7 +698,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     return expandQoderProviders(subscriptionExpanded, () => getQoderModelCatalog());
   }
 
-  function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, apiKey, contextWindow, maxOutputTokens, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthClientId, oauthClientSecret, oauthProjectId, customHeaders }) {
+  function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, modelLabel, metadataSource, metadataSyncedAt, apiKey, contextWindow, maxOutputTokens, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthClientId, oauthClientSecret, oauthProjectId, customHeaders }) {
     const items = readAll();
     const method = normalizeAuthMethod(authMethod);
     const channelId = method === 'oauth_chatgpt'
@@ -429,8 +725,8 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       authMethod: method,
       baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : (isLocalQoderAuth ? defaults.baseUrl : (baseUrl || defaults.baseUrl)),
       apiKey: isSubscription || isGoogleOAuth || isGrokOAuth || isLocalQoderAuth ? '' : (apiKey || ''),
-      supportsReasoning: isSubscription ? true : (isLocalQoderAuth ? false : (supportsReasoning ?? false)),
-      supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (isLocalQoderAuth ? false : (supportsPromptCaching ?? false)),
+      supportsReasoning: isSubscription ? true : (isLocalQoderAuth ? false : supportsReasoning),
+      supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (isLocalQoderAuth ? false : supportsPromptCaching),
       supportsVision,
       reasoningParamStyle,
       reasoningEffortMap,
@@ -451,11 +747,14 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : isLocalQoderAuth ? defaults.baseUrl : baseUrl || defaults.baseUrl,
       // 订阅默认落到权威清单的最新模型(gpt-5.5),非订阅沿用各家 preset。
       model: selectedModel,
-      apiKey: encrypt(isSubscription || isGoogleOAuth || isGrokOAuth || isLocalQoderAuth ? '' : apiKey || ''),
+      modelLabel: modelLabel || undefined,
+      metadataSource: isSubscription ? 'builtin' : isLocalQoderAuth ? 'local' : metadataSource,
+      metadataSyncedAt: isSubscription || isLocalQoderAuth ? new Date().toISOString() : metadataSyncedAt,
+      apiKeyConfigured: false,
       oauthClientId: isGoogleOAuth ? String(oauthClientId || '').trim() || undefined : undefined,
-      oauthClientSecret: encrypt(isGoogleOAuth ? String(oauthClientSecret || '') : ''),
+      oauthClientSecretConfigured: false,
       oauthProjectId: isGoogleOAuth ? String(oauthProjectId || '').trim() || undefined : undefined,
-      oauthTokens: encrypt(''),
+      oauthConfigured: false,
       enabled: true,
       isDefault: items.length === 0,
       createdAt: new Date().toISOString(),
@@ -469,19 +768,47 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       longContextInputPrice: isSubscription ? subscriptionMetadata?.longContextInputPrice : undefined,
       longContextCacheReadPrice: isSubscription ? subscriptionMetadata?.longContextCacheReadPrice : undefined,
       longContextOutputPrice: isSubscription ? subscriptionMetadata?.longContextOutputPrice : undefined,
-      supportsVision: isLocalQoderAuth ? false : (supportsVision ?? false),
-      // 订阅链路(codex/responses)原生支持思考强度,默认开启。
-      supportsReasoning: isSubscription ? true : (isLocalQoderAuth ? false : (supportsReasoning ?? false)),
-      supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (isLocalQoderAuth ? false : (supportsPromptCaching ?? false)),
+      supportsVision: isLocalQoderAuth ? false : supportsVision,
+      // 订阅链路(codex/responses)原生支持思考强度,默认开启；API Key 目录未返回的能力保持未知。
+      supportsReasoning: isSubscription ? true : (isLocalQoderAuth ? false : supportsReasoning),
+      supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (isLocalQoderAuth ? false : supportsPromptCaching),
       reasoningParamStyle: reasoningParamStyle || undefined,
       reasoningEffortMap: resolved.reasoningEffortMap || undefined,
       customHeaders: customHeaders || undefined,
     };
     if (isLocalQoderAuth) applyQoderModelMetadata(item);
     item.provider = legacyProviderForWire(resolved.wire);
+
+    const existingGroup = items.find((candidate) => groupKey(candidate) === item.groupId);
+    if (existingGroup) {
+      item.apiKeyConfigured = Boolean(existingGroup.apiKeyConfigured);
+      item.apiKeyMasked = existingGroup.apiKeyMasked || undefined;
+      item.oauthClientSecretConfigured = Boolean(existingGroup.oauthClientSecretConfigured);
+      item.oauthConfigured = Boolean(existingGroup.oauthConfigured);
+      item.oauthExpires = existingGroup.oauthExpires;
+      item.oauthAccountId = existingGroup.oauthAccountId;
+      items.push(item);
+      writeAll(items);
+      return toView(item);
+    }
+
+    const storedApiKey = isOAuthAuthMethod(method) || isLocalQoderAuth ? '' : String(apiKey || '');
+    const storedOauthClientSecret = isGoogleOAuth ? String(oauthClientSecret || '') : '';
+    item.apiKeyConfigured = Boolean(storedApiKey);
+    item.apiKeyMasked = storedApiKey ? maskApiKey(storedApiKey) : undefined;
+    item.oauthClientSecretConfigured = Boolean(storedOauthClientSecret);
     items.push(item);
-    writeAll(items);
-    return toView(item);
+    return withGroupSecretTransaction(
+      item.groupId,
+      () => {
+        setGroupApiKey(item.groupId, storedApiKey);
+        setGroupOAuthClientSecret(item.groupId, storedOauthClientSecret);
+      },
+      () => {
+        writeAll(items);
+        return toView(item);
+      },
+    );
   }
 
   function updateProvider(id, patch) {
@@ -489,6 +816,10 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     const idx = items.findIndex((i) => i.id === id);
     if (idx < 0) throw new Error(`Provider ${id} not found`);
     const item = items[idx];
+    const groupId = groupKey(item);
+    const previousAuthMethod = normalizeAuthMethod(item.authMethod);
+    if (patch.authMethod !== undefined) item.authMethod = normalizeAuthMethod(patch.authMethod);
+    const leavingOAuth = isOAuthAuthMethod(previousAuthMethod) && !isOAuthAuthMethod(item.authMethod);
     if (patch.provider !== undefined) {
       item.provider = patch.provider;
       if (patch.channelId === undefined) {
@@ -505,25 +836,33 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     }
     applyExplicitModelMetadataPatch(item, patch);
     if (patch.enabled !== undefined) item.enabled = patch.enabled;
-    if (patch.apiKey !== undefined) item.apiKey = encrypt(patch.apiKey);
+    if (patch.apiKey !== undefined) {
+      syncGroupSecretMetadata(items, groupId, {
+        apiKeyConfigured: Boolean(patch.apiKey),
+        apiKeyMasked: patch.apiKey ? maskApiKey(patch.apiKey) : undefined,
+      });
+    }
     if (patch.oauthClientId !== undefined) item.oauthClientId = patch.oauthClientId || undefined;
-    if (patch.oauthClientSecret !== undefined) item.oauthClientSecret = encrypt(patch.oauthClientSecret || '');
+    if (patch.oauthClientSecret !== undefined) {
+      syncGroupSecretMetadata(items, groupId, {
+        oauthClientSecretConfigured: Boolean(patch.oauthClientSecret),
+      });
+    }
     if (patch.oauthProjectId !== undefined) item.oauthProjectId = patch.oauthProjectId || undefined;
-    if (patch.contextWindow !== undefined) item.contextWindow = patch.contextWindow || undefined;
-    if (patch.maxOutputTokens !== undefined) item.maxOutputTokens = patch.maxOutputTokens || undefined;
-    if (patch.inputPrice !== undefined) item.inputPrice = patch.inputPrice;
-    if (patch.outputPrice !== undefined) item.outputPrice = patch.outputPrice;
-    if (patch.cacheWritePrice !== undefined) item.cacheWritePrice = patch.cacheWritePrice;
-    if (patch.cacheReadPrice !== undefined) item.cacheReadPrice = patch.cacheReadPrice;
-    if (patch.supportsVision !== undefined) item.supportsVision = patch.supportsVision;
-    if (patch.supportsReasoning !== undefined) item.supportsReasoning = patch.supportsReasoning;
-    if (patch.supportsPromptCaching !== undefined) item.supportsPromptCaching = patch.supportsPromptCaching;
-    if (patch.reasoningParamStyle !== undefined) item.reasoningParamStyle = patch.reasoningParamStyle || undefined;
-    if (patch.reasoningEffortMap !== undefined) item.reasoningEffortMap = patch.reasoningEffortMap || undefined;
     if (patch.customHeaders !== undefined) {
       validateCustomHeaders(patch.customHeaders || {});
       item.customHeaders = patch.customHeaders || undefined;
       delete item.customHeadersInvalid;
+    }
+    if (leavingOAuth) {
+      syncGroupSecretMetadata(items, groupId, {
+        oauthConfigured: false,
+        oauthExpires: undefined,
+        oauthAccountId: undefined,
+        oauthClientId: undefined,
+        oauthClientSecretConfigured: false,
+        oauthProjectId: undefined,
+      });
     }
     if (item.authMethod === 'oauth_chatgpt') {
       item.name = CHATGPT_SUBSCRIPTION_NAME;
@@ -546,7 +885,6 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       delete item.wireOverride;
       item.provider = 'openai';
       item.baseUrl = defaultsForChannel('grok').baseUrl;
-      item.apiKey = encrypt('');
       item.supportsReasoning = true;
     }
     if (item.authMethod === 'qoder_local_auth' || item.authMethod === 'local_cli') {
@@ -555,22 +893,38 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       delete item.wireOverride;
       item.provider = 'openai';
       item.baseUrl = defaultsForChannel('qoder').baseUrl;
-      item.apiKey = encrypt('');
+      syncGroupSecretMetadata(items, groupId, {
+        apiKeyConfigured: false,
+        apiKeyMasked: undefined,
+      });
       applyQoderModelMetadata(item);
       applyExplicitModelMetadataPatch(item, patch);
     }
     const resolved = resolveChannel({
       ...item,
-      apiKey: isOAuthAuthMethod(item.authMethod)
-        ? (decryptTokens(item.oauthTokens)?.access || '')
-        : decrypt(item.apiKey),
+      apiKey: item.apiKeyConfigured || item.oauthConfigured ? 'configured' : '',
       accountId: oauthStatusOf(item)?.accountId,
     });
     item.provider = legacyProviderForWire(resolved.wire);
-    item.reasoningEffortMap = resolved.reasoningEffortMap || undefined;
     items[idx] = item;
-    writeAll(items);
-    return toView(item);
+    return withGroupSecretTransaction(
+      groupId,
+      () => {
+        if (patch.apiKey !== undefined) setGroupApiKey(groupId, patch.apiKey || '');
+        if (patch.oauthClientSecret !== undefined) {
+          setGroupOAuthClientSecret(groupId, patch.oauthClientSecret || '');
+        }
+        if (leavingOAuth) {
+          setGroupOAuthClientSecret(groupId, '');
+          setGroupOAuthTokens(groupId, null);
+        }
+        if (isLocalCliAuthMethod(item.authMethod)) setGroupApiKey(groupId, '');
+      },
+      () => {
+        writeAll(items);
+        return toView(item);
+      },
+    );
   }
 
   function removeProvider(id) {
@@ -580,22 +934,46 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     if (removed?.isDefault && items.length > 0) {
       items[0].isDefault = true;
     }
-    writeAll(items);
-    return items.map(toView);
+    const removedGroupId = removed ? groupKey(removed) : '';
+    const groupIsEmpty = removedGroupId
+      ? !items.some((item) => groupKey(item) === removedGroupId)
+      : false;
+    if (!groupIsEmpty) {
+      writeAll(items);
+      return items.map(toView);
+    }
+    return withGroupSecretTransaction(
+      removedGroupId,
+      () => removeGroupSecrets(removedGroupId),
+      () => {
+        writeAll(items);
+        return items.map(toView);
+      },
+    );
   }
 
   // B-2 删除整个 provider 组(同 groupId 的全部模型)。
   // 若删掉的组里含当前默认模型,则把剩余首条记录设为默认(与 removeProvider 一致)。
   function removeGroup(groupId) {
     let items = readAll();
-    const removed = items.filter((i) => (i.groupId || i.id) === groupId);
+    const removed = items.filter((i) => groupKey(i) === groupId);
     const hadDefault = removed.some((i) => i.isDefault);
-    items = items.filter((i) => (i.groupId || i.id) !== groupId);
+    items = items.filter((i) => groupKey(i) !== groupId);
     if (hadDefault && items.length > 0) {
       items[0].isDefault = true;
     }
-    writeAll(items);
-    return items.map(toView);
+    if (removed.length === 0) {
+      writeAll(items);
+      return items.map(toView);
+    }
+    return withGroupSecretTransaction(
+      groupId,
+      () => removeGroupSecrets(groupId),
+      () => {
+        writeAll(items);
+        return items.map(toView);
+      },
+    );
   }
 
   function setDefault(id) {
@@ -618,8 +996,8 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
 
   // 复制一个已有 provider，生成可独立编辑的副本。
   // 订阅(OAuth)类型不允许复制：其身份绑定登录态/token，复制无意义且有安全风险。
-  // 副本：新 id、不继承默认标记、不复制 OAuth token，名称智能去重。
-  // apiKey 按产品决策随副本一起复制(密文深拷贝)，副本开箱即用。
+  // 副本：新 id/新 groupId、不继承默认标记、不复制 OAuth token，名称智能去重。
+  // API Key 与 OAuth client secret 按产品决策复制到副本自己的 Vault 键，副本开箱即用。
   function duplicateProvider(id) {
     const items = readAll();
     const source = items.find((i) => i.id === id);
@@ -627,20 +1005,37 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     if (isOAuthAuthMethod(source.authMethod)) {
       throw new Error('Subscription providers cannot be duplicated');
     }
+    const copyId = randomUUID();
     const copy = {
       ...source,
-      id: randomUUID(),
+      id: copyId,
+      groupId: copyId,
       name: nextCopyName(source.name, items.map((i) => i.name)),
-      apiKey: source.apiKey ? { ...source.apiKey } : encrypt(''),
-      oauthClientSecret: source.oauthClientSecret ? { ...source.oauthClientSecret } : encrypt(''),
-      oauthTokens: encrypt(''),
+      oauthConfigured: false,
+      oauthExpires: undefined,
+      oauthAccountId: undefined,
       isDefault: false,
       enabled: true,
       createdAt: new Date().toISOString(),
     };
+    const sourceApiKey = readApiKey(source);
+    const sourceOauthClientSecret = readOAuthClientSecret(source);
+    copy.apiKeyConfigured = Boolean(sourceApiKey);
+    copy.apiKeyMasked = sourceApiKey ? maskApiKey(sourceApiKey) : undefined;
+    copy.oauthClientSecretConfigured = Boolean(sourceOauthClientSecret);
     items.push(copy);
-    writeAll(items);
-    return toView(copy);
+    return withGroupSecretTransaction(
+      copy.groupId,
+      () => {
+        setGroupApiKey(copy.groupId, sourceApiKey);
+        setGroupOAuthClientSecret(copy.groupId, sourceOauthClientSecret);
+        setGroupOAuthTokens(copy.groupId, null);
+      },
+      () => {
+        writeAll(items);
+        return toView(copy);
+      },
+    );
   }
 
   // B-2 在已有 provider 组内新增一个模型:凭证(apiKey/baseUrl/provider 归属)
@@ -655,7 +1050,11 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     if (isOAuthAuthMethod(source.authMethod)) {
       throw new Error('Subscription providers cannot host multiple models');
     }
-    const inheritedApiKey = decrypt(source.apiKey);
+    const model = String(patch.model || '').trim();
+    if (!model) throw new Error('model is required');
+    if (items.some((item) => (item.groupId || item.id) === groupId && item.model === model)) {
+      throw new Error(`Model ${model} already exists in provider group`);
+    }
     return addProvider({
       // 凭证与 provider 归属继承自组内首条记录
       groupId,
@@ -664,10 +1063,12 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       wireOverride: source.wireOverride,
       authMethod: source.authMethod || 'api_key',
       baseUrl: source.baseUrl,
-      apiKey: inheritedApiKey,
-      // 模型级参数来自 patch(缺省回退到 source,保证必填字段有值)
+      // 模型级参数来自 patch；连接和凭证仍继承同组记录。
       name: patch.name || source.name,
-      model: patch.model || source.model,
+      model,
+      modelLabel: patch.modelLabel,
+      metadataSource: patch.metadataSource,
+      metadataSyncedAt: patch.metadataSyncedAt,
       contextWindow: patch.contextWindow,
       maxOutputTokens: patch.maxOutputTokens,
       inputPrice: patch.inputPrice,
@@ -679,7 +1080,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       supportsPromptCaching: patch.supportsPromptCaching,
       reasoningParamStyle: patch.reasoningParamStyle,
       reasoningEffortMap: patch.reasoningEffortMap,
-      customHeaders: patch.customHeaders,
+      customHeaders: patch.customHeaders ?? source.customHeaders,
     });
   }
 
@@ -687,18 +1088,18 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     const items = readAll();
     const item = items.find((i) => i.id === id);
     if (!item) return null;
-    return decrypt(item.apiKey);
+    return readApiKey(item);
   }
 
-  // 返回订阅凭据 { tokens },tokens 为解密后的 OAuth token 集合。
+  // 返回订阅凭据 { tokens }；秘密仅在真实请求路径中通过 Helper 解封。
   function getCredential(id) {
     const items = readAll();
     const item = items.find((i) => i.id === id);
     if (!item) return null;
     return {
-      tokens: decryptTokens(item.oauthTokens),
+      tokens: readOAuthTokens(item),
       oauthClientId: item.oauthClientId,
-      oauthClientSecret: decrypt(item.oauthClientSecret),
+      oauthClientSecret: readOAuthClientSecret(item),
       oauthProjectId: item.oauthProjectId,
       authMethod: item.authMethod,
     };
@@ -720,7 +1121,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     const item = items.find((i) => i.id === id);
     if (!item) return null;
     if (isOAuthAuthMethod(item.authMethod) || isLocalCliAuthMethod(item.authMethod)) return null;
-    const apiKey = decrypt(item.apiKey);
+    const apiKey = readApiKey(item);
     if (!apiKey) return null;
     const resolved = resolveChannel({ ...item, apiKey });
     return {
@@ -731,15 +1132,27 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     };
   }
 
-  // 写入/刷新订阅 token 集合(整体加密存储)。tokens 形如
-  // { access, refresh, expires, accountId }。
+  // 写入/刷新订阅 token 集合。秘密进入统一 Vault，配置文件只保存连接状态元数据。
+  // tokens 形如 { access, refresh, expires, accountId }。
   function setOAuthTokens(id, tokens) {
     const items = readAll();
     const idx = items.findIndex((i) => i.id === id);
     if (idx < 0) throw new Error(`Provider ${id} not found`);
-    items[idx].oauthTokens = encrypt(tokens ? JSON.stringify(tokens) : '');
-    writeAll(items);
-    return toView(items[idx]);
+    const item = items[idx];
+    const groupId = groupKey(item);
+    syncGroupSecretMetadata(items, groupId, {
+      oauthConfigured: Boolean(tokens?.access),
+      oauthExpires: typeof tokens?.expires === 'number' ? tokens.expires : undefined,
+      oauthAccountId: tokens?.accountId ? String(tokens.accountId) : undefined,
+    });
+    return withGroupSecretTransaction(
+      groupId,
+      () => setGroupOAuthTokens(groupId, tokens),
+      () => {
+        writeAll(items);
+        return toView(item);
+      },
+    );
   }
 
   async function testConnection(id) {
@@ -758,7 +1171,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       return testQoderPrivate(item.model);
     }
 
-    const apiKey = decrypt(item.apiKey);
+    const apiKey = readApiKey(item);
     if (!apiKey) return { success: false, error: 'API key not configured' };
 
     const start = Date.now();

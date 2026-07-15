@@ -45,9 +45,13 @@ const packageJsonFiles = [
   'apps/desktop/package.json',
   'packages/chat-kernel/package.json',
   'packages/i18n/package.json',
-  'packages/protocol/package.json',
   'packages/task-thread/package.json',
   'packages/ui/package.json',
+];
+
+const cargoPackages = [
+  ['cu-proxy-core', 'crates/cu-proxy-core/Cargo.toml'],
+  ['peer-credential-helper', 'crates/peer-credential-helper/Cargo.toml'],
 ];
 
 const changed = [];
@@ -67,9 +71,8 @@ for (const file of packageJsonFiles) {
   }
 }
 
-// 3) crates/cu-proxy-core/Cargo.toml —— 只改 [package] 段的首个 version 行
-{
-  const file = 'crates/cu-proxy-core/Cargo.toml';
+// 3) Rust package manifests —— 只改各 [package] 段的首个 version 行
+for (const [, file] of cargoPackages) {
   const abs = join(root, file);
   const toml = readFileSync(abs, 'utf8');
   const next = toml.replace(/^version = "[^"]*"$/m, `version = "${version}"`);
@@ -79,15 +82,18 @@ for (const file of packageJsonFiles) {
   }
 }
 
-// 4) Cargo.lock —— 定位 cu-proxy-core 包条目，替换其紧邻的 version 行
+// 4) Cargo.lock —— 定位受治理的 Rust 包条目并替换其紧邻 version 行
 {
   const file = 'Cargo.lock';
   const abs = join(root, file);
   const lock = readFileSync(abs, 'utf8');
-  const next = lock.replace(
-    /(name = "cu-proxy-core"\nversion = ")[^"]*(")/,
-    `$1${version}$2`,
-  );
+  let next = lock;
+  for (const [packageName] of cargoPackages) {
+    next = next.replace(
+      new RegExp(`(name = "${packageName}"\\nversion = ")[^"]*(")`),
+      (_, prefix, suffix) => `${prefix}${version}${suffix}`,
+    );
+  }
   if (next !== lock) {
     writeFileSync(abs, next);
     changed.push(file);
