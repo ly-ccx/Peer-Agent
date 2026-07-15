@@ -5,6 +5,8 @@ export type TuiCommandAction =
   | { readonly type: 'open-mode-picker' }
   | { readonly type: 'open-permission-picker' }
   | { readonly type: 'show-help' }
+  | { readonly type: 'clear-chat' }
+  | { readonly type: 'open-resume-picker' }
   | { readonly type: 'goal-control'; readonly control: 'pause' | 'resume' | 'cancel' }
   | { readonly type: 'quit' };
 
@@ -30,6 +32,8 @@ export const TUI_COMMAND_REGISTRY: readonly TuiCommandDefinition[] = Object.free
   { id: 'model', label: 'Model', description: 'Choose model and reasoning effort', keywords: ['provider', 'llm', 'effort'], shortcut: 'Ctrl+X M', action: { type: 'open-model-picker' } },
   { id: 'mode', label: 'Mode', description: 'Choose Chat, Plan, or Goal', keywords: ['chat', 'plan', 'goal'], shortcut: 'Ctrl+X O', action: { type: 'open-mode-picker' } },
   { id: 'permissions', label: 'Permissions', description: 'Choose the session permission policy', keywords: ['access', 'approval', 'ask'], shortcut: 'Ctrl+X P', action: { type: 'open-permission-picker' } },
+  { id: 'clear', label: 'Clear chat', description: 'Clear messages, model context, and errors', keywords: ['reset', 'conversation', 'error'], action: { type: 'clear-chat' } },
+  { id: 'resume', label: 'Resume session', description: 'Restore and continue a saved conversation', keywords: ['session', 'conversation', 'history', 'restore'], action: { type: 'open-resume-picker' } },
   { id: 'goal-pause', label: 'Pause goal', description: 'Pause the active goal after the current safe boundary', keywords: ['hold'], action: { type: 'goal-control', control: 'pause' }, visible: GOAL_RUNNING },
   { id: 'goal-resume', label: 'Resume goal', description: 'Resume the paused goal', keywords: ['continue'], action: { type: 'goal-control', control: 'resume' }, visible: GOAL_PAUSED },
   { id: 'goal-cancel', label: 'Cancel goal', description: 'Cancel the active goal', keywords: ['stop', 'abort'], action: { type: 'goal-control', control: 'cancel' }, visible: GOAL_ACTIVE },

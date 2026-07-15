@@ -107,6 +107,18 @@ function MainApp() {
     } catch {}
   }, [activeWorkspace, conversationView]);
 
+  useEffect(() => {
+    const refreshExternalConversations = () => {
+      if (document.visibilityState === 'visible') void refreshConversations();
+    };
+    window.addEventListener('focus', refreshExternalConversations);
+    document.addEventListener('visibilitychange', refreshExternalConversations);
+    return () => {
+      window.removeEventListener('focus', refreshExternalConversations);
+      document.removeEventListener('visibilitychange', refreshExternalConversations);
+    };
+  }, [refreshConversations]);
+
   const refreshSettings = useCallback(async () => {
     try {
       const settings = await clientApi.getSettings();

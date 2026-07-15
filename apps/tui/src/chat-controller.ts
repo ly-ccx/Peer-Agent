@@ -68,10 +68,17 @@ export interface ChatModelPort extends RuntimePipelineModelAdapter<
   string
 > {}
 
+export interface ChatRestoreInput {
+  readonly mode: TuiMode;
+  readonly messages: readonly ChatMessage[];
+}
+
 export interface ChatController {
   getSnapshot(): ChatSnapshot;
   subscribe(listener: (snapshot: ChatSnapshot) => void): () => void;
   setMode(mode: TuiMode): boolean;
+  restore(input: ChatRestoreInput): boolean;
+  clear(): boolean;
   send(content: string): Promise<void>;
   executeGoalTask(
     task: RuntimeGoalTaskInput,
@@ -189,6 +196,19 @@ export function createChatController(options: {
       publish({ ...snapshot, mode: nextMode });
       return true;
     },
+    restore(input) {
+      if (activeTurn || snapshot.status !== 'idle') return false;
+      const messages = input.messages
+        .filter((message) => !message.pending)
+        .map((message) => ({ ...message, pending: undefined }));
+      conversationModelMessages = messages
+        .filter((message) => message.role === 'user' || message.role === 'assistant')
+        .map((message) => ({ role: message.role, content: message.content }));
+      executionEvidenceIds = [];
+      sequence = messages.length;
+      publish({ status: 'idle', mode: normalizeTuiMode(input.mode), messages });
+      return true;
+    },
     async send(content) {
       const trimmed = content.trim();
       if (!trimmed || activeTurn) return;
@@ -270,6 +290,13 @@ export function createChatController(options: {
       } finally {
         if (activeTurn === turn) activeTurn = null;
       }
+    },
+    clear() {
+      if (activeTurn) return false;
+      conversationModelMessages = [];
+      executionEvidenceIds = [];
+      publish({ status: 'idle', mode: snapshot.mode, messages: [] });
+      return true;
     },
     async executeGoalTask(task, context) {
       if (activeTurn) return { status: 'blocked', reason: 'chat_turn_active' };

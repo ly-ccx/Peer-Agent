@@ -42,6 +42,18 @@ describe('TUI app layout', () => {
     expect(dockSource).toContain('flexShrink={0}');
   });
 
+  test('keeps long errors from displacing slash command suggestions', () => {
+    const errorSource = appSource.slice(
+      appSource.indexOf('function ErrorBanner'),
+      appSource.indexOf('function SlashCommandMenu'),
+    );
+
+    expect(errorSource).toContain('height={1}');
+    expect(errorSource).toContain('flexShrink={0}');
+    expect(errorSource).toContain('wrapMode="none"');
+    expect(appSource).toContain('paddingTop={menuReserve}');
+  });
+
   test('keeps the composer input pure and places status outside its border', () => {
     expect(appSource).toContain("placeholder={disabled ? 'Resolve the request above…' : 'Ask anything…'}");
     const dockSource = appSource.slice(

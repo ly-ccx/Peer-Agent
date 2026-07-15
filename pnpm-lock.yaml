@@ -27,6 +27,9 @@ importers:
       '@peer-agent/chat-kernel':
         specifier: workspace:*
         version: link:../../packages/chat-kernel
+      '@peer-agent/conversation-store':
+        specifier: workspace:*
+        version: link:../../packages/conversation-store
       '@peer-agent/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
@@ -109,6 +112,9 @@ importers:
       '@opentui/react':
         specifier: 0.4.3
         version: 0.4.3(react-devtools-core@7.0.1)(react@19.2.7)(typescript@5.9.3)(web-tree-sitter@0.25.10)(ws@8.21.0)
+      '@peer-agent/conversation-store':
+        specifier: workspace:*
+        version: link:../../packages/conversation-store
       '@peer-agent/runtime-core':
         specifier: workspace:*
         version: link:../../packages/runtime-core
@@ -147,6 +153,8 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/conversation-store: {}
 
   packages/i18n:
     dependencies:

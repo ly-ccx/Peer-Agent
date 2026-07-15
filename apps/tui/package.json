@@ -16,6 +16,7 @@
   "dependencies": {
     "@opentui/core": "0.4.3",
     "@opentui/react": "0.4.3",
+    "@peer-agent/conversation-store": "workspace:*",
     "@peer-agent/credential-helper": "workspace:*",
     "@peer-agent/runtime-core": "workspace:*",
     "@peer-agent/runtime-node": "workspace:*",

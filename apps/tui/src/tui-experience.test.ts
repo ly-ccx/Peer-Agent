@@ -25,12 +25,12 @@ describe('TUI experience model', () => {
 
   test('derives commands from the shared registry and keeps Explorer internal', () => {
     expect(filterTuiCommands('').map((command) => command.id)).toEqual([
-      'model', 'mode', 'permissions', 'help', 'quit',
+      'model', 'mode', 'permissions', 'clear', 'resume', 'help', 'quit',
     ]);
     expect(TUI_COMMANDS.map((command) => command.id)).not.toContain('mode-explorer');
     expect(filterTuiCommands('provider').map((command) => command.id)).toEqual(['model']);
     expect(filterTuiCommands('hold', { goalStatus: 'running' }).map((command) => command.id)).toEqual(['goal-pause']);
-    expect(filterTuiCommands('continue', { goalStatus: 'paused' }).map((command) => command.id)).toEqual(['goal-resume']);
+    expect(filterTuiCommands('continue', { goalStatus: 'paused' }).map((command) => command.id)).toEqual(['resume', 'goal-resume']);
   });
 
   test('keeps slash command windows bounded around the selected item', () => {
@@ -39,9 +39,9 @@ describe('TUI experience model', () => {
       'model', 'mode', 'permissions',
     ]);
     expect(slashCommandWindow(commands, 3, 3).map(({ command, index }) => [command.id, index])).toEqual([
-      ['permissions', 2], ['help', 3], ['quit', 4],
+      ['permissions', 2], ['clear', 3], ['resume', 4],
     ]);
-    expect(slashCommandWindow(commands, 4, 2).map(({ command }) => command.id)).toEqual([
+    expect(slashCommandWindow(commands, 6, 2).map(({ command }) => command.id)).toEqual([
       'help', 'quit',
     ]);
   });
@@ -90,5 +90,7 @@ describe('TUI experience model', () => {
     const mode = TUI_COMMANDS.find((item) => item.id === 'mode')!;
     expect(applyTuiCommand(state, model).surface).toMatchObject({ type: 'picker', picker: 'model' });
     expect(applyTuiCommand(state, mode).surface).toMatchObject({ type: 'picker', picker: 'mode' });
+    const resume = TUI_COMMANDS.find((item) => item.id === 'resume')!;
+    expect(applyTuiCommand(state, resume).surface).toMatchObject({ type: 'picker', picker: 'resume' });
   });
 });

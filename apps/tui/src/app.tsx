@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { TextareaRenderable } from '@opentui/core';
-import { useKeyboard, useRenderer, useTerminalDimensions } from '@opentui/react';
+import { useKeyboard, useTerminalDimensions } from '@opentui/react';
 import type { RuntimeGoalSnapshot } from '@peer-agent/runtime-sdk';
 import type { RuntimeModelSelection, RuntimePermissionPolicy } from '@peer-agent/runtime-node';
 
 import { B3Wordmark } from './b3-wordmark-view.tsx';
+import { executeTuiCommand } from './command-execution.ts';
+import {
+  createTuiConversationPersistence,
+  type TuiConversationSummary,
+} from './conversation-persistence.ts';
 import {
   ComposerStatusBar,
   type ComposerStatusLayout,
@@ -104,6 +109,14 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
   );
 }
 
+function ErrorBanner({ message }: { readonly message: string }) {
+  return (
+    <box height={1} flexShrink={0} paddingLeft={2} paddingRight={2}>
+      <text fg="#fca5a5" wrapMode="none">Error: {message}</text>
+    </box>
+  );
+}
+
 function SlashCommandMenu({ commands, selectedIndex, maxVisible, showDescriptions }: {
   readonly commands: readonly TuiCommand[];
   readonly selectedIndex: number;
@@ -147,6 +160,23 @@ function SlashCommandMenu({ commands, selectedIndex, maxVisible, showDescription
           </box>
         );
       })}
+    </box>
+  );
+}
+
+function ResumePickerMenu({ rows, selectedIndex }: {
+  readonly rows: readonly TuiConversationSummary[];
+  readonly selectedIndex: number;
+}) {
+  return (
+    <box position="absolute" left={0} right={0} bottom={5} zIndex={100} flexDirection="column" border borderColor={COLOR.border} backgroundColor={COLOR.panel} paddingLeft={1} paddingRight={1}>
+      <text fg={COLOR.accent} wrapMode="none"><strong>Resume session</strong></text>
+      {rows.length === 0 ? <text fg={COLOR.muted}>No saved conversations to resume.</text> : rows.slice(0, 8).map((row, index) => (
+        <text key={row.id} fg={index === selectedIndex ? COLOR.accent : COLOR.text} wrapMode="none">
+          {index === selectedIndex ? '› ' : '  '}{row.title}  ({row.messageCount} messages)
+        </text>
+      ))}
+      <text fg={COLOR.muted} wrapMode="none">↑↓ choose · enter resume · esc close</text>
     </box>
   );
 }
@@ -274,8 +304,14 @@ function ComposerDock({
   readonly modelPickerMaxVisible: number;
   readonly modelPickerShowHint: boolean;
 }) {
+  const menuReserve = slashOpen
+    ? Math.min(slashMaxVisible, Math.max(1, slashItems.length)) + 2
+    : modelPickerOpen
+      ? Math.min(modelPickerMaxVisible, Math.max(1, modelPickerRows.length)) + 2
+      : 0;
+
   return (
-    <box flexDirection="column" flexShrink={0} width="100%">
+    <box flexDirection="column" flexShrink={0} width="100%" paddingTop={menuReserve}>
       <box position="relative" width="100%" height={5} overflow="visible">
         {slashOpen ? (
           <SlashCommandMenu
@@ -307,13 +343,13 @@ function ComposerDock({
   );
 }
 
-export function App({ host, model, modelLabel, modelSelection }: {
+export function App({ host, model, modelLabel, modelSelection, onQuit }: {
   readonly host: TuiHost;
   readonly model: ChatModelPort;
   readonly modelLabel: string;
   readonly modelSelection?: TuiModelSelectionControl;
+  readonly onQuit: () => void;
 }) {
-  const renderer = useRenderer();
   const terminal = useTerminalDimensions();
   const controllerRef = useRef<ChatController | null>(null);
   const composerRef = useRef<TextareaRenderable | null>(null);
@@ -345,9 +381,19 @@ export function App({ host, model, modelLabel, modelSelection }: {
   const [approvalSelection, setApprovalSelection] = useState(0);
   const [planSelection, setPlanSelection] = useState(0);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
+  const [resumeItems, setResumeItems] = useState<readonly TuiConversationSummary[]>([]);
   const [selectedModel, setSelectedModel] = useState<RuntimeModelSelection | null>(
     () => modelSelection?.getSelection() ?? null,
   );
+  const persistence = useMemo(() => createTuiConversationPersistence({
+    workspacePath: process.cwd(),
+    initialMode: controller.getSnapshot().mode,
+    initialModel: modelSelection?.getSelection() ?? {
+      providerId: 'unknown',
+      modelId: modelLabel,
+      reasoningEffort: 'default',
+    },
+  }), [controller, modelLabel, modelSelection]);
   const [permissionPolicy, setPermissionPolicy] = useState<RuntimePermissionPolicy>('ask');
   const [composerDraft, setComposerDraft] = useState('');
   const [experience, setExperience] = useState<TuiExperienceState>(() => createTuiExperienceState());
@@ -370,6 +416,9 @@ export function App({ host, model, modelLabel, modelSelection }: {
     ? filterTuiCommands(slashSurface.query, { goalStatus })
     : [];
   const modeSurface = experience.surface.type === 'picker' && experience.surface.picker === 'mode'
+    ? experience.surface
+    : null;
+  const resumeSurface = experience.surface.type === 'picker' && experience.surface.picker === 'resume'
     ? experience.surface
     : null;
   const modelSurface = experience.surface.type === 'picker' && experience.surface.picker === 'model'
@@ -428,6 +477,16 @@ export function App({ host, model, modelLabel, modelSelection }: {
   const isComposerSurface = experience.surface.type === 'composer'
     || experience.surface.type === 'slash-suggestions'
     || Boolean(modelSurface);
+  useEffect(() => {
+    if (!resumeSurface) return;
+    if (snapshot.status !== 'idle') {
+      setCommandNotice('Cannot resume a session while a response is running');
+      setExperience((current) => escapeFooter(current));
+      return;
+    }
+    setResumeItems(persistence.listResumable());
+  }, [persistence, resumeSurface, snapshot.status]);
+
   const isWelcome = snapshot.messages.length === 0
     && !approval
     && snapshot.plan?.status !== 'awaiting_approval'
@@ -435,7 +494,10 @@ export function App({ host, model, modelLabel, modelSelection }: {
     && !snapshot.error
     && isComposerSurface;
 
-  useEffect(() => controller.subscribe(setSnapshot), [controller]);
+  useEffect(() => controller.subscribe((next) => {
+    persistence.syncSnapshot(next);
+    setSnapshot(next);
+  }), [controller, persistence]);
   useEffect(() => goalRunner.subscribe(setGoal), [goalRunner]);
   useEffect(() => host.subscribeApproval((next) => {
     setApprovalSelection(0);
@@ -452,6 +514,34 @@ export function App({ host, model, modelLabel, modelSelection }: {
     );
     queueMicrotask(() => composerRef.current?.focus());
   };
+
+  const runCommand = (command: TuiCommand) => executeTuiCommand(command, {
+    clearChat: () => {
+      const cleared = controller.clear();
+      if (cleared) persistence.startNewConversation(controller.getSnapshot().mode);
+      return cleared;
+    },
+    controlGoal: (control) => {
+      if (!goal) return 'No active goal';
+      if (control === 'pause' && goal.status === 'running') {
+        goalRunner.pause(goal.goalId);
+        return 'Goal paused';
+      }
+      if (control === 'resume' && goal.status === 'paused') {
+        void goalRunner.resume(goal.goalId);
+        return 'Goal resumed';
+      }
+      if (control === 'cancel' && ['pending', 'running', 'paused'].includes(goal.status)) {
+        controller.cancel();
+        goalRunner.cancel(goal.goalId);
+        return 'Goal cancelled';
+      }
+      return `Goal is ${goal.status}; ${control} is unavailable`;
+    },
+    quit: onQuit,
+    setNotice: setCommandNotice,
+    updateExperience: setExperience,
+  });
 
   useKeyboard((key) => {
     const control = runtimeControlAction({
@@ -507,12 +597,47 @@ export function App({ host, model, modelLabel, modelSelection }: {
         const next = modelItems[modelPickerSelection % modelItems.length];
         if (!next || !modelSelection) return;
         modelSelection.setSelection(next);
+        persistence.syncModel(next);
         setSelectedModel(next);
         setCommandNotice(`Next message: ${modelSelectionLabel(modelSelection, next)}`);
         setExperience((current) => escapeFooter(current));
         queueMicrotask(() => composerRef.current?.focus());
         return;
       }
+    }
+
+    if (resumeSurface) {
+      if (key.name === 'escape') {
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+        return;
+      }
+      if (key.name === 'up') {
+        setExperience((current) => ({ ...current, surface: moveTuiSurfaceSelection(current.surface, -1, resumeItems.length) }));
+        return;
+      }
+      if (key.name === 'down' || key.name === 'tab') {
+        setExperience((current) => ({ ...current, surface: moveTuiSurfaceSelection(current.surface, 1, resumeItems.length) }));
+        return;
+      }
+      if ((key.name === 'return' || key.name === 'enter') && resumeItems.length > 0) {
+        const item = resumeItems[resumeSurface.selectedIndex];
+        const restored = item ? persistence.loadConversation(item.id) : null;
+        if (!restored) {
+          setCommandNotice('That saved session could not be restored');
+        } else if (controller.restore(restored)) {
+          persistence.resumeConversation(restored);
+          if (restored.modelSelection && modelSelection) {
+            modelSelection.setSelection(restored.modelSelection);
+            setSelectedModel(restored.modelSelection);
+          }
+          setCommandNotice(`Resumed ${item?.title ?? 'saved session'}`);
+        }
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+        return;
+      }
+      return;
     }
 
     if (permissionSurface) {
@@ -621,8 +746,7 @@ export function App({ host, model, modelLabel, modelSelection }: {
         if (!command) return;
         composerRef.current?.clear();
         setComposerDraft('');
-        setCommandNotice(null);
-        setExperience((current) => applyTuiCommand({ ...current, mode: snapshot.mode }, command));
+        runCommand(command);
         return;
       }
     }
@@ -655,25 +779,7 @@ export function App({ host, model, modelLabel, modelSelection }: {
       if ((key.name === 'return' || key.name === 'enter') && commandItems.length > 0) {
         const command = commandItems[commandSelection] ?? commandItems[0];
         if (!command) return;
-        const action = command.action;
-        if (action.type === 'goal-control') {
-          if (!goal) setCommandNotice('No active goal');
-          else if (action.control === 'pause' && goal.status === 'running') {
-            goalRunner.pause(goal.goalId);
-            setCommandNotice('Goal paused');
-          } else if (action.control === 'resume' && goal.status === 'paused') {
-            void goalRunner.resume(goal.goalId);
-            setCommandNotice('Goal resumed');
-          } else if (action.control === 'cancel' && ['pending', 'running', 'paused'].includes(goal.status)) {
-            controller.cancel();
-            goalRunner.cancel(goal.goalId);
-            setCommandNotice('Goal cancelled');
-          } else setCommandNotice(`Goal is ${goal.status}`);
-        } else if (action.type === 'quit') {
-          renderer.destroy();
-          return;
-        }
-        setExperience((current) => applyTuiCommand(current, command));
+        runCommand(command);
       }
       return;
     }
@@ -720,7 +826,7 @@ export function App({ host, model, modelLabel, modelSelection }: {
     }
     if (key.ctrl && key.name === 'c') {
       if (snapshot.status === 'running') controller.cancel();
-      else renderer.destroy();
+      else onQuit();
       return;
     }
     if (snapshot.status !== 'idle') return;
@@ -785,7 +891,7 @@ export function App({ host, model, modelLabel, modelSelection }: {
 
           <ChatHistory snapshot={snapshot} />
 
-      {snapshot.error ? <text fg="#fca5a5">{snapshot.error}</text> : null}
+      {snapshot.error ? <ErrorBanner message={snapshot.error} /> : null}
 
       {snapshot.plan?.status === 'awaiting_approval' ? (
         <box flexDirection="column" border borderColor="#60a5fa" padding={1}>
@@ -863,6 +969,10 @@ export function App({ host, model, modelLabel, modelSelection }: {
           <text fg={COLOR.muted}>Runtime deny rules and irreversible-action gates always win.</text>
           {layout.showHints ? <text fg={COLOR.muted}>↑↓ select  ·  1–3 choose  ·  enter apply  ·  esc close</text> : null}
         </box>
+      ) : null}
+
+      {resumeSurface ? (
+        <ResumePickerMenu rows={resumeItems} selectedIndex={resumeSurface.selectedIndex} />
       ) : null}
 
       {modeSurface ? (

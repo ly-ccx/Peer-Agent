@@ -22,6 +22,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@peer-agent/chat-kernel": "workspace:*",
+    "@peer-agent/conversation-store": "workspace:*",
     "@peer-agent/credential-helper": "workspace:*",
     "@peer-agent/i18n": "workspace:*",
     "@peer-agent/protocol": "workspace:*",

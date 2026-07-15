@@ -95,7 +95,7 @@ export function updateCommandPanelQuery(state: TuiExperienceState, query: string
 
 export function openPicker(
   state: TuiExperienceState,
-  picker: 'mode' | 'model' | 'permission' | 'help',
+  picker: 'mode' | 'model' | 'permission' | 'resume' | 'help',
 ): TuiExperienceState {
   return {
     ...state,
@@ -137,6 +137,7 @@ export function applyTuiCommand(state: TuiExperienceState, command: TuiCommand):
   if (action.type === 'open-model-picker') return openPicker(state, 'model');
   if (action.type === 'open-mode-picker') return openPicker(state, 'mode');
   if (action.type === 'open-permission-picker') return openPicker(state, 'permission');
+  if (action.type === 'open-resume-picker') return openPicker(state, 'resume');
   if (action.type === 'show-help') return openPicker(state, 'help');
   return escapeFooter(state);
 }

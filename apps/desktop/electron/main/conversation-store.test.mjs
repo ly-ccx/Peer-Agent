@@ -507,3 +507,37 @@ test('archiving a pinned conversation clears pinned metadata', () => {
     cleanup();
   }
 });
+
+test('multiple store instances preserve conversations created by each process', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'peer-conversations-concurrent-'));
+  try {
+    const desktopStore = createConversationStore({ storeDir: dir });
+    const tuiStore = createConversationStore({ storeDir: dir });
+    const desktop = desktopStore.createConversation({ title: 'desktop' });
+    const tui = tuiStore.createConversation({ title: 'tui', mode: 'goal' });
+
+    const reloaded = createConversationStore({ storeDir: dir }).listConversations();
+    assert.deepEqual(new Set(reloaded.map((item) => item.id)), new Set([desktop.id, tui.id]));
+    assert.equal(reloaded.find((item) => item.id === tui.id)?.mode, 'goal');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('multiple store instances append messages without overwriting each other', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'peer-conversations-messages-'));
+  try {
+    const desktopStore = createConversationStore({ storeDir: dir });
+    const tuiStore = createConversationStore({ storeDir: dir });
+    const conversation = desktopStore.createConversation({ title: '' });
+
+    desktopStore.appendMessage(conversation.id, { id: 'desktop', role: 'user', content: 'from desktop' });
+    tuiStore.appendMessage(conversation.id, { id: 'tui', role: 'assistant', content: 'from tui' });
+
+    const reloaded = createConversationStore({ storeDir: dir }).getConversation(conversation.id);
+    assert.deepEqual(reloaded.messages.map((message) => message.id), ['desktop', 'tui']);
+    assert.equal(reloaded.title, 'from desktop');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

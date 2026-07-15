@@ -22,6 +22,7 @@ import {
   createUnavailableChatModel,
 } from './provider-chat-model.ts';
 import { createTuiHost } from './tui-host.ts';
+import { createTuiShutdown } from './tui-shutdown.ts';
 
 const workspaceRoot = process.env.PEER_WORKSPACE_ROOT ?? process.cwd();
 const userDataPath = process.env.PEER_USER_DATA_PATH ?? path.join(os.homedir(), '.peer-agent');
@@ -85,12 +86,19 @@ const model = provider
     })
   : createUnavailableChatModel(missingModelConfigurationMessage());
 const renderer = await createCliRenderer({ exitOnCtrlC: false });
+const root = createRoot(renderer);
+const shutdown = createTuiShutdown({
+  unmount: () => root.unmount(),
+  destroyRenderer: () => renderer.destroy(),
+  exitProcess: (code) => process.exit(code),
+});
 
-createRoot(renderer).render(
+root.render(
   <App
     host={host}
     model={model}
     modelLabel={modelConfig.modelLabel}
     modelSelection={modelSelection}
+    onQuit={shutdown}
   />,
 );
