@@ -413,7 +413,7 @@ export function LlmSettingsPanel({
   } | null>(null);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [addModelGroupId, setAddModelGroupId] = useState<string | null>(null);
-  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(new Set());
   const [removingGroupId, setRemovingGroupId] = useState<string | null>(null);
   // 远程模型目录只作为候选，不直接替换已配置模型。
   const [catalogTargetId, setCatalogTargetId] = useState<string | null>(null);
@@ -549,7 +549,7 @@ export function LlmSettingsPanel({
   };
 
   const toggleGroup = (groupId: string) => {
-    setCollapsedGroups((prev) => {
+    setExpandedGroups((prev) => {
       const next = new Set(prev);
       if (next.has(groupId)) next.delete(groupId);
       else next.add(groupId);
@@ -899,7 +899,7 @@ export function LlmSettingsPanel({
           </div>
         ) : groups.map((g) => {
           const head = g.head;
-          const collapsed = collapsedGroups.has(g.groupId);
+          const collapsed = !expandedGroups.has(g.groupId);
           const groupChannel = descriptorFor(head.channelId || (head.provider === 'anthropic' ? 'anthropic' : 'openai-compatible'), channels);
           return (
           <div key={g.groupId} className="llm-provider-group">

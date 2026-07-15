@@ -41,21 +41,11 @@
 }
 
 .llm-list-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 5;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
   padding: var(--space-2) 0 var(--space-3);
-  background:
-    linear-gradient(
-      180deg,
-      var(--paper-canvas, var(--paper-sheet)) 0%,
-      color-mix(in srgb, var(--paper-canvas, var(--paper-sheet)) 92%, transparent) 72%,
-      transparent 100%
-    );
 }
 
 .llm-list-summary {
@@ -1104,7 +1094,6 @@
 
 .llm-configured-model-row.is-default {
   border-color: rgba(78, 163, 217, 0.62);
-  box-shadow: inset 3px 0 0 rgba(78, 163, 217, 0.78);
 }
 
 .llm-configured-model-summary {
