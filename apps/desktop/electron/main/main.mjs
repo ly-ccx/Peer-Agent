@@ -34,6 +34,7 @@ import {
   POPOVER_MAX_SIZE as QUICK_CHAT_POPOVER_SIZE,
   resolveQuickChatWindowBackground,
 } from './quick-chat-window.mjs';
+import { getMainWindowWebContents } from './window-routing.mjs';
 import { createMcpRegistry } from './mcp-registry.mjs';
 import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-credential-store.mjs';
 import { disconnectMcp, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMcpResource, startMcpOAuth, testMcpConnection } from './mcp-client.mjs';
@@ -334,8 +335,7 @@ function broadcastToAllWindows(channel, payload) {
 }
 
 function getRunnerWebContents() {
-  const wins = BrowserWindow.getAllWindows();
-  return wins.find((win) => !win.isDestroyed())?.webContents ?? null;
+  return getMainWindowWebContents(BrowserWindow.getAllWindows());
 }
 
 function toRuntimeMessages(messages = []) {
