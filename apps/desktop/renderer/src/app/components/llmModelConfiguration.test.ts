@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   buildModelCatalog,
   buildModelImportPatches,
+  calculateModelSelectionChanges,
   filterModelCatalog,
   metadataSourceFromList,
   modelMetadataCompletion,
@@ -24,6 +25,21 @@ describe('LLM model configuration rules', () => {
       ['model-a', false],
       ['model-b', true],
     ]);
+  });
+
+  it('calculates additions and removals from the complete catalog selection', () => {
+    const configured = [
+      { id: 'record-a', model: 'model-a' },
+      { id: 'record-b', model: 'model-b' },
+    ] as never;
+    const changes = calculateModelSelectionChanges([
+      { id: 'model-b', label: 'B' },
+      { id: ' model-c ', label: 'C' },
+      { id: 'model-c', label: 'duplicate' },
+    ], configured);
+
+    assert.deepEqual(changes.additions.map((model) => model.id), ['model-c']);
+    assert.deepEqual(changes.removals.map((model) => model.id), ['record-a']);
   });
 
   it('filters by model id or label', () => {

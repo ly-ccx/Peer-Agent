@@ -1,3 +1,5 @@
+import { enrichModelsWithRegistry, fetchModelsDevRegistry } from './models-dev-registry.mjs';
+
 // OpenAI 订阅(ChatGPT OAuth)模型目录(ADR 28)。
 //
 // 端点事实(参考 cline / opencode 的订阅实现):
@@ -148,6 +150,11 @@ function isLikelyChatModel(id) {
 // - Anthropic:   { data: [{ id, display_name, created_at }] }
 // - Gemini:      { models: [{ name, displayName, inputTokenLimit, outputTokenLimit,
 //                             supportedGenerationMethods }] }
+function finiteCatalogNumber(...values) {
+  const value = values.find((candidate) => typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0);
+  return value;
+}
+
 function normalizeApiModelList(data, wire) {
   if (wire === 'gemini') {
     const arr = Array.isArray(data?.models) ? data.models : [];
@@ -174,11 +181,51 @@ function normalizeApiModelList(data, wire) {
       const createdRaw = typeof m?.created === 'number'
         ? m.created
         : (typeof m?.created_at === 'string' ? Date.parse(m.created_at) / 1000 : undefined);
-      return {
+      const inputModalities = m?.architecture?.input_modalities ?? m?.supported_input_modalities;
+      const pricing = m?.pricing ?? {};
+      const contextWindow = finiteCatalogNumber(m?.contextWindow, m?.context_window, m?.context_length);
+      const maxOutputTokens = finiteCatalogNumber(
+        m?.maxOutputTokens,
+        m?.max_output_tokens,
+        m?.max_completion_tokens,
+        m?.top_provider?.max_completion_tokens,
+      );
+      const inputPrice = finiteCatalogNumber(m?.inputPrice, pricing.input, pricing.prompt);
+      const outputPrice = finiteCatalogNumber(m?.outputPrice, pricing.output, pricing.completion);
+      const cacheReadPrice = finiteCatalogNumber(m?.cacheReadPrice, pricing.cache_read);
+      const cacheWritePrice = finiteCatalogNumber(m?.cacheWritePrice, pricing.cache_write);
+      const providerMetadataPresent = [contextWindow, maxOutputTokens, inputPrice, outputPrice, cacheReadPrice, cacheWritePrice]
+        .some((value) => value !== undefined)
+        || Array.isArray(inputModalities)
+        || typeof m?.supportsReasoning === 'boolean'
+        || typeof m?.reasoning === 'boolean';
+      const model = {
         id,
         label: m?.display_name || m?.name || id,
-        created: Number.isFinite(createdRaw) ? createdRaw : undefined,
       };
+      const optionalFields = {
+        created: Number.isFinite(createdRaw) ? createdRaw : undefined,
+        contextWindow,
+        maxOutputTokens,
+        supportsVision: Array.isArray(inputModalities)
+          ? inputModalities.map((value) => String(value).toLowerCase()).includes('image')
+          : undefined,
+        supportsReasoning: typeof m?.supportsReasoning === 'boolean'
+          ? m.supportsReasoning
+          : (typeof m?.reasoning === 'boolean' ? m.reasoning : undefined),
+        inputPrice,
+        outputPrice,
+        cacheReadPrice,
+        cacheWritePrice,
+        metadataSource: providerMetadataPresent ? 'provider' : undefined,
+        pricingSource: [inputPrice, outputPrice, cacheReadPrice, cacheWritePrice].some((value) => value !== undefined)
+          ? 'provider'
+          : undefined,
+      };
+      for (const [key, value] of Object.entries(optionalFields)) {
+        if (value !== undefined) model[key] = value;
+      }
+      return model;
     })
     .filter((m) => m.id);
 }
@@ -198,7 +245,15 @@ function normalizeApiModelList(data, wire) {
  *           apiKey?: string, timeoutMs?: number, fetchImpl?: typeof fetch }} params
  * @returns {Promise<{ models: Array<{id:string,label:string}>, source: 'remote' }>}
  */
-export async function listOpenAICompatibleModels({ baseUrl, headers = {}, wire, apiKey, timeoutMs = 15000, fetchImpl } = {}) {
+export async function listOpenAICompatibleModels({
+  baseUrl,
+  headers = {},
+  wire,
+  apiKey,
+  timeoutMs = 15000,
+  fetchImpl,
+  registryFetchImpl,
+} = {}) {
   const doFetch = fetchImpl || fetch;
   const root = String(baseUrl || '').replace(/\/+$/, '');
   if (!root) throw new Error('base_url_not_configured');
@@ -228,9 +283,15 @@ export async function listOpenAICompatibleModels({ baseUrl, headers = {}, wire, 
     throw new Error(`models list failed: HTTP ${res.status} ${text.slice(0, 200)}`);
   }
   const data = await res.json();
-  const models = sortNewestFirst(
+  const providerModels = sortNewestFirst(
     normalizeApiModelList(data, wire).filter((m) => isLikelyChatModel(m.id)),
   );
+  // A provider fetch mock should not accidentally become the registry transport too.
+  // Production calls use global fetch; tests can opt in with registryFetchImpl.
+  const registry = fetchImpl && !registryFetchImpl
+    ? new Map()
+    : await fetchModelsDevRegistry({ fetchImpl: registryFetchImpl });
+  const models = enrichModelsWithRegistry(providerModels, registry);
   return { models, source: 'remote' };
 }
 

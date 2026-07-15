@@ -397,8 +397,10 @@ export interface LlmProviderConfig {
   readonly baseUrl: string;
   readonly model: string;
   readonly modelLabel?: string;
-  // 模型元数据来源：远程目录、本机/内置目录，或用户手动维护。
-  readonly metadataSource?: 'remote' | 'builtin' | 'local' | 'manual';
+  // 模型元数据来源：渠道目录、models.dev 补全、本机/内置目录，或用户手动维护。
+  readonly metadataSource?: 'remote' | 'models.dev' | 'builtin' | 'local' | 'manual';
+  // models.dev-reference 表示参考模型价格，不代表代理渠道的实际结算价格。
+  readonly pricingSource?: 'provider' | 'models.dev-reference';
   readonly metadataSyncedAt?: string;
   readonly enabled: boolean;
   readonly isDefault: boolean;
@@ -507,10 +509,15 @@ export interface LlmModelInfo {
   readonly maxOutputTokens?: number;
   readonly supportsVision?: boolean;
   readonly supportsReasoning?: boolean;
+  // 元数据可由渠道直返或 models.dev 精确模型 ID 补全；渠道字段始终优先。
+  readonly metadataSource?: 'provider' | 'models.dev';
+  // models.dev 价格是模型参考价，不代表当前代理渠道的实际结算价格。
+  readonly pricingSource?: 'provider' | 'models.dev-reference';
   // USD per 1M tokens unless otherwise noted by the provider.
   readonly inputPrice?: number;
   readonly outputPrice?: number;
   readonly cacheReadPrice?: number;
+  readonly cacheWritePrice?: number;
   readonly longContextInputThreshold?: number;
   readonly longContextInputPrice?: number;
   readonly longContextCacheReadPrice?: number;

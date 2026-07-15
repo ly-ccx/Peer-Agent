@@ -54,17 +54,33 @@ export function ModelCatalogDialog({
 }) {
   const zh = i18n.locale === 'zh-CN';
   const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const configuredIds = useMemo(
+    () => new Set(configuredModels.map((model) => model.model)),
+    [configuredModels],
+  );
+  const [selected, setSelected] = useState<ReadonlySet<string>>(
+    () => new Set(configuredModels.map((model) => model.model)),
+  );
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [manualModel, setManualModel] = useState('');
   const [importedModels, setImportedModels] = useState<readonly LlmProviderConfigView[]>(configuredModels);
   const catalog = useMemo(() => buildModelCatalog(models, importedModels), [models, importedModels]);
   const visible = useMemo(() => filterModelCatalog(catalog, query), [catalog, query]);
-  useEffect(() => setImportedModels(configuredModels), [configuredModels]);
-  const selectable = catalog.filter((entry) => !entry.configured);
-  const visibleSelectable = visible.filter((entry) => !entry.configured);
-  const selectedModels = selectable.filter((entry) => selected.has(entry.model.id)).map((entry) => entry.model);
+  useEffect(() => {
+    setImportedModels(configuredModels);
+    setSelected(new Set(configuredModels.map((model) => model.model)));
+  }, [configuredModels]);
+  const catalogIds = new Set(catalog.map((entry) => entry.model.id));
+  const selectedModels = [
+    ...catalog.filter((entry) => selected.has(entry.model.id)).map((entry) => entry.model),
+    ...configuredModels
+      .filter((model) => selected.has(model.model) && !catalogIds.has(model.model))
+      .map((model) => ({ id: model.model, label: model.modelLabel || model.model })),
+  ];
+  const hasSelectionChanges = selectedModels.length !== configuredIds.size
+    || selectedModels.some((model) => !configuredIds.has(model.id));
+  const wouldRemoveAll = configuredModels.length > 0 && selectedModels.length === 0;
 
   const toggle = (id: string) => {
     setSelected((current) => {
@@ -77,13 +93,16 @@ export function ModelCatalogDialog({
   };
 
   const importSelected = async () => {
-    if (selectedModels.length === 0) return;
+    if (wouldRemoveAll) {
+      setImportError(zh ? '渠道至少需要保留一个模型。' : 'A provider must keep at least one model.');
+      return;
+    }
+    if (!hasSelectionChanges) return;
     setImporting(true);
     setImportError(null);
     try {
       const imported = await onImport(selectedModels);
       if (imported) setImportedModels(imported);
-      setSelected(new Set());
     } catch (error: unknown) {
       setImportError(error instanceof Error ? error.message : 'model_import_failed');
     } finally {
@@ -138,7 +157,7 @@ export function ModelCatalogDialog({
               <button
                 type="button"
                 onClick={() => {
-                  const visibleIds = new Set(visibleSelectable.map((entry) => entry.model.id));
+                  const visibleIds = new Set(visible.map((entry) => entry.model.id));
                   const allVisibleSelected = visibleIds.size > 0 && [...visibleIds].every((id) => selected.has(id));
                   setSelected((current) => {
                     const next = new Set(current);
@@ -149,9 +168,9 @@ export function ModelCatalogDialog({
                     return next;
                   });
                 }}
-                disabled={visibleSelectable.length === 0}
+                disabled={visible.length === 0}
               >
-                {visibleSelectable.length > 0 && visibleSelectable.every((entry) => selected.has(entry.model.id))
+                {visible.length > 0 && visible.every((entry) => selected.has(entry.model.id))
                   ? (zh ? '取消当前筛选' : 'Deselect filtered')
                   : (zh ? '选择当前筛选' : 'Select filtered')}
               </button>
@@ -168,7 +187,7 @@ export function ModelCatalogDialog({
               const hasMetadata = Boolean(context || output || model.supportsVision || model.supportsReasoning);
               return (
                 <label key={model.id} className={`llm-catalog-item ${configured ? 'is-configured' : ''} ${checked ? 'is-selected' : ''}`}>
-                  <input type="checkbox" checked={configured || checked} disabled={configured} onChange={() => toggle(model.id)} />
+                  <input type="checkbox" checked={checked} disabled={selectionMode === 'single' && configured} onChange={() => toggle(model.id)} />
                   <span className="llm-catalog-item-main">
                     <strong>{model.label || model.id}</strong>
                     <code>{model.id}</code>
@@ -199,8 +218,8 @@ export function ModelCatalogDialog({
 
           <footer className="llm-dialog-footer">
             <button type="button" onClick={requestClose}>{zh ? '取消' : 'Cancel'}</button>
-            <button type="button" className="primary" onClick={() => void importSelected()} disabled={selectedModels.length === 0 || importing}>
-              {importing ? '…' : (zh ? `导入选中的 ${selectedModels.length} 个模型` : `Import ${selectedModels.length} selected`)}
+            <button type="button" className="primary" onClick={() => void importSelected()} disabled={!hasSelectionChanges || wouldRemoveAll || importing}>
+              {importing ? '…' : (zh ? `应用选择（${selectedModels.length} 个模型）` : `Apply selection (${selectedModels.length} models)`)}
             </button>
           </footer>
         </>

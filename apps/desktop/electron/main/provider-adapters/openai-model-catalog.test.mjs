@@ -175,6 +175,55 @@ test('listOpenAICompatibleModels fetches /models, strips content-type, filters n
   assert.deepEqual(res.models.map((m) => m.id), ['new-chat', 'old-chat']);
 });
 
+test('listOpenAICompatibleModels enriches exact IDs while preserving provider fields', async () => {
+  const res = await listOpenAICompatibleModels({
+    baseUrl: 'https://example.test/v1',
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ data: [{ id: 'gpt-5.6-terra', contextWindow: 999 }] }),
+    }),
+    registryFetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        custom: {
+          models: {
+            'gpt-5.6-terra': {
+              id: 'gpt-5.6-terra',
+              name: 'GPT 5.6 Terra',
+              reasoning: true,
+              modalities: { input: ['text', 'image'] },
+              limit: { context: 1_050_000, output: 128_000 },
+              cost: { input: 2.5, output: 15 },
+            },
+          },
+        },
+      }),
+    }),
+  });
+
+  assert.deepEqual(res.models, [{
+    id: 'gpt-5.6-terra',
+    label: 'gpt-5.6-terra',
+    contextWindow: 999,
+    maxOutputTokens: 128_000,
+    supportsVision: true,
+    supportsReasoning: true,
+    inputPrice: 2.5,
+    outputPrice: 15,
+    metadataSource: 'provider',
+    pricingSource: 'models.dev-reference',
+  }]);
+});
+
+test('listOpenAICompatibleModels keeps provider catalog when registry fetch fails', async () => {
+  const res = await listOpenAICompatibleModels({
+    baseUrl: 'https://example.test/v1',
+    fetchImpl: async () => ({ ok: true, json: async () => ({ data: [{ id: 'unknown-chat' }] }) }),
+    registryFetchImpl: async () => { throw new Error('offline'); },
+  });
+  assert.deepEqual(res.models, [{ id: 'unknown-chat', label: 'unknown-chat' }]);
+});
+
 test('listOpenAICompatibleModels derives Anthropic and Gemini model endpoints', async () => {
   const urls = [];
   const okResponse = { ok: true, json: async () => ({ data: [{ id: 'claude-sonnet-4-5', created_at: '2025-01-01T00:00:00Z' }] }) };

@@ -160,8 +160,13 @@ function applyExplicitModelMetadataPatch(item, patch) {
   }
   if (patch.metadataSource !== undefined) {
     const source = String(patch.metadataSource || '').trim();
-    if (['remote', 'builtin', 'local', 'manual'].includes(source)) item.metadataSource = source;
+    if (['remote', 'models.dev', 'builtin', 'local', 'manual'].includes(source)) item.metadataSource = source;
     else delete item.metadataSource;
+  }
+  if (patch.pricingSource !== undefined) {
+    const source = String(patch.pricingSource || '').trim();
+    if (['provider', 'models.dev-reference'].includes(source)) item.pricingSource = source;
+    else delete item.pricingSource;
   }
   if (patch.metadataSyncedAt !== undefined) {
     const syncedAt = String(patch.metadataSyncedAt || '').trim();
@@ -644,6 +649,7 @@ export function createLlmConfigStore({
       model: item.model,
       modelLabel: item.modelLabel || undefined,
       metadataSource: item.metadataSource || undefined,
+      pricingSource: item.pricingSource || undefined,
       metadataSyncedAt: item.metadataSyncedAt || undefined,
       enabled: item.enabled,
       isDefault: item.isDefault,
@@ -691,7 +697,7 @@ export function createLlmConfigStore({
     return listProviders();
   }
 
-  function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, modelLabel, metadataSource, metadataSyncedAt, apiKey, contextWindow, maxOutputTokens, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthClientId, oauthClientSecret, oauthProjectId, customHeaders }) {
+  function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, modelLabel, metadataSource, pricingSource, metadataSyncedAt, apiKey, contextWindow, maxOutputTokens, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthClientId, oauthClientSecret, oauthProjectId, customHeaders }) {
     const items = readAll();
     const method = normalizeAuthMethod(authMethod);
     const channelId = method === 'oauth_chatgpt'
@@ -742,6 +748,7 @@ export function createLlmConfigStore({
       model: selectedModel,
       modelLabel: modelLabel || undefined,
       metadataSource: isSubscription ? 'builtin' : isLocalQoderAuth ? 'local' : metadataSource,
+      pricingSource: isSubscription || isLocalQoderAuth ? undefined : pricingSource,
       metadataSyncedAt: isSubscription || isLocalQoderAuth ? new Date().toISOString() : metadataSyncedAt,
       apiKeyConfigured: false,
       oauthClientId: isGoogleOAuth ? String(oauthClientId || '').trim() || undefined : undefined,
@@ -1058,6 +1065,7 @@ export function createLlmConfigStore({
       model,
       modelLabel: patch.modelLabel,
       metadataSource: patch.metadataSource,
+      pricingSource: patch.pricingSource,
       metadataSyncedAt: patch.metadataSyncedAt,
       contextWindow: patch.contextWindow,
       maxOutputTokens: patch.maxOutputTokens,

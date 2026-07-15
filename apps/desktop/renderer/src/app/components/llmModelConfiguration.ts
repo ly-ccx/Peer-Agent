@@ -22,10 +22,12 @@ export function modelMetadataPatch(
   source: ModelMetadataSource,
   syncedAt = new Date().toISOString(),
 ): Record<string, unknown> {
+  const enrichedByModelsDev = model.metadataSource === 'models.dev';
   const patch: Record<string, unknown> = {
-    metadataSource: source,
+    metadataSource: enrichedByModelsDev ? 'models.dev' : source,
     metadataSyncedAt: syncedAt,
   };
+  if (model.pricingSource) patch.pricingSource = model.pricingSource;
   const label = meaningfulLabel(model);
   if (label) patch.modelLabel = label;
   if (typeof model.contextWindow === 'number') patch.contextWindow = model.contextWindow;
@@ -33,6 +35,7 @@ export function modelMetadataPatch(
   if (typeof model.inputPrice === 'number') patch.inputPrice = model.inputPrice;
   if (typeof model.outputPrice === 'number') patch.outputPrice = model.outputPrice;
   if (typeof model.cacheReadPrice === 'number') patch.cacheReadPrice = model.cacheReadPrice;
+  if (typeof model.cacheWritePrice === 'number') patch.cacheWritePrice = model.cacheWritePrice;
   if (typeof model.supportsVision === 'boolean') patch.supportsVision = model.supportsVision;
   if (typeof model.supportsReasoning === 'boolean') patch.supportsReasoning = model.supportsReasoning;
   return patch;
@@ -93,6 +96,29 @@ export function buildModelCatalog(
     deduped.set(id, { ...model, id, label: model.label?.trim() || id });
   }
   return [...deduped.values()].map((model) => ({ model, configured: configured.has(model.id) }));
+}
+
+export interface ModelSelectionChanges {
+  readonly additions: readonly LlmModelInfo[];
+  readonly removals: readonly LlmProviderConfigView[];
+}
+
+/** Compare the complete catalog selection with the models currently stored in a provider group. */
+export function calculateModelSelectionChanges(
+  selectedModels: readonly LlmModelInfo[],
+  configuredModels: readonly LlmProviderConfigView[],
+): ModelSelectionChanges {
+  const selectedById = new Map<string, LlmModelInfo>();
+  for (const candidate of selectedModels) {
+    const id = candidate.id?.trim();
+    if (!id || selectedById.has(id)) continue;
+    selectedById.set(id, { ...candidate, id });
+  }
+  const configuredIds = new Set(configuredModels.map((item) => item.model));
+  return {
+    additions: [...selectedById.values()].filter((model) => !configuredIds.has(model.id)),
+    removals: configuredModels.filter((item) => !selectedById.has(item.model)),
+  };
 }
 
 export function formatReasoningEffortMap(map: LlmReasoningEffortMap | undefined): string {

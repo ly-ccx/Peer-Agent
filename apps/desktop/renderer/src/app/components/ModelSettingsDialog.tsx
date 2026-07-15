@@ -30,6 +30,7 @@ const capabilityState = (value: boolean | undefined): 'unknown' | 'yes' | 'no' =
 
 function sourceLabel(source: LlmProviderConfigView['metadataSource'], zh: boolean): string {
   if (source === 'remote') return zh ? '远程目录' : 'Remote catalog';
+  if (source === 'models.dev') return 'models.dev';
   if (source === 'builtin') return zh ? '内置目录' : 'Built-in catalog';
   if (source === 'local') return zh ? '本机目录' : 'Local catalog';
   if (source === 'manual') return zh ? '手动维护' : 'Manual';

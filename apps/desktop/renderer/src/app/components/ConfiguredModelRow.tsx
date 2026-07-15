@@ -42,6 +42,7 @@ export function ConfiguredModelRow({
   const metadataSource = (() => {
     switch (model.metadataSource) {
       case 'remote': return zh ? '远程目录' : 'Remote catalog';
+      case 'models.dev': return 'models.dev';
       case 'builtin': return zh ? '内置目录' : 'Built-in catalog';
       case 'local': return zh ? '本地目录' : 'Local catalog';
       case 'manual': return zh ? '手动配置' : 'Manual';

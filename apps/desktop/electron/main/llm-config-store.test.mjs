@@ -529,7 +529,8 @@ test('addModel inherits connection fields without copying model metadata', () =>
 
   const second = store.addModel(base.groupId, {
     model: 'model-b',
-    metadataSource: 'remote',
+    metadataSource: 'models.dev',
+    pricingSource: 'models.dev-reference',
     metadataSyncedAt: '2026-01-02T03:04:05.000Z',
   });
 
@@ -541,7 +542,12 @@ test('addModel inherits connection fields without copying model metadata', () =>
   assert.equal(second.supportsVision, undefined);
   assert.equal(second.supportsReasoning, undefined);
   assert.equal(second.supportsPromptCaching, undefined);
-  assert.equal(second.metadataSource, 'remote');
+  assert.equal(second.metadataSource, 'models.dev');
+  assert.equal(second.pricingSource, 'models.dev-reference');
+  const persistedSecond = createLlmConfigStore({ configFile }).listProviders()
+    .find((item) => item.id === second.id);
+  assert.equal(persistedSecond?.metadataSource, 'models.dev');
+  assert.equal(persistedSecond?.pricingSource, 'models.dev-reference');
 
   const annotated = store.updateProvider(second.id, {
     modelLabel: 'Model B',

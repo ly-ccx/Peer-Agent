@@ -19,6 +19,7 @@ import { ModelCatalogDialog } from './ModelCatalogDialog';
 import { ModelSettingsDialog } from './ModelSettingsDialog';
 import {
   buildModelImportPatches,
+  calculateModelSelectionChanges,
   formatReasoningEffortMap,
   metadataSourceFromList,
   parseReasoningEffortMap,
@@ -756,16 +757,20 @@ export function LlmSettingsPanel({
     const target = providers.find((provider) => provider.id === catalogTargetId);
     if (!target) return [];
     const groupId = target.groupId ?? target.id;
+    const configuredModels = providers.filter(
+      (provider) => (provider.groupId ?? provider.id) === groupId,
+    );
+    const changes = calculateModelSelectionChanges(models, configuredModels);
+    if (changes.additions.length === 0 && changes.removals.length === configuredModels.length) {
+      throw new Error('provider_requires_at_least_one_model');
+    }
+    const additionPatches = buildModelImportPatches(changes.additions, source);
     try {
-      const configured = new Set(
-        providers
-          .filter((provider) => (provider.groupId ?? provider.id) === groupId)
-          .map((provider) => provider.model),
-      );
-      for (const patch of patches) {
-        if (configured.has(patch.model)) continue;
+      for (const patch of additionPatches) {
         await clientApi.llmAddModel({ groupId, name: target.name, ...patch });
-        configured.add(patch.model);
+      }
+      for (const removed of changes.removals) {
+        await clientApi.llmRemoveProvider({ id: removed.id });
       }
     } catch (error) {
       await refresh();
