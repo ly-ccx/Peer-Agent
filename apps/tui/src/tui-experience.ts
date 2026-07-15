@@ -34,16 +34,26 @@ export function composerRows(text: string, terminalColumns: number): number {
   return Math.max(1, Math.min(6, rows));
 }
 
-export function shouldOpenCommandPanel(input: string, incoming = ''): boolean {
-  if (incoming) return incoming === '/' && (input === '' || input === '/');
-  return input === '/';
-}
-
 export function filterTuiCommands(
   query: string,
   context: TuiCommandContext = { goalStatus: 'none' },
 ): readonly TuiCommand[] {
   return filterTuiCommandRegistry(query, context);
+}
+
+export function slashCommandWindow(
+  commands: readonly TuiCommand[],
+  selectedIndex: number,
+  maxVisible: number,
+): ReadonlyArray<{ readonly command: TuiCommand; readonly index: number }> {
+  const windowSize = Math.max(1, Math.min(maxVisible, commands.length));
+  const centeredStart = selectedIndex - Math.floor(windowSize / 2);
+  const maxStart = Math.max(0, commands.length - windowSize);
+  const start = Math.max(0, Math.min(centeredStart, maxStart));
+  return commands.slice(start, start + windowSize).map((command, offset) => ({
+    command,
+    index: start + offset,
+  }));
 }
 
 export function openCommandPanel(state: TuiExperienceState, query = ''): TuiExperienceState {

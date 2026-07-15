@@ -9,7 +9,7 @@ import {
   openCommandPanel,
   showPermission,
   showPlanApproval,
-  shouldOpenCommandPanel,
+  slashCommandWindow,
   syncSlashSuggestions,
   TUI_COMMANDS,
   updateCommandPanelQuery,
@@ -33,11 +33,17 @@ describe('TUI experience model', () => {
     expect(filterTuiCommands('continue', { goalStatus: 'paused' }).map((command) => command.id)).toEqual(['goal-resume']);
   });
 
-  test('opens the command picker only for slash at the input root', () => {
-    expect(shouldOpenCommandPanel('', '/')).toBe(true);
-    expect(shouldOpenCommandPanel('/', '/')).toBe(true);
-    expect(shouldOpenCommandPanel('hello', '/')).toBe(false);
-    expect(shouldOpenCommandPanel('/model')).toBe(false);
+  test('keeps slash command windows bounded around the selected item', () => {
+    const commands = filterTuiCommands('');
+    expect(slashCommandWindow(commands, 0, 3).map(({ command }) => command.id)).toEqual([
+      'model', 'mode', 'permissions',
+    ]);
+    expect(slashCommandWindow(commands, 3, 3).map(({ command, index }) => [command.id, index])).toEqual([
+      ['permissions', 2], ['help', 3], ['quit', 4],
+    ]);
+    expect(slashCommandWindow(commands, 4, 2).map(({ command }) => command.id)).toEqual([
+      'help', 'quit',
+    ]);
   });
 
   test('sizes multiline composer content within a bounded height', () => {

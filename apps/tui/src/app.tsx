@@ -53,8 +53,9 @@ import {
   escapeFooter,
   filterTuiCommands,
   openCommandPanel,
-  shouldOpenCommandPanel,
+  slashCommandWindow,
   syncSlashSuggestions,
+  type TuiCommand,
   type TuiExperienceState,
   updateCommandPanelQuery,
 } from './tui-experience.ts';
@@ -95,11 +96,106 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
   );
 }
 
-function Composer({ controller, snapshot, disabled, onCommand, onValueChange, editorRef }: {
+function SlashCommandMenu({ commands, selectedIndex, maxVisible, showDescriptions }: {
+  readonly commands: readonly TuiCommand[];
+  readonly selectedIndex: number;
+  readonly maxVisible: number;
+  readonly showDescriptions: boolean;
+}) {
+  const visibleCommands = slashCommandWindow(commands, selectedIndex, maxVisible);
+
+  return (
+    <box
+      position="absolute"
+      left={0}
+      right={0}
+      bottom={5}
+      zIndex={100}
+      flexDirection="column"
+      border
+      borderColor={COLOR.border}
+      backgroundColor={COLOR.panel}
+      paddingLeft={1}
+      paddingRight={1}
+    >
+      {visibleCommands.length === 0 ? (
+        <text fg={COLOR.muted}>No matching commands</text>
+      ) : visibleCommands.map(({ command, index }) => {
+        const selected = index === selectedIndex;
+        return (
+          <box
+            key={command.id}
+            flexDirection="row"
+            height={1}
+            justifyContent="space-between"
+            backgroundColor={selected ? '#1c1c1c' : COLOR.panel}
+          >
+            <text fg={selected ? COLOR.accent : COLOR.text} wrapMode="none">
+              {selected ? '› ' : '  '}/{command.id}
+            </text>
+            {showDescriptions ? (
+              <text fg={COLOR.muted} wrapMode="none">{command.description}</text>
+            ) : null}
+          </box>
+        );
+      })}
+    </box>
+  );
+}
+
+interface ModelPickerRow {
+  readonly key: string;
+  readonly label: string;
+  readonly current: boolean;
+}
+
+function ModelPickerMenu({ rows, selectedIndex, maxVisible, showHint }: {
+  readonly rows: readonly ModelPickerRow[];
+  readonly selectedIndex: number;
+  readonly maxVisible: number;
+  readonly showHint: boolean;
+}) {
+  const start = Math.max(0, Math.min(
+    selectedIndex - Math.floor(maxVisible / 2),
+    Math.max(0, rows.length - maxVisible),
+  ));
+  const visibleRows = rows.slice(start, start + maxVisible);
+
+  return (
+    <box
+      position="absolute"
+      left={0}
+      right={0}
+      bottom={5}
+      zIndex={100}
+      flexDirection="column"
+      border
+      borderColor={COLOR.border}
+      backgroundColor={COLOR.panel}
+      paddingLeft={1}
+      paddingRight={1}
+    >
+      <text fg={COLOR.accent} wrapMode="none"><strong>Model &amp; reasoning</strong></text>
+      {visibleRows.length === 0 ? (
+        <text fg="#f59e0b" wrapMode="none">No configured model is available.</text>
+      ) : visibleRows.map((row, offset) => {
+        const selected = start + offset === selectedIndex;
+        return (
+          <text key={row.key} fg={selected ? COLOR.accent : COLOR.text} wrapMode="none">
+            {selected ? '› ' : '  '}{row.label}{row.current ? '  current' : ''}
+          </text>
+        );
+      })}
+      {showHint ? <text fg={COLOR.muted} wrapMode="none">↑↓ choose · enter apply · esc close</text> : null}
+    </box>
+  );
+}
+
+function Composer({ controller, snapshot, disabled, focused, onValueChange, editorRef }: {
   readonly controller: ChatController;
   readonly snapshot: ChatSnapshot;
   readonly disabled: boolean;
-  readonly onCommand: () => void;
+  readonly focused: boolean;
   readonly onValueChange: (value: string) => void;
   readonly editorRef: RefObject<TextareaRenderable | null>;
 }) {
@@ -107,12 +203,8 @@ function Composer({ controller, snapshot, disabled, onCommand, onValueChange, ed
 
   const submit = () => {
     const value = editor.current?.plainText ?? '';
-    if (!value.trim() || disabled || snapshot.status !== 'idle') return;
-    if (value.trim() === '/') {
-      editor.current?.clear();
-      onCommand();
-      return;
-    }
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.startsWith('/') || disabled || snapshot.status !== 'idle') return;
     editor.current?.clear();
     void controller.send(value);
   };
@@ -121,22 +213,14 @@ function Composer({ controller, snapshot, disabled, onCommand, onValueChange, ed
     <box flexDirection="column" border borderColor={snapshot.status === 'idle' ? COLOR.border : COLOR.accent} height={5} paddingLeft={1} paddingRight={1} backgroundColor={COLOR.panel}>
       <textarea
         ref={editor}
-        focused={!disabled}
+        focused={focused && !disabled}
         placeholder={disabled ? 'Resolve the request above…' : 'Ask anything…'}
         wrapMode="word"
         onContentChange={() => onValueChange(editor.current?.plainText ?? '')}
         onKeyDown={(event) => {
-          const value = editor.current?.plainText ?? '';
           if ((event.name === 'return' || event.name === 'enter') && !shouldHandleComposerSubmit(event.eventType)) {
             event.preventDefault();
             event.stopPropagation();
-            return;
-          }
-          if (!disabled && snapshot.status === 'idle' && shouldOpenCommandPanel(`${value}${event.sequence}`)) {
-            event.preventDefault();
-            event.stopPropagation();
-            editor.current?.clear();
-            onCommand();
           }
         }}
         onSubmit={submit}
@@ -149,31 +233,67 @@ function ComposerDock({
   controller,
   snapshot,
   disabled,
-  onCommand,
   onValueChange,
   editorRef,
   status,
   statusLayout,
+  slashOpen,
+  slashItems,
+  slashSelection,
+  slashMaxVisible,
+  slashShowDescriptions,
+  modelPickerOpen,
+  modelPickerRows,
+  modelPickerSelection,
+  modelPickerMaxVisible,
+  modelPickerShowHint,
 }: {
   readonly controller: ChatController;
   readonly snapshot: ChatSnapshot;
   readonly disabled: boolean;
-  readonly onCommand: () => void;
   readonly onValueChange: (value: string) => void;
   readonly editorRef: RefObject<TextareaRenderable | null>;
   readonly status: ComposerStatus;
   readonly statusLayout: ComposerStatusLayout;
+  readonly slashOpen: boolean;
+  readonly slashItems: readonly TuiCommand[];
+  readonly slashSelection: number;
+  readonly slashMaxVisible: number;
+  readonly slashShowDescriptions: boolean;
+  readonly modelPickerOpen: boolean;
+  readonly modelPickerRows: readonly ModelPickerRow[];
+  readonly modelPickerSelection: number;
+  readonly modelPickerMaxVisible: number;
+  readonly modelPickerShowHint: boolean;
 }) {
   return (
     <box flexDirection="column" width="100%">
-      <Composer
-        controller={controller}
-        snapshot={snapshot}
-        disabled={disabled}
-        onCommand={onCommand}
-        onValueChange={onValueChange}
-        editorRef={editorRef}
-      />
+      <box position="relative" width="100%" height={5} overflow="visible">
+        {slashOpen ? (
+          <SlashCommandMenu
+            commands={slashItems}
+            selectedIndex={slashSelection}
+            maxVisible={slashMaxVisible}
+            showDescriptions={slashShowDescriptions}
+          />
+        ) : null}
+        {modelPickerOpen ? (
+          <ModelPickerMenu
+            rows={modelPickerRows}
+            selectedIndex={modelPickerSelection}
+            maxVisible={modelPickerMaxVisible}
+            showHint={modelPickerShowHint}
+          />
+        ) : null}
+        <Composer
+          controller={controller}
+          snapshot={snapshot}
+          disabled={disabled}
+          focused={!modelPickerOpen}
+          onValueChange={onValueChange}
+          editorRef={editorRef}
+        />
+      </box>
       <ComposerStatusBar status={status} layout={statusLayout} />
     </box>
   );
@@ -251,6 +371,13 @@ export function App({ host, model, modelLabel, modelSelection }: {
     ? experience.surface
     : null;
   const modelItems = modelSelection ? modelPickerItems(modelSelection) : [];
+  const modelPickerRows: readonly ModelPickerRow[] = modelItems.map((item) => ({
+    key: `${item.providerId}:${item.modelId}:${item.reasoningEffort}`,
+    label: modelSelection ? modelSelectionLabel(modelSelection, item) : item.modelId,
+    current: selectedModel?.providerId === item.providerId
+      && selectedModel.modelId === item.modelId
+      && selectedModel.reasoningEffort === item.reasoningEffort,
+  }));
   const commandSelection = commandSurface?.selectedIndex ?? 0;
   const slashSelection = slashSurface?.selectedIndex ?? 0;
   const modeSelection = modeSurface?.selectedIndex ?? 0;
@@ -269,6 +396,17 @@ export function App({ host, model, modelLabel, modelSelection }: {
     usage: snapshot.usage,
   });
   const layout = responsiveLayout(terminal.width);
+  const slashMaxVisible = layout.density === 'wide' || layout.density === 'compact'
+    ? 5
+    : layout.density === 'narrow'
+      ? 3
+      : 2;
+  const welcomeModelMaxVisible = layout.density === 'wide' || layout.density === 'compact'
+    ? 4
+    : layout.density === 'narrow'
+      ? 3
+      : 2;
+  const welcomeModelVisibleRows = Math.min(welcomeModelMaxVisible, Math.max(1, modelPickerRows.length));
   const composerStatusLayout: ComposerStatusLayout = terminal.width >= 160
     ? 'wide'
     : terminal.width >= 72
@@ -279,12 +417,15 @@ export function App({ host, model, modelLabel, modelSelection }: {
     : terminal.width >= 42
       ? 'half'
       : 'narrow';
+  const isComposerSurface = experience.surface.type === 'composer'
+    || experience.surface.type === 'slash-suggestions'
+    || Boolean(modelSurface);
   const isWelcome = snapshot.messages.length === 0
     && !approval
     && snapshot.plan?.status !== 'awaiting_approval'
     && !goal
     && !snapshot.error
-    && experience.surface.type === 'composer';
+    && isComposerSurface;
 
   useEffect(() => controller.subscribe(setSnapshot), [controller]);
   useEffect(() => goalRunner.subscribe(setGoal), [goalRunner]);
@@ -309,7 +450,8 @@ export function App({ host, model, modelLabel, modelSelection }: {
       keyName: key.name,
       ctrl: key.ctrl,
       isRunning: snapshot.status !== 'idle' || Boolean(goal && ['pending', 'running'].includes(goal.status)),
-      hasSurface: experience.surface.type !== 'composer',
+      hasSurface: experience.surface.type !== 'composer'
+        && experience.surface.type !== 'slash-suggestions',
       hasDraft: composerDraft.length > 0,
     });
     if (control === 'interrupt') {
@@ -438,26 +580,18 @@ export function App({ host, model, modelLabel, modelSelection }: {
       return;
     }
 
-    if (
-      experience.surface.type === 'composer'
-      && !approval
-      && snapshot.plan?.status !== 'awaiting_approval'
-      && snapshot.status === 'idle'
-      && shouldOpenCommandPanel(composerRef.current?.plainText ?? '', key.sequence)
-    ) {
-      key.preventDefault();
-      key.stopPropagation();
-      composerRef.current?.clear();
-      setCommandNotice(null);
-      setExperience((current) => openCommandPanel({ ...current, mode: snapshot.mode }));
-      return;
-    }
     if (slashSurface) {
       if (key.name === 'escape') {
+        key.preventDefault();
+        key.stopPropagation();
+        composerRef.current?.clear();
+        setComposerDraft('');
         setExperience((current) => escapeFooter(current));
         return;
       }
       if (key.name === 'up' || key.name === 'down') {
+        key.preventDefault();
+        key.stopPropagation();
         const direction = key.name === 'up' ? -1 : 1;
         setExperience((current) => current.surface.type === 'slash-suggestions'
           ? {
@@ -472,12 +606,14 @@ export function App({ host, model, modelLabel, modelSelection }: {
           : current);
         return;
       }
-      if ((key.name === 'return' || key.name === 'enter' || key.name === 'tab') && slashItems.length > 0) {
-        const command = slashItems[slashSelection] ?? slashItems[0];
-        if (!command) return;
+      if (key.name === 'return' || key.name === 'enter' || key.name === 'tab') {
         key.preventDefault();
         key.stopPropagation();
+        const command = slashItems[slashSelection] ?? slashItems[0];
+        if (!command) return;
         composerRef.current?.clear();
+        setComposerDraft('');
+        setCommandNotice(null);
         setExperience((current) => applyTuiCommand({ ...current, mode: snapshot.mode }, command));
         return;
       }
@@ -590,7 +726,17 @@ export function App({ host, model, modelLabel, modelSelection }: {
       {isWelcome ? (
         <box flexGrow={1} flexDirection="column" justifyContent="center" alignItems="center" paddingLeft={layout.outerPadding} paddingRight={layout.outerPadding}>
           <box width="100%" flexDirection="column" alignItems="center" gap={2}>
-            <box width="100%" alignItems="center" justifyContent="center">
+            <box
+              width="100%"
+              position="relative"
+              top={modelSurface
+                ? -(welcomeModelVisibleRows + 2)
+                : slashSurface
+                  ? -Math.min(3, slashMaxVisible)
+                  : 0}
+              alignItems="center"
+              justifyContent="center"
+            >
               <B3Wordmark variant={wordmarkVariant} />
             </box>
             <box width={layout.welcomeWidth} maxWidth={112}>
@@ -601,10 +747,16 @@ export function App({ host, model, modelLabel, modelSelection }: {
                 editorRef={composerRef}
                 status={composerStatus}
                 statusLayout={composerStatusLayout}
-                onCommand={() => {
-                  setCommandNotice(null);
-                  setExperience((current) => openCommandPanel({ ...current, mode: snapshot.mode }));
-                }}
+                slashOpen={Boolean(slashSurface)}
+                slashItems={slashItems}
+                slashSelection={slashSelection}
+                slashMaxVisible={Math.min(3, slashMaxVisible)}
+                slashShowDescriptions={layout.showDescriptions}
+                modelPickerOpen={Boolean(modelSurface)}
+                modelPickerRows={modelPickerRows}
+                modelPickerSelection={modelPickerSelection}
+                modelPickerMaxVisible={welcomeModelMaxVisible}
+                modelPickerShowHint={layout.showHints}
                 onValueChange={(value) => {
                   setComposerDraft(value);
                   setExperience((current) => syncSlashSuggestions(current, value));
@@ -688,20 +840,6 @@ export function App({ host, model, modelLabel, modelSelection }: {
         <text fg={COLOR.accent}>{commandNotice}</text>
       ) : null}
 
-      {slashSurface ? (
-        <box flexDirection="column" border borderColor={COLOR.border} backgroundColor={COLOR.panel} paddingLeft={1} paddingRight={1}>
-          {slashItems.length > 0 ? slashItems.map((command, index) => (
-            <box key={command.id} justifyContent="space-between">
-              <text fg={index === slashSelection ? COLOR.text : COLOR.muted}>
-                {index === slashSelection ? '› ' : '  '}/{command.id}
-              </text>
-              {layout.showDescriptions ? <text fg={COLOR.muted}>{command.description}</text> : null}
-            </box>
-          )) : <text fg={COLOR.muted}>No matching commands</text>}
-          {layout.showHints ? <text fg={COLOR.muted}>↑↓ select  ·  enter run  ·  esc close</text> : null}
-        </box>
-      ) : null}
-
       {permissionSurface ? (
         <box flexDirection="column" border borderColor={COLOR.accent} backgroundColor={COLOR.panel} padding={1} gap={1}>
           <text fg={COLOR.text}><strong>Permissions for this session</strong></text>
@@ -741,23 +879,6 @@ export function App({ host, model, modelLabel, modelSelection }: {
         </box>
       ) : null}
 
-      {modelSurface ? (
-        <box flexDirection="column" border borderColor={COLOR.accent} backgroundColor={COLOR.panel} padding={1}>
-          <text fg={COLOR.accent}><strong>Model &amp; reasoning</strong></text>
-          {modelItems.length === 0 ? (
-            <text fg="#f59e0b">No configured model is available in the runtime catalog.</text>
-          ) : modelItems.map((item, index) => (
-            <text key={`${item.providerId}:${item.modelId}:${item.reasoningEffort}`} fg={index === modelPickerSelection ? COLOR.text : COLOR.muted}>
-              {index === modelPickerSelection ? '› ' : '  '}{modelSelection ? modelSelectionLabel(modelSelection, item) : item.modelId}
-              {selectedModel?.providerId === item.providerId
-                && selectedModel.modelId === item.modelId
-                && selectedModel.reasoningEffort === item.reasoningEffort ? '  current' : ''}
-            </text>
-          ))}
-          {layout.showHints ? <text fg={COLOR.muted}>↑↓ choose · enter apply to next message · esc close</text> : null}
-        </box>
-      ) : null}
-
       {commandSurface ? (
         <box flexDirection="column" border borderColor={COLOR.accent} backgroundColor={COLOR.panel} padding={1}>
           <text fg={COLOR.accent}><strong>Commands</strong></text>
@@ -780,10 +901,16 @@ export function App({ host, model, modelLabel, modelSelection }: {
           editorRef={composerRef}
           status={composerStatus}
           statusLayout={composerStatusLayout}
-          onCommand={() => {
-            setCommandNotice(null);
-            setExperience((current) => openCommandPanel({ ...current, mode: snapshot.mode }));
-          }}
+          slashOpen={Boolean(slashSurface)}
+          slashItems={slashItems}
+          slashSelection={slashSelection}
+          slashMaxVisible={slashMaxVisible}
+          slashShowDescriptions={layout.showDescriptions}
+          modelPickerOpen={Boolean(modelSurface)}
+          modelPickerRows={modelPickerRows}
+          modelPickerSelection={modelPickerSelection}
+          modelPickerMaxVisible={slashMaxVisible}
+          modelPickerShowHint={layout.showHints}
           onValueChange={(value) => {
             setComposerDraft(value);
             setExperience((current) => syncSlashSuggestions(current, value));

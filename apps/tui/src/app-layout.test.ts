@@ -40,6 +40,69 @@ describe('TUI app layout', () => {
     expect(appSource).not.toContain('↵ send  ·  / commands');
   });
 
+  test('keeps slash suggestions as a bounded overlay anchored above the composer', () => {
+    const slashMenuSource = appSource.slice(
+      appSource.indexOf('function SlashCommandMenu'),
+      appSource.indexOf('function Composer('),
+    );
+    const dockSource = appSource.slice(
+      appSource.indexOf('function ComposerDock'),
+      appSource.indexOf('export function App'),
+    );
+
+    expect(slashMenuSource).toContain('position="absolute"');
+    expect(slashMenuSource).toContain('left={0}');
+    expect(slashMenuSource).toContain('right={0}');
+    expect(slashMenuSource).toContain('bottom={5}');
+    expect(slashMenuSource).toContain('zIndex={100}');
+    expect(slashMenuSource).toContain('flexDirection="row"');
+    expect(slashMenuSource).toContain('height={1}');
+    expect(dockSource).toContain('<box position="relative" width="100%" height={5} overflow="visible">');
+    expect(dockSource).toContain('<SlashCommandMenu');
+    expect(dockSource.indexOf('<SlashCommandMenu')).toBeLessThan(dockSource.indexOf('<Composer'));
+    expect(appSource).toContain("experience.surface.type === 'slash-suggestions'");
+    expect(appSource).toContain('slashMaxVisible={slashMaxVisible}');
+    expect(appSource).toContain('slashMaxVisible={Math.min(3, slashMaxVisible)}');
+    expect(appSource).toContain(': slashSurface');
+    expect(appSource).toContain('? -Math.min(3, slashMaxVisible)');
+    expect(appSource).toContain("layout.density === 'wide' || layout.density === 'compact'");
+    expect(appSource).toContain("layout.density === 'narrow'");
+    expect(appSource).not.toContain('shouldOpenCommandPanel');
+    expect(appSource).not.toContain('{slashSurface ? (');
+  });
+
+  test('keeps the model picker in the composer dock instead of restoring the top-level surface', () => {
+    const modelPickerSource = appSource.slice(
+      appSource.indexOf('function ModelPickerMenu'),
+      appSource.indexOf('function Composer('),
+    );
+    const dockSource = appSource.slice(
+      appSource.indexOf('function ComposerDock'),
+      appSource.indexOf('export function App'),
+    );
+    const appRenderSource = appSource.slice(appSource.indexOf('export function App'));
+
+    expect(modelPickerSource).toContain('position="absolute"');
+    expect(modelPickerSource).toContain('left={0}');
+    expect(modelPickerSource).toContain('right={0}');
+    expect(modelPickerSource).toContain('bottom={5}');
+    expect(modelPickerSource).toContain('zIndex={100}');
+    expect(modelPickerSource).toContain('<strong>Model &amp; reasoning</strong>');
+    expect(dockSource).toContain('<ModelPickerMenu');
+    expect(dockSource.indexOf('<ModelPickerMenu')).toBeLessThan(dockSource.indexOf('<Composer'));
+    expect(dockSource).toContain('focused={!modelPickerOpen}');
+    expect(appSource).toContain('focused={focused && !disabled}');
+    expect(appSource.match(/modelPickerOpen=\{Boolean\(modelSurface\)\}/g)?.length).toBe(2);
+    expect(appSource).toContain('|| Boolean(modelSurface)');
+    expect(appSource).toContain('const welcomeModelMaxVisible =');
+    expect(appSource).toContain('? 4');
+    expect(appSource).toContain('modelPickerMaxVisible={welcomeModelMaxVisible}');
+    expect(appSource).toContain('const welcomeModelVisibleRows = Math.min(welcomeModelMaxVisible');
+    expect(appSource).toContain('top={modelSurface');
+    expect(appSource).toContain('? -(welcomeModelVisibleRows + 2)');
+    expect(appRenderSource).not.toContain('{modelSurface ? (');
+  });
+
   test('shows one shared three-level responsive status bar in welcome and conversation layouts', () => {
     expect(appSource).toContain('const composerStatusLayout: ComposerStatusLayout = terminal.width >= 160');
     expect(appSource).toContain(': terminal.width >= 72');
