@@ -82,6 +82,20 @@ export type TranslationKey =
   | 'settings.search'
   | 'settings.searchEmpty'
   | 'settings.general'
+  | 'settings.archived'
+  | 'settings.archived.description'
+  | 'settings.archived.loading'
+  | 'settings.archived.empty'
+  | 'settings.archived.emptyDescription'
+  | 'settings.archived.loadFailed'
+  | 'settings.archived.actionFailed'
+  | 'settings.archived.messageCount'
+  | 'settings.archived.date'
+  | 'settings.archived.restore'
+  | 'settings.archived.delete'
+  | 'settings.archived.deleteTitle'
+  | 'settings.archived.confirmDelete'
+  | 'settings.archived.working'
   | 'settings.backToChat'
   | 'settings.appearance.description'
   | 'settings.language.description'
@@ -598,6 +612,20 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.search': '搜索设置…',
     'settings.searchEmpty': '无匹配的设置项',
     'settings.general': '通用',
+    'settings.archived': '已归档会话',
+    'settings.archived.description': '查看和管理当前工作区中已归档的会话。',
+    'settings.archived.loading': '正在加载已归档会话…',
+    'settings.archived.empty': '暂无已归档会话',
+    'settings.archived.emptyDescription': '归档后的会话会显示在这里。',
+    'settings.archived.loadFailed': '已归档会话加载失败，请重试。',
+    'settings.archived.actionFailed': '操作失败，请重试。',
+    'settings.archived.messageCount': '{count} 条消息',
+    'settings.archived.date': '归档于 {date}',
+    'settings.archived.restore': '恢复',
+    'settings.archived.delete': '删除',
+    'settings.archived.deleteTitle': '删除已归档会话',
+    'settings.archived.confirmDelete': '确定要永久删除“{title}”吗？此操作无法撤销。',
+    'settings.archived.working': '处理中…',
     'settings.backToChat': '返回对话',
     'settings.appearance.description': '选择界面的浅色、深色模式或跟随系统偏好。',
     'settings.language.description': '选择界面显示语言。',
@@ -1133,6 +1161,20 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.search': 'Search settings…',
     'settings.searchEmpty': 'No matching settings',
     'settings.general': 'General',
+    'settings.archived': 'Archived chats',
+    'settings.archived.description': 'View and manage archived chats in the current workspace.',
+    'settings.archived.loading': 'Loading archived chats…',
+    'settings.archived.empty': 'No archived chats',
+    'settings.archived.emptyDescription': 'Chats will appear here after you archive them.',
+    'settings.archived.loadFailed': 'Failed to load archived chats. Please try again.',
+    'settings.archived.actionFailed': 'The action failed. Please try again.',
+    'settings.archived.messageCount': '{count} messages',
+    'settings.archived.date': 'Archived {date}',
+    'settings.archived.restore': 'Restore',
+    'settings.archived.delete': 'Delete',
+    'settings.archived.deleteTitle': 'Delete archived chat',
+    'settings.archived.confirmDelete': 'Permanently delete “{title}”? This action cannot be undone.',
+    'settings.archived.working': 'Working…',
     'settings.backToChat': 'Back to chat',
     'settings.appearance.description': 'Choose light, dark, or follow system preference.',
     'settings.language.description': 'Choose the display language for the interface.',

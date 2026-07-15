@@ -2,6 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LocaleCode } from '@peer-agent/protocol';
 import { useState } from 'react';
 import { AppearancePanel } from '../../appearance/AppearancePanel';
+import { ArchivedConversationsPanel } from './ArchivedConversationsPanel';
 import { CapabilitiesPanel } from './CapabilitiesPanel';
 import { GeneralPanel } from './GeneralPanel';
 import { GitPanel } from './GitPanel';
@@ -10,7 +11,7 @@ import { SystemInstructionsPanel } from './SystemInstructionsPanel';
 import { ShortcutsPanel } from './ShortcutsPanel';
 import { UpdatesPanel } from './UpdatesPanel';
 
-type SettingsSection = 'general' | 'model' | 'skills' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates';
+type SettingsSection = 'general' | 'archived' | 'model' | 'skills' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates';
 
 /**
  * SettingsPage 是设置入口的单一表达层:
@@ -32,6 +33,8 @@ export function SettingsPage({
   onReplyLanguageChanged,
   onSystemInstructionsChanged,
   onGitBranchPrefixChanged,
+  workspacePath,
+  onArchivedConversationsChanged,
 }: {
   readonly availableLocales: readonly LocaleCode[];
   readonly i18n: I18nRuntime;
@@ -40,6 +43,8 @@ export function SettingsPage({
   readonly onReplyLanguageChanged?: (replyLanguage: string) => void;
   readonly onSystemInstructionsChanged?: (value: string) => void;
   readonly onGitBranchPrefixChanged?: (value: string) => void;
+  readonly workspacePath: string | null;
+  readonly onArchivedConversationsChanged?: () => Promise<void> | void;
 }) {
   const [section, setSection] = useState<SettingsSection>('general');
   const [query, setQuery] = useState('');
@@ -49,6 +54,7 @@ export function SettingsPage({
       : { model: '模型配置', skills: '能力', instructions: '个性化设置' };
   const items: ReadonlyArray<{ key: SettingsSection; label: string }> = [
     { key: 'general', label: i18n.t('settings.general') },
+    { key: 'archived', label: i18n.t('settings.archived') },
     { key: 'model', label: localizedSettingsLabels.model },
     { key: 'skills', label: localizedSettingsLabels.skills },
     { key: 'instructions', label: localizedSettingsLabels.instructions },
@@ -116,6 +122,12 @@ export function SettingsPage({
             i18n={i18n}
             onLocaleChanged={onLocaleChanged}
             onReplyLanguageChanged={onReplyLanguageChanged}
+          />
+        ) : section === 'archived' ? (
+          <ArchivedConversationsPanel
+            i18n={i18n}
+            workspacePath={workspacePath}
+            onConversationsChanged={onArchivedConversationsChanged}
           />
         ) : section === 'model' ? (
           <LlmSettingsPanel i18n={i18n} />

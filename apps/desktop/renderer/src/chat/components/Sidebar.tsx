@@ -113,7 +113,6 @@ export function Sidebar({
   onPinConversation,
   onUnpinConversation,
   onReorderPinnedConversations,
-  onShowArchivedConversations,
   onShowActiveConversations,
   onOpenSettings,
   onWorkspaceChanged,
@@ -141,7 +140,6 @@ export function Sidebar({
   readonly onPinConversation: (id: string) => void | Promise<void>;
   readonly onUnpinConversation: (id: string) => void | Promise<void>;
   readonly onReorderPinnedConversations: (ids: readonly string[]) => void | Promise<void>;
-  readonly onShowArchivedConversations: () => void | Promise<void>;
   readonly onShowActiveConversations: () => void | Promise<void>;
   readonly onOpenSettings: () => void;
   readonly onWorkspaceChanged?: () => Promise<void> | void;
@@ -704,18 +702,6 @@ export function Sidebar({
       ) : null}
 
       <div className="sidebar-bottom">
-        <button
-          type="button"
-          className={`sidebar-nav-btn ${isArchivedView ? 'active' : ''}`}
-          onClick={() => { void onShowArchivedConversations(); }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <rect x="3" y="4" width="18" height="4" rx="1" />
-            <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
-            <path d="M10 12h4" />
-          </svg>
-          <span>{isZh ? '已归档会话' : 'Archived Chats'}</span>
-        </button>
         <button type="button" className={`sidebar-nav-btn ${activePage === 'settings' ? 'active' : ''}`} onClick={onOpenSettings}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />

@@ -296,14 +296,6 @@ function MainApp() {
     setActivePage('chat');
   }, []);
 
-  const handleShowArchivedConversations = useCallback(async () => {
-    setConversationView('archived');
-    setActiveConversationId(null);
-    setActivePage('chat');
-    // 保留旧列表直到新数据成功返回，避免切换期间闪现"暂无会话"。
-    await refreshConversations(activeWorkspace, 'archived');
-  }, [activeWorkspace, refreshConversations]);
-
   const handleShowActiveConversations = useCallback(async () => {
     setConversationView('active');
     setActiveConversationId(null);
@@ -367,6 +359,8 @@ function MainApp() {
           onReplyLanguageChanged={setReplyLanguage}
           onSystemInstructionsChanged={setSystemInstructions}
           onGitBranchPrefixChanged={setGitBranchPrefix}
+          workspacePath={activeWorkspace}
+          onArchivedConversationsChanged={() => refreshConversations(activeWorkspace, 'active')}
         />
       ) : session ? (
         <WorkbenchProvider conversationId={activeConversationId}>
@@ -390,7 +384,6 @@ function MainApp() {
               onPinConversation={handlePinConversation}
               onUnpinConversation={handleUnpinConversation}
               onReorderPinnedConversations={handleReorderPinnedConversations}
-              onShowArchivedConversations={handleShowArchivedConversations}
               onShowActiveConversations={handleShowActiveConversations}
               onOpenSettings={() => setActivePage('settings')}
               onWorkspaceChanged={handleWorkspaceChanged}

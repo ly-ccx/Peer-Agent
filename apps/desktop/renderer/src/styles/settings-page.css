@@ -234,6 +234,146 @@
   font-size: 0.78rem;
 }
 
+/* ── 已归档会话 · 设置内管理分区 ── */
+.archived-conversations-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--settings-panel-max-width);
+  margin: 0 auto;
+  padding: var(--space-6);
+  padding-top: 52px;
+}
+
+.archived-conversations-header h2 {
+  margin: 0;
+  color: var(--pa-text-primary);
+  font-family: var(--font-serif-zh);
+  font-size: 1.25rem;
+}
+
+.archived-conversations-header p,
+.archived-conversation-copy p,
+.archived-conversations-state p {
+  margin: 6px 0 0;
+  color: var(--graphite-soft);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.archived-conversations-list {
+  overflow: hidden;
+  border: 1px solid var(--pa-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--pa-surface-card);
+}
+
+.archived-conversation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 72px;
+  padding: var(--space-3) var(--space-4);
+}
+
+.archived-conversation-row + .archived-conversation-row {
+  border-top: 1px solid var(--pa-border-subtle);
+}
+
+.archived-conversation-copy {
+  min-width: 0;
+}
+
+.archived-conversation-copy h3 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--pa-text-primary);
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archived-conversation-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.archived-conversation-actions button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--pa-border-subtle);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--pa-text-secondary);
+  cursor: pointer;
+  font-size: 0.78rem;
+  transition: border-color var(--za-motion-fast), background var(--za-motion-fast), color var(--za-motion-fast);
+}
+
+.archived-conversation-actions button:hover:not(:disabled) {
+  border-color: var(--pa-border-strong);
+  background: var(--pa-surface-hover);
+  color: var(--pa-text-primary);
+}
+
+.archived-conversation-actions .archived-conversation-restore {
+  color: var(--za-accent);
+}
+
+.archived-conversation-actions .archived-conversation-delete {
+  color: var(--state-danger);
+}
+
+.archived-conversation-actions button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.archived-conversations-state {
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: var(--space-6);
+  border: 1px dashed var(--pa-border-subtle);
+  border-radius: var(--radius-lg);
+  color: var(--graphite-soft);
+  text-align: center;
+}
+
+.archived-conversations-state strong {
+  color: var(--pa-text-primary);
+  font-size: 0.92rem;
+}
+
+.archived-conversations-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--za-danger-soft);
+  color: var(--state-danger);
+  font-size: 0.78rem;
+}
+
+@media (max-width: 760px) {
+  .archived-conversation-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .archived-conversation-actions {
+    justify-content: flex-end;
+  }
+}
+
 @media (max-width: 760px) {
   .general-setting-row {
     align-items: stretch;
