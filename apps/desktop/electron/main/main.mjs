@@ -1643,18 +1643,19 @@ ipcMain.handle('file:read', async (_event, { absPath, workspaceRoot, relPath } =
   }
 });
 
-// ── 内嵌浏览器控制句柄注册（见 ADR 40）──
-// renderer 的 <webview> 在 dom-ready 后上报自己的 webContentsId，main 记下当前活跃
-// 句柄；Agent 的 browser_* 工具由 provider 用 webContents.fromId(id) 直接操控同一个
-// 可见 webview。webview 卸载时注销。
-ipcMain.handle('browser:register-webcontents', (_event, { webContentsId, url, title } = {}) => {
-  const result = registerBrowserWebContents({ webContentsId, url, title });
-  rebuildAppMenu(); // 有活动浏览器页 → ⌘R「刷新浏览器页」由置灰转可用
+// ── 会话级内嵌浏览器标签控制句柄注册（见 ADR 40 / 46）──
+// renderer 上报 webContentsId + conversationId + browserTabId；main 按会话登记活跃标签，
+// Agent 的 browser_* provider 只解析工具调用所属会话的目标。webview 卸载时注销。
+ipcMain.handle('browser:register-webcontents', (_event, registration = {}) => {
+  const hadActiveBrowser = getActiveWebContentsId() != null;
+  const result = registerBrowserWebContents(registration);
+  if (hadActiveBrowser !== (getActiveWebContentsId() != null)) rebuildAppMenu();
   return result;
 });
-ipcMain.handle('browser:unregister-webcontents', (_event, { webContentsId } = {}) => {
-  const result = unregisterBrowserWebContents(webContentsId);
-  rebuildAppMenu(); // 无活动浏览器页 → ⌘R 置灰禁用
+ipcMain.handle('browser:unregister-webcontents', (_event, registration = {}) => {
+  const hadActiveBrowser = getActiveWebContentsId() != null;
+  const result = unregisterBrowserWebContents(registration);
+  if (hadActiveBrowser !== (getActiveWebContentsId() != null)) rebuildAppMenu();
   return result;
 });
 

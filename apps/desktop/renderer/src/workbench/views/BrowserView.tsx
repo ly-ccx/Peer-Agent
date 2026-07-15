@@ -10,11 +10,17 @@ import {
   type Ref,
 } from 'react';
 import { clientApi } from '../../clientApi';
-import { getBrowserSessionUrl, setBrowserSessionUrl } from '../browserSessionState';
+import {
+  BROWSER_HOME_URL,
+  activateBrowserTab,
+  addBrowserTab,
+  closeBrowserTab,
+  createBrowserTabSession,
+  updateBrowserTab,
+  type BrowserSessionState,
+  type BrowserTabSession,
+} from '../browserSessionState';
 
-// ── <webview> 类型声明 ────────────────────────────────────────────────
-// Electron 的 <webview> 标签不是标准 JSX 元素，这里补一个最小可用的内联声明，
-// 仅覆盖本组件用到的属性/方法，避免引入额外类型依赖。
 interface WebviewElement extends HTMLElement {
   src: string;
   loadURL(url: string): Promise<void>;
@@ -34,7 +40,6 @@ interface WebviewProps
   readonly src?: string;
   readonly partition?: string;
   readonly allowpopups?: string;
-  readonly useragent?: string;
 }
 
 declare global {
@@ -49,16 +54,51 @@ declare global {
 interface BrowserViewProps {
   readonly isZh: boolean;
   readonly conversationId: string | null;
+  readonly session: BrowserSessionState;
+  readonly onSessionChange: (
+    next: BrowserSessionState | ((current: BrowserSessionState) => BrowserSessionState),
+  ) => void;
 }
 
-// 会话隔离：浏览器面板使用独立的持久化分区，与主应用 cookie/storage 互不污染。
-const BROWSER_PARTITION = 'persist:peer-browser';
-const HOME_URL = 'about:blank';
+interface BrowserFailure {
+  readonly code: number;
+  readonly desc: string;
+  readonly url: string;
+}
 
-// 把用户在地址栏输入的内容规范化为可导航的 URL：
-// - 已带协议的原样使用
-// - 形似域名/带路径的补 https://
-// - 其它一律当作搜索词，走必应搜索
+interface BrowserTabRuntimeState {
+  readonly currentUrl: string;
+  readonly loading: boolean;
+  readonly canBack: boolean;
+  readonly canForward: boolean;
+  readonly failure: BrowserFailure | null;
+}
+
+interface BrowserPageProps {
+  readonly tab: BrowserTabSession;
+  readonly active: boolean;
+  readonly conversationId: string | null;
+  readonly onHandleChange: (tabId: string, handle: WebviewElement | null) => void;
+  readonly onMetadataChange: (
+    tabId: string,
+    patch: Partial<Pick<BrowserTabSession, 'url' | 'title'>>,
+  ) => void;
+  readonly onRuntimeChange: (tabId: string, patch: Partial<BrowserTabRuntimeState>) => void;
+}
+
+// Cookie / localStorage 在所有会话和标签间共享，浏览器身份与主应用 renderer 隔离。
+const BROWSER_PARTITION = 'persist:peer-browser';
+
+function initialRuntime(tab: BrowserTabSession): BrowserTabRuntimeState {
+  return {
+    currentUrl: tab.url || BROWSER_HOME_URL,
+    loading: false,
+    canBack: false,
+    canForward: false,
+    failure: null,
+  };
+}
+
 function normalizeInput(raw: string): string {
   const text = raw.trim();
   if (!text) return '';
@@ -72,15 +112,23 @@ function normalizeInput(raw: string): string {
   return `https://www.bing.com/search?q=${encodeURIComponent(text)}`;
 }
 
-// 把内部 URL 显示为更干净的地址（about:blank 显示为空）。
 function displayUrl(url: string): string {
-  if (!url || url === 'about:blank') return '';
+  if (!url || url === BROWSER_HOME_URL) return '';
   return url;
 }
 
-// ── 工具栏图标 ────────────────────────────────────────────────────────
-// 复用项目既有的内联 SVG 范式（见 WorkbenchPanel.tsx）：24x24 viewBox、
-// fill=none、stroke=currentColor、线宽 2、圆角线帽，跟随当前文字色。
+function tabLabel(tab: BrowserTabSession, untitled: string): string {
+  if (tab.title.trim()) return tab.title.trim();
+  if (tab.url && tab.url !== BROWSER_HOME_URL) {
+    try {
+      return new URL(tab.url).hostname || tab.url;
+    } catch {
+      return tab.url;
+    }
+  }
+  return untitled;
+}
+
 const ICON_PROPS = {
   width: 16,
   height: 16,
@@ -94,175 +142,132 @@ const ICON_PROPS = {
 };
 
 function IconBack() {
-  return (
-    <svg {...ICON_PROPS}>
-      <path d="m15 18-6-6 6-6" />
-    </svg>
-  );
+  return <svg {...ICON_PROPS}><path d="m15 18-6-6 6-6" /></svg>;
 }
 
 function IconForward() {
-  return (
-    <svg {...ICON_PROPS}>
-      <path d="m9 18 6-6-6-6" />
-    </svg>
-  );
+  return <svg {...ICON_PROPS}><path d="m9 18 6-6-6-6" /></svg>;
 }
 
 function IconReload() {
-  return (
-    <svg {...ICON_PROPS}>
-      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-      <path d="M21 3v6h-6" />
-    </svg>
-  );
+  return <svg {...ICON_PROPS}><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>;
 }
 
 function IconStop() {
-  return (
-    <svg {...ICON_PROPS}>
-      <path d="M18 6 6 18" />
-      <path d="m6 6 12 12" />
-    </svg>
-  );
+  return <svg {...ICON_PROPS}><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>;
 }
 
 function IconGo() {
+  return <svg {...ICON_PROPS}><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>;
+}
+
+function IconGlobe() {
   return (
-    <svg {...ICON_PROPS}>
-      <path d="M5 12h14" />
-      <path d="m12 5 7 7-7 7" />
+    <svg {...ICON_PROPS} width={14} height={14}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" />
+      <path d="M12 3a14 14 0 0 1 0 18" />
+      <path d="M12 3a14 14 0 0 0 0 18" />
     </svg>
   );
 }
 
-export function BrowserView({ isZh, conversationId }: BrowserViewProps) {
-  const initialUrl = getBrowserSessionUrl(conversationId);
+function IconClose() {
+  return <svg {...ICON_PROPS} width={13} height={13}><path d="m7 7 10 10M17 7 7 17" /></svg>;
+}
+
+function IconPlus() {
+  return <svg {...ICON_PROPS}><path d="M12 5v14M5 12h14" /></svg>;
+}
+
+function BrowserPage({
+  tab,
+  active,
+  conversationId,
+  onHandleChange,
+  onMetadataChange,
+  onRuntimeChange,
+}: BrowserPageProps) {
   const webviewRef = useRef<WebviewElement | null>(null);
-  const [address, setAddress] = useState(() => displayUrl(initialUrl));
-  const [currentUrl, setCurrentUrl] = useState(initialUrl);
-  const [title, setTitle] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [canBack, setCanBack] = useState(false);
-  const [canForward, setCanForward] = useState(false);
-  const [failure, setFailure] = useState<{ code: number; desc: string; url: string } | null>(
-    null,
-  );
-  // 地址栏聚焦时不被导航事件回写覆盖，避免“打字被打断”。用 ref 追踪，不触发重渲染。
-  const editingRef = useRef(false);
+  // src 只负责 guest 首次挂载；后续导航由 WebContents 自己维护，避免 redirect 后
+  // 元数据回写再次改 src，造成重复加载和 history 被重置。
+  const initialUrlRef = useRef(tab.url || BROWSER_HOME_URL);
+  const registeredIdRef = useRef<number | null>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
-  const t = useMemo(
-    () => ({
-      back: isZh ? '后退' : 'Back',
-      forward: isZh ? '前进' : 'Forward',
-      reload: isZh ? '刷新' : 'Reload',
-      stop: isZh ? '停止' : 'Stop',
-      go: isZh ? '前往' : 'Go',
-      placeholder: isZh ? '输入网址或搜索内容，回车前往' : 'Enter URL or search, press Enter',
-      loading: isZh ? '加载中…' : 'Loading…',
-      failTitle: isZh ? '无法打开此页面' : 'This page can’t be opened',
-      retry: isZh ? '重试' : 'Retry',
-      blank: isZh ? '空白页 · 输入网址开始浏览' : 'Blank page · type a URL to start',
-    }),
-    [isZh],
-  );
-
-  const syncNavState = useCallback(() => {
+  const publishRegistration = useCallback((isActive = activeRef.current) => {
     const wv = webviewRef.current;
     if (!wv) return;
     try {
-      setCanBack(wv.canGoBack());
-      setCanForward(wv.canGoForward());
+      const webContentsId = wv.getWebContentsId();
+      if (!Number.isInteger(webContentsId) || webContentsId <= 0) return;
+      registeredIdRef.current = webContentsId;
+      void clientApi.registerBrowserWebContents({
+        webContentsId,
+        conversationId,
+        browserTabId: tab.id,
+        active: isActive,
+        url: wv.getURL(),
+        title: wv.getTitle(),
+      }).catch(() => {});
     } catch {
-      /* webview 尚未就绪，忽略 */
+      // 非 Electron 环境或 guest 尚未就绪，dom-ready 后会再次发布。
     }
-  }, []);
+  }, [conversationId, tab.id]);
 
-  const navigate = useCallback((url: string) => {
-    const wv = webviewRef.current;
-    if (!wv || !url) return;
-    setFailure(null);
-    try {
-      void wv.loadURL(url);
-    } catch {
-      wv.src = url;
-    }
-  }, []);
-
-  const handleSubmit = useCallback(() => {
-    const url = normalizeInput(address);
-    if (!url) return;
-    editingRef.current = false;
-    navigate(url);
-  }, [address, navigate]);
-
-  const handleKeyDown = useCallback(
-    (e: ReactKeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        handleSubmit();
-      } else if (e.key === 'Escape') {
-        editingRef.current = false;
-        setAddress(displayUrl(currentUrl));
-        e.currentTarget.blur();
-      }
-    },
-    [handleSubmit, currentUrl],
-  );
-
-  // 绑定 webview 事件：导航/标题/加载态/失败兜底。
   useEffect(() => {
     const wv = webviewRef.current;
     if (!wv) return;
+    onHandleChange(tab.id, wv);
 
-    const onStartLoading = () => {
-      setLoading(true);
-      setFailure(null);
-    };
-    const onStopLoading = () => {
-      setLoading(false);
-      syncNavState();
+    const syncNavState = () => {
+      try {
+        onRuntimeChange(tab.id, {
+          canBack: wv.canGoBack(),
+          canForward: wv.canGoForward(),
+        });
+      } catch {
+        // guest 尚未就绪。
+      }
     };
     const updateUrl = () => {
-      const url = wv.getURL();
-      setCurrentUrl(url);
-      setBrowserSessionUrl(conversationId, url);
-      // 仅在用户未编辑地址栏时才回写，避免打断输入。
-      if (!editingRef.current) setAddress(displayUrl(url));
+      const url = wv.getURL() || BROWSER_HOME_URL;
+      onRuntimeChange(tab.id, { currentUrl: url });
+      onMetadataChange(tab.id, { url });
       syncNavState();
+      publishRegistration();
     };
-    const onTitle = (e: Event) => {
-      const detail = (e as unknown as { title?: string }).title;
-      setTitle(detail ?? wv.getTitle());
+    const onStartLoading = () => {
+      onRuntimeChange(tab.id, { loading: true, failure: null });
     };
-    const onFailLoad = (e: Event) => {
-      const ev = e as unknown as {
+    const onStopLoading = () => {
+      onRuntimeChange(tab.id, { loading: false });
+      syncNavState();
+      publishRegistration();
+    };
+    const onTitle = (event: Event) => {
+      const detail = (event as unknown as { title?: string }).title;
+      onMetadataChange(tab.id, { title: detail ?? wv.getTitle() });
+      publishRegistration();
+    };
+    const onFailLoad = (event: Event) => {
+      const ev = event as unknown as {
         errorCode: number;
         errorDescription: string;
         validatedURL: string;
         isMainFrame: boolean;
       };
-      // 仅对主框架失败兜底；子资源失败（广告/统计等）忽略。-3 = ABORTED（用户停止/重定向）忽略。
-      if (ev.isMainFrame === false) return;
-      if (ev.errorCode === -3) return;
-      setLoading(false);
-      setFailure({ code: ev.errorCode, desc: ev.errorDescription, url: ev.validatedURL });
+      if (ev.isMainFrame === false || ev.errorCode === -3) return;
+      onRuntimeChange(tab.id, {
+        loading: false,
+        failure: { code: ev.errorCode, desc: ev.errorDescription, url: ev.validatedURL },
+      });
     };
-
-    // dom-ready：同步导航态 + 把本 webview 的 webContentsId 上报给 main（见 ADR 40），
-    // 使 Agent 的 browser_* 工具能经 webContents.fromId 直接操控这同一个可见浏览器。
-    let registeredId: number | null = null;
     const onDomReady = () => {
-      syncNavState();
-      try {
-        const id = wv.getWebContentsId();
-        if (Number.isInteger(id) && id > 0) {
-          registeredId = id;
-          void clientApi.registerBrowserWebContents(id, wv.getURL(), wv.getTitle());
-        }
-      } catch {
-        /* 非 Electron 环境或句柄未就绪 → Agent 操控将在未注册时报错兜底 */
-      }
+      updateUrl();
+      onMetadataChange(tab.id, { title: wv.getTitle() });
+      publishRegistration();
     };
 
     wv.addEventListener('did-start-loading', onStartLoading);
@@ -281,18 +286,211 @@ export function BrowserView({ isZh, conversationId }: BrowserViewProps) {
       wv.removeEventListener('page-title-updated', onTitle);
       wv.removeEventListener('did-fail-load', onFailLoad);
       wv.removeEventListener('dom-ready', onDomReady);
-      if (registeredId != null) {
-        try {
-          void clientApi.unregisterBrowserWebContents(registeredId);
-        } catch {
-          /* 忽略注销异常 */
-        }
+      onHandleChange(tab.id, null);
+      if (registeredIdRef.current != null) {
+        void clientApi.unregisterBrowserWebContents({
+          webContentsId: registeredIdRef.current,
+          conversationId,
+          browserTabId: tab.id,
+        }).catch(() => {});
       }
     };
-  }, [conversationId, syncNavState]);
+  }, [
+    conversationId,
+    onHandleChange,
+    onMetadataChange,
+    onRuntimeChange,
+    publishRegistration,
+    tab.id,
+  ]);
+
+  useEffect(() => {
+    if (active) publishRegistration(true);
+  }, [active, publishRegistration]);
+
+  return (
+    <webview
+      ref={webviewRef as unknown as Ref<HTMLElement>}
+      className="browser-webview"
+      data-active={active}
+      src={initialUrlRef.current}
+      partition={BROWSER_PARTITION}
+    />
+  );
+}
+
+export function BrowserView({
+  isZh,
+  conversationId,
+  session,
+  onSessionChange,
+}: BrowserViewProps) {
+  const handlesRef = useRef(new Map<string, WebviewElement>());
+  const sessionTabsRef = useRef(session.tabs);
+  sessionTabsRef.current = session.tabs;
+  const [runtimeByTab, setRuntimeByTab] = useState<Record<string, BrowserTabRuntimeState>>(() =>
+    Object.fromEntries(session.tabs.map((tab) => [tab.id, initialRuntime(tab)])),
+  );
+  const activeTab = session.tabs.find((tab) => tab.id === session.activeTabId) ?? session.tabs[0];
+  const activeRuntime = runtimeByTab[activeTab.id] ?? initialRuntime(activeTab);
+  const [address, setAddress] = useState(() => displayUrl(activeRuntime.currentUrl));
+  const editingRef = useRef(false);
+
+  const t = useMemo(
+    () => ({
+      back: isZh ? '后退' : 'Back',
+      forward: isZh ? '前进' : 'Forward',
+      reload: isZh ? '刷新' : 'Reload',
+      stop: isZh ? '停止' : 'Stop',
+      go: isZh ? '前往' : 'Go',
+      newTab: isZh ? '新建网页标签' : 'New browser tab',
+      closeTab: isZh ? '关闭网页标签' : 'Close browser tab',
+      untitled: isZh ? '新标签页' : 'New tab',
+      placeholder: isZh ? '输入网址或搜索内容，回车前往' : 'Enter URL or search, press Enter',
+      loading: isZh ? '加载中…' : 'Loading…',
+      failTitle: isZh ? '无法打开此页面' : 'This page can’t be opened',
+      retry: isZh ? '重试' : 'Retry',
+      blank: isZh ? '空白页 · 输入网址开始浏览' : 'Blank page · type a URL to start',
+    }),
+    [isZh],
+  );
+
+  useEffect(() => {
+    if (!editingRef.current) setAddress(displayUrl(activeRuntime.currentUrl));
+  }, [activeRuntime.currentUrl, activeTab.id]);
+
+  const handleHandleChange = useCallback((tabId: string, handle: WebviewElement | null) => {
+    if (handle) handlesRef.current.set(tabId, handle);
+    else handlesRef.current.delete(tabId);
+  }, []);
+
+  const handleMetadataChange = useCallback((
+    tabId: string,
+    patch: Partial<Pick<BrowserTabSession, 'url' | 'title'>>,
+  ) => {
+    onSessionChange((current) => updateBrowserTab(current, tabId, patch));
+  }, [onSessionChange]);
+
+  const handleRuntimeChange = useCallback((
+    tabId: string,
+    patch: Partial<BrowserTabRuntimeState>,
+  ) => {
+    setRuntimeByTab((prev) => {
+      const current = prev[tabId]
+        ?? initialRuntime(sessionTabsRef.current.find((tab) => tab.id === tabId) ?? createBrowserTabSession(tabId));
+      const next = { ...current, ...patch };
+      return { ...prev, [tabId]: next };
+    });
+  }, []);
+
+  const activeWebview = useCallback(
+    () => handlesRef.current.get(session.activeTabId) ?? null,
+    [session.activeTabId],
+  );
+
+  const navigate = useCallback((url: string) => {
+    const wv = activeWebview();
+    if (!wv || !url) return;
+    handleRuntimeChange(activeTab.id, { failure: null });
+    try {
+      void wv.loadURL(url);
+    } catch {
+      wv.src = url;
+    }
+  }, [activeTab.id, activeWebview, handleRuntimeChange]);
+
+  const handleSubmit = useCallback(() => {
+    const url = normalizeInput(address);
+    if (!url) return;
+    editingRef.current = false;
+    navigate(url);
+  }, [address, navigate]);
+
+  const handleAddressKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      handleSubmit();
+    } else if (event.key === 'Escape') {
+      editingRef.current = false;
+      setAddress(displayUrl(activeRuntime.currentUrl));
+      event.currentTarget.blur();
+    }
+  }, [activeRuntime.currentUrl, handleSubmit]);
+
+  const createTab = useCallback(() => {
+    const tab = createBrowserTabSession();
+    setRuntimeByTab((prev) => ({ ...prev, [tab.id]: initialRuntime(tab) }));
+    onSessionChange((current) => addBrowserTab(current, tab));
+  }, [onSessionChange]);
+
+  const selectTab = useCallback((tabId: string) => {
+    editingRef.current = false;
+    onSessionChange((current) => activateBrowserTab(current, tabId));
+  }, [onSessionChange]);
+
+  const removeTab = useCallback((tabId: string) => {
+    const replacement = createBrowserTabSession();
+    setRuntimeByTab((prev) => {
+      const next = { ...prev };
+      delete next[tabId];
+      if (session.tabs.length === 1) next[replacement.id] = initialRuntime(replacement);
+      return next;
+    });
+    onSessionChange((current) => closeBrowserTab(current, tabId, replacement));
+  }, [onSessionChange, session.tabs.length]);
 
   return (
     <div className="browser-view">
+      <div className="browser-tab-strip">
+        <div className="browser-tabs" role="tablist" aria-label={isZh ? '网页标签' : 'Browser tabs'}>
+          {session.tabs.map((tab) => {
+            const selected = tab.id === session.activeTabId;
+            const label = tabLabel(tab, t.untitled);
+            return (
+              <div
+                key={tab.id}
+                className={`browser-page-tab${selected ? ' browser-page-tab--active' : ''}`}
+                role="presentation"
+              >
+                <button
+                  type="button"
+                  className="browser-page-tab-select"
+                  role="tab"
+                  aria-selected={selected}
+                  tabIndex={selected ? 0 : -1}
+                  title={label}
+                  onClick={() => selectTab(tab.id)}
+                >
+                  <span className="browser-page-tab-icon" aria-hidden="true"><IconGlobe /></span>
+                  <span className="browser-page-tab-label">{label}</span>
+                </button>
+                <button
+                  type="button"
+                  className="browser-page-tab-close"
+                  aria-label={`${t.closeTab}: ${label}`}
+                  title={t.closeTab}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    removeTab(tab.id);
+                  }}
+                >
+                  <IconClose />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <button
+          type="button"
+          className="browser-new-tab-btn"
+          aria-label={t.newTab}
+          title={t.newTab}
+          onClick={createTab}
+        >
+          <IconPlus />
+        </button>
+      </div>
+
       <div className="browser-toolbar">
         <div className="browser-nav-group">
           <button
@@ -300,8 +498,8 @@ export function BrowserView({ isZh, conversationId }: BrowserViewProps) {
             className="browser-nav-btn"
             title={t.back}
             aria-label={t.back}
-            disabled={!canBack}
-            onClick={() => webviewRef.current?.goBack()}
+            disabled={!activeRuntime.canBack}
+            onClick={() => activeWebview()?.goBack()}
           >
             <IconBack />
           </button>
@@ -310,18 +508,18 @@ export function BrowserView({ isZh, conversationId }: BrowserViewProps) {
             className="browser-nav-btn"
             title={t.forward}
             aria-label={t.forward}
-            disabled={!canForward}
-            onClick={() => webviewRef.current?.goForward()}
+            disabled={!activeRuntime.canForward}
+            onClick={() => activeWebview()?.goForward()}
           >
             <IconForward />
           </button>
-          {loading ? (
+          {activeRuntime.loading ? (
             <button
               type="button"
               className="browser-nav-btn"
               title={t.stop}
               aria-label={t.stop}
-              onClick={() => webviewRef.current?.stop()}
+              onClick={() => activeWebview()?.stop()}
             >
               <IconStop />
             </button>
@@ -331,7 +529,7 @@ export function BrowserView({ isZh, conversationId }: BrowserViewProps) {
               className="browser-nav-btn"
               title={t.reload}
               aria-label={t.reload}
-              onClick={() => webviewRef.current?.reload()}
+              onClick={() => activeWebview()?.reload()}
             >
               <IconReload />
             </button>
@@ -344,16 +542,16 @@ export function BrowserView({ isZh, conversationId }: BrowserViewProps) {
             value={address}
             placeholder={t.placeholder}
             spellCheck={false}
-            onChange={(e) => setAddress(e.target.value)}
-            onFocus={(e) => {
+            onChange={(event) => setAddress(event.target.value)}
+            onFocus={(event) => {
               editingRef.current = true;
-              e.currentTarget.select();
+              event.currentTarget.select();
             }}
             onBlur={() => {
               editingRef.current = false;
-              setAddress(displayUrl(currentUrl));
+              setAddress(displayUrl(activeRuntime.currentUrl));
             }}
-            onKeyDown={handleKeyDown}
+            onKeyDown={handleAddressKeyDown}
           />
           <button
             type="button"
@@ -368,41 +566,50 @@ export function BrowserView({ isZh, conversationId }: BrowserViewProps) {
       </div>
 
       <div className="browser-stage">
-        <div className={`browser-progress${loading ? ' browser-progress--active' : ''}`} />
+        <div className={`browser-progress${activeRuntime.loading ? ' browser-progress--active' : ''}`} />
 
-        <webview
-          ref={webviewRef as unknown as Ref<HTMLElement>}
-          className="browser-webview"
-          src={initialUrl}
-          partition={BROWSER_PARTITION}
-        />
+        {session.tabs.map((tab) => (
+          <BrowserPage
+            key={tab.id}
+            tab={tab}
+            active={tab.id === session.activeTabId}
+            conversationId={conversationId}
+            onHandleChange={handleHandleChange}
+            onMetadataChange={handleMetadataChange}
+            onRuntimeChange={handleRuntimeChange}
+          />
+        ))}
 
-        {failure ? (
+        {activeRuntime.failure ? (
           <div className="browser-error">
             <div className="browser-error-icon">⚠️</div>
             <div className="browser-error-title">{t.failTitle}</div>
             <div className="browser-error-desc">
-              {failure.desc} ({failure.code})
+              {activeRuntime.failure.desc} ({activeRuntime.failure.code})
             </div>
-            {failure.url ? <div className="browser-error-url">{failure.url}</div> : null}
+            {activeRuntime.failure.url ? (
+              <div className="browser-error-url">{activeRuntime.failure.url}</div>
+            ) : null}
             <button
               type="button"
               className="browser-error-retry"
-              onClick={() => navigate(failure.url || normalizeInput(address))}
+              onClick={() => navigate(activeRuntime.failure?.url || normalizeInput(address))}
             >
               {t.retry}
             </button>
           </div>
         ) : null}
 
-        {!failure && currentUrl === 'about:blank' && !loading ? (
+        {!activeRuntime.failure && activeRuntime.currentUrl === BROWSER_HOME_URL && !activeRuntime.loading ? (
           <div className="browser-blank">{t.blank}</div>
         ) : null}
       </div>
 
-      <div className="browser-statusbar" data-loading={loading}>
+      <div className="browser-statusbar" data-loading={activeRuntime.loading}>
         <span className="browser-status-text">
-          {loading ? t.loading : title || displayUrl(currentUrl)}
+          {activeRuntime.loading
+            ? t.loading
+            : activeTab.title || displayUrl(activeRuntime.currentUrl)}
         </span>
       </div>
     </div>

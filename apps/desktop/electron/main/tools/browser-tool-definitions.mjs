@@ -5,7 +5,7 @@
  *   Capability Provider(local.web.control.*) → Manifest(本文件) → Runtime Projection
  *     → Tool Call(browser_*) → PermissionGrant → Evidence
  *
- * 用途：让 Agent 操控「用户眼前那个可见的」Workbench 浏览器面板（<webview>）：
+ * 用途：让 Agent 操控当前会话 Workbench 浏览器的活跃网页标签（<webview>）：
  * 导航、点击、输入、截图、读取 DOM。renderer 在 webview dom-ready 后把
  * getWebContentsId() 上报给 main（见 browser-control-registry.mjs），provider 用
  * webContents.fromId(id) 直接操控同一个 WebContents，操作对用户实时可见。
@@ -36,8 +36,8 @@ export const BROWSER_CAPABILITY_TO_TOOL = Object.freeze({
 });
 
 const NAVIGATE_PROMPT = [
-  'Navigate the visible in-app browser panel (the one the user can see in the Workbench',
-  '"Browser" tab) to an absolute http(s) URL. The page loads in that same visible webview,',
+  'Navigate the active browser tab bound to the current conversation (the one shown in the',
+  'Workbench "Browser" view) to an absolute http(s) URL. The page loads in that same webview,',
   'so the user watches the navigation happen in real time. Returns the final URL and title.',
   'Network access requires user authorization on first use in the session.',
 ].join(' ');

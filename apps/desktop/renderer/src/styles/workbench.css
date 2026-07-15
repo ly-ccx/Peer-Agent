@@ -679,6 +679,142 @@
     background: var(--za-surface-1);
   }
 
+  /* 会话内网页标签条：与 Workbench 的 Plan/Browser/Files/Diff 导航分层。 */
+  .browser-tab-strip {
+    flex: 0 0 42px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 6px 8px 4px;
+    border-bottom: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+    background: var(--za-sidebar-bg);
+    -webkit-app-region: drag;
+  }
+
+  .browser-tabs {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-app-region: no-drag;
+  }
+  .browser-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .browser-page-tab {
+    flex: 1 1 150px;
+    position: relative;
+    min-width: 88px;
+    max-width: 190px;
+    height: 30px;
+    border: 1px solid transparent;
+    border-radius: var(--ui-radius-row, 9px);
+    color: var(--graphite-mute);
+    user-select: none;
+    -webkit-app-region: no-drag;
+    transition: background var(--za-motion-fast), color var(--za-motion-fast), border-color var(--za-motion-fast);
+  }
+  .browser-page-tab:hover {
+    background: var(--ui-surface-hover, var(--chrome-hover));
+    color: var(--graphite-base);
+  }
+  .browser-page-tab--active {
+    border-color: var(--ui-border-subtle, var(--chrome-hairline));
+    background: var(--za-surface-1);
+    color: var(--graphite-base);
+  }
+  .browser-page-tab-select {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    padding: 0 30px 0 9px;
+    border: none;
+    border-radius: inherit;
+    outline: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+  .browser-page-tab-select:focus-visible {
+    box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
+  }
+  .browser-page-tab-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .browser-page-tab-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+  .browser-page-tab-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-size: var(--ui-font-control, 13px);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .browser-page-tab-close,
+  .browser-new-tab-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: var(--ui-radius-control, 6px);
+    background: transparent;
+    color: var(--graphite-mute);
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+  }
+  .browser-page-tab-close {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 20px;
+    height: 20px;
+    opacity: 0;
+  }
+  .browser-page-tab:hover .browser-page-tab-close,
+  .browser-page-tab--active .browser-page-tab-close,
+  .browser-page-tab-close:focus-visible {
+    opacity: 1;
+  }
+  .browser-page-tab-close:hover,
+  .browser-new-tab-btn:hover {
+    background: var(--ui-surface-hover, var(--chrome-hover));
+    color: var(--graphite-base);
+  }
+  .browser-page-tab-close:focus-visible,
+  .browser-new-tab-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
+  }
+  .browser-page-tab-close svg {
+    width: 13px;
+    height: 13px;
+  }
+  .browser-new-tab-btn {
+    flex: 0 0 auto;
+  }
+  .browser-new-tab-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+
   /* 工具条：导航按钮组 + 地址栏 */
   .browser-toolbar {
     flex: 0 0 auto;
@@ -826,6 +962,12 @@
     width: 100%;
     height: 100%;
     border: none;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .browser-webview[data-active='true'] {
+    visibility: visible;
+    pointer-events: auto;
   }
 
   /* 错误兜底页 */

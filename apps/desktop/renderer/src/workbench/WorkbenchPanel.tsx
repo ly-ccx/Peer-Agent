@@ -101,6 +101,8 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
     sidebarOpen,
     sidebarWidth,
     conversationId,
+    browserSession,
+    setBrowserSession,
   } = useWorkbench();
 
   const goalSlotRef = useRef<HTMLDivElement | null>(null);
@@ -266,6 +268,8 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
             key={conversationId ?? '__none'}
             isZh={isZh}
             conversationId={conversationId}
+            session={browserSession}
+            onSessionChange={setBrowserSession}
           />
         </div>
         <div className="workbench-view" data-active={activeTab === 'files'}>

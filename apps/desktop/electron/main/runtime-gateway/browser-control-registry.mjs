@@ -1,58 +1,122 @@
 /**
- * 内嵌浏览器（Workbench「浏览器」面板 <webview>）控制句柄注册表 —— 见 ADR 40。
+ * 会话级内嵌浏览器控制句柄注册表（ADR 46）。
  *
- * 背景：Agent 要操控用户眼前那个可见的 <webview>，最稳的做法是 renderer 在
- * webview `dom-ready` 后把它的 `getWebContentsId()` 上报给 main，main 侧记下当前
- * 活跃的 webContentsId；Agent 工具执行时由 provider 用 `webContents.fromId(id)`
- * 直接拿到同一个 WebContents 操控（loadURL/executeJavaScript/sendInputEvent/
- * capturePage），避免逐跳 IPC 往返的脆弱链路。
- *
- * 这是一个 main 进程内的极简单例：只保存「当前活跃」一个 webview 的句柄与少量
- * 调试元信息（url/title/registeredAt）。范围外：多标签页 / 多 webview 同时操控。
+ * 条目以 conversationId + browserTabId 为稳定身份；每个会话只暴露自己的活跃网页
+ * 标签给 Agent。窗口菜单仍通过 foregroundEntryKey 操控前台会话的活跃标签。
  */
 
-let activeEntry = null;
+const FALLBACK_CONVERSATION_KEY = '__none';
+
+const entriesByKey = new Map();
+const activeEntryKeyByConversation = new Map();
+let foregroundEntryKey = null;
+
+function conversationKey(conversationId) {
+  return typeof conversationId === 'string' && conversationId ? conversationId : FALLBACK_CONVERSATION_KEY;
+}
+
+function entryKey(conversationId, browserTabId) {
+  return `${conversationKey(conversationId)}\u0000${browserTabId}`;
+}
+
+function findEntryKeyByWebContentsId(webContentsId) {
+  for (const [key, entry] of entriesByKey) {
+    if (entry.webContentsId === webContentsId) return key;
+  }
+  return null;
+}
 
 /**
- * 注册（或刷新）当前活跃 webview 的控制句柄。
- * @param {{ webContentsId: number, url?: string, title?: string }} entry
- * @returns {{ ok: boolean, webContentsId?: number, error?: string }}
+ * @param {{
+ *   webContentsId: number,
+ *   conversationId?: string | null,
+ *   browserTabId: string,
+ *   active?: boolean,
+ *   url?: string,
+ *   title?: string
+ * }} entry
  */
 export function registerBrowserWebContents(entry = {}) {
   const webContentsId = Number(entry.webContentsId);
+  const browserTabId = typeof entry.browserTabId === 'string' ? entry.browserTabId.trim() : '';
   if (!Number.isInteger(webContentsId) || webContentsId <= 0) {
     return { ok: false, error: 'invalid_web_contents_id' };
   }
-  activeEntry = {
+  if (!browserTabId) {
+    return { ok: false, error: 'invalid_browser_tab_id' };
+  }
+
+  const convKey = conversationKey(entry.conversationId);
+  const key = entryKey(entry.conversationId, browserTabId);
+  const registered = {
     webContentsId,
+    conversationId: convKey === FALLBACK_CONVERSATION_KEY ? null : convKey,
+    browserTabId,
+    active: entry.active === true,
     url: typeof entry.url === 'string' ? entry.url : '',
     title: typeof entry.title === 'string' ? entry.title : '',
     registeredAt: new Date().toISOString(),
   };
-  return { ok: true, webContentsId };
+  entriesByKey.set(key, registered);
+
+  if (registered.active) {
+    activeEntryKeyByConversation.set(convKey, key);
+    foregroundEntryKey = key;
+  } else if (activeEntryKeyByConversation.get(convKey) === key) {
+    activeEntryKeyByConversation.delete(convKey);
+    if (foregroundEntryKey === key) foregroundEntryKey = null;
+  }
+
+  return {
+    ok: true,
+    webContentsId,
+    conversationId: registered.conversationId,
+    browserTabId,
+  };
 }
 
 /**
- * 注销指定 webview 的控制句柄。仅当传入 id 与当前活跃 id 一致时才清空，
- * 避免「新 webview 已注册、旧 webview 卸载」时误清掉新句柄。
- * @param {number} webContentsId
- * @returns {{ ok: boolean, cleared: boolean }}
+ * @param {{ webContentsId: number, conversationId?: string | null, browserTabId?: string } | number} input
  */
-export function unregisterBrowserWebContents(webContentsId) {
-  const id = Number(webContentsId);
-  if (activeEntry && (!Number.isInteger(id) || activeEntry.webContentsId === id)) {
-    activeEntry = null;
-    return { ok: true, cleared: true };
+export function unregisterBrowserWebContents(input) {
+  const payload = input && typeof input === 'object' ? input : { webContentsId: input };
+  const webContentsId = Number(payload.webContentsId);
+  const key = typeof payload.browserTabId === 'string' && payload.browserTabId
+    ? entryKey(payload.conversationId, payload.browserTabId)
+    : findEntryKeyByWebContentsId(webContentsId);
+  const registered = key ? entriesByKey.get(key) : null;
+  if (!registered || !Number.isInteger(webContentsId) || registered.webContentsId !== webContentsId) {
+    return { ok: true, cleared: false };
   }
-  return { ok: true, cleared: false };
+
+  entriesByKey.delete(key);
+  const convKey = conversationKey(registered.conversationId);
+  if (activeEntryKeyByConversation.get(convKey) === key) {
+    activeEntryKeyByConversation.delete(convKey);
+  }
+  if (foregroundEntryKey === key) foregroundEntryKey = null;
+  return { ok: true, cleared: true };
 }
 
-/** 读取当前活跃 webview 的控制句柄（无则返回 null）。 */
-export function getActiveBrowserEntry() {
-  return activeEntry;
+/**
+ * 传 conversationId 时只解析该会话的活跃标签；无参数时返回前台窗口活跃标签。
+ */
+export function getActiveBrowserEntry(conversationId) {
+  const key = arguments.length > 0
+    ? activeEntryKeyByConversation.get(conversationKey(conversationId))
+    : foregroundEntryKey;
+  return key ? entriesByKey.get(key) ?? null : null;
 }
 
-/** 读取当前活跃 webview 的 webContentsId（无则返回 null）。 */
-export function getActiveWebContentsId() {
-  return activeEntry?.webContentsId ?? null;
+export function getActiveWebContentsId(conversationId) {
+  const entry = arguments.length > 0
+    ? getActiveBrowserEntry(conversationId)
+    : getActiveBrowserEntry();
+  return entry?.webContentsId ?? null;
+}
+
+export function resetBrowserControlRegistryForTests() {
+  entriesByKey.clear();
+  activeEntryKeyByConversation.clear();
+  foregroundEntryKey = null;
 }

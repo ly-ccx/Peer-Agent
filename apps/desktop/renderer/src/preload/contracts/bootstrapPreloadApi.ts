@@ -283,18 +283,29 @@ export interface BootstrapPreloadApi {
     readonly error?: string;
   }>;
   /**
-   * 内嵌浏览器（Workbench「浏览器」面板 <webview>）控制句柄注册 —— 见 ADR 40。
-   * renderer 在 webview `dom-ready` 后上报其 `getWebContentsId()`，main 记下当前
-   * 活跃句柄，供 Agent 的 browser_* 工具经 webContents.fromId 直接操控。
+   * 内嵌浏览器控制句柄注册 —— 见 ADR 40 / 46。
+   * renderer 同时上报 conversationId + browserTabId；main 按会话解析活跃网页标签，
+   * 供 Agent 的 browser_* 工具经 webContents.fromId 精确操控。
    */
-  readonly registerBrowserWebContents: (
-    webContentsId: number,
-    url?: string,
-    title?: string,
-  ) => Promise<{ readonly ok: boolean; readonly webContentsId?: number; readonly error?: string }>;
-  readonly unregisterBrowserWebContents: (
-    webContentsId: number,
-  ) => Promise<{ readonly ok: boolean; readonly cleared: boolean }>;
+  readonly registerBrowserWebContents: (registration: {
+    readonly webContentsId: number;
+    readonly conversationId: string | null;
+    readonly browserTabId: string;
+    readonly active: boolean;
+    readonly url?: string;
+    readonly title?: string;
+  }) => Promise<{
+    readonly ok: boolean;
+    readonly webContentsId?: number;
+    readonly conversationId?: string | null;
+    readonly browserTabId?: string;
+    readonly error?: string;
+  }>;
+  readonly unregisterBrowserWebContents: (registration: {
+    readonly webContentsId: number;
+    readonly conversationId: string | null;
+    readonly browserTabId: string;
+  }) => Promise<{ readonly ok: boolean; readonly cleared: boolean }>;
   readonly listShellTasks: () => Promise<readonly Record<string, unknown>[]>;
   readonly stopActiveShellTask: () => Promise<Record<string, unknown>>;
   readonly stopShellTask: (taskId: string) => Promise<Record<string, unknown>>;

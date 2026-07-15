@@ -43,11 +43,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
   fileExists: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:exists', { absPath, workspaceRoot, relPath }),
   readFile: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('file:read', { absPath, workspaceRoot, relPath }),
   readDir: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:read-dir', { absPath, workspaceRoot, relPath }),
-  // 内嵌浏览器（Workbench「浏览器」面板 <webview>）控制句柄注册（见 ADR 40）。
-  registerBrowserWebContents: (webContentsId, url, title) =>
-    ipcRenderer.invoke('browser:register-webcontents', { webContentsId, url, title }),
-  unregisterBrowserWebContents: (webContentsId) =>
-    ipcRenderer.invoke('browser:unregister-webcontents', { webContentsId }),
+  // 会话级内嵌浏览器标签控制句柄注册（见 ADR 40 / 46）。
+  registerBrowserWebContents: (registration) =>
+    ipcRenderer.invoke('browser:register-webcontents', registration),
+  unregisterBrowserWebContents: (registration) =>
+    ipcRenderer.invoke('browser:unregister-webcontents', registration),
   listShellTasks: () => ipcRenderer.invoke('shell:tasks:list'),
   stopActiveShellTask: () => ipcRenderer.invoke('shell:tasks:stop-active'),
   stopShellTask: (taskId) => ipcRenderer.invoke('shell:tasks:stop', { taskId }),

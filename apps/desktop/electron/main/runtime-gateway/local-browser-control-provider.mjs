@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import electron from 'electron';
 import { createFailedClientToolResult, createPermissionGrant, nowIso } from './tool-result-factory.mjs';
-import { getActiveBrowserEntry, getActiveWebContentsId } from './browser-control-registry.mjs';
+import { getActiveBrowserEntry } from './browser-control-registry.mjs';
 
 const { webContents: electronWebContents } = electron;
 
@@ -134,8 +134,10 @@ export function createLocalBrowserControlProvider({
 } = {}) {
   const store = artifactStore ?? createBrowserArtifactStore({ userDataPath });
 
-  function resolveTarget() {
-    const id = getActiveWebContentsId();
+  function resolveTarget(context = {}) {
+    const conversationId = context?.toolContext?.conversationId ?? null;
+    const entry = getActiveBrowserEntry(conversationId);
+    const id = entry?.webContentsId ?? null;
     if (!id) {
       return { ok: false, reason: 'no_active_browser' };
     }
@@ -143,7 +145,7 @@ export function createLocalBrowserControlProvider({
     if (!wc || (typeof wc.isDestroyed === 'function' && wc.isDestroyed())) {
       return { ok: false, reason: 'browser_unavailable' };
     }
-    return { ok: true, id, wc };
+    return { ok: true, id, wc, entry, conversationId };
   }
 
   function failed({ call, locale, reason, status = 'failed', dataLevel = 'D2_sensitive' }) {
@@ -194,7 +196,7 @@ export function createLocalBrowserControlProvider({
       }
     }
 
-    const activeEntry = getActiveBrowserEntry();
+    const activeEntry = getActiveBrowserEntry(context?.toolContext?.conversationId ?? null);
     const host = capabilityId === NAVIGATE ? hostOf(String(args?.url ?? '')) : hostOf(activeEntry?.url ?? '');
     const scope = { kind: 'browser-control', capabilityId, host };
 
@@ -233,7 +235,7 @@ export function createLocalBrowserControlProvider({
     }
 
     // 解析目标 WebContents（用户眼前那个可见 webview）。
-    const target = resolveTarget();
+    const target = resolveTarget(context);
     if (!target.ok) {
       const reason =
         target.reason === 'no_active_browser'
@@ -247,6 +249,10 @@ export function createLocalBrowserControlProvider({
     }
 
     const { wc } = target;
+    const targetIdentity = {
+      conversationId: target.entry?.conversationId ?? target.conversationId,
+      browserTabId: target.entry?.browserTabId ?? null,
+    };
     const startedAt = nowIso();
 
     try {
@@ -261,8 +267,8 @@ export function createLocalBrowserControlProvider({
         await wc.loadURL(url);
         const finalUrl = typeof wc.getURL === 'function' ? wc.getURL() : url;
         const title = typeof wc.getTitle === 'function' ? wc.getTitle() : '';
-        outputPreview = { status: 'success', action: 'navigate', requestedUrl: url, finalUrl, title };
-        output = { action: 'navigate', finalUrl, title };
+        outputPreview = { status: 'success', action: 'navigate', requestedUrl: url, finalUrl, title, ...targetIdentity };
+        output = { action: 'navigate', finalUrl, title, ...targetIdentity };
         evidenceSummary = zh
           ? `已在内嵌浏览器打开「${title || finalUrl}」。`
           : `Navigated the in-app browser to "${title || finalUrl}".`;
@@ -283,8 +289,8 @@ export function createLocalBrowserControlProvider({
         }
         wc.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 });
         wc.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 });
-        outputPreview = { status: 'success', action: 'click', locatedBy, selector: selector || undefined, x: point.x, y: point.y };
-        output = { action: 'click', locatedBy, x: point.x, y: point.y };
+        outputPreview = { status: 'success', action: 'click', locatedBy, selector: selector || undefined, x: point.x, y: point.y, ...targetIdentity };
+        output = { action: 'click', locatedBy, x: point.x, y: point.y, ...targetIdentity };
         evidenceSummary = zh
           ? `已在内嵌浏览器点击${selector ? `元素「${selector}」` : `坐标 (${point.x}, ${point.y})`}。`
           : `Clicked ${selector ? `element "${selector}"` : `point (${point.x}, ${point.y})`} in the in-app browser.`;
@@ -314,8 +320,8 @@ export function createLocalBrowserControlProvider({
           wc.sendInputEvent({ type: 'char', keyCode: '\r' });
           wc.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
         }
-        outputPreview = { status: 'success', action: 'type', selector: selector || undefined, chars: text.length, cleared: clear, submitted: submit };
-        output = { action: 'type', chars: text.length, submitted: submit };
+        outputPreview = { status: 'success', action: 'type', selector: selector || undefined, chars: text.length, cleared: clear, submitted: submit, ...targetIdentity };
+        output = { action: 'type', chars: text.length, submitted: submit, ...targetIdentity };
         evidenceSummary = zh
           ? `已在内嵌浏览器输入 ${text.length} 个字符${submit ? '并回车提交' : ''}。`
           : `Typed ${text.length} characters into the in-app browser${submit ? ' and submitted' : ''}.`;
@@ -332,11 +338,11 @@ export function createLocalBrowserControlProvider({
           actionId,
           toolCallId: call.toolCallId,
           pngBuffer,
-          metadata: { capability: SCREENSHOT, finalUrl, title, width: size.width, height: size.height, startedAt, completedAt: nowIso() },
+          metadata: { capability: SCREENSHOT, finalUrl, title, width: size.width, height: size.height, ...targetIdentity, startedAt, completedAt: nowIso() },
         });
         evidenceArtifactRefs = artifact.artifactRefs;
-        outputPreview = { status: 'success', action: 'screenshot', width: size.width, height: size.height, bytes: artifact.bytes, artifactRef: artifact.artifactRef, artifactRefs: artifact.artifactRefs };
-        output = { action: 'screenshot', width: size.width, height: size.height, artifactRef: artifact.artifactRef };
+        outputPreview = { status: 'success', action: 'screenshot', width: size.width, height: size.height, bytes: artifact.bytes, artifactRef: artifact.artifactRef, artifactRefs: artifact.artifactRefs, ...targetIdentity };
+        output = { action: 'screenshot', width: size.width, height: size.height, artifactRef: artifact.artifactRef, ...targetIdentity };
         evidenceSummary = zh
           ? `已对内嵌浏览器截图（${size.width}×${size.height}），图片已落盘（${artifact.artifactRef}）。`
           : `Captured the in-app browser (${size.width}×${size.height}); image stored at ${artifact.artifactRef}.`;
@@ -360,13 +366,13 @@ export function createLocalBrowserControlProvider({
           toolCallId: call.toolCallId,
           format,
           content: fullText,
-          metadata: { capability: READ_DOM, selector: selector || null, format, finalUrl, title, chars: fullText.length, startedAt, completedAt: nowIso() },
+          metadata: { capability: READ_DOM, selector: selector || null, format, finalUrl, title, chars: fullText.length, ...targetIdentity, startedAt, completedAt: nowIso() },
         });
         evidenceArtifactRefs = artifact.artifactRefs;
         const summary = summarize(fullText);
         const maxChars = Number.isFinite(Number(args.maxChars)) ? Number(args.maxChars) : SUMMARY_MAX_CHARS;
-        outputPreview = { status: 'success', action: 'read_dom', format, chars: fullText.length, summary: summarize(fullText, maxChars), artifactRef: artifact.artifactRef, artifactRefs: artifact.artifactRefs, truncated: artifact.truncated };
-        output = { action: 'read_dom', format, chars: fullText.length, summary, artifactRef: artifact.artifactRef };
+        outputPreview = { status: 'success', action: 'read_dom', format, chars: fullText.length, summary: summarize(fullText, maxChars), artifactRef: artifact.artifactRef, artifactRefs: artifact.artifactRefs, truncated: artifact.truncated, ...targetIdentity };
+        output = { action: 'read_dom', format, chars: fullText.length, summary, artifactRef: artifact.artifactRef, ...targetIdentity };
         evidenceSummary = zh
           ? `已读取内嵌浏览器页面（${format}，${fullText.length} 字符），内容已落盘（${artifact.artifactRef}）。`
           : `Read the in-app browser DOM (${format}, ${fullText.length} chars); content stored at ${artifact.artifactRef}.`;
@@ -393,6 +399,7 @@ export function createLocalBrowserControlProvider({
               providerId: 'local.browser.control',
               capabilityId,
               host,
+              ...targetIdentity,
             },
           },
           completedAt,
