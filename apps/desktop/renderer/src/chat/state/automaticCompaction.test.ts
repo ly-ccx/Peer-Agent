@@ -1,10 +1,32 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { scheduleAutomaticCompaction } from './automaticCompaction.ts';
+import {
+  beginConversationCompaction,
+  scheduleAutomaticCompaction,
+} from './automaticCompaction.ts';
 import { conversationStore } from './conversationStore.ts';
 
 describe('scheduleAutomaticCompaction', () => {
+  it('projects a background compaction only into the conversation that owns it', () => {
+    conversationStore.reset('A');
+    conversationStore.reset('B');
+
+    beginConversationCompaction(
+      'A',
+      'compact-A',
+      10,
+    );
+
+    assert.deepEqual(conversationStore.getSnapshot('A').compactionState, {
+      phase: 'running',
+      percent: null,
+      streamId: 'compact-A',
+      startedAt: 10,
+    });
+    assert.deepEqual(conversationStore.getSnapshot('B').compactionState, { phase: 'idle' });
+  });
+
   it('keeps the task bound to the conversation that triggered it after the active conversation changes', async () => {
     conversationStore.reset('A');
     conversationStore.reset('B');

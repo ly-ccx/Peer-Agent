@@ -105,7 +105,10 @@ import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
 import { MessageRail } from './thread/MessageRail';
 import { useConversationState } from '../hooks/useConversationState';
-import { scheduleAutomaticCompaction } from '../state/automaticCompaction';
+import {
+  beginConversationCompaction,
+  scheduleAutomaticCompaction,
+} from '../state/automaticCompaction';
 import { conversationStore, type ConversationRuntimeState } from '../state/conversationStore';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { useStreamingReport } from '../hooks/useStreamingReport';
@@ -1002,21 +1005,12 @@ export function ChatSurface({
   // 返回是否真的发生了压缩，供调用方决定后续（如清空权威用量快照）。
   const runCompaction = useCallback(async (compactConversationId: string): Promise<boolean> => {
     const streamId = `compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    streamIdRef.current = streamId;
     const compactStartedAt = Date.now();
-    conversationStore.routeStream(streamId, compactConversationId);
-    conversationStore.setState(compactConversationId, { streamId, turnStartedAt: compactStartedAt });
-    setCompactionState({ phase: 'running', percent: null, streamId, startedAt: compactStartedAt });
-    try {
-      const result = await clientApi.chatCompact({ conversationId: compactConversationId, streamId });
-      if (result.compacted) onConversationUpdated?.();
-      return result.compacted;
-    } finally {
-      // chat:compaction 是压缩状态、消息重载和完成快照的唯一投影来源。
-      // invoke 只等待操作结果，不再清横幅或重复回读，避免两条异步收尾互相覆盖。
-      streamIdRef.current = null;
-    }
-  }, [onConversationUpdated, setCompactionState, streamIdRef]);
+    beginConversationCompaction(compactConversationId, streamId, compactStartedAt);
+    const result = await clientApi.chatCompact({ conversationId: compactConversationId, streamId });
+    if (result.compacted) onConversationUpdated?.();
+    return result.compacted;
+  }, [onConversationUpdated]);
 
   // 回合结束自动压缩：主进程在 done 里判定 compactionSuggested 后请求触发。
   // 三道护栏：① autoCompactingRef 防重入（多 loop 收尾/done 抖动只压一次）；
