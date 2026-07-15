@@ -149,6 +149,7 @@ const unavailableApi: ClientApi = {
   llmTestConnection: unavailableMethod('llmTestConnection'),
   llmOAuthStart: unavailableMethod('llmOAuthStart'),
   llmOAuthCancel: unavailableMethod('llmOAuthCancel'),
+  onLlmOAuthPending: unavailableMethod('onLlmOAuthPending'),
   llmListModels: unavailableMethod('llmListModels'),
   llmFetchModels: unavailableMethod('llmFetchModels'),
   initialSettings: {},

@@ -13,6 +13,7 @@ import type {
   GoalPlanStatus,
   LlmModelListResult,
   LlmModelFetchRequest,
+  LlmModelInfo,
   LlmChannelDescriptor,
   LlmProviderConfigView,
   LlmProviderTestResult,
@@ -524,9 +525,14 @@ export interface BootstrapPreloadApi {
   readonly llmOAuthStart: (
     params: { id: string; draft?: undefined } | { id?: undefined; draft: Record<string, unknown> },
   ) => Promise<
-    { success: true; provider: LlmProviderConfigView } | { success: false; error: string }
+    { success: true; provider: LlmProviderConfigView; models?: readonly LlmModelInfo[] | null } | { success: false; error: string }
   >;
   readonly llmOAuthCancel: () => Promise<{ success: boolean }>;
+  readonly onLlmOAuthPending: (listener: (payload: {
+    verificationUrl: string;
+    userCode: string;
+    expiresAt: string;
+  }) => void) => () => void;
   // ADR 28(方案 B): 列出订阅可用模型(远程拉取,失败回退内置清单)。
   readonly llmListModels: (params: { id: string }) => Promise<LlmModelListResult>;
   // 用表单临时配置(未落盘)直接拉模型,供"添加渠道"弹窗预览/多选。

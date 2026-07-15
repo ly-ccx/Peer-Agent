@@ -103,4 +103,28 @@ describe('provider credential resolver', () => {
     assert.deepEqual(getCalls, ['chatgpt-1']);
     assert.deepEqual(setCalls, [['chatgpt-1', refreshedTokens]]);
   });
+
+  it('resolves and persists refreshed Grok subscription tokens', async () => {
+    const refreshedTokens = {
+      access: 'grok-fresh',
+      refresh: 'grok-refresh',
+      expires: Date.now() + 3_600_000,
+    };
+    const setCalls = [];
+    const credential = await resolveProviderCredential({
+      provider: { id: 'grok-1', authMethod: 'oauth_grok', model: 'grok-4.5' },
+      llmConfigStore: {
+        getCredential: () => ({
+          tokens: { access: 'grok-old', refresh: 'grok-refresh', expires: 0 },
+        }),
+        setOAuthTokens: (...args) => setCalls.push(args),
+      },
+      ensureFreshGrokAccessTokens: async () => ({ tokens: refreshedTokens, refreshed: true }),
+    });
+
+    assert.equal(credential.authMethod, 'oauth_grok');
+    assert.equal(credential.apiKey, 'grok-fresh');
+    assert.equal(credential.accountId, null);
+    assert.deepEqual(setCalls, [['grok-1', refreshedTokens]]);
+  });
 });

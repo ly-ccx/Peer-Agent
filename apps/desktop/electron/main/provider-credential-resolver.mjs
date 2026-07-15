@@ -1,5 +1,6 @@
 import { ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
 import { ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
+import { ensureFreshGrokTokens } from './llm-oauth/grok-oauth.mjs';
 import { loadQoderAccessToken } from './provider-adapters/qoder-local-auth.mjs';
 
 export function createProviderCredentialError(code, cause = null) {
@@ -18,6 +19,7 @@ export async function resolveProviderCredential({
   llmConfigStore,
   ensureFreshChatGptTokens = ensureFreshTokens,
   ensureFreshGeminiTokens = ensureFreshGoogleTokens,
+  ensureFreshGrokAccessTokens = ensureFreshGrokTokens,
   loadQoderToken = loadQoderAccessToken,
 }) {
   if (!provider?.id) {
@@ -52,6 +54,25 @@ export async function resolveProviderCredential({
         authMethod,
         apiKey: fresh.access,
         accountId: fresh.accountId || tokens.accountId || null,
+      };
+    } catch (error) {
+      throw createProviderCredentialError('oauth_token_refresh_failed', error);
+    }
+  }
+
+  if (authMethod === 'oauth_grok') {
+    const credential = llmConfigStore.getCredential(credentialId);
+    const tokens = credential?.tokens || null;
+    if (!tokens?.access) {
+      throw createProviderCredentialError('oauth_not_logged_in');
+    }
+    try {
+      const { tokens: fresh, refreshed } = await ensureFreshGrokAccessTokens(tokens);
+      if (refreshed) llmConfigStore.setOAuthTokens(credentialId, fresh);
+      return {
+        authMethod,
+        apiKey: fresh.access,
+        accountId: null,
       };
     } catch (error) {
       throw createProviderCredentialError('oauth_token_refresh_failed', error);

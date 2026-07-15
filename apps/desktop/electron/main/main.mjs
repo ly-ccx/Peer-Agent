@@ -41,7 +41,9 @@ import { createLlmConfigStore } from './llm-config-store.mjs';
 import { listChannelDescriptors, resolveChannel } from './provider-channels.mjs';
 import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
 import { startGoogleBrowserLogin, ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
+import { startGrokOAuthLogin, ensureFreshGrokTokens } from './llm-oauth/grok-oauth.mjs';
 import { listSubscriptionModels, listOpenAICompatibleModels } from './provider-adapters/openai-model-catalog.mjs';
+import { listGrokBuildModels } from './provider-adapters/grok-build-model-catalog.mjs';
 import { listGeminiModels } from './provider-adapters/gemini-model-catalog.mjs';
 import { listQoderModels } from './provider-adapters/qoder-model-catalog.mjs';
 import { createHostRestarter } from './host-restart.mjs';
@@ -2177,7 +2179,7 @@ ipcMain.handle('llm:oauth:start', async (_event, params) => {
   const existing = id ? llmConfigStore.listProviders().find((provider) => provider.id === id) : null;
   const credential = id ? llmConfigStore.getCredential(id) : null;
   const authMethod = draft?.authMethod || existing?.authMethod || 'oauth_chatgpt';
-  if (authMethod !== 'oauth_chatgpt' && authMethod !== 'oauth_google') {
+  if (authMethod !== 'oauth_chatgpt' && authMethod !== 'oauth_google' && authMethod !== 'oauth_grok') {
     throw new Error(`unsupported_oauth_method:${authMethod}`);
   }
   if (activeOAuthLogin) {
@@ -2193,7 +2195,15 @@ ipcMain.handle('llm:oauth:start', async (_event, params) => {
       clientId: draft?.oauthClientId ?? credential?.oauthClientId,
       clientSecret: draft?.oauthClientSecret ?? credential?.oauthClientSecret,
     })
-    : startBrowserLogin();
+    : authMethod === 'oauth_grok'
+      ? startGrokOAuthLogin({
+        openExternal: (url) => shell.openExternal(url),
+        onPending: (pending) => {
+          const target = BrowserWindow.getFocusedWindow() || mainWindow;
+          target?.webContents.send('llm:oauth:pending', pending);
+        },
+      })
+      : startBrowserLogin();
   activeOAuthLogin = session;
   let createdId = null;
   try {
@@ -2203,9 +2213,23 @@ ipcMain.handle('llm:oauth:start', async (_event, params) => {
     const targetId = id
       ?? (createdId = llmConfigStore.addProvider({ ...draft, authMethod }).id);
     llmConfigStore.setOAuthTokens(targetId, tokens);
-    const provider = llmConfigStore.listProviders().find((p) => p.id === targetId) ?? null;
+    let provider = llmConfigStore.listProviders().find((p) => p.id === targetId) ?? null;
+    let models = null;
+    if (authMethod === 'oauth_grok') {
+      const catalog = await listGrokBuildModels(tokens.access, { baseUrl: provider?.baseUrl });
+      models = catalog.models;
+      const preferred = models.find((model) => model.id === 'grok-4.5') ?? models[0] ?? null;
+      if (preferred && provider?.model !== preferred.id) {
+        provider = llmConfigStore.updateProvider(targetId, {
+          model: preferred.id,
+          contextWindow: preferred.contextWindow,
+          supportsVision: preferred.supportsVision,
+          supportsReasoning: preferred.supportsReasoning,
+        });
+      }
+    }
     if (provider) recordProviderBaseline('oauth_login', provider);
-    return { success: true, provider };
+    return { success: true, provider, models };
   } catch (err) {
     // 若已创建了草稿 provider 但 token 写入失败,回滚以保持"失败不留痕"。
     if (createdId) {
@@ -2261,14 +2285,18 @@ ipcMain.handle('llm:models:list', async (_event, { id }) => {
         clientId: credential.oauthClientId,
         clientSecret: credential.oauthClientSecret,
       })
-      : await ensureFreshTokens(tokens);
+      : authMethod === 'oauth_grok'
+        ? await ensureFreshGrokTokens(tokens)
+        : await ensureFreshTokens(tokens);
     if (refreshed) llmConfigStore.setOAuthTokens(id, fresh);
     const { models, source, error } = authMethod === 'oauth_google'
       ? await listGeminiModels(fresh, {
         projectId: credential.oauthProjectId,
         baseUrl: provider?.baseUrl,
       })
-      : await listSubscriptionModels(fresh);
+      : authMethod === 'oauth_grok'
+        ? await listGrokBuildModels(fresh.access, { baseUrl: provider?.baseUrl })
+        : await listSubscriptionModels(fresh);
     return { success: true, models, source, error };
   } catch (err) {
     return { success: false, models: [], error: err?.message || 'models_list_failed' };

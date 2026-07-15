@@ -368,9 +368,10 @@ export interface LlmChannelDescriptor {
 //   订阅模型走 OpenAI Responses 传输。
 // - oauth_google: Google OAuth 登录,access/refresh token 存 main 进程,
 //   Gemini 模型走 Google Generative Language API 传输。
+// - oauth_grok: Grok Build 订阅账号设备码登录,token 存 main 进程。
 // - qoder_local_auth: 复用本机 Qoder 登录态/token,不在 Peer Agent 内保存远端密钥。
 // - local_cli: 旧配置兼容值,读取时迁移到 qoder_local_auth。
-export type LlmAuthMethod = 'api_key' | 'oauth_chatgpt' | 'oauth_google' | 'qoder_local_auth' | 'local_cli';
+export type LlmAuthMethod = 'api_key' | 'oauth_chatgpt' | 'oauth_google' | 'oauth_grok' | 'qoder_local_auth' | 'local_cli';
 
 // 订阅(OAuth)登录态投影。token 永不回传 renderer,仅以状态 + 账号标识表达。
 export type LlmOAuthConnectionStatus = 'connected' | 'expired' | 'disconnected';
@@ -426,7 +427,7 @@ export interface LlmProviderConfig {
 export interface LlmProviderConfigView extends LlmProviderConfig {
   readonly apiKeyMasked: string;
   readonly apiKeyConfigured: boolean;
-  // 仅当 authMethod === 'oauth_chatgpt' 时存在,表达订阅登录态。
+  // OAuth 渠道登录后存在,仅表达登录态而不暴露 token。
   readonly oauthStatus?: LlmOAuthStatus;
   // 仅存在于「聊天列表展开」出的虚拟记录（订阅/多模型）：其复合 id 在存储里不存在，
   // 凭证解析/刷新据此回退到原始记录 id 取 OAuth token / apiKey。普通记录不带此字段。

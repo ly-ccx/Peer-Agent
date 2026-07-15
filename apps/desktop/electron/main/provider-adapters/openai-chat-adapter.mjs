@@ -10,7 +10,7 @@ import { hasLiteralToolCallSyntax } from '../chat-runtime/response-guard.mjs';
 export function shouldUsePublicOpenAIChatStream(resolvedChannel, useResponses = false) {
   return (
     !useResponses &&
-    resolvedChannel?.channelId === 'openai' &&
+    (resolvedChannel?.channelId === 'openai' || resolvedChannel?.channelId === 'grok') &&
     resolvedChannel?.wire === 'openai-chat'
   );
 }

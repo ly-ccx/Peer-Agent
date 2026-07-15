@@ -105,19 +105,20 @@ function decryptTokens(stored) {
 
 // 由存储的 token 推导对外可见的登录态(不泄漏 token 本身)。
 function oauthStatusOf(item) {
-  if (item.authMethod !== 'oauth_chatgpt' && item.authMethod !== 'oauth_google') return undefined;
+  if (item.authMethod !== 'oauth_chatgpt' && item.authMethod !== 'oauth_google' && item.authMethod !== 'oauth_grok') return undefined;
   return deriveOAuthStatus(decryptTokens(item.oauthTokens));
 }
 
 function normalizeAuthMethod(value) {
   if (value === 'oauth_chatgpt') return 'oauth_chatgpt';
   if (value === 'oauth_google') return 'oauth_google';
+  if (value === 'oauth_grok') return 'oauth_grok';
   if (value === 'qoder_local_auth' || value === 'local_cli') return 'qoder_local_auth';
   return 'api_key';
 }
 
 function isOAuthAuthMethod(value) {
-  return value === 'oauth_chatgpt' || value === 'oauth_google';
+  return value === 'oauth_chatgpt' || value === 'oauth_google' || value === 'oauth_grok';
 }
 
 function isLocalCliAuthMethod(value) {
@@ -228,6 +229,16 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
     if (item.authMethod === 'oauth_google') {
       if (item.channelId !== 'google-ai') {
         item.channelId = 'google-ai';
+        changed = true;
+      }
+      if (item.wireOverride !== undefined) {
+        delete item.wireOverride;
+        changed = true;
+      }
+    }
+    if (item.authMethod === 'oauth_grok') {
+      if (item.channelId !== 'grok') {
+        item.channelId = 'grok';
         changed = true;
       }
       if (item.wireOverride !== undefined) {
@@ -398,14 +409,17 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       ? 'openai'
       : method === 'oauth_google'
         ? 'google-ai'
-        : method === 'qoder_local_auth'
-          ? 'qoder'
-          : (rawChannelId || inferChannelId({ provider, authMethod: method }));
+        : method === 'oauth_grok'
+          ? 'grok'
+          : method === 'qoder_local_auth'
+            ? 'qoder'
+            : (rawChannelId || inferChannelId({ provider, authMethod: method }));
     const defaults = rawChannelId ? defaultsForChannel(channelId) : (PROVIDER_DEFAULTS[provider] || defaultsForChannel(channelId));
     if (customHeaders) validateCustomHeaders(customHeaders);
     // 订阅(OAuth)身份写死:名称/baseURL 固定,不接受外部传入。model 留待登录后选择。
     const isSubscription = method === 'oauth_chatgpt';
     const isGoogleOAuth = method === 'oauth_google';
+    const isGrokOAuth = method === 'oauth_grok';
     const isLocalQoderAuth = method === 'qoder_local_auth';
     const selectedModel = model || (isSubscription ? DEFAULT_SUBSCRIPTION_MODEL : defaults.model);
     const subscriptionMetadata = isSubscription ? getSubscriptionModelMetadata(selectedModel) : null;
@@ -414,7 +428,7 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       wireOverride,
       authMethod: method,
       baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : (isLocalQoderAuth ? defaults.baseUrl : (baseUrl || defaults.baseUrl)),
-      apiKey: isSubscription || isGoogleOAuth || isLocalQoderAuth ? '' : (apiKey || ''),
+      apiKey: isSubscription || isGoogleOAuth || isGrokOAuth || isLocalQoderAuth ? '' : (apiKey || ''),
       supportsReasoning: isSubscription ? true : (isLocalQoderAuth ? false : (supportsReasoning ?? false)),
       supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (isLocalQoderAuth ? false : (supportsPromptCaching ?? false)),
       supportsVision,
@@ -431,13 +445,13 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       groupId: (typeof rawGroupId === 'string' && rawGroupId) ? rawGroupId : newId,
       provider: provider || resolved.legacyProvider,
       channelId,
-      wireOverride: isSubscription || isGoogleOAuth || isLocalQoderAuth ? undefined : wireOverride,
+      wireOverride: isSubscription || isGoogleOAuth || isGrokOAuth || isLocalQoderAuth ? undefined : wireOverride,
       authMethod: method,
-      name: isSubscription ? CHATGPT_SUBSCRIPTION_NAME : isGoogleOAuth ? (name || GEMINI_OAUTH_NAME) : isLocalQoderAuth ? (name || QODER_PRIVATE_NAME) : name || provider || 'Untitled',
+      name: isSubscription ? CHATGPT_SUBSCRIPTION_NAME : isGoogleOAuth ? (name || GEMINI_OAUTH_NAME) : isGrokOAuth ? (name || 'Grok 订阅') : isLocalQoderAuth ? (name || QODER_PRIVATE_NAME) : name || provider || 'Untitled',
       baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : isLocalQoderAuth ? defaults.baseUrl : baseUrl || defaults.baseUrl,
       // 订阅默认落到权威清单的最新模型(gpt-5.5),非订阅沿用各家 preset。
       model: selectedModel,
-      apiKey: encrypt(isSubscription || isGoogleOAuth || isLocalQoderAuth ? '' : apiKey || ''),
+      apiKey: encrypt(isSubscription || isGoogleOAuth || isGrokOAuth || isLocalQoderAuth ? '' : apiKey || ''),
       oauthClientId: isGoogleOAuth ? String(oauthClientId || '').trim() || undefined : undefined,
       oauthClientSecret: encrypt(isGoogleOAuth ? String(oauthClientSecret || '') : ''),
       oauthProjectId: isGoogleOAuth ? String(oauthProjectId || '').trim() || undefined : undefined,
@@ -525,6 +539,15 @@ export function createLlmConfigStore({ configFile = pathOf('llmProviders') } = {
       delete item.wireOverride;
       item.provider = 'openai';
       item.baseUrl = item.baseUrl || defaultsForChannel('google-ai').baseUrl;
+    }
+    if (item.authMethod === 'oauth_grok') {
+      item.name = 'Grok 订阅';
+      item.channelId = 'grok';
+      delete item.wireOverride;
+      item.provider = 'openai';
+      item.baseUrl = defaultsForChannel('grok').baseUrl;
+      item.apiKey = encrypt('');
+      item.supportsReasoning = true;
     }
     if (item.authMethod === 'qoder_local_auth' || item.authMethod === 'local_cli') {
       item.authMethod = 'qoder_local_auth';

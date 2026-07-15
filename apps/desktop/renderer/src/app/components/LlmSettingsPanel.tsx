@@ -99,6 +99,16 @@ const FALLBACK_CHANNELS: readonly LlmChannelDescriptor[] = [
     authMethods: { api_key: { wire: 'gemini' } },
   },
   {
+    id: 'grok',
+    label: 'Grok 订阅',
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    allowedWires: ['openai-chat'],
+    defaults: { baseUrl: 'https://cli-chat-proxy.grok.com/v1', model: 'grok-4.5' },
+    capabilities: { reasoning: { supported: true, paramStyle: 'openai-effort' }, promptCache: false, vision: true },
+    authMethods: { oauth_grok: { wire: 'openai-chat' } },
+  },
+  {
     id: 'qoder',
     label: 'Qoder 私有接口',
     legacyProvider: 'openai',
@@ -126,10 +136,13 @@ const PROTECTED_HEADER_NAMES = new Set([
   'x-goog-api-key',
   'x-goog-user-project',
   'chatgpt-account-id',
+  'x-xai-token-auth',
+  'x-grok-client-surface',
+  'x-grok-client-version',
 ]);
 
 function isOAuthMethod(method: LlmAuthMethod): boolean {
-  return method === 'oauth_chatgpt' || method === 'oauth_google';
+  return method === 'oauth_chatgpt' || method === 'oauth_google' || method === 'oauth_grok';
 }
 
 function isLocalCliMethod(method: LlmAuthMethod): boolean {
@@ -148,6 +161,7 @@ function oauthLabel(method: LlmAuthMethod, locale: string): string {
   const zh = locale === 'zh-CN';
   if (method === 'oauth_google') return zh ? 'Google OAuth 登录' : 'Google OAuth';
   if (method === 'oauth_chatgpt') return zh ? 'ChatGPT 订阅登录' : 'ChatGPT Subscription';
+  if (method === 'oauth_grok') return zh ? 'Grok 订阅登录' : 'Grok Subscription';
   return 'API Key';
 }
 
@@ -426,6 +440,11 @@ export function LlmSettingsPanel({
   const [testResults, setTestResults] = useState<Record<string, LlmProviderTestResult>>({});
   const [testingId, setTestingId] = useState<string | null>(null);
   const [oauthBusyId, setOauthBusyId] = useState<string | null>(null);
+  const [oauthPending, setOauthPending] = useState<{
+    verificationUrl: string;
+    userCode: string;
+    expiresAt: string;
+  } | null>(null);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   // ADR 28(方案 B): 订阅 provider 的模型清单与加载态(按 provider id 维度)。
   const [modelLists, setModelLists] = useState<Record<string, readonly LlmModelInfo[]>>({});
@@ -469,6 +488,10 @@ export function LlmSettingsPanel({
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => clientApi.onLlmOAuthPending((pending) => {
+    setOauthPending(pending);
+  }), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -824,6 +847,7 @@ export function LlmSettingsPanel({
     // 新建订阅尚无 provider id,用 'new' 作为按钮 busy 哨兵。
     const busyKey = target.id ?? 'new';
     setOauthBusyId(busyKey);
+    setOauthPending(null);
     try {
       const result = await clientApi.llmOAuthStart(target);
       if (!result.success) {
@@ -832,6 +856,9 @@ export function LlmSettingsPanel({
         return;
       }
       clearTestResult(busyKey);
+      if (result.models?.length) {
+        setModelLists((prev) => ({ ...prev, [result.provider.id]: result.models! }));
+      }
       setShowForm(false);
       setEditingId(null);
       await refresh();
@@ -843,7 +870,7 @@ export function LlmSettingsPanel({
   };
 
   const selectedChannel = descriptorFor(form.channelId, channels);
-  const oauthMethods = (['oauth_chatgpt', 'oauth_google'] as const)
+  const oauthMethods = (['oauth_chatgpt', 'oauth_google', 'oauth_grok'] as const)
     .filter((method) => Boolean(selectedChannel.authMethods?.[method]));
   const canUseOAuth = oauthMethods.length > 0;
   const canChooseWire = !isOAuthMethod(form.authMethod) && selectedChannel.allowedWires.length > 1;
@@ -1167,14 +1194,25 @@ export function LlmSettingsPanel({
           ) : null}
 
           {/* ADR 28: 订阅(OAuth)模式下先登录、成功后才落盘。 */}
-          {form.authMethod === 'oauth_chatgpt' ? (
+          {form.authMethod === 'oauth_chatgpt' || form.authMethod === 'oauth_grok' ? (
             <label>
               <span>{i18n.locale === 'zh-CN' ? '登录' : 'Login'}</span>
               <p className="llm-oauth-hint">
-                {i18n.locale === 'zh-CN'
-                  ? '点击登录将打开浏览器完成 ChatGPT 订阅账号登录;登录成功后才会保存,登录失败或取消不会保存任何配置。登录后自动拉取可用模型(默认使用最新模型)。'
-                  : 'Clicking login opens your browser to sign in with your ChatGPT subscription. The provider is saved only after a successful login — nothing is saved if login fails or is cancelled. Available models are fetched after login (latest selected by default).'}
+                {form.authMethod === 'oauth_grok'
+                  ? (i18n.locale === 'zh-CN'
+                    ? '点击登录将打开 Grok 的设备授权页。按页面提示确认一次性验证码后，Peer Agent 会保存 Grok 订阅登录态并拉取 Grok Build 模型。'
+                    : 'Click login to open the Grok device authorization page. Confirm the one-time code to save your Grok subscription session and load Grok Build models.')
+                  : (i18n.locale === 'zh-CN'
+                    ? '点击登录将打开浏览器完成 ChatGPT 订阅账号登录;登录成功后才会保存,登录失败或取消不会保存任何配置。登录后自动拉取可用模型(默认使用最新模型)。'
+                    : 'Clicking login opens your browser to sign in with your ChatGPT subscription. The provider is saved only after a successful login — nothing is saved if login fails or is cancelled. Available models are fetched after login (latest selected by default).')}
               </p>
+              {form.authMethod === 'oauth_grok' && oauthPending ? (
+                <div className="llm-oauth-device-code" role="status">
+                  <span>{i18n.locale === 'zh-CN' ? '一次性验证码' : 'One-time code'}</span>
+                  <strong>{oauthPending.userCode}</strong>
+                  <small>{i18n.locale === 'zh-CN' ? '浏览器已打开，请在 Grok 授权页确认此验证码。' : 'The browser is open. Confirm this code on the Grok authorization page.'}</small>
+                </div>
+              ) : null}
             </label>
           ) : isLocalCliAuth ? (
             <>
@@ -1204,7 +1242,7 @@ export function LlmSettingsPanel({
           </>
           )}
 
-          {form.authMethod !== 'oauth_chatgpt' ? (
+          {!isOAuthMethod(form.authMethod) ? (
           <>
           <label>
             <span>{isLocalCliAuth ? (i18n.locale === 'zh-CN' ? 'Qoder 模型' : 'Qoder Model') : (i18n.locale === 'zh-CN' ? '模型名称' : 'Model')}</span>
@@ -1418,8 +1456,10 @@ export function LlmSettingsPanel({
             >
               {saving || oauthBusyId
                 ? '...'
-                : (form.authMethod === 'oauth_chatgpt' && !editingId
-                    ? (i18n.locale === 'zh-CN' ? '登录 ChatGPT' : 'Login with ChatGPT')
+                : (isOAuthMethod(form.authMethod) && !editingId
+                    ? (form.authMethod === 'oauth_grok'
+                      ? (i18n.locale === 'zh-CN' ? '登录 Grok' : 'Login with Grok')
+                      : (i18n.locale === 'zh-CN' ? '登录 ChatGPT' : 'Login with ChatGPT'))
                     : (i18n.locale === 'zh-CN' ? '保存' : 'Save'))}
             </button>
             </div>

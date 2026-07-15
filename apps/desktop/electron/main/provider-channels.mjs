@@ -2,6 +2,8 @@ import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli
 
 export const CHATGPT_SUBSCRIPTION_NAME = 'ChatGPT 订阅';
 export const CHATGPT_SUBSCRIPTION_BASE_URL = 'https://chatgpt.com/backend-api/codex';
+export const GROK_SUBSCRIPTION_NAME = 'Grok 订阅';
+export const GROK_SUBSCRIPTION_BASE_URL = 'https://cli-chat-proxy.grok.com/v1';
 export const GEMINI_OAUTH_NAME = 'Gemini OAuth';
 export const QODER_PRIVATE_NAME = 'Qoder 私有接口';
 
@@ -11,6 +13,7 @@ export const CHANNEL_IDS = {
   OPENAI_COMPATIBLE: 'openai-compatible',
   ANTHROPIC_COMPATIBLE: 'anthropic-compatible',
   GOOGLE_AI: 'google-ai',
+  GROK: 'grok',
   QODER: 'qoder',
 };
 
@@ -23,6 +26,9 @@ const PROTECTED_HEADER_NAMES = new Set([
   'x-goog-api-key',
   'x-goog-user-project',
   'chatgpt-account-id',
+  'x-xai-token-auth',
+  'x-grok-client-surface',
+  'x-grok-client-version',
 ]);
 
 const CHANNEL_DESCRIPTORS = {
@@ -136,6 +142,32 @@ const CHANNEL_DESCRIPTORS = {
       temperature: true,
     },
   },
+  [CHANNEL_IDS.GROK]: {
+    id: CHANNEL_IDS.GROK,
+    label: GROK_SUBSCRIPTION_NAME,
+    legacyProvider: 'openai',
+    defaultWire: 'openai-chat',
+    allowedWires: ['openai-chat'],
+    authMethods: { oauth_grok: { wire: 'openai-chat' } },
+    defaults: { baseUrl: GROK_SUBSCRIPTION_BASE_URL, model: 'grok-4.5' },
+    headers: {
+      'X-XAI-Token-Auth': 'xai-grok-cli',
+      'x-grok-client-surface': 'grok-build',
+      'x-grok-client-version': '0.1.202',
+    },
+    capabilities: {
+      reasoning: {
+        supported: true,
+        paramStyle: 'openai-effort',
+        effortLevels: ['low', 'medium', 'high'],
+        defaultEffort: 'high',
+      },
+      promptCache: false,
+      vision: true,
+      toolUse: true,
+      temperature: true,
+    },
+  },
   [CHANNEL_IDS.QODER]: {
     id: CHANNEL_IDS.QODER,
     label: QODER_PRIVATE_NAME,
@@ -189,6 +221,7 @@ export function inferChannelId(config = {}) {
   if (typeof config.channelId === 'string' && config.channelId.trim()) return config.channelId;
   if (config.authMethod === 'oauth_chatgpt') return CHANNEL_IDS.OPENAI;
   if (config.authMethod === 'oauth_google') return CHANNEL_IDS.GOOGLE_AI;
+  if (config.authMethod === 'oauth_grok') return CHANNEL_IDS.GROK;
   if (config.authMethod === 'qoder_local_auth' || config.authMethod === 'local_cli') return CHANNEL_IDS.QODER;
   if (config.provider === 'anthropic') return CHANNEL_IDS.ANTHROPIC;
   return CHANNEL_IDS.OPENAI_COMPATIBLE;
@@ -286,14 +319,16 @@ export function resolveChannel(config = {}) {
     ? 'oauth_chatgpt'
     : config.authMethod === 'oauth_google'
       ? 'oauth_google'
-      : config.authMethod === 'qoder_local_auth' || config.authMethod === 'local_cli'
-        ? 'qoder_local_auth'
-        : 'api_key';
+      : config.authMethod === 'oauth_grok'
+        ? 'oauth_grok'
+        : config.authMethod === 'qoder_local_auth' || config.authMethod === 'local_cli'
+          ? 'qoder_local_auth'
+          : 'api_key';
   const authRule = descriptor.authMethods[authMethod];
   if (!authRule) throw new Error(`unsupported_auth_method:${channelId}:${authMethod}`);
 
   const wireOverride = config.wireOverride || config.wire;
-  const wire = authMethod === 'oauth_chatgpt'
+  const wire = authMethod === 'oauth_chatgpt' || authMethod === 'oauth_grok'
     ? authRule.wire
     : (wireOverride ?? authRule.wire ?? descriptor.defaultWire);
   if (wireOverride && !descriptor.allowedWires.includes(wireOverride)) {
@@ -308,13 +343,18 @@ export function resolveChannel(config = {}) {
   if (authMethod === 'oauth_google' && wireOverride && wireOverride !== wire) {
     throw new Error(`unsupported_wire:${channelId}:${wireOverride}`);
   }
+  if (authMethod === 'oauth_grok' && wireOverride && wireOverride !== wire) {
+    throw new Error(`unsupported_wire:${channelId}:${wireOverride}`);
+  }
   if (authMethod === 'qoder_local_auth' && wireOverride && wireOverride !== wire) {
     throw new Error(`unsupported_wire:${channelId}:${wireOverride}`);
   }
 
   const baseUrl = authMethod === 'oauth_chatgpt'
     ? CHATGPT_SUBSCRIPTION_BASE_URL
-    : (config.baseUrl || descriptor.defaults.baseUrl);
+    : authMethod === 'oauth_grok'
+      ? GROK_SUBSCRIPTION_BASE_URL
+      : (config.baseUrl || descriptor.defaults.baseUrl);
   const apiKey = config.apiKey || '';
   const endpoint = endpointForWire(baseUrl, wire, { model: config.model, apiKey, authMethod, stream: true });
   const accountId = config.accountId || null;
