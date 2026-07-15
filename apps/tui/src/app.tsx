@@ -5,6 +5,11 @@ import type { RuntimeGoalSnapshot } from '@peer-agent/runtime-sdk';
 
 import { B3Wordmark } from './b3-wordmark-view.tsx';
 import {
+  ComposerStatusBar,
+  type ComposerStatusLayout,
+} from './composer-status-view.tsx';
+import { createComposerStatus, type ComposerStatus } from './composer-status.ts';
+import {
   createChatController,
   type ChatController,
   type ChatMessage,
@@ -33,7 +38,6 @@ import {
   shouldOpenCommandPanel,
   type TuiExperienceState,
 } from './tui-experience.ts';
-import { tuiModeOption } from './tui-mode.ts';
 
 const COLOR = {
   background: '#0a0a0a',
@@ -114,6 +118,37 @@ function Composer({ controller, snapshot, disabled, onCommand, editorRef }: {
   );
 }
 
+function ComposerDock({
+  controller,
+  snapshot,
+  disabled,
+  onCommand,
+  editorRef,
+  status,
+  statusLayout,
+}: {
+  readonly controller: ChatController;
+  readonly snapshot: ChatSnapshot;
+  readonly disabled: boolean;
+  readonly onCommand: () => void;
+  readonly editorRef: RefObject<TextareaRenderable | null>;
+  readonly status: ComposerStatus;
+  readonly statusLayout: ComposerStatusLayout;
+}) {
+  return (
+    <box flexDirection="column" width="100%">
+      <Composer
+        controller={controller}
+        snapshot={snapshot}
+        disabled={disabled}
+        onCommand={onCommand}
+        editorRef={editorRef}
+      />
+      <ComposerStatusBar status={status} layout={statusLayout} />
+    </box>
+  );
+}
+
 export function App({ host, model, modelLabel }: {
   readonly host: TuiHost;
   readonly model: ChatModelPort;
@@ -156,8 +191,17 @@ export function App({ host, model, modelLabel }: {
   const commandFooter = experience.footer.type === 'command' ? experience.footer : null;
   const commandItems = commandFooter ? filterTuiCommands(commandFooter.query) : [];
   const commandSelection = commandFooter?.selectedIndex ?? 0;
-  const toolCount = (host.capabilitiesForMode?.(snapshot.mode) ?? host.capabilities).length;
-  const composerMetadata = `${modelLabel}  ·  ${tuiModeOption(snapshot.mode).label.toLowerCase()}  ·  ${toolCount} tools`;
+  const composerStatus = createComposerStatus({
+    workspaceRoot: host.workspaceRoot,
+    mode: snapshot.mode,
+    modelLabel,
+    usage: snapshot.usage,
+  });
+  const composerStatusLayout: ComposerStatusLayout = terminal.width >= 160
+    ? 'wide'
+    : terminal.width >= 72
+      ? 'compact'
+      : 'narrow';
   const wordmarkVariant = terminal.width >= 76
     ? 'full'
     : terminal.width >= 42
@@ -298,12 +342,14 @@ export function App({ host, model, modelLabel }: {
             <box width="100%" alignItems="center" justifyContent="center">
               <B3Wordmark variant={wordmarkVariant} />
             </box>
-            <box width="75%" maxWidth={88}>
-              <Composer
+            <box width="75%" maxWidth={112}>
+              <ComposerDock
                 controller={controller}
                 snapshot={snapshot}
                 disabled={false}
                 editorRef={composerRef}
+                status={composerStatus}
+                statusLayout={composerStatusLayout}
                 onCommand={() => {
                   setCommandNotice(null);
                   setExperience((current) => openCommandPanel({ ...current, mode: snapshot.mode }));
@@ -315,12 +361,7 @@ export function App({ host, model, modelLabel }: {
       ) : (
         <>
           {snapshot.messages.length > 0 ? (
-            <box justifyContent="space-between">
-              <text fg={COLOR.text}><strong>peer</strong></text>
-              <text fg={COLOR.muted}>
-                {snapshot.usage?.totalTokens === undefined ? composerMetadata : `${composerMetadata}  ·  ${snapshot.usage.totalTokens} tokens`}
-              </text>
-            </box>
+            <text fg={COLOR.text}><strong>peer</strong></text>
           ) : null}
 
           {snapshot.session && visibleTurn ? (
@@ -404,11 +445,13 @@ export function App({ host, model, modelLabel }: {
           <text fg={COLOR.muted}>↑↓ select  ·  enter run  ·  esc close</text>
         </box>
       ) : (
-        <Composer
+        <ComposerDock
           controller={controller}
           snapshot={snapshot}
           disabled={Boolean(approval) || snapshot.plan?.status === 'awaiting_approval'}
           editorRef={composerRef}
+          status={composerStatus}
+          statusLayout={composerStatusLayout}
           onCommand={() => {
             setCommandNotice(null);
             setExperience((current) => openCommandPanel({ ...current, mode: snapshot.mode }));
