@@ -51,6 +51,19 @@
   transition: border-color var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
 }
 
+/* 中间内容区向左投下的内侧阴影：保留 1px 分隔线，同时增强栏间层次。 */
+.app-sidebar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  z-index: 4;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, rgba(0, 0, 0, 0.05));
+}
+
 /* ── Sidebar Resizer（左栏右缘拖拽条，镜像右侧 workbench-resizer）── */
 /* 拖拽分隔线：6px hit area，无独立指示条；hover/聚焦/拖拽时让侧栏自身的
    1px border-right 变为强调色，始终呈现为一条干净的线（无双线）。 */
