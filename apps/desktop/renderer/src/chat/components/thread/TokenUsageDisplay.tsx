@@ -182,9 +182,9 @@ export function TokenUsageDisplay({
   readonly modelOptions?: readonly DropdownOption[];
   readonly modelLoading?: boolean;
   readonly canSwitchModel?: boolean;
-  /** onModelChange 回传选中项的 provider 复合 id（groupId::modelId），会话据此绑定模型。 */
+  /** onModelChange 回传选中项的已配置模型记录 id，会话据此绑定模型。 */
   readonly onModelChange?: (providerId: string) => void;
-  /** 会话级绑定的 provider 复合 id；决定下拉选中项与展示的模型/价格/上下文窗口。null=用全局默认。 */
+  /** 会话级绑定的模型记录 id；决定下拉选中项与展示的模型/价格/上下文窗口。null=用全局默认。 */
   readonly selectedModelProviderId?: string | null;
 }) {
   // 当前展示的 provider：优先会话绑定的 modelProviderId（随会话切换模型），其次全局默认，

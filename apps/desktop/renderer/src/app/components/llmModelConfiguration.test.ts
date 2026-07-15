@@ -1,0 +1,113 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import {
+  buildModelCatalog,
+  buildModelImportPatches,
+  filterModelCatalog,
+  metadataSourceFromList,
+  modelMetadataCompletion,
+  modelMetadataPatch,
+  parseReasoningEffortMap,
+} from './llmModelConfiguration.ts';
+
+describe('LLM model configuration rules', () => {
+  it('deduplicates a remote catalog and marks configured models', () => {
+    const catalog = buildModelCatalog([
+      { id: 'model-a', label: 'Model A' },
+      { id: 'model-a', label: 'Duplicate A' },
+      { id: 'model-b', label: 'Model B' },
+      { id: '  ', label: 'Empty' },
+    ], [{ model: 'model-b' }]);
+
+    assert.deepEqual(catalog.map((entry) => [entry.model.id, entry.configured]), [
+      ['model-a', false],
+      ['model-b', true],
+    ]);
+  });
+
+  it('filters by model id or label', () => {
+    const catalog = buildModelCatalog([
+      { id: 'claude-sonnet', label: 'Claude Sonnet' },
+      { id: 'gpt-5', label: 'GPT 5' },
+    ], []);
+    assert.deepEqual(filterModelCatalog(catalog, 'sonnet').map((entry) => entry.model.id), ['claude-sonnet']);
+    assert.deepEqual(filterModelCatalog(catalog, 'gpt-5').map((entry) => entry.model.id), ['gpt-5']);
+  });
+
+  it('creates a safe metadata patch without inventing absent values', () => {
+    const patch = modelMetadataPatch({
+      id: 'model-a',
+      label: 'Model A',
+      contextWindow: 200_000,
+      supportsVision: true,
+    }, 'remote', '2026-07-15T00:00:00.000Z');
+
+    assert.deepEqual(patch, {
+      modelLabel: 'Model A',
+      metadataSource: 'remote',
+      metadataSyncedAt: '2026-07-15T00:00:00.000Z',
+      contextWindow: 200_000,
+      supportsVision: true,
+    });
+    assert.equal('maxOutputTokens' in patch, false);
+    assert.equal('inputPrice' in patch, false);
+  });
+
+  it('builds stable import patches and deduplicates selected model IDs', () => {
+    const patches = buildModelImportPatches([
+      { id: ' model-a ', label: 'Model A', contextWindow: 128_000 },
+      { id: 'model-a', label: 'Duplicate' },
+      { id: 'model-b', label: 'model-b' },
+      { id: '   ', label: 'blank' },
+    ], 'remote', '2026-01-02T03:04:05.000Z');
+
+    assert.deepEqual(patches, [
+      {
+        model: 'model-a',
+        modelLabel: 'Model A',
+        metadataSource: 'remote',
+        metadataSyncedAt: '2026-01-02T03:04:05.000Z',
+        contextWindow: 128_000,
+      },
+      {
+        model: 'model-b',
+        metadataSource: 'remote',
+        metadataSyncedAt: '2026-01-02T03:04:05.000Z',
+      },
+    ]);
+  });
+
+  it('parses reasoning effort maps from JSON or key=value lines', () => {
+    assert.deepEqual(parseReasoningEffortMap('{"low": 1024, "high": "xhigh"}'), {
+      low: 1024,
+      high: 'xhigh',
+    });
+    assert.deepEqual(parseReasoningEffortMap('low=1024\nhigh=xhigh'), {
+      low: 1024,
+      high: 'xhigh',
+    });
+    assert.deepEqual(parseReasoningEffortMap('low: 1024\nhigh: xhigh'), {
+      low: 1024,
+      high: 'xhigh',
+    });
+    assert.equal(parseReasoningEffortMap('  '), undefined);
+    assert.throws(() => parseReasoningEffortMap('invalid'), /reasoning_effort_map_invalid/);
+  });
+
+  it('maps catalog sources and reports metadata completeness', () => {
+    assert.equal(metadataSourceFromList({ source: 'builtin' }), 'builtin');
+    assert.equal(metadataSourceFromList({ source: 'local' }), 'local');
+    assert.equal(metadataSourceFromList({ source: 'remote' }), 'remote');
+
+    assert.equal(modelMetadataCompletion({}), 'missing');
+    assert.equal(modelMetadataCompletion({ supportsVision: false }), 'partial');
+    assert.equal(modelMetadataCompletion({ contextWindow: 200_000 }), 'partial');
+    assert.equal(modelMetadataCompletion({
+      contextWindow: 200_000,
+      maxOutputTokens: 8_192,
+      inputPrice: 3,
+      outputPrice: 15,
+    }), 'complete');
+  });
+});

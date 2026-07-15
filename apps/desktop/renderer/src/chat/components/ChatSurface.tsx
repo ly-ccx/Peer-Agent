@@ -668,7 +668,7 @@ export function ChatSurface({
   const hasProvider = providers.some((p) => p.apiKeyConfigured);
   // 当前激活 provider(默认且已配置 Key,否则取首个已配置)是否勾选了原生推理(reasoning/thinking)。
   // 只有勾选时才显示思考强度选择器；OpenAI 暴露额外 xhigh 档。
-  // 优先取会话绑定的模型（modelProviderId 复合 id），使推理档位/思考强度随会话选中的模型走；
+  // 优先取会话绑定的已配置模型记录，使推理档位/思考强度随会话选中的模型走；
   // 会话未绑定或绑定失效时回退全局默认 → 首个已配置 Key 的 provider（与后端强绑定回退同口径）。
   const activeProvider = (modelProviderId
     ? providers.find((p) => p.id === modelProviderId && p.apiKeyConfigured)
@@ -705,8 +705,8 @@ export function ChatSurface({
     const userMessage = currentTurn ? getTurnUserMessage(currentTurn) : null;
     return userMessage ? summarizeUserMessageForContext(userMessage, isZh) : null;
   }, [chatTurns, currentTurnId, isZh, liveChatTurn]);
-  // 模型下拉选项：以打平后的 provider×model（复合 id=groupId::modelId）为单位，仅列已配置 Key 的
-  // 可用模型。value=复合 id（会话据此绑定模型），label 优先取 modelLabel，回退分组名+模型名。
+  // 模型下拉选项：以持久化的 provider×model 记录为单位，仅列凭据已就绪的可用模型。
+  // value=真实模型记录 id（会话据此绑定模型），label 优先取 modelLabel，回退分组名+模型名。
   const modelOptions = useMemo(
     () => providers
       .filter((p) => p.apiKeyConfigured)

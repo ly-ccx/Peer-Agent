@@ -81,6 +81,38 @@ test('subscription provider creation applies gpt-5.5 pricing and context metadat
   assert.equal(provider.supportsReasoning, true);
 }));
 
+test('subscription provider supports multiple configured models in one group', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const first = store.addProvider({ provider: 'openai', authMethod: 'oauth_chatgpt' });
+  const second = store.addModel(first.groupId, {
+    model: 'gpt-5.4',
+    modelLabel: 'GPT-5.4',
+    metadataSource: 'remote',
+  });
+
+  assert.equal(second.groupId, first.groupId);
+  assert.equal(second.authMethod, 'oauth_chatgpt');
+  assert.equal(second.model, 'gpt-5.4');
+  assert.equal(second.modelLabel, 'GPT-5.4');
+  assert.deepEqual(
+    store.listProviders().map((provider) => provider.model),
+    ['gpt-5.5', 'gpt-5.4'],
+  );
+}));
+
+test('chat provider compatibility list returns configured records without catalog expansion', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const first = store.addProvider({ provider: 'openai', authMethod: 'oauth_chatgpt' });
+  store.addModel(first.groupId, { model: 'gpt-5.4', modelLabel: 'GPT-5.4' });
+
+  const configured = store.listProviders();
+  const chat = store.listChatProviders();
+
+  assert.deepEqual(chat.map((provider) => provider.id), configured.map((provider) => provider.id));
+  assert.deepEqual(chat.map((provider) => provider.model), ['gpt-5.5', 'gpt-5.4']);
+  assert.equal(new Set(chat.map((provider) => provider.id)).size, chat.length);
+}));
+
 test('subscription provider migration backfills pricing and context metadata', () => withStore(({ configFile }) => {
   writeFileSync(configFile, JSON.stringify([
     {
@@ -577,12 +609,6 @@ test('addModel inherits connection fields without copying model metadata', () =>
     () => store.addModel(base.groupId, { model: 'model-b' }),
     /already exists in provider group/,
   );
-}));
-
-test('addModel refuses subscription (OAuth) providers', () => withStore(({ configFile }) => {
-  const store = createLlmConfigStore({ configFile });
-  const sub = store.addProvider({ provider: 'openai', authMethod: 'oauth_chatgpt' });
-  assert.throws(() => store.addModel(sub.groupId, { model: 'gpt-x' }), /multiple models/);
 }));
 
 test('removeGroup deletes every model in the group and reassigns default', () => withStore(({ configFile }) => {

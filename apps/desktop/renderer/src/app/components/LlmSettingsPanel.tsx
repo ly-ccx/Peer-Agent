@@ -3,17 +3,35 @@ import type {
   LlmAuthMethod,
   LlmChannelDescriptor,
   LlmModelInfo,
+  LlmModelListResult,
   LlmProviderConfigView,
   LlmProviderTestResult,
   LlmProviderType,
-  LlmReasoningEffortMap,
   LlmReasoningParamStyle,
   LlmWireProtocol,
 } from '@peer-agent/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { ConfiguredModelRow } from './ConfiguredModelRow';
 import { Drawer } from './Drawer';
 import { Dropdown } from './Dropdown';
+import { ModelCatalogDialog } from './ModelCatalogDialog';
+import { ModelSettingsDialog } from './ModelSettingsDialog';
+import {
+  buildModelImportPatches,
+  formatReasoningEffortMap,
+  metadataSourceFromList,
+  parseReasoningEffortMap,
+} from './llmModelConfiguration';
+
+interface PendingProviderDraft extends Record<string, unknown> {
+  readonly channelId: string;
+  readonly wireOverride?: string;
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  readonly customHeaders?: Record<string, string>;
+  readonly name: string;
+}
 
 interface FormState {
   provider: LlmProviderType;
@@ -210,62 +228,6 @@ function formatModelTokenLimit(tokens: number): string {
   return `${(tokens / 1000).toFixed(0)}K`;
 }
 
-function modelMetadataPatch(model: LlmModelInfo | undefined): Record<string, unknown> {
-  const patch: Record<string, unknown> = {};
-  if (!model) return patch;
-  if (model.label) patch.modelLabel = model.label;
-  if (typeof model.contextWindow === 'number') patch.contextWindow = model.contextWindow;
-  if (typeof model.maxOutputTokens === 'number') patch.maxOutputTokens = model.maxOutputTokens;
-  if (typeof model.supportsVision === 'boolean') patch.supportsVision = model.supportsVision;
-  if (typeof model.supportsReasoning === 'boolean') patch.supportsReasoning = model.supportsReasoning;
-  return patch;
-}
-
-function formatReasoningEffortMap(map: LlmReasoningEffortMap | undefined): string {
-  return map ? JSON.stringify(map, null, 2) : '';
-}
-
-function parseReasoningEffortMap(text: string): LlmReasoningEffortMap | undefined {
-  const trimmed = text.trim();
-  if (!trimmed) return undefined;
-  const parsed: Record<string, string | number> = {};
-  const assign = (key: string, value: unknown) => {
-    const name = String(key || '').trim();
-    if (!name) throw new Error('reasoning_effort_map_invalid');
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      parsed[name] = value;
-      return;
-    }
-    if (typeof value === 'string' && value.trim()) {
-      const raw = value.trim();
-      const asNumber = Number(raw);
-      parsed[name] = Number.isFinite(asNumber) && /^-?\d+(\.\d+)?$/.test(raw) ? asNumber : raw;
-      return;
-    }
-    throw new Error('reasoning_effort_map_invalid');
-  };
-
-  if (trimmed.startsWith('{')) {
-    let value: unknown;
-    try {
-      value = JSON.parse(trimmed) as unknown;
-    } catch {
-      throw new Error('reasoning_effort_map_invalid');
-    }
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('reasoning_effort_map_invalid');
-    for (const [key, item] of Object.entries(value)) assign(key, item);
-  } else {
-    for (const rawLine of trimmed.split('\n')) {
-      const line = rawLine.trim();
-      if (!line) continue;
-      const idx = line.indexOf(':');
-      if (idx <= 0) throw new Error('reasoning_effort_map_invalid');
-      assign(line.slice(0, idx), line.slice(idx + 1));
-    }
-  }
-  return Object.keys(parsed).length ? parsed : undefined;
-}
-
 function formatCustomHeaders(headers: Readonly<Record<string, string>> | undefined): string {
   return Object.entries(headers || {}).map(([key, value]) => `${key}: ${value}`).join('\n');
 }
@@ -293,6 +255,7 @@ function validateForm(
   selectedChannel: LlmChannelDescriptor,
   // B-2 组内加模型:凭证(apiKey/baseUrl)继承自组内首条,不要求用户重填。
   isAddModel = false,
+  existingApiKeyConfigured = false,
 ): string | null {
   if (!selectedChannel.id) return 'unknown_channel';
   if (isLocalCliMethod(form.authMethod)) {
@@ -311,24 +274,26 @@ function validateForm(
     return null;
   }
   if (!isAddModel && !form.baseUrl.trim()) return 'base_url_required';
-  if (!form.model.trim()) return 'model_required';
-  if (!editingId && !isAddModel && !form.apiKey.trim()) return 'api_key_required';
+  if (isAddModel && !form.model.trim()) return 'model_required';
+  if (!isAddModel && !existingApiKeyConfigured && !form.apiKey.trim()) return 'api_key_required';
   try {
     parseCustomHeaders(form.customHeadersText);
-    if (form.supportsReasoning) parseReasoningEffortMap(form.reasoningEffortMapText);
+    if (isAddModel && form.supportsReasoning) parseReasoningEffortMap(form.reasoningEffortMapText);
   } catch (err: unknown) {
     return err instanceof Error ? err.message : 'custom_header_invalid_line';
   }
-  const numberFields = [
-    form.contextWindow,
-    form.maxOutputTokens,
-    form.inputPrice,
-    form.outputPrice,
-    form.cacheWritePrice,
-    form.cacheReadPrice,
-  ];
-  if (numberFields.some((value) => value.trim() && (!Number.isFinite(Number(value)) || Number(value) < 0))) {
-    return 'number_field_invalid';
+  if (isAddModel) {
+    const numberFields = [
+      form.contextWindow,
+      form.maxOutputTokens,
+      form.inputPrice,
+      form.outputPrice,
+      form.cacheWritePrice,
+      form.cacheReadPrice,
+    ];
+    if (numberFields.some((value) => value.trim() && (!Number.isFinite(Number(value)) || Number(value) < 0))) {
+      return 'number_field_invalid';
+    }
   }
   return null;
 }
@@ -446,21 +411,15 @@ export function LlmSettingsPanel({
     expiresAt: string;
   } | null>(null);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
-  // ADR 28(方案 B): 订阅 provider 的模型清单与加载态(按 provider id 维度)。
-  const [modelLists, setModelLists] = useState<Record<string, readonly LlmModelInfo[]>>({});
-  const [modelLoadingId, setModelLoadingId] = useState<string | null>(null);
-  // B-2 手风琴：给某个 provider 组「加模型」的模式(非 null 表示当前是加模型而非新建 provider)。
   const [addModelGroupId, setAddModelGroupId] = useState<string | null>(null);
-  // 添加渠道表单:用临时配置拉取的候选模型列表 + 勾选集合。
-  const [fetchedModels, setFetchedModels] = useState<readonly LlmModelInfo[]>([]);
-  const [fetchingModels, setFetchingModels] = useState(false);
-  const [fetchModelError, setFetchModelError] = useState<string | null>(null);
-  const [selectedModelIds, setSelectedModelIds] = useState<ReadonlySet<string>>(new Set());
-  // B-2 手风琴：已折叠的组 groupId 集合(默认全部展开)。
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
   const [removingGroupId, setRemovingGroupId] = useState<string | null>(null);
-  // model 行折叠：展开的 model id 集合(默认折叠,只显示模型名/默认徽标;展开显示规格/定价/测试/操作)。
-  const [expandedModels, setExpandedModels] = useState<ReadonlySet<string>>(new Set());
+  // 远程模型目录只作为候选，不直接替换已配置模型。
+  const [catalogTargetId, setCatalogTargetId] = useState<string | null>(null);
+  const [pendingProviderDraft, setPendingProviderDraft] = useState<PendingProviderDraft | null>(null);
+  const [catalogResult, setCatalogResult] = useState<LlmModelListResult>({ success: true, models: [] });
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [modelSettingsId, setModelSettingsId] = useState<string | null>(null);
 
   const clearTestResult = useCallback((id: string) => {
     setTestResults((prev) => {
@@ -484,7 +443,9 @@ export function LlmSettingsPanel({
         }
         return next ?? prev;
       });
+      return list;
     } catch { /* silent */ }
+    return [];
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
@@ -503,83 +464,41 @@ export function LlmSettingsPanel({
     return () => { cancelled = true; };
   }, []);
 
-  // 拉取 provider 的可用模型: OAuth 走远程/内置目录,Qoder 走本机 catalog。
-  const loadModels = useCallback(async (id: string) => {
-    setModelLoadingId(id);
+  // 显式读取远程模型目录。目录结果只用于导入，不会自动替换或删除已配置模型。
+  const loadCatalog = useCallback(async (id: string) => {
+    setCatalogLoading(true);
+    setCatalogResult({ success: true, models: [] });
     try {
-      const res = await clientApi.llmListModels({ id });
-      if (res.success) {
-        setModelLists((prev) => ({ ...prev, [id]: res.models }));
-        const provider = providers.find((item) => item.id === id);
-        const selected = res.models.find((item) => item.id === provider?.model);
-        const patch = modelMetadataPatch(selected);
-        const shouldPatch = provider && Object.entries(patch).some(([key, value]) => (provider as unknown as Record<string, unknown>)[key] !== value);
-        if (shouldPatch) {
-          await clientApi.llmUpdateProvider({ id, ...patch });
-          await refresh();
-        }
-      }
-    } catch { /* silent */ } finally {
-      setModelLoadingId((cur) => (cur === id ? null : cur));
-    }
-  }, [providers, refresh]);
-
-  // 用表单当前填的 channelId/baseUrl/apiKey/customHeaders 拉取候选模型(不落盘)。
-  // 供"添加渠道"弹窗在保存前预览可用模型、勾选多个模型一次性创建。
-  const fetchFormModels = useCallback(async () => {
-    setFetchingModels(true);
-    setFetchModelError(null);
-    try {
-      const parsedHeaders = parseCustomHeaders(form.customHeadersText);
-      const headers = parsedHeaders ?? {};
-      const res = await clientApi.llmFetchModels({
-        channelId: form.channelId,
-        wireOverride: form.wireOverride || undefined,
-        baseUrl: form.baseUrl,
-        apiKey: form.apiKey,
-        customHeaders: Object.keys(headers).length > 0 ? headers : undefined,
-      });
-      if (res.success && res.models.length > 0) {
-        setFetchedModels(res.models);
-        // 默认全不选,让用户自己勾;若当前 form.model 已填且在候选中则预选它。
-        setSelectedModelIds((prev) => {
-          const next = new Set(prev);
-          const current = form.model.trim();
-          if (current && res.models.some((m) => m.id === current)) next.add(current);
-          return next;
-        });
-      } else {
-        setFetchedModels([]);
-        setFetchModelError(res.error || 'models_fetch_empty');
-      }
-    } catch (err: unknown) {
-      setFetchedModels([]);
-      setFetchModelError(err instanceof Error ? err.message : 'models_fetch_failed');
+      setCatalogResult(await clientApi.llmListModels({ id }));
+    } catch (error: unknown) {
+      setCatalogResult({ success: false, models: [], error: error instanceof Error ? error.message : 'models_list_failed' });
     } finally {
-      setFetchingModels(false);
+      setCatalogLoading(false);
     }
-  }, [form.channelId, form.wireOverride, form.baseUrl, form.apiKey, form.customHeadersText, form.model]);
+  }, []);
 
-  // 已登录(connected)的订阅 provider、本机 Qoder provider 与已配置 key 的 api_key
-  // provider 自动加载一次模型清单。
-  useEffect(() => {
-    for (const p of providers) {
-      const shouldLoad = (isOAuthMethod(p.authMethod) && p.oauthStatus?.status === 'connected')
-        || isLocalCliMethod(p.authMethod)
-        || (p.authMethod === 'api_key' && p.apiKeyConfigured);
-      if (shouldLoad && !modelLists[p.id]) {
-        void loadModels(p.id);
-      }
-    }
-  }, [providers, modelLists, loadModels]);
-
-  // 切换订阅 provider 当前使用的模型。
-  const handleSelectModel = async (id: string, model: string) => {
+  const loadPendingCatalog = useCallback(async (draft: PendingProviderDraft) => {
+    setCatalogLoading(true);
+    setCatalogResult({ success: true, models: [] });
     try {
-      const selected = modelLists[id]?.find((item) => item.id === model);
-      await clientApi.llmUpdateProvider({ id, model, ...modelMetadataPatch(selected) });
-      await refresh();
-    } catch { /* silent */ }
+      setCatalogResult(await clientApi.llmFetchModels({
+        channelId: draft.channelId,
+        wireOverride: draft.wireOverride,
+        baseUrl: draft.baseUrl,
+        apiKey: draft.apiKey,
+        customHeaders: draft.customHeaders,
+      }));
+    } catch (error: unknown) {
+      setCatalogResult({ success: false, models: [], error: error instanceof Error ? error.message : 'models_list_failed' });
+    } finally {
+      setCatalogLoading(false);
+    }
+  }, []);
+
+  const openCatalog = (id: string) => {
+    setPendingProviderDraft(null);
+    setCatalogTargetId(id);
+    void loadCatalog(id);
   };
 
   const handleChannelChange = (channelId: string) => {
@@ -605,9 +524,6 @@ export function LlmSettingsPanel({
     setEditingId(null);
     setAddModelGroupId(null);
     setForm(emptyForm(channels));
-    setFetchedModels([]);
-    setSelectedModelIds(new Set());
-    setFetchModelError(null);
     setShowForm(true);
   };
 
@@ -688,99 +604,79 @@ export function LlmSettingsPanel({
       const cwPrice = form.cacheWritePrice ? Number(form.cacheWritePrice) : undefined;
       const crPrice = form.cacheReadPrice ? Number(form.cacheReadPrice) : undefined;
       if (editingId) {
-        const patch: Record<string, unknown> = {
-          id: editingId,
+        const edited = providers.find((provider) => provider.id === editingId);
+        const groupId = edited?.groupId ?? editingId;
+        const groupModels = providers.filter((provider) => (provider.groupId ?? provider.id) === groupId);
+        const connectionPatch: Record<string, unknown> = {
           provider: form.provider,
           channelId: form.channelId,
-          wireOverride: form.wireOverride || undefined,
-          reasoningParamStyle: form.reasoningParamStyle || undefined,
-          reasoningEffortMap,
-          customHeaders,
+          wireOverride: form.wireOverride || '',
+          customHeaders: customHeaders ?? {},
+          authMethod: form.authMethod,
           name: form.name,
           baseUrl: form.baseUrl,
-          model: form.model,
           oauthClientId: form.oauthClientId,
-          oauthClientSecret: form.oauthClientSecret || undefined,
           oauthProjectId: form.oauthProjectId,
-          contextWindow: ctxWin,
-          maxOutputTokens: maxOut,
-          inputPrice: inPrice,
-          outputPrice: outPrice,
-          cacheWritePrice: cwPrice,
-          cacheReadPrice: crPrice,
-          supportsVision: form.supportsVision,
-          supportsReasoning: form.supportsReasoning,
-          supportsPromptCaching: form.supportsPromptCaching,
         };
-        if (form.apiKey) patch.apiKey = form.apiKey;
-        await clientApi.llmUpdateProvider(patch as { id: string });
+        for (const [index, model] of groupModels.entries()) {
+          await clientApi.llmUpdateProvider({
+            id: model.id,
+            ...connectionPatch,
+            ...(index === 0 && form.apiKey ? { apiKey: form.apiKey } : {}),
+            ...(index === 0 && form.oauthClientSecret ? { oauthClientSecret: form.oauthClientSecret } : {}),
+          });
+        }
       } else {
         const draft = {
           provider: form.provider,
           channelId: form.channelId,
           wireOverride: form.wireOverride || undefined,
-          reasoningParamStyle: form.reasoningParamStyle || undefined,
-          reasoningEffortMap,
           customHeaders,
           authMethod: form.authMethod,
           name: form.name || (localCli ? 'Qoder 私有接口' : form.provider),
           baseUrl: form.baseUrl,
-          model: form.model,
           apiKey: form.apiKey,
           oauthClientId: form.oauthClientId,
           oauthClientSecret: form.oauthClientSecret,
           oauthProjectId: form.oauthProjectId,
-          contextWindow: ctxWin,
-          maxOutputTokens: maxOut,
-          inputPrice: inPrice,
-          outputPrice: outPrice,
-          cacheWritePrice: cwPrice,
-          cacheReadPrice: crPrice,
-          supportsVision: form.supportsVision,
-          supportsReasoning: form.supportsReasoning,
-          supportsPromptCaching: form.supportsPromptCaching,
-        } as Record<string, unknown>;
-        // ADR 28: 订阅链路必须"先登录、成功后才落盘"。
-        // 不在这里 llmAddProvider —— 把草稿交给 OAuth,登录成功才由 main 创建 provider,
-        // 失败/取消则什么都不留。
-        if (isOAuthMethod(form.authMethod)) {
+        } as PendingProviderDraft;
+        if (addModelGroupId) {
+          // 手动新增只写模型字段；连接信息与密钥由组内记录继承。
+          await clientApi.llmAddModel({
+            groupId: addModelGroupId,
+            name: form.name,
+            model: form.model,
+            contextWindow: ctxWin,
+            maxOutputTokens: maxOut,
+            inputPrice: inPrice,
+            outputPrice: outPrice,
+            cacheWritePrice: cwPrice,
+            cacheReadPrice: crPrice,
+            supportsVision: form.supportsVision,
+            supportsReasoning: form.supportsReasoning,
+            supportsPromptCaching: form.supportsPromptCaching,
+            reasoningParamStyle: form.reasoningParamStyle || undefined,
+            reasoningEffortMap,
+            metadataSource: 'manual',
+            metadataSyncedAt: new Date().toISOString(),
+          });
+        } else if (isOAuthMethod(form.authMethod)) {
+          // 订阅链路必须先登录、成功后才落盘；失败或取消不留空记录。
           await handleOAuthLogin({ draft });
           return;
-        }
-        if (addModelGroupId) {
-          // B-2 组内加模型:凭证继承自组内首条,apiKey 由 main 复用,无需重填。
-          await clientApi.llmAddModel({ groupId: addModelGroupId, ...draft });
+        } else if (localCli) {
+          await clientApi.llmAddProvider({ ...draft, model: form.model });
         } else {
-          // api_key 新建渠道:若勾选了多个候选模型,先创建第一个(含 apiKey 落盘),
-          // 再对剩余模型逐个 llmAddModel(继承 groupId 凭证),实现"一次保存多模型"。
-          const selectedModels = fetchedModels.filter((m) => selectedModelIds.has(m.id));
-          const extraModels = selectedModels.filter((m) => m.id !== draft.model);
-          await clientApi.llmAddProvider(draft);
-          if (extraModels.length > 0) {
-            // llmAddProvider 返回的是 listProviders() 全量,首条即新建组的 head。
-            const list = await clientApi.llmListProviders();
-            const created = list.find((p) => p.model === draft.model && p.apiKeyConfigured);
-            const groupId = created?.groupId ?? created?.id;
-            if (groupId) {
-              for (const m of extraModels) {
-                await clientApi.llmAddModel({
-                  groupId,
-                  ...draft,
-                  model: m.id,
-                  contextWindow: m.contextWindow ? String(m.contextWindow) : ctxWin,
-                  maxOutputTokens: m.maxOutputTokens ? String(m.maxOutputTokens) : maxOut,
-                });
-              }
-            }
-          }
+          setPendingProviderDraft(draft);
+          setCatalogTargetId(null);
+          setShowForm(false);
+          await loadPendingCatalog(draft);
+          return;
         }
       }
       setShowForm(false);
       setEditingId(null);
       setAddModelGroupId(null);
-      setFetchedModels([]);
-      setSelectedModelIds(new Set());
-      setFetchModelError(null);
       await refresh();
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : 'Save failed');
@@ -792,6 +688,7 @@ export function LlmSettingsPanel({
   const handleDelete = async (id: string) => {
     await clientApi.llmRemoveProvider({ id });
     if (editingId === id) { setShowForm(false); setEditingId(null); }
+    if (modelSettingsId === id) setModelSettingsId(null);
     await refresh();
   };
 
@@ -822,6 +719,64 @@ export function LlmSettingsPanel({
 
   const handleSetDefault = async (id: string) => {
     await clientApi.llmSetDefault({ id });
+    await refresh();
+  };
+
+  const handleImportModels = async (
+    models: readonly LlmModelInfo[],
+    sourceOverride?: Parameters<typeof buildModelImportPatches>[1],
+  ): Promise<readonly LlmProviderConfigView[]> => {
+    if (models.length === 0) return [];
+    const source = sourceOverride ?? metadataSourceFromList(catalogResult);
+    const patches = buildModelImportPatches(models, source);
+    if (patches.length === 0) return [];
+
+    if (pendingProviderDraft) {
+      const [first, ...rest] = patches;
+      if (!first) return [];
+      let createdGroupId: string | null = null;
+      try {
+        const created = await clientApi.llmAddProvider({ ...pendingProviderDraft, ...first });
+        createdGroupId = created.groupId ?? created.id;
+        for (const patch of rest) {
+          await clientApi.llmAddModel({ groupId: createdGroupId, name: created.name, ...patch });
+        }
+      } catch (error) {
+        if (createdGroupId) {
+          try { await clientApi.llmRemoveGroup({ groupId: createdGroupId }); } catch { /* keep original error */ }
+        }
+        await refresh();
+        throw error;
+      }
+      setPendingProviderDraft(null);
+      setCatalogTargetId(null);
+      return refresh();
+    }
+
+    const target = providers.find((provider) => provider.id === catalogTargetId);
+    if (!target) return [];
+    const groupId = target.groupId ?? target.id;
+    try {
+      const configured = new Set(
+        providers
+          .filter((provider) => (provider.groupId ?? provider.id) === groupId)
+          .map((provider) => provider.model),
+      );
+      for (const patch of patches) {
+        if (configured.has(patch.model)) continue;
+        await clientApi.llmAddModel({ groupId, name: target.name, ...patch });
+        configured.add(patch.model);
+      }
+    } catch (error) {
+      await refresh();
+      throw error;
+    }
+    const latest = await refresh();
+    return latest.filter((provider) => (provider.groupId ?? provider.id) === groupId);
+  };
+
+  const handleSaveModelSettings = async (id: string, patch: Record<string, unknown>) => {
+    await clientApi.llmUpdateProvider({ id, ...patch });
     await refresh();
   };
 
@@ -857,7 +812,8 @@ export function LlmSettingsPanel({
       }
       clearTestResult(busyKey);
       if (result.models?.length) {
-        setModelLists((prev) => ({ ...prev, [result.provider.id]: result.models! }));
+        setCatalogTargetId(result.provider.id);
+        setCatalogResult({ success: true, models: result.models, source: 'builtin' });
       }
       setShowForm(false);
       setEditingId(null);
@@ -876,7 +832,14 @@ export function LlmSettingsPanel({
   const canChooseWire = !isOAuthMethod(form.authMethod) && selectedChannel.allowedWires.length > 1;
   const isAddModel = Boolean(addModelGroupId);
   const isLocalCliAuth = isLocalCliMethod(form.authMethod);
-  const formValidationError = validateForm(form, editingId, selectedChannel, isAddModel);
+  const editingProvider = editingId ? providers.find((provider) => provider.id === editingId) : undefined;
+  const formValidationError = validateForm(
+    form,
+    editingId,
+    selectedChannel,
+    isAddModel,
+    editingProvider?.authMethod === 'api_key' && editingProvider.apiKeyConfigured,
+  );
   const canSubmit = !saving && !oauthBusyId;
   // B-2 手风琴：把打平的 provider×model 列表按 groupId 归组，保持原有顺序。
   // 每组的首条记录承载 provider 级展示信息(名称/凭证/协议)，其 models 为该组全部记录。
@@ -976,133 +939,42 @@ export function LlmSettingsPanel({
                 </small>
               )}
               <div className="llm-group-actions">
-                <button type="button" onClick={() => openAddModel(head)}>
-                  {i18n.locale === 'zh-CN' ? '+ 加模型' : '+ Add model'}
+                <button type="button" className="primary" onClick={() => openCatalog(head.id)}>
+                  {i18n.locale === 'zh-CN' ? '获取模型列表' : 'Get models'}
+                </button>
+                {!isOAuthMethod(head.authMethod) ? (
+                  <button type="button" onClick={() => openAddModel(head)}>
+                    {i18n.locale === 'zh-CN' ? '手动新增' : 'Add manually'}
+                  </button>
+                ) : null}
+                <button type="button" onClick={() => openEdit(head)}>
+                  {i18n.locale === 'zh-CN' ? '编辑连接' : 'Edit connection'}
                 </button>
                 {isOAuthMethod(head.authMethod) && head.oauthStatus?.status !== 'connected' ? (
-                  <button type="button" className="primary" onClick={() => void handleOAuthLogin({ id: head.id })} disabled={oauthBusyId === head.id}>
+                  <button type="button" onClick={() => void handleOAuthLogin({ id: head.id })} disabled={oauthBusyId === head.id}>
                     {oauthBusyId === head.id ? '...' : (i18n.locale === 'zh-CN' ? '重新登录' : 'Re-login')}
                   </button>
                 ) : null}
                 <button type="button" className="danger" onClick={() => handleRemoveGroup(g.groupId)} disabled={removingGroupId === g.groupId}>
-                  {removingGroupId === g.groupId ? '...' : (i18n.locale === 'zh-CN' ? '删除组' : 'Remove group')}
+                  {removingGroupId === g.groupId ? '...' : (i18n.locale === 'zh-CN' ? '删除渠道' : 'Remove provider')}
                 </button>
               </div>
             </div>
             {!collapsed ? (
               <div className="llm-group-models">
-                {g.models.map((p) => {
-                  const canSelectModel = (isOAuthMethod(p.authMethod) && p.oauthStatus?.status === 'connected') || isLocalCliMethod(p.authMethod) || (p.authMethod === 'api_key' && p.apiKeyConfigured);
-                  const modelOptions = (modelLists[p.id] && modelLists[p.id].length > 0
-                    ? modelLists[p.id]
-                    : [{ id: p.model, label: p.modelLabel || p.model } as LlmModelInfo]
-                  ).map((m) => ({ value: m.id, label: m.label }));
-                  const selectedModelMetadata = modelLists[p.id]?.find((item) => item.id === p.model);
-                  const modelDisplayName = p.modelLabel || p.model;
-                  return (
-                  <div key={p.id} className={`llm-model-row ${p.isDefault ? 'is-default' : ''} ${expandedModels.has(p.id) ? 'is-expanded' : ''}`}>
-                    <div className="llm-model-row-info">
-                      <button
-                        type="button"
-                        className="llm-model-toggle"
-                        onClick={() => {
-                          setExpandedModels((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(p.id)) next.delete(p.id);
-                            else next.add(p.id);
-                            return next;
-                          });
-                        }}
-                        aria-expanded={expandedModels.has(p.id)}
-                      >
-                        <svg
-                          className={`llm-model-caret ${expandedModels.has(p.id) ? '' : 'is-collapsed'}`}
-                          width="12"
-                          height="12"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                        >
-                          <path d="m6 9 6 6 6-6" />
-                        </svg>
-                      </button>
-                      {canSelectModel ? (
-                        <Dropdown
-                          className="llm-model-picker"
-                          value={p.model}
-                          disabled={modelLoadingId === p.id && !modelLists[p.id]}
-                          ariaLabel={i18n.locale === 'zh-CN' ? '选择模型' : 'Select model'}
-                          placeholder={
-                            modelLoadingId === p.id && !modelLists[p.id]
-                              ? (i18n.locale === 'zh-CN' ? '加载中…' : 'Loading…')
-                              : modelDisplayName
-                          }
-                          options={modelOptions}
-                          onChange={(value) => void handleSelectModel(p.id, value)}
-                        />
-                      ) : (
-                        <span className="llm-provider-chip mono" title={p.model}>{modelDisplayName}</span>
-                      )}
-                      {p.isDefault ? <span className="llm-badge-default">{i18n.locale === 'zh-CN' ? '默认激活' : 'Default'}</span> : null}
-                    </div>
-                    {expandedModels.has(p.id) ? (
-                    <div className="llm-model-row-detail">
-                      {selectedModelMetadata?.contextWindow || p.contextWindow || selectedModelMetadata?.maxOutputTokens || p.maxOutputTokens || p.inputPrice != null ? (
-                        <span className="llm-provider-specs">
-                          {selectedModelMetadata?.contextWindow || p.contextWindow ? `${formatModelTokenLimit(selectedModelMetadata?.contextWindow ?? p.contextWindow ?? 0)} ctx` : ''}
-                          {(selectedModelMetadata?.contextWindow || p.contextWindow) && (selectedModelMetadata?.maxOutputTokens || p.maxOutputTokens) ? ' · ' : ''}
-                          {selectedModelMetadata?.maxOutputTokens || p.maxOutputTokens ? `${formatModelTokenLimit(selectedModelMetadata?.maxOutputTokens ?? p.maxOutputTokens ?? 0)} out` : ''}
-                          {((selectedModelMetadata?.contextWindow || p.contextWindow) || (selectedModelMetadata?.maxOutputTokens || p.maxOutputTokens)) && p.inputPrice != null ? ' · ' : ''}
-                          {p.inputPrice != null ? `${p.inputPrice}/${p.outputPrice ?? '?'}` : ''}
-                        </span>
-                      ) : null}
-                      {testResults[p.id] ? (
-                        <small className={`llm-test-result ${testResults[p.id].success ? 'success' : 'fail'}`}>
-                          {testResults[p.id].success
-                            ? `✓ ${testResults[p.id].model} (${testResults[p.id].latencyMs}ms)`
-                            : `✗ ${friendlyTestError(testResults[p.id].error, i18n.locale)}`}
-                        </small>
-                      ) : null}
-                    <div className="llm-provider-actions">
-                      {!p.isDefault ? (
-                        (() => {
-                          const oauthNotConnected = isOAuthMethod(p.authMethod) && p.oauthStatus?.status !== 'connected';
-                          return (
-                            <button
-                              type="button"
-                              onClick={() => handleSetDefault(p.id)}
-                              disabled={oauthNotConnected}
-                              title={oauthNotConnected ? (i18n.locale === 'zh-CN' ? '会话已过期，请先重新登录' : 'Session expired — please re-login first') : undefined}
-                            >
-                              {i18n.locale === 'zh-CN' ? '设为默认' : 'Set default'}
-                            </button>
-                          );
-                        })()
-                      ) : null}
-                      <button type="button" onClick={() => handleTest(p.id)} disabled={testingId === p.id}>
-                        {testingId === p.id ? '...' : (i18n.locale === 'zh-CN' ? '测试' : 'Test')}
-                      </button>
-                      {!isOAuthMethod(p.authMethod) ? (
-                        <button type="button" onClick={() => handleDuplicate(p.id)} disabled={duplicatingId === p.id}>
-                          {duplicatingId === p.id ? '...' : (i18n.locale === 'zh-CN' ? '复制' : 'Duplicate')}
-                        </button>
-                      ) : null}
-                      <button type="button" onClick={() => openEdit(p)}>
-                        {i18n.locale === 'zh-CN' ? '编辑' : 'Edit'}
-                      </button>
-                      <button type="button" className="danger" onClick={() => handleDelete(p.id)}>
-                        {i18n.locale === 'zh-CN' ? '删除' : 'Delete'}
-                      </button>
-                    </div>
-                    </div>
-                    ) : null}
-                  </div>
-                  );
-                })}
+                {g.models.map((p) => (
+                  <ConfiguredModelRow
+                    key={p.id}
+                    i18n={i18n}
+                    model={p}
+                    result={testResults[p.id]}
+                    testing={testingId === p.id}
+                    onSetDefault={() => void handleSetDefault(p.id)}
+                    onTest={() => void handleTest(p.id)}
+                    onEdit={() => setModelSettingsId(p.id)}
+                    onDelete={() => void handleDelete(p.id)}
+                  />
+                ))}
               </div>
             ) : null}
           </div>
@@ -1115,7 +987,7 @@ export function LlmSettingsPanel({
           onClose={() => { setShowForm(false); setEditingId(null); }}
           closeOnBackdrop={!saving && !oauthBusyId}
           ariaLabel={editingId
-            ? (i18n.locale === 'zh-CN' ? '编辑模型' : 'Edit Model')
+            ? (i18n.locale === 'zh-CN' ? '编辑连接' : 'Edit Connection')
             : isAddModel
               ? (i18n.locale === 'zh-CN' ? '添加模型' : 'Add Model')
               : (i18n.locale === 'zh-CN' ? '添加渠道' : 'Add Channel')}
@@ -1126,7 +998,7 @@ export function LlmSettingsPanel({
           <>
             <header className="llm-modal-header">
               <h3>{editingId
-                ? (i18n.locale === 'zh-CN' ? '编辑模型' : 'Edit Model')
+                ? (i18n.locale === 'zh-CN' ? '编辑连接' : 'Edit Connection')
                 : isAddModel
                   ? (i18n.locale === 'zh-CN' ? `给 ${form.name} 加模型` : `Add model to ${form.name}`)
                   : (i18n.locale === 'zh-CN' ? '添加渠道' : 'Add Channel')}</h3>
@@ -1242,83 +1114,12 @@ export function LlmSettingsPanel({
           </>
           )}
 
-          {!isOAuthMethod(form.authMethod) ? (
+          {isAddModel && !isOAuthMethod(form.authMethod) ? (
           <>
           <label>
             <span>{isLocalCliAuth ? (i18n.locale === 'zh-CN' ? 'Qoder 模型' : 'Qoder Model') : (i18n.locale === 'zh-CN' ? '模型名称' : 'Model')}</span>
             <input value={form.model} onChange={(e) => setForm((prev) => ({ ...prev, model: e.target.value }))} />
           </label>
-
-          {/* api_key 新建渠道:拉取候选模型 + 多选,一次保存多个模型。 */}
-          {form.authMethod === 'api_key' && !editingId && !isAddModel ? (
-          <div className="llm-model-fetch">
-            <button
-              type="button"
-              className="llm-fetch-btn"
-              onClick={() => void fetchFormModels()}
-              disabled={fetchingModels || !form.baseUrl.trim() || !form.apiKey.trim()}
-            >
-              {fetchingModels
-                ? '...'
-                : (i18n.locale === 'zh-CN' ? '拉取可用模型' : 'Fetch available models')}
-            </button>
-            {fetchModelError ? (
-              <small className="llm-fetch-error">{friendlyTestError(fetchModelError, i18n.locale)}</small>
-            ) : null}
-            {fetchedModels.length > 0 ? (
-              <div className="llm-model-candidates">
-                <div className="llm-model-candidates-header">
-                  <span>{i18n.locale === 'zh-CN' ? `候选模型 (${fetchedModels.length})` : `Candidates (${fetchedModels.length})`}</span>
-                  <button
-                    type="button"
-                    className="llm-select-all"
-                    onClick={() => {
-                      if (selectedModelIds.size === fetchedModels.length) {
-                        setSelectedModelIds(new Set());
-                      } else {
-                        setSelectedModelIds(new Set(fetchedModels.map((m) => m.id)));
-                      }
-                    }}
-                  >
-                    {selectedModelIds.size === fetchedModels.length
-                      ? (i18n.locale === 'zh-CN' ? '取消全选' : 'Deselect all')
-                      : (i18n.locale === 'zh-CN' ? '全选' : 'Select all')}
-                  </button>
-                </div>
-                <div className="llm-model-candidates-list">
-                  {fetchedModels.map((m) => {
-                    const checked = selectedModelIds.has(m.id);
-                    return (
-                      <label key={m.id} className={`llm-model-candidate ${checked ? 'is-checked' : ''}`}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => {
-                            setSelectedModelIds((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(m.id)) next.delete(m.id);
-                              else next.add(m.id);
-                              return next;
-                            });
-                          }}
-                        />
-                        <span className="llm-model-candidate-id mono">{m.id}</span>
-                        {m.contextWindow ? <span className="llm-model-candidate-ctx">{formatModelTokenLimit(m.contextWindow)} ctx</span> : null}
-                      </label>
-                    );
-                  })}
-                </div>
-                {selectedModelIds.size > 0 ? (
-                  <small className="llm-fetch-hint">
-                    {i18n.locale === 'zh-CN'
-                      ? `已选 ${selectedModelIds.size} 个模型，保存时将批量创建。未选则只创建上方填写的单个模型。`
-                      : `${selectedModelIds.size} selected. On save, all selected models will be created. If none selected, only the model above is created.`}
-                  </small>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-          ) : null}
 
           {!isLocalCliAuth ? (
           <>
@@ -1460,13 +1261,68 @@ export function LlmSettingsPanel({
                     ? (form.authMethod === 'oauth_grok'
                       ? (i18n.locale === 'zh-CN' ? '登录 Grok' : 'Login with Grok')
                       : (i18n.locale === 'zh-CN' ? '登录 ChatGPT' : 'Login with ChatGPT'))
-                    : (i18n.locale === 'zh-CN' ? '保存' : 'Save'))}
+                    : (!editingId && !isAddModel && form.authMethod === 'api_key'
+                      ? (i18n.locale === 'zh-CN' ? '下一步：选择模型' : 'Next: choose models')
+                      : (i18n.locale === 'zh-CN' ? '保存' : 'Save')))}
             </button>
             </div>
           </>
           )}
         </Drawer>
       ) : null}
+
+      {pendingProviderDraft ? (
+        <ModelCatalogDialog
+          i18n={i18n}
+          providerName={pendingProviderDraft.name}
+          models={catalogResult.models}
+          configuredModels={[]}
+          source={catalogResult.source}
+          loading={catalogLoading}
+          error={catalogResult.error}
+          selectionMode="multiple"
+          allowManualModel
+          onRefresh={() => void loadPendingCatalog(pendingProviderDraft)}
+          onImport={handleImportModels}
+          onClose={() => {
+            setPendingProviderDraft(null);
+            setShowForm(true);
+          }}
+        />
+      ) : catalogTargetId ? (() => {
+        const target = providers.find((provider) => provider.id === catalogTargetId);
+        if (!target) return null;
+        const groupId = target.groupId ?? target.id;
+        const configuredModels = providers.filter((provider) => (provider.groupId ?? provider.id) === groupId);
+        return (
+          <ModelCatalogDialog
+            i18n={i18n}
+            providerName={target.name || target.provider}
+            models={catalogResult.models}
+            configuredModels={configuredModels}
+            source={catalogResult.source}
+            loading={catalogLoading}
+            error={catalogResult.error}
+            selectionMode="multiple"
+            onRefresh={() => void loadCatalog(target.id)}
+            onImport={handleImportModels}
+            onClose={() => setCatalogTargetId(null)}
+          />
+        );
+      })() : null}
+
+      {modelSettingsId ? (() => {
+        const target = providers.find((provider) => provider.id === modelSettingsId);
+        if (!target) return null;
+        return (
+          <ModelSettingsDialog
+            i18n={i18n}
+            model={target}
+            onSave={(patch) => handleSaveModelSettings(target.id, patch)}
+            onClose={() => setModelSettingsId(null)}
+          />
+        );
+      })() : null}
     </div>
   );
 }

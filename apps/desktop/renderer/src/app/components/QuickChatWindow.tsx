@@ -77,7 +77,8 @@ export function QuickChatWindow() {
         ? remembered
         : result.activeWorkspace ?? items[0]?.path ?? '');
     }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
-    void clientApi.llmListChatProviders().then((items) => {
+    // Quick Chat 与主聊天保持同一口径：只列已配置模型，不把 provider 目录自动投影进选择器。
+    void clientApi.llmListProviders().then((items) => {
       const available = items.filter((provider) => provider.apiKeyConfigured);
       setProviders(available);
       const remembered = localStorage.getItem('quick-chat:model-provider');

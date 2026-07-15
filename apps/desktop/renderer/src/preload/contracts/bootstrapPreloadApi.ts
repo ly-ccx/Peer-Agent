@@ -512,8 +512,8 @@ export interface BootstrapPreloadApi {
   ) => () => void;
   readonly llmListProviders: () => Promise<readonly LlmProviderConfigView[]>;
   /**
-   * 聊天模型菜单专用列表：Qoder 本机记录已按目录展开成多条虚拟模型记录
-   * （复合 id=groupId::modelId，共享同一凭证）。设置页请用 llmListProviders（纯真实记录）。
+   * 旧聊天列表 IPC 的兼容别名。与 llmListProviders 一样只返回已配置模型，
+   * 不再把远程或本机目录虚拟展开进表达层。
    */
   readonly llmListChatProviders: () => Promise<readonly LlmProviderConfigView[]>;
   readonly llmListChannels: () => Promise<readonly LlmChannelDescriptor[]>;

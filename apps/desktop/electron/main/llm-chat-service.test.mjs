@@ -1156,6 +1156,56 @@ describe('llm chat service tool materialization', () => {
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
   });
 
+  it('routes a selected configured model without replacing it with catalog-expanded projections', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const urls = [];
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      return new Response(sse([
+        { choices: [{ delta: { content: 'configured model' } }] },
+        '[DONE]',
+      ]), { status: 200 });
+    };
+
+    try {
+      const configured = {
+        id: 'configured-model-id',
+        groupId: 'provider-group',
+        provider: 'openai',
+        baseUrl: 'https://configured.example/v1',
+        model: 'configured-model',
+        isDefault: false,
+        apiKeyConfigured: true,
+      };
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [configured],
+          listChatProviders: () => [{
+            ...configured,
+            id: 'provider-group::catalog-model',
+            baseUrl: 'https://catalog-projection.example/v1',
+            model: 'catalog-model',
+            isDefault: true,
+          }],
+          getDecryptedApiKey: () => 'key',
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'hello' }],
+        streamId: 's-configured-provider',
+        conversationId: 'c-configured-provider',
+        modelProviderId: configured.id,
+        webContents: { send() {} },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.deepEqual(urls, ['https://configured.example/v1/chat/completions']);
+  });
+
   it('does not recover a transport-blocked provider by switching to a different model', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;

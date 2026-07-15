@@ -397,6 +397,9 @@ export interface LlmProviderConfig {
   readonly baseUrl: string;
   readonly model: string;
   readonly modelLabel?: string;
+  // 模型元数据来源：远程目录、本机/内置目录，或用户手动维护。
+  readonly metadataSource?: 'remote' | 'builtin' | 'local' | 'manual';
+  readonly metadataSyncedAt?: string;
   readonly enabled: boolean;
   readonly isDefault: boolean;
   readonly createdAt: string;

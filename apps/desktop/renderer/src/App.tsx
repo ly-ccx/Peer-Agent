@@ -89,9 +89,9 @@ function MainApp() {
     readGitBranchPrefix(clientApi.initialSettings));
 
   const refreshProviders = useCallback(async () => {
-    // 聊天模型菜单用「展开后」列表：Qoder 本机记录会按目录展开成多条虚拟模型记录，
-    // 使菜单列出该 provider 的全部模型（设置页另有独立列表，走 llmListProviders）。
-    try { setProviders(await clientApi.llmListChatProviders()); } catch {}
+    // 表达层只展示用户明确配置的模型。远程/本机目录是设置页的候选来源，不能在聊天菜单里
+    // 自动展开，否则“支持的模型”会绕过配置边界，串进 provider 的已配置模型列表。
+    try { setProviders(await clientApi.llmListProviders()); } catch {}
   }, []);
 
   const refreshSeqRef = useRef(0);

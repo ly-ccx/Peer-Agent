@@ -23,7 +23,6 @@ import { deriveOAuthStatus, resolveSubscriptionTestResult } from './provider-con
 import {
   DEFAULT_SUBSCRIPTION_MODEL,
   SUBSCRIPTION_MODEL_IDS,
-  SUBSCRIPTION_CATALOG,
   getSubscriptionModelMetadata,
 } from './provider-adapters/openai-model-catalog.mjs';
 import {
@@ -38,10 +37,8 @@ import {
   validateCustomHeaders,
 } from './provider-channels.mjs';
 import { loadQoderAccessToken } from './provider-adapters/qoder-local-auth.mjs';
-import { getQoderModelCatalog, getQoderModelMetadata } from './provider-adapters/qoder-model-catalog.mjs';
+import { getQoderModelMetadata } from './provider-adapters/qoder-model-catalog.mjs';
 import { sendQoderPrivateStream } from './provider-adapters/qoder-private-adapter.mjs';
-import { expandQoderProviders } from './provider-adapters/qoder-provider-expansion.mjs';
-import { expandSubscriptionProviders } from './provider-adapters/subscription-provider-expansion.mjs';
 
 const { safeStorage } = electron;
 
@@ -688,14 +685,10 @@ export function createLlmConfigStore({
     return readAll().map(toView);
   }
 
-  // 聊天/路由专用列表：在真实记录基础上，把每条 Qoder 本机记录展开成「该 provider 目录下的
-  // 全部模型」多条虚拟记录（复合 id=groupId::modelId，共享同一凭证）。设置页仍走 listProviders()，
-  // 因此这里的展开不会污染 CRUD。catalog 读取失败时 expandQoderProviders 会保留原单条记录。
+  // 兼容旧 IPC 名称，但返回的仍是已配置模型真值。模型目录只在设置页作为候选来源，
+  // 不再在聊天/路由层虚拟展开，否则持久化多模型会与目录形成 N×M 笛卡尔积。
   function listChatProviders() {
-    // 先做订阅展开（ChatGPT OAuth 单记录 → 全部订阅模型多条虚拟记录，各带 credentialId 回退凭证），
-    // 再做 Qoder 展开；两者对彼此的记录都原样透传，互不影响。设置页仍走 listProviders()（不展开）。
-    const subscriptionExpanded = expandSubscriptionProviders(listProviders(), () => SUBSCRIPTION_CATALOG);
-    return expandQoderProviders(subscriptionExpanded, () => getQoderModelCatalog());
+    return listProviders();
   }
 
   function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, modelLabel, metadataSource, metadataSyncedAt, apiKey, contextWindow, maxOutputTokens, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthClientId, oauthClientSecret, oauthProjectId, customHeaders }) {
@@ -1039,17 +1032,14 @@ export function createLlmConfigStore({
   }
 
   // B-2 在已有 provider 组内新增一个模型:凭证(apiKey/baseUrl/provider 归属)
-  // 继承自组内首条记录,调用方无需重填 apiKey;模型级参数由 patch 提供。
+  // 继承自组内首条记录,调用方无需重填凭证;模型级参数由 patch 提供。
   // 复用 addProvider 的完整 wire/channel/定价解析,保证路由字段正确。
-  // 订阅(OAuth)类型与 duplicateProvider 一致:不支持多模型,直接拒绝。
+  // 所有认证类型都允许在同一连接下持久化多个已配置模型；目录本身只提供候选。
   function addModel(groupId, patch = {}) {
     if (!groupId) throw new Error('groupId is required');
     const items = readAll();
     const source = items.find((i) => (i.groupId || i.id) === groupId);
     if (!source) throw new Error(`Provider group ${groupId} not found`);
-    if (isOAuthAuthMethod(source.authMethod)) {
-      throw new Error('Subscription providers cannot host multiple models');
-    }
     const model = String(patch.model || '').trim();
     if (!model) throw new Error('model is required');
     if (items.some((item) => (item.groupId || item.id) === groupId && item.model === model)) {
