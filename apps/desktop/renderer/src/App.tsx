@@ -431,7 +431,16 @@ function MainApp() {
         <section className="main-panel">
           <section className="thread">
             {initError ? <p className="running-note">{initError}</p> : null}
-            {!session && !initError ? <p className="runtime-note">{i18n.t('thread.loading.bootstrap')}</p> : null}
+            {!session && !initError ? (
+              <div className="bootstrap-loader" role="status" aria-live="polite">
+                <span className="bootstrap-loader-copy">
+                  <span className="bootstrap-loader-label">{i18n.t('thread.loading.bootstrap')}</span>
+                </span>
+                <span className="bootstrap-loader-track" aria-hidden="true">
+                  <span />
+                </span>
+              </div>
+            ) : null}
           </section>
         </section>
       )}

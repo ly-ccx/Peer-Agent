@@ -132,6 +132,51 @@
     border: none;
   }
 
+  .bootstrap-loader {
+    @apply relative grid overflow-hidden;
+    width: min(360px, calc(100vw - 64px));
+    margin: auto;
+    padding: 22px 24px 18px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 3px;
+    row-gap: 16px;
+    align-items: center;
+    color: var(--ink-fade);
+    border: 1px solid var(--za-line);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--za-app-bg) 82%, transparent);
+    box-shadow: 0 16px 44px color-mix(in srgb, var(--ink) 8%, transparent);
+    --motion-enter-from: 6px;
+    animation: motion-enter-rise var(--za-motion-slow) var(--za-ease-out) both;
+  }
+
+  .bootstrap-loader-copy {
+    @apply flex min-w-0 items-center gap-2;
+  }
+
+  .bootstrap-loader-label {
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bootstrap-loader-track {
+    @apply relative col-span-2 h-[3px] overflow-hidden rounded-full;
+    background: color-mix(in srgb, var(--za-accent) 10%, var(--za-line));
+  }
+
+  .bootstrap-loader-track > span {
+    @apply absolute inset-y-0 left-0 w-1/3 rounded-full;
+    background: linear-gradient(90deg, transparent, var(--za-accent), transparent);
+    --motion-progress-from: -110%;
+    --motion-progress-to: 310%;
+    animation: motion-progress-slide 1.6s var(--za-ease-standard) infinite;
+  }
+
   .empty-actions span,
   .context-row > span,
   .row-meta span,
