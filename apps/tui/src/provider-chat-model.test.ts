@@ -60,6 +60,37 @@ function completed(content: string): ModelProviderResult {
 }
 
 describe('OpenAI-compatible TUI chat adapter', () => {
+  test('reads model and reasoning selection at turn start', async () => {
+    const requests: ModelProviderRequest[] = [];
+    let modelId = 'model-a';
+    let effort: 'default' | 'high' = 'default';
+    const provider: ModelProvider = {
+      async stream(request) {
+        requests.push(request);
+        return completed('done');
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({
+        provider,
+        model: modelId,
+        getModel: () => modelId,
+        getReasoningEffort: () => effort,
+      }),
+    });
+
+    await controller.send('first');
+    modelId = 'model-b';
+    effort = 'high';
+    await controller.send('second');
+
+    expect(requests[0]?.model).toBe('model-a');
+    expect(requests[0]?.reasoningEffort).toBeUndefined();
+    expect(requests[1]?.model).toBe('model-b');
+    expect(requests[1]?.reasoningEffort).toBe('high');
+  });
+
   test('exposes only the tool definitions projected for the active mode', async () => {
     const requests: ModelProviderRequest[] = [];
     const writeTool: RuntimeToolDefinition = {

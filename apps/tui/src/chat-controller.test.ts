@@ -53,7 +53,7 @@ const initialState = (input: { content: string }): ChatModelState => ({
 });
 
 describe('chat controller', () => {
-  test('switches among four modes while idle and keeps the mode fixed during a turn', async () => {
+  test('queues the next user-facing mode while keeping the active turn mode fixed', async () => {
     let release!: () => void;
     let started!: () => void;
     const didStart = new Promise<void>((resolve) => { started = resolve; });
@@ -77,13 +77,13 @@ describe('chat controller', () => {
 
     const pending = controller.send('make a plan');
     await didStart;
-    expect(controller.setMode('goal')).toBe(false);
-    expect(controller.getSnapshot().mode).toBe('plan');
+    expect(controller.setMode('goal')).toBe(true);
+    expect(controller.getSnapshot().mode).toBe('goal');
     release();
     await pending;
 
     expect(observedModes).toEqual(['plan']);
-    expect(controller.getSnapshot().mode).toBe('plan');
+    expect(controller.getSnapshot().mode).toBe('goal');
     expect(controller.setMode('explorer')).toBe(true);
     expect(controller.getSnapshot().mode).toBe('explorer');
   });

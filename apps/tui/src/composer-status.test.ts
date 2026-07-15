@@ -56,7 +56,7 @@ describe('composer status', () => {
       workspace: '~/Projects/peer_agent',
       workspaceShort: 'peer_agent',
       mode: 'chat',
-      permission: 'ask before write',
+      permission: 'ask',
       permissionShort: 'ask',
       model: 'gpt-5.6-sol',
       reasoning: 'reasoning auto',

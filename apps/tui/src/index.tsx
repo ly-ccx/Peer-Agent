@@ -18,12 +18,22 @@ import {
   createProviderChatModel,
   createUnavailableChatModel,
 } from './provider-chat-model.ts';
+import { createTuiModelSelectionControl } from './tui-model-selection.ts';
 import { createTuiHost } from './tui-host.ts';
 
 const workspaceRoot = process.env.PEER_WORKSPACE_ROOT ?? process.cwd();
 const userDataPath = process.env.PEER_USER_DATA_PATH ?? path.join(os.homedir(), '.peer-agent');
 const host = createTuiHost({ workspaceRoot, userDataPath });
 const modelConfig = resolveTuiModelConfig(process.env);
+const modelSelection = createTuiModelSelectionControl({
+  providerId: modelConfig.providerId,
+  modelId: modelConfig.model,
+  displayName: modelConfig.configured ? modelConfig.model : 'model not configured',
+  reasoningEffort: 'default',
+  supportedReasoningEfforts: modelConfig.configured
+    ? ['default', 'low', 'high', 'xhigh']
+    : ['default'],
+});
 const model = modelConfig.configured
   ? createProviderChatModel({
       provider: createOpenAICompatibleProvider({
@@ -33,6 +43,8 @@ const model = modelConfig.configured
         }),
       }),
       model: modelConfig.model,
+      getModel: () => modelSelection.getSelection().modelId,
+      getReasoningEffort: () => modelSelection.getSelection().reasoningEffort,
       toolDefinitionsForMode: (mode) => host.toolDefinitionsForMode?.(mode) ?? host.toolDefinitions,
       systemPrompt: 'You are Peer Agent. Use the available governed tools when they help answer the user.',
     })
@@ -44,5 +56,6 @@ createRoot(renderer).render(
     host={host}
     model={model}
     modelLabel={modelConfig.configured ? modelConfig.model : 'model not configured'}
+    modelSelection={modelSelection}
   />,
 );

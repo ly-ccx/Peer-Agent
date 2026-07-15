@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { TextareaRenderable } from '@opentui/core';
 import { useKeyboard, useRenderer, useTerminalDimensions } from '@opentui/react';
 import type { RuntimeGoalSnapshot } from '@peer-agent/runtime-sdk';
+import type { RuntimeModelSelection, RuntimePermissionPolicy } from '@peer-agent/runtime-node';
 
 import { B3Wordmark } from './b3-wordmark-view.tsx';
 import {
@@ -18,6 +19,8 @@ import {
 } from './chat-controller.ts';
 import {
   approvalDecisionForKey,
+  formatApprovalArguments,
+  formatApprovalRisk,
   moveApprovalSelection,
   TUI_APPROVAL_OPTIONS,
 } from './approval-card.ts';
@@ -28,7 +31,22 @@ import {
   planDecisionForKey,
 } from './plan-mode.ts';
 import { createTuiGoalRunner } from './goal-mode.ts';
+import {
+  modelPickerItems,
+  modelSelectionLabel,
+  type TuiModelSelectionControl,
+} from './tui-model-selection.ts';
 import type { PendingApproval, TuiHost } from './tui-host.ts';
+import { TUI_MODES, tuiModeOption, type TuiMode } from './tui-mode.ts';
+import {
+  permissionPolicyForKey,
+  permissionPolicyIndex,
+  permissionPolicyLabels,
+  TUI_PERMISSION_POLICIES,
+} from './tui-permission-policy.ts';
+import { moveTuiSurfaceSelection } from './surface-state.ts';
+import { runtimeControlAction, shouldHandleComposerSubmit } from './runtime-controls.ts';
+import { responsiveLayout } from './responsive-layout.ts';
 import {
   applyTuiCommand,
   createTuiExperienceState,
@@ -36,7 +54,9 @@ import {
   filterTuiCommands,
   openCommandPanel,
   shouldOpenCommandPanel,
+  syncSlashSuggestions,
   type TuiExperienceState,
+  updateCommandPanelQuery,
 } from './tui-experience.ts';
 
 const COLOR = {
@@ -75,11 +95,12 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
   );
 }
 
-function Composer({ controller, snapshot, disabled, onCommand, editorRef }: {
+function Composer({ controller, snapshot, disabled, onCommand, onValueChange, editorRef }: {
   readonly controller: ChatController;
   readonly snapshot: ChatSnapshot;
   readonly disabled: boolean;
   readonly onCommand: () => void;
+  readonly onValueChange: (value: string) => void;
   readonly editorRef: RefObject<TextareaRenderable | null>;
 }) {
   const editor = editorRef;
@@ -103,8 +124,14 @@ function Composer({ controller, snapshot, disabled, onCommand, editorRef }: {
         focused={!disabled}
         placeholder={disabled ? 'Resolve the request above…' : 'Ask anything…'}
         wrapMode="word"
+        onContentChange={() => onValueChange(editor.current?.plainText ?? '')}
         onKeyDown={(event) => {
           const value = editor.current?.plainText ?? '';
+          if ((event.name === 'return' || event.name === 'enter') && !shouldHandleComposerSubmit(event.eventType)) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
           if (!disabled && snapshot.status === 'idle' && shouldOpenCommandPanel(`${value}${event.sequence}`)) {
             event.preventDefault();
             event.stopPropagation();
@@ -123,6 +150,7 @@ function ComposerDock({
   snapshot,
   disabled,
   onCommand,
+  onValueChange,
   editorRef,
   status,
   statusLayout,
@@ -131,6 +159,7 @@ function ComposerDock({
   readonly snapshot: ChatSnapshot;
   readonly disabled: boolean;
   readonly onCommand: () => void;
+  readonly onValueChange: (value: string) => void;
   readonly editorRef: RefObject<TextareaRenderable | null>;
   readonly status: ComposerStatus;
   readonly statusLayout: ComposerStatusLayout;
@@ -142,6 +171,7 @@ function ComposerDock({
         snapshot={snapshot}
         disabled={disabled}
         onCommand={onCommand}
+        onValueChange={onValueChange}
         editorRef={editorRef}
       />
       <ComposerStatusBar status={status} layout={statusLayout} />
@@ -149,10 +179,11 @@ function ComposerDock({
   );
 }
 
-export function App({ host, model, modelLabel }: {
+export function App({ host, model, modelLabel, modelSelection }: {
   readonly host: TuiHost;
   readonly model: ChatModelPort;
   readonly modelLabel: string;
+  readonly modelSelection?: TuiModelSelectionControl;
 }) {
   const renderer = useRenderer();
   const terminal = useTerminalDimensions();
@@ -186,17 +217,58 @@ export function App({ host, model, modelLabel }: {
   const [approvalSelection, setApprovalSelection] = useState(0);
   const [planSelection, setPlanSelection] = useState(0);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<RuntimeModelSelection | null>(
+    () => modelSelection?.getSelection() ?? null,
+  );
+  const [permissionPolicy, setPermissionPolicy] = useState<RuntimePermissionPolicy>('ask');
+  const [composerDraft, setComposerDraft] = useState('');
   const [experience, setExperience] = useState<TuiExperienceState>(() => createTuiExperienceState());
   const visibleTurn = snapshot.session?.activeTurn ?? snapshot.session?.lastTurn;
-  const commandFooter = experience.footer.type === 'command' ? experience.footer : null;
-  const commandItems = commandFooter ? filterTuiCommands(commandFooter.query) : [];
-  const commandSelection = commandFooter?.selectedIndex ?? 0;
+  const commandSurface = experience.surface.type === 'picker' && experience.surface.picker === 'command'
+    ? experience.surface
+    : null;
+  const slashSurface = experience.surface.type === 'slash-suggestions'
+    ? experience.surface
+    : null;
+  const goalStatus = goal?.status === 'paused'
+    ? 'paused'
+    : goal && ['pending', 'running'].includes(goal.status)
+      ? 'running'
+      : 'none';
+  const commandItems = commandSurface
+    ? filterTuiCommands(commandSurface.query, { goalStatus })
+    : [];
+  const slashItems = slashSurface
+    ? filterTuiCommands(slashSurface.query, { goalStatus })
+    : [];
+  const modeSurface = experience.surface.type === 'picker' && experience.surface.picker === 'mode'
+    ? experience.surface
+    : null;
+  const modelSurface = experience.surface.type === 'picker' && experience.surface.picker === 'model'
+    ? experience.surface
+    : null;
+  const permissionSurface = experience.surface.type === 'picker' && experience.surface.picker === 'permission'
+    ? experience.surface
+    : null;
+  const modelItems = modelSelection ? modelPickerItems(modelSelection) : [];
+  const commandSelection = commandSurface?.selectedIndex ?? 0;
+  const slashSelection = slashSurface?.selectedIndex ?? 0;
+  const modeSelection = modeSurface?.selectedIndex ?? 0;
+  const modelPickerSelection = modelSurface?.selectedIndex ?? 0;
+  const permissionSelection = permissionSurface?.selectedIndex ?? permissionPolicyIndex(permissionPolicy);
+  const activeTurnMode = snapshot.activeTurnMode;
+  const selectedModelLabel = selectedModel && modelSelection
+    ? modelSelectionLabel(modelSelection, selectedModel)
+    : modelLabel;
   const composerStatus = createComposerStatus({
     workspaceRoot: host.workspaceRoot,
     mode: snapshot.mode,
-    modelLabel,
+    permissionPolicy,
+    modelLabel: selectedModelLabel,
+    reasoningEffort: selectedModel?.reasoningEffort,
     usage: snapshot.usage,
   });
+  const layout = responsiveLayout(terminal.width);
   const composerStatusLayout: ComposerStatusLayout = terminal.width >= 160
     ? 'wide'
     : terminal.width >= 72
@@ -212,7 +284,7 @@ export function App({ host, model, modelLabel }: {
     && snapshot.plan?.status !== 'awaiting_approval'
     && !goal
     && !snapshot.error
-    && experience.footer.type === 'composer';
+    && experience.surface.type === 'composer';
 
   useEffect(() => controller.subscribe(setSnapshot), [controller]);
   useEffect(() => goalRunner.subscribe(setGoal), [goalRunner]);
@@ -221,9 +293,153 @@ export function App({ host, model, modelLabel }: {
     setApproval(next);
   }), [host]);
 
+  const selectMode = (mode: TuiMode) => {
+    controller.setMode(mode);
+    setExperience((current) => escapeFooter({ ...current, mode }));
+    setCommandNotice(
+      activeTurnMode && activeTurnMode !== mode
+        ? `${tuiModeOption(mode).label} selected for the next message · current turn remains ${tuiModeOption(activeTurnMode).label}`
+        : `${tuiModeOption(mode).label} mode selected`,
+    );
+    queueMicrotask(() => composerRef.current?.focus());
+  };
+
   useKeyboard((key) => {
+    const control = runtimeControlAction({
+      keyName: key.name,
+      ctrl: key.ctrl,
+      isRunning: snapshot.status !== 'idle' || Boolean(goal && ['pending', 'running'].includes(goal.status)),
+      hasSurface: experience.surface.type !== 'composer',
+      hasDraft: composerDraft.length > 0,
+    });
+    if (control === 'interrupt') {
+      controller.cancel();
+      if (goal && ['pending', 'running', 'paused'].includes(goal.status)) goalRunner.cancel(goal.goalId);
+      setCommandNotice('Interrupt requested');
+      queueMicrotask(() => composerRef.current?.focus());
+      return;
+    }
+    if (control === 'dismiss-surface') {
+      setExperience((current) => escapeFooter(current));
+      queueMicrotask(() => composerRef.current?.focus());
+      return;
+    }
+    if (control === 'clear-composer') {
+      composerRef.current?.setText('');
+      setComposerDraft('');
+      setExperience((current) => syncSlashSuggestions(current, ''));
+      queueMicrotask(() => composerRef.current?.focus());
+      return;
+    }
+
+    if (modelSurface) {
+      if (key.name === 'escape') {
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+        return;
+      }
+      if (modelItems.length === 0) return;
+      if (key.name === 'up' || key.name === 'left') {
+        setExperience((current) => ({
+          ...current,
+          surface: moveTuiSurfaceSelection(current.surface, -1, modelItems.length),
+        }));
+        return;
+      }
+      if (key.name === 'down' || key.name === 'right' || key.name === 'tab') {
+        setExperience((current) => ({
+          ...current,
+          surface: moveTuiSurfaceSelection(current.surface, 1, modelItems.length),
+        }));
+        return;
+      }
+      if (key.name === 'return' || key.name === 'enter') {
+        const next = modelItems[modelPickerSelection % modelItems.length];
+        if (!next || !modelSelection) return;
+        modelSelection.setSelection(next);
+        setSelectedModel(next);
+        setCommandNotice(`Next message: ${modelSelectionLabel(modelSelection, next)}`);
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+        return;
+      }
+    }
+
+    if (permissionSurface) {
+      if (key.name === 'escape') {
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+        return;
+      }
+      if (key.name === 'up' || key.name === 'left') {
+        setExperience((current) => ({
+          ...current,
+          surface: moveTuiSurfaceSelection(current.surface, -1, TUI_PERMISSION_POLICIES.length),
+        }));
+        return;
+      }
+      if (key.name === 'down' || key.name === 'right' || key.name === 'tab') {
+        setExperience((current) => ({
+          ...current,
+          surface: moveTuiSurfaceSelection(current.surface, 1, TUI_PERMISSION_POLICIES.length),
+        }));
+        return;
+      }
+      const nextPolicy = permissionPolicyForKey(key.name)
+        ?? ((key.name === 'return' || key.name === 'enter')
+          ? TUI_PERMISSION_POLICIES[permissionSelection % TUI_PERMISSION_POLICIES.length]?.policy ?? null
+          : null);
+      if (nextPolicy) {
+        setPermissionPolicy(nextPolicy);
+        setCommandNotice(`Permissions for this session: ${permissionPolicyLabels(nextPolicy).label}`);
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+      }
+      return;
+    }
+
+    if (modeSurface) {
+      if (key.name === 'escape') {
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+        return;
+      }
+      if (key.name === 'up' || key.name === 'left') {
+        setExperience((current) => current.surface.type === 'picker'
+          ? {
+              ...current,
+              surface: {
+                ...current.surface,
+                selectedIndex: (current.surface.selectedIndex - 1 + TUI_MODES.length) % TUI_MODES.length,
+              },
+            }
+          : current);
+        return;
+      }
+      if (key.name === 'down' || key.name === 'right' || key.name === 'tab') {
+        setExperience((current) => current.surface.type === 'picker'
+          ? {
+              ...current,
+              surface: {
+                ...current.surface,
+                selectedIndex: (current.surface.selectedIndex + 1) % TUI_MODES.length,
+              },
+            }
+          : current);
+        return;
+      }
+      if (key.name === 'return' || key.name === 'enter') {
+        const option = TUI_MODES[modeSelection];
+        if (option) selectMode(option.mode);
+        return;
+      }
+      const direct = TUI_MODES.find((option) => option.shortcut === key.name);
+      if (direct) selectMode(direct.mode);
+      return;
+    }
+
     if (
-      experience.footer.type === 'composer'
+      experience.surface.type === 'composer'
       && !approval
       && snapshot.plan?.status !== 'awaiting_approval'
       && snapshot.status === 'idle'
@@ -236,15 +452,59 @@ export function App({ host, model, modelLabel }: {
       setExperience((current) => openCommandPanel({ ...current, mode: snapshot.mode }));
       return;
     }
-    if (experience.footer.type === 'command') {
+    if (slashSurface) {
       if (key.name === 'escape') {
         setExperience((current) => escapeFooter(current));
         return;
       }
       if (key.name === 'up' || key.name === 'down') {
         const direction = key.name === 'up' ? -1 : 1;
-        setExperience((current) => current.footer.type === 'command'
-          ? { ...current, footer: { ...current.footer, selectedIndex: Math.max(0, Math.min(commandItems.length - 1, current.footer.selectedIndex + direction)) } }
+        setExperience((current) => current.surface.type === 'slash-suggestions'
+          ? {
+              ...current,
+              surface: {
+                ...current.surface,
+                selectedIndex: slashItems.length === 0
+                  ? 0
+                  : (current.surface.selectedIndex + direction + slashItems.length) % slashItems.length,
+              },
+            }
+          : current);
+        return;
+      }
+      if ((key.name === 'return' || key.name === 'enter' || key.name === 'tab') && slashItems.length > 0) {
+        const command = slashItems[slashSelection] ?? slashItems[0];
+        if (!command) return;
+        key.preventDefault();
+        key.stopPropagation();
+        composerRef.current?.clear();
+        setExperience((current) => applyTuiCommand({ ...current, mode: snapshot.mode }, command));
+        return;
+      }
+    }
+    if (commandSurface) {
+      if (key.name === 'escape') {
+        setExperience((current) => escapeFooter(current));
+        return;
+      }
+      if (key.name === 'backspace') {
+        setExperience((current) => updateCommandPanelQuery(current, commandSurface.query.slice(0, -1)));
+        return;
+      }
+      if (!key.ctrl && !key.meta && key.sequence.length === 1 && key.sequence >= ' ') {
+        setExperience((current) => updateCommandPanelQuery(current, `${commandSurface.query}${key.sequence}`));
+        return;
+      }
+      if (key.name === 'up' || key.name === 'down') {
+        const direction = key.name === 'up' ? -1 : 1;
+        setExperience((current) => current.surface.type === 'picker' && current.surface.picker === 'command'
+          ? {
+              ...current,
+              surface: {
+                ...current.surface,
+                selectedIndex: Math.max(0, Math.min(commandItems.length - 1, current.surface.selectedIndex + direction)),
+              },
+            }
           : current);
         return;
       }
@@ -252,10 +512,7 @@ export function App({ host, model, modelLabel }: {
         const command = commandItems[commandSelection] ?? commandItems[0];
         if (!command) return;
         const action = command.action;
-        if (action.type === 'set-mode') {
-          controller.setMode(action.mode);
-          setCommandNotice(`Mode changed to ${action.mode}`);
-        } else if (action.type === 'goal-control') {
+        if (action.type === 'goal-control') {
           if (!goal) setCommandNotice('No active goal');
           else if (action.control === 'pause' && goal.status === 'running') {
             goalRunner.pause(goal.goalId);
@@ -268,12 +525,6 @@ export function App({ host, model, modelLabel }: {
             goalRunner.cancel(goal.goalId);
             setCommandNotice('Goal cancelled');
           } else setCommandNotice(`Goal is ${goal.status}`);
-        } else if (action.type === 'show-help') {
-          setCommandNotice('↵ send · shift+↵ newline · / commands · esc close · ctrl+c stop/quit');
-        } else if (action.type === 'select-model') {
-          setCommandNotice(`Using ${modelLabel}; model switching is configured in the desktop client`);
-        } else if (action.type === 'new-session') {
-          setCommandNotice('New session is unavailable while conversation persistence is being finalized');
         } else if (action.type === 'quit') {
           renderer.destroy();
           return;
@@ -335,14 +586,14 @@ export function App({ host, model, modelLabel }: {
   });
 
   return (
-    <box flexDirection="column" width="100%" height="100%" paddingLeft={2} paddingRight={2} gap={1} backgroundColor={COLOR.background}>
+    <box flexDirection="column" width="100%" height="100%" paddingLeft={layout.outerPadding} paddingRight={layout.outerPadding} gap={1} backgroundColor={COLOR.background}>
       {isWelcome ? (
-        <box flexGrow={1} flexDirection="column" justifyContent="center" alignItems="center" paddingLeft={2} paddingRight={2}>
+        <box flexGrow={1} flexDirection="column" justifyContent="center" alignItems="center" paddingLeft={layout.outerPadding} paddingRight={layout.outerPadding}>
           <box width="100%" flexDirection="column" alignItems="center" gap={2}>
             <box width="100%" alignItems="center" justifyContent="center">
               <B3Wordmark variant={wordmarkVariant} />
             </box>
-            <box width="75%" maxWidth={112}>
+            <box width={layout.welcomeWidth} maxWidth={112}>
               <ComposerDock
                 controller={controller}
                 snapshot={snapshot}
@@ -353,6 +604,10 @@ export function App({ host, model, modelLabel }: {
                 onCommand={() => {
                   setCommandNotice(null);
                   setExperience((current) => openCommandPanel({ ...current, mode: snapshot.mode }));
+                }}
+                onValueChange={(value) => {
+                  setComposerDraft(value);
+                  setExperience((current) => syncSlashSuggestions(current, value));
                 }}
               />
             </box>
@@ -379,7 +634,7 @@ export function App({ host, model, modelLabel }: {
           {snapshot.plan.plan.tasks.map((task, index) => (
             <text key={task.taskId} fg="#94a3b8">{index + 1}. {task.title}</text>
           ))}
-          <box flexDirection="row" gap={2}>
+          <box flexDirection={layout.stackActions ? 'column' : 'row'} gap={layout.stackActions ? 0 : 2}>
             {PLAN_APPROVAL_OPTIONS.map((option, index) => (
               <text key={option.decision} fg={option.color}>
                 {index === planSelection ? '▶ ' : '  '}
@@ -387,7 +642,7 @@ export function App({ host, model, modelLabel }: {
               </text>
             ))}
           </box>
-          <text fg="#64748b">←/→ or Tab select · Enter confirm · Esc Reject</text>
+          {layout.showHints ? <text fg="#64748b">←/→ or Tab select · Enter confirm · Esc Reject</text> : null}
         </box>
       ) : null}
 
@@ -409,13 +664,15 @@ export function App({ host, model, modelLabel }: {
         <box flexDirection="column" border borderColor="#fb7185" padding={1}>
           <text fg="#fecdd3"><strong>Permission required</strong></text>
           <text fg="#fda4af">
-            {approval.prompt.capabilityId} · {approval.prompt.confirmation.kind}
+            {approval.prompt.toolName} · {approval.prompt.capabilityId}
           </text>
-          <text fg="#94a3b8">{approval.prompt.reason}</text>
+          <text fg="#cbd5e1">args: {formatApprovalArguments(approval.prompt.args)}</text>
+          <text fg="#94a3b8">reason: {approval.prompt.reason}</text>
           <text fg="#94a3b8">
-            scope {approval.sessionId ? `session ${approval.sessionId}` : 'this request only'}
+            scope: {approval.prompt.workspacePath ?? host.workspaceRoot} · {approval.prompt.scope.kind}
           </text>
-          <box flexDirection="row" gap={2}>
+          <text fg="#fbbf24">risk: {formatApprovalRisk(approval.prompt.riskLevel)}</text>
+          <box flexDirection={layout.stackActions ? 'column' : 'row'} gap={layout.stackActions ? 0 : 2}>
             {TUI_APPROVAL_OPTIONS.map((option, index) => (
               <text key={option.decision} fg={option.color}>
                 {index === approvalSelection ? '▶ ' : '  '}
@@ -423,26 +680,97 @@ export function App({ host, model, modelLabel }: {
               </text>
             ))}
           </box>
-          <text fg="#64748b">←/→ or Tab select · Enter confirm · Esc deny</text>
+          {layout.showHints ? <text fg="#64748b">←/→ or Tab select · Enter confirm · Esc deny</text> : null}
         </box>
       ) : null}
 
-      {commandNotice && experience.footer.type !== 'command' ? (
+      {commandNotice && !commandSurface ? (
         <text fg={COLOR.accent}>{commandNotice}</text>
       ) : null}
 
-      {experience.footer.type === 'command' ? (
+      {slashSurface ? (
+        <box flexDirection="column" border borderColor={COLOR.border} backgroundColor={COLOR.panel} paddingLeft={1} paddingRight={1}>
+          {slashItems.length > 0 ? slashItems.map((command, index) => (
+            <box key={command.id} justifyContent="space-between">
+              <text fg={index === slashSelection ? COLOR.text : COLOR.muted}>
+                {index === slashSelection ? '› ' : '  '}/{command.id}
+              </text>
+              {layout.showDescriptions ? <text fg={COLOR.muted}>{command.description}</text> : null}
+            </box>
+          )) : <text fg={COLOR.muted}>No matching commands</text>}
+          {layout.showHints ? <text fg={COLOR.muted}>↑↓ select  ·  enter run  ·  esc close</text> : null}
+        </box>
+      ) : null}
+
+      {permissionSurface ? (
+        <box flexDirection="column" border borderColor={COLOR.accent} backgroundColor={COLOR.panel} padding={1} gap={1}>
+          <text fg={COLOR.text}><strong>Permissions for this session</strong></text>
+          {TUI_PERMISSION_POLICIES.map((option, index) => (
+            <box key={option.policy} flexDirection="column">
+              <text fg={index === permissionSelection ? COLOR.accent : COLOR.text}>
+                {index === permissionSelection ? '●' : ' '} {option.shortcut}. {option.label}
+                {option.policy === permissionPolicy ? '  current' : ''}
+              </text>
+              {layout.showDescriptions ? <text fg={COLOR.muted}>   {option.description}</text> : null}
+            </box>
+          ))}
+          <text fg={COLOR.muted}>Runtime deny rules and irreversible-action gates always win.</text>
+          {layout.showHints ? <text fg={COLOR.muted}>↑↓ select  ·  1–3 choose  ·  enter apply  ·  esc close</text> : null}
+        </box>
+      ) : null}
+
+      {modeSurface ? (
+        <box flexDirection="column" border borderColor={COLOR.accent} backgroundColor={COLOR.panel} padding={1}>
+          <text fg={COLOR.accent}><strong>Mode</strong></text>
+          {activeTurnMode && activeTurnMode !== snapshot.mode ? (
+            <text fg={COLOR.muted}>
+              Current turn: {tuiModeOption(activeTurnMode).label} · Next message: {tuiModeOption(snapshot.mode).label}
+            </text>
+          ) : (
+            <text fg={COLOR.muted}>Choose how the next message should run</text>
+          )}
+          {TUI_MODES.map((option, index) => (
+            <box key={option.mode} flexDirection="column">
+              <text fg={index === modeSelection ? COLOR.text : COLOR.muted}>
+                {index === modeSelection ? '› ' : '  '}[{option.shortcut}] {option.label}{snapshot.mode === option.mode ? '  current' : ''}
+              </text>
+              {layout.showDescriptions ? <text fg={COLOR.muted}>    {option.description}</text> : null}
+            </box>
+          ))}
+          {layout.showHints ? <text fg={COLOR.muted}>↑↓ select · 1–3 direct · enter confirm · esc close</text> : null}
+        </box>
+      ) : null}
+
+      {modelSurface ? (
+        <box flexDirection="column" border borderColor={COLOR.accent} backgroundColor={COLOR.panel} padding={1}>
+          <text fg={COLOR.accent}><strong>Model &amp; reasoning</strong></text>
+          {modelItems.length === 0 ? (
+            <text fg="#f59e0b">No configured model is available in the runtime catalog.</text>
+          ) : modelItems.map((item, index) => (
+            <text key={`${item.providerId}:${item.modelId}:${item.reasoningEffort}`} fg={index === modelPickerSelection ? COLOR.text : COLOR.muted}>
+              {index === modelPickerSelection ? '› ' : '  '}{modelSelection ? modelSelectionLabel(modelSelection, item) : item.modelId}
+              {selectedModel?.providerId === item.providerId
+                && selectedModel.modelId === item.modelId
+                && selectedModel.reasoningEffort === item.reasoningEffort ? '  current' : ''}
+            </text>
+          ))}
+          {layout.showHints ? <text fg={COLOR.muted}>↑↓ choose · enter apply to next message · esc close</text> : null}
+        </box>
+      ) : null}
+
+      {commandSurface ? (
         <box flexDirection="column" border borderColor={COLOR.accent} backgroundColor={COLOR.panel} padding={1}>
           <text fg={COLOR.accent}><strong>Commands</strong></text>
+          <text fg={COLOR.muted}>{commandSurface.query ? `Search: ${commandSurface.query}` : 'Type to search commands'}</text>
           {commandItems.map((command, index) => (
             <box key={command.id} justifyContent="space-between">
               <text fg={index === commandSelection ? COLOR.text : COLOR.muted}>
                 {index === commandSelection ? '› ' : '  '}{command.label}
               </text>
-              <text fg={COLOR.muted}>{command.description}</text>
+              {layout.showDescriptions ? <text fg={COLOR.muted}>{command.description}</text> : null}
             </box>
           ))}
-          <text fg={COLOR.muted}>↑↓ select  ·  enter run  ·  esc close</text>
+          {layout.showHints ? <text fg={COLOR.muted}>↑↓ select  ·  enter run  ·  esc close</text> : null}
         </box>
       ) : (
         <ComposerDock
@@ -455,6 +783,10 @@ export function App({ host, model, modelLabel }: {
           onCommand={() => {
             setCommandNotice(null);
             setExperience((current) => openCommandPanel({ ...current, mode: snapshot.mode }));
+          }}
+          onValueChange={(value) => {
+            setComposerDraft(value);
+            setExperience((current) => syncSlashSuggestions(current, value));
           }}
         />
       )}

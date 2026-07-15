@@ -10,80 +10,79 @@ import {
   showPermission,
   showPlanApproval,
   shouldOpenCommandPanel,
+  syncSlashSuggestions,
   TUI_COMMANDS,
+  updateCommandPanelQuery,
 } from './tui-experience.ts';
 
 describe('TUI experience model', () => {
   test('uses the conversation composer as the only default surface', () => {
     expect(createTuiExperienceState()).toEqual({
       mode: 'chat',
-      footer: { type: 'composer' },
+      surface: { type: 'composer' },
     });
   });
 
-  test('puts modes and common actions behind one discoverable command list', () => {
-    expect(TUI_COMMANDS.map((command) => command.id)).toEqual([
-      'model',
-      'mode-chat',
-      'mode-plan',
-      'mode-goal',
-      'mode-explorer',
-      'new',
-      'goal-pause',
-      'goal-resume',
-      'goal-cancel',
-      'help',
-      'quit',
+  test('derives commands from the shared registry and keeps Explorer internal', () => {
+    expect(filterTuiCommands('').map((command) => command.id)).toEqual([
+      'model', 'mode', 'permissions', 'help', 'quit',
     ]);
-    expect(filterTuiCommands('read only').map((command) => command.id)).toEqual([
-      'mode-plan',
-      'mode-explorer',
-    ]);
+    expect(TUI_COMMANDS.map((command) => command.id)).not.toContain('mode-explorer');
     expect(filterTuiCommands('provider').map((command) => command.id)).toEqual(['model']);
-    expect(filterTuiCommands('hold').map((command) => command.id)).toEqual(['goal-pause']);
-    expect(filterTuiCommands('continue').map((command) => command.id)).toEqual(['goal-resume']);
-    expect(filterTuiCommands('abort').map((command) => command.id)).toEqual(['goal-cancel']);
+    expect(filterTuiCommands('hold', { goalStatus: 'running' }).map((command) => command.id)).toEqual(['goal-pause']);
+    expect(filterTuiCommands('continue', { goalStatus: 'paused' }).map((command) => command.id)).toEqual(['goal-resume']);
   });
 
-  test('keeps the composer compact and grows it only up to six rows', () => {
-    expect(composerRows('', 80)).toBe(1);
-    expect(composerRows('hello', 80)).toBe(1);
-    expect(composerRows('a'.repeat(200), 40)).toBe(6);
-    expect(composerRows('one\ntwo\nthree', 80)).toBe(3);
-  });
-
-  test('opens commands immediately only for slash at the start of an empty composer', () => {
-    expect(shouldOpenCommandPanel('/')).toBe(true);
+  test('opens the command picker only for slash at the input root', () => {
     expect(shouldOpenCommandPanel('', '/')).toBe(true);
     expect(shouldOpenCommandPanel('/', '/')).toBe(true);
     expect(shouldOpenCommandPanel('hello', '/')).toBe(false);
-    expect(shouldOpenCommandPanel('hello/')).toBe(false);
-    expect(shouldOpenCommandPanel('//')).toBe(false);
+    expect(shouldOpenCommandPanel('/model')).toBe(false);
   });
 
-  test('opens and escapes the command panel without changing the active mode', () => {
+  test('sizes multiline composer content within a bounded height', () => {
+    expect(composerRows('', 80)).toBe(1);
+    expect(composerRows('a'.repeat(150), 80)).toBe(3);
+    expect(composerRows(Array.from({ length: 12 }, () => 'x').join('\n'), 80)).toBe(6);
+  });
+
+  test('opens and dismisses the command picker without changing mode', () => {
     const state = createTuiExperienceState('goal');
-    const opened = openCommandPanel(state, 'mod');
-    expect(opened).toEqual({
+    expect(openCommandPanel(state, 'mod')).toEqual({
       mode: 'goal',
-      footer: { type: 'command', query: 'mod', selectedIndex: 0 },
+      surface: { type: 'picker', picker: 'command', query: 'mod', selectedIndex: 0 },
     });
-    expect(escapeFooter(opened)).toEqual(state);
+    expect(escapeFooter(openCommandPanel(state))).toEqual(state);
   });
 
-  test('gives permission the highest footer priority', () => {
+  test('tracks slash suggestions from composer text and dismisses them for normal prose', () => {
+    const state = createTuiExperienceState();
+    const suggestions = syncSlashSuggestions(state, '/mod');
+    expect(suggestions.surface).toEqual({ type: 'slash-suggestions', query: 'mod', selectedIndex: 0 });
+    expect(syncSlashSuggestions(suggestions, 'hello').surface).toEqual({ type: 'composer' });
+    expect(syncSlashSuggestions(state, '/model now').surface).toEqual({ type: 'composer' });
+  });
+
+  test('updates command palette search independently from slash suggestions', () => {
+    const panel = openCommandPanel(createTuiExperienceState());
+    expect(updateCommandPanelQuery(panel, 'perm').surface).toEqual({
+      type: 'picker', picker: 'command', query: 'perm', selectedIndex: 0,
+    });
+    expect(updateCommandPanelQuery(createTuiExperienceState(), 'perm')).toEqual(createTuiExperienceState());
+  });
+
+  test('keeps decision surfaces above command pickers', () => {
     const permission = showPermission(openCommandPanel(createTuiExperienceState()));
-    expect(permission.footer.type).toBe('permission');
-    expect(openCommandPanel(permission).footer.type).toBe('permission');
-    expect(showPlanApproval(permission).footer.type).toBe('permission');
+    expect(permission.surface.type).toBe('tool-approval');
+    expect(openCommandPanel(permission).surface.type).toBe('tool-approval');
+    expect(showPlanApproval(permission).surface.type).toBe('tool-approval');
   });
 
-  test('applies mode commands and returns to the composer', () => {
-    const command = TUI_COMMANDS.find((item) => item.id === 'mode-explorer')!;
-    const state = showPlanApproval(createTuiExperienceState('plan'));
-    expect(applyTuiCommand(state, command)).toEqual({
-      mode: 'explorer',
-      footer: { type: 'composer' },
-    });
+  test('routes registry actions to dedicated pickers', () => {
+    const state = createTuiExperienceState();
+    const model = TUI_COMMANDS.find((item) => item.id === 'model')!;
+    const mode = TUI_COMMANDS.find((item) => item.id === 'mode')!;
+    expect(applyTuiCommand(state, model).surface).toMatchObject({ type: 'picker', picker: 'model' });
+    expect(applyTuiCommand(state, mode).surface).toMatchObject({ type: 'picker', picker: 'mode' });
   });
 });

@@ -1,3 +1,5 @@
+import type { ModelReasoningEffort } from './model-catalog.ts';
+
 export type ModelMessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
 export interface ModelMessage {
@@ -41,6 +43,7 @@ export interface ModelProviderRequest {
   readonly tools?: readonly ModelToolDefinition[];
   readonly temperature?: number;
   readonly maxOutputTokens?: number;
+  readonly reasoningEffort?: ModelReasoningEffort;
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: ModelStreamEvent) => void;
 }

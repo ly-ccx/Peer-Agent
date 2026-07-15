@@ -22,7 +22,7 @@ describe('TUI app layout', () => {
 
   test('gives the wordmark full width while keeping the composer dock restrained', () => {
     expect(appSource).toContain('<box width="100%" flexDirection="column" alignItems="center" gap={2}>');
-    expect(appSource).toContain('<box width="75%" maxWidth={112}>');
+    expect(appSource).toContain('<box width={layout.welcomeWidth} maxWidth={112}>');
   });
 
   test('keeps the composer input pure and places status outside its border', () => {
@@ -51,6 +51,14 @@ describe('TUI app layout', () => {
     expect(statusViewSource).toContain("if (layout === 'compact')");
     expect(statusViewSource).toContain('flexDirection="column"');
     expect(statusViewSource).toContain('justifyContent="space-between"');
+  });
+
+  test('adapts picker density and stacks approval actions on narrow terminals', () => {
+    expect(appSource).toContain('const layout = responsiveLayout(terminal.width)');
+    expect(appSource).toContain("flexDirection={layout.stackActions ? 'column' : 'row'}");
+    expect(appSource).toContain('layout.showDescriptions ?');
+    expect(appSource).toContain('layout.showHints ?');
+    expect(appSource).toContain('paddingLeft={layout.outerPadding}');
   });
 
   test('covers workspace, mode, permission, model, reasoning and context', () => {

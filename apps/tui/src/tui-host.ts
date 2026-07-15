@@ -12,7 +12,7 @@ import type {
   RuntimeSdkProviderExecution,
 } from '@peer-agent/runtime-sdk';
 
-import { normalizeTuiMode, TUI_MODES, type TuiMode } from './tui-mode.ts';
+import { normalizeTuiMode, TUI_RUNTIME_MODES, type TuiMode } from './tui-mode.ts';
 
 export type TuiApprovalDecision = 'allow-once' | 'allow-session' | 'deny';
 
@@ -140,10 +140,10 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
   };
 
   const bundles = new Map<TuiMode, ReturnType<typeof createNodeProviderBundle>>();
-  for (const option of TUI_MODES) {
-    bundles.set(option.mode, createNodeProviderBundle({
+  for (const mode of TUI_RUNTIME_MODES) {
+    bundles.set(mode, createNodeProviderBundle({
       workspaceRoot,
-      mode: option.mode,
+      mode,
       hookRunner,
       requestPermission,
     }));

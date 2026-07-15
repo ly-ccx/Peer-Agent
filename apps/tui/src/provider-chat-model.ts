@@ -2,6 +2,7 @@ import type { RuntimeToolDefinition } from '@peer-agent/runtime-core';
 import type {
   ModelMessage,
   ModelProvider,
+  ModelReasoningEffort,
   ModelToolCall,
   ModelToolDefinition,
 } from '@peer-agent/runtime-node';
@@ -21,6 +22,8 @@ export interface CreateProviderChatModelOptions {
   readonly toolDefinitions?: readonly RuntimeToolDefinition[];
   readonly toolDefinitionsForMode?: (mode: TuiMode) => readonly RuntimeToolDefinition[];
   readonly systemPrompt?: string;
+  readonly getModel?: () => string;
+  readonly getReasoningEffort?: () => ModelReasoningEffort;
 }
 
 function parameters(tool: RuntimeToolDefinition): Readonly<Record<string, unknown>> {
@@ -96,10 +99,12 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
       const toolsByName = new Map(projectedToolDefinitions.map((tool) => [tool.name, tool]));
       const tools = projectedToolDefinitions.map(toModelTool);
       const streamId = context.run.streamId ?? 'tui-chat';
+      const reasoningEffort = options.getReasoningEffort?.();
       const result = await options.provider.stream({
-        model: options.model,
+        model: options.getModel?.() ?? options.model,
         messages: state.modelMessages,
         tools,
+        ...(!reasoningEffort || reasoningEffort === 'default' ? {} : { reasoningEffort }),
         signal: context.signal,
         onEvent(event) {
           if (event.type === 'text.delta') {

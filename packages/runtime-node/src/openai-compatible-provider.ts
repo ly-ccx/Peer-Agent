@@ -87,6 +87,9 @@ export function createOpenAICompatibleProvider(
           } : {}),
           ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
           ...(request.maxOutputTokens === undefined ? {} : { max_tokens: request.maxOutputTokens }),
+          ...(!request.reasoningEffort || request.reasoningEffort === 'default'
+            ? {}
+            : { reasoning_effort: request.reasoningEffort }),
         }),
         signal: request.signal,
       });

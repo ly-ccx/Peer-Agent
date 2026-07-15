@@ -22,6 +22,18 @@ export type {
 } from './provider-contracts.ts';
 export { createNodeFileProvider, NODE_FILE_CAPABILITY_MANIFESTS } from './file-provider.ts';
 export type {
+  ModelReasoningEffort,
+  RuntimeModelCatalogEntry,
+  RuntimeModelSelection,
+  RuntimePermissionPolicy,
+} from './model-catalog.ts';
+export {
+  isRuntimeModelSelectionAvailable,
+  normalizeModelReasoningEffort,
+  normalizeRuntimePermissionPolicy,
+  RUNTIME_PERMISSION_POLICIES,
+} from './model-catalog.ts';
+export type {
   ModelCredential,
   ModelCredentialPort,
   ModelCredentialRequest,

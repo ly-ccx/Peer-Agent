@@ -67,6 +67,20 @@ test('streams text and usage without exposing credentials in the result', async 
   assert.doesNotMatch(JSON.stringify(result), /secret-key/);
 });
 
+test('encodes explicit reasoning effort without overriding provider defaults', async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const model = provider(async (_input, init) => {
+    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return sseResponse(['[DONE]']);
+  });
+
+  await model.stream({ model: 'gpt-test', messages: [], reasoningEffort: 'high' });
+  await model.stream({ model: 'gpt-test', messages: [], reasoningEffort: 'default' });
+
+  assert.equal(bodies[0]?.reasoning_effort, 'high');
+  assert.equal('reasoning_effort' in (bodies[1] ?? {}), false);
+});
+
 test('assembles streamed tool calls and serializes tools', async () => {
   const events: ModelStreamEvent[] = [];
   let body: Record<string, unknown> = {};

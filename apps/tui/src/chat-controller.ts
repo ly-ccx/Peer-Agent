@@ -31,6 +31,7 @@ export interface ChatMessage {
 export interface ChatSnapshot {
   readonly status: ChatRunStatus;
   readonly mode: TuiMode;
+  readonly activeTurnMode?: TuiMode;
   readonly messages: readonly ChatMessage[];
   readonly session?: RuntimeSessionSnapshot;
   readonly plan?: PlanSnapshot;
@@ -183,7 +184,6 @@ export function createChatController(options: {
       return () => listeners.delete(listener);
     },
     setMode(mode) {
-      if (snapshot.status !== 'idle') return false;
       const nextMode = normalizeTuiMode(mode, snapshot.mode);
       if (nextMode === snapshot.mode) return true;
       publish({ ...snapshot, mode: nextMode });
@@ -207,6 +207,7 @@ export function createChatController(options: {
       publish({
         status: 'running',
         mode: turnMode,
+        activeTurnMode: turnMode,
         session: sessions.get(sessionId) ?? undefined,
         messages: [
           ...history,
@@ -244,7 +245,7 @@ export function createChatController(options: {
 
         publish({
           status: 'idle',
-          mode: turnMode,
+          mode: snapshot.mode,
           session: sessions.get(sessionId) ?? undefined,
           plan: options.planCoordinator?.getSnapshot() ?? undefined,
           usage: result.state?.usage,
@@ -259,7 +260,7 @@ export function createChatController(options: {
         else turn.fail(errorMessage(error));
         publish({
           status: 'idle',
-          mode: turnMode,
+          mode: snapshot.mode,
           session: sessions.get(sessionId) ?? undefined,
           messages: snapshot.messages.map((message) =>
             message.pending ? { ...message, pending: false } : message,

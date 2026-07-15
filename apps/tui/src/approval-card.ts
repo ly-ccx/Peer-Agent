@@ -16,7 +16,7 @@ export const TUI_APPROVAL_OPTIONS = [
   },
   {
     decision: 'allow-session',
-    label: 'Allow for session',
+    label: 'Allow similar this session',
     shortcut: '2',
     color: '#67e8f9',
   },
@@ -27,6 +27,22 @@ export const TUI_APPROVAL_OPTIONS = [
     color: '#fda4af',
   },
 ] as const satisfies readonly TuiApprovalOption[];
+
+export function formatApprovalArguments(args: unknown, maxLength = 180): string {
+  let formatted: string;
+  try {
+    formatted = typeof args === 'string' ? args : JSON.stringify(args);
+  } catch {
+    formatted = String(args);
+  }
+  if (!formatted) return '—';
+  return formatted.length <= maxLength ? formatted : `${formatted.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+export function formatApprovalRisk(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) return value.trim().toLowerCase();
+  return 'runtime governed';
+}
 
 export function moveApprovalSelection(current: number, delta: -1 | 1): number {
   return (current + delta + TUI_APPROVAL_OPTIONS.length) % TUI_APPROVAL_OPTIONS.length;

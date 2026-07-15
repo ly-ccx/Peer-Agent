@@ -30,16 +30,14 @@ export const TUI_MODES: readonly TuiModeOption[] = Object.freeze([
     description: 'Autonomous execution with projected read and write tools.',
     readOnly: false,
   },
-  {
-    mode: 'explorer',
-    label: 'Explorer',
-    shortcut: '4',
-    description: 'Strictly read-only investigation.',
-    readOnly: true,
-  },
 ]);
 
-const TUI_MODE_SET = new Set<TuiMode>(TUI_MODES.map((option) => option.mode));
+export const TUI_RUNTIME_MODES: readonly TuiMode[] = Object.freeze([
+  ...TUI_MODES.map((option) => option.mode),
+  'explorer',
+]);
+
+const TUI_MODE_SET = new Set<TuiMode>(TUI_RUNTIME_MODES);
 
 export function isTuiMode(value: unknown): value is TuiMode {
   return typeof value === 'string' && TUI_MODE_SET.has(value as TuiMode);
@@ -62,5 +60,14 @@ export function tuiModeForKey(keyName: string, ctrl: boolean): TuiMode | null {
 }
 
 export function tuiModeOption(mode: TuiMode): TuiModeOption {
+  if (mode === 'explorer') {
+    return {
+      mode,
+      label: 'Explorer',
+      shortcut: '',
+      description: 'Internal read-only profile used by the Goal runner.',
+      readOnly: true,
+    };
+  }
   return TUI_MODES.find((option) => option.mode === mode) ?? TUI_MODES[0]!;
 }

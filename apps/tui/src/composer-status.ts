@@ -1,3 +1,6 @@
+import type { RuntimePermissionPolicy } from '@peer-agent/runtime-node';
+
+import { permissionPolicyLabels } from './tui-permission-policy.ts';
 import type { TuiMode } from './tui-mode.ts';
 import { tuiModeOption } from './tui-mode.ts';
 
@@ -9,6 +12,7 @@ export interface ComposerUsageSnapshot {
 export interface ComposerStatusInput {
   readonly workspaceRoot: string;
   readonly mode: TuiMode;
+  readonly permissionPolicy?: RuntimePermissionPolicy;
   readonly modelLabel: string;
   readonly reasoningEffort?: string;
   readonly contextWindow?: number;
@@ -99,6 +103,9 @@ export function contextStatus(
 
 export function createComposerStatus(input: ComposerStatusInput): ComposerStatus {
   const mode = tuiModeOption(input.mode);
+  const permission = mode.readOnly
+    ? permissionPolicyLabels('read-only')
+    : permissionPolicyLabels(input.permissionPolicy ?? 'ask');
   const context = contextStatus(
     input.usage,
     input.contextWindow ?? contextWindowForModel(input.modelLabel),
@@ -107,8 +114,8 @@ export function createComposerStatus(input: ComposerStatusInput): ComposerStatus
     workspace: compactWorkspacePath(input.workspaceRoot),
     workspaceShort: workspaceBasename(input.workspaceRoot),
     mode: mode.label.toLowerCase(),
-    permission: mode.readOnly ? 'read only' : 'ask before write',
-    permissionShort: mode.readOnly ? 'read' : 'ask',
+    permission: permission.label,
+    permissionShort: permission.shortLabel,
     model: modelIdFromLabel(input.modelLabel),
     reasoning: `reasoning ${input.reasoningEffort?.trim() || 'auto'}`,
     ...context,
