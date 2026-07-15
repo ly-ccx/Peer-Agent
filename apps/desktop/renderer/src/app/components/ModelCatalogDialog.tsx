@@ -1,6 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LlmModelInfo, LlmModelListResult, LlmProviderConfigView } from '@peer-agent/protocol';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Overlay } from './Overlay';
 import {
   buildModelCatalog,
@@ -35,6 +35,7 @@ export function ModelCatalogDialog({
   selectionMode = 'multiple',
   allowManualModel = false,
   onClose,
+  onAppliedClose,
 }: {
   readonly i18n: I18nRuntime;
   readonly providerName: string;
@@ -51,6 +52,7 @@ export function ModelCatalogDialog({
   readonly selectionMode?: 'single' | 'multiple';
   readonly allowManualModel?: boolean;
   readonly onClose: () => void;
+  readonly onAppliedClose?: () => void;
 }) {
   const zh = i18n.locale === 'zh-CN';
   const [query, setQuery] = useState('');
@@ -62,15 +64,33 @@ export function ModelCatalogDialog({
     () => new Set(configuredModels.map((model) => model.model)),
   );
   const [importing, setImporting] = useState(false);
+  const [applyState, setApplyState] = useState<'idle' | 'applying' | 'success'>('idle');
+  const appliedSuccessfullyRef = useRef(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [manualModel, setManualModel] = useState('');
   const [importedModels, setImportedModels] = useState<readonly LlmProviderConfigView[]>(configuredModels);
+  const [showFetchComplete, setShowFetchComplete] = useState(false);
+  const wasLoadingRef = useRef(loading);
   const catalog = useMemo(() => buildModelCatalog(models, importedModels), [models, importedModels]);
   const visible = useMemo(() => filterModelCatalog(catalog, query), [catalog, query]);
+  const isInitialLoading = loading && catalog.length === 0;
+  const isRefreshing = loading && catalog.length > 0;
+  const fetchState = isInitialLoading ? 'initial-loading' : isRefreshing ? 'refreshing' : showFetchComplete ? 'complete' : 'idle';
   useEffect(() => {
     setImportedModels(configuredModels);
     setSelected(new Set(configuredModels.map((model) => model.model)));
   }, [configuredModels]);
+  useEffect(() => {
+    const justCompleted = wasLoadingRef.current && !loading && !error;
+    wasLoadingRef.current = loading;
+    if (!justCompleted) {
+      if (loading || error) setShowFetchComplete(false);
+      return undefined;
+    }
+    setShowFetchComplete(true);
+    const timer = window.setTimeout(() => setShowFetchComplete(false), 1200);
+    return () => window.clearTimeout(timer);
+  }, [error, loading]);
   const catalogIds = new Set(catalog.map((entry) => entry.model.id));
   const selectedModels = [
     ...catalog.filter((entry) => selected.has(entry.model.id)).map((entry) => entry.model),
@@ -92,20 +112,24 @@ export function ModelCatalogDialog({
     });
   };
 
-  const importSelected = async () => {
+  const importSelected = async (requestClose: () => void) => {
     if (wouldRemoveAll) {
       setImportError(zh ? '渠道至少需要保留一个模型。' : 'A provider must keep at least one model.');
       return;
     }
     if (!hasSelectionChanges) return;
     setImporting(true);
+    setApplyState('applying');
     setImportError(null);
     try {
       const imported = await onImport(selectedModels);
       if (imported) setImportedModels(imported);
+      appliedSuccessfullyRef.current = true;
+      setApplyState('success');
+      window.setTimeout(requestClose, 420);
     } catch (error: unknown) {
+      setApplyState('idle');
       setImportError(error instanceof Error ? error.message : 'model_import_failed');
-    } finally {
       setImporting(false);
     }
   };
@@ -127,7 +151,15 @@ export function ModelCatalogDialog({
   };
 
   return (
-    <Overlay onClose={onClose} closeOnBackdrop={!importing} ariaLabel={zh ? '获取模型列表' : 'Import models'} panelClassName="llm-catalog-dialog">
+    <Overlay
+      onClose={() => {
+        if (appliedSuccessfullyRef.current) (onAppliedClose ?? onClose)();
+        else onClose();
+      }}
+      closeOnBackdrop={!importing}
+      ariaLabel={zh ? '获取模型列表' : 'Import models'}
+      panelClassName={`llm-catalog-dialog is-${applyState}`}
+    >
       {({ requestClose }) => (
         <>
           <header className="llm-dialog-header">
@@ -138,15 +170,30 @@ export function ModelCatalogDialog({
             <button type="button" className="llm-dialog-close" onClick={requestClose} aria-label={zh ? '关闭' : 'Close'}>✕</button>
           </header>
 
-          <div className="llm-catalog-toolbar">
+          <div className="llm-catalog-toolbar" data-fetch-state={fetchState}>
             <input
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={zh ? '搜索 Model ID 或名称' : 'Search model ID or name'}
               autoFocus
+              disabled={isInitialLoading}
             />
-            <button type="button" onClick={onRefresh} disabled={loading}>{loading ? '…' : (zh ? '刷新目录' : 'Refresh')}</button>
+            <button type="button" onClick={onRefresh} disabled={loading} aria-busy={loading}>
+              {loading ? <span className="llm-catalog-fetch-spinner motion-spin" aria-hidden="true" /> : null}
+              {isInitialLoading
+                ? (zh ? '正在拉取' : 'Loading')
+                : isRefreshing
+                  ? (zh ? '正在刷新' : 'Refreshing')
+                  : showFetchComplete
+                    ? (zh ? '已更新' : 'Updated')
+                    : (zh ? '刷新目录' : 'Refresh')}
+            </button>
+          </div>
+
+          <div className="llm-catalog-fetch-status" role="status" aria-live="polite" data-fetch-state={fetchState}>
+            {isRefreshing ? (zh ? '正在后台刷新，当前模型列表仍可浏览。' : 'Refreshing in the background; the current list remains available.') : null}
+            {showFetchComplete ? (zh ? `模型目录已更新，共 ${catalog.length} 个模型。` : `Model catalog updated with ${catalog.length} models.`) : null}
           </div>
 
           {error ? <p className="llm-catalog-error">{error}</p> : null}
@@ -177,10 +224,26 @@ export function ModelCatalogDialog({
             ) : null}
           </div>
 
-          <div className="llm-catalog-list">
-            {loading && catalog.length === 0 ? <div className="llm-catalog-empty">{zh ? '正在读取远程模型目录…' : 'Loading model catalog…'}</div> : null}
+          <div className="llm-catalog-list" data-fetch-state={fetchState} aria-busy={loading}>
+            {isInitialLoading ? (
+              <div className="llm-catalog-initial-loading">
+                <div className="llm-catalog-loading-title">
+                  <span className="llm-catalog-fetch-spinner motion-spin" aria-hidden="true" />
+                  <span>{zh ? '正在读取远程模型目录…' : 'Loading remote model catalog…'}</span>
+                </div>
+                <div className="llm-catalog-skeleton-list" aria-hidden="true">
+                  {[0, 1, 2, 3].map((index) => (
+                    <div className="llm-catalog-skeleton" key={index}>
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             {!loading && visible.length === 0 ? <div className="llm-catalog-empty">{zh ? '没有匹配的模型' : 'No matching models'}</div> : null}
-            {visible.map(({ model, configured }) => {
+            {!isInitialLoading ? visible.map(({ model, configured }) => {
               const checked = selected.has(model.id);
               const context = compactTokens(model.contextWindow);
               const output = compactTokens(model.maxOutputTokens);
@@ -200,7 +263,7 @@ export function ModelCatalogDialog({
                   <span className={`llm-catalog-status ${configured ? 'is-configured' : ''}`}>{configured ? (zh ? '已配置' : 'Configured') : (zh ? '新模型' : 'New')}</span>
                 </label>
               );
-            })}
+            }) : null}
           </div>
 
           {allowManualModel ? (
@@ -218,8 +281,21 @@ export function ModelCatalogDialog({
 
           <footer className="llm-dialog-footer">
             <button type="button" onClick={requestClose}>{zh ? '取消' : 'Cancel'}</button>
-            <button type="button" className="primary" onClick={() => void importSelected()} disabled={!hasSelectionChanges || wouldRemoveAll || importing}>
-              {importing ? '…' : (zh ? `应用选择（${selectedModels.length} 个模型）` : `Apply selection (${selectedModels.length} models)`)}
+            <button
+              type="button"
+              className="primary llm-catalog-apply-button"
+              onClick={() => void importSelected(requestClose)}
+              disabled={!hasSelectionChanges || wouldRemoveAll || importing}
+              aria-live="polite"
+              data-state={applyState}
+            >
+              {applyState === 'applying' ? (
+                <><span className="llm-catalog-apply-spinner motion-spin" aria-hidden="true" />{zh ? '正在应用…' : 'Applying…'}</>
+              ) : applyState === 'success' ? (
+                <><span className="llm-catalog-apply-check" aria-hidden="true">✓</span>{zh ? '已应用' : 'Applied'}</>
+              ) : (
+                zh ? `应用选择（${selectedModels.length} 个模型）` : `Apply selection (${selectedModels.length} models)`
+              )}
             </button>
           </footer>
         </>

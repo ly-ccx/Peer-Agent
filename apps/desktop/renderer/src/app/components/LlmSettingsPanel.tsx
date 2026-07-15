@@ -749,8 +749,6 @@ export function LlmSettingsPanel({
         await refresh();
         throw error;
       }
-      setPendingProviderDraft(null);
-      setCatalogTargetId(null);
       return refresh();
     }
 
@@ -1292,6 +1290,10 @@ export function LlmSettingsPanel({
           onClose={() => {
             setPendingProviderDraft(null);
             setShowForm(true);
+          }}
+          onAppliedClose={() => {
+            setPendingProviderDraft(null);
+            setCatalogTargetId(null);
           }}
         />
       ) : catalogTargetId ? (() => {
