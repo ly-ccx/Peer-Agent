@@ -16,7 +16,7 @@ describe('message rail projection', () => {
       message('user-1', 'user', ' first '),
       message('assistant-1', 'assistant'),
       {
-        ...message('compact', 'assistant'),
+        ...message('compact-1', 'assistant'),
         compaction: {
           method: 'rolling',
           originalMessageCount: 2,
@@ -26,12 +26,25 @@ describe('message rail projection', () => {
         },
       },
       message('user-2', 'user', 'second'),
+      {
+        ...message('compact-2', 'assistant'),
+        compaction: {
+          method: 'rolling',
+          originalMessageCount: 4,
+          beforeTokens: 200,
+          afterTokens: 30,
+          summary: 'newer summary',
+        },
+      },
+      message('user-3', 'user', 'third'),
     ], 'Compacted');
 
     assert.deepEqual(items, [
       { kind: 'message', id: 'user-1', text: 'first', messageNumber: 1 },
-      { kind: 'compaction', id: 'compact', text: 'Compacted' },
+      { kind: 'compaction', id: 'compact-1', text: 'Compacted' },
       { kind: 'message', id: 'user-2', text: 'second', messageNumber: 2 },
+      { kind: 'compaction', id: 'compact-2', text: 'Compacted' },
+      { kind: 'message', id: 'user-3', text: 'third', messageNumber: 3 },
     ]);
   });
 

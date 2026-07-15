@@ -124,7 +124,7 @@ describe('compactIfNeeded（触发口径含工具 schema）', () => {
 
   it('triggers compaction when tools push the estimate over the threshold', async () => {
     // 构造一个「仅看 messages 不会越线，但加上工具 schema 后越线」的场景。
-    const messages = buildMessages(12, 20);
+    const messages = buildMessages(20, 400);
     const baseTokens = estimateTokensFromMessages(messages);
     // 选一个上下文窗口：messages 单独 < 0.8*window，但 messages + tools > 0.8*window。
     const bigTool = {
@@ -132,7 +132,7 @@ describe('compactIfNeeded（触发口径含工具 schema）', () => {
       description: 'x'.repeat(4_000),
       input_schema: { type: 'object', properties: {} },
     };
-    const tools = Array.from({ length: 10 }, () => bigTool);
+    const tools = [bigTool];
     const toolTokens = estimateToolsTokens(tools);
     // 让 window 落在二者之间。
     const contextWindow = Math.ceil((baseTokens + toolTokens / 2) / COMPACTION_CONFIG.triggerRatio);
@@ -150,11 +150,35 @@ describe('compactIfNeeded（触发口径含工具 schema）', () => {
       systemPrompt: 'system prompt',
       contextWindow,
       providerConfig: null,
-      force: true,
       tools,
     });
-    // force=true 时只要有非 system 消息即压缩；这里主要验证 tools 参数被接受且不报错。
+    // 工具把总预算推过触发线；压缩后仍把不可压缩的工具预算纳入验收。
     assert.equal(withTools.compacted, true);
+    assert.ok(withTools.notification.afterTokens + toolTokens <= contextWindow * COMPACTION_CONFIG.triggerRatio);
+  });
+
+  it('fails explicitly when immutable tool schemas alone cannot fit below the trigger', async () => {
+    const messages = buildMessages(12, 20);
+    const tools = Array.from({ length: 10 }, () => ({
+      name: 'huge_tool',
+      description: 'x'.repeat(4_000),
+      input_schema: { type: 'object', properties: {} },
+    }));
+
+    await assert.rejects(
+      () => compactIfNeeded({
+        messages,
+        systemPrompt: 'system prompt',
+        contextWindow: 6_599,
+        providerConfig: null,
+        tools,
+      }),
+      (error) => {
+        assert.equal(error.code, 'CONTEXT_COMPACTION_INSUFFICIENT_REDUCTION');
+        assert.match(error.message, /minimal candidate=/);
+        return true;
+      },
+    );
   });
 });
 
@@ -471,7 +495,7 @@ describe('context compactor', () => {
     assert.doesNotMatch(result.messages[1]._compaction.summary, /current turn question/);
   });
 
-  it('preserves the latest human user turn together with its closed tool pair tail', async () => {
+  it('compacts closed tool rounds inside the latest human turn while preserving the raw user request', async () => {
     const messages = [
       { role: 'system', content: 'system prompt' },
       { role: 'user', content: 'old question' },
@@ -484,7 +508,42 @@ describe('context compactor', () => {
           { id: 'tool-9', type: 'function', function: { name: 'bash', arguments: '{}' } },
         ],
       },
-      { role: 'tool', tool_call_id: 'tool-9', content: 'tool output' },
+      { role: 'tool', tool_call_id: 'tool-9', content: `tool output ${'x'.repeat(360_000)}` },
+    ];
+
+    const result = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      contextWindow: 100_000,
+      providerConfig: null,
+      preserveLatestUserTurn: true,
+    });
+
+    assert.equal(result.compacted, true);
+    assert.equal(result.notification.oldMessageCount, 4);
+    assert.equal(result.notification.keptMessageCount, 1);
+    assert.equal(result.messages.length, 3);
+    assert.equal(result.messages.at(-1).role, 'user');
+    assert.equal(result.messages.at(-1).content, 'current task');
+    assert.ok(
+      result.notification.afterTokens < result.notification.beforeTokens,
+      'an automatic compaction must actually reduce the context',
+    );
+  });
+
+  it('keeps an unclosed tool call with the latest user request for provider validity', async () => {
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'old question' },
+      { role: 'assistant', content: 'old answer' },
+      { role: 'user', content: 'current task' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'tool-open', type: 'function', function: { name: 'bash', arguments: '{}' } },
+        ],
+      },
     ];
 
     const result = await compactIfNeeded({
@@ -498,8 +557,8 @@ describe('context compactor', () => {
 
     assert.equal(result.compacted, true);
     assert.equal(result.notification.oldMessageCount, 2);
-    assert.equal(result.notification.keptMessageCount, 3);
-    assert.deepEqual(result.messages.slice(2), messages.slice(3));
+    assert.equal(result.notification.keptMessageCount, 2);
+    assert.deepEqual(result.messages.slice(-2), messages.slice(-2));
   });
 
   it('does not treat a pure Anthropic tool_result user message as latest human input', async () => {
@@ -612,7 +671,13 @@ describe('context compactor', () => {
     assert.equal(result.compacted, true);
     assert.equal(result.messages[1].role, 'user');
     assert.match(result.messages[1].content, /^\[上下文交接/);
-    assert.equal(result.notification.method, 'structural');
+    assert.equal(result.notification.method, 'fallback_drop');
+    assert.equal(result.notification.fallbackReason, 'insufficient_reduction');
+    assert.ok(
+      result.notification.afterTokens < result.notification.beforeTokens,
+      'an over-threshold compaction must never be accepted when it increases the prompt',
+    );
+    assert.ok(result.notification.afterTokens <= 800, 'the compacted prompt must return below the trigger');
   });
 
   it('microcompacts old local tool result refs while preserving retrieval fields', () => {

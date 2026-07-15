@@ -504,8 +504,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     );
 
     const offCompaction = clientApi.onChatCompaction(
-      ({ streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount, contextTokens, contextWindow }) => {
-        const cid = conversationStore.resolveConversation(streamId);
+      ({ conversationId, streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount, contextTokens, contextWindow }) => {
+        const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         if (stage === 'start') {
           conversationStore.setState(cid, (prev) => ({

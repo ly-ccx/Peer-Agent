@@ -48,19 +48,22 @@ export function buildConversationAttachmentContext(messages: readonly ChatMsg[])
   ));
 }
 
-/** 从带 compaction 的消息中提取连续性（continuity）上下文项。 */
+/**
+ * 提取最新累计 compaction 作为连续性上下文。历史 handoff 继续留在 UI 时间线用于回看，
+ * 但最新摘要已经 carry-forward 之前摘要，不能把所有历史摘要再次注入 runtime。
+ */
 export function buildConversationContinuityContext(messages: readonly ChatMsg[]): ContinuityContextItem[] {
-  return messages
-    .filter((message) => Boolean(message.compaction))
-    .map((message) => ({
-      id: message.id,
-      method: message.compaction?.method ?? 'unknown',
-      originalMessageCount: message.compaction?.originalMessageCount ?? 0,
-      beforeTokens: message.compaction?.beforeTokens ?? 0,
-      afterTokens: message.compaction?.afterTokens ?? 0,
-      summary: message.compaction?.summary || message.content,
-      content: message.content,
-    }));
+  const message = [...messages].reverse().find((candidate) => Boolean(candidate.compaction));
+  if (!message?.compaction) return [];
+  return [{
+    id: message.id,
+    method: message.compaction.method ?? 'unknown',
+    originalMessageCount: message.compaction.originalMessageCount ?? 0,
+    beforeTokens: message.compaction.beforeTokens ?? 0,
+    afterTokens: message.compaction.afterTokens ?? 0,
+    summary: message.compaction.summary || message.content,
+    content: message.content,
+  }];
 }
 
 /** 把用户配置的系统指令包装为 instruction 层 Context item（空则不产出）。 */

@@ -206,6 +206,7 @@ async function persistAndNotifyCompaction({
     tools,
   });
   webContents.send('chat:compaction', {
+    conversationId,
     streamId,
     stage: 'done',
     emergency,
@@ -267,7 +268,7 @@ export async function runCompactionCheck({
     // 登记表与事件 emit 单一来源：先登记会话压缩态再 emit start，
     // 使切会话查询（chat:compaction:get）与横幅事件流一致。
     beginCompaction({ conversationId, streamId, manual: false });
-    webContents.send('chat:compaction', { streamId, stage: 'start', emergency });
+    webContents.send('chat:compaction', { conversationId, streamId, stage: 'start', emergency });
     let lastSentPercent = -1;
     onProgress = ({ receivedChars, estimatedTotalChars }) => {
       const total = estimatedTotalChars > 0 ? estimatedTotalChars : 1;
@@ -277,6 +278,7 @@ export async function runCompactionCheck({
       lastSentPercent = percent;
       updateCompactionProgress({ conversationId, streamId, percent });
       webContents.send('chat:compaction', {
+        conversationId,
         streamId,
         stage: 'progress',
         emergency,
@@ -294,7 +296,7 @@ export async function runCompactionCheck({
     if (settledBanner) return;
     settledBanner = true;
     endCompaction({ conversationId, streamId });
-    webContents.send('chat:compaction', { streamId, stage: 'idle', emergency });
+    webContents.send('chat:compaction', { conversationId, streamId, stage: 'idle', emergency });
   };
 
   try {

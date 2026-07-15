@@ -311,19 +311,18 @@ function continuityContextFromCompactionResult(result) {
 }
 
 function continuityContextFromMessages(messages = []) {
-  return messages
-    .filter((message) => message?._compaction)
-    .map((message, index) => {
-      const handoff = message._compaction;
-      return {
-        id: `conversation-compact:${message.id || index}`,
-        method: handoff.method || 'unknown',
-        originalMessageCount: handoff.originalMessageCount ?? 0,
-        beforeTokens: handoff.beforeTokens ?? 0,
-        afterTokens: handoff.afterTokens ?? 0,
-        summary: handoff.summary || message.content || '',
-      };
-    });
+  const index = messages.findLastIndex((message) => message?._compaction);
+  if (index < 0) return [];
+  const message = messages[index];
+  const handoff = message._compaction;
+  return [{
+    id: `conversation-compact:${message.id || index}`,
+    method: handoff.method || 'unknown',
+    originalMessageCount: handoff.originalMessageCount ?? 0,
+    beforeTokens: handoff.beforeTokens ?? 0,
+    afterTokens: handoff.afterTokens ?? 0,
+    summary: handoff.summary || message.content || '',
+  }];
 }
 
 // 向所有渲染窗口广播一个事件(用于全局活跃流状态等不绑定单一 streamId 的通知)。

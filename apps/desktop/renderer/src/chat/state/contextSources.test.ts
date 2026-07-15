@@ -47,9 +47,14 @@ describe('buildConversationAttachmentContext', () => {
 });
 
 describe('buildConversationContinuityContext', () => {
-  it('extracts only compaction messages with fallbacks', () => {
+  it('uses only the latest cumulative compaction handoff for runtime continuity', () => {
     const out = buildConversationContinuityContext([
       msg({ id: 'plain', content: 'hi' }),
+      msg({
+        id: 'c-old',
+        content: 'old summary',
+        compaction: { method: 'rolling', originalMessageCount: 3, beforeTokens: 80, afterTokens: 30 },
+      }),
       msg({
         id: 'c',
         content: 'raw body',

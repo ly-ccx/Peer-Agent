@@ -30,7 +30,15 @@ export function buildPersistedCompactedMessages({
     ? activeSourceMessages.slice(-safeKeptCount)
     : [];
 
-  const persisted = [...compressedSourceMessages];
+  // 历史 compaction 是 UI 时间线事实：右侧轨道需要展示每一次压缩，不能在下一次压缩时删除。
+  // 但 keptCount 只按非 compaction 原消息计算，因此先用首条活跃尾消息定位新分界线，再把
+  // 新 handoff 插回完整时间线。这样旧 handoff 留在原位，同时不会被误算为活跃 API 消息。
+  const firstKeptSource = keptSourceMessages[0];
+  const insertionIndex = firstKeptSource
+    ? sourceWithoutPending.indexOf(firstKeptSource)
+    : sourceWithoutPending.length;
+  const safeInsertionIndex = insertionIndex >= 0 ? insertionIndex : compressedSourceMessages.length;
+  const persisted = sourceWithoutPending.slice(0, safeInsertionIndex);
   for (const message of compactedMessages) {
     if (!message?._compaction) continue;
     persisted.push({
@@ -41,7 +49,7 @@ export function buildPersistedCompactedMessages({
     });
   }
 
-  persisted.push(...keptSourceMessages);
+  persisted.push(...sourceWithoutPending.slice(safeInsertionIndex));
   if (pendingAssistant) persisted.push(pendingAssistant);
   return persisted;
 }

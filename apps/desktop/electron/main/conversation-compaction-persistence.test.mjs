@@ -66,7 +66,7 @@ describe('conversation compaction persistence', () => {
     assert.deepEqual(persisted[4], pendingAssistant);
   });
 
-  it('does not keep an older compaction handoff as a recent source message', () => {
+  it('keeps older compaction handoffs at their historical timeline positions', () => {
     const previousCompaction = {
       id: 'previous-compaction',
       role: 'user',
@@ -92,10 +92,10 @@ describe('conversation compaction persistence', () => {
       idFactory: () => 'compaction-id',
     });
 
-    assert.equal(persisted.length, 3);
-    assert.equal(persisted[0].id, 'compaction-id');
-    assert.deepEqual(persisted.slice(1), sourceMessages.slice(1));
-    assert.equal(persisted.some((message) => message.id === 'previous-compaction'), false);
+    assert.equal(persisted.length, 4);
+    assert.equal(persisted[0].id, 'previous-compaction');
+    assert.equal(persisted[1].id, 'compaction-id');
+    assert.deepEqual(persisted.slice(2), sourceMessages.slice(1));
   });
 
   it('places all source messages before the handoff when keptCount is 0 (guards against slice(-0) active tail)', () => {

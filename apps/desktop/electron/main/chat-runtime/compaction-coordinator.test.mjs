@@ -168,6 +168,10 @@ describe('chat compaction coordinator', () => {
       .filter((e) => e.channel === 'chat:compaction')
       .map((e) => e.payload.stage);
     assert.deepEqual(stages, ['start', 'idle']);
+    assert.deepEqual(
+      events.filter((e) => e.channel === 'chat:compaction').map((e) => e.payload.conversationId),
+      ['c1', 'c1'],
+    );
   });
 
   it('forwards preserveLatestUserTurn to automatic compaction', async () => {
@@ -241,6 +245,7 @@ describe('chat compaction coordinator', () => {
       (event) => event.channel === 'chat:compaction' && event.payload.stage === 'done',
     )?.payload;
     assert.ok(done, 'successful compaction must emit done');
+    assert.equal(done.conversationId, 'c1');
     assert.deepEqual(ordering, ['persist', 'done']);
     assert.equal(done.contextWindow, 200_000);
     assert.equal(

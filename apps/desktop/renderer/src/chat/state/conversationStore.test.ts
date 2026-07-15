@@ -145,6 +145,35 @@ describe('conversationStore', () => {
     assert.equal(store.resolveConversation('s-2'), 'B');
   });
 
+  it('routes an explicitly identified compaction event to A while a new B stays idle', () => {
+    const store = new ConversationStore();
+    store.routeStream('stream-A', 'A');
+    store.setState('A', {
+      compactionState: { phase: 'running', percent: 0, streamId: 'stream-A', startedAt: 1 },
+    });
+
+    const eventConversationId = store.resolveEventConversation('stream-A', 'A');
+    assert.equal(eventConversationId, 'A');
+    store.setState(eventConversationId!, {
+      compactionState: { phase: 'running', percent: 42, streamId: 'stream-A', startedAt: 1 },
+    });
+
+    assert.deepEqual(store.getSnapshot('B').compactionState, { phase: 'idle' });
+    assert.deepEqual(store.getSnapshot('A').compactionState, {
+      phase: 'running',
+      percent: 42,
+      streamId: 'stream-A',
+      startedAt: 1,
+    });
+  });
+
+  it('uses explicit event identity to repair a missing local stream route', () => {
+    const store = new ConversationStore();
+    assert.equal(store.resolveConversation('stream-A'), null);
+    assert.equal(store.resolveEventConversation('stream-A', 'A'), 'A');
+    assert.equal(store.resolveConversation('stream-A'), 'A');
+  });
+
   it('supports functional updater patches over previous snapshot', () => {
     const store = new ConversationStore();
     store.setState('A', { messages: [msg('m1', 'one')] });

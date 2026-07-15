@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { executeProjectedModelTool } from './chat-runtime/projected-tool-executor.mjs';
 import { createToolContext } from './chat-runtime/tool-orchestrator.mjs';
+import { resetCircuitBreaker } from './context-compactor.mjs';
 
 let tmpDir;
 
@@ -471,6 +472,7 @@ describe('llm chat service tool materialization', () => {
   });
 
   it('continues the same OpenAI turn after automatic compaction while preserving the latest user input', async () => {
+    resetCircuitBreaker();
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;
     const events = [];
@@ -502,7 +504,9 @@ describe('llm chat service tool materialization', () => {
             model: 'test-model',
             isDefault: true,
             apiKeyConfigured: true,
-            contextWindow: 400,
+            // 内置工具 schema 与 system context 固定占用较大；8.5k 窗口可让压前总量越过 80% 软线，
+            // 同时允许压后 handoff + 工具真实回到软线以下。
+            contextWindow: 8_500,
           }],
           getDecryptedApiKey: () => 'test-key',
         },
@@ -546,6 +550,7 @@ describe('llm chat service tool materialization', () => {
   });
 
   it('emits a stream error instead of done when automatic compaction persistence fails', async () => {
+    resetCircuitBreaker();
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;
     const events = [];
@@ -569,7 +574,8 @@ describe('llm chat service tool materialization', () => {
             model: 'test-model',
             isDefault: true,
             apiKeyConfigured: true,
-            contextWindow: 400,
+            // 保持与上一个自动压缩集成场景相同的可实现预算。
+            contextWindow: 8_500,
           }],
           getDecryptedApiKey: () => 'test-key',
         },

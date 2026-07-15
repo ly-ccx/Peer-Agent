@@ -109,7 +109,7 @@ describe('estimateConversationTokens', () => {
     assert.equal(next.totalTokens, estimateConversationHistoryTokens([stableUser, nextTail]));
   });
 
-  // 压缩感知：与 toApiMessages 同口径——只统计最后一条 compaction 之后的活跃消息 + 各 compaction 摘要。
+  // 压缩感知：与 toApiMessages 同口径——只统计最后一条 compaction 之后的活跃消息 + 最新累计摘要。
   const compaction = (summary?: string) => ({
     method: 'rolling',
     originalMessageCount: 3,
@@ -141,7 +141,7 @@ describe('estimateConversationTokens', () => {
     assert.equal(estimateConversationTokens(messages, '', []), 22);
   });
 
-  it('counts all compaction summaries but only originals after the last boundary', () => {
+  it('counts only the latest cumulative compaction summary and originals after its boundary', () => {
     const total = estimateConversationTokens([
       msg({ content: 'abcd' }), // 第一个压缩点之前：不计入
       msg({ content: 'x', compaction: compaction('ab') }), // 摘要 'ab' => 1
@@ -149,6 +149,6 @@ describe('estimateConversationTokens', () => {
       msg({ content: 'x', compaction: compaction('abcdefgh') }), // 摘要 8 字符 => 2
       msg({ content: 'abcd' }), // 最后一条压缩之后的活跃消息：11
     ], '', []);
-    assert.equal(total, 11 + 1 + 2);
+    assert.equal(total, 11 + 2);
   });
 });

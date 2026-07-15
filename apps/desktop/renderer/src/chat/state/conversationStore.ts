@@ -227,6 +227,18 @@ export class ConversationStore {
     return this.streamRoutes.get(streamId) ?? null;
   }
 
+  /**
+   * 解析带会话身份的事件。显式 conversationId 是跨进程事件的权威归属，
+   * 同时补登记 stream 路由；仅为兼容旧事件才回退到 renderer 本地映射。
+   */
+  resolveEventConversation(streamId: string, conversationId?: string | null): string | null {
+    if (conversationId) {
+      this.routeStream(streamId, conversationId);
+      return conversationId;
+    }
+    return this.resolveConversation(streamId);
+  }
+
   /** 终结事件（done/aborted/error）后清理路由表项，避免泄漏。 */
   clearStream(streamId: string): void {
     if (!streamId) return;

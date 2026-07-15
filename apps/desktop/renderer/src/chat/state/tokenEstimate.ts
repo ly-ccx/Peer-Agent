@@ -59,8 +59,8 @@ export function estimateAttachmentTokens(attachments: readonly ChatAttachment[])
  *
  * 压缩感知（与 toApiMessages 同口径）：发送给模型的内容并非全部 UI 消息，而是
  * - 「最后一条 compaction 之后」的活跃消息（更早的原文仅供 UI 回看，不回灌模型）；
- * - 各 compaction 的连续性摘要（summary || content，对齐 buildConversationContinuityContext
- *   实际经 continuity 通道注入的文本）。
+ * - 最新 compaction 的累计连续性摘要（summary || content，对齐
+ *   buildConversationContinuityContext 实际经 continuity 通道注入的文本）。
  */
 export function estimateConversationHistoryTokens(messages: readonly ChatMsg[]): number {
   const lastCompactionIndex = messages.reduce(
@@ -75,12 +75,11 @@ export function estimateConversationHistoryTokens(messages: readonly ChatMsg[]):
     messageTokens += estimateMessageTokens(message);
   }
 
-  // 计入所有 compaction 的连续性摘要（无论是否在活跃区间内，摘要都会被注入连续性上下文）。
-  let continuityTokens = 0;
-  for (const message of messages) {
-    if (!message.compaction) continue;
-    continuityTokens += estimateTextTokens(message.compaction.summary || message.content);
-  }
+  // 最新摘要已经累计 carry-forward 之前摘要；旧标记仅用于 UI 时间线，不能重复计入。
+  const latestCompaction = lastCompactionIndex >= 0 ? messages[lastCompactionIndex] : undefined;
+  const continuityTokens = latestCompaction?.compaction
+    ? estimateTextTokens(latestCompaction.compaction.summary || latestCompaction.content)
+    : 0;
 
   return Math.max(0, messageTokens + continuityTokens);
 }

@@ -541,6 +541,47 @@ function messageHasToolUse(message) {
   return Array.isArray(message?.content) && message.content.some((block) => block?.type === 'tool_use');
 }
 
+function toolUseEntries(message, messageIndex) {
+  const entries = [];
+  if (Array.isArray(message?.tool_calls)) {
+    message.tool_calls.forEach((toolCall, index) => {
+      entries.push({ id: toolCall?.id || `unmatched-openai:${messageIndex}:${index}`, messageIndex });
+    });
+  }
+  if (Array.isArray(message?.content)) {
+    message.content.forEach((block, index) => {
+      if (block?.type !== 'tool_use') return;
+      entries.push({ id: block.id || `unmatched-anthropic:${messageIndex}:${index}`, messageIndex });
+    });
+  }
+  return entries;
+}
+
+function toolResultIds(message) {
+  const ids = [];
+  if (message?.role === 'tool' && message.tool_call_id) ids.push(message.tool_call_id);
+  if (Array.isArray(message?.content)) {
+    for (const block of message.content) {
+      if (block?.type === 'tool_result' && block.tool_use_id) ids.push(block.tool_use_id);
+    }
+  }
+  return ids;
+}
+
+// 找到最新真人 user 之后仍未闭合的最早 tool_use。已经拿到全部 tool_result 的轮次
+// 是可摘要的历史进展，不应因为仍处于同一个 Goal turn 就永久占据活跃上下文。
+function findUnclosedToolTailStart(messages) {
+  const pendingToolUses = new Map();
+  messages.forEach((message, messageIndex) => {
+    for (const entry of toolUseEntries(message, messageIndex)) {
+      pendingToolUses.set(entry.id, entry.messageIndex);
+    }
+    for (const resultId of toolResultIds(message)) pendingToolUses.delete(resultId);
+  });
+  if (pendingToolUses.size === 0) return messages.length;
+  return Math.min(...pendingToolUses.values());
+}
+
 function isHumanUserMessage(message) {
   if (message?.role !== 'user') return false;
   if (message?._compaction) return false;
@@ -579,15 +620,26 @@ function splitForCompaction(messages, { preserveLatestUserTurn = false } = {}) {
   // 默认保持手动 /compact 的“真·全量压缩”：旧消息全部摘要，连当前轮原文也不保留。
   // 自动 preflight 压缩则必须保留最新真人 user turn：用户刚发送的原文不能被 summary 代替。
   const currentTurnStart = preserveLatestUserTurn ? findCurrentTurnStart(convMsgs) : -1;
-  // ⚠️ 全量压缩时显式用 length 而非负数：slice(-0) ≡ slice(0) = 全部，会把切分反转。
-  const cutIndex = currentTurnStart >= 0 ? currentTurnStart : convMsgs.length;
+  let initialKeep;
+  let initialOld;
+  if (currentTurnStart >= 0) {
+    const latestUser = convMsgs[currentTurnStart];
+    const currentTurnTail = convMsgs.slice(currentTurnStart + 1);
+    const unclosedTailStart = findUnclosedToolTailStart(currentTurnTail);
+    initialKeep = [latestUser, ...currentTurnTail.slice(unclosedTailStart)];
+    initialOld = [
+      ...convMsgs.slice(0, currentTurnStart),
+      ...currentTurnTail.slice(0, unclosedTailStart),
+    ];
+  } else {
+    // ⚠️ 全量压缩时显式把 keep 设为空：slice(-0) ≡ slice(0) 会把切分反转。
+    initialKeep = [];
+    initialOld = convMsgs;
+  }
 
-  // 末尾若是悬空工具对（assistant tool_call 尚未闭合 / keep 首条为孤立 tool_result），
-  // 由 expandKeepForToolContinuity 兜底拉入最小未闭合工具尾，避免 provider 因配对缺失报错。
-  const split = expandKeepForToolContinuity({
-    keep: convMsgs.slice(cutIndex),
-    old: convMsgs.slice(0, cutIndex),
-  });
+  // 异常 provider 历史若让 keep 从 tool_result 开始，兜底把对应 tool_use 一并拉入，
+  // 避免发送孤立工具结果。
+  const split = expandKeepForToolContinuity({ keep: initialKeep, old: initialOld });
   return {
     keep: split.keep,
     old: split.old,
@@ -970,19 +1022,22 @@ function summarizeOldMessages(oldMessages) {
   let currentUser = null;
 
   for (const m of oldMessages) {
-    if (m.role === 'user') {
+    if (isHumanUserMessage(m)) {
       currentUser = m;
-    } else if (m.role === 'assistant' && currentUser) {
+    } else if (m.role === 'assistant') {
       turnCounter++;
-      const userContent =
-        typeof currentUser.content === 'string'
-          ? currentUser.content
-          : JSON.stringify(currentUser.content);
-
       parts.push(`\n### Turn ${turnCounter}`);
-      parts.push(
-        `**User**: ${userContent.slice(0, 800)}${userContent.length > 800 ? '...' : ''}`,
-      );
+      if (currentUser) {
+        const userContent =
+          typeof currentUser.content === 'string'
+            ? currentUser.content
+            : JSON.stringify(currentUser.content);
+        parts.push(
+          `**User**: ${userContent.slice(0, 800)}${userContent.length > 800 ? '...' : ''}`,
+        );
+      } else {
+        parts.push('**Context**: Continued execution inside the latest preserved user turn.');
+      }
 
       // Extract tool calls
       const tcList =
@@ -1026,6 +1081,13 @@ function summarizeOldMessages(oldMessages) {
       }
 
       currentUser = null;
+    } else if (messageHasToolResult(m)) {
+      const toolResultContent = typeof m.content === 'string'
+        ? m.content
+        : JSON.stringify(m.content);
+      parts.push(
+        `**Tool result**: ${toolResultContent.slice(0, 800)}${toolResultContent.length > 800 ? '...' : ''}`,
+      );
     }
   }
 
@@ -1391,7 +1453,7 @@ export async function compactIfNeeded({
   }
 
   // Build result
-  const result = buildCompactedMessages({
+  let result = buildCompactedMessages({
     systemPrompt,
     compactSummary,
     oldCount: old.length,
@@ -1404,11 +1466,88 @@ export async function compactIfNeeded({
     fallbackDetail,
   });
 
-  const afterTokens = estimateTokensFromMessages(result);
+  let afterTokens = estimateTokensFromMessages(result);
   setCompactionAfterTokens(result, afterTokens);
 
+  // 压缩不是“生成了摘要”就算成功：自动压缩必须同时满足两条验收条件：
+  // 1) messages + tools 的总预算确实下降；2) 回到触发线以内。
+  // 结构摘要在大量短消息场景可能比原文还大，LLM 也可能返回异常冗长摘要；此时降级为
+  // 最小 handoff。若连最小 handoff + 必须保留的 user/tool 尾都无法过线，则明确失败，
+  // 避免把“压后仍超窗”伪装成 compacted:true 后继续撞 provider。
+  const toolTokens = estimateToolsTokens(tools);
+  const triggerLimit = contextWindow
+    ? Math.floor(contextWindow * COMPACTION_CONFIG.triggerRatio)
+    : null;
+  let afterBudgetTokens = afterTokens + toolTokens;
+  const requiresBudgetAcceptance = shouldCompact(beforeTokens, contextWindow);
+  const meetsBudgetAcceptance = () => (
+    afterBudgetTokens < beforeTokens
+    && (triggerLimit === null || afterBudgetTokens <= triggerLimit)
+  );
+
+  if (requiresBudgetAcceptance && !meetsBudgetAcceptance()) {
+    const rejectedMethod = method;
+    const rejectedBudgetTokens = afterBudgetTokens;
+    const alternatives = [];
+    if (method === 'llm') {
+      const structuralSummary = summarizeOldMessages(old);
+      if (structuralSummary) alternatives.push({ method: 'structural', summary: structuralSummary });
+    }
+    alternatives.push({ method: 'fallback_drop', summary: null });
+
+    let accepted = false;
+    let minimalCandidateBudgetTokens = afterBudgetTokens;
+    for (const alternative of alternatives) {
+      const candidate = buildCompactedMessages({
+        systemPrompt,
+        compactSummary: alternative.summary,
+        oldCount: old.length,
+        keepMessages: keep,
+        method: alternative.method,
+        beforeTokens,
+        afterTokens: 0,
+        continuityContext,
+        fallbackReason: 'insufficient_reduction',
+        fallbackDetail: `${rejectedMethod} candidate left ${rejectedBudgetTokens} tokens against trigger ${triggerLimit}`,
+      });
+      const candidateAfterTokens = estimateTokensFromMessages(candidate);
+      setCompactionAfterTokens(candidate, candidateAfterTokens);
+      const candidateBudgetTokens = candidateAfterTokens + toolTokens;
+      minimalCandidateBudgetTokens = Math.min(minimalCandidateBudgetTokens, candidateBudgetTokens);
+      if (
+        candidateBudgetTokens < beforeTokens
+        && (triggerLimit === null || candidateBudgetTokens <= triggerLimit)
+      ) {
+        result = candidate;
+        compactSummary = alternative.summary;
+        method = alternative.method;
+        fallbackReason = 'insufficient_reduction';
+        fallbackDetail = `${rejectedMethod} candidate left ${rejectedBudgetTokens} tokens against trigger ${triggerLimit}`;
+        afterTokens = candidateAfterTokens;
+        afterBudgetTokens = candidateBudgetTokens;
+        accepted = true;
+        break;
+      }
+    }
+
+    if (!accepted) {
+      const error = new Error(
+        `Context compaction could not reduce the prompt below ${triggerLimit} tokens; minimal candidate=${minimalCandidateBudgetTokens}, before=${beforeTokens}`,
+      );
+      error.code = 'CONTEXT_COMPACTION_INSUFFICIENT_REDUCTION';
+      logCompactionDiagnostic('compact:insufficient_reduction', {
+        beforeTokens,
+        afterBudgetTokens: minimalCandidateBudgetTokens,
+        triggerLimit,
+        oldMessageCount: old.length,
+        keptMessageCount: keep.length,
+      });
+      throw error;
+    }
+  }
+
   console.log(
-    `[context-compactor] Compaction complete: ${beforeTokens} → ${afterTokens} tokens (method: ${method})`,
+    `[context-compactor] Compaction complete: ${beforeTokens} → ${afterBudgetTokens} tokens (method: ${method})`,
   );
 
   logCompactionDiagnostic('compact:complete', {
@@ -1416,6 +1555,8 @@ export async function compactIfNeeded({
     fallbackReason,
     beforeTokens,
     afterTokens,
+    afterBudgetTokens,
+    triggerLimit,
     oldMessageCount: old.length,
     summaryChars: typeof compactSummary === 'string' ? compactSummary.length : 0,
   });
