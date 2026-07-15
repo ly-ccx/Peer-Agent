@@ -172,26 +172,28 @@ export function ThinkingTimeline({
               const toolId = tool.toolCallId ?? tool.toolId ?? `tool_${displayNumber}_${toolIndex}`;
               const toolStatus = tool.status ?? 'completed';
               return (
-                <article key={toolId} className={`timeline-tool ${toolStatus}`}>
-                  <div>
+                <details key={toolId} className={`timeline-tool ${toolStatus}`}>
+                  <summary className="timeline-tool-summary">
                     <strong>{resolveToolTitle(tool, i18n)}</strong>
                     <span>{renderToolStatusBadge(tool, toolStatus)}</span>
+                  </summary>
+                  <div className="timeline-tool-details">
+                    {renderToolInput(i18n.t('chat.timeline.toolInput'), tool)}
+                    {steps.length > 0 ? (
+                      <ol>
+                        {steps.map((step) => (
+                          <li key={`${toolId}-${step.step}`}>
+                            <span>{step.title}</span>
+                            <small>{step.status}</small>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : null}
+                    {renderToolStream(i18n.t('chat.timeline.toolStdout'), tool.stdout, 'stdout')}
+                    {renderToolStream(i18n.t('chat.timeline.toolStderr'), tool.stderr, 'stderr')}
+                    {renderToolResult(tool)}
                   </div>
-                  {renderToolInput(i18n.t('chat.timeline.toolInput'), tool)}
-                  {steps.length > 0 ? (
-                    <ol>
-                      {steps.map((step) => (
-                        <li key={`${toolId}-${step.step}`}>
-                          <span>{step.title}</span>
-                          <small>{step.status}</small>
-                        </li>
-                      ))}
-                    </ol>
-                  ) : null}
-                  {renderToolStream(i18n.t('chat.timeline.toolStdout'), tool.stdout, 'stdout')}
-                  {renderToolStream(i18n.t('chat.timeline.toolStderr'), tool.stderr, 'stderr')}
-                  {renderToolResult(tool)}
-                </article>
+                </details>
               );
             })}
           </section>

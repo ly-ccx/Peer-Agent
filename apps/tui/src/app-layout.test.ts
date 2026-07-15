@@ -25,6 +25,23 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('<box width={layout.welcomeWidth} maxWidth={112}>');
   });
 
+  test('lets long chat history shrink and scroll without compressing the composer dock', () => {
+    const historySource = appSource.slice(
+      appSource.indexOf('function ChatHistory'),
+      appSource.indexOf('function ErrorBanner'),
+    );
+    const dockSource = appSource.slice(
+      appSource.indexOf('function ComposerDock'),
+      appSource.indexOf('export function App'),
+    );
+
+    expect(historySource).toContain('flexGrow={1}');
+    expect(historySource).toContain('flexShrink={1}');
+    expect(historySource).toContain('minHeight={0}');
+    expect(historySource).toContain('stickyScroll');
+    expect(dockSource).toContain('flexShrink={0}');
+  });
+
   test('keeps the composer input pure and places status outside its border', () => {
     expect(appSource).toContain("placeholder={disabled ? 'Resolve the request above…' : 'Ask anything…'}");
     const dockSource = appSource.slice(

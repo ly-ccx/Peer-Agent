@@ -82,7 +82,15 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
   if (snapshot.messages.length === 0) return null;
 
   return (
-    <scrollbox flexGrow={1} stickyScroll stickyStart="bottom" paddingLeft={2} paddingRight={2}>
+    <scrollbox
+      flexGrow={1}
+      flexShrink={1}
+      minHeight={0}
+      stickyScroll
+      stickyStart="bottom"
+      paddingLeft={2}
+      paddingRight={2}
+    >
       {snapshot.messages.map((message) => (
         <box key={message.id} flexDirection="column" marginBottom={1}>
           <text fg={roleColor(message.role)}>
@@ -267,7 +275,7 @@ function ComposerDock({
   readonly modelPickerShowHint: boolean;
 }) {
   return (
-    <box flexDirection="column" width="100%">
+    <box flexDirection="column" flexShrink={0} width="100%">
       <box position="relative" width="100%" height={5} overflow="visible">
         {slashOpen ? (
           <SlashCommandMenu
