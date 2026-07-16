@@ -530,7 +530,6 @@ export function Sidebar({
         <span className="sidebar-brand-copy">
           <BrandWordmark />
         </span>
-        <VersionBadge i18n={i18n} />
       </div>
 
       <div className="sidebar-workspace-wrap" ref={wsWrapRef}>
@@ -709,6 +708,7 @@ export function Sidebar({
           </svg>
           <span>{isZh ? '设置' : 'Settings'}</span>
         </button>
+        <VersionBadge i18n={i18n} />
       </div>
       <SidebarResizer isZh={isZh} />
     </aside>

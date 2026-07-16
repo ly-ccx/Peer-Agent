@@ -712,11 +712,15 @@
 /* ── Bottom nav ── */
 .sidebar-bottom {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 1px;
   padding: var(--space-2);
   border-top: 1px solid var(--chrome-hairline);
   -webkit-app-region: no-drag;
+}
+.sidebar-bottom .sidebar-nav-btn {
+  width: auto;
+  flex: 1;
 }
 .sidebar-nav-btn {
   display: flex;
