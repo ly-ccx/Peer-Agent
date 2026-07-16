@@ -423,6 +423,10 @@ export function createLlmConfigStore({
       }
     }
     if (item.authMethod === 'oauth_grok') {
+      if (item.name !== 'Grok 官方') {
+        item.name = 'Grok 官方';
+        changed = true;
+      }
       if (item.channelId !== 'grok') {
         item.channelId = 'grok';
         changed = true;
@@ -771,7 +775,7 @@ export function createLlmConfigStore({
       channelId,
       wireOverride: isSubscription || isGoogleOAuth || isGrokOAuth || isLocalQoderAuth ? undefined : wireOverride,
       authMethod: method,
-      name: isSubscription ? CHATGPT_SUBSCRIPTION_NAME : isGoogleOAuth ? (name || GEMINI_OAUTH_NAME) : isGrokOAuth ? (name || 'Grok 订阅') : isLocalQoderAuth ? (name || QODER_PRIVATE_NAME) : name || provider || 'Untitled',
+      name: isSubscription ? CHATGPT_SUBSCRIPTION_NAME : isGoogleOAuth ? (name || GEMINI_OAUTH_NAME) : isGrokOAuth ? (name || 'Grok 官方') : isLocalQoderAuth ? (name || QODER_PRIVATE_NAME) : name || provider || 'Untitled',
       baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : isLocalQoderAuth ? defaults.baseUrl : baseUrl || defaults.baseUrl,
       // 订阅默认落到权威清单的最新模型(gpt-5.5),非订阅沿用各家 preset。
       model: selectedModel,
@@ -918,7 +922,7 @@ export function createLlmConfigStore({
       item.baseUrl = item.baseUrl || defaultsForChannel('google-ai').baseUrl;
     }
     if (item.authMethod === 'oauth_grok') {
-      item.name = 'Grok 订阅';
+      item.name = 'Grok 官方';
       item.channelId = 'grok';
       delete item.wireOverride;
       item.provider = 'openai';

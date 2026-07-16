@@ -123,7 +123,7 @@ const FALLBACK_CHANNELS: readonly LlmChannelDescriptor[] = [
   },
   {
     id: 'grok',
-    label: 'Grok 订阅',
+    label: 'Grok 官方',
     legacyProvider: 'openai',
     defaultWire: 'openai-chat',
     allowedWires: ['openai-chat'],
@@ -184,7 +184,7 @@ function oauthLabel(method: LlmAuthMethod, locale: string): string {
   const zh = locale === 'zh-CN';
   if (method === 'oauth_google') return zh ? 'Google OAuth 登录' : 'Google OAuth';
   if (method === 'oauth_chatgpt') return zh ? 'ChatGPT 订阅登录' : 'ChatGPT Subscription';
-  if (method === 'oauth_grok') return zh ? 'Grok 订阅登录' : 'Grok Subscription';
+  if (method === 'oauth_grok') return zh ? 'Grok 官方登录' : 'Grok Official';
   return 'API Key';
 }
 
@@ -1073,8 +1073,8 @@ export function LlmSettingsPanel({
               <p className="llm-oauth-hint">
                 {form.authMethod === 'oauth_grok'
                   ? (i18n.locale === 'zh-CN'
-                    ? '点击登录将打开 Grok 的设备授权页。按页面提示确认一次性验证码后，Peer Agent 会保存 Grok 订阅登录态并拉取 Grok Build 模型。'
-                    : 'Click login to open the Grok device authorization page. Confirm the one-time code to save your Grok subscription session and load Grok Build models.')
+                    ? '点击登录将打开 Grok 官方设备授权页。按页面提示确认一次性验证码后，Peer Agent 会保存 Grok 官方登录态并拉取 Grok Build 模型。'
+                    : 'Click login to open the official Grok device authorization page. Confirm the one-time code to save your Grok Official session and load Grok Build models.')
                   : form.authMethod === 'oauth_google'
                     ? (i18n.locale === 'zh-CN'
                       ? '点击登录将直接打开浏览器，使用 Google 账号完成订阅授权。无需填写或校验 API Key。'

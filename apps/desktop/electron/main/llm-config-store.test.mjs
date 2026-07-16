@@ -202,6 +202,31 @@ test('subscription provider migration restores GPT-5.6 prompt cache and effort l
   assert.deepEqual(persisted.reasoningEffortLevels, ['low', 'default', 'high', 'max']);
 }));
 
+test('Grok OAuth records migrate to the official display name', () => withStore(({ configFile }) => {
+  writeFileSync(configFile, JSON.stringify([
+    {
+      id: 'grok-oauth',
+      provider: 'openai',
+      authMethod: 'oauth_grok',
+      name: 'Grok 订阅',
+      baseUrl: 'https://cli-chat-proxy.grok.com/v1',
+      model: 'grok-4.5',
+      enabled: true,
+      isDefault: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+  ], null, 2));
+
+  const store = createLlmConfigStore({ configFile });
+  const [provider] = store.listProviders();
+  assert.equal(provider.name, 'Grok 官方');
+  assert.equal(provider.channelId, 'grok');
+  assert.equal(provider.authMethod, 'oauth_grok');
+
+  const [persisted] = JSON.parse(readFileSync(configFile, 'utf8'));
+  assert.equal(persisted.name, 'Grok 官方');
+}));
+
 test('legacy provider entries migrate to channel fields without losing stored settings', () => withStore(({ configFile, credentialSecrets }) => {
   writeFileSync(configFile, JSON.stringify([
     {

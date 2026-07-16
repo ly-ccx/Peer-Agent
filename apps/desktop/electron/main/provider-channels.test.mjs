@@ -2,11 +2,17 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  listChannelDescriptors,
   resolveChannel,
   validateCustomHeaders,
 } from './provider-channels.mjs';
 
 describe('provider channel registry', () => {
+  it('uses the official Grok display name', () => {
+    const grok = listChannelDescriptors().find((channel) => channel.id === 'grok');
+    assert.equal(grok?.label, 'Grok 官方');
+  });
+
   it('resolves ChatGPT OAuth through OpenAI official responses wire only', () => {
     const resolved = resolveChannel({
       channelId: 'openai',

@@ -2,7 +2,7 @@ import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli
 
 export const CHATGPT_SUBSCRIPTION_NAME = 'ChatGPT 订阅';
 export const CHATGPT_SUBSCRIPTION_BASE_URL = 'https://chatgpt.com/backend-api/codex';
-export const GROK_SUBSCRIPTION_NAME = 'Grok 订阅';
+export const GROK_OFFICIAL_NAME = 'Grok 官方';
 export const GROK_SUBSCRIPTION_BASE_URL = 'https://cli-chat-proxy.grok.com/v1';
 export const GEMINI_OAUTH_NAME = 'Gemini OAuth';
 export const QODER_PRIVATE_NAME = 'Qoder 私有接口';
@@ -147,7 +147,7 @@ const CHANNEL_DESCRIPTORS = {
   },
   [CHANNEL_IDS.GROK]: {
     id: CHANNEL_IDS.GROK,
-    label: GROK_SUBSCRIPTION_NAME,
+    label: GROK_OFFICIAL_NAME,
     legacyProvider: 'openai',
     defaultWire: 'openai-chat',
     allowedWires: ['openai-chat'],
