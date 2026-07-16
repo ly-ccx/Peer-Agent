@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,7 +19,14 @@ function readJsonl(filePath) {
 
 function writeJsonl(filePath, rows) {
   mkdirSync(path.dirname(filePath), { recursive: true });
-  writeFileSync(filePath, rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : ''), 'utf8');
+  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  writeFileSync(temporaryPath, rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : ''), 'utf8');
+  try {
+    renameSync(temporaryPath, filePath);
+  } catch (error) {
+    try { unlinkSync(temporaryPath); } catch {}
+    throw error;
+  }
 }
 
 function appendJsonl(filePath, row) {
@@ -250,7 +257,11 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     return meta ? { ...meta, messages } : null;
   }
 
-  function replaceMessages(id, newMessages) {
+  function replaceMessages(id, newMessages, options = {}) {
+    const existingMessages = readJsonl(convFile(id));
+    if (newMessages.length === 0 && existingMessages.length > 0 && options.allowEmpty !== true) {
+      throw new Error(`Refusing to replace non-empty conversation ${id} with an empty message list`);
+    }
     writeJsonl(convFile(id), newMessages);
     const index = readIndex();
     const meta = index.find((c) => c.id === id);

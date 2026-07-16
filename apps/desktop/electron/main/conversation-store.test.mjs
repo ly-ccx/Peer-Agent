@@ -33,6 +33,36 @@ test('addUsage accumulates lifetime usage on index meta', () => {
   }
 });
 
+test('replaceMessages refuses a stale empty overwrite but allows an explicitly requested clear', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'protected' });
+    store.appendMessage(conv.id, { id: 'm1', role: 'user', content: 'must survive' });
+
+    assert.throws(
+      () => store.replaceMessages(conv.id, []),
+      /Refusing to replace non-empty conversation/,
+    );
+    assert.deepEqual(store.getConversation(conv.id).messages.map((message) => message.id), ['m1']);
+
+    store.replaceMessages(conv.id, [], { allowEmpty: true });
+    assert.deepEqual(store.getConversation(conv.id).messages, []);
+  } finally {
+    cleanup();
+  }
+});
+
+test('replaceMessages accepts an empty list for a newly created empty conversation', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'new empty conversation' });
+    store.replaceMessages(conv.id, []);
+    assert.deepEqual(store.getConversation(conv.id).messages, []);
+  } finally {
+    cleanup();
+  }
+});
+
 test('lifetimeUsage survives replaceMessages (compaction does NOT reset billing)', () => {
   const { store, cleanup } = freshStore();
   try {
