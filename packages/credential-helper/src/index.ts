@@ -209,10 +209,6 @@ export function modelOauthCredentialKey(providerId: string): string {
   return modelCredentialKey(providerId, 'oauth-tokens');
 }
 
-export function modelOauthClientSecretCredentialKey(providerId: string): string {
-  return modelCredentialKey(providerId, 'oauth-client-secret');
-}
-
 function modelCredentialKey(providerId: string, kind: string): string {
   const key = `model/${providerId}/${kind}`;
   validateCredentialKey(key);

@@ -38,18 +38,4 @@ describe('Google subscription OAuth', () => {
     assert.equal(tokens.refresh, 'refresh-token');
   });
 
-  it('keeps supporting an explicitly configured client for existing providers', async () => {
-    globalThis.fetch = async (_url, options) => {
-      const body = new URLSearchParams(options.body);
-      assert.equal(body.get('client_id'), 'legacy-client');
-      assert.equal(body.get('client_secret'), 'legacy-secret');
-      return new Response(JSON.stringify({ access_token: 'next-access', expires_in: 3600 }), { status: 200 });
-    };
-
-    const tokens = await refreshGoogleAccessToken(
-      { access: 'old-access', refresh: 'refresh-token', expires: 0 },
-      { clientId: 'legacy-client', clientSecret: 'legacy-secret' },
-    );
-    assert.equal(tokens.access, 'next-access');
-  });
 });

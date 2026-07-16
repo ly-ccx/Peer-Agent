@@ -1,8 +1,7 @@
 // Google / Gemini OAuth (PKCE, browser mode).
 //
-// Uses the public installed-app OAuth client shipped by the open-source Gemini
-// CLI. Installed-app client credentials are not secrets; tokens remain encrypted
-// by llm-config-store as part of the provider record.
+// The application owns the installed-app OAuth identity. Callers provide no
+// client configuration; tokens remain encrypted by llm-config-store.
 
 import http from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
@@ -44,13 +43,6 @@ function extractEmail(idToken) {
   }
 }
 
-function resolveOAuthClient(config = {}) {
-  return {
-    clientId: String(config.clientId || DEFAULT_CLIENT_ID).trim(),
-    clientSecret: String(config.clientSecret || DEFAULT_CLIENT_SECRET).trim(),
-  };
-}
-
 function toTokenSet(json) {
   const expiresInMs = (Number(json.expires_in) || 3600) * 1000;
   return {
@@ -62,14 +54,14 @@ function toTokenSet(json) {
   };
 }
 
-async function exchangeCode({ code, verifier, clientId, clientSecret }) {
+async function exchangeCode({ code, verifier }) {
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       grant_type: 'authorization_code',
-      client_id: clientId,
-      client_secret: clientSecret,
+      client_id: DEFAULT_CLIENT_ID,
+      client_secret: DEFAULT_CLIENT_SECRET,
       code,
       redirect_uri: REDIRECT_URI,
       code_verifier: verifier,
@@ -82,16 +74,15 @@ async function exchangeCode({ code, verifier, clientId, clientSecret }) {
   return toTokenSet(await res.json());
 }
 
-export async function refreshGoogleAccessToken(tokens, oauthClient) {
+export async function refreshGoogleAccessToken(tokens) {
   if (!tokens?.refresh) throw new Error('No Google refresh token available');
-  const { clientId, clientSecret } = resolveOAuthClient(oauthClient);
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       grant_type: 'refresh_token',
-      client_id: clientId,
-      client_secret: clientSecret,
+      client_id: DEFAULT_CLIENT_ID,
+      client_secret: DEFAULT_CLIENT_SECRET,
       refresh_token: tokens.refresh,
     }).toString(),
   });
@@ -109,12 +100,12 @@ export async function refreshGoogleAccessToken(tokens, oauthClient) {
   };
 }
 
-export async function ensureFreshGoogleTokens(tokens, oauthClient, { skewMs = 60_000 } = {}) {
+export async function ensureFreshGoogleTokens(tokens, { skewMs = 60_000 } = {}) {
   if (!tokens?.access) throw new Error('Not logged in');
   if (typeof tokens.expires === 'number' && tokens.expires - skewMs > Date.now()) {
     return { tokens, refreshed: false };
   }
-  const next = await refreshGoogleAccessToken(tokens, oauthClient);
+  const next = await refreshGoogleAccessToken(tokens);
   return { tokens: next, refreshed: true };
 }
 
@@ -147,8 +138,7 @@ const CALLBACK_HTML = (ok) => {
   );
 };
 
-export function startGoogleBrowserLogin(oauthClient) {
-  const { clientId, clientSecret } = resolveOAuthClient(oauthClient);
+export function startGoogleBrowserLogin() {
   const { verifier, challenge } = createPkce();
   const state = base64url(randomBytes(16));
 
@@ -201,7 +191,7 @@ export function startGoogleBrowserLogin(oauthClient) {
     }
 
     try {
-      const tokens = await exchangeCode({ code, verifier, clientId, clientSecret });
+      const tokens = await exchangeCode({ code, verifier });
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(CALLBACK_HTML(true));
       finish(resolveFn, tokens);
@@ -214,7 +204,7 @@ export function startGoogleBrowserLogin(oauthClient) {
 
   function onListening() {
     const authorizeUrl = new URL(AUTHORIZE_URL);
-    authorizeUrl.searchParams.set('client_id', clientId);
+    authorizeUrl.searchParams.set('client_id', DEFAULT_CLIENT_ID);
     authorizeUrl.searchParams.set('response_type', 'code');
     authorizeUrl.searchParams.set('redirect_uri', REDIRECT_URI);
     authorizeUrl.searchParams.set('scope', SCOPE);

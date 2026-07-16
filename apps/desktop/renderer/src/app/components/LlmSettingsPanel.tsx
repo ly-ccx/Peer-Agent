@@ -48,8 +48,6 @@ interface FormState {
   baseUrl: string;
   model: string;
   apiKey: string;
-  oauthClientId: string;
-  oauthClientSecret: string;
   oauthProjectId: string;
   contextWindow: string;
   maxOutputTokens: string;
@@ -314,8 +312,6 @@ function emptyForm(channels: readonly LlmChannelDescriptor[] = FALLBACK_CHANNELS
     baseUrl: channel.defaults.baseUrl,
     model: channel.defaults.model,
     apiKey: '',
-    oauthClientId: '',
-    oauthClientSecret: '',
     oauthProjectId: '',
     contextWindow: '',
     maxOutputTokens: '',
@@ -349,10 +345,6 @@ function friendlyTestError(error: string | undefined, locale: string): string {
       return zh ? '未登录，请先完成 OAuth 登录' : 'Not logged in — please complete OAuth login';
     case 'oauth_session_expired':
       return zh ? '登录已过期，请重新登录' : 'Session expired — please re-login';
-    case 'oauth_google_client_id_required':
-      return zh ? '请填写 Google OAuth Client ID' : 'Please enter the Google OAuth Client ID';
-    case 'oauth_google_client_secret_required':
-      return zh ? '请填写 Google OAuth Client Secret' : 'Please enter the Google OAuth Client Secret';
     case 'oauth_google_project_required':
       return zh ? '请填写 Google Cloud Project ID' : 'Please enter the Google Cloud Project ID';
     case 'API key not configured':
@@ -574,8 +566,6 @@ export function LlmSettingsPanel({
       baseUrl: p.baseUrl,
       model: p.model,
       apiKey: '',
-      oauthClientId: p.oauthClientId ?? '',
-      oauthClientSecret: '',
       oauthProjectId: p.oauthProjectId ?? '',
       contextWindow: p.contextWindow ? String(p.contextWindow) : '',
       maxOutputTokens: p.maxOutputTokens ? String(p.maxOutputTokens) : '',
@@ -615,7 +605,6 @@ export function LlmSettingsPanel({
           authMethod: form.authMethod,
           name: form.name,
           baseUrl: form.baseUrl,
-          oauthClientId: form.oauthClientId,
           oauthProjectId: form.oauthProjectId,
         };
         for (const [index, model] of groupModels.entries()) {
@@ -623,7 +612,6 @@ export function LlmSettingsPanel({
             id: model.id,
             ...connectionPatch,
             ...(index === 0 && form.apiKey ? { apiKey: form.apiKey } : {}),
-            ...(index === 0 && form.oauthClientSecret ? { oauthClientSecret: form.oauthClientSecret } : {}),
           });
         }
       } else {
@@ -636,8 +624,6 @@ export function LlmSettingsPanel({
           name: form.name || (localCli ? 'Qoder 私有接口' : form.provider),
           baseUrl: form.baseUrl,
           apiKey: form.apiKey,
-          oauthClientId: form.oauthClientId,
-          oauthClientSecret: form.oauthClientSecret,
           oauthProjectId: form.oauthProjectId,
         } as PendingProviderDraft;
         if (addModelGroupId) {

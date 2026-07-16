@@ -423,7 +423,6 @@ export interface LlmProviderConfig {
   // 该 provider 原生支持的思考强度档位（来自 channel capabilities，未含归一化）。
   // 前端据此渲染档位选择器；缺省时前端回退到通用四档。
   readonly reasoningEffortLevels?: readonly string[];
-  readonly oauthClientId?: string;
   readonly oauthProjectId?: string;
   readonly customHeaders?: Readonly<Record<string, string>>;
   readonly customHeadersInvalid?: boolean;
@@ -485,7 +484,6 @@ export interface LlmProviderGroupConfig {
   readonly name: string;
   readonly baseUrl: string;
   readonly createdAt: string;
-  readonly oauthClientId?: string;
   readonly oauthProjectId?: string;
   readonly models: readonly LlmModelConfig[];
 }

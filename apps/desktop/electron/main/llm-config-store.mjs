@@ -14,7 +14,6 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import {
   modelApiKeyCredentialKey,
-  modelOauthClientSecretCredentialKey,
   modelOauthCredentialKey,
 } from '@peer-agent/credential-helper';
 import { getDataHome, pathOf } from './data-store.mjs';
@@ -217,11 +216,6 @@ export function createLlmConfigStore({
     return key ? credentials().getSecret(modelApiKeyCredentialKey(key)) || '' : '';
   }
 
-  function readOAuthClientSecret(item) {
-    const key = groupKey(item);
-    return key ? credentials().getSecret(modelOauthClientSecretCredentialKey(key)) || '' : '';
-  }
-
   function readOAuthTokens(item) {
     const key = groupKey(item);
     if (!key) return null;
@@ -252,10 +246,6 @@ export function createLlmConfigStore({
     writeVerifiedSecret(modelApiKeyCredentialKey(groupId), String(value || ''));
   }
 
-  function setGroupOAuthClientSecret(groupId, value) {
-    writeVerifiedSecret(modelOauthClientSecretCredentialKey(groupId), String(value || ''));
-  }
-
   function setGroupOAuthTokens(groupId, tokens) {
     const serialized = tokens ? JSON.stringify(tokens) : '';
     writeVerifiedSecret(modelOauthCredentialKey(groupId), serialized);
@@ -264,7 +254,6 @@ export function createLlmConfigStore({
   function removeGroupSecrets(groupId) {
     if (!groupId) return;
     writeVerifiedSecret(modelApiKeyCredentialKey(groupId), '');
-    writeVerifiedSecret(modelOauthClientSecretCredentialKey(groupId), '');
     writeVerifiedSecret(modelOauthCredentialKey(groupId), '');
   }
 
@@ -278,19 +267,12 @@ export function createLlmConfigStore({
   function snapshotGroupSecrets(groupId) {
     return {
       apiKey: credentials().getSecret(modelApiKeyCredentialKey(groupId)),
-      oauthClientSecret: credentials().getSecret(
-        modelOauthClientSecretCredentialKey(groupId),
-      ),
       oauthTokens: credentials().getSecret(modelOauthCredentialKey(groupId)),
     };
   }
 
   function restoreGroupSecrets(groupId, snapshot) {
     writeVerifiedSecret(modelApiKeyCredentialKey(groupId), snapshot.apiKey || '');
-    writeVerifiedSecret(
-      modelOauthClientSecretCredentialKey(groupId),
-      snapshot.oauthClientSecret || '',
-    );
     writeVerifiedSecret(modelOauthCredentialKey(groupId), snapshot.oauthTokens || '');
   }
 
@@ -532,7 +514,6 @@ export function createLlmConfigStore({
     const groups = new Map();
     for (const item of items) {
       const hasLegacySecret = item.apiKey !== undefined
-        || item.oauthClientSecret !== undefined
         || item.oauthTokens !== undefined;
       if (!hasLegacySecret) continue;
       const groupId = groupKey(item);
@@ -540,13 +521,6 @@ export function createLlmConfigStore({
       const group = groups.get(groupId) || { groupId };
       if (item.apiKey !== undefined) {
         mergeLegacySecret(group, 'apiKey', legacySecretDecryptor(item.apiKey));
-      }
-      if (item.oauthClientSecret !== undefined) {
-        mergeLegacySecret(
-          group,
-          'oauthClientSecret',
-          legacySecretDecryptor(item.oauthClientSecret),
-        );
       }
       if (item.oauthTokens !== undefined) {
         mergeLegacySecret(
@@ -566,9 +540,6 @@ export function createLlmConfigStore({
     try {
       for (const group of groups.values()) {
         if (group.apiKeyPresent) setGroupApiKey(group.groupId, group.apiKey);
-        if (group.oauthClientSecretPresent) {
-          setGroupOAuthClientSecret(group.groupId, group.oauthClientSecret);
-        }
         if (group.oauthTokensPresent) setGroupOAuthTokens(group.groupId, group.oauthTokens);
       }
     } catch (error) {
@@ -583,9 +554,6 @@ export function createLlmConfigStore({
         if (group.apiKey) item.apiKeyMasked = maskApiKey(group.apiKey);
         else delete item.apiKeyMasked;
       }
-      if (group.oauthClientSecretPresent) {
-        item.oauthClientSecretConfigured = Boolean(group.oauthClientSecret);
-      }
       if (group.oauthTokensPresent) {
         const tokens = group.oauthTokens;
         item.oauthConfigured = Boolean(tokens?.access);
@@ -595,7 +563,6 @@ export function createLlmConfigStore({
         else delete item.oauthAccountId;
       }
       delete item.apiKey;
-      delete item.oauthClientSecret;
       delete item.oauthTokens;
     }
     return snapshots;
@@ -615,6 +582,18 @@ export function createLlmConfigStore({
       if (migrateChannelItem(item)) migrated = true;
       if (migrateSubscriptionItem(item)) migrated = true;
       if (migrateGroupId(item)) migrated = true;
+      if (Object.hasOwn(item, 'oauthClientId')) {
+        delete item.oauthClientId;
+        migrated = true;
+      }
+      if (Object.hasOwn(item, 'oauthClientSecret')) {
+        delete item.oauthClientSecret;
+        migrated = true;
+      }
+      if (Object.hasOwn(item, 'oauthClientSecretConfigured')) {
+        delete item.oauthClientSecretConfigured;
+        migrated = true;
+      }
     }
     const credentialSnapshots = migrateLegacyCredentials(parsed);
     if (credentialSnapshots) migrated = true;
@@ -701,7 +680,6 @@ export function createLlmConfigStore({
       reasoningParamStyle: item.reasoningParamStyle ?? undefined,
       reasoningEffortMap: item.reasoningEffortMap ?? undefined,
       reasoningEffortLevels: item.reasoningEffortLevels ?? resolved?.reasoningEffortLevels ?? undefined,
-      oauthClientId: item.oauthClientId ?? undefined,
       oauthProjectId: item.oauthProjectId ?? undefined,
       customHeaders: item.customHeaders ?? undefined,
       customHeadersInvalid: item.customHeadersInvalid ?? undefined,
@@ -714,7 +692,6 @@ export function createLlmConfigStore({
           : isOAuthAuthMethod(item.authMethod)
           ? oauthStatus?.status === 'connected'
           : Boolean(item.apiKeyConfigured),
-      oauthClientSecretConfigured: Boolean(item.oauthClientSecretConfigured),
     };
   }
 
@@ -728,7 +705,7 @@ export function createLlmConfigStore({
     return listProviders();
   }
 
-  function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, modelLabel, metadataSource, pricingSource, metadataSyncedAt, apiKey, contextWindow, maxOutputTokens, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthClientId, oauthClientSecret, oauthProjectId, customHeaders }) {
+  function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, modelLabel, metadataSource, pricingSource, metadataSyncedAt, apiKey, contextWindow, maxOutputTokens, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthProjectId, customHeaders }) {
     const items = readAll();
     const method = normalizeAuthMethod(authMethod);
     const channelId = method === 'oauth_chatgpt'
@@ -784,8 +761,6 @@ export function createLlmConfigStore({
       pricingSource: isSubscription || isLocalQoderAuth ? undefined : pricingSource,
       metadataSyncedAt: isSubscription || isLocalQoderAuth ? new Date().toISOString() : metadataSyncedAt,
       apiKeyConfigured: false,
-      oauthClientId: isGoogleOAuth ? String(oauthClientId || '').trim() || undefined : undefined,
-      oauthClientSecretConfigured: false,
       oauthProjectId: isGoogleOAuth ? String(oauthProjectId || '').trim() || undefined : undefined,
       oauthConfigured: false,
       enabled: true,
@@ -825,7 +800,6 @@ export function createLlmConfigStore({
     if (existingGroup) {
       item.apiKeyConfigured = Boolean(existingGroup.apiKeyConfigured);
       item.apiKeyMasked = existingGroup.apiKeyMasked || undefined;
-      item.oauthClientSecretConfigured = Boolean(existingGroup.oauthClientSecretConfigured);
       item.oauthConfigured = Boolean(existingGroup.oauthConfigured);
       item.oauthExpires = existingGroup.oauthExpires;
       item.oauthAccountId = existingGroup.oauthAccountId;
@@ -835,16 +809,13 @@ export function createLlmConfigStore({
     }
 
     const storedApiKey = isOAuthAuthMethod(method) || isLocalQoderAuth ? '' : String(apiKey || '');
-    const storedOauthClientSecret = isGoogleOAuth ? String(oauthClientSecret || '') : '';
     item.apiKeyConfigured = Boolean(storedApiKey);
     item.apiKeyMasked = storedApiKey ? maskApiKey(storedApiKey) : undefined;
-    item.oauthClientSecretConfigured = Boolean(storedOauthClientSecret);
     items.push(item);
     return withGroupSecretTransaction(
       item.groupId,
       () => {
         setGroupApiKey(item.groupId, storedApiKey);
-        setGroupOAuthClientSecret(item.groupId, storedOauthClientSecret);
       },
       () => {
         writeAll(items);
@@ -884,12 +855,6 @@ export function createLlmConfigStore({
         apiKeyMasked: patch.apiKey ? maskApiKey(patch.apiKey) : undefined,
       });
     }
-    if (patch.oauthClientId !== undefined) item.oauthClientId = patch.oauthClientId || undefined;
-    if (patch.oauthClientSecret !== undefined) {
-      syncGroupSecretMetadata(items, groupId, {
-        oauthClientSecretConfigured: Boolean(patch.oauthClientSecret),
-      });
-    }
     if (patch.oauthProjectId !== undefined) item.oauthProjectId = patch.oauthProjectId || undefined;
     if (patch.customHeaders !== undefined) {
       validateCustomHeaders(patch.customHeaders || {});
@@ -901,8 +866,6 @@ export function createLlmConfigStore({
         oauthConfigured: false,
         oauthExpires: undefined,
         oauthAccountId: undefined,
-        oauthClientId: undefined,
-        oauthClientSecretConfigured: false,
         oauthProjectId: undefined,
       });
     }
@@ -953,11 +916,7 @@ export function createLlmConfigStore({
       groupId,
       () => {
         if (patch.apiKey !== undefined) setGroupApiKey(groupId, patch.apiKey || '');
-        if (patch.oauthClientSecret !== undefined) {
-          setGroupOAuthClientSecret(groupId, patch.oauthClientSecret || '');
-        }
         if (leavingOAuth) {
-          setGroupOAuthClientSecret(groupId, '');
           setGroupOAuthTokens(groupId, null);
         }
         if (isLocalCliAuthMethod(item.authMethod)) setGroupApiKey(groupId, '');
@@ -1061,16 +1020,13 @@ export function createLlmConfigStore({
       createdAt: new Date().toISOString(),
     };
     const sourceApiKey = readApiKey(source);
-    const sourceOauthClientSecret = readOAuthClientSecret(source);
     copy.apiKeyConfigured = Boolean(sourceApiKey);
     copy.apiKeyMasked = sourceApiKey ? maskApiKey(sourceApiKey) : undefined;
-    copy.oauthClientSecretConfigured = Boolean(sourceOauthClientSecret);
     items.push(copy);
     return withGroupSecretTransaction(
       copy.groupId,
       () => {
         setGroupApiKey(copy.groupId, sourceApiKey);
-        setGroupOAuthClientSecret(copy.groupId, sourceOauthClientSecret);
         setGroupOAuthTokens(copy.groupId, null);
       },
       () => {
@@ -1138,8 +1094,6 @@ export function createLlmConfigStore({
     if (!item) return null;
     return {
       tokens: readOAuthTokens(item),
-      oauthClientId: item.oauthClientId,
-      oauthClientSecret: readOAuthClientSecret(item),
       oauthProjectId: item.oauthProjectId,
       authMethod: item.authMethod,
     };

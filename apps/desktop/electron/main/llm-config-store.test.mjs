@@ -6,7 +6,6 @@ import { test } from 'node:test';
 
 import {
   modelApiKeyCredentialKey,
-  modelOauthClientSecretCredentialKey,
   modelOauthCredentialKey,
 } from '@peer-agent/credential-helper';
 import { createLlmConfigStore as createLlmConfigStoreImpl } from './llm-config-store.mjs';
@@ -346,11 +345,11 @@ test('Gemini subscription can be added without manual OAuth client configuration
 
   assert.equal(provider.channelId, 'google-ai');
   assert.equal(provider.authMethod, 'oauth_google');
-  assert.equal(provider.oauthClientId, undefined);
-  assert.equal(provider.oauthClientSecretConfigured, false);
+  assert.equal(Object.hasOwn(provider, 'oauthClientId'), false);
+  assert.equal(Object.hasOwn(provider, 'oauthClientSecretConfigured'), false);
 }));
 
-test('legacy Gemini OAuth records remain readable for migration or deletion', () => withStore(({ configFile }) => {
+test('legacy Gemini OAuth client fields are discarded while the provider remains usable', () => withStore(({ configFile }) => {
   writeFileSync(configFile, JSON.stringify([
     {
       id: 'legacy-gemini-oauth',
@@ -375,14 +374,17 @@ test('legacy Gemini OAuth records remain readable for migration or deletion', ()
   assert.equal(provider.id, 'legacy-gemini-oauth');
   assert.equal(provider.channelId, 'google-ai');
   assert.equal(provider.authMethod, 'oauth_google');
-  assert.equal(provider.oauthClientId, 'google-client-id');
-  assert.equal(provider.oauthClientSecretConfigured, true);
+  assert.equal(Object.hasOwn(provider, 'oauthClientId'), false);
+  assert.equal(Object.hasOwn(provider, 'oauthClientSecretConfigured'), false);
   assert.equal(provider.oauthProjectId, 'my-project');
 
   const credential = store.getCredential(provider.id);
-  assert.equal(credential.oauthClientId, 'google-client-id');
-  assert.equal(credential.oauthClientSecret, 'google-client-secret');
+  assert.equal(Object.hasOwn(credential, 'oauthClientId'), false);
+  assert.equal(Object.hasOwn(credential, 'oauthClientSecret'), false);
   assert.equal(credential.oauthProjectId, 'my-project');
+  const [persisted] = JSON.parse(readFileSync(configFile, 'utf8'));
+  assert.equal(Object.hasOwn(persisted, 'oauthClientId'), false);
+  assert.equal(Object.hasOwn(persisted, 'oauthClientSecret'), false);
 }));
 
 test('Qoder local auth provider does not require a stored API key', () => withStore(({ configFile, credentialSecrets }) => {
@@ -741,14 +743,10 @@ test('legacy safeStorage secrets migrate to Vault before encrypted fields are re
   });
 
   const [provider] = store.listProviders();
-  assert.equal(decryptCount, 3);
+  assert.equal(decryptCount, 2);
   assert.equal(provider.oauthStatus.status, 'connected');
   assert.equal(provider.oauthStatus.accountId, 'acct-legacy');
   assert.equal(credentialSecrets.get(modelApiKeyCredentialKey('legacy-oauth')), 'legacy-api-key');
-  assert.equal(
-    credentialSecrets.get(modelOauthClientSecretCredentialKey('legacy-oauth')),
-    'legacy-client-secret',
-  );
   assert.deepEqual(
     JSON.parse(credentialSecrets.get(modelOauthCredentialKey('legacy-oauth'))),
     tokens,
@@ -767,14 +765,12 @@ test('legacy safeStorage secrets migrate to Vault before encrypted fields are re
   assert.equal(persisted.oauthAccountId, 'acct-legacy');
   assert.deepEqual(store.getCredential('legacy-oauth'), {
     tokens,
-    oauthClientId: 'legacy-client-id',
-    oauthClientSecret: 'legacy-client-secret',
     oauthProjectId: undefined,
     authMethod: 'oauth_google',
   });
 
   store.listProviders();
-  assert.equal(decryptCount, 3, 'migration is idempotent and legacy decrypt is not repeated');
+  assert.equal(decryptCount, 2, 'migration is idempotent and legacy decrypt is not repeated');
 }));
 
 test('legacy credential migration failure preserves the source file and rolls Vault back', () => withStore(({
@@ -789,21 +785,21 @@ test('legacy credential migration failure preserves the source file and rolls Va
     baseUrl: 'https://example.test/v1',
     model: 'legacy-model',
     apiKey: { encrypted: false, data: 'legacy-api-key' },
-    oauthClientSecret: { encrypted: false, data: 'legacy-client-secret' },
+    oauthTokens: { encrypted: false, data: '{"access":"legacy-access"}' },
     enabled: true,
     isDefault: true,
     createdAt: '2026-01-01T00:00:00.000Z',
   }], null, 2);
   writeFileSync(configFile, original);
 
-  let failClientSecretWrite = true;
+  let failTokenWrite = true;
   const credentialClient = {
     getSecret(key) {
       return credentialSecrets.has(key) ? credentialSecrets.get(key) : null;
     },
     setSecret(key, value) {
-      if (failClientSecretWrite && key === modelOauthClientSecretCredentialKey('legacy-failure')) {
-        failClientSecretWrite = false;
+      if (failTokenWrite && key === modelOauthCredentialKey('legacy-failure')) {
+        failTokenWrite = false;
         throw new Error('injected_credential_failure');
       }
       credentialSecrets.set(key, String(value));
@@ -946,7 +942,6 @@ test('legacy Google OAuth group migrates to API key without changing per-model m
       createdAt,
     },
   ], null, 2));
-  credentialSecrets.set(modelOauthClientSecretCredentialKey(groupId), 'legacy-client-secret');
   credentialSecrets.set(modelOauthCredentialKey(groupId), JSON.stringify({
     access: 'legacy-access',
     refresh: 'legacy-refresh',
@@ -971,7 +966,7 @@ test('legacy Google OAuth group migrates to API key without changing per-model m
     assert.equal(provider.authMethod, 'api_key');
     assert.equal(provider.apiKeyConfigured, true);
     assert.equal(provider.oauthStatus, undefined);
-    assert.equal(provider.oauthClientSecretConfigured, false);
+    assert.equal(Object.hasOwn(provider, 'oauthClientSecretConfigured'), false);
     assert.equal(store.getDecryptedApiKey(provider.id), 'gemini-api-key');
   }
   assert.equal(migrated[0].modelLabel, 'Gemini A');
@@ -982,7 +977,6 @@ test('legacy Google OAuth group migrates to API key without changing per-model m
   assert.equal(migrated[1].maxOutputTokens, 8_192);
   assert.equal(migrated[1].supportsReasoning, true);
   assert.equal(migrated[1].metadataSource, 'manual');
-  assert.equal(credentialSecrets.has(modelOauthClientSecretCredentialKey(groupId)), false);
   assert.equal(credentialSecrets.has(modelOauthCredentialKey(groupId)), false);
 
   for (const persisted of JSON.parse(readFileSync(configFile, 'utf8'))) {

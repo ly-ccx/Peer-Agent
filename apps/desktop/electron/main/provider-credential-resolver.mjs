@@ -86,10 +86,7 @@ export async function resolveProviderCredential({
       throw createProviderCredentialError('oauth_not_logged_in');
     }
     try {
-      const { tokens: fresh, refreshed } = await ensureFreshGeminiTokens(tokens, {
-        clientId: credential?.oauthClientId,
-        clientSecret: credential?.oauthClientSecret,
-      });
+      const { tokens: fresh, refreshed } = await ensureFreshGeminiTokens(tokens);
       if (refreshed) llmConfigStore.setOAuthTokens(credentialId, fresh);
       return {
         authMethod,
