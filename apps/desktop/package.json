@@ -7,14 +7,15 @@
   "type": "module",
   "main": "electron/main/main.mjs",
   "scripts": {
-    "dev": "pnpm --filter @peer-agent/protocol build && pnpm --filter @peer-agent/runtime-core build && pnpm --filter @peer-agent/runtime-sdk build && pnpm --filter @peer-agent/runtime-node build && pnpm --filter @peer-agent/credential-helper build && node ../../scripts/build-credential-helper.mjs --profile debug && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
-    "build": "pnpm --filter @peer-agent/protocol build && pnpm --filter @peer-agent/runtime-core build && pnpm --filter @peer-agent/runtime-sdk build && pnpm --filter @peer-agent/runtime-node build && pnpm --filter @peer-agent/credential-helper build && vite build",
+    "dev": "pnpm --filter @peer-agent/protocol build && pnpm --filter @peer-agent/runtime-core build && pnpm --filter @peer-agent/runtime-sdk build && pnpm --filter @peer-agent/runtime-node build && pnpm --filter @peer-agent/credential-helper build && pnpm --filter @peer-agent/conversation-store build && node ../../scripts/build-credential-helper.mjs --profile debug && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "build": "pnpm --filter @peer-agent/protocol build && pnpm --filter @peer-agent/runtime-core build && pnpm --filter @peer-agent/runtime-sdk build && pnpm --filter @peer-agent/runtime-node build && pnpm --filter @peer-agent/credential-helper build && pnpm --filter @peer-agent/conversation-store build && vite build",
     "test": "node --test \"electron/main/**/*.test.mjs\" \"renderer/src/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json",
-    "pack": "node ../../scripts/build-credential-helper.mjs --profile release && electron-builder --dir",
-    "dist": "node ../../scripts/build-credential-helper.mjs --profile release && electron-builder",
-    "dist:mac": "node ../../scripts/build-credential-helper.mjs --profile release && electron-builder --mac",
-    "dist:win": "node ../../scripts/build-credential-helper.mjs --profile release && electron-builder --win",
+    "pack": "node ../../scripts/build-credential-helper.mjs --profile release && electron-builder --dir && pnpm verify:packaged",
+    "dist": "node ../../scripts/build-credential-helper.mjs --profile release && electron-builder && pnpm verify:packaged",
+    "dist:mac": "node ../../scripts/build-credential-helper.mjs --profile release && electron-builder --mac && pnpm verify:packaged",
+    "dist:win": "node ../../scripts/build-credential-helper.mjs --profile release && electron-builder --win && pnpm verify:packaged",
+    "verify:packaged": "node scripts/verify-packaged-runtime.cjs",
     "publish:stable": "bash scripts/publish.sh stable",
     "publish:beta": "bash scripts/publish.sh beta",
     "dev:lab": "node ../../scripts/build-credential-helper.mjs --profile debug && concurrently -k \"cross-env PEER_DEV_PORT=5273 vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5273 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5273 PEER_AGENT_HOME=$HOME/.peer-agent-lab electron .\""
@@ -40,6 +41,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "@tailwindcss/vite": "^4.3.0",
     "@types/react": "^19.2.6",
     "@types/react-dom": "^19.2.3",

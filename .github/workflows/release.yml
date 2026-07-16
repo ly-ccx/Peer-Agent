@@ -132,6 +132,9 @@ jobs:
           --config.publish.channel=${{ needs.meta.outputs.channel }}
           --config.publish.releaseType=${{ needs.meta.outputs.releaseType }}
 
+      - name: Verify packaged runtime entries
+        run: pnpm --filter @peer-agent/desktop verify:packaged
+
       # 上传各平台产物（安装包 + blockmap + 更新清单）给 release job 汇总。
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
