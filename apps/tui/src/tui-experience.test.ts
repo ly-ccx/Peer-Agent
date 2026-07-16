@@ -9,6 +9,7 @@ import {
   openCommandPanel,
   showPermission,
   showPlanApproval,
+  selectionWindow,
   slashCommandWindow,
   syncSlashSuggestions,
   TUI_COMMANDS,
@@ -43,6 +44,19 @@ describe('TUI experience model', () => {
     ]);
     expect(slashCommandWindow(commands, 6, 2).map(({ command }) => command.id)).toEqual([
       'help', 'quit',
+    ]);
+  });
+
+  test('keeps generic selection windows centered on the selected item', () => {
+    const rows = Array.from({ length: 12 }, (_, index) => `row-${index}`);
+    expect(selectionWindow(rows, 0, 4).map(({ item, index }) => [item, index])).toEqual([
+      ['row-0', 0], ['row-1', 1], ['row-2', 2], ['row-3', 3],
+    ]);
+    expect(selectionWindow(rows, 8, 4).map(({ item, index }) => [item, index])).toEqual([
+      ['row-6', 6], ['row-7', 7], ['row-8', 8], ['row-9', 9],
+    ]);
+    expect(selectionWindow(rows, 11, 4).map(({ item }) => item)).toEqual([
+      'row-8', 'row-9', 'row-10', 'row-11',
     ]);
   });
 

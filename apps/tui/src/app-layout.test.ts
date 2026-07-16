@@ -25,6 +25,16 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('<box width={layout.welcomeWidth} maxWidth={112}>');
   });
 
+  test('renders the composer with OpenTUI rounded corners without changing its height', () => {
+    const composerSource = appSource.slice(
+      appSource.indexOf('function Composer('),
+      appSource.indexOf('function ComposerDock'),
+    );
+
+    expect(composerSource).toContain('borderStyle="rounded"');
+    expect(composerSource).toContain('height={5}');
+  });
+
   test('lets long chat history shrink and scroll without compressing the composer dock', () => {
     const historySource = appSource.slice(
       appSource.indexOf('function ChatHistory'),
@@ -40,6 +50,32 @@ describe('TUI app layout', () => {
     expect(historySource).toContain('minHeight={0}');
     expect(historySource).toContain('stickyScroll');
     expect(dockSource).toContain('flexShrink={0}');
+  });
+
+  test('keeps an empty chat history spacer so the resume composer stays at the bottom', () => {
+    const historySource = appSource.slice(
+      appSource.indexOf('function ChatHistory'),
+      appSource.indexOf('function ErrorBanner'),
+    );
+
+    expect(historySource).toContain('flexGrow={1}');
+    expect(historySource).not.toContain('if (snapshot.messages.length === 0) return null');
+  });
+
+  test('docks the resume picker above the composer and windows rows around selection', () => {
+    const resumeSource = appSource.slice(
+      appSource.indexOf('function ResumePickerMenu'),
+      appSource.indexOf('interface ModelPickerRow'),
+    );
+
+    expect(resumeSource).toContain('selectionWindow(rows, selectedIndex, maxVisible)');
+    expect(resumeSource).toContain('visibleRows.map(({ item: row, index })');
+    expect(resumeSource).toContain('flexShrink={0}');
+    expect(resumeSource).not.toContain('position="absolute"');
+    expect(resumeSource).not.toContain('bottom={5}');
+    expect(resumeSource).not.toContain('rows.slice(0, 8)');
+    expect(appSource.indexOf('<ResumePickerMenu'))
+      .toBeLessThan(appSource.lastIndexOf('<ComposerDock'));
   });
 
   test('keeps the composer input pure and places status outside its border', () => {

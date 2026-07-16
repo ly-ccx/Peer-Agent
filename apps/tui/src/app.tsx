@@ -60,6 +60,7 @@ import {
   escapeFooter,
   filterTuiCommands,
   openCommandPanel,
+  selectionWindow,
   slashCommandWindow,
   syncSlashSuggestions,
   type TuiCommand,
@@ -83,7 +84,6 @@ const COMMAND_NOTICE_DURATION_MS = 3_000;
 
 function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
   const [expandedTools, setExpandedTools] = useState<ReadonlySet<string>>(new Set());
-  if (snapshot.messages.length === 0) return null;
 
   const toggleTool = (messageId: string) => {
     setExpandedTools((current) => {
@@ -200,14 +200,16 @@ function SlashCommandMenu({ commands, selectedIndex, maxVisible, showDescription
   );
 }
 
-function ResumePickerMenu({ rows, selectedIndex }: {
+function ResumePickerMenu({ rows, selectedIndex, maxVisible }: {
   readonly rows: readonly TuiConversationSummary[];
   readonly selectedIndex: number;
+  readonly maxVisible: number;
 }) {
+  const visibleRows = selectionWindow(rows, selectedIndex, maxVisible);
   return (
-    <box position="absolute" left={0} right={0} bottom={5} zIndex={100} flexDirection="column" border borderColor={COLOR.border} backgroundColor={COLOR.panel} paddingLeft={1} paddingRight={1}>
+    <box flexDirection="column" flexShrink={0} border borderColor={COLOR.border} backgroundColor={COLOR.panel} paddingLeft={1} paddingRight={1}>
       <text fg={COLOR.accent} wrapMode="none"><strong>Resume session</strong></text>
-      {rows.length === 0 ? <text fg={COLOR.muted}>No saved conversations to resume.</text> : rows.slice(0, 8).map((row, index) => (
+      {rows.length === 0 ? <text fg={COLOR.muted}>No saved conversations to resume.</text> : visibleRows.map(({ item: row, index }) => (
         <text key={row.id} fg={index === selectedIndex ? COLOR.accent : COLOR.text} wrapMode="none">
           {index === selectedIndex ? '› ' : '  '}{row.title}  ({row.messageCount} messages)
         </text>
@@ -284,7 +286,7 @@ function Composer({ controller, snapshot, disabled, focused, onValueChange, edit
   };
 
   return (
-    <box flexDirection="column" border borderColor={snapshot.status === 'idle' ? COLOR.border : COLOR.accent} height={5} paddingLeft={1} paddingRight={1} backgroundColor={COLOR.panel}>
+    <box flexDirection="column" border borderStyle="rounded" borderColor={snapshot.status === 'idle' ? COLOR.border : COLOR.accent} height={5} paddingLeft={1} paddingRight={1} backgroundColor={COLOR.panel}>
       <textarea
         ref={editor}
         focused={focused && !disabled}
@@ -1037,7 +1039,11 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
       ) : null}
 
       {resumeSurface ? (
-        <ResumePickerMenu rows={resumeItems} selectedIndex={resumeSurface.selectedIndex} />
+        <ResumePickerMenu
+          rows={resumeItems}
+          selectedIndex={resumeSurface.selectedIndex}
+          maxVisible={Math.min(8, pickerLayout.commandMaxVisible)}
+        />
       ) : null}
 
       {modeSurface ? (

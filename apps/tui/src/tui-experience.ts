@@ -41,18 +41,29 @@ export function filterTuiCommands(
   return filterTuiCommandRegistry(query, context);
 }
 
+export function selectionWindow<T>(
+  items: readonly T[],
+  selectedIndex: number,
+  maxVisible: number,
+): ReadonlyArray<{ readonly item: T; readonly index: number }> {
+  const windowSize = Math.max(1, Math.min(maxVisible, items.length));
+  const centeredStart = selectedIndex - Math.floor(windowSize / 2);
+  const maxStart = Math.max(0, items.length - windowSize);
+  const start = Math.max(0, Math.min(centeredStart, maxStart));
+  return items.slice(start, start + windowSize).map((item, offset) => ({
+    item,
+    index: start + offset,
+  }));
+}
+
 export function slashCommandWindow(
   commands: readonly TuiCommand[],
   selectedIndex: number,
   maxVisible: number,
 ): ReadonlyArray<{ readonly command: TuiCommand; readonly index: number }> {
-  const windowSize = Math.max(1, Math.min(maxVisible, commands.length));
-  const centeredStart = selectedIndex - Math.floor(windowSize / 2);
-  const maxStart = Math.max(0, commands.length - windowSize);
-  const start = Math.max(0, Math.min(centeredStart, maxStart));
-  return commands.slice(start, start + windowSize).map((command, offset) => ({
-    command,
-    index: start + offset,
+  return selectionWindow(commands, selectedIndex, maxVisible).map(({ item, index }) => ({
+    command: item,
+    index,
   }));
 }
 
