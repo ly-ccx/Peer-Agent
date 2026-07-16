@@ -24,13 +24,6 @@ export function resolveQuickChatPopoverSize(state = {}) {
   return { width: Math.round(width), height: Math.round(height) };
 }
 
-export function resolveQuickChatWindowBackground(appearance, systemUsesDarkColors = false) {
-  const mode = appearance?.mode;
-  const followsSystem = mode === 'system' || mode == null;
-  const useDark = mode === 'dark' || (followsSystem && systemUsesDarkColors);
-  return useDark ? '#11141A' : '#F7F8FA';
-}
-
 export function resolveQuickChatBounds({ cursorPoint, displays, size = DEFAULT_SIZE }) {
   const display = displays.find(({ bounds }) => (
     cursorPoint.x >= bounds.x
@@ -47,35 +40,54 @@ export function resolveQuickChatBounds({ cursorPoint, displays, size = DEFAULT_S
   };
 }
 
-export function resolveQuickChatPopoverBounds(parentBounds, anchorRect, displayBounds, size = POPOVER_MAX_SIZE) {
-  const anchorX = parentBounds.x + Math.round(anchorRect?.x ?? 0);
-  const anchorBottom = parentBounds.y + Math.round((anchorRect?.y ?? parentBounds.height) + (anchorRect?.height ?? 0));
-  const minX = displayBounds.x + 8;
-  const maxX = displayBounds.x + displayBounds.width - size.width - 8;
-  const minY = displayBounds.y + 8;
-  const maxY = displayBounds.y + displayBounds.height - size.height - 8;
-  const roomBelow = displayBounds.y + displayBounds.height - anchorBottom;
-  const preferredY = roomBelow >= size.height + POPOVER_GAP
-    ? anchorBottom + POPOVER_GAP
-    : parentBounds.y - size.height - POPOVER_GAP;
+export function resolveQuickChatExpandedBounds(parentBounds, anchorRect, _displayBounds, size = POPOVER_MAX_SIZE, baseHeight = DEFAULT_SIZE.height) {
+  const popoverBottom = Math.round((anchorRect?.y ?? baseHeight) + (anchorRect?.height ?? 0)) + POPOVER_GAP + size.height;
   return {
-    width: size.width,
-    height: size.height,
-    x: Math.min(maxX, Math.max(minX, anchorX)),
-    y: Math.min(maxY, Math.max(minY, preferredY)),
+    width: parentBounds.width,
+    height: Math.max(baseHeight, popoverBottom),
+    x: parentBounds.x,
+    y: parentBounds.y,
   };
 }
 
-export function createQuickChatWindowController({ screen, createWindow, createPopoverWindow }) {
+export function createQuickChatWindowController({ screen, createWindow }) {
   let quickChatWindow = null;
-  let popoverWindow = null;
   let popoverState = null;
-  let suppressParentBlur = false;
+  let taskCardVisible = false;
+
+  function baseSize() {
+    return taskCardVisible ? TASK_SIZE : DEFAULT_SIZE;
+  }
+
+  function resizeForCurrentState({ animate = false } = {}) {
+    if (!quickChatWindow || quickChatWindow.isDestroyed()) return;
+    const currentBounds = quickChatWindow.getBounds();
+    const size = baseSize();
+    const baseBounds = { ...currentBounds, width: size.width, height: size.height };
+    if (!popoverState) {
+      quickChatWindow.setBounds(baseBounds, animate);
+      quickChatWindow.setMaximumSize?.(size.width, size.height);
+      return;
+    }
+    const display = screen.getDisplayMatching?.(baseBounds) ?? screen.getAllDisplays()[0];
+    const area = display?.workArea ?? display?.bounds ?? baseBounds;
+    const expandedBounds = resolveQuickChatExpandedBounds(
+      baseBounds,
+      popoverState.anchorRect,
+      area,
+      resolveQuickChatPopoverSize(popoverState),
+      size.height,
+    );
+    // Older running windows may still carry the collapsed native maxHeight.
+    // Electron clamps setBounds until that constraint is lifted first.
+    quickChatWindow.setMaximumSize?.(size.width, Math.max(expandedBounds.height, area.height));
+    quickChatWindow.setBounds(expandedBounds, animate);
+  }
 
   function hidePopover({ restoreFocus = false } = {}) {
-    if (popoverWindow && !popoverWindow.isDestroyed()) popoverWindow.hide();
+    const wasOpen = popoverState !== null;
     popoverState = null;
-    suppressParentBlur = false;
+    if (wasOpen) resizeForCurrentState();
     if (restoreFocus && quickChatWindow && !quickChatWindow.isDestroyed()) {
       quickChatWindow.show();
       quickChatWindow.focus();
@@ -87,64 +99,23 @@ export function createQuickChatWindowController({ screen, createWindow, createPo
     if (quickChatWindow && !quickChatWindow.isDestroyed()) return quickChatWindow;
     quickChatWindow = createWindow();
     quickChatWindow.on('closed', () => {
-      if (popoverWindow && !popoverWindow.isDestroyed()) popoverWindow.close();
-      popoverWindow = null;
       popoverState = null;
       quickChatWindow = null;
     });
     quickChatWindow.on('blur', () => {
-      if (suppressParentBlur) return;
       if (quickChatWindow && !quickChatWindow.isDestroyed() && !quickChatWindow.webContents.isDevToolsOpened()) {
         hidePopover();
         quickChatWindow.hide();
       }
     });
-    quickChatWindow.on('move', () => { if (popoverState) positionPopover(); });
     return quickChatWindow;
-  }
-
-  function ensurePopoverWindow() {
-    if (popoverWindow && !popoverWindow.isDestroyed()) return popoverWindow;
-    popoverWindow = createPopoverWindow(ensureWindow());
-    popoverWindow.on('closed', () => {
-      popoverWindow = null;
-      popoverState = null;
-      suppressParentBlur = false;
-    });
-    popoverWindow.on('blur', () => {
-      if (popoverWindow && !popoverWindow.isDestroyed() && !popoverWindow.webContents.isDevToolsOpened()) {
-        hidePopover({ restoreFocus: true });
-      }
-    });
-    return popoverWindow;
-  }
-
-  function positionPopover() {
-    if (!popoverState || !quickChatWindow || quickChatWindow.isDestroyed()) return;
-    const picker = ensurePopoverWindow();
-    const parentBounds = quickChatWindow.getBounds();
-    const display = screen.getDisplayMatching?.(parentBounds) ?? screen.getAllDisplays()[0];
-    const area = display?.workArea ?? display?.bounds ?? parentBounds;
-    const size = resolveQuickChatPopoverSize(popoverState);
-    picker.setBounds(resolveQuickChatPopoverBounds(parentBounds, popoverState.anchorRect, area, size), false);
   }
 
   function showPopover(nextState) {
     if (!nextState || !['workspace', 'model', 'effort', 'mode', 'access'].includes(nextState.kind) || !Array.isArray(nextState.items)) return false;
     popoverState = nextState;
-    suppressParentBlur = true;
-    const picker = ensurePopoverWindow();
-    positionPopover();
-    picker.setAlwaysOnTop(true, 'floating');
-    picker.setVisibleOnAllWorkspaces(true, {
-      visibleOnFullScreen: true,
-      skipTransformProcessType: true,
-    });
-    const sendState = () => picker.webContents.send('quick-chat-popover:state', popoverState);
-    if (picker.webContents.isLoading?.()) picker.webContents.once?.('did-finish-load', sendState);
-    else sendState();
-    picker.show();
-    picker.focus();
+    ensureWindow();
+    resizeForCurrentState();
     return true;
   }
 
@@ -158,10 +129,11 @@ export function createQuickChatWindowController({ screen, createWindow, createPo
 
   function show() {
     const win = ensureWindow();
+    popoverState = null;
     const bounds = resolveQuickChatBounds({
       cursorPoint: screen.getCursorScreenPoint(),
       displays: screen.getAllDisplays(),
-      size: DEFAULT_SIZE,
+      size: baseSize(),
     });
     win.setBounds(bounds, false);
     win.setAlwaysOnTop(true, 'floating');
@@ -191,24 +163,15 @@ export function createQuickChatWindowController({ screen, createWindow, createPo
   }
 
   function setTaskCardVisible(visible) {
+    taskCardVisible = visible;
     const win = quickChatWindow && !quickChatWindow.isDestroyed() ? quickChatWindow : null;
     if (!win) return false;
-    const size = visible ? TASK_SIZE : DEFAULT_SIZE;
-    const bounds = resolveQuickChatBounds({
-      cursorPoint: screen.getCursorScreenPoint(),
-      displays: screen.getAllDisplays(),
-      size,
-    });
-    win.setBounds(bounds, true);
+    resizeForCurrentState({ animate: true });
     return true;
   }
 
   function getWindow() {
     return quickChatWindow && !quickChatWindow.isDestroyed() ? quickChatWindow : null;
-  }
-
-  function getPopoverWindow() {
-    return popoverWindow && !popoverWindow.isDestroyed() ? popoverWindow : null;
   }
 
   return {
@@ -217,7 +180,6 @@ export function createQuickChatWindowController({ screen, createWindow, createPo
     hide,
     setTaskCardVisible,
     getWindow,
-    getPopoverWindow,
     showPopover,
     hidePopover,
     selectPopoverValue,

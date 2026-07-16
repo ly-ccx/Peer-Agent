@@ -1,20 +1,18 @@
 html:has(.quick-chat-shell),
 body:has(.quick-chat-shell),
-#root:has(.quick-chat-shell),
-html:has(.quick-chat-popover-shell),
-body:has(.quick-chat-popover-shell),
-#root:has(.quick-chat-popover-shell) {
-  min-width: 0;
+#root:has(.quick-chat-shell) {
+  width: 100%;
+  min-width: 720px;
   min-height: 0;
   background: transparent !important;
 }
 
-body:has(.quick-chat-shell),
-body:has(.quick-chat-popover-shell) {
+body:has(.quick-chat-shell) {
   overflow: hidden;
 }
 
 .quick-chat-shell {
+  position: relative;
   color-scheme: light;
   --quick-surface: var(--chrome-canvas);
   --quick-control: var(--control-fill);
@@ -27,12 +25,15 @@ body:has(.quick-chat-popover-shell) {
   --quick-button-text: var(--chrome-canvas);
   --quick-shadow: var(--shadow-card);
   display: flex;
-  width: 100vw;
+  width: 720px;
+  min-width: 720px;
   height: 100vh;
   min-height: 0;
+  flex: 0 0 720px;
+  align-items: flex-start;
   overflow: hidden;
   color: var(--quick-text);
-  background: var(--quick-surface);
+  background: transparent;
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -42,9 +43,11 @@ body:has(.quick-chat-popover-shell) {
 
 .quick-chat-bar {
   display: flex;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
+  width: 720px;
+  min-width: 720px;
+  height: 104px;
+  min-height: 104px;
+  flex: 0 0 104px;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--quick-border);
@@ -52,7 +55,17 @@ body:has(.quick-chat-popover-shell) {
   background: var(--quick-surface);
   box-shadow: var(--quick-shadow);
   -webkit-app-region: drag;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition: border-color 120ms ease;
+}
+
+.quick-chat-shell.has-task .quick-chat-bar {
+  height: 286px;
+  flex-basis: 286px;
+}
+
+.quick-chat-shell.has-open-popover .quick-chat-bar {
+  border-bottom-color: transparent;
+  box-shadow: none;
 }
 
 .quick-chat-bar--error {
@@ -67,7 +80,10 @@ body:has(.quick-chat-popover-shell) {
   position: relative;
   z-index: 3;
   display: flex;
+  width: 100%;
+  min-width: 0;
   min-height: 32px;
+  flex: 0 0 32px;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
@@ -365,11 +381,17 @@ body:has(.quick-chat-popover-shell) {
 }
 
 .quick-chat-popover-shell {
-  width: 100vw;
-  height: 100vh;
+  position: absolute;
+  z-index: 10;
+  overflow: hidden;
+  border: 1px solid var(--quick-border);
+  border-radius: 12px;
   color: var(--graphite-base);
   background: var(--chrome-canvas);
+  box-shadow: var(--shadow-card);
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  outline: 0;
+  -webkit-app-region: no-drag;
 }
 
 .quick-chat-popover-panel {

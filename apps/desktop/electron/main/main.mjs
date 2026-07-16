@@ -31,8 +31,6 @@ import { createShortcutService } from './shortcut-service.mjs';
 import {
   createQuickChatWindowController,
   DEFAULT_SIZE as QUICK_CHAT_SIZE,
-  POPOVER_MAX_SIZE as QUICK_CHAT_POPOVER_SIZE,
-  resolveQuickChatWindowBackground,
 } from './quick-chat-window.mjs';
 import { getMainWindowWebContents } from './window-routing.mjs';
 import { createMcpRegistry } from './mcp-registry.mjs';
@@ -883,18 +881,14 @@ function loadRendererWindow(targetWindow, query = {}) {
 }
 
 function createQuickChatWindow() {
-  const backgroundColor = resolveQuickChatWindowBackground(
-    settingsStore.getAll().appearance,
-    nativeTheme.shouldUseDarkColors,
-  );
   const quickWindow = new BrowserWindow({
     ...QUICK_CHAT_SIZE,
     minWidth: QUICK_CHAT_SIZE.width,
     maxWidth: QUICK_CHAT_SIZE.width,
     minHeight: QUICK_CHAT_SIZE.height,
-    maxHeight: QUICK_CHAT_SIZE.height,
     useContentSize: true,
-    backgroundColor,
+    backgroundColor: '#00000000',
+    transparent: true,
     show: false,
     frame: false,
     roundedCorners: true,
@@ -911,35 +905,9 @@ function createQuickChatWindow() {
   return quickWindow;
 }
 
-function createQuickChatPopoverWindow(parentWindow) {
-  const backgroundColor = resolveQuickChatWindowBackground(
-    settingsStore.getAll().appearance,
-    nativeTheme.shouldUseDarkColors,
-  );
-  const popoverWindow = new BrowserWindow({
-    ...QUICK_CHAT_POPOVER_SIZE,
-    parent: parentWindow,
-    show: false,
-    frame: false,
-    roundedCorners: true,
-    resizable: false,
-    hasShadow: true,
-    backgroundColor,
-    webPreferences: {
-      preload: path.join(__dirname, '../preload/preload.cjs'),
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-    },
-  });
-  loadRendererWindow(popoverWindow, { window: 'quick-chat-popover' });
-  return popoverWindow;
-}
-
 const quickChatWindowController = createQuickChatWindowController({
   screen,
   createWindow: createQuickChatWindow,
-  createPopoverWindow: createQuickChatPopoverWindow,
 });
 const shortcutService = createShortcutService({
   globalShortcut,
@@ -1073,17 +1041,9 @@ ipcMain.handle('settings:update', (_event, partial) => {
     && !Array.isArray(partial)
     && Object.prototype.hasOwnProperty.call(partial, 'appearance')
   ) {
-    const backgroundColor = resolveQuickChatWindowBackground(
-      next.appearance,
-      nativeTheme.shouldUseDarkColors,
-    );
     const quickWindow = quickChatWindowController.getWindow();
-    const popoverWindow = quickChatWindowController.getPopoverWindow();
-    quickWindow?.setBackgroundColor(backgroundColor);
-    popoverWindow?.setBackgroundColor(backgroundColor);
     setDockIcon(next.appearance);
     quickWindow?.webContents.send('appearance:changed', next.appearance);
-    popoverWindow?.webContents.send('appearance:changed', next.appearance);
   }
   if (
     partial

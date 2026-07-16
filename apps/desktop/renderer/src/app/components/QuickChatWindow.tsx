@@ -32,6 +32,8 @@ import { mergeQuickChatTasks, projectQuickChatPlanTasks, projectQuickChatTasks, 
 import type { ChatAttachment, ChatMsg } from '../../chat/state/types';
 import { loadConversationMessages } from '../../chat/state/conversationLoad';
 import { AttachmentStrip } from '../../chat/components/thread/AttachmentStrip';
+import type { QuickChatPopoverKind } from '../../preload/contracts/bootstrapPreloadApi';
+import { QuickChatPopover, type InlineQuickChatPopoverState } from './QuickChatPopover';
 import { QuickChatTaskCard } from './QuickChatTaskCard';
 import { runQuickChatSubmission } from '../state/quickChatSubmission';
 import '../../styles/quick-chat.css';
@@ -53,7 +55,7 @@ export function QuickChatWindow() {
   const [taskIndex, setTaskIndex] = useState(0);
   const [taskSubmitting, setTaskSubmitting] = useState(false);
   const [dragActive, setDragActive] = useState(false);
-  const [openPopover, setOpenPopover] = useState<'workspace' | 'model' | 'effort' | 'mode' | 'access' | null>(null);
+  const [popoverState, setPopoverState] = useState<InlineQuickChatPopoverState | null>(null);
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
   const [modelProviderId, setModelProviderId] = useState('');
   const [effort, setEffort] = useState<EffortLevel>('default');
@@ -99,7 +101,7 @@ export function QuickChatWindow() {
     if (workspacePath) localStorage.setItem('quick-chat:workspace', workspacePath);
   }, [workspacePath]);
   useEffect(() => clientApi.onQuickChatShown?.(() => {
-    setOpenPopover(null);
+    setPopoverState(null);
     inputRef.current?.focus();
   }), []);
   useEffect(() => {
@@ -116,13 +118,14 @@ export function QuickChatWindow() {
     [selectedProvider],
   );
 
+  const openPopover = popoverState?.kind ?? null;
+
   useEffect(() => clientApi.onQuickChatPopoverClosed(() => {
-    setOpenPopover(null);
+    setPopoverState(null);
     inputRef.current?.focus();
   }), []);
 
-  useEffect(() => clientApi.onQuickChatPopoverSelected(({ kind, value }) => {
-    setOpenPopover(null);
+  const selectPopoverValue = useCallback((kind: QuickChatPopoverKind, value: string) => {
     if (kind === 'workspace' && workspaces.some((workspace) => workspace.path === value)) {
       setWorkspacePath(value);
     }
@@ -142,16 +145,20 @@ export function QuickChatWindow() {
       setLocalAccessLevel(value);
       void clientApi.updateSettings({ localAccessLevel: value });
     }
+  }, [effortLevels, providers, workspaces]);
+
+  const dismissPopover = useCallback(() => {
+    setPopoverState(null);
+    void clientApi.quickChatHidePopover();
     requestAnimationFrame(() => inputRef.current?.focus());
-  }), [effortLevels, providers, workspaces]);
+  }, []);
 
   const togglePopover = useCallback((
-    kind: 'workspace' | 'model' | 'effort' | 'mode' | 'access',
+    kind: QuickChatPopoverKind,
     anchor: HTMLButtonElement,
   ) => {
     if (openPopover === kind) {
-      setOpenPopover(null);
-      void clientApi.quickChatHidePopover();
+      dismissPopover();
       return;
     }
     const rect = anchor.getBoundingClientRect();
@@ -173,14 +180,20 @@ export function QuickChatWindow() {
           : kind === 'mode'
             ? mode
             : localAccessLevel;
-    setOpenPopover(kind);
-    void clientApi.quickChatShowPopover({
+    const nextState: InlineQuickChatPopoverState = {
       kind,
       items,
       selectedValue,
       anchorRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+    };
+    setPopoverState(nextState);
+    void clientApi.quickChatShowPopover(nextState).then((result) => {
+      if (!result.ok) setPopoverState((current) => current?.kind === kind ? null : current);
+    }).catch((reason: unknown) => {
+      setPopoverState((current) => current?.kind === kind ? null : current);
+      setError(reason instanceof Error ? reason.message : String(reason));
     });
-  }, [effort, effortLevels, localAccessLevel, mode, modelProviderId, openPopover, providers, workspacePath, workspaces]);
+  }, [dismissPopover, effort, effortLevels, localAccessLevel, mode, modelProviderId, openPopover, providers, workspacePath, workspaces]);
 
   const selectedName = useMemo(() => {
     const selected = workspaces.find((item) => item.path === workspacePath);
@@ -359,7 +372,7 @@ export function QuickChatWindow() {
   }
 
   return (
-    <main className="quick-chat-shell">
+    <main className={`quick-chat-shell${activeTask ? ' has-task' : ''}${popoverState ? ' has-open-popover' : ''}`}>
       <section className={`quick-chat-bar${error ? ' quick-chat-bar--error' : ''}${sending ? ' quick-chat-bar--sending' : ''}`} aria-label="快速会话" aria-busy={sending}>
         <div className={`quick-chat-composer${dragActive ? ' is-drag-active' : ''}`} onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDragActive(true); } }} onDragLeave={() => setDragActive(false)} onDrop={(event) => { event.preventDefault(); setDragActive(false); void addFiles(event.dataTransfer.files); }}>
           <div className="quick-chat-input-row">
@@ -372,7 +385,11 @@ export function QuickChatWindow() {
               const files = getClipboardFiles(event.clipboardData.items);
               if (files.length) { event.preventDefault(); void addFiles(files); }
             }} onKeyDown={(event) => {
-              if (event.key === 'Escape') { void clientApi.quickChatHide?.(); return; }
+              if (event.key === 'Escape') {
+                if (popoverState) dismissPopover();
+                else void clientApi.quickChatHide?.();
+                return;
+              }
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(event.metaKey || event.ctrlKey); }
             }} />
             <input ref={fileInputRef} className="quick-chat-file-input" type="file" multiple onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ''; }} />
@@ -449,6 +466,16 @@ export function QuickChatWindow() {
           />
         ) : null}
       </section>
+      {popoverState ? (
+        <QuickChatPopover
+          state={popoverState}
+          onDismiss={dismissPopover}
+          onSelect={(value) => {
+            selectPopoverValue(popoverState.kind, value);
+            dismissPopover();
+          }}
+        />
+      ) : null}
     </main>
   );
 }

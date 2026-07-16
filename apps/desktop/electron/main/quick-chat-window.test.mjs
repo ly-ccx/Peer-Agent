@@ -3,9 +3,8 @@ import test from 'node:test';
 import {
   createQuickChatWindowController,
   resolveQuickChatBounds,
-  resolveQuickChatPopoverBounds,
+  resolveQuickChatExpandedBounds,
   resolveQuickChatPopoverSize,
-  resolveQuickChatWindowBackground,
 } from './quick-chat-window.mjs';
 
 function createFakeWindow(initialBounds = { x: 100, y: 100, width: 720, height: 104 }) {
@@ -29,6 +28,7 @@ function createFakeWindow(initialBounds = { x: 100, y: 100, width: 720, height: 
     isVisible: () => visible,
     getBounds: () => ({ ...bounds }),
     setBounds: (nextBounds, animate) => { bounds = { ...bounds, ...nextBounds }; calls.push(['setBounds', nextBounds, animate]); },
+    setMaximumSize: (...args) => calls.push(['setMaximumSize', ...args]),
     setAlwaysOnTop: (...args) => calls.push(['setAlwaysOnTop', ...args]),
     setVisibleOnAllWorkspaces: (...args) => calls.push(['setVisibleOnAllWorkspaces', ...args]),
     show: () => { visible = true; calls.push(['show']); },
@@ -48,20 +48,13 @@ const screen = {
   getDisplayMatching: () => ({ bounds: { x: 0, y: 0, width: 1000, height: 800 }, workArea: { x: 0, y: 0, width: 1000, height: 760 } }),
 };
 
-test('resolves a solid window background for light, dark, and system themes', () => {
-  assert.equal(resolveQuickChatWindowBackground({ mode: 'light' }, true), '#F7F8FA');
-  assert.equal(resolveQuickChatWindowBackground({ mode: 'dark' }, false), '#11141A');
-  assert.equal(resolveQuickChatWindowBackground({ mode: 'system' }, false), '#F7F8FA');
-  assert.equal(resolveQuickChatWindowBackground({ mode: 'system' }, true), '#11141A');
-});
-
 test('positions the floating window on the display containing the cursor', () => {
   assert.deepEqual(resolveQuickChatBounds({
     cursorPoint: screen.getCursorScreenPoint(), displays: screen.getAllDisplays(), size: { width: 600, height: 200 },
   }), { x: 1300, y: 154, width: 600, height: 200 });
 });
 
-test('sizes the external popover from its item count instead of reserving an empty fixed panel', () => {
+test('sizes the inline popover from its item count instead of reserving an empty fixed panel', () => {
   assert.deepEqual(resolveQuickChatPopoverSize({
     kind: 'workspace',
     items: [
@@ -75,26 +68,26 @@ test('sizes the external popover from its item count instead of reserving an emp
   }), { width: 240, height: 72 });
 });
 
-test('positions the external popover below its button and flips above near the screen edge', () => {
+test('expands the main window only downward without moving its top edge', () => {
   const size = { width: 280, height: 100 };
-  assert.deepEqual(resolveQuickChatPopoverBounds(
+  assert.deepEqual(resolveQuickChatExpandedBounds(
     { x: 100, y: 100, width: 720, height: 104 },
     { x: 200, y: 72, width: 100, height: 24 },
     { x: 0, y: 0, width: 1000, height: 760 },
     size,
-  ), { x: 300, y: 202, width: 280, height: 100 });
-  assert.deepEqual(resolveQuickChatPopoverBounds(
+  ), { x: 100, y: 100, width: 720, height: 202 });
+  assert.deepEqual(resolveQuickChatExpandedBounds(
     { x: 100, y: 650, width: 720, height: 104 },
     { x: 20, y: 72, width: 100, height: 24 },
     { x: 0, y: 0, width: 1000, height: 760 },
     size,
-  ), { x: 120, y: 544, width: 280, height: 100 });
+  ), { x: 100, y: 650, width: 720, height: 202 });
 });
 
 test('creates one main window and toggles its visibility', () => {
   let creations = 0;
   const window = createFakeWindow();
-  const controller = createQuickChatWindowController({ screen, createWindow: () => { creations += 1; return window; }, createPopoverWindow: () => createFakeWindow() });
+  const controller = createQuickChatWindowController({ screen, createWindow: () => { creations += 1; return window; } });
   assert.equal(controller.toggle(), true);
   assert.equal(controller.toggle(), false);
   assert.equal(controller.show(), window);
@@ -102,10 +95,33 @@ test('creates one main window and toggles its visibility', () => {
   assert.equal(window.getBounds().height, 104);
 });
 
-test('shows one external popover and sends a validated selection to the main window', () => {
+test('expands the main window for an inline popover without creating another window', () => {
   const parent = createFakeWindow();
-  const popover = createFakeWindow({ x: 0, y: 0, width: 420, height: 220 });
-  const controller = createQuickChatWindowController({ screen, createWindow: () => parent, createPopoverWindow: () => popover });
+  const controller = createQuickChatWindowController({
+    screen,
+    createWindow: () => parent,
+  });
+
+  controller.show();
+  assert.equal(controller.showPopover({
+    kind: 'model',
+    selectedValue: 'model-a',
+    anchorRect: { x: 180, y: 72, width: 100, height: 24 },
+    items: [{ value: 'model-a', label: 'Model A' }, { value: 'model-b', label: 'Model B' }],
+  }), true);
+
+  assert.equal('getPopoverWindow' in controller, false);
+  assert.equal(parent.getBounds().height, 182);
+  controller.hidePopover({ restoreFocus: true });
+  assert.equal(parent.getBounds().height, 104);
+});
+
+test('shows one inline popover and sends a validated selection to the main window', () => {
+  const parent = createFakeWindow();
+  const controller = createQuickChatWindowController({
+    screen,
+    createWindow: () => parent,
+  });
   controller.show();
   assert.equal(controller.showPopover({
     kind: 'model', selectedValue: 'model-a', anchorRect: { x: 180, y: 72, width: 100, height: 24 },
@@ -120,36 +136,80 @@ test('shows one external popover and sends a validated selection to the main win
     && visible === true
     && assert.deepEqual(options, expectedWorkspaceOptions) === undefined
   )), true);
-  assert.equal(popover.calls.some(([name, visible, options]) => (
-    name === 'setVisibleOnAllWorkspaces'
-    && visible === true
-    && assert.deepEqual(options, expectedWorkspaceOptions) === undefined
-  )), true);
-  assert.equal(parent.getBounds().height, 104);
-  assert.equal(popover.isVisible(), true);
-  assert.equal(popover.calls.some(([name, channel]) => name === 'send' && channel === 'quick-chat-popover:state'), true);
+  assert.equal(parent.getBounds().height, 182);
   assert.equal(controller.selectPopoverValue('missing'), false);
   assert.equal(controller.selectPopoverValue('model-b'), true);
-  assert.equal(popover.isVisible(), false);
+  assert.equal(parent.getBounds().height, 104);
   assert.equal(parent.calls.some(([name, channel, payload]) => name === 'send' && channel === 'quick-chat:popover-selected' && payload.value === 'model-b'), true);
 });
 
-test('keeps the main window visible while focus moves to the popover', () => {
+test('lifts the native height cap before expanding and restores it after closing', () => {
   const parent = createFakeWindow();
-  const popover = createFakeWindow();
-  const controller = createQuickChatWindowController({ screen, createWindow: () => parent, createPopoverWindow: () => popover });
+  const controller = createQuickChatWindowController({ screen, createWindow: () => parent });
+  controller.show();
+  parent.calls.length = 0;
+
+  controller.showPopover({
+    kind: 'model',
+    selectedValue: 'model-a',
+    anchorRect: { x: 180, y: 72, width: 100, height: 24 },
+    items: [{ value: 'model-a', label: 'Model A' }],
+  });
+
+  const expandLimitIndex = parent.calls.findIndex(([name, width, height]) => (
+    name === 'setMaximumSize' && width === 720 && height === 760
+  ));
+  const expandBoundsIndex = parent.calls.findIndex(([name, bounds]) => (
+    name === 'setBounds' && bounds.height > 104
+  ));
+  assert.ok(expandLimitIndex >= 0);
+  assert.ok(expandBoundsIndex > expandLimitIndex);
+
+  parent.calls.length = 0;
+  controller.hidePopover();
+  assert.deepEqual(parent.calls.at(-1), ['setMaximumSize', 720, 104]);
+  assert.equal(parent.getBounds().height, 104);
+});
+
+test('keeps the main window visible while closing the inline popover', () => {
+  const parent = createFakeWindow();
+  const controller = createQuickChatWindowController({ screen, createWindow: () => parent });
   controller.show();
   controller.showPopover({ kind: 'workspace', selectedValue: '/one', anchorRect: {}, items: [{ value: '/one', label: 'one' }] });
-  parent.emit('blur');
+  controller.hidePopover({ restoreFocus: true });
   assert.equal(parent.isVisible(), true);
-  popover.emit('blur');
-  assert.equal(popover.isVisible(), false);
-  assert.equal(parent.isVisible(), true);
+  assert.equal(parent.getBounds().height, 104);
+});
+
+test('restores the design width from a compressed native window across every state change', () => {
+  const parent = createFakeWindow({ x: 100, y: 100, width: 208, height: 104 });
+  const controller = createQuickChatWindowController({ screen, createWindow: () => parent });
+
+  controller.show();
+  const shownBounds = parent.getBounds();
+  assert.equal(shownBounds.width, 720);
+  assert.equal(shownBounds.height, 104);
+
+  controller.showPopover({
+    kind: 'model',
+    selectedValue: 'model-a',
+    anchorRect: { x: 180, y: 72, width: 100, height: 24 },
+    items: [{ value: 'model-a', label: 'Model A' }],
+  });
+  assert.equal(parent.getBounds().width, 720);
+
+  controller.hidePopover();
+  assert.deepEqual(parent.getBounds(), { ...shownBounds, width: 720, height: 104 });
+
+  controller.setTaskCardVisible(true);
+  assert.deepEqual(parent.getBounds(), { ...shownBounds, width: 720, height: 286 });
+  controller.setTaskCardVisible(false);
+  assert.deepEqual(parent.getBounds(), { ...shownBounds, width: 720, height: 104 });
 });
 
 test('hides on blur but remains visible while devtools is open', () => {
   const window = createFakeWindow();
-  const controller = createQuickChatWindowController({ screen, createWindow: () => window, createPopoverWindow: () => createFakeWindow() });
+  const controller = createQuickChatWindowController({ screen, createWindow: () => window });
   controller.show();
   window.setDevtoolsOpen(true);
   window.emit('blur');
@@ -162,7 +222,7 @@ test('hides on blur but remains visible while devtools is open', () => {
 test('recreates the singleton after it is closed', () => {
   const windows = [createFakeWindow(), createFakeWindow()];
   let index = 0;
-  const controller = createQuickChatWindowController({ screen, createWindow: () => windows[index++], createPopoverWindow: () => createFakeWindow() });
+  const controller = createQuickChatWindowController({ screen, createWindow: () => windows[index++] });
   controller.show();
   windows[0].close();
   assert.equal(controller.show(), windows[1]);
