@@ -15,3 +15,9 @@ target/
 
 # 设计文档（本地保留，不提交）
 docs/architecture/*
+
+# 目标工作树模型配置（本地保留）
+.goal-worktree-model-config/
+
+# 误生成的证书文件
+-
