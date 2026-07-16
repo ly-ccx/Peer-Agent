@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { SyntaxStyle, type TextareaRenderable } from '@opentui/core';
+import type { TextareaRenderable } from '@opentui/core';
 import { useKeyboard, useTerminalDimensions } from '@opentui/react';
 import type { LocalAccessLevel } from '@peer-agent/protocol';
 import type { RuntimeGoalSnapshot } from '@peer-agent/runtime-sdk';
 import type { RuntimeModelSelection } from '@peer-agent/runtime-node';
 
 import { B3Wordmark } from './b3-wordmark-view.tsx';
+import { MarkdownView } from './markdown-view.tsx';
 import { executeTuiCommand } from './command-execution.ts';
 import {
   createTuiConversationPersistence,
@@ -79,18 +80,6 @@ const COLOR = {
 
 const COMMAND_NOTICE_DURATION_MS = 3_000;
 
-const MARKDOWN_STYLE = SyntaxStyle.fromStyles({
-  'markup.heading': { fg: COLOR.accent, bold: true },
-  'markup.heading.1': { fg: COLOR.accent, bold: true },
-  'markup.heading.2': { fg: '#bef264', bold: true },
-  'markup.bold': { fg: COLOR.text, bold: true },
-  'markup.italic': { fg: '#d4d4d4', italic: true },
-  'markup.raw': { fg: '#a5b4fc' },
-  'markup.link': { fg: COLOR.user, underline: true },
-  'markup.list': { fg: COLOR.accent },
-  'markup.quote': { fg: COLOR.muted, italic: true },
-});
-
 function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
   const [expandedTools, setExpandedTools] = useState<ReadonlySet<string>>(new Set());
   if (snapshot.messages.length === 0) return null;
@@ -121,14 +110,7 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
               {message.pending && !message.content ? (
                 <text fg={COLOR.muted}>thinking…</text>
               ) : (
-                <markdown
-                  content={message.content || ' '}
-                  syntaxStyle={MARKDOWN_STYLE}
-                  fg={COLOR.text}
-                  conceal
-                  concealCode
-                  streaming={message.pending}
-                />
+                <MarkdownView content={message.content || ' '} />
               )}
             </box>
           );

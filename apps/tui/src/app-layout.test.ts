@@ -210,12 +210,11 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('host.setAccessLevel(nextPolicy)');
   });
 
-  test('renders assistant content with the native OpenTUI markdown component', () => {
-    expect(appSource).toContain("import { SyntaxStyle, type TextareaRenderable } from '@opentui/core'");
-    expect(appSource).toContain('<markdown');
-    expect(appSource).toContain('content={message.content');
-    expect(appSource).toContain('syntaxStyle={MARKDOWN_STYLE}');
-    expect(appSource).toContain('streaming={message.pending}');
+  test('renders assistant content through the terminal-frame-tested Markdown view', () => {
+    expect(appSource).toContain("import { MarkdownView } from './markdown-view.tsx'");
+    expect(appSource).toContain("<MarkdownView content={message.content || ' '} />");
+    expect(appSource).not.toContain('<markdown');
+    expect(appSource).not.toContain('MARKDOWN_STYLE');
   });
 
   test('keeps user and tool messages visually distinct without repeated speaker headings', () => {
