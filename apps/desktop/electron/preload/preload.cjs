@@ -96,6 +96,16 @@ contextBridge.exposeInMainWorld('peerAgent', {
   conversationsList: (params) => ipcRenderer.invoke('conversations:list', params),
   conversationsCreate: (params) => ipcRenderer.invoke('conversations:create', params),
   conversationsGet: (params) => ipcRenderer.invoke('conversations:get', params),
+  onConversationsChanged: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('conversations:changed', handler);
+    return () => ipcRenderer.removeListener('conversations:changed', handler);
+  },
+  onWorkspacesChanged: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('workspaces:changed', handler);
+    return () => ipcRenderer.removeListener('workspaces:changed', handler);
+  },
   conversationsUpdateTitle: (params) => ipcRenderer.invoke('conversations:update-title', params),
   conversationsUpdateMode: (params) => ipcRenderer.invoke('conversations:update-mode', params),
   conversationsUpdateModelEffort: (params) => ipcRenderer.invoke('conversations:update-model-effort', params),

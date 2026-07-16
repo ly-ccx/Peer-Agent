@@ -21,6 +21,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 
 import { clientApi } from '../../clientApi';
 import { conversationStore } from '../state/conversationStore';
+import { shouldRevealBrowserPanel } from '../state/browserToolReveal';
 import { reduceCompactionLifecycle } from '../state/compactionLifecycle';
 import { mergeLoadedMessagesWithLiveTail } from '../state/compactionLiveTailMerge';
 import { loadConversationMessages, usageFromLifetime } from '../state/conversationLoad';
@@ -80,7 +81,9 @@ function appendThinking(messages: readonly ChatMsg[], chunk: string): ChatMsg[] 
 
 /** 把内存消息映射回主进程持久化（与原 hook persistMessages 逐字一致，按会话 id）。 */
 function persistMessages(conversationId: string, msgs: readonly ChatMsg[]): void {
-  if (!conversationId) return;
+  // A stream can finish after its bucket was reset during a page/mode switch. That empty
+  // snapshot is not an intentional clear and must never replace persisted history.
+  if (!conversationId || msgs.length === 0) return;
   void clientApi.conversationsReplaceMessages({
     id: conversationId,
     messages: msgs.map((m) => ({
@@ -354,7 +357,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       const cid = conversationStore.resolveConversation(streamId);
       if (!cid) return;
       // 内置浏览器工具：通知上层自动展开 Workbench。仅前台触发，避免后台会话抢占视图。
-      if (tool.startsWith('browser_') && cid === activeRef.current) onBrowserRef.current?.(tool);
+      if (shouldRevealBrowserPanel(tool, cid, activeRef.current)) onBrowserRef.current?.(tool);
       if (cid === activeRef.current) {
         textTypewriter.flush();
         thinkingTypewriter.flush();

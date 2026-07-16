@@ -24,6 +24,15 @@ export interface StoredConversation extends ConversationMeta {
   readonly messages: readonly Record<string, unknown>[];
 }
 
+export interface ConversationChangeEvent {
+  readonly conversationId: string;
+  readonly workspacePath: string | null;
+  readonly changeType: 'created' | 'messages-updated' | 'metadata-updated' | 'deleted';
+  readonly revision: string;
+  readonly writerPid: number;
+  readonly changedAt: string;
+}
+
 export interface ConversationStore {
   listConversations(params?: { status?: string | readonly string[] }): ConversationMeta[];
   getConversation(id: string): StoredConversation | null;
@@ -32,6 +41,7 @@ export interface ConversationStore {
   updateMode(id: string, mode: string): unknown;
   updateModelEffort(id: string, input: { effort: string; modelProviderId: string | null }): unknown;
   addUsage(id: string, usage: ConversationUsage): unknown;
+  subscribeChanges(listener: (event: ConversationChangeEvent) => void, options?: { interval?: number }): () => void;
   readonly [key: string]: unknown;
 }
 

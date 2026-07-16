@@ -313,6 +313,7 @@ export function ChatSurface({
   i18n,
   providers,
   conversationId,
+  conversationRevision,
   conversationTitle,
   systemInstructions,
   replyLanguage,
@@ -331,6 +332,7 @@ export function ChatSurface({
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
   readonly conversationId: string | null;
+  readonly conversationRevision?: string | null;
   readonly conversationTitle?: string;
   readonly systemInstructions?: string;
   readonly replyLanguage?: string;
@@ -369,6 +371,7 @@ export function ChatSurface({
     [convActions],
   );
   const messages = convState.messages as ChatMsg[];
+  const loadStatus = convState.loadStatus;
   const isStreaming = convState.isStreaming;
   const turnGroupCacheRef = useRef<{
     conversationId: string | null;
@@ -826,13 +829,16 @@ export function ChatSurface({
     // 打字机缓冲的清空已上移到 useConversationStreamRouter（随前台会话切换自动 reset）。
     setTurnStartedAt(null);
     if (!conversationId) { setMessages([]); setTokenUsage(null); return; }
+    convActions.beginLoad();
     setTokenUsage(null);
     let cancelled = false;
     void (async () => {
       const { messages: loaded, tokenUsage: usage, mode: convMode, effort: convEffort, modelProviderId: convModelProviderId } = await loadConversationMessages(conversationId);
       if (cancelled) return;
-      setMessages(loaded);
-      if (usage) setTokenUsage(usage);
+      convActions.commitLoad({
+        messages: loaded,
+        tokenUsage: usage,
+      });
       // 对话模式随会话恢复:每会话各自独立,切换会话即切到该会话自己的模式。
       setMode(convMode);
       // 思考强度 + 模型 provider 随会话恢复:与 mode 同口径,切换会话即切到该会话自己的绑定值。
@@ -919,6 +925,19 @@ export function ChatSurface({
     })();
     return () => { cancelled = true; };
   }, [conversationId, convActions]);
+
+  const appliedExternalRevisionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!conversationId || !conversationRevision || isStreaming) return;
+    if (appliedExternalRevisionRef.current === conversationRevision) return;
+    let cancelled = false;
+    void loadConversationMessages(conversationId).then(({ messages: loaded, tokenUsage: usage }) => {
+      if (cancelled) return;
+      appliedExternalRevisionRef.current = conversationRevision;
+      convActions.commitLoad({ messages: loaded, tokenUsage: usage });
+    });
+    return () => { cancelled = true; };
+  }, [conversationId, conversationRevision, convActions, isStreaming]);
 
   // 输入框(草稿 + 待发送队列)按会话持久化。
   // draft/queue 的运行态已经下沉到 conversationStore 会话桶,切会话时组件订阅的是目标会话桶,
@@ -1274,7 +1293,7 @@ export function ChatSurface({
   // 核心发送路径:给定文本(+ 可选附件)就执行一次 agent turn。
   // handleSend(用户输入)与 pending-task 续传(跨重启)都复用它,避免另造发送路径。
   const submitMessage = useCallback(async (text: string, sentAttachments: ChatAttachment[], submitEffort?: string) => {
-    if ((!text && sentAttachments.length === 0) || isStreaming || !hasProvider || !conversationId) return;
+    if ((!text && sentAttachments.length === 0) || isStreaming || !hasProvider || !conversationId || loadStatus !== 'ready') return;
     setStreamError(null);
     setActiveUsage(null);
     setProviderRecoveryNotice(null);
@@ -1317,9 +1336,12 @@ export function ChatSurface({
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
     void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId, modelProviderId, workspacePath, contextAttachments, continuityContext, configInstructions });
-  }, [isStreaming, hasProvider, conversationId, messages, onConversationUpdated, effort, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
+  }, [isStreaming, hasProvider, conversationId, loadStatus, messages, onConversationUpdated, effort, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
 
   const handleSend = useCallback(async () => {
+    // 恢复历史尚未完成时绝不允许发送：否则空 renderer 桶会先追加新回合，
+    // 随后的流收尾再以短列表 replaceMessages，覆盖仍在磁盘上的完整历史。
+    if (!conversationId || loadStatus !== 'ready') return;
     const text = draft.trim();
     if ((!text && attachments.length === 0) || !hasProvider || !conversationId) return;
     const sentAttachments = attachments;
@@ -1333,7 +1355,7 @@ export function ChatSurface({
       return;
     }
     await submitMessage(text, sentAttachments);
-  }, [draft, attachments, isStreaming, isCompactionActive, hasProvider, conversationId, submitMessage, effort, setDraft, enqueueMessage]);
+  }, [draft, attachments, isStreaming, isCompactionActive, hasProvider, conversationId, loadStatus, submitMessage, effort, setDraft, enqueueMessage]);
 
   // 任务续传(ADR 21):就绪后在「正确的会话内」自动发送。
   // App.tsx 已 peek 到会话锚定的待办、切到 resumeTask.sessionId 并经 prop 传入;这里要求
@@ -1435,6 +1457,7 @@ export function ChatSurface({
     await clientApi.conversationsReplaceMessages({
       id: conversationId,
       messages: updated.map((m) => ({ id: m.id, role: m.role, content: m.content, segments: m.segments, usage: m.usage, durationMs: m.durationMs, timestamp: m.timestamp, _compaction: m.compaction, attachments: m.attachments, interrupted: m.interrupted })),
+      allowEmpty: updated.length === 0,
     });
     onConversationUpdated?.();
   }, [conversationId, isStreaming, messages, onConversationUpdated]);

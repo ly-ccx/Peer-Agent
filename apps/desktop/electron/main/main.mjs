@@ -236,6 +236,16 @@ function persistMcpProbeResult(serverId, probe) {
 
 const llmConfigStore = createLlmConfigStore();
 const conversationStore = createConversationStore();
+const stopConversationChangeSubscription = conversationStore.subscribeChanges((event) => {
+  if (event.writerPid === process.pid) return;
+
+  const workspacePath = typeof event.workspacePath === 'string' ? event.workspacePath : null;
+  if (workspacePath && existsSync(workspacePath)) {
+    broadcastToAllWindows('workspaces:changed', { workspacePath });
+  }
+
+  broadcastToAllWindows('conversations:changed', event);
+});
 const goalPlanStore = createGoalPlanStore({
   // 任何写路径（IPC 或 AI 工具 local-goal-provider）改动计划后，广播给所有窗口，
   // 让 GoalPlanPanel 实时重拉，无需切换会话/重挂载。详见方案 B。
@@ -1198,7 +1208,25 @@ ipcMain.handle('core:health', (_event, payload) => {
 // ── Workspace ──
 ipcMain.handle('workspace:list', () => {
   const all = settingsStore.getAll();
-  return { workspaces: all.workspaces || [], activeWorkspace: all.activeWorkspace || null };
+  const configured = all.workspaces || [];
+  const knownPaths = new Set(configured.map((workspace) => workspace.path));
+  const discovered = conversationStore.listConversations()
+    .map((conversation) => conversation.workspacePath)
+    .filter((workspacePath) => typeof workspacePath === 'string' && existsSync(workspacePath))
+    .filter((workspacePath) => {
+      if (knownPaths.has(workspacePath)) return false;
+      knownPaths.add(workspacePath);
+      return true;
+    })
+    .map((workspacePath) => ({
+      path: workspacePath,
+      name: path.basename(workspacePath),
+      addedAt: new Date(0).toISOString(),
+    }));
+  return {
+    workspaces: [...configured, ...discovered],
+    activeWorkspace: all.activeWorkspace || null,
+  };
 });
 
 ipcMain.handle('workspace:ensure-default', () => {
@@ -1646,7 +1674,7 @@ ipcMain.handle('conversations:update-mode', (_, { id, mode }) => conversationSto
 ipcMain.handle('conversations:update-model-effort', (_, { id, effort, modelProviderId }) => conversationStore.updateModelEffort(id, { effort, modelProviderId }));
 ipcMain.handle('conversations:append-message', (_, { id, message }) => conversationStore.appendMessage(id, message));
 ipcMain.handle('conversations:update-last-message', (_, { id, content }) => conversationStore.updateLastMessage(id, content));
-ipcMain.handle('conversations:replace-messages', (_, { id, messages }) => conversationStore.replaceMessages(id, messages));
+ipcMain.handle('conversations:replace-messages', (_, { id, messages, allowEmpty = false }) => conversationStore.replaceMessages(id, messages, { allowEmpty }));
 ipcMain.handle('conversations:archive', (_, { id }) => conversationStore.archiveConversation(id));
 ipcMain.handle('conversations:restore', (_, { id }) => conversationStore.restoreConversation(id));
 ipcMain.handle('conversations:pin', (_, { id }) => conversationStore.pinConversation(id));
@@ -2151,7 +2179,6 @@ ipcMain.handle('llm:oauth:start', async (_event, params) => {
   const draft = params?.draft ?? null;
   if (!id && !draft) throw new Error('provider id or draft required');
   const existing = id ? llmConfigStore.listProviders().find((provider) => provider.id === id) : null;
-  const credential = id ? llmConfigStore.getCredential(id) : null;
   const authMethod = draft?.authMethod || existing?.authMethod || 'oauth_chatgpt';
   if (authMethod !== 'oauth_chatgpt' && authMethod !== 'oauth_google' && authMethod !== 'oauth_grok') {
     throw new Error(`unsupported_oauth_method:${authMethod}`);
@@ -2165,10 +2192,7 @@ ipcMain.handle('llm:oauth:start', async (_event, params) => {
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   const session = authMethod === 'oauth_google'
-    ? startGoogleBrowserLogin({
-      clientId: draft?.oauthClientId ?? credential?.oauthClientId,
-      clientSecret: draft?.oauthClientSecret ?? credential?.oauthClientSecret,
-    })
+    ? startGoogleBrowserLogin()
     : authMethod === 'oauth_grok'
       ? startGrokOAuthLogin({
         openExternal: (url) => shell.openExternal(url),
@@ -2255,10 +2279,7 @@ ipcMain.handle('llm:models:list', async (_event, { id }) => {
   }
   try {
     const { tokens: fresh, refreshed } = authMethod === 'oauth_google'
-      ? await ensureFreshGoogleTokens(tokens, {
-        clientId: credential.oauthClientId,
-        clientSecret: credential.oauthClientSecret,
-      })
+      ? await ensureFreshGoogleTokens(tokens)
       : authMethod === 'oauth_grok'
         ? await ensureFreshGrokTokens(tokens)
         : await ensureFreshTokens(tokens);
@@ -2515,9 +2536,7 @@ app.whenReady().then(async () => {
     const appearance = settingsStore.getAll().appearance;
     if (appearance?.mode !== 'system') return;
     setDockIcon(appearance);
-    const backgroundColor = resolveQuickChatWindowBackground(appearance, nativeTheme.shouldUseDarkColors);
-    quickChatWindowController.getWindow()?.setBackgroundColor(backgroundColor);
-    quickChatWindowController.getPopoverWindow()?.setBackgroundColor(backgroundColor);
+    quickChatWindowController.getWindow()?.webContents.send('appearance:changed', appearance);
   });
   const userDataPath = dataHome;
   const disableLocalSkill = process.env.PEER_AGENT_DISABLE_LOCAL_SKILL === '1';
@@ -2625,6 +2644,7 @@ app.on('window-all-closed', () => {
 
 // 退出前清理自动更新周期检测定时器，避免定时器泄漏。
 app.on('before-quit', () => {
+  stopConversationChangeSubscription();
   shortcutService.dispose();
   try {
     stopAutoUpdater();

@@ -75,6 +75,7 @@ const unavailableApi: ClientApi = {
   conversationsList: unavailableMethod('conversationsList'),
   conversationsCreate: unavailableMethod('conversationsCreate'),
   conversationsGet: unavailableMethod('conversationsGet'),
+  onConversationsChanged: unavailableMethod('onConversationsChanged'),
   conversationsUpdateTitle: unavailableMethod('conversationsUpdateTitle'),
   conversationsUpdateMode: unavailableMethod('conversationsUpdateMode'),
   conversationsUpdateModelEffort: unavailableMethod('conversationsUpdateModelEffort'),
@@ -170,6 +171,7 @@ const unavailableApi: ClientApi = {
   updaterSetChannel: unavailableMethod('updaterSetChannel'),
   onUpdaterEvent: unavailableMethod('onUpdaterEvent'),
   onQuickChatConversationCreated: unavailableMethod('onQuickChatConversationCreated'),
+  onWorkspacesChanged: unavailableMethod('onWorkspacesChanged'),
   onQuickChatOpenConversation: unavailableMethod('onQuickChatOpenConversation'),
   onRuntimeEvent: unavailableMethod('onRuntimeEvent'),
 };

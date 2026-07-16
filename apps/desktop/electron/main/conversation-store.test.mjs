@@ -554,6 +554,30 @@ test('multiple store instances preserve conversations created by each process', 
   }
 });
 
+test('store change subscription observes writes from another store instance', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'peer-conversations-events-'));
+  try {
+    const desktopStore = createConversationStore({ storeDir: dir });
+    const tuiStore = createConversationStore({ storeDir: dir });
+    const eventPromise = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('conversation change event timed out')), 2_000);
+      const unsubscribe = desktopStore.subscribeChanges((event) => {
+        clearTimeout(timeout);
+        unsubscribe();
+        resolve(event);
+      }, { interval: 20 });
+    });
+    const conversation = tuiStore.createConversation({ title: 'from tui', workspacePath: '/workspace' });
+    const event = await eventPromise;
+    assert.equal(event.conversationId, conversation.id);
+    assert.equal(event.workspacePath, '/workspace');
+    assert.equal(event.changeType, 'created');
+    assert.equal(typeof event.revision, 'string');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('multiple store instances append messages without overwriting each other', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'peer-conversations-messages-'));
   try {

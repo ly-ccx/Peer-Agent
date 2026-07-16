@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync, watchFile, unwatchFile } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
@@ -32,6 +32,16 @@ function writeJsonl(filePath, rows) {
 function appendJsonl(filePath, row) {
   mkdirSync(path.dirname(filePath), { recursive: true });
   appendFileSync(filePath, JSON.stringify(row) + '\n', 'utf8');
+}
+
+function writeChangeEvent(storeDir, event) {
+  const changeFile = path.join(storeDir, '.changes.json');
+  writeFileSync(changeFile, JSON.stringify({
+    ...event,
+    revision: `${Date.now()}-${randomUUID()}`,
+    writerPid: process.pid,
+    changedAt: new Date().toISOString(),
+  }), 'utf8');
 }
 
 function withFileLock(filePath, operation) {
@@ -137,6 +147,14 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
   migrateLegacyGoalMode(storeDir, indexFile);
 
   function convFile(id) { return path.join(storeDir, `${id}.jsonl`); }
+  function publishChange(meta, changeType) {
+    if (!meta?.id) return;
+    writeChangeEvent(storeDir, {
+      conversationId: meta.id,
+      workspacePath: meta.workspacePath ?? null,
+      changeType,
+    });
+  }
 
   function readIndex() { return readJsonl(indexFile).map(normalizeMeta); }
 
@@ -460,25 +478,54 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     }
   }
 
+  function changed(operation, changeType) {
+    return (...args) => {
+      const result = operation(...args);
+      const id = result?.id || (typeof args[0] === 'string' ? args[0] : null);
+      const meta = result?.id ? result : (id ? readIndex().find((entry) => entry.id === id) : null);
+      if (meta) publishChange(meta, changeType);
+      return result;
+    };
+  }
+
+  function subscribeChanges(listener, { interval = 200 } = {}) {
+    const changeFile = path.join(storeDir, '.changes.json');
+    mkdirSync(storeDir, { recursive: true });
+    let lastRevision = null;
+    const handleChange = () => {
+      try {
+        const event = JSON.parse(readFileSync(changeFile, 'utf8'));
+        if (!event?.revision || event.revision === lastRevision) return;
+        lastRevision = event.revision;
+        listener(event);
+      } catch {
+        // The journal may not exist yet or may be between atomic observations.
+      }
+    };
+    watchFile(changeFile, { interval, persistent: false }, handleChange);
+    return () => unwatchFile(changeFile, handleChange);
+  }
+
   return {
     listConversations,
     listConversationsByWorkspace,
-    createConversation,
+    createConversation: changed(createConversation, 'created'),
     getConversation,
-    updateTitle,
-    updateMode,
-    updateModelEffort,
-    appendMessage,
-    updateLastMessage,
-    updateMessageById,
-    replaceMessages,
-    addUsage,
-    archiveConversation,
-    restoreConversation,
-    pinConversation,
-    unpinConversation,
+    updateTitle: changed(updateTitle, 'metadata-updated'),
+    updateMode: changed(updateMode, 'metadata-updated'),
+    updateModelEffort: changed(updateModelEffort, 'metadata-updated'),
+    appendMessage: changed(appendMessage, 'messages-updated'),
+    updateLastMessage: changed(updateLastMessage, 'messages-updated'),
+    updateMessageById: changed(updateMessageById, 'messages-updated'),
+    replaceMessages: changed(replaceMessages, 'messages-updated'),
+    addUsage: changed(addUsage, 'metadata-updated'),
+    archiveConversation: changed(archiveConversation, 'metadata-updated'),
+    restoreConversation: changed(restoreConversation, 'metadata-updated'),
+    pinConversation: changed(pinConversation, 'metadata-updated'),
+    unpinConversation: changed(unpinConversation, 'metadata-updated'),
     reorderPinnedConversations,
     autoArchiveConversations,
-    deleteConversation,
+    deleteConversation: changed(deleteConversation, 'deleted'),
+    subscribeChanges,
   };
 }

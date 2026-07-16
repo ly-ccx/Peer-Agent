@@ -358,6 +358,8 @@ export interface BootstrapPreloadApi {
   readonly conversationsList: (params?: { workspacePath?: string | null; status?: 'active' | 'archived' | readonly ('active' | 'archived')[] }) => Promise<readonly { id: string; title: string; workspacePath?: string | null; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }[]>;
   readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null; mode?: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }>;
   readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage } | null>;
+  readonly onConversationsChanged: (listener: (event: { conversationId: string; workspacePath: string | null; changeType: 'created' | 'messages-updated' | 'metadata-updated' | 'deleted'; revision: string; writerPid: number; changedAt: string }) => void) => () => void;
+  readonly onWorkspacesChanged: (listener: (event: { workspacePath: string }) => void) => () => void;
   readonly conversationsUpdateTitle: (params: { id: string; title: string }) => Promise<unknown>;
   // 对话模式按会话持久化在会话 meta 上（chat / goal）。模式真值仍经 chatSend → IPC →
   // mode-source 进入 System Context 的 L6_MODE_REMINDER；此处仅负责「每会话存哪」。
@@ -368,7 +370,7 @@ export interface BootstrapPreloadApi {
   readonly conversationsUpdateModelEffort: (params: { id: string; effort?: string; modelProviderId?: string | null }) => Promise<unknown>;
   readonly conversationsAppendMessage: (params: { id: string; message: Record<string, unknown> & { id: string; role: string; content: string } }) => Promise<unknown>;
   readonly conversationsUpdateLastMessage: (params: { id: string; content: string }) => Promise<unknown>;
-  readonly conversationsReplaceMessages: (params: { id: string; messages: readonly Record<string, unknown>[] }) => Promise<unknown>;
+  readonly conversationsReplaceMessages: (params: { id: string; messages: readonly Record<string, unknown>[]; allowEmpty?: boolean }) => Promise<unknown>;
   readonly conversationsArchive: (params: { id: string }) => Promise<unknown>;
   readonly conversationsRestore: (params: { id: string }) => Promise<unknown>;
   readonly conversationsPin: (params: { id: string }) => Promise<unknown>;

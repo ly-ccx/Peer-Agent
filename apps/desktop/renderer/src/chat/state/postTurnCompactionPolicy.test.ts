@@ -21,4 +21,11 @@ describe('post-turn compaction policy', () => {
     assert.match(surfaceSource, /text === '\/compact'/);
     assert.equal(surfaceSource.match(/clientApi\.chatCompact\(/g)?.length, 1);
   });
+
+  it('does not send or replace history before conversation recovery is ready', () => {
+    assert.match(surfaceSource, /convActions\.beginLoad\(\)/);
+    assert.match(surfaceSource, /convActions\.commitLoad\(\{[\s\S]*messages: loaded,[\s\S]*tokenUsage: usage/);
+    assert.match(surfaceSource, /loadStatus !== 'ready'/);
+    assert.match(surfaceSource, /submitMessage = useCallback[\s\S]*loadStatus !== 'ready'/);
+  });
 });
