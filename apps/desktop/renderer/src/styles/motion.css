@@ -250,26 +250,23 @@
   animation: motion-halo var(--za-motion-slow) var(--za-ease-decelerate) both;
 }
 
-/* 圆环心跳 ripple — box-shadow 硬边圆环往返扩散（收敛自 ws-running-pulse /
- * sidebar-conv-pulse / sidebar-conv-compacting-pulse）。与 motion-halo（单次
- * 扩散淡出，both）互补：此基元反复"心跳"，spread 0→满→0 循环，营造"进行中"
- * 的持续脉动。颜色/半径/透明度低谷由调用点通过 --motion-ripple-* 定制。
- * 需要额外缩放的调用点可叠加自身 transform，不在本基元内表达。 */
+/* 圆环心跳 ripple — 只使用合成线程可处理的 transform + opacity。
+ * 调用点把动画挂在独立伪元素上，圆点本体保持静止；避免持续改变 box-shadow
+ * 触发主窗口重绘并挤占多个 Electron renderer 共用的 GPU 帧预算。 */
 @keyframes motion-ripple {
   0% {
     opacity: var(--motion-ripple-peak, 0.95);
-    box-shadow: 0 0 0 0
-      color-mix(in srgb, var(--motion-ripple-color, var(--azure-seal)) var(--motion-ripple-strength, 50%), transparent);
+    transform: scale(0.72);
   }
 
   70% {
-    opacity: var(--motion-ripple-floor, 0.55);
-    box-shadow: 0 0 0 var(--motion-ripple-radius, 6px) transparent;
+    opacity: 0;
+    transform: scale(var(--motion-ripple-scale, 2.5));
   }
 
   100% {
-    opacity: var(--motion-ripple-peak, 0.95);
-    box-shadow: 0 0 0 0 transparent;
+    opacity: 0;
+    transform: scale(var(--motion-ripple-scale, 2.5));
   }
 }
 
