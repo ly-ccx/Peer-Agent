@@ -217,47 +217,6 @@
     animation: brand-startup-support 3.2s cubic-bezier(.2, .72, .2, 1) both;
   }
 
-  @keyframes brand-startup-arrive {
-    0% { opacity: 0; transform: translateY(18px) scale(.96); filter: blur(7px); }
-    13% { opacity: 1; filter: blur(0); }
-    72% { transform: translateY(0) scale(1); }
-    86% { transform: scale(1.018); }
-    100% { opacity: 1; transform: scale(1); filter: blur(0); }
-  }
-
-  @keyframes brand-startup-atmosphere {
-    0%, 8% { opacity: 0; transform: translateY(13%) scale(.82); }
-    55% { opacity: .76; }
-    100% { opacity: .44; transform: translateY(4%) scale(1.08); }
-  }
-
-  @keyframes brand-startup-fill {
-    0%, 12% { transform: translateY(220px); }
-    70% { transform: translateY(0); }
-    82% { transform: translateY(-8px); }
-    100% { transform: translateY(-4px); }
-  }
-
-  @keyframes brand-startup-edge {
-    0%, 10% { opacity: 0; transform: translateY(184px) scaleX(.68); }
-    20% { opacity: .7; }
-    70% { opacity: .9; transform: translateY(0) scaleX(1); }
-    82% { opacity: .35; transform: translateY(-30px) scaleX(1.04); }
-    100% { opacity: 0; transform: translateY(-35px) scaleX(1.05); }
-  }
-
-  @keyframes brand-startup-crest {
-    0%, 62% { opacity: 0; transform: translateY(184px) scaleY(.2); }
-    70% { opacity: .8; transform: translateY(0) scaleY(1); }
-    82% { opacity: .35; transform: translateY(-30px) scaleY(.7); }
-    100% { opacity: 0; transform: translateY(-35px) scaleY(.25); }
-  }
-
-  @keyframes brand-startup-support {
-    0%, 70% { opacity: 0; transform: scaleX(.35); }
-    84%, 100% { opacity: 1; transform: scaleX(1); }
-  }
-
   @media (prefers-reduced-motion: reduce) {
     .brand-startup-loader::before,
     .brand-startup-loader__brand,

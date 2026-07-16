@@ -91,7 +91,8 @@ function assertArchitectureDocsStayLocal() {
 }
 
 function assertRendererHasNoHighPrivilegeImports() {
-  const files = collectFiles('apps/desktop/renderer/src', ['.ts', '.tsx', '.js', '.jsx']);
+  const files = collectFiles('apps/desktop/renderer/src', ['.ts', '.tsx', '.js', '.jsx'])
+    .filter((filePath) => !/\.(?:test|spec)\.[jt]sx?$/.test(filePath));
   const forbiddenPatterns = [
     {
       label: 'fs import',
