@@ -77,6 +77,8 @@ const COLOR = {
   danger: '#fb7185',
 } as const;
 
+const COMMAND_NOTICE_DURATION_MS = 3_000;
+
 const MARKDOWN_STYLE = SyntaxStyle.fromStyles({
   'markup.heading': { fg: COLOR.accent, bold: true },
   'markup.heading.1': { fg: COLOR.accent, bold: true },
@@ -555,6 +557,12 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
     }
     setResumeItems(persistence.listResumable());
   }, [persistence, resumeSurface, snapshot.status]);
+
+  useEffect(() => {
+    if (!commandNotice) return;
+    const timeout = setTimeout(() => setCommandNotice(null), COMMAND_NOTICE_DURATION_MS);
+    return () => clearTimeout(timeout);
+  }, [commandNotice]);
 
   const isWelcome = snapshot.messages.length === 0
     && !approval

@@ -101,6 +101,16 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('paddingTop={menuReserve}');
   });
 
+  test('auto-dismisses transient command notices and cancels superseded timers', () => {
+    expect(appSource).toContain('const COMMAND_NOTICE_DURATION_MS = 3_000;');
+    expect(appSource).toContain('if (!commandNotice) return;');
+    expect(appSource).toContain(
+      'const timeout = setTimeout(() => setCommandNotice(null), COMMAND_NOTICE_DURATION_MS);',
+    );
+    expect(appSource).toContain('return () => clearTimeout(timeout);');
+    expect(appSource).toContain('}, [commandNotice]);');
+  });
+
   test('keeps the model picker in the composer dock instead of restoring the top-level surface', () => {
     const modelPickerSource = appSource.slice(
       appSource.indexOf('function ModelPickerMenu'),
