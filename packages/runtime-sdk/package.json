@@ -1,8 +1,25 @@
 {
   "name": "@peer-agent/runtime-sdk",
   "version": "0.1.0",
-  "private": true,
+  "description": "Public host-neutral orchestration SDK for Peer Agent runtimes.",
   "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yinLiangDream/Peer-Agent.git",
+    "directory": "packages/runtime-sdk"
+  },
+  "homepage": "https://github.com/yinLiangDream/Peer-Agent#readme",
+  "bugs": {
+    "url": "https://github.com/yinLiangDream/Peer-Agent/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -17,12 +34,13 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm build",
     "test": "node --test src/*.test.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@peer-agent/protocol": "workspace:*",
-    "@peer-agent/runtime-core": "workspace:*"
+    "@peer-agent/protocol": "workspace:^",
+    "@peer-agent/runtime-core": "workspace:^"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

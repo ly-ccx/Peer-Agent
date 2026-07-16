@@ -1,6 +1,8 @@
 import {
   loadSharedModelMetadata,
+  loadSharedModelMetadataList,
   loadSharedModelSelection,
+  type RuntimeModelCatalogEntry,
   type ModelCredential,
   type ModelCredentialPort,
   type ModelCredentialRequest,
@@ -22,14 +24,16 @@ export interface TuiModelEnvironment {
 }
 
 export interface TuiModelConfig {
-  readonly providerId: 'openai-compatible' | 'chatgpt-subscription';
+  readonly providerId: string;
   readonly model: string;
   readonly modelLabel: string;
   readonly source: 'environment' | 'desktop-default' | 'unconfigured';
   readonly configured: boolean;
   readonly credentials: ModelCredentialPort;
+  readonly catalog: readonly RuntimeModelCatalogEntry[];
   readonly sharedMetadata?: SharedModelMetadata;
-  readonly resolveSharedSelection?: () => SharedModelSelection | null;
+  readonly sharedProviders?: readonly SharedModelMetadata[];
+  readonly resolveSharedSelection?: (credentialId?: string) => SharedModelSelection | null;
 }
 
 function value(environment: TuiModelEnvironment, name: string): string | undefined {
@@ -59,6 +63,7 @@ export function resolveTuiModelConfig(
     readonly userDataPath?: string;
     readonly sharedCredentialStore?: SharedModelCredentialStore;
     readonly loadSharedMetadata?: typeof loadSharedModelMetadata;
+    readonly loadSharedMetadataList?: typeof loadSharedModelMetadataList;
     readonly loadSharedSelection?: typeof loadSharedModelSelection;
   } = {},
 ): TuiModelConfig {
@@ -73,6 +78,11 @@ export function resolveTuiModelConfig(
       source: 'environment',
       configured: true,
       credentials,
+      catalog: [{
+        providerId: 'openai-compatible', modelId: model, displayName: model,
+        supportsTools: true, supportedReasoningEfforts: ['default', 'low', 'high'],
+        defaultReasoningEffort: 'default', available: true,
+      }],
     };
   }
 
@@ -80,24 +90,40 @@ export function resolveTuiModelConfig(
     userDataPath: options.userDataPath,
   });
   if (sharedMetadata) {
+    const sharedProviders = (options.loadSharedMetadataList ?? loadSharedModelMetadataList)({
+      userDataPath: options.userDataPath,
+    });
+    const catalog = sharedProviders
+      .filter((provider) => provider.authMethod === 'api_key' || provider.authMethod === 'oauth_chatgpt')
+      .map((provider): RuntimeModelCatalogEntry => ({
+        providerId: provider.credentialId,
+        modelId: provider.model,
+        displayName: `${provider.model} · ${provider.displayName}`,
+        supportsTools: true,
+        supportedReasoningEfforts: ['default', 'low', 'high'],
+        defaultReasoningEffort: 'default',
+        available: provider.credentialStored,
+      }));
     const sharedCredentialStore = options.sharedCredentialStore
       ?? (options.userDataPath
         ? createTuiSharedModelCredentialStore({ dataHome: options.userDataPath })
         : undefined);
     return {
-      providerId: sharedMetadata.authMethod === 'oauth_chatgpt'
-        ? 'chatgpt-subscription'
-        : 'openai-compatible',
+      providerId: sharedMetadata.credentialId,
       model: sharedMetadata.model,
       modelLabel: `${sharedMetadata.model} · desktop default`,
       source: 'desktop-default',
       configured: sharedMetadata.credentialStored,
       credentials,
+      catalog,
       sharedMetadata,
-      resolveSharedSelection: () => (options.loadSharedSelection ?? loadSharedModelSelection)({
-        userDataPath: options.userDataPath,
-        credentialStore: sharedCredentialStore,
-      }),
+      sharedProviders,
+      resolveSharedSelection: (credentialId = sharedMetadata.credentialId) =>
+        (options.loadSharedSelection ?? loadSharedModelSelection)({
+          userDataPath: options.userDataPath,
+          credentialId,
+          credentialStore: sharedCredentialStore,
+        }),
     };
   }
 
@@ -109,6 +135,7 @@ export function resolveTuiModelConfig(
     source: 'unconfigured',
     configured: false,
     credentials,
+    catalog: [],
   };
 }
 

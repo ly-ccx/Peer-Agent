@@ -1,4 +1,4 @@
-import type { RuntimePermissionPolicy } from '@peer-agent/runtime-node';
+import type { LocalAccessLevel } from '@peer-agent/protocol';
 
 import { permissionPolicyLabels } from './tui-permission-policy.ts';
 import type { TuiMode } from './tui-mode.ts';
@@ -12,7 +12,7 @@ export interface ComposerUsageSnapshot {
 export interface ComposerStatusInput {
   readonly workspaceRoot: string;
   readonly mode: TuiMode;
-  readonly permissionPolicy?: RuntimePermissionPolicy;
+  readonly accessLevel?: LocalAccessLevel;
   readonly modelLabel: string;
   readonly reasoningEffort?: string;
   readonly contextWindow?: number;
@@ -104,8 +104,8 @@ export function contextStatus(
 export function createComposerStatus(input: ComposerStatusInput): ComposerStatus {
   const mode = tuiModeOption(input.mode);
   const permission = mode.readOnly
-    ? permissionPolicyLabels('read-only')
-    : permissionPolicyLabels(input.permissionPolicy ?? 'ask');
+    ? permissionPolicyLabels('read_only')
+    : permissionPolicyLabels(input.accessLevel ?? 'ask_before_local');
   const context = contextStatus(
     input.usage,
     input.contextWindow ?? contextWindowForModel(input.modelLabel),

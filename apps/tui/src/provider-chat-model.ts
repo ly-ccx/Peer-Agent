@@ -18,6 +18,7 @@ import { normalizeTuiMode, type TuiMode } from './tui-mode.ts';
 
 export interface CreateProviderChatModelOptions {
   readonly provider: ModelProvider;
+  readonly getProvider?: () => ModelProvider;
   readonly model: string;
   readonly toolDefinitions?: readonly RuntimeToolDefinition[];
   readonly toolDefinitionsForMode?: (mode: TuiMode) => readonly RuntimeToolDefinition[];
@@ -100,7 +101,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
       const tools = projectedToolDefinitions.map(toModelTool);
       const streamId = context.run.streamId ?? 'tui-chat';
       const reasoningEffort = options.getReasoningEffort?.();
-      const result = await options.provider.stream({
+      const result = await (options.getProvider?.() ?? options.provider).stream({
         model: options.getModel?.() ?? options.model,
         messages: state.modelMessages,
         tools,

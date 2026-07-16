@@ -17,6 +17,7 @@ import type { PlanCoordinator, PlanSnapshot } from './plan-mode.ts';
 import { parseRuntimePlanText } from './plan-mode.ts';
 import type { TuiHost } from './tui-host.ts';
 import { normalizeTuiMode, type TuiMode } from './tui-mode.ts';
+import { formatToolResultSummary } from './tool-result-summary.ts';
 
 export type ChatRole = 'user' | 'assistant' | 'tool';
 export type ChatRunStatus = 'idle' | 'running' | 'cancelling';
@@ -154,7 +155,10 @@ export function createChatController(options: {
             {
               id: `tool-${++sequence}`,
               role: 'tool',
-              content: `${call.capabilityId}: ${execution.result.outputPreview ?? execution.result.status}`,
+              content: `${call.capabilityId}: ${formatToolResultSummary(
+                execution.result.outputPreview,
+                execution.result.status,
+              )}`,
             },
           ],
         });
@@ -366,7 +370,10 @@ export function createDemoChatModel(): ChatModelPort {
       }
 
       const text = state.toolExecutions.length > 0
-        ? `Tool completed: ${state.toolExecutions.at(-1)?.result.outputPreview ?? 'done'}`
+        ? `Tool completed: ${formatToolResultSummary(
+          state.toolExecutions.at(-1)?.result.outputPreview,
+          'done',
+        )}`
         : `Demo model: ${context.run.input.content}`;
       for (const token of text.split(/(?<=\s)/u)) {
         if (context.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -390,7 +397,10 @@ export function createDemoChatModel(): ChatModelPort {
           ...executions.map((item) => ({
             role: 'tool' as const,
             toolCallId: item.call.toolCallId,
-            content: String(item.result.result.outputPreview ?? item.result.result.status ?? 'completed'),
+            content: formatToolResultSummary(
+              item.result.result.outputPreview,
+              item.result.result.status ?? 'completed',
+            ),
           })),
         ],
         toolExecutions: [...state.toolExecutions, ...executions.map((item) => item.result)],

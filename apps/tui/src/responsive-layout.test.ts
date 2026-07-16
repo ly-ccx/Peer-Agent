@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { responsiveLayout } from './responsive-layout.ts';
+import { responsiveLayout, responsivePickerLayout } from './responsive-layout.ts';
 
 describe('responsive TUI layout', () => {
   test.each([
@@ -20,5 +20,44 @@ describe('responsive TUI layout', () => {
   test('preserves decisions by changing layout rather than hiding actions', () => {
     expect(responsiveLayout(40).stackActions).toBe(true);
     expect(responsiveLayout(40).showDescriptions).toBe(false);
+  });
+
+  test.each([
+    [14, false, false, false, 0, 6, 11],
+    [17, true, false, true, 0, 8, 12],
+    [20, true, true, true, 1, 13, 6],
+  ] as const)('keeps picker content within the vertical budget at %i rows', (
+    rows,
+    showContext,
+    showDescriptions,
+    showHints,
+    verticalPadding,
+    modePanelRows,
+    commandMaxVisible,
+  ) => {
+    expect(responsivePickerLayout(rows, 3)).toEqual({
+      showContext,
+      showDescriptions,
+      showHints,
+      verticalPadding,
+      modePanelRows,
+      commandMaxVisible,
+    });
+
+    if (rows >= 14) {
+      const composerAndGapRows = 7;
+      expect(modePanelRows + composerAndGapRows).toBeLessThanOrEqual(rows);
+    }
+  });
+
+  test('does not reserve rows for descriptions or hints hidden by narrow layouts', () => {
+    expect(responsivePickerLayout(20, 3, false, false)).toEqual({
+      showContext: true,
+      showDescriptions: false,
+      showHints: false,
+      verticalPadding: 0,
+      modePanelRows: 7,
+      commandMaxVisible: 16,
+    });
   });
 });

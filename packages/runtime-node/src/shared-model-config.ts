@@ -71,6 +71,8 @@ export interface LoadSharedModelSelectionOptions {
   readonly userDataPath?: string;
   readonly readFile?: (file: string) => string;
   readonly credentialStore?: SharedModelCredentialStore;
+  /** Select a specific configured provider instead of the desktop default. */
+  readonly credentialId?: string;
   readonly writeProviders?: (
     file: string,
     providers: readonly StoredModelProvider[],
@@ -147,7 +149,14 @@ function selectedProvider(options: LoadSharedModelSelectionOptions): {
   const configFile = getSharedModelConfigPath(options.userDataPath);
   if (!existsSync(configFile)) return null;
   const read = options.readFile ?? ((file: string) => readFileSync(file, 'utf8'));
-  const selected = selectDesktopDefaultProvider(parseProviders(read(configFile)));
+  const providers = parseProviders(read(configFile));
+  const selected = options.credentialId
+    ? providers.find((provider) =>
+        provider.enabled !== false
+        && provider.model?.trim()
+        && credentialIdOf(provider) === options.credentialId)
+      ?? null
+    : selectDesktopDefaultProvider(providers);
   return selected?.model ? { configFile, read, selected } : null;
 }
 
@@ -198,6 +207,18 @@ export function loadSharedModelMetadata(
 ): SharedModelMetadata | null {
   const found = selectedProvider(options);
   return found ? metadataFromSelected(found.configFile, found.selected) : null;
+}
+
+/** Lists every enabled desktop provider that has a model and stored credential. */
+export function loadSharedModelMetadataList(
+  options: Pick<LoadSharedModelSelectionOptions, 'userDataPath' | 'readFile'> = {},
+): readonly SharedModelMetadata[] {
+  const configFile = getSharedModelConfigPath(options.userDataPath);
+  if (!existsSync(configFile)) return [];
+  const read = options.readFile ?? ((file: string) => readFileSync(file, 'utf8'));
+  return parseProviders(read(configFile))
+    .filter((provider) => provider.enabled !== false && provider.model?.trim() && hasStoredCredential(provider))
+    .map((provider) => metadataFromSelected(configFile, provider));
 }
 
 export function loadSharedModelSelection(

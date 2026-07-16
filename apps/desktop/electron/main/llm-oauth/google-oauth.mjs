@@ -1,7 +1,8 @@
 // Google / Gemini OAuth (PKCE, browser mode).
 //
-// This uses a user-provided Google Cloud OAuth Desktop client. Tokens are
-// encrypted by llm-config-store as part of the provider record.
+// Uses the public installed-app OAuth client shipped by the open-source Gemini
+// CLI. Installed-app client credentials are not secrets; tokens remain encrypted
+// by llm-config-store as part of the provider record.
 
 import http from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
@@ -13,6 +14,9 @@ async function openInBrowser(url) {
 
 const AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
+// Public installed-app credentials from google-gemini/gemini-cli.
+const DEFAULT_CLIENT_ID = '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com';
+const DEFAULT_CLIENT_SECRET = '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';
 const CALLBACK_PORT = 1456;
 const CALLBACK_PATH = '/auth/google/callback';
 const REDIRECT_URI = `http://localhost:${CALLBACK_PORT}${CALLBACK_PATH}`;
@@ -40,12 +44,11 @@ function extractEmail(idToken) {
   }
 }
 
-function requireOAuthClient(config = {}) {
-  const clientId = String(config.clientId || '').trim();
-  const clientSecret = String(config.clientSecret || '').trim();
-  if (!clientId) throw new Error('oauth_google_client_id_required');
-  if (!clientSecret) throw new Error('oauth_google_client_secret_required');
-  return { clientId, clientSecret };
+function resolveOAuthClient(config = {}) {
+  return {
+    clientId: String(config.clientId || DEFAULT_CLIENT_ID).trim(),
+    clientSecret: String(config.clientSecret || DEFAULT_CLIENT_SECRET).trim(),
+  };
 }
 
 function toTokenSet(json) {
@@ -81,7 +84,7 @@ async function exchangeCode({ code, verifier, clientId, clientSecret }) {
 
 export async function refreshGoogleAccessToken(tokens, oauthClient) {
   if (!tokens?.refresh) throw new Error('No Google refresh token available');
-  const { clientId, clientSecret } = requireOAuthClient(oauthClient);
+  const { clientId, clientSecret } = resolveOAuthClient(oauthClient);
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -145,7 +148,7 @@ const CALLBACK_HTML = (ok) => {
 };
 
 export function startGoogleBrowserLogin(oauthClient) {
-  const { clientId, clientSecret } = requireOAuthClient(oauthClient);
+  const { clientId, clientSecret } = resolveOAuthClient(oauthClient);
   const { verifier, challenge } = createPkce();
   const state = base64url(randomBytes(16));
 

@@ -35,6 +35,16 @@ afterEach(async () => {
 });
 
 describe('TUI Runtime host', () => {
+  test('uses the desktop ask level by default and updates the runtime permission truth', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createTuiHost(workspaceRoot);
+
+    expect(host.getAccessLevel()).toBe('ask_before_local');
+    expect(host.setAccessLevel('full_local')).toBe('full_local');
+    expect(host.getAccessLevel()).toBe('full_local');
+    expect(host.setAccessLevel('invalid')).toBe('ask_before_local');
+  });
+
   test('projects read-only tools for plan and explorer while retaining write tools for chat and goal', async () => {
     const workspaceRoot = await createWorkspace();
     const host = createTuiHost(workspaceRoot);
@@ -161,6 +171,63 @@ describe('TUI Runtime host', () => {
       (execution.result.permissionGrant as { decision?: string } | undefined)?.decision,
     ).toBe('allow');
     expect(await Bun.file(path.join(workspaceRoot, 'approved.txt')).exists()).toBe(true);
+  });
+
+  test('matches desktop approve-for-me behavior for workspace writes and low-risk shell', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createTuiHost({ workspaceRoot, accessLevel: 'session_local' });
+    const approvals: PendingApproval[] = [];
+    const unsubscribe = host.subscribeApproval((approval) => {
+      if (approval) approvals.push(approval);
+    });
+
+    const fileExecution = await host.execute(
+      'local.file.write',
+      { path: 'session-file.txt', content: 'approved by desktop policy' },
+      sessionContext('session-local-file'),
+    );
+    const shellExecution = await host.executeShell(
+      'touch session-shell.txt',
+      sessionContext('session-local-shell'),
+    );
+    unsubscribe();
+
+    expect(fileExecution.result.status).toBe('completed');
+    expect(shellExecution.result.status).toBe('completed');
+    expect(approvals).toHaveLength(0);
+    expect(await Bun.file(path.join(workspaceRoot, 'session-file.txt')).text()).toBe('approved by desktop policy');
+    expect(await Bun.file(path.join(workspaceRoot, 'session-shell.txt')).exists()).toBe(true);
+  });
+
+  test('matches desktop full-access behavior without bypassing irreversible hard gates', async () => {
+    const workspaceRoot = await createWorkspace();
+    const host = createTuiHost({ workspaceRoot, accessLevel: 'full_local' });
+    const approvals: PendingApproval[] = [];
+    const unsubscribe = host.subscribeApproval((approval) => {
+      if (approval) approvals.push(approval);
+    });
+
+    const fileExecution = await host.execute(
+      'local.file.write',
+      { path: 'full-file.txt', content: 'full access' },
+      sessionContext('full-local-file'),
+    );
+    const shellExecution = await host.executeShell(
+      'touch full-shell.txt',
+      sessionContext('full-local-shell'),
+    );
+    const deniedExecution = await host.executeShell(
+      'rm -rf full-file.txt',
+      sessionContext('full-local-denied'),
+    );
+    unsubscribe();
+
+    expect(fileExecution.result.status).toBe('completed');
+    expect(shellExecution.result.status).toBe('completed');
+    expect(deniedExecution.result.status).toBe('denied');
+    expect(approvals).toHaveLength(0);
+    expect(await Bun.file(path.join(workspaceRoot, 'full-file.txt')).exists()).toBe(true);
+    expect(await Bun.file(path.join(workspaceRoot, 'full-shell.txt')).exists()).toBe(true);
   });
 
   test('denies a requested shell capability without executing it', async () => {

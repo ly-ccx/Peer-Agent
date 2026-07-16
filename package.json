@@ -10,6 +10,8 @@
     "typecheck": "pnpm -r typecheck",
     "architecture:check": "node scripts/check-architecture-governance.mjs",
     "version:check": "node scripts/check-version.mjs",
+    "runtime:pack-check": "node scripts/check-runtime-packages.mjs --contents",
+    "runtime:pack-smoke": "node scripts/check-runtime-packages.mjs --smoke",
     "build:core": "cargo build --workspace",
     "build:core:release": "cargo build --workspace --release",
     "pack": "pnpm build && pnpm --filter @peer-agent/desktop pack",

@@ -9,32 +9,33 @@ import {
 } from './tui-permission-policy.ts';
 
 describe('TUI permission policy', () => {
-  test('exposes only implemented session policies in the designed order', () => {
+  test('uses the desktop local-access options as the canonical order', () => {
     expect(TUI_PERMISSION_POLICIES.map(({ policy, label }) => [policy, label])).toEqual([
-      ['ask', 'Ask'],
-      ['read-only', 'Read only'],
-      ['workspace-write', 'Workspace write'],
+      ['ask_before_local', 'Ask'],
+      ['session_local', 'Approve for me'],
+      ['full_local', 'Full access'],
     ]);
   });
 
-  test('keeps ask as the safe default and does not expose custom without a rule editor', () => {
-    expect(selectablePermissionPolicy(undefined)).toBe('ask');
-    expect(selectablePermissionPolicy('invalid')).toBe('ask');
-    expect(selectablePermissionPolicy('custom')).toBe('ask');
+  test('keeps the desktop ask level as the safe default and does not expose restricted local', () => {
+    expect(selectablePermissionPolicy(undefined)).toBe('ask_before_local');
+    expect(selectablePermissionPolicy('invalid')).toBe('ask_before_local');
+    expect(selectablePermissionPolicy('restricted_local')).toBe('ask_before_local');
   });
 
   test('maps direct keys and selection indexes', () => {
-    expect(permissionPolicyForKey('1')).toBe('ask');
-    expect(permissionPolicyForKey('2')).toBe('read-only');
-    expect(permissionPolicyForKey('3')).toBe('workspace-write');
+    expect(permissionPolicyForKey('1')).toBe('ask_before_local');
+    expect(permissionPolicyForKey('2')).toBe('session_local');
+    expect(permissionPolicyForKey('3')).toBe('full_local');
     expect(permissionPolicyForKey('4')).toBeNull();
-    expect(permissionPolicyIndex('workspace-write')).toBe(2);
-    expect(permissionPolicyIndex('custom')).toBe(0);
+    expect(permissionPolicyIndex('full_local')).toBe(2);
+    expect(permissionPolicyIndex('restricted_local')).toBe(0);
   });
 
-  test('provides full and compact status labels', () => {
-    expect(permissionPolicyLabels('read-only')).toEqual({ label: 'read only', shortLabel: 'read' });
-    expect(permissionPolicyLabels('workspace-write')).toEqual({ label: 'workspace write', shortLabel: 'write' });
-    expect(permissionPolicyLabels('custom')).toEqual({ label: 'custom', shortLabel: 'custom' });
+  test('provides desktop-aligned full and compact status labels', () => {
+    expect(permissionPolicyLabels('ask_before_local')).toEqual({ label: 'ask', shortLabel: 'ask' });
+    expect(permissionPolicyLabels('session_local')).toEqual({ label: 'approve for me', shortLabel: 'approve' });
+    expect(permissionPolicyLabels('full_local')).toEqual({ label: 'full access', shortLabel: 'full' });
+    expect(permissionPolicyLabels('read_only')).toEqual({ label: 'read only', shortLabel: 'read' });
   });
 });

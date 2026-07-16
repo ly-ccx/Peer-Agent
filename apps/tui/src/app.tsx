@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import type { TextareaRenderable } from '@opentui/core';
+import { SyntaxStyle, type TextareaRenderable } from '@opentui/core';
 import { useKeyboard, useTerminalDimensions } from '@opentui/react';
+import type { LocalAccessLevel } from '@peer-agent/protocol';
 import type { RuntimeGoalSnapshot } from '@peer-agent/runtime-sdk';
-import type { RuntimeModelSelection, RuntimePermissionPolicy } from '@peer-agent/runtime-node';
+import type { RuntimeModelSelection } from '@peer-agent/runtime-node';
 
 import { B3Wordmark } from './b3-wordmark-view.tsx';
 import { executeTuiCommand } from './command-execution.ts';
@@ -18,14 +19,12 @@ import { createComposerStatus, type ComposerStatus } from './composer-status.ts'
 import {
   createChatController,
   type ChatController,
-  type ChatMessage,
   type ChatModelPort,
   type ChatSnapshot,
 } from './chat-controller.ts';
 import {
+  approvalCardDetails,
   approvalDecisionForKey,
-  formatApprovalArguments,
-  formatApprovalRisk,
   moveApprovalSelection,
   TUI_APPROVAL_OPTIONS,
 } from './approval-card.ts';
@@ -50,8 +49,9 @@ import {
   TUI_PERMISSION_POLICIES,
 } from './tui-permission-policy.ts';
 import { moveTuiSurfaceSelection } from './surface-state.ts';
-import { runtimeControlAction, shouldHandleComposerSubmit } from './runtime-controls.ts';
-import { responsiveLayout } from './responsive-layout.ts';
+import { composerEnterAction, runtimeControlAction } from './runtime-controls.ts';
+import { responsiveLayout, responsivePickerLayout } from './responsive-layout.ts';
+import { toolResultInlineSummary, toggleToolDetails } from './tool-result-summary.ts';
 import {
   applyTuiCommand,
   createTuiExperienceState,
@@ -77,14 +77,30 @@ const COLOR = {
   danger: '#fb7185',
 } as const;
 
-function roleColor(role: ChatMessage['role']): string {
-  if (role === 'user') return COLOR.user;
-  if (role === 'tool') return COLOR.tool;
-  return COLOR.text;
-}
+const MARKDOWN_STYLE = SyntaxStyle.fromStyles({
+  'markup.heading': { fg: COLOR.accent, bold: true },
+  'markup.heading.1': { fg: COLOR.accent, bold: true },
+  'markup.heading.2': { fg: '#bef264', bold: true },
+  'markup.bold': { fg: COLOR.text, bold: true },
+  'markup.italic': { fg: '#d4d4d4', italic: true },
+  'markup.raw': { fg: '#a5b4fc' },
+  'markup.link': { fg: COLOR.user, underline: true },
+  'markup.list': { fg: COLOR.accent },
+  'markup.quote': { fg: COLOR.muted, italic: true },
+});
 
 function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
+  const [expandedTools, setExpandedTools] = useState<ReadonlySet<string>>(new Set());
   if (snapshot.messages.length === 0) return null;
+
+  const toggleTool = (messageId: string) => {
+    setExpandedTools((current) => {
+      const next = new Set(current);
+      if (toggleToolDetails(next.has(messageId))) next.add(messageId);
+      else next.delete(messageId);
+      return next;
+    });
+  };
 
   return (
     <scrollbox
@@ -96,15 +112,50 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
       paddingLeft={2}
       paddingRight={2}
     >
-      {snapshot.messages.map((message) => (
-        <box key={message.id} flexDirection="column" marginBottom={1}>
-          <text fg={roleColor(message.role)}>
-            <strong>{message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Peer' : 'Tool'}</strong>
-            {message.pending ? '  thinking…' : ''}
-          </text>
-          <text fg={COLOR.text}>{message.content || ' '}</text>
-        </box>
-      ))}
+      {snapshot.messages.map((message) => {
+        if (message.role === 'assistant') {
+          return (
+            <box key={message.id} flexDirection="column" marginBottom={1}>
+              {message.pending && !message.content ? (
+                <text fg={COLOR.muted}>thinking…</text>
+              ) : (
+                <markdown
+                  content={message.content || ' '}
+                  syntaxStyle={MARKDOWN_STYLE}
+                  fg={COLOR.text}
+                  conceal
+                  concealCode
+                  streaming={message.pending}
+                />
+              )}
+            </box>
+          );
+        }
+
+        if (message.role === 'user') {
+          return (
+            <box key={message.id} flexDirection="row" marginBottom={1}>
+              <text fg={COLOR.user}><strong>› </strong></text>
+              <text fg={COLOR.text}>{message.content || ' '}</text>
+            </box>
+          );
+        }
+
+        const toolExpanded = expandedTools.has(message.id);
+        return (
+          <box
+            key={message.id}
+            flexDirection="column"
+            marginBottom={1}
+            onMouseDown={() => toggleTool(message.id)}
+          >
+            <text fg={COLOR.muted} wrapMode="none">
+              {toolExpanded ? '▼' : '▶'} tool  {toolResultInlineSummary(message.content)}
+            </text>
+            {toolExpanded ? <text fg="#cbd5e1">{message.content || ' '}</text> : null}
+          </box>
+        );
+      })}
     </scrollbox>
   );
 }
@@ -256,12 +307,16 @@ function Composer({ controller, snapshot, disabled, focused, onValueChange, edit
         wrapMode="word"
         onContentChange={() => onValueChange(editor.current?.plainText ?? '')}
         onKeyDown={(event) => {
-          if ((event.name === 'return' || event.name === 'enter') && !shouldHandleComposerSubmit(event.eventType)) {
-            event.preventDefault();
-            event.stopPropagation();
-          }
+          const action = composerEnterAction({
+            keyName: event.name,
+            shift: event.shift,
+            eventType: event.eventType,
+          });
+          if (action === 'none' || action === 'newline') return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (action === 'submit') submit();
         }}
-        onSubmit={submit}
       />
     </box>
   );
@@ -394,7 +449,7 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
       reasoningEffort: 'default',
     },
   }), [controller, modelLabel, modelSelection]);
-  const [permissionPolicy, setPermissionPolicy] = useState<RuntimePermissionPolicy>('ask');
+  const [accessLevel, setAccessLevel] = useState<LocalAccessLevel>(() => host.getAccessLevel());
   const [composerDraft, setComposerDraft] = useState('');
   const [experience, setExperience] = useState<TuiExperienceState>(() => createTuiExperienceState());
   const visibleTurn = snapshot.session?.activeTurn ?? snapshot.session?.lastTurn;
@@ -439,20 +494,31 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
   const slashSelection = slashSurface?.selectedIndex ?? 0;
   const modeSelection = modeSurface?.selectedIndex ?? 0;
   const modelPickerSelection = modelSurface?.selectedIndex ?? 0;
-  const permissionSelection = permissionSurface?.selectedIndex ?? permissionPolicyIndex(permissionPolicy);
+  const permissionSelection = permissionSurface?.selectedIndex ?? permissionPolicyIndex(accessLevel);
   const activeTurnMode = snapshot.activeTurnMode;
   const selectedModelLabel = selectedModel && modelSelection
     ? modelSelectionLabel(modelSelection, selectedModel)
     : modelLabel;
+  const contextWindow = modelSelection?.catalog.find(
+    (entry) => entry.providerId === selectedModel?.providerId
+      && entry.modelId === selectedModel?.modelId,
+  )?.contextWindow;
   const composerStatus = createComposerStatus({
     workspaceRoot: host.workspaceRoot,
     mode: snapshot.mode,
-    permissionPolicy,
+    accessLevel,
     modelLabel: selectedModelLabel,
     reasoningEffort: selectedModel?.reasoningEffort,
     usage: snapshot.usage,
+    contextWindow,
   });
   const layout = responsiveLayout(terminal.width);
+  const pickerLayout = responsivePickerLayout(
+    terminal.height,
+    TUI_MODES.length,
+    layout.showDescriptions,
+    layout.showHints,
+  );
   const slashMaxVisible = layout.density === 'wide' || layout.density === 'compact'
     ? 5
     : layout.density === 'narrow'
@@ -464,6 +530,9 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
       ? 3
       : 2;
   const welcomeModelVisibleRows = Math.min(welcomeModelMaxVisible, Math.max(1, modelPickerRows.length));
+  const commandWindow = commandSurface
+    ? slashCommandWindow(commandItems, commandSelection, pickerLayout.commandMaxVisible)
+    : [];
   const composerStatusLayout: ComposerStatusLayout = terminal.width >= 160
     ? 'wide'
     : terminal.width >= 72
@@ -665,8 +734,9 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
           ? TUI_PERMISSION_POLICIES[permissionSelection % TUI_PERMISSION_POLICIES.length]?.policy ?? null
           : null);
       if (nextPolicy) {
-        setPermissionPolicy(nextPolicy);
-        setCommandNotice(`Permissions for this session: ${permissionPolicyLabels(nextPolicy).label}`);
+        const normalized = host.setAccessLevel(nextPolicy);
+        setAccessLevel(normalized);
+        setCommandNotice(`Local access: ${permissionPolicyLabels(normalized).label}`);
         setExperience((current) => escapeFooter(current));
         queueMicrotask(() => composerRef.current?.focus());
       }
@@ -881,14 +951,6 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
         </box>
       ) : (
         <>
-          {snapshot.messages.length > 0 ? (
-            <text fg={COLOR.text}><strong>peer</strong></text>
-          ) : null}
-
-          {snapshot.session && visibleTurn ? (
-            <text fg={COLOR.muted}>turn {visibleTurn.turnIndex} · {visibleTurn.status}</text>
-          ) : null}
-
           <ChatHistory snapshot={snapshot} />
 
       {snapshot.error ? <ErrorBanner message={snapshot.error} /> : null}
@@ -926,48 +988,61 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
         </box>
       ) : null}
 
-      {approval ? (
-        <box flexDirection="column" border borderColor="#fb7185" padding={1}>
-          <text fg="#fecdd3"><strong>Permission required</strong></text>
-          <text fg="#fda4af">
-            {approval.prompt.toolName} · {approval.prompt.capabilityId}
-          </text>
-          <text fg="#cbd5e1">args: {formatApprovalArguments(approval.prompt.args)}</text>
-          <text fg="#94a3b8">reason: {approval.prompt.reason}</text>
-          <text fg="#94a3b8">
-            scope: {approval.prompt.workspacePath ?? host.workspaceRoot} · {approval.prompt.scope.kind}
-          </text>
-          <text fg="#fbbf24">risk: {formatApprovalRisk(approval.prompt.riskLevel)}</text>
-          <box flexDirection={layout.stackActions ? 'column' : 'row'} gap={layout.stackActions ? 0 : 2}>
-            {TUI_APPROVAL_OPTIONS.map((option, index) => (
-              <text key={option.decision} fg={option.color}>
-                {index === approvalSelection ? '▶ ' : '  '}
-                [{option.shortcut}] {option.label}
-              </text>
-            ))}
+      {approval ? (() => {
+        const details = approvalCardDetails(approval.prompt);
+        return (
+          <box flexDirection="column" border borderColor="#fb7185" paddingLeft={1} paddingRight={1} flexShrink={0}>
+            <text fg="#fecdd3" wrapMode="none"><strong>Approval required</strong></text>
+            <text fg="#fda4af" wrapMode="none">Action  {details.action}</text>
+            <text fg="#94a3b8" wrapMode="none">Where   {details.location}</text>
+            <text fg="#94a3b8" wrapMode="none">Reason  {details.reason}</text>
+            <text fg="#fbbf24" wrapMode="none">Risk    {details.risk}</text>
+            <text fg="#cbd5e1" wrapMode="none">Args    {details.arguments}</text>
+            <box flexDirection="column" gap={0} flexShrink={0}>
+              {TUI_APPROVAL_OPTIONS.map((option, index) => (
+                <text key={option.decision} fg={option.color}>
+                  {index === approvalSelection ? '▶' : ' '} {option.shortcut}. {option.label}
+                </text>
+              ))}
+            </box>
+            {layout.showHints ? <text fg="#64748b">↑/↓ select  ·  Enter confirm  ·  Esc deny</text> : null}
           </box>
-          {layout.showHints ? <text fg="#64748b">←/→ or Tab select · Enter confirm · Esc deny</text> : null}
-        </box>
-      ) : null}
+        );
+      })() : null}
 
       {commandNotice && !commandSurface ? (
         <text fg={COLOR.accent}>{commandNotice}</text>
       ) : null}
 
       {permissionSurface ? (
-        <box flexDirection="column" border borderColor={COLOR.accent} backgroundColor={COLOR.panel} padding={1} gap={1}>
-          <text fg={COLOR.text}><strong>Permissions for this session</strong></text>
+        <box
+          flexDirection="column"
+          height={pickerLayout.modePanelRows}
+          flexShrink={0}
+          border
+          borderColor={COLOR.accent}
+          backgroundColor={COLOR.panel}
+          paddingLeft={1}
+          paddingRight={1}
+          paddingTop={pickerLayout.verticalPadding}
+          paddingBottom={pickerLayout.verticalPadding}
+        >
+          <text fg={COLOR.text} wrapMode="none"><strong>Local access</strong></text>
           {TUI_PERMISSION_POLICIES.map((option, index) => (
-            <box key={option.policy} flexDirection="column">
-              <text fg={index === permissionSelection ? COLOR.accent : COLOR.text}>
+            <box key={option.policy} flexDirection="column" flexShrink={0}>
+              <text fg={index === permissionSelection ? COLOR.accent : COLOR.text} wrapMode="none">
                 {index === permissionSelection ? '●' : ' '} {option.shortcut}. {option.label}
-                {option.policy === permissionPolicy ? '  current' : ''}
+                {option.policy === accessLevel ? '  current' : ''}
               </text>
-              {layout.showDescriptions ? <text fg={COLOR.muted}>   {option.description}</text> : null}
+              {pickerLayout.showDescriptions ? <text fg={COLOR.muted} wrapMode="none">   {option.description}</text> : null}
             </box>
           ))}
-          <text fg={COLOR.muted}>Runtime deny rules and irreversible-action gates always win.</text>
-          {layout.showHints ? <text fg={COLOR.muted}>↑↓ select  ·  1–3 choose  ·  enter apply  ·  esc close</text> : null}
+          {pickerLayout.showContext ? (
+            <text fg={COLOR.muted} wrapMode="none">Runtime deny rules and irreversible-action gates always win.</text>
+          ) : null}
+          {pickerLayout.showHints ? (
+            <text fg={COLOR.muted} wrapMode="none">↑↓ select  ·  1–3 choose  ·  enter apply  ·  esc close</text>
+          ) : null}
         </box>
       ) : null}
 
@@ -976,40 +1051,69 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
       ) : null}
 
       {modeSurface ? (
-        <box flexDirection="column" border borderColor={COLOR.accent} backgroundColor={COLOR.panel} padding={1}>
-          <text fg={COLOR.accent}><strong>Mode</strong></text>
-          {activeTurnMode && activeTurnMode !== snapshot.mode ? (
-            <text fg={COLOR.muted}>
-              Current turn: {tuiModeOption(activeTurnMode).label} · Next message: {tuiModeOption(snapshot.mode).label}
-            </text>
-          ) : (
-            <text fg={COLOR.muted}>Choose how the next message should run</text>
-          )}
+        <box
+          flexDirection="column"
+          height={pickerLayout.modePanelRows}
+          flexShrink={0}
+          border
+          borderColor={COLOR.accent}
+          backgroundColor={COLOR.panel}
+          paddingLeft={1}
+          paddingRight={1}
+          paddingTop={pickerLayout.verticalPadding}
+          paddingBottom={pickerLayout.verticalPadding}
+        >
+          <text fg={COLOR.accent} wrapMode="none"><strong>Mode</strong></text>
+          {pickerLayout.showContext ? (
+            activeTurnMode && activeTurnMode !== snapshot.mode ? (
+              <text fg={COLOR.muted} wrapMode="none">
+                Current turn: {tuiModeOption(activeTurnMode).label} · Next message: {tuiModeOption(snapshot.mode).label}
+              </text>
+            ) : (
+              <text fg={COLOR.muted} wrapMode="none">Choose how the next message should run</text>
+            )
+          ) : null}
           {TUI_MODES.map((option, index) => (
-            <box key={option.mode} flexDirection="column">
-              <text fg={index === modeSelection ? COLOR.text : COLOR.muted}>
+            <box key={option.mode} flexDirection="column" flexShrink={0}>
+              <text fg={index === modeSelection ? COLOR.text : COLOR.muted} wrapMode="none">
                 {index === modeSelection ? '› ' : '  '}[{option.shortcut}] {option.label}{snapshot.mode === option.mode ? '  current' : ''}
               </text>
-              {layout.showDescriptions ? <text fg={COLOR.muted}>    {option.description}</text> : null}
+              {pickerLayout.showDescriptions ? <text fg={COLOR.muted} wrapMode="none">    {option.description}</text> : null}
             </box>
           ))}
-          {layout.showHints ? <text fg={COLOR.muted}>↑↓ select · 1–3 direct · enter confirm · esc close</text> : null}
+          {pickerLayout.showHints ? (
+            <text fg={COLOR.muted} wrapMode="none">↑↓ select · 1–3 direct · enter confirm · esc close</text>
+          ) : null}
         </box>
       ) : null}
 
       {commandSurface ? (
-        <box flexDirection="column" border borderColor={COLOR.accent} backgroundColor={COLOR.panel} padding={1}>
-          <text fg={COLOR.accent}><strong>Commands</strong></text>
-          <text fg={COLOR.muted}>{commandSurface.query ? `Search: ${commandSurface.query}` : 'Type to search commands'}</text>
-          {commandItems.map((command, index) => (
-            <box key={command.id} justifyContent="space-between">
-              <text fg={index === commandSelection ? COLOR.text : COLOR.muted}>
+        <box
+          flexDirection="column"
+          flexShrink={0}
+          border
+          borderColor={COLOR.accent}
+          backgroundColor={COLOR.panel}
+          paddingLeft={1}
+          paddingRight={1}
+          paddingTop={pickerLayout.verticalPadding}
+          paddingBottom={pickerLayout.verticalPadding}
+        >
+          <text fg={COLOR.accent} wrapMode="none"><strong>Commands</strong></text>
+          {pickerLayout.showContext ? (
+            <text fg={COLOR.muted} wrapMode="none">{commandSurface.query ? `Search: ${commandSurface.query}` : 'Type to search commands'}</text>
+          ) : null}
+          {commandWindow.map(({ command, index }) => (
+            <box key={command.id} flexDirection="column" flexShrink={0}>
+              <text fg={index === commandSelection ? COLOR.text : COLOR.muted} wrapMode="none">
                 {index === commandSelection ? '› ' : '  '}{command.label}
               </text>
-              {layout.showDescriptions ? <text fg={COLOR.muted}>{command.description}</text> : null}
+              {pickerLayout.showDescriptions ? <text fg={COLOR.muted} wrapMode="none">{command.description}</text> : null}
             </box>
           ))}
-          {layout.showHints ? <text fg={COLOR.muted}>↑↓ select  ·  enter run  ·  esc close</text> : null}
+          {pickerLayout.showHints ? (
+            <text fg={COLOR.muted} wrapMode="none">↑↓ select  ·  enter run  ·  esc close</text>
+          ) : null}
         </box>
       ) : (
         <ComposerDock

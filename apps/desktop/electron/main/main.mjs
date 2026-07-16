@@ -105,13 +105,27 @@ const availableLocales = ['zh-CN', 'en-US'];
 const desktopIconPath = workspaceRoot
   ? path.join(workspaceRoot, 'apps/desktop/build/icon.png')
   : null;
+const macDockIconPath = workspaceRoot
+  ? path.join(workspaceRoot, 'apps/desktop/build/icon-macos-dock.png')
+  : null;
+const macDarkDockIconPath = workspaceRoot
+  ? path.join(workspaceRoot, 'apps/desktop/build/icon-macos-dock-dark.png')
+  : null;
 
 function getDesktopIconPath() {
   return desktopIconPath && existsSync(desktopIconPath) ? desktopIconPath : undefined;
 }
 
-function setDockIcon() {
-  const iconPath = getDesktopIconPath();
+function setDockIcon(appearance = settingsStore.getAll().appearance) {
+  // app.dock.setIcon renders a PNG as-is; unlike a packaged .icns, macOS does
+  // not apply the system app-icon mask for us in development.
+  const followsSystem = appearance?.mode === 'system' || appearance?.mode == null;
+  const useDarkIcon = appearance?.mode === 'dark'
+    || (followsSystem && nativeTheme.shouldUseDarkColors);
+  const preferredIconPath = useDarkIcon ? macDarkDockIconPath : macDockIconPath;
+  let iconPath = getDesktopIconPath();
+  if (macDockIconPath && existsSync(macDockIconPath)) iconPath = macDockIconPath;
+  if (preferredIconPath && existsSync(preferredIconPath)) iconPath = preferredIconPath;
   if (process.platform === 'darwin' && iconPath && app.dock) {
     app.dock.setIcon(nativeImage.createFromPath(iconPath));
   }
@@ -1067,6 +1081,7 @@ ipcMain.handle('settings:update', (_event, partial) => {
     const popoverWindow = quickChatWindowController.getPopoverWindow();
     quickWindow?.setBackgroundColor(backgroundColor);
     popoverWindow?.setBackgroundColor(backgroundColor);
+    setDockIcon(next.appearance);
     quickWindow?.webContents.send('appearance:changed', next.appearance);
     popoverWindow?.webContents.send('appearance:changed', next.appearance);
   }
@@ -2539,6 +2554,7 @@ app.whenReady().then(async () => {
   nativeTheme.on('updated', () => {
     const appearance = settingsStore.getAll().appearance;
     if (appearance?.mode !== 'system') return;
+    setDockIcon(appearance);
     const backgroundColor = resolveQuickChatWindowBackground(appearance, nativeTheme.shouldUseDarkColors);
     quickChatWindowController.getWindow()?.setBackgroundColor(backgroundColor);
     quickChatWindowController.getPopoverWindow()?.setBackgroundColor(backgroundColor);

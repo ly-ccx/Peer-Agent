@@ -58,11 +58,20 @@ test('subscription catalog includes gpt-5.5 pricing and context metadata', () =>
   assert.equal(model.longContextOutputPrice, 45);
 });
 
-test('GPT-5.6 subscription models expose 353k context and max reasoning', () => {
-  for (const id of ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
+test('GPT-5.6 subscription models expose cache pricing and max reasoning', () => {
+  const expected = new Map([
+    ['gpt-5.6-sol', { inputPrice: 5, cacheReadPrice: 0.5, outputPrice: 30 }],
+    ['gpt-5.6-terra', { inputPrice: 2.5, cacheReadPrice: 0.25, outputPrice: 15 }],
+    ['gpt-5.6-luna', { inputPrice: 1, cacheReadPrice: 0.1, outputPrice: 6 }],
+  ]);
+  for (const [id, pricing] of expected) {
     const model = getSubscriptionModelMetadata(id);
     assert.ok(model);
     assert.equal(model.contextWindow, 353_000);
+    assert.equal(model.inputPrice, pricing.inputPrice);
+    assert.equal(model.cacheReadPrice, pricing.cacheReadPrice);
+    assert.equal(model.outputPrice, pricing.outputPrice);
+    assert.equal(model.supportsPromptCaching, true);
     assert.deepEqual(model.reasoningEffortLevels, ['low', 'default', 'high', 'max']);
   }
 });

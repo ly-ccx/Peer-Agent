@@ -28,20 +28,53 @@ export const TUI_APPROVAL_OPTIONS = [
   },
 ] as const satisfies readonly TuiApprovalOption[];
 
-export function formatApprovalArguments(args: unknown, maxLength = 180): string {
+export function formatApprovalArguments(args: unknown, maxLength = 240): string {
   let formatted: string;
-  try {
-    formatted = typeof args === 'string' ? args : JSON.stringify(args);
-  } catch {
-    formatted = String(args);
+  if (typeof args === 'string') {
+    formatted = args;
+  } else {
+    try {
+      formatted = JSON.stringify(args, null, 2) ?? 'No arguments';
+    } catch {
+      formatted = 'Arguments could not be displayed';
+    }
   }
-  if (!formatted) return '—';
-  return formatted.length <= maxLength ? formatted : `${formatted.slice(0, Math.max(0, maxLength - 1))}…`;
+  const singleLine = formatted.replace(/\s+/g, ' ').trim();
+  if (!singleLine) return 'No arguments';
+  return singleLine.length <= maxLength
+    ? singleLine
+    : `${singleLine.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 export function formatApprovalRisk(value: unknown): string {
   if (typeof value === 'string' && value.trim()) return value.trim().toLowerCase();
   return 'runtime governed';
+}
+
+export interface ApprovalCardDetails {
+  readonly action: string;
+  readonly location: string;
+  readonly reason: string;
+  readonly risk: string;
+  readonly arguments: string;
+}
+
+export function approvalCardDetails(prompt: {
+  readonly toolName: string;
+  readonly capabilityId: string;
+  readonly args: unknown;
+  readonly workspacePath?: string;
+  readonly reason: string;
+  readonly scope: { readonly kind?: string; readonly workspaceRoot?: string };
+  readonly riskLevel: unknown;
+}): ApprovalCardDetails {
+  return {
+    action: `${prompt.toolName} (${prompt.capabilityId})`,
+    location: prompt.workspacePath || prompt.scope.workspaceRoot || 'Current workspace',
+    reason: prompt.reason || 'This action needs your approval before local execution.',
+    risk: formatApprovalRisk(prompt.riskLevel),
+    arguments: formatApprovalArguments(prompt.args),
+  };
 }
 
 export function moveApprovalSelection(current: number, delta: -1 | 1): number {

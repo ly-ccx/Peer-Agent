@@ -42,18 +42,6 @@ describe('TUI app layout', () => {
     expect(dockSource).toContain('flexShrink={0}');
   });
 
-  test('keeps long errors from displacing slash command suggestions', () => {
-    const errorSource = appSource.slice(
-      appSource.indexOf('function ErrorBanner'),
-      appSource.indexOf('function SlashCommandMenu'),
-    );
-
-    expect(errorSource).toContain('height={1}');
-    expect(errorSource).toContain('flexShrink={0}');
-    expect(errorSource).toContain('wrapMode="none"');
-    expect(appSource).toContain('paddingTop={menuReserve}');
-  });
-
   test('keeps the composer input pure and places status outside its border', () => {
     expect(appSource).toContain("placeholder={disabled ? 'Resolve the request above…' : 'Ask anything…'}");
     const dockSource = appSource.slice(
@@ -100,6 +88,19 @@ describe('TUI app layout', () => {
     expect(appSource).not.toContain('{slashSurface ? (');
   });
 
+  test('constrains long errors to a separate row so slash suggestions keep their reserved space', () => {
+    const errorBannerSource = appSource.slice(
+      appSource.indexOf('function ErrorBanner'),
+      appSource.indexOf('function SlashCommandMenu'),
+    );
+
+    expect(errorBannerSource).toContain('<box height={1} flexShrink={0}');
+    expect(errorBannerSource).toContain('wrapMode="none"');
+    expect(appSource).toContain('<ErrorBanner message={snapshot.error} />');
+    expect(appSource).toContain('const menuReserve = slashOpen');
+    expect(appSource).toContain('paddingTop={menuReserve}');
+  });
+
   test('keeps the model picker in the composer dock instead of restoring the top-level surface', () => {
     const modelPickerSource = appSource.slice(
       appSource.indexOf('function ModelPickerMenu'),
@@ -142,15 +143,51 @@ describe('TUI app layout', () => {
     expect(statusViewSource).toContain("if (layout === 'narrow')");
     expect(statusViewSource).toContain("if (layout === 'compact')");
     expect(statusViewSource).toContain('flexDirection="column"');
-    expect(statusViewSource).toContain('justifyContent="space-between"');
   });
 
-  test('adapts picker density and stacks approval actions on narrow terminals', () => {
+  test('renders the wide status as one non-wrapping text flow so long model names cannot overlap other fields', () => {
+    const wideStatusSource = statusViewSource.slice(statusViewSource.lastIndexOf('return ('));
+
+    expect(wideStatusSource.match(/<text /g)?.length).toBe(1);
+    expect(wideStatusSource).toContain('<text fg={MUTED} wrapMode="none">');
+    expect(wideStatusSource).not.toContain('justifyContent="space-between"');
+    expect(wideStatusSource).toContain('<StatusPair label="workspace" value={status.workspace} />');
+    expect(wideStatusSource).toContain('<StatusPair label="mode" value={status.mode} accent />');
+    expect(wideStatusSource).toContain('<StatusPair label="access" value={status.permissionShort} />');
+    expect(wideStatusSource).toContain('{status.model}');
+    expect(wideStatusSource).toContain('{status.reasoning}');
+    expect(wideStatusSource).toContain('<ContextStatus status={status} />');
+  });
+
+  test('adapts picker density and keeps approval choices on separate rows', () => {
     expect(appSource).toContain('const layout = responsiveLayout(terminal.width)');
-    expect(appSource).toContain("flexDirection={layout.stackActions ? 'column' : 'row'}");
-    expect(appSource).toContain('layout.showDescriptions ?');
-    expect(appSource).toContain('layout.showHints ?');
+    expect(appSource).toContain('<box flexDirection="column" gap={0} flexShrink={0}>');
+    expect(appSource).toContain('Action  {details.action}');
+    expect(appSource).toContain('Where   {details.location}');
+    expect(appSource).toContain('Reason  {details.reason}');
+    expect(appSource).toContain("{index === approvalSelection ? '▶' : ' '} {option.shortcut}. {option.label}");
+    expect(appSource).toContain('pickerLayout.showDescriptions ?');
+    expect(appSource).toContain('pickerLayout.showHints ?');
     expect(appSource).toContain('paddingLeft={layout.outerPadding}');
+  });
+
+  test('prevents short-terminal picker rows from collapsing onto each other', () => {
+    const modePickerSource = appSource.slice(
+      appSource.indexOf('{modeSurface ? ('),
+      appSource.indexOf('{commandSurface ? ('),
+    );
+    const commandPickerSource = appSource.slice(
+      appSource.indexOf('{commandSurface ? ('),
+      appSource.indexOf('<ComposerDock', appSource.indexOf('{commandSurface ? (')),
+    );
+
+    expect(appSource).toContain('responsivePickerLayout(');
+    expect(modePickerSource).toContain('height={pickerLayout.modePanelRows}');
+    expect(modePickerSource).toContain('flexShrink={0}');
+    expect(modePickerSource).toContain('pickerLayout.showDescriptions');
+    expect(modePickerSource).toContain('pickerLayout.showHints');
+    expect(commandPickerSource).toContain('commandWindow.map');
+    expect(commandPickerSource).toContain('flexShrink={0}');
   });
 
   test('covers workspace, mode, permission, model, reasoning and context', () => {
@@ -160,6 +197,23 @@ describe('TUI app layout', () => {
     expect(statusViewSource).toContain('{status.model}');
     expect(statusViewSource).toContain('{status.reasoning}');
     expect(statusViewSource).toContain('status.contextShort : status.context');
+    expect(appSource).toContain('host.setAccessLevel(nextPolicy)');
+  });
+
+  test('renders assistant content with the native OpenTUI markdown component', () => {
+    expect(appSource).toContain("import { SyntaxStyle, type TextareaRenderable } from '@opentui/core'");
+    expect(appSource).toContain('<markdown');
+    expect(appSource).toContain('content={message.content');
+    expect(appSource).toContain('syntaxStyle={MARKDOWN_STYLE}');
+    expect(appSource).toContain('streaming={message.pending}');
+  });
+
+  test('keeps user and tool messages visually distinct without repeated speaker headings', () => {
+    expect(appSource).toContain('<strong>› </strong>');
+    expect(appSource).toContain("{toolExpanded ? '▼' : '▶'} tool");
+    expect(appSource).not.toContain("message.role === 'user' ? 'You'");
+    expect(appSource).not.toContain('<strong>peer</strong>');
+    expect(appSource).not.toContain('show details');
   });
 
   test('does not restore the old central instructions or standalone footer', () => {

@@ -30,6 +30,9 @@ importers:
       '@peer-agent/conversation-store':
         specifier: workspace:*
         version: link:../../packages/conversation-store
+      '@peer-agent/credential-helper':
+        specifier: workspace:*
+        version: link:../../packages/credential-helper
       '@peer-agent/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
@@ -115,6 +118,12 @@ importers:
       '@peer-agent/conversation-store':
         specifier: workspace:*
         version: link:../../packages/conversation-store
+      '@peer-agent/credential-helper':
+        specifier: workspace:*
+        version: link:../../packages/credential-helper
+      '@peer-agent/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@peer-agent/runtime-core':
         specifier: workspace:*
         version: link:../../packages/runtime-core
@@ -156,6 +165,15 @@ importers:
 
   packages/conversation-store: {}
 
+  packages/credential-helper:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.20
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/i18n:
     dependencies:
       '@peer-agent/protocol':
@@ -194,10 +212,10 @@ importers:
   packages/runtime-sdk:
     dependencies:
       '@peer-agent/protocol':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../protocol
       '@peer-agent/runtime-core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../runtime-core
     devDependencies:
       typescript:

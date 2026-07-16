@@ -345,9 +345,36 @@ export function createLlmConfigStore({
       item.cacheWritePrice = undefined;
       changed = true;
     }
-    const supportsPromptCaching = Boolean(metadata.cacheReadPrice);
+    // 缓存能力是模型能力，不等于“缓存读取价是否为 truthy”。显式能力优先；旧目录没有
+    // capability 字段时，只要声明过 cached-input 价格（包括 0）也视为支持。
+    const supportsPromptCaching = metadata.supportsPromptCaching
+      ?? metadata.cacheReadPrice !== undefined;
     if (item.supportsPromptCaching !== supportsPromptCaching) {
       item.supportsPromptCaching = supportsPromptCaching;
+      changed = true;
+    }
+    if (metadata.supportsVision !== undefined && item.supportsVision !== metadata.supportsVision) {
+      item.supportsVision = metadata.supportsVision;
+      changed = true;
+    }
+    if (metadata.supportsReasoning !== undefined && item.supportsReasoning !== metadata.supportsReasoning) {
+      item.supportsReasoning = metadata.supportsReasoning;
+      changed = true;
+    }
+    const effortLevels = Array.isArray(metadata.reasoningEffortLevels)
+      ? metadata.reasoningEffortLevels
+      : null;
+    if (effortLevels) {
+      const sameLevels = Array.isArray(item.reasoningEffortLevels)
+        && item.reasoningEffortLevels.length === effortLevels.length
+        && item.reasoningEffortLevels.every((level, index) => level === effortLevels[index]);
+      if (!sameLevels) {
+        item.reasoningEffortLevels = [...effortLevels];
+        changed = true;
+      }
+    } else if (item.reasoningEffortLevels !== undefined) {
+      // 切到没有模型级覆盖的订阅模型时，删除旧模型遗留值；toView 会回退到 channel 能力。
+      delete item.reasoningEffortLevels;
       changed = true;
     }
     return changed;
@@ -669,7 +696,7 @@ export function createLlmConfigStore({
       supportsPromptCaching: item.supportsPromptCaching ?? undefined,
       reasoningParamStyle: item.reasoningParamStyle ?? undefined,
       reasoningEffortMap: item.reasoningEffortMap ?? undefined,
-      reasoningEffortLevels: item.reasoningEffortLevels ?? undefined,
+      reasoningEffortLevels: item.reasoningEffortLevels ?? resolved?.reasoningEffortLevels ?? undefined,
       oauthClientId: item.oauthClientId ?? undefined,
       oauthProjectId: item.oauthProjectId ?? undefined,
       customHeaders: item.customHeaders ?? undefined,
@@ -725,7 +752,9 @@ export function createLlmConfigStore({
       baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : (isLocalQoderAuth ? defaults.baseUrl : (baseUrl || defaults.baseUrl)),
       apiKey: isSubscription || isGoogleOAuth || isGrokOAuth || isLocalQoderAuth ? '' : (apiKey || ''),
       supportsReasoning: isSubscription ? true : (isLocalQoderAuth ? false : supportsReasoning),
-      supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (isLocalQoderAuth ? false : supportsPromptCaching),
+      supportsPromptCaching: isSubscription
+        ? (subscriptionMetadata?.supportsPromptCaching ?? subscriptionMetadata?.cacheReadPrice !== undefined)
+        : (isLocalQoderAuth ? false : supportsPromptCaching),
       supportsVision,
       reasoningParamStyle,
       reasoningEffortMap,
@@ -768,12 +797,21 @@ export function createLlmConfigStore({
       longContextInputPrice: isSubscription ? subscriptionMetadata?.longContextInputPrice : undefined,
       longContextCacheReadPrice: isSubscription ? subscriptionMetadata?.longContextCacheReadPrice : undefined,
       longContextOutputPrice: isSubscription ? subscriptionMetadata?.longContextOutputPrice : undefined,
-      supportsVision: isLocalQoderAuth ? false : supportsVision,
+      supportsVision: isSubscription
+        ? subscriptionMetadata?.supportsVision
+        : (isLocalQoderAuth ? false : supportsVision),
       // 订阅链路(codex/responses)原生支持思考强度,默认开启；API Key 目录未返回的能力保持未知。
-      supportsReasoning: isSubscription ? true : (isLocalQoderAuth ? false : supportsReasoning),
-      supportsPromptCaching: isSubscription ? Boolean(subscriptionMetadata?.cacheReadPrice) : (isLocalQoderAuth ? false : supportsPromptCaching),
+      supportsReasoning: isSubscription
+        ? (subscriptionMetadata?.supportsReasoning ?? true)
+        : (isLocalQoderAuth ? false : supportsReasoning),
+      supportsPromptCaching: isSubscription
+        ? (subscriptionMetadata?.supportsPromptCaching ?? subscriptionMetadata?.cacheReadPrice !== undefined)
+        : (isLocalQoderAuth ? false : supportsPromptCaching),
       reasoningParamStyle: reasoningParamStyle || undefined,
       reasoningEffortMap: resolved.reasoningEffortMap || undefined,
+      reasoningEffortLevels: subscriptionMetadata?.reasoningEffortLevels
+        ? [...subscriptionMetadata.reasoningEffortLevels]
+        : resolved.reasoningEffortLevels || undefined,
       customHeaders: customHeaders || undefined,
     };
     if (isLocalQoderAuth) applyQoderModelMetadata(item);

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  approvalCardDetails,
   approvalDecisionForKey,
   formatApprovalArguments,
   formatApprovalRisk,
@@ -18,10 +19,28 @@ describe('TUI approval card', () => {
   });
 
   test('formats governed request details without unbounded output', () => {
-    expect(formatApprovalArguments({ path: 'notes.txt' })).toBe('{"path":"notes.txt"}');
+    expect(formatApprovalArguments({ path: 'notes.txt' })).toBe('{ "path": "notes.txt" }');
     expect(formatApprovalArguments('abcdef', 4)).toBe('abc…');
     expect(formatApprovalRisk('HIGH')).toBe('high');
     expect(formatApprovalRisk(undefined)).toBe('runtime governed');
+  });
+
+  test('builds a clear action, location, reason, and risk hierarchy', () => {
+    expect(approvalCardDetails({
+      toolName: 'Write file',
+      capabilityId: 'file.write',
+      args: { path: 'notes.txt' },
+      workspacePath: '/tmp/project',
+      reason: 'Writes local data',
+      scope: { workspaceRoot: '/tmp/project' },
+      riskLevel: 'HIGH',
+    })).toEqual({
+      action: 'Write file (file.write)',
+      location: '/tmp/project',
+      reason: 'Writes local data',
+      risk: 'high',
+      arguments: '{ "path": "notes.txt" }',
+    });
   });
 
   test('cycles keyboard selection in both directions', () => {

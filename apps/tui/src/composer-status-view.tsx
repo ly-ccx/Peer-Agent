@@ -81,16 +81,14 @@ export function ComposerStatusBar({ status, layout }: {
   }
 
   return (
-    <box flexDirection="row" width="100%" justifyContent="space-between" paddingLeft={1} paddingRight={1}>
+    <box width="100%" paddingLeft={1} paddingRight={1}>
       <text fg={MUTED} wrapMode="none">
         <StatusPair label="workspace" value={status.workspace} />
-      </text>
-      <text fg={MUTED} wrapMode="none">
+        <StatusSeparator />
         <StatusPair label="mode" value={status.mode} accent />
         <StatusSeparator />
         <StatusPair label="access" value={status.permissionShort} />
-      </text>
-      <text fg={MUTED} wrapMode="none">
+        <StatusSeparator />
         <span fg={TEXT}>{status.model}</span>
         <StatusSeparator />
         <span fg={MUTED}>{status.reasoning}</span>

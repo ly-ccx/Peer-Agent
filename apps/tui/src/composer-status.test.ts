@@ -75,5 +75,15 @@ describe('composer status', () => {
       reasoning: 'reasoning high',
       context: 'context 0 / ?',
     });
+
+    expect(createComposerStatus({
+      workspaceRoot: '/tmp/project',
+      mode: 'chat',
+      accessLevel: 'session_local',
+      modelLabel: 'custom-model',
+    })).toMatchObject({
+      permission: 'approve for me',
+      permissionShort: 'approve',
+    });
   });
 });

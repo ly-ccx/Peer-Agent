@@ -2,7 +2,7 @@
  * 更新通道（Update Channel）契约。
  *
  * 这是「版本号显示 + 检查更新 + 可选更新通道」能力的跨层边界类型：
- *   - 主进程（能力）依据通道决定向 electron-updater 暴露 latest*.yml / beta*.yml 哪条清单。
+ *   - 桌面更新适配器依据通道决定使用 latest*.yml / beta*.yml 哪条清单。
  *   - 渲染层（表达）仅消费这些类型展示版本徽标、更新摘要弹窗与设置项。
  *   - settings 存储是通道选择的权限真相（updateChannel 字段）。
  */

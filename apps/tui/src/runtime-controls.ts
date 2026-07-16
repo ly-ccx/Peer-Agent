@@ -27,6 +27,22 @@ export function runtimeControlAction(input: RuntimeControlInput): RuntimeControl
   return 'none';
 }
 
-export function shouldHandleComposerSubmit(eventType: 'press' | 'repeat' | 'release'): boolean {
-  return eventType === 'press';
+export interface ComposerEnterInput {
+  readonly keyName: string;
+  readonly shift: boolean;
+  readonly eventType: 'press' | 'repeat' | 'release';
+}
+
+export type ComposerEnterAction = 'submit' | 'newline' | 'suppress' | 'none';
+
+/**
+ * Keeps the text area's multiline editing and message submission bindings separate.
+ * Only the first unmodified Enter submits; Shift+Enter remains native newline input,
+ * while repeat/release events are suppressed so one physical key press acts once.
+ */
+export function composerEnterAction(input: ComposerEnterInput): ComposerEnterAction {
+  const isEnter = input.keyName === 'return' || input.keyName === 'enter';
+  if (!isEnter) return 'none';
+  if (input.eventType !== 'press') return 'suppress';
+  return input.shift ? 'newline' : 'submit';
 }

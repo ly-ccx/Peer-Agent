@@ -1,8 +1,25 @@
 {
   "name": "@peer-agent/runtime-core",
-  "version": "0.0.1-beta.28",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Host-neutral capability, permission, projection, and Evidence primitives for Peer Agent runtimes.",
   "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yinLiangDream/Peer-Agent.git",
+    "directory": "packages/runtime-core"
+  },
+  "homepage": "https://github.com/yinLiangDream/Peer-Agent#readme",
+  "bugs": {
+    "url": "https://github.com/yinLiangDream/Peer-Agent/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -12,10 +29,12 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm build",
     "test": "node --test src/*.test.ts",
     "typecheck": "tsc -p tsconfig.json"
   },

@@ -44,6 +44,8 @@ function host(
     workspaceRoot: '/tmp/test',
     capabilities: ['local.file.read'],
     toolDefinitions,
+    getAccessLevel: () => 'ask_before_local',
+    setAccessLevel: () => 'ask_before_local',
     execute: async (capabilityId, arguments_) => run(capabilityId, arguments_),
     executeRead: async () => execution('file contents'),
     executeShell: async () => execution('shell'),
@@ -89,6 +91,52 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     expect(requests[0]?.reasoningEffort).toBeUndefined();
     expect(requests[1]?.model).toBe('model-b');
     expect(requests[1]?.reasoningEffort).toBe('high');
+  });
+
+  test('routes each turn through the provider selected at turn start', async () => {
+    const calls: string[] = [];
+    let selectedProvider = 'provider-a';
+    const provider = (id: string): ModelProvider => ({
+      async stream() {
+        calls.push(id);
+        return completed(id);
+      },
+    });
+    const providers = new Map([
+      ['provider-a', provider('provider-a')],
+      ['provider-b', provider('provider-b')],
+    ]);
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({
+        provider: providers.get('provider-a')!,
+        model: 'model-test',
+        getProvider: () => providers.get(selectedProvider)!,
+      }),
+    });
+
+    await controller.send('first');
+    selectedProvider = 'provider-b';
+    await controller.send('second');
+
+    expect(calls).toEqual(['provider-a', 'provider-b']);
+  });
+
+  test('does not fall back to the previous provider when selected provider resolution fails', async () => {
+    let fallbackCalls = 0;
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({
+        provider: { async stream() { fallbackCalls += 1; return completed('fallback'); } },
+        model: 'model-test',
+        getProvider: () => { throw new Error('Selected provider is no longer available.'); },
+      }),
+    });
+
+    await controller.send('hello');
+
+    expect(fallbackCalls).toBe(0);
+    expect(controller.getSnapshot().error).toContain('Selected provider is no longer available');
   });
 
   test('exposes only the tool definitions projected for the active mode', async () => {

@@ -1,9 +1,11 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
+import type { LocalAccessLevel } from '@peer-agent/protocol';
 import type { RuntimeToolDefinition } from '@peer-agent/runtime-core';
 import {
   createConfiguredNodeHookRunner,
   createNodeProviderBundle,
+  NODE_SHELL_RISK_ORDER,
   type NodeRuntimePermissionPrompt,
 } from '@peer-agent/runtime-node';
 import type {
@@ -13,6 +15,7 @@ import type {
 } from '@peer-agent/runtime-sdk';
 
 import { normalizeTuiMode, TUI_RUNTIME_MODES, type TuiMode } from './tui-mode.ts';
+import { normalizeLocalAccessLevel } from './tui-permission-policy.ts';
 
 export type TuiApprovalDecision = 'allow-once' | 'allow-session' | 'deny';
 
@@ -36,6 +39,8 @@ export interface TuiHost {
   readonly workspaceRoot: string;
   readonly capabilities: readonly string[];
   readonly toolDefinitions: readonly RuntimeToolDefinition[];
+  getAccessLevel(): LocalAccessLevel;
+  setAccessLevel(value: unknown): LocalAccessLevel;
   capabilitiesForMode?(mode: TuiMode): readonly string[];
   toolDefinitionsForMode?(mode: TuiMode): readonly RuntimeToolDefinition[];
   execute(
@@ -53,6 +58,36 @@ export interface CreateTuiHostOptions {
   readonly workspaceRoot: string;
   readonly userDataPath?: string;
   readonly hookRunner?: RuntimeSdkHookRunner | null;
+  readonly accessLevel?: LocalAccessLevel;
+  readonly persistAccessLevel?: (accessLevel: LocalAccessLevel) => void;
+}
+
+function isNodeShellRiskLevel(value: unknown): value is keyof typeof NODE_SHELL_RISK_ORDER {
+  return typeof value === 'string'
+    && Object.prototype.hasOwnProperty.call(NODE_SHELL_RISK_ORDER, value);
+}
+
+function automaticAccessDecision(
+  accessLevel: LocalAccessLevel,
+  prompt: NodeRuntimePermissionPrompt,
+): { readonly granted: true; readonly reason: string } | null {
+  if (accessLevel === 'full_local') {
+    return { granted: true, reason: 'local_access_level_full' };
+  }
+  if (accessLevel !== 'session_local' || prompt.confirmation.kind !== 'capability-approval') {
+    return null;
+  }
+  if (prompt.confirmation.approvalKind === 'file-write') {
+    return { granted: true, reason: 'local_access_level_session' };
+  }
+  if (
+    prompt.confirmation.approvalKind === 'shell-exec'
+    && isNodeShellRiskLevel(prompt.riskLevel)
+    && NODE_SHELL_RISK_ORDER[prompt.riskLevel] <= NODE_SHELL_RISK_ORDER.L3_external_write
+  ) {
+    return { granted: true, reason: 'local_access_level_session' };
+  }
+  return null;
 }
 
 export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
@@ -67,6 +102,17 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
   const sessionApprovals = new Set<string>();
   const approvalQueue: PendingApproval[] = [];
   let activeApproval: PendingApproval | null = null;
+  let accessLevel = normalizeLocalAccessLevel(resolvedOptions.accessLevel);
+
+  const setAccessLevel = (value: unknown): LocalAccessLevel => {
+    accessLevel = normalizeLocalAccessLevel(value);
+    try {
+      resolvedOptions.persistAccessLevel?.(accessLevel);
+    } catch {
+      // Runtime truth still changes for this session when shared preference persistence is unavailable.
+    }
+    return accessLevel;
+  };
 
   const sessionApprovalKey = (
     sessionId: string,
@@ -103,6 +149,9 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
         reason: 'approved_for_tui_session',
       });
     }
+
+    const automaticDecision = automaticAccessDecision(accessLevel, prompt);
+    if (automaticDecision) return Promise.resolve(automaticDecision);
 
     if (approvalListeners.size === 0) {
       return Promise.resolve({
@@ -187,6 +236,8 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     workspaceRoot: defaultBundle.workspaceRoot,
     capabilities: defaultBundle.projection.tools.map((tool) => tool.capabilityId),
     toolDefinitions: defaultBundle.toolDefinitions,
+    getAccessLevel: () => accessLevel,
+    setAccessLevel,
     capabilitiesForMode(mode) {
       return bundleForMode(normalizeTuiMode(mode)).projection.tools.map((tool) => tool.capabilityId);
     },

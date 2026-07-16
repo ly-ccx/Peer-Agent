@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { runtimeControlAction, shouldHandleComposerSubmit } from './runtime-controls.ts';
+import { composerEnterAction, runtimeControlAction } from './runtime-controls.ts';
 
 describe('runtime controls', () => {
   test('interrupts a running turn before dismissing an open surface', () => {
@@ -40,9 +40,50 @@ describe('runtime controls', () => {
     })).toBe('clear-composer');
   });
 
-  test('does not treat key repeats or releases as composer submission', () => {
-    expect(shouldHandleComposerSubmit('press')).toBe(true);
-    expect(shouldHandleComposerSubmit('repeat')).toBe(false);
-    expect(shouldHandleComposerSubmit('release')).toBe(false);
+  test('submits on an unmodified Enter press', () => {
+    expect(composerEnterAction({
+      keyName: 'return',
+      shift: false,
+      eventType: 'press',
+    })).toBe('submit');
+    expect(composerEnterAction({
+      keyName: 'enter',
+      shift: false,
+      eventType: 'press',
+    })).toBe('submit');
+  });
+
+  test('leaves Shift+Enter to the textarea so it inserts a newline', () => {
+    expect(composerEnterAction({
+      keyName: 'return',
+      shift: true,
+      eventType: 'press',
+    })).toBe('newline');
+  });
+
+  test('prevents repeat and release Enter events from submitting or inserting another newline', () => {
+    expect(composerEnterAction({
+      keyName: 'return',
+      shift: false,
+      eventType: 'repeat',
+    })).toBe('suppress');
+    expect(composerEnterAction({
+      keyName: 'return',
+      shift: false,
+      eventType: 'release',
+    })).toBe('suppress');
+    expect(composerEnterAction({
+      keyName: 'return',
+      shift: true,
+      eventType: 'repeat',
+    })).toBe('suppress');
+  });
+
+  test('ignores non-Enter keys', () => {
+    expect(composerEnterAction({
+      keyName: 'a',
+      shift: false,
+      eventType: 'press',
+    })).toBe('none');
   });
 });

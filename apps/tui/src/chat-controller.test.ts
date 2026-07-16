@@ -35,6 +35,8 @@ function host(run: (
     workspaceRoot: '/tmp/test',
     capabilities: ['local.file.read'],
     toolDefinitions: [{ name: 'read_file', capabilityId: 'local.file.read' }],
+    getAccessLevel: () => 'ask_before_local',
+    setAccessLevel: () => 'ask_before_local',
     execute: async (capabilityId, arguments_, context) => run(capabilityId, arguments_, context),
     executeRead: async () => execution('read'),
     executeShell: async () => execution('shell'),
@@ -238,6 +240,54 @@ describe('chat controller', () => {
     expect(controller.getSnapshot().session?.lastTurn?.reason).toBe('cancelled_in_tui');
   });
 
+  test('clears messages, provider errors, and model context while preserving mode', async () => {
+    const observedInputs: string[][] = [];
+    let shouldFail = true;
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        observedInputs.push(state.modelMessages.map((message) => String(message.content)));
+        if (shouldFail) throw new Error('provider exploded');
+        return { kind: 'completed', state, output: 'recovered' };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model, initialMode: 'plan' });
+
+    await controller.send('fail');
+    expect(controller.clear()).toBe(true);
+    expect(controller.getSnapshot()).toMatchObject({ status: 'idle', mode: 'plan', messages: [] });
+    expect(controller.getSnapshot().error).toBeUndefined();
+
+    shouldFail = false;
+    await controller.send('fresh');
+    expect(observedInputs).toEqual([['fail'], ['fresh']]);
+  });
+
+  test('refuses to clear while a turn is active', async () => {
+    let release!: () => void;
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => { started = resolve; });
+    const canFinish = new Promise<void>((resolve) => { release = resolve; });
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        started();
+        await canFinish;
+        return { kind: 'completed', state, output: 'done' };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+    const sending = controller.send('active');
+    await didStart;
+
+    expect(controller.clear()).toBe(false);
+    expect(controller.getSnapshot().messages).not.toEqual([]);
+    release();
+    await sending;
+  });
+
   test('records a failed turn without losing the provider error', async () => {
     const model: ChatModelPort = {
       initialize: (input) => initialState(input.input),
@@ -254,6 +304,75 @@ describe('chat controller', () => {
     expect(controller.getSnapshot().error).toBe('provider exploded');
     expect(controller.getSnapshot().session?.lastTurn?.status).toBe('failed');
     expect(controller.getSnapshot().session?.lastTurn?.reason).toBe('provider exploded');
+  });
+
+  test('restores stable history and exposes it as model context on the next turn', async () => {
+    const observedHistory: Array<readonly { role: string; content: string }[]> = [];
+    const model: ChatModelPort = {
+      initialize(input) {
+        observedHistory.push(input.input.history);
+        return initialState(input.input);
+      },
+      async runTurn(state) {
+        return { kind: 'completed', state, output: 'continued' };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+
+    expect(controller.restore({
+      mode: 'plan',
+      messages: [
+        { id: 'old-user', role: 'user', content: 'original request' },
+        { id: 'old-tool', role: 'tool', content: 'tool evidence' },
+        { id: 'old-assistant', role: 'assistant', content: 'original answer' },
+        { id: 'pending', role: 'assistant', content: 'partial', pending: true },
+      ],
+    })).toBe(true);
+    expect(controller.getSnapshot()).toMatchObject({
+      status: 'idle',
+      mode: 'plan',
+    });
+    expect(controller.getSnapshot().error).toBeUndefined();
+    expect(controller.getSnapshot().messages.map((message) => message.id)).toEqual([
+      'old-user', 'old-tool', 'old-assistant',
+    ]);
+
+    await controller.send('continue please');
+
+    expect(observedHistory.map((history) => history.map(({ role, content }) => ({ role, content })))).toEqual([[
+      { role: 'user', content: 'original request' },
+      { role: 'tool', content: 'tool evidence' },
+      { role: 'assistant', content: 'original answer' },
+    ]]);
+  });
+
+  test('refuses to restore while a turn is running', async () => {
+    let release!: () => void;
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => { started = resolve; });
+    const canFinish = new Promise<void>((resolve) => { release = resolve; });
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        started();
+        await canFinish;
+        return { kind: 'completed', state, output: 'done' };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+    const pending = controller.send('active message');
+    await didStart;
+
+    expect(controller.restore({
+      mode: 'goal',
+      messages: [{ id: 'restored', role: 'user', content: 'must not replace active turn' }],
+    })).toBe(false);
+    expect(controller.getSnapshot().messages.some((message) => message.id === 'restored')).toBe(false);
+
+    release();
+    await pending;
   });
 
   test('starts the first turn and resumes the same session on later sends', async () => {

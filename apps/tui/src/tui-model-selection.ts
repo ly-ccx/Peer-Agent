@@ -17,9 +17,10 @@ export function createTuiModelSelectionControl(input: {
   readonly contextWindow?: number;
   readonly reasoningEffort?: ModelReasoningEffort;
   readonly supportedReasoningEfforts?: readonly ModelReasoningEffort[];
+  readonly catalog?: readonly RuntimeModelCatalogEntry[];
 }): TuiModelSelectionControl {
   const efforts = input.supportedReasoningEfforts ?? ['default', 'low', 'high'];
-  const catalog: readonly RuntimeModelCatalogEntry[] = Object.freeze([{
+  const catalog: readonly RuntimeModelCatalogEntry[] = Object.freeze(input.catalog ?? [{
     providerId: input.providerId,
     modelId: input.modelId,
     displayName: input.displayName,

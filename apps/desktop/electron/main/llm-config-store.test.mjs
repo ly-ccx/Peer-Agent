@@ -81,6 +81,24 @@ test('subscription provider creation applies gpt-5.5 pricing and context metadat
   assert.equal(provider.supportsReasoning, true);
 }));
 
+test('GPT-5.6 subscription model persists prompt cache and reasoning effort metadata', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const provider = store.addProvider({
+    provider: 'openai',
+    authMethod: 'oauth_chatgpt',
+    model: 'gpt-5.6-sol',
+  });
+
+  assert.equal(provider.cacheReadPrice, 0.5);
+  assert.equal(provider.supportsPromptCaching, true);
+  assert.deepEqual(provider.reasoningEffortLevels, ['low', 'default', 'high', 'max']);
+
+  const reloaded = createLlmConfigStore({ configFile }).listProviders()
+    .find((item) => item.id === provider.id);
+  assert.equal(reloaded?.supportsPromptCaching, true);
+  assert.deepEqual(reloaded?.reasoningEffortLevels, ['low', 'default', 'high', 'max']);
+}));
+
 test('subscription provider supports multiple configured models in one group', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });
   const first = store.addProvider({ provider: 'openai', authMethod: 'oauth_chatgpt' });
@@ -155,6 +173,33 @@ test('subscription provider migration backfills pricing and context metadata', (
   assert.equal(persisted.maxOutputTokens, 128_000);
   assert.equal(persisted.inputPrice, 5);
   assert.equal(persisted.cacheWritePrice, undefined);
+}));
+
+test('subscription provider migration restores GPT-5.6 prompt cache and effort levels', () => withStore(({ configFile }) => {
+  writeFileSync(configFile, JSON.stringify([
+    {
+      id: 'sol',
+      provider: 'openai',
+      authMethod: 'oauth_chatgpt',
+      name: 'ChatGPT 订阅',
+      baseUrl: 'https://chatgpt.com/backend-api/codex',
+      model: 'gpt-5.6-sol',
+      enabled: true,
+      isDefault: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      supportsReasoning: true,
+      supportsPromptCaching: false,
+    },
+  ], null, 2));
+
+  const store = createLlmConfigStore({ configFile });
+  const [provider] = store.listProviders();
+  assert.equal(provider.supportsPromptCaching, true);
+  assert.deepEqual(provider.reasoningEffortLevels, ['low', 'default', 'high', 'max']);
+
+  const [persisted] = JSON.parse(readFileSync(configFile, 'utf8'));
+  assert.equal(persisted.supportsPromptCaching, true);
+  assert.deepEqual(persisted.reasoningEffortLevels, ['low', 'default', 'high', 'max']);
 }));
 
 test('legacy provider entries migrate to channel fields without losing stored settings', () => withStore(({ configFile, credentialSecrets }) => {
@@ -264,21 +309,20 @@ test('manual provider creation and updates persist reasoning effort maps', () =>
   assert.deepEqual(persisted.reasoningEffortMap, { medium: 'high', xhigh: 'max' });
 }));
 
-test('Gemini OAuth can no longer be added', () => withStore(({ configFile }) => {
+test('Gemini subscription can be added without manual OAuth client configuration', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });
-  assert.throws(
-    () => store.addProvider({
-      provider: 'openai',
-      channelId: 'google-ai',
-      authMethod: 'oauth_google',
-      name: 'Gemini OAuth',
-      model: 'gemini-2.0-flash',
-      oauthClientId: 'google-client-id',
-      oauthClientSecret: 'google-client-secret',
-      oauthProjectId: 'my-project',
-    }),
-    /unsupported_auth_method:google-ai:oauth_google/,
-  );
+  const provider = store.addProvider({
+    provider: 'openai',
+    channelId: 'google-ai',
+    authMethod: 'oauth_google',
+    name: 'Gemini OAuth',
+    model: 'gemini-2.0-flash',
+  });
+
+  assert.equal(provider.channelId, 'google-ai');
+  assert.equal(provider.authMethod, 'oauth_google');
+  assert.equal(provider.oauthClientId, undefined);
+  assert.equal(provider.oauthClientSecretConfigured, false);
 }));
 
 test('legacy Gemini OAuth records remain readable for migration or deletion', () => withStore(({ configFile }) => {

@@ -109,6 +109,7 @@ export type {
 export {
   getSharedModelConfigPath,
   loadSharedModelMetadata,
+  loadSharedModelMetadataList,
   loadSharedModelSelection,
   selectDesktopDefaultProvider,
 } from './shared-model-config.ts';

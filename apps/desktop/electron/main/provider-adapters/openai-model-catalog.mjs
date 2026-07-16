@@ -32,15 +32,21 @@ const SUBSCRIPTION_CATALOG = [
       longContextInputThreshold: 258_000,
     },
   },
-  // GPT-5.6 家族(预览): codex 端点模型 id 为 gpt-5.6-{sol,terra,luna}。
-  // reasoning 控制新增 max,Sol 另有 ultra 档。上下文窗口 353k tokens。
-  // 预览期官方未公开确切计费,价格类字段暂缺,由上层按缺省处理。
+  // GPT-5.6 家族: codex 端点模型 id 为 gpt-5.6-{sol,terra,luna}。
+  // Codex 原生强度包含 xhigh/max 等值；Peer Agent 保持四档产品映射，max 对应“超深度思考”。
+  // 上下文窗口 353k tokens；价格与 cached-input 能力来自 OpenAI 模型目录。
   // 置于 gpt-5.5 之后:与 ChatGPT 客户端展示顺序一致,且不改变默认(仍为 gpt-5.5)。
   {
     id: 'gpt-5.6-sol',
     label: 'GPT-5.6 Sol',
     contextWindow: 353_000,
     maxOutputTokens: 128_000,
+    inputPrice: 5,
+    outputPrice: 30,
+    cacheReadPrice: 0.5,
+    supportsVision: true,
+    supportsReasoning: true,
+    supportsPromptCaching: true,
     reasoningEffortLevels: ['low', 'default', 'high', 'max'],
   },
   {
@@ -48,6 +54,12 @@ const SUBSCRIPTION_CATALOG = [
     label: 'GPT-5.6 Terra',
     contextWindow: 353_000,
     maxOutputTokens: 128_000,
+    inputPrice: 2.5,
+    outputPrice: 15,
+    cacheReadPrice: 0.25,
+    supportsVision: true,
+    supportsReasoning: true,
+    supportsPromptCaching: true,
     reasoningEffortLevels: ['low', 'default', 'high', 'max'],
   },
   {
@@ -55,6 +67,12 @@ const SUBSCRIPTION_CATALOG = [
     label: 'GPT-5.6 Luna',
     contextWindow: 353_000,
     maxOutputTokens: 128_000,
+    inputPrice: 1,
+    outputPrice: 6,
+    cacheReadPrice: 0.1,
+    supportsVision: true,
+    supportsReasoning: true,
+    supportsPromptCaching: true,
     reasoningEffortLevels: ['low', 'default', 'high', 'max'],
   },
   {

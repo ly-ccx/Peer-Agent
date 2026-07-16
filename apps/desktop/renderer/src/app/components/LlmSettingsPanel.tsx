@@ -24,6 +24,7 @@ import {
   metadataSourceFromList,
   parseReasoningEffortMap,
 } from './llmModelConfiguration';
+import { availableOAuthMethods, subscriptionLoginLabel } from './llmSubscriptionAuth';
 
 interface PendingProviderDraft extends Record<string, unknown> {
   readonly channelId: string;
@@ -115,7 +116,10 @@ const FALLBACK_CHANNELS: readonly LlmChannelDescriptor[] = [
     allowedWires: ['gemini'],
     defaults: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.0-flash' },
     capabilities: { reasoning: { supported: false, paramStyle: 'none' }, promptCache: false, vision: true },
-    authMethods: { api_key: { wire: 'gemini' } },
+    authMethods: {
+      api_key: { wire: 'gemini' },
+      oauth_google: { wire: 'gemini' },
+    },
   },
   {
     id: 'grok',
@@ -266,12 +270,7 @@ function validateForm(
   }
   if (isOAuthMethod(form.authMethod)) {
     if (!selectedChannel.authMethods?.[form.authMethod]) return 'unsupported_auth_method';
-    if (form.authMethod === 'oauth_google') {
-      if (!form.oauthClientId.trim()) return 'oauth_google_client_id_required';
-      if (!editingId && !form.oauthClientSecret.trim()) return 'oauth_google_client_secret_required';
-      if (!form.oauthProjectId.trim()) return 'oauth_google_project_required';
-      if (!form.model.trim()) return 'model_required';
-    }
+    if (form.authMethod === 'oauth_google' && !form.model.trim()) return 'model_required';
     return null;
   }
   if (!isAddModel && !form.baseUrl.trim()) return 'base_url_required';
@@ -829,8 +828,7 @@ export function LlmSettingsPanel({
   };
 
   const selectedChannel = descriptorFor(form.channelId, channels);
-  const oauthMethods = (['oauth_chatgpt', 'oauth_google', 'oauth_grok'] as const)
-    .filter((method) => Boolean(selectedChannel.authMethods?.[method]));
+  const oauthMethods = availableOAuthMethods(selectedChannel);
   const canUseOAuth = oauthMethods.length > 0;
   const canChooseWire = !isOAuthMethod(form.authMethod) && selectedChannel.allowedWires.length > 1;
   const isAddModel = Boolean(addModelGroupId);
@@ -1068,18 +1066,22 @@ export function LlmSettingsPanel({
             </label>
           ) : null}
 
-          {/* ADR 28: 订阅(OAuth)模式下先登录、成功后才落盘。 */}
-          {form.authMethod === 'oauth_chatgpt' || form.authMethod === 'oauth_grok' ? (
+          {/* 订阅(OAuth)模式下直接登录，成功后才落盘。 */}
+          {isOAuthMethod(form.authMethod) ? (
             <label>
-              <span>{i18n.locale === 'zh-CN' ? '登录' : 'Login'}</span>
+              <span>{i18n.locale === 'zh-CN' ? '订阅登录' : 'Subscription Login'}</span>
               <p className="llm-oauth-hint">
                 {form.authMethod === 'oauth_grok'
                   ? (i18n.locale === 'zh-CN'
                     ? '点击登录将打开 Grok 的设备授权页。按页面提示确认一次性验证码后，Peer Agent 会保存 Grok 订阅登录态并拉取 Grok Build 模型。'
                     : 'Click login to open the Grok device authorization page. Confirm the one-time code to save your Grok subscription session and load Grok Build models.')
-                  : (i18n.locale === 'zh-CN'
-                    ? '点击登录将打开浏览器完成 ChatGPT 订阅账号登录;登录成功后才会保存,登录失败或取消不会保存任何配置。登录后自动拉取可用模型(默认使用最新模型)。'
-                    : 'Clicking login opens your browser to sign in with your ChatGPT subscription. The provider is saved only after a successful login — nothing is saved if login fails or is cancelled. Available models are fetched after login (latest selected by default).')}
+                  : form.authMethod === 'oauth_google'
+                    ? (i18n.locale === 'zh-CN'
+                      ? '点击登录将直接打开浏览器，使用 Google 账号完成订阅授权。无需填写或校验 API Key。'
+                      : 'Click login to open your browser and authorize with your Google subscription account. No API key is required.')
+                    : (i18n.locale === 'zh-CN'
+                      ? '点击登录将打开浏览器完成 ChatGPT 订阅账号登录;登录成功后才会保存,登录失败或取消不会保存任何配置。登录后自动拉取可用模型(默认使用最新模型)。'
+                      : 'Clicking login opens your browser to sign in with your ChatGPT subscription. The provider is saved only after a successful login — nothing is saved if login fails or is cancelled. Available models are fetched after login (latest selected by default).')}
               </p>
               {form.authMethod === 'oauth_grok' && oauthPending ? (
                 <div className="llm-oauth-device-code" role="status">
@@ -1261,9 +1263,7 @@ export function LlmSettingsPanel({
               {saving || oauthBusyId
                 ? '...'
                 : (isOAuthMethod(form.authMethod) && !editingId
-                    ? (form.authMethod === 'oauth_grok'
-                      ? (i18n.locale === 'zh-CN' ? '登录 Grok' : 'Login with Grok')
-                      : (i18n.locale === 'zh-CN' ? '登录 ChatGPT' : 'Login with ChatGPT'))
+                    ? subscriptionLoginLabel(form.authMethod, i18n.locale === 'zh-CN')
                     : (!editingId && !isAddModel && form.authMethod === 'api_key'
                       ? (i18n.locale === 'zh-CN' ? '下一步：选择模型' : 'Next: choose models')
                       : (i18n.locale === 'zh-CN' ? '保存' : 'Save')))}

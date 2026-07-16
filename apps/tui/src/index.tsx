@@ -17,55 +17,68 @@ import {
   resolveTuiModelConfig,
 } from './model-config.ts';
 import { createTuiModelSelectionControl } from './tui-model-selection.ts';
+import { createTuiLocalAccessStore } from './tui-local-access-store.ts';
 import {
   createProviderChatModel,
   createUnavailableChatModel,
 } from './provider-chat-model.ts';
 import { createTuiHost } from './tui-host.ts';
+import { createTuiProviderFetch } from './provider-transport.ts';
 import { createTuiShutdown } from './tui-shutdown.ts';
 
+const providerFetch = createTuiProviderFetch();
 const workspaceRoot = process.env.PEER_WORKSPACE_ROOT ?? process.cwd();
 const userDataPath = process.env.PEER_USER_DATA_PATH ?? path.join(os.homedir(), '.peer-agent');
-const host = createTuiHost({ workspaceRoot, userDataPath });
+const localAccessStore = createTuiLocalAccessStore({ userDataPath });
+const host = createTuiHost({
+  workspaceRoot,
+  userDataPath,
+  accessLevel: localAccessStore.getAccessLevel(),
+  persistAccessLevel: (accessLevel) => localAccessStore.setAccessLevel(accessLevel),
+});
 const modelConfig = resolveTuiModelConfig(process.env, { userDataPath });
 const sharedMetadata = modelConfig.sharedMetadata;
-const provider = sharedMetadata?.authMethod === 'oauth_chatgpt'
-  ? createChatGptResponsesProvider({
-      baseUrl: sharedMetadata.baseUrl,
+function sharedProvider(credentialId: string) {
+  const metadata = modelConfig.sharedProviders?.find((item) => item.credentialId === credentialId);
+  if (!metadata) throw new Error(`Provider "${credentialId}" is no longer available.`);
+  if (metadata.authMethod === 'oauth_chatgpt') {
+    return createChatGptResponsesProvider({
+      baseUrl: metadata.baseUrl,
+      fetch: providerFetch,
       resolveTokens() {
-        const selection = modelConfig.resolveSharedSelection?.();
+        const selection = modelConfig.resolveSharedSelection?.(credentialId);
         if (!selection?.oauthTokens) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
         return selection.oauthTokens;
       },
       refreshTokens: refreshChatGptOAuthTokens,
       persistTokens(tokens) {
-        const selection = modelConfig.resolveSharedSelection?.();
+        const selection = modelConfig.resolveSharedSelection?.(credentialId);
         if (!selection) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
         selection.persistOAuthTokens(tokens);
       },
-    })
-  : sharedMetadata?.authMethod === 'api_key'
-    ? {
-        async stream(request: Parameters<ReturnType<typeof createOpenAICompatibleProvider>['stream']>[0]) {
-          const selection = modelConfig.resolveSharedSelection?.();
-          if (!selection?.apiKey) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
-          return createOpenAICompatibleProvider({
-            config: {
-              providerId: 'openai-compatible',
-              apiKey: selection.apiKey,
-              baseUrl: selection.baseUrl,
-            },
-          }).stream(request);
-        },
-      }
-    : modelConfig.configured
-      ? createOpenAICompatibleProvider({
-          config: await resolveOpenAICompatibleProviderConfig({
-            providerId: 'openai-compatible',
-            credentials: modelConfig.credentials,
-          }),
-        })
-      : null;
+    });
+  }
+  return {
+    async stream(request: Parameters<ReturnType<typeof createOpenAICompatibleProvider>['stream']>[0]) {
+      const selection = modelConfig.resolveSharedSelection?.(credentialId);
+      if (!selection?.apiKey) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
+      return createOpenAICompatibleProvider({
+        config: { providerId: credentialId, apiKey: selection.apiKey, baseUrl: selection.baseUrl },
+        fetch: providerFetch,
+      }).stream(request);
+    },
+  };
+}
+const provider = sharedMetadata
+  ? sharedProvider(sharedMetadata.credentialId)
+  : modelConfig.configured
+    ? createOpenAICompatibleProvider({
+        config: await resolveOpenAICompatibleProviderConfig({
+          providerId: 'openai-compatible', credentials: modelConfig.credentials,
+        }),
+        fetch: providerFetch,
+      })
+    : null;
 const modelSelection = createTuiModelSelectionControl({
   providerId: modelConfig.providerId,
   modelId: modelConfig.model,
@@ -74,10 +87,14 @@ const modelSelection = createTuiModelSelectionControl({
   supportedReasoningEfforts: modelConfig.configured
     ? ['default', 'low', 'high', 'xhigh']
     : ['default'],
+  catalog: modelConfig.catalog,
 });
 const model = provider
   ? createProviderChatModel({
       provider,
+      getProvider: () => sharedMetadata
+        ? sharedProvider(modelSelection.getSelection().providerId)
+        : provider,
       model: modelConfig.model,
       getModel: () => modelSelection.getSelection().modelId,
       getReasoningEffort: () => modelSelection.getSelection().reasoningEffort,

@@ -1,13 +1,40 @@
 {
   "name": "@peer-agent/protocol",
-  "version": "0.0.1-beta.34",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Shared host-neutral protocol contracts for Peer Agent runtimes and clients.",
   "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
+  "license": "MIT",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yinLiangDream/Peer-Agent.git",
+    "directory": "packages/protocol"
+  },
+  "homepage": "https://github.com/yinLiangDream/Peer-Agent#readme",
+  "bugs": {
+    "url": "https://github.com/yinLiangDream/Peer-Agent/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm build",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
