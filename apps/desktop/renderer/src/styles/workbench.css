@@ -113,6 +113,12 @@
     inset-block-start: 0;
   }
 
+  /* Electron webview 是独立的 guest surface；仅用 visibility 隐藏祖先时仍可能残留合成画面。
+   * 保持 BrowserView 挂载以保留标签页与页面会话，但在一级“网页”标签未激活时让其退出布局和合成树。 */
+  .workbench-view--browser[data-active='false'] {
+    display: none;
+  }
+
   .workbench-view[data-active='true'] {
     visibility: visible;
     pointer-events: auto;
