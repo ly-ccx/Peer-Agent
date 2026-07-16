@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Peer Agent Loader Review</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 24px; background: #e9eef2; color: #1a1d21; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; }
+    h1 { margin: 0 0 6px; font-size: 20px; }
+    .summary { margin: 0 0 18px; color: #52606b; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; align-items: start; }
+    .case { min-width: 0; padding: 14px; border-radius: 16px; background: rgba(255,255,255,.72); box-shadow: 0 10px 35px rgba(35,50,64,.08); }
+    .case h2 { margin: 0 0 10px; font-size: 15px; }
+    .viewport { width: 100%; overflow: hidden; border: 1px solid rgba(26,29,33,.12); border-radius: 10px; background: #f4f7fa; }
+    .viewport iframe { display: block; border: 0; transform-origin: left top; }
+    .desktop-frame { height: min(56.25vw, 450px); }
+    .narrow-frame { width: min(100%, 390px); height: min(176vw, 844px); }
+    pre { min-height: 180px; margin: 12px 0 0; padding: 12px; overflow: auto; border-radius: 10px; background: #182027; color: #dce8ef; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .pass { color: #18794e; font-weight: 650; }
+    .fail { color: #b42318; font-weight: 650; }
+  </style>
+</head>
+<body>
+  <h1>Peer Agent 字标装饰锚点验收</h1>
+  <p class="summary" id="summary">正在测量真实 1440×900 与 390×844 视口…</p>
+  <div class="grid">
+    <section class="case">
+      <h2>桌面 · 1440×900</h2>
+      <div class="viewport desktop-frame"><iframe id="desktop" title="桌面原型" src="peer-agent-brand-loader-prototype.html" width="1440" height="900"></iframe></div>
+      <pre id="desktop-result">等待加载…</pre>
+    </section>
+    <section class="case">
+      <h2>窄窗口 · 390×844</h2>
+      <div class="viewport narrow-frame"><iframe id="narrow" title="窄窗口原型" src="peer-agent-brand-loader-prototype.html" width="390" height="844"></iframe></div>
+      <pre id="narrow-result">等待加载…</pre>
+    </section>
+  </div>
+
+  <script>
+    const results = {};
+
+    function scaleFrame(frame) {
+      const host = frame.parentElement;
+      const scale = Math.min(host.clientWidth / Number(frame.width), host.clientHeight / Number(frame.height));
+      frame.style.transform = `scale(${scale})`;
+      host.style.height = `${Number(frame.height) * scale}px`;
+    }
+
+    function rounded(value) { return Number(value.toFixed(3)); }
+
+    function measure(id) {
+      const frame = document.getElementById(id);
+      const output = document.getElementById(`${id}-result`);
+      scaleFrame(frame);
+      frame.addEventListener('load', async () => {
+        await frame.contentDocument.fonts?.ready;
+        requestAnimationFrame(() => {
+          const doc = frame.contentDocument;
+          const brand = doc.querySelector('.brand');
+          const text = doc.querySelector('.wordmark--ghost');
+          const line = doc.querySelector('[data-anchor="wordmark-support"]');
+          const brandRect = brand.getBoundingClientRect();
+          const textBounds = text.getBBox();
+          const lineLength = line.x2.baseVal.value - line.x1.baseVal.value;
+          const lineCenter = (line.x1.baseVal.value + line.x2.baseVal.value) / 2;
+          const textCenter = textBounds.x + textBounds.width / 2;
+          const gap = line.y1.baseVal.value - (textBounds.y + textBounds.height);
+          const data = {
+            viewport: `${doc.documentElement.clientWidth}×${doc.documentElement.clientHeight}`,
+            horizontalOverflow: doc.documentElement.scrollWidth > doc.documentElement.clientWidth,
+            brandClipped: brandRect.left < 0 || brandRect.right > doc.documentElement.clientWidth,
+            blueDotPresent: Boolean(doc.querySelector('.accent-dot, [data-anchor="blue-dot"]')),
+            textWidth: rounded(textBounds.width),
+            supportWidth: rounded(lineLength),
+            widthDelta: rounded(Math.abs(lineLength - textBounds.width)),
+            centerDelta: rounded(Math.abs(lineCenter - textCenter)),
+            bottomGap: rounded(gap)
+          };
+          data.pass = !data.horizontalOverflow && !data.brandClipped && !data.blueDotPresent && data.widthDelta < 0.01 && data.centerDelta < 0.01 && Math.abs(data.bottomGap - 11) < 0.01;
+          results[id] = data;
+          output.textContent = JSON.stringify(data, null, 2);
+          compare();
+        });
+      }, { once: true });
+    }
+
+    function compare() {
+      if (!results.desktop || !results.narrow) return;
+      const sameGap = Math.abs(results.desktop.bottomGap - results.narrow.bottomGap) < 0.01;
+      const pass = results.desktop.pass && results.narrow.pass && sameGap;
+      const summary = document.getElementById('summary');
+      summary.className = `summary ${pass ? 'pass' : 'fail'}`;
+      summary.textContent = pass
+        ? '通过：两种真实视口下无蓝点，承托线与整段文字等宽、居中，且底部间距一致。'
+        : `未通过：桌面=${results.desktop.pass}，窄窗=${results.narrow.pass}，间距一致=${sameGap}`;
+      document.documentElement.dataset.anchorCheck = pass ? 'pass' : 'fail';
+    }
+
+    measure('desktop');
+    measure('narrow');
+    addEventListener('resize', () => {
+      scaleFrame(document.getElementById('desktop'));
+      scaleFrame(document.getElementById('narrow'));
+    });
+  </script>
+</body>
+</html>

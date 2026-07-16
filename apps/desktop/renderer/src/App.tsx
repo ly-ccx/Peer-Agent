@@ -2,7 +2,7 @@ import { createI18n } from '@peer-agent/i18n';
 import type { LlmProviderConfigView } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SettingsPage } from './app/components/SettingsPage';
-import { QuickChatPopover } from './app/components/QuickChatPopover';
+import { BrandStartupLoader } from './app/components/BrandStartupLoader';
 import { QuickChatWindow } from './app/components/QuickChatWindow';
 import { shouldRefreshQuickChatConversationList } from './app/state/quickChatSubmission';
 import { useDesktopBootstrap } from './app/state/useDesktopBootstrap';
@@ -44,21 +44,23 @@ function readGitBranchPrefix(settings: Record<string, unknown> | null | undefine
 export function App() {
   const windowView = new URLSearchParams(window.location.search).get('window');
   if (windowView === 'quick-chat') return <QuickChatWindow />;
-  if (windowView === 'quick-chat-popover') return <QuickChatPopover />;
 
   return <MainApp />;
 }
 
 function MainApp() {
-  const { availableLocales, initError, refreshBootstrap, session } = useDesktopBootstrap();
+  const { availableLocales, initError, refreshBootstrap, session, startupSnapshot } = useDesktopBootstrap();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [activePage, setActivePage] = useState<AppPage>('chat');
   const [conversationView, setConversationView] = useState<ConversationView>('active');
   // 窗口是否处于原生全屏。全屏时交通灯被系统隐藏,据此收掉顶部为其预留的留白。
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
-  const [conversations, setConversations] = useState<readonly ConversationMeta[]>([]);
+  const [conversations, setConversations] = useState<readonly ConversationMeta[]>(
+    () => startupSnapshot?.conversations as readonly ConversationMeta[] ?? [],
+  );
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [conversationRevision, setConversationRevision] = useState<string | null>(null);
   // 表达层状态:当前正在流式运行的会话 id 集合,用于左侧列表显示 Loading 图标。
   // 真值来自 main 的 activeStreams:挂载时经 chatStreamListActive 拉取,之后由
   // onChatActiveStreamsChanged 广播实时更新——因此无需"点进会话"即可显示运行状态。
@@ -77,7 +79,7 @@ function MainApp() {
   // 让侧栏能提示"其它工作区仍有任务在跑",避免切换工作区后误以为任务丢失。
   const [runningWorkspacePaths, setRunningWorkspacePaths] = useState<ReadonlySet<string>>(
     () => new Set());
-  const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
+  const [activeWorkspace, setActiveWorkspace] = useState<string | null>(() => startupSnapshot?.activeWorkspace ?? null);
   // ADR 21: main 进程可能已写入 PendingTask(例如重启恢复)。renderer 只负责
   // 切到 task.sessionId(回到中断现场)后,把 task 下发给 ChatSurface 自动发出。
   const [resumeTask, setResumeTask] = useState<{ sessionId: string; task: string; effort?: string } | null>(null);
@@ -113,11 +115,18 @@ function MainApp() {
     };
     window.addEventListener('focus', refreshExternalConversations);
     document.addEventListener('visibilitychange', refreshExternalConversations);
+    const unsubscribe = clientApi.onConversationsChanged((event) => {
+      void refreshConversations();
+      if (event.conversationId === activeConversationId && event.changeType === 'messages-updated') {
+        setConversationRevision(event.revision);
+      }
+    });
     return () => {
+      unsubscribe();
       window.removeEventListener('focus', refreshExternalConversations);
       document.removeEventListener('visibilitychange', refreshExternalConversations);
     };
-  }, [refreshConversations]);
+  }, [activeConversationId, refreshConversations]);
 
   const refreshSettings = useCallback(async () => {
     try {
@@ -148,13 +157,17 @@ function MainApp() {
   useEffect(() => {
     void refreshProviders();
     void refreshSettings();
-    void clientApi.workspaceList().then((r) => {
+    if (startupSnapshot) return;
+    void clientApi.workspaceList().then(async (r) => {
       setActiveWorkspace(r.activeWorkspace);
-      void clientApi.conversationsList({ workspacePath: r.activeWorkspace, status: 'active' })
-        .then((list) => { setConversations(list as readonly ConversationMeta[]); })
-        .catch(() => {});
-    }).catch(() => {});
-  }, [refreshProviders, refreshSettings]);
+      try {
+        const list = await clientApi.conversationsList({ workspacePath: r.activeWorkspace, status: 'active' });
+        setConversations(list as readonly ConversationMeta[]);
+      } catch {
+        // Keep the workspace interactive when startup preloading and fallback refresh both fail.
+      }
+    }).catch(() => undefined);
+  }, [refreshProviders, refreshSettings, startupSnapshot]);
 
   // 任务续传(ADR 21):重启后回到中断现场。
   // peek(只读不清)拿到会话锚定的待办 → 切到 sessionId(回到原会话)→ 存 resumeTask,
@@ -376,7 +389,9 @@ function MainApp() {
         />
       ) : session ? (
         <WorkbenchProvider conversationId={activeConversationId}>
-          <div className="app-layout">
+          <div
+            className="app-layout"
+          >
             <Sidebar
               conversations={conversations}
               activeConversationId={activeConversationId}
@@ -399,6 +414,7 @@ function MainApp() {
               onShowActiveConversations={handleShowActiveConversations}
               onOpenSettings={() => setActivePage('settings')}
               onWorkspaceChanged={handleWorkspaceChanged}
+              startupSnapshot={startupSnapshot}
             />
             <section className="main-panel">
               <section className="thread thread-has-header">
@@ -406,6 +422,7 @@ function MainApp() {
                   i18n={i18n}
                   providers={providers}
                   conversationId={activeConversationId}
+                  conversationRevision={conversationRevision}
                   conversationTitle={conversations.find((c) => c.id === activeConversationId)?.title}
                   systemInstructions={systemInstructions}
                   replyLanguage={replyLanguage}
@@ -443,16 +460,7 @@ function MainApp() {
         <section className="main-panel">
           <section className="thread">
             {initError ? <p className="running-note">{initError}</p> : null}
-            {!session && !initError ? (
-              <div className="bootstrap-loader" role="status" aria-live="polite">
-                <span className="bootstrap-loader-copy">
-                  <span className="bootstrap-loader-label">{i18n.t('thread.loading.bootstrap')}</span>
-                </span>
-                <span className="bootstrap-loader-track" aria-hidden="true">
-                  <span />
-                </span>
-              </div>
-            ) : null}
+            {!session && !initError ? <BrandStartupLoader /> : null}
           </section>
         </section>
       )}

@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Peer Agent — Brand Loader Prototype</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f4f7fa;
+      --canvas-glow: rgba(255, 255, 255, 0.92);
+      --ghost: rgba(26, 29, 33, 0.105);
+      --ink: #1a1d21;
+      --azure: #3b7fab;
+      --azure-light: #9ecbe0;
+      --yellow: #e0a92f;
+      --duration: 3.2s;
+      --ease: cubic-bezier(.22, .82, .2, 1);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 45%, var(--canvas-glow) 0 16%, transparent 48%),
+        var(--canvas);
+      color: var(--ink);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+    }
+
+    button { font: inherit; }
+
+    .stage {
+      position: relative;
+      min-height: 100svh;
+      display: grid;
+      place-items: center;
+      isolation: isolate;
+    }
+
+    .stage::before {
+      content: "";
+      position: absolute;
+      width: min(62vw, 760px);
+      aspect-ratio: 1.55;
+      border-radius: 50%;
+      background: rgba(59, 127, 171, 0.08);
+      filter: blur(72px);
+      transform: translateY(10%);
+      opacity: 0;
+      animation: atmosphere var(--duration) var(--ease) both;
+      pointer-events: none;
+    }
+
+    /* 字标、填充和装饰共享同一个固定坐标系，只由 SVG 整体负责缩放。 */
+    .brand {
+      position: relative;
+      width: min(88vw, 1000px);
+      aspect-ratio: 1000 / 220;
+      transform-origin: center;
+      animation: brand-arrive var(--duration) var(--ease) both;
+    }
+
+    .brand-lockup {
+      display: block;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      user-select: none;
+    }
+
+    .wordmark {
+      font-family: "Avenir Next Rounded", "Avenir Next", Nunito, Inter, sans-serif;
+      font-size: 152px;
+      font-weight: 560;
+      letter-spacing: -9px;
+      text-anchor: middle;
+    }
+
+    .wordmark--ghost {
+      fill: var(--ghost);
+      stroke: rgba(255, 255, 255, 0.55);
+      stroke-width: 1;
+      paint-order: stroke;
+    }
+
+    .wordmark--fill { fill: url(#wordmark-ink); }
+
+    /* 遮罩从固定 SVG y=220 向上移动；字形与装饰的坐标不会随视口重新计算。 */
+    .fill-mask-shape {
+      transform: translateY(220px);
+      animation: fill-from-bottom var(--duration) var(--ease) both;
+      will-change: transform;
+    }
+
+    .liquid-edge {
+      opacity: 0;
+      transform: translateY(184px) scaleX(.72);
+      transform-origin: 500px 110px;
+      animation: liquid-overflow var(--duration) var(--ease) both;
+      pointer-events: none;
+    }
+
+    .liquid-crest {
+      opacity: 0;
+      transform: translateY(184px) scaleY(.2);
+      transform-origin: 500px 111px;
+      animation: crest var(--duration) var(--ease) both;
+    }
+
+    .accent-line {
+      opacity: 0;
+      animation: accent-in var(--duration) var(--ease) both;
+      transform: scaleX(.35);
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+
+    .replay {
+      position: fixed;
+      right: 22px;
+      bottom: 20px;
+      z-index: 10;
+      appearance: none;
+      border: 1px solid rgba(26, 29, 33, 0.12);
+      border-radius: 999px;
+      padding: 9px 14px;
+      background: rgba(255, 255, 255, 0.58);
+      color: rgba(26, 29, 33, 0.6);
+      box-shadow: 0 8px 28px rgba(28, 38, 48, 0.08);
+      backdrop-filter: blur(14px);
+      cursor: pointer;
+      transition: color 160ms ease, background 160ms ease, transform 160ms ease;
+    }
+
+    .replay:hover { color: var(--ink); background: rgba(255, 255, 255, 0.84); }
+    .replay:active { transform: scale(.97); }
+
+    @keyframes brand-arrive {
+      0% { opacity: 0; transform: translateY(18px) scale(.96); filter: blur(7px); }
+      13% { opacity: 1; filter: blur(0); }
+      72% { transform: translateY(0) scale(1); }
+      86% { transform: scale(1.018); }
+      100% { opacity: 1; transform: scale(1); filter: blur(0); }
+    }
+
+    @keyframes atmosphere {
+      0%, 8% { opacity: 0; transform: translateY(13%) scale(.82); }
+      55% { opacity: .76; }
+      100% { opacity: .44; transform: translateY(4%) scale(1.08); }
+    }
+
+    @keyframes fill-from-bottom {
+      0%, 12% { transform: translateY(220px); }
+      70% { transform: translateY(0); }
+      80%, 100% { transform: translateY(-4px); }
+    }
+
+    @keyframes liquid-overflow {
+      0%, 12% { opacity: 0; transform: translateY(184px) scaleX(.72); }
+      18% { opacity: .55; }
+      70% { opacity: .88; transform: translateY(0) scaleX(1); }
+      80% { opacity: .72; transform: translateY(-30px) scaleX(.93); }
+      100% { opacity: 0; transform: translateY(-35px) scaleX(.84); }
+    }
+
+    @keyframes crest {
+      0%, 58% { opacity: 0; transform: translateY(184px) scaleY(.2); }
+      70% { opacity: .8; transform: translateY(0) scaleY(1); }
+      82% { opacity: .35; transform: translateY(-30px) scaleY(.7); }
+      100% { opacity: 0; transform: translateY(-35px) scaleY(.25); }
+    }
+
+    @keyframes accent-in {
+      0%, 70% { opacity: 0; }
+      84% { opacity: 1; transform: scale(1.12); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+
+    @media (max-width: 620px) {
+      .brand { width: 90vw; }
+      .replay { right: 14px; bottom: 14px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .stage::before,
+      .brand,
+      .fill-mask-shape,
+      .liquid-edge,
+      .liquid-crest,
+      .accent-line { animation: none !important; }
+
+      .stage::before { opacity: .45; }
+      .brand { opacity: 1; transform: none; filter: none; }
+      .fill-mask-shape { transform: translateY(-4px); }
+      .liquid-edge, .liquid-crest { display: none; }
+      .accent-line { opacity: 1; transform: none; }
+      .replay { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="stage" aria-label="Peer Agent 正在准备">
+    <div class="brand" role="img" aria-label="Peer Agent">
+      <svg class="brand-lockup" viewBox="0 0 1000 220" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        <defs>
+          <linearGradient id="wordmark-ink" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#497f9f" />
+            <stop offset=".24" stop-color="#1a1d21" />
+            <stop offset="1" stop-color="#111419" />
+          </linearGradient>
+          <linearGradient id="liquid-shine" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#9ecbe0" stop-opacity="0" />
+            <stop offset=".2" stop-color="#9ecbe0" stop-opacity=".95" />
+            <stop offset=".5" stop-color="#fff" />
+            <stop offset=".78" stop-color="#9ecbe0" stop-opacity=".9" />
+            <stop offset="1" stop-color="#9ecbe0" stop-opacity="0" />
+          </linearGradient>
+          <filter id="edge-blur" x="-10%" y="-100%" width="120%" height="300%">
+            <feGaussianBlur stdDeviation="3" />
+          </filter>
+          <mask id="fill-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="1000" height="220">
+            <rect class="fill-mask-shape" x="0" y="0" width="1000" height="224" fill="white" />
+          </mask>
+        </defs>
+
+        <text class="wordmark wordmark--ghost" x="500" y="164">Peer Agent</text>
+        <text class="wordmark wordmark--fill" x="500" y="164" mask="url(#fill-mask)">Peer Agent</text>
+
+        <g class="liquid-edge" filter="url(#edge-blur)">
+          <ellipse cx="500" cy="110" rx="420" ry="8" fill="url(#liquid-shine)" />
+        </g>
+        <path class="liquid-crest" d="M496 111 C496 98 498 91 500 88 C503 92 505 100 504 111 Z" fill="rgba(255,255,255,.88)" />
+
+        <!-- 承托线坐标由文字实际 SVG 边界在字体就绪后计算。 -->
+        <line class="accent-line" data-anchor="wordmark-support" stroke="var(--yellow)" stroke-width="3" stroke-linecap="round" />
+      </svg>
+    </div>
+  </main>
+
+  <button class="replay" type="button" aria-label="重新播放品牌动画">重新播放</button>
+
+  <script>
+    const SUPPORT_GAP = 11;
+    const replay = document.querySelector('.replay');
+    let stage = document.querySelector('.stage');
+
+    function positionSupportLine(root = document) {
+      const text = root.querySelector('.wordmark--ghost');
+      const line = root.querySelector('[data-anchor="wordmark-support"]');
+      if (!text || !line) return;
+
+      const bounds = text.getBBox();
+      const y = bounds.y + bounds.height + SUPPORT_GAP;
+      line.setAttribute('x1', bounds.x);
+      line.setAttribute('x2', bounds.x + bounds.width);
+      line.setAttribute('y1', y);
+      line.setAttribute('y2', y);
+      line.dataset.wordmarkX = String(bounds.x);
+      line.dataset.wordmarkWidth = String(bounds.width);
+      line.dataset.supportGap = String(SUPPORT_GAP);
+    }
+
+    function prepareWordmark(root = document) {
+      positionSupportLine(root);
+      document.fonts?.ready.then(() => positionSupportLine(root));
+    }
+
+    prepareWordmark();
+
+    replay.addEventListener('click', () => {
+      const clone = stage.cloneNode(true);
+      stage.replaceWith(clone);
+      stage = clone;
+      prepareWordmark(stage);
+    });
+  </script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import type { DesktopStartupSnapshot } from '../../app/state/useDesktopBootstrap';
 import { BrandWordmark } from '../../app/components/BrandWordmark';
 import { VersionBadge } from '../../app/components/VersionBadge';
 import { SidebarResizer } from '../../workbench/SidebarResizer';
@@ -117,6 +118,7 @@ export function Sidebar({
   onOpenSettings,
   onWorkspaceChanged,
   pendingConfirmationCounts,
+  startupSnapshot,
 }: {
   readonly conversations: readonly ConversationMeta[];
   readonly activeConversationId: string | null;
@@ -143,6 +145,7 @@ export function Sidebar({
   readonly onShowActiveConversations: () => void | Promise<void>;
   readonly onOpenSettings: () => void;
   readonly onWorkspaceChanged?: () => Promise<void> | void;
+  readonly startupSnapshot?: DesktopStartupSnapshot | null;
 }) {
   const isZh = i18n.locale === 'zh-CN';
   const isArchivedView = conversationView === 'archived';
@@ -155,9 +158,9 @@ export function Sidebar({
   const editingInputRef = useRef<HTMLInputElement | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const isFinishingRenameRef = useRef(false);
-  const [workspaces, setWorkspaces] = useState<readonly WorkspaceEntry[]>([]);
-  const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
-  const [wsInfo, setWsInfo] = useState<WorkspaceInfo | null>(null);
+  const [workspaces, setWorkspaces] = useState<readonly WorkspaceEntry[]>(() => startupSnapshot?.workspaces ?? []);
+  const [activeWorkspace, setActiveWorkspace] = useState<string | null>(() => startupSnapshot?.activeWorkspace ?? null);
+  const [wsInfo, setWsInfo] = useState<WorkspaceInfo | null>(() => startupSnapshot?.workspaceInfo as WorkspaceInfo | null ?? null);
   const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
   // 退场动画态:关闭时先置 closing 播退场动画,动画结束(onAnimationEnd)再真正卸载下拉。
   const [wsClosing, setWsClosing] = useState(false);
@@ -179,7 +182,12 @@ export function Sidebar({
     } catch {}
   }, []);
 
-  useEffect(() => { void refreshWorkspaces(); }, [refreshWorkspaces]);
+  useEffect(() => {
+    void refreshWorkspaces();
+    return clientApi.onWorkspacesChanged(() => {
+      void refreshWorkspaces();
+    });
+  }, [refreshWorkspaces]);
 
   // 请求关闭下拉:置 closing 播退场动画,真正卸载交给 onAnimationEnd。
   const requestCloseDropdown = useCallback(() => {

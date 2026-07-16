@@ -231,23 +231,23 @@
 /* ADR 27: 工作区运行指示点。表示该工作区有运行中的流(任务仍在跑,未丢失)。
    柔和脉冲呼应"进行中"语义;prefers-reduced-motion 由 tokens.css 全局降级兜底。 */
 .ws-running-dot {
+  position: relative;
+  isolation: isolate;
   width: 6px;
   height: 6px;
   flex-shrink: 0;
   border-radius: 50%;
   background: var(--state-success, #3a9d6e);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-success, #3a9d6e) 60%, transparent);
   --motion-ripple-color: var(--state-success, #3a9d6e);
   --motion-ripple-strength: 55%;
-  --motion-ripple-radius: 5px;
+  --motion-ripple-scale: 2.67;
+  --motion-ripple-duration: 1.6s;
   --motion-ripple-peak: 1;
-  --motion-ripple-floor: 1;
-  animation: motion-ripple 1.6s var(--za-ease-standard) infinite;
 }
 /* 折叠态、提示"其它工作区"时用警示色,和当前工作区的运行点区分。 */
 .ws-running-dot-other {
   background: var(--state-warning, #c8861a);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-warning, #c8861a) 60%, transparent);
+  --motion-ripple-color: var(--state-warning, #c8861a);
   margin-right: var(--space-1);
 }
 .ws-chevron {
@@ -551,18 +551,18 @@
   -webkit-app-region: no-drag;
 }
 .sidebar-conv-spinner {
+  position: relative;
+  isolation: isolate;
   flex-shrink: 0;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--azure-seal);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--azure-seal) 50%, transparent);
   --motion-ripple-color: var(--azure-seal);
   --motion-ripple-strength: 50%;
-  --motion-ripple-radius: 6px;
+  --motion-ripple-scale: 2.5;
+  --motion-ripple-duration: 1.6s;
   --motion-ripple-peak: 0.95;
-  --motion-ripple-floor: 0.55;
-  animation: motion-ripple 1.6s var(--za-ease-standard) infinite;
 }
 .sidebar-conv-time {
   flex: 0 0 auto;
@@ -582,18 +582,37 @@
   gap: 4px;
 }
 .sidebar-conv-compacting-dot {
+  position: relative;
+  isolation: isolate;
   flex-shrink: 0;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--azure-seal);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--azure-seal) 45%, transparent);
   --motion-ripple-color: var(--azure-seal);
   --motion-ripple-strength: 45%;
-  --motion-ripple-radius: 5px;
+  --motion-ripple-scale: 2.25;
+  --motion-ripple-duration: 1.4s;
   --motion-ripple-peak: 0.95;
-  --motion-ripple-floor: 0.6;
-  animation: motion-ripple 1.4s var(--za-ease-standard) infinite;
+}
+
+.ws-running-dot::after,
+.sidebar-conv-spinner::after,
+.sidebar-conv-compacting-dot::after {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border: 1px solid color-mix(
+    in srgb,
+    var(--motion-ripple-color, var(--azure-seal)) var(--motion-ripple-strength, 50%),
+    transparent
+  );
+  border-radius: inherit;
+  content: '';
+  pointer-events: none;
+  transform: scale(0.72);
+  will-change: transform, opacity;
+  animation: motion-ripple var(--motion-ripple-duration, 1.6s) var(--za-ease-standard) infinite;
 }
 .sidebar-conv-compacting-pct {
   font-size: 0.62rem;
