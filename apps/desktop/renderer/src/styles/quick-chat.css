@@ -55,11 +55,6 @@ body:has(.quick-chat-popover-shell) {
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-.quick-chat-bar:focus-within {
-  border-color: var(--quick-border-strong);
-  box-shadow: var(--quick-shadow);
-}
-
 .quick-chat-bar--error {
   border-color: var(--state-danger);
 }
