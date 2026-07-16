@@ -642,7 +642,15 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--za-motion-fast);
   -webkit-app-region: no-drag;
+}
+.conversation-row:hover .sidebar-conv-actions,
+.conversation-row:focus-within .sidebar-conv-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 .sidebar-conv-pin-leading {
   position: absolute;

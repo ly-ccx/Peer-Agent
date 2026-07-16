@@ -150,7 +150,6 @@ export function Sidebar({
   const isZh = i18n.locale === 'zh-CN';
   const isArchivedView = conversationView === 'archived';
   const awaitingGoalPlanCounts = useAwaitingGoalPlanCounts(true);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; conversation: ConversationMeta } | null>(null);
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
@@ -374,8 +373,6 @@ export function Sidebar({
           e.preventDefault();
           setContextMenu({ x: e.clientX, y: e.clientY, conversation: conv });
         }}
-        onMouseEnter={() => setHoveredId(conv.id)}
-        onMouseLeave={() => setHoveredId(null)}
       >
         {canTogglePin ? (
           <button
@@ -454,7 +451,7 @@ export function Sidebar({
               {isZh ? '取消' : 'No'}
             </button>
           </span>
-        ) : hoveredId === conv.id ? (
+        ) : (
           <span className="sidebar-conv-actions" onClick={(e) => e.stopPropagation()}>
             {isArchivedView ? (
               <button
@@ -508,7 +505,8 @@ export function Sidebar({
               ×
             </button>
           </span>
-        ) : (
+        )}
+        {confirmDeleteId === conv.id ? null : (
           <time
             className="sidebar-conv-time"
             dateTime={conv.updatedAt}

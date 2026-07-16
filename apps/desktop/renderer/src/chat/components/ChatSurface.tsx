@@ -107,6 +107,7 @@ import { MessageRail } from './thread/MessageRail';
 import { useConversationState } from '../hooks/useConversationState';
 import { beginConversationCompaction } from '../state/automaticCompaction';
 import { conversationStore, type ConversationRuntimeState } from '../state/conversationStore';
+import { createFrameCoalescer } from '../state/frameCoalescer';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { useStreamingReport } from '../hooks/useStreamingReport';
 import { useConversationStreamRouter } from '../hooks/useConversationStreamRouter';
@@ -579,14 +580,22 @@ export function ChatSurface({
   const messageNavigationRequestRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaResizeCoalescerRef = useRef(createFrameCoalescer({
+    request: (callback) => requestAnimationFrame(callback),
+    cancel: (frameId) => cancelAnimationFrame(frameId),
+  }));
 
   // textarea 自适应高度:随内容从单行增高,到 CSS max-height(120px) 后内部滚动。
-  // 监听 draft 而非只在 onChange 处理,可同时覆盖恢复草稿/slash 命令/清空等编程式赋值路径。
+  // 草稿可能在一次绘制前快速变化多次；尺寸读取合并到每帧一次，避免输入事件中同步强制布局。
   useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight}px`;
+    textareaResizeCoalescerRef.current.request(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      const previousHeight = el.style.height;
+      el.style.height = 'auto';
+      const nextHeight = `${el.scrollHeight}px`;
+      el.style.height = nextHeight === previousHeight ? previousHeight : nextHeight;
+    });
   }, [draft]);
 
   const updateThreadBottomState = useCallback((container: HTMLDivElement | null) => {
@@ -627,16 +636,29 @@ export function ChatSurface({
     updateCurrentTurnContext(container);
   }, [saveThreadScrollSnapshot, updateCurrentTurnContext]);
 
+  const threadScrollCoalescerRef = useRef(createFrameCoalescer({
+    request: (callback) => requestAnimationFrame(callback),
+    cancel: (frameId) => cancelAnimationFrame(frameId),
+  }));
   const handleThreadScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const container = event.currentTarget;
-    updateVirtualViewport();
-    updateThreadBottomState(container);
-    updateCurrentTurnContext(container);
-    if (pendingThreadScrollRestoreRef.current?.conversationId !== conversationId) {
-      saveThreadScrollSnapshot(conversationId, container);
-    }
-    setThreadScrolled(container.scrollTop > 4);
+    // Scroll can dispatch far faster than React can commit a long thread. Keep the latest
+    // container state and coalesce virtual range updates and geometry probes to one pass per frame.
+    threadScrollCoalescerRef.current.request(() => {
+      updateVirtualViewport();
+      updateThreadBottomState(container);
+      updateCurrentTurnContext(container);
+      if (pendingThreadScrollRestoreRef.current?.conversationId !== conversationId) {
+        saveThreadScrollSnapshot(conversationId, container);
+      }
+      setThreadScrolled(container.scrollTop > 4);
+    });
   }, [conversationId, saveThreadScrollSnapshot, updateCurrentTurnContext, updateThreadBottomState, updateVirtualViewport]);
+
+  useEffect(() => () => {
+    threadScrollCoalescerRef.current.cancel();
+    textareaResizeCoalescerRef.current.cancel();
+  }, []);
 
   // 表达层导航：虚拟轮次未挂载时先按 turn index 定位并强制挂载，再精确居中消息锚点。
   const scrollToMessage = useCallback((id: string) => {
