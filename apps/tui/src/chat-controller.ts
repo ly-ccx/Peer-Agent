@@ -27,6 +27,7 @@ export interface ChatMessage {
   readonly role: ChatRole;
   readonly content: string;
   readonly pending?: boolean;
+  readonly usage?: ModelUsage;
 }
 
 export interface ChatSnapshot {
@@ -72,6 +73,7 @@ export interface ChatModelPort extends RuntimePipelineModelAdapter<
 export interface ChatRestoreInput {
   readonly mode: TuiMode;
   readonly messages: readonly ChatMessage[];
+  readonly usage?: ModelUsage;
 }
 
 export interface ChatController {
@@ -210,7 +212,12 @@ export function createChatController(options: {
         .map((message) => ({ role: message.role, content: message.content }));
       executionEvidenceIds = [];
       sequence = messages.length;
-      publish({ status: 'idle', mode: normalizeTuiMode(input.mode), messages });
+      publish({
+        status: 'idle',
+        mode: normalizeTuiMode(input.mode),
+        messages,
+        usage: input.usage,
+      });
       return true;
     },
     async send(content) {

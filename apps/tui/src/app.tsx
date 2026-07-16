@@ -10,6 +10,7 @@ import { MarkdownView } from './markdown-view.tsx';
 import { executeTuiCommand } from './command-execution.ts';
 import {
   createTuiConversationPersistence,
+  resumeTuiConversation,
   type TuiConversationSummary,
 } from './conversation-persistence.ts';
 import {
@@ -684,8 +685,7 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
         const restored = item ? persistence.loadConversation(item.id) : null;
         if (!restored) {
           setCommandNotice('That saved session could not be restored');
-        } else if (controller.restore(restored)) {
-          persistence.resumeConversation(restored);
+        } else if (resumeTuiConversation(controller, persistence, restored)) {
           if (restored.modelSelection && modelSelection) {
             modelSelection.setSelection(restored.modelSelection);
             setSelectedModel(restored.modelSelection);

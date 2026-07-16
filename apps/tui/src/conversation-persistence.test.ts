@@ -1,7 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createTuiConversationPersistence } from './conversation-persistence.ts';
-import type { ChatSnapshot } from './chat-controller.ts';
+import {
+  createTuiConversationPersistence,
+  resumeTuiConversation,
+} from './conversation-persistence.ts';
+import {
+  createChatController,
+  createDemoChatModel,
+  type ChatSnapshot,
+} from './chat-controller.ts';
+import type { TuiHost } from './tui-host.ts';
 
 function createStoreRecorder() {
   const calls: Array<{ method: string; args: unknown[] }> = [];
@@ -34,6 +42,21 @@ function snapshot(input: Partial<ChatSnapshot> = {}): ChatSnapshot {
   };
 }
 
+function inertHost(): TuiHost {
+  return {
+    workspaceRoot: '/workspace',
+    capabilities: [],
+    toolDefinitions: [],
+    getAccessLevel: () => 'ask_before_local',
+    setAccessLevel: () => 'ask_before_local',
+    execute: async () => { throw new Error('not used'); },
+    executeRead: async () => { throw new Error('not used'); },
+    executeShell: async () => { throw new Error('not used'); },
+    subscribe: () => () => {},
+    subscribeApproval: () => () => {},
+  };
+}
+
 describe('TUI conversation persistence', () => {
   test('creates lazily and persists stable messages, model, mode, and usage once', () => {
     const recorder = createStoreRecorder();
@@ -61,6 +84,13 @@ describe('TUI conversation persistence', () => {
     expect(recorder.calls.filter((call) => call.method === 'createConversation')).toHaveLength(1);
     expect(recorder.calls.filter((call) => call.method === 'appendMessage')).toHaveLength(2);
     expect(recorder.calls.filter((call) => call.method === 'addUsage')).toHaveLength(1);
+    expect(recorder.calls.filter((call) => call.method === 'appendMessage').at(-1)?.args[1]).toEqual({
+      id: 'assistant-1',
+      role: 'assistant',
+      content: 'world',
+      usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
+      timestamp: 123,
+    });
     expect(recorder.calls.find((call) => call.method === 'createConversation')?.args[0]).toEqual({
       workspacePath: '/workspace',
       mode: 'chat',
@@ -123,6 +153,7 @@ describe('TUI conversation persistence', () => {
         { id: 'old-assistant', role: 'assistant', content: 'remembered' },
       ],
       modelSelection: { providerId: 'provider-b', modelId: 'model-b', reasoningEffort: 'low' },
+      usage: { inputTokens: 27, totalTokens: 27 },
     });
     persistence.resumeConversation(restored!);
     persistence.syncSnapshot(snapshot({
@@ -138,6 +169,87 @@ describe('TUI conversation persistence', () => {
       method: 'appendMessage',
       args: ['stored-1', { id: 'new-user', role: 'user', content: 'continue', timestamp: 456 }],
     }]);
+  });
+
+  test('restores context usage before publishing without creating a duplicate conversation', () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const stored = {
+      id: 'stored-ctx',
+      title: 'Context session',
+      mode: 'chat',
+      messageCount: 2,
+      messages: [
+        { id: 'old-user', role: 'user', content: 'remember this context' },
+        {
+          id: 'old-assistant',
+          role: 'assistant',
+          content: 'context remembered',
+          usage: { inputTokens: 120, outputTokens: 8, totalTokens: 128 },
+        },
+      ],
+    };
+    const persistence = createTuiConversationPersistence({
+      workspacePath: '/workspace',
+      initialMode: 'chat',
+      initialModel: selection,
+      store: {
+        listConversations: () => [stored],
+        getConversation: (id: string) => id === stored.id ? stored : null,
+        createConversation(input?: unknown) {
+          calls.push({ method: 'createConversation', args: [input] });
+          return { id: 'duplicate' };
+        },
+        appendMessage(...args: unknown[]) { calls.push({ method: 'appendMessage', args }); },
+        updateMode(...args: unknown[]) { calls.push({ method: 'updateMode', args }); },
+        updateModelEffort(...args: unknown[]) { calls.push({ method: 'updateModelEffort', args }); },
+        addUsage(...args: unknown[]) { calls.push({ method: 'addUsage', args }); },
+      },
+    });
+    const controller = createChatController({ host: inertHost(), model: createDemoChatModel() });
+    const unsubscribe = controller.subscribe((next) => persistence.syncSnapshot(next));
+    const restored = persistence.loadConversation(stored.id);
+
+    expect(restored).not.toBeNull();
+    expect(resumeTuiConversation(controller, persistence, restored!)).toBe(true);
+
+    expect(calls.filter((call) => call.method === 'createConversation')).toHaveLength(0);
+    expect(persistence.getConversationId()).toBe(stored.id);
+    expect(controller.getSnapshot().usage).toEqual({
+      inputTokens: 120,
+      outputTokens: 8,
+      totalTokens: 128,
+    });
+    unsubscribe();
+  });
+
+  test('estimates restored context for legacy conversations without per-message usage', () => {
+    const stored = {
+      id: 'legacy-context',
+      mode: 'chat',
+      messages: [
+        { id: 'legacy-user', role: 'user', content: '请继续分析这个历史会话' },
+        { id: 'legacy-assistant', role: 'assistant', content: 'Existing context in English.' },
+      ],
+    };
+    const persistence = createTuiConversationPersistence({
+      workspacePath: '/workspace',
+      initialMode: 'chat',
+      initialModel: selection,
+      store: {
+        listConversations: () => [stored],
+        getConversation: (id: string) => id === stored.id ? stored : null,
+        createConversation: () => ({ id: 'unused' }),
+        appendMessage() {},
+        updateMode() {},
+        updateModelEffort() {},
+        addUsage() {},
+      },
+    });
+
+    const restored = persistence.loadConversation(stored.id);
+
+    expect(restored).not.toBeNull();
+    expect(restored?.usage).toEqual({ inputTokens: 34, totalTokens: 34 });
   });
 
   test('filters the active conversation and ignores missing or corrupt stored sessions', () => {
