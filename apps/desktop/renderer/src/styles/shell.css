@@ -133,25 +133,21 @@
   }
 
   .bootstrap-loader {
-    @apply relative grid overflow-hidden;
-    width: min(360px, calc(100vw - 64px));
+    @apply grid;
+    width: min(312px, calc(100vw - 64px));
     margin: auto;
-    padding: 22px 24px 18px;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto 3px;
     row-gap: 16px;
     align-items: center;
     color: var(--ink-fade);
-    border: 1px solid var(--za-line);
-    border-radius: 14px;
-    background: color-mix(in srgb, var(--za-app-bg) 82%, transparent);
-    box-shadow: 0 16px 44px color-mix(in srgb, var(--ink) 8%, transparent);
     --motion-enter-from: 6px;
     animation: motion-enter-rise var(--za-motion-slow) var(--za-ease-out) both;
   }
 
   .bootstrap-loader-copy {
-    @apply flex min-w-0 items-center gap-2;
+    @apply flex min-w-0 items-center justify-center;
+    text-align: center;
   }
 
   .bootstrap-loader-label {
