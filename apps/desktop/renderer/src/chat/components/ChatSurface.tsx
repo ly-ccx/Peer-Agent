@@ -105,10 +105,7 @@ import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
 import { MessageRail } from './thread/MessageRail';
 import { useConversationState } from '../hooks/useConversationState';
-import {
-  beginConversationCompaction,
-  scheduleAutomaticCompaction,
-} from '../state/automaticCompaction';
+import { beginConversationCompaction } from '../state/automaticCompaction';
 import { conversationStore, type ConversationRuntimeState } from '../state/conversationStore';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { useStreamingReport } from '../hooks/useStreamingReport';
@@ -999,10 +996,8 @@ export function ChatSurface({
     setWorkbenchOpen(true);
   }, [setWorkbenchTab, setWorkbenchOpen]);
 
-  // 压缩执行核心：手动 /compact 与回合结束自动压缩共用同一条安全链路。
-  // 复用主进程 chatCompact（按 shouldCompact 自门控），完成后仅当仍停留发起会话时
-  // 回灌视图（messages/tokenUsage），切走则只刷新列表，避免把结果灌进已切换的当前会话。
-  // 返回是否真的发生了压缩，供调用方决定后续（如清空权威用量快照）。
+  // 显式 /compact 的 renderer 入口。自动压缩只能发生在 Runtime provider 请求前的
+  // 阻塞式 preflight 中，不能从 stream done 旁路启动，否则会与 Goal Runner 下一 tick 并发写会话。
   const runCompaction = useCallback(async (compactConversationId: string): Promise<boolean> => {
     const streamId = `compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const compactStartedAt = Date.now();
@@ -1012,15 +1007,6 @@ export function ChatSurface({
     return result.compacted;
   }, [onConversationUpdated]);
 
-  // 回合结束自动压缩：主进程在 done 里判定 compactionSuggested 后请求触发。
-  // 三道护栏：① autoCompactingRef 防重入（多 loop 收尾/done 抖动只压一次）；
-  // ② 捕获发起会话并要求完成时仍停留，避免灌进已切走的会话；
-  // ③ macrotask defer(setTimeout 0)——排到渲染端 done 收尾的落库
-  //    （conversations:replace-messages）之后再压缩，避免迟到的整段覆盖把压缩结果冲掉。
-  const handleCompactionSuggested = useCallback((compactConversationId: string) => {
-    scheduleAutomaticCompaction(compactConversationId, runCompaction);
-  }, [runCompaction]);
-
   // 应用级单例流路由器（方案 C / 甲-1）：订阅全部 chatStream 事件，按 streamId→conversationId
   // 路由到对应会话桶。前台会话（=当前 conversationId）的 delta 走打字机平滑吐字，后台会话的
   // delta 直接整段写入其桶。因 App 只渲染单个稳定的 ChatSurface 实例（切会话只改 conversationId
@@ -1029,7 +1015,6 @@ export function ChatSurface({
     activeConversationId: conversationId,
     onConversationUpdated,
     onBrowserToolActivity: handleBrowserToolActivity,
-    onCompactionSuggested: handleCompactionSuggested,
   });
 
   useLayoutEffect(() => {

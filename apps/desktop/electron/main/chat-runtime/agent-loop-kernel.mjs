@@ -46,8 +46,9 @@ export function createAgentLoopKernel({
   // 用于 Goal Runner 展示用的实时轮次计数，与具体 provider 解耦。
   onRound = null,
   // 口径统一：回合自然结束时，由各 loop 注入的闭包返回「权威上下文用量」快照
-  // （{ contextTokens, contextWindow, compactionSuggested }），随 done 事件下发，
-  // 让渲染端进度条与主进程压缩触发用同一份估算与阈值。返回 null 表示不附带。
+  // （{ contextTokens, contextWindow, compactionSuggested }），随 done 事件下发。
+  // renderer 只消费用量/压力投影；真正的自动压缩由下一次 provider 请求前的 Runtime
+  // preflight 阻塞执行，不能从 done 旁路启动。返回 null 表示不附带。
   getContextInfo = null,
 } = {}) {
   const normalizedMaxTurns = normalizeAgentLoopMaxTurns(maxTurns);
@@ -112,8 +113,9 @@ export function createAgentLoopKernel({
   }
 
   function sendDone() {
-    // 回合自然结束：附带权威上下文用量快照，供渲染端进度条对齐，并据 compactionSuggested
-    // 在回合结束后触发自动压缩。闭包取数失败不得影响收尾。
+    // 回合自然结束：附带权威上下文用量与压力快照，供渲染端进度条对齐。
+    // compactionSuggested 不授权 renderer 另起压缩任务；下一次 Runtime preflight 负责压缩并续跑。
+    // 闭包取数失败不得影响收尾。
     // 口径分离（ADR 42）：把「最后一轮 usage 快照」传给 getContextInfo，使显示口径
     // 优先采用 provider 真实 input+cacheRead（压缩后回落），触发口径仍按完整会话量判定。
     let contextInfo = null;

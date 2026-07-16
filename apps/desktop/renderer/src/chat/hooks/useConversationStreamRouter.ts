@@ -41,8 +41,6 @@ export interface ConversationStreamRouterParams {
   onConversationUpdated?: (conversationId: string) => void;
   /** 前台会话触发内置浏览器工具时，请求上层自动展开 Workbench。仅前台触发。 */
   onBrowserToolActivity?: (tool: string) => void;
-  /** 回合结束且主进程判定已越过压缩阈值时，请求上层对该会话跑一次自动压缩。 */
-  onCompactionSuggested?: (conversationId: string) => void;
 }
 
 // —— 纯函数助手：与 ChatSurface 内原 appendStreamText/appendStreamThinking 逐字一致，
@@ -107,8 +105,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
   textTypewriter: ReturnType<typeof useTypewriterStream>;
   thinkingTypewriter: ReturnType<typeof useTypewriterStream>;
 } {
-  const { activeConversationId, onConversationUpdated, onBrowserToolActivity, onCompactionSuggested } =
-    params;
+  const { activeConversationId, onConversationUpdated, onBrowserToolActivity } = params;
 
   // 用 ref 持有「当前前台会话 / 最新回调」，让稳定的事件处理闭包始终读到最新值，
   // 从而把全部订阅放进一个「只挂载一次」的 effect，避免频繁解绑/重绑。
@@ -117,8 +114,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
   onUpdatedRef.current = onConversationUpdated;
   const onBrowserRef = useRef(onBrowserToolActivity);
   onBrowserRef.current = onBrowserToolActivity;
-  const onCompactionRef = useRef(onCompactionSuggested);
-  onCompactionRef.current = onCompactionSuggested;
 
   // 前台打字机：onText 落到「当前前台会话」桶。后台会话不经打字机（直接整段写桶）。
   const appendActiveText = useCallback((chunk: string) => {
@@ -204,7 +199,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     });
 
     const offDone = clientApi.onChatStreamDone(
-      ({ streamId, usage, lifetimeUsage, contextTokens, contextWindow, compactionSuggested }) => {
+      ({ streamId, usage, lifetimeUsage, contextTokens, contextWindow }) => {
         const cid = conversationStore.resolveConversation(streamId);
         if (!cid) return;
         // 流正常收尾，重试横幅若仍残留一并清除。
@@ -288,7 +283,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           return {};
         });
         onUpdatedRef.current?.(cid);
-        if (compactionSuggested) onCompactionRef.current?.(cid);
       },
     );
 

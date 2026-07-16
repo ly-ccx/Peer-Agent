@@ -66,8 +66,6 @@ export interface ConversationRuntimeState {
   readonly turnStartedAt: number | null;
   /** 当前会话正在进行的流 id（取代旧的组件内 streamIdRef.current）。 */
   readonly streamId: string | null;
-  /** 自动压缩闸门（取代旧的 autoCompactingRef），防止重复触发自动压缩。 */
-  readonly autoCompacting: boolean;
 }
 
 /** 未知会话返回的稳定空切片单例（冻结，引用恒定，避免订阅死循环）。 */
@@ -88,7 +86,6 @@ export const EMPTY_CONVERSATION_STATE: ConversationRuntimeState = Object.freeze(
   mode: 'chat',
   turnStartedAt: null,
   streamId: null,
-  autoCompacting: false,
 });
 
 type Listener = () => void;
@@ -194,7 +191,6 @@ export class ConversationStore {
       providerRecoveryNotice: null,
       turnStartedAt: null,
       streamId: null,
-      autoCompacting: false,
     });
   }
 

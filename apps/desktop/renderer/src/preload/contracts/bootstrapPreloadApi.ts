@@ -458,7 +458,7 @@ export interface BootstrapPreloadApi {
     usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number };
     lifetimeUsage?: LifetimeUsage;
     // 口径统一：主进程随回合结束下发的权威上下文用量快照（与压缩触发同口径）。
-    // contextTokens 用于进度条对齐；compactionSuggested 表示已达阈值、应在回合结束后自动压缩。
+    // compactionSuggested 仅表达上下文压力；自动压缩由下一次 Runtime preflight 阻塞执行。
     contextTokens?: number;
     contextWindow?: number;
     compactionSuggested?: boolean;
