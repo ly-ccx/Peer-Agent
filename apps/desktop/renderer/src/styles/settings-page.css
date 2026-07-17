@@ -58,7 +58,7 @@
   margin: 0 var(--space-2) var(--space-2);
   padding: 6px 10px;
   border: 1px solid var(--pa-border-subtle);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-row);
   background: var(--pa-surface-muted);
   color: var(--pa-text-secondary);
   transition: border-color var(--za-motion-fast), background var(--za-motion-fast);
@@ -128,7 +128,7 @@
   border: none;
   background: transparent;
   color: var(--pa-text-secondary);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-row);
   cursor: pointer;
   font-size: 13px;
   text-align: left;
@@ -332,7 +332,7 @@
   min-height: 32px;
   padding: 0 12px;
   border: 1px solid var(--pa-border-subtle);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-row);
   background: transparent;
   color: var(--pa-text-secondary);
   cursor: pointer;
@@ -380,7 +380,7 @@
 .archived-conversations-error {
   margin: 0;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-row);
   background: var(--za-danger-soft);
   color: var(--state-danger);
   font-size: 0.78rem;
@@ -584,7 +584,7 @@
 .mcp-health {
   flex: 0 0 auto;
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-round);
   background: var(--pa-surface-muted);
   color: var(--pa-text-secondary);
   font-size: 0.72rem;
@@ -1379,7 +1379,7 @@
   padding: 0 8px;
   border: 1px solid var(--pa-border-strong);
   border-bottom-color: color-mix(in srgb, var(--pa-border-strong) 72%, var(--pa-text-primary));
-  border-radius: 6px;
+  border-radius: var(--ui-radius-control);
   background: var(--pa-surface-card);
   box-shadow: 0 1px 0 var(--pa-border-subtle);
   color: var(--pa-text-primary);
@@ -1407,7 +1407,7 @@
 .shortcut-state__dot {
   width: 6px;
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-round);
   background: currentColor;
   box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
 }

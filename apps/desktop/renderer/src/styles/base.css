@@ -77,7 +77,7 @@
 }
 
 *::-webkit-scrollbar-thumb {
-  border-radius: 4px;
+  border-radius: var(--ui-radius-chip);
   background-color: transparent;
 }
 

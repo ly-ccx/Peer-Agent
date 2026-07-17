@@ -52,7 +52,7 @@
   .profile-chip span {
     @apply grid h-7 w-7 place-items-center text-[11px] font-medium;
     border: 1px solid var(--za-line);
-    border-radius: 999px;
+    border-radius: var(--ui-radius-round);
     color: var(--za-text);
     background: var(--za-surface-1);
   }
@@ -342,7 +342,7 @@
   .peer-startup-seal {
     @apply grid h-20 w-20 place-items-center;
     flex-shrink: 0;
-    border-radius: 2px;
+    border-radius: var(--radius-xs);
     background: var(--cinnabar-seal);
     color: var(--surface-vellum-base);
     font-family: var(--font-serif-zh);
@@ -402,7 +402,7 @@
     min-width: 220px;
     height: 48px;
     padding: 0 32px;
-    border-radius: 6px;
+    border-radius: var(--ui-radius-control);
     border: 1px solid transparent;
     font-family: var(--font-sans-zh);
     font-size: 15px;
@@ -427,7 +427,7 @@
     @apply inline-flex cursor-pointer items-center justify-center;
     height: 48px;
     padding: 0 24px;
-    border-radius: 6px;
+    border-radius: var(--ui-radius-control);
     border: 1px solid var(--ink-hairline);
     font-family: var(--font-sans-zh);
     font-size: 14px;

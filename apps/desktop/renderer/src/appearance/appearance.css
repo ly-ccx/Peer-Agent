@@ -56,7 +56,7 @@
 
   /* 浅 / 深 / 跟随系统 — 三段式分段控件 */
   .appearance-segmented {
-    @apply grid gap-1 rounded-[8px] p-1;
+    @apply grid gap-1 rounded-[var(--ui-radius-row)] p-1;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     background: var(--za-surface-1);
     border: 1px solid var(--za-line);
@@ -71,7 +71,7 @@
   }
 
   .palette-select-trigger {
-    @apply grid w-full items-center rounded-[8px] px-2.5 text-left;
+    @apply grid w-full items-center rounded-[var(--ui-radius-row)] px-2.5 text-left;
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 0.5rem;
     min-height: 2.25rem;
@@ -120,7 +120,7 @@
   }
 
   .palette-select-option {
-    @apply grid items-center rounded-[6px] px-2 text-[12px] font-normal;
+    @apply grid items-center rounded-[var(--ui-radius-control)] px-2 text-[12px] font-normal;
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 0.5rem;
     min-height: 2rem;
@@ -155,7 +155,7 @@
   }
 
   .appearance-segmented button {
-    @apply min-h-7 rounded-[6px] px-2 text-[12px] font-normal;
+    @apply min-h-7 rounded-[var(--ui-radius-control)] px-2 text-[12px] font-normal;
     color: var(--za-text-muted);
     background: transparent;
     transition: background var(--za-motion-fast) var(--za-ease-standard),
@@ -175,19 +175,19 @@
 
   /* 色板区：当前配色 + 明暗下的真实色值清单 */
   .appearance-swatches {
-    @apply grid gap-1 rounded-[8px] p-2;
+    @apply grid gap-1 rounded-[var(--ui-radius-row)] p-2;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     border: 1px solid var(--za-line);
     background: var(--za-bg-1);
   }
 
   .appearance-swatch {
-    @apply grid min-w-0 items-center gap-2 rounded-[6px] px-2 py-1.5 text-[11px];
+    @apply grid min-w-0 items-center gap-2 rounded-[var(--ui-radius-control)] px-2 py-1.5 text-[11px];
     grid-template-columns: 16px minmax(0, 1fr) auto;
   }
 
   .appearance-swatch-chip {
-    @apply h-4 w-4 rounded-[4px];
+    @apply h-4 w-4 rounded-[var(--ui-radius-chip)];
     border: 1px solid var(--za-line);
   }
 
@@ -204,7 +204,7 @@
 
   /* 自定义三色（仅 palette=custom 时渲染）：浅/深各一组色块 */
   .appearance-custom-scheme {
-    @apply grid gap-1.5 rounded-[8px] p-2;
+    @apply grid gap-1.5 rounded-[var(--ui-radius-row)] p-2;
     border: 1px solid var(--za-line);
     background: var(--za-bg-1);
   }
@@ -230,7 +230,7 @@
   }
 
   .appearance-custom-color input[type='color'] {
-    @apply h-7 w-full rounded-[6px] p-0;
+    @apply h-7 w-full rounded-[var(--ui-radius-control)] p-0;
     border: 1px solid var(--za-line);
     background: transparent;
     cursor: pointer;
@@ -263,7 +263,7 @@
   /* WebKit 轨道：用 --slider-pct 驱动填充色分段 */
   .appearance-slider-input::-webkit-slider-runnable-track {
     height: var(--slider-track-h);
-    border-radius: 999px;
+    border-radius: var(--ui-radius-round);
     background: linear-gradient(
       to right,
       var(--za-accent) 0%,
@@ -303,13 +303,13 @@
   /* Firefox 轨道 / 填充 / thumb */
   .appearance-slider-input::-moz-range-track {
     height: var(--slider-track-h);
-    border-radius: 999px;
+    border-radius: var(--ui-radius-round);
     background: var(--za-line);
   }
 
   .appearance-slider-input::-moz-range-progress {
     height: var(--slider-track-h);
-    border-radius: 999px;
+    border-radius: var(--ui-radius-round);
     background: var(--za-accent);
   }
 
@@ -342,7 +342,7 @@
   }
 
   .appearance-code-font input[type='number'] {
-    @apply w-14 rounded-[6px] px-2 py-1 text-[12px] tabular-nums;
+    @apply w-14 rounded-[var(--ui-radius-control)] px-2 py-1 text-[12px] tabular-nums;
     border: 1px solid var(--za-line);
     background: var(--za-surface-1);
     color: var(--za-text);
@@ -359,7 +359,7 @@
   }
 
   .appearance-reset {
-    @apply w-fit justify-self-end rounded-[4px] px-2.5 py-1.5 text-[12px] font-normal;
+    @apply w-fit justify-self-end rounded-[var(--ui-radius-chip)] px-2.5 py-1.5 text-[12px] font-normal;
     color: var(--za-text-faint);
     background: transparent;
     border: 1px solid transparent;
@@ -377,7 +377,7 @@
   /* 代码预览：复用当前主题语义 token 做近似语法高亮（参考 Catppuccin 风格指南）。
      不引入新 token，随 mode/palette/custom 自动跟随。 */
   .appearance-code-preview {
-    @apply m-0 grid gap-0 overflow-x-auto rounded-[6px];
+    @apply m-0 grid gap-0 overflow-x-auto rounded-[var(--ui-radius-control)];
     padding: 8px 10px;
     background: var(--za-surface-1);
     border: 1px solid var(--za-line);

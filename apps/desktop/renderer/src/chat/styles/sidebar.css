@@ -7,7 +7,7 @@
   .sidebar-brand-seal {
     @apply grid h-8 w-8 place-items-center;
     flex-shrink: 0;
-    border-radius: 2px;
+    border-radius: var(--radius-xs);
     background: var(--cinnabar-seal);
     color: var(--surface-vellum-base);
     font-family: var(--font-serif-zh);

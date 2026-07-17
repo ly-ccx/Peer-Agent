@@ -131,7 +131,7 @@
   inset: 0;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-row);
   object-fit: cover;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--chrome-hairline) 70%, transparent);
 }
@@ -556,7 +556,7 @@
   min-width: 0;
   padding: 2px 4px;
   border: 1px solid var(--azure-seal);
-  border-radius: 6px;
+  border-radius: var(--ui-radius-control);
   outline: none;
   background: var(--za-surface-glass);
   color: var(--graphite-base);

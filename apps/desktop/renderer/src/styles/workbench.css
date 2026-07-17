@@ -992,7 +992,7 @@
     height: 100%;
     width: 40%;
     background: var(--ui-accent, var(--za-accent));
-    border-radius: 2px;
+    border-radius: var(--radius-xs);
     --motion-progress-to: 320%;
     animation: motion-progress-slide 1.1s ease-in-out infinite;
   }

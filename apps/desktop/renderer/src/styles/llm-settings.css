@@ -1239,7 +1239,7 @@
   min-height: 20px;
   padding: 1px 7px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-round);
   color: var(--graphite-soft);
   font-size: 0.66rem;
   white-space: nowrap;
@@ -1270,7 +1270,7 @@
   min-height: 20px;
   padding: 1px 7px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: 999px;
+  border-radius: var(--ui-radius-round);
   background: var(--paper-sheet);
   color: var(--graphite-soft);
   font-size: 0.66rem;
@@ -1509,7 +1509,7 @@
 .llm-catalog-skeleton span {
   display: block;
   height: 11px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-round);
   background: linear-gradient(100deg, rgba(118, 129, 145, 0.08) 20%, rgba(118, 129, 145, 0.18) 42%, rgba(118, 129, 145, 0.08) 64%);
   background-size: 220% 100%;
   animation: llm-catalog-skeleton-shimmer 1.3s ease-in-out infinite;

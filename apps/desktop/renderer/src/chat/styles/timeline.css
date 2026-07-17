@@ -302,7 +302,7 @@
     @apply m-0 mt-1 overflow-auto;
     max-height: 280px;
     padding: 6px 8px;
-    border-radius: 4px;
+    border-radius: var(--ui-radius-chip);
     background: var(--surface-paper-soft, transparent);
     font-family: var(--font-mono);
     font-size: 0.71875rem;
@@ -320,7 +320,7 @@
     @apply m-0 overflow-auto;
     max-height: 280px;
     padding: 6px 8px;
-    border-radius: 4px;
+    border-radius: var(--ui-radius-chip);
     background: var(--surface-paper-soft, transparent);
     font-family: var(--font-mono);
     font-size: 0.71875rem;

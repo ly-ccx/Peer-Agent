@@ -64,7 +64,7 @@
   }
 
   .capability-tabs button {
-    @apply min-w-0 rounded-[6px] px-3 text-[13px] font-semibold;
+    @apply min-w-0 rounded-[var(--ui-radius-control)] px-3 text-[13px] font-semibold;
     color: var(--za-text-soft);
   }
 
@@ -160,7 +160,7 @@
   .capability-state i {
     width: 6px;
     height: 6px;
-    border-radius: 999px;
+    border-radius: var(--ui-radius-round);
     background: currentColor;
   }
 
@@ -189,7 +189,7 @@
   }
 
   .capability-card-meta code {
-    @apply inline-flex min-h-6 items-center rounded-[2px] px-1.5 text-[12px];
+    @apply inline-flex min-h-6 items-center rounded-[var(--radius-xs)] px-1.5 text-[12px];
     border: 1px solid var(--za-line);
     color: var(--za-text-soft);
     background: transparent;
@@ -228,7 +228,7 @@
 
   .capability-detail-seal {
     @apply grid h-7 w-7 shrink-0 place-items-center;
-    border-radius: 2px;
+    border-radius: var(--radius-xs);
     color: var(--surface-vellum-base);
     background: var(--cinnabar-seal);
     font-family: var(--font-serif-zh);
@@ -250,7 +250,7 @@
   }
 
   .capability-detail-panel header button {
-    @apply h-7 w-7 rounded-[6px] text-[18px];
+    @apply h-7 w-7 rounded-[var(--ui-radius-control)] text-[18px];
     color: var(--za-text-muted);
   }
 
@@ -287,7 +287,7 @@
   }
 
   .capability-manifest-preview {
-    @apply m-0 max-h-56 overflow-auto whitespace-pre-wrap rounded-[8px] p-3 text-[11px] leading-5;
+    @apply m-0 max-h-56 overflow-auto whitespace-pre-wrap rounded-[var(--ui-radius-row)] p-3 text-[11px] leading-5;
     border: 1px solid var(--za-line);
     color: var(--za-text-soft);
     background: var(--za-bg-2);
@@ -299,7 +299,7 @@
   }
 
   .capability-detail-panel footer button {
-    @apply h-9 rounded-[6px] px-4 text-[13px] font-semibold;
+    @apply h-9 rounded-[var(--ui-radius-control)] px-4 text-[13px] font-semibold;
     border: 1px solid var(--za-line);
     color: var(--za-text);
     background: transparent;
@@ -424,7 +424,7 @@
   .skill-market-card {
     @apply relative flex min-w-0 items-start gap-2.5 px-3 py-2.5;
     border: 1px solid var(--za-line);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-row);
     color: var(--za-text);
     background: var(--za-panel-1);
     transition: border-color 0.2s, box-shadow 0.2s;
@@ -604,7 +604,7 @@
     @apply text-[14px] leading-none tracking-widest;
     color: var(--za-text-muted);
     padding: 2px 4px;
-    border-radius: 4px;
+    border-radius: var(--ui-radius-chip);
   }
 
   .skill-card-menu:hover {
@@ -815,7 +815,7 @@
 
   .skill-upload-dialog {
     @apply grid w-[480px] gap-5 p-7;
-    border-radius: 16px;
+    border-radius: var(--ui-radius-modal);
     background: #fff;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
   }
@@ -1018,7 +1018,7 @@
   .mcp-drawer-credentials .mcp-credential-item {
     @apply flex items-center justify-between gap-3 px-3 py-2;
     border: 1px solid var(--za-line);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-row);
     background: var(--za-panel-1);
   }
 

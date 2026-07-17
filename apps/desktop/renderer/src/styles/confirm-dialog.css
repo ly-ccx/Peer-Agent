@@ -44,7 +44,7 @@
   .pa-confirm-btn {
     min-width: 72px;
     padding: 7px 16px;
-    border-radius: 8px;
+    border-radius: var(--ui-radius-row);
     border: 1px solid transparent;
     font-size: 13px;
     font-weight: 500;

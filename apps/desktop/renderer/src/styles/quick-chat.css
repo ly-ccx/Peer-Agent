@@ -128,7 +128,7 @@ body:has(.quick-chat-shell) {
   gap: 7px;
   padding: 0 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--ui-radius-control);
   color: var(--quick-muted);
   background: transparent;
   cursor: pointer;
@@ -176,7 +176,7 @@ body:has(.quick-chat-shell) {
   width: 6px;
   height: 6px;
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-round);
   background: var(--state-success);
 }
 
@@ -258,7 +258,7 @@ body:has(.quick-chat-shell) {
   flex: 0 0 auto;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-row);
   color: var(--quick-muted);
   background: transparent;
   cursor: pointer;
@@ -300,7 +300,7 @@ body:has(.quick-chat-shell) {
 .quick-chat-input-row > .attachment-strip .attachment-file-icon {
   width: 24px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: var(--ui-radius-control);
 }
 
 .quick-chat-input-row > .attachment-strip .attachment-thumb {
@@ -376,7 +376,7 @@ body:has(.quick-chat-shell) {
   height: 13px;
   border: 2px solid currentColor;
   border-right-color: transparent;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-round);
   animation: motion-spin 700ms linear infinite;
 }
 
@@ -385,7 +385,7 @@ body:has(.quick-chat-shell) {
   z-index: 10;
   overflow: hidden;
   border: 1px solid var(--quick-border);
-  border-radius: 12px;
+  border-radius: var(--ui-radius-panel);
   color: var(--graphite-base);
   background: var(--chrome-canvas);
   box-shadow: var(--shadow-card);
@@ -495,7 +495,7 @@ body:has(.quick-chat-shell) {
 
 .quick-chat-effort-slider::-webkit-slider-runnable-track {
   height: 3px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-round);
   background: linear-gradient(to right, var(--graphite-base) 0%, var(--graphite-base) var(--effort-progress), var(--za-line-strong) var(--effort-progress), var(--za-line-strong) 100%);
 }
 
@@ -553,7 +553,7 @@ body:has(.quick-chat-shell) {
   height: 28px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--ui-radius-row);
   color: white;
   background: var(--workspace-accent);
   font-size: 12px;
