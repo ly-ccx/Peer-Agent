@@ -262,17 +262,50 @@ export function QuickChatWindow() {
     if (!workspacePath) return;
 
     const refreshScheduler = createCoalescedRefreshScheduler(refreshTasks);
-    const scheduleRefresh = refreshScheduler.schedule;
 
-    if (document.visibilityState === 'visible') scheduleRefresh(0);
+    // Visibility gate: the floating window is hidden (not closed) on blur, so it
+    // spends most of its life invisible. Running the heavy refreshTasks (per-conversation
+    // full message load) on every background stream event is the main cause of jank.
+    // While hidden we drop refreshes and only remember that work is pending; when the
+    // window becomes visible again we refresh once.
+    let pendingWhileHidden = false;
+    const isVisible = () => document.visibilityState === 'visible';
+    // Tool stream events fire very frequently; debounce them harder than user-facing signals.
+    const STREAM_REFRESH_DELAY = 600;
+
+    const scheduleRefresh = (delay?: number) => {
+      if (!isVisible()) {
+        pendingWhileHidden = true;
+        return;
+      }
+      refreshScheduler.schedule(delay);
+    };
+    const scheduleStreamRefresh = () => {
+      if (!isVisible()) {
+        pendingWhileHidden = true;
+        return;
+      }
+      refreshScheduler.schedule(STREAM_REFRESH_DELAY);
+    };
+
+    const handleVisibilityChange = () => {
+      if (isVisible() && pendingWhileHidden) {
+        pendingWhileHidden = false;
+        refreshScheduler.schedule(0);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    if (isVisible()) scheduleRefresh(0);
     const unsubscribers = [
-      clientApi.onQuickChatShown(() => scheduleRefresh(0)),
+      clientApi.onQuickChatShown(() => refreshScheduler.schedule(0)),
       clientApi.onGoalPlansChanged(() => scheduleRefresh()),
-      clientApi.onChatStreamToolCall(() => scheduleRefresh()),
-      clientApi.onChatStreamToolResult(() => scheduleRefresh()),
-      clientApi.onChatStreamDone(() => scheduleRefresh()),
+      clientApi.onChatStreamToolCall(() => scheduleStreamRefresh()),
+      clientApi.onChatStreamToolResult(() => scheduleStreamRefresh()),
+      clientApi.onChatStreamDone(() => scheduleStreamRefresh()),
     ];
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       refreshScheduler.dispose();
       for (const unsubscribe of unsubscribers) unsubscribe();
     };
