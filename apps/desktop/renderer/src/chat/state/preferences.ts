@@ -119,6 +119,35 @@ export function resolveModelSwitchState({
   };
 }
 
+/**
+ * 主聊天「当前/上次」模型的共享记忆键。
+ * Quick 漂浮窗与主聊天共用：主聊天切换或恢复会话模型时写入，Quick 优先读取，
+ * 不再使用独立的 quick-chat:model-provider 覆盖。
+ */
+export const LAST_MODEL_PROVIDER_KEY = 'peer-agent:last-model-provider';
+
+/** 读取共享的主聊天上次/当前模型 providerId；无有效值时返回 null。 */
+export function readLastModelProviderId(): string | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const value = localStorage.getItem(LAST_MODEL_PROVIDER_KEY);
+    return value && value.trim() ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 写入共享的主聊天上次/当前模型 providerId；空值不写。 */
+export function writeLastModelProviderId(providerId: string | null | undefined): void {
+  if (!providerId || !providerId.trim()) return;
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(LAST_MODEL_PROVIDER_KEY, providerId);
+  } catch {
+    // localStorage 不可用时静默忽略（隐私模式 / 配额满）。
+  }
+}
+
 /** LocalAccessLevel 类型守卫（认 4 个合法值，含 restricted_local）。 */
 export function isLocalAccessLevel(value: unknown): value is LocalAccessLevel {
   return value === 'ask_before_local'

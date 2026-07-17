@@ -22,7 +22,9 @@ import {
   modeLabel,
   modeTitle,
   normalizeEffortLevels,
+  readLastModelProviderId,
   resolvePreferredEffort,
+  writeLastModelProviderId,
   type ChatMode,
   type EffortLevel,
 } from '../../chat/state/preferences';
@@ -84,7 +86,8 @@ export function QuickChatWindow() {
     void clientApi.llmListProviders().then((items) => {
       const available = items.filter((provider) => provider.apiKeyConfigured);
       setProviders(available);
-      const remembered = localStorage.getItem('quick-chat:model-provider');
+      // 优先读主聊天共享记忆，不再被独立的 quick-chat:model-provider 压过。
+      const remembered = readLastModelProviderId();
       const selected = available.find((provider) => provider.id === remembered)
         ?? available.find((provider) => provider.isDefault)
         ?? available[0];
@@ -105,12 +108,21 @@ export function QuickChatWindow() {
   useEffect(() => {
     if (workspacePath) localStorage.setItem('quick-chat:workspace', workspacePath);
   }, [workspacePath]);
+  // 每次显示 Quick 时重新对齐主聊天当前/上次模型，避免窗口长期存活导致模型过期。
   useEffect(() => clientApi.onQuickChatShown?.(() => {
     setPopoverState(null);
+    const remembered = readLastModelProviderId();
+    if (remembered) {
+      setModelProviderId((current) => {
+        if (providers.some((provider) => provider.id === remembered)) return remembered;
+        return current;
+      });
+    }
     inputRef.current?.focus();
-  }), []);
+  }), [providers]);
+  // Quick 内切换模型也回写共享记忆，保持与主聊天同一条“上次模型”链路。
   useEffect(() => {
-    if (modelProviderId) localStorage.setItem('quick-chat:model-provider', modelProviderId);
+    writeLastModelProviderId(modelProviderId);
   }, [modelProviderId]);
   useEffect(() => { localStorage.setItem('quick-chat:effort', effort); }, [effort]);
   useEffect(() => { localStorage.setItem('quick-chat:mode', mode); }, [mode]);

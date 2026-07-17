@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 
 import { clientApi } from '../../clientApi';
-import { isEffortLevel, type EffortLevel } from '../state/preferences';
+import { isEffortLevel, writeLastModelProviderId, type EffortLevel } from '../state/preferences';
 
 /**
  * useConversationModelEffort —— 每会话独立的「模型（provider）+ 思考强度（effort）」绑定。
@@ -48,6 +48,8 @@ export function useConversationModelEffort(conversationId: string | null): Conve
     setModelProviderId(providerId);
     // 模型只按会话绑定，不写全局设置，避免「一次切换全局通用」。
     if (conversationId) void clientApi.conversationsUpdateModelEffort({ id: conversationId, modelProviderId: providerId });
+    // 同步写入共享记忆，供 Quick 漂浮窗默认跟随主聊天当前/上次模型。
+    writeLastModelProviderId(providerId);
   }, [conversationId]);
 
   return { effort, modelProviderId, setEffort, setModelProviderId, changeEffort, changeModelProviderId };

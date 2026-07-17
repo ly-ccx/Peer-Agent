@@ -2,10 +2,13 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BASE_EFFORT_LEVELS,
+  LAST_MODEL_PROVIDER_KEY,
   normalizeEffortLevels,
+  readLastModelProviderId,
   resolveModelSwitchEffort,
   resolveModelSwitchState,
   resolvePreferredEffort,
+  writeLastModelProviderId,
 } from './preferences.ts';
 
 describe('normalizeEffortLevels', () => {
@@ -118,5 +121,47 @@ describe('resolveModelSwitchState', () => {
       effort: 'high',
       authoritativeContext: null,
     });
+  });
+});
+
+describe('last model provider shared memory', () => {
+  const memory = new Map<string, string>();
+
+  const installLocalStorage = () => {
+    const storage = {
+      getItem(key: string) {
+        return memory.has(key) ? memory.get(key)! : null;
+      },
+      setItem(key: string, value: string) {
+        memory.set(key, String(value));
+      },
+      removeItem(key: string) {
+        memory.delete(key);
+      },
+      clear() {
+        memory.clear();
+      },
+    };
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: storage,
+    });
+  };
+
+  it('writes and reads the shared last-model-provider key', () => {
+    memory.clear();
+    installLocalStorage();
+    writeLastModelProviderId('chatgpt::gpt-5.6-sol');
+    assert.equal(localStorage.getItem(LAST_MODEL_PROVIDER_KEY), 'chatgpt::gpt-5.6-sol');
+    assert.equal(readLastModelProviderId(), 'chatgpt::gpt-5.6-sol');
+  });
+
+  it('ignores empty values and blank strings', () => {
+    memory.clear();
+    installLocalStorage();
+    writeLastModelProviderId(null);
+    writeLastModelProviderId('');
+    writeLastModelProviderId('   ');
+    assert.equal(readLastModelProviderId(), null);
   });
 });

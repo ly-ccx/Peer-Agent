@@ -25,6 +25,7 @@ import {
   modeLabel,
   modeTitle,
   normalizeChatMode,
+  writeLastModelProviderId,
   type EffortLevel,
   type ChatMode,
 } from '../state/preferences';
@@ -823,6 +824,8 @@ export function ChatSurface({
       // 直接 setState(不触发回写),避免恢复动作被当成用户切换而反写 meta。
       setEffort(convEffort);
       setModelProviderId(convModelProviderId);
+      // 会话恢复的模型也写共享记忆，让 Quick 跟主聊天「当前/上次」模型一致。
+      writeLastModelProviderId(convModelProviderId);
 
       // 压缩横幅按会话恢复:压缩态真值在主进程登记表,切回正在压缩的会话时恢复横幅与进度,
       // 并把 streamIdRef 指向压缩流,使后续 progress/done 事件(按 streamId 门控)能继续匹配收尾。
