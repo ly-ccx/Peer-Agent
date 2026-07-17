@@ -1,3 +1,5 @@
+import { fetchGrokWithConnectionRecovery } from '../provider-transports/grok-fetch.mjs';
+
 export const GROK_BUILD_BASE_URL = 'https://cli-chat-proxy.grok.com/v1';
 export const GROK_BUILD_DEFAULT_MODEL = 'grok-4.5';
 export const GROK_BUILD_CLIENT_VERSION = '0.1.202';
@@ -46,7 +48,7 @@ function toModel(item) {
 }
 
 export async function listGrokBuildModels(accessToken, {
-  fetchImpl = fetch,
+  fetchImpl = fetchGrokWithConnectionRecovery,
   baseUrl = GROK_BUILD_BASE_URL,
 } = {}) {
   const endpoint = `${String(baseUrl).replace(/\/+$/, '')}/models`;

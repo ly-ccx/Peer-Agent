@@ -242,6 +242,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   llmSetDefault: (params) => ipcRenderer.invoke('llm:set-default', params),
   llmTestConnection: (params) => ipcRenderer.invoke('llm:test', params),
   llmOAuthStart: (params) => ipcRenderer.invoke('llm:oauth:start', params),
+  llmOAuthOpenPending: () => ipcRenderer.invoke('llm:oauth:open-pending'),
   llmOAuthCancel: () => ipcRenderer.invoke('llm:oauth:cancel'),
   onLlmOAuthPending: (listener) => {
     const handler = (_event, payload) => listener(payload);

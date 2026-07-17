@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, screen, shell, webContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, screen, shell, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -41,6 +41,7 @@ import { listChannelDescriptors, resolveChannel } from './provider-channels.mjs'
 import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
 import { startGoogleBrowserLogin, ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
 import { startGrokOAuthLogin, ensureFreshGrokTokens } from './llm-oauth/grok-oauth.mjs';
+import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 import { listSubscriptionModels, listOpenAICompatibleModels } from './provider-adapters/openai-model-catalog.mjs';
 import { listGrokBuildModels } from './provider-adapters/grok-build-model-catalog.mjs';
 import { listGeminiModels } from './provider-adapters/gemini-model-catalog.mjs';
@@ -2169,6 +2170,7 @@ ipcMain.handle('llm:test', (_, { id }) => llmConfigStore.testConnection(id));
 // ── Provider OAuth(ADR 28+) ──
 // 同一时刻只允许一个进行中的 browser 登录会话,便于取消。
 let activeOAuthLogin = null;
+let activeOAuthVerificationUrl = null;
 
 ipcMain.handle('llm:oauth:start', async (_event, params) => {
   // ADR 28: 订阅登录链路必须"先登录、成功后才落盘"。
@@ -2195,8 +2197,18 @@ ipcMain.handle('llm:oauth:start', async (_event, params) => {
     ? startGoogleBrowserLogin()
     : authMethod === 'oauth_grok'
       ? startGrokOAuthLogin({
-        openExternal: (url) => shell.openExternal(url),
+        fetchImpl: (url, init) => fetchWithConnectionRecovery(url, init, {
+          provider: 'grok',
+          model: 'oauth',
+          maxRetries: 1,
+        }),
+        openExternal: async (url) => {
+          activeOAuthVerificationUrl = url;
+          await shell.openExternal(url);
+        },
         onPending: (pending) => {
+          activeOAuthVerificationUrl = pending.verificationUrl;
+          clipboard.writeText(pending.userCode);
           const target = BrowserWindow.getFocusedWindow() || mainWindow;
           target?.webContents.send('llm:oauth:pending', pending);
         },
@@ -2235,7 +2247,22 @@ ipcMain.handle('llm:oauth:start', async (_event, params) => {
     }
     return { success: false, error: err?.message || 'oauth_login_failed' };
   } finally {
-    if (activeOAuthLogin === session) activeOAuthLogin = null;
+    if (activeOAuthLogin === session) {
+      activeOAuthLogin = null;
+      activeOAuthVerificationUrl = null;
+    }
+  }
+});
+
+ipcMain.handle('llm:oauth:open-pending', async () => {
+  if (!activeOAuthLogin || !activeOAuthVerificationUrl) {
+    return { success: false, error: 'oauth_pending_url_unavailable' };
+  }
+  try {
+    await shell.openExternal(activeOAuthVerificationUrl);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || 'oauth_open_browser_failed' };
   }
 });
 
@@ -2244,6 +2271,7 @@ ipcMain.handle('llm:oauth:cancel', () => {
     try { activeOAuthLogin.cancel(); } catch {}
     activeOAuthLogin = null;
   }
+  activeOAuthVerificationUrl = null;
   return { success: true };
 });
 

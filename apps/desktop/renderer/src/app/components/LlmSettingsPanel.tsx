@@ -17,6 +17,7 @@ import { Drawer } from './Drawer';
 import { Dropdown } from './Dropdown';
 import { ModelCatalogDialog } from './ModelCatalogDialog';
 import { ModelSettingsDialog } from './ModelSettingsDialog';
+import { Overlay } from './Overlay';
 import {
   buildModelImportPatches,
   calculateModelSelectionChanges,
@@ -791,9 +792,11 @@ export function LlmSettingsPanel({
     const busyKey = target.id ?? 'new';
     setOauthBusyId(busyKey);
     setOauthPending(null);
+    setFormError(null);
     try {
       const result = await clientApi.llmOAuthStart(target);
       if (!result.success) {
+        setFormError(result.error);
         setTestResults((prev) => ({ ...prev, [busyKey]: { success: false, error: result.error } }));
         // 登录失败:保持表单打开,让用户可重试或取消。
         return;
@@ -807,7 +810,9 @@ export function LlmSettingsPanel({
       setEditingId(null);
       await refresh();
     } catch (err: unknown) {
-      setTestResults((prev) => ({ ...prev, [busyKey]: { success: false, error: err instanceof Error ? err.message : 'Login failed' } }));
+      const error = err instanceof Error ? err.message : 'Login failed';
+      setFormError(error);
+      setTestResults((prev) => ({ ...prev, [busyKey]: { success: false, error } }));
     } finally {
       setOauthBusyId(null);
     }
@@ -1069,13 +1074,6 @@ export function LlmSettingsPanel({
                       ? '点击登录将打开浏览器完成 ChatGPT 订阅账号登录;登录成功后才会保存,登录失败或取消不会保存任何配置。登录后自动拉取可用模型(默认使用最新模型)。'
                       : 'Clicking login opens your browser to sign in with your ChatGPT subscription. The provider is saved only after a successful login — nothing is saved if login fails or is cancelled. Available models are fetched after login (latest selected by default).')}
               </p>
-              {form.authMethod === 'oauth_grok' && oauthPending ? (
-                <div className="llm-oauth-device-code" role="status">
-                  <span>{i18n.locale === 'zh-CN' ? '一次性验证码' : 'One-time code'}</span>
-                  <strong>{oauthPending.userCode}</strong>
-                  <small>{i18n.locale === 'zh-CN' ? '浏览器已打开，请在 Grok 授权页确认此验证码。' : 'The browser is open. Confirm this code on the Grok authorization page.'}</small>
-                </div>
-              ) : null}
             </label>
           ) : isLocalCliAuth ? (
             <>
@@ -1316,6 +1314,39 @@ export function LlmSettingsPanel({
           />
         );
       })() : null}
+
+      {oauthPending ? (
+        <Overlay
+          onClose={() => undefined}
+          closeOnBackdrop={false}
+          ariaLabel={i18n.locale === 'zh-CN' ? 'Grok 登录授权码' : 'Grok sign-in authorization code'}
+          panelClassName="llm-oauth-code-dialog"
+          backdropClassName="llm-oauth-code-backdrop"
+        >
+          <div className="llm-oauth-code-content" role="status" aria-live="polite">
+            <span>{i18n.locale === 'zh-CN' ? 'Grok 授权码（已复制）' : 'Grok authorization code (copied)'}</span>
+            <strong>{oauthPending.userCode}</strong>
+            <small>
+              {i18n.locale === 'zh-CN'
+                ? '请在已打开的 Grok 登录页面粘贴此授权码。授权完成后弹层会自动关闭。'
+                : 'Paste this code into the Grok sign-in page. This dialog closes automatically after authorization.'}
+            </small>
+            <button
+              type="button"
+              onClick={() => {
+                setFormError(null);
+                void clientApi.llmOAuthOpenPending().then((result) => {
+                  if (!result.success) setFormError(result.error || 'oauth_open_browser_failed');
+                }).catch((error: unknown) => {
+                  setFormError(error instanceof Error ? error.message : 'oauth_open_browser_failed');
+                });
+              }}
+            >
+              {i18n.locale === 'zh-CN' ? '重新打开授权页' : 'Open authorization page again'}
+            </button>
+          </div>
+        </Overlay>
+      ) : null}
     </div>
   );
 }

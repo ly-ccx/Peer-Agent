@@ -63,6 +63,43 @@ describe('Grok subscription OAuth', () => {
     assert.equal(tokenBody.get('grant_type'), 'urn:ietf:params:oauth:grant-type:device_code');
   });
 
+  it('turns a device-code connection failure into an actionable proxy error', async () => {
+    const session = startGrokOAuthLogin({
+      fetchImpl: async () => {
+        const error = new TypeError('fetch failed');
+        error.cause = new Error('ConnectTimeoutError');
+        throw error;
+      },
+    });
+
+    await assert.rejects(session.promise, (error) => {
+      assert.equal(error.code, 'grok_oauth_network_failed');
+      assert.match(error.message, /系统代理或 VPN/);
+      assert.match(error.message, /fetch failed/);
+      return true;
+    });
+  });
+
+  it('surfaces an external browser open failure after publishing the device code', async () => {
+    const pending = [];
+    const session = startGrokOAuthLogin({
+      fetchImpl: async () => jsonResponse({
+        device_code: 'device-123',
+        user_code: 'ABCD-EFGH',
+        verification_uri_complete: 'https://auth.x.ai/device?user_code=ABCD-EFGH',
+        expires_in: 600,
+        interval: 1,
+      }),
+      openExternal: async () => { throw new Error('browser unavailable'); },
+      onPending: (value) => pending.push(value),
+    });
+
+    await assert.rejects(session.promise, /browser unavailable/);
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0].userCode, 'ABCD-EFGH');
+    assert.equal(pending[0].verificationUrl, 'https://auth.x.ai/device?user_code=ABCD-EFGH');
+  });
+
   it('refreshes an expired token and preserves rotated refresh state', async () => {
     const calls = [];
     const fetchImpl = async (url, init = {}) => {

@@ -540,6 +540,7 @@ export interface BootstrapPreloadApi {
   ) => Promise<
     { success: true; provider: LlmProviderConfigView; models?: readonly LlmModelInfo[] | null } | { success: false; error: string }
   >;
+  readonly llmOAuthOpenPending: () => Promise<{ success: boolean; error?: string }>;
   readonly llmOAuthCancel: () => Promise<{ success: boolean }>;
   readonly onLlmOAuthPending: (listener: (payload: {
     verificationUrl: string;

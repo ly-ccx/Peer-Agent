@@ -3,6 +3,8 @@
 // 使用 Grok CLI 的公共 OIDC client 与 grok-cli:access scope，不需要用户创建
 // xAI 开发者应用。token 集合由 llm-config-store 整体加密保存。
 
+import { fetchGrokWithConnectionRecovery } from '../provider-transports/grok-fetch.mjs';
+
 export const GROK_OIDC_ISSUER = 'https://auth.x.ai';
 export const GROK_CLI_CLIENT_ID = 'b1a00492-073a-47ea-816f-4c329264a828';
 export const GROK_LOGIN_SCOPE = 'openid profile email offline_access grok-cli:access';
@@ -52,11 +54,25 @@ function delay(ms, signal) {
   });
 }
 
+function createGrokNetworkError(error) {
+  if (error?.name === 'AbortError' || error?.code === 'grok_oauth_cancelled') return error;
+  const detail = nonEmpty(error?.message) || nonEmpty(error?.cause?.message) || 'network request failed';
+  return createOAuthError(
+    'grok_oauth_network_failed',
+    `无法连接 Grok 登录服务。请检查 macOS 系统代理或 VPN 后重试（${detail}）`,
+  );
+}
+
 async function requestDeviceCode(fetchImpl, { issuer, clientId, scope, signal }) {
-  const response = await postForm(fetchImpl, `${issuer}/oauth2/device/code`, {
-    client_id: clientId,
-    scope,
-  }, signal);
+  let response;
+  try {
+    response = await postForm(fetchImpl, `${issuer}/oauth2/device/code`, {
+      client_id: clientId,
+      scope,
+    }, signal);
+  } catch (error) {
+    throw createGrokNetworkError(error);
+  }
   const body = await readJson(response, 'Grok device authorization');
   if (!response.ok) {
     throw createOAuthError(nonEmpty(body.error) || 'grok_device_code_failed', nonEmpty(body.error_description) || `Grok device authorization failed (${response.status})`);
@@ -134,7 +150,7 @@ async function fetchUserInfo(fetchImpl, tokens, signal) {
 export function startGrokOAuthLogin({
   openExternal,
   onPending,
-  fetchImpl = fetch,
+  fetchImpl = fetchGrokWithConnectionRecovery,
   issuer = GROK_OIDC_ISSUER,
   clientId = GROK_CLI_CLIENT_ID,
   scope = GROK_LOGIN_SCOPE,
@@ -175,7 +191,7 @@ export function startGrokOAuthLogin({
   };
 }
 
-export async function refreshGrokTokens(tokens, { fetchImpl = fetch } = {}) {
+export async function refreshGrokTokens(tokens, { fetchImpl = fetchGrokWithConnectionRecovery } = {}) {
   if (!tokens?.refresh) throw createOAuthError('grok_oauth_refresh_missing', 'Grok refresh token is missing');
   const issuer = nonEmpty(tokens.issuer) || GROK_OIDC_ISSUER;
   const clientId = nonEmpty(tokens.clientId) || GROK_CLI_CLIENT_ID;
@@ -194,7 +210,7 @@ export async function refreshGrokTokens(tokens, { fetchImpl = fetch } = {}) {
   };
 }
 
-export async function ensureFreshGrokTokens(tokens, { skewMs = 60_000, fetchImpl = fetch } = {}) {
+export async function ensureFreshGrokTokens(tokens, { skewMs = 60_000, fetchImpl = fetchGrokWithConnectionRecovery } = {}) {
   if (!tokens?.access) throw createOAuthError('grok_oauth_not_logged_in', 'Grok login required');
   if (typeof tokens.expires === 'number' && tokens.expires - skewMs > Date.now()) {
     return { tokens, refreshed: false };
