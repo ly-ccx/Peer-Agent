@@ -281,8 +281,19 @@ export function TokenUsageDisplay({
             onChange={onEffortChange}
           />
         ) : null}
-        {ctxWindow ? (
-          <>{isZh ? '上下文' : 'Ctx'} {formatTokenCount(currentContextTokens)}<span className="token-usage-detail"> / {formatTokenCount(ctxWindow)}</span></>
+        {ctxWindow && ctxPercent != null ? (
+          <span
+            className="ctx-usage"
+            title={`${isZh ? '上下文' : 'Context'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow)}`}
+            aria-label={`${isZh ? '上下文' : 'Context'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow)} (${Math.round(ctxPercent)}%)`}
+          >
+            <span
+              className="ctx-ring"
+              style={{ '--ctx-pct': ctxPercent } as CSSProperties}
+              aria-hidden
+            />
+            <span className="ctx-pct">{Math.round(ctxPercent)}%</span>
+          </span>
         ) : currentContextTokens > 0 ? (
           <>{formatTokenCount(currentContextTokens)} tokens</>
         ) : null}
@@ -311,11 +322,6 @@ export function TokenUsageDisplay({
           </span>
         ) : null}
       </span>
-      {ctxPercent != null ? (
-        <div className="ctx-bar">
-          <div className="ctx-bar-fill" style={{ width: `${ctxPercent}%` }} />
-        </div>
-      ) : null}
     </div>
   );
 }

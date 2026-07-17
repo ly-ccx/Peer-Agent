@@ -789,6 +789,35 @@
   align-items: center;
   gap: 6px;
 }
+/* 上下文用量：紧凑圆环 + 百分比；完整 used/total 仅通过 title/hover 展示 */
+.ctx-usage {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  cursor: default;
+}
+.ctx-ring {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background:
+    conic-gradient(
+      var(--azure-seal) calc(var(--ctx-pct, 0) * 1%),
+      var(--chrome-sunken) 0
+    );
+  /* mask 挖空中心，避免硬编码底色在毛玻璃/主题下露馅 */
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+  transition: background var(--za-motion-medium);
+}
+.ctx-pct {
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--composer-addon-color);
+  line-height: 1;
+}
 .token-usage-detail {
   font-size: 0.62rem;
   color: var(--graphite-fade);
@@ -951,19 +980,6 @@
   font-size: 0.62rem;
   color: var(--azure-seal);
   font-weight: 500;
-}
-.ctx-bar {
-  width: 80px;
-  height: 3px;
-  background: var(--chrome-sunken);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.ctx-bar-fill {
-  height: 100%;
-  background: var(--azure-seal);
-  border-radius: 2px;
-  transition: width var(--za-motion-medium);
 }
 
 .chat-composer {
