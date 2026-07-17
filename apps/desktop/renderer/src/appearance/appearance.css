@@ -246,6 +246,101 @@
     grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
+  /* 自绘滑块：填充进度轨道 + 圆形 thumb + hover/focus 反馈，随主题 token 浅深自适应 */
+  .appearance-slider {
+    @apply relative flex items-center;
+    --slider-track-h: 4px;
+    --slider-thumb: 14px;
+    height: var(--slider-thumb);
+  }
+
+  .appearance-slider-input {
+    @apply w-full cursor-pointer appearance-none bg-transparent;
+    height: var(--slider-thumb);
+    margin: 0;
+  }
+
+  /* WebKit 轨道：用 --slider-pct 驱动填充色分段 */
+  .appearance-slider-input::-webkit-slider-runnable-track {
+    height: var(--slider-track-h);
+    border-radius: 999px;
+    background: linear-gradient(
+      to right,
+      var(--za-accent) 0%,
+      var(--za-accent) var(--slider-pct, 0%),
+      var(--za-line) var(--slider-pct, 0%),
+      var(--za-line) 100%
+    );
+  }
+
+  .appearance-slider-input::-webkit-slider-thumb {
+    @apply appearance-none rounded-full;
+    width: var(--slider-thumb);
+    height: var(--slider-thumb);
+    margin-top: calc((var(--slider-track-h) - var(--slider-thumb)) / 2);
+    background: var(--za-surface-1);
+    border: 2px solid var(--za-accent);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
+    transition:
+      transform 120ms ease,
+      box-shadow 120ms ease,
+      border-color 120ms ease;
+  }
+
+  .appearance-slider-input:hover::-webkit-slider-thumb {
+    transform: scale(1.12);
+    box-shadow: 0 2px 6px rgb(0 0 0 / 0.24);
+  }
+
+  .appearance-slider-input:focus-visible {
+    outline: none;
+  }
+
+  .appearance-slider-input:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-accent) 32%, transparent);
+  }
+
+  /* Firefox 轨道 / 填充 / thumb */
+  .appearance-slider-input::-moz-range-track {
+    height: var(--slider-track-h);
+    border-radius: 999px;
+    background: var(--za-line);
+  }
+
+  .appearance-slider-input::-moz-range-progress {
+    height: var(--slider-track-h);
+    border-radius: 999px;
+    background: var(--za-accent);
+  }
+
+  .appearance-slider-input::-moz-range-thumb {
+    @apply rounded-full;
+    width: var(--slider-thumb);
+    height: var(--slider-thumb);
+    background: var(--za-surface-1);
+    border: 2px solid var(--za-accent);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
+    transition:
+      transform 120ms ease,
+      box-shadow 120ms ease;
+  }
+
+  .appearance-slider-input:hover::-moz-range-thumb {
+    transform: scale(1.12);
+    box-shadow: 0 2px 6px rgb(0 0 0 / 0.24);
+  }
+
+  .appearance-slider-input:focus-visible::-moz-range-thumb {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-accent) 32%, transparent);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .appearance-slider-input::-webkit-slider-thumb,
+    .appearance-slider-input::-moz-range-thumb {
+      transition: none;
+    }
+  }
+
   .appearance-code-font input[type='number'] {
     @apply w-14 rounded-[6px] px-2 py-1 text-[12px] tabular-nums;
     border: 1px solid var(--za-line);

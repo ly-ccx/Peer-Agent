@@ -2,6 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { useAppearance } from './AppearanceProvider';
 import { PALETTE_LABELS, PALETTE_SWATCHES } from './themePresets';
 import { PaletteSelect } from './PaletteSelect';
+import { AppearanceSlider } from './AppearanceSlider';
 import {
   CODE_FONT_SIZE_MAX,
   CODE_FONT_SIZE_MIN,
@@ -219,14 +220,13 @@ export function AppearancePanel({
       <section className="appearance-group">
         <div className="appearance-field-label">{i18n.t('appearance.codeFont')}</div>
         <div className="appearance-code-font">
-          <input
-            type="range"
+          <AppearanceSlider
             min={CODE_FONT_SIZE_MIN}
             max={CODE_FONT_SIZE_MAX}
             step={1}
             value={settings.codeFontSize}
-            onChange={(e) => setCodeFontSize(Number(e.target.value))}
-            aria-label={i18n.t('appearance.codeFont')}
+            onChange={setCodeFontSize}
+            ariaLabel={i18n.t('appearance.codeFont')}
           />
           <input
             type="number"
