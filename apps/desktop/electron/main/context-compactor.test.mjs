@@ -289,6 +289,25 @@ describe('context compactor', () => {
     assert.equal(result.messages, messages);
   });
 
+  it('compacts when usageTokens exceed soft limit even if local estimate is low', async () => {
+    const messages = buildMessages(12, 20);
+    const estimated = estimateTokensFromMessages(messages);
+    const contextWindow = 100_000;
+    const softLimit = Math.floor(contextWindow * COMPACTION_CONFIG.triggerRatio);
+    assert.ok(estimated < softLimit, 'fixture 本地估算必须低于 soft 线');
+
+    const result = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      contextWindow,
+      providerConfig: null,
+      usageTokens: softLimit + 10,
+    });
+
+    assert.equal(result.compacted, true, 'usage 过 soft 线时必须压缩');
+    assert.notEqual(result.messages, messages);
+  });
+
   it('estimates image_url / input_image blocks as fixed cost, not their base64 length', () => {
     // 模拟一张 ~3MB 图片的 data URL（base64 约 400 万字符）。
     const hugeDataUrl = `data:image/png;base64,${'A'.repeat(4_000_000)}`;

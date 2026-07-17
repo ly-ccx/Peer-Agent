@@ -154,10 +154,21 @@ export function createAgentLoopKernel({
     );
   }
 
+  function getLastTurnUsage() {
+    return lastTurnUsage;
+  }
+
+  function clearLastTurnUsage() {
+    // 压缩成功后清掉陈旧 usage，避免下一轮 preflight 被压缩前的高水位反复强制触发。
+    lastTurnUsage = null;
+  }
+
   return {
     maxTurns: normalizedMaxTurns,
     usage,
     addUsage,
+    getLastTurnUsage,
+    clearLastTurnUsage,
     claimUnsupportedToolRetry,
     claimEmptyResponseRetry,
     claimThinkingOnlyRetry,

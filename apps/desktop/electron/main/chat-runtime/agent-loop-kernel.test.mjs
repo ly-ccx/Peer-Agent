@@ -48,6 +48,33 @@ describe('agent loop kernel', () => {
     }]);
   });
 
+  it('exposes last-turn usage for preflight compaction and clears it after compact', () => {
+    const loop = createAgentLoopKernel({ webContents: makeWebContents(), streamId: 's1u' });
+
+    assert.equal(loop.getLastTurnUsage(), null);
+    loop.addUsage({ inputTokens: 100, outputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 50 });
+    assert.deepEqual(loop.getLastTurnUsage(), {
+      inputTokens: 100,
+      outputTokens: 5,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 50,
+    });
+
+    // 下一轮覆盖，不累加。
+    loop.addUsage({ inputTokens: 20, cacheReadTokens: 3 });
+    assert.deepEqual(loop.getLastTurnUsage(), {
+      inputTokens: 20,
+      outputTokens: 0,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 3,
+    });
+
+    loop.clearLastTurnUsage();
+    assert.equal(loop.getLastTurnUsage(), null);
+    // lifetime ledger 不受 clear 影响。
+    assert.equal(loop.usage.inputTokens, 120);
+  });
+
   it('attaches authoritative context info from getContextInfo onto the done payload', () => {
     const webContents = makeWebContents();
     const loop = createAgentLoopKernel({

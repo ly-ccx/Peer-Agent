@@ -454,7 +454,7 @@ describe('ADR 42：显示口径与压缩触发口径分离', () => {
     assert.equal(contextTokensFromUsageSnapshot({ outputTokens: 999 }), null, '仅 output 不算上下文');
   });
 
-  it('显示口径优先采用 provider usage 快照，且远小于完整会话触发口径', () => {
+  it('显示口径优先采用 provider usage 快照；触发取 max(估算, usage)', () => {
     const full = buildBigConversation();
     // 真实场景：压缩后实际发送量很小，provider usage 快照体现这一点。
     const usageSnapshot = { inputTokens: 800, outputTokens: 100, cacheWriteTokens: 0, cacheReadTokens: 200 };
@@ -462,11 +462,12 @@ describe('ADR 42：显示口径与压缩触发口径分离', () => {
 
     // 显示口径 = usage 快照的 input+cacheRead = 1000，反映实际发送上下文（压缩后回落）。
     assert.equal(info.contextTokens, 1000, '有 usage 快照时 contextTokens 必须采用显示口径');
-    // 触发口径仍按完整会话集合估算，显著大于显示口径。
+    // 触发口径 = max(完整会话估算, usage)；此处估算更大。
     const fullTokens = estimateTokensFromMessages(full);
-    assert.ok(
-      info.triggerTokens >= fullTokens,
-      `触发口径(${info.triggerTokens}) 应基于完整会话(${fullTokens})，不受 usage 快照影响`,
+    assert.equal(
+      info.triggerTokens,
+      Math.max(fullTokens, 1000),
+      `触发口径(${info.triggerTokens}) 应是 max(完整会话估算 ${fullTokens}, usage 1000)`,
     );
     assert.ok(
       info.contextTokens < info.triggerTokens,
@@ -490,18 +491,89 @@ describe('ADR 42：显示口径与压缩触发口径分离', () => {
     );
   });
 
-  it('压缩触发判定只看触发口径：显示口径再小也不能压制该压缩的建议', () => {
+  it('压缩触发判定：小显示口径不能压制「估算已越线」的建议', () => {
     const full = buildBigConversation();
     const fullTokens = estimateTokensFromMessages(full);
     const ratio = COMPACTION_CONFIG.triggerRatio;
     const windowAbove = Math.floor(fullTokens / ratio) - 1; // 完整集合越过触发线
-    // 即便显示口径很小（usage 快照仅 500），compactionSuggested 仍必须为 true。
+    // 即便显示口径很小（usage 快照仅 500），估算已越线时 compactionSuggested 仍必须为 true。
     const info = computeContextInfo({
       messages: full,
       contextWindow: windowAbove,
       usageSnapshot: { inputTokens: 500, cacheReadTokens: 0 },
     });
     assert.equal(info.contextTokens, 500, '显示口径采用 usage 快照');
-    assert.equal(info.compactionSuggested, true, '触发判定按完整会话口径，不被小显示口径压制');
+    assert.equal(info.compactionSuggested, true, '估算已越 soft 线时仍建议压缩，不被小显示口径压制');
+  });
+
+  it('usage 高水位触发：本地估算未超 soft 线但真实 usage 已超时，预算与建议均触发', () => {
+    // 模拟用户截图场景：本地估算偏低，进度条 usage 已接近满窗。
+    const messages = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'short' },
+      { role: 'assistant', content: 'ok' },
+    ];
+    const estimated = estimateTokensFromMessages(messages);
+    const contextWindow = 100_000;
+    const softLimit = Math.floor(contextWindow * COMPACTION_CONFIG.triggerRatio);
+    assert.ok(estimated < softLimit, '本地估算必须低于 soft 线，才能验证 usage 路径');
+
+    // usage 越过 soft 线但未到 hard 线（0.95），应走 soft 触发而非 force/emergency。
+    const usageTokens = softLimit + 1;
+    const usageSnapshot = { inputTokens: usageTokens, cacheReadTokens: 0 };
+
+    const budget = computeContextBudget({ messages, contextWindow, usageSnapshot });
+    assert.equal(budget.estimatedTokens, estimated);
+    assert.equal(budget.usageTokens, usageTokens);
+    assert.equal(budget.contextTokens, usageTokens, '触发量取 max(估算, usage)');
+    assert.equal(budget.overSoftLimit, true);
+    assert.equal(budget.shouldCompact, true);
+    assert.equal(budget.force, false, '仅 soft 越线不应 force');
+    assert.equal(budget.emergency, false, '仅 soft 越线不应 emergency');
+
+    const info = computeContextInfo({ messages, contextWindow, usageSnapshot });
+    assert.equal(info.contextTokens, usageTokens, '进度条显示 usage');
+    assert.equal(info.triggerTokens, usageTokens, '触发与显示同源（均为 usage 高水位）');
+    assert.equal(info.compactionSuggested, true, 'usage 过 soft 线时必须建议压缩');
+  });
+
+  it('runCompactionCheck 在 usage 高水位时也会走 threshold 路径（即便估算未超）', async () => {
+    const messages = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'u'.repeat(200) },
+      { role: 'assistant', content: 'a'.repeat(200) },
+      { role: 'user', content: 'next' },
+      { role: 'assistant', content: 'prev' },
+      { role: 'user', content: 'again' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'latest' },
+    ];
+    const estimated = estimateTokensFromMessages(messages);
+    const contextWindow = 10_000;
+    const softLimit = Math.floor(contextWindow * COMPACTION_CONFIG.triggerRatio);
+    assert.ok(estimated < softLimit, '本地估算未超 soft');
+
+    const events = [];
+    const result = await runCompactionCheck({
+      messages,
+      systemPrompt: 'sys',
+      contextWindow,
+      providerConfig: null,
+      usageSnapshot: { inputTokens: softLimit + 50, cacheReadTokens: 0 },
+      streamId: 's-usage',
+      conversationId: 'c-usage',
+      webContents: {
+        send(channel, payload) {
+          events.push({ channel, payload });
+        },
+      },
+    });
+
+    // 无 providerConfig 时走结构化/fallback 路径，但必须真正 compacted。
+    assert.equal(result.compacted, true, 'usage 过 soft 线必须触发压缩');
+    assert.ok(
+      events.some((e) => e.channel === 'chat:compaction' && e.payload.stage === 'start'),
+      '应发出压缩 start 横幅',
+    );
   });
 });

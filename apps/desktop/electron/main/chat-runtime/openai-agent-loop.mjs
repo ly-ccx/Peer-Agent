@@ -126,8 +126,14 @@ export async function agentLoopOpenAI({
           continuityContext,
           tools,
           preserveLatestUserTurn: true,
+          // 对齐进度条：上一轮真实 usage 高水位也参与 soft 触发。
+          usageSnapshot: loop.getLastTurnUsage?.() ?? null,
         });
-        if (compaction.compacted) apiMessages = compaction.messages;
+        if (compaction.compacted) {
+          apiMessages = compaction.messages;
+          // 压缩后清掉陈旧 usage，避免用压缩前的高水位在下一轮再次强制触发。
+          loop.clearLastTurnUsage?.();
+        }
 
         // Provider adapter 只接收实际发送切片；完整历史仍由 Desktop Model Adapter 持有。
         const sendMessages = sanitizeApiMessages(applyMicrocompaction(apiMessages).messages);

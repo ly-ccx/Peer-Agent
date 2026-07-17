@@ -87,12 +87,22 @@ export const CONTEXT_BUDGET_GUARD = Object.freeze({
   hardRatio: 0.95,
 });
 
-export function computeContextBudget({ messages, contextWindow, tools = null }) {
+export function computeContextBudget({
+  messages,
+  contextWindow,
+  tools = null,
+  usageSnapshot = null,
+}) {
   // 工具 schema（tools）每次请求都全量发送给 provider，必须计入上下文用量；
   // 否则进度条只算 messages，会远低于 provider 实际计入的 input tokens。
-  const contextTokens =
+  const estimatedTokens =
     estimateTokensFromMessages(Array.isArray(messages) ? messages : []) +
     estimateToolsTokens(tools);
+  // 与进度条对齐：有 provider 真实 usage 时，触发也取 max(本地估算, usage)。
+  // 避免「条已满但本地低估仍不压」的口径割裂（ADR 42 后续收口）。
+  const usageTokens = contextTokensFromUsageSnapshot(usageSnapshot);
+  const contextTokens =
+    usageTokens != null ? Math.max(estimatedTokens, usageTokens) : estimatedTokens;
   const normalizedWindow = Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null;
   const triggerRatio = COMPACTION_CONFIG.triggerRatio;
   const hardRatio = Math.max(triggerRatio, CONTEXT_BUDGET_GUARD.hardRatio);
@@ -114,6 +124,8 @@ export function computeContextBudget({ messages, contextWindow, tools = null }) 
 
   return {
     contextTokens,
+    estimatedTokens,
+    usageTokens,
     contextWindow: normalizedWindow,
     triggerRatio,
     softLimit,
@@ -141,14 +153,15 @@ export function contextTokensFromUsageSnapshot(snapshot) {
   return total > 0 ? total : null;
 }
 
-// 口径分离（ADR 42）：
+// 口径（ADR 42 收口）：
 // - 显示口径（contextTokens）：界面进度条分子，表示「本回合实际发送给模型的上下文大小」，
 //   压缩后应自然回落。取值优先级：
 //     1) provider 真实 usage 快照（最后一轮 input + cacheRead）；
 //     2) 回退为对「实际发送切片 displayMessages」的估算；
 //     3) 再回退为对完整会话 messages 的估算（兼容未传 displayMessages 的旧调用）。
-// - 触发口径（compactionSuggested / triggerRatio）：始终基于「将要发送 / 完整会话 messages」
-//   的估算与 soft 阈值，语义不变，确保压缩触发时机不被显示口径改动带偏。
+// - 触发口径（compactionSuggested / triggerTokens）：与 preflight 一致，取
+//   max(完整会话本地估算, usage 快照)。有真实 usage 高水位时必须建议压缩，
+//   避免进度条已满但自动压缩不跑；无 usage 时仍退回本地估算。
 // - 分母口径（contextWindow）：与触发判定同一 normalizedWindow，不变。
 export function computeContextInfo({
   messages,
@@ -157,10 +170,10 @@ export function computeContextInfo({
   displayMessages = null,
   usageSnapshot = null,
 }) {
-  // 触发口径：完整会话 messages（单一来源，不变）。
-  const budget = computeContextBudget({ messages, contextWindow, tools });
+  // 触发口径：与 runCompactionCheck 同源，纳入 usage 快照。
+  const budget = computeContextBudget({ messages, contextWindow, tools, usageSnapshot });
 
-  // 显示口径：优先真实 usage 快照，其次发送切片估算，最后回退完整会话估算。
+  // 显示口径：优先真实 usage 快照，其次发送切片估算，最后回退本地估算。
   const usageTokens = contextTokensFromUsageSnapshot(usageSnapshot);
   let displayTokens;
   if (usageTokens != null) {
@@ -168,7 +181,7 @@ export function computeContextInfo({
   } else if (Array.isArray(displayMessages)) {
     displayTokens = estimateTokensFromMessages(displayMessages) + estimateToolsTokens(tools);
   } else {
-    displayTokens = budget.contextTokens;
+    displayTokens = budget.estimatedTokens ?? budget.contextTokens;
   }
 
   return {
@@ -176,9 +189,9 @@ export function computeContextInfo({
     contextTokens: displayTokens,
     contextWindow: budget.contextWindow,
     triggerRatio: budget.triggerRatio,
-    // 触发判定：仍按完整会话量越过 soft 阈值，与显示口径解耦。
+    // 触发判定：与 preflight 同源（估算 ∪ usage）。
     compactionSuggested: budget.overSoftLimit,
-    // 触发口径快照，供诊断 / 测试核对（进度条不使用）。
+    // 触发口径快照，供诊断 / 测试核对。
     triggerTokens: budget.contextTokens,
   };
 }
@@ -231,8 +244,9 @@ export async function runCompactionCheck({
   continuityContext = [],
   tools = null,
   preserveLatestUserTurn = false,
+  usageSnapshot = null,
 }) {
-  const budget = computeContextBudget({ messages, contextWindow, tools });
+  const budget = computeContextBudget({ messages, contextWindow, tools, usageSnapshot });
   force = Boolean(force || budget.force);
   emergency = Boolean(emergency || budget.emergency);
 
@@ -248,7 +262,9 @@ export async function runCompactionCheck({
           ? 'threshold'
           : 'skip';
     console.log(
-      `[compaction-trigger] path=${path} mode=${budget.mode} est=${budget.contextTokens} window=${budget.contextWindow || 'unset'} ` +
+      `[compaction-trigger] path=${path} mode=${budget.mode} est=${budget.estimatedTokens ?? budget.contextTokens}` +
+        `${budget.usageTokens != null ? ` usage=${budget.usageTokens}` : ''} ` +
+        `tokens=${budget.contextTokens} window=${budget.contextWindow || 'unset'} ` +
         `triggerRatio=${budget.triggerRatio} threshold=${budget.softLimit != null ? Math.round(budget.softLimit) : 'n/a'} ` +
         `hardRatio=${budget.hardRatio} hardLimit=${budget.hardLimit != null ? Math.round(budget.hardLimit) : 'n/a'} ` +
         `overThreshold=${budget.overSoftLimit} overHard=${budget.overHardLimit} overWindow=${budget.overContextWindow} ` +
@@ -313,6 +329,7 @@ export async function runCompactionCheck({
       streamId,
       tools,
       preserveLatestUserTurn,
+      usageTokens: budget.usageTokens,
     });
 
     if (compactResult.compacted) {
