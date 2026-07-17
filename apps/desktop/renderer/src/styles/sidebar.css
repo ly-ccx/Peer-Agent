@@ -45,7 +45,7 @@
   flex-direction: column;
   background: var(--za-sidebar-bg);
   border-right: 1px solid var(--chrome-hairline);
-  padding-top: 52px;
+  padding-top: 36px;
   -webkit-app-region: drag;
   overflow: hidden;
   transition: border-color var(--za-motion-fast, 120ms) var(--za-ease-out, ease);

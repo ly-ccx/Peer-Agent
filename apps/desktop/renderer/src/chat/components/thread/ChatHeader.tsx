@@ -18,7 +18,7 @@ export interface ChatHeaderAction {
 /**
  * ChatHeader — 聊天区域顶部标题栏。
  *
- * 位于 chat-surface 顶部固定 52px 区域（即 macOS 交通灯同行），
+ * 位于 chat-surface 顶部固定 36px 区域（即 macOS 交通灯同行），
  * 提供会话标题（可内联编辑）、上下文菜单和快捷操作按钮。
  * 遵循 Frost 设计语言的冷感 + 简洁原则。
  */

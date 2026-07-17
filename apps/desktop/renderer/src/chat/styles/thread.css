@@ -22,7 +22,7 @@
   }
 
   .cloud-chat-thread {
-    @apply flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden px-8 pb-7 pt-[52px];
+    @apply flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden px-8 pb-7 pt-[36px];
     background: var(--za-thread-bg);
     --motion-enter-from: 10px;
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) 50ms both;

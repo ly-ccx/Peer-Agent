@@ -70,14 +70,14 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding: var(--space-8) var(--space-6);
-  padding-top: 52px;
+  padding-top: 36px;
   display: flex;
   flex-direction: column;
 }
 
 .current-turn-context {
   position: absolute;
-  top: 52px;
+  top: 36px;
   left: 0;
   right: 0;
   z-index: 24;
@@ -1677,7 +1677,7 @@
  */
 .message-rail {
   position: absolute;
-  top: 52px;
+  top: 36px;
   right: var(--space-2);
   bottom: 96px;
   z-index: 5;
@@ -2135,7 +2135,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 52px;
+  height: 36px;
   padding: 0 var(--space-5);
   background: var(--chrome-canvas);
   border-bottom: 1px solid transparent;
@@ -2143,8 +2143,8 @@
   transition: border-color var(--za-motion-fast);
 }
 
-/* 全屏时收窄(交通灯被系统隐藏,header 可稍矮)。
-   浮条与消息内容使用同一页头下沿，避免继续按普通模式的 52px 留白。 */
+/* 全屏时保持同一页头高度（交通灯被系统隐藏，无需额外留白）。
+   默认高度已与全屏对齐；保留选择器便于后续差异化。 */
 .app-shell.is-fullscreen .chat-header {
   height: 36px;
 }
