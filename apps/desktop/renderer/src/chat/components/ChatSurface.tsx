@@ -307,6 +307,7 @@ export function ChatSurface({
   onArchiveConversation,
   onDeleteConversation,
   workspacePath,
+  isPageActive,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
@@ -328,6 +329,8 @@ export function ChatSurface({
   readonly onDeleteConversation?: (id: string) => void;
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
   readonly workspacePath?: string | null;
+  // 设置页覆盖显示时保活会话树与流事件订阅，但暂停聊天专属全局快捷键。
+  readonly isPageActive: boolean;
 }) {
   // 会话运行时状态的真值已上移到 conversationStore（按 conversationId 分桶的外部 store）。
   // 本组件不再持有 messages/isStreaming/... 的 useState 槽位，改为订阅当前会话切片；
@@ -470,16 +473,17 @@ export function ChatSurface({
   }, [providerRecoveryNotice]);
 
   useEffect(() => {
-    if (!imagePreview) return undefined;
+    if (!isPageActive || !imagePreview) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setImagePreview(null);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [imagePreview]);
+  }, [imagePreview, isPageActive]);
 
   // cmd/ctrl+F 打开会话内查找。常驻监听,与图片预览的 Escape 监听相互独立。
   useEffect(() => {
+    if (!isPageActive) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'f') {
         event.preventDefault();
@@ -488,10 +492,11 @@ export function ChatSurface({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [isPageActive]);
 
   // 顶部 header 快捷键:⌥⌘R 重命名、⌥⇧A 归档。
   useEffect(() => {
+    if (!isPageActive) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
       // ⌥⌘R → 重命名
       if (event.altKey && event.metaKey && event.key.toLowerCase() === 'r') {
@@ -511,7 +516,7 @@ export function ChatSurface({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [conversationId, onRenameConversation, onArchiveConversation, isStreaming]);
+  }, [conversationId, isPageActive, onRenameConversation, onArchiveConversation, isStreaming]);
 
   // 任务续传(ADR 21):防止同一 resumeTask 被自动发送多次的一次性闸门。
   const resumeFiredRef = useRef<string | null>(null);
@@ -1538,11 +1543,11 @@ export function ChatSurface({
               return (
                 <ChatTurn
                   key={turn.id}
+                  conversationId={conversationId}
                   turn={turn}
                   isLive={live}
                   streamStartedAt={live ? convState.turnStartedAt : null}
                   isZh={isZh}
-                  conversationId={conversationId}
                   i18n={i18n}
                   onMessageAction={stableHandleMessageAction}
                   onRegenerate={stableHandleRegenerate}

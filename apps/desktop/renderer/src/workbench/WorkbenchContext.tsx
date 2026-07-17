@@ -159,10 +159,11 @@ function readWorkbenchSettings(raw: unknown): WorkbenchSettingsShape {
 
 interface WorkbenchProviderProps {
   readonly conversationId: string | null;
+  readonly isPageActive: boolean;
   readonly children: ReactNode;
 }
 
-export function WorkbenchProvider({ conversationId, children }: WorkbenchProviderProps) {
+export function WorkbenchProvider({ conversationId, isPageActive, children }: WorkbenchProviderProps) {
   const initial = readWorkbenchSettings(clientApi.initialSettings);
   const legacyOpenDefault = initial.open === true;
   const [openByConversation, setOpenByConversation] = useState<WorkbenchOpenMap>(
@@ -390,6 +391,7 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
 
   // ⌘\ 全局快捷键（右侧 workbench）
   useEffect(() => {
+    if (!isPageActive) return undefined;
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
         e.preventDefault();
@@ -399,10 +401,11 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [conversationId, schedulePersist]);
+  }, [conversationId, isPageActive, schedulePersist]);
 
   // ⌘B 全局快捷键（左侧 sidebar）。视为用户主动操作，清除自动收起标记。
   useEffect(() => {
+    if (!isPageActive) return undefined;
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
         e.preventDefault();
@@ -413,7 +416,7 @@ export function WorkbenchProvider({ conversationId, children }: WorkbenchProvide
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [schedulePersist]);
+  }, [isPageActive, schedulePersist]);
 
   // 左栏最终收起态 = 用户主动收起 或 右侧挤压自动收起。
   const sidebarCollapsed = !sidebarOpen || sidebarAutoCollapsed;

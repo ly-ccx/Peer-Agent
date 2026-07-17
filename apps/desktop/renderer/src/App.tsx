@@ -379,27 +379,18 @@ function MainApp() {
 
   return (
     <main className={isFullscreen ? 'app-shell is-fullscreen' : 'app-shell'}>
-      {session && activePage === 'settings' ? (
-        <SettingsPage
-          availableLocales={availableLocales}
-          i18n={i18n}
-          onBack={() => {
-            setActivePage('chat');
-            void refreshProviders();
-            void refreshSettings();
-          }}
-          onLocaleChanged={refreshBootstrap}
-          onReplyLanguageChanged={setReplyLanguage}
-          onSystemInstructionsChanged={setSystemInstructions}
-          onGitBranchPrefixChanged={setGitBranchPrefix}
-          workspacePath={activeWorkspace}
-          onArchivedConversationsChanged={() => refreshConversations(activeWorkspace, 'active')}
-        />
-      ) : session ? (
-        <WorkbenchProvider conversationId={activeConversationId}>
-          <div
-            className="app-layout"
+      {session ? (
+        <>
+          <section
+            className={`app-page-layer app-chat-page${activePage === 'chat' ? ' is-active' : ''}`}
+            aria-hidden={activePage !== 'chat'}
+            inert={activePage !== 'chat'}
           >
+            <WorkbenchProvider
+              conversationId={activeConversationId}
+              isPageActive={activePage === 'chat'}
+            >
+              <div className="app-layout">
             <Sidebar
               conversations={conversations}
               activeConversationId={activeConversationId}
@@ -458,12 +449,34 @@ function MainApp() {
                   onArchiveConversation={handleArchiveConversation}
                   onDeleteConversation={handleDeleteConversation}
                   workspacePath={activeWorkspace}
+                  isPageActive={activePage === 'chat'}
                 />
               </section>
             </section>
-            <WorkbenchPanel isZh={isZh} workspacePath={activeWorkspace} />
-          </div>
-        </WorkbenchProvider>
+                <WorkbenchPanel isZh={isZh} workspacePath={activeWorkspace} />
+              </div>
+            </WorkbenchProvider>
+          </section>
+          {activePage === 'settings' ? (
+            <section className="app-page-layer app-settings-page is-active">
+              <SettingsPage
+                availableLocales={availableLocales}
+                i18n={i18n}
+                onBack={() => {
+                  setActivePage('chat');
+                  void refreshProviders();
+                  void refreshSettings();
+                }}
+                onLocaleChanged={refreshBootstrap}
+                onReplyLanguageChanged={setReplyLanguage}
+                onSystemInstructionsChanged={setSystemInstructions}
+                onGitBranchPrefixChanged={setGitBranchPrefix}
+                workspacePath={activeWorkspace}
+                onArchivedConversationsChanged={() => refreshConversations(activeWorkspace, conversationView)}
+              />
+            </section>
+          ) : null}
+        </>
       ) : (
         <section className="main-panel">
           <section className="thread">
