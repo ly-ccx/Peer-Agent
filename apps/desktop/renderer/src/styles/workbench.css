@@ -9,12 +9,25 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
-    background: var(--za-surface-1);
+    /* Workbench 外壳是 Chrome 层：半透明毛玻璃；内部内容视图仍用实色承载。 */
+    background: var(--glass-chrome, var(--za-surface-1));
+    -webkit-backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
+    backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
+    box-shadow: var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.4));
     border-left: 1px solid var(--ui-border-subtle, var(--za-line));
     overflow: hidden;
     transition: width var(--za-motion-medium, 200ms) var(--za-ease-out, ease),
       border-color var(--za-motion-fast);
     -webkit-app-region: no-drag;
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .workbench-panel {
+      background: var(--za-surface-1);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+      box-shadow: none;
+    }
   }
 
   .workbench-panel:not(.workbench-panel--open) {
@@ -44,7 +57,8 @@
     align-items: center;
     gap: 4px;
     padding: 4px 8px;
-    background: var(--za-sidebar-bg);
+    /* 外壳已是毛玻璃；tab rail 透明以免叠两层 blur。 */
+    background: transparent;
     border-bottom: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   }
 

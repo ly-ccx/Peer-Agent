@@ -43,12 +43,25 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  background: var(--za-sidebar-bg);
+  /* Chrome 毛玻璃：半透明底 + blur；macOS 下再叠 Electron vibrancy，勿用纯不透明底盖死。 */
+  background: var(--glass-chrome, var(--za-sidebar-bg));
+  -webkit-backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
+  backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
+  box-shadow: var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.4));
   border-right: 1px solid var(--chrome-hairline);
   padding-top: 36px;
   -webkit-app-region: drag;
   overflow: hidden;
   transition: border-color var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .app-sidebar {
+    background: var(--za-sidebar-bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
 }
 
 /* 中间内容区向左投下的内侧阴影：保留 1px 分隔线，同时增强栏间层次。 */

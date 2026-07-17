@@ -430,37 +430,4 @@
   84%, 100% { opacity: 1; transform: scaleX(1); }
 }
 
-/*
- * 入场结束后的持续加载态：
- * - 字标保持黑色并定住
- * - 背景水墨颜料散开（ink-wash blots）
- * 峰值透明度必须够高，否则浅底 + 模糊会肉眼看不见
- */
-@keyframes brand-startup-ink-wash {
-  0% {
-    opacity: 0;
-    transform: scale(0.22) translate(0, 0);
-  }
-  12% {
-    opacity: 0.88;
-    transform: scale(0.52) translate(-0.4%, 0.3%);
-  }
-  28% {
-    opacity: 0.78;
-    transform: scale(0.92) translate(1.2%, -0.8%);
-  }
-  48% {
-    opacity: 0.58;
-    transform: scale(1.28) translate(-1.6%, 1.2%);
-  }
-  72% {
-    opacity: 0.28;
-    transform: scale(1.68) translate(1%, -0.6%);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(2.05) translate(0.4%, 0.8%);
-  }
-}
-
 

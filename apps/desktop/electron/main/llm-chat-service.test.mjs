@@ -2148,3 +2148,102 @@ describe('resolveRunWorkspacePath (per-run workspace truth)', () => {
     );
   });
 });
+
+
+describe('ephemeral verifier/explorer stream isolation', () => {
+  it('does not persist stream content when assistantMessageId is missing', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const patches = [];
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: '{"passed":true}' } }] },
+      '[DONE]',
+    ]), { status: 200 });
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        conversationStore: {
+          addUsage: () => null,
+          updateMessageById: (id, messageId, patch) => {
+            patches.push({ id, messageId, patch: JSON.parse(JSON.stringify(patch)) });
+            return { id };
+          },
+        },
+      });
+
+      const outcome = await service.sendMessage({
+        messages: [{ role: 'user', content: 'verify' }],
+        streamId: 's-verifier-null-id',
+        conversationId: 'c-verifier',
+        // 复现旧 bug：无 assistantMessageId 时会回写最后一条 assistant。
+        assistantMessageId: null,
+        webContents: { send: () => {} },
+      });
+      assert.equal(outcome.terminalStatus, 'done');
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.equal(patches.length, 0);
+  });
+
+  it('does not persist stream content when ephemeral is true', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const patches = [];
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: '{"passed":true,"recommendedNextAction":"noop"}' } }] },
+      '[DONE]',
+    ]), { status: 200 });
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        conversationStore: {
+          addUsage: () => null,
+          updateMessageById: (id, messageId, patch) => {
+            patches.push({ id, messageId, patch: JSON.parse(JSON.stringify(patch)) });
+            return { id };
+          },
+        },
+      });
+
+      const outcome = await service.sendMessage({
+        messages: [{ role: 'user', content: 'verify' }],
+        streamId: 's-verifier-ephemeral',
+        conversationId: 'c-verifier',
+        assistantMessageId: 'a-should-not-write',
+        ephemeral: true,
+        webContents: { send: () => {} },
+      });
+      assert.equal(outcome.terminalStatus, 'done');
+      assert.deepEqual(service.listActiveStreams(), []);
+      assert.deepEqual(service.listActiveConversationIds(), []);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.equal(patches.length, 0);
+  });
+});

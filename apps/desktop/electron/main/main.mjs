@@ -505,6 +505,7 @@ Return JSON only with: passed, failedCriteria[{criterionId,reason,evidenceRefs}]
 }
 
 function createCollectingWebContents() {
+  // 内存收集器：Explorer / Verifier 专用。不转发到真实渲染窗口，避免内部 JSON 出现在聊天。
   const events = [];
   let text = '';
   let terminal = null;
@@ -811,7 +812,9 @@ goalRunner = createGoalRunner({
         streamId,
         effort: 'default',
         mode: 'explorer',
-        conversationId: plan.conversationId,
+        // 旁路只读调查：不写会话正文，避免内部过程进聊天。
+        conversationId: null,
+        ephemeral: true,
         explorerContext: buildExplorerContext({ plan, explorer }),
         runtimeReminders: [buildExplorerReminder(explorer)],
       });
@@ -851,7 +854,9 @@ goalRunner = createGoalRunner({
         effort: 'default',
         // Verifier 复用 explorer 的只读工具投影；任务语义由 verifierContext Source 注入。
         mode: 'explorer',
-        conversationId: plan.conversationId,
+        // 验收旁路流：不写会话、不进活跃流投影，JSON 只给 runner 解析。
+        conversationId: null,
+        ephemeral: true,
         verifierContext: buildVerifierContext({ plan, verifierRunId }),
         runtimeReminders: [buildVerifierReminder(verifierRunId)],
       });
@@ -976,13 +981,23 @@ ipcMain.handle('quick-chat:submit', (_event, payload = {}) => {
 });
 
 function createWindow() {
+  // macOS 原生毛玻璃：透明底 + vibrancy，让渲染层 --glass-* 半透明色透出桌面材质。
+  // 非 darwin 保持实色背景，避免 Win/Linux 透明窗体闪黑或合成异常。
+  const isMac = process.platform === 'darwin';
   const mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
     minWidth: 1040,
     minHeight: 720,
     title: 'Peer Agent',
-    backgroundColor: '#1e1e2e',
+    backgroundColor: isMac ? '#00000000' : '#1e1e2e',
+    ...(isMac
+      ? {
+          transparent: true,
+          vibrancy: 'sidebar',
+          visualEffectState: 'active',
+        }
+      : {}),
     titleBarStyle: 'hiddenInset',
     icon: getDesktopIconPath(),
     webPreferences: {

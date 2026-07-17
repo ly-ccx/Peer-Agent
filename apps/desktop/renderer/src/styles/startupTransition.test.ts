@@ -59,7 +59,7 @@ test('branded startup motion has a reduced-motion fallback and the old progress 
   assert.doesNotMatch(shellCss, /\.bootstrap-loader(?:-copy|-label|-track)?\b/);
 });
 
-test('brand startup keeps black wordmark, drops liquid-crest, and ink-wash holds loading', async () => {
+test('brand startup is pure wordmark with theme-aware ink and no fluid wash', async () => {
   const shellCss = await readRendererSource('./shell.css');
   const motionCss = await readRendererSource('./motion.css');
   const loader = await readRendererSource('../app/components/BrandStartupLoader.tsx');
@@ -74,40 +74,53 @@ test('brand startup keeps black wordmark, drops liquid-crest, and ink-wash holds
   assert.doesNotMatch(shellCss, /liquid-crest/);
   assert.doesNotMatch(motionCss, /@keyframes brand-startup-crest/);
 
-  // 字标填充为深墨黑，而非五彩光谱
+  // 字标填充：浅色深墨 / 深色浅墨，跟随 data-theme
   assert.match(loader, /INK_BLACK\s*=\s*'#1a1d21'/);
+  assert.match(loader, /INK_LIGHT\s*=\s*'#d7dde8'/);
   assert.match(loader, /brand-startup-loader__wordmark--ink/);
+  assert.match(loader, /readThemeMode/);
+  assert.match(loader, /data-theme/);
   assert.doesNotMatch(loader, /#5f7db8/);
   assert.doesNotMatch(loader, /#b87898/);
   assert.doesNotMatch(loader, /attributeName="gradientTransform"/);
   assert.doesNotMatch(loader, /allowColorFlow/);
 
-  // 入场停住后：背景水墨颜料散开加载态（必须肉眼可见，禁止再冲淡到看不见）
-  assert.match(loader, /brand-startup-loader__ink-wash/);
-  assert.match(loader, /brand-startup-loader__ink-blot/);
-  assert.match(shellCss, /brand-startup-loader__ink-wash/);
-  assert.match(shellCss, /brand-startup-ink-wash 6\.4s/);
-  assert.match(shellCss, /\.brand-startup-loader__ink-blot[\s\S]*filter:\s*blur\(28px\)/);
+  // 纯字标：无 canvas 流体泼墨 / 密度场引擎
+  assert.doesNotMatch(loader, /brand-startup-loader__ink-canvas/);
+  assert.doesNotMatch(loader, /data-ink-wash/);
+  assert.doesNotMatch(loader, /getContext\('2d'/);
+  assert.doesNotMatch(loader, /startInkWash/);
+  assert.doesNotMatch(loader, /randomDrop/);
+  assert.doesNotMatch(loader, /function splat/);
+  assert.doesNotMatch(loader, /AUTO_MIN_MS/);
+  assert.doesNotMatch(loader, /AUTO_MAX_MS/);
+  assert.doesNotMatch(loader, /DEN_DISSIPATION/);
+  assert.doesNotMatch(loader, /DIFFUSION/);
+  assert.doesNotMatch(loader, /velocityStep/);
+  assert.doesNotMatch(loader, /densityStep/);
+  assert.doesNotMatch(loader, /renderDensity/);
+  assert.doesNotMatch(loader, /InkFilament/);
+  assert.doesNotMatch(loader, /curlNoise/);
+  assert.doesNotMatch(loader, /burstDrop/);
+  assert.doesNotMatch(loader, /stampRibbon/);
+  assert.doesNotMatch(loader, /InkPuff/);
+  assert.doesNotMatch(loader, /drawInkPuff/);
+  assert.doesNotMatch(loader, /InkParticle/);
+  assert.doesNotMatch(shellCss, /brand-startup-loader__ink-canvas/);
+  assert.doesNotMatch(loader, /ink-blot/);
+  assert.doesNotMatch(shellCss, /ink-blot/);
+  assert.doesNotMatch(shellCss, /brand-startup-ink-wash/);
+  assert.doesNotMatch(motionCss, /@keyframes brand-startup-ink-wash/);
   assert.doesNotMatch(shellCss, /mix-blend-mode:\s*multiply/);
-  assert.match(motionCss, /@keyframes brand-startup-ink-wash/);
-  // 峰值透明度足够高（≥0.8），否则浅底 + 模糊会看不见
-  assert.match(motionCss, /opacity:\s*0\.88/);
-  // 墨渍本体 alpha 足够深
-  assert.match(shellCss, /rgba\(22,\s*24,\s*30,\s*0\.78\)/);
-  assert.match(shellCss, /rgba\(28,\s*32,\s*42,\s*0\.72\)/);
-  assert.match(shellCss, /rgba\(18,\s*20,\s*26,\s*0\.7\)/);
+
+  // 仍可渲染字标与支撑线
+  assert.match(loader, /export function BrandStartupLoader/);
+  assert.match(loader, /Peer Agent/);
+  assert.match(loader, /brand-startup-loader__support/);
+  assert.match(loader, /getBBox\(\)/);
 
   assert.match(
     shellCss,
     /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.brand-startup-loader__brand[\s\S]*animation:\s*none/,
-  );
-  assert.match(
-    shellCss,
-    /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.brand-startup-loader__ink-blot[\s\S]*animation:\s*none/,
-  );
-  // reduced-motion 静态墨渍也必须可见
-  assert.match(
-    shellCss,
-    /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.brand-startup-loader__ink-blot[\s\S]*opacity:\s*\.62/,
   );
 });

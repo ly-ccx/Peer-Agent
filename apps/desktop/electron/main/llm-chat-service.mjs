@@ -269,6 +269,11 @@ function wrapWebContentsForRuntimeEvents(
   const persistStreamRecord = ({ final = false, interrupted = false } = {}) => {
     if (!conversationStore?.updateMessageById) return;
     if (!streamRecord?.conversationId) return;
+    // 没有明确 assistantMessageId 时绝不回写：否则会落到会话最后一条 assistant，
+    // 把 Verifier 的 JSON 验收结果盖到用户可见回复上。
+    if (!streamRecord?.assistantMessageId) return;
+    // Explorer / Verifier 等内部旁路流不落盘。
+    if (streamRecord?.ephemeral) return;
     const now = Date.now();
     if (!final && now - lastPersistAt < PERSIST_THROTTLE_MS) return;
     lastPersistAt = now;
@@ -513,7 +518,7 @@ export function createLlmChatService({
   function listActiveConversationIds() {
     const ids = new Set();
     for (const record of activeStreams.values()) {
-      if (isRunning(record) && record.conversationId) ids.add(record.conversationId);
+      if (isRunning(record) && record.conversationId && !record.ephemeral) ids.add(record.conversationId);
     }
     return [...ids];
   }
@@ -525,6 +530,7 @@ export function createLlmChatService({
     for (const record of activeStreams.values()) {
       if (!isRunning(record)) continue;
       if (!record.conversationId) continue;
+      if (record.ephemeral) continue;
       if (!byConversation.has(record.conversationId)) {
         byConversation.set(record.conversationId, {
           conversationId: record.conversationId,
@@ -580,6 +586,8 @@ export function createLlmChatService({
     // Goal Runner 进度 sink：{ onRound, onToolCall }。onRound 经各 provider loop 透传，
     // onToolCall 经 toolContext 透传，分别用于实时轮次/工具计数。普通 chat 不传。
     agentProgress = null,
+    // 内部旁路流（Explorer / Verifier）：不写会话正文、不进活跃流投影，避免验收 JSON 泄漏到聊天。
+    ephemeral = false,
   }) {
     const providerCandidates = getProviderCandidates(modelProviderId);
     if (!providerCandidates.length) {
@@ -609,6 +617,8 @@ export function createLlmChatService({
       conversationId,
       // 正文持久化主键：主进程据此把累积正文/segments patch 回 store 的 assistant 消息。
       assistantMessageId,
+      // 内部旁路流：true 时不落盘、不投影为用户可见活跃会话流。
+      ephemeral: Boolean(ephemeral),
       // ADR 27: 快照发起时的工作区。流的工作区归属在发起时固定(与 sendMessage
       // 入口快照 activeWorkspacePath 的语义一致),后续切换工作区不改变已在跑的流。
       // 供活跃流投影携带工作区维度,让"任务在其它工作区仍在跑"成为可见事实。
