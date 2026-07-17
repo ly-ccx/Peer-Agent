@@ -1754,8 +1754,6 @@ export function ChatSurface({
               options={CHAT_MODES.map((m) => ({
                 value: m,
                 label: modeLabel(m, isZh),
-                // plan(审批门)与 goal(自驱)均为非默认的强模式,用 danger 色标注以示区别。
-                tone: m === 'plan' || m === 'goal' ? 'danger' : undefined,
               }))}
               onChange={(next) => {
                 if (isChatMode(next)) changeMode(next);

@@ -155,7 +155,7 @@ export function accessLevelTitle(level: LocalAccessLevel, isZh: boolean): string
 export function modeLabel(mode: ChatMode, isZh: boolean): string {
   if (mode === 'plan') return isZh ? '计划模式' : 'Plan mode';
   if (mode === 'goal') return isZh ? '目标模式' : 'Goal mode';
-  return isZh ? '对话模式' : 'Chat mode';
+  return isZh ? 'Agent模式' : 'Agent mode';
 }
 
 export function modeTitle(mode: ChatMode, isZh: boolean): string {
