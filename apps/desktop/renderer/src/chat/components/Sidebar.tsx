@@ -334,12 +334,17 @@ export function Sidebar({
       : pendingApprovalLabel;
     const isPinned = Boolean(conv.pinnedAt);
     const canTogglePin = !isArchivedView;
+    const isEditing = editingConversationId === conv.id;
+    const isConfirmingDelete = confirmDeleteId === conv.id;
     const rowClasses = [
       'conversation-row',
       activeConversationId === conv.id ? 'active' : '',
       isRunning ? 'is-running' : '',
       isCompactionVisible ? 'is-compacting' : '',
       isPinned ? 'is-pinned' : '',
+      isEditing ? 'is-editing' : '',
+      isConfirmingDelete ? 'is-confirming-delete' : '',
+      isArchivedView ? 'is-archived' : '',
       options.pinnedGroup ? 'is-in-pinned-group' : '',
       draggingPinnedId === conv.id ? 'is-dragging' : '',
     ].filter(Boolean).join(' ');

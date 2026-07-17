@@ -11,7 +11,8 @@ import { SystemInstructionsPanel } from './SystemInstructionsPanel';
 import { ShortcutsPanel } from './ShortcutsPanel';
 import { UpdatesPanel } from './UpdatesPanel';
 
-type SettingsSection = 'general' | 'archived' | 'model' | 'skills' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates';
+type SettingsSection = 'general' | 'model' | 'skills' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates' | 'archived';
+type SettingsGroup = { readonly label: string; readonly items: ReadonlyArray<{ key: SettingsSection; label: string }>; readonly lowPriority?: boolean };
 
 /**
  * SettingsPage 是设置入口的单一表达层:
@@ -48,26 +49,37 @@ export function SettingsPage({
 }) {
   const [section, setSection] = useState<SettingsSection>('general');
   const [query, setQuery] = useState('');
-  const localizedSettingsLabels =
-    i18n.locale === 'en-US'
-      ? { model: 'Model configuration', skills: 'Capabilities', instructions: 'Personalization' }
-      : { model: '模型配置', skills: '能力', instructions: '个性化设置' };
-  const items: ReadonlyArray<{ key: SettingsSection; label: string }> = [
-    { key: 'general', label: i18n.t('settings.general') },
-    { key: 'archived', label: i18n.t('settings.archived') },
-    { key: 'model', label: localizedSettingsLabels.model },
-    { key: 'skills', label: localizedSettingsLabels.skills },
-    { key: 'instructions', label: localizedSettingsLabels.instructions },
-    { key: 'git', label: i18n.t('settings.git') },
-    { key: 'shortcuts', label: i18n.locale === 'zh-CN' ? '快捷键' : 'Keyboard shortcuts' },
-    { key: 'appearance', label: i18n.t('appearance.title') },
-    { key: 'updates', label: i18n.t('updater.settings.title') },
+  const isZh = i18n.locale === 'zh-CN';
+  const groups: readonly SettingsGroup[] = [
+    {
+      label: isZh ? '个人' : 'Personal',
+      items: [
+        { key: 'general', label: i18n.t('settings.general') },
+        { key: 'appearance', label: i18n.t('appearance.title') },
+        { key: 'instructions', label: isZh ? '个性化' : 'Personalization' },
+        { key: 'shortcuts', label: isZh ? '快捷键' : 'Keyboard shortcuts' },
+      ],
+    },
+    {
+      label: 'AI',
+      items: [
+        { key: 'model', label: isZh ? '模型与渠道' : 'Models & providers' },
+        { key: 'skills', label: isZh ? '工具与能力' : 'Tools & capabilities' },
+      ],
+    },
+    { label: isZh ? '开发' : 'Development', items: [{ key: 'git', label: i18n.t('settings.git') }] },
+    { label: isZh ? '应用' : 'Application', items: [{ key: 'updates', label: isZh ? '更新与关于' : 'Updates & about' }] },
+    {
+      label: isZh ? '归档' : 'Archived',
+      items: [{ key: 'archived', label: isZh ? '已归档会话' : 'Archived chats' }],
+      lowPriority: true,
+    },
   ];
   // 搜索仅过滤左侧分区导航项（按 label 子串匹配），不做跨面板深搜。
   const normalizedQuery = query.trim().toLowerCase();
-  const visibleItems = normalizedQuery
-    ? items.filter((item) => item.label.toLowerCase().includes(normalizedQuery))
-    : items;
+  const visibleGroups = groups
+    .map((group) => ({ ...group, items: group.items.filter((item) => !normalizedQuery || item.label.toLowerCase().includes(normalizedQuery)) }))
+    .filter((group) => group.items.length > 0);
 
   return (
     <div className="settings-page">
@@ -95,19 +107,24 @@ export function SettingsPage({
           />
         </div>
         <nav className="settings-nav-list">
-          {visibleItems.length === 0 ? (
+          {visibleGroups.length === 0 ? (
             <p className="settings-nav-empty">{i18n.t('settings.searchEmpty')}</p>
           ) : (
-            visibleItems.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                className={`settings-nav-item ${section === item.key ? 'active' : ''}`}
-                aria-current={section === item.key}
-                onClick={() => setSection(item.key)}
-              >
-                {item.label}
-              </button>
+            visibleGroups.map((group) => (
+              <section className={`settings-nav-group ${group.lowPriority ? 'settings-nav-group-low-priority' : ''}`} key={group.label} aria-label={group.label}>
+                <h2>{group.label}</h2>
+                {group.items.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`settings-nav-item ${section === item.key ? 'active' : ''}`}
+                    aria-current={section === item.key ? 'page' : undefined}
+                    onClick={() => setSection(item.key)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </section>
             ))
           )}
         </nav>
@@ -122,12 +139,6 @@ export function SettingsPage({
             i18n={i18n}
             onLocaleChanged={onLocaleChanged}
             onReplyLanguageChanged={onReplyLanguageChanged}
-          />
-        ) : section === 'archived' ? (
-          <ArchivedConversationsPanel
-            i18n={i18n}
-            workspacePath={workspacePath}
-            onConversationsChanged={onArchivedConversationsChanged}
           />
         ) : section === 'model' ? (
           <LlmSettingsPanel i18n={i18n} />
@@ -144,6 +155,12 @@ export function SettingsPage({
           <ShortcutsPanel />
         ) : section === 'updates' ? (
           <UpdatesPanel i18n={i18n} />
+        ) : section === 'archived' ? (
+          <ArchivedConversationsPanel
+            i18n={i18n}
+            workspacePath={workspacePath}
+            onConversationsChanged={onArchivedConversationsChanged}
+          />
         ) : (
           <AppearancePanel i18n={i18n} />
         )}

@@ -94,7 +94,30 @@
 .settings-nav-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-4);
+}
+
+.settings-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-nav-group-low-priority {
+  margin-top: auto;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--pa-border-subtle);
+}
+
+.settings-nav-group h2 {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-1);
+  color: var(--graphite-mute);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.5;
+  text-transform: uppercase;
 }
 
 .settings-nav-item {
