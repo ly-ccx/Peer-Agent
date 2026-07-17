@@ -131,6 +131,19 @@ function normalizeModelOptionValues(value) {
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
+function normalizeModelOptions(value) {
+  if (!Array.isArray(value)) return undefined;
+  const normalized = value.filter((definition) => (
+    definition
+    && typeof definition === 'object'
+    && typeof definition.id === 'string'
+    && definition.id.trim()
+    && definition.kind === 'select'
+    && Array.isArray(definition.choices)
+  ));
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 function normalizeAuthMethod(value) {
   if (value === 'oauth_chatgpt') return 'oauth_chatgpt';
   if (value === 'oauth_google') return 'oauth_google';
@@ -677,6 +690,7 @@ export function createLlmConfigStore({
       createdAt: item.createdAt,
       contextWindow: item.contextWindow || undefined,
       maxOutputTokens: item.maxOutputTokens || undefined,
+      modelOptions: normalizeModelOptions(item.modelOptions),
       modelOptionValues: normalizeModelOptionValues(item.modelOptionValues),
       inputPrice: item.inputPrice ?? undefined,
       outputPrice: item.outputPrice ?? undefined,
@@ -717,7 +731,7 @@ export function createLlmConfigStore({
     return listProviders();
   }
 
-  function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, modelLabel, metadataSource, pricingSource, metadataSyncedAt, apiKey, contextWindow, maxOutputTokens, modelOptionValues, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthProjectId, customHeaders }) {
+  function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, modelLabel, metadataSource, pricingSource, metadataSyncedAt, apiKey, contextWindow, maxOutputTokens, modelOptions, modelOptionValues, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, oauthProjectId, customHeaders }) {
     const items = readAll();
     const method = normalizeAuthMethod(authMethod);
     const channelId = method === 'oauth_chatgpt'
@@ -780,6 +794,7 @@ export function createLlmConfigStore({
       createdAt: new Date().toISOString(),
       contextWindow: isSubscription ? subscriptionMetadata?.contextWindow : (contextWindow || undefined),
       maxOutputTokens: isSubscription ? subscriptionMetadata?.maxOutputTokens : (maxOutputTokens || undefined),
+      modelOptions: normalizeModelOptions(modelOptions),
       modelOptionValues: normalizeModelOptionValues(modelOptionValues),
       inputPrice: isSubscription ? subscriptionMetadata?.inputPrice : (inputPrice ?? undefined),
       outputPrice: isSubscription ? subscriptionMetadata?.outputPrice : (outputPrice ?? undefined),
@@ -861,6 +876,7 @@ export function createLlmConfigStore({
       delete item.modelLabel;
     }
     applyExplicitModelMetadataPatch(item, patch);
+    if (patch.modelOptions !== undefined) item.modelOptions = normalizeModelOptions(patch.modelOptions);
     if (patch.modelOptionValues !== undefined) item.modelOptionValues = normalizeModelOptionValues(patch.modelOptionValues);
     if (patch.enabled !== undefined) item.enabled = patch.enabled;
     if (patch.apiKey !== undefined) {
@@ -1081,6 +1097,7 @@ export function createLlmConfigStore({
       metadataSyncedAt: patch.metadataSyncedAt,
       contextWindow: patch.contextWindow,
       maxOutputTokens: patch.maxOutputTokens,
+      modelOptions: normalizeModelOptions(patch.modelOptions),
       modelOptionValues: normalizeModelOptionValues(patch.modelOptionValues),
       inputPrice: patch.inputPrice,
       outputPrice: patch.outputPrice,

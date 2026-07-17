@@ -1060,13 +1060,29 @@ test('model option values persist per model and legacy configs remain readable',
     authMethod: 'api_key',
     apiKey: 'sk-test',
     model: 'model-a',
+    modelOptions: [{
+      id: 'contextTier',
+      label: 'Context',
+      kind: 'select',
+      defaultValue: '200K',
+      choices: [{ value: '200K', label: '200K' }],
+    }],
     modelOptionValues: { contextTier: '200K', retries: 2, streaming: true, ignored: null },
   });
+  assert.deepEqual(base.modelOptions?.map((option) => option.id), ['contextTier']);
   assert.deepEqual(base.modelOptionValues, { contextTier: '200K', retries: 2, streaming: true });
 
   const updated = store.updateProvider(base.id, {
+    modelOptions: [{
+      id: 'contextTier',
+      label: 'Context',
+      kind: 'select',
+      defaultValue: '400K',
+      choices: [{ value: '400K', label: '400K' }],
+    }],
     modelOptionValues: { contextTier: '1M', invalid: { nested: true } },
   });
+  assert.equal(updated.modelOptions?.[0]?.defaultValue, '400K');
   assert.deepEqual(updated.modelOptionValues, { contextTier: '1M' });
 
   const second = store.addModel(base.groupId, {

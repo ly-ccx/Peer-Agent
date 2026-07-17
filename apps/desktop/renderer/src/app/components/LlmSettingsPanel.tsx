@@ -23,6 +23,7 @@ import {
   calculateModelSelectionChanges,
   formatReasoningEffortMap,
   metadataSourceFromList,
+  modelMetadataPatch,
   parseReasoningEffortMap,
 } from './llmModelConfiguration';
 import { availableOAuthMethods, subscriptionLoginLabel } from './llmSubscriptionAuth';
@@ -750,6 +751,12 @@ export function LlmSettingsPanel({
     }
     const additionPatches = buildModelImportPatches(changes.additions, source);
     try {
+      for (const { configured, model } of changes.updates) {
+        await clientApi.llmUpdateProvider({
+          id: configured.id,
+          ...modelMetadataPatch(model, source),
+        });
+      }
       for (const patch of additionPatches) {
         await clientApi.llmAddModel({ groupId, name: target.name, ...patch });
       }

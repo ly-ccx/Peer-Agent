@@ -41,6 +41,7 @@ export function modelMetadataPatch(
   if (typeof model.cacheWritePrice === 'number') patch.cacheWritePrice = model.cacheWritePrice;
   if (typeof model.supportsVision === 'boolean') patch.supportsVision = model.supportsVision;
   if (typeof model.supportsReasoning === 'boolean') patch.supportsReasoning = model.supportsReasoning;
+  if (model.modelOptions) patch.modelOptions = model.modelOptions;
   return patch;
 }
 
@@ -103,6 +104,7 @@ export function buildModelCatalog(
 
 export interface ModelSelectionChanges {
   readonly additions: readonly LlmModelInfo[];
+  readonly updates: readonly { readonly configured: LlmProviderConfigView; readonly model: LlmModelInfo }[];
   readonly removals: readonly LlmProviderConfigView[];
 }
 
@@ -120,6 +122,10 @@ export function calculateModelSelectionChanges(
   const configuredIds = new Set(configuredModels.map((item) => item.model));
   return {
     additions: [...selectedById.values()].filter((model) => !configuredIds.has(model.id)),
+    updates: configuredModels.flatMap((configured) => {
+      const model = selectedById.get(configured.model);
+      return model ? [{ configured, model }] : [];
+    }),
     removals: configuredModels.filter((item) => !selectedById.has(item.model)),
   };
 }

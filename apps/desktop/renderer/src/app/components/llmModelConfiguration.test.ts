@@ -28,7 +28,7 @@ describe('LLM model configuration rules', () => {
     ]);
   });
 
-  it('calculates additions and removals from the complete catalog selection', () => {
+  it('calculates additions, metadata refreshes, and removals from the complete catalog selection', () => {
     const configured = [
       { id: 'record-a', model: 'model-a' },
       { id: 'record-b', model: 'model-b' },
@@ -40,6 +40,7 @@ describe('LLM model configuration rules', () => {
     ], configured);
 
     assert.deepEqual(changes.additions.map((model) => model.id), ['model-c']);
+    assert.deepEqual(changes.updates.map(({ configured: item, model }) => [item.id, model.id]), [['record-b', 'model-b']]);
     assert.deepEqual(changes.removals.map((model) => model.id), ['record-a']);
   });
 
@@ -58,6 +59,13 @@ describe('LLM model configuration rules', () => {
       label: 'Model A',
       contextWindow: 200_000,
       supportsVision: true,
+      modelOptions: [{
+        id: 'contextTier',
+        label: 'Context',
+        kind: 'select',
+        defaultValue: '200K',
+        choices: [{ value: '200K', label: '200K' }],
+      }],
     }, 'remote', '2026-07-15T00:00:00.000Z');
 
     assert.deepEqual(patch, {
@@ -66,6 +74,13 @@ describe('LLM model configuration rules', () => {
       metadataSyncedAt: '2026-07-15T00:00:00.000Z',
       contextWindow: 200_000,
       supportsVision: true,
+      modelOptions: [{
+        id: 'contextTier',
+        label: 'Context',
+        kind: 'select',
+        defaultValue: '200K',
+        choices: [{ value: '200K', label: '200K' }],
+      }],
     });
     assert.equal('maxOutputTokens' in patch, false);
     assert.equal('inputPrice' in patch, false);
