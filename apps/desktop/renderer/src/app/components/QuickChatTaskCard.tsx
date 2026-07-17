@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { QuickChatTask } from '../../chat/state/quickChatTasks';
+import { getQuickChatWorkspaceIdentity } from '../../chat/state/quickChatWorkspaceIdentity';
 
 export function QuickChatTaskCard({
   task,
@@ -24,10 +25,22 @@ export function QuickChatTaskCard({
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const taskKey = task.kind === 'plan-approval' ? task.plan.planId : task.assistantMessageId;
+  const workspace = useMemo(() => getQuickChatWorkspaceIdentity(task.workspacePath), [task.workspacePath]);
   useEffect(() => setSelected(null), [taskKey]);
 
   return (
-    <aside className="quick-chat-task-card" aria-label="待处理任务">
+    <aside
+      className="quick-chat-task-card"
+      data-workspace-accent={workspace.accentIndex}
+      aria-label={`${workspace.name} 工作区的待处理任务`}
+    >
+      <div className="quick-chat-task-workspace" title={workspace.path}>
+        <span className="quick-chat-task-workspace-mark" aria-hidden="true">{workspace.name.slice(0, 1).toUpperCase()}</span>
+        <span className="quick-chat-task-workspace-copy">
+          <span className="quick-chat-task-workspace-label">工作区</span>
+          <strong>{workspace.name}</strong>
+        </span>
+      </div>
       <header className="quick-chat-task-header">
         <div className="quick-chat-task-title">
           <span className="quick-chat-task-dot" aria-hidden="true" />

@@ -511,12 +511,76 @@ body:has(.quick-chat-shell) {
 }
 
 .quick-chat-task-card {
-  margin: 0 9px 9px;
-  padding: 11px 12px;
-  border: 1px solid var(--quick-border);
-  border-radius: 10px;
-  background: var(--quick-control);
+  --workspace-accent: #5b6fd8;
+  position: relative;
+  margin: 10px 16px 14px;
+  padding: 13px 14px 12px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--workspace-accent) 24%, var(--quick-border));
+  border-radius: 14px;
+  background: var(--quick-surface);
+  box-shadow: var(--shadow-card);
   -webkit-app-region: no-drag;
+}
+
+.quick-chat-task-card::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--workspace-accent);
+  content: '';
+}
+
+.quick-chat-task-card[data-workspace-accent='1'] { --workspace-accent: #9b5fc0; }
+.quick-chat-task-card[data-workspace-accent='2'] { --workspace-accent: #268a72; }
+.quick-chat-task-card[data-workspace-accent='3'] { --workspace-accent: #c06a38; }
+.quick-chat-task-card[data-workspace-accent='4'] { --workspace-accent: #4d83b8; }
+.quick-chat-task-card[data-workspace-accent='5'] { --workspace-accent: #a44f6f; }
+
+.quick-chat-task-workspace {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 11px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--quick-border);
+}
+
+.quick-chat-task-workspace-mark {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 8px;
+  color: white;
+  background: var(--workspace-accent);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.quick-chat-task-workspace-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.quick-chat-task-workspace-copy strong {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-chat-task-workspace-label {
+  color: var(--quick-muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .08em;
+  text-transform: uppercase;
 }
 
 .quick-chat-task-header,

@@ -1,5 +1,5 @@
 const DEFAULT_SIZE = Object.freeze({ width: 720, height: 104 });
-const TASK_SIZE = Object.freeze({ width: 720, height: 286 });
+const TASK_SIZE = Object.freeze({ width: 720, height: 334 });
 const POPOVER_MAX_SIZE = Object.freeze({ width: 360, height: 280 });
 const POPOVER_GAP = 6;
 

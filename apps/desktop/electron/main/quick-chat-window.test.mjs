@@ -202,7 +202,7 @@ test('restores the design width from a compressed native window across every sta
   assert.deepEqual(parent.getBounds(), { ...shownBounds, width: 720, height: 104 });
 
   controller.setTaskCardVisible(true);
-  assert.deepEqual(parent.getBounds(), { ...shownBounds, width: 720, height: 286 });
+  assert.deepEqual(parent.getBounds(), { ...shownBounds, width: 720, height: 334 });
   controller.setTaskCardVisible(false);
   assert.deepEqual(parent.getBounds(), { ...shownBounds, width: 720, height: 104 });
 });
