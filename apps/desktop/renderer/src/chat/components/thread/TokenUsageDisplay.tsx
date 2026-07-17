@@ -310,7 +310,6 @@ export function TokenUsageDisplay({
             {costStr}
           </span>
         ) : null}
-        {isStreaming && !activeUsage ? <span className="token-usage-detail">{isZh ? '计费待返回' : 'usage pending'}</span> : null}
       </span>
       {ctxPercent != null ? (
         <div className="ctx-bar">
