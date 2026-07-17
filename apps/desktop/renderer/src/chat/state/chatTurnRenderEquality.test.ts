@@ -16,10 +16,10 @@ function message(id: string, role: ChatMsg['role']): ChatMsg {
 
 function identity(turn: ChatTurnRenderIdentity['turn']): ChatTurnRenderIdentity {
   return {
+    conversationId: 'conversation-1',
     turn,
     isLive: false,
     streamStartedAt: null,
-    toolProgress: null,
     isZh: true,
     i18n: runtime,
     onMessageAction: callback,

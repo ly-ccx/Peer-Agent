@@ -30,8 +30,7 @@ import {
 import { useConversationModelEffort } from '../hooks/useConversationModelEffort';
 import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
-import { loadComposerEntry, saveComposerEntry } from '../state/composerPersistence';
-import { formatTokenCount } from '../state/format';
+import { loadComposerEntry } from '../state/composerPersistence';
 import { getProviderModelDisplayLabel } from '../state/providerDisplay';
 import {
   buildMessageRailItemsIncremental,
@@ -39,7 +38,6 @@ import {
 } from '../state/messageRailItems';
 import {
   estimateConversationHistoryTokensIncremental,
-  estimateDraftTokens,
   type ConversationTokenEstimateCache,
 } from '../state/tokenEstimate';
 import {
@@ -89,12 +87,12 @@ import type {
   ThinkingGroup,
   ToolCallGroup,
   SegmentGroup,
-  ToolProgress,
 } from '../state/types';
 import { MarkdownMessage } from './markdown/MarkdownMessage';
 import { WorkspacePathContext } from './markdown/InlineMarkdown';
-import { TokenUsageDisplay } from './thread/TokenUsageDisplay';
-import { AttachmentStrip, ImagePreviewOverlay } from './thread/AttachmentStrip';
+import { ImagePreviewOverlay } from './thread/AttachmentStrip';
+import { ComposerDraftControls } from './ComposerDraftControls';
+import { ComposerTokenUsageDisplay } from './ComposerTokenUsageDisplay';
 import { InteractionContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
 import { ChatHeader } from './thread/ChatHeader';
@@ -177,32 +175,12 @@ interface TokenUsageState {
   cacheRead?: number;
 }
 
-interface SlashCommand {
-  id: string;
-  value: string;
-  labelZh: string;
-  labelEn: string;
-  descriptionZh: string;
-  descriptionEn: string;
-}
-
 interface ThreadScrollSnapshot {
   top: number;
   atBottom: boolean;
   turnId: string | null;
   turnOffset: number;
 }
-
-const SLASH_COMMANDS: SlashCommand[] = [
-  {
-    id: 'compact',
-    value: '/compact',
-    labelZh: '/compact',
-    labelEn: '/compact',
-    descriptionZh: '压缩当前对话历史',
-    descriptionEn: 'Compact conversation history',
-  },
-];
 
 let msgSeq = 0;
 function nextId() { return `msg-${++msgSeq}-${Date.now()}`; }
@@ -404,9 +382,7 @@ export function ChatSurface({
   const showCompactionNotice = isCompactionActive || isCompactionFailed;
   // 压缩进度（0-100）：流式收摘要时按已收字符/预期字符估算；null = 尚无进度。
   const compactionProgressPercent = getCompactionProgressPercent(compactionState);
-  // 输入草稿 + 待发送队列随 conversationStore 会话桶存放，避免切会话时复用上一会话 composer 状态。
-  const draft = convState.draft;
-  const setDraft = convActions.setDraft;
+  // 输入草稿由 ComposerDraftControls 独立订阅；父表面只保留低频队列状态。
   const messageQueue = convState.messageQueue;
   const enqueueMessage = convActions.enqueueMessage;
   const removeQueuedMessage = convActions.removeQueuedMessage;
@@ -466,7 +442,6 @@ export function ChatSurface({
       reason?: string;
     } | null>
   >;
-  const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<ChatAttachment | null>(null);
@@ -475,13 +450,8 @@ export function ChatSurface({
     SetStateAction<ClientToolCall[]>
   >;
   const [isThreadAtBottom, setIsThreadAtBottom] = useState(true);
-  // 流式工具参数进度(Codex 式实时体感):工具调用参数(如 edit_file 的整文件内容)
-  // 在落地为正式 tool-call 段之前会先以增量形式抵达,这里保存最近一次进度用于展示。
-  // 仅为过程提示,不替代 Tool Result / Evidence。
-  const toolProgress = convState.toolProgress as ToolProgress | null;
-  const setToolProgress = useMemo(() => makeSetter('toolProgress'), [makeSetter]) as Dispatch<
-    SetStateAction<ToolProgress | null>
-  >;
+  // 工具参数进度由活动 AssistantContent 局部订阅，避免高频 IPC 更新唤醒整棵 ChatSurface。
+  const setToolProgress = useMemo(() => makeSetter('toolProgress'), [makeSetter]);
   // 会话内查找(cmd/ctrl+F):仅在表达层对已渲染消息做高亮跳转,不触碰会话真值。
   const [findOpen, setFindOpen] = useState(false);
   // 顶部 header 滚动感知:chat-thread 滚动后给 header 加底线区分。
@@ -550,10 +520,6 @@ export function ChatSurface({
   // 避免手动 /compact 完成后把结果/横幅误作用到已切走的当前会话。
   const conversationIdRef = useRef<string | null>(conversationId);
   conversationIdRef.current = conversationId;
-  // 输入框持久化的「上次落盘会话」标记。初值用 undefined 哨兵(区别于真实 id 与 null),
-  // 使每次切到新会话的首遍只同步本 ref 并跳过保存,避免把旧会话草稿写到新会话名下。
-  const composerPersistConvRef = useRef<string | null | undefined>(undefined);
-
   // 正文/思考 delta 的追加逻辑已上移到 useConversationStreamRouter（应用级单例流路由器），
   // 由它按 streamId→conversationId 路由到对应会话桶。本组件不再持有本地 append 逻辑与打字机。
 
@@ -578,25 +544,6 @@ export function ChatSurface({
     snapshot: ThreadScrollSnapshot | null;
   } | null>(null);
   const messageNavigationRequestRef = useRef(0);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const textareaResizeCoalescerRef = useRef(createFrameCoalescer({
-    request: (callback) => requestAnimationFrame(callback),
-    cancel: (frameId) => cancelAnimationFrame(frameId),
-  }));
-
-  // textarea 自适应高度:随内容从单行增高,到 CSS max-height(120px) 后内部滚动。
-  // 草稿可能在一次绘制前快速变化多次；尺寸读取合并到每帧一次，避免输入事件中同步强制布局。
-  useEffect(() => {
-    textareaResizeCoalescerRef.current.request(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      const previousHeight = el.style.height;
-      el.style.height = 'auto';
-      const nextHeight = `${el.scrollHeight}px`;
-      el.style.height = nextHeight === previousHeight ? previousHeight : nextHeight;
-    });
-  }, [draft]);
 
   const updateThreadBottomState = useCallback((container: HTMLDivElement | null) => {
     if (!container) return true;
@@ -657,7 +604,6 @@ export function ChatSurface({
 
   useEffect(() => () => {
     threadScrollCoalescerRef.current.cancel();
-    textareaResizeCoalescerRef.current.cancel();
   }, []);
 
   // 表达层导航：虚拟轮次未挂载时先按 turn index 定位并强制挂载，再精确居中消息锚点。
@@ -743,10 +689,6 @@ export function ChatSurface({
   );
   // 有两个及以上可用模型时才允许切换（单模型无切换意义）。
   const canSwitchModel = modelOptions.length > 1;
-  const slashQuery = draft.startsWith('/') && !/\s/.test(draft) ? draft.toLowerCase() : null;
-  const slashCommands = slashQuery
-    ? SLASH_COMMANDS.filter((command) => command.value.startsWith(slashQuery))
-    : [];
 
   // 右侧消息轨不依赖流式 assistant 内容；同会话流式尾部替换时复用上次投影。
   const railItemsCacheRef = useRef<{
@@ -768,7 +710,6 @@ export function ChatSurface({
     railItemsCacheRef.current = { conversationId, isZh, cache };
     return cache.items;
   }, [conversationId, isStreaming, isZh, messages]);
-  const showSlashCommands = !isStreaming && !isCompactionActive && slashCommands.length > 0;
   // 口径分离（ADR 42：显示口径 ≠ 压缩触发口径）：进度条分子取「权威快照口径」与「实时本地估算」的较大值。
   // - 权威快照口径 = 主进程回合结束下发的 contextTokens，现已改为「显示口径」= 实际发送给模型的上下文
   //   （优先 provider 真实 usage 的 input+cacheRead，回退为对最后一轮实际发送切片的估算），
@@ -795,21 +736,13 @@ export function ChatSurface({
     historyTokenCacheRef.current = { conversationId, cache: next };
     return next.totalTokens;
   }, [conversationId, isStreaming, messages]);
-  const draftContextTokens = useMemo(
-    () => estimateDraftTokens(draft, attachments),
-    [attachments, draft],
-  );
-  const liveContextTokens = historyContextTokens + draftContextTokens;
-  const authoritativeContextTokens = authoritativeContext
-    ? authoritativeContext.contextTokens + draftContextTokens
-    : 0;
-  const estimatedContextTokens = Math.max(authoritativeContextTokens, liveContextTokens);
+  // 草稿 token 增量由 ComposerTokenUsageDisplay 的叶子订阅计算，避免字符输入唤醒消息表面。
+  const authoritativeContextTokens = authoritativeContext?.contextTokens ?? null;
   // 进度条分母优先用权威 contextWindow（与触发判定同窗口），消除 provider 配置窗口与
   // 主进程实际所用窗口不一致时的百分比偏差；权威窗口未知时回退到 provider 配置窗口。
   const authoritativeContextWindow = authoritativeContext?.contextWindow ?? undefined;
-  // 当前轮进行中(流式/压缩)。此时主操作按钮含义:有草稿则"排队",无草稿则"停止"。
+  // 当前轮进行中(流式/压缩)。草稿是否有内容由输入叶子自行判断。
   const isBusy = isStreaming || isCompactionActive;
-  const hasComposerContent = draft.trim().length > 0 || attachments.length > 0;
 
   useEffect(() => {
     setAttachments([]);
@@ -960,27 +893,6 @@ export function ChatSurface({
     });
     return () => { cancelled = true; };
   }, [conversationId, conversationRevision, convActions, isStreaming]);
-
-  // 输入框(草稿 + 待发送队列)按会话持久化。
-  // draft/queue 的运行态已经下沉到 conversationStore 会话桶,切会话时组件订阅的是目标会话桶,
-  // 不再存在「新 conversationId + 旧队列」的共享状态组合。这里保留切换首帧跳过保存的保护,
-  // 避免恢复落盘与用户真实编辑互相覆盖。
-  useEffect(() => {
-    if (composerPersistConvRef.current !== conversationId) {
-      composerPersistConvRef.current = conversationId;
-      return;
-    }
-    if (!conversationId) return;
-    saveComposerEntry(conversationId, {
-      draft,
-      queue: messageQueue.map((item) => ({
-        id: item.id,
-        text: item.text,
-        attachments: item.attachments,
-        effort: item.effort,
-      })),
-    });
-  }, [conversationId, draft, messageQueue]);
 
   useEffect(() => {
     return clientApi.onGoalRunnerChanged((payload) => {
@@ -1161,18 +1073,6 @@ export function ChatSurface({
       scrollThreadToBottom();
     }
   }, [isCompactionActive, scrollThreadToBottom]);
-
-  useEffect(() => {
-    setActiveSlashIndex(0);
-  }, [slashQuery]);
-
-  const applySlashCommand = useCallback((command: SlashCommand) => {
-    setDraft(command.value);
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(command.value.length, command.value.length);
-    });
-  }, [setDraft]);
 
   const removePendingPermissionCall = useCallback((toolCallId: string) => {
     setPendingPermissionCalls((prev) => prev.filter((call) => call.toolCallId !== toolCallId));
@@ -1364,10 +1264,11 @@ export function ChatSurface({
     // 恢复历史尚未完成时绝不允许发送：否则空 renderer 桶会先追加新回合，
     // 随后的流收尾再以短列表 replaceMessages，覆盖仍在磁盘上的完整历史。
     if (!conversationId || loadStatus !== 'ready') return;
-    const text = draft.trim();
-    if ((!text && attachments.length === 0) || !hasProvider || !conversationId) return;
+    // 草稿由输入叶子独立订阅；发送瞬间直接读取会话桶，避免父表面闭包持有旧文本。
+    const text = conversationStore.getSnapshot(conversationId).draft.trim();
+    if ((!text && attachments.length === 0) || !hasProvider) return;
     const sentAttachments = attachments;
-    setDraft('');
+    conversationStore.setDraft(conversationId, '');
     setAttachments([]);
     setAttachmentError(null);
     // 当前轮(流式或压缩)进行中时,不丢弃也不阻塞输入:把消息排队,
@@ -1377,7 +1278,7 @@ export function ChatSurface({
       return;
     }
     await submitMessage(text, sentAttachments);
-  }, [draft, attachments, isStreaming, isCompactionActive, hasProvider, conversationId, loadStatus, submitMessage, effort, setDraft, enqueueMessage]);
+  }, [attachments, isStreaming, isCompactionActive, hasProvider, conversationId, loadStatus, submitMessage, effort, enqueueMessage]);
 
   // 任务续传(ADR 21):就绪后在「正确的会话内」自动发送。
   // App.tsx 已 peek 到会话锚定的待办、切到 resumeTask.sessionId 并经 prop 传入;这里要求
@@ -1416,16 +1317,19 @@ export function ChatSurface({
     void submitMessage(head.text, head.attachments, head.effort);
   }, [isStreaming, isCompactionActive, hasProvider, conversationId, resumeTask, messageQueue.length, shiftQueuedMessage, submitMessage]);
 
-  // 主操作按钮/回车键的统一入口:
-  // - 有草稿内容时:发送或排队(由 handleSend 内部判断是否当前轮进行中)。
-  // - 无草稿且当前轮进行中时:停止当前轮。
+  // 主操作按钮/回车键的统一入口。草稿内容由输入叶子决定按钮语义；这里按触发瞬间
+  // 读取会话桶，确保不依赖父表面的高频草稿订阅。
   const handlePrimaryAction = useCallback(() => {
-    if (draft.trim() || attachments.length > 0) {
+    const hasDraft = conversationId
+      ? conversationStore.getSnapshot(conversationId).draft.trim().length > 0
+      : false;
+    if (hasDraft || attachments.length > 0) {
       void handleSend();
       return;
     }
     if (isStreaming) handleStop();
-  }, [draft, attachments, isStreaming, handleSend, handleStop]);
+  }, [conversationId, attachments, isStreaming, handleSend, handleStop]);
+  const stableHandlePrimaryAction = useStableCallback(handlePrimaryAction);
 
   const handleRegenerate = useCallback(async (msgIndex: number) => {
     if (isStreaming || !hasProvider || !conversationId) return;
@@ -1637,8 +1541,8 @@ export function ChatSurface({
                   turn={turn}
                   isLive={live}
                   streamStartedAt={live ? convState.turnStartedAt : null}
-                  toolProgress={live ? toolProgress : null}
                   isZh={isZh}
+                  conversationId={conversationId}
                   i18n={i18n}
                   onMessageAction={stableHandleMessageAction}
                   onRegenerate={stableHandleRegenerate}
@@ -1804,129 +1708,21 @@ export function ChatSurface({
             })}
           </div>
         ) : null}
-        <form
-          className="chat-composer"
-          onSubmit={(e) => { e.preventDefault(); handlePrimaryAction(); }}
-        >
-          {showSlashCommands ? (
-            <div className="slash-command-menu" role="listbox" aria-label={isZh ? '命令' : 'Commands'}>
-              {slashCommands.map((command, index) => (
-                <button
-                  key={command.id}
-                  type="button"
-                  role="option"
-                  aria-selected={index === activeSlashIndex}
-                  className={`slash-command-item ${index === activeSlashIndex ? 'active' : ''}`}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    applySlashCommand(command);
-                  }}
-                >
-                  <span className="slash-command-badge">/</span>
-                  <span className="slash-command-main">
-                    <span className="slash-command-label">{isZh ? command.labelZh : command.labelEn}</span>
-                    <span className="slash-command-desc">{isZh ? command.descriptionZh : command.descriptionEn}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          ) : null}
-          {attachments.length ? (
-            <AttachmentStrip
-              attachments={attachments}
-              onRemove={removeAttachment}
-              onPreviewImage={setImagePreview}
-              isZh={isZh}
-            />
-          ) : null}
-          {attachmentError ? <div className="attachment-error">{attachmentError}</div> : null}
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            disabled={!hasProvider}
-            placeholder={hasProvider ? (isBusy ? (isZh ? '输入消息将在完成后自动发送...' : 'Message will auto-send when done...') : (isZh ? '输入消息...' : 'Type a message...')) : (isZh ? '请先配置模型' : 'Configure a model first')}
-            rows={1}
-            onPaste={handlePaste}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (showSlashCommands) {
-                if (e.key === 'ArrowDown') {
-                  e.preventDefault();
-                  setActiveSlashIndex((index) => (index + 1) % slashCommands.length);
-                  return;
-                }
-                if (e.key === 'ArrowUp') {
-                  e.preventDefault();
-                  setActiveSlashIndex((index) => (index - 1 + slashCommands.length) % slashCommands.length);
-                  return;
-                }
-                if ((e.key === 'Tab' || e.key === 'Enter') && draft !== slashCommands[activeSlashIndex]?.value) {
-                  e.preventDefault();
-                  applySlashCommand(slashCommands[activeSlashIndex]);
-                  return;
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  setDraft('');
-                  return;
-                }
-              }
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                handlePrimaryAction();
-              }
-            }}
-          />
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="chat-file-input"
-            onChange={(event) => {
-              void addFiles(event.currentTarget.files);
-              event.currentTarget.value = '';
-            }}
-          />
-          <button
-            type="button"
-            className="composer-attach-btn"
-            disabled={!hasProvider || isStreaming}
-            title={isZh ? '添加附件' : 'Attach files'}
-            aria-label={isZh ? '添加附件' : 'Attach files'}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 1 1-2.83-2.83l8.49-8.48" />
-            </svg>
-          </button>
-          <button
-            type="submit"
-            className={isBusy && !hasComposerContent ? 'streaming' : undefined}
-            disabled={!hasProvider || (!isBusy && !hasComposerContent)}
-            title={
-              isBusy && !hasComposerContent
-                ? (isZh ? '停止' : 'Stop')
-                : isBusy
-                  ? (isZh ? '加入队列' : 'Add to queue')
-                  : (isZh ? '发送' : 'Send')
-            }
-            aria-label={
-              isBusy && !hasComposerContent
-                ? (isZh ? '停止' : 'Stop')
-                : isBusy
-                  ? (isZh ? '加入队列' : 'Add to queue')
-                  : (isZh ? '发送' : 'Send')
-            }
-          >
-            {isBusy && !hasComposerContent ? (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
-            ) : (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 19V5" /><path d="m5 12 7-7 7 7" />
-              </svg>
-            )}
-          </button>
-        </form>
+        <ComposerDraftControls
+          conversationId={conversationId}
+          hasProvider={hasProvider}
+          isBusy={isBusy}
+          isStreaming={isStreaming}
+          isZh={isZh}
+          attachments={attachments}
+          attachmentError={attachmentError}
+          messageQueue={messageQueue}
+          onRemoveAttachment={removeAttachment}
+          onPreviewImage={setImagePreview}
+          onPaste={handlePaste}
+          onAddFiles={addFiles}
+          onPrimaryAction={stableHandlePrimaryAction}
+        />
         <div className="chat-composer-toolbar">
           <div className="chat-composer-toolbar-left">
             <Dropdown
@@ -1961,11 +1757,14 @@ export function ChatSurface({
               menuPlacement="up"
             />
           </div>
-          <TokenUsageDisplay
+          <ComposerTokenUsageDisplay
+            conversationId={conversationId}
+            historyContextTokens={historyContextTokens}
+            attachments={attachments}
+            authoritativeContextTokens={authoritativeContextTokens}
             providers={providers}
             tokenUsage={tokenUsage}
             activeUsage={activeUsage}
-            contextTokens={estimatedContextTokens}
             contextWindow={authoritativeContextWindow}
             isStreaming={isStreaming}
             isZh={isZh}

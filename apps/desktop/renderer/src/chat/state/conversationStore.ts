@@ -88,6 +88,39 @@ export const EMPTY_CONVERSATION_STATE: ConversationRuntimeState = Object.freeze(
   streamId: null,
 });
 
+const CONVERSATION_STATE_KEYS = Object.keys(
+  EMPTY_CONVERSATION_STATE,
+) as (keyof ConversationRuntimeState)[];
+
+/** 高频工具参数进度由局部提示订阅，不应唤醒整棵 ChatSurface。 */
+export function areConversationStatesEqualForSurface(
+  previous: ConversationRuntimeState,
+  next: ConversationRuntimeState,
+): boolean {
+  if (previous === next) return true;
+  return CONVERSATION_STATE_KEYS.every((key) =>
+    key === 'draft'
+    || key === 'toolProgress'
+    || Object.is(previous[key], next[key]),
+  );
+}
+
+/**
+ * 缓存供 ChatSurface 使用的快照引用。仅 draft / toolProgress 变化时继续返回上一引用，
+ * 满足 useSyncExternalStore 的稳定快照要求；两者由输入区和活动工具提示各自叶子订阅，
+ * 其他任意字段变化都会立即透出新快照。
+ */
+export function createConversationSurfaceSnapshotReader(
+  readSnapshot: () => ConversationRuntimeState,
+): () => ConversationRuntimeState {
+  let current = readSnapshot();
+  return () => {
+    const next = readSnapshot();
+    if (!areConversationStatesEqualForSurface(current, next)) current = next;
+    return current;
+  };
+}
+
 type Listener = () => void;
 type Patch =
   | Partial<ConversationRuntimeState>
@@ -126,6 +159,25 @@ export class ConversationStore {
       current.delete(listener);
       if (current.size === 0) this.listeners.delete(conversationId);
     };
+  }
+
+  /**
+   * Subscribe to one derived field instead of every write to the conversation bucket.
+   * This keeps sidebar projections out of the hot token/message update path.
+   */
+  subscribeSelector<Value>(
+    conversationId: string | null,
+    selector: (state: ConversationRuntimeState) => Value,
+    listener: Listener,
+    isEqual: (previous: Value, next: Value) => boolean = Object.is,
+  ): () => void {
+    let previous = selector(this.getSnapshot(conversationId));
+    return this.subscribe(conversationId, () => {
+      const next = selector(this.getSnapshot(conversationId));
+      if (isEqual(previous, next)) return;
+      previous = next;
+      listener();
+    });
   }
 
   /**

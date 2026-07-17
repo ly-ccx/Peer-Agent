@@ -13,10 +13,12 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 
 import {
+  areConversationStatesEqualForSurface,
   conversationStore,
+  createConversationSurfaceSnapshotReader,
   type ConversationRuntimeState,
 } from '../state/conversationStore';
-import type { QueuedMessage } from '../state/types';
+import type { QueuedMessage, ToolProgress } from '../state/types';
 
 /** 绑定到具体 conversationId 的运行态写入句柄。 */
 export interface ConversationActions {
@@ -49,15 +51,61 @@ export interface UseConversationStateResult {
   readonly actions: ConversationActions;
 }
 
+/** 只让输入区响应高频草稿变化，避免每个字符重跑整个 ChatSurface。 */
+export function useConversationDraft(conversationId: string | null): string {
+  const subscribe = useCallback(
+    (listener: () => void) => conversationStore.subscribeSelector(
+      conversationId,
+      snapshot => snapshot.draft,
+      listener,
+    ),
+    [conversationId],
+  );
+  const getSnapshot = useCallback(
+    () => conversationStore.getSnapshot(conversationId).draft,
+    [conversationId],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+/** 只让活动消息里的进度提示响应高频工具参数进度。 */
+export function useConversationToolProgress(
+  conversationId: string | null,
+  enabled: boolean,
+): ToolProgress | null {
+  const subscribe = useCallback(
+    (listener: () => void) => enabled
+      ? conversationStore.subscribeSelector(
+          conversationId,
+          (snapshot) => snapshot.toolProgress,
+          listener,
+        )
+      : () => {},
+    [conversationId, enabled],
+  );
+  const getSnapshot = useCallback(
+    () => enabled ? conversationStore.getSnapshot(conversationId).toolProgress : null,
+    [conversationId, enabled],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
 export function useConversationState(
   conversationId: string | null,
 ): UseConversationStateResult {
   const subscribe = useCallback(
-    (listener: () => void) => conversationStore.subscribe(conversationId, listener),
+    (listener: () => void) => conversationStore.subscribeSelector(
+      conversationId,
+      (snapshot) => snapshot,
+      listener,
+      areConversationStatesEqualForSurface,
+    ),
     [conversationId],
   );
-  const getSnapshot = useCallback(
-    () => conversationStore.getSnapshot(conversationId),
+  const getSnapshot = useMemo(
+    () => createConversationSurfaceSnapshotReader(
+      () => conversationStore.getSnapshot(conversationId),
+    ),
     [conversationId],
   );
 

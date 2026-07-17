@@ -2,10 +2,10 @@ import type { ChatTurn } from './chatTurns';
 
 /** ChatTurn memo 边界真正关心的渲染输入；回调与运行时对象只比较引用。 */
 export interface ChatTurnRenderIdentity {
+  readonly conversationId: string | null;
   readonly turn: ChatTurn;
   readonly isLive: boolean;
   readonly streamStartedAt: number | null;
-  readonly toolProgress: unknown;
   readonly isZh: boolean;
   readonly i18n: unknown;
   readonly onMessageAction: unknown;
@@ -24,11 +24,11 @@ export function areChatTurnRenderPropsEqual(
   next: ChatTurnRenderIdentity,
 ): boolean {
   if (
-    previous.turn.id !== next.turn.id
+    previous.conversationId !== next.conversationId
+    || previous.turn.id !== next.turn.id
     || previous.turn.messages.length !== next.turn.messages.length
     || previous.isLive !== next.isLive
     || previous.streamStartedAt !== next.streamStartedAt
-    || previous.toolProgress !== next.toolProgress
     || previous.isZh !== next.isZh
     || previous.i18n !== next.i18n
     || previous.onMessageAction !== next.onMessageAction

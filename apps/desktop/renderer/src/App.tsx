@@ -256,7 +256,11 @@ function MainApp() {
 
     syncCompactionStates();
     const unsubs = conversationIds.map((conversationId) =>
-      conversationStore.subscribe(conversationId, syncCompactionStates),
+      conversationStore.subscribeSelector(
+        conversationId,
+        (state) => state.compactionState,
+        syncCompactionStates,
+      ),
     );
     return () => { unsubs.forEach((unsub) => unsub()); };
   }, [conversations]);
@@ -279,7 +283,11 @@ function MainApp() {
 
     syncPendingConfirmations();
     const unsubs = conversationIds.map((conversationId) =>
-      conversationStore.subscribe(conversationId, syncPendingConfirmations),
+      conversationStore.subscribeSelector(
+        conversationId,
+        (state) => state.pendingPermissionCalls.length,
+        syncPendingConfirmations,
+      ),
     );
     return () => { unsubs.forEach((unsub) => unsub()); };
   }, [conversations]);

@@ -1,7 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { memo, useCallback, useEffect, useState } from 'react';
 import { formatDuration, formatTime } from '../../state/format';
-import type { ChatAttachment, ToolProgress } from '../../state/types';
+import type { ChatAttachment } from '../../state/types';
 import type { ChatTurn as ChatTurnModel } from '../../state/chatTurns';
 import { areChatTurnRenderPropsEqual } from '../../state/chatTurnRenderEquality';
 import { AssistantContent, CompactionSummaryCard } from './AssistantContent';
@@ -10,10 +10,10 @@ import { InteractionAnsweredContext } from './interactionContext';
 import { MessageActionBar, type MessageActionId } from './MessageActionBar';
 
 interface ChatTurnProps {
+  readonly conversationId: string | null;
   readonly turn: ChatTurnModel;
   readonly isLive: boolean;
   readonly streamStartedAt: number | null;
-  readonly toolProgress: ToolProgress | null;
   readonly isZh: boolean;
   readonly i18n: I18nRuntime;
   readonly onMessageAction: (messageIndex: number, action: MessageActionId) => void;
@@ -48,10 +48,10 @@ function StreamingElapsedTime({ startedAt, isZh }: { readonly startedAt: number 
 }
 
 function ChatTurnImpl({
+  conversationId,
   turn,
   isLive,
   streamStartedAt,
-  toolProgress,
   isZh,
   i18n,
   onMessageAction,
@@ -99,10 +99,10 @@ function ChatTurnImpl({
                 ) : (
                   <InteractionAnsweredContext.Provider value={answeredText}>
                     <AssistantContent
+                      conversationId={conversationId}
                       segments={msg.segments}
                       content={msg.content}
                       isStreaming={isLive && msg === lastMessage}
-                      toolProgress={isLive && msg === lastMessage ? toolProgress : null}
                       durationMs={msg.durationMs}
                       isZh={isZh}
                     />

@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useState } from 'react';
+import { useConversationToolProgress } from '../../hooks/useConversationState';
 import { parseInteractionToolViewFromCandidates } from '../../state/interactionToolView';
 import { groupSegments, splitFinalTextGroup } from '../../state/streamSegments';
 import { formatDuration } from '../../state/format';
@@ -55,6 +56,20 @@ export function ToolProgressInline({ progress, isZh }: { readonly progress: Tool
   );
 }
 
+function LiveToolProgress({
+  conversationId,
+  showCursor,
+  isZh,
+}: {
+  readonly conversationId: string | null;
+  readonly showCursor: boolean;
+  readonly isZh: boolean;
+}) {
+  const progress = useConversationToolProgress(conversationId, true);
+  if (progress) return <ToolProgressInline progress={progress} isZh={isZh} />;
+  return showCursor ? <span className="streaming-cursor">▍</span> : null;
+}
+
 function useAutoCollapsingExpanded(isActive: boolean) {
   // 流式输出和工具调度期间保持展开，让用户持续看到正在发生什么；
   // 整条回复最终完成后再自动折叠。已完成的历史消息首次渲染时保持折叠。
@@ -90,11 +105,18 @@ function buildProcessingSummary(groups: SegmentGroup[], durationMs: number | und
   return prefix;
 }
 
-function AssistantContentImpl({ segments, content, isStreaming, toolProgress, durationMs, isZh }: {
+function AssistantContentImpl({
+  conversationId,
+  segments,
+  content,
+  isStreaming,
+  durationMs,
+  isZh,
+}: {
+  readonly conversationId: string | null;
   readonly segments?: ContentSegment[];
   readonly content: string;
   readonly isStreaming: boolean;
-  readonly toolProgress?: ToolProgress | null;
   readonly durationMs?: number;
   readonly isZh: boolean;
 }) {
@@ -108,12 +130,13 @@ function AssistantContentImpl({ segments, content, isStreaming, toolProgress, du
   );
 
   if (!segments?.length) {
-    if (content || toolProgress || isStreaming) {
+    if (content || isStreaming) {
       return (
         <div className="assistant-segments">
           {content ? <MarkdownMessage content={content} /> : null}
-          {toolProgress ? <ToolProgressInline progress={toolProgress} isZh={isZh} /> : null}
-          {!toolProgress && isStreaming ? <span className="streaming-cursor">▍</span> : null}
+          {isStreaming ? (
+            <LiveToolProgress conversationId={conversationId} showCursor={true} isZh={isZh} />
+          ) : null}
         </div>
       );
     }
@@ -142,7 +165,7 @@ function AssistantContentImpl({ segments, content, isStreaming, toolProgress, du
     ((lastGroup.type === 'tool-call-group' && lastGroup.calls.some((c) => c.result === undefined)) ||
       lastGroup.type === 'thinking'),
   );
-  const showCursor = isStreaming && !toolProgress && !lastGroupHasActiveIndicator;
+  const showCursor = !lastGroupHasActiveIndicator;
 
   return (
     <div className="assistant-segments">
@@ -165,8 +188,9 @@ function AssistantContentImpl({ segments, content, isStreaming, toolProgress, du
       {interactionCalls.map((tc, idx) => (
         <ToolCallCard key={`interaction-${idx}`} tc={tc} isZh={isZh} />
       ))}
-      {toolProgress ? <ToolProgressInline progress={toolProgress} isZh={isZh} /> : null}
-      {showCursor ? <span className="streaming-cursor">▍</span> : null}
+      {isStreaming ? (
+        <LiveToolProgress conversationId={conversationId} showCursor={showCursor} isZh={isZh} />
+      ) : null}
     </div>
   );
 }

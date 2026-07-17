@@ -31,7 +31,7 @@ function tryParsePath(json) {
  * 在工具参数流式累积期间，发出节流后的 tool-progress 事件。
  *
  * @param {object} progress  per-tool-call 的可变进度状态（由调用方持有并复用），
- *   本模块会在其上记录 argPath / lastProgressAt / lastProgressLines。
+ *   本模块会在其上记录 argPath / lastProgressAt。
  * @param {object} ctx
  * @param {Electron.WebContents} ctx.webContents
  * @param {string} ctx.streamId
@@ -55,13 +55,11 @@ export function emitToolArgProgress(progress, ctx) {
   const now = Date.now();
   if (
     progress.lastProgressAt &&
-    now - progress.lastProgressAt < TOOL_ARG_PROGRESS_INTERVAL_MS &&
-    receivedLines === progress.lastProgressLines
+    now - progress.lastProgressAt < TOOL_ARG_PROGRESS_INTERVAL_MS
   ) {
     return;
   }
   progress.lastProgressAt = now;
-  progress.lastProgressLines = receivedLines;
 
   webContents.send('chat:stream:tool-progress', {
     streamId,

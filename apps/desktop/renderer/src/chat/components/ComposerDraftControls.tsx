@@ -1,0 +1,251 @@
+import type React from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { useConversationDraft } from '../hooks/useConversationState';
+import { saveComposerEntry } from '../state/composerPersistence';
+import { conversationStore } from '../state/conversationStore';
+import { createFrameCoalescer } from '../state/frameCoalescer';
+import type { ChatAttachment, QueuedMessage } from '../state/types';
+import { AttachmentStrip } from './thread/AttachmentStrip';
+
+interface SlashCommand {
+  readonly id: string;
+  readonly value: string;
+  readonly labelZh: string;
+  readonly labelEn: string;
+  readonly descriptionZh: string;
+  readonly descriptionEn: string;
+}
+
+const SLASH_COMMANDS: readonly SlashCommand[] = [
+  {
+    id: 'compact',
+    value: '/compact',
+    labelZh: '/compact',
+    labelEn: '/compact',
+    descriptionZh: '压缩当前对话历史',
+    descriptionEn: 'Compact conversation history',
+  },
+];
+
+export const ComposerDraftControls = memo(function ComposerDraftControls({
+  conversationId,
+  hasProvider,
+  isBusy,
+  isStreaming,
+  isZh,
+  attachments,
+  attachmentError,
+  messageQueue,
+  onRemoveAttachment,
+  onPreviewImage,
+  onPaste,
+  onAddFiles,
+  onPrimaryAction,
+}: {
+  readonly conversationId: string | null;
+  readonly hasProvider: boolean;
+  readonly isBusy: boolean;
+  readonly isStreaming: boolean;
+  readonly isZh: boolean;
+  readonly attachments: readonly ChatAttachment[];
+  readonly attachmentError: string | null;
+  readonly messageQueue: readonly QueuedMessage[];
+  readonly onRemoveAttachment: (id: string) => void;
+  readonly onPreviewImage: (attachment: ChatAttachment) => void;
+  readonly onPaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void;
+  readonly onAddFiles: (files: FileList | File[] | null | undefined) => void | Promise<void>;
+  readonly onPrimaryAction: () => void;
+}) {
+  const draft = useConversationDraft(conversationId);
+  const [activeSlashIndex, setActiveSlashIndex] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaResizeCoalescerRef = useRef(createFrameCoalescer({
+    request: (callback) => requestAnimationFrame(callback),
+    cancel: (frameId) => cancelAnimationFrame(frameId),
+  }));
+  const persistedConversationRef = useRef<string | null | undefined>(undefined);
+
+  const slashCommands = useMemo(() => {
+    const query = draft.startsWith('/') && !/\s/.test(draft) ? draft.toLowerCase() : null;
+    return query
+      ? SLASH_COMMANDS.filter((command) => command.value.startsWith(query))
+      : [];
+  }, [draft]);
+  const showSlashCommands = !isBusy && slashCommands.length > 0;
+  const hasComposerContent = draft.trim().length > 0 || attachments.length > 0;
+
+  useEffect(() => {
+    setActiveSlashIndex(0);
+  }, [draft]);
+
+  // 草稿高频更新只调整输入框自身高度，不再让消息时间线参与渲染。
+  useEffect(() => {
+    textareaResizeCoalescerRef.current.request(() => {
+      const element = textareaRef.current;
+      if (!element) return;
+      element.style.height = 'auto';
+      element.style.height = `${Math.min(element.scrollHeight, 120)}px`;
+    });
+  }, [draft]);
+
+  useEffect(() => () => textareaResizeCoalescerRef.current.cancel(), []);
+
+  // 草稿与队列仍沿用既有表达层持久化缝；仅把订阅移入输入叶子。
+  useEffect(() => {
+    if (persistedConversationRef.current !== conversationId) {
+      persistedConversationRef.current = conversationId;
+      return;
+    }
+    if (!conversationId) return;
+    saveComposerEntry(conversationId, {
+      draft,
+      queue: messageQueue.map((item) => ({
+        id: item.id,
+        text: item.text,
+        attachments: item.attachments,
+        effort: item.effort,
+      })),
+    });
+  }, [conversationId, draft, messageQueue]);
+
+  const setDraft = (value: string) => conversationStore.setDraft(conversationId, value);
+  const applySlashCommand = (command: SlashCommand) => {
+    setDraft(command.value);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(command.value.length, command.value.length);
+    });
+  };
+
+  return (
+    <form
+      className="chat-composer"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onPrimaryAction();
+      }}
+    >
+      {showSlashCommands ? (
+        <div className="slash-command-menu" role="listbox" aria-label={isZh ? '命令' : 'Commands'}>
+          {slashCommands.map((command, index) => (
+            <button
+              key={command.id}
+              type="button"
+              role="option"
+              aria-selected={index === activeSlashIndex}
+              className={`slash-command-item ${index === activeSlashIndex ? 'active' : ''}`}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                applySlashCommand(command);
+              }}
+            >
+              <span className="slash-command-badge">/</span>
+              <span className="slash-command-main">
+                <span className="slash-command-label">{isZh ? command.labelZh : command.labelEn}</span>
+                <span className="slash-command-desc">{isZh ? command.descriptionZh : command.descriptionEn}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {attachments.length ? (
+        <AttachmentStrip
+          attachments={attachments}
+          onRemove={onRemoveAttachment}
+          onPreviewImage={onPreviewImage}
+          isZh={isZh}
+        />
+      ) : null}
+      {attachmentError ? <div className="attachment-error">{attachmentError}</div> : null}
+      <textarea
+        ref={textareaRef}
+        value={draft}
+        disabled={!hasProvider}
+        placeholder={hasProvider
+          ? isBusy
+            ? (isZh ? '输入消息将在完成后自动发送...' : 'Message will auto-send when done...')
+            : (isZh ? '输入消息...' : 'Type a message...')
+          : (isZh ? '请先配置模型' : 'Configure a model first')}
+        rows={1}
+        onPaste={onPaste}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (showSlashCommands) {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault();
+              setActiveSlashIndex((index) => (index + 1) % slashCommands.length);
+              return;
+            }
+            if (event.key === 'ArrowUp') {
+              event.preventDefault();
+              setActiveSlashIndex((index) => (index - 1 + slashCommands.length) % slashCommands.length);
+              return;
+            }
+            if ((event.key === 'Tab' || event.key === 'Enter')
+              && draft !== slashCommands[activeSlashIndex]?.value) {
+              event.preventDefault();
+              const command = slashCommands[activeSlashIndex];
+              if (command) applySlashCommand(command);
+              return;
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              setDraft('');
+              return;
+            }
+          }
+          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            onPrimaryAction();
+          }
+        }}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="chat-file-input"
+        onChange={(event) => {
+          void onAddFiles(event.currentTarget.files);
+          event.currentTarget.value = '';
+        }}
+      />
+      <button
+        type="button"
+        className="composer-attach-btn"
+        disabled={!hasProvider || isStreaming}
+        title={isZh ? '添加附件' : 'Attach files'}
+        aria-label={isZh ? '添加附件' : 'Attach files'}
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 1 1-2.83-2.83l8.49-8.48" />
+        </svg>
+      </button>
+      <button
+        type="submit"
+        className={isBusy && !hasComposerContent ? 'streaming' : undefined}
+        disabled={!hasProvider || (!isBusy && !hasComposerContent)}
+        title={isBusy && !hasComposerContent
+          ? (isZh ? '停止' : 'Stop')
+          : isBusy
+            ? (isZh ? '加入队列' : 'Add to queue')
+            : (isZh ? '发送' : 'Send')}
+        aria-label={isBusy && !hasComposerContent
+          ? (isZh ? '停止' : 'Stop')
+          : isBusy
+            ? (isZh ? '加入队列' : 'Add to queue')
+            : (isZh ? '发送' : 'Send')}
+      >
+        {isBusy && !hasComposerContent ? (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+        ) : (
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 19V5" /><path d="m5 12 7-7 7 7" />
+          </svg>
+        )}
+      </button>
+    </form>
+  );
+});

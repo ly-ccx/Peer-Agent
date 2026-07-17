@@ -47,15 +47,23 @@ test('throttles repeat calls within interval when line count is unchanged', () =
   assert.equal(wc.sent.length, 1);
 });
 
-test('always emits when a new line boundary arrives, even within interval', () => {
+test('throttles rapid line growth instead of emitting one IPC event per line', () => {
   const wc = makeWebContents();
   const progress = {};
-  emitToolArgProgress(progress, baseCtx(wc, '{"path":"a.ts","content":"x\\ny"}'));
+  const originalNow = Date.now;
+  Date.now = () => 1_000;
+  try {
+    emitToolArgProgress(progress, baseCtx(wc, '{"path":"a.ts","content":"line-0"}'));
+    for (let line = 1; line <= 100; line += 1) {
+      const content = Array.from({ length: line + 1 }, (_, index) => `line-${index}`).join('\n');
+      emitToolArgProgress(progress, baseCtx(wc, JSON.stringify({ path: 'a.ts', content })));
+    }
+  } finally {
+    Date.now = originalNow;
+  }
+
   assert.equal(wc.sent.length, 1);
-  // One more \n -> line count increased -> not throttled.
-  emitToolArgProgress(progress, baseCtx(wc, '{"path":"a.ts","content":"x\\ny\\nz"}'));
-  assert.equal(wc.sent.length, 2);
-  assert.equal(wc.sent[1].payload.receivedLines, 2);
+  assert.equal(wc.sent[0].payload.receivedLines, 0);
 });
 
 test('path is null until it appears in the accumulating JSON', () => {

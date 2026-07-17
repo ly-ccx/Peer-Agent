@@ -156,7 +156,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       clearTimeout(entry.timer);
       compactionDoneTimers.delete(cid);
     };
-
     // 兜底清除“正在重试连接”横幅：连接若在 SSE 正文阶段恢复，recovering-fetch 已
     // return，不会补发 recovered 事件，横幅会一直残留。收到真实数据/收尾事件即收敛。
     const clearRecoveryNotice = (cid: string) => {
@@ -350,6 +349,12 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     const offToolProgress = clientApi.onChatStreamToolProgress(({ streamId, tool, path, receivedLines }) => {
       const cid = conversationStore.resolveConversation(streamId);
       if (!cid) return;
+      const previous = conversationStore.getSnapshot(cid).toolProgress;
+      if (
+        previous?.tool === tool
+        && previous.path === path
+        && previous.receivedLines === receivedLines
+      ) return;
       conversationStore.setState(cid, { toolProgress: { tool, path, receivedLines } });
     });
 

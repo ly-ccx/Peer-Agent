@@ -2,7 +2,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  areConversationStatesEqualForSurface,
   ConversationStore,
+  createConversationSurfaceSnapshotReader,
   EMPTY_CONVERSATION_STATE,
 } from './conversationStore.ts';
 import type { ChatMsg, QueuedMessage } from './types.ts';
@@ -180,6 +182,136 @@ describe('conversationStore', () => {
     store.setState('A', (prev) => ({ messages: [...prev.messages, msg('m2', 'two')] }));
     assert.equal(store.getSnapshot('A').messages.length, 2);
     assert.equal(store.getSnapshot('A').messages[1].content, 'two');
+  });
+
+  it('selector subscriptions ignore hot message updates outside their selected field', () => {
+    const store = new ConversationStore();
+    let compactionNotifications = 0;
+    let permissionNotifications = 0;
+    store.subscribeSelector('A', (state) => state.compactionState, () => {
+      compactionNotifications += 1;
+    });
+    store.subscribeSelector('A', (state) => state.pendingPermissionCalls.length, () => {
+      permissionNotifications += 1;
+    });
+
+    for (let index = 0; index < 100; index += 1) {
+      store.setState('A', { messages: [msg('stream', `token-${index}`)] });
+    }
+
+    assert.equal(compactionNotifications, 0);
+    assert.equal(permissionNotifications, 0);
+
+    store.setState('A', {
+      compactionState: { phase: 'running', percent: 1, streamId: 'stream-A', startedAt: 1 },
+    });
+    store.setState('A', {
+      pendingPermissionCalls: [{
+        toolCallId: 'permission-1',
+        capabilityId: 'local.bash',
+        displayName: 'Bash',
+        reason: 'confirm',
+        argumentsPreview: {},
+        riskLevel: 'L0_inert',
+        dataLevel: 'D0_public',
+        requestedAt: '2026-07-16T00:00:00.000Z',
+      }],
+    });
+
+    assert.equal(compactionNotifications, 1);
+    assert.equal(permissionNotifications, 1);
+  });
+
+  it('surface equality ignores draft and tool progress but keeps all other state changes visible', () => {
+    const base = { ...EMPTY_CONVERSATION_STATE, isStreaming: true };
+    const withProgressAndDraft = {
+      ...base,
+      draft: 'local composer text',
+      toolProgress: { tool: 'edit_file', path: 'src/a.ts', receivedLines: 40 },
+    };
+    assert.equal(areConversationStatesEqualForSurface(base, withProgressAndDraft), true);
+    assert.equal(
+      areConversationStatesEqualForSurface(withProgressAndDraft, { ...withProgressAndDraft, isStreaming: false }),
+      false,
+    );
+    assert.equal(
+      areConversationStatesEqualForSurface(withProgressAndDraft, {
+        ...withProgressAndDraft,
+        messages: [msg('m1', 'updated')],
+      }),
+      false,
+    );
+  });
+
+  it('keeps rapid tool progress writes out of the surface subscription', () => {
+    const store = new ConversationStore();
+    let surfaceNotifications = 0;
+    store.subscribeSelector(
+      'A',
+      (state) => state,
+      () => {
+        surfaceNotifications += 1;
+      },
+      areConversationStatesEqualForSurface,
+    );
+
+    for (let line = 1; line <= 100; line += 1) {
+      store.setState('A', {
+        toolProgress: { tool: 'edit_file', path: 'src/a.ts', receivedLines: line },
+      });
+    }
+    assert.equal(surfaceNotifications, 0);
+
+    store.setState('A', { messages: [msg('stream', 'visible update')] });
+    assert.equal(surfaceNotifications, 1);
+  });
+
+  it('keeps rapid draft writes in the composer leaf subscription', () => {
+    const store = new ConversationStore();
+    let surfaceNotifications = 0;
+    let draftNotifications = 0;
+    store.subscribeSelector(
+      'A',
+      (state) => state,
+      () => {
+        surfaceNotifications += 1;
+      },
+      areConversationStatesEqualForSurface,
+    );
+    store.subscribeSelector('A', (state) => state.draft, () => {
+      draftNotifications += 1;
+    });
+
+    for (let length = 1; length <= 100; length += 1) {
+      store.setDraft('A', 'x'.repeat(length));
+    }
+    assert.equal(surfaceNotifications, 0);
+    assert.equal(draftNotifications, 100);
+    assert.equal(store.getSnapshot('A').draft.length, 100);
+
+    store.setState('A', { messages: [msg('stream', 'visible update')] });
+    assert.equal(surfaceNotifications, 1);
+  });
+
+  it('keeps the surface snapshot reference stable across draft and progress-only writes', () => {
+    const store = new ConversationStore();
+    store.setState('A', { isStreaming: true });
+    const readSurfaceSnapshot = createConversationSurfaceSnapshotReader(
+      () => store.getSnapshot('A'),
+    );
+    const initial = readSurfaceSnapshot();
+
+    store.setDraft('A', 'latest local draft');
+    store.setState('A', {
+      toolProgress: { tool: 'write_file', path: 'src/a.ts', receivedLines: 80 },
+    });
+    assert.equal(readSurfaceSnapshot(), initial);
+
+    store.setState('A', { messages: [msg('stream', 'visible update')] });
+    const updated = readSurfaceSnapshot();
+    assert.notEqual(updated, initial);
+    assert.equal(updated.draft, 'latest local draft');
+    assert.equal(updated.toolProgress?.receivedLines, 80);
   });
 
   it('reset drops the bucket and notifies', () => {

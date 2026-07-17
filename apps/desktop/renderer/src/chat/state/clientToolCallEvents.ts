@@ -27,8 +27,6 @@ export function normalizeClientToolCall(event: ChatStreamEvent): ClientToolCall 
   ) return null;
   if (!isRecord(event.data)) return null;
 
-  console.log('[Step2 客户端接收 normalizeClientToolCall] 收到 client_tool_call 事件，原始数据:', JSON.stringify(event.data, null, 2));
-
   const raw = isRecord(event.data.call) ? event.data.call : event.data;
   // policy 容器名字两边不一致:v3 dispatching payload 用 policyContext,
   // v2 created 用 policySnapshot。两个都兜底,字段名(riskLevel/dataLevel)一致。
@@ -38,8 +36,6 @@ export function normalizeClientToolCall(event: ChatStreamEvent): ClientToolCall 
   const toolCallId = readString(raw, ['toolCallId', 'callId', 'id']);
   const capabilityId = readString(raw, ['capabilityId', 'toolName', 'name']);
   if (!toolCallId || !capabilityId) return null;
-
-  console.log('[Step2 客户端接收 normalizeClientToolCall] 解析成功 → toolCallId:', toolCallId, 'capabilityId:', capabilityId);
 
   // arguments 是完整参数（后端 v3 dispatching 开始携带），shell 执行必须用它。
   // argumentsPreview 只是 UI 授权卡片展示用的预览。两者都保留：
