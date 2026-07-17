@@ -2,7 +2,11 @@ import crypto from 'node:crypto';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 import { consumeOpenAIStream } from './openai-chat-adapter.mjs';
-import { getQoderModelMetadata, listQoderModels } from './qoder-model-catalog.mjs';
+import {
+  getQoderModelMetadata,
+  listQoderModels,
+  resolveQoderModelOptionProjection,
+} from './qoder-model-catalog.mjs';
 import { prepareQoderInferRequest, resolveQoderInferenceEndpoint } from './qoder-local-auth.mjs';
 
 function qoderModelServerHost(env = process.env) {
@@ -366,7 +370,7 @@ function qoderCompatibleTools(tools) {
   return tools.map(qoderCompatibleTool).filter(Boolean);
 }
 
-function qoderRemoteChatAsk({
+export function buildQoderRemoteChatAsk({
   model,
   messages,
   tools = [],
@@ -376,7 +380,9 @@ function qoderRemoteChatAsk({
   sessionId,
   taskId,
   metadata = null,
+  modelOptionValues = {},
 } = {}) {
+  const optionProjection = resolveQoderModelOptionProjection(metadata, modelOptionValues);
   const sanitizedInput = mergeConsecutiveAssistants(sanitizeQoderToolPairing(messages));
   const normalizedMessages = sanitizedInput.map(qoderMessage).filter(Boolean);
   const systemPrompt = normalizedMessages.find((message) => message.role === 'system')?.content || '';
@@ -424,7 +430,8 @@ function qoderRemoteChatAsk({
       api_key: '',
       url: '',
       source,
-      max_input_tokens: metadata?.contextWindow || 200000,
+      max_input_tokens: optionProjection.contextWindow || metadata?.contextWindow || 200000,
+      ...optionProjection.requestOptions,
     },
     custom_model: null,
     system: systemPrompt,
@@ -464,11 +471,12 @@ async function sendQoderPreparedStream({
   bufferThinkingDeltas = false,
   emitBufferedThinkingDeltas = true,
   streamIdleTimeoutMs = 0,
+  modelOptionValues = {},
 } = {}) {
   const requestId = crypto.randomUUID();
   const sessionId = crypto.randomUUID();
   const metadata = await getQoderModelMetadataForSend(model);
-  const requestBody = qoderRemoteChatAsk({
+  const requestBody = buildQoderRemoteChatAsk({
     model,
     messages,
     tools,
@@ -478,6 +486,7 @@ async function sendQoderPreparedStream({
     sessionId,
     taskId: qoderTurnTaskId(streamId),
     metadata,
+    modelOptionValues,
   });
   const resolvedEndpoint = normalizeQoderPreparedEndpoint(endpoint) || await resolveQoderInferenceEndpoint();
   const prepared = await prepareQoderInferRequest({
@@ -652,6 +661,7 @@ export async function sendQoderPrivateStream({
   bufferThinkingDeltas = false,
   emitBufferedThinkingDeltas = true,
   streamIdleTimeoutMs = 0,
+  modelOptionValues = {},
 } = {}) {
   const metadata = await getQoderModelMetadataForSend(model);
   if (metadata) {
@@ -668,6 +678,7 @@ export async function sendQoderPrivateStream({
       bufferThinkingDeltas,
       emitBufferedThinkingDeltas,
       streamIdleTimeoutMs,
+      modelOptionValues,
     });
   }
   const requestId = crypto.randomUUID();
@@ -683,6 +694,8 @@ export async function sendQoderPrivateStream({
     requestSetId: requestId,
     sessionId,
     taskId: qoderTurnTaskId(streamId),
+    metadata,
+    modelOptionValues,
   });
   const trace = createProviderStreamTrace({
     provider: 'qoder',

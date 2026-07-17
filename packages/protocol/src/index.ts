@@ -407,6 +407,8 @@ export interface LlmProviderConfig {
   readonly createdAt: string;
   readonly contextWindow?: number;
   readonly maxOutputTokens?: number;
+  readonly modelOptions?: readonly LlmModelOptionDefinition[];
+  readonly modelOptionValues?: LlmModelOptionValues;
   readonly inputPrice?: number;
   readonly outputPrice?: number;
   readonly cacheWritePrice?: number;
@@ -497,6 +499,52 @@ export interface LlmProviderGroupConfigView extends LlmProviderGroupConfig {
   readonly defaultComboId?: string;
 }
 
+// 渠道声明、通用层持久化和 Renderer 渲染共用的可序列化模型选项。
+// 通用层只理解控件与值；requestValue 及预算字段由渠道适配器解释并投影。
+export type LlmModelOptionValue = string | number | boolean;
+
+export interface LlmModelOptionChoice {
+  readonly value: LlmModelOptionValue;
+  readonly label: string;
+  readonly description?: string;
+  readonly requestValue?: LlmModelOptionValue;
+  readonly contextWindow?: number;
+  readonly inputTokenLimit?: number;
+}
+
+export interface LlmModelOptionDefinition {
+  readonly id: string;
+  readonly label: string;
+  readonly kind: 'select';
+  readonly description?: string;
+  readonly defaultValue: LlmModelOptionValue;
+  readonly choices: readonly LlmModelOptionChoice[];
+}
+
+export type LlmModelOptionValues = Readonly<Record<string, LlmModelOptionValue>>;
+
+export function resolveLlmModelOptionValues(
+  definitions: readonly LlmModelOptionDefinition[] | undefined,
+  values: LlmModelOptionValues | undefined,
+): LlmModelOptionValues {
+  if (!definitions?.length) return {};
+  const resolved: Record<string, LlmModelOptionValue> = {};
+  for (const definition of definitions) {
+    const selected = values?.[definition.id] ?? definition.defaultValue;
+    const valid = definition.choices.some((choice) => choice.value === selected);
+    resolved[definition.id] = valid ? selected : definition.defaultValue;
+  }
+  return resolved;
+}
+
+export function resolveLlmModelOptionChoice(
+  definition: LlmModelOptionDefinition,
+  values: LlmModelOptionValues | undefined,
+): LlmModelOptionChoice | undefined {
+  const selected = resolveLlmModelOptionValues([definition], values)[definition.id];
+  return definition.choices.find((choice) => choice.value === selected);
+}
+
 // ADR 28: 订阅(OAuth)登录后从远程拉取的可用模型项。
 export interface LlmModelInfo {
   readonly id: string;
@@ -505,6 +553,8 @@ export interface LlmModelInfo {
   readonly created?: number;
   readonly contextWindow?: number;
   readonly maxOutputTokens?: number;
+  readonly modelOptions?: readonly LlmModelOptionDefinition[];
+  readonly modelOptionValues?: LlmModelOptionValues;
   readonly supportsVision?: boolean;
   readonly supportsReasoning?: boolean;
   // 元数据可由渠道直返或 models.dev 精确模型 ID 补全；渠道字段始终优先。

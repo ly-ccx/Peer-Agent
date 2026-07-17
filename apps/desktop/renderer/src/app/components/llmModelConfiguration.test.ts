@@ -10,6 +10,7 @@ import {
   modelMetadataCompletion,
   modelMetadataPatch,
   parseReasoningEffortMap,
+  updateModelOptionSelection,
 } from './llmModelConfiguration.ts';
 
 describe('LLM model configuration rules', () => {
@@ -109,6 +110,41 @@ describe('LLM model configuration rules', () => {
     });
     assert.equal(parseReasoningEffortMap('  '), undefined);
     assert.throws(() => parseReasoningEffortMap('invalid'), /reasoning_effort_map_invalid/);
+  });
+
+  it('updates generic channel model options using serialized dropdown values', () => {
+    const definitions = [{
+      id: 'contextTier',
+      label: 'Context tier',
+      kind: 'select' as const,
+      defaultValue: '200K',
+      choices: [
+        { value: '200K', label: '200K' },
+        { value: '1M', label: '1M' },
+      ],
+    }, {
+      id: 'parallelism',
+      label: 'Parallelism',
+      kind: 'select' as const,
+      defaultValue: 1,
+      choices: [
+        { value: 1, label: '1' },
+        { value: 4, label: '4' },
+      ],
+    }];
+
+    assert.deepEqual(
+      updateModelOptionSelection(definitions, { contextTier: 'removed' }, 'contextTier', '1M'),
+      { contextTier: '1M', parallelism: 1 },
+    );
+    assert.deepEqual(
+      updateModelOptionSelection(definitions, undefined, 'parallelism', '4'),
+      { contextTier: '200K', parallelism: 4 },
+    );
+    assert.deepEqual(
+      updateModelOptionSelection(definitions, { contextTier: '1M' }, 'unknown', 'value'),
+      { contextTier: '1M', parallelism: 1 },
+    );
   });
 
   it('maps catalog sources and reports metadata completeness', () => {

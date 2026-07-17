@@ -1,5 +1,10 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import type { LlmProviderConfigView, LlmReasoningParamStyle } from '@peer-agent/protocol';
+import {
+  resolveLlmModelOptionValues,
+  type LlmModelOptionValues,
+  type LlmProviderConfigView,
+  type LlmReasoningParamStyle,
+} from '@peer-agent/protocol';
 import { useState } from 'react';
 import { Dropdown } from './Dropdown';
 import { Overlay } from './Overlay';
@@ -7,6 +12,7 @@ import {
   formatReasoningEffortMap,
   modelMetadataCompletion,
   parseReasoningEffortMap,
+  updateModelOptionSelection,
 } from './llmModelConfiguration';
 
 interface ModelSettingsForm {
@@ -22,6 +28,7 @@ interface ModelSettingsForm {
   supportsPromptCaching: 'unknown' | 'yes' | 'no';
   reasoningParamStyle: LlmReasoningParamStyle | '';
   reasoningEffortMapText: string;
+  modelOptionValues: LlmModelOptionValues;
 }
 
 const asOptionalNumber = (value: string): number | null => value.trim() ? Number(value) : null;
@@ -64,6 +71,7 @@ export function ModelSettingsDialog({
     supportsPromptCaching: capabilityState(model.supportsPromptCaching),
     reasoningParamStyle: model.reasoningParamStyle ?? '',
     reasoningEffortMapText: formatReasoningEffortMap(model.reasoningEffortMap),
+    modelOptionValues: resolveLlmModelOptionValues(model.modelOptions, model.modelOptionValues),
   });
   const completion = modelMetadataCompletion(model);
 
@@ -89,6 +97,7 @@ export function ModelSettingsDialog({
           ? (form.reasoningParamStyle || null)
           : null,
         reasoningEffortMap: reasoningEffortMap ?? null,
+        modelOptionValues: form.modelOptionValues,
         metadataSource: 'manual',
         metadataSyncedAt: new Date().toISOString(),
       });
@@ -177,6 +186,39 @@ export function ModelSettingsDialog({
                 </>
               ) : null}
             </section>
+
+            {model.modelOptions?.length ? (
+              <section className="llm-settings-section">
+                <h4>{zh ? '渠道模型选项' : 'Channel model options'}</h4>
+                <div className="llm-settings-grid">
+                  {model.modelOptions.map((definition) => {
+                    const selected = form.modelOptionValues[definition.id] ?? definition.defaultValue;
+                    return (
+                      <label key={definition.id}>
+                        <span>{definition.label}</span>
+                        <Dropdown
+                          value={String(selected)}
+                          options={definition.choices.map((choice) => ({
+                            value: String(choice.value),
+                            label: choice.label,
+                          }))}
+                          onChange={(value) => setForm((current) => ({
+                            ...current,
+                            modelOptionValues: updateModelOptionSelection(
+                              model.modelOptions,
+                              current.modelOptionValues,
+                              definition.id,
+                              value,
+                            ),
+                          }))}
+                        />
+                        {definition.description ? <small>{definition.description}</small> : null}
+                      </label>
+                    );
+                  })}
+                </div>
+              </section>
+            ) : null}
 
             <section className="llm-settings-section">
               <h4>{zh ? '价格（美元 / 百万 tokens）' : 'Pricing (USD / 1M tokens)'}</h4>

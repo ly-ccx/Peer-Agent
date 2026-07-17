@@ -1052,3 +1052,35 @@ test('credential Helper failures abort writes without plaintext fallback', () =>
   );
   assert.equal(existsSync(configFile), false, 'provider metadata is not written after Helper failure');
 }));
+
+test('model option values persist per model and legacy configs remain readable', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const base = store.addProvider({
+    provider: 'openai',
+    authMethod: 'api_key',
+    apiKey: 'sk-test',
+    model: 'model-a',
+    modelOptionValues: { contextTier: '200K', retries: 2, streaming: true, ignored: null },
+  });
+  assert.deepEqual(base.modelOptionValues, { contextTier: '200K', retries: 2, streaming: true });
+
+  const updated = store.updateProvider(base.id, {
+    modelOptionValues: { contextTier: '1M', invalid: { nested: true } },
+  });
+  assert.deepEqual(updated.modelOptionValues, { contextTier: '1M' });
+
+  const second = store.addModel(base.groupId, {
+    model: 'model-b',
+    modelOptionValues: { contextTier: '400K' },
+  });
+  assert.deepEqual(second.modelOptionValues, { contextTier: '400K' });
+  assert.deepEqual(store.listProviders().find((item) => item.id === base.id)?.modelOptionValues, { contextTier: '1M' });
+
+  const persisted = JSON.parse(readFileSync(configFile, 'utf8'));
+  assert.deepEqual(persisted.find((item) => item.id === base.id)?.modelOptionValues, { contextTier: '1M' });
+  assert.deepEqual(persisted.find((item) => item.id === second.id)?.modelOptionValues, { contextTier: '400K' });
+
+  delete persisted[0].modelOptionValues;
+  writeFileSync(configFile, JSON.stringify(persisted, null, 2), 'utf8');
+  assert.equal(store.listProviders().find((item) => item.id === persisted[0].id)?.modelOptionValues, undefined);
+}));

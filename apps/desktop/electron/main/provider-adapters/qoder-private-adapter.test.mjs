@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   buildQoderPrivateHeaders,
   buildQoderPrivateRequestBody,
+  buildQoderRemoteChatAsk,
   normalizeQoderModel,
   normalizeQoderPreparedEndpoint,
   mergeConsecutiveAssistants,
@@ -52,6 +53,30 @@ describe('qoder private adapter', () => {
       { role: 'user', content: 'hello' },
     ]);
     assert.equal(body.tools[0].function.name, 'bash');
+  });
+
+  it('projects a selected context tier into Qoder model_config', () => {
+    const metadata = {
+      contextWindow: 180000,
+      modelOptions: [{
+        id: 'contextTier',
+        kind: 'select',
+        defaultValue: '200K',
+        choices: [
+          { value: '200K', requestValue: '200K', contextWindow: 200000, inputTokenLimit: 180000 },
+          { value: '1M', requestValue: '1M', contextWindow: 1000000, inputTokenLimit: 980000 },
+        ],
+      }],
+    };
+    const body = buildQoderRemoteChatAsk({
+      model: 'kimi-k3',
+      messages: [{ role: 'user', content: 'hello' }],
+      metadata,
+      modelOptionValues: { contextTier: '1M' },
+    });
+
+    assert.equal(body.model_config.max_input_tokens, 1000000);
+    assert.equal(body.model_config.contextTier, '1M');
   });
 
   it('builds bearer headers for direct private API calls', () => {

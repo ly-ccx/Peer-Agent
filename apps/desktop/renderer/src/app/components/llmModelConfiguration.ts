@@ -1,8 +1,11 @@
-import type {
-  LlmModelInfo,
-  LlmModelListResult,
-  LlmProviderConfigView,
-  LlmReasoningEffortMap,
+import {
+  resolveLlmModelOptionValues,
+  type LlmModelInfo,
+  type LlmModelListResult,
+  type LlmModelOptionDefinition,
+  type LlmModelOptionValues,
+  type LlmProviderConfigView,
+  type LlmReasoningEffortMap,
 } from '@peer-agent/protocol';
 
 export type ModelMetadataSource = NonNullable<LlmProviderConfigView['metadataSource']>;
@@ -169,6 +172,19 @@ export function filterModelCatalog(
   const needle = query.trim().toLocaleLowerCase();
   if (!needle) return entries;
   return entries.filter(({ model }) => `${model.label} ${model.id}`.toLocaleLowerCase().includes(needle));
+}
+
+export function updateModelOptionSelection(
+  definitions: readonly LlmModelOptionDefinition[] | undefined,
+  values: LlmModelOptionValues | undefined,
+  definitionId: string,
+  serializedValue: string,
+): LlmModelOptionValues {
+  const resolved = resolveLlmModelOptionValues(definitions, values);
+  const definition = definitions?.find((candidate) => candidate.id === definitionId);
+  const choice = definition?.choices.find((candidate) => String(candidate.value) === serializedValue);
+  if (!definition || !choice) return resolved;
+  return { ...resolved, [definition.id]: choice.value };
 }
 
 export function modelMetadataCompletion(

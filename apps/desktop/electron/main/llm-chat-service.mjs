@@ -33,6 +33,7 @@ import {
   resolveProviderCredential,
 } from './provider-credential-resolver.mjs';
 import { resolveChannel } from './provider-channels.mjs';
+import { getQoderModelMetadata, resolveQoderModelOptionProjection } from './provider-adapters/qoder-model-catalog.mjs';
 import { detectTailRepetition } from './repetition-detector.mjs';
 
 const activeStreams = new Map();
@@ -721,7 +722,10 @@ export function createLlmChatService({
           streamId,
           provider,
         });
-        const contextWindow = provider.contextWindow || 0;
+        const qoderOptionProjection = resolvedChannel.wire === 'qoder-private'
+          ? resolveQoderModelOptionProjection(getQoderModelMetadata(provider.model), provider.modelOptionValues)
+          : null;
+        const contextWindow = qoderOptionProjection?.inputTokenLimit || provider.contextWindow || 0;
         const maxOutputTokens = provider.maxOutputTokens || 0;
         const onNativeReasoningFallback = (details) => noteNativeReasoningFallback(provider, details);
         const runtimeTools = buildRuntimeTools({
@@ -743,6 +747,7 @@ export function createLlmChatService({
               streamId,
               signal: runtimeTurn.signal,
               contextWindow,
+              modelOptionValues: provider.modelOptionValues,
               maxOutputTokens,
               conversationId,
               toolContext,

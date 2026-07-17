@@ -25,10 +25,69 @@ function encryptedCatalogCandidates(uid, options = {}) {
   return ['catalog-v5', 'catalog-v4', 'catalog-v2', 'catalog'].map((name) => path.join(dir, name));
 }
 
+function normalizeContextTierOption(raw) {
+  const entries = Object.entries(raw?.context_config || {})
+    .filter(([key, config]) => key.trim() && config && Number.isFinite(config.token_count) && config.token_count > 0);
+  if (!entries.length) return undefined;
+
+  const defaultEntry = entries.find(([, config]) => config.is_default === true) || entries[0];
+  const defaultContextWindow = defaultEntry[1].token_count;
+  const defaultInputTokenLimit = Number.isFinite(raw.max_input_tokens) ? raw.max_input_tokens : defaultContextWindow;
+  const reservedTokens = Math.max(0, defaultContextWindow - defaultInputTokenLimit);
+
+  return {
+    id: 'contextTier',
+    label: '上下文档位',
+    kind: 'select',
+    description: '总上下文窗口；最大输入会为模型输出和运行时内容预留空间。',
+    defaultValue: defaultEntry[0],
+    choices: entries.map(([key, config]) => ({
+      value: key,
+      label: key,
+      requestValue: key,
+      contextWindow: config.token_count,
+      inputTokenLimit: Math.max(1, config.token_count - reservedTokens),
+    })),
+  };
+}
+
+export function resolveQoderModelOptionProjection(metadata, values = {}) {
+  const definitions = Array.isArray(metadata?.modelOptions) ? metadata.modelOptions : [];
+  const definition = definitions.find((option) => option?.id === 'contextTier' && option.kind === 'select');
+  if (!definition) {
+    return {
+      contextWindow: metadata?.contextWindow,
+      inputTokenLimit: metadata?.contextWindow,
+      requestOptions: {},
+    };
+  }
+
+  const requestedValue = typeof values?.contextTier === 'string' ? values.contextTier : undefined;
+  const choice = definition.choices.find((item) => item.value === requestedValue)
+    || definition.choices.find((item) => item.value === definition.defaultValue)
+    || definition.choices[0];
+  if (!choice) {
+    return {
+      contextWindow: metadata?.contextWindow,
+      inputTokenLimit: metadata?.contextWindow,
+      requestOptions: {},
+    };
+  }
+
+  return {
+    contextWindow: choice.contextWindow ?? metadata?.contextWindow,
+    inputTokenLimit: choice.inputTokenLimit ?? metadata?.contextWindow,
+    requestOptions: {
+      contextTier: choice.requestValue ?? choice.value,
+    },
+  };
+}
+
 function normalizeModel(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const id = String(raw.key || raw.id || raw.model || '').trim();
   if (!id) return null;
+  const contextTierOption = normalizeContextTierOption(raw);
   return {
     id,
     label: String(raw.display_name || raw.displayName || raw.label || id),
@@ -43,6 +102,7 @@ function normalizeModel(raw) {
     maxOutputTokens: Number.isFinite(raw.max_output_tokens) ? raw.max_output_tokens : undefined,
     supportsVision: typeof raw.is_vl === 'boolean' ? raw.is_vl : undefined,
     supportsReasoning: typeof raw.is_reasoning === 'boolean' ? raw.is_reasoning : undefined,
+    modelOptions: contextTierOption ? [contextTierOption] : undefined,
     raw,
   };
 }
