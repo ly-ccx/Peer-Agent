@@ -11,7 +11,15 @@ import { normalizeOpenAIMessages } from './message-normalizer.mjs';
 
 // OpenAI Responses reasoning.effort 随模型支持 none/low/medium/high/xhigh/max。
 // Peer Agent 的 off 不发 reasoning；其余档位按目标模型能力与 provider wire 契约透传。
-const REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' };
+// medium 是 Grok 4.5 等渠道的原生档位，必须直通。
+const REASONING_EFFORT = {
+  low: 'low',
+  medium: 'medium',
+  default: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+};
 
 function positiveTokenLimit(value) {
   const num = Number(value);

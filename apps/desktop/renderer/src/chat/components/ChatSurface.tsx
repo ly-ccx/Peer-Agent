@@ -14,6 +14,7 @@ import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi }
 import {
   normalizeEffortLevels,
   resolveModelSwitchState,
+  resolvePreferredEffort,
   ACCESS_LEVELS,
   CHAT_MODES,
   accessLevelLabel,
@@ -656,6 +657,22 @@ export function ChatSurface({
   // 档位列表以后端透传的 provider 原生能力（reasoningEffortLevels）为准，经归一化后渲染；
   // 后端未提供时回退到通用四档。不再按 provider 名硬编码（旧逻辑只认 openai，导致 Anthropic 等被降级到四档）。
   const effortLevels = normalizeEffortLevels(activeProvider?.reasoningEffortLevels);
+  // 渠道能力变化后（如切到 Grok 仅 low/medium/high），把会话旧档位投影到合法默认值。
+  useEffect(() => {
+    if (!activeProviderSupportsReasoning) return;
+    if (effortLevels.includes(effort)) return;
+    const preferred = resolvePreferredEffort(
+      effortLevels,
+      activeProvider?.reasoningDefaultEffort,
+    );
+    if (preferred !== effort) changeEffort(preferred);
+  }, [
+    activeProvider?.reasoningDefaultEffort,
+    activeProviderSupportsReasoning,
+    changeEffort,
+    effort,
+    effortLevels,
+  ]);
   const handleModelChange = useCallback((providerId: string) => {
     const targetProvider = providers.find((provider) => provider.id === providerId && provider.apiKeyConfigured);
     const targetEffortLevels = normalizeEffortLevels(targetProvider?.reasoningEffortLevels);
@@ -663,6 +680,7 @@ export function ChatSurface({
       providerId,
       currentEffort: effort,
       targetLevels: targetEffortLevels,
+      preferredDefault: targetProvider?.reasoningDefaultEffort,
     });
 
     // done 事件里的窗口属于上一模型。切模型后必须立即失效，展示层才能回退到目标

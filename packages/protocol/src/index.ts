@@ -425,6 +425,8 @@ export interface LlmProviderConfig {
   // 该 provider 原生支持的思考强度档位（来自 channel capabilities，未含归一化）。
   // 前端据此渲染档位选择器；缺省时前端回退到通用四档。
   readonly reasoningEffortLevels?: readonly string[];
+  /** 渠道默认思考强度（如 Grok 为 high）。UI 切模型时用于落到正确默认档。 */
+  readonly reasoningDefaultEffort?: string;
   readonly oauthProjectId?: string;
   readonly customHeaders?: Readonly<Record<string, string>>;
   readonly customHeadersInvalid?: boolean;
@@ -473,6 +475,8 @@ export interface LlmModelConfig {
   readonly reasoningParamStyle?: LlmReasoningParamStyle;
   readonly reasoningEffortMap?: LlmReasoningEffortMap;
   readonly reasoningEffortLevels?: readonly string[];
+  /** 渠道默认思考强度（如 Grok 为 high）。 */
+  readonly reasoningDefaultEffort?: string;
   readonly customHeaders?: Readonly<Record<string, string>>;
   readonly customHeadersInvalid?: boolean;
 }

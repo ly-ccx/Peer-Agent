@@ -91,6 +91,18 @@ describe('Provider message encoders', () => {
     assert.equal(body.max_tokens, 8192);
   });
 
+  it('passes Grok medium effort through OpenAI-compatible reasoning_effort', () => {
+    const body = encodeOpenAIChatRequest({
+      model: 'grok-4.5',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      effort: 'medium',
+      supportsReasoning: true,
+      reasoningParamStyle: 'openai-effort',
+    });
+    assert.equal(body.reasoning_effort, 'medium');
+  });
+
   it('maps max output tokens to the OpenAI Responses request field', () => {
     const body = encodeOpenAIResponsesRequest({
       model: 'gpt-test',

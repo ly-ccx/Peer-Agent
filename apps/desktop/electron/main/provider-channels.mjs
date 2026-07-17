@@ -47,7 +47,7 @@ const CHANNEL_DESCRIPTORS = {
       reasoning: {
         supported: true,
         paramStyle: 'openai-effort',
-        effortLevels: ['low', 'default', 'high', 'xhigh'],
+        effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
         defaultEffort: 'default',
       },
       promptCache: true,
@@ -69,7 +69,7 @@ const CHANNEL_DESCRIPTORS = {
       reasoning: {
         supported: true,
         paramStyle: 'anthropic-enabled-budget',
-        effortLevels: ['low', 'default', 'high', 'xhigh'],
+        effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
         defaultEffort: 'default',
       },
       promptCache: true,
@@ -90,7 +90,7 @@ const CHANNEL_DESCRIPTORS = {
       reasoning: {
         supported: false,
         paramStyle: 'openai-effort',
-        effortLevels: ['low', 'default', 'high', 'xhigh'],
+        effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
         defaultEffort: 'default',
       },
       promptCache: false,
@@ -112,7 +112,7 @@ const CHANNEL_DESCRIPTORS = {
       reasoning: {
         supported: false,
         paramStyle: 'anthropic-enabled-budget',
-        effortLevels: ['low', 'default', 'high', 'xhigh'],
+        effortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
         defaultEffort: 'default',
       },
       promptCache: false,
@@ -162,8 +162,17 @@ const CHANNEL_DESCRIPTORS = {
       reasoning: {
         supported: true,
         paramStyle: 'openai-effort',
+        // Grok 4.5：仅 low/medium/high，默认 high，不可关闭 Thinking。
+        // effortMap 兜底把 UI 历史 default/off 投影为 high，避免编码层落到 OpenAI 通用 medium。
         effortLevels: ['low', 'medium', 'high'],
         defaultEffort: 'high',
+        effortMap: {
+          off: 'high',
+          low: 'low',
+          medium: 'medium',
+          default: 'high',
+          high: 'high',
+        },
       },
       promptCache: false,
       vision: true,
@@ -419,6 +428,7 @@ export function resolveChannel(config = {}) {
     reasoningParamStyle: capabilities.reasoning?.paramStyle || 'none',
     reasoningEffortMap: capabilities.reasoning?.effortMap || undefined,
     reasoningEffortLevels: capabilities.reasoning?.effortLevels || undefined,
+    reasoningDefaultEffort: capabilities.reasoning?.defaultEffort || undefined,
     supportsReasoning: Boolean(capabilities.reasoning?.supported),
     supportsPromptCaching: Boolean(capabilities.promptCache),
   };

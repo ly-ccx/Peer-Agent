@@ -8,8 +8,8 @@ import type { LocalAccessLevel } from '@peer-agent/protocol';
 //
 // 注意 LocalAccessLevel 跨进程契约类型仍来自 @peer-agent/protocol，不在此重复定义。
 
-/** 思考强度：通用五档 + GPT-5.6 等模型暴露的 max 档。 */
-export type EffortLevel = 'off' | 'low' | 'default' | 'high' | 'xhigh' | 'max';
+/** 思考强度：通用档位 + GPT-5.6 等模型暴露的 max 档 + Grok 的 medium 档。 */
+export type EffortLevel = 'off' | 'low' | 'medium' | 'default' | 'high' | 'xhigh' | 'max';
 
 /** 通用 provider 的思考强度档位（四档）。 */
 export const BASE_EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'low', 'default', 'high'];
@@ -17,46 +17,83 @@ export const BASE_EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'low', 'defaul
 /** OpenAI 系 provider 的思考强度档位（五档，含 xhigh）。 */
 export const OPENAI_EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'low', 'default', 'high', 'xhigh'];
 
+/** 固定档位排序：off → low → medium → default → high → xhigh → max。 */
+const CANONICAL_EFFORT_ORDER: readonly EffortLevel[] = [
+  'off',
+  'low',
+  'medium',
+  'default',
+  'high',
+  'xhigh',
+  'max',
+];
+
 /**
  * 把后端透传的 provider 原生档位（reasoningEffortLevels）归一化成 UI 可直接渲染的档位列表。
  *
  * 归一化规则（解决 channel 各自档位口径不一致的问题）：
  * - 过滤掉非法值（非 EffortLevel 的字符串一律丢弃）。
- * - 强制把 'off'（关闭思考）放到列表首位：它是通用开关，部分 channel（如 Anthropic/OpenAI）
- *   的 effortLevels 并不含 off，需要补齐；含 off 的（如 Google）则去重后归位。
- * - 按 EffortLevel 的标准顺序（off→low→default→high→xhigh→max）排序，确保 UI 档位顺序稳定。
+ * - 渠道声明什么就渲染什么：Grok 仅 low/medium/high，不强制补 off。
+ * - 按固定顺序排序，确保 UI 档位顺序稳定。
  * - 入参为空 / 全部非法 / 未提供时，回退到通用四档 BASE_EFFORT_LEVELS。
  */
 export function normalizeEffortLevels(raw: readonly string[] | undefined | null): readonly EffortLevel[] {
-  const ORDER: readonly EffortLevel[] = ['off', 'low', 'default', 'high', 'xhigh', 'max'];
   if (!raw || raw.length === 0) return BASE_EFFORT_LEVELS;
   const valid = new Set<EffortLevel>();
   for (const item of raw) {
     if (isEffortLevel(item)) valid.add(item);
   }
-  valid.add('off'); // off 是通用开关，始终提供。
-  const result = ORDER.filter((level) => valid.has(level));
-  return result.length > 1 ? result : BASE_EFFORT_LEVELS;
+  const result = CANONICAL_EFFORT_ORDER.filter((level) => valid.has(level));
+  return result.length > 0 ? result : BASE_EFFORT_LEVELS;
 }
 
 /** EffortLevel 类型守卫。 */
 export function isEffortLevel(value: unknown): value is EffortLevel {
-  return value === 'off' || value === 'low' || value === 'default' || value === 'high' || value === 'xhigh' || value === 'max';
+  return value === 'off'
+    || value === 'low'
+    || value === 'medium'
+    || value === 'default'
+    || value === 'high'
+    || value === 'xhigh'
+    || value === 'max';
+}
+
+/**
+ * 在目标档位中解析渠道默认思考强度。
+ * 优先使用渠道声明的 defaultEffort；否则按 high → default → medium → low 回落。
+ */
+export function resolvePreferredEffort(
+  targetLevels: readonly EffortLevel[],
+  preferredDefault?: string | null,
+): EffortLevel {
+  if (preferredDefault && isEffortLevel(preferredDefault) && targetLevels.includes(preferredDefault)) {
+    return preferredDefault;
+  }
+  for (const candidate of ['high', 'default', 'medium', 'low'] as const) {
+    if (targetLevels.includes(candidate)) return candidate;
+  }
+  return targetLevels[0] ?? 'default';
 }
 
 /**
  * 切换模型时把会话当前档位投影到目标模型能力集。
  * xhigh/max 都表达“该模型的最高强度”，跨模型切换时优先保持这一语义。
+ * preferredDefault 用于 Grok 等渠道把默认落到 high，而不是第一个可用档。
  */
 export function resolveModelSwitchEffort(
   current: EffortLevel,
   targetLevels: readonly EffortLevel[],
+  preferredDefault?: string | null,
 ): EffortLevel {
   if (targetLevels.includes(current)) return current;
   if (current === 'xhigh' && targetLevels.includes('max')) return 'max';
   if (current === 'max' && targetLevels.includes('xhigh')) return 'xhigh';
+  // default/off 不是 Grok 原生档；切到不可关闭 Thinking 的渠道时按渠道默认。
+  if ((current === 'default' || current === 'off') && preferredDefault) {
+    return resolvePreferredEffort(targetLevels, preferredDefault);
+  }
   if (targetLevels.includes('default')) return 'default';
-  return targetLevels.find((level) => level !== 'off') ?? 'off';
+  return resolvePreferredEffort(targetLevels, preferredDefault);
 }
 
 /** 模型切换的表达层原子状态：绑定目标模型、投影思考档位、废弃旧模型窗口快照。 */
@@ -64,10 +101,12 @@ export function resolveModelSwitchState({
   providerId,
   currentEffort,
   targetLevels,
+  preferredDefault,
 }: {
   providerId: string;
   currentEffort: EffortLevel;
   targetLevels: readonly EffortLevel[];
+  preferredDefault?: string | null;
 }): {
   modelProviderId: string;
   effort: EffortLevel;
@@ -75,7 +114,7 @@ export function resolveModelSwitchState({
 } {
   return {
     modelProviderId: providerId,
-    effort: resolveModelSwitchEffort(currentEffort, targetLevels),
+    effort: resolveModelSwitchEffort(currentEffort, targetLevels, preferredDefault),
     authoritativeContext: null,
   };
 }
@@ -128,6 +167,7 @@ export function modeTitle(mode: ChatMode, isZh: boolean): string {
 export function effortLabel(level: EffortLevel, isZh: boolean): string {
   if (level === 'off') return isZh ? '关闭思考' : 'Reasoning off';
   if (level === 'low') return isZh ? '简洁思考' : 'Low reasoning';
+  if (level === 'medium') return isZh ? '均衡思考' : 'Medium reasoning';
   if (level === 'high') return isZh ? '深度思考' : 'High reasoning';
   if (level === 'xhigh') return isZh ? '超深度思考' : 'Extra-high reasoning';
   if (level === 'max') return isZh ? '超深度思考' : 'Extra-high reasoning';

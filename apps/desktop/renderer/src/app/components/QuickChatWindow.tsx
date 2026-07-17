@@ -22,6 +22,7 @@ import {
   modeLabel,
   modeTitle,
   normalizeEffortLevels,
+  resolvePreferredEffort,
   type ChatMode,
   type EffortLevel,
 } from '../../chat/state/preferences';
@@ -91,7 +92,11 @@ export function QuickChatWindow() {
       setModelProviderId(selected.id);
       const levels = normalizeEffortLevels(selected.reasoningEffortLevels);
       const rememberedEffort = localStorage.getItem('quick-chat:effort') as EffortLevel | null;
-      setEffort(rememberedEffort && levels.includes(rememberedEffort) ? rememberedEffort : levels[0] ?? 'default');
+      setEffort(
+        rememberedEffort && levels.includes(rememberedEffort)
+          ? rememberedEffort
+          : resolvePreferredEffort(levels, selected.reasoningDefaultEffort),
+      );
     }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
     inputRef.current?.focus();
   }, []);
@@ -134,7 +139,11 @@ export function QuickChatWindow() {
       if (provider) {
         const levels = normalizeEffortLevels(provider.reasoningEffortLevels);
         setModelProviderId(provider.id);
-        setEffort((current) => levels.includes(current) ? current : levels[0] ?? 'default');
+        setEffort((current) => (
+          levels.includes(current)
+            ? current
+            : resolvePreferredEffort(levels, provider.reasoningDefaultEffort)
+        ));
       }
     }
     if (kind === 'effort' && effortLevels.includes(value as EffortLevel)) {

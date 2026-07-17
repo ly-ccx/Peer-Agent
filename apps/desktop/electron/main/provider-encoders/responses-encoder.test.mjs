@@ -106,4 +106,29 @@ describe('OpenAI Responses request encoder (ADR 28)', () => {
     });
     assert.equal(body.reasoning.effort, 'max');
   });
+
+  it('passes Grok low/medium/high and maps default/off to high via effort map', () => {
+    const make = (effort, reasoningEffortMap) => encodeOpenAIResponsesRequest({
+      model: 'grok-4.5',
+      messages: [{ role: 'user', content: 'debug' }],
+      supportsReasoning: true,
+      reasoningParamStyle: 'openai-effort',
+      effort,
+      reasoningEffortMap,
+    });
+
+    assert.equal(make('low').reasoning.effort, 'low');
+    assert.equal(make('medium').reasoning.effort, 'medium');
+    assert.equal(make('high').reasoning.effort, 'high');
+
+    const grokMap = {
+      off: 'high',
+      low: 'low',
+      medium: 'medium',
+      default: 'high',
+      high: 'high',
+    };
+    assert.equal(make('default', grokMap).reasoning.effort, 'high');
+    assert.equal(make('off', grokMap).reasoning, undefined);
+  });
 });

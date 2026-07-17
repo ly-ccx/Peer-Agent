@@ -6,7 +6,14 @@ import {
 
 // OpenAI GPT-5.5 原生 reasoning_effort 支持 none/low/medium/high/xhigh。
 // Peer Agent 的 off 不发 reasoning_effort；其余档位按 provider wire 契约透传。
-const OPENAI_REASONING_EFFORT = { low: 'low', default: 'medium', high: 'high', xhigh: 'xhigh' };
+// medium 是 Grok 4.5 等渠道的原生档位，必须直通，不能被 default→medium 逻辑吞掉。
+const OPENAI_REASONING_EFFORT = {
+  low: 'low',
+  medium: 'medium',
+  default: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+};
 const ANTHROPIC_THINKING_BUDGET = { low: 4096, default: 10240, high: 32768, xhigh: 32768 };
 const QWEN_THINKING_BUDGET = { low: 1024, default: 4096, high: 8192, xhigh: 16384 };
 // Anthropic output_config.effort 原生枚举为 low/medium/high/xhigh/max（与 thinking 是

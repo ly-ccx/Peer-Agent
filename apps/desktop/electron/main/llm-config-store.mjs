@@ -762,6 +762,7 @@ export function createLlmConfigStore({
       reasoningParamStyle: item.reasoningParamStyle ?? undefined,
       reasoningEffortMap: item.reasoningEffortMap ?? undefined,
       reasoningEffortLevels: item.reasoningEffortLevels ?? resolved?.reasoningEffortLevels ?? undefined,
+      reasoningDefaultEffort: item.reasoningDefaultEffort ?? resolved?.reasoningDefaultEffort ?? undefined,
       oauthProjectId: item.oauthProjectId ?? undefined,
       customHeaders: item.customHeaders ?? undefined,
       customHeadersInvalid: item.customHeadersInvalid ?? undefined,
@@ -902,6 +903,7 @@ export function createLlmConfigStore({
       reasoningEffortLevels: subscriptionMetadata?.reasoningEffortLevels
         ? [...subscriptionMetadata.reasoningEffortLevels]
         : resolved.reasoningEffortLevels || undefined,
+      reasoningDefaultEffort: resolved.reasoningDefaultEffort || undefined,
       customHeaders: customHeaders || undefined,
     };
     if (isLocalQoderAuth) applyQoderModelMetadata(item);
