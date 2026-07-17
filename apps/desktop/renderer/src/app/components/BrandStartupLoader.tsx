@@ -1,6 +1,8 @@
 import { useId, useLayoutEffect, useRef } from 'react';
 
 const SUPPORT_GAP = 11;
+/** Deep ink black for the wordmark fill — stays solid black through intro and hold. */
+const INK_BLACK = '#1a1d21';
 
 export function BrandStartupLoader() {
   const id = useId().replace(/:/g, '');
@@ -25,13 +27,22 @@ export function BrandStartupLoader() {
     void document.fonts?.ready.then(positionSupportLine);
   }, []);
 
-  const inkGradientId = `brand-startup-ink-${id}`;
   const shineGradientId = `brand-startup-shine-${id}`;
   const edgeBlurId = `brand-startup-edge-${id}`;
   const fillMaskId = `brand-startup-mask-${id}`;
 
   return (
     <div className="brand-startup-loader" role="status" aria-label="Peer Agent is starting">
+      {/*
+        Post-intro loading state: soft ink-wash pigment blots that bloom and diffuse
+        behind the settled black wordmark (水墨颜料散开).
+      */}
+      <div className="brand-startup-loader__ink-wash" aria-hidden="true">
+        <span className="brand-startup-loader__ink-blot brand-startup-loader__ink-blot--a" />
+        <span className="brand-startup-loader__ink-blot brand-startup-loader__ink-blot--b" />
+        <span className="brand-startup-loader__ink-blot brand-startup-loader__ink-blot--c" />
+      </div>
+
       <div className="brand-startup-loader__brand" role="img" aria-label="Peer Agent">
         <svg
           className="brand-startup-loader__lockup"
@@ -40,11 +51,6 @@ export function BrandStartupLoader() {
           aria-hidden="true"
         >
           <defs>
-            <linearGradient id={inkGradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="#497f9f" />
-              <stop offset=".24" stopColor="#1a1d21" />
-              <stop offset="1" stopColor="#111419" />
-            </linearGradient>
             <linearGradient id={shineGradientId} x1="0" y1="0" x2="1" y2="0">
               <stop offset="0" stopColor="#9ecbe0" stopOpacity="0" />
               <stop offset=".2" stopColor="#9ecbe0" stopOpacity=".95" />
@@ -56,30 +62,38 @@ export function BrandStartupLoader() {
               <feGaussianBlur stdDeviation="3" />
             </filter>
             <mask id={fillMaskId} maskUnits="userSpaceOnUse" x="0" y="0" width="1000" height="220">
-              <rect className="brand-startup-loader__fill-mask" x="0" y="0" width="1000" height="224" fill="white" />
+              <rect className="brand-startup-loader__fill-mask" x="0" y="0" width="1000" height="220" fill="#fff" />
             </mask>
           </defs>
 
-          <text ref={textRef} className="brand-startup-loader__wordmark brand-startup-loader__wordmark--ghost" x="500" y="164">
+          <text
+            ref={textRef}
+            className="brand-startup-loader__wordmark brand-startup-loader__wordmark--ghost"
+            x="500"
+            y="150"
+          >
             Peer Agent
           </text>
+          {/* Solid deep-ink fill (black throughout intro; no spectrum). */}
           <text
-            className="brand-startup-loader__wordmark brand-startup-loader__wordmark--fill"
+            className="brand-startup-loader__wordmark brand-startup-loader__wordmark--ink"
             x="500"
-            y="164"
-            fill={`url(#${inkGradientId})`}
+            y="150"
+            fill={INK_BLACK}
             mask={`url(#${fillMaskId})`}
           >
             Peer Agent
           </text>
-
-          <g className="brand-startup-loader__liquid-edge" filter={`url(#${edgeBlurId})`}>
-            <ellipse cx="500" cy="110" rx="420" ry="8" fill={`url(#${shineGradientId})`} />
-          </g>
-          <path
-            className="brand-startup-loader__liquid-crest"
-            d="M496 111 C496 98 498 91 500 88 C503 92 505 100 504 111 Z"
-            fill="rgba(255,255,255,.88)"
+          {/* Horizontal liquid-edge sheen only (no rising tip path). */}
+          <rect
+            className="brand-startup-loader__liquid-edge"
+            x="120"
+            y="104"
+            width="760"
+            height="12"
+            rx="6"
+            fill={`url(#${shineGradientId})`}
+            filter={`url(#${edgeBlurId})`}
           />
           <line ref={supportLineRef} className="brand-startup-loader__support" strokeLinecap="round" />
         </svg>

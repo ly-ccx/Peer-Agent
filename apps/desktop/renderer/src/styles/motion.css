@@ -380,10 +380,15 @@
 /* ---------------------------------------------------------------------------
  * 品牌启动页 — brand-startup-loader 的编排关键帧
  * ---------------------------------------------------------------------------
- * 受控例外：这 6 个关键帧是品牌启动动画的编排特效，不属于通用语义基元
+ * 受控例外：这组关键帧是品牌启动动画的编排特效，不属于通用语义基元
  *（motion-*），因为其设计参数（时长 3.2s、专属 cubic-bezier、负向位移 +
  * 模糊 + 缩放 + 填充液位 + 装饰线）完全耦合于品牌启动的叙事节奏，无法被
  * 任何通用基元参数化表达。
+ *
+ * 分段：
+ *   1) 入场 3.2s（arrive / atmosphere / fill / edge / crest / support）
+ *   2) 入场结束后的 hold 循环（*-hold）：若 bootstrap 仍未完成，继续给
+ *      “仍在加载”的呼吸反馈，而不是停在最后一帧。
  *
  * 治理登记：在 check-architecture-governance.mjs 的 keyframeAllowlist 中，
  * motion.css 已是白名单文件；shell.css 仅保留 animation 引用（不定义
@@ -419,14 +424,43 @@
   100% { opacity: 0; transform: translateY(-35px) scaleX(1.05); }
 }
 
-@keyframes brand-startup-crest {
-  0%, 62% { opacity: 0; transform: translateY(184px) scaleY(.2); }
-  70% { opacity: .8; transform: translateY(0) scaleY(1); }
-  82% { opacity: .35; transform: translateY(-30px) scaleY(.7); }
-  100% { opacity: 0; transform: translateY(-35px) scaleY(.25); }
-}
 
 @keyframes brand-startup-support {
   0%, 70% { opacity: 0; transform: scaleX(.35); }
   84%, 100% { opacity: 1; transform: scaleX(1); }
 }
+
+/*
+ * 入场结束后的持续加载态：
+ * - 字标保持黑色并定住
+ * - 背景水墨颜料散开（ink-wash blots）
+ * 峰值透明度必须够高，否则浅底 + 模糊会肉眼看不见
+ */
+@keyframes brand-startup-ink-wash {
+  0% {
+    opacity: 0;
+    transform: scale(0.22) translate(0, 0);
+  }
+  12% {
+    opacity: 0.88;
+    transform: scale(0.52) translate(-0.4%, 0.3%);
+  }
+  28% {
+    opacity: 0.78;
+    transform: scale(0.92) translate(1.2%, -0.8%);
+  }
+  48% {
+    opacity: 0.58;
+    transform: scale(1.28) translate(-1.6%, 1.2%);
+  }
+  72% {
+    opacity: 0.28;
+    transform: scale(1.68) translate(1%, -0.6%);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.05) translate(0.4%, 0.8%);
+  }
+}
+
+

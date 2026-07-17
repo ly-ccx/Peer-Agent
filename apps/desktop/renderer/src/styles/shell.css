@@ -159,6 +159,7 @@
     height: 100%;
     place-items: center;
     overflow: hidden;
+    position: relative;
     background:
       radial-gradient(circle at 50% 48%, rgba(255, 255, 255, 0.96) 0 16%, rgba(255, 255, 255, 0) 52%),
       var(--za-app-bg);
@@ -173,8 +174,68 @@
     background: rgba(59, 127, 171, 0.08);
     filter: blur(72px);
     opacity: 0;
+    /* 入场后定住，加载态交给背景水墨散开 */
     animation: brand-startup-atmosphere 3.2s cubic-bezier(.2, .72, .2, 1) both;
     pointer-events: none;
+  }
+
+  /* 入场停住后的水墨颜料散开加载态（背景层） */
+  .brand-startup-loader__ink-wash {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  /* 水墨渍：深墨色 + 中等模糊，肉眼可见的散开形态（不用 multiply，浅底上几乎看不见） */
+  .brand-startup-loader__ink-blot {
+    position: absolute;
+    border-radius: 58% 42% 48% 52% / 46% 54% 46% 54%;
+    opacity: 0;
+    transform: scale(0.22);
+    filter: blur(28px);
+    will-change: transform, opacity;
+    animation: brand-startup-ink-wash 6.4s cubic-bezier(.22, .61, .28, 1) 3.2s infinite;
+  }
+
+  .brand-startup-loader__ink-blot--a {
+    width: min(62vw, 620px);
+    aspect-ratio: 1.05;
+    left: 40%;
+    top: 46%;
+    translate: -50% -50%;
+    background:
+      radial-gradient(ellipse 58% 52% at 40% 46%, rgba(22, 24, 30, 0.78) 0 24%, rgba(22, 24, 30, 0.28) 48%, rgba(22, 24, 30, 0) 74%),
+      radial-gradient(ellipse 42% 38% at 66% 58%, rgba(48, 58, 78, 0.55) 0 22%, rgba(48, 58, 78, 0) 70%);
+  }
+
+  .brand-startup-loader__ink-blot--b {
+    width: min(50vw, 480px);
+    aspect-ratio: 1.18;
+    left: 60%;
+    top: 54%;
+    translate: -50% -50%;
+    border-radius: 44% 56% 52% 48% / 58% 42% 58% 42%;
+    background:
+      radial-gradient(ellipse 54% 48% at 46% 40%, rgba(28, 32, 42, 0.72) 0 22%, rgba(28, 32, 42, 0.24) 50%, rgba(28, 32, 42, 0) 72%),
+      radial-gradient(ellipse 36% 44% at 30% 66%, rgba(62, 74, 98, 0.48) 0 20%, rgba(62, 74, 98, 0) 68%);
+    animation-delay: 3.55s;
+    animation-duration: 7.2s;
+  }
+
+  .brand-startup-loader__ink-blot--c {
+    width: min(44vw, 400px);
+    aspect-ratio: 0.9;
+    left: 50%;
+    top: 38%;
+    translate: -50% -50%;
+    border-radius: 50% 50% 42% 58% / 48% 52% 48% 52%;
+    background:
+      radial-gradient(ellipse 50% 56% at 52% 48%, rgba(18, 20, 26, 0.7) 0 20%, rgba(18, 20, 26, 0.22) 46%, rgba(18, 20, 26, 0) 70%),
+      radial-gradient(ellipse 34% 30% at 28% 36%, rgba(70, 84, 108, 0.42) 0 18%, rgba(70, 84, 108, 0) 66%);
+    animation-delay: 3.9s;
+    animation-duration: 7.8s;
   }
 
   .brand-startup-loader__brand {
@@ -183,6 +244,7 @@
     position: relative;
     z-index: 1;
     opacity: 0;
+    /* 字标入场后定住（黑色填充，无呼吸/无五彩） */
     animation: brand-startup-arrive 3.2s cubic-bezier(.2, .72, .2, 1) both;
   }
 
@@ -208,6 +270,10 @@
     paint-order: stroke;
   }
 
+  .brand-startup-loader__wordmark--ink {
+    fill: #1a1d21;
+  }
+
   .brand-startup-loader__fill-mask {
     transform: translateY(220px);
     animation: brand-startup-fill 3.2s cubic-bezier(.2, .72, .2, 1) both;
@@ -219,13 +285,6 @@
     transform: translateY(184px) scaleX(.68);
     transform-origin: 500px 110px;
     animation: brand-startup-edge 3.2s cubic-bezier(.2, .72, .2, 1) both;
-  }
-
-  .brand-startup-loader__liquid-crest {
-    opacity: 0;
-    transform: translateY(184px) scaleY(.2);
-    transform-origin: 500px 111px;
-    animation: brand-startup-crest 3.2s cubic-bezier(.2, .72, .2, 1) both;
   }
 
   .brand-startup-loader__support {
@@ -242,16 +301,23 @@
     .brand-startup-loader::before,
     .brand-startup-loader__brand,
     .brand-startup-loader__fill-mask,
-    .brand-startup-loader__support {
+    .brand-startup-loader__support,
+    .brand-startup-loader__ink-blot {
       animation: none;
     }
 
     .brand-startup-loader::before { opacity: .44; }
     .brand-startup-loader__brand { opacity: 1; }
     .brand-startup-loader__fill-mask { transform: translateY(-4px); }
-    .brand-startup-loader__liquid-edge,
-    .brand-startup-loader__liquid-crest { display: none; }
+    .brand-startup-loader__liquid-edge { display: none; }
     .brand-startup-loader__support { opacity: 1; transform: none; }
+
+    /* 降级：静态可见墨渍，无散开动效 */
+    .brand-startup-loader__ink-blot {
+      opacity: .62;
+      transform: scale(1.05);
+      filter: blur(32px);
+    }
   }
 
   .empty-actions span,
