@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test, beforeEach, afterEach } from 'node:test';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -591,6 +591,10 @@ test('onChange: 每个写操作（含 AI 工具路径的 create/recordTaskEviden
   assert.equal(events.length, 6, 'deletePlan 也应触发');
   assert.equal(events[5].reason, 'delete');
   assert.equal(events[5].planId, plan.planId);
+  assert.equal(events[0].conversationId, plan.conversationId ?? null);
+  assert.equal(events[0].changeKind, 'persist');
+  assert.equal(events[5].changeKind, 'delete');
+  assert.equal(events[5].conversationId, plan.conversationId ?? null);
 });
 
 test('onChange: 回调抛错不影响写盘事实（Evidence 已落盘）', () => {
@@ -1378,4 +1382,60 @@ test('派生子目标会反向关联父任务并联动执行状态', () => {
   sourceTask = store.getPlan(parent.planId).tasks[0];
   assert.equal(sourceTask.status, 'waiting_user');
   assert.match(sourceTask.blockedReason, /派生子目标/);
+});
+
+
+test('onChange: setRunnerState 进度字段广播 conversationId + changeKind=runner-progress，并节流写盘', async () => {
+  const events = [];
+  const storeDir = path.join(tmpRoot, 'goal-plans-runner-progress');
+  const watched = createGoalPlanStore({
+    storeDir,
+    onChange: (e) => events.push(e),
+  });
+  const plan = watched.createPlan({ ...draftWithTasks(), conversationId: 'conv-progress' });
+  events.length = 0;
+
+  watched.setRunnerState(plan.planId, { roundCount: 1, toolCallCount: 2, phase: 'act' });
+  watched.setRunnerState(plan.planId, { roundCount: 2, toolCallCount: 3, phase: 'act' });
+
+  assert.ok(events.length >= 2, '进度更新应立即广播');
+  assert.equal(events[0].changeKind, 'runner-progress');
+  assert.equal(events[0].conversationId, 'conv-progress');
+  assert.equal(events[0].planId, plan.planId);
+  assert.ok(events[0].runner, 'runner-progress 应附带 runner 便于 UI 本地 patch');
+  assert.equal(events[0].runner.roundCount, 1);
+  assert.equal(events[1].runner.roundCount, 2);
+
+  // 内存即时可见
+  assert.equal(watched.getPlan(plan.planId)?.runner?.roundCount, 2);
+
+  // 节流写盘：短时间内磁盘可能仍是旧值，等待 flush 后应落盘
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  const disk = JSON.parse(
+    readFileSync(path.join(storeDir, `${plan.planId}.json`), 'utf8'),
+  );
+  assert.equal(disk.runner.roundCount, 2);
+  assert.equal(disk.runner.toolCallCount, 3);
+});
+
+test('onChange: setRunnerState 状态跃迁走 runner-state 并立即落盘', () => {
+  const events = [];
+  const storeDir = path.join(tmpRoot, 'goal-plans-runner-state');
+  const watched = createGoalPlanStore({
+    storeDir,
+    onChange: (e) => events.push(e),
+  });
+  const plan = watched.createPlan({ ...draftWithTasks(), conversationId: 'conv-state' });
+  events.length = 0;
+
+  watched.setRunnerState(plan.planId, { status: 'running', enabled: true, phase: 'act' });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].changeKind, 'runner-state');
+  assert.equal(events[0].conversationId, 'conv-state');
+
+  const disk = JSON.parse(
+    readFileSync(path.join(storeDir, `${plan.planId}.json`), 'utf8'),
+  );
+  assert.equal(disk.runner.status, 'running');
+  assert.equal(disk.runner.enabled, true);
 });

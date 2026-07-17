@@ -690,7 +690,8 @@ goalRunner = createGoalRunner({
       broadcastToAllWindows('goalRunner:changed', {
         type: 'goalRunner:streamStarted',
         planId: plan.planId,
-        conversationId: plan.conversationId,
+        conversationId: plan.conversationId ?? null,
+        changeKind: 'runner-state',
         streamId,
         turnNumber,
         startedAt: Date.now(),
@@ -798,6 +799,8 @@ goalRunner = createGoalRunner({
       broadcastToAllWindows('goalRunner:changed', {
         type: 'goalRunner:explorerStreamStarted',
         planId: plan.planId,
+        conversationId: plan.conversationId ?? null,
+        changeKind: 'runner-state',
         explorerId: explorer.explorerId,
         streamId,
         startedAt: Date.now(),
@@ -835,6 +838,8 @@ goalRunner = createGoalRunner({
       broadcastToAllWindows('goalRunner:changed', {
         type: 'goalRunner:verifierStreamStarted',
         planId: plan.planId,
+        conversationId: plan.conversationId ?? null,
+        changeKind: 'runner-state',
         verifierRunId,
         streamId,
         startedAt: Date.now(),
@@ -862,7 +867,16 @@ goalRunner = createGoalRunner({
       });
     },
   },
-  emitEvent: (payload) => broadcastToAllWindows('goalRunner:changed', payload),
+  emitEvent: (payload) => {
+    const planId = payload?.planId ?? null;
+    const plan = planId ? goalPlanStore.getPlan(planId) : null;
+    broadcastToAllWindows('goalRunner:changed', {
+      ...payload,
+      planId,
+      conversationId: payload?.conversationId ?? plan?.conversationId ?? null,
+      changeKind: payload?.changeKind ?? 'runner-state',
+    });
+  },
 });
 
 function buildRuntimeProjection() {

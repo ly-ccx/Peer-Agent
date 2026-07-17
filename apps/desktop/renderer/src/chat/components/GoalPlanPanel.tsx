@@ -27,6 +27,56 @@ function normalizeConversationId(value: string | number | null | undefined): str
   return normalized.length > 0 ? normalized : null;
 }
 
+type GoalChangePayload = {
+  reason?: string;
+  type?: string;
+  planId?: string | null;
+  conversationId?: string | null;
+  changeKind?: string | null;
+  runner?: GoalPlan['runner'] | Partial<GoalRunnerState> | null;
+};
+
+function shouldRefreshForConversation(
+  payload: GoalChangePayload | undefined,
+  conversationId: string | null,
+  plans: readonly GoalPlan[],
+): boolean {
+  if (!conversationId) return false;
+  const eventConversationId = normalizeConversationId(payload?.conversationId);
+  if (eventConversationId) return eventConversationId === conversationId;
+  const planId = typeof payload?.planId === 'string' ? payload.planId : null;
+  if (planId) {
+    // 已有本会话列表时，仅当 planId 属于当前列表才刷新；空列表保守刷新。
+    if (plans.length === 0) return true;
+    return plans.some((plan) => plan.planId === planId);
+  }
+  // 缺 conversationId/planId：保守刷新，避免漏更新。
+  return true;
+}
+
+function patchPlanRunner(
+  plans: readonly GoalPlan[],
+  planId: string | null | undefined,
+  runner: GoalPlan['runner'] | Partial<GoalRunnerState> | null | undefined,
+): readonly GoalPlan[] | null {
+  if (!planId || !runner) return null;
+  let changed = false;
+  const next = plans.map((plan) => {
+    if (plan.planId !== planId) return plan;
+    changed = true;
+    const mergedRunner = {
+      ...(plan.runner ?? {}),
+      ...runner,
+    } as GoalRunnerState;
+    return {
+      ...plan,
+      runner: mergedRunner,
+      updatedAt: mergedRunner.updatedAt || plan.updatedAt,
+    };
+  });
+  return changed ? next : null;
+}
+
 function isIntakePlan(plan: GoalPlan): boolean {
   return plan.activation?.kind === 'intake';
 }
@@ -1483,7 +1533,15 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     [conversationId],
   );
 
-  const reload = useCallback(async () => {
+  // 合并并发 reload：广播连发时复用 in-flight，并在结束后补一次最新拉取。
+  const reloadInFlightRef = useRef<Promise<void> | null>(null);
+  const reloadQueuedRef = useRef(false);
+  const reloadRequestIdRef = useRef(0);
+  const plansRef = useRef(plans);
+  plansRef.current = plans;
+
+  const reload = useCallback(async (options: { silent?: boolean; mode?: 'silent' | 'visible' } = {}) => {
+    const silent = options.mode === 'silent' || options.silent === true;
     if (normalizedConversationId === null) {
       setPlans([]);
       prevPlanCountRef.current = 0;
@@ -1492,26 +1550,57 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
       return;
     }
 
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await clientApi.goalPlansList({ conversationId: normalizedConversationId });
-      const scopedResult = result.filter(
-        (plan) => normalizeConversationId(plan.conversationId) === normalizedConversationId
-          && isDisplayableGoalPlan(plan),
-      );
-      // 仅 reload（广播驱动，同一会话内的实时变更）路径检测「真正新建」：
-      // 新数量 > 基线 → 本会话内新建了计划（含同会话第 2/3/N 个），触发一次自动展开。
-      // 切换会话由下方 load effect 处理（只刷基线、不触发），故这里不会被切会话误触。
-      if (scopedResult.length > prevPlanCountRef.current) {
-        onGoalPlanCreated?.();
+    if (reloadInFlightRef.current) {
+      reloadQueuedRef.current = true;
+      await reloadInFlightRef.current;
+      return;
+    }
+
+    const requestId = ++reloadRequestIdRef.current;
+    // 仅首屏/切会话可见 loading；广播驱动的静默刷新不展示「刷新中…」。
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
+
+    const task = (async () => {
+      try {
+        const result = await clientApi.goalPlansList({ conversationId: normalizedConversationId });
+        if (requestId !== reloadRequestIdRef.current) return;
+        const scopedResult = result.filter(
+          (plan) => normalizeConversationId(plan.conversationId) === normalizedConversationId
+            && isDisplayableGoalPlan(plan),
+        );
+        // 仅 reload（广播驱动，同一会话内的实时变更）路径检测「真正新建」：
+        // 新数量 > 基线 → 本会话内新建了计划（含同会话第 2/3/N 个），触发一次自动展开。
+        // 切换会话由下方 load effect 处理（只刷基线、不触发），故这里不会被切会话误触。
+        if (silent && scopedResult.length > prevPlanCountRef.current) {
+          onGoalPlanCreated?.();
+        }
+        prevPlanCountRef.current = scopedResult.length;
+        setPlans(scopedResult);
+      } catch (err) {
+        if (requestId !== reloadRequestIdRef.current) return;
+        // 静默刷新失败不打断现有面板；仅非静默路径写 error。
+        if (!silent) {
+          setError(err instanceof Error ? err.message : isZh ? '加载计划失败' : 'Failed to load plans');
+        }
+      } finally {
+        if (requestId === reloadRequestIdRef.current && !silent) {
+          setLoading(false);
+        }
       }
-      prevPlanCountRef.current = scopedResult.length;
-      setPlans(scopedResult);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : isZh ? '加载计划失败' : 'Failed to load plans');
+    })();
+
+    reloadInFlightRef.current = task;
+    try {
+      await task;
     } finally {
-      setLoading(false);
+      if (reloadInFlightRef.current === task) reloadInFlightRef.current = null;
+      if (reloadQueuedRef.current) {
+        reloadQueuedRef.current = false;
+        void reload({ mode: 'silent' });
+      }
     }
   }, [normalizedConversationId, isZh, onGoalPlanCreated]);
 
@@ -1522,6 +1611,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     // 加载完成后只把基线刷成新会话的真实数量，绝不触发 onGoalPlanCreated。
     // 这是「切到一个本来就有计划的会话不自动弹开侧栏」的关键所在。
     prevPlanCountRef.current = 0;
+    reloadRequestIdRef.current += 1;
     const load = async () => {
       if (normalizedConversationId === null) {
         setPlans([]);
@@ -1558,24 +1648,54 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     };
   }, [normalizedConversationId, isZh]);
 
-  // 实时同步：任一写路径（IPC 或 AI 工具 goal_create_plan/goal_update_task）改动计划后，
-  // main 会广播 'goalPlans:changed'，这里据此重拉，无需用户切换会话/重挂载面板。
-  // 修复 bug：goal 模式下 AI 创建计划后面板不刷新、需切走再切回才显示。
+  // 实时同步：任一写路径（IPC 或 AI 工具 goal_create_plan/goal_update_task 等）
+  // 改动计划后，main 广播 'goalPlans:changed'；此处订阅并静默重拉。
+  // 会话过滤 + runner-progress 本地 patch，避免无关会话全量 list 与「刷新中…」。
   useEffect(() => {
-    const unsubscribe = clientApi.onGoalPlansChanged(() => {
-      void reload();
+    const unsubscribe = clientApi.onGoalPlansChanged((payload) => {
+      if (!shouldRefreshForConversation(payload, normalizedConversationId, plansRef.current)) {
+        return;
+      }
+      if (payload?.changeKind === 'runner-progress') {
+        const patched = patchPlanRunner(
+          plansRef.current,
+          payload.planId,
+          payload.runner,
+        );
+        if (patched) {
+          setPlans(patched);
+          return;
+        }
+        // 无本地目标 plan 时退回静默全量（例如新建后首个 progress 事件）。
+      }
+      void reload({ mode: 'silent' });
     });
     return unsubscribe;
-  }, [reload]);
+  }, [normalizedConversationId, reload]);
 
   // Runner 每个 tick 改动 plan.runner 后，main 同样广播 'goalRunner:changed'；
-  // runner 状态内嵌在 plan 内，这里据此重拉，托管状态实时反映在面板而不刷进聊天流。
+  // runner 状态内嵌在 plan 内，这里据此刷新；进度优先本地 patch。
   useEffect(() => {
-    const unsubscribe = clientApi.onGoalRunnerChanged(() => {
-      void reload();
+    const unsubscribe = clientApi.onGoalRunnerChanged((payload) => {
+      if (!shouldRefreshForConversation(payload, normalizedConversationId, plansRef.current)) {
+        return;
+      }
+      if (payload?.changeKind === 'runner-progress' || payload?.runner) {
+        const patched = patchPlanRunner(
+          plansRef.current,
+          payload.planId,
+          (payload.runner) ?? null,
+        );
+        if (patched) {
+          setPlans(patched);
+          return;
+        }
+      }
+      // 结构/状态跃迁或缺 runner 时静默全量。
+      void reload({ mode: 'silent' });
     });
     return unsubscribe;
-  }, [reload]);
+  }, [normalizedConversationId, reload]);
 
   // Runner 控制：pause/resume/clear。renderer 不直接执行本地能力，
   // 全部经 clientApi → preload → IPC → goalRunner（main），再由广播驱动 reload。
@@ -1591,7 +1711,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         } else {
           await clientApi.goalRunnerClear({ planId: plan.planId });
         }
-        await reload();
+        await reload({ mode: 'silent' });
       } catch (err) {
         setError(err instanceof Error ? err.message : isZh ? '操作失败' : 'Action failed');
       } finally {
@@ -1616,7 +1736,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
             options: { intent: 'verify', phase: 'verify' },
           });
         }
-        await reload();
+        await reload({ mode: 'silent' });
       } catch (err) {
         setError(err instanceof Error ? err.message : isZh ? '操作失败' : 'Action failed');
       } finally {
@@ -1633,7 +1753,13 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
     busyPlanId: approvalBusyPlanId,
     error: approvalError,
     decide,
-  } = useGoalPlanApproval({ isZh, onApproved, onSettled: reload });
+  } = useGoalPlanApproval({
+    isZh,
+    onApproved,
+    onSettled: async () => {
+      await reload({ mode: 'silent' });
+    },
+  });
 
   const handleNextAction = useCallback(
     async (plan: GoalPlan, action: 'start' | 'adjust' | 'cancel') => {
@@ -1655,7 +1781,7 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
         } else {
           await clientApi.goalPlansSetStatus({ planId: plan.planId, status: 'cancelled' });
         }
-        await reload();
+        await reload({ mode: 'silent' });
       } catch (err) {
         setError(err instanceof Error ? err.message : isZh ? '操作失败' : 'Action failed');
       } finally {
@@ -1721,7 +1847,8 @@ export function GoalPlanPanel({ conversationId, isZh, onApproved, sidePanelConta
   if (plans.length === 0) {
     return null;
   }
-  const refreshing = loading ? (isZh ? ' · 刷新中…' : ' · refreshing…') : '';
+  // 仅首屏可见 loading 展示「刷新中…」；广播静默刷新不再走该文案。
+  const refreshing = loading && plans.length === 0 ? (isZh ? ' · 刷新中…' : ' · refreshing…') : '';
   // A：折叠态也要有信息密度——挑一个「活跃计划」（优先待批准，其次执行中，再次第一个），
   // 在 header 上直接显示它的标题与 X/Y 迷你进度，避免「很长却什么都没有」。
   const activePlan =

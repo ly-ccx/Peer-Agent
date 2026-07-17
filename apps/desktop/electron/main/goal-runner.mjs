@@ -613,6 +613,15 @@ export function createGoalRunner({
     }
   }
 
+  /**
+   * Runner 进度 patch 入口：高频计数/阶段更新统一走这里。
+   * 实际写盘节流与 changeKind=runner-progress 分级由 goal-plan-store.setRunnerState 负责。
+   */
+  function scheduleRunnerPatch(planId, patch = {}) {
+    if (!planId || typeof goalPlanStore?.setRunnerState !== 'function') return null;
+    return goalPlanStore.setRunnerState(planId, patch);
+  }
+
   function appendRunEvent(planId, event = {}) {
     if (typeof goalPlanStore.appendRunEvent !== 'function') return null;
     try {
@@ -1145,7 +1154,7 @@ export function createGoalRunner({
     if (session.cancelled) return { terminal: true, state: getState(planId) };
     if (explorerToolCalls > 0) {
       const afterExplore = goalPlanStore.getPlan(planId);
-      goalPlanStore.setRunnerState(planId, {
+      scheduleRunnerPatch(planId, {
         toolCallCount:
           toPositiveInteger(afterExplore?.runner?.toolCallCount, 0, { allowZero: true }) + explorerToolCalls,
         updatedAt: now(),
@@ -1432,7 +1441,7 @@ export function createGoalRunner({
       // turnCount 仅作预算/tick 计数（maxTurns 熔断依据），每 tick +1。
       // 展示用的「工具」计数（toolCallCount）已由 runGoalTurn 注入的实时 sink 在工具
       // 派发处拥有并累加，这里不再重复累加，避免双重计数。
-      goalPlanStore.setRunnerState(planId, {
+      scheduleRunnerPatch(planId, {
         turnCount: toPositiveInteger(afterTurnRunner.turnCount, 0, { allowZero: true }) + 1,
         updatedAt: now(),
       });

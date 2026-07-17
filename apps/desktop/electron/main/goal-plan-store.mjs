@@ -1146,14 +1146,108 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
   // 完成后触发 onChange，使 main 进程可向 renderer 广播 'goalPlans:changed'。
   // 收口于此，AI 工具路径（local-goal-provider）与 IPC 路径共享同一通知，
   // 无需在每个调用点重复挂广播。回调异常被吞掉，绝不影响写盘结果。
-  function notifyChanged(reason, planId) {
+  //
+  // payload 契约（向后兼容扩展）：
+  // - reason: 写路径标签（persist/delete/...）
+  // - planId / conversationId: 供 renderer 做会话域过滤
+  // - changeKind: 变更分级（persist | delete | runner-progress | runner-state）
+  // - runner: runner-progress 时附带最新 runner，便于 UI 本地 patch
+  function notifyChanged(reason, planId, options = {}) {
     if (typeof onChange !== 'function') return;
     try {
-      onChange({ reason, planId: planId ?? null });
+      const conversationId =
+        options.conversationId !== undefined
+          ? options.conversationId ?? null
+          : null;
+      onChange({
+        reason,
+        planId: planId ?? null,
+        conversationId,
+        changeKind: options.changeKind ?? reason ?? 'persist',
+        ...(options.runner ? { runner: options.runner } : {}),
+      });
     } catch (err) {
       // 广播失败不影响写盘结果，但显式打印以便排查（不要静默吞）。
       console.warn('[goal-plan-store] onChange broadcast failed:', err);
     }
+  }
+
+  /** Runner 高频进度字段：仅计数/阶段跳动时走 runner-progress，避免无关会话全量 list。 */
+  const RUNNER_PROGRESS_KEYS = new Set([
+    'turnCount',
+    'roundCount',
+    'toolCallCount',
+    'explorerCount',
+    'updatedAt',
+    'phase',
+    'currentTaskId',
+    'lastTickAt',
+  ]);
+
+  function classifyRunnerChangeKind(patch = {}) {
+    const keys = Object.keys(patch).filter((key) => patch[key] !== undefined);
+    if (keys.length === 0) return 'runner-state';
+    return keys.every((key) => RUNNER_PROGRESS_KEYS.has(key))
+      ? 'runner-progress'
+      : 'runner-state';
+  }
+
+  // runner-progress 内存叠加 + 写盘节流：保证同 tick 内 getPlan 读到最新计数，
+  // 同时把磁盘写入合并到 300ms 窗口，降低高频 tick 的 IO 与广播放大。
+  const runnerProgressOverlay = new Map();
+  const runnerProgressTimers = new Map();
+  const RUNNER_PROGRESS_PERSIST_MS = 300;
+
+  function clearRunnerProgressState(planId) {
+    if (planId) {
+      runnerProgressOverlay.delete(planId);
+      const timer = runnerProgressTimers.get(planId);
+      if (timer) {
+        clearTimeout(timer);
+        runnerProgressTimers.delete(planId);
+      }
+      return;
+    }
+    for (const timer of runnerProgressTimers.values()) clearTimeout(timer);
+    runnerProgressTimers.clear();
+    runnerProgressOverlay.clear();
+  }
+
+  function flushRunnerProgressPersist(planId, { notify = false } = {}) {
+    const timer = runnerProgressTimers.get(planId);
+    if (timer) {
+      clearTimeout(timer);
+      runnerProgressTimers.delete(planId);
+    }
+    const overlay = runnerProgressOverlay.get(planId);
+    if (!overlay) return null;
+    const normalized = normalizePlan(overlay);
+    const next = {
+      ...normalized,
+      status: derivePlanStatus(normalized.status, normalized.tasks),
+      progress: aggregateProgress(normalized.tasks),
+    };
+    writeJsonAtomic(planFile(next.planId), next);
+    syncIndex(next);
+    // 落盘后保留 overlay 内容一致；完整 persist 路径会清 overlay。
+    runnerProgressOverlay.set(planId, next);
+    if (notify) {
+      notifyChanged('persist', next.planId, {
+        conversationId: next.conversationId ?? null,
+        changeKind: 'runner-progress',
+        runner: next.runner ?? null,
+      });
+    }
+    return next;
+  }
+
+  function scheduleRunnerProgressPersist(planId) {
+    if (runnerProgressTimers.has(planId)) return;
+    const timer = setTimeout(() => {
+      runnerProgressTimers.delete(planId);
+      flushRunnerProgressPersist(planId, { notify: false });
+    }, RUNNER_PROGRESS_PERSIST_MS);
+    runnerProgressTimers.set(planId, timer);
   }
 
   function planFile(id) {
@@ -1260,7 +1354,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     writeJsonl(indexFile, index);
   }
 
-  function persist(plan) {
+  function persist(plan, options = {}) {
     // progress 始终由子任务聚合派生，写入前强制重算覆盖（不可手填）。
     const normalized = normalizePlan(plan);
     const next = {
@@ -1270,9 +1364,15 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       status: derivePlanStatus(normalized.status, normalized.tasks),
       progress: aggregateProgress(normalized.tasks),
     };
+    // 完整写盘优先：清掉 runner-progress 节流状态，避免旧计数回写覆盖。
+    clearRunnerProgressState(next.planId);
     writeJsonAtomic(planFile(next.planId), next);
     syncIndex(next);
-    notifyChanged('persist', next.planId);
+    notifyChanged('persist', next.planId, {
+      conversationId: next.conversationId ?? null,
+      changeKind: options.changeKind ?? 'persist',
+      ...(options.runner ? { runner: options.runner } : {}),
+    });
     return next;
   }
 
@@ -1323,6 +1423,8 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
   }
 
   function getPlan(planId) {
+    const overlay = runnerProgressOverlay.get(planId);
+    if (overlay) return normalizePlan(overlay);
     return normalizePlan(readJson(planFile(planId)));
   }
 
@@ -1802,7 +1904,33 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       updatedAt: now,
     };
     const nextRunner = normalizeRunnerState({ ...current, ...patch, updatedAt: patch.updatedAt || now }, planId);
-    return persist({ ...plan, runner: nextRunner, updatedAt: now });
+    const changeKind = classifyRunnerChangeKind(patch);
+    const nextPlan = { ...plan, runner: nextRunner, updatedAt: now };
+
+    // 高频 runner 进度：内存即时可见 + 广播 runner-progress（带 runner 本地 patch），
+    // 写盘节流到 300ms，避免每个 tick 全量 list 与磁盘抖动。
+    if (changeKind === 'runner-progress') {
+      const normalized = normalizePlan(nextPlan);
+      const next = {
+        ...normalized,
+        status: derivePlanStatus(normalized.status, normalized.tasks),
+        progress: aggregateProgress(normalized.tasks),
+      };
+      runnerProgressOverlay.set(planId, next);
+      scheduleRunnerProgressPersist(planId);
+      notifyChanged('persist', next.planId, {
+        conversationId: next.conversationId ?? null,
+        changeKind: 'runner-progress',
+        runner: next.runner ?? null,
+      });
+      return next;
+    }
+
+    // 状态跃迁/终态等：立即 flush + 完整 persist（会清 overlay）。
+    return persist(nextPlan, {
+      changeKind: 'runner-state',
+      runner: nextRunner,
+    });
   }
 
   /** Append a structured Goal / Plan / Run execution event without changing task Evidence. */
@@ -2241,12 +2369,19 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
   }
 
   function deletePlan(planId) {
+    // 删除前尽量取出 conversationId，便于 renderer 会话过滤。
+    const existing = getPlan(planId);
+    const conversationId = existing?.conversationId ?? null;
+    clearRunnerProgressState(planId);
     const index = readIndex().filter((m) => m.planId !== planId);
     writeJsonl(indexFile, index);
     try {
       if (existsSync(planFile(planId))) unlinkSync(planFile(planId));
     } catch {}
-    notifyChanged('delete', planId);
+    notifyChanged('delete', planId, {
+      conversationId,
+      changeKind: 'delete',
+    });
     return listPlans();
   }
 
@@ -2286,7 +2421,11 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       } catch {}
     }
     // 批量删除只广播一次，避免抖动；planId 传 null 表示非单一计划变更。
-    notifyChanged('delete', null);
+    for (const meta of removed) clearRunnerProgressState(meta.planId);
+    notifyChanged('delete', null, {
+      conversationId: normalizedConversationId,
+      changeKind: 'delete',
+    });
     return listPlans();
   }
 

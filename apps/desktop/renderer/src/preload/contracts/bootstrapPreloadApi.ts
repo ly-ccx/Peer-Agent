@@ -417,11 +417,26 @@ export interface BootstrapPreloadApi {
   readonly goalPlansDelete: (params: { planId: string }) => Promise<readonly GoalPlan[]>;
   // 任一写路径（IPC 或 AI 工具）改动计划后由 main 推送，renderer 据此实时重拉，
   // 无需切换会话/重挂载。reason: 'persist'（创建/修订/审批/状态/证据）或 'delete'。
+  // conversationId / changeKind 用于会话域过滤与分级刷新（runner-progress 可本地 patch）。
   readonly onGoalPlansChanged: (
-    listener: (payload: { reason: string; planId: string | null }) => void,
+    listener: (payload: {
+      reason: string;
+      planId: string | null;
+      conversationId?: string | null;
+      changeKind?: string | null;
+      /** runner-progress 时附带最新 runner，便于 UI 本地 patch */
+      runner?: GoalPlan['runner'] | null;
+    }) => void,
   ) => () => void;
   readonly onGoalRunnerChanged: (
-    listener: (payload: { type?: string; planId?: string | null; [key: string]: unknown }) => void,
+    listener: (payload: {
+      type?: string;
+      planId?: string | null;
+      conversationId?: string | null;
+      changeKind?: string | null;
+      runner?: GoalPlan['runner'] | null;
+      [key: string]: unknown;
+    }) => void,
   ) => () => void;
   readonly chatSend: (params: ChatSendRequest) => Promise<void>;
   readonly chatAbort: (params: { streamId: string }) => Promise<void>;
