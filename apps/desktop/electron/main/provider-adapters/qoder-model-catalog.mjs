@@ -8,6 +8,12 @@ const FALLBACK_QODER_MODELS = [
   { id: 'auto', label: 'Auto', contextWindow: 180_000, maxOutputTokens: 32_768, supportsVision: true, supportsReasoning: false },
 ];
 
+const latestCatalogByConfigDir = new Map();
+
+function catalogCacheKey(options = {}) {
+  return resolveQoderConfigDir(options);
+}
+
 function modelPath(options = {}) {
   return path.join(resolveQoderConfigDir(options), '.auth/models');
 }
@@ -194,6 +200,8 @@ function readEncryptedCatalogSync(options = {}) {
 }
 
 export function getQoderModelCatalog(options = {}) {
+  const cached = latestCatalogByConfigDir.get(catalogCacheKey(options));
+  if (cached?.length) return cached;
   try {
     const models = readEncryptedCatalogSync(options);
     if (models.length) return mergeModelCatalog(models, readLegacyModelCatalog(options));
@@ -215,12 +223,17 @@ export function getQoderModelMetadata(modelId, options = {}) {
 export async function listQoderModels(options = {}) {
   try {
     const result = await readEncryptedCatalog(options);
-    return { models: mergeModelCatalog(result.models, await readLegacyModelCatalogAsync(options)), source: result.source };
+    const models = mergeModelCatalog(result.models, await readLegacyModelCatalogAsync(options));
+    latestCatalogByConfigDir.set(catalogCacheKey(options), models);
+    return { models, source: result.source };
   } catch {}
   try {
     const text = await fsp.readFile(modelPath(options), 'utf8');
     const models = parseQoderModelCatalogText(text);
-    if (models.length) return { models, source: 'local' };
+    if (models.length) {
+      latestCatalogByConfigDir.set(catalogCacheKey(options), models);
+      return { models, source: 'local' };
+    }
     return { models: [...FALLBACK_QODER_MODELS], source: 'fallback', error: 'qoder_models_empty' };
   } catch (error) {
     return {

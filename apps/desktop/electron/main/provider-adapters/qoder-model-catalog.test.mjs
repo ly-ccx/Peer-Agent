@@ -115,6 +115,11 @@ describe('qoder model catalog', () => {
       ['400K', 400000, 380000],
       ['1M', 1000000, 980000],
     ]);
+
+    rmSync(modelFile);
+    const cachedMetadata = getQoderModelMetadata('kimi-k3', options);
+    assert.equal(cachedMetadata?.contextWindow, 180000);
+    assert.equal(cachedMetadata?.modelOptions?.[0]?.defaultValue, '200K');
   }));
 
   it('projects a selected context tier into request and input budgets', async () => withQoderConfig(async (options) => {

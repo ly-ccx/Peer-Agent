@@ -472,6 +472,7 @@ test('Qoder local auth provider exposes catalog display label without changing r
     assert.equal(provider.maxOutputTokens, 32_768);
     assert.equal(provider.supportsVision, true);
     assert.equal(provider.supportsReasoning, true);
+    assert.equal(provider.supportsPromptCaching, undefined);
   } finally {
     if (previousQoderConfigDir === undefined) delete process.env.QODER_CONFIG_DIR;
     else process.env.QODER_CONFIG_DIR = previousQoderConfigDir;

@@ -165,9 +165,11 @@ function applyQoderModelMetadata(item) {
   if (metadata?.label) item.modelLabel = metadata.label;
   item.contextWindow = metadata?.contextWindow ?? item.contextWindow;
   item.maxOutputTokens = metadata?.maxOutputTokens ?? item.maxOutputTokens;
-  item.supportsVision = metadata?.supportsVision ?? false;
-  item.supportsReasoning = metadata?.supportsReasoning ?? false;
-  item.supportsPromptCaching = false;
+  if (typeof metadata?.supportsVision === 'boolean') item.supportsVision = metadata.supportsVision;
+  if (typeof metadata?.supportsReasoning === 'boolean') item.supportsReasoning = metadata.supportsReasoning;
+  // Qoder's catalog does not currently declare prompt-cache support. Keep that
+  // capability unknown instead of turning missing metadata into an explicit no.
+  delete item.supportsPromptCaching;
   item.cacheWritePrice = undefined;
   item.cacheReadPrice = undefined;
   item.customHeaders = undefined;
