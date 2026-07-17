@@ -44,6 +44,56 @@ describe('LLM model configuration rules', () => {
     assert.deepEqual(changes.removals.map((model) => model.id), ['record-a']);
   });
 
+  it('treats Grok remote capabilities as an applicable metadata refresh', () => {
+    const configured = [{
+      id: 'grok-record',
+      model: 'grok-4.5',
+      modelLabel: 'grok-4.5',
+    }] as never;
+    const remote = [{
+      id: 'grok-4.5',
+      label: 'grok-4.5',
+      contextWindow: 500_000,
+      supportsVision: true,
+      supportsReasoning: true,
+    }];
+
+    const changes = calculateModelSelectionChanges(remote, configured);
+
+    assert.equal(changes.additions.length, 0);
+    assert.equal(changes.removals.length, 0);
+    assert.deepEqual(changes.updates.map(({ configured: item, model }) => [
+      item.id,
+      model.id,
+      model.contextWindow,
+      model.supportsVision,
+      model.supportsReasoning,
+    ]), [['grok-record', 'grok-4.5', 500_000, true, true]]);
+  });
+
+  it('does not report a metadata refresh when selected catalog metadata is unchanged', () => {
+    const configured = [{
+      id: 'grok-record',
+      model: 'grok-4.5',
+      modelLabel: 'grok-4.5',
+      contextWindow: 500_000,
+      supportsVision: true,
+      supportsReasoning: true,
+    }] as never;
+
+    const changes = calculateModelSelectionChanges([{
+      id: 'grok-4.5',
+      label: 'grok-4.5',
+      contextWindow: 500_000,
+      supportsVision: true,
+      supportsReasoning: true,
+    }], configured);
+
+    assert.equal(changes.additions.length, 0);
+    assert.equal(changes.updates.length, 0);
+    assert.equal(changes.removals.length, 0);
+  });
+
   it('filters by model id or label', () => {
     const catalog = buildModelCatalog([
       { id: 'claude-sonnet', label: 'Claude Sonnet' },

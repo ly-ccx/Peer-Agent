@@ -15,6 +15,39 @@ export interface ModelCatalogEntry {
   readonly configured: boolean;
 }
 
+function contextWindowDefinition(model: Pick<LlmModelInfo, 'modelOptions'>) {
+  return model.modelOptions?.find((definition) => definition.choices.some((choice) => (
+    typeof choice.contextWindow === 'number' && choice.contextWindow > 0
+  )));
+}
+
+export function selectedModelContextWindow(
+  model: Pick<LlmProviderConfigView, 'contextWindow' | 'modelOptions' | 'modelOptionValues'>,
+): number | undefined {
+  const definition = contextWindowDefinition(model);
+  if (!definition) return model.contextWindow;
+  const values = resolveLlmModelOptionValues(model.modelOptions, model.modelOptionValues);
+  const selected = definition.choices.find((choice) => choice.value === values[definition.id]);
+  return selected?.contextWindow ?? model.contextWindow;
+}
+
+export function modelContextWindowRange(
+  model: Pick<LlmModelInfo, 'contextWindow' | 'modelOptions'>,
+): { readonly defaultContextWindow?: number; readonly maxContextWindow?: number } {
+  const definition = contextWindowDefinition(model);
+  const windows = definition?.choices
+    .map((choice) => choice.contextWindow)
+    .filter((value): value is number => typeof value === 'number' && value > 0) ?? [];
+  if (!definition || windows.length === 0) {
+    return { defaultContextWindow: model.contextWindow, maxContextWindow: model.contextWindow };
+  }
+  const defaultChoice = definition.choices.find((choice) => choice.value === definition.defaultValue);
+  return {
+    defaultContextWindow: defaultChoice?.contextWindow ?? model.contextWindow,
+    maxContextWindow: Math.max(...windows),
+  };
+}
+
 const meaningfulLabel = (model: LlmModelInfo): string | undefined => {
   const label = model.label?.trim();
   return label && label !== model.id ? label : undefined;
@@ -108,6 +141,35 @@ export interface ModelSelectionChanges {
   readonly removals: readonly LlmProviderConfigView[];
 }
 
+function metadataValueEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (left === undefined || right === undefined) return false;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** Return true when importing a catalog entry would change stored model metadata. */
+export function modelCatalogMetadataDiffers(
+  model: LlmModelInfo,
+  configured: LlmProviderConfigView,
+): boolean {
+  const comparable: Record<string, unknown> = {};
+  const label = meaningfulLabel(model);
+  if (label) comparable.modelLabel = label;
+  if (model.pricingSource) comparable.pricingSource = model.pricingSource;
+  if (typeof model.contextWindow === 'number') comparable.contextWindow = model.contextWindow;
+  if (typeof model.maxOutputTokens === 'number') comparable.maxOutputTokens = model.maxOutputTokens;
+  if (typeof model.inputPrice === 'number') comparable.inputPrice = model.inputPrice;
+  if (typeof model.outputPrice === 'number') comparable.outputPrice = model.outputPrice;
+  if (typeof model.cacheReadPrice === 'number') comparable.cacheReadPrice = model.cacheReadPrice;
+  if (typeof model.cacheWritePrice === 'number') comparable.cacheWritePrice = model.cacheWritePrice;
+  if (typeof model.supportsVision === 'boolean') comparable.supportsVision = model.supportsVision;
+  if (typeof model.supportsReasoning === 'boolean') comparable.supportsReasoning = model.supportsReasoning;
+  if (model.modelOptions) comparable.modelOptions = model.modelOptions;
+  return Object.entries(comparable).some(([key, value]) => (
+    !metadataValueEqual(configured[key as keyof LlmProviderConfigView], value)
+  ));
+}
+
 /** Compare the complete catalog selection with the models currently stored in a provider group. */
 export function calculateModelSelectionChanges(
   selectedModels: readonly LlmModelInfo[],
@@ -124,7 +186,7 @@ export function calculateModelSelectionChanges(
     additions: [...selectedById.values()].filter((model) => !configuredIds.has(model.id)),
     updates: configuredModels.flatMap((configured) => {
       const model = selectedById.get(configured.model);
-      return model ? [{ configured, model }] : [];
+      return model && modelCatalogMetadataDiffers(model, configured) ? [{ configured, model }] : [];
     }),
     removals: configuredModels.filter((item) => !selectedById.has(item.model)),
   };

@@ -592,16 +592,50 @@ export function createLlmConfigStore({
     return snapshots;
   }
 
-  function readAll() {
-    if (!existsSync(configFile)) return [];
-    let parsed;
+  function channelFromItem(item) {
+    const channel = { ...item, id: groupKey(item) };
+    for (const field of [
+      'model', 'modelLabel', 'metadataSource', 'pricingSource', 'metadataSyncedAt',
+      'contextWindow', 'maxOutputTokens', 'modelOptions', 'modelOptionValues',
+      'inputPrice', 'outputPrice', 'cacheWritePrice', 'cacheReadPrice',
+      'longContextInputThreshold', 'longContextInputPrice', 'longContextCacheReadPrice',
+      'longContextOutputPrice', 'supportsVision', 'supportsReasoning',
+      'supportsPromptCaching', 'reasoningParamStyle', 'reasoningEffortMap',
+      'reasoningEffortLevels', 'enabled', 'isDefault',
+    ]) delete channel[field];
+    for (const field of [
+      'apiKey', 'oauthTokens', 'oauthClientId', 'oauthClientSecret',
+      'oauthClientSecretConfigured',
+    ]) delete channel[field];
+    channel.groupId = channel.id;
+    return channel;
+  }
+
+  function readStoredState() {
+    if (!existsSync(configFile)) return { channels: [], models: [], legacy: false };
     try {
-      parsed = JSON.parse(readFileSync(configFile, 'utf8'));
+      const parsed = JSON.parse(readFileSync(configFile, 'utf8'));
+      if (Array.isArray(parsed)) {
+        const channels = [...new Map(parsed.map((item) => [groupKey(item), channelFromItem(item)])).values()];
+        return { channels, models: parsed, legacy: true };
+      }
+      if (parsed && Array.isArray(parsed.channels) && Array.isArray(parsed.models)) {
+        return { channels: parsed.channels, models: parsed.models, legacy: false };
+      }
     } catch {
-      return [];
+      // Invalid configuration is treated as empty, matching the legacy behavior.
     }
-    if (!Array.isArray(parsed)) return [];
-    let migrated = false;
+    return { channels: [], models: [], legacy: false };
+  }
+
+  function readAll() {
+    const state = readStoredState();
+    const channels = new Map(state.channels.map((channel) => [channel.id || channel.groupId, channel]));
+    const parsed = state.models.map((model) => {
+      const channel = channels.get(groupKey(model));
+      return channel ? { ...channel, ...model, groupId: channel.id || channel.groupId } : model;
+    });
+    let migrated = state.legacy;
     for (const item of parsed) {
       if (migrateChannelItem(item)) migrated = true;
       if (migrateSubscriptionItem(item)) migrated = true;
@@ -632,7 +666,27 @@ export function createLlmConfigStore({
     return parsed;
   }
 
-  function writeAll(items) {
+  function writeAll(items, channelsOverride) {
+    const previous = readStoredState();
+    const channels = new Map(
+      (channelsOverride || previous.channels).map((channel) => [channel.id || channel.groupId, channel]),
+    );
+    for (const item of items) {
+      const groupId = groupKey(item);
+      const existing = channels.get(groupId);
+      channels.set(groupId, { ...(existing || {}), ...channelFromItem(item), id: groupId, groupId });
+    }
+    const models = items.map((item) => {
+      const model = { ...item };
+      const channel = channels.get(groupKey(item));
+      for (const field of Object.keys(channel || {})) {
+        if (!['id', 'groupId'].includes(field)) delete model[field];
+      }
+      model.id = item.id;
+      model.groupId = groupKey(item);
+      return model;
+    });
+    const stored = { version: 2, channels: [...channels.values()], models };
     const directory = path.dirname(configFile);
     mkdirSync(directory, { recursive: true });
     const temporaryFile = path.join(
@@ -642,7 +696,7 @@ export function createLlmConfigStore({
     let descriptor;
     try {
       descriptor = openSync(temporaryFile, 'wx', 0o600);
-      writeFileSync(descriptor, JSON.stringify(items, null, 2), 'utf8');
+      writeFileSync(descriptor, JSON.stringify(stored, null, 2), 'utf8');
       fsyncSync(descriptor);
       closeSync(descriptor);
       descriptor = undefined;
@@ -723,6 +777,33 @@ export function createLlmConfigStore({
 
   function listProviders() {
     return readAll().map(toView);
+  }
+
+  function listGroups() {
+    const state = readStoredState();
+    const models = readAll();
+    const modelsByGroup = new Map();
+    for (const model of models) {
+      const groupId = groupKey(model);
+      const groupModels = modelsByGroup.get(groupId) || [];
+      groupModels.push(model);
+      modelsByGroup.set(groupId, groupModels);
+    }
+    return state.channels.flatMap((channel) => {
+      const groupId = channel.id || channel.groupId;
+      const groupModels = modelsByGroup.get(groupId) || [];
+      if (groupModels.length > 0) return groupModels.map(toView);
+      const representative = {
+        ...channel,
+        id: groupId,
+        groupId,
+        model: '',
+        enabled: false,
+        isDefault: false,
+        createdAt: channel.createdAt || new Date().toISOString(),
+      };
+      return [{ ...toView(representative), id: groupId, groupId, model: '' }];
+    });
   }
 
   // 兼容旧 IPC 名称，但返回的仍是已配置模型真值。模型目录只在设置页作为候选来源，
@@ -965,22 +1046,10 @@ export function createLlmConfigStore({
     if (removed?.isDefault && items.length > 0) {
       items[0].isDefault = true;
     }
-    const removedGroupId = removed ? groupKey(removed) : '';
-    const groupIsEmpty = removedGroupId
-      ? !items.some((item) => groupKey(item) === removedGroupId)
-      : false;
-    if (!groupIsEmpty) {
-      writeAll(items);
-      return items.map(toView);
-    }
-    return withGroupSecretTransaction(
-      removedGroupId,
-      () => removeGroupSecrets(removedGroupId),
-      () => {
-        writeAll(items);
-        return items.map(toView);
-      },
-    );
+    // A model and its channel have separate lifecycles. In particular, removing the
+    // final model keeps the channel and its credentials so models can be re-added.
+    writeAll(items);
+    return items.map(toView);
   }
 
   // B-2 删除整个 provider 组(同 groupId 的全部模型)。
@@ -993,15 +1062,20 @@ export function createLlmConfigStore({
     if (hadDefault && items.length > 0) {
       items[0].isDefault = true;
     }
-    if (removed.length === 0) {
+    const state = readStoredState();
+    const channelExists = state.channels.some((channel) => (channel.id || channel.groupId) === groupId);
+    if (!channelExists) {
       writeAll(items);
       return items.map(toView);
     }
+    const remainingChannels = state.channels.filter(
+      (channel) => (channel.id || channel.groupId) !== groupId,
+    );
     return withGroupSecretTransaction(
       groupId,
       () => removeGroupSecrets(groupId),
       () => {
-        writeAll(items);
+        writeAll(items, remainingChannels);
         return items.map(toView);
       },
     );
@@ -1073,7 +1147,9 @@ export function createLlmConfigStore({
   function addModel(groupId, patch = {}) {
     if (!groupId) throw new Error('groupId is required');
     const items = readAll();
-    const source = items.find((i) => (i.groupId || i.id) === groupId);
+    const state = readStoredState();
+    const source = items.find((i) => (i.groupId || i.id) === groupId)
+      || state.channels.find((channel) => (channel.id || channel.groupId) === groupId);
     if (!source) throw new Error(`Provider group ${groupId} not found`);
     const model = String(patch.model || '').trim();
     if (!model) throw new Error('model is required');
@@ -1218,7 +1294,7 @@ export function createLlmConfigStore({
     }
   }
 
-  return { listProviders, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, getApiKeyRequestConfig, setOAuthTokens, testConnection };
+  return { listProviders, listGroups, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, getApiKeyRequestConfig, setOAuthTokens, testConnection };
 }
 
 async function testOpenAI(resolved, model, start) {

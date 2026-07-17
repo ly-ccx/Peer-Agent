@@ -149,9 +149,9 @@ const CHANNEL_DESCRIPTORS = {
     id: CHANNEL_IDS.GROK,
     label: GROK_OFFICIAL_NAME,
     legacyProvider: 'openai',
-    defaultWire: 'openai-chat',
-    allowedWires: ['openai-chat'],
-    authMethods: { oauth_grok: { wire: 'openai-chat' } },
+    defaultWire: 'openai-responses',
+    allowedWires: ['openai-responses'],
+    authMethods: { oauth_grok: { wire: 'openai-responses' } },
     defaults: { baseUrl: GROK_SUBSCRIPTION_BASE_URL, model: 'grok-4.5' },
     headers: {
       'X-XAI-Token-Auth': 'xai-grok-cli',

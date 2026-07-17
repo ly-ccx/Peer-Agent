@@ -471,11 +471,15 @@ async function sendQoderPreparedStream({
   bufferThinkingDeltas = false,
   emitBufferedThinkingDeltas = true,
   streamIdleTimeoutMs = 0,
+  modelOptions,
   modelOptionValues = {},
 } = {}) {
   const requestId = crypto.randomUUID();
   const sessionId = crypto.randomUUID();
-  const metadata = await getQoderModelMetadataForSend(model);
+  const catalogMetadata = await getQoderModelMetadataForSend(model);
+  const metadata = catalogMetadata && Array.isArray(modelOptions)
+    ? { ...catalogMetadata, modelOptions }
+    : catalogMetadata;
   const requestBody = buildQoderRemoteChatAsk({
     model,
     messages,
@@ -661,9 +665,13 @@ export async function sendQoderPrivateStream({
   bufferThinkingDeltas = false,
   emitBufferedThinkingDeltas = true,
   streamIdleTimeoutMs = 0,
+  modelOptions,
   modelOptionValues = {},
 } = {}) {
-  const metadata = await getQoderModelMetadataForSend(model);
+  const catalogMetadata = await getQoderModelMetadataForSend(model);
+  const metadata = catalogMetadata && Array.isArray(modelOptions)
+    ? { ...catalogMetadata, modelOptions }
+    : catalogMetadata;
   if (metadata) {
     return sendQoderPreparedStream({
       apiKey,
@@ -678,6 +686,7 @@ export async function sendQoderPrivateStream({
       bufferThinkingDeltas,
       emitBufferedThinkingDeltas,
       streamIdleTimeoutMs,
+      modelOptions: metadata.modelOptions,
       modelOptionValues,
     });
   }

@@ -1,6 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LlmProviderConfigView, LlmProviderTestResult } from '@peer-agent/protocol';
-import { modelMetadataCompletion } from './llmModelConfiguration';
+import { modelMetadataCompletion, selectedModelContextWindow } from './llmModelConfiguration';
 
 function compactTokens(value: number | undefined): string | null {
   if (!value) return null;
@@ -30,7 +30,7 @@ export function ConfiguredModelRow({
 }) {
   const zh = i18n.locale === 'zh-CN';
   const completion = modelMetadataCompletion(model);
-  const context = compactTokens(model.contextWindow);
+  const context = compactTokens(selectedModelContextWindow(model));
   const output = compactTokens(model.maxOutputTokens);
   const summary = [
     context ? `${context} ctx` : null,

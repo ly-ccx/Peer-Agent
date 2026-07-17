@@ -26,7 +26,11 @@ import {
   modelMetadataPatch,
   parseReasoningEffortMap,
 } from './llmModelConfiguration';
-import { availableOAuthMethods, subscriptionLoginLabel } from './llmSubscriptionAuth';
+import {
+  availableOAuthMethods,
+  shouldOpenOAuthModelCatalog,
+  subscriptionLoginLabel,
+} from './llmSubscriptionAuth';
 
 interface PendingProviderDraft extends Record<string, unknown> {
   readonly channelId: string;
@@ -125,11 +129,11 @@ const FALLBACK_CHANNELS: readonly LlmChannelDescriptor[] = [
     id: 'grok',
     label: 'Grok 官方',
     legacyProvider: 'openai',
-    defaultWire: 'openai-chat',
-    allowedWires: ['openai-chat'],
+    defaultWire: 'openai-responses',
+    allowedWires: ['openai-responses'],
     defaults: { baseUrl: 'https://cli-chat-proxy.grok.com/v1', model: 'grok-4.5' },
     capabilities: { reasoning: { supported: true, paramStyle: 'openai-effort' }, promptCache: false, vision: true },
-    authMethods: { oauth_grok: { wire: 'openai-chat' } },
+    authMethods: { oauth_grok: { wire: 'openai-responses' } },
   },
   {
     id: 'qoder',
@@ -426,7 +430,7 @@ export function LlmSettingsPanel({
 
   const refresh = useCallback(async () => {
     try {
-      const list = await clientApi.llmListProviders();
+      const list = await clientApi.llmListProviderGroups();
       setProviders(list);
       setTestResults((prev) => {
         let next: Record<string, LlmProviderTestResult> | null = null;
@@ -446,6 +450,10 @@ export function LlmSettingsPanel({
 
   useEffect(() => clientApi.onLlmOAuthPending((pending) => {
     setOauthPending(pending);
+  }), []);
+
+  useEffect(() => clientApi.onLlmOAuthAuthorized(() => {
+    setOauthPending(null);
   }), []);
 
   useEffect(() => {
@@ -809,9 +817,9 @@ export function LlmSettingsPanel({
         return;
       }
       clearTestResult(busyKey);
-      if (result.models?.length) {
+      if (shouldOpenOAuthModelCatalog(result.provider.model, result.models)) {
         setCatalogTargetId(result.provider.id);
-        setCatalogResult({ success: true, models: result.models, source: 'builtin' });
+        setCatalogResult({ success: true, models: result.models ?? [], source: 'builtin' });
       }
       setShowForm(false);
       setEditingId(null);
@@ -821,6 +829,7 @@ export function LlmSettingsPanel({
       setFormError(error);
       setTestResults((prev) => ({ ...prev, [busyKey]: { success: false, error } }));
     } finally {
+      setOauthPending(null);
       setOauthBusyId(null);
     }
   };

@@ -21,6 +21,7 @@ describe('Grok subscription OAuth', () => {
     const calls = [];
     const pending = [];
     const opened = [];
+    const lifecycle = [];
     const fetchImpl = async (url, init = {}) => {
       calls.push({ url: String(url), init });
       if (String(url).endsWith('/oauth2/device/code')) {
@@ -33,9 +34,14 @@ describe('Grok subscription OAuth', () => {
         });
       }
       if (String(url).endsWith('/oauth2/token')) {
-        return jsonResponse({ access_token: 'access-token', refresh_token: 'refresh-token', expires_in: 3600 });
+        return jsonResponse({
+          access_token: 'access-token',
+          refresh_token: 'refresh-token',
+          expires_in: 3600,
+        });
       }
       if (String(url).endsWith('/oauth2/userinfo')) {
+        lifecycle.push('userinfo');
         return jsonResponse({ sub: 'user-1', email: 'grok@example.com' });
       }
       throw new Error(`unexpected request: ${url}`);
@@ -45,14 +51,17 @@ describe('Grok subscription OAuth', () => {
       fetchImpl,
       openExternal: async (url) => opened.push(url),
       onPending: (value) => pending.push(value),
+      onTokenReady: () => lifecycle.push('token-ready'),
     });
     const tokens = await session.promise;
 
     assert.equal(tokens.access, 'access-token');
     assert.equal(tokens.refresh, 'refresh-token');
+    assert.equal(tokens.scope, GROK_LOGIN_SCOPE);
     assert.equal(tokens.clientId, GROK_CLI_CLIENT_ID);
     assert.equal(tokens.email, 'grok@example.com');
     assert.equal(tokens.userId, 'user-1');
+    assert.deepEqual(lifecycle, ['token-ready', 'userinfo']);
     assert.deepEqual(opened, ['https://auth.x.ai/device?user_code=ABCD-EFGH']);
     assert.equal(pending[0].userCode, 'ABCD-EFGH');
 
@@ -109,23 +118,56 @@ describe('Grok subscription OAuth', () => {
     const next = await refreshGrokTokens({
       access: 'old-access',
       refresh: 'old-refresh',
+      scope: GROK_LOGIN_SCOPE,
       expires: 0,
     }, { fetchImpl });
 
     assert.equal(next.access, 'next-access');
     assert.equal(next.refresh, 'next-refresh');
+    assert.equal(next.scope, GROK_LOGIN_SCOPE);
     const body = new URLSearchParams(calls[0].init.body);
     assert.equal(body.get('grant_type'), 'refresh_token');
     assert.equal(body.get('refresh_token'), 'old-refresh');
     assert.equal(body.get('client_id'), GROK_CLI_CLIENT_ID);
   });
 
-  it('keeps a sufficiently fresh token without network access', async () => {
-    const tokens = { access: 'fresh', refresh: 'refresh', expires: Date.now() + 300_000 };
+  it('keeps a sufficiently fresh token with API access without network access', async () => {
+    const tokens = {
+      access: 'fresh',
+      refresh: 'refresh',
+      scope: GROK_LOGIN_SCOPE,
+      expires: Date.now() + 300_000,
+    };
     const result = await ensureFreshGrokTokens(tokens, {
       fetchImpl: async () => { throw new Error('should not fetch'); },
     });
     assert.equal(result.refreshed, false);
     assert.equal(result.tokens, tokens);
+  });
+
+  it('requires a new login for saved tokens missing API access', async () => {
+    const tokens = {
+      access: 'legacy-access',
+      refresh: 'legacy-refresh',
+      scope: 'openid profile email offline_access grok-cli:access',
+      expires: Date.now() + 300_000,
+    };
+    await assert.rejects(
+      ensureFreshGrokTokens(tokens, {
+        fetchImpl: async () => { throw new Error('should not fetch'); },
+      }),
+      (error) => error?.code === 'grok_oauth_scope_upgrade_required' && /重新登录/.test(error.message),
+    );
+  });
+
+  it('requires a new login for legacy saved tokens without scope metadata', async () => {
+    await assert.rejects(
+      ensureFreshGrokTokens({
+        access: 'legacy-access',
+        refresh: 'legacy-refresh',
+        expires: Date.now() + 300_000,
+      }),
+      (error) => error?.code === 'grok_oauth_scope_upgrade_required',
+    );
   });
 });

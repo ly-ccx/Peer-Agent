@@ -39,6 +39,24 @@ function createLlmConfigStore(options = {}) {
   });
 }
 
+function readPersistedModels(configFile) {
+  const persisted = JSON.parse(readFileSync(configFile, 'utf8'));
+  if (Array.isArray(persisted)) return persisted;
+  const channels = new Map(persisted.channels.map((channel) => [channel.id || channel.groupId, channel]));
+  return persisted.models.map((model) => ({
+    ...channels.get(model.groupId),
+    ...model,
+  }));
+}
+
+function readPersistedChannels(configFile) {
+  const persisted = JSON.parse(readFileSync(configFile, 'utf8'));
+  if (Array.isArray(persisted)) {
+    return [...new Map(persisted.map((model) => [model.groupId || model.id, model])).values()];
+  }
+  return persisted.channels;
+}
+
 function withStore(fn) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'llm-config-store-'));
   const configFile = path.join(dir, 'llm-providers.json');
@@ -167,7 +185,7 @@ test('subscription provider migration backfills pricing and context metadata', (
   assert.equal(provider.supportsReasoning, true);
   assert.equal(provider.supportsPromptCaching, true);
 
-  const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
+  const persisted = readPersistedModels(configFile)[0];
   assert.equal(persisted.contextWindow, 258_000);
   assert.equal(persisted.maxOutputTokens, 128_000);
   assert.equal(persisted.inputPrice, 5);
@@ -196,7 +214,7 @@ test('subscription provider migration restores GPT-5.6 prompt cache and effort l
   assert.equal(provider.supportsPromptCaching, true);
   assert.deepEqual(provider.reasoningEffortLevels, ['low', 'default', 'high', 'max']);
 
-  const [persisted] = JSON.parse(readFileSync(configFile, 'utf8'));
+  const [persisted] = readPersistedModels(configFile);
   assert.equal(persisted.supportsPromptCaching, true);
   assert.deepEqual(persisted.reasoningEffortLevels, ['low', 'default', 'high', 'max']);
 }));
@@ -222,7 +240,7 @@ test('Grok OAuth records migrate to the official display name', () => withStore(
   assert.equal(provider.channelId, 'grok');
   assert.equal(provider.authMethod, 'oauth_grok');
 
-  const [persisted] = JSON.parse(readFileSync(configFile, 'utf8'));
+  const [persisted] = readPersistedModels(configFile);
   assert.equal(persisted.name, 'Grok 官方');
 }));
 
@@ -271,7 +289,7 @@ test('legacy provider entries migrate to channel fields without losing stored se
   assert.equal(provider.supportsPromptCaching, true);
   assert.equal(provider.apiKeyConfigured, true);
 
-  const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
+  const persisted = readPersistedModels(configFile)[0];
   assert.equal(persisted.channelId, 'openai-compatible');
   assert.equal(Object.hasOwn(persisted, 'apiKey'), false);
   assert.equal(Object.hasOwn(persisted, 'oauthTokens'), false);
@@ -295,7 +313,7 @@ test('manual provider creation and updates persist max output tokens', () => wit
   const updated = store.updateProvider(provider.id, { maxOutputTokens: 4096 });
   assert.equal(updated.maxOutputTokens, 4096);
 
-  const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
+  const persisted = readPersistedModels(configFile)[0];
   assert.equal(persisted.maxOutputTokens, 4096);
 }));
 
@@ -329,7 +347,7 @@ test('manual provider creation and updates persist reasoning effort maps', () =>
   });
   assert.deepEqual(updated.reasoningEffortMap, { medium: 'high', xhigh: 'max' });
 
-  const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
+  const persisted = readPersistedModels(configFile)[0];
   assert.deepEqual(persisted.reasoningEffortMap, { medium: 'high', xhigh: 'max' });
 }));
 
@@ -382,7 +400,7 @@ test('legacy Gemini OAuth client fields are discarded while the provider remains
   assert.equal(Object.hasOwn(credential, 'oauthClientId'), false);
   assert.equal(Object.hasOwn(credential, 'oauthClientSecret'), false);
   assert.equal(credential.oauthProjectId, 'my-project');
-  const [persisted] = JSON.parse(readFileSync(configFile, 'utf8'));
+  const [persisted] = readPersistedModels(configFile);
   assert.equal(Object.hasOwn(persisted, 'oauthClientId'), false);
   assert.equal(Object.hasOwn(persisted, 'oauthClientSecret'), false);
 }));
@@ -410,7 +428,7 @@ test('Qoder local auth provider does not require a stored API key', () => withSt
   assert.equal(provider.supportsVision, true);
   assert.equal(provider.supportsReasoning, false);
 
-  const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
+  const persisted = readPersistedModels(configFile)[0];
   assert.equal(Object.hasOwn(persisted, 'apiKey'), false);
   assert.equal(persisted.apiKeyConfigured, false);
   assert.equal(credentialSecrets.has(`model/${provider.groupId}/api-key`), false);
@@ -551,7 +569,7 @@ test('legacy records migrate to self groups (groupId backfilled to id) and persi
   const [view] = store.listProviders();
   assert.equal(view.groupId, 'legacy-1', 'legacy record self-groups by its id');
 
-  const persisted = JSON.parse(readFileSync(configFile, 'utf8'))[0];
+  const persisted = readPersistedModels(configFile)[0];
   assert.equal(persisted.groupId, 'legacy-1', 'groupId backfill is written to disk');
 }));
 
@@ -664,7 +682,7 @@ test('addModel inherits connection fields without copying model metadata', () =>
   assert.equal(resetToUnknown.reasoningParamStyle, undefined);
   assert.equal(resetToUnknown.reasoningEffortMap, undefined);
 
-  const persisted = JSON.parse(readFileSync(configFile, 'utf8')).find((item) => item.id === second.id);
+  const persisted = readPersistedModels(configFile).find((item) => item.id === second.id);
   for (const field of [
     'modelLabel',
     'contextWindow',
@@ -686,6 +704,31 @@ test('addModel inherits connection fields without copying model metadata', () =>
     () => store.addModel(base.groupId, { model: 'model-b' }),
     /already exists in provider group/,
   );
+}));
+
+test('removing the final model preserves its empty channel and credentials', () => withStore(({
+  configFile,
+  credentialSecrets,
+}) => {
+  const store = createLlmConfigStore({ configFile });
+  const provider = store.addProvider({
+    provider: 'openai',
+    authMethod: 'oauth_grok',
+    model: 'grok-4.5',
+  });
+  store.setOAuthTokens(provider.id, { access: 'grok-token', refresh: 'grok-refresh' });
+
+  assert.equal(store.removeProvider(provider.id).length, 0);
+  assert.equal(store.listGroups().length, 1);
+  assert.equal(store.listGroups()[0].groupId, provider.groupId);
+  assert.equal(readPersistedModels(configFile).length, 0);
+  assert.equal(readPersistedChannels(configFile).length, 1);
+  assert.equal(credentialSecrets.has(modelOauthCredentialKey(provider.groupId)), true);
+
+  store.removeGroup(provider.groupId);
+  assert.equal(store.listGroups().length, 0);
+  assert.equal(readPersistedChannels(configFile).length, 0);
+  assert.equal(credentialSecrets.has(modelOauthCredentialKey(provider.groupId)), false);
 }));
 
 test('removeGroup deletes every model in the group and reassigns default', () => withStore(({ configFile }) => {
@@ -753,7 +796,7 @@ test('legacy safeStorage secrets migrate to Vault before encrypted fields are re
   );
 
   const persistedText = readFileSync(configFile, 'utf8');
-  const [persisted] = JSON.parse(persistedText);
+  const [persisted] = readPersistedChannels(configFile);
   for (const field of ['apiKey', 'oauthClientSecret', 'oauthTokens']) {
     assert.equal(Object.hasOwn(persisted, field), false, `${field} removed after verified migration`);
   }
@@ -869,7 +912,7 @@ test('OAuth token updates store only Vault ciphertext references and non-sensiti
     tokens,
   );
   const persistedText = readFileSync(configFile, 'utf8');
-  const [persisted] = JSON.parse(persistedText);
+  const [persisted] = readPersistedChannels(configFile);
   assert.equal(Object.hasOwn(persisted, 'oauthTokens'), false);
   assert.equal(persisted.oauthConfigured, true);
   assert.equal(persisted.oauthExpires, tokens.expires);
@@ -880,7 +923,7 @@ test('OAuth token updates store only Vault ciphertext references and non-sensiti
   const disconnected = store.setOAuthTokens(provider.id, null);
   assert.equal(disconnected.oauthStatus.status, 'disconnected');
   assert.equal(credentialSecrets.has(modelOauthCredentialKey(provider.groupId)), false);
-  const [cleared] = JSON.parse(readFileSync(configFile, 'utf8'));
+  const [cleared] = readPersistedModels(configFile);
   assert.equal(cleared.oauthConfigured, false);
   assert.equal(Object.hasOwn(cleared, 'oauthExpires'), false);
   assert.equal(Object.hasOwn(cleared, 'oauthAccountId'), false);
@@ -979,7 +1022,7 @@ test('legacy Google OAuth group migrates to API key without changing per-model m
   assert.equal(migrated[1].metadataSource, 'manual');
   assert.equal(credentialSecrets.has(modelOauthCredentialKey(groupId)), false);
 
-  for (const persisted of JSON.parse(readFileSync(configFile, 'utf8'))) {
+  for (const persisted of readPersistedModels(configFile)) {
     assert.equal(Object.hasOwn(persisted, 'oauthExpires'), false);
     assert.equal(Object.hasOwn(persisted, 'oauthAccountId'), false);
     assert.equal(Object.hasOwn(persisted, 'oauthClientId'), false);
@@ -1092,7 +1135,7 @@ test('model option values persist per model and legacy configs remain readable',
   assert.deepEqual(second.modelOptionValues, { contextTier: '400K' });
   assert.deepEqual(store.listProviders().find((item) => item.id === base.id)?.modelOptionValues, { contextTier: '1M' });
 
-  const persisted = JSON.parse(readFileSync(configFile, 'utf8'));
+  const persisted = readPersistedModels(configFile);
   assert.deepEqual(persisted.find((item) => item.id === base.id)?.modelOptionValues, { contextTier: '1M' });
   assert.deepEqual(persisted.find((item) => item.id === second.id)?.modelOptionValues, { contextTier: '400K' });
 

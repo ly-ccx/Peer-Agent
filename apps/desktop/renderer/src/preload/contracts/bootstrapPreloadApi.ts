@@ -512,6 +512,8 @@ export interface BootstrapPreloadApi {
   readonly onWindowFullscreenChanged: (
     listener: (payload: { fullscreen: boolean }) => void,
   ) => () => void;
+  /** 设置页渠道列表，包含没有模型的渠道连接。 */
+  readonly llmListProviderGroups: () => Promise<readonly LlmProviderConfigView[]>;
   readonly llmListProviders: () => Promise<readonly LlmProviderConfigView[]>;
   /**
    * 旧聊天列表 IPC 的兼容别名。与 llmListProviders 一样只返回已配置模型，
@@ -547,6 +549,7 @@ export interface BootstrapPreloadApi {
     userCode: string;
     expiresAt: string;
   }) => void) => () => void;
+  readonly onLlmOAuthAuthorized: (listener: () => void) => () => void;
   // ADR 28(方案 B): 列出订阅可用模型(远程拉取,失败回退内置清单)。
   readonly llmListModels: (params: { id: string }) => Promise<LlmModelListResult>;
   // 用表单临时配置(未落盘)直接拉模型,供"添加渠道"弹窗预览/多选。

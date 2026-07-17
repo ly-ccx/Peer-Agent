@@ -230,6 +230,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.on('window:fullscreen-changed', handler);
     return () => ipcRenderer.removeListener('window:fullscreen-changed', handler);
   },
+  llmListProviderGroups: () => ipcRenderer.invoke('llm:groups:list'),
   llmListProviders: () => ipcRenderer.invoke('llm:list'),
   llmListChatProviders: () => ipcRenderer.invoke('llm:chat:list'),
   llmListChannels: () => ipcRenderer.invoke('llm:channels:list'),
@@ -248,6 +249,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('llm:oauth:pending', handler);
     return () => ipcRenderer.removeListener('llm:oauth:pending', handler);
+  },
+  onLlmOAuthAuthorized: (listener) => {
+    const handler = () => listener();
+    ipcRenderer.on('llm:oauth:authorized', handler);
+    return () => ipcRenderer.removeListener('llm:oauth:authorized', handler);
   },
   llmListModels: (params) => ipcRenderer.invoke('llm:models:list', params),
   llmFetchModels: (params) => ipcRenderer.invoke('llm:models:fetch', params),

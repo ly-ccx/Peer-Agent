@@ -11,3 +11,10 @@ export function subscriptionLoginLabel(method: LlmAuthMethod, zh: boolean): stri
   if (method === 'oauth_grok') return zh ? '登录 Grok' : 'Login with Grok';
   return zh ? '登录 ChatGPT' : 'Login with ChatGPT';
 }
+
+export function shouldOpenOAuthModelCatalog(
+  currentModel: string | null | undefined,
+  models: readonly unknown[] | null | undefined,
+): boolean {
+  return !currentModel?.trim() && Boolean(models?.length);
+}

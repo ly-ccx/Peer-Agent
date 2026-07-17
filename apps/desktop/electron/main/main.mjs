@@ -32,7 +32,7 @@ import {
   createQuickChatWindowController,
   DEFAULT_SIZE as QUICK_CHAT_SIZE,
 } from './quick-chat-window.mjs';
-import { getMainWindowWebContents } from './window-routing.mjs';
+import { getMainWindowWebContents, getOAuthWindowWebContents } from './window-routing.mjs';
 import { createMcpRegistry } from './mcp-registry.mjs';
 import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-credential-store.mjs';
 import { disconnectMcp, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMcpResource, startMcpOAuth, testMcpConnection } from './mcp-client.mjs';
@@ -2111,6 +2111,8 @@ ipcMain.handle('prompt-context-epochs:chain', (_event, params = {}) =>
 
 // ── LLM Providers ──
 ipcMain.handle('llm:channels:list', () => listChannelDescriptors());
+// 设置页读取独立渠道视图，包含尚未配置任何模型的空渠道。
+ipcMain.handle('llm:groups:list', () => llmConfigStore.listGroups());
 ipcMain.handle('llm:list', () => llmConfigStore.listProviders());
 // 兼容旧 preload API；聊天与设置统一返回已配置模型真值，不再投影目录候选。
 ipcMain.handle('llm:chat:list', () => llmConfigStore.listChatProviders());
@@ -2172,7 +2174,7 @@ ipcMain.handle('llm:test', (_, { id }) => llmConfigStore.testConnection(id));
 let activeOAuthLogin = null;
 let activeOAuthVerificationUrl = null;
 
-ipcMain.handle('llm:oauth:start', async (_event, params) => {
+ipcMain.handle('llm:oauth:start', async (event, params) => {
   // ADR 28: 订阅登录链路必须"先登录、成功后才落盘"。
   // - { id }   : 对已存在的订阅 provider 重新登录(刷新 token)。
   // - { draft }: 新建订阅。draft 是表单草稿,登录成功后才创建 provider;
@@ -2209,8 +2211,12 @@ ipcMain.handle('llm:oauth:start', async (_event, params) => {
         onPending: (pending) => {
           activeOAuthVerificationUrl = pending.verificationUrl;
           clipboard.writeText(pending.userCode);
-          const target = BrowserWindow.getFocusedWindow() || mainWindow;
-          target?.webContents.send('llm:oauth:pending', pending);
+          const target = getOAuthWindowWebContents(event.sender, BrowserWindow.getAllWindows());
+          target?.send('llm:oauth:pending', pending);
+        },
+        onTokenReady: () => {
+          const target = getOAuthWindowWebContents(event.sender, BrowserWindow.getAllWindows());
+          target?.send('llm:oauth:authorized');
         },
       })
       : startBrowserLogin();

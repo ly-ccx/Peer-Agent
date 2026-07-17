@@ -27,7 +27,7 @@ describe('provider channel registry', () => {
     assert.equal(resolved.headers['chatgpt-account-id'], 'acct_1');
   });
 
-  it('resolves Grok subscription through the Grok Build chat proxy', () => {
+  it('resolves Grok subscription through the Grok Build Responses API', () => {
     const resolved = resolveChannel({
       channelId: 'grok',
       authMethod: 'oauth_grok',
@@ -35,8 +35,8 @@ describe('provider channel registry', () => {
       model: 'grok-4.5',
     });
 
-    assert.equal(resolved.wire, 'openai-chat');
-    assert.equal(resolved.endpoint, 'https://cli-chat-proxy.grok.com/v1/chat/completions');
+    assert.equal(resolved.wire, 'openai-responses');
+    assert.equal(resolved.endpoint, 'https://cli-chat-proxy.grok.com/v1/responses');
     assert.equal(resolved.headers.Authorization, 'Bearer grok-access-token');
     assert.equal(resolved.headers['X-XAI-Token-Auth'], 'xai-grok-cli');
     assert.equal(resolved.headers['x-grok-client-surface'], 'grok-build');

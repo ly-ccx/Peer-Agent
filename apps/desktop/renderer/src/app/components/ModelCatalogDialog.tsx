@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Overlay } from './Overlay';
 import {
   buildModelCatalog,
+  calculateModelSelectionChanges,
   filterModelCatalog,
+  modelContextWindowRange,
   type ModelMetadataSource,
 } from './llmModelConfiguration';
 
@@ -98,8 +100,10 @@ export function ModelCatalogDialog({
       .filter((model) => selected.has(model.model) && !catalogIds.has(model.model))
       .map((model) => ({ id: model.model, label: model.modelLabel || model.model })),
   ];
-  const hasSelectionChanges = selectedModels.length !== configuredIds.size
-    || selectedModels.some((model) => !configuredIds.has(model.id));
+  const selectionChanges = calculateModelSelectionChanges(selectedModels, importedModels);
+  const hasSelectionChanges = selectionChanges.additions.length > 0
+    || selectionChanges.updates.length > 0
+    || selectionChanges.removals.length > 0;
   const wouldRemoveAll = configuredModels.length > 0 && selectedModels.length === 0;
 
   const toggle = (id: string) => {
@@ -245,9 +249,14 @@ export function ModelCatalogDialog({
             {!loading && visible.length === 0 ? <div className="llm-catalog-empty">{zh ? '没有匹配的模型' : 'No matching models'}</div> : null}
             {!isInitialLoading ? visible.map(({ model, configured }) => {
               const checked = selected.has(model.id);
-              const context = compactTokens(model.contextWindow);
+              const contextRange = modelContextWindowRange(model);
+              const context = compactTokens(contextRange.defaultContextWindow);
+              const maxContext = compactTokens(contextRange.maxContextWindow);
+              const contextSummary = context && maxContext && context !== maxContext
+                ? (zh ? `默认 ${context} · 最高 ${maxContext}` : `Default ${context} · Up to ${maxContext}`)
+                : context;
               const output = compactTokens(model.maxOutputTokens);
-              const hasMetadata = Boolean(context || output || model.supportsVision || model.supportsReasoning);
+              const hasMetadata = Boolean(contextSummary || output || model.supportsVision || model.supportsReasoning);
               return (
                 <label key={model.id} className={`llm-catalog-item ${configured ? 'is-configured' : ''} ${checked ? 'is-selected' : ''}`}>
                   <input type="checkbox" checked={checked} disabled={selectionMode === 'single' && configured} onChange={() => toggle(model.id)} />
@@ -256,7 +265,7 @@ export function ModelCatalogDialog({
                     <code>{model.id}</code>
                     <small>
                       {hasMetadata
-                        ? [context ? `${context} ctx` : null, output ? `${output} out` : null, model.supportsVision ? (zh ? '图像输入' : 'vision') : null, model.supportsReasoning ? (zh ? '推理' : 'reasoning') : null].filter(Boolean).join(' · ')
+                        ? [contextSummary ? `${contextSummary} ctx` : null, output ? `${output} out` : null, model.supportsVision ? (zh ? '图像输入' : 'vision') : null, model.supportsReasoning ? (zh ? '推理' : 'reasoning') : null].filter(Boolean).join(' · ')
                         : (zh ? '远程接口仅返回 Model ID；导入后元数据待完善' : 'Only a model ID was returned; metadata needs review after import')}
                     </small>
                   </span>

@@ -722,8 +722,14 @@ export function createLlmChatService({
           streamId,
           provider,
         });
+        const qoderCatalogMetadata = resolvedChannel.wire === 'qoder-private'
+          ? getQoderModelMetadata(provider.model)
+          : null;
+        const qoderMetadata = qoderCatalogMetadata || provider.modelOptions?.length
+          ? { ...qoderCatalogMetadata, modelOptions: provider.modelOptions ?? qoderCatalogMetadata?.modelOptions }
+          : null;
         const qoderOptionProjection = resolvedChannel.wire === 'qoder-private'
-          ? resolveQoderModelOptionProjection(getQoderModelMetadata(provider.model), provider.modelOptionValues)
+          ? resolveQoderModelOptionProjection(qoderMetadata, provider.modelOptionValues)
           : null;
         const contextWindow = qoderOptionProjection?.inputTokenLimit || provider.contextWindow || 0;
         const maxOutputTokens = provider.maxOutputTokens || 0;
@@ -747,6 +753,7 @@ export function createLlmChatService({
               streamId,
               signal: runtimeTurn.signal,
               contextWindow,
+              modelOptions: provider.modelOptions,
               modelOptionValues: provider.modelOptionValues,
               maxOutputTokens,
               conversationId,

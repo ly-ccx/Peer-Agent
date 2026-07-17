@@ -39,6 +39,8 @@ describe('agentLoopQoder', () => {
       webContents: { send: (channel, payload) => sent.push({ channel, payload }) },
       streamId: 'qoder-loop-native-tool',
       contextWindow: 1000,
+      modelOptions: [{ key: 'context_window', choices: [{ value: '1M', metadata: { contextWindow: 1_000_000 } }] }],
+      modelOptionValues: { context_window: '1M' },
       toolContext: createToolContext({ conversationId: 'conv-qoder-loop', mode: 'chat' }),
       permissionGate: {
         createFilePermissionRequester: () => async () => ({ granted: true }),
@@ -49,6 +51,11 @@ describe('agentLoopQoder', () => {
     });
 
     assert.equal(attempts.length, 2);
+    assert.deepEqual(attempts[0].modelOptions, [{
+      key: 'context_window',
+      choices: [{ value: '1M', metadata: { contextWindow: 1_000_000 } }],
+    }]);
+    assert.deepEqual(attempts[0].modelOptionValues, { context_window: '1M' });
     assert.deepEqual(attempts[0].tools, tools);
     assert.equal(attempts[0].messages.some((message) => /tool-call dialect/i.test(message.content)), false);
     assert.equal(attempts[1].messages.some((message) => Array.isArray(message.tool_calls)), true);
