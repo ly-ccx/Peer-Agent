@@ -130,24 +130,32 @@
     grid-template-columns: 22px minmax(0, 1fr) 22px;
     border: 1px solid transparent;
     border-radius: var(--ui-radius-row, 8px);
+    background: transparent;
+    box-shadow: var(--ui-surface-float-shadow, none);
     transform-origin: center;
     transition:
       background var(--za-motion-fast) var(--za-ease-standard),
       border-color var(--za-motion-fast) var(--za-ease-standard),
+      box-shadow var(--za-motion-fast) var(--za-ease-standard),
       opacity var(--za-motion-medium) var(--za-ease-standard);
   }
 
   .conversation-row:hover {
     background: var(--ui-surface-hover, var(--za-surface-1));
+    border-color: var(--ui-surface-float-border, var(--ui-border-subtle));
+    box-shadow: var(--ui-surface-float-shadow-hover, none);
   }
 
   .conversation-row.active {
-    border-color: var(--ui-border-subtle, transparent);
+    border-color: var(--ui-surface-float-border, var(--ui-border-subtle));
     background: var(--ui-surface-selected, var(--za-sidebar-thread-active-bg));
+    box-shadow: var(--ui-surface-float-shadow, none);
   }
 
   .conversation-row.active:hover {
     background: var(--ui-surface-selected, var(--za-sidebar-active-bg));
+    border-color: var(--ui-surface-float-border, var(--ui-border-subtle));
+    box-shadow: var(--ui-surface-float-shadow-hover, none);
   }
 
   .conversation-main {

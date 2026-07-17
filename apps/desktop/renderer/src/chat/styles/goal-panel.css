@@ -342,29 +342,31 @@
 .goal-plan-card {
   display: flex;
   flex-direction: column;
-  border: none;
+  border: 1px solid var(--ui-surface-float-border, var(--ui-border-subtle));
   border-radius: var(--ui-radius-panel, var(--za-radius));
-  background: var(--ui-surface-raised, var(--za-surface-1));
-  box-shadow: var(--shadow-card);
+  background: var(--ui-surface-float-bg, var(--ui-surface-raised, var(--za-surface-1)));
+  box-shadow: var(--ui-surface-float-shadow, none);
   overflow: hidden;
-  transform: translateY(0);
+  transform: none;
   transition:
-    transform 180ms var(--za-ease-standard, ease),
+    background 180ms var(--za-ease-standard, ease),
+    border-color 180ms var(--za-ease-standard, ease),
     box-shadow 180ms var(--za-ease-standard, ease);
 }
 
 .goal-plan-card:hover {
-  box-shadow: var(--shadow-card-hover);
-  transform: translateY(-2px);
+  background: var(--ui-surface-hover, var(--za-hover));
+  box-shadow: var(--ui-surface-float-shadow-hover, none);
+  transform: none;
 }
 
 .goal-plan-card:focus-within {
-  box-shadow: var(--shadow-card-hover), 0 0 0 2px color-mix(in srgb, var(--ui-focus-ring, var(--za-focus)) 30%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-focus-ring, var(--za-focus)) 30%, transparent);
 }
 
 .goal-plan-card:active {
-  box-shadow: var(--shadow-card-active);
-  transform: translateY(0);
+  box-shadow: var(--ui-surface-float-shadow, none);
+  transform: none;
 }
 
 .goal-plan-head {
@@ -802,9 +804,11 @@
   outline-offset: 2px;
 }
 
-/* 主卡：当前计划永远置顶展开，只用表面反差与柔和阴影拉开层级。 */
+/* 主卡：当前计划永远置顶展开，靠轻浮层表面与选中色拉开层级，不再用重阴影。 */
 .goal-plan-card--main {
-  background: var(--za-surface-1);
+  background: var(--ui-surface-float-bg, var(--za-surface-1));
+  border-color: var(--ui-surface-float-border, var(--ui-border-subtle));
+  box-shadow: var(--ui-surface-float-shadow, none);
 }
 .goal-plan-card--main .goal-plan-head-caret {
   display: none;

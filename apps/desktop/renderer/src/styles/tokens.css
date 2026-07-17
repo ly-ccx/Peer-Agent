@@ -285,6 +285,11 @@
   --ui-surface-selected: var(--ui-selected-bg);
   --ui-surface-raised: var(--za-surface-0);
   --ui-surface-elevated: var(--za-popover-bg);
+  /* 轻浮层：列表项 / 计划卡共用——极浅边框、几乎无阴影，不过度卡片化。 */
+  --ui-surface-float-bg: var(--ui-surface-raised);
+  --ui-surface-float-border: var(--ui-border-subtle);
+  --ui-surface-float-shadow: none;
+  --ui-surface-float-shadow-hover: none;
   --ui-link: var(--ui-accent);
 
   /* 兼容少量已出现但未正名的局部变量。 */
