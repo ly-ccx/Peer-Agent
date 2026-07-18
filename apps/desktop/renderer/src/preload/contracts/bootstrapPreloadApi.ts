@@ -16,8 +16,7 @@ import type {
   LlmModelInfo,
   LlmChannelDescriptor,
   LlmProviderConfigView,
-  LlmProviderTestResult,
-  LlmSubscriptionQuota,
+  LlmProviderTestResult, LlmSubscriptionQuota,
   LocalMcpServerUpsertRequest,
   LocalMcpServerView,
   LocaleCode,
@@ -343,6 +342,7 @@ export interface BootstrapPreloadApi {
   readonly workspaceList: () => Promise<{ workspaces: readonly { path: string; name: string; addedAt: string }[]; activeWorkspace: string | null }>;
   readonly quickChatHide: () => Promise<{ ok: true }>;
   readonly quickChatSetTaskCardVisible: (visible: boolean) => Promise<{ ok: boolean }>;
+  readonly quickChatSetContentHeight: (height: number) => Promise<{ ok: boolean; height: number }>;
   readonly quickChatShowPopover: (payload: QuickChatPopoverState & { anchorRect: QuickChatPopoverAnchorRect }) => Promise<{ ok: boolean }>;
   readonly quickChatHidePopover: () => Promise<{ ok: true }>;
   readonly quickChatSelectPopoverValue: (value: string) => Promise<{ ok: boolean }>;

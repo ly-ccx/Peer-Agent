@@ -34,7 +34,7 @@ import { createCoalescedRefreshScheduler } from '../../chat/state/coalescedRefre
 import { mergeQuickChatTasks, projectQuickChatPlanTasks, projectQuickChatTasks, type QuickChatTask } from '../../chat/state/quickChatTasks';
 import type { ChatAttachment, ChatMsg } from '../../chat/state/types';
 import { loadConversationMessages } from '../../chat/state/conversationLoad';
-import { AttachmentStrip } from '../../chat/components/thread/AttachmentStrip';
+import { AttachmentStrip, PEER_ATTACHMENT_DND_TYPE } from '../../chat/components/thread/AttachmentStrip';
 import type { QuickChatPopoverKind } from '../../preload/contracts/bootstrapPreloadApi';
 import { QuickChatPopover, type InlineQuickChatPopoverState } from './QuickChatPopover';
 import { QuickChatTaskCard } from './QuickChatTaskCard';
@@ -72,6 +72,8 @@ export function QuickChatWindow() {
   });
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const barRef = useRef<HTMLElement | null>(null);
+  const lastReportedHeightRef = useRef(0);
 
   useEffect(() => {
     void clientApi.workspaceList().then((result) => {
@@ -329,6 +331,48 @@ export function QuickChatWindow() {
     void clientApi.quickChatSetTaskCardVisible(Boolean(activeTask)).catch(() => {});
   }, [activeTask]);
 
+  useEffect(() => {
+    const element = inputRef.current;
+    if (!element) return;
+    element.style.height = 'auto';
+    element.style.height = `${Math.min(element.scrollHeight, 120)}px`;
+  }, [draft, attachments.length]);
+
+  useEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+
+    const reportHeight = () => {
+      const nextHeight = Math.ceil(bar.getBoundingClientRect().height);
+      if (!Number.isFinite(nextHeight) || nextHeight <= 0) return;
+      if (Math.abs(nextHeight - lastReportedHeightRef.current) < 1) return;
+      lastReportedHeightRef.current = nextHeight;
+      void clientApi.quickChatSetContentHeight?.(nextHeight).catch(() => {});
+    };
+
+    reportHeight();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => reportHeight());
+    observer?.observe(bar);
+    const unsubscribeShown = clientApi.onQuickChatShown?.(() => {
+      requestAnimationFrame(reportHeight);
+    });
+    return () => {
+      observer?.disconnect();
+      unsubscribeShown?.();
+    };
+  }, [activeTask, attachments.length, draft, error]);
+
+  const reorderAttachments = useCallback((fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    setAttachments((prev) => {
+      if (fromIndex < 0 || toIndex < 0 || fromIndex >= prev.length || toIndex >= prev.length) return prev;
+      const next = [...prev];
+      const [item] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, item);
+      return next;
+    });
+  }, []);
+
   const openTaskConversation = useCallback((task: QuickChatTask) => {
     void clientApi.quickChatSubmit?.({
       conversationId: task.conversationId,
@@ -427,14 +471,36 @@ export function QuickChatWindow() {
 
   return (
     <main className={`quick-chat-shell${activeTask ? ' has-task' : ''}${popoverState ? ' has-open-popover' : ''}`}>
-      <section className={`quick-chat-bar${error ? ' quick-chat-bar--error' : ''}${sending ? ' quick-chat-bar--sending' : ''}`} aria-label="快速会话" aria-busy={sending}>
-        <div className={`quick-chat-composer${dragActive ? ' is-drag-active' : ''}`} onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDragActive(true); } }} onDragLeave={() => setDragActive(false)} onDrop={(event) => { event.preventDefault(); setDragActive(false); void addFiles(event.dataTransfer.files); }}>
-          <div className="quick-chat-input-row">
+      <section ref={barRef} className={`quick-chat-bar${error ? ' quick-chat-bar--error' : ''}${sending ? ' quick-chat-bar--sending' : ''}`} aria-label="快速会话" aria-busy={sending}>
+        <div
+          className={`quick-chat-composer${dragActive ? ' is-drag-active' : ''}`}
+          onDragOver={(event) => {
+            const types = Array.from(event.dataTransfer.types);
+            if (types.includes(PEER_ATTACHMENT_DND_TYPE)) return;
+            if (types.includes('Files')) {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'copy';
+              setDragActive(true);
+            }
+          }}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={(event) => {
+            const types = Array.from(event.dataTransfer.types);
+            if (types.includes(PEER_ATTACHMENT_DND_TYPE)) return;
+            event.preventDefault();
+            setDragActive(false);
+            void addFiles(event.dataTransfer.files);
+          }}
+        >
+          {attachments.length ? (
             <AttachmentStrip
               attachments={attachments}
               isZh
               onRemove={(attachmentId) => setAttachments((current) => current.filter((item) => item.id !== attachmentId))}
+              onReorder={reorderAttachments}
             />
+          ) : null}
+          <div className="quick-chat-input-row">
             <textarea ref={inputRef} value={draft} placeholder="向 Peer Agent 发起任务…" aria-label="快速会话内容" onChange={(event) => { setDraft(event.target.value); setError(''); }} onPaste={(event) => {
               const files = getClipboardFiles(event.clipboardData.items);
               if (files.length) { event.preventDefault(); void addFiles(files); }

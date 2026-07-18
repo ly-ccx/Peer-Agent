@@ -1,7 +1,15 @@
 const DEFAULT_SIZE = Object.freeze({ width: 720, height: 104 });
 const TASK_SIZE = Object.freeze({ width: 720, height: 334 });
+const MAX_CONTENT_HEIGHT = 480;
 const POPOVER_MAX_SIZE = Object.freeze({ width: 360, height: 280 });
 const POPOVER_GAP = 6;
+
+export function clampQuickChatContentHeight(height, { hasTaskCard = false } = {}) {
+  const fallback = hasTaskCard ? TASK_SIZE.height : DEFAULT_SIZE.height;
+  const numeric = Number(height);
+  const next = Number.isFinite(numeric) ? Math.ceil(numeric) : fallback;
+  return Math.min(MAX_CONTENT_HEIGHT, Math.max(DEFAULT_SIZE.height, next));
+}
 
 export function resolveQuickChatPopoverSize(state = {}) {
   const items = Array.isArray(state.items) ? state.items : [];
@@ -54,9 +62,13 @@ export function createQuickChatWindowController({ screen, createWindow }) {
   let quickChatWindow = null;
   let popoverState = null;
   let taskCardVisible = false;
+  let contentHeight = DEFAULT_SIZE.height;
 
   function baseSize() {
-    return taskCardVisible ? TASK_SIZE : DEFAULT_SIZE;
+    return {
+      width: DEFAULT_SIZE.width,
+      height: clampQuickChatContentHeight(contentHeight, { hasTaskCard: taskCardVisible }),
+    };
   }
 
   function resizeForCurrentState({ animate = false } = {}) {
@@ -163,11 +175,27 @@ export function createQuickChatWindowController({ screen, createWindow }) {
   }
 
   function setTaskCardVisible(visible) {
-    taskCardVisible = visible;
+    taskCardVisible = Boolean(visible);
+    if (taskCardVisible) {
+      contentHeight = Math.max(contentHeight, TASK_SIZE.height);
+    } else if (contentHeight === TASK_SIZE.height) {
+      contentHeight = DEFAULT_SIZE.height;
+    }
     const win = quickChatWindow && !quickChatWindow.isDestroyed() ? quickChatWindow : null;
     if (!win) return false;
     resizeForCurrentState({ animate: true });
     return true;
+  }
+
+  function setContentHeight(height) {
+    const nextHeight = clampQuickChatContentHeight(height, { hasTaskCard: taskCardVisible });
+    if (nextHeight === contentHeight) {
+      return { ok: true, height: contentHeight };
+    }
+    contentHeight = nextHeight;
+    const win = quickChatWindow && !quickChatWindow.isDestroyed() ? quickChatWindow : null;
+    if (win) resizeForCurrentState({ animate: false });
+    return { ok: true, height: contentHeight };
   }
 
   function getWindow() {
@@ -179,6 +207,7 @@ export function createQuickChatWindowController({ screen, createWindow }) {
     toggle,
     hide,
     setTaskCardVisible,
+    setContentHeight,
     getWindow,
     showPopover,
     hidePopover,
@@ -186,4 +215,4 @@ export function createQuickChatWindowController({ screen, createWindow }) {
   };
 }
 
-export { DEFAULT_SIZE, POPOVER_MAX_SIZE };
+export { DEFAULT_SIZE, MAX_CONTENT_HEIGHT, POPOVER_MAX_SIZE, TASK_SIZE };

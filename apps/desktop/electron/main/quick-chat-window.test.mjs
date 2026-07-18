@@ -207,6 +207,24 @@ test('restores the design width from a compressed native window across every sta
   assert.deepEqual(parent.getBounds(), { ...shownBounds, width: 720, height: 104 });
 });
 
+test('content height drives window growth while keeping the top edge fixed', () => {
+  const parent = createFakeWindow({ x: 100, y: 100, width: 720, height: 104 });
+  const controller = createQuickChatWindowController({ screen, createWindow: () => parent });
+  controller.show();
+  const shownBounds = parent.getBounds();
+
+  const result = controller.setContentHeight(180);
+  assert.deepEqual(result, { ok: true, height: 180 });
+  assert.deepEqual(parent.getBounds(), { ...shownBounds, width: 720, height: 180 });
+
+  const clamped = controller.setContentHeight(999);
+  assert.deepEqual(clamped, { ok: true, height: 480 });
+  assert.deepEqual(parent.getBounds(), { ...shownBounds, width: 720, height: 480 });
+
+  const same = controller.setContentHeight(480);
+  assert.deepEqual(same, { ok: true, height: 480 });
+});
+
 test('hides on blur but remains visible while devtools is open', () => {
   const window = createFakeWindow();
   const controller = createQuickChatWindowController({ screen, createWindow: () => window });
