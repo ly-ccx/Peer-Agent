@@ -31,6 +31,10 @@ import {
   shouldOpenOAuthModelCatalog,
   subscriptionLoginLabel,
 } from './llmSubscriptionAuth';
+import {
+  formatQuotaLine,
+  isOAuthMethod,
+} from './llmSubscriptionQuota';
 
 interface PendingProviderDraft extends Record<string, unknown> {
   readonly channelId: string;
@@ -167,43 +171,6 @@ const PROTECTED_HEADER_NAMES = new Set([
   'x-grok-client-surface',
   'x-grok-client-version',
 ]);
-
-function isOAuthMethod(method: LlmAuthMethod): boolean {
-  return method === 'oauth_chatgpt' || method === 'oauth_google' || method === 'oauth_grok';
-}
-
-
-function formatResetAt(value: string | undefined, zh: boolean): string | null {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  const now = Date.now();
-  const deltaMs = date.getTime() - now;
-  if (deltaMs <= 0) return zh ? '已重置' : 'reset now';
-  const hours = Math.round(deltaMs / (60 * 60 * 1000));
-  if (hours < 48) return zh ? `${hours}h 后重置` : `resets in ${hours}h`;
-  const days = Math.round(hours / 24);
-  return zh ? `${days}d 后重置` : `resets in ${days}d`;
-}
-
-function formatQuotaLine(quota: LlmSubscriptionQuota | undefined, zh: boolean): string | null {
-  if (!quota) return null;
-  if (!quota.success) {
-    if (quota.status === 'not_logged_in') return zh ? '未登录，无法查询额度' : 'Not logged in';
-    if (quota.status === 'session_expired') return zh ? '登录已过期，请重新登录' : 'Session expired — re-login';
-    if (quota.status === 'unsupported') return null;
-    return zh ? (quota.error ? `额度：${quota.error}` : '额度查询失败') : (quota.error ? `Quota: ${quota.error}` : 'Quota unavailable');
-  }
-  const remaining = typeof quota.remainingPercent === 'number'
-    ? Math.round(quota.remainingPercent)
-    : (typeof quota.usedPercent === 'number' ? Math.round(100 - quota.usedPercent) : null);
-  if (remaining == null) return zh ? '额度已更新' : 'Quota updated';
-  const reset = formatResetAt(quota.resetsAt, zh);
-  const plan = quota.planLabel ? ` · ${quota.planLabel}` : '';
-  if (zh) return `剩余 ${remaining}%${plan}${reset ? ` · ${reset}` : ''}`;
-  return `${remaining}% left${plan}${reset ? ` · ${reset}` : ''}`;
-}
-
 
 function isLocalCliMethod(method: LlmAuthMethod): boolean {
   return method === 'qoder_local_auth' || method === 'local_cli';
@@ -604,9 +571,9 @@ export function LlmSettingsPanel({
       reasoningParamStyle: p.reasoningParamStyle ?? channel.capabilities?.reasoning?.paramStyle ?? '',
       reasoningEffortMapText: formatReasoningEffortMap(p.reasoningEffortMap),
       customHeadersText: formatCustomHeaders(p.customHeaders),
-      // Gemini 已停止提供 Google OAuth。历史 oauth_google 记录打开编辑时直接进入
-      // API Key 迁移表单，不再展示 Client ID/Secret/Project 或登录入口。
-      authMethod: p.authMethod === 'oauth_google' ? 'api_key' : (p.authMethod ?? 'api_key'),
+      // 保留历史订阅登录态（含 oauth_google），编辑时只改显示名称等连接元数据，
+      // 不要强制降级成 api_key，否则会出现 Base URL / API Key 误校验。
+      authMethod: p.authMethod ?? 'api_key',
       name: p.name,
       baseUrl: p.baseUrl,
       model: p.model,
@@ -1191,22 +1158,38 @@ export function LlmSettingsPanel({
 
           {/* 订阅(OAuth)模式下直接登录，成功后才落盘。 */}
           {isOAuthMethod(form.authMethod) ? (
-            <label>
-              <span>{i18n.locale === 'zh-CN' ? '订阅登录' : 'Subscription Login'}</span>
-              <p className="llm-oauth-hint">
-                {form.authMethod === 'oauth_grok'
-                  ? (i18n.locale === 'zh-CN'
-                    ? '点击登录将打开 Grok 官方设备授权页。按页面提示确认一次性验证码后，Peer Agent 会保存 Grok 官方登录态并拉取 Grok Build 模型。'
-                    : 'Click login to open the official Grok device authorization page. Confirm the one-time code to save your Grok Official session and load Grok Build models.')
-                  : form.authMethod === 'oauth_google'
+            <>
+              {editingId ? (
+                <label>
+                  <span>{i18n.locale === 'zh-CN' ? '显示名称' : 'Display Name'}</span>
+                  <input
+                    value={form.name}
+                    placeholder={selectedChannel.label || form.provider}
+                    onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+                  />
+                </label>
+              ) : null}
+              <label>
+                <span>{i18n.locale === 'zh-CN' ? '订阅登录' : 'Subscription Login'}</span>
+                <p className="llm-oauth-hint">
+                  {editingId
                     ? (i18n.locale === 'zh-CN'
-                      ? '点击登录将直接打开浏览器，使用 Google 账号完成订阅授权。无需填写或校验 API Key。'
-                      : 'Click login to open your browser and authorize with your Google subscription account. No API key is required.')
-                    : (i18n.locale === 'zh-CN'
-                      ? '点击登录将打开浏览器完成 ChatGPT 订阅账号登录;登录成功后才会保存,登录失败或取消不会保存任何配置。登录后自动拉取可用模型(默认使用最新模型)。'
-                      : 'Clicking login opens your browser to sign in with your ChatGPT subscription. The provider is saved only after a successful login — nothing is saved if login fails or is cancelled. Available models are fetched after login (latest selected by default).')}
-              </p>
-            </label>
+                      ? '当前为订阅登录连接。可直接修改显示名称并保存；无需填写 Base URL 或 API Key。'
+                      : 'This is a subscription login connection. You can update the display name and save without Base URL or API Key.')
+                    : form.authMethod === 'oauth_grok'
+                      ? (i18n.locale === 'zh-CN'
+                        ? '点击登录将打开 Grok 官方设备授权页。按页面提示确认一次性验证码后，Peer Agent 会保存 Grok 官方登录态并拉取 Grok Build 模型。'
+                        : 'Click login to open the official Grok device authorization page. Confirm the one-time code to save your Grok Official session and load Grok Build models.')
+                      : form.authMethod === 'oauth_google'
+                        ? (i18n.locale === 'zh-CN'
+                          ? '点击登录将直接打开浏览器，使用 Google 账号完成订阅授权。无需填写或校验 API Key。'
+                          : 'Click login to open your browser and authorize with your Google subscription account. No API key is required.')
+                        : (i18n.locale === 'zh-CN'
+                          ? '点击登录将打开浏览器完成 ChatGPT 订阅账号登录;登录成功后才会保存,登录失败或取消不会保存任何配置。登录后自动拉取可用模型(默认使用最新模型)。'
+                          : 'Clicking login opens your browser to sign in with your ChatGPT subscription. The provider is saved only after a successful login — nothing is saved if login fails or is cancelled. Available models are fetched after login (latest selected by default).')}
+                </p>
+              </label>
+            </>
           ) : isLocalCliAuth ? (
             <>
               <label>
