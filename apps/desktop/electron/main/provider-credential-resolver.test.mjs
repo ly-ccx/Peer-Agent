@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   getProviderCredentialErrorCode,
+  refreshExpiredOAuthProviders,
   resolveProviderCredential,
 } from './provider-credential-resolver.mjs';
 
@@ -126,5 +127,78 @@ describe('provider credential resolver', () => {
     assert.equal(credential.apiKey, 'grok-fresh');
     assert.equal(credential.accountId, null);
     assert.deepEqual(setCalls, [['grok-1', refreshedTokens]]);
+  });
+});
+
+describe('refreshExpiredOAuthProviders (settings list silent refresh)', () => {
+  it('refreshes expired OAuth providers and dedupes shared credentialId', async () => {
+    const resolveCalls = [];
+    const result = await refreshExpiredOAuthProviders({
+      llmConfigStore: {
+        listProviders: () => ([
+          { id: 'api-1', authMethod: 'api_key', oauthStatus: { status: 'disconnected' } },
+          { id: 'grok-1', authMethod: 'oauth_grok', oauthStatus: { status: 'expired' } },
+          {
+            id: 'chatgpt-1::gpt-5.4',
+            credentialId: 'chatgpt-1',
+            authMethod: 'oauth_chatgpt',
+            oauthStatus: { status: 'expired' },
+          },
+          {
+            id: 'chatgpt-1::gpt-5.3',
+            credentialId: 'chatgpt-1',
+            authMethod: 'oauth_chatgpt',
+            oauthStatus: { status: 'expired' },
+          },
+          { id: 'google-1', authMethod: 'oauth_google', oauthStatus: { status: 'connected' } },
+        ]),
+      },
+      resolveCredential: async ({ provider }) => {
+        resolveCalls.push(provider.id);
+        return { authMethod: provider.authMethod, apiKey: 'fresh', accountId: null };
+      },
+    });
+
+    assert.deepEqual(result, { attempted: 2, refreshed: 2 });
+    // grok once + chatgpt once (shared credentialId)，不碰 api_key / connected
+    assert.deepEqual(resolveCalls.sort(), ['chatgpt-1::gpt-5.4', 'grok-1'].sort());
+  });
+
+  it('swallows per-provider refresh failures so settings list can still load', async () => {
+    const result = await refreshExpiredOAuthProviders({
+      llmConfigStore: {
+        listProviders: () => ([
+          { id: 'grok-1', authMethod: 'oauth_grok', oauthStatus: { status: 'expired' } },
+          { id: 'google-1', authMethod: 'oauth_google', oauthStatus: { status: 'expired' } },
+        ]),
+      },
+      resolveCredential: async ({ provider }) => {
+        if (provider.id === 'grok-1') {
+          throw Object.assign(new Error('refresh failed'), { code: 'oauth_token_refresh_failed' });
+        }
+        return { authMethod: provider.authMethod, apiKey: 'fresh', accountId: null };
+      },
+    });
+
+    assert.deepEqual(result, { attempted: 2, refreshed: 1 });
+  });
+
+  it('no-ops when there is no expired OAuth provider', async () => {
+    let resolveCalled = false;
+    const result = await refreshExpiredOAuthProviders({
+      llmConfigStore: {
+        listProviders: () => ([
+          { id: 'grok-1', authMethod: 'oauth_grok', oauthStatus: { status: 'connected' } },
+          { id: 'api-1', authMethod: 'api_key' },
+        ]),
+      },
+      resolveCredential: async () => {
+        resolveCalled = true;
+        return { authMethod: 'oauth_grok', apiKey: 'x', accountId: null };
+      },
+    });
+
+    assert.deepEqual(result, { attempted: 0, refreshed: 0 });
+    assert.equal(resolveCalled, false);
   });
 });

@@ -14,6 +14,65 @@ export function getProviderCredentialErrorCode(error) {
   return typeof error?.code === 'string' ? error.code : 'provider_credential_error';
 }
 
+function isOAuthAuthMethod(authMethod) {
+  return authMethod === 'oauth_chatgpt'
+    || authMethod === 'oauth_google'
+    || authMethod === 'oauth_grok';
+}
+
+/**
+ * 设置页/渠道列表加载时，对 access 已过期但仍可能 refresh 的 OAuth 渠道静默续期。
+ * 成功则写回 token（经 resolveProviderCredential → setOAuthTokens），失败时吞掉错误，
+ * 让列表继续用本地 oauthStatus 投影（仍可能是 expired，需用户重登）。
+ *
+ * 只处理 status === 'expired'：connected 不必触网，disconnected 无 token 可刷。
+ * 同一 credentialId 只刷新一次，避免订阅展开的多虚拟模型重复请求。
+ */
+export async function refreshExpiredOAuthProviders({
+  llmConfigStore,
+  resolveCredential = resolveProviderCredential,
+  ensureFreshChatGptTokens = ensureFreshTokens,
+  ensureFreshGeminiTokens = ensureFreshGoogleTokens,
+  ensureFreshGrokAccessTokens = ensureFreshGrokTokens,
+} = {}) {
+  if (!llmConfigStore?.listProviders) return { attempted: 0, refreshed: 0 };
+
+  const providers = llmConfigStore.listProviders() || [];
+  const seenCredentialIds = new Set();
+  const targets = [];
+
+  for (const provider of providers) {
+    if (!isOAuthAuthMethod(provider?.authMethod)) continue;
+    if (provider?.oauthStatus?.status !== 'expired') continue;
+    const credentialId = provider.credentialId || provider.id;
+    if (!credentialId || seenCredentialIds.has(credentialId)) continue;
+    seenCredentialIds.add(credentialId);
+    targets.push({
+      id: provider.id,
+      credentialId,
+      authMethod: provider.authMethod,
+    });
+  }
+
+  let refreshed = 0;
+  await Promise.all(targets.map(async (provider) => {
+    try {
+      await resolveCredential({
+        provider,
+        llmConfigStore,
+        ensureFreshChatGptTokens,
+        ensureFreshGeminiTokens,
+        ensureFreshGrokAccessTokens,
+      });
+      refreshed += 1;
+    } catch {
+      // 列表路径不得因单个渠道 refresh 失败而整页报错；UI 继续展示 expired。
+    }
+  }));
+
+  return { attempted: targets.length, refreshed };
+}
+
 export async function resolveProviderCredential({
   provider,
   llmConfigStore,

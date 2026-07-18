@@ -66,7 +66,7 @@ import {
   updateCompactionProgress,
   getCompaction,
 } from './chat-runtime/compaction-registry.mjs';
-import { resolveProviderCredential } from './provider-credential-resolver.mjs';
+import { resolveProviderCredential, refreshExpiredOAuthProviders } from './provider-credential-resolver.mjs';
 import {
   initAutoUpdater,
   stopAutoUpdater,
@@ -2140,11 +2140,32 @@ ipcMain.handle('prompt-context-epochs:chain', (_event, params = {}) =>
 
 // ── LLM Providers ──
 ipcMain.handle('llm:channels:list', () => listChannelDescriptors());
+
+// 设置页/模型列表加载前，对 access 过期的 OAuth 渠道静默 ensureFresh 并写回 token，
+// 避免 refresh 仍可用时误报「登录已过期」。失败不抛，UI 继续用本地 oauthStatus。
+async function listProvidersWithSilentOAuthRefresh() {
+  try {
+    await refreshExpiredOAuthProviders({ llmConfigStore });
+  } catch (err) {
+    console.warn('[llm] silent oauth refresh failed:', err?.message || err);
+  }
+  return llmConfigStore.listProviders();
+}
+
+async function listGroupsWithSilentOAuthRefresh() {
+  try {
+    await refreshExpiredOAuthProviders({ llmConfigStore });
+  } catch (err) {
+    console.warn('[llm] silent oauth refresh failed:', err?.message || err);
+  }
+  return llmConfigStore.listGroups();
+}
+
 // 设置页读取独立渠道视图，包含尚未配置任何模型的空渠道。
-ipcMain.handle('llm:groups:list', () => llmConfigStore.listGroups());
-ipcMain.handle('llm:list', () => llmConfigStore.listProviders());
+ipcMain.handle('llm:groups:list', () => listGroupsWithSilentOAuthRefresh());
+ipcMain.handle('llm:list', () => listProvidersWithSilentOAuthRefresh());
 // 兼容旧 preload API；聊天与设置统一返回已配置模型真值，不再投影目录候选。
-ipcMain.handle('llm:chat:list', () => llmConfigStore.listChatProviders());
+ipcMain.handle('llm:chat:list', () => listProvidersWithSilentOAuthRefresh());
 ipcMain.handle('llm:add', (_, config) => {
   const provider = llmConfigStore.addProvider(config);
   if (provider.isDefault) recordProviderBaseline('initial', provider);
