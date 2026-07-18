@@ -7,6 +7,7 @@ import test from 'node:test';
 import {
   getSharedModelConfigPath,
   loadSharedModelMetadata,
+  loadSharedModelMetadataList,
   loadSharedModelSelection,
   selectDesktopDefaultProvider,
   type ChatGptOAuthTokens,
@@ -265,6 +266,215 @@ test('legacy encrypted fields are not treated as usable TUI credentials', () => 
       }),
       null,
     );
+  } finally {
+    rmSync(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test('loadSharedModelMetadataList expands Desktop v2 channels/models config', () => {
+  const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-v2-'));
+  try {
+    writeFileSync(getSharedModelConfigPath(userDataPath), JSON.stringify({
+      version: 2,
+      channels: [
+        {
+          id: 'channel-api',
+          groupId: 'channel-api',
+          name: 'Idealab',
+          provider: 'openai',
+          baseUrl: 'https://example.test/v1',
+          authMethod: 'api_key',
+          apiKeyConfigured: true,
+        },
+        {
+          id: 'channel-oauth',
+          groupId: 'channel-oauth',
+          name: 'ChatGPT',
+          provider: 'openai',
+          baseUrl: 'https://chatgpt.example/v1',
+          authMethod: 'oauth_chatgpt',
+          oauthConfigured: true,
+        },
+        {
+          id: 'channel-grok',
+          groupId: 'channel-grok',
+          name: 'Grok',
+          provider: 'xai',
+          baseUrl: 'https://grok.example',
+          authMethod: 'oauth_grok',
+          oauthConfigured: true,
+        },
+      ],
+      models: [
+        {
+          id: 'model-api-1',
+          groupId: 'channel-api',
+          model: 'gpt-test',
+          enabled: true,
+          isDefault: false,
+        },
+        {
+          id: 'model-oauth-1',
+          groupId: 'channel-oauth',
+          model: 'gpt-5',
+          enabled: true,
+          isDefault: false,
+        },
+        {
+          id: 'model-grok-1',
+          groupId: 'channel-grok',
+          model: 'grok-4.5',
+          enabled: true,
+          isDefault: true,
+        },
+        {
+          id: 'model-missing-channel',
+          groupId: 'missing',
+          model: 'ignored',
+          enabled: true,
+        },
+      ],
+    }, null, 2));
+
+    const list = loadSharedModelMetadataList({ userDataPath });
+    assert.equal(list.length, 3);
+    assert.deepEqual(
+      list.map((item) => ({
+        credentialId: item.credentialId,
+        model: item.model,
+        authMethod: item.authMethod,
+        displayName: item.displayName,
+      })),
+      [
+        {
+          credentialId: 'channel-api',
+          model: 'gpt-test',
+          authMethod: 'api_key',
+          displayName: 'Idealab',
+        },
+        {
+          credentialId: 'channel-oauth',
+          model: 'gpt-5',
+          authMethod: 'oauth_chatgpt',
+          displayName: 'ChatGPT',
+        },
+        {
+          credentialId: 'channel-grok',
+          model: 'grok-4.5',
+          authMethod: 'oauth_grok',
+          displayName: 'Grok',
+        },
+      ],
+    );
+
+    const metadata = loadSharedModelMetadata({ userDataPath });
+    assert.equal(metadata?.credentialId, 'channel-grok');
+    assert.equal(metadata?.model, 'grok-4.5');
+    assert.equal(metadata?.authMethod, 'oauth_grok');
+  } finally {
+    rmSync(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test('loadSharedModelSelection resolves API keys from Desktop v2 config', () => {
+  const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-v2-'));
+  const credentials = createCredentialStore({
+    apiKeys: { 'channel-api': 'desktop-secret' },
+  });
+  try {
+    writeFileSync(getSharedModelConfigPath(userDataPath), JSON.stringify({
+      version: 2,
+      channels: [{
+        id: 'channel-api',
+        groupId: 'channel-api',
+        name: 'Idealab',
+        provider: 'openai',
+        baseUrl: 'https://example.test/v1',
+        authMethod: 'api_key',
+        apiKeyConfigured: true,
+      }],
+      models: [{
+        id: 'model-api-1',
+        groupId: 'channel-api',
+        model: 'gpt-test',
+        enabled: true,
+        isDefault: true,
+      }],
+    }, null, 2));
+
+    const selection = loadSharedModelSelection({
+      userDataPath,
+      credentialStore: credentials.store,
+    });
+    assert.equal(selection?.credentialId, 'channel-api');
+    assert.equal(selection?.apiKey, 'desktop-secret');
+    assert.equal(selection?.model, 'gpt-test');
+    assert.equal(selection?.baseUrl, 'https://example.test/v1');
+  } finally {
+    rmSync(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test('persistOAuthTokens keeps Desktop v2 channels/models layout', () => {
+  const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-v2-'));
+  const credentials = createCredentialStore({
+    oauthTokens: {
+      'channel-oauth': {
+        access: 'old-access',
+        refresh: 'old-refresh',
+        expires: 1_700_000_000_000,
+      },
+    },
+  });
+  try {
+    writeFileSync(getSharedModelConfigPath(userDataPath), JSON.stringify({
+      version: 2,
+      channels: [{
+        id: 'channel-oauth',
+        groupId: 'channel-oauth',
+        name: 'ChatGPT',
+        provider: 'openai',
+        baseUrl: 'https://chatgpt.example/v1',
+        authMethod: 'oauth_chatgpt',
+        oauthConfigured: true,
+        oauthExpires: 1_700_000_000_000,
+      }],
+      models: [{
+        id: 'model-oauth-1',
+        groupId: 'channel-oauth',
+        model: 'gpt-5',
+        enabled: true,
+        isDefault: true,
+      }],
+    }, null, 2));
+
+    const selection = loadSharedModelSelection({
+      userDataPath,
+      credentialStore: credentials.store,
+    });
+    assert.ok(selection);
+    selection.persistOAuthTokens({
+      access: 'new-access',
+      refresh: 'new-refresh',
+      expires: 1_800_000_000_000,
+      accountId: 'account-1',
+    });
+
+    const stored = JSON.parse(readFileSync(getSharedModelConfigPath(userDataPath), 'utf8')) as {
+      version: number;
+      channels: Array<{ id: string; oauthExpires?: number; oauthConfigured?: boolean; oauthAccountId?: string }>;
+      models: Array<{ id: string; model: string }>;
+    };
+    assert.equal(stored.version, 2);
+    assert.equal(stored.channels.length, 1);
+    assert.equal(stored.models.length, 1);
+    assert.equal(stored.channels[0]?.id, 'channel-oauth');
+    assert.equal(stored.channels[0]?.oauthConfigured, true);
+    assert.equal(stored.channels[0]?.oauthExpires, 1_800_000_000_000);
+    assert.equal(stored.channels[0]?.oauthAccountId, 'account-1');
+    assert.equal(stored.models[0]?.model, 'gpt-5');
+    assert.equal(credentials.oauthTokens.get('channel-oauth')?.access, 'new-access');
+    assert.equal(JSON.stringify(stored).includes('new-access'), false);
   } finally {
     rmSync(userDataPath, { recursive: true, force: true });
   }

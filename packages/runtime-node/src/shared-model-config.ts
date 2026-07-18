@@ -85,17 +85,168 @@ export function getSharedModelConfigPath(
   return path.join(userDataPath, 'llm-providers.json');
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function groupKeyOf(provider: Pick<StoredModelProvider, 'groupId' | 'id'>): string {
+  return provider.groupId?.trim() || provider.id?.trim() || '';
+}
+
+/**
+ * Desktop stores llm-providers.json either as:
+ * - legacy flat array / { providers: [...] }
+ * - v2 { version: 2, channels: [...], models: [...] }
+ *
+ * Shared readers always expand to the flat provider/model row shape so TUI and
+ * Desktop can share the same selection helpers.
+ */
 function parseProviders(content: string): StoredModelProvider[] {
   const parsed: unknown = JSON.parse(content);
   if (Array.isArray(parsed)) return parsed as StoredModelProvider[];
-  if (
-    parsed
-    && typeof parsed === 'object'
-    && Array.isArray((parsed as { providers?: unknown }).providers)
-  ) {
-    return (parsed as { providers: StoredModelProvider[] }).providers;
+  if (!isRecord(parsed)) return [];
+
+  if (Array.isArray(parsed.providers)) {
+    return parsed.providers as StoredModelProvider[];
   }
+
+  if (Array.isArray(parsed.channels) && Array.isArray(parsed.models)) {
+    const channels = new Map<string, StoredModelProvider>();
+    for (const channel of parsed.channels as StoredModelProvider[]) {
+      const key = groupKeyOf(channel);
+      if (!key) continue;
+      channels.set(key, {
+        ...channel,
+        id: key,
+        groupId: key,
+      });
+    }
+
+    const providers: StoredModelProvider[] = [];
+    for (const model of parsed.models as StoredModelProvider[]) {
+      const key = groupKeyOf(model);
+      const channel = channels.get(key);
+      if (!channel) continue;
+      providers.push({
+        ...channel,
+        ...model,
+        id: model.id ?? key,
+        groupId: key,
+      });
+    }
+    return providers;
+  }
+
   return [];
+}
+
+const MODEL_ONLY_FIELDS = new Set([
+  'model',
+  'modelLabel',
+  'metadataSource',
+  'pricingSource',
+  'metadataSyncedAt',
+  'contextWindow',
+  'maxOutputTokens',
+  'modelOptions',
+  'modelOptionValues',
+  'inputPrice',
+  'outputPrice',
+  'cacheWritePrice',
+  'cacheReadPrice',
+  'longContextInputThreshold',
+  'longContextInputPrice',
+  'longContextCacheReadPrice',
+  'supportsVision',
+  'supportsReasoning',
+  'supportsPromptCaching',
+  'reasoningEffortLevels',
+  'reasoningParamStyle',
+  'enabled',
+  'isDefault',
+]);
+
+function channelFromProvider(provider: StoredModelProvider): StoredModelProvider {
+  const channel: Record<string, unknown> = {
+    ...provider,
+    id: groupKeyOf(provider),
+    groupId: groupKeyOf(provider),
+  };
+  for (const field of MODEL_ONLY_FIELDS) {
+    delete channel[field];
+  }
+  return channel as StoredModelProvider;
+}
+
+function modelFromProvider(provider: StoredModelProvider): StoredModelProvider {
+  const groupId = groupKeyOf(provider);
+  const model: Record<string, unknown> = {
+    id: provider.id ?? groupId,
+    groupId,
+    model: provider.model,
+    enabled: provider.enabled !== false,
+    isDefault: provider.isDefault === true,
+  };
+  for (const field of MODEL_ONLY_FIELDS) {
+    if (field === 'enabled' || field === 'isDefault' || field === 'model') continue;
+    const value = (provider as Record<string, unknown>)[field];
+    if (value !== undefined) model[field] = value;
+  }
+  return model as StoredModelProvider;
+}
+
+function serializeProvidersDocument(
+  providers: readonly StoredModelProvider[],
+  previousContent: string | null,
+): string {
+  if (previousContent) {
+    try {
+      const previous = JSON.parse(previousContent) as unknown;
+      if (
+        isRecord(previous)
+        && Array.isArray(previous.channels)
+        && Array.isArray(previous.models)
+      ) {
+        const channels = new Map<string, StoredModelProvider>();
+        for (const channel of previous.channels as StoredModelProvider[]) {
+          const key = groupKeyOf(channel);
+          if (key) channels.set(key, { ...channel, id: key, groupId: key });
+        }
+        for (const provider of providers) {
+          const key = groupKeyOf(provider);
+          if (!key) continue;
+          channels.set(key, {
+            ...(channels.get(key) ?? {}),
+            ...channelFromProvider(provider),
+          });
+        }
+
+        const modelsById = new Map<string, StoredModelProvider>();
+        for (const model of previous.models as StoredModelProvider[]) {
+          const id = model.id?.trim() || groupKeyOf(model);
+          if (id) modelsById.set(id, model);
+        }
+        for (const provider of providers) {
+          const id = provider.id?.trim() || groupKeyOf(provider);
+          if (!id) continue;
+          modelsById.set(id, {
+            ...(modelsById.get(id) ?? {}),
+            ...modelFromProvider(provider),
+          });
+        }
+
+        return `${JSON.stringify({
+          version: 2,
+          channels: [...channels.values()],
+          models: [...modelsById.values()],
+        }, null, 2)}\n`;
+      }
+    } catch {
+      // Fall through to legacy array serialization.
+    }
+  }
+
+  return `${JSON.stringify(providers, null, 2)}\n`;
 }
 
 function normalizedAuthMethod(provider: StoredModelProvider): SharedModelAuthMethod {
@@ -187,8 +338,15 @@ function writeProvidersAtomically(
   );
   let descriptor: number | undefined;
   try {
+    const previousContent = existsSync(configFile)
+      ? readFileSync(configFile, 'utf8')
+      : null;
     descriptor = openSync(temporaryFile, 'wx', 0o600);
-    writeFileSync(descriptor, JSON.stringify(providers, null, 2), 'utf8');
+    writeFileSync(
+      descriptor,
+      serializeProvidersDocument(providers, previousContent),
+      'utf8',
+    );
     fsyncSync(descriptor);
     closeSync(descriptor);
     descriptor = undefined;

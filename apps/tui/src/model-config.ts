@@ -86,24 +86,39 @@ export function resolveTuiModelConfig(
     };
   }
 
-  const sharedMetadata = (options.loadSharedMetadata ?? loadSharedModelMetadata)({
+  const sharedProviders = (options.loadSharedMetadataList ?? loadSharedModelMetadataList)({
     userDataPath: options.userDataPath,
   });
+  const catalog = sharedProviders
+    .filter((provider) => provider.authMethod === 'api_key' || provider.authMethod === 'oauth_chatgpt')
+    .map((provider): RuntimeModelCatalogEntry => ({
+      providerId: provider.credentialId,
+      modelId: provider.model,
+      displayName: `${provider.model} · ${provider.displayName}`,
+      supportsTools: true,
+      supportedReasoningEfforts: ['default', 'low', 'high'],
+      defaultReasoningEffort: 'default',
+      available: provider.credentialStored,
+    }));
+
+  // Prefer the Desktop default when TUI can actually run it; otherwise fall back
+  // to the first catalog-supported provider so the model picker stays usable.
+  const preferredSharedMetadata = (options.loadSharedMetadata ?? loadSharedModelMetadata)({
+    userDataPath: options.userDataPath,
+  });
+  const sharedMetadata = (
+    preferredSharedMetadata
+    && (
+      preferredSharedMetadata.authMethod === 'api_key'
+      || preferredSharedMetadata.authMethod === 'oauth_chatgpt'
+    )
+  )
+    ? preferredSharedMetadata
+    : (sharedProviders.find((provider) =>
+      provider.authMethod === 'api_key' || provider.authMethod === 'oauth_chatgpt'
+    ) ?? null);
+
   if (sharedMetadata) {
-    const sharedProviders = (options.loadSharedMetadataList ?? loadSharedModelMetadataList)({
-      userDataPath: options.userDataPath,
-    });
-    const catalog = sharedProviders
-      .filter((provider) => provider.authMethod === 'api_key' || provider.authMethod === 'oauth_chatgpt')
-      .map((provider): RuntimeModelCatalogEntry => ({
-        providerId: provider.credentialId,
-        modelId: provider.model,
-        displayName: `${provider.model} · ${provider.displayName}`,
-        supportsTools: true,
-        supportedReasoningEfforts: ['default', 'low', 'high'],
-        defaultReasoningEffort: 'default',
-        available: provider.credentialStored,
-      }));
     const sharedCredentialStore = options.sharedCredentialStore
       ?? (options.userDataPath
         ? createTuiSharedModelCredentialStore({ dataHome: options.userDataPath })

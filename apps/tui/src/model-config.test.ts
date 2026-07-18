@@ -129,7 +129,11 @@ describe('TUI model environment', () => {
   });
 
   test('uses a safe missing-config state without including a secret', async () => {
-    const config = resolveTuiModelConfig({}, { loadSharedMetadata: () => null, loadSharedSelection: () => null });
+    const config = resolveTuiModelConfig({}, {
+      loadSharedMetadata: () => null,
+      loadSharedMetadataList: () => [],
+      loadSharedSelection: () => null,
+    });
     const message = missingModelConfigurationMessage();
 
     expect(config.configured).toBe(false);
@@ -138,4 +142,34 @@ describe('TUI model environment', () => {
     expect(message).toContain(TUI_MODEL_ENV.apiKey);
     expect(message).not.toContain('test-secret');
   });
+
+  test('falls back to a catalog-supported desktop provider when the default auth is unsupported', () => {
+    const config = resolveTuiModelConfig({}, {
+      loadSharedMetadata: () => ({
+        source: 'desktop-default', providerId: 'xai', credentialId: 'credential-grok',
+        displayName: 'Grok', model: 'grok-4.5', baseUrl: 'https://grok.example',
+        authMethod: 'oauth_grok', credentialStored: true, configFile: '/tmp/llm-providers.json',
+      }),
+      loadSharedMetadataList: () => [
+        {
+          source: 'desktop-default', providerId: 'xai', credentialId: 'credential-grok',
+          displayName: 'Grok', model: 'grok-4.5', baseUrl: 'https://grok.example',
+          authMethod: 'oauth_grok', credentialStored: true, configFile: '/tmp/llm-providers.json',
+        },
+        {
+          source: 'desktop-default', providerId: 'openai', credentialId: 'credential-api',
+          displayName: 'Idealab', model: 'gpt-test', baseUrl: 'https://api.example/v1',
+          authMethod: 'api_key', credentialStored: true, configFile: '/tmp/llm-providers.json',
+        },
+      ],
+      loadSharedSelection: () => null,
+    });
+
+    expect(config.configured).toBe(true);
+    expect(config.source).toBe('desktop-default');
+    expect(config.providerId).toBe('credential-api');
+    expect(config.model).toBe('gpt-test');
+    expect(config.catalog.map((entry) => entry.providerId)).toEqual(['credential-api']);
+  });
+
 });

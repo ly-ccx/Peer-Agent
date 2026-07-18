@@ -30,11 +30,28 @@ export function createTuiModelSelectionControl(input: {
     defaultReasoningEffort: input.reasoningEffort ?? 'default',
     available: true,
   }]);
-  let selection: RuntimeModelSelection = {
+  const initialSelection: RuntimeModelSelection = {
     providerId: input.providerId,
     modelId: input.modelId,
     reasoningEffort: input.reasoningEffort ?? 'default',
   };
+  const initialModel = catalog.find((entry) =>
+    entry.providerId === initialSelection.providerId
+    && entry.modelId === initialSelection.modelId
+    && entry.available
+  );
+  let selection: RuntimeModelSelection = initialModel
+    && initialModel.supportedReasoningEfforts.includes(initialSelection.reasoningEffort)
+    ? initialSelection
+    : (() => {
+      const fallback = catalog.find((entry) => entry.available);
+      if (!fallback) return initialSelection;
+      return {
+        providerId: fallback.providerId,
+        modelId: fallback.modelId,
+        reasoningEffort: fallback.defaultReasoningEffort,
+      };
+    })();
   return {
     catalog,
     getSelection: () => selection,
