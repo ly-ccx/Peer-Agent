@@ -11,6 +11,7 @@ import {
   sidebarConversationActivity,
 } from '../state/compactionStateView';
 import type { CompactionState } from '../state/types';
+import { useListFlip } from '../hooks/useListFlip';
 import { useAwaitingGoalPlanCounts } from './goal/useAwaitingGoalPlans';
 
 type ConversationView = 'active' | 'archived';
@@ -285,6 +286,16 @@ export function Sidebar({
     [conversations, isArchivedView],
   );
   const pinnedIds = useMemo(() => pinnedConversations.map((conv) => conv.id), [pinnedConversations]);
+  const normalIds = useMemo(() => normalConversations.map((conv) => conv.id), [normalConversations]);
+  const listOrderKey = useMemo(
+    () => `${pinnedCollapsed ? 'pinned-collapsed' : pinnedIds.join(',')}|${normalIds.join(',')}`,
+    [normalIds, pinnedCollapsed, pinnedIds],
+  );
+  const conversationListRef = useRef<HTMLDivElement>(null);
+  useListFlip(conversationListRef, listOrderKey, {
+    // 置顶拖拽进行中不播 FLIP，避免与原生 drag 抢 transform。
+    enabled: draggingPinnedId == null,
+  });
 
   const movePinnedConversation = useCallback((dragId: string, targetId: string) => {
     if (dragId === targetId) return;
@@ -352,6 +363,7 @@ export function Sidebar({
     return (
       <div
         key={conv.id}
+        data-conversation-id={conv.id}
         className={rowClasses}
         draggable={Boolean(options.pinnedGroup && canTogglePin)}
         onDragStart={(e) => {
@@ -622,7 +634,10 @@ export function Sidebar({
         )}
       </div>
 
-      <div className={`channel-conversation-list ${isArchivedView ? 'is-archive-view' : ''}`}>
+      <div
+        ref={conversationListRef}
+        className={`channel-conversation-list ${isArchivedView ? 'is-archive-view' : ''}`}
+      >
         {conversations.length === 0 ? (
           <div className="sidebar-empty-state">
             {isArchivedView

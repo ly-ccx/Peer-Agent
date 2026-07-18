@@ -425,6 +425,15 @@
 .channel-conversation-list .conversation-row.is-dragging {
   opacity: 0.58;
 }
+
+/* 列表重排 FLIP：仅播 transform，时长/缓动走 motion token */
+.channel-conversation-list .conversation-row.is-flipping {
+  transition: transform var(--za-motion-medium) var(--za-ease-out);
+  will-change: transform;
+  z-index: 1;
+  pointer-events: none;
+}
+
 .channel-conversation-list .conversation-row.is-in-pinned-group {
   cursor: grab;
 }
