@@ -340,7 +340,8 @@
   width: 100%;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--radius-sm);
+  /* Align with right-side composer / goal dock panel radius (12px). */
+  border-radius: var(--ui-radius-panel, var(--radius-lg));
   background: transparent;
   color: var(--graphite-base);
   cursor: pointer;
@@ -382,7 +383,8 @@
   box-sizing: border-box;
   padding: var(--space-2) var(--space-3);
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  /* Match right panel / goal list card radius so left/right no longer feel split. */
+  border-radius: var(--ui-radius-panel, var(--radius-lg));
   background: transparent;
   box-shadow: var(--ui-surface-float-shadow, none);
   cursor: pointer;
@@ -537,7 +539,7 @@
   box-sizing: border-box;
   padding: var(--space-2) var(--space-3);
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-panel, var(--radius-lg));
   background: transparent;
   box-shadow: var(--ui-surface-float-shadow, none);
   cursor: pointer;
