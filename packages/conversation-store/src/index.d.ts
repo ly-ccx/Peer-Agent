@@ -35,6 +35,13 @@ export interface ConversationChangeEvent {
 
 export interface ConversationStore {
   listConversations(params?: { status?: string | readonly string[] }): ConversationMeta[];
+  searchConversations(params?: {
+    query?: string;
+    status?: string | readonly string[];
+    workspacePath?: string | null;
+    limit?: number;
+    includeWorkspaceNameMatch?: boolean;
+  }): ConversationMeta[];
   getConversation(id: string): StoredConversation | null;
   createConversation(input?: { title?: string; workspacePath?: string; mode?: string }): ConversationMeta;
   appendMessage(id: string, message: object): unknown;
@@ -46,3 +53,9 @@ export interface ConversationStore {
 }
 
 export function createConversationStore(options?: { storeDir?: string }): ConversationStore;
+
+export function rankConversationMatch(
+  meta: Pick<ConversationMeta, 'title' | 'workspacePath'> | null | undefined,
+  query?: string,
+  options?: { includeWorkspaceNameMatch?: boolean },
+): number;

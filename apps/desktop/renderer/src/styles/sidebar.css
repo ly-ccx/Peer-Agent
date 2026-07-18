@@ -333,6 +333,37 @@
   padding: 0 var(--space-3) var(--space-2);
   -webkit-app-region: no-drag;
 }
+.sidebar-search-chats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--za-line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--pa-text-secondary, var(--graphite-soft));
+  cursor: pointer;
+  font-size: 0.82rem;
+  transition: background var(--za-motion-fast), border-color var(--za-motion-fast);
+}
+.sidebar-search-chats:hover {
+  background: var(--za-sidebar-active-bg);
+  border-color: color-mix(in srgb, var(--za-line) 70%, var(--za-accent, #4c8bf5));
+}
+.sidebar-search-chats span {
+  flex: 1 1 auto;
+  text-align: left;
+}
+.sidebar-search-chats-kbd {
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 6px;
+  border: 1px solid var(--za-line);
+  color: var(--pa-text-tertiary, var(--graphite-soft));
+}
 .sidebar-new-chat {
   display: flex;
   align-items: center;

@@ -140,6 +140,39 @@ function migrateLegacyGoalMode(storeDir, indexFile) {
   }
 }
 
+
+function normalizeSearchQuery(query) {
+  return String(query || '').trim().toLowerCase();
+}
+
+function workspaceShortName(workspacePath) {
+  if (!workspacePath) return '';
+  const normalized = String(workspacePath).replace(/[\\/]+$/, '');
+  const parts = normalized.split(/[\\/]/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : normalized;
+}
+
+/**
+ * Title-first conversation search ranker (P0 Search Chats).
+ * Higher score wins; empty query returns 0 for every candidate so callers can
+ * fall back to recency ordering without inventing match quality.
+ */
+export function rankConversationMatch(meta, query, { includeWorkspaceNameMatch = false } = {}) {
+  const q = normalizeSearchQuery(query);
+  if (!q) return 0;
+  const title = normalizeSearchQuery(meta?.title);
+  if (title.includes(q)) {
+    if (title === q) return 300;
+    if (title.startsWith(q)) return 200;
+    return 100;
+  }
+  if (includeWorkspaceNameMatch) {
+    const wsName = normalizeSearchQuery(workspaceShortName(meta?.workspacePath));
+    if (wsName && wsName.includes(q)) return 50;
+  }
+  return -1;
+}
+
 export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
   const indexFile = path.join(storeDir, 'index.jsonl');
 
@@ -177,6 +210,47 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
   function listConversationsByWorkspace(workspacePath, params = {}) {
     return listConversations(params).filter((c) => (c.workspacePath || null) === (workspacePath || null));
   }
+
+
+  /**
+   * Cross-workspace conversation search over index meta only (no per-chat jsonl).
+   * P0: active-only by default, title match, recency fallback when query is empty.
+   */
+  function searchConversations(params = {}) {
+    const query = normalizeSearchQuery(params?.query);
+    const limitRaw = Number(params?.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 50;
+    const includeWorkspaceNameMatch = Boolean(params?.includeWorkspaceNameMatch);
+    // Default active-only for Search Chats MVP (archived excluded unless requested).
+    const statuses = normalizeStatuses(params?.status ?? 'active');
+    const workspaceFilter = params?.workspacePath !== undefined
+      ? (params.workspacePath || null)
+      : undefined;
+
+    const recencyKey = (meta) => String(meta?.updatedAt || meta?.createdAt || '');
+
+    let items = readIndex().filter((meta) => {
+      if (statuses && !statuses.has(normalizeStatus(meta.status))) return false;
+      if (workspaceFilter !== undefined && (meta.workspacePath || null) !== workspaceFilter) return false;
+      return true;
+    });
+
+    if (query) {
+      items = items
+        .map((meta) => ({ meta, score: rankConversationMatch(meta, query, { includeWorkspaceNameMatch }) }))
+        .filter((entry) => entry.score >= 0)
+        .sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          return recencyKey(b.meta).localeCompare(recencyKey(a.meta));
+        })
+        .map((entry) => entry.meta);
+    } else {
+      items = items.sort((a, b) => recencyKey(b).localeCompare(recencyKey(a)));
+    }
+
+    return items.slice(0, limit);
+  }
+
 
   // 对话模式（chat / plan）按会话持久化在会话 meta 上，而非全局设置：
   // 模式是「每会话状态」，与计划数据同口径，切换会话各自独立、互不影响。
@@ -509,6 +583,7 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
   return {
     listConversations,
     listConversationsByWorkspace,
+    searchConversations,
     createConversation: changed(createConversation, 'created'),
     getConversation,
     updateTitle: changed(updateTitle, 'metadata-updated'),

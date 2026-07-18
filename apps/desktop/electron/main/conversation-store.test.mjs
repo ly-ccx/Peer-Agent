@@ -595,3 +595,56 @@ test('multiple store instances append messages without overwriting each other', 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('searchConversations ranks title matches and excludes archived by default', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'peer-conversations-search-'));
+  try {
+    const store = createConversationStore({ storeDir: dir });
+    const exact = store.createConversation({ title: 'Search Chats', workspacePath: '/ws/a' });
+    const prefix = store.createConversation({ title: 'Search chats palette', workspacePath: '/ws/b' });
+    const contains = store.createConversation({ title: 'Implement search chats', workspacePath: '/ws/c' });
+    const other = store.createConversation({ title: 'Unrelated task', workspacePath: '/ws/a' });
+    const archived = store.createConversation({ title: 'Search archived', workspacePath: '/ws/a' });
+    store.archiveConversation(archived.id);
+
+    // Make recency deterministic among equal-score items.
+    store.updateTitle(contains.id, 'Implement search chats');
+    store.updateTitle(prefix.id, 'Search chats palette');
+    store.updateTitle(exact.id, 'Search Chats');
+
+    const results = store.searchConversations({ query: 'search chats' });
+    assert.deepEqual(results.map((item) => item.id), [exact.id, prefix.id, contains.id]);
+    assert.equal(results.some((item) => item.id === other.id), false);
+    assert.equal(results.some((item) => item.id === archived.id), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('searchConversations empty query returns recent active conversations with limit', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'peer-conversations-search-empty-'));
+  try {
+    const store = createConversationStore({ storeDir: dir });
+    const older = store.createConversation({ title: 'Older', workspacePath: '/ws/a' });
+    const newer = store.createConversation({ title: 'Newer', workspacePath: '/ws/b' });
+    const archived = store.createConversation({ title: 'Archived recent', workspacePath: '/ws/c' });
+    store.archiveConversation(archived.id);
+    store.updateTitle(newer.id, 'Newer');
+
+    const results = store.searchConversations({ query: '  ', limit: 1 });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].id, newer.id);
+    assert.equal(results[0].id === older.id, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('rankConversationMatch prefers exact and prefix title matches', async () => {
+  const { rankConversationMatch } = await import('@peer-agent/conversation-store');
+  assert.equal(rankConversationMatch({ title: 'Search Chats' }, 'search chats'), 300);
+  assert.equal(rankConversationMatch({ title: 'Search chats palette' }, 'search chats'), 200);
+  assert.equal(rankConversationMatch({ title: 'Implement search chats' }, 'search chats'), 100);
+  assert.equal(rankConversationMatch({ title: 'Other' }, 'search chats'), -1);
+  assert.equal(rankConversationMatch({ title: 'Other', workspacePath: '/tmp/search-chats' }, 'search', { includeWorkspaceNameMatch: true }), 50);
+});

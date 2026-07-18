@@ -8,6 +8,7 @@ import { shouldRefreshQuickChatConversationList } from './app/state/quickChatSub
 import { useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { ChatSurface } from './chat/components/ChatSurface';
 import { Sidebar } from './chat/components/Sidebar';
+import { ConversationSearchPalette, type SearchConversationHit } from './chat/components/ConversationSearchPalette';
 import { conversationStore } from './chat/state/conversationStore';
 import type { CompactionState } from './chat/state/types';
 import { clientApi } from './clientApi';
@@ -51,6 +52,7 @@ export function App() {
 function MainApp() {
   const { availableLocales, initError, refreshBootstrap, session, startupSnapshot } = useDesktopBootstrap();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [activePage, setActivePage] = useState<AppPage>('chat');
   const [conversationView, setConversationView] = useState<ConversationView>('active');
   // 窗口是否处于原生全屏。全屏时交通灯被系统隐藏,据此收掉顶部为其预留的留白。
@@ -309,6 +311,46 @@ function MainApp() {
     setActiveConversationId(next ? next.id : null);
   }, [runningConversationIds]);
 
+
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      // ⌘K / Ctrl+K toggles Search Chats palette.
+      if (event.metaKey && key === 'k' || event.ctrlKey && key === 'k') {
+        if (event.isComposing) return;
+        event.preventDefault();
+        setSearchOpen((open) => !open);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  const handleOpenSearch = useCallback(() => {
+    setSearchOpen(true);
+  }, []);
+
+  const handleCloseSearch = useCallback(() => {
+    setSearchOpen(false);
+  }, []);
+
+  const handleSearchSelectConversation = useCallback(async (hit: SearchConversationHit) => {
+    const targetWorkspace = hit.workspacePath || null;
+    const currentWorkspace = activeWorkspace || null;
+    if (targetWorkspace && targetWorkspace !== currentWorkspace) {
+      await clientApi.workspaceSetActive({ path: targetWorkspace });
+      setActiveWorkspace(targetWorkspace);
+      setConversationView('active');
+      await refreshConversations(targetWorkspace, 'active');
+    } else if (conversationView !== 'active') {
+      setConversationView('active');
+      await refreshConversations(activeWorkspace, 'active');
+    }
+    setActiveConversationId(hit.id);
+    setActivePage('chat');
+  }, [activeWorkspace, conversationView, refreshConversations]);
+
   const handleNewChat = useCallback(async () => {
     // 没有工作区时不允许把对话落到根目录:先确保有一个工作区(必要时默认初始化)。
     let ws = activeWorkspace;
@@ -435,6 +477,7 @@ function MainApp() {
               activePage={activePage}
               i18n={i18n}
               onNewChat={handleNewChat}
+              onOpenSearch={handleOpenSearch}
               onSelectConversation={handleSelectConversation}
               onDeleteConversation={handleDeleteConversation}
               onRenameConversation={handleRenameConversation}
@@ -510,6 +553,20 @@ function MainApp() {
               />
             </section>
           ) : null}
+
+      {searchOpen ? (
+        <ConversationSearchPalette
+          open={searchOpen}
+          i18n={i18n}
+          activeWorkspace={activeWorkspace}
+          onClose={handleCloseSearch}
+          onSelectConversation={handleSearchSelectConversation}
+          onNewTask={async () => {
+            setSearchOpen(false);
+            await handleNewChat();
+          }}
+        />
+      ) : null}
         </>
       ) : (
         <section className="main-panel">

@@ -8,6 +8,14 @@ export const AVAILABLE_LOCALES = ['zh-CN', 'en-US'] as const satisfies readonly 
 
 export type TranslationKey =
   | 'app.newTask'
+  | 'searchChats.open'
+  | 'searchChats.placeholder'
+  | 'searchChats.section.chats'
+  | 'searchChats.section.suggested'
+  | 'searchChats.empty'
+  | 'searchChats.untitled'
+  | 'searchChats.newTask'
+  | 'searchChats.shortcut'
   | 'app.search'
   | 'app.plugins'
   | 'app.agents'
@@ -558,6 +566,14 @@ type TranslationValues = Record<string, string | number>;
 const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
   'zh-CN': {
     'app.newTask': '新任务',
+    'searchChats.open': '打开搜索会话',
+    'searchChats.placeholder': '搜索会话',
+    'searchChats.section.chats': '会话',
+    'searchChats.section.suggested': '建议',
+    'searchChats.empty': '未找到相关会话',
+    'searchChats.untitled': '未命名任务',
+    'searchChats.newTask': '新建任务',
+    'searchChats.shortcut': '⌘K',
     'app.search': '搜索',
     'app.plugins': '插件',
     'app.agents': 'Agent',
@@ -1107,6 +1123,14 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
   },
   'en-US': {
     'app.newTask': 'New task',
+    'searchChats.open': 'Search chats',
+    'searchChats.placeholder': 'Search chats',
+    'searchChats.section.chats': 'Chats',
+    'searchChats.section.suggested': 'Suggested',
+    'searchChats.empty': 'No chats found',
+    'searchChats.untitled': 'Untitled',
+    'searchChats.newTask': 'New task',
+    'searchChats.shortcut': '⌘K',
     'app.search': 'Search',
     'app.plugins': 'Plugins',
     'app.agents': 'Agents',

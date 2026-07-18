@@ -357,7 +357,29 @@ export interface BootstrapPreloadApi {
   readonly workspaceRemove: (params: { path: string }) => Promise<unknown>;
   readonly workspaceInfo: (params: { path: string }) => Promise<{ name: string; absolutePath: string; git?: { branch?: string; isDirty?: boolean } } | null>;
   readonly conversationsList: (params?: { workspacePath?: string | null; status?: 'active' | 'archived' | readonly ('active' | 'archived')[] }) => Promise<readonly { id: string; title: string; workspacePath?: string | null; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }[]>;
-  readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null; mode?: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }>;
+    readonly conversationsSearch: (params?: {
+    query?: string;
+    status?: 'active' | 'archived' | readonly ('active' | 'archived')[];
+    workspacePath?: string | null;
+    limit?: number;
+    includeWorkspaceNameMatch?: boolean;
+  }) => Promise<readonly {
+    id: string;
+    title: string;
+    workspacePath?: string | null;
+    mode?: string;
+    effort?: string;
+    modelProviderId?: string | null;
+    status?: 'active' | 'archived';
+    archivedAt?: string | null;
+    pinnedAt?: string | null;
+    pinnedOrder?: number | null;
+    createdAt?: string;
+    updatedAt?: string;
+    messageCount?: number;
+    lifetimeUsage?: unknown;
+  }[]>;
+readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null; mode?: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }>;
   readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage } | null>;
   readonly onConversationsChanged: (listener: (event: { conversationId: string; workspacePath: string | null; changeType: 'created' | 'messages-updated' | 'metadata-updated' | 'deleted'; revision: string; writerPid: number; changedAt: string }) => void) => () => void;
   readonly onWorkspacesChanged: (listener: (event: { workspacePath: string }) => void) => () => void;
