@@ -51,7 +51,7 @@
   }
   /* TabRail：内容区顶部的横向纯图标 tab。文字由原生 title tooltip 提供。 */
   .workbench-tab-rail {
-    flex: 0 0 36px;
+    flex: 0 0 40px;
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -208,7 +208,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    min-height: 36px;
+    min-height: 40px;
     padding: 0 12px;
     border-bottom: 1px solid var(--ui-border-subtle, var(--za-line));
     flex: 0 0 auto;
