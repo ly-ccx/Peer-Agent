@@ -5,12 +5,23 @@ const SUPPORT_GAP = 11;
 const INK_BLACK = '#1a1d21';
 /** Cool light ink for dark theme wordmark. */
 const INK_LIGHT = '#d7dde8';
+/** Sidebar brand marks — prewarm during startup so left-top logo is ready after transition. */
+const SIDEBAR_LOGO_SRCS = ['./logo-light.png', './logo-dark.png'] as const;
 
 type ThemeMode = 'light' | 'dark';
 
 function readThemeMode(): ThemeMode {
   if (typeof document === 'undefined') return 'light';
   return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+}
+
+function preloadSidebarLogos(): void {
+  if (typeof Image === 'undefined') return;
+  for (const src of SIDEBAR_LOGO_SRCS) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = src;
+  }
 }
 
 /**
@@ -22,6 +33,11 @@ export function BrandStartupLoader() {
   const textRef = useRef<SVGTextElement | null>(null);
   const inkTextRef = useRef<SVGTextElement | null>(null);
   const supportLineRef = useRef<SVGLineElement | null>(null);
+
+  // Second warm-up while the transition page is visible (HTML preload is the first).
+  useLayoutEffect(() => {
+    preloadSidebarLogos();
+  }, []);
 
   useLayoutEffect(() => {
     const text = textRef.current;
