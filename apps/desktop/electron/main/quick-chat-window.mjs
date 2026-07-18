@@ -2,7 +2,8 @@ const DEFAULT_SIZE = Object.freeze({ width: 720, height: 104 });
 const TASK_SIZE = Object.freeze({ width: 720, height: 334 });
 const MAX_CONTENT_HEIGHT = 480;
 const POPOVER_MAX_SIZE = Object.freeze({ width: 360, height: 280 });
-const POPOVER_GAP = 6;
+/** Keep in sync with renderer QuickChatPopover gap (flush to bar bottom). */
+const POPOVER_GAP = 0;
 
 export function clampQuickChatContentHeight(height, { hasTaskCard = false } = {}) {
   const fallback = hasTaskCard ? TASK_SIZE.height : DEFAULT_SIZE.height;
@@ -20,11 +21,13 @@ export function resolveQuickChatPopoverSize(state = {}) {
     String(item?.detail ?? '').length,
   ), 0);
   const rowHeight = hasDetails ? 44 : 34;
+  // Compact content width (not full bar width).
+  const minWidth = state.kind === 'workspace' ? 280 : state.kind === 'effort' ? 240 : 190;
   const width = state.kind === 'effort'
     ? 240
     : Math.min(
       POPOVER_MAX_SIZE.width,
-      Math.max(state.kind === 'workspace' ? 280 : 190, 80 + longestText * (hasDetails ? 6.2 : 7.2)),
+      Math.max(minWidth, 80 + longestText * (hasDetails ? 6.2 : 7.2)),
     );
   const height = state.kind === 'effort'
     ? 72

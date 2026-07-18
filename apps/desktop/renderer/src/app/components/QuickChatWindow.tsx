@@ -181,7 +181,16 @@ export function QuickChatWindow() {
       dismissPopover();
       return;
     }
-    const rect = anchor.getBoundingClientRect();
+    // Horizontal: trigger button. Vertical: flush under the whole input bar bottom.
+    const trigger = anchor.getBoundingClientRect();
+    const bar = barRef.current?.getBoundingClientRect();
+    const barBottom = bar ? bar.y + bar.height : trigger.y + trigger.height;
+    const rect = {
+      x: trigger.x,
+      y: bar?.y ?? trigger.y,
+      width: trigger.width,
+      height: barBottom - (bar?.y ?? trigger.y),
+    };
     const items = kind === 'workspace'
       ? workspaces.map((workspace) => ({ value: workspace.path, label: workspace.name || workspace.path.split('/').filter(Boolean).pop() || workspace.path, detail: workspace.path }))
       : kind === 'model'

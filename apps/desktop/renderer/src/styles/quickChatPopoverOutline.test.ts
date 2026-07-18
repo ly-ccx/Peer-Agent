@@ -1,30 +1,30 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-const readRendererSource = (path: string) => readFile(new URL(path, import.meta.url), 'utf8');
+const cssPath = join(dirname(fileURLToPath(import.meta.url)), 'quick-chat.css');
+const css = readFileSync(cssPath, 'utf8');
 
-test('Quick Chat only suppresses the main card bottom outline while a popover is open', async () => {
-  const [component, css] = await Promise.all([
-    readRendererSource('../app/components/QuickChatWindow.tsx'),
-    readRendererSource('./quick-chat.css'),
-  ]);
+function ruleBody(selector: string) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
+  assert.ok(match, `missing rule for ${selector}`);
+  return match[1];
+}
 
-  assert.match(component, /popoverState \? ' has-open-popover' : ''/);
-  assert.match(
-    css,
-    /\.quick-chat-shell\.has-open-popover \.quick-chat-bar\s*\{[^}]*border-bottom-color:\s*transparent;[^}]*box-shadow:\s*none;/s,
-  );
-});
+test('compact popover is a single full-outline card, not a bar extension seam', () => {
+  const shellRule = ruleBody('.quick-chat-popover-shell');
+  const panelRule = ruleBody('.quick-chat-popover-panel');
+  const openBarRule = ruleBody('.quick-chat-shell.has-open-popover .quick-chat-bar');
 
-test('Quick Chat popover keeps its own border and shadow', async () => {
-  const css = await readRendererSource('./quick-chat.css');
-  const shellStart = css.indexOf('.quick-chat-popover-shell {');
-  const panelStart = css.indexOf('.quick-chat-popover-panel {', shellStart);
-  const shellRule = css.slice(shellStart, panelStart);
-
-  assert.notEqual(shellStart, -1);
-  assert.notEqual(panelStart, -1);
-  assert.match(shellRule, /border:\s*1px solid/);
-  assert.match(shellRule, /box-shadow:\s*var\(--shadow-card\)/);
+  assert.match(shellRule, /border:\s*1px solid var\(--quick-border\)/);
+  assert.match(shellRule, /border-radius:\s*12px/);
+  assert.doesNotMatch(shellRule, /border-top-color:\s*transparent/);
+  assert.doesNotMatch(shellRule, /border-radius:\s*0 0/);
+  assert.match(shellRule, /background:\s*var\(--quick-surface\)/);
+  assert.match(panelRule, /background:\s*transparent/);
+  assert.doesNotMatch(openBarRule, /border-bottom-color:\s*transparent/);
+  assert.doesNotMatch(openBarRule, /border-bottom-left-radius:\s*0/);
 });

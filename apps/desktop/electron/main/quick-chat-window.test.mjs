@@ -54,18 +54,32 @@ test('positions the floating window on the display containing the cursor', () =>
   }), { x: 1300, y: 154, width: 600, height: 200 });
 });
 
-test('sizes the inline popover from its item count instead of reserving an empty fixed panel', () => {
-  assert.deepEqual(resolveQuickChatPopoverSize({
+test('sizes the inline popover from content width (compact), not full bar width', () => {
+  const workspace = resolveQuickChatPopoverSize({
     kind: 'workspace',
     items: [
       { label: 'one', detail: '/workspaces/one' },
       { label: 'two', detail: '/workspaces/two' },
     ],
-  }), { width: 280, height: 100 });
+    anchorRect: { x: 0, y: 0, width: 720, height: 104 },
+  });
+  assert.equal(workspace.width < 720, true);
+  assert.equal(workspace.width >= 280, true);
+  assert.equal(workspace.height, 100);
+
   assert.deepEqual(resolveQuickChatPopoverSize({
     kind: 'effort',
     items: [{ label: '标准思考' }, { label: '深度思考' }],
+    anchorRect: { x: 0, y: 0, width: 720, height: 104 },
   }), { width: 240, height: 72 });
+
+  const model = resolveQuickChatPopoverSize({
+    kind: 'model',
+    items: [{ label: 'Model A' }],
+  });
+  assert.equal(model.width < 720, true);
+  assert.equal(model.width >= 190, true);
+  assert.equal(model.height, 46);
 });
 
 test('expands the main window only downward without moving its top edge', () => {
@@ -75,13 +89,13 @@ test('expands the main window only downward without moving its top edge', () => 
     { x: 200, y: 72, width: 100, height: 24 },
     { x: 0, y: 0, width: 1000, height: 760 },
     size,
-  ), { x: 100, y: 100, width: 720, height: 202 });
+  ), { x: 100, y: 100, width: 720, height: 196 });
   assert.deepEqual(resolveQuickChatExpandedBounds(
     { x: 100, y: 650, width: 720, height: 104 },
     { x: 20, y: 72, width: 100, height: 24 },
     { x: 0, y: 0, width: 1000, height: 760 },
     size,
-  ), { x: 100, y: 650, width: 720, height: 202 });
+  ), { x: 100, y: 650, width: 720, height: 196 });
 });
 
 test('creates one main window and toggles its visibility', () => {
@@ -130,7 +144,7 @@ test('expands the main window for an inline popover without creating another win
   }), true);
 
   assert.equal('getPopoverWindow' in controller, false);
-  assert.equal(parent.getBounds().height, 182);
+  assert.equal(parent.getBounds().height, 176);
   controller.hidePopover({ restoreFocus: true });
   assert.equal(parent.getBounds().height, 104);
 });
@@ -155,7 +169,7 @@ test('shows one inline popover and sends a validated selection to the main windo
     && visible === true
     && assert.deepEqual(options, expectedWorkspaceOptions) === undefined
   )), true);
-  assert.equal(parent.getBounds().height, 182);
+  assert.equal(parent.getBounds().height, 176);
   assert.equal(controller.selectPopoverValue('missing'), false);
   assert.equal(controller.selectPopoverValue('model-b'), true);
   assert.equal(parent.getBounds().height, 104);

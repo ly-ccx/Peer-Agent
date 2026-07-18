@@ -5,9 +5,10 @@ import type {
   QuickChatPopoverAnchorRect,
   QuickChatPopoverState,
 } from '../../preload/contracts/bootstrapPreloadApi';
-
-const POPOVER_MAX_SIZE = Object.freeze({ width: 360, height: 280 });
-const POPOVER_GAP = 6;
+import {
+  resolveQuickChatPopoverPosition,
+  resolveQuickChatPopoverVisualSize,
+} from './quickChatPopoverLayout.ts';
 
 export type InlineQuickChatPopoverState = QuickChatPopoverState & {
   readonly anchorRect: QuickChatPopoverAnchorRect;
@@ -19,25 +20,10 @@ interface QuickChatPopoverProps {
   readonly onDismiss: () => void;
 }
 
-export function resolveQuickChatPopoverVisualSize(state: QuickChatPopoverState) {
-  const hasDetails = state.items.some((item) => typeof item.detail === 'string' && item.detail.length > 0);
-  const longestText = state.items.reduce((length, item) => Math.max(
-    length,
-    item.label.length,
-    item.detail?.length ?? 0,
-  ), 0);
-  const rowHeight = hasDetails ? 44 : 34;
-  const width = state.kind === 'effort'
-    ? 240
-    : Math.min(
-      POPOVER_MAX_SIZE.width,
-      Math.max(state.kind === 'workspace' ? 280 : 190, 80 + longestText * (hasDetails ? 6.2 : 7.2)),
-    );
-  const height = state.kind === 'effort'
-    ? 72
-    : Math.min(POPOVER_MAX_SIZE.height, 12 + Math.max(1, state.items.length) * rowHeight);
-  return { width: Math.round(width), height: Math.round(height) };
-}
+export {
+  resolveQuickChatPopoverPosition,
+  resolveQuickChatPopoverVisualSize,
+} from './quickChatPopoverLayout.ts';
 
 export function QuickChatPopover({ state, onSelect, onDismiss }: QuickChatPopoverProps) {
   const shellRef = useRef<HTMLElement>(null);
@@ -56,11 +42,13 @@ export function QuickChatPopover({ state, onSelect, onDismiss }: QuickChatPopove
   const previewEffort = effortLevels[previewIndex]
     ?? (isEffortLevel(state.selectedValue) ? state.selectedValue : 'default');
   const size = resolveQuickChatPopoverVisualSize(state);
-  const left = Math.min(
-    Math.max(8, window.innerWidth - size.width - 8),
-    Math.max(8, Math.round(state.anchorRect.x)),
-  );
-  const top = Math.round(state.anchorRect.y + state.anchorRect.height) + POPOVER_GAP;
+  // state.anchorRect is the trigger button; vertical flush uses bar bottom encoded as
+  // y/height of a synthetic rect (see QuickChatWindow.togglePopover).
+  const { left, top } = resolveQuickChatPopoverPosition({
+    kind: state.kind,
+    anchorRect: state.anchorRect,
+    size,
+  });
 
   useEffect(() => {
     setActiveIndex(selectedIndex);
