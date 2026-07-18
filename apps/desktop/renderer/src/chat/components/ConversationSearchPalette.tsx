@@ -74,36 +74,33 @@ function filterAndRankConversations(
   return ranked.slice(0, limit);
 }
 
-async function searchConversationsResilient(params: {
-  query: string;
-  limit?: number;
-}): Promise<readonly SearchConversationHit[]> {
-  const limit = params.limit ?? 50;
+/**
+ * Load active conversation metas once for the palette session.
+ * Prefer dedicated search IPC with empty query (recent active list); fall back to list.
+ * Filtering stays on the client so typing never blocks on IPC.
+ */
+async function loadActiveConversationsForSearch(limit = 500): Promise<readonly SearchConversationHit[]> {
   const searchApi = (clientApi as { conversationsSearch?: (p: {
     query?: string;
     status?: 'active';
     limit?: number;
   }) => Promise<readonly SearchConversationHit[]> }).conversationsSearch;
 
-  // Prefer dedicated IPC when preload/main have been restarted with the new channel.
   if (typeof searchApi === 'function') {
     try {
       const list = await searchApi({
-        query: params.query,
+        query: '',
         status: 'active',
         limit,
       });
-      if (Array.isArray(list)) return list;
+      if (Array.isArray(list) && list.length > 0) return list;
     } catch (error) {
-      // Fall through to list-based search when the handler is missing on a hot-reloaded main process.
       console.warn('[search-chats] conversationsSearch failed, falling back to conversationsList', error);
     }
   }
 
-  // Fallback: use existing conversations:list (no workspace filter) + client rank.
-  // This keeps Search Chats usable even if Electron main/preload was not restarted.
   const list = await clientApi.conversationsList({ status: 'active' });
-  return filterAndRankConversations((list || []) as readonly SearchConversationHit[], params.query, limit);
+  return filterAndRankConversations((list || []) as readonly SearchConversationHit[], '', limit);
 }
 
 function highlightTitle(title: string, query: string): ReactNode {
@@ -134,46 +131,48 @@ export function ConversationSearchPalette({
   onNewTask,
 }: ConversationSearchPaletteProps) {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<readonly SearchConversationHit[]>([]);
+  const [catalog, setCatalog] = useState<readonly SearchConversationHit[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
-  const requestSeq = useRef(0);
+  const loadSeq = useRef(0);
 
-  // Reset ephemeral state each time the palette opens.
+  // Reset query + focus when opening; load the active catalog once per open.
   useEffect(() => {
     if (!open) return;
     setQuery('');
-    setResults([]);
     setActiveIndex(0);
     setLoading(true);
-    const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
-    return () => window.clearTimeout(timer);
+    const seq = ++loadSeq.current;
+    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 0);
+    void (async () => {
+      try {
+        const list = await loadActiveConversationsForSearch(500);
+        if (seq !== loadSeq.current) return;
+        setCatalog(list);
+      } catch (error) {
+        console.warn('[search-chats] catalog load failed', error);
+        if (seq !== loadSeq.current) return;
+        setCatalog([]);
+      } finally {
+        if (seq === loadSeq.current) setLoading(false);
+      }
+    })();
+    return () => {
+      window.clearTimeout(focusTimer);
+    };
   }, [open]);
 
+  // Typing only re-ranks the in-memory catalog — no IPC, no debounce needed.
+  const results = useMemo(
+    () => filterAndRankConversations(catalog, query, 50),
+    [catalog, query],
+  );
+
   useEffect(() => {
-    if (!open) return;
-    const seq = ++requestSeq.current;
-    const handle = window.setTimeout(() => {
-      void (async () => {
-        setLoading(true);
-        try {
-          const list = await searchConversationsResilient({ query, limit: 50 });
-          if (seq !== requestSeq.current) return;
-          setResults(list);
-          setActiveIndex(0);
-        } catch (error) {
-          console.warn('[search-chats] search failed', error);
-          if (seq !== requestSeq.current) return;
-          setResults([]);
-        } finally {
-          if (seq === requestSeq.current) setLoading(false);
-        }
-      })();
-    }, query.trim() ? 80 : 0);
-    return () => window.clearTimeout(handle);
-  }, [open, query]);
+    setActiveIndex(0);
+  }, [query, results]);
 
   const items = useMemo<readonly PaletteItem[]>(() => {
     const conversationItems: PaletteItem[] = results.map((conversation) => ({
