@@ -633,7 +633,15 @@ export function LlmSettingsPanel({
           wireOverride: form.wireOverride || undefined,
           customHeaders,
           authMethod: form.authMethod,
-          name: form.name || (localCli ? 'Qoder 私有接口' : form.provider),
+          name: form.name || (localCli
+            ? 'Qoder 私有接口'
+            : form.authMethod === 'oauth_google'
+              ? 'Gemini OAuth'
+              : form.authMethod === 'oauth_grok'
+                ? 'Grok 官方'
+                : form.authMethod === 'oauth_chatgpt'
+                  ? 'ChatGPT 订阅'
+                  : selectedChannel?.label || form.provider),
           baseUrl: form.baseUrl,
           apiKey: form.apiKey,
           oauthProjectId: form.oauthProjectId,
@@ -1201,7 +1209,7 @@ export function LlmSettingsPanel({
             <>
               <label>
                 <span>{i18n.locale === 'zh-CN' ? '显示名称' : 'Display Name'}</span>
-                <input value={form.name} placeholder={form.provider} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+                <input value={form.name} placeholder={selectedChannel.label || form.provider} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
               </label>
 
               <label>

@@ -244,6 +244,32 @@ test('Grok OAuth records migrate to the official display name', () => withStore(
   assert.equal(persisted.name, 'Grok 官方');
 }));
 
+test('Google OAuth records migrate away from the openai display name', () => withStore(({ configFile }) => {
+  writeFileSync(configFile, JSON.stringify([
+    {
+      id: 'google-oauth',
+      provider: 'openai',
+      authMethod: 'oauth_google',
+      name: 'openai',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      model: 'gemini-2.0-flash',
+      enabled: true,
+      isDefault: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+  ], null, 2));
+
+  const store = createLlmConfigStore({ configFile });
+  const [provider] = store.listProviders();
+  assert.equal(provider.name, 'Gemini OAuth');
+  assert.equal(provider.channelId, 'google-ai');
+  assert.equal(provider.authMethod, 'oauth_google');
+
+  const [persisted] = readPersistedModels(configFile);
+  assert.equal(persisted.name, 'Gemini OAuth');
+  assert.equal(persisted.channelId, 'google-ai');
+}));
+
 test('legacy provider entries migrate to channel fields without losing stored settings', () => withStore(({ configFile, credentialSecrets }) => {
   writeFileSync(configFile, JSON.stringify([
     {
@@ -357,14 +383,18 @@ test('Gemini subscription can be added without manual OAuth client configuration
     provider: 'openai',
     channelId: 'google-ai',
     authMethod: 'oauth_google',
-    name: 'Gemini OAuth',
+    name: 'openai',
     model: 'gemini-2.0-flash',
   });
 
   assert.equal(provider.channelId, 'google-ai');
   assert.equal(provider.authMethod, 'oauth_google');
+  assert.equal(provider.name, 'Gemini OAuth');
   assert.equal(Object.hasOwn(provider, 'oauthClientId'), false);
   assert.equal(Object.hasOwn(provider, 'oauthClientSecretConfigured'), false);
+
+  const [persisted] = readPersistedModels(configFile);
+  assert.equal(persisted.name, 'Gemini OAuth');
 }));
 
 test('legacy Gemini OAuth client fields are discarded while the provider remains usable', () => withStore(({ configFile }) => {
