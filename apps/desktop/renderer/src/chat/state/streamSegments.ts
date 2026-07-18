@@ -226,21 +226,46 @@ export function groupSegments(segments: ContentSegment[]): SegmentGroup[] {
   return groups;
 }
 
+export type SplitFinalTextOptions = {
+  /**
+   * 有未完成交互卡时：该轮所有非空 text 都留在折叠区外。
+   * 避免「选项在外、决策上下文被折进『已处理』」导致用户看不懂选项。
+   * thinking / tool-call 仍进历史折叠区。
+   */
+  readonly keepAllTextOutside?: boolean;
+};
+
 /**
- * 把已完成回复拆成「历史过程 + 最终正文」。
- * 仅当时间线最后一组是非空正文时才将它留在折叠区外；其余组严格保持原顺序进入历史区。
+ * 把已完成回复拆成「历史过程 + 折叠区外正文」。
+ *
+ * 默认：仅当时间线最后一组是非空正文时才将它留在折叠区外；其余组严格保持原顺序进入历史区。
+ * keepAllTextOutside=true：所有非空 text 都外露；历史区只保留 thinking / tool-call（过程噪音）。
  */
-export function splitFinalTextGroup(groups: SegmentGroup[]): {
+export function splitFinalTextGroup(
+  groups: SegmentGroup[],
+  options?: SplitFinalTextOptions,
+): {
   historyGroups: SegmentGroup[];
-  finalTextGroup?: Extract<SegmentGroup, { type: 'text' }>;
+  finalTextGroups: Array<Extract<SegmentGroup, { type: 'text' }>>;
 } {
+  if (options?.keepAllTextOutside) {
+    const finalTextGroups = groups.filter(
+      (group): group is Extract<SegmentGroup, { type: 'text' }> =>
+        group.type === 'text' && Boolean(group.content.trim()),
+    );
+    return {
+      historyGroups: groups.filter((group) => group.type !== 'text'),
+      finalTextGroups,
+    };
+  }
+
   const last = groups[groups.length - 1];
   if (!last || last.type !== 'text' || !last.content.trim()) {
-    return { historyGroups: groups };
+    return { historyGroups: groups, finalTextGroups: [] };
   }
   return {
     historyGroups: groups.slice(0, -1),
-    finalTextGroup: last,
+    finalTextGroups: [last],
   };
 }
 

@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useContext, useEffect, useMemo, useState } from 'react';
 import { useConversationToolProgress } from '../../hooks/useConversationState';
 import { parseInteractionToolViewFromCandidates } from '../../state/interactionToolView';
 import { groupSegments, splitFinalTextGroup } from '../../state/streamSegments';
@@ -19,6 +19,7 @@ import { MarkdownMessage } from '../markdown/MarkdownMessage';
 import { BatchSearchToolCard } from './BatchSearchToolCard';
 import { buildBatchSearchView } from '../../state/batchSearchLaneView';
 import { neutralizeToolCallSyntaxForDisplay } from '../../state/historicalLocalRecord';
+import { InteractionAnsweredContext } from './interactionContext';
 import { InteractionToolCard } from './InteractionToolCard';
 
 function toolProgressLabel(
@@ -124,9 +125,23 @@ function AssistantContentImpl({
     () => (segments?.length ? groupSegments(segments) : []),
     [segments],
   );
+  // 消息级事实：交互卡之后是否已有 user 回复。未回复时正文需外露，否则选项会「悬空」。
+  const answeredText = useContext(InteractionAnsweredContext);
+  // 交互卡（request_user_input）需要用户点击，单独抽出、始终渲染在折叠面板外。
+  const interactionCalls = useMemo(
+    () => groups.flatMap((group) =>
+      group.type === 'tool-call-group'
+        ? group.calls.filter((tc) => parseToolCallInteractionView(tc))
+        : [],
+    ),
+    [groups],
+  );
+  const keepAllTextOutside = interactionCalls.length > 0 && answeredText === null;
   const completedSplit = useMemo(
-    () => (isStreaming || groups.length === 0 ? undefined : splitFinalTextGroup(groups)),
-    [groups, isStreaming],
+    () => (isStreaming || groups.length === 0
+      ? undefined
+      : splitFinalTextGroup(groups, { keepAllTextOutside })),
+    [groups, isStreaming, keepAllTextOutside],
   );
 
   if (!segments?.length) {
@@ -144,18 +159,23 @@ function AssistantContentImpl({
   }
 
   const processingSummary = buildProcessingSummary(groups, durationMs, isZh);
-  const hasProcessingGroups = groups.some(isProcessingGroup);
-  // 流式期间完整展示原始时间线；完成后只把最后正文留在折叠区外。
+  // 流式期间完整展示原始时间线；完成后：
+  // - 默认只把最后正文留在折叠区外；
+  // - 有未完成交互卡时，该轮所有 text 都外露（选项依赖的决策上下文）。
   const timelineGroups = completedSplit?.historyGroups ?? groups;
-  const finalTextGroup = completedSplit?.finalTextGroup;
-  // 交互卡（request_user_input）需要用户点击，单独抽出、始终渲染在折叠面板外。
-  const interactionCalls = groups.flatMap((group) =>
-    group.type === 'tool-call-group'
-      ? group.calls.filter((tc) => parseToolCallInteractionView(tc))
-      : [],
-  );
+  const finalTextGroups = completedSplit?.finalTextGroups ?? [];
+  // 折叠区只展示「过程噪音」。纯交互工具组已在外面单独渲染，不在折叠区占空壳。
+  const collapsibleGroups = timelineGroups.filter((group) => {
+    if (group.type === 'thinking' || group.type === 'text') return true;
+    if (group.type === 'tool-call-group') {
+      return group.calls.some((tc) => !parseToolCallInteractionView(tc));
+    }
+    return true;
+  });
+  const hasCollapsibleProcess = collapsibleGroups.some(isProcessingGroup)
+    || collapsibleGroups.some((group) => group.type === 'text');
   // 活跃态只跟随整条回复的流式生命周期，避免中间段类型切换造成展开/折叠抖动。
-  const processingIsActive = isStreaming && hasProcessingGroups;
+  const processingIsActive = isStreaming && groups.some(isProcessingGroup);
   const lastGroup = groups[groups.length - 1];
   // 流式期间始终保留一个“还在运行”的指示，避免工具执行间隙/文本结束等待下一步时
   // 光标消失造成“卡住”的错觉。仅当末尾组本身已有 active 视觉（工具执行中的工具组、
@@ -169,19 +189,21 @@ function AssistantContentImpl({
 
   return (
     <div className="assistant-segments">
-      {hasProcessingGroups && timelineGroups.length > 0 ? (
+      {hasCollapsibleProcess && collapsibleGroups.length > 0 ? (
         <ProcessingDetailsSection
-          groups={timelineGroups}
+          groups={collapsibleGroups}
           isActive={processingIsActive}
           label={processingSummary}
           isZh={isZh}
         />
       ) : null}
-      {finalTextGroup ? (
-        <div className="segment-text-after-tools">
-          <MarkdownMessage content={finalTextGroup.content} />
-        </div>
-      ) : !hasProcessingGroups ? (
+      {finalTextGroups.length > 0 ? (
+        finalTextGroups.map((textGroup, idx) => (
+          <div key={`final-text-${idx}`} className="segment-text-after-tools">
+            <MarkdownMessage content={textGroup.content} />
+          </div>
+        ))
+      ) : !groups.some(isProcessingGroup) ? (
         <TimelineGroups groups={groups} isZh={isZh} />
       ) : null}
       {/* 交互卡（request_user_input）始终渲染在折叠面板之外，折叠历史过程时也能看到并点击选项。 */}

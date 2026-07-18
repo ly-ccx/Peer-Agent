@@ -197,7 +197,7 @@ describe('splitFinalTextGroup', () => {
       { type: 'text', content: '正文-1' },
       { type: 'thinking', content: 'thinking-2' },
     ]);
-    assert.deepEqual(split.finalTextGroup, { type: 'text', content: '正文-2' });
+    assert.deepEqual(split.finalTextGroups, [{ type: 'text', content: '正文-2' }]);
   });
 
   it('keeps the whole timeline in history when there is no final text', () => {
@@ -205,7 +205,41 @@ describe('splitFinalTextGroup', () => {
     const split = splitFinalTextGroup(groups);
 
     assert.equal(split.historyGroups, groups);
-    assert.equal(split.finalTextGroup, undefined);
+    assert.deepEqual(split.finalTextGroups, []);
+  });
+
+  it('keeps all non-empty text outside when keepAllTextOutside (pending interaction context)', () => {
+    const groups = groupSegments([
+      think('thinking'),
+      tool('bash'),
+      txt('布局结构约定…'),
+      txt(''),
+      tool('request_user_input'),
+    ]);
+    const split = splitFinalTextGroup(groups, { keepAllTextOutside: true });
+
+    assert.deepEqual(
+      split.historyGroups.map((group) => group.type),
+      ['thinking', 'tool-call-group', 'tool-call-group'],
+    );
+    assert.deepEqual(split.finalTextGroups, [{ type: 'text', content: '布局结构约定…' }]);
+  });
+
+  it('keeps multiple text groups outside in order under keepAllTextOutside', () => {
+    const groups = groupSegments([
+      think('t'),
+      txt('设计说明'),
+      tool('bash'),
+      txt('§1 是否同意？'),
+      tool('request_user_input'),
+    ]);
+    const split = splitFinalTextGroup(groups, { keepAllTextOutside: true });
+
+    assert.deepEqual(split.finalTextGroups, [
+      { type: 'text', content: '设计说明' },
+      { type: 'text', content: '§1 是否同意？' },
+    ]);
+    assert.ok(split.historyGroups.every((group) => group.type !== 'text'));
   });
 });
 
