@@ -131,7 +131,7 @@ const CHANNEL_DESCRIPTORS = {
       api_key: { wire: 'gemini' },
       oauth_google: { wire: 'gemini' },
     },
-    defaults: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.0-flash' },
+    defaults: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.5-pro' },
     capabilities: {
       reasoning: {
         supported: false,
@@ -277,7 +277,7 @@ function mergeHeaders(...parts) {
 
 function geminiModelPath(model) {
   const raw = String(model || '').trim();
-  if (!raw) return 'models/gemini-2.0-flash';
+  if (!raw) return 'models/gemini-2.5-pro';
   return raw.startsWith('models/') ? raw : `models/${raw}`;
 }
 

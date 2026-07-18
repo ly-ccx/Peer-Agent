@@ -13,7 +13,7 @@ const googleChannel = {
   legacyProvider: 'openai',
   defaultWire: 'gemini',
   allowedWires: ['gemini'],
-  defaults: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.0-flash' },
+  defaults: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.5-pro' },
   capabilities: { reasoning: { supported: false, paramStyle: 'none' }, promptCache: false, vision: true },
   authMethods: {
     api_key: { wire: 'gemini' },

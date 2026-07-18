@@ -44,7 +44,7 @@ import { startGrokOAuthLogin, ensureFreshGrokTokens } from './llm-oauth/grok-oau
 import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 import { listSubscriptionModels, listOpenAICompatibleModels } from './provider-adapters/openai-model-catalog.mjs';
 import { listGrokBuildModels } from './provider-adapters/grok-build-model-catalog.mjs';
-import { listGeminiModels } from './provider-adapters/gemini-model-catalog.mjs';
+import { listGeminiModels, preferGeminiModel } from './provider-adapters/gemini-model-catalog.mjs';
 import { listQoderModels } from './provider-adapters/qoder-model-catalog.mjs';
 import { createHostRestarter } from './host-restart.mjs';
 import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
@@ -1715,6 +1715,7 @@ ipcMain.handle('conversations:list', (_, params) => {
   if (params?.workspacePath !== undefined) return conversationStore.listConversationsByWorkspace(params.workspacePath, listParams);
   return conversationStore.listConversations(listParams);
 });
+ipcMain.handle('conversations:search', (_, params) => conversationStore.searchConversations(params || {}));
 ipcMain.handle('conversations:create', (_, params) => conversationStore.createConversation(params));
 ipcMain.handle('conversations:get', (_, { id }) => conversationStore.getConversation(id));
 ipcMain.handle('conversations:update-title', (_, { id, title }) => conversationStore.updateTitle(id, title));
@@ -2323,6 +2324,22 @@ ipcMain.handle('llm:oauth:start', async (event, params) => {
           supportsReasoning: preferred.supportsReasoning,
         });
       }
+    } else if (authMethod === 'oauth_google') {
+      // 对齐 gemini-cli：登录成功后挂 curated 模型目录，默认 DEFAULT_GEMINI_MODEL。
+      // 不调用 GET /v1beta/models；目录来自 gemini-cli 本地常量。
+      const catalog = await listGeminiModels(tokens);
+      models = catalog.models;
+      const preferred = preferGeminiModel(models);
+      if (preferred?.id) {
+        provider = llmConfigStore.updateProvider(targetId, {
+          model: preferred.id,
+          modelLabel: preferred.label || preferred.id,
+          contextWindow: preferred.contextWindow,
+          maxOutputTokens: preferred.maxOutputTokens,
+          metadataSource: catalog.source || 'builtin',
+          metadataSyncedAt: new Date().toISOString(),
+        }) || provider;
+      }
     }
     if (provider) recordProviderBaseline('oauth_login', provider);
     return { success: true, provider, models };
@@ -2399,10 +2416,7 @@ ipcMain.handle('llm:models:list', async (_event, { id }) => {
         : await ensureFreshTokens(tokens);
     if (refreshed) llmConfigStore.setOAuthTokens(id, fresh);
     const { models, source, error } = authMethod === 'oauth_google'
-      ? await listGeminiModels(fresh, {
-        projectId: credential.oauthProjectId,
-        baseUrl: provider?.baseUrl,
-      })
+      ? await listGeminiModels(fresh)
       : authMethod === 'oauth_grok'
         ? await listGrokBuildModels(fresh.access, { baseUrl: provider?.baseUrl })
         : await listSubscriptionModels(fresh);
