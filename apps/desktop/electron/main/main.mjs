@@ -56,6 +56,10 @@ import { createConversationStore } from './conversation-store.mjs';
 import { createGoalPlanStore, goalPlanIsSelfDriven } from './goal-plan-store.mjs';
 import { decideIntakeConvergence } from './goal-intake-convergence.mjs';
 import { createGoalRunner } from './goal-runner.mjs';
+import {
+  buildGoalRunnerStreamStartedPayload,
+  createGoalRunnerAssistantPlaceholder,
+} from './goal-runner-message-persistence.mjs';
 import { applyGoalMessageRoute, routeGoalMessage } from './goal-message-router.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
 import { buildPersistedCompactedMessages } from './conversation-compaction-persistence.mjs';
@@ -688,15 +692,22 @@ goalRunner = createGoalRunner({
         return { failed: true, failureReason: 'Goal conversation not found' };
       }
       const streamId = randomUUID();
-      broadcastToAllWindows('goalRunner:changed', {
-        type: 'goalRunner:streamStarted',
+      // Goal Runner 执行回合必须主进程落盘：先创建 assistant 占位并拿到 id，
+      // 再把 assistantMessageId 同时交给 streamStarted（渲染绑定）与 sendMessage（正文回写）。
+      // 没有 assistantMessageId 时 llm-chat-service 会跳过 persistStreamRecord。
+      const startedAt = Date.now();
+      const { id: assistantMessageId, message: assistantPlaceholder } =
+        createGoalRunnerAssistantPlaceholder({ now: startedAt });
+      conversationStore.appendMessage(plan.conversationId, assistantPlaceholder);
+      broadcastToAllWindows('goalRunner:changed', buildGoalRunnerStreamStartedPayload({
         planId: plan.planId,
         conversationId: plan.conversationId ?? null,
-        changeKind: 'runner-state',
         streamId,
         turnNumber,
-        startedAt: Date.now(),
-      });
+        assistantMessageId,
+        startedAt,
+      }));
+      
       const messages = [
         ...toRuntimeMessages(conversation.messages),
         { role: 'user', content: buildGoalRunnerMessage(plan, turnNumber) },
@@ -748,6 +759,7 @@ goalRunner = createGoalRunner({
         // 注入续推上下文、goal-mode-gate 放行自驱。plan 为纯审批门,不再托管续推。
         mode: 'goal',
         conversationId: plan.conversationId,
+        assistantMessageId,
         continuityContext: goalContinuityContext,
         runtimeReminders: [buildGoalRunnerReminder(plan, turnNumber)],
         agentProgress,
