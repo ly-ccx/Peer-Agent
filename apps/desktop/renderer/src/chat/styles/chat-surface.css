@@ -70,14 +70,14 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding: var(--space-8) var(--space-6);
-  padding-top: 36px;
+  padding-top: 40px;
   display: flex;
   flex-direction: column;
 }
 
 .current-turn-context {
   position: absolute;
-  top: 36px;
+  top: 40px;
   left: 0;
   right: 0;
   z-index: 24;
@@ -133,19 +133,97 @@
   flex: 1;
   text-align: center;
   padding: var(--space-16) var(--space-6);
+  max-width: 760px;
+  margin: 0 auto;
+  width: 100%;
+}
+.chat-empty-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: var(--space-1, 4px);
+  color: var(--graphite-mute, var(--graphite-fade));
+  opacity: 0.72;
 }
 .chat-empty-state h2 {
-  font-family: var(--font-serif-zh);
-  font-size: var(--ui-font-heading-lg, 26px);
-  font-weight: 500;
+  font-family: var(--font-sans);
+  font-size: clamp(1.5rem, 2.1vw, 1.9rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
   color: var(--graphite-base);
   margin: 0;
+  max-width: 22em;
 }
 .chat-empty-state p {
   color: var(--graphite-fade);
   font-size: var(--ui-font-body, 14px);
   margin: 0;
+  line-height: 1.5;
 }
+.chat-empty-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  width: min(100%, 680px);
+  margin-top: var(--space-5);
+  text-align: left;
+}
+.chat-empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: 104px;
+  padding: var(--space-4);
+  border: 1px solid var(--ui-border-subtle, color-mix(in srgb, var(--graphite-fade) 28%, transparent));
+  border-radius: var(--radius-lg, 12px);
+  background: color-mix(in srgb, var(--chrome-canvas) 88%, var(--graphite-base) 4%);
+  color: var(--graphite-base);
+  cursor: pointer;
+  transition:
+    border-color var(--za-motion-fast, 120ms) ease,
+    background var(--za-motion-fast, 120ms) ease,
+    transform var(--za-motion-fast, 120ms) ease;
+}
+.chat-empty-card:hover {
+  border-color: color-mix(in srgb, var(--azure-seal) 34%, var(--ui-border-subtle, transparent));
+  background: color-mix(in srgb, var(--chrome-canvas) 80%, var(--azure-trace) 20%);
+  transform: translateY(-1px);
+}
+.chat-empty-card:focus-visible {
+  outline: 2px solid var(--azure-seal);
+  outline-offset: 2px;
+}
+.chat-empty-card-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: var(--azure-seal);
+  background: color-mix(in srgb, var(--azure-seal) 12%, transparent);
+}
+.chat-empty-card-title {
+  font-family: var(--font-sans);
+  font-size: 0.92rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--graphite-base);
+}
+@media (max-width: 820px) {
+  .chat-empty-cards {
+    grid-template-columns: 1fr;
+    width: min(100%, 420px);
+  }
+  .chat-empty-card {
+    min-height: 0;
+    flex-direction: row;
+    align-items: center;
+  }
+}
+
 .chat-link-btn {
   background: none;
   border: none;
@@ -1208,6 +1286,18 @@
   background: var(--control-composer);
   font-size: 0.72rem;
   color: var(--graphite-base);
+  transition: border-color var(--za-motion-fast), box-shadow var(--za-motion-fast), opacity var(--za-motion-fast);
+}
+.message-queue-item.reorderable {
+  cursor: grab;
+}
+.message-queue-item.is-dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+.message-queue-item.is-drop-target {
+  border-color: var(--za-line-strong, var(--chrome-border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--za-accent, #5b8def) 45%, transparent);
 }
 .message-queue-index {
   display: inline-flex;
@@ -1223,9 +1313,38 @@
   font-size: 0.62rem;
 }
 .message-queue-text {
+  display: inline;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: inherit;
+}
+.message-queue-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
+  margin: 0;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-control, 4px);
+  background: transparent;
+  color: var(--graphite-mute);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.66rem;
+  line-height: 1;
+  transition: background var(--za-motion-fast), color var(--za-motion-fast), border-color var(--za-motion-fast);
+}
+.message-queue-edit:hover {
+  border-color: var(--chrome-border);
+  background: var(--azure-soft);
+  color: var(--azure-seal);
+}
+.message-queue-edit:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--za-focus);
 }
 .message-queue-remove {
   display: inline-flex;
@@ -1704,7 +1823,7 @@
  */
 .message-rail {
   position: absolute;
-  top: 36px;
+  top: 40px;
   right: var(--space-2);
   bottom: 96px;
   z-index: 5;
@@ -2162,7 +2281,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 36px;
+  height: 40px;
   padding: 0 var(--space-5);
   background: var(--chrome-canvas);
   border-bottom: 1px solid transparent;
@@ -2173,15 +2292,15 @@
 /* 全屏时保持同一页头高度（交通灯被系统隐藏，无需额外留白）。
    默认高度已与全屏对齐；保留选择器便于后续差异化。 */
 .app-shell.is-fullscreen .chat-header {
-  height: 36px;
+  height: 40px;
 }
 
 .app-shell.is-fullscreen .current-turn-context {
-  top: 36px;
+  top: 40px;
 }
 
 .app-shell.is-fullscreen .chat-thread {
-  padding-top: 36px;
+  padding-top: 40px;
 }
 
 /* 侧栏自动折叠且非全屏时,主面板顶到窗口最左,需为 macOS 交通灯预留左侧空间,
@@ -2648,7 +2767,8 @@
   flex-shrink: 0;
 }
 
-/* 一级面板：provider 列表浮层（portal 投影到 body） */
+/* 一级面板：provider 列表浮层（portal 投影到 body）
+   去掉实线描边 + 重阴影的“双层框”观感，改用半透明底 + 轻阴影，与 composer 下拉一致。 */
 .pa-cascading-menu-panel {
   position: fixed;
   z-index: 1200;
@@ -2657,14 +2777,16 @@
   max-width: 260px;
   max-height: 360px;
   overflow-y: auto;
-  background: var(--paper-sheet);
-  border: 1px solid var(--chrome-hairline);
+  background: color-mix(in srgb, var(--chrome-raised) 88%, transparent);
+  backdrop-filter: blur(18px);
+  border: none;
   border-radius: var(--radius-md);
-  box-shadow: 0 12px 30px rgba(16, 24, 40, 0.28);
+  box-shadow: var(--shadow-popover);
   isolation: isolate;
 }
 
-/* 二级子菜单：某个 provider 下的模型列表浮层，层级高于一级面板 */
+/* 二级子菜单：某个 provider 下的模型列表浮层，层级高于一级面板；
+   与一级无缝贴边（gap=0），共用轻阴影，避免两层各自重描边叠成框中框。 */
 .pa-cascading-submenu-panel {
   position: fixed;
   z-index: 1201;
@@ -2673,10 +2795,11 @@
   max-width: 280px;
   max-height: 360px;
   overflow-y: auto;
-  background: var(--paper-sheet);
-  border: 1px solid var(--chrome-hairline);
+  background: color-mix(in srgb, var(--chrome-raised) 88%, transparent);
+  backdrop-filter: blur(18px);
+  border: none;
   border-radius: var(--radius-md);
-  box-shadow: 0 12px 30px rgba(16, 24, 40, 0.28);
+  box-shadow: var(--shadow-popover);
   isolation: isolate;
 }
 

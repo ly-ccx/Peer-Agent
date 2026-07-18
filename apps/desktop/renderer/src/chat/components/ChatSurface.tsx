@@ -101,6 +101,7 @@ import { ChatHeader } from './thread/ChatHeader';
 import { ChatTurn } from './thread/ChatTurn';
 import { GoalPlanPanel } from './GoalPlanPanel';
 import { ChatGoalApprovalCard } from './goal/ChatGoalApprovalCard';
+import { MessageQueue } from './MessageQueue';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
 import { MessageRail } from './thread/MessageRail';
@@ -400,6 +401,7 @@ export function ChatSurface({
   const messageQueue = convState.messageQueue;
   const enqueueMessage = convActions.enqueueMessage;
   const removeQueuedMessage = convActions.removeQueuedMessage;
+  const reorderQueuedMessage = convActions.reorderQueuedMessage;
   const shiftQueuedMessage = convActions.shiftQueuedMessage;
   // useElapsedTimer 只保留本轮起点 ref；回合时长真值由 useConversationStreamRouter
   // 在 done/aborted/error 时读取。实时跳秒在末端 ChatTurn 内更新，避免每秒重渲染整页。
@@ -1236,6 +1238,23 @@ export function ChatSurface({
     });
   }, []);
 
+  /** 点编辑回填输入框：文案/附件回到 composer，不从队列移除（只有 × 才移除）。 */
+  const refillQueuedMessageToComposer = useCallback((item: QueuedMessage) => {
+    const currentDraft = conversationStore.getSnapshot(conversationId).draft;
+    const nextDraft = currentDraft.trim()
+      ? `${currentDraft.trimEnd()}\n${item.text}`
+      : item.text;
+    conversationStore.setDraft(conversationId, nextDraft);
+    if (item.attachments.length > 0) {
+      setAttachments((prev) => {
+        const existingIds = new Set(prev.map((attachment) => attachment.id));
+        const merged = item.attachments.filter((attachment) => !existingIds.has(attachment.id));
+        return merged.length > 0 ? [...prev, ...merged] : prev;
+      });
+    }
+    setAttachmentError(null);
+  }, [conversationId]);
+
   const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const fileItems = Array.from(event.clipboardData?.items ?? [])
       .filter((item) => item.kind === 'file')
@@ -1565,6 +1584,85 @@ export function ChatSurface({
     if (mode !== 'plan') setHasGoalPlan(false);
   }, [mode, setHasGoalPlan]);
 
+  const workspaceLabel = useMemo(() => {
+    if (!workspacePath) return null;
+    const normalized = workspacePath.replace(/[\\/]+$/, '');
+    const parts = normalized.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] || normalized;
+  }, [workspacePath]);
+
+  const emptyStarterCards = useMemo(() => {
+    if (isZh) {
+      return [
+        {
+          id: 'understand',
+          title: '梳理现状',
+          prompt: workspaceLabel
+            ? `帮我梳理一下 ${workspaceLabel} 的当前状态，指出关键结构和最近值得关注的点。`
+            : '帮我梳理一下当前工作区的状态，指出关键结构和最近值得关注的点。',
+          icon: 'scan' as const,
+        },
+        {
+          id: 'goal',
+          title: '推进一个目标',
+          prompt: workspaceLabel
+            ? `我想在 ${workspaceLabel} 推进一个目标，先帮我拆成可执行步骤。`
+            : '我想推进一个目标，先帮我拆成可执行步骤。',
+          icon: 'target' as const,
+        },
+        {
+          id: 'debug',
+          title: '排查问题',
+          prompt: workspaceLabel
+            ? `我在 ${workspaceLabel} 遇到一个问题，先帮我定位可能原因和验证路径。`
+            : '我遇到一个问题，先帮我定位可能原因和验证路径。',
+          icon: 'debug' as const,
+        },
+      ];
+    }
+    return [
+      {
+        id: 'understand',
+        title: 'Understand the current state',
+        prompt: workspaceLabel
+          ? `Help me understand the current state of ${workspaceLabel}, including structure and what matters most right now.`
+          : 'Help me understand the current workspace state, including structure and what matters most right now.',
+        icon: 'scan' as const,
+      },
+      {
+        id: 'goal',
+        title: 'Drive a goal forward',
+        prompt: workspaceLabel
+          ? `I want to drive a goal in ${workspaceLabel}. Break it into executable steps first.`
+          : 'I want to drive a goal forward. Break it into executable steps first.',
+        icon: 'target' as const,
+      },
+      {
+        id: 'debug',
+        title: 'Investigate a problem',
+        prompt: workspaceLabel
+          ? `I hit a problem in ${workspaceLabel}. Help me find likely causes and a verification path.`
+          : 'I hit a problem. Help me find likely causes and a verification path.',
+        icon: 'debug' as const,
+      },
+    ];
+  }, [isZh, workspaceLabel]);
+
+  const applyEmptyStarter = useCallback((prompt: string) => {
+    if (!hasProvider) {
+      onOpenSettings();
+      return;
+    }
+    conversationStore.setDraft(conversationId, prompt);
+    requestAnimationFrame(() => {
+      const el = document.querySelector('.chat-composer textarea') as HTMLTextAreaElement | null;
+      if (!el) return;
+      el.focus();
+      const end = prompt.length;
+      el.setSelectionRange(end, end);
+    });
+  }, [conversationId, hasProvider, onOpenSettings]);
+
   // 草稿态（conversationId === null）也渲染完整聊天面：可输入，首条发送时再落库。
   return (
     <WorkspacePathContext.Provider value={workspacePath ?? null}>
@@ -1624,7 +1722,18 @@ export function ChatSurface({
       <div className="chat-thread" ref={threadRef} onScroll={handleThreadScroll}>
         {messages.length === 0 ? (
           <div className="chat-empty-state">
-            <h2>{isZh ? '有什么可以帮你的？' : 'How can I help you?'}</h2>
+            <div className="chat-empty-mark" aria-hidden="true">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 9h8" />
+                <path d="M8 13h5" />
+                <path d="M5 5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-4 3v-3H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" />
+              </svg>
+            </div>
+            <h2>
+              {workspaceLabel
+                ? (isZh ? `接下来在 ${workspaceLabel} 做什么？` : `What should we work on in ${workspaceLabel}?`)
+                : (isZh ? '接下来做什么？' : 'What should we work on?')}
+            </h2>
             {!hasProvider ? (
               <p>
                 {isZh ? '请先' : 'Please '}
@@ -1634,8 +1743,45 @@ export function ChatSurface({
                 {isZh ? '后开始对话' : ' to start chatting'}
               </p>
             ) : (
-              <p>{isZh ? '输入消息开始对话' : 'Type a message to start'}</p>
+              <p>{isZh ? '描述任务，或从下面选一个开始' : 'Describe a task, or pick a starting point below'}</p>
             )}
+            {hasProvider ? (
+              <div className="chat-empty-cards">
+                {emptyStarterCards.map((card) => (
+                  <button
+                    key={card.id}
+                    type="button"
+                    className="chat-empty-card"
+                    onClick={() => applyEmptyStarter(card.prompt)}
+                  >
+                    <span className={`chat-empty-card-icon chat-empty-card-icon--${card.icon}`} aria-hidden="true">
+                      {card.icon === 'scan' ? (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="11" cy="11" r="7" />
+                          <path d="m20 20-3.5-3.5" />
+                        </svg>
+                      ) : card.icon === 'target' ? (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="8" />
+                          <circle cx="12" cy="12" r="3" />
+                          <path d="M12 2v2" />
+                          <path d="M12 20v2" />
+                          <path d="M2 12h2" />
+                          <path d="M20 12h2" />
+                        </svg>
+                      ) : (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 9v4" />
+                          <path d="M12 17h.01" />
+                          <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+                        </svg>
+                      )}
+                    </span>
+                    <span className="chat-empty-card-title">{card.title}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : (
           <div
@@ -1801,29 +1947,13 @@ export function ChatSurface({
           enabled={mode === 'plan' || mode === 'goal'}
         />
         {messageQueue.length > 0 ? (
-          <div className="message-queue" role="list" aria-label={isZh ? '待发送队列' : 'Queued messages'}>
-            <span className="message-queue-label">
-              {isZh ? `已排队 ${messageQueue.length} 条` : `${messageQueue.length} queued`}
-            </span>
-            {messageQueue.map((item, index) => {
-              const preview = item.text.trim() || (item.attachments.length ? (isZh ? '（附件）' : '(attachments)') : '');
-              return (
-                <div key={item.id} className="message-queue-item" role="listitem" title={item.text}>
-                  <span className="message-queue-index">{index + 1}</span>
-                  <span className="message-queue-text">{preview}</span>
-                  <button
-                    type="button"
-                    className="message-queue-remove"
-                    onClick={() => removeQueuedMessage(item.id)}
-                    aria-label={isZh ? '移除' : 'Remove'}
-                    title={isZh ? '移除' : 'Remove'}
-                  >
-                    ×
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+          <MessageQueue
+            items={messageQueue}
+            isZh={isZh}
+            onRemove={removeQueuedMessage}
+            onReorder={reorderQueuedMessage}
+            onRefillToComposer={refillQueuedMessageToComposer}
+          />
         ) : null}
         <ComposerDraftControls
           conversationId={conversationId}

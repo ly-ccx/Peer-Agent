@@ -160,6 +160,47 @@ describe('conversationStore', () => {
     assert.equal(store.getSnapshot('B').messageQueue.length, 0);
   });
 
+  it('updates queued message text and reorders queue items', () => {
+    const store = new ConversationStore();
+    store.enqueueMessage('A', queued('q1', 'first'));
+    store.enqueueMessage('A', queued('q2', 'second'));
+    store.enqueueMessage('A', queued('q3', 'third'));
+
+    store.updateQueuedMessage('A', 'q2', 'second-edited');
+    assert.deepEqual(
+      store.getSnapshot('A').messageQueue.map((item) => item.text),
+      ['first', 'second-edited', 'third'],
+    );
+
+    // 未知 id / 相同文案不改队列。
+    store.updateQueuedMessage('A', 'missing', 'noop');
+    store.updateQueuedMessage('A', 'q2', 'second-edited');
+    assert.deepEqual(
+      store.getSnapshot('A').messageQueue.map((item) => item.text),
+      ['first', 'second-edited', 'third'],
+    );
+
+    store.reorderQueuedMessage('A', 0, 2);
+    assert.deepEqual(
+      store.getSnapshot('A').messageQueue.map((item) => item.id),
+      ['q2', 'q3', 'q1'],
+    );
+
+    store.reorderQueuedMessage('A', 2, 0);
+    assert.deepEqual(
+      store.getSnapshot('A').messageQueue.map((item) => item.id),
+      ['q1', 'q2', 'q3'],
+    );
+
+    // 越界索引忽略。
+    store.reorderQueuedMessage('A', -1, 1);
+    store.reorderQueuedMessage('A', 0, 99);
+    assert.deepEqual(
+      store.getSnapshot('A').messageQueue.map((item) => item.id),
+      ['q1', 'q2', 'q3'],
+    );
+  });
+
   it('routes streamId to its owning conversation and clears on finalize', () => {
     const store = new ConversationStore();
     store.routeStream('s-1', 'A');

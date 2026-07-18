@@ -237,6 +237,39 @@ export class ConversationStore {
     }));
   }
 
+  /** 更新当前会话待发送队列中指定消息的文案（原地编辑）。 */
+  updateQueuedMessage(conversationId: string | null, id: string, text: string): void {
+    this.setState(conversationId, (prev) => {
+      const index = prev.messageQueue.findIndex((item) => item.id === id);
+      if (index < 0) return prev;
+      const current = prev.messageQueue[index];
+      if (current.text === text) return prev;
+      const next = prev.messageQueue.slice();
+      next[index] = { ...current, text };
+      return { messageQueue: next };
+    });
+  }
+
+  /** 拖动排序：把 fromIndex 处的消息移动到 toIndex。 */
+  reorderQueuedMessage(conversationId: string | null, fromIndex: number, toIndex: number): void {
+    if (fromIndex === toIndex) return;
+    this.setState(conversationId, (prev) => {
+      const queue = prev.messageQueue;
+      if (
+        fromIndex < 0
+        || toIndex < 0
+        || fromIndex >= queue.length
+        || toIndex >= queue.length
+      ) {
+        return prev;
+      }
+      const next = queue.slice();
+      const [item] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, item);
+      return { messageQueue: next };
+    });
+  }
+
   /** 当前会话待发送队列出队一条消息；队列为空时返回 null。 */
   shiftQueuedMessage(conversationId: string | null): QueuedMessage | null {
     const prev = this.getSnapshot(conversationId);

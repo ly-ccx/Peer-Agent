@@ -40,6 +40,10 @@ export interface ConversationActions {
   enqueueMessage: (item: QueuedMessage) => void;
   /** 从当前会话待发送队列中移除指定消息。 */
   removeQueuedMessage: (id: string) => void;
+  /** 更新当前会话待发送队列中指定消息的文案（原地编辑）。 */
+  updateQueuedMessage: (id: string, text: string) => void;
+  /** 拖动排序：把 fromIndex 处的消息移动到 toIndex。 */
+  reorderQueuedMessage: (fromIndex: number, toIndex: number) => void;
   /** 当前会话待发送队列出队一条消息；队列为空时返回 null。 */
   shiftQueuedMessage: () => QueuedMessage | null;
   /** 登记 streamId 归属当前会话（发送/压缩/reattach 时调用）。 */
@@ -120,6 +124,8 @@ export function useConversationState(
       setDraft: (draft) => conversationStore.setDraft(conversationId, draft),
       enqueueMessage: (item) => conversationStore.enqueueMessage(conversationId, item),
       removeQueuedMessage: (id) => conversationStore.removeQueuedMessage(conversationId, id),
+      updateQueuedMessage: (id, text) => conversationStore.updateQueuedMessage(conversationId, id, text),
+      reorderQueuedMessage: (fromIndex, toIndex) => conversationStore.reorderQueuedMessage(conversationId, fromIndex, toIndex),
       shiftQueuedMessage: () => conversationStore.shiftQueuedMessage(conversationId),
       routeStream: (streamId) => {
         if (conversationId) conversationStore.routeStream(streamId, conversationId);
