@@ -141,17 +141,6 @@
   color: var(--za-accent);
   font-weight: 600;
 }
-.settings-nav-item.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 16px;
-  border-radius: 0 2px 2px 0;
-  background: var(--za-accent);
-}
 
 .settings-content {
   min-width: 0;

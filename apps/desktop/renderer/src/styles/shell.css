@@ -27,6 +27,9 @@
     position: relative;
     z-index: 1;
     background: var(--za-app-bg);
+    /* 与聊天主面板 (.main-panel) 同 token 的外壳圆角；overflow 裁切四角。 */
+    overflow: hidden;
+    border-radius: var(--radius-lg);
   }
 
   .main-panel {
