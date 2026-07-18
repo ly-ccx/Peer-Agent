@@ -110,6 +110,12 @@ export function createQuickChatWindowController({ screen, createWindow }) {
   function ensureWindow() {
     if (quickChatWindow && !quickChatWindow.isDestroyed()) return quickChatWindow;
     quickChatWindow = createWindow();
+    // 置顶 / 全 Space 可见在创建时配置一次，避免每次 show 都走昂贵的原生层调用。
+    quickChatWindow.setAlwaysOnTop?.(true, 'floating');
+    quickChatWindow.setVisibleOnAllWorkspaces?.(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
     quickChatWindow.on('closed', () => {
       popoverState = null;
       quickChatWindow = null;
@@ -121,6 +127,11 @@ export function createQuickChatWindowController({ screen, createWindow }) {
       }
     });
     return quickChatWindow;
+  }
+
+  // 启动后预热：创建并加载 renderer，但不 show，降低首次/再次唤醒冷启动成本。
+  function prewarm() {
+    return ensureWindow();
   }
 
   function showPopover(nextState) {
@@ -147,12 +158,8 @@ export function createQuickChatWindowController({ screen, createWindow }) {
       displays: screen.getAllDisplays(),
       size: baseSize(),
     });
+    // show 热路径只做定位 + 显示 + 聚焦；置顶/全 Space 已在 ensureWindow 一次性配置。
     win.setBounds(bounds, false);
-    win.setAlwaysOnTop(true, 'floating');
-    win.setVisibleOnAllWorkspaces(true, {
-      visibleOnFullScreen: true,
-      skipTransformProcessType: true,
-    });
     win.show();
     win.focus();
     win.webContents.send('quick-chat:shown');
@@ -206,6 +213,7 @@ export function createQuickChatWindowController({ screen, createWindow }) {
     show,
     toggle,
     hide,
+    prewarm,
     setTaskCardVisible,
     setContentHeight,
     getWindow,

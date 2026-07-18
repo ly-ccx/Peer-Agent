@@ -1,4 +1,4 @@
-import type { GoalApproval, LlmProviderConfigView, LocalAccessLevel } from '@peer-agent/protocol';
+import type { LlmProviderConfigView, LocalAccessLevel } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import {
@@ -9,7 +9,7 @@ import {
   readAsDataUrl,
   readAsText,
 } from '../../chat/state/attachmentIntake';
-import { getApiMessageContent, toApiMessages } from '../../chat/state/apiMessageMapping';
+import { getApiMessageContent } from '../../chat/state/apiMessageMapping';
 import { buildAttachmentContext } from '../../chat/state/contextSources';
 import {
   ACCESS_LEVELS,
@@ -30,14 +30,10 @@ import {
 } from '../../chat/state/preferences';
 import { getProviderModelDisplayLabel } from '../../chat/state/providerDisplay';
 import { getClipboardFiles, hasQuickChatContent } from '../../chat/state/quickChatAttachments';
-import { createCoalescedRefreshScheduler } from '../../chat/state/coalescedRefresh';
-import { mergeQuickChatTasks, projectQuickChatPlanTasks, projectQuickChatTasks, type QuickChatTask } from '../../chat/state/quickChatTasks';
 import type { ChatAttachment, ChatMsg } from '../../chat/state/types';
-import { loadConversationMessages } from '../../chat/state/conversationLoad';
 import { AttachmentStrip, PEER_ATTACHMENT_DND_TYPE } from '../../chat/components/thread/AttachmentStrip';
 import type { QuickChatPopoverKind } from '../../preload/contracts/bootstrapPreloadApi';
 import { QuickChatPopover, type InlineQuickChatPopoverState } from './QuickChatPopover';
-import { QuickChatTaskCard } from './QuickChatTaskCard';
 import { runQuickChatSubmission } from '../state/quickChatSubmission';
 import '../../styles/quick-chat.css';
 
@@ -54,9 +50,6 @@ export function QuickChatWindow() {
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
-  const [tasks, setTasks] = useState<QuickChatTask[]>([]);
-  const [taskIndex, setTaskIndex] = useState(0);
-  const [taskSubmitting, setTaskSubmitting] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [popoverState, setPopoverState] = useState<InlineQuickChatPopoverState | null>(null);
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
@@ -110,17 +103,21 @@ export function QuickChatWindow() {
   useEffect(() => {
     if (workspacePath) localStorage.setItem('quick-chat:workspace', workspacePath);
   }, [workspacePath]);
-  // 每次显示 Quick 时重新对齐主聊天当前/上次模型，避免窗口长期存活导致模型过期。
+  // 每次显示 Quick 时：先聚焦输入框；模型对齐等非关键工作延后到下一帧，避免和首帧争抢。
   useEffect(() => clientApi.onQuickChatShown?.(() => {
     setPopoverState(null);
-    const remembered = readLastModelProviderId();
-    if (remembered) {
+    inputRef.current?.focus();
+    const schedule = typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame
+      : (cb: FrameRequestCallback) => window.setTimeout(cb, 0);
+    schedule(() => {
+      const remembered = readLastModelProviderId();
+      if (!remembered) return;
       setModelProviderId((current) => {
         if (providers.some((provider) => provider.id === remembered)) return remembered;
         return current;
       });
-    }
-    inputRef.current?.focus();
+    });
   }), [providers]);
   // Quick 内切换模型也回写共享记忆，保持与主聊天同一条“上次模型”链路。
   useEffect(() => {
@@ -250,87 +247,6 @@ export function QuickChatWindow() {
     if (next.length) setAttachments((current) => [...current, ...next]);
   }, [attachments.length]);
 
-  const refreshTasks = useCallback(async () => {
-    const workspaceItems = workspaces.length ? workspaces : (workspacePath ? [{ path: workspacePath }] : []);
-    const projected = await Promise.all(workspaceItems.map(async (workspace) => {
-      const conversations = await clientApi.conversationsList({ workspacePath: workspace.path, status: 'active' });
-      const loaded = await Promise.all(conversations.map(async (conversation) => ({
-        id: conversation.id,
-        title: conversation.title,
-        workspacePath: workspace.path,
-        messages: (await loadConversationMessages(conversation.id)).messages,
-      })));
-      return { interactions: projectQuickChatTasks(loaded), conversations: loaded };
-    }));
-    const conversations = projected.flatMap((item) => item.conversations);
-    const plans = await clientApi.goalPlansList();
-    const merged = mergeQuickChatTasks(
-      projectQuickChatPlanTasks(plans, conversations),
-      projected.flatMap((item) => item.interactions),
-    );
-    setTasks(merged);
-    setTaskIndex((current) => Math.min(current, Math.max(0, merged.length - 1)));
-  }, [workspacePath, workspaces]);
-
-  useEffect(() => {
-    if (!workspacePath) return;
-
-    const refreshScheduler = createCoalescedRefreshScheduler(refreshTasks);
-
-    // Visibility gate: the floating window is hidden (not closed) on blur, so it
-    // spends most of its life invisible. Running the heavy refreshTasks (per-conversation
-    // full message load) on every background stream event is the main cause of jank.
-    // While hidden we drop refreshes and only remember that work is pending; when the
-    // window becomes visible again we refresh once.
-    let pendingWhileHidden = false;
-    const isVisible = () => document.visibilityState === 'visible';
-    // Tool stream events fire very frequently; debounce them harder than user-facing signals.
-    const STREAM_REFRESH_DELAY = 600;
-
-    const scheduleRefresh = (delay?: number) => {
-      if (!isVisible()) {
-        pendingWhileHidden = true;
-        return;
-      }
-      refreshScheduler.schedule(delay);
-    };
-    const scheduleStreamRefresh = () => {
-      if (!isVisible()) {
-        pendingWhileHidden = true;
-        return;
-      }
-      refreshScheduler.schedule(STREAM_REFRESH_DELAY);
-    };
-
-    const handleVisibilityChange = () => {
-      if (isVisible() && pendingWhileHidden) {
-        pendingWhileHidden = false;
-        refreshScheduler.schedule(0);
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    if (isVisible()) scheduleRefresh(0);
-    const unsubscribers = [
-      clientApi.onQuickChatShown(() => refreshScheduler.schedule(0)),
-      clientApi.onGoalPlansChanged(() => scheduleRefresh()),
-      clientApi.onChatStreamToolCall(() => scheduleStreamRefresh()),
-      clientApi.onChatStreamToolResult(() => scheduleStreamRefresh()),
-      clientApi.onChatStreamDone(() => scheduleStreamRefresh()),
-    ];
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      refreshScheduler.dispose();
-      for (const unsubscribe of unsubscribers) unsubscribe();
-    };
-  }, [refreshTasks, workspacePath]);
-
-  const activeTask = tasks[taskIndex] ?? null;
-
-  useEffect(() => {
-    void clientApi.quickChatSetTaskCardVisible(Boolean(activeTask)).catch(() => {});
-  }, [activeTask]);
-
   useEffect(() => {
     const element = inputRef.current;
     if (!element) return;
@@ -360,7 +276,7 @@ export function QuickChatWindow() {
       observer?.disconnect();
       unsubscribeShown?.();
     };
-  }, [activeTask, attachments.length, draft, error]);
+  }, [attachments.length, draft, error]);
 
   const reorderAttachments = useCallback((fromIndex: number, toIndex: number) => {
     if (fromIndex === toIndex) return;
@@ -372,68 +288,6 @@ export function QuickChatWindow() {
       return next;
     });
   }, []);
-
-  const openTaskConversation = useCallback((task: QuickChatTask) => {
-    void clientApi.quickChatSubmit?.({
-      conversationId: task.conversationId,
-      workspacePath: task.workspacePath,
-      openMainWindow: true,
-      streamId: '',
-    });
-  }, []);
-
-  const sendConversationReply = useCallback(async (task: QuickChatTask, text: string) => {
-    const { messages } = await loadConversationMessages(task.conversationId);
-    const userMessage: ChatMsg = { id: id('user'), role: 'user', content: text, timestamp: Date.now() };
-    const assistantMessage: ChatMsg = { id: id('assistant'), role: 'assistant', content: '', timestamp: Date.now() };
-    await clientApi.conversationsAppendMessage({ id: task.conversationId, message: { ...userMessage } as Record<string, unknown> & { id: string; role: string; content: string } });
-    await clientApi.conversationsAppendMessage({ id: task.conversationId, message: { ...assistantMessage } as Record<string, unknown> & { id: string; role: string; content: string } });
-    await clientApi.chatSend({
-      messages: toApiMessages([...messages, userMessage]),
-      streamId: id('quick-task'),
-      assistantMessageId: assistantMessage.id,
-      effort: 'default', mode: 'chat', conversationId: task.conversationId, workspacePath: task.workspacePath,
-    });
-  }, []);
-
-  const submitTaskOption = useCallback(async (task: QuickChatTask, option: string) => {
-    if (taskSubmitting || task.kind !== 'interaction') return;
-    setTaskSubmitting(true);
-    setError('');
-    try {
-      await sendConversationReply(task, option);
-      setTasks((current) => current.filter((item) => item.kind !== 'interaction' || item.assistantMessageId !== task.assistantMessageId));
-      setTaskIndex(0);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setTaskSubmitting(false);
-    }
-  }, [sendConversationReply, taskSubmitting]);
-
-  const submitPlanAction = useCallback(async (task: QuickChatTask, action: 'start' | 'adjust' | 'cancel') => {
-    if (taskSubmitting || task.kind !== 'plan-approval') return;
-    setTaskSubmitting(true);
-    setError('');
-    try {
-      if (action === 'adjust') {
-        await sendConversationReply(task, '我想调整这个计划。先不要执行，请询问我希望修改哪些内容。');
-      } else {
-        const approval: GoalApproval = {
-          decision: action === 'start' ? 'approve' : 'reject',
-          confirmationId: `quick-chat-${Date.now()}`,
-          decidedAt: new Date().toISOString(),
-        };
-        await clientApi.goalPlansApprove({ planId: task.plan.planId, approval });
-      }
-      await refreshTasks();
-      setTaskIndex(0);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setTaskSubmitting(false);
-    }
-  }, [refreshTasks, sendConversationReply, taskSubmitting]);
 
   async function submit(openMainWindow: boolean) {
     const text = draft.trim();
@@ -470,7 +324,7 @@ export function QuickChatWindow() {
   }
 
   return (
-    <main className={`quick-chat-shell${activeTask ? ' has-task' : ''}${popoverState ? ' has-open-popover' : ''}`}>
+    <main className={`quick-chat-shell${popoverState ? ' has-open-popover' : ''}`}>
       <section ref={barRef} className={`quick-chat-bar${error ? ' quick-chat-bar--error' : ''}${sending ? ' quick-chat-bar--sending' : ''}`} aria-label="快速会话" aria-busy={sending}>
         <div
           className={`quick-chat-composer${dragActive ? ' is-drag-active' : ''}`}
@@ -572,19 +426,6 @@ export function QuickChatWindow() {
           </div>
           {error ? <span className="quick-chat-error" role="alert">{error}</span> : null}
         </div>
-        {activeTask ? (
-          <QuickChatTaskCard
-            task={activeTask}
-            position={taskIndex}
-            total={tasks.length}
-            submitting={taskSubmitting}
-            onPrevious={() => setTaskIndex((current) => (current - 1 + tasks.length) % tasks.length)}
-            onNext={() => setTaskIndex((current) => (current + 1) % tasks.length)}
-            onSelect={(option) => void submitTaskOption(activeTask, option)}
-            onPlanAction={(action) => void submitPlanAction(activeTask, action)}
-            onOpenConversation={() => openTaskConversation(activeTask)}
-          />
-        ) : null}
       </section>
       {popoverState ? (
         <QuickChatPopover

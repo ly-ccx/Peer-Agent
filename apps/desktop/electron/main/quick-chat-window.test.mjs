@@ -95,6 +95,25 @@ test('creates one main window and toggles its visibility', () => {
   assert.equal(window.getBounds().height, 104);
 });
 
+test('applies always-on-top and all-workspaces once on create, not on every show', () => {
+  const window = createFakeWindow();
+  const controller = createQuickChatWindowController({ screen, createWindow: () => window });
+
+  controller.prewarm();
+  const afterCreate = window.calls.filter(([name]) => name === 'setAlwaysOnTop' || name === 'setVisibleOnAllWorkspaces');
+  assert.equal(afterCreate.filter(([name]) => name === 'setAlwaysOnTop').length, 1);
+  assert.equal(afterCreate.filter(([name]) => name === 'setVisibleOnAllWorkspaces').length, 1);
+
+  window.calls.length = 0;
+  controller.show();
+  controller.hide();
+  controller.show();
+  const showCalls = window.calls.filter(([name]) => name === 'setAlwaysOnTop' || name === 'setVisibleOnAllWorkspaces');
+  assert.equal(showCalls.length, 0);
+  assert.equal(window.calls.filter(([name]) => name === 'setBounds').length >= 1, true);
+  assert.equal(window.calls.filter(([name]) => name === 'show').length, 2);
+});
+
 test('expands the main window for an inline popover without creating another window', () => {
   const parent = createFakeWindow();
   const controller = createQuickChatWindowController({

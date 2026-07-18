@@ -942,6 +942,8 @@ function createQuickChatWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      // 隐藏态不节流 renderer，避免再次唤醒时先“醒进程”再出首帧。
+      backgroundThrottling: false,
     },
   });
   loadRendererWindow(quickWindow, { window: 'quick-chat' });
@@ -2720,6 +2722,12 @@ app.whenReady().then(async () => {
   });
 
   createWindow();
+  // 启动后预热 Quick 窗口（隐藏态创建 + 加载 renderer），避免首次快捷键唤醒冷创建。
+  try {
+    quickChatWindowController.prewarm();
+  } catch (err) {
+    console.warn('[quick-chat] prewarm failed:', err);
+  }
   const shortcutRegistration = shortcutService.register();
   if (!shortcutRegistration.success) {
     console.warn('[shortcuts] Quick Chat global shortcut unavailable:', shortcutRegistration.error);
