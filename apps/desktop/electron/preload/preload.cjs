@@ -242,6 +242,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   llmRemoveGroup: (params) => ipcRenderer.invoke('llm:remove-group', params),
   llmSetDefault: (params) => ipcRenderer.invoke('llm:set-default', params),
   llmTestConnection: (params) => ipcRenderer.invoke('llm:test', params),
+  llmGetSubscriptionQuota: (params) => ipcRenderer.invoke('llm:quota', params),
   llmOAuthStart: (params) => ipcRenderer.invoke('llm:oauth:start', params),
   llmOAuthOpenPending: () => ipcRenderer.invoke('llm:oauth:open-pending'),
   llmOAuthCancel: () => ipcRenderer.invoke('llm:oauth:cancel'),

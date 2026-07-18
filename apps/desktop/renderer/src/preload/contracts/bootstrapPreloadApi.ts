@@ -17,6 +17,7 @@ import type {
   LlmChannelDescriptor,
   LlmProviderConfigView,
   LlmProviderTestResult,
+  LlmSubscriptionQuota,
   LocalMcpServerUpsertRequest,
   LocalMcpServerView,
   LocaleCode,
@@ -547,6 +548,7 @@ export interface BootstrapPreloadApi {
   readonly llmRemoveGroup: (params: { groupId: string }) => Promise<readonly LlmProviderConfigView[]>;
   readonly llmSetDefault: (params: { id: string }) => Promise<readonly LlmProviderConfigView[]>;
   readonly llmTestConnection: (params: { id: string }) => Promise<LlmProviderTestResult>;
+  readonly llmGetSubscriptionQuota: (params: { id: string; force?: boolean }) => Promise<LlmSubscriptionQuota>;
   // ADR 28: 启动 ChatGPT 订阅 OAuth 登录(browser 模式)。
   // 链路契约:"先登录、成功后才落盘"。
   // - { id }   : 对已存在的订阅 provider 重新登录(刷新 token)。

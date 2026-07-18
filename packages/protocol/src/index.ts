@@ -382,6 +382,37 @@ export interface LlmOAuthStatus {
   readonly expiresAt?: string;
 }
 
+/** 订阅额度窗口（session / weekly / model 等）。 */
+export interface LlmSubscriptionQuotaWindow {
+  readonly id: string;
+  readonly label?: string;
+  readonly remainingPercent?: number;
+  readonly usedPercent?: number;
+  readonly resetsAt?: string;
+}
+
+/**
+ * GPT / Gemini / Grok 订阅额度快照。
+ * success=false 时用 status/error 表达未登录、过期或拉取失败，UI 应降级展示。
+ */
+export interface LlmSubscriptionQuota {
+  readonly success: boolean;
+  readonly status?: string;
+  readonly providerId?: string;
+  readonly authMethod?: LlmAuthMethod;
+  readonly provider?: 'chatgpt' | 'gemini' | 'grok' | string;
+  readonly planLabel?: string;
+  readonly remainingPercent?: number;
+  readonly usedPercent?: number;
+  readonly resetsAt?: string;
+  readonly windows?: readonly LlmSubscriptionQuotaWindow[];
+  readonly accountId?: string;
+  readonly projectId?: string;
+  readonly fetchedAt?: string;
+  readonly cached?: boolean;
+  readonly error?: string;
+}
+
 export interface LlmProviderConfig {
   readonly id: string;
   // B-2 多模型分组键：同 groupId 的扁平记录共享同一 provider 凭证（apiKey/baseUrl/OAuth），

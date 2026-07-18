@@ -149,6 +149,7 @@ const unavailableApi: ClientApi = {
   llmRemoveGroup: unavailableMethod('llmRemoveGroup'),
   llmSetDefault: unavailableMethod('llmSetDefault'),
   llmTestConnection: unavailableMethod('llmTestConnection'),
+  llmGetSubscriptionQuota: unavailableMethod('llmGetSubscriptionQuota'),
   llmOAuthStart: unavailableMethod('llmOAuthStart'),
   llmOAuthOpenPending: unavailableMethod('llmOAuthOpenPending'),
   llmOAuthCancel: unavailableMethod('llmOAuthCancel'),

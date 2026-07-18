@@ -5,7 +5,7 @@ import type {
   LlmModelInfo,
   LlmModelListResult,
   LlmProviderConfigView,
-  LlmProviderTestResult,
+  LlmProviderTestResult, LlmSubscriptionQuota,
   LlmProviderType,
   LlmReasoningParamStyle,
   LlmWireProtocol,
@@ -171,6 +171,39 @@ const PROTECTED_HEADER_NAMES = new Set([
 function isOAuthMethod(method: LlmAuthMethod): boolean {
   return method === 'oauth_chatgpt' || method === 'oauth_google' || method === 'oauth_grok';
 }
+
+
+function formatResetAt(value: string | undefined, zh: boolean): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const now = Date.now();
+  const deltaMs = date.getTime() - now;
+  if (deltaMs <= 0) return zh ? '已重置' : 'reset now';
+  const hours = Math.round(deltaMs / (60 * 60 * 1000));
+  if (hours < 48) return zh ? `${hours}h 后重置` : `resets in ${hours}h`;
+  const days = Math.round(hours / 24);
+  return zh ? `${days}d 后重置` : `resets in ${days}d`;
+}
+
+function formatQuotaLine(quota: LlmSubscriptionQuota | undefined, zh: boolean): string | null {
+  if (!quota) return null;
+  if (!quota.success) {
+    if (quota.status === 'not_logged_in') return zh ? '未登录，无法查询额度' : 'Not logged in';
+    if (quota.status === 'session_expired') return zh ? '登录已过期，请重新登录' : 'Session expired — re-login';
+    if (quota.status === 'unsupported') return null;
+    return zh ? (quota.error ? `额度：${quota.error}` : '额度查询失败') : (quota.error ? `Quota: ${quota.error}` : 'Quota unavailable');
+  }
+  const remaining = typeof quota.remainingPercent === 'number'
+    ? Math.round(quota.remainingPercent)
+    : (typeof quota.usedPercent === 'number' ? Math.round(100 - quota.usedPercent) : null);
+  if (remaining == null) return zh ? '额度已更新' : 'Quota updated';
+  const reset = formatResetAt(quota.resetsAt, zh);
+  const plan = quota.planLabel ? ` · ${quota.planLabel}` : '';
+  if (zh) return `剩余 ${remaining}%${plan}${reset ? ` · ${reset}` : ''}`;
+  return `${remaining}% left${plan}${reset ? ` · ${reset}` : ''}`;
+}
+
 
 function isLocalCliMethod(method: LlmAuthMethod): boolean {
   return method === 'qoder_local_auth' || method === 'local_cli';
@@ -401,6 +434,8 @@ export function LlmSettingsPanel({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, LlmProviderTestResult>>({});
+  const [quotaResults, setQuotaResults] = useState<Record<string, LlmSubscriptionQuota>>({});
+  const [quotaLoadingId, setQuotaLoadingId] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [oauthBusyId, setOauthBusyId] = useState<string | null>(null);
   const [oauthPending, setOauthPending] = useState<{
@@ -796,6 +831,57 @@ export function LlmSettingsPanel({
     }
   };
 
+  const handleRefreshQuota = async (id: string, force = true) => {
+    setQuotaLoadingId(id);
+    try {
+      const result = await clientApi.llmGetSubscriptionQuota({ id, force });
+      setQuotaResults((prev) => ({ ...prev, [id]: result }));
+    } catch (err: unknown) {
+      setQuotaResults((prev) => ({
+        ...prev,
+        [id]: {
+          success: false,
+          status: 'fetch_failed',
+          error: err instanceof Error ? err.message : 'Quota fetch failed',
+          fetchedAt: new Date().toISOString(),
+        },
+      }));
+    } finally {
+      setQuotaLoadingId((current) => (current === id ? null : current));
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    // 渠道维度：每个 OAuth 分组只刷 head，避免同凭证重复请求
+    const headIds: string[] = [];
+    const seenGroup = new Set<string>();
+    for (const provider of providers) {
+      if (!isOAuthMethod(provider.authMethod) || provider.oauthStatus?.status !== 'connected') continue;
+      const groupId = provider.groupId || provider.id;
+      if (seenGroup.has(groupId)) continue;
+      seenGroup.add(groupId);
+      const head = providers.find((p) => p.id === groupId) ?? provider;
+      headIds.push(head.id);
+    }
+    void (async () => {
+      for (const id of headIds) {
+        if (cancelled) return;
+        if (quotaResults[id]?.success) continue;
+        try {
+          const result = await clientApi.llmGetSubscriptionQuota({ id, force: false });
+          if (cancelled) return;
+          setQuotaResults((prev) => ({ ...prev, [id]: result }));
+        } catch {
+          /* silent; 用户可手动刷新 */
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+    // 仅在 providers 列表身份变化时触发
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providers.map((provider) => `${provider.id}:${provider.oauthStatus?.status ?? ''}`).join('|')]);
+
   // ADR 28: 拉起 ChatGPT 订阅 OAuth 登录(browser 模式)。token 由 main 进程写入。
   // 链路契约:"先登录、成功后才落盘"。
   // - 传 { id }   : 对已存在订阅 provider 重新登录。
@@ -885,7 +971,7 @@ export function LlmSettingsPanel({
       <div className="llm-list-toolbar">
         <div className="llm-list-summary">
           <strong>{i18n.locale === 'zh-CN' ? '渠道' : 'Channels'}</strong>
-          <span>{providers.length} {i18n.locale === 'zh-CN' ? '个渠道' : 'channels'} · {providers.length === 1 ? groups[0]?.models.length ?? 0 : groups.reduce((sum, group) => sum + group.models.length, 0)} {i18n.locale === 'zh-CN' ? '个模型' : 'models'}</span>
+          <span>{groups.length} {i18n.locale === 'zh-CN' ? '个渠道' : 'channels'} · {groups.reduce((sum, group) => sum + group.models.length, 0)} {i18n.locale === 'zh-CN' ? '个模型' : 'models'}</span>
         </div>
         <button type="button" className="llm-add-channel-btn" onClick={openAdd}>
           ＋ {i18n.locale === 'zh-CN' ? '添加渠道' : 'Add Channel'}
@@ -907,6 +993,7 @@ export function LlmSettingsPanel({
           return (
           <div key={g.groupId} className="llm-provider-group">
             <div className="llm-group-header">
+              <div className="llm-group-header-main">
               <button type="button" className="llm-group-toggle" onClick={() => toggleGroup(g.groupId)} aria-expanded={!collapsed}>
                 <svg
                   className={`llm-group-caret ${collapsed ? 'is-collapsed' : ''}`}
@@ -967,6 +1054,35 @@ export function LlmSettingsPanel({
                   {removingGroupId === g.groupId ? '...' : (i18n.locale === 'zh-CN' ? '删除渠道' : 'Remove provider')}
                 </button>
               </div>
+            
+              </div>
+              {isOAuthMethod(head.authMethod) ? (
+                <div className="llm-group-header-quota">
+                  <div className="llm-subscription-quota llm-group-quota">
+                    <span
+                      className={`llm-subscription-quota-text${quotaResults[head.id] && !quotaResults[head.id].success ? ' is-error' : ''}`}
+                      title={formatQuotaLine(quotaResults[head.id], i18n.locale === 'zh-CN') ?? undefined}
+                    >
+                      {quotaLoadingId === head.id
+                        ? (i18n.locale === 'zh-CN' ? '额度刷新中…' : 'Refreshing quota…')
+                        : (formatQuotaLine(quotaResults[head.id], i18n.locale === 'zh-CN')
+                          ?? (i18n.locale === 'zh-CN' ? '点击刷新订阅额度' : 'Refresh subscription quota'))}
+                    </span>
+                    <button
+                      type="button"
+                      className="llm-subscription-quota-refresh"
+                      disabled={quotaLoadingId === head.id}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        void handleRefreshQuota(head.id);
+                      }}
+                    >
+                      {quotaLoadingId === head.id ? '…' : (i18n.locale === 'zh-CN' ? '刷新额度' : 'Quota')}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
             {!collapsed ? (
               <div className="llm-group-models">

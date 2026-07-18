@@ -969,10 +969,25 @@
 
 .llm-group-header {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
+}
+
+.llm-group-header-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   flex-wrap: wrap;
+  min-width: 0;
+}
+
+.llm-group-header-quota {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-left: calc(14px + var(--space-2)); /* align under title after caret */
 }
 
 .llm-group-toggle {
@@ -1922,4 +1937,62 @@
   .llm-metadata-source {
     grid-template-columns: 1fr;
   }
+}
+
+
+/* 订阅额度（GPT / Gemini / Grok OAuth）— 渠道头第二排 */
+.llm-subscription-quota {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.llm-group-quota {
+  flex: 1 1 auto;
+  margin: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.llm-group-header-quota .llm-subscription-quota-text {
+  font-size: 12px;
+  color: var(--za-text-secondary, #5b6472);
+}
+
+.llm-subscription-quota-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--za-text-secondary, #5b6472);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.llm-subscription-quota-text.is-error {
+  color: var(--za-danger, #c0392b);
+}
+
+.llm-subscription-quota-refresh {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--za-border-subtle, rgba(0, 0, 0, 0.08));
+  background: var(--za-surface-muted, rgba(0, 0, 0, 0.03));
+  color: var(--za-text-secondary, #5b6472);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.llm-subscription-quota-refresh:hover:not(:disabled) {
+  background: var(--za-surface-hover, rgba(0, 0, 0, 0.05));
+  color: var(--za-text-primary, #1f2328);
+}
+
+.llm-subscription-quota-refresh:disabled {
+  opacity: 0.6;
+  cursor: default;
 }

@@ -60,6 +60,7 @@ import {
   buildGoalRunnerStreamStartedPayload,
   createGoalRunnerAssistantPlaceholder,
 } from './goal-runner-message-persistence.mjs';
+import { fetchProviderSubscriptionQuota } from './subscription-quota.mjs';
 import { applyGoalMessageRoute, routeGoalMessage } from './goal-message-router.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
 import { buildPersistedCompactedMessages } from './conversation-compaction-persistence.mjs';
@@ -2230,6 +2231,18 @@ ipcMain.handle('llm:set-default', (_, { id }) => {
   return providers;
 });
 ipcMain.handle('llm:test', (_, { id }) => llmConfigStore.testConnection(id));
+ipcMain.handle('llm:quota', async (_, { id, force } = {}) => fetchProviderSubscriptionQuota({
+  providerId: id,
+  llmConfigStore,
+  force: Boolean(force),
+  // 与 OAuth / 模型调用一致：走 Node↔Electron 双通道 + 代理回退。
+  // 裸 fetch 在系统代理/跨境网络下会直接 TypeError: fetch failed。
+  fetchImpl: (url, init) => fetchWithConnectionRecovery(url, init, {
+    provider: 'subscription-quota',
+    model: 'quota',
+    maxRetries: 1,
+  }),
+}));
 
 // ── Provider OAuth(ADR 28+) ──
 // 同一时刻只允许一个进行中的 browser 登录会话,便于取消。
