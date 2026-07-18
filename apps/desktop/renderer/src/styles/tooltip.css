@@ -1,0 +1,70 @@
+/* 自绘 Tooltip：受控样式浮层，替换浏览器原生 title 气泡。
+   暗色底 + 圆角 + 轻阴影，随主题 token 走；通过 portal 定位到视口坐标。 */
+.app-tooltip {
+  position: fixed;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 280px;
+  padding: 6px 9px;
+  border-radius: var(--ui-radius-control, var(--radius-sm, 6px));
+  background: var(--ui-tooltip-bg, rgba(28, 30, 36, 0.96));
+  color: var(--ui-tooltip-fg, #f2f4f8);
+  border: 1px solid var(--ui-tooltip-border, rgba(255, 255, 255, 0.08));
+  box-shadow: var(--shadow-pop, 0 6px 20px rgba(0, 0, 0, 0.28));
+  font-size: 0.68rem;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  white-space: normal;
+  word-break: break-word;
+  animation: app-tooltip-in var(--za-motion-fast, 120ms) ease;
+}
+
+.app-tooltip__line {
+  display: block;
+}
+
+.app-tooltip__line:first-child {
+  font-weight: 600;
+}
+
+.app-tooltip__arrow {
+  position: absolute;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translateX(-50%) rotate(45deg);
+  background: inherit;
+  border: inherit;
+}
+
+.app-tooltip--top .app-tooltip__arrow {
+  bottom: -5px;
+  border-top: none;
+  border-left: none;
+}
+
+.app-tooltip--bottom .app-tooltip__arrow {
+  top: -5px;
+  border-bottom: none;
+  border-right: none;
+}
+
+@keyframes app-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-tooltip {
+    animation: none;
+  }
+}

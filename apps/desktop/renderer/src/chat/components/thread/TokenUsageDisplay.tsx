@@ -3,6 +3,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties
 import { createPortal } from 'react-dom';
 import type { DropdownOption } from '../../../app/components/Dropdown';
 import { CascadingMenu, type CascadingMenuGroup } from '../../../app/components/CascadingMenu';
+import { Tooltip } from '../../../app/components/Tooltip';
 import { effortLabel, isEffortLevel, type EffortLevel } from '../../state/preferences';
 import { formatTokenCount } from '../../state/format';
 import { getProviderDisplayName } from '../../state/providerDisplay';
@@ -225,6 +226,22 @@ export function TokenUsageDisplay({
   // 仅在未提供（>0 校验）时回退到 provider 配置窗口，避免两套窗口导致百分比与触发线不符。
   const ctxWindow = (typeof contextWindow === 'number' && contextWindow > 0) ? contextWindow : defaultProvider?.contextWindow;
   const ctxPercent = ctxWindow ? Math.min((currentContextTokens / ctxWindow) * 100, 100) : null;
+  const hasCtxRing = Boolean(ctxWindow && ctxPercent != null);
+  // 圆环 hover：用量明细（used/total + 百分比）叠加缓存命中率（读取/写入），
+  // 让常驻区只保留圆环+百分比，缓存命中率不再单独常驻占位。
+  const ctxTooltipLines: readonly string[] = hasCtxRing
+    ? [
+        `${isZh ? '上下文' : 'Context'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow as number)} (${Math.round(ctxPercent as number)}%)`,
+        ...(showCacheHit
+          ? [
+              isZh
+                ? `缓存命中 ${cacheHitPercent}%（读取 ${formatTokenCount(cacheRead)}${cacheWrite > 0 ? ` / 写入 ${formatTokenCount(cacheWrite)}` : ''}）`
+                : `Cache hit ${cacheHitPercent}% (read ${formatTokenCount(cacheRead)}${cacheWrite > 0 ? ` / write ${formatTokenCount(cacheWrite)}` : ''})`,
+            ]
+          : []),
+      ]
+    : [];
+  const ctxTooltip = ctxTooltipLines.join('\n');
   const shouldShowModelDropdown = Boolean(defaultProvider?.model && canSwitchModel && onModelChange && modelOptions.length > 0);
   // 级联菜单分组：一级 provider（按 groupId 折叠同一凭证下的多模型），二级为该 provider 下的模型。
   // 每个 provider 恒有二级子菜单（哪怕只有一个模型），一级只负责展开、不直接选中。
@@ -282,32 +299,18 @@ export function TokenUsageDisplay({
           />
         ) : null}
         {ctxWindow && ctxPercent != null ? (
-          <span
-            className="ctx-usage"
-            title={`${isZh ? '上下文' : 'Context'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow)}`}
-            aria-label={`${isZh ? '上下文' : 'Context'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow)} (${Math.round(ctxPercent)}%)`}
-          >
-            <span
-              className="ctx-ring"
-              style={{ '--ctx-pct': ctxPercent } as CSSProperties}
-              aria-hidden
-            />
-            <span className="ctx-pct">{Math.round(ctxPercent)}%</span>
-          </span>
+          <Tooltip lines={ctxTooltipLines} placement="top">
+            <span className="ctx-usage" aria-label={ctxTooltip} tabIndex={0}>
+              <span
+                className="ctx-ring"
+                style={{ '--ctx-pct': ctxPercent } as CSSProperties}
+                aria-hidden
+              />
+              <span className="ctx-pct">{Math.round(ctxPercent)}%</span>
+            </span>
+          </Tooltip>
         ) : currentContextTokens > 0 ? (
           <>{formatTokenCount(currentContextTokens)} tokens</>
-        ) : null}
-        {showCacheHit ? (
-          <span
-            className="token-usage-detail"
-            title={
-              isZh
-                ? `缓存读取 ${formatTokenCount(cacheRead)} tokens${cacheWrite > 0 ? `，缓存写入 ${formatTokenCount(cacheWrite)} tokens` : ''}`
-                : `Cache read ${formatTokenCount(cacheRead)} tokens${cacheWrite > 0 ? `, cache write ${formatTokenCount(cacheWrite)} tokens` : ''}`
-            }
-          >
-            {isZh ? '缓存命中' : 'cache hit'} {cacheHitPercent}%
-          </span>
         ) : null}
         {costStr ? (
           <span
