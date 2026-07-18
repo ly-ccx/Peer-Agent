@@ -1395,6 +1395,23 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     return listPlans().filter((m) => normalizeConversationId(m.conversationId) === normalizedConversationId);
   }
 
+  /**
+   * 侧栏徽标聚合：只扫 index meta，不 hydrate 全量 plan JSON。
+   * 返回 { [conversationId]: number }，仅包含 awaiting_approval > 0 的会话。
+   */
+  function countAwaitingApprovalsByConversation() {
+    const counts = Object.create(null);
+    for (const meta of readIndex()) {
+      const m = normalizePlan(meta);
+      if (!m || isInactivePlan(m)) continue;
+      if (m.status !== 'awaiting_approval') continue;
+      const conversationId = normalizeConversationId(m.conversationId);
+      if (!conversationId) continue;
+      counts[conversationId] = (counts[conversationId] || 0) + 1;
+    }
+    return counts;
+  }
+
   function hydratePlanMeta(meta) {
     if (!meta?.planId) return null;
     const plan = getPlan(meta.planId);
@@ -2432,6 +2449,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
   return {
     listPlans,
     listPlansByConversation,
+    countAwaitingApprovalsByConversation,
     listPlanDetails,
     listPlanDetailsByConversation,
     getActivePlanByConversation,

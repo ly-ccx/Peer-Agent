@@ -1056,7 +1056,8 @@ function createWindow() {
 ipcMain.handle('bootstrap:get', async () => ({
   session: sessionStore.getSession(),
   capabilities: capabilityRegistry.refreshCapabilities(),
-  projects: readProjectIndex({ workspaceRoot: resourcesRoot }),
+  // 冷启动：monorepo git 项目索引不阻塞 bootstrap；projects:list 仍可按需同步读取。
+  projects: [],
   activeProjectId: 'workspace-root',
   availableLocales,
   llmProviders: llmConfigStore.listProviders(),
@@ -1258,7 +1259,7 @@ ipcMain.handle('workspace:list', () => {
   const all = settingsStore.getAll();
   const configured = all.workspaces || [];
   const knownPaths = new Set(configured.map((workspace) => workspace.path));
-  const discovered = conversationStore.listConversations()
+  const discovered = conversationStore.listConversations({ includeMessageCount: false })
     .map((conversation) => conversation.workspacePath)
     .filter((workspacePath) => typeof workspacePath === 'string' && existsSync(workspacePath))
     .filter((workspacePath) => {
@@ -1710,9 +1711,19 @@ ipcMain.handle('browser:unregister-webcontents', (_event, registration = {}) => 
 });
 
 // ── Conversations ──
-ipcMain.handle('conversations:list', (_, params) => {
-  const listParams = { status: params?.status };
-  if (params?.workspacePath !== undefined) return conversationStore.listConversationsByWorkspace(params.workspacePath, listParams);
+ipcMain.handle('conversations:list', (_, params = {}) => {
+  const wantsPage = params?.paginated === true || params?.limit != null || params?.cursor != null;
+  const listParams = {
+    status: params?.status,
+    includeMessageCount: params?.includeMessageCount,
+    backfillMessageCount: params?.backfillMessageCount,
+    limit: params?.limit,
+    cursor: params?.cursor,
+    paginated: wantsPage,
+  };
+  if (params?.workspacePath !== undefined) {
+    return conversationStore.listConversationsByWorkspace(params.workspacePath, listParams);
+  }
   return conversationStore.listConversations(listParams);
 });
 ipcMain.handle('conversations:search', (_, params) => conversationStore.searchConversations(params || {}));
@@ -1755,6 +1766,8 @@ ipcMain.handle('goalPlans:list', (_, params) => {
   if (params?.conversationId !== undefined) return goalPlanStore.listPlanDetailsByConversation(params.conversationId);
   return goalPlanStore.listPlanDetails();
 });
+// 侧栏徽标：只返回 awaiting_approval 计数聚合，避免全量 hydrate GoalPlan。
+ipcMain.handle('goalPlans:awaiting-counts', () => goalPlanStore.countAwaitingApprovalsByConversation());
 ipcMain.handle('goalPlans:get', (_, { planId }) => goalPlanStore.getPlan(planId));
 ipcMain.handle('goalPlans:create', (_, { draft }) => goalPlanStore.createPlan(draft));
 ipcMain.handle('goalPlans:revise', (_, { planId, patch, reason, changedBy }) =>
@@ -2673,7 +2686,11 @@ app.whenReady().then(async () => {
   const sourceRoots = [path.join(os.homedir(), '.agents', 'skills')];
   skillStore = disableLocalSkill ? null : createSkillStore({ userDataPath, sourceRoots });
 
-  await createShellEnvSnapshot();
+  // 冷启动：shell 环境快照与首窗创建并行，不阻塞 createWindow。
+  // buildShellSpawnArgs 在快照未就绪时会 fallback 到 login shell。
+  void createShellEnvSnapshot().catch((err) => {
+    console.warn('[shell-env-snapshot] background create failed:', err?.message || err);
+  });
 
   const shellProvider = createLocalShellProvider({
     workspaceRoot: resourcesRoot,

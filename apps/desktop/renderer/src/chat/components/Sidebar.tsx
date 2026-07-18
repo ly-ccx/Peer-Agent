@@ -99,6 +99,9 @@ function PinIcon({ size = 13, filled = false }: { readonly size?: number; readon
 
 export function Sidebar({
   conversations,
+  conversationHasMore = false,
+  conversationsLoadingMore = false,
+  onLoadMoreConversations,
   activeConversationId,
   conversationView,
   runningConversationIds,
@@ -123,6 +126,9 @@ export function Sidebar({
   startupSnapshot,
 }: {
   readonly conversations: readonly ConversationMeta[];
+  readonly conversationHasMore?: boolean;
+  readonly conversationsLoadingMore?: boolean;
+  readonly onLoadMoreConversations?: () => void;
   readonly activeConversationId: string | null;
   readonly conversationView: ConversationView;
   // 当前正在流式运行的会话 id 集合(表达层状态,真值来自 main 的 activeStreams 广播)。
@@ -657,6 +663,13 @@ export function Sidebar({
       <div
         ref={conversationListRef}
         className={`channel-conversation-list ${isArchivedView ? 'is-archive-view' : ''}`}
+        onScroll={(event) => {
+          if (!conversationHasMore || conversationsLoadingMore || !onLoadMoreConversations) return;
+          const el = event.currentTarget;
+          if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80) {
+            onLoadMoreConversations();
+          }
+        }}
       >
         {conversations.length === 0 ? (
           <div className="sidebar-empty-state">
@@ -694,6 +707,18 @@ export function Sidebar({
           </section>
         ) : null}
         {normalConversations.map((conv) => renderConversationRow(conv))}
+        {conversationHasMore ? (
+          <button
+            type="button"
+            className="sidebar-load-more"
+            disabled={conversationsLoadingMore}
+            onClick={() => onLoadMoreConversations?.()}
+          >
+            {conversationsLoadingMore
+              ? (isZh ? '加载中…' : 'Loading…')
+              : (isZh ? '加载更多' : 'Load more')}
+          </button>
+        ) : null}
       </div>
 
       {contextMenu && contextConv ? (

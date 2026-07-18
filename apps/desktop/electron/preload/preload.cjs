@@ -123,6 +123,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   conversationsDelete: (params) => ipcRenderer.invoke('conversations:delete', params),
   conversationsAddUsage: (params) => ipcRenderer.invoke('conversations:add-usage', params),
   goalPlansList: (params) => ipcRenderer.invoke('goalPlans:list', params),
+  goalPlansAwaitingCounts: () => ipcRenderer.invoke('goalPlans:awaiting-counts'),
   goalPlansGet: (params) => ipcRenderer.invoke('goalPlans:get', params),
   goalPlansCreate: (params) => ipcRenderer.invoke('goalPlans:create', params),
   goalPlansRevise: (params) => ipcRenderer.invoke('goalPlans:revise', params),

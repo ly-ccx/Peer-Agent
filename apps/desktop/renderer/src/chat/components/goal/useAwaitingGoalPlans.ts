@@ -117,9 +117,8 @@ export function useAwaitingGoalPlans(
 /**
  * 左侧会话列表的只读待批准聚合视图。
  *
- * 为避免改动 conversationsList 主进程契约，这里在渲染端拉取全量 GoalPlan，
- * 仅按 status === 'awaiting_approval' + conversationId 聚合计数。任何批准/驳回/
- * 新建计划都会触发 goalPlans:changed 广播并重拉，因此列表徽标会和右侧面板同步消解。
+ * 服务端聚合 awaiting_approval 计数（goalPlansAwaitingCounts），不再全量 goalPlansList。
+ * 批准/驳回/新建计划会触发 goalPlans:changed 广播并重拉，列表徽标与右侧面板同步消解。
  */
 export function useAwaitingGoalPlanCounts(enabled = true): ReadonlyMap<string, number> {
   const [counts, setCounts] = useState<ReadonlyMap<string, number>>(() => new Map());
@@ -132,41 +131,36 @@ export function useAwaitingGoalPlanCounts(enabled = true): ReadonlyMap<string, n
       setCounts(new Map());
       return;
     }
-
     if (inFlightRef.current) {
       reloadQueuedRef.current = true;
-      await inFlightRef.current;
-      return;
+      return inFlightRef.current;
     }
-
     const requestId = ++requestIdRef.current;
-    const task = (async () => {
+    const run = (async () => {
       try {
-        const result = await clientApi.goalPlansList({});
+        const raw = await clientApi.goalPlansAwaitingCounts();
         if (requestId !== requestIdRef.current) return;
         const next = new Map<string, number>();
-        for (const plan of result) {
-          const conversationId = normalizeConversationId(plan.conversationId);
-          if (!conversationId || plan.status !== 'awaiting_approval') continue;
-          next.set(conversationId, (next.get(conversationId) ?? 0) + 1);
+        if (raw && typeof raw === 'object') {
+          for (const [conversationId, count] of Object.entries(raw)) {
+            const n = Number(count);
+            if (!conversationId || !Number.isFinite(n) || n <= 0) continue;
+            next.set(conversationId, n);
+          }
         }
         setCounts(next);
       } catch {
-        // 只读列表徽标：拉取失败时不阻断左侧会话列表。
         if (requestId === requestIdRef.current) setCounts(new Map());
+      } finally {
+        inFlightRef.current = null;
+        if (reloadQueuedRef.current) {
+          reloadQueuedRef.current = false;
+          void reload();
+        }
       }
     })();
-
-    inFlightRef.current = task;
-    try {
-      await task;
-    } finally {
-      if (inFlightRef.current === task) inFlightRef.current = null;
-      if (reloadQueuedRef.current) {
-        reloadQueuedRef.current = false;
-        void reload();
-      }
-    }
+    inFlightRef.current = run;
+    return run;
   }, [enabled]);
 
   useEffect(() => {

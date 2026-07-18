@@ -5,7 +5,8 @@ import { SettingsPage } from './app/components/SettingsPage';
 import { BrandStartupLoader } from './app/components/BrandStartupLoader';
 import { QuickChatWindow } from './app/components/QuickChatWindow';
 import { shouldRefreshQuickChatConversationList } from './app/state/quickChatSubmission';
-import { useDesktopBootstrap } from './app/state/useDesktopBootstrap';
+import { CONVERSATION_LIST_PAGE_SIZE, useDesktopBootstrap } from './app/state/useDesktopBootstrap';
+import { useBrandStartupMinHold } from './app/state/useBrandStartupMinHold';
 import { ChatSurface } from './chat/components/ChatSurface';
 import { Sidebar } from './chat/components/Sidebar';
 import { ConversationSearchPalette, type SearchConversationHit } from './chat/components/ConversationSearchPalette';
@@ -51,6 +52,9 @@ export function App() {
 
 function MainApp() {
   const { availableLocales, initError, refreshBootstrap, session, startupSnapshot } = useDesktopBootstrap();
+  // LOGO 过渡页保留：bootstrap 再快也要播完品牌入场动画，再进入主界面。
+  const brandStartupHoldDone = useBrandStartupMinHold(!initError);
+  const showMainShell = Boolean(session) && brandStartupHoldDone;
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [activePage, setActivePage] = useState<AppPage>('chat');
@@ -61,6 +65,13 @@ function MainApp() {
   const [conversations, setConversations] = useState<readonly ConversationMeta[]>(
     () => startupSnapshot?.conversations as readonly ConversationMeta[] ?? [],
   );
+  const [conversationNextCursor, setConversationNextCursor] = useState<string | null>(
+    () => startupSnapshot?.conversationNextCursor ?? null,
+  );
+  const [conversationHasMore, setConversationHasMore] = useState<boolean>(
+    () => Boolean(startupSnapshot?.conversationHasMore),
+  );
+  const [conversationsLoadingMore, setConversationsLoadingMore] = useState(false);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [conversationRevision, setConversationRevision] = useState<string | null>(null);
   // 表达层状态:当前正在流式运行的会话 id 集合,用于左侧列表显示 Loading 图标。
@@ -99,36 +110,107 @@ function MainApp() {
   }, []);
 
   const refreshSeqRef = useRef(0);
+  const conversationRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const applyConversationListPage = useCallback((page: {
+    items?: readonly ConversationMeta[];
+    nextCursor?: string | null;
+    hasMore?: boolean;
+  } | readonly ConversationMeta[], { append = false }: { append?: boolean } = {}) => {
+    const normalized = Array.isArray(page)
+      ? { items: page as readonly ConversationMeta[], nextCursor: null, hasMore: false }
+      : {
+          items: (page.items ?? []) as readonly ConversationMeta[],
+          nextCursor: page.nextCursor ?? null,
+          hasMore: Boolean(page.hasMore),
+        };
+    setConversations((prev) => {
+      if (!append) return normalized.items;
+      const seen = new Set(prev.map((item) => item.id));
+      const merged = [...prev];
+      for (const item of normalized.items) {
+        if (seen.has(item.id)) continue;
+        seen.add(item.id);
+        merged.push(item);
+      }
+      return merged;
+    });
+    setConversationNextCursor(normalized.nextCursor);
+    setConversationHasMore(normalized.hasMore);
+  }, []);
+
   const refreshConversations = useCallback(async (wsPath?: string | null, view?: ConversationView) => {
     const ws = wsPath !== undefined ? wsPath : activeWorkspace;
     const status = view ?? conversationView;
     const seq = ++refreshSeqRef.current;
     try {
-      const list = await clientApi.conversationsList({ workspacePath: ws, status }) as readonly ConversationMeta[];
+      const page = await clientApi.conversationsList({
+        workspacePath: ws,
+        status,
+        limit: CONVERSATION_LIST_PAGE_SIZE,
+        paginated: true,
+      });
       // 丢弃过期响应：只有最新一次请求的结果才允许写回，避免慢请求晚返回覆盖新视图。
       if (seq !== refreshSeqRef.current) return;
-      setConversations(list);
+      applyConversationListPage(page as any, { append: false });
     } catch {}
-  }, [activeWorkspace, conversationView]);
+  }, [activeWorkspace, applyConversationListPage, conversationView]);
+
+  const loadMoreConversations = useCallback(async () => {
+    if (!conversationHasMore || conversationsLoadingMore || !conversationNextCursor) return;
+    const ws = activeWorkspace;
+    const status = conversationView;
+    const seq = refreshSeqRef.current;
+    setConversationsLoadingMore(true);
+    try {
+      const page = await clientApi.conversationsList({
+        workspacePath: ws,
+        status,
+        limit: CONVERSATION_LIST_PAGE_SIZE,
+        cursor: conversationNextCursor,
+        paginated: true,
+      });
+      if (seq !== refreshSeqRef.current) return;
+      applyConversationListPage(page as any, { append: true });
+    } catch {
+    } finally {
+      setConversationsLoadingMore(false);
+    }
+  }, [
+    activeWorkspace,
+    applyConversationListPage,
+    conversationHasMore,
+    conversationNextCursor,
+    conversationView,
+    conversationsLoadingMore,
+  ]);
+
+  const scheduleConversationRefresh = useCallback((wsPath?: string | null, view?: ConversationView) => {
+    if (conversationRefreshTimerRef.current) clearTimeout(conversationRefreshTimerRef.current);
+    conversationRefreshTimerRef.current = setTimeout(() => {
+      conversationRefreshTimerRef.current = null;
+      void refreshConversations(wsPath, view);
+    }, 120);
+  }, [refreshConversations]);
 
   useEffect(() => {
     const refreshExternalConversations = () => {
-      if (document.visibilityState === 'visible') void refreshConversations();
+      if (document.visibilityState === 'visible') scheduleConversationRefresh();
     };
     window.addEventListener('focus', refreshExternalConversations);
     document.addEventListener('visibilitychange', refreshExternalConversations);
-    const unsubscribe = clientApi.onConversationsChanged((event) => {
-      void refreshConversations();
-      if (event.conversationId === activeConversationId && event.changeType === 'messages-updated') {
-        setConversationRevision(event.revision);
-      }
+    const unsubscribe = clientApi.onConversationsChanged(() => {
+      // 变更事件目前只有 conversationId/changeType，缺少单行完整 meta；
+      // 统一防抖重拉第一页，避免 focus/高频变更触发整表全量。
+      scheduleConversationRefresh();
     });
     return () => {
-      unsubscribe();
       window.removeEventListener('focus', refreshExternalConversations);
       document.removeEventListener('visibilitychange', refreshExternalConversations);
+      if (conversationRefreshTimerRef.current) clearTimeout(conversationRefreshTimerRef.current);
+      unsubscribe();
     };
-  }, [activeConversationId, refreshConversations]);
+  }, [scheduleConversationRefresh]);
 
   const refreshSettings = useCallback(async () => {
     try {
@@ -454,7 +536,7 @@ function MainApp() {
 
   return (
     <main className={isFullscreen ? 'app-shell is-fullscreen' : 'app-shell'}>
-      {session ? (
+      {showMainShell ? (
         <>
           <section
             className={`app-page-layer app-chat-page${activePage === 'chat' ? ' is-active' : ''}`}
@@ -468,6 +550,9 @@ function MainApp() {
               <div className="app-layout">
             <Sidebar
               conversations={conversations}
+              conversationHasMore={conversationHasMore}
+              conversationsLoadingMore={conversationsLoadingMore}
+              onLoadMoreConversations={() => { void loadMoreConversations(); }}
               activeConversationId={activeConversationId}
               conversationView={conversationView}
               runningConversationIds={runningConversationIds}
@@ -572,7 +657,7 @@ function MainApp() {
         <section className="main-panel">
           <section className="thread">
             {initError ? <p className="running-note">{initError}</p> : null}
-            {!session && !initError ? <BrandStartupLoader /> : null}
+            {!initError ? <BrandStartupLoader /> : null}
           </section>
         </section>
       )}

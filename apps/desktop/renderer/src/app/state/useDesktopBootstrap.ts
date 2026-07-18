@@ -7,8 +7,13 @@ import type {
 import { useCallback, useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
 
+/** 侧栏首屏只拉最近 N 条；滚动再加载更多。 */
+export const CONVERSATION_LIST_PAGE_SIZE = 40;
+
 export interface DesktopStartupSnapshot {
   readonly activeWorkspace: string | null;
+  readonly conversationNextCursor?: string | null;
+  readonly conversationHasMore?: boolean;
   readonly conversations: readonly {
     readonly id: string;
     readonly title: string;
@@ -44,31 +49,46 @@ export function useDesktopBootstrap(): DesktopBootstrapState {
   const loadBootstrap = useCallback(async () => {
     try {
       const bootstrap = await clientApi.getBootstrap();
-      let nextSnapshot: DesktopStartupSnapshot | null = null;
-      if (bootstrap.session) {
-        try {
-          const directory = await clientApi.workspaceList();
-          const [workspaceInfo, conversations] = await Promise.all([
-            directory.activeWorkspace ? clientApi.workspaceInfo({ path: directory.activeWorkspace }) : Promise.resolve(null),
-            clientApi.conversationsList({ workspacePath: directory.activeWorkspace, status: 'active' }),
-          ]);
-          nextSnapshot = {
-            activeWorkspace: directory.activeWorkspace,
-            conversations,
-            workspaceInfo,
-            workspaces: directory.workspaces,
-          };
-        } catch {
-          // Bootstrap remains usable when optional workspace preloading fails.
-          // App and Sidebar will fall back to their normal background refresh paths.
-        }
-      }
-      setStartupSnapshot(nextSnapshot);
+      // 冷启动门闩：bootstrap 成功即可离开启动页（session 非 null）。
+      // workspace / 会话列表属于可后台填充的预加载，不应阻塞 BrandStartupLoader。
       setAvailableLocales(bootstrap.availableLocales);
       setCapabilities(bootstrap.capabilities);
       setProjects(bootstrap.projects);
       setSession(bootstrap.session);
       setInitError(null);
+
+      if (!bootstrap.session) {
+        setStartupSnapshot(null);
+        return;
+      }
+
+      try {
+        const directory = await clientApi.workspaceList();
+        const [workspaceInfo, conversationPage] = await Promise.all([
+          directory.activeWorkspace ? clientApi.workspaceInfo({ path: directory.activeWorkspace }) : Promise.resolve(null),
+          clientApi.conversationsList({
+            workspacePath: directory.activeWorkspace,
+            status: 'active',
+            limit: CONVERSATION_LIST_PAGE_SIZE,
+            paginated: true,
+          }),
+        ]);
+        const page = Array.isArray(conversationPage)
+          ? { items: conversationPage, nextCursor: null, hasMore: false, total: conversationPage.length }
+          : conversationPage;
+        setStartupSnapshot({
+          activeWorkspace: directory.activeWorkspace,
+          conversations: page.items ?? [],
+          conversationNextCursor: page.nextCursor ?? null,
+          conversationHasMore: Boolean(page.hasMore),
+          workspaceInfo,
+          workspaces: directory.workspaces,
+        });
+      } catch {
+        // Bootstrap remains usable when optional workspace preloading fails.
+        // App and Sidebar will fall back to their normal background refresh paths.
+        setStartupSnapshot(null);
+      }
     } catch (error: unknown) {
       setInitError(error instanceof Error ? error.message : 'Failed to bootstrap local client.');
     }

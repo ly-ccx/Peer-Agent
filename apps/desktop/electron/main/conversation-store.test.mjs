@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createConversationStore } from './conversation-store.mjs';
@@ -648,3 +648,170 @@ test('rankConversationMatch prefers exact and prefix title matches', async () =>
   assert.equal(rankConversationMatch({ title: 'Other' }, 'search chats'), -1);
   assert.equal(rankConversationMatch({ title: 'Other', workspacePath: '/tmp/search-chats' }, 'search', { includeWorkspaceNameMatch: true }), 50);
 });
+
+/**
+ * 冷启动优化：messageCount 写入 index 后，listConversations 不应再为计数全量读 jsonl。
+ * 污染消息文件后若仍扫全文会得到错误计数；有 index messageCount 时应直接返回 index 值。
+ */
+test('listConversations prefers index messageCount and skips full jsonl scan', () => {
+  const { store, dir, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'count-me', workspacePath: '/ws/count' });
+    store.appendMessage(conv.id, { id: 'm1', role: 'user', content: 'hello' });
+    store.appendMessage(conv.id, { id: 'm2', role: 'assistant', content: 'world' });
+
+    const listed = store.listConversations();
+    assert.equal(listed.find((c) => c.id === conv.id)?.messageCount, 2);
+
+    // 污染消息文件：若 list 再扫全文，messageCount 会变成 0。
+    writeFileSync(path.join(dir, `${conv.id}.jsonl`), '{not-json\n');
+    const listedAgain = store.listConversations();
+    assert.equal(listedAgain.find((c) => c.id === conv.id)?.messageCount, 2);
+  } finally {
+    cleanup();
+  }
+});
+
+test('listConversations never reads conversation body on hot path', async () => {
+  const { store, dir, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'legacy', workspacePath: '/ws/legacy' });
+    store.appendMessage(conv.id, { id: 'm1', role: 'user', content: 'a' });
+    store.appendMessage(conv.id, { id: 'm2', role: 'assistant', content: 'b' });
+    store.appendMessage(conv.id, { id: 'm3', role: 'user', content: 'c' });
+
+    // 模拟老 index：去掉 messageCount 字段
+    const indexPath = path.join(dir, 'index.jsonl');
+    const rows = readFileSync(indexPath, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    const next = rows.map((row) => {
+      if (row.id !== conv.id) return row;
+      const { messageCount, ...rest } = row;
+      return rest;
+    });
+    writeFileSync(indexPath, next.map((row) => JSON.stringify(row)).join('\n') + '\n');
+
+    // 污染消息文件：若 list 热路径扫 jsonl 会抛错或返回错误 count。
+    writeFileSync(path.join(dir, `${conv.id}.jsonl`), '{not-json\n');
+
+    const listed = createConversationStore({ storeDir: dir }).listConversations();
+    // 热路径：缺 count 时返回占位 0，不读正文
+    assert.equal(listed.find((c) => c.id === conv.id)?.messageCount, 0);
+
+    // 热路径 list 后 index 仍未同步回填（后台 schedule，不阻塞返回）
+    const immediately = readFileSync(indexPath, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    assert.equal(immediately.find((c) => c.id === conv.id)?.messageCount, undefined);
+
+    // 显式 backfill 才会读正文（恢复合法 jsonl 后）
+    writeFileSync(
+      path.join(dir, `${conv.id}.jsonl`),
+      [
+        JSON.stringify({ id: 'm1', role: 'user', content: 'a' }),
+        JSON.stringify({ id: 'm2', role: 'assistant', content: 'b' }),
+        JSON.stringify({ id: 'm3', role: 'user', content: 'c' }),
+      ].join('\n') + '\n',
+    );
+    const filled = createConversationStore({ storeDir: dir }).listConversations({ backfillMessageCount: true });
+    assert.equal(filled.find((c) => c.id === conv.id)?.messageCount, 3);
+    const persisted = readFileSync(indexPath, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    assert.equal(persisted.find((c) => c.id === conv.id)?.messageCount, 3);
+  } finally {
+    cleanup();
+  }
+});
+
+test('listConversations supports limit/cursor pagination', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const ids = [];
+    for (let i = 0; i < 5; i += 1) {
+      const conv = store.createConversation({ title: `c${i}`, workspacePath: '/ws/p' });
+      ids.push(conv.id);
+      // 保证 updatedAt 顺序可预期
+      store.updateTitle(conv.id, `c${i}`);
+    }
+    const page1 = store.listConversations({ status: 'active', limit: 2, paginated: true });
+    assert.equal(page1.items.length, 2);
+    assert.equal(page1.hasMore, true);
+    assert.ok(page1.nextCursor);
+    assert.equal(page1.total, 5);
+
+    const page2 = store.listConversations({
+      status: 'active',
+      limit: 2,
+      cursor: page1.nextCursor,
+      paginated: true,
+    });
+    assert.equal(page2.items.length, 2);
+    assert.equal(page2.hasMore, true);
+
+    const page3 = store.listConversations({
+      status: 'active',
+      limit: 2,
+      cursor: page2.nextCursor,
+      paginated: true,
+    });
+    assert.equal(page3.items.length, 1);
+    assert.equal(page3.hasMore, false);
+    assert.equal(page3.nextCursor, null);
+
+    const allIds = [...page1.items, ...page2.items, ...page3.items].map((c) => c.id);
+    assert.equal(new Set(allIds).size, 5);
+  } finally {
+    cleanup();
+  }
+});
+
+test('listConversationsByWorkspace filters by meta before counting', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const a = store.createConversation({ title: 'A', workspacePath: '/ws/a' });
+    const b = store.createConversation({ title: 'B', workspacePath: '/ws/b' });
+    store.appendMessage(a.id, { id: 'm1', role: 'user', content: 'a1' });
+    store.appendMessage(b.id, { id: 'm1', role: 'user', content: 'b1' });
+    store.appendMessage(b.id, { id: 'm2', role: 'assistant', content: 'b2' });
+
+    const onlyA = store.listConversationsByWorkspace('/ws/a');
+    assert.equal(onlyA.length, 1);
+    assert.equal(onlyA[0].id, a.id);
+    assert.equal(onlyA[0].messageCount, 1);
+
+    const onlyB = store.listConversationsByWorkspace('/ws/b');
+    assert.equal(onlyB.length, 1);
+    assert.equal(onlyB[0].messageCount, 2);
+  } finally {
+    cleanup();
+  }
+});
+
+test('listConversations can skip messageCount for workspace discovery', () => {
+  const { store, dir, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'skip', workspacePath: '/ws/skip' });
+    store.appendMessage(conv.id, { id: 'm1', role: 'user', content: 'x' });
+
+    // 模拟老 index 无 messageCount + 污染消息文件：skip 路径不得扫 jsonl 回填。
+    const indexPath = path.join(dir, 'index.jsonl');
+    const rows = readFileSync(indexPath, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    writeFileSync(
+      indexPath,
+      rows.map((row) => {
+        if (row.id !== conv.id) return JSON.stringify(row);
+        const { messageCount, ...rest } = row;
+        return JSON.stringify(rest);
+      }).join('\n') + '\n',
+    );
+    writeFileSync(path.join(dir, `${conv.id}.jsonl`), '{not-json\n');
+
+    const listed = createConversationStore({ storeDir: dir }).listConversations({ includeMessageCount: false });
+    const row = listed.find((c) => c.id === conv.id);
+    assert.ok(row);
+    assert.equal(row.messageCount, undefined);
+
+    // index 也不应被回填
+    const persisted = readFileSync(indexPath, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    assert.equal(persisted.find((c) => c.id === conv.id)?.messageCount, undefined);
+  } finally {
+    cleanup();
+  }
+});
+

@@ -93,6 +93,7 @@ const unavailableApi: ClientApi = {
   conversationsDelete: unavailableMethod('conversationsDelete'),
   conversationsAddUsage: unavailableMethod('conversationsAddUsage'),
   goalPlansList: unavailableMethod('goalPlansList'),
+  goalPlansAwaitingCounts: unavailableMethod('goalPlansAwaitingCounts'),
   goalPlansGet: unavailableMethod('goalPlansGet'),
   goalPlansCreate: unavailableMethod('goalPlansCreate'),
   goalPlansRevise: unavailableMethod('goalPlansRevise'),

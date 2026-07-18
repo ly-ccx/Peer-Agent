@@ -76,8 +76,6 @@ export function BrandStartupLoader() {
     return () => observer.disconnect();
   }, []);
 
-  const shineGradientId = `brand-startup-shine-${id}`;
-  const edgeBlurId = `brand-startup-edge-${id}`;
   const fillMaskId = `brand-startup-loader__fill-mask-${id}`;
   const initialFill = readThemeMode() === 'dark' ? INK_LIGHT : INK_BLACK;
 
@@ -91,16 +89,6 @@ export function BrandStartupLoader() {
           aria-hidden="true"
         >
           <defs>
-            <linearGradient id={shineGradientId} x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0" stopColor="#9ecbe0" stopOpacity="0" />
-              <stop offset=".22" stopColor="#9ecbe0" stopOpacity=".9" />
-              <stop offset=".5" stopColor="#ffffff" stopOpacity="1" />
-              <stop offset=".78" stopColor="#9ecbe0" stopOpacity=".9" />
-              <stop offset="1" stopColor="#9ecbe0" stopOpacity="0" />
-            </linearGradient>
-            <filter id={edgeBlurId} x="-10%" y="-100%" width="120%" height="300%">
-              <feGaussianBlur stdDeviation="3" />
-            </filter>
             <mask id={fillMaskId} maskUnits="userSpaceOnUse" x="0" y="0" width="1000" height="220">
               <rect
                 className="brand-startup-loader__fill-mask"
@@ -131,16 +119,6 @@ export function BrandStartupLoader() {
           >
             Peer Agent
           </text>
-          <rect
-            className="brand-startup-loader__liquid-edge"
-            x="180"
-            y="118"
-            width="640"
-            height="12"
-            rx="6"
-            fill={`url(#${shineGradientId})`}
-            filter={`url(#${edgeBlurId})`}
-          />
           <line ref={supportLineRef} className="brand-startup-loader__support" strokeLinecap="round" />
         </svg>
       </div>

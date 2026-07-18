@@ -102,6 +102,8 @@ function normalizeMeta(meta) {
   const status = normalizeStatus(meta?.status);
   const pinnedAt = typeof meta?.pinnedAt === 'string' && meta.pinnedAt.trim() ? meta.pinnedAt : null;
   const pinnedOrder = pinnedAt && Number.isFinite(Number(meta?.pinnedOrder)) ? Number(meta.pinnedOrder) : null;
+  // messageCount 写入 index 后，列表路径可直接读 meta；缺省时保持 undefined，由 withMessageCount 惰性回填。
+  const messageCount = Number.isFinite(Number(meta?.messageCount)) ? Number(meta.messageCount) : undefined;
   return {
     ...meta,
     mode: normalizeMode(meta?.mode),
@@ -111,6 +113,7 @@ function normalizeMeta(meta) {
     archivedAt: status === 'archived' ? (meta?.archivedAt || meta?.updatedAt || meta?.createdAt || null) : null,
     pinnedAt,
     pinnedOrder,
+    ...(messageCount === undefined ? {} : { messageCount }),
   };
 }
 
@@ -173,6 +176,14 @@ export function rankConversationMatch(meta, query, { includeWorkspaceNameMatch =
   return -1;
 }
 
+function sortByUpdatedAtDesc(items) {
+  return [...items].sort((a, b) => {
+    const ak = String(a?.updatedAt || a?.createdAt || '');
+    const bk = String(b?.updatedAt || b?.createdAt || '');
+    return bk.localeCompare(ak);
+  });
+}
+
 export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
   const indexFile = path.join(storeDir, 'index.jsonl');
 
@@ -191,25 +202,182 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
 
   function readIndex() { return readJsonl(indexFile).map(normalizeMeta); }
 
+  function withMessageCount(meta) {
+    if (!meta) return null;
+    if (Number.isFinite(Number(meta.messageCount))) {
+      return { ...meta, messageCount: Number(meta.messageCount) };
+    }
+    // list 热路径禁止同步读会话正文；缺 count 时返回占位，由后台迁移回填。
+    return { ...meta, messageCount: 0 };
+  }
+
+  function computeMessageCount(id) {
+    return existsSync(convFile(id)) ? readJsonl(convFile(id)).length : 0;
+  }
+
+  /**
+   * 为缺 messageCount 的 index 行批量回填并一次写回。
+   * 仅用于后台迁移 / 显式 backfill，不在 list 热路径调用。
+   */
+  function ensureMessageCounts(metas) {
+    let dirty = false;
+    const byId = new Map();
+    const next = metas.map((meta) => {
+      if (Number.isFinite(Number(meta.messageCount))) {
+        const normalized = { ...meta, messageCount: Number(meta.messageCount) };
+        byId.set(meta.id, normalized);
+        return normalized;
+      }
+      dirty = true;
+      const filled = { ...meta, messageCount: computeMessageCount(meta.id) };
+      byId.set(meta.id, filled);
+      return filled;
+    });
+    if (dirty) {
+      const index = readIndex().map((row) => {
+        if (!Number.isFinite(Number(row.messageCount)) && byId.has(row.id)) {
+          return byId.get(row.id);
+        }
+        return row;
+      });
+      writeJsonl(indexFile, index);
+    }
+    return next;
+  }
+
+  let messageCountMigrationScheduled = false;
+  let messageCountMigrationTimer = null;
+
+  function scheduleMessageCountMigration(ids = null) {
+    const wanted = Array.isArray(ids) && ids.length > 0 ? new Set(ids.filter(Boolean)) : null;
+    if (messageCountMigrationScheduled && !wanted) return;
+    messageCountMigrationScheduled = true;
+    if (messageCountMigrationTimer) return;
+    messageCountMigrationTimer = setTimeout(() => {
+      messageCountMigrationTimer = null;
+      messageCountMigrationScheduled = false;
+      try {
+        const index = readIndex();
+        let dirty = false;
+        const next = index.map((row) => {
+          if (Number.isFinite(Number(row.messageCount))) {
+            return { ...row, messageCount: Number(row.messageCount) };
+          }
+          if (wanted && !wanted.has(row.id)) return row;
+          dirty = true;
+          return { ...row, messageCount: computeMessageCount(row.id) };
+        });
+        if (dirty) writeJsonl(indexFile, next);
+      } catch (err) {
+        // 后台迁移失败不影响 list；下次 list 会再次调度。
+        console.warn('[conversation-store] messageCount migration failed:', err);
+      }
+    }, 0);
+  }
+
+  function normalizeListLimit(value, { defaultLimit = null, maxLimit = 500 } = {}) {
+    if (value === undefined || value === null || value === '') return defaultLimit;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return defaultLimit;
+    return Math.min(Math.floor(n), maxLimit);
+  }
+
+  function applyListPagination(items, params = {}) {
+    const limit = normalizeListLimit(params?.limit, { defaultLimit: null });
+    const cursor = typeof params?.cursor === 'string' && params.cursor.trim()
+      ? params.cursor.trim()
+      : null;
+    let start = 0;
+    if (cursor) {
+      const idx = items.findIndex((item) => item.id === cursor);
+      start = idx >= 0 ? idx + 1 : 0;
+    }
+    if (limit == null) {
+      return {
+        items: items.slice(start),
+        nextCursor: null,
+        hasMore: false,
+        total: items.length,
+      };
+    }
+    const page = items.slice(start, start + limit);
+    const end = start + page.length;
+    const hasMore = end < items.length;
+    return {
+      items: page,
+      nextCursor: hasMore ? page[page.length - 1]?.id ?? null : null,
+      hasMore,
+      total: items.length,
+    };
+  }
+
+  function projectListMeta(meta) {
+    if (!meta) return null;
+    if (Number.isFinite(Number(meta.messageCount))) {
+      return { ...meta, messageCount: Number(meta.messageCount) };
+    }
+    // 热路径永不读 jsonl：缺 count 返回 0 占位，并调度后台回填。
+    return { ...meta, messageCount: 0 };
+  }
+
   function listConversations(params = {}) {
     const statuses = normalizeStatuses(params?.status);
-    return readIndex()
-      .filter((meta) => !statuses || statuses.has(normalizeStatus(meta.status)))
-      .map((meta) => {
-        const msgs = existsSync(convFile(meta.id)) ? readJsonl(convFile(meta.id)) : [];
-        return { ...meta, messageCount: msgs.length };
-      })
-      // 按「最近修改」降序：updatedAt 每次写操作（消息追加 / 改标题 / 改模式 / 计费）都会刷新，
-      // 因此最近活跃的对话冒泡到顶部；极旧数据若缺 updatedAt 则回退到 createdAt 兜底。
-      .sort((a, b) => {
-        const keyOf = (m) => String(m.updatedAt || m.createdAt || '');
-        return keyOf(b).localeCompare(keyOf(a));
-      });
+    const filtered = readIndex()
+      .filter((meta) => !statuses || statuses.has(normalizeStatus(meta.status)));
+    const sorted = sortByUpdatedAtDesc(filtered.map((meta) => ({ ...meta })));
+
+    // 显式 backfill 仅用于迁移工具/测试；默认 list 热路径永不读正文。
+    if (params?.backfillMessageCount === true) {
+      const filled = ensureMessageCounts(sorted);
+      const page = applyListPagination(filled, params);
+      return params?.paginated === true ? page : page.items;
+    }
+
+    const missingIds = sorted
+      .filter((meta) => !Number.isFinite(Number(meta.messageCount)))
+      .map((meta) => meta.id);
+    if (missingIds.length > 0 && params?.includeMessageCount !== false) {
+      scheduleMessageCountMigration(missingIds);
+    }
+
+    const projected = params?.includeMessageCount === false
+      ? sorted
+      : sorted.map(projectListMeta);
+    const page = applyListPagination(projected, params);
+    return params?.paginated === true ? page : page.items;
   }
 
   function listConversationsByWorkspace(workspacePath, params = {}) {
-    return listConversations(params).filter((c) => (c.workspacePath || null) === (workspacePath || null));
+    const statuses = normalizeStatuses(params?.status);
+    // 先按 index meta 过滤 workspace / status，再投影 messageCount。
+    // 避免「先全量扫 jsonl 再过滤」的历史路径。
+    const filtered = readIndex().filter((meta) => {
+      if ((meta.workspacePath || null) !== (workspacePath || null)) return false;
+      if (statuses && !statuses.has(normalizeStatus(meta.status))) return false;
+      return true;
+    });
+    const sorted = sortByUpdatedAtDesc(filtered.map((meta) => ({ ...meta })));
+
+    if (params?.backfillMessageCount === true) {
+      const filled = ensureMessageCounts(sorted);
+      const page = applyListPagination(filled, params);
+      return params?.paginated === true ? page : page.items;
+    }
+
+    const missingIds = sorted
+      .filter((meta) => !Number.isFinite(Number(meta.messageCount)))
+      .map((meta) => meta.id);
+    if (missingIds.length > 0 && params?.includeMessageCount !== false) {
+      scheduleMessageCountMigration(missingIds);
+    }
+
+    const projected = params?.includeMessageCount === false
+      ? sorted
+      : sorted.map(projectListMeta);
+    const page = applyListPagination(projected, params);
+    return params?.paginated === true ? page : page.items;
   }
+
 
 
   /**
@@ -270,6 +438,7 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
       archivedAt: null,
       pinnedAt: null,
       pinnedOrder: null,
+      messageCount: 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -284,8 +453,7 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     meta.mode = normalizeMode(mode);
     meta.updatedAt = new Date().toISOString();
     writeJsonl(indexFile, index);
-    const msgs = existsSync(convFile(id)) ? readJsonl(convFile(id)) : [];
-    return { ...meta, messageCount: msgs.length };
+    return withMessageCount(meta);
   }
 
   // 会话级模型 + 思考模式绑定（随会话持久化，同 mode 范式）。两者各自独立写入，互不影响：
@@ -300,8 +468,7 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     if (modelProviderId !== undefined) meta.modelProviderId = normalizeModelProviderId(modelProviderId);
     meta.updatedAt = new Date().toISOString();
     writeJsonl(indexFile, index);
-    const msgs = existsSync(convFile(id)) ? readJsonl(convFile(id)) : [];
-    return { ...meta, messageCount: msgs.length };
+    return withMessageCount(meta);
   }
 
   function getConversation(id) {
@@ -319,8 +486,7 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     meta.title = title;
     meta.updatedAt = new Date().toISOString();
     writeJsonl(indexFile, index);
-    const msgs = existsSync(convFile(id)) ? readJsonl(convFile(id)) : [];
-    return { ...meta, messageCount: msgs.length };
+    return withMessageCount(meta);
   }
 
   function appendMessage(id, message) {
@@ -332,6 +498,11 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
       if (!meta.title && message.role === 'user') {
         meta.title = message.content.slice(0, 50);
       }
+      // index 维护 messageCount，listConversations 不再扫全文 jsonl。
+      const prevCount = Number.isFinite(Number(meta.messageCount)) ? Number(meta.messageCount) : null;
+      meta.messageCount = prevCount === null
+        ? readJsonl(convFile(id)).length
+        : prevCount + 1;
       meta.updatedAt = new Date().toISOString();
       writeJsonl(indexFile, index);
       return { ...meta, messages: readJsonl(convFile(id)) };
@@ -357,7 +528,11 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     writeJsonl(convFile(id), newMessages);
     const index = readIndex();
     const meta = index.find((c) => c.id === id);
-    if (meta) { meta.updatedAt = new Date().toISOString(); writeJsonl(indexFile, index); }
+    if (meta) {
+      meta.messageCount = Array.isArray(newMessages) ? newMessages.length : 0;
+      meta.updatedAt = new Date().toISOString();
+      writeJsonl(indexFile, index);
+    }
     return meta ? { ...meta, messages: newMessages } : null;
   }
 
@@ -429,8 +604,7 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     }
     meta.updatedAt = now;
     writeJsonl(indexFile, index);
-    const msgs = existsSync(convFile(id)) ? readJsonl(convFile(id)) : [];
-    return { ...meta, messageCount: msgs.length };
+    return withMessageCount(meta);
   }
 
   function archiveConversation(id) {
@@ -447,11 +621,6 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
       .map((meta) => Number(meta.pinnedOrder))
       .filter((order) => Number.isFinite(order));
     return orders.length ? Math.min(...orders) - 1 : 0;
-  }
-
-  function withMessageCount(meta) {
-    const msgs = existsSync(convFile(meta.id)) ? readJsonl(convFile(meta.id)) : [];
-    return { ...meta, messageCount: msgs.length };
   }
 
   function pinConversation(id) {
@@ -528,8 +697,7 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     writeJsonl(indexFile, index);
     try { if (existsSync(convFile(id))) unlinkSync(convFile(id)); } catch {}
     return index.map((meta) => {
-      const msgs = existsSync(convFile(meta.id)) ? readJsonl(convFile(meta.id)) : [];
-      return { ...meta, messageCount: msgs.length };
+      return withMessageCount(meta);
     });
   }
 
@@ -583,6 +751,8 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
   return {
     listConversations,
     listConversationsByWorkspace,
+    scheduleMessageCountMigration,
+    backfillMessageCounts: () => ensureMessageCounts(readIndex()),
     searchConversations,
     createConversation: changed(createConversation, 'created'),
     getConversation,

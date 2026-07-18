@@ -24,6 +24,13 @@ export interface StoredConversation extends ConversationMeta {
   readonly messages: readonly Record<string, unknown>[];
 }
 
+export interface ConversationListPage {
+  readonly items: ConversationMeta[];
+  readonly nextCursor: string | null;
+  readonly hasMore: boolean;
+  readonly total: number;
+}
+
 export interface ConversationChangeEvent {
   readonly conversationId: string;
   readonly workspacePath: string | null;
@@ -33,8 +40,22 @@ export interface ConversationChangeEvent {
   readonly changedAt: string;
 }
 
+export interface ConversationListParams {
+  status?: string | readonly string[];
+  includeMessageCount?: boolean;
+  /** 显式同步回填 messageCount（会读 jsonl）；默认 false，list 热路径永不读正文 */
+  backfillMessageCount?: boolean;
+  limit?: number;
+  cursor?: string | null;
+  /** true 时返回 ConversationListPage；默认 false 兼容旧调用方返回数组 */
+  paginated?: boolean;
+}
+
 export interface ConversationStore {
-  listConversations(params?: { status?: string | readonly string[] }): ConversationMeta[];
+  listConversations(params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
+  listConversationsByWorkspace?(workspacePath: string | null | undefined, params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
+  scheduleMessageCountMigration?(ids?: readonly string[] | null): void;
+  backfillMessageCounts?(): ConversationMeta[];
   searchConversations(params?: {
     query?: string;
     status?: string | readonly string[];
