@@ -1,9 +1,14 @@
-import type { LlmProviderConfigView } from '@peer-agent/protocol';
+import type { LlmProviderConfigView, LlmSubscriptionQuota } from '@peer-agent/protocol';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { DropdownOption } from '../../../app/components/Dropdown';
 import { CascadingMenu, type CascadingMenuGroup } from '../../../app/components/CascadingMenu';
+import {
+  formatQuotaTooltipLine,
+  isOAuthMethod,
+} from '../../../app/components/llmSubscriptionQuota';
 import { Tooltip } from '../../../app/components/Tooltip';
+import { clientApi } from '../../../clientApi';
 import { effortLabel, isEffortLevel, type EffortLevel } from '../../state/preferences';
 import { formatTokenCount } from '../../state/format';
 import { getProviderDisplayName } from '../../state/providerDisplay';
@@ -196,6 +201,44 @@ export function TokenUsageDisplay({
   const defaultProvider = selectedProvider
     || providers.find((p) => p.isDefault && p.apiKeyConfigured)
     || providers.find((p) => p.apiKeyConfigured);
+
+  // 订阅额度：与设置页一致，按 group head 拉取；仅 OAuth 且已连接时查询。
+  // 每 5 分钟自动刷新剩余额度（force=true），模型切换时立即重拉。
+  const [subscriptionQuota, setSubscriptionQuota] = useState<LlmSubscriptionQuota | null>(null);
+  const quotaProviderId = (() => {
+    if (!defaultProvider || !isOAuthMethod(defaultProvider.authMethod)) return null;
+    const groupId = defaultProvider.groupId || defaultProvider.id;
+    const head = providers.find((p) => p.id === groupId) ?? defaultProvider;
+    if (!isOAuthMethod(head.authMethod)) return null;
+    if (head.oauthStatus?.status !== 'connected') return null;
+    return head.id;
+  })();
+
+  useEffect(() => {
+    if (!quotaProviderId) {
+      setSubscriptionQuota(null);
+      return;
+    }
+    let cancelled = false;
+    const load = async (force: boolean) => {
+      try {
+        const result = await clientApi.llmGetSubscriptionQuota({ id: quotaProviderId, force });
+        if (!cancelled) setSubscriptionQuota(result);
+      } catch {
+        if (!cancelled) setSubscriptionQuota(null);
+      }
+    };
+    void load(false);
+    // 每 5 分钟自动刷新剩余额度（与 llmSubscriptionQuota.SUBSCRIPTION_QUOTA_REFRESH_MS 一致）
+    const timer = window.setInterval(() => {
+      void load(true);
+    }, 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [quotaProviderId]);
+
   const hasInfo = tokenUsage || activeUsage || contextTokens || defaultProvider?.contextWindow || defaultProvider?.inputPrice != null;
   if (!hasInfo) return null;
 
@@ -210,7 +253,7 @@ export function TokenUsageDisplay({
   // 仅当前选中模型支持 Prompt 缓存时才展示缓存命中率，避免切到无缓存模型后仍显示旧模型遗留的累计缓存数据。
   const showCacheHit = defaultProvider?.supportsPromptCaching === true && cacheRead > 0;
 
-  const isSubscriptionProvider = defaultProvider?.authMethod === 'oauth_chatgpt';
+  const isSubscriptionProvider = isOAuthMethod(defaultProvider?.authMethod);
   let costStr: string | null = null;
   if (!isSubscriptionProvider && defaultProvider?.inputPrice != null && defaultProvider?.outputPrice != null) {
     const p = defaultProvider;
@@ -227,8 +270,9 @@ export function TokenUsageDisplay({
   const ctxWindow = (typeof contextWindow === 'number' && contextWindow > 0) ? contextWindow : defaultProvider?.contextWindow;
   const ctxPercent = ctxWindow ? Math.min((currentContextTokens / ctxWindow) * 100, 100) : null;
   const hasCtxRing = Boolean(ctxWindow && ctxPercent != null);
-  // 圆环 hover：用量明细（used/total + 百分比）叠加缓存命中率（读取/写入），
-  // 让常驻区只保留圆环+百分比，缓存命中率不再单独常驻占位。
+  // 圆环 hover：用量明细（used/total + 百分比）叠加缓存命中率（读取/写入）与订阅剩余额度，
+  // 让常驻区只保留圆环+百分比，缓存命中率 / 额度不再单独常驻占位。
+  const quotaTooltipLine = formatQuotaTooltipLine(subscriptionQuota ?? undefined, isZh);
   const ctxTooltipLines: readonly string[] = hasCtxRing
     ? [
         `${isZh ? '上下文' : 'Context'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow as number)} (${Math.round(ctxPercent as number)}%)`,
@@ -239,6 +283,7 @@ export function TokenUsageDisplay({
                 : `Cache hit ${cacheHitPercent}% (read ${formatTokenCount(cacheRead)}${cacheWrite > 0 ? ` / write ${formatTokenCount(cacheWrite)}` : ''})`,
             ]
           : []),
+        ...(quotaTooltipLine ? [quotaTooltipLine] : []),
       ]
     : [];
   const ctxTooltip = ctxTooltipLines.join('\n');

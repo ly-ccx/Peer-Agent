@@ -1,5 +1,8 @@
 import type { MarkdownBlock, MarkdownHeadingBlock } from './markdownTypes.ts';
+import { sanitizeMarkdownFences } from './markdownFenceSanitizer.ts';
+
 export type { MarkdownBlock } from './markdownTypes.ts';
+export { sanitizeMarkdownFences } from './markdownFenceSanitizer.ts';
 
 function parseListLine(line: string) {
   const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
@@ -69,7 +72,9 @@ function isMarkdownBlockStart(line: string) {
 }
 
 export function parseMarkdownBlocks(markdown: string): readonly MarkdownBlock[] {
-  const lines = markdown.replace(/<!--[\s\S]*?-->/g, '').replace(/\r\n?/g, '\n').split('\n');
+  // Pre-parse cleanup: fix high-confidence fence/path-backtick mistakes from model output.
+  const cleaned = sanitizeMarkdownFences(markdown);
+  const lines = cleaned.replace(/<!--[\s\S]*?-->/g, '').replace(/\r\n?/g, '\n').split('\n');
   const blocks: MarkdownBlock[] = [];
   let index = 0;
 
