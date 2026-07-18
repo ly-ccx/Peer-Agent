@@ -961,8 +961,9 @@ const shortcutService = createShortcutService({
 });
 
 ipcMain.handle('shortcuts:status', () => shortcutService.status());
-ipcMain.handle('shortcuts:update', (_event, accelerator) => shortcutService.update(accelerator));
-ipcMain.handle('shortcuts:reset', () => shortcutService.reset());
+ipcMain.handle('shortcuts:update', (_event, actionOrAccelerator, accelerator) =>
+  shortcutService.update(actionOrAccelerator, accelerator));
+ipcMain.handle('shortcuts:reset', (_event, action) => shortcutService.reset(action));
 
 ipcMain.handle('quick-chat:hide', () => {
   quickChatWindowController.hide();

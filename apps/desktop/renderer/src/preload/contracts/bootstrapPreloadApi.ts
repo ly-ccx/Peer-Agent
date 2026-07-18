@@ -608,9 +608,25 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly getSettings: () => Promise<Record<string, unknown>>;
   readonly updateSettings: (partial: Record<string, unknown>) => Promise<Record<string, unknown>>;
   readonly onAppearanceChanged: (listener: (appearance: unknown) => void) => () => void;
-  readonly getShortcutStatus: () => Promise<{ quickChat: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean } }>;
-  readonly updateShortcut: (accelerator: string) => Promise<{ success: boolean; error: string | null }>;
-  readonly resetShortcut: () => Promise<{ success: boolean; error: string | null }>;
+  readonly getShortcutStatus: () => Promise<{
+    quickChat: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };
+    newTask: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };
+  }>;
+  readonly updateShortcut: (
+    action: 'quickChat' | 'newTask',
+    accelerator: string,
+  ) => Promise<{
+    success?: boolean;
+    error?: string | null;
+    quickChat: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };
+    newTask: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };
+  }>;
+  readonly resetShortcut: (action?: 'quickChat' | 'newTask') => Promise<{
+    success?: boolean;
+    error?: string | null;
+    quickChat: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };
+    newTask: { configured: string; active: string | null; registered: boolean; error: string | null; isDefault: boolean };
+  }>;
   readonly exportConfig: () => Promise<Record<string, unknown>>;
   readonly importConfig: () => Promise<Record<string, unknown>>;
   // ── Updater ──（主进程负责能力，渲染层只表达）

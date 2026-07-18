@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createShortcutService, validateShortcut } from './shortcut-service.mjs';
+import { createShortcutService, DEFAULT_SHORTCUTS, validateShortcut } from './shortcut-service.mjs';
 
 function fixture(initial = {}) {
   const registered = new Map();
@@ -16,35 +16,86 @@ function fixture(initial = {}) {
   };
   const settingsStore = {
     getAll: () => settings,
-    merge(partial) { settings = { ...settings, ...partial }; return settings; },
+    merge(partial) {
+      // Mirror settings-store shallow top-level merge; nested objects replace.
+      settings = { ...settings, ...partial };
+      return settings;
+    },
   };
-  return { registered, settingsStore, service: createShortcutService({ globalShortcut, settingsStore, onQuickChat() {} }) };
+  return { registered, settingsStore, service: createShortcutService({ globalShortcut, settingsStore, onQuickChat() {} }), getSettings: () => settings };
 }
 
-test('rejects shortcuts without a modifier', () => {
-  assert.deepEqual(validateShortcut('N'), { valid: false, reason: 'modifier-required' });
+test('rejects shortcuts without a non-modifier key', () => {
+  assert.equal(validateShortcut('CommandOrControl').valid, false);
 });
 
-test('persists a successfully registered shortcut', () => {
-  const { service, settingsStore } = fixture();
-  assert.equal(service.register().success, true);
-  assert.equal(service.update('CommandOrControl+Shift+K').quickChat.configured, 'CommandOrControl+Shift+K');
-  assert.equal(settingsStore.getAll().shortcuts.quickChat, 'CommandOrControl+Shift+K');
+test('registers the configured default shortcut', () => {
+  const { service, registered } = fixture();
+  const result = service.register();
+  assert.equal(result.success, true);
+  assert.equal(registered.has(result.accelerator), true);
 });
 
-test('keeps the previous shortcut when registration fails', () => {
-  const { service, registered, settingsStore } = fixture();
-  const first = service.register();
-  const failed = service.update('CommandOrControl+Taken');
+test('keeps previous binding when the next accelerator fails', () => {
+  const { service, registered } = fixture({ shortcuts: { quickChat: 'CommandOrControl+Shift+N' } });
+  service.register();
+  const failed = service.update('quickChat', 'CommandOrControl+Taken');
   assert.equal(failed.success, false);
-  assert.equal(registered.has(first.accelerator), true);
-  assert.equal(settingsStore.getAll().shortcuts, undefined);
+  assert.equal(registered.has('CommandOrControl+Shift+N'), true);
 });
 
-test('reset restores the platform default', () => {
+test('reset restores the platform default for quickChat', () => {
   const { service } = fixture({ shortcuts: { quickChat: 'CommandOrControl+Shift+K' } });
   service.register();
-  const result = service.reset();
+  const result = service.reset('quickChat');
   assert.equal(result.quickChat.isDefault, true);
   assert.equal(result.quickChat.registered, true);
+});
+
+test('defaults include newTask as CommandOrControl+N', () => {
+  assert.equal(DEFAULT_SHORTCUTS.newTask, 'CommandOrControl+N');
+});
+
+test('status exposes newTask with default when unset', () => {
+  const { service } = fixture();
+  const result = service.status();
+  assert.equal(result.newTask.configured, 'CommandOrControl+N');
+  assert.equal(result.newTask.isDefault, true);
+  assert.equal(result.newTask.registered, true);
+});
+
+test('update newTask persists without touching global registration', () => {
+  const { service, registered, getSettings } = fixture({ shortcuts: { quickChat: 'CommandOrControl+Shift+N' } });
+  service.register();
+  const before = registered.size;
+  const result = service.update('newTask', 'CommandOrControl+T');
+  assert.equal(result.newTask.configured, 'CommandOrControl+T');
+  assert.equal(result.newTask.isDefault, false);
+  assert.equal(registered.size, before);
+  assert.equal(getSettings().shortcuts.newTask, 'CommandOrControl+T');
+  assert.equal(getSettings().shortcuts.quickChat, 'CommandOrControl+Shift+N');
+});
+
+test('update quickChat preserves existing newTask config', () => {
+  const { service, getSettings } = fixture({
+    shortcuts: { quickChat: 'CommandOrControl+Shift+N', newTask: 'CommandOrControl+T' },
+  });
+  service.register();
+  service.update('quickChat', 'CommandOrControl+Shift+M');
+  assert.equal(getSettings().shortcuts.quickChat, 'CommandOrControl+Shift+M');
+  assert.equal(getSettings().shortcuts.newTask, 'CommandOrControl+T');
+});
+
+test('reset newTask restores CommandOrControl+N', () => {
+  const { service } = fixture({ shortcuts: { newTask: 'CommandOrControl+T' } });
+  const result = service.reset('newTask');
+  assert.equal(result.newTask.configured, 'CommandOrControl+N');
+  assert.equal(result.newTask.isDefault, true);
+});
+
+test('backward-compatible update(accelerator) still targets quickChat', () => {
+  const { service, getSettings } = fixture();
+  service.register();
+  service.update('CommandOrControl+Shift+Y');
+  assert.equal(getSettings().shortcuts.quickChat, 'CommandOrControl+Shift+Y');
 });

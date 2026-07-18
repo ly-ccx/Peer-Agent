@@ -20,8 +20,8 @@ contextBridge.exposeInMainWorld('peerAgent', {
     return () => ipcRenderer.removeListener('appearance:changed', handler);
   },
   getShortcutStatus: () => ipcRenderer.invoke('shortcuts:status'),
-  updateShortcut: (accelerator) => ipcRenderer.invoke('shortcuts:update', accelerator),
-  resetShortcut: () => ipcRenderer.invoke('shortcuts:reset'),
+  updateShortcut: (action, accelerator) => ipcRenderer.invoke('shortcuts:update', action, accelerator),
+  resetShortcut: (action) => ipcRenderer.invoke('shortcuts:reset', action),
   getDeveloperSettings: () => ipcRenderer.invoke('developer-settings:get'),
   updateDeveloperSettings: (partial) => ipcRenderer.invoke('developer-settings:update', partial),
   resetDeveloperSettings: () => ipcRenderer.invoke('developer-settings:reset'),

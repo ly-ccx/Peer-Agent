@@ -49,7 +49,7 @@
   backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
   box-shadow: var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.4));
   border-right: 1px solid var(--chrome-hairline);
-  padding-top: 36px;
+  padding-top: 40px;
   -webkit-app-region: drag;
   overflow: hidden;
   transition: border-color var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
@@ -356,13 +356,20 @@
   flex: 1 1 auto;
   text-align: left;
 }
-.sidebar-search-chats-kbd {
+/* Shared shortcut badge for search / new-task rows — keep width & padding aligned. */
+.sidebar-search-chats-kbd,
+.sidebar-new-chat-kbd {
   font-size: 11px;
   line-height: 1;
   padding: 3px 5px;
   border-radius: 6px;
   border: 1px solid var(--za-line);
   color: var(--pa-text-tertiary, var(--graphite-soft));
+  flex: 0 0 auto;
+  font-family: inherit;
+  font-weight: 500;
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 .sidebar-new-chat {
   display: flex;
@@ -378,6 +385,10 @@
   cursor: pointer;
   font-size: 0.82rem;
   transition: background var(--za-motion-fast);
+}
+.sidebar-new-chat span {
+  flex: 1 1 auto;
+  text-align: left;
 }
 .sidebar-new-chat:hover {
   background: var(--za-sidebar-active-bg);

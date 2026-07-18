@@ -110,6 +110,7 @@ export function Sidebar({
   activePage,
   i18n,
   onNewChat,
+  newTaskShortcutLabel,
   onOpenSearch,
   onSelectConversation,
   onDeleteConversation,
@@ -142,6 +143,7 @@ export function Sidebar({
   readonly activePage: string;
   readonly i18n: I18nRuntime;
   readonly onNewChat: () => void;
+  readonly newTaskShortcutLabel?: string;
   readonly onOpenSearch?: () => void;
   readonly onSelectConversation: (id: string) => void;
   readonly onDeleteConversation: (id: string) => void;
@@ -650,11 +652,17 @@ export function Sidebar({
                 <kbd className="sidebar-search-chats-kbd">{i18n.t('searchChats.shortcut')}</kbd>
               </button>
             ) : null}
-            <button type="button" className="sidebar-new-chat" onClick={onNewChat}>
+            <button
+              type="button"
+              className="sidebar-new-chat"
+              onClick={onNewChat}
+              title={newTaskShortcutLabel ? `${isZh ? '新建任务' : 'New Task'} (${newTaskShortcutLabel})` : (isZh ? '新建任务' : 'New Task')}
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 5v14" /><path d="M5 12h14" />
               </svg>
               <span>{isZh ? '新建任务' : 'New Task'}</span>
+              {newTaskShortcutLabel ? <kbd className="sidebar-new-chat-kbd">{newTaskShortcutLabel}</kbd> : null}
             </button>
           </>
         )}

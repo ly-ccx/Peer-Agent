@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SettingsPage } from './app/components/SettingsPage';
 import { BrandStartupLoader } from './app/components/BrandStartupLoader';
 import { QuickChatWindow } from './app/components/QuickChatWindow';
+import { displayShortcut } from './app/components/ShortcutsPanel';
 import { shouldRefreshQuickChatConversationList } from './app/state/quickChatSubmission';
 import { CONVERSATION_LIST_PAGE_SIZE, useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { useBrandStartupMinHold } from './app/state/useBrandStartupMinHold';
@@ -15,6 +16,37 @@ import type { CompactionState } from './chat/state/types';
 import { clientApi } from './clientApi';
 import { WorkbenchPanel } from './workbench/WorkbenchPanel';
 import { WorkbenchProvider } from './workbench/WorkbenchContext';
+
+const DEFAULT_NEW_TASK_SHORTCUT = 'CommandOrControl+N';
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
+function eventMatchesAccelerator(event: KeyboardEvent, accelerator: string): boolean {
+  const parts = accelerator.split('+').filter(Boolean);
+  if (parts.length < 2) return false;
+  const keyPart = parts[parts.length - 1]!;
+  const modifiers = new Set(parts.slice(0, -1));
+  const wantsMeta = modifiers.has('Command') || modifiers.has('Cmd') || modifiers.has('CommandOrControl') || modifiers.has('CmdOrCtrl') || modifiers.has('Super') || modifiers.has('Meta');
+  const wantsCtrl = modifiers.has('Control') || modifiers.has('Ctrl') || modifiers.has('CommandOrControl') || modifiers.has('CmdOrCtrl');
+  const wantsAlt = modifiers.has('Alt') || modifiers.has('Option');
+  const wantsShift = modifiers.has('Shift');
+  const key = event.key.length === 1 ? event.key.toUpperCase() : event.key === ' ' ? 'Space' : event.key;
+  if (key !== keyPart && key.toLowerCase() !== keyPart.toLowerCase()) return false;
+  if (wantsAlt !== event.altKey) return false;
+  if (wantsShift !== event.shiftKey) return false;
+  if (modifiers.has('CommandOrControl') || modifiers.has('CmdOrCtrl')) {
+    if (!(event.metaKey || event.ctrlKey)) return false;
+  } else {
+    if (wantsMeta !== event.metaKey) return false;
+    if (wantsCtrl !== event.ctrlKey) return false;
+  }
+  return true;
+}
 
 type AppPage = 'chat' | 'settings';
 type ConversationStatus = 'active' | 'archived';
@@ -395,19 +427,25 @@ function MainApp() {
 
 
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase();
-      // ⌘K / Ctrl+K toggles Search Chats palette.
-      if (event.metaKey && key === 'k' || event.ctrlKey && key === 'k') {
-        if (event.isComposing) return;
-        event.preventDefault();
-        setSearchOpen((open) => !open);
+  const [newTaskShortcut, setNewTaskShortcut] = useState(DEFAULT_NEW_TASK_SHORTCUT);
+
+  const refreshNewTaskShortcut = useCallback(async () => {
+    try {
+      const status = await clientApi.getShortcutStatus();
+      const configured = status?.newTask?.configured;
+      if (typeof configured === 'string' && configured.trim()) {
+        setNewTaskShortcut(configured);
+      } else {
+        setNewTaskShortcut(DEFAULT_NEW_TASK_SHORTCUT);
       }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    } catch {
+      setNewTaskShortcut(DEFAULT_NEW_TASK_SHORTCUT);
+    }
   }, []);
+
+  useEffect(() => {
+    void refreshNewTaskShortcut();
+  }, [refreshNewTaskShortcut]);
 
   const handleOpenSearch = useCallback(() => {
     setSearchOpen(true);
@@ -447,6 +485,27 @@ function MainApp() {
     setActiveConversationId(null);
     setActivePage('chat');
   }, [activeWorkspace]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing) return;
+      const key = event.key.toLowerCase();
+      // ⌘K / Ctrl+K toggles Search Chats palette.
+      if ((event.metaKey && key === 'k') || (event.ctrlKey && key === 'k')) {
+        event.preventDefault();
+        setSearchOpen((open) => !open);
+        return;
+      }
+      // Configurable app-local "new task" shortcut (default ⌘/Ctrl+N).
+      if (eventMatchesAccelerator(event, newTaskShortcut)) {
+        if (isEditableTarget(event.target)) return;
+        event.preventDefault();
+        void handleNewChat();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleNewChat, newTaskShortcut]);
 
   // 草稿态发首条消息时由 ChatSurface 调用：此时才创建会话并进入左侧列表。
   const ensureConversation = useCallback(async (seed?: {
@@ -562,6 +621,7 @@ function MainApp() {
               activePage={activePage}
               i18n={i18n}
               onNewChat={handleNewChat}
+              newTaskShortcutLabel={displayShortcut(newTaskShortcut)}
               onOpenSearch={handleOpenSearch}
               onSelectConversation={handleSelectConversation}
               onDeleteConversation={handleDeleteConversation}
@@ -628,6 +688,7 @@ function MainApp() {
                   setActivePage('chat');
                   void refreshProviders();
                   void refreshSettings();
+                  void refreshNewTaskShortcut();
                 }}
                 onLocaleChanged={refreshBootstrap}
                 onReplyLanguageChanged={setReplyLanguage}

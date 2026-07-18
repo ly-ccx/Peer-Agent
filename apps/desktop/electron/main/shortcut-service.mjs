@@ -1,6 +1,10 @@
 export const DEFAULT_SHORTCUTS = Object.freeze({
   quickChat: process.platform === 'darwin' ? 'CommandOrControl+Shift+N' : 'Control+Shift+N',
+  newTask: 'CommandOrControl+N',
 });
+
+/** Actions registered via Electron globalShortcut (OS-level). Others are app-local. */
+const GLOBAL_ACTIONS = new Set(['quickChat']);
 
 const RESERVED_SHORTCUTS = new Set(
   process.platform === 'darwin'
@@ -28,17 +32,40 @@ export function validateShortcut(value) {
   return { valid: true, accelerator };
 }
 
-/** Owns global registration and keeps the previous working binding on failure. */
+function isKnownAction(action) {
+  return Object.prototype.hasOwnProperty.call(DEFAULT_SHORTCUTS, action);
+}
+
+/**
+ * Owns shortcut configuration for both global and app-local actions.
+ * Global actions (quickChat) register via Electron globalShortcut and keep the
+ * previous working binding on failure. App-local actions (newTask) only persist
+ * configuration for the renderer to bind.
+ */
 export function createShortcutService({ globalShortcut, settingsStore, onQuickChat }) {
   let activeAccelerator = null;
   let registrationError = null;
 
-  function configuredAccelerator() {
+  function readShortcuts() {
     const shortcuts = settingsStore.getAll().shortcuts;
-    return normalizeShortcut(shortcuts?.quickChat) || DEFAULT_SHORTCUTS.quickChat;
+    return shortcuts && typeof shortcuts === 'object' ? shortcuts : {};
   }
 
-  function register(accelerator = configuredAccelerator()) {
+  function configuredAccelerator(action) {
+    const shortcuts = readShortcuts();
+    return normalizeShortcut(shortcuts?.[action]) || DEFAULT_SHORTCUTS[action];
+  }
+
+  function persist(action, accelerator) {
+    settingsStore.merge({
+      shortcuts: {
+        ...readShortcuts(),
+        [action]: accelerator,
+      },
+    });
+  }
+
+  function register(accelerator = configuredAccelerator('quickChat')) {
     const validation = validateShortcut(accelerator);
     if (!validation.valid) return { success: false, accelerator, error: validation.reason };
     const next = validation.accelerator;
@@ -56,27 +83,58 @@ export function createShortcutService({ globalShortcut, settingsStore, onQuickCh
     return { success: true, accelerator: next };
   }
 
-  function update(accelerator) {
-    const result = register(accelerator);
-    if (!result.success) return result;
-    settingsStore.merge({ shortcuts: { quickChat: result.accelerator } });
-    return status();
+  function update(action, accelerator) {
+    const resolvedAction = typeof action === 'string' && isKnownAction(action) ? action : 'quickChat';
+    // Backward compat: old callers passed only the accelerator string.
+    const resolvedAccelerator = typeof accelerator === 'string'
+      ? accelerator
+      : (typeof action === 'string' && !isKnownAction(action) ? action : '');
+
+    const validation = validateShortcut(resolvedAccelerator);
+    if (!validation.valid) {
+      return { success: false, error: validation.reason, ...status() };
+    }
+
+    if (GLOBAL_ACTIONS.has(resolvedAction)) {
+      const result = register(validation.accelerator);
+      if (!result.success) return { success: false, error: result.error, ...status() };
+      persist(resolvedAction, result.accelerator);
+      return { success: true, error: null, ...status() };
+    }
+
+    persist(resolvedAction, validation.accelerator);
+    return { success: true, error: null, ...status() };
   }
 
-  function reset() {
-    return update(DEFAULT_SHORTCUTS.quickChat);
+  function reset(action = 'quickChat') {
+    const resolvedAction = isKnownAction(action) ? action : 'quickChat';
+    return update(resolvedAction, DEFAULT_SHORTCUTS[resolvedAction]);
   }
 
-  function status() {
-    const configured = configuredAccelerator();
-    return {
-      quickChat: {
+  function actionStatus(action) {
+    const configured = configuredAccelerator(action);
+    if (GLOBAL_ACTIONS.has(action)) {
+      return {
         configured,
         active: activeAccelerator,
         registered: Boolean(activeAccelerator && globalShortcut.isRegistered(activeAccelerator)),
         error: registrationError,
-        isDefault: configured === DEFAULT_SHORTCUTS.quickChat,
-      },
+        isDefault: configured === DEFAULT_SHORTCUTS[action],
+      };
+    }
+    return {
+      configured,
+      active: configured,
+      registered: true,
+      error: null,
+      isDefault: configured === DEFAULT_SHORTCUTS[action],
+    };
+  }
+
+  function status() {
+    return {
+      quickChat: actionStatus('quickChat'),
+      newTask: actionStatus('newTask'),
     };
   }
 
@@ -85,5 +143,5 @@ export function createShortcutService({ globalShortcut, settingsStore, onQuickCh
     activeAccelerator = null;
   }
 
-  return { register, update, reset, status, dispose };
+  return { register, update, reset, status, dispose, configuredAccelerator };
 }

@@ -1312,6 +1312,10 @@
   padding: var(--space-4) var(--space-5);
 }
 
+.shortcut-group + .shortcut-group {
+  margin-top: var(--space-4);
+}
+
 .shortcut-description {
   display: flex;
   flex: 1 1 auto;
