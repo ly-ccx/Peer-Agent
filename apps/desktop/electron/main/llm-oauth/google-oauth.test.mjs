@@ -33,7 +33,7 @@ describe('Google subscription OAuth', () => {
     assert.equal(request.url, 'https://oauth2.googleapis.com/token');
     const body = new URLSearchParams(request.options.body);
     assert.equal(body.get('client_id'), '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com');
-    assert.equal(body.get('client_secret'), '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');
+    assert.equal(body.get('client_secret'), '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');
     assert.equal(body.get('refresh_token'), 'refresh-token');
     assert.equal(tokens.access, 'next-access');
     assert.equal(tokens.refresh, 'refresh-token');

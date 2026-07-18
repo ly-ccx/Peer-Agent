@@ -17,7 +17,8 @@ const AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 // Public installed-app credentials from google-gemini/gemini-cli.
 const DEFAULT_CLIENT_ID = '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com';
-const DEFAULT_CLIENT_SECRET = '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';
+// Keep in sync with google-gemini/gemini-cli packages/core/src/code_assist/oauth2.ts
+const DEFAULT_CLIENT_SECRET = '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';
 const CALLBACK_PORT = 1456;
 const CALLBACK_PATH = '/auth/google/callback';
 const REDIRECT_URI = `http://localhost:${CALLBACK_PORT}${CALLBACK_PATH}`;
