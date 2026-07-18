@@ -305,6 +305,7 @@ export function ChatSurface({
   onConversationUpdated,
   onStreamingChange,
   onBranch,
+  onEnsureConversation,
   onRenameConversation,
   onArchiveConversation,
   onDeleteConversation,
@@ -326,6 +327,13 @@ export function ChatSurface({
   // 把当前会话的流式运行状态上报给上层(App),供左侧列表显示 Loading 图标。
   readonly onStreamingChange?: (conversationId: string | null, isStreaming: boolean) => void;
   readonly onBranch?: (newConversationId: string) => void;
+  // 草稿态发首条消息时创建会话（落库并进入左侧列表）。
+  readonly onEnsureConversation?: (seed?: {
+    title?: string;
+    mode?: string;
+    effort?: string;
+    modelProviderId?: string | null;
+  }) => Promise<{ id: string }>;
   readonly onRenameConversation?: (id: string, title: string) => void;
   readonly onArchiveConversation?: (id: string) => void;
   readonly onDeleteConversation?: (id: string) => void;
@@ -334,6 +342,7 @@ export function ChatSurface({
   // 设置页覆盖显示时保活会话树与流事件订阅，但暂停聊天专属全局快捷键。
   readonly isPageActive: boolean;
 }) {
+  const isDraftConversation = conversationId === null;
   // 会话运行时状态的真值已上移到 conversationStore（按 conversationId 分桶的外部 store）。
   // 本组件不再持有 messages/isStreaming/... 的 useState 槽位，改为订阅当前会话切片；
   // 切会话 = 换订阅 key，物理上不存在「被复用的共享 messages 槽位」，跨会话串内容在架构层不可能发生。
@@ -449,6 +458,13 @@ export function ChatSurface({
   >;
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  // 草稿态首条消息：create 完成后等会话 ready 再走 submitMessage，避免与加载竞态。
+  const pendingFirstSendRef = useRef<{
+    text: string;
+    attachments: ChatAttachment[];
+    effort?: string;
+  } | null>(null);
+  const creatingConversationRef = useRef(false);
   const [imagePreview, setImagePreview] = useState<ChatAttachment | null>(null);
   const pendingPermissionCalls = convState.pendingPermissionCalls as ClientToolCall[];
   const setPendingPermissionCalls = useMemo(() => makeSetter('pendingPermissionCalls'), [makeSetter]) as Dispatch<
@@ -807,7 +823,16 @@ export function ChatSurface({
     // 切换会话时一并清掉本轮计时锚点,避免上一会话的实时跳秒残留到新会话。
     // 打字机缓冲的清空已上移到 useConversationStreamRouter（随前台会话切换自动 reset）。
     setTurnStartedAt(null);
-    if (!conversationId) { setMessages([]); setTokenUsage(null); return; }
+    if (!conversationId) {
+      // 草稿态：不拉磁盘、不进左侧列表；直接 ready，允许输入与发送。
+      // 再次点「新建任务」时 conversationId 仍为 null，本 effect 不会重跑，draft 得以保留。
+      setTokenUsage(null);
+      convActions.commitLoad({
+        messages: [],
+        tokenUsage: null,
+      });
+      return;
+    }
     convActions.beginLoad();
     setTokenUsage(null);
     let cancelled = false;
@@ -927,8 +952,14 @@ export function ChatSurface({
       const streamId = typeof payload.streamId === 'string' ? payload.streamId : '';
       if (!streamId) return;
       const now = typeof payload.startedAt === 'number' ? payload.startedAt : Date.now();
+      // 主进程 runGoalTurn 已创建并落盘 assistant 占位；渲染端必须绑定同一 id，
+      // 否则流式内容无法对上，且会再 append 一条空消息污染会话。
+      const assistantMessageIdFromMain =
+        typeof (payload as { assistantMessageId?: unknown }).assistantMessageId === 'string'
+          ? (payload as { assistantMessageId: string }).assistantMessageId.trim()
+          : '';
       const assistantMsg: ChatMsg = {
-        id: nextId(),
+        id: assistantMessageIdFromMain || nextId(),
         role: 'assistant',
         content: '',
         segments: [],
@@ -945,16 +976,26 @@ export function ChatSurface({
       setToolProgress(null);
       setIsStreaming(true);
       setMessages((prev) => {
+        if (prev.some((msg) => msg.id === assistantMsg.id)) {
+          return prev.map((msg) => (
+            msg.id === assistantMsg.id
+              ? {
+                  ...msg,
+                  role: 'assistant',
+                  content: msg.content || '',
+                  segments: msg.segments || [],
+                  timestamp: msg.timestamp || now,
+                }
+              : msg
+          ));
+        }
         const tail = prev[prev.length - 1];
         if (tail && isEmptyAssistantPlaceholder(tail)) {
           return [...prev.slice(0, -1), assistantMsg];
         }
         return [...prev, assistantMsg];
       });
-      void clientApi.conversationsAppendMessage({
-        id: conversationId,
-        message: { id: assistantMsg.id, role: 'assistant', content: '', timestamp: now },
-      });
+      // 主进程已 append 同 id 占位；此处不再二次 append，避免重复空 assistant。
       onConversationUpdated?.();
     });
   }, [conversationId, onConversationUpdated]);
@@ -1184,6 +1225,17 @@ export function ChatSurface({
     setAttachmentError(null);
   }, []);
 
+  const reorderAttachment = useCallback((fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    setAttachments((prev) => {
+      if (fromIndex < 0 || toIndex < 0 || fromIndex >= prev.length || toIndex >= prev.length) return prev;
+      const next = [...prev];
+      const [item] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, item);
+      return next;
+    });
+  }, []);
+
   const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const fileItems = Array.from(event.clipboardData?.items ?? [])
       .filter((item) => item.kind === 'file')
@@ -1196,7 +1248,7 @@ export function ChatSurface({
 
   const [isFileDropActive, setIsFileDropActive] = useState(false);
   const fileDragDepthRef = useRef(0);
-  const canAcceptFileDrop = Boolean(conversationId) && hasProvider && !isStreaming;
+  const canAcceptFileDrop = hasProvider && !isStreaming;
   const hasFileTransfer = useCallback((dataTransfer: DataTransfer | null) => {
     if (!dataTransfer) return false;
     if (Array.from(dataTransfer.types ?? []).includes('Files')) return true;
@@ -1289,11 +1341,40 @@ export function ChatSurface({
   const handleSend = useCallback(async () => {
     // 恢复历史尚未完成时绝不允许发送：否则空 renderer 桶会先追加新回合，
     // 随后的流收尾再以短列表 replaceMessages，覆盖仍在磁盘上的完整历史。
-    if (!conversationId || loadStatus !== 'ready') return;
+    if (loadStatus !== 'ready') return;
     // 草稿由输入叶子独立订阅；发送瞬间直接读取会话桶，避免父表面闭包持有旧文本。
     const text = conversationStore.getSnapshot(conversationId).draft.trim();
     if ((!text && attachments.length === 0) || !hasProvider) return;
     const sentAttachments = attachments;
+
+    // 草稿态：先创建会话进入左侧列表，再等 ready 后发出首条消息。
+    if (!conversationId) {
+      if (!onEnsureConversation || creatingConversationRef.current) return;
+      creatingConversationRef.current = true;
+      conversationStore.setDraft(conversationId, '');
+      setAttachments([]);
+      setAttachmentError(null);
+      try {
+        const title = text.slice(0, 48) || sentAttachments[0]?.name || (isZh ? '新对话' : 'New Chat');
+        pendingFirstSendRef.current = { text, attachments: sentAttachments, effort };
+        await onEnsureConversation({
+          title,
+          mode,
+          effort,
+          modelProviderId,
+        });
+      } catch (error) {
+        pendingFirstSendRef.current = null;
+        // 创建失败：恢复草稿与附件，用户可重试。
+        conversationStore.setDraft(null, text);
+        setAttachments(sentAttachments);
+        setAttachmentError(error instanceof Error ? error.message : String(error));
+      } finally {
+        creatingConversationRef.current = false;
+      }
+      return;
+    }
+
     conversationStore.setDraft(conversationId, '');
     setAttachments([]);
     setAttachmentError(null);
@@ -1304,7 +1385,30 @@ export function ChatSurface({
       return;
     }
     await submitMessage(text, sentAttachments);
-  }, [attachments, isStreaming, isCompactionActive, hasProvider, conversationId, loadStatus, submitMessage, effort, enqueueMessage]);
+  }, [
+    attachments,
+    isStreaming,
+    isCompactionActive,
+    hasProvider,
+    conversationId,
+    loadStatus,
+    submitMessage,
+    effort,
+    enqueueMessage,
+    onEnsureConversation,
+    mode,
+    modelProviderId,
+    isZh,
+  ]);
+
+  // 草稿首条：会话 create 后 activeConversationId 切换并 load ready 时，自动发出挂起消息。
+  useEffect(() => {
+    if (!conversationId || loadStatus !== 'ready') return;
+    const pending = pendingFirstSendRef.current;
+    if (!pending) return;
+    pendingFirstSendRef.current = null;
+    void submitMessage(pending.text, pending.attachments, pending.effort);
+  }, [conversationId, loadStatus, submitMessage]);
 
   // 任务续传(ADR 21):就绪后在「正确的会话内」自动发送。
   // App.tsx 已 peek 到会话锚定的待办、切到 resumeTask.sessionId 并经 prop 传入;这里要求
@@ -1346,9 +1450,7 @@ export function ChatSurface({
   // 主操作按钮/回车键的统一入口。草稿内容由输入叶子决定按钮语义；这里按触发瞬间
   // 读取会话桶，确保不依赖父表面的高频草稿订阅。
   const handlePrimaryAction = useCallback(() => {
-    const hasDraft = conversationId
-      ? conversationStore.getSnapshot(conversationId).draft.trim().length > 0
-      : false;
+    const hasDraft = conversationStore.getSnapshot(conversationId).draft.trim().length > 0;
     if (hasDraft || attachments.length > 0) {
       void handleSend();
       return;
@@ -1463,29 +1565,7 @@ export function ChatSurface({
     if (mode !== 'plan') setHasGoalPlan(false);
   }, [mode, setHasGoalPlan]);
 
-  if (!conversationId) {
-    return (
-      <div className="chat-surface">
-        <div className="chat-thread" ref={threadRef} onScroll={handleThreadScroll}>
-          <div className="chat-empty-state">
-            <h2>{isZh ? '有什么可以帮你的？' : 'How can I help you?'}</h2>
-            {!hasProvider ? (
-              <p>
-                {isZh ? '请先' : 'Please '}
-                <button type="button" className="chat-link-btn" onClick={onOpenSettings}>
-                  {isZh ? '配置模型' : 'configure a model'}
-                </button>
-                {isZh ? '后开始对话' : ' to start chatting'}
-              </p>
-            ) : (
-              <p>{isZh ? '点击左侧「新对话」开始' : 'Click "New Chat" to start'}</p>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+  // 草稿态（conversationId === null）也渲染完整聊天面：可输入，首条发送时再落库。
   return (
     <WorkspacePathContext.Provider value={workspacePath ?? null}>
     <InteractionContext.Provider value={{ onSelectOption: selectInteractionOption, isStreaming }}>
@@ -1507,7 +1587,7 @@ export function ChatSurface({
         </div>
       ) : null}
       <ChatHeader
-        title={conversationTitle ?? ''}
+        title={conversationTitle || (isDraftConversation ? (isZh ? '新对话' : 'New Chat') : '')}
         isZh={isZh}
         i18n={i18n}
         isStreaming={isStreaming}
@@ -1515,15 +1595,15 @@ export function ChatSurface({
         localAccessLevel={localAccessLevel}
         editTriggerRef={headerEditTriggerRef}
         onOpenSettings={onOpenSettings}
-        onRename={onRenameConversation && conversationId
+        onRename={!isDraftConversation && onRenameConversation && conversationId
           ? (newTitle) => onRenameConversation(conversationId, newTitle)
           : undefined}
-        onArchive={onArchiveConversation && conversationId
+        onArchive={!isDraftConversation && onArchiveConversation && conversationId
           ? () => onArchiveConversation(conversationId)
           : undefined}
-        onBranch={messages.length > 0 ? handleHeaderBranch : undefined}
+        onBranch={!isDraftConversation && messages.length > 0 ? handleHeaderBranch : undefined}
         onFind={() => setFindOpen(true)}
-        onDelete={onDeleteConversation && conversationId
+        onDelete={!isDraftConversation && onDeleteConversation && conversationId
           ? () => onDeleteConversation(conversationId)
           : undefined}
       />
@@ -1544,7 +1624,18 @@ export function ChatSurface({
       <div className="chat-thread" ref={threadRef} onScroll={handleThreadScroll}>
         {messages.length === 0 ? (
           <div className="chat-empty-state">
-            <p>{isZh ? '输入消息开始对话' : 'Type a message to start'}</p>
+            <h2>{isZh ? '有什么可以帮你的？' : 'How can I help you?'}</h2>
+            {!hasProvider ? (
+              <p>
+                {isZh ? '请先' : 'Please '}
+                <button type="button" className="chat-link-btn" onClick={onOpenSettings}>
+                  {isZh ? '配置模型' : 'configure a model'}
+                </button>
+                {isZh ? '后开始对话' : ' to start chatting'}
+              </p>
+            ) : (
+              <p>{isZh ? '输入消息开始对话' : 'Type a message to start'}</p>
+            )}
           </div>
         ) : (
           <div
@@ -1744,6 +1835,7 @@ export function ChatSurface({
           attachmentError={attachmentError}
           messageQueue={messageQueue}
           onRemoveAttachment={removeAttachment}
+          onReorderAttachment={reorderAttachment}
           onPreviewImage={setImagePreview}
           onPaste={handlePaste}
           onAddFiles={addFiles}

@@ -88,6 +88,24 @@ export const EMPTY_CONVERSATION_STATE: ConversationRuntimeState = Object.freeze(
   streamId: null,
 });
 
+/**
+ * 未落库草稿会话的运行时桶 key。
+ * 点「新建任务」后、首条消息发送前：activeConversationId 为 null，
+ * 但 Composer 仍需要可写 draft / ready 态；统一映射到此 key，避免污染真实会话桶。
+ * 仅存内存，不落盘、不进左侧列表。
+ */
+export const DRAFT_CONVERSATION_ID = '__draft__';
+
+/** null（UI 草稿态）→ DRAFT 桶；真实 id 原样返回。 */
+export function resolveConversationBucketId(
+  conversationId: string | null | undefined,
+): string {
+  if (conversationId === null || conversationId === undefined || conversationId === '') {
+    return DRAFT_CONVERSATION_ID;
+  }
+  return conversationId;
+}
+
 const CONVERSATION_STATE_KEYS = Object.keys(
   EMPTY_CONVERSATION_STATE,
 ) as (keyof ConversationRuntimeState)[];
@@ -140,24 +158,24 @@ export class ConversationStore {
 
   /** 读取某会话的当前快照；未知会话返回稳定的 EMPTY 单例。 */
   getSnapshot(conversationId: string | null): ConversationRuntimeState {
-    if (!conversationId) return EMPTY_CONVERSATION_STATE;
-    return this.buckets.get(conversationId) ?? EMPTY_CONVERSATION_STATE;
+    const bucketId = resolveConversationBucketId(conversationId);
+    return this.buckets.get(bucketId) ?? EMPTY_CONVERSATION_STATE;
   }
 
   /** 订阅某会话的快照变化；返回取消订阅函数。 */
   subscribe(conversationId: string | null, listener: Listener): () => void {
-    if (!conversationId) return () => {};
-    let set = this.listeners.get(conversationId);
+    const bucketId = resolveConversationBucketId(conversationId);
+    let set = this.listeners.get(bucketId);
     if (!set) {
       set = new Set();
-      this.listeners.set(conversationId, set);
+      this.listeners.set(bucketId, set);
     }
     set.add(listener);
     return () => {
-      const current = this.listeners.get(conversationId);
+      const current = this.listeners.get(bucketId);
       if (!current) return;
       current.delete(listener);
-      if (current.size === 0) this.listeners.delete(conversationId);
+      if (current.size === 0) this.listeners.delete(bucketId);
     };
   }
 
@@ -185,8 +203,8 @@ export class ConversationStore {
    * 仅当产生实际变化时写回新引用并通知该桶订阅者。
    */
   setState(conversationId: string | null, patch: Patch): void {
-    if (!conversationId) return;
-    const prev = this.buckets.get(conversationId) ?? EMPTY_CONVERSATION_STATE;
+    const bucketId = resolveConversationBucketId(conversationId);
+    const prev = this.buckets.get(bucketId) ?? EMPTY_CONVERSATION_STATE;
     const delta = typeof patch === 'function' ? patch(prev) : patch;
     if (!delta) return;
     let changed = false;
@@ -198,8 +216,8 @@ export class ConversationStore {
     }
     if (!changed) return;
     const next: ConversationRuntimeState = { ...prev, ...delta };
-    this.buckets.set(conversationId, next);
-    this.notify(conversationId);
+    this.buckets.set(bucketId, next);
+    this.notify(bucketId);
   }
 
   /** 设置当前会话输入草稿。 */
@@ -221,8 +239,7 @@ export class ConversationStore {
 
   /** 当前会话待发送队列出队一条消息；队列为空时返回 null。 */
   shiftQueuedMessage(conversationId: string | null): QueuedMessage | null {
-    if (!conversationId) return null;
-    const prev = this.buckets.get(conversationId) ?? EMPTY_CONVERSATION_STATE;
+    const prev = this.getSnapshot(conversationId);
     const [head, ...rest] = prev.messageQueue;
     if (!head) return null;
     this.setState(conversationId, { messageQueue: rest });
@@ -231,7 +248,6 @@ export class ConversationStore {
 
   /** 进入加载阶段：归零内容并标记 loading（切会话时调用，消灭脏中间态）。 */
   beginLoad(conversationId: string | null): void {
-    if (!conversationId) return;
     this.setState(conversationId, {
       loadStatus: 'loading',
       messages: Object.freeze([]) as readonly ChatMsg[],
@@ -251,14 +267,13 @@ export class ConversationStore {
     conversationId: string | null,
     patch: Partial<ConversationRuntimeState>,
   ): void {
-    if (!conversationId) return;
     this.setState(conversationId, { ...patch, loadStatus: 'ready' });
   }
 
   /** 丢弃某会话桶（会话删除时清理内存）。 */
   reset(conversationId: string | null): void {
-    if (!conversationId) return;
-    if (this.buckets.delete(conversationId)) this.notify(conversationId);
+    const bucketId = resolveConversationBucketId(conversationId);
+    if (this.buckets.delete(bucketId)) this.notify(bucketId);
   }
 
   // —— streamId → conversationId 路由 ——

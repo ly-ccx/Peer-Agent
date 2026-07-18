@@ -5,7 +5,9 @@ import {
   areConversationStatesEqualForSurface,
   ConversationStore,
   createConversationSurfaceSnapshotReader,
+  DRAFT_CONVERSATION_ID,
   EMPTY_CONVERSATION_STATE,
+  resolveConversationBucketId,
 } from './conversationStore.ts';
 import type { ChatMsg, QueuedMessage } from './types.ts';
 
@@ -21,9 +23,34 @@ describe('conversationStore', () => {
   it('returns the stable EMPTY singleton for unknown conversations', () => {
     const store = new ConversationStore();
     assert.equal(store.getSnapshot('nope'), EMPTY_CONVERSATION_STATE);
+    // null 映射到草稿桶；未写入前同样返回 EMPTY 单例。
     assert.equal(store.getSnapshot(null), EMPTY_CONVERSATION_STATE);
     // 同一引用：useSyncExternalStore 据此判定「未变化」，不会进入死循环。
     assert.equal(store.getSnapshot('a'), store.getSnapshot('b'));
+  });
+
+  it('maps null conversationId to a writable draft bucket', () => {
+    const store = new ConversationStore();
+    assert.equal(resolveConversationBucketId(null), DRAFT_CONVERSATION_ID);
+    assert.equal(resolveConversationBucketId(''), DRAFT_CONVERSATION_ID);
+    assert.equal(resolveConversationBucketId('real-id'), 'real-id');
+
+    store.setDraft(null, 'hello draft');
+    store.commitLoad(null, { messages: [] });
+
+    assert.equal(store.getSnapshot(null).draft, 'hello draft');
+    assert.equal(store.getSnapshot(null).loadStatus, 'ready');
+    // 草稿桶与真实会话桶隔离。
+    assert.equal(store.getSnapshot('real-id').draft, '');
+    assert.equal(store.getSnapshot(DRAFT_CONVERSATION_ID).draft, 'hello draft');
+
+    let notified = 0;
+    store.subscribe(null, () => {
+      notified += 1;
+    });
+    store.setDraft(null, 'updated');
+    assert.equal(notified, 1);
+    assert.equal(store.getSnapshot(null).draft, 'updated');
   });
 
   it('isolates state between conversation buckets', () => {

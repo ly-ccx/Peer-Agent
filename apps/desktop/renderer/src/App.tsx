@@ -317,12 +317,45 @@ function MainApp() {
       ws = ensured.path;
       setActiveWorkspace(ws);
     }
-    const conv = await clientApi.conversationsCreate({ workspacePath: ws }) as ConversationMeta;
+    // 草稿态：不落库、不进左侧列表；首条消息发送时再 create。
+    // 已在草稿态时再次点击：保留输入框内容，仅确保停留在草稿。
+    setConversationView('active');
+    setActiveConversationId(null);
+    setActivePage('chat');
+  }, [activeWorkspace]);
+
+  // 草稿态发首条消息时由 ChatSurface 调用：此时才创建会话并进入左侧列表。
+  const ensureConversation = useCallback(async (seed?: {
+    title?: string;
+    mode?: string;
+    effort?: string;
+    modelProviderId?: string | null;
+  }): Promise<{ id: string }> => {
+    let ws = activeWorkspace;
+    if (!ws) {
+      const ensured = await clientApi.workspaceEnsureDefault();
+      ws = ensured.path;
+      setActiveWorkspace(ws);
+    }
+    const conv = await clientApi.conversationsCreate({
+      workspacePath: ws,
+      title: seed?.title,
+      mode: seed?.mode,
+    }) as ConversationMeta;
+    // 在切到新会话前写回草稿态选中的模型/思考强度，避免 load 读到默认值。
+    if (seed?.effort !== undefined || seed?.modelProviderId !== undefined) {
+      await clientApi.conversationsUpdateModelEffort({
+        id: conv.id,
+        effort: seed?.effort,
+        modelProviderId: seed?.modelProviderId,
+      });
+    }
     setConversationView('active');
     await refreshConversations(ws, 'active');
     setActiveConversationId(conv.id);
     setActivePage('chat');
-  }, [refreshConversations, activeWorkspace]);
+    return { id: conv.id };
+  }, [activeWorkspace, refreshConversations]);
 
   const handleSelectConversation = useCallback((id: string) => {
     setActiveConversationId(id);
@@ -445,6 +478,7 @@ function MainApp() {
                     });
                   }}
                   onBranch={(id) => { setConversationView('active'); setActiveConversationId(id); void refreshConversations(activeWorkspace, 'active'); }}
+                  onEnsureConversation={ensureConversation}
                   onRenameConversation={handleRenameConversation}
                   onArchiveConversation={handleArchiveConversation}
                   onDeleteConversation={handleDeleteConversation}
