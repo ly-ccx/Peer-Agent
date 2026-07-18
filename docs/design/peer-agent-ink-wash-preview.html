@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fluid Ink Wash Preview</title>
+  <style>
+    html, body { margin:0; height:100%; background:#f4f1ea; overflow:hidden; font-family: system-ui, sans-serif; }
+    html[data-theme="dark"], html[data-theme="dark"] body { background:#0f131a; }
+    canvas { position:fixed; inset:0; width:100%; height:100%; display:block; }
+    .word { position:fixed; inset:0; display:grid; place-items:center; pointer-events:none;
+      font-size: clamp(36px, 8vw, 84px); font-weight:700; letter-spacing:0.02em; color:#1a1d21; z-index:2; }
+    html[data-theme="dark"] .word { color:#d7dde8; }
+    .bar { position:fixed; left:16px; top:16px; z-index:3; display:flex; gap:8px; }
+    button { border:1px solid #9994; background:#fff8; backdrop-filter:blur(6px); padding:8px 12px; border-radius:10px; cursor:pointer; }
+    html[data-theme="dark"] button { background:#0008; color:#eee; border-color:#fff3; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <button id="theme">Toggle theme</button>
+    <button id="drop">Restart</button>
+  </div>
+  <div class="word">Peer Agent</div>
+  <canvas id="c"></canvas>
+  <script>
+function readThemeMode() {
+  const root = document.documentElement;
+  const theme = root.dataset.theme ?? root.getAttribute('data-theme');
+  return theme === 'dark' ? 'dark' : 'light';
+}
+
+function inkPalette(mode) {
+  if (mode === 'dark') {
+    return {
+      cores: [[210, 220, 235], [180, 196, 214], [150, 168, 190]],
+      residual: 'rgba(10, 14, 22, 0.03)',
+      dissolve: 0.008,
+    };
+  }
+  return {
+    cores: [[18, 20, 26], [34, 40, 52], [48, 58, 78]],
+    residual: 'rgba(255, 255, 255, 0.028)',
+    dissolve: 0.006,
+  };
+}
+
+function pickCore(cores) {
+  return cores[Math.floor(Math.random() * cores.length)] ?? cores[0];
+}
+
+function hash2(x, y) {
+  const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+  return s - Math.floor(s) * 2 - 1;
+}
+
+function valueNoise(x, y) {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const fx = x - x0;
+  const fy = y - y0;
+  const u = fx * fx * (3 - 2 * fx);
+  const v = fy * fy * (3 - 2 * fy);
+  const n00 = hash2(x0, y0);
+  const n10 = hash2(x0 + 1, y0);
+  const n01 = hash2(x0, y0 + 1);
+  const n11 = hash2(x0 + 1, y0 + 1);
+  const nx0 = n00 * (1 - u) + n10 * u;
+  const nx1 = n01 * (1 - u) + n11 * u;
+  return nx0 * (1 - v) + nx1 * v;
+}
+
+function curlNoise(x, y, t, seed) {
+  const scale = 0.0042;
+  const e = 1.35;
+  const px = x * scale + seed * 0.17;
+  const py = y * scale - seed * 0.11;
+  const pt = t * 0.11 + seed * 0.31;
+  const n1 = valueNoise(px, py + e + pt);
+  const n2 = valueNoise(px, py - e + pt);
+  const n3 = valueNoise(px + e + pt, py);
+  const n4 = valueNoise(px - e + pt, py);
+  return { x: (n1 - n2) / (2 * e), y: (n4 - n3) / (2 * e) };
+}
+
+function randomDropOrigin(width, height) {
+  const cx = width * 0.5;
+  const cy = height * 0.48;
+  const base = Math.min(width, height);
+  const wide = Math.random() < 0.3;
+  const radius = wide ? base * (0.08 + Math.random() * 0.2) : base * (0.02 + Math.random() * 0.09);
+  const angle = Math.random() * Math.PI * 2;
+  return {
+    x: cx + Math.cos(angle) * radius * (0.9 + Math.random() * 0.35),
+    y: cy + Math.sin(angle) * radius * 0.55,
+  };
+}
+
+function burstDrop(originX, originY, cores, mode) {
+  const color = pickCore(cores);
+  const count = 10 + Math.floor(Math.random() * 8);
+  const filaments = [];
+  const peakBase = mode === 'dark' ? 0.55 : 0.72;
+  const baseAngle = Math.random() * Math.PI * 2;
+  const vortexSpin = (Math.random() < 0.5 ? -1 : 1) * (1.2 + Math.random() * 1.8);
+
+  for (let i = 0; i < count; i += 1) {
+    const lobe = baseAngle + (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 1.15 + Math.sin(i * 1.7) * 0.35;
+    const radial = 18 + Math.random() * 42;
+    const tangent = lobe + Math.PI * 0.5;
+    const tanW = 0.55 + Math.random() * 0.75;
+    const radW = 0.25 + Math.random() * 0.55;
+    const thickness = 8 + Math.random() * 14;
+    const fx = originX + Math.cos(lobe) * (2 + Math.random() * 8);
+    const fy = originY + Math.sin(lobe) * (1.5 + Math.random() * 6);
+    const fvx = Math.cos(lobe) * radial * radW + Math.cos(tangent) * radial * tanW * 0.55;
+    const fvy = Math.sin(lobe) * radial * radW + Math.sin(tangent) * radial * tanW * 0.55;
+    filaments.push({
+      x: fx, y: fy, vx: fvx, vy: fvy,
+      seed: Math.random() * 1000,
+      thickness,
+      age: 0,
+      life: 2.8 + Math.random() * 2.4,
+      peakAlpha: peakBase * (0.6 + Math.random() * 0.5),
+      color,
+      trail: [
+        { x: fx - fvx * 0.02, y: fy - fvy * 0.02, w: thickness * 0.7, a: 0.75 },
+        { x: fx, y: fy, w: thickness, a: 1 },
+      ],
+      vortexX: originX,
+      vortexY: originY,
+      vortexSpin: vortexSpin * (0.7 + Math.random() * 0.6),
+      vortexDecay: 0.55 + Math.random() * 0.35,
+    });
+  }
+  return {
+    drop: {
+      x: originX, y: originY, age: 0,
+      life: 0.38 + Math.random() * 0.16,
+      radius: 8 + Math.random() * 10,
+      peakAlpha: mode === 'dark' ? 0.55 : 0.75,
+      color,
+    },
+    filaments,
+  };
+}
+
+function stampRibbon(ctx, x, y, dx, dy, halfW, alpha, color) {
+  if (alpha <= 0.004 || halfW <= 0.2) return;
+  const len = Math.hypot(dx, dy);
+  if (len < 0.001) return;
+  const [r, g, b] = color;
+  const stretch = Math.min(5.5, 1.6 + len * 0.09);
+  const angle = Math.atan2(dy, dx);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.scale(stretch, 1);
+  const rad = Math.max(halfW, 1.2);
+  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, rad);
+  grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha})`);
+  grad.addColorStop(0.28, `rgba(${r}, ${g}, ${b}, ${alpha * 0.55})`);
+  grad.addColorStop(0.62, `rgba(${r}, ${g}, ${b}, ${alpha * 0.16})`);
+  grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, rad, rad * (0.42 + (hash2(x * 0.08, y * 0.08) * 0.5 + 0.5) * 0.22), 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawFilament(ctx, fil) {
+  const t = fil.age / fil.life;
+  if (t >= 1) return;
+  const envelope = t < 0.08 ? t / 0.08 : Math.pow(1 - (t - 0.08) / 0.92, 1.2);
+  const baseA = fil.peakAlpha * envelope;
+  if (baseA <= 0.004) return;
+  const trail = fil.trail;
+  if (trail.length < 2) {
+    stampRibbon(ctx, fil.x, fil.y, fil.vx, fil.vy, fil.thickness * 0.55, baseA, fil.color);
+    return;
+  }
+  for (let i = 1; i < trail.length; i += 1) {
+    const a = trail[i - 1];
+    const b = trail[i];
+    stampRibbon(ctx, b.x, b.y, b.x - a.x, b.y - a.y, (a.w + b.w) * 0.5, (a.a + b.a) * 0.5 * baseA, fil.color);
+  }
+  const head = trail[trail.length - 1];
+  stampRibbon(ctx, head.x, head.y, fil.vx, fil.vy, head.w * 0.85, baseA * 0.9, fil.color);
+}
+
+function drawDropImpact(ctx, drop) {
+  const t = drop.age / drop.life;
+  if (t >= 1) return;
+  const alpha = drop.peakAlpha * (1 - t) * (1 - t);
+  const radius = drop.radius * (0.45 + t * 1.8);
+  const [r, g, b] = drop.color;
+  ctx.save();
+  ctx.translate(drop.x, drop.y);
+  ctx.rotate(t * 0.8);
+  ctx.scale(1 + t * 0.35, 0.72 + t * 0.2);
+  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+  grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha})`);
+  grad.addColorStop(0.45, `rgba(${r}, ${g}, ${b}, ${alpha * 0.28})`);
+  grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, radius, radius * 0.78, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function startInkWash(canvas, options) {
+  const ctx = canvas.getContext('2d', { alpha: true });
+  if (!ctx) return () => undefined;
+
+  let mode = readThemeMode();
+  let palette = inkPalette(mode);
+  let filaments = [];
+  let drops = [];
+  let raf = 0;
+  let lastTs = 0;
+  let introElapsed = 0;
+  let holdStarted = false;
+  let running = true;
+  let nextDropIn = 0.1;
+  let fieldTime = 0;
+
+  const applyTheme = () => {
+    mode = readThemeMode();
+    palette = inkPalette(mode);
+  };
+
+  const resize = () => {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cssW = Math.max(1, Math.floor(rect.width));
+    const cssH = Math.max(1, Math.floor(rect.height));
+    const w = Math.max(1, Math.floor(cssW * dpr));
+    const h = Math.max(1, Math.floor(cssH * dpr));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { w: cssW, h: cssH, dpr };
+  };
+
+  const spawnRandomDrop = (w, h) => {
+    const origin = randomDropOrigin(w, h);
+    const burst = burstDrop(origin.x, origin.y, palette.cores, mode);
+    drops.push(burst.drop);
+    filaments.push(...burst.filaments);
+    if (filaments.length > 120) filaments = filaments.slice(filaments.length - 120);
+  };
+
+  const tick = (ts) => {
+    if (!running) return;
+    if (!lastTs) lastTs = ts;
+    const dt = Math.min(0.033, (ts - lastTs) / 1000);
+    lastTs = ts;
+    const { w, h } = resize();
+
+    if (!holdStarted) {
+      introElapsed += dt * 1000;
+      if (introElapsed < options.introDelayMs) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      holdStarted = true;
+      applyTheme();
+      spawnRandomDrop(w, h);
+      nextDropIn = 1.5 + Math.random() * 1.4;
+    }
+
+    fieldTime += dt;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = palette.residual;
+    ctx.fillRect(0, 0, w, h);
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = `rgba(0, 0, 0, ${palette.dissolve})`;
+    ctx.fillRect(0, 0, w, h);
+    ctx.globalCompositeOperation = 'source-over';
+
+    nextDropIn -= dt;
+    if (nextDropIn <= 0) {
+      spawnRandomDrop(w, h);
+      nextDropIn = 1.45 + Math.random() * 1.7;
+      if (Math.random() < 0.18) nextDropIn = 0.35 + Math.random() * 0.35;
+    }
+
+    const nextDrops = [];
+    for (const drop of drops) {
+      drop.age += dt;
+      if (drop.age < drop.life) {
+        drawDropImpact(ctx, drop);
+        nextDrops.push(drop);
+      }
+    }
+    drops = nextDrops;
+
+    const nextFilaments = [];
+    for (const fil of filaments) {
+      fil.age += dt;
+      if (fil.age >= fil.life) continue;
+      const t = fil.age / fil.life;
+      const curl = curlNoise(fil.x, fil.y, fieldTime, fil.seed);
+      const dx = fil.x - fil.vortexX;
+      const dy = fil.y - fil.vortexY;
+      const dist = Math.hypot(dx, dy) + 0.001;
+      const vortexStrength = fil.vortexSpin * Math.exp(-dist * 0.01) * Math.exp(-fil.age * fil.vortexDecay);
+      const vtx = (-dy / dist) * vortexStrength * 28;
+      const vty = (dx / dist) * vortexStrength * 28;
+      const fieldAmp = 70 + (1 - t) * 50;
+      fil.vx = fil.vx * 0.94 + curl.x * fieldAmp * dt * 60 + vtx * dt;
+      fil.vy = fil.vy * 0.94 + curl.y * fieldAmp * dt * 60 + vty * dt;
+      fil.vx *= 0.985;
+      fil.vy *= 0.985;
+      fil.x += fil.vx * dt;
+      fil.y += fil.vy * dt;
+      const thickEnv = t < 0.2 ? 0.7 + t * 2.2 : Math.max(0.25, 1.15 - (t - 0.2) * 1.05);
+      const speed = Math.hypot(fil.vx, fil.vy);
+      const width = fil.thickness * thickEnv + Math.min(6, speed * 0.04);
+      const last = fil.trail[fil.trail.length - 1];
+      const sampleEvery = t < 0.35 ? 1.8 : 3.2;
+      if (!last || Math.hypot(fil.x - last.x, fil.y - last.y) >= sampleEvery) {
+        fil.trail.push({ x: fil.x, y: fil.y, w: width, a: 0.55 + (1 - t) * 0.45 });
+        if (fil.trail.length > 28) fil.trail.shift();
+      }
+      drawFilament(ctx, fil);
+      nextFilaments.push(fil);
+    }
+    filaments = nextFilaments;
+    raf = requestAnimationFrame(tick);
+  };
+
+  applyTheme();
+  resize();
+  const themeObserver = new MutationObserver(applyTheme);
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  window.addEventListener('resize', resize);
+  raf = requestAnimationFrame(tick);
+  return () => {
+    running = false;
+    cancelAnimationFrame(raf);
+    window.removeEventListener('resize', resize);
+    themeObserver.disconnect();
+  };
+}
+</script>
+  <script>
+    const canvas = document.getElementById('c');
+    let stop = startInkWash(canvas, { introDelayMs: 0, reducedMotion: false });
+    document.getElementById('theme').onclick = () => {
+      const root = document.documentElement;
+      root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+    };
+    document.getElementById('drop').onclick = () => {
+      stop();
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const { width, height } = canvas;
+        ctx.setTransform(1,0,0,1,0,0);
+        ctx.clearRect(0, 0, width, height);
+      }
+      stop = startInkWash(canvas, { introDelayMs: 0, reducedMotion: false });
+    };
+  </script>
+</body>
+</html>
