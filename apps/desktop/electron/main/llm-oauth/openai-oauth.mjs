@@ -11,6 +11,8 @@
 import http from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 
+import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
+
 // 在系统浏览器打开授权页。electron 的 shell 仅在 main 运行时可用,
 // 故惰性加载,避免该模块在 node 测试环境(无 electron shell 导出)下崩溃。
 async function openInBrowser(url) {
@@ -61,9 +63,10 @@ function toTokenSet(json) {
   };
 }
 
-// code 换 token。
-async function exchangeCode({ code, verifier }) {
-  const res = await fetch(TOKEN_URL, {
+// code 换 token。默认走代理感知 fetch(与 Grok OAuth / provider transport 一致),
+// 避免 Node 全局 fetch 在有系统代理时直连失败。
+async function exchangeCode({ code, verifier, fetchImpl = fetchWithConnectionRecovery }) {
+  const res = await fetchImpl(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -82,9 +85,9 @@ async function exchangeCode({ code, verifier }) {
 }
 
 // 用 refresh_token 换新 access_token。
-export async function refreshAccessToken(tokens) {
+export async function refreshAccessToken(tokens, { fetchImpl = fetchWithConnectionRecovery } = {}) {
   if (!tokens?.refresh) throw new Error('No refresh token available');
-  const res = await fetch(TOKEN_URL, {
+  const res = await fetchImpl(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -109,12 +112,15 @@ export async function refreshAccessToken(tokens) {
 }
 
 // 临近过期(默认 60s 缓冲)即刷新。返回 { tokens, refreshed }。
-export async function ensureFreshTokens(tokens, { skewMs = 60_000 } = {}) {
+export async function ensureFreshTokens(
+  tokens,
+  { skewMs = 60_000, fetchImpl = fetchWithConnectionRecovery } = {},
+) {
   if (!tokens?.access) throw new Error('Not logged in');
   if (typeof tokens.expires === 'number' && tokens.expires - skewMs > Date.now()) {
     return { tokens, refreshed: false };
   }
-  const next = await refreshAccessToken(tokens);
+  const next = await refreshAccessToken(tokens, { fetchImpl });
   return { tokens: next, refreshed: true };
 }
 

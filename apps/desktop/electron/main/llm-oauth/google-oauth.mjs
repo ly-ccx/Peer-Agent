@@ -6,6 +6,8 @@
 import http from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 
+import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
+
 async function openInBrowser(url) {
   const { shell } = await import('electron');
   await shell.openExternal(url);
@@ -54,8 +56,8 @@ function toTokenSet(json) {
   };
 }
 
-async function exchangeCode({ code, verifier }) {
-  const res = await fetch(TOKEN_URL, {
+async function exchangeCode({ code, verifier, fetchImpl = fetchWithConnectionRecovery }) {
+  const res = await fetchImpl(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -74,9 +76,9 @@ async function exchangeCode({ code, verifier }) {
   return toTokenSet(await res.json());
 }
 
-export async function refreshGoogleAccessToken(tokens) {
+export async function refreshGoogleAccessToken(tokens, { fetchImpl = fetchWithConnectionRecovery } = {}) {
   if (!tokens?.refresh) throw new Error('No Google refresh token available');
-  const res = await fetch(TOKEN_URL, {
+  const res = await fetchImpl(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -100,12 +102,15 @@ export async function refreshGoogleAccessToken(tokens) {
   };
 }
 
-export async function ensureFreshGoogleTokens(tokens, { skewMs = 60_000 } = {}) {
+export async function ensureFreshGoogleTokens(
+  tokens,
+  { skewMs = 60_000, fetchImpl = fetchWithConnectionRecovery } = {},
+) {
   if (!tokens?.access) throw new Error('Not logged in');
   if (typeof tokens.expires === 'number' && tokens.expires - skewMs > Date.now()) {
     return { tokens, refreshed: false };
   }
-  const next = await refreshGoogleAccessToken(tokens);
+  const next = await refreshGoogleAccessToken(tokens, { fetchImpl });
   return { tokens: next, refreshed: true };
 }
 
