@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   workspaceList: () => ipcRenderer.invoke('workspace:list'),
   quickChatHide: () => ipcRenderer.invoke('quick-chat:hide'),
   quickChatSetTaskCardVisible: (visible) => ipcRenderer.invoke('quick-chat:set-task-card-visible', { visible }),
+  quickChatSetContentHeight: (height) => ipcRenderer.invoke('quick-chat:set-content-height', { height }),
   quickChatShowPopover: (payload) => ipcRenderer.invoke('quick-chat-popover:show', payload),
   quickChatHidePopover: () => ipcRenderer.invoke('quick-chat-popover:hide'),
   quickChatSelectPopoverValue: (value) => ipcRenderer.invoke('quick-chat-popover:select', value),

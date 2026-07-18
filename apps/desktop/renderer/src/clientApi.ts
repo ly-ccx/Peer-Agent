@@ -59,6 +59,7 @@ const unavailableApi: ClientApi = {
   workspaceList: unavailableMethod('workspaceList'),
   quickChatHide: unavailableMethod('quickChatHide'),
   quickChatSetTaskCardVisible: unavailableMethod('quickChatSetTaskCardVisible'),
+  quickChatSetContentHeight: unavailableMethod('quickChatSetContentHeight'),
   quickChatShowPopover: unavailableMethod('quickChatShowPopover'),
   quickChatHidePopover: unavailableMethod('quickChatHidePopover'),
   quickChatSelectPopoverValue: unavailableMethod('quickChatSelectPopoverValue'),
