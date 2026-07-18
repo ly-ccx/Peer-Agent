@@ -1090,6 +1090,17 @@
   background: var(--paper-sheet);
   color: var(--graphite-soft);
 }
+.attachment-strip.reorderable .attachment-chip {
+  cursor: grab;
+}
+.attachment-chip.is-dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+.attachment-chip.is-drop-target {
+  border-color: var(--za-line-strong, var(--chrome-border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--za-accent, #7c6af7) 45%, transparent);
+}
 .attachment-strip.readonly .attachment-chip {
   background: var(--chrome-sunken);
 }

@@ -37,6 +37,7 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   attachmentError,
   messageQueue,
   onRemoveAttachment,
+  onReorderAttachment,
   onPreviewImage,
   onPaste,
   onAddFiles,
@@ -51,6 +52,7 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   readonly attachmentError: string | null;
   readonly messageQueue: readonly QueuedMessage[];
   readonly onRemoveAttachment: (id: string) => void;
+  readonly onReorderAttachment?: (fromIndex: number, toIndex: number) => void;
   readonly onPreviewImage: (attachment: ChatAttachment) => void;
   readonly onPaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   readonly onAddFiles: (files: FileList | File[] | null | undefined) => void | Promise<void>;
@@ -153,6 +155,7 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
         <AttachmentStrip
           attachments={attachments}
           onRemove={onRemoveAttachment}
+          onReorder={onReorderAttachment}
           onPreviewImage={onPreviewImage}
           isZh={isZh}
         />
