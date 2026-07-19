@@ -15,8 +15,6 @@ import path from 'node:path';
 import { pathOf } from './data-store.mjs';
 import { estimateUsageCostUsd } from './usage-stats.mjs';
 
-const DEFAULT_REL = path.join('usage', 'requests.jsonl');
-
 function finiteNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -27,7 +25,7 @@ function optionalText(value) {
 }
 
 export function createUsageRequestLog({
-  logFile = pathOf(DEFAULT_REL),
+  logFile = pathOf('usageRequests'),
   estimateCost = estimateUsageCostUsd,
 } = {}) {
   function ensureParent() {

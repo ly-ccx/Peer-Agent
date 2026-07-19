@@ -5,6 +5,20 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { createUsageRequestLog } from './usage-request-log.mjs';
 
+test('default log file resolves under the registered data home', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'usage-request-log-default-'));
+  const previousDataHome = process.env.PEER_AGENT_HOME;
+
+  try {
+    process.env.PEER_AGENT_HOME = dir;
+    const log = createUsageRequestLog();
+    assert.equal(log.logFile, path.join(dir, 'usage', 'requests.jsonl'));
+  } finally {
+    if (previousDataHome === undefined) delete process.env.PEER_AGENT_HOME;
+    else process.env.PEER_AGENT_HOME = previousDataHome;
+  }
+});
+
 test('appendUsageRequestLog writes request snapshot with estimated cost', () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'usage-request-log-'));
   const logFile = path.join(dir, 'requests.jsonl');

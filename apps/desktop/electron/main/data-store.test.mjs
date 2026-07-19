@@ -47,6 +47,7 @@ test('pathOf resolves declared entries under the home', () => {
   assert.equal(pathOf('skills'), path.join(dataHome, 'skills'));
   assert.equal(pathOf('developerSettings'), path.join(dataHome, 'developer-settings.json'));
   assert.equal(pathOf('auth'), path.join(dataHome, 'auth'));
+  assert.equal(pathOf('usageRequests'), path.join(dataHome, 'usage', 'requests.jsonl'));
 });
 
 test('pathOf throws on unknown entry', () => {

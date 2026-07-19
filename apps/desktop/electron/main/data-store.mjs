@@ -45,6 +45,7 @@ export const DATA_STORE_ENTRIES = {
   settings:          { rel: 'settings.json',           kind: 'file', scope: 'portable' },
   llmProviders:      { rel: 'llm-providers.json',      kind: 'file', scope: 'portable' },
   conversations:     { rel: 'conversations',            kind: 'dir',  scope: 'portable' },
+  usageRequests:     { rel: 'usage/requests.jsonl',    kind: 'file', scope: 'portable' },
   goalPlans:         { rel: 'goal-plans',               kind: 'dir',  scope: 'portable' },
   pendingTask:       { rel: 'pending-task.json',       kind: 'file', scope: 'device'   },
   shellArtifacts:    { rel: 'shell-artifacts',         kind: 'dir',  scope: 'cache'    },
