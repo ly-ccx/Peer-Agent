@@ -744,7 +744,7 @@
 }
 .conversation-row.is-archived:hover:not(.is-confirming-delete) .sidebar-conv-actions,
 .conversation-row.is-archived:focus-within:not(.is-confirming-delete) .sidebar-conv-actions {
-  width: 40px;
+  width: 44px;
 }
 .conversation-row:hover:not(.is-editing):not(.is-confirming-delete) .sidebar-conv-time,
 .conversation-row:focus-within:not(.is-editing):not(.is-confirming-delete) .sidebar-conv-time {

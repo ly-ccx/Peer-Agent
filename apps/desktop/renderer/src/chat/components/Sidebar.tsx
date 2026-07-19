@@ -113,10 +113,10 @@ export function Sidebar({
   newTaskShortcutLabel,
   onOpenSearch,
   onSelectConversation,
-  onDeleteConversation,
   onRenameConversation,
   onArchiveConversation,
   onRestoreConversation,
+  onDeleteConversation,
   onPinConversation,
   onUnpinConversation,
   onReorderPinnedConversations,
@@ -146,10 +146,10 @@ export function Sidebar({
   readonly newTaskShortcutLabel?: string;
   readonly onOpenSearch?: () => void;
   readonly onSelectConversation: (id: string) => void;
-  readonly onDeleteConversation: (id: string) => void;
   readonly onRenameConversation: (id: string, title: string) => void | Promise<void>;
   readonly onArchiveConversation: (id: string) => void | Promise<void>;
   readonly onRestoreConversation: (id: string) => void | Promise<void>;
+  readonly onDeleteConversation: (id: string) => void | Promise<void>;
   readonly onPinConversation: (id: string) => void | Promise<void>;
   readonly onUnpinConversation: (id: string) => void | Promise<void>;
   readonly onReorderPinnedConversations: (ids: readonly string[]) => void | Promise<void>;
@@ -161,7 +161,7 @@ export function Sidebar({
   const isZh = i18n.locale === 'zh-CN';
   const isArchivedView = conversationView === 'archived';
   const awaitingGoalPlanCounts = useAwaitingGoalPlanCounts(true);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; conversation: ConversationMeta } | null>(null);
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -264,7 +264,6 @@ export function Sidebar({
   const beginRenameConversation = useCallback((conv: ConversationMeta) => {
     if (isArchivedView) return;
     isFinishingRenameRef.current = false;
-    setConfirmDeleteId(null);
     setContextMenu(null);
     setEditingConversationId(conv.id);
     setEditingTitle(conv.title || (isZh ? '新对话' : 'New Chat'));
@@ -356,7 +355,6 @@ export function Sidebar({
     const isPinned = Boolean(conv.pinnedAt);
     const canTogglePin = !isArchivedView;
     const isEditing = editingConversationId === conv.id;
-    const isConfirmingDelete = confirmDeleteId === conv.id;
     const rowClasses = [
       'conversation-row',
       activeConversationId === conv.id ? 'active' : '',
@@ -364,7 +362,6 @@ export function Sidebar({
       isCompactionVisible ? 'is-compacting' : '',
       isPinned ? 'is-pinned' : '',
       isEditing ? 'is-editing' : '',
-      isConfirmingDelete ? 'is-confirming-delete' : '',
       isArchivedView ? 'is-archived' : '',
       options.pinnedGroup ? 'is-in-pinned-group' : '',
       draggingPinnedId === conv.id ? 'is-dragging' : '',
@@ -469,18 +466,24 @@ export function Sidebar({
             {conv.title || (isZh ? '新对话' : 'New Chat')}
           </span>
         )}
-        {confirmDeleteId === conv.id ? (
-          <span className="sidebar-conv-confirm" onClick={(e) => e.stopPropagation()}>
-            <button type="button" className="confirm-yes" onClick={() => { setConfirmDeleteId(null); onDeleteConversation(conv.id); }}>
-              {isZh ? '删除' : 'Del'}
-            </button>
-            <button type="button" className="confirm-no" onClick={() => setConfirmDeleteId(null)}>
-              {isZh ? '取消' : 'No'}
-            </button>
-          </span>
-        ) : (
-          <span className="sidebar-conv-actions" onClick={(e) => e.stopPropagation()}>
-            {isArchivedView ? (
+        <span className="sidebar-conv-actions" onClick={(e) => e.stopPropagation()}>
+          {isArchivedView ? (
+            <>
+              <button
+                type="button"
+                className="sidebar-conv-delete"
+                title={isZh ? '永久删除' : 'Delete permanently'}
+                aria-label={isZh ? '永久删除' : 'Delete permanently'}
+                onClick={() => { void onDeleteConversation(conv.id); }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4h8v2" />
+                  <path d="M19 6l-1 14H6L5 6" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                </svg>
+              </button>
               <button
                 type="button"
                 className="sidebar-conv-restore"
@@ -493,55 +496,45 @@ export function Sidebar({
                   <path d="M3 4v6h6" />
                 </svg>
               </button>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="sidebar-conv-edit"
-                  title={isZh ? '编辑标题' : 'Edit title'}
-                  aria-label={isZh ? '编辑标题' : 'Edit title'}
-                  onClick={() => beginRenameConversation(conv)}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M12 20h9" />
-                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  className="sidebar-conv-archive"
-                  title={isRunning ? (isZh ? '运行中不可归档' : 'Cannot archive while running') : isCompactionVisible ? (isZh ? '压缩中不可归档' : 'Cannot archive while compacting') : (isZh ? '归档会话' : 'Archive chat')}
-                  aria-label={isZh ? '归档会话' : 'Archive chat'}
-                  disabled={isRunning || isCompactionVisible}
-                  onClick={() => { if (!isRunning && !isCompactionVisible) void onArchiveConversation(conv.id); }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <rect x="3" y="4" width="18" height="4" rx="1" />
-                    <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
-                    <path d="M10 12h4" />
-                  </svg>
-                </button>
-              </>
-            )}
-            <button
-              type="button"
-              className="sidebar-conv-delete"
-              aria-label={isZh ? '删除对话' : 'Delete conversation'}
-              onClick={() => setConfirmDeleteId(conv.id)}
-            >
-              ×
-            </button>
-          </span>
-        )}
-        {confirmDeleteId === conv.id ? null : (
-          <time
-            className="sidebar-conv-time"
-            dateTime={conv.updatedAt}
-            title={conv.updatedAt ? new Date(conv.updatedAt).toLocaleString() : undefined}
-          >
-            {formatRelativeTime(conv.updatedAt, isZh)}
-          </time>
-        )}
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="sidebar-conv-edit"
+                title={isZh ? '编辑标题' : 'Edit title'}
+                aria-label={isZh ? '编辑标题' : 'Edit title'}
+                onClick={() => beginRenameConversation(conv)}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="sidebar-conv-archive"
+                title={isRunning ? (isZh ? '运行中不可归档' : 'Cannot archive while running') : isCompactionVisible ? (isZh ? '压缩中不可归档' : 'Cannot archive while compacting') : (isZh ? '归档会话' : 'Archive chat')}
+                aria-label={isZh ? '归档会话' : 'Archive chat'}
+                disabled={isRunning || isCompactionVisible}
+                onClick={() => { if (!isRunning && !isCompactionVisible) void onArchiveConversation(conv.id); }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="3" y="4" width="18" height="4" rx="1" />
+                  <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
+                  <path d="M10 12h4" />
+                </svg>
+              </button>
+            </>
+          )}
+        </span>
+        <time
+          className="sidebar-conv-time"
+          dateTime={conv.updatedAt}
+          title={conv.updatedAt ? new Date(conv.updatedAt).toLocaleString() : undefined}
+        >
+          {formatRelativeTime(conv.updatedAt, isZh)}
+        </time>
       </div>
     );
   };
@@ -757,9 +750,21 @@ export function Sidebar({
             </button>
           ) : null}
           {isArchivedView ? (
-            <button type="button" role="menuitem" onClick={() => { closeContextMenu(); void onRestoreConversation(contextConv.id); }}>
-              <span>{isZh ? '恢复会话' : 'Restore chat'}</span>
-            </button>
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeContextMenu();
+                  void onDeleteConversation(contextConv.id);
+                }}
+              >
+                <span>{isZh ? '永久删除' : 'Delete permanently'}</span>
+              </button>
+              <button type="button" role="menuitem" onClick={() => { closeContextMenu(); void onRestoreConversation(contextConv.id); }}>
+                <span>{isZh ? '恢复会话' : 'Restore chat'}</span>
+              </button>
+            </>
           ) : (
             <button
               type="button"
@@ -773,9 +778,6 @@ export function Sidebar({
               <span>{isZh ? '归档会话' : 'Archive chat'}</span>
             </button>
           )}
-          <button type="button" role="menuitem" className="danger" onClick={() => { closeContextMenu(); setConfirmDeleteId(contextConv.id); }}>
-            <span>{isZh ? '删除会话' : 'Delete chat'}</span>
-          </button>
         </div>
       ) : null}
 

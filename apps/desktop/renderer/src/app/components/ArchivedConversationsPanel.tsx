@@ -86,14 +86,13 @@ export function ArchivedConversationsPanel({
   const handleDelete = useCallback(async (conversation: ArchivedConversationMeta) => {
     if (pendingId) return;
     const title = conversation.title || i18n.t('chat.conversations.untitled');
-    const accepted = await confirm({
+    const ok = await confirm({
       title: i18n.t('settings.archived.deleteTitle'),
       message: i18n.t('settings.archived.confirmDelete', { title }),
       confirmText: i18n.t('settings.archived.delete'),
-      cancelText: i18n.t('share.cancel'),
       tone: 'danger',
     });
-    if (!accepted) return;
+    if (!ok) return;
 
     setPendingId(conversation.id);
     setError(null);
@@ -138,19 +137,26 @@ export function ArchivedConversationsPanel({
               <article className="archived-conversation-row" role="listitem" key={conversation.id}>
                 <div className="archived-conversation-copy">
                   <h3>{conversation.title || i18n.t('chat.conversations.untitled')}</h3>
-                  <p>
+                  <div className="archived-conversation-meta">
                     <span>{i18n.t('settings.archived.messageCount', { count: conversation.messageCount })}</span>
                     {archivedDate ? (
-                      <>
-                        <span aria-hidden="true"> · </span>
-                        <time dateTime={conversation.archivedAt ?? conversation.updatedAt}>
-                          {i18n.t('settings.archived.date', { date: archivedDate })}
-                        </time>
-                      </>
+                      <span>
+                        {i18n.t('settings.archived.date', { date: archivedDate })}
+                      </span>
                     ) : null}
-                  </p>
+                  </div>
                 </div>
                 <div className="archived-conversation-actions">
+                  <button
+                    type="button"
+                    className="archived-conversation-delete"
+                    disabled={Boolean(pendingId)}
+                    title={i18n.t('settings.archived.deleteTitle')}
+                    aria-label={i18n.t('settings.archived.deleteTitle')}
+                    onClick={() => { void handleDelete(conversation); }}
+                  >
+                    {isPending ? i18n.t('settings.archived.working') : i18n.t('settings.archived.delete')}
+                  </button>
                   <button
                     type="button"
                     className="archived-conversation-restore"
@@ -158,14 +164,6 @@ export function ArchivedConversationsPanel({
                     onClick={() => { void handleRestore(conversation); }}
                   >
                     {isPending ? i18n.t('settings.archived.working') : i18n.t('settings.archived.restore')}
-                  </button>
-                  <button
-                    type="button"
-                    className="archived-conversation-delete"
-                    disabled={Boolean(pendingId)}
-                    onClick={() => { void handleDelete(conversation); }}
-                  >
-                    {i18n.t('settings.archived.delete')}
                   </button>
                 </div>
               </article>

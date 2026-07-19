@@ -5,6 +5,7 @@ import { SettingsPage } from './app/components/SettingsPage';
 import { BrandStartupLoader } from './app/components/BrandStartupLoader';
 import { QuickChatWindow } from './app/components/QuickChatWindow';
 import { displayShortcut } from './app/components/ShortcutsPanel';
+import { useConfirm } from './app/components/ConfirmProvider';
 import { shouldRefreshQuickChatConversationList } from './app/state/quickChatSubmission';
 import { CONVERSATION_LIST_PAGE_SIZE, useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { useBrandStartupMinHold } from './app/state/useBrandStartupMinHold';
@@ -87,6 +88,7 @@ function MainApp() {
   // LOGO 过渡页保留：bootstrap 再快也要播完品牌入场动画，再进入主界面。
   const brandStartupHoldDone = useBrandStartupMinHold(!initError);
   const showMainShell = Boolean(session) && brandStartupHoldDone;
+  const confirm = useConfirm();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [activePage, setActivePage] = useState<AppPage>('chat');
@@ -581,10 +583,28 @@ function MainApp() {
   }, [activeWorkspace, conversationView, refreshConversations]);
 
   const handleDeleteConversation = useCallback(async (id: string) => {
+    const target = conversations.find((item) => item.id === id);
+    const title = target?.title?.trim() || i18n.t('chat.conversations.untitled');
+    const ok = await confirm({
+      title: i18n.t('settings.archived.deleteTitle'),
+      message: i18n.t('settings.archived.confirmDelete', { title }),
+      confirmText: i18n.t('settings.archived.delete'),
+      tone: 'danger',
+    });
+    if (!ok) return;
+
     await clientApi.conversationsDelete({ id });
     if (activeConversationId === id) setActiveConversationId(null);
     await refreshConversations(activeWorkspace, conversationView);
-  }, [activeConversationId, activeWorkspace, conversationView, refreshConversations]);
+  }, [
+    activeConversationId,
+    activeWorkspace,
+    confirm,
+    conversations,
+    conversationView,
+    i18n,
+    refreshConversations,
+  ]);
 
   const handleRenameConversation = useCallback(async (id: string, title: string) => {
     await clientApi.conversationsUpdateTitle({ id, title: title.trim() });
@@ -669,7 +689,6 @@ function MainApp() {
                   onEnsureConversation={ensureConversation}
                   onRenameConversation={handleRenameConversation}
                   onArchiveConversation={handleArchiveConversation}
-                  onDeleteConversation={handleDeleteConversation}
                   workspacePath={activeWorkspace}
                   isPageActive={activePage === 'chat'}
                 />

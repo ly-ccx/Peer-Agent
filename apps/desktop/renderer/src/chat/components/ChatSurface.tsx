@@ -309,7 +309,6 @@ export function ChatSurface({
   onEnsureConversation,
   onRenameConversation,
   onArchiveConversation,
-  onDeleteConversation,
   workspacePath,
   isPageActive,
 }: {
@@ -337,7 +336,6 @@ export function ChatSurface({
   }) => Promise<{ id: string }>;
   readonly onRenameConversation?: (id: string, title: string) => void;
   readonly onArchiveConversation?: (id: string) => void;
-  readonly onDeleteConversation?: (id: string) => void;
   // 分叉时把当前工作区透传给新建会话，使分叉会话与父会话同属一个工作区（否则会落到「无工作区」而在左侧列表被过滤隐藏）。
   readonly workspacePath?: string | null;
   // 设置页覆盖显示时保活会话树与流事件订阅，但暂停聊天专属全局快捷键。
@@ -1701,9 +1699,6 @@ export function ChatSurface({
           : undefined}
         onBranch={!isDraftConversation && messages.length > 0 ? handleHeaderBranch : undefined}
         onFind={() => setFindOpen(true)}
-        onDelete={!isDraftConversation && onDeleteConversation && conversationId
-          ? () => onDeleteConversation(conversationId)
-          : undefined}
       />
       {findOpen ? (
         <ChatFindBar

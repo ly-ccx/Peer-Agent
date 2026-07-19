@@ -34,7 +34,6 @@ export function ChatHeader({
   onArchive,
   onBranch,
   onFind,
-  onDelete,
   onOpenSettings,
 }: {
   readonly title: string;
@@ -48,7 +47,6 @@ export function ChatHeader({
   readonly onArchive?: () => void;
   readonly onBranch?: () => void;
   readonly onFind?: () => void;
-  readonly onDelete?: () => void;
   readonly onOpenSettings?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -127,13 +125,6 @@ export function ChatHeader({
       label: isZh ? '查找' : 'Find in conversation',
       shortcut: '⌘F',
       onAction: () => { setMenuOpen(false); onFind(); },
-    }] : []),
-    ...(onDelete ? [{
-      id: 'delete',
-      label: isZh ? '删除对话' : 'Delete conversation',
-      danger: true,
-      disabled: isStreaming,
-      onAction: () => { setMenuOpen(false); onDelete(); },
     }] : []),
   ];
 
