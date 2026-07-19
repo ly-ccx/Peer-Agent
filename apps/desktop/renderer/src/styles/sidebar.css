@@ -735,13 +735,15 @@
     opacity var(--za-motion-fast);
   -webkit-app-region: no-drag;
 }
+/* Active rows: edit + archive (2 buttons ≈ 18+4+18). */
 .conversation-row:hover:not(.is-editing):not(.is-confirming-delete) .sidebar-conv-actions,
 .conversation-row:focus-within:not(.is-editing):not(.is-confirming-delete) .sidebar-conv-actions {
-  width: 62px;
+  width: 44px;
   overflow: visible;
   opacity: 1;
   pointer-events: auto;
 }
+/* Archived rows: delete + restore (still dual-button width). */
 .conversation-row.is-archived:hover:not(.is-confirming-delete) .sidebar-conv-actions,
 .conversation-row.is-archived:focus-within:not(.is-confirming-delete) .sidebar-conv-actions {
   width: 44px;
