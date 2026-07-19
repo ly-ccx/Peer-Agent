@@ -95,7 +95,12 @@ export function encodeGeminiGenerateContentRequest({
   messages,
   tools,
   maxOutputTokens,
-}) {
+  model,
+  projectId,
+  authMethod,
+  userPromptId,
+  sessionId,
+} = {}) {
   const normalized = normalizeOpenAIMessages(messages);
   const systemText = normalized
     .filter((message) => message.role === 'system')
@@ -117,5 +122,21 @@ export function encodeGeminiGenerateContentRequest({
   if (systemText) {
     body.systemInstruction = { parts: [{ text: systemText }] };
   }
+
+  // Gemini OAuth / Code Assist 请求体对齐 gemini-cli converter.toGenerateContentRequest：
+  // { model, project, request: { contents, systemInstruction, tools, generationConfig, session_id } }
+  if (authMethod === 'oauth_google') {
+    const modelId = String(model || '').replace(/^models\//, '');
+    const request = { ...body };
+    if (sessionId) request.session_id = String(sessionId);
+    const wrapped = {
+      model: modelId,
+      request,
+    };
+    if (projectId) wrapped.project = String(projectId);
+    if (userPromptId) wrapped.user_prompt_id = String(userPromptId);
+    return wrapped;
+  }
+
   return body;
 }

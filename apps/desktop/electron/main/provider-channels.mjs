@@ -5,6 +5,7 @@ export const CHATGPT_SUBSCRIPTION_BASE_URL = 'https://chatgpt.com/backend-api/co
 export const GROK_OFFICIAL_NAME = 'Grok 官方';
 export const GROK_SUBSCRIPTION_BASE_URL = 'https://cli-chat-proxy.grok.com/v1';
 export const GEMINI_OAUTH_NAME = 'Gemini OAuth';
+export const GEMINI_CODE_ASSIST_BASE_URL = 'https://cloudcode-pa.googleapis.com';
 export const QODER_PRIVATE_NAME = 'Qoder 私有接口';
 
 export const CHANNEL_IDS = {
@@ -287,8 +288,14 @@ function endpointForWire(baseUrl, wire, { model, apiKey, authMethod, stream = tr
   if (wire === 'anthropic-messages') return `${root}/v1/messages`;
   if (wire === 'openai-responses') return `${root}/responses`;
   if (wire === 'gemini') {
+    // Gemini OAuth / Code Assist 对齐 gemini-cli：走 cloudcode-pa v1internal，
+    // 而不是 generativelanguage.googleapis.com 的 models/{model}:streamGenerateContent。
+    if (authMethod === 'oauth_google') {
+      const action = stream ? 'streamGenerateContent' : 'generateContent';
+      return `${root}/v1internal:${action}${stream ? '?alt=sse' : ''}`;
+    }
     const method = stream ? 'streamGenerateContent?alt=sse' : 'generateContent';
-    const keyParam = authMethod === 'oauth_google' || !apiKey
+    const keyParam = !apiKey
       ? ''
       : `${method.includes('?') ? '&' : '?'}key=${encodeURIComponent(apiKey)}`;
     return `${root}/${geminiModelPath(model)}:${method}${keyParam}`;
@@ -308,8 +315,10 @@ function requiredHeadersFor({ wire, apiKey, accountId, authMethod, oauthProjectI
   if (wire === 'gemini') {
     const headers = { 'Content-Type': 'application/json' };
     if (authMethod === 'oauth_google') {
+      // Code Assist 只需要 Bearer；project 放在请求体 project 字段。
+      // 不要加 x-goog-user-project：它会把请求路由到 GCP 项目配额，
+      // 对个人 Code Assist project 常触发 SERVICE_DISABLED / cloudcode-pa 403。
       headers.Authorization = `Bearer ${apiKey}`;
-      if (oauthProjectId) headers['x-goog-user-project'] = oauthProjectId;
     }
     return headers;
   }
@@ -366,7 +375,9 @@ export function resolveChannel(config = {}) {
     ? CHATGPT_SUBSCRIPTION_BASE_URL
     : authMethod === 'oauth_grok'
       ? GROK_SUBSCRIPTION_BASE_URL
-      : (config.baseUrl || descriptor.defaults.baseUrl);
+      : authMethod === 'oauth_google'
+        ? GEMINI_CODE_ASSIST_BASE_URL
+        : (config.baseUrl || descriptor.defaults.baseUrl);
   const apiKey = config.apiKey || '';
   const endpoint = endpointForWire(baseUrl, wire, { model: config.model, apiKey, authMethod, stream: true });
   const accountId = config.accountId || null;
@@ -417,6 +428,7 @@ export function resolveChannel(config = {}) {
   return {
     channelId,
     authMethod,
+    oauthProjectId: String(config.oauthProjectId || '').trim() || null,
     wire,
     baseUrl,
     endpoint,

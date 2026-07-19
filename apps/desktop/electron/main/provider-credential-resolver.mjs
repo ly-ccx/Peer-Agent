@@ -151,6 +151,7 @@ export async function resolveProviderCredential({
         authMethod,
         apiKey: fresh.access,
         accountId: fresh.accountId || tokens.accountId || null,
+        oauthProjectId: credential?.oauthProjectId || null,
       };
     } catch (error) {
       throw createProviderCredentialError('oauth_token_refresh_failed', error);

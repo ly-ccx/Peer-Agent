@@ -141,20 +141,27 @@ describe('provider channel registry', () => {
     assert.deepEqual(resolved.headers, { 'Content-Type': 'application/json' });
   });
 
-  it('resolves Gemini subscription with OAuth bearer auth', () => {
+  it('resolves Gemini subscription with Code Assist OAuth endpoint', () => {
     const resolved = resolveChannel({
       channelId: 'google-ai',
       authMethod: 'oauth_google',
       baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
       model: 'gemini-2.0-flash',
       apiKey: 'oauth-access-token',
+      oauthProjectId: 'peer-project',
     });
 
     assert.equal(resolved.wire, 'gemini');
+    assert.equal(resolved.baseUrl, 'https://cloudcode-pa.googleapis.com');
     assert.equal(
       resolved.endpoint,
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse',
+      'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse',
     );
+    assert.equal(
+      resolved.testEndpoint,
+      'https://cloudcode-pa.googleapis.com/v1internal:generateContent',
+    );
+    assert.equal(resolved.oauthProjectId, 'peer-project');
     assert.equal(resolved.headers.Authorization, 'Bearer oauth-access-token');
     assert.equal(resolved.headers['x-goog-user-project'], undefined);
   });

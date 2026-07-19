@@ -5,8 +5,10 @@ import {
   buildConversationAttachmentContext,
   buildConversationContinuityContext,
   buildConfigInstructionContext,
+  buildGitBranchPrefixContext,
   buildReplyLanguageContext,
 } from './contextSources.ts';
+import { DEFAULT_GIT_BRANCH_PREFIX } from '../../app/gitBranchPrefix.ts';
 import type { ChatAttachment, ChatMsg } from './types.ts';
 
 function att(over: Partial<ChatAttachment> = {}): ChatAttachment {
@@ -106,5 +108,25 @@ describe('buildReplyLanguageContext', () => {
     const out = buildReplyLanguageContext('  ja-JP  ');
     assert.equal(out.length, 1);
     assert.match(out[0].content, /Japanese/);
+  });
+});
+
+describe('buildGitBranchPrefixContext', () => {
+  it('injects the default prefix when unset, blank, or whitespace-only', () => {
+    for (const input of [null, undefined, '', '   '] as const) {
+      const out = buildGitBranchPrefixContext(input);
+      assert.equal(out.length, 1);
+      assert.equal(out[0].id, 'settings.gitBranchPrefix');
+      assert.equal(out[0].source, 'settings.gitBranchPrefix');
+      assert.match(out[0].content, new RegExp(`prefix "${DEFAULT_GIT_BRANCH_PREFIX}"`));
+      assert.match(out[0].content, /Do not apply this prefix to existing branches/);
+    }
+  });
+
+  it('injects a custom non-empty prefix (trimmed)', () => {
+    const out = buildGitBranchPrefixContext('  team/  ');
+    assert.equal(out.length, 1);
+    assert.match(out[0].content, /prefix "team\/"/);
+    assert.match(out[0].content, /team\/my-feature/);
   });
 });

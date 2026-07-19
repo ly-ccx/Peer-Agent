@@ -33,6 +33,8 @@ import {
   resolveProviderCredential,
 } from './provider-credential-resolver.mjs';
 import { resolveChannel } from './provider-channels.mjs';
+import { resolveGeminiCodeAssistProjectId } from './subscription-quota.mjs';
+import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 import { getQoderModelMetadata, resolveQoderModelOptionProjection } from './provider-adapters/qoder-model-catalog.mjs';
 import { detectTailRepetition } from './repetition-detector.mjs';
 import { createUsageRequestLog } from './usage-request-log.mjs';
@@ -717,7 +719,7 @@ export function createLlmChatService({
       toolContext.onToolCall = agentProgress?.onToolCall ?? null;
 
       for (let attemptIndex = 0; attemptIndex < providerCandidates.length; attemptIndex += 1) {
-        const provider = providerCandidates[attemptIndex];
+        let provider = providerCandidates[attemptIndex];
         // 记录本轮实际命中的 provider 快照，供 usage 落盘归因。
         streamRecord.actualModelProviderId = provider?.id || null;
         streamRecord.actualModel = provider?.model || null;
@@ -740,10 +742,40 @@ export function createLlmChatService({
           return;
         }
         if (!credential || streamRecord.terminalEventSent) return;
+        // Gemini OAuth 需要 Code Assist projectId；缺失时通过 loadCodeAssist/onboardUser 解析并落盘。
+        if (provider.authMethod === 'oauth_google' && credential.apiKey) {
+          const existingProjectId = provider.oauthProjectId || credential.oauthProjectId || null;
+          if (!existingProjectId) {
+            try {
+              const projectId = await resolveGeminiCodeAssistProjectId({
+                accessToken: credential.apiKey,
+                projectId: null,
+                pollIntervalMs: 1000,
+                maxPolls: 45,
+                // 走 Electron net.fetch + 重试，避免 Node undici 在代理环境下超时后被误判为“缺少 project”。
+                fetchImpl: (url, init) => fetchWithConnectionRecovery(url, init),
+              });
+              if (projectId && typeof llmConfigStore?.updateProvider === 'function') {
+                llmConfigStore.updateProvider(provider.id, { oauthProjectId: projectId });
+                provider = { ...provider, oauthProjectId: projectId };
+              } else if (!projectId) {
+                throw new Error(
+                  'Gemini OAuth 尚未完成 Code Assist 项目初始化（缺少 cloudaicompanionProject）。请重新登录 Google，或确认账号已开通 Gemini Code Assist。',
+                );
+              }
+            } catch (error) {
+              // 项目解析失败时直接中断，避免无 project 打 streamGenerateContent 只得到含糊 500。
+              throw error;
+            }
+          } else {
+            provider = { ...provider, oauthProjectId: existingProjectId };
+          }
+        }
         const resolvedChannel = resolveChannel({
           ...provider,
           apiKey: credential.apiKey,
           accountId: credential.accountId,
+          oauthProjectId: provider.oauthProjectId || credential.oauthProjectId || null,
         });
 
         const systemContext = buildSystemContext(runWorkspacePath, {

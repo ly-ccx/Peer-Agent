@@ -270,8 +270,12 @@ export function TokenUsageDisplay({
   const output = (tokenUsage?.output ?? 0) + (activeUsage?.output ?? 0);
   const cacheWrite = (tokenUsage?.cacheWrite ?? 0) + (activeUsage?.cacheWrite ?? 0);
   const cacheRead = (tokenUsage?.cacheRead ?? 0) + (activeUsage?.cacheRead ?? 0);
-  const billedTokens = input + output;
-  const currentContextTokens = contextTokens ?? billedTokens;
+  // billedTokens 仅用于费用估算；上下文圆环分子只接受有效上下文 token，
+  // 禁止用 lifetime 计费累计（input+output）回退，否则长会话会误显示 100%。
+  const currentContextTokens =
+    typeof contextTokens === 'number' && Number.isFinite(contextTokens)
+      ? Math.max(0, contextTokens)
+      : 0;
   const cacheDenominator = input + cacheRead;
   const cacheHitPercent = cacheDenominator > 0 ? Math.round((cacheRead / cacheDenominator) * 100) : null;
   // 仅当前选中模型支持 Prompt 缓存时才展示缓存命中率，避免切到无缓存模型后仍显示旧模型遗留的累计缓存数据。

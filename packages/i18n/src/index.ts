@@ -148,6 +148,21 @@ export type TranslationKey =
   | 'settings.usage.col.cacheWrite'
   | 'settings.usage.col.total'
   | 'settings.usage.col.cost'
+  | 'settings.usage.range'
+  | 'settings.usage.range.7d'
+  | 'settings.usage.range.1m'
+  | 'settings.usage.range.3m'
+  | 'settings.usage.range.6m'
+  | 'settings.usage.range.1y'
+  | 'settings.usage.heatmap'
+  | 'settings.usage.heatmap.note'
+  | 'settings.usage.heatmap.empty'
+  | 'settings.usage.heatmap.less'
+  | 'settings.usage.heatmap.more'
+  | 'settings.usage.trend'
+  | 'settings.usage.daily.totalTokens'
+  | 'settings.usage.daily.requests'
+  | 'settings.usage.daily.activeDays'
   | 'auth.login'
   | 'auth.logout'
   | 'auth.not_configured'
@@ -679,7 +694,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.config.canceled': '已取消',
     'settings.config.failed': '操作失败',
     'settings.usage': '使用统计',
-    'settings.usage.description': '汇总全部会话的 token 用量，并按当前模型单价估算成本。不含逐条请求日志与趋势图。',
+    'settings.usage.description': '汇总全部会话的 token 用量，并按当前模型单价估算成本。热力图与趋势基于请求日志（接入后开始记录）。',
     'settings.usage.loading': '加载中…',
     'settings.usage.refresh': '刷新',
     'settings.usage.loadFailed': '加载使用统计失败',
@@ -704,6 +719,21 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.usage.col.cacheWrite': '缓存写',
     'settings.usage.col.total': '合计',
     'settings.usage.col.cost': '估算成本',
+    'settings.usage.range': '时间段',
+    'settings.usage.range.7d': '7 天',
+    'settings.usage.range.1m': '1 个月',
+    'settings.usage.range.3m': '3 个月',
+    'settings.usage.range.6m': '6 个月',
+    'settings.usage.range.1y': '1 年',
+    'settings.usage.heatmap': 'Token 热力图',
+    'settings.usage.heatmap.note': '按天聚合请求日志中的 token（仅统计日志接入后的用量）',
+    'settings.usage.heatmap.empty': '当前还没有请求日志。发送消息后会开始按天累积。',
+    'settings.usage.heatmap.less': '少',
+    'settings.usage.heatmap.more': '多',
+    'settings.usage.trend': '使用趋势',
+    'settings.usage.daily.totalTokens': '区间 Token',
+    'settings.usage.daily.requests': '请求数',
+    'settings.usage.daily.activeDays': '有用量天数',
     'auth.login': '登录',
     'auth.logout': '退出',
     'auth.not_configured': '登录未配置',
@@ -1254,7 +1284,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.config.canceled': 'Canceled',
     'settings.config.failed': 'Operation failed',
     'settings.usage': 'Usage',
-    'settings.usage.description': 'Aggregate token usage across conversations and estimate cost from current model prices. No per-request logs or trend charts.',
+    'settings.usage.description': 'Aggregate token usage across conversations and estimate cost from current model prices. Heatmap and trend use the request log (starts after logging was enabled).',
     'settings.usage.loading': 'Loading…',
     'settings.usage.refresh': 'Refresh',
     'settings.usage.loadFailed': 'Failed to load usage stats',
@@ -1279,6 +1309,21 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.usage.col.cacheWrite': 'Cache write',
     'settings.usage.col.total': 'Total',
     'settings.usage.col.cost': 'Est. cost',
+    'settings.usage.range': 'Range',
+    'settings.usage.range.7d': '7 days',
+    'settings.usage.range.1m': '1 month',
+    'settings.usage.range.3m': '3 months',
+    'settings.usage.range.6m': '6 months',
+    'settings.usage.range.1y': '1 year',
+    'settings.usage.heatmap': 'Token heatmap',
+    'settings.usage.heatmap.note': 'Daily tokens from the request log (only after logging was enabled)',
+    'settings.usage.heatmap.empty': 'No request log yet. Send a message to start daily accumulation.',
+    'settings.usage.heatmap.less': 'Less',
+    'settings.usage.heatmap.more': 'More',
+    'settings.usage.trend': 'Usage trend',
+    'settings.usage.daily.totalTokens': 'Range tokens',
+    'settings.usage.daily.requests': 'Requests',
+    'settings.usage.daily.activeDays': 'Active days',
     'auth.login': 'Sign in',
     'auth.logout': 'Sign out',
     'auth.not_configured': 'Auth not configured',

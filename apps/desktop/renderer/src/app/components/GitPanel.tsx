@@ -1,13 +1,11 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useState } from 'react';
+import {
+  DEFAULT_GIT_BRANCH_PREFIX,
+  readGitBranchPrefixFromSettings,
+  resolveGitBranchPrefix,
+} from '../gitBranchPrefix';
 import { clientApi } from '../../clientApi';
-
-const DEFAULT_BRANCH_PREFIX = 'PeerAgent/';
-
-function readBranchPrefix(settings: Record<string, unknown> | null | undefined): string {
-  const value = settings?.gitBranchPrefix;
-  return typeof value === 'string' && value.trim() ? value : DEFAULT_BRANCH_PREFIX;
-}
 
 export interface GitPanelProps {
   readonly i18n: I18nRuntime;
@@ -25,11 +23,12 @@ export interface GitPanelProps {
 export function GitPanel({ i18n, onGitBranchPrefixChanged }: GitPanelProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [branchPrefix, setBranchPrefix] = useState(() => readBranchPrefix(clientApi.initialSettings));
+  const [branchPrefix, setBranchPrefix] = useState(() =>
+    readGitBranchPrefixFromSettings(clientApi.initialSettings));
   const [savedPrefix, setSavedPrefix] = useState(branchPrefix);
 
   async function handleSave() {
-    const next = branchPrefix.trim() ? branchPrefix : DEFAULT_BRANCH_PREFIX;
+    const next = resolveGitBranchPrefix(branchPrefix);
     if (next === savedPrefix || isSaving) {
       if (next !== branchPrefix) setBranchPrefix(next);
       return;
@@ -66,7 +65,7 @@ export function GitPanel({ i18n, onGitBranchPrefixChanged }: GitPanelProps) {
               value={branchPrefix}
               spellCheck={false}
               disabled={isSaving}
-              placeholder={DEFAULT_BRANCH_PREFIX}
+              placeholder={DEFAULT_GIT_BRANCH_PREFIX}
               aria-label={i18n.t('settings.git.branchPrefix')}
               onChange={(event) => setBranchPrefix(event.target.value)}
               onBlur={() => void handleSave()}

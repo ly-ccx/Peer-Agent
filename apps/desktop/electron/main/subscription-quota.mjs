@@ -153,36 +153,194 @@ export async function fetchChatGptUsage({ accessToken, accountId, fetchImpl = fe
   };
 }
 
+
+// ── Gemini Code Assist project resolution ──────────────────────────────
+// 对齐 gemini-cli packages/core/src/code_assist/setup.ts：
+// 1) loadCodeAssist 取 cloudaicompanionProject
+// 2) 若尚未 onboard，则 onboardUser（free tier 不传 project）并轮询 LRO
+
+const GEMINI_CODE_ASSIST_BASE = 'https://cloudcode-pa.googleapis.com/v1internal';
+const GEMINI_CODE_ASSIST_METADATA = {
+  ideType: 'IDE_UNSPECIFIED',
+  platform: 'PLATFORM_UNSPECIFIED',
+  pluginType: 'GEMINI',
+};
+
+function extractCloudAiCompanionProjectId(value) {
+  if (!value) return null;
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'object') {
+    const nested = value.id || value.projectId || value.name || null;
+    if (typeof nested === 'string' && nested.trim()) return nested.trim();
+  }
+  return null;
+}
+
+async function postCodeAssistJson(fetchImpl, accessToken, method, body) {
+  const response = await fetchImpl(`${GEMINI_CODE_ASSIST_BASE}:${method}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'User-Agent': 'PeerAgent/1.0',
+    },
+    body: JSON.stringify(body || {}),
+  });
+  const payload = await readJsonResponse(response);
+  return { response, payload };
+}
+
+function pickDefaultOnboardTier(loadRes) {
+  const tiers = Array.isArray(loadRes?.allowedTiers) ? loadRes.allowedTiers : [];
+  const preferred = tiers.find((tier) => tier?.isDefault) || tiers[0] || null;
+  return preferred;
+}
+
+export async function resolveGeminiCodeAssistProjectId({
+  accessToken,
+  projectId,
+  fetchImpl = fetch,
+  pollIntervalMs = 1000,
+  maxPolls = 30,
+} = {}) {
+  if (!accessToken) throw new Error('oauth_not_logged_in');
+  let resolvedProjectId = typeof projectId === 'string' && projectId.trim()
+    ? projectId.trim()
+    : null;
+
+  const metadata = {
+    ...GEMINI_CODE_ASSIST_METADATA,
+    ...(resolvedProjectId ? { duetProject: resolvedProjectId } : {}),
+  };
+
+  let loadResponse;
+  let loadRes;
+  try {
+    ({ response: loadResponse, payload: loadRes } = await postCodeAssistJson(
+      fetchImpl,
+      accessToken,
+      'loadCodeAssist',
+      {
+        ...(resolvedProjectId ? { cloudaicompanionProject: resolvedProjectId } : {}),
+        metadata,
+      },
+    ));
+  } catch (error) {
+    // 网络/代理失败时不要吞成“缺少 project”，否则用户会误判为账号未开通。
+    const detail = error?.cause?.message || error?.message || String(error);
+    throw new Error(`Gemini Code Assist loadCodeAssist 网络请求失败：${detail}`);
+  }
+
+  if (!loadResponse?.ok) {
+    const status = loadResponse?.status || 'unknown';
+    const message = loadRes?.error?.message
+      || loadRes?.message
+      || (typeof loadRes === 'string' ? loadRes : JSON.stringify(loadRes || {}));
+    throw new Error(`Gemini Code Assist loadCodeAssist 失败（HTTP ${status}）：${message}`);
+  }
+
+  if (loadRes) {
+    const fromLoad = extractCloudAiCompanionProjectId(
+      loadRes.cloudaicompanionProject
+        || loadRes.cloudAiCompanionProject
+        || loadRes.projectId,
+    );
+    if (fromLoad) return fromLoad;
+
+    // 已有 currentTier 但仍无 project：若调用方给了 projectId 可直接用。
+    if (loadRes.currentTier && resolvedProjectId) return resolvedProjectId;
+
+    // 未 onboard 时，尝试自动 onboard（个人免费档 / 默认档）。
+    if (!loadRes.currentTier) {
+      const tier = pickDefaultOnboardTier(loadRes);
+      const tierId = tier?.id || 'free-tier';
+      const isFreeTier = tierId === 'free-tier' || tierId === 'FREE';
+      const onboardReq = isFreeTier
+        ? {
+            tierId,
+            cloudaicompanionProject: undefined,
+            metadata: GEMINI_CODE_ASSIST_METADATA,
+          }
+        : {
+            tierId,
+            cloudaicompanionProject: resolvedProjectId || undefined,
+            metadata: {
+              ...GEMINI_CODE_ASSIST_METADATA,
+              ...(resolvedProjectId ? { duetProject: resolvedProjectId } : {}),
+            },
+          };
+
+      let onboardResponse;
+      let lroRes;
+      try {
+        ({ response: onboardResponse, payload: lroRes } = await postCodeAssistJson(
+          fetchImpl,
+          accessToken,
+          'onboardUser',
+          onboardReq,
+        ));
+      } catch (error) {
+        const detail = error?.cause?.message || error?.message || String(error);
+        throw new Error(`Gemini Code Assist onboardUser 网络请求失败：${detail}`);
+      }
+      if (!onboardResponse.ok) {
+        const status = onboardResponse.status || 'unknown';
+        const message = lroRes?.error?.message
+          || lroRes?.message
+          || JSON.stringify(lroRes || {});
+        throw new Error(`Gemini Code Assist onboardUser 失败（HTTP ${status}）：${message}`);
+      }
+
+      let polls = 0;
+      while (lroRes && !lroRes.done && lroRes.name && polls < maxPolls) {
+        polls += 1;
+        if (pollIntervalMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+        }
+        // 对齐 gemini-cli：GET {base}/{operationName}
+        const opUrl = lroRes.name.startsWith('http')
+          ? lroRes.name
+          : `${GEMINI_CODE_ASSIST_BASE}/${String(lroRes.name).replace(/^\/+/, '')}`;
+        let opResponse;
+        try {
+          opResponse = await fetchImpl(opUrl, {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              Accept: 'application/json',
+              'User-Agent': 'PeerAgent/1.0',
+            },
+          });
+        } catch (error) {
+          const detail = error?.cause?.message || error?.message || String(error);
+          throw new Error(`Gemini Code Assist getOperation 网络请求失败：${detail}`);
+        }
+        if (!opResponse.ok) {
+          throw new Error(`Gemini Code Assist getOperation 失败（HTTP ${opResponse.status}）`);
+        }
+        lroRes = await readJsonResponse(opResponse);
+      }
+
+      const fromOnboard = extractCloudAiCompanionProjectId(
+        lroRes?.response?.cloudaicompanionProject
+          || lroRes?.cloudaicompanionProject,
+      );
+      if (fromOnboard) return fromOnboard;
+      if (resolvedProjectId) return resolvedProjectId;
+    }
+  }
+
+  return resolvedProjectId;
+}
+
 // ── Gemini Code Assist (retrieveUserQuota) ──────────────────────────────
 
 export async function fetchGeminiQuota({ accessToken, projectId, fetchImpl = fetch } = {}) {
   if (!accessToken) throw new Error('oauth_not_logged_in');
 
-  let resolvedProjectId = projectId || null;
-
   // CodexBar：先 loadCodeAssist 拿 cloudaicompanionProject，再 retrieveUserQuota。
-  try {
-    const statusRes = await fetchImpl('https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        'User-Agent': 'PeerAgent/1.0',
-      },
-      body: JSON.stringify({}),
-    });
-    if (statusRes.ok) {
-      const statusJson = await readJsonResponse(statusRes);
-      const fromStatus = statusJson?.cloudaicompanionProject
-        || statusJson?.cloudAiCompanionProject
-        || statusJson?.projectId
-        || null;
-      if (typeof fromStatus === 'string' && fromStatus) resolvedProjectId = fromStatus;
-    }
-  } catch {
-    // loadCodeAssist 失败时仍尝试 retrieveUserQuota（空 body 在部分账号可用）
-  }
+  const resolvedProjectId = await resolveGeminiCodeAssistProjectId({ accessToken, projectId, fetchImpl });
 
   const body = resolvedProjectId
     ? { project: resolvedProjectId }

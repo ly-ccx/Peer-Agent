@@ -37,6 +37,7 @@ import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-cre
 import { disconnectMcp, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMcpResource, startMcpOAuth, testMcpConnection } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
 import { collectUsageStats } from './usage-stats.mjs';
+import { collectUsageDaily } from './usage-daily.mjs';
 import { listChannelDescriptors, resolveChannel } from './provider-channels.mjs';
 import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
 import { startGoogleBrowserLogin, ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
@@ -60,7 +61,7 @@ import {
   buildGoalRunnerStreamStartedPayload,
   createGoalRunnerAssistantPlaceholder,
 } from './goal-runner-message-persistence.mjs';
-import { fetchProviderSubscriptionQuota } from './subscription-quota.mjs';
+import { fetchProviderSubscriptionQuota, resolveGeminiCodeAssistProjectId } from './subscription-quota.mjs';
 import { applyGoalMessageRoute, routeGoalMessage } from './goal-message-router.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
 import { buildPersistedCompactedMessages } from './conversation-compaction-persistence.mjs';
@@ -2192,6 +2193,8 @@ async function listGroupsWithSilentOAuthRefresh() {
 
 // 跨会话用量汇总（精简使用统计页）：会话 lifetimeUsage + 当前 provider 单价估算。
 ipcMain.handle('usage:stats', () => collectUsageStats({ conversationStore, llmConfigStore }));
+// 请求日志按天聚合（Token 热力图 / 趋势）：range = 7d|1m|3m|6m|1y。
+ipcMain.handle('usage:daily', (_event, params) => collectUsageDaily({ range: params?.range }));
 
 // 设置页读取独立渠道视图，包含尚未配置任何模型的空渠道。
 ipcMain.handle('llm:groups:list', () => listGroupsWithSilentOAuthRefresh());
@@ -2343,14 +2346,26 @@ ipcMain.handle('llm:oauth:start', async (event, params) => {
       const catalog = await listGeminiModels(tokens);
       models = catalog.models;
       const preferred = preferGeminiModel(models);
-      if (preferred?.id) {
+      let oauthProjectId = null;
+      try {
+        oauthProjectId = await resolveGeminiCodeAssistProjectId({
+          accessToken: tokens.access,
+          fetchImpl: (url, init) => fetchWithConnectionRecovery(url, init),
+        });
+      } catch (error) {
+        console.warn('[oauth] resolve Gemini Code Assist project failed:', error?.message || error);
+      }
+      if (preferred?.id || oauthProjectId) {
         provider = llmConfigStore.updateProvider(targetId, {
-          model: preferred.id,
-          modelLabel: preferred.label || preferred.id,
-          contextWindow: preferred.contextWindow,
-          maxOutputTokens: preferred.maxOutputTokens,
-          metadataSource: catalog.source || 'builtin',
-          metadataSyncedAt: new Date().toISOString(),
+          ...(preferred?.id ? {
+            model: preferred.id,
+            modelLabel: preferred.label || preferred.id,
+            contextWindow: preferred.contextWindow,
+            maxOutputTokens: preferred.maxOutputTokens,
+            metadataSource: catalog.source || 'builtin',
+            metadataSyncedAt: new Date().toISOString(),
+          } : {}),
+          ...(oauthProjectId ? { oauthProjectId } : {}),
         }) || provider;
       }
     }

@@ -1,6 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatTime, formatDuration, formatBytes, formatTokenCount } from './format.ts';
+import {
+  formatTime,
+  formatDuration,
+  formatBytes,
+  formatTokenCount,
+  formatTokenYiApprox,
+} from './format.ts';
 
 describe('formatDuration', () => {
   it('clamps negative to 0ms', () => {
@@ -54,6 +60,28 @@ describe('formatTokenCount', () => {
     assert.equal(formatTokenCount(1000), '1.0k');
     assert.equal(formatTokenCount(1500), '1.5k');
     assert.equal(formatTokenCount(12_340), '12.3k');
+  });
+  it('shows M from 1_000_000 and B from 1_000_000_000', () => {
+    assert.equal(formatTokenCount(1_000_000), '1.0M');
+    assert.equal(formatTokenCount(2_340_000), '2.3M');
+    assert.equal(formatTokenCount(999_999_999), '1000.0M');
+    assert.equal(formatTokenCount(1_000_000_000), '1.0B');
+    assert.equal(formatTokenCount(5_057_063_600), '5.1B');
+  });
+});
+
+describe('formatTokenYiApprox', () => {
+  it('returns null below 1 亿', () => {
+    assert.equal(formatTokenYiApprox(0), null);
+    assert.equal(formatTokenYiApprox(99_999_999), null);
+  });
+  it('returns ≈ X.X 亿 from 1 亿', () => {
+    assert.equal(formatTokenYiApprox(100_000_000), '≈ 1.0 亿');
+    assert.equal(formatTokenYiApprox(5_057_063_600), '≈ 50.6 亿');
+  });
+  it('rounds to integer at ≥ 100 亿', () => {
+    assert.equal(formatTokenYiApprox(10_000_000_000), '≈ 100 亿');
+    assert.equal(formatTokenYiApprox(12_340_000_000), '≈ 123 亿');
   });
 });
 

@@ -74,6 +74,7 @@ const unavailableApi: ClientApi = {
   workspaceInfo: unavailableMethod('workspaceInfo'),
   conversationsList: unavailableMethod('conversationsList'),
   usageGetStats: unavailableMethod('usageGetStats'),
+  usageGetDaily: unavailableMethod('usageGetDaily'),
   conversationsSearch: unavailableMethod('conversationsSearch'),
   conversationsCreate: unavailableMethod('conversationsCreate'),
   conversationsGet: unavailableMethod('conversationsGet'),

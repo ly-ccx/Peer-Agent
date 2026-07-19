@@ -577,3 +577,102 @@ describe('ADR 42：显示口径与压缩触发口径分离', () => {
     );
   });
 });
+
+
+describe('静默 microcompaction 与占用显示口径对齐', () => {
+  function buildMicrocompactableConversation() {
+    // 构造：旧 tool 结果很大，保留最近几条小消息。
+    // microcompaction 会把旧 tool 结果压成预览，使有效发送量显著低于完整历史。
+    const big = 'x'.repeat(12000);
+    const messages = [{ role: 'system', content: 'sys' }];
+    for (let i = 0; i < 8; i++) {
+      messages.push({
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id: `t${i}`, type: 'function', function: { name: 'read', arguments: '{}' } }],
+      });
+      messages.push({ role: 'tool', tool_call_id: `t${i}`, content: `result-${i}-${big}` });
+    }
+    messages.push({ role: 'user', content: 'recent-user' });
+    messages.push({ role: 'assistant', content: 'recent-assistant' });
+    messages.push({ role: 'user', content: 'latest-question' });
+    return messages;
+  }
+
+  it('runCompactionCheck：微压缩把占用压回 soft 线后取消语义压缩，但仍返回有效消息并上报 contextTokens', async () => {
+    const messages = buildMicrocompactableConversation();
+    const fullEstimated = estimateTokensFromMessages(messages);
+    const micro = applyMicrocompaction(messages).messages;
+    const microEstimated = estimateTokensFromMessages(micro);
+    assert.ok(microEstimated < fullEstimated * 0.5, '样本必须能被微压缩显著缩小');
+
+    // 窗口选择约束：
+    // 1) full > soft=0.8W  → 触发 preflight
+    // 2) full < hard=0.95W 且 full < W → 避免 hard/overflow 强制语义压缩
+    // 3) micro < soft → Layer1 后取消 Layer2
+    // 取 W = full / 0.85，则 soft≈0.941 full，hard≈1.118 full，满足 1/2。
+    const window = Math.floor(fullEstimated / 0.85);
+    const soft = Math.floor(window * COMPACTION_CONFIG.triggerRatio);
+    assert.ok(fullEstimated > soft, `完整历史应超过 soft: full=${fullEstimated} soft=${soft}`);
+    assert.ok(fullEstimated < window, `完整历史应低于窗口: full=${fullEstimated} window=${window}`);
+    assert.ok(microEstimated <= soft, `微压缩后应回到 soft 下: micro=${microEstimated} soft=${soft}`);
+
+    const events = [];
+    const result = await runCompactionCheck({
+      messages,
+      systemPrompt: 'sys',
+      contextWindow: window,
+      providerConfig: null,
+      conversationId: 'c-micro',
+      streamId: 's-micro',
+      webContents: {
+        send(channel, payload) {
+          events.push({ channel, payload });
+        },
+      },
+    });
+
+    assert.equal(result.compacted, false, '微压缩回落后不应再做语义压缩');
+    assert.equal(result.microcompacted, true, '应标记 microcompacted');
+    assert.ok(Array.isArray(result.messages), '应返回有效消息');
+    assert.notEqual(
+      JSON.stringify(result.messages),
+      JSON.stringify(messages),
+      '返回消息应为微压缩后的有效上下文',
+    );
+    assert.ok(
+      typeof result.contextTokens === 'number' && result.contextTokens > 0,
+      '应回传有效 contextTokens',
+    );
+    assert.ok(
+      result.contextTokens < fullEstimated,
+      `有效占用应低于完整历史: effective=${result.contextTokens} full=${fullEstimated}`,
+    );
+    assert.ok(
+      result.contextTokens <= soft,
+      `有效占用应回到 soft 线以下: effective=${result.contextTokens} soft=${soft}`,
+    );
+
+    const idle = events.find((e) => e.channel === 'chat:compaction' && e.payload.stage === 'idle');
+    assert.ok(idle, '应发送 chat:compaction idle 携带有效占用');
+    assert.equal(idle.payload.microcompacted, true);
+    assert.equal(idle.payload.contextTokens, result.contextTokens);
+    assert.ok(
+      !events.some((e) => e.channel === 'chat:compaction' && e.payload.stage === 'done'),
+      '取消语义压缩时不应发 done 横幅',
+    );
+  });
+
+  it('computeContextInfo：有 displayMessages 时显示口径采用有效发送切片，不被完整历史抬高', () => {
+    const full = buildMicrocompactableConversation();
+    const sent = applyMicrocompaction(full).messages;
+    const info = computeContextInfo({
+      messages: full,
+      contextWindow: 200_000,
+      displayMessages: sent,
+      usageSnapshot: null,
+    });
+    assert.equal(info.contextTokens, estimateTokensFromMessages(sent));
+    assert.ok(info.contextTokens < estimateTokensFromMessages(full));
+  });
+});

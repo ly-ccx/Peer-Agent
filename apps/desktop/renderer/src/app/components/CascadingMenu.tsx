@@ -20,7 +20,9 @@ export interface CascadingMenuItem {
 
 interface MenuCoords {
   readonly left: number;
-  readonly top: number;
+  /** 向下弹出时用 top；向上弹出时用 bottom 锚定触发器上沿，避免首帧高度为 0 时错位。 */
+  readonly top?: number;
+  readonly bottom?: number;
   readonly width: number;
   readonly placement: 'down' | 'up';
 }
@@ -85,24 +87,54 @@ export function CascadingMenu({
   const submenuItems = activeGroup?.items ?? [];
 
   // 依据触发器在视口中的位置计算一级 fixed 菜单坐标，并按可用空间自适应上下方向。
+  // 向上弹出时用 bottom 锚定触发器上沿（贴齐底部触发器），不依赖首帧 menu 高度。
+  // 水平方向优先与触发器左对齐；面板更宽贴右边界时左移，避免溢出。
   const updatePosition = useCallback(() => {
     const trigger = triggerRef.current;
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
     const gap = 4;
+    const margin = 8;
     const viewportH = window.innerHeight;
+    const viewportW = window.innerWidth;
     const menuH = menuRef.current?.offsetHeight ?? 0;
+    const menuW = menuRef.current?.offsetWidth ?? Math.max(rect.width, 160);
     const spaceBelow = viewportH - rect.bottom - gap;
     const spaceAbove = rect.top - gap;
-    let placement: MenuCoords['placement'] = 'down';
-    if (menuPlacement === 'up' || (menuH > spaceBelow && spaceAbove > spaceBelow)) {
+    let placement: MenuCoords['placement'] = menuPlacement;
+    if (placement === 'down' && menuH > 0 && spaceBelow < menuH && spaceAbove > spaceBelow) {
       placement = 'up';
+    } else if (placement === 'up' && menuH > 0 && spaceAbove < menuH && spaceBelow > spaceAbove) {
+      placement = 'down';
     }
-    const top = placement === 'down' ? rect.bottom + gap : Math.max(gap, rect.top - menuH - gap);
-    setCoords({ left: rect.left, top, width: rect.width, placement });
+
+    // 模型选择器在底部工具栏：向上时优先右对齐触发器，视觉上更贴触发器；向下仍左对齐。
+    let left = placement === 'up' ? rect.right - menuW : rect.left;
+    if (left + menuW > viewportW - margin) {
+      left = Math.max(margin, viewportW - menuW - margin);
+    }
+    if (left < margin) left = margin;
+
+    if (placement === 'up') {
+      setCoords({
+        left,
+        bottom: Math.max(gap, viewportH - rect.top + gap),
+        width: rect.width,
+        placement,
+      });
+      return;
+    }
+    setCoords({
+      left,
+      top: rect.bottom + gap,
+      width: rect.width,
+      placement,
+    });
   }, [menuPlacement]);
 
-  // 依据当前展开的 group 行位置，计算二级子菜单坐标：默认右侧弹出，贴右边界时翻向左侧，超出视口时上移贴边。
+  // 依据当前展开的 group 行位置，计算二级子菜单坐标：
+  // 默认贴一级面板右侧并与当前 group 行顶对齐；贴右边界时翻向左侧；
+  // 垂直方向优先与 group 行顶对齐，必要时再贴视口底边，避免与一级面板错位。
   const updateSubmenuPosition = useCallback(() => {
     const panel = menuRef.current;
     const row = groupRowRefs.current[activeGroupIndex];
@@ -112,19 +144,23 @@ export function CascadingMenu({
     }
     const panelRect = panel.getBoundingClientRect();
     const rowRect = row.getBoundingClientRect();
-    const gap = 2;
-    const margin = 4;
+    const gap = 0;
+    const margin = 8;
     const subW = submenuRef.current?.offsetWidth ?? 220;
     const subH = submenuRef.current?.offsetHeight ?? 0;
     let left = panelRect.right + gap;
     let side: SubmenuCoords['side'] = 'right';
     if (left + subW > window.innerWidth - margin) {
-      left = panelRect.left - subW - gap;
+      left = Math.max(margin, panelRect.left - subW - gap);
       side = 'left';
     }
+    // 与一级当前行顶对齐；若底部溢出则整体上移，但不高于一级面板顶。
     let top = rowRect.top;
     if (subH > 0 && top + subH > window.innerHeight - margin) {
       top = Math.max(margin, window.innerHeight - subH - margin);
+    }
+    if (top < panelRect.top) {
+      top = panelRect.top;
     }
     setSubmenuCoords({ left, top, side });
   }, [activeGroupIndex]);
@@ -257,7 +293,9 @@ export function CascadingMenu({
     ? ({
         position: 'fixed',
         left: coords.left,
-        top: coords.top,
+        ...(coords.placement === 'up'
+          ? { bottom: coords.bottom, top: 'auto' }
+          : { top: coords.top, bottom: 'auto' }),
         '--pa-cascading-menu-width': `${coords.width}px`,
       } as CSSProperties)
     : { position: 'fixed', left: 0, top: 0, visibility: 'hidden' };
