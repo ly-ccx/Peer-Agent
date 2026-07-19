@@ -160,7 +160,7 @@ function AssistantContentImpl({
 
   const processingSummary = buildProcessingSummary(groups, durationMs, isZh);
   // 流式期间完整展示原始时间线；完成后：
-  // - 默认只把最后正文留在折叠区外；
+  // - 默认把最后一段非空正文留在折叠区外（即使其后还有 tool-call）；
   // - 有未完成交互卡时，该轮所有 text 都外露（选项依赖的决策上下文）。
   const timelineGroups = completedSplit?.historyGroups ?? groups;
   const finalTextGroups = completedSplit?.finalTextGroups ?? [];

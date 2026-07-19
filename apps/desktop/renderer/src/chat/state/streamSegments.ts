@@ -238,7 +238,10 @@ export type SplitFinalTextOptions = {
 /**
  * 把已完成回复拆成「历史过程 + 折叠区外正文」。
  *
- * 默认：仅当时间线最后一组是非空正文时才将它留在折叠区外；其余组严格保持原顺序进入历史区。
+ * 默认：取时间线中最后一段非空 text 外露（即使其后还有 tool-call / thinking）；
+ * 其余组严格保持原顺序进入历史区。这样 text → goal_create_plan 这类「说明后接工具」
+ * 的回合，说明正文不会被自动折叠进「已处理」后看起来像消失。
+ * 若没有任何非空 text，则全部进历史区。
  * keepAllTextOutside=true：所有非空 text 都外露；历史区只保留 thinking / tool-call（过程噪音）。
  */
 export function splitFinalTextGroup(
@@ -259,13 +262,25 @@ export function splitFinalTextGroup(
     };
   }
 
-  const last = groups[groups.length - 1];
-  if (!last || last.type !== 'text' || !last.content.trim()) {
+  let lastTextIndex = -1;
+  for (let i = groups.length - 1; i >= 0; i -= 1) {
+    const group = groups[i];
+    if (group?.type === 'text' && group.content.trim()) {
+      lastTextIndex = i;
+      break;
+    }
+  }
+  if (lastTextIndex < 0) {
     return { historyGroups: groups, finalTextGroups: [] };
   }
+
+  const finalText = groups[lastTextIndex] as Extract<SegmentGroup, { type: 'text' }>;
   return {
-    historyGroups: groups.slice(0, -1),
-    finalTextGroups: [last],
+    historyGroups: [
+      ...groups.slice(0, lastTextIndex),
+      ...groups.slice(lastTextIndex + 1),
+    ],
+    finalTextGroups: [finalText],
   };
 }
 

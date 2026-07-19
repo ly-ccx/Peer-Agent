@@ -208,6 +208,39 @@ describe('splitFinalTextGroup', () => {
     assert.deepEqual(split.finalTextGroups, []);
   });
 
+  it('keeps the last non-empty text outside when timeline ends with a tool call', () => {
+    const groups = groupSegments([
+      think('thinking'),
+      txt('计划说明：将按三步修复折叠丢失'),
+      tool('goal_create_plan'),
+    ]);
+    const split = splitFinalTextGroup(groups);
+
+    assert.deepEqual(split.finalTextGroups, [
+      { type: 'text', content: '计划说明：将按三步修复折叠丢失' },
+    ]);
+    assert.deepEqual(
+      split.historyGroups.map((group) => group.type),
+      ['thinking', 'tool-call-group'],
+    );
+  });
+
+  it('skips trailing empty text and still exposes the last non-empty text before tools', () => {
+    const groups = groupSegments([
+      txt('最终说明'),
+      txt(''),
+      tool('goal_create_plan'),
+      txt('   '),
+    ]);
+    const split = splitFinalTextGroup(groups);
+
+    assert.deepEqual(split.finalTextGroups, [{ type: 'text', content: '最终说明' }]);
+    assert.deepEqual(
+      split.historyGroups.map((group) => group.type),
+      ['text', 'tool-call-group', 'text'],
+    );
+  });
+
   it('keeps all non-empty text outside when keepAllTextOutside (pending interaction context)', () => {
     const groups = groupSegments([
       think('thinking'),
