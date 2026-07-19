@@ -183,6 +183,16 @@ function resolveProviderRecord(modelProviderId, providerIndex) {
   return providerIndex.byGroupId.get(modelProviderId) || null;
 }
 
+/**
+ * 稳定的「按模型」分组 key：groupId::modelId。
+ * 把 groupId / groupId::model / 模型条目 id 等不同绑定形态合并到同一行。
+ */
+function stableModelGroupKey(groupKey, modelId) {
+  const group = String(groupKey || UNBOUND_PROVIDER_KEY).trim() || UNBOUND_PROVIDER_KEY;
+  const model = String(modelId || UNBOUND_MODEL_LABEL).trim() || UNBOUND_MODEL_LABEL;
+  return `${group}::${model}`;
+}
+
 function resolveConversationPricing(meta, providerIndex) {
   const modelProviderId = typeof meta?.modelProviderId === 'string'
     ? meta.modelProviderId.trim()
@@ -196,6 +206,7 @@ function resolveConversationPricing(meta, providerIndex) {
       modelProviderId: null,
       provider: null,
       model: UNBOUND_MODEL_LABEL,
+      modelId: UNBOUND_MODEL_LABEL,
       providerName: UNBOUND_PROVIDER_LABEL,
       groupKey: UNBOUND_PROVIDER_KEY,
       groupLabel: UNBOUND_PROVIDER_LABEL,
@@ -215,28 +226,47 @@ function resolveConversationPricing(meta, providerIndex) {
     || providerDisplayName(providerIndex?.byGroupId?.get(groupKey))
     || groupKey;
 
-  // 会话 meta.model 优先；若 composite 指定了 model 且与命中记录不一致，用 composite.model。
+  const metaModel = typeof meta?.model === 'string' && meta.model.trim()
+    ? meta.model.trim()
+    : '';
   const providerModel = providerModelKey(provider);
-  const model = (typeof meta?.model === 'string' && meta.model.trim())
-    || (composite.model && providerModel && composite.model !== providerModel
-      ? composite.model
-      : '')
-    || providerModelLabel(provider)
+
+  // 规范 modelId：用于分组合并，优先会话显式 model / 复合 id，再回落 provider 配置。
+  const modelId = metaModel
     || composite.model
+    || providerModel
     || modelProviderId;
+
+  // 展示名：优先精确模型条目的 label，避免把 modelId 与 label 混作分组 key。
+  const exactModelProvider = providerIndex?.byComposite?.get(`${groupKey}::${modelId}`) || null;
+  const labelProvider = (exactModelProvider && providerModelKey(exactModelProvider) === modelId)
+    ? exactModelProvider
+    : (provider && providerModel === modelId ? provider : null);
+  const model = providerModelLabel(labelProvider)
+    || providerModelLabel(exactModelProvider)
+    || metaModel
+    || composite.model
+    || providerModelLabel(provider)
+    || modelId;
+
+  // 单价优先用精确模型条目，避免只绑 groupId 时误用其它模型价。
+  const pricingProvider = exactModelProvider
+    || (provider && providerModel === modelId ? provider : null)
+    || provider;
 
   return {
     modelProviderId,
-    provider,
+    provider: pricingProvider || provider,
     model,
+    modelId,
     providerName: groupLabel,
     groupKey,
     groupLabel,
     pricing: {
-      inputPrice: optionalPrice(provider?.inputPrice),
-      outputPrice: optionalPrice(provider?.outputPrice),
-      cacheReadPrice: optionalPrice(provider?.cacheReadPrice),
-      cacheWritePrice: optionalPrice(provider?.cacheWritePrice),
+      inputPrice: optionalPrice(pricingProvider?.inputPrice),
+      outputPrice: optionalPrice(pricingProvider?.outputPrice),
+      cacheReadPrice: optionalPrice(pricingProvider?.cacheReadPrice),
+      cacheWritePrice: optionalPrice(pricingProvider?.cacheWritePrice),
     },
   };
 }
@@ -324,8 +354,7 @@ export function buildUsageStatsSnapshot({
     }
     byProvider.set(resolved.groupKey, providerRow);
 
-    const modelKey = resolved.modelProviderId
-      || `${resolved.groupKey}::${resolved.model}`;
+    const modelKey = stableModelGroupKey(resolved.groupKey, resolved.modelId);
     const modelRow = byModel.get(modelKey) || {
       key: modelKey,
       label: resolved.model,
@@ -342,6 +371,11 @@ export function buildUsageStatsSnapshot({
       ...modelRow,
       ...addTokenBuckets(modelRow, usage),
     });
+    // 展示名：若后续会话解析到更友好的 label，覆盖回落值。
+    if (resolved.model && resolved.model !== modelKey && resolved.model !== resolved.modelId) {
+      modelRow.label = resolved.model;
+      modelRow.model = resolved.model;
+    }
     if (cost.hasPricing) {
       modelRow.hasPricing = true;
       modelRow.estimatedCostUsd += cost.estimatedCostUsd || 0;

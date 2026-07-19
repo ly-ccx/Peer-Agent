@@ -35,8 +35,11 @@ import {
 import { resolveChannel } from './provider-channels.mjs';
 import { getQoderModelMetadata, resolveQoderModelOptionProjection } from './provider-adapters/qoder-model-catalog.mjs';
 import { detectTailRepetition } from './repetition-detector.mjs';
+import { createUsageRequestLog } from './usage-request-log.mjs';
 
 const activeStreams = new Map();
+const usageRequestLog = createUsageRequestLog();
+
 const permissionGate = createChatPermissionGate({ activeStreams });
 const conversationToolContexts = new Map();
 let activeWorkspacePath = null;
@@ -177,12 +180,48 @@ function buildAgentRunOutcome(streamRecord = {}) {
   };
 }
 
-function recordConversationUsage({ conversationStore, streamRecord, usage }) {
+function recordConversationUsage({ conversationStore, streamRecord, usage, usageRequestLog }) {
   if (!conversationStore?.addUsage || !streamRecord?.conversationId || !hasBillableUsage(usage)) return null;
   if (streamRecord.usageRecorded) return null;
   try {
     const lifetimeUsage = conversationStore.addUsage(streamRecord.conversationId, usage);
     streamRecord.usageRecorded = Boolean(lifetimeUsage);
+
+    // 1) 把本轮实际 provider/model 快照写回会话 meta，避免长期 null 导致统计归到「未绑定」。
+    // 2) 追加请求级 usage 日志，供后续按请求聚合。
+    if (lifetimeUsage) {
+      const modelProviderId = streamRecord.actualModelProviderId
+        || streamRecord.modelProviderId
+        || null;
+      const model = streamRecord.actualModel || null;
+      try {
+        if (typeof conversationStore.updateModelEffort === 'function') {
+          conversationStore.updateModelEffort(streamRecord.conversationId, {
+            modelProviderId,
+            model,
+          });
+        }
+      } catch (error) {
+        console.warn('[llm-chat] failed to persist provider snapshot:', error?.message || error);
+      }
+
+      try {
+        usageRequestLog?.append?.({
+          id: streamRecord.streamId || undefined,
+          conversationId: streamRecord.conversationId,
+          streamId: streamRecord.streamId || null,
+          modelProviderId,
+          model,
+          providerName: streamRecord.actualProviderName || null,
+          usage,
+          pricing: streamRecord.actualPricing || {},
+          pricingSource: streamRecord.actualPricingSource || null,
+        });
+      } catch (error) {
+        console.warn('[llm-chat] failed to append usage request log:', error?.message || error);
+      }
+    }
+
     return lifetimeUsage;
   } catch (error) {
     console.warn('[llm-chat] failed to record conversation usage:', error?.message || error);
@@ -341,6 +380,7 @@ function wrapWebContentsForRuntimeEvents(
             conversationStore,
             streamRecord,
             usage: undefined,
+            usageRequestLog,
           });
           const errorPayload = { streamId: streamRecord.streamId, error: 'repetition_detected' };
           if (lifetimeUsage) errorPayload.lifetimeUsage = lifetimeUsage;
@@ -390,6 +430,7 @@ function wrapWebContentsForRuntimeEvents(
           conversationStore,
           streamRecord,
           usage: payload?.usage,
+          usageRequestLog,
         });
         if (lifetimeUsage) {
           payload = { ...payload, lifetimeUsage };
@@ -628,6 +669,8 @@ export function createLlmChatService({
       startedAt: Date.now(),
       // 复读兜底：命中尾部周期检测时需在 send 收口点自行构造 error payload，故留存 streamId。
       streamId,
+      // 发送入口透传的首选 provider；真正命中的实际 provider 在 attempt 循环里覆盖到 actual*。
+      modelProviderId: modelProviderId ?? null,
       // ADR 22: 累积进行中的流式正文/思考/工具段,供 HMR 重载后 reattach 取快照续接。
       accumulatedText: '',
       accumulatedThinking: '',
@@ -675,6 +718,17 @@ export function createLlmChatService({
 
       for (let attemptIndex = 0; attemptIndex < providerCandidates.length; attemptIndex += 1) {
         const provider = providerCandidates[attemptIndex];
+        // 记录本轮实际命中的 provider 快照，供 usage 落盘归因。
+        streamRecord.actualModelProviderId = provider?.id || null;
+        streamRecord.actualModel = provider?.model || null;
+        streamRecord.actualProviderName = provider?.name || null;
+        streamRecord.actualPricing = {
+          inputPrice: provider?.inputPrice,
+          outputPrice: provider?.outputPrice,
+          cacheReadPrice: provider?.cacheReadPrice,
+          cacheWritePrice: provider?.cacheWritePrice,
+        };
+        streamRecord.actualPricingSource = provider?.pricingSource || null;
         let credential;
         try {
           credential = await resolveProviderCredential({ provider, llmConfigStore });

@@ -67,7 +67,7 @@ export interface ConversationStore {
   createConversation(input?: { title?: string; workspacePath?: string; mode?: string }): ConversationMeta;
   appendMessage(id: string, message: object): unknown;
   updateMode(id: string, mode: string): unknown;
-  updateModelEffort(id: string, input: { effort: string; modelProviderId: string | null }): unknown;
+  updateModelEffort(id: string, input: { effort?: string; modelProviderId?: string | null; model?: string | null }): unknown;
   addUsage(id: string, usage: ConversationUsage): unknown;
   subscribeChanges(listener: (event: ConversationChangeEvent) => void, options?: { interval?: number }): () => void;
   readonly [key: string]: unknown;

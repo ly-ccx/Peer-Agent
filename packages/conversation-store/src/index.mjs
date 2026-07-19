@@ -104,11 +104,13 @@ function normalizeMeta(meta) {
   const pinnedOrder = pinnedAt && Number.isFinite(Number(meta?.pinnedOrder)) ? Number(meta.pinnedOrder) : null;
   // messageCount 写入 index 后，列表路径可直接读 meta；缺省时保持 undefined，由 withMessageCount 惰性回填。
   const messageCount = Number.isFinite(Number(meta?.messageCount)) ? Number(meta.messageCount) : undefined;
+  const model = typeof meta?.model === 'string' && meta.model.trim() ? meta.model.trim() : null;
   return {
     ...meta,
     mode: normalizeMode(meta?.mode),
     effort: normalizeEffort(meta?.effort),
     modelProviderId: normalizeModelProviderId(meta?.modelProviderId),
+    model,
     status,
     archivedAt: status === 'archived' ? (meta?.archivedAt || meta?.updatedAt || meta?.createdAt || null) : null,
     pinnedAt,
@@ -460,12 +462,16 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
   // 用户可只切模型不切思考档，或反之。modelProviderId 为 null 表示回退到全局默认 provider。
   // 强绑定校验不在存储层做——发送时 orderProviderCandidates 会校验首选 provider 是否仍可用，
   // 不可用则自动回退；这里只负责如实存取用户的选择。
-  function updateModelEffort(id, { effort, modelProviderId } = {}) {
+  function updateModelEffort(id, { effort, modelProviderId, model } = {}) {
     const index = readIndex();
     const meta = index.find((c) => c.id === id);
     if (!meta) return null;
     if (effort !== undefined) meta.effort = normalizeEffort(effort);
     if (modelProviderId !== undefined) meta.modelProviderId = normalizeModelProviderId(modelProviderId);
+    // 发送成功后可把本轮实际 model 快照落盘；null/空串表示清除。
+    if (model !== undefined) {
+      meta.model = typeof model === 'string' && model.trim() ? model.trim() : null;
+    }
     meta.updatedAt = new Date().toISOString();
     writeJsonl(indexFile, index);
     return withMessageCount(meta);

@@ -207,21 +207,21 @@ test('buildUsageStatsSnapshot resolves id / groupId / groupId::model shapes', ()
   assert.equal(chatgpt.label, 'ChatGPT 订阅');
   assert.equal(chatgpt.conversationCount, 3);
 
+  // groupId::gpt-5.5 与模型条目 id 合并到同一稳定 key
   const gpt55 = snapshot.byModel.find((row) => row.key === `${groupId}::gpt-5.5`);
   assert.ok(gpt55);
   assert.equal(gpt55.label, 'GPT-5.5');
   assert.equal(gpt55.providerName, 'ChatGPT 订阅');
-  assert.ok(Math.abs(gpt55.estimatedCostUsd - 3) < 1e-9);
+  assert.equal(gpt55.conversationCount, 2);
+  assert.ok(Math.abs(gpt55.estimatedCostUsd - 7) < 1e-9);
+  assert.equal(snapshot.byModel.filter((row) => row.label === 'GPT-5.5').length, 1);
 
-  const byEntry = snapshot.byModel.find((row) => row.key === modelEntryId);
-  assert.ok(byEntry);
-  assert.equal(byEntry.label, 'GPT-5.5');
-  assert.ok(Math.abs(byEntry.estimatedCostUsd - 4) < 1e-9);
-
-  const byGroup = snapshot.byModel.find((row) => row.key === groupId);
-  assert.ok(byGroup);
-  assert.equal(byGroup.label, 'GPT-5.6 Sol');
-  assert.equal(byGroup.providerName, 'ChatGPT 订阅');
+  // 仅 groupId 绑定时回落渠道默认模型
+  const byGroupDefault = snapshot.byModel.find((row) => row.key === `${groupId}::gpt-5.6-sol`);
+  assert.ok(byGroupDefault);
+  assert.equal(byGroupDefault.label, 'GPT-5.6 Sol');
+  assert.equal(byGroupDefault.providerName, 'ChatGPT 订阅');
+  assert.equal(byGroupDefault.conversationCount, 1);
 
   const qoder = snapshot.byProvider.find((row) => row.key === '4cbe42eb-ddec-43d9-8969-a9acf381230d');
   assert.ok(qoder);
@@ -235,6 +235,60 @@ test('buildUsageStatsSnapshot resolves id / groupId / groupId::model shapes', ()
   // 友好文案：不再默认落到 unknown / Unknown provider。
   assert.equal(snapshot.byProvider.some((row) => row.label === 'Unknown provider'), false);
   assert.equal(snapshot.byModel.some((row) => row.label === 'unknown'), false);
+});
+
+test('buildUsageStatsSnapshot merges groupId and groupId::model for same model', () => {
+  const groupId = '5198c365-98ac-48f6-a5d0-29067ce63e42';
+  const snapshot = buildUsageStatsSnapshot({
+    generatedAt: '2026-07-18T00:00:00.000Z',
+    providers: [
+      {
+        id: groupId,
+        groupId,
+        name: 'ChatGPT 订阅',
+        model: 'gpt-5.6-sol',
+        modelLabel: 'GPT-5.6 Sol',
+        inputPrice: 1,
+        outputPrice: 2,
+      },
+    ],
+    conversations: [
+      {
+        id: 'bind-group-only',
+        modelProviderId: groupId,
+        lifetimeUsage: { inputTokens: 1_000_000, outputTokens: 0 },
+      },
+      {
+        id: 'bind-composite',
+        modelProviderId: `${groupId}::gpt-5.6-sol`,
+        lifetimeUsage: { inputTokens: 2_000_000, outputTokens: 0 },
+      },
+      {
+        id: 'bind-other-model',
+        modelProviderId: `${groupId}::gpt-5.5`,
+        lifetimeUsage: { inputTokens: 500_000, outputTokens: 0 },
+      },
+    ],
+  });
+
+  const merged = snapshot.byModel.find((row) => row.key === `${groupId}::gpt-5.6-sol`);
+  assert.ok(merged);
+  assert.equal(merged.label, 'GPT-5.6 Sol');
+  assert.equal(merged.conversationCount, 2);
+  assert.equal(merged.inputTokens, 3_000_000);
+  assert.ok(Math.abs(merged.estimatedCostUsd - 3) < 1e-9);
+
+  // 不应再出现以原始 modelProviderId 为 key 的重复行
+  assert.equal(snapshot.byModel.filter((row) => row.key === groupId).length, 0);
+  assert.equal(
+    snapshot.byModel.filter((row) => row.label === 'GPT-5.6 Sol').length,
+    1,
+  );
+
+  const other = snapshot.byModel.find((row) => row.key === `${groupId}::gpt-5.5`);
+  assert.ok(other);
+  assert.equal(other.conversationCount, 1);
+  assert.equal(other.inputTokens, 500_000);
 });
 
 test('addTokenBuckets is pure and additive', () => {

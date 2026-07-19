@@ -257,6 +257,21 @@ test('effort + modelProviderId are per-conversation: default, persist, isolate, 
     const store2 = createConversationStore({ storeDir: dir });
     assert.equal(store2.getConversation(a.id).effort, 'low');
     assert.equal(store2.getConversation(a.id).modelProviderId, 'grp2::claude-y');
+
+    // 发送成功后可同时落盘实际 model 快照；跨重启保留。
+    const afterModelName = store2.updateModelEffort(a.id, {
+      modelProviderId: 'grp2::claude-y',
+      model: 'claude-y',
+    });
+    assert.equal(afterModelName.modelProviderId, 'grp2::claude-y');
+    assert.equal(afterModelName.model, 'claude-y');
+    const store3 = createConversationStore({ storeDir: dir });
+    assert.equal(store3.getConversation(a.id).model, 'claude-y');
+    assert.equal(store3.getConversation(a.id).modelProviderId, 'grp2::claude-y');
+
+    // 空串/空白 model 归一为 null。
+    const cleared = store3.updateModelEffort(a.id, { model: '   ' });
+    assert.equal(cleared.model, null);
   } finally {
     cleanup();
   }
