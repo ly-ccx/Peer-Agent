@@ -37,6 +37,10 @@ import {
 } from './provider-channels.mjs';
 import { loadQoderAccessToken } from './provider-adapters/qoder-local-auth.mjs';
 import { getQoderModelMetadata } from './provider-adapters/qoder-model-catalog.mjs';
+import {
+  fetchModelsDevRegistry,
+  fillMissingPricingFromRegistry,
+} from './provider-adapters/models-dev-registry.mjs';
 import { sendQoderPrivateStream } from './provider-adapters/qoder-private-adapter.mjs';
 
 const { safeStorage } = electron;
@@ -1303,7 +1307,34 @@ export function createLlmConfigStore({
     }
   }
 
-  return { listProviders, listGroups, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, getApiKeyRequestConfig, setOAuthTokens, testConnection };
+
+  /**
+   * Backfill missing price fields for saved models from models.dev.
+   * Only fills undefined price fields; never overwrites existing values.
+   */
+  async function backfillMissingPricingFromModelsDev({
+    fetchImpl,
+    timeoutMs,
+    cacheTtlMs,
+  } = {}) {
+    const registry = await fetchModelsDevRegistry({ fetchImpl, timeoutMs, cacheTtlMs });
+    if (!registry || registry.size === 0) {
+      return { updated: 0, examined: 0, skipped: true };
+    }
+
+    const items = readAll();
+    let updated = 0;
+    const nextItems = items.map((item) => {
+      const { item: filled, changed } = fillMissingPricingFromRegistry(item, registry);
+      if (changed) updated += 1;
+      return filled;
+    });
+
+    if (updated > 0) writeAll(nextItems);
+    return { updated, examined: items.length, skipped: false };
+  }
+
+  return { listProviders, listGroups, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, getApiKeyRequestConfig, setOAuthTokens, testConnection, backfillMissingPricingFromModelsDev };
 }
 
 async function testOpenAI(resolved, model, start) {

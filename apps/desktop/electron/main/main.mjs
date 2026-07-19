@@ -2148,12 +2148,36 @@ ipcMain.handle('llm:channels:list', () => listChannelDescriptors());
 
 // 设置页/模型列表加载前，对 access 过期的 OAuth 渠道静默 ensureFresh 并写回 token，
 // 避免 refresh 仍可用时误报「登录已过期」。失败不抛，UI 继续用本地 oauthStatus。
+let missingPricingBackfillPromise = null;
+
+function scheduleMissingPricingBackfill(reason = 'startup') {
+  if (typeof llmConfigStore.backfillMissingPricingFromModelsDev !== 'function') return;
+  if (missingPricingBackfillPromise) return missingPricingBackfillPromise;
+  missingPricingBackfillPromise = llmConfigStore.backfillMissingPricingFromModelsDev()
+    .then((result) => {
+      if (result?.updated) {
+        console.info(`[llm] models.dev pricing backfill (${reason}): updated ${result.updated}/${result.examined}`);
+      }
+      return result;
+    })
+    .catch((err) => {
+      console.warn('[llm] models.dev pricing backfill failed:', err?.message || err);
+      return null;
+    })
+    .finally(() => {
+      missingPricingBackfillPromise = null;
+    });
+  return missingPricingBackfillPromise;
+}
+
 async function listProvidersWithSilentOAuthRefresh() {
   try {
     await refreshExpiredOAuthProviders({ llmConfigStore });
   } catch (err) {
     console.warn('[llm] silent oauth refresh failed:', err?.message || err);
   }
+  // Fire-and-forget: fill missing prices for saved models when settings/model list loads.
+  void scheduleMissingPricingBackfill('llm:list');
   return llmConfigStore.listProviders();
 }
 
@@ -2664,6 +2688,7 @@ app.whenReady().then(async () => {
 
   // 冷启动：shell 环境快照与首窗创建并行，不阻塞 createWindow。
   // buildShellSpawnArgs 在快照未就绪时会 fallback 到 login shell。
+  void scheduleMissingPricingBackfill('startup');
   void createShellEnvSnapshot().catch((err) => {
     console.warn('[shell-env-snapshot] background create failed:', err?.message || err);
   });

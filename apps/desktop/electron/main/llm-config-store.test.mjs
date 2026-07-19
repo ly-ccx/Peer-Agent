@@ -1174,3 +1174,83 @@ test('model option values persist per model and legacy configs remain readable',
   writeFileSync(configFile, JSON.stringify(persisted, null, 2), 'utf8');
   assert.equal(store.listProviders().find((item) => item.id === persisted[0].id)?.modelOptionValues, undefined);
 }));
+
+
+
+test('backfillMissingPricingFromModelsDev fills only blank price fields and persists', async () => withStore(async ({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const provider = store.addProvider({
+    name: 'OpenAI Compatible',
+    provider: 'openai',
+    baseUrl: 'https://example.com/v1',
+    model: 'gpt-5.4',
+    apiKey: 'sk-test',
+    inputPrice: 9,
+  });
+  assert.equal(provider.inputPrice, 9);
+  assert.equal(provider.outputPrice, undefined);
+
+  const result = await store.backfillMissingPricingFromModelsDev({
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        openai: {
+          models: {
+            'gpt-5.4': {
+              id: 'gpt-5.4',
+              name: 'GPT 5.4',
+              cost: { input: 2.5, output: 10, cache_read: 0.25, cache_write: 3 },
+            },
+          },
+        },
+      }),
+    }),
+  });
+
+  assert.equal(result.updated, 1);
+  assert.equal(result.examined, 1);
+  const reloaded = store.listProviders().find((item) => item.id === provider.id);
+  assert.equal(reloaded.inputPrice, 9); // existing value preserved
+  assert.equal(reloaded.outputPrice, 10);
+  assert.equal(reloaded.cacheReadPrice, 0.25);
+  assert.equal(reloaded.cacheWritePrice, 3);
+  assert.equal(reloaded.pricingSource, 'models.dev-reference');
+
+  const persisted = JSON.parse(readFileSync(configFile, 'utf8'));
+  const models = Array.isArray(persisted) ? persisted : persisted.models;
+  const saved = models.find((item) => item.id === provider.id);
+  assert.equal(saved.inputPrice, 9);
+  assert.equal(saved.outputPrice, 10);
+}));
+
+test('backfillMissingPricingFromModelsDev matches canonical model ids', async () => withStore(async ({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const provider = store.addProvider({
+    name: 'OpenAI Compatible',
+    provider: 'openai',
+    baseUrl: 'https://example.com/v1',
+    model: 'GPT_5_4',
+    apiKey: 'sk-test',
+  });
+  assert.equal(provider.inputPrice, undefined);
+
+  await store.backfillMissingPricingFromModelsDev({
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        openai: {
+          models: {
+            'gpt-5.4': {
+              id: 'gpt-5.4',
+              cost: { input: 2.5, output: 10 },
+            },
+          },
+        },
+      }),
+    }),
+  });
+
+  const reloaded = store.listProviders().find((item) => item.id === provider.id);
+  assert.equal(reloaded.inputPrice, 2.5);
+  assert.equal(reloaded.outputPrice, 10);
+}));

@@ -1480,3 +1480,140 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ── 使用统计（精简版） ── */
+.usage-stats-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--settings-panel-max-width);
+  margin: 0 auto;
+  padding: var(--space-6);
+  padding-top: 52px;
+}
+
+.usage-stats-panel .settings-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.usage-stats-panel .settings-panel__header h2 {
+  margin: 0;
+  color: var(--pa-text-primary);
+  font-family: var(--font-serif-zh);
+  font-size: 1.25rem;
+}
+
+.usage-stats-panel .settings-panel__header p {
+  margin: 6px 0 0;
+  color: var(--graphite-soft);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.usage-stats-card h3 {
+  margin: 0 0 var(--space-3);
+  font-size: 0.98rem;
+  color: var(--pa-text-primary);
+}
+
+.usage-stats-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.usage-stats-metric {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 96px;
+}
+
+.usage-stats-metric__label {
+  color: var(--pa-text-secondary);
+  font-size: 12px;
+}
+
+.usage-stats-metric__value {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.usage-stats-metric__hint {
+  color: var(--pa-text-tertiary, var(--pa-text-secondary));
+  font-size: 12px;
+}
+
+.usage-stats-note {
+  margin: var(--space-2) 0 0;
+  color: var(--pa-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.usage-stats-note--warn {
+  color: var(--state-warning, #b7791f);
+}
+
+.usage-stats-table-wrap {
+  overflow-x: auto;
+}
+
+.usage-stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.usage-stats-table th,
+.usage-stats-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--pa-border-subtle);
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-stats-table th:first-child,
+.usage-stats-table td:first-child {
+  text-align: left;
+}
+
+.usage-stats-table th {
+  color: var(--pa-text-secondary);
+  font-weight: 500;
+}
+
+.usage-stats-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+}
+
+.usage-stats-sub {
+  color: var(--pa-text-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .usage-stats-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .usage-stats-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .usage-stats-panel .settings-panel__header {
+    flex-direction: column;
+  }
+}

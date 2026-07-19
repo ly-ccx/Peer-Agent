@@ -10,8 +10,9 @@ import { LlmSettingsPanel } from './LlmSettingsPanel';
 import { SystemInstructionsPanel } from './SystemInstructionsPanel';
 import { ShortcutsPanel } from './ShortcutsPanel';
 import { UpdatesPanel } from './UpdatesPanel';
+import { UsageStatsPanel } from '../../settings/UsageStatsPanel';
 
-type SettingsSection = 'general' | 'model' | 'skills' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates' | 'archived';
+type SettingsSection = 'general' | 'model' | 'skills' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage';
 type SettingsGroup = { readonly label: string; readonly items: ReadonlyArray<{ key: SettingsSection; label: string }>; readonly lowPriority?: boolean };
 
 /**
@@ -65,6 +66,7 @@ export function SettingsPage({
       items: [
         { key: 'model', label: isZh ? '模型与渠道' : 'Models & providers' },
         { key: 'skills', label: isZh ? '工具与能力' : 'Tools & capabilities' },
+        { key: 'usage', label: i18n.t('settings.usage') },
       ],
     },
     { label: isZh ? '开发' : 'Development', items: [{ key: 'git', label: i18n.t('settings.git') }] },
@@ -161,6 +163,8 @@ export function SettingsPage({
             workspacePath={workspacePath}
             onConversationsChanged={onArchivedConversationsChanged}
           />
+        ) : section === 'usage' ? (
+          <UsageStatsPanel i18n={i18n} />
         ) : (
           <AppearancePanel i18n={i18n} />
         )}

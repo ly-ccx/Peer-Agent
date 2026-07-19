@@ -2,6 +2,13 @@ const MODELS_DEV_URL = 'https://models.dev/api.json';
 const DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 5000;
 
+const PRICING_FIELDS = [
+  'inputPrice',
+  'outputPrice',
+  'cacheReadPrice',
+  'cacheWritePrice',
+];
+
 let cachedRegistry = null;
 let cachedAt = 0;
 let pendingRegistry = null;
@@ -13,6 +20,13 @@ function finiteNumber(value) {
 
 function normalizeModelId(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+/** Lowercase alphanumerics only — bridges gpt-5.4 / gpt5.4 / GPT_5_4 style ids. */
+function canonicalizeModelId(value) {
+  const normalized = normalizeModelId(value).toLowerCase();
+  if (!normalized) return '';
+  return normalized.replace(/[^a-z0-9]+/g, '');
 }
 
 function normalizeModelsDevEntry(entry) {
@@ -38,6 +52,13 @@ function normalizeModelsDevEntry(entry) {
   };
 }
 
+function indexEntry(index, key, entry) {
+  const exact = normalizeModelId(key);
+  if (exact && !index.has(exact)) index.set(exact, entry);
+  const canonical = canonicalizeModelId(key);
+  if (canonical && !index.has(canonical)) index.set(canonical, entry);
+}
+
 function buildModelsDevIndex(data) {
   const index = new Map();
   if (!data || typeof data !== 'object') return index;
@@ -49,12 +70,21 @@ function buildModelsDevIndex(data) {
       if (!entry) continue;
       // models.dev may expose the same exact model ID under several providers.
       // Keep the first registry entry for deterministic, exact-ID enrichment.
-      if (!index.has(entry.id)) index.set(entry.id, entry);
-      const keyedId = normalizeModelId(key);
-      if (keyedId && !index.has(keyedId)) index.set(keyedId, entry);
+      indexEntry(index, entry.id, entry);
+      indexEntry(index, key, entry);
     }
   }
   return index;
+}
+
+function lookupModelsDevMetadata(registry, modelId) {
+  if (!registry || typeof registry.get !== 'function') return undefined;
+  const exact = normalizeModelId(modelId);
+  if (!exact) return undefined;
+  if (registry.has(exact)) return registry.get(exact);
+  const canonical = canonicalizeModelId(exact);
+  if (canonical && registry.has(canonical)) return registry.get(canonical);
+  return undefined;
 }
 
 async function fetchModelsDevRegistry({
@@ -102,23 +132,61 @@ function mergeDefinedFallback(primary, fallback) {
   return merged;
 }
 
+function hasAnyPricing(source) {
+  return PRICING_FIELDS.some((field) => source?.[field] !== undefined);
+}
+
+function resolvePricingSource(model, metadata, providerHasPricing) {
+  if (providerHasPricing) return 'provider';
+  if (hasAnyPricing(model) || hasAnyPricing(metadata)) return 'models.dev-reference';
+  return undefined;
+}
+
 function enrichModelsWithRegistry(models, registry) {
   return models.map((model) => {
-    const metadata = registry.get(model.id);
+    const modelId = model?.id ?? model?.model;
+    const metadata = lookupModelsDevMetadata(registry, modelId);
     if (!metadata) return model;
     const providerHasMetadata = model.metadataSource === 'provider';
     const providerHasPricing = model.pricingSource === 'provider';
+    const merged = mergeDefinedFallback(model, metadata);
     return {
-      ...mergeDefinedFallback(model, metadata),
+      ...merged,
       metadataSource: providerHasMetadata ? 'provider' : 'models.dev',
-      pricingSource: providerHasPricing
-        ? 'provider'
-        : ([metadata.inputPrice, metadata.outputPrice, metadata.cacheReadPrice, metadata.cacheWritePrice]
-          .some((value) => value !== undefined)
-          ? 'models.dev-reference'
-          : undefined),
+      pricingSource: resolvePricingSource(merged, metadata, providerHasPricing),
     };
   });
+}
+
+/**
+ * Fill missing price fields on a saved provider/model record from models.dev.
+ * Never overwrites existing finite prices (user-written or previously filled).
+ * Returns { item, changed }.
+ */
+function fillMissingPricingFromRegistry(item, registry) {
+  if (!item || typeof item !== 'object') return { item, changed: false };
+  const modelId = item.model ?? item.id;
+  const metadata = lookupModelsDevMetadata(registry, modelId);
+  if (!metadata) return { item, changed: false };
+
+  // Do not clobber prices the user explicitly marked as provider-owned.
+  if (item.pricingSource === 'provider') return { item, changed: false };
+
+  let changed = false;
+  const next = { ...item };
+  for (const field of PRICING_FIELDS) {
+    if (next[field] === undefined && metadata[field] !== undefined) {
+      next[field] = metadata[field];
+      changed = true;
+    }
+  }
+
+  if (!changed) return { item, changed: false };
+
+  if (!next.pricingSource) next.pricingSource = 'models.dev-reference';
+  if (!next.metadataSource) next.metadataSource = 'models.dev';
+  next.metadataSyncedAt = new Date().toISOString();
+  return { item: next, changed: true };
 }
 
 function resetModelsDevRegistryCacheForTests() {
@@ -130,9 +198,13 @@ function resetModelsDevRegistryCacheForTests() {
 export {
   MODELS_DEV_URL,
   DEFAULT_CACHE_TTL_MS,
+  PRICING_FIELDS,
   buildModelsDevIndex,
+  canonicalizeModelId,
   enrichModelsWithRegistry,
   fetchModelsDevRegistry,
+  fillMissingPricingFromRegistry,
+  lookupModelsDevMetadata,
   normalizeModelsDevEntry,
   resetModelsDevRegistryCacheForTests,
 };
