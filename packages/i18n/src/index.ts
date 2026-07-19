@@ -122,6 +122,32 @@ export type TranslationKey =
   | 'settings.config.imported'
   | 'settings.config.canceled'
   | 'settings.config.failed'
+  | 'settings.usage'
+  | 'settings.usage.description'
+  | 'settings.usage.loading'
+  | 'settings.usage.refresh'
+  | 'settings.usage.loadFailed'
+  | 'settings.usage.totalTokens'
+  | 'settings.usage.estimatedCost'
+  | 'settings.usage.conversations'
+  | 'settings.usage.inputTokens'
+  | 'settings.usage.outputTokens'
+  | 'settings.usage.cacheTokens'
+  | 'settings.usage.cacheSplit'
+  | 'settings.usage.note'
+  | 'settings.usage.unpricedNote'
+  | 'settings.usage.byProvider'
+  | 'settings.usage.byModel'
+  | 'settings.usage.emptyGroup'
+  | 'settings.usage.col.provider'
+  | 'settings.usage.col.model'
+  | 'settings.usage.col.conversations'
+  | 'settings.usage.col.input'
+  | 'settings.usage.col.output'
+  | 'settings.usage.col.cacheRead'
+  | 'settings.usage.col.cacheWrite'
+  | 'settings.usage.col.total'
+  | 'settings.usage.col.cost'
   | 'auth.login'
   | 'auth.logout'
   | 'auth.not_configured'
@@ -149,7 +175,6 @@ export type TranslationKey =
   | 'status.git.clean'
   | 'status.git.dirty'
   | 'sidebar.noPinned'
-  | 'composer.localHealthOnly'
   | 'composer.placeholder'
   | 'composer.disabledPlaceholder'
   | 'composer.model.ceoAgent'
@@ -158,7 +183,6 @@ export type TranslationKey =
   | 'thread.empty.authAction'
   | 'thread.empty.cloudAction'
   | 'thread.loading.bootstrap'
-  | 'thread.error.healthMissing'
   | 'thread.running.approvedCapability'
   | 'chat.conversations.title'
   | 'chat.conversations.refresh'
@@ -491,14 +515,8 @@ export type TranslationKey =
   | 'access.session_local'
   | 'access.restricted_local'
   | 'access.full_local'
-  | 'evidence.localHealth.success'
-  | 'evidence.localHealth.failed'
-  | 'evidence.localHealth.missingCore'
-  | 'evidence.localHealth.missingCapability'
   | 'artifact.evidence.local'
   | 'artifact.evidence.returned'
-  | 'capability.localHealth.name'
-  | 'capability.localHealth.description'
   | 'task.pinned.minimalLoop'
   | 'task.pinned.reviewDesign'
   | 'updater.badge.upToDate'
@@ -660,6 +678,32 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.config.imported': '已导入 {count} 项，重启后生效',
     'settings.config.canceled': '已取消',
     'settings.config.failed': '操作失败',
+    'settings.usage': '使用统计',
+    'settings.usage.description': '汇总全部会话的 token 用量，并按当前模型单价估算成本。不含逐条请求日志与趋势图。',
+    'settings.usage.loading': '加载中…',
+    'settings.usage.refresh': '刷新',
+    'settings.usage.loadFailed': '加载使用统计失败',
+    'settings.usage.totalTokens': '总 Token',
+    'settings.usage.estimatedCost': '估算成本',
+    'settings.usage.conversations': '会话数',
+    'settings.usage.inputTokens': '输入 Token',
+    'settings.usage.outputTokens': '输出 Token',
+    'settings.usage.cacheTokens': '缓存 Token',
+    'settings.usage.cacheSplit': '读 {read} · 写 {write}',
+    'settings.usage.note': '成本按会话当前绑定模型的单价估算（USD / 1M tokens）。会话切换模型后，历史用量也会按当前单价重算。',
+    'settings.usage.unpricedNote': '有 {count} 个会话缺少有效单价，其成本未计入总计。',
+    'settings.usage.byProvider': '按 Provider',
+    'settings.usage.byModel': '按模型',
+    'settings.usage.emptyGroup': '暂无分组数据',
+    'settings.usage.col.provider': 'Provider',
+    'settings.usage.col.model': '模型',
+    'settings.usage.col.conversations': '会话',
+    'settings.usage.col.input': '输入',
+    'settings.usage.col.output': '输出',
+    'settings.usage.col.cacheRead': '缓存读',
+    'settings.usage.col.cacheWrite': '缓存写',
+    'settings.usage.col.total': '合计',
+    'settings.usage.col.cost': '估算成本',
     'auth.login': '登录',
     'auth.logout': '退出',
     'auth.not_configured': '登录未配置',
@@ -707,7 +751,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'status.git.clean': 'git 干净',
     'status.git.dirty': '{count} 项本地变更',
     'sidebar.noPinned': '暂无置顶任务',
-    'composer.localHealthOnly': '仅 local.health',
     'composer.placeholder': '向 Cloud CEO Agent 发送任务...',
     'composer.disabledPlaceholder': '登录并连接 Cloud Runtime 后开始真实任务...',
     'composer.model.ceoAgent': 'CEO Agent',
@@ -717,7 +760,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'thread.empty.authAction': '需要完成 BUC 登录',
     'thread.empty.cloudAction': '需要配置并连接 Cloud Runtime',
     'thread.loading.bootstrap': '正在准备客户端会话和本地能力注册表...',
-    'thread.error.healthMissing': 'local.health 能力尚未注册。',
     'thread.running.approvedCapability': '正在通过 Electron main 和 Rust core 执行已授权的本地能力...',
     'chat.conversations.title': '真实会话',
     'chat.conversations.refresh': '刷新',
@@ -1050,14 +1092,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'access.session_local': '本会话允许本地',
     'access.restricted_local': '受限本地',
     'access.full_local': '完全本地',
-    'evidence.localHealth.success': '本地 health 能力执行完成。未读取本地文件。',
-    'evidence.localHealth.failed': '本地 health 能力执行失败。',
-    'evidence.localHealth.missingCore': 'Rust health stub 尚未构建。请先执行 cargo build --workspace。',
-    'evidence.localHealth.missingCapability': 'local.health 能力未注册。',
     'artifact.evidence.local': 'Evidence 摘要保留在本地，只有明确允许后才会返回云端。',
     'artifact.evidence.returned': 'Evidence 摘要已经返回 Cloud Runtime。',
-    'capability.localHealth.name': '本地 health 检查',
-    'capability.localHealth.description': '检查本地能力核心是否可用，不读取本地文件。',
     'task.pinned.minimalLoop': '端云最小闭环',
     'task.pinned.reviewDesign': 'Review card 设计',
     'updater.badge.upToDate': '已是最新',
@@ -1217,6 +1253,32 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.config.imported': 'Imported {count} item(s); restart to apply',
     'settings.config.canceled': 'Canceled',
     'settings.config.failed': 'Operation failed',
+    'settings.usage': 'Usage',
+    'settings.usage.description': 'Aggregate token usage across conversations and estimate cost from current model prices. No per-request logs or trend charts.',
+    'settings.usage.loading': 'Loading…',
+    'settings.usage.refresh': 'Refresh',
+    'settings.usage.loadFailed': 'Failed to load usage stats',
+    'settings.usage.totalTokens': 'Total tokens',
+    'settings.usage.estimatedCost': 'Estimated cost',
+    'settings.usage.conversations': 'Conversations',
+    'settings.usage.inputTokens': 'Input tokens',
+    'settings.usage.outputTokens': 'Output tokens',
+    'settings.usage.cacheTokens': 'Cache tokens',
+    'settings.usage.cacheSplit': 'read {read} · write {write}',
+    'settings.usage.note': 'Cost is estimated from the model currently bound to each conversation (USD / 1M tokens). After a model switch, historical usage is re-priced with the current rates.',
+    'settings.usage.unpricedNote': '{count} conversation(s) lack pricing and are excluded from cost totals.',
+    'settings.usage.byProvider': 'By provider',
+    'settings.usage.byModel': 'By model',
+    'settings.usage.emptyGroup': 'No grouped usage yet',
+    'settings.usage.col.provider': 'Provider',
+    'settings.usage.col.model': 'Model',
+    'settings.usage.col.conversations': 'Chats',
+    'settings.usage.col.input': 'Input',
+    'settings.usage.col.output': 'Output',
+    'settings.usage.col.cacheRead': 'Cache read',
+    'settings.usage.col.cacheWrite': 'Cache write',
+    'settings.usage.col.total': 'Total',
+    'settings.usage.col.cost': 'Est. cost',
     'auth.login': 'Sign in',
     'auth.logout': 'Sign out',
     'auth.not_configured': 'Auth not configured',
@@ -1264,7 +1326,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'status.git.clean': 'git clean',
     'status.git.dirty': '{count} local change(s)',
     'sidebar.noPinned': 'No pinned tasks',
-    'composer.localHealthOnly': 'Local health only',
     'composer.placeholder': 'Send a task to Cloud CEO Agent...',
     'composer.disabledPlaceholder': 'Sign in and connect Cloud Runtime to start a real task...',
     'composer.model.ceoAgent': 'CEO Agent',
@@ -1274,7 +1335,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'thread.empty.authAction': 'BUC sign-in is required',
     'thread.empty.cloudAction': 'Cloud Runtime must be configured and connected',
     'thread.loading.bootstrap': 'Preparing client session and local capability registry...',
-    'thread.error.healthMissing': 'local.health capability is not registered.',
     'thread.running.approvedCapability': 'Running approved local capability through Electron main and Rust core...',
     'chat.conversations.title': 'Real conversations',
     'chat.conversations.refresh': 'Refresh',
@@ -1607,14 +1667,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'access.session_local': 'Session local',
     'access.restricted_local': 'Restricted local',
     'access.full_local': 'Full local',
-    'evidence.localHealth.success': 'Local health capability completed. No local files were read.',
-    'evidence.localHealth.failed': 'Local health capability failed.',
-    'evidence.localHealth.missingCore': 'Rust health stub has not been built yet. Run cargo build --workspace.',
-    'evidence.localHealth.missingCapability': 'Local health capability is not registered.',
     'artifact.evidence.local': 'Evidence summary remains local and available for explicit return.',
     'artifact.evidence.returned': 'Evidence summary has been returned to the cloud runtime.',
-    'capability.localHealth.name': 'Local health check',
-    'capability.localHealth.description': 'Checks whether the local capability core is available without reading local files.',
     'task.pinned.minimalLoop': 'Cloud-client minimal loop',
     'task.pinned.reviewDesign': 'Review card design',
     'updater.badge.upToDate': 'Up to date',

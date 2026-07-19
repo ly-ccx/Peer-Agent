@@ -52,8 +52,8 @@ test('normalizeClientToolCall still handles legacy client_tool_call.created with
     data: {
       call: {
         toolCallId: 'tc_legacy',
-        capabilityId: 'local.health',
-        displayName: 'Local Health',
+        capabilityId: 'local.shell.exec',
+        displayName: 'Local Shell',
         arguments: { ping: true },
         policySnapshot: {
           dataLevel: 'D0_public',
@@ -64,7 +64,7 @@ test('normalizeClientToolCall still handles legacy client_tool_call.created with
   };
   const call = normalizeClientToolCall(event);
   assert.ok(call);
-  assert.equal(call!.capabilityId, 'local.health');
+  assert.equal(call!.capabilityId, 'local.shell.exec');
   assert.deepEqual(call!.argumentsPreview, { ping: true });
   assert.equal(call!.riskLevel, 'L0_inert');
   assert.equal(call!.dataLevel, 'D0_public');
@@ -89,7 +89,7 @@ test('normalizeClientToolCall returns null when toolCallId or capabilityId missi
   assert.equal(
     normalizeClientToolCall({
       event: 'client_tool_dispatching',
-      data: { capabilityId: 'local.health' },
+      data: { capabilityId: 'local.shell.exec' },
     }),
     null,
   );

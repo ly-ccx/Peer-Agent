@@ -111,7 +111,6 @@ function decodeToolNameToCapabilityId(toolName: string): string {
   }
   if (toolName === 'local_shell_exec') return 'local.shell.exec';
   if (toolName === 'local_shell_stop') return 'local.shell.stop';
-  if (toolName === 'local_health') return 'local.health';
   // fallback: 采用严格全部替换
   return toolName.replaceAll('_', '.');
 }

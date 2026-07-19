@@ -5,7 +5,7 @@ import { applyToolResult, type TaskThread } from './index.ts';
 
 const call: ClientToolCall = {
   toolCallId: 'tool_call_denied',
-  capabilityId: 'local.health',
+  capabilityId: 'local.shell.exec',
   displayName: 'Local Health',
   reason: 'verify local proxy',
   argumentsPreview: {},
@@ -33,7 +33,7 @@ const deniedResult: ClientToolResult = {
   evidence: {
     evidenceId: 'evidence_denied',
     toolCallId: call.toolCallId,
-    summary: 'The user denied local capability local.health.',
+    summary: 'The user denied local capability local.shell.exec.',
     locale: 'en-US',
     returnedToCloud: true,
     dataLevel: call.dataLevel,

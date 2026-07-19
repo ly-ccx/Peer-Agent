@@ -47,7 +47,7 @@ function makeRequest(capabilityId, args = {}) {
 describe('createLocalSkillProvider', () => {
   it('returns null for unrelated capabilityId', async () => {
     const provider = createLocalSkillProvider({ skillStore: mockSkillStore() });
-    const result = await provider.executeCapability(makeRequest('local.health'));
+    const result = await provider.executeCapability(makeRequest('local.web.fetch'));
     assert.equal(result, null);
   });
 

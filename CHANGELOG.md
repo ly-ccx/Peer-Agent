@@ -2,6 +2,12 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## Unreleased
+
+### Removed
+
+- Remove the unused `cu-proxy-core` Rust health stub and `local.health` scaffold (capability, provider, IPC, packaging, and tests). Keep `peer-credential-helper`.
+
 ## 0.0.1-beta.26 - 2026-07-07
 
 ### Added

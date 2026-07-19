@@ -11,7 +11,6 @@ import os from 'node:os';
 const execFileAsync = promisify(execFile);
 import { createCapabilityRegistry } from './capability-registry.mjs';
 import { loadLocalEnv } from './env-loader.mjs';
-import { runHealthStub } from './core-health.mjs';
 import { readProjectIndex } from './project-index.mjs';
 import { createSessionStore, resolveLocalAccessLevel } from './session-store.mjs';
 import { createLocalToolHost } from './runtime-gateway/local-tool-host.mjs';
@@ -37,6 +36,7 @@ import { createMcpRegistry } from './mcp-registry.mjs';
 import { createMcpCredentialResolver, createMcpCredentialStore } from './mcp-credential-store.mjs';
 import { disconnectMcp, finishMcpOAuth, getMcpPrompt, probeMcpConnection, readMcpResource, startMcpOAuth, testMcpConnection } from './mcp-client.mjs';
 import { createLlmConfigStore } from './llm-config-store.mjs';
+import { collectUsageStats } from './usage-stats.mjs';
 import { listChannelDescriptors, resolveChannel } from './provider-channels.mjs';
 import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
 import { startGoogleBrowserLogin, ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
@@ -1227,34 +1227,6 @@ ipcMain.handle('permission:deny', (_event, payload) => {
   return grant;
 });
 
-// ── Core Health ──
-ipcMain.handle('core:health', (_event, payload) => {
-  const capability = capabilityRegistry.findCapability('local.health');
-  if (!capability) {
-    return {
-      toolCallId: payload.toolCallId,
-      status: 'failed',
-      outputPreview: { status: 'capability_not_registered', capabilityId: 'local.health' },
-      evidence: {
-        evidenceId: randomUUID(),
-        toolCallId: payload.toolCallId,
-        summary:
-          sessionStore.getSession().locale === 'zh-CN'
-            ? 'local.health 能力未注册。'
-            : 'Local health capability is not registered.',
-        locale: sessionStore.getSession().locale,
-        returnedToCloud: false,
-        dataLevel: 'D0_public',
-        redactions: [],
-        artifactRefs: [],
-      },
-      completedAt: new Date().toISOString(),
-    };
-  }
-  sessionStore.setPendingReviewCount(0);
-  return runHealthStub({ workspaceRoot: resourcesRoot, toolCallId: payload.toolCallId, locale: sessionStore.getSession().locale });
-});
-
 // ── Workspace ──
 ipcMain.handle('workspace:list', () => {
   const all = settingsStore.getAll();
@@ -2194,6 +2166,9 @@ async function listGroupsWithSilentOAuthRefresh() {
   return llmConfigStore.listGroups();
 }
 
+// 跨会话用量汇总（精简使用统计页）：会话 lifetimeUsage + 当前 provider 单价估算。
+ipcMain.handle('usage:stats', () => collectUsageStats({ conversationStore, llmConfigStore }));
+
 // 设置页读取独立渠道视图，包含尚未配置任何模型的空渠道。
 ipcMain.handle('llm:groups:list', () => listGroupsWithSilentOAuthRefresh());
 ipcMain.handle('llm:list', () => listProvidersWithSilentOAuthRefresh());
@@ -2702,7 +2677,6 @@ app.whenReady().then(async () => {
     workspaceRoot: resourcesRoot,
     userDataPath,
     sessionStore,
-    runHealthStub,
     mcpRegistry,
     mcpCredentialResolver,
     shellProvider,

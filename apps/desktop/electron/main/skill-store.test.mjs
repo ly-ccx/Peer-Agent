@@ -98,7 +98,6 @@ describe('createSkillStore', () => {
       'dataLevel: D0_public',
       'allowed-tools:',
       '  - local.shell.exec',
-      '  - local.health',
       '---',
       '',
       'Do something important.',
@@ -114,7 +113,7 @@ describe('createSkillStore', () => {
     assert.ok(ctx);
     assert.equal(ctx.skillId, 'ctx-skill');
     assert.equal(ctx.frontmatter.name, 'Context Skill');
-    assert.deepEqual(ctx.frontmatter.allowedTools, ['local.shell.exec', 'local.health']);
+    assert.deepEqual(ctx.frontmatter.allowedTools, ['local.shell.exec']);
     assert.equal(ctx.instructions, 'Do something important.');
     assert.equal(ctx.attachments.length, 1);
     assert.equal(ctx.attachments[0].path, 'assets/template.txt');

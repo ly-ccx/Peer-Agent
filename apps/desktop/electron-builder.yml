@@ -28,8 +28,6 @@ extraResources:
   - from: "../../target/release/"
     to: "bin/"
     filter:
-      - "cu-proxy-core"
-      - "cu-proxy-core.exe"
       - "peer-credential-helper"
       - "peer-credential-helper.exe"
   # 本地能力 Manifest

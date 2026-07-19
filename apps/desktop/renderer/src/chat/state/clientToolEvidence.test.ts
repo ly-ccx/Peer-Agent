@@ -9,7 +9,7 @@ import {
 
 const baseCall: ClientToolCall = {
   toolCallId: 'tool_call_1',
-  capabilityId: 'local.health',
+  capabilityId: 'local.shell.exec',
   displayName: 'Local Health',
   reason: 'verify local proxy',
   argumentsPreview: {},
@@ -67,7 +67,7 @@ test('createFailedClientToolResult records local adapter failures as evidence', 
 
   assert.equal(result.status, 'failed');
   assert.equal(result.toolCallId, baseCall.toolCallId);
-  assert.equal(result.outputPreview.capabilityId, 'local.health');
+  assert.equal(result.outputPreview.capabilityId, 'local.shell.exec');
   assert.equal(result.evidence.returnedToCloud, false);
   assert.match(result.evidence.summary, /adapter crashed/);
 });

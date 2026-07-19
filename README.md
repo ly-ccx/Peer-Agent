@@ -72,7 +72,7 @@ Electron Rich Client Shell
 
 ## 🏁 Quick Start
 
-**Prerequisites:** Node.js + [pnpm](https://pnpm.io/), and the [Rust toolchain](https://rustup.rs/) (for the local capability core).
+**Prerequisites:** Node.js + [pnpm](https://pnpm.io/), and the [Rust toolchain](https://rustup.rs/) (for the credential helper).
 
 ```bash
 # Install dependencies
@@ -103,7 +103,7 @@ peer_agent/
 │   ├── i18n/             # Internationalization
 │   └── ui/               # Base UI components
 ├── crates/
-│   └── cu-proxy-core/    # Rust local capability core
+│   └── peer-credential-helper/  # Cross-platform credential vault helper
 ├── capabilities/         # Capability manifest JSON
 └── docs/architecture/    # Engineering contract & ADRs
 ```

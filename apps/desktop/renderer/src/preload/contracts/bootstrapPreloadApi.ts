@@ -123,6 +123,43 @@ export interface LifetimeUsage {
   readonly cacheReadTokens: number;
 }
 
+/** 跨会话用量汇总（精简使用统计页，对应 main `usage:stats`）。 */
+export interface UsageStatsTokenTotals {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly totalTokens: number;
+}
+
+export interface UsageStatsGroupRow extends UsageStatsTokenTotals {
+  readonly key: string;
+  readonly label: string;
+  readonly providerId?: string | null;
+  readonly providerName?: string;
+  readonly model?: string;
+  readonly conversationCount: number;
+  readonly estimatedCostUsd: number | null;
+  readonly hasPricing: boolean;
+}
+
+export interface UsageStatsSnapshot {
+  readonly generatedAt: string;
+  readonly totals: UsageStatsTokenTotals & {
+    readonly conversationCount: number;
+    readonly pricedConversationCount: number;
+    readonly estimatedCostUsd: number | null;
+  };
+  readonly byProvider: readonly UsageStatsGroupRow[];
+  readonly byModel: readonly UsageStatsGroupRow[];
+  readonly notes: {
+    readonly unpricedConversationCount: number;
+    readonly missingProviderCount: number;
+    readonly pricingUnit: string;
+    readonly scope: string;
+  };
+}
+
 /**
  * ADR 27: 活跃流投影(带工作区维度)。
  * - conversationId:正在运行的会话 id。
@@ -176,7 +213,6 @@ export interface BootstrapPreloadApi {
     readonly grant: PermissionGrant;
     readonly result: ClientToolResult;
   }>;
-  readonly runHealthCheck: (toolCallId: string) => Promise<ClientToolResult>;
   /**
    * 用系统默认方式打开指定文件/目录（点击聊天消息中的文件路径时调用）。
    * - absPath 必须是绝对路径；相对路径需调用方先基于 workspacePath 解析。
@@ -356,6 +392,7 @@ export interface BootstrapPreloadApi {
   readonly workspaceSetActive: (params: { path: string | null }) => Promise<{ activeWorkspace: string | null }>;
   readonly workspaceRemove: (params: { path: string }) => Promise<unknown>;
   readonly workspaceInfo: (params: { path: string }) => Promise<{ name: string; absolutePath: string; git?: { branch?: string; isDirty?: boolean } } | null>;
+  readonly usageGetStats: () => Promise<UsageStatsSnapshot>;
   readonly conversationsList: (params?: {
     workspacePath?: string | null;
     status?: 'active' | 'archived' | readonly ('active' | 'archived')[];

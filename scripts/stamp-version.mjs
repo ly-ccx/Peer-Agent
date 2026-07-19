@@ -50,7 +50,6 @@ const packageJsonFiles = [
 ];
 
 const cargoPackages = [
-  ['cu-proxy-core', 'crates/cu-proxy-core/Cargo.toml'],
   ['peer-credential-helper', 'crates/peer-credential-helper/Cargo.toml'],
 ];
 

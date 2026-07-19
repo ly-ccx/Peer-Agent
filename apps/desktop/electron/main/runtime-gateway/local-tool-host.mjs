@@ -3,7 +3,6 @@ import { createRuntimeSdk } from '@peer-agent/runtime-sdk';
 import { createCapabilityProviderRegistry } from './capability-provider-registry.mjs';
 import { createLocalFileProvider } from './local-file-provider.mjs';
 import { createLocalGoalProvider } from './local-goal-provider.mjs';
-import { createLocalHealthProvider } from './local-health-provider.mjs';
 import { createLocalInteractionProvider } from './local-interaction-provider.mjs';
 import { createLocalMcpProvider } from './local-mcp-provider.mjs';
 import { createLocalSearchAggregateProvider } from './local-search-aggregate-provider.mjs';
@@ -18,7 +17,6 @@ export function createLocalToolHost({
   workspaceRoot,
   userDataPath,
   sessionStore,
-  runHealthStub,
   mcpRegistry,
   mcpCredentialResolver = null,
   fileProvider = createLocalFileProvider({ workspaceRoot }),
@@ -42,7 +40,6 @@ export function createLocalToolHost({
   const mcpProvider = mcpRegistry ? createLocalMcpProvider({ mcpRegistry, credentialResolver: mcpCredentialResolver }) : null;
   const providerRegistry = createCapabilityProviderRegistry({
     providers: providers ?? [
-      createLocalHealthProvider({ workspaceRoot, runHealthStub }),
       fileProvider,
       activeShellProvider,
       goalProvider,
