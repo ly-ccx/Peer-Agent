@@ -1,6 +1,6 @@
 {
   "name": "@peer-agent/chat-kernel",
-  "version": "0.0.1-beta.36",
+  "version": "0.0.1-beta.37",
   "private": true,
   "type": "module",
   "exports": {
