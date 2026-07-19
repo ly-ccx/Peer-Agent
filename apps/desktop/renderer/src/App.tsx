@@ -13,6 +13,7 @@ import { ChatSurface } from './chat/components/ChatSurface';
 import { Sidebar } from './chat/components/Sidebar';
 import { ConversationSearchPalette, type SearchConversationHit } from './chat/components/ConversationSearchPalette';
 import { conversationStore } from './chat/state/conversationStore';
+import { readGitBranchPrefixFromSettings } from './app/gitBranchPrefix';
 import type { CompactionState } from './chat/state/types';
 import { clientApi } from './clientApi';
 import { WorkbenchPanel } from './workbench/WorkbenchPanel';
@@ -73,7 +74,7 @@ function readReplyLanguage(settings: Record<string, unknown> | null | undefined)
 }
 
 function readGitBranchPrefix(settings: Record<string, unknown> | null | undefined): string {
-  return typeof settings?.gitBranchPrefix === 'string' ? settings.gitBranchPrefix : '';
+  return readGitBranchPrefixFromSettings(settings);
 }
 
 export function App() {
@@ -567,21 +568,6 @@ function MainApp() {
     await refreshConversations(activeWorkspace, conversationView);
   }, [activeWorkspace, conversationView, refreshConversations]);
 
-  const handlePinConversation = useCallback(async (id: string) => {
-    await clientApi.conversationsPin({ id });
-    await refreshConversations(activeWorkspace, conversationView);
-  }, [activeWorkspace, conversationView, refreshConversations]);
-
-  const handleUnpinConversation = useCallback(async (id: string) => {
-    await clientApi.conversationsUnpin({ id });
-    await refreshConversations(activeWorkspace, conversationView);
-  }, [activeWorkspace, conversationView, refreshConversations]);
-
-  const handleReorderPinnedConversations = useCallback(async (ids: readonly string[]) => {
-    await clientApi.conversationsReorderPinned({ ids });
-    await refreshConversations(activeWorkspace, conversationView);
-  }, [activeWorkspace, conversationView, refreshConversations]);
-
   const handleDeleteConversation = useCallback(async (id: string) => {
     const target = conversations.find((item) => item.id === id);
     const title = target?.title?.trim() || i18n.t('chat.conversations.untitled');
@@ -605,6 +591,21 @@ function MainApp() {
     i18n,
     refreshConversations,
   ]);
+
+  const handlePinConversation = useCallback(async (id: string) => {
+    await clientApi.conversationsPin({ id });
+    await refreshConversations(activeWorkspace, conversationView);
+  }, [activeWorkspace, conversationView, refreshConversations]);
+
+  const handleUnpinConversation = useCallback(async (id: string) => {
+    await clientApi.conversationsUnpin({ id });
+    await refreshConversations(activeWorkspace, conversationView);
+  }, [activeWorkspace, conversationView, refreshConversations]);
+
+  const handleReorderPinnedConversations = useCallback(async (ids: readonly string[]) => {
+    await clientApi.conversationsReorderPinned({ ids });
+    await refreshConversations(activeWorkspace, conversationView);
+  }, [activeWorkspace, conversationView, refreshConversations]);
 
   const handleRenameConversation = useCallback(async (id: string, title: string) => {
     await clientApi.conversationsUpdateTitle({ id, title: title.trim() });
@@ -644,10 +645,10 @@ function MainApp() {
               newTaskShortcutLabel={displayShortcut(newTaskShortcut)}
               onOpenSearch={handleOpenSearch}
               onSelectConversation={handleSelectConversation}
-              onDeleteConversation={handleDeleteConversation}
               onRenameConversation={handleRenameConversation}
               onArchiveConversation={handleArchiveConversation}
               onRestoreConversation={handleRestoreConversation}
+              onDeleteConversation={handleDeleteConversation}
               onPinConversation={handlePinConversation}
               onUnpinConversation={handleUnpinConversation}
               onReorderPinnedConversations={handleReorderPinnedConversations}

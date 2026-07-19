@@ -17,6 +17,7 @@ import type {
   ContextAttachmentItem,
   ContinuityContextItem,
 } from '@peer-agent/protocol';
+import { resolveGitBranchPrefix } from '../../app/gitBranchPrefix.ts';
 import type { ChatAttachment, ChatMsg } from './types';
 
 /** 把一组附件映射为受治理的附件 Context item（标注传输方式/来源/生命周期）。 */
@@ -123,15 +124,14 @@ export function buildReplyLanguageContext(replyLanguage: string | null | undefin
 /**
  * 把用户配置的「Git 分支前缀」包装为 instruction 层 Context item。
  *
- * - 空串 / 未配置：不产出（不约束分支命名，保持默认行为）。
- * - 非空：产出一条稳定的指令，要求 Agent 在创建 git 分支时以该前缀命名。
+ * - 空串 / 未配置 / 空白：回退默认前缀 `PeerAgent/` 并注入指令（与设置页展示一致）。
+ * - 自定义非空：注入该前缀指令。
  *
  * 注意（System Context 治理）：分支前缀是用户配置的指令型上下文，走既有
  * configInstructions（instruction 层）通道纳入 System Context，不在组件里直接拼接系统提示词。
  */
 export function buildGitBranchPrefixContext(gitBranchPrefix: string | null | undefined): ConfigInstructionContextItem[] {
-  const prefix = typeof gitBranchPrefix === 'string' ? gitBranchPrefix.trim() : '';
-  if (!prefix) return [];
+  const prefix = resolveGitBranchPrefix(gitBranchPrefix);
   return [{
     id: 'settings.gitBranchPrefix',
     title: 'Git Branch Prefix',
