@@ -9,6 +9,7 @@ function compactTokens(value: number | undefined): string | null {
   return String(value);
 }
 
+
 export function ConfiguredModelRow({
   i18n,
   model,
@@ -91,6 +92,8 @@ export function ConfiguredModelRow({
           <small>{zh ? '元数据来源' : 'Metadata source'}: {metadataSource}{model.metadataSyncedAt ? ` · ${model.metadataSyncedAt}` : ''}</small>
           {result ? <small className={`llm-test-result ${result.success ? 'success' : 'fail'}`}>{result.success ? `✓ ${result.model} (${result.latencyMs}ms)` : `✗ ${result.error || 'connection_failed'}`}</small> : null}
         </div>
+        
+
         <div className="llm-configured-model-actions">
           {!model.isDefault ? <button type="button" onClick={onSetDefault} disabled={oauthNotConnected}>{zh ? '设为默认' : 'Set default'}</button> : null}
           <button type="button" onClick={onTest} disabled={testing}>{testing ? '…' : (zh ? '测试' : 'Test')}</button>

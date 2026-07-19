@@ -537,6 +537,16 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
               stage: 'idle',
               streamId,
             }),
+            // 静默 microcompaction 取消语义压缩后，主进程会在 idle 附带有效上下文快照。
+            // 这里同步 authoritativeContext，让右下角占用按「实际发送」口径回落。
+            ...(typeof contextTokens === 'number'
+              ? {
+                  authoritativeContext: {
+                    contextTokens,
+                    contextWindow: typeof contextWindow === 'number' ? contextWindow : null,
+                  },
+                }
+              : {}),
           }));
           return;
         }

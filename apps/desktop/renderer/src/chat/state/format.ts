@@ -35,8 +35,30 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** 把 token 数格式化为简洁形式：<1000 原样，否则以 k 为单位保留一位小数。 */
+/**
+ * 把 token 数格式化为简洁形式：
+ * - < 1_000：原样
+ * - < 1_000_000：X.Xk
+ * - < 1_000_000_000：X.XM
+ * - ≥ 1_000_000_000：X.XB
+ */
 export function formatTokenCount(tokens: number): string {
-  if (tokens < 1000) return String(tokens);
-  return `${(tokens / 1000).toFixed(1)}k`;
+  const n = Number.isFinite(tokens) ? Math.max(0, tokens) : 0;
+  if (n < 1_000) return String(Math.round(n));
+  if (n < 1_000_000) return `${(n / 1_000).toFixed(1)}k`;
+  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  return `${(n / 1_000_000_000).toFixed(1)}B`;
+}
+
+/**
+ * 大数量级中文近似：≥ 1 亿时返回 `≈ X.X 亿`，否则返回 null。
+ * 供使用统计等大数字卡片在 k/M/B 旁补充可读性。
+ */
+export function formatTokenYiApprox(tokens: number): string | null {
+  const n = Number.isFinite(tokens) ? Math.max(0, tokens) : 0;
+  if (n < 100_000_000) return null;
+  const yi = n / 100_000_000;
+  // 1 亿级保留 1 位；≥ 100 亿保留整数，避免过长
+  if (yi >= 100) return `≈ ${Math.round(yi)} 亿`;
+  return `≈ ${yi.toFixed(1)} 亿`;
 }

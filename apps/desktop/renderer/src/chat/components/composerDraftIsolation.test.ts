@@ -35,3 +35,20 @@ test('send actions read the latest draft from the conversation bucket', async ()
   assert.match(surface, /conversationStore\.setDraft\(conversationId, ''\)/);
   assert.doesNotMatch(surface, /\}, \[draft, attachments,/);
 });
+
+test('token usage prefers authoritative effective context over local full-history max', async () => {
+  const tokenUsage = await readSource('./ComposerTokenUsageDisplay.tsx');
+  // 有权威快照时必须直接采用 authoritative + draft，不能再 Math.max 抬回本地完整历史。
+  assert.match(
+    tokenUsage,
+    /const hasAuthoritative =\s*typeof authoritativeContextTokens === 'number'/,
+  );
+  assert.match(
+    tokenUsage,
+    /hasAuthoritative\s*\?\s*Math\.max\(0,\s*authoritativeContextTokens \+ draftContextTokens\)/,
+  );
+  assert.doesNotMatch(
+    tokenUsage,
+    /Math\.max\(authoritativeWithDraft,\s*localContextTokens\)/,
+  );
+});
