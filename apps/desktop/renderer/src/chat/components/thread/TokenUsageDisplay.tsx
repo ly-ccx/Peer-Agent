@@ -51,7 +51,31 @@ function ReasoningEffortSlider({
       const panel = panelRef.current;
       if (!trigger || !panel) return;
       const rect = trigger.getBoundingClientRect();
-      setCoords({ left: rect.left, top: rect.top - panel.offsetHeight - 6 });
+      const panelWidth = panel.offsetWidth;
+      const panelHeight = panel.offsetHeight;
+      const gap = 6;
+      const margin = 8;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+
+      // Prefer above the trigger; flip below when there is not enough room.
+      let top = rect.top - panelHeight - gap;
+      if (top < margin) {
+        const below = rect.bottom + gap;
+        if (below + panelHeight <= viewportHeight - margin) {
+          top = below;
+        } else {
+          top = Math.max(margin, Math.min(top, viewportHeight - panelHeight - margin));
+        }
+      }
+
+      // Prefer left-aligned with the trigger; clamp horizontally to the viewport.
+      const left = Math.max(
+        margin,
+        Math.min(rect.left, viewportWidth - panelWidth - margin),
+      );
+
+      setCoords({ left, top });
     };
     updatePosition();
     window.addEventListener('resize', updatePosition);
