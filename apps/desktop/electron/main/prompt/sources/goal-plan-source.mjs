@@ -19,6 +19,8 @@ const ACTIVE_PLAN_STATUSES = new Set([
   'approved',
   'accepted',
   'executing',
+  'paused',
+  'failed',
 ]);
 
 function flattenTasks(tasks) {

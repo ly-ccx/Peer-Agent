@@ -7,7 +7,7 @@
  * - 工具执行、权限、Evidence 仍由注入的 chatRuntime 及既有能力链路负责。
  */
 
-import { goalPlanIsSelfDriven } from './goal-plan-store.mjs';
+import { derivePlanStatus, goalPlanIsSelfDriven } from './goal-plan-store.mjs';
 
 const DEFAULT_MAX_TURNS = 8;
 const DEFAULT_MAX_TOOL_CALLS = 40;
@@ -1260,20 +1260,40 @@ export function createGoalRunner({
         return getState(planId);
       }
       if (plan.status === 'failed') {
-        goalPlanStore.setRunnerState(planId, {
-          enabled: false,
-          status: 'failed',
-          intent: 'block',
-          phase: 'blocked',
-          updatedAt: now(),
-        });
-        appendRunEvent(planId, {
-          type: 'problem_found',
-          summary: 'Goal Runner stopped because plan status is failed',
-          payload: { summaryCode: 'runner_stopped_failed', reason: 'plan_failed' },
-        });
-        emit('goalRunner:failed', { planId });
-        return getState(planId);
+        // stream/runtime 瞬时失败可能留下 plan.failed，但叶子事实可能已恢复。
+        // 先按任务树重算：仅当叶子事实仍支持 failed 时才真正停机。
+        const recoveredStatus = derivePlanStatus(plan.status, plan.tasks);
+        if (recoveredStatus !== 'failed') {
+          if (recoveredStatus === 'completed') {
+            goalPlanStore.setPlanStatus(planId, 'completed');
+            goalPlanStore.setRunnerState(planId, {
+              enabled: false,
+              status: 'completed',
+              intent: 'verify',
+              phase: 'synthesize',
+              updatedAt: now(),
+            });
+            emit('goalRunner:completed', { planId });
+            return getState(planId);
+          }
+          goalPlanStore.setPlanStatus(planId, 'executing');
+          plan = goalPlanStore.getPlan(planId) || { ...plan, status: 'executing' };
+        } else {
+          goalPlanStore.setRunnerState(planId, {
+            enabled: false,
+            status: 'failed',
+            intent: 'block',
+            phase: 'blocked',
+            updatedAt: now(),
+          });
+          appendRunEvent(planId, {
+            type: 'problem_found',
+            summary: 'Goal Runner stopped because plan status is failed',
+            payload: { summaryCode: 'runner_stopped_failed', reason: 'plan_failed' },
+          });
+          emit('goalRunner:failed', { planId });
+          return getState(planId);
+        }
       }
       if (shouldStopForPlan(plan)) return getState(planId);
 

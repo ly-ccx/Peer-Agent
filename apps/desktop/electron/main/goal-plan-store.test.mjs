@@ -205,6 +205,31 @@ test('derivePlanStatus: executing + 含 failed（其余 completed）→ failed',
   assert.equal(derivePlanStatus('executing', tasks), 'failed');
 });
 
+test('derivePlanStatus: failed + 全叶子 completed → completed（stream 失败后恢复）', () => {
+  const tasks = [
+    { taskId: 't1', status: 'completed' },
+    { taskId: 't2', status: 'completed' },
+  ];
+  assert.equal(derivePlanStatus('failed', tasks), 'completed');
+});
+
+test('derivePlanStatus: failed + 仍有未完成叶子 → 保持 failed（需 resume 才能继续）', () => {
+  const tasks = [
+    { taskId: 't1', status: 'completed' },
+    { taskId: 't2', status: 'pending' },
+  ];
+  assert.equal(derivePlanStatus('failed', tasks), 'failed');
+});
+
+test('derivePlanStatus: failed + 含 failed 叶子且全终态 → 仍为 failed', () => {
+  const tasks = [
+    { taskId: 't1', status: 'completed' },
+    { taskId: 't2', status: 'failed' },
+  ];
+  assert.equal(derivePlanStatus('failed', tasks), 'failed');
+});
+
+
 test('derivePlanStatus: executing + 仍有 running/pending → 维持 executing（不前进）', () => {
   assert.equal(
     derivePlanStatus('executing', [
@@ -1077,6 +1102,52 @@ test('verifier: passed 必须带 evidenceRefs，且目标必须引用真实 task
     }),
     /verifier target task missing-task not found/,
   );
+});
+
+
+test('stream_error 后 setPlanStatus(failed)，任务全部 completed 时 plan 恢复为 completed', () => {
+  // 先批准再执行，模拟真实「中途 stream_error → 后续任务继续成功」路径
+  const created = approvedPlanWithTasks();
+  store.setPlanStatus(created.planId, 'executing');
+  store.setPlanStatus(created.planId, 'failed');
+  assert.equal(store.getPlan(created.planId).status, 'failed');
+
+  registerEvidenceRefs(created.planId, [
+    'artifact://stream-fail-recover-1',
+    'artifact://stream-fail-recover-2',
+    'artifact://stream-fail-recover-3',
+  ]);
+
+  store.recordTaskEvidence(created.planId, 't1', {
+    status: 'completed',
+    evidenceRefs: ['artifact://stream-fail-recover-1'],
+  });
+  assert.equal(
+    store.getPlan(created.planId).status,
+    'failed',
+    '尚有未完成叶子时，瞬时 failed 可保留（不提前伪装成功）',
+  );
+
+  store.recordTaskEvidence(created.planId, 't2a', {
+    status: 'completed',
+    evidenceRefs: ['artifact://stream-fail-recover-2'],
+  });
+  store.recordTaskEvidence(created.planId, 't2b', {
+    status: 'completed',
+    evidenceRefs: ['artifact://stream-fail-recover-3'],
+  });
+  assert.equal(
+    store.getPlan(created.planId).status,
+    'completed',
+    '全部叶子成功完成后，不应继续显示 failed',
+  );
+});
+
+test('getActivePlanByConversation 在 plan 为 failed 时仍返回该计划（可恢复失败）', () => {
+  const created = store.createPlan({ ...draftWithTasks(), conversationId: 'conv-failed-active' });
+  store.setPlanStatus(created.planId, 'failed');
+  const got = store.getActivePlanByConversation('conv-failed-active');
+  assert.equal(got?.planId, created.planId);
 });
 
 test('getActivePlanByConversation 返回同会话最新活跃计划，忽略结束态', () => {

@@ -102,3 +102,38 @@ test('classifyGoalMessage treats correction wording as user_correction', () => {
   assert.equal(classification.intent, 'correction');
   assert.equal(classification.eventType, 'user_correction');
 });
+
+
+test('applyGoalMessageRoute restores a failed Goal on follow_up (not only resume keyword)', () => {
+  const failedPlan = {
+    planId: 'goal-1',
+    status: 'failed',
+    workflowKind: 'goal_self_driven',
+    runner: { phase: 'act' },
+  };
+  const calls = [];
+  const goalPlanStore = {
+    resumeRunner(planId, patch) {
+      calls.push(['resume', planId, patch]);
+      return { ...failedPlan, status: 'executing' };
+    },
+    appendRunEvent(planId, event) {
+      calls.push(['event', planId, event]);
+      return event;
+    },
+  };
+  const route = {
+    type: 'append_goal_event',
+    goalPlanId: 'goal-1',
+    intent: 'follow_up',
+    eventType: 'message_routed',
+    summaryCode: 'msg_follow_up',
+    summary: '用户补充了一句，已归入当前目标：继续推进',
+    messageText: '继续推进刚才的改动',
+  };
+  applyGoalMessageRoute({ route, activeGoalPlan: failedPlan, goalPlanStore });
+  assert.deepEqual(calls.map(([kind]) => kind), ['resume', 'event']);
+  assert.equal(calls[0][0], 'resume');
+  assert.equal(calls[0][1], 'goal-1');
+});
+

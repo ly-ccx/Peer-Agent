@@ -120,37 +120,37 @@ export function aggregateProgress(tasks) {
 /**
  * 由子任务事实自底向上派生「计划整体状态」，与 aggregateProgress 同源（提案 §4/§6）。
  *
- * 负责两种「只前进」的派生（均与 aggregateProgress 同源、由叶子事实驱动、纯函数、不回退）：
+ * 规则：
  *
  * 1. 开工推进：当计划已处于「已批准」状态（approved），
  *    但已有任意子任务进入活跃或终态（running / completed / failed / waiting_user）时，
  *    说明执行已经开始，此时把计划推进到 'executing'，从而让审批相关 UI 正确收敛。
  *    注意：'awaiting_approval'（未批准）不在此规则的推进范围内——未批准计划即便
  *    出现活跃叶子，也不会被派生成 'executing'，以杜绝「顶层 executing 但从未批准、
- *    Runner 未启动」的僵死态（详见规则 1 实现处的说明）。批准闸门只能由显式
- *    recordApproval 打开。
+ *    Runner 未启动」的僵死态。批准闸门只能由显式 recordApproval 打开。
  *
- * 2. 自动收尾（见 Goal 计划自动收尾设计）：当计划已 'executing'
- *    且存在叶子、且所有叶子均为终态（completed / failed）时，把顶层推进到终态——
- *    含任一 failed → 'failed'，否则全 completed → 'completed'。这修复了「子任务 100%
- *    完成但顶层仍显示 executing」的现象。waiting_user（阻塞）叶子不算终态，存在它时不收尾；
- *    空计划（无叶子）不收尾。
+ * 2. 自动收尾：当计划已 'executing'（或可恢复的 'failed'）且存在叶子、且所有叶子均为
+ *    终态（completed / failed）时，把顶层推进到终态——含任一 failed → 'failed'，
+ *    否则全 completed → 'completed'。waiting_user 不算终态；空计划不收尾。
  *
- * 不做任何回退（已是 completed/failed/cancelled/paused 等终态/显式态不会被改回），
- * 避免与 recordApproval / setPlanStatus 的显式状态机产生竞争。
+ * 3. 失败恢复：stream/runtime 中断可能把 plan 显式标成 'failed'，但子任务仍可能继续
+ *    成功完成。若全部叶子已成功终态，则收尾为 'completed'（解除 failed 粘住）。
+ *    未全部终态时保持 'failed'；继续执行需 resumeRunner / 用户续聊显式恢复为 executing。
+ *    历史失败事件仍保留在 runTrace，不因状态恢复而抹掉。
+ *
+ * cancelled / paused / drafting 等显式态不由此函数回退改写。
  *
  * @param {string} currentStatus 当前 plan.status
  * @param {Array} tasks 顶层子任务树
  * @returns {string} 派生后的 plan.status
  */
 export function derivePlanStatus(currentStatus, tasks) {
-  // 规则 2：executing + 全叶子终态 → 自动收尾（completed/failed）。
-  if (currentStatus === 'executing') {
+  const inspectLeaves = (list) => {
     let leafTotal = 0;
     let allTerminal = true;
     let hasFailed = false;
-    const walkLeaves = (list) => {
-      for (const t of list || []) {
+    const walkLeaves = (nodes) => {
+      for (const t of nodes || []) {
         const children = Array.isArray(t.subtasks) ? t.subtasks : [];
         if (children.length > 0) {
           walkLeaves(children);
@@ -161,21 +161,24 @@ export function derivePlanStatus(currentStatus, tasks) {
         else if (t.status !== TERMINAL_OK) allTerminal = false;
       }
     };
-    walkLeaves(tasks);
+    walkLeaves(list);
+    return { leafTotal, allTerminal, hasFailed };
+  };
+
+  // 规则 2/3：executing 自动收尾；failed 仅在「叶子事实已全部成功完成」时恢复为 completed，
+  // 避免 stream_error 把计划永久粘在 failed。未全部终态时保持 failed（需 resumeRunner
+  // 显式恢复为 executing，或等全部叶子成功后自动 completed）。
+  if (currentStatus === 'executing' || currentStatus === 'failed') {
+    const { leafTotal, allTerminal, hasFailed } = inspectLeaves(tasks);
     if (leafTotal > 0 && allTerminal) {
       return hasFailed ? TERMINAL_FAIL : TERMINAL_OK;
     }
     return currentStatus;
   }
 
-  // 规则 1：执行前 → executing（一旦有叶子开工）。
-  // 注意：PRE_EXECUTION 只含 'approved'，不含 'awaiting_approval'。
-  // 未批准的计划即便出现了 running/终态叶子，也不允许被派生成 'executing'——
-  // 否则会产生「顶层 executing 但从未批准、Runner 未启动」的僵死态
-  // （审批按钮消失、探查也永远派发不出去）。批准闸门必须由显式 recordApproval
-  // 把 status 推进到 'approved' 后，本规则才接手推进到 'executing'。
-  const PRE_EXECUTION = new Set(['approved', 'accepted']);
-  if (!PRE_EXECUTION.has(currentStatus)) return currentStatus;
+  // 规则 1：approved/accepted + 已有活跃/终态叶子 → executing。
+  // accepted 覆盖自驱 Goal（无 Plan 批准闸门）；drafting/awaiting_approval/paused/cancelled 等保持原样。
+  if (currentStatus !== 'approved' && currentStatus !== 'accepted') return currentStatus;
 
   let started = false;
   const walk = (list) => {
@@ -959,7 +962,7 @@ function normalizeRunTrace(trace, fallback = {}) {
   return normalized;
 }
 
-const ACTIVE_PLAN_STATUSES = new Set(['drafting', 'awaiting_approval', 'approved', 'accepted', 'executing', 'paused']);
+const ACTIVE_PLAN_STATUSES = new Set(['drafting', 'awaiting_approval', 'approved', 'accepted', 'executing', 'paused', 'failed']);
 
 function normalizeConversationId(value) {
   if (value === undefined || value === null) return null;
@@ -1359,9 +1362,11 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     const normalized = normalizePlan(plan);
     const next = {
       ...normalized,
-      // 计划整体状态与 progress 同源：仅「执行前 → executing」的只前进派生，
-      // 让对话直接触发执行的场景也能正确收起面板审批按钮。
-      status: derivePlanStatus(normalized.status, normalized.tasks),
+      // 默认按叶子事实派生；preserveStatus 用于显式 setPlanStatus（如 stream_error → failed），
+      // 避免瞬时失败态在同一次写入中被立刻恢复。后续 recordTaskEvidence 会重新派生。
+      status: options.preserveStatus
+        ? normalized.status
+        : derivePlanStatus(normalized.status, normalized.tasks),
       progress: aggregateProgress(normalized.tasks),
     };
     // 完整写盘优先：清掉 runner-progress 节流状态，避免旧计数回写覆盖。
@@ -1865,7 +1870,13 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
   function setPlanStatus(planId, status) {
     const plan = getPlan(planId);
     if (!plan) return null;
-    return persist({ ...plan, status, updatedAt: new Date().toISOString() });
+    // 显式状态写入保留调用方给定值（例如 stream_error → failed），
+    // 不在此处被 derivePlanStatus 立即改写；后续 recordTaskEvidence 等
+    // 叶子事实更新会重新派生，从而在任务全部成功时恢复 completed/executing。
+    return persist(
+      { ...plan, status, updatedAt: new Date().toISOString() },
+      { preserveStatus: true },
+    );
   }
 
   /**
