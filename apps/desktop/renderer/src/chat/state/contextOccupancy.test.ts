@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  mergeAuthoritativeContextSnapshot,
   resolveContextOccupancyTokens,
   resolveContextRingTokens,
   seedAuthoritativeContextOnSend,
@@ -105,5 +106,68 @@ describe('resolveContextRingTokens', () => {
     assert.equal(resolveContextRingTokens(null), null);
     assert.equal(resolveContextRingTokens(12_345), 12_345);
     assert.equal(resolveContextRingTokens(-1), 0);
+  });
+});
+
+describe('mergeAuthoritativeContextSnapshot', () => {
+  it('blocks midturn microcompact idle from dropping ~30% to ~8%', () => {
+    // 用户可见路径：三十多% → microcompact idle 写入 38.9k（≈8%/500k）→ done 回 51%。
+    const mid = mergeAuthoritativeContextSnapshot({
+      previous: { contextTokens: 160_000, contextWindow: 500_000 },
+      nextTokens: 38_900,
+      nextWindow: 500_000,
+      mode: 'midturn',
+    });
+    assert.equal(mid?.contextTokens, 160_000);
+    assert.equal(mid?.contextWindow, 500_000);
+
+    // 回合结束 final 写入真实有效上下文，允许绝对更新（可升可降）。
+    const done = mergeAuthoritativeContextSnapshot({
+      previous: mid,
+      nextTokens: 255_000,
+      nextWindow: 500_000,
+      mode: 'final',
+    });
+    assert.equal(done?.contextTokens, 255_000);
+  });
+
+  it('allows midturn rise when next usage is larger', () => {
+    const next = mergeAuthoritativeContextSnapshot({
+      previous: { contextTokens: 100_000, contextWindow: 500_000 },
+      nextTokens: 180_000,
+      nextWindow: 500_000,
+      mode: 'midturn',
+    });
+    assert.equal(next?.contextTokens, 180_000);
+  });
+
+  it('allows midturn drop only when context window shrinks (model switch)', () => {
+    const next = mergeAuthoritativeContextSnapshot({
+      previous: { contextTokens: 200_000, contextWindow: 500_000 },
+      nextTokens: 80_000,
+      nextWindow: 128_000,
+      mode: 'midturn',
+    });
+    assert.equal(next?.contextTokens, 80_000);
+    assert.equal(next?.contextWindow, 128_000);
+  });
+
+  it('allows final drop after semantic compaction', () => {
+    const next = mergeAuthoritativeContextSnapshot({
+      previous: { contextTokens: 400_000, contextWindow: 500_000 },
+      nextTokens: 90_000,
+      nextWindow: 500_000,
+      mode: 'final',
+    });
+    assert.equal(next?.contextTokens, 90_000);
+  });
+
+  it('keeps previous when midturn next is missing', () => {
+    const next = mergeAuthoritativeContextSnapshot({
+      previous: { contextTokens: 120_000, contextWindow: 500_000 },
+      nextTokens: null,
+      mode: 'midturn',
+    });
+    assert.equal(next?.contextTokens, 120_000);
   });
 });

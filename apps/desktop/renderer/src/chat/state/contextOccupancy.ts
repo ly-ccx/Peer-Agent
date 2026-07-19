@@ -87,3 +87,62 @@ export function resolveContextRingTokens(
 ): number | null {
   return finiteNonNegative(contextTokens);
 }
+
+export type AuthoritativeContextSnapshot = {
+  readonly contextTokens: number;
+  readonly contextWindow: number | null;
+};
+
+/**
+ * 合并权威上下文快照。
+ *
+ * - final：stream done / 语义压缩完成。允许绝对写入（含真实回落）。
+ * - midturn：同一回合中途（如 microcompaction idle）。未确认压缩时禁止显著回落，
+ *   只允许抬升或保留旧值；窗口显著变小（切模型）时才允许回落。
+ *
+ * 根因：microcompact idle 在 usageSnapshot=null 时会附带本地低估 contextTokens
+ * （例如 38.9k≈8%），无条件覆盖会把三十多% 打成 8%，done 后再回到真实 51%。
+ */
+export function mergeAuthoritativeContextSnapshot(input: {
+  readonly previous: AuthoritativeContextSnapshot | null | undefined;
+  readonly nextTokens: number | null | undefined;
+  readonly nextWindow?: number | null;
+  readonly mode: 'midturn' | 'final';
+}): AuthoritativeContextSnapshot | null {
+  const nextTokens = finiteNonNegative(input.nextTokens);
+  if (nextTokens == null) {
+    return input.previous
+      ? {
+          contextTokens: input.previous.contextTokens,
+          contextWindow: input.previous.contextWindow ?? null,
+        }
+      : null;
+  }
+
+  const nextWindow =
+    finiteNonNegative(input.nextWindow)
+    ?? (input.previous?.contextWindow ?? null);
+
+  if (!input.previous || input.mode === 'final') {
+    return { contextTokens: nextTokens, contextWindow: nextWindow };
+  }
+
+  const prevTokens = finiteNonNegative(input.previous.contextTokens) ?? 0;
+  const prevWindow = finiteNonNegative(input.previous.contextWindow);
+
+  // 窗口显著缩小（切模型）时允许回落；否则中途只抬不降。
+  const windowShrunk =
+    prevWindow != null
+    && nextWindow != null
+    && nextWindow < prevWindow * 0.9;
+
+  if (!windowShrunk && nextTokens + 1 < prevTokens) {
+    // 保留更高水位；窗口可更新为 next（若提供）否则沿用旧窗口。
+    return {
+      contextTokens: prevTokens,
+      contextWindow: nextWindow ?? prevWindow ?? null,
+    };
+  }
+
+  return { contextTokens: nextTokens, contextWindow: nextWindow };
+}

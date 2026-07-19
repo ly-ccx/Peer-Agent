@@ -32,6 +32,7 @@ import {
   markDanglingToolCallsInterrupted,
 } from '../state/streamSegments';
 import type { ChatMsg } from '../state/types';
+import { mergeAuthoritativeContextSnapshot } from '../state/contextOccupancy';
 import { useTypewriterStream } from './useTypewriterStream';
 
 /** 路由器需要的、无法下沉到 store 的应用级回调（按会话 id 携带上下文）。 */
@@ -233,16 +234,18 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           streamId: null,
         });
 
-        // 口径统一：主进程随 done 下发权威上下文快照时更新；
+        // 口径统一：主进程随 done 下发权威上下文快照时更新（final 模式允许真实回落）；
         // 若本轮未携带快照，保留上一份权威占用，避免发送中/流式结束瞬间掉到本地低估。
-        // 真实压缩路径会显式写入压缩后快照（见 compaction idle/done），切换模型会清空。
+        // 中途 microcompaction idle 走 midturn 合并，禁止未压缩时显著回落。
         if (typeof contextTokens === 'number') {
-          conversationStore.setState(cid, {
-            authoritativeContext: {
-              contextTokens,
-              contextWindow: typeof contextWindow === 'number' ? contextWindow : null,
-            },
-          });
+          conversationStore.setState(cid, (prev) => ({
+            authoritativeContext: mergeAuthoritativeContextSnapshot({
+              previous: prev.authoritativeContext,
+              nextTokens: contextTokens,
+              nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
+              mode: 'final',
+            }),
+          }));
         }
 
         // 用量账本真值在主进程：优先反映 lifetimeUsage，否则按本轮 msgUsage 累加。
@@ -532,22 +535,26 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         }
         if (stage === 'idle') {
           cancelCompactionDoneTimer(cid, streamId);
-          conversationStore.setState(cid, (prev) => ({
-            compactionState: reduceCompactionLifecycle(prev.compactionState, {
-              stage: 'idle',
-              streamId,
-            }),
-            // 静默 microcompaction 取消语义压缩后，主进程会在 idle 附带有效上下文快照。
-            // 这里同步 authoritativeContext，让右下角占用按「实际发送」口径回落。
-            ...(typeof contextTokens === 'number'
-              ? {
-                  authoritativeContext: {
-                    contextTokens,
-                    contextWindow: typeof contextWindow === 'number' ? contextWindow : null,
-                  },
-                }
-              : {}),
-          }));
+          conversationStore.setState(cid, (prev) => {
+            // microcompaction idle 常在 usageSnapshot=null 时附带本地低估。
+            // midturn 合并：未确认语义压缩时禁止把占用写小，避免「三十多 → 8% → 51%」。
+            const nextAuthoritative =
+              typeof contextTokens === 'number'
+                ? mergeAuthoritativeContextSnapshot({
+                    previous: prev.authoritativeContext,
+                    nextTokens: contextTokens,
+                    nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
+                    mode: 'midturn',
+                  })
+                : prev.authoritativeContext;
+            return {
+              compactionState: reduceCompactionLifecycle(prev.compactionState, {
+                stage: 'idle',
+                streamId,
+              }),
+              authoritativeContext: nextAuthoritative,
+            };
+          });
           return;
         }
         const activeCompaction = conversationStore.getSnapshot(cid).compactionState;
@@ -567,13 +574,15 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
             streamId,
             now: completedAt,
           }),
-          // 原子替换压缩前快照。若旧 renderer 对接的是尚未携带快照的主进程，则清空旧值，
-          // 回退到消息切片的本地估算，绝不继续把底部数字锁在压缩前高位。
+          // 语义压缩完成：final 模式允许真实回落。缺快照时清空，回退本地估算，
+          // 绝不继续把底部数字锁在压缩前高位。
           authoritativeContext: typeof contextTokens === 'number'
-            ? {
-                contextTokens,
-                contextWindow: typeof contextWindow === 'number' ? contextWindow : null,
-              }
+            ? mergeAuthoritativeContextSnapshot({
+                previous: prev.authoritativeContext,
+                nextTokens: contextTokens,
+                nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
+                mode: 'final',
+              })
             : null,
         }));
         if (
