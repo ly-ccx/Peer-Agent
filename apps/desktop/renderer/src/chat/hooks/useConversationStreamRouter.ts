@@ -233,7 +233,9 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           streamId: null,
         });
 
-        // 口径统一：把主进程随 done 下发的权威上下文用量快照反映到该会话表达层。
+        // 口径统一：主进程随 done 下发权威上下文快照时更新；
+        // 若本轮未携带快照，保留上一份权威占用，避免发送中/流式结束瞬间掉到本地低估。
+        // 真实压缩路径会显式写入压缩后快照（见 compaction idle/done），切换模型会清空。
         if (typeof contextTokens === 'number') {
           conversationStore.setState(cid, {
             authoritativeContext: {
@@ -241,8 +243,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
               contextWindow: typeof contextWindow === 'number' ? contextWindow : null,
             },
           });
-        } else {
-          conversationStore.setState(cid, { authoritativeContext: null });
         }
 
         // 用量账本真值在主进程：优先反映 lifetimeUsage，否则按本轮 msgUsage 累加。

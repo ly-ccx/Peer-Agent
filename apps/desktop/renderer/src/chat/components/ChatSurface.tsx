@@ -38,8 +38,10 @@ import {
   buildMessageRailItemsIncremental,
   type MessageRailItemCache,
 } from '../state/messageRailItems';
+import { seedAuthoritativeContextOnSend } from '../state/contextOccupancy';
 import {
   estimateConversationHistoryTokensIncremental,
+  estimateDraftTokens,
   type ConversationTokenEstimateCache,
 } from '../state/tokenEstimate';
 import {
@@ -1324,6 +1326,17 @@ export function ChatSurface({
       return;
     }
 
+    // 发送瞬间固化「发送前可见占用」为权威种子：草稿清空后不会仅因口径切换从 63% 掉到 36%。
+    // 真实压缩 / stream done 仍会覆盖；切换模型会清空。
+    const seeded = seedAuthoritativeContextOnSend({
+      previousAuthoritativeTokens: authoritativeContext?.contextTokens ?? null,
+      historyContextTokens,
+      sentDraftTokens: estimateDraftTokens(text, sentAttachments),
+      previousContextWindow: authoritativeContext?.contextWindow ?? null,
+      fallbackContextWindow: activeProvider?.contextWindow ?? null,
+    });
+    setAuthoritativeContext(seeded);
+
     const now = Date.now();
     const userMsg: ChatMsg = { id: nextId(), role: 'user', content: text, timestamp: now, attachments: sentAttachments.length ? sentAttachments : undefined };
     const assistantMsg: ChatMsg = { id: nextId(), role: 'assistant', content: '', segments: [], timestamp: now };
@@ -1353,7 +1366,25 @@ export function ChatSurface({
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
     void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId, modelProviderId, workspacePath, contextAttachments, continuityContext, configInstructions });
-  }, [isStreaming, hasProvider, conversationId, loadStatus, messages, onConversationUpdated, effort, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
+  }, [
+    isStreaming,
+    hasProvider,
+    conversationId,
+    loadStatus,
+    messages,
+    onConversationUpdated,
+    effort,
+    mode,
+    modelProviderId,
+    systemInstructions,
+    replyLanguage,
+    gitBranchPrefix,
+    workspacePath,
+    authoritativeContext,
+    historyContextTokens,
+    activeProvider?.contextWindow,
+    setAuthoritativeContext,
+  ]);
 
   const handleSend = useCallback(async () => {
     // 恢复历史尚未完成时绝不允许发送：否则空 renderer 桶会先追加新回合，
