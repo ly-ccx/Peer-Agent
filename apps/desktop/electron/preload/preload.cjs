@@ -95,6 +95,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   workspaceInfo: (params) => ipcRenderer.invoke('workspace:info', params),
   conversationsList: (params) => ipcRenderer.invoke('conversations:list', params),
   usageGetStats: () => ipcRenderer.invoke('usage:stats'),
+  usageGetDaily: (params) => ipcRenderer.invoke('usage:daily', params),
   conversationsSearch: (params) => ipcRenderer.invoke('conversations:search', params),
   conversationsCreate: (params) => ipcRenderer.invoke('conversations:create', params),
   conversationsGet: (params) => ipcRenderer.invoke('conversations:get', params),

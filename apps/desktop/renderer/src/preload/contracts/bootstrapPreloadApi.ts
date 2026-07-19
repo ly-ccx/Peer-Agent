@@ -160,6 +160,41 @@ export interface UsageStatsSnapshot {
   };
 }
 
+/** 请求日志按天聚合（Token 热力图 / 趋势，对应 main `usage:daily`）。 */
+export type UsageDailyRange = '7d' | '1m' | '3m' | '6m' | '1y';
+
+export interface UsageDailyDay {
+  readonly date: string;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly totalTokens: number;
+  readonly requestCount: number;
+  readonly estimatedCostUsd: number | null;
+}
+
+export interface UsageDailySnapshot {
+  readonly range: UsageDailyRange;
+  readonly startDate: string;
+  readonly endDate: string;
+  readonly source: string;
+  readonly days: readonly UsageDailyDay[];
+  readonly totals: {
+    readonly totalTokens: number;
+    readonly requestCount: number;
+    readonly pricedRequestCount: number;
+    readonly estimatedCostUsd: number | null;
+    readonly maxTokens: number;
+    readonly dayCount: number;
+    readonly activeDayCount: number;
+  };
+  readonly notes: {
+    readonly emptyLog: boolean;
+    readonly scope: string;
+  };
+}
+
 /**
  * ADR 27: 活跃流投影(带工作区维度)。
  * - conversationId:正在运行的会话 id。
@@ -393,6 +428,7 @@ export interface BootstrapPreloadApi {
   readonly workspaceRemove: (params: { path: string }) => Promise<unknown>;
   readonly workspaceInfo: (params: { path: string }) => Promise<{ name: string; absolutePath: string; git?: { branch?: string; isDirty?: boolean } } | null>;
   readonly usageGetStats: () => Promise<UsageStatsSnapshot>;
+  readonly usageGetDaily: (params?: { range?: UsageDailyRange }) => Promise<UsageDailySnapshot>;
   readonly conversationsList: (params?: {
     workspacePath?: string | null;
     status?: 'active' | 'archived' | readonly ('active' | 'archived')[];
