@@ -349,8 +349,49 @@ export async function runCompactionCheck({
       return { compacted: true, messages: compactResult.messages, compactResult };
     }
 
+    // Layer 1 微压缩可能已把实际发送上下文压回 soft 线以下，从而取消 Layer 2。
+    // 此时 compactResult.compacted=false，但仍必须：
+    // 1) 把微压缩后的消息交给上游实际发送；
+    // 2) 把「有效上下文」占用回传给 UI，避免圆环继续锁在压缩前高位。
+    const effectiveMessages = Array.isArray(compactResult?.messages)
+      ? compactResult.messages
+      : messages;
+    const microApplied = Boolean(
+      compactResult?.microcompacted
+      || effectiveMessages !== messages,
+    );
+    if (microApplied && webContents?.send && conversationId) {
+      const effectiveInfo = computeContextInfo({
+        messages: effectiveMessages,
+        contextWindow,
+        tools,
+        displayMessages: effectiveMessages,
+        // 显示有效发送量：忽略上一轮高水位 usage，避免把 87% 锁死在 UI。
+        usageSnapshot: null,
+      });
+      settledBanner = true;
+      endCompaction({ conversationId, streamId });
+      webContents.send('chat:compaction', {
+        conversationId,
+        streamId,
+        stage: 'idle',
+        emergency,
+        contextTokens: effectiveInfo.contextTokens,
+        contextWindow: effectiveInfo.contextWindow,
+        microcompacted: true,
+      });
+      return {
+        compacted: false,
+        messages: effectiveMessages,
+        compactResult,
+        microcompacted: true,
+        contextTokens: effectiveInfo.contextTokens,
+        contextWindow: effectiveInfo.contextWindow,
+      };
+    }
+
     settleBannerIdle();
-    return { compacted: false, messages };
+    return { compacted: false, messages: effectiveMessages, compactResult };
   } catch (err) {
     // 压缩失败不应静默吞掉:收尾横幅后继续抛出,交由上游统一的终态兜底处理。
     settleBannerIdle();

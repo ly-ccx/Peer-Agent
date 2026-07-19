@@ -110,9 +110,9 @@ export async function agentLoopGemini({
           // 对齐进度条：上一轮真实 usage 高水位也参与 soft 触发。
           usageSnapshot: loop.getLastTurnUsage?.() ?? null,
         });
-        if (compaction.compacted) {
+        if (compaction.compacted || compaction.microcompacted) {
           apiMessages = compaction.messages;
-          // 压缩后清掉陈旧 usage，避免用压缩前的高水位在下一轮再次强制触发。
+          // 语义压缩或静默微压缩后，清掉陈旧 usage，避免压缩前高水位继续锁死显示/触发。
           loop.clearLastTurnUsage?.();
         }
 
@@ -129,6 +129,10 @@ export async function agentLoopGemini({
           effort,
           supportsReasoning: Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning),
           maxOutputTokens,
+          authMethod: resolvedChannel?.authMethod,
+          projectId: resolvedChannel?.oauthProjectId,
+          userPromptId: streamId || conversationId || undefined,
+          sessionId: conversationId || streamId || undefined,
           signal,
           webContents,
           streamId,

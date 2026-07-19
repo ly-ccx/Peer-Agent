@@ -1337,7 +1337,14 @@ export async function compactIfNeeded({
   const estimated = usageNum != null ? Math.max(estimatedLocal, usageNum) : estimatedLocal;
 
   if (!shouldRunCompaction({ force, estimatedTokens: estimated, contextWindow, messages })) {
-    return { compacted: false, messages };
+    // Layer 1 可能已压回 soft 线。保留 messages（已微压缩）并标记 microcompacted，
+    // 让 coordinator 能回传有效上下文占用，而不是把原始高位继续显示给 UI。
+    return {
+      compacted: false,
+      messages,
+      microcompacted: Boolean(microcompactResult?.stats?.compactedCount > 0),
+      microcompactStats: microcompactResult?.stats ?? null,
+    };
   }
 
   // Split
