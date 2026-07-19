@@ -27,6 +27,7 @@ import {
 import {
   CHATGPT_SUBSCRIPTION_BASE_URL,
   CHATGPT_SUBSCRIPTION_NAME,
+  GEMINI_CODE_ASSIST_BASE_URL,
   GEMINI_OAUTH_NAME,
   QODER_PRIVATE_NAME,
   defaultsForChannel,
@@ -431,6 +432,10 @@ export function createLlmConfigStore({
       }
       if (item.channelId !== 'google-ai') {
         item.channelId = 'google-ai';
+        changed = true;
+      }
+      if (item.baseUrl !== GEMINI_CODE_ASSIST_BASE_URL) {
+        item.baseUrl = GEMINI_CODE_ASSIST_BASE_URL;
         changed = true;
       }
       if (item.wireOverride !== undefined) {
@@ -871,7 +876,7 @@ export function createLlmConfigStore({
       wireOverride: isSubscription || isGoogleOAuth || isGrokOAuth || isLocalQoderAuth ? undefined : wireOverride,
       authMethod: method,
       name: isSubscription ? CHATGPT_SUBSCRIPTION_NAME : isGoogleOAuth ? GEMINI_OAUTH_NAME : isGrokOAuth ? (name || 'Grok 官方') : isLocalQoderAuth ? (name || QODER_PRIVATE_NAME) : name || provider || 'Untitled',
-      baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : isLocalQoderAuth ? defaults.baseUrl : baseUrl || defaults.baseUrl,
+      baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : isGoogleOAuth ? GEMINI_CODE_ASSIST_BASE_URL : isLocalQoderAuth ? defaults.baseUrl : baseUrl || defaults.baseUrl,
       // 订阅默认落到权威清单的最新模型(gpt-5.5),非订阅沿用各家 preset。
       model: selectedModel,
       modelLabel: modelLabel || undefined,
@@ -978,7 +983,12 @@ export function createLlmConfigStore({
         apiKeyMasked: patch.apiKey ? maskApiKey(patch.apiKey) : undefined,
       });
     }
-    if (patch.oauthProjectId !== undefined) item.oauthProjectId = patch.oauthProjectId || undefined;
+    if (patch.oauthProjectId !== undefined) {
+      const nextProjectId = String(patch.oauthProjectId || '').trim() || undefined;
+      item.oauthProjectId = nextProjectId;
+      // project 是 group 级元数据：同步到同 group 全部 model，并在 writeAll 时写入 channel。
+      syncGroupSecretMetadata(items, groupId, { oauthProjectId: nextProjectId });
+    }
     if (patch.customHeaders !== undefined) {
       validateCustomHeaders(patch.customHeaders || {});
       item.customHeaders = patch.customHeaders || undefined;
@@ -1006,7 +1016,7 @@ export function createLlmConfigStore({
       item.channelId = 'google-ai';
       delete item.wireOverride;
       item.provider = 'openai';
-      item.baseUrl = item.baseUrl || defaultsForChannel('google-ai').baseUrl;
+      item.baseUrl = GEMINI_CODE_ASSIST_BASE_URL;
     }
     if (item.authMethod === 'oauth_grok') {
       item.name = 'Grok 官方';

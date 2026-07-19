@@ -6,6 +6,7 @@ import {
   fetchGeminiQuota,
   fetchGrokQuota,
   fetchProviderSubscriptionQuota,
+  resolveGeminiCodeAssistProjectId,
   supportsSubscriptionQuota,
 } from './subscription-quota.mjs';
 
@@ -176,6 +177,84 @@ assert.equal(supportsSubscriptionQuota('api_key'), false);
   assert.equal(refreshed.success, true);
   assert.equal(refreshed.usedPercent, 42);
   assert.equal(fetchCount, 2);
+}
+
+
+// Gemini Code Assist project resolution
+{
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method, body: init?.body ? JSON.parse(init.body) : null });
+    if (String(url).includes('loadCodeAssist')) {
+      return new Response(JSON.stringify({
+        cloudaicompanionProject: 'proj-from-load',
+        currentTier: { id: 'free-tier' },
+      }), { status: 200 });
+    }
+    throw new Error(`unexpected url ${url}`);
+  };
+  const projectId = await resolveGeminiCodeAssistProjectId({
+    accessToken: 'tok',
+    fetchImpl,
+  });
+  assert.equal(projectId, 'proj-from-load');
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /loadCodeAssist$/);
+  assert.equal(calls[0].body.metadata.pluginType, 'GEMINI');
+}
+
+{
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    const href = String(url);
+    calls.push({ url: href, method: init?.method, body: init?.body ? JSON.parse(init.body) : null });
+    if (href.includes('loadCodeAssist')) {
+      return new Response(JSON.stringify({
+        allowedTiers: [{ id: 'free-tier', isDefault: true }],
+      }), { status: 200 });
+    }
+    if (href.includes('onboardUser')) {
+      return new Response(JSON.stringify({
+        name: 'operations/abc',
+        done: false,
+      }), { status: 200 });
+    }
+    if (href.includes('/operations/abc')) {
+      return new Response(JSON.stringify({
+        name: 'operations/abc',
+        done: true,
+        response: { cloudaicompanionProject: { id: 'proj-onboarded' } },
+      }), { status: 200 });
+    }
+    throw new Error(`unexpected url ${href}`);
+  };
+  const projectId = await resolveGeminiCodeAssistProjectId({
+    accessToken: 'tok',
+    fetchImpl,
+    pollIntervalMs: 0,
+  });
+  assert.equal(projectId, 'proj-onboarded');
+  assert.equal(calls.some((c) => c.url.includes('onboardUser')), true);
+  assert.equal(calls.some((c) => c.url.includes('/operations/abc')), true);
+}
+
+
+// network failure should surface, not silently return null
+{
+  let threw = false;
+  try {
+    await resolveGeminiCodeAssistProjectId({
+      accessToken: 'tok',
+      fetchImpl: async () => {
+        throw new Error('fetch failed: ConnectTimeoutError');
+      },
+      pollIntervalMs: 0,
+    });
+  } catch (error) {
+    threw = true;
+    assert.match(String(error?.message || error), /loadCodeAssist 网络请求失败/);
+  }
+  assert.equal(threw, true);
 }
 
 console.log('subscription-quota tests passed');

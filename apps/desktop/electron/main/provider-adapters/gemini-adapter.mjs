@@ -23,14 +23,23 @@ function normalizeGeminiUsage(usage) {
   };
 }
 
+function unwrapGeminiPayload(parsed) {
+  // Code Assist SSE 外层是 { response: GenerateContentResponse }；API key 路径则是裸 GenerateContentResponse。
+  if (parsed && typeof parsed === 'object' && parsed.response && typeof parsed.response === 'object') {
+    return parsed.response;
+  }
+  return parsed;
+}
+
 function consumeGeminiPayload(parsed, state, webContents, streamId, trace = null) {
-  trace?.recordSsePayload?.(JSON.stringify(parsed), parsed);
-  const streamError = extractGeminiStreamError(parsed);
+  const payload = unwrapGeminiPayload(parsed);
+  trace?.recordSsePayload?.(JSON.stringify(parsed), payload);
+  const streamError = extractGeminiStreamError(payload) || extractGeminiStreamError(parsed);
   if (streamError) {
     state.streamError = streamError;
     return;
   }
-  const candidates = Array.isArray(parsed?.candidates) ? parsed.candidates : [];
+  const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
   for (const candidate of candidates) {
     const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
     for (const part of parts) {
@@ -55,7 +64,7 @@ function consumeGeminiPayload(parsed, state, webContents, streamId, trace = null
       }
     }
   }
-  const usage = normalizeGeminiUsage(parsed?.usageMetadata);
+  const usage = normalizeGeminiUsage(payload?.usageMetadata);
   if (usage) {
     state.usage = usage;
     webContents.send('chat:stream:usage', { streamId, usage });
@@ -126,12 +135,25 @@ export async function sendGeminiStream({
   effort,
   supportsReasoning,
   maxOutputTokens,
+  authMethod,
+  projectId,
+  userPromptId,
+  sessionId,
   signal,
   webContents,
   streamId,
 }) {
   const url = endpoint || `${baseUrl.replace(/\/+$/, '')}/models/${model}:streamGenerateContent?alt=sse`;
-  const body = encodeGeminiGenerateContentRequest({ messages, tools, maxOutputTokens });
+  const body = encodeGeminiGenerateContentRequest({
+    messages,
+    tools,
+    maxOutputTokens,
+    model,
+    projectId,
+    authMethod,
+    userPromptId,
+    sessionId,
+  });
   const trace = createProviderStreamTrace({
     provider: 'gemini',
     baseUrl,

@@ -136,6 +136,26 @@ describe('Provider message encoders', () => {
     assert.deepEqual(body.generationConfig, { maxOutputTokens: 2048 });
   });
 
+  it('wraps Gemini OAuth requests into Code Assist envelope', () => {
+    const body = encodeGeminiGenerateContentRequest({
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      maxOutputTokens: 2048,
+      authMethod: 'oauth_google',
+      model: 'models/gemini-3.5-flash',
+      projectId: 'peer-project',
+      userPromptId: 'stream-1',
+      sessionId: 'conversation-1',
+    });
+
+    assert.equal(body.model, 'gemini-3.5-flash');
+    assert.equal(body.project, 'peer-project');
+    assert.equal(body.user_prompt_id, 'stream-1');
+    assert.equal(body.request.session_id, 'conversation-1');
+    assert.deepEqual(body.request.generationConfig, { maxOutputTokens: 2048 });
+    assert.equal(body.request.contents[0].role, 'user');
+  });
+
   it('lowers canonical OpenAI-style tool history to Gemini function call and response parts', () => {
     const body = encodeGeminiGenerateContentRequest({
       messages: [

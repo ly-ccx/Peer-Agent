@@ -754,6 +754,68 @@ describe('Provider adapters', () => {
     }
   });
 
+  it('sends Gemini OAuth Code Assist stream and unwraps response envelope', async () => {
+    const previousFetch = globalThis.fetch;
+    const events = [];
+    let captured = null;
+    globalThis.fetch = async (url, init) => {
+      captured = { url, init, body: JSON.parse(init.body) };
+      return new Response(sse([
+        {
+          response: {
+            candidates: [{
+              content: {
+                parts: [
+                  { text: 'hello-ca' },
+                  { functionCall: { name: 'bash', args: { command: 'pwd' } } },
+                ],
+              },
+            }],
+            usageMetadata: {
+              promptTokenCount: 5,
+              candidatesTokenCount: 3,
+            },
+          },
+        },
+      ]), { status: 200 });
+    };
+
+    try {
+      const result = await sendGeminiStream({
+        baseUrl: 'https://cloudcode-pa.googleapis.com',
+        endpoint: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse',
+        headers: { Authorization: 'Bearer oauth-token' },
+        model: 'gemini-3.5-flash',
+        authMethod: 'oauth_google',
+        projectId: 'peer-project',
+        userPromptId: 'stream-1',
+        sessionId: 'conversation-1',
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [],
+        webContents: {
+          send: (channel, payload) => events.push({ channel, payload }),
+        },
+        streamId: 'gemini-ca',
+      });
+
+      assert.equal(captured.url, 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse');
+      assert.equal(captured.body.model, 'gemini-3.5-flash');
+      assert.equal(captured.body.project, 'peer-project');
+      assert.equal(captured.body.user_prompt_id, 'stream-1');
+      assert.equal(captured.body.request.session_id, 'conversation-1');
+      assert.equal(result.content, 'hello-ca');
+      assert.equal(result.toolCalls[0].name, 'bash');
+      assert.deepEqual(result.streamUsage, {
+        inputTokens: 5,
+        outputTokens: 3,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   it('cancels the Gemini SSE reader when the chat stream is aborted', async () => {
     const previousFetch = globalThis.fetch;
     const abortController = new AbortController();
