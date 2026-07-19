@@ -812,23 +812,28 @@ export function LlmSettingsPanel({
       const result = await clientApi.llmGetSubscriptionQuota({ id, force });
       setQuotaResults((prev) => ({ ...prev, [id]: result }));
     } catch (err: unknown) {
-      setQuotaResults((prev) => ({
-        ...prev,
-        [id]: {
-          success: false,
-          status: 'fetch_failed',
-          error: err instanceof Error ? err.message : 'Quota fetch failed',
-          fetchedAt: new Date().toISOString(),
-        },
-      }));
+      // 静默/手动刷新失败时保留上次成功结果，避免把已展示额度冲成错误态。
+      setQuotaResults((prev) => {
+        if (prev[id]?.success) return prev;
+        return {
+          ...prev,
+          [id]: {
+            success: false,
+            status: 'fetch_failed',
+            error: err instanceof Error ? err.message : 'Quota fetch failed',
+            fetchedAt: new Date().toISOString(),
+          },
+        };
+      });
     } finally {
       setQuotaLoadingId((current) => (current === id ? null : current));
     }
   };
 
+  // 进入设置页：先 force=false 立刻拿到主进程上次成功/TTL 缓存，再 force=true 静默刷新。
+  // 渠道维度：每个 OAuth 分组只刷 head，避免同凭证重复请求。
   useEffect(() => {
     let cancelled = false;
-    // 渠道维度：每个 OAuth 分组只刷 head，避免同凭证重复请求
     const headIds: string[] = [];
     const seenGroup = new Set<string>();
     for (const provider of providers) {
@@ -842,14 +847,17 @@ export function LlmSettingsPanel({
     void (async () => {
       for (const id of headIds) {
         if (cancelled) return;
-        if (quotaResults[id]?.success) continue;
+        // 先展示缓存（含 TTL 过期后的上次成功结果）
         try {
-          const result = await clientApi.llmGetSubscriptionQuota({ id, force: false });
+          const cached = await clientApi.llmGetSubscriptionQuota({ id, force: false });
           if (cancelled) return;
-          setQuotaResults((prev) => ({ ...prev, [id]: result }));
+          setQuotaResults((prev) => ({ ...prev, [id]: cached }));
         } catch {
-          /* silent; 用户可手动刷新 */
+          /* silent; 下方仍会 force 刷新 */
         }
+        if (cancelled) return;
+        // 再后台静默拉最新
+        await handleRefreshQuota(id, true);
       }
     })();
     return () => { cancelled = true; };
@@ -1038,10 +1046,10 @@ export function LlmSettingsPanel({
                       className={`llm-subscription-quota-text${quotaResults[head.id] && !quotaResults[head.id].success ? ' is-error' : ''}`}
                       title={formatQuotaLine(quotaResults[head.id], i18n.locale === 'zh-CN') ?? undefined}
                     >
-                      {quotaLoadingId === head.id
-                        ? (i18n.locale === 'zh-CN' ? '额度刷新中…' : 'Refreshing quota…')
-                        : (formatQuotaLine(quotaResults[head.id], i18n.locale === 'zh-CN')
-                          ?? (i18n.locale === 'zh-CN' ? '点击刷新订阅额度' : 'Refresh subscription quota'))}
+                      {formatQuotaLine(quotaResults[head.id], i18n.locale === 'zh-CN')
+                        ?? (quotaLoadingId === head.id
+                          ? (i18n.locale === 'zh-CN' ? '额度加载中…' : 'Loading quota…')
+                          : '')}
                     </span>
                     <button
                       type="button"

@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import {
+  clearSubscriptionQuotaCache,
+  expireFreshSubscriptionQuotaCache,
   fetchChatGptUsage,
   fetchGeminiQuota,
   fetchGrokQuota,
+  fetchProviderSubscriptionQuota,
   supportsSubscriptionQuota,
 } from './subscription-quota.mjs';
 
@@ -87,6 +90,92 @@ assert.equal(supportsSubscriptionQuota('api_key'), false);
   assert.equal(result.success, true);
   assert.equal(result.usedPercent, 25);
   assert.equal(result.remainingPercent, 75);
+}
+
+// 上次成功额度：TTL 过期后 force=false 仍可先回缓存，便于 UI 静默刷新
+{
+  clearSubscriptionQuotaCache();
+  let fetchCount = 0;
+  const llmConfigStore = {
+    listProviders: () => ([
+      {
+        id: 'gpt-1',
+        authMethod: 'oauth_chatgpt',
+        credentialId: 'cred-gpt',
+        oauthStatus: { status: 'connected', accountId: 'acct-1' },
+      },
+    ]),
+    getCredential: () => null,
+  };
+  const resolveCredential = async () => ({ apiKey: 'tok', accountId: 'acct-1' });
+  const fetchImpl = async () => {
+    fetchCount += 1;
+    const payload = {
+      plan_type: 'plus',
+      rate_limit: {
+        primary_window: {
+          used_percent: 40 + fetchCount,
+          reset_at: 2000000000,
+          limit_window_seconds: 10800,
+        },
+      },
+    };
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(payload),
+    };
+  };
+
+  const first = await fetchProviderSubscriptionQuota({
+    providerId: 'gpt-1',
+    llmConfigStore,
+    force: true,
+    fetchImpl,
+    resolveCredential,
+  });
+  assert.equal(first.success, true);
+  assert.equal(first.usedPercent, 41);
+  assert.equal(fetchCount, 1);
+
+  // 新鲜 TTL 内 force=false 直接命中缓存
+  const freshHit = await fetchProviderSubscriptionQuota({
+    providerId: 'gpt-1',
+    llmConfigStore,
+    force: false,
+    fetchImpl,
+    resolveCredential,
+  });
+  assert.equal(freshHit.success, true);
+  assert.equal(freshHit.cached, true);
+  assert.equal(freshHit.usedPercent, 41);
+  assert.equal(fetchCount, 1);
+
+  // TTL 过期后仍回 lastSuccess，不重新请求
+  expireFreshSubscriptionQuotaCache();
+  const lastSuccessHit = await fetchProviderSubscriptionQuota({
+    providerId: 'gpt-1',
+    llmConfigStore,
+    force: false,
+    fetchImpl,
+    resolveCredential,
+  });
+  assert.equal(lastSuccessHit.success, true);
+  assert.equal(lastSuccessHit.cached, true);
+  assert.equal(lastSuccessHit.usedPercent, 41);
+  assert.equal(fetchCount, 1);
+
+  // force=true 会重新请求并更新 lastSuccess
+  const refreshed = await fetchProviderSubscriptionQuota({
+    providerId: 'gpt-1',
+    llmConfigStore,
+    force: true,
+    fetchImpl,
+    resolveCredential,
+  });
+  assert.equal(refreshed.success, true);
+  assert.equal(refreshed.usedPercent, 42);
+  assert.equal(fetchCount, 2);
 }
 
 console.log('subscription-quota tests passed');

@@ -8,7 +8,13 @@
 import { resolveProviderCredential, getProviderCredentialErrorCode } from './provider-credential-resolver.mjs';
 
 const QUOTA_TTL_MS = 60_000;
-const quotaCache = new Map(); // credentialId -> { expiresAt, result }
+/** 新鲜缓存：TTL 内直接返回，避免重复打供应商接口。 */
+const quotaCache = new Map(); // cacheKey -> { expiresAt, result }
+/**
+ * 上次成功额度：进程生命周期内保留，TTL 过期后仍可先回给 UI，
+ * 便于设置页进入时立刻展示「上次额度」，再后台 force 静默刷新。
+ */
+const lastSuccessByKey = new Map(); // cacheKey -> result
 
 const OAUTH_METHODS = new Set(['oauth_chatgpt', 'oauth_google', 'oauth_grok']);
 
@@ -454,6 +460,13 @@ export async function fetchProviderSubscriptionQuota({
   if (!force && cached && cached.expiresAt > Date.now()) {
     return { ...cached.result, cached: true };
   }
+  // TTL 过期后仍优先回上次成功结果，让 UI 能先渲染再静默 force 刷新。
+  if (!force) {
+    const lastSuccess = lastSuccessByKey.get(cacheKey);
+    if (lastSuccess?.success) {
+      return { ...lastSuccess, cached: true };
+    }
+  }
 
   try {
     const credential = await resolveCredential({ provider, llmConfigStore });
@@ -480,6 +493,9 @@ export async function fetchProviderSubscriptionQuota({
       accountId: accountId || undefined,
     };
     quotaCache.set(cacheKey, { expiresAt: Date.now() + QUOTA_TTL_MS, result });
+    if (result.success) {
+      lastSuccessByKey.set(cacheKey, result);
+    }
     return result;
   } catch (error) {
     const code = error?.code || getProviderCredentialErrorCode(error) || 'quota_fetch_failed';
@@ -493,4 +509,12 @@ export async function fetchProviderSubscriptionQuota({
 
 export function clearSubscriptionQuotaCache() {
   quotaCache.clear();
+  lastSuccessByKey.clear();
+}
+
+/** 仅让新鲜 TTL 失效，保留 lastSuccess（测试/调试用）。 */
+export function expireFreshSubscriptionQuotaCache() {
+  for (const [key, entry] of quotaCache.entries()) {
+    quotaCache.set(key, { ...entry, expiresAt: 0 });
+  }
 }
