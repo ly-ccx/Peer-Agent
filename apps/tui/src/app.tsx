@@ -27,6 +27,10 @@ import {
   type ChatSnapshot,
 } from './chat-controller.ts';
 import {
+  isSlashCommandInput,
+  loadLocalImageAttachments,
+} from './composer-image-paths.ts';
+import {
   approvalCardDetails,
   approvalDecisionForKey,
   moveApprovalSelection,
@@ -80,20 +84,12 @@ import {
   type TuiExperienceState,
   updateCommandPanelQuery,
 } from './tui-experience.ts';
-
-const COLOR = {
-  background: '#0a0a0a',
-  panel: '#111111',
-  border: '#2a2a2a',
-  muted: '#737373',
-  text: '#e5e5e5',
-  accent: '#a3e635',
-  user: '#7dd3fc',
-  tool: '#86efac',
-  toolFailed: '#fb7185',
-  toolDetail: '#a3a3a3',
-  danger: '#fb7185',
-} as const;
+import {
+  COLOR,
+  PICKER_CHROME,
+  TOOL_CHROME,
+  toolStatusColor,
+} from './tui-theme.ts';
 
 const COMMAND_NOTICE_DURATION_MS = 3_000;
 
@@ -120,6 +116,21 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
       paddingRight={2}
     >
       {snapshot.messages.map((message) => {
+        if (message.role === 'system') {
+          const phase = message.compact?.phase ?? 'done';
+          const label = phase === 'progress' ? 'COMPACTING' : 'COMPACTED';
+          return (
+            <box key={message.id} flexDirection="column" marginBottom={1} marginTop={1}>
+              <box flexDirection="row">
+                <text fg={COLOR.muted}>{'─'.repeat(8)} </text>
+                <text fg={COLOR.accent}><strong>{label}</strong></text>
+                <text fg={COLOR.muted}> {'─'.repeat(8)}</text>
+              </box>
+              <text fg={COLOR.muted}>{message.content || ' '}</text>
+            </box>
+          );
+        }
+
         if (message.role === 'assistant') {
           return (
             <box key={message.id} flexDirection="column" marginBottom={1}>
@@ -143,9 +154,10 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
 
         const toolExpanded = expandedTools.has(message.id);
         const presentation = resolveToolPresentation(message);
-        const failed = presentation.status === 'failed' || presentation.status === 'denied';
-        const headlineColor = failed ? COLOR.toolFailed : COLOR.tool;
-        const detailColor = failed ? COLOR.toolFailed : COLOR.toolDetail;
+        const headlineColor = toolStatusColor(presentation.status);
+        const detailColor = presentation.status === 'failed' || presentation.status === 'denied'
+          ? COLOR.toolFailed
+          : COLOR.toolDetail;
         const detailLines = toolExpanded
           ? presentation.detail.split(/\r?\n/).filter((line) => line.trim().length > 0)
           : presentation.detailLines;
@@ -166,8 +178,8 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
             </box>
             {detailLines.map((line, index) => (
               <box key={`${message.id}-detail-${index}`} flexDirection="row">
-                <text fg={COLOR.muted} wrapMode="none">
-                  {index === 0 ? '  ╰ ' : '    '}
+                <text fg={COLOR.subtle} wrapMode="none">
+                  {index === 0 ? TOOL_CHROME.branchFirst : TOOL_CHROME.branchRest}
                 </text>
                 <text fg={detailColor}>{line || ' '}</text>
               </box>
@@ -182,7 +194,7 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
 function ErrorBanner({ message }: { readonly message: string }) {
   return (
     <box height={1} flexShrink={0} paddingLeft={2} paddingRight={2}>
-      <text fg="#fca5a5" wrapMode="none">Error: {message}</text>
+      <text fg={COLOR.dangerSoft} wrapMode="none">Error: {message}</text>
     </box>
   );
 }
@@ -219,10 +231,10 @@ function SlashCommandMenu({ commands, selectedIndex, maxVisible, showDescription
             flexDirection="row"
             height={1}
             justifyContent="space-between"
-            backgroundColor={selected ? '#1c1c1c' : COLOR.panel}
+            backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
           >
-            <text fg={selected ? COLOR.accent : COLOR.text} wrapMode="none">
-              {selected ? '› ' : '  '}/{command.id}
+            <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
+              {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}/{command.id}
             </text>
             {showDescriptions ? (
               <text fg={COLOR.muted} wrapMode="none">{command.description}</text>
@@ -243,11 +255,21 @@ function ResumePickerMenu({ rows, selectedIndex, maxVisible }: {
   return (
     <box flexDirection="column" flexShrink={0} border borderColor={COLOR.border} backgroundColor={COLOR.panel} paddingLeft={1} paddingRight={1}>
       <text fg={COLOR.accent} wrapMode="none"><strong>Resume session</strong></text>
-      {rows.length === 0 ? <text fg={COLOR.muted}>No saved conversations to resume.</text> : visibleRows.map(({ item: row, index }) => (
-        <text key={row.id} fg={index === selectedIndex ? COLOR.accent : COLOR.text} wrapMode="none">
-          {index === selectedIndex ? '› ' : '  '}{row.title}  ({row.messageCount} messages)
-        </text>
-      ))}
+      {rows.length === 0 ? <text fg={COLOR.muted}>No saved conversations to resume.</text> : visibleRows.map(({ item: row, index }) => {
+        const selected = index === selectedIndex;
+        return (
+          <box
+            key={row.id}
+            flexDirection="row"
+            height={1}
+            backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+          >
+            <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
+              {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}{row.title}  ({row.messageCount} messages)
+            </text>
+          </box>
+        );
+      })}
       <text fg={COLOR.muted} wrapMode="none">↑↓ choose · enter resume · esc close</text>
     </box>
   );
@@ -301,16 +323,23 @@ function ModelPickerMenu({
     >
       <text fg={COLOR.accent} wrapMode="none"><strong>{title}</strong>{subtitle ? ` · ${subtitle}` : ''}</text>
       {groups.length > 0 ? (
-        <text fg={COLOR.muted} wrapMode="none">
-          {groups.map((group) => {
+        // Wrap chips and highlight the active group more clearly than brackets alone.
+        <text wrapMode="word">
+          {groups.map((group, index) => {
             const raw = group.replace(/ \(\d+\/\d+\)$/, '');
-            return raw === activeGroup ? `[${group}]` : group;
-          }).join('  ')}
+            const active = raw === activeGroup;
+            return (
+              <span key={group} fg={active ? PICKER_CHROME.selectedForeground : PICKER_CHROME.mutedForeground}>
+                {active ? <strong>[{group}]</strong> : group}
+                {index < groups.length - 1 ? '  ' : ''}
+              </span>
+            );
+          })}
         </text>
       ) : null}
       <text fg={COLOR.muted} wrapMode="none">Search: {query.length > 0 ? query : '…'}</text>
       {visibleRows.length === 0 ? (
-        <text fg="#f59e0b" wrapMode="none">No configured model is available.</text>
+        <text fg={PICKER_CHROME.warning} wrapMode="none">No configured model is available.</text>
       ) : visibleRows.map((row, offset) => {
         const absoluteIndex = start + offset;
         const selected = absoluteIndex === absoluteSelected;
@@ -323,11 +352,21 @@ function ModelPickerMenu({
         }
         const color = !row.selectable
           ? COLOR.muted
-          : (selected ? COLOR.accent : COLOR.text);
+          : (selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground);
         return (
-          <text key={row.key} fg={color} wrapMode="none">
-            {selected ? '› ' : '  '}{row.label}{row.detail ? `  ${row.detail}` : ''}{row.current ? '  ✓' : ''}
-          </text>
+          <box
+            key={row.key}
+            flexDirection="row"
+            height={1}
+            backgroundColor={selected && row.selectable ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+          >
+            <text fg={color} wrapMode="none">
+              {selected && row.selectable ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}
+              {row.label}
+              {row.detail ? `  ${row.detail}` : ''}
+              {row.current ? PICKER_CHROME.checkCurrent : ''}
+            </text>
+          </box>
         );
       })}
       {showHint ? (
@@ -352,9 +391,14 @@ function Composer({ controller, snapshot, disabled, focused, onValueChange, edit
   const submit = () => {
     const value = editor.current?.plainText ?? '';
     const trimmed = value.trim();
-    if (!trimmed || trimmed.startsWith('/') || disabled || snapshot.status !== 'idle') return;
+    if (!trimmed || isSlashCommandInput(trimmed) || disabled || snapshot.status !== 'idle') return;
     editor.current?.clear();
-    void controller.send(value);
+    void (async () => {
+      const attachment = await loadLocalImageAttachments(value);
+      const text = attachment.text || attachment.displayContent;
+      if (!text.trim() && attachment.images.length === 0) return;
+      void controller.send(text, attachment.images.length > 0 ? { images: attachment.images } : undefined);
+    })();
   };
 
   return (
@@ -747,6 +791,7 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
       if (cleared) persistence.startNewConversation(controller.getSnapshot().mode);
       return cleared;
     },
+    compactContext: async () => (await controller.compact()).notice,
     controlGoal: (control) => {
       if (!goal) return 'No active goal';
       if (control === 'pause' && goal.status === 'running') {
@@ -950,6 +995,62 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
         setCommandNotice(`Local access: ${permissionPolicyLabels(normalized).label}`);
         setExperience((current) => escapeFooter(current));
         queueMicrotask(() => composerRef.current?.focus());
+      }
+      return;
+    }
+
+    if (resumeSurface) {
+      if (key.name === 'escape') {
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+        return;
+      }
+      if (key.name === 'up' || key.name === 'left') {
+        setExperience((current) => ({
+          ...current,
+          surface: moveTuiSurfaceSelection(current.surface, -1, resumeItems.length),
+        }));
+        return;
+      }
+      if (key.name === 'down' || key.name === 'right' || key.name === 'tab') {
+        setExperience((current) => ({
+          ...current,
+          surface: moveTuiSurfaceSelection(current.surface, 1, resumeItems.length),
+        }));
+        return;
+      }
+      if (key.name === 'return' || key.name === 'enter') {
+        const selected = resumeItems[resumeSurface.selectedIndex];
+        if (!selected) {
+          setCommandNotice('No session selected');
+          return;
+        }
+        if (snapshot.status !== 'idle') {
+          setCommandNotice('Cannot resume a session while a response is running');
+          return;
+        }
+        const conversation = persistence.loadConversation(selected.id);
+        if (!conversation) {
+          setCommandNotice('Failed to load selected session');
+          setResumeItems(persistence.listResumable());
+          return;
+        }
+        const resumed = resumeTuiConversation(controller, persistence, conversation);
+        if (!resumed) {
+          setCommandNotice('Cannot resume a session while a response is running');
+          return;
+        }
+        if (conversation.modelSelection) {
+          modelSelection.setSelection(conversation.modelSelection);
+        }
+        setExperience((current) => escapeFooter({
+          ...current,
+          mode: conversation.mode,
+        }));
+        setComposerDraft('');
+        setCommandNotice(`Resumed: ${selected.title}`);
+        queueMicrotask(() => composerRef.current?.focus());
+        return;
       }
       return;
     }
@@ -1187,56 +1288,83 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
       {snapshot.error ? <ErrorBanner message={snapshot.error} /> : null}
 
       {snapshot.plan?.status === 'awaiting_approval' ? (
-        <box flexDirection="column" border borderColor="#60a5fa" padding={1}>
-          <text fg="#93c5fd"><strong>Plan approval</strong> · {snapshot.plan.plan.title}</text>
-          <text fg="#e2e8f0">{snapshot.plan.plan.goal}</text>
+        <box flexDirection="column" border borderColor={COLOR.user} padding={1} backgroundColor={COLOR.panel}>
+          <text fg={COLOR.user}><strong>Plan approval</strong> · {snapshot.plan.plan.title}</text>
+          <text fg={COLOR.text}>{snapshot.plan.plan.goal}</text>
           {snapshot.plan.plan.tasks.map((task, index) => (
-            <text key={task.taskId} fg="#94a3b8">{index + 1}. {task.title}</text>
+            <text key={task.taskId} fg={COLOR.muted}>{index + 1}. {task.title}</text>
           ))}
           <box flexDirection={layout.stackActions ? 'column' : 'row'} gap={layout.stackActions ? 0 : 2}>
-            {PLAN_APPROVAL_OPTIONS.map((option, index) => (
-              <text key={option.decision} fg={option.color}>
-                {index === planSelection ? '▶ ' : '  '}
-                [{option.shortcut}] {option.label}
-              </text>
-            ))}
+            {PLAN_APPROVAL_OPTIONS.map((option, index) => {
+              const selected = index === planSelection;
+              return (
+                <box
+                  key={option.decision}
+                  backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+                  paddingLeft={selected ? 0 : 0}
+                >
+                  <text fg={selected ? option.color : COLOR.muted}>
+                    {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}
+                    [{option.shortcut}] {option.label}
+                  </text>
+                </box>
+              );
+            })}
           </box>
-          {layout.showHints ? <text fg="#64748b">←/→ or Tab select · Enter confirm · Esc Reject</text> : null}
+          {layout.showHints ? <text fg={COLOR.muted}>←/→ or Tab select · Enter confirm · Esc Reject</text> : null}
         </box>
       ) : null}
 
       {goal ? (
-        <box flexDirection="column" border borderColor="#22c55e" padding={1}>
-          <text fg="#86efac"><strong>Goal</strong> · {goal.title} · {goal.status}</text>
-          <text fg="#94a3b8">source {goal.sourcePlanId} · {goal.tasks.filter((task) => task.status === 'completed').length}/{goal.tasks.length} tasks</text>
+        <box flexDirection="column" border borderColor={COLOR.success} padding={1} backgroundColor={COLOR.panel}>
+          <text fg={COLOR.success}><strong>Goal</strong> · {goal.title} · {goal.status}</text>
+          <text fg={COLOR.muted}>source {goal.sourcePlanId} · {goal.tasks.filter((task) => task.status === 'completed').length}/{goal.tasks.length} tasks</text>
           {goal.tasks.map((task) => (
-            <text key={task.taskId} fg={task.status === 'completed' ? '#86efac' : task.status === 'running' ? '#67e8f9' : '#94a3b8'}>
+            <text
+              key={task.taskId}
+              fg={task.status === 'completed'
+                ? COLOR.success
+                : task.status === 'running'
+                  ? COLOR.diffHunk
+                  : task.status === 'failed' || task.status === 'blocked'
+                    ? COLOR.danger
+                    : COLOR.muted}
+            >
               {task.status === 'completed' ? '✓' : task.status === 'running' ? '▶' : task.status === 'failed' || task.status === 'blocked' ? '!' : '○'} {task.title}
               {task.reason ? ` · ${task.reason}` : ''}
             </text>
           ))}
-          <text fg="#64748b">[p] Pause · [r] Resume · [c] Cancel</text>
+          <text fg={COLOR.muted}>[p] Pause · [r] Resume · [c] Cancel</text>
         </box>
       ) : null}
 
       {approval ? (() => {
         const details = approvalCardDetails(approval.prompt);
         return (
-          <box flexDirection="column" border borderColor="#fb7185" paddingLeft={1} paddingRight={1} flexShrink={0}>
-            <text fg="#fecdd3" wrapMode="none"><strong>Approval required</strong></text>
-            <text fg="#fda4af" wrapMode="none">Action  {details.action}</text>
-            <text fg="#94a3b8" wrapMode="none">Where   {details.location}</text>
-            <text fg="#94a3b8" wrapMode="none">Reason  {details.reason}</text>
-            <text fg="#fbbf24" wrapMode="none">Risk    {details.risk}</text>
-            <text fg="#cbd5e1" wrapMode="none">Args    {details.arguments}</text>
+          <box flexDirection="column" border borderColor={COLOR.danger} paddingLeft={1} paddingRight={1} flexShrink={0} backgroundColor={COLOR.panel}>
+            <text fg={COLOR.dangerSoft} wrapMode="none"><strong>Approval required</strong></text>
+            <text fg={COLOR.dangerSoft} wrapMode="none">Action  {details.action}</text>
+            <text fg={COLOR.muted} wrapMode="none">Where   {details.location}</text>
+            <text fg={COLOR.muted} wrapMode="none">Reason  {details.reason}</text>
+            <text fg={COLOR.warning} wrapMode="none">Risk    {details.risk}</text>
+            <text fg={COLOR.textSoft} wrapMode="none">Args    {details.arguments}</text>
             <box flexDirection="column" gap={0} flexShrink={0}>
-              {TUI_APPROVAL_OPTIONS.map((option, index) => (
-                <text key={option.decision} fg={option.color}>
-                  {index === approvalSelection ? '▶' : ' '} {option.shortcut}. {option.label}
-                </text>
-              ))}
+              {TUI_APPROVAL_OPTIONS.map((option, index) => {
+                const selected = index === approvalSelection;
+                return (
+                  <box
+                    key={option.decision}
+                    backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+                  >
+                    <text fg={selected ? option.color : COLOR.muted}>
+                      {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}
+                      {option.shortcut}. {option.label}
+                    </text>
+                  </box>
+                );
+              })}
             </box>
-            {layout.showHints ? <text fg="#64748b">↑/↓ select  ·  Enter confirm  ·  Esc deny</text> : null}
+            {layout.showHints ? <text fg={COLOR.muted}>↑/↓ select  ·  Enter confirm  ·  Esc deny</text> : null}
           </box>
         );
       })() : null}
@@ -1259,15 +1387,24 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
           paddingBottom={pickerLayout.verticalPadding}
         >
           <text fg={COLOR.text} wrapMode="none"><strong>Local access</strong></text>
-          {TUI_PERMISSION_POLICIES.map((option, index) => (
-            <box key={option.policy} flexDirection="column" flexShrink={0}>
-              <text fg={index === permissionSelection ? COLOR.accent : COLOR.text} wrapMode="none">
-                {index === permissionSelection ? '●' : ' '} {option.shortcut}. {option.label}
-                {option.policy === accessLevel ? '  current' : ''}
-              </text>
-              {pickerLayout.showDescriptions ? <text fg={COLOR.muted} wrapMode="none">   {option.description}</text> : null}
-            </box>
-          ))}
+          {TUI_PERMISSION_POLICIES.map((option, index) => {
+            const selected = index === permissionSelection;
+            return (
+              <box
+                key={option.policy}
+                flexDirection="column"
+                flexShrink={0}
+                backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+              >
+                <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
+                  {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}
+                  {option.shortcut}. {option.label}
+                  {option.policy === accessLevel ? PICKER_CHROME.checkCurrent : ''}
+                </text>
+                {pickerLayout.showDescriptions ? <text fg={COLOR.muted} wrapMode="none">   {option.description}</text> : null}
+              </box>
+            );
+          })}
           {pickerLayout.showContext ? (
             <text fg={COLOR.muted} wrapMode="none">Runtime deny rules and irreversible-action gates always win.</text>
           ) : null}
@@ -1308,14 +1445,24 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
               <text fg={COLOR.muted} wrapMode="none">Choose how the next message should run</text>
             )
           ) : null}
-          {TUI_MODES.map((option, index) => (
-            <box key={option.mode} flexDirection="column" flexShrink={0}>
-              <text fg={index === modeSelection ? COLOR.text : COLOR.muted} wrapMode="none">
-                {index === modeSelection ? '› ' : '  '}[{option.shortcut}] {option.label}{snapshot.mode === option.mode ? '  current' : ''}
-              </text>
-              {pickerLayout.showDescriptions ? <text fg={COLOR.muted} wrapMode="none">    {option.description}</text> : null}
-            </box>
-          ))}
+          {TUI_MODES.map((option, index) => {
+            const selected = index === modeSelection;
+            return (
+              <box
+                key={option.mode}
+                flexDirection="column"
+                flexShrink={0}
+                backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+              >
+                <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
+                  {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}
+                  [{option.shortcut}] {option.label}
+                  {snapshot.mode === option.mode ? PICKER_CHROME.checkCurrent : ''}
+                </text>
+                {pickerLayout.showDescriptions ? <text fg={COLOR.muted} wrapMode="none">    {option.description}</text> : null}
+              </box>
+            );
+          })}
           {pickerLayout.showHints ? (
             <text fg={COLOR.muted} wrapMode="none">↑↓ select · 1–3 direct · enter confirm · esc close</text>
           ) : null}
@@ -1366,14 +1513,22 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
           {pickerLayout.showContext ? (
             <text fg={COLOR.muted} wrapMode="none">{commandSurface.query ? `Search: ${commandSurface.query}` : 'Type to search commands'}</text>
           ) : null}
-          {commandWindow.map(({ command, index }) => (
-            <box key={command.id} flexDirection="column" flexShrink={0}>
-              <text fg={index === commandSelection ? COLOR.text : COLOR.muted} wrapMode="none">
-                {index === commandSelection ? '› ' : '  '}{command.label}
-              </text>
-              {pickerLayout.showDescriptions ? <text fg={COLOR.muted} wrapMode="none">{command.description}</text> : null}
-            </box>
-          ))}
+          {commandWindow.map(({ command, index }) => {
+            const selected = index === commandSelection;
+            return (
+              <box
+                key={command.id}
+                flexDirection="column"
+                flexShrink={0}
+                backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+              >
+                <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
+                  {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}{command.label}
+                </text>
+                {pickerLayout.showDescriptions ? <text fg={COLOR.muted} wrapMode="none">{command.description}</text> : null}
+              </box>
+            );
+          })}
           {pickerLayout.showHints ? (
             <text fg={COLOR.muted} wrapMode="none">↑↓ select  ·  enter run  ·  esc close</text>
           ) : null}

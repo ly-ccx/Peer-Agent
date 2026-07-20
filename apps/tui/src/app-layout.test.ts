@@ -78,6 +78,19 @@ describe('TUI app layout', () => {
       .toBeLessThan(appSource.lastIndexOf('<ComposerDock'));
   });
 
+  test('wires resume picker keyboard selection, resume and escape close', () => {
+    const keyboardSource = appSource.slice(
+      appSource.indexOf('useKeyboard((key) => {'),
+      appSource.indexOf('if (helpSurface) {'),
+    );
+    expect(keyboardSource).toContain('if (resumeSurface) {');
+    expect(keyboardSource).toContain('moveTuiSurfaceSelection(current.surface, -1, resumeItems.length)');
+    expect(keyboardSource).toContain('moveTuiSurfaceSelection(current.surface, 1, resumeItems.length)');
+    expect(keyboardSource).toContain('resumeTuiConversation(controller, persistence, conversation)');
+    expect(keyboardSource).toContain("key.name === 'escape'");
+    expect(keyboardSource).toContain("key.name === 'return' || key.name === 'enter'");
+  });
+
   test('keeps the composer input pure and places controls above and status below', () => {
     expect(appSource).toContain("placeholder={disabled ? 'Resolve the request above…' : 'Ask anything…'}");
     const dockSource = appSource.slice(
@@ -169,6 +182,11 @@ describe('TUI app layout', () => {
     expect(modelPickerSource).toContain('bottom={5}');
     expect(modelPickerSource).toContain('zIndex={100}');
     expect(modelPickerSource).toContain('<strong>{title}</strong>');
+    // Group chips must wrap so later providers are not clipped off-screen.
+    expect(modelPickerSource).toContain('wrapMode="word"');
+    // Active group should stand out with accent color + bold brackets.
+    expect(modelPickerSource).toContain('fg={active ? PICKER_CHROME.selectedForeground : PICKER_CHROME.mutedForeground}');
+    expect(modelPickerSource).toContain('<strong>[{group}]</strong>');
     expect(dockSource).toContain('<ModelPickerMenu');
     expect(dockSource.indexOf('<ModelPickerMenu')).toBeLessThan(dockSource.indexOf('<Composer\n'));
     expect(dockSource).toContain('focused={!modelPickerOpen}');
@@ -226,7 +244,8 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('Action  {details.action}');
     expect(appSource).toContain('Where   {details.location}');
     expect(appSource).toContain('Reason  {details.reason}');
-    expect(appSource).toContain("{index === approvalSelection ? '▶' : ' '} {option.shortcut}. {option.label}");
+    expect(appSource).toContain('selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle');
+    expect(appSource).toContain('{option.shortcut}. {option.label}');
     expect(appSource).toContain('pickerLayout.showDescriptions ?');
     expect(appSource).toContain('pickerLayout.showHints ?');
     expect(appSource).toContain('paddingLeft={layout.outerPadding}');
@@ -279,11 +298,21 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('resolveToolPresentation(message)');
     expect(appSource).toContain('toolStatusGlyph(presentation.status)');
     expect(appSource).toContain('toolHeadline(presentation.toolName, presentation.argumentSummary)');
-    expect(appSource).toContain("index === 0 ? '  ╰ ' : '    '");
+    expect(appSource).toContain('index === 0 ? TOOL_CHROME.branchFirst : TOOL_CHROME.branchRest');
+    expect(appSource).toContain('toolStatusColor(presentation.status)');
     expect(appSource).not.toContain("{toolExpanded ? '▼' : '▶'} tool");
     expect(appSource).not.toContain("message.role === 'user' ? 'You'");
     expect(appSource).not.toContain('<strong>peer</strong>');
     expect(appSource).not.toContain('show details');
+  });
+
+  test('uses the shared theme module for chrome colors and picker selection', () => {
+    expect(appSource).toContain("from './tui-theme.ts'");
+    expect(appSource).toContain('PICKER_CHROME.selectedBackground');
+    expect(appSource).toContain('PICKER_CHROME.selectedForeground');
+    expect(appSource).toContain('PICKER_CHROME.caretSelected');
+    expect(statusViewSource).toContain("from './tui-theme.ts'");
+    expect(statusViewSource).toContain('contextUsageColor(status.contextPercent, COLOR.muted)');
   });
 
   test('renders the help picker opened by /help', () => {
@@ -298,5 +327,13 @@ describe('TUI app layout', () => {
     expect(appSource).not.toContain('Ask a question, inspect a project, or describe a task.');
     expect(appSource).not.toContain('Type / for commands and modes.');
     expect(appSource).not.toContain('ctrl+p commands  ·  ctrl+c');
+  });
+});
+
+describe('TUI compact progress and separator rendering', () => {
+  test('ChatHistory renders system compact progress and done separators', () => {
+    expect(appSource).toContain("if (message.role === 'system')");
+    expect(appSource).toContain("phase === 'progress' ? 'COMPACTING' : 'COMPACTED'");
+    expect(appSource).toContain("compactContext: async () => (await controller.compact()).notice");
   });
 });

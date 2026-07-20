@@ -102,16 +102,33 @@ function storedToolPresentation(value: unknown): ChatMessage['tool'] | undefined
   };
 }
 
+function storedCompactMeta(value: unknown): ChatMessage['compact'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.phase !== 'progress' && record.phase !== 'done') return undefined;
+  return {
+    phase: record.phase,
+    ...(typeof record.percent === 'number' ? { percent: record.percent } : {}),
+    ...(typeof record.beforeCount === 'number' ? { beforeCount: record.beforeCount } : {}),
+    ...(typeof record.afterCount === 'number' ? { afterCount: record.afterCount } : {}),
+    ...(typeof record.summarizedCount === 'number' ? { summarizedCount: record.summarizedCount } : {}),
+  };
+}
+
 function storedMessage(value: Record<string, unknown>, index: number): ChatMessage | null {
-  if (!['user', 'assistant', 'tool'].includes(String(value.role)) || typeof value.content !== 'string') return null;
+  if (!['user', 'assistant', 'tool', 'system'].includes(String(value.role)) || typeof value.content !== 'string') return null;
   const usage = storedUsage(value.usage);
   const tool = storedToolPresentation(value.tool);
+  const compact = storedCompactMeta(value.compact);
+  // Do not restore in-flight compact progress rows.
+  if (compact?.phase === 'progress' || value.pending === true && String(value.role) === 'system') return null;
   return {
     id: typeof value.id === 'string' ? value.id : `restored-${index}`,
     role: value.role as ChatMessage['role'],
     content: value.content,
     ...(usage ? { usage } : {}),
     ...(tool ? { tool } : {}),
+    ...(compact ? { compact } : {}),
   };
 }
 

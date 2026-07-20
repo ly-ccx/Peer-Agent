@@ -1,4 +1,5 @@
 import type { TuiApprovalDecision } from './tui-host.ts';
+import { COLOR } from './tui-theme.ts';
 
 export interface TuiApprovalOption {
   readonly decision: TuiApprovalDecision;
@@ -12,19 +13,19 @@ export const TUI_APPROVAL_OPTIONS = [
     decision: 'allow-once',
     label: 'Allow once',
     shortcut: '1',
-    color: '#86efac',
+    color: COLOR.success,
   },
   {
     decision: 'allow-session',
     label: 'Allow similar this session',
     shortcut: '2',
-    color: '#67e8f9',
+    color: COLOR.diffHunk,
   },
   {
     decision: 'deny',
     label: 'Deny',
     shortcut: '3',
-    color: '#fda4af',
+    color: COLOR.dangerSoft,
   },
 ] as const satisfies readonly TuiApprovalOption[];
 

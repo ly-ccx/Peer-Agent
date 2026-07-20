@@ -1,5 +1,6 @@
 import type { RuntimeToolDefinition } from '@peer-agent/runtime-core';
 import type {
+  ModelContentPart,
   ModelMessage,
   ModelProvider,
   ModelReasoningEffort,
@@ -10,11 +11,28 @@ import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
 
 import type {
   ChatMessage,
+  ChatMessageImage,
   ChatModelPort,
   ChatModelState,
   ChatModelToolCall,
 } from './chat-controller.ts';
 import { normalizeTuiMode, type TuiMode } from './tui-mode.ts';
+
+function toUserModelContent(
+  content: string,
+  images?: readonly ChatMessageImage[],
+): string | readonly ModelContentPart[] {
+  if (!images || images.length === 0) return content;
+  const parts: ModelContentPart[] = [];
+  if (content.trim()) {
+    parts.push({ type: 'text', text: content });
+  }
+  for (const image of images) {
+    if (!image.url) continue;
+    parts.push({ type: 'image_url', image_url: { url: image.url } });
+  }
+  return parts.length > 0 ? parts : content;
+}
 
 export interface CreateProviderChatModelOptions {
   readonly provider: ModelProvider;
@@ -78,17 +96,25 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
       const mode = normalizeTuiMode(context.run.mode);
       const systemPrompts = [options.systemPrompt, mode === 'plan' ? PLAN_MODE_SYSTEM_PROMPT : null]
         .filter((prompt): prompt is string => Boolean(prompt));
+      const userContent = toUserModelContent(input.input.content, input.input.images);
       const modelMessages: ModelMessage[] = [
         ...input.input.modelMessages,
         ...(input.input.modelMessages.length === 0
           ? systemPrompts.map((content) => ({ role: 'system' as const, content }))
           : []),
-        { role: 'user', content: input.input.content },
+        { role: 'user', content: userContent },
       ];
       return {
         messages: [
           ...input.input.history,
-          { id: 'input', role: 'user', content: input.input.content } as ChatMessage,
+          {
+            id: 'input',
+            role: 'user',
+            content: input.input.content,
+            ...(input.input.images && input.input.images.length > 0
+              ? { images: input.input.images }
+              : {}),
+          } as ChatMessage,
         ],
         modelMessages,
         toolExecutions: [],
@@ -179,14 +205,22 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
 export function createUnavailableChatModel(message: string): ChatModelPort {
   return {
     initialize(input): ChatModelState {
+      const userContent = toUserModelContent(input.input.content, input.input.images);
       return {
         messages: [
           ...input.input.history,
-          { id: 'input', role: 'user', content: input.input.content },
+          {
+            id: 'input',
+            role: 'user',
+            content: input.input.content,
+            ...(input.input.images && input.input.images.length > 0
+              ? { images: input.input.images }
+              : {}),
+          },
         ],
         modelMessages: [
           ...input.input.modelMessages,
-          { role: 'user', content: input.input.content },
+          { role: 'user', content: userContent },
         ],
         toolExecutions: [],
       };

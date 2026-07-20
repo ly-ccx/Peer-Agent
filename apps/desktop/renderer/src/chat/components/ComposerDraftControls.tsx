@@ -5,6 +5,12 @@ import { saveComposerEntry } from '../state/composerPersistence';
 import { conversationStore } from '../state/conversationStore';
 import { createFrameCoalescer } from '../state/frameCoalescer';
 import type { ChatAttachment, QueuedMessage } from '../state/types';
+import {
+  detectAtQuery,
+  insertSessionMention,
+  type SessionReferenceHit,
+} from '../state/sessionReference';
+import { clientApi } from '../../clientApi';
 import { AttachmentStrip } from './thread/AttachmentStrip';
 
 interface SlashCommand {
@@ -41,6 +47,7 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   onPreviewImage,
   onPaste,
   onAddFiles,
+  onAttachSessionReference,
   onPrimaryAction,
 }: {
   readonly conversationId: string | null;
@@ -56,10 +63,15 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   readonly onPreviewImage: (attachment: ChatAttachment) => void;
   readonly onPaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   readonly onAddFiles: (files: FileList | File[] | null | undefined) => void | Promise<void>;
+  readonly onAttachSessionReference: (hit: SessionReferenceHit) => void | Promise<void>;
   readonly onPrimaryAction: () => void;
 }) {
   const draft = useConversationDraft(conversationId);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
+  const [activeSessionIndex, setActiveSessionIndex] = useState(0);
+  const [sessionHits, setSessionHits] = useState<readonly SessionReferenceHit[]>([]);
+  const [sessionLoading, setSessionLoading] = useState(false);
+  const sessionQueryRef = useRef<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaResizeCoalescerRef = useRef(createFrameCoalescer({
@@ -75,11 +87,92 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
       : [];
   }, [draft]);
   const showSlashCommands = !isBusy && slashCommands.length > 0;
+  const atQuery = useMemo(() => {
+    if (showSlashCommands) return null;
+    return detectAtQuery(draft);
+  }, [draft, showSlashCommands]);
+  const showSessionMentions = Boolean(atQuery) && !isBusy;
   const hasComposerContent = draft.trim().length > 0 || attachments.length > 0;
 
   useEffect(() => {
     setActiveSlashIndex(0);
   }, [draft]);
+
+  useEffect(() => {
+    setActiveSessionIndex(0);
+  }, [atQuery?.query, showSessionMentions]);
+
+  useEffect(() => {
+    if (!showSessionMentions || !atQuery) {
+      sessionQueryRef.current = null;
+      setSessionHits([]);
+      setSessionLoading(false);
+      return;
+    }
+    const query = atQuery.query.trim();
+    sessionQueryRef.current = query;
+    let cancelled = false;
+    setSessionLoading(true);
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          let hits: SessionReferenceHit[] = [];
+          try {
+            const search = await clientApi.conversationsSearch?.({ query, status: 'active', limit: 20 });
+            if (Array.isArray(search)) {
+              hits = search.map((item) => ({
+                id: String((item as { id?: string }).id || ''),
+                title: (item as { title?: string }).title,
+                workspacePath: (item as { workspacePath?: string | null }).workspacePath ?? null,
+                updatedAt: (item as { updatedAt?: string }).updatedAt,
+                createdAt: (item as { createdAt?: string }).createdAt,
+              })).filter((item) => item.id);
+            }
+          } catch {
+            // fall through to list
+          }
+          if (hits.length === 0) {
+            const list = await clientApi.conversationsList({ status: 'active' });
+            const rows = Array.isArray(list)
+              ? list
+              : Array.isArray((list as { items?: unknown[] } | null)?.items)
+                ? ((list as { items: unknown[] }).items)
+                : [];
+            hits = rows.map((item) => ({
+              id: String((item as { id?: string }).id || ''),
+              title: (item as { title?: string }).title,
+              workspacePath: (item as { workspacePath?: string | null }).workspacePath ?? null,
+              updatedAt: (item as { updatedAt?: string }).updatedAt,
+              createdAt: (item as { createdAt?: string }).createdAt,
+            })).filter((item) => item.id);
+            if (query) {
+              const lower = query.toLowerCase();
+              hits = hits.filter((item) =>
+                (item.title || '').toLowerCase().includes(lower)
+                || item.id.toLowerCase().includes(lower),
+              );
+            }
+          }
+          hits = hits.filter((item) => item.id !== conversationId).slice(0, 12);
+          if (!cancelled && sessionQueryRef.current === query) {
+            setSessionHits(hits);
+          }
+        } catch {
+          if (!cancelled && sessionQueryRef.current === query) {
+            setSessionHits([]);
+          }
+        } finally {
+          if (!cancelled && sessionQueryRef.current === query) {
+            setSessionLoading(false);
+          }
+        }
+      })();
+    }, 120);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [atQuery, conversationId, showSessionMentions]);
 
   // 草稿高频更新只调整输入框自身高度，不再让消息时间线参与渲染。
   useEffect(() => {
@@ -135,6 +228,21 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
     });
   };
 
+  const applySessionMention = (hit: SessionReferenceHit) => {
+    if (!atQuery) return;
+    const title = hit.title?.trim() || (isZh ? '未命名会话' : 'Untitled session');
+    const next = insertSessionMention(draft, atQuery.start, atQuery.query, title);
+    setDraft(next);
+    void onAttachSessionReference(hit);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      const caret = Math.min(next.length, atQuery.start + title.length + 2);
+      el.setSelectionRange(caret, caret);
+    });
+  };
+
   return (
     <form
       className="chat-composer"
@@ -166,6 +274,38 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
           ))}
         </div>
       ) : null}
+      {showSessionMentions ? (
+        <div className="slash-command-menu session-mention-menu" role="listbox" aria-label={isZh ? '选择会话' : 'Select session'}>
+          {sessionLoading && sessionHits.length === 0 ? (
+            <div className="session-mention-empty">{isZh ? '加载会话…' : 'Loading sessions…'}</div>
+          ) : null}
+          {!sessionLoading && sessionHits.length === 0 ? (
+            <div className="session-mention-empty">{isZh ? '没有可引用的会话' : 'No sessions found'}</div>
+          ) : null}
+          {sessionHits.map((hit, index) => {
+            const title = hit.title?.trim() || (isZh ? '未命名会话' : 'Untitled session');
+            return (
+              <button
+                key={hit.id}
+                type="button"
+                role="option"
+                aria-selected={index === activeSessionIndex}
+                className={`slash-command-item ${index === activeSessionIndex ? 'active' : ''}`}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  applySessionMention(hit);
+                }}
+              >
+                <span className="slash-command-badge">@</span>
+                <span className="slash-command-main">
+                  <span className="slash-command-label">{title}</span>
+                  <span className="slash-command-desc">{hit.id.slice(0, 8)}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
       {attachments.length ? (
         <AttachmentStrip
           attachments={attachments}
@@ -183,7 +323,7 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
         placeholder={hasProvider
           ? isBusy
             ? (isZh ? '输入消息将在完成后自动发送...' : 'Message will auto-send when done...')
-            : (isZh ? '输入消息...' : 'Type a message...')
+            : (isZh ? '输入消息，@ 引用其他会话' : 'Type a message, @ to mention a session')
           : (isZh ? '请先配置模型' : 'Configure a model first')}
         rows={1}
         onPaste={onPaste}
@@ -210,6 +350,31 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
             if (event.key === 'Escape') {
               event.preventDefault();
               setDraft('');
+              return;
+            }
+          }
+          if (showSessionMentions && sessionHits.length > 0) {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault();
+              setActiveSessionIndex((index) => (index + 1) % sessionHits.length);
+              return;
+            }
+            if (event.key === 'ArrowUp') {
+              event.preventDefault();
+              setActiveSessionIndex((index) => (index - 1 + sessionHits.length) % sessionHits.length);
+              return;
+            }
+            if (event.key === 'Tab' || event.key === 'Enter') {
+              event.preventDefault();
+              const hit = sessionHits[activeSessionIndex];
+              if (hit) applySessionMention(hit);
+              return;
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              if (atQuery) {
+                setDraft(`${draft.slice(0, atQuery.start)}${draft.slice(atQuery.start + 1 + atQuery.query.length)}`);
+              }
               return;
             }
           }

@@ -1,16 +1,6 @@
 import type { ReactNode } from 'react';
 
-const COLOR = {
-  text: '#e5e5e5',
-  muted: '#737373',
-  accent: '#a3e635',
-  code: '#bef264',
-  codeBackground: '#171717',
-  diffAdd: '#4ade80',
-  diffDelete: '#f87171',
-  diffHunk: '#67e8f9',
-  diffMeta: '#737373',
-} as const;
+import { COLOR } from './tui-theme.ts';
 
 type MarkdownBlock =
   | { type: 'heading'; level: number; text: string }

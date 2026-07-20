@@ -1,3 +1,5 @@
+import { TOOL_CHROME } from './tui-theme.ts';
+
 const DEFAULT_MAX_LENGTH = 1_200;
 const DEFAULT_INLINE_MAX_LENGTH = 120;
 const DEFAULT_DETAIL_PREVIEW_LINES = 3;
@@ -164,15 +166,16 @@ export function toolStatusGlyph(status: ToolPresentationStatus): string {
   switch (status) {
     case 'failed':
     case 'denied':
-      return '×';
+      return TOOL_CHROME.glyphFailed;
     case 'cancelled':
-      return '–';
+      return TOOL_CHROME.glyphCancelled;
     case 'running':
-      return '…';
+      return TOOL_CHROME.glyphRunning;
     case 'completed':
+      return TOOL_CHROME.glyphCompleted;
     case 'unknown':
     default:
-      return '•';
+      return TOOL_CHROME.glyphUnknown;
   }
 }
 

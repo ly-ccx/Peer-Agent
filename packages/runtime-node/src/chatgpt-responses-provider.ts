@@ -19,9 +19,18 @@ export interface CreateChatGptResponsesProviderOptions {
   readonly persistTokens?: (tokens: ChatGptOAuthTokens) => void;
 }
 
+function contentText(content: ModelMessage['content']): string {
+  if (typeof content === 'string') return content;
+  if (!content) return '';
+  return content
+    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+    .map((part) => part.text)
+    .join('\n');
+}
+
 function messageInput(message: ModelMessage): Record<string, unknown>[] {
   if (message.role === 'tool') {
-    return [{ type: 'function_call_output', call_id: message.toolCallId, output: message.content ?? '' }];
+    return [{ type: 'function_call_output', call_id: message.toolCallId, output: contentText(message.content) }];
   }
   const items: Record<string, unknown>[] = [];
   if (message.role === 'assistant' && message.toolCalls) {
@@ -30,16 +39,33 @@ function messageInput(message: ModelMessage): Record<string, unknown>[] {
     }
   }
   if (message.content) {
-    items.unshift({
-      role: message.role,
-      content: [{ type: message.role === 'assistant' ? 'output_text' : 'input_text', text: message.content }],
-    });
+    const parts = Array.isArray(message.content)
+      ? message.content.flatMap((part) => {
+          if (part.type === 'text') {
+            return [{ type: message.role === 'assistant' ? 'output_text' : 'input_text', text: part.text }];
+          }
+          if (part.type === 'image_url' && message.role !== 'assistant') {
+            return [{ type: 'input_image', image_url: part.image_url.url }];
+          }
+          return [];
+        })
+      : [{ type: message.role === 'assistant' ? 'output_text' : 'input_text', text: message.content }];
+    if (parts.length > 0) {
+      items.unshift({
+        role: message.role,
+        content: parts,
+      });
+    }
   }
   return items;
 }
 
 function requestBody(request: ModelProviderRequest): Record<string, unknown> {
-  const system = request.messages.filter((message) => message.role === 'system').map((message) => message.content).filter(Boolean).join('\n\n');
+  const system = request.messages
+    .filter((message) => message.role === 'system')
+    .map((message) => contentText(message.content))
+    .filter(Boolean)
+    .join('\n\n');
   const input = request.messages.filter((message) => message.role !== 'system').flatMap(messageInput);
   return {
     model: request.model,

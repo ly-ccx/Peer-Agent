@@ -306,6 +306,155 @@ describe('chat controller', () => {
     expect(controller.getSnapshot().session?.lastTurn?.reason).toBe('provider exploded');
   });
 
+  test('compacts modelMessages while preserving UI transcript', async () => {
+    let observedModelMessageCount = 0;
+    const model: ChatModelPort = {
+      initialize(input) {
+        return {
+          messages: [
+            ...input.input.history,
+            { id: 'input', role: 'user', content: input.input.content },
+          ],
+          modelMessages: [
+            ...input.input.modelMessages,
+            { role: 'user', content: input.input.content },
+          ],
+          toolExecutions: [],
+        };
+      },
+      async runTurn(state) {
+        observedModelMessageCount = state.modelMessages.length;
+        return {
+          kind: 'completed',
+          state: {
+            ...state,
+            modelMessages: [
+              ...state.modelMessages,
+              { role: 'assistant', content: `reply-${state.modelMessages.length}` },
+            ],
+          },
+          output: `reply-${state.modelMessages.length}`,
+        };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+
+    for (let index = 0; index < 6; index += 1) {
+      await controller.send(`message-${index}`);
+    }
+    const beforeUiCount = controller.getSnapshot().messages.length;
+    const beforeModelCount = observedModelMessageCount;
+    expect(beforeModelCount).toBeGreaterThan(8);
+
+    const result = await controller.compact();
+
+    expect(result.ok).toBe(true);
+    expect(result.compacted).toBe(true);
+    expect(result.afterCount).toBeLessThan(result.beforeCount);
+    // UI transcript keeps prior turns and appends one durable compact separator.
+    expect(controller.getSnapshot().messages).toHaveLength(beforeUiCount + 1);
+    expect(
+      controller.getSnapshot().messages.some(
+        (message) => message.role === 'system' && message.compact?.phase === 'done',
+      ),
+    ).toBe(true);
+
+    await controller.send('after-compact');
+    expect(observedModelMessageCount).toBeLessThan(beforeModelCount + 2);
+    // UI transcript keeps prior turns and appends the new exchange.
+    expect(controller.getSnapshot().messages.length).toBeGreaterThan(beforeUiCount);
+    expect(
+      controller.getSnapshot().messages.some((message) => message.content === 'after-compact'),
+    ).toBe(true);
+  });
+
+  
+  test('compact publishes progress then durable separator in UI transcript', async () => {
+    const model: ChatModelPort = {
+      initialize(input) {
+        return {
+          messages: [
+            ...input.input.history,
+            { id: 'input', role: 'user', content: input.input.content },
+          ],
+          modelMessages: [
+            ...input.input.modelMessages,
+            { role: 'user', content: input.input.content },
+          ],
+          toolExecutions: [],
+        };
+      },
+      async runTurn(state) {
+        return {
+          kind: 'completed',
+          state: {
+            ...state,
+            modelMessages: [
+              ...state.modelMessages,
+              { role: 'assistant', content: `reply-${state.modelMessages.length}` },
+            ],
+          },
+          output: `reply-${state.modelMessages.length}`,
+        };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+    const seen: string[] = [];
+    controller.subscribe((snapshot) => {
+      const system = snapshot.messages.filter((message) => message.role === 'system');
+      for (const message of system) {
+        seen.push(`${message.compact?.phase ?? 'none'}:${message.content}`);
+      }
+    });
+
+    for (let index = 0; index < 6; index += 1) {
+      await controller.send(`message-${index}`);
+    }
+
+    const result = await controller.compact();
+    expect(result.ok).toBe(true);
+    expect(result.compacted).toBe(true);
+
+    const finalSystem = controller.getSnapshot().messages.filter((message) => message.role === 'system');
+    expect(finalSystem).toHaveLength(1);
+    expect(finalSystem[0]?.compact?.phase).toBe('done');
+    expect(finalSystem[0]?.content).toContain('Compacted');
+    expect(seen.some((entry) => entry.startsWith('progress:'))).toBe(true);
+    expect(seen.some((entry) => entry.startsWith('done:'))).toBe(true);
+  });
+
+  test('compact is blocked while a turn is active', async () => {
+    let release!: () => void;
+    const canFinish = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        started();
+        await canFinish;
+        return { kind: 'completed', state, output: 'done' };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+    const sending = controller.send('active');
+    await didStart;
+
+    const result = await controller.compact();
+    expect(result.ok).toBe(false);
+    expect(result.notice).toContain('idle');
+
+    release();
+    await sending;
+  });
+
   test('restores stable history and exposes it as model context on the next turn', async () => {
     const observedHistory: Array<readonly { role: string; content: string }[]> = [];
     const model: ChatModelPort = {

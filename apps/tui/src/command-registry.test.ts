@@ -16,6 +16,7 @@ describe('TUI command registry', () => {
       'mode',
       'permissions',
       'clear',
+      'compact',
       'resume',
       'help',
       'quit',
@@ -28,6 +29,7 @@ describe('TUI command registry', () => {
     expect(filterTuiCommandRegistry('provider effort', idle).map((command) => command.id)).toEqual(['model']);
     expect(filterTuiCommandRegistry('ask approval', idle).map((command) => command.id)).toEqual(['permissions']);
     expect(filterTuiCommandRegistry('plan', idle).map((command) => command.id)).toEqual(['mode']);
+    expect(filterTuiCommandRegistry('compress context', idle).map((command) => command.id)).toEqual(['compact']);
   });
 
   test('shows goal controls only when they can execute', () => {

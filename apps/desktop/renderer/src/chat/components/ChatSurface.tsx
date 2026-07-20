@@ -96,6 +96,10 @@ import { MarkdownMessage } from './markdown/MarkdownMessage';
 import { WorkspacePathContext } from './markdown/InlineMarkdown';
 import { ImagePreviewOverlay } from './thread/AttachmentStrip';
 import { ComposerDraftControls } from './ComposerDraftControls';
+import {
+  buildSessionReferenceAttachment,
+  type SessionReferenceHit,
+} from '../state/sessionReference';
 import { ComposerTokenUsageDisplay } from './ComposerTokenUsageDisplay';
 import { InteractionContext } from './thread/interactionContext';
 import { ChatFindBar } from './thread/ChatFindBar';
@@ -1231,6 +1235,25 @@ export function ChatSurface({
     setAttachmentError(null);
   }, []);
 
+  const attachSessionReference = useCallback(async (hit: SessionReferenceHit) => {
+    try {
+      const loaded = await loadConversationMessages(hit.id);
+      const attachment = buildSessionReferenceAttachment({
+        conversationId: hit.id,
+        title: hit.title,
+        messages: loaded.messages,
+      });
+      setAttachments((prev) => {
+        // 同一会话重复引用时替换旧附件，避免叠多份
+        const filtered = prev.filter((item) => !item.name.startsWith('session:') || !item.id.includes(hit.id));
+        return [...filtered, attachment];
+      });
+      setAttachmentError(null);
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : (isZh ? '读取会话失败' : 'Failed to load session'));
+    }
+  }, [isZh]);
+
   const reorderAttachment = useCallback((fromIndex: number, toIndex: number) => {
     if (fromIndex === toIndex) return;
     setAttachments((prev) => {
@@ -1999,6 +2022,7 @@ export function ChatSurface({
           onPreviewImage={setImagePreview}
           onPaste={handlePaste}
           onAddFiles={addFiles}
+          onAttachSessionReference={attachSessionReference}
           onPrimaryAction={stableHandlePrimaryAction}
         />
         <div className="chat-composer-toolbar">

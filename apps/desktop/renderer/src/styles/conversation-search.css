@@ -14,8 +14,9 @@
   .conversation-search {
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
     min-height: 0;
-    max-height: min(70vh, 560px);
+    max-height: inherit;
   }
 
   .conversation-search-input-row {
@@ -58,9 +59,10 @@
   }
 
   .conversation-search-body {
+    flex: 1 1 auto;
+    min-height: 0;
     overflow: auto;
     padding: 8px;
-    min-height: 120px;
   }
 
   .conversation-search-section-label {

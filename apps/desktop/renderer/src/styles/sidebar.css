@@ -340,17 +340,16 @@
   width: 100%;
   margin: 0 0 8px;
   padding: 8px 10px;
-  border: 1px solid var(--za-line);
+  border: none;
   border-radius: 10px;
   background: transparent;
   color: var(--pa-text-secondary, var(--graphite-soft));
   cursor: pointer;
   font-size: 0.82rem;
-  transition: background var(--za-motion-fast), border-color var(--za-motion-fast);
+  transition: background var(--za-motion-fast);
 }
 .sidebar-search-chats:hover {
   background: var(--za-sidebar-active-bg);
-  border-color: color-mix(in srgb, var(--za-line) 70%, var(--za-accent, #4c8bf5));
 }
 .sidebar-search-chats span {
   flex: 1 1 auto;
@@ -377,14 +376,15 @@
   gap: var(--space-2);
   width: 100%;
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--chrome-hairline);
-  /* Align with right-side composer / goal dock panel radius (12px). */
+  /* Outline primary: faint border + transparent fill (not selected-row gray). */
+  border: 1px solid color-mix(in srgb, var(--za-line, var(--chrome-hairline)) 70%, transparent);
   border-radius: var(--ui-radius-panel, var(--radius-lg));
   background: transparent;
   color: var(--graphite-base);
+  font-weight: 500;
   cursor: pointer;
   font-size: 0.82rem;
-  transition: background var(--za-motion-fast);
+  transition: background var(--za-motion-fast), color var(--za-motion-fast), border-color var(--za-motion-fast);
 }
 .sidebar-new-chat span {
   flex: 1 1 auto;
@@ -392,6 +392,8 @@
 }
 .sidebar-new-chat:hover {
   background: var(--za-sidebar-active-bg);
+  border-color: var(--za-line, var(--chrome-hairline));
+  color: var(--graphite-ink, var(--graphite-base));
 }
 .sidebar-return-chat {
   color: var(--graphite-soft);

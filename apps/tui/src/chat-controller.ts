@@ -13,6 +13,7 @@ import {
   type RuntimeSdkProviderExecution,
 } from '@peer-agent/runtime-sdk';
 
+import { compactModelMessagesStructurally } from './context-compact.ts';
 import type { PlanCoordinator, PlanSnapshot } from './plan-mode.ts';
 import { parseRuntimePlanText } from './plan-mode.ts';
 import type { TuiHost } from './tui-host.ts';
@@ -24,17 +25,35 @@ import {
   type ToolPresentation,
 } from './tool-result-summary.ts';
 
-export type ChatRole = 'user' | 'assistant' | 'tool';
+export type ChatRole = 'user' | 'assistant' | 'tool' | 'system';
 export type ChatRunStatus = 'idle' | 'running' | 'cancelling';
+
+export interface ChatCompactMeta {
+  readonly phase: 'progress' | 'done';
+  readonly percent?: number;
+  readonly beforeCount?: number;
+  readonly afterCount?: number;
+  readonly summarizedCount?: number;
+}
+
+export interface ChatMessageImage {
+  readonly url: string;
+  readonly mimeType?: string;
+  readonly width?: number;
+  readonly height?: number;
+}
 
 export interface ChatMessage {
   readonly id: string;
   readonly role: ChatRole;
   readonly content: string;
+  readonly images?: readonly ChatMessageImage[];
   readonly pending?: boolean;
   readonly usage?: ModelUsage;
   /** Structured tool presentation for hierarchical TUI rendering. */
   readonly tool?: ToolPresentation;
+  /** Compact progress / separator metadata for system messages. */
+  readonly compact?: ChatCompactMeta;
 }
 
 export interface ChatSnapshot {
@@ -55,6 +74,7 @@ export interface ChatModelToolCall extends RuntimePipelineToolCall {
 
 export interface ChatModelInput {
   readonly content: string;
+  readonly images?: readonly ChatMessageImage[];
   readonly history: readonly ChatMessage[];
   readonly modelMessages: readonly ModelMessage[];
   readonly turnId: string;
@@ -83,13 +103,24 @@ export interface ChatRestoreInput {
   readonly usage?: ModelUsage;
 }
 
+export interface ChatCompactResult {
+  readonly ok: boolean;
+  readonly compacted: boolean;
+  readonly beforeCount: number;
+  readonly afterCount: number;
+  readonly summarizedCount: number;
+  readonly notice: string;
+}
+
 export interface ChatController {
   getSnapshot(): ChatSnapshot;
   subscribe(listener: (snapshot: ChatSnapshot) => void): () => void;
   setMode(mode: TuiMode): boolean;
   restore(input: ChatRestoreInput): boolean;
   clear(): boolean;
-  send(content: string): Promise<void>;
+  /** Compress modelMessages with a structural summary; UI transcript keeps a progress then separator. Idle only. */
+  compact(): Promise<ChatCompactResult>;
+  send(content: string, options?: { readonly images?: readonly ChatMessageImage[] }): Promise<void>;
   executeGoalTask(
     task: RuntimeGoalTaskInput,
     context: RuntimeGoalTaskExecutionContext,
@@ -99,6 +130,12 @@ export interface ChatController {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export function renderCompactProgressBar(percent: number, width = 16): string {
+  const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+  const filled = Math.round((clamped / 100) * width);
+  return `[${'█'.repeat(filled)}${'░'.repeat(width - filled)}]`;
 }
 
 export function createChatController(options: {
@@ -224,7 +261,7 @@ export function createChatController(options: {
         .map((message) => ({ ...message, pending: undefined }));
       conversationModelMessages = messages
         .filter((message) => message.role === 'user' || message.role === 'assistant')
-        .map((message) => ({ role: message.role, content: message.content }));
+        .map((message) => ({ role: message.role as 'user' | 'assistant', content: message.content }));
       executionEvidenceIds = [];
       sequence = messages.length;
       publish({
@@ -235,9 +272,10 @@ export function createChatController(options: {
       });
       return true;
     },
-    async send(content) {
+    async send(content, options) {
       const trimmed = content.trim();
-      if (!trimmed || activeTurn) return;
+      const images = options?.images?.filter((image) => Boolean(image.url)) ?? [];
+      if ((!trimmed && images.length === 0) || activeTurn) return;
 
       const existingSession = sessions.get(sessionId);
       activeTurn = existingSession
@@ -249,15 +287,26 @@ export function createChatController(options: {
           });
       const turn = activeTurn;
       const turnMode = snapshot.mode;
-      const history = snapshot.messages.filter((message) => !message.pending);
+      const history = snapshot.messages.filter(
+        (message) => !message.pending && message.role !== 'system',
+      );
+      // Keep system separators in the UI transcript while excluding them from turn history.
+      const uiMessages = snapshot.messages.filter((message) => !message.pending);
+      const userContent = trimmed
+        || (images.length > 0 ? `[image${images.length > 1 ? 's' : ''}]` : '');
       publish({
         status: 'running',
         mode: turnMode,
         activeTurnMode: turnMode,
         session: sessions.get(sessionId) ?? undefined,
         messages: [
-          ...history,
-          { id: `user-${++sequence}`, role: 'user', content: trimmed },
+          ...uiMessages,
+          {
+            id: `user-${++sequence}`,
+            role: 'user',
+            content: userContent,
+            ...(images.length > 0 ? { images } : {}),
+          },
         ],
       });
 
@@ -269,7 +318,8 @@ export function createChatController(options: {
             ...(turn.streamId ? { streamId: turn.streamId } : {}),
             mode: turnMode,
             input: {
-              content: trimmed,
+              content: userContent,
+              ...(images.length > 0 ? { images } : {}),
               history,
               modelMessages: conversationModelMessages,
               turnId: turn.turnId,
@@ -324,6 +374,122 @@ export function createChatController(options: {
       publish({ status: 'idle', mode: snapshot.mode, messages: [] });
       return true;
     },
+    async compact() {
+      if (activeTurn || snapshot.status !== 'idle') {
+        return {
+          ok: false,
+          compacted: false,
+          beforeCount: conversationModelMessages.length,
+          afterCount: conversationModelMessages.length,
+          summarizedCount: 0,
+          notice: 'Compact is available only while idle',
+        };
+      }
+
+      const beforeCount = conversationModelMessages.length;
+      if (beforeCount === 0) {
+        return {
+          ok: true,
+          compacted: false,
+          beforeCount: 0,
+          afterCount: 0,
+          summarizedCount: 0,
+          notice: 'Nothing to compact',
+        };
+      }
+
+      const progressId = `compact-${++sequence}`;
+      const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+      const publishProgress = (percent: number) => {
+        const content = `Compacting context  ${renderCompactProgressBar(percent)}  ${percent}%`;
+        const progressMessage: ChatMessage = {
+          id: progressId,
+          role: 'system',
+          content,
+          pending: true,
+          compact: { phase: 'progress', percent },
+        };
+        const without = snapshot.messages.filter((message) => message.id !== progressId);
+        publish({
+          status: 'idle',
+          mode: snapshot.mode,
+          session: snapshot.session,
+          messages: [...without, progressMessage],
+          plan: snapshot.plan,
+          usage: snapshot.usage,
+          error: undefined,
+        });
+      };
+
+      publishProgress(12);
+      await sleep(35);
+      publishProgress(48);
+      await sleep(35);
+      publishProgress(78);
+      await sleep(25);
+
+      const result = compactModelMessagesStructurally(conversationModelMessages);
+      if (!result.compacted) {
+        const notice =
+          result.reason === 'empty'
+            ? 'Nothing to compact'
+            : 'Context is already compact enough';
+        publish({
+          status: 'idle',
+          mode: snapshot.mode,
+          session: snapshot.session,
+          messages: snapshot.messages.filter((message) => message.id !== progressId),
+          plan: snapshot.plan,
+          usage: snapshot.usage,
+          error: undefined,
+        });
+        return {
+          ok: true,
+          compacted: false,
+          beforeCount: result.beforeCount,
+          afterCount: result.afterCount,
+          summarizedCount: 0,
+          notice,
+        };
+      }
+
+      conversationModelMessages = result.messages;
+      const doneContent =
+        `Compacted ${result.beforeCount} → ${result.afterCount} messages` +
+        ` (summarized ${result.summarizedCount})`;
+      const doneMessage: ChatMessage = {
+        id: progressId,
+        role: 'system',
+        content: doneContent,
+        compact: {
+          phase: 'done',
+          percent: 100,
+          beforeCount: result.beforeCount,
+          afterCount: result.afterCount,
+          summarizedCount: result.summarizedCount,
+        },
+      };
+      // Preserve UI transcript and usage; only provider history shrinks. Progress row becomes a durable separator.
+      const withoutProgress = snapshot.messages.filter((message) => message.id !== progressId);
+      publish({
+        status: 'idle',
+        mode: snapshot.mode,
+        session: snapshot.session,
+        messages: [...withoutProgress, doneMessage],
+        plan: snapshot.plan,
+        usage: snapshot.usage,
+        error: undefined,
+      });
+
+      return {
+        ok: true,
+        compacted: true,
+        beforeCount: result.beforeCount,
+        afterCount: result.afterCount,
+        summarizedCount: result.summarizedCount,
+        notice: `Compacted model context ${result.beforeCount} → ${result.afterCount} messages (summarized ${result.summarizedCount})`,
+      };
+    },
     async executeGoalTask(task, context) {
       if (activeTurn) return { status: 'blocked', reason: 'chat_turn_active' };
       const beforeMessages = snapshot.messages.length;
@@ -369,11 +535,31 @@ export function createDemoChatModel(): ChatModelPort {
       return {
         messages: [
           ...input.input.history,
-          { id: 'input', role: 'user', content: input.input.content } as ChatMessage,
+          {
+            id: 'input',
+            role: 'user',
+            content: input.input.content,
+            ...(input.input.images && input.input.images.length > 0
+              ? { images: input.input.images }
+              : {}),
+          } as ChatMessage,
         ],
         modelMessages: [
           ...input.input.modelMessages,
-          { role: 'user', content: input.input.content },
+          {
+            role: 'user',
+            content: input.input.images && input.input.images.length > 0
+              ? [
+                  ...(input.input.content.trim()
+                    ? [{ type: 'text' as const, text: input.input.content }]
+                    : []),
+                  ...input.input.images.map((image) => ({
+                    type: 'image_url' as const,
+                    image_url: { url: image.url },
+                  })),
+                ]
+              : input.input.content,
+          },
         ],
         toolExecutions: [],
       };

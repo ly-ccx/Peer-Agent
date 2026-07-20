@@ -2,9 +2,26 @@ import type { ModelReasoningEffort } from './model-catalog.ts';
 
 export type ModelMessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
+/** OpenAI-compatible multimodal content parts for user/assistant messages. */
+export type ModelTextContentPart = {
+  readonly type: 'text';
+  readonly text: string;
+};
+
+export type ModelImageUrlContentPart = {
+  readonly type: 'image_url';
+  readonly image_url: {
+    readonly url: string;
+    readonly detail?: 'auto' | 'low' | 'high';
+  };
+};
+
+export type ModelContentPart = ModelTextContentPart | ModelImageUrlContentPart;
+export type ModelMessageContent = string | readonly ModelContentPart[] | null;
+
 export interface ModelMessage {
   readonly role: ModelMessageRole;
-  readonly content: string | null;
+  readonly content: ModelMessageContent;
   readonly name?: string;
   readonly toolCallId?: string;
   readonly toolCalls?: readonly ModelToolCall[];

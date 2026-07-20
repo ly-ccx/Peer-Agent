@@ -1,3 +1,5 @@
+import { COLOR } from './tui-theme.ts';
+
 export type PlanApprovalDecision = 'approve' | 'revise' | 'reject';
 export type PlanStatus = 'awaiting_approval' | 'approved' | 'revising' | 'rejected' | 'goal_created';
 
@@ -144,9 +146,9 @@ export function createPlanCoordinator(options: {
 }
 
 export const PLAN_APPROVAL_OPTIONS = Object.freeze([
-  { decision: 'approve', label: 'Approve and execute', shortcut: '1', color: '#86efac' },
-  { decision: 'revise', label: 'Revise', shortcut: '2', color: '#fde68a' },
-  { decision: 'reject', label: 'Reject', shortcut: '3', color: '#fca5a5' },
+  { decision: 'approve', label: 'Approve and execute', shortcut: '1', color: COLOR.success },
+  { decision: 'revise', label: 'Revise', shortcut: '2', color: COLOR.toolRunning },
+  { decision: 'reject', label: 'Reject', shortcut: '3', color: COLOR.dangerSoft },
 ] as const);
 
 export function planDecisionForKey(keyName: string, selectedIndex: number): PlanApprovalDecision | null {

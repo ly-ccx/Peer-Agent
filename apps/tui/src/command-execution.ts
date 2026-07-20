@@ -2,6 +2,7 @@ import { applyTuiCommand, type TuiCommand, type TuiExperienceState } from './tui
 
 export interface TuiCommandExecutionHandlers {
   readonly clearChat: () => boolean;
+  readonly compactContext: () => string | Promise<string>;
   readonly controlGoal: (control: 'pause' | 'resume' | 'cancel') => string;
   readonly quit: () => void;
   readonly setNotice: (notice: string | null) => void;
@@ -17,6 +18,14 @@ export function executeTuiCommand(
   if (action.type === 'clear-chat') {
     const cleared = handlers.clearChat();
     handlers.setNotice(cleared ? 'Chat cleared' : 'Finish or interrupt the active turn before clearing');
+  } else if (action.type === 'compact-context') {
+    const noticeOrPromise = handlers.compactContext();
+    if (typeof noticeOrPromise === 'string') {
+      handlers.setNotice(noticeOrPromise);
+    } else {
+      handlers.setNotice('Compacting context…');
+      void noticeOrPromise.then((notice) => handlers.setNotice(notice));
+    }
   } else if (action.type === 'goal-control') {
     handlers.setNotice(handlers.controlGoal(action.control));
   } else if (action.type === 'quit') {

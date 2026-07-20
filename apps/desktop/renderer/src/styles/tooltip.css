@@ -19,7 +19,9 @@
   pointer-events: none;
   white-space: normal;
   word-break: break-word;
-  animation: app-tooltip-in var(--za-motion-fast, 120ms) ease;
+  /* Reuse centralized motion primitives instead of a local @keyframes. */
+  --motion-enter-from: 2px;
+  animation: motion-enter-rise var(--za-motion-fast, 120ms) var(--za-ease-out, ease) both;
 }
 
 .app-tooltip__line {
@@ -50,17 +52,6 @@
   top: -5px;
   border-bottom: none;
   border-right: none;
-}
-
-@keyframes app-tooltip-in {
-  from {
-    opacity: 0;
-    transform: translateY(2px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
