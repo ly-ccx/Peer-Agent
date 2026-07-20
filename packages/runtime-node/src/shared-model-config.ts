@@ -27,6 +27,8 @@ export interface StoredModelProvider {
   readonly channelId?: string;
   readonly authMethod?: SharedModelAuthMethod;
   readonly model?: string;
+  /** Human-readable model label from Desktop (e.g. GLM-5.2). */
+  readonly modelLabel?: string;
   readonly baseUrl?: string;
   readonly enabled?: boolean;
   readonly isDefault?: boolean;
@@ -57,6 +59,8 @@ export interface SharedModelMetadata {
   readonly credentialId: string;
   readonly displayName: string;
   readonly model: string;
+  /** Optional human-readable model label from Desktop (e.g. GLM-5.2). */
+  readonly modelLabel?: string;
   readonly baseUrl: string;
   readonly authMethod: SharedModelAuthMethod;
   readonly credentialStored: boolean;
@@ -328,12 +332,14 @@ function metadataFromSelected(
   selected: StoredModelProvider,
 ): SharedModelMetadata {
   const contextWindow = normalizeContextWindow(selected.contextWindow);
+  const modelLabel = selected.modelLabel?.trim() || undefined;
   return {
     source: 'desktop-default',
     providerId: selected.provider?.trim() || 'openai',
     credentialId: credentialIdOf(selected),
     displayName: selected.name?.trim() || selected.model?.trim() || 'Desktop default',
     model: selected.model?.trim() || '',
+    ...(modelLabel ? { modelLabel } : {}),
     baseUrl: selected.baseUrl?.trim() || 'https://api.openai.com/v1',
     authMethod: normalizedAuthMethod(selected),
     credentialStored: hasStoredCredential(selected),

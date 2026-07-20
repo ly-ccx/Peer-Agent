@@ -43,6 +43,7 @@ if (!SEMVER.test(version)) {
 const packageJsonFiles = [
   'package.json',
   'apps/desktop/package.json',
+  'apps/tui/package.json',
   'packages/chat-kernel/package.json',
   'packages/i18n/package.json',
   'packages/task-thread/package.json',

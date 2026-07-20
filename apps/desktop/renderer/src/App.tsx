@@ -325,15 +325,21 @@ function MainApp() {
   // 全局运行中会话:挂载时拉取当前活跃流快照,并订阅后续变更广播。
   // 这让左侧列表无需"点进去"即可知道哪些会话正在跑(含后台并行会话)。
   useEffect(() => {
-    // ADR 27: streams 携带工作区维度,据此派生"哪些工作区有运行中的流"。
+    // ADR 27: streams 携带发起工作区(origin),据此派生"哪些工作区有运行中的流"。
+    // Goal target/execution 不进入绿点;优先 originWorkspacePath,兼容旧投影的 workspacePath。
     const applyStreams = (
       conversationIds: readonly string[],
-      streams: readonly { conversationId: string; workspacePath: string | null }[],
+      streams: readonly {
+        conversationId: string;
+        workspacePath: string | null;
+        originWorkspacePath?: string | null;
+      }[],
     ) => {
       setRunningConversationIds(new Set(conversationIds));
       const wsPaths = new Set<string>();
       for (const s of streams) {
-        if (s.workspacePath) wsPaths.add(s.workspacePath);
+        const origin = s.originWorkspacePath ?? s.workspacePath;
+        if (origin) wsPaths.add(origin);
       }
       setRunningWorkspacePaths(wsPaths);
     };

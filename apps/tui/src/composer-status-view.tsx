@@ -49,6 +49,9 @@ export function ComposerControlsBar({ status, layout }: {
           <StatusPair label="access" value={status.permissionShort} />
         </text>
         <text fg={COLOR.muted} wrapMode="none">
+          <StatusPair label="lang" value={status.languageShort} />
+        </text>
+        <text fg={COLOR.muted} wrapMode="none">
           <StatusPair label="workspace" value={workspaceValue} />
         </text>
       </box>
@@ -68,6 +71,8 @@ export function ComposerControlsBar({ status, layout }: {
         <StatusPair label="mode" value={status.mode} accent />
         <StatusSeparator />
         <StatusPair label="access" value={layout === 'compact' ? status.permissionShort : status.permission} />
+        <StatusSeparator />
+        <StatusPair label="lang" value={layout === 'compact' ? status.languageShort : status.language} />
       </text>
       <text fg={COLOR.muted} wrapMode="none">
         <StatusPair label="workspace" value={workspaceValue} />

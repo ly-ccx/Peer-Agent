@@ -1899,9 +1899,79 @@ describe('llm chat service tool materialization', () => {
       assert.deepEqual(firstWithStream[0], {
         conversationId: 'c1',
         workspacePath: '/ws/alpha',
+        originWorkspacePath: '/ws/alpha',
       });
       // 终态后投影清空。
       assert.deepEqual(service.listActiveStreams(), []);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('projects origin workspace for green-dot even when Goal target differs', async () => {
+    // Goal 从 peer-knowledge 发起、写 peer_agent 时，活跃流投影应保留 origin，
+    // 不能把绿点打到 target execution workspace。
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const streamSnapshots = [];
+    const originWs = '/ws/peer-knowledge';
+    const targetWs = '/ws/peer_agent';
+
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'hi' } }] },
+      '[DONE]',
+    ]), { status: 200 });
+
+    try {
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => [{
+            id: 'p1',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            model: 'test-model',
+            isDefault: true,
+            apiKeyConfigured: true,
+          }],
+          getDecryptedApiKey: () => 'test-key',
+        },
+        conversationStore: {
+          getConversation: () => ({ id: 'c-goal', workspacePath: originWs }),
+          updateMessageById: () => ({}),
+          addUsage: () => null,
+        },
+        goalPlanStore: {
+          getActivePlanByConversation: () => ({
+            planId: 'plan-1',
+            originWorkspacePath: originWs,
+            targetWorkspacePath: targetWs,
+          }),
+        },
+        broadcast: (channel, payload) => {
+          if (channel === 'chat:stream:active-changed') {
+            streamSnapshots.push(payload.streams ? [...payload.streams] : []);
+          }
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'run goal' }],
+        streamId: 's-goal',
+        conversationId: 'c-goal',
+        mode: 'goal',
+        workspacePath: originWs,
+        webContents: { send: () => {} },
+      });
+
+      const firstWithStream = streamSnapshots.find((snap) => snap.length > 0);
+      assert.ok(firstWithStream, 'expected at least one active stream snapshot');
+      assert.deepEqual(firstWithStream[0], {
+        conversationId: 'c-goal',
+        workspacePath: originWs,
+        originWorkspacePath: originWs,
+      });
+      // 明确不跟 target
+      assert.notEqual(firstWithStream[0].workspacePath, targetWs);
     } finally {
       globalThis.fetch = previousFetch;
     }

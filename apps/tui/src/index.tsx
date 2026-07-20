@@ -12,6 +12,7 @@ import {
 } from '@peer-agent/runtime-node';
 
 import { App } from './app.tsx';
+import { handleCliVersionArgs } from './cli-version.ts';
 import {
   missingModelConfigurationMessage,
   resolveTuiModelConfig,
@@ -22,14 +23,22 @@ import {
   createProviderChatModel,
   createUnavailableChatModel,
 } from './provider-chat-model.ts';
+import { createQoderPrivateProvider } from './qoder-private-provider.ts';
 import { createTuiHost } from './tui-host.ts';
 import { createTuiProviderFetch } from './provider-transport.ts';
 import { createTuiShutdown } from './tui-shutdown.ts';
+import { buildTuiSystemPrompt, createTuiLanguageStore } from './tui-language.ts';
+
+// Fast path: `peer --version` / `peer -v` → single line, no TUI boot.
+if (handleCliVersionArgs(process.argv.slice(2))) {
+  process.exit(0);
+}
 
 const providerFetch = createTuiProviderFetch();
 const workspaceRoot = process.env.PEER_WORKSPACE_ROOT ?? process.cwd();
 const userDataPath = process.env.PEER_USER_DATA_PATH ?? path.join(os.homedir(), '.peer-agent');
 const localAccessStore = createTuiLocalAccessStore({ userDataPath });
+const languageStore = createTuiLanguageStore({ userDataPath });
 const host = createTuiHost({
   workspaceRoot,
   userDataPath,
@@ -71,6 +80,22 @@ function sharedProvider(credentialId: string) {
     });
   }
 
+  // Qoder must reuse Desktop qoder-private (prepareInfer + private SSE), not
+  // token + OpenAI-compatible /chat/completions.
+  if (metadata.authMethod === 'qoder_local_auth') {
+    return createQoderPrivateProvider({
+      providerId: credentialId,
+      baseUrl: metadata.baseUrl,
+      async getAccessToken() {
+        // @ts-ignore Desktop ESM adapter without local type declarations.
+        const { loadQoderAccessToken } = await import(
+          '../../desktop/electron/main/provider-adapters/qoder-local-auth.mjs'
+        );
+        return loadQoderAccessToken();
+      },
+    });
+  }
+
   return {
     async stream(request: Parameters<ReturnType<typeof createOpenAICompatibleProvider>['stream']>[0]) {
       const selection = modelConfig.resolveSharedSelection?.(credentialId);
@@ -79,11 +104,7 @@ function sharedProvider(credentialId: string) {
       let apiKey = selection.apiKey;
       let baseUrl = selection.baseUrl;
 
-      if (selection.authMethod === 'qoder_local_auth') {
-        // @ts-ignore Desktop ESM adapter without local type declarations.
-        const { loadQoderAccessToken } = await import('../../desktop/electron/main/provider-adapters/qoder-local-auth.mjs');
-        apiKey = await loadQoderAccessToken();
-      } else if (selection.authMethod === 'oauth_google') {
+      if (selection.authMethod === 'oauth_google') {
         if (!selection.oauthTokens) {
           throw new Error('Desktop Google OAuth tokens are locked. Allow Keychain access and retry.');
         }
@@ -141,7 +162,8 @@ const model = provider
       getModel: () => modelSelection.getSelection().modelId,
       getReasoningEffort: () => modelSelection.getSelection().reasoningEffort,
       toolDefinitionsForMode: (mode) => host.toolDefinitionsForMode?.(mode) ?? host.toolDefinitions,
-      systemPrompt: 'You are Peer Agent. Use the available governed tools when they help answer the user.',
+      systemPrompt: buildTuiSystemPrompt(languageStore.getReplyLanguage()),
+      getSystemPrompt: () => buildTuiSystemPrompt(languageStore.getReplyLanguage()),
     })
   : createUnavailableChatModel(missingModelConfigurationMessage());
 const renderer = await createCliRenderer({ exitOnCtrlC: false });
@@ -158,6 +180,7 @@ root.render(
     model={model}
     modelLabel={modelConfig.modelLabel}
     modelSelection={modelSelection}
+    languageStore={languageStore}
     onQuit={shutdown}
   />,
 );

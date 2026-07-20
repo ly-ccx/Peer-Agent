@@ -93,10 +93,12 @@ export function resolveTuiModelConfig(
   // are present. Auth-method-specific request routing lives in index.tsx.
   const catalog = sharedProviders.map((provider): RuntimeModelCatalogEntry => {
     const available = provider.credentialStored;
+    // Prefer Desktop modelLabel (e.g. GLM-5.2) over raw model id (e.g. gm51model).
+    const modelDisplay = provider.modelLabel?.trim() || provider.model;
     return {
       providerId: provider.credentialId,
       modelId: provider.model,
-      displayName: `${provider.model} · ${provider.displayName}`,
+      displayName: `${modelDisplay} · ${provider.displayName}`,
       // Prefer Desktop llm-providers.json contextWindow so status bar can
       // render `ctx N%` instead of falling back to `ctx N / ?`.
       ...(provider.contextWindow === undefined ? {} : { contextWindow: provider.contextWindow }),
@@ -125,10 +127,11 @@ export function resolveTuiModelConfig(
       ?? (options.userDataPath
         ? createTuiSharedModelCredentialStore({ dataHome: options.userDataPath })
         : undefined);
+    const modelDisplay = sharedMetadata.modelLabel?.trim() || sharedMetadata.model;
     return {
       providerId: sharedMetadata.credentialId,
       model: sharedMetadata.model,
-      modelLabel: `${sharedMetadata.model} · desktop default`,
+      modelLabel: `${modelDisplay} · desktop default`,
       source: 'desktop-default',
       configured: sharedMetadata.credentialStored,
       credentials,

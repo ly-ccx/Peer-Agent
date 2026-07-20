@@ -1,4 +1,5 @@
 export type RuntimeControlAction =
+  | 'copy-selection'
   | 'interrupt'
   | 'dismiss-surface'
   | 'clear-composer'
@@ -7,20 +8,27 @@ export type RuntimeControlAction =
 export interface RuntimeControlInput {
   readonly keyName: string;
   readonly ctrl: boolean;
+  /** Cmd/Super on macOS terminals (OpenTUI reports this as meta or super). */
+  readonly meta?: boolean;
   readonly isRunning: boolean;
   readonly hasSurface: boolean;
   readonly hasDraft: boolean;
+  /** True when the terminal has an active non-empty text selection. */
+  readonly hasSelection?: boolean;
 }
 
 /**
  * Resolves global cancellation before any picker or composer-specific binding.
- * Runtime execution always wins over surface dismissal so Esc/Ctrl+C cannot be
+ * An active text selection makes Ctrl/Cmd+C copy instead of interrupt/quit.
+ * Runtime execution still wins over surface dismissal so Esc cannot be
  * swallowed by an open picker while a turn is active.
  */
 export function runtimeControlAction(input: RuntimeControlInput): RuntimeControlAction {
   const isEscape = input.keyName === 'escape';
+  const isCopyChord = (input.ctrl || Boolean(input.meta)) && input.keyName === 'c';
   const isCtrlC = input.ctrl && input.keyName === 'c';
 
+  if (isCopyChord && input.hasSelection) return 'copy-selection';
   if (input.isRunning && (isEscape || isCtrlC)) return 'interrupt';
   if (input.hasSurface && (isEscape || isCtrlC)) return 'dismiss-surface';
   if (isCtrlC && input.hasDraft) return 'clear-composer';

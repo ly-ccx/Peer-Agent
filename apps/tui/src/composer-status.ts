@@ -3,6 +3,7 @@ import type { LocalAccessLevel } from '@peer-agent/protocol';
 import { permissionPolicyLabels } from './tui-permission-policy.ts';
 import type { TuiMode } from './tui-mode.ts';
 import { tuiModeOption } from './tui-mode.ts';
+import { languageOption, type TuiLocale } from './tui-language.ts';
 
 export interface ComposerUsageSnapshot {
   readonly inputTokens?: number;
@@ -13,6 +14,7 @@ export interface ComposerStatusInput {
   readonly workspaceRoot: string;
   readonly mode: TuiMode;
   readonly accessLevel?: LocalAccessLevel;
+  readonly locale?: TuiLocale;
   readonly modelLabel: string;
   readonly reasoningEffort?: string;
   readonly contextWindow?: number;
@@ -25,6 +27,8 @@ export interface ComposerStatus {
   readonly mode: string;
   readonly permission: string;
   readonly permissionShort: string;
+  readonly language: string;
+  readonly languageShort: string;
   readonly model: string;
   readonly reasoning: string;
   readonly context: string;
@@ -110,12 +114,15 @@ export function createComposerStatus(input: ComposerStatusInput): ComposerStatus
     input.usage,
     input.contextWindow ?? contextWindowForModel(input.modelLabel),
   );
+  const language = languageOption(input.locale ?? 'zh-CN');
   return {
     workspace: compactWorkspacePath(input.workspaceRoot),
     workspaceShort: workspaceBasename(input.workspaceRoot),
     mode: mode.label.toLowerCase(),
     permission: permission.label,
     permissionShort: permission.shortLabel,
+    language: language.label,
+    languageShort: language.locale === 'zh-CN' ? 'zh' : 'en',
     model: modelIdFromLabel(input.modelLabel),
     reasoning: `reasoning ${input.reasoningEffort?.trim() || 'auto'}`,
     ...context,

@@ -567,7 +567,8 @@ export function createLlmChatService({
   }
 
   // ADR 27: 活跃流投影携带工作区维度。按 conversationId 去重(同一会话可能有多条流,
-  // 取首条记录的工作区即可),供 renderer 派生"哪些工作区有运行中的流"。
+  // 取首条记录的 origin 工作区即可),供 renderer 派生"哪些工作区有运行中的流"。
+  // workspacePath / originWorkspacePath 都是会话发起侧；execution 不进绿点投影。
   function listActiveStreams() {
     const byConversation = new Map();
     for (const record of activeStreams.values()) {
@@ -575,9 +576,14 @@ export function createLlmChatService({
       if (!record.conversationId) continue;
       if (record.ephemeral) continue;
       if (!byConversation.has(record.conversationId)) {
+        const originWorkspacePath = record.originWorkspacePath
+          ?? record.workspacePath
+          ?? null;
         byConversation.set(record.conversationId, {
           conversationId: record.conversationId,
-          workspacePath: record.workspacePath ?? null,
+          // 绿点真值：origin（会话发起工作区）
+          workspacePath: originWorkspacePath,
+          originWorkspacePath,
         });
       }
     }
@@ -662,10 +668,13 @@ export function createLlmChatService({
       assistantMessageId,
       // 内部旁路流：true 时不落盘、不投影为用户可见活跃会话流。
       ephemeral: Boolean(ephemeral),
-      // ADR 27: 快照发起时的工作区。流的工作区归属在发起时固定(与 sendMessage
-      // 入口快照 activeWorkspacePath 的语义一致),后续切换工作区不改变已在跑的流。
-      // 供活跃流投影携带工作区维度,让"任务在其它工作区仍在跑"成为可见事实。
-      workspacePath: runWorkspacePath,
+      // ADR 27: 活跃流指示用「会话发起工作区」(origin)，不是 Goal target / execution。
+      // 用户从 peer-knowledge 发起、工具写到 peer_agent 时，绿点应留在 peer-knowledge。
+      // runWorkspacePath 仍用于 tool cwd / 项目指令 / 写入边界，不混入 UI 运行指示。
+      workspacePath: conversationWorkspacePath,
+      originWorkspacePath: conversationWorkspacePath,
+      // 可选诊断字段：本轮实际执行根（Goal target 或 origin）。
+      executionWorkspacePath: runWorkspacePath,
       // 整轮 wall-clock 起点属于运行时事实。renderer 切走/重开后通过 reattach 恢复该锚点，
       // 避免重新进入会话时计时停住或从 0 重新开始。
       startedAt: Date.now(),

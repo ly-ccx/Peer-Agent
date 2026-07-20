@@ -8,6 +8,7 @@ const expected = readFileSync(join(root, 'VERSION'), 'utf8').trim();
 const packageJsonFiles = [
   'package.json',
   'apps/desktop/package.json',
+  'apps/tui/package.json',
   'packages/chat-kernel/package.json',
   'packages/i18n/package.json',
   'packages/task-thread/package.json',

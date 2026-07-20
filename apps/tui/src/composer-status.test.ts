@@ -59,9 +59,21 @@ describe('composer status', () => {
       mode: 'agent',
       permission: 'ask',
       permissionShort: 'ask',
+      language: '中文',
+      languageShort: 'zh',
       model: 'gpt-5.6-sol',
       reasoning: 'reasoning auto',
       context: 'context 0%',
+    });
+
+    expect(createComposerStatus({
+      workspaceRoot: '/tmp/project',
+      mode: 'chat',
+      locale: 'en-US',
+      modelLabel: 'gpt-5.6-sol',
+    })).toMatchObject({
+      language: 'English',
+      languageShort: 'en',
     });
 
     expect(createComposerStatus({

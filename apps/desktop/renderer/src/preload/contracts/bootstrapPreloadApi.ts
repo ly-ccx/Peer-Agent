@@ -198,13 +198,15 @@ export interface UsageDailySnapshot {
 /**
  * ADR 27: 活跃流投影(带工作区维度)。
  * - conversationId:正在运行的会话 id。
- * - workspacePath:该流发起时所属的工作区(发起时快照,切换工作区不改变);
+ * - workspacePath / originWorkspacePath:会话发起工作区(origin 快照,切换工作区不改变);
+ *   Goal target / execution workspace 不进入此投影,避免绿点打到代码仓而非知识库。
  *   无工作区上下文时为 null。
  * 让 renderer 能派生"哪些工作区有运行中的流",使跨工作区运行可见而非静默丢失。
  */
 export interface ActiveStreamProjection {
   readonly conversationId: string;
   readonly workspacePath: string | null;
+  readonly originWorkspacePath?: string | null;
 }
 
 export type QuickChatPopoverKind = 'workspace' | 'model' | 'effort' | 'mode' | 'access';

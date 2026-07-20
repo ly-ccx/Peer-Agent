@@ -5,11 +5,13 @@
 #   - v1.2.3-beta.N     → 预发布 Release（beta 通道，prerelease=true）
 #
 # 链路（拆分 build / publish，消除并行发布竞态）：
-#   meta   → 从 tag 解析版本 / 通道 / releaseType / prerelease（单一事实源）
-#   build  → matrix（mac + win）各自构建，electron-builder --publish never
-#            只产出安装包与更新清单（*-mac.yml / *.yml），不直接发布，
-#            产物经 upload-artifact 上传。
-#   release→ 单个 job 下载全部平台产物，一次性创建/更新同一个 GitHub Release。
+#   meta      → 从 tag 解析版本 / 通道 / releaseType / prerelease（单一事实源）
+#   build     → matrix（mac + win）各自构建 Desktop，electron-builder --publish never
+#               只产出安装包与更新清单（*-mac.yml / *.yml），不直接发布，
+#               产物经 upload-artifact 上传。
+#   build-cli → 构建 CLI 归档（peer + peer-credential-helper 同目录），阶段一
+#               最小平台：darwin-arm64（macos-14）。关键失败阻断整个 Release。
+#   release   → 单个 job 下载 Desktop + CLI 产物，一次性创建/更新同一个 GitHub Release。
 #
 # 为什么拆分：mac、win 两个 matrix job 若各自 --publish 到同一 tag，会并发
 #   抢建 Release，导致同一 tag 出现多个 Release、产物被劈开（electron-builder
@@ -149,9 +151,92 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
+  # ── CLI 一等发布：peer + peer-credential-helper 同归档 ──
+  # 阶段一最小平台：macos-14 → peer-darwin-arm64.tar.gz
+  # 失败策略：needs 纳入 release，CLI 失败阻断整个 tag 发布。
+  build-cli:
+    needs: meta
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.22.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.17
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cli-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Stamp version from tag
+        shell: bash
+        run: node scripts/stamp-version.mjs "${{ needs.meta.outputs.version }}"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build CLI (peer + credential helper)
+        env:
+          PEER_CLI_VERSION: ${{ needs.meta.outputs.version }}
+        run: pnpm --filter @peer-agent/cli build
+
+      - name: Verify peer --version
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$(./apps/tui/dist/peer --version)"
+          echo "peer --version → $OUT"
+          test "$OUT" = "peer ${{ needs.meta.outputs.version }}"
+          test -x ./apps/tui/dist/peer
+          test -x ./apps/tui/dist/peer-credential-helper
+
+      - name: Package CLI archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.meta.outputs.version }}"
+          ARCHIVE="peer-darwin-arm64.tar.gz"
+          STAGE="cli-stage/peer-darwin-arm64"
+          mkdir -p "$STAGE" cli-dist
+          cp apps/tui/dist/peer "$STAGE/peer"
+          cp apps/tui/dist/peer-credential-helper "$STAGE/peer-credential-helper"
+          chmod +x "$STAGE/peer" "$STAGE/peer-credential-helper"
+          tar -czf "cli-dist/${ARCHIVE}" -C cli-stage peer-darwin-arm64
+          ls -la cli-dist
+          echo "Packaged CLI ${VERSION} → cli-dist/${ARCHIVE}"
+
+      - name: Upload CLI artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-cli-darwin-arm64
+          path: cli-dist/*
+          if-no-files-found: error
+          retention-days: 5
+
   # ── 单 job 集中发布：下载所有平台产物，一次性写入同一个 Release ──
   release:
-    needs: [meta, build]
+    needs: [meta, build, build-cli]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (release notes source)
@@ -171,6 +256,8 @@ jobs:
           find artifacts -type f -exec cp -f {} release-assets/ \;
           echo "=== release-assets ==="
           ls -la release-assets
+          # CLI 归档必须在 Release 资产中（阶段一：darwin-arm64）
+          test -f release-assets/peer-darwin-arm64.tar.gz
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

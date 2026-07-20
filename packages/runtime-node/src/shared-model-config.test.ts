@@ -80,6 +80,7 @@ test('loadSharedModelMetadata reads only non-sensitive metadata', () => {
       name: 'Desktop provider',
       provider: 'openai',
       model: 'gpt-shared',
+      modelLabel: 'GPT Shared Label',
       baseUrl: 'https://models.example/v1',
       enabled: true,
       isDefault: true,
@@ -94,6 +95,7 @@ test('loadSharedModelMetadata reads only non-sensitive metadata', () => {
       credentialStore: credentials.store,
     });
     assert.equal(metadata?.model, 'gpt-shared');
+    assert.equal(metadata?.modelLabel, 'GPT Shared Label');
     assert.equal(metadata?.credentialId, 'credential-group');
     assert.equal(metadata?.credentialStored, true);
     assert.deepEqual(credentials.reads, { apiKey: 0, oauth: 0 });

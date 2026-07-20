@@ -41,6 +41,7 @@ export interface CreateProviderChatModelOptions {
   readonly toolDefinitions?: readonly RuntimeToolDefinition[];
   readonly toolDefinitionsForMode?: (mode: TuiMode) => readonly RuntimeToolDefinition[];
   readonly systemPrompt?: string;
+  readonly getSystemPrompt?: () => string;
   readonly getModel?: () => string;
   readonly getReasoningEffort?: () => ModelReasoningEffort;
 }
@@ -94,7 +95,8 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
   return {
     initialize(input, context) {
       const mode = normalizeTuiMode(context.run.mode);
-      const systemPrompts = [options.systemPrompt, mode === 'plan' ? PLAN_MODE_SYSTEM_PROMPT : null]
+      const baseSystemPrompt = options.getSystemPrompt?.() ?? options.systemPrompt;
+      const systemPrompts = [baseSystemPrompt, mode === 'plan' ? PLAN_MODE_SYSTEM_PROMPT : null]
         .filter((prompt): prompt is string => Boolean(prompt));
       const userContent = toUserModelContent(input.input.content, input.input.images);
       const modelMessages: ModelMessage[] = [

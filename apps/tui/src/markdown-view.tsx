@@ -128,7 +128,7 @@ function DiffCodeBlock({ text }: { text: string }) {
   return (
     <box flexDirection="column">
       {(text || ' ').split('\n').map((line, index) => (
-        <text key={`diff-line-${index}`} fg={diffLineColor(line)}>{line || ' '}</text>
+        <text key={`diff-line-${index}`} selectable fg={diffLineColor(line)}>{line || ' '}</text>
       ))}
     </box>
   );
@@ -141,30 +141,30 @@ export function MarkdownView({ content }: { content: string }) {
         const key = `${block.type}-${index}`;
         if (block.type === 'heading') {
           const prefix = block.level === 1 ? '▌ ' : block.level === 2 ? '▸ ' : '• ';
-          return <text key={key} fg={block.level <= 2 ? COLOR.accent : COLOR.text} marginBottom={1}><strong>{prefix}{inline(block.text, key)}</strong></text>;
+          return <text key={key} selectable fg={block.level <= 2 ? COLOR.accent : COLOR.text} marginBottom={1}><strong>{prefix}{inline(block.text, key)}</strong></text>;
         }
         if (block.type === 'code') {
           return (
             <box key={key} flexDirection="column" backgroundColor={COLOR.codeBackground} paddingLeft={1} paddingRight={1} marginBottom={1}>
-              {block.language ? <text fg={COLOR.muted}>{block.language}</text> : null}
+              {block.language ? <text selectable fg={COLOR.muted}>{block.language}</text> : null}
               {block.language.toLowerCase() === 'diff'
                 ? <DiffCodeBlock text={block.text} />
-                : <text fg={COLOR.text}>{block.text || ' '}</text>}
+                : <text selectable fg={COLOR.text}>{block.text || ' '}</text>}
             </box>
           );
         }
-        if (block.type === 'quote') return <text key={key} fg={COLOR.muted} marginBottom={1}>│ {inline(block.text, key)}</text>;
-        if (block.type === 'rule') return <text key={key} fg={COLOR.muted} marginBottom={1}>────────────────────────────────────────</text>;
+        if (block.type === 'quote') return <text key={key} selectable fg={COLOR.muted} marginBottom={1}>│ {inline(block.text, key)}</text>;
+        if (block.type === 'rule') return <text key={key} selectable fg={COLOR.muted} marginBottom={1}>────────────────────────────────────────</text>;
         if (block.type === 'list') {
           return (
             <box key={key} flexDirection="column" marginBottom={1}>
               {block.items.map((item, itemIndex) => (
-                <text key={`${key}-${itemIndex}`}>{block.ordered ? `${itemIndex + 1}. ` : '• '}{inline(item, `${key}-${itemIndex}`)}</text>
+                <text key={`${key}-${itemIndex}`} selectable>{block.ordered ? `${itemIndex + 1}. ` : '• '}{inline(item, `${key}-${itemIndex}`)}</text>
               ))}
             </box>
           );
         }
-        return <text key={key} fg={COLOR.text} marginBottom={1}>{inline(block.text, key)}</text>;
+        return <text key={key} selectable fg={COLOR.text} marginBottom={1}>{inline(block.text, key)}</text>;
       })}
     </box>
   );

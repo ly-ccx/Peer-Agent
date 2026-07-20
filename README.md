@@ -72,6 +72,45 @@ Electron Rich Client Shell
 
 ## 🏁 Quick Start
 
+Peer Agent has **two first-class entry points**. Install only what you need:
+
+| Entry | Who it's for | Needs Desktop? |
+|-------|--------------|----------------|
+| **CLI (`peer`)** | Terminal / headless use | No |
+| **Desktop app** | GUI shell | — |
+
+Both share the same local Runtime and data under `~/.peer-agent` (settings, conversations, credentials).
+
+### CLI-only (no Desktop)
+
+Stage 1 ships a macOS Apple Silicon archive on each GitHub Release:
+
+1. Open the [latest Release](https://github.com/yinLiangDream/Peer-Agent/releases) and download `peer-darwin-arm64.tar.gz`.
+2. Extract and keep **both** binaries in the **same directory** (the credential helper is resolved next to `peer`):
+
+```bash
+tar -xzf peer-darwin-arm64.tar.gz
+# → peer-darwin-arm64/peer
+# → peer-darwin-arm64/peer-credential-helper
+
+# optional: put the folder on PATH
+export PATH="$PWD/peer-darwin-arm64:$PATH"
+peer --version   # peer <semver>
+peer             # start the TUI
+```
+
+> **Important:** Do not ship or move `peer` alone. `peer-credential-helper` must sit beside it.
+
+Local build from source (developers):
+
+```bash
+pnpm install
+pnpm --filter @peer-agent/cli build   # needs Bun + Rust
+./apps/tui/dist/peer --version
+```
+
+### Desktop (from source)
+
 **Prerequisites:** Node.js + [pnpm](https://pnpm.io/), and the [Rust toolchain](https://rustup.rs/) (for the credential helper).
 
 ```bash
@@ -95,7 +134,8 @@ pnpm dev
 ```text
 peer_agent/
 ├── apps/
-│   └── desktop/          # Electron desktop application
+│   ├── desktop/          # Electron desktop application
+│   └── tui/              # CLI / TUI (`peer` binary, package @peer-agent/cli)
 ├── packages/
 │   ├── protocol/         # Shared cross-layer contract types
 │   ├── chat-kernel/      # Conversation kernel
@@ -126,6 +166,7 @@ The full set of ADRs lives in [`docs/architecture/`](./docs/architecture/).
 - [x] Local capability runtime — manifest, permission grants, Evidence
 - [x] Electron desktop shell — task threads, composer, review cards
 - [x] MCP connection & authentication
+- [x] CLI first-class release — `peer` + helper archive on the same tag as Desktop
 - [ ] **Local Agent Runtime** — on-device LLM inference
 - [ ] Expanded plugin & skill ecosystem
 

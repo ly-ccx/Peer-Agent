@@ -3,6 +3,26 @@ import { describe, expect, test } from 'bun:test';
 import { composerEnterAction, runtimeControlAction } from './runtime-controls.ts';
 
 describe('runtime controls', () => {
+  test('copies active selection before interrupt or quit on Ctrl/Cmd+C', () => {
+    expect(runtimeControlAction({
+      keyName: 'c',
+      ctrl: true,
+      isRunning: true,
+      hasSurface: true,
+      hasDraft: true,
+      hasSelection: true,
+    })).toBe('copy-selection');
+    expect(runtimeControlAction({
+      keyName: 'c',
+      ctrl: false,
+      meta: true,
+      isRunning: false,
+      hasSurface: false,
+      hasDraft: false,
+      hasSelection: true,
+    })).toBe('copy-selection');
+  });
+
   test('interrupts a running turn before dismissing an open surface', () => {
     expect(runtimeControlAction({
       keyName: 'escape',
