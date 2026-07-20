@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
   extractEmbeddedAuthWasmBytes,
   loadQoderLocalAuth,
+  resolveQoderCliBinary,
   resolveQoderConfigDir,
 } from './qoder-local-auth.mjs';
 
@@ -39,6 +43,41 @@ describe('qoder local auth', () => {
       }),
       '/tmp/qoder-home/.qoder',
     );
+  });
+
+  it('resolves the CLI executable independently from an explicit wasm binary', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'qoder-cli-path-'));
+    const cliPath = path.join(dir, 'qodercli');
+    const wasmPath = path.join(dir, 'auth-wasm-container');
+    writeFileSync(cliPath, 'cli');
+    writeFileSync(wasmPath, 'wasm');
+    try {
+      assert.equal(await resolveQoderCliBinary({
+        env: {
+          PATH: '',
+          QODER_AUTH_WASM_BINARY: wasmPath,
+          QODER_CLI_PATH: cliPath,
+        },
+        homeDir: dir,
+      }), cliPath);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('finds qodercli.exe on Windows PATH', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'qoder-cli-windows-'));
+    const cliPath = path.join(dir, 'qodercli.exe');
+    writeFileSync(cliPath, 'cli');
+    try {
+      assert.equal(await resolveQoderCliBinary({
+        env: { PATH: dir },
+        homeDir: path.join(dir, 'home'),
+        platform: 'win32',
+      }), cliPath);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('extracts auth wasm from historical MsC and minified G9_ variable names', () => {

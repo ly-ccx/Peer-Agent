@@ -366,19 +366,19 @@ function friendlyTestError(error: string | undefined, locale: string): string {
     case 'qoder_auth_wasm_not_found':
     case 'qoder_auth_wasm_missing':
       return zh
-        ? '未找到本机 Qoder CLI（qodercli），无法解密模型目录。请安装/登录 Qoder CLI 后重试'
-        : 'Local Qoder CLI (qodercli) was not found; cannot decrypt the model catalog. Install/sign in to Qoder CLI and retry';
+        ? '未找到本机 Qoder CLI（qodercli），无法获取模型目录。请安装/登录 Qoder CLI 后重试'
+        : 'Local Qoder CLI (qodercli) was not found, so the model catalog cannot be loaded. Install/sign in to Qoder CLI and retry';
     case 'qoder_models_not_found':
       return zh
-        ? '未找到本机 Qoder 模型目录（~/.qoder）。请先在 Qoder 中登录并同步模型'
-        : 'Local Qoder model catalog (~/.qoder) was not found. Sign in to Qoder and sync models first';
+        ? '未能从 Qoder CLI 或本机缓存获取模型目录。请先登录 Qoder 并同步模型'
+        : 'No Qoder model catalog was available from the CLI or local cache. Sign in to Qoder and sync models first';
     case 'qoder_models_unavailable':
     case 'qoder_encrypted_models_unavailable':
     case 'qoder_encrypted_models_empty':
     case 'qoder_models_empty':
       return zh
-        ? '本机 Qoder 模型目录不可用。请确认已登录 Qoder CLI，并存在可用模型缓存'
-        : 'Local Qoder model catalog is unavailable. Ensure Qoder CLI is signed in and model cache exists';
+        ? 'Qoder 模型目录不可用。请确认已登录 Qoder CLI，或本机存在可用模型缓存'
+        : 'The Qoder model catalog is unavailable. Ensure Qoder CLI is signed in or a usable local cache exists';
     case 'qoder_private_empty_response':
       return zh ? 'Qoder 私有接口未返回内容' : 'Qoder private API returned an empty response';
     case 'base_url_required':

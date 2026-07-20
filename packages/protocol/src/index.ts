@@ -609,7 +609,7 @@ export interface LlmModelInfo {
 
 // 列模型结果。source 标明数据来源:
 // - 'builtin' : 订阅(codex 平面)内置权威目录,平面无列模型接口,内置即真值。
-// - 'remote'  : 自带 API key 时从 /v1/models 动态拉取。
+// - 'remote'  : 通过 provider 的公开远程接口或官方 SDK 动态拉取。
 // - 'fallback': 远程失败后的兜底(保留以兼容历史诊断语义)。
 // - 'local'   : 从本机 provider 登录态/cache 派生的目录。
 export interface LlmModelListResult {

@@ -3,6 +3,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { decryptQoderModelCache, resolveQoderConfigDir } from './qoder-local-auth.mjs';
+import { fetchOfficialQoderModelCatalog } from './qoder-official-model-catalog.mjs';
 
 const FALLBACK_QODER_MODELS = [
   { id: 'auto', label: 'Auto', contextWindow: 180_000, maxOutputTokens: 32_768, supportsVision: true, supportsReasoning: false },
@@ -38,7 +39,9 @@ function normalizeContextTierOption(raw) {
 
   const defaultEntry = entries.find(([, config]) => config.is_default === true) || entries[0];
   const defaultContextWindow = defaultEntry[1].token_count;
-  const defaultInputTokenLimit = Number.isFinite(raw.max_input_tokens) ? raw.max_input_tokens : defaultContextWindow;
+  const defaultInputTokenLimit = Number.isFinite(raw.max_input_tokens) && raw.max_input_tokens > 0
+    ? raw.max_input_tokens
+    : defaultContextWindow;
   const reservedTokens = Math.max(0, defaultContextWindow - defaultInputTokenLimit);
 
   return {
@@ -104,13 +107,72 @@ function normalizeModel(raw) {
     isNew: typeof raw.is_new === 'boolean' ? raw.is_new : undefined,
     priceFactor: Number.isFinite(raw.price_factor) ? raw.price_factor : undefined,
     originalPriceFactor: Number.isFinite(raw.original_price_factor) ? raw.original_price_factor : undefined,
-    contextWindow: Number.isFinite(raw.max_input_tokens) ? raw.max_input_tokens : undefined,
+    contextWindow: Number.isFinite(raw.max_input_tokens) && raw.max_input_tokens > 0
+      ? raw.max_input_tokens
+      : undefined,
     maxOutputTokens: Number.isFinite(raw.max_output_tokens) ? raw.max_output_tokens : undefined,
     supportsVision: typeof raw.is_vl === 'boolean' ? raw.is_vl : undefined,
     supportsReasoning: typeof raw.is_reasoning === 'boolean' ? raw.is_reasoning : undefined,
     modelOptions: contextTierOption ? [contextTierOption] : undefined,
     raw,
   };
+}
+
+function officialContextConfig(raw) {
+  if (raw?.context_config && typeof raw.context_config === 'object') return raw.context_config;
+  if (raw?.serverModel?.context_config && typeof raw.serverModel.context_config === 'object') {
+    return raw.serverModel.context_config;
+  }
+  const windows = Array.isArray(raw?.availableContextWindows)
+    ? raw.availableContextWindows.filter((value) => Number.isFinite(value) && value > 0)
+    : [];
+  if (!windows.length) return undefined;
+  const defaultWindow = Number.isFinite(raw.defaultContextWindow)
+    ? raw.defaultContextWindow
+    : windows[0];
+  return Object.fromEntries(windows.map((tokenCount) => [String(tokenCount), {
+    token_count: tokenCount,
+    is_default: tokenCount === defaultWindow,
+  }]));
+}
+
+function normalizeOfficialModel(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const serverModel = raw.serverModel && typeof raw.serverModel === 'object' && !Array.isArray(raw.serverModel)
+    ? raw.serverModel
+    : {};
+  const id = String(raw.modelId || raw.value || serverModel.key || '').trim();
+  if (!id) return null;
+  return normalizeModel({
+    ...serverModel,
+    key: id,
+    display_name: raw.displayName ?? serverModel.display_name,
+    source: raw.source ?? serverModel.source,
+    format: raw.format ?? serverModel.format,
+    enable: raw.isEnabled ?? serverModel.enable,
+    is_default: raw.isDefault ?? serverModel.is_default,
+    is_new: raw.isNew ?? serverModel.is_new,
+    price_factor: raw.priceFactor ?? serverModel.price_factor,
+    original_price_factor: raw.originalPriceFactor ?? serverModel.original_price_factor,
+    max_input_tokens: raw.maxInputTokens ?? serverModel.max_input_tokens,
+    max_output_tokens: raw.maxOutputTokens ?? serverModel.max_output_tokens,
+    is_vl: raw.isVl ?? serverModel.is_vl,
+    is_reasoning: raw.isReasoning ?? serverModel.is_reasoning,
+    context_config: officialContextConfig(raw),
+  });
+}
+
+function normalizeOfficialCatalog(entries) {
+  const seen = new Set();
+  const models = [];
+  for (const raw of Array.isArray(entries) ? entries : []) {
+    const model = normalizeOfficialModel(raw);
+    const key = model?.id.toLowerCase();
+    if (!model || seen.has(key)) continue;
+    seen.add(key);
+    models.push(model);
+  }
+  return models;
 }
 
 function pickQoderChatModels(catalog) {
@@ -236,12 +298,25 @@ export function getQoderModelMetadata(modelId, options = {}) {
 }
 
 export async function listQoderModels(options = {}) {
+  let officialError = null;
+  try {
+    const loadOfficialCatalog = options.officialCatalogLoader ?? fetchOfficialQoderModelCatalog;
+    const models = normalizeOfficialCatalog(await loadOfficialCatalog(options));
+    if (models.length) {
+      latestCatalogByConfigDir.set(catalogCacheKey(options), models);
+      return { models, source: 'remote' };
+    }
+    officialError = new Error('qoder_official_models_empty');
+  } catch (error) {
+    officialError = error;
+  }
+
   let encryptedError = null;
   try {
     const result = await readEncryptedCatalog(options);
     const models = mergeModelCatalog(result.models, await readLegacyModelCatalogAsync(options));
     latestCatalogByConfigDir.set(catalogCacheKey(options), models);
-    return { models, source: result.source };
+    return { models, source: 'local' };
   } catch (error) {
     encryptedError = error;
   }
@@ -255,10 +330,16 @@ export async function listQoderModels(options = {}) {
     return {
       models: [...FALLBACK_QODER_MODELS],
       source: 'fallback',
-      error: classifyQoderCatalogError(encryptedError || new Error('qoder_models_empty')),
+      error: classifyQoderCatalogError(
+        encryptedError && encryptedError.code !== 'ENOENT'
+          ? encryptedError
+          : officialError || new Error('qoder_models_empty'),
+      ),
     };
   } catch (error) {
-    const primary = encryptedError && encryptedError.code !== 'ENOENT' ? encryptedError : error;
+    const primary = encryptedError && encryptedError.code !== 'ENOENT'
+      ? encryptedError
+      : officialError || error;
     return {
       models: [...FALLBACK_QODER_MODELS],
       source: 'fallback',
@@ -271,6 +352,11 @@ function classifyQoderCatalogError(error) {
   if (!error) return 'qoder_models_not_found';
   const code = String(error.code || error.message || '').trim();
   if (!code || code === 'ENOENT') return 'qoder_models_not_found';
+  if (code === 'qoder_cli_not_found') return 'qoder_auth_wasm_not_found';
+  if (code === 'qoder_official_models_empty') return 'qoder_models_empty';
+  if (code === 'qoder_official_models_timeout' || code === 'qoder_official_models_unavailable') {
+    return 'qoder_models_unavailable';
+  }
   if (code.startsWith('qoder_')) return code;
   if (code.includes('wasm')) {
     return code.includes('not_found') ? 'qoder_auth_wasm_not_found' : 'qoder_auth_wasm_missing';

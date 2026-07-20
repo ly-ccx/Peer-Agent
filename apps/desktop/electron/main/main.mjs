@@ -2462,7 +2462,7 @@ ipcMain.handle('llm:models:fetch', async (_event, config) => {
   if (!config) return { success: false, models: [], error: 'config_required' };
   try {
     const authMethod = config.authMethod || 'api_key';
-    // Qoder 私有接口复用本机 CLI 登录态，模型目录从 ~/.qoder 读取，不走 OpenAI /models。
+    // Qoder 私有接口复用本机 CLI 登录态；目录优先走官方 SDK，失败再读 ~/.qoder 缓存。
     if (authMethod === 'qoder_local_auth' || authMethod === 'local_cli' || config.channelId === 'qoder') {
       const { models, source, error } = await listQoderModels();
       return {

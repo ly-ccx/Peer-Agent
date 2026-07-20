@@ -70,14 +70,25 @@ async function existingFile(candidate) {
   }
 }
 
-async function qoderCliBinaryCandidates({ env = process.env, homeDir = os.homedir() } = {}) {
+async function qoderCliBinaryCandidates({
+  env = process.env,
+  homeDir = os.homedir(),
+  platform = process.platform,
+} = {}) {
+  const executableNames = platform === 'win32'
+    ? ['qodercli.exe', 'qodercli']
+    : ['qodercli'];
   const candidates = [
-    nonEmpty(env.QODER_AUTH_WASM_BINARY),
     nonEmpty(env.QODER_CLI_PATH),
-    path.join(homeDir, '.local/bin/qodercli'),
-    '/usr/local/bin/qodercli',
-    '/opt/homebrew/bin/qodercli',
-    '/Applications/QoderWork.app/Contents/Resources/bin/qodercli',
+    nonEmpty(env.QODERCLI_PATH),
+    ...executableNames.map((name) => path.join(homeDir, '.local/bin', name)),
+    ...(platform === 'win32' ? [] : [
+      '/usr/local/bin/qodercli',
+      '/opt/homebrew/bin/qodercli',
+    ]),
+    ...(platform === 'darwin' ? [
+      '/Applications/QoderWork.app/Contents/Resources/bin/qodercli',
+    ] : []),
   ].filter(Boolean);
 
   const managedDir = path.join(homeDir, '.qoder/bin/qodercli');
@@ -89,9 +100,17 @@ async function qoderCliBinaryCandidates({ env = process.env, homeDir = os.homedi
   } catch {}
 
   for (const dir of String(env.PATH || '').split(path.delimiter).filter(Boolean)) {
-    candidates.push(path.join(dir, 'qodercli'));
+    for (const name of executableNames) candidates.push(path.join(dir, name));
   }
   return [...new Set(candidates)];
+}
+
+export async function resolveQoderCliBinary(options = {}) {
+  for (const candidate of await qoderCliBinaryCandidates(options)) {
+    const binary = await existingFile(candidate);
+    if (binary) return binary;
+  }
+  return null;
 }
 
 export function extractEmbeddedAuthWasmBytes(content) {
@@ -108,7 +127,12 @@ export function extractEmbeddedAuthWasmBytes(content) {
 
 async function loadEmbeddedWasmBytes(options = {}) {
   let sawBinary = false;
-  for (const candidate of await qoderCliBinaryCandidates(options)) {
+  const explicitWasmBinary = nonEmpty((options.env ?? process.env).QODER_AUTH_WASM_BINARY);
+  const candidates = [
+    explicitWasmBinary,
+    ...await qoderCliBinaryCandidates(options),
+  ].filter(Boolean);
+  for (const candidate of [...new Set(candidates)]) {
     const binary = await existingFile(candidate);
     if (!binary) continue;
     sawBinary = true;

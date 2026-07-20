@@ -32,6 +32,7 @@
     "@peer-agent/runtime-sdk": "workspace:*",
     "@peer-agent/task-thread": "workspace:*",
     "@peer-agent/ui": "workspace:*",
+    "@qoder-ai/qoder-agent-sdk": "^1.0.15",
     "@vitejs/plugin-react": "^5.1.0",
     "adm-zip": "^0.5.17",
     "electron-updater": "^6.8.9",

@@ -10,7 +10,13 @@ import {
   resolveQoderModelOptionProjection,
 } from './qoder-model-catalog.mjs';
 
-async function withQoderConfig(fn) {
+async function unavailableOfficialCatalog() {
+  const error = new Error('qoder_cli_not_found');
+  error.code = 'qoder_cli_not_found';
+  throw error;
+}
+
+async function withQoderConfig(fn, optionOverrides = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'qoder-models-'));
   const configDir = path.join(dir, '.qoder');
   mkdirSync(path.join(configDir, '.auth'), { recursive: true });
@@ -35,13 +41,79 @@ async function withQoderConfig(fn) {
         { key: 'quest-auto', display_name: 'Quest Auto', max_input_tokens: 1, max_output_tokens: 1 },
       ],
     }));
-    return await fn({ env: {}, homeDir: dir });
+    return await fn({
+      env: {},
+      homeDir: dir,
+      officialCatalogLoader: unavailableOfficialCatalog,
+      ...optionOverrides,
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
 describe('qoder model catalog', () => {
+  it('prefers the official SDK catalog and caches its normalized metadata', async () => withQoderConfig(async (options) => {
+    const result = await listQoderModels(options);
+
+    assert.equal(result.source, 'remote');
+    assert.deepEqual(result.models.map((model) => model.id), ['cmodel']);
+    assert.equal(result.models[0].label, 'Cantus');
+    assert.equal(result.models[0].contextWindow, 180000);
+    assert.equal(result.models[0].maxOutputTokens, 32768);
+    assert.equal(result.models[0].supportsVision, true);
+    assert.equal(result.models[0].supportsReasoning, true);
+    assert.equal(result.models[0].modelOptions[0].defaultValue, '200K');
+
+    const cached = getQoderModelMetadata('CMODEL', options);
+    assert.equal(cached?.label, 'Cantus');
+    assert.equal(cached?.modelOptions?.[0]?.choices?.[1]?.contextWindow, 1000000);
+  }, {
+    officialCatalogLoader: async () => [{
+      value: 'cmodel',
+      modelId: 'cmodel',
+      displayName: 'Cantus',
+      source: 'system',
+      format: 'openai',
+      isEnabled: true,
+      isDefault: false,
+      isVl: true,
+      isReasoning: true,
+      maxInputTokens: 180000,
+      maxOutputTokens: 32768,
+      context_config: {
+        '200K': { token_count: 200000, is_default: true },
+        '1M': { token_count: 1000000 },
+      },
+      serverModel: {
+        key: 'cmodel',
+        display_name: 'Cantus',
+      },
+    }],
+  }));
+
+  it('treats a zero official max-input value as unknown instead of a one-token budget', async () => withQoderConfig(async (options) => {
+    const result = await listQoderModels(options);
+    const model = result.models[0];
+
+    assert.equal(model.contextWindow, undefined);
+    assert.deepEqual(resolveQoderModelOptionProjection(model), {
+      contextWindow: 1000000,
+      inputTokenLimit: 1000000,
+      requestOptions: { contextTier: '1M' },
+    });
+  }, {
+    officialCatalogLoader: async () => [{
+      value: 'qwen-latest-series-invite-beta-v92',
+      displayName: 'Peach',
+      maxInputTokens: 0,
+      maxOutputTokens: 32768,
+      context_config: {
+        '1M': { token_count: 1000000, is_default: true },
+      },
+    }],
+  }));
+
   it('lists chat models from the local Qoder catalog', async () => withQoderConfig(async (options) => {
     const result = await listQoderModels(options);
 
@@ -150,7 +222,11 @@ describe('qoder model catalog', () => {
   }));
 
   it('falls back to auto when no local catalog exists', async () => {
-    const result = await listQoderModels({ env: {}, homeDir: '/missing-qoder-home' });
+    const result = await listQoderModels({
+      env: {},
+      homeDir: '/missing-qoder-home',
+      officialCatalogLoader: unavailableOfficialCatalog,
+    });
 
     assert.equal(result.source, 'fallback');
     assert.deepEqual(result.models.map((model) => model.id), ['auto']);
@@ -171,6 +247,7 @@ it('preserves non-ENOENT encrypted catalog errors when legacy cache is missing',
     const result = await listQoderModels({
       env: { PATH: '/usr/bin:/bin', HOME: dir, QODER_CONFIG_DIR: configDir },
       homeDir: dir,
+      officialCatalogLoader: unavailableOfficialCatalog,
     });
     assert.equal(result.source, 'fallback');
     assert.equal(result.models.length, 1);
