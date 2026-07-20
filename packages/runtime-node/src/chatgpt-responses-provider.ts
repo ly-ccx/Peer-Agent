@@ -39,17 +39,26 @@ function messageInput(message: ModelMessage): Record<string, unknown>[] {
     }
   }
   if (message.content) {
-    const parts = Array.isArray(message.content)
-      ? message.content.flatMap((part) => {
+    type ResponsesContentPart =
+      | { type: 'output_text' | 'input_text'; text: string }
+      | { type: 'input_image'; image_url: string };
+    const parts: ResponsesContentPart[] = Array.isArray(message.content)
+      ? message.content.flatMap((part): ResponsesContentPart[] => {
           if (part.type === 'text') {
-            return [{ type: message.role === 'assistant' ? 'output_text' : 'input_text', text: part.text }];
+            return [{
+              type: message.role === 'assistant' ? 'output_text' : 'input_text',
+              text: part.text,
+            }];
           }
           if (part.type === 'image_url' && message.role !== 'assistant') {
             return [{ type: 'input_image', image_url: part.image_url.url }];
           }
           return [];
         })
-      : [{ type: message.role === 'assistant' ? 'output_text' : 'input_text', text: message.content }];
+      : [{
+          type: message.role === 'assistant' ? 'output_text' : 'input_text',
+          text: typeof message.content === 'string' ? message.content : '',
+        }];
     if (parts.length > 0) {
       items.unshift({
         role: message.role,

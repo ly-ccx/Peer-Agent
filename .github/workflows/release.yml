@@ -196,6 +196,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Workspace packages export dist/*; clean CI must build them before bun compile.
+      - name: Build workspace packages for CLI
+        run: |
+          set -euo pipefail
+          pnpm --filter @peer-agent/protocol build
+          pnpm --filter @peer-agent/runtime-core build
+          pnpm --filter @peer-agent/runtime-sdk build
+          pnpm --filter @peer-agent/runtime-node build
+          pnpm --filter @peer-agent/credential-helper build
+          pnpm --filter @peer-agent/conversation-store build
+
       - name: Build CLI (peer + credential helper)
         env:
           PEER_CLI_VERSION: ${{ needs.meta.outputs.version }}
