@@ -363,6 +363,22 @@ function friendlyTestError(error: string | undefined, locale: string): string {
       return zh ? '本机 Qoder 登录态已过期，请重新登录 Qoder' : 'Local Qoder auth has expired. Please sign in to Qoder again';
     case 'qoder_auth_unavailable':
       return zh ? '无法读取本机 Qoder 登录态' : 'Unable to read local Qoder auth';
+    case 'qoder_auth_wasm_not_found':
+    case 'qoder_auth_wasm_missing':
+      return zh
+        ? '未找到本机 Qoder CLI（qodercli），无法解密模型目录。请安装/登录 Qoder CLI 后重试'
+        : 'Local Qoder CLI (qodercli) was not found; cannot decrypt the model catalog. Install/sign in to Qoder CLI and retry';
+    case 'qoder_models_not_found':
+      return zh
+        ? '未找到本机 Qoder 模型目录（~/.qoder）。请先在 Qoder 中登录并同步模型'
+        : 'Local Qoder model catalog (~/.qoder) was not found. Sign in to Qoder and sync models first';
+    case 'qoder_models_unavailable':
+    case 'qoder_encrypted_models_unavailable':
+    case 'qoder_encrypted_models_empty':
+    case 'qoder_models_empty':
+      return zh
+        ? '本机 Qoder 模型目录不可用。请确认已登录 Qoder CLI，并存在可用模型缓存'
+        : 'Local Qoder model catalog is unavailable. Ensure Qoder CLI is signed in and model cache exists';
     case 'qoder_private_empty_response':
       return zh ? 'Qoder 私有接口未返回内容' : 'Qoder private API returned an empty response';
     case 'base_url_required':
@@ -488,6 +504,7 @@ export function LlmSettingsPanel({
       setCatalogResult(await clientApi.llmFetchModels({
         channelId: draft.channelId,
         wireOverride: draft.wireOverride,
+        authMethod: draft.authMethod,
         baseUrl: draft.baseUrl,
         apiKey: draft.apiKey,
         customHeaders: draft.customHeaders,

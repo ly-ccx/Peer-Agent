@@ -156,3 +156,30 @@ describe('qoder model catalog', () => {
     assert.deepEqual(result.models.map((model) => model.id), ['auto']);
   });
 });
+
+it('preserves non-ENOENT encrypted catalog errors when legacy cache is missing', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'qoder-models-err-'));
+  const configDir = path.join(dir, '.qoder');
+  const uid = 'test-uid';
+  mkdirSync(path.join(configDir, '.models', uid), { recursive: true });
+  writeFileSync(path.join(configDir, '.models', 'default'), JSON.stringify({ uid }), 'utf8');
+  // 有加密目录文件，但无 qodercli/wasm 可解密，且无 legacy .auth/models。
+  writeFileSync(path.join(configDir, '.models', uid, 'catalog-v5'), 'not-a-valid-cipher', 'utf8');
+  const previousPath = process.env.PATH;
+  process.env.PATH = '/usr/bin:/bin';
+  try {
+    const result = await listQoderModels({
+      env: { PATH: '/usr/bin:/bin', HOME: dir, QODER_CONFIG_DIR: configDir },
+      homeDir: dir,
+    });
+    assert.equal(result.source, 'fallback');
+    assert.equal(result.models.length, 1);
+    assert.equal(result.models[0].id, 'auto');
+    // 文件存在但解密失败时，不应再误报 not_found。
+    assert.notEqual(result.error, 'qoder_models_not_found');
+    assert.ok(String(result.error || '').startsWith('qoder_'));
+  } finally {
+    process.env.PATH = previousPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

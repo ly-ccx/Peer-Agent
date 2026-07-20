@@ -2412,7 +2412,12 @@ ipcMain.handle('llm:models:list', async (_event, { id }) => {
   const credential = llmConfigStore.getCredential(id);
   const provider = llmConfigStore.listProviders().find((p) => p.id === id) ?? null;
   const authMethod = credential?.authMethod || provider?.authMethod || 'oauth_chatgpt';
-  if (authMethod === 'qoder_local_auth' || authMethod === 'local_cli') {
+  // channelId=qoder 也视为 Qoder 私有接口，避免历史配置 authMethod 写错时误走 OpenAI /models。
+  if (
+    authMethod === 'qoder_local_auth'
+    || authMethod === 'local_cli'
+    || provider?.channelId === 'qoder'
+  ) {
     const { models, source, error } = await listQoderModels();
     return { success: true, models, source, error };
   }
@@ -2459,6 +2464,17 @@ ipcMain.handle('llm:models:list', async (_event, { id }) => {
 ipcMain.handle('llm:models:fetch', async (_event, config) => {
   if (!config) return { success: false, models: [], error: 'config_required' };
   try {
+    const authMethod = config.authMethod || 'api_key';
+    // Qoder 私有接口复用本机 CLI 登录态，模型目录从 ~/.qoder 读取，不走 OpenAI /models。
+    if (authMethod === 'qoder_local_auth' || authMethod === 'local_cli' || config.channelId === 'qoder') {
+      const { models, source, error } = await listQoderModels();
+      return {
+        success: true,
+        models,
+        source,
+        ...(error ? { error } : {}),
+      };
+    }
     const resolved = resolveChannel({
       channelId: config.channelId,
       wireOverride: config.wireOverride,

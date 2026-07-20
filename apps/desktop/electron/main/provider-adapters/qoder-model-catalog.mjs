@@ -170,15 +170,30 @@ async function readEncryptedCatalog(options = {}) {
   const defaultInfo = JSON.parse(await fsp.readFile(defaultModelPath(options), 'utf8'));
   const uid = String(defaultInfo?.uid || '').trim();
   if (!uid) throw new Error('qoder_models_uid_missing');
+  let lastError = null;
+  let sawEncryptedFile = false;
   for (const candidate of encryptedCatalogCandidates(uid, options)) {
     try {
       const encrypted = await fsp.readFile(candidate, 'utf8');
+      sawEncryptedFile = true;
       const text = await decryptQoderModelCache(encrypted, uid, options);
       const models = parseQoderModelCatalogText(text);
       if (models.length) return { models, source: path.basename(candidate) };
-    } catch {}
+      lastError = new Error('qoder_encrypted_models_empty');
+    } catch (error) {
+      // ENOENT: 当前候选不存在，继续尝试更旧版本；其他错误（解密/wasm/解析）保留最后一次原因。
+      if (error?.code !== 'ENOENT') lastError = error;
+    }
   }
-  throw new Error('qoder_encrypted_models_unavailable');
+  if (!sawEncryptedFile) {
+    const notFound = new Error('qoder_models_not_found');
+    notFound.code = 'ENOENT';
+    throw notFound;
+  }
+  const failure = lastError instanceof Error
+    ? lastError
+    : new Error('qoder_encrypted_models_unavailable');
+  throw failure;
 }
 
 function readEncryptedCatalogSync(options = {}) {
@@ -221,12 +236,15 @@ export function getQoderModelMetadata(modelId, options = {}) {
 }
 
 export async function listQoderModels(options = {}) {
+  let encryptedError = null;
   try {
     const result = await readEncryptedCatalog(options);
     const models = mergeModelCatalog(result.models, await readLegacyModelCatalogAsync(options));
     latestCatalogByConfigDir.set(catalogCacheKey(options), models);
     return { models, source: result.source };
-  } catch {}
+  } catch (error) {
+    encryptedError = error;
+  }
   try {
     const text = await fsp.readFile(modelPath(options), 'utf8');
     const models = parseQoderModelCatalogText(text);
@@ -234,14 +252,30 @@ export async function listQoderModels(options = {}) {
       latestCatalogByConfigDir.set(catalogCacheKey(options), models);
       return { models, source: 'local' };
     }
-    return { models: [...FALLBACK_QODER_MODELS], source: 'fallback', error: 'qoder_models_empty' };
-  } catch (error) {
     return {
       models: [...FALLBACK_QODER_MODELS],
       source: 'fallback',
-      error: error?.code === 'ENOENT' ? 'qoder_models_not_found' : 'qoder_models_unavailable',
+      error: classifyQoderCatalogError(encryptedError || new Error('qoder_models_empty')),
+    };
+  } catch (error) {
+    const primary = encryptedError && encryptedError.code !== 'ENOENT' ? encryptedError : error;
+    return {
+      models: [...FALLBACK_QODER_MODELS],
+      source: 'fallback',
+      error: classifyQoderCatalogError(primary),
     };
   }
+}
+
+function classifyQoderCatalogError(error) {
+  if (!error) return 'qoder_models_not_found';
+  const code = String(error.code || error.message || '').trim();
+  if (!code || code === 'ENOENT') return 'qoder_models_not_found';
+  if (code.startsWith('qoder_')) return code;
+  if (code.includes('wasm')) {
+    return code.includes('not_found') ? 'qoder_auth_wasm_not_found' : 'qoder_auth_wasm_missing';
+  }
+  return 'qoder_models_unavailable';
 }
 
 export function qoderModelsPathForDebug({ env = process.env, homeDir = os.homedir() } = {}) {

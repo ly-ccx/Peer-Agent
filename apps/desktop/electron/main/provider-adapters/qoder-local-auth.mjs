@@ -6,7 +6,10 @@ import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const WASM_BASE64_PATTERN = /var MsC="([A-Za-z0-9+/=]+)"/;
+// qodercli 内嵌 auth wasm 的变量名会被 minify 改写（历史为 MsC，新版如 G9_）。
+// 统一按 wasm base64 magic（AGFzb...）匹配，并在多个命中时取最长串。
+const WASM_BASE64_PATTERN = /var [A-Za-z0-9_$]+="(AGFzb[A-Za-z0-9+/=]+)"/g;
+const MIN_EMBEDDED_WASM_BASE64_LENGTH = 1_000;
 const TOKEN_ENV_NAMES = ['QODER_ACCESS_TOKEN', 'QODER_PERSONAL_ACCESS_TOKEN', 'QODER_PAT'];
 
 let authWasmPromise = null;
@@ -91,6 +94,18 @@ async function qoderCliBinaryCandidates({ env = process.env, homeDir = os.homedi
   return [...new Set(candidates)];
 }
 
+export function extractEmbeddedAuthWasmBytes(content) {
+  const text = Buffer.isBuffer(content) ? content.toString('latin1') : String(content || '');
+  let best = null;
+  for (const match of text.matchAll(WASM_BASE64_PATTERN)) {
+    const payload = match?.[1];
+    if (!payload) continue;
+    if (!best || payload.length > best.length) best = payload;
+  }
+  if (!best || best.length < MIN_EMBEDDED_WASM_BASE64_LENGTH) return null;
+  return Buffer.from(best, 'base64');
+}
+
 async function loadEmbeddedWasmBytes(options = {}) {
   let sawBinary = false;
   for (const candidate of await qoderCliBinaryCandidates(options)) {
@@ -98,8 +113,8 @@ async function loadEmbeddedWasmBytes(options = {}) {
     if (!binary) continue;
     sawBinary = true;
     const content = await fs.readFile(binary);
-    const match = content.toString('latin1').match(WASM_BASE64_PATTERN);
-    if (match) return Buffer.from(match[1], 'base64');
+    const wasmBytes = extractEmbeddedAuthWasmBytes(content);
+    if (wasmBytes) return wasmBytes;
   }
   throw createQoderAuthError(sawBinary ? 'qoder_auth_wasm_missing' : 'qoder_auth_wasm_not_found');
 }
@@ -370,7 +385,13 @@ async function createAuthWasm(options = {}) {
 }
 
 async function getAuthWasm(options = {}) {
-  if (!authWasmPromise) authWasmPromise = createAuthWasm(options);
+  if (!authWasmPromise) {
+    authWasmPromise = createAuthWasm(options).catch((error) => {
+      // 失败时清空缓存，避免进程内永久钉死为 wasm_missing。
+      authWasmPromise = null;
+      throw error;
+    });
+  }
   return authWasmPromise;
 }
 

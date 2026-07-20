@@ -625,8 +625,10 @@ export interface LlmModelListResult {
 export interface LlmModelFetchRequest {
   readonly channelId?: string;
   readonly wireOverride?: string;
-  readonly baseUrl: string;
-  readonly apiKey: string;
+  /** Qoder 私有接口等本机鉴权渠道需要显式传入，避免 fetch 路径被默认当成 api_key。 */
+  readonly authMethod?: LlmAuthMethod;
+  readonly baseUrl?: string;
+  readonly apiKey?: string;
   readonly customHeaders?: Record<string, string>;
 }
 
