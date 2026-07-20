@@ -444,14 +444,14 @@
 }
 .channel-conversation-list .conversation-row:hover {
   background: var(--ui-surface-hover, var(--za-sidebar-active-bg));
-  border-color: var(--ui-surface-float-border, var(--ui-border-subtle));
-  box-shadow: var(--ui-surface-float-shadow-hover, none);
+  border-color: transparent;
+  box-shadow: none;
   color: var(--graphite-base);
 }
 .channel-conversation-list .conversation-row.active {
   background: var(--ui-surface-selected, var(--za-sidebar-thread-active-bg));
-  border-color: var(--ui-surface-float-border, var(--ui-border-subtle));
-  box-shadow: var(--ui-surface-float-shadow, none);
+  border-color: transparent;
+  box-shadow: none;
   color: var(--graphite-base);
   font-weight: 500;
 }
@@ -603,14 +603,14 @@
 }
 .sidebar-conversation-item:hover {
   background: var(--ui-surface-hover, var(--za-sidebar-active-bg));
-  border-color: var(--ui-surface-float-border, var(--ui-border-subtle));
-  box-shadow: var(--ui-surface-float-shadow-hover, none);
+  border-color: transparent;
+  box-shadow: none;
   color: var(--graphite-base);
 }
 .sidebar-conversation-item.active {
   background: var(--ui-surface-selected, var(--za-sidebar-thread-active-bg));
-  border-color: var(--ui-surface-float-border, var(--ui-border-subtle));
-  box-shadow: var(--ui-surface-float-shadow, none);
+  border-color: transparent;
+  box-shadow: none;
   color: var(--graphite-base);
   font-weight: 500;
 }
