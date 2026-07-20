@@ -155,6 +155,19 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('paddingTop={menuReserve}');
   });
 
+  test('makes chat history text selectable and copies active selection on Ctrl/Cmd+C', () => {
+    const chatHistorySource = appSource.slice(
+      appSource.indexOf('function ChatHistory'),
+      appSource.indexOf('function ErrorBanner'),
+    );
+    expect(chatHistorySource).toContain('selectable');
+    expect(appSource).toContain('useSelectionHandler');
+    expect(appSource).toContain("control === 'copy-selection'");
+    expect(appSource).toContain('copyTextToClipboard');
+    expect(appSource).toContain('renderer.copyToClipboardOSC52');
+    expect(appSource).toContain('hasSelection');
+  });
+
   test('auto-dismisses transient command notices and cancels superseded timers', () => {
     expect(appSource).toContain('const COMMAND_NOTICE_DURATION_MS = 3_000;');
     expect(appSource).toContain('if (!commandNotice) return;');

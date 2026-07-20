@@ -147,11 +147,16 @@ function MainApp() {
   } | readonly ConversationMeta[], { append = false }: { append?: boolean } = {}) => {
     const normalized = Array.isArray(page)
       ? { items: page as readonly ConversationMeta[], nextCursor: null, hasMore: false }
-      : {
-          items: (page.items ?? []) as readonly ConversationMeta[],
-          nextCursor: page.nextCursor ?? null,
-          hasMore: Boolean(page.hasMore),
-        };
+      : (() => {
+          const nextCursor = page.nextCursor ?? null;
+          // hasMore 仅在同时具备 nextCursor 时成立，避免刷新后残留误显。
+          const hasMore = Boolean(page.hasMore) && Boolean(nextCursor);
+          return {
+            items: (page.items ?? []) as readonly ConversationMeta[],
+            nextCursor,
+            hasMore,
+          };
+        })();
     setConversations((prev) => {
       if (!append) return normalized.items;
       const seen = new Set(prev.map((item) => item.id));
@@ -624,6 +629,7 @@ function MainApp() {
             <Sidebar
               conversations={conversations}
               conversationHasMore={conversationHasMore}
+              conversationNextCursor={conversationNextCursor}
               conversationsLoadingMore={conversationsLoadingMore}
               onLoadMoreConversations={() => { void loadMoreConversations(); }}
               activeConversationId={activeConversationId}

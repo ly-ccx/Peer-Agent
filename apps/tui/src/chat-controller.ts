@@ -49,6 +49,8 @@ export interface ChatMessage {
   readonly content: string;
   readonly images?: readonly ChatMessageImage[];
   readonly pending?: boolean;
+  /** Streaming reasoning/thinking text shown while the assistant is still pending. */
+  readonly thinkingContent?: string;
   readonly usage?: ModelUsage;
   /** Structured tool presentation for hierarchical TUI rendering. */
   readonly tool?: ToolPresentation;
@@ -130,6 +132,17 @@ export interface ChatController {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Drop empty thinking placeholders; keep messages that already received content. */
+function finalizePendingMessages(messages: readonly ChatMessage[]): ChatMessage[] {
+  return messages
+    .filter((message) => {
+      if (!message.pending) return true;
+      // Empty placeholder that never received text/thinking: remove it.
+      return Boolean(message.content || message.thinkingContent);
+    })
+    .map((message) => (message.pending ? { ...message, pending: false } : message));
 }
 
 export function renderCompactProgressBar(percent: number, width = 16): string {
@@ -236,6 +249,25 @@ export function createChatController(options: {
           }
           publish({ ...snapshot, messages });
         }
+        if (event.type === 'reasoning.delta') {
+          const messages = [...snapshot.messages];
+          const last = messages.at(-1);
+          if (last?.role === 'assistant' && last.pending) {
+            messages[messages.length - 1] = {
+              ...last,
+              thinkingContent: `${last.thinkingContent ?? ''}${event.content}`,
+            };
+          } else {
+            messages.push({
+              id: `assistant-${++sequence}`,
+              role: 'assistant',
+              content: '',
+              pending: true,
+              thinkingContent: event.content,
+            });
+          }
+          publish({ ...snapshot, messages });
+        }
         return null;
       },
     },
@@ -307,6 +339,14 @@ export function createChatController(options: {
             content: userContent,
             ...(images.length > 0 ? { images } : {}),
           },
+          // Insert a pending assistant immediately so the UI can show a Thinking
+          // transition state before the first token arrives (Claude Code / Qoder style).
+          {
+            id: `assistant-${++sequence}`,
+            role: 'assistant',
+            content: '',
+            pending: true,
+          },
         ],
       });
 
@@ -345,9 +385,7 @@ export function createChatController(options: {
           session: sessions.get(sessionId) ?? undefined,
           plan: options.planCoordinator?.getSnapshot() ?? undefined,
           usage: result.state?.usage,
-          messages: snapshot.messages.map((message) =>
-            message.pending ? { ...message, pending: false } : message,
-          ),
+          messages: finalizePendingMessages(snapshot.messages),
           error: result.status === 'exhausted' ? 'The model exhausted its turn limit.' : undefined,
         });
       } catch (error) {
@@ -358,9 +396,7 @@ export function createChatController(options: {
           status: 'idle',
           mode: snapshot.mode,
           session: sessions.get(sessionId) ?? undefined,
-          messages: snapshot.messages.map((message) =>
-            message.pending ? { ...message, pending: false } : message,
-          ),
+          messages: finalizePendingMessages(snapshot.messages),
           error: wasCancelled ? undefined : errorMessage(error),
         });
       } finally {

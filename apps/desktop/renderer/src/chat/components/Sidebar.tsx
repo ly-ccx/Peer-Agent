@@ -100,6 +100,7 @@ function PinIcon({ size = 13, filled = false }: { readonly size?: number; readon
 export function Sidebar({
   conversations,
   conversationHasMore = false,
+  conversationNextCursor = null,
   conversationsLoadingMore = false,
   onLoadMoreConversations,
   activeConversationId,
@@ -128,6 +129,7 @@ export function Sidebar({
 }: {
   readonly conversations: readonly ConversationMeta[];
   readonly conversationHasMore?: boolean;
+  readonly conversationNextCursor?: string | null;
   readonly conversationsLoadingMore?: boolean;
   readonly onLoadMoreConversations?: () => void;
   readonly activeConversationId: string | null;
@@ -665,7 +667,15 @@ export function Sidebar({
         ref={conversationListRef}
         className={`channel-conversation-list ${isArchivedView ? 'is-archive-view' : ''}`}
         onScroll={(event) => {
-          if (!conversationHasMore || conversationsLoadingMore || !onLoadMoreConversations) return;
+          if (
+            !conversationHasMore
+            || !conversationNextCursor
+            || conversations.length === 0
+            || conversationsLoadingMore
+            || !onLoadMoreConversations
+          ) {
+            return;
+          }
           const el = event.currentTarget;
           if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80) {
             onLoadMoreConversations();
@@ -708,7 +718,7 @@ export function Sidebar({
           </section>
         ) : null}
         {normalConversations.map((conv) => renderConversationRow(conv))}
-        {conversationHasMore ? (
+        {conversationHasMore && conversationNextCursor && conversations.length > 0 ? (
           <button
             type="button"
             className="sidebar-load-more"

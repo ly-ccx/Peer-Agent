@@ -76,11 +76,13 @@ export function useDesktopBootstrap(): DesktopBootstrapState {
         const page = Array.isArray(conversationPage)
           ? { items: conversationPage, nextCursor: null, hasMore: false, total: conversationPage.length }
           : conversationPage;
+        const conversationNextCursor = page.nextCursor ?? null;
         setStartupSnapshot({
           activeWorkspace: directory.activeWorkspace,
           conversations: page.items ?? [],
-          conversationNextCursor: page.nextCursor ?? null,
-          conversationHasMore: Boolean(page.hasMore),
+          conversationNextCursor,
+          // hasMore 与 nextCursor 绑定，避免首屏残留误显。
+          conversationHasMore: Boolean(page.hasMore) && Boolean(conversationNextCursor),
           workspaceInfo,
           workspaces: directory.workspaces,
         });

@@ -4,6 +4,7 @@ export type TuiCommandAction =
   | { readonly type: 'open-model-picker' }
   | { readonly type: 'open-mode-picker' }
   | { readonly type: 'open-permission-picker' }
+  | { readonly type: 'open-language-picker' }
   | { readonly type: 'show-help' }
   | { readonly type: 'clear-chat' }
   | { readonly type: 'compact-context' }
@@ -33,6 +34,13 @@ export const TUI_COMMAND_REGISTRY: readonly TuiCommandDefinition[] = Object.free
   { id: 'model', label: 'Model', description: 'Choose model and reasoning effort', keywords: ['provider', 'llm', 'effort'], shortcut: 'Ctrl+X M', action: { type: 'open-model-picker' } },
   { id: 'mode', label: 'Mode', description: 'Choose Agent, Plan, or Goal', keywords: ['agent', 'chat', 'plan', 'goal'], shortcut: 'Ctrl+X O', action: { type: 'open-mode-picker' } },
   { id: 'permissions', label: 'Permissions', description: 'Choose the session permission policy', keywords: ['access', 'approval', 'ask'], shortcut: 'Ctrl+X P', action: { type: 'open-permission-picker' } },
+  {
+    id: 'language',
+    label: 'Language',
+    description: 'Switch UI and model reply language (Chinese/English)',
+    keywords: ['locale', '中文', 'english', 'zh', 'en', 'i18n', 'lang'],
+    action: { type: 'open-language-picker' },
+  },
   { id: 'clear', label: 'Clear chat', description: 'Clear messages, model context, and errors', keywords: ['reset', 'conversation', 'error'], action: { type: 'clear-chat' } },
   { id: 'compact', label: 'Compact context', description: 'Compress model context with a structural summary; UI transcript stays', keywords: ['compress', 'summary', 'context', 'tokens'], action: { type: 'compact-context' } },
   { id: 'resume', label: 'Resume session', description: 'Restore and continue a saved conversation', keywords: ['session', 'conversation', 'history', 'restore'], action: { type: 'open-resume-picker' } },
@@ -78,7 +86,8 @@ export function buildTuiHelpSections(
         'Ctrl+X then P  permissions',
         'Ctrl+1 / 2 / 3  Agent / Plan / Goal',
         'Esc  close panel or cancel',
-        'Ctrl+C  interrupt / quit',
+        'Ctrl/Cmd+C  copy selection, else interrupt / quit',
+        'Drag to select chat text, then Ctrl/Cmd+C to copy',
       ],
     },
     {
@@ -97,10 +106,18 @@ export function buildTuiHelpSections(
       ],
     },
     {
+      title: 'Language',
+      lines: [
+        '/language  switch UI + model reply language (Chinese / English)',
+        'Persisted in ~/.peer-agent/settings.json as locale + replyLanguage',
+      ],
+    },
+    {
       title: 'Tips',
       lines: [
         'Type / to search commands',
         'Click a tool result to expand full output',
+        'Select chat text with the mouse, then Ctrl/Cmd+C to copy',
         'ctx shows context usage for the current model',
       ],
     },

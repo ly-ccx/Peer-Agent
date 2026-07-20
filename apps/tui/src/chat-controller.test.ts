@@ -147,6 +147,84 @@ describe('chat controller', () => {
     ]);
   });
 
+  test('inserts a pending assistant placeholder as soon as send() starts', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        await gate;
+        return { kind: 'completed', state, output: 'done' };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+    const snapshots: Array<{ status: string; pending: boolean; content: string }> = [];
+    controller.subscribe((snapshot) => {
+      const last = snapshot.messages.at(-1);
+      if (last?.role === 'assistant') {
+        snapshots.push({
+          status: snapshot.status,
+          pending: Boolean(last.pending),
+          content: last.content,
+        });
+      }
+    });
+
+    const pending = controller.send('hi');
+    // Immediately after send(), before first model token:
+    const running = controller.getSnapshot();
+    expect(running.status).toBe('running');
+    const placeholder = running.messages.at(-1);
+    expect(placeholder).toMatchObject({
+      role: 'assistant',
+      content: '',
+      pending: true,
+    });
+
+    release();
+    await pending;
+
+    expect(controller.getSnapshot().status).toBe('idle');
+    // Empty placeholder with no content should be cleaned up after finish.
+    expect(controller.getSnapshot().messages.map((m) => m.role)).toEqual(['user']);
+    expect(snapshots.some((item) => item.status === 'running' && item.pending && item.content === '')).toBe(true);
+  });
+
+  test('streams reasoning.delta into thinkingContent on the pending assistant', async () => {
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state, context) {
+        context.emit({ type: 'reasoning.delta', streamId: 'test', content: 'step 1 ' });
+        context.emit({ type: 'reasoning.delta', streamId: 'test', content: 'step 2' });
+        context.emit({ type: 'message.delta', streamId: 'test', content: 'answer' });
+        return { kind: 'completed', state, output: 'answer' };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+    const thinkingSnapshots: string[] = [];
+    controller.subscribe((snapshot) => {
+      const last = snapshot.messages.at(-1);
+      if (last?.role === 'assistant' && last.thinkingContent) {
+        thinkingSnapshots.push(last.thinkingContent);
+      }
+    });
+
+    await controller.send('think');
+
+    expect(thinkingSnapshots.at(-1)).toBe('step 1 step 2');
+    const final = controller.getSnapshot().messages.at(-1);
+    expect(final).toMatchObject({
+      role: 'assistant',
+      content: 'answer',
+      pending: false,
+      thinkingContent: 'step 1 step 2',
+    });
+  });
+
   test('executes model tool calls through the TUI host and resumes the model', async () => {
     const calls: string[] = [];
     const model: ChatModelPort = {

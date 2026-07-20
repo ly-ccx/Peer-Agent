@@ -15,12 +15,14 @@ describe('TUI command registry', () => {
       'model',
       'mode',
       'permissions',
+      'language',
       'clear',
       'compact',
       'resume',
       'help',
       'quit',
     ]);
+    expect(TUI_COMMAND_REGISTRY.some((command) => command.id === 'language')).toBe(true);
     expect(TUI_COMMAND_REGISTRY.some((command) => command.id.includes('explorer'))).toBe(false);
     expect(TUI_COMMAND_REGISTRY.some((command) => command.id === 'new')).toBe(false);
   });
@@ -30,6 +32,7 @@ describe('TUI command registry', () => {
     expect(filterTuiCommandRegistry('ask approval', idle).map((command) => command.id)).toEqual(['permissions']);
     expect(filterTuiCommandRegistry('plan', idle).map((command) => command.id)).toEqual(['mode']);
     expect(filterTuiCommandRegistry('compress context', idle).map((command) => command.id)).toEqual(['compact']);
+    expect(filterTuiCommandRegistry('中文 english', idle).map((command) => command.id)).toEqual(['language']);
   });
 
   test('shows goal controls only when they can execute', () => {
@@ -45,6 +48,7 @@ describe('TUI command registry', () => {
       'Keyboard',
       'Slash commands',
       'Modes',
+      'Language',
       'Tips',
     ]);
     const slash = sections.find((section) => section.title === 'Slash commands')!;

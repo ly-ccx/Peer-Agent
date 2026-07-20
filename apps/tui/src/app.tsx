@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { TextareaRenderable } from '@opentui/core';
-import { useKeyboard, useTerminalDimensions } from '@opentui/react';
+import { useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } from '@opentui/react';
 import type { LocalAccessLevel } from '@peer-agent/protocol';
 import type { RuntimeGoalSnapshot } from '@peer-agent/runtime-sdk';
 import type { RuntimeModelSelection } from '@peer-agent/runtime-node';
 
 import { B3Wordmark } from './b3-wordmark-view.tsx';
 import { MarkdownView } from './markdown-view.tsx';
+import { copyTextToClipboard, selectionCopyNotice } from './tui-clipboard.ts';
 import { buildTuiHelpSections } from './command-registry.ts';
 import { executeTuiCommand } from './command-execution.ts';
 import {
@@ -56,6 +57,14 @@ import {
 } from './tui-model-selection.ts';
 import type { PendingApproval, TuiHost } from './tui-host.ts';
 import { TUI_MODES, tuiModeOption, type TuiMode } from './tui-mode.ts';
+import {
+  languageIndex,
+  languageOption,
+  languageSwitchNotice,
+  TUI_LANGUAGE_OPTIONS,
+  type TuiLanguageStore,
+  type TuiLocale,
+} from './tui-language.ts';
 import {
   permissionPolicyForKey,
   permissionPolicyIndex,
@@ -126,18 +135,32 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
                 <text fg={COLOR.accent}><strong>{label}</strong></text>
                 <text fg={COLOR.muted}> {'─'.repeat(8)}</text>
               </box>
-              <text fg={COLOR.muted}>{message.content || ' '}</text>
+              <text selectable fg={COLOR.muted}>{message.content || ' '}</text>
             </box>
           );
         }
 
         if (message.role === 'assistant') {
+          const showThinkingPlaceholder = message.pending && !message.content;
+          const thinkingText = message.thinkingContent?.trim();
           return (
             <box key={message.id} flexDirection="column" marginBottom={1}>
-              {message.pending && !message.content ? (
-                <text fg={COLOR.muted}>thinking…</text>
+              {showThinkingPlaceholder ? (
+                <box flexDirection="column">
+                  <text selectable fg={COLOR.muted}>
+                    {thinkingText ? 'Thinking…' : 'Thinking… esc to cancel'}
+                  </text>
+                  {thinkingText ? (
+                    <text selectable fg={COLOR.muted}>{thinkingText}</text>
+                  ) : null}
+                </box>
               ) : (
-                <MarkdownView content={message.content || ' '} />
+                <box flexDirection="column">
+                  {thinkingText && message.pending ? (
+                    <text selectable fg={COLOR.muted}>{thinkingText}</text>
+                  ) : null}
+                  <MarkdownView content={message.content || ' '} />
+                </box>
               )}
             </box>
           );
@@ -146,8 +169,8 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
         if (message.role === 'user') {
           return (
             <box key={message.id} flexDirection="row" marginBottom={1}>
-              <text fg={COLOR.user}><strong>› </strong></text>
-              <text fg={COLOR.text}>{message.content || ' '}</text>
+              <text selectable fg={COLOR.user}><strong>› </strong></text>
+              <text selectable fg={COLOR.text}>{message.content || ' '}</text>
             </box>
           );
         }
@@ -169,19 +192,19 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
             onMouseDown={() => toggleTool(message.id)}
           >
             <box flexDirection="row">
-              <text fg={headlineColor} wrapMode="none">
+              <text selectable fg={headlineColor} wrapMode="none">
                 {toolStatusGlyph(presentation.status)}{' '}
               </text>
-              <text fg={headlineColor} wrapMode="none">
+              <text selectable fg={headlineColor} wrapMode="none">
                 <strong>{toolHeadline(presentation.toolName, presentation.argumentSummary)}</strong>
               </text>
             </box>
             {detailLines.map((line, index) => (
               <box key={`${message.id}-detail-${index}`} flexDirection="row">
-                <text fg={COLOR.subtle} wrapMode="none">
+                <text selectable fg={COLOR.subtle} wrapMode="none">
                   {index === 0 ? TOOL_CHROME.branchFirst : TOOL_CHROME.branchRest}
                 </text>
-                <text fg={detailColor}>{line || ' '}</text>
+                <text selectable fg={detailColor}>{line || ' '}</text>
               </box>
             ))}
           </box>
@@ -519,11 +542,12 @@ function ComposerDock({
   );
 }
 
-export function App({ host, model, modelLabel, modelSelection, onQuit }: {
+export function App({ host, model, modelLabel, modelSelection, languageStore, onQuit }: {
   readonly host: TuiHost;
   readonly model: ChatModelPort;
   readonly modelLabel: string;
   readonly modelSelection?: TuiModelSelectionControl;
+  readonly languageStore?: TuiLanguageStore;
   readonly onQuit: () => void;
 }) {
   const terminal = useTerminalDimensions();
@@ -557,6 +581,15 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
   const [approvalSelection, setApprovalSelection] = useState(0);
   const [planSelection, setPlanSelection] = useState(0);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
+  const renderer = useRenderer();
+  const selectedTextRef = useRef('');
+  const [hasTextSelection, setHasTextSelection] = useState(false);
+
+  useSelectionHandler((selection) => {
+    const next = selection?.getSelectedText?.() ?? '';
+    selectedTextRef.current = next;
+    setHasTextSelection(next.length > 0);
+  });
   const [resumeItems, setResumeItems] = useState<readonly TuiConversationSummary[]>([]);
   const [selectedModel, setSelectedModel] = useState<RuntimeModelSelection | null>(
     () => modelSelection?.getSelection() ?? null,
@@ -578,6 +611,7 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
     },
   }), [controller, modelLabel, modelSelection]);
   const [accessLevel, setAccessLevel] = useState<LocalAccessLevel>(() => host.getAccessLevel());
+  const [locale, setLocale] = useState<TuiLocale>(() => languageStore?.getLocale() ?? 'zh-CN');
   const [composerDraft, setComposerDraft] = useState('');
   const [experience, setExperience] = useState<TuiExperienceState>(() => createTuiExperienceState());
   const visibleTurn = snapshot.session?.activeTurn ?? snapshot.session?.lastTurn;
@@ -645,6 +679,9 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
   const permissionSurface = experience.surface.type === 'picker' && experience.surface.picker === 'permission'
     ? experience.surface
     : null;
+  const languageSurface = experience.surface.type === 'picker' && experience.surface.picker === 'language'
+    ? experience.surface
+    : null;
   const modelPickerView = modelSelection && selectedModel
     ? buildModelPickerView({
       control: modelSelection,
@@ -690,6 +727,7 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
   const modeSelection = modeSurface?.selectedIndex ?? 0;
   const modelPickerSelection = modelSurface?.selectedIndex ?? 0;
   const permissionSelection = permissionSurface?.selectedIndex ?? permissionPolicyIndex(accessLevel);
+  const languageSelection = languageSurface?.selectedIndex ?? languageIndex(locale);
   const activeTurnMode = snapshot.activeTurnMode;
   const selectedModelLabel = selectedModel && modelSelection
     ? modelSelectionLabel(modelSelection, selectedModel)
@@ -702,6 +740,7 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
     workspaceRoot: host.workspaceRoot,
     mode: snapshot.mode,
     accessLevel,
+    locale,
     modelLabel: selectedModelLabel,
     reasoningEffort: selectedModel?.reasoningEffort,
     usage: snapshot.usage,
@@ -815,14 +854,33 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
   });
 
   useKeyboard((key) => {
+    const keyMeta = Boolean((key as { meta?: boolean; super?: boolean }).meta || (key as { super?: boolean }).super);
+    const liveSelection = renderer.getSelection()?.getSelectedText?.() ?? selectedTextRef.current;
+    const hasSelection = liveSelection.trim().length > 0 || hasTextSelection;
     const control = runtimeControlAction({
       keyName: key.name,
       ctrl: key.ctrl,
+      meta: keyMeta,
       isRunning: snapshot.status !== 'idle' || Boolean(goal && ['pending', 'running'].includes(goal.status)),
       hasSurface: experience.surface.type !== 'composer'
         && experience.surface.type !== 'slash-suggestions',
       hasDraft: composerDraft.length > 0,
+      hasSelection,
     });
+    if (control === 'copy-selection') {
+      const textToCopy = liveSelection.trim().length > 0 ? liveSelection : selectedTextRef.current;
+      void copyTextToClipboard(textToCopy, {
+        writeOsc52: (value) => renderer.copyToClipboardOSC52(value),
+      }).then((result) => {
+        setCommandNotice(selectionCopyNotice(result, textToCopy.length));
+        if (result.ok) {
+          selectedTextRef.current = '';
+          setHasTextSelection(false);
+          renderer.clearSelection();
+        }
+      });
+      return;
+    }
     if (control === 'interrupt') {
       controller.cancel();
       if (goal && ['pending', 'running', 'paused'].includes(goal.status)) goalRunner.cancel(goal.goalId);
@@ -1050,6 +1108,51 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
         setComposerDraft('');
         setCommandNotice(`Resumed: ${selected.title}`);
         queueMicrotask(() => composerRef.current?.focus());
+        return;
+      }
+      return;
+    }
+
+    if (languageSurface) {
+      if (key.name === 'escape') {
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+        return;
+      }
+      if (key.name === 'up' || key.name === 'left') {
+        setExperience((current) => ({
+          ...current,
+          surface: moveTuiSurfaceSelection(current.surface, -1, TUI_LANGUAGE_OPTIONS.length),
+        }));
+        return;
+      }
+      if (key.name === 'down' || key.name === 'right' || key.name === 'tab') {
+        setExperience((current) => ({
+          ...current,
+          surface: moveTuiSurfaceSelection(current.surface, 1, TUI_LANGUAGE_OPTIONS.length),
+        }));
+        return;
+      }
+      if (key.name === 'return') {
+        const option = TUI_LANGUAGE_OPTIONS[languageSelection];
+        if (option) {
+          const next = languageStore?.setLanguage(option.locale) ?? { locale: option.locale, replyLanguage: option.locale };
+          setLocale(next.locale);
+          setNotice(languageSwitchNotice(next.locale));
+        }
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+        return;
+      }
+      if (typeof key.name === 'string' && key.name.length === 1 && key.name >= '1' && key.name <= '9') {
+        const option = TUI_LANGUAGE_OPTIONS[Number(key.name) - 1];
+        if (option) {
+          const next = languageStore?.setLanguage(option.locale) ?? { locale: option.locale, replyLanguage: option.locale };
+          setLocale(next.locale);
+          setNotice(languageSwitchNotice(next.locale));
+          setExperience((current) => escapeFooter(current));
+          queueMicrotask(() => composerRef.current?.focus());
+        }
         return;
       }
       return;
@@ -1422,7 +1525,50 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
         />
       ) : null}
 
-      {modeSurface ? (
+            {languageSurface ? (
+        <box
+          flexDirection="column"
+          height={pickerLayout.modePanelRows}
+          flexShrink={0}
+          border
+          borderColor={COLOR.accent}
+          backgroundColor={COLOR.panel}
+          paddingLeft={1}
+          paddingRight={1}
+          paddingTop={pickerLayout.verticalPadding}
+          paddingBottom={pickerLayout.verticalPadding}
+        >
+          <text fg={COLOR.text} wrapMode="none"><strong>{locale === 'zh-CN' ? '语言' : 'Language'}</strong></text>
+          {pickerLayout.showDescriptions ? (
+            <text fg={COLOR.muted} wrapMode="none">
+              {locale === 'zh-CN' ? '同时切换界面语言与模型回复语言' : 'Switch UI language and model reply language together'}
+            </text>
+          ) : null}
+          {TUI_LANGUAGE_OPTIONS.map((option, index) => {
+            const selected = index === languageSelection;
+            return (
+              <box
+                key={option.locale}
+                flexDirection="row"
+                backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+              >
+                <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
+                  {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}
+                  {option.shortcut}. {option.label}
+                  {option.locale === locale ? PICKER_CHROME.checkCurrent : ''}
+                </text>
+              </box>
+            );
+          })}
+          {pickerLayout.showDescriptions ? (
+            <text fg={COLOR.muted} wrapMode="word">
+              {TUI_LANGUAGE_OPTIONS[languageSelection]?.description ?? ''}
+            </text>
+          ) : null}
+        </box>
+      ) : null}
+
+{modeSurface ? (
         <box
           flexDirection="column"
           height={pickerLayout.modePanelRows}
