@@ -21,13 +21,6 @@ import { WorkbenchProvider } from './workbench/WorkbenchContext';
 
 const DEFAULT_NEW_TASK_SHORTCUT = 'CommandOrControl+N';
 
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  const tag = target.tagName;
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
-}
-
 function eventMatchesAccelerator(event: KeyboardEvent, accelerator: string): boolean {
   const parts = accelerator.split('+').filter(Boolean);
   if (parts.length < 2) return false;
@@ -500,8 +493,8 @@ function MainApp() {
         return;
       }
       // Configurable app-local "new task" shortcut (default ⌘/Ctrl+N).
+      // Match ⌘K: fire even when focus is in composer/input fields.
       if (eventMatchesAccelerator(event, newTaskShortcut)) {
-        if (isEditableTarget(event.target)) return;
         event.preventDefault();
         void handleNewChat();
       }
