@@ -89,34 +89,36 @@ export function resolveTuiModelConfig(
   const sharedProviders = (options.loadSharedMetadataList ?? loadSharedModelMetadataList)({
     userDataPath: options.userDataPath,
   });
-  const catalog = sharedProviders
-    .filter((provider) => provider.authMethod === 'api_key' || provider.authMethod === 'oauth_chatgpt')
-    .map((provider): RuntimeModelCatalogEntry => ({
+  // Keep the full Desktop catalog visible and selectable in CLI when credentials
+  // are present. Auth-method-specific request routing lives in index.tsx.
+  const catalog = sharedProviders.map((provider): RuntimeModelCatalogEntry => {
+    const available = provider.credentialStored;
+    return {
       providerId: provider.credentialId,
       modelId: provider.model,
       displayName: `${provider.model} · ${provider.displayName}`,
+      // Prefer Desktop llm-providers.json contextWindow so status bar can
+      // render `ctx N%` instead of falling back to `ctx N / ?`.
+      ...(provider.contextWindow === undefined ? {} : { contextWindow: provider.contextWindow }),
       supportsTools: true,
       supportedReasoningEfforts: ['default', 'low', 'high'],
       defaultReasoningEffort: 'default',
-      available: provider.credentialStored,
-    }));
+      available,
+      ...(available ? {} : { unavailableReason: 'credential missing' }),
+    };
+  });
 
-  // Prefer the Desktop default when TUI can actually run it; otherwise fall back
-  // to the first catalog-supported provider so the model picker stays usable.
+  // Prefer the Desktop default when credentials exist; otherwise fall back to
+  // the first credentialed provider so the model picker stays usable.
   const preferredSharedMetadata = (options.loadSharedMetadata ?? loadSharedModelMetadata)({
     userDataPath: options.userDataPath,
   });
   const sharedMetadata = (
     preferredSharedMetadata
-    && (
-      preferredSharedMetadata.authMethod === 'api_key'
-      || preferredSharedMetadata.authMethod === 'oauth_chatgpt'
-    )
+    && preferredSharedMetadata.credentialStored
   )
     ? preferredSharedMetadata
-    : (sharedProviders.find((provider) =>
-      provider.authMethod === 'api_key' || provider.authMethod === 'oauth_chatgpt'
-    ) ?? null);
+    : (sharedProviders.find((provider) => provider.credentialStored) ?? null);
 
   if (sharedMetadata) {
     const sharedCredentialStore = options.sharedCredentialStore

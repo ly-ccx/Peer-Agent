@@ -55,7 +55,8 @@ describe('composer status', () => {
     })).toMatchObject({
       workspace: '~/Projects/peer_agent',
       workspaceShort: 'peer_agent',
-      mode: 'chat',
+      // Wire mode is `chat`; status surface shows the Agent product label.
+      mode: 'agent',
       permission: 'ask',
       permissionShort: 'ask',
       model: 'gpt-5.6-sol',
@@ -84,6 +85,19 @@ describe('composer status', () => {
     })).toMatchObject({
       permission: 'approve for me',
       permissionShort: 'approve',
+    });
+
+    // Catalog-provided windows (e.g. grok-4.5 from llm-providers.json) should
+    // replace the unknown-window fallback.
+    expect(createComposerStatus({
+      workspaceRoot: '/tmp/project',
+      mode: 'chat',
+      modelLabel: 'grok-4.5',
+      contextWindow: 500_000,
+      usage: { inputTokens: 0 },
+    })).toMatchObject({
+      context: 'context 0%',
+      contextShort: 'ctx 0%',
     });
   });
 });

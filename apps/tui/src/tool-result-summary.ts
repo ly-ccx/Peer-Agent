@@ -1,5 +1,24 @@
 const DEFAULT_MAX_LENGTH = 1_200;
 const DEFAULT_INLINE_MAX_LENGTH = 120;
+const DEFAULT_DETAIL_PREVIEW_LINES = 3;
+const DEFAULT_DETAIL_LINE_MAX = 100;
+
+export type ToolPresentationStatus =
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'denied'
+  | 'running'
+  | 'unknown';
+
+export interface ToolPresentation {
+  readonly capabilityId: string;
+  readonly toolName: string;
+  readonly argumentSummary: string;
+  readonly status: ToolPresentationStatus;
+  readonly detail: string;
+  readonly detailLines: readonly string[];
+}
 
 export function toolResultInlineSummary(
   content: string,
@@ -16,7 +35,6 @@ export function toolResultInlineSummary(
 export function toggleToolDetails(current: boolean): boolean {
   return !current;
 }
-
 
 function stableJson(value: unknown): string {
   const seen = new WeakSet<object>();
@@ -53,4 +71,217 @@ export function formatToolResultSummary(
 
   if (formatted.length <= maxLength) return formatted;
   return `${formatted.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+const TOOL_DISPLAY_NAMES: Readonly<Record<string, string>> = Object.freeze({
+  'local.shell.exec': 'Bash',
+  'local.file.read': 'Read',
+  'local.file.write': 'Write',
+  'local.file.list': 'List',
+  'local.search.content': 'Search',
+  'local.search.files': 'Search',
+  'local.search.aggregate': 'Search',
+});
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function compactText(value: string, maxLength = 72): string {
+  const singleLine = value.replace(/\s+/g, ' ').trim();
+  if (!singleLine) return '';
+  if (singleLine.length <= maxLength) return singleLine;
+  return `${singleLine.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+export function toolDisplayName(capabilityId: string): string {
+  const known = TOOL_DISPLAY_NAMES[capabilityId];
+  if (known) return known;
+  const leaf = capabilityId.split('.').filter(Boolean).at(-1) ?? capabilityId;
+  if (!leaf) return 'Tool';
+  return leaf.charAt(0).toUpperCase() + leaf.slice(1);
+}
+
+export function toolArgumentSummary(
+  capabilityId: string,
+  args: Record<string, unknown> | null | undefined,
+): string {
+  const record = args ?? {};
+  if (capabilityId === 'local.shell.exec') {
+    const command = typeof record.command === 'string' ? record.command : '';
+    return compactText(command, 88);
+  }
+  if (
+    capabilityId === 'local.file.read'
+    || capabilityId === 'local.file.write'
+    || capabilityId === 'local.file.list'
+  ) {
+    const path = typeof record.path === 'string'
+      ? record.path
+      : typeof record.file === 'string'
+        ? record.file
+        : '';
+    return compactText(path, 88);
+  }
+  if (
+    capabilityId === 'local.search.content'
+    || capabilityId === 'local.search.files'
+    || capabilityId === 'local.search.aggregate'
+  ) {
+    const query = typeof record.query === 'string'
+      ? record.query
+      : typeof record.pattern === 'string'
+        ? record.pattern
+        : '';
+    return compactText(query, 72);
+  }
+
+  const preferred = ['path', 'command', 'query', 'url', 'name', 'id']
+    .map((key) => record[key])
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  if (preferred) return compactText(preferred, 72);
+
+  const keys = Object.keys(record);
+  if (keys.length === 0) return '';
+  return compactText(keys.slice(0, 3).join(', '), 48);
+}
+
+export function normalizeToolPresentationStatus(value: unknown): ToolPresentationStatus {
+  switch (value) {
+    case 'completed':
+    case 'failed':
+    case 'cancelled':
+    case 'denied':
+    case 'running':
+      return value;
+    default:
+      return 'unknown';
+  }
+}
+
+export function toolStatusGlyph(status: ToolPresentationStatus): string {
+  switch (status) {
+    case 'failed':
+    case 'denied':
+      return '×';
+    case 'cancelled':
+      return '–';
+    case 'running':
+      return '…';
+    case 'completed':
+    case 'unknown':
+    default:
+      return '•';
+  }
+}
+
+export function toolHeadline(
+  toolName: string,
+  argumentSummary: string,
+): string {
+  if (!argumentSummary) return toolName;
+  return `${toolName}(${argumentSummary})`;
+}
+
+export function toolDetailLines(
+  detail: string,
+  maxLines = DEFAULT_DETAIL_PREVIEW_LINES,
+  lineMax = DEFAULT_DETAIL_LINE_MAX,
+): readonly string[] {
+  const lines = detail
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0)
+    .map((line) => compactText(line, lineMax));
+  if (lines.length === 0) return ['completed'];
+  if (lines.length <= maxLines) return lines;
+  const visible = lines.slice(0, maxLines);
+  const remaining = lines.length - maxLines;
+  return [...visible, `… +${remaining} lines`];
+}
+
+export function createToolPresentation(input: {
+  readonly capabilityId: string;
+  readonly arguments?: Record<string, unknown> | null;
+  readonly status?: unknown;
+  readonly outputPreview?: unknown;
+  readonly errorMessage?: string | null;
+}): ToolPresentation {
+  const capabilityId = input.capabilityId.trim() || 'tool';
+  const status = normalizeToolPresentationStatus(input.status);
+  const toolName = toolDisplayName(capabilityId);
+  const argumentSummary = toolArgumentSummary(capabilityId, input.arguments);
+  const fallback = status === 'failed' || status === 'denied'
+    ? (input.errorMessage?.trim() || status)
+    : status === 'cancelled'
+      ? 'cancelled'
+      : 'completed';
+  const detail = formatToolResultSummary(input.outputPreview, fallback);
+  return {
+    capabilityId,
+    toolName,
+    argumentSummary,
+    status,
+    detail,
+    detailLines: toolDetailLines(detail),
+  };
+}
+
+/**
+ * Best-effort recovery for older sessions that only stored a flat
+ * `capabilityId: summary` string.
+ */
+export function parseLegacyToolContent(content: string): ToolPresentation {
+  const trimmed = content.trim();
+  const match = /^([a-z0-9._-]+):\s*([\s\S]*)$/i.exec(trimmed);
+  if (!match) {
+    return createToolPresentation({
+      capabilityId: 'tool',
+      status: 'unknown',
+      outputPreview: trimmed || 'completed',
+    });
+  }
+  return createToolPresentation({
+    capabilityId: match[1]!,
+    status: 'unknown',
+    outputPreview: match[2] || 'completed',
+  });
+}
+
+export function resolveToolPresentation(
+  message: {
+    readonly content: string;
+    readonly tool?: Partial<ToolPresentation> | null;
+  },
+): ToolPresentation {
+  const tool = message.tool;
+  if (tool && typeof tool.capabilityId === 'string' && tool.capabilityId.trim()) {
+    const detail = typeof tool.detail === 'string' && tool.detail.trim()
+      ? tool.detail
+      : message.content;
+    const status = normalizeToolPresentationStatus(tool.status);
+    const toolName = typeof tool.toolName === 'string' && tool.toolName.trim()
+      ? tool.toolName
+      : toolDisplayName(tool.capabilityId);
+    const argumentSummary = typeof tool.argumentSummary === 'string'
+      ? tool.argumentSummary
+      : '';
+    return {
+      capabilityId: tool.capabilityId,
+      toolName,
+      argumentSummary,
+      status,
+      detail,
+      detailLines: Array.isArray(tool.detailLines) && tool.detailLines.length > 0
+        ? tool.detailLines
+        : toolDetailLines(detail),
+    };
+  }
+  return parseLegacyToolContent(message.content);
+}
+
+export function toolPresentationContent(presentation: ToolPresentation): string {
+  const headline = toolHeadline(presentation.toolName, presentation.argumentSummary);
+  return `${presentation.capabilityId}: ${headline} — ${presentation.detail}`;
 }

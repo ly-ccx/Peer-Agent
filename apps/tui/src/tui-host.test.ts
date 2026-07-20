@@ -50,6 +50,8 @@ describe('TUI Runtime host', () => {
     const host = createTuiHost(workspaceRoot);
     const capabilities = (mode: 'chat' | 'plan' | 'goal' | 'explorer') =>
       host.capabilitiesForMode?.(mode) ?? [];
+    const toolNames = (mode: 'chat' | 'plan' | 'goal' | 'explorer') =>
+      (host.toolDefinitionsForMode?.(mode) ?? []).map((tool) => tool.capabilityId);
 
     expect(capabilities('chat')).toEqual([
       'local.file.read',
@@ -60,6 +62,14 @@ describe('TUI Runtime host', () => {
     expect(capabilities('goal')).toEqual(capabilities('chat'));
     expect(capabilities('plan')).toEqual(['local.file.read', 'local.file.list']);
     expect(capabilities('explorer')).toEqual(['local.file.read', 'local.file.list']);
+
+    // Model-visible tool definitions must use the same projected set. Returning
+    // the unfiltered provider catalog would re-expose write/shell in plan mode.
+    expect([...toolNames('chat')]).toEqual([...capabilities('chat')]);
+    expect([...toolNames('plan')]).toEqual([...capabilities('plan')]);
+    expect([...toolNames('explorer')]).toEqual([...capabilities('explorer')]);
+    expect(toolNames('plan')).not.toContain('local.file.write');
+    expect(toolNames('plan')).not.toContain('local.shell.exec');
   });
 
   test('rejects non-projected write and shell capabilities before approval in plan and explorer', async () => {

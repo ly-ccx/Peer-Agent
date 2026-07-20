@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  buildModelPickerView,
   createTuiModelSelectionControl,
+  cycleModelPickerGroup,
   modelPickerItems,
   modelSelectionLabel,
 } from './tui-model-selection.ts';
@@ -21,7 +23,7 @@ describe('TUI model selection', () => {
       { providerId: 'chatgpt', modelId: 'gpt-5.6-sol', reasoningEffort: 'high' },
       { providerId: 'chatgpt', modelId: 'gpt-5.6-sol', reasoningEffort: 'xhigh' },
     ]);
-    expect(modelSelectionLabel(control, control.getSelection())).toBe('GPT-5.6 SOL · high');
+    expect(modelSelectionLabel(control, control.getSelection())).toBe('GPT-5.6 SOL · Models · high');
   });
 
   test('lists and switches across configured providers', () => {
@@ -80,4 +82,122 @@ describe('TUI model selection', () => {
       providerId: 'openai', modelId: 'gpt-test', reasoningEffort: 'xhigh',
     })).toThrow('unavailable');
   });
+
+  test('groups models by provider and filters by search query', () => {
+    const control = createTuiModelSelectionControl({
+      providerId: 'credential-a',
+      modelId: 'model-a',
+      displayName: 'Model A · Provider A',
+      catalog: [
+        {
+          providerId: 'credential-a',
+          modelId: 'model-a',
+          displayName: 'Model A · Provider A',
+          supportsTools: true,
+          supportedReasoningEfforts: ['default'],
+          defaultReasoningEffort: 'default',
+          available: true,
+        },
+        {
+          providerId: 'credential-b',
+          modelId: 'model-b',
+          displayName: 'Model B · Provider B',
+          supportsTools: true,
+          supportedReasoningEfforts: ['default', 'high'],
+          defaultReasoningEffort: 'default',
+          available: true,
+        },
+        {
+          providerId: 'credential-b',
+          modelId: 'model-c',
+          displayName: 'Model C · Provider B',
+          supportsTools: true,
+          supportedReasoningEfforts: ['default'],
+          defaultReasoningEffort: 'default',
+          available: true,
+        },
+      ],
+    });
+
+    const grouped = buildModelPickerView({
+      control,
+      current: control.getSelection(),
+      activeGroup: 'Provider B',
+    });
+    expect(grouped.groups).toEqual(['Provider A', 'Provider B']);
+    expect(grouped.selectableRows.map((row) => row.label)).toEqual(['Model B', 'Model C']);
+
+    const searched = buildModelPickerView({
+      control,
+      current: control.getSelection(),
+      query: 'model c',
+    });
+    expect(searched.selectableRows.map((row) => row.label)).toEqual(['Model C']);
+    expect(cycleModelPickerGroup(grouped.groups, 'Provider A', 1)).toBe('Provider B');
+  });
+
+  test('opens multi-effort models as a second stage instead of flattening every effort', () => {
+    const control = createTuiModelSelectionControl({
+      providerId: 'credential-b',
+      modelId: 'model-b',
+      displayName: 'Model B · Provider B',
+      catalog: [
+        {
+          providerId: 'credential-b',
+          modelId: 'model-b',
+          displayName: 'Model B · Provider B',
+          supportsTools: true,
+          supportedReasoningEfforts: ['default', 'high'],
+          defaultReasoningEffort: 'default',
+          available: true,
+        },
+      ],
+    });
+    const efforts = buildModelPickerView({
+      control,
+      current: control.getSelection(),
+      stage: 'efforts',
+      pendingModel: { providerId: 'credential-b', modelId: 'model-b' },
+    });
+    expect(efforts.stage).toBe('efforts');
+    expect(efforts.selectableRows.map((row) => row.label)).toEqual(['default', 'high']);
+  });
+
+
+  test('shows credentialed models from every desktop provider as selectable', () => {
+    const control = createTuiModelSelectionControl({
+      providerId: 'credential-api',
+      modelId: 'model-api',
+      displayName: 'Model API · Provider API',
+      catalog: [
+        {
+          providerId: 'credential-api',
+          modelId: 'model-api',
+          displayName: 'Model API · Provider API',
+          supportsTools: true,
+          supportedReasoningEfforts: ['default'],
+          defaultReasoningEffort: 'default',
+          available: true,
+        },
+        {
+          providerId: 'credential-grok',
+          modelId: 'grok-4.5',
+          displayName: 'grok-4.5 · Grok 官方',
+          supportsTools: true,
+          supportedReasoningEfforts: ['default'],
+          defaultReasoningEffort: 'default',
+          available: true,
+        },
+      ],
+    });
+    const view = buildModelPickerView({
+      control,
+      current: control.getSelection(),
+      activeGroup: 'Grok 官方',
+    });
+    expect(view.rows.some((row) => row.label === 'grok-4.5')).toBe(true);
+    expect(view.selectableRows.map((row) => row.label)).toEqual(['grok-4.5']);
+    expect(view.subtitle).toBe('1/1 runnable');
+  });
+
 });

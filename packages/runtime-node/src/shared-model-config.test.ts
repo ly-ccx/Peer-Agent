@@ -218,7 +218,7 @@ test('OAuth metadata write failure restores the previous credential', () => {
   }
 });
 
-test('loadSharedModelSelection returns null without a credential store or for unsupported auth', () => {
+test('loadSharedModelSelection returns null without a credential store, and resolves oauth_google with tokens', () => {
   const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-unsupported-'));
   try {
     const configFile = getSharedModelConfigPath(userDataPath);
@@ -230,15 +230,26 @@ test('loadSharedModelSelection returns null without a credential store or for un
       isDefault: true,
       authMethod: 'oauth_google',
       oauthConfigured: true,
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     }]));
     assert.equal(loadSharedModelSelection({ userDataPath }), null);
-    assert.equal(
-      loadSharedModelSelection({
-        userDataPath,
-        credentialStore: createCredentialStore().store,
-      }),
-      null,
-    );
+
+    const credentials = createCredentialStore({
+      oauthTokens: {
+        'google-group': {
+          access: 'google-access',
+          refresh: 'google-refresh',
+          expires: Date.now() + 60_000,
+        },
+      },
+    });
+    const selection = loadSharedModelSelection({
+      userDataPath,
+      credentialStore: credentials.store,
+    });
+    assert.equal(selection?.authMethod, 'oauth_google');
+    assert.equal(selection?.oauthTokens?.access, 'google-access');
+    assert.equal(selection?.model, 'gemini');
   } finally {
     rmSync(userDataPath, { recursive: true, force: true });
   }
@@ -326,6 +337,7 @@ test('loadSharedModelMetadataList expands Desktop v2 channels/models config', ()
           model: 'grok-4.5',
           enabled: true,
           isDefault: true,
+          contextWindow: 500_000,
         },
         {
           id: 'model-missing-channel',
@@ -344,6 +356,7 @@ test('loadSharedModelMetadataList expands Desktop v2 channels/models config', ()
         model: item.model,
         authMethod: item.authMethod,
         displayName: item.displayName,
+        contextWindow: item.contextWindow,
       })),
       [
         {
@@ -351,18 +364,21 @@ test('loadSharedModelMetadataList expands Desktop v2 channels/models config', ()
           model: 'gpt-test',
           authMethod: 'api_key',
           displayName: 'Idealab',
+          contextWindow: undefined,
         },
         {
           credentialId: 'channel-oauth',
           model: 'gpt-5',
           authMethod: 'oauth_chatgpt',
           displayName: 'ChatGPT',
+          contextWindow: undefined,
         },
         {
           credentialId: 'channel-grok',
           model: 'grok-4.5',
           authMethod: 'oauth_grok',
           displayName: 'Grok',
+          contextWindow: 500_000,
         },
       ],
     );

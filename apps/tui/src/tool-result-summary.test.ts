@@ -1,9 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  createToolPresentation,
   formatToolResultSummary,
+  parseLegacyToolContent,
+  resolveToolPresentation,
   toggleToolDetails,
+  toolDisplayName,
+  toolHeadline,
   toolResultInlineSummary,
+  toolStatusGlyph,
 } from './tool-result-summary.ts';
 
 describe('tool result summary', () => {
@@ -37,5 +43,45 @@ describe('tool result summary', () => {
   test('toggles detail expansion explicitly', () => {
     expect(toggleToolDetails(false)).toBe(true);
     expect(toggleToolDetails(true)).toBe(false);
+  });
+
+  test('presents tools with Qoder-like hierarchy: name, args, status glyph, nested detail', () => {
+    const presentation = createToolPresentation({
+      capabilityId: 'local.shell.exec',
+      arguments: { command: 'git status --short' },
+      status: 'completed',
+      outputPreview: ' M apps/tui/src/app.tsx\n?? apps/tui/src/tool-result-summary.ts\n',
+    });
+
+    expect(toolDisplayName('local.shell.exec')).toBe('Bash');
+    expect(toolHeadline(presentation.toolName, presentation.argumentSummary))
+      .toBe('Bash(git status --short)');
+    expect(toolStatusGlyph(presentation.status)).toBe('•');
+    expect(presentation.detailLines[0]).toContain('M apps/tui/src/app.tsx');
+
+    const failed = createToolPresentation({
+      capabilityId: 'local.file.read',
+      arguments: { path: '/tmp/missing.txt' },
+      status: 'failed',
+      errorMessage: 'ENOENT: no such file',
+    });
+    expect(toolHeadline(failed.toolName, failed.argumentSummary))
+      .toBe('Read(/tmp/missing.txt)');
+    expect(toolStatusGlyph(failed.status)).toBe('×');
+    expect(failed.detail).toContain('ENOENT');
+  });
+
+  test('recovers hierarchical presentation from legacy flat tool content', () => {
+    const legacy = parseLegacyToolContent(
+      'local.file.read: {"path":"apps/tui/src/app.tsx","bytes":120}',
+    );
+    expect(legacy.toolName).toBe('Read');
+    expect(legacy.capabilityId).toBe('local.file.read');
+
+    const resolved = resolveToolPresentation({
+      content: 'local.shell.exec: exit 0',
+      tool: null,
+    });
+    expect(resolved.toolName).toBe('Bash');
   });
 });

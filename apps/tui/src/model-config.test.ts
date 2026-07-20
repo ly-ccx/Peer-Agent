@@ -70,7 +70,7 @@ describe('TUI model environment', () => {
     expect(config.resolveSharedSelection?.()?.oauthTokens?.access).toBe('hidden');
   });
 
-  test('builds a catalog from every supported configured desktop provider', () => {
+  test('builds a catalog from every configured desktop provider', () => {
     const config = resolveTuiModelConfig({}, {
       loadSharedMetadata: () => ({
         source: 'desktop-default', providerId: 'openai', credentialId: 'credential-a',
@@ -104,11 +104,12 @@ describe('TUI model environment', () => {
     });
 
     expect(config.providerId).toBe('credential-a');
-    expect(config.catalog.map(({ providerId, modelId, displayName }) => ({
-      providerId, modelId, displayName,
+    expect(config.catalog.map(({ providerId, modelId, displayName, available }) => ({
+      providerId, modelId, displayName, available,
     }))).toEqual([
-      { providerId: 'credential-a', modelId: 'model-a', displayName: 'model-a · Provider A' },
-      { providerId: 'credential-b', modelId: 'model-b', displayName: 'model-b · Provider B' },
+      { providerId: 'credential-a', modelId: 'model-a', displayName: 'model-a · Provider A', available: true },
+      { providerId: 'credential-b', modelId: 'model-b', displayName: 'model-b · Provider B', available: true },
+      { providerId: 'credential-unsupported', modelId: 'model-c', displayName: 'model-c · Unsupported', available: true },
     ]);
     expect(config.resolveSharedSelection?.('credential-b')?.credentialId).toBe('credential-b');
   });
@@ -143,18 +144,20 @@ describe('TUI model environment', () => {
     expect(message).not.toContain('test-secret');
   });
 
-  test('falls back to a catalog-supported desktop provider when the default auth is unsupported', () => {
+  test('prefers the desktop default even when it uses oauth_grok', () => {
     const config = resolveTuiModelConfig({}, {
       loadSharedMetadata: () => ({
         source: 'desktop-default', providerId: 'xai', credentialId: 'credential-grok',
         displayName: 'Grok', model: 'grok-4.5', baseUrl: 'https://grok.example',
         authMethod: 'oauth_grok', credentialStored: true, configFile: '/tmp/llm-providers.json',
+        contextWindow: 500_000,
       }),
       loadSharedMetadataList: () => [
         {
           source: 'desktop-default', providerId: 'xai', credentialId: 'credential-grok',
           displayName: 'Grok', model: 'grok-4.5', baseUrl: 'https://grok.example',
           authMethod: 'oauth_grok', credentialStored: true, configFile: '/tmp/llm-providers.json',
+          contextWindow: 500_000,
         },
         {
           source: 'desktop-default', providerId: 'openai', credentialId: 'credential-api',
@@ -167,9 +170,11 @@ describe('TUI model environment', () => {
 
     expect(config.configured).toBe(true);
     expect(config.source).toBe('desktop-default');
-    expect(config.providerId).toBe('credential-api');
-    expect(config.model).toBe('gpt-test');
-    expect(config.catalog.map((entry) => entry.providerId)).toEqual(['credential-api']);
+    expect(config.providerId).toBe('credential-grok');
+    expect(config.model).toBe('grok-4.5');
+    expect(config.catalog.map((entry) => entry.providerId)).toEqual(['credential-grok', 'credential-api']);
+    expect(config.catalog.every((entry) => entry.available)).toBe(true);
+    expect(config.catalog.find((entry) => entry.modelId === 'grok-4.5')?.contextWindow).toBe(500_000);
   });
 
 });

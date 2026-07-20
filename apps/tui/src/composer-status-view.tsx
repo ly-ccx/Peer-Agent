@@ -35,21 +35,58 @@ function ContextStatus({ status, short = false }: {
   );
 }
 
+/** Above the input: mode + access on the left, workspace on the right. */
+export function ComposerControlsBar({ status, layout }: {
+  readonly status: ComposerStatus;
+  readonly layout: ComposerStatusLayout;
+}) {
+  const workspaceValue = layout === 'wide' ? status.workspace : status.workspaceShort;
+
+  if (layout === 'narrow') {
+    return (
+      <box flexDirection="column" width="100%" paddingLeft={1} paddingRight={1} paddingBottom={0}>
+        <text fg={MUTED} wrapMode="none">
+          <StatusPair label="mode" value={status.mode} accent />
+        </text>
+        <text fg={MUTED} wrapMode="none">
+          <StatusPair label="access" value={status.permissionShort} />
+        </text>
+        <text fg={MUTED} wrapMode="none">
+          <StatusPair label="workspace" value={workspaceValue} />
+        </text>
+      </box>
+    );
+  }
+
+  return (
+    <box
+      width="100%"
+      flexDirection="row"
+      justifyContent="space-between"
+      paddingLeft={1}
+      paddingRight={1}
+      paddingBottom={0}
+    >
+      <text fg={MUTED} wrapMode="none">
+        <StatusPair label="mode" value={status.mode} accent />
+        <StatusSeparator />
+        <StatusPair label="access" value={layout === 'compact' ? status.permissionShort : status.permission} />
+      </text>
+      <text fg={MUTED} wrapMode="none">
+        <StatusPair label="workspace" value={workspaceValue} />
+      </text>
+    </box>
+  );
+}
+
+/** Below the input: model · reasoning on the left, context pinned to the right. */
 export function ComposerStatusBar({ status, layout }: {
   readonly status: ComposerStatus;
   readonly layout: ComposerStatusLayout;
 }) {
   if (layout === 'narrow') {
     return (
-      <box flexDirection="column" width="100%" paddingLeft={1} paddingRight={1}>
-        <text fg={MUTED} wrapMode="none">
-          <StatusPair label="workspace" value={status.workspaceShort} />
-        </text>
-        <text fg={MUTED} wrapMode="none">
-          <StatusPair label="mode" value={status.mode} accent />
-          <StatusSeparator />
-          <StatusPair label="access" value={status.permissionShort} />
-        </text>
+      <box flexDirection="column" width="100%" paddingLeft={1} paddingRight={1} paddingTop={0}>
         <text fg={TEXT} wrapMode="none">{status.model}</text>
         <text fg={MUTED} wrapMode="none">{status.reasoning}</text>
         <text fg={MUTED} wrapMode="none">
@@ -59,41 +96,22 @@ export function ComposerStatusBar({ status, layout }: {
     );
   }
 
-  if (layout === 'compact') {
-    return (
-      <box flexDirection="column" width="100%" paddingLeft={1} paddingRight={1}>
-        <text fg={MUTED} wrapMode="none">
-          <StatusPair label="workspace" value={status.workspaceShort} />
-          <StatusSeparator />
-          <StatusPair label="mode" value={status.mode} accent />
-          <StatusSeparator />
-          <StatusPair label="access" value={status.permissionShort} />
-        </text>
-        <text fg={MUTED} wrapMode="none">
-          <span fg={TEXT}>{status.model}</span>
-          <StatusSeparator />
-          <span fg={MUTED}>{status.reasoning}</span>
-          <StatusSeparator />
-          <ContextStatus status={status} short />
-        </text>
-      </box>
-    );
-  }
-
   return (
-    <box width="100%" paddingLeft={1} paddingRight={1}>
+    <box
+      width="100%"
+      flexDirection="row"
+      justifyContent="space-between"
+      paddingLeft={1}
+      paddingRight={1}
+      paddingTop={0}
+    >
       <text fg={MUTED} wrapMode="none">
-        <StatusPair label="workspace" value={status.workspace} />
-        <StatusSeparator />
-        <StatusPair label="mode" value={status.mode} accent />
-        <StatusSeparator />
-        <StatusPair label="access" value={status.permissionShort} />
-        <StatusSeparator />
         <span fg={TEXT}>{status.model}</span>
         <StatusSeparator />
         <span fg={MUTED}>{status.reasoning}</span>
-        <StatusSeparator />
-        <ContextStatus status={status} />
+      </text>
+      <text fg={MUTED} wrapMode="none">
+        <ContextStatus status={status} short={layout === 'compact'} />
       </text>
     </box>
   );

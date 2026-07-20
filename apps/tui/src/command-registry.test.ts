@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  buildTuiHelpSections,
   filterTuiCommandRegistry,
   TUI_COMMAND_REGISTRY,
   visibleTuiCommands,
@@ -34,5 +35,20 @@ describe('TUI command registry', () => {
     expect(visibleTuiCommands({ goalStatus: 'running' }).map((command) => command.id)).not.toContain('goal-resume');
     expect(visibleTuiCommands({ goalStatus: 'paused' }).map((command) => command.id)).toContain('goal-resume');
     expect(visibleTuiCommands({ goalStatus: 'paused' }).map((command) => command.id)).not.toContain('goal-pause');
+  });
+
+  test('builds a non-empty help panel with commands and modes', () => {
+    const sections = buildTuiHelpSections(idle);
+    expect(sections.map((section) => section.title)).toEqual([
+      'Keyboard',
+      'Slash commands',
+      'Modes',
+      'Tips',
+    ]);
+    const slash = sections.find((section) => section.title === 'Slash commands')!;
+    expect(slash.lines.some((line) => line.startsWith('/help'))).toBe(true);
+    expect(slash.lines.some((line) => line.startsWith('/mode'))).toBe(true);
+    const modes = sections.find((section) => section.title === 'Modes')!;
+    expect(modes.lines.some((line) => line.startsWith('Agent'))).toBe(true);
   });
 });

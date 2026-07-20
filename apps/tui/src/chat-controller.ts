@@ -17,7 +17,12 @@ import type { PlanCoordinator, PlanSnapshot } from './plan-mode.ts';
 import { parseRuntimePlanText } from './plan-mode.ts';
 import type { TuiHost } from './tui-host.ts';
 import { normalizeTuiMode, type TuiMode } from './tui-mode.ts';
-import { formatToolResultSummary } from './tool-result-summary.ts';
+import {
+  createToolPresentation,
+  formatToolResultSummary,
+  toolPresentationContent,
+  type ToolPresentation,
+} from './tool-result-summary.ts';
 
 export type ChatRole = 'user' | 'assistant' | 'tool';
 export type ChatRunStatus = 'idle' | 'running' | 'cancelling';
@@ -28,6 +33,8 @@ export interface ChatMessage {
   readonly content: string;
   readonly pending?: boolean;
   readonly usage?: ModelUsage;
+  /** Structured tool presentation for hierarchical TUI rendering. */
+  readonly tool?: ToolPresentation;
 }
 
 export interface ChatSnapshot {
@@ -150,6 +157,16 @@ export function createChatController(options: {
           ? String(evidence.evidenceId)
           : '';
         if (evidenceId) executionEvidenceIds = [...executionEvidenceIds, evidenceId];
+        const tool = createToolPresentation({
+          capabilityId: call.capabilityId,
+          arguments: call.arguments,
+          status: execution.result.status,
+          outputPreview: execution.result.outputPreview,
+          errorMessage: execution.result.error && typeof execution.result.error === 'object'
+            && 'message' in execution.result.error
+            ? String((execution.result.error as { message?: unknown }).message ?? '')
+            : null,
+        });
         publish({
           ...snapshot,
           messages: [
@@ -157,10 +174,8 @@ export function createChatController(options: {
             {
               id: `tool-${++sequence}`,
               role: 'tool',
-              content: `${call.capabilityId}: ${formatToolResultSummary(
-                execution.result.outputPreview,
-                execution.result.status,
-              )}`,
+              content: toolPresentationContent(tool),
+              tool,
             },
           ],
         });

@@ -106,5 +106,7 @@ describe('TUI experience model', () => {
     expect(applyTuiCommand(state, mode).surface).toMatchObject({ type: 'picker', picker: 'mode' });
     const resume = TUI_COMMANDS.find((item) => item.id === 'resume')!;
     expect(applyTuiCommand(state, resume).surface).toMatchObject({ type: 'picker', picker: 'resume' });
+    const help = TUI_COMMANDS.find((item) => item.id === 'help')!;
+    expect(applyTuiCommand(state, help).surface).toMatchObject({ type: 'picker', picker: 'help' });
   });
 });

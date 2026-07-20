@@ -30,7 +30,7 @@ const GOAL_PAUSED = (context: TuiCommandContext): boolean => context.goalStatus 
 
 export const TUI_COMMAND_REGISTRY: readonly TuiCommandDefinition[] = Object.freeze([
   { id: 'model', label: 'Model', description: 'Choose model and reasoning effort', keywords: ['provider', 'llm', 'effort'], shortcut: 'Ctrl+X M', action: { type: 'open-model-picker' } },
-  { id: 'mode', label: 'Mode', description: 'Choose Chat, Plan, or Goal', keywords: ['chat', 'plan', 'goal'], shortcut: 'Ctrl+X O', action: { type: 'open-mode-picker' } },
+  { id: 'mode', label: 'Mode', description: 'Choose Agent, Plan, or Goal', keywords: ['agent', 'chat', 'plan', 'goal'], shortcut: 'Ctrl+X O', action: { type: 'open-mode-picker' } },
   { id: 'permissions', label: 'Permissions', description: 'Choose the session permission policy', keywords: ['access', 'approval', 'ask'], shortcut: 'Ctrl+X P', action: { type: 'open-permission-picker' } },
   { id: 'clear', label: 'Clear chat', description: 'Clear messages, model context, and errors', keywords: ['reset', 'conversation', 'error'], action: { type: 'clear-chat' } },
   { id: 'resume', label: 'Resume session', description: 'Restore and continue a saved conversation', keywords: ['session', 'conversation', 'history', 'restore'], action: { type: 'open-resume-picker' } },
@@ -55,4 +55,52 @@ export function filterTuiCommandRegistry(
     const haystack = [command.id, command.label, command.description, ...command.keywords].join(' ').toLowerCase();
     return terms.every((term) => haystack.includes(term));
   });
+}
+
+export interface TuiHelpSection {
+  readonly title: string;
+  readonly lines: readonly string[];
+}
+
+/** Content for the `/help` panel: shortcuts, slash commands, and modes. */
+export function buildTuiHelpSections(
+  context: TuiCommandContext = { goalStatus: 'none' },
+): readonly TuiHelpSection[] {
+  const commands = visibleTuiCommands(context);
+  return [
+    {
+      title: 'Keyboard',
+      lines: [
+        'Ctrl+X then M  model picker',
+        'Ctrl+X then O  mode picker',
+        'Ctrl+X then P  permissions',
+        'Ctrl+1 / 2 / 3  Agent / Plan / Goal',
+        'Esc  close panel or cancel',
+        'Ctrl+C  interrupt / quit',
+      ],
+    },
+    {
+      title: 'Slash commands',
+      lines: commands.map((command) => {
+        const shortcut = command.shortcut ? `  (${command.shortcut})` : '';
+        return `/${command.id}  ${command.description}${shortcut}`;
+      }),
+    },
+    {
+      title: 'Modes',
+      lines: [
+        'Agent  general conversation with projected read/write tools',
+        'Plan   read-only planning until a plan is approved',
+        'Goal   autonomous execution with projected tools',
+      ],
+    },
+    {
+      title: 'Tips',
+      lines: [
+        'Type / to search commands',
+        'Click a tool result to expand full output',
+        'ctx shows context usage for the current model',
+      ],
+    },
+  ];
 }

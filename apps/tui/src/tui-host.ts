@@ -234,15 +234,18 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
 
   return {
     workspaceRoot: defaultBundle.workspaceRoot,
+    // Default surface uses the mode-projected tool set, not the unfiltered
+    // provider catalog. Otherwise the model would see write/shell tools even
+    // when the active mode projection excludes them.
     capabilities: defaultBundle.projection.tools.map((tool) => tool.capabilityId),
-    toolDefinitions: defaultBundle.toolDefinitions,
+    toolDefinitions: defaultBundle.projection.tools,
     getAccessLevel: () => accessLevel,
     setAccessLevel,
     capabilitiesForMode(mode) {
       return bundleForMode(normalizeTuiMode(mode)).projection.tools.map((tool) => tool.capabilityId);
     },
     toolDefinitionsForMode(mode) {
-      return bundleForMode(normalizeTuiMode(mode)).toolDefinitions;
+      return bundleForMode(normalizeTuiMode(mode)).projection.tools;
     },
     execute,
     executeRead: (path, context) => execute('local.file.read', { path }, context),

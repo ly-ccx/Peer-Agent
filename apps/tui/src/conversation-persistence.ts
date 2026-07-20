@@ -78,14 +78,40 @@ function storedUsage(value: unknown): NonNullable<ChatSnapshot['usage']> | undef
   };
 }
 
+function storedToolPresentation(value: unknown): ChatMessage['tool'] | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.capabilityId !== 'string' || !record.capabilityId.trim()) return undefined;
+  const detailLines = Array.isArray(record.detailLines)
+    ? record.detailLines.filter((line): line is string => typeof line === 'string')
+    : [];
+  return {
+    capabilityId: record.capabilityId,
+    toolName: typeof record.toolName === 'string' ? record.toolName : record.capabilityId,
+    argumentSummary: typeof record.argumentSummary === 'string' ? record.argumentSummary : '',
+    status: (
+      record.status === 'completed'
+      || record.status === 'failed'
+      || record.status === 'cancelled'
+      || record.status === 'denied'
+      || record.status === 'running'
+      || record.status === 'unknown'
+    ) ? record.status : 'unknown',
+    detail: typeof record.detail === 'string' ? record.detail : '',
+    detailLines,
+  };
+}
+
 function storedMessage(value: Record<string, unknown>, index: number): ChatMessage | null {
   if (!['user', 'assistant', 'tool'].includes(String(value.role)) || typeof value.content !== 'string') return null;
   const usage = storedUsage(value.usage);
+  const tool = storedToolPresentation(value.tool);
   return {
     id: typeof value.id === 'string' ? value.id : `restored-${index}`,
     role: value.role as ChatMessage['role'],
     content: value.content,
     ...(usage ? { usage } : {}),
+    ...(tool ? { tool } : {}),
   };
 }
 

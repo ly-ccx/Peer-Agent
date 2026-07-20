@@ -41,16 +41,28 @@ const sharedMetadata = modelConfig.sharedMetadata;
 function sharedProvider(credentialId: string) {
   const metadata = modelConfig.sharedProviders?.find((item) => item.credentialId === credentialId);
   if (!metadata) throw new Error(`Provider "${credentialId}" is no longer available.`);
-  if (metadata.authMethod === 'oauth_chatgpt') {
+
+  // ChatGPT subscription and Grok official both speak OpenAI Responses.
+  if (metadata.authMethod === 'oauth_chatgpt' || metadata.authMethod === 'oauth_grok') {
     return createChatGptResponsesProvider({
       baseUrl: metadata.baseUrl,
       fetch: providerFetch,
       resolveTokens() {
         const selection = modelConfig.resolveSharedSelection?.(credentialId);
-        if (!selection?.oauthTokens) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
+        if (!selection?.oauthTokens) {
+          throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
+        }
         return selection.oauthTokens;
       },
-      refreshTokens: refreshChatGptOAuthTokens,
+      async refreshTokens(tokens) {
+        if (metadata.authMethod === 'oauth_chatgpt') {
+          return refreshChatGptOAuthTokens(tokens);
+        }
+        // @ts-ignore Desktop ESM adapter without local type declarations.
+        const { ensureFreshGrokTokens } = await import('../../desktop/electron/main/llm-oauth/grok-oauth.mjs');
+        const fresh = await ensureFreshGrokTokens(tokens, { fetchImpl: providerFetch });
+        return fresh.tokens;
+      },
       persistTokens(tokens) {
         const selection = modelConfig.resolveSharedSelection?.(credentialId);
         if (!selection) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
@@ -58,12 +70,42 @@ function sharedProvider(credentialId: string) {
       },
     });
   }
+
   return {
     async stream(request: Parameters<ReturnType<typeof createOpenAICompatibleProvider>['stream']>[0]) {
       const selection = modelConfig.resolveSharedSelection?.(credentialId);
-      if (!selection?.apiKey) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
+      if (!selection) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
+
+      let apiKey = selection.apiKey;
+      let baseUrl = selection.baseUrl;
+
+      if (selection.authMethod === 'qoder_local_auth') {
+        // @ts-ignore Desktop ESM adapter without local type declarations.
+        const { loadQoderAccessToken } = await import('../../desktop/electron/main/provider-adapters/qoder-local-auth.mjs');
+        apiKey = await loadQoderAccessToken();
+      } else if (selection.authMethod === 'oauth_google') {
+        if (!selection.oauthTokens) {
+          throw new Error('Desktop Google OAuth tokens are locked. Allow Keychain access and retry.');
+        }
+        // @ts-ignore Desktop ESM adapter without local type declarations.
+        const { ensureFreshGoogleTokens } = await import('../../desktop/electron/main/llm-oauth/google-oauth.mjs');
+        const fresh = await ensureFreshGoogleTokens(selection.oauthTokens, { fetchImpl: providerFetch });
+        if (fresh.refreshed) selection.persistOAuthTokens(fresh.tokens);
+        apiKey = fresh.tokens.access;
+        // Prefer Google's OpenAI-compatible gateway so CLI can reuse the shared
+        // chat/completions adapter instead of reimplementing Gemini SSE.
+        if (baseUrl.includes('generativelanguage.googleapis.com') && !baseUrl.includes('/openai')) {
+          baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai';
+        }
+      }
+
+      if (!apiKey) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
       return createOpenAICompatibleProvider({
-        config: { providerId: credentialId, apiKey: selection.apiKey, baseUrl: selection.baseUrl },
+        config: {
+          providerId: credentialId,
+          apiKey,
+          baseUrl,
+        },
         fetch: providerFetch,
       }).stream(request);
     },

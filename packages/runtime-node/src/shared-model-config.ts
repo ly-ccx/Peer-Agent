@@ -34,6 +34,8 @@ export interface StoredModelProvider {
   readonly oauthConfigured?: boolean;
   readonly oauthExpires?: number;
   readonly oauthAccountId?: string;
+  readonly oauthProjectId?: string | null;
+  readonly contextWindow?: number;
 }
 
 export interface ChatGptOAuthTokens {
@@ -59,10 +61,14 @@ export interface SharedModelMetadata {
   readonly authMethod: SharedModelAuthMethod;
   readonly credentialStored: boolean;
   readonly configFile: string;
+  /** Optional context window from Desktop llm-providers.json model entry. */
+  readonly contextWindow?: number;
 }
 
 export interface SharedModelSelection extends SharedModelMetadata {
   readonly apiKey?: string;
+  readonly accountId?: string | null;
+  readonly oauthProjectId?: string | null;
   readonly oauthTokens?: ChatGptOAuthTokens;
   persistOAuthTokens(tokens: ChatGptOAuthTokens): void;
 }
@@ -311,10 +317,17 @@ function selectedProvider(options: LoadSharedModelSelectionOptions): {
   return selected?.model ? { configFile, read, selected } : null;
 }
 
+function normalizeContextWindow(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : undefined;
+}
+
 function metadataFromSelected(
   configFile: string,
   selected: StoredModelProvider,
 ): SharedModelMetadata {
+  const contextWindow = normalizeContextWindow(selected.contextWindow);
   return {
     source: 'desktop-default',
     providerId: selected.provider?.trim() || 'openai',
@@ -325,6 +338,7 @@ function metadataFromSelected(
     authMethod: normalizedAuthMethod(selected),
     credentialStored: hasStoredCredential(selected),
     configFile,
+    ...(contextWindow === undefined ? {} : { contextWindow }),
   };
 }
 
@@ -386,31 +400,45 @@ export function loadSharedModelSelection(
   if (!found || !options.credentialStore) return null;
   const { configFile, read, selected } = found;
   const authMethod = normalizedAuthMethod(selected);
-  if (
-    authMethod === 'oauth_google'
+  const credentialId = credentialIdOf(selected);
+  if (!credentialId) return null;
+
+  // All Desktop auth methods are selectable in CLI. Runtime adapters decide how
+  // to refresh/use credentials; unsupported execution remains a provider concern.
+  const apiKey = authMethod === 'api_key'
+    ? options.credentialStore.getApiKey(credentialId)
+    : undefined;
+  const oauthTokens = (
+    authMethod === 'oauth_chatgpt'
+    || authMethod === 'oauth_google'
     || authMethod === 'oauth_grok'
-    || authMethod === 'qoder_local_auth'
+  )
+    ? options.credentialStore.getOAuthTokens(credentialId)
+    : undefined;
+  // qoder_local_auth loads its token from the external Qoder CLI at stream time.
+  if (authMethod === 'api_key' && !apiKey) return null;
+  if (
+    (authMethod === 'oauth_chatgpt' || authMethod === 'oauth_google' || authMethod === 'oauth_grok')
+    && !oauthTokens?.access
   ) {
     return null;
   }
 
-  const credentialId = credentialIdOf(selected);
-  if (!credentialId) return null;
-  const apiKey = authMethod === 'api_key'
-    ? options.credentialStore.getApiKey(credentialId)
-    : undefined;
-  const oauthTokens = authMethod === 'oauth_chatgpt'
-    ? options.credentialStore.getOAuthTokens(credentialId)
-    : undefined;
-  if (authMethod === 'api_key' && !apiKey) return null;
-  if (authMethod === 'oauth_chatgpt' && !oauthTokens?.access) return null;
+  const accountId = selected.oauthAccountId ?? oauthTokens?.accountId ?? null;
+  const oauthProjectId = selected.oauthProjectId ?? null;
 
   return {
     ...metadataFromSelected(configFile, selected),
     ...(apiKey ? { apiKey } : {}),
+    ...(accountId ? { accountId } : { accountId: null }),
+    ...(oauthProjectId ? { oauthProjectId } : { oauthProjectId: null }),
     ...(oauthTokens ? { oauthTokens } : {}),
     persistOAuthTokens(tokens) {
-      if (authMethod !== 'oauth_chatgpt') return;
+      if (
+        authMethod !== 'oauth_chatgpt'
+        && authMethod !== 'oauth_google'
+        && authMethod !== 'oauth_grok'
+      ) return;
       const previousTokens = options.credentialStore?.getOAuthTokens(credentialId) ?? null;
       options.credentialStore?.setOAuthTokens(credentialId, tokens);
       try {

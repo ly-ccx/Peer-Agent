@@ -7,6 +7,7 @@ import type { RuntimeModelSelection } from '@peer-agent/runtime-node';
 
 import { B3Wordmark } from './b3-wordmark-view.tsx';
 import { MarkdownView } from './markdown-view.tsx';
+import { buildTuiHelpSections } from './command-registry.ts';
 import { executeTuiCommand } from './command-execution.ts';
 import {
   createTuiConversationPersistence,
@@ -14,6 +15,7 @@ import {
   type TuiConversationSummary,
 } from './conversation-persistence.ts';
 import {
+  ComposerControlsBar,
   ComposerStatusBar,
   type ComposerStatusLayout,
 } from './composer-status-view.tsx';
@@ -38,8 +40,14 @@ import {
 } from './plan-mode.ts';
 import { createTuiGoalRunner } from './goal-mode.ts';
 import {
-  modelPickerItems,
+  buildModelPickerView,
+  cycleModelPickerGroup,
+  formatModelPickerGroupLabel,
+  indexOfCurrentSelectableRow,
+  modelPickerGroupCounts,
   modelSelectionLabel,
+  type ModelPickerStage,
+  type ModelPickerViewRow,
   type TuiModelSelectionControl,
 } from './tui-model-selection.ts';
 import type { PendingApproval, TuiHost } from './tui-host.ts';
@@ -53,7 +61,12 @@ import {
 import { moveTuiSurfaceSelection } from './surface-state.ts';
 import { composerEnterAction, runtimeControlAction } from './runtime-controls.ts';
 import { responsiveLayout, responsivePickerLayout } from './responsive-layout.ts';
-import { toolResultInlineSummary, toggleToolDetails } from './tool-result-summary.ts';
+import {
+  resolveToolPresentation,
+  toolHeadline,
+  toolStatusGlyph,
+  toggleToolDetails,
+} from './tool-result-summary.ts';
 import {
   applyTuiCommand,
   createTuiExperienceState,
@@ -76,7 +89,9 @@ const COLOR = {
   text: '#e5e5e5',
   accent: '#a3e635',
   user: '#7dd3fc',
-  tool: '#facc15',
+  tool: '#86efac',
+  toolFailed: '#fb7185',
+  toolDetail: '#a3a3a3',
   danger: '#fb7185',
 } as const;
 
@@ -127,6 +142,13 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
         }
 
         const toolExpanded = expandedTools.has(message.id);
+        const presentation = resolveToolPresentation(message);
+        const failed = presentation.status === 'failed' || presentation.status === 'denied';
+        const headlineColor = failed ? COLOR.toolFailed : COLOR.tool;
+        const detailColor = failed ? COLOR.toolFailed : COLOR.toolDetail;
+        const detailLines = toolExpanded
+          ? presentation.detail.split(/\r?\n/).filter((line) => line.trim().length > 0)
+          : presentation.detailLines;
         return (
           <box
             key={message.id}
@@ -134,10 +156,22 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
             marginBottom={1}
             onMouseDown={() => toggleTool(message.id)}
           >
-            <text fg={COLOR.muted} wrapMode="none">
-              {toolExpanded ? '▼' : '▶'} tool  {toolResultInlineSummary(message.content)}
-            </text>
-            {toolExpanded ? <text fg="#cbd5e1">{message.content || ' '}</text> : null}
+            <box flexDirection="row">
+              <text fg={headlineColor} wrapMode="none">
+                {toolStatusGlyph(presentation.status)}{' '}
+              </text>
+              <text fg={headlineColor} wrapMode="none">
+                <strong>{toolHeadline(presentation.toolName, presentation.argumentSummary)}</strong>
+              </text>
+            </box>
+            {detailLines.map((line, index) => (
+              <box key={`${message.id}-detail-${index}`} flexDirection="row">
+                <text fg={COLOR.muted} wrapMode="none">
+                  {index === 0 ? '  ╰ ' : '    '}
+                </text>
+                <text fg={detailColor}>{line || ' '}</text>
+              </box>
+            ))}
           </box>
         );
       })}
@@ -219,20 +253,34 @@ function ResumePickerMenu({ rows, selectedIndex, maxVisible }: {
   );
 }
 
-interface ModelPickerRow {
-  readonly key: string;
-  readonly label: string;
-  readonly current: boolean;
-}
-
-function ModelPickerMenu({ rows, selectedIndex, maxVisible, showHint }: {
-  readonly rows: readonly ModelPickerRow[];
+function ModelPickerMenu({
+  title,
+  subtitle,
+  groups,
+  activeGroup,
+  query,
+  rows,
+  selectedIndex,
+  maxVisible,
+  showHint,
+}: {
+  readonly title: string;
+  readonly subtitle?: string;
+  readonly groups: readonly string[];
+  readonly activeGroup: string | null;
+  readonly query: string;
+  readonly rows: readonly ModelPickerViewRow[];
   readonly selectedIndex: number;
   readonly maxVisible: number;
   readonly showHint: boolean;
 }) {
+  // Map selectable-row index onto absolute row index so section headers stay visible.
+  const selectableAbsoluteIndexes = rows
+    .map((row, index) => (row.selectable ? index : -1))
+    .filter((index) => index >= 0);
+  const absoluteSelected = selectableAbsoluteIndexes[selectedIndex] ?? 0;
   const start = Math.max(0, Math.min(
-    selectedIndex - Math.floor(maxVisible / 2),
+    absoluteSelected - Math.floor(maxVisible / 2),
     Math.max(0, rows.length - maxVisible),
   ));
   const visibleRows = rows.slice(start, start + maxVisible);
@@ -251,18 +299,42 @@ function ModelPickerMenu({ rows, selectedIndex, maxVisible, showHint }: {
       paddingLeft={1}
       paddingRight={1}
     >
-      <text fg={COLOR.accent} wrapMode="none"><strong>Model &amp; reasoning</strong></text>
+      <text fg={COLOR.accent} wrapMode="none"><strong>{title}</strong>{subtitle ? ` · ${subtitle}` : ''}</text>
+      {groups.length > 0 ? (
+        <text fg={COLOR.muted} wrapMode="none">
+          {groups.map((group) => {
+            const raw = group.replace(/ \(\d+\/\d+\)$/, '');
+            return raw === activeGroup ? `[${group}]` : group;
+          }).join('  ')}
+        </text>
+      ) : null}
+      <text fg={COLOR.muted} wrapMode="none">Search: {query.length > 0 ? query : '…'}</text>
       {visibleRows.length === 0 ? (
         <text fg="#f59e0b" wrapMode="none">No configured model is available.</text>
       ) : visibleRows.map((row, offset) => {
-        const selected = start + offset === selectedIndex;
+        const absoluteIndex = start + offset;
+        const selected = absoluteIndex === absoluteSelected;
+        if (row.kind === 'section') {
+          return (
+            <text key={row.key} fg={COLOR.muted} wrapMode="none">
+              {row.label}
+            </text>
+          );
+        }
+        const color = !row.selectable
+          ? COLOR.muted
+          : (selected ? COLOR.accent : COLOR.text);
         return (
-          <text key={row.key} fg={selected ? COLOR.accent : COLOR.text} wrapMode="none">
-            {selected ? '› ' : '  '}{row.label}{row.current ? '  current' : ''}
+          <text key={row.key} fg={color} wrapMode="none">
+            {selected ? '› ' : '  '}{row.label}{row.detail ? `  ${row.detail}` : ''}{row.current ? '  ✓' : ''}
           </text>
         );
       })}
-      {showHint ? <text fg={COLOR.muted} wrapMode="none">↑↓ choose · enter apply · esc close</text> : null}
+      {showHint ? (
+        <text fg={COLOR.muted} wrapMode="none">
+          tab/←→ group · type search · ↑↓ navigate · enter select · esc back
+        </text>
+      ) : null}
     </box>
   );
 }
@@ -323,6 +395,11 @@ function ComposerDock({
   slashMaxVisible,
   slashShowDescriptions,
   modelPickerOpen,
+  modelPickerTitle,
+  modelPickerSubtitle,
+  modelPickerGroups,
+  modelPickerActiveGroup,
+  modelPickerQuery,
   modelPickerRows,
   modelPickerSelection,
   modelPickerMaxVisible,
@@ -341,7 +418,12 @@ function ComposerDock({
   readonly slashMaxVisible: number;
   readonly slashShowDescriptions: boolean;
   readonly modelPickerOpen: boolean;
-  readonly modelPickerRows: readonly ModelPickerRow[];
+  readonly modelPickerTitle: string;
+  readonly modelPickerSubtitle?: string;
+  readonly modelPickerGroups: readonly string[];
+  readonly modelPickerActiveGroup: string | null;
+  readonly modelPickerQuery: string;
+  readonly modelPickerRows: readonly ModelPickerViewRow[];
   readonly modelPickerSelection: number;
   readonly modelPickerMaxVisible: number;
   readonly modelPickerShowHint: boolean;
@@ -349,11 +431,14 @@ function ComposerDock({
   const menuReserve = slashOpen
     ? Math.min(slashMaxVisible, Math.max(1, slashItems.length)) + 2
     : modelPickerOpen
-      ? Math.min(modelPickerMaxVisible, Math.max(1, modelPickerRows.length)) + 2
+      // groups + search + optional hint around the visible rows
+      ? Math.min(modelPickerMaxVisible, Math.max(1, modelPickerRows.length)) + 4
       : 0;
 
   return (
     <box flexDirection="column" flexShrink={0} width="100%" paddingTop={menuReserve}>
+      {/* controls above the input; status below */}
+      <ComposerControlsBar status={status} layout={statusLayout} />
       <box position="relative" width="100%" height={5} overflow="visible">
         {slashOpen ? (
           <SlashCommandMenu
@@ -365,6 +450,11 @@ function ComposerDock({
         ) : null}
         {modelPickerOpen ? (
           <ModelPickerMenu
+            title={modelPickerTitle}
+            subtitle={modelPickerSubtitle}
+            groups={modelPickerGroups}
+            activeGroup={modelPickerActiveGroup}
+            query={modelPickerQuery}
             rows={modelPickerRows}
             selectedIndex={modelPickerSelection}
             maxVisible={modelPickerMaxVisible}
@@ -427,6 +517,13 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
   const [selectedModel, setSelectedModel] = useState<RuntimeModelSelection | null>(
     () => modelSelection?.getSelection() ?? null,
   );
+  const [modelPickerQuery, setModelPickerQuery] = useState('');
+  const [modelPickerStage, setModelPickerStage] = useState<ModelPickerStage>('models');
+  const [modelPickerGroup, setModelPickerGroup] = useState<string | null>(null);
+  const [modelPickerPending, setModelPickerPending] = useState<{
+    readonly providerId: string;
+    readonly modelId: string;
+  } | null>(null);
   const persistence = useMemo(() => createTuiConversationPersistence({
     workspacePath: process.cwd(),
     initialMode: controller.getSnapshot().mode,
@@ -466,17 +563,84 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
   const modelSurface = experience.surface.type === 'picker' && experience.surface.picker === 'model'
     ? experience.surface
     : null;
+  const helpSurface = experience.surface.type === 'picker' && experience.surface.picker === 'help'
+    ? experience.surface
+    : null;
+  const helpSections = useMemo(
+    () => (helpSurface ? buildTuiHelpSections({ goalStatus }) : []),
+    [goalStatus, helpSurface],
+  );
+  useEffect(() => {
+    if (!modelSurface) {
+      setModelPickerQuery('');
+      setModelPickerStage('models');
+      setModelPickerPending(null);
+      return;
+    }
+    if (!modelSelection || !selectedModel) return;
+    if (modelPickerGroup) return;
+    const groups = [];
+    const seen = new Set();
+    for (const entry of modelSelection.catalog) {
+      const parts = entry.displayName.split(' · ');
+      const group = parts.length > 1 ? parts[parts.length - 1] : 'Models';
+      if (seen.has(group)) continue;
+      seen.add(group);
+      groups.push(group);
+    }
+    const current = modelSelection.catalog.find((entry) =>
+      entry.providerId === selectedModel.providerId && entry.modelId === selectedModel.modelId
+    );
+    const currentGroup = current
+      ? (current.displayName.includes(' · ') ? current.displayName.split(' · ').slice(-1)[0] : groups[0] ?? null)
+      : (groups[0] ?? null);
+    setModelPickerGroup(currentGroup ?? null);
+  }, [modelSurface, modelSelection, selectedModel, modelPickerGroup]);
+
+
   const permissionSurface = experience.surface.type === 'picker' && experience.surface.picker === 'permission'
     ? experience.surface
     : null;
-  const modelItems = modelSelection ? modelPickerItems(modelSelection) : [];
-  const modelPickerRows: readonly ModelPickerRow[] = modelItems.map((item) => ({
-    key: `${item.providerId}:${item.modelId}:${item.reasoningEffort}`,
-    label: modelSelection ? modelSelectionLabel(modelSelection, item) : item.modelId,
-    current: selectedModel?.providerId === item.providerId
-      && selectedModel.modelId === item.modelId
-      && selectedModel.reasoningEffort === item.reasoningEffort,
-  }));
+  const modelPickerView = modelSelection && selectedModel
+    ? buildModelPickerView({
+      control: modelSelection,
+      current: selectedModel,
+      query: modelPickerQuery,
+      stage: modelPickerStage,
+      activeGroup: modelPickerGroup,
+      pendingModel: modelPickerPending,
+    })
+    : null;
+  const modelPickerRows = modelPickerView?.rows ?? [];
+  const modelPickerSelectableRows = modelPickerView?.selectableRows ?? [];
+  const modelPickerGroupLabels = modelSelection
+    ? (modelPickerView?.groups ?? []).map((group) =>
+      formatModelPickerGroupLabel(group, modelPickerGroupCounts(modelSelection)))
+    : [];
+
+  useEffect(() => {
+    if (!modelSurface || !modelSelection || !modelPickerView) return;
+    if (modelPickerStage !== 'models') return;
+    if (modelPickerQuery.trim()) return;
+    if (modelPickerSelectableRows.length > 0) return;
+    const counts = modelPickerGroupCounts(modelSelection);
+    const next = modelPickerView.groups.find((group) => (counts.get(group)?.available ?? 0) > 0) ?? null;
+    if (next && next !== modelPickerGroup) {
+      setModelPickerGroup(next);
+      setExperience((current) => ({
+        ...current,
+        surface: { type: 'picker', picker: 'model', query: '', selectedIndex: 0 },
+      }));
+    }
+  }, [
+    modelSurface,
+    modelSelection,
+    modelPickerView,
+    modelPickerStage,
+    modelPickerQuery,
+    modelPickerSelectableRows.length,
+    modelPickerGroup,
+  ]);
   const commandSelection = commandSurface?.selectedIndex ?? 0;
   const slashSelection = slashSurface?.selectedIndex ?? 0;
   const modeSelection = modeSurface?.selectedIndex ?? 0;
@@ -516,7 +680,7 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
     : layout.density === 'narrow'
       ? 3
       : 2;
-  const welcomeModelVisibleRows = Math.min(welcomeModelMaxVisible, Math.max(1, modelPickerRows.length));
+  const welcomeModelVisibleRows = Math.min(welcomeModelMaxVisible, Math.max(1, modelPickerSelectableRows.length)) + 2;
   const commandWindow = commandSurface
     ? slashCommandWindow(commandItems, commandSelection, pickerLayout.commandMaxVisible)
     : [];
@@ -636,67 +800,122 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
 
     if (modelSurface) {
       if (key.name === 'escape') {
+        if (modelPickerStage === 'efforts') {
+          setModelPickerStage('models');
+          setModelPickerPending(null);
+          setExperience((current) => ({
+            ...current,
+            surface: {
+              type: 'picker',
+              picker: 'model',
+              query: '',
+              selectedIndex: 0,
+            },
+          }));
+          return;
+        }
+        if (modelPickerQuery.length > 0) {
+          setModelPickerQuery('');
+          return;
+        }
+        setModelPickerQuery('');
+        setModelPickerStage('models');
+        setModelPickerPending(null);
         setExperience((current) => escapeFooter(current));
         queueMicrotask(() => composerRef.current?.focus());
         return;
       }
-      if (modelItems.length === 0) return;
-      if (key.name === 'up' || key.name === 'left') {
+
+      if (modelPickerStage === 'models' && modelPickerView && modelPickerView.groups.length > 0) {
+        if (key.name === 'tab' || key.name === 'right') {
+          const nextGroup = cycleModelPickerGroup(modelPickerView.groups, modelPickerView.activeGroup, key.shift ? -1 : 1);
+          setModelPickerGroup(nextGroup);
+          setExperience((current) => ({
+            ...current,
+            surface: { type: 'picker', picker: 'model', query: '', selectedIndex: 0 },
+          }));
+          return;
+        }
+        if (key.name === 'left') {
+          const nextGroup = cycleModelPickerGroup(modelPickerView.groups, modelPickerView.activeGroup, -1);
+          setModelPickerGroup(nextGroup);
+          setExperience((current) => ({
+            ...current,
+            surface: { type: 'picker', picker: 'model', query: '', selectedIndex: 0 },
+          }));
+          return;
+        }
+      }
+
+      if (modelPickerStage === 'models' && key.name === 'backspace') {
+        setModelPickerQuery((current) => current.slice(0, -1));
         setExperience((current) => ({
           ...current,
-          surface: moveTuiSurfaceSelection(current.surface, -1, modelItems.length),
+          surface: { type: 'picker', picker: 'model', query: '', selectedIndex: 0 },
         }));
         return;
       }
-      if (key.name === 'down' || key.name === 'right' || key.name === 'tab') {
+
+      if (
+        modelPickerStage === 'models'
+        && !key.ctrl
+        && !key.meta
+        && typeof key.sequence === 'string'
+        && key.sequence.length === 1
+        && key.sequence >= ' '
+      ) {
+        setModelPickerQuery((current) => `${current}${key.sequence}`);
         setExperience((current) => ({
           ...current,
-          surface: moveTuiSurfaceSelection(current.surface, 1, modelItems.length),
+          surface: { type: 'picker', picker: 'model', query: '', selectedIndex: 0 },
+        }));
+        return;
+      }
+
+      if (modelPickerSelectableRows.length === 0) return;
+
+      if (key.name === 'up') {
+        setExperience((current) => ({
+          ...current,
+          surface: moveTuiSurfaceSelection(current.surface, -1, modelPickerSelectableRows.length),
+        }));
+        return;
+      }
+      if (key.name === 'down') {
+        setExperience((current) => ({
+          ...current,
+          surface: moveTuiSurfaceSelection(current.surface, 1, modelPickerSelectableRows.length),
         }));
         return;
       }
       if (key.name === 'return' || key.name === 'enter') {
-        const next = modelItems[modelPickerSelection % modelItems.length];
-        if (!next || !modelSelection) return;
+        const row = modelPickerSelectableRows[modelPickerSelection % modelPickerSelectableRows.length];
+        if (!row || !modelSelection) return;
+        if (modelPickerStage === 'models' && row.modelRef) {
+          const model = modelSelection.catalog.find((entry) =>
+            entry.providerId === row.modelRef?.providerId && entry.modelId === row.modelRef?.modelId
+          );
+          if (model && model.supportedReasoningEfforts.length > 1) {
+            setModelPickerPending(row.modelRef);
+            setModelPickerStage('efforts');
+            setExperience((current) => ({
+              ...current,
+              surface: { type: 'picker', picker: 'model', query: '', selectedIndex: 0 },
+            }));
+            return;
+          }
+        }
+        const next = row.selection;
+        if (!next) return;
         modelSelection.setSelection(next);
         persistence.syncModel(next);
         setSelectedModel(next);
+        setModelPickerQuery('');
+        setModelPickerStage('models');
+        setModelPickerPending(null);
         setCommandNotice(`Next message: ${modelSelectionLabel(modelSelection, next)}`);
         setExperience((current) => escapeFooter(current));
         queueMicrotask(() => composerRef.current?.focus());
-        return;
-      }
-    }
-
-    if (resumeSurface) {
-      if (key.name === 'escape') {
-        setExperience((current) => escapeFooter(current));
-        queueMicrotask(() => composerRef.current?.focus());
-        return;
-      }
-      if (key.name === 'up') {
-        setExperience((current) => ({ ...current, surface: moveTuiSurfaceSelection(current.surface, -1, resumeItems.length) }));
-        return;
-      }
-      if (key.name === 'down' || key.name === 'tab') {
-        setExperience((current) => ({ ...current, surface: moveTuiSurfaceSelection(current.surface, 1, resumeItems.length) }));
-        return;
-      }
-      if ((key.name === 'return' || key.name === 'enter') && resumeItems.length > 0) {
-        const item = resumeItems[resumeSurface.selectedIndex];
-        const restored = item ? persistence.loadConversation(item.id) : null;
-        if (!restored) {
-          setCommandNotice('That saved session could not be restored');
-        } else if (resumeTuiConversation(controller, persistence, restored)) {
-          if (restored.modelSelection && modelSelection) {
-            modelSelection.setSelection(restored.modelSelection);
-            setSelectedModel(restored.modelSelection);
-          }
-          setCommandNotice(`Resumed ${item?.title ?? 'saved session'}`);
-        }
-        setExperience((current) => escapeFooter(current));
-        queueMicrotask(() => composerRef.current?.focus());
-        return;
       }
       return;
     }
@@ -729,6 +948,21 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
         const normalized = host.setAccessLevel(nextPolicy);
         setAccessLevel(normalized);
         setCommandNotice(`Local access: ${permissionPolicyLabels(normalized).label}`);
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+      }
+      return;
+    }
+
+    if (helpSurface) {
+      if (
+        key.name === 'escape'
+        || key.name === 'return'
+        || key.name === 'enter'
+        || key.name === 'q'
+      ) {
+        key.preventDefault();
+        key.stopPropagation();
         setExperience((current) => escapeFooter(current));
         queueMicrotask(() => composerRef.current?.focus());
       }
@@ -929,6 +1163,11 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
                 slashMaxVisible={Math.min(3, slashMaxVisible)}
                 slashShowDescriptions={layout.showDescriptions}
                 modelPickerOpen={Boolean(modelSurface)}
+                modelPickerTitle={modelPickerView?.title ?? 'Model'}
+                modelPickerSubtitle={modelPickerView?.subtitle}
+                modelPickerGroups={modelPickerGroupLabels}
+                modelPickerActiveGroup={modelPickerView?.activeGroup ?? null}
+                modelPickerQuery={modelPickerQuery}
                 modelPickerRows={modelPickerRows}
                 modelPickerSelection={modelPickerSelection}
                 modelPickerMaxVisible={welcomeModelMaxVisible}
@@ -1083,6 +1322,34 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
         </box>
       ) : null}
 
+      {helpSurface ? (
+        <box
+          flexDirection="column"
+          flexShrink={0}
+          border
+          borderColor={COLOR.accent}
+          backgroundColor={COLOR.panel}
+          paddingLeft={1}
+          paddingRight={1}
+          paddingTop={pickerLayout.verticalPadding}
+          paddingBottom={pickerLayout.verticalPadding}
+        >
+          <text fg={COLOR.text} wrapMode="none"><strong>Help</strong></text>
+          <text fg={COLOR.muted} wrapMode="none">Shortcuts, commands, and modes for this TUI</text>
+          {helpSections.map((section) => (
+            <box key={section.title} flexDirection="column" marginTop={1}>
+              <text fg={COLOR.accent} wrapMode="none"><strong>{section.title}</strong></text>
+              {section.lines.map((line) => (
+                <text key={`${section.title}:${line}`} fg={COLOR.muted} wrapMode="none">  {line}</text>
+              ))}
+            </box>
+          ))}
+          {pickerLayout.showHints ? (
+            <text fg={COLOR.muted} wrapMode="none">enter / esc close</text>
+          ) : null}
+        </box>
+      ) : null}
+
       {commandSurface ? (
         <box
           flexDirection="column"
@@ -1125,6 +1392,11 @@ export function App({ host, model, modelLabel, modelSelection, onQuit }: {
           slashMaxVisible={slashMaxVisible}
           slashShowDescriptions={layout.showDescriptions}
           modelPickerOpen={Boolean(modelSurface)}
+          modelPickerTitle={modelPickerView?.title ?? 'Model'}
+          modelPickerSubtitle={modelPickerView?.subtitle}
+          modelPickerGroups={modelPickerGroupLabels}
+          modelPickerActiveGroup={modelPickerView?.activeGroup ?? null}
+          modelPickerQuery={modelPickerQuery}
           modelPickerRows={modelPickerRows}
           modelPickerSelection={modelPickerSelection}
           modelPickerMaxVisible={slashMaxVisible}

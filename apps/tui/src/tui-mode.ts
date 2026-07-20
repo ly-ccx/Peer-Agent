@@ -8,12 +8,57 @@ export interface TuiModeOption {
   readonly readOnly: boolean;
 }
 
-export const TUI_MODES: readonly TuiModeOption[] = Object.freeze([
+/**
+ * Product-level projection policy for TUI runtime modes.
+ *
+ * Actual capability membership still comes from Runtime SDK projection
+ * (`modeScopes` on manifests + `createRuntimeProjection`). This table is the
+ * TUI-facing contract: which modes are read-only and which allow write tools.
+ */
+export interface TuiModeProjectionRule {
+  readonly mode: TuiMode;
+  readonly readOnly: boolean;
+  /** Whether write/shell capabilities may be projected for this mode. */
+  readonly allowsWriteTools: boolean;
+  /** Whether this mode is user-selectable in the mode picker. */
+  readonly userSelectable: boolean;
+}
+
+export const TUI_MODE_PROJECTION_RULES: readonly TuiModeProjectionRule[] = Object.freeze([
   {
     mode: 'chat',
-    label: 'Chat',
+    readOnly: false,
+    allowsWriteTools: true,
+    userSelectable: true,
+  },
+  {
+    mode: 'plan',
+    readOnly: true,
+    allowsWriteTools: false,
+    userSelectable: true,
+  },
+  {
+    mode: 'goal',
+    readOnly: false,
+    allowsWriteTools: true,
+    userSelectable: true,
+  },
+  {
+    mode: 'explorer',
+    readOnly: true,
+    allowsWriteTools: false,
+    userSelectable: false,
+  },
+]);
+
+export const TUI_MODES: readonly TuiModeOption[] = Object.freeze([
+  {
+    // Wire value stays `chat` for Runtime SDK / Desktop compatibility.
+    // User-facing label is Agent (same product copy as Desktop modeLabel).
+    mode: 'chat',
+    label: 'Agent',
     shortcut: '1',
-    description: 'General conversation with projected read and write tools.',
+    description: 'Answer directly and call projected read and write tools as needed.',
     readOnly: false,
   },
   {
@@ -38,6 +83,9 @@ export const TUI_RUNTIME_MODES: readonly TuiMode[] = Object.freeze([
 ]);
 
 const TUI_MODE_SET = new Set<TuiMode>(TUI_RUNTIME_MODES);
+const TUI_MODE_PROJECTION_BY_MODE = new Map(
+  TUI_MODE_PROJECTION_RULES.map((rule) => [rule.mode, rule] as const),
+);
 
 export function isTuiMode(value: unknown): value is TuiMode {
   return typeof value === 'string' && TUI_MODE_SET.has(value as TuiMode);
@@ -45,6 +93,14 @@ export function isTuiMode(value: unknown): value is TuiMode {
 
 export function normalizeTuiMode(value: unknown, fallback: TuiMode = 'chat'): TuiMode {
   return isTuiMode(value) ? value : fallback;
+}
+
+export function tuiModeProjectionRule(mode: TuiMode): TuiModeProjectionRule {
+  return TUI_MODE_PROJECTION_BY_MODE.get(mode) ?? TUI_MODE_PROJECTION_RULES[0]!;
+}
+
+export function tuiModeAllowsWriteTools(mode: TuiMode): boolean {
+  return tuiModeProjectionRule(mode).allowsWriteTools;
 }
 
 export function cycleTuiMode(current: TuiMode, offset = 1): TuiMode {

@@ -65,7 +65,7 @@ describe('TUI app layout', () => {
   test('docks the resume picker above the composer and windows rows around selection', () => {
     const resumeSource = appSource.slice(
       appSource.indexOf('function ResumePickerMenu'),
-      appSource.indexOf('interface ModelPickerRow'),
+      appSource.indexOf('function ModelPickerMenu'),
     );
 
     expect(resumeSource).toContain('selectionWindow(rows, selectedIndex, maxVisible)');
@@ -78,15 +78,20 @@ describe('TUI app layout', () => {
       .toBeLessThan(appSource.lastIndexOf('<ComposerDock'));
   });
 
-  test('keeps the composer input pure and places status outside its border', () => {
+  test('keeps the composer input pure and places controls above and status below', () => {
     expect(appSource).toContain("placeholder={disabled ? 'Resolve the request above…' : 'Ask anything…'}");
     const dockSource = appSource.slice(
       appSource.indexOf('function ComposerDock'),
       appSource.indexOf('export function App'),
     );
+    expect(dockSource).toContain('<ComposerControlsBar status={status} layout={statusLayout} />');
     expect(dockSource).toContain('<ComposerStatusBar status={status} layout={statusLayout} />');
-    expect(dockSource.indexOf('<ComposerStatusBar status={status} layout={statusLayout} />'))
-      .toBeGreaterThan(dockSource.indexOf('<Composer'));
+    const controlsAt = dockSource.indexOf('<ComposerControlsBar status={status} layout={statusLayout} />');
+    const inputAt = dockSource.indexOf('<Composer\n');
+    const statusAt = dockSource.indexOf('<ComposerStatusBar status={status} layout={statusLayout} />');
+    expect(controlsAt).toBeGreaterThanOrEqual(0);
+    expect(inputAt).toBeGreaterThan(controlsAt);
+    expect(statusAt).toBeGreaterThan(inputAt);
     expect(appSource).not.toContain('metadata={composerMetadata}');
     expect(appSource).not.toContain('readonly metadata: string');
     expect(appSource).not.toContain('Ask anything…  / commands');
@@ -112,7 +117,7 @@ describe('TUI app layout', () => {
     expect(slashMenuSource).toContain('height={1}');
     expect(dockSource).toContain('<box position="relative" width="100%" height={5} overflow="visible">');
     expect(dockSource).toContain('<SlashCommandMenu');
-    expect(dockSource.indexOf('<SlashCommandMenu')).toBeLessThan(dockSource.indexOf('<Composer'));
+    expect(dockSource.indexOf('<SlashCommandMenu')).toBeLessThan(dockSource.indexOf('<Composer\n'));
     expect(appSource).toContain("experience.surface.type === 'slash-suggestions'");
     expect(appSource).toContain('slashMaxVisible={slashMaxVisible}');
     expect(appSource).toContain('slashMaxVisible={Math.min(3, slashMaxVisible)}');
@@ -163,9 +168,9 @@ describe('TUI app layout', () => {
     expect(modelPickerSource).toContain('right={0}');
     expect(modelPickerSource).toContain('bottom={5}');
     expect(modelPickerSource).toContain('zIndex={100}');
-    expect(modelPickerSource).toContain('<strong>Model &amp; reasoning</strong>');
+    expect(modelPickerSource).toContain('<strong>{title}</strong>');
     expect(dockSource).toContain('<ModelPickerMenu');
-    expect(dockSource.indexOf('<ModelPickerMenu')).toBeLessThan(dockSource.indexOf('<Composer'));
+    expect(dockSource.indexOf('<ModelPickerMenu')).toBeLessThan(dockSource.indexOf('<Composer\n'));
     expect(dockSource).toContain('focused={!modelPickerOpen}');
     expect(appSource).toContain('focused={focused && !disabled}');
     expect(appSource.match(/modelPickerOpen=\{Boolean\(modelSurface\)\}/g)?.length).toBe(2);
@@ -179,7 +184,7 @@ describe('TUI app layout', () => {
     expect(appRenderSource).not.toContain('{modelSurface ? (');
   });
 
-  test('shows one shared three-level responsive status bar in welcome and conversation layouts', () => {
+  test('shows one shared three-level responsive composer chrome in welcome and conversation layouts', () => {
     expect(appSource).toContain('const composerStatusLayout: ComposerStatusLayout = terminal.width >= 160');
     expect(appSource).toContain(': terminal.width >= 72');
     expect(appSource).toContain("? 'wide'");
@@ -187,22 +192,32 @@ describe('TUI app layout', () => {
     expect(appSource).toContain(": 'narrow';");
     expect(appSource.match(/<ComposerDock/g)?.length).toBe(2);
     expect(statusViewSource).toContain("if (layout === 'narrow')");
-    expect(statusViewSource).toContain("if (layout === 'compact')");
+    expect(statusViewSource).toContain("short={layout === 'compact'}");
     expect(statusViewSource).toContain('flexDirection="column"');
   });
 
-  test('renders the wide status as one non-wrapping text flow so long model names cannot overlap other fields', () => {
-    const wideStatusSource = statusViewSource.slice(statusViewSource.lastIndexOf('return ('));
+  test('renders wide controls above and wide status below as non-wrapping text flows', () => {
+    const controlsSource = statusViewSource.slice(
+      statusViewSource.indexOf('export function ComposerControlsBar'),
+      statusViewSource.indexOf('export function ComposerStatusBar'),
+    );
+    const wideControlsSource = controlsSource.slice(controlsSource.lastIndexOf('return ('));
+    const statusSource = statusViewSource.slice(statusViewSource.indexOf('export function ComposerStatusBar'));
+    const wideStatusSource = statusSource.slice(statusSource.lastIndexOf('return ('));
 
-    expect(wideStatusSource.match(/<text /g)?.length).toBe(1);
-    expect(wideStatusSource).toContain('<text fg={MUTED} wrapMode="none">');
-    expect(wideStatusSource).not.toContain('justifyContent="space-between"');
-    expect(wideStatusSource).toContain('<StatusPair label="workspace" value={status.workspace} />');
-    expect(wideStatusSource).toContain('<StatusPair label="mode" value={status.mode} accent />');
-    expect(wideStatusSource).toContain('<StatusPair label="access" value={status.permissionShort} />');
+    expect(wideControlsSource).toContain('justifyContent="space-between"');
+    expect(wideControlsSource.match(/<text /g)?.length).toBe(2);
+    expect(wideControlsSource).toContain('<StatusPair label="mode" value={status.mode} accent />');
+    expect(wideControlsSource).toContain('value={layout === \'compact\' ? status.permissionShort : status.permission}');
+    expect(wideControlsSource).toContain('<StatusPair label="workspace" value={workspaceValue} />');
+    expect(wideStatusSource).toContain('justifyContent="space-between"');
+    expect(wideStatusSource.match(/<text /g)?.length).toBe(2);
     expect(wideStatusSource).toContain('{status.model}');
     expect(wideStatusSource).toContain('{status.reasoning}');
-    expect(wideStatusSource).toContain('<ContextStatus status={status} />');
+    expect(wideStatusSource).toContain('<ContextStatus status={status} short={layout === \'compact\'} />');
+    expect(wideStatusSource).not.toContain('label="workspace"');
+    expect(wideStatusSource).not.toContain('label="mode"');
+    expect(wideStatusSource).not.toContain('label="access"');
   });
 
   test('adapts picker density and keeps approval choices on separate rows', () => {
@@ -236,13 +251,19 @@ describe('TUI app layout', () => {
     expect(commandPickerSource).toContain('flexShrink={0}');
   });
 
-  test('covers workspace, mode, permission, model, reasoning and context', () => {
-    expect(statusViewSource).toContain('label="workspace"');
+  test('covers mode/access above with workspace right, model/context below, and no top bar', () => {
+    expect(statusViewSource).toContain('export function ComposerControlsBar');
+    expect(statusViewSource).toContain('export function ComposerStatusBar');
+    expect(statusViewSource).not.toContain('export function WorkspaceTopBar');
     expect(statusViewSource).toContain('label="mode"');
     expect(statusViewSource).toContain('label="access"');
+    expect(statusViewSource).toContain('label="workspace"');
+    expect(statusViewSource).toContain('justifyContent="space-between"');
     expect(statusViewSource).toContain('{status.model}');
     expect(statusViewSource).toContain('{status.reasoning}');
-    expect(statusViewSource).toContain('status.contextShort : status.context');
+    expect(statusViewSource).toContain('short ? status.contextShort : status.context');
+    expect(appSource).not.toContain('<WorkspaceTopBar');
+    expect(appSource).toContain('<ComposerControlsBar status={status} layout={statusLayout} />');
     expect(appSource).toContain('host.setAccessLevel(nextPolicy)');
   });
 
@@ -255,10 +276,21 @@ describe('TUI app layout', () => {
 
   test('keeps user and tool messages visually distinct without repeated speaker headings', () => {
     expect(appSource).toContain('<strong>› </strong>');
-    expect(appSource).toContain("{toolExpanded ? '▼' : '▶'} tool");
+    expect(appSource).toContain('resolveToolPresentation(message)');
+    expect(appSource).toContain('toolStatusGlyph(presentation.status)');
+    expect(appSource).toContain('toolHeadline(presentation.toolName, presentation.argumentSummary)');
+    expect(appSource).toContain("index === 0 ? '  ╰ ' : '    '");
+    expect(appSource).not.toContain("{toolExpanded ? '▼' : '▶'} tool");
     expect(appSource).not.toContain("message.role === 'user' ? 'You'");
     expect(appSource).not.toContain('<strong>peer</strong>');
     expect(appSource).not.toContain('show details');
+  });
+
+  test('renders the help picker opened by /help', () => {
+    expect(appSource).toContain("experience.surface.picker === 'help'");
+    expect(appSource).toContain('buildTuiHelpSections({ goalStatus })');
+    expect(appSource).toContain('<strong>Help</strong>');
+    expect(appSource).toContain('helpSections.map((section)');
   });
 
   test('does not restore the old central instructions or standalone footer', () => {
