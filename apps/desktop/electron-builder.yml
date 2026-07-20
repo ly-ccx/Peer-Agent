@@ -24,6 +24,12 @@ files:
   - "!node_modules/@peer-agent/*/tsconfig*.json"
 
 extraResources:
+  # Dock 深浅色图标。正式包运行时由主进程根据外观模式动态选择。
+  - from: "build/"
+    to: "app-icons/"
+    filter:
+      - "icon-macos-dock.png"
+      - "icon-macos-dock-dark.png"
   # Rust native binary (must be pre-built for target platform)
   - from: "../../target/release/"
     to: "bin/"

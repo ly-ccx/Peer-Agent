@@ -1,8 +1,12 @@
-const { readdirSync, statSync } = require('node:fs');
+const { existsSync, readdirSync, statSync } = require('node:fs');
 const path = require('node:path');
 const { extractFile, listPackage } = require('@electron/asar');
 
 const WORKSPACE_SCOPE = '@peer-agent/';
+const PACKAGED_DOCK_ICONS = [
+  'icon-macos-dock.png',
+  'icon-macos-dock-dark.png',
+];
 const repoRoot = path.resolve(__dirname, '../../..');
 const defaultOutputDirectory = path.join(repoRoot, 'dist-electron');
 
@@ -71,6 +75,18 @@ function assertArchiveRuntime(archivePath) {
   console.log(`[packaged-runtime] verified ${workspaceDependencies.length} main-process workspace imports in ${archivePath}`);
 }
 
+function assertPackagedDockIcons(archivePath) {
+  const iconDirectory = path.join(path.dirname(archivePath), 'app-icons');
+  for (const iconName of PACKAGED_DOCK_ICONS) {
+    const iconPath = path.join(iconDirectory, iconName);
+    if (!existsSync(iconPath)) {
+      throw new Error(`${archivePath}: packaged Dock icon is missing: ${iconPath}`);
+    }
+  }
+
+  console.log(`[packaged-runtime] verified ${PACKAGED_DOCK_ICONS.length} theme-aware Dock icons in ${iconDirectory}`);
+}
+
 const targets = process.argv.slice(2);
 const roots = targets.length > 0 ? targets.map((target) => path.resolve(target)) : [defaultOutputDirectory];
 const archives = roots.flatMap(collectArchives);
@@ -79,4 +95,7 @@ if (archives.length === 0) {
   throw new Error(`No app.asar archives found under: ${roots.join(', ')}`);
 }
 
-for (const archivePath of archives) assertArchiveRuntime(archivePath);
+for (const archivePath of archives) {
+  assertArchiveRuntime(archivePath);
+  assertPackagedDockIcons(archivePath);
+}

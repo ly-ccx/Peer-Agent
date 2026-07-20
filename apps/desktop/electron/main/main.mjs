@@ -48,6 +48,7 @@ import { listGrokBuildModels } from './provider-adapters/grok-build-model-catalo
 import { listGeminiModels, preferGeminiModel } from './provider-adapters/gemini-model-catalog.mjs';
 import { listQoderModels } from './provider-adapters/qoder-model-catalog.mjs';
 import { createHostRestarter } from './host-restart.mjs';
+import { resolveDockIconPaths } from './dock-icon-paths.mjs';
 import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
 import { createLlmChatService } from './llm-chat-service.mjs';
 import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
@@ -107,23 +108,19 @@ console.log('[env-diag] resourcesRoot=', resourcesRoot);
 console.log('[env-diag] loadedEnvKeys=', loadedEnvKeys);
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const availableLocales = ['zh-CN', 'en-US'];
-const desktopIconPath = workspaceRoot
-  ? path.join(workspaceRoot, 'apps/desktop/build/icon.png')
-  : null;
-const macDockIconPath = workspaceRoot
-  ? path.join(workspaceRoot, 'apps/desktop/build/icon-macos-dock.png')
-  : null;
-const macDarkDockIconPath = workspaceRoot
-  ? path.join(workspaceRoot, 'apps/desktop/build/icon-macos-dock-dark.png')
-  : null;
+const {
+  fallback: desktopIconPath,
+  light: macDockIconPath,
+  dark: macDarkDockIconPath,
+} = resolveDockIconPaths({ isPackaged, workspaceRoot, resourcesRoot });
 
 function getDesktopIconPath() {
   return desktopIconPath && existsSync(desktopIconPath) ? desktopIconPath : undefined;
 }
 
 function setDockIcon(appearance = settingsStore.getAll().appearance) {
-  // app.dock.setIcon renders a PNG as-is; unlike a packaged .icns, macOS does
-  // not apply the system app-icon mask for us in development.
+  // app.dock.setIcon renders a PNG as-is in both development and packaged apps,
+  // so the shipped theme variants already include their macOS alpha mask.
   const followsSystem = appearance?.mode === 'system' || appearance?.mode == null;
   const useDarkIcon = appearance?.mode === 'dark'
     || (followsSystem && nativeTheme.shouldUseDarkColors);
