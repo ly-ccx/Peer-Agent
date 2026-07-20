@@ -291,6 +291,31 @@
     box-shadow: 0 12px 28px color-mix(in srgb, #000 18%, transparent);
     backdrop-filter: blur(12px);
     outline: none;
+    transform-origin: top center;
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+    pointer-events: none;
+    transition:
+      opacity var(--za-motion-fast, 0.15s) ease,
+      transform var(--za-motion-fast, 0.15s) ease;
+  }
+
+  .palette-select-list[data-state='open'] {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+
+  .palette-select-list[data-state='closed'] {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+    pointer-events: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .palette-select-list {
+      transition: none;
+    }
   }
 
   .palette-select-option {

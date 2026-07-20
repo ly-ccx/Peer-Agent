@@ -12,7 +12,16 @@ import { PALETTE_REGISTRY, type AppearancePalette } from './paletteRegistry';
  *
  * 可访问性：button(role=combobox) + ul(role=listbox) + li(role=option)，
  * 支持键盘 ↑/↓/Home/End 移动高亮、Enter/Space 选中、Esc 关闭、点外关闭、失焦关闭。
+ *
+ * 开合过渡：list 挂载后用 data-state=open|closed 驱动 enter/exit；
+ * 关闭时先播退场再卸载，避免选中后瞬间消失。
  */
+
+/** 与 CSS `--za-motion-fast` 对齐的退场兜底时长（ms）。 */
+const EXIT_MS = 160;
+
+type PanelPhase = 'closed' | 'open' | 'closing';
+
 export function PaletteSelect({
   value,
   onChange,
@@ -22,7 +31,7 @@ export function PaletteSelect({
   readonly onChange: (palette: AppearancePalette) => void;
   readonly label: string;
 }) {
-  const [open, setOpen] = useState(false);
+  const [phase, setPhase] = useState<PanelPhase>('closed');
   const [activeIndex, setActiveIndex] = useState(() =>
     Math.max(
       0,
@@ -30,23 +39,67 @@ export function PaletteSelect({
     ),
   );
   const rootRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const exitTimerRef = useRef<number | null>(null);
   const listboxId = useId();
 
   const selected = PALETTE_REGISTRY.find((palette) => palette.id === value) ?? PALETTE_REGISTRY[0];
+  const isExpanded = phase === 'open';
+  const isMounted = phase !== 'closed';
 
-  const close = useCallback(() => setOpen(false), []);
+  const clearExitTimer = useCallback(() => {
+    if (exitTimerRef.current != null) {
+      window.clearTimeout(exitTimerRef.current);
+      exitTimerRef.current = null;
+    }
+  }, []);
+
+  const finishClose = useCallback(() => {
+    clearExitTimer();
+    setPhase('closed');
+  }, [clearExitTimer]);
+
+  const openPanel = useCallback(() => {
+    clearExitTimer();
+    setPhase('open');
+  }, [clearExitTimer]);
+
+  const closePanel = useCallback(() => {
+    setPhase((prev) => {
+      if (prev !== 'open') return prev;
+      return 'closing';
+    });
+  }, []);
 
   const commit = useCallback(
     (palette: AppearancePalette) => {
       onChange(palette);
-      setOpen(false);
+      closePanel();
     },
-    [onChange],
+    [onChange, closePanel],
   );
+
+  // 退场结束后卸载；reduced-motion 时跳过等待。
+  useEffect(() => {
+    if (phase !== 'closing') return;
+
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion) {
+      finishClose();
+      return;
+    }
+
+    clearExitTimer();
+    exitTimerRef.current = window.setTimeout(() => {
+      finishClose();
+    }, EXIT_MS);
+
+    return () => clearExitTimer();
+  }, [phase, finishClose, clearExitTimer]);
 
   // 打开时把高亮对齐到当前选中项
   useEffect(() => {
-    if (open) {
+    if (phase === 'open') {
       setActiveIndex(
         Math.max(
           0,
@@ -54,24 +107,45 @@ export function PaletteSelect({
         ),
       );
     }
-  }, [open, value]);
+  }, [phase, value]);
 
-  // 点击外部关闭
+  // 点击外部关闭（仅在展开态响应）
   useEffect(() => {
-    if (!open) return;
+    if (phase !== 'open') return;
     const onPointerDown = (event: PointerEvent) => {
       if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
-        close();
+        closePanel();
       }
     };
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [open, close]);
+  }, [phase, closePanel]);
+
+  // 挂载后下一帧再切 data-state=open，确保 enter 过渡能播
+  useEffect(() => {
+    if (phase !== 'open') return;
+    const node = listRef.current;
+    if (!node) return;
+    if (node.dataset.state !== 'open') {
+      node.dataset.state = 'closed';
+      // force reflow so the closed -> open transition actually runs
+      void node.offsetHeight;
+      node.dataset.state = 'open';
+    }
+  }, [phase]);
+
+  const onListTransitionEnd = (event: React.TransitionEvent<HTMLUListElement>) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.propertyName !== 'opacity' && event.propertyName !== 'transform') return;
+    if (phase === 'closing') {
+      finishClose();
+    }
+  };
 
   const onTriggerKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      setOpen(true);
+      openPanel();
     }
   };
 
@@ -100,11 +174,19 @@ export function PaletteSelect({
         break;
       case 'Escape':
         event.preventDefault();
-        close();
+        closePanel();
         break;
       default:
         break;
     }
+  };
+
+  const togglePanel = () => {
+    if (phase === 'open') {
+      closePanel();
+      return;
+    }
+    openPanel();
   };
 
   return (
@@ -113,14 +195,14 @@ export function PaletteSelect({
         type="button"
         className="palette-select-trigger"
         aria-haspopup="listbox"
-        aria-expanded={open}
+        aria-expanded={isExpanded}
         aria-label={label}
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={togglePanel}
         onKeyDown={onTriggerKeyDown}
       >
         <span className="palette-dot" style={{ background: selected.dotColor }} aria-hidden="true" />
         <span className="palette-select-value">{selected.label}</span>
-        <span className={`palette-select-caret${open ? ' open' : ''}`} aria-hidden="true">
+        <span className={`palette-select-caret${isExpanded ? ' open' : ''}`} aria-hidden="true">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
             <path
               d="M6 9l6 6 6-6"
@@ -133,15 +215,22 @@ export function PaletteSelect({
         </span>
       </button>
 
-      {open ? (
+      {isMounted ? (
         <ul
           className="palette-select-list"
           role="listbox"
           id={listboxId}
           tabIndex={-1}
+          data-state={phase === 'open' ? 'open' : 'closed'}
           aria-activedescendant={`${listboxId}-${activeIndex}`}
           onKeyDown={onListKeyDown}
-          ref={(node) => node?.focus()}
+          onTransitionEnd={onListTransitionEnd}
+          ref={(node) => {
+            listRef.current = node;
+            if (node && phase === 'open') {
+              node.focus();
+            }
+          }}
         >
           {PALETTE_REGISTRY.map((palette, index) => {
             const isSelected = palette.id === value;

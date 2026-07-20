@@ -122,7 +122,7 @@ export function AppearancePanel({
                 <button
                   key={scale}
                   type="button"
-                  className={settings.fontScale === scale ? 'is-active' : undefined}
+                  className={settings.fontScale === scale ? 'active' : undefined}
                   onClick={() => setFontScale(scale)}
                 >
                   {i18n.t(`appearance.fontScale.${scale}`)}
@@ -150,7 +150,7 @@ export function AppearancePanel({
               <span className="appearance-settings-row-title">{i18n.t('appearance.diffMarker')}</span>
             </div>
             <div
-              className="appearance-segmented appearance-segmented--inline"
+              className="appearance-segmented appearance-segmented--two appearance-segmented--inline"
               role="group"
               aria-label={i18n.t('appearance.diffMarker')}
             >
@@ -158,7 +158,7 @@ export function AppearancePanel({
                 <button
                   key={mode}
                   type="button"
-                  className={settings.diffMarkerMode === mode ? 'is-active' : undefined}
+                  className={settings.diffMarkerMode === mode ? 'active' : undefined}
                   onClick={() => setDiffMarkerMode(mode)}
                 >
                   {i18n.t(`appearance.diffMarker.${mode}`)}
@@ -169,8 +169,8 @@ export function AppearancePanel({
         </div>
       </section>
 
-      <footer className="appearance-panel-footer">
-        <button type="button" className="appearance-reset-btn" onClick={reset}>
+      <footer className="appearance-footer">
+        <button type="button" className="appearance-reset" onClick={reset}>
           {i18n.t('appearance.reset')}
         </button>
       </footer>
@@ -187,14 +187,14 @@ export function ThemeModeCards({
   readonly mode: AppearanceMode;
   readonly onChange: (mode: AppearanceMode) => void;
 }) {
-  const cards: Array<{ id: AppearanceMode; title: string; hint: string }> = [
-    { id: 'system', title: i18n.t('appearance.mode.system'), hint: 'A' },
-    { id: 'light', title: i18n.t('appearance.mode.light'), hint: 'A' },
-    { id: 'dark', title: i18n.t('appearance.mode.dark'), hint: 'A' },
+  const cards: Array<{ id: AppearanceMode; title: string }> = [
+    { id: 'system', title: i18n.t('appearance.mode.system') },
+    { id: 'light', title: i18n.t('appearance.mode.light') },
+    { id: 'dark', title: i18n.t('appearance.mode.dark') },
   ];
 
   return (
-    <div className="theme-mode-cards" role="radiogroup" aria-label={i18n.t('appearance.mode')}>
+    <div className="appearance-mode-cards" role="radiogroup" aria-label={i18n.t('appearance.mode')}>
       {cards.map((card) => {
         const selected = mode === card.id;
         return (
@@ -203,17 +203,18 @@ export function ThemeModeCards({
             type="button"
             role="radio"
             aria-checked={selected}
-            className={`theme-mode-card theme-mode-card--${card.id}${selected ? ' is-selected' : ''}`}
+            className={`appearance-mode-card${selected ? ' is-active' : ''}`}
             onClick={() => onChange(card.id)}
           >
-            <span className="theme-mode-card-preview" aria-hidden="true">
-              <span className="theme-mode-card-preview-sidebar" />
-              <span className="theme-mode-card-preview-main">
-                <span className="theme-mode-card-preview-line" />
-                <span className="theme-mode-card-preview-line theme-mode-card-preview-line--short" />
+            <span className={`appearance-mode-thumb appearance-mode-thumb--${card.id}`} aria-hidden="true">
+              <span className="appearance-mode-thumb-bar" />
+              <span className="appearance-mode-thumb-body">
+                <span className="appearance-mode-thumb-line" />
+                <span className="appearance-mode-thumb-line short" />
+                <span className="appearance-mode-thumb-chip" />
               </span>
             </span>
-            <span className="theme-mode-card-label">{card.title}</span>
+            <span className="appearance-mode-card-label">{card.title}</span>
           </button>
         );
       })}
@@ -256,7 +257,7 @@ export function ThemeLivePreview({
 
   return (
     <div
-      className="theme-live-preview"
+      className="appearance-live-preview"
       style={{
         // 预览区局部映射当前语义色，随 mode/palette 即时变化
         ['--preview-accent' as string]: previewColors.accent,
@@ -264,28 +265,25 @@ export function ThemeLivePreview({
         ['--preview-fg' as string]: previewColors.foreground,
       }}
     >
-      <div className="theme-live-preview-pane">
-        <div className="theme-live-preview-pane-title">{i18n.t('appearance.preview')}</div>
-        <pre className="theme-live-preview-code" aria-hidden="true">
+      <div className="appearance-live-preview-pane">
+        <div className="appearance-live-preview-caption">{i18n.t('appearance.preview')}</div>
+        <pre className="appearance-live-code" aria-hidden="true">
           {codeLines.map((line) => (
-            <code
-              key={line.text}
-              className={
-                line.tone === 'accent'
-                  ? 'is-accent'
-                  : line.tone === 'muted'
-                    ? 'is-muted'
-                    : undefined
-              }
-            >
-              {line.text}
+            <code key={line.text}>
+              {line.tone === 'muted' ? (
+                <span className="tok-comment">{line.text}</span>
+              ) : line.tone === 'accent' ? (
+                <span className="tok-string">{line.text}</span>
+              ) : (
+                <span className="tok-variable">{line.text}</span>
+              )}
             </code>
           ))}
         </pre>
       </div>
-      <div className="theme-live-preview-pane">
-        <div className="theme-live-preview-pane-title">{i18n.t('appearance.diffPreview')}</div>
-        <div className="theme-live-preview-diff" aria-hidden="true">
+      <div className="appearance-live-preview-pane">
+        <div className="appearance-live-preview-caption">{i18n.t('appearance.diffPreview')}</div>
+        <div className="appearance-live-diff" aria-hidden="true">
           {diffRows.map((row, index) => {
             const sign =
               row.kind === 'add' ? '+' : row.kind === 'del' ? '-' : ' ';
@@ -293,12 +291,12 @@ export function ThemeLivePreview({
             return (
               <div
                 key={`${row.kind}-${index}`}
-                className={`theme-live-preview-diff-row is-${row.kind}`}
+                className={`appearance-live-diff-row${
+                  row.kind === 'add' ? ' is-add' : row.kind === 'del' ? ' is-del' : ''
+                }`}
               >
-                <span className="theme-live-preview-diff-sign">
-                  {showSign ? sign : ' '}
-                </span>
-                <span className="theme-live-preview-diff-text">{row.text}</span>
+                <span className="sign">{showSign ? sign : ' '}</span>
+                <span className="line">{row.text}</span>
               </div>
             );
           })}
