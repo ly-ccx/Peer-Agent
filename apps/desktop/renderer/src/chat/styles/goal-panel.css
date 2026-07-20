@@ -311,6 +311,15 @@
   gap: 12px;
   overflow-y: auto;
   padding: 12px;
+  /* 顶边只在 docked 展开时需要（toggle 与 body 的分隔）。
+     Workbench portal 场景无上方 toggle，不应出现这条线；
+     且 goal-panel.css 未分层，会盖掉 workbench.css @layer 内的 border-top:none。 */
+  border-top: none;
+}
+
+/* docked 场景：toggle 灯条下方保留顶部分隔线。
+   Workbench portal 的 body 不在 .goal-panel--docked 子树内，因此不会命中。 */
+.goal-panel--docked .goal-panel-body {
   border-top: 1px solid var(--ui-border-subtle, var(--za-line));
 }
 
@@ -342,30 +351,30 @@
 .goal-plan-card {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--ui-surface-float-border, var(--ui-border-subtle));
+  border: 1px solid transparent;
   border-radius: var(--ui-radius-panel, var(--za-radius));
   background: var(--ui-surface-float-bg, var(--ui-surface-raised, var(--za-surface-1)));
-  box-shadow: var(--ui-surface-float-shadow, none);
+  box-shadow: none;
   overflow: hidden;
   transform: none;
   transition:
-    background 180ms var(--za-ease-standard, ease),
-    border-color 180ms var(--za-ease-standard, ease),
-    box-shadow 180ms var(--za-ease-standard, ease);
+    background 180ms var(--za-ease-standard, ease);
 }
 
 .goal-plan-card:hover {
   background: var(--ui-surface-hover, var(--za-hover));
-  box-shadow: var(--ui-surface-float-shadow-hover, none);
+  border-color: transparent;
+  box-shadow: none;
   transform: none;
 }
 
 .goal-plan-card:focus-within {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-focus-ring, var(--za-focus)) 30%, transparent);
+  box-shadow: none;
 }
 
 .goal-plan-card:active {
-  box-shadow: var(--ui-surface-float-shadow, none);
+  border-color: transparent;
+  box-shadow: none;
   transform: none;
 }
 
@@ -804,11 +813,11 @@
   outline-offset: 2px;
 }
 
-/* 主卡：当前计划永远置顶展开，靠轻浮层表面与选中色拉开层级，不再用重阴影。 */
+/* 主卡：当前计划永远置顶展开，靠背景高亮拉开层级，与会话列表一致不描边。 */
 .goal-plan-card--main {
   background: var(--ui-surface-float-bg, var(--za-surface-1));
-  border-color: var(--ui-surface-float-border, var(--ui-border-subtle));
-  box-shadow: var(--ui-surface-float-shadow, none);
+  border-color: transparent;
+  box-shadow: none;
 }
 .goal-plan-card--main .goal-plan-head-caret {
   display: none;

@@ -1613,9 +1613,9 @@ export function ChatSurface({
     setWorkbenchTab('plan');
     setWorkbenchOpen(true);
   }, [setWorkbenchTab, setWorkbenchOpen]);
-  useEffect(() => {
-    if (mode !== 'plan') setHasGoalPlan(false);
-  }, [mode, setHasGoalPlan]);
+  // hasGoalPlan 的唯一来源是 GoalPlanPanel 上报的 plans 数量（handleGoalPlansCountChange）。
+  // 不要在 mode !== 'plan' 时强制清 false：goal 模式同样会创建/持有计划，
+  // 清掉会导致 Workbench 的 plan tab 被 disabled，切到 browser 后无法切回。
 
   const workspaceLabel = useMemo(() => {
     if (!workspacePath) return null;

@@ -59,6 +59,7 @@
     padding: 4px 8px;
     /* 外壳已是毛玻璃；tab rail 透明以免叠两层 blur。 */
     background: transparent;
+    /* Tab 栏与内容区之间的底部分隔线。 */
     border-bottom: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   }
 
