@@ -94,8 +94,23 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   useEffect(() => () => textareaResizeCoalescerRef.current.cancel(), []);
 
   // 草稿与队列仍沿用既有表达层持久化缝；仅把订阅移入输入叶子。
+  // 切会话时：先把「离开的会话」当前桶态同步写入持久化镜像，避免入队后立刻切走导致
+  // 最新队列尚未 debounce 落盘；进入新会话的首帧仍跳过 save，防止用空态覆盖刚恢复的数据。
   useEffect(() => {
-    if (persistedConversationRef.current !== conversationId) {
+    const previousId = persistedConversationRef.current;
+    if (previousId && previousId !== conversationId) {
+      const previous = conversationStore.getSnapshot(previousId);
+      saveComposerEntry(previousId, {
+        draft: previous.draft,
+        queue: previous.messageQueue.map((item) => ({
+          id: item.id,
+          text: item.text,
+          attachments: item.attachments,
+          effort: item.effort,
+        })),
+      });
+    }
+    if (previousId !== conversationId) {
       persistedConversationRef.current = conversationId;
       return;
     }

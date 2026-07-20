@@ -154,6 +154,29 @@ export function loadComposerEntry(conversationId: string): PersistedComposerEntr
 }
 
 /**
+ * 切换会话时决定 composer 草稿/队列用哪一份真值。
+ *
+ * 规则：
+ * - 会话桶里已有草稿或队列（同会话二次进入）→ 保留内存态，避免被尚未落盘的空持久化覆盖；
+ * - 内存为空 → 回落持久化（冷启动 / 首次进入该会话）。
+ *
+ * 这样「入队后立刻切走再切回」不会把 UI 冲成空队列，同时仍支持跨重启恢复。
+ */
+export function resolveComposerHydration(
+  live: { readonly draft: string; readonly messageQueue: readonly unknown[] },
+  persisted: PersistedComposerEntry | null,
+): { draft: string; queue: PersistedQueuedMessage[] | readonly unknown[]; source: 'live' | 'persisted' } {
+  if (live.draft.length > 0 || live.messageQueue.length > 0) {
+    return { draft: live.draft, queue: live.messageQueue, source: 'live' };
+  }
+  return {
+    draft: persisted?.draft ?? '',
+    queue: persisted?.queue ?? [],
+    source: 'persisted',
+  };
+}
+
+/**
  * 写入某会话的输入框状态（debounce 落盘）。
  * 当草稿为空且队列为空时，移除该会话条目，避免 settings 里堆积空壳。
  */

@@ -32,7 +32,7 @@ import {
 import { useConversationModelEffort } from '../hooks/useConversationModelEffort';
 import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
-import { loadComposerEntry } from '../state/composerPersistence';
+import { loadComposerEntry, resolveComposerHydration } from '../state/composerPersistence';
 import { getProviderModelDisplayLabel } from '../state/providerDisplay';
 import {
   buildMessageRailItemsIncremental,
@@ -793,13 +793,17 @@ export function ChatSurface({
     setProviderRecoveryNotice(null);
     // 切换会话时清掉上一会话的流式错误横幅，避免错误提示跨会话残留。
     setStreamError(null);
-    // 切换会话时恢复「该会话」已持久化的输入框状态(草稿文本 + 待发送队列):
-    // 草稿与队列都以 conversationId 为坐标,二次打开应原样保留;无会话(新建未落库)则清空。
+    // 切换会话时恢复「该会话」输入框状态(草稿文本 + 待发送队列):
+    // - 同会话二次进入：优先保留 conversationStore 桶内已有草稿/队列，避免被尚未落盘的空持久化冲掉；
+    // - 冷启动 / 首次进入：回落 composerPersistence。
     // 草稿区附件不持久化(见 composerPersistence 取舍说明),故切换会话后附件区始终清空。
+    const liveComposer = conversationStore.getSnapshot(conversationId);
     const persisted = conversationId ? loadComposerEntry(conversationId) : null;
+    const hydrated = resolveComposerHydration(liveComposer, persisted);
     convActions.set({
-      draft: persisted?.draft ?? '',
-      messageQueue: persisted?.queue ?? [],
+      draft: hydrated.draft,
+      // live 路径直接复用桶内 QueuedMessage；persisted 路径形状兼容。
+      messageQueue: hydrated.queue as typeof liveComposer.messageQueue,
     });
     const threadScrollSnapshot = conversationId
       ? threadScrollSnapshotsRef.current.get(conversationId) ?? null

@@ -5,6 +5,7 @@ import {
   clearComposerEntry,
   flushComposerPersistence,
   loadComposerEntry,
+  resolveComposerHydration,
   saveComposerEntry,
   type ComposerSettingsPort,
 } from './composerPersistence.ts';
@@ -105,5 +106,31 @@ describe('composerPersistence', () => {
     assert.equal(port.writes.length, 1);
     const written = port.writes[0].composerDrafts as Record<string, unknown>;
     assert.equal('conv-3' in written, false);
+  });
+
+  it('resolveComposerHydration prefers live queue/draft over empty or stale persistence', () => {
+    const liveQueue = [{ id: 'q-live', text: 'still queued', attachments: [], effort: 'default' }];
+    const live = resolveComposerHydration(
+      { draft: '', messageQueue: liveQueue },
+      { draft: '', queue: [] },
+    );
+    assert.equal(live.source, 'live');
+    assert.equal(live.queue, liveQueue);
+
+    const cold = resolveComposerHydration(
+      { draft: '', messageQueue: [] },
+      {
+        draft: 'from disk',
+        queue: [{ id: 'q1', text: 'persisted queue', attachments: [], effort: 'default' }],
+      },
+    );
+    assert.equal(cold.source, 'persisted');
+    assert.equal(cold.draft, 'from disk');
+    assert.equal(cold.queue.length, 1);
+
+    const empty = resolveComposerHydration({ draft: '', messageQueue: [] }, null);
+    assert.equal(empty.source, 'persisted');
+    assert.equal(empty.draft, '');
+    assert.equal(empty.queue.length, 0);
   });
 });
