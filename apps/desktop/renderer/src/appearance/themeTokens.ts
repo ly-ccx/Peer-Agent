@@ -2,9 +2,9 @@
  * Peer Vellum 不再做 token 派生；token 全部固化在 styles/tokens.css。
  * 本文件保留：
  *   - applyAppearance()：把 mode/density/fontScale/diffMarker 写到 <html dataset>，
- *     把 codeFontSize 与（palette=custom 时）自定义三色注入为 <html style 上的 CSS 变量。
- *   - sanitizeSettings()：normalize loadSettings() 读到的 localStorage payload，
- *     对新增的 customColors / codeFontSize / diffMarkerMode 做校验与回退。
+ *     把 codeFontSize 注入为 <html style 上的 CSS 变量。
+ *   - sanitizeSettings()：normalize loadSettings() 读到的 payload；
+ *     非法 palette（含历史 custom）回退默认 Frost。
  */
 
 import type {
@@ -18,7 +18,7 @@ import type {
   DiffMarkerMode,
 } from './appearanceTypes';
 import { CODE_FONT_SIZE_MAX, CODE_FONT_SIZE_MIN } from './appearanceTypes';
-import { DEFAULT_APPEARANCE_SETTINGS, DEFAULT_CUSTOM_COLORS } from './themePresets.ts';
+import { DEFAULT_APPEARANCE_SETTINGS, DEFAULT_CUSTOM_COLORS } from './themePresets';
 import { sanitizePalette } from './paletteRegistry';
 
 function isMode(value: unknown): value is AppearanceMode {
@@ -63,7 +63,7 @@ function sanitizeCustomColors(raw: unknown): CustomColors {
   };
 }
 
-// 代码字号：限制在 [MIN, MAX] 区间，非数字/越界回退默认。
+// codeFontSize 限制在 [MIN, MAX] 区间，非数字/越界回退默认。
 function sanitizeCodeFontSize(raw: unknown): number {
   const n = typeof raw === 'number' ? raw : Number(raw);
   if (!Number.isFinite(n)) return DEFAULT_APPEARANCE_SETTINGS.codeFontSize;
@@ -76,7 +76,7 @@ export function sanitizeSettings(raw: unknown): AppearanceSettings {
   const candidate = raw as Partial<AppearanceSettings>;
   return {
     mode: isMode(candidate.mode) ? candidate.mode : DEFAULT_APPEARANCE_SETTINGS.mode,
-    // palette 合法性由配色注册表统一判定，新增配色自动生效
+    // palette 合法性由配色注册表统一判定；历史 custom 等非法值回退默认 Frost
     palette: sanitizePalette(candidate.palette),
     density: isDensity(candidate.density) ? candidate.density : DEFAULT_APPEARANCE_SETTINGS.density,
     fontScale: isFontScale(candidate.fontScale)
@@ -90,12 +90,7 @@ export function sanitizeSettings(raw: unknown): AppearanceSettings {
   };
 }
 
-// custom palette 运行时注入的语义 CSS 变量名（与 tokens.css 的兜底骨架对应）。
-const CUSTOM_VAR_ACCENT = '--za-custom-accent';
-const CUSTOM_VAR_BG = '--za-custom-bg';
-const CUSTOM_VAR_FG = '--za-custom-fg';
-
-export function applyAppearance(scheme: AppearanceScheme, settings: AppearanceSettings) {
+export function applyAppearance(settings: AppearanceSettings, scheme: AppearanceScheme) {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   root.dataset.theme = scheme;
@@ -104,21 +99,9 @@ export function applyAppearance(scheme: AppearanceScheme, settings: AppearanceSe
   root.dataset.density = settings.density;
   root.dataset.fontScale = settings.fontScale;
   root.dataset.diffMarker = settings.diffMarkerMode;
-  root.style.colorScheme = scheme;
-
-  // 代码字号：始终注入（所有 palette 通用），驱动 tokens.css 的 --za-code-font-size。
   root.style.setProperty('--za-code-font-size', `${settings.codeFontSize}px`);
-
-  // 自定义三色：仅 palette=custom 时按当前明暗 scheme 注入对应一套；
-  // 切到其它 palette 时清理注入，避免残留覆盖 frost/catppuccin。
-  if (settings.palette === 'custom') {
-    const colors = scheme === 'dark' ? settings.customColors.dark : settings.customColors.light;
-    root.style.setProperty(CUSTOM_VAR_ACCENT, colors.accent);
-    root.style.setProperty(CUSTOM_VAR_BG, colors.background);
-    root.style.setProperty(CUSTOM_VAR_FG, colors.foreground);
-  } else {
-    root.style.removeProperty(CUSTOM_VAR_ACCENT);
-    root.style.removeProperty(CUSTOM_VAR_BG);
-    root.style.removeProperty(CUSTOM_VAR_FG);
-  }
+  // 自定义配色入口已移除：清理历史 custom 注入变量，避免脏状态残留
+  root.style.removeProperty('--za-custom-accent');
+  root.style.removeProperty('--za-custom-bg');
+  root.style.removeProperty('--za-custom-fg');
 }

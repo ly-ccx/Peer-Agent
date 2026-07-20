@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useAppearance } from './AppearanceProvider';
 import { PALETTE_LABELS, PALETTE_SWATCHES } from './themePresets';
@@ -6,23 +7,17 @@ import { AppearanceSlider } from './AppearanceSlider';
 import {
   CODE_FONT_SIZE_MAX,
   CODE_FONT_SIZE_MIN,
-  type CustomSchemeColors,
+  type AppearanceMode,
+  type AppearanceScheme,
 } from './appearanceTypes';
 
 /**
- * AppearancePanel 负责切换：
- *   - mode: 浅 / 深 / 跟随系统
- *   - palette: 配色方案（从配色注册表派生，新增配色无需改本组件）
- *   - fontScale: 界面字体大小 小 / 中 / 大
- *
- * mode / palette / fontScale 是正交的外观轴：mode 决定明暗，palette 决定色相，
- * fontScale 决定根字号缩放。具体 token 值由 styles/tokens.css 固化，
- * 本面板只切换 <html dataset>。
- *
- * 视觉编排（借鉴 Codex 外观页分区）：按「主题模式 / 配色 / 字体大小」
- * 三个 .appearance-group 分组，组间留白区隔，组内字段紧凑。
+ * AppearancePanel —— 外观设置：
+ *   - ThemeModeCards：主题模式缩略图（light / dark / system）
+ *   - ThemeLivePreview：双栏实时预览（代码 + diff）
+ *   - 预设配色选择 + 色板 swatch
+ *   - 字号与差异标记统一 settings list
  */
-
 export function AppearancePanel({
   i18n,
   onBack,
@@ -31,31 +26,25 @@ export function AppearancePanel({
   readonly onBack?: () => void;
 }) {
   const {
-    settings,
     activeScheme,
+    settings,
     setMode,
     setPalette,
     setFontScale,
-    setCustomColor,
     setCodeFontSize,
     setDiffMarkerMode,
     reset,
   } = useAppearance();
-  const activePaletteLabel = PALETTE_LABELS[settings.palette];
-  const swatches = PALETTE_SWATCHES[settings.palette][activeScheme];
-  const isCustom = settings.palette === 'custom';
 
-  // 自定义三色控件：浅/深各一组（accent/background/foreground）。
-  const customColorKeys: readonly (keyof CustomSchemeColors)[] = [
-    'accent',
-    'background',
-    'foreground',
-  ];
-  const customColorLabel: Record<keyof CustomSchemeColors, string> = {
-    accent: i18n.t('appearance.accent'),
-    background: i18n.t('appearance.background'),
-    foreground: i18n.t('appearance.foreground'),
-  };
+  const previewColors = useMemo(() => {
+    const swatches = PALETTE_SWATCHES[settings.palette]?.[activeScheme] ?? [];
+    const byLabel = Object.fromEntries(swatches.map((s) => [s.label, s.value]));
+    return {
+      accent: byLabel.Accent ?? 'var(--za-accent)',
+      background: byLabel.Background ?? 'var(--za-bg)',
+      foreground: byLabel.Text ?? byLabel.Foreground ?? 'var(--za-fg)',
+    };
+  }, [activeScheme, settings.palette]);
 
   return (
     <div className="appearance-panel">
@@ -69,27 +58,34 @@ export function AppearancePanel({
           </button>
           <div>
             <strong>{i18n.t('appearance.title')}</strong>
-            <span>{activePaletteLabel}</span>
+            <span>{PALETTE_LABELS[settings.palette] ?? i18n.t('appearance.subtitle')}</span>
           </div>
         </header>
       ) : null}
 
+      {/* 1. 主题模式缩略图 */}
       <section className="appearance-group">
         <div className="appearance-field-label">{i18n.t('appearance.mode')}</div>
-        <div className="appearance-segmented" role="group" aria-label={i18n.t('appearance.mode')}>
-          {(['light', 'dark', 'system'] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              className={settings.mode === mode ? 'active' : ''}
-              onClick={() => setMode(mode)}
-            >
-              {i18n.t(`appearance.mode.${mode}`)}
-            </button>
-          ))}
-        </div>
+        <ThemeModeCards
+          i18n={i18n}
+          mode={settings.mode}
+          onChange={setMode}
+        />
       </section>
 
+      {/* 2. 实时双栏预览 */}
+      <section className="appearance-group">
+        <div className="appearance-field-label">{i18n.t('appearance.preview')}</div>
+        <ThemeLivePreview
+          i18n={i18n}
+          activeScheme={activeScheme}
+          paletteLabel={PALETTE_LABELS[settings.palette] ?? settings.palette}
+          previewColors={previewColors}
+          diffMarkerMode={settings.diffMarkerMode}
+        />
+      </section>
+
+      {/* 3. 预设配色 */}
       <section className="appearance-group">
         <div className="appearance-field-label">{i18n.t('appearance.palette')}</div>
         <PaletteSelect
@@ -97,173 +93,217 @@ export function AppearancePanel({
           onChange={setPalette}
           label={i18n.t('appearance.palette')}
         />
-
-        <div className="appearance-field-label">{i18n.t('appearance.swatches')}</div>
-        <div className="appearance-swatches" aria-label={i18n.t('appearance.swatches')}>
-          {swatches.map((swatch) => (
-            <div key={swatch.label} className="appearance-swatch">
-              <span
-                className="appearance-swatch-chip"
-                style={{ backgroundColor: swatch.value }}
-                aria-hidden="true"
-              />
-              <span className="appearance-swatch-name">{swatch.label}</span>
-              <span className="appearance-swatch-value">{swatch.value}</span>
-            </div>
+        <div className="appearance-swatch-strip" aria-label={i18n.t('appearance.swatches')}>
+          {(PALETTE_SWATCHES[settings.palette]?.[activeScheme] ?? []).slice(0, 6).map((swatch) => (
+            <span
+              key={swatch.label}
+              className="appearance-swatch-dot"
+              style={{ backgroundColor: swatch.value }}
+              title={`${swatch.label} ${swatch.value}`}
+            />
           ))}
         </div>
+      </section>
 
-        {/* 代码预览：用当前主题语义 token 近似映射语法高亮（参考 Catppuccin 风格指南），
-            让用户切换/自定义配色时直观看到代码高亮的实际观感。纯展示，不新增高亮 token。 */}
-        <div className="appearance-field-label">{i18n.t('appearance.codePreview')}</div>
-        <pre
-          className="appearance-code-preview"
-          aria-label={i18n.t('appearance.codePreview')}
-        >
-          <code>
-            <span className="appearance-code-line">
-              <span className="appearance-code-ln">1</span>
-              <span className="appearance-code-text">
-                <span className="tok-comment">{'// theme config'}</span>
+      {/* 4. 统一 settings list：字号 / 代码字号 / 差异标记 */}
+      <section className="appearance-group">
+        <div className="appearance-field-label">{i18n.t('appearance.settingsList')}</div>
+        <div className="appearance-settings-list appearance-settings-card">
+          <div className="appearance-settings-row">
+            <div className="appearance-settings-row-meta">
+              <span className="appearance-settings-row-title">{i18n.t('appearance.fontScale')}</span>
+            </div>
+            <div
+              className="appearance-segmented appearance-segmented--inline"
+              role="group"
+              aria-label={i18n.t('appearance.fontScale')}
+            >
+              {(['small', 'medium', 'large'] as const).map((scale) => (
+                <button
+                  key={scale}
+                  type="button"
+                  className={settings.fontScale === scale ? 'is-active' : undefined}
+                  onClick={() => setFontScale(scale)}
+                >
+                  {i18n.t(`appearance.fontScale.${scale}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="appearance-settings-row">
+            <div className="appearance-settings-row-meta">
+              <span className="appearance-settings-row-title">{i18n.t('appearance.codeFont')}</span>
+              <span className="appearance-settings-row-value">{settings.codeFontSize}px</span>
+            </div>
+            <AppearanceSlider
+              min={CODE_FONT_SIZE_MIN}
+              max={CODE_FONT_SIZE_MAX}
+              value={settings.codeFontSize}
+              onChange={setCodeFontSize}
+              ariaLabel={i18n.t('appearance.codeFont')}
+            />
+          </div>
+
+          <div className="appearance-settings-row">
+            <div className="appearance-settings-row-meta">
+              <span className="appearance-settings-row-title">{i18n.t('appearance.diffMarker')}</span>
+            </div>
+            <div
+              className="appearance-segmented appearance-segmented--inline"
+              role="group"
+              aria-label={i18n.t('appearance.diffMarker')}
+            >
+              {(['color', 'sign'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={settings.diffMarkerMode === mode ? 'is-active' : undefined}
+                  onClick={() => setDiffMarkerMode(mode)}
+                >
+                  {i18n.t(`appearance.diffMarker.${mode}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer className="appearance-panel-footer">
+        <button type="button" className="appearance-reset-btn" onClick={reset}>
+          {i18n.t('appearance.reset')}
+        </button>
+      </footer>
+    </div>
+  );
+}
+
+export function ThemeModeCards({
+  i18n,
+  mode,
+  onChange,
+}: {
+  readonly i18n: I18nRuntime;
+  readonly mode: AppearanceMode;
+  readonly onChange: (mode: AppearanceMode) => void;
+}) {
+  const cards: Array<{ id: AppearanceMode; title: string; hint: string }> = [
+    { id: 'system', title: i18n.t('appearance.mode.system'), hint: 'A' },
+    { id: 'light', title: i18n.t('appearance.mode.light'), hint: 'A' },
+    { id: 'dark', title: i18n.t('appearance.mode.dark'), hint: 'A' },
+  ];
+
+  return (
+    <div className="theme-mode-cards" role="radiogroup" aria-label={i18n.t('appearance.mode')}>
+      {cards.map((card) => {
+        const selected = mode === card.id;
+        return (
+          <button
+            key={card.id}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            className={`theme-mode-card theme-mode-card--${card.id}${selected ? ' is-selected' : ''}`}
+            onClick={() => onChange(card.id)}
+          >
+            <span className="theme-mode-card-preview" aria-hidden="true">
+              <span className="theme-mode-card-preview-sidebar" />
+              <span className="theme-mode-card-preview-main">
+                <span className="theme-mode-card-preview-line" />
+                <span className="theme-mode-card-preview-line theme-mode-card-preview-line--short" />
               </span>
             </span>
-            <span className="appearance-code-line">
-              <span className="appearance-code-ln">2</span>
-              <span className="appearance-code-text">
-                <span className="tok-keyword">const</span>
-                {' '}
-                <span className="tok-variable">theme</span>
-                <span className="tok-punct">:</span>
-                {' '}
-                <span className="tok-type">ThemeConfig</span>
-                {' '}
-                <span className="tok-punct">=</span>
-                {' '}
-                <span className="tok-punct">{'{'}</span>
-              </span>
-            </span>
-            <span className="appearance-code-line">
-              <span className="appearance-code-ln">3</span>
-              <span className="appearance-code-text">
-                {'  '}
-                <span className="tok-property">accent</span>
-                <span className="tok-punct">:</span>
-                {' '}
-                <span className="tok-string">{'"#5d9cbf"'}</span>
-                <span className="tok-punct">,</span>
-              </span>
-            </span>
-            <span className="appearance-code-line">
-              <span className="appearance-code-ln">4</span>
-              <span className="appearance-code-text">
-                {'  '}
-                <span className="tok-property">contrast</span>
-                <span className="tok-punct">:</span>
-                {' '}
-                <span className="tok-number">68</span>
-                <span className="tok-punct">,</span>
-              </span>
-            </span>
-            <span className="appearance-code-line">
-              <span className="appearance-code-ln">5</span>
-              <span className="appearance-code-text">
-                <span className="tok-punct">{'}'}</span>
-                <span className="tok-punct">;</span>
-              </span>
-            </span>
-          </code>
+            <span className="theme-mode-card-label">{card.title}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function ThemeLivePreview({
+  i18n,
+  activeScheme,
+  paletteLabel,
+  previewColors,
+  diffMarkerMode,
+}: {
+  readonly i18n: I18nRuntime;
+  readonly activeScheme: AppearanceScheme;
+  readonly paletteLabel: string;
+  readonly previewColors: {
+    readonly accent: string;
+    readonly background: string;
+    readonly foreground: string;
+  };
+  readonly diffMarkerMode: 'color' | 'sign';
+}) {
+  const codeLines = [
+    { text: `// ${paletteLabel} · ${activeScheme}`, tone: 'muted' as const },
+    { text: 'const theme = {', tone: 'fg' as const },
+    { text: `  accent: "${previewColors.accent}",`, tone: 'accent' as const },
+    { text: `  background: "${previewColors.background}",`, tone: 'fg' as const },
+    { text: `  foreground: "${previewColors.foreground}",`, tone: 'fg' as const },
+    { text: '};', tone: 'fg' as const },
+  ];
+
+  const diffRows = [
+    { kind: 'ctx' as const, text: ' export function render() {' },
+    { kind: 'del' as const, text: '   return <OldTheme />;' },
+    { kind: 'add' as const, text: '   return <NewTheme />;' },
+    { kind: 'ctx' as const, text: ' }' },
+  ];
+
+  return (
+    <div
+      className="theme-live-preview"
+      style={{
+        // 预览区局部映射当前语义色，随 mode/palette 即时变化
+        ['--preview-accent' as string]: previewColors.accent,
+        ['--preview-bg' as string]: previewColors.background,
+        ['--preview-fg' as string]: previewColors.foreground,
+      }}
+    >
+      <div className="theme-live-preview-pane">
+        <div className="theme-live-preview-pane-title">{i18n.t('appearance.preview')}</div>
+        <pre className="theme-live-preview-code" aria-hidden="true">
+          {codeLines.map((line) => (
+            <code
+              key={line.text}
+              className={
+                line.tone === 'accent'
+                  ? 'is-accent'
+                  : line.tone === 'muted'
+                    ? 'is-muted'
+                    : undefined
+              }
+            >
+              {line.text}
+            </code>
+          ))}
         </pre>
-      </section>
-
-      <section className="appearance-group">
-        <div className="appearance-field-label">{i18n.t('appearance.fontScale')}</div>
-        <div className="appearance-segmented" role="group" aria-label={i18n.t('appearance.fontScale')}>
-          {(['small', 'medium', 'large'] as const).map((fontScale) => (
-            <button
-              key={fontScale}
-              type="button"
-              className={settings.fontScale === fontScale ? 'active' : ''}
-              onClick={() => setFontScale(fontScale)}
-            >
-              {i18n.t(`appearance.fontScale.${fontScale}`)}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      {isCustom ? (
-        <section className="appearance-group">
-          <div className="appearance-field-label">{i18n.t('appearance.custom')}</div>
-          {(['light', 'dark'] as const).map((scheme) => (
-            <div key={scheme} className="appearance-custom-scheme">
-              <div className="appearance-custom-scheme-label">
-                {i18n.t(`appearance.scheme.${scheme}`)}
+      </div>
+      <div className="theme-live-preview-pane">
+        <div className="theme-live-preview-pane-title">{i18n.t('appearance.diffPreview')}</div>
+        <div className="theme-live-preview-diff" aria-hidden="true">
+          {diffRows.map((row, index) => {
+            const sign =
+              row.kind === 'add' ? '+' : row.kind === 'del' ? '-' : ' ';
+            const showSign = diffMarkerMode === 'sign' || row.kind === 'ctx';
+            return (
+              <div
+                key={`${row.kind}-${index}`}
+                className={`theme-live-preview-diff-row is-${row.kind}`}
+              >
+                <span className="theme-live-preview-diff-sign">
+                  {showSign ? sign : ' '}
+                </span>
+                <span className="theme-live-preview-diff-text">{row.text}</span>
               </div>
-              <div className="appearance-custom-colors">
-                {customColorKeys.map((key) => (
-                  <label key={key} className="appearance-custom-color">
-                    <input
-                      type="color"
-                      value={settings.customColors[scheme][key]}
-                      onChange={(e) => setCustomColor(scheme, key, e.target.value)}
-                      aria-label={`${i18n.t(`appearance.scheme.${scheme}`)} ${customColorLabel[key]}`}
-                    />
-                    <span className="appearance-custom-color-name">{customColorLabel[key]}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          ))}
-        </section>
-      ) : null}
-
-      <section className="appearance-group">
-        <div className="appearance-field-label">{i18n.t('appearance.codeFont')}</div>
-        <div className="appearance-code-font">
-          <AppearanceSlider
-            min={CODE_FONT_SIZE_MIN}
-            max={CODE_FONT_SIZE_MAX}
-            step={1}
-            value={settings.codeFontSize}
-            onChange={setCodeFontSize}
-            ariaLabel={i18n.t('appearance.codeFont')}
-          />
-          <input
-            type="number"
-            min={CODE_FONT_SIZE_MIN}
-            max={CODE_FONT_SIZE_MAX}
-            step={1}
-            value={settings.codeFontSize}
-            onChange={(e) => setCodeFontSize(Number(e.target.value))}
-            aria-label={i18n.t('appearance.codeFont')}
-          />
-          <span className="appearance-code-font-unit">px</span>
+            );
+          })}
         </div>
-      </section>
-
-      <section className="appearance-group">
-        <div className="appearance-field-label">{i18n.t('appearance.diffMarker')}</div>
-        <div
-          className="appearance-segmented appearance-segmented--two"
-          role="group"
-          aria-label={i18n.t('appearance.diffMarker')}
-        >
-          {(['color', 'sign'] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              className={settings.diffMarkerMode === mode ? 'active' : ''}
-              onClick={() => setDiffMarkerMode(mode)}
-            >
-              {i18n.t(`appearance.diffMarker.${mode}`)}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <button type="button" className="appearance-reset" onClick={reset}>
-        {i18n.t('appearance.reset')}
-      </button>
+      </div>
     </div>
   );
 }

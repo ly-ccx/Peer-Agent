@@ -14,7 +14,6 @@ import type {
   AppearancePalette,
   AppearanceScheme,
   AppearanceSettings,
-  CustomSchemeColors,
   DiffMarkerMode,
 } from './appearanceTypes';
 import { DEFAULT_APPEARANCE_SETTINGS } from './themePresets';
@@ -30,12 +29,6 @@ interface AppearanceContextValue {
   readonly setPalette: (palette: AppearancePalette) => void;
   readonly setDensity: (density: AppearanceDensity) => void;
   readonly setFontScale: (fontScale: AppearanceFontScale) => void;
-  // 更新 custom palette 下某一明暗方案的单个颜色键（accent/background/foreground）。
-  readonly setCustomColor: (
-    scheme: 'light' | 'dark',
-    key: keyof CustomSchemeColors,
-    value: string,
-  ) => void;
   readonly setCodeFontSize: (size: number) => void;
   readonly setDiffMarkerMode: (mode: DiffMarkerMode) => void;
   readonly reset: () => void;
@@ -51,7 +44,8 @@ function readSystemScheme(): AppearanceScheme {
 function loadSettings(): AppearanceSettings {
   if (typeof window === 'undefined') return DEFAULT_APPEARANCE_SETTINGS;
   const api = window.peerAgent;
-  // 1) 首选 ~/.peer-agent/settings.json 的首屏同步快照（preload 注入），无 IPC 往返、无闪烁
+  // 1) 优先读主进程同步注入的初始设置——与 ~/.peer-agent/settings.json 同源，
+  //    保证刷新/重启后主题立刻正确，无 localStorage 往返、无闪烁
   const stored = api?.initialSettings?.appearance;
   if (stored && typeof stored === 'object') return sanitizeSettings(stored);
   // 2) 一次性迁移旧 Chromium localStorage（v2 → v1）到统一设置，迁完清掉 localStorage
@@ -97,88 +91,55 @@ export function AppearanceProvider({
   const activeScheme: AppearanceScheme = settings.mode === 'system' ? systemScheme : settings.mode;
 
   useEffect(() => {
-    const query = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = () => setSystemScheme(readSystemScheme());
-    query.addEventListener('change', onChange);
-    return () => query.removeEventListener('change', onChange);
-  }, []);
-
-  useEffect(() => window.peerAgent?.onAppearanceChanged((appearance) => {
-    if (appearance && typeof appearance === 'object') {
-      const next = sanitizeSettings(appearance);
-      setSettings((current) => (
-        JSON.stringify(current) === JSON.stringify(next) ? current : next
-      ));
-    }
-  }), []);
-
-  useEffect(() => {
+    applyAppearance(settings, activeScheme);
     saveSettings(settings);
-    applyAppearance(activeScheme, settings);
   }, [activeScheme, settings]);
 
-  const setMode = useCallback((mode: AppearanceMode) => {
-    setSettings((current) => ({ ...current, mode }));
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => setSystemScheme(media.matches ? 'dark' : 'light');
+    onChange();
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
   }, []);
 
-  const setPalette = useCallback((palette: AppearancePalette) => {
-    setSettings((current) => ({ ...current, palette }));
+  const update = useCallback((patch: Partial<AppearanceSettings>) => {
+    setSettings((current) => sanitizeSettings({ ...current, ...patch }));
   }, []);
 
-  const setDensity = useCallback((density: AppearanceDensity) => {
-    setSettings((current) => ({ ...current, density }));
-  }, []);
-
-  const setFontScale = useCallback((fontScale: AppearanceFontScale) => {
-    setSettings((current) => ({ ...current, fontScale }));
-  }, []);
-
-  const setCustomColor = useCallback(
-    (scheme: 'light' | 'dark', key: keyof CustomSchemeColors, value: string) => {
-      setSettings((current) => ({
-        ...current,
-        customColors: {
-          ...current.customColors,
-          [scheme]: { ...current.customColors[scheme], [key]: value },
-        },
-      }));
-    },
-    [],
-  );
-
-  const setCodeFontSize = useCallback((size: number) => {
-    setSettings((current) => ({ ...current, codeFontSize: size }));
-  }, []);
-
-  const setDiffMarkerMode = useCallback((mode: DiffMarkerMode) => {
-    setSettings((current) => ({ ...current, diffMarkerMode: mode }));
-  }, []);
-
+  const setMode = useCallback((mode: AppearanceMode) => update({ mode }), [update]);
+  const setPalette = useCallback((palette: AppearancePalette) => update({ palette }), [update]);
+  const setDensity = useCallback((density: AppearanceDensity) => update({ density }), [update]);
+  const setFontScale = useCallback((fontScale: AppearanceFontScale) => update({ fontScale }), [update]);
+  const setCodeFontSize = useCallback((size: number) => update({ codeFontSize: size }), [update]);
+  const setDiffMarkerMode = useCallback((mode: DiffMarkerMode) => update({ diffMarkerMode: mode }), [update]);
   const reset = useCallback(() => setSettings(DEFAULT_APPEARANCE_SETTINGS), []);
 
-  const value = useMemo<AppearanceContextValue>(() => ({
-    activeScheme,
-    settings,
-    setMode,
-    setPalette,
-    setDensity,
-    setFontScale,
-    setCustomColor,
-    setCodeFontSize,
-    setDiffMarkerMode,
-    reset,
-  }), [
-    activeScheme,
-    reset,
-    setCodeFontSize,
-    setCustomColor,
-    setDensity,
-    setDiffMarkerMode,
-    setFontScale,
-    setMode,
-    setPalette,
-    settings,
-  ]);
+  const value = useMemo<AppearanceContextValue>(
+    () => ({
+      activeScheme,
+      settings,
+      setMode,
+      setPalette,
+      setDensity,
+      setFontScale,
+      setCodeFontSize,
+      setDiffMarkerMode,
+      reset,
+    }),
+    [
+      activeScheme,
+      settings,
+      setMode,
+      setPalette,
+      setDensity,
+      setFontScale,
+      setCodeFontSize,
+      setDiffMarkerMode,
+      reset,
+    ],
+  );
 
   return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
 }

@@ -1,6 +1,6 @@
 @layer components {
   .sidebar-account-popover.appearance {
-    width: min(360px, calc(100vw - 28px));
+    width: min(420px, calc(100vw - 28px));
     right: auto;
   }
 
@@ -9,8 +9,8 @@
     color: var(--za-text-soft);
   }
 
-  /* 分区编排（借鉴 Codex 外观页）：主题模式 / 配色 / 字体大小 各成一组。
-     组内字段紧凑（gap-2），组间留白由 panel 的 gap-5 提供，形成视觉层级。 */
+  /* 分区编排：主题模式 / 预览 / 配色 / 设置 各成一组。
+     组内字段紧凑（gap-2），组间留白由 panel 的 gap-5 提供。 */
   .appearance-group {
     @apply grid gap-2;
   }
@@ -47,25 +47,197 @@
     color: var(--za-text-faint);
   }
 
-  /* 字段标签：mode / palette 等分组的小标题 */
   .appearance-field-label {
     @apply text-[11px] font-medium;
     color: var(--za-text-muted);
     letter-spacing: 0.01em;
   }
 
-  /* 浅 / 深 / 跟随系统 — 三段式分段控件 */
-  .appearance-segmented {
-    @apply grid gap-1 rounded-[var(--ui-radius-row)] p-1;
+  /* —— 主题模式缩略图卡片 —— */
+  .appearance-mode-cards {
+    @apply grid gap-2;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    background: var(--za-surface-1);
+  }
+
+  .appearance-mode-card {
+    @apply grid gap-1.5 rounded-[12px] p-1.5 text-left;
+    border: 1px solid var(--za-line);
+    background: color-mix(in srgb, var(--za-surface-1) 88%, transparent);
+    color: var(--za-text-soft);
+    transition:
+      border-color var(--za-motion-fast, 0.15s) ease,
+      box-shadow var(--za-motion-fast, 0.15s) ease,
+      background var(--za-motion-fast, 0.15s) ease;
+  }
+
+  .appearance-mode-card:hover {
+    border-color: color-mix(in srgb, var(--za-accent) 35%, var(--za-line));
+    background: color-mix(in srgb, var(--za-surface-2) 70%, transparent);
+  }
+
+  .appearance-mode-card.is-active {
+    border-color: color-mix(in srgb, var(--za-accent) 55%, var(--za-line));
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--za-accent) 25%, transparent),
+      0 8px 20px color-mix(in srgb, var(--za-accent) 12%, transparent);
+    background: color-mix(in srgb, var(--za-surface-2) 80%, transparent);
+  }
+
+  .appearance-mode-card-label {
+    @apply px-0.5 text-center text-[11px] font-medium;
+    color: var(--za-text-soft);
+  }
+
+  .appearance-mode-card.is-active .appearance-mode-card-label {
+    color: var(--za-text);
+  }
+
+  .appearance-mode-thumb {
+    @apply relative block overflow-hidden rounded-[8px];
+    aspect-ratio: 16 / 11;
+    border: 1px solid color-mix(in srgb, var(--za-line) 80%, transparent);
+  }
+
+  .appearance-mode-thumb--light {
+    background: linear-gradient(160deg, #f4f7fb 0%, #e7edf5 100%);
+  }
+
+  .appearance-mode-thumb--dark {
+    background: linear-gradient(160deg, #151a22 0%, #0f1319 100%);
+  }
+
+  .appearance-mode-thumb--system {
+    background:
+      linear-gradient(110deg, #f4f7fb 0 50%, transparent 50%),
+      linear-gradient(160deg, #151a22 0%, #0f1319 100%);
+  }
+
+  .appearance-mode-thumb-bar {
+    @apply absolute left-0 right-0 top-0;
+    height: 18%;
+    background: color-mix(in srgb, #5d9cbf 55%, transparent);
+    opacity: 0.55;
+  }
+
+  .appearance-mode-thumb-body {
+    @apply absolute inset-x-[10%] bottom-[14%] top-[30%] grid content-start gap-1;
+  }
+
+  .appearance-mode-thumb-line {
+    @apply block h-[3px] w-full rounded-full;
+    background: color-mix(in srgb, currentColor 22%, transparent);
+    color: #1a1d21;
+  }
+
+  .appearance-mode-thumb--dark .appearance-mode-thumb-line,
+  .appearance-mode-thumb--system .appearance-mode-thumb-line {
+    color: #edf1f6;
+  }
+
+  .appearance-mode-thumb-line.short {
+    width: 62%;
+  }
+
+  .appearance-mode-thumb-chip {
+    @apply mt-0.5 block h-[7px] w-[34%] rounded-full;
+    background: #5d9cbf;
+    opacity: 0.9;
+  }
+
+  /* —— 双栏实时预览 —— */
+  .appearance-live-preview {
+    @apply grid gap-2 rounded-[14px] p-2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    background: color-mix(in srgb, var(--za-surface-1) 92%, transparent);
     border: 1px solid var(--za-line);
   }
 
-  /* 配色选择：下拉框（配色会越来越多，下拉比分段控件更紧凑、可扩展）。
-     新增配色只需在 paletteRegistry.ts 加一条记录，<option> 自动跟随。 */
-  /* 自定义配色下拉框（PaletteSelect）：非原生 <select>，主题完全可控。
-     触发器 + 自绘 listbox，每项带色点和选中勾。 */
+  .appearance-live-preview-pane {
+    @apply grid min-w-0 gap-1;
+  }
+
+  .appearance-live-preview-caption {
+    @apply px-1 text-[10px] font-medium uppercase tracking-[0.04em];
+    color: var(--za-text-faint);
+  }
+
+  .appearance-live-code,
+  .appearance-live-diff {
+    @apply min-h-[88px] overflow-hidden rounded-[10px] p-2.5 text-[11px] leading-relaxed;
+    background: var(--preview-bg, var(--za-bg));
+    color: var(--preview-fg, var(--za-text));
+    border: 1px solid color-mix(in srgb, var(--preview-fg, var(--za-text)) 10%, transparent);
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: calc(var(--za-code-font-size, 12px) * 0.92);
+  }
+
+  .appearance-live-code {
+    @apply m-0 whitespace-pre-wrap;
+  }
+
+  .appearance-live-code .tok-comment {
+    color: color-mix(in srgb, var(--preview-fg, var(--za-text)) 45%, transparent);
+    font-style: italic;
+  }
+
+  .appearance-live-code .tok-keyword {
+    color: var(--preview-accent, var(--za-accent));
+    font-weight: 600;
+  }
+
+  .appearance-live-code .tok-variable,
+  .appearance-live-code .tok-property {
+    color: color-mix(in srgb, var(--preview-fg, var(--za-text)) 88%, var(--preview-accent, var(--za-accent)));
+  }
+
+  .appearance-live-code .tok-string {
+    color: color-mix(in srgb, var(--preview-accent, var(--za-accent)) 70%, #7ec699);
+  }
+
+  .appearance-live-code .tok-punct {
+    color: color-mix(in srgb, var(--preview-fg, var(--za-text)) 55%, transparent);
+  }
+
+  .appearance-live-diff {
+    @apply grid content-start gap-1;
+  }
+
+  .appearance-live-diff-row {
+    @apply grid items-center gap-1 rounded-[6px] px-1.5 py-1;
+    grid-template-columns: auto minmax(0, 1fr);
+    background: color-mix(in srgb, var(--preview-fg, var(--za-text)) 5%, transparent);
+  }
+
+  .appearance-live-diff-row .sign {
+    @apply w-3 text-center font-semibold;
+    color: color-mix(in srgb, var(--preview-fg, var(--za-text)) 55%, transparent);
+  }
+
+  .appearance-live-diff-row.is-add {
+    background: color-mix(in srgb, #3e7a6b 22%, transparent);
+  }
+
+  .appearance-live-diff-row.is-add .sign {
+    color: #3e7a6b;
+  }
+
+  .appearance-live-diff-row.is-del {
+    background: color-mix(in srgb, #7a3e50 20%, transparent);
+  }
+
+  .appearance-live-diff-row.is-del .sign {
+    color: #a35b6d;
+  }
+
+  .appearance-live-diff-row .line {
+    color: var(--preview-fg, var(--za-text));
+  }
+
+  .appearance-live-diff-row:not(.is-add):not(.is-del) .line {
+    color: var(--preview-accent, var(--za-accent));
+  }
+
+  /* 配色选择（对齐 PaletteSelect 类名） */
   .palette-select {
     @apply relative;
   }
@@ -78,12 +250,14 @@
     background: var(--za-surface-1);
     border: 1px solid var(--za-line);
     cursor: pointer;
-    transition: border-color var(--za-motion-fast, 0.15s) ease,
-                background var(--za-motion-fast, 0.15s) ease;
+    transition:
+      border-color var(--za-motion-fast, 0.15s) ease,
+      background var(--za-motion-fast, 0.15s) ease;
   }
 
   .palette-select-trigger:hover {
     border-color: var(--za-line-strong, var(--za-line));
+    background: var(--za-surface-2);
   }
 
   .palette-select-trigger:focus-visible,
@@ -107,15 +281,15 @@
     transform: rotate(180deg);
   }
 
-  /* 自绘下拉菜单：绝对定位浮层，主题色一致。 */
   .palette-select-list {
     @apply absolute left-0 right-0 z-50 m-0 mt-1 list-none overflow-auto p-1;
     top: 100%;
     max-height: 16rem;
     border-radius: 10px;
-    background: var(--za-surface-1);
+    background: color-mix(in srgb, var(--za-surface-1) 96%, transparent);
     border: 1px solid var(--za-line);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+    box-shadow: 0 12px 28px color-mix(in srgb, #000 18%, transparent);
+    backdrop-filter: blur(12px);
     outline: none;
   }
 
@@ -124,228 +298,224 @@
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 0.5rem;
     min-height: 2rem;
-    color: var(--za-text);
+    color: var(--za-text-soft);
     cursor: pointer;
   }
 
-  .palette-select-option.active {
-    background: var(--za-surface-hover, var(--za-control-fill, rgba(127, 127, 127, 0.12)));
-  }
-
-  .palette-select-option.selected {
-    color: var(--za-accent);
-    font-weight: 600;
+  .palette-select-option:hover,
+  .palette-select-option.active,
+  .palette-select-option[aria-selected='true'] {
+    background: color-mix(in srgb, var(--za-accent) 12%, transparent);
+    color: var(--za-text);
   }
 
   .palette-select-option-label {
     @apply truncate;
   }
 
-  .palette-select-check {
-    @apply inline-flex items-center justify-center;
-    color: var(--za-accent);
-    width: 14px;
+  .palette-dot {
+    @apply h-2.5 w-2.5 shrink-0 rounded-full;
+    border: 1px solid color-mix(in srgb, var(--za-line) 70%, transparent);
   }
 
-  /* 配色色板小圆点：直观呈现该 palette 的主色相。
-     具体颜色由组件 inline style 从配色注册表的 dotColor 注入。 */
-  .palette-dot {
-    @apply inline-block h-2.5 w-2.5 shrink-0 rounded-full;
-    border: 1px solid rgba(0, 0, 0, 0.12);
+  .palette-select-check {
+    @apply inline-flex items-center justify-center text-[11px];
+    color: var(--za-accent);
+    min-width: 0.9rem;
+  }
+
+  .appearance-theme-actions {
+    @apply grid gap-1.5;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .appearance-action-btn {
+    @apply rounded-[10px] px-2 py-1.5 text-[11px] font-medium;
+    color: var(--za-text-soft);
+    background: color-mix(in srgb, var(--za-surface-1) 90%, transparent);
+    border: 1px solid var(--za-line);
+  }
+
+  .appearance-action-btn:hover {
+    color: var(--za-text);
+    border-color: color-mix(in srgb, var(--za-accent) 35%, var(--za-line));
+    background: color-mix(in srgb, var(--za-surface-2) 80%, transparent);
+  }
+
+  .appearance-inline-error {
+    @apply m-0 text-[11px];
+    color: color-mix(in srgb, #c45b6d 85%, var(--za-text));
+  }
+
+  /* 预设 swatch 条（只读） */
+  .appearance-swatch-strip {
+    @apply flex flex-wrap gap-1.5;
+  }
+
+  .appearance-swatch-dot {
+    @apply h-5 w-5 rounded-full;
+    border: 1px solid color-mix(in srgb, var(--za-line) 80%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 8%, transparent);
+  }
+
+  /* Custom 浅/深双卡 */
+  .appearance-scheme-cards {
+    @apply grid gap-2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .appearance-scheme-card {
+    @apply grid gap-2 rounded-[12px] p-2.5;
+    background: color-mix(in srgb, var(--za-surface-1) 92%, transparent);
+    border: 1px solid var(--za-line);
+  }
+
+  .appearance-scheme-card[data-scheme='light'] {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, #fff 8%, transparent), transparent),
+      color-mix(in srgb, var(--za-surface-1) 92%, transparent);
+  }
+
+  .appearance-scheme-card[data-scheme='dark'] {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, #000 10%, transparent), transparent),
+      color-mix(in srgb, var(--za-surface-1) 92%, transparent);
+  }
+
+  .appearance-scheme-card-title {
+    @apply text-[11px] font-semibold;
+    color: var(--za-text);
+  }
+
+  .appearance-color-rows {
+    @apply grid gap-1.5;
+  }
+
+  .appearance-color-row {
+    @apply grid items-center gap-2;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .appearance-color-row-label {
+    @apply text-[11px];
+    color: var(--za-text-muted);
+  }
+
+  .appearance-color-row-control {
+    @apply grid items-center gap-1.5;
+    grid-template-columns: 22px minmax(0, 4.8rem);
+  }
+
+  .appearance-color-picker {
+    @apply h-[22px] w-[22px] cursor-pointer appearance-none rounded-full p-0;
+    border: 1px solid var(--za-line);
+    background: transparent;
+  }
+
+  .appearance-color-picker::-webkit-color-swatch-wrapper {
+    padding: 0;
+  }
+
+  .appearance-color-picker::-webkit-color-swatch {
+    border: none;
+    border-radius: 999px;
+  }
+
+  .appearance-color-hex {
+    @apply w-full rounded-[8px] px-1.5 py-1 text-[11px];
+    color: var(--za-text);
+    background: var(--za-surface-2);
+    border: 1px solid var(--za-line);
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  }
+
+  .appearance-color-hex:focus {
+    outline: none;
+    border-color: var(--za-accent);
+  }
+
+  /* 统一 settings list 卡 */
+  .appearance-settings-list,
+  .appearance-settings-card {
+    @apply grid overflow-hidden rounded-[14px];
+    background: color-mix(in srgb, var(--za-surface-1) 92%, transparent);
+    border: 1px solid var(--za-line);
+  }
+
+  .appearance-settings-row {
+    @apply grid items-center gap-2 px-3 py-2.5;
+    grid-template-columns: minmax(0, 1fr) auto;
+    border-bottom: 1px solid color-mix(in srgb, var(--za-line) 80%, transparent);
+  }
+
+  .appearance-settings-row:last-child {
+    border-bottom: none;
+  }
+
+  .appearance-settings-row-meta {
+    @apply grid min-w-0 gap-0.5;
+  }
+
+  .appearance-settings-row-title {
+    @apply text-[12px] font-medium;
+    color: var(--za-text);
+  }
+
+  .appearance-settings-row-value {
+    @apply text-[10px];
+    color: var(--za-text-faint);
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  }
+
+  /* 行内分段控件：去掉旧 segmented 白条噪音，改为轻描边选中 */
+  .appearance-segmented {
+    @apply grid gap-1 rounded-[10px] p-0.5;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    background: color-mix(in srgb, var(--za-surface-2) 70%, transparent);
+    border: 1px solid color-mix(in srgb, var(--za-line) 80%, transparent);
+  }
+
+  .appearance-segmented--two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .appearance-segmented--inline {
+    min-width: 9.5rem;
   }
 
   .appearance-segmented button {
-    @apply min-h-7 rounded-[var(--ui-radius-control)] px-2 text-[12px] font-normal;
+    @apply rounded-[8px] px-2 py-1 text-[11px] font-medium;
     color: var(--za-text-muted);
     background: transparent;
-    transition: background var(--za-motion-fast) var(--za-ease-standard),
-                color var(--za-motion-fast) var(--za-ease-standard);
+    border: 1px solid transparent;
   }
 
   .appearance-segmented button:hover {
     color: var(--za-text);
-    background: var(--za-control-fill-hover);
+    background: color-mix(in srgb, var(--za-surface-1) 70%, transparent);
   }
 
-  /* 选中态：墨填底 + 雪文字（红线 1：朱砂不上 CTA） */
   .appearance-segmented button.active {
-    color: var(--za-primary-control-ink);
-    background: var(--za-primary-control-bg);
-  }
-
-  /* 色板区：当前配色 + 明暗下的真实色值清单 */
-  .appearance-swatches {
-    @apply grid gap-1 rounded-[var(--ui-radius-row)] p-2;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    border: 1px solid var(--za-line);
-    background: var(--za-bg-1);
-  }
-
-  .appearance-swatch {
-    @apply grid min-w-0 items-center gap-2 rounded-[var(--ui-radius-control)] px-2 py-1.5 text-[11px];
-    grid-template-columns: 16px minmax(0, 1fr) auto;
-  }
-
-  .appearance-swatch-chip {
-    @apply h-4 w-4 rounded-[var(--ui-radius-chip)];
-    border: 1px solid var(--za-line);
-  }
-
-  .appearance-swatch-name {
-    @apply overflow-hidden text-ellipsis whitespace-nowrap;
     color: var(--za-text);
+    background: color-mix(in srgb, var(--za-surface-1) 92%, transparent);
+    border-color: color-mix(in srgb, var(--za-accent) 28%, var(--za-line));
+    box-shadow: 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
   }
 
-  .appearance-swatch-value {
-    @apply text-[10px] tabular-nums uppercase;
-    font-family: var(--font-mono);
-    color: var(--za-text-faint);
-  }
-
-  /* 自定义三色（仅 palette=custom 时渲染）：浅/深各一组色块 */
-  .appearance-custom-scheme {
-    @apply grid gap-1.5 rounded-[var(--ui-radius-row)] p-2;
-    border: 1px solid var(--za-line);
-    background: var(--za-bg-1);
-  }
-
-  .appearance-custom-scheme + .appearance-custom-scheme {
-    margin-top: 0.5rem;
-  }
-
-  .appearance-custom-scheme-label {
-    @apply text-[11px] font-medium;
-    color: var(--za-text-muted);
-  }
-
-  .appearance-custom-colors {
-    @apply grid gap-2;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .appearance-custom-color {
-    @apply grid items-center gap-1 text-[10px];
-    justify-items: center;
-    cursor: pointer;
-  }
-
-  .appearance-custom-color input[type='color'] {
-    @apply h-7 w-full rounded-[var(--ui-radius-control)] p-0;
-    border: 1px solid var(--za-line);
-    background: transparent;
-    cursor: pointer;
-  }
-
-  .appearance-custom-color-name {
-    color: var(--za-text-faint);
-  }
-
-  /* 代码字号：滑块 + 数字输入 + 单位 */
   .appearance-code-font {
     @apply grid items-center gap-2;
     grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
-  /* 自绘滑块：填充进度轨道 + 圆形 thumb + hover/focus 反馈，随主题 token 浅深自适应 */
-  .appearance-slider {
-    @apply relative flex items-center;
-    --slider-track-h: 4px;
-    --slider-thumb: 14px;
-    height: var(--slider-thumb);
-  }
-
-  .appearance-slider-input {
-    @apply w-full cursor-pointer appearance-none bg-transparent;
-    height: var(--slider-thumb);
-    margin: 0;
-  }
-
-  /* WebKit 轨道：用 --slider-pct 驱动填充色分段 */
-  .appearance-slider-input::-webkit-slider-runnable-track {
-    height: var(--slider-track-h);
-    border-radius: var(--ui-radius-round);
-    background: linear-gradient(
-      to right,
-      var(--za-accent) 0%,
-      var(--za-accent) var(--slider-pct, 0%),
-      var(--za-line) var(--slider-pct, 0%),
-      var(--za-line) 100%
-    );
-  }
-
-  .appearance-slider-input::-webkit-slider-thumb {
-    @apply appearance-none rounded-full;
-    width: var(--slider-thumb);
-    height: var(--slider-thumb);
-    margin-top: calc((var(--slider-track-h) - var(--slider-thumb)) / 2);
-    background: var(--za-surface-1);
-    border: 2px solid var(--za-accent);
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
-    transition:
-      transform 120ms ease,
-      box-shadow 120ms ease,
-      border-color 120ms ease;
-  }
-
-  .appearance-slider-input:hover::-webkit-slider-thumb {
-    transform: scale(1.12);
-    box-shadow: 0 2px 6px rgb(0 0 0 / 0.24);
-  }
-
-  .appearance-slider-input:focus-visible {
-    outline: none;
-  }
-
-  .appearance-slider-input:focus-visible::-webkit-slider-thumb {
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-accent) 32%, transparent);
-  }
-
-  /* Firefox 轨道 / 填充 / thumb */
-  .appearance-slider-input::-moz-range-track {
-    height: var(--slider-track-h);
-    border-radius: var(--ui-radius-round);
-    background: var(--za-line);
-  }
-
-  .appearance-slider-input::-moz-range-progress {
-    height: var(--slider-track-h);
-    border-radius: var(--ui-radius-round);
-    background: var(--za-accent);
-  }
-
-  .appearance-slider-input::-moz-range-thumb {
-    @apply rounded-full;
-    width: var(--slider-thumb);
-    height: var(--slider-thumb);
-    background: var(--za-surface-1);
-    border: 2px solid var(--za-accent);
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
-    transition:
-      transform 120ms ease,
-      box-shadow 120ms ease;
-  }
-
-  .appearance-slider-input:hover::-moz-range-thumb {
-    transform: scale(1.12);
-    box-shadow: 0 2px 6px rgb(0 0 0 / 0.24);
-  }
-
-  .appearance-slider-input:focus-visible::-moz-range-thumb {
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-accent) 32%, transparent);
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .appearance-slider-input::-webkit-slider-thumb,
-    .appearance-slider-input::-moz-range-thumb {
-      transition: none;
-    }
+  .appearance-code-font--inline {
+    min-width: 11rem;
   }
 
   .appearance-code-font input[type='number'] {
-    @apply w-14 rounded-[var(--ui-radius-control)] px-2 py-1 text-[12px] tabular-nums;
-    border: 1px solid var(--za-line);
-    background: var(--za-surface-1);
+    @apply w-12 rounded-[8px] px-1.5 py-1 text-center text-[11px];
     color: var(--za-text);
+    background: var(--za-surface-2);
+    border: 1px solid var(--za-line);
   }
 
   .appearance-code-font-unit {
@@ -353,79 +523,98 @@
     color: var(--za-text-faint);
   }
 
-  /* 差异标记：两段分段控件（复用 segmented 视觉，列数改 2） */
-  .appearance-segmented.appearance-segmented--two {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* 自绘滑块 */
+  .appearance-slider {
+    @apply relative flex items-center;
+    height: 1.25rem;
+  }
+
+  .appearance-slider input[type='range'],
+  .appearance-slider-input {
+    @apply w-full appearance-none bg-transparent;
+    --slider-pct: 0%;
+  }
+
+  .appearance-slider input[type='range']::-webkit-slider-runnable-track,
+  .appearance-slider-input::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 999px;
+    background: linear-gradient(
+      90deg,
+      var(--za-accent) 0 var(--slider-pct),
+      color-mix(in srgb, var(--za-line) 90%, transparent) var(--slider-pct) 100%
+    );
+  }
+
+  .appearance-slider input[type='range']::-webkit-slider-thumb,
+  .appearance-slider-input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    margin-top: -5px;
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    background: var(--za-surface-1);
+    border: 2px solid var(--za-accent);
+    box-shadow: 0 1px 3px color-mix(in srgb, #000 18%, transparent);
+  }
+
+  .appearance-slider input[type='range']::-moz-range-track,
+  .appearance-slider-input::-moz-range-track {
+    height: 4px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--za-line) 90%, transparent);
+  }
+
+  .appearance-slider input[type='range']::-moz-range-progress,
+  .appearance-slider-input::-moz-range-progress {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--za-accent);
+  }
+
+  .appearance-slider input[type='range']::-moz-range-thumb,
+  .appearance-slider-input::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    background: var(--za-surface-1);
+    border: 2px solid var(--za-accent);
+  }
+
+  .appearance-footer {
+    @apply flex justify-end;
   }
 
   .appearance-reset {
-    @apply w-fit justify-self-end rounded-[var(--ui-radius-chip)] px-2.5 py-1.5 text-[12px] font-normal;
-    color: var(--za-text-faint);
+    @apply rounded-[10px] px-3 py-1.5 text-[12px] font-medium;
+    color: var(--za-text-muted);
     background: transparent;
     border: 1px solid transparent;
-    transition: color var(--za-motion-fast) var(--za-ease-standard),
-                background var(--za-motion-fast) var(--za-ease-standard),
-                border-color var(--za-motion-fast) var(--za-ease-standard);
   }
 
   .appearance-reset:hover {
     color: var(--za-text);
-    background: var(--za-control-fill-hover);
     border-color: var(--za-line);
+    background: color-mix(in srgb, var(--za-surface-1) 80%, transparent);
   }
 
-  /* 代码预览：复用当前主题语义 token 做近似语法高亮（参考 Catppuccin 风格指南）。
-     不引入新 token，随 mode/palette/custom 自动跟随。 */
-  .appearance-code-preview {
-    @apply m-0 grid gap-0 overflow-x-auto rounded-[var(--ui-radius-control)];
-    padding: 8px 10px;
-    background: var(--za-surface-1);
-    border: 1px solid var(--za-line);
-    font-family: var(--za-font-code);
-    font-size: 12px;
-    line-height: 1.7;
-  }
+  /* 窄屏：预览与双卡改为单列 */
+  @media (max-width: 380px) {
+    .appearance-live-preview,
+    .appearance-scheme-cards,
+    .appearance-theme-actions {
+      grid-template-columns: 1fr;
+    }
 
-  .appearance-code-line {
-    @apply grid items-baseline;
-    grid-template-columns: 1.75em 1fr;
-    column-gap: 12px;
-    white-space: pre;
-  }
+    .appearance-settings-row {
+      grid-template-columns: 1fr;
+      justify-items: stretch;
+    }
 
-  .appearance-code-ln {
-    color: var(--za-text-faint);
-    text-align: right;
-    user-select: none;
-  }
-
-  .appearance-code-text {
-    color: var(--za-text);
-    white-space: pre;
-  }
-
-  /* Catppuccin 语义 → 现有 token 近似映射 */
-  .appearance-code-preview .tok-keyword {
-    color: var(--za-accent);
-  }
-  .appearance-code-preview .tok-string {
-    color: var(--za-good);
-  }
-  .appearance-code-preview .tok-number {
-    color: var(--za-warn);
-  }
-  .appearance-code-preview .tok-type {
-    color: var(--za-danger);
-  }
-  .appearance-code-preview .tok-property,
-  .appearance-code-preview .tok-variable {
-    color: var(--za-text-soft);
-  }
-  .appearance-code-preview .tok-punct {
-    color: var(--za-text-muted);
-  }
-  .appearance-code-preview .tok-comment {
-    color: var(--za-text-faint);
-    font-style: italic;
+    .appearance-segmented--inline,
+    .appearance-code-font--inline {
+      min-width: 0;
+      width: 100%;
+    }
   }
 }

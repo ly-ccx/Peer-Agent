@@ -87,27 +87,6 @@ export const PALETTE_REGISTRY = [
       ],
     },
   },
-  {
-    // 自定义配色：用户在面板里直接编辑 强调/背景/前景 三色（浅/深各一套）。
-    // 真正生效的三色由 AppearanceProvider 运行时注入为 CSS 变量；
-    // 其余中性色走 tokens.css 的 [data-palette="custom"] 兜底骨架（以 frost 中性阶为基底）。
-    // 这里的 swatches 仅作面板默认展示副本，须与 themePresets 的默认 customColors 保持一致。
-    id: 'custom',
-    label: 'Custom',
-    dotColor: 'conic-gradient(from 180deg, #f38ba8, #fab387, #a6e3a1, #89b4fa, #cba6f7, #f38ba8)',
-    swatches: {
-      light: [
-        { label: 'Accent', value: '#3B7FAB' },
-        { label: 'Background', value: '#EDF1F6' },
-        { label: 'Text', value: '#1A1D21' },
-      ],
-      dark: [
-        { label: 'Accent', value: '#5D9CBF' },
-        { label: 'Background', value: '#11141A' },
-        { label: 'Text', value: '#EDF1F6' },
-      ],
-    },
-  },
 ] as const satisfies readonly PaletteDefinition[];
 
 /** 配色 id 的联合类型，直接从注册表派生——加配色不用再手敲 union。 */

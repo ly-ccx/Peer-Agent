@@ -54,9 +54,8 @@ export const PEER_FROST_TOKENS: Readonly<Record<AppearanceScheme, ThemeSnapshot>
 };
 
 /**
- * custom palette 的默认三色（浅/深各一套）。
- * 取 Peer Frost 的核心三色锚点作为初值，保证用户首次切到 custom 时观感与 frost 接近，
- * 再在此基础上自定义。必须与 paletteRegistry 中 custom 记录的 swatches 保持一致。
+ * 历史 custom 字段的默认三色（浅/深各一套）。
+ * 自定义配色入口已移除；此默认值仅用于 sanitize 存储兼容。
  */
 export const DEFAULT_CUSTOM_COLORS: CustomColors = {
   light: {

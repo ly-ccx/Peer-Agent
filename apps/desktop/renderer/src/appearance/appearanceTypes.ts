@@ -45,7 +45,7 @@ export type DiffMarkerMode = 'color' | 'sign';
 export const DEFAULT_DIFF_MARKER_MODE: DiffMarkerMode = 'color';
 
 // 单套配色方案下用户自定义的三个语义色（强调 / 背景 / 前景）。
-// 仅在 palette='custom' 时生效，运行时注入为 CSS 变量；其余中性色走 tokens.css 兜底骨架。
+// 历史字段：自定义配色入口已移除，仅保留存储兼容；运行时不再注入。
 export interface CustomSchemeColors {
   readonly accent: string;
   readonly background: string;
@@ -63,7 +63,7 @@ export interface AppearanceSettings {
   readonly palette: AppearancePalette;
   readonly density: AppearanceDensity;
   readonly fontScale: AppearanceFontScale;
-  // 自定义三色（浅/深各一套）。仅 palette='custom' 时被运行时注入采用。
+  // 历史字段：自定义三色（浅/深各一套）。入口已移除，仅保留存储兼容。
   readonly customColors: CustomColors;
   // 代码字号（px）。
   readonly codeFontSize: AppearanceCodeFontSize;

@@ -85,6 +85,10 @@ export type TranslationKey =
   | 'appearance.fontScale.small'
   | 'appearance.fontScale.medium'
   | 'appearance.fontScale.large'
+  | 'appearance.preview'
+  | 'appearance.diffPreview'
+  | 'appearance.deriveCustom'
+  | 'appearance.settingsList'
   | 'appearance.reset'
   | 'appearance.language'
   | 'settings.search'
@@ -656,6 +660,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.fontScale.small': '小',
     'appearance.fontScale.medium': '中',
     'appearance.fontScale.large': '大',
+    'appearance.preview': '实时预览',
+    'appearance.diffPreview': '差异预览',
+    'appearance.deriveCustom': '基于此自定义',
+    'appearance.settingsList': '界面与代码',
     'appearance.reset': '重置外观',
     'appearance.language': '语言',
     'settings.search': '搜索设置…',
@@ -1246,6 +1254,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'appearance.fontScale.small': 'Small',
     'appearance.fontScale.medium': 'Medium',
     'appearance.fontScale.large': 'Large',
+    'appearance.preview': 'Live preview',
+    'appearance.diffPreview': 'Diff preview',
+    'appearance.deriveCustom': 'Customize from this',
+    'appearance.settingsList': 'Interface & code',
     'appearance.reset': 'Reset appearance',
     'appearance.language': 'Language',
     'settings.search': 'Search settings…',
