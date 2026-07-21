@@ -89,8 +89,8 @@ describe('tool result summary', () => {
   });
 
   test('thinking status label uses a leading cursor spinner', () => {
-    expect(thinkingStatusLabel(0, false)).toBe('⠋ Thinking esc to cancel');
-    expect(thinkingStatusLabel(1, false)).toBe('⠙ Thinking esc to cancel');
+    expect(thinkingStatusLabel(0, false)).toBe('⠋ Thinking');
+    expect(thinkingStatusLabel(1, false)).toBe('⠙ Thinking');
     expect(thinkingStatusLabel(2, true)).toBe('⠹ Thinking');
     expect(thinkingStatusLabel(3, true)).toBe('⠸ Thinking');
   });

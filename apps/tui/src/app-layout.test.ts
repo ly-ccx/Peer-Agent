@@ -95,6 +95,17 @@ describe('TUI app layout', () => {
     expect(keyboardSource).toContain("key.name === 'return' || key.name === 'enter'");
   });
 
+
+  test('keeps the thinking spinner docked above composer and animates it quickly', () => {
+    expect(appSource).toContain('const THINKING_SPINNER_INTERVAL_MS = 120;');
+    const labelSource = appSource.slice(
+      appSource.indexOf('function ThinkingStatusLabel'),
+      appSource.indexOf('function ToolStatusGlyph'),
+    );
+    expect(labelSource).toContain('useStatusAnimationFrame(true, THINKING_SPINNER_INTERVAL_MS)');
+    expect(labelSource).toContain('thinkingStatusLabel(frame, hasThinkingContent)');
+  });
+
   test('docks transient thinking above the composer instead of the chat transcript', () => {
     const historySource = appSource.slice(
       appSource.indexOf('function ChatHistory'),
@@ -336,7 +347,9 @@ describe('TUI app layout', () => {
   });
 
   test('keeps user and tool messages visually distinct without repeated speaker headings', () => {
-    expect(appSource).toContain('<strong>› </strong>');
+    expect(appSource).toContain('backgroundColor={COLOR.userPanel}');
+    expect(appSource).toContain('width="100%"');
+    expect(appSource).not.toContain('<strong>› </strong>');
     expect(appSource).toContain('resolveToolPresentation(message)');
     expect(appSource).toContain('<ToolStatusGlyph status={presentation.status}');
     expect(appSource).toContain('ThinkingStatusLabel');

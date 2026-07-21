@@ -187,10 +187,9 @@ const THINKING_CURSOR_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦',
 const RUNNING_DOT_FRAMES = ['●', '◉', '○', '◉'] as const;
 
 /** Leading cursor spinner for pending assistant placeholders. */
-export function thinkingStatusLabel(frame: number, hasThinkingContent = false): string {
+export function thinkingStatusLabel(frame: number, _hasThinkingContent = false): string {
   const cursor = THINKING_CURSOR_FRAMES[Math.abs(frame) % THINKING_CURSOR_FRAMES.length] ?? '⠋';
-  const base = `${cursor} Thinking`;
-  return hasThinkingContent ? base : `${base} esc to cancel`;
+  return `${cursor} Thinking`;
 }
 
 /** Breathing/pulsing leading glyph for in-flight tool rows. */

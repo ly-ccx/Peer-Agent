@@ -10,6 +10,7 @@ export const COLOR = {
   background: '#0a0a0a',
   panel: '#111111',
   panelRaised: '#161616',
+  userPanel: '#10212a',
   selection: '#1c1c1c',
   border: '#2a2a2a',
   borderFocus: '#3f3f46',

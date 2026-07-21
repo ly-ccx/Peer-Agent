@@ -109,6 +109,7 @@ import {
 } from './tui-theme.ts';
 
 const COMMAND_NOTICE_DURATION_MS = 3_000;
+const THINKING_SPINNER_INTERVAL_MS = 120;
 
 
 function useStatusAnimationFrame(active: boolean, intervalMs = 280): number {
@@ -133,7 +134,7 @@ function ThinkingStatusLabel({
   readonly hasThinkingContent: boolean;
   readonly thinkingText?: string;
 }) {
-  const frame = useStatusAnimationFrame(true);
+  const frame = useStatusAnimationFrame(true, THINKING_SPINNER_INTERVAL_MS);
   return (
     <box flexDirection="column">
       <text selectable fg={COLOR.muted}>
@@ -214,9 +215,16 @@ function ChatHistory({
 
         if (message.role === 'user') {
           return (
-            <box key={message.id} flexDirection="row" marginBottom={1}>
-              <text selectable fg={COLOR.user}><strong>› </strong></text>
-              <text selectable fg={COLOR.text}>{message.content || ' '}</text>
+            <box
+              key={message.id}
+              flexDirection="row"
+              width="100%"
+              marginBottom={1}
+              paddingLeft={1}
+              paddingRight={1}
+              backgroundColor={COLOR.userPanel}
+            >
+              <text selectable fg={COLOR.textSoft}>{message.content || ' '}</text>
             </box>
           );
         }
