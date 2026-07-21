@@ -159,6 +159,61 @@ export function writeLastModelProviderId(providerId: string | null | undefined):
   }
 }
 
+/**
+ * 解析会话/记忆中的 modelProviderId 到当前 providers 列表中的真实记录。
+ * 兼容历史 groupId::model 与 groupId 绑定；解析失败返回 null。
+ */
+export function resolveProviderById<T extends {
+  id?: string | null;
+  groupId?: string | null;
+  model?: string | null;
+  apiKeyConfigured?: boolean;
+}>(providers: readonly T[] | null | undefined, modelProviderId: string | null | undefined): T | null {
+  if (!modelProviderId || !providers?.length) return null;
+  const exact = providers.find((provider) => provider.id === modelProviderId) || null;
+  if (exact) return exact;
+
+  if (modelProviderId.includes('::')) {
+    const separator = modelProviderId.indexOf('::');
+    const groupId = modelProviderId.slice(0, separator).trim();
+    const model = modelProviderId.slice(separator + 2).trim();
+    if (groupId && model) {
+      const byComposite = providers.find((provider) => {
+        const providerGroupId = typeof provider.groupId === 'string' ? provider.groupId.trim() : '';
+        const providerModel = typeof provider.model === 'string' ? provider.model.trim() : '';
+        return (
+          providerModel === model
+          && (providerGroupId === groupId || provider.id === groupId)
+        );
+      }) || null;
+      if (byComposite) return byComposite;
+    }
+  }
+
+  return providers.find((provider) => {
+    const providerGroupId = typeof provider.groupId === 'string' ? provider.groupId.trim() : '';
+    return providerGroupId === modelProviderId || provider.id === modelProviderId;
+  }) || null;
+}
+
+/**
+ * 草稿态模型种子：优先上次使用模型；可解析时返回真实 id，否则 null（UI 回退默认显示）。
+ */
+export function resolveDraftModelProviderId<T extends {
+  id?: string | null;
+  groupId?: string | null;
+  model?: string | null;
+  apiKeyConfigured?: boolean;
+}>(
+  providers: readonly T[] | null | undefined,
+  rememberedId: string | null | undefined = readLastModelProviderId(),
+): string | null {
+  const resolved = resolveProviderById(providers, rememberedId);
+  if (!resolved?.id) return null;
+  if (resolved.apiKeyConfigured === false) return null;
+  return resolved.id;
+}
+
 /** LocalAccessLevel 类型守卫（认 4 个合法值，含 restricted_local）。 */
 export function isLocalAccessLevel(value: unknown): value is LocalAccessLevel {
   return value === 'ask_before_local'

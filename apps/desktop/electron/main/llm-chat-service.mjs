@@ -24,6 +24,7 @@ import {
   describeFetchFailure,
   describeProviderTarget,
   orderProviderCandidates,
+  resolveConversationModelBindingPatch,
 } from './chat-runtime/provider-recovery-broker.mjs';
 import { hasUnsupportedToolClaim } from './chat-runtime/response-guard.mjs';
 import { createDesktopRuntimeSessionAdapter } from './chat-runtime/runtime-session-adapter.mjs';
@@ -182,7 +183,7 @@ function buildAgentRunOutcome(streamRecord = {}) {
   };
 }
 
-function recordConversationUsage({ conversationStore, streamRecord, usage, usageRequestLog }) {
+function recordConversationUsage({ conversationStore, streamRecord, usage, usageRequestLog, llmConfigStore }) {
   if (!conversationStore?.addUsage || !streamRecord?.conversationId || !hasBillableUsage(usage)) return null;
   if (streamRecord.usageRecorded) return null;
   try {
@@ -190,18 +191,29 @@ function recordConversationUsage({ conversationStore, streamRecord, usage, usage
     streamRecord.usageRecorded = Boolean(lifetimeUsage);
 
     // 1) 把本轮实际 provider/model 快照写回会话 meta，避免长期 null 导致统计归到「未绑定」。
+    //    但若用户绑定了解析失败的历史 id，本轮只是强绑定回退到默认，则不要用默认覆盖原绑定。
+    //    若历史 groupId::model 能解析到真实记录，则回写真实 id（顺带迁移）。
     // 2) 追加请求级 usage 日志，供后续按请求聚合。
     if (lifetimeUsage) {
-      const modelProviderId = streamRecord.actualModelProviderId
-        || streamRecord.modelProviderId
-        || null;
+      const requestedModelProviderId = streamRecord.modelProviderId || null;
+      const actualModelProviderId = streamRecord.actualModelProviderId || null;
       const model = streamRecord.actualModel || null;
+      const providers = typeof llmConfigStore?.listProviders === 'function'
+        ? llmConfigStore.listProviders()
+        : [];
+      const patch = resolveConversationModelBindingPatch({
+        providers,
+        requestedModelProviderId,
+        actualModelProviderId,
+        actualModel: model,
+      });
+      const modelProviderId = patch.modelProviderId
+        || actualModelProviderId
+        || requestedModelProviderId
+        || null;
       try {
         if (typeof conversationStore.updateModelEffort === 'function') {
-          conversationStore.updateModelEffort(streamRecord.conversationId, {
-            modelProviderId,
-            model,
-          });
+          conversationStore.updateModelEffort(streamRecord.conversationId, patch);
         }
       } catch (error) {
         console.warn('[llm-chat] failed to persist provider snapshot:', error?.message || error);
@@ -383,6 +395,7 @@ function wrapWebContentsForRuntimeEvents(
             streamRecord,
             usage: undefined,
             usageRequestLog,
+            llmConfigStore,
           });
           const errorPayload = { streamId: streamRecord.streamId, error: 'repetition_detected' };
           if (lifetimeUsage) errorPayload.lifetimeUsage = lifetimeUsage;
@@ -433,6 +446,7 @@ function wrapWebContentsForRuntimeEvents(
           streamRecord,
           usage: payload?.usage,
           usageRequestLog,
+          llmConfigStore,
         });
         if (lifetimeUsage) {
           payload = { ...payload, lifetimeUsage };

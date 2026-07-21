@@ -26,6 +26,8 @@ import {
   modeLabel,
   modeTitle,
   normalizeChatMode,
+  resolveDraftModelProviderId,
+  resolveProviderById,
   writeLastModelProviderId,
   type EffortLevel,
   type ChatMode,
@@ -670,10 +672,11 @@ export function ChatSurface({
   // 当前激活 provider(默认且已配置 Key,否则取首个已配置)是否勾选了原生推理(reasoning/thinking)。
   // 只有勾选时才显示思考强度选择器；OpenAI 暴露额外 xhigh 档。
   // 优先取会话绑定的已配置模型记录，使推理档位/思考强度随会话选中的模型走；
-  // 会话未绑定或绑定失效时回退全局默认 → 首个已配置 Key 的 provider（与后端强绑定回退同口径）。
-  const activeProvider = (modelProviderId
-    ? providers.find((p) => p.id === modelProviderId && p.apiKeyConfigured)
-    : null)
+  // 兼容历史 groupId::model 绑定；会话未绑定或绑定失效时回退全局默认 → 首个已配置 Key。
+  const boundProvider = modelProviderId
+    ? resolveProviderById(providers, modelProviderId)
+    : null;
+  const activeProvider = (boundProvider?.apiKeyConfigured ? boundProvider : null)
     || providers.find((p) => p.isDefault && p.apiKeyConfigured)
     || providers.find((p) => p.apiKeyConfigured)
     || null;
@@ -830,6 +833,9 @@ export function ChatSurface({
     if (!conversationId) {
       // 草稿态：不拉磁盘、不进左侧列表；直接 ready，允许输入与发送。
       // 再次点「新建任务」时 conversationId 仍为 null，本 effect 不会重跑，draft 得以保留。
+      // 模型选择沿用上次使用的模型（可解析时），而不是强制显示全局默认。
+      const draftModelId = resolveDraftModelProviderId(providers);
+      if (draftModelId) setModelProviderId(draftModelId);
       setTokenUsage(null);
       convActions.commitLoad({
         messages: [],
@@ -852,9 +858,24 @@ export function ChatSurface({
       // 思考强度 + 模型 provider 随会话恢复:与 mode 同口径,切换会话即切到该会话自己的绑定值。
       // 直接 setState(不触发回写),避免恢复动作被当成用户切换而反写 meta。
       setEffort(convEffort);
-      setModelProviderId(convModelProviderId);
+      // 兼容历史 groupId::model 绑定：能解析到真实记录就回写真实 id，并迁移会话 meta。
+      const resolvedBound = resolveProviderById(providers, convModelProviderId);
+      const restoredModelProviderId = resolvedBound?.id ?? convModelProviderId;
+      setModelProviderId(restoredModelProviderId);
+      if (
+        convModelProviderId
+        && resolvedBound?.id
+        && resolvedBound.id !== convModelProviderId
+      ) {
+        void clientApi.conversationsUpdateModelEffort({
+          id: conversationId,
+          modelProviderId: resolvedBound.id,
+        }).catch(() => {
+          // 迁移失败不影响本轮 UI；下次进入仍会再尝试。
+        });
+      }
       // 会话恢复的模型也写共享记忆，让 Quick 跟主聊天「当前/上次」模型一致。
-      writeLastModelProviderId(convModelProviderId);
+      writeLastModelProviderId(restoredModelProviderId);
 
       // 压缩横幅按会话恢复:压缩态真值在主进程登记表,切回正在压缩的会话时恢复横幅与进度,
       // 并把 streamIdRef 指向压缩流,使后续 progress/done 事件(按 streamId 门控)能继续匹配收尾。
@@ -934,7 +955,15 @@ export function ChatSurface({
       }
     })();
     return () => { cancelled = true; };
-  }, [conversationId, convActions]);
+  }, [conversationId, convActions, providers]);
+
+  // providers 异步到达后，草稿态若还没绑定模型则补一次上次模型种子。
+  useEffect(() => {
+    if (conversationId) return;
+    if (modelProviderId) return;
+    const draftModelId = resolveDraftModelProviderId(providers);
+    if (draftModelId) setModelProviderId(draftModelId);
+  }, [conversationId, modelProviderId, providers]);
 
   const appliedExternalRevisionRef = useRef<string | null>(null);
   useEffect(() => {

@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { orderProviderCandidates } from './provider-recovery-broker.mjs';
+import {
+  orderProviderCandidates,
+  resolveConversationModelBindingPatch,
+  resolvePreferredProvider,
+} from './provider-recovery-broker.mjs';
 
 /**
  * orderProviderCandidates 的会话级首选 provider（preferredProviderId）测试。
@@ -69,4 +73,62 @@ test('no preferred falls back to default-first ordering', () => {
 test('empty when no runnable providers', () => {
   const providers = [p({ id: 'a', apiKeyConfigured: false })];
   assert.deepEqual(orderProviderCandidates(providers, 'a'), []);
+});
+
+test('resolvePreferredProvider matches legacy groupId::model', () => {
+  const providers = [
+    p({ id: 'uuid-default', groupId: 'grok-official', model: 'grok-3', isDefault: true }),
+    p({ id: 'uuid-grok-45', groupId: 'grok-official', model: 'grok-4.5', isDefault: false }),
+  ];
+  const resolved = resolvePreferredProvider(providers, 'grok-official::grok-4.5');
+  assert.equal(resolved?.id, 'uuid-grok-45');
+});
+
+test('orderProviderCandidates ranks legacy groupId::model first when runnable', () => {
+  const providers = [
+    p({ id: 'uuid-default', groupId: 'grok-official', model: 'grok-3', isDefault: true }),
+    p({ id: 'uuid-grok-45', groupId: 'grok-official', model: 'grok-4.5', isDefault: false }),
+  ];
+  const ordered = orderProviderCandidates(providers, 'grok-official::grok-4.5');
+  assert.equal(ordered[0].id, 'uuid-grok-45');
+});
+
+test('resolveConversationModelBindingPatch migrates legacy id when resolvable', () => {
+  const providers = [
+    p({ id: 'uuid-default', groupId: 'grok-official', model: 'grok-3', isDefault: true }),
+    p({ id: 'uuid-grok-45', groupId: 'grok-official', model: 'grok-4.5', isDefault: false }),
+  ];
+  const patch = resolveConversationModelBindingPatch({
+    providers,
+    requestedModelProviderId: 'grok-official::grok-4.5',
+    actualModelProviderId: 'uuid-default',
+    actualModel: 'grok-3',
+  });
+  assert.equal(patch.modelProviderId, 'uuid-grok-45');
+  assert.equal(patch.model, 'grok-3');
+});
+
+test('resolveConversationModelBindingPatch does not clobber unresolved binding with default', () => {
+  const providers = [
+    p({ id: 'uuid-default', groupId: 'grok-official', model: 'grok-3', isDefault: true }),
+  ];
+  const patch = resolveConversationModelBindingPatch({
+    providers,
+    requestedModelProviderId: 'missing-group::missing-model',
+    actualModelProviderId: 'uuid-default',
+    actualModel: 'grok-3',
+  });
+  assert.equal(Object.hasOwn(patch, 'modelProviderId'), false);
+  assert.equal(patch.model, 'grok-3');
+});
+
+test('resolveConversationModelBindingPatch seeds unbound conversation with actual provider', () => {
+  const patch = resolveConversationModelBindingPatch({
+    providers: [p({ id: 'uuid-default', isDefault: true })],
+    requestedModelProviderId: null,
+    actualModelProviderId: 'uuid-default',
+    actualModel: 'grok-3',
+  });
+  assert.equal(patch.modelProviderId, 'uuid-default');
+  assert.equal(patch.model, 'grok-3');
 });

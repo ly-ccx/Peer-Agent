@@ -23,8 +23,9 @@ import {
   modeLabel,
   modeTitle,
   normalizeEffortLevels,
-  readLastModelProviderId,
+  resolveDraftModelProviderId,
   resolvePreferredEffort,
+  resolveProviderById,
   writeLastModelProviderId,
   type ChatMode,
   type EffortLevel,
@@ -83,8 +84,9 @@ export function QuickChatWindow() {
       const available = items.filter((provider) => provider.apiKeyConfigured);
       setProviders(available);
       // 优先读主聊天共享记忆，不再被独立的 quick-chat:model-provider 压过。
-      const remembered = readLastModelProviderId();
-      const selected = available.find((provider) => provider.id === remembered)
+      // 兼容历史 groupId::model 绑定。
+      const remembered = resolveDraftModelProviderId(available);
+      const selected = (remembered ? available.find((provider) => provider.id === remembered) : null)
         ?? available.find((provider) => provider.isDefault)
         ?? available[0];
       if (!selected) return;
@@ -112,7 +114,7 @@ export function QuickChatWindow() {
       ? requestAnimationFrame
       : (cb: FrameRequestCallback) => window.setTimeout(cb, 0);
     schedule(() => {
-      const remembered = readLastModelProviderId();
+      const remembered = resolveDraftModelProviderId(providers);
       if (!remembered) return;
       setModelProviderId((current) => {
         if (providers.some((provider) => provider.id === remembered)) return remembered;
@@ -127,7 +129,7 @@ export function QuickChatWindow() {
   useEffect(() => { localStorage.setItem('quick-chat:effort', effort); }, [effort]);
   useEffect(() => { localStorage.setItem('quick-chat:mode', mode); }, [mode]);
   const selectedProvider = useMemo(
-    () => providers.find((provider) => provider.id === modelProviderId) ?? providers[0],
+    () => resolveProviderById(providers, modelProviderId) ?? providers[0],
     [modelProviderId, providers],
   );
   const effortLevels = useMemo(

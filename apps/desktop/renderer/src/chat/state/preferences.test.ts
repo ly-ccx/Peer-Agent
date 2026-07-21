@@ -6,9 +6,11 @@ import {
   hasTunableEffortLevels,
   normalizeEffortLevels,
   readLastModelProviderId,
+  resolveDraftModelProviderId,
   resolveModelSwitchEffort,
   resolveModelSwitchState,
   resolvePreferredEffort,
+  resolveProviderById,
   writeLastModelProviderId,
 } from './preferences.ts';
 
@@ -183,5 +185,46 @@ describe('last model provider shared memory', () => {
     writeLastModelProviderId('');
     writeLastModelProviderId('   ');
     assert.equal(readLastModelProviderId(), null);
+  });
+});
+
+describe('resolveProviderById / resolveDraftModelProviderId', () => {
+  const providers = [
+    {
+      id: 'uuid-default',
+      groupId: 'grok-official',
+      model: 'grok-3',
+      apiKeyConfigured: true,
+      isDefault: true,
+    },
+    {
+      id: 'uuid-grok-45',
+      groupId: 'grok-official',
+      model: 'grok-4.5',
+      apiKeyConfigured: true,
+      isDefault: false,
+    },
+    {
+      id: 'uuid-disabled',
+      groupId: 'other',
+      model: 'x',
+      apiKeyConfigured: false,
+      isDefault: false,
+    },
+  ] as const;
+
+  it('resolves exact id and legacy groupId::model', () => {
+    assert.equal(resolveProviderById(providers, 'uuid-grok-45')?.id, 'uuid-grok-45');
+    assert.equal(resolveProviderById(providers, 'grok-official::grok-4.5')?.id, 'uuid-grok-45');
+    assert.equal(resolveProviderById(providers, 'missing::model'), null);
+  });
+
+  it('seeds draft from remembered last model when resolvable and configured', () => {
+    assert.equal(
+      resolveDraftModelProviderId(providers, 'grok-official::grok-4.5'),
+      'uuid-grok-45',
+    );
+    assert.equal(resolveDraftModelProviderId(providers, 'uuid-disabled'), null);
+    assert.equal(resolveDraftModelProviderId(providers, null), null);
   });
 });
