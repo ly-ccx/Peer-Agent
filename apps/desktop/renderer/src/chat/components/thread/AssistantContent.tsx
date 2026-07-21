@@ -72,8 +72,8 @@ function LiveToolProgress({
 }
 
 function useAutoCollapsingExpanded(isActive: boolean) {
-  // 流式输出和工具调度期间保持展开，让用户持续看到正在发生什么；
-  // 整条回复最终完成后再自动折叠。已完成的历史消息首次渲染时保持折叠。
+  // 思考 / 工具进行中保持展开；过程一旦结束（或历史消息首次渲染）自动收起为摘要条。
+  // isActive 变化时同步展开态；完成后用户仍可手动点开，不会被后续同态重渲染强行关掉。
   const [expanded, setExpanded] = useState(isActive);
 
   useEffect(() => {
@@ -85,6 +85,33 @@ function useAutoCollapsingExpanded(isActive: boolean) {
   };
 
   return { expanded, toggleExpanded };
+}
+
+/**
+ * 过程区是否仍在进行。
+ * - 思考中 / 工具未返回：展开
+ * - 多轮工具间隙（末尾是已完成工具组）：仍保持展开，避免闪烁
+ * - 过程结束后开始输出最终正文，或整轮流式结束：收起成「已处理」摘要
+ */
+function isProcessingActive(
+  groups: SegmentGroup[],
+  isStreaming: boolean,
+): boolean {
+  if (!isStreaming || !groups.some(isProcessingGroup)) return false;
+  const lastGroup = groups[groups.length - 1];
+  if (lastGroup?.type === 'thinking') return true;
+  const hasPendingTools = groups.some(
+    (group) =>
+      group.type === 'tool-call-group'
+      && group.calls.some((call) => call.result === undefined),
+  );
+  if (hasPendingTools) return true;
+  // 最终正文已开始流式输出：过程完成，允许自动收起
+  if (lastGroup?.type === 'text' && lastGroup.content.trim().length > 0) {
+    return false;
+  }
+  // 工具轮次间隙：暂不收起
+  return true;
 }
 
 function buildProcessingSummary(groups: SegmentGroup[], durationMs: number | undefined, isZh: boolean): string {
@@ -137,11 +164,14 @@ function AssistantContentImpl({
     [groups],
   );
   const keepAllTextOutside = interactionCalls.length > 0 && answeredText === null;
+  // 过程仍在进行（思考中 / 工具未返回）时保持完整时间线；
+  // 过程结束后即使整轮仍在流式输出最终正文，也拆出折叠区外的正文并允许自动收起。
+  const processingIsActive = isProcessingActive(groups, isStreaming);
   const completedSplit = useMemo(
-    () => (isStreaming || groups.length === 0
+    () => (processingIsActive || groups.length === 0
       ? undefined
       : splitFinalTextGroup(groups, { keepAllTextOutside })),
-    [groups, isStreaming, keepAllTextOutside],
+    [groups, processingIsActive, keepAllTextOutside],
   );
 
   if (!segments?.length) {
@@ -159,7 +189,7 @@ function AssistantContentImpl({
   }
 
   const processingSummary = buildProcessingSummary(groups, durationMs, isZh);
-  // 流式期间完整展示原始时间线；完成后：
+  // 过程进行中展示完整时间线；过程结束后（含最终正文仍在流式输出时）：
   // - 默认把最后一段非空正文留在折叠区外（即使其后还有 tool-call）；
   // - 有未完成交互卡时，该轮所有 text 都外露（选项依赖的决策上下文）。
   const timelineGroups = completedSplit?.historyGroups ?? groups;
@@ -174,8 +204,6 @@ function AssistantContentImpl({
   });
   const hasCollapsibleProcess = collapsibleGroups.some(isProcessingGroup)
     || collapsibleGroups.some((group) => group.type === 'text');
-  // 活跃态只跟随整条回复的流式生命周期，避免中间段类型切换造成展开/折叠抖动。
-  const processingIsActive = isStreaming && groups.some(isProcessingGroup);
   const lastGroup = groups[groups.length - 1];
   // 流式期间始终保留一个“还在运行”的指示，避免工具执行间隙/文本结束等待下一步时
   // 光标消失造成“卡住”的错觉。仅当末尾组本身已有 active 视觉（工具执行中的工具组、
