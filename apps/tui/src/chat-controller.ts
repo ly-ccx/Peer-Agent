@@ -14,6 +14,7 @@ import {
 } from '@peer-agent/runtime-sdk';
 
 import { compactModelMessagesStructurally } from './context-compact.ts';
+import { computeContextPressure } from './context-pressure.ts';
 import type { PlanCoordinator, PlanSnapshot } from './plan-mode.ts';
 import { parseRuntimePlanText } from './plan-mode.ts';
 import type { TuiHost } from './tui-host.ts';
@@ -25,7 +26,7 @@ import {
 } from './tool-result-summary.ts';
 
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system';
-export type ChatRunStatus = 'idle' | 'running' | 'cancelling';
+export type ChatRunStatus = 'idle' | 'running' | 'cancelling' | 'compacting';
 
 const STREAM_BUFFER_FLUSH_MS = 32;
 
@@ -76,6 +77,11 @@ export interface ChatSnapshot {
   readonly session?: RuntimeSessionSnapshot;
   readonly plan?: PlanSnapshot;
   readonly usage?: ModelUsage;
+  /**
+   * Compression-pressure numerator (aligned with Desktop Runtime triggerTokens):
+   * max(local estimate of model messages, last usage input+cacheRead).
+   */
+  readonly triggerTokens?: number;
   readonly error?: string;
 }
 
@@ -268,6 +274,8 @@ export function createChatController(options: {
   readonly initialMode?: TuiMode;
   readonly sessionController?: RuntimeSessionController;
   readonly planCoordinator?: PlanCoordinator;
+  /** Optional live context-window resolver for auto-compact thresholds / pressure. */
+  readonly getContextWindow?: () => number | undefined;
 }): ChatController {
   const listeners = new Set<(snapshot: ChatSnapshot) => void>();
   const sessionId = options.sessionId ?? 'tui-chat';
@@ -284,6 +292,155 @@ export function createChatController(options: {
     snapshot = next;
     for (const listener of listeners) listener(snapshot);
   };
+
+  const resolveContextWindow = (): number | undefined => {
+    const value = options.getContextWindow?.();
+    return Number.isFinite(value) && (value as number) > 0
+      ? Math.floor(value as number)
+      : undefined;
+  };
+
+  const pressureFor = (
+    messages: readonly ModelMessage[],
+    usage?: ModelUsage,
+    draftText?: string,
+  ) => computeContextPressure({
+    messages,
+    usage,
+    contextWindow: resolveContextWindow(),
+    draftText,
+  });
+
+  const withPressure = (
+    next: ChatSnapshot,
+    messages: readonly ModelMessage[] = conversationModelMessages,
+  ): ChatSnapshot => {
+    const pressure = pressureFor(messages, next.usage);
+    return {
+      ...next,
+      triggerTokens: pressure.triggerTokens,
+    };
+  };
+
+
+  const runStructuralCompact = async (opts: {
+    readonly source: 'manual' | 'auto';
+  }): Promise<ChatCompactResult> => {
+    const beforeCount = conversationModelMessages.length;
+    if (beforeCount === 0) {
+      return {
+        ok: true,
+        compacted: false,
+        beforeCount: 0,
+        afterCount: 0,
+        summarizedCount: 0,
+        notice: opts.source === 'auto' ? 'Auto-compact skipped: empty context' : 'Nothing to compact',
+      };
+    }
+
+    const progressId = `compact-${++sequence}`;
+    const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+    const previousStatus = snapshot.status;
+    publish({
+      ...snapshot,
+      status: 'compacting',
+      error: undefined,
+    });
+
+    const label = opts.source === 'auto' ? 'Auto-compacting context' : 'Compacting context';
+    const publishProgress = (percent: number) => {
+      const content = `${label}  ${renderCompactProgressBar(percent)}  ${percent}%`;
+      const progressMessage: ChatMessage = {
+        id: progressId,
+        role: 'system',
+        content,
+        pending: true,
+        compact: { phase: 'progress', percent },
+      };
+      const without = snapshot.messages.filter((message) => message.id !== progressId);
+      publish(withPressure({
+        ...snapshot,
+        status: 'compacting',
+        messages: [...without, progressMessage],
+        plan: snapshot.plan,
+        usage: snapshot.usage,
+        error: undefined,
+      }));
+    };
+
+    // Same progress frames for manual / auto so auto-compact feels complete.
+    publishProgress(12);
+    await sleep(35);
+    publishProgress(48);
+    await sleep(35);
+    publishProgress(78);
+    await sleep(25);
+
+    const result = compactModelMessagesStructurally(conversationModelMessages);
+    if (!result.compacted) {
+      const notice =
+        result.reason === 'empty'
+          ? (opts.source === 'auto' ? 'Auto-compact skipped: empty context' : 'Nothing to compact')
+          : (opts.source === 'auto' ? 'Auto-compact skipped: already compact enough' : 'Context is already compact enough');
+      publish(withPressure({
+        ...snapshot,
+        status: previousStatus === 'compacting' ? 'idle' : previousStatus,
+        messages: snapshot.messages.filter((message) => message.id !== progressId),
+        plan: snapshot.plan,
+        usage: snapshot.usage,
+        error: undefined,
+      }));
+      return {
+        ok: true,
+        compacted: false,
+        beforeCount: result.beforeCount,
+        afterCount: result.afterCount,
+        summarizedCount: 0,
+        notice,
+      };
+    }
+
+    conversationModelMessages = result.messages as ModelMessage[];
+    const prefix = opts.source === 'auto' ? 'Auto-compacted' : 'Compacted';
+    const doneContent =
+      `${prefix} ${result.beforeCount} → ${result.afterCount} messages` +
+      ` (summarized ${result.summarizedCount})`;
+    const doneMessage: ChatMessage = {
+      id: progressId,
+      role: 'system',
+      content: doneContent,
+      compact: {
+        phase: 'done',
+        percent: 100,
+        beforeCount: result.beforeCount,
+        afterCount: result.afterCount,
+        summarizedCount: result.summarizedCount,
+      },
+    };
+    // Preserve UI transcript and usage; only provider history shrinks. Progress row becomes a durable separator.
+    const withoutProgress = snapshot.messages.filter((message) => message.id !== progressId);
+    publish(withPressure({
+      ...snapshot,
+      status: previousStatus === 'compacting' ? 'idle' : previousStatus,
+      messages: [...withoutProgress, doneMessage],
+      plan: snapshot.plan,
+      usage: snapshot.usage,
+      error: undefined,
+    }));
+
+    return {
+      ok: true,
+      compacted: true,
+      beforeCount: result.beforeCount,
+      afterCount: result.afterCount,
+      summarizedCount: result.summarizedCount,
+      notice:
+        opts.source === 'auto'
+          ? `Auto-compacted model context ${result.beforeCount} → ${result.afterCount} messages (summarized ${result.summarizedCount})`
+          : `Compacted model context ${result.beforeCount} → ${result.afterCount} messages (summarized ${result.summarizedCount})`,
+    };
+  };
+
 
   const streamDeltaBuffer: Array<{
     readonly type: 'message.delta' | 'reasoning.delta';
@@ -443,18 +600,31 @@ export function createChatController(options: {
         .map((message) => ({ role: message.role as 'user' | 'assistant', content: message.content }));
       executionEvidenceIds = [];
       sequence = messages.length;
-      publish({
+      publish(withPressure({
         status: 'idle',
         mode: normalizeTuiMode(input.mode),
         messages,
         usage: input.usage,
-      });
+      }));
       return true;
     },
     async send(content, sendOptions) {
       const trimmed = content.trim();
       const images = sendOptions?.images?.filter((image) => Boolean(image.url)) ?? [];
       if ((!trimmed && images.length === 0) || activeTurn) return;
+
+      // Pre-send auto-compact: same soft threshold as Desktop (triggerTokens >= 0.8 * window).
+      // Uses structural compact (manual /compact path), not Desktop LLM summarizer.
+      const draftForPressure = trimmed
+        || (images.length > 0 ? `[image${images.length > 1 ? 's' : ''}]` : '');
+      const preflightPressure = pressureFor(
+        conversationModelMessages,
+        snapshot.usage,
+        draftForPressure,
+      );
+      if (preflightPressure.shouldCompact) {
+        await runStructuralCompact({ source: 'auto' });
+      }
 
       const existingSession = sessions.get(sessionId);
       activeTurn = existingSession
@@ -540,7 +710,7 @@ export function createChatController(options: {
           : result.status === 'failed'
             ? (result.reason || 'provider_stream_error')
             : undefined;
-        publish({
+        publish(withPressure({
           status: 'idle',
           mode: snapshot.mode,
           session: sessions.get(sessionId) ?? undefined,
@@ -551,7 +721,7 @@ export function createChatController(options: {
             error: failureDetail,
           }),
           error: failureDetail,
-        });
+        }));
       } catch (error) {
         flushStreamDeltaBuffer();
         const wasCancelled = turn.signal.aborted;
@@ -560,7 +730,7 @@ export function createChatController(options: {
         else turn.fail(detail);
         // Keep already-executed tool results and any partial assistant text.
         // Mark the latest assistant as interrupted so Desktop/TUI can recover.
-        publish({
+        publish(withPressure({
           status: 'idle',
           mode: snapshot.mode,
           session: sessions.get(sessionId) ?? undefined,
@@ -569,7 +739,8 @@ export function createChatController(options: {
             error: detail,
           }),
           error: wasCancelled ? undefined : detail,
-        });
+          usage: snapshot.usage,
+        }));
       } finally {
         if (activeTurn === turn) activeTurn = null;
       }
@@ -578,7 +749,7 @@ export function createChatController(options: {
       if (activeTurn) return false;
       conversationModelMessages = [];
       executionEvidenceIds = [];
-      publish({ status: 'idle', mode: snapshot.mode, messages: [] });
+      publish(withPressure({ status: 'idle', mode: snapshot.mode, messages: [] }, []));
       return true;
     },
     async compact() {
@@ -593,109 +764,7 @@ export function createChatController(options: {
         };
       }
 
-      const beforeCount = conversationModelMessages.length;
-      if (beforeCount === 0) {
-        return {
-          ok: true,
-          compacted: false,
-          beforeCount: 0,
-          afterCount: 0,
-          summarizedCount: 0,
-          notice: 'Nothing to compact',
-        };
-      }
-
-      const progressId = `compact-${++sequence}`;
-      const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-      const publishProgress = (percent: number) => {
-        const content = `Compacting context  ${renderCompactProgressBar(percent)}  ${percent}%`;
-        const progressMessage: ChatMessage = {
-          id: progressId,
-          role: 'system',
-          content,
-          pending: true,
-          compact: { phase: 'progress', percent },
-        };
-        const without = snapshot.messages.filter((message) => message.id !== progressId);
-        publish({
-          status: 'idle',
-          mode: snapshot.mode,
-          session: snapshot.session,
-          messages: [...without, progressMessage],
-          plan: snapshot.plan,
-          usage: snapshot.usage,
-          error: undefined,
-        });
-      };
-
-      publishProgress(12);
-      await sleep(35);
-      publishProgress(48);
-      await sleep(35);
-      publishProgress(78);
-      await sleep(25);
-
-      const result = compactModelMessagesStructurally(conversationModelMessages);
-      if (!result.compacted) {
-        const notice =
-          result.reason === 'empty'
-            ? 'Nothing to compact'
-            : 'Context is already compact enough';
-        publish({
-          status: 'idle',
-          mode: snapshot.mode,
-          session: snapshot.session,
-          messages: snapshot.messages.filter((message) => message.id !== progressId),
-          plan: snapshot.plan,
-          usage: snapshot.usage,
-          error: undefined,
-        });
-        return {
-          ok: true,
-          compacted: false,
-          beforeCount: result.beforeCount,
-          afterCount: result.afterCount,
-          summarizedCount: 0,
-          notice,
-        };
-      }
-
-      conversationModelMessages = result.messages;
-      const doneContent =
-        `Compacted ${result.beforeCount} → ${result.afterCount} messages` +
-        ` (summarized ${result.summarizedCount})`;
-      const doneMessage: ChatMessage = {
-        id: progressId,
-        role: 'system',
-        content: doneContent,
-        compact: {
-          phase: 'done',
-          percent: 100,
-          beforeCount: result.beforeCount,
-          afterCount: result.afterCount,
-          summarizedCount: result.summarizedCount,
-        },
-      };
-      // Preserve UI transcript and usage; only provider history shrinks. Progress row becomes a durable separator.
-      const withoutProgress = snapshot.messages.filter((message) => message.id !== progressId);
-      publish({
-        status: 'idle',
-        mode: snapshot.mode,
-        session: snapshot.session,
-        messages: [...withoutProgress, doneMessage],
-        plan: snapshot.plan,
-        usage: snapshot.usage,
-        error: undefined,
-      });
-
-      return {
-        ok: true,
-        compacted: true,
-        beforeCount: result.beforeCount,
-        afterCount: result.afterCount,
-        summarizedCount: result.summarizedCount,
-        notice: `Compacted model context ${result.beforeCount} → ${result.afterCount} messages (summarized ${result.summarizedCount})`,
-      };
+      return runStructuralCompact({ source: 'manual' });
     },
     async executeGoalTask(task, context) {
       if (activeTurn) return { status: 'blocked', reason: 'chat_turn_active' };

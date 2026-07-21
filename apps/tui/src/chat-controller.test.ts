@@ -1022,4 +1022,167 @@ describe('chat controller', () => {
     expect(planCoordinator.getSnapshot()?.status).toBe('awaiting_approval');
     expect(planCoordinator.getSnapshot()?.plan.title).toBe('Plan only');
   });
+
+  test('publishes triggerTokens pressure after a completed turn', async () => {
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        return {
+          kind: 'completed',
+          state: {
+            ...state,
+            usage: { inputTokens: 1_200, cacheReadTokens: 300 },
+          },
+          output: 'done',
+        };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({
+      host: host(),
+      model,
+      getContextWindow: () => 100_000,
+    });
+
+    await controller.send('hello pressure');
+    const snapshot = controller.getSnapshot();
+    expect(snapshot.usage?.inputTokens).toBe(1_200);
+    expect(snapshot.triggerTokens).toBeGreaterThanOrEqual(1_500);
+  });
+
+  test('auto-compacts before send when pressure crosses the soft threshold', async () => {
+    const observedModelMessageCounts: number[] = [];
+    // Mirror the existing compact test: accumulate modelMessages on each turn so
+    // the controller has a real provider history to compress.
+    const model: ChatModelPort = {
+      initialize(input) {
+        observedModelMessageCounts.push(input.input.modelMessages.length);
+        return {
+          messages: [
+            ...input.input.history,
+            { id: 'input', role: 'user', content: input.input.content },
+          ],
+          modelMessages: [
+            ...input.input.modelMessages,
+            { role: 'user', content: input.input.content },
+          ],
+          toolExecutions: [],
+        };
+      },
+      async runTurn(state) {
+        return {
+          kind: 'completed',
+          state: {
+            ...state,
+            modelMessages: [
+              ...state.modelMessages,
+              { role: 'assistant', content: `reply-${state.modelMessages.length}` },
+            ],
+            // Keep usage high enough that the next send still sees pressure
+            // until structural compact rewrites history.
+            usage: { inputTokens: 90_000 },
+          },
+          output: `reply-${state.modelMessages.length}`,
+        };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({
+      host: host(),
+      model,
+      getContextWindow: () => 100_000,
+    });
+
+    // Seed enough transcript for structural compact to have something to summarize.
+    for (let index = 0; index < 12; index += 1) {
+      await controller.send(`seed-${index} ${'x'.repeat(200)}`);
+    }
+    const beforeAuto = controller.getSnapshot().messages.length;
+    expect(beforeAuto).toBeGreaterThan(10);
+    expect(controller.getSnapshot().triggerTokens).toBeGreaterThanOrEqual(80_000);
+
+    // High usage + non-trivial history should have already auto-compacted during
+    // the seed loop (and/or on the next send). Durable UI separator is the signal.
+    await controller.send('trigger-auto-compact');
+    const after = controller.getSnapshot();
+    const compactMarkers = after.messages.filter((message) =>
+      message.role === 'system'
+      && typeof message.content === 'string'
+      && message.content.includes('Auto-compacted'),
+    );
+    expect(compactMarkers.length).toBeGreaterThan(0);
+    // Structural compact keeps a small recent window; provider history should
+    // not keep growing unbounded under repeated high-pressure sends.
+    expect(Math.max(...observedModelMessageCounts)).toBeLessThan(20);
+  });
+
+  test('auto-compact publishes full progress frames and compacting footer status', async () => {
+    const model: ChatModelPort = {
+      initialize(input) {
+        return {
+          messages: [
+            ...input.input.history,
+            { id: 'input', role: 'user', content: input.input.content },
+          ],
+          modelMessages: [
+            ...input.input.modelMessages,
+            { role: 'user', content: input.input.content },
+          ],
+          toolExecutions: [],
+        };
+      },
+      async runTurn(state) {
+        return {
+          kind: 'completed',
+          state: {
+            ...state,
+            modelMessages: [
+              ...state.modelMessages,
+              { role: 'assistant', content: `reply-${state.modelMessages.length}` },
+            ],
+            usage: { inputTokens: 90_000 },
+          },
+          output: `reply-${state.modelMessages.length}`,
+        };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({
+      host: host(),
+      model,
+      getContextWindow: () => 100_000,
+    });
+
+    // Seed transcript so structural compact has content; high usage keeps pressure hot.
+    for (let index = 0; index < 12; index += 1) {
+      await controller.send(`seed-${index} ${'x'.repeat(200)}`);
+    }
+
+    const statuses: string[] = [];
+    const progressPercents: number[] = [];
+    const unsubscribe = controller.subscribe((snapshot) => {
+      statuses.push(snapshot.status);
+      for (const message of snapshot.messages) {
+        if (message.compact?.phase === 'progress' && typeof message.compact.percent === 'number') {
+          progressPercents.push(message.compact.percent);
+        }
+      }
+    });
+
+    await controller.send(`pressure ${'y'.repeat(200)}`);
+    unsubscribe();
+
+    expect(statuses).toContain('compacting');
+    expect(progressPercents).toContain(12);
+    expect(progressPercents).toContain(48);
+    expect(progressPercents).toContain(78);
+    expect(controller.getSnapshot().status).toBe('idle');
+    expect(
+      controller.getSnapshot().messages.some((message) =>
+        message.role === 'system'
+        && typeof message.content === 'string'
+        && message.content.includes('Auto-compacted'),
+      ),
+    ).toBe(true);
+  });
 });

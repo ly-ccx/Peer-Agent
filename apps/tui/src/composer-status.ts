@@ -19,6 +19,11 @@ export interface ComposerStatusInput {
   readonly reasoningEffort?: string;
   readonly contextWindow?: number;
   readonly usage?: ComposerUsageSnapshot;
+  /**
+   * Compression-pressure numerator (Desktop Runtime triggerTokens).
+   * When set, ctx% uses this instead of last-turn usage alone.
+   */
+  readonly triggerTokens?: number;
 }
 
 export interface ComposerStatus {
@@ -86,8 +91,13 @@ function compactTokens(tokens: number): string {
 export function contextStatus(
   usage: ComposerUsageSnapshot | undefined,
   contextWindow: number | undefined,
+  triggerTokens?: number,
 ): Pick<ComposerStatus, 'context' | 'contextShort' | 'contextPercent'> {
-  const tokens = contextTokensFromUsage(usage);
+  // Prefer Runtime-style pressure numerator when available (max(estimate, usage)).
+  const usageTokens = contextTokensFromUsage(usage);
+  const tokens = Number.isFinite(triggerTokens) && (triggerTokens as number) >= 0
+    ? Math.floor(triggerTokens as number)
+    : usageTokens;
   if (!Number.isFinite(contextWindow) || contextWindow! <= 0) {
     return {
       context: `context ${compactTokens(tokens)} / ?`,
@@ -113,6 +123,7 @@ export function createComposerStatus(input: ComposerStatusInput): ComposerStatus
   const context = contextStatus(
     input.usage,
     input.contextWindow ?? contextWindowForModel(input.modelLabel),
+    input.triggerTokens,
   );
   const language = languageOption(input.locale ?? 'zh-CN');
   return {

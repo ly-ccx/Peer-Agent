@@ -161,6 +161,7 @@ export type TuiMessageKey =
   | 'composer.placeholder.disabled'
   | 'composer.running'
   | 'composer.cancelling'
+  | 'composer.compacting'
   | 'command.model.label'
   | 'command.model.description'
   | 'command.mode.label'
@@ -202,6 +203,7 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'composer.placeholder.disabled': '请先处理上方请求…',
     'composer.running': '运行中…',
     'composer.cancelling': '正在取消…',
+    'composer.compacting': '压缩中…',
     'command.model.label': '模型',
     'command.model.description': '选择模型与思考强度',
     'command.mode.label': '模式',
@@ -242,6 +244,7 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'composer.placeholder.disabled': 'Resolve the request above…',
     'composer.running': 'Working…',
     'composer.cancelling': 'Cancelling…',
+    'composer.compacting': 'Compacting…',
     'command.model.label': 'Model',
     'command.model.description': 'Choose model and reasoning effort',
     'command.mode.label': 'Mode',
@@ -289,9 +292,11 @@ export function composerPlaceholder(locale: TuiLocale, disabled = false): string
 
 export function composerRunningStatusLabel(
   locale: TuiLocale,
-  status: 'running' | 'cancelling',
+  status: 'running' | 'cancelling' | 'compacting',
 ): string {
-  return tuiMessage(locale, status === 'cancelling' ? 'composer.cancelling' : 'composer.running');
+  if (status === 'cancelling') return tuiMessage(locale, 'composer.cancelling');
+  if (status === 'compacting') return tuiMessage(locale, 'composer.compacting');
+  return tuiMessage(locale, 'composer.running');
 }
 
 export function languageSwitchNotice(locale: TuiLocale): string {

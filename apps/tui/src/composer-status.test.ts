@@ -46,6 +46,32 @@ describe('composer status', () => {
     });
   });
 
+  test('prefers triggerTokens pressure numerator over last usage alone', () => {
+    // usage alone would be ~2%; pressure seed is 5% of the window.
+    expect(contextStatus(
+      { inputTokens: 7_060 },
+      353_000,
+      17_650,
+    )).toEqual({
+      context: 'context 5%',
+      contextShort: 'ctx 5%',
+      contextPercent: 5,
+    });
+
+    expect(createComposerStatus({
+      workspaceRoot: '/tmp/project',
+      mode: 'chat',
+      modelLabel: 'gpt-5.6-sol',
+      contextWindow: 353_000,
+      usage: { inputTokens: 7_060 },
+      triggerTokens: 17_650,
+    })).toMatchObject({
+      context: 'context 5%',
+      contextShort: 'ctx 5%',
+      contextPercent: 5,
+    });
+  });
+
   test('derives mode permission and actual default reasoning status', () => {
     expect(createComposerStatus({
       workspaceRoot: '/Users/alice/Projects/peer_agent',

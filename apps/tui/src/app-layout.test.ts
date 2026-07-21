@@ -142,6 +142,8 @@ describe('TUI app layout', () => {
     expect(runningLabelSource).toContain('useStatusAnimationFrame(true, THINKING_SPINNER_INTERVAL_MS)');
     expect(runningLabelSource).toContain('thinkingSpinnerGlyph(frame)');
     expect(runningLabelSource).toContain('composerRunningStatusLabel(locale, runStatus)');
+    expect(dockSource).toContain("snapshot.status === 'compacting' ? 'compacting'");
+    expect(runningLabelSource).toContain("'compacting'");
     expect(runningLabelSource).not.toContain('composerEscToCancelHint');
     expect(runningLabelSource).not.toContain('cancelHint');
     expect(dockSource).toContain("snapshot.status !== 'idle'");

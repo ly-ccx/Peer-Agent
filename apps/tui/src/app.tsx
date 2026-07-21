@@ -159,7 +159,7 @@ function ComposerRunningStatusLabel({
   runStatus,
 }: {
   readonly locale: TuiLocale;
-  readonly runStatus: 'running' | 'cancelling';
+  readonly runStatus: 'running' | 'cancelling' | 'compacting';
 }) {
   const frame = useStatusAnimationFrame(true, THINKING_SPINNER_INTERVAL_MS);
   const spinner = thinkingSpinnerGlyph(frame);
@@ -711,7 +711,7 @@ function ComposerDock({
         <>
           <ComposerRunningStatusLabel
             locale={locale}
-            runStatus={snapshot.status === 'cancelling' ? 'cancelling' : 'running'}
+            runStatus={snapshot.status === 'cancelling' ? 'cancelling' : snapshot.status === 'compacting' ? 'compacting' : 'running'}
           />
           <ComposerModeDivider width={dividerWidth} />
         </>
@@ -783,9 +783,24 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
       },
     },
   }), [goalRunner]);
+  const selectedModelRef = useRef<RuntimeModelSelection | null>(
+    modelSelection?.getSelection() ?? null,
+  );
   const controller = useMemo(
-    () => createChatController({ host, model, planCoordinator }),
-    [host, model, planCoordinator],
+    () => createChatController({
+      host,
+      model,
+      planCoordinator,
+      getContextWindow: () => {
+        const selection = selectedModelRef.current;
+        if (!selection || !modelSelection) return undefined;
+        return modelSelection.catalog.find(
+          (entry) => entry.providerId === selection.providerId
+            && entry.modelId === selection.modelId,
+        )?.contextWindow;
+      },
+    }),
+    [host, model, planCoordinator, modelSelection],
   );
   controllerRef.current = controller;
   const [snapshot, setSnapshot] = useState(() => controller.getSnapshot());
@@ -809,6 +824,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
   const [selectedModel, setSelectedModel] = useState<RuntimeModelSelection | null>(
     () => modelSelection?.getSelection() ?? null,
   );
+  selectedModelRef.current = selectedModel;
   const [modelPickerQuery, setModelPickerQuery] = useState('');
   const [modelPickerStage, setModelPickerStage] = useState<ModelPickerStage>('models');
   const [modelPickerGroup, setModelPickerGroup] = useState<string | null>(null);
@@ -961,6 +977,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
     reasoningEffort: selectedModel?.reasoningEffort,
     usage: snapshot.usage,
     contextWindow,
+    triggerTokens: snapshot.triggerTokens,
   });
   const layout = responsiveLayout(terminal.width);
   const pickerLayout = responsivePickerLayout(

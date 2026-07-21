@@ -105,5 +105,7 @@ describe('ui messages', () => {
     expect(composerRunningStatusLabel('en-US', 'running')).toBe('Working…');
     expect(composerRunningStatusLabel('zh-CN', 'cancelling')).toBe('正在取消…');
     expect(composerRunningStatusLabel('en-US', 'cancelling')).toBe('Cancelling…');
+    expect(composerRunningStatusLabel('zh-CN', 'compacting')).toBe('压缩中…');
+    expect(composerRunningStatusLabel('en-US', 'compacting')).toBe('Compacting…');
   });
 });
