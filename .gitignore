@@ -6,6 +6,7 @@ dist-electron/
 coverage/
 *.log
 .qoder/
+.peer-tmp/
 
 target/
 
