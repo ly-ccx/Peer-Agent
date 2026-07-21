@@ -1,5 +1,5 @@
 {
-  "name": "@peer-agent/cli",
+  "name": "@peer-agent/tui",
   "version": "0.0.1-beta.38",
   "private": true,
   "type": "module",

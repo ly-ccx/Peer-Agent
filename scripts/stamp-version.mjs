@@ -46,6 +46,7 @@ const packageJsonFiles = [
   'apps/tui/package.json',
   'packages/chat-kernel/package.json',
   'packages/i18n/package.json',
+  'packages/npm-cli/package.json',
   'packages/task-thread/package.json',
   'packages/ui/package.json',
 ];

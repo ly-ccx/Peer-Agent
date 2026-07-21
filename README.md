@@ -83,7 +83,22 @@ Both share the same local Runtime and data under `~/.peer-agent` (settings, conv
 
 ### CLI-only (no Desktop)
 
-Stage 1 ships a macOS Apple Silicon archive on each GitHub Release:
+#### Option A — npm (recommended when published)
+
+```bash
+npm install -g @peer-agent/cli
+# or: pnpm add -g @peer-agent/cli
+
+peer --version
+peer
+```
+
+`postinstall` downloads `peer` + `peer-credential-helper` for your platform from the matching GitHub Release (package version == Release tag). Requires **Node.js 20+**.  
+Current Release assets: **macOS Apple Silicon** (`peer-darwin-arm64.tar.gz`). Other platforms land as multi-arch CLI builds ship.
+
+> npm publish runs on tag release when `NPM_TOKEN` is configured. Until the first successful publish, use Option B.
+
+#### Option B — GitHub Release archive
 
 1. Open the [latest Release](https://github.com/yinLiangDream/Peer-Agent/releases) and download `peer-darwin-arm64.tar.gz`.
 2. Extract and keep **both** binaries in the **same directory** (the credential helper is resolved next to `peer`):
@@ -105,7 +120,7 @@ Local build from source (developers):
 
 ```bash
 pnpm install
-pnpm --filter @peer-agent/cli build   # needs Bun + Rust
+pnpm --filter @peer-agent/tui build   # needs Bun + Rust
 ./apps/tui/dist/peer --version
 ```
 
@@ -135,11 +150,12 @@ pnpm dev
 peer_agent/
 ├── apps/
 │   ├── desktop/          # Electron desktop application
-│   └── tui/              # CLI / TUI (`peer` binary, package @peer-agent/cli)
+│   └── tui/              # CLI / TUI source (`peer` binary, package @peer-agent/tui)
 ├── packages/
 │   ├── protocol/         # Shared cross-layer contract types
 │   ├── chat-kernel/      # Conversation kernel
 │   ├── task-thread/      # Task-thread state
+│   ├── npm-cli/          # Public npm installer (`@peer-agent/cli`)
 │   ├── i18n/             # Internationalization
 │   └── ui/               # Base UI components
 ├── crates/

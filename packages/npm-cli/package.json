@@ -1,0 +1,50 @@
+{
+  "name": "@peer-agent/cli",
+  "version": "0.0.1-beta.38",
+  "description": "Peer Agent CLI — install via npm; downloads the platform peer binary from GitHub Releases.",
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "peer": "bin/peer.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yinLiangDream/Peer-Agent.git",
+    "directory": "packages/npm-cli"
+  },
+  "homepage": "https://github.com/yinLiangDream/Peer-Agent#readme",
+  "bugs": {
+    "url": "https://github.com/yinLiangDream/Peer-Agent/issues"
+  },
+  "keywords": [
+    "peer-agent",
+    "cli",
+    "ai-agent",
+    "tui"
+  ],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ]
+}

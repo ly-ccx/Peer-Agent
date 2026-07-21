@@ -26,5 +26,7 @@
 
 - 本版 GitHub Release 附带 CLI 归档（与 Desktop 同 tag / 同版本）。
 - 资产示例：`peer-darwin-arm64.tar.gz`（内含 `peer` + `peer-credential-helper`，**必须同目录**）。
-- 安装：解压后将目录加入 `PATH`，执行 `peer --version` 校验，再运行 `peer`。
-- 可不装 Desktop；会话与设置仍落在 `~/.peer-agent`，与客户端共享。 
+- 安装方式：
+  - **npm（有 `NPM_TOKEN` 且 publish 成功时）**：`npm i -g @peer-agent/cli`（或 `pnpm add -g @peer-agent/cli`），`postinstall` 自动拉本版归档。
+  - **手动**：解压归档后将目录加入 `PATH`，执行 `peer --version` 校验，再运行 `peer`。
+- 可不装 Desktop；会话与设置仍落在 `~/.peer-agent`，与客户端共享。

@@ -210,7 +210,7 @@ jobs:
       - name: Build CLI (peer + credential helper)
         env:
           PEER_CLI_VERSION: ${{ needs.meta.outputs.version }}
-        run: pnpm --filter @peer-agent/cli build
+        run: pnpm --filter @peer-agent/tui build
 
       - name: Verify peer --version
         shell: bash
@@ -279,3 +279,52 @@ jobs:
           prerelease: ${{ needs.meta.outputs.prerelease }}
           files: release-assets/*
           fail_on_unmatched_files: true
+
+  # ── npm 全局 CLI 包装包（@peer-agent/cli）—— 依赖 GitHub Release 资产已就绪 ──
+  # postinstall 会按版本从本 Release 拉 peer + helper 归档；无 NPM_TOKEN 时跳过。
+  # monorepo 源码 TUI 包是 @peer-agent/tui；对外安装器才是 @peer-agent/cli。
+  publish-npm:
+    needs: [meta, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Stamp version onto npm-cli package
+        run: node scripts/stamp-version.mjs ${{ needs.meta.outputs.version }}
+
+      - name: Publish @peer-agent/cli to npm
+        working-directory: packages/npm-cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # 发布包装包本身时不要在 CI 里再下二进制（用户装包时 postinstall 才下）
+          PEER_AGENT_SKIP_DOWNLOAD: '1'
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "NPM_TOKEN not set — skip npm publish (GitHub Release still published)."
+            exit 0
+          fi
+          # beta/alpha/rc → npm dist-tag；正式版走 latest
+          VERSION="${{ needs.meta.outputs.version }}"
+          if [[ "$VERSION" == *"-beta."* ]]; then
+            TAG=beta
+          elif [[ "$VERSION" == *"-alpha."* ]]; then
+            TAG=alpha
+          elif [[ "$VERSION" == *"-rc."* ]]; then
+            TAG=rc
+          else
+            TAG=latest
+          fi
+          echo "Publishing @peer-agent/cli@$VERSION with dist-tag $TAG"
+          # 包装包无 build 步骤；--ignore-scripts 避免 monorepo 探测/误下
+          # scoped 包需 --access public（package.json publishConfig 已声明）
+          npm publish --access public --tag "$TAG" --ignore-scripts
