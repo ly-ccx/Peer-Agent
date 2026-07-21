@@ -1,11 +1,45 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { createTuiGoalBridge, GOAL_CAPABILITY_IDS, GOAL_TOOL_NAMES } from './goal-bridge.ts';
 
 describe('TuiGoalBridge', () => {
+  test('statically imports Desktop createGoalPlanStore for packaged CLI', async () => {
+    const source = await readFile(new URL('./goal-bridge.ts', import.meta.url), 'utf8');
+    expect(source).toContain("from '../../desktop/electron/main/goal-plan-store.mjs'");
+    expect(source).toContain('createGoalPlanStore({');
+    expect(source).not.toContain('findGoalPlanStorePath');
+    expect(source).not.toContain('loadGoalPlanStoreFactory');
+    expect(source).not.toContain('Unable to locate Desktop goal-plan-store.mjs');
+  });
+
+  test('creates a real shared store without injecting a mock store', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-goal-static-'));
+    try {
+      // No `store` override: must construct via the static createGoalPlanStore import.
+      const bridge = createTuiGoalBridge({ storeDir });
+      const created = await bridge.execute({
+        capabilityId: GOAL_TOOL_NAMES.createPlan,
+        conversationId: 'conv-static-import',
+        mode: 'goal',
+        workspaceRoot: process.cwd(),
+        args: {
+          title: 'Static import store',
+          goal: 'Verify packaged CLI can create goal plans',
+          tasks: [{ title: 'Create plan via embedded store' }],
+        },
+      });
+      expect(created.result.status).toBe('success');
+      const planId = (created.result.output as { planId?: string }).planId;
+      expect(typeof planId).toBe('string');
+      expect(bridge.getPlan(planId!).planId).toBe(planId);
+    } finally {
+      await rm(storeDir, { recursive: true, force: true });
+    }
+  });
+
   test('exposes Desktop-aligned goal tools and blocks shell during intake', async () => {
     const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-goal-'));
     try {

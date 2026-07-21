@@ -7,15 +7,16 @@
  */
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { createRequire } from 'node:module';
 
 import type { RuntimeToolDefinition } from '@peer-agent/runtime-core';
 import type { RuntimeSdkProviderExecution, RuntimeSdkToolCall } from '@peer-agent/runtime-sdk';
+// Static import so `bun --compile` embeds the shared Desktop store into peer.
+// Runtime path-walking fails inside /$bunfs of the packaged binary.
+// Desktop store is plain ESM without a declaration file.
+// @ts-expect-error -- shared .mjs module has no adjacent .d.ts
+import { createGoalPlanStore } from '../../desktop/electron/main/goal-plan-store.mjs';
 
 import type { TuiMode } from './tui-mode.ts';
-
-const require = createRequire(import.meta.url);
 
 export const GOAL_TOOL_NAMES = Object.freeze({
   createPlan: 'goal_create_plan',
@@ -95,57 +96,6 @@ export interface TuiGoalBridge {
 
 function goalPlansDir(): string {
   return path.join(homedir(), '.peer-agent', 'goal-plans');
-}
-
-function findGoalPlanStorePath(): string | null {
-  const fileName = path.join('apps', 'desktop', 'electron', 'main', 'goal-plan-store.mjs');
-  const seeds = [
-    process.cwd(),
-    import.meta.dirname,
-    path.resolve(import.meta.dirname, '..'),
-    path.resolve(import.meta.dirname, '../..'),
-    path.resolve(import.meta.dirname, '../../..'),
-    path.resolve(import.meta.dirname, '../../../..'),
-  ];
-  const seen = new Set<string>();
-  for (const seed of seeds) {
-    let current = path.resolve(seed);
-    for (let depth = 0; depth < 8; depth += 1) {
-      if (seen.has(current)) break;
-      seen.add(current);
-      const candidate = path.join(current, fileName);
-      try {
-        // Access via require.resolve-like probe using fs through require
-        require('node:fs').accessSync(candidate);
-        return candidate;
-      } catch {
-        // continue walking up
-      }
-      const parent = path.dirname(current);
-      if (parent === current) break;
-      current = parent;
-    }
-  }
-  return null;
-}
-
-function loadGoalPlanStoreFactory(): (options?: { storeDir?: string; onChange?: (event: unknown) => void }) => any {
-  // Prefer direct path to Desktop store (shared on-disk format under ~/.peer-agent/goal-plans).
-  const candidate = findGoalPlanStorePath();
-  if (!candidate) {
-    throw new Error('Unable to locate Desktop goal-plan-store.mjs from TUI goal bridge');
-  }
-  try {
-    // createRequire can load this workspace .mjs module in the Bun/Node test runtime.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require(candidate);
-    if (typeof mod.createGoalPlanStore === 'function') return mod.createGoalPlanStore;
-  } catch (error) {
-    throw new Error(
-      `Unable to load Desktop goal-plan-store from ${candidate}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  throw new Error(`Desktop goal-plan-store at ${candidate} does not export createGoalPlanStore`);
 }
 
 function asString(value: unknown): string | null {
@@ -244,7 +194,7 @@ export function createTuiGoalBridge(options?: {
   readonly storeDir?: string;
   readonly store?: any;
 }): TuiGoalBridge {
-  const store = options?.store ?? loadGoalPlanStoreFactory()({
+  const store = options?.store ?? createGoalPlanStore({
     storeDir: options?.storeDir ?? goalPlansDir(),
   });
 
