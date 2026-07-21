@@ -17,6 +17,7 @@ import {
 } from './conversation-persistence.ts';
 import {
   ComposerControlsBar,
+  ComposerModeDivider,
   ComposerRunningStatusBar,
   ComposerStatusBar,
   type ComposerStatusLayout,
@@ -703,7 +704,14 @@ function ComposerDock({
       paddingLeft={layout.outerPadding}
       paddingRight={layout.outerPadding}
     >
-      {/* controls above the input; thinking renders in chat history with the message timeline. */}
+      {/* Running status above mode; thinking still renders in chat history. */}
+      {snapshot.status !== 'idle' ? (
+        <ComposerRunningStatusLabel
+          locale={locale}
+          runStatus={snapshot.status === 'cancelling' ? 'cancelling' : 'running'}
+        />
+      ) : null}
+      <ComposerModeDivider />
       <ComposerControlsBar status={status} layout={statusLayout} />
       <box position="relative" width="100%" height={5} overflow="visible">
         {slashOpen ? (
@@ -738,12 +746,6 @@ function ComposerDock({
         imagePathRegistry={imagePathRegistry}
       />
       </box>
-      {snapshot.status !== 'idle' ? (
-        <ComposerRunningStatusLabel
-          locale={locale}
-          runStatus={snapshot.status === 'cancelling' ? 'cancelling' : 'running'}
-        />
-      ) : null}
       <ComposerStatusBar status={status} layout={statusLayout} />
     </box>
   );

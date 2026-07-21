@@ -5,6 +5,7 @@ export type ComposerStatusLayout = 'wide' | 'compact' | 'narrow';
 
 /**
  * Footer running status: spinner + status text only.
+ * Mounted above the mode controls bar.
  */
 export function ComposerRunningStatusBar({
   spinner,
@@ -17,12 +18,23 @@ export function ComposerRunningStatusBar({
     <box
       flexDirection="row"
       width="100%"
-      marginTop={1}
       flexShrink={0}
+      paddingBottom={0}
     >
       <text fg={COLOR.accent} wrapMode="none">
         <span>{spinner}</span>
         <span> {statusLabel}</span>
+      </text>
+    </box>
+  );
+}
+
+/** Thin rule between running status (if any) and the mode controls bar. */
+export function ComposerModeDivider() {
+  return (
+    <box width="100%" height={1} flexShrink={0}>
+      <text fg={COLOR.subtle} wrapMode="none">
+        {'─'.repeat(80)}
       </text>
     </box>
   );

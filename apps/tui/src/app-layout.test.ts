@@ -125,7 +125,7 @@ describe('TUI app layout', () => {
     expect(appSource).not.toContain('thinkingText={dockThinkingText}');
   });
 
-  test('mounts a Qoder-style running status bar under the composer input', () => {
+  test('mounts a Qoder-style running status bar above the mode controls', () => {
     const dockSource = appSource.slice(
       appSource.indexOf('function ComposerDock'),
       appSource.indexOf('export function App'),
@@ -136,6 +136,7 @@ describe('TUI app layout', () => {
     );
 
     expect(statusViewSource).toContain('export function ComposerRunningStatusBar');
+    expect(statusViewSource).toContain('export function ComposerModeDivider');
     expect(statusViewSource).not.toContain('cancelHint');
     expect(appSource).toContain('function ComposerRunningStatusLabel');
     expect(runningLabelSource).toContain('useStatusAnimationFrame(true, THINKING_SPINNER_INTERVAL_MS)');
@@ -145,9 +146,17 @@ describe('TUI app layout', () => {
     expect(runningLabelSource).not.toContain('cancelHint');
     expect(dockSource).toContain("snapshot.status !== 'idle'");
     expect(dockSource).toContain('<ComposerRunningStatusLabel');
-    expect(dockSource.indexOf('<ComposerRunningStatusLabel')).toBeLessThan(
-      dockSource.indexOf('<ComposerStatusBar'),
-    );
+    expect(dockSource).toContain('<ComposerModeDivider />');
+    const runningAt = dockSource.indexOf('<ComposerRunningStatusLabel');
+    const dividerAt = dockSource.indexOf('<ComposerModeDivider />');
+    const controlsAt = dockSource.indexOf('<ComposerControlsBar status={status} layout={statusLayout} />');
+    const inputAt = dockSource.indexOf('<Composer\n');
+    const statusAt = dockSource.indexOf('<ComposerStatusBar status={status} layout={statusLayout} />');
+    expect(runningAt).toBeGreaterThanOrEqual(0);
+    expect(dividerAt).toBeGreaterThan(runningAt);
+    expect(controlsAt).toBeGreaterThan(dividerAt);
+    expect(inputAt).toBeGreaterThan(controlsAt);
+    expect(statusAt).toBeGreaterThan(inputAt);
   });
 
   test('preserves typed composer draft when image paste reports a replacement value', () => {
