@@ -31,6 +31,8 @@ interface SubmenuCoords {
   readonly left: number;
   readonly top: number;
   readonly side: 'right' | 'left';
+  /** 基于可用视口空间动态计算，避免长列表被写死高度裁成“像没加上”。 */
+  readonly maxHeight: number;
 }
 
 type FocusZone = 'root' | 'sub';
@@ -73,7 +75,9 @@ export function CascadingMenu({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const submenuRef = useRef<HTMLDivElement | null>(null);
   const groupRowRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const listId = useId();
+  const [submenuScrollState, setSubmenuScrollState] = useState({ canUp: false, canDown: false });
 
   // 查找当前选中项对应的分组和项目，用于触发器展示「分组 · 模型」。
   const selectedGroupIndex = groups.findIndex((g) => g.items.some((item) => item.id === value));
@@ -132,9 +136,10 @@ export function CascadingMenu({
     });
   }, [menuPlacement]);
 
-  // 依据当前展开的 group 行位置，计算二级子菜单坐标：
+  // 依据当前展开的 group 行位置，计算二级子菜单坐标与可用高度：
   // 默认贴一级面板右侧并与当前 group 行顶对齐；贴右边界时翻向左侧；
-  // 垂直方向优先与 group 行顶对齐，必要时再贴视口底边，避免与一级面板错位。
+  // 垂直方向优先与 group 行顶对齐，必要时再贴视口底边；
+  // maxHeight 跟随视口可用空间，避免长列表被固定高度裁切成“像没加上”。
   const updateSubmenuPosition = useCallback(() => {
     const panel = menuRef.current;
     const row = groupRowRefs.current[activeGroupIndex];
@@ -147,7 +152,10 @@ export function CascadingMenu({
     const gap = 0;
     const margin = 8;
     const subW = submenuRef.current?.offsetWidth ?? 220;
-    const subH = submenuRef.current?.offsetHeight ?? 0;
+    const preferredTop = Math.max(margin, Math.min(rowRect.top, panelRect.top));
+    const maxHeight = Math.max(160, window.innerHeight - preferredTop - margin);
+    const measuredH = submenuRef.current?.scrollHeight ?? 0;
+    const subH = measuredH > 0 ? Math.min(measuredH, maxHeight) : maxHeight;
     let left = panelRect.right + gap;
     let side: SubmenuCoords['side'] = 'right';
     if (left + subW > window.innerWidth - margin) {
@@ -155,14 +163,15 @@ export function CascadingMenu({
       side = 'left';
     }
     // 与一级当前行顶对齐；若底部溢出则整体上移，但不高于一级面板顶。
-    let top = rowRect.top;
-    if (subH > 0 && top + subH > window.innerHeight - margin) {
+    let top = preferredTop;
+    if (top + subH > window.innerHeight - margin) {
       top = Math.max(margin, window.innerHeight - subH - margin);
     }
     if (top < panelRect.top) {
-      top = panelRect.top;
+      top = Math.max(margin, panelRect.top);
     }
-    setSubmenuCoords({ left, top, side });
+    const finalMaxHeight = Math.max(160, window.innerHeight - top - margin);
+    setSubmenuCoords({ left, top, side, maxHeight: finalMaxHeight });
   }, [activeGroupIndex]);
 
   useLayoutEffect(() => {
@@ -208,6 +217,18 @@ export function CascadingMenu({
     setOpen(true);
   }, [groups.length, selectedGroupIndex]);
 
+  const updateSubmenuScrollState = useCallback(() => {
+    const el = submenuRef.current;
+    if (!el) {
+      setSubmenuScrollState({ canUp: false, canDown: false });
+      return;
+    }
+    const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+    const canUp = el.scrollTop > 1;
+    const canDown = el.scrollTop < maxScroll - 1;
+    setSubmenuScrollState({ canUp, canDown });
+  }, []);
+
   const enterSubmenu = useCallback((gi: number) => {
     const items = groups[gi]?.items ?? [];
     if (items.length === 0) return;
@@ -216,6 +237,22 @@ export function CascadingMenu({
     const selIdx = items.findIndex((it) => it.id === value && !it.disabled);
     setActiveItemIndex(selIdx >= 0 ? selIdx : firstEnabledIndex(items));
   }, [groups, value]);
+
+  // 打开/切换子菜单后，把当前选中模型滚进可视区，并刷新“还有更多”滚动提示。
+  useLayoutEffect(() => {
+    if (!open || !submenuCoords || activeGroupIndex < 0) {
+      setSubmenuScrollState({ canUp: false, canDown: false });
+      return;
+    }
+    const items = groups[activeGroupIndex]?.items ?? [];
+    const selectedIdx = items.findIndex((it) => it.id === value);
+    const targetIdx = selectedIdx >= 0 ? selectedIdx : activeItemIndex;
+    const target = targetIdx >= 0 ? itemRefs.current[targetIdx] : null;
+    if (target) {
+      target.scrollIntoView({ block: 'nearest' });
+    }
+    updateSubmenuScrollState();
+  }, [open, submenuCoords, activeGroupIndex, activeItemIndex, groups, value, updateSubmenuScrollState]);
 
   const onKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
     if (disabled) return;
@@ -301,7 +338,12 @@ export function CascadingMenu({
     : { position: 'fixed', left: 0, top: 0, visibility: 'hidden' };
 
   const submenuStyle: CSSProperties = submenuCoords
-    ? { position: 'fixed', left: submenuCoords.left, top: submenuCoords.top }
+    ? {
+        position: 'fixed',
+        left: submenuCoords.left,
+        top: submenuCoords.top,
+        maxHeight: submenuCoords.maxHeight,
+      }
     : { position: 'fixed', left: 0, top: 0, visibility: 'hidden' };
 
   const rootPanel = open
@@ -365,11 +407,20 @@ export function CascadingMenu({
     ? createPortal(
         <div
           ref={submenuRef}
-          className={`pa-cascading-submenu-panel ${className ?? ''} ${submenuCoords?.side === 'left' ? 'is-left' : 'is-right'}`}
+          className={[
+            'pa-cascading-submenu-panel',
+            className ?? '',
+            submenuCoords?.side === 'left' ? 'is-left' : 'is-right',
+            submenuScrollState.canUp ? 'can-scroll-up' : '',
+            submenuScrollState.canDown ? 'can-scroll-down' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
           role="menu"
           aria-label={activeGroup.label}
           style={submenuStyle}
           onKeyDown={onKeyDown}
+          onScroll={updateSubmenuScrollState}
         >
           {submenuItems.map((item, ii) => {
             const itemDisabled = item.disabled ?? false;
@@ -378,6 +429,9 @@ export function CascadingMenu({
             return (
               <button
                 key={item.id}
+                ref={(node) => {
+                  itemRefs.current[ii] = node;
+                }}
                 type="button"
                 role="menuitemradio"
                 aria-checked={isSelected}

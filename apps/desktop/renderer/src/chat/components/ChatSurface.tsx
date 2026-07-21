@@ -499,6 +499,34 @@ export function ChatSurface({
     return () => window.clearTimeout(timeoutId);
   }, [providerRecoveryNotice]);
 
+  // connection retry 横幅倒计时：主进程只在进入 retrying 时推送一次 delayMs，
+  // 表达层需要本地剩余秒数，才能每秒递减「约 Xs 后重试」。
+  const [connectionRetryRemainingSeconds, setConnectionRetryRemainingSeconds] = useState<number | null>(null);
+  useEffect(() => {
+    if (
+      !providerRecoveryNotice
+      || providerRecoveryNotice.kind !== 'connection'
+      || providerRecoveryNotice.status !== 'retrying'
+    ) {
+      setConnectionRetryRemainingSeconds(null);
+      return undefined;
+    }
+    const delayMs = Math.max(0, providerRecoveryNotice.delayMs ?? 0);
+    const startedAt = Date.now();
+    const computeRemaining = () =>
+      Math.max(0, Math.ceil((delayMs - (Date.now() - startedAt)) / 1000));
+    setConnectionRetryRemainingSeconds(computeRemaining());
+    const intervalId = window.setInterval(() => {
+      setConnectionRetryRemainingSeconds(computeRemaining());
+    }, 250);
+    return () => window.clearInterval(intervalId);
+  }, [
+    providerRecoveryNotice?.kind,
+    providerRecoveryNotice?.status,
+    providerRecoveryNotice?.attempt,
+    providerRecoveryNotice?.delayMs,
+  ]);
+
   useEffect(() => {
     if (!isPageActive || !imagePreview) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1902,8 +1930,8 @@ export function ChatSurface({
               {providerRecoveryNotice.kind === 'connection'
                 ? providerRecoveryNotice.status === 'retrying'
                   ? isZh
-                    ? `网络连接波动，正在重试连接（第 ${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10} 次，约 ${Math.round((providerRecoveryNotice.delayMs ?? 0) / 1000)}s 后重试）`
-                    : `Network connection interrupted; retrying (${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10}, in about ${Math.round((providerRecoveryNotice.delayMs ?? 0) / 1000)}s)`
+                    ? `网络连接波动，正在重试连接（第 ${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10} 次，约 ${connectionRetryRemainingSeconds ?? Math.ceil((providerRecoveryNotice.delayMs ?? 0) / 1000)}s 后重试）`
+                    : `Network connection interrupted; retrying (${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10}, in about ${connectionRetryRemainingSeconds ?? Math.ceil((providerRecoveryNotice.delayMs ?? 0) / 1000)}s)`
                   : isZh
                     ? '连接已恢复，正在继续生成'
                     : 'Connection recovered; continuing generation'

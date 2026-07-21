@@ -558,6 +558,20 @@ export function Sidebar({
         <span className="sidebar-brand-copy">
           <BrandWordmark />
         </span>
+        {onOpenSearch ? (
+          <button
+            type="button"
+            className="sidebar-search-icon-btn"
+            onClick={onOpenSearch}
+            title={`${i18n.t('searchChats.open')} (${i18n.t('searchChats.shortcut')})`}
+            aria-label={`${i18n.t('searchChats.open')} (${i18n.t('searchChats.shortcut')})`}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.3-4.3" />
+            </svg>
+          </button>
+        ) : null}
       </div>
 
       <div className="sidebar-workspace-wrap" ref={wsWrapRef}>
@@ -630,36 +644,18 @@ export function Sidebar({
             <span>{isZh ? '返回会话' : 'Back to Chats'}</span>
           </button>
         ) : (
-          <>
-            {onOpenSearch ? (
-              <button
-                type="button"
-                className="sidebar-search-chats"
-                onClick={onOpenSearch}
-                title={i18n.t('searchChats.open')}
-                aria-label={i18n.t('searchChats.open')}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <circle cx="11" cy="11" r="8" />
-                  <path d="m21 21-4.3-4.3" />
-                </svg>
-                <span>{i18n.t('searchChats.open')}</span>
-                <kbd className="sidebar-search-chats-kbd">{i18n.t('searchChats.shortcut')}</kbd>
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="sidebar-new-chat"
-              onClick={onNewChat}
-              title={newTaskShortcutLabel ? `${isZh ? '新建任务' : 'New Task'} (${newTaskShortcutLabel})` : (isZh ? '新建任务' : 'New Task')}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 5v14" /><path d="M5 12h14" />
-              </svg>
-              <span>{isZh ? '新建任务' : 'New Task'}</span>
-              {newTaskShortcutLabel ? <kbd className="sidebar-new-chat-kbd">{newTaskShortcutLabel}</kbd> : null}
-            </button>
-          </>
+          <button
+            type="button"
+            className="sidebar-new-chat"
+            onClick={onNewChat}
+            title={newTaskShortcutLabel ? `${isZh ? '新建任务' : 'New Task'} (${newTaskShortcutLabel})` : (isZh ? '新建任务' : 'New Task')}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5v14" /><path d="M5 12h14" />
+            </svg>
+            <span>{isZh ? '新建任务' : 'New Task'}</span>
+            {newTaskShortcutLabel ? <kbd className="sidebar-new-chat-kbd">{newTaskShortcutLabel}</kbd> : null}
+          </button>
         )}
       </div>
 

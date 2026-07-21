@@ -238,12 +238,17 @@ function TokenTrendChart({
   const chartW = width - padX * 2;
   const chartH = height - padY * 2;
   const safeMax = Math.max(maxTokens, 1);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
-  const points = days.map((day, index) => {
-    const x = padX + (days.length <= 1 ? chartW / 2 : (index / (days.length - 1)) * chartW);
-    const y = padY + chartH - (day.totalTokens / safeMax) * chartH;
-    return { x, y, day };
-  });
+  const points = useMemo(
+    () =>
+      days.map((day, index) => {
+        const x = padX + (days.length <= 1 ? chartW / 2 : (index / (days.length - 1)) * chartW);
+        const y = padY + chartH - (day.totalTokens / safeMax) * chartH;
+        return { x, y, day };
+      }),
+    [chartH, chartW, days, padX, padY, safeMax],
+  );
 
   const linePath = points
     .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`)
@@ -256,26 +261,106 @@ function TokenTrendChart({
   const firstLabel = days[0]?.date?.slice(5) || '';
   const midLabel = days[Math.floor(days.length / 2)]?.date?.slice(5) || '';
   const lastLabel = days[days.length - 1]?.date?.slice(5) || '';
+  const active = hoverIndex != null ? points[hoverIndex] : null;
+
+  const resolveHoverIndex = useCallback(
+    (clientX: number, target: SVGSVGElement) => {
+      if (points.length === 0) {
+        setHoverIndex(null);
+        return;
+      }
+      const rect = target.getBoundingClientRect();
+      if (rect.width <= 0) {
+        setHoverIndex(null);
+        return;
+      }
+      const svgX = ((clientX - rect.left) / rect.width) * width;
+      let nearest = 0;
+      let bestDist = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < points.length; i += 1) {
+        const dist = Math.abs(points[i].x - svgX);
+        if (dist < bestDist) {
+          bestDist = dist;
+          nearest = i;
+        }
+      }
+      setHoverIndex(nearest);
+    },
+    [points, width],
+  );
 
   return (
     <div className="usage-trend">
-      <svg className="usage-trend__svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={i18n.t('settings.usage.trend')}>
-        <defs>
-          <linearGradient id="usageTrendFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--pa-accent, #3b82f6)" stopOpacity="0.35" />
-            <stop offset="100%" stopColor="var(--pa-accent, #3b82f6)" stopOpacity="0.02" />
-          </linearGradient>
-        </defs>
-        <line
-          x1={padX}
-          y1={padY + chartH}
-          x2={padX + chartW}
-          y2={padY + chartH}
-          className="usage-trend__axis"
-        />
-        {areaPath ? <path d={areaPath} fill="url(#usageTrendFill)" /> : null}
-        {linePath ? <path d={linePath} className="usage-trend__line" fill="none" /> : null}
-      </svg>
+      <div className="usage-trend__chart">
+        <svg
+          className="usage-trend__svg"
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label={i18n.t('settings.usage.trend')}
+          onMouseMove={(event) => resolveHoverIndex(event.clientX, event.currentTarget)}
+          onMouseLeave={() => setHoverIndex(null)}
+        >
+          <defs>
+            <linearGradient id="usageTrendFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--pa-accent, #3b82f6)" stopOpacity="0.35" />
+              <stop offset="100%" stopColor="var(--pa-accent, #3b82f6)" stopOpacity="0.02" />
+            </linearGradient>
+          </defs>
+          <line
+            x1={padX}
+            y1={padY + chartH}
+            x2={padX + chartW}
+            y2={padY + chartH}
+            className="usage-trend__axis"
+          />
+          {areaPath ? <path d={areaPath} fill="url(#usageTrendFill)" /> : null}
+          {linePath ? <path d={linePath} className="usage-trend__line" fill="none" /> : null}
+          {active ? (
+            <>
+              <line
+                x1={active.x}
+                y1={padY}
+                x2={active.x}
+                y2={padY + chartH}
+                className="usage-trend__guide"
+              />
+              <circle
+                cx={active.x}
+                cy={active.y}
+                r={4.5}
+                className="usage-trend__dot"
+              />
+            </>
+          ) : null}
+          {/* 透明命中层：扩大可 hover 区域，避免必须精确点到折线 */}
+          <rect
+            x={padX}
+            y={padY}
+            width={chartW}
+            height={chartH}
+            className="usage-trend__hit"
+          />
+        </svg>
+        {active ? (
+          <div
+            className="usage-trend__tooltip"
+            style={{
+              left: `${(active.x / width) * 100}%`,
+              top: `${Math.max(8, (active.y / height) * 100 - 8)}%`,
+            }}
+          >
+            <div className="usage-trend__tooltip-date">{active.day.date}</div>
+            <div className="usage-trend__tooltip-row">
+              <span>{formatTokenCount(active.day.totalTokens)}</span>
+              <span>tokens</span>
+            </div>
+            <div className="usage-trend__tooltip-row">
+              <span>{formatCount(active.day.requestCount)}</span>
+              <span>req</span>
+            </div>
+          </div>
+        ) : null}
+      </div>
       <div className="usage-trend__xlabels">
         <span>{firstLabel}</span>
         <span>{midLabel}</span>

@@ -150,6 +150,34 @@
   min-width: 0;
   flex: 0 1 136px;
 }
+/* Compact search entry beside brand wordmark (⌘K still opens search). */
+.sidebar-search-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--pa-text-secondary, var(--graphite-soft));
+  cursor: pointer;
+  transition:
+    background var(--za-motion-fast),
+    color var(--za-motion-fast);
+  -webkit-app-region: no-drag;
+}
+.sidebar-search-icon-btn:hover {
+  background: var(--za-sidebar-active-bg);
+  color: var(--graphite-ink, var(--graphite-base));
+}
+.sidebar-search-icon-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--azure-seal, #3b82f6) 55%, transparent);
+  outline-offset: 1px;
+}
 .brand-wordmark {
   display: block;
   width: 136px;
@@ -333,30 +361,7 @@
   padding: 0 var(--space-3) var(--space-2);
   -webkit-app-region: no-drag;
 }
-.sidebar-search-chats {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  margin: 0 0 8px;
-  padding: 8px 10px;
-  border: none;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--pa-text-secondary, var(--graphite-soft));
-  cursor: pointer;
-  font-size: 0.82rem;
-  transition: background var(--za-motion-fast);
-}
-.sidebar-search-chats:hover {
-  background: var(--za-sidebar-active-bg);
-}
-.sidebar-search-chats span {
-  flex: 1 1 auto;
-  text-align: left;
-}
-/* Shared shortcut badge for search / new-task rows — keep width & padding aligned. */
-.sidebar-search-chats-kbd,
+/* Shortcut badge for new-task row. */
 .sidebar-new-chat-kbd {
   font-size: 11px;
   line-height: 1;

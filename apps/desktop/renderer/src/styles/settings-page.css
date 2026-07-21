@@ -1768,10 +1768,15 @@
   gap: 6px;
 }
 
+.usage-trend__chart {
+  position: relative;
+}
+
 .usage-trend__svg {
   width: 100%;
   height: 180px;
   display: block;
+  cursor: crosshair;
 }
 
 .usage-trend__axis {
@@ -1784,6 +1789,58 @@
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.usage-trend__guide {
+  stroke: var(--pa-border-strong, var(--pa-border));
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  pointer-events: none;
+}
+
+.usage-trend__dot {
+  fill: var(--pa-surface, #fff);
+  stroke: var(--pa-accent, #3b82f6);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+.usage-trend__hit {
+  fill: transparent;
+  pointer-events: none;
+}
+
+.usage-trend__tooltip {
+  position: absolute;
+  z-index: 2;
+  min-width: 120px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--pa-border-subtle);
+  background: var(--pa-surface-elevated, var(--pa-surface));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  color: var(--pa-text-primary);
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+  white-space: nowrap;
+}
+
+.usage-trend__tooltip-date {
+  margin-bottom: 4px;
+  color: var(--pa-text-secondary);
+  font-weight: 600;
+}
+
+.usage-trend__tooltip-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.usage-trend__tooltip-row span:last-child {
+  color: var(--pa-text-secondary);
 }
 
 .usage-trend__xlabels {
