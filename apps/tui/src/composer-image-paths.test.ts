@@ -8,6 +8,7 @@ import {
   expandImageChipsInText,
   extractImagePathTokens,
   formatImagePathChip,
+  formatUserMessageBody,
   isSlashCommandInput,
   loadLocalImageAttachments,
   mergeImagePasteWithExistingDraft,
@@ -171,6 +172,29 @@ describe('extractImagePathTokens + loadLocalImageAttachments', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  test('formatUserMessageBody keeps typed text and adds image chip', () => {
+    const withText = formatUserMessageBody('看一下', [{ url: 'data:image/png;base64,abc' }]);
+    expect(withText.text).toBe('看一下');
+    expect(withText.imageLabel).toBe('[Image]');
+
+    const pureImage = formatUserMessageBody('', [{ url: 'data:image/png;base64,abc' }]);
+    expect(pureImage.text).toBe('');
+    expect(pureImage.imageLabel).toBe('[Image]');
+
+    const placeholderOnly = formatUserMessageBody('[image: shot.png]', [
+      { url: 'data:image/png;base64,abc' },
+    ]);
+    expect(placeholderOnly.text).toBe('');
+    expect(placeholderOnly.imageLabel).toBe('[Image]');
+
+    const multi = formatUserMessageBody('两张图', [
+      { url: 'data:image/png;base64,a' },
+      { url: 'data:image/png;base64,b' },
+    ]);
+    expect(multi.text).toBe('两张图');
+    expect(multi.imageLabel).toBe('[Images × 2]');
   });
 
 });

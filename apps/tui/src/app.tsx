@@ -756,6 +756,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
   controllerRef.current = controller;
   const [snapshot, setSnapshot] = useState(() => controller.getSnapshot());
   const [goal, setGoal] = useState<RuntimeGoalSnapshot | null>(null);
+  // Shared Desktop goal-plan store snapshot for this conversation (if any).
+  const [sharedGoalPlan, setSharedGoalPlan] = useState<any | null>(null);
   const [approval, setApproval] = useState<PendingApproval | null>(null);
   const [approvalSelection, setApprovalSelection] = useState(0);
   const [planSelection, setPlanSelection] = useState(0);
@@ -992,6 +994,24 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
     setApprovalSelection(0);
     setApproval(next);
   }), [host]);
+  // Poll shared goal-plan store so CLI shows plans created via goal_create_plan.
+  useEffect(() => {
+    const bridge = host.goalBridge;
+    if (!bridge) return undefined;
+    const conversationId = 'tui-chat';
+    const refresh = () => {
+      const plans = bridge.listPlansByConversation(conversationId);
+      const active = [...plans]
+        .reverse()
+        .find((plan) => !['cancelled', 'completed', 'failed'].includes(String(plan?.status ?? '')))
+        ?? plans.at(-1)
+        ?? null;
+      setSharedGoalPlan(active);
+    };
+    refresh();
+    const timer = setInterval(refresh, 1200);
+    return () => clearInterval(timer);
+  }, [host, snapshot.mode, snapshot.status, snapshot.messages.length]);
 
   const handleResumeConversationSummary = useCallback((selected: TuiConversationSummary | undefined) => {
     if (!selected) {
@@ -1638,6 +1658,34 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
             </text>
           ))}
           <text fg={COLOR.muted}>[p] Pause · [r] Resume · [c] Cancel</text>
+        </box>
+      ) : sharedGoalPlan ? (
+        <box flexDirection="column" border borderStyle="rounded" borderColor={COLOR.success} padding={1} backgroundColor={COLOR.panel} marginLeft={layout.outerPadding} marginRight={layout.outerPadding}>
+          <text fg={COLOR.success}>
+            <strong>Goal plan</strong> · {String(sharedGoalPlan.title ?? sharedGoalPlan.goal ?? sharedGoalPlan.planId)} · {String(sharedGoalPlan.status ?? 'unknown')}
+          </text>
+          <text fg={COLOR.muted}>
+            id {String(sharedGoalPlan.planId ?? '')} · {
+              Array.isArray(sharedGoalPlan.tasks)
+                ? `${sharedGoalPlan.tasks.filter((task: any) => task?.status === 'completed').length}/${sharedGoalPlan.tasks.length} tasks`
+                : '0/0 tasks'
+            }
+          </text>
+          {(Array.isArray(sharedGoalPlan.tasks) ? sharedGoalPlan.tasks : []).slice(0, 8).map((task: any) => (
+            <text
+              key={String(task?.taskId ?? task?.title)}
+              fg={task?.status === 'completed'
+                ? COLOR.success
+                : task?.status === 'running'
+                  ? COLOR.diffHunk
+                  : task?.status === 'failed' || task?.status === 'blocked'
+                    ? COLOR.danger
+                    : COLOR.muted}
+            >
+              {task?.status === 'completed' ? '✓' : task?.status === 'running' ? '▶' : task?.status === 'failed' || task?.status === 'blocked' ? '!' : '○'} {String(task?.title ?? task?.taskId ?? '')}
+            </text>
+          ))}
+          <text fg={COLOR.muted}>shared store · ~/.peer-agent/goal-plans</text>
         </box>
       ) : null}
 

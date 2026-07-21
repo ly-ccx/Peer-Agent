@@ -354,3 +354,41 @@ export async function loadLocalImageAttachments(
     missingPaths,
   };
 }
+
+/**
+ * Visible history placeholder for image attachments in TUI chat.
+ * Terminal cannot render pixels; keep a stable chip so pure-image turns do not "disappear".
+ */
+export function formatHistoryImageLabel(
+  images: readonly MessageImageLike[] | undefined,
+): string {
+  const count = images?.length ?? 0;
+  if (count <= 0) return '';
+  if (count === 1) return '[Image]';
+  return `[Images × ${count}]`;
+}
+
+function looksLikeImagePlaceholder(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  // Composer displayContent / older pure-image payloads.
+  return /^\[images?\s*[:：]/i.test(trimmed) || /^\[Image(?:s)?\b/i.test(trimmed);
+}
+
+/**
+ * User-visible body for a history bubble: typed text + optional image chip.
+ * When content is only an auto image placeholder and images[] is present,
+ * prefer the chip so pure-image turns do not render blank or duplicated.
+ */
+export function formatUserMessageBody(
+  content: string,
+  images?: readonly MessageImageLike[],
+): { readonly text: string; readonly imageLabel: string | null } {
+  const imageLabel = formatHistoryImageLabel(images) || null;
+  const raw = content.trim();
+  const text = raw && !(imageLabel && looksLikeImagePlaceholder(raw)) ? raw : '';
+  return {
+    text,
+    imageLabel,
+  };
+}

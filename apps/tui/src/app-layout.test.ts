@@ -371,6 +371,17 @@ describe('TUI app layout', () => {
     expect(appSource).not.toContain('show details');
   });
 
+  test('ChatHistory user messages render image attachments as visible chips', () => {
+    const historyStart = appSource.indexOf('function ChatHistory');
+    expect(historyStart).toBeGreaterThanOrEqual(0);
+    // ToolStatusGlyph is defined before ChatHistory; slice forward from ChatHistory body.
+    const historySource = appSource.slice(historyStart, historyStart + 5000);
+    expect(historySource).toContain('formatUserMessageBody');
+    expect(historySource).toContain('message.images');
+    expect(historySource).toContain('imageLabel');
+    expect(appSource).toContain("attachment.images.length > 0 ? '' : attachment.displayContent");
+  });
+
   test('uses the shared theme module for chrome colors and picker selection', () => {
     expect(appSource).toContain("from './tui-theme.ts'");
     expect(appSource).toContain('PICKER_CHROME.selectedBackground');
