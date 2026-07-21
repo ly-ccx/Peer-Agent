@@ -1,13 +1,28 @@
 import {
-  B3_WORDMARK_COLORS,
   renderB3Wordmark,
   type B3ColorRole,
   type B3TerminalLine,
   type B3TerminalVariant,
 } from './b3-wordmark.ts';
+import { COLOR } from './tui-theme.ts';
+
+/**
+ * Map wordmark roles onto the live Frost palette so light mode uses dark ink
+ * and dark mode keeps the original light glyphs.
+ */
+export function resolveB3WordmarkColor(role: B3ColorRole): string {
+  switch (role) {
+    case 'primary':
+      return COLOR.text;
+    case 'signal':
+      return COLOR.info;
+    case 'muted':
+      return COLOR.muted;
+  }
+}
 
 function colorForRole(role: B3ColorRole | undefined): string | undefined {
-  return role ? B3_WORDMARK_COLORS[role] : undefined;
+  return role ? resolveB3WordmarkColor(role) : undefined;
 }
 
 function B3WordmarkLine({ line }: { readonly line: B3TerminalLine }) {

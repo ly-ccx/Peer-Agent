@@ -170,6 +170,14 @@ export type TuiMessageKey =
   | 'command.permissions.description'
   | 'command.language.label'
   | 'command.language.description'
+  | 'command.theme.label'
+  | 'command.theme.description'
+  | 'picker.theme.title'
+  | 'picker.theme.hint'
+  | 'picker.theme.description'
+  | 'theme.switched.light'
+  | 'theme.switched.dark'
+  | 'theme.switched.system'
   | 'command.clear.label'
   | 'command.clear.description'
   | 'command.compact.label'
@@ -212,6 +220,14 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'command.permissions.description': '选择本会话的权限策略',
     'command.language.label': '语言',
     'command.language.description': '切换界面与模型回复语言（中文/英文）',
+    'command.theme.label': '主题',
+    'command.theme.description': '切换浅色 / 深色 / 跟随系统（Peer Frost）',
+    'picker.theme.title': '主题',
+    'picker.theme.hint': '↑↓ 选择 · Enter 确认 · Esc 关闭',
+    'picker.theme.description': '与桌面端 Peer Frost 浅/深主题对齐',
+    'theme.switched.light': '已切换为浅色主题',
+    'theme.switched.dark': '已切换为深色主题',
+    'theme.switched.system': '已切换为跟随系统主题',
     'command.clear.label': '清空会话',
     'command.clear.description': '清空消息、模型上下文与错误',
     'command.compact.label': '压缩上下文',
@@ -253,6 +269,14 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'command.permissions.description': 'Choose the session permission policy',
     'command.language.label': 'Language',
     'command.language.description': 'Switch UI and model reply language (Chinese/English)',
+    'command.theme.label': 'Theme',
+    'command.theme.description': 'Switch light / dark / system theme (Peer Frost)',
+    'picker.theme.title': 'Theme',
+    'picker.theme.hint': '↑↓ select · Enter confirm · Esc close',
+    'picker.theme.description': 'Aligns with desktop Peer Frost light/dark themes',
+    'theme.switched.light': 'Switched to light theme',
+    'theme.switched.dark': 'Switched to dark theme',
+    'theme.switched.system': 'Switched to system theme',
     'command.clear.label': 'Clear chat',
     'command.clear.description': 'Clear messages, model context, and errors',
     'command.compact.label': 'Compact context',
@@ -302,4 +326,17 @@ export function composerRunningStatusLabel(
 export function languageSwitchNotice(locale: TuiLocale): string {
   if (locale === 'zh-CN') return MESSAGES['zh-CN']['language.switched'];
   return MESSAGES['en-US']['language.switched'];
+}
+
+export function themeSwitchNotice(
+  locale: TuiLocale,
+  mode: 'light' | 'dark' | 'system',
+): string {
+  const key =
+    mode === 'light'
+      ? 'theme.switched.light'
+      : mode === 'dark'
+        ? 'theme.switched.dark'
+        : 'theme.switched.system';
+  return tuiMessage(locale, key);
 }

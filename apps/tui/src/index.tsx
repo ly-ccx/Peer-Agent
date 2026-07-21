@@ -28,6 +28,7 @@ import { createTuiHost } from './tui-host.ts';
 import { createTuiProviderFetch } from './provider-transport.ts';
 import { createTuiShutdown } from './tui-shutdown.ts';
 import { buildTuiSystemPrompt, createTuiLanguageStore } from './tui-language.ts';
+import { createTuiThemeStore } from './tui-theme.ts';
 
 // Fast path: `peer --version` / `peer -v` → single line, no TUI boot.
 if (handleCliVersionArgs(process.argv.slice(2))) {
@@ -39,6 +40,7 @@ const workspaceRoot = process.env.PEER_WORKSPACE_ROOT ?? process.cwd();
 const userDataPath = process.env.PEER_USER_DATA_PATH ?? path.join(os.homedir(), '.peer-agent');
 const localAccessStore = createTuiLocalAccessStore({ userDataPath });
 const languageStore = createTuiLanguageStore({ userDataPath });
+const themeStore = createTuiThemeStore({ userDataPath });
 const host = createTuiHost({
   workspaceRoot,
   userDataPath,
@@ -186,6 +188,7 @@ root.render(
     modelLabel={modelConfig.modelLabel}
     modelSelection={modelSelection}
     languageStore={languageStore}
+    themeStore={themeStore}
     onQuit={shutdown}
   />,
 );

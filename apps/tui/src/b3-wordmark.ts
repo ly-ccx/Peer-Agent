@@ -67,6 +67,11 @@ const GLYPHS = {
   ],
 } as const;
 
+/**
+ * Static dark-theme reference used by the browser preview manifest.
+ * Runtime TUI rendering resolves colors from the live Frost palette in
+ * `b3-wordmark-view.tsx` so light mode uses dark ink.
+ */
 export const B3_WORDMARK_COLORS = {
   primary: '#e8e6e0',
   signal: '#7189c9',

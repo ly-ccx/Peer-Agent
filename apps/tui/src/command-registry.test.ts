@@ -17,6 +17,7 @@ describe('TUI command registry', () => {
       'mode',
       'permissions',
       'language',
+      'theme',
       'clear',
       'compact',
       'resume',

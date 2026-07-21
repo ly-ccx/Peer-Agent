@@ -7,6 +7,7 @@ export type TuiCommandAction =
   | { readonly type: 'open-mode-picker' }
   | { readonly type: 'open-permission-picker' }
   | { readonly type: 'open-language-picker' }
+  | { readonly type: 'open-theme-picker' }
   | { readonly type: 'show-help' }
   | { readonly type: 'clear-chat' }
   | { readonly type: 'compact-context' }
@@ -42,6 +43,13 @@ export const TUI_COMMAND_REGISTRY: readonly TuiCommandDefinition[] = Object.free
     description: 'Switch UI and model reply language (Chinese/English)',
     keywords: ['locale', '中文', 'english', 'zh', 'en', 'i18n', 'lang'],
     action: { type: 'open-language-picker' },
+  },
+  {
+    id: 'theme',
+    label: 'Theme',
+    description: 'Switch light / dark / system theme (Peer Frost)',
+    keywords: ['appearance', 'light', 'dark', 'system', 'color', 'palette', 'frost', '白', '黑', '浅色', '深色'],
+    action: { type: 'open-theme-picker' },
   },
   { id: 'clear', label: 'Clear chat', description: 'Clear messages, model context, and errors', keywords: ['reset', 'conversation', 'error'], action: { type: 'clear-chat' } },
   { id: 'compact', label: 'Compact context', description: 'Compress model context with a structural summary; UI transcript stays', keywords: ['compress', 'summary', 'context', 'tokens'], action: { type: 'compact-context' } },

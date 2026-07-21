@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 
 import {
   B3_MATRIX_HEIGHT,
@@ -10,13 +10,35 @@ import {
   matrixRowsForPreview,
   renderB3Wordmark,
 } from './b3-wordmark.ts';
+import { resolveB3WordmarkColor } from './b3-wordmark-view.tsx';
+import {
+  applyThemeMode,
+  DARK_PALETTE,
+  LIGHT_PALETTE,
+} from './tui-theme.ts';
 
 describe('B3 Signal terminal wordmark', () => {
+  afterEach(() => {
+    applyThemeMode('dark');
+  });
+
   test('keeps a stable 23 by 7 logical matrix', () => {
     expect(B3_MATRIX_WIDTH).toBe(23);
     expect(B3_MATRIX_HEIGHT).toBe(7);
     expect(B3_PIXEL_MATRIX).toHaveLength(7);
     expect(B3_PIXEL_MATRIX.every((row) => row.length === 23)).toBe(true);
+  });
+
+  test('resolves dark ink for light theme and light ink for dark theme', () => {
+    applyThemeMode('light');
+    expect(resolveB3WordmarkColor('primary')).toBe(LIGHT_PALETTE.text);
+    expect(resolveB3WordmarkColor('signal')).toBe(LIGHT_PALETTE.info);
+    expect(resolveB3WordmarkColor('muted')).toBe(LIGHT_PALETTE.muted);
+
+    applyThemeMode('dark');
+    expect(resolveB3WordmarkColor('primary')).toBe(DARK_PALETTE.text);
+    expect(resolveB3WordmarkColor('signal')).toBe(DARK_PALETTE.info);
+    expect(resolveB3WordmarkColor('muted')).toBe(DARK_PALETTE.muted);
   });
 
   test('uses one continuous eleven-cell signal bridge across the two e glyphs', () => {

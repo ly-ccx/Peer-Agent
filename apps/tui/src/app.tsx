@@ -70,6 +70,7 @@ import {
   languageIndex,
   languageOption,
   languageSwitchNotice,
+  themeSwitchNotice,
   TUI_LANGUAGE_OPTIONS,
   tuiMessage,
   type TuiLanguageStore,
@@ -111,7 +112,10 @@ import {
   COLOR,
   PICKER_CHROME,
   TOOL_CHROME,
+  TUI_THEME_OPTIONS,
   toolStatusColor,
+  type TuiThemeMode,
+  type TuiThemeStore,
 } from './tui-theme.ts';
 
 const COMMAND_NOTICE_DURATION_MS = 3_000;
@@ -824,12 +828,13 @@ function ComposerDock({
   );
 }
 
-export function App({ host, model, modelLabel, modelSelection, languageStore, onQuit }: {
+export function App({ host, model, modelLabel, modelSelection, languageStore, themeStore, onQuit }: {
   readonly host: TuiHost;
   readonly model: ChatModelPort;
   readonly modelLabel: string;
   readonly modelSelection?: TuiModelSelectionControl;
   readonly languageStore?: TuiLanguageStore;
+  readonly themeStore?: TuiThemeStore;
   readonly onQuit: () => void;
 }) {
   const terminal = useTerminalDimensions();
@@ -912,6 +917,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
   }), [controller, modelLabel, modelSelection]);
   const [accessLevel, setAccessLevel] = useState<LocalAccessLevel>(() => host.getAccessLevel());
   const [locale, setLocale] = useState<TuiLocale>(() => languageStore?.getLocale() ?? 'zh-CN');
+  const [themeMode, setThemeMode] = useState<TuiThemeMode>(() => themeStore?.getMode() ?? 'dark');
+  // Force chrome re-render after palette mutation (COLOR is a shared mutable object).
+  const [, setThemeTick] = useState(0);
   const [composerDraft, setComposerDraft] = useState('');
   const imagePathRegistryRef = useRef(new Map<string, string>());
   const [experience, setExperience] = useState<TuiExperienceState>(() => createTuiExperienceState());
@@ -983,6 +991,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
   const languageSurface = experience.surface.type === 'picker' && experience.surface.picker === 'language'
     ? experience.surface
     : null;
+  const themeSurface = experience.surface.type === 'picker' && experience.surface.picker === 'theme'
+    ? experience.surface
+    : null;
   const modelPickerView = modelSelection && selectedModel
     ? buildModelPickerView({
       control: modelSelection,
@@ -1029,6 +1040,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
   const modelPickerSelection = modelSurface?.selectedIndex ?? 0;
   const permissionSelection = permissionSurface?.selectedIndex ?? permissionPolicyIndex(accessLevel);
   const languageSelection = languageSurface?.selectedIndex ?? languageIndex(locale);
+  const themeSelection = themeSurface?.selectedIndex
+    ?? Math.max(0, TUI_THEME_OPTIONS.findIndex((option) => option.mode === themeMode));
   const activeTurnMode = snapshot.activeTurnMode;
   const selectedModelLabel = selectedModel && modelSelection
     ? modelSelectionLabel(modelSelection, selectedModel)
@@ -1478,6 +1491,53 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
           const next = languageStore?.setLanguage(option.locale) ?? { locale: option.locale, replyLanguage: option.locale };
           setLocale(next.locale);
           setCommandNotice(languageSwitchNotice(next.locale));
+          setExperience((current) => escapeFooter(current));
+          queueMicrotask(() => composerRef.current?.focus());
+        }
+        return;
+      }
+      return;
+    }
+
+    if (themeSurface) {
+      if (key.name === 'escape') {
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+        return;
+      }
+      if (key.name === 'up' || key.name === 'left') {
+        setExperience((current) => ({
+          ...current,
+          surface: moveTuiSurfaceSelection(current.surface, -1, TUI_THEME_OPTIONS.length),
+        }));
+        return;
+      }
+      if (key.name === 'down' || key.name === 'right' || key.name === 'tab') {
+        setExperience((current) => ({
+          ...current,
+          surface: moveTuiSurfaceSelection(current.surface, 1, TUI_THEME_OPTIONS.length),
+        }));
+        return;
+      }
+      if (key.name === 'return') {
+        const option = TUI_THEME_OPTIONS[themeSelection];
+        if (option) {
+          const next = themeStore?.setMode(option.mode) ?? { mode: option.mode, scheme: option.mode === 'system' ? 'dark' : option.mode };
+          setThemeMode(next.mode);
+          setThemeTick((tick) => tick + 1);
+          setCommandNotice(themeSwitchNotice(locale, next.mode));
+        }
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+        return;
+      }
+      if (typeof key.name === 'string' && key.name.length === 1 && key.name >= '1' && key.name <= '9') {
+        const option = TUI_THEME_OPTIONS[Number(key.name) - 1];
+        if (option) {
+          const next = themeStore?.setMode(option.mode) ?? { mode: option.mode, scheme: option.mode === 'system' ? 'dark' : option.mode };
+          setThemeMode(next.mode);
+          setThemeTick((tick) => tick + 1);
+          setCommandNotice(themeSwitchNotice(locale, next.mode));
           setExperience((current) => escapeFooter(current));
           queueMicrotask(() => composerRef.current?.focus());
         }
@@ -1939,7 +1999,54 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
         </box>
       ) : null}
 
-{modeSurface ? (
+      {themeSurface ? (
+        <box
+          flexDirection="column"
+          height={pickerLayout.modePanelRows}
+          flexShrink={0}
+          border
+          borderStyle="rounded"
+          borderColor={COLOR.accent}
+          backgroundColor={COLOR.panel}
+          paddingLeft={1}
+          paddingRight={1}
+          paddingTop={pickerLayout.verticalPadding}
+          paddingBottom={pickerLayout.verticalPadding}
+        >
+          <text fg={COLOR.text} wrapMode="none">
+            <strong>{tuiMessage(locale, 'picker.theme.title')}</strong>
+          </text>
+          {pickerLayout.showDescriptions ? (
+            <text fg={COLOR.muted} wrapMode="none">
+              {tuiMessage(locale, 'picker.theme.description')}
+            </text>
+          ) : null}
+          {TUI_THEME_OPTIONS.map((option, index) => {
+            const selected = index === themeSelection;
+            const label = locale === 'zh-CN' ? option.labelZh : option.labelEn;
+            return (
+              <box
+                key={option.mode}
+                flexDirection="row"
+                backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+              >
+                <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
+                  {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}
+                  {index + 1}. {label}
+                  {option.mode === themeMode ? PICKER_CHROME.checkCurrent : ''}
+                </text>
+              </box>
+            );
+          })}
+          {pickerLayout.showHints ? (
+            <text fg={COLOR.muted} wrapMode="none">
+              {tuiMessage(locale, 'picker.theme.hint')}
+            </text>
+          ) : null}
+        </box>
+      ) : null}
+
+      {modeSurface ? (
         <box
           flexDirection="column"
           height={pickerLayout.modePanelRows}
