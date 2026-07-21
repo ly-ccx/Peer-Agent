@@ -14,19 +14,19 @@ Peer Agent follows the 端云能力代理设计原则:
 证据负责治理。
 ```
 
-The detailed governance baseline is in `docs/architecture/20-architecture-governance.md`. Existing architecture context is in:
+Architecture knowledge lives in the companion knowledge base `peer-knowledge` (not in this code repo). The detailed governance baseline is in `peer-knowledge/knowledge/architecture/20-architecture-governance.md`. Existing architecture context is in:
 
-- `docs/architecture/00-engineering-philosophy.md`
-- `docs/architecture/01-project-structure.md`
-- `docs/architecture/15-plugin-skill-mcp-system.md`
-- `docs/architecture/16-skill-call-lifecycle.md`
-- `docs/architecture/19-system-prompt-context-architecture.md`
+- `peer-knowledge/knowledge/architecture/00-engineering-philosophy.md`
+- `peer-knowledge/knowledge/architecture/01-project-structure.md`
+- `peer-knowledge/knowledge/decisions/15-plugin-skill-mcp-system.md`
+- `peer-knowledge/knowledge/decisions/16-skill-call-lifecycle.md`
+- `peer-knowledge/knowledge/architecture/19-system-prompt-context-architecture.md`
 
-These documents are part of the engineering contract, not background reading. Treat them as read-only reference material by default.
+These documents are part of the engineering contract, not background reading. Treat them as read-only reference material by default. When local path resolution is needed, use the associated knowledge workspace (e.g. `/Users/liangyin/Documents/MiaoYan/peer-knowledge`).
 
-## User Repository Preference: Architecture Docs Are Read-Only
+## User Repository Preference: Architecture Docs Live in peer-knowledge
 
-Do not edit, unignore, stage, or submit `docs/architecture/*` unless the user explicitly asks for a specific architecture-document change. If a code change would normally require architecture documentation, explain the architecture impact in the response instead of modifying `docs/architecture/*`.
+Do not recreate, stage, or submit architecture / design knowledge under `docs/architecture/*` or other knowledge trees in this code repo unless the user explicitly asks. If a code change would normally require architecture documentation, explain the architecture impact in the response and write durable knowledge into `peer-knowledge` instead.
 
 ## Non-Negotiable Runtime Chain
 
