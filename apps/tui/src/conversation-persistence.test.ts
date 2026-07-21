@@ -340,7 +340,82 @@ describe('TUI conversation persistence', () => {
     expect(recorder.calls.filter((call) => call.method === 'createConversation')).toHaveLength(2);
     expect(persistence.getConversationId()).toBe('conversation-2');
   });
-  test('persists tool messages with Desktop-compatible tool-call segments', () => {
+  test('persists assistant tools as Desktop-compatible multi tool-call segments', () => {
+    const recorder = createStoreRecorder();
+    const persistence = createTuiConversationPersistence({
+      workspacePath: '/workspace',
+      initialMode: 'chat',
+      initialModel: selection,
+      store: recorder.store,
+    });
+
+    persistence.syncSnapshot(snapshot({
+      messages: [
+        { id: 'user-1', role: 'user', content: 'read package.json' },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: 'done',
+          tools: [
+            {
+              capabilityId: 'local.file.read',
+              toolName: 'Read',
+              argumentSummary: 'package.json',
+              status: 'completed',
+              detail: 'file contents',
+              detailLines: ['file contents'],
+              toolCallId: 'call-1',
+              arguments: { path: 'package.json' },
+            },
+            {
+              capabilityId: 'local.search.files',
+              toolName: 'Search',
+              argumentSummary: 'foo',
+              status: 'completed',
+              detail: '2 matches',
+              detailLines: ['2 matches'],
+              toolCallId: 'call-2',
+              arguments: { query: 'foo' },
+            },
+          ],
+        },
+      ],
+    }));
+
+    const appends = recorder.calls.filter((call) => call.method === 'appendMessage');
+    expect(appends.length).toBeGreaterThanOrEqual(2);
+    const assistantAppend = appends.find((call) => {
+      const message = call.args[1] as Record<string, unknown>;
+      return message.role === 'assistant';
+    });
+    expect(assistantAppend).toBeDefined();
+    const message = assistantAppend!.args[1] as Record<string, unknown>;
+    expect(message.role).toBe('assistant');
+    expect(message.segments).toEqual([
+      {
+        type: 'tool-call',
+        tool: 'local.file.read',
+        displayName: 'Read',
+        args: { path: 'package.json' },
+        result: 'file contents',
+        toolCallId: 'call-1',
+      },
+      {
+        type: 'tool-call',
+        tool: 'local.search.files',
+        displayName: 'Search',
+        args: { query: 'foo' },
+        result: '2 matches',
+        toolCallId: 'call-2',
+      },
+      {
+        type: 'text',
+        content: 'done',
+      },
+    ]);
+  });
+
+  test('still persists legacy role=tool rows with a single tool-call segment', () => {
     const recorder = createStoreRecorder();
     const persistence = createTuiConversationPersistence({
       workspacePath: '/workspace',
@@ -367,13 +442,11 @@ describe('TUI conversation persistence', () => {
             arguments: { path: 'package.json' },
           },
         },
-        { id: 'assistant-1', role: 'assistant', content: 'done' },
       ],
     }));
 
-    const appends = recorder.calls.filter((call) => call.method === 'appendMessage');
-    expect(appends.length).toBeGreaterThanOrEqual(2);
-    const toolAppend = appends.find((call) => {
+    const toolAppend = recorder.calls.find((call) => {
+      if (call.method !== 'appendMessage') return false;
       const message = call.args[1] as Record<string, unknown>;
       return message.role === 'tool';
     });

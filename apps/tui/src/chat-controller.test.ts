@@ -6,6 +6,7 @@ import {
   type ChatModelPort,
   type ChatModelState,
 } from './chat-controller.ts';
+import { createPlanCoordinator, type RuntimePlan } from './plan-mode.ts';
 import type { TuiExecutionContext, TuiHost } from './tui-host.ts';
 
 const goalContext = (goalId: string, sourcePlanId: string, sessionId: string) => ({
@@ -259,8 +260,68 @@ describe('chat controller', () => {
     await controller.send('read it');
 
     expect(calls).toEqual(['local.file.read']);
-    expect(controller.getSnapshot().messages.some((message) => message.role === 'tool')).toBe(true);
-    expect(controller.getSnapshot().messages.at(-1)?.content).toBe('finished');
+    const messages = controller.getSnapshot().messages;
+    expect(messages.some((message) => message.role === 'tool')).toBe(false);
+    const assistantWithTools = messages.find((message) => (
+      message.role === 'assistant' && ((message.tools?.length ?? 0) > 0 || Boolean(message.tool))
+    ));
+    expect(assistantWithTools?.tools?.map((tool) => tool.capabilityId) ?? [assistantWithTools?.tool?.capabilityId]).toEqual([
+      'local.file.read',
+    ]);
+    expect(messages.at(-1)?.content).toBe('finished');
+  });
+
+  test('attaches multiple tool calls to the same assistant message', async () => {
+    const calls: string[] = [];
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      runTurn(state, context) {
+        if (state.toolExecutions.length === 0) {
+          return {
+            kind: 'tool_calls',
+            state,
+            calls: [
+              {
+                toolCallId: 'call-1',
+                capabilityId: 'local.file.read',
+                arguments: { path: 'a.txt' },
+              },
+              {
+                toolCallId: 'call-2',
+                capabilityId: 'local.search.files',
+                arguments: { query: 'foo' },
+              },
+            ],
+          };
+        }
+        context.emit({ type: 'message.delta', streamId: 'test', content: 'done' });
+        return { kind: 'completed', state, output: 'done' };
+      },
+      applyToolResults(state, results) {
+        return { ...state, toolExecutions: results.map((item) => item.result) };
+      },
+    };
+    const controller = createChatController({
+      model,
+      host: host((capabilityId) => {
+        calls.push(capabilityId);
+        return execution(`${capabilityId} ok`);
+      }),
+    });
+
+    await controller.send('run tools');
+
+    expect(calls).toEqual(['local.file.read', 'local.search.files']);
+    const messages = controller.getSnapshot().messages;
+    expect(messages.filter((message) => message.role === 'tool')).toHaveLength(0);
+    const toolBearer = messages.find((message) => (
+      message.role === 'assistant' && (message.tools?.length ?? 0) >= 2
+    ));
+    expect(toolBearer?.tools?.map((tool) => tool.capabilityId)).toEqual([
+      'local.file.read',
+      'local.search.files',
+    ]);
+    expect(messages.at(-1)?.content).toBe('done');
   });
 
   test('cancels an active model turn', async () => {
@@ -814,12 +875,11 @@ describe('chat controller', () => {
     const snap = controller.getSnapshot();
     expect(snap.status).toBe('idle');
     expect(snap.error).toContain('provider_stream_error');
-    expect(snap.messages.some((message) => message.role === 'tool')).toBe(true);
-    const tool = snap.messages.find((message) => message.role === 'tool');
-    expect(tool?.tool?.toolCallId).toBe('call-1');
-    expect(tool?.tool?.arguments).toEqual({ path: 'package.json' });
-    // partial assistant placeholder may remain interrupted for recovery
+    expect(snap.messages.some((message) => message.role === 'tool')).toBe(false);
     const assistant = [...snap.messages].reverse().find((message) => message.role === 'assistant');
+    expect(assistant?.tools?.[0]?.toolCallId ?? assistant?.tool?.toolCallId).toBe('call-1');
+    expect(assistant?.tools?.[0]?.arguments ?? assistant?.tool?.arguments).toEqual({ path: 'package.json' });
+    // partial assistant placeholder may remain interrupted for recovery
     expect(assistant?.interrupted).toBe(true);
   });
 
@@ -860,22 +920,106 @@ describe('chat controller', () => {
 
     controller.subscribe((snapshot) => {
       for (const message of snapshot.messages) {
-        if (message.role === 'tool' && message.tool) {
-          statuses.push(message.tool.status);
-        }
+        if (message.role !== 'assistant') continue;
+        const tools = message.tools && message.tools.length > 0
+          ? message.tools
+          : (message.tool ? [message.tool] : []);
+        for (const tool of tools) statuses.push(tool.status);
       }
     });
 
     const pending = controller.send('list files');
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(statuses).toContain('running');
-    const runningMessage = controller.getSnapshot().messages.find((message) => message.role === 'tool');
-    expect(runningMessage?.tool?.status).toBe('running');
+    const runningMessage = controller.getSnapshot().messages.find((message) => (
+      message.role === 'assistant'
+      && ((message.tools?.some((tool) => tool.status === 'running')) || message.tool?.status === 'running')
+    ));
+    expect(runningMessage?.tools?.[0]?.status ?? runningMessage?.tool?.status).toBe('running');
     const runningId = runningMessage?.id;
     release?.();
     await pending;
     const completedMessage = controller.getSnapshot().messages.find((message) => message.id === runningId);
-    expect(completedMessage?.tool?.status).toBe('completed');
+    expect(completedMessage?.tools?.[0]?.status ?? completedMessage?.tool?.status).toBe('completed');
     expect(statuses[0]).toBe('running');
+  });
+
+  test('publishes a draft plan after a completed Goal turn', async () => {
+    const planJson: RuntimePlan = {
+      planId: 'goal-plan-1',
+      title: 'Ship goal mode',
+      goal: 'Make Goal create a visible draft plan first.',
+      tasks: [{ taskId: 'draft', title: 'Publish a draft plan' }],
+      successCriteria: [{ description: 'Approval panel appears' }],
+    };
+    const created: RuntimePlan[] = [];
+    const planCoordinator = createPlanCoordinator({
+      sessionId: 'goal-session',
+      goalExecution: {
+        create(request) {
+          created.push(request.plan);
+        },
+      },
+    });
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        return {
+          kind: 'completed',
+          state,
+          output: `Here is the plan:\n\`\`\`json\n${JSON.stringify(planJson)}\n\`\`\``,
+        };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({
+      host: host(),
+      initialMode: 'goal',
+      model,
+      planCoordinator,
+    });
+
+    await controller.send('enable goal mode');
+
+    const planSnapshot = planCoordinator.getSnapshot();
+    expect(planSnapshot?.status).toBe('awaiting_approval');
+    expect(planSnapshot?.plan.planId).toBe('goal-plan-1');
+    expect(controller.getSnapshot().plan?.status).toBe('awaiting_approval');
+
+    expect(await planCoordinator.decide('goal-plan-1', 'approve')).toBe(true);
+    expect(created).toHaveLength(1);
+    expect(created[0]?.planId).toBe('goal-plan-1');
+    expect(planCoordinator.getSnapshot()?.status).toBe('goal_created');
+  });
+
+  test('still publishes a draft plan after a completed Plan turn', async () => {
+    const planJson: RuntimePlan = {
+      planId: 'plan-turn-1',
+      title: 'Plan only',
+      goal: 'Keep plan publish working.',
+      tasks: [{ taskId: 'inspect', title: 'Inspect' }],
+      successCriteria: [{ description: 'Draft appears' }],
+    };
+    const planCoordinator = createPlanCoordinator({
+      sessionId: 'plan-session',
+      goalExecution: { create: () => {} },
+    });
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        return { kind: 'completed', state, output: JSON.stringify(planJson) };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({
+      host: host(),
+      initialMode: 'plan',
+      model,
+      planCoordinator,
+    });
+
+    await controller.send('make a plan');
+    expect(planCoordinator.getSnapshot()?.status).toBe('awaiting_approval');
+    expect(planCoordinator.getSnapshot()?.plan.title).toBe('Plan only');
   });
 });

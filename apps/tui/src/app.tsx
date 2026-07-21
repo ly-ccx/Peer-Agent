@@ -30,6 +30,7 @@ import {
 import {
   chipifyImagePathsInText,
   extractImagePathTokens,
+  formatUserMessageBody,
   mergeImagePasteWithExistingDraft,
   isSlashCommandInput,
   loadLocalImageAttachments,
@@ -201,6 +202,9 @@ function ChatHistory({
         if (message.role === 'assistant') {
           const showThinkingPlaceholder = message.pending && !message.content;
           const thinkingText = message.thinkingContent?.trim();
+          const tools = message.tools && message.tools.length > 0
+            ? message.tools
+            : (message.tool ? [message.tool] : []);
           return (
             <box key={message.id} flexDirection="column" marginBottom={1}>
               <box flexDirection="column">
@@ -212,8 +216,44 @@ function ChatHistory({
                 ) : thinkingText && message.pending ? (
                   <text selectable fg={COLOR.muted}>{thinkingText}</text>
                 ) : null}
-                {!showThinkingPlaceholder ? (
-                  <MarkdownView content={message.content || ' '} />
+                {tools.map((tool, toolIndex) => {
+                  const toolKey = `${message.id}-tool-${tool.toolCallId ?? toolIndex}`;
+                  const toolExpanded = expandedTools.has(toolKey);
+                  const presentation = resolveToolPresentation({ content: '', tool });
+                  const headlineColor = toolStatusColor(presentation.status);
+                  const detailColor = presentation.status === 'failed' || presentation.status === 'denied'
+                    ? COLOR.toolFailed
+                    : COLOR.toolDetail;
+                  const detailLines = toolExpanded
+                    ? presentation.detail.split(/\r?\n/).filter((line) => line.trim().length > 0)
+                    : presentation.detailLines;
+                  return (
+                    <box
+                      key={toolKey}
+                      flexDirection="column"
+                      onMouseDown={() => toggleTool(toolKey)}
+                    >
+                      <box flexDirection="row">
+                        <text selectable fg={headlineColor} wrapMode="none">
+                          <ToolStatusGlyph status={presentation.status} />{' '}
+                        </text>
+                        <text selectable fg={headlineColor} wrapMode="none">
+                          <strong>{toolHeadline(presentation.toolName, presentation.argumentSummary)}</strong>
+                        </text>
+                      </box>
+                      {detailLines.map((line, index) => (
+                        <box key={`${toolKey}-detail-${index}`} flexDirection="row">
+                          <text selectable fg={COLOR.subtle} wrapMode="none">
+                            {index === 0 ? TOOL_CHROME.branchFirst : TOOL_CHROME.branchRest}
+                          </text>
+                          <text selectable fg={detailColor}>{line || ' '}</text>
+                        </box>
+                      ))}
+                    </box>
+                  );
+                })}
+                {!showThinkingPlaceholder && message.content ? (
+                  <MarkdownView content={message.content} />
                 ) : null}
               </box>
             </box>
@@ -221,17 +261,31 @@ function ChatHistory({
         }
 
         if (message.role === 'user') {
+          // History must surface both typed text and image attachments.
+          // Pure-image turns store empty content + images[]; without a chip they look "missing".
+          const { text: userText, imageLabel } = formatUserMessageBody(
+            message.content,
+            message.images,
+          );
           return (
             <box
               key={message.id}
-              flexDirection="row"
+              flexDirection="column"
               width="100%"
               marginBottom={1}
               paddingLeft={1}
               paddingRight={1}
               backgroundColor={COLOR.userPanel}
             >
-              <text selectable fg={COLOR.textSoft}>{message.content || ' '}</text>
+              {userText ? (
+                <text selectable fg={COLOR.textSoft}>{userText}</text>
+              ) : null}
+              {imageLabel ? (
+                <text selectable fg={COLOR.user}>{imageLabel}</text>
+              ) : null}
+              {!userText && !imageLabel ? (
+                <text selectable fg={COLOR.textSoft}>{' '}</text>
+              ) : null}
             </box>
           );
         }
@@ -520,7 +574,12 @@ function Composer({ controller, snapshot, disabled, focused, locale, onValueChan
     lastComposerValueRef.current = '';
     void (async () => {
       const attachment = await loadLocalImageAttachments(value, { pathByKey: imagePathRegistry });
-      const textToSend = attachment.text || attachment.displayContent;
+      // Keep typed text only. Pure-image turns send empty content + images[];
+      // ChatHistory renders a visible [Image] chip from message.images.
+      // Fall back to displayContent only when no images loaded (path missing).
+      const textToSend = attachment.text.trim()
+        ? attachment.text
+        : (attachment.images.length > 0 ? '' : attachment.displayContent);
       if (!textToSend.trim() && attachment.images.length === 0) return;
       void controller.send(textToSend, attachment.images.length > 0 ? { images: attachment.images } : undefined);
     })();

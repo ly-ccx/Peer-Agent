@@ -137,6 +137,37 @@ function desktopToolSegment(tool: NonNullable<ChatMessage['tool']>): Record<stri
   };
 }
 
+function toolsFromMessage(message: ChatMessage): readonly NonNullable<ChatMessage['tool']>[] {
+  if (message.tools && message.tools.length > 0) return message.tools;
+  if (message.tool) return [message.tool];
+  return [];
+}
+
+function desktopSegmentsForMessage(message: ChatMessage): Record<string, unknown>[] | undefined {
+  const tools = toolsFromMessage(message);
+  if (message.role === 'tool' && tools.length > 0) {
+    // Legacy CLI rows: one role=tool message per call.
+    return tools.map((tool) => desktopToolSegment(tool));
+  }
+  if (message.role !== 'assistant') return undefined;
+
+  // Only emit segments when the assistant turn has structured parts
+  // (thinking / tools). Plain text-only assistants stay segment-free.
+  if (!message.thinkingContent && tools.length === 0) return undefined;
+
+  const segments: Record<string, unknown>[] = [];
+  if (message.thinkingContent) {
+    segments.push({ type: 'thinking', content: message.thinkingContent });
+  }
+  for (const tool of tools) {
+    segments.push(desktopToolSegment(tool));
+  }
+  if (message.content) {
+    segments.push({ type: 'text', content: message.content });
+  }
+  return segments.length > 0 ? segments : undefined;
+}
+
 function dataUrlByteLength(dataUrl: string): number {
   const comma = dataUrl.indexOf(',');
   if (comma < 0) return 0;
@@ -233,10 +264,65 @@ function imagesFromStoredAttachments(value: Record<string, unknown>): readonly C
   return images.length > 0 ? images : undefined;
 }
 
+function toolsFromStored(value: Record<string, unknown>): {
+  tools?: readonly NonNullable<ChatMessage['tool']>[];
+  tool?: NonNullable<ChatMessage['tool']>;
+  thinkingContent?: string;
+} {
+  const tools: NonNullable<ChatMessage['tool']>[] = [];
+  let thinkingContent: string | undefined;
+
+  if (Array.isArray(value.tools)) {
+    for (const item of value.tools) {
+      if (!item || typeof item !== 'object') continue;
+      const tool = storedToolPresentation(item as Record<string, unknown>);
+      if (tool) tools.push(tool);
+    }
+  }
+
+  if (Array.isArray(value.segments)) {
+    for (const segment of value.segments) {
+      if (!segment || typeof segment !== 'object') continue;
+      const record = segment as Record<string, unknown>;
+      if (record.type === 'thinking' && typeof record.content === 'string' && record.content.trim()) {
+        thinkingContent = record.content;
+        continue;
+      }
+      if (record.type !== 'tool-call') continue;
+      const capabilityId = typeof record.tool === 'string' ? record.tool : '';
+      if (!capabilityId) continue;
+      tools.push({
+        capabilityId,
+        toolName: typeof record.displayName === 'string' && record.displayName.trim()
+          ? record.displayName
+          : capabilityId,
+        argumentSummary: '',
+        status: 'completed',
+        detail: typeof record.result === 'string' ? record.result : 'completed',
+        detailLines: typeof record.result === 'string' && record.result.trim()
+          ? [record.result]
+          : ['completed'],
+        ...(record.args && typeof record.args === 'object' && !Array.isArray(record.args)
+          ? { arguments: record.args as Record<string, unknown> }
+          : {}),
+        ...(typeof record.toolCallId === 'string' ? { toolCallId: record.toolCallId } : {}),
+      });
+    }
+  }
+
+  const single = storedToolPresentation(value.tool);
+  if (tools.length === 0 && single) tools.push(single);
+
+  return {
+    ...(tools.length > 0 ? { tools, tool: tools[tools.length - 1] } : single ? { tool: single } : {}),
+    ...(thinkingContent ? { thinkingContent } : {}),
+  };
+}
+
 function storedMessage(value: Record<string, unknown>, index: number): ChatMessage | null {
   if (!['user', 'assistant', 'tool', 'system'].includes(String(value.role)) || typeof value.content !== 'string') return null;
   const usage = storedUsage(value.usage);
-  const tool = storedToolPresentation(value.tool);
+  const restoredTools = toolsFromStored(value);
   const compact = storedCompactMeta(value.compact);
   const images = imagesFromStoredAttachments(value);
   // Do not restore in-flight compact progress rows.
@@ -247,7 +333,7 @@ function storedMessage(value: Record<string, unknown>, index: number): ChatMessa
     content: value.content,
     ...(images ? { images } : {}),
     ...(usage ? { usage } : {}),
-    ...(tool ? { tool } : {}),
+    ...restoredTools,
     ...(compact ? { compact } : {}),
     ...(value.interrupted === true ? { interrupted: true } : {}),
   };
@@ -378,16 +464,9 @@ export function createTuiConversationPersistence(options: {
           ? [...newMessages].reverse().find((message) => message.role === 'assistant')
           : undefined;
         for (const message of newMessages) {
-          // Desktop replay contract: tool results also carry tool-call segments so
-          // history load can render structured tool cards instead of plain text.
-          const segments = message.role === 'tool' && message.tool
-            ? [desktopToolSegment(message.tool)]
-            : message.role === 'assistant' && message.thinkingContent
-              ? [
-                  { type: 'thinking', content: message.thinkingContent },
-                  ...(message.content ? [{ type: 'text', content: message.content }] : []),
-                ]
-              : undefined;
+          // Desktop replay contract: assistant turns carry tool-call segments so
+          // history load can render one "Processed N tools" summary instead of N rows.
+          const segments = desktopSegmentsForMessage(message);
           const attachments = desktopAttachmentsFromImages(message.id, message.images);
           // Persist Desktop-compatible attachments for image messages.
           // Keep runtime `images` for in-memory TUI state, but write `attachments` for Desktop.

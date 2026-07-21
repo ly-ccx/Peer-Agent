@@ -21,7 +21,6 @@ import { normalizeTuiMode, type TuiMode } from './tui-mode.ts';
 import {
   createToolPresentation,
   formatToolResultSummary,
-  toolPresentationContent,
   type ToolPresentation,
 } from './tool-result-summary.ts';
 
@@ -54,7 +53,14 @@ export interface ChatMessage {
   /** Streaming reasoning/thinking text shown while the assistant is still pending. */
   readonly thinkingContent?: string;
   readonly usage?: ModelUsage;
-  /** Structured tool presentation for hierarchical TUI rendering. */
+  /**
+   * Tool presentations attached to the current assistant turn.
+   * Desktop-compatible: multiple tool-calls share one assistant message.
+   */
+  readonly tools?: readonly ToolPresentation[];
+  /**
+   * @deprecated Prefer `tools`. Kept for restore/compat of older single-tool rows.
+   */
   readonly tool?: ToolPresentation;
   /** Stream/provider failure interrupted this assistant message after partial progress. */
   readonly interrupted?: boolean;
@@ -138,6 +144,68 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function toolKey(tool: ToolPresentation): string {
+  return tool.toolCallId?.trim() || `${tool.capabilityId}:${tool.argumentSummary}`;
+}
+
+function messageTools(message: ChatMessage | undefined): ToolPresentation[] {
+  if (!message) return [];
+  if (message.tools && message.tools.length > 0) return [...message.tools];
+  if (message.tool) return [message.tool];
+  return [];
+}
+
+/**
+ * Upsert a tool presentation onto the current assistant turn.
+ * Creates a pending assistant placeholder when none exists yet (tool-first turn).
+ */
+function upsertAssistantTool(
+  messages: readonly ChatMessage[],
+  tool: ToolPresentation,
+  nextSequence: () => number,
+): ChatMessage[] {
+  const next = [...messages];
+  const key = toolKey(tool);
+  let targetIndex = -1;
+  for (let i = next.length - 1; i >= 0; i -= 1) {
+    const message = next[i];
+    if (!message) continue;
+    if (message.role === 'assistant' && message.pending) {
+      targetIndex = i;
+      break;
+    }
+    if (message.role === 'assistant' || message.role === 'user' || message.role === 'system') {
+      break;
+    }
+  }
+  // Never attach tools to a completed previous assistant turn.
+  // If there is no pending assistant yet, open a new one for this tool batch.
+  if (targetIndex < 0) {
+    next.push({
+      id: `assistant-${nextSequence()}`,
+      role: 'assistant',
+      content: '',
+      pending: true,
+      tools: [tool],
+      tool,
+    });
+    return next;
+  }
+
+  const target = next[targetIndex]!;
+  const existing = messageTools(target);
+  const index = existing.findIndex((item) => toolKey(item) === key);
+  const tools = index >= 0
+    ? existing.map((item, i) => (i === index ? tool : item))
+    : [...existing, tool];
+  next[targetIndex] = {
+    ...target,
+    tools,
+    tool: tools[tools.length - 1],
+  };
+  return next;
+}
+
 /** Drop empty thinking placeholders; keep messages that already received content. */
 function finalizePendingMessages(
   messages: readonly ChatMessage[],
@@ -161,7 +229,12 @@ function finalizePendingMessages(
       if (message.pending) {
         // Empty placeholder that never received text/thinking/tool progress:
         // keep only when this is the recovery anchor for a failed stream.
-        const hasProgress = Boolean(message.content || message.thinkingContent || message.tool);
+        const hasProgress = Boolean(
+          message.content
+          || message.thinkingContent
+          || message.tool
+          || (message.tools && message.tools.length > 0),
+        );
         if (!hasProgress && index !== recoveryIndex) return null;
       }
       const next: ChatMessage = message.pending
@@ -287,10 +360,8 @@ export function createChatController(options: {
     model: options.model,
     tools: {
       async execute(call, context) {
-        // Publish a stable running intermediate message first so TUI can show
-        // a breathing/running glyph while the capability executes; complete by
-        // updating the same message id instead of appending a second row.
-        const messageId = `tool-${++sequence}`;
+        // Attach tool-call progress to the current assistant turn (Desktop model):
+        // multiple tools share one assistant message via `tools[]` / segments.
         flushStreamDeltaBuffer();
         const runningTool = createToolPresentation({
           capabilityId: call.capabilityId,
@@ -301,15 +372,7 @@ export function createChatController(options: {
         });
         publish({
           ...snapshot,
-          messages: [
-            ...snapshot.messages,
-            {
-              id: messageId,
-              role: 'tool',
-              content: toolPresentationContent(runningTool),
-              tool: runningTool,
-            },
-          ],
+          messages: upsertAssistantTool(snapshot.messages, runningTool, () => ++sequence),
         });
 
         const execution = await options.host.execute(call.capabilityId, call.arguments, {
@@ -339,17 +402,10 @@ export function createChatController(options: {
             ? String((execution.result.error as { message?: unknown }).message ?? '')
             : null,
         });
+        // Complete the same tool entry in-place on the assistant turn.
         publish({
           ...snapshot,
-          messages: snapshot.messages.map((message) => (
-            message.id === messageId
-              ? {
-                  ...message,
-                  content: toolPresentationContent(tool),
-                  tool,
-                }
-              : message
-          )),
+          messages: upsertAssistantTool(snapshot.messages, tool, () => ++sequence),
         });
         return { call, result: execution };
       },
@@ -467,7 +523,13 @@ export function createChatController(options: {
         else if (result.status === 'failed') turn.fail(result.reason || 'provider_stream_error');
         else turn.complete();
 
-        if (turnMode === 'plan' && result.status === 'completed' && result.output) {
+        // Plan and Goal both surface a draft plan for approval before execution.
+        // Goal mode still publishes first so the TUI approval + goal runner path can start.
+        if (
+          (turnMode === 'plan' || turnMode === 'goal')
+          && result.status === 'completed'
+          && result.output
+        ) {
           const plan = parseRuntimePlanText(result.output);
           if (plan) options.planCoordinator?.publish(plan);
         }
