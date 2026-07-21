@@ -695,6 +695,14 @@
   --motion-ripple-duration: 1.6s;
   --motion-ripple-peak: 0.95;
 }
+/* 任务完成但未读：标题前绿色圆点。运行中/压缩中时不与 spinner 并存。 */
+.sidebar-conv-completed-unread {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--state-success, #40a02b);
+}
 .sidebar-conv-time {
   flex: 0 0 auto;
   margin-left: 6px;

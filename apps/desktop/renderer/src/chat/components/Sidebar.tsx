@@ -10,6 +10,7 @@ import {
   sidebarCompactionStateLabel,
   sidebarConversationActivity,
 } from '../state/compactionStateView';
+import { shouldShowCompletedUnreadDot } from '../state/completedUnreadState';
 import type { CompactionState } from '../state/types';
 import { useListFlip } from '../hooks/useListFlip';
 import { useAwaitingGoalPlanCounts } from './goal/useAwaitingGoalPlans';
@@ -106,6 +107,7 @@ export function Sidebar({
   activeConversationId,
   conversationView,
   runningConversationIds,
+  completedUnreadConversationIds,
   compactionStates,
   runningWorkspacePaths,
   activePage,
@@ -136,6 +138,8 @@ export function Sidebar({
   readonly conversationView: ConversationView;
   // 当前正在流式运行的会话 id 集合(表达层状态,真值来自 main 的 activeStreams 广播)。
   readonly runningConversationIds?: ReadonlySet<string>;
+  // 任务完成后尚未打开查看的会话 id 集合(表达层状态,会话内内存态)。
+  readonly completedUnreadConversationIds?: ReadonlySet<string>;
   // 当前正在执行上下文压缩的会话 -> 显式压缩状态机。
   readonly compactionStates?: ReadonlyMap<string, CompactionState>;
   // 本地敏感操作确认数量；计划审批数量由 useAwaitingGoalPlanCounts 从同一后端事实投影。
@@ -343,6 +347,12 @@ export function Sidebar({
     const compactionState = compactionStates?.get(conv.id);
     const activity = sidebarConversationActivity({ isRunning, compactionState });
     const isCompactionVisible = activity.kind === 'compaction';
+    const showCompletedUnread = shouldShowCompletedUnreadDot({
+      conversationId: conv.id,
+      isRunning,
+      isCompactionVisible,
+      completedUnreadIds: completedUnreadConversationIds,
+    });
     const compactPercent = compactionProgressPercent(compactionState);
     const compactLabel = sidebarCompactionStateLabel(compactionState, isZh);
     const compactPercentText = typeof compactPercent === 'number' ? `${Math.round(compactPercent)}%` : null;
@@ -362,6 +372,7 @@ export function Sidebar({
       activeConversationId === conv.id ? 'active' : '',
       isRunning ? 'is-running' : '',
       isCompactionVisible ? 'is-compacting' : '',
+      showCompletedUnread ? 'has-completed-unread' : '',
       isPinned ? 'is-pinned' : '',
       isEditing ? 'is-editing' : '',
       isArchivedView ? 'is-archived' : '',
@@ -420,6 +431,14 @@ export function Sidebar({
             role="img"
             aria-label={isZh ? '运行中' : 'Running'}
             title={isZh ? '运行中' : 'Running'}
+          />
+        ) : null}
+        {showCompletedUnread ? (
+          <span
+            className="sidebar-conv-completed-unread"
+            role="img"
+            aria-label={isZh ? '任务已完成，未读' : 'Completed, unread'}
+            title={isZh ? '任务已完成，未读' : 'Completed, unread'}
           />
         ) : null}
         {isCompactionVisible ? (

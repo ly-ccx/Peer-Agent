@@ -13,6 +13,11 @@ import { ChatSurface } from './chat/components/ChatSurface';
 import { Sidebar } from './chat/components/Sidebar';
 import { ConversationSearchPalette, type SearchConversationHit } from './chat/components/ConversationSearchPalette';
 import { conversationStore } from './chat/state/conversationStore';
+import {
+  clearCompletedUnreadId,
+  nextCompletedUnreadIds,
+  sameStringSet,
+} from './chat/state/completedUnreadState';
 import { readGitBranchPrefixFromSettings } from './app/gitBranchPrefix';
 import type { CompactionState } from './chat/state/types';
 import { clientApi } from './clientApi';
@@ -108,6 +113,12 @@ function MainApp() {
   // 另外 ChatSurface 的 onStreamingChange 作为本会话的即时信号合并进集合(更快反馈)。
   const [runningConversationIds, setRunningConversationIds] = useState<ReadonlySet<string>>(
     () => new Set());
+  // 表达层状态:任务完成后尚未打开查看的会话。会话内内存态,不跨重启持久化。
+  // 置位:会话离开 running 且当前不是 active;清除:用户打开/选中该会话。
+  const [completedUnreadConversationIds, setCompletedUnreadConversationIds] = useState<ReadonlySet<string>>(
+    () => new Set());
+  const runningConversationIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const activeConversationIdRef = useRef<string | null>(null);
   // 所有敏感操作确认均来自 conversationStore 的受治理 pendingPermissionCalls。
   // 在 App 层按会话投影给 Sidebar，列表不解析模型文本，也不复制审批事实。
   const [pendingConfirmationCounts, setPendingConfirmationCounts] = useState<ReadonlyMap<string, number>>(
@@ -322,6 +333,33 @@ function MainApp() {
     return unsubscribe;
   }, []);
 
+  // 同步 activeConversationId ref,并在用户打开会话时清除完成未读标记。
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+    if (!activeConversationId) return;
+    setCompletedUnreadConversationIds((prev) => {
+      const next = clearCompletedUnreadId(prev, activeConversationId);
+      return sameStringSet(prev, next) ? prev : next;
+    });
+  }, [activeConversationId]);
+
+  // 统一写入 runningConversationIds:顺带根据 prev→next 差分置位完成未读。
+  const applyRunningConversationIds = useCallback((nextIds: ReadonlySet<string>) => {
+    const previousIds = runningConversationIdsRef.current;
+    if (sameStringSet(previousIds, nextIds)) return;
+    runningConversationIdsRef.current = nextIds;
+    setRunningConversationIds(nextIds);
+    setCompletedUnreadConversationIds((unread) => {
+      const derived = nextCompletedUnreadIds({
+        previousRunningIds: previousIds,
+        nextRunningIds: nextIds,
+        activeConversationId: activeConversationIdRef.current,
+        completedUnreadIds: unread,
+      });
+      return sameStringSet(unread, derived) ? unread : derived;
+    });
+  }, []);
+
   // 全局运行中会话:挂载时拉取当前活跃流快照,并订阅后续变更广播。
   // 这让左侧列表无需"点进去"即可知道哪些会话正在跑(含后台并行会话)。
   useEffect(() => {
@@ -335,7 +373,7 @@ function MainApp() {
         originWorkspacePath?: string | null;
       }[],
     ) => {
-      setRunningConversationIds(new Set(conversationIds));
+      applyRunningConversationIds(new Set(conversationIds));
       const wsPaths = new Set<string>();
       for (const s of streams) {
         const origin = s.originWorkspacePath ?? s.workspacePath;
@@ -350,7 +388,7 @@ function MainApp() {
       applyStreams(conversationIds, streams ?? []);
     });
     return unsubscribe;
-  }, []);
+  }, [applyRunningConversationIds]);
 
   useEffect(() => {
     const conversationIds = Array.from(new Set(conversations.map((conversation) => conversation.id)));
@@ -641,6 +679,7 @@ function MainApp() {
               activeConversationId={activeConversationId}
               conversationView={conversationView}
               runningConversationIds={runningConversationIds}
+              completedUnreadConversationIds={completedUnreadConversationIds}
               compactionStates={compactionStates}
               pendingConfirmationCounts={pendingConfirmationCounts}
               runningWorkspacePaths={runningWorkspacePaths}
@@ -682,14 +721,13 @@ function MainApp() {
                   onConversationUpdated={() => { void refreshConversations(); }}
                   onStreamingChange={(convId, streaming) => {
                     if (!convId) return;
-                    setRunningConversationIds((prev) => {
-                      const has = prev.has(convId);
-                      if (streaming === has) return prev;
-                      const next = new Set(prev);
-                      if (streaming) next.add(convId);
-                      else next.delete(convId);
-                      return next;
-                    });
+                    const prev = runningConversationIdsRef.current;
+                    const has = prev.has(convId);
+                    if (streaming === has) return;
+                    const next = new Set(prev);
+                    if (streaming) next.add(convId);
+                    else next.delete(convId);
+                    applyRunningConversationIds(next);
                   }}
                   onBranch={(id) => { setConversationView('active'); setActiveConversationId(id); void refreshConversations(activeWorkspace, 'active'); }}
                   onEnsureConversation={ensureConversation}
