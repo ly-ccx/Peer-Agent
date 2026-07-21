@@ -142,14 +142,19 @@ const provider = sharedMetadata
         fetch: providerFetch,
       })
     : null;
+const preferredCatalogEntry = modelConfig.catalog.find((entry) => (
+  entry.providerId === modelConfig.providerId
+  && entry.modelId === modelConfig.model
+  && entry.available
+)) ?? modelConfig.catalog.find((entry) => entry.available);
 const modelSelection = createTuiModelSelectionControl({
   providerId: modelConfig.providerId,
   modelId: modelConfig.model,
   displayName: modelConfig.modelLabel.split(' · ')[0] ?? modelConfig.model,
-  reasoningEffort: 'default',
-  supportedReasoningEfforts: modelConfig.configured
-    ? ['default', 'low', 'high', 'xhigh']
-    : ['default'],
+  // Use Desktop-projected default/levels from catalog (not a TUI hardcode).
+  reasoningEffort: preferredCatalogEntry?.defaultReasoningEffort ?? 'default',
+  supportedReasoningEfforts: preferredCatalogEntry?.supportedReasoningEfforts
+    ?? (modelConfig.configured ? ['off', 'low', 'default', 'high'] : ['default']),
   catalog: modelConfig.catalog,
 });
 const model = provider

@@ -36,6 +36,9 @@ const MIME_BY_EXT: Record<string, string> = {
   '.avif': 'image/avif',
 };
 
+const IMAGE_CHIP_RE = /\[Image ([^\]]+)\]/g;
+const IMAGE_CHIP_SPLIT_RE = /(\[Image [^\]]+\])/g;
+
 /** Slash-command form: `/help`, `/model foo`. Paths like `/var/...` or `/Users/...` are not commands. */
 export function isSlashCommandInput(value: string): boolean {
   const trimmed = value.trim();
@@ -88,10 +91,14 @@ export function extractImagePathTokens(text: string): string[] {
   return paths;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function stripImagePathsFromText(text: string, imagePaths: readonly string[]): string {
   let next = text;
   for (const imagePath of imagePaths) {
-    const escaped = imagePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escaped = escapeRegExp(imagePath);
     next = next.replace(new RegExp(`(?:^|\\s)${escaped}(?=\\s|$)`, 'g'), ' ');
   }
   return next.replace(/[ \t]+\n/g, '\n').replace(/\n[ \t]+/g, '\n').replace(/[ \t]{2,}/g, ' ').trim();
@@ -130,9 +137,104 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
+/** Visible chip token, Qoder-style: `[Image ...tail.png]` or `[Image short.png]`. */
+export function formatImagePathChip(filePath: string, maxVisible = 18): string {
+  const base = path.basename(normalizeLocalPath(filePath));
+  if (!base) return '[Image]';
+  if (base.length <= maxVisible) return `[Image ${base}]`;
+  const keep = Math.max(6, maxVisible - 3);
+  return `[Image ...${base.slice(-keep)}]`;
+}
+
+/**
+ * Replace raw image path tokens in composer text with compact chips.
+ * Does not re-chip already-chipped segments.
+ */
+export function chipifyImagePathsInText(text: string): string {
+  if (!text) return text;
+  const parts = text.split(IMAGE_CHIP_SPLIT_RE);
+  return parts
+    .map((part) => {
+      if (part.startsWith('[Image ') && part.endsWith(']')) return part;
+      const paths = extractImagePathTokens(part);
+      if (paths.length === 0) return part;
+      let next = part;
+      const ordered = [...paths].sort((a, b) => b.length - a.length);
+      for (const imagePath of ordered) {
+        next = next.replace(new RegExp(escapeRegExp(imagePath), 'g'), formatImagePathChip(imagePath));
+      }
+      return next;
+    })
+    .join('');
+}
+
+/** Build basename/tail keys for a path so chips can resolve back. */
+export function imagePathChipKeys(filePath: string): string[] {
+  const normalized = path.resolve(normalizeLocalPath(filePath));
+  const base = path.basename(normalized);
+  const keys = new Set<string>([base, normalized, filePath, normalizeLocalPath(filePath)]);
+  if (base.length > 18) {
+    const keep = Math.max(6, 15);
+    keys.add(`...${base.slice(-keep)}`);
+    keys.add(base.slice(-keep));
+  }
+  return [...keys];
+}
+
+/**
+ * Expand composer chips back to absolute paths using a path registry
+ * (basename/tail → full path). Unknown chips are left as-is.
+ */
+export function expandImageChipsInText(
+  text: string,
+  pathByKey: ReadonlyMap<string, string> | Readonly<Record<string, string>>,
+): string {
+  const lookup = pathByKey instanceof Map
+    ? pathByKey
+    : new Map(Object.entries(pathByKey));
+  return text.replace(IMAGE_CHIP_RE, (full, label: string) => {
+    const key = String(label).trim();
+    const bare = key.startsWith('...') ? key.slice(3) : key;
+    const candidates = [key, bare, path.basename(bare)];
+    for (const candidate of candidates) {
+      const hit = lookup.get(candidate);
+      if (hit) return hit;
+    }
+    for (const [mapKey, fullPath] of lookup.entries()) {
+      const base = path.basename(fullPath);
+      if (
+        mapKey === key
+        || mapKey === bare
+        || base === key
+        || base === bare
+        || base.endsWith(bare)
+      ) {
+        return fullPath;
+      }
+    }
+    return full;
+  });
+}
+
+/** Register paths so later chip tokens can expand back to absolute paths. */
+export function registerImagePathKeys(
+  pathByKey: Map<string, string>,
+  filePaths: readonly string[],
+): void {
+  for (const filePath of filePaths) {
+    const absolute = path.resolve(normalizeLocalPath(filePath));
+    for (const key of imagePathChipKeys(filePath)) {
+      pathByKey.set(key, absolute);
+    }
+  }
+}
+
 export async function loadLocalImageAttachments(
   text: string,
-  options?: { readonly maxBytes?: number },
+  options?: {
+    readonly maxBytes?: number;
+    readonly pathByKey?: ReadonlyMap<string, string> | Readonly<Record<string, string>>;
+  },
 ): Promise<{
   readonly text: string;
   readonly images: readonly MessageImageLike[];
@@ -140,7 +242,10 @@ export async function loadLocalImageAttachments(
   readonly missingPaths: readonly string[];
 }> {
   const maxBytes = options?.maxBytes ?? 8 * 1024 * 1024;
-  const tokens = extractImagePathTokens(text);
+  const expanded = options?.pathByKey
+    ? expandImageChipsInText(text, options.pathByKey)
+    : text;
+  const tokens = extractImagePathTokens(expanded);
   const images: MessageImageLike[] = [];
   const usedPaths: string[] = [];
   const missingPaths: string[] = [];
@@ -175,12 +280,22 @@ export async function loadLocalImageAttachments(
       mimeType,
     });
     usedPaths.push(token);
+    usedPaths.push(localPath);
   }
 
-  const remainingText = stripImagePathsFromText(text, usedPaths);
-  const labels = usedPaths.map((item) => path.basename(normalizeLocalPath(item)));
+  let remainingText = stripImagePathsFromText(expanded, usedPaths);
+  remainingText = remainingText
+    .replace(IMAGE_CHIP_RE, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+  const labels = usedPaths
+    .filter((item) => !item.startsWith('data:image/'))
+    .map((item) => path.basename(normalizeLocalPath(item)));
+  const uniqueLabels = [...new Set(labels)];
   const displayContent = remainingText
-    || (labels.length > 0 ? `[image${labels.length > 1 ? 's' : ''}: ${labels.join(', ')}]` : text.trim());
+    || (uniqueLabels.length > 0
+      ? `[image${uniqueLabels.length > 1 ? 's' : ''}: ${uniqueLabels.join(', ')}]`
+      : text.trim());
 
   return {
     text: remainingText,

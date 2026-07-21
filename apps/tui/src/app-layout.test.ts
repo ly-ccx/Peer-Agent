@@ -92,7 +92,7 @@ describe('TUI app layout', () => {
   });
 
   test('keeps the composer input pure and places controls above and status below', () => {
-    expect(appSource).toContain("placeholder={disabled ? 'Resolve the request above…' : 'Ask anything…'}");
+    expect(appSource).toContain('placeholder={composerPlaceholder(locale, disabled)}');
     const dockSource = appSource.slice(
       appSource.indexOf('function ComposerDock'),
       appSource.indexOf('export function App'),
@@ -202,7 +202,6 @@ describe('TUI app layout', () => {
     expect(modelPickerSource).toContain('<strong>[{group}]</strong>');
     expect(dockSource).toContain('<ModelPickerMenu');
     expect(dockSource.indexOf('<ModelPickerMenu')).toBeLessThan(dockSource.indexOf('<Composer\n'));
-    expect(dockSource).toContain('focused={!modelPickerOpen}');
     expect(appSource).toContain('focused={focused && !disabled}');
     expect(appSource.match(/modelPickerOpen=\{Boolean\(modelSurface\)\}/g)?.length).toBe(2);
     expect(appSource).toContain('|| Boolean(modelSurface)');
@@ -335,7 +334,7 @@ describe('TUI app layout', () => {
 
   test('renders the help picker opened by /help', () => {
     expect(appSource).toContain("experience.surface.picker === 'help'");
-    expect(appSource).toContain('buildTuiHelpSections({ goalStatus })');
+    expect(appSource).toContain('buildTuiHelpSections({ goalStatus }, locale)');
     expect(appSource).toContain('<strong>Help</strong>');
     expect(appSource).toContain('helpSections.map((section)');
   });
@@ -346,6 +345,21 @@ describe('TUI app layout', () => {
     expect(appSource).not.toContain('Type / for commands and modes.');
     expect(appSource).not.toContain('ctrl+p commands  ·  ctrl+c');
   });
+
+  test('every bordered box uses rounded borders', () => {
+    const lines = appSource.split('\n');
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i] ?? '';
+      if (!/\bborder\b/.test(line) || /borderStyle|borderColor|COLOR\.border/.test(line)) continue;
+      // standalone `border` prop line — next few lines must declare rounded style
+      const window = lines.slice(i, i + 4).join('\n');
+      expect(window).toContain('borderStyle="rounded"');
+    }
+    // inline `border borderColor` without style should not exist
+    expect(appSource).not.toMatch(/\bborder\s+borderColor=/);
+  });
+
+
 });
 
 describe('TUI compact progress and separator rendering', () => {

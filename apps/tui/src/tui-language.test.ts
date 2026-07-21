@@ -10,6 +10,7 @@ import {
   languageIndex,
   languageSwitchNotice,
   normalizeTuiLocale,
+  composerPlaceholder,
   tuiMessage,
 } from './tui-language.ts';
 
@@ -89,5 +90,12 @@ describe('ui messages', () => {
     expect(languageSwitchNotice('zh-CN')).toContain('中文');
     expect(languageSwitchNotice('en-US')).toContain('English');
     expect(languageIndex('en-US')).toBe(1);
+  });
+
+  test('composer placeholder follows locale', () => {
+    expect(composerPlaceholder('zh-CN')).toBe('输入任何问题…');
+    expect(composerPlaceholder('en-US')).toBe('Ask anything…');
+    expect(composerPlaceholder('zh-CN', true)).toBe('请先处理上方请求…');
+    expect(composerPlaceholder('en-US', true)).toBe('Resolve the request above…');
   });
 });

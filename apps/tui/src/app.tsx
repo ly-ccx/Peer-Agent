@@ -28,8 +28,11 @@ import {
   type ChatSnapshot,
 } from './chat-controller.ts';
 import {
+  chipifyImagePathsInText,
+  extractImagePathTokens,
   isSlashCommandInput,
   loadLocalImageAttachments,
+  registerImagePathKeys,
 } from './composer-image-paths.ts';
 import {
   approvalCardDetails,
@@ -58,10 +61,12 @@ import {
 import type { PendingApproval, TuiHost } from './tui-host.ts';
 import { TUI_MODES, tuiModeOption, type TuiMode } from './tui-mode.ts';
 import {
+  composerPlaceholder,
   languageIndex,
   languageOption,
   languageSwitchNotice,
   TUI_LANGUAGE_OPTIONS,
+  tuiMessage,
   type TuiLanguageStore,
   type TuiLocale,
 } from './tui-language.ts';
@@ -251,6 +256,7 @@ function SlashCommandMenu({ commands, selectedIndex, maxVisible, showDescription
       zIndex={100}
       flexDirection="column"
       border
+      borderStyle="rounded"
       borderColor={COLOR.border}
       backgroundColor={COLOR.panel}
       paddingLeft={1}
@@ -288,7 +294,7 @@ function ResumePickerMenu({ rows, selectedIndex, maxVisible }: {
 }) {
   const visibleRows = selectionWindow(rows, selectedIndex, maxVisible);
   return (
-    <box flexDirection="column" flexShrink={0} border borderColor={COLOR.border} backgroundColor={COLOR.panel} paddingLeft={1} paddingRight={1}>
+    <box flexDirection="column" flexShrink={0} border borderStyle="rounded" borderColor={COLOR.border} backgroundColor={COLOR.panel} paddingLeft={1} paddingRight={1}>
       <text fg={COLOR.accent} wrapMode="none"><strong>Resume session</strong></text>
       {rows.length === 0 ? <text fg={COLOR.muted}>No saved conversations to resume.</text> : visibleRows.map(({ item: row, index }) => {
         const selected = index === selectedIndex;
@@ -351,6 +357,7 @@ function ModelPickerMenu({
       zIndex={100}
       flexDirection="column"
       border
+      borderStyle="rounded"
       borderColor={COLOR.border}
       backgroundColor={COLOR.panel}
       paddingLeft={1}
@@ -413,15 +420,41 @@ function ModelPickerMenu({
   );
 }
 
-function Composer({ controller, snapshot, disabled, focused, onValueChange, editorRef }: {
+function Composer({ controller, snapshot, disabled, focused, locale, onValueChange, editorRef, imagePathRegistry }: {
   readonly controller: ChatController;
   readonly snapshot: ChatSnapshot;
   readonly disabled: boolean;
   readonly focused: boolean;
+  readonly locale: TuiLocale;
   readonly onValueChange: (value: string) => void;
   readonly editorRef: RefObject<TextareaRenderable | null>;
+  readonly imagePathRegistry: Map<string, string>;
 }) {
   const editor = editorRef;
+  const chipifyPendingRef = useRef(false);
+
+  const applyImageChips = () => {
+    const current = editor.current;
+    if (!current || chipifyPendingRef.current) return;
+    const value = current.plainText ?? '';
+    const chipped = chipifyImagePathsInText(value);
+    if (chipped === value) {
+      onValueChange(value);
+      return;
+    }
+    const rawPaths = extractImagePathTokens(value);
+    if (rawPaths.length > 0) registerImagePathKeys(imagePathRegistry, rawPaths);
+    chipifyPendingRef.current = true;
+    current.setText(chipped);
+    try {
+      // Keep caret near end after rewrite so paste+type still feels natural.
+      (current as { cursorOffset?: number }).cursorOffset = chipped.length;
+    } catch {
+      // Some OpenTUI builds may not expose cursorOffset; ignore.
+    }
+    chipifyPendingRef.current = false;
+    onValueChange(chipped);
+  };
 
   const submit = () => {
     const value = editor.current?.plainText ?? '';
@@ -429,10 +462,10 @@ function Composer({ controller, snapshot, disabled, focused, onValueChange, edit
     if (!trimmed || isSlashCommandInput(trimmed) || disabled || snapshot.status !== 'idle') return;
     editor.current?.clear();
     void (async () => {
-      const attachment = await loadLocalImageAttachments(value);
-      const text = attachment.text || attachment.displayContent;
-      if (!text.trim() && attachment.images.length === 0) return;
-      void controller.send(text, attachment.images.length > 0 ? { images: attachment.images } : undefined);
+      const attachment = await loadLocalImageAttachments(value, { pathByKey: imagePathRegistry });
+      const textToSend = attachment.text || attachment.displayContent;
+      if (!textToSend.trim() && attachment.images.length === 0) return;
+      void controller.send(textToSend, attachment.images.length > 0 ? { images: attachment.images } : undefined);
     })();
   };
 
@@ -441,9 +474,9 @@ function Composer({ controller, snapshot, disabled, focused, onValueChange, edit
       <textarea
         ref={editor}
         focused={focused && !disabled}
-        placeholder={disabled ? 'Resolve the request above…' : 'Ask anything…'}
+        placeholder={composerPlaceholder(locale, disabled)}
         wrapMode="word"
-        onContentChange={() => onValueChange(editor.current?.plainText ?? '')}
+        onContentChange={() => applyImageChips()}
         onKeyDown={(event) => {
           const action = composerEnterAction({
             keyName: event.name,
@@ -460,12 +493,15 @@ function Composer({ controller, snapshot, disabled, focused, onValueChange, edit
   );
 }
 
+
 function ComposerDock({
   controller,
   snapshot,
   disabled,
+  locale,
   onValueChange,
   editorRef,
+  imagePathRegistry,
   status,
   statusLayout,
   layout,
@@ -488,8 +524,10 @@ function ComposerDock({
   readonly controller: ChatController;
   readonly snapshot: ChatSnapshot;
   readonly disabled: boolean;
+  readonly locale: TuiLocale;
   readonly onValueChange: (value: string) => void;
   readonly editorRef: RefObject<TextareaRenderable | null>;
+  readonly imagePathRegistry: Map<string, string>;
   readonly status: ComposerStatus;
   readonly statusLayout: ComposerStatusLayout;
   readonly layout: ReturnType<typeof responsiveLayout>;
@@ -549,14 +587,16 @@ function ComposerDock({
             showHint={modelPickerShowHint}
           />
         ) : null}
-        <Composer
-          controller={controller}
-          snapshot={snapshot}
-          disabled={disabled}
-          focused={!modelPickerOpen}
-          onValueChange={onValueChange}
-          editorRef={editorRef}
-        />
+              <Composer
+        controller={controller}
+        snapshot={snapshot}
+        disabled={disabled}
+        focused
+        locale={locale}
+        onValueChange={onValueChange}
+        editorRef={editorRef}
+        imagePathRegistry={imagePathRegistry}
+      />
       </box>
       <ComposerStatusBar status={status} layout={statusLayout} />
     </box>
@@ -634,6 +674,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
   const [accessLevel, setAccessLevel] = useState<LocalAccessLevel>(() => host.getAccessLevel());
   const [locale, setLocale] = useState<TuiLocale>(() => languageStore?.getLocale() ?? 'zh-CN');
   const [composerDraft, setComposerDraft] = useState('');
+  const imagePathRegistryRef = useRef(new Map<string, string>());
   const [experience, setExperience] = useState<TuiExperienceState>(() => createTuiExperienceState());
   const visibleTurn = snapshot.session?.activeTurn ?? snapshot.session?.lastTurn;
   const commandSurface = experience.surface.type === 'picker' && experience.surface.picker === 'command'
@@ -648,10 +689,10 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
       ? 'running'
       : 'none';
   const commandItems = commandSurface
-    ? filterTuiCommands(commandSurface.query, { goalStatus })
+    ? filterTuiCommands(commandSurface.query, { goalStatus }, locale)
     : [];
   const slashItems = slashSurface
-    ? filterTuiCommands(slashSurface.query, { goalStatus })
+    ? filterTuiCommands(slashSurface.query, { goalStatus }, locale)
     : [];
   const modeSurface = experience.surface.type === 'picker' && experience.surface.picker === 'mode'
     ? experience.surface
@@ -666,8 +707,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
     ? experience.surface
     : null;
   const helpSections = useMemo(
-    () => (helpSurface ? buildTuiHelpSections({ goalStatus }) : []),
-    [goalStatus, helpSurface],
+    () => (helpSurface ? buildTuiHelpSections({ goalStatus }, locale) : []),
+    [goalStatus, helpSurface, locale],
   );
   useEffect(() => {
     if (!modelSurface) {
@@ -1120,7 +1161,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
           return;
         }
         if (conversation.modelSelection) {
-          modelSelection.setSelection(conversation.modelSelection);
+          modelSelection?.setSelection(conversation.modelSelection);
         }
         setExperience((current) => escapeFooter({
           ...current,
@@ -1159,7 +1200,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
         if (option) {
           const next = languageStore?.setLanguage(option.locale) ?? { locale: option.locale, replyLanguage: option.locale };
           setLocale(next.locale);
-          setNotice(languageSwitchNotice(next.locale));
+          setCommandNotice(languageSwitchNotice(next.locale));
         }
         setExperience((current) => escapeFooter(current));
         queueMicrotask(() => composerRef.current?.focus());
@@ -1170,7 +1211,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
         if (option) {
           const next = languageStore?.setLanguage(option.locale) ?? { locale: option.locale, replyLanguage: option.locale };
           setLocale(next.locale);
-          setNotice(languageSwitchNotice(next.locale));
+          setCommandNotice(languageSwitchNotice(next.locale));
           setExperience((current) => escapeFooter(current));
           queueMicrotask(() => composerRef.current?.focus());
         }
@@ -1387,7 +1428,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
                 controller={controller}
                 snapshot={snapshot}
                 disabled={false}
+                locale={locale}
                 editorRef={composerRef}
+          imagePathRegistry={imagePathRegistryRef.current}
                 status={composerStatus}
                 statusLayout={composerStatusLayout}
                 layout={layout}
@@ -1421,7 +1464,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
       {snapshot.error ? <ErrorBanner message={snapshot.error} layout={layout} /> : null}
 
       {snapshot.plan?.status === 'awaiting_approval' ? (
-        <box flexDirection="column" border borderColor={COLOR.user} padding={1} backgroundColor={COLOR.panel}>
+        <box flexDirection="column" border borderStyle="rounded" borderColor={COLOR.user} padding={1} backgroundColor={COLOR.panel} marginLeft={layout.outerPadding} marginRight={layout.outerPadding}>
           <text fg={COLOR.user}><strong>Plan approval</strong> · {snapshot.plan.plan.title}</text>
           <text fg={COLOR.text}>{snapshot.plan.plan.goal}</text>
           {snapshot.plan.plan.tasks.map((task, index) => (
@@ -1449,7 +1492,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
       ) : null}
 
       {goal ? (
-        <box flexDirection="column" border borderColor={COLOR.success} padding={1} backgroundColor={COLOR.panel}>
+        <box flexDirection="column" border borderStyle="rounded" borderColor={COLOR.success} padding={1} backgroundColor={COLOR.panel} marginLeft={layout.outerPadding} marginRight={layout.outerPadding}>
           <text fg={COLOR.success}><strong>Goal</strong> · {goal.title} · {goal.status}</text>
           <text fg={COLOR.muted}>source {goal.sourcePlanId} · {goal.tasks.filter((task) => task.status === 'completed').length}/{goal.tasks.length} tasks</text>
           {goal.tasks.map((task) => (
@@ -1474,7 +1517,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
       {approval ? (() => {
         const details = approvalCardDetails(approval.prompt);
         return (
-          <box flexDirection="column" border borderColor={COLOR.danger} paddingLeft={1} paddingRight={1} flexShrink={0} backgroundColor={COLOR.panel} marginLeft={layout.outerPadding} marginRight={layout.outerPadding}>
+          <box flexDirection="column" border borderStyle="rounded" borderColor={COLOR.danger} paddingLeft={1} paddingRight={1} flexShrink={0} backgroundColor={COLOR.panel} marginLeft={layout.outerPadding} marginRight={layout.outerPadding}>
             <text fg={COLOR.dangerSoft} wrapMode="none"><strong>Approval required</strong></text>
             <text fg={COLOR.dangerSoft} wrapMode="none">Action  {details.action}</text>
             <text fg={COLOR.muted} wrapMode="none">Where   {details.location}</text>
@@ -1512,6 +1555,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
           height={pickerLayout.modePanelRows}
           flexShrink={0}
           border
+          borderStyle="rounded"
           borderColor={COLOR.accent}
           backgroundColor={COLOR.panel}
           paddingLeft={1}
@@ -1561,6 +1605,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
           height={pickerLayout.modePanelRows}
           flexShrink={0}
           border
+          borderStyle="rounded"
           borderColor={COLOR.accent}
           backgroundColor={COLOR.panel}
           paddingLeft={1}
@@ -1604,6 +1649,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
           height={pickerLayout.modePanelRows}
           flexShrink={0}
           border
+          borderStyle="rounded"
           borderColor={COLOR.accent}
           backgroundColor={COLOR.panel}
           paddingLeft={1}
@@ -1650,6 +1696,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
           flexDirection="column"
           flexShrink={0}
           border
+          borderStyle="rounded"
           borderColor={COLOR.accent}
           backgroundColor={COLOR.panel}
           paddingLeft={1}
@@ -1678,6 +1725,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
           flexDirection="column"
           flexShrink={0}
           border
+          borderStyle="rounded"
           borderColor={COLOR.accent}
           backgroundColor={COLOR.panel}
           paddingLeft={1}
@@ -1714,7 +1762,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
           controller={controller}
           snapshot={snapshot}
           disabled={Boolean(approval) || snapshot.plan?.status === 'awaiting_approval'}
+          locale={locale}
           editorRef={composerRef}
+          imagePathRegistry={imagePathRegistryRef.current}
           status={composerStatus}
           statusLayout={composerStatusLayout}
           layout={layout}

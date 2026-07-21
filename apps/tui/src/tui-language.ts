@@ -157,8 +157,32 @@ export type TuiMessageKey =
   | 'status.language'
   | 'picker.language.title'
   | 'picker.language.hint'
+  | 'composer.placeholder'
+  | 'composer.placeholder.disabled'
+  | 'command.model.label'
+  | 'command.model.description'
+  | 'command.mode.label'
+  | 'command.mode.description'
+  | 'command.permissions.label'
+  | 'command.permissions.description'
   | 'command.language.label'
-  | 'command.language.description';
+  | 'command.language.description'
+  | 'command.clear.label'
+  | 'command.clear.description'
+  | 'command.compact.label'
+  | 'command.compact.description'
+  | 'command.resume.label'
+  | 'command.resume.description'
+  | 'command.goal-pause.label'
+  | 'command.goal-pause.description'
+  | 'command.goal-resume.label'
+  | 'command.goal-resume.description'
+  | 'command.goal-cancel.label'
+  | 'command.goal-cancel.description'
+  | 'command.help.label'
+  | 'command.help.description'
+  | 'command.quit.label'
+  | 'command.quit.description';
 
 const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string>>>> = Object.freeze({
   'zh-CN': {
@@ -172,8 +196,32 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'status.language': '语言',
     'picker.language.title': '语言',
     'picker.language.hint': '↑↓ 选择 · Enter 确认 · Esc 关闭',
+    'composer.placeholder': '输入任何问题…',
+    'composer.placeholder.disabled': '请先处理上方请求…',
+    'command.model.label': '模型',
+    'command.model.description': '选择模型与思考强度',
+    'command.mode.label': '模式',
+    'command.mode.description': '选择 Agent、Plan 或 Goal',
+    'command.permissions.label': '权限',
+    'command.permissions.description': '选择本会话的权限策略',
     'command.language.label': '语言',
     'command.language.description': '切换界面与模型回复语言（中文/英文）',
+    'command.clear.label': '清空会话',
+    'command.clear.description': '清空消息、模型上下文与错误',
+    'command.compact.label': '压缩上下文',
+    'command.compact.description': '用结构化摘要压缩模型上下文；界面记录保留',
+    'command.resume.label': '恢复会话',
+    'command.resume.description': '恢复并继续已保存的会话',
+    'command.goal-pause.label': '暂停目标',
+    'command.goal-pause.description': '在当前安全边界后暂停活动目标',
+    'command.goal-resume.label': '继续目标',
+    'command.goal-resume.description': '恢复已暂停的目标',
+    'command.goal-cancel.label': '取消目标',
+    'command.goal-cancel.description': '取消当前活动目标',
+    'command.help.label': '帮助',
+    'command.help.description': '显示快捷键与命令说明',
+    'command.quit.label': '退出',
+    'command.quit.description': '退出 Peer Agent',
   },
   'en-US': {
     'language.switched': 'Switched to English (UI + replies)',
@@ -186,13 +234,51 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'status.language': 'lang',
     'picker.language.title': 'Language',
     'picker.language.hint': '↑↓ select · Enter confirm · Esc close',
+    'composer.placeholder': 'Ask anything…',
+    'composer.placeholder.disabled': 'Resolve the request above…',
+    'command.model.label': 'Model',
+    'command.model.description': 'Choose model and reasoning effort',
+    'command.mode.label': 'Mode',
+    'command.mode.description': 'Choose Agent, Plan, or Goal',
+    'command.permissions.label': 'Permissions',
+    'command.permissions.description': 'Choose the session permission policy',
     'command.language.label': 'Language',
     'command.language.description': 'Switch UI and model reply language (Chinese/English)',
+    'command.clear.label': 'Clear chat',
+    'command.clear.description': 'Clear messages, model context, and errors',
+    'command.compact.label': 'Compact context',
+    'command.compact.description': 'Compress model context with a structural summary; UI transcript stays',
+    'command.resume.label': 'Resume session',
+    'command.resume.description': 'Restore and continue a saved conversation',
+    'command.goal-pause.label': 'Pause goal',
+    'command.goal-pause.description': 'Pause the active goal after the current safe boundary',
+    'command.goal-resume.label': 'Resume goal',
+    'command.goal-resume.description': 'Resume the paused goal',
+    'command.goal-cancel.label': 'Cancel goal',
+    'command.goal-cancel.description': 'Cancel the active goal',
+    'command.help.label': 'Help',
+    'command.help.description': 'Show keyboard shortcuts and command syntax',
+    'command.quit.label': 'Quit',
+    'command.quit.description': 'Exit Peer Agent',
   },
 });
 
 export function tuiMessage(locale: TuiLocale, key: TuiMessageKey): string {
   return MESSAGES[locale][key] ?? MESSAGES['en-US'][key] ?? key;
+}
+
+export function tuiCommandMessage(
+  locale: TuiLocale,
+  commandId: string,
+  part: 'label' | 'description',
+): string | null {
+  const key = `command.${commandId}.${part}` as TuiMessageKey;
+  const value = MESSAGES[locale][key] ?? MESSAGES['en-US'][key];
+  return value ?? null;
+}
+
+export function composerPlaceholder(locale: TuiLocale, disabled = false): string {
+  return tuiMessage(locale, disabled ? 'composer.placeholder.disabled' : 'composer.placeholder');
 }
 
 export function languageSwitchNotice(locale: TuiLocale): string {

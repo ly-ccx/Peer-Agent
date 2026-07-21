@@ -10,6 +10,7 @@ import {
   requestTuiSurface,
   type TuiSurface,
 } from './surface-state.ts';
+import type { TuiLocale } from './tui-language.ts';
 import type { TuiMode } from './tui-mode.ts';
 
 export type TuiCommand = TuiCommandDefinition;
@@ -37,8 +38,9 @@ export function composerRows(text: string, terminalColumns: number): number {
 export function filterTuiCommands(
   query: string,
   context: TuiCommandContext = { goalStatus: 'none' },
+  locale: TuiLocale = 'en-US',
 ): readonly TuiCommand[] {
-  return filterTuiCommandRegistry(query, context);
+  return filterTuiCommandRegistry(query, context, locale);
 }
 
 export function selectionWindow<T>(

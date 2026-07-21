@@ -1,3 +1,5 @@
+import { tuiCommandMessage, tuiMessage, type TuiLocale } from './tui-language.ts';
+
 export type TuiUserMode = 'chat' | 'plan' | 'goal';
 
 export type TuiCommandAction =
@@ -51,16 +53,44 @@ export const TUI_COMMAND_REGISTRY: readonly TuiCommandDefinition[] = Object.free
   { id: 'quit', label: 'Quit', description: 'Exit Peer Agent', keywords: ['exit'], action: { type: 'quit' } },
 ]);
 
-export function visibleTuiCommands(context: TuiCommandContext): readonly TuiCommandDefinition[] {
-  return TUI_COMMAND_REGISTRY.filter((command) => command.visible?.(context) ?? true);
+export function localizeTuiCommand(
+  command: TuiCommandDefinition,
+  locale: TuiLocale = 'en-US',
+): TuiCommandDefinition {
+  const label = tuiCommandMessage(locale, command.id, 'label') ?? command.label;
+  const description = tuiCommandMessage(locale, command.id, 'description') ?? command.description;
+  if (label === command.label && description === command.description) return command;
+  return {
+    ...command,
+    label,
+    description,
+  };
+}
+
+export function localizeTuiCommands(
+  commands: readonly TuiCommandDefinition[],
+  locale: TuiLocale = 'en-US',
+): readonly TuiCommandDefinition[] {
+  return commands.map((command) => localizeTuiCommand(command, locale));
+}
+
+export function visibleTuiCommands(
+  context: TuiCommandContext,
+  locale: TuiLocale = 'en-US',
+): readonly TuiCommandDefinition[] {
+  return localizeTuiCommands(
+    TUI_COMMAND_REGISTRY.filter((command) => command.visible?.(context) ?? true),
+    locale,
+  );
 }
 
 export function filterTuiCommandRegistry(
   query: string,
   context: TuiCommandContext,
+  locale: TuiLocale = 'en-US',
 ): readonly TuiCommandDefinition[] {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  return visibleTuiCommands(context).filter((command) => {
+  return visibleTuiCommands(context, locale).filter((command) => {
     if (terms.length === 0) return true;
     const haystack = [command.id, command.label, command.description, ...command.keywords].join(' ').toLowerCase();
     return terms.every((term) => haystack.includes(term));
@@ -72,48 +102,41 @@ export interface TuiHelpSection {
   readonly lines: readonly string[];
 }
 
-/** Content for the `/help` panel: shortcuts, slash commands, and modes. */
+/** Content for the `/help` panel; keep titles locale-aware. */
 export function buildTuiHelpSections(
   context: TuiCommandContext = { goalStatus: 'none' },
+  locale: TuiLocale = 'en-US',
 ): readonly TuiHelpSection[] {
-  const commands = visibleTuiCommands(context);
+  const commands = visibleTuiCommands(context, locale);
   return [
     {
-      title: 'Keyboard',
+      title: tuiMessage(locale, 'help.keyboard'),
       lines: [
-        'Ctrl+X then M  model picker',
-        'Ctrl+X then O  mode picker',
-        'Ctrl+X then P  permissions',
-        'Ctrl+1 / 2 / 3  Agent / Plan / Goal',
-        'Esc  close panel or cancel',
-        'Ctrl/Cmd+C  copy selection, else interrupt / quit',
+        'Enter  send',
+        'Shift+Enter  newline',
+        'Ctrl+C  cancel stream / clear draft / quit',
+        'Ctrl+X then M/O/P  model / mode / permissions',
+        'Ctrl+X then 1/2/3  Agent / Plan / Goal',
         'Drag to select chat text, then Ctrl/Cmd+C to copy',
       ],
     },
     {
-      title: 'Slash commands',
+      title: tuiMessage(locale, 'help.commands'),
       lines: commands.map((command) => {
         const shortcut = command.shortcut ? `  (${command.shortcut})` : '';
         return `/${command.id}  ${command.description}${shortcut}`;
       }),
     },
     {
-      title: 'Modes',
+      title: tuiMessage(locale, 'help.modes'),
       lines: [
         'Agent  general conversation with projected read/write tools',
-        'Plan   read-only planning until a plan is approved',
-        'Goal   autonomous execution with projected tools',
+        'Plan  clarify intent and produce an executable plan',
+        'Goal  execute an approved plan with evidence checkpoints',
       ],
     },
     {
-      title: 'Language',
-      lines: [
-        '/language  switch UI + model reply language (Chinese / English)',
-        'Persisted in ~/.peer-agent/settings.json as locale + replyLanguage',
-      ],
-    },
-    {
-      title: 'Tips',
+      title: tuiMessage(locale, 'help.tips'),
       lines: [
         'Type / to search commands',
         'Click a tool result to expand full output',
