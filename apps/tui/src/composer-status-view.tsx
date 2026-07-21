@@ -30,11 +30,12 @@ export function ComposerRunningStatusBar({
 }
 
 /** Thin rule between running status (if any) and the mode controls bar. */
-export function ComposerModeDivider() {
+export function ComposerModeDivider({ width }: { readonly width: number }) {
+  const cols = Math.max(1, Math.floor(width));
   return (
     <box width="100%" height={1} flexShrink={0}>
       <text fg={COLOR.subtle} wrapMode="none">
-        {'─'.repeat(80)}
+        {'─'.repeat(cols)}
       </text>
     </box>
   );

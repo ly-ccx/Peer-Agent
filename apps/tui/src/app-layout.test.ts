@@ -146,9 +146,20 @@ describe('TUI app layout', () => {
     expect(runningLabelSource).not.toContain('cancelHint');
     expect(dockSource).toContain("snapshot.status !== 'idle'");
     expect(dockSource).toContain('<ComposerRunningStatusLabel');
-    expect(dockSource).toContain('<ComposerModeDivider />');
+    expect(dockSource).toContain('composerContentWidth(terminal.width, layout.outerPadding)');
+    expect(dockSource).toContain('<ComposerModeDivider width={dividerWidth} />');
+    expect(statusViewSource).not.toContain("{'─'.repeat(80)}");
+    expect(statusViewSource).toContain("{'─'.repeat(cols)}");
+    // Divider must only render with the running status (not when idle).
+    const activeBlock = dockSource.slice(
+      dockSource.indexOf("snapshot.status !== 'idle'"),
+      dockSource.indexOf('<ComposerControlsBar status={status} layout={statusLayout} />'),
+    );
+    expect(activeBlock).toContain('<ComposerRunningStatusLabel');
+    expect(activeBlock).toContain('<ComposerModeDivider width={dividerWidth} />');
+    expect(activeBlock).toContain(') : null}');
     const runningAt = dockSource.indexOf('<ComposerRunningStatusLabel');
-    const dividerAt = dockSource.indexOf('<ComposerModeDivider />');
+    const dividerAt = dockSource.indexOf('<ComposerModeDivider width={dividerWidth} />');
     const controlsAt = dockSource.indexOf('<ComposerControlsBar status={status} layout={statusLayout} />');
     const inputAt = dockSource.indexOf('<Composer\n');
     const statusAt = dockSource.indexOf('<ComposerStatusBar status={status} layout={statusLayout} />');

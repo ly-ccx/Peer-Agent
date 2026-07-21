@@ -39,6 +39,13 @@ export function responsiveLayout(columns: number): TuiResponsiveLayout {
   };
 }
 
+/** Usable content columns after left/right outer padding (matches ComposerDock content width). */
+export function composerContentWidth(columns: number, outerPadding: number): number {
+  const cols = Math.max(1, Math.floor(columns));
+  const pad = Math.max(0, Math.floor(outerPadding));
+  return Math.max(1, cols - pad * 2);
+}
+
 export function responsivePickerLayout(
   terminalRows: number,
   modeOptionCount: number,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { responsiveLayout, responsivePickerLayout } from './responsive-layout.ts';
+import { composerContentWidth, responsiveLayout, responsivePickerLayout } from './responsive-layout.ts';
 
 describe('responsive TUI layout', () => {
   test.each([
@@ -15,6 +15,17 @@ describe('responsive TUI layout', () => {
     expect(responsiveLayout(columns)).toEqual({
       density, showDescriptions, showHints, stackActions, outerPadding, outerPaddingY, welcomeWidth,
     });
+  });
+
+  test.each([
+    [120, 3, 114],
+    [100, 2, 96],
+    [80, 2, 76],
+    [60, 1, 58],
+    [40, 0, 40],
+    [5, 3, 1],
+  ] as const)('composer content width for %i columns with pad %i is %i', (columns, outerPadding, expected) => {
+    expect(composerContentWidth(columns, outerPadding)).toBe(expected);
   });
 
   test('preserves decisions by changing layout rather than hiding actions', () => {

@@ -83,7 +83,7 @@ import {
 } from './tui-permission-policy.ts';
 import { moveTuiSurfaceSelection } from './surface-state.ts';
 import { composerEnterAction, runtimeControlAction } from './runtime-controls.ts';
-import { responsiveLayout, responsivePickerLayout } from './responsive-layout.ts';
+import { composerContentWidth, responsiveLayout, responsivePickerLayout } from './responsive-layout.ts';
 import {
   animatedToolStatusGlyph,
   resolveToolPresentation,
@@ -694,6 +694,8 @@ function ComposerDock({
       // groups + search + optional hint around the visible rows
       ? Math.min(modelPickerMaxVisible, Math.max(1, modelPickerRows.length)) + 4
       : 0;
+  const terminal = useTerminalDimensions();
+  const dividerWidth = composerContentWidth(terminal.width, layout.outerPadding);
 
   return (
     <box
@@ -704,14 +706,16 @@ function ComposerDock({
       paddingLeft={layout.outerPadding}
       paddingRight={layout.outerPadding}
     >
-      {/* Running status above mode; thinking still renders in chat history. */}
+      {/* Running status + divider only while active; thinking stays in chat history. */}
       {snapshot.status !== 'idle' ? (
-        <ComposerRunningStatusLabel
-          locale={locale}
-          runStatus={snapshot.status === 'cancelling' ? 'cancelling' : 'running'}
-        />
+        <>
+          <ComposerRunningStatusLabel
+            locale={locale}
+            runStatus={snapshot.status === 'cancelling' ? 'cancelling' : 'running'}
+          />
+          <ComposerModeDivider width={dividerWidth} />
+        </>
       ) : null}
-      <ComposerModeDivider />
       <ComposerControlsBar status={status} layout={statusLayout} />
       <box position="relative" width="100%" height={5} overflow="visible">
         {slashOpen ? (
