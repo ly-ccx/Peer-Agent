@@ -1,4 +1,4 @@
-export type ModelReasoningEffort = 'off' | 'low' | 'default' | 'high' | 'xhigh';
+export type ModelReasoningEffort = 'off' | 'low' | 'medium' | 'default' | 'high' | 'xhigh' | 'max';
 
 export type RuntimePermissionPolicy = 'read-only' | 'ask' | 'workspace-write' | 'custom';
 

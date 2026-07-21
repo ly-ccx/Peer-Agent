@@ -80,8 +80,11 @@ export function resolveTuiModelConfig(
       credentials,
       catalog: [{
         providerId: 'openai-compatible', modelId: model, displayName: model,
-        supportsTools: true, supportedReasoningEfforts: ['default', 'low', 'high'],
-        defaultReasoningEffort: 'default', available: true,
+        supportsTools: true,
+        // Align with Desktop BASE fallback when no Desktop catalog is present.
+        supportedReasoningEfforts: ['off', 'low', 'default', 'high'],
+        defaultReasoningEffort: 'default',
+        available: true,
       }],
     };
   }
@@ -103,8 +106,8 @@ export function resolveTuiModelConfig(
       // render `ctx N%` instead of falling back to `ctx N / ?`.
       ...(provider.contextWindow === undefined ? {} : { contextWindow: provider.contextWindow }),
       supportsTools: true,
-      supportedReasoningEfforts: ['default', 'low', 'high'],
-      defaultReasoningEffort: 'default',
+      supportedReasoningEfforts: provider.supportedReasoningEfforts,
+      defaultReasoningEffort: provider.defaultReasoningEffort,
       available,
       ...(available ? {} : { unavailableReason: 'credential missing' }),
     };

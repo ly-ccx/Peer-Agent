@@ -12,6 +12,8 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 
+import type { ModelReasoningEffort } from './model-catalog.ts';
+
 export type SharedModelAuthMethod =
   | 'api_key'
   | 'oauth_chatgpt'
@@ -38,6 +40,11 @@ export interface StoredModelProvider {
   readonly oauthAccountId?: string;
   readonly oauthProjectId?: string | null;
   readonly contextWindow?: number;
+  /** Desktop-projected reasoning levels for this model (e.g. off/low/default/high/xhigh). */
+  readonly reasoningEffortLevels?: readonly string[];
+  readonly reasoningDefaultEffort?: string;
+  readonly reasoningParamStyle?: string;
+  readonly supportsReasoning?: boolean;
 }
 
 export interface ChatGptOAuthTokens {
@@ -67,6 +74,12 @@ export interface SharedModelMetadata {
   readonly configFile: string;
   /** Optional context window from Desktop llm-providers.json model entry. */
   readonly contextWindow?: number;
+  /**
+   * Projected from Desktop llm-providers.json (model.reasoningEffortLevels).
+   * Empty/missing levels fall back to the desktop BASE set.
+   */
+  readonly supportedReasoningEfforts: readonly ModelReasoningEffort[];
+  readonly defaultReasoningEffort: ModelReasoningEffort;
 }
 
 export interface SharedModelSelection extends SharedModelMetadata {
@@ -327,12 +340,68 @@ function normalizeContextWindow(value: unknown): number | undefined {
     : undefined;
 }
 
+
+const CANONICAL_REASONING_EFFORT_ORDER: readonly ModelReasoningEffort[] = [
+  'off',
+  'low',
+  'medium',
+  'default',
+  'high',
+  'xhigh',
+  'max',
+];
+
+const BASE_REASONING_EFFORT_LEVELS: readonly ModelReasoningEffort[] = [
+  'off',
+  'low',
+  'default',
+  'high',
+];
+
+function isModelReasoningEffort(value: string): value is ModelReasoningEffort {
+  return (CANONICAL_REASONING_EFFORT_ORDER as readonly string[]).includes(value);
+}
+
+/**
+ * Normalize Desktop-projected reasoningEffortLevels the same way the Desktop UI does:
+ * keep declared legal levels, stable order, fall back to BASE when empty/invalid.
+ */
+export function normalizeReasoningEffortLevels(
+  raw: readonly string[] | null | undefined,
+): readonly ModelReasoningEffort[] {
+  if (!raw || raw.length === 0) return BASE_REASONING_EFFORT_LEVELS;
+  const valid = new Set<ModelReasoningEffort>();
+  for (const item of raw) {
+    if (typeof item === 'string' && isModelReasoningEffort(item)) valid.add(item);
+  }
+  const result = CANONICAL_REASONING_EFFORT_ORDER.filter((level) => valid.has(level));
+  return result.length > 0 ? result : BASE_REASONING_EFFORT_LEVELS;
+}
+
+export function resolveDefaultReasoningEffort(
+  levels: readonly ModelReasoningEffort[],
+  preferred?: string | null,
+): ModelReasoningEffort {
+  if (preferred && isModelReasoningEffort(preferred) && levels.includes(preferred)) {
+    return preferred;
+  }
+  if (levels.includes('default')) return 'default';
+  return levels[0] ?? 'default';
+}
+
 function metadataFromSelected(
   configFile: string,
   selected: StoredModelProvider,
 ): SharedModelMetadata {
   const contextWindow = normalizeContextWindow(selected.contextWindow);
   const modelLabel = selected.modelLabel?.trim() || undefined;
+  const supportedReasoningEfforts = normalizeReasoningEffortLevels(
+    selected.reasoningEffortLevels,
+  );
+  const defaultReasoningEffort = resolveDefaultReasoningEffort(
+    supportedReasoningEfforts,
+    selected.reasoningDefaultEffort,
+  );
   return {
     source: 'desktop-default',
     providerId: selected.provider?.trim() || 'openai',
@@ -345,6 +414,8 @@ function metadataFromSelected(
     credentialStored: hasStoredCredential(selected),
     configFile,
     ...(contextWindow === undefined ? {} : { contextWindow }),
+    supportedReasoningEfforts,
+    defaultReasoningEffort,
   };
 }
 

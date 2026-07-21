@@ -8,6 +8,7 @@ import {
   getSharedModelConfigPath,
   loadSharedModelMetadata,
   loadSharedModelMetadataList,
+  normalizeReasoningEffortLevels,
   loadSharedModelSelection,
   selectDesktopDefaultProvider,
   type ChatGptOAuthTokens,
@@ -98,6 +99,9 @@ test('loadSharedModelMetadata reads only non-sensitive metadata', () => {
     assert.equal(metadata?.modelLabel, 'GPT Shared Label');
     assert.equal(metadata?.credentialId, 'credential-group');
     assert.equal(metadata?.credentialStored, true);
+    // No Desktop levels → BASE fallback (same as Desktop normalizeEffortLevels).
+    assert.deepEqual(metadata?.supportedReasoningEfforts, ['off', 'low', 'default', 'high']);
+    assert.equal(metadata?.defaultReasoningEffort, 'default');
     assert.deepEqual(credentials.reads, { apiKey: 0, oauth: 0 });
   } finally {
     rmSync(userDataPath, { recursive: true, force: true });
@@ -497,3 +501,66 @@ test('persistOAuthTokens keeps Desktop v2 channels/models layout', () => {
     rmSync(userDataPath, { recursive: true, force: true });
   }
 });
+
+
+test('normalizeReasoningEffortLevels matches Desktop UI rules', () => {
+  assert.deepEqual(normalizeReasoningEffortLevels(undefined), ['off', 'low', 'default', 'high']);
+  assert.deepEqual(normalizeReasoningEffortLevels([]), ['off', 'low', 'default', 'high']);
+  assert.deepEqual(
+    normalizeReasoningEffortLevels(['high', 'off', 'xhigh', 'bogus', 'low']),
+    ['off', 'low', 'high', 'xhigh'],
+  );
+  assert.deepEqual(
+    normalizeReasoningEffortLevels(['medium', 'high', 'low']),
+    ['low', 'medium', 'high'],
+  );
+  assert.deepEqual(normalizeReasoningEffortLevels(['max', 'high', 'low']), ['low', 'high', 'max']);
+});
+
+test('loadSharedModelMetadata projects Desktop reasoningEffortLevels', () => {
+  const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-effort-'));
+  try {
+    const configFile = getSharedModelConfigPath(userDataPath);
+    writeFileSync(configFile, JSON.stringify({
+      version: 2,
+      channels: [{
+        id: 'channel-1',
+        groupId: 'channel-1',
+        name: 'Qoder CLI',
+        provider: 'openai',
+        baseUrl: 'https://example.test/v1',
+        authMethod: 'api_key',
+        apiKeyConfigured: true,
+        reasoningDefaultEffort: 'off',
+      }],
+      models: [{
+        id: 'model-1',
+        groupId: 'channel-1',
+        model: 'cmodel',
+        modelLabel: 'Cantus',
+        enabled: true,
+        isDefault: true,
+        supportsReasoning: true,
+        reasoningEffortLevels: ['off', 'low', 'default', 'high', 'xhigh'],
+        reasoningDefaultEffort: 'default',
+      }],
+    }));
+    const credentials = createCredentialStore({
+      apiKeys: { 'channel-1': 'secret' },
+    });
+    const metadata = loadSharedModelMetadata({
+      userDataPath,
+      credentialStore: credentials.store,
+    });
+    assert.equal(metadata?.model, 'cmodel');
+    assert.equal(metadata?.modelLabel, 'Cantus');
+    assert.deepEqual(
+      metadata?.supportedReasoningEfforts,
+      ['off', 'low', 'default', 'high', 'xhigh'],
+    );
+    assert.equal(metadata?.defaultReasoningEffort, 'default');
+  } finally {
+    rmSync(userDataPath, { recursive: true, force: true });
+  }
+});
+

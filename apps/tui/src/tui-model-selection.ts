@@ -46,7 +46,7 @@ export function createTuiModelSelectionControl(input: {
   readonly supportedReasoningEfforts?: readonly ModelReasoningEffort[];
   readonly catalog?: readonly RuntimeModelCatalogEntry[];
 }): TuiModelSelectionControl {
-  const efforts = input.supportedReasoningEfforts ?? ['default', 'low', 'high'];
+  const efforts = input.supportedReasoningEfforts ?? ['off', 'low', 'default', 'high'];
   const catalog: readonly RuntimeModelCatalogEntry[] = Object.freeze(input.catalog ?? [{
     providerId: input.providerId,
     modelId: input.modelId,
@@ -67,18 +67,27 @@ export function createTuiModelSelectionControl(input: {
     && entry.modelId === initialSelection.modelId
     && entry.available
   );
-  let selection: RuntimeModelSelection = initialModel
-    && initialModel.supportedReasoningEfforts.includes(initialSelection.reasoningEffort)
-    ? initialSelection
-    : (() => {
-      const fallback = catalog.find((entry) => entry.available);
-      if (!fallback) return initialSelection;
+  let selection: RuntimeModelSelection = (() => {
+    // Prefer the requested model; clamp effort into that model's projected levels
+    // instead of jumping to an unrelated catalog entry (Desktop-aligned).
+    if (initialModel) {
+      if (initialModel.supportedReasoningEfforts.includes(initialSelection.reasoningEffort)) {
+        return initialSelection;
+      }
       return {
-        providerId: fallback.providerId,
-        modelId: fallback.modelId,
-        reasoningEffort: fallback.defaultReasoningEffort,
+        providerId: initialModel.providerId,
+        modelId: initialModel.modelId,
+        reasoningEffort: initialModel.defaultReasoningEffort,
       };
-    })();
+    }
+    const fallback = catalog.find((entry) => entry.available);
+    if (!fallback) return initialSelection;
+    return {
+      providerId: fallback.providerId,
+      modelId: fallback.modelId,
+      reasoningEffort: fallback.defaultReasoningEffort,
+    };
+  })();
   return {
     catalog,
     getSelection: () => selection,
