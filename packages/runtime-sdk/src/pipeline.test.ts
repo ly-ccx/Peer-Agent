@@ -202,12 +202,12 @@ test('returns cancelled when aborted between model and tool execution', async ()
   assert.equal(cancelled, true);
 });
 
-test('emits runtime.error and rethrows model errors', async () => {
+test('emits runtime.error and returns failed status with preserved state', async () => {
   const events: RuntimeSdkEvent[] = [];
   const pipeline = createRuntimePipeline<string, State, ToolCall, ToolResult>({
     events: createEventSink(events),
     model: {
-      initialize: () => ({ phase: 0, transcript: [] }),
+      initialize: () => ({ phase: 0, transcript: ['seed'] }),
       runTurn: async () => {
         throw new Error('provider failed');
       },
@@ -218,10 +218,10 @@ test('emits runtime.error and rethrows model errors', async () => {
     },
   });
 
-  await assert.rejects(
-    pipeline.run({ sessionId: 'session-1', input: 'start' }),
-    /provider failed/,
-  );
+  const result = await pipeline.run({ sessionId: 'session-1', input: 'start' });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.reason, 'provider failed');
+  assert.deepEqual(result.state, { phase: 0, transcript: ['seed'] });
   assert.deepEqual(events.map((event) => event.type), [
     'session.started',
     'runtime.error',

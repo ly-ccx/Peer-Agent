@@ -20,6 +20,10 @@ export interface ToolPresentation {
   readonly status: ToolPresentationStatus;
   readonly detail: string;
   readonly detailLines: readonly string[];
+  /** Stable tool-call id for Desktop segments / API replay. */
+  readonly toolCallId?: string;
+  /** Original tool arguments retained for Desktop segment.args. */
+  readonly arguments?: Record<string, unknown> | null;
 }
 
 export function toolResultInlineSummary(
@@ -210,6 +214,7 @@ export function createToolPresentation(input: {
   readonly status?: unknown;
   readonly outputPreview?: unknown;
   readonly errorMessage?: string | null;
+  readonly toolCallId?: string | null;
 }): ToolPresentation {
   const capabilityId = input.capabilityId.trim() || 'tool';
   const status = normalizeToolPresentationStatus(input.status);
@@ -221,6 +226,9 @@ export function createToolPresentation(input: {
       ? 'cancelled'
       : 'completed';
   const detail = formatToolResultSummary(input.outputPreview, fallback);
+  const toolCallId = typeof input.toolCallId === 'string' && input.toolCallId.trim()
+    ? input.toolCallId.trim()
+    : undefined;
   return {
     capabilityId,
     toolName,
@@ -228,6 +236,8 @@ export function createToolPresentation(input: {
     status,
     detail,
     detailLines: toolDetailLines(detail),
+    ...(toolCallId ? { toolCallId } : {}),
+    ...(input.arguments === undefined ? {} : { arguments: input.arguments }),
   };
 }
 

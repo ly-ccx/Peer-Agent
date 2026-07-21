@@ -182,13 +182,22 @@ export function createRuntimePipeline<
           };
         }
 
+        const detail = errorMessage(error);
         emit({
           type: 'runtime.error',
           ...eventBase,
           code: 'runtime_pipeline_error',
-          message: errorMessage(error),
+          message: detail,
         });
-        throw error;
+        // Preserve partial state (already-executed tools / model messages) so
+        // hosts can recover instead of discarding progress on provider stream errors.
+        return {
+          status: 'failed',
+          state,
+          turns,
+          toolCalls,
+          reason: detail,
+        };
       }
     },
   };

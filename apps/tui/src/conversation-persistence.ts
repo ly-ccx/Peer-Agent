@@ -85,6 +85,15 @@ function storedToolPresentation(value: unknown): ChatMessage['tool'] | undefined
   const detailLines = Array.isArray(record.detailLines)
     ? record.detailLines.filter((line): line is string => typeof line === 'string')
     : [];
+  const toolCallId = typeof record.toolCallId === 'string' && record.toolCallId.trim()
+    ? record.toolCallId.trim()
+    : undefined;
+  const args = record.arguments;
+  const arguments_ = args && typeof args === 'object' && !Array.isArray(args)
+    ? args as Record<string, unknown>
+    : record.arguments === null
+      ? null
+      : undefined;
   return {
     capabilityId: record.capabilityId,
     toolName: typeof record.toolName === 'string' ? record.toolName : record.capabilityId,
@@ -99,6 +108,8 @@ function storedToolPresentation(value: unknown): ChatMessage['tool'] | undefined
     ) ? record.status : 'unknown',
     detail: typeof record.detail === 'string' ? record.detail : '',
     detailLines,
+    ...(toolCallId ? { toolCallId } : {}),
+    ...(arguments_ === undefined ? {} : { arguments: arguments_ }),
   };
 }
 
@@ -112,6 +123,17 @@ function storedCompactMeta(value: unknown): ChatMessage['compact'] | undefined {
     ...(typeof record.beforeCount === 'number' ? { beforeCount: record.beforeCount } : {}),
     ...(typeof record.afterCount === 'number' ? { afterCount: record.afterCount } : {}),
     ...(typeof record.summarizedCount === 'number' ? { summarizedCount: record.summarizedCount } : {}),
+  };
+}
+
+function desktopToolSegment(tool: NonNullable<ChatMessage['tool']>): Record<string, unknown> {
+  return {
+    type: 'tool-call',
+    tool: tool.capabilityId,
+    displayName: tool.toolName,
+    ...(tool.arguments && typeof tool.arguments === 'object' ? { args: tool.arguments } : {}),
+    result: tool.detail || tool.status,
+    ...(tool.toolCallId ? { toolCallId: tool.toolCallId } : {}),
   };
 }
 
@@ -129,6 +151,7 @@ function storedMessage(value: Record<string, unknown>, index: number): ChatMessa
     ...(usage ? { usage } : {}),
     ...(tool ? { tool } : {}),
     ...(compact ? { compact } : {}),
+    ...(value.interrupted === true ? { interrupted: true } : {}),
   };
 }
 
@@ -257,11 +280,22 @@ export function createTuiConversationPersistence(options: {
           ? [...newMessages].reverse().find((message) => message.role === 'assistant')
           : undefined;
         for (const message of newMessages) {
+          // Desktop replay contract: tool results also carry tool-call segments so
+          // history load can render structured tool cards instead of plain text.
+          const segments = message.role === 'tool' && message.tool
+            ? [desktopToolSegment(message.tool)]
+            : message.role === 'assistant' && message.thinkingContent
+              ? [
+                  { type: 'thinking', content: message.thinkingContent },
+                  ...(message.content ? [{ type: 'text', content: message.content }] : []),
+                ]
+              : undefined;
           store.appendMessage(id, {
             ...message,
             ...(snapshot.usage && message.id === completedAssistant?.id
               ? { usage: snapshot.usage }
               : {}),
+            ...(segments ? { segments } : {}),
             timestamp: now(),
           });
           persistedMessageIds.add(message.id);

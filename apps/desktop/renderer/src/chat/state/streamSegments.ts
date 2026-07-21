@@ -415,3 +415,95 @@ export function markDanglingToolCallsInterrupted(
   });
   return changed ? next : (list as ContentSegment[]);
 }
+
+/**
+ * 兼容 CLI/TUI 落盘的 role=tool 消息：Desktop 表达层只渲染 user/assistant/system，
+ * 因此把 tool 消息折叠进前一条 assistant 的 tool-call segments。
+ * 这是历史回放适配，不是把 tool 文本提升为可执行指令。
+ */
+export function foldCliToolMessagesForDesktop(
+  rawMessages: readonly Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (const raw of rawMessages) {
+    const role = String(raw.role ?? '');
+    if (role !== 'tool') {
+      out.push({ ...raw });
+      continue;
+    }
+
+    const content = typeof raw.content === 'string' ? raw.content : '';
+    const tool = raw.tool && typeof raw.tool === 'object' && !Array.isArray(raw.tool)
+      ? raw.tool as Record<string, unknown>
+      : null;
+    const existingSegments = Array.isArray(raw.segments)
+      ? raw.segments as Record<string, unknown>[]
+      : [];
+    const segmentFromTool = tool && typeof tool.capabilityId === 'string'
+      ? {
+          type: 'tool-call',
+          tool: tool.capabilityId,
+          displayName: typeof tool.toolName === 'string' ? tool.toolName : tool.capabilityId,
+          ...(tool.arguments && typeof tool.arguments === 'object' && !Array.isArray(tool.arguments)
+            ? { args: tool.arguments as Record<string, unknown> }
+            : {}),
+          result: typeof tool.detail === 'string' && tool.detail.trim()
+            ? tool.detail
+            : (content || String(tool.status ?? 'completed')),
+          ...(typeof tool.toolCallId === 'string' && tool.toolCallId.trim()
+            ? { toolCallId: tool.toolCallId }
+            : {}),
+        }
+      : existingSegments.find((segment) => segment?.type === 'tool-call')
+        ?? {
+          type: 'tool-call',
+          tool: 'tool',
+          result: content || 'completed',
+        };
+
+    let targetIndex = -1;
+    for (let i = out.length - 1; i >= 0; i -= 1) {
+      if (String(out[i]?.role) === 'assistant') {
+        targetIndex = i;
+        break;
+      }
+    }
+    if (targetIndex < 0) {
+      out.push({
+        id: typeof raw.id === 'string' ? raw.id : `tool-folded-${out.length + 1}`,
+        role: 'assistant',
+        content: '',
+        segments: [segmentFromTool],
+        timestamp: raw.timestamp,
+      });
+      continue;
+    }
+
+    const target = { ...out[targetIndex] } as Record<string, unknown>;
+    const prevSegments = Array.isArray(target.segments)
+      ? [...(target.segments as Record<string, unknown>[])]
+      : [];
+    const callId = typeof segmentFromTool.toolCallId === 'string' ? segmentFromTool.toolCallId : '';
+    let merged = false;
+    if (callId) {
+      for (let i = prevSegments.length - 1; i >= 0; i -= 1) {
+        const seg = prevSegments[i];
+        if (seg && seg.type === 'tool-call' && seg.toolCallId === callId) {
+          prevSegments[i] = {
+            ...seg,
+            ...segmentFromTool,
+            result: segmentFromTool.result ?? seg.result,
+          };
+          merged = true;
+          break;
+        }
+      }
+    }
+    if (!merged) prevSegments.push(segmentFromTool);
+    target.segments = prevSegments;
+    out[targetIndex] = target;
+  }
+  return out;
+}
+
+

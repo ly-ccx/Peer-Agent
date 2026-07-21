@@ -54,6 +54,8 @@ export interface ChatMessage {
   readonly usage?: ModelUsage;
   /** Structured tool presentation for hierarchical TUI rendering. */
   readonly tool?: ToolPresentation;
+  /** Stream/provider failure interrupted this assistant message after partial progress. */
+  readonly interrupted?: boolean;
   /** Compact progress / separator metadata for system messages. */
   readonly compact?: ChatCompactMeta;
 }
@@ -135,14 +137,46 @@ function errorMessage(error: unknown): string {
 }
 
 /** Drop empty thinking placeholders; keep messages that already received content. */
-function finalizePendingMessages(messages: readonly ChatMessage[]): ChatMessage[] {
+function finalizePendingMessages(
+  messages: readonly ChatMessage[],
+  options?: { readonly interrupted?: boolean; readonly error?: string },
+): ChatMessage[] {
+  const interrupted = options?.interrupted === true;
+  const errorNote = options?.error?.trim();
+  // Prefer the latest assistant (even empty pending placeholder) as the recovery anchor.
+  let recoveryIndex = -1;
+  if (interrupted) {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i]?.role === 'assistant') {
+        recoveryIndex = i;
+        break;
+      }
+    }
+  }
   return messages
-    .filter((message) => {
-      if (!message.pending) return true;
-      // Empty placeholder that never received text/thinking: remove it.
-      return Boolean(message.content || message.thinkingContent);
+    .map((message, index) => {
+      if (!message.pending && !(interrupted && index === recoveryIndex)) return message;
+      if (message.pending) {
+        // Empty placeholder that never received text/thinking/tool progress:
+        // keep only when this is the recovery anchor for a failed stream.
+        const hasProgress = Boolean(message.content || message.thinkingContent || message.tool);
+        if (!hasProgress && index !== recoveryIndex) return null;
+      }
+      const next: ChatMessage = message.pending
+        ? { ...message, pending: false }
+        : message;
+      if (!interrupted || message.role !== 'assistant' || index !== recoveryIndex) return next;
+      // Preserve partial assistant progress and mark the turn as recoverable.
+      const content = next.content?.trim()
+        ? next.content
+        : (errorNote ? `Stream interrupted: ${errorNote}` : next.content);
+      return {
+        ...next,
+        content,
+        interrupted: true,
+      };
     })
-    .map((message) => (message.pending ? { ...message, pending: false } : message));
+    .filter((message): message is ChatMessage => message !== null);
 }
 
 export function renderCompactProgressBar(percent: number, width = 16): string {
@@ -209,6 +243,7 @@ export function createChatController(options: {
         if (evidenceId) executionEvidenceIds = [...executionEvidenceIds, evidenceId];
         const tool = createToolPresentation({
           capabilityId: call.capabilityId,
+          toolCallId: call.toolCallId,
           arguments: call.arguments,
           status: execution.result.status,
           outputPreview: execution.result.outputPreview,
@@ -372,6 +407,7 @@ export function createChatController(options: {
 
         if (result.status === 'cancelled') turn.cancel(result.reason);
         else if (result.status === 'exhausted') turn.fail('turn_limit_exhausted');
+        else if (result.status === 'failed') turn.fail(result.reason || 'provider_stream_error');
         else turn.complete();
 
         if (turnMode === 'plan' && result.status === 'completed' && result.output) {
@@ -379,25 +415,40 @@ export function createChatController(options: {
           if (plan) options.planCoordinator?.publish(plan);
         }
 
+        const failed = result.status === 'failed' || result.status === 'exhausted';
+        const failureDetail = result.status === 'exhausted'
+          ? 'The model exhausted its turn limit.'
+          : result.status === 'failed'
+            ? (result.reason || 'provider_stream_error')
+            : undefined;
         publish({
           status: 'idle',
           mode: snapshot.mode,
           session: sessions.get(sessionId) ?? undefined,
           plan: options.planCoordinator?.getSnapshot() ?? undefined,
           usage: result.state?.usage,
-          messages: finalizePendingMessages(snapshot.messages),
-          error: result.status === 'exhausted' ? 'The model exhausted its turn limit.' : undefined,
+          messages: finalizePendingMessages(snapshot.messages, {
+            interrupted: failed,
+            error: failureDetail,
+          }),
+          error: failureDetail,
         });
       } catch (error) {
         const wasCancelled = turn.signal.aborted;
-        if (wasCancelled) turn.cancel(errorMessage(error));
-        else turn.fail(errorMessage(error));
+        const detail = errorMessage(error);
+        if (wasCancelled) turn.cancel(detail);
+        else turn.fail(detail);
+        // Keep already-executed tool results and any partial assistant text.
+        // Mark the latest assistant as interrupted so Desktop/TUI can recover.
         publish({
           status: 'idle',
           mode: snapshot.mode,
           session: sessions.get(sessionId) ?? undefined,
-          messages: finalizePendingMessages(snapshot.messages),
-          error: wasCancelled ? undefined : errorMessage(error),
+          messages: finalizePendingMessages(snapshot.messages, {
+            interrupted: !wasCancelled,
+            error: detail,
+          }),
+          error: wasCancelled ? undefined : detail,
         });
       } finally {
         if (activeTurn === turn) activeTurn = null;

@@ -12,6 +12,7 @@
 import { clientApi } from '../../clientApi';
 import { normalizeChatMode, type ChatMode } from './preferences';
 import {
+  foldCliToolMessagesForDesktop,
   isEmptyAssistantPlaceholder,
   migrateToSegments,
   parseSerializedToolSegments,
@@ -45,6 +46,7 @@ export function usageFromLifetime(lifetime: {
   };
 }
 
+
 /**
  * 加载某会话的消息与整轮用量、对话模式。
  *
@@ -63,10 +65,17 @@ export async function loadConversationMessages(conversationId: string): Promise<
   // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'，历史 'goal' 归一化为 'plan'。
   const convMode: ChatMode = normalizeChatMode(conv.mode);
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0;
-  const loaded = conv.messages.map((m: Record<string, unknown>) => {
+  const folded = foldCliToolMessagesForDesktop(
+    (conv.messages as readonly Record<string, unknown>[]) ?? [],
+  );
+  const loaded = folded.map((m: Record<string, unknown>) => {
+    const roleRaw = String(m.role ?? 'user');
+    const role: ChatMsg['role'] = roleRaw === 'assistant' || roleRaw === 'system'
+      ? roleRaw
+      : 'user';
     const msg: ChatMsg = {
       id: (m.id as string) || nextId(),
-      role: (m.role as ChatMsg['role']) || 'user',
+      role: roleRaw === 'tool' ? 'assistant' : role,
       content: (m.content as string) || '',
       timestamp: m.timestamp as number | undefined,
     };

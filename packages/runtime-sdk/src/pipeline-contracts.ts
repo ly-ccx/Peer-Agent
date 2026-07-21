@@ -8,7 +8,8 @@ export type RuntimePipelineStatus =
   | 'completed'
   | 'stopped'
   | 'cancelled'
-  | 'exhausted';
+  | 'exhausted'
+  | 'failed';
 
 export interface RuntimePipelineRunInput<TInput = unknown> {
   readonly sessionId: string;

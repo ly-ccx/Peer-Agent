@@ -781,4 +781,46 @@ describe('chat controller', () => {
     expect(secondResult.evidenceRefs).toEqual(['evidence://session-b']);
     expect(contexts.map((context) => context.sessionId).sort()).toEqual(['session-a', 'session-b']);
   });
+  test('keeps tool results and marks assistant interrupted on stream failure', async () => {
+    let turns = 0;
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      runTurn(state) {
+        turns += 1;
+        if (turns === 1) {
+          return {
+            kind: 'tool_calls',
+            state,
+            calls: [{
+              toolCallId: 'call-1',
+              capabilityId: 'local.file.read',
+              arguments: { path: 'package.json' },
+            }],
+          };
+        }
+        throw new Error('provider_stream_error: connection reset');
+      },
+      applyToolResults(state, results) {
+        return { ...state, toolExecutions: results.map((item) => item.result) };
+      },
+    };
+    const controller = createChatController({
+      model,
+      host: host(() => execution('file contents')),
+    });
+
+    await controller.send('read it');
+
+    const snap = controller.getSnapshot();
+    expect(snap.status).toBe('idle');
+    expect(snap.error).toContain('provider_stream_error');
+    expect(snap.messages.some((message) => message.role === 'tool')).toBe(true);
+    const tool = snap.messages.find((message) => message.role === 'tool');
+    expect(tool?.tool?.toolCallId).toBe('call-1');
+    expect(tool?.tool?.arguments).toEqual({ path: 'package.json' });
+    // partial assistant placeholder may remain interrupted for recovery
+    const assistant = [...snap.messages].reverse().find((message) => message.role === 'assistant');
+    expect(assistant?.interrupted).toBe(true);
+  });
+
 });
