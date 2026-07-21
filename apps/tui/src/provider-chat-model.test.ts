@@ -465,4 +465,60 @@ describe('OpenAI-compatible TUI chat adapter', () => {
 
     expect(controller.getSnapshot().messages.at(-1)?.content).toContain('PEER_MODEL_API_KEY');
   });
+
+  test('injects a Goal-mode system prompt that requires creating a draft plan first', async () => {
+    const requests: ModelProviderRequest[] = [];
+    const provider: ModelProvider = {
+      async stream(request) {
+        requests.push(request);
+        return completed('ok');
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      initialMode: 'goal',
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        toolDefinitions: [],
+      }),
+    });
+
+    await controller.send('build a feature');
+
+    const system = requests[0]?.messages.find((message) => message.role === 'system');
+    const content = typeof system?.content === 'string'
+      ? system.content
+      : JSON.stringify(system?.content ?? '');
+    expect(content).toContain('You are in Goal mode');
+    expect(content).toContain('goal_create_plan');
+    expect(content).toContain('side-effecting');
+  });
+
+  test('injects a Plan-mode system prompt for plan turns', async () => {
+    const requests: ModelProviderRequest[] = [];
+    const provider: ModelProvider = {
+      async stream(request) {
+        requests.push(request);
+        return completed('ok');
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      initialMode: 'plan',
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        toolDefinitions: [],
+      }),
+    });
+
+    await controller.send('investigate');
+
+    const system = requests[0]?.messages.find((message) => message.role === 'system');
+    const content = typeof system?.content === 'string'
+      ? system.content
+      : JSON.stringify(system?.content ?? '');
+    expect(content).toContain('You are in read-only Plan mode');
+  });
 });

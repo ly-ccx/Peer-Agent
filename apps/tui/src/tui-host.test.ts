@@ -59,17 +59,36 @@ describe('TUI Runtime host', () => {
       'local.file.write',
       'local.shell.exec',
     ]);
-    expect(capabilities('goal')).toEqual(capabilities('chat'));
-    expect(capabilities('plan')).toEqual(['local.file.read', 'local.file.list']);
+    // Goal mode keeps chat write/shell tools and adds shared Desktop goal tools.
+    expect(capabilities('goal')).toEqual([
+      'local.file.read',
+      'local.file.list',
+      'local.file.write',
+      'local.shell.exec',
+      'local.goal.create',
+      'local.goal.update',
+      'local.goal.read',
+    ]);
+    // Plan mode stays read-only for local files, but projects goal plan tools.
+    expect(capabilities('plan')).toEqual([
+      'local.file.read',
+      'local.file.list',
+      'local.goal.create',
+      'local.goal.update',
+      'local.goal.read',
+    ]);
     expect(capabilities('explorer')).toEqual(['local.file.read', 'local.file.list']);
 
     // Model-visible tool definitions must use the same projected set. Returning
     // the unfiltered provider catalog would re-expose write/shell in plan mode.
     expect([...toolNames('chat')]).toEqual([...capabilities('chat')]);
     expect([...toolNames('plan')]).toEqual([...capabilities('plan')]);
+    expect([...toolNames('goal')]).toEqual([...capabilities('goal')]);
     expect([...toolNames('explorer')]).toEqual([...capabilities('explorer')]);
     expect(toolNames('plan')).not.toContain('local.file.write');
     expect(toolNames('plan')).not.toContain('local.shell.exec');
+    expect(toolNames('goal')).toContain('local.goal.create');
+    expect(toolNames('goal')).toContain('local.shell.exec');
   });
 
   test('rejects non-projected write and shell capabilities before approval in plan and explorer', async () => {

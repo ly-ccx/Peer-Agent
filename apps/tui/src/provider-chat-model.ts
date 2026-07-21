@@ -84,7 +84,14 @@ function parseArguments(call: ModelToolCall): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-const PLAN_MODE_SYSTEM_PROMPT = `You are in read-only Plan mode. Investigate only with the projected read-only tools. Do not claim to modify files or execute the plan. End with exactly one JSON object (a fenced json block is allowed) using this shape: {"planId":"unique-id","title":"short title","goal":"goal statement","tasks":[{"taskId":"stable-id","title":"one action"}],"successCriteria":[{"description":"verifiable result"}]}. The plan remains a draft until the user chooses Approve and execute.`;
+const PLAN_JSON_SHAPE =
+  '{"planId":"unique-id","title":"short title","goal":"goal statement","tasks":[{"taskId":"stable-id","title":"one action"}],"successCriteria":[{"description":"verifiable result"}]}';
+
+const PLAN_MODE_SYSTEM_PROMPT = `You are in read-only Plan mode. Investigate only with the projected read-only tools. Do not claim to modify files or execute the plan. End with exactly one JSON object (a fenced json block is allowed) using this shape: ${PLAN_JSON_SHAPE}. The plan remains a draft until the user chooses Approve and execute.`;
+
+// Goal mode must create a plan via goal_create_plan before side-effect tools.
+// Intake gate blocks shell/write until a plan exists for this conversation.
+const GOAL_MODE_SYSTEM_PROMPT = `You are in Goal mode (self-driven). Before any side-effecting work (bash, write_file, edit_file, etc.), you MUST call the tool goal_create_plan with a clear goal, ordered tasks, and success criteria. Read-only investigation tools and goal_get_plan / goal_update_task are allowed. Do not invent progress: only goal_update_task records task completion. If a plan already exists, use goal_get_plan and continue from it. Prefer goal_create_plan over dumping a free-form JSON plan in the assistant message.`;
 
 function executionContent(execution: RuntimeSdkProviderExecution): string {
   const result = execution.result;
@@ -106,14 +113,27 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
     initialize(input, context) {
       const mode = normalizeTuiMode(context.run.mode);
       const baseSystemPrompt = options.getSystemPrompt?.() ?? options.systemPrompt;
-      const systemPrompts = [baseSystemPrompt, mode === 'plan' ? PLAN_MODE_SYSTEM_PROMPT : null]
+      const modePrompt =
+        mode === 'plan'
+          ? PLAN_MODE_SYSTEM_PROMPT
+          : mode === 'goal'
+            ? GOAL_MODE_SYSTEM_PROMPT
+            : null;
+      const systemPrompts = [baseSystemPrompt, modePrompt]
         .filter((prompt): prompt is string => Boolean(prompt));
       const userContent = toUserModelContent(input.input.content, input.input.images);
+      // Always re-inject mode system prompts so mid-session mode switches
+      // (especially Goal intake) take effect on the next turn.
+      const historyWithoutModeSystem = input.input.modelMessages.filter((message) => {
+        if (message.role !== 'system' || typeof message.content !== 'string') return true;
+        return !(
+          message.content.includes('You are in Goal mode')
+          || message.content.includes('You are in read-only Plan mode')
+        );
+      });
       const modelMessages: ModelMessage[] = [
-        ...input.input.modelMessages,
-        ...(input.input.modelMessages.length === 0
-          ? systemPrompts.map((content) => ({ role: 'system' as const, content }))
-          : []),
+        ...systemPrompts.map((content) => ({ role: 'system' as const, content })),
+        ...historyWithoutModeSystem,
         { role: 'user', content: userContent },
       ];
       return {

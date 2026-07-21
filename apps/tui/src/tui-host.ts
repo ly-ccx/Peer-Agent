@@ -14,6 +14,7 @@ import type {
   RuntimeSdkProviderExecution,
 } from '@peer-agent/runtime-sdk';
 
+import { createTuiGoalBridge } from './goal-bridge.ts';
 import { normalizeTuiMode, TUI_RUNTIME_MODES, type TuiMode } from './tui-mode.ts';
 import { normalizeLocalAccessLevel } from './tui-permission-policy.ts';
 
@@ -39,6 +40,8 @@ export interface TuiHost {
   readonly workspaceRoot: string;
   readonly capabilities: readonly string[];
   readonly toolDefinitions: readonly RuntimeToolDefinition[];
+  /** Shared Desktop goal-plan bridge (create/update/get + intake gate). */
+  readonly goalBridge?: ReturnType<typeof createTuiGoalBridge>;
   getAccessLevel(): LocalAccessLevel;
   setAccessLevel(value: unknown): LocalAccessLevel;
   capabilitiesForMode?(mode: TuiMode): readonly string[];
@@ -199,21 +202,61 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
   }
   const bundleForMode = (mode: TuiMode) => bundles.get(mode)!;
   const defaultBundle = bundleForMode('chat');
+  // Shared on-disk goal plan store + goal tools (aligned with Desktop).
+  const goalBridge = createTuiGoalBridge();
 
   let callSequence = 0;
-  const execute = (
+  const execute = async (
     capabilityId: string,
     args: Record<string, unknown>,
     context?: TuiExecutionContext,
   ) => {
     const mode = normalizeTuiMode(context?.mode);
     const bundle = bundleForMode(mode);
+    const toolCallId = `tui-tool-${++callSequence}`;
+
+    // Goal intake gate: block shell/write until a plan exists for this conversation.
+    const intake = goalBridge.evaluateIntake({
+      mode,
+      conversationId: context?.conversationId,
+      capabilityId,
+    });
+    if (!intake.allowed) {
+      return {
+        result: {
+          toolCallId,
+          capabilityId,
+          status: 'failed',
+          summary: 'Blocked by Goal intake gate',
+          error: { message: intake.reason },
+          output: { ok: false, error: intake.reason },
+          outputPreview: intake.reason,
+          evidence: {
+            summary: intake.reason,
+            returnedToCloud: true,
+            dataLevel: 'D1_internal',
+          },
+        },
+      } as RuntimeSdkProviderExecution;
+    }
+
+    if (goalBridge.isGoalCapability(capabilityId)) {
+      return goalBridge.execute({
+        capabilityId,
+        args,
+        conversationId: context?.conversationId,
+        mode,
+        workspaceRoot: bundle.workspaceRoot,
+        toolCallId,
+      });
+    }
+
     const run = () => bundle.runtime.execute({
       sessionId: context?.sessionId ?? 'tui-session',
       ...(context?.conversationId ? { conversationId: context.conversationId } : {}),
       projectionId: bundle.projection.createdAt,
       call: {
-        toolCallId: `tui-tool-${++callSequence}`,
+        toolCallId,
         capabilityId,
         arguments: args,
       },
@@ -232,6 +275,13 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     return context ? executionContext.run({ ...context, mode }, run) : run();
   };
 
+  const withGoalTools = (mode: TuiMode, tools: readonly RuntimeToolDefinition[]) => {
+    if (mode !== 'goal' && mode !== 'plan') return tools;
+    const existing = new Set(tools.map((tool) => tool.capabilityId));
+    const extras = goalBridge.toolDefinitions.filter((tool) => !existing.has(tool.capabilityId));
+    return extras.length > 0 ? [...tools, ...extras] : tools;
+  };
+
   return {
     workspaceRoot: defaultBundle.workspaceRoot,
     // Default surface uses the mode-projected tool set, not the unfiltered
@@ -239,13 +289,17 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     // when the active mode projection excludes them.
     capabilities: defaultBundle.projection.tools.map((tool) => tool.capabilityId),
     toolDefinitions: defaultBundle.projection.tools,
+    goalBridge,
     getAccessLevel: () => accessLevel,
     setAccessLevel,
     capabilitiesForMode(mode) {
-      return bundleForMode(normalizeTuiMode(mode)).projection.tools.map((tool) => tool.capabilityId);
+      const normalized = normalizeTuiMode(mode);
+      return withGoalTools(normalized, bundleForMode(normalized).projection.tools)
+        .map((tool) => tool.capabilityId);
     },
     toolDefinitionsForMode(mode) {
-      return bundleForMode(normalizeTuiMode(mode)).projection.tools;
+      const normalized = normalizeTuiMode(mode);
+      return withGoalTools(normalized, bundleForMode(normalized).projection.tools);
     },
     execute,
     executeRead: (path, context) => execute('local.file.read', { path }, context),
