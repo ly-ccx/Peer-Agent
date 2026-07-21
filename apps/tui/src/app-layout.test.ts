@@ -106,7 +106,7 @@ describe('TUI app layout', () => {
     expect(labelSource).toContain('thinkingStatusLabel(frame, hasThinkingContent)');
   });
 
-  test('docks transient thinking above the composer instead of the chat transcript', () => {
+  test('renders pending thinking in chat history with the message timeline', () => {
     const historySource = appSource.slice(
       appSource.indexOf('function ChatHistory'),
       appSource.indexOf('function ErrorBanner'),
@@ -116,15 +116,24 @@ describe('TUI app layout', () => {
       appSource.indexOf('export function App'),
     );
 
-    expect(historySource).toContain('if (showThinkingPlaceholder) return null;');
-    expect(dockSource).toContain('thinkingActive ? (');
-    expect(dockSource).toContain('<ThinkingStatusLabel');
-    expect(dockSource.indexOf('<ComposerControlsBar status={status} layout={statusLayout} />'))
-      .toBeLessThan(dockSource.indexOf('<ThinkingStatusLabel'));
-    expect(dockSource.indexOf('<ThinkingStatusLabel'))
-      .toBeLessThan(dockSource.indexOf('<Composer\n'));
-    expect(appSource).toContain('thinkingActive={dockThinkingActive}');
-    expect(appSource).toContain('thinkingText={dockThinkingText}');
+    expect(historySource).toContain('showThinkingPlaceholder ? (');
+    expect(historySource).toContain('<ThinkingStatusLabel');
+    expect(historySource).not.toContain('if (showThinkingPlaceholder) return null;');
+    expect(dockSource).not.toContain('thinkingActive ? (');
+    expect(dockSource).not.toContain('<ThinkingStatusLabel');
+    expect(appSource).not.toContain('thinkingActive={dockThinkingActive}');
+    expect(appSource).not.toContain('thinkingText={dockThinkingText}');
+  });
+
+  test('preserves typed composer draft when image paste reports a replacement value', () => {
+    const composerSource = appSource.slice(
+      appSource.indexOf('function Composer('),
+      appSource.indexOf('function ComposerDock'),
+    );
+    expect(composerSource).toContain("const lastComposerValueRef = useRef('');");
+    expect(composerSource).toContain('mergeImagePasteWithExistingDraft(rawValue, lastComposerValueRef.current)');
+    expect(composerSource).toContain('lastComposerValueRef.current = chipped;');
+    expect(composerSource).toContain("lastComposerValueRef.current = '';");
   });
 
   test('keeps the composer input pure and places controls above and status below', () => {

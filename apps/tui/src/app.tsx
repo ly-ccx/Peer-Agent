@@ -30,6 +30,7 @@ import {
 import {
   chipifyImagePathsInText,
   extractImagePathTokens,
+  mergeImagePasteWithExistingDraft,
   isSlashCommandInput,
   loadLocalImageAttachments,
   registerImagePathKeys,
@@ -200,14 +201,20 @@ function ChatHistory({
         if (message.role === 'assistant') {
           const showThinkingPlaceholder = message.pending && !message.content;
           const thinkingText = message.thinkingContent?.trim();
-          if (showThinkingPlaceholder) return null;
           return (
             <box key={message.id} flexDirection="column" marginBottom={1}>
               <box flexDirection="column">
-                {thinkingText && message.pending ? (
+                {showThinkingPlaceholder ? (
+                  <ThinkingStatusLabel
+                    hasThinkingContent={Boolean(thinkingText)}
+                    thinkingText={thinkingText || undefined}
+                  />
+                ) : thinkingText && message.pending ? (
                   <text selectable fg={COLOR.muted}>{thinkingText}</text>
                 ) : null}
-                <MarkdownView content={message.content || ' '} />
+                {!showThinkingPlaceholder ? (
+                  <MarkdownView content={message.content || ' '} />
+                ) : null}
               </box>
             </box>
           );
@@ -477,14 +484,17 @@ function Composer({ controller, snapshot, disabled, focused, locale, onValueChan
 }) {
   const editor = editorRef;
   const chipifyPendingRef = useRef(false);
+  const lastComposerValueRef = useRef('');
 
   const applyImageChips = () => {
     const current = editor.current;
     if (!current || chipifyPendingRef.current) return;
-    const value = current.plainText ?? '';
+    const rawValue = current.plainText ?? '';
+    const value = mergeImagePasteWithExistingDraft(rawValue, lastComposerValueRef.current);
     const chipped = chipifyImagePathsInText(value);
-    if (chipped === value) {
-      onValueChange(value);
+    if (chipped === rawValue) {
+      lastComposerValueRef.current = rawValue;
+      onValueChange(rawValue);
       return;
     }
     const rawPaths = extractImagePathTokens(value);
@@ -498,6 +508,7 @@ function Composer({ controller, snapshot, disabled, focused, locale, onValueChan
       // Some OpenTUI builds may not expose cursorOffset; ignore.
     }
     chipifyPendingRef.current = false;
+    lastComposerValueRef.current = chipped;
     onValueChange(chipped);
   };
 
@@ -506,6 +517,7 @@ function Composer({ controller, snapshot, disabled, focused, locale, onValueChan
     const trimmed = value.trim();
     if (!trimmed || isSlashCommandInput(trimmed) || disabled || snapshot.status !== 'idle') return;
     editor.current?.clear();
+    lastComposerValueRef.current = '';
     void (async () => {
       const attachment = await loadLocalImageAttachments(value, { pathByKey: imagePathRegistry });
       const textToSend = attachment.text || attachment.displayContent;
@@ -566,8 +578,6 @@ function ComposerDock({
   modelPickerSelection,
   modelPickerMaxVisible,
   modelPickerShowHint,
-  thinkingActive,
-  thinkingText,
 }: {
   readonly controller: ChatController;
   readonly snapshot: ChatSnapshot;
@@ -595,8 +605,6 @@ function ComposerDock({
   readonly modelPickerSelection: number;
   readonly modelPickerMaxVisible: number;
   readonly modelPickerShowHint: boolean;
-  readonly thinkingActive: boolean;
-  readonly thinkingText?: string;
 }) {
   const menuReserve = slashOpen
     ? Math.min(slashMaxVisible, Math.max(1, slashItems.length)) + 2
@@ -614,16 +622,8 @@ function ComposerDock({
       paddingLeft={layout.outerPadding}
       paddingRight={layout.outerPadding}
     >
-      {/* controls above the input; transient thinking lives with the composer, not the transcript. */}
+      {/* controls above the input; thinking renders in chat history with the message timeline. */}
       <ComposerControlsBar status={status} layout={statusLayout} />
-      {thinkingActive ? (
-        <box flexDirection="column" flexShrink={0} paddingLeft={1}>
-          <ThinkingStatusLabel
-            hasThinkingContent={Boolean(thinkingText)}
-            thinkingText={thinkingText}
-          />
-        </box>
-      ) : null}
       <box position="relative" width="100%" height={5} overflow="visible">
         {slashOpen ? (
           <SlashCommandMenu
@@ -867,11 +867,6 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
     usage: snapshot.usage,
     contextWindow,
   });
-  const pendingAssistant = [...snapshot.messages]
-    .reverse()
-    .find((message) => message.role === 'assistant' && message.pending);
-  const dockThinkingActive = Boolean(pendingAssistant && !pendingAssistant.content);
-  const dockThinkingText = pendingAssistant?.thinkingContent?.trim() || undefined;
   const layout = responsiveLayout(terminal.width);
   const pickerLayout = responsivePickerLayout(
     terminal.height,
@@ -1522,8 +1517,6 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
                 modelPickerSelection={modelPickerSelection}
                 modelPickerMaxVisible={welcomeModelMaxVisible}
                 modelPickerShowHint={layout.showHints}
-                thinkingActive={dockThinkingActive}
-                thinkingText={dockThinkingText}
                 onValueChange={(value) => {
                   setComposerDraft(value);
                   setExperience((current) => syncSlashSuggestions(current, value));
@@ -1860,8 +1853,6 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
           modelPickerSelection={modelPickerSelection}
           modelPickerMaxVisible={slashMaxVisible}
           modelPickerShowHint={layout.showHints}
-          thinkingActive={dockThinkingActive}
-          thinkingText={dockThinkingText}
           onValueChange={(value) => {
             setComposerDraft(value);
             setExperience((current) => syncSlashSuggestions(current, value));
