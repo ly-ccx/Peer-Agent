@@ -304,9 +304,9 @@ export function createChatController(options: {
       });
       return true;
     },
-    async send(content, options) {
+    async send(content, sendOptions) {
       const trimmed = content.trim();
-      const images = options?.images?.filter((image) => Boolean(image.url)) ?? [];
+      const images = sendOptions?.images?.filter((image) => Boolean(image.url)) ?? [];
       if ((!trimmed && images.length === 0) || activeTurn) return;
 
       const existingSession = sessions.get(sessionId);

@@ -283,6 +283,110 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     expect(controller.getSnapshot().messages.at(-1)?.content).toBe('read complete');
   });
 
+  test('recovers invalid JSON tool arguments without crashing the turn', async () => {
+    const requests: ModelProviderRequest[] = [];
+    const executions: Array<{ capabilityId: string; arguments_: Record<string, unknown> }> = [];
+    const provider: ModelProvider = {
+      async stream(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          return {
+            content: '',
+            toolCalls: [{
+              id: 'call-bad-json',
+              name: 'local_file_list',
+              arguments: '{"path":"/tmp"',
+            }],
+          };
+        }
+        request.onEvent?.({ type: 'text.delta', content: 'recovered from bad args' });
+        return completed('recovered from bad args');
+      },
+    };
+    const controller = createChatController({
+      host: host((capabilityId, arguments_) => {
+        executions.push({ capabilityId, arguments_ });
+        return execution('invalid args wrapped');
+      }),
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        toolDefinitions: [{
+          capabilityId: 'local.file.list',
+          name: 'local_file_list',
+          description: 'List files',
+          inputSchema: {
+            type: 'object',
+            properties: { path: { type: 'string' } },
+          },
+        }],
+      }),
+    });
+
+    await controller.send('list files');
+
+    expect(controller.getSnapshot().error).toBeUndefined();
+    expect(controller.getSnapshot().status).toBe('idle');
+    expect(executions).toEqual([{
+      capabilityId: 'local.file.list',
+      arguments_: { raw_arguments: '{"path":"/tmp"' },
+    }]);
+    expect(requests).toHaveLength(2);
+    expect(controller.getSnapshot().messages.at(-1)?.content).toBe('recovered from bad args');
+  });
+
+  test('recovers non-object tool arguments without crashing the turn', async () => {
+    const requests: ModelProviderRequest[] = [];
+    const executions: Array<{ capabilityId: string; arguments_: Record<string, unknown> }> = [];
+    const provider: ModelProvider = {
+      async stream(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          return {
+            content: '',
+            toolCalls: [{
+              id: 'call-array-args',
+              name: 'local_file_list',
+              arguments: '["/tmp"]',
+            }],
+          };
+        }
+        request.onEvent?.({ type: 'text.delta', content: 'recovered from array args' });
+        return completed('recovered from array args');
+      },
+    };
+    const controller = createChatController({
+      host: host((capabilityId, arguments_) => {
+        executions.push({ capabilityId, arguments_ });
+        return execution('non-object args wrapped');
+      }),
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        toolDefinitions: [{
+          capabilityId: 'local.file.list',
+          name: 'local_file_list',
+          description: 'List files',
+          inputSchema: {
+            type: 'object',
+            properties: { path: { type: 'string' } },
+          },
+        }],
+      }),
+    });
+
+    await controller.send('list files as array');
+
+    expect(controller.getSnapshot().error).toBeUndefined();
+    expect(controller.getSnapshot().status).toBe('idle');
+    expect(executions).toEqual([{
+      capabilityId: 'local.file.list',
+      arguments_: { raw_arguments: '["/tmp"]' },
+    }]);
+    expect(requests).toHaveLength(2);
+    expect(controller.getSnapshot().messages.at(-1)?.content).toBe('recovered from array args');
+  });
+
   test('preserves completed model history across user turns', async () => {
     const requests: ModelProviderRequest[] = [];
     const provider: ModelProvider = {

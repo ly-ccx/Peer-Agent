@@ -61,16 +61,26 @@ function toModelTool(tool: RuntimeToolDefinition): ModelToolDefinition {
   };
 }
 
+/**
+ * Recoverably parse model tool-call arguments.
+ * Invalid JSON / non-object payloads must not crash the whole turn; wrap them so
+ * Runtime can reject the tool call with a structured failure instead.
+ */
 function parseArguments(call: ModelToolCall): Record<string, unknown> {
+  const raw = call.arguments;
+  if (!raw || !raw.trim()) return {};
+
   let parsed: unknown;
   try {
-    parsed = call.arguments.trim() ? JSON.parse(call.arguments) : {};
+    parsed = JSON.parse(raw);
   } catch {
-    throw new Error(`Model returned invalid JSON arguments for tool "${call.name}".`);
+    return { raw_arguments: raw };
   }
+
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`Model returned non-object arguments for tool "${call.name}".`);
+    return { raw_arguments: raw };
   }
+
   return parsed as Record<string, unknown>;
 }
 
