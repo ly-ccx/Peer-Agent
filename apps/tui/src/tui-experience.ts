@@ -81,9 +81,25 @@ export function openCommandPanel(state: TuiExperienceState, query = ''): TuiExpe
   };
 }
 
+function isLocalPathLikeSlashInput(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('/')) return false;
+  // Absolute POSIX paths pasted/dropped into the composer must stay as normal text.
+  // Otherwise `/Users/.../file.md` is interpreted as a slash-command query and the
+  // UI shows a misleading "No matching commands" overlay.
+  if (/^\/(?:Users|home|var|tmp|private|opt|usr|etc|Volumes|Applications|System|Library|bin|sbin)\//.test(trimmed)) {
+    return true;
+  }
+  // Generic absolute path with at least two path segments. Keep one-segment inputs
+  // such as `/help` or `/model` available for command suggestions.
+  if (/^\/[^\s/]+\/[^\s]+/.test(trimmed)) return true;
+  if (/^\/(?:\.|~)(?:\/|$)/.test(trimmed)) return true;
+  return false;
+}
+
 export function syncSlashSuggestions(state: TuiExperienceState, value: string): TuiExperienceState {
   const match = /^\/([^\s]*)$/.exec(value);
-  if (!match) {
+  if (!match || isLocalPathLikeSlashInput(value)) {
     return state.surface.type === 'slash-suggestions'
       ? { ...state, surface: createComposerSurface() }
       : state;

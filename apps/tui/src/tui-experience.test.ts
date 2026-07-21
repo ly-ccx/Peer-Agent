@@ -83,6 +83,20 @@ describe('TUI experience model', () => {
     expect(syncSlashSuggestions(state, '/model now').surface).toEqual({ type: 'composer' });
   });
 
+  test('does not open slash suggestions for dragged absolute file paths', () => {
+    const state = createTuiExperienceState();
+    expect(syncSlashSuggestions(state, '/Users/liangyin/Downloads/Peer-Agent-产品定义与自我进化机制-PRD-v0.2.md').surface)
+      .toEqual({ type: 'composer' });
+    expect(syncSlashSuggestions(state, '/var/folders/24/otty-paste/image.png').surface)
+      .toEqual({ type: 'composer' });
+    expect(syncSlashSuggestions(state, '/tmp/a.md').surface)
+      .toEqual({ type: 'composer' });
+
+    const suggestions = syncSlashSuggestions(state, '/mod');
+    expect(syncSlashSuggestions(suggestions, '/Users/liangyin/Downloads/spec.md').surface)
+      .toEqual({ type: 'composer' });
+  });
+
   test('updates command palette search independently from slash suggestions', () => {
     const panel = openCommandPanel(createTuiExperienceState());
     expect(updateCommandPanelQuery(panel, 'perm').surface).toEqual({
