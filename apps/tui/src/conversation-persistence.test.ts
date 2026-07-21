@@ -389,4 +389,100 @@ describe('TUI conversation persistence', () => {
     }]);
   });
 
+
+  test('persists user images as Desktop-readable attachments', () => {
+    const recorder = createStoreRecorder();
+    const persistence = createTuiConversationPersistence({
+      workspacePath: '/workspace',
+      initialMode: 'chat',
+      initialModel: selection,
+      store: recorder.store as never,
+      now: () => 456,
+    });
+
+    const dataUrl = 'data:image/png;base64,aGVsbG8=';
+    persistence.syncSnapshot(snapshot({
+      messages: [
+        {
+          id: 'user-img-1',
+          role: 'user',
+          content: '看一下',
+          images: [{ url: dataUrl, mimeType: 'image/png' }],
+        },
+      ],
+    }));
+
+    const append = recorder.calls.find((call) => call.method === 'appendMessage');
+    expect(append).toBeTruthy();
+    const payload = append?.args[1] as Record<string, unknown>;
+    expect(payload.content).toBe('看一下');
+    expect(payload).not.toHaveProperty('images');
+    expect(payload.attachments).toEqual([
+      {
+        id: 'user-img-1-image-1',
+        name: 'image-1.png',
+        mimeType: 'image/png',
+        size: 5,
+        kind: 'image',
+        dataUrl,
+      },
+    ]);
+  });
+
+  test('restores Desktop attachments back into TUI images', () => {
+    const dataUrl = 'data:image/png;base64,aGVsbG8=';
+    const store = {
+      listConversations() {
+        return [{
+          id: 'stored-img',
+          title: 'Image session',
+          mode: 'chat',
+          updatedAt: '2026-07-15T10:00:00.000Z',
+          messageCount: 1,
+        }];
+      },
+      getConversation() {
+        return {
+          id: 'stored-img',
+          mode: 'chat',
+          messages: [
+            {
+              id: 'user-1',
+              role: 'user',
+              content: '看一下',
+              attachments: [
+                {
+                  id: 'user-1-image-1',
+                  name: 'image-1.png',
+                  mimeType: 'image/png',
+                  size: 5,
+                  kind: 'image',
+                  dataUrl,
+                },
+              ],
+            },
+          ],
+        };
+      },
+      createConversation() { return { id: 'new' }; },
+      appendMessage() {},
+      updateMode() {},
+      updateModelEffort() {},
+      addUsage() {},
+    };
+    const persistence = createTuiConversationPersistence({
+      workspacePath: '/workspace',
+      initialMode: 'chat',
+      initialModel: selection,
+      store: store as never,
+    });
+    const loaded = persistence.loadConversation('stored-img');
+    expect(loaded?.messages[0]).toEqual({
+      id: 'user-1',
+      role: 'user',
+      content: '看一下',
+      images: [{ url: dataUrl, mimeType: 'image/png' }],
+    });
+  });
+
 });

@@ -73,16 +73,43 @@ function isImagePathCandidate(token: string): boolean {
   return IMAGE_EXTENSIONS.has(ext);
 }
 
+const IMAGE_EXT_PATTERN = '(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif)';
+// Match image paths even when glued to non-ASCII text (e.g. Chinese) without spaces.
+// Stop at whitespace / quotes / brackets / common CJK punctuation, not at every non-word char.
+const IMAGE_PATH_CANDIDATE_RE = new RegExp(
+  `(?:file:\\/\\/)?(?:\\/|\\.\\/|\\.\\.\\/|~\\/)?[^\\s"'\`<>\\[\\]{}|，。；：！？、（）【】《》]+?\\.${IMAGE_EXT_PATTERN}(?=$|[\\s"'\`<>\\[\\]{}|，。；：！？、（）【】《》]|[^\\w./\\\\-])`,
+  'gi',
+);
+
+/**
+ * If text is glued in front of a path (e.g. Chinese + absolute path), keep only the path.
+ */
+function refineImagePathToken(raw: string): string {
+  const token = stripWrappingQuotes(raw);
+  if (!token) return token;
+  // Prefer absolute/relative path markers inside the match.
+  const absolute = token.match(
+    /(?:file:\/\/|\/|\.\/|\.\.\/|~\/)[^\s"'`<>\[\]{}|，。；：！？、（）【】《》]*?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif)/i,
+  );
+  if (absolute?.[0]) return absolute[0];
+  // Bare relative image file name (no directory prefix).
+  const relative = token.match(
+    /(?:^|[^A-Za-z0-9._-])([A-Za-z0-9._-]+\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif))$/i,
+  );
+  if (relative?.[1]) return relative[1];
+  return token;
+}
+
 /**
  * Extract local image path tokens from free-form composer text.
  * Supports absolute paths, relative paths, file:// URLs, and otty-paste temp paths.
+ * Paths glued to CJK/non-ASCII text (no whitespace) are also extracted.
  */
 export function extractImagePathTokens(text: string): string[] {
-  const tokens = text.match(/(?:file:\/\/)?(?:\/|\.\/|\.\.\/|~\/)?[^\s"'`]+/g) ?? [];
   const seen = new Set<string>();
   const paths: string[] = [];
-  for (const raw of tokens) {
-    const token = stripWrappingQuotes(raw);
+  for (const match of text.matchAll(IMAGE_PATH_CANDIDATE_RE)) {
+    const token = refineImagePathToken(match[0] ?? '');
     if (!isImagePathCandidate(token)) continue;
     if (seen.has(token)) continue;
     seen.add(token);
@@ -95,11 +122,34 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+
+/**
+ * Some terminals / paste helpers can deliver a pasted image path as a full textarea
+ * replacement instead of inserting it at the caret. If the previous draft is still
+ * meaningful and the next value contains an image path but lost the previous draft,
+ * preserve the user's typed prompt and append the pasted image token.
+ */
+export function mergeImagePasteWithExistingDraft(nextText: string, previousDraft: string): string {
+  if (!previousDraft.trim() || !nextText.trim()) return nextText;
+  if (nextText.includes(previousDraft) || previousDraft.includes(nextText)) return nextText;
+  const imagePaths = extractImagePathTokens(nextText);
+  if (imagePaths.length === 0) return nextText;
+
+  const previous = previousDraft.replace(/[ 	]+$/g, '');
+  const next = nextText.replace(/^[ 	]+/g, '');
+  const separator = previous.length === 0 || previous.endsWith('\n') ? '' : ' ';
+  return `${previous}${separator}${next}`;
+}
+
 export function stripImagePathsFromText(text: string, imagePaths: readonly string[]): string {
   let next = text;
-  for (const imagePath of imagePaths) {
+  // Longer paths first so nested/overlapping tokens strip cleanly.
+  const ordered = [...imagePaths].sort((a, b) => b.length - a.length);
+  for (const imagePath of ordered) {
+    if (!imagePath) continue;
     const escaped = escapeRegExp(imagePath);
-    next = next.replace(new RegExp(`(?:^|\\s)${escaped}(?=\\s|$)`, 'g'), ' ');
+    // Allow paths glued to non-ASCII text (no leading/trailing whitespace required).
+    next = next.replace(new RegExp(escaped, 'g'), ' ');
   }
   return next.replace(/[ \t]+\n/g, '\n').replace(/\n[ \t]+/g, '\n').replace(/[ \t]{2,}/g, ' ').trim();
 }

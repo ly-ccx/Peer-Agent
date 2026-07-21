@@ -1,7 +1,7 @@
 import { createConversationStore } from '@peer-agent/conversation-store';
 import type { RuntimeModelSelection } from '@peer-agent/runtime-node';
 
-import type { ChatController, ChatMessage, ChatSnapshot } from './chat-controller.ts';
+import type { ChatController, ChatMessage, ChatMessageImage, ChatSnapshot } from './chat-controller.ts';
 import { normalizeTuiMode, type TuiMode } from './tui-mode.ts';
 
 export interface TuiConversationSummary {
@@ -137,17 +137,115 @@ function desktopToolSegment(tool: NonNullable<ChatMessage['tool']>): Record<stri
   };
 }
 
+function dataUrlByteLength(dataUrl: string): number {
+  const comma = dataUrl.indexOf(',');
+  if (comma < 0) return 0;
+  const base64 = dataUrl.slice(comma + 1);
+  // base64 length to approximate decoded bytes; padding-aware.
+  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
+function extensionForMime(mimeType: string | undefined): string {
+  switch ((mimeType ?? '').toLowerCase()) {
+    case 'image/jpeg':
+      return 'jpg';
+    case 'image/gif':
+      return 'gif';
+    case 'image/webp':
+      return 'webp';
+    case 'image/bmp':
+      return 'bmp';
+    case 'image/tiff':
+      return 'tiff';
+    case 'image/heic':
+      return 'heic';
+    case 'image/heif':
+      return 'heif';
+    case 'image/avif':
+      return 'avif';
+    case 'image/png':
+    default:
+      return 'png';
+  }
+}
+
+/**
+ * Map TUI runtime images into Desktop-readable chat attachments.
+ * Desktop loads history via `message.attachments[].dataUrl`.
+ */
+function desktopAttachmentsFromImages(
+  messageId: string,
+  images: readonly ChatMessageImage[] | undefined,
+): readonly Record<string, unknown>[] | undefined {
+  if (!images || images.length === 0) return undefined;
+  return images
+    .filter((image) => typeof image.url === 'string' && image.url.length > 0)
+    .map((image, index) => {
+      const mimeType = image.mimeType || 'image/png';
+      const ext = extensionForMime(mimeType);
+      return {
+        id: `${messageId}-image-${index + 1}`,
+        name: `image-${index + 1}.${ext}`,
+        mimeType,
+        size: dataUrlByteLength(image.url),
+        kind: 'image' as const,
+        dataUrl: image.url,
+      };
+    });
+}
+
+function imagesFromStoredAttachments(value: Record<string, unknown>): readonly ChatMessageImage[] | undefined {
+  const attachments = Array.isArray(value.attachments) ? value.attachments : null;
+  if (attachments) {
+    const images = attachments
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const record = item as Record<string, unknown>;
+        if (record.kind !== 'image') return null;
+        const dataUrl = typeof record.dataUrl === 'string' ? record.dataUrl : '';
+        if (!dataUrl) return null;
+        return {
+          url: dataUrl,
+          ...(typeof record.mimeType === 'string' ? { mimeType: record.mimeType } : {}),
+        } satisfies ChatMessageImage;
+      })
+      .filter((image): image is ChatMessageImage => Boolean(image));
+    if (images.length > 0) return images;
+  }
+
+  const legacy = Array.isArray(value.images) ? value.images : null;
+  if (!legacy) return undefined;
+  const images = legacy
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+      const url = typeof record.url === 'string' ? record.url : '';
+      if (!url) return null;
+      return {
+        url,
+        ...(typeof record.mimeType === 'string' ? { mimeType: record.mimeType } : {}),
+        ...(typeof record.width === 'number' ? { width: record.width } : {}),
+        ...(typeof record.height === 'number' ? { height: record.height } : {}),
+      } satisfies ChatMessageImage;
+    })
+    .filter((image): image is ChatMessageImage => Boolean(image));
+  return images.length > 0 ? images : undefined;
+}
+
 function storedMessage(value: Record<string, unknown>, index: number): ChatMessage | null {
   if (!['user', 'assistant', 'tool', 'system'].includes(String(value.role)) || typeof value.content !== 'string') return null;
   const usage = storedUsage(value.usage);
   const tool = storedToolPresentation(value.tool);
   const compact = storedCompactMeta(value.compact);
+  const images = imagesFromStoredAttachments(value);
   // Do not restore in-flight compact progress rows.
   if (compact?.phase === 'progress' || value.pending === true && String(value.role) === 'system') return null;
   return {
     id: typeof value.id === 'string' ? value.id : `restored-${index}`,
     role: value.role as ChatMessage['role'],
     content: value.content,
+    ...(images ? { images } : {}),
     ...(usage ? { usage } : {}),
     ...(tool ? { tool } : {}),
     ...(compact ? { compact } : {}),
@@ -290,14 +388,19 @@ export function createTuiConversationPersistence(options: {
                   ...(message.content ? [{ type: 'text', content: message.content }] : []),
                 ]
               : undefined;
+          const attachments = desktopAttachmentsFromImages(message.id, message.images);
+          // Persist Desktop-compatible attachments for image messages.
+          // Keep runtime `images` for in-memory TUI state, but write `attachments` for Desktop.
+          const { images: _images, ...messageWithoutImages } = message;
           store.appendMessage(id, {
-            ...message,
+            ...messageWithoutImages,
+            ...(attachments ? { attachments } : {}),
             ...(snapshot.usage && message.id === completedAssistant?.id
               ? { usage: snapshot.usage }
               : {}),
             ...(segments ? { segments } : {}),
             timestamp: now(),
-          });
+          } as ChatMessage & { timestamp: number; attachments?: readonly Record<string, unknown>[] });
           persistedMessageIds.add(message.id);
         }
 
