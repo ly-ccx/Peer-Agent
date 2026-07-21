@@ -2,11 +2,13 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   animatedToolStatusGlyph,
+  composerRunningStatusLine,
   createToolPresentation,
   formatToolResultSummary,
   parseLegacyToolContent,
   resolveToolPresentation,
   runningToolStatusGlyph,
+  thinkingSpinnerGlyph,
   thinkingStatusLabel,
   toggleToolDetails,
   toolDisplayName,
@@ -89,10 +91,27 @@ describe('tool result summary', () => {
   });
 
   test('thinking status label uses a leading cursor spinner', () => {
+    expect(thinkingSpinnerGlyph(0)).toBe('⠋');
+    expect(thinkingSpinnerGlyph(1)).toBe('⠙');
     expect(thinkingStatusLabel(0, false)).toBe('⠋ Thinking');
     expect(thinkingStatusLabel(1, false)).toBe('⠙ Thinking');
     expect(thinkingStatusLabel(2, true)).toBe('⠹ Thinking');
     expect(thinkingStatusLabel(3, true)).toBe('⠸ Thinking');
+  });
+
+  test('composer running status line pairs spinner with status label', () => {
+    expect(composerRunningStatusLine({
+      frame: 0,
+      statusLabel: 'Working…',
+    })).toBe('⠋ Working…');
+    expect(composerRunningStatusLine({
+      frame: 1,
+      statusLabel: '运行中…',
+    })).toBe('⠙ 运行中…');
+    expect(composerRunningStatusLine({
+      frame: 2,
+      statusLabel: 'Cancelling…',
+    })).toBe('⠹ Cancelling…');
   });
 
   test('running tool glyph is larger and breathes across frames', () => {

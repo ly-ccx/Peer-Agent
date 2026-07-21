@@ -3,6 +3,31 @@ import { COLOR, contextUsageColor } from './tui-theme.ts';
 
 export type ComposerStatusLayout = 'wide' | 'compact' | 'narrow';
 
+/**
+ * Footer running status: spinner + status text only.
+ */
+export function ComposerRunningStatusBar({
+  spinner,
+  statusLabel,
+}: {
+  readonly spinner: string;
+  readonly statusLabel: string;
+}) {
+  return (
+    <box
+      flexDirection="row"
+      width="100%"
+      marginTop={1}
+      flexShrink={0}
+    >
+      <text fg={COLOR.accent} wrapMode="none">
+        <span>{spinner}</span>
+        <span> {statusLabel}</span>
+      </text>
+    </box>
+  );
+}
+
 function StatusSeparator() {
   return <span fg={COLOR.subtle}> · </span>;
 }

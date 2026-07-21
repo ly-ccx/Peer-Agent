@@ -17,6 +17,7 @@ import {
 } from './conversation-persistence.ts';
 import {
   ComposerControlsBar,
+  ComposerRunningStatusBar,
   ComposerStatusBar,
   type ComposerStatusLayout,
 } from './composer-status-view.tsx';
@@ -64,6 +65,7 @@ import type { PendingApproval, TuiHost } from './tui-host.ts';
 import { TUI_MODES, tuiModeOption, type TuiMode } from './tui-mode.ts';
 import {
   composerPlaceholder,
+  composerRunningStatusLabel,
   languageIndex,
   languageOption,
   languageSwitchNotice,
@@ -84,6 +86,7 @@ import { responsiveLayout, responsivePickerLayout } from './responsive-layout.ts
 import {
   animatedToolStatusGlyph,
   resolveToolPresentation,
+  thinkingSpinnerGlyph,
   thinkingStatusLabel,
   toolHeadline,
   toolStatusGlyph,
@@ -146,6 +149,25 @@ function ThinkingStatusLabel({
         <text selectable fg={COLOR.muted}>{thinkingText}</text>
       ) : null}
     </box>
+  );
+}
+
+
+function ComposerRunningStatusLabel({
+  locale,
+  runStatus,
+}: {
+  readonly locale: TuiLocale;
+  readonly runStatus: 'running' | 'cancelling';
+}) {
+  const frame = useStatusAnimationFrame(true, THINKING_SPINNER_INTERVAL_MS);
+  const spinner = thinkingSpinnerGlyph(frame);
+  const statusLabel = composerRunningStatusLabel(locale, runStatus);
+  return (
+    <ComposerRunningStatusBar
+      spinner={spinner}
+      statusLabel={statusLabel}
+    />
   );
 }
 
@@ -716,6 +738,12 @@ function ComposerDock({
         imagePathRegistry={imagePathRegistry}
       />
       </box>
+      {snapshot.status !== 'idle' ? (
+        <ComposerRunningStatusLabel
+          locale={locale}
+          runStatus={snapshot.status === 'cancelling' ? 'cancelling' : 'running'}
+        />
+      ) : null}
       <ComposerStatusBar status={status} layout={statusLayout} />
     </box>
   );

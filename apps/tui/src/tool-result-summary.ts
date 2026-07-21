@@ -186,10 +186,26 @@ export function toolStatusGlyph(status: ToolPresentationStatus): string {
 const THINKING_CURSOR_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const;
 const RUNNING_DOT_FRAMES = ['●', '◉', '○', '◉'] as const;
 
+/** Single spinner glyph used by thinking placeholders and composer running status. */
+export function thinkingSpinnerGlyph(frame: number): string {
+  return THINKING_CURSOR_FRAMES[Math.abs(frame) % THINKING_CURSOR_FRAMES.length] ?? '⠋';
+}
+
 /** Leading cursor spinner for pending assistant placeholders. */
 export function thinkingStatusLabel(frame: number, _hasThinkingContent = false): string {
-  const cursor = THINKING_CURSOR_FRAMES[Math.abs(frame) % THINKING_CURSOR_FRAMES.length] ?? '⠋';
-  return `${cursor} Thinking`;
+  return `${thinkingSpinnerGlyph(frame)} Thinking`;
+}
+
+/**
+ * Footer running-status line:
+ * `⠋ Working…`
+ */
+export function composerRunningStatusLine(options: {
+  readonly frame: number;
+  readonly statusLabel: string;
+}): string {
+  const label = options.statusLabel.trim();
+  return `${thinkingSpinnerGlyph(options.frame)} ${label}`.trimEnd();
 }
 
 /** Breathing/pulsing leading glyph for in-flight tool rows. */

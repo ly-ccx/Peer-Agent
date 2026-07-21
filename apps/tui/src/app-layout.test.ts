@@ -125,6 +125,31 @@ describe('TUI app layout', () => {
     expect(appSource).not.toContain('thinkingText={dockThinkingText}');
   });
 
+  test('mounts a Qoder-style running status bar under the composer input', () => {
+    const dockSource = appSource.slice(
+      appSource.indexOf('function ComposerDock'),
+      appSource.indexOf('export function App'),
+    );
+    const runningLabelSource = appSource.slice(
+      appSource.indexOf('function ComposerRunningStatusLabel'),
+      appSource.indexOf('function ToolStatusGlyph'),
+    );
+
+    expect(statusViewSource).toContain('export function ComposerRunningStatusBar');
+    expect(statusViewSource).not.toContain('cancelHint');
+    expect(appSource).toContain('function ComposerRunningStatusLabel');
+    expect(runningLabelSource).toContain('useStatusAnimationFrame(true, THINKING_SPINNER_INTERVAL_MS)');
+    expect(runningLabelSource).toContain('thinkingSpinnerGlyph(frame)');
+    expect(runningLabelSource).toContain('composerRunningStatusLabel(locale, runStatus)');
+    expect(runningLabelSource).not.toContain('composerEscToCancelHint');
+    expect(runningLabelSource).not.toContain('cancelHint');
+    expect(dockSource).toContain("snapshot.status !== 'idle'");
+    expect(dockSource).toContain('<ComposerRunningStatusLabel');
+    expect(dockSource.indexOf('<ComposerRunningStatusLabel')).toBeLessThan(
+      dockSource.indexOf('<ComposerStatusBar'),
+    );
+  });
+
   test('preserves typed composer draft when image paste reports a replacement value', () => {
     const composerSource = appSource.slice(
       appSource.indexOf('function Composer('),
@@ -350,7 +375,7 @@ describe('TUI app layout', () => {
 
   test('renders assistant content through the terminal-frame-tested Markdown view', () => {
     expect(appSource).toContain("import { MarkdownView } from './markdown-view.tsx'");
-    expect(appSource).toContain("<MarkdownView content={message.content || ' '} />");
+    expect(appSource).toContain('<MarkdownView content={message.content} />');
     expect(appSource).not.toContain('<markdown');
     expect(appSource).not.toContain('MARKDOWN_STYLE');
   });

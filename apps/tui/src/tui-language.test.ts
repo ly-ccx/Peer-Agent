@@ -6,11 +6,12 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import {
   buildReplyLanguageInstruction,
   buildTuiSystemPrompt,
+  composerPlaceholder,
+  composerRunningStatusLabel,
   createTuiLanguageStore,
   languageIndex,
   languageSwitchNotice,
   normalizeTuiLocale,
-  composerPlaceholder,
   tuiMessage,
 } from './tui-language.ts';
 
@@ -97,5 +98,12 @@ describe('ui messages', () => {
     expect(composerPlaceholder('en-US')).toBe('Ask anything…');
     expect(composerPlaceholder('zh-CN', true)).toBe('请先处理上方请求…');
     expect(composerPlaceholder('en-US', true)).toBe('Resolve the request above…');
+  });
+
+  test('composer running status follows locale', () => {
+    expect(composerRunningStatusLabel('zh-CN', 'running')).toBe('运行中…');
+    expect(composerRunningStatusLabel('en-US', 'running')).toBe('Working…');
+    expect(composerRunningStatusLabel('zh-CN', 'cancelling')).toBe('正在取消…');
+    expect(composerRunningStatusLabel('en-US', 'cancelling')).toBe('Cancelling…');
   });
 });
