@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  *
  * 设计依据：动效体系设计稿 §2「轻量 JS 编排 helper」。收敛此前散落的三处重复实现：
  *   - components/Overlay.tsx 的 closing/finishClose/兜底定时器内联逻辑
- *   - components/UpdateToast.tsx 的收起编排
  *   - chat/hooks/useExitAnimation.ts 的 timer-only 退场
  *
  * 单一职责：解决「React 想卸载元素，但要先播完 CSS 退场动画再真删」这一时序问题。

@@ -4,7 +4,6 @@ import { createI18n } from '@peer-agent/i18n';
 
 const installCopyKeys = [
   'updater.badge.openInstaller',
-  'updater.toast.openInstaller',
   'updater.modal.openInstaller',
 ] as const;
 

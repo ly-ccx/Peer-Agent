@@ -547,11 +547,6 @@ export type TranslationKey =
   | 'updater.badge.install'
   | 'updater.badge.openInstaller'
   | 'updater.badge.ready'
-  | 'updater.toast.title'
-  | 'updater.toast.ready'
-  | 'updater.toast.install'
-  | 'updater.toast.openInstaller'
-  | 'updater.toast.dismiss'
   | 'updater.modal.title'
   | 'updater.modal.checking'
   | 'updater.modal.currentVersion'
@@ -1143,11 +1138,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.badge.install': '安装',
     'updater.badge.openInstaller': '安装',
     'updater.badge.ready': '新版本 v{version} 已就绪',
-    'updater.toast.title': '下载完成',
-    'updater.toast.ready': '新版本 v{version} 已就绪',
-    'updater.toast.install': '立即安装',
-    'updater.toast.openInstaller': '安装',
-    'updater.toast.dismiss': '收起',
     'updater.modal.title': '发现新版本',
     'updater.modal.checking': '正在检查更新…',
     'updater.modal.currentVersion': '当前版本',
@@ -1737,11 +1727,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.badge.install': 'Install',
     'updater.badge.openInstaller': 'Install',
     'updater.badge.ready': 'Version v{version} is ready',
-    'updater.toast.title': 'Download complete',
-    'updater.toast.ready': 'Version v{version} is ready',
-    'updater.toast.install': 'Install now',
-    'updater.toast.openInstaller': 'Install',
-    'updater.toast.dismiss': 'Dismiss',
     'updater.modal.title': 'Update available',
     'updater.modal.checking': 'Checking for updates…',
     'updater.modal.currentVersion': 'Current version',

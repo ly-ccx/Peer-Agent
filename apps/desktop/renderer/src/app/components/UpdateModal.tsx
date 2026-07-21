@@ -10,13 +10,13 @@ import { ReleaseNotesView } from './ReleaseNotesView';
  * 职责（按确认的产品设计，下载阶段不再霸屏）：
  *   - available：展示当前版本 / 新版本 / 更新内容 +「更新」「稍后」。
  *     点「更新」= 触发后台下载并带动画收起弹窗，进度改由版本徽标的环形进度表达，
- *     下载完成由右下角 UpdateToast 承接「立即安装」。
+ *     下载完成由侧边栏版本徽标旁的「安装」按钮承接。
  *   - checking：正在检查更新…
  *   - not-available：已是最新 +「重新检查」。
  *   - error：错误信息 +（可选）打开 Release 页 +「重新检查」。
  *
  * 下载中 / 已下载 / 待打开（downloading / downloaded / ready-to-open）不再由本弹窗呈现，
- * 分别交给「徽标环形进度」与「右下角完成卡片（UpdateToast）」。
+ * 分别交给「徽标环形进度」与「徽标旁安装按钮」。
  *
  * 能力真相在主进程；本组件仅触发 onUpdate/onOpenReleasePage/onRecheck/onClose 回调。
  * 关闭统一经 Overlay 的 requestClose 走退场动画，不再直接卸载。
