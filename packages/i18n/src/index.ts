@@ -549,6 +549,9 @@ export type TranslationKey =
   | 'updater.badge.ready'
   | 'updater.modal.title'
   | 'updater.modal.checking'
+  | 'updater.modal.newUpdatePill'
+  | 'updater.modal.fromVersion'
+  | 'updater.modal.backgroundDownloadHint'
   | 'updater.modal.currentVersion'
   | 'updater.modal.newVersion'
   | 'updater.modal.releaseNotes'
@@ -1140,6 +1143,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.badge.ready': '新版本 v{version} 已就绪',
     'updater.modal.title': '发现新版本',
     'updater.modal.checking': '正在检查更新…',
+    'updater.modal.newUpdatePill': '新版本',
+    'updater.modal.fromVersion': '来自 v{version}',
+    'updater.modal.backgroundDownloadHint': '下载在后台进行，完成后用侧边栏 Install 安装。',
     'updater.modal.currentVersion': '当前版本',
     'updater.modal.newVersion': '新版本',
     'updater.modal.releaseNotes': '更新内容',
@@ -1729,6 +1735,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'updater.badge.ready': 'Version v{version} is ready',
     'updater.modal.title': 'Update available',
     'updater.modal.checking': 'Checking for updates…',
+    'updater.modal.newUpdatePill': 'New update',
+    'updater.modal.fromVersion': 'from v{version}',
+    'updater.modal.backgroundDownloadHint': 'Download runs in the background. Install from the sidebar when ready.',
     'updater.modal.currentVersion': 'Current version',
     'updater.modal.newVersion': 'New version',
     'updater.modal.releaseNotes': "What's new",

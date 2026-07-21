@@ -148,22 +148,17 @@
   /* ── 更新弹窗 ── */
   /* 浮层基座由 .pa-overlay-backdrop / .pa-overlay-panel 统一提供（见 overlay.css）。 */
   .updater-modal {
-    width: min(440px, calc(100vw - 48px));
-    border-radius: 14px;
+    width: min(460px, calc(100vw - 48px));
+    border-radius: 16px;
     background: var(--pa-surface-card);
     border: 1px solid var(--za-line);
     box-shadow: var(--za-shadow-popover);
-    padding: 24px;
+    padding: 0;
     color: var(--pa-text-primary);
+    overflow: hidden;
   }
 
-  /* 点「更新」后弹窗退场：覆写 Overlay 通用的 motion-exit-sink（仅下移），
-     改为向左上角版本徽标方向收缩淡出，把用户视线引导到进度落点（C1 连续性样板）。
-     复用 motion-exit-collapse 基元，通过方向变量 --motion-collapse-x/y 指定飞向左上角，
-     位移仍受 --za-motion-shift-lg（24px）克制，transform-origin 设为左上。
-     时长 medium=200ms < Overlay 兜底定时 240ms，保证 onAnimationEnd 先触发。
-     特异度 3 类 > overlay.css 的 .pa-overlay-panel.is-closing(2 类)，稳定生效。
-     prefers-reduced-motion 由 tokens.css 全局兜底降级。 */
+  /* 点「更新」后弹窗退场：覆写 Overlay 通用退场，朝左上角版本徽标方向收缩淡出。 */
   .pa-overlay-panel.updater-modal.is-closing {
     transform-origin: top left;
     --motion-collapse-x: calc(-1 * var(--za-motion-shift-lg));
@@ -171,15 +166,18 @@
     animation: motion-exit-collapse var(--za-motion-medium) var(--za-ease-accelerate) both;
   }
 
+  /* 简单状态（检查中 / 最新 / 错误 / 下载中） */
   .updater-modal-body {
     display: grid;
     gap: 16px;
+    padding: 22px 22px 18px;
   }
 
   .updater-modal-title {
     margin: 0;
     font-size: 18px;
     font-weight: 600;
+    letter-spacing: -0.01em;
     color: var(--pa-text-primary);
   }
 
@@ -197,33 +195,116 @@
     font-weight: 600;
   }
 
-  .updater-modal-notes {
+  /* ── available：Changelog 卡片 ── */
+  .updater-modal-changelog {
     display: grid;
-    gap: 6px;
+    grid-template-rows: auto 1fr auto;
   }
 
-  .updater-modal-notes-label {
-    font-size: 12px;
+  .updater-modal-hero {
+    padding: 20px 20px 14px;
+    border-bottom: 1px solid var(--za-line);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--cinnabar-seal) 8%, transparent),
+      transparent 88%
+    );
+  }
+
+  .updater-modal-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 22px;
+    padding: 0 9px;
+    margin-bottom: 10px;
+    border-radius: 999px;
+    font-size: 11px;
     font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--cinnabar-seal);
+    background: color-mix(in srgb, var(--cinnabar-seal) 12%, transparent);
+  }
+
+  .updater-modal-pill::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--cinnabar-seal);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--cinnabar-seal) 18%, transparent);
+  }
+
+  .updater-modal-version-title {
+    margin: 0;
+    font-size: 22px;
+    line-height: 1.15;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--pa-text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .updater-modal-from {
+    margin: 8px 0 0;
+    font-size: 12.5px;
+    color: var(--pa-text-secondary);
+  }
+
+  .updater-modal-changelog-body {
+    padding: 14px 20px 8px;
+  }
+
+  .updater-modal-section-title {
+    margin: 0 0 10px;
+    font-size: 11.5px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
     color: var(--pa-text-secondary);
   }
 
   .updater-modal-notes-body {
-    max-height: 200px;
+    max-height: 250px;
     overflow-y: auto;
     font-size: 13px;
-    line-height: 1.5;
+    line-height: 1.55;
     color: var(--pa-text-primary);
-    background: var(--surface-vellum-sunken);
-    border-radius: var(--ui-radius-row);
-    padding: 10px 12px;
   }
 
-  .updater-modal-notes-body pre {
+  /* 扁平 changelog：去掉厚重 sunken 灰盒 */
+  .updater-modal-notes-body.is-flat {
+    background: transparent;
+    border-radius: 0;
+    padding: 0 2px 4px 0;
+  }
+
+  .updater-modal-empty-notes {
     margin: 0;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: inherit;
+    color: var(--pa-text-secondary);
+  }
+
+  .updater-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 20px 16px;
+    border-top: 1px solid var(--za-line);
+    background: color-mix(in srgb, var(--pa-surface-card) 88%, var(--pa-text-primary) 3%);
+  }
+
+  .updater-modal-hint {
+    margin: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: var(--pa-text-secondary);
+  }
+
+  .updater-modal-footer .updater-modal-actions {
+    flex-shrink: 0;
   }
 
   /* 富文本更新说明（ReleaseNotesView 渲染的白名单 HTML） */
@@ -254,8 +335,7 @@
     font-weight: 600;
   }
 
-  /* Tailwind preflight 会全局 list-style:none，这里显式还原更新说明里的列表符号，
-     否则每条修复/新功能都没有前导点，视觉上糊成一片、读起来累。 */
+  /* Tailwind preflight 会全局 list-style:none，这里显式还原更新说明里的列表符号。 */
   .updater-notes-rich ul,
   .updater-notes-rich ol {
     margin: 0 0 10px;
@@ -271,15 +351,12 @@
   }
 
   .updater-notes-rich li {
-    /* display:list-item + list-style:inherit：抵消 preflight 对 li 的重置，
-       让上面 ul/ol 的符号真正落到每个条目上。 */
     display: list-item;
     list-style: inherit;
     margin: 4px 0;
     padding-left: 2px;
   }
 
-  /* 嵌套列表收紧上下留白，避免层级之间出现过大空档。 */
   .updater-notes-rich li > ul,
   .updater-notes-rich li > ol {
     margin: 4px 0 2px;
@@ -303,7 +380,7 @@
   }
 
   .updater-notes-rich blockquote {
-    margin: 0 0 8px;
+    margin: 8px 0;
     padding-left: 10px;
     border-left: 2px solid var(--za-line-strong);
     color: var(--pa-text-secondary);
@@ -356,40 +433,23 @@
     background: transparent;
   }
 
-  /* 设置页下载中行内进度文字 */
-  .updater-inline-progress {
-    font-size: 13px;
-    color: var(--cinnabar-seal);
-    font-weight: 600;
-    white-space: nowrap;
-  }
-
   .updater-modal-uptodate {
     margin: 0;
     font-size: 14px;
-    color: var(--pa-text-primary);
+    color: var(--pa-text-secondary);
   }
 
-  .updater-modal-error {
+  .updater-modal-error,
+  .updater-modal-downloading {
     margin: 0;
     font-size: 13px;
     line-height: 1.5;
-    color: var(--za-danger);
-    word-break: break-word;
-  }
-
-  /* ── 下载进度弹窗（下载中点击徽标唤出） ── */
-  .updater-modal-downloading {
-    margin: 0;
-    font-size: 14px;
-    color: var(--pa-text-primary);
+    color: var(--pa-text-secondary);
   }
 
   .updater-modal-progress {
-    margin-top: 12px;
-    width: 100%;
     height: 6px;
-    border-radius: var(--ui-radius-round);
+    border-radius: 999px;
     background: var(--surface-vellum-sunken);
     overflow: hidden;
   }
@@ -400,6 +460,5 @@
     width: calc(var(--pa-update-pct, 0) * 1%);
     border-radius: inherit;
     background: var(--cinnabar-seal);
-    transition: width 0.25s ease;
+    transition: width 0.2s ease;
   }
-}
