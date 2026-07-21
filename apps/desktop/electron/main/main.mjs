@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, screen, shell, webContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, shell, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -58,6 +58,7 @@ import { createConversationStore } from './conversation-store.mjs';
 import { createGoalPlanStore, goalPlanIsSelfDriven } from './goal-plan-store.mjs';
 import { decideIntakeConvergence } from './goal-intake-convergence.mjs';
 import { createGoalRunner } from './goal-runner.mjs';
+import { createTaskNotificationBroker } from './task-notification-broker.mjs';
 import {
   buildGoalRunnerStreamStartedPayload,
   createGoalRunnerAssistantPlaceholder,
@@ -250,13 +251,24 @@ const stopConversationChangeSubscription = conversationStore.subscribeChanges((e
 
   broadcastToAllWindows('conversations:changed', event);
 });
+// 主窗口当前前台会话（由 renderer 通过 conversation:set-active 上报），用于同会话通知抑制。
+let activeConversationIdForNotifications = null;
+
 const goalPlanStore = createGoalPlanStore({
   // 任何写路径（IPC 或 AI 工具 local-goal-provider）改动计划后，广播给所有窗口，
   // 让 GoalPlanPanel 实时重拉，无需切换会话/重挂载。详见方案 B。
   // broadcastToAllWindows 是后文的函数声明（已提升），onChange 仅在运行时触发，引用安全。
-  onChange: (payload) => broadcastToAllWindows('goalPlans:changed', payload),
+  onChange: (payload) => {
+    broadcastToAllWindows('goalPlans:changed', payload);
+    try {
+      taskNotificationBroker?.handleGoalPlanChanged(payload);
+    } catch (err) {
+      console.warn('[task-notification] handleGoalPlanChanged failed:', err);
+    }
+  },
 });
 let goalRunner = null;
+let taskNotificationBroker = null;
 const promptSnapshotStore = createPromptSnapshotStore();
 const contextBaselineRecorder = createContextBaselineRecorder({
   promptSnapshotStore,
@@ -356,6 +368,80 @@ function broadcastToAllWindows(channel, payload) {
   const wins = BrowserWindow.getAllWindows();
   for (const win of wins) {
     if (!win.isDestroyed()) win.webContents.send(channel, payload);
+  }
+}
+
+function getPeerAgentMainWindow() {
+  return BrowserWindow.getAllWindows().find((window) => window.__peerAgentMainWindow === true) || null;
+}
+
+function isMainAppForegroundForNotifications() {
+  if (!app.isReady() || !app.isActive?.()) return false;
+  const mainWindow = getPeerAgentMainWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (!mainWindow.isVisible() || mainWindow.isMinimized()) return false;
+  return true;
+}
+
+function openConversationFromTaskNotification(payload = {}) {
+  const conversationId = typeof payload.conversationId === 'string' ? payload.conversationId : '';
+  const workspacePath = typeof payload.workspacePath === 'string' ? payload.workspacePath : '';
+  const mainWindow = getPeerAgentMainWindow();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    if (conversationId) {
+      mainWindow.webContents.send('quick-chat:open-conversation', {
+        conversationId,
+        workspacePath,
+        planId: payload.planId ?? payload.taskId ?? null,
+        attentionVersion: payload.attentionVersion ?? null,
+        source: payload.source || 'system-notification',
+      });
+    }
+    return true;
+  }
+  // 主窗口不存在时先创建，再在 did-finish-load 后发送（简化：创建后立即 send，renderer 会挂 listener）
+  createWindow();
+  const created = getPeerAgentMainWindow();
+  if (created && !created.isDestroyed() && conversationId) {
+    created.webContents.once('did-finish-load', () => {
+      created.webContents.send('quick-chat:open-conversation', {
+        conversationId,
+        workspacePath,
+        planId: payload.planId ?? payload.taskId ?? null,
+        attentionVersion: payload.attentionVersion ?? null,
+        source: payload.source || 'system-notification',
+      });
+    });
+    return true;
+  }
+  return false;
+}
+
+function showTaskSystemNotification({ title, body, onClick }) {
+  if (!Notification.isSupported()) return false;
+  try {
+    const notification = new Notification({
+      title: String(title || 'Peer Agent'),
+      body: String(body || ''),
+      silent: false,
+    });
+    if (typeof onClick === 'function') {
+      notification.on('click', () => {
+        try {
+          onClick();
+        } catch (err) {
+          console.warn('[task-notification] click handler failed:', err);
+        }
+      });
+    }
+    notification.show();
+    return true;
+  } catch (err) {
+    console.warn('[task-notification] Notification.show failed:', err);
+    return false;
   }
 }
 
@@ -985,7 +1071,7 @@ ipcMain.handle('quick-chat-popover:select', (_event, value) => ({
 }));
 ipcMain.handle('quick-chat:submit', (_event, payload = {}) => {
   quickChatWindowController.hide();
-  const mainWindow = BrowserWindow.getAllWindows().find((window) => window.__peerAgentMainWindow === true);
+  const mainWindow = getPeerAgentMainWindow();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('quick-chat:conversation-created', payload);
     if (payload.openMainWindow) {
@@ -995,6 +1081,30 @@ ipcMain.handle('quick-chat:submit', (_event, payload = {}) => {
     }
   }
   return { ok: true };
+});
+
+// renderer 上报当前前台会话，供任务系统通知做「同会话抑制」。
+ipcMain.handle('conversation:set-active', (_event, payload = {}) => {
+  const conversationId =
+    payload && typeof payload.conversationId === 'string' && payload.conversationId.trim()
+      ? payload.conversationId.trim()
+      : null;
+  activeConversationIdForNotifications = conversationId;
+  if (conversationId && taskNotificationBroker) {
+    // 打开会话即视为已读该会话下当前 attention（若已知 planId 则精确标记）。
+    const planId =
+      payload && typeof payload.planId === 'string' && payload.planId.trim()
+        ? payload.planId.trim()
+        : null;
+    if (planId) {
+      try {
+        taskNotificationBroker.markTaskRead(planId);
+      } catch (err) {
+        console.warn('[task-notification] markTaskRead failed:', err);
+      }
+    }
+  }
+  return { ok: true, conversationId: activeConversationIdForNotifications };
 });
 
 function createWindow() {
@@ -2783,6 +2893,26 @@ app.whenReady().then(async () => {
   });
 
   createWindow();
+
+  // 任务完成系统通知 Broker：订阅 goalPlans 变更、去重、前台抑制、点击回流。
+  try {
+    taskNotificationBroker = createTaskNotificationBroker({
+      getPlan: (planId) => goalPlanStore.getPlan(planId),
+      listPlans: () => goalPlanStore.listPlanDetails(),
+      getSettings: () => settingsStore.getAll(),
+      isAppForeground: () => isMainAppForegroundForNotifications(),
+      getActiveConversationId: () => activeConversationIdForNotifications,
+      openConversation: (payload) => openConversationFromTaskNotification(payload),
+      showNotification: (payload) => showTaskSystemNotification(payload),
+      isNotificationSupported: () => Notification.isSupported(),
+      logWarn: (message, err) => console.warn(message, err),
+    });
+    taskNotificationBroker.bootstrapExisting();
+  } catch (err) {
+    console.warn('[task-notification] broker init failed:', err);
+    taskNotificationBroker = null;
+  }
+
   // 启动后预热 Quick 窗口（隐藏态创建 + 加载 renderer），避免首次快捷键唤醒冷创建。
   try {
     quickChatWindowController.prewarm();

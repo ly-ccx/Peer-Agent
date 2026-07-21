@@ -272,12 +272,20 @@ function MainApp() {
   }), [activeWorkspace, conversationView, refreshConversations]);
 
   useEffect(() => {
-    return clientApi.onQuickChatOpenConversation(({ conversationId, workspacePath }) => {
+    return clientApi.onQuickChatOpenConversation(({ conversationId, workspacePath, planId }) => {
       void (async () => {
-        await clientApi.workspaceSetActive({ path: workspacePath });
-        setActiveWorkspace(workspacePath);
-        await refreshConversations(workspacePath, conversationView);
+        if (workspacePath) {
+          await clientApi.workspaceSetActive({ path: workspacePath });
+          setActiveWorkspace(workspacePath);
+          await refreshConversations(workspacePath, conversationView);
+        }
         setActiveConversationId(conversationId);
+        // 点击系统通知回流时，若带 planId 则精确标记该任务 attention 已读。
+        if (planId) {
+          await clientApi
+            .setActiveConversation({ conversationId, planId })
+            .catch(() => {});
+        }
       })().catch(() => {});
     });
   }, [conversationView, refreshConversations]);
@@ -334,8 +342,10 @@ function MainApp() {
   }, []);
 
   // 同步 activeConversationId ref,并在用户打开会话时清除完成未读标记。
+  // 同时上报 main 进程，供任务系统通知做同会话前台抑制。
   useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
+    void clientApi.setActiveConversation({ conversationId: activeConversationId }).catch(() => {});
     if (!activeConversationId) return;
     setCompletedUnreadConversationIds((prev) => {
       const next = clearCompletedUnreadId(prev, activeConversationId);

@@ -48,6 +48,8 @@ export const DATA_STORE_ENTRIES = {
   usageRequests:     { rel: 'usage/requests.jsonl',    kind: 'file', scope: 'portable' },
   goalPlans:         { rel: 'goal-plans',               kind: 'dir',  scope: 'portable' },
   pendingTask:       { rel: 'pending-task.json',       kind: 'file', scope: 'device'   },
+  // 任务系统通知回执 / attentionVersion（设备本地，冷启动不回放）
+  taskNotificationReceipts: { rel: 'task-notification-receipts.json', kind: 'file', scope: 'device' },
   shellArtifacts:    { rel: 'shell-artifacts',         kind: 'dir',  scope: 'cache'    },
   promptSnapshots:   { rel: 'prompt-snapshots',        kind: 'dir',  scope: 'cache'    },
 };

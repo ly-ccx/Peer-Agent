@@ -307,6 +307,8 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.on('quick-chat:open-conversation', handler);
     return () => ipcRenderer.removeListener('quick-chat:open-conversation', handler);
   },
+  // 上报主窗口当前前台会话，供任务系统通知做同会话抑制 / 已读。
+  setActiveConversation: (payload) => ipcRenderer.invoke('conversation:set-active', payload || {}),
   onRuntimeEvent: (listener) => {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('runtime:event', handler);

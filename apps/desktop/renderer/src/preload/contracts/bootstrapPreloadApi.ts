@@ -723,6 +723,14 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly onQuickChatOpenConversation: (listener: (payload: {
     conversationId: string;
     workspacePath: string;
+    planId?: string | null;
+    attentionVersion?: number | null;
+    source?: string;
   }) => void) => () => void;
+  /** 上报主窗口当前前台会话，供任务系统通知做同会话抑制。 */
+  readonly setActiveConversation: (payload: {
+    conversationId: string | null;
+    planId?: string | null;
+  }) => Promise<{ ok: boolean; conversationId: string | null }>;
   readonly onRuntimeEvent: (listener: (payload: RuntimeSdkEvent) => void) => () => void;
 }

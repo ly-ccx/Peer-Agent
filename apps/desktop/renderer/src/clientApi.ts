@@ -181,6 +181,7 @@ const unavailableApi: ClientApi = {
   onQuickChatConversationCreated: unavailableMethod('onQuickChatConversationCreated'),
   onWorkspacesChanged: unavailableMethod('onWorkspacesChanged'),
   onQuickChatOpenConversation: unavailableMethod('onQuickChatOpenConversation'),
+  setActiveConversation: unavailableMethod('setActiveConversation'),
   onRuntimeEvent: unavailableMethod('onRuntimeEvent'),
 };
 
