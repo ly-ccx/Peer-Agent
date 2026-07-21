@@ -202,7 +202,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     });
 
     const offDone = clientApi.onChatStreamDone(
-      ({ streamId, usage, lifetimeUsage, contextTokens, contextWindow }) => {
+      ({ streamId, usage, lifetimeUsage, triggerTokens, contextWindow }) => {
         const cid = conversationStore.resolveConversation(streamId);
         if (!cid) return;
         // 流正常收尾，重试横幅若仍残留一并清除。
@@ -234,14 +234,13 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           streamId: null,
         });
 
-        // 口径统一：主进程随 done 下发权威上下文快照时更新（final 模式允许真实回落）；
-        // 若本轮未携带快照，保留上一份权威占用，避免发送中/流式结束瞬间掉到本地低估。
-        // 中途 microcompaction idle 走 midturn 合并，禁止未压缩时显著回落。
-        if (typeof contextTokens === 'number') {
+        // 主圆环只消费 Runtime preflight 的 triggerTokens，保证用户看到的百分比与
+        // 自动压缩判定完全同源；最近实际发送量 contextTokens 不再进入主圆环。
+        if (typeof triggerTokens === 'number') {
           conversationStore.setState(cid, (prev) => ({
             authoritativeContext: mergeAuthoritativeContextSnapshot({
               previous: prev.authoritativeContext,
-              nextTokens: contextTokens,
+              nextTokens: triggerTokens,
               nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
               mode: 'final',
             }),
@@ -509,7 +508,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     );
 
     const offCompaction = clientApi.onChatCompaction(
-      ({ conversationId, streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount, contextTokens, contextWindow }) => {
+      ({ conversationId, streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount, triggerTokens, contextWindow, microcompacted }) => {
         const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         if (stage === 'start') {
@@ -536,15 +535,15 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         if (stage === 'idle') {
           cancelCompactionDoneTimer(cid, streamId);
           conversationStore.setState(cid, (prev) => {
-            // microcompaction idle 常在 usageSnapshot=null 时附带本地低估。
-            // midturn 合并：未确认语义压缩时禁止把占用写小，避免「三十多 → 8% → 51%」。
+            // 已确认的 Layer 1 会改变接下来真正参与 Layer 2 判定的 triggerTokens，允许
+            // 压力真实回落；普通 idle 仍只允许抬升，避免不完整快照制造假下降。
             const nextAuthoritative =
-              typeof contextTokens === 'number'
+              typeof triggerTokens === 'number'
                 ? mergeAuthoritativeContextSnapshot({
                     previous: prev.authoritativeContext,
-                    nextTokens: contextTokens,
+                    nextTokens: triggerTokens,
                     nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
-                    mode: 'midturn',
+                    mode: microcompacted === true ? 'final' : 'midturn',
                   })
                 : prev.authoritativeContext;
             return {
@@ -574,16 +573,16 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
             streamId,
             now: completedAt,
           }),
-          // 语义压缩完成：final 模式允许真实回落。缺快照时清空，回退本地估算，
-          // 绝不继续把底部数字锁在压缩前高位。
-          authoritativeContext: typeof contextTokens === 'number'
+          // 语义压缩完成：压缩后的 triggerTokens 成为新压力快照，允许真实回落。
+          // 缺快照时保留旧值，避免事件字段缺失让主圆环切换到另一套本地口径。
+          authoritativeContext: typeof triggerTokens === 'number'
             ? mergeAuthoritativeContextSnapshot({
                 previous: prev.authoritativeContext,
-                nextTokens: contextTokens,
+                nextTokens: triggerTokens,
                 nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
                 mode: 'final',
               })
-            : null,
+            : prev.authoritativeContext,
         }));
         if (
           !method ||

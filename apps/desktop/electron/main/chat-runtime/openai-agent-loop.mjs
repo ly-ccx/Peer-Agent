@@ -67,14 +67,14 @@ export async function agentLoopOpenAI({
     : sendOpenAIChatStream;
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
   // 最后一轮「实际发送切片」（微压缩+清洗后真正发给 provider 的消息，已含 system）。供
-  // getContextInfo 显示口径在 provider usage 缺失时回退估算之用；不参与压缩触发判定。
+  // getContextInfo 实际发送量在 provider usage 缺失时回退估算之用；不参与压缩触发判定。
   let lastSentMessages = null;
   const loop = createAgentLoopKernel({
     webContents,
     streamId,
     onRound: agentProgress?.onRound,
-    // 口径分离（ADR 42）：触发口径仍按「完整会话 apiMessages」（已含 system）判定，保持压缩时机不变；
-    // 显示口径优先采用 kernel 传入的 provider 真实 usage 快照（最后一轮 input+cacheRead，压缩后回落），
+    // 触发口径按「当前 Runtime apiMessages」（已含 system）判定；实际发送量优先采用 kernel
+    // 传入的 provider 真实 usage 快照（最后一轮 input+cacheRead），
     // 其次回退到对「最后一轮实际发送切片」的估算，最后回退完整会话估算。
     getContextInfo: ({ usageSnapshot = null } = {}) => computeContextInfo({
       messages: apiMessages,

@@ -756,15 +756,9 @@ export function ChatSurface({
     railItemsCacheRef.current = { conversationId, isZh, cache };
     return cache.items;
   }, [conversationId, isStreaming, isZh, messages]);
-  // 口径分离（ADR 42：显示口径 ≠ 压缩触发口径）：进度条分子取「权威快照口径」与「实时本地估算」的较大值。
-  // - 权威快照口径 = 主进程回合结束下发的 contextTokens，现已改为「显示口径」= 实际发送给模型的上下文
-  //   （优先 provider 真实 usage 的 input+cacheRead，回退为对最后一轮实际发送切片的估算），
-  //   叠加当前草稿/附件的实时增量；无快照时记 0。注意它不再等于压缩触发口径（后者仍按完整会话量判定）。
-  // - 实时本地估算 = 对「按 _compaction 边界切片后的活跃 messages」+ 草稿 + 附件的本地估算
-  //   （tokenEstimate 已按最后一条 _compaction 切片），压缩后随之回落。
-  // 两者现已同为「实际发送量」口径，取 max 仅用于消除「流式→结束」瞬时抖动，保证数值连续、不无故突降。
-  // 压缩发生时：onChatCompaction 完成分支已清空 authoritativeContext（置 null）、messages 也替换为压缩后
-  // 集合，故 max 自然回落到压缩后的本地估算，不会把已压缩的用量错误地锁在压缩前高位（本次 bug 的修复点）。
+  // 主圆环口径：优先使用 Runtime preflight 真正用于自动压缩判定的 triggerTokens；
+  // 本地历史估算仅用于尚未收到权威快照的冷启动降级。草稿/附件和本轮真实 input
+  // 只允许抬升压力，不会把主圆环切换成「最近实际发送量」口径。
   const historyTokenCacheRef = useRef<{
     conversationId: string | null;
     cache: ConversationTokenEstimateCache;
@@ -827,9 +821,8 @@ export function ChatSurface({
     // 压缩横幅真值在主进程登记表（按会话），切会话时先归零本地表达，避免上一会话的
     // 压缩横幅/进度残留到新会话；随后由下方查询按"新会话是否确在压缩"重新点亮。
     setCompactionState(IDLE_COMPACTION_STATE);
-    // 切换会话时清掉权威上下文用量快照，避免上一会话的进度条分子/分母残留到新会话；
-    // 新会话由其首个回合结束的 done 重新下发权威快照，在此之前回退到本地估算。
-    setAuthoritativeContext(null);
+    // authoritativeContext 已按 conversationId 分桶。切换订阅时必须保留目标会话自己的
+    // triggerTokens 快照；主动清空会让同一会话退回本地历史估算，造成百分比口径跳变。
     // 切换会话时一并清掉本轮计时锚点,避免上一会话的实时跳秒残留到新会话。
     // 打字机缓冲的清空已上移到 useConversationStreamRouter（随前台会话切换自动 reset）。
     setTurnStartedAt(null);

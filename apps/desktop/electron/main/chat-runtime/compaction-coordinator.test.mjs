@@ -357,10 +357,9 @@ describe('computeContextInfo（进度条用量与压缩触发口径单一来源�
   });
 });
 
-// 方案 A（完整会话量口径）回归：进度条分子 / 压缩触发 / done 权威快照统一按「完整会话量」计算，
-// 不再按微压缩后的发送副本计算。这些用例锁定 agent-loop 重构所依赖的两条不变量，防止回归到
-// 「流式 ~200k 结束瞬间掉到 ~100k」的旧 bug。
-describe('方案 A：完整会话量口径不变量', () => {
+// microcompaction 预算回归：原始集合与 Layer 1 后集合是两个明确阶段；主圆环应投影
+// 当前阶段真正用于下一步压缩判定的 triggerTokens，而不是混入 contextTokens。
+describe('microcompaction 前后触发预算不变量', () => {
   // 构造一个含「大块旧工具结果」的会话：微压缩会把旧 tool_result 截断成预览，
   // 因此完整集合的估算必然显著大于微压缩后集合的估算。
   function buildConversationWithBigToolResults() {
@@ -383,32 +382,28 @@ describe('方案 A：完整会话量口径不变量', () => {
 
     const result = applyMicrocompaction(messages);
 
-    // 入参对象与每个元素都不被原地改动：方案 A 据此保留完整 apiMessages 仅作度量，
-    // 另用返回的发送副本发给 provider。
+    // 不原地修改，协调器才能可靠比较 Layer 1 前后的预算并发布最终 triggerTokens。
     assert.equal(JSON.stringify(messages), snapshot, 'applyMicrocompaction 不应原地修改入参 messages');
     assert.notEqual(result.messages, messages, '应返回新的数组而非原数组');
     assert.ok(result.stats.compactedCount > 0, '本样本应至少触发一次微压缩，用例才有意义');
   });
 
-  it('完整集合的 contextTokens 显著大于微压缩后集合（这正是旧 bug 跳变的来源）', () => {
+  it('完整集合的 triggerTokens 显著大于微压缩后集合', () => {
     const full = buildConversationWithBigToolResults();
     const sent = applyMicrocompaction(full).messages;
 
     const fullInfo = computeContextInfo({ messages: full, contextWindow: 200_000 });
     const sentInfo = computeContextInfo({ messages: sent, contextWindow: 200_000 });
 
-    // 方案 A：进度条与触发都按 full 计算（更大、更安全）；旧实现误按 sent 计算，
-    // 于是回合结束 done 快照从 full 掉到 sent，产生用户观察到的瞬间下降。
     assert.ok(
-      fullInfo.contextTokens > sentInfo.contextTokens,
-      `完整集合估算(${fullInfo.contextTokens}) 应大于微压缩后(${sentInfo.contextTokens})`,
+      fullInfo.triggerTokens > sentInfo.triggerTokens,
+      `完整集合预算(${fullInfo.triggerTokens}) 应大于微压缩后(${sentInfo.triggerTokens})`,
     );
   });
 
-  it('bar ≡ trigger：done 权威 contextTokens 与压缩触发判定来自同一完整集合', () => {
+  it('主圆环 triggerTokens 与压缩建议来自同一预算', () => {
     const full = buildConversationWithBigToolResults();
-    // 选一个窗口，使完整集合刚好越过触发线：证明「进度条所用数值」与「是否触发压缩」同源。
-    const fullTokens = computeContextInfo({ messages: full, contextWindow: 200_000 }).contextTokens;
+    const fullTokens = computeContextInfo({ messages: full, contextWindow: 200_000 }).triggerTokens;
     const ratio = COMPACTION_CONFIG.triggerRatio;
     const windowAbove = Math.floor(fullTokens / ratio) - 1; // 阈值 < fullTokens ⇒ 触发
     const windowBelow = Math.ceil(fullTokens / ratio) + 1; // 阈值 > fullTokens ⇒ 不触发
@@ -416,15 +411,15 @@ describe('方案 A：完整会话量口径不变量', () => {
     const above = computeContextInfo({ messages: full, contextWindow: windowAbove });
     const below = computeContextInfo({ messages: full, contextWindow: windowBelow });
 
-    assert.equal(above.contextTokens, fullTokens, '触发判定所用的 contextTokens 必须就是进度条分子');
+    assert.equal(above.triggerTokens, fullTokens, '主圆环分子必须就是触发判定预算');
     assert.equal(above.compactionSuggested, true);
-    assert.equal(below.contextTokens, fullTokens);
+    assert.equal(below.triggerTokens, fullTokens);
     assert.equal(below.compactionSuggested, false);
   });
 });
 
-describe('ADR 42：显示口径与压缩触发口径分离', () => {
-  // 本地构造一段「完整会话量很大」的消息（含多条大 tool 结果），用于对比显示口径与触发口径。
+describe('实际发送口径与压缩触发口径分离', () => {
+  // 本地构造一段「完整会话量很大」的消息（含多条大 tool 结果），用于对比两种数据口径。
   function buildBigConversation() {
     const big = 'x'.repeat(8000);
     const messages = [{ role: 'system', content: 'sys' }];
@@ -657,6 +652,12 @@ describe('静默 microcompaction 与占用显示口径对齐', () => {
     assert.ok(idle, '应发送 chat:compaction idle 携带有效占用');
     assert.equal(idle.payload.microcompacted, true);
     assert.equal(idle.payload.contextTokens, result.contextTokens);
+    assert.equal(result.triggerTokens, microEstimated);
+    assert.equal(
+      idle.payload.triggerTokens,
+      microEstimated,
+      'UI 压力圆环必须收到 Layer 1 后真正参与语义压缩判定的 triggerTokens',
+    );
     assert.ok(
       !events.some((e) => e.channel === 'chat:compaction' && e.payload.stage === 'done'),
       '取消语义压缩时不应发 done 横幅',

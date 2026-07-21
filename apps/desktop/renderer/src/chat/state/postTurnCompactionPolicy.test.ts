@@ -28,4 +28,27 @@ describe('post-turn compaction policy', () => {
     assert.match(surfaceSource, /loadStatus !== 'ready'/);
     assert.match(surfaceSource, /submitMessage = useCallback[\s\S]*loadStatus !== 'ready'/);
   });
+
+  it('keeps the context ring on the compression trigger budget across microcompaction and conversation switches', () => {
+    assert.match(
+      routerSource,
+      /triggerTokens/,
+      'stream/compaction events must project the Runtime trigger budget into the context ring',
+    );
+    assert.match(
+      routerSource,
+      /nextTokens:\s*triggerTokens/,
+      'the authoritative ring numerator must use triggerTokens instead of effective sent contextTokens',
+    );
+    assert.match(
+      routerSource,
+      /microcompacted\s*===\s*true\s*\?\s*'final'\s*:\s*'midturn'/,
+      'a confirmed Layer 1 result must be allowed to lower the trigger snapshot',
+    );
+    assert.doesNotMatch(
+      surfaceSource,
+      /setAuthoritativeContext\(null\)/,
+      'conversation switching must not discard the selected conversation bucket trigger snapshot',
+    );
+  });
 });

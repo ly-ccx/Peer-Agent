@@ -270,7 +270,7 @@ export function TokenUsageDisplay({
   const output = (tokenUsage?.output ?? 0) + (activeUsage?.output ?? 0);
   const cacheWrite = (tokenUsage?.cacheWrite ?? 0) + (activeUsage?.cacheWrite ?? 0);
   const cacheRead = (tokenUsage?.cacheRead ?? 0) + (activeUsage?.cacheRead ?? 0);
-  // billedTokens 仅用于费用估算；上下文圆环分子只接受有效上下文 token，
+  // billedTokens 仅用于费用估算；上下文圆环分子只接受压缩触发预算 token，
   // 禁止用 lifetime 计费累计（input+output）回退，否则长会话会误显示 100%。
   const currentContextTokens =
     typeof contextTokens === 'number' && Number.isFinite(contextTokens)
@@ -303,7 +303,7 @@ export function TokenUsageDisplay({
   const quotaTooltipLine = formatQuotaTooltipLine(subscriptionQuota ?? undefined, isZh);
   const ctxTooltipLines: readonly string[] = hasCtxRing
     ? [
-        `${isZh ? '上下文' : 'Context'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow as number)} (${Math.round(ctxPercent as number)}%)`,
+        `${isZh ? '压缩压力' : 'Compaction pressure'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow as number)} (${Math.round(ctxPercent as number)}%)`,
         ...(showCacheHit
           ? [
               isZh

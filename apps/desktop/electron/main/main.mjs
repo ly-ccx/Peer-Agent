@@ -2101,6 +2101,8 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
           // 手动压缩目前不经过会话 runtime projection，无法重建该会话当轮的工具 schema；
           // 至少返回 system + 压缩后 messages 的可靠快照，renderer 的本地 live 估算会补齐实时增量。
           contextTokens: estimateTokensFromMessages(result.messages),
+          // 手动语义压缩已落盘；压缩后完整消息预算即下一轮压缩触发分子。
+          triggerTokens: estimateTokensFromMessages(result.messages),
           contextWindow,
         }
       : undefined;

@@ -81,8 +81,13 @@ describe('agent loop kernel', () => {
       webContents,
       streamId: 's1ctx',
       // 口径统一 + 回合结束触发：loop 注入返回权威上下文快照的闭包，
-      // sendDone 必须把 contextTokens/contextWindow/compactionSuggested 透传到 done 事件。
-      getContextInfo: () => ({ contextTokens: 84_000, contextWindow: 100_000, compactionSuggested: true }),
+      // sendDone 必须把实际发送量 contextTokens、压缩判定用 triggerTokens、窗口与压力透传到 done 事件。
+      getContextInfo: () => ({
+        contextTokens: 31_000,
+        triggerTokens: 84_000,
+        contextWindow: 100_000,
+        compactionSuggested: true,
+      }),
     });
 
     loop.sendDone();
@@ -92,7 +97,8 @@ describe('agent loop kernel', () => {
       payload: {
         streamId: 's1ctx',
         usage: loop.usage,
-        contextTokens: 84_000,
+        contextTokens: 31_000,
+        triggerTokens: 84_000,
         contextWindow: 100_000,
         compactionSuggested: true,
       },

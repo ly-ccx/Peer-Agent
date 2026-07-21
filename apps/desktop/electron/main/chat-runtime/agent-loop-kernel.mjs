@@ -46,7 +46,7 @@ export function createAgentLoopKernel({
   // 用于 Goal Runner 展示用的实时轮次计数，与具体 provider 解耦。
   onRound = null,
   // 口径统一：回合自然结束时，由各 loop 注入的闭包返回「权威上下文用量」快照
-  // （{ contextTokens, contextWindow, compactionSuggested }），随 done 事件下发。
+  // （{ contextTokens, triggerTokens, contextWindow, compactionSuggested }），随 done 事件下发。
   // renderer 只消费用量/压力投影；真正的自动压缩由下一次 provider 请求前的 Runtime
   // preflight 阻塞执行，不能从 done 旁路启动。返回 null 表示不附带。
   getContextInfo = null,
@@ -113,11 +113,11 @@ export function createAgentLoopKernel({
   }
 
   function sendDone() {
-    // 回合自然结束：附带权威上下文用量与压力快照，供渲染端进度条对齐。
+    // 回合自然结束：附带实际上下文用量与权威压力快照，供渲染端圆环对齐。
     // compactionSuggested 不授权 renderer 另起压缩任务；下一次 Runtime preflight 负责压缩并续跑。
     // 闭包取数失败不得影响收尾。
-    // 口径分离（ADR 42）：把「最后一轮 usage 快照」传给 getContextInfo，使显示口径
-    // 优先采用 provider 真实 input+cacheRead（压缩后回落），触发口径仍按完整会话量判定。
+    // 把「最后一轮 usage 快照」传给 getContextInfo：contextTokens 优先采用 provider
+    // 真实 input+cacheRead，triggerTokens 仍按 Runtime preflight 的预算口径判定。
     let contextInfo = null;
     if (typeof getContextInfo === 'function') {
       try {
@@ -129,6 +129,9 @@ export function createAgentLoopKernel({
     const payload = { streamId, usage };
     if (contextInfo && typeof contextInfo === 'object') {
       if (typeof contextInfo.contextTokens === 'number') payload.contextTokens = contextInfo.contextTokens;
+      // triggerTokens 是 Runtime preflight 真正用于判断自动压缩的分子。Renderer 主圆环
+      // 必须消费它，而不是最近一次请求的有效发送量 contextTokens。
+      if (typeof contextInfo.triggerTokens === 'number') payload.triggerTokens = contextInfo.triggerTokens;
       if (typeof contextInfo.contextWindow === 'number') payload.contextWindow = contextInfo.contextWindow;
       if (typeof contextInfo.compactionSuggested === 'boolean') {
         payload.compactionSuggested = contextInfo.compactionSuggested;

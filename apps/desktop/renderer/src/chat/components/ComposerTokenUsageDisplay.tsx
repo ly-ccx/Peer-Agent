@@ -18,12 +18,12 @@ type ComposerTokenUsageDisplayProps = Omit<TokenUsageDisplayProps, 'contextToken
 /**
  * 只在工具栏叶子中订阅高频草稿变化。
  *
- * ChatSurface 负责低频的历史消息估算与权威上下文快照；这里仅叠加当前草稿和附件，
+ * ChatSurface 负责低频的历史消息估算与权威压缩触发快照；这里仅叠加当前草稿和附件，
  * 避免每输入一个字符都重新执行整棵消息表面及虚拟列表的渲染逻辑。
  *
  * 占用显示口径（contextOccupancy）：
- * - 有运行时权威有效上下文（stream done / 发送种子 / 微压缩 idle）时，优先采用它 + 草稿增量。
- * - 流式阶段仅可用本轮 activeUsage 的 input+cacheRead 抬升，绝不用 lifetime 计费累计。
+ * - 有 Runtime triggerTokens（stream done / 发送种子 / 压缩事件）时，优先采用它 + 草稿增量。
+ * - 流式阶段仅可用本轮 activeUsage 的 input+cacheRead 抬升压力，绝不用 lifetime 计费累计。
  * - 无权威快照时，回退到本地历史估算 + 草稿增量。
  */
 export function ComposerTokenUsageDisplay({

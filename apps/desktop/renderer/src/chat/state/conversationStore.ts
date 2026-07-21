@@ -36,7 +36,7 @@ import type {
   ToolProgress,
 } from './types';
 
-/** 主进程随回合结束下发的权威上下文用量快照（与压缩触发同口径）。 */
+/** 主进程下发的权威压缩触发预算快照；主圆环与 Runtime preflight 同口径。 */
 export interface AuthoritativeContext {
   contextTokens: number;
   contextWindow: number | null;

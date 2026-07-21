@@ -110,8 +110,9 @@ describe('resolveContextRingTokens', () => {
 });
 
 describe('mergeAuthoritativeContextSnapshot', () => {
-  it('blocks midturn microcompact idle from dropping ~30% to ~8%', () => {
-    // 用户可见路径：三十多% → microcompact idle 写入 38.9k（≈8%/500k）→ done 回 51%。
+  it('blocks an unconfirmed midturn snapshot from dropping ~30% to ~8%', () => {
+    // 未标记为已确认 Layer 1 的中途快照不得制造假下降；已确认 microcompaction
+    // 由事件路由器使用 final 模式合并，允许真实回落。
     const mid = mergeAuthoritativeContextSnapshot({
       previous: { contextTokens: 160_000, contextWindow: 500_000 },
       nextTokens: 38_900,

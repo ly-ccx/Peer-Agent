@@ -153,15 +153,14 @@ export function contextTokensFromUsageSnapshot(snapshot) {
   return total > 0 ? total : null;
 }
 
-// 口径（ADR 42 收口）：
-// - 显示口径（contextTokens）：界面进度条分子，表示「本回合实际发送给模型的上下文大小」，
-//   压缩后应自然回落。取值优先级：
+// 口径（ADR 42 数据面，UI 产品口径已收口到 triggerTokens）：
+// - 实际发送口径（contextTokens）：表示「本回合实际发送给模型的上下文大小」，取值优先级：
 //     1) provider 真实 usage 快照（最后一轮 input + cacheRead）；
 //     2) 回退为对「实际发送切片 displayMessages」的估算；
 //     3) 再回退为对完整会话 messages 的估算（兼容未传 displayMessages 的旧调用）。
-// - 触发口径（compactionSuggested / triggerTokens）：与 preflight 一致，取
+// - 压缩压力口径（compactionSuggested / triggerTokens）：与 preflight 一致，取
 //   max(完整会话本地估算, usage 快照)。有真实 usage 高水位时必须建议压缩，
-//   避免进度条已满但自动压缩不跑；无 usage 时仍退回本地估算。
+//   避免实际输入已满但自动压缩不跑；无 usage 时仍退回本地估算。Renderer 主圆环消费此字段。
 // - 分母口径（contextWindow）：与触发判定同一 normalizedWindow，不变。
 export function computeContextInfo({
   messages,
@@ -173,7 +172,7 @@ export function computeContextInfo({
   // 触发口径：与 runCompactionCheck 同源，纳入 usage 快照。
   const budget = computeContextBudget({ messages, contextWindow, tools, usageSnapshot });
 
-  // 显示口径：优先真实 usage 快照，其次发送切片估算，最后回退本地估算。
+  // 实际发送口径：优先真实 usage 快照，其次发送切片估算，最后回退本地估算。
   const usageTokens = contextTokensFromUsageSnapshot(usageSnapshot);
   let displayTokens;
   if (usageTokens != null) {
@@ -185,13 +184,13 @@ export function computeContextInfo({
   }
 
   return {
-    // 进度条分子：实际发送上下文（压缩后回落）。
+    // 最近一次实际发送上下文；保留给诊断，不作为 Renderer 主圆环分子。
     contextTokens: displayTokens,
     contextWindow: budget.contextWindow,
     triggerRatio: budget.triggerRatio,
     // 触发判定：与 preflight 同源（估算 ∪ usage）。
     compactionSuggested: budget.overSoftLimit,
-    // 触发口径快照，供诊断 / 测试核对。
+    // Runtime preflight 触发口径，也是 Renderer 主圆环分子。
     triggerTokens: budget.contextTokens,
   };
 }
@@ -225,6 +224,8 @@ async function persistAndNotifyCompaction({
     emergency,
     ...compactResult.notification,
     contextTokens: compactedBudget.contextTokens,
+    // 语义压缩已持久化，压缩后的完整预算就是下一轮 preflight 的触发分子。
+    triggerTokens: compactedBudget.contextTokens,
     contextWindow: compactedBudget.contextWindow,
   });
 }
@@ -366,7 +367,7 @@ export async function runCompactionCheck({
         contextWindow,
         tools,
         displayMessages: effectiveMessages,
-        // 显示有效发送量：忽略上一轮高水位 usage，避免把 87% 锁死在 UI。
+        // 计算 Layer 1 后的有效发送量：忽略上一轮高水位 usage，避免旧快照锁死新预算。
         usageSnapshot: null,
       });
       settledBanner = true;
@@ -377,6 +378,9 @@ export async function runCompactionCheck({
         stage: 'idle',
         emergency,
         contextTokens: effectiveInfo.contextTokens,
+        // Layer 1 已完成后，主圆环必须展示接下来真正参与 Layer 2 阈值判断的预算。
+        // 否则会出现圆环已越过 soft 线、但语义压缩实际被 microcompaction 取消的假警报。
+        triggerTokens: effectiveInfo.triggerTokens,
         contextWindow: effectiveInfo.contextWindow,
         microcompacted: true,
       });
@@ -386,6 +390,7 @@ export async function runCompactionCheck({
         compactResult,
         microcompacted: true,
         contextTokens: effectiveInfo.contextTokens,
+        triggerTokens: effectiveInfo.triggerTokens,
         contextWindow: effectiveInfo.contextWindow,
       };
     }

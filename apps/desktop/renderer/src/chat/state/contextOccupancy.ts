@@ -1,16 +1,17 @@
-// 右下角上下文占用口径：统一「一次请求的有效上下文」分子。
+// 右下角上下文压力口径：统一 Runtime preflight 的压缩触发分子。
 // 纯函数、无副作用；供 Composer 展示与回归测试共用。
 //
-// 口径（与主进程 ADR 42 显示口径对齐）：
-// - 表示「当前/最近一次实际发送给模型的有效上下文」占窗口比例。
-// - 优先采用主进程权威快照（stream done / microcompaction idle）。
+// 口径：
+// - 表示「当前压缩触发预算」占窗口比例，回答用户距离自动压缩还有多远。
+// - 优先采用主进程 triggerTokens 快照（stream done / compaction event）。
 // - 发送瞬间会把草稿并入权威种子，避免「发完草稿清空 → 百分比骤降」。
 // - 流式中可用本轮 usage 的 input+cacheRead 抬升（agent 多步下一跳），
 //   但绝不用 lifetime 计费累计（input+output 跨轮总和）当上下文。
-// - 只有确认压缩或切换模型窗口时，才允许显著回落（由上层显式改写权威快照）。
+// - 只有确认 Layer 1 / 语义压缩或切换模型窗口时，才允许显著回落
+//   （由上层显式改写权威快照）。
 
 export interface ContextOccupancyInput {
-  /** 主进程/发送路径写入的权威有效上下文（不含当前草稿）。 */
+  /** 主进程/发送路径写入的权威压缩触发预算（不含当前草稿）。 */
   readonly authoritativeContextTokens?: number | null;
   /** 本地历史消息启发式估算（不含草稿）。 */
   readonly historyContextTokens: number;
@@ -32,8 +33,8 @@ function finiteNonNegative(value: number | null | undefined): number | null {
  * 解析右下角上下文占用分子（token 数）。
  *
  * 优先级：
- * 1. 权威快照 + 草稿
- * 2. 与本轮 streaming input 取 max（多步 agent 下一跳变大时跟上）
+ * 1. 权威 trigger budget + 草稿
+ * 2. 与本轮 streaming input 取 max（真实输入超过估算时跟上）
  * 3. 无权威时回退本地历史 + 草稿
  */
 export function resolveContextOccupancyTokens(input: ContextOccupancyInput): number {
@@ -100,8 +101,8 @@ export type AuthoritativeContextSnapshot = {
  * - midturn：同一回合中途（如 microcompaction idle）。未确认压缩时禁止显著回落，
  *   只允许抬升或保留旧值；窗口显著变小（切模型）时才允许回落。
  *
- * 根因：microcompact idle 在 usageSnapshot=null 时会附带本地低估 contextTokens
- * （例如 38.9k≈8%），无条件覆盖会把三十多% 打成 8%，done 后再回到真实 51%。
+ * midturn 快照只允许抬高压力；确认 Layer 1 / 语义压缩完成或模型窗口切换时，
+ * 上层改用 final 模式，允许真实回落。
  */
 export function mergeAuthoritativeContextSnapshot(input: {
   readonly previous: AuthoritativeContextSnapshot | null | undefined;
