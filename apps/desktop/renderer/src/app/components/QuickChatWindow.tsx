@@ -17,6 +17,7 @@ import {
   accessLevelLabel,
   accessLevelTitle,
   effortLabel,
+  hasTunableEffortLevels,
   isChatMode,
   isLocalAccessLevel,
   modeLabel,
@@ -425,7 +426,7 @@ export function QuickChatWindow() {
                   <svg className={`quick-chat-chevron${openPopover === 'model' ? ' is-open' : ''}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
                 </button>
               ) : null}
-              {selectedProvider?.supportsReasoning && effortLevels.length ? (
+              {selectedProvider?.supportsReasoning && hasTunableEffortLevels(effortLevels) ? (
                 <button className="quick-chat-effort" type="button" aria-haspopup="listbox" aria-expanded={openPopover === 'effort'} onClick={(event) => togglePopover('effort', event.currentTarget)}>
                   <span>{effortLabel(effort, true)}</span>
                   <svg className={`quick-chat-chevron${openPopover === 'effort' ? ' is-open' : ''}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>

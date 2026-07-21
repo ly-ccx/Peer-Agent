@@ -47,6 +47,17 @@ export function normalizeEffortLevels(raw: readonly string[] | undefined | null)
   return result.length > 0 ? result : BASE_EFFORT_LEVELS;
 }
 
+/**
+ * 判断档位列表是否还有「除 off 外」的可调档位。
+ *
+ * 退化场景：supportsReasoning=true 但渠道只上报 ['off']（例如 Qoder Cantus）。
+ * 此时 UI 不应再渲染思考强度滑块/按钮，避免「只有关闭思考的单点滑块」。
+ */
+export function hasTunableEffortLevels(levels: readonly EffortLevel[] | undefined | null): boolean {
+  if (!levels || levels.length === 0) return false;
+  return levels.some((level) => level !== 'off');
+}
+
 /** EffortLevel 类型守卫。 */
 export function isEffortLevel(value: unknown): value is EffortLevel {
   return value === 'off'

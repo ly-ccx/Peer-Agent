@@ -13,6 +13,7 @@ import { clientApi } from '../../clientApi';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from '../state/historicalLocalRecord';
 import {
   normalizeEffortLevels,
+  hasTunableEffortLevels,
   resolveModelSwitchState,
   resolvePreferredEffort,
   ACCESS_LEVELS,
@@ -2062,7 +2063,7 @@ export function ChatSurface({
             isStreaming={isStreaming}
             isZh={isZh}
             effort={effort}
-            effortLevels={activeProviderSupportsReasoning ? effortLevels : []}
+            effortLevels={activeProviderSupportsReasoning && hasTunableEffortLevels(effortLevels) ? effortLevels : []}
             onEffortChange={changeEffort}
             modelOptions={modelOptions}
             canSwitchModel={canSwitchModel}

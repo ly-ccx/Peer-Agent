@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   BASE_EFFORT_LEVELS,
   LAST_MODEL_PROVIDER_KEY,
+  hasTunableEffortLevels,
   normalizeEffortLevels,
   readLastModelProviderId,
   resolveModelSwitchEffort,
@@ -59,6 +60,25 @@ describe('normalizeEffortLevels', () => {
       normalizeEffortLevels(['low', 'default', 'high', 'max']),
       ['low', 'default', 'high', 'max'],
     );
+  });
+});
+
+describe('hasTunableEffortLevels', () => {
+  it('returns false for empty / null / undefined', () => {
+    assert.equal(hasTunableEffortLevels(undefined), false);
+    assert.equal(hasTunableEffortLevels(null), false);
+    assert.equal(hasTunableEffortLevels([]), false);
+  });
+
+  it('returns false when the only level is off (degenerate channel)', () => {
+    // e.g. Qoder Cantus: supportsReasoning=true but effortLevels=['off']
+    assert.equal(hasTunableEffortLevels(['off']), false);
+  });
+
+  it('returns true when there is at least one non-off level', () => {
+    assert.equal(hasTunableEffortLevels(['off', 'default']), true);
+    assert.equal(hasTunableEffortLevels(['low', 'medium', 'high']), true);
+    assert.equal(hasTunableEffortLevels(['high']), true);
   });
 });
 
