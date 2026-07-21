@@ -30,14 +30,14 @@ function host(run: (
   capabilityId: string,
   arguments_: Record<string, unknown>,
   context?: TuiExecutionContext,
-) => RuntimeSdkProviderExecution = (capabilityId) => execution(capabilityId)): TuiHost {
+) => RuntimeSdkProviderExecution | Promise<RuntimeSdkProviderExecution> = (capabilityId) => execution(capabilityId)): TuiHost {
   return {
     workspaceRoot: '/tmp/test',
     capabilities: ['local.file.read'],
     toolDefinitions: [{ name: 'read_file', capabilityId: 'local.file.read' }],
     getAccessLevel: () => 'ask_before_local',
     setAccessLevel: () => 'ask_before_local',
-    execute: async (capabilityId, arguments_, context) => run(capabilityId, arguments_, context),
+    execute: async (capabilityId, arguments_, context) => await run(capabilityId, arguments_, context),
     executeRead: async () => execution('read'),
     executeShell: async () => execution('shell'),
     subscribe: () => () => {},
@@ -823,4 +823,59 @@ describe('chat controller', () => {
     expect(assistant?.interrupted).toBe(true);
   });
 
+  test('publishes running intermediate tool state before completion', async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const statuses: string[] = [];
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        if (state.toolExecutions.length === 0) {
+          return {
+            kind: 'tool_calls',
+            state,
+            calls: [{
+              toolCallId: 'call-running-1',
+              capabilityId: 'local.file.list',
+              arguments: { path: '.' },
+            }],
+          };
+        }
+        return { kind: 'completed', state };
+      },
+      applyToolResults(state, results) {
+        return { ...state, toolExecutions: results.map((item) => item.result) };
+      },
+    };
+
+    const controller = createChatController({
+      model,
+      host: host(async () => {
+        await gate;
+        return execution('listed');
+      }),
+    });
+
+    controller.subscribe((snapshot) => {
+      for (const message of snapshot.messages) {
+        if (message.role === 'tool' && message.tool) {
+          statuses.push(message.tool.status);
+        }
+      }
+    });
+
+    const pending = controller.send('list files');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(statuses).toContain('running');
+    const runningMessage = controller.getSnapshot().messages.find((message) => message.role === 'tool');
+    expect(runningMessage?.tool?.status).toBe('running');
+    const runningId = runningMessage?.id;
+    release?.();
+    await pending;
+    const completedMessage = controller.getSnapshot().messages.find((message) => message.id === runningId);
+    expect(completedMessage?.tool?.status).toBe('completed');
+    expect(statuses[0]).toBe('running');
+  });
 });

@@ -28,6 +28,8 @@ import {
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system';
 export type ChatRunStatus = 'idle' | 'running' | 'cancelling';
 
+const STREAM_BUFFER_FLUSH_MS = 32;
+
 export interface ChatCompactMeta {
   readonly phase: 'progress' | 'done';
   readonly percent?: number;
@@ -210,6 +212,66 @@ export function createChatController(options: {
     for (const listener of listeners) listener(snapshot);
   };
 
+  const streamDeltaBuffer: Array<{
+    readonly type: 'message.delta' | 'reasoning.delta';
+    readonly content: string;
+  }> = [];
+  let streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const appendAssistantDelta = (
+    messages: ChatMessage[],
+    event: { readonly type: 'message.delta' | 'reasoning.delta'; readonly content: string },
+  ) => {
+    const last = messages.at(-1);
+    if (event.type === 'message.delta') {
+      if (last?.role === 'assistant' && last.pending) {
+        messages[messages.length - 1] = { ...last, content: last.content + event.content };
+      } else {
+        messages.push({
+          id: `assistant-${++sequence}`,
+          role: 'assistant',
+          content: event.content,
+          pending: true,
+        });
+      }
+      return;
+    }
+
+    if (last?.role === 'assistant' && last.pending) {
+      messages[messages.length - 1] = {
+        ...last,
+        thinkingContent: `${last.thinkingContent ?? ''}${event.content}`,
+      };
+    } else {
+      messages.push({
+        id: `assistant-${++sequence}`,
+        role: 'assistant',
+        content: '',
+        pending: true,
+        thinkingContent: event.content,
+      });
+    }
+  };
+
+  const flushStreamDeltaBuffer = () => {
+    if (streamFlushTimer) {
+      clearTimeout(streamFlushTimer);
+      streamFlushTimer = null;
+    }
+    if (streamDeltaBuffer.length === 0) return;
+    const events = streamDeltaBuffer.splice(0, streamDeltaBuffer.length);
+    const messages = [...snapshot.messages];
+    for (const event of events) appendAssistantDelta(messages, event);
+    publish({ ...snapshot, messages });
+  };
+
+  const enqueueStreamDelta = (event: { readonly type: 'message.delta' | 'reasoning.delta'; readonly content: string }) => {
+    if (!event.content) return;
+    streamDeltaBuffer.push(event);
+    if (streamFlushTimer) return;
+    streamFlushTimer = setTimeout(flushStreamDeltaBuffer, STREAM_BUFFER_FLUSH_MS);
+  };
+
   options.planCoordinator?.subscribe((plan) => {
     if (snapshot.plan === plan) return;
     publish({ ...snapshot, plan: plan ?? undefined });
@@ -225,6 +287,31 @@ export function createChatController(options: {
     model: options.model,
     tools: {
       async execute(call, context) {
+        // Publish a stable running intermediate message first so TUI can show
+        // a breathing/running glyph while the capability executes; complete by
+        // updating the same message id instead of appending a second row.
+        const messageId = `tool-${++sequence}`;
+        flushStreamDeltaBuffer();
+        const runningTool = createToolPresentation({
+          capabilityId: call.capabilityId,
+          toolCallId: call.toolCallId,
+          arguments: call.arguments,
+          status: 'running',
+          outputPreview: 'running',
+        });
+        publish({
+          ...snapshot,
+          messages: [
+            ...snapshot.messages,
+            {
+              id: messageId,
+              role: 'tool',
+              content: toolPresentationContent(runningTool),
+              tool: runningTool,
+            },
+          ],
+        });
+
         const execution = await options.host.execute(call.capabilityId, call.arguments, {
           sessionId: context.run.sessionId,
           ...(context.run.conversationId
@@ -254,54 +341,23 @@ export function createChatController(options: {
         });
         publish({
           ...snapshot,
-          messages: [
-            ...snapshot.messages,
-            {
-              id: `tool-${++sequence}`,
-              role: 'tool',
-              content: toolPresentationContent(tool),
-              tool,
-            },
-          ],
+          messages: snapshot.messages.map((message) => (
+            message.id === messageId
+              ? {
+                  ...message,
+                  content: toolPresentationContent(tool),
+                  tool,
+                }
+              : message
+          )),
         });
         return { call, result: execution };
       },
     },
     events: {
       emit(event) {
-        if (event.type === 'message.delta') {
-          const messages = [...snapshot.messages];
-          const last = messages.at(-1);
-          if (last?.role === 'assistant' && last.pending) {
-            messages[messages.length - 1] = { ...last, content: last.content + event.content };
-          } else {
-            messages.push({
-              id: `assistant-${++sequence}`,
-              role: 'assistant',
-              content: event.content,
-              pending: true,
-            });
-          }
-          publish({ ...snapshot, messages });
-        }
-        if (event.type === 'reasoning.delta') {
-          const messages = [...snapshot.messages];
-          const last = messages.at(-1);
-          if (last?.role === 'assistant' && last.pending) {
-            messages[messages.length - 1] = {
-              ...last,
-              thinkingContent: `${last.thinkingContent ?? ''}${event.content}`,
-            };
-          } else {
-            messages.push({
-              id: `assistant-${++sequence}`,
-              role: 'assistant',
-              content: '',
-              pending: true,
-              thinkingContent: event.content,
-            });
-          }
-          publish({ ...snapshot, messages });
+        if (event.type === 'message.delta' || event.type === 'reasoning.delta') {
+          enqueueStreamDelta(event);
         }
         return null;
       },
@@ -403,6 +459,7 @@ export function createChatController(options: {
           },
           { signal: turn.signal },
         );
+        flushStreamDeltaBuffer();
         if (result.state) conversationModelMessages = result.state.modelMessages;
 
         if (result.status === 'cancelled') turn.cancel(result.reason);
@@ -434,6 +491,7 @@ export function createChatController(options: {
           error: failureDetail,
         });
       } catch (error) {
+        flushStreamDeltaBuffer();
         const wasCancelled = turn.signal.aborted;
         const detail = errorMessage(error);
         if (wasCancelled) turn.cancel(detail);
@@ -606,6 +664,7 @@ export function createChatController(options: {
     },
     cancel() {
       if (!activeTurn) return;
+      flushStreamDeltaBuffer();
       const session = sessions.cancel(sessionId, 'cancelled_in_tui');
       publish({
         ...snapshot,
