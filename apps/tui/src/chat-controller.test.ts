@@ -224,6 +224,81 @@ describe('chat controller', () => {
       pending: false,
       thinkingContent: 'step 1 step 2',
     });
+    expect(final?.segments).toEqual([
+      { type: 'thinking', content: 'step 1 step 2' },
+      { type: 'text', content: 'answer' },
+    ]);
+  });
+
+  test('interleaves thinking and tool segments in event order', async () => {
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      runTurn(state, context) {
+        if (state.toolExecutions.length === 0) {
+          context.emit({ type: 'reasoning.delta', streamId: 'test', content: 'think1' });
+          return {
+            kind: 'tool_calls',
+            state,
+            calls: [{
+              toolCallId: 'call-1',
+              capabilityId: 'local.file.read',
+              arguments: { path: 'a.txt' },
+            }],
+          };
+        }
+        if (state.toolExecutions.length === 1) {
+          context.emit({ type: 'reasoning.delta', streamId: 'test', content: 'think2' });
+          return {
+            kind: 'tool_calls',
+            state,
+            calls: [{
+              toolCallId: 'call-2',
+              capabilityId: 'local.search.files',
+              arguments: { query: 'foo' },
+            }],
+          };
+        }
+        context.emit({ type: 'message.delta', streamId: 'test', content: 'done' });
+        return { kind: 'completed', state, output: 'done' };
+      },
+      applyToolResults(state, results) {
+        return {
+          ...state,
+          toolExecutions: [
+            ...state.toolExecutions,
+            ...results.map((item) => item.result),
+          ],
+        };
+      },
+    };
+    const controller = createChatController({
+      model,
+      host: host(() => execution('ok')),
+    });
+
+    await controller.send('interleave');
+    // Stream deltas are buffered (~32ms); wait so the final text segment is flushed.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const assistant = controller.getSnapshot().messages.find((message) => (
+      message.role === 'assistant' && (message.segments?.length ?? 0) > 0
+    ));
+    expect(assistant?.segments?.map((segment) => segment.type)).toEqual([
+      'thinking',
+      'tool-call',
+      'thinking',
+      'tool-call',
+      'text',
+    ]);
+    expect(assistant?.segments).toMatchObject([
+      { type: 'thinking', content: 'think1' },
+      { type: 'tool-call', tool: { capabilityId: 'local.file.read', toolCallId: 'call-1' } },
+      { type: 'thinking', content: 'think2' },
+      { type: 'tool-call', tool: { capabilityId: 'local.search.files', toolCallId: 'call-2' } },
+      { type: 'text', content: 'done' },
+    ]);
+    expect(assistant?.thinkingContent).toBe('think1think2');
+    expect(assistant?.tools?.map((tool) => tool.toolCallId)).toEqual(['call-1', 'call-2']);
   });
 
   test('executes model tool calls through the TUI host and resumes the model', async () => {
@@ -320,6 +395,11 @@ describe('chat controller', () => {
     expect(toolBearer?.tools?.map((tool) => tool.capabilityId)).toEqual([
       'local.file.read',
       'local.search.files',
+    ]);
+    expect(toolBearer?.segments?.map((segment) => segment.type)).toEqual([
+      'tool-call',
+      'tool-call',
+      'text',
     ]);
     expect(messages.at(-1)?.content).toBe('done');
   });

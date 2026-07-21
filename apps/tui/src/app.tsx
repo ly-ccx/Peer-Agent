@@ -223,61 +223,130 @@ function ChatHistory({
         }
 
         if (message.role === 'assistant') {
-          const showThinkingPlaceholder = message.pending && !message.content;
-          const thinkingText = message.thinkingContent?.trim();
-          const tools = message.tools && message.tools.length > 0
+          const segments = message.segments && message.segments.length > 0
+            ? message.segments
+            : null;
+          const legacyTools = message.tools && message.tools.length > 0
             ? message.tools
             : (message.tool ? [message.tool] : []);
+          const thinkingText = message.thinkingContent?.trim();
+          const hasSegmentThinking = Boolean(
+            segments?.some((segment) => segment.type === 'thinking' && segment.content.trim()),
+          );
+          const hasSegmentTools = Boolean(
+            segments?.some((segment) => segment.type === 'tool-call'),
+          );
+          const hasSegmentText = Boolean(
+            segments?.some((segment) => segment.type === 'text' && segment.content),
+          );
+          const showThinkingPlaceholder = message.pending
+            && !message.content
+            && !hasSegmentText
+            && !hasSegmentTools
+            && !hasSegmentThinking
+            && !thinkingText
+            && legacyTools.length === 0;
+
+          const renderTool = (tool: (typeof legacyTools)[number], toolKey: string) => {
+            const toolExpanded = expandedTools.has(toolKey);
+            const presentation = resolveToolPresentation({ content: '', tool });
+            const headlineColor = toolStatusColor(presentation.status);
+            const detailColor = presentation.status === 'failed' || presentation.status === 'denied'
+              ? COLOR.toolFailed
+              : COLOR.toolDetail;
+            const detailLines = toolExpanded
+              ? presentation.detail.split(/\r?\n/).filter((line) => line.trim().length > 0)
+              : presentation.detailLines;
+            return (
+              <box
+                key={toolKey}
+                flexDirection="column"
+                onMouseDown={() => toggleTool(toolKey)}
+              >
+                <box flexDirection="row">
+                  <text selectable fg={headlineColor} wrapMode="none">
+                    <ToolStatusGlyph status={presentation.status} />{' '}
+                  </text>
+                  <text selectable fg={headlineColor} wrapMode="none">
+                    <strong>{toolHeadline(presentation.toolName, presentation.argumentSummary)}</strong>
+                  </text>
+                </box>
+                {detailLines.map((line, index) => (
+                  <box key={`${toolKey}-detail-${index}`} flexDirection="row">
+                    <text selectable fg={COLOR.subtle} wrapMode="none">
+                      {index === 0 ? TOOL_CHROME.branchFirst : TOOL_CHROME.branchRest}
+                    </text>
+                    <text selectable fg={detailColor}>{line || ' '}</text>
+                  </box>
+                ))}
+              </box>
+            );
+          };
+
           return (
             <box key={message.id} flexDirection="column" marginBottom={1}>
               <box flexDirection="column">
                 {showThinkingPlaceholder ? (
                   <ThinkingStatusLabel
-                    hasThinkingContent={Boolean(thinkingText)}
-                    thinkingText={thinkingText || undefined}
+                    hasThinkingContent={false}
                   />
-                ) : thinkingText && message.pending ? (
-                  <text selectable fg={COLOR.muted}>{thinkingText}</text>
                 ) : null}
-                {tools.map((tool, toolIndex) => {
-                  const toolKey = `${message.id}-tool-${tool.toolCallId ?? toolIndex}`;
-                  const toolExpanded = expandedTools.has(toolKey);
-                  const presentation = resolveToolPresentation({ content: '', tool });
-                  const headlineColor = toolStatusColor(presentation.status);
-                  const detailColor = presentation.status === 'failed' || presentation.status === 'denied'
-                    ? COLOR.toolFailed
-                    : COLOR.toolDetail;
-                  const detailLines = toolExpanded
-                    ? presentation.detail.split(/\r?\n/).filter((line) => line.trim().length > 0)
-                    : presentation.detailLines;
-                  return (
-                    <box
-                      key={toolKey}
-                      flexDirection="column"
-                      onMouseDown={() => toggleTool(toolKey)}
-                    >
-                      <box flexDirection="row">
-                        <text selectable fg={headlineColor} wrapMode="none">
-                          <ToolStatusGlyph status={presentation.status} />{' '}
+                {segments
+                  ? segments.map((segment, segmentIndex) => {
+                    if (segment.type === 'thinking') {
+                      const text = segment.content.trim();
+                      if (!text) return null;
+                      // While streaming the open thinking tail, keep the animated label.
+                      const isOpenThinking = message.pending
+                        && segmentIndex === segments.length - 1;
+                      if (isOpenThinking) {
+                        return (
+                          <ThinkingStatusLabel
+                            key={`${message.id}-thinking-${segmentIndex}`}
+                            hasThinkingContent
+                            thinkingText={text}
+                          />
+                        );
+                      }
+                      return (
+                        <text
+                          key={`${message.id}-thinking-${segmentIndex}`}
+                          selectable
+                          fg={COLOR.muted}
+                        >
+                          {text}
                         </text>
-                        <text selectable fg={headlineColor} wrapMode="none">
-                          <strong>{toolHeadline(presentation.toolName, presentation.argumentSummary)}</strong>
-                        </text>
-                      </box>
-                      {detailLines.map((line, index) => (
-                        <box key={`${toolKey}-detail-${index}`} flexDirection="row">
-                          <text selectable fg={COLOR.subtle} wrapMode="none">
-                            {index === 0 ? TOOL_CHROME.branchFirst : TOOL_CHROME.branchRest}
-                          </text>
-                          <text selectable fg={detailColor}>{line || ' '}</text>
-                        </box>
-                      ))}
-                    </box>
-                  );
-                })}
-                {!showThinkingPlaceholder && message.content ? (
-                  <MarkdownView content={message.content} />
-                ) : null}
+                      );
+                    }
+                    if (segment.type === 'tool-call') {
+                      const toolKey = `${message.id}-tool-${segment.tool.toolCallId ?? segmentIndex}`;
+                      return renderTool(segment.tool, toolKey);
+                    }
+                    // text
+                    if (!segment.content) return null;
+                    return (
+                      <MarkdownView
+                        key={`${message.id}-text-${segmentIndex}`}
+                        content={segment.content}
+                      />
+                    );
+                  })
+                  : (
+                    <>
+                      {thinkingText && message.pending ? (
+                        <text selectable fg={COLOR.muted}>{thinkingText}</text>
+                      ) : thinkingText ? (
+                        <text selectable fg={COLOR.muted}>{thinkingText}</text>
+                      ) : null}
+                      {legacyTools.map((tool, toolIndex) => {
+                        const toolKey = `${message.id}-tool-${tool.toolCallId ?? toolIndex}`;
+                        return renderTool(tool, toolKey);
+                      })}
+                      {!showThinkingPlaceholder && message.content ? (
+                        <MarkdownView content={message.content} />
+                      ) : null}
+                    </>
+                  )}
               </box>
             </box>
           );

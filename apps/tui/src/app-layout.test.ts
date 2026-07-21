@@ -96,6 +96,16 @@ describe('TUI app layout', () => {
   });
 
 
+  test('renders assistant thinking/tool segments in event order instead of fixed thinking-then-tools', () => {
+    const historyStart = appSource.indexOf('function ChatHistory');
+    const historySource = appSource.slice(historyStart, historyStart + 12_000);
+    expect(historySource).toContain('message.segments');
+    expect(historySource).toContain("segment.type === 'thinking'");
+    expect(historySource).toContain("segment.type === 'tool-call'");
+    // Ordered map over segments, not a fixed thinking block followed by tools[] only.
+    expect(historySource).toContain('segments.map((segment, segmentIndex)');
+  });
+
   test('keeps the thinking spinner docked above composer and animates it quickly', () => {
     expect(appSource).toContain('const THINKING_SPINNER_INTERVAL_MS = 120;');
     const labelSource = appSource.slice(
@@ -422,7 +432,8 @@ describe('TUI app layout', () => {
     const historyStart = appSource.indexOf('function ChatHistory');
     expect(historyStart).toBeGreaterThanOrEqual(0);
     // ToolStatusGlyph is defined before ChatHistory; slice forward from ChatHistory body.
-    const historySource = appSource.slice(historyStart, historyStart + 5000);
+    // Assistant segment rendering makes ChatHistory larger — keep user-message helpers in range.
+    const historySource = appSource.slice(historyStart, historyStart + 12_000);
     expect(historySource).toContain('formatUserMessageBody');
     expect(historySource).toContain('message.images');
     expect(historySource).toContain('imageLabel');

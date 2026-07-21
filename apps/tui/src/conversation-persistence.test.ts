@@ -415,6 +415,105 @@ describe('TUI conversation persistence', () => {
     ]);
   });
 
+  test('persists interleaved thinking/tool segments in event order', () => {
+    const recorder = createStoreRecorder();
+    const persistence = createTuiConversationPersistence({
+      workspacePath: '/workspace',
+      initialMode: 'chat',
+      initialModel: selection,
+      store: recorder.store,
+    });
+
+    persistence.syncSnapshot(snapshot({
+      messages: [
+        { id: 'user-1', role: 'user', content: 'go' },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: 'done',
+          thinkingContent: 'think1think2',
+          tools: [
+            {
+              capabilityId: 'local.file.read',
+              toolName: 'Read',
+              argumentSummary: 'a.txt',
+              status: 'completed',
+              detail: 'ok',
+              detailLines: ['ok'],
+              toolCallId: 'call-1',
+            },
+            {
+              capabilityId: 'local.search.files',
+              toolName: 'Search',
+              argumentSummary: 'foo',
+              status: 'completed',
+              detail: 'ok',
+              detailLines: ['ok'],
+              toolCallId: 'call-2',
+            },
+          ],
+          segments: [
+            { type: 'thinking', content: 'think1' },
+            {
+              type: 'tool-call',
+              tool: {
+                capabilityId: 'local.file.read',
+                toolName: 'Read',
+                argumentSummary: 'a.txt',
+                status: 'completed',
+                detail: 'ok',
+                detailLines: ['ok'],
+                toolCallId: 'call-1',
+              },
+            },
+            { type: 'thinking', content: 'think2' },
+            {
+              type: 'tool-call',
+              tool: {
+                capabilityId: 'local.search.files',
+                toolName: 'Search',
+                argumentSummary: 'foo',
+                status: 'completed',
+                detail: 'ok',
+                detailLines: ['ok'],
+                toolCallId: 'call-2',
+              },
+            },
+            { type: 'text', content: 'done' },
+          ],
+        },
+      ],
+    }));
+
+    const appends = recorder.calls.filter((call) => call.method === 'appendMessage');
+    const assistantAppend = appends.find((call) => {
+      const message = call.args[1] as Record<string, unknown>;
+      return message.role === 'assistant';
+    });
+    expect(assistantAppend).toBeDefined();
+    const message = assistantAppend!.args[1] as Record<string, unknown>;
+    expect(message.role).toBe('assistant');
+    expect(message.segments).toEqual([
+      { type: 'thinking', content: 'think1' },
+      {
+        type: 'tool-call',
+        tool: 'local.file.read',
+        displayName: 'Read',
+        result: 'ok',
+        toolCallId: 'call-1',
+      },
+      { type: 'thinking', content: 'think2' },
+      {
+        type: 'tool-call',
+        tool: 'local.search.files',
+        displayName: 'Search',
+        result: 'ok',
+        toolCallId: 'call-2',
+      },
+      { type: 'text', content: 'done' },
+    ]);
+  });
+
   test('still persists legacy role=tool rows with a single tool-call segment', () => {
     const recorder = createStoreRecorder();
     const persistence = createTuiConversationPersistence({

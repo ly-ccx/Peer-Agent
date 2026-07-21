@@ -1,7 +1,7 @@
 import { createConversationStore } from '@peer-agent/conversation-store';
 import type { RuntimeModelSelection } from '@peer-agent/runtime-node';
 
-import type { ChatController, ChatMessage, ChatMessageImage, ChatSnapshot } from './chat-controller.ts';
+import type { AssistantSegment, ChatController, ChatMessage, ChatMessageImage, ChatSnapshot } from './chat-controller.ts';
 import { normalizeTuiMode, type TuiMode } from './tui-mode.ts';
 
 export interface TuiConversationSummary {
@@ -139,6 +139,12 @@ function desktopToolSegment(tool: NonNullable<ChatMessage['tool']>): Record<stri
 
 function toolsFromMessage(message: ChatMessage): readonly NonNullable<ChatMessage['tool']>[] {
   if (message.tools && message.tools.length > 0) return message.tools;
+  if (message.segments && message.segments.length > 0) {
+    const fromSegments = message.segments
+      .filter((segment): segment is Extract<AssistantSegment, { type: 'tool-call' }> => segment.type === 'tool-call')
+      .map((segment) => segment.tool);
+    if (fromSegments.length > 0) return fromSegments;
+  }
   if (message.tool) return [message.tool];
   return [];
 }
@@ -151,8 +157,28 @@ function desktopSegmentsForMessage(message: ChatMessage): Record<string, unknown
   }
   if (message.role !== 'assistant') return undefined;
 
-  // Only emit segments when the assistant turn has structured parts
-  // (thinking / tools). Plain text-only assistants stay segment-free.
+  // Prefer event-order segments when the runtime already built a timeline.
+  if (message.segments && message.segments.length > 0) {
+    const segments: Record<string, unknown>[] = [];
+    for (const segment of message.segments) {
+      if (segment.type === 'thinking') {
+        if (segment.content.trim()) {
+          segments.push({ type: 'thinking', content: segment.content });
+        }
+        continue;
+      }
+      if (segment.type === 'tool-call') {
+        segments.push(desktopToolSegment(segment.tool));
+        continue;
+      }
+      if (segment.type === 'text' && segment.content) {
+        segments.push({ type: 'text', content: segment.content });
+      }
+    }
+    return segments.length > 0 ? segments : undefined;
+  }
+
+  // Legacy fallback: thinking bucket + tools[] + text (no interleaving preserved).
   if (!message.thinkingContent && tools.length === 0) return undefined;
 
   const segments: Record<string, unknown>[] = [];
@@ -167,6 +193,7 @@ function desktopSegmentsForMessage(message: ChatMessage): Record<string, unknown
   }
   return segments.length > 0 ? segments : undefined;
 }
+
 
 function dataUrlByteLength(dataUrl: string): number {
   const comma = dataUrl.indexOf(',');
@@ -268,9 +295,11 @@ function toolsFromStored(value: Record<string, unknown>): {
   tools?: readonly NonNullable<ChatMessage['tool']>[];
   tool?: NonNullable<ChatMessage['tool']>;
   thinkingContent?: string;
+  segments?: readonly AssistantSegment[];
 } {
   const tools: NonNullable<ChatMessage['tool']>[] = [];
   let thinkingContent: string | undefined;
+  const segments: AssistantSegment[] = [];
 
   if (Array.isArray(value.tools)) {
     for (const item of value.tools) {
@@ -285,19 +314,24 @@ function toolsFromStored(value: Record<string, unknown>): {
       if (!segment || typeof segment !== 'object') continue;
       const record = segment as Record<string, unknown>;
       if (record.type === 'thinking' && typeof record.content === 'string' && record.content.trim()) {
-        thinkingContent = record.content;
+        thinkingContent = `${thinkingContent ?? ''}${record.content}`;
+        segments.push({ type: 'thinking', content: record.content });
+        continue;
+      }
+      if (record.type === 'text' && typeof record.content === 'string' && record.content) {
+        segments.push({ type: 'text', content: record.content });
         continue;
       }
       if (record.type !== 'tool-call') continue;
       const capabilityId = typeof record.tool === 'string' ? record.tool : '';
       if (!capabilityId) continue;
-      tools.push({
+      const tool = {
         capabilityId,
         toolName: typeof record.displayName === 'string' && record.displayName.trim()
           ? record.displayName
           : capabilityId,
         argumentSummary: '',
-        status: 'completed',
+        status: 'completed' as const,
         detail: typeof record.result === 'string' ? record.result : 'completed',
         detailLines: typeof record.result === 'string' && record.result.trim()
           ? [record.result]
@@ -306,16 +340,34 @@ function toolsFromStored(value: Record<string, unknown>): {
           ? { arguments: record.args as Record<string, unknown> }
           : {}),
         ...(typeof record.toolCallId === 'string' ? { toolCallId: record.toolCallId } : {}),
-      });
+      };
+      tools.push(tool);
+      segments.push({ type: 'tool-call', tool });
     }
   }
 
   const single = storedToolPresentation(value.tool);
   if (tools.length === 0 && single) tools.push(single);
 
+  // Legacy stored rows without ordered segments: reconstruct thinking→tools→text
+  // only when structured parts exist. Pure text assistants stay segment-free.
+  // Never invent segments for user/system rows.
+  if (
+    segments.length === 0
+    && (value.role === 'assistant' || value.role === 'tool')
+    && (thinkingContent || tools.length > 0)
+  ) {
+    if (thinkingContent) segments.push({ type: 'thinking', content: thinkingContent });
+    for (const tool of tools) segments.push({ type: 'tool-call', tool });
+    if (typeof value.content === 'string' && value.content) {
+      segments.push({ type: 'text', content: value.content });
+    }
+  }
+
   return {
     ...(tools.length > 0 ? { tools, tool: tools[tools.length - 1] } : single ? { tool: single } : {}),
     ...(thinkingContent ? { thinkingContent } : {}),
+    ...(segments.length > 0 ? { segments } : {}),
   };
 }
 

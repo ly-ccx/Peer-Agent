@@ -45,24 +45,39 @@ export interface ChatMessageImage {
   readonly height?: number;
 }
 
+/** Ordered assistant timeline (Desktop-aligned). */
+export type AssistantSegment =
+  | { readonly type: 'thinking'; readonly content: string }
+  | { readonly type: 'tool-call'; readonly tool: ToolPresentation }
+  | { readonly type: 'text'; readonly content: string };
+
 export interface ChatMessage {
   readonly id: string;
   readonly role: ChatRole;
   readonly content: string;
   readonly images?: readonly ChatMessageImage[];
   readonly pending?: boolean;
-  /** Streaming reasoning/thinking text shown while the assistant is still pending. */
+  /**
+   * Streaming reasoning/thinking text (compatibility aggregate).
+   * Prefer `segments` for ordered thinking/tool interleaving.
+   */
   readonly thinkingContent?: string;
   readonly usage?: ModelUsage;
   /**
    * Tool presentations attached to the current assistant turn.
    * Desktop-compatible: multiple tool-calls share one assistant message.
+   * Derived from `segments` when the timeline is present.
    */
   readonly tools?: readonly ToolPresentation[];
   /**
    * @deprecated Prefer `tools`. Kept for restore/compat of older single-tool rows.
    */
   readonly tool?: ToolPresentation;
+  /**
+   * Event-order timeline: thinking → tool-call → thinking → tool-call → text.
+   * When present, TUI renders this order instead of fixed thinking-then-tools.
+   */
+  readonly segments?: readonly AssistantSegment[];
   /** Stream/provider failure interrupted this assistant message after partial progress. */
   readonly interrupted?: boolean;
   /** Compact progress / separator metadata for system messages. */
@@ -157,13 +172,56 @@ function toolKey(tool: ToolPresentation): string {
 function messageTools(message: ChatMessage | undefined): ToolPresentation[] {
   if (!message) return [];
   if (message.tools && message.tools.length > 0) return [...message.tools];
+  if (message.segments && message.segments.length > 0) {
+    const fromSegments = message.segments
+      .filter((segment): segment is Extract<AssistantSegment, { type: 'tool-call' }> => segment.type === 'tool-call')
+      .map((segment) => segment.tool);
+    if (fromSegments.length > 0) return fromSegments;
+  }
   if (message.tool) return [message.tool];
   return [];
+}
+
+function thinkingContentFromSegments(segments: readonly AssistantSegment[] | undefined): string | undefined {
+  if (!segments || segments.length === 0) return undefined;
+  const parts = segments
+    .filter((segment): segment is Extract<AssistantSegment, { type: 'thinking' }> => segment.type === 'thinking')
+    .map((segment) => segment.content)
+    .filter((content) => content.length > 0);
+  if (parts.length === 0) return undefined;
+  return parts.join('');
+}
+
+function textContentFromSegments(segments: readonly AssistantSegment[] | undefined): string {
+  if (!segments || segments.length === 0) return '';
+  return segments
+    .filter((segment): segment is Extract<AssistantSegment, { type: 'text' }> => segment.type === 'text')
+    .map((segment) => segment.content)
+    .join('');
+}
+
+function withDerivedAssistantFields(message: ChatMessage, segments: readonly AssistantSegment[]): ChatMessage {
+  const tools = segments
+    .filter((segment): segment is Extract<AssistantSegment, { type: 'tool-call' }> => segment.type === 'tool-call')
+    .map((segment) => segment.tool);
+  const thinkingContent = thinkingContentFromSegments(segments);
+  const textContent = textContentFromSegments(segments);
+  return {
+    ...message,
+    segments,
+    // Keep any non-segment content only when no text segments yet (compat).
+    content: textContent || (segments.some((s) => s.type === 'text') ? '' : message.content),
+    ...(thinkingContent !== undefined ? { thinkingContent } : { thinkingContent: undefined }),
+    ...(tools.length > 0
+      ? { tools, tool: tools[tools.length - 1] }
+      : { tools: undefined, tool: undefined }),
+  };
 }
 
 /**
  * Upsert a tool presentation onto the current assistant turn.
  * Creates a pending assistant placeholder when none exists yet (tool-first turn).
+ * Appends a new tool-call segment in event order so thinking/tool can interleave.
  */
 function upsertAssistantTool(
   messages: readonly ChatMessage[],
@@ -187,28 +245,27 @@ function upsertAssistantTool(
   // Never attach tools to a completed previous assistant turn.
   // If there is no pending assistant yet, open a new one for this tool batch.
   if (targetIndex < 0) {
-    next.push({
+    const segments: AssistantSegment[] = [{ type: 'tool-call', tool }];
+    next.push(withDerivedAssistantFields({
       id: `assistant-${nextSequence()}`,
       role: 'assistant',
       content: '',
       pending: true,
-      tools: [tool],
-      tool,
-    });
+    }, segments));
     return next;
   }
 
   const target = next[targetIndex]!;
-  const existing = messageTools(target);
-  const index = existing.findIndex((item) => toolKey(item) === key);
-  const tools = index >= 0
-    ? existing.map((item, i) => (i === index ? tool : item))
-    : [...existing, tool];
-  next[targetIndex] = {
-    ...target,
-    tools,
-    tool: tools[tools.length - 1],
-  };
+  const existingSegments = [...(target.segments ?? [])];
+  const segmentIndex = existingSegments.findIndex(
+    (segment) => segment.type === 'tool-call' && toolKey(segment.tool) === key,
+  );
+  if (segmentIndex >= 0) {
+    existingSegments[segmentIndex] = { type: 'tool-call', tool };
+  } else {
+    existingSegments.push({ type: 'tool-call', tool });
+  }
+  next[targetIndex] = withDerivedAssistantFields(target, existingSegments);
   return next;
 }
 
@@ -239,7 +296,8 @@ function finalizePendingMessages(
           message.content
           || message.thinkingContent
           || message.tool
-          || (message.tools && message.tools.length > 0),
+          || (message.tools && message.tools.length > 0)
+          || (message.segments && message.segments.length > 0),
         );
         if (!hasProgress && index !== recoveryIndex) return null;
       }
@@ -452,35 +510,50 @@ export function createChatController(options: {
     messages: ChatMessage[],
     event: { readonly type: 'message.delta' | 'reasoning.delta'; readonly content: string },
   ) => {
-    const last = messages.at(-1);
-    if (event.type === 'message.delta') {
-      if (last?.role === 'assistant' && last.pending) {
-        messages[messages.length - 1] = { ...last, content: last.content + event.content };
-      } else {
-        messages.push({
-          id: `assistant-${++sequence}`,
-          role: 'assistant',
-          content: event.content,
-          pending: true,
-        });
-      }
-      return;
-    }
-
-    if (last?.role === 'assistant' && last.pending) {
-      messages[messages.length - 1] = {
-        ...last,
-        thinkingContent: `${last.thinkingContent ?? ''}${event.content}`,
-      };
-    } else {
-      messages.push({
+    if (!event.content) return;
+    const ensurePendingAssistant = (): ChatMessage => {
+      const current = messages.at(-1);
+      if (current?.role === 'assistant' && current.pending) return current;
+      const created: ChatMessage = {
         id: `assistant-${++sequence}`,
         role: 'assistant',
         content: '',
         pending: true,
-        thinkingContent: event.content,
-      });
+        segments: [],
+      };
+      messages.push(created);
+      return created;
+    };
+
+    if (event.type === 'message.delta') {
+      const target = ensurePendingAssistant();
+      const segments = [...(target.segments ?? [])];
+      const lastSeg = segments.at(-1);
+      if (lastSeg?.type === 'text') {
+        segments[segments.length - 1] = {
+          type: 'text',
+          content: lastSeg.content + event.content,
+        };
+      } else {
+        segments.push({ type: 'text', content: event.content });
+      }
+      messages[messages.length - 1] = withDerivedAssistantFields(target, segments);
+      return;
     }
+
+    // reasoning.delta → thinking segment; open a new one after tool/text so order is preserved
+    const target = ensurePendingAssistant();
+    const segments = [...(target.segments ?? [])];
+    const lastSeg = segments.at(-1);
+    if (lastSeg?.type === 'thinking') {
+      segments[segments.length - 1] = {
+        type: 'thinking',
+        content: lastSeg.content + event.content,
+      };
+    } else {
+      segments.push({ type: 'thinking', content: event.content });
+    }
+    messages[messages.length - 1] = withDerivedAssistantFields(target, segments);
   };
 
   const flushStreamDeltaBuffer = () => {
