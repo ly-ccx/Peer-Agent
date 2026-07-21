@@ -88,11 +88,11 @@ describe('tool result summary', () => {
     expect(resolved.toolName).toBe('Bash');
   });
 
-  test('thinking status label cycles through transitional frames', () => {
-    expect(thinkingStatusLabel(0, false)).toBe('Thinking esc to cancel');
-    expect(thinkingStatusLabel(1, false)).toBe('Thinking. esc to cancel');
-    expect(thinkingStatusLabel(2, true)).toBe('Thinking..');
-    expect(thinkingStatusLabel(3, true)).toBe('Thinking...');
+  test('thinking status label uses a leading cursor spinner', () => {
+    expect(thinkingStatusLabel(0, false)).toBe('⠋ Thinking esc to cancel');
+    expect(thinkingStatusLabel(1, false)).toBe('⠙ Thinking esc to cancel');
+    expect(thinkingStatusLabel(2, true)).toBe('⠹ Thinking');
+    expect(thinkingStatusLabel(3, true)).toBe('⠸ Thinking');
   });
 
   test('running tool glyph is larger and breathes across frames', () => {

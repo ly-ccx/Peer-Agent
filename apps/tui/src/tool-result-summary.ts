@@ -183,12 +183,13 @@ export function toolStatusGlyph(status: ToolPresentationStatus): string {
   }
 }
 
-const THINKING_FRAMES = ['Thinking', 'Thinking.', 'Thinking..', 'Thinking...'] as const;
+const THINKING_CURSOR_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const;
 const RUNNING_DOT_FRAMES = ['●', '◉', '○', '◉'] as const;
 
-/** Cycling Thinking label for pending assistant placeholders. */
+/** Leading cursor spinner for pending assistant placeholders. */
 export function thinkingStatusLabel(frame: number, hasThinkingContent = false): string {
-  const base = THINKING_FRAMES[Math.abs(frame) % THINKING_FRAMES.length] ?? 'Thinking...';
+  const cursor = THINKING_CURSOR_FRAMES[Math.abs(frame) % THINKING_CURSOR_FRAMES.length] ?? '⠋';
+  const base = `${cursor} Thinking`;
   return hasThinkingContent ? base : `${base} esc to cancel`;
 }
 
