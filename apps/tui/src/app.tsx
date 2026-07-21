@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { TextareaRenderable } from '@opentui/core';
 import { useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } from '@opentui/react';
 import type { LocalAccessLevel } from '@peer-agent/protocol';
@@ -287,10 +287,11 @@ function SlashCommandMenu({ commands, selectedIndex, maxVisible, showDescription
   );
 }
 
-function ResumePickerMenu({ rows, selectedIndex, maxVisible }: {
+function ResumePickerMenu({ rows, selectedIndex, maxVisible, onResume }: {
   readonly rows: readonly TuiConversationSummary[];
   readonly selectedIndex: number;
   readonly maxVisible: number;
+  readonly onResume: (row: TuiConversationSummary) => void;
 }) {
   const visibleRows = selectionWindow(rows, selectedIndex, maxVisible);
   return (
@@ -304,6 +305,7 @@ function ResumePickerMenu({ rows, selectedIndex, maxVisible }: {
             flexDirection="row"
             height={1}
             backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+            onMouseDown={() => onResume(row)}
           >
             <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
               {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}{row.title}  ({row.messageCount} messages)
@@ -498,6 +500,7 @@ function ComposerDock({
   controller,
   snapshot,
   disabled,
+  focused,
   locale,
   onValueChange,
   editorRef,
@@ -524,6 +527,7 @@ function ComposerDock({
   readonly controller: ChatController;
   readonly snapshot: ChatSnapshot;
   readonly disabled: boolean;
+  readonly focused: boolean;
   readonly locale: TuiLocale;
   readonly onValueChange: (value: string) => void;
   readonly editorRef: RefObject<TextareaRenderable | null>;
@@ -591,7 +595,7 @@ function ComposerDock({
         controller={controller}
         snapshot={snapshot}
         disabled={disabled}
-        focused
+        focused={focused}
         locale={locale}
         onValueChange={onValueChange}
         editorRef={editorRef}
@@ -839,9 +843,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
     : terminal.width >= 42
       ? 'half'
       : 'narrow';
-  const isComposerSurface = experience.surface.type === 'composer'
-    || experience.surface.type === 'slash-suggestions'
-    || Boolean(modelSurface);
+  const isComposerInputFocused = experience.surface.type === 'composer'
+    || experience.surface.type === 'slash-suggestions';
+  const isComposerSurface = isComposerInputFocused || Boolean(modelSurface);
   useEffect(() => {
     if (!resumeSurface) return;
     if (snapshot.status !== 'idle') {
@@ -874,6 +878,43 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
     setApprovalSelection(0);
     setApproval(next);
   }), [host]);
+
+  const handleResumeConversationSummary = useCallback((selected: TuiConversationSummary | undefined) => {
+    if (!selected) {
+      setCommandNotice('No session selected');
+      return;
+    }
+    if (snapshot.status !== 'idle') {
+      setCommandNotice('Cannot resume a session while a response is running');
+      setExperience((current) => escapeFooter(current));
+      queueMicrotask(() => composerRef.current?.focus());
+      return;
+    }
+    const conversation = persistence.loadConversation(selected.id);
+    if (!conversation) {
+      setCommandNotice('Failed to load selected session');
+      setResumeItems(persistence.listResumable());
+      return;
+    }
+    const resumed = resumeTuiConversation(controller, persistence, conversation);
+    if (!resumed) {
+      setCommandNotice('Cannot resume a session while a response is running');
+      setExperience((current) => escapeFooter(current));
+      queueMicrotask(() => composerRef.current?.focus());
+      return;
+    }
+    if (conversation.modelSelection) {
+      modelSelection?.setSelection(conversation.modelSelection);
+      setSelectedModel(conversation.modelSelection);
+    }
+    setExperience((current) => escapeFooter({
+      ...current,
+      mode: conversation.mode,
+    }));
+    setComposerDraft('');
+    setCommandNotice(`Resumed: ${selected.title}`);
+    queueMicrotask(() => composerRef.current?.focus());
+  }, [controller, modelSelection, persistence, snapshot.status]);
 
   const selectMode = (mode: TuiMode) => {
     controller.setMode(mode);
@@ -1140,36 +1181,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
         return;
       }
       if (key.name === 'return' || key.name === 'enter') {
-        const selected = resumeItems[resumeSurface.selectedIndex];
-        if (!selected) {
-          setCommandNotice('No session selected');
-          return;
-        }
-        if (snapshot.status !== 'idle') {
-          setCommandNotice('Cannot resume a session while a response is running');
-          return;
-        }
-        const conversation = persistence.loadConversation(selected.id);
-        if (!conversation) {
-          setCommandNotice('Failed to load selected session');
-          setResumeItems(persistence.listResumable());
-          return;
-        }
-        const resumed = resumeTuiConversation(controller, persistence, conversation);
-        if (!resumed) {
-          setCommandNotice('Cannot resume a session while a response is running');
-          return;
-        }
-        if (conversation.modelSelection) {
-          modelSelection?.setSelection(conversation.modelSelection);
-        }
-        setExperience((current) => escapeFooter({
-          ...current,
-          mode: conversation.mode,
-        }));
-        setComposerDraft('');
-        setCommandNotice(`Resumed: ${selected.title}`);
-        queueMicrotask(() => composerRef.current?.focus());
+        handleResumeConversationSummary(resumeItems[resumeSurface.selectedIndex]);
         return;
       }
       return;
@@ -1428,6 +1440,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
                 controller={controller}
                 snapshot={snapshot}
                 disabled={false}
+                focused={isComposerInputFocused}
                 locale={locale}
                 editorRef={composerRef}
           imagePathRegistry={imagePathRegistryRef.current}
@@ -1596,6 +1609,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
           rows={resumeItems}
           selectedIndex={resumeSurface.selectedIndex}
           maxVisible={Math.min(8, pickerLayout.commandMaxVisible)}
+          onResume={handleResumeConversationSummary}
         />
       ) : null}
 
@@ -1762,6 +1776,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
           controller={controller}
           snapshot={snapshot}
           disabled={Boolean(approval) || snapshot.plan?.status === 'awaiting_approval'}
+          focused={isComposerInputFocused}
           locale={locale}
           editorRef={composerRef}
           imagePathRegistry={imagePathRegistryRef.current}

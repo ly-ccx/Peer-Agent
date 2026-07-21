@@ -86,7 +86,11 @@ describe('TUI app layout', () => {
     expect(keyboardSource).toContain('if (resumeSurface) {');
     expect(keyboardSource).toContain('moveTuiSurfaceSelection(current.surface, -1, resumeItems.length)');
     expect(keyboardSource).toContain('moveTuiSurfaceSelection(current.surface, 1, resumeItems.length)');
-    expect(keyboardSource).toContain('resumeTuiConversation(controller, persistence, conversation)');
+    expect(appSource).toContain('const resumed = resumeTuiConversation(controller, persistence, conversation);');
+    expect(keyboardSource).toContain('handleResumeConversationSummary(resumeItems[resumeSurface.selectedIndex])');
+    expect(appSource).toContain('focused={isComposerInputFocused}');
+    expect(appSource).toContain('onMouseDown={() => onResume(row)}');
+    expect(appSource).toContain('onResume={handleResumeConversationSummary}');
     expect(keyboardSource).toContain("key.name === 'escape'");
     expect(keyboardSource).toContain("key.name === 'return' || key.name === 'enter'");
   });
