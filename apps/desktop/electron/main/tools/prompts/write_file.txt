@@ -5,6 +5,7 @@ Use this tool when:
 - Replacing a generated artifact or a small file where the user explicitly asked for full replacement.
 
 Rules:
+- Path may be absolute or workspace-relative; absolute paths may write outside the session workspace after permission approval.
 - Prefer edit_file for existing user-authored files.
 - Before replacing an existing file, use read_file to inspect the current content and set allow_overwrite=true only for intentional full replacement.
 - Do not create documentation, config, or source files merely as a proposal; create them only when the user asked for implementation or the task requires it.

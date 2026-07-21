@@ -31,17 +31,17 @@ function context(signal?: AbortSignal): CapabilityExecutionContext {
   };
 }
 
-test('shell classifier preserves allow, ask, deny, and cwd boundaries', () => {
+test('shell classifier preserves allow, ask, deny, and allows cwd outside workspace', () => {
   const workspaceRoot = path.resolve('/workspace');
   assert.equal(classifyNodeShellCommand({ command: 'printf hello', workspaceRoot }).decision, 'allow');
   assert.equal(classifyNodeShellCommand({ command: 'touch file.txt', workspaceRoot }).decision, 'ask');
   const destructive = classifyNodeShellCommand({ command: 'rm -rf .', workspaceRoot });
   assert.equal(destructive.decision, 'deny');
   assert.equal(destructive.riskLevel, 'L5_destructive');
-  assert.throws(
-    () => classifyNodeShellCommand({ command: 'pwd', cwd: '../outside', workspaceRoot }),
-    /cwd_outside_workspace/,
-  );
+  // Product decision: no cwd hard sandbox; outside cwd is resolved and classified normally.
+  const outside = classifyNodeShellCommand({ command: 'pwd', cwd: '../outside', workspaceRoot });
+  assert.equal(outside.decision, 'allow');
+  assert.ok(outside.cwd.endsWith(`${path.sep}outside`) || outside.cwd.endsWith('/outside'));
 });
 
 test('shell provider auto-allows read-only commands and records Evidence', async (t) => {

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { resolve } from 'node:path';
 
 import {
   appendEvidenceRecords,
@@ -40,17 +40,21 @@ export function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+/**
+ * Resolve a tool path against the session workspace root.
+ *
+ * Product decision (2026-07-21): no path hard sandbox.
+ * - Relative paths stay workspace-relative (default productivity anchor).
+ * - Absolute paths may point anywhere on the machine; permission gates still apply upstream.
+ * - Does NOT throw `path_outside_workspace`.
+ */
 export function resolveWorkspacePath(workspaceRoot: string, inputPath: unknown): string {
   const root = resolve(workspaceRoot);
   const candidate = typeof inputPath === 'string' && inputPath.trim()
     ? inputPath.trim()
     : '.';
-  const resolvedPath = resolve(root, candidate);
-  const relativePath = relative(root, resolvedPath);
-  if (relativePath === '..' || relativePath.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(relativePath)) {
-    throw new Error('path_outside_workspace');
-  }
-  return resolvedPath;
+  // path.resolve: absolute candidate ignores root; relative candidate joins under root.
+  return resolve(root, candidate);
 }
 
 export function createNodePermissionGrant({

@@ -102,7 +102,7 @@ test('file provider keeps write approval explicit and supports empty files', asy
   assert.ok(completed.evidence);
 });
 
-test('file provider rejects lexical and symlink workspace escapes', async (t) => {
+test('file provider allows absolute and relative paths outside the workspace root', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'peer-runtime-node-escape-'));
   const workspaceRoot = path.join(root, 'workspace');
   const outsideRoot = path.join(root, 'outside');
@@ -116,25 +116,38 @@ test('file provider rejects lexical and symlink workspace escapes', async (t) =>
     requestApproval: () => ({ granted: true }),
   });
 
+  // Relative escape from workspace root.
   const lexical = await provider.execute(
     request('local.file.read', { path: '../outside/secret.txt' }),
     context(),
   );
-  assert.equal(lexical.status, 'failed');
-  assert.equal(lexical.error?.code, 'path_outside_workspace');
+  assert.equal(lexical.status, 'completed');
+  assert.equal((lexical.output as { content?: string } | undefined)?.content, 'secret');
 
+  // Symlink that lands outside the workspace root.
   const existingSymlink = await provider.execute(
     request('local.file.read', { path: 'linked-outside/secret.txt' }),
     context(),
   );
-  assert.equal(existingSymlink.status, 'failed');
-  assert.equal(existingSymlink.error?.code, 'path_outside_workspace');
+  assert.equal(existingSymlink.status, 'completed');
+  assert.equal((existingSymlink.output as { content?: string } | undefined)?.content, 'secret');
 
-  const writeThroughSymlink = await provider.execute(
-    request('local.file.write', { path: 'linked-outside/new.txt', content: 'blocked' }),
+  // Absolute path outside workspace.
+  const absolute = await provider.execute(
+    request('local.file.read', { path: path.join(outsideRoot, 'secret.txt') }),
     context(),
   );
-  assert.equal(writeThroughSymlink.status, 'failed');
-  assert.equal(writeThroughSymlink.error?.code, 'path_outside_workspace');
-  await assert.rejects(readFile(path.join(outsideRoot, 'new.txt'), 'utf8'));
+  assert.equal(absolute.status, 'completed');
+  assert.equal((absolute.output as { content?: string } | undefined)?.content, 'secret');
+
+  // Write outside workspace after approval (no path hard sandbox).
+  const writeOutside = await provider.execute(
+    request('local.file.write', {
+      path: path.join(outsideRoot, 'new.txt'),
+      content: 'allowed-outside',
+    }),
+    context(),
+  );
+  assert.equal(writeOutside.status, 'completed');
+  assert.equal(await readFile(path.join(outsideRoot, 'new.txt'), 'utf8'), 'allowed-outside');
 });

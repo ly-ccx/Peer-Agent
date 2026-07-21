@@ -68,19 +68,15 @@ const COMMAND_SEPARATORS = new Set([';', '&&', '||', '|', '|&']);
 const WRITE_OPERATORS = new Set(['>', '>>', '2>', '&>', '1>']);
 const HEREDOC_OPERATORS = new Set(['<<', '<<<']);
 
-function isInsideDirectory(parent, child) {
-  const relativePath = path.relative(parent, child);
-  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
-}
-
+/**
+ * Normalize shell cwd.
+ *
+ * Product decision (2026-07-21): no cwd hard sandbox.
+ * Default remains the session workspace; absolute/relative cwd outside is allowed.
+ * Does NOT throw `cwd_outside_workspace` — permission gates still apply upstream.
+ */
 export function normalizeShellCwd(cwd, workspaceRoot) {
-  const resolved = path.resolve(cwd || workspaceRoot);
-  if (!isInsideDirectory(workspaceRoot, resolved)) {
-    const err = new Error('Shell cwd must stay inside the active workspace.');
-    err.code = 'cwd_outside_workspace';
-    throw err;
-  }
-  return resolved;
+  return path.resolve(cwd || workspaceRoot);
 }
 
 function stripCommandPath(commandName) {

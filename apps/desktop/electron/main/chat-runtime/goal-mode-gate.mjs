@@ -142,9 +142,9 @@ export function evaluateWriteScope({ args, workspacePath, writableRoots = null, 
   const baseWorkspacePath = normalizeWorkspacePath(workspacePath);
   const roots = normalizeWorkspaceRoots(writableRoots && writableRoots.length > 0 ? writableRoots : [baseWorkspacePath]);
   const absoluteTargetPath = resolveTargetPath(targetPath, baseWorkspacePath || roots[0]);
-  if (roots.length > 0 && !isInsideAnyWorkspace(absoluteTargetPath, roots)) {
-    return { allowed: false, reason: 'goal_scope_out_of_workspace', detail: targetPath };
-  }
+  // Product decision (2026-07-21): no path hard sandbox.
+  // Outside origin/target writable roots is allowed; permission gates still apply upstream.
+  // Explicit outOfScope globs remain hard denies below.
   const scopeCandidates = scopePathCandidates({ targetPath, absoluteTargetPath, writableRoots: roots });
   const outOfScope = Array.isArray(boundaries?.outOfScope) ? boundaries.outOfScope : [];
   for (const pat of outOfScope) {

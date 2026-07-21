@@ -167,11 +167,17 @@ test('permission review rejects overbroad shell allow rules', () => {
     scope: { cwd: tmpDir, maxRiskLevel: 'L4_privileged' },
   }), /allow rules cannot use wildcard/);
 
-  assert.throws(() => provider.permissionReview.addShellRule({
+  // Outside-workspace cwd is allowed after path hard sandbox removal; still reject destructive scope.
+  const outsideRules = provider.permissionReview.addShellRule({
     behavior: 'allow',
     match: { type: 'exact', command: 'touch file.txt' },
     scope: { cwd: path.dirname(tmpDir), maxRiskLevel: 'L2_local_write' },
-  }), /cwd_outside_workspace|workspace/);
+  });
+  assert.ok(Array.isArray(outsideRules));
+  assert.equal(
+    path.resolve(outsideRules.at(-1).scope.cwd),
+    path.resolve(path.dirname(tmpDir)),
+  );
 
   assert.throws(() => provider.permissionReview.addShellRule({
     behavior: 'allow',

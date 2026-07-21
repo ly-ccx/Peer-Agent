@@ -54,20 +54,17 @@ const GIT_READ_SUBCOMMANDS = new Set([
 const SHELL_WRAPPERS = new Set(['bash', 'sh', 'zsh']);
 const PASS_THROUGH_WRAPPERS = new Set(['builtin', 'command', 'env']);
 
-function insideDirectory(parent: string, child: string): boolean {
-  const relativePath = path.relative(parent, child);
-  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
-}
-
+/**
+ * Normalize shell cwd.
+ *
+ * Product decision (2026-07-21): no cwd hard sandbox.
+ * - Default cwd remains the session workspace root.
+ * - Absolute/relative cwd outside the workspace is allowed; permission gates still apply upstream.
+ * - Does NOT throw `cwd_outside_workspace`.
+ */
 export function normalizeNodeShellCwd(cwd: string | undefined, workspaceRoot: string): string {
   const root = path.resolve(workspaceRoot);
-  const resolved = path.resolve(cwd || root);
-  if (!insideDirectory(root, resolved)) {
-    const error = new Error('cwd_outside_workspace') as Error & { code?: string };
-    error.code = 'cwd_outside_workspace';
-    throw error;
-  }
-  return resolved;
+  return path.resolve(cwd || root);
 }
 
 function stripQuotes(value: string): string {

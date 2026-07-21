@@ -6,6 +6,7 @@ Use this tool when:
 - You can provide the exact old_string that should be replaced.
 
 Rules:
+- Path may be absolute or workspace-relative; absolute paths may edit outside the session workspace after permission approval.
 - Before editing an existing file, call read_file for that file and use the exact current content returned by the tool.
 - old_string must be a non-empty exact match from the current file.
 - If old_string appears more than once, the edit is rejected unless replace_all is true.

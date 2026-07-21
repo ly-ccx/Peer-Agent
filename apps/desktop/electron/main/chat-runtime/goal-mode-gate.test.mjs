@@ -244,16 +244,14 @@ describe('evaluateWriteScope', () => {
     assert.equal(r.allowed, true);
   });
 
-  it('denies writes outside the workspace (absolute)', () => {
+  it('allows writes outside the workspace (absolute) after path hard sandbox removal', () => {
     const r = evaluateWriteScope({ args: { path: '/etc/passwd' }, workspacePath, boundaries: null });
-    assert.equal(r.allowed, false);
-    assert.equal(r.reason, 'goal_scope_out_of_workspace');
+    assert.equal(r.allowed, true);
   });
 
-  it('denies writes escaping the workspace via ..', () => {
+  it('allows writes escaping the workspace via .. after path hard sandbox removal', () => {
     const r = evaluateWriteScope({ args: { path: '../outside/x.ts' }, workspacePath, boundaries: null });
-    assert.equal(r.allowed, false);
-    assert.equal(r.reason, 'goal_scope_out_of_workspace');
+    assert.equal(r.allowed, true);
   });
 
   it('allows writes inside a Goal target writable root outside the origin workspace', () => {
@@ -266,15 +264,14 @@ describe('evaluateWriteScope', () => {
     assert.equal(r.allowed, true);
   });
 
-  it('denies writes outside both origin and Goal target writable roots', () => {
+  it('allows writes outside both origin and Goal target writable roots (permission still applies)', () => {
     const r = evaluateWriteScope({
       args: { path: '/repo/other/src/a.ts' },
       workspacePath: '/repo/peer-knowledge',
       writableRoots: ['/repo/peer_agent'],
       boundaries: null,
     });
-    assert.equal(r.allowed, false);
-    assert.equal(r.reason, 'goal_scope_out_of_workspace');
+    assert.equal(r.allowed, true);
   });
 
   it('denies paths matching an outOfScope glob', () => {
@@ -374,7 +371,7 @@ describe('detectIrreversibleAction', () => {
 });
 
 describe('evaluateGoalModeGate (goal mode, Slice B)', () => {
-  it('denies edit_file writing outside the workspace', () => {
+  it('allows edit_file writing outside the workspace after path hard sandbox removal', () => {
     const r = evaluateGoalModeGate({
       mode: 'goal',
       toolName: 'edit_file',
@@ -382,8 +379,7 @@ describe('evaluateGoalModeGate (goal mode, Slice B)', () => {
       args: { path: '/etc/hosts' },
       workspacePath: '/ws',
     });
-    assert.equal(r.allowed, false);
-    assert.equal(r.reason, 'goal_scope_out_of_workspace');
+    assert.equal(r.allowed, true);
   });
 
   it('denies write_file matching outOfScope boundary', () => {

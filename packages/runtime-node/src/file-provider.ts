@@ -2,7 +2,6 @@ import {
   mkdir,
   readFile,
   readdir,
-  realpath,
   stat,
   writeFile,
 } from 'node:fs/promises';
@@ -40,7 +39,7 @@ export const NODE_FILE_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Obj
   {
     capabilityId: 'local.file.read',
     displayName: 'Read file',
-    description: 'Read a UTF-8 text file inside the active workspace.',
+    description: 'Read a UTF-8 text file. Relative paths are workspace-relative; absolute paths may be anywhere on the machine.',
     riskLevel: 'L1_readonly',
     modeScopes: READ_MODE_SCOPES,
     inputSchema: {
@@ -53,7 +52,7 @@ export const NODE_FILE_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Obj
   {
     capabilityId: 'local.file.list',
     displayName: 'List directory',
-    description: 'List direct children of a directory inside the active workspace.',
+    description: 'List direct children of a directory. Relative paths are workspace-relative; absolute paths may be anywhere on the machine.',
     riskLevel: 'L1_readonly',
     modeScopes: READ_MODE_SCOPES,
     inputSchema: {
@@ -65,7 +64,7 @@ export const NODE_FILE_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Obj
   {
     capabilityId: 'local.file.write',
     displayName: 'Write file',
-    description: 'Write a UTF-8 text file inside the active workspace after approval.',
+    description: 'Write a UTF-8 text file after approval. Relative paths are workspace-relative; absolute paths may be anywhere on the machine.',
     riskLevel: 'L2_low_write',
     modeScopes: WRITE_MODE_SCOPES,
     inputSchema: {
@@ -84,44 +83,6 @@ export const NODE_FILE_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Obj
 function relativeDisplayPath(workspaceRoot: string, targetPath: string): string {
   const path = relative(resolve(workspaceRoot), targetPath);
   return path || '.';
-}
-
-async function assertExistingPathInsideWorkspace(
-  workspaceRoot: string,
-  targetPath: string,
-): Promise<void> {
-  const [rootRealPath, targetRealPath] = await Promise.all([
-    realpath(workspaceRoot),
-    realpath(targetPath),
-  ]);
-  resolveWorkspacePath(rootRealPath, targetRealPath);
-}
-
-async function assertWritePathInsideWorkspace(
-  workspaceRoot: string,
-  targetPath: string,
-): Promise<void> {
-  const rootRealPath = await realpath(workspaceRoot);
-  try {
-    const targetRealPath = await realpath(targetPath);
-    resolveWorkspacePath(rootRealPath, targetRealPath);
-    return;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
-  let cursor = dirname(targetPath);
-  while (cursor !== dirname(cursor)) {
-    try {
-      const parentRealPath = await realpath(cursor);
-      resolveWorkspacePath(rootRealPath, parentRealPath);
-      return;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT') throw error;
-      cursor = dirname(cursor);
-    }
-  }
-  throw new Error('path_outside_workspace');
 }
 
 function requireString(
@@ -170,7 +131,6 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
         const displayPath = relativeDisplayPath(workspaceRoot, targetPath);
 
         if (request.capabilityId === 'local.file.read') {
-          await assertExistingPathInsideWorkspace(workspaceRoot, targetPath);
           const fileStat = await stat(targetPath);
           if (!fileStat.isFile()) throw new Error('not_a_file');
           if (fileStat.size > maxReadBytes) throw new Error('file_too_large');
@@ -195,7 +155,6 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
         }
 
         if (request.capabilityId === 'local.file.list') {
-          await assertExistingPathInsideWorkspace(workspaceRoot, targetPath);
           const directoryStat = await stat(targetPath);
           if (!directoryStat.isDirectory()) throw new Error('not_a_directory');
           const entries = await readdir(targetPath, { withFileTypes: true });
@@ -227,7 +186,6 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
 
         if (request.capabilityId === 'local.file.write') {
           const content = requireString(input, 'content', true);
-          await assertWritePathInsideWorkspace(workspaceRoot, targetPath);
           const approval = options.requestApproval
             ? await options.requestApproval({
                 tool: call.capabilityId,
