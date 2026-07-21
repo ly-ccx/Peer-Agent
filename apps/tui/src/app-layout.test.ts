@@ -95,6 +95,27 @@ describe('TUI app layout', () => {
     expect(keyboardSource).toContain("key.name === 'return' || key.name === 'enter'");
   });
 
+  test('docks transient thinking above the composer instead of the chat transcript', () => {
+    const historySource = appSource.slice(
+      appSource.indexOf('function ChatHistory'),
+      appSource.indexOf('function ErrorBanner'),
+    );
+    const dockSource = appSource.slice(
+      appSource.indexOf('function ComposerDock'),
+      appSource.indexOf('export function App'),
+    );
+
+    expect(historySource).toContain('if (showThinkingPlaceholder) return null;');
+    expect(dockSource).toContain('thinkingActive ? (');
+    expect(dockSource).toContain('<ThinkingStatusLabel');
+    expect(dockSource.indexOf('<ComposerControlsBar status={status} layout={statusLayout} />'))
+      .toBeLessThan(dockSource.indexOf('<ThinkingStatusLabel'));
+    expect(dockSource.indexOf('<ThinkingStatusLabel'))
+      .toBeLessThan(dockSource.indexOf('<Composer\n'));
+    expect(appSource).toContain('thinkingActive={dockThinkingActive}');
+    expect(appSource).toContain('thinkingText={dockThinkingText}');
+  });
+
   test('keeps the composer input pure and places controls above and status below', () => {
     expect(appSource).toContain('placeholder={composerPlaceholder(locale, disabled)}');
     const dockSource = appSource.slice(
@@ -317,7 +338,8 @@ describe('TUI app layout', () => {
   test('keeps user and tool messages visually distinct without repeated speaker headings', () => {
     expect(appSource).toContain('<strong>› </strong>');
     expect(appSource).toContain('resolveToolPresentation(message)');
-    expect(appSource).toContain('toolStatusGlyph(presentation.status)');
+    expect(appSource).toContain('<ToolStatusGlyph status={presentation.status}');
+    expect(appSource).toContain('ThinkingStatusLabel');
     expect(appSource).toContain('toolHeadline(presentation.toolName, presentation.argumentSummary)');
     expect(appSource).toContain('index === 0 ? TOOL_CHROME.branchFirst : TOOL_CHROME.branchRest');
     expect(appSource).toContain('toolStatusColor(presentation.status)');

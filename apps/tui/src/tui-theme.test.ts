@@ -25,7 +25,9 @@ describe('TUI theme tokens', () => {
 
   test('tool chrome maps status to layered glyphs and colors', () => {
     expect(TOOL_CHROME.branchFirst).toBe('  ╰ ');
-    expect(TOOL_CHROME.glyphFailed).toBe('×');
+    expect(TOOL_CHROME.glyphCompleted).toBe('●');
+    expect(TOOL_CHROME.glyphFailed).toBe('●');
+    expect(TOOL_CHROME.glyphRunning).toBe('●');
     expect(toolStatusColor('completed')).toBe(COLOR.tool);
     expect(toolStatusColor('failed')).toBe(COLOR.toolFailed);
     expect(toolStatusColor('running')).toBe(COLOR.toolRunning);
@@ -38,3 +40,7 @@ describe('TUI theme tokens', () => {
     expect(contextUsageColor(undefined, COLOR.textSoft)).toBe(COLOR.textSoft);
   });
 });
+
+  test('running tool glyph is enlarged', () => {
+    expect(TOOL_CHROME.glyphRunning).toBe('●');
+  });

@@ -1,10 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  animatedToolStatusGlyph,
   createToolPresentation,
   formatToolResultSummary,
   parseLegacyToolContent,
   resolveToolPresentation,
+  runningToolStatusGlyph,
+  thinkingStatusLabel,
   toggleToolDetails,
   toolDisplayName,
   toolHeadline,
@@ -56,7 +59,7 @@ describe('tool result summary', () => {
     expect(toolDisplayName('local.shell.exec')).toBe('Bash');
     expect(toolHeadline(presentation.toolName, presentation.argumentSummary))
       .toBe('Bash(git status --short)');
-    expect(toolStatusGlyph(presentation.status)).toBe('•');
+    expect(toolStatusGlyph(presentation.status)).toBe('●');
     expect(presentation.detailLines[0]).toContain('M apps/tui/src/app.tsx');
 
     const failed = createToolPresentation({
@@ -67,7 +70,7 @@ describe('tool result summary', () => {
     });
     expect(toolHeadline(failed.toolName, failed.argumentSummary))
       .toBe('Read(/tmp/missing.txt)');
-    expect(toolStatusGlyph(failed.status)).toBe('×');
+    expect(toolStatusGlyph(failed.status)).toBe('●');
     expect(failed.detail).toContain('ENOENT');
   });
 
@@ -83,5 +86,21 @@ describe('tool result summary', () => {
       tool: null,
     });
     expect(resolved.toolName).toBe('Bash');
+  });
+
+  test('thinking status label cycles through transitional frames', () => {
+    expect(thinkingStatusLabel(0, false)).toBe('Thinking esc to cancel');
+    expect(thinkingStatusLabel(1, false)).toBe('Thinking. esc to cancel');
+    expect(thinkingStatusLabel(2, true)).toBe('Thinking..');
+    expect(thinkingStatusLabel(3, true)).toBe('Thinking...');
+  });
+
+  test('running tool glyph is larger and breathes across frames', () => {
+    expect(toolStatusGlyph('running')).toBe('●');
+    expect(runningToolStatusGlyph(0)).toBe('●');
+    expect(runningToolStatusGlyph(1)).toBe('◉');
+    expect(runningToolStatusGlyph(2)).toBe('○');
+    expect(animatedToolStatusGlyph('running', 1)).toBe('◉');
+    expect(animatedToolStatusGlyph('completed', 1)).toBe(toolStatusGlyph('completed'));
   });
 });

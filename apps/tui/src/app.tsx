@@ -80,10 +80,13 @@ import { moveTuiSurfaceSelection } from './surface-state.ts';
 import { composerEnterAction, runtimeControlAction } from './runtime-controls.ts';
 import { responsiveLayout, responsivePickerLayout } from './responsive-layout.ts';
 import {
+  animatedToolStatusGlyph,
   resolveToolPresentation,
+  thinkingStatusLabel,
   toolHeadline,
   toolStatusGlyph,
   toggleToolDetails,
+  type ToolPresentationStatus,
 } from './tool-result-summary.ts';
 import {
   applyTuiCommand,
@@ -106,6 +109,48 @@ import {
 } from './tui-theme.ts';
 
 const COMMAND_NOTICE_DURATION_MS = 3_000;
+
+
+function useStatusAnimationFrame(active: boolean, intervalMs = 280): number {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    if (!active) {
+      setFrame(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setFrame((current) => current + 1);
+    }, intervalMs);
+    return () => clearInterval(timer);
+  }, [active, intervalMs]);
+  return frame;
+}
+
+function ThinkingStatusLabel({
+  hasThinkingContent,
+  thinkingText,
+}: {
+  readonly hasThinkingContent: boolean;
+  readonly thinkingText?: string;
+}) {
+  const frame = useStatusAnimationFrame(true);
+  return (
+    <box flexDirection="column">
+      <text selectable fg={COLOR.muted}>
+        {thinkingStatusLabel(frame, hasThinkingContent)}
+      </text>
+      {thinkingText ? (
+        <text selectable fg={COLOR.muted}>{thinkingText}</text>
+      ) : null}
+    </box>
+  );
+}
+
+function ToolStatusGlyph({ status }: { readonly status: ToolPresentationStatus }) {
+  const active = status === 'running';
+  const frame = useStatusAnimationFrame(active);
+  return <>{animatedToolStatusGlyph(status, frame)}</>;
+}
 
 function ChatHistory({
   snapshot,
@@ -154,25 +199,15 @@ function ChatHistory({
         if (message.role === 'assistant') {
           const showThinkingPlaceholder = message.pending && !message.content;
           const thinkingText = message.thinkingContent?.trim();
+          if (showThinkingPlaceholder) return null;
           return (
             <box key={message.id} flexDirection="column" marginBottom={1}>
-              {showThinkingPlaceholder ? (
-                <box flexDirection="column">
-                  <text selectable fg={COLOR.muted}>
-                    {thinkingText ? 'Thinking…' : 'Thinking… esc to cancel'}
-                  </text>
-                  {thinkingText ? (
-                    <text selectable fg={COLOR.muted}>{thinkingText}</text>
-                  ) : null}
-                </box>
-              ) : (
-                <box flexDirection="column">
-                  {thinkingText && message.pending ? (
-                    <text selectable fg={COLOR.muted}>{thinkingText}</text>
-                  ) : null}
-                  <MarkdownView content={message.content || ' '} />
-                </box>
-              )}
+              <box flexDirection="column">
+                {thinkingText && message.pending ? (
+                  <text selectable fg={COLOR.muted}>{thinkingText}</text>
+                ) : null}
+                <MarkdownView content={message.content || ' '} />
+              </box>
             </box>
           );
         }
@@ -204,7 +239,7 @@ function ChatHistory({
           >
             <box flexDirection="row">
               <text selectable fg={headlineColor} wrapMode="none">
-                {toolStatusGlyph(presentation.status)}{' '}
+                <ToolStatusGlyph status={presentation.status} />{' '}
               </text>
               <text selectable fg={headlineColor} wrapMode="none">
                 <strong>{toolHeadline(presentation.toolName, presentation.argumentSummary)}</strong>
@@ -523,6 +558,8 @@ function ComposerDock({
   modelPickerSelection,
   modelPickerMaxVisible,
   modelPickerShowHint,
+  thinkingActive,
+  thinkingText,
 }: {
   readonly controller: ChatController;
   readonly snapshot: ChatSnapshot;
@@ -550,6 +587,8 @@ function ComposerDock({
   readonly modelPickerSelection: number;
   readonly modelPickerMaxVisible: number;
   readonly modelPickerShowHint: boolean;
+  readonly thinkingActive: boolean;
+  readonly thinkingText?: string;
 }) {
   const menuReserve = slashOpen
     ? Math.min(slashMaxVisible, Math.max(1, slashItems.length)) + 2
@@ -567,8 +606,16 @@ function ComposerDock({
       paddingLeft={layout.outerPadding}
       paddingRight={layout.outerPadding}
     >
-      {/* controls above the input; status below */}
+      {/* controls above the input; transient thinking lives with the composer, not the transcript. */}
       <ComposerControlsBar status={status} layout={statusLayout} />
+      {thinkingActive ? (
+        <box flexDirection="column" flexShrink={0} paddingLeft={1}>
+          <ThinkingStatusLabel
+            hasThinkingContent={Boolean(thinkingText)}
+            thinkingText={thinkingText}
+          />
+        </box>
+      ) : null}
       <box position="relative" width="100%" height={5} overflow="visible">
         {slashOpen ? (
           <SlashCommandMenu
@@ -812,6 +859,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
     usage: snapshot.usage,
     contextWindow,
   });
+  const pendingAssistant = [...snapshot.messages]
+    .reverse()
+    .find((message) => message.role === 'assistant' && message.pending);
+  const dockThinkingActive = Boolean(pendingAssistant && !pendingAssistant.content);
+  const dockThinkingText = pendingAssistant?.thinkingContent?.trim() || undefined;
   const layout = responsiveLayout(terminal.width);
   const pickerLayout = responsivePickerLayout(
     terminal.height,
@@ -1462,6 +1514,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
                 modelPickerSelection={modelPickerSelection}
                 modelPickerMaxVisible={welcomeModelMaxVisible}
                 modelPickerShowHint={layout.showHints}
+                thinkingActive={dockThinkingActive}
+                thinkingText={dockThinkingText}
                 onValueChange={(value) => {
                   setComposerDraft(value);
                   setExperience((current) => syncSlashSuggestions(current, value));
@@ -1798,6 +1852,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
           modelPickerSelection={modelPickerSelection}
           modelPickerMaxVisible={slashMaxVisible}
           modelPickerShowHint={layout.showHints}
+          thinkingActive={dockThinkingActive}
+          thinkingText={dockThinkingText}
           onValueChange={(value) => {
             setComposerDraft(value);
             setExperience((current) => syncSlashSuggestions(current, value));

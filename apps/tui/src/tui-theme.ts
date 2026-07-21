@@ -66,11 +66,13 @@ export const PICKER_CHROME = {
 export const TOOL_CHROME = {
   branchFirst: '  ╰ ',
   branchRest: '    ',
-  glyphCompleted: '•',
-  glyphFailed: '×',
-  glyphCancelled: '–',
-  glyphRunning: '…',
-  glyphUnknown: '•',
+  // Use the same visual footprint for all terminal tool statuses; color carries state.
+  glyphCompleted: '●',
+  glyphFailed: '●',
+  glyphCancelled: '●',
+  // Larger filled circle for in-flight tools; UI also breathes this glyph.
+  glyphRunning: '●',
+  glyphUnknown: '●',
 } as const;
 
 export function toolStatusColor(status: string): string {

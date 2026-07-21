@@ -183,6 +183,27 @@ export function toolStatusGlyph(status: ToolPresentationStatus): string {
   }
 }
 
+const THINKING_FRAMES = ['Thinking', 'Thinking.', 'Thinking..', 'Thinking...'] as const;
+const RUNNING_DOT_FRAMES = ['●', '◉', '○', '◉'] as const;
+
+/** Cycling Thinking label for pending assistant placeholders. */
+export function thinkingStatusLabel(frame: number, hasThinkingContent = false): string {
+  const base = THINKING_FRAMES[Math.abs(frame) % THINKING_FRAMES.length] ?? 'Thinking...';
+  return hasThinkingContent ? base : `${base} esc to cancel`;
+}
+
+/** Breathing/pulsing leading glyph for in-flight tool rows. */
+export function runningToolStatusGlyph(frame: number): string {
+  return RUNNING_DOT_FRAMES[Math.abs(frame) % RUNNING_DOT_FRAMES.length] ?? TOOL_CHROME.glyphRunning;
+}
+
+/** Prefer animated glyph only while status is running. */
+export function animatedToolStatusGlyph(status: ToolPresentationStatus, frame = 0): string {
+  if (status === 'running') return runningToolStatusGlyph(frame);
+  return toolStatusGlyph(status);
+}
+
+
 export function toolHeadline(
   toolName: string,
   argumentSummary: string,
