@@ -40,6 +40,12 @@ const COMPACTION_CONFIG = {
   summaryCompressionRatio: 0.12,
   // 估算下限，避免极短对话时分母过小导致进度瞬间满。
   minEstimatedSummaryChars: 1_200,
+  // 摘要生成默认输出预算；provider 未配置 maxOutputTokens 时回退到此值。
+  defaultSummaryMaxTokens: 12_000,
+  // 自动压缩触发时预留给「摘要输出」的 token，避免窗口顶满后摘要请求自身失败。
+  summaryOutputReserveTokens: 4_000,
+  // 额外安全区：provider framing / 工具 schema 抖动 / 估算误差。
+  safetyReserveTokens: 1_000,
 };
 
 const MICROCOMPACTION_CONFIG = {
@@ -322,13 +328,13 @@ function compactLocalRefPayload(payload, previewChars) {
       compacted.stdoutPreview = previewHistoricalText(payload.stdoutPreview, previewChars);
     }
     if (payload.stderrPreview) {
-      compacted.stderrPreview = previewHistoricalText(payload.stderrPreview, previewChars);
+      compacted.stderrPreview = previewHistoricalText(payload.stderrPreview, Math.min(previewChars, 400));
     }
     return compacted;
   }
 
   if (payload?.kind === 'local_file_ref') {
-    const compacted = {
+    return {
       kind: payload.kind,
       microCompacted: true,
       note: 'Historical local file read compacted; use path or suggestedRetrieval for full content.',
@@ -337,26 +343,205 @@ function compactLocalRefPayload(payload, previewChars) {
         'path',
         'chars',
         'lines',
+        'mtimeMs',
+        'sizeBytes',
+        'contentHash',
+        'fullRead',
         'contextPreviewTruncated',
         'suggestedRetrieval',
       ]),
+      preview: previewHistoricalText(payload.preview ?? '', previewChars),
     };
-    if (payload.preview) {
-      compacted.preview = previewHistoricalText(payload.preview, previewChars);
-    }
-    return compacted;
+  }
+
+  if (payload?.kind === 'local_capability_result_ref') {
+    const outputPreview = payload.outputPreview && typeof payload.outputPreview === 'object'
+      ? compactCapabilityOutputPreview(payload.outputPreview, previewChars)
+      : payload.outputPreview;
+    return {
+      kind: payload.kind,
+      microCompacted: true,
+      note: 'Historical local capability result compacted; use artifact paths or suggestedRetrieval for full output.',
+      ...pickDefined(payload, [
+        'tool',
+        'capabilityId',
+        'status',
+        'artifactRef',
+        'artifactRefs',
+        'suggestedRetrieval',
+      ]),
+      outputPreview,
+    };
   }
 
   return null;
 }
 
+function compactCapabilityOutputPreview(preview, previewChars) {
+  const next = {
+    ...pickDefined(preview, [
+      'status',
+      'tool',
+      'capabilityId',
+      'cwd',
+      'exitCode',
+      'stdoutPath',
+      'stderrPath',
+      'metadataPath',
+      'artifactRef',
+      'artifactRefs',
+      'stdoutChars',
+      'stderrChars',
+      'stdoutLines',
+      'stderrLines',
+      'contextPreviewTruncated',
+      'suggestedRetrieval',
+    ]),
+  };
+
+  // nested shell/file refs inside capability output
+  if (preview.localToolResultRef && typeof preview.localToolResultRef === 'object') {
+    next.localToolResultRef = compactLocalRefPayload(
+      { kind: 'local_tool_result_ref', ...preview.localToolResultRef },
+      previewChars,
+    ) || {
+      ...pickDefined(preview.localToolResultRef, [
+        'tool',
+        'command',
+        'cwd',
+        'status',
+        'exitCode',
+        'stdoutPath',
+        'stderrPath',
+        'metadataPath',
+        'artifactRef',
+        'artifactRefs',
+        'suggestedRetrieval',
+      ]),
+      microCompacted: true,
+    };
+  }
+
+  if (typeof preview.preview === 'string') {
+    next.preview = previewHistoricalText(preview.preview, previewChars);
+  }
+  if (typeof preview.stdoutPreview === 'string') {
+    next.stdoutPreview = previewHistoricalText(preview.stdoutPreview, previewChars);
+  }
+  if (typeof preview.stderrPreview === 'string') {
+    next.stderrPreview = previewHistoricalText(preview.stderrPreview, Math.min(previewChars, 400));
+  }
+
+  // Drop large unstructured blobs that are recoverable via artifact refs.
+  if (preview.aggregated && typeof preview.aggregated === 'object') {
+    next.aggregated = {
+      ...pickDefined(preview.aggregated, ['matchCount', 'truncated', 'laneCount']),
+      note: 'Aggregated match details dropped by microcompact; use artifactRefs/suggestedRetrieval.',
+    };
+  }
+
+  return next;
+}
+
+function uniqueNonEmptyStrings(values, limit = 12) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    const text = String(value ?? '').trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    result.push(text);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+/**
+ * 从将被裁掉的历史正文中抽取可回捞线索（artifact / path / retrieval command）。
+ * 目标：即使原文没有结构化 local_*_ref，压缩后仍留下可再读入口。
+ */
+function extractRecoverableClues(text, { limit = 12 } = {}) {
+  const value = String(text ?? '');
+  if (!value) {
+    return { artifactRefs: [], paths: [], suggestedRetrieval: [] };
+  }
+
+  const artifactRefs = uniqueNonEmptyStrings([
+    ...(value.match(/local-[a-z0-9-]+-artifact:\/\/[^\s"'`\]]+/gi) || []),
+    ...(value.match(/tool-result:\/\/[^\s"'`\]]+/gi) || []),
+    ...(value.match(/goal-plan:\/\/[^\s"'`\]]+/gi) || []),
+  ], limit);
+
+  const pathPatterns = [
+    /(?:stdoutPath|stderrPath|metadataPath|path)\s*[:=]\s*["']([^"']+)["']/g,
+    /(?:^|\s)(\/(?:Users|home|tmp|var|private|Volumes)\/[^\s"'`\]]+)/g,
+    /(?:^|\s)([A-Za-z]:\\[^\s"'`\]]+)/g,
+  ];
+  const paths = [];
+  for (const pattern of pathPatterns) {
+    for (const match of value.matchAll(pattern)) {
+      const candidate = match[1] || match[0];
+      if (candidate) paths.push(candidate.trim());
+    }
+  }
+
+  const retrievalPatterns = [
+    /(?:^|\n)\s*((?:rg|tail|sed|cat|head|read_file)\b[^\n]{0,240})/g,
+  ];
+  const suggestedRetrieval = [];
+  for (const pattern of retrievalPatterns) {
+    for (const match of value.matchAll(pattern)) {
+      const cmd = String(match[1] || '').trim();
+      if (cmd.length >= 8) suggestedRetrieval.push(cmd);
+    }
+  }
+
+  // If we only have artifact paths, synthesize cheap retrieval commands.
+  for (const ref of artifactRefs) {
+    if (ref.startsWith('local-shell-artifact://') || ref.includes('/stdout')) {
+      suggestedRetrieval.push(`tail -n 120 "${ref}"`);
+    }
+  }
+  for (const filePath of uniqueNonEmptyStrings(paths, 6)) {
+    if (filePath.includes('stdout') || filePath.endsWith('.txt') || filePath.endsWith('.log')) {
+      suggestedRetrieval.push(`tail -n 120 "${filePath}"`);
+    } else {
+      suggestedRetrieval.push(`sed -n '1,120p' "${filePath}"`);
+    }
+  }
+
+  return {
+    artifactRefs: uniqueNonEmptyStrings(artifactRefs, limit),
+    paths: uniqueNonEmptyStrings(paths, limit),
+    suggestedRetrieval: uniqueNonEmptyStrings(suggestedRetrieval, limit),
+  };
+}
+
 function compactLongHistoricalString(text, previewChars) {
-  return [
-    '[历史长文本已从活跃上下文压缩为预览；原文没有可恢复的本地 artifact ref]',
+  const clues = extractRecoverableClues(text);
+  const hasClues = clues.artifactRefs.length > 0
+    || clues.paths.length > 0
+    || clues.suggestedRetrieval.length > 0;
+  const lines = [
+    hasClues
+      ? '[历史长文本已从活跃上下文压缩为预览；请用下方可回捞线索按需读取原文]'
+      : '[历史长文本已从活跃上下文压缩为预览；原文没有可恢复的本地 artifact ref]',
     `originalChars: ${text.length}`,
-    '',
-    previewHistoricalText(text, previewChars),
-  ].join('\n');
+  ];
+  if (clues.artifactRefs.length > 0) {
+    lines.push(`artifactRefs: ${JSON.stringify(clues.artifactRefs)}`);
+  }
+  if (clues.paths.length > 0) {
+    lines.push(`paths: ${JSON.stringify(clues.paths)}`);
+  }
+  if (clues.suggestedRetrieval.length > 0) {
+    lines.push('suggestedRetrieval:');
+    for (const cmd of clues.suggestedRetrieval) {
+      lines.push(`  - ${cmd}`);
+    }
+  }
+  lines.push('', previewHistoricalText(text, previewChars));
+  return lines.join('\n');
 }
 
 function microcompactStringContent(content, config) {
@@ -778,6 +963,44 @@ function estimateSummaryChars({ inputChars, maxSummaryChars, receivedChars = 0 }
   return Math.max(minChars, estimate);
 }
 
+/**
+ * 为摘要生成解析输出/输入预算。
+ * - 输出：复用模型 maxOutputTokens，并夹在安全范围内
+ * - 输入：summaryMaxInputTokens，同时为输出与 safety 预留空间（当 contextWindow 可知时）
+ */
+function resolveSummaryTokenBudget(providerConfig = {}, { contextWindow = null } = {}) {
+  const configuredOutput = Number(providerConfig?.maxOutputTokens);
+  const defaultOutput = COMPACTION_CONFIG.defaultSummaryMaxTokens;
+  const summaryMaxTokens = Math.max(
+    1_024,
+    Math.min(
+      Number.isFinite(configuredOutput) && configuredOutput > 0 ? configuredOutput : defaultOutput,
+      defaultOutput * 2,
+    ),
+  );
+
+  const safety = COMPACTION_CONFIG.safetyReserveTokens;
+  const outputReserve = Math.max(
+    COMPACTION_CONFIG.summaryOutputReserveTokens,
+    Math.min(summaryMaxTokens, COMPACTION_CONFIG.summaryOutputReserveTokens * 2),
+  );
+
+  let summaryMaxInputTokens = COMPACTION_CONFIG.summaryMaxInputTokens;
+  const windowTokens = Number(contextWindow);
+  if (Number.isFinite(windowTokens) && windowTokens > 0) {
+    // 摘要请求本身也占窗口：给输出与安全区留空，避免 prompt-too-long 在摘要阶段发生。
+    const usableInput = Math.max(2_000, windowTokens - summaryMaxTokens - safety);
+    summaryMaxInputTokens = Math.min(summaryMaxInputTokens, usableInput);
+  }
+
+  return {
+    summaryMaxTokens,
+    summaryMaxInputTokens,
+    outputReserveTokens: outputReserve,
+    safetyReserveTokens: safety,
+  };
+}
+
 async function summarizeWithLLM({
   oldMessages,
   providerConfig,
@@ -786,12 +1009,13 @@ async function summarizeWithLLM({
   webContents = null,
   streamId = null,
   connectionRecoveryOptions = {},
+  contextWindow = null,
 }) {
   const { provider, baseUrl, apiKey, model } = providerConfig;
 
-  // 摘要输出上限复用「当前模型的 maxOutputTokens」，让压缩与模型真实能力对齐，
-  // 避免写死的小上限把长摘要截断（表现为压缩后内容看不全）。未配置时回退到 12000。
-  const summaryMaxTokens = providerConfig.maxOutputTokens || 12000;
+  // 摘要输出/输入预算：输出对齐模型能力，输入为输出与安全区预留空间。
+  const summaryBudget = resolveSummaryTokenBudget(providerConfig, { contextWindow });
+  const summaryMaxTokens = summaryBudget.summaryMaxTokens;
 
   logCompactionDiagnostic('summarize:enter', {
     providerConfig,
@@ -802,7 +1026,7 @@ async function summarizeWithLLM({
   const summaryInput = formatOldMessagesForSummary(oldMessages);
   const summaryMessages = [
     { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
-    { role: 'user', content: summaryInput.slice(0, COMPACTION_CONFIG.summaryMaxInputTokens * COMPACTION_CONFIG.charsPerToken) },
+    { role: 'user', content: summaryInput.slice(0, summaryBudget.summaryMaxInputTokens * COMPACTION_CONFIG.charsPerToken) },
     { role: 'user', content: COMPACT_PROMPT },
   ];
 
@@ -833,7 +1057,7 @@ async function summarizeWithLLM({
       model,
       system: SUMMARY_SYSTEM_PROMPT,
       messages: [
-        { role: 'user', content: summaryInput.slice(0, COMPACTION_CONFIG.summaryMaxInputTokens * COMPACTION_CONFIG.charsPerToken) },
+        { role: 'user', content: summaryInput.slice(0, summaryBudget.summaryMaxInputTokens * COMPACTION_CONFIG.charsPerToken) },
         { role: 'user', content: COMPACT_PROMPT },
       ],
       max_tokens: summaryMaxTokens,
@@ -1377,6 +1601,7 @@ export async function compactIfNeeded({
             webContents,
             streamId,
             connectionRecoveryOptions,
+            contextWindow,
           });
 
           if (rawSummary) {
@@ -1598,4 +1823,6 @@ export {
   estimateToolsTokens,
   estimateSummaryChars,
   formatCompactSummary,
+  extractRecoverableClues,
+  resolveSummaryTokenBudget,
 };

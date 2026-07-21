@@ -36,6 +36,7 @@ export async function agentLoopGemini({
   conversationId,
   persistCompaction,
   continuityContext = [],
+  rebuildSystemPrompt = null,
   toolContext,
   workspacePath,
   permissionGate,
@@ -51,7 +52,8 @@ export async function agentLoopGemini({
   providerId = null,
   runtimeMode = 'chat',
 }) {
-  let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
+  let effectiveSystemPrompt = systemPrompt;
+  let apiMessages = sanitizeApiMessages([{ role: 'system', content: effectiveSystemPrompt }, ...messages]);
   // 最后一轮「实际发送切片」（微压缩+清洗后真正发给 provider 的消息，已含 system）。供
   // getContextInfo 实际发送量在 provider usage 缺失时回退估算之用；不参与压缩触发判定。
   let lastSentMessages = null;
@@ -96,7 +98,7 @@ export async function agentLoopGemini({
       runTurn: async (state) => {
         const compaction = await runCompactionCheck({
           messages: apiMessages,
-          systemPrompt,
+          systemPrompt: effectiveSystemPrompt,
           contextWindow,
           providerConfig,
           signal,
@@ -109,9 +111,13 @@ export async function agentLoopGemini({
           preserveLatestUserTurn: true,
           // 对齐进度条：上一轮真实 usage 高水位也参与 soft 触发。
           usageSnapshot: loop.getLastTurnUsage?.() ?? null,
+          rebuildSystemPrompt,
         });
         if (compaction.compacted || compaction.microcompacted) {
           apiMessages = compaction.messages;
+          if (typeof compaction.systemPrompt === 'string' && compaction.systemPrompt.trim()) {
+            effectiveSystemPrompt = compaction.systemPrompt;
+          }
           // 语义压缩或静默微压缩后，清掉陈旧 usage，避免压缩前高水位继续锁死显示/触发。
           loop.clearLastTurnUsage?.();
         }
@@ -144,7 +150,7 @@ export async function agentLoopGemini({
           if (promptTooLong && !promptTooLongRetryUsed) {
             const emergencyCompaction = await runCompactionCheck({
               messages: apiMessages,
-              systemPrompt,
+              systemPrompt: effectiveSystemPrompt,
               contextWindow,
               providerConfig,
               signal,
@@ -157,9 +163,13 @@ export async function agentLoopGemini({
               continuityContext,
               tools,
               preserveLatestUserTurn: true,
-            });
+              rebuildSystemPrompt,
+        });
             if (emergencyCompaction.compacted) {
               apiMessages = emergencyCompaction.messages;
+              if (typeof emergencyCompaction.systemPrompt === 'string' && emergencyCompaction.systemPrompt.trim()) {
+                effectiveSystemPrompt = emergencyCompaction.systemPrompt;
+              }
               promptTooLongRetryUsed = true;
               return { kind: 'continue', state };
             }

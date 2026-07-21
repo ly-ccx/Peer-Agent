@@ -4,6 +4,7 @@ import {
   estimateTokensFromMessages,
   estimateToolsTokens,
   microcompactMessagesForContext,
+  resolveSummaryTokenBudget,
 } from '../context-compactor.mjs';
 import { beginCompaction, endCompaction, updateCompactionProgress } from './compaction-registry.mjs';
 
@@ -92,6 +93,9 @@ export function computeContextBudget({
   contextWindow,
   tools = null,
   usageSnapshot = null,
+  // 可选：providerConfig 用于解析摘要输出预算；也可直接传 maxOutputTokens。
+  providerConfig = null,
+  maxOutputTokens = null,
 }) {
   // 工具 schema（tools）每次请求都全量发送给 provider，必须计入上下文用量；
   // 否则进度条只算 messages，会远低于 provider 实际计入的 input tokens。
@@ -106,14 +110,38 @@ export function computeContextBudget({
   const normalizedWindow = Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null;
   const triggerRatio = COMPACTION_CONFIG.triggerRatio;
   const hardRatio = Math.max(triggerRatio, CONTEXT_BUDGET_GUARD.hardRatio);
-  const softLimit = normalizedWindow ? Math.floor(normalizedWindow * triggerRatio) : null;
-  const hardLimit = normalizedWindow ? Math.floor(normalizedWindow * hardRatio) : null;
+
+  // 摘要输出 + 安全区预留：不改写公开 soft/hard 触发线（仍按 window*ratio），
+  // 但暴露 reserved/effective 字段，并在「剩余窗口已不够摘要」时提前触发压缩。
+  const summaryBudget = resolveSummaryTokenBudget(
+    {
+      maxOutputTokens:
+        maxOutputTokens
+        ?? providerConfig?.maxOutputTokens
+        ?? null,
+    },
+    { contextWindow: normalizedWindow },
+  );
+  const summaryOutputReserveTokens = summaryBudget.outputReserveTokens;
+  const safetyReserveTokens = summaryBudget.safetyReserveTokens;
+  const reservedTokens = summaryOutputReserveTokens + safetyReserveTokens;
+  const effectiveWindow =
+    normalizedWindow != null
+      ? Math.max(1, normalizedWindow - reservedTokens)
+      : null;
+
+  const softLimit = normalizedWindow != null ? Math.floor(normalizedWindow * triggerRatio) : null;
+  const hardLimit = normalizedWindow != null ? Math.floor(normalizedWindow * hardRatio) : null;
+  // 剩余空间不足摘要输出/安全区时，即使未越过 soft 线也建议压缩。
+  const summaryHeadroomLimit = effectiveWindow;
   const overSoftLimit = softLimit != null && contextTokens > softLimit;
+  const overSummaryHeadroom =
+    summaryHeadroomLimit != null && contextTokens > summaryHeadroomLimit;
   const overHardLimit = hardLimit != null && contextTokens > hardLimit;
   const overContextWindow = normalizedWindow != null && contextTokens > normalizedWindow;
   const force = overHardLimit || overContextWindow;
   const emergency = force;
-  const shouldCompact = overSoftLimit || force;
+  const shouldCompact = overSoftLimit || overSummaryHeadroom || force;
   const mode = overContextWindow
     ? 'overflow'
     : overHardLimit
@@ -127,11 +155,18 @@ export function computeContextBudget({
     estimatedTokens,
     usageTokens,
     contextWindow: normalizedWindow,
+    effectiveContextWindow: effectiveWindow,
     triggerRatio,
     softLimit,
     hardRatio,
     hardLimit,
+    summaryOutputReserveTokens,
+    safetyReserveTokens,
+    reservedTokens,
+    summaryMaxTokens: summaryBudget.summaryMaxTokens,
+    summaryMaxInputTokens: summaryBudget.summaryMaxInputTokens,
     overSoftLimit,
+    overSummaryHeadroom,
     overHardLimit,
     overContextWindow,
     shouldCompact,
@@ -139,6 +174,58 @@ export function computeContextBudget({
     emergency,
     mode,
   };
+}
+
+/**
+ * 压缩后通过既有 Context Source 重建 system prompt（goal/mode/continuity 等权威工作状态）。
+ * 失败时回退旧 systemPrompt，不阻断主链路。
+ */
+export async function rehydrateSystemPromptAfterCompaction({
+  systemPrompt,
+  rebuildSystemPrompt = null,
+  continuityContext = [],
+  compactedMessages = null,
+  reason = 'post-compact',
+} = {}) {
+  if (typeof rebuildSystemPrompt !== 'function') {
+    return {
+      systemPrompt,
+      rehydrated: false,
+      reason: 'no_rebuild_hook',
+    };
+  }
+
+  try {
+    const next = await rebuildSystemPrompt({
+      reason,
+      continuityContext,
+      compactedMessages,
+      previousSystemPrompt: systemPrompt,
+    });
+    if (typeof next === 'string' && next.trim()) {
+      return {
+        systemPrompt: next,
+        rehydrated: next !== systemPrompt,
+        reason,
+      };
+    }
+    return {
+      systemPrompt,
+      rehydrated: false,
+      reason: 'empty_rebuild_result',
+    };
+  } catch (error) {
+    console.warn(
+      '[compaction] post-compact system prompt rehydration failed:',
+      error?.message || error,
+    );
+    return {
+      systemPrompt,
+      rehydrated: false,
+      reason: 'rebuild_failed',
+      error: error?.message || String(error),
+    };
+  }
 }
 
 // 从 provider 真实 usage 快照折算「实际发送的上下文 token」。
@@ -246,8 +333,15 @@ export async function runCompactionCheck({
   tools = null,
   preserveLatestUserTurn = false,
   usageSnapshot = null,
+  rebuildSystemPrompt = null,
 }) {
-  const budget = computeContextBudget({ messages, contextWindow, tools, usageSnapshot });
+  const budget = computeContextBudget({
+    messages,
+    contextWindow,
+    tools,
+    usageSnapshot,
+    providerConfig,
+  });
   force = Boolean(force || budget.force);
   emergency = Boolean(emergency || budget.emergency);
 
@@ -347,7 +441,28 @@ export async function runCompactionCheck({
       // done 通知本身即为 start 的收尾。只有持久化与 done 都完成后才标记已结算；
       // 若 persistCompaction 抛错，catch 分支必须还能补发 idle，避免压缩态悬挂。
       settledBanner = true;
-      return { compacted: true, messages: compactResult.messages, compactResult };
+      const rehydration = await rehydrateSystemPromptAfterCompaction({
+        systemPrompt,
+        rebuildSystemPrompt,
+        continuityContext,
+        compactedMessages: compactResult.messages,
+        reason: emergency ? 'post-emergency-compact' : force ? 'post-force-compact' : 'post-compact',
+      });
+      let messagesOut = compactResult.messages;
+      if (rehydration.rehydrated && Array.isArray(messagesOut) && messagesOut[0]?.role === 'system') {
+        messagesOut = [
+          { ...messagesOut[0], content: rehydration.systemPrompt },
+          ...messagesOut.slice(1),
+        ];
+      }
+      return {
+        compacted: true,
+        messages: messagesOut,
+        compactResult,
+        systemPrompt: rehydration.systemPrompt,
+        rehydrated: rehydration.rehydrated,
+        rehydration,
+      };
     }
 
     // Layer 1 微压缩可能已把实际发送上下文压回 soft 线以下，从而取消 Layer 2。

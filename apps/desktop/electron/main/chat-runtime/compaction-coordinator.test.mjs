@@ -10,6 +10,7 @@ import {
   contextTokensFromUsageSnapshot,
   CONTEXT_BUDGET_GUARD,
   isPromptTooLongResponse,
+  rehydrateSystemPromptAfterCompaction,
   runCompactionCheck,
 } from './compaction-coordinator.mjs';
 import {
@@ -675,5 +676,110 @@ describe('静默 microcompaction 与占用显示口径对齐', () => {
     });
     assert.equal(info.contextTokens, estimateTokensFromMessages(sent));
     assert.ok(info.contextTokens < estimateTokensFromMessages(full));
+  });
+});
+
+
+describe('P0 summary reserve + post-compact rehydration', () => {
+  it('computeContextBudget reserves summary output and safety tokens in soft/hard limits', () => {
+    const messages = [{ role: 'user', content: 'hello world' }];
+    const contextWindow = 100_000;
+    const budget = computeContextBudget({
+      messages,
+      contextWindow,
+      maxOutputTokens: 8_000,
+    });
+
+    assert.ok(budget.reservedTokens > 0);
+    assert.ok(budget.summaryOutputReserveTokens >= 1_000);
+    assert.ok(budget.safetyReserveTokens >= 1_000);
+    assert.equal(
+      budget.effectiveContextWindow,
+      contextWindow - budget.reservedTokens,
+    );
+    // 公开 soft/hard 线仍按完整窗口计算，保证进度条与既有阈值契约稳定。
+    assert.equal(
+      budget.softLimit,
+      Math.floor(contextWindow * COMPACTION_CONFIG.triggerRatio),
+    );
+    assert.equal(
+      budget.hardLimit,
+      Math.floor(contextWindow * Math.max(COMPACTION_CONFIG.triggerRatio, CONTEXT_BUDGET_GUARD.hardRatio)),
+    );
+    // 摘要预留体现在 effectiveContextWindow，并在剩余不足时通过 overSummaryHeadroom 提前触发。
+    assert.ok(budget.effectiveContextWindow < contextWindow);
+    assert.equal(budget.overSummaryHeadroom, false);
+  });
+
+  it('runCompactionCheck rehydrates system prompt via rebuildSystemPrompt after compact', async () => {
+    // 用足够大的本地估算 + 很小的 window，确保 threshold 路径一定进入语义压缩。
+    const oldBlob = 'history-token-pressure-'.repeat(800);
+    const messages = [
+      { role: 'system', content: 'OLD_SYSTEM' },
+      { role: 'user', content: oldBlob },
+      { role: 'assistant', content: oldBlob },
+      { role: 'user', content: oldBlob },
+      { role: 'assistant', content: oldBlob },
+      { role: 'user', content: 'current question' },
+    ];
+    const estimated = estimateTokensFromMessages(messages);
+    const contextWindow = Math.max(200, Math.floor(estimated / 2));
+
+    let rebuildCalls = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: 'summary of prior work' } }],
+      }),
+      text: async () => '',
+    });
+
+    try {
+      const result = await runCompactionCheck({
+        messages,
+        systemPrompt: 'OLD_SYSTEM',
+        contextWindow,
+        providerConfig: {
+          provider: 'openai',
+          baseUrl: 'https://example.test',
+          apiKey: 'k',
+          model: 'test-model',
+          maxOutputTokens: 1024,
+        },
+        force: true,
+        preserveLatestUserTurn: true,
+        rebuildSystemPrompt: async ({ reason }) => {
+          rebuildCalls += 1;
+          assert.match(String(reason), /post-(force|emergency)?-?compact|post-compact|post-force-compact|post-emergency-compact/);
+          return 'REHYDRATED_SYSTEM_WITH_GOAL_STATE';
+        },
+        webContents: { send() {} },
+      });
+
+      assert.equal(result.compacted, true, `expected compacted=true, got ${JSON.stringify({
+        compacted: result.compacted,
+        microcompacted: result.compactResult?.microcompacted,
+        notification: result.compactResult?.notification,
+      })}`);
+      assert.equal(rebuildCalls, 1);
+      assert.equal(result.rehydrated, true);
+      assert.equal(result.systemPrompt, 'REHYDRATED_SYSTEM_WITH_GOAL_STATE');
+      assert.equal(result.messages[0].role, 'system');
+      assert.equal(result.messages[0].content, 'REHYDRATED_SYSTEM_WITH_GOAL_STATE');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rehydrateSystemPromptAfterCompaction falls back when rebuild hook is missing', async () => {
+    const result = await rehydrateSystemPromptAfterCompaction({
+      systemPrompt: 'KEEP',
+      rebuildSystemPrompt: null,
+    });
+    assert.equal(result.systemPrompt, 'KEEP');
+    assert.equal(result.rehydrated, false);
+    assert.equal(result.reason, 'no_rebuild_hook');
   });
 });

@@ -7,11 +7,13 @@ import {
   compactIfNeeded,
   estimateSummaryChars,
   estimateTextTokens,
+  extractRecoverableClues,
   formatCompactSummary,
   estimateTokensFromMessages,
   estimateToolsTokens,
   microcompactMessagesForContext,
   resetCircuitBreaker,
+  resolveSummaryTokenBudget,
 } from './context-compactor.mjs';
 
 const COMPACTOR_SOURCE = readFileSync(
@@ -969,5 +971,111 @@ describe('context compactor · streaming progress (0007)', () => {
     assert.equal(result.compacted, true);
     assert.equal(result.messages[1]._compaction.method, 'structural');
     assert.equal(result.messages[1]._compaction.fallbackReason, 'llm_error');
+  });
+});
+
+
+describe('P0 recoverable microcompact + summary budget', () => {
+  it('preserves retrieval clues for local_file_ref and local_capability_result_ref', () => {
+    const fileRef = JSON.stringify({
+      kind: 'local_file_ref',
+      tool: 'read_file',
+      path: '/tmp/workspace/apps/desktop/electron/main/context-compactor.mjs',
+      chars: 50000,
+      lines: 1600,
+      preview: 'A'.repeat(5000),
+      suggestedRetrieval: [
+        "sed -n '1,160p' \"/tmp/workspace/apps/desktop/electron/main/context-compactor.mjs\"",
+        'rg -n "microcompact" "/tmp/workspace/apps/desktop/electron/main/context-compactor.mjs"',
+      ],
+    });
+    const capabilityRef = JSON.stringify({
+      kind: 'local_capability_result_ref',
+      tool: 'batch_search',
+      capabilityId: 'local.search.aggregate',
+      status: 'success',
+      outputPreview: {
+        status: 'success',
+        preview: 'B'.repeat(4000),
+        artifactRefs: ['local-shell-artifact://shell_demo/stdout'],
+        suggestedRetrieval: [
+          'tail -n 120 "/Users/liangyin/.peer-agent/shell-artifacts/demo/stdout.txt"',
+        ],
+      },
+    });
+    const messages = [
+      { role: 'system', content: 'system' },
+      ...Array.from({ length: 10 }, (_, i) => ({ role: 'user', content: `old-${i}` })),
+      { role: 'tool', content: fileRef },
+      { role: 'tool', content: capabilityRef },
+      { role: 'user', content: 'recent-1' },
+      { role: 'assistant', content: 'recent-2' },
+    ];
+
+    const result = microcompactMessagesForContext(messages, {
+      keepRecentCount: 2,
+      triggerChars: 100,
+      previewChars: 200,
+    });
+
+    const compactedFile = JSON.parse(result.messages.find((m) => m.content.includes('local_file_ref')).content);
+    assert.equal(compactedFile.microCompacted, true);
+    assert.equal(compactedFile.path, '/tmp/workspace/apps/desktop/electron/main/context-compactor.mjs');
+    assert.ok(Array.isArray(compactedFile.suggestedRetrieval));
+    assert.ok(compactedFile.suggestedRetrieval[0].includes('sed -n'));
+    assert.ok(compactedFile.preview.length < 1000);
+
+    const compactedCap = JSON.parse(result.messages.find((m) => m.content.includes('local_capability_result_ref')).content);
+    assert.equal(compactedCap.microCompacted, true);
+    assert.deepEqual(compactedCap.outputPreview.artifactRefs, ['local-shell-artifact://shell_demo/stdout']);
+    assert.ok(compactedCap.outputPreview.suggestedRetrieval[0].includes('tail -n'));
+  });
+
+  it('keeps recoverable clues when microcompacting plain long tool text', () => {
+    const longText = [
+      'command finished',
+      'artifactRef: local-shell-artifact://shell_abcdef/stdout',
+      'stdoutPath: /Users/liangyin/.peer-agent/shell-artifacts/2026-07-21/shell_abcdef/stdout.txt',
+      'suggestedRetrieval:',
+      '  - tail -n 120 "/Users/liangyin/.peer-agent/shell-artifacts/2026-07-21/shell_abcdef/stdout.txt"',
+      'X'.repeat(5000),
+    ].join('\n');
+    const messages = [
+      { role: 'system', content: 'system' },
+      ...Array.from({ length: 10 }, (_, i) => ({ role: 'user', content: `old-${i}` })),
+      { role: 'tool', content: longText },
+      { role: 'user', content: 'recent' },
+    ];
+    const result = microcompactMessagesForContext(messages, {
+      keepRecentCount: 1,
+      triggerChars: 200,
+      previewChars: 300,
+    });
+    const content = result.messages.find((m) => m.role === 'tool').content;
+    assert.match(content, /可回捞线索|artifactRefs|suggestedRetrieval/);
+    assert.match(content, /local-shell-artifact:\/\/shell_abcdef\/stdout/);
+    assert.match(content, /stdout\.txt/);
+  });
+
+  it('resolveSummaryTokenBudget reserves output and safety room against context window', () => {
+    const budget = resolveSummaryTokenBudget(
+      { maxOutputTokens: 8000 },
+      { contextWindow: 32_000 },
+    );
+    assert.equal(budget.summaryMaxTokens, 8000);
+    assert.ok(budget.outputReserveTokens >= COMPACTION_CONFIG.summaryOutputReserveTokens);
+    assert.equal(budget.safetyReserveTokens, COMPACTION_CONFIG.safetyReserveTokens);
+    // input budget must leave room for summary output + safety
+    assert.ok(budget.summaryMaxInputTokens <= 32_000 - budget.summaryMaxTokens - budget.safetyReserveTokens);
+    assert.ok(budget.summaryMaxInputTokens < COMPACTION_CONFIG.summaryMaxInputTokens);
+  });
+
+  it('extractRecoverableClues finds artifact refs and paths', () => {
+    const clues = extractRecoverableClues(
+      'see local-shell-artifact://shell_1/stdout and path /tmp/a/stdout.txt then run tail -n 20 "/tmp/a/stdout.txt"',
+    );
+    assert.ok(clues.artifactRefs.some((ref) => ref.includes('local-shell-artifact://shell_1/stdout')));
+    assert.ok(clues.paths.some((p) => p.includes('/tmp/a/stdout.txt')));
+    assert.ok(clues.suggestedRetrieval.length > 0);
   });
 });

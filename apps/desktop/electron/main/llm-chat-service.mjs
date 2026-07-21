@@ -819,6 +819,45 @@ export function createLlmChatService({
           recoveryAttempt: attemptIndex + 1,
         });
 
+        // 压缩后通过既有 Context Source 重建 system prompt（goal/mode/continuity 等）。
+        // 只重建可权威回读的工作状态，不把 tool output 抬升为 system 指令。
+        const rebuildSystemPrompt = async ({
+          continuityContext: nextContinuityContext = continuityContext,
+          reason = 'post-compact',
+        } = {}) => {
+          const rebuiltContext = buildSystemContext(runWorkspacePath, {
+            contextAttachments,
+            runtimeReminders,
+            attachmentContext,
+            configInstructions,
+            contextExtensions: effectiveContextExtensions,
+            explorerContext,
+            verifierContext,
+            continuityContext: nextContinuityContext,
+            conversationId,
+            effort,
+            mode,
+            goalPlanStore,
+            mcpRegistry,
+            provider: resolvedChannel.legacyProvider,
+            model: provider.model,
+          });
+          const rebuiltPrompt = renderSystemContext(rebuiltContext);
+          recordPromptSnapshot(promptSnapshotStore, rebuiltContext, {
+            streamId,
+            conversationId,
+            contextEpochId: getActiveContextEpochId(promptSnapshotStore, conversationId),
+            effort,
+            provider: resolvedChannel.legacyProvider,
+            providerId: provider.id,
+            model: provider.model,
+            mode,
+            recoveryAttempt: attemptIndex + 1,
+            rehydrateReason: reason,
+          });
+          return rebuiltPrompt;
+        };
+
         // (a) 同 provider 流读取早期中断的自动重试：把单次尝试封装为闭包，便于在
         // replay-safe 且为可恢复传输失败时，从头重发同一请求（覆盖全部 wire）。
         const runProviderAttempt = async () => {
@@ -895,6 +934,7 @@ export function createLlmChatService({
               conversationId,
               persistCompaction,
               continuityContext,
+              rebuildSystemPrompt,
               toolContext,
               agentProgress,
               workspacePath: runWorkspacePath,
@@ -928,6 +968,7 @@ export function createLlmChatService({
               conversationId,
               persistCompaction,
               continuityContext,
+              rebuildSystemPrompt,
               toolContext,
               agentProgress,
               workspacePath: runWorkspacePath,
@@ -961,6 +1002,7 @@ export function createLlmChatService({
               conversationId,
               persistCompaction,
               continuityContext,
+              rebuildSystemPrompt,
               toolContext,
               agentProgress,
               workspacePath: runWorkspacePath,
