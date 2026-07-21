@@ -271,7 +271,10 @@ export function WorkbenchPanel({ isZh, workspacePath }: WorkbenchPanelProps) {
             onSessionChange={setBrowserSession}
           />
         </div>
-        <div className="workbench-view" data-active={activeTab === 'files'}>
+        <div
+          className="workbench-view workbench-view--files"
+          data-active={activeTab === 'files'}
+        >
           <FilesView isZh={isZh} workspacePath={workspacePath} />
         </div>
         <div

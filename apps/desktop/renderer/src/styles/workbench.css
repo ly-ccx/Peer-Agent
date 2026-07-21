@@ -128,6 +128,11 @@
     inset-block-start: 0;
   }
 
+  /* 文件视图：贴顶覆盖，去掉 .workbench-view 默认 24px 顶部安全区。 */
+  .workbench-view--files {
+    inset-block-start: 0;
+  }
+
   /* Electron webview 是独立的 guest surface；仅用 visibility 隐藏祖先时仍可能残留合成画面。
    * 保持 BrowserView 挂载以保留标签页与页面会话，但在一级“网页”标签未激活时让其退出布局和合成树。 */
   .workbench-view--browser[data-active='false'] {
@@ -140,10 +145,12 @@
   }
 
   /* GoalView slot：portal target，避免内部多余 padding。
+   * 与 documents/browser 一致：贴顶覆盖，去掉 .workbench-view 默认 24px 顶部安全区。
    * 外层 overflow:hidden，避免与内部投影的 .goal-panel-body 形成双层滚动嵌套
    * （双层 overflow-y:auto 会让滚轮焦点在内外层之间抢夺，导致右栏滚动卡顿）。
    * 唯一滚动容器交给内层 .goal-panel-body（见下方 flex:1 + min-height:0 + overflow-y:auto）。 */
   .workbench-view--goal {
+    inset-block-start: 0;
     padding: 0;
     overflow: hidden;
     display: flex;
