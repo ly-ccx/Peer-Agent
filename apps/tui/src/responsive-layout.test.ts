@@ -4,16 +4,16 @@ import { responsiveLayout, responsivePickerLayout } from './responsive-layout.ts
 
 describe('responsive TUI layout', () => {
   test.each([
-    [120, 'wide', true, true, false, 2, '75%'],
-    [100, 'compact', true, true, false, 1, '88%'],
-    [80, 'compact', true, true, false, 1, '88%'],
-    [60, 'narrow', false, true, true, 1, '100%'],
-    [40, 'minimal', false, false, true, 0, '100%'],
+    [120, 'wide', true, true, false, 3, 1, '75%'],
+    [100, 'compact', true, true, false, 2, 1, '88%'],
+    [80, 'compact', true, true, false, 2, 1, '88%'],
+    [60, 'narrow', false, true, true, 1, 1, '100%'],
+    [40, 'minimal', false, false, true, 0, 0, '100%'],
   ] as const)('maps %i columns to an explicit information density', (
-    columns, density, showDescriptions, showHints, stackActions, outerPadding, welcomeWidth,
+    columns, density, showDescriptions, showHints, stackActions, outerPadding, outerPaddingY, welcomeWidth,
   ) => {
     expect(responsiveLayout(columns)).toEqual({
-      density, showDescriptions, showHints, stackActions, outerPadding, welcomeWidth,
+      density, showDescriptions, showHints, stackActions, outerPadding, outerPaddingY, welcomeWidth,
     });
   });
 

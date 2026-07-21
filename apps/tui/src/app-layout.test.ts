@@ -150,7 +150,7 @@ describe('TUI app layout', () => {
 
     expect(errorBannerSource).toContain('<box height={1} flexShrink={0}');
     expect(errorBannerSource).toContain('wrapMode="none"');
-    expect(appSource).toContain('<ErrorBanner message={snapshot.error} />');
+    expect(appSource).toContain('<ErrorBanner message={snapshot.error} layout={layout} />');
     expect(appSource).toContain('const menuReserve = slashOpen');
     expect(appSource).toContain('paddingTop={menuReserve}');
   });
@@ -262,6 +262,11 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('pickerLayout.showDescriptions ?');
     expect(appSource).toContain('pickerLayout.showHints ?');
     expect(appSource).toContain('paddingLeft={layout.outerPadding}');
+    expect(appSource).toContain('<ChatHistory snapshot={snapshot} layout={layout} />');
+    expect(appSource).toContain('paddingRight={layout.outerPadding}');
+    expect(appSource).toContain('paddingTop={layout.outerPaddingY}');
+    expect(appSource).toContain('paddingBottom={layout.outerPaddingY}');
+    expect(appSource).not.toContain('paddingLeft={2}');
   });
 
   test('prevents short-terminal picker rows from collapsing onto each other', () => {

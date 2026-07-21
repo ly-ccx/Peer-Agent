@@ -6,6 +6,8 @@ export interface TuiResponsiveLayout {
   readonly showHints: boolean;
   readonly stackActions: boolean;
   readonly outerPadding: number;
+  /** Vertical outer margin so chat / composer / status don't hug terminal edges. */
+  readonly outerPaddingY: number;
   readonly welcomeWidth: `${number}%`;
 }
 
@@ -21,19 +23,19 @@ export interface TuiResponsivePickerLayout {
 export function responsiveLayout(columns: number): TuiResponsiveLayout {
   if (columns >= 120) return {
     density: 'wide', showDescriptions: true, showHints: true,
-    stackActions: false, outerPadding: 2, welcomeWidth: '75%',
+    stackActions: false, outerPadding: 3, outerPaddingY: 1, welcomeWidth: '75%',
   };
   if (columns >= 80) return {
     density: 'compact', showDescriptions: true, showHints: true,
-    stackActions: false, outerPadding: 1, welcomeWidth: '88%',
+    stackActions: false, outerPadding: 2, outerPaddingY: 1, welcomeWidth: '88%',
   };
   if (columns >= 60) return {
     density: 'narrow', showDescriptions: false, showHints: true,
-    stackActions: true, outerPadding: 1, welcomeWidth: '100%',
+    stackActions: true, outerPadding: 1, outerPaddingY: 1, welcomeWidth: '100%',
   };
   return {
     density: 'minimal', showDescriptions: false, showHints: false,
-    stackActions: true, outerPadding: 0, welcomeWidth: '100%',
+    stackActions: true, outerPadding: 0, outerPaddingY: 0, welcomeWidth: '100%',
   };
 }
 

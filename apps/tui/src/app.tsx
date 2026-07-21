@@ -102,7 +102,13 @@ import {
 
 const COMMAND_NOTICE_DURATION_MS = 3_000;
 
-function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
+function ChatHistory({
+  snapshot,
+  layout,
+}: {
+  readonly snapshot: ChatSnapshot;
+  readonly layout: ReturnType<typeof responsiveLayout>;
+}) {
   const [expandedTools, setExpandedTools] = useState<ReadonlySet<string>>(new Set());
 
   const toggleTool = (messageId: string) => {
@@ -121,8 +127,8 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
       minHeight={0}
       stickyScroll
       stickyStart="bottom"
-      paddingLeft={2}
-      paddingRight={2}
+      paddingLeft={layout.outerPadding}
+      paddingRight={layout.outerPadding}
     >
       {snapshot.messages.map((message) => {
         if (message.role === 'system') {
@@ -214,9 +220,15 @@ function ChatHistory({ snapshot }: { readonly snapshot: ChatSnapshot }) {
   );
 }
 
-function ErrorBanner({ message }: { readonly message: string }) {
+function ErrorBanner({
+  message,
+  layout,
+}: {
+  readonly message: string;
+  readonly layout: ReturnType<typeof responsiveLayout>;
+}) {
   return (
-    <box height={1} flexShrink={0} paddingLeft={2} paddingRight={2}>
+    <box height={1} flexShrink={0} paddingLeft={layout.outerPadding} paddingRight={layout.outerPadding}>
       <text fg={COLOR.dangerSoft} wrapMode="none">Error: {message}</text>
     </box>
   );
@@ -456,6 +468,7 @@ function ComposerDock({
   editorRef,
   status,
   statusLayout,
+  layout,
   slashOpen,
   slashItems,
   slashSelection,
@@ -479,6 +492,7 @@ function ComposerDock({
   readonly editorRef: RefObject<TextareaRenderable | null>;
   readonly status: ComposerStatus;
   readonly statusLayout: ComposerStatusLayout;
+  readonly layout: ReturnType<typeof responsiveLayout>;
   readonly slashOpen: boolean;
   readonly slashItems: readonly TuiCommand[];
   readonly slashSelection: number;
@@ -503,7 +517,14 @@ function ComposerDock({
       : 0;
 
   return (
-    <box flexDirection="column" flexShrink={0} width="100%" paddingTop={menuReserve}>
+    <box
+      flexDirection="column"
+      flexShrink={0}
+      width="100%"
+      paddingTop={menuReserve}
+      paddingLeft={layout.outerPadding}
+      paddingRight={layout.outerPadding}
+    >
       {/* controls above the input; status below */}
       <ComposerControlsBar status={status} layout={statusLayout} />
       <box position="relative" width="100%" height={5} overflow="visible">
@@ -1336,7 +1357,15 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
   });
 
   return (
-    <box flexDirection="column" width="100%" height="100%" paddingLeft={layout.outerPadding} paddingRight={layout.outerPadding} gap={1} backgroundColor={COLOR.background}>
+    <box
+      flexDirection="column"
+      width="100%"
+      height="100%"
+      gap={1}
+      backgroundColor={COLOR.background}
+      paddingTop={layout.outerPaddingY}
+      paddingBottom={layout.outerPaddingY}
+    >
       {isWelcome ? (
         <box flexGrow={1} flexDirection="column" justifyContent="center" alignItems="center" paddingLeft={layout.outerPadding} paddingRight={layout.outerPadding}>
           <box width="100%" flexDirection="column" alignItems="center" gap={2}>
@@ -1361,6 +1390,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
                 editorRef={composerRef}
                 status={composerStatus}
                 statusLayout={composerStatusLayout}
+                layout={layout}
                 slashOpen={Boolean(slashSurface)}
                 slashItems={slashItems}
                 slashSelection={slashSelection}
@@ -1386,9 +1416,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
         </box>
       ) : (
         <>
-          <ChatHistory snapshot={snapshot} />
+          <ChatHistory snapshot={snapshot} layout={layout} />
 
-      {snapshot.error ? <ErrorBanner message={snapshot.error} /> : null}
+      {snapshot.error ? <ErrorBanner message={snapshot.error} layout={layout} /> : null}
 
       {snapshot.plan?.status === 'awaiting_approval' ? (
         <box flexDirection="column" border borderColor={COLOR.user} padding={1} backgroundColor={COLOR.panel}>
@@ -1444,7 +1474,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
       {approval ? (() => {
         const details = approvalCardDetails(approval.prompt);
         return (
-          <box flexDirection="column" border borderColor={COLOR.danger} paddingLeft={1} paddingRight={1} flexShrink={0} backgroundColor={COLOR.panel}>
+          <box flexDirection="column" border borderColor={COLOR.danger} paddingLeft={1} paddingRight={1} flexShrink={0} backgroundColor={COLOR.panel} marginLeft={layout.outerPadding} marginRight={layout.outerPadding}>
             <text fg={COLOR.dangerSoft} wrapMode="none"><strong>Approval required</strong></text>
             <text fg={COLOR.dangerSoft} wrapMode="none">Action  {details.action}</text>
             <text fg={COLOR.muted} wrapMode="none">Where   {details.location}</text>
@@ -1687,6 +1717,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, on
           editorRef={composerRef}
           status={composerStatus}
           statusLayout={composerStatusLayout}
+          layout={layout}
           slashOpen={Boolean(slashSurface)}
           slashItems={slashItems}
           slashSelection={slashSelection}
