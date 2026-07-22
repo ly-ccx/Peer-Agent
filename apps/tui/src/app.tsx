@@ -446,8 +446,8 @@ function ErrorBanner({
   readonly layout: ReturnType<typeof responsiveLayout>;
 }) {
   return (
-    <box height={1} flexShrink={0} paddingLeft={layout.outerPadding} paddingRight={layout.outerPadding}>
-      <text fg={COLOR.dangerSoft} wrapMode="none">Error: {message}</text>
+    <box flexShrink={0} paddingLeft={layout.outerPadding} paddingRight={layout.outerPadding}>
+      <text fg={COLOR.dangerSoft} wrapMode="word">Error: {message}</text>
     </box>
   );
 }

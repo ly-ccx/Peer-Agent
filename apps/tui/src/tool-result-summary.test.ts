@@ -93,13 +93,14 @@ describe('tool result summary', () => {
     expect(resolved.toolName).toBe('Bash');
   });
 
-  test('thinking status label uses a leading cursor spinner', () => {
+  test('thinking status label uses a trailing three-dot animation without a leading spinner', () => {
     expect(thinkingSpinnerGlyph(0)).toBe('⠋');
     expect(thinkingSpinnerGlyph(1)).toBe('⠙');
-    expect(thinkingStatusLabel(0, false)).toBe('⠋ Thinking');
-    expect(thinkingStatusLabel(1, false)).toBe('⠙ Thinking');
-    expect(thinkingStatusLabel(2, true)).toBe('⠹ Thinking');
-    expect(thinkingStatusLabel(3, true)).toBe('⠸ Thinking');
+    expect(thinkingStatusLabel(0, false)).toBe('Thinking.');
+    expect(thinkingStatusLabel(1, false)).toBe('Thinking..');
+    expect(thinkingStatusLabel(2, true)).toBe('Thinking...');
+    expect(thinkingStatusLabel(3, true)).toBe('Thinking.');
+    expect(thinkingStatusLabel(0, false)).not.toMatch(/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
   });
 
   test('composer running status line pairs spinner with status label', () => {

@@ -116,7 +116,7 @@ describe('TUI app layout', () => {
     expect(historySource).toContain('segments.map((segment, segmentIndex)');
   });
 
-  test('keeps the thinking spinner docked above composer and animates it quickly', () => {
+  test('keeps the thinking status docked above composer and animates trailing dots quickly', () => {
     expect(appSource).toContain('const THINKING_SPINNER_INTERVAL_MS = 120;');
     const labelSource = appSource.slice(
       appSource.indexOf('function ThinkingStatusLabel'),
@@ -254,14 +254,16 @@ describe('TUI app layout', () => {
     expect(appSource).not.toContain('{slashSurface ? (');
   });
 
-  test('constrains long errors to a separate row so slash suggestions keep their reserved space', () => {
+  test('allows long errors to wrap on a dedicated banner so slash suggestions keep their reserved space', () => {
     const errorBannerSource = appSource.slice(
       appSource.indexOf('function ErrorBanner'),
       appSource.indexOf('function SlashCommandMenu'),
     );
 
-    expect(errorBannerSource).toContain('<box height={1} flexShrink={0}');
-    expect(errorBannerSource).toContain('wrapMode="none"');
+    expect(errorBannerSource).toContain('<box flexShrink={0}');
+    expect(errorBannerSource).not.toContain('height={1}');
+    expect(errorBannerSource).toContain('wrapMode="word"');
+    expect(errorBannerSource).not.toContain('wrapMode="none"');
     expect(appSource).toContain('<ErrorBanner message={snapshot.error} layout={layout} />');
     expect(appSource).toContain('const menuReserve = slashOpen');
     expect(appSource).toContain('paddingTop={menuReserve}');

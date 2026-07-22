@@ -271,9 +271,12 @@ export function thinkingSpinnerGlyph(frame: number): string {
   return THINKING_CURSOR_FRAMES[Math.abs(frame) % THINKING_CURSOR_FRAMES.length] ?? '⠋';
 }
 
-/** Leading cursor spinner for pending assistant placeholders. */
+const THINKING_DOT_FRAMES = ['.', '..', '...'] as const;
+
+/** Trailing three-dot animation for pending assistant placeholders (no leading spinner). */
 export function thinkingStatusLabel(frame: number, _hasThinkingContent = false): string {
-  return `${thinkingSpinnerGlyph(frame)} Thinking`;
+  const dots = THINKING_DOT_FRAMES[Math.abs(frame) % THINKING_DOT_FRAMES.length] ?? '.';
+  return `Thinking${dots}`;
 }
 
 /**
