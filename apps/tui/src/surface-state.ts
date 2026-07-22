@@ -1,4 +1,4 @@
-export type TuiPickerKind = 'command' | 'mode' | 'model' | 'permission' | 'resume' | 'help' | 'language' | 'theme';
+export type TuiPickerKind = 'command' | 'mode' | 'model' | 'permission' | 'resume' | 'help' | 'language' | 'theme' | 'skill' | 'mcp';
 
 export type TuiSurface =
   | { readonly type: 'composer' }

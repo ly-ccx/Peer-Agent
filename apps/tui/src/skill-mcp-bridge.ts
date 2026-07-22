@@ -37,7 +37,7 @@ type SharedProvider = Readonly<{
   ): Promise<RuntimeSdkProviderExecution | null>;
 }>;
 
-type SkillSummary = Readonly<{
+export type TuiSkillSummary = Readonly<{
   skillId: string;
   name?: string;
   description?: string;
@@ -45,14 +45,28 @@ type SkillSummary = Readonly<{
   enabled?: boolean;
 }>;
 
+export type TuiMcpServerSummary = Readonly<{
+  id: string;
+  displayName: string;
+  enabled: boolean;
+  toolsCount: number;
+  visibleToolsCount: number;
+  health: Readonly<{ status?: string; message?: string }>;
+  tools: readonly Readonly<{ name?: string; toolName?: string; description?: string; visible?: boolean }>[];
+}>;
+
 type SkillStore = Readonly<{
-  listSkills(): readonly SkillSummary[];
+  listSkills(): readonly TuiSkillSummary[];
   readSkillContext(skillId: string): unknown;
+  refresh(): readonly TuiSkillSummary[];
+  enableSkill(skillId: string): readonly TuiSkillSummary[];
+  disableSkill(skillId: string): readonly TuiSkillSummary[];
 }>;
 
 type McpRegistry = Readonly<{
   listCapabilityManifests(): readonly Readonly<Record<string, unknown>>[];
-  listServers(): readonly Readonly<Record<string, unknown>>[];
+  listInstalled(): readonly TuiMcpServerSummary[];
+  setEnabled(serverId: string, enabled: boolean): unknown;
   path?: string;
 }>;
 
@@ -79,7 +93,7 @@ function normalizeInputSchema(value: unknown): unknown {
     : { type: 'object', additionalProperties: true };
 }
 
-function skillToolDefinition(skill: SkillSummary): RuntimeToolDefinition {
+function skillToolDefinition(skill: TuiSkillSummary): RuntimeToolDefinition {
   const description = [skill.description, skill.whenToUse].filter(Boolean).join('\n');
   return {
     name: `skill__${skill.skillId}`,
@@ -149,6 +163,17 @@ export function createTuiSkillMcpBridge(options: SkillMcpBridgeOptions) {
     .map(skillToolDefinition);
 
   const listMcpTools = (): readonly RuntimeToolDefinition[] => mcpToolDefinitions(mcpRegistry);
+  const listSkills = (): readonly TuiSkillSummary[] => skillStore.listSkills();
+  const refreshSkills = (): readonly TuiSkillSummary[] => skillStore.refresh();
+  const setSkillEnabled = (skillId: string, enabled: boolean): readonly TuiSkillSummary[] => enabled
+    ? skillStore.enableSkill(skillId)
+    : skillStore.disableSkill(skillId);
+  const listMcpServers = (): readonly TuiMcpServerSummary[] => mcpRegistry.listInstalled();
+  const refreshMcp = (): readonly TuiMcpServerSummary[] => mcpRegistry.listInstalled();
+  const setMcpServerEnabled = (serverId: string, enabled: boolean): readonly TuiMcpServerSummary[] => {
+    mcpRegistry.setEnabled(serverId, enabled);
+    return mcpRegistry.listInstalled();
+  };
 
   const toolDefinitions = (): readonly RuntimeToolDefinition[] => [
     ...listSkillTools(),
@@ -208,6 +233,12 @@ export function createTuiSkillMcpBridge(options: SkillMcpBridgeOptions) {
     toolDefinitions,
     listSkillTools,
     listMcpTools,
+    listSkills,
+    refreshSkills,
+    setSkillEnabled,
+    listMcpServers,
+    refreshMcp,
+    setMcpServerEnabled,
     isCapability,
     isSkillCapability,
     isMcpCapability,

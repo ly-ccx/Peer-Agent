@@ -79,6 +79,37 @@ describe('TuiSkillMcpBridge', () => {
     }
   });
 
+  test('manages Skill and MCP enabled state through the shared stores', () => {
+    let skillEnabled = true;
+    let serverEnabled = true;
+    let skillRefreshes = 0;
+    const skillStore = {
+      listSkills: () => [{ skillId: 'demo', name: 'Demo', enabled: skillEnabled }],
+      readSkillContext: () => ({}),
+      refresh() { skillRefreshes += 1; return this.listSkills(); },
+      enableSkill() { skillEnabled = true; return this.listSkills(); },
+      disableSkill() { skillEnabled = false; return this.listSkills(); },
+    };
+    const mcpRegistry = {
+      listCapabilityManifests: () => [],
+      listInstalled: () => [{ id: 'demo', displayName: 'Demo MCP', enabled: serverEnabled, toolsCount: 1, visibleToolsCount: 1, health: { status: 'connected' }, tools: [{ name: 'echo' }] }],
+      setEnabled(_id: string, enabled: boolean) { serverEnabled = enabled; },
+    };
+    const bridge = createTuiSkillMcpBridge({
+      userDataPath: '/unused-peer-home',
+      skillStore,
+      mcpRegistry,
+      skillProvider: { capabilityPrefix: 'local.skill.', executeCapability: async () => null },
+      mcpProvider: { capabilityPrefix: 'local.mcp.', executeCapability: async () => null },
+    });
+
+    expect(bridge.setSkillEnabled('demo', false)[0]?.enabled).toBe(false);
+    expect(bridge.refreshSkills()[0]?.skillId).toBe('demo');
+    expect(skillRefreshes).toBe(1);
+    expect(bridge.setMcpServerEnabled('demo', false)[0]?.enabled).toBe(false);
+    expect(bridge.refreshMcp()[0]?.tools[0]?.name).toBe('echo');
+  });
+
   test('routes projected Skill and MCP capabilities to their providers', async () => {
     const calls: string[] = [];
     const skillStore = {
@@ -88,6 +119,9 @@ describe('TuiSkillMcpBridge', () => {
         enabled: true,
       }],
       readSkillContext: () => ({}),
+      refresh() { return this.listSkills(); },
+      enableSkill() { return this.listSkills(); },
+      disableSkill() { return this.listSkills(); },
     };
     const mcpRegistry = {
       listCapabilityManifests: () => [{
@@ -96,7 +130,8 @@ describe('TuiSkillMcpBridge', () => {
         description: 'Echo a message',
         inputSchema: { type: 'object' },
       }],
-      listServers: () => [],
+      listInstalled: () => [],
+      setEnabled: () => ({}),
     };
     const provider = (prefix: string) => ({
       capabilityPrefix: prefix,

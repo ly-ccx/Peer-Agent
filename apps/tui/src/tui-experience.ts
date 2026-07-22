@@ -168,6 +168,8 @@ export function applyTuiCommand(state: TuiExperienceState, command: TuiCommand):
   if (action.type === 'open-permission-picker') return openPicker(state, 'permission');
   if (action.type === 'open-language-picker') return openPicker(state, 'language');
   if (action.type === 'open-theme-picker') return openPicker(state, 'theme');
+  if (action.type === 'open-skill-picker') return openPicker(state, 'skill');
+  if (action.type === 'open-mcp-picker') return openPicker(state, 'mcp');
   if (action.type === 'open-resume-picker') return openPicker(state, 'resume');
   if (action.type === 'show-help') return openPicker(state, 'help');
   return escapeFooter(state);

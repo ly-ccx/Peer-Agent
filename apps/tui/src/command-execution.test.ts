@@ -5,6 +5,8 @@ import { createTuiExperienceState, syncSlashSuggestions, TUI_COMMANDS } from './
 
 const quit = TUI_COMMANDS.find((command) => command.id === 'quit')!;
 const compact = TUI_COMMANDS.find((command) => command.id === 'compact')!;
+const skill = TUI_COMMANDS.find((command) => command.id === 'skill')!;
+const mcp = TUI_COMMANDS.find((command) => command.id === 'mcp')!;
 
 function harness() {
   let state = createTuiExperienceState('chat');
@@ -48,6 +50,14 @@ describe('TUI command execution', () => {
     executeTuiCommand(quit, subject.handlers);
 
     expect(subject.quitCount).toBe(1);
+  });
+
+  test('opens Skill and MCP management pickers through the shared dispatcher', () => {
+    const subject = harness();
+    executeTuiCommand(skill, subject.handlers);
+    expect(subject.state.surface).toMatchObject({ type: 'picker', picker: 'skill' });
+    executeTuiCommand(mcp, subject.handlers);
+    expect(subject.state.surface).toMatchObject({ type: 'picker', picker: 'mcp' });
   });
 
   test('executes /compact through the shared dispatcher and surfaces notice', () => {

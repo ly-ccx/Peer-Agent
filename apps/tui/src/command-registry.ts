@@ -8,6 +8,8 @@ export type TuiCommandAction =
   | { readonly type: 'open-permission-picker' }
   | { readonly type: 'open-language-picker' }
   | { readonly type: 'open-theme-picker' }
+  | { readonly type: 'open-skill-picker' }
+  | { readonly type: 'open-mcp-picker' }
   | { readonly type: 'show-help' }
   | { readonly type: 'clear-chat' }
   | { readonly type: 'compact-context' }
@@ -51,6 +53,8 @@ export const TUI_COMMAND_REGISTRY: readonly TuiCommandDefinition[] = Object.free
     keywords: ['appearance', 'light', 'dark', 'system', 'color', 'palette', 'frost', '白', '黑', '浅色', '深色'],
     action: { type: 'open-theme-picker' },
   },
+  { id: 'skill', label: 'Skills', description: 'Browse, enable, disable, refresh, insert, or invoke Skills', keywords: ['capability', 'manage'], action: { type: 'open-skill-picker' } },
+  { id: 'mcp', label: 'MCP Servers', description: 'Manage MCP Servers and inspect tool status', keywords: ['server', 'tools', 'capability'], action: { type: 'open-mcp-picker' } },
   { id: 'clear', label: 'Clear chat', description: 'Clear messages, model context, and errors', keywords: ['reset', 'conversation', 'error'], action: { type: 'clear-chat' } },
   { id: 'compact', label: 'Compact context', description: 'Compress model context with a structural summary; UI transcript stays', keywords: ['compress', 'summary', 'context', 'tokens'], action: { type: 'compact-context' } },
   { id: 'resume', label: 'Resume session', description: 'Restore and continue a saved conversation', keywords: ['session', 'conversation', 'history', 'restore'], action: { type: 'open-resume-picker' } },

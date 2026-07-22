@@ -10,6 +10,7 @@ import { MarkdownView } from './markdown-view.tsx';
 import { copyTextToClipboard, selectionCopyNotice } from './tui-clipboard.ts';
 import { buildTuiHelpSections } from './command-registry.ts';
 import { executeTuiCommand } from './command-execution.ts';
+import type { TuiMcpServerSummary, TuiSkillSummary } from './skill-mcp-bridge.ts';
 import {
   createTuiConversationPersistence,
   resumeTuiConversation,
@@ -899,6 +900,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const [approvalSelection, setApprovalSelection] = useState(0);
   const [planSelection, setPlanSelection] = useState(0);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
+  const [skills, setSkills] = useState<readonly TuiSkillSummary[]>(() => host.skillMcpBridge?.listSkills() ?? []);
+  const [mcpServers, setMcpServers] = useState<readonly TuiMcpServerSummary[]>(() => host.skillMcpBridge?.listMcpServers() ?? []);
   const renderer = useRenderer();
   const selectedTextRef = useRef('');
   const [hasTextSelection, setHasTextSelection] = useState(false);
@@ -941,6 +944,12 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const commandSurface = experience.surface.type === 'picker' && experience.surface.picker === 'command'
     ? experience.surface
     : null;
+  const skillSurface = experience.surface.type === 'picker' && experience.surface.picker === 'skill'
+    ? experience.surface
+    : null;
+  const mcpSurface = experience.surface.type === 'picker' && experience.surface.picker === 'mcp'
+    ? experience.surface
+    : null;
   const slashSurface = experience.surface.type === 'slash-suggestions'
     ? experience.surface
     : null;
@@ -954,6 +963,12 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     : [];
   const slashItems = slashSurface
     ? filterTuiCommands(slashSurface.query, { goalStatus }, locale)
+    : [];
+  const skillItems = skillSurface
+    ? skills.filter((skill) => `${skill.name ?? ''} ${skill.skillId} ${skill.description ?? ''}`.toLowerCase().includes(skillSurface.query.toLowerCase()))
+    : [];
+  const mcpItems = mcpSurface
+    ? mcpServers.filter((server) => `${server.displayName} ${server.id}`.toLowerCase().includes(mcpSurface.query.toLowerCase()))
     : [];
   const modeSurface = experience.surface.type === 'picker' && experience.surface.picker === 'mode'
     ? experience.surface
@@ -1656,6 +1671,64 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         return;
       }
     }
+    if (skillSurface || mcpSurface) {
+      const items = skillSurface ? skillItems : mcpItems;
+      const surface = (skillSurface ?? mcpSurface)!;
+      const selectedIndex = Math.min(surface.selectedIndex, Math.max(0, items.length - 1));
+      if (key.name === 'escape') {
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+        return;
+      }
+      if (key.name === 'up' || key.name === 'down') {
+        const direction = key.name === 'up' ? -1 : 1;
+        setExperience((current) => current.surface.type === 'picker'
+          ? { ...current, surface: { ...current.surface, selectedIndex: items.length === 0 ? 0 : (current.surface.selectedIndex + direction + items.length) % items.length } }
+          : current);
+        return;
+      }
+      if (key.name === 'r') {
+        if (skillSurface) setSkills(host.skillMcpBridge?.refreshSkills() ?? []);
+        else setMcpServers(host.skillMcpBridge?.refreshMcp() ?? []);
+        setCommandNotice(`${skillSurface ? 'Skills' : 'MCP Servers'} refreshed`);
+        return;
+      }
+      if (key.name === 'space') {
+        if (skillSurface) {
+          const skill = skillItems[selectedIndex] as TuiSkillSummary | undefined;
+          if (skill) setSkills(host.skillMcpBridge?.setSkillEnabled(skill.skillId, skill.enabled === false) ?? []);
+        } else {
+          const server = mcpItems[selectedIndex] as TuiMcpServerSummary | undefined;
+          if (server) setMcpServers(host.skillMcpBridge?.setMcpServerEnabled(server.id, !server.enabled) ?? []);
+        }
+        return;
+      }
+      if (skillSurface && (key.name === 'return' || key.name === 'enter')) {
+        const skill = skillItems[selectedIndex] as TuiSkillSummary | undefined;
+        if (!skill) return;
+        const prompt = `Use the ${skill.name ?? skill.skillId} Skill for this request: `;
+        setExperience((current) => escapeFooter(current));
+        if (key.shift) void controller.send(prompt);
+        else {
+          composerRef.current?.setText(prompt);
+          setComposerDraft(prompt);
+          queueMicrotask(() => composerRef.current?.focus());
+        }
+        return;
+      }
+      if (key.name === 'backspace') {
+        setExperience((current) => current.surface.type === 'picker'
+          ? { ...current, surface: { ...current.surface, query: current.surface.query.slice(0, -1), selectedIndex: 0 } }
+          : current);
+        return;
+      }
+      if (!key.ctrl && !key.meta && key.sequence.length === 1 && key.sequence >= ' ') {
+        setExperience((current) => current.surface.type === 'picker'
+          ? { ...current, surface: { ...current.surface, query: `${current.surface.query}${key.sequence}`, selectedIndex: 0 } }
+          : current);
+      }
+      return;
+    }
     if (commandSurface) {
       if (key.name === 'escape') {
         setExperience((current) => escapeFooter(current));
@@ -2095,6 +2168,39 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           {pickerLayout.showHints ? (
             <text fg={COLOR.muted} wrapMode="none">enter / esc close</text>
           ) : null}
+        </box>
+      ) : null}
+
+      {skillSurface || mcpSurface ? (
+        <box
+          position="absolute"
+          width="100%"
+          height="100%"
+          justifyContent="center"
+          alignItems="center"
+          backgroundColor={COLOR.background}
+        >
+          <box width={Math.min(76, Math.max(44, terminal.width - 6))} maxHeight={Math.max(12, terminal.height - 6)} flexDirection="column" border borderStyle="rounded" borderColor={COLOR.accent} backgroundColor={COLOR.panel} paddingLeft={1} paddingRight={1}>
+            <text fg={COLOR.text}><b>{skillSurface ? 'Skills' : 'MCP Servers'}</b></text>
+            <text fg={COLOR.muted}>{skillSurface ? 'Enter insert · Shift+Enter invoke · Space toggle · R refresh · Esc close' : 'Space toggle · R refresh · Esc close'}</text>
+            {(skillSurface ? skillItems : mcpItems).map((item, index) => {
+              const selected = index === (skillSurface ?? mcpSurface)!.selectedIndex;
+              if (skillSurface) {
+                const skill = item as TuiSkillSummary;
+                return <box key={skill.skillId} flexDirection="column" backgroundColor={selected ? COLOR.selection : undefined} paddingLeft={1}>
+                  <text fg={skill.enabled === false ? COLOR.muted : COLOR.text}>{selected ? '› ' : '  '}{skill.enabled === false ? '○' : '●'} {skill.name ?? skill.skillId}</text>
+                  <text fg={COLOR.muted} wrapMode="none">  {skill.description ?? skill.skillId}</text>
+                </box>;
+              }
+              const server = item as TuiMcpServerSummary;
+              return <box key={server.id} flexDirection="column" backgroundColor={selected ? COLOR.selection : undefined} paddingLeft={1}>
+                <text fg={server.enabled ? COLOR.text : COLOR.muted}>{selected ? '› ' : '  '}{server.enabled ? '●' : '○'} {server.displayName}</text>
+                <text fg={COLOR.muted} wrapMode="none">  {server.health?.status ?? 'unknown'} · {server.visibleToolsCount}/{server.toolsCount} tools · {server.tools.map((tool) => tool.name ?? tool.toolName).filter(Boolean).join(', ') || 'no tools'}</text>
+              </box>;
+            })}
+            {(skillSurface ? skillItems : mcpItems).length === 0 ? <text fg={COLOR.muted}>No matching items. Press R to refresh.</text> : null}
+            <text fg={COLOR.muted}>Search: {(skillSurface ?? mcpSurface)!.query || 'type to filter'}</text>
+          </box>
         </box>
       ) : null}
 

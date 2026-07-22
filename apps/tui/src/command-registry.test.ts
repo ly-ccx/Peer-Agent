@@ -18,6 +18,8 @@ describe('TUI command registry', () => {
       'permissions',
       'language',
       'theme',
+      'skill',
+      'mcp',
       'clear',
       'compact',
       'resume',
