@@ -476,6 +476,18 @@ describe('TUI app layout', () => {
     expect(appSource).not.toMatch(/\bborder\s+borderColor=/);
   });
 
+  test('uses the main interaction area plus a right Goal status area without a persistent left navigation', () => {
+    expect(appSource).toContain('<box flexDirection="row" width="100%" height="100%" gap={1}>');
+    expect(appSource).toContain("goalLayout.mode === 'side-panel'");
+    expect(appSource).toContain('<GoalStatusPanel view={goalView} width={goalLayout.panelWidth} />');
+    expect(appSource).toContain("goalLayout.mode === 'compact-summary'");
+    expect(appSource).toContain('<GoalCompactSummary view={goalView} />');
+    expect(appSource).not.toContain('LeftNavigation');
+  });
+
+  test('hides ordinary Goal tool payloads from both assistant and tool chat entries', () => {
+    expect(appSource.match(/if \(isGoalStatusToolPresentation\(presentation\)\) return null;/g)).toHaveLength(2);
+  });
 
 });
 

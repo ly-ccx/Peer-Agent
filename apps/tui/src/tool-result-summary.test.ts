@@ -6,6 +6,7 @@ import {
   createToolPresentation,
   formatToolResultSummary,
   formatInteractionToolDetail,
+  isGoalStatusToolPresentation,
   toolArgumentSummary,
   parseLegacyToolContent,
   resolveToolPresentation,
@@ -161,6 +162,19 @@ describe('tool result summary', () => {
       question: 'Choose branch strategy?',
       options: ['1', '2'],
     })).toContain('Choose branch strategy?');
+  });
+
+  test('identifies ordinary Goal tools for chat noise reduction', () => {
+    expect(isGoalStatusToolPresentation(createToolPresentation({
+      capabilityId: 'local.goal.update',
+      status: 'completed',
+      outputPreview: { ok: true, taskId: 'internal-task-id' },
+    }))).toBe(true);
+    expect(isGoalStatusToolPresentation(createToolPresentation({
+      capabilityId: 'local.interaction.request_user_input',
+      status: 'completed',
+      outputPreview: { question: 'Continue?' },
+    }))).toBe(false);
   });
 
 });

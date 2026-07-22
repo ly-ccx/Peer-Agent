@@ -13,6 +13,12 @@ export type ToolPresentationStatus =
   | 'running'
   | 'unknown';
 
+const GOAL_STATUS_CAPABILITY_IDS = new Set([
+  'local.goal.create',
+  'local.goal.update',
+  'local.goal.read',
+]);
+
 export interface ToolPresentation {
   readonly capabilityId: string;
   readonly toolName: string;
@@ -412,6 +418,11 @@ export function resolveToolPresentation(
     };
   }
   return parseLegacyToolContent(message.content);
+}
+
+export function isGoalStatusToolPresentation(presentation: ToolPresentation): boolean {
+  return GOAL_STATUS_CAPABILITY_IDS.has(presentation.capabilityId)
+    || ['goal_create_plan', 'goal_update_task', 'goal_get_plan'].includes(presentation.toolName);
 }
 
 export function toolPresentationContent(presentation: ToolPresentation): string {

@@ -52,6 +52,12 @@ import {
 } from './plan-mode.ts';
 import { createTuiGoalRunner } from './goal-mode.ts';
 import {
+  goalStatusFromRuntime,
+  goalStatusFromSharedPlan,
+  goalStatusLayout,
+} from './goal-status-model.ts';
+import { GoalCompactSummary, GoalStatusPanel } from './goal-status-view.tsx';
+import {
   buildModelPickerView,
   cycleModelPickerGroup,
   formatModelPickerGroupLabel,
@@ -87,6 +93,7 @@ import { composerEnterAction, runtimeControlAction } from './runtime-controls.ts
 import { composerContentWidth, responsiveLayout, responsivePickerLayout } from './responsive-layout.ts';
 import {
   animatedToolStatusGlyph,
+  isGoalStatusToolPresentation,
   resolveToolPresentation,
   thinkingSpinnerGlyph,
   thinkingStatusLabel,
@@ -257,6 +264,7 @@ function ChatHistory({
           const renderTool = (tool: (typeof legacyTools)[number], toolKey: string) => {
             const toolExpanded = expandedTools.has(toolKey);
             const presentation = resolveToolPresentation({ content: '', tool });
+            if (isGoalStatusToolPresentation(presentation)) return null;
             const headlineColor = toolStatusColor(presentation.status);
             const detailColor = presentation.status === 'failed' || presentation.status === 'denied'
               ? COLOR.toolFailed
@@ -391,6 +399,7 @@ function ChatHistory({
 
         const toolExpanded = expandedTools.has(message.id);
         const presentation = resolveToolPresentation(message);
+        if (isGoalStatusToolPresentation(presentation)) return null;
         const headlineColor = toolStatusColor(presentation.status);
         const detailColor = presentation.status === 'failed' || presentation.status === 'denied'
           ? COLOR.toolFailed
@@ -1065,6 +1074,10 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     triggerTokens: snapshot.triggerTokens,
   });
   const layout = responsiveLayout(terminal.width);
+  const goalView = goal
+    ? goalStatusFromRuntime(goal)
+    : goalStatusFromSharedPlan(sharedGoalPlan);
+  const goalLayout = goalStatusLayout(terminal.width);
   const pickerLayout = responsivePickerLayout(
     terminal.height,
     TUI_MODES.length,
@@ -1736,6 +1749,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       paddingTop={layout.outerPaddingY}
       paddingBottom={layout.outerPaddingY}
     >
+      <box flexDirection="row" width="100%" height="100%" gap={1}>
+        <box flexDirection="column" flexGrow={1} minWidth={0} height="100%" gap={1}>
       {isWelcome ? (
         <box flexGrow={1} flexDirection="column" justifyContent="center" alignItems="center" paddingLeft={layout.outerPadding} paddingRight={layout.outerPadding}>
           <box width="100%" flexDirection="column" alignItems="center" gap={2}>
@@ -1821,54 +1836,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         </box>
       ) : null}
 
-      {goal ? (
-        <box flexDirection="column" border borderStyle="rounded" borderColor={COLOR.success} padding={1} backgroundColor={COLOR.panel} marginLeft={layout.outerPadding} marginRight={layout.outerPadding}>
-          <text fg={COLOR.success}><strong>Goal</strong> · {goal.title} · {goal.status}</text>
-          <text fg={COLOR.muted}>source {goal.sourcePlanId} · {goal.tasks.filter((task) => task.status === 'completed').length}/{goal.tasks.length} tasks</text>
-          {goal.tasks.map((task) => (
-            <text
-              key={task.taskId}
-              fg={task.status === 'completed'
-                ? COLOR.success
-                : task.status === 'running'
-                  ? COLOR.diffHunk
-                  : task.status === 'failed' || task.status === 'blocked'
-                    ? COLOR.danger
-                    : COLOR.muted}
-            >
-              {task.status === 'completed' ? '✓' : task.status === 'running' ? '▶' : task.status === 'failed' || task.status === 'blocked' ? '!' : '○'} {task.title}
-              {task.reason ? ` · ${task.reason}` : ''}
-            </text>
-          ))}
-          <text fg={COLOR.muted}>[p] Pause · [r] Resume · [c] Cancel</text>
-        </box>
-      ) : sharedGoalPlan ? (
-        <box flexDirection="column" border borderStyle="rounded" borderColor={COLOR.success} padding={1} backgroundColor={COLOR.panel} marginLeft={layout.outerPadding} marginRight={layout.outerPadding}>
-          <text fg={COLOR.success}>
-            <strong>Goal plan</strong> · {String(sharedGoalPlan.title ?? sharedGoalPlan.goal ?? sharedGoalPlan.planId)} · {String(sharedGoalPlan.status ?? 'unknown')}
-          </text>
-          <text fg={COLOR.muted}>
-            id {String(sharedGoalPlan.planId ?? '')} · {
-              Array.isArray(sharedGoalPlan.tasks)
-                ? `${sharedGoalPlan.tasks.filter((task: any) => task?.status === 'completed').length}/${sharedGoalPlan.tasks.length} tasks`
-                : '0/0 tasks'
-            }
-          </text>
-          {(Array.isArray(sharedGoalPlan.tasks) ? sharedGoalPlan.tasks : []).slice(0, 8).map((task: any) => (
-            <text
-              key={String(task?.taskId ?? task?.title)}
-              fg={task?.status === 'completed'
-                ? COLOR.success
-                : task?.status === 'running'
-                  ? COLOR.diffHunk
-                  : task?.status === 'failed' || task?.status === 'blocked'
-                    ? COLOR.danger
-                    : COLOR.muted}
-            >
-              {task?.status === 'completed' ? '✓' : task?.status === 'running' ? '▶' : task?.status === 'failed' || task?.status === 'blocked' ? '!' : '○'} {String(task?.title ?? task?.taskId ?? '')}
-            </text>
-          ))}
-          <text fg={COLOR.muted}>shared store · ~/.peer-agent/goal-plans</text>
+      {goalView && goalLayout.mode === 'compact-summary' ? (
+        <box flexShrink={0} marginLeft={layout.outerPadding} marginRight={layout.outerPadding}>
+          <GoalCompactSummary view={goalView} />
         </box>
       ) : null}
 
@@ -2198,6 +2168,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       )}
         </>
       )}
+        </box>
+        {goalView && goalLayout.mode === 'side-panel' ? (
+          <GoalStatusPanel view={goalView} width={goalLayout.panelWidth} />
+        ) : null}
+      </box>
     </box>
   );
 }
