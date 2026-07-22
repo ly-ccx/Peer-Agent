@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import type { TextareaRenderable } from '@opentui/core';
 import { useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } from '@opentui/react';
 import type { LocalAccessLevel } from '@peer-agent/protocol';
-import type { RuntimeGoalSnapshot } from '@peer-agent/runtime-sdk';
 import type { RuntimeModelSelection } from '@peer-agent/runtime-node';
 
 import { B3Wordmark } from './b3-wordmark-view.tsx';
@@ -51,9 +50,8 @@ import {
   PLAN_APPROVAL_OPTIONS,
   planDecisionForKey,
 } from './plan-mode.ts';
-import { createTuiGoalRunner } from './goal-mode.ts';
+import { createTuiSharedGoalRunner } from './goal-runner-adapter.ts';
 import {
-  goalStatusFromRuntime,
   goalStatusFromSharedPlan,
   goalStatusLayout,
 } from './goal-status-model.ts';
@@ -270,9 +268,10 @@ function ChatHistory({
             const detailColor = presentation.status === 'failed' || presentation.status === 'denied'
               ? COLOR.toolFailed
               : COLOR.toolDetail;
+            // Collapsed tools show only the green headline; expand to reveal details.
             const detailLines = toolExpanded
               ? presentation.detail.split(/\r?\n/).filter((line) => line.trim().length > 0)
-              : presentation.detailLines;
+              : [];
             return (
               <box
                 key={toolKey}
@@ -405,9 +404,10 @@ function ChatHistory({
         const detailColor = presentation.status === 'failed' || presentation.status === 'denied'
           ? COLOR.toolFailed
           : COLOR.toolDetail;
+        // Collapsed tools show only the green headline; expand to reveal details.
         const detailLines = toolExpanded
           ? presentation.detail.split(/\r?\n/).filter((line) => line.trim().length > 0)
-          : presentation.detailLines;
+          : [];
         return (
           <box
             key={message.id}
@@ -855,23 +855,17 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const terminal = useTerminalDimensions();
   const controllerRef = useRef<ChatController | null>(null);
   const composerRef = useRef<TextareaRenderable | null>(null);
-  const goalRunner = useMemo(() => createTuiGoalRunner({
-    sessionId: 'tui-chat',
-    executeTask: async (task, context) => {
-      const active = controllerRef.current;
-      if (!active) return { status: 'blocked', reason: 'chat_controller_unavailable' };
-      return active.executeGoalTask(task, context);
-    },
-  }), []);
+  // 与 Desktop 对齐：goal 模式的自驱执行由共享 Goal Runner（goal-plan-store
+  // + goal-runner.mjs）承担；此处只保留占位 ref，真实创建在 controller 就绪后
+  // （见下方 useMemo(createTuiSharedGoalRunner)），因为 runGoalTurn 要驱动 chat 会话。
   const planCoordinator = useMemo(() => createPlanCoordinator({
     sessionId: 'tui-chat',
     goalExecution: {
-      create: async ({ plan }) => {
-        const goal = goalRunner.create(plan);
-        void goalRunner.start(goal.goalId);
-      },
+      // Plan 审批通过后的执行统一交给共享 Runner（由 goal-runner-adapter 里
+      // store onChange 的 auto-start 闸门负责）；这里不再用旧局部 goalRunner。
+      create: () => {},
     },
-  }), [goalRunner]);
+  }), []);
   const selectedModelRef = useRef<RuntimeModelSelection | null>(
     modelSelection?.getSelection() ?? null,
   );
@@ -893,9 +887,21 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   );
   controllerRef.current = controller;
   const [snapshot, setSnapshot] = useState(() => controller.getSnapshot());
-  const [goal, setGoal] = useState<RuntimeGoalSnapshot | null>(null);
+  // 与 Desktop 对齐的共享 Goal Runner：goal_create_plan 写盘后由 store onChange
+  // 的 auto-start 闸门 kick；runGoalTurn 通过 controller.send 驱动会话继续执行。
+  // 仅在共享 store 存在（host.goalBridge）时创建；测试 host 可能不带 bridge。
+  const goalRunner = useMemo(() => {
+    if (!host.goalBridge) return null;
+    try {
+      return createTuiSharedGoalRunner({ bridge: host.goalBridge, chat: controller });
+    } catch {
+      return null;
+    }
+  }, [host, controller]);
   // Shared Desktop goal-plan store snapshot for this conversation (if any).
   const [sharedGoalPlan, setSharedGoalPlan] = useState<any | null>(null);
+  // Runner 领域事件触发的轻量重拉信号（started/tickCompleted/blocked/... 时 +1）。
+  const [goalEventTick, setGoalEventTick] = useState(0);
   const [approval, setApproval] = useState<PendingApproval | null>(null);
   const [approvalSelection, setApprovalSelection] = useState(0);
   const [planSelection, setPlanSelection] = useState(0);
@@ -953,9 +959,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const slashSurface = experience.surface.type === 'slash-suggestions'
     ? experience.surface
     : null;
-  const goalStatus = goal?.status === 'paused'
+  const goalStatus = sharedGoalPlan?.runner?.status === 'paused'
     ? 'paused'
-    : goal && ['pending', 'running'].includes(goal.status)
+    : sharedGoalPlan && ['accepted', 'executing'].includes(String(sharedGoalPlan?.status ?? ''))
       ? 'running'
       : 'none';
   const commandItems = commandSurface
@@ -1091,9 +1097,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     triggerTokens: snapshot.triggerTokens,
   });
   const layout = responsiveLayout(terminal.width);
-  const goalView = goal
-    ? goalStatusFromRuntime(goal)
-    : goalStatusFromSharedPlan(sharedGoalPlan);
+  const goalView = goalStatusFromSharedPlan(sharedGoalPlan);
   const goalLayout = goalStatusLayout(terminal.width);
   const pickerLayout = responsivePickerLayout(
     terminal.height,
@@ -1147,7 +1151,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const isWelcome = snapshot.messages.length === 0
     && !approval
     && snapshot.plan?.status !== 'awaiting_approval'
-    && !goal
+    && !sharedGoalPlan
     && !snapshot.error
     && isComposerSurface;
 
@@ -1155,29 +1159,39 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     persistence.syncSnapshot(next);
     setSnapshot(next);
   }), [controller, persistence]);
-  useEffect(() => goalRunner.subscribe(setGoal), [goalRunner]);
+  useEffect(() => {
+    if (!goalRunner) return undefined;
+    // 用 runner 领域事件驱动轻量重拉（替代旧局部 RuntimeGoalController 订阅）。
+    const unsubscribe = goalRunner.subscribe(() => { setGoalEventTick((tick) => tick + 1); });
+    return unsubscribe;
+  }, [goalRunner]);
   useEffect(() => host.subscribeApproval((next) => {
     setApprovalSelection(0);
     setApproval(next);
   }), [host]);
   // Poll shared goal-plan store so CLI shows plans created via goal_create_plan.
+  // 用 getPlan 取全量 plan（含 tasks + progress overlay），
+  // 修此前 listPlansByConversation 只返回 index meta 导致的「0/0」。
   useEffect(() => {
     const bridge = host.goalBridge;
     if (!bridge) return undefined;
-    const conversationId = 'tui-chat';
+    const conversationId = snapshot.session?.conversationId ?? 'tui-chat';
     const refresh = () => {
       const plans = bridge.listPlansByConversation(conversationId);
-      const active = [...plans]
+      const activeMeta = [...plans]
         .reverse()
         .find((plan) => !['cancelled', 'completed', 'failed'].includes(String(plan?.status ?? '')))
         ?? plans.at(-1)
         ?? null;
-      setSharedGoalPlan(active);
+      const full = activeMeta && typeof bridge.getPlan === 'function'
+        ? bridge.getPlan(activeMeta.planId)
+        : activeMeta;
+      setSharedGoalPlan(full ?? null);
     };
     refresh();
     const timer = setInterval(refresh, 1200);
     return () => clearInterval(timer);
-  }, [host, snapshot.mode, snapshot.status, snapshot.messages.length]);
+  }, [host, snapshot.mode, snapshot.status, snapshot.messages.length, snapshot.session?.conversationId, goalEventTick]);
 
   const handleResumeConversationSummary = useCallback((selected: TuiConversationSummary | undefined) => {
     if (!selected) {
@@ -1235,21 +1249,23 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     },
     compactContext: async () => (await controller.compact()).notice,
     controlGoal: (control) => {
-      if (!goal) return 'No active goal';
-      if (control === 'pause' && goal.status === 'running') {
-        goalRunner.pause(goal.goalId);
+      if (!sharedGoalPlan || !goalRunner) return 'No active goal';
+      const planId = sharedGoalPlan.planId;
+      const runnerStatus = sharedGoalPlan.runner?.status ?? sharedGoalPlan.status;
+      if (control === 'pause' && runnerStatus === 'running') {
+        goalRunner.pause(planId);
         return 'Goal paused';
       }
-      if (control === 'resume' && goal.status === 'paused') {
-        void goalRunner.resume(goal.goalId);
+      if (control === 'resume' && runnerStatus === 'paused') {
+        void goalRunner.resume(planId);
         return 'Goal resumed';
       }
-      if (control === 'cancel' && ['pending', 'running', 'paused'].includes(goal.status)) {
+      if (control === 'cancel' && ['accepted', 'executing', 'running', 'paused'].includes(String(runnerStatus))) {
         controller.cancel();
-        goalRunner.cancel(goal.goalId);
+        goalRunner.clear(planId);
         return 'Goal cancelled';
       }
-      return `Goal is ${goal.status}; ${control} is unavailable`;
+      return `Goal is ${runnerStatus}; ${control} is unavailable`;
     },
     quit: onQuit,
     setNotice: setCommandNotice,
@@ -1264,7 +1280,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       keyName: key.name,
       ctrl: key.ctrl,
       meta: keyMeta,
-      isRunning: snapshot.status !== 'idle' || Boolean(goal && ['pending', 'running'].includes(goal.status)),
+      isRunning: snapshot.status !== 'idle' || goalStatus === 'running',
       hasSurface: experience.surface.type !== 'composer'
         && experience.surface.type !== 'slash-suggestions',
       hasDraft: composerDraft.length > 0,
@@ -1286,7 +1302,12 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     }
     if (control === 'interrupt') {
       controller.cancel();
-      if (goal && ['pending', 'running', 'paused'].includes(goal.status)) goalRunner.cancel(goal.goalId);
+      if (sharedGoalPlan && goalRunner) {
+        const runnerStatus = sharedGoalPlan.runner?.status ?? sharedGoalPlan.status;
+        if (['accepted', 'executing', 'running', 'paused'].includes(String(runnerStatus))) {
+          goalRunner.clear(sharedGoalPlan.planId);
+        }
+      }
       setCommandNotice('Interrupt requested');
       queueMicrotask(() => composerRef.current?.focus());
       return;
@@ -1764,18 +1785,20 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       }
       return;
     }
-    if (goal && !approval && snapshot.plan?.status !== 'awaiting_approval') {
-      if (key.name === 'p' && goal.status === 'running') {
-        goalRunner.pause(goal.goalId);
+    if (sharedGoalPlan && goalRunner && !approval && snapshot.plan?.status !== 'awaiting_approval') {
+      const planId = sharedGoalPlan.planId;
+      const runnerStatus = sharedGoalPlan.runner?.status ?? sharedGoalPlan.status;
+      if (key.name === 'p' && runnerStatus === 'running') {
+        goalRunner.pause(planId);
         return;
       }
-      if (key.name === 'r' && goal.status === 'paused') {
-        void goalRunner.resume(goal.goalId);
+      if (key.name === 'r' && runnerStatus === 'paused') {
+        void goalRunner.resume(planId);
         return;
       }
-      if (key.name === 'c' && ['pending', 'running', 'paused'].includes(goal.status)) {
+      if (key.name === 'c' && ['accepted', 'executing', 'running', 'paused'].includes(String(runnerStatus))) {
         controller.cancel();
-        goalRunner.cancel(goal.goalId);
+        goalRunner.clear(planId);
         return;
       }
     }
@@ -1881,6 +1904,20 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         </box>
       ) : (
         <>
+          <box
+            flexDirection="row"
+            justifyContent="space-between"
+            paddingLeft={layout.outerPadding}
+            paddingRight={layout.outerPadding}
+          >
+            <text fg={COLOR.textSoft} wrapMode="none">
+              <span fg={COLOR.accent}>◆</span>
+              <strong> PEER</strong>
+              <span fg={COLOR.muted}>  local capability agent</span>
+            </text>
+            <text fg={COLOR.muted} wrapMode="none">{modelLabel}</text>
+          </box>
+          <box height={1} marginLeft={layout.outerPadding} marginRight={layout.outerPadding} backgroundColor={COLOR.border} />
           <ChatHistory snapshot={snapshot} layout={layout} />
 
       {snapshot.error ? <ErrorBanner message={snapshot.error} layout={layout} /> : null}

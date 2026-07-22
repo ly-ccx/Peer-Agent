@@ -1182,7 +1182,9 @@ export function createGoalRunner({
     let scopeBaseline = null;
     let reanchorInterval = REANCHOR_MIN_INTERVAL;
     while (!session.cancelled) {
-      const plan = goalPlanStore.getPlan(planId);
+      // 用 let：verification gate 未过时会把状态从 completed 拨回 executing 并重取 plan
+      // （见下方 "plan = goalPlanStore.getPlan(...)"），const 会在该路径抛 TypeError。
+      let plan = goalPlanStore.getPlan(planId);
       if (!plan) return null;
 
       if (plan.status === 'completed' || hasCompletedProgress(plan)) {

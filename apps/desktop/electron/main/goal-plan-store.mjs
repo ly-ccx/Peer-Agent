@@ -1144,6 +1144,12 @@ function isInactivePlan(plan) {
 export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange } = {}) {
   const indexFile = path.join(storeDir, 'index.jsonl');
   const evidenceIndexFile = path.join(storeDir, 'evidence-index.jsonl');
+  // onChange 可变引用：Desktop 在构造时注入；TUI 需在建好 store 之后再挂
+  // auto-start 闸门（见 goal-runner-adapter），故暴露 setOnChange 修改同一引用。
+  let onChangeCallback = typeof onChange === 'function' ? onChange : null;
+  function setOnChange(next) {
+    onChangeCallback = typeof next === 'function' ? next : null;
+  }
 
   // 变更通知 Seam：任何写操作（create/revise/approve/setStatus/recordTaskEvidence/delete）
   // 完成后触发 onChange，使 main 进程可向 renderer 广播 'goalPlans:changed'。
@@ -1156,13 +1162,13 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
   // - changeKind: 变更分级（persist | delete | runner-progress | runner-state）
   // - runner: runner-progress 时附带最新 runner，便于 UI 本地 patch
   function notifyChanged(reason, planId, options = {}) {
-    if (typeof onChange !== 'function') return;
+    if (typeof onChangeCallback !== 'function') return;
     try {
       const conversationId =
         options.conversationId !== undefined
           ? options.conversationId ?? null
           : null;
-      onChange({
+      onChangeCallback({
         reason,
         planId: planId ?? null,
         conversationId,
@@ -2505,5 +2511,6 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     recordManualConfirmation,
     deletePlan,
     deletePlanByConversation,
+    setOnChange,
   };
 }

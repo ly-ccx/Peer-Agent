@@ -1,0 +1,172 @@
+/**
+ * TUI Goal Runner 接入层 —— 与 Desktop 主进程同一套自驱编排。
+ *
+ * 背景（为什么 CLI goal 模式此前「永远不生效」）：
+ * - Desktop 在 main.mjs 里 createGoalRunner，并在 goal-plan-store onChange
+ *   (changeKind === 'goal-accepted') 时立刻 kick Runner，驱动 runGoalTurn 循环；
+ * - TUI 此前只有 goal-bridge（goal 工具 + 共享 store + intake 门禁）和
+ *   goal-status 展示，没有任何东西在计划 accepted 后启动 Runner，
+ *   于是计划停在 `0/0 · accepted` 永远不动。
+ *
+ * 本模块做三件事，与 Desktop 对齐：
+ * 1. 直接复用 apps/desktop/electron/main/goal-runner.mjs 的 createGoalRunner
+ *    （同一份编排逻辑，不复制），chatRuntime.runGoalTurn 由 TUI chat 会话驱动；
+ * 2. 复用 goal-intake-convergence.mjs 的 auto-start 闸门纯函数，
+ *    只有 intake → accepted_goal 这一次领域跃迁会 kick Runner，Runner 自己写盘
+ *    触发的 change 不会反向自激；
+ * 3. 向 TUI 暴露 runner 状态订阅（供状态面板展示）与控制入口（/goal pause 等）。
+ *
+ * 与 Desktop 的差异（有意为之）：
+ * - explorerRunner / verifierRunner 传 null：TUI 暂无并行子会话执行器。
+ *   runner 已有降级逻辑（explorer 请求会 block 并说明原因；无 verifier 时
+ *   verification gate 走 evaluateVerificationGate 纯判定）。
+ */
+
+// @ts-expect-error -- shared .mjs modules ship without adjacent .d.ts（同 goal-bridge.ts 的处理）
+import { createGoalRunner } from '../../desktop/electron/main/goal-runner.mjs';
+// @ts-expect-error -- shared .mjs module without declarations
+import { shouldAutoStartAcceptedGoalRunnerFromChange } from '../../desktop/electron/main/goal-intake-convergence.mjs';
+
+import type { ChatController } from './chat-controller.ts';
+import type { TuiGoalBridge } from './goal-bridge.ts';
+
+export interface TuiGoalRunnerEvent {
+  readonly type: string;
+  readonly planId?: string;
+  readonly [key: string]: unknown;
+}
+
+export interface TuiSharedGoalRunner {
+  start(planId: string): Promise<unknown>;
+  pause(planId: string, reason?: string): unknown;
+  resume(planId: string): Promise<unknown>;
+  clear(planId: string): unknown;
+  getState(planId: string): unknown;
+  /** 订阅 runner 领域事件（started/tickCompleted/blocked/completed/failed/paused 等）。 */
+  subscribe(listener: (event: TuiGoalRunnerEvent) => void): () => void;
+}
+
+export interface TuiGoalTurnRuntime {
+  /** 等待当前 intake turn（若仍在跑）结束，再 kick Runner，避免与活跃 turn 冲突。 */
+  whenIdle(): Promise<void>;
+  /** Runner 每个 tick 通过它驱动 CLI chat 继续执行；对应 Desktop 的 runGoalTurn。 */
+  sendGoalTurn(content: string): Promise<void>;
+}
+
+function buildGoalRunnerMessage(plan: any, turnNumber: number): string {
+  const planLabel = plan?.title || plan?.goal || plan?.planId || 'goal';
+  return `Goal Runner tick ${turnNumber} for goal "${planLabel}" (planId=${plan?.planId || 'unknown'}). Continue from the active GoalPlan state.`;
+}
+
+function createIdleWaiter(chat: Pick<ChatController, 'getSnapshot' | 'subscribe'>) {
+  return async function whenIdle(): Promise<void> {
+    if (chat.getSnapshot().status === 'idle') return;
+    await new Promise<void>((resolve) => {
+      const unsubscribe = chat.subscribe((snapshot) => {
+        if (snapshot.status === 'idle') {
+          unsubscribe();
+          resolve();
+        }
+      });
+    });
+  };
+}
+
+export function createTuiSharedGoalRunner(options: {
+  readonly bridge: TuiGoalBridge;
+  readonly chat: Pick<ChatController, 'getSnapshot' | 'subscribe' | 'send'>;
+  /** 是否订阅 store onChange 并自动 kick（仅真实运行时开启；测试可注入禁用）。 */
+  readonly autoStart?: boolean;
+  readonly logger?: Pick<Console, 'warn' | 'error'>;
+}): TuiSharedGoalRunner {
+  const { bridge, chat } = options;
+  const logger = options.logger ?? console;
+  const store = bridge.store;
+  const listeners = new Set<(event: TuiGoalRunnerEvent) => void>();
+
+  const emit = (event: TuiGoalRunnerEvent) => {
+    for (const listener of listeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        logger.warn?.('[tui-goal-runner] listener failed:', error as never);
+      }
+    }
+  };
+
+  const whenIdle = createIdleWaiter(chat);
+
+  const runtime: TuiGoalTurnRuntime = {
+    whenIdle,
+    sendGoalTurn: async (content) => {
+      await chat.send(content);
+    },
+  };
+
+  const runner = createGoalRunner({
+    goalPlanStore: store,
+    chatRuntime: {
+      async runGoalTurn({ plan, turnNumber }: { plan: any; turnNumber: number }) {
+        try {
+          // 与 Desktop runGoalTurn 同语义：把 tick 消息作为下一轮 user 输入交给会话。
+          await runtime.sendGoalTurn(buildGoalRunnerMessage(plan, turnNumber));
+          return { continued: true };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return { failed: true, failureReason: message };
+        }
+      },
+    },
+    explorerRunner: null,
+    verifierRunner: null,
+    emitEvent: (event: TuiGoalRunnerEvent) => emit(event),
+    logger,
+  });
+
+  // —— 对齐 Desktop main.mjs 的 maybeAutoStartAcceptedGoalFromPlanChange ——
+  // 只有 intake → accepted_goal 的领域跃迁（changeKind === 'goal-accepted'）会 kick。
+  function maybeAutoStartFromChange(payload: any) {
+    const planId = typeof payload?.planId === 'string' ? payload.planId : null;
+    if (!planId) return;
+    const plan = typeof store?.getPlan === 'function' ? store.getPlan(planId) : null;
+    if (!shouldAutoStartAcceptedGoalRunnerFromChange(payload, plan)) return;
+    void (async () => {
+      try {
+        // 等 intake turn 结束再 kick，避免与当前活跃 turn 冲突
+        // （Desktop 用 forceComplete + released；TUI 用快照 status === 'idle' 等价）。
+        await runtime.whenIdle();
+        const latest = typeof store?.getPlan === 'function' ? store.getPlan(planId) : null;
+        if (!shouldAutoStartAcceptedGoalRunnerFromChange(payload, latest)) return;
+        await runner.start(planId);
+      } catch (error) {
+        logger.error?.(
+          '[tui-goal-runner] auto-start failed:',
+          error instanceof Error ? error.message : (error as never),
+        );
+      }
+    })();
+  }
+
+  if (options.autoStart !== false && typeof store?.setOnChange === 'function') {
+    // goal-bridge 建 store 时未传 onChange；这里经 setOnChange 挂 auto-start 闸门。
+    // Desktop 是 store 构造时注入 onChange，语义一致。
+    store.setOnChange((payload: any) => {
+      maybeAutoStartFromChange(payload);
+    });
+  }
+
+  return {
+    start: (planId) => runner.start(planId),
+    pause: (planId, reason) => runner.pause(planId, reason),
+    resume: async (planId) => {
+      await runtime.whenIdle();
+      return runner.resume(planId);
+    },
+    clear: (planId) => runner.clear(planId),
+    getState: (planId) => runner.getState(planId),
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
