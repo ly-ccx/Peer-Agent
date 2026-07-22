@@ -86,14 +86,10 @@ function localeFromContext(context: { readonly locale?: unknown } | undefined): 
   return typeof context?.locale === 'string' ? context.locale : 'en';
 }
 
-function buildToolCall(request: {
-  readonly toolCall?: RuntimeSdkToolCall;
-  readonly capabilityId?: string;
-}): RuntimeSdkToolCall {
-  if (request.toolCall) return request.toolCall as RuntimeSdkToolCall;
+function buildToolCall(capabilityId?: string): RuntimeSdkToolCall {
   return {
     toolCallId: `interaction-${Date.now()}`,
-    capabilityId: request.capabilityId || INTERACTION_CAPABILITY_ID,
+    capabilityId: capabilityId || INTERACTION_CAPABILITY_ID,
   };
 }
 
@@ -123,7 +119,7 @@ export function createNodeInteractionProvider(
     capabilities: NODE_INTERACTION_CAPABILITY_MANIFESTS,
     async execute(request, context) {
       const call = (request.toolCall as RuntimeSdkToolCall | undefined)
-        ?? buildToolCall(request);
+        ?? buildToolCall(request.capabilityId);
       const input = asRecord(request.input ?? request.toolCall?.input);
       const question = asString(input.question);
       const optionsList = asStringList(input.options);
