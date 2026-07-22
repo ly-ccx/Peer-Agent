@@ -6,6 +6,7 @@ import {
   cycleModelPickerGroup,
   modelPickerItems,
   modelSelectionLabel,
+  sessionTopbarModelLabel,
 } from './tui-model-selection.ts';
 
 describe('TUI model selection', () => {
@@ -198,6 +199,31 @@ describe('TUI model selection', () => {
     expect(view.rows.some((row) => row.label === 'grok-4.5')).toBe(true);
     expect(view.selectableRows.map((row) => row.label)).toEqual(['grok-4.5']);
     expect(view.subtitle).toBe('1/1 runnable');
+  });
+
+  test('formats session topbar as PROVIDER / MODEL without reasoning suffix', () => {
+    const control = createTuiModelSelectionControl({
+      providerId: 'openai',
+      modelId: 'gpt-5.6-sol',
+      displayName: 'GPT-5.6 SOL · OpenAI',
+      catalog: [
+        {
+          providerId: 'openai',
+          modelId: 'gpt-5.6-sol',
+          displayName: 'GPT-5.6 SOL · OpenAI',
+          supportsTools: true,
+          supportedReasoningEfforts: ['high'],
+          defaultReasoningEffort: 'high',
+          available: true,
+        },
+      ],
+      supportedReasoningEfforts: ['high'],
+    });
+
+    expect(sessionTopbarModelLabel(control, control.getSelection())).toBe(
+      'OPENAI / GPT-5.6-SOL',
+    );
+    expect(sessionTopbarModelLabel(null, null, 'gpt-5.6-sol')).toBe('GPT-5.6-SOL');
   });
 
 });

@@ -36,6 +36,7 @@ interface ConversationStore {
 
 export interface TuiConversationPersistence {
   getConversationId(): string | undefined;
+  ensureConversation(): string;
   listResumable(): readonly TuiConversationSummary[];
   loadConversation(id: string): TuiConversationRestore | null;
   resumeConversation(conversation: TuiConversationRestore): void;
@@ -99,6 +100,15 @@ function storedToolPresentation(value: unknown): ChatMessage['tool'] | undefined
     : record.arguments === null
       ? null
       : undefined;
+  const startedAt = typeof record.startedAt === 'number' && Number.isFinite(record.startedAt)
+    ? record.startedAt
+    : undefined;
+  const completedAt = typeof record.completedAt === 'number' && Number.isFinite(record.completedAt)
+    ? record.completedAt
+    : undefined;
+  const durationMs = typeof record.durationMs === 'number' && Number.isFinite(record.durationMs)
+    ? Math.max(0, record.durationMs)
+    : undefined;
   return {
     capabilityId: record.capabilityId,
     toolName: typeof record.toolName === 'string' ? record.toolName : record.capabilityId,
@@ -113,6 +123,9 @@ function storedToolPresentation(value: unknown): ChatMessage['tool'] | undefined
     ) ? record.status : 'unknown',
     detail: typeof record.detail === 'string' ? record.detail : '',
     detailLines,
+    ...(startedAt === undefined ? {} : { startedAt }),
+    ...(completedAt === undefined ? {} : { completedAt }),
+    ...(durationMs === undefined ? {} : { durationMs }),
     ...(toolCallId ? { toolCallId } : {}),
     ...(arguments_ === undefined ? {} : { arguments: arguments_ }),
   };
@@ -475,6 +488,7 @@ export function createTuiConversationPersistence(options: {
 
   return {
     getConversationId: () => conversationId,
+    ensureConversation,
     listResumable() {
       try {
         const conversations = store.listConversationsByWorkspace

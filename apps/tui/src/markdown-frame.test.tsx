@@ -79,4 +79,47 @@ describe('Markdown terminal frame', () => {
     expect(metadata).toEqual([115, 115, 115, 255]);
     expect(new Set([add, deletion, hunk, metadata, context].map((color) => color?.join(','))).size).toBe(5);
   });
+
+  test('renders GFM tables with aligned columns and CJK-aware padding', async () => {
+    const frame = await renderMarkdown([
+      '| 角色 | PID | 命令 |',
+      '| --- | ---: | --- |',
+      '| preview | 91972 | pnpm preview |',
+      '| main | 92021 | electron main |',
+    ].join('\n'));
+
+    // Header row visible on its own line
+    expect(frame).toContain('角色');
+    expect(frame).toContain('PID');
+    expect(frame).toContain('命令');
+
+    // Data rows on separate lines
+    expect(frame).toContain('91972');
+    expect(frame).toContain('pnpm preview');
+    expect(frame).toContain('92021');
+    expect(frame).toContain('electron main');
+
+    // Separator line rendered
+    expect(frame).toContain('│');
+    expect(frame).toContain('─');
+
+    // Raw pipe markers from source should not leak as a collapsed single line
+    const lines = frame.split('\n');
+    const tableLines = lines.filter((l) => l.includes('│') || l.includes('─'));
+    expect(tableLines.length).toBeGreaterThanOrEqual(3);
+  });
+
+  test('does not collapse a table into a single paragraph line', async () => {
+    const frame = await renderMarkdown([
+      '| A | B |',
+      '| --- | --- |',
+      '| 1 | 2 |',
+    ].join('\n'));
+
+    const lines = frame.split('\n').filter((l) => l.trim());
+    // Header, separator, data row = at least 3 distinct rendered lines
+    expect(lines.length).toBeGreaterThanOrEqual(3);
+    expect(lines.some((l) => l.includes('A'))).toBe(true);
+    expect(lines.some((l) => l.includes('1'))).toBe(true);
+  });
 });

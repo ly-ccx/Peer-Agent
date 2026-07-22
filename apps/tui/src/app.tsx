@@ -16,16 +16,16 @@ import {
   type TuiConversationSummary,
 } from './conversation-persistence.ts';
 import {
-  ComposerControlsBar,
   ComposerModeDivider,
   ComposerRunningStatusBar,
   ComposerStatusBar,
   type ComposerStatusLayout,
 } from './composer-status-view.tsx';
-import { createComposerStatus, type ComposerStatus } from './composer-status.ts';
+import { compactWorkspacePath, createComposerStatus, type ComposerStatus } from './composer-status.ts';
 import {
   createChatController,
   type ChatController,
+  type ChatMessage,
   type ChatModelPort,
   type ChatSnapshot,
 } from './chat-controller.ts';
@@ -45,6 +45,12 @@ import {
   TUI_APPROVAL_OPTIONS,
 } from './approval-card.ts';
 import {
+  extractUserInputRequest,
+  toUserInputOptions,
+  userInputDecisionForKey,
+  type TuiUserInputRequest,
+} from './user-input-card.ts';
+import {
   createPlanCoordinator,
   movePlanSelection,
   PLAN_APPROVAL_OPTIONS,
@@ -63,6 +69,7 @@ import {
   indexOfCurrentSelectableRow,
   modelPickerGroupCounts,
   modelSelectionLabel,
+  sessionTopbarModelLabel,
   type ModelPickerStage,
   type ModelPickerViewRow,
   type TuiModelSelectionControl,
@@ -74,8 +81,6 @@ import {
   composerRunningStatusLabel,
   languageIndex,
   languageOption,
-  languageSwitchNotice,
-  themeSwitchNotice,
   TUI_LANGUAGE_OPTIONS,
   tuiMessage,
   type TuiLanguageStore,
@@ -84,7 +89,6 @@ import {
 import {
   permissionPolicyForKey,
   permissionPolicyIndex,
-  permissionPolicyLabels,
   TUI_PERMISSION_POLICIES,
 } from './tui-permission-policy.ts';
 import { moveTuiSurfaceSelection } from './surface-state.ts';
@@ -92,13 +96,17 @@ import { composerEnterAction, runtimeControlAction } from './runtime-controls.ts
 import { composerContentWidth, responsiveLayout, responsivePickerLayout } from './responsive-layout.ts';
 import {
   animatedToolStatusGlyph,
+  formatToolDuration,
   isGoalStatusToolPresentation,
+  toolActivitySummary,
   resolveToolPresentation,
+  scrambleStatusLabel,
   thinkingSpinnerGlyph,
   thinkingStatusLabel,
   toolHeadline,
   toolStatusGlyph,
   toggleToolDetails,
+  type ToolPresentation,
   type ToolPresentationStatus,
 } from './tool-result-summary.ts';
 import {
@@ -108,6 +116,7 @@ import {
   filterTuiCommands,
   openCommandPanel,
   selectionWindow,
+  showUserInput,
   slashCommandWindow,
   syncSlashSuggestions,
   type TuiCommand,
@@ -173,7 +182,7 @@ function ComposerRunningStatusLabel({
 }) {
   const frame = useStatusAnimationFrame(true, THINKING_SPINNER_INTERVAL_MS);
   const spinner = thinkingSpinnerGlyph(frame);
-  const statusLabel = composerRunningStatusLabel(locale, runStatus);
+  const statusLabel = scrambleStatusLabel(composerRunningStatusLabel(locale, runStatus), frame);
   return (
     <ComposerRunningStatusBar
       spinner={spinner}
@@ -186,6 +195,49 @@ function ToolStatusGlyph({ status }: { readonly status: ToolPresentationStatus }
   const active = status === 'running';
   const frame = useStatusAnimationFrame(active);
   return <>{animatedToolStatusGlyph(status, frame)}</>;
+}
+
+function ToolActivityTimeline({
+  presentation,
+  expanded,
+  onToggle,
+}: {
+  readonly presentation: ToolPresentation;
+  readonly expanded: boolean;
+  readonly onToggle: () => void;
+}) {
+  const color = toolStatusColor(presentation.status);
+  const detailLines = expanded
+    ? presentation.detail.split(/\r?\n/).filter((line) => line.trim().length > 0)
+    : [];
+  const summary = toolActivitySummary(presentation);
+  const canExpand = presentation.detail.trim().length > 0;
+  return (
+    <box flexDirection="row">
+      <box width={3} flexDirection="column" alignItems="center">
+        <text fg={color}><ToolStatusGlyph status={presentation.status} /></text>
+        {expanded && detailLines.length > 0 ? <text fg={COLOR.subtle}>│</text> : null}
+      </box>
+      <box flexGrow={1} minWidth={0} flexDirection="column">
+        <box flexDirection="row" width="100%">
+          <text selectable fg={color} width={12} wrapMode="none">{presentation.toolName}</text>
+          <text selectable fg={COLOR.textSoft} flexGrow={1} wrapMode="none">{summary}</text>
+          <text selectable fg={presentation.status === 'running' ? COLOR.accent : COLOR.muted} width={7} wrapMode="none">
+            {formatToolDuration(presentation)}
+          </text>
+          <text fg={canExpand ? COLOR.muted : COLOR.subtle} width={2} wrapMode="none" onMouseDown={canExpand ? onToggle : undefined}>
+            {canExpand ? (expanded ? '−' : '+') : ' '}
+          </text>
+        </box>
+        {detailLines.map((line, index) => (
+          <box key={`${presentation.toolCallId ?? presentation.toolName}-detail-${index}`} flexDirection="row">
+            <text fg={COLOR.subtle}>│ </text>
+            <text selectable fg={COLOR.toolDetail}>{line || ' '}</text>
+          </box>
+        ))}
+      </box>
+    </box>
+  );
 }
 
 function ChatHistory({
@@ -264,43 +316,20 @@ function ChatHistory({
             const toolExpanded = expandedTools.has(toolKey);
             const presentation = resolveToolPresentation({ content: '', tool });
             if (isGoalStatusToolPresentation(presentation)) return null;
-            const headlineColor = toolStatusColor(presentation.status);
-            const detailColor = presentation.status === 'failed' || presentation.status === 'denied'
-              ? COLOR.toolFailed
-              : COLOR.toolDetail;
-            // Collapsed tools show only the green headline; expand to reveal details.
-            const detailLines = toolExpanded
-              ? presentation.detail.split(/\r?\n/).filter((line) => line.trim().length > 0)
-              : [];
             return (
-              <box
+              <ToolActivityTimeline
                 key={toolKey}
-                flexDirection="column"
-                onMouseDown={() => toggleTool(toolKey)}
-              >
-                <box flexDirection="row">
-                  <text selectable fg={headlineColor} wrapMode="none">
-                    <ToolStatusGlyph status={presentation.status} />{' '}
-                  </text>
-                  <text selectable fg={headlineColor} wrapMode="none">
-                    <strong>{toolHeadline(presentation.toolName, presentation.argumentSummary)}</strong>
-                  </text>
-                </box>
-                {detailLines.map((line, index) => (
-                  <box key={`${toolKey}-detail-${index}`} flexDirection="row">
-                    <text selectable fg={COLOR.subtle} wrapMode="none">
-                      {index === 0 ? TOOL_CHROME.branchFirst : TOOL_CHROME.branchRest}
-                    </text>
-                    <text selectable fg={detailColor}>{line || ' '}</text>
-                  </box>
-                ))}
-              </box>
+                presentation={presentation}
+                expanded={toolExpanded}
+                onToggle={() => toggleTool(toolKey)}
+              />
             );
           };
 
           return (
-            <box key={message.id} flexDirection="column" marginBottom={1}>
-              <box flexDirection="column">
+            <box key={message.id} flexDirection="row" marginBottom={1}>
+              <box width={7}><text fg={COLOR.accent}><strong>PEER</strong></text></box>
+              <box flexDirection="column" flexGrow={1} minWidth={0}>
                 {showThinkingPlaceholder ? (
                   <ThinkingStatusLabel
                     hasThinkingContent={false}
@@ -374,25 +403,18 @@ function ChatHistory({
             message.content,
             message.images,
           );
+          // Crush-style user turn: muted YOU rail + cyan bar on the body column.
           return (
-            <box
-              key={message.id}
-              flexDirection="column"
-              width="100%"
-              marginBottom={1}
-              paddingLeft={1}
-              paddingRight={1}
-              backgroundColor={COLOR.userPanel}
-            >
-              {userText ? (
-                <text selectable fg={COLOR.textSoft}>{userText}</text>
-              ) : null}
-              {imageLabel ? (
-                <text selectable fg={COLOR.user}>{imageLabel}</text>
-              ) : null}
-              {!userText && !imageLabel ? (
-                <text selectable fg={COLOR.textSoft}>{' '}</text>
-              ) : null}
+            <box key={message.id} flexDirection="row" width="100%" marginBottom={1}>
+              <box width={7}><text fg={COLOR.muted}>YOU</text></box>
+              <box flexDirection="row" flexGrow={1} minWidth={0}>
+                <text fg={COLOR.user}>▌ </text>
+                <box flexDirection="column" flexGrow={1} minWidth={0}>
+                  {userText ? <text selectable fg={COLOR.text}>{userText}</text> : null}
+                  {imageLabel ? <text selectable fg={COLOR.user}>{imageLabel}</text> : null}
+                  {!userText && !imageLabel ? <text selectable fg={COLOR.textSoft}>{' '}</text> : null}
+                </box>
+              </box>
             </box>
           );
         }
@@ -400,37 +422,13 @@ function ChatHistory({
         const toolExpanded = expandedTools.has(message.id);
         const presentation = resolveToolPresentation(message);
         if (isGoalStatusToolPresentation(presentation)) return null;
-        const headlineColor = toolStatusColor(presentation.status);
-        const detailColor = presentation.status === 'failed' || presentation.status === 'denied'
-          ? COLOR.toolFailed
-          : COLOR.toolDetail;
-        // Collapsed tools show only the green headline; expand to reveal details.
-        const detailLines = toolExpanded
-          ? presentation.detail.split(/\r?\n/).filter((line) => line.trim().length > 0)
-          : [];
         return (
-          <box
-            key={message.id}
-            flexDirection="column"
-            marginBottom={1}
-            onMouseDown={() => toggleTool(message.id)}
-          >
-            <box flexDirection="row">
-              <text selectable fg={headlineColor} wrapMode="none">
-                <ToolStatusGlyph status={presentation.status} />{' '}
-              </text>
-              <text selectable fg={headlineColor} wrapMode="none">
-                <strong>{toolHeadline(presentation.toolName, presentation.argumentSummary)}</strong>
-              </text>
-            </box>
-            {detailLines.map((line, index) => (
-              <box key={`${message.id}-detail-${index}`} flexDirection="row">
-                <text selectable fg={COLOR.subtle} wrapMode="none">
-                  {index === 0 ? TOOL_CHROME.branchFirst : TOOL_CHROME.branchRest}
-                </text>
-                <text selectable fg={detailColor}>{line || ' '}</text>
-              </box>
-            ))}
+          <box key={message.id} flexDirection="column" marginBottom={1}>
+            <ToolActivityTimeline
+              presentation={presentation}
+              expanded={toolExpanded}
+              onToggle={() => toggleTool(message.id)}
+            />
           </box>
         );
       })}
@@ -804,7 +802,6 @@ function ComposerDock({
           <ComposerModeDivider width={dividerWidth} />
         </>
       ) : null}
-      <ComposerControlsBar status={status} layout={statusLayout} />
       <box position="relative" width="100%" height={5} overflow="visible">
         {slashOpen ? (
           <SlashCommandMenu
@@ -842,6 +839,41 @@ function ComposerDock({
     </box>
   );
 }
+
+
+function collectMessageTools(message: ChatMessage): ToolPresentation[] {
+  const tools: ToolPresentation[] = [];
+  if (message.tools && message.tools.length > 0) tools.push(...message.tools);
+  if (message.tool) tools.push(message.tool);
+  if (message.segments) {
+    for (const segment of message.segments) {
+      if (segment.type === 'tool-call') tools.push(segment.tool);
+    }
+  }
+  return tools;
+}
+
+/** Latest unanswered Ask user request after the last user message. */
+function findPendingUserInput(messages: readonly ChatMessage[]): TuiUserInputRequest | null {
+  let lastUserIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === 'user') {
+      lastUserIndex = index;
+      break;
+    }
+  }
+  for (let index = messages.length - 1; index > lastUserIndex; index -= 1) {
+    const message = messages[index];
+    if (!message || message.role !== 'assistant') continue;
+    const tools = collectMessageTools(message);
+    for (let toolIndex = tools.length - 1; toolIndex >= 0; toolIndex -= 1) {
+      const request = extractUserInputRequest(tools[toolIndex]);
+      if (request) return request;
+    }
+  }
+  return null;
+}
+
 
 export function App({ host, model, modelLabel, modelSelection, languageStore, themeStore, onQuit }: {
   readonly host: TuiHost;
@@ -1077,10 +1109,20 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const languageSelection = languageSurface?.selectedIndex ?? languageIndex(locale);
   const themeSelection = themeSurface?.selectedIndex
     ?? Math.max(0, TUI_THEME_OPTIONS.findIndex((option) => option.mode === themeMode));
+  const pendingUserInput = findPendingUserInput(snapshot.messages);
+  const userInputOptions = pendingUserInput ? toUserInputOptions(pendingUserInput.options) : [];
+  const userInputSurface = experience.surface.type === 'user-input' ? experience.surface : null;
+  const userInputSelection = userInputSurface?.selectedIndex ?? 0;
   const activeTurnMode = snapshot.activeTurnMode;
   const selectedModelLabel = selectedModel && modelSelection
     ? modelSelectionLabel(modelSelection, selectedModel)
     : modelLabel;
+  const sessionTopbarModel = sessionTopbarModelLabel(
+    modelSelection,
+    selectedModel,
+    modelLabel,
+  );
+  const sessionWorkspacePath = compactWorkspacePath(host.workspaceRoot);
   const contextWindow = modelSelection?.catalog.find(
     (entry) => entry.providerId === selectedModel?.providerId
       && entry.modelId === selectedModel?.modelId,
@@ -1097,6 +1139,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     triggerTokens: snapshot.triggerTokens,
   });
   const layout = responsiveLayout(terminal.width);
+  const topbarDividerWidth = composerContentWidth(terminal.width, layout.outerPadding);
   const goalView = goalStatusFromSharedPlan(sharedGoalPlan);
   const goalLayout = goalStatusLayout(terminal.width);
   const pickerLayout = responsivePickerLayout(
@@ -1132,6 +1175,19 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const isComposerInputFocused = experience.surface.type === 'composer'
     || experience.surface.type === 'slash-suggestions';
   const isComposerSurface = isComposerInputFocused || Boolean(modelSurface);
+
+  useEffect(() => {
+    if (!pendingUserInput || pendingUserInput.options.length === 0) {
+      if (experience.surface.type === 'user-input') {
+        setExperience((current) => escapeFooter(current));
+      }
+      return;
+    }
+    if (approval || snapshot.plan?.status === 'awaiting_approval') return;
+    if (experience.surface.type === 'user-input') return;
+    setExperience((current) => showUserInput(current));
+  }, [pendingUserInput, approval, snapshot.plan?.status, experience.surface.type]);
+
   useEffect(() => {
     if (!resumeSurface) return;
     if (snapshot.status !== 'idle') {
@@ -1148,10 +1204,12 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     return () => clearTimeout(timeout);
   }, [commandNotice]);
 
+  // Goal state may decorate the empty session, but it must not replace the CLI home.
+  // The confirmed workspace redesign begins only after the conversation has content.
   const isWelcome = snapshot.messages.length === 0
     && !approval
     && snapshot.plan?.status !== 'awaiting_approval'
-    && !sharedGoalPlan
+    && !pendingUserInput
     && !snapshot.error
     && isComposerSurface;
 
@@ -1175,7 +1233,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   useEffect(() => {
     const bridge = host.goalBridge;
     if (!bridge) return undefined;
-    const conversationId = snapshot.session?.conversationId ?? 'tui-chat';
+    const conversationId = persistence.getConversationId();
+    if (!conversationId) {
+      setSharedGoalPlan(null);
+      return undefined;
+    }
     const refresh = () => {
       const plans = bridge.listPlansByConversation(conversationId);
       const activeMeta = [...plans]
@@ -1226,18 +1288,12 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       mode: conversation.mode,
     }));
     setComposerDraft('');
-    setCommandNotice(`Resumed: ${selected.title}`);
     queueMicrotask(() => composerRef.current?.focus());
   }, [controller, modelSelection, persistence, snapshot.status]);
 
   const selectMode = (mode: TuiMode) => {
     controller.setMode(mode);
     setExperience((current) => escapeFooter({ ...current, mode }));
-    setCommandNotice(
-      activeTurnMode && activeTurnMode !== mode
-        ? `${tuiModeOption(mode).label} selected for the next message · current turn remains ${tuiModeOption(activeTurnMode).label}`
-        : `${tuiModeOption(mode).label} mode selected`,
-    );
     queueMicrotask(() => composerRef.current?.focus());
   };
 
@@ -1291,7 +1347,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       void copyTextToClipboard(textToCopy, {
         writeOsc52: (value) => renderer.copyToClipboardOSC52(value),
       }).then((result) => {
-        setCommandNotice(selectionCopyNotice(result, textToCopy.length));
+        if (!result.ok) {
+          setCommandNotice(selectionCopyNotice(result, textToCopy.length));
+        }
         if (result.ok) {
           selectedTextRef.current = '';
           setHasTextSelection(false);
@@ -1308,7 +1366,6 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           goalRunner.clear(sharedGoalPlan.planId);
         }
       }
-      setCommandNotice('Interrupt requested');
       queueMicrotask(() => composerRef.current?.focus());
       return;
     }
@@ -1440,7 +1497,6 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         setModelPickerQuery('');
         setModelPickerStage('models');
         setModelPickerPending(null);
-        setCommandNotice(`Next message: ${modelSelectionLabel(modelSelection, next)}`);
         setExperience((current) => escapeFooter(current));
         queueMicrotask(() => composerRef.current?.focus());
       }
@@ -1474,7 +1530,6 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       if (nextPolicy) {
         const normalized = host.setAccessLevel(nextPolicy);
         setAccessLevel(normalized);
-        setCommandNotice(`Local access: ${permissionPolicyLabels(normalized).label}`);
         setExperience((current) => escapeFooter(current));
         queueMicrotask(() => composerRef.current?.focus());
       }
@@ -1533,7 +1588,6 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         if (option) {
           const next = languageStore?.setLanguage(option.locale) ?? { locale: option.locale, replyLanguage: option.locale };
           setLocale(next.locale);
-          setCommandNotice(languageSwitchNotice(next.locale));
         }
         setExperience((current) => escapeFooter(current));
         queueMicrotask(() => composerRef.current?.focus());
@@ -1544,7 +1598,6 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         if (option) {
           const next = languageStore?.setLanguage(option.locale) ?? { locale: option.locale, replyLanguage: option.locale };
           setLocale(next.locale);
-          setCommandNotice(languageSwitchNotice(next.locale));
           setExperience((current) => escapeFooter(current));
           queueMicrotask(() => composerRef.current?.focus());
         }
@@ -1579,7 +1632,6 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           const next = themeStore?.setMode(option.mode) ?? { mode: option.mode, scheme: option.mode === 'system' ? 'dark' : option.mode };
           setThemeMode(next.mode);
           setThemeTick((tick) => tick + 1);
-          setCommandNotice(themeSwitchNotice(locale, next.mode));
         }
         setExperience((current) => escapeFooter(current));
         queueMicrotask(() => composerRef.current?.focus());
@@ -1591,7 +1643,6 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           const next = themeStore?.setMode(option.mode) ?? { mode: option.mode, scheme: option.mode === 'system' ? 'dark' : option.mode };
           setThemeMode(next.mode);
           setThemeTick((tick) => tick + 1);
-          setCommandNotice(themeSwitchNotice(locale, next.mode));
           setExperience((current) => escapeFooter(current));
           queueMicrotask(() => composerRef.current?.focus());
         }
@@ -1711,7 +1762,6 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       if (key.name === 'r') {
         if (skillSurface) setSkills(host.skillMcpBridge?.refreshSkills() ?? []);
         else setMcpServers(host.skillMcpBridge?.refreshMcp() ?? []);
-        setCommandNotice(tuiMessage(locale, skillSurface ? 'notice.skill.refreshed' : 'notice.mcp.refreshed'));
         return;
       }
       if (key.name === 'space') {
@@ -1828,6 +1878,35 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       if (decision) void planCoordinator.decide(snapshot.plan.plan.planId, decision);
       return;
     }
+    if (userInputSurface && pendingUserInput && pendingUserInput.options.length > 0) {
+      if (key.name === 'left' || key.name === 'up') {
+        setExperience((current) => ({
+          ...current,
+          surface: moveTuiSurfaceSelection(current.surface, -1, pendingUserInput.options.length),
+        }));
+        return;
+      }
+      if (key.name === 'right' || key.name === 'down' || key.name === 'tab') {
+        setExperience((current) => ({
+          ...current,
+          surface: moveTuiSurfaceSelection(current.surface, 1, pendingUserInput.options.length),
+        }));
+        return;
+      }
+      // Free-text draft in composer takes priority over Enter option confirm.
+      const draft = (composerRef.current?.plainText ?? composerDraft).trim();
+      if ((key.name === 'return' || key.name === 'enter') && draft) {
+        return;
+      }
+      const answer = userInputDecisionForKey(key.name, userInputSelection, pendingUserInput.options);
+      if (answer) {
+        setExperience((current) => escapeFooter(current));
+        void controller.send(answer);
+        return;
+      }
+      // Digits map to options; other keys fall through for free-text composer input.
+      if (/^[1-9]$/.test(key.name)) return;
+    }
     if (key.ctrl && key.name === 'c') {
       if (snapshot.status === 'running') controller.cancel();
       else onQuit();
@@ -1906,18 +1985,27 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         <>
           <box
             flexDirection="row"
-            justifyContent="space-between"
+            alignItems="center"
             paddingLeft={layout.outerPadding}
             paddingRight={layout.outerPadding}
+            gap={1}
           >
             <text fg={COLOR.textSoft} wrapMode="none">
               <span fg={COLOR.accent}>◆</span>
               <strong> PEER</strong>
-              <span fg={COLOR.muted}>  local capability agent</span>
             </text>
-            <text fg={COLOR.muted} wrapMode="none">{modelLabel}</text>
+            <text fg={COLOR.muted} wrapMode="none" flexShrink={1}>
+              {sessionWorkspacePath}
+            </text>
+            <box flexGrow={1} minWidth={1} />
+            <text fg={COLOR.muted} wrapMode="none">
+              {sessionTopbarModel}
+            </text>
+            <text fg={COLOR.success} wrapMode="none">●</text>
           </box>
-          <box height={1} marginLeft={layout.outerPadding} marginRight={layout.outerPadding} backgroundColor={COLOR.border} />
+          <box marginLeft={layout.outerPadding} marginRight={layout.outerPadding}>
+            <ComposerModeDivider width={topbarDividerWidth} />
+          </box>
           <ChatHistory snapshot={snapshot} layout={layout} />
 
       {snapshot.error ? <ErrorBanner message={snapshot.error} layout={layout} /> : null}
@@ -1953,6 +2041,41 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       {goalView && goalLayout.mode === 'compact-summary' ? (
         <box flexShrink={0} marginLeft={layout.outerPadding} marginRight={layout.outerPadding}>
           <GoalCompactSummary view={goalView} />
+        </box>
+      ) : null}
+
+
+      {pendingUserInput && userInputSurface && pendingUserInput.options.length > 0 ? (
+        <box
+          flexDirection="column"
+          flexShrink={0}
+          border
+          borderStyle="rounded"
+          borderColor={COLOR.accent}
+          padding={1}
+          backgroundColor={COLOR.panel}
+          marginLeft={layout.outerPadding}
+          marginRight={layout.outerPadding}
+        >
+          <text fg={COLOR.accent}><strong>Ask user</strong></text>
+          <text fg={COLOR.text}>{pendingUserInput.question}</text>
+          <box flexDirection="column" gap={0} flexShrink={0}>
+            {userInputOptions.map((option, index) => {
+              const selected = index === userInputSelection;
+              return (
+                <box
+                  key={`${option.shortcut}-${option.label}`}
+                  backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+                >
+                  <text fg={selected ? option.color : COLOR.muted}>
+                    {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}
+                    [{option.shortcut}] {option.label}
+                  </text>
+                </box>
+              );
+            })}
+          </box>
+          <text fg={COLOR.muted}>↑↓ select · Enter confirm · type free text below</text>
         </box>
       ) : null}
 
@@ -2316,7 +2439,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         </>
       )}
         </box>
-        {goalView && goalLayout.mode === 'side-panel' ? (
+        {!isWelcome && goalView && goalLayout.mode === 'side-panel' ? (
           <GoalStatusPanel view={goalView} width={goalLayout.panelWidth} />
         ) : null}
       </box>

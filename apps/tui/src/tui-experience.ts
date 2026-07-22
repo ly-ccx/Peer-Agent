@@ -157,6 +157,16 @@ export function showPlanApproval(state: TuiExperienceState): TuiExperienceState 
   };
 }
 
+export function showUserInput(state: TuiExperienceState): TuiExperienceState {
+  return {
+    ...state,
+    surface: requestTuiSurface(state.surface, {
+      type: 'user-input',
+      selectedIndex: 0,
+    }),
+  };
+}
+
 export function escapeFooter(state: TuiExperienceState): TuiExperienceState {
   return { ...state, surface: dismissTuiSurface(state.surface) };
 }

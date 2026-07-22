@@ -4,9 +4,12 @@ import {
   animatedToolStatusGlyph,
   composerRunningStatusLine,
   createToolPresentation,
+  formatToolDuration,
+  scrambleStatusLabel,
   formatToolResultSummary,
   formatInteractionToolDetail,
   isGoalStatusToolPresentation,
+  toolActivitySummary,
   toolArgumentSummary,
   parseLegacyToolContent,
   resolveToolPresentation,
@@ -62,9 +65,11 @@ describe('tool result summary', () => {
     });
 
     expect(toolDisplayName('local.shell.exec')).toBe('Bash');
+    expect(toolDisplayName('bash')).toBe('Bash');
+    expect(toolDisplayName('read_file')).toBe('Read');
     expect(toolHeadline(presentation.toolName, presentation.argumentSummary))
       .toBe('Bash(git status --short)');
-    expect(toolStatusGlyph(presentation.status)).toBe('●');
+    expect(toolStatusGlyph(presentation.status)).toBe('✓');
     expect(presentation.detailLines[0]).toContain('M apps/tui/src/app.tsx');
 
     const failed = createToolPresentation({
@@ -75,7 +80,7 @@ describe('tool result summary', () => {
     });
     expect(toolHeadline(failed.toolName, failed.argumentSummary))
       .toBe('Read(/tmp/missing.txt)');
-    expect(toolStatusGlyph(failed.status)).toBe('●');
+    expect(toolStatusGlyph(failed.status)).toBe('✗');
     expect(failed.detail).toContain('ENOENT');
   });
 
@@ -91,6 +96,47 @@ describe('tool result summary', () => {
       tool: null,
     });
     expect(resolved.toolName).toBe('Bash');
+  });
+
+  test('keeps Bash collapsed activity to one command line even for multiline JSON output', () => {
+    const command = 'for i in {1..20}; do\n  echo "poll $i"\ndone';
+    const presentation = resolveToolPresentation({
+      content: '',
+      tool: {
+        capabilityId: 'local.shell.exec',
+        toolName: 'Bash',
+        argumentSummary: '',
+        arguments: { command },
+        status: 'completed',
+        detail: JSON.stringify({ command, stdout: 'poll 1\npoll 2', exitCode: 0 }, null, 2),
+        detailLines: [],
+        startedAt: 1_000,
+        completedAt: 1_250,
+      },
+    });
+
+    const summary = toolActivitySummary(presentation);
+    expect(summary).toBe('for i in {1..20}; do echo "poll $i" done');
+    expect(summary).not.toContain('\n');
+    expect(summary).not.toStartWith('{');
+    expect(presentation.durationMs).toBe(250);
+  });
+
+  test('recovers the command from legacy Bash result JSON when arguments are missing', () => {
+    const command = 'printf "one\\ntwo"';
+    const presentation = resolveToolPresentation({
+      content: '',
+      tool: {
+        capabilityId: 'local.shell.exec',
+        toolName: 'Bash',
+        argumentSummary: '',
+        status: 'completed',
+        detail: JSON.stringify({ command, stdout: 'one\ntwo', exitCode: 0 }, null, 2),
+        detailLines: [],
+      },
+    });
+
+    expect(toolActivitySummary(presentation)).toBe('printf "one\\ntwo"');
   });
 
   test('thinking status label uses a trailing three-dot animation without a leading spinner', () => {
@@ -123,12 +169,13 @@ describe('tool result summary', () => {
     })).toBe('- Cancelling…');
   });
 
-  test('running tool glyph is larger and breathes across frames', () => {
-    expect(toolStatusGlyph('running')).toBe('●');
-    expect(runningToolStatusGlyph(0)).toBe('●');
-    expect(runningToolStatusGlyph(1)).toBe('◉');
-    expect(runningToolStatusGlyph(2)).toBe('○');
-    expect(animatedToolStatusGlyph('running', 1)).toBe('◉');
+  test('uses Crush glyphs: ✓ completed and animated ◇ running', () => {
+    expect(toolStatusGlyph('completed')).toBe('✓');
+    expect(toolStatusGlyph('running')).toBe('◇');
+    expect(runningToolStatusGlyph(0)).toBe('◇');
+    expect(runningToolStatusGlyph(1)).toBe('◆');
+    expect(runningToolStatusGlyph(2)).toBe('◇');
+    expect(animatedToolStatusGlyph('running', 1)).toBe('◆');
     expect(animatedToolStatusGlyph('completed', 1)).toBe(toolStatusGlyph('completed'));
   });
 
@@ -168,6 +215,24 @@ describe('tool result summary', () => {
       question: 'Choose branch strategy?',
       options: ['1', '2'],
     })).toContain('Choose branch strategy?');
+  });
+
+  test('records and formats real tool timing', () => {
+    const completed = createToolPresentation({
+      capabilityId: 'local.file.read',
+      status: 'completed',
+      outputPreview: 'ok',
+      startedAt: 1_000,
+      completedAt: 1_145,
+    });
+    expect(completed.durationMs).toBe(145);
+    expect(formatToolDuration(completed)).toBe('0.1s');
+    expect(formatToolDuration({ status: 'running' })).toBe('now');
+  });
+
+  test('scrambles briefly and then settles on the running label', () => {
+    expect(scrambleStatusLabel('Running…', 0)).not.toBe('Running…');
+    expect(scrambleStatusLabel('Running…', 6)).toBe('Running…');
   });
 
   test('identifies ordinary Goal tools for chat noise reduction', () => {

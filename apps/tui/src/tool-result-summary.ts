@@ -26,6 +26,10 @@ export interface ToolPresentation {
   readonly status: ToolPresentationStatus;
   readonly detail: string;
   readonly detailLines: readonly string[];
+  /** Real wall-clock timing captured around host execution. */
+  readonly startedAt?: number;
+  readonly completedAt?: number;
+  readonly durationMs?: number;
   /** Stable tool-call id for Desktop segments / API replay. */
   readonly toolCallId?: string;
   /** Original tool arguments retained for Desktop segment.args. */
@@ -151,6 +155,7 @@ export function formatToolResultSummary(
 }
 
 const TOOL_DISPLAY_NAMES: Readonly<Record<string, string>> = Object.freeze({
+  // Local capability ids
   'local.shell.exec': 'Bash',
   'local.file.read': 'Read',
   'local.file.write': 'Write',
@@ -160,6 +165,18 @@ const TOOL_DISPLAY_NAMES: Readonly<Record<string, string>> = Object.freeze({
   'local.search.aggregate': 'Search',
   'local.interaction.request_user_input': 'Ask user',
   request_user_input: 'Ask user',
+  // Common model-facing / provider tool names (kind labels in the timeline)
+  bash: 'Bash',
+  shell: 'Bash',
+  read_file: 'Read',
+  read: 'Read',
+  write_file: 'Write',
+  write: 'Write',
+  edit_file: 'Write',
+  search_files: 'Search',
+  batch_search: 'Search',
+  grep: 'Search',
+  glob: 'Search',
 });
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -175,10 +192,13 @@ function compactText(value: string, maxLength = 72): string {
 }
 
 export function toolDisplayName(capabilityId: string): string {
-  const known = TOOL_DISPLAY_NAMES[capabilityId];
+  const known = TOOL_DISPLAY_NAMES[capabilityId] ?? TOOL_DISPLAY_NAMES[capabilityId.toLowerCase()];
   if (known) return known;
   const leaf = capabilityId.split('.').filter(Boolean).at(-1) ?? capabilityId;
   if (!leaf) return 'Tool';
+  // Prefer kind-style labels for common leaf names even when casing differs.
+  const knownLeaf = TOOL_DISPLAY_NAMES[leaf] ?? TOOL_DISPLAY_NAMES[leaf.toLowerCase()];
+  if (knownLeaf) return knownLeaf;
   return leaf.charAt(0).toUpperCase() + leaf.slice(1);
 }
 
@@ -266,7 +286,8 @@ export function toolStatusGlyph(status: ToolPresentationStatus): string {
 // Prefer geometric/line glyphs over Braille: Braille dots sit high in many terminal
 // fonts and look misaligned next to CJK/Latin status labels like "运行中…".
 const THINKING_CURSOR_FRAMES = ['|', '/', '-', '\\'] as const;
-const RUNNING_DOT_FRAMES = ['●', '◉', '○', '◉'] as const;
+// Soft pulse around the design-running glyph (◇), not a green status dot.
+const RUNNING_DOT_FRAMES = ['◇', '◆', '◇', '◆'] as const;
 
 /** Single spinner glyph used by composer running status. */
 export function thinkingSpinnerGlyph(frame: number): string {
@@ -337,6 +358,8 @@ export function createToolPresentation(input: {
   readonly outputPreview?: unknown;
   readonly errorMessage?: string | null;
   readonly toolCallId?: string | null;
+  readonly startedAt?: number;
+  readonly completedAt?: number;
 }): ToolPresentation {
   const capabilityId = input.capabilityId.trim() || 'tool';
   const status = normalizeToolPresentationStatus(input.status);
@@ -360,6 +383,11 @@ export function createToolPresentation(input: {
   const toolCallId = typeof input.toolCallId === 'string' && input.toolCallId.trim()
     ? input.toolCallId.trim()
     : undefined;
+  const startedAt = Number.isFinite(input.startedAt) ? input.startedAt : undefined;
+  const completedAt = Number.isFinite(input.completedAt) ? input.completedAt : undefined;
+  const durationMs = startedAt !== undefined && completedAt !== undefined
+    ? Math.max(0, completedAt - startedAt)
+    : undefined;
   return {
     capabilityId,
     toolName,
@@ -367,6 +395,9 @@ export function createToolPresentation(input: {
     status,
     detail,
     detailLines: toolDetailLines(detail),
+    ...(startedAt === undefined ? {} : { startedAt }),
+    ...(completedAt === undefined ? {} : { completedAt }),
+    ...(durationMs === undefined ? {} : { durationMs }),
     ...(toolCallId ? { toolCallId } : {}),
     ...(input.arguments === undefined ? {} : { arguments: input.arguments }),
   };
@@ -408,9 +439,32 @@ export function resolveToolPresentation(
     const toolName = typeof tool.toolName === 'string' && tool.toolName.trim()
       ? tool.toolName
       : toolDisplayName(tool.capabilityId);
-    const argumentSummary = typeof tool.argumentSummary === 'string'
-      ? tool.argumentSummary
+    const arguments_ = tool.arguments && typeof tool.arguments === 'object' && !Array.isArray(tool.arguments)
+      ? tool.arguments
+      : tool.arguments === null
+        ? null
+        : undefined;
+    const storedSummary = typeof tool.argumentSummary === 'string'
+      ? compactText(tool.argumentSummary, 88)
       : '';
+    const argumentSummary = storedSummary || toolArgumentSummary(tool.capabilityId, arguments_);
+    const startedAt = typeof tool.startedAt === 'number' && Number.isFinite(tool.startedAt)
+      ? tool.startedAt
+      : undefined;
+    const completedAt = typeof tool.completedAt === 'number' && Number.isFinite(tool.completedAt)
+      ? tool.completedAt
+      : undefined;
+    const storedDuration = typeof tool.durationMs === 'number' && Number.isFinite(tool.durationMs)
+      ? Math.max(0, tool.durationMs)
+      : undefined;
+    const durationMs = storedDuration ?? (
+      startedAt !== undefined && completedAt !== undefined
+        ? Math.max(0, completedAt - startedAt)
+        : undefined
+    );
+    const toolCallId = typeof tool.toolCallId === 'string' && tool.toolCallId.trim()
+      ? tool.toolCallId.trim()
+      : undefined;
     return {
       capabilityId: tool.capabilityId,
       toolName,
@@ -420,14 +474,58 @@ export function resolveToolPresentation(
       detailLines: Array.isArray(tool.detailLines) && tool.detailLines.length > 0
         ? tool.detailLines
         : toolDetailLines(detail),
+      ...(startedAt === undefined ? {} : { startedAt }),
+      ...(completedAt === undefined ? {} : { completedAt }),
+      ...(durationMs === undefined ? {} : { durationMs }),
+      ...(toolCallId ? { toolCallId } : {}),
+      ...(arguments_ === undefined ? {} : { arguments: arguments_ }),
     };
   }
   return parseLegacyToolContent(message.content);
 }
 
+export function toolActivitySummary(presentation: ToolPresentation, maxLength = 108): string {
+  const argumentSummary = compactText(presentation.argumentSummary, maxLength);
+  if (argumentSummary) return argumentSummary;
+
+  const argumentsSummary = toolArgumentSummary(presentation.capabilityId, presentation.arguments);
+  if (argumentsSummary) return compactText(argumentsSummary, maxLength);
+
+  if (presentation.capabilityId === 'local.shell.exec') {
+    try {
+      const parsed = JSON.parse(presentation.detail) as unknown;
+      const record = asRecord(parsed);
+      const command = typeof record?.command === 'string' ? record.command : '';
+      if (command) return compactText(command, maxLength);
+    } catch {
+      // Older shell records may not contain JSON; use the generic one-line fallback below.
+    }
+  }
+
+  return toolResultInlineSummary(presentation.detail, maxLength);
+}
+
 export function isGoalStatusToolPresentation(presentation: ToolPresentation): boolean {
   return GOAL_STATUS_CAPABILITY_IDS.has(presentation.capabilityId)
     || ['goal_create_plan', 'goal_update_task', 'goal_get_plan'].includes(presentation.toolName);
+}
+
+export function scrambleStatusLabel(label: string, frame: number, revealFrames = 6): string {
+  if (frame >= revealFrames) return label;
+  const glyphs = '▓▒░<>/\\[]{}';
+  const revealCount = Math.floor((Math.max(0, frame) / revealFrames) * label.length);
+  return [...label].map((character, index) => {
+    if (/\s/u.test(character) || index < revealCount) return character;
+    return glyphs[(frame * 7 + index * 3) % glyphs.length];
+  }).join('');
+}
+
+export function formatToolDuration(presentation: Pick<ToolPresentation, 'status' | 'durationMs'>): string {
+  if (presentation.status === 'running') return 'now';
+  if (presentation.durationMs === undefined) return '—';
+  if (presentation.durationMs < 1_000) return `${Math.max(0.1, presentation.durationMs / 1_000).toFixed(1)}s`;
+  if (presentation.durationMs < 10_000) return `${(presentation.durationMs / 1_000).toFixed(1)}s`;
+  return `${Math.round(presentation.durationMs / 1_000)}s`;
 }
 
 export function toolPresentationContent(presentation: ToolPresentation): string {

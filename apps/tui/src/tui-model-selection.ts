@@ -313,6 +313,33 @@ export function modelSelectionLabel(
   return `${modelName} · ${providerName} · ${selection.reasoningEffort}`;
 }
 
+/** Session topbar model chip: `PROVIDER / MODEL` (design-aligned, no reasoning suffix). */
+export function sessionTopbarModelLabel(
+  control: TuiModelSelectionControl | null | undefined,
+  selection: RuntimeModelSelection | null | undefined,
+  fallbackModelLabel?: string,
+): string {
+  if (selection && control) {
+    const model = control.catalog.find((entry) =>
+      entry.providerId === selection.providerId && entry.modelId === selection.modelId);
+    if (model) {
+      const { providerName, modelName } = splitModelDisplayName(model.displayName, model.modelId);
+      const provider = providerName === 'Models' ? selection.providerId : providerName;
+      return `${normalizeTopbarToken(provider)} / ${normalizeTopbarToken(modelName)}`;
+    }
+    return `${normalizeTopbarToken(selection.providerId)} / ${normalizeTopbarToken(selection.modelId)}`;
+  }
+
+  const fallback = (fallbackModelLabel ?? '').trim();
+  if (!fallback) return 'MODEL';
+  if (fallback.includes(' / ')) return fallback.toUpperCase();
+  return normalizeTopbarToken(fallback);
+}
+
+function normalizeTopbarToken(value: string): string {
+  return value.trim().replace(/\s+/g, '-').toUpperCase();
+}
+
 export function indexOfCurrentSelectableRow(
   view: ModelPickerView,
   current: RuntimeModelSelection,

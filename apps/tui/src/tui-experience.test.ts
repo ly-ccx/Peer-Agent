@@ -9,6 +9,7 @@ import {
   openCommandPanel,
   showPermission,
   showPlanApproval,
+  showUserInput,
   selectionWindow,
   slashCommandWindow,
   syncSlashSuggestions,
@@ -110,6 +111,12 @@ describe('TUI experience model', () => {
     expect(permission.surface.type).toBe('tool-approval');
     expect(openCommandPanel(permission).surface.type).toBe('tool-approval');
     expect(showPlanApproval(permission).surface.type).toBe('tool-approval');
+    expect(showUserInput(permission).surface.type).toBe('tool-approval');
+  });
+
+  test('opens user-input surface for Ask user option selection', () => {
+    const next = showUserInput(createTuiExperienceState());
+    expect(next.surface).toEqual({ type: 'user-input', selectedIndex: 0 });
   });
 
   test('routes registry actions to dedicated pickers', () => {

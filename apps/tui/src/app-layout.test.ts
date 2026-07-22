@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 const appSource = await Bun.file(new URL('./app.tsx', import.meta.url)).text();
 const statusViewSource = await Bun.file(new URL('./composer-status-view.tsx', import.meta.url)).text();
+const goalStatusViewSource = await Bun.file(new URL('./goal-status-view.tsx', import.meta.url)).text();
 
 describe('TUI app layout', () => {
   test('centers the B3 Signal wordmark above the welcome composer', () => {
@@ -10,6 +11,14 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('<B3Wordmark variant={wordmarkVariant} />');
     expect(appSource).not.toContain('<ascii-font');
     expect(appSource).not.toContain('wordmarkFont');
+  });
+
+  test('keeps the CLI home visible for an empty session even when a Goal exists', () => {
+    const welcomeCondition = appSource.match(/const isWelcome = [\s\S]*?isComposerSurface;/)?.[0] ?? '';
+
+    expect(welcomeCondition).toContain('snapshot.messages.length === 0');
+    expect(welcomeCondition).not.toContain('!sharedGoalPlan');
+    expect(appSource).toContain("!isWelcome && goalView && goalLayout.mode === 'side-panel'");
   });
 
   test('switches B3 terminal mappings at the approved width thresholds', () => {
@@ -145,7 +154,7 @@ describe('TUI app layout', () => {
     expect(appSource).not.toContain('thinkingText={dockThinkingText}');
   });
 
-  test('mounts a Qoder-style running status bar above the mode controls', () => {
+  test('mounts a Qoder-style running status bar above the input', () => {
     const dockSource = appSource.slice(
       appSource.indexOf('function ComposerDock'),
       appSource.indexOf('export function App'),
@@ -175,20 +184,18 @@ describe('TUI app layout', () => {
     // Divider must only render with the running status (not when idle).
     const activeBlock = dockSource.slice(
       dockSource.indexOf("snapshot.status !== 'idle'"),
-      dockSource.indexOf('<ComposerControlsBar status={status} layout={statusLayout} />'),
+      dockSource.indexOf('<Composer\n'),
     );
     expect(activeBlock).toContain('<ComposerRunningStatusLabel');
     expect(activeBlock).toContain('<ComposerModeDivider width={dividerWidth} />');
     expect(activeBlock).toContain(') : null}');
     const runningAt = dockSource.indexOf('<ComposerRunningStatusLabel');
     const dividerAt = dockSource.indexOf('<ComposerModeDivider width={dividerWidth} />');
-    const controlsAt = dockSource.indexOf('<ComposerControlsBar status={status} layout={statusLayout} />');
     const inputAt = dockSource.indexOf('<Composer\n');
     const statusAt = dockSource.indexOf('<ComposerStatusBar status={status} layout={statusLayout} />');
     expect(runningAt).toBeGreaterThanOrEqual(0);
     expect(dividerAt).toBeGreaterThan(runningAt);
-    expect(controlsAt).toBeGreaterThan(dividerAt);
-    expect(inputAt).toBeGreaterThan(controlsAt);
+    expect(inputAt).toBeGreaterThan(dividerAt);
     expect(statusAt).toBeGreaterThan(inputAt);
   });
 
@@ -203,19 +210,17 @@ describe('TUI app layout', () => {
     expect(composerSource).toContain("lastComposerValueRef.current = '';");
   });
 
-  test('keeps the composer input pure and places controls above and status below', () => {
+  test('keeps the composer input pure and places status below the input', () => {
     expect(appSource).toContain('placeholder={composerPlaceholder(locale, disabled)}');
     const dockSource = appSource.slice(
       appSource.indexOf('function ComposerDock'),
       appSource.indexOf('export function App'),
     );
-    expect(dockSource).toContain('<ComposerControlsBar status={status} layout={statusLayout} />');
+    expect(dockSource).not.toContain('ComposerControlsBar');
     expect(dockSource).toContain('<ComposerStatusBar status={status} layout={statusLayout} />');
-    const controlsAt = dockSource.indexOf('<ComposerControlsBar status={status} layout={statusLayout} />');
     const inputAt = dockSource.indexOf('<Composer\n');
     const statusAt = dockSource.indexOf('<ComposerStatusBar status={status} layout={statusLayout} />');
-    expect(controlsAt).toBeGreaterThanOrEqual(0);
-    expect(inputAt).toBeGreaterThan(controlsAt);
+    expect(inputAt).toBeGreaterThanOrEqual(0);
     expect(statusAt).toBeGreaterThan(inputAt);
     expect(appSource).not.toContain('metadata={composerMetadata}');
     expect(appSource).not.toContain('readonly metadata: string');
@@ -340,28 +345,20 @@ describe('TUI app layout', () => {
     expect(statusViewSource).toContain('flexDirection="column"');
   });
 
-  test('renders wide controls above and wide status below as non-wrapping text flows', () => {
-    const controlsSource = statusViewSource.slice(
-      statusViewSource.indexOf('export function ComposerControlsBar'),
-      statusViewSource.indexOf('export function ComposerStatusBar'),
-    );
-    const wideControlsSource = controlsSource.slice(controlsSource.lastIndexOf('return ('));
+  test('renders footer statusbar as mode · access left and model + context right', () => {
     const statusSource = statusViewSource.slice(statusViewSource.indexOf('export function ComposerStatusBar'));
     const wideStatusSource = statusSource.slice(statusSource.lastIndexOf('return ('));
 
-    expect(wideControlsSource).toContain('justifyContent="space-between"');
-    expect(wideControlsSource.match(/<text /g)?.length).toBe(2);
-    expect(wideControlsSource).toContain('<StatusPair label="mode" value={status.mode} accent />');
-    expect(wideControlsSource).toContain('value={layout === \'compact\' ? status.permissionShort : status.permission}');
-    expect(wideControlsSource).toContain('<StatusPair label="workspace" value={workspaceValue} />');
+    expect(statusViewSource).not.toContain('ComposerControlsBar');
+    expect(statusViewSource).not.toContain('label="lang"');
+    expect(statusViewSource).not.toContain('label="workspace"');
+    expect(statusViewSource).not.toContain('{status.reasoning}');
     expect(wideStatusSource).toContain('justifyContent="space-between"');
     expect(wideStatusSource.match(/<text /g)?.length).toBe(2);
+    expect(wideStatusSource).toContain('<StatusPair label="mode" value={status.mode} accent />');
+    expect(wideStatusSource).toContain('value={layout === \'compact\' ? status.permissionShort : status.permission}');
     expect(wideStatusSource).toContain('{status.model}');
-    expect(wideStatusSource).toContain('{status.reasoning}');
     expect(wideStatusSource).toContain('<ContextStatus status={status} short={layout === \'compact\'} />');
-    expect(wideStatusSource).not.toContain('label="workspace"');
-    expect(wideStatusSource).not.toContain('label="mode"');
-    expect(wideStatusSource).not.toContain('label="access"');
   });
 
   test('adapts picker density and keeps approval choices on separate rows', () => {
@@ -401,19 +398,22 @@ describe('TUI app layout', () => {
     expect(commandPickerSource).toContain('flexShrink={0}');
   });
 
-  test('covers mode/access above with workspace right, model/context below, and no top bar', () => {
-    expect(statusViewSource).toContain('export function ComposerControlsBar');
+  test('covers mode · access + model/context footer and keeps workspace out of the dock', () => {
+    expect(statusViewSource).not.toContain('export function ComposerControlsBar');
     expect(statusViewSource).toContain('export function ComposerStatusBar');
     expect(statusViewSource).not.toContain('export function WorkspaceTopBar');
     expect(statusViewSource).toContain('label="mode"');
     expect(statusViewSource).toContain('label="access"');
-    expect(statusViewSource).toContain('label="workspace"');
+    expect(statusViewSource).not.toContain('label="lang"');
+    expect(statusViewSource).not.toContain('label="workspace"');
     expect(statusViewSource).toContain('justifyContent="space-between"');
     expect(statusViewSource).toContain('{status.model}');
-    expect(statusViewSource).toContain('{status.reasoning}');
-    expect(statusViewSource).toContain('short ? status.contextShort : status.context');
+    expect(statusViewSource).not.toContain('{status.reasoning}');
+    expect(statusViewSource).toContain('const width = short ? 6 : 12;');
+    expect(statusViewSource).toContain('contextMeterParts(status.contextPercent, width)');
     expect(appSource).not.toContain('<WorkspaceTopBar');
-    expect(appSource).toContain('<ComposerControlsBar status={status} layout={statusLayout} />');
+    expect(appSource).not.toContain('ComposerControlsBar');
+    expect(appSource).toContain('<ComposerStatusBar status={status} layout={statusLayout} />');
     expect(appSource).toContain('host.setAccessLevel(nextPolicy)');
   });
 
@@ -424,20 +424,28 @@ describe('TUI app layout', () => {
     expect(appSource).not.toContain('MARKDOWN_STYLE');
   });
 
-  test('keeps user and tool messages visually distinct without repeated speaker headings', () => {
-    expect(appSource).toContain('backgroundColor={COLOR.userPanel}');
-    expect(appSource).toContain('width="100%"');
-    expect(appSource).not.toContain('<strong>› </strong>');
-    expect(appSource).toContain('resolveToolPresentation(message)');
-    expect(appSource).toContain('<ToolStatusGlyph status={presentation.status}');
-    expect(appSource).toContain('ThinkingStatusLabel');
-    expect(appSource).toContain('toolHeadline(presentation.toolName, presentation.argumentSummary)');
-    expect(appSource).toContain('index === 0 ? TOOL_CHROME.branchFirst : TOOL_CHROME.branchRest');
+  test('renders YOU/PEER lanes and a real tool activity timeline', () => {
+    // YOU is a muted left rail label (not a highlighted title row).
+    expect(appSource).toContain('<box width={7}><text fg={COLOR.muted}>YOU</text></box>');
+    expect(appSource).not.toContain('<strong>YOU</strong>');
+    expect(appSource).toContain('<strong>PEER</strong>');
+    // Cyan bar sits on the user body column, not before the YOU label.
+    expect(appSource).toContain('<text fg={COLOR.user}>▌ </text>');
+    expect(appSource).toContain('function ToolActivityTimeline');
+    expect(appSource).toContain('width={12}');
+    expect(appSource).toContain('formatToolDuration(presentation)');
+    expect(appSource).toContain('const summary = toolActivitySummary(presentation)');
+    expect(appSource).toContain("{canExpand ? (expanded ? '−' : '+') : ' '}");
+    expect(appSource).toContain('onMouseDown={canExpand ? onToggle : undefined}');
+    expect(appSource).not.toContain('<box flexDirection="row" onMouseDown={onToggle}>');
+    expect(appSource).toContain('>│ </text>');
     expect(appSource).toContain('toolStatusColor(presentation.status)');
-    expect(appSource).not.toContain("{toolExpanded ? '▼' : '▶'} tool");
-    expect(appSource).not.toContain("message.role === 'user' ? 'You'");
-    expect(appSource).not.toContain('<strong>peer</strong>');
-    expect(appSource).not.toContain('show details');
+    expect(appSource).toContain('resolveToolPresentation(message)');
+    // Crush tool timeline: status glyph + kind label + summary + duration.
+    expect(appSource).toContain('<ToolStatusGlyph status={presentation.status} />');
+    expect(appSource).toContain('{presentation.toolName}');
+    expect(appSource).toContain('{formatToolDuration(presentation)}');
+    expect(appSource).not.toContain('backgroundColor={COLOR.userPanel}');
   });
 
   test('ChatHistory user messages render image attachments as visible chips', () => {
@@ -458,7 +466,10 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('PICKER_CHROME.selectedForeground');
     expect(appSource).toContain('PICKER_CHROME.caretSelected');
     expect(statusViewSource).toContain("from './tui-theme.ts'");
-    expect(statusViewSource).toContain('contextUsageColor(status.contextPercent, COLOR.muted)');
+    expect(statusViewSource).toContain('contextUsageColor(status.contextPercent)');
+    expect(statusViewSource).toContain('contextMeterParts(status.contextPercent, width)');
+    expect(statusViewSource).toContain('<span fg={color}>{filled}</span>');
+    expect(statusViewSource).toContain('<span fg={COLOR.muted}>{empty}</span>');
   });
 
   test('renders the help picker opened by /help', () => {
@@ -501,6 +512,60 @@ describe('TUI app layout', () => {
     expect(appSource.match(/if \(isGoalStatusToolPresentation\(presentation\)\) return null;/g)).toHaveLength(2);
   });
 
+  test('uses a design-aligned session topbar above active conversations', () => {
+    expect(appSource).toContain('<strong> PEER</strong>');
+    expect(appSource).not.toContain('local capability agent');
+    expect(appSource).toContain('{sessionWorkspacePath}');
+    expect(appSource).toContain('{sessionTopbarModel}');
+    expect(appSource).toContain('sessionTopbarModelLabel(');
+    expect(appSource).toContain('compactWorkspacePath(host.workspaceRoot)');
+    expect(appSource).toContain('<text fg={COLOR.success} wrapMode="none">●</text>');
+    expect(appSource).not.toContain('backgroundColor={COLOR.border}');
+    expect(appSource).toContain('composerContentWidth(terminal.width, layout.outerPadding)');
+    expect(appSource).toContain('<ComposerModeDivider width={topbarDividerWidth} />');
+  });
+
+  test('presents running work as an activity rail instead of a loose spinner label', () => {
+    expect(statusViewSource).toContain('justifyContent="space-between"');
+    expect(statusViewSource).toContain('<span>PEER</span>');
+    expect(statusViewSource).toContain('<span fg={COLOR.accent}> / ACTIVE</span>');
+  });
+
+  test('presents goals as a mission rail with progress and current-work emphasis', () => {
+    expect(goalStatusViewSource).toContain('<strong>MISSION</strong>');
+    expect(goalStatusViewSource).toContain("const progressTrack = `${'━'.repeat(progressDone)}${'─'.repeat(progressWidth - progressDone)}`;");
+    expect(goalStatusViewSource).toContain('NOW WORKING');
+    expect(goalStatusViewSource).toContain('border={[\'left\']}');
+    expect(goalStatusViewSource).not.toContain('borderStyle="rounded"');
+  });
+
+});
+
+describe('TUI Ask user option selection', () => {
+  test('wires a selectable user-input surface with arrow/digit confirmation', async () => {
+    const surfaceSource = await Bun.file(new URL('./surface-state.ts', import.meta.url)).text();
+    expect(surfaceSource).toContain("type: 'user-input'");
+    expect(appSource).toContain('userInputDecisionForKey');
+    expect(appSource).toContain('showUserInput');
+    expect(appSource).toContain('pendingUserInput');
+    expect(appSource).toContain('↑↓ select · Enter confirm · type free text below');
+  });
+
+  test('keeps the Ask user card from being compressed by chat history', () => {
+    const askUserIndex = appSource.indexOf('<strong>Ask user</strong>');
+    expect(askUserIndex).toBeGreaterThan(-1);
+
+    const cardStart = appSource.lastIndexOf('<box', askUserIndex);
+    const cardEnd = appSource.indexOf('↑↓ select · Enter confirm · type free text below', askUserIndex);
+    expect(cardStart).toBeGreaterThan(-1);
+    expect(cardEnd).toBeGreaterThan(cardStart);
+
+    const askUserCardSource = appSource.slice(cardStart, cardEnd);
+    expect(askUserCardSource).toContain('flexShrink={0}');
+    expect(askUserCardSource).toContain('borderColor={COLOR.accent}');
+    expect(askUserCardSource).toContain('{pendingUserInput.question}');
+    expect(askUserCardSource).toContain('userInputOptions.map');
+  });
 });
 
 describe('TUI compact progress and separator rendering', () => {
