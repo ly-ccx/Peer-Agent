@@ -585,7 +585,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     conversationId?: string;
     usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number };
     lifetimeUsage?: LifetimeUsage;
-    // contextTokens 是最近实际发送量；triggerTokens 是主圆环与压缩 preflight 共用的压力分子。
+    // contextTokens 是最近实际发送量（主圆环）；triggerTokens 是压缩 preflight 压力分子（tooltip）。
     // compactionSuggested 仅表达上下文压力；自动压缩由下一次 Runtime preflight 阻塞执行。
     contextTokens?: number;
     triggerTokens?: number;

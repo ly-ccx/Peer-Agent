@@ -36,9 +36,12 @@ import type {
   ToolProgress,
 } from './types';
 
-/** 主进程下发的权威压缩触发预算快照；主圆环与 Runtime preflight 同口径。 */
+/** 主进程下发的权威双口径快照：主圆环用 contextTokens，压缩触发用 triggerTokens。 */
 export interface AuthoritativeContext {
+  /** 实际发送上下文占用（主圆环）。 */
   contextTokens: number;
+  /** 压缩触发压力（与 Runtime preflight 同源）。 */
+  triggerTokens: number;
   contextWindow: number | null;
 }
 

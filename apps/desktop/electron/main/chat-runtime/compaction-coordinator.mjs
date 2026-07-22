@@ -240,14 +240,14 @@ export function contextTokensFromUsageSnapshot(snapshot) {
   return total > 0 ? total : null;
 }
 
-// 口径（ADR 42 数据面，UI 产品口径已收口到 triggerTokens）：
+// 口径（ADR 42 数据面；UI 主圆环消费 contextTokens，压缩触发与 tooltip 消费 triggerTokens）：
 // - 实际发送口径（contextTokens）：表示「本回合实际发送给模型的上下文大小」，取值优先级：
 //     1) provider 真实 usage 快照（最后一轮 input + cacheRead）；
 //     2) 回退为对「实际发送切片 displayMessages」的估算；
 //     3) 再回退为对完整会话 messages 的估算（兼容未传 displayMessages 的旧调用）。
 // - 压缩压力口径（compactionSuggested / triggerTokens）：与 preflight 一致，取
 //   max(完整会话本地估算, usage 快照)。有真实 usage 高水位时必须建议压缩，
-//   避免实际输入已满但自动压缩不跑；无 usage 时仍退回本地估算。Renderer 主圆环消费此字段。
+//   避免实际输入已满但自动压缩不跑；无 usage 时仍退回本地估算。
 // - 分母口径（contextWindow）：与触发判定同一 normalizedWindow，不变。
 export function computeContextInfo({
   messages,

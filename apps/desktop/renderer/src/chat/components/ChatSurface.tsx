@@ -443,11 +443,11 @@ export function ChatSurface({
   const setActiveUsage = useMemo(() => makeSetter('activeUsage'), [makeSetter]) as Dispatch<
     SetStateAction<TokenUsageState | null>
   >;
-  // 口径统一：主进程随回合结束（done）下发的权威上下文用量快照（与压缩触发同口径）。
-  // 进度条优先用它，回退到本地估算；null = 本会话尚无权威快照（如刚切入未跑过回合）。
+  // 口径统一：主进程随回合结束（done）下发的权威双口径快照。
+  // 主圆环用 contextTokens，压缩压力用 triggerTokens；null = 本会话尚无权威快照。
   const authoritativeContext = convState.authoritativeContext;
   const setAuthoritativeContext = useMemo(() => makeSetter('authoritativeContext'), [makeSetter]) as Dispatch<
-    SetStateAction<{ contextTokens: number; contextWindow: number | null } | null>
+    SetStateAction<{ contextTokens: number; triggerTokens: number; contextWindow: number | null } | null>
   >;
   const providerRecoveryNotice = convState.providerRecoveryNotice;
   const setProviderRecoveryNotice = useMemo(() => makeSetter('providerRecoveryNotice'), [makeSetter]) as Dispatch<
@@ -816,7 +816,12 @@ export function ChatSurface({
     return next.totalTokens;
   }, [conversationId, isStreaming, messages]);
   // 草稿 token 增量由 ComposerTokenUsageDisplay 的叶子订阅计算，避免字符输入唤醒消息表面。
+  // 主圆环用实际发送 contextTokens；压缩压力用 triggerTokens（tooltip）。
   const authoritativeContextTokens = authoritativeContext?.contextTokens ?? null;
+  const authoritativeTriggerTokens =
+    authoritativeContext?.triggerTokens
+    ?? authoritativeContext?.contextTokens
+    ?? null;
   // 进度条分母优先用权威 contextWindow（与触发判定同窗口），消除 provider 配置窗口与
   // 主进程实际所用窗口不一致时的百分比偏差；权威窗口未知时回退到 provider 配置窗口。
   const authoritativeContextWindow = authoritativeContext?.contextWindow ?? undefined;
@@ -1415,6 +1420,7 @@ export function ChatSurface({
     // 真实压缩 / stream done 仍会覆盖；切换模型会清空。
     const seeded = seedAuthoritativeContextOnSend({
       previousAuthoritativeTokens: authoritativeContext?.contextTokens ?? null,
+      previousTriggerTokens: authoritativeContext?.triggerTokens ?? null,
       historyContextTokens,
       sentDraftTokens: estimateDraftTokens(text, sentAttachments),
       previousContextWindow: authoritativeContext?.contextWindow ?? null,
@@ -2120,6 +2126,7 @@ export function ChatSurface({
             historyContextTokens={historyContextTokens}
             attachments={attachments}
             authoritativeContextTokens={authoritativeContextTokens}
+            authoritativeTriggerTokens={authoritativeTriggerTokens}
             providers={providers}
             tokenUsage={tokenUsage}
             activeUsage={activeUsage}

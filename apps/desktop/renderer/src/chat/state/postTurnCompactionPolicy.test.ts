@@ -10,6 +10,10 @@ const surfaceSource = readFileSync(
   new URL('../components/ChatSurface.tsx', import.meta.url),
   'utf8',
 );
+const displaySource = readFileSync(
+  new URL('../components/thread/TokenUsageDisplay.tsx', import.meta.url),
+  'utf8',
+);
 
 describe('post-turn compaction policy', () => {
   it('leaves automatic compaction inside the blocking runtime preflight path', () => {
@@ -29,26 +33,36 @@ describe('post-turn compaction policy', () => {
     assert.match(surfaceSource, /submitMessage = useCallback[\s\S]*loadStatus !== 'ready'/);
   });
 
-  it('keeps the context ring on the compression trigger budget across microcompaction and conversation switches', () => {
+  it('splits ring occupancy and compaction pressure into dual fields', () => {
     assert.match(
       routerSource,
-      /triggerTokens/,
-      'stream/compaction events must project the Runtime trigger budget into the context ring',
+      /nextContextTokens/,
+      'stream/compaction events must project actual sent context into the ring numerator',
     );
     assert.match(
       routerSource,
-      /nextTokens:\s*triggerTokens/,
-      'the authoritative ring numerator must use triggerTokens instead of effective sent contextTokens',
+      /nextTriggerTokens/,
+      'stream/compaction events must keep triggerTokens for compaction pressure',
     );
     assert.match(
       routerSource,
       /microcompacted\s*===\s*true\s*\?\s*'final'\s*:\s*'midturn'/,
-      'a confirmed Layer 1 result must be allowed to lower the trigger snapshot',
+      'a confirmed Layer 1 result must be allowed to lower the dual-field snapshot',
+    );
+    assert.match(
+      displaySource,
+      /isZh \? '上下文' : 'Context'/,
+      'tooltip must label the ring occupancy as context',
+    );
+    assert.match(
+      displaySource,
+      /isZh \? '压缩压力' : 'Compaction pressure'/,
+      'tooltip must still surface compaction pressure separately',
     );
     assert.doesNotMatch(
       surfaceSource,
       /setAuthoritativeContext\(null\)/,
-      'conversation switching must not discard the selected conversation bucket trigger snapshot',
+      'conversation switching must not discard the selected conversation bucket dual-field snapshot',
     );
   });
 });

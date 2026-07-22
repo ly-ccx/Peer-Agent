@@ -186,6 +186,7 @@ export function TokenUsageDisplay({
   tokenUsage,
   activeUsage,
   contextTokens,
+  triggerTokens,
   contextWindow,
   isStreaming,
   isZh,
@@ -201,7 +202,10 @@ export function TokenUsageDisplay({
   readonly providers: readonly LlmProviderConfigView[];
   readonly tokenUsage: TokenUsageState | null;
   readonly activeUsage?: TokenUsageState | null;
+  /** 实际发送上下文占用（主圆环分子）。 */
   readonly contextTokens?: number;
+  /** 压缩触发压力（tooltip 第二行；缺省时与 contextTokens 同值）。 */
+  readonly triggerTokens?: number;
   /** 权威上下文窗口（与压缩触发同窗口）。传入时优先于 provider 配置窗口，消除百分比偏差。 */
   readonly contextWindow?: number;
   readonly isStreaming?: boolean;
@@ -298,12 +302,37 @@ export function TokenUsageDisplay({
   const ctxWindow = (typeof contextWindow === 'number' && contextWindow > 0) ? contextWindow : defaultProvider?.contextWindow;
   const ctxPercent = ctxWindow ? Math.min((currentContextTokens / ctxWindow) * 100, 100) : null;
   const hasCtxRing = Boolean(ctxWindow && ctxPercent != null);
-  // 圆环 hover：用量明细（used/total + 百分比）叠加缓存命中率（读取/写入）与订阅剩余额度，
+  // 圆环 hover：双口径（上下文 + 压缩压力）叠加缓存命中率与订阅剩余额度，
   // 让常驻区只保留圆环+百分比，缓存命中率 / 额度不再单独常驻占位。
   const quotaTooltipLine = formatQuotaTooltipLine(subscriptionQuota ?? undefined, isZh);
+  const pressureTokens =
+    typeof triggerTokens === 'number' && Number.isFinite(triggerTokens)
+      ? Math.max(0, triggerTokens)
+      : currentContextTokens;
+  const pressurePercent =
+    hasCtxRing && typeof pressureTokens === 'number' && (ctxWindow as number) > 0
+      ? Math.min(100, (pressureTokens / (ctxWindow as number)) * 100)
+      : null;
+  const pressureDiverges =
+    hasCtxRing
+    && typeof currentContextTokens === 'number'
+    && typeof pressureTokens === 'number'
+    && pressureTokens > currentContextTokens + Math.max(1_000, (ctxWindow as number) * 0.02);
   const ctxTooltipLines: readonly string[] = hasCtxRing
     ? [
-        `${isZh ? '压缩压力' : 'Compaction pressure'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow as number)} (${Math.round(ctxPercent as number)}%)`,
+        `${isZh ? '上下文' : 'Context'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow as number)} (${Math.round(ctxPercent as number)}%)`,
+        ...(pressurePercent != null
+          ? [
+              `${isZh ? '压缩压力' : 'Compaction pressure'} ${formatTokenCount(pressureTokens)} / ${formatTokenCount(ctxWindow as number)} (${Math.round(pressurePercent)}%)`,
+            ]
+          : []),
+        ...(pressureDiverges
+          ? [
+              isZh
+                ? '压缩压力高于实际上下文：历史仍偏长，系统会更早触发压缩。'
+                : 'Compaction pressure exceeds sent context; auto-compact may trigger sooner.',
+            ]
+          : []),
         ...(showCacheHit
           ? [
               isZh
