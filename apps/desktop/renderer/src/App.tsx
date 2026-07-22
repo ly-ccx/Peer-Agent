@@ -18,6 +18,10 @@ import {
   nextCompletedUnreadIds,
   sameStringSet,
 } from './chat/state/completedUnreadState';
+import {
+  applyLocalStreamingWorkspaceChange,
+  deriveRunningWorkspacePaths,
+} from './chat/state/runningWorkspaceState';
 import { readGitBranchPrefixFromSettings } from './app/gitBranchPrefix';
 import type { CompactionState } from './chat/state/types';
 import { clientApi } from './clientApi';
@@ -137,6 +141,9 @@ function MainApp() {
   // 让侧栏能提示"其它工作区仍有任务在跑",避免切换工作区后误以为任务丢失。
   const [runningWorkspacePaths, setRunningWorkspacePaths] = useState<ReadonlySet<string>>(
     () => new Set());
+  // Keep a ref so local onStreamingChange can update workspace dots without
+  // reading a stale closure of the authoritative set.
+  const runningWorkspacePathsRef = useRef<ReadonlySet<string>>(new Set());
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(() => startupSnapshot?.activeWorkspace ?? null);
   // ADR 21: main 进程可能已写入 PendingTask(例如重启恢复)。renderer 只负责
   // 切到 task.sessionId(回到中断现场)后,把 task 下发给 ChatSurface 自动发出。
@@ -402,11 +409,10 @@ function MainApp() {
       // main 的活跃流投影是运行态真值。若终态 IPC 在 renderer 重载/路由切换时丢失，
       // 以仍然活跃的 streamId 集合兜底清理 conversationStore，且不会误结束其它会话。
       conversationStore.settleInactiveStreams(streams.map((stream) => stream.streamId));
-      const wsPaths = new Set<string>();
-      for (const s of streams) {
-        const origin = s.originWorkspacePath ?? s.workspacePath;
-        if (origin) wsPaths.add(origin);
-      }
+      // Prefer originWorkspacePath (ADR 27). Normalize keys so trailing-slash
+      // variants do not leave a sticky "other workspace" yellow/green dot.
+      const wsPaths = deriveRunningWorkspacePaths(streams);
+      runningWorkspacePathsRef.current = wsPaths;
       setRunningWorkspacePaths(wsPaths);
     };
     void clientApi.chatStreamListActive()
@@ -751,11 +757,28 @@ function MainApp() {
                     if (!convId) return;
                     const prev = runningConversationIdsRef.current;
                     const has = prev.has(convId);
-                    if (streaming === has) return;
+                    // Even if conversation membership is unchanged, still
+                    // re-sync workspace dots when the local edge reports stop
+                    // with zero remaining running conversations.
+                    if (streaming === has && !( !streaming && prev.size === 0)) return;
                     const next = new Set(prev);
                     if (streaming) next.add(convId);
                     else next.delete(convId);
                     applyRunningConversationIds(next);
+                    // Local streaming edges previously only updated conversation
+                    // spinners. Workspace dots stayed lit until the next main
+                    // active-stream broadcast — and could stick forever if that
+                    // event was missed or path keys mismatched. Keep both in sync.
+                    const nextWs = applyLocalStreamingWorkspaceChange({
+                      prev: runningWorkspacePathsRef.current,
+                      workspacePath: activeWorkspace,
+                      isStreaming: streaming,
+                      remainingRunningConversationCount: next.size,
+                    });
+                    if (!sameStringSet(runningWorkspacePathsRef.current, nextWs)) {
+                      runningWorkspacePathsRef.current = nextWs;
+                      setRunningWorkspacePaths(nextWs);
+                    }
                   }}
                   onBranch={(id) => { setConversationView('active'); setActiveConversationId(id); void refreshConversations(activeWorkspace, 'active'); }}
                   onEnsureConversation={ensureConversation}
