@@ -106,6 +106,12 @@ function MainApp() {
   );
   const [conversationsLoadingMore, setConversationsLoadingMore] = useState(false);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [notificationMessageTarget, setNotificationMessageTarget] = useState<{
+    conversationId: string;
+    messageId: string;
+    requestId: number;
+  } | null>(null);
+  const notificationMessageRequestRef = useRef(0);
   const [conversationRevision, setConversationRevision] = useState<string | null>(null);
   // 表达层状态:当前正在流式运行的会话 id 集合,用于左侧列表显示 Loading 图标。
   // 真值来自 main 的 activeStreams:挂载时经 chatStreamListActive 拉取,之后由
@@ -272,7 +278,7 @@ function MainApp() {
   }), [activeWorkspace, conversationView, refreshConversations]);
 
   useEffect(() => {
-    return clientApi.onQuickChatOpenConversation(({ conversationId, workspacePath, planId }) => {
+    return clientApi.onQuickChatOpenConversation(({ conversationId, workspacePath, planId, messageId }) => {
       void (async () => {
         if (workspacePath) {
           await clientApi.workspaceSetActive({ path: workspacePath });
@@ -280,6 +286,14 @@ function MainApp() {
           await refreshConversations(workspacePath, conversationView);
         }
         setActiveConversationId(conversationId);
+        if (messageId) {
+          notificationMessageRequestRef.current += 1;
+          setNotificationMessageTarget({
+            conversationId,
+            messageId,
+            requestId: notificationMessageRequestRef.current,
+          });
+        }
         // 点击系统通知回流时，若带 planId 则精确标记该任务 attention 已读。
         if (planId) {
           await clientApi
@@ -749,6 +763,7 @@ function MainApp() {
                   onArchiveConversation={handleArchiveConversation}
                   workspacePath={activeWorkspace}
                   isPageActive={activePage === 'chat'}
+                  messageTarget={notificationMessageTarget}
                 />
               </section>
             </section>

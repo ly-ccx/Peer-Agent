@@ -320,6 +320,7 @@ export function ChatSurface({
   onArchiveConversation,
   workspacePath,
   isPageActive,
+  messageTarget,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
@@ -349,6 +350,7 @@ export function ChatSurface({
   readonly workspacePath?: string | null;
   // 设置页覆盖显示时保活会话树与流事件订阅，但暂停聊天专属全局快捷键。
   readonly isPageActive: boolean;
+  readonly messageTarget?: { conversationId: string; messageId: string; requestId: number } | null;
 }) {
   const isDraftConversation = conversationId === null;
   // 会话运行时状态的真值已上移到 conversationStore（按 conversationId 分桶的外部 store）。
@@ -695,6 +697,11 @@ export function ChatSurface({
       });
     });
   }, [messageTurnIndex, scrollToTurn]);
+
+  useEffect(() => {
+    if (!messageTarget || messageTarget.conversationId !== conversationId) return;
+    scrollToMessage(messageTarget.messageId);
+  }, [conversationId, messageTarget, scrollToMessage]);
 
   const hasProvider = providers.some((p) => p.apiKeyConfigured);
   // 当前激活 provider(默认且已配置 Key,否则取首个已配置)是否勾选了原生推理(reasoning/thinking)。

@@ -168,6 +168,7 @@ export function createTaskNotificationBroker(deps) {
       planId: task.planId,
       conversationId: task.conversationId,
       workspacePath: task.workspacePath,
+      messageId: task.sourceMessageId,
       attentionVersion: decision.attentionVersion,
       source: 'system-notification',
     };

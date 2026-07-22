@@ -411,6 +411,7 @@ function openConversationFromTaskNotification(payload = {}) {
         conversationId,
         workspacePath,
         planId: payload.planId ?? payload.taskId ?? null,
+        messageId: typeof payload.messageId === 'string' ? payload.messageId : null,
         attentionVersion: payload.attentionVersion ?? null,
         source: payload.source || 'system-notification',
       });
@@ -426,6 +427,7 @@ function openConversationFromTaskNotification(payload = {}) {
         conversationId,
         workspacePath,
         planId: payload.planId ?? payload.taskId ?? null,
+        messageId: typeof payload.messageId === 'string' ? payload.messageId : null,
         attentionVersion: payload.attentionVersion ?? null,
         source: payload.source || 'system-notification',
       });

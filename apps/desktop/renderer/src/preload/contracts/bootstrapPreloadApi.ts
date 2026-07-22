@@ -727,6 +727,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     conversationId: string;
     workspacePath: string;
     planId?: string | null;
+    messageId?: string | null;
     attentionVersion?: number | null;
     source?: string;
   }) => void) => () => void;
