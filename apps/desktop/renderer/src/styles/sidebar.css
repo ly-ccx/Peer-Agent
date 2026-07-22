@@ -689,19 +689,30 @@
   height: 8px;
   border-radius: 50%;
   background: var(--azure-seal);
-  --motion-ripple-color: var(--azure-seal);
-  --motion-ripple-strength: 50%;
-  --motion-ripple-scale: 2.5;
-  --motion-ripple-duration: 1.6s;
-  --motion-ripple-peak: 0.95;
 }
-/* 任务完成但未读：标题前绿色圆点。运行中/压缩中时不与 spinner 并存。 */
+/* 运行中：静止蓝点外叠加扩散圆环，表达持续进行且不影响列表布局。 */
+.sidebar-conv-spinner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--azure-seal) 50%, transparent);
+  --motion-ripple-scale: 2.5;
+  --motion-ripple-peak: 0.9;
+  animation: motion-ripple 1.6s var(--za-ease-standard) infinite;
+  will-change: transform, opacity;
+}
+/* 任务完成但未读：用更明亮的成功绿和稳定光晕，与运行中的动态蓝点拉开层级。 */
 .sidebar-conv-completed-unread {
   flex-shrink: 0;
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: var(--state-success, #40a02b);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--state-success, #40a02b) 22%, transparent),
+    0 0 8px color-mix(in srgb, var(--state-success, #40a02b) 48%, transparent);
 }
 .sidebar-conv-time {
   flex: 0 0 auto;
