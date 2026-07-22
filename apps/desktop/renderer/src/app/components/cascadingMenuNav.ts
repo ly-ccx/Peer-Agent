@@ -25,3 +25,23 @@ export function stepEnabledIndex(items: readonly CascadingNavItem[], from: numbe
   }
   return from;
 }
+
+/** 子菜单应滚到哪一项；none 表示保持用户当前滚动位置。 */
+export type SubmenuScrollTarget =
+  | { readonly kind: 'index'; readonly index: number }
+  | { readonly kind: 'none' };
+
+// 打开菜单 / 切换一级分组时：优先滚到已选 value 对应项；没有已选项时不强制滚动。
+export function resolveOpenGroupScrollTarget(selectedIdx: number): SubmenuScrollTarget {
+  if (selectedIdx >= 0) return { kind: 'index', index: selectedIdx };
+  return { kind: 'none' };
+}
+
+// 仅键盘 ↑↓ 导航时才跟随 activeItemIndex；悬停切换高亮必须返回 none，避免列表回跳到已选项。
+export function resolveKeyboardActiveScrollTarget(
+  keyboardNav: boolean,
+  activeItemIndex: number,
+): SubmenuScrollTarget {
+  if (!keyboardNav || activeItemIndex < 0) return { kind: 'none' };
+  return { kind: 'index', index: activeItemIndex };
+}

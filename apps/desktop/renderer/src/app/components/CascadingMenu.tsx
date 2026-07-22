@@ -1,7 +1,12 @@
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { firstEnabledIndex, stepEnabledIndex } from './cascadingMenuNav.ts';
+import {
+  firstEnabledIndex,
+  resolveKeyboardActiveScrollTarget,
+  resolveOpenGroupScrollTarget,
+  stepEnabledIndex,
+} from './cascadingMenuNav.ts';
 
 export interface CascadingMenuGroup {
   readonly id: string;
@@ -78,6 +83,8 @@ export function CascadingMenu({
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const listId = useId();
   const [submenuScrollState, setSubmenuScrollState] = useState({ canUp: false, canDown: false });
+  // 仅键盘 ↑↓ 导航时需要把“当前高亮项”滚进可视区；悬停切高亮绝不能触发回滚。
+  const scrollActiveItemOnNavRef = useRef(false);
 
   // 查找当前选中项对应的分组和项目，用于触发器展示「分组 · 模型」。
   const selectedGroupIndex = groups.findIndex((g) => g.items.some((item) => item.id === value));
@@ -238,21 +245,32 @@ export function CascadingMenu({
     setActiveItemIndex(selIdx >= 0 ? selIdx : firstEnabledIndex(items));
   }, [groups, value]);
 
-  // 打开/切换子菜单后，把当前选中模型滚进可视区，并刷新“还有更多”滚动提示。
+  // 打开/切换分组后，只把当前选中模型滚进可视区；悬停切换 activeItemIndex 时绝不回跳。
+  // 键盘 ↑↓ 则额外把“当前高亮项”滚进可视区（由 scrollActiveItemOnNavRef 门控）。
   useLayoutEffect(() => {
     if (!open || !submenuCoords || activeGroupIndex < 0) {
       setSubmenuScrollState({ canUp: false, canDown: false });
+      scrollActiveItemOnNavRef.current = false;
       return;
     }
     const items = groups[activeGroupIndex]?.items ?? [];
     const selectedIdx = items.findIndex((it) => it.id === value);
-    const targetIdx = selectedIdx >= 0 ? selectedIdx : activeItemIndex;
-    const target = targetIdx >= 0 ? itemRefs.current[targetIdx] : null;
-    if (target) {
-      target.scrollIntoView({ block: 'nearest' });
+    const target = resolveOpenGroupScrollTarget(selectedIdx);
+    if (target.kind === 'index') {
+      itemRefs.current[target.index]?.scrollIntoView({ block: 'nearest' });
     }
     updateSubmenuScrollState();
-  }, [open, submenuCoords, activeGroupIndex, activeItemIndex, groups, value, updateSubmenuScrollState]);
+  }, [open, submenuCoords, activeGroupIndex, groups, value, updateSubmenuScrollState]);
+
+  useLayoutEffect(() => {
+    if (!open || !submenuCoords || activeGroupIndex < 0) return;
+    const keyboardNav = scrollActiveItemOnNavRef.current;
+    scrollActiveItemOnNavRef.current = false;
+    const target = resolveKeyboardActiveScrollTarget(keyboardNav, activeItemIndex);
+    if (target.kind !== 'index') return;
+    itemRefs.current[target.index]?.scrollIntoView({ block: 'nearest' });
+    updateSubmenuScrollState();
+  }, [activeItemIndex, open, submenuCoords, activeGroupIndex, updateSubmenuScrollState]);
 
   const onKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
     if (disabled) return;
@@ -300,10 +318,12 @@ export function CascadingMenu({
         break;
       case 'ArrowDown':
         event.preventDefault();
+        scrollActiveItemOnNavRef.current = true;
         setActiveItemIndex((i) => stepEnabledIndex(submenuItems, i < 0 ? -1 : i, 1));
         break;
       case 'ArrowUp':
         event.preventDefault();
+        scrollActiveItemOnNavRef.current = true;
         setActiveItemIndex((i) => stepEnabledIndex(submenuItems, i < 0 ? 0 : i, -1));
         break;
       case 'Enter':

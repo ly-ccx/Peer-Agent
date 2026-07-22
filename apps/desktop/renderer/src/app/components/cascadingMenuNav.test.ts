@@ -1,6 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { firstEnabledIndex, stepEnabledIndex, type CascadingNavItem } from './cascadingMenuNav.ts';
+import {
+  firstEnabledIndex,
+  resolveKeyboardActiveScrollTarget,
+  resolveOpenGroupScrollTarget,
+  stepEnabledIndex,
+  type CascadingNavItem,
+} from './cascadingMenuNav.ts';
 
 const item = (disabled = false): CascadingNavItem => ({ disabled });
 
@@ -43,5 +49,28 @@ describe('stepEnabledIndex', () => {
   });
   it('returns -1 for empty list', () => {
     assert.equal(stepEnabledIndex([], 0, 1), -1);
+  });
+});
+
+describe('resolveOpenGroupScrollTarget', () => {
+  it('scrolls to the selected model when opening or switching group', () => {
+    // 已选中靠下模型（例如 index 12）时，打开菜单应滚到该项。
+    assert.deepEqual(resolveOpenGroupScrollTarget(12), { kind: 'index', index: 12 });
+  });
+  it('does not force scroll when there is no selected item in the group', () => {
+    assert.deepEqual(resolveOpenGroupScrollTarget(-1), { kind: 'none' });
+  });
+});
+
+describe('resolveKeyboardActiveScrollTarget', () => {
+  it('scrolls to active item only for keyboard navigation', () => {
+    assert.deepEqual(resolveKeyboardActiveScrollTarget(true, 3), { kind: 'index', index: 3 });
+  });
+  it('does not scroll when hover changes activeItemIndex', () => {
+    // 用户滚上去悬停靠上模型时，绝不能强制 scrollIntoView 回已选项。
+    assert.deepEqual(resolveKeyboardActiveScrollTarget(false, 3), { kind: 'none' });
+  });
+  it('does not scroll when active index is invalid', () => {
+    assert.deepEqual(resolveKeyboardActiveScrollTarget(true, -1), { kind: 'none' });
   });
 });
