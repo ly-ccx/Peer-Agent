@@ -22,6 +22,8 @@
   .cloud-chat-composer textarea {
     @apply min-w-0 resize-none border-0 bg-transparent px-3 py-2 font-normal outline-none;
     color: var(--za-text);
+    caret-color: var(--za-text);
+    -webkit-text-fill-color: var(--za-text);
     font-size: var(--ui-font-control, 13px);
     line-height: 1.52;
   }
@@ -41,7 +43,9 @@
   }
 
   .cloud-chat-composer textarea::placeholder {
-    color: var(--za-text-faint);
+    color: var(--za-text-soft, var(--za-text-muted));
+    -webkit-text-fill-color: var(--za-text-soft, var(--za-text-muted));
+    opacity: 1;
   }
 
   .cloud-chat-composer button[type="submit"] {

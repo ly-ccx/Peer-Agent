@@ -1603,7 +1603,10 @@
   resize: none;
   border: none;
   background: transparent;
-  color: var(--graphite-base);
+  /* Prefer theme text tokens so light/dark stay readable on control-composer. */
+  color: var(--graphite-base, var(--za-text));
+  caret-color: var(--graphite-base, var(--za-text));
+  -webkit-text-fill-color: var(--graphite-base, var(--za-text));
   font-size: 0.9rem;
   line-height: 1.5;
   padding: 6px 8px;
@@ -1613,7 +1616,10 @@
   font-family: var(--font-sans);
 }
 .chat-composer textarea::placeholder {
-  color: var(--graphite-mute);
+  /* mute is too faint on light control surfaces; soft/fade stay readable. */
+  color: var(--graphite-soft, var(--graphite-fade, var(--za-text-soft)));
+  -webkit-text-fill-color: var(--graphite-soft, var(--graphite-fade, var(--za-text-soft)));
+  opacity: 1;
 }
 
 .chat-composer button[type="submit"] {
