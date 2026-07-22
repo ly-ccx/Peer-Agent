@@ -1,7 +1,7 @@
 import type React from 'react';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useConversationDraft } from '../hooks/useConversationState';
-import { saveComposerEntry } from '../state/composerPersistence';
+import { loadComposerEntry, saveComposerEntry, shouldDeferEmptyComposerSave } from '../state/composerPersistence';
 import { conversationStore } from '../state/conversationStore';
 import { createFrameCoalescer } from '../state/frameCoalescer';
 import type { ChatAttachment, QueuedMessage } from '../state/types';
@@ -79,6 +79,7 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
     cancel: (frameId) => cancelAnimationFrame(frameId),
   }));
   const persistedConversationRef = useRef<string | null | undefined>(undefined);
+  const hydrationReadyConversationRef = useRef<string | null>(null);
 
   const slashCommands = useMemo(() => {
     const query = draft.startsWith('/') && !/\s/.test(draft) ? draft.toLowerCase() : null;
@@ -205,9 +206,20 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
     }
     if (previousId !== conversationId) {
       persistedConversationRef.current = conversationId;
+      hydrationReadyConversationRef.current = null;
       return;
     }
     if (!conversationId) return;
+    // 工作区切换会重新挂载输入叶子。父级恢复会话桶之前，这里可能先观察到初始空态；
+    // 若磁盘上仍有该会话的草稿/队列，拒绝这一次空写。恢复完成后即使用户主动清空，
+    // hydrationReadyConversationRef 也已就绪，仍会正常删除持久化条目。
+    if (shouldDeferEmptyComposerSave(
+      hydrationReadyConversationRef.current === conversationId,
+      draft,
+      messageQueue,
+      loadComposerEntry(conversationId),
+    )) return;
+    hydrationReadyConversationRef.current = conversationId;
     saveComposerEntry(conversationId, {
       draft,
       queue: messageQueue.map((item) => ({

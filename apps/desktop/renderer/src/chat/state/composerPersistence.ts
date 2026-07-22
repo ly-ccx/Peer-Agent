@@ -153,6 +153,16 @@ export function loadComposerEntry(conversationId: string): PersistedComposerEntr
   return entry ? { draft: entry.draft, queue: entry.queue } : null;
 }
 
+/** 输入叶子重新挂载时，仅阻止初始空态覆盖尚待恢复的磁盘数据。 */
+export function shouldDeferEmptyComposerSave(
+  hydrationReady: boolean,
+  draft: string,
+  queue: readonly unknown[],
+  persisted: PersistedComposerEntry | null,
+): boolean {
+  return !hydrationReady && draft.length === 0 && queue.length === 0 && persisted !== null;
+}
+
 /**
  * 切换会话时决定 composer 草稿/队列用哪一份真值。
  *

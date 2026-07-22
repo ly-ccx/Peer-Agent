@@ -1444,6 +1444,68 @@
   outline: none;
   box-shadow: 0 0 0 3px var(--za-focus);
 }
+
+/* Codex 风格：队列收敛为紧凑单行，操作仅在 hover / 键盘聚焦时出现。 */
+.message-queue {
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.message-queue-item {
+  gap: var(--space-2);
+  min-height: 38px;
+  padding: 4px 8px;
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  box-shadow: none;
+}
+.message-queue-item:hover {
+  border-color: color-mix(in srgb, var(--glass-border) 72%, transparent);
+  background: color-mix(in srgb, var(--glass-bg-strong) 66%, transparent);
+  box-shadow: none;
+}
+.message-queue-card-main {
+  gap: 7px;
+}
+.message-queue-drag-handle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--graphite-faint);
+  cursor: grab;
+}
+.message-queue-item:active .message-queue-drag-handle {
+  cursor: grabbing;
+}
+.message-queue-index {
+  min-width: 16px;
+  color: var(--graphite-strong);
+  font-size: 0.82rem;
+}
+.message-queue-text {
+  min-width: 0;
+  font-size: 0.82rem;
+}
+.message-queue-attachment-count {
+  flex: 0 0 auto;
+  color: var(--graphite-mute);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+.message-queue-actions {
+  opacity: 0;
+  transition: opacity var(--za-motion-fast);
+}
+.message-queue-item:hover .message-queue-actions,
+.message-queue-item:focus-within .message-queue-actions {
+  opacity: 1;
+}
+.message-queue-edit,
+.message-queue-remove {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
 /* 图片预览的重遮罩修饰类：仅加深背景观感，布局与入场动效继承 .pa-overlay-backdrop 基座。 */
 .image-preview-backdrop {
   background: rgba(8, 12, 18, 0.76);

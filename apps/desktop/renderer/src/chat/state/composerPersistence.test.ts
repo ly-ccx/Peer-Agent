@@ -7,6 +7,7 @@ import {
   loadComposerEntry,
   resolveComposerHydration,
   saveComposerEntry,
+  shouldDeferEmptyComposerSave,
   type ComposerSettingsPort,
 } from './composerPersistence.ts';
 
@@ -106,6 +107,19 @@ describe('composerPersistence', () => {
     assert.equal(port.writes.length, 1);
     const written = port.writes[0].composerDrafts as Record<string, unknown>;
     assert.equal('conv-3' in written, false);
+  });
+
+  it('defers only the pre-hydration empty save that would erase persisted queue data', () => {
+    const persisted = {
+      draft: '',
+      queue: [{ id: 'q1', text: 'queued', attachments: [], effort: 'default' as const }],
+    };
+
+    assert.equal(shouldDeferEmptyComposerSave(false, '', [], persisted), true);
+    assert.equal(shouldDeferEmptyComposerSave(true, '', [], persisted), false);
+    assert.equal(shouldDeferEmptyComposerSave(false, 'edited', [], persisted), false);
+    assert.equal(shouldDeferEmptyComposerSave(false, '', [{ id: 'live' }], persisted), false);
+    assert.equal(shouldDeferEmptyComposerSave(false, '', [], null), false);
   });
 
   it('resolveComposerHydration prefers live queue/draft over empty or stale persistence', () => {
