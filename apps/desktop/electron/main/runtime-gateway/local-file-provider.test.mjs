@@ -48,6 +48,33 @@ describe('local file provider', () => {
     assert.equal(toolContext.readFiles.get(filePath)?.fullRead, true);
   });
 
+  it('lists directory entries through the governed file provider', async () => {
+    const directoryPath = path.join(tmpDir, 'docs');
+    mkdirSync(directoryPath);
+    mkdirSync(path.join(directoryPath, 'nested'));
+    writeFileSync(path.join(directoryPath, 'note.txt'), 'hello\n', 'utf8');
+
+    const provider = createLocalFileProvider({ workspaceRoot: tmpDir });
+    const execution = await provider.executeCapability(
+      { call: createCall('local.file.list', { path: 'docs' }) },
+      {
+        workspaceRoot: tmpDir,
+        toolContext: { conversationId: 'c1', readFiles: new Map() },
+        locale: 'zh-CN',
+      },
+    );
+
+    assert.equal(execution.grant.granted, true);
+    assert.equal(execution.result.status, 'success');
+    const output = JSON.parse(execution.result.outputPreview.fileResult.output);
+    assert.equal(output.tool, 'list_files');
+    assert.equal(output.path, 'docs');
+    assert.deepEqual(output.entries, [
+      { name: 'nested', path: 'docs/nested', type: 'directory' },
+      { name: 'note.txt', path: 'docs/note.txt', type: 'file' },
+    ]);
+  });
+
   it('requires a fresh read before editing existing files', async () => {
     const filePath = path.join(tmpDir, 'app.js');
     writeFileSync(filePath, 'const value = 1;\n', 'utf8');

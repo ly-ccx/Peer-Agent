@@ -46,6 +46,7 @@ test('file provider reads and lists workspace files with Evidence', async (t) =>
     path: 'docs/note.txt',
     content: 'hello node bundle',
     bytes: 17,
+    contentHash: '0d3ca04056bfea5afaa32985710ffbbc9b60c00708be51eddc68dd58f4ba5dc3',
   });
   assert.equal(readResult.permissionGrant?.decision, 'allow');
   assert.equal(
@@ -63,6 +64,58 @@ test('file provider reads and lists workspace files with Evidence', async (t) =>
     entries: [{ name: 'note.txt', path: 'docs/note.txt', type: 'file' }],
   });
   assert.ok(listResult.evidence);
+});
+
+test('file provider edits previously read files and rejects stale or ambiguous replacements', async (t) => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-runtime-node-edit-'));
+  t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
+  const filePath = path.join(workspaceRoot, 'note.txt');
+  await writeFile(filePath, 'alpha beta beta', 'utf8');
+  const provider = createNodeFileProvider({ workspaceRoot, requestApproval: () => ({ granted: true }) });
+
+  const unread = await provider.execute(
+    request('local.file.edit', { path: 'note.txt', old_string: 'alpha', new_string: 'omega' }), context(),
+  );
+  assert.equal(unread.error?.code, 'read_required');
+
+  await provider.execute(request('local.file.read', { path: 'note.txt' }), context());
+  const ambiguous = await provider.execute(
+    request('local.file.edit', { path: 'note.txt', old_string: 'beta', new_string: 'gamma' }), context(),
+  );
+  assert.equal(ambiguous.error?.code, 'old_string_not_unique');
+
+  const edited = await provider.execute(
+    request('local.file.edit', { path: 'note.txt', old_string: 'beta', new_string: 'gamma', replace_all: true }), context(),
+  );
+  assert.equal(edited.status, 'completed');
+  assert.equal(await readFile(filePath, 'utf8'), 'alpha gamma gamma');
+
+  await writeFile(filePath, 'external change', 'utf8');
+  const stale = await provider.execute(
+    request('local.file.edit', { path: 'note.txt', old_string: 'alpha', new_string: 'omega' }), context(),
+  );
+  assert.equal(stale.error?.code, 'file_changed_since_read');
+});
+
+test('file provider searches file contents with case and result limits', async (t) => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-runtime-node-search-'));
+  t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
+  await mkdir(path.join(workspaceRoot, 'docs'));
+  await writeFile(path.join(workspaceRoot, 'docs', 'a.txt'), 'Needle one\nneedle two', 'utf8');
+  await writeFile(path.join(workspaceRoot, 'docs', 'b.txt'), 'needle three', 'utf8');
+  const provider = createNodeFileProvider({ workspaceRoot });
+
+  const limited = await provider.execute(
+    request('local.file.search', { query: 'needle', path: 'docs', max_results: 2 }), context(),
+  );
+  assert.equal(limited.status, 'completed');
+  assert.equal((limited.output as { matchCount?: number }).matchCount, 2);
+  assert.equal((limited.output as { truncated?: boolean }).truncated, true);
+
+  const sensitive = await provider.execute(
+    request('local.file.search', { query: 'Needle', path: 'docs', case_sensitive: true }), context(),
+  );
+  assert.equal((sensitive.output as { matchCount?: number }).matchCount, 1);
 });
 
 test('file provider keeps write approval explicit and supports empty files', async (t) => {

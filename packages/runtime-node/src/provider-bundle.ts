@@ -35,11 +35,20 @@ import {
   REQUEST_USER_INPUT_TOOL_NAME,
 } from './interaction-provider.ts';
 
+const FILE_TOOL_NAMES: Readonly<Record<string, string>> = Object.freeze({
+  'local.file.read': 'read_file',
+  'local.file.list': 'list_files',
+  'local.file.write': 'write_file',
+  'local.file.edit': 'edit_file',
+  'local.file.search': 'search_files',
+});
+
 function manifestToToolDefinition(manifest: CapabilityManifest): RuntimeToolDefinition {
   return {
     name: manifest.capabilityId === INTERACTION_CAPABILITY_ID
       ? REQUEST_USER_INPUT_TOOL_NAME
-      : manifest.capabilityId.replace(/[^A-Za-z0-9_]+/g, '_'),
+      : FILE_TOOL_NAMES[manifest.capabilityId]
+        ?? manifest.capabilityId.replace(/[^A-Za-z0-9_]+/g, '_'),
     capabilityId: manifest.capabilityId,
     description: manifest.description ?? manifest.displayName,
     inputSchema: manifest.inputSchema,

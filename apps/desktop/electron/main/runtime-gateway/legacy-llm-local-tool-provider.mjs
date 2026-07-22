@@ -6,6 +6,7 @@ import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 const TOOL_TO_CAPABILITY = {
   bash: 'legacy.local.shell.exec',
   read_file: 'legacy.local.file.read',
+  list_files: 'legacy.local.file.list',
   search_files: 'legacy.local.file.search',
   edit_file: 'legacy.local.file.edit',
   write_file: 'legacy.local.file.write',
@@ -13,6 +14,7 @@ const TOOL_TO_CAPABILITY = {
 
 const TOOL_TO_LOCAL_FILE_CAPABILITY = {
   read_file: 'local.file.read',
+  list_files: 'local.file.list',
   search_files: 'local.file.search',
   edit_file: 'local.file.edit',
   write_file: 'local.file.write',

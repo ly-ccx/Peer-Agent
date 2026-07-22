@@ -14,6 +14,7 @@ const MAX_TOOL_CONTEXT_CHARS = 4_000;
 
 const FILE_CAPABILITY_TO_TOOL = {
   'local.file.read': 'read_file',
+  'local.file.list': 'list_files',
   'local.file.edit': 'edit_file',
   'local.file.write': 'write_file',
   'local.file.search': 'search_files',
@@ -427,6 +428,28 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
       return materializeFileRead({ filePath, content, readState });
     }
 
+    if (name === 'list_files') {
+      const directoryPath = resolveToolPath(args.path ?? '.', cwd);
+      if (!existsSync(directoryPath)) return { success: false, error: `Directory not found: ${directoryPath}` };
+      if (!statSync(directoryPath).isDirectory()) return { success: false, error: `Not a directory: ${directoryPath}` };
+      const entries = readdirSync(directoryPath, { withFileTypes: true })
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .map((entry) => ({
+          name: entry.name,
+          path: relative(cwd, resolve(directoryPath, entry.name)) || '.',
+          type: entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other',
+        }));
+      return {
+        success: true,
+        output: formatContextResult({
+          status: 'success',
+          tool: name,
+          path: relative(cwd, directoryPath) || '.',
+          entries,
+        }),
+      };
+    }
+
     if (name === 'search_files') {
       return runFileSearch({ args, cwd, requestPermission });
     }
@@ -576,7 +599,9 @@ function statusFromFileResult(fileResult) {
 function buildFileCapabilityResult({ call, name, locale, fileResult }) {
   const status = statusFromFileResult(fileResult);
   const dataLevel =
-    name === 'read_file' || name === 'search_files' ? 'D1_internal' : 'D2_sensitive';
+    name === 'read_file' || name === 'list_files' || name === 'search_files'
+      ? 'D1_internal'
+      : 'D2_sensitive';
   return {
     toolCallId: call.toolCallId,
     status,

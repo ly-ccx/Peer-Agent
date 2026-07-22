@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 export const TOOL_NAMES = {
   bash: 'bash',
   readFile: 'read_file',
+  listFiles: 'list_files',
   searchFiles: 'search_files',
   editFile: 'edit_file',
   writeFile: 'write_file',
@@ -50,6 +51,27 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
         },
       },
       required: ['command'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: TOOL_NAMES.listFiles,
+    capabilityId: 'legacy.local.file.list',
+    prompt: () => 'List the immediate entries in a directory. Use this instead of shell commands when you only need directory contents.',
+    availableInModes: ['chat', 'plan', 'explorer', 'goal'],
+    runtime: legacyRuntime('local.file.list'),
+    permissionPolicy: {
+      kind: 'file-read',
+      requiresReviewForOutsideWorkspace: false,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Absolute or workspace-relative directory path. Defaults to the workspace root.',
+        },
+      },
       additionalProperties: false,
     },
   },
