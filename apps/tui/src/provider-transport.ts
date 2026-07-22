@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { rootCertificates } from 'node:tls';
 
 import { loadMacosTrustedCertificates } from './macos-trusted-certificates.ts';
+import { readMacosSystemProxy, type SystemProxyConfig } from './macos-system-proxy.ts';
 
 export interface TuiProviderTransportEnvironment {
   readonly [key: string]: string | undefined;
@@ -70,15 +71,16 @@ export function shouldBypassProxy(url: URL, noProxy: string | undefined): boolea
 export function proxyForUrl(
   url: URL,
   env: TuiProviderTransportEnvironment,
+  systemProxy: SystemProxyConfig = {},
 ): string | undefined {
   const noProxy = firstNonEmpty(env.NO_PROXY, env.no_proxy);
   if (shouldBypassProxy(url, noProxy)) return undefined;
   const allProxy = firstNonEmpty(env.ALL_PROXY, env.all_proxy);
   if (url.protocol === 'https:') {
-    return firstNonEmpty(env.HTTPS_PROXY, env.https_proxy, allProxy);
+    return firstNonEmpty(env.HTTPS_PROXY, env.https_proxy, allProxy, systemProxy.https);
   }
   if (url.protocol === 'http:') {
-    return firstNonEmpty(env.HTTP_PROXY, env.http_proxy, allProxy);
+    return firstNonEmpty(env.HTTP_PROXY, env.http_proxy, allProxy, systemProxy.http);
   }
   return allProxy;
 }
@@ -94,6 +96,7 @@ export interface CreateTuiProviderFetchOptions {
   readonly readFile?: typeof readFileSync;
   readonly systemRootCertificates?: readonly string[];
   readonly macosTrustedCertificates?: readonly string[];
+  readonly systemProxy?: SystemProxyConfig;
   readonly fetch?: typeof globalThis.fetch;
 }
 
@@ -126,12 +129,13 @@ export function createTuiProviderFetch(
     extraCa,
   );
   const underlyingFetch = options.fetch ?? globalThis.fetch;
+  const systemProxy = options.systemProxy ?? readMacosSystemProxy();
 
   const providerFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(
       input instanceof Request ? input.url : input instanceof URL ? input.href : input,
     );
-    const proxy = proxyForUrl(url, env);
+    const proxy = proxyForUrl(url, env, systemProxy);
     return underlyingFetch(input, {
       ...init,
       proxy,

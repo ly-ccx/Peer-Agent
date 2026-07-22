@@ -28,6 +28,47 @@ describe('TUI provider transport', () => {
     expect(shouldBypassProxy(new URL('https://anything.test'), '*')).toBe(true);
   });
 
+  test('falls back to system proxy only when env proxy is unset', () => {
+    const systemProxy = {
+      http: 'http://system-proxy.example:9674',
+      https: 'http://system-proxy.example:9675',
+    };
+    // Env proxy wins over system proxy.
+    expect(
+      proxyForUrl(new URL('https://api.example.test'), { HTTPS_PROXY: 'http://env:8443' }, systemProxy),
+    ).toBe('http://env:8443');
+    // No env proxy: fall back to system proxy per scheme.
+    expect(proxyForUrl(new URL('https://api.example.test'), {}, systemProxy)).toBe(systemProxy.https);
+    expect(proxyForUrl(new URL('http://api.example.test'), {}, systemProxy)).toBe(systemProxy.http);
+  });
+
+  test('honors NO_PROXY even when a system proxy is available', () => {
+    const systemProxy = { https: 'http://system-proxy.example:9675' };
+    expect(
+      proxyForUrl(new URL('https://localhost'), { NO_PROXY: 'localhost' }, systemProxy),
+    ).toBeUndefined();
+  });
+
+  test('uses injected system proxy config in createTuiProviderFetch', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    const fakeFetch = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({ input, init });
+        return new Response(null, { status: 204 });
+      },
+      { preconnect() {} },
+    ) as typeof globalThis.fetch;
+    const providerFetch = createTuiProviderFetch({
+      env: {},
+      systemProxy: { https: 'http://system-proxy.example:9675' },
+      fetch: fakeFetch,
+    });
+
+    await providerFetch('https://chatgpt.com/backend-api/codex');
+
+    expect(calls[0]?.init).toMatchObject({ proxy: 'http://system-proxy.example:9675' });
+  });
+
   test('prefers the Peer Agent CA setting and accepts Node extra CA compatibility', () => {
     expect(resolveExtraCaPath({
       PEER_EXTRA_CA_CERTS: '/certs/peer.pem',
