@@ -13,6 +13,7 @@ import {
   applyThemeScheme,
   contextUsageColor,
   createTuiThemeStore,
+  detectSystemPrefersDark,
   normalizeTuiThemeMode,
   resolveThemeScheme,
   toolStatusColor,
@@ -55,6 +56,25 @@ describe('TUI theme tokens', () => {
     expect(resolveThemeScheme('dark')).toBe('dark');
     expect(resolveThemeScheme('system', true)).toBe('dark');
     expect(resolveThemeScheme('system', false)).toBe('light');
+  });
+
+  test('detects macOS light mode when AppleInterfaceStyle is absent', () => {
+    expect(detectSystemPrefersDark({
+      platform: 'darwin',
+      colorFgBg: '15;0',
+      readMacOSAppearance: () => {
+        throw new Error('AppleInterfaceStyle is absent');
+      },
+    })).toBe(false);
+  });
+
+  test('preserves macOS dark detection and non-macOS terminal fallback', () => {
+    expect(detectSystemPrefersDark({
+      platform: 'darwin',
+      readMacOSAppearance: () => 'Dark\n',
+    })).toBe(true);
+    expect(detectSystemPrefersDark({ platform: 'linux', colorFgBg: '15;0' })).toBe(true);
+    expect(detectSystemPrefersDark({ platform: 'linux', colorFgBg: '0;15' })).toBe(false);
   });
 
   test('normalizeTuiThemeMode falls back safely', () => {

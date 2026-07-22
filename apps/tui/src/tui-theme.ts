@@ -163,21 +163,32 @@ export function getActiveThemeMode(): TuiThemeMode {
   return activeMode;
 }
 
-export function detectSystemPrefersDark(): boolean {
-  try {
-    if (process.platform === 'darwin') {
-      const out = execSync('defaults read -g AppleInterfaceStyle', {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }).trim();
-      return out === 'Dark';
+type SystemThemeDetectionOptions = {
+  readonly platform?: NodeJS.Platform;
+  readonly colorFgBg?: string;
+  readonly readMacOSAppearance?: () => string;
+};
+
+export function detectSystemPrefersDark(options: SystemThemeDetectionOptions = {}): boolean {
+  const platform = options.platform ?? process.platform;
+  if (platform === 'darwin') {
+    try {
+      const readMacOSAppearance = options.readMacOSAppearance ?? (() => execSync(
+        'defaults read -g AppleInterfaceStyle',
+        {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
+      ));
+      return readMacOSAppearance().trim() === 'Dark';
+    } catch {
+      // In macOS light mode AppleInterfaceStyle is normally absent.
+      return false;
     }
-  } catch {
-    // fall through
   }
 
   // COLORFGBG is "fg;bg". bg 0–7 ≈ dark, 8–15 ≈ light (xterm convention).
-  const cfg = process.env.COLORFGBG;
+  const cfg = options.colorFgBg ?? process.env.COLORFGBG;
   if (cfg) {
     const bg = Number(cfg.split(';').pop());
     if (Number.isFinite(bg)) return bg < 8;
