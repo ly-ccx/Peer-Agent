@@ -11,10 +11,7 @@ import {
   sidebarConversationActivity,
 } from '../state/compactionStateView';
 import { shouldShowCompletedUnreadDot } from '../state/completedUnreadState';
-import {
-  hasRunningWorkspaceOtherThan,
-  isWorkspaceRunning,
-} from '../state/runningWorkspaceState';
+import { isWorkspaceRunning } from '../state/runningWorkspaceState';
 import type { CompactionState } from '../state/types';
 import { useListFlip } from '../hooks/useListFlip';
 import { shouldShowConversationLoadMore } from '../state/conversationListPagination';
@@ -600,16 +597,6 @@ export function Sidebar({
 
       <div className="sidebar-workspace-wrap" ref={wsWrapRef}>
         <div className="sidebar-workspace" onClick={toggleDropdown}>
-          {/* ADR 27: 折叠态下,若有"非当前工作区"存在运行中的流,显示一个运行点,
-              提示用户切走的工作区任务仍在跑——展开下拉可定位到具体工作区。
-              路径比较走 normalize,避免 trailing-slash 造成假"其它工作区"黄点。 */}
-          {hasRunningWorkspaceOtherThan(runningWorkspacePaths, activeWorkspace) ? (
-            <span
-              className="ws-running-dot ws-running-dot-other"
-              aria-label={isZh ? '其它工作区有任务运行中' : 'Tasks running in another workspace'}
-              title={isZh ? '其它工作区有任务正在运行' : 'Another workspace has running tasks'}
-            />
-          ) : null}
           {wsInfo ? (
             <>
               <span className="ws-name">{wsInfo.name}</span>

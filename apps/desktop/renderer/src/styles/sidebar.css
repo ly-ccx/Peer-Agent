@@ -285,12 +285,6 @@
   --motion-ripple-duration: 1.6s;
   --motion-ripple-peak: 1;
 }
-/* 折叠态、提示"其它工作区"时用警示色,和当前工作区的运行点区分。 */
-.ws-running-dot-other {
-  background: var(--state-warning, #c8861a);
-  --motion-ripple-color: var(--state-warning, #c8861a);
-  margin-right: var(--space-1);
-}
 .ws-chevron {
   color: var(--graphite-mute);
   flex-shrink: 0;
