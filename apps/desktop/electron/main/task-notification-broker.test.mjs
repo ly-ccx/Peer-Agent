@@ -165,14 +165,15 @@ describe('task-notification-broker', () => {
     assert.equal(h.shown.length, 0);
   });
 
-  it('click handler opens conversation and marks read', () => {
+  it('click handler opens the conversation in its origin workspace and marks read', () => {
     const h = createHarness();
     h.plans.set('p1', {
       planId: 'p1',
       status: 'executing',
       title: '回流',
       conversationId: 'c42',
-      targetWorkspacePath: '/ws/x',
+      originWorkspacePath: '/ws/conversation',
+      targetWorkspacePath: '/repo/execution',
     });
     h.broker.evaluatePlan(h.plans.get('p1'));
     h.plans.set('p1', { ...h.plans.get('p1'), status: 'completed' });
@@ -182,7 +183,7 @@ describe('task-notification-broker', () => {
     h.shown[0].onClick();
     assert.equal(h.opened.length, 1);
     assert.equal(h.opened[0].conversationId, 'c42');
-    assert.equal(h.opened[0].workspacePath, '/ws/x');
+    assert.equal(h.opened[0].workspacePath, '/ws/conversation');
     assert.equal(h.opened[0].source, 'system-notification');
     assert.equal(h.receiptStore.get('p1').lastReadAttentionVersion, 1);
   });

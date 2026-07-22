@@ -172,21 +172,31 @@ describe('task-notification-policy helpers', () => {
     );
   });
 
-  it('projects plan to notification task', () => {
+  it('projects plan to notification task using the conversation workspace', () => {
     const task = projectPlanToNotificationTask({
       planId: 'p1',
       status: 'awaiting_approval',
       title: '发布预发',
       conversationId: 'c1',
       activation: { sourceMessageId: 'assistant-message-1' },
-      targetWorkspacePath: '/tmp/ws',
+      originWorkspacePath: '/tmp/conversation-workspace',
+      targetWorkspacePath: '/tmp/execution-repository',
       failureReason: 'x',
     });
     assert.equal(task.taskId, 'p1');
     assert.equal(task.status, 'waiting_user');
-    assert.equal(task.workspacePath, '/tmp/ws');
+    assert.equal(task.workspacePath, '/tmp/conversation-workspace');
     assert.equal(task.sourceMessageId, 'assistant-message-1');
     assert.equal(task.waitingReason, 'confirmation');
+  });
+
+  it('falls back to the execution workspace for legacy plans without a conversation workspace', () => {
+    const task = projectPlanToNotificationTask({
+      planId: 'p2',
+      status: 'completed',
+      targetWorkspacePath: '/tmp/legacy-workspace',
+    });
+    assert.equal(task.workspacePath, '/tmp/legacy-workspace');
   });
 
   it('builds waiting permission copy', () => {

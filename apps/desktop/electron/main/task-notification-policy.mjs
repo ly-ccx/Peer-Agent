@@ -318,10 +318,12 @@ export function projectPlanToNotificationTask(plan) {
     (typeof plan.goal === 'string' && plan.goal.trim()) ||
     '未命名任务';
 
+  // 通知要回到承载该会话的工作区。targetWorkspacePath 是 Goal 的执行边界，
+  // 可能指向另一个代码仓，不能优先用于会话导航。
   const workspacePath =
-    (typeof plan.targetWorkspacePath === 'string' && plan.targetWorkspacePath) ||
     (typeof plan.originWorkspacePath === 'string' && plan.originWorkspacePath) ||
     (typeof plan.workspacePath === 'string' && plan.workspacePath) ||
+    (typeof plan.targetWorkspacePath === 'string' && plan.targetWorkspacePath) ||
     null;
 
   return {
