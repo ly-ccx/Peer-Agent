@@ -5,6 +5,8 @@ import {
   composerRunningStatusLine,
   createToolPresentation,
   formatToolResultSummary,
+  formatInteractionToolDetail,
+  toolArgumentSummary,
   parseLegacyToolContent,
   resolveToolPresentation,
   runningToolStatusGlyph,
@@ -122,4 +124,43 @@ describe('tool result summary', () => {
     expect(animatedToolStatusGlyph('running', 1)).toBe('◉');
     expect(animatedToolStatusGlyph('completed', 1)).toBe(toolStatusGlyph('completed'));
   });
+
+  test('formats request_user_input as selectable prompt', () => {
+    const detail = formatInteractionToolDetail({
+      ok: true,
+      acknowledged: true,
+      question: 'Pick a plan?',
+      options: ['A', 'B'],
+      note: 'Waiting for you.',
+    });
+    expect(detail).toContain('Pick a plan?');
+    expect(detail).toContain('1. A');
+    expect(detail).toContain('2. B');
+    expect(detail).toContain('Reply with a number');
+    expect(formatToolResultSummary({
+      ok: true,
+      acknowledged: true,
+      question: 'Pick a plan?',
+      options: ['A', 'B'],
+    })).toContain('1. A');
+  });
+
+  test('formats request_user_input free-input when options empty', () => {
+    const detail = formatInteractionToolDetail({
+      ok: true,
+      acknowledged: true,
+      question: 'What is the target?',
+      options: [],
+    });
+    expect(detail).toContain('What is the target?');
+    expect(detail).toContain('Type your answer');
+  });
+
+  test('toolArgumentSummary uses question for request_user_input', () => {
+    expect(toolArgumentSummary('local.interaction.request_user_input', {
+      question: 'Choose branch strategy?',
+      options: ['1', '2'],
+    })).toContain('Choose branch strategy?');
+  });
+
 });

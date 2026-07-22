@@ -66,6 +66,8 @@ export interface CreateNodeProviderBundleOptions {
   readonly mode?: string;
   readonly file?: Omit<NodeFileProviderOptions, 'workspaceRoot' | 'requestApproval' | 'now' | 'idFactory'> | false;
   readonly shell?: Omit<NodeShellProviderOptions, 'workspaceRoot' | 'requestApproval' | 'now' | 'idFactory'> | false;
+  /** Pass false to omit request_user_input from the bundle. */
+  readonly interaction?: false;
 }
 
 export interface NodeProviderBundle {

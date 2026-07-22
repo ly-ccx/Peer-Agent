@@ -28,10 +28,18 @@ import {
   createProviderRuntimeClock,
 } from './provider-utils.ts';
 import { createNodeShellProvider, NODE_SHELL_CAPABILITY_MANIFESTS } from './shell-provider.ts';
+import {
+  createNodeInteractionProvider,
+  INTERACTION_CAPABILITY_ID,
+  NODE_INTERACTION_CAPABILITY_MANIFESTS,
+  REQUEST_USER_INPUT_TOOL_NAME,
+} from './interaction-provider.ts';
 
 function manifestToToolDefinition(manifest: CapabilityManifest): RuntimeToolDefinition {
   return {
-    name: manifest.capabilityId.replace(/[^A-Za-z0-9_]+/g, '_'),
+    name: manifest.capabilityId === INTERACTION_CAPABILITY_ID
+      ? REQUEST_USER_INPUT_TOOL_NAME
+      : manifest.capabilityId.replace(/[^A-Za-z0-9_]+/g, '_'),
     capabilityId: manifest.capabilityId,
     description: manifest.description ?? manifest.displayName,
     inputSchema: manifest.inputSchema,
@@ -94,10 +102,14 @@ export function createNodeProviderBundle(
       idFactory: clock.idFactory,
       ...(options.shell ?? {}),
     })]),
+    ...(options.interaction === false ? [] : [createNodeInteractionProvider({
+      clock,
+    })]),
   ];
   const manifests = Object.freeze([
     ...(options.file === false ? [] : NODE_FILE_CAPABILITY_MANIFESTS),
     ...(options.shell === false ? [] : NODE_SHELL_CAPABILITY_MANIFESTS),
+    ...(options.interaction === false ? [] : NODE_INTERACTION_CAPABILITY_MANIFESTS),
   ]);
   const toolDefinitions = Object.freeze(manifests.map(manifestToToolDefinition));
   const projection = createRuntimeProjection(toolDefinitions, {
@@ -157,6 +169,9 @@ export function createNodeProviderBundle(
             ...(result.evidence === undefined ? {} : { evidence: result.evidence }),
             ...(result.error === undefined ? {} : { error: result.error }),
             ...(result.metadata === undefined ? {} : { metadata: result.metadata }),
+            ...((result as { control?: unknown }).control === undefined
+              ? {}
+              : { control: (result as { control?: unknown }).control }),
           },
         };
       } catch (error) {
@@ -235,7 +250,19 @@ export function createNodeProviderBundle(
         requestPermission: options.requestPermission,
         mode: options.mode,
       });
-      return { call, result: execution };
+      const control = (execution.result as { control?: { terminal?: unknown; reason?: unknown } } | undefined)?.control
+        ?? ((execution.result as { output?: { control?: { terminal?: unknown; reason?: unknown } } } | undefined)?.output?.control);
+      const terminal = control?.terminal === true;
+      return {
+        call,
+        result: execution,
+        ...(terminal
+          ? {
+              terminal: true,
+              terminalReason: typeof control?.reason === 'string' ? control.reason : 'request_user_input',
+            }
+          : {}),
+      };
     },
   };
 

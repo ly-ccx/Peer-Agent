@@ -637,7 +637,22 @@ export function createChatController(options: {
           ...snapshot,
           messages: upsertAssistantTool(snapshot.messages, tool, () => ++sequence),
         });
-        return { call, result: execution };
+        const control = (execution.result as { control?: { terminal?: unknown; reason?: unknown } } | undefined)?.control
+          ?? ((execution.result as { output?: { control?: { terminal?: unknown; reason?: unknown } } } | undefined)?.output?.control)
+          ?? ((execution.result as { metadata?: { control?: { terminal?: unknown; reason?: unknown } } } | undefined)?.metadata?.control);
+        const terminal = control?.terminal === true
+          || call.capabilityId === 'local.interaction.request_user_input'
+          || call.name === 'request_user_input';
+        return {
+          call,
+          result: execution,
+          ...(terminal
+            ? {
+                terminal: true,
+                terminalReason: typeof control?.reason === 'string' ? control.reason : 'request_user_input',
+              }
+            : {}),
+        };
       },
     },
     events: {

@@ -21,6 +21,12 @@ export type {
   NodeShellProviderOptions,
 } from './provider-contracts.ts';
 export { createNodeFileProvider, NODE_FILE_CAPABILITY_MANIFESTS } from './file-provider.ts';
+export {
+  createNodeInteractionProvider,
+  INTERACTION_CAPABILITY_ID,
+  NODE_INTERACTION_CAPABILITY_MANIFESTS,
+  REQUEST_USER_INPUT_TOOL_NAME,
+} from './interaction-provider.ts';
 export type {
   ModelReasoningEffort,
   RuntimeModelCatalogEntry,

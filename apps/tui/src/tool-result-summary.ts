@@ -57,11 +57,76 @@ function stableJson(value: unknown): string {
   }, 2);
 }
 
+
+export function isRequestUserInputTool(name: string | null | undefined): boolean {
+  if (!name) return false;
+  return name === 'request_user_input'
+    || name === 'local.interaction.request_user_input'
+    || name.endsWith('.request_user_input')
+    || name.endsWith('request_user_input');
+}
+
+function asStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
+}
+
+/**
+ * Project request_user_input tool output into a selectable / free-input card for TUI.
+ * Expression-layer only: does not own permission/terminal truth.
+ */
+export function formatInteractionToolDetail(
+  value: unknown,
+  args?: Record<string, unknown> | null,
+): string | null {
+  const record = asRecord(value) ?? {};
+  const argRecord = args ?? {};
+  const question = typeof record.question === 'string' && record.question.trim()
+    ? record.question.trim()
+    : typeof argRecord.question === 'string' && argRecord.question.trim()
+      ? argRecord.question.trim()
+      : '';
+  if (!question && !asStringList(record.options).length && !asStringList(argRecord.options).length) {
+    // Not an interaction payload.
+    if (record.ok !== true && record.acknowledged !== true) return null;
+  }
+  if (!question && record.ok !== true && record.acknowledged !== true) return null;
+
+  const options = asStringList(record.options).length
+    ? asStringList(record.options)
+    : asStringList(argRecord.options);
+  const note = typeof record.note === 'string' && record.note.trim()
+    ? record.note.trim()
+    : '';
+
+  const lines: string[] = [];
+  if (question) lines.push(question);
+  if (options.length > 0) {
+    lines.push('Options:');
+    options.forEach((option, index) => {
+      lines.push(`  ${index + 1}. ${option}`);
+    });
+    lines.push('Reply with a number or type your answer.');
+  } else {
+    lines.push('Type your answer in the input below.');
+  }
+  if (note) lines.push(note);
+  return lines.join('\n');
+}
+
 export function formatToolResultSummary(
   value: unknown,
   fallback = 'completed',
   maxLength = DEFAULT_MAX_LENGTH,
 ): string {
+  const interactionDetail = formatInteractionToolDetail(value);
+  if (interactionDetail) {
+    if (interactionDetail.length <= maxLength) return interactionDetail;
+    return `${interactionDetail.slice(0, Math.max(0, maxLength - 1))}…`;
+  }
+
   let formatted: string;
   if (typeof value === 'string') {
     formatted = value;
@@ -87,6 +152,8 @@ const TOOL_DISPLAY_NAMES: Readonly<Record<string, string>> = Object.freeze({
   'local.search.content': 'Search',
   'local.search.files': 'Search',
   'local.search.aggregate': 'Search',
+  'local.interaction.request_user_input': 'Ask user',
+  request_user_input: 'Ask user',
 });
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -114,6 +181,13 @@ export function toolArgumentSummary(
   args: Record<string, unknown> | null | undefined,
 ): string {
   const record = args ?? {};
+  if (
+    capabilityId === 'local.interaction.request_user_input'
+    || capabilityId === 'request_user_input'
+  ) {
+    const question = typeof record.question === 'string' ? record.question : '';
+    return compactText(question, 88);
+  }
   if (capabilityId === 'local.shell.exec') {
     const command = typeof record.command === 'string' ? record.command : '';
     return compactText(command, 88);
@@ -262,7 +336,16 @@ export function createToolPresentation(input: {
     : status === 'cancelled'
       ? 'cancelled'
       : 'completed';
-  const detail = formatToolResultSummary(input.outputPreview, fallback);
+  const interactionDetail = formatInteractionToolDetail(
+    input.outputPreview,
+    input.arguments,
+  ) ?? (
+    isRequestUserInputTool(capabilityId)
+      ? formatInteractionToolDetail(input.arguments, input.arguments)
+      : null
+  );
+  const detail = interactionDetail
+    ?? formatToolResultSummary(input.outputPreview, fallback);
   const toolCallId = typeof input.toolCallId === 'string' && input.toolCallId.trim()
     ? input.toolCallId.trim()
     : undefined;

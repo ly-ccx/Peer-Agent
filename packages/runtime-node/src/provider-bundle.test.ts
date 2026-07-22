@@ -30,9 +30,10 @@ test('node provider bundle exposes a host-neutral projection and governed runtim
       { name: 'local_file_list', capabilityId: 'local.file.list' },
       { name: 'local_file_write', capabilityId: 'local.file.write' },
       { name: 'local_shell_exec', capabilityId: 'local.shell.exec' },
+      { name: 'request_user_input', capabilityId: 'local.interaction.request_user_input' },
     ],
   );
-  assert.equal(bundle.providers.length, 2);
+  assert.equal(bundle.providers.length, 3);
 
   const execution = await bundle.runtime.execute({
     sessionId: 'session-1',
@@ -74,17 +75,18 @@ test('node provider bundle materializes mode scopes into read-only plan and expl
 
   assert.deepEqual(
     plan.projection.tools.map((tool) => tool.capabilityId),
-    ['local.file.read', 'local.file.list'],
+    ['local.file.read', 'local.file.list', 'local.interaction.request_user_input'],
   );
   assert.deepEqual(
     explorer.projection.tools.map((tool) => tool.capabilityId),
-    ['local.file.read', 'local.file.list'],
+    ['local.file.read', 'local.file.list', 'local.interaction.request_user_input'],
   );
   const fullCapabilities = [
     'local.file.read',
     'local.file.list',
     'local.file.write',
     'local.shell.exec',
+    'local.interaction.request_user_input',
   ];
   assert.deepEqual(goal.projection.tools.map((tool) => tool.capabilityId), fullCapabilities);
   assert.deepEqual(compact.projection.tools.map((tool) => tool.capabilityId), fullCapabilities);
