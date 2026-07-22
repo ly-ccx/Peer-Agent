@@ -54,10 +54,10 @@ describe('post-turn compaction policy', () => {
       /isZh \? '上下文' : 'Context'/,
       'tooltip must label the ring occupancy as context',
     );
-    assert.match(
+    assert.doesNotMatch(
       displaySource,
       /isZh \? '压缩压力' : 'Compaction pressure'/,
-      'tooltip must still surface compaction pressure separately',
+      'tooltip must not surface compaction pressure (context-only display)',
     );
     assert.doesNotMatch(
       surfaceSource,
