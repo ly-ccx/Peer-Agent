@@ -498,11 +498,19 @@ test('Qoder local auth provider exposes catalog display label without changing r
 
     assert.equal(provider.model, 'gm51model');
     assert.equal(provider.modelLabel, 'GLM-5.2');
-    assert.equal(provider.contextWindow, 1_000_000);
+    // contextWindow 与发送链路同口径：默认档位（200K）投影后的可用输入窗口，
+    // 而非目录原始 max_input_tokens（1M）。
+    assert.equal(provider.contextWindow, 200_000);
     assert.equal(provider.maxOutputTokens, 32_768);
     assert.equal(provider.supportsVision, true);
     assert.equal(provider.supportsReasoning, true);
     assert.equal(provider.supportsPromptCaching, undefined);
+
+    // 用户切换 contextTier 档位后，contextWindow 跟随所选档位投影。
+    const upgraded = store.updateProvider(provider.id, {
+      modelOptionValues: { contextTier: '1M' },
+    });
+    assert.equal(upgraded.contextWindow, 1_000_000);
   } finally {
     if (previousQoderConfigDir === undefined) delete process.env.QODER_CONFIG_DIR;
     else process.env.QODER_CONFIG_DIR = previousQoderConfigDir;

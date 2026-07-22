@@ -37,7 +37,7 @@ import {
   validateCustomHeaders,
 } from './provider-channels.mjs';
 import { loadQoderAccessToken } from './provider-adapters/qoder-local-auth.mjs';
-import { getQoderModelMetadata } from './provider-adapters/qoder-model-catalog.mjs';
+import { getQoderModelMetadata, resolveQoderModelOptionProjection } from './provider-adapters/qoder-model-catalog.mjs';
 import {
   fetchModelsDevRegistry,
   fillMissingPricingFromRegistry,
@@ -168,7 +168,13 @@ function isLocalCliAuthMethod(value) {
 function applyQoderModelMetadata(item) {
   const metadata = getQoderModelMetadata(item.model);
   if (metadata?.label) item.modelLabel = metadata.label;
-  item.contextWindow = metadata?.contextWindow ?? item.contextWindow;
+  // 与发送链路同口径：按 contextTier 档位投影后的可用输入窗口（1M 档 − 输出预留），
+  // 而非目录原始窗口。渲染层回退分母与压缩预检都消费该值，口径不齐会导致
+  // 切模型后百分比失真（328k/180k=100%）甚至误触发压缩。
+  const optionProjection = resolveQoderModelOptionProjection(metadata, item.modelOptionValues);
+  item.contextWindow = optionProjection?.inputTokenLimit
+    ?? metadata?.contextWindow
+    ?? item.contextWindow;
   item.maxOutputTokens = metadata?.maxOutputTokens ?? item.maxOutputTokens;
   if (typeof metadata?.supportsVision === 'boolean') item.supportsVision = metadata.supportsVision;
   if (typeof metadata?.supportsReasoning === 'boolean') item.supportsReasoning = metadata.supportsReasoning;
