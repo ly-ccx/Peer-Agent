@@ -15,7 +15,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function registryPath() {
+function defaultRegistryPath() {
   return pathOf('mcpRegistry');
 }
 
@@ -216,13 +216,13 @@ function toRendererView(server) {
   };
 }
 
-export function createMcpRegistry() {
+export function createMcpRegistry({ registryPath = defaultRegistryPath() } = {}) {
   function readRegistry() {
-    return normalizeRegistry(readJsonFile(registryPath(), { version: VERSION, servers: [] }));
+    return normalizeRegistry(readJsonFile(registryPath, { version: VERSION, servers: [] }));
   }
 
   function writeRegistry(registry) {
-    writeJsonFile(registryPath(), normalizeRegistry(registry));
+    writeJsonFile(registryPath, normalizeRegistry(registry));
   }
 
   function listServers() {

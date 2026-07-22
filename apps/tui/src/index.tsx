@@ -159,6 +159,10 @@ const modelSelection = createTuiModelSelectionControl({
     ?? (modelConfig.configured ? ['off', 'low', 'default', 'high'] : ['default']),
   catalog: modelConfig.catalog,
 });
+const systemPrompt = () => buildTuiSystemPrompt(
+  languageStore.getReplyLanguage(),
+  [host.skillMcpBridge?.discoveryHint() ?? ''],
+);
 const model = provider
   ? createProviderChatModel({
       provider,
@@ -169,8 +173,8 @@ const model = provider
       getModel: () => modelSelection.getSelection().modelId,
       getReasoningEffort: () => modelSelection.getSelection().reasoningEffort,
       toolDefinitionsForMode: (mode) => host.toolDefinitionsForMode?.(mode) ?? host.toolDefinitions,
-      systemPrompt: buildTuiSystemPrompt(languageStore.getReplyLanguage()),
-      getSystemPrompt: () => buildTuiSystemPrompt(languageStore.getReplyLanguage()),
+      systemPrompt: systemPrompt(),
+      getSystemPrompt: systemPrompt,
     })
   : createUnavailableChatModel(missingModelConfigurationMessage());
 const renderer = await createCliRenderer({ exitOnCtrlC: false });

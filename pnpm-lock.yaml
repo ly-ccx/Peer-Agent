@@ -115,6 +115,9 @@ importers:
 
   apps/tui:
     dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@4.4.3)
       '@opentui/core':
         specifier: 0.4.3
         version: 0.4.3(typescript@5.9.3)(web-tree-sitter@0.25.10)
@@ -139,6 +142,9 @@ importers:
       '@peer-agent/runtime-sdk':
         specifier: workspace:*
         version: link:../../packages/runtime-sdk
+      adm-zip:
+        specifier: ^0.5.17
+        version: 0.5.17
       react:
         specifier: 19.2.7
         version: 19.2.7
@@ -148,6 +154,9 @@ importers:
       ws:
         specifier: 8.21.0
         version: 8.21.0
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
     devDependencies:
       '@types/bun':
         specifier: ^1.2.17

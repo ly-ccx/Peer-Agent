@@ -47,20 +47,44 @@ describe('TUI Runtime host', () => {
 
   test('projects read-only tools for plan and explorer while retaining write tools for chat and goal', async () => {
     const workspaceRoot = await createWorkspace();
-    const host = createTuiHost(workspaceRoot);
+    const userDataPath = await createWorkspace();
+    const skillDir = path.join(userDataPath, 'skills', 'host-test-skill');
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(path.join(skillDir, 'SKILL.md'), [
+      '---',
+      'name: Host Test Skill',
+      'description: Tests Skill projection in TUI host',
+      '---',
+      '',
+      '# Host Test Skill',
+    ].join('\n'));
+    await writeFile(path.join(userDataPath, 'mcp-registry.json'), JSON.stringify({
+      version: 1,
+      servers: [{
+        id: 'host-test-mcp',
+        displayName: 'Host Test MCP',
+        enabled: true,
+        transport: 'streamable_http',
+        url: 'https://example.invalid/mcp',
+        policy: { trusted: true, visibleByDefault: true, requirePermission: false },
+        health: { status: 'ready' },
+        tools: [{ name: 'echo', inputSchema: { type: 'object' } }],
+      }],
+    }));
+    const host = createTuiHost({ workspaceRoot, userDataPath });
     const capabilities = (mode: 'chat' | 'plan' | 'goal' | 'explorer') =>
       host.capabilitiesForMode?.(mode) ?? [];
     const toolNames = (mode: 'chat' | 'plan' | 'goal' | 'explorer') =>
       (host.toolDefinitionsForMode?.(mode) ?? []).map((tool) => tool.capabilityId);
 
-    expect(capabilities('chat')).toEqual([
+    expect(capabilities('chat')).toEqual(expect.arrayContaining([
       'local.file.read',
       'local.file.list',
       'local.file.write',
       'local.shell.exec',
-    ]);
+    ]));
     // Goal mode keeps chat write/shell tools and adds shared Desktop goal tools.
-    expect(capabilities('goal')).toEqual([
+    expect(capabilities('goal')).toEqual(expect.arrayContaining([
       'local.file.read',
       'local.file.list',
       'local.file.write',
@@ -68,16 +92,21 @@ describe('TUI Runtime host', () => {
       'local.goal.create',
       'local.goal.update',
       'local.goal.read',
-    ]);
+    ]));
     // Plan mode stays read-only for local files, but projects goal plan tools.
-    expect(capabilities('plan')).toEqual([
+    expect(capabilities('plan')).toEqual(expect.arrayContaining([
       'local.file.read',
       'local.file.list',
       'local.goal.create',
       'local.goal.update',
       'local.goal.read',
-    ]);
-    expect(capabilities('explorer')).toEqual(['local.file.read', 'local.file.list']);
+    ]));
+    expect(capabilities('explorer')).toEqual(expect.arrayContaining([
+      'local.file.read',
+      'local.file.list',
+    ]));
+    expect(capabilities('chat').some((id) => id.startsWith('local.skill.'))).toBe(true);
+    expect(capabilities('chat').some((id) => id.startsWith('local.mcp.'))).toBe(true);
 
     // Model-visible tool definitions must use the same projected set. Returning
     // the unfiltered provider catalog would re-expose write/shell in plan mode.

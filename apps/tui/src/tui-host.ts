@@ -1,4 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { homedir } from 'node:os';
+import path from 'node:path';
 
 import type { LocalAccessLevel } from '@peer-agent/protocol';
 import type { RuntimeToolDefinition } from '@peer-agent/runtime-core';
@@ -15,6 +17,7 @@ import type {
 } from '@peer-agent/runtime-sdk';
 
 import { createTuiGoalBridge } from './goal-bridge.ts';
+import { createTuiSkillMcpBridge } from './skill-mcp-bridge.ts';
 import { normalizeTuiMode, TUI_RUNTIME_MODES, type TuiMode } from './tui-mode.ts';
 import { normalizeLocalAccessLevel } from './tui-permission-policy.ts';
 
@@ -42,6 +45,8 @@ export interface TuiHost {
   readonly toolDefinitions: readonly RuntimeToolDefinition[];
   /** Shared Desktop goal-plan bridge (create/update/get + intake gate). */
   readonly goalBridge?: ReturnType<typeof createTuiGoalBridge>;
+  /** Shared local Skill/MCP registries, projections, and providers. */
+  readonly skillMcpBridge?: ReturnType<typeof createTuiSkillMcpBridge>;
   getAccessLevel(): LocalAccessLevel;
   setAccessLevel(value: unknown): LocalAccessLevel;
   capabilitiesForMode?(mode: TuiMode): readonly string[];
@@ -96,8 +101,11 @@ function automaticAccessDecision(
 export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
   const resolvedOptions = typeof options === 'string' ? { workspaceRoot: options } : options;
   const { workspaceRoot } = resolvedOptions;
+  const userDataPath = resolvedOptions.userDataPath
+    ?? process.env.PEER_AGENT_HOME
+    ?? path.join(homedir(), '.peer-agent');
   const hookRunner = resolvedOptions.hookRunner ?? createConfiguredNodeHookRunner({
-    userDataPath: resolvedOptions.userDataPath,
+    userDataPath,
     workspaceRoot,
   });
   const approvalListeners = new Set<(approval: PendingApproval | null) => void>();
@@ -204,6 +212,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
   const defaultBundle = bundleForMode('chat');
   // Shared on-disk goal plan store + goal tools (aligned with Desktop).
   const goalBridge = createTuiGoalBridge();
+  const skillMcpBridge = createTuiSkillMcpBridge({ userDataPath });
 
   let callSequence = 0;
   const execute = async (
@@ -251,6 +260,16 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       });
     }
 
+    if (skillMcpBridge.isCapability(capabilityId)) {
+      return skillMcpBridge.execute({
+        capabilityId,
+        args,
+        toolCallId,
+        mode,
+        requestPermission: requestPermission as never,
+      });
+    }
+
     const run = () => bundle.runtime.execute({
       sessionId: context?.sessionId ?? 'tui-session',
       ...(context?.conversationId ? { conversationId: context.conversationId } : {}),
@@ -275,10 +294,21 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     return context ? executionContext.run({ ...context, mode }, run) : run();
   };
 
-  const withGoalTools = (mode: TuiMode, tools: readonly RuntimeToolDefinition[]) => {
-    if (mode !== 'goal' && mode !== 'plan') return tools;
+  const withBridgeTools = (mode: TuiMode, tools: readonly RuntimeToolDefinition[]) => {
     const existing = new Set(tools.map((tool) => tool.capabilityId));
-    const extras = goalBridge.toolDefinitions.filter((tool) => !existing.has(tool.capabilityId));
+    const extras: RuntimeToolDefinition[] = [];
+    for (const tool of skillMcpBridge.toolDefinitions()) {
+      if (existing.has(tool.capabilityId)) continue;
+      existing.add(tool.capabilityId);
+      extras.push(tool);
+    }
+    if (mode === 'goal' || mode === 'plan') {
+      for (const tool of goalBridge.toolDefinitions) {
+        if (existing.has(tool.capabilityId)) continue;
+        existing.add(tool.capabilityId);
+        extras.push(tool);
+      }
+    }
     return extras.length > 0 ? [...tools, ...extras] : tools;
   };
 
@@ -287,19 +317,21 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     // Default surface uses the mode-projected tool set, not the unfiltered
     // provider catalog. Otherwise the model would see write/shell tools even
     // when the active mode projection excludes them.
-    capabilities: defaultBundle.projection.tools.map((tool) => tool.capabilityId),
-    toolDefinitions: defaultBundle.projection.tools,
+    capabilities: withBridgeTools('chat', defaultBundle.projection.tools)
+      .map((tool) => tool.capabilityId),
+    toolDefinitions: withBridgeTools('chat', defaultBundle.projection.tools),
     goalBridge,
+    skillMcpBridge,
     getAccessLevel: () => accessLevel,
     setAccessLevel,
     capabilitiesForMode(mode) {
       const normalized = normalizeTuiMode(mode);
-      return withGoalTools(normalized, bundleForMode(normalized).projection.tools)
+      return withBridgeTools(normalized, bundleForMode(normalized).projection.tools)
         .map((tool) => tool.capabilityId);
     },
     toolDefinitionsForMode(mode) {
       const normalized = normalizeTuiMode(mode);
-      return withGoalTools(normalized, bundleForMode(normalized).projection.tools);
+      return withBridgeTools(normalized, bundleForMode(normalized).projection.tools);
     },
     execute,
     executeRead: (path, context) => execute('local.file.read', { path }, context),

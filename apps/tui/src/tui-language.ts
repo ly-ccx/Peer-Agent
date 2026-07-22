@@ -85,9 +85,14 @@ export function buildReplyLanguageInstruction(replyLanguage: string | null | und
   return REPLY_LANGUAGE_INSTRUCTIONS[locale];
 }
 
-export function buildTuiSystemPrompt(replyLanguage: string | null | undefined): string {
+export function buildTuiSystemPrompt(
+  replyLanguage: string | null | undefined,
+  contextExtensions: readonly string[] = [],
+): string {
   const instruction = buildReplyLanguageInstruction(replyLanguage);
-  return instruction ? `${BASE_SYSTEM_PROMPT}\n\n${instruction}` : BASE_SYSTEM_PROMPT;
+  return [BASE_SYSTEM_PROMPT, instruction, ...contextExtensions]
+    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+    .join('\n\n');
 }
 
 export function createTuiLanguageStore({
