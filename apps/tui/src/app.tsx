@@ -907,14 +907,14 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     readonly modelId: string;
   } | null>(null);
   const persistence = useMemo(() => createTuiConversationPersistence({
-    workspacePath: process.cwd(),
+    workspacePath: host.workspaceRoot,
     initialMode: controller.getSnapshot().mode,
     initialModel: modelSelection?.getSelection() ?? {
       providerId: 'unknown',
       modelId: modelLabel,
       reasoningEffort: 'default',
     },
-  }), [controller, modelLabel, modelSelection]);
+  }), [controller, host.workspaceRoot, modelLabel, modelSelection]);
   const [accessLevel, setAccessLevel] = useState<LocalAccessLevel>(() => host.getAccessLevel());
   const [locale, setLocale] = useState<TuiLocale>(() => languageStore?.getLocale() ?? 'zh-CN');
   const [themeMode, setThemeMode] = useState<TuiThemeMode>(() => themeStore?.getMode() ?? 'dark');
