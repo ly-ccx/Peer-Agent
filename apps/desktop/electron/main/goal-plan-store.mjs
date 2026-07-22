@@ -1536,7 +1536,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
    * approved / executing / paused）的旧计划做收尾或作废（见 supersedeAwaitingDrafts）——
    * 全叶子终态的如实收尾为 completed/failed，否则作废为 cancelled，杜绝「僵尸 executing 计划」累积。
    */
-  function createPlan(draft = {}) {
+  function createPlan(draft = {}, { changeKind = 'persist' } = {}) {
     const now = new Date().toISOString();
     const tasks = Array.isArray(draft.tasks) ? draft.tasks : [];
     const workflowKind = normalizeWorkflowKind(draft.workflowKind);
@@ -1627,7 +1627,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
         activationKind: plan.activation?.kind,
         taskCount: tasks.length,
       },
-    }));
+    }), { changeKind });
     if (parentPlan && sourceTask) {
       const now = new Date().toISOString();
       const linked = updateTaskInTree(parentPlan.tasks, sourceTask.taskId, (task) => ({
@@ -1683,7 +1683,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
         autonomy: 'self_driven',
       },
       createdBy: draft.createdBy || 'user',
-    });
+    }, { changeKind: 'goal-accepted' });
   }
 
   /**
@@ -1799,6 +1799,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     }, {
       reason: revisionReason || (upgradingFromIntake ? 'intake:goal_confirmed' : '更新了目标内容'),
       changedBy: changedBy || createdBy || 'agent',
+      changeKind: upgradingFromIntake ? 'goal-accepted' : 'persist',
     });
   }
 
@@ -1807,7 +1808,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
    * 递增 version，并向 revisionHistory 追加一条。progress 自动重算。
    * 不允许通过本方法直接改 progress（会被忽略并重算）。
    */
-  function revisePlan(planId, patch = {}, { reason, changedBy } = {}) {
+  function revisePlan(planId, patch = {}, { reason, changedBy, changeKind = 'persist' } = {}) {
     const plan = getPlan(planId);
     if (!plan) return null;
     const { progress: _ignore, version: _v, revisionHistory: _rh, ...safePatch } = patch;
@@ -1847,7 +1848,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
         changedBy: changedBy || null,
         version: nextVersion,
       },
-    }));
+    }), { changeKind });
   }
 
   /**

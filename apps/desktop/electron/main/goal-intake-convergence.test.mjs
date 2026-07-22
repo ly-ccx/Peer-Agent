@@ -5,6 +5,8 @@ import {
   decideIntakeConvergence,
   isIntakeContract,
   shouldAutoStartAcceptedGoalRunner,
+  shouldAutoStartAcceptedGoalRunnerFromChange,
+  shouldRecoverAcceptedGoalRunnerOnConversationOpen,
 } from './goal-intake-convergence.mjs';
 
 const intakePlan = { planId: 'p1', activation: { kind: 'intake' } };
@@ -110,4 +112,49 @@ test('shouldAutoStartAcceptedGoalRunner: intake / 非自驱 / 终态 不启动',
     false,
   );
   assert.equal(shouldAutoStartAcceptedGoalRunner(null), false);
+});
+
+test('plan change auto-start: 只接受 goal-accepted，拒绝 Runner 自身 persist 回流', () => {
+  const acceptedGoal = {
+    workflowKind: 'goal_self_driven',
+    activation: { kind: 'accepted_goal' },
+    status: 'executing',
+  };
+
+  assert.equal(
+    shouldAutoStartAcceptedGoalRunnerFromChange({ changeKind: 'goal-accepted' }, acceptedGoal),
+    true,
+  );
+  assert.equal(
+    shouldAutoStartAcceptedGoalRunnerFromChange({ changeKind: 'persist' }, acceptedGoal),
+    false,
+  );
+  assert.equal(
+    shouldAutoStartAcceptedGoalRunnerFromChange({ changeKind: 'runner-state' }, acceptedGoal),
+    false,
+  );
+});
+
+test('conversation open recovery: 只恢复磁盘上仍为 running 的 accepted Goal', () => {
+  const plan = {
+    workflowKind: 'goal_self_driven',
+    activation: { kind: 'accepted_goal' },
+    status: 'executing',
+    runner: { enabled: true, status: 'running' },
+  };
+  assert.equal(shouldRecoverAcceptedGoalRunnerOnConversationOpen(plan), true);
+  assert.equal(
+    shouldRecoverAcceptedGoalRunnerOnConversationOpen({
+      ...plan,
+      runner: { enabled: true, status: 'paused' },
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRecoverAcceptedGoalRunnerOnConversationOpen({
+      ...plan,
+      status: 'completed',
+    }),
+    false,
+  );
 });

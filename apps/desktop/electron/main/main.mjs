@@ -60,6 +60,8 @@ import { createGoalPlanStore, goalPlanIsSelfDriven } from './goal-plan-store.mjs
 import {
   decideIntakeConvergence,
   shouldAutoStartAcceptedGoalRunner,
+  shouldAutoStartAcceptedGoalRunnerFromChange,
+  shouldRecoverAcceptedGoalRunnerOnConversationOpen,
 } from './goal-intake-convergence.mjs';
 import { createGoalRunner } from './goal-runner.mjs';
 import { createTaskNotificationBroker } from './task-notification-broker.mjs';
@@ -1115,6 +1117,18 @@ ipcMain.handle('conversation:set-active', (_event, payload = {}) => {
       ? payload.conversationId.trim()
       : null;
   activeConversationIdForNotifications = conversationId;
+  if (conversationId) {
+    const activeGoal = goalPlanStore.getActivePlanByConversation?.(conversationId) ?? null;
+    if (shouldRecoverAcceptedGoalRunnerOnConversationOpen(activeGoal)) {
+      // 主进程重载会丢失内存 session，但磁盘 runner 仍是 running。打开会话时
+      // 幂等 kick 即可恢复；若 session 本就存在，Goal Runner.start 会直接 no-op。
+      queueMicrotask(() => {
+        void goalRunner?.start(activeGoal.planId).catch((error) => {
+          console.error('[main] recover active goal runner failed:', error?.message || error);
+        });
+      });
+    }
+  }
   if (conversationId && taskNotificationBroker) {
     // 打开会话即视为已读该会话下当前 attention（若已知 planId 则精确标记）。
     const planId =
@@ -1938,10 +1952,8 @@ function latestUserTextFromProviderMessages(messages = []) {
 function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
   const planId = typeof payload?.planId === 'string' ? payload.planId : null;
   if (!planId) return;
-  // runner-progress 高频跳动不需要重复 start。
-  if (payload?.changeKind === 'runner-progress' || payload?.changeKind === 'runner-state') return;
   const plan = goalPlanStore.getPlan?.(planId) || goalPlanStore.getActivePlanByConversation?.(payload.conversationId);
-  if (!shouldAutoStartAcceptedGoalRunner(plan)) return;
+  if (!shouldAutoStartAcceptedGoalRunnerFromChange(payload, plan)) return;
   // 先强制收口同会话 intake 流，避免 Runner 与前台 agent loop 抢同一会话。
   try {
     llmChatService?.forceCompleteConversationStreams?.(plan.conversationId, { reason: 'goal_handoff' });
@@ -2071,13 +2083,9 @@ ipcMain.handle('chat:send', (event, {
       // 原地升级后 activation.kind=accepted_goal，但 status 可能仍是 executing。
       // auto-start 判定抽到 shouldAutoStartAcceptedGoalRunner，accepted/executing 都要启动。
       if (shouldAutoStartAcceptedGoalRunner(acceptedGoal)) {
-        // 双保险：outcome resolve 时再 kick 一次；force-complete 确保 intake 流已解锁。
+        // 双保险：outcome resolve 时再幂等 kick 一次。不能在这里按 conversation
+        // force-complete；goal-accepted 回调可能已经启动 Runner，再按会话收口会误杀 Runner 流。
         queueMicrotask(() => {
-          try {
-            llmChatService?.forceCompleteConversationStreams?.(conversationId, { reason: 'goal_handoff' });
-          } catch (error) {
-            console.warn('[main] force-complete on outcome failed:', error?.message || error);
-          }
           void goalRunner?.start(acceptedGoal.planId).catch((error) => {
             console.error('[main] auto-start goal runner failed:', error?.message || error);
           });
