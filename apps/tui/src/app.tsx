@@ -1690,7 +1690,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       if (key.name === 'r') {
         if (skillSurface) setSkills(host.skillMcpBridge?.refreshSkills() ?? []);
         else setMcpServers(host.skillMcpBridge?.refreshMcp() ?? []);
-        setCommandNotice(`${skillSurface ? 'Skills' : 'MCP Servers'} refreshed`);
+        setCommandNotice(tuiMessage(locale, skillSurface ? 'notice.skill.refreshed' : 'notice.mcp.refreshed'));
         return;
       }
       if (key.name === 'space') {
@@ -1706,7 +1706,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       if (skillSurface && (key.name === 'return' || key.name === 'enter')) {
         const skill = skillItems[selectedIndex] as TuiSkillSummary | undefined;
         if (!skill) return;
-        const prompt = `Use the ${skill.name ?? skill.skillId} Skill for this request: `;
+        const prompt = locale === 'zh-CN'
+          ? `使用「${skill.name ?? skill.skillId}」技能处理此请求：`
+          : `Use the ${skill.name ?? skill.skillId} Skill for this request: `;
         setExperience((current) => escapeFooter(current));
         if (key.shift) void controller.send(prompt);
         else {
@@ -2181,8 +2183,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           backgroundColor={COLOR.background}
         >
           <box width={Math.min(76, Math.max(44, terminal.width - 6))} maxHeight={Math.max(12, terminal.height - 6)} flexDirection="column" border borderStyle="rounded" borderColor={COLOR.accent} backgroundColor={COLOR.panel} paddingLeft={1} paddingRight={1}>
-            <text fg={COLOR.text}><b>{skillSurface ? 'Skills' : 'MCP Servers'}</b></text>
-            <text fg={COLOR.muted}>{skillSurface ? 'Enter insert · Shift+Enter invoke · Space toggle · R refresh · Esc close' : 'Space toggle · R refresh · Esc close'}</text>
+            <text fg={COLOR.text}><b>{skillSurface ? tuiMessage(locale, 'picker.skill.title') : tuiMessage(locale, 'picker.mcp.title')}</b></text>
+            <text fg={COLOR.muted}>{skillSurface ? tuiMessage(locale, 'picker.skill.hint') : tuiMessage(locale, 'picker.mcp.hint')}</text>
             {(skillSurface ? skillItems : mcpItems).map((item, index) => {
               const selected = index === (skillSurface ?? mcpSurface)!.selectedIndex;
               if (skillSurface) {
@@ -2195,11 +2197,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
               const server = item as TuiMcpServerSummary;
               return <box key={server.id} flexDirection="column" backgroundColor={selected ? COLOR.selection : undefined} paddingLeft={1}>
                 <text fg={server.enabled ? COLOR.text : COLOR.muted}>{selected ? '› ' : '  '}{server.enabled ? '●' : '○'} {server.displayName}</text>
-                <text fg={COLOR.muted} wrapMode="none">  {server.health?.status ?? 'unknown'} · {server.visibleToolsCount}/{server.toolsCount} tools · {server.tools.map((tool) => tool.name ?? tool.toolName).filter(Boolean).join(', ') || 'no tools'}</text>
+                <text fg={COLOR.muted} wrapMode="none">  {server.health?.status ?? tuiMessage(locale, 'mcp.status.unknown')} · {server.visibleToolsCount}/{server.toolsCount} {tuiMessage(locale, 'mcp.status.tools')} · {server.tools.map((tool) => tool.name ?? tool.toolName).filter(Boolean).join(', ') || tuiMessage(locale, 'mcp.status.noTools')}</text>
               </box>;
             })}
-            {(skillSurface ? skillItems : mcpItems).length === 0 ? <text fg={COLOR.muted}>No matching items. Press R to refresh.</text> : null}
-            <text fg={COLOR.muted}>Search: {(skillSurface ?? mcpSurface)!.query || 'type to filter'}</text>
+            {(skillSurface ? skillItems : mcpItems).length === 0 ? <text fg={COLOR.muted}>{tuiMessage(locale, 'picker.skillmcp.empty')}</text> : null}
+            <text fg={COLOR.muted}>{tuiMessage(locale, 'picker.skillmcp.searchLabel')} {(skillSurface ?? mcpSurface)!.query || tuiMessage(locale, 'picker.skillmcp.searchPlaceholder')}</text>
           </box>
         </box>
       ) : null}

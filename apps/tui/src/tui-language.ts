@@ -195,6 +195,22 @@ export type TuiMessageKey =
   | 'command.goal-resume.description'
   | 'command.goal-cancel.label'
   | 'command.goal-cancel.description'
+  | 'command.skill.label'
+  | 'command.skill.description'
+  | 'command.mcp.label'
+  | 'command.mcp.description'
+  | 'picker.skill.title'
+  | 'picker.skill.hint'
+  | 'picker.mcp.title'
+  | 'picker.mcp.hint'
+  | 'picker.skillmcp.empty'
+  | 'picker.skillmcp.searchPlaceholder'
+  | 'picker.skillmcp.searchLabel'
+  | 'notice.skill.refreshed'
+  | 'notice.mcp.refreshed'
+  | 'mcp.status.unknown'
+  | 'mcp.status.tools'
+  | 'mcp.status.noTools'
   | 'command.help.label'
   | 'command.help.description'
   | 'command.quit.label'
@@ -245,6 +261,22 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'command.goal-resume.description': '恢复已暂停的目标',
     'command.goal-cancel.label': '取消目标',
     'command.goal-cancel.description': '取消当前活动目标',
+    'command.skill.label': '技能',
+    'command.skill.description': '浏览、启用、禁用、刷新、插入或调用技能',
+    'command.mcp.label': 'MCP 服务器',
+    'command.mcp.description': '管理 MCP 服务器并查看工具状态',
+    'picker.skill.title': '技能',
+    'picker.skill.hint': 'Enter 插入 · Shift+Enter 调用 · 空格 切换 · R 刷新 · Esc 关闭',
+    'picker.mcp.title': 'MCP 服务器',
+    'picker.mcp.hint': '空格 切换 · R 刷新 · Esc 关闭',
+    'picker.skillmcp.empty': '没有匹配项，按 R 刷新。',
+    'picker.skillmcp.searchPlaceholder': '输入以筛选',
+    'picker.skillmcp.searchLabel': '搜索：',
+    'notice.skill.refreshed': '技能已刷新',
+    'notice.mcp.refreshed': 'MCP 服务器已刷新',
+    'mcp.status.unknown': '未知',
+    'mcp.status.tools': '个工具',
+    'mcp.status.noTools': '无工具',
     'command.help.label': '帮助',
     'command.help.description': '显示快捷键与命令说明',
     'command.quit.label': '退出',
@@ -294,6 +326,22 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'command.goal-resume.description': 'Resume the paused goal',
     'command.goal-cancel.label': 'Cancel goal',
     'command.goal-cancel.description': 'Cancel the active goal',
+    'command.skill.label': 'Skills',
+    'command.skill.description': 'Browse, enable, disable, refresh, insert, or invoke Skills',
+    'command.mcp.label': 'MCP Servers',
+    'command.mcp.description': 'Manage MCP Servers and inspect tool status',
+    'picker.skill.title': 'Skills',
+    'picker.skill.hint': 'Enter insert · Shift+Enter invoke · Space toggle · R refresh · Esc close',
+    'picker.mcp.title': 'MCP Servers',
+    'picker.mcp.hint': 'Space toggle · R refresh · Esc close',
+    'picker.skillmcp.empty': 'No matching items. Press R to refresh.',
+    'picker.skillmcp.searchPlaceholder': 'type to filter',
+    'picker.skillmcp.searchLabel': 'Search:',
+    'notice.skill.refreshed': 'Skills refreshed',
+    'notice.mcp.refreshed': 'MCP Servers refreshed',
+    'mcp.status.unknown': 'unknown',
+    'mcp.status.tools': 'tools',
+    'mcp.status.noTools': 'no tools',
     'command.help.label': 'Help',
     'command.help.description': 'Show keyboard shortcuts and command syntax',
     'command.quit.label': 'Quit',

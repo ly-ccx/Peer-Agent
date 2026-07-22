@@ -108,4 +108,27 @@ describe('ui messages', () => {
     expect(composerRunningStatusLabel('zh-CN', 'compacting')).toBe('压缩中…');
     expect(composerRunningStatusLabel('en-US', 'compacting')).toBe('Compacting…');
   });
+
+  test('Skill and MCP command messages follow locale', () => {
+    expect(tuiMessage('zh-CN', 'command.skill.label')).toBe('技能');
+    expect(tuiMessage('zh-CN', 'command.skill.description')).toBe('浏览、启用、禁用、刷新、插入或调用技能');
+    expect(tuiMessage('zh-CN', 'command.mcp.label')).toBe('MCP 服务器');
+    expect(tuiMessage('zh-CN', 'command.mcp.description')).toBe('管理 MCP 服务器并查看工具状态');
+    expect(tuiMessage('en-US', 'command.skill.label')).toBe('Skills');
+    expect(tuiMessage('en-US', 'command.mcp.label')).toBe('MCP Servers');
+  });
+
+  test('Skill and MCP picker hints follow locale', () => {
+    expect(tuiMessage('zh-CN', 'picker.skill.hint')).toContain('插入');
+    expect(tuiMessage('en-US', 'picker.skill.hint')).toContain('insert');
+    expect(tuiMessage('zh-CN', 'picker.mcp.hint')).toContain('切换');
+    expect(tuiMessage('en-US', 'picker.mcp.hint')).toContain('toggle');
+  });
+
+  test('Skill and MCP refresh notices follow locale', () => {
+    expect(tuiMessage('zh-CN', 'notice.skill.refreshed')).toBe('技能已刷新');
+    expect(tuiMessage('en-US', 'notice.skill.refreshed')).toBe('Skills refreshed');
+    expect(tuiMessage('zh-CN', 'notice.mcp.refreshed')).toBe('MCP 服务器已刷新');
+    expect(tuiMessage('en-US', 'notice.mcp.refreshed')).toBe('MCP Servers refreshed');
+  });
 });

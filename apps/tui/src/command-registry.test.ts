@@ -62,6 +62,12 @@ describe('TUI command localization', () => {
     const mode = commands.find((command) => command.id === 'mode');
     expect(mode?.label).toBe('模式');
     expect(mode?.description).toBe('选择 Agent、Plan 或 Goal');
+    const skill = commands.find((command) => command.id === 'skill');
+    expect(skill?.label).toBe('技能');
+    expect(skill?.description).toBe('浏览、启用、禁用、刷新、插入或调用技能');
+    const mcp = commands.find((command) => command.id === 'mcp');
+    expect(mcp?.label).toBe('MCP 服务器');
+    expect(mcp?.description).toBe('管理 MCP 服务器并查看工具状态');
   });
 
   test('filters by localized Chinese text', () => {
