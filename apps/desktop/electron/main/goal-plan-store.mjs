@@ -1757,29 +1757,47 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
       return createGoalContract({ ...draft, conversationId: normalizedConversationId ?? draft.conversationId });
     }
 
-    const safeStatus = activeGoal.status === 'accepted' || activeGoal.status === 'executing' || activeGoal.status === 'paused'
-      ? activeGoal.status
-      : 'accepted';
+    // intake 契约初始 status=executing；goal_create_plan 升级时若调用方显式
+    // 传入 accepted，应采用该值，不能被旧的 executing 覆盖。否则 main 侧
+    // auto-start 仅看 status===accepted 时会漏启动 Runner。
+    const requestedStatus = typeof planPatch.status === 'string' ? planPatch.status : null;
+    const safeStatus = requestedStatus
+      || (activeGoal.status === 'accepted' || activeGoal.status === 'executing' || activeGoal.status === 'paused'
+        ? activeGoal.status
+        : 'accepted');
     const tasks = Array.isArray(planPatch.tasks) && planPatch.tasks.length > 0 ? planPatch.tasks : activeGoal.tasks;
+    // intake → accepted_goal 原地升级时，确保 activation 与 resolution 与 promote 一致。
+    const upgradingFromIntake = activeGoal.activation?.kind === 'intake'
+      && (planPatch.activation?.kind === 'accepted_goal' || requestedStatus === 'accepted');
     return revisePlan(activeGoal.planId, {
       ...planPatch,
       conversationId: normalizedConversationId ?? activeGoal.conversationId,
       tasks,
-      status: planPatch.status || safeStatus,
+      status: safeStatus,
       workflowKind: 'goal_self_driven',
       activation: {
         ...(activeGoal.activation || {}),
         ...(planPatch.activation || {}),
         kind: 'accepted_goal',
         acceptedAt: activeGoal.activation?.acceptedAt || planPatch.activation?.acceptedAt || new Date().toISOString(),
+        acceptedBy: upgradingFromIntake
+          ? (planPatch.activation?.acceptedBy || 'agent:goal_create_plan')
+          : (planPatch.activation?.acceptedBy || activeGoal.activation?.acceptedBy),
       },
+      intake: upgradingFromIntake
+        ? {
+          ...(activeGoal.intake || {}),
+          ...(planPatch.intake || {}),
+          resolution: 'goal_confirmed',
+        }
+        : (planPatch.intake || activeGoal.intake),
       executionPolicy: {
         ...(activeGoal.executionPolicy || DEFAULT_SELF_DRIVEN_POLICY),
         ...(planPatch.executionPolicy || {}),
         autonomy: 'self_driven',
       },
     }, {
-      reason: revisionReason || '更新了目标内容',
+      reason: revisionReason || (upgradingFromIntake ? 'intake:goal_confirmed' : '更新了目标内容'),
       changedBy: changedBy || createdBy || 'agent',
     });
   }

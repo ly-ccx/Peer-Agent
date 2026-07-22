@@ -1409,13 +1409,24 @@ test('upsertGoalContract: intake 轮调 goal_create_plan 命中当前 intake 契
     conversationId: 'conv-intake-3',
     goal: '模糊目标占位',
   });
+  assert.equal(intake.status, 'executing', 'intake 初始 status 为 executing');
   // 模型在 intake 轮调用 goal_create_plan → provider 走 upsertGoalContract。
+  // provider 显式传入 status:'accepted'；不得被旧的 executing 覆盖。
   const upserted = store.upsertGoalContract('conv-intake-3', {
     goal: '给鉴权模块补齐单测',
     title: '补齐鉴权单测',
+    status: 'accepted',
     activation: { kind: 'accepted_goal' },
+    tasks: [
+      { taskId: 't1', title: '定位失败点', status: 'pending', evidenceRefs: [] },
+      { taskId: 't2', title: '补测试', status: 'pending', evidenceRefs: [] },
+    ],
   });
   assert.equal(upserted.planId, intake.planId, 'upsert 应命中当前 intake 契约而非新建');
+  assert.equal(upserted.activation?.kind, 'accepted_goal');
+  assert.equal(upserted.status, 'accepted', 'goal_create_plan 升级后 status 应为 accepted');
+  assert.equal(upserted.intake?.resolution, 'goal_confirmed');
+  assert.equal(upserted.tasks?.length, 2, '应写入 create_plan 的真实子任务');
   const plans = store.listPlansByConversation('conv-intake-3');
   assert.equal(plans.length, 1, '不应产生第二条悬空契约');
 });

@@ -41,3 +41,20 @@ export function decideIntakeConvergence(activePlan, outcome) {
   // 纯问答/咨询：既未升级、也未提问、回合正常结束 → 静默移除。
   return 'remove';
 }
+
+/**
+ * 首答回合结束后是否应 auto-start Goal Runner。
+ *
+ * goal_create_plan 会把 intake 原地升级为 accepted_goal；intake 初始 status 为
+ * executing，升级后 status 可能是 accepted 或仍保留 executing。两种都需要启动
+ * Runner，否则界面会卡在「正在思考 / 0/N」。
+ *
+ * @param {object|null} plan 当前会话活动计划
+ * @returns {boolean}
+ */
+export function shouldAutoStartAcceptedGoalRunner(plan) {
+  if (!plan) return false;
+  if (plan.workflowKind !== 'goal_self_driven') return false;
+  if (plan.activation?.kind !== 'accepted_goal') return false;
+  return plan.status === 'accepted' || plan.status === 'executing';
+}

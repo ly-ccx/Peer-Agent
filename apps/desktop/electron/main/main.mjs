@@ -56,7 +56,10 @@ import { createContextBaselineRecorder } from './prompt/context-baseline-recorde
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
 import { createConversationStore } from './conversation-store.mjs';
 import { createGoalPlanStore, goalPlanIsSelfDriven } from './goal-plan-store.mjs';
-import { decideIntakeConvergence } from './goal-intake-convergence.mjs';
+import {
+  decideIntakeConvergence,
+  shouldAutoStartAcceptedGoalRunner,
+} from './goal-intake-convergence.mjs';
 import { createGoalRunner } from './goal-runner.mjs';
 import { createTaskNotificationBroker } from './task-notification-broker.mjs';
 import {
@@ -2022,11 +2025,10 @@ ipcMain.handle('chat:send', (event, {
     return Promise.resolve(outcomePromise).then((outcome) => {
       convergeIntakeAfterGoalTurn(conversationId, outcome);
       const acceptedGoal = goalPlanStore.getActivePlanByConversation(conversationId);
-      if (
-        acceptedGoal?.workflowKind === 'goal_self_driven' &&
-        acceptedGoal.activation?.kind === 'accepted_goal' &&
-        acceptedGoal.status === 'accepted'
-      ) {
+      // intake 路径下 createIntakeContract 初始 status 为 executing；goal_create_plan
+      // 原地升级后 activation.kind=accepted_goal，但 status 可能仍是 executing。
+      // auto-start 判定抽到 shouldAutoStartAcceptedGoalRunner，accepted/executing 都要启动。
+      if (shouldAutoStartAcceptedGoalRunner(acceptedGoal)) {
         // goal_create_plan 已用结构化 control signal 结束 intake 工具回合。
         // 等该回合完全 resolve 后再启动唯一的托管执行入口，避免前台 agent loop
         // 与 Goal Runner 同时推进同一目标。

@@ -68,3 +68,40 @@ describe('request_user_input terminal control signal (runtime chain)', () => {
     assert.equal(extractToolControlSignal(result), null);
   });
 });
+
+describe('goal_create_plan terminal control signal (runtime chain)', () => {
+  beforeEach(() => {
+    tmpDir = mkdtempSync(path.join(os.tmpdir(), 'goal-create-handoff-'));
+    process.env.PEER_AGENT_HOME = tmpDir;
+  });
+
+  afterEach(() => {
+    delete process.env.PEER_AGENT_HOME;
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('surfaces goal_handoff so the intake agent loop ends before Runner starts', async () => {
+    const { registry, projection } = createRuntimeToolProjection();
+    const result = await executeProjectedModelTool({
+      name: 'goal_create_plan',
+      args: {
+        title: '修卡住',
+        goal: '修复 goal create 后 Runner 不启动',
+        tasks: [{ title: '定位 auto-start' }],
+      },
+      workspacePath: tmpDir,
+      toolContext: {
+        readFiles: new Map(),
+        conversationId: 'c-goal-handoff',
+        mode: 'goal',
+      },
+      toolCallId: 'tc_goal_create',
+      registry,
+      runtimeProjection: projection,
+    });
+
+    assert.equal(result.success, true);
+    const signal = extractToolControlSignal(result);
+    assert.deepEqual(signal, { terminal: true, reason: 'goal_handoff' });
+  });
+});
