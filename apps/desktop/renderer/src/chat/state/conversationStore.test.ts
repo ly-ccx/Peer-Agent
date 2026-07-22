@@ -215,6 +215,44 @@ describe('conversationStore', () => {
     assert.equal(store.resolveConversation('s-2'), 'B');
   });
 
+  it('settles only renderer streams missing from the authoritative active snapshot', () => {
+    const store = new ConversationStore();
+    store.routeStream('stream-stale', 'A');
+    store.routeStream('stream-active', 'B');
+    store.setState('A', {
+      isStreaming: true,
+      streamId: 'stream-stale',
+      activeUsage: { input: 1, output: 2, cacheWrite: 0, cacheRead: 0 },
+      toolProgress: { tool: 'bash', path: null, receivedLines: 1 },
+      turnStartedAt: 10,
+    });
+    store.setState('B', { isStreaming: true, streamId: 'stream-active' });
+
+    assert.deepEqual(store.settleInactiveStreams(['stream-active']), ['A']);
+    assert.deepEqual(
+      {
+        isStreaming: store.getSnapshot('A').isStreaming,
+        streamId: store.getSnapshot('A').streamId,
+        activeUsage: store.getSnapshot('A').activeUsage,
+        pendingPermissionCalls: store.getSnapshot('A').pendingPermissionCalls,
+        toolProgress: store.getSnapshot('A').toolProgress,
+        turnStartedAt: store.getSnapshot('A').turnStartedAt,
+      },
+      {
+        isStreaming: false,
+        streamId: null,
+        activeUsage: null,
+        pendingPermissionCalls: [],
+        toolProgress: null,
+        turnStartedAt: null,
+      },
+    );
+    assert.equal(store.resolveConversation('stream-stale'), null);
+    assert.equal(store.getSnapshot('B').isStreaming, true);
+    assert.equal(store.getSnapshot('B').streamId, 'stream-active');
+    assert.equal(store.resolveConversation('stream-active'), 'B');
+  });
+
   it('routes an explicitly identified compaction event to A while a new B stays idle', () => {
     const store = new ConversationStore();
     store.routeStream('stream-A', 'A');

@@ -58,3 +58,20 @@ export function shouldAutoStartAcceptedGoalRunner(plan) {
   if (plan.activation?.kind !== 'accepted_goal') return false;
   return plan.status === 'accepted' || plan.status === 'executing';
 }
+
+/**
+ * Plan store 变更广播的 auto-start 闸门。只有 intake -> accepted_goal 这一次
+ * 领域跃迁能 kick Runner；Runner 自己写入的 persist / runTrace 事件绝不能反向
+ * 再次触发 start，否则会形成 onChange -> start -> appendRunEvent -> onChange 自激循环。
+ */
+export function shouldAutoStartAcceptedGoalRunnerFromChange(change, plan) {
+  return change?.changeKind === 'goal-accepted'
+    && shouldAutoStartAcceptedGoalRunner(plan);
+}
+
+/** 主进程重启后内存 session 丢失，打开会话时恢复磁盘上仍标记 running 的 Goal。 */
+export function shouldRecoverAcceptedGoalRunnerOnConversationOpen(plan) {
+  return shouldAutoStartAcceptedGoalRunner(plan)
+    && plan?.runner?.enabled === true
+    && plan?.runner?.status === 'running';
+}

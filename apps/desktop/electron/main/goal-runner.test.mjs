@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { createGoalPlanStore } from './goal-plan-store.mjs';
 import { createDeterministicExplorePlan, createGoalRunner } from './goal-runner.mjs';
+import { shouldAutoStartAcceptedGoalRunnerFromChange } from './goal-intake-convergence.mjs';
 
 let tmpRoot;
 let store;
@@ -181,6 +182,80 @@ test('start: 会把 plan/runner 置为 executing/running', async () => {
   assert.ok(got.runTrace.events.some((event) => event.type === 'action_started'));
   assert.ok(got.runTrace.events.some((event) => event.type === 'step_started'));
   assert.ok(got.runTrace.events.some((event) => event.type === 'step_completed'));
+});
+
+test('start: 运行中重复 kick 是幂等的，不会重复写 action_started', async () => {
+  const plan = createApprovedPlan();
+  let releaseTurn;
+  const turnGate = new Promise((resolve) => {
+    releaseTurn = resolve;
+  });
+  const runtime = {
+    async runGoalTurn() {
+      await turnGate;
+      return { continue: false, intent: 'verify' };
+    },
+  };
+  const events = [];
+  const runner = createRunner({ runtime, events });
+
+  await runner.start(plan.planId);
+  await runner.start(plan.planId);
+
+  const running = store.getPlan(plan.planId);
+  assert.equal(
+    running.runTrace.events.filter((event) => event.type === 'action_started').length,
+    1,
+  );
+  assert.equal(events.filter((event) => event.type === 'goalRunner:started').length, 1);
+
+  releaseTurn();
+  await runner.waitForIdle(plan.planId);
+});
+
+test('goal-accepted onChange 只启动一次 Runner，action_started 的 persist 不会自激', async () => {
+  let runner;
+  let resolveTurnObserved;
+  const turnObserved = new Promise((resolve) => {
+    resolveTurnObserved = resolve;
+  });
+  store = createGoalPlanStore({
+    onChange: (change) => {
+      queueMicrotask(() => {
+        const plan = change?.planId ? store.getPlan(change.planId) : null;
+        if (!runner || !shouldAutoStartAcceptedGoalRunnerFromChange(change, plan)) return;
+        void runner.start(plan.planId);
+      });
+    },
+  });
+  runner = createRunner({
+    runtime: {
+      async runGoalTurn() {
+        resolveTurnObserved();
+        return { continue: false, intent: 'verify' };
+      },
+    },
+  });
+
+  const intake = store.createIntakeContract({
+    conversationId: 'conv-onchange-autostart',
+    goal: '修复通知跳转',
+  });
+  store.upsertGoalContract(intake.conversationId, {
+    status: 'accepted',
+    activation: { kind: 'accepted_goal' },
+    tasks: [{ taskId: 'inspect', title: '梳理链路', status: 'pending', evidenceRefs: [] }],
+  });
+
+  await turnObserved;
+  await runner.waitForIdle(intake.planId);
+
+  const completedTurn = store.getPlan(intake.planId);
+  assert.equal(completedTurn.runner.turnCount, 1);
+  assert.equal(
+    completedTurn.runTrace.events.filter((event) => event.type === 'action_started').length,
+    1,
+  );
 });
 
 test('pause: 会停止后续 tick', async () => {

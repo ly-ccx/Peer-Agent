@@ -458,7 +458,9 @@ describe('llm chat service tool materialization', () => {
     assert.equal(capturedBodies[1].reasoning_effort, undefined);
     assert.equal(events.find((event) => event.channel === 'chat:stream:delta')?.payload.content, 'ok');
     assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
-    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+    const doneEvent = events.find((event) => event.channel === 'chat:stream:done');
+    assert.equal(doneEvent?.payload.streamId, 's1');
+    assert.equal(doneEvent?.payload.conversationId, 'c1');
     assert.deepEqual(runtimeEvents.map((event) => event.type), [
       'session.started',
       'message.delta',
@@ -1206,6 +1208,66 @@ describe('llm chat service tool materialization', () => {
     assert.deepEqual(urls, ['https://configured.example/v1/chat/completions']);
   });
 
+  it('inherits the conversation model binding when a managed turn omits modelProviderId', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const urls = [];
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      return new Response(sse([
+        { choices: [{ delta: { content: 'bound model' } }] },
+        '[DONE]',
+      ]), { status: 200 });
+    };
+
+    try {
+      const providers = [
+        {
+          id: 'p-default-grok',
+          provider: 'openai',
+          baseUrl: 'https://default-grok.example/v1',
+          model: 'grok-default',
+          isDefault: true,
+          apiKeyConfigured: true,
+        },
+        {
+          id: 'p-conversation-chatgpt',
+          provider: 'openai',
+          baseUrl: 'https://conversation-chatgpt.example/v1',
+          model: 'gpt-conversation',
+          isDefault: false,
+          apiKeyConfigured: true,
+        },
+      ];
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => providers,
+          getDecryptedApiKey: () => 'key',
+        },
+        conversationStore: {
+          getConversation: (conversationId) => ({
+            id: conversationId,
+            workspacePath: tmpDir,
+            modelProviderId: 'p-conversation-chatgpt',
+          }),
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'managed Goal turn' }],
+        streamId: 's-managed-goal-turn',
+        conversationId: 'c-managed-goal-turn',
+        // Goal Runner historically omitted this field. The service must recover
+        // the authoritative per-conversation binding instead of using the global default.
+        webContents: { send() {} },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.deepEqual(urls, ['https://conversation-chatgpt.example/v1/chat/completions']);
+  });
+
   it('does not recover a transport-blocked provider by switching to a different model', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;
@@ -1898,6 +1960,7 @@ describe('llm chat service tool materialization', () => {
       assert.ok(firstWithStream, 'expected at least one broadcast with an active stream');
       assert.deepEqual(firstWithStream[0], {
         conversationId: 'c1',
+        streamId: 's1',
         workspacePath: '/ws/alpha',
         originWorkspacePath: '/ws/alpha',
       });
@@ -1967,6 +2030,7 @@ describe('llm chat service tool materialization', () => {
       assert.ok(firstWithStream, 'expected at least one active stream snapshot');
       assert.deepEqual(firstWithStream[0], {
         conversationId: 'c-goal',
+        streamId: 's-goal',
         workspacePath: originWs,
         originWorkspacePath: originWs,
       });

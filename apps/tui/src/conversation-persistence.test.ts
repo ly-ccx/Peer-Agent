@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 import {
   createTuiConversationPersistence,
@@ -99,6 +102,141 @@ describe('TUI conversation persistence', () => {
       effort: 'high',
       modelProviderId: 'provider-a::model-a',
     });
+  });
+
+  test('lists resumable conversations from the current workspace only', () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const current = {
+      id: 'current-workspace',
+      title: 'Current workspace session',
+      updatedAt: '2026-07-15T10:00:00.000Z',
+      messageCount: 2,
+    };
+    const other = {
+      id: 'other-workspace',
+      title: 'Other workspace session',
+      updatedAt: '2026-07-15T11:00:00.000Z',
+      messageCount: 4,
+    };
+    const persistence = createTuiConversationPersistence({
+      workspacePath: '/workspace',
+      initialMode: 'chat',
+      initialModel: selection,
+      store: {
+        listConversations() {
+          throw new Error('global list should not be used');
+        },
+        listConversationsByWorkspace(...args: unknown[]) {
+          calls.push({ method: 'listConversationsByWorkspace', args });
+          return [current];
+        },
+        getConversation(id: string) {
+          return id === current.id ? { ...current, messages: [] } : id === other.id ? { ...other, messages: [] } : null;
+        },
+        createConversation: () => ({ id: 'new' }),
+        appendMessage() {},
+        updateMode() {},
+        updateModelEffort() {},
+        addUsage() {},
+      },
+    });
+
+    expect(persistence.listResumable()).toEqual([{
+      id: 'current-workspace',
+      title: 'Current workspace session',
+      updatedAt: '2026-07-15T10:00:00.000Z',
+      messageCount: 2,
+    }]);
+    expect(calls).toEqual([{
+      method: 'listConversationsByWorkspace',
+      args: ['/workspace', { status: 'active' }],
+    }]);
+  });
+
+  test('normalizes a symlinked workspace path before listing and creating conversations', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'peer-tui-workspace-'));
+    const canonicalRoot = realpathSync(root);
+    const linkedWorkspace = `${root}-link`;
+    symlinkSync(root, linkedWorkspace);
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    try {
+      const persistence = createTuiConversationPersistence({
+        workspacePath: linkedWorkspace,
+        initialMode: 'chat',
+        initialModel: selection,
+        store: {
+          listConversations() { return []; },
+          listConversationsByWorkspace(...args: unknown[]) {
+            calls.push({ method: 'listConversationsByWorkspace', args });
+            return [];
+          },
+          getConversation: () => null,
+          createConversation(input?: unknown) {
+            calls.push({ method: 'createConversation', args: [input] });
+            return { id: 'normalized' };
+          },
+          appendMessage() {},
+          updateMode() {},
+          updateModelEffort() {},
+          addUsage() {},
+        },
+      });
+
+      persistence.listResumable();
+      persistence.syncSnapshot(snapshot({
+        messages: [{ id: 'user-normalized', role: 'user', content: 'hello' }],
+      }));
+
+      expect(calls).toContainEqual({
+        method: 'listConversationsByWorkspace',
+        args: [canonicalRoot, { status: 'active' }],
+      });
+      expect(calls).toContainEqual({
+        method: 'createConversation',
+        args: [{ workspacePath: canonicalRoot, mode: 'chat' }],
+      });
+    } finally {
+      rmSync(linkedWorkspace, { force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('falls back to the global list for legacy stores without workspace listing', () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const stored = {
+      id: 'legacy-stored',
+      title: 'Legacy store session',
+      updatedAt: '2026-07-15T10:00:00.000Z',
+      messageCount: 2,
+    };
+    const persistence = createTuiConversationPersistence({
+      workspacePath: '/workspace',
+      initialMode: 'chat',
+      initialModel: selection,
+      store: {
+        listConversations(...args: unknown[]) {
+          calls.push({ method: 'listConversations', args });
+          return [stored];
+        },
+        getConversation: () => ({ ...stored, messages: [] }),
+        createConversation: () => ({ id: 'new' }),
+        appendMessage() {},
+        updateMode() {},
+        updateModelEffort() {},
+        addUsage() {},
+      },
+    });
+
+    expect(persistence.listResumable()).toEqual([{
+      id: 'legacy-stored',
+      title: 'Legacy store session',
+      updatedAt: '2026-07-15T10:00:00.000Z',
+      messageCount: 2,
+    }]);
+    expect(calls).toEqual([{
+      method: 'listConversations',
+      args: [{ status: 'active' }],
+    }]);
   });
 
   test('lists, loads, and resumes a stored conversation without duplicating its history', () => {

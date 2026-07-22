@@ -44,6 +44,39 @@ describe('OpenAI Responses request encoder (ADR 28)', () => {
     assert.equal(fnOut.output, 'ok');
   });
 
+  it('normalizes legacy capability ids before replaying historical function calls', () => {
+    const body = encodeOpenAIResponsesRequest({
+      model: 'gpt-5.6-sol',
+      messages: [
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            { id: 'call_1', function: { name: 'local.file.read', arguments: '{"path":"a.ts"}' } },
+            { id: 'call_2', function: { name: 'MCP 服务: list_nodes', arguments: '{}' } },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'call_1', content: 'file contents' },
+        { role: 'tool', tool_call_id: 'call_2', content: 'node list' },
+      ],
+    });
+
+    const calls = body.input.filter((item) => item.type === 'function_call');
+    assert.deepEqual(calls.map((item) => ({
+      callId: item.call_id,
+      name: item.name,
+    })), [
+      { callId: 'call_1', name: 'local_file_read' },
+      { callId: 'call_2', name: 'MCP_____list_nodes' },
+    ]);
+    assert.ok(calls.every((item) => /^[a-zA-Z0-9_-]+$/.test(item.name)));
+    assert.deepEqual(
+      body.input.filter((item) => item.type === 'function_call_output').map((item) => item.call_id),
+      ['call_1', 'call_2'],
+      'normalizing names must preserve call_id pairing with tool outputs',
+    );
+  });
+
   it('flattens tools to Responses function shape', () => {
     const body = encodeOpenAIResponsesRequest({
       model: 'gpt-5',

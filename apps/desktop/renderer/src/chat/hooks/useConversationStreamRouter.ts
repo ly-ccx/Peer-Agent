@@ -202,8 +202,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     });
 
     const offDone = clientApi.onChatStreamDone(
-      ({ streamId, usage, lifetimeUsage, triggerTokens, contextWindow }) => {
-        const cid = conversationStore.resolveConversation(streamId);
+      ({ streamId, conversationId, usage, lifetimeUsage, contextTokens, triggerTokens, contextWindow }) => {
+        const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         // 流正常收尾，重试横幅若仍残留一并清除。
         clearRecoveryNotice(cid);
@@ -234,13 +234,14 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           streamId: null,
         });
 
-        // 主圆环只消费 Runtime preflight 的 triggerTokens，保证用户看到的百分比与
-        // 自动压缩判定完全同源；最近实际发送量 contextTokens 不再进入主圆环。
-        if (typeof triggerTokens === 'number') {
+        // 双口径：contextTokens → 主圆环；triggerTokens → 压缩压力（tooltip）。
+        // 两者都来自 Runtime getContextInfo，但职责分离。
+        if (typeof contextTokens === 'number' || typeof triggerTokens === 'number') {
           conversationStore.setState(cid, (prev) => ({
             authoritativeContext: mergeAuthoritativeContextSnapshot({
               previous: prev.authoritativeContext,
-              nextTokens: triggerTokens,
+              nextContextTokens: typeof contextTokens === 'number' ? contextTokens : null,
+              nextTriggerTokens: typeof triggerTokens === 'number' ? triggerTokens : null,
               nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
               mode: 'final',
             }),
@@ -303,8 +304,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       });
     });
 
-    const offAborted = clientApi.onChatStreamAborted(({ streamId }) => {
-      const cid = conversationStore.resolveConversation(streamId);
+    const offAborted = clientApi.onChatStreamAborted(({ streamId, conversationId }) => {
+      const cid = conversationStore.resolveEventConversation(streamId, conversationId);
       if (!cid) return;
       if (cid === activeRef.current) {
         // 中断时丢弃打字机积压缓冲（而非 flush 吐完），否则用户点停止后
@@ -410,8 +411,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       });
     });
 
-    const offError = clientApi.onChatStreamError(({ streamId, error, usage, lifetimeUsage }) => {
-      const cid = conversationStore.resolveConversation(streamId);
+    const offError = clientApi.onChatStreamError(({ streamId, conversationId, error, usage, lifetimeUsage }) => {
+      const cid = conversationStore.resolveEventConversation(streamId, conversationId);
       if (!cid) return;
       if (cid === activeRef.current) {
         // 异常终止（含复读兜底自动 error）同样丢弃积压缓冲，避免残留 delta 继续涌出。
@@ -508,7 +509,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     );
 
     const offCompaction = clientApi.onChatCompaction(
-      ({ conversationId, streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount, triggerTokens, contextWindow, microcompacted }) => {
+      ({ conversationId, streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount, contextTokens, triggerTokens, contextWindow, microcompacted }) => {
         const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         if (stage === 'start') {
@@ -537,11 +538,13 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           conversationStore.setState(cid, (prev) => {
             // 已确认的 Layer 1 会改变接下来真正参与 Layer 2 判定的 triggerTokens，允许
             // 压力真实回落；普通 idle 仍只允许抬升，避免不完整快照制造假下降。
+            // 同时写入实际发送 contextTokens，主圆环按实际占用显示。
             const nextAuthoritative =
-              typeof triggerTokens === 'number'
+              typeof contextTokens === 'number' || typeof triggerTokens === 'number'
                 ? mergeAuthoritativeContextSnapshot({
                     previous: prev.authoritativeContext,
-                    nextTokens: triggerTokens,
+                    nextContextTokens: typeof contextTokens === 'number' ? contextTokens : null,
+                    nextTriggerTokens: typeof triggerTokens === 'number' ? triggerTokens : null,
                     nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
                     mode: microcompacted === true ? 'final' : 'midturn',
                   })
@@ -573,16 +576,18 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
             streamId,
             now: completedAt,
           }),
-          // 语义压缩完成：压缩后的 triggerTokens 成为新压力快照，允许真实回落。
+          // 语义压缩完成：双口径写入（context 主圆环 + trigger 压缩压力），允许真实回落。
           // 缺快照时保留旧值，避免事件字段缺失让主圆环切换到另一套本地口径。
-          authoritativeContext: typeof triggerTokens === 'number'
-            ? mergeAuthoritativeContextSnapshot({
-                previous: prev.authoritativeContext,
-                nextTokens: triggerTokens,
-                nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
-                mode: 'final',
-              })
-            : prev.authoritativeContext,
+          authoritativeContext:
+            typeof contextTokens === 'number' || typeof triggerTokens === 'number'
+              ? mergeAuthoritativeContextSnapshot({
+                  previous: prev.authoritativeContext,
+                  nextContextTokens: typeof contextTokens === 'number' ? contextTokens : null,
+                  nextTriggerTokens: typeof triggerTokens === 'number' ? triggerTokens : null,
+                  nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
+                  mode: 'final',
+                })
+              : prev.authoritativeContext,
         }));
         if (
           !method ||

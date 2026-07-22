@@ -10,85 +10,76 @@ import {
 describe('resolveContextOccupancyTokens', () => {
   it('uses authoritative + draft before send (no sudden drop source)', () => {
     const tokens = resolveContextOccupancyTokens({
-      authoritativeContextTokens: 50_000,
-      historyContextTokens: 30_000,
-      draftContextTokens: 13_000,
+      authoritativeContextTokens: 60_000,
+      historyContextTokens: 40_000,
+      draftContextTokens: 3_000,
     });
     assert.equal(tokens, 63_000);
   });
 
-  it('keeps occupancy after send when draft is cleared but authoritative was seeded', () => {
-    // 发送前 63k；发送后草稿清零，权威种子应已并入 sent draft。
+  it('falls back to history + draft when no authoritative snapshot', () => {
+    const tokens = resolveContextOccupancyTokens({
+      historyContextTokens: 40_000,
+      draftContextTokens: 5_000,
+    });
+    assert.equal(tokens, 45_000);
+  });
+
+  it('raises with streaming input when higher than base', () => {
+    const tokens = resolveContextOccupancyTokens({
+      authoritativeContextTokens: 50_000,
+      historyContextTokens: 40_000,
+      draftContextTokens: 0,
+      streamingInputTokens: 80_000,
+    });
+    assert.equal(tokens, 80_000);
+  });
+
+  it('does not lower below authoritative+draft for lower streaming input', () => {
+    const tokens = resolveContextOccupancyTokens({
+      authoritativeContextTokens: 50_000,
+      historyContextTokens: 40_000,
+      draftContextTokens: 2_000,
+      streamingInputTokens: 10_000,
+    });
+    assert.equal(tokens, 52_000);
+  });
+});
+
+describe('seedAuthoritativeContextOnSend', () => {
+  it('freezes pre-send occupancy so draft clear cannot drop the ring alone', () => {
     const seeded = seedAuthoritativeContextOnSend({
-      previousAuthoritativeTokens: 50_000,
-      historyContextTokens: 30_000,
-      sentDraftTokens: 13_000,
-      previousContextWindow: 100_000,
+      previousAuthoritativeTokens: 60_000,
+      historyContextTokens: 40_000,
+      sentDraftTokens: 3_000,
+      previousContextWindow: 200_000,
     });
     assert.equal(seeded.contextTokens, 63_000);
+    assert.equal(seeded.triggerTokens, 63_000);
+    assert.equal(seeded.contextWindow, 200_000);
 
+    // After send, draft is empty; occupancy still uses the seeded authority.
     const afterSend = resolveContextOccupancyTokens({
       authoritativeContextTokens: seeded.contextTokens,
-      historyContextTokens: 43_000, // 历史已含新 user，但可能仍低于权威（缺 system/tools）
+      historyContextTokens: 40_000,
       draftContextTokens: 0,
     });
     assert.equal(afterSend, 63_000);
   });
 
-  it('does not fall back to local history while authoritative snapshot exists', () => {
-    const tokens = resolveContextOccupancyTokens({
-      authoritativeContextTokens: 63_000,
-      historyContextTokens: 36_000,
-      draftContextTokens: 0,
-    });
-    assert.equal(tokens, 63_000);
-  });
-
-  it('falls back to local history + draft when no authoritative snapshot', () => {
-    const tokens = resolveContextOccupancyTokens({
-      authoritativeContextTokens: null,
-      historyContextTokens: 36_000,
-      draftContextTokens: 2_000,
-    });
-    assert.equal(tokens, 38_000);
-  });
-
-  it('can rise with streaming input of the current provider request, not lifetime billing', () => {
-    const tokens = resolveContextOccupancyTokens({
-      authoritativeContextTokens: 63_000,
-      historyContextTokens: 70_000,
-      draftContextTokens: 0,
-      streamingInputTokens: 72_000, // 本轮 input+cacheRead
-    });
-    assert.equal(tokens, 72_000);
-  });
-
-  it('ignores streaming input when it is smaller than the seeded occupancy', () => {
-    const tokens = resolveContextOccupancyTokens({
-      authoritativeContextTokens: 63_000,
-      historyContextTokens: 40_000,
-      draftContextTokens: 0,
-      streamingInputTokens: 10_000,
-    });
-    assert.equal(tokens, 63_000);
-  });
-});
-
-describe('seedAuthoritativeContextOnSend', () => {
-  it('prevents 63% → 36% drop caused by clearing draft against stale authoritative', () => {
+  it('carries previous trigger higher than context when seeding', () => {
     const seeded = seedAuthoritativeContextOnSend({
-      previousAuthoritativeTokens: 50_000,
-      historyContextTokens: 23_000,
-      sentDraftTokens: 13_000,
-      previousContextWindow: 100_000,
-      fallbackContextWindow: 200_000,
+      previousAuthoritativeTokens: 60_000,
+      previousTriggerTokens: 120_000,
+      historyContextTokens: 40_000,
+      sentDraftTokens: 3_000,
+      previousContextWindow: 200_000,
     });
-    // max(50k+13k, 23k+13k) = 63k，而不是回落到 23k/36k 本地历史
     assert.equal(seeded.contextTokens, 63_000);
-    assert.equal(seeded.contextWindow, 100_000);
+    assert.equal(seeded.triggerTokens, 123_000);
   });
 
-  it('uses history+sent when there is no previous authoritative snapshot', () => {
+  it('uses history + draft when no previous authority', () => {
     const seeded = seedAuthoritativeContextOnSend({
       previousAuthoritativeTokens: null,
       historyContextTokens: 20_000,
@@ -96,6 +87,7 @@ describe('seedAuthoritativeContextOnSend', () => {
       fallbackContextWindow: 128_000,
     });
     assert.equal(seeded.contextTokens, 25_000);
+    assert.equal(seeded.triggerTokens, 25_000);
     assert.equal(seeded.contextWindow, 128_000);
   });
 });
@@ -110,65 +102,86 @@ describe('resolveContextRingTokens', () => {
 });
 
 describe('mergeAuthoritativeContextSnapshot', () => {
-  it('blocks an unconfirmed midturn snapshot from dropping ~30% to ~8%', () => {
-    // 未标记为已确认 Layer 1 的中途快照不得制造假下降；已确认 microcompaction
-    // 由事件路由器使用 final 模式合并，允许真实回落。
-    const mid = mergeAuthoritativeContextSnapshot({
-      previous: { contextTokens: 160_000, contextWindow: 500_000 },
-      nextTokens: 38_900,
-      nextWindow: 500_000,
-      mode: 'midturn',
-    });
-    assert.equal(mid?.contextTokens, 160_000);
-    assert.equal(mid?.contextWindow, 500_000);
-
-    // 回合结束 final 写入真实有效上下文，允许绝对更新（可升可降）。
-    const done = mergeAuthoritativeContextSnapshot({
-      previous: mid,
-      nextTokens: 255_000,
+  it('final mode writes absolute dual-field values including drops', () => {
+    const next = mergeAuthoritativeContextSnapshot({
+      previous: { contextTokens: 200_000, triggerTokens: 280_000, contextWindow: 500_000 },
+      nextContextTokens: 80_000,
+      nextTriggerTokens: 90_000,
       nextWindow: 500_000,
       mode: 'final',
     });
-    assert.equal(done?.contextTokens, 255_000);
+    assert.equal(next?.contextTokens, 80_000);
+    assert.equal(next?.triggerTokens, 90_000);
+    assert.equal(next?.contextWindow, 500_000);
   });
 
-  it('allows midturn rise when next usage is larger', () => {
+  it('midturn mode refuses unexplained drop for each field', () => {
     const next = mergeAuthoritativeContextSnapshot({
-      previous: { contextTokens: 100_000, contextWindow: 500_000 },
-      nextTokens: 180_000,
+      previous: { contextTokens: 200_000, triggerTokens: 280_000, contextWindow: 500_000 },
+      nextContextTokens: 50_000,
+      nextTriggerTokens: 60_000,
       nextWindow: 500_000,
       mode: 'midturn',
     });
-    assert.equal(next?.contextTokens, 180_000);
+    assert.equal(next?.contextTokens, 200_000);
+    assert.equal(next?.triggerTokens, 280_000);
   });
 
-  it('allows midturn drop only when context window shrinks (model switch)', () => {
+  it('midturn mode allows raise independently on each field', () => {
     const next = mergeAuthoritativeContextSnapshot({
-      previous: { contextTokens: 200_000, contextWindow: 500_000 },
-      nextTokens: 80_000,
-      nextWindow: 128_000,
+      previous: { contextTokens: 100_000, triggerTokens: 120_000, contextWindow: 500_000 },
+      nextContextTokens: 110_000,
+      nextTriggerTokens: 180_000,
+      nextWindow: 500_000,
+      mode: 'midturn',
+    });
+    assert.equal(next?.contextTokens, 110_000);
+    assert.equal(next?.triggerTokens, 180_000);
+  });
+
+  it('midturn mode allows drop when context window shrinks (model switch)', () => {
+    const next = mergeAuthoritativeContextSnapshot({
+      previous: { contextTokens: 200_000, triggerTokens: 280_000, contextWindow: 500_000 },
+      nextContextTokens: 80_000,
+      nextTriggerTokens: 90_000,
+      nextWindow: 200_000,
       mode: 'midturn',
     });
     assert.equal(next?.contextTokens, 80_000);
-    assert.equal(next?.contextWindow, 128_000);
+    assert.equal(next?.triggerTokens, 90_000);
+    assert.equal(next?.contextWindow, 200_000);
   });
 
-  it('allows final drop after semantic compaction', () => {
+  it('legacy nextTokens writes both fields for compatibility', () => {
     const next = mergeAuthoritativeContextSnapshot({
-      previous: { contextTokens: 400_000, contextWindow: 500_000 },
-      nextTokens: 90_000,
-      nextWindow: 500_000,
+      previous: null,
+      nextTokens: 42_000,
+      nextWindow: 128_000,
       mode: 'final',
     });
-    assert.equal(next?.contextTokens, 90_000);
+    assert.equal(next?.contextTokens, 42_000);
+    assert.equal(next?.triggerTokens, 42_000);
   });
 
   it('keeps previous when midturn next is missing', () => {
     const next = mergeAuthoritativeContextSnapshot({
-      previous: { contextTokens: 120_000, contextWindow: 500_000 },
+      previous: { contextTokens: 120_000, triggerTokens: 150_000, contextWindow: 500_000 },
       nextTokens: null,
       mode: 'midturn',
     });
     assert.equal(next?.contextTokens, 120_000);
+    assert.equal(next?.triggerTokens, 150_000);
+  });
+
+  it('ensures triggerTokens is never below contextTokens', () => {
+    const next = mergeAuthoritativeContextSnapshot({
+      previous: null,
+      nextContextTokens: 100_000,
+      nextTriggerTokens: 80_000,
+      nextWindow: 200_000,
+      mode: 'final',
+    });
+    assert.equal(next?.contextTokens, 100_000);
+    assert.equal(next?.triggerTokens, 100_000);
   });
 });

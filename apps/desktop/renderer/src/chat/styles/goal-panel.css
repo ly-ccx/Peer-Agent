@@ -819,6 +819,13 @@
   border-color: transparent;
   box-shadow: none;
 }
+
+/* 浅色目标项统一复用展开态的中性悬浮层色，不再额外制造灰蓝层级。 */
+:root:not([data-theme="dark"]) .goal-plan-card,
+:root:not([data-theme="dark"]) .goal-plan-card:hover {
+  background: var(--ui-surface-hover, var(--za-hover));
+}
+
 .goal-plan-card--main .goal-plan-head-caret {
   display: none;
 }

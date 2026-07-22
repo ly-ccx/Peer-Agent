@@ -186,6 +186,7 @@ export function TokenUsageDisplay({
   tokenUsage,
   activeUsage,
   contextTokens,
+  triggerTokens,
   contextWindow,
   isStreaming,
   isZh,
@@ -201,7 +202,13 @@ export function TokenUsageDisplay({
   readonly providers: readonly LlmProviderConfigView[];
   readonly tokenUsage: TokenUsageState | null;
   readonly activeUsage?: TokenUsageState | null;
+  /** 实际发送上下文占用（主圆环分子 + tooltip）。 */
   readonly contextTokens?: number;
+  /**
+   * 压缩触发压力（仅保留 prop 兼容；tooltip 不再展示，触发逻辑在 runtime）。
+   * @deprecated UI 不再消费；可逐步从调用方移除。
+   */
+  readonly triggerTokens?: number;
   /** 权威上下文窗口（与压缩触发同窗口）。传入时优先于 provider 配置窗口，消除百分比偏差。 */
   readonly contextWindow?: number;
   readonly isStreaming?: boolean;
@@ -298,12 +305,13 @@ export function TokenUsageDisplay({
   const ctxWindow = (typeof contextWindow === 'number' && contextWindow > 0) ? contextWindow : defaultProvider?.contextWindow;
   const ctxPercent = ctxWindow ? Math.min((currentContextTokens / ctxWindow) * 100, 100) : null;
   const hasCtxRing = Boolean(ctxWindow && ctxPercent != null);
-  // 圆环 hover：用量明细（used/total + 百分比）叠加缓存命中率（读取/写入）与订阅剩余额度，
-  // 让常驻区只保留圆环+百分比，缓存命中率 / 额度不再单独常驻占位。
+  // 圆环 hover：只展示「上下文」占用，叠加缓存命中率与订阅剩余额度。
+  // 压缩触发仍由 runtime 的 triggerTokens 负责，不在 UI 重复展示，避免干扰。
+  void triggerTokens;
   const quotaTooltipLine = formatQuotaTooltipLine(subscriptionQuota ?? undefined, isZh);
   const ctxTooltipLines: readonly string[] = hasCtxRing
     ? [
-        `${isZh ? '压缩压力' : 'Compaction pressure'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow as number)} (${Math.round(ctxPercent as number)}%)`,
+        `${isZh ? '上下文' : 'Context'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow as number)} (${Math.round(ctxPercent as number)}%)`,
         ...(showCacheHit
           ? [
               isZh

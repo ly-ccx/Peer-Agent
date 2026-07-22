@@ -39,6 +39,7 @@ import { fetchWithConnectionRecovery } from './provider-transports/recovering-fe
 import { getQoderModelMetadata, resolveQoderModelOptionProjection } from './provider-adapters/qoder-model-catalog.mjs';
 import { detectTailRepetition } from './repetition-detector.mjs';
 import { createUsageRequestLog } from './usage-request-log.mjs';
+import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 
 const activeStreams = new Map();
 const usageRequestLog = createUsageRequestLog();
@@ -298,6 +299,7 @@ function wrapWebContentsForRuntimeEvents(
   streamRecord,
   {
     conversationStore = null,
+    llmConfigStore = null,
     emitRuntimeEvent = null,
     failRuntimeTurn = null,
   } = {},
@@ -489,7 +491,14 @@ function wrapWebContentsForRuntimeEvents(
         });
         persistStreamRecord({ final: true, interrupted: true });
       }
-      return realWebContents.send(channel, payload);
+      const routedPayload = (
+        channel === 'chat:stream:done'
+        || channel === 'chat:stream:error'
+        || channel === 'chat:stream:aborted'
+      ) && streamRecord.conversationId
+        ? { ...payload, conversationId: streamRecord.conversationId }
+        : payload;
+      return realWebContents.send(channel, routedPayload);
     },
   };
 }
@@ -595,6 +604,7 @@ export function createLlmChatService({
           ?? null;
         byConversation.set(record.conversationId, {
           conversationId: record.conversationId,
+          streamId: record.streamId,
           // 绿点真值：origin（会话发起工作区）
           workspacePath: originWorkspacePath,
           originWorkspacePath,
@@ -652,7 +662,15 @@ export function createLlmChatService({
     // 内部旁路流（Explorer / Verifier）：不写会话正文、不进活跃流投影，避免验收 JSON 泄漏到聊天。
     ephemeral = false,
   }) {
-    const providerCandidates = getProviderCandidates(modelProviderId);
+    // 托管回合（Goal Runner 等）没有 renderer 再次透传 modelProviderId，但只要绑定了
+    // conversationId，就必须继承该会话的模型选择。否则会静默落到全局默认 provider，
+    // 造成 UI 显示 ChatGPT、后台实际改跑 Grok 的跨模型漂移。
+    const effectiveModelProviderId = resolveConversationModelProviderId({
+      modelProviderId,
+      conversationId,
+      conversationStore,
+    });
+    const providerCandidates = getProviderCandidates(effectiveModelProviderId);
     if (!providerCandidates.length) {
       webContents.send('chat:stream:error', { streamId, error: 'no_provider_configured' });
       return { terminalStatus: 'error', requestedUserInput: false, toolCallCount: 0 };
@@ -695,7 +713,7 @@ export function createLlmChatService({
       // 复读兜底：命中尾部周期检测时需在 send 收口点自行构造 error payload，故留存 streamId。
       streamId,
       // 发送入口透传的首选 provider；真正命中的实际 provider 在 attempt 循环里覆盖到 actual*。
-      modelProviderId: modelProviderId ?? null,
+      modelProviderId: effectiveModelProviderId ?? null,
       // ADR 22: 累积进行中的流式正文/思考/工具段,供 HMR 重载后 reattach 取快照续接。
       accumulatedText: '',
       accumulatedThinking: '',
@@ -724,6 +742,7 @@ export function createLlmChatService({
       // 累积代理:拦截 delta/thinking 追加到记录,其余事件透传给真实 webContents。
       accumulatingWebContents = wrapWebContentsForRuntimeEvents(webContents, streamRecord, {
         conversationStore,
+        llmConfigStore,
         emitRuntimeEvent,
         failRuntimeTurn: (reason) => runtimeSessions.failStream(streamId, reason),
       });
@@ -1155,6 +1174,52 @@ export function createLlmChatService({
     }
   }
 
+  /**
+   * Goal handoff 专用：把某会话仍 running 的 intake 流强制收口为 done。
+   * 先标记 terminalEventSent 再 cancel，避免 agent loop 后续 abort/error 覆盖终态。
+   * 用于 goal_create_plan 后 Runner 接管前解锁 UI，并让 outcome resolve 路径不再卡死。
+   */
+  function forceCompleteConversationStreams(conversationId, { reason = 'goal_handoff' } = {}) {
+    const normalized = typeof conversationId === 'string' ? conversationId.trim() : '';
+    if (!normalized) return { completed: 0, streamIds: [] };
+    const completedIds = [];
+    for (const [streamId, record] of activeStreams.entries()) {
+      if (record?.conversationId !== normalized) continue;
+      if (!isRunning(record)) continue;
+      // 先落 done 终态，后续 cancel 触发的 abort 路径会被 terminalEventSent 去重。
+      if (!record.terminalEventSent) {
+        const payload = {
+          streamId,
+          conversationId: normalized,
+          reason,
+        };
+        try {
+          record.webContents?.send?.('chat:stream:done', payload);
+        } catch (error) {
+          console.warn('[llm-chat] force-complete done send failed:', error?.message || error);
+        }
+        record.terminalEventSent = true;
+        record.terminalStatus = 'completed';
+        record.interrupted = false;
+      }
+      try {
+        runtimeSessions.cancelStream(streamId, reason);
+      } catch (error) {
+        console.warn('[llm-chat] force-complete cancel failed:', error?.message || error);
+      }
+      permissionGate.settleStreamPermissionRequests(streamId, {
+        granted: false,
+        reason,
+      });
+      try {
+        runtimeSessions.settleStream(streamId, 'completed', reason);
+      } catch {}
+      retireStream(streamId);
+      completedIds.push(streamId);
+    }
+    return { completed: completedIds.length, streamIds: completedIds };
+  }
+
   function abort(streamId) {
     const active = activeStreams.get(streamId);
     if (!active) return { aborted: false };
@@ -1163,7 +1228,10 @@ export function createLlmChatService({
       granted: false,
       reason: 'stream_aborted',
     });
-    active.webContents.send('chat:stream:aborted', { streamId });
+    active.webContents.send('chat:stream:aborted', {
+      streamId,
+      ...(active.conversationId ? { conversationId: active.conversationId } : {}),
+    });
     // abort 直接走真实 webContents，绕过累积代理；故在此显式收口终态并落盘，
     // 再走保留期（不立即删除），让切回被中断的后台轮次也能回放已累积正文。
     active.terminalEventSent = true;
@@ -1238,6 +1306,7 @@ export function createLlmChatService({
   return {
     sendMessage,
     abort,
+    forceCompleteConversationStreams,
     setWorkspacePath,
     setLocalAccessLevel,
     resolvePermissionGrant,

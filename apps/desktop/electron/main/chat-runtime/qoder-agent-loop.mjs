@@ -200,6 +200,11 @@ export async function agentLoopQoder({
           goalPlanStore,
         });
         if (toolExecution.aborted) throw createDesktopAbortError();
+        // goal_create_plan / request_user_input 等 terminal 工具：立即 sendDone，
+        // 不依赖后续 pipeline onStopped 时序，避免 UI 卡在「正在思考」。
+        if (toolExecution.controlSignal?.terminal) {
+          try { loop.sendDone(); } catch {}
+        }
         return {
           call,
           result: toolExecution,

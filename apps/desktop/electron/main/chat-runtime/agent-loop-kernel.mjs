@@ -129,8 +129,8 @@ export function createAgentLoopKernel({
     const payload = { streamId, usage };
     if (contextInfo && typeof contextInfo === 'object') {
       if (typeof contextInfo.contextTokens === 'number') payload.contextTokens = contextInfo.contextTokens;
-      // triggerTokens 是 Runtime preflight 真正用于判断自动压缩的分子。Renderer 主圆环
-      // 必须消费它，而不是最近一次请求的有效发送量 contextTokens。
+      // triggerTokens 是 Runtime preflight 真正用于判断自动压缩的分子（tooltip 压缩压力）。
+      // contextTokens 是实际发送量（主圆环）。两者都下发，UI 按职责拆分消费。
       if (typeof contextInfo.triggerTokens === 'number') payload.triggerTokens = contextInfo.triggerTokens;
       if (typeof contextInfo.contextWindow === 'number') payload.contextWindow = contextInfo.contextWindow;
       if (typeof contextInfo.compactionSuggested === 'boolean') {

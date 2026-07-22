@@ -358,8 +358,8 @@ describe('computeContextInfo（进度条用量与压缩触发口径单一来源�
   });
 });
 
-// microcompaction 预算回归：原始集合与 Layer 1 后集合是两个明确阶段；主圆环应投影
-// 当前阶段真正用于下一步压缩判定的 triggerTokens，而不是混入 contextTokens。
+// microcompaction 预算回归：原始集合与 Layer 1 后集合是两个明确阶段；
+// 压缩触发应投影当前阶段真正用于下一步判定的 triggerTokens，主圆环则消费 contextTokens。
 describe('microcompaction 前后触发预算不变量', () => {
   // 构造一个含「大块旧工具结果」的会话：微压缩会把旧 tool_result 截断成预览，
   // 因此完整集合的估算必然显著大于微压缩后集合的估算。
@@ -402,7 +402,7 @@ describe('microcompaction 前后触发预算不变量', () => {
     );
   });
 
-  it('主圆环 triggerTokens 与压缩建议来自同一预算', () => {
+  it('压缩触发 triggerTokens 与压缩建议来自同一预算', () => {
     const full = buildConversationWithBigToolResults();
     const fullTokens = computeContextInfo({ messages: full, contextWindow: 200_000 }).triggerTokens;
     const ratio = COMPACTION_CONFIG.triggerRatio;
@@ -412,7 +412,7 @@ describe('microcompaction 前后触发预算不变量', () => {
     const above = computeContextInfo({ messages: full, contextWindow: windowAbove });
     const below = computeContextInfo({ messages: full, contextWindow: windowBelow });
 
-    assert.equal(above.triggerTokens, fullTokens, '主圆环分子必须就是触发判定预算');
+    assert.equal(above.triggerTokens, fullTokens, 'triggerTokens 必须就是触发判定预算');
     assert.equal(above.compactionSuggested, true);
     assert.equal(below.triggerTokens, fullTokens);
     assert.equal(below.compactionSuggested, false);

@@ -36,6 +36,10 @@ import { useConversationModelEffort } from '../hooks/useConversationModelEffort'
 import { useLocalAccessPreference } from '../hooks/useLocalAccessPreference';
 import { useConversationMode } from '../hooks/useConversationMode';
 import { loadComposerEntry, resolveComposerHydration } from '../state/composerPersistence';
+import {
+  canAutoDispatchQueuedMessage,
+  dispatchQueuedMessage,
+} from '../state/messageQueueDispatch';
 import { getProviderModelDisplayLabel } from '../state/providerDisplay';
 import {
   buildMessageRailItemsIncremental,
@@ -320,6 +324,7 @@ export function ChatSurface({
   onArchiveConversation,
   workspacePath,
   isPageActive,
+  messageTarget,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
@@ -349,6 +354,7 @@ export function ChatSurface({
   readonly workspacePath?: string | null;
   // 设置页覆盖显示时保活会话树与流事件订阅，但暂停聊天专属全局快捷键。
   readonly isPageActive: boolean;
+  readonly messageTarget?: { conversationId: string; messageId: string; requestId: number } | null;
 }) {
   const isDraftConversation = conversationId === null;
   // 会话运行时状态的真值已上移到 conversationStore（按 conversationId 分桶的外部 store）。
@@ -409,7 +415,7 @@ export function ChatSurface({
   const enqueueMessage = convActions.enqueueMessage;
   const removeQueuedMessage = convActions.removeQueuedMessage;
   const reorderQueuedMessage = convActions.reorderQueuedMessage;
-  const shiftQueuedMessage = convActions.shiftQueuedMessage;
+  const queuedDispatchInFlightRef = useRef(new Set<string>());
   // useElapsedTimer 只保留本轮起点 ref；回合时长真值由 useConversationStreamRouter
   // 在 done/aborted/error 时读取。实时跳秒在末端 ChatTurn 内更新，避免每秒重渲染整页。
   const { setTurnStartedAt } = useElapsedTimer();
@@ -441,11 +447,11 @@ export function ChatSurface({
   const setActiveUsage = useMemo(() => makeSetter('activeUsage'), [makeSetter]) as Dispatch<
     SetStateAction<TokenUsageState | null>
   >;
-  // 口径统一：主进程随回合结束（done）下发的权威上下文用量快照（与压缩触发同口径）。
-  // 进度条优先用它，回退到本地估算；null = 本会话尚无权威快照（如刚切入未跑过回合）。
+  // 口径统一：主进程随回合结束（done）下发的权威双口径快照。
+  // 主圆环用 contextTokens，压缩压力用 triggerTokens；null = 本会话尚无权威快照。
   const authoritativeContext = convState.authoritativeContext;
   const setAuthoritativeContext = useMemo(() => makeSetter('authoritativeContext'), [makeSetter]) as Dispatch<
-    SetStateAction<{ contextTokens: number; contextWindow: number | null } | null>
+    SetStateAction<{ contextTokens: number; triggerTokens: number; contextWindow: number | null } | null>
   >;
   const providerRecoveryNotice = convState.providerRecoveryNotice;
   const setProviderRecoveryNotice = useMemo(() => makeSetter('providerRecoveryNotice'), [makeSetter]) as Dispatch<
@@ -696,6 +702,11 @@ export function ChatSurface({
     });
   }, [messageTurnIndex, scrollToTurn]);
 
+  useEffect(() => {
+    if (!messageTarget || messageTarget.conversationId !== conversationId) return;
+    scrollToMessage(messageTarget.messageId);
+  }, [conversationId, messageTarget, scrollToMessage]);
+
   const hasProvider = providers.some((p) => p.apiKeyConfigured);
   // 当前激活 provider(默认且已配置 Key,否则取首个已配置)是否勾选了原生推理(reasoning/thinking)。
   // 只有勾选时才显示思考强度选择器；OpenAI 暴露额外 xhigh 档。
@@ -809,7 +820,12 @@ export function ChatSurface({
     return next.totalTokens;
   }, [conversationId, isStreaming, messages]);
   // 草稿 token 增量由 ComposerTokenUsageDisplay 的叶子订阅计算，避免字符输入唤醒消息表面。
+  // 主圆环用实际发送 contextTokens；压缩压力用 triggerTokens（tooltip）。
   const authoritativeContextTokens = authoritativeContext?.contextTokens ?? null;
+  const authoritativeTriggerTokens =
+    authoritativeContext?.triggerTokens
+    ?? authoritativeContext?.contextTokens
+    ?? null;
   // 进度条分母优先用权威 contextWindow（与触发判定同窗口），消除 provider 配置窗口与
   // 主进程实际所用窗口不一致时的百分比偏差；权威窗口未知时回退到 provider 配置窗口。
   const authoritativeContextWindow = authoritativeContext?.contextWindow ?? undefined;
@@ -877,7 +893,9 @@ export function ChatSurface({
     void (async () => {
       const { messages: loaded, tokenUsage: usage, mode: convMode, effort: convEffort, modelProviderId: convModelProviderId } = await loadConversationMessages(conversationId);
       if (cancelled) return;
-      convActions.commitLoad({
+      // 消息可以先投影到 UI，但 loadStatus 必须保持 loading，直到下面的 compaction/stream
+      // reattach 全部收敛；否则自动出队会把「流状态尚未知」误判为「确认空闲」。
+      convActions.set({
         messages: loaded,
         tokenUsage: usage,
       });
@@ -930,57 +948,63 @@ export function ChatSurface({
       // 并恢复 streamIdRef,使现有 delta 监听重新匹配、无缝续上(不重发、不打断)。
       try {
         const live = await clientApi.chatStreamReattach({ conversationId });
-        if (cancelled || !live || !live.streamId) return;
-        // 方案 3：reattach 既可能返回「运行中的流」，也可能返回「已终结但保留的终态快照」。
-        // - running：接回 streamIdRef + isStreaming，使 delta 监听续上（既有无缝续接）。
-        // - terminal：不重新武装流式，只用终态快照补齐完整正文/工具段，并标注 interrupted，
-        //   让切回已结束的后台轮次也能无缝回放（正文真值已由主进程落盘，这里仅做表达补齐）。
-        const running = live.isStreaming === true;
-        const liveStartedAt = typeof live.startedAt === 'number' && Number.isFinite(live.startedAt)
-          ? live.startedAt
-          : Date.now();
-        const liveSegments: ContentSegment[] = Array.isArray(live.segments) && live.segments.length > 0
-          ? live.segments.map((segment) => normalizeStreamSegment(segment as ContentSegment))
-          : [];
-        if (liveSegments.length === 0) {
-          if (live.accumulatedThinking) liveSegments.push({ type: 'thinking', content: live.accumulatedThinking });
-          if (live.accumulatedText) liveSegments.push({ type: 'text', content: live.accumulatedText });
-        }
-        const terminalInterrupted = !running && live.interrupted === true;
-        // 重新打开会话时,loaded 末尾通常已是这一轮进行中的 assistant 消息。
-        // 续接不能用 main 的活跃流快照直接覆盖它:renderer 侧可能已经把更完整的
-        // 分段思考/工具调用记录落盘了。这里以 loaded/prev 中已有 segments
-        // 为证据基线,只接受可证明更完整的 live suffix,避免切回后历史段被清空。
-        setMessages((prev) => {
-          const base = prev.length > 0 ? prev : loaded;
-          const last = base[base.length - 1];
-          const persistedAssistant = last && last.role === 'assistant' ? last : null;
-          const segments = mergeReattachedSegments(persistedAssistant?.segments, liveSegments);
-          const liveMsg: ChatMsg = {
-            ...(persistedAssistant || {}),
-            id: persistedAssistant?.id || nextId(),
-            role: 'assistant',
-            content: contentFromSegments(segments, live.accumulatedText ?? persistedAssistant?.content ?? ''),
-            segments,
-            timestamp: persistedAssistant?.timestamp || Date.now(),
-            // 终态回放：异常中断标记保留；正常完成则清除既有 interrupted（轮次确已完成）。
-            interrupted: running ? persistedAssistant?.interrupted : terminalInterrupted,
-          };
-          if (persistedAssistant) {
-            return [...base.slice(0, -1), liveMsg];
+        if (cancelled) return;
+        if (live && live.streamId) {
+          // 方案 3：reattach 既可能返回「运行中的流」，也可能返回「已终结但保留的终态快照」。
+          // - running：接回 streamIdRef + isStreaming，使 delta 监听续上（既有无缝续接）。
+          // - terminal：不重新武装流式，只用终态快照补齐完整正文/工具段，并标注 interrupted，
+          //   让切回已结束的后台轮次也能无缝回放（正文真值已由主进程落盘，这里仅做表达补齐）。
+          const running = live.isStreaming === true;
+          const liveStartedAt = typeof live.startedAt === 'number' && Number.isFinite(live.startedAt)
+            ? live.startedAt
+            : Date.now();
+          const liveSegments: ContentSegment[] = Array.isArray(live.segments) && live.segments.length > 0
+            ? live.segments.map((segment) => normalizeStreamSegment(segment as ContentSegment))
+            : [];
+          if (liveSegments.length === 0) {
+            if (live.accumulatedThinking) liveSegments.push({ type: 'thinking', content: live.accumulatedThinking });
+            if (live.accumulatedText) liveSegments.push({ type: 'text', content: live.accumulatedText });
           }
-          return [...base, liveMsg];
-        });
-        if (running) {
-          streamIdRef.current = live.streamId;
-          setTurnStartedAt(liveStartedAt);
-          conversationStore.routeStream(live.streamId, conversationId);
-          conversationStore.setState(conversationId, { streamId: live.streamId, turnStartedAt: liveStartedAt });
-          setIsStreaming(true);
+          const terminalInterrupted = !running && live.interrupted === true;
+          // 重新打开会话时,loaded 末尾通常已是这一轮进行中的 assistant 消息。
+          // 续接不能用 main 的活跃流快照直接覆盖它:renderer 侧可能已经把更完整的
+          // 分段思考/工具调用记录落盘了。这里以 loaded/prev 中已有 segments
+          // 为证据基线,只接受可证明更完整的 live suffix,避免切回后历史段被清空。
+          setMessages((prev) => {
+            const base = prev.length > 0 ? prev : loaded;
+            const last = base[base.length - 1];
+            const persistedAssistant = last && last.role === 'assistant' ? last : null;
+            const segments = mergeReattachedSegments(persistedAssistant?.segments, liveSegments);
+            const liveMsg: ChatMsg = {
+              ...(persistedAssistant || {}),
+              id: persistedAssistant?.id || nextId(),
+              role: 'assistant',
+              content: contentFromSegments(segments, live.accumulatedText ?? persistedAssistant?.content ?? ''),
+              segments,
+              timestamp: persistedAssistant?.timestamp || Date.now(),
+              // 终态回放：异常中断标记保留；正常完成则清除既有 interrupted（轮次确已完成）。
+              interrupted: running ? persistedAssistant?.interrupted : terminalInterrupted,
+            };
+            if (persistedAssistant) {
+              return [...base.slice(0, -1), liveMsg];
+            }
+            return [...base, liveMsg];
+          });
+          if (running) {
+            streamIdRef.current = live.streamId;
+            setTurnStartedAt(liveStartedAt);
+            conversationStore.routeStream(live.streamId, conversationId);
+            conversationStore.setState(conversationId, { streamId: live.streamId, turnStartedAt: liveStartedAt });
+            setIsStreaming(true);
+          }
         }
       } catch {
         // reattach 失败不影响正常加载;降级为无续接(用户可重新发送)。
       }
+      if (cancelled) return;
+      // 只有 main 侧流状态已经查询完毕，才把会话标记为可发送；running=true 已在上面先恢复，
+      // 因而 ready 首帧不会暴露错误的「非流式空闲」窗口。
+      convActions.commitLoad({});
     })();
     return () => { cancelled = true; };
   }, [conversationId, convActions, providers]);
@@ -1390,7 +1414,7 @@ export function ChatSurface({
   // 核心发送路径:给定文本(+ 可选附件)就执行一次 agent turn。
   // handleSend(用户输入)与 pending-task 续传(跨重启)都复用它,避免另造发送路径。
   const submitMessage = useCallback(async (text: string, sentAttachments: ChatAttachment[], submitEffort?: string) => {
-    if ((!text && sentAttachments.length === 0) || isStreaming || !hasProvider || !conversationId || loadStatus !== 'ready') return;
+    if ((!text && sentAttachments.length === 0) || isStreaming || !hasProvider || !conversationId || loadStatus !== 'ready') return false;
     setStreamError(null);
     setActiveUsage(null);
     setProviderRecoveryNotice(null);
@@ -1401,13 +1425,14 @@ export function ChatSurface({
     // 统一由 chat:compaction 事件投影，避免命令路径再做第二次状态收尾。
     if (text === '/compact' && sentAttachments.length === 0) {
       await runCompaction(conversationId);
-      return;
+      return true;
     }
 
     // 发送瞬间固化「发送前可见占用」为权威种子：草稿清空后不会仅因口径切换从 63% 掉到 36%。
     // 真实压缩 / stream done 仍会覆盖；切换模型会清空。
     const seeded = seedAuthoritativeContextOnSend({
       previousAuthoritativeTokens: authoritativeContext?.contextTokens ?? null,
+      previousTriggerTokens: authoritativeContext?.triggerTokens ?? null,
       historyContextTokens,
       sentDraftTokens: estimateDraftTokens(text, sentAttachments),
       previousContextWindow: authoritativeContext?.contextWindow ?? null,
@@ -1444,6 +1469,7 @@ export function ChatSurface({
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
     void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId, modelProviderId, workspacePath, contextAttachments, continuityContext, configInstructions });
+    return true;
   }, [
     isStreaming,
     hasProvider,
@@ -1562,16 +1588,46 @@ export function ChatSurface({
     if (streamIdRef.current) void clientApi.chatAbort({ streamId: streamIdRef.current });
   }, []);
 
-  // 队列自动出队:当前轮结束(非流式、非压缩)且 provider/会话就绪时,取队首自动发送。
-  // 复用 submitMessage 同一发送路径;resumeTask 优先(避免与续传抢同一空闲窗口)。
+  // 队列自动出队：loadStatus 只有在 reattach 收敛后才会 ready，避免切回运行中会话时
+  // 把暂时的 isStreaming=false 当成真正空闲。每个会话同一时间只投递一条；发送路径明确
+  // 接受后才移除队首，IPC 失败或前置条件变化时消息仍留在队列中。
   useEffect(() => {
-    if (isStreaming || isCompactionActive || !hasProvider || !conversationId) return;
-    if (resumeTask) return;
-    if (messageQueue.length === 0) return;
-    const head = shiftQueuedMessage();
+    if (!canAutoDispatchQueuedMessage({
+      loadStatus,
+      isStreaming,
+      isCompactionActive,
+      hasProvider,
+      hasConversation: Boolean(conversationId),
+      hasResumeTask: Boolean(resumeTask),
+      queueLength: messageQueue.length,
+    })) return;
+    if (!conversationId || queuedDispatchInFlightRef.current.has(conversationId)) return;
+    const head = messageQueue[0];
     if (!head) return;
-    void submitMessage(head.text, head.attachments, head.effort);
-  }, [isStreaming, isCompactionActive, hasProvider, conversationId, resumeTask, messageQueue.length, shiftQueuedMessage, submitMessage]);
+    queuedDispatchInFlightRef.current.add(conversationId);
+    void dispatchQueuedMessage({
+      message: head,
+      submit: (message) => submitMessage(message.text, message.attachments, message.effort),
+      remove: removeQueuedMessage,
+    })
+      .catch((error) => {
+        setStreamError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        queuedDispatchInFlightRef.current.delete(conversationId);
+      });
+  }, [
+    loadStatus,
+    isStreaming,
+    isCompactionActive,
+    hasProvider,
+    conversationId,
+    resumeTask,
+    messageQueue,
+    removeQueuedMessage,
+    submitMessage,
+    setStreamError,
+  ]);
 
   // 主操作按钮/回车键的统一入口。草稿内容由输入叶子决定按钮语义；这里按触发瞬间
   // 读取会话桶，确保不依赖父表面的高频草稿订阅。
@@ -2113,6 +2169,7 @@ export function ChatSurface({
             historyContextTokens={historyContextTokens}
             attachments={attachments}
             authoritativeContextTokens={authoritativeContextTokens}
+            authoritativeTriggerTokens={authoritativeTriggerTokens}
             providers={providers}
             tokenUsage={tokenUsage}
             activeUsage={activeUsage}

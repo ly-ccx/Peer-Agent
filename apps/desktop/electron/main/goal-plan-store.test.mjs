@@ -1431,6 +1431,28 @@ test('upsertGoalContract: intake 轮调 goal_create_plan 命中当前 intake 契
   assert.equal(plans.length, 1, '不应产生第二条悬空契约');
 });
 
+test('upsertGoalContract: 只在 intake 升级时发出 goal-accepted，Runner 事件仍是普通 persist', () => {
+  const events = [];
+  const watched = createGoalPlanStore({ onChange: (event) => events.push(event) });
+  const intake = watched.createIntakeContract({
+    conversationId: 'conv-goal-accepted-event',
+    goal: '修复通知跳转',
+  });
+
+  watched.upsertGoalContract(intake.conversationId, {
+    status: 'accepted',
+    activation: { kind: 'accepted_goal' },
+    tasks: [{ taskId: 'inspect', title: '梳理链路', status: 'pending', evidenceRefs: [] }],
+  });
+  watched.appendRunEvent(intake.planId, {
+    type: 'action_started',
+    summary: 'Goal Runner started',
+  });
+
+  assert.equal(events.at(-2)?.changeKind, 'goal-accepted');
+  assert.equal(events.at(-1)?.changeKind, 'persist');
+});
+
 test('派生子目标会反向关联父任务并联动执行状态', () => {
   const parent = store.createPlan({
     conversationId: 'conv-parent-link',

@@ -79,6 +79,26 @@ describe('Desktop Runtime Pipeline adapter', () => {
     assert.deepEqual(calls, ['local.test']);
   });
 
+  it('converts structured pipeline failure back to Desktop error semantics', async () => {
+    await assert.rejects(
+      runDesktopRuntimePipeline({
+        sessionId: 'session-1',
+        streamId: 'stream-1',
+        model: {
+          initialize: () => ({ phase: 0 }),
+          runTurn: () => {
+            throw new Error('persist failed for test');
+          },
+          applyToolResults: (state) => state,
+        },
+        tools: {
+          execute: async (call) => ({ call, result: {} }),
+        },
+      }),
+      /persist failed for test/,
+    );
+  });
+
   it('converts structured pipeline cancellation back to Desktop AbortError semantics', async () => {
     const controller = new AbortController();
     controller.abort();

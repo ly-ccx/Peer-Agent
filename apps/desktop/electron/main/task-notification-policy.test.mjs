@@ -178,12 +178,14 @@ describe('task-notification-policy helpers', () => {
       status: 'awaiting_approval',
       title: '发布预发',
       conversationId: 'c1',
+      activation: { sourceMessageId: 'assistant-message-1' },
       targetWorkspacePath: '/tmp/ws',
       failureReason: 'x',
     });
     assert.equal(task.taskId, 'p1');
     assert.equal(task.status, 'waiting_user');
     assert.equal(task.workspacePath, '/tmp/ws');
+    assert.equal(task.sourceMessageId, 'assistant-message-1');
     assert.equal(task.waitingReason, 'confirmation');
   });
 

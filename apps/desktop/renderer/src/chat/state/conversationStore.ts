@@ -36,9 +36,12 @@ import type {
   ToolProgress,
 } from './types';
 
-/** 主进程下发的权威压缩触发预算快照；主圆环与 Runtime preflight 同口径。 */
+/** 主进程下发的权威双口径快照：主圆环用 contextTokens，压缩触发用 triggerTokens。 */
 export interface AuthoritativeContext {
+  /** 实际发送上下文占用（主圆环）。 */
   contextTokens: number;
+  /** 压缩触发压力（与 Runtime preflight 同源）。 */
+  triggerTokens: number;
   contextWindow: number | null;
 }
 
@@ -339,6 +342,30 @@ export class ConversationStore {
   clearStream(streamId: string): void {
     if (!streamId) return;
     this.streamRoutes.delete(streamId);
+  }
+
+  /**
+   * 用 main 进程的权威活跃流快照收口 renderer 遗留运行态。
+   * 只清理当前 streamId 已不在权威集合里的会话，避免误结束其它仍在运行的会话。
+   */
+  settleInactiveStreams(activeStreamIds: Iterable<string>): readonly string[] {
+    const active = new Set(Array.from(activeStreamIds, (streamId) => String(streamId)));
+    const settled: string[] = [];
+    for (const [conversationId, state] of this.buckets) {
+      const streamId = state.streamId;
+      if (!state.isStreaming || !streamId || active.has(streamId)) continue;
+      this.setState(conversationId, {
+        isStreaming: false,
+        activeUsage: null,
+        pendingPermissionCalls: [],
+        toolProgress: null,
+        turnStartedAt: null,
+        streamId: null,
+      });
+      this.clearStream(streamId);
+      settled.push(conversationId);
+    }
+    return settled;
   }
 
   private notify(conversationId: string): void {

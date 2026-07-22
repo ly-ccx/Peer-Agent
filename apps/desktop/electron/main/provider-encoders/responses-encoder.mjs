@@ -36,6 +36,14 @@ function textPart(text) {
   return { type: 'input_text', text };
 }
 
+// Responses API 对 function_call.name 强制要求 ^[a-zA-Z0-9_-]+$。
+// 旧会话可能保存过 dotted capability id（如 local.file.read）；这些名称只用于
+// 回放已经完成的历史调用，执行配对依赖 call_id，因此可在 provider wire 边界安全归一化。
+function normalizeHistoricalFunctionName(value) {
+  const normalized = String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return normalized || 'tool';
+}
+
 // 把一条内部消息(chat 格式)转换为 Responses input item(可能展开为多项)。
 function toInputItems(msg) {
   if (!msg || typeof msg !== 'object') return [];
@@ -62,7 +70,7 @@ function toInputItems(msg) {
       items.push({
         type: 'function_call',
         call_id: tc.id,
-        name: tc.function?.name,
+        name: normalizeHistoricalFunctionName(tc.function?.name),
         arguments: tc.function?.arguments ?? '',
       });
     }

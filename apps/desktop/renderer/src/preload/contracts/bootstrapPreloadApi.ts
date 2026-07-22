@@ -205,6 +205,7 @@ export interface UsageDailySnapshot {
  */
 export interface ActiveStreamProjection {
   readonly conversationId: string;
+  readonly streamId: string;
   readonly workspacePath: string | null;
   readonly originWorkspacePath?: string | null;
 }
@@ -581,16 +582,17 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly onChatStreamThinking: (listener: (payload: { streamId: string; content: string }) => void) => () => void;
   readonly onChatStreamDone: (listener: (payload: {
     streamId: string;
+    conversationId?: string;
     usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number };
     lifetimeUsage?: LifetimeUsage;
-    // contextTokens 是最近实际发送量；triggerTokens 是主圆环与压缩 preflight 共用的压力分子。
+    // contextTokens 是最近实际发送量（主圆环）；triggerTokens 是压缩 preflight 压力分子（tooltip）。
     // compactionSuggested 仅表达上下文压力；自动压缩由下一次 Runtime preflight 阻塞执行。
     contextTokens?: number;
     triggerTokens?: number;
     contextWindow?: number;
     compactionSuggested?: boolean;
   }) => void) => () => void;
-  readonly onChatStreamAborted: (listener: (payload: { streamId: string }) => void) => () => void;
+  readonly onChatStreamAborted: (listener: (payload: { streamId: string; conversationId?: string }) => void) => () => void;
   readonly onChatStreamUsage: (listener: (payload: { streamId: string; usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number } }) => void) => () => void;
   readonly onChatStreamToolCall: (listener: (payload: { streamId: string; tool: string; displayName?: string | null; args: Record<string, unknown>; toolCallId: string }) => void) => () => void;
   // 流式工具参数进度(Codex 式实时体感)。仅是 provider 流式提示,不替代 Tool Result / Evidence。
@@ -599,6 +601,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly onChatStreamPermissionRequest: (listener: (payload: { streamId: string; call: ClientToolCall }) => void) => () => void;
   readonly onChatStreamError: (listener: (payload: {
     streamId: string;
+    conversationId?: string;
     error: string;
     usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number };
     lifetimeUsage?: LifetimeUsage;
@@ -724,6 +727,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     conversationId: string;
     workspacePath: string;
     planId?: string | null;
+    messageId?: string | null;
     attentionVersion?: number | null;
     source?: string;
   }) => void) => () => void;

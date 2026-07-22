@@ -7,30 +7,33 @@ import { TokenUsageDisplay } from './thread/TokenUsageDisplay';
 
 type TokenUsageDisplayProps = React.ComponentProps<typeof TokenUsageDisplay>;
 
-type ComposerTokenUsageDisplayProps = Omit<TokenUsageDisplayProps, 'contextTokens'> & {
+type ComposerTokenUsageDisplayProps = Omit<TokenUsageDisplayProps, 'contextTokens' | 'triggerTokens'> & {
   readonly conversationId: string | null;
   readonly historyContextTokens: number;
   readonly attachments: readonly ChatAttachment[];
+  /** 实际发送上下文权威快照（主圆环）。 */
   readonly authoritativeContextTokens?: number | null;
+  /** 压缩触发压力权威快照（runtime 触发用；UI 不再展示）。 */
+  readonly authoritativeTriggerTokens?: number | null;
   readonly activeUsage?: TokenUsageState | null;
 };
 
 /**
  * 只在工具栏叶子中订阅高频草稿变化。
  *
- * ChatSurface 负责低频的历史消息估算与权威压缩触发快照；这里仅叠加当前草稿和附件，
+ * ChatSurface 负责低频的历史消息估算与权威双口径快照；这里仅叠加当前草稿和附件，
  * 避免每输入一个字符都重新执行整棵消息表面及虚拟列表的渲染逻辑。
  *
- * 占用显示口径（contextOccupancy）：
- * - 有 Runtime triggerTokens（stream done / 发送种子 / 压缩事件）时，优先采用它 + 草稿增量。
- * - 流式阶段仅可用本轮 activeUsage 的 input+cacheRead 抬升压力，绝不用 lifetime 计费累计。
- * - 无权威快照时，回退到本地历史估算 + 草稿增量。
+ * 主圆环 / tooltip：实际上下文占用（contextTokens = 权威发送量 + 草稿；可被本轮 streaming input 抬升）。
+ * triggerTokens 仅保留给 runtime 压缩触发与兼容透传，UI 不再展示。
+ * 绝不用 lifetime 计费累计充当上下文。
  */
 export function ComposerTokenUsageDisplay({
   conversationId,
   historyContextTokens,
   attachments,
   authoritativeContextTokens = null,
+  authoritativeTriggerTokens = null,
   activeUsage = null,
   ...props
 }: ComposerTokenUsageDisplayProps) {
@@ -47,6 +50,21 @@ export function ComposerTokenUsageDisplay({
     draftContextTokens,
     streamingInputTokens,
   });
+  const triggerBase =
+    typeof authoritativeTriggerTokens === 'number' && Number.isFinite(authoritativeTriggerTokens)
+      ? Math.max(0, authoritativeTriggerTokens)
+      : null;
+  const triggerTokens = Math.max(
+    contextTokens,
+    triggerBase != null ? triggerBase + draftContextTokens : contextTokens,
+  );
 
-  return <TokenUsageDisplay {...props} activeUsage={activeUsage} contextTokens={contextTokens} />;
+  return (
+    <TokenUsageDisplay
+      {...props}
+      activeUsage={activeUsage}
+      contextTokens={contextTokens}
+      triggerTokens={triggerTokens}
+    />
+  );
 }

@@ -329,6 +329,10 @@ export function projectPlanToNotificationTask(plan) {
     planId,
     conversationId: plan.conversationId ?? null,
     workspacePath,
+    sourceMessageId:
+      (typeof plan.activation?.sourceMessageId === 'string' && plan.activation.sourceMessageId.trim())
+        ? plan.activation.sourceMessageId.trim()
+        : null,
     status,
     title,
     shortError: extractShortError(plan),

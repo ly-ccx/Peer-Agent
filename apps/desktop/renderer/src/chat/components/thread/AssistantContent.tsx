@@ -4,6 +4,11 @@ import { parseInteractionToolViewFromCandidates } from '../../state/interactionT
 import { groupSegments, splitFinalTextGroup } from '../../state/streamSegments';
 import { formatDuration } from '../../state/format';
 import {
+  createProcessExpansionState,
+  toggleProcessExpansion,
+  updateProcessActivity,
+} from '../../state/processExpansion';
+import {
   previewInlineText,
   windowProcessingGroups,
   windowProcessingText,
@@ -72,19 +77,19 @@ function LiveToolProgress({
 }
 
 function useAutoCollapsingExpanded(isActive: boolean) {
-  // 思考 / 工具进行中保持展开；过程一旦结束（或历史消息首次渲染）自动收起为摘要条。
-  // isActive 变化时同步展开态；完成后用户仍可手动点开，不会被后续同态重渲染强行关掉。
-  const [expanded, setExpanded] = useState(isActive);
+  // 思考 / 工具进行中默认展开；过程一旦结束（或历史消息首次渲染）自动收起为摘要条。
+  // 用户手动选择优先于后续流式活跃态抖动，避免已经收起的过程被再次强制展开。
+  const [state, setState] = useState(() => createProcessExpansionState(isActive));
 
   useEffect(() => {
-    setExpanded(isActive);
+    setState((current) => updateProcessActivity(current, isActive));
   }, [isActive]);
 
   const toggleExpanded = () => {
-    setExpanded((current) => !current);
+    setState(toggleProcessExpansion);
   };
 
-  return { expanded, toggleExpanded };
+  return { expanded: state.expanded, toggleExpanded };
 }
 
 /**

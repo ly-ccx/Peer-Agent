@@ -960,6 +960,9 @@ export function createGoalRunner({
   }
 
   async function start(planId, options = {}) {
+    // start 是多入口的 kick（plan change、chat outcome、IPC），必须以活跃 session 为幂等边界。
+    // 否则重复 kick 会反复写 action_started，写入本身又可能触发新的 change 回调。
+    if (getSession(planId)) return getState(planId);
     const initialized = initializeRunner(planId, options);
     if (!initialized) return null;
     appendRunEvent(planId, {

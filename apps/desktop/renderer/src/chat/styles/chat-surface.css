@@ -1460,8 +1460,8 @@
   box-shadow: none;
 }
 .message-queue-item:hover {
-  border-color: color-mix(in srgb, var(--glass-border) 72%, transparent);
-  background: color-mix(in srgb, var(--glass-bg-strong) 66%, transparent);
+  border-color: transparent;
+  background: var(--chrome-hover);
   box-shadow: none;
 }
 .message-queue-card-main {

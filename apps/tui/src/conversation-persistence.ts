@@ -1,4 +1,5 @@
 import { createConversationStore } from '@peer-agent/conversation-store';
+import { realpathSync } from 'node:fs';
 import type { RuntimeModelSelection } from '@peer-agent/runtime-node';
 
 import type { AssistantSegment, ChatController, ChatMessage, ChatMessageImage, ChatSnapshot } from './chat-controller.ts';
@@ -21,6 +22,10 @@ export interface TuiConversationRestore {
 
 interface ConversationStore {
   listConversations(params?: { status?: string }): readonly Record<string, unknown>[];
+  listConversationsByWorkspace?(
+    workspacePath: string | null | undefined,
+    params?: { status?: string },
+  ): readonly Record<string, unknown>[];
   getConversation(id: string): (Record<string, unknown> & { messages?: readonly Record<string, unknown>[] }) | null;
   createConversation(input?: { title?: string; workspacePath?: string; mode?: TuiMode }): { id: string };
   appendMessage(id: string, message: ChatMessage & { timestamp: number }): unknown;
@@ -428,6 +433,14 @@ function modelProviderId(selection: RuntimeModelSelection): string {
   return `${selection.providerId}::${selection.modelId}`;
 }
 
+function normalizeWorkspacePath(workspacePath: string): string {
+  try {
+    return realpathSync(workspacePath);
+  } catch {
+    return workspacePath;
+  }
+}
+
 export function createTuiConversationPersistence(options: {
   readonly workspacePath: string;
   readonly initialMode: TuiMode;
@@ -439,6 +452,7 @@ export function createTuiConversationPersistence(options: {
   const store: ConversationStore = options.store ?? createConversationStore() as ConversationStore;
   const now = options.now ?? Date.now;
   const reportError = options.onError ?? (() => {});
+  const workspacePath = normalizeWorkspacePath(options.workspacePath);
   let conversationId: string | undefined;
   let mode = options.initialMode;
   let model = options.initialModel;
@@ -448,7 +462,7 @@ export function createTuiConversationPersistence(options: {
   function ensureConversation(): string {
     if (conversationId) return conversationId;
     const conversation = store.createConversation({
-      workspacePath: options.workspacePath,
+      workspacePath,
       mode,
     });
     conversationId = conversation.id;
@@ -463,7 +477,10 @@ export function createTuiConversationPersistence(options: {
     getConversationId: () => conversationId,
     listResumable() {
       try {
-        return store.listConversations({ status: 'active' })
+        const conversations = store.listConversationsByWorkspace
+          ? store.listConversationsByWorkspace(workspacePath, { status: 'active' })
+          : store.listConversations({ status: 'active' });
+        return conversations
           .filter((item) => item.id !== conversationId && Number(item.messageCount ?? 0) > 0)
           .map((item) => ({
             id: String(item.id),
