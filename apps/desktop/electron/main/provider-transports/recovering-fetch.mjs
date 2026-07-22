@@ -18,23 +18,17 @@ const CONNECTION_FAILURE_PATTERNS = [
   /UND_ERR_|HeadersTimeoutError|ConnectTimeoutError|SocketError/i,
 ];
 
-// Fast-first, bounded backoff. Cold-connection blips (the common "first call"
-// failure) recover almost immediately on the 500ms retry, while the total
-// transport budget stays bounded (~10s across 4 retries) instead of the old
-// flat 5s x 5 = 25s. The first failed round still emits a `retrying`
-// connection-recovery event, so the "重连中" banner appears right away.
-export const DEFAULT_CONNECTION_RETRY_DELAYS_MS = [
-  500,
-  1_500,
-  3_000,
-  5_000,
-];
+// Retry a transient connection failure once after a short bounded delay. The
+// actual default delay receives up to 50% positive jitter, which avoids clients
+// reconnecting in lockstep while keeping recovery responsive.
+export const DEFAULT_CONNECTION_RETRY_DELAYS_MS = [1_000];
+export const DEFAULT_CONNECTION_RETRY_JITTER_RATIO = 0.5;
 
 // Connect/first-response timeout guard. A socket that hangs during DNS / TLS /
 // proxy cold start (returning neither headers nor an error) is aborted after
 // this bound and surfaced as a recoverable ConnectTimeoutError, so it enters
 // the backoff loop instead of blocking the turn forever.
-export const DEFAULT_CONNECT_TIMEOUT_MS = 12_000;
+export const DEFAULT_CONNECT_TIMEOUT_MS = 20_000;
 
 function makeConnectTimeoutError(ms) {
   // Message includes "ConnectTimeoutError" so isRecoverableConnectionFailure
@@ -163,6 +157,10 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
   fetchImpl = globalThis.fetch,
   electronFetchImpl = null,
   retryDelaysMs = DEFAULT_CONNECTION_RETRY_DELAYS_MS,
+  retryJitterRatio = retryDelaysMs === DEFAULT_CONNECTION_RETRY_DELAYS_MS
+    ? DEFAULT_CONNECTION_RETRY_JITTER_RATIO
+    : 0,
+  randomImpl = Math.random,
   waitImpl = sleep,
   detectProxy = defaultDetectProxy,
   connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS,
@@ -282,7 +280,9 @@ export async function fetchWithConnectionRecovery(url, init = {}, {
     }
 
     if (round >= maxRetries) break;
-    const delayMs = retryDelaysMs[round];
+    const baseDelayMs = retryDelaysMs[round];
+    const jitterMs = Math.floor(baseDelayMs * Math.max(0, retryJitterRatio) * randomImpl());
+    const delayMs = baseDelayMs + jitterMs;
     emitConnectionRecovery(webContents, {
       streamId,
       provider,

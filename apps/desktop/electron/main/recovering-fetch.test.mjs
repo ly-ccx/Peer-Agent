@@ -55,7 +55,7 @@ describe('recovering provider fetch', () => {
         toConnection: 'electron-net-fetch',
         connection: 'electron-net-fetch',
         attempt: 0,
-        maxRetries: 4,
+        maxRetries: 1,
         reason: 'fetch failed (SELF_SIGNED_CERT_IN_CHAIN)',
       },
     }]);
@@ -171,14 +171,54 @@ describe('recovering provider fetch', () => {
     ]);
   });
 
-  it('uses a fast-first bounded default backoff (no flat 25s), avoiding double-layer wait', () => {
-    // Guards the t2 convergence: the transport default must not be the old
-    // flat 5s x 5. Fast first retry + bounded total keeps cold-start blips snappy.
-    assert.deepEqual(DEFAULT_CONNECTION_RETRY_DELAYS_MS, [500, 1_500, 3_000, 5_000]);
-    const total = DEFAULT_CONNECTION_RETRY_DELAYS_MS.reduce((a, b) => a + b, 0);
-    assert.ok(total <= 10_000, `expected bounded total <=10s, got ${total}`);
-    assert.equal(DEFAULT_CONNECTION_RETRY_DELAYS_MS[0], 500, 'first retry should be fast');
-    assert.ok(DEFAULT_CONNECT_TIMEOUT_MS > 0 && DEFAULT_CONNECT_TIMEOUT_MS <= 15_000);
+  it('uses one short jittered retry and a 20 second connection timeout by default', async () => {
+    const waits = [];
+    let attempts = 0;
+    await assert.rejects(
+      fetchWithConnectionRecovery('https://example.com', {}, {
+        fetchImpl: async () => {
+          attempts += 1;
+          const error = new TypeError('fetch failed');
+          error.cause = { code: 'ETIMEDOUT' };
+          throw error;
+        },
+        electronFetchImpl: null,
+        randomImpl: () => 0.5,
+        waitImpl: async (ms) => { waits.push(ms); },
+      }),
+      /fetch failed/,
+    );
+
+    assert.equal(attempts, 2);
+    assert.deepEqual(DEFAULT_CONNECTION_RETRY_DELAYS_MS, [1_000]);
+    assert.deepEqual(waits, [1_250]);
+    assert.equal(DEFAULT_CONNECT_TIMEOUT_MS, 20_000);
+  });
+
+  it('stops before retrying when the caller cancels during backoff', async () => {
+    const controller = new AbortController();
+    let attempts = 0;
+
+    await assert.rejects(
+      fetchWithConnectionRecovery('https://example.com', { signal: controller.signal }, {
+        fetchImpl: async () => {
+          attempts += 1;
+          const error = new TypeError('fetch failed');
+          error.cause = { code: 'ETIMEDOUT' };
+          throw error;
+        },
+        electronFetchImpl: null,
+        retryDelaysMs: [1_000],
+        waitImpl: async (_ms, signal) => {
+          controller.abort();
+          assert.equal(signal.aborted, true);
+          throw signal.reason;
+        },
+      }),
+      (error) => error?.name === 'AbortError',
+    );
+
+    assert.equal(attempts, 1);
   });
 
   it('aborts a hung first-call socket via connect-timeout and surfaces a recoverable error into backoff', async () => {
