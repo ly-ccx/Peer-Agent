@@ -593,12 +593,14 @@ export function createChatController(options: {
         // Attach tool-call progress to the current assistant turn (Desktop model):
         // multiple tools share one assistant message via `tools[]` / segments.
         flushStreamDeltaBuffer();
+        const startedAt = Date.now();
         const runningTool = createToolPresentation({
           capabilityId: call.capabilityId,
           toolCallId: call.toolCallId,
           arguments: call.arguments,
           status: 'running',
           outputPreview: 'running',
+          startedAt,
         });
         publish({
           ...snapshot,
@@ -631,6 +633,8 @@ export function createChatController(options: {
             && 'message' in execution.result.error
             ? String((execution.result.error as { message?: unknown }).message ?? '')
             : null,
+          startedAt,
+          completedAt: Date.now(),
         });
         // Complete the same tool entry in-place on the assistant turn.
         publish({
