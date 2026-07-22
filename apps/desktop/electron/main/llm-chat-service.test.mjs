@@ -1208,6 +1208,66 @@ describe('llm chat service tool materialization', () => {
     assert.deepEqual(urls, ['https://configured.example/v1/chat/completions']);
   });
 
+  it('inherits the conversation model binding when a managed turn omits modelProviderId', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch;
+    const urls = [];
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      return new Response(sse([
+        { choices: [{ delta: { content: 'bound model' } }] },
+        '[DONE]',
+      ]), { status: 200 });
+    };
+
+    try {
+      const providers = [
+        {
+          id: 'p-default-grok',
+          provider: 'openai',
+          baseUrl: 'https://default-grok.example/v1',
+          model: 'grok-default',
+          isDefault: true,
+          apiKeyConfigured: true,
+        },
+        {
+          id: 'p-conversation-chatgpt',
+          provider: 'openai',
+          baseUrl: 'https://conversation-chatgpt.example/v1',
+          model: 'gpt-conversation',
+          isDefault: false,
+          apiKeyConfigured: true,
+        },
+      ];
+      const service = createLlmChatService({
+        llmConfigStore: {
+          listProviders: () => providers,
+          getDecryptedApiKey: () => 'key',
+        },
+        conversationStore: {
+          getConversation: (conversationId) => ({
+            id: conversationId,
+            workspacePath: tmpDir,
+            modelProviderId: 'p-conversation-chatgpt',
+          }),
+        },
+      });
+
+      await service.sendMessage({
+        messages: [{ role: 'user', content: 'managed Goal turn' }],
+        streamId: 's-managed-goal-turn',
+        conversationId: 'c-managed-goal-turn',
+        // Goal Runner historically omitted this field. The service must recover
+        // the authoritative per-conversation binding instead of using the global default.
+        webContents: { send() {} },
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.deepEqual(urls, ['https://conversation-chatgpt.example/v1/chat/completions']);
+  });
+
   it('does not recover a transport-blocked provider by switching to a different model', async () => {
     const { createLlmChatService } = await loadService();
     const previousFetch = globalThis.fetch;

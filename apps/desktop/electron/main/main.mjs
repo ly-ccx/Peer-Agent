@@ -55,6 +55,7 @@ import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
 import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
 import { createConversationStore } from './conversation-store.mjs';
+import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 import { createGoalPlanStore, goalPlanIsSelfDriven } from './goal-plan-store.mjs';
 import {
   decideIntakeConvergence,
@@ -268,6 +269,15 @@ const goalPlanStore = createGoalPlanStore({
     } catch (err) {
       console.warn('[task-notification] handleGoalPlanChanged failed:', err);
     }
+    // goal_create_plan 写盘后立刻 kick Runner，不依赖 intake agent loop 是否成功 sendDone。
+    // 旧路径只在 chat:send outcome resolve 后 auto-start；若 handoff 后流未收口，就会永久卡在 0/N。
+    queueMicrotask(() => {
+      try {
+        maybeAutoStartAcceptedGoalFromPlanChange(payload);
+      } catch (error) {
+        console.error('[main] plan-change auto-start failed:', error?.message || error);
+      }
+    });
   },
 });
 let goalRunner = null;
@@ -847,6 +857,10 @@ goalRunner = createGoalRunner({
         // 注入续推上下文、goal-mode-gate 放行自驱。plan 为纯审批门,不再托管续推。
         mode: 'goal',
         conversationId: plan.conversationId,
+        modelProviderId: resolveConversationModelProviderId({
+          conversationId: plan.conversationId,
+          conversationStore,
+        }),
         assistantMessageId,
         continuityContext: goalContinuityContext,
         runtimeReminders: [buildGoalRunnerReminder(plan, turnNumber)],
@@ -914,6 +928,10 @@ goalRunner = createGoalRunner({
         mode: 'explorer',
         // 旁路只读调查：不写会话正文，避免内部过程进聊天。
         conversationId: null,
+        modelProviderId: resolveConversationModelProviderId({
+          conversationId: plan.conversationId,
+          conversationStore,
+        }),
         ephemeral: true,
         explorerContext: buildExplorerContext({ plan, explorer }),
         runtimeReminders: [buildExplorerReminder(explorer)],
@@ -956,6 +974,10 @@ goalRunner = createGoalRunner({
         mode: 'explorer',
         // 验收旁路流：不写会话、不进活跃流投影，JSON 只给 runner 解析。
         conversationId: null,
+        modelProviderId: resolveConversationModelProviderId({
+          conversationId: plan.conversationId,
+          conversationStore,
+        }),
         ephemeral: true,
         verifierContext: buildVerifierContext({ plan, verifierRunId }),
         runtimeReminders: [buildVerifierReminder(verifierRunId)],
@@ -1912,6 +1934,26 @@ function latestUserTextFromProviderMessages(messages = []) {
 //   - 明确目标：模型调用 goal_create_plan → upsertGoalContract 已把本契约原地升级为
 //     accepted_goal（activation.kind 不再是 intake）→ 本函数直接跳过，落入正常自驱推进。
 //   - 出错/中止的回合不在此误删，保留契约交由既有失败链路处理。
+
+function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
+  const planId = typeof payload?.planId === 'string' ? payload.planId : null;
+  if (!planId) return;
+  // runner-progress 高频跳动不需要重复 start。
+  if (payload?.changeKind === 'runner-progress' || payload?.changeKind === 'runner-state') return;
+  const plan = goalPlanStore.getPlan?.(planId) || goalPlanStore.getActivePlanByConversation?.(payload.conversationId);
+  if (!shouldAutoStartAcceptedGoalRunner(plan)) return;
+  // 先强制收口同会话 intake 流，避免 Runner 与前台 agent loop 抢同一会话。
+  try {
+    llmChatService?.forceCompleteConversationStreams?.(plan.conversationId, { reason: 'goal_handoff' });
+  } catch (error) {
+    console.warn('[main] force-complete intake stream failed:', error?.message || error);
+  }
+  if (!goalRunner) return;
+  void goalRunner.start(plan.planId).catch((error) => {
+    console.error('[main] plan-change auto-start goal runner failed:', error?.message || error);
+  });
+}
+
 function convergeIntakeAfterGoalTurn(conversationId, outcome) {
   try {
     if (typeof goalPlanStore.getActivePlanByConversation !== 'function') return;
@@ -2029,10 +2071,13 @@ ipcMain.handle('chat:send', (event, {
       // 原地升级后 activation.kind=accepted_goal，但 status 可能仍是 executing。
       // auto-start 判定抽到 shouldAutoStartAcceptedGoalRunner，accepted/executing 都要启动。
       if (shouldAutoStartAcceptedGoalRunner(acceptedGoal)) {
-        // goal_create_plan 已用结构化 control signal 结束 intake 工具回合。
-        // 等该回合完全 resolve 后再启动唯一的托管执行入口，避免前台 agent loop
-        // 与 Goal Runner 同时推进同一目标。
+        // 双保险：outcome resolve 时再 kick 一次；force-complete 确保 intake 流已解锁。
         queueMicrotask(() => {
+          try {
+            llmChatService?.forceCompleteConversationStreams?.(conversationId, { reason: 'goal_handoff' });
+          } catch (error) {
+            console.warn('[main] force-complete on outcome failed:', error?.message || error);
+          }
           void goalRunner?.start(acceptedGoal.planId).catch((error) => {
             console.error('[main] auto-start goal runner failed:', error?.message || error);
           });
