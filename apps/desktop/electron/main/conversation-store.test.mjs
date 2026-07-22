@@ -734,6 +734,27 @@ test('listConversations never reads conversation body on hot path', async () => 
   }
 });
 
+test('listConversations reports no next page when the result is below the page limit', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    store.createConversation({ title: 'one', workspacePath: '/ws/short' });
+    store.createConversation({ title: 'two', workspacePath: '/ws/short' });
+
+    const page = store.listConversationsByWorkspace('/ws/short', {
+      status: 'active',
+      limit: 40,
+      paginated: true,
+    });
+
+    assert.equal(page.items.length, 2);
+    assert.equal(page.total, 2);
+    assert.equal(page.hasMore, false);
+    assert.equal(page.nextCursor, null);
+  } finally {
+    cleanup();
+  }
+});
+
 test('listConversations supports limit/cursor pagination', () => {
   const { store, cleanup } = freshStore();
   try {

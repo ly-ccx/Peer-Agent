@@ -6,6 +6,7 @@ import type {
 } from '@peer-agent/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { normalizeConversationListPage } from '../../chat/state/conversationListPagination';
 
 /** 侧栏首屏只拉最近 N 条；滚动再加载更多。 */
 export const CONVERSATION_LIST_PAGE_SIZE = 40;
@@ -73,16 +74,12 @@ export function useDesktopBootstrap(): DesktopBootstrapState {
             paginated: true,
           }),
         ]);
-        const page = Array.isArray(conversationPage)
-          ? { items: conversationPage, nextCursor: null, hasMore: false, total: conversationPage.length }
-          : conversationPage;
-        const conversationNextCursor = page.nextCursor ?? null;
+        const page = normalizeConversationListPage(conversationPage);
         setStartupSnapshot({
           activeWorkspace: directory.activeWorkspace,
-          conversations: page.items ?? [],
-          conversationNextCursor,
-          // hasMore 与 nextCursor 绑定，避免首屏残留误显。
-          conversationHasMore: Boolean(page.hasMore) && Boolean(conversationNextCursor),
+          conversations: page.items,
+          conversationNextCursor: page.nextCursor,
+          conversationHasMore: page.hasMore,
           workspaceInfo,
           workspaces: directory.workspaces,
         });

@@ -13,6 +13,7 @@ import { ChatSurface } from './chat/components/ChatSurface';
 import { Sidebar } from './chat/components/Sidebar';
 import { ConversationSearchPalette, type SearchConversationHit } from './chat/components/ConversationSearchPalette';
 import { conversationStore } from './chat/state/conversationStore';
+import { normalizeConversationListPage } from './chat/state/conversationListPagination';
 import {
   clearCompletedUnreadId,
   nextCompletedUnreadIds,
@@ -169,18 +170,7 @@ function MainApp() {
     nextCursor?: string | null;
     hasMore?: boolean;
   } | readonly ConversationMeta[], { append = false }: { append?: boolean } = {}) => {
-    const normalized = Array.isArray(page)
-      ? { items: page as readonly ConversationMeta[], nextCursor: null, hasMore: false }
-      : (() => {
-          const nextCursor = page.nextCursor ?? null;
-          // hasMore 仅在同时具备 nextCursor 时成立，避免刷新后残留误显。
-          const hasMore = Boolean(page.hasMore) && Boolean(nextCursor);
-          return {
-            items: (page.items ?? []) as readonly ConversationMeta[],
-            nextCursor,
-            hasMore,
-          };
-        })();
+    const normalized = normalizeConversationListPage(page);
     setConversations((prev) => {
       if (!append) return normalized.items;
       const seen = new Set(prev.map((item) => item.id));
@@ -318,13 +308,18 @@ function MainApp() {
     void clientApi.workspaceList().then(async (r) => {
       setActiveWorkspace(r.activeWorkspace);
       try {
-        const list = await clientApi.conversationsList({ workspacePath: r.activeWorkspace, status: 'active' });
-        setConversations(list as readonly ConversationMeta[]);
+        const page = await clientApi.conversationsList({
+          workspacePath: r.activeWorkspace,
+          status: 'active',
+          limit: CONVERSATION_LIST_PAGE_SIZE,
+          paginated: true,
+        });
+        applyConversationListPage(page as Parameters<typeof applyConversationListPage>[0]);
       } catch {
         // Keep the workspace interactive when startup preloading and fallback refresh both fail.
       }
     }).catch(() => undefined);
-  }, [refreshProviders, refreshSettings, startupSnapshot]);
+  }, [applyConversationListPage, refreshProviders, refreshSettings, startupSnapshot]);
 
   // 任务续传(ADR 21):重启后回到中断现场。
   // peek(只读不清)拿到会话锚定的待办 → 切到 sessionId(回到原会话)→ 存 resumeTask,
@@ -494,15 +489,21 @@ function MainApp() {
     // 切换工作区后自动选激活会话:优先第一个"进行中"的会话,否则第一个会话,
     // 空工作区(无任何会话)则保持空态。需 list 返回值当场计算,故内联拉取而非走
     // refreshConversations(后者只 setState、不回传列表)。
-    let list: readonly ConversationMeta[] = [];
+    let page = normalizeConversationListPage<ConversationMeta>([]);
     try {
-      list = await clientApi.conversationsList({ workspacePath: r.activeWorkspace, status: 'active' }) as readonly ConversationMeta[];
+      const response = await clientApi.conversationsList({
+        workspacePath: r.activeWorkspace,
+        status: 'active',
+        limit: CONVERSATION_LIST_PAGE_SIZE,
+        paginated: true,
+      });
+      page = normalizeConversationListPage(response as Parameters<typeof normalizeConversationListPage<ConversationMeta>>[0]);
     } catch {}
-    setConversations(list);
-    const firstRunning = list.find((c) => runningConversationIds.has(c.id));
-    const next = firstRunning ?? list[0] ?? null;
+    applyConversationListPage(page);
+    const firstRunning = page.items.find((c) => runningConversationIds.has(c.id));
+    const next = firstRunning ?? page.items[0] ?? null;
     setActiveConversationId(next ? next.id : null);
-  }, [runningConversationIds]);
+  }, [applyConversationListPage, runningConversationIds]);
 
 
 

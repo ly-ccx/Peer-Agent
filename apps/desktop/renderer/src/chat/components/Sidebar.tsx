@@ -17,6 +17,7 @@ import {
 } from '../state/runningWorkspaceState';
 import type { CompactionState } from '../state/types';
 import { useListFlip } from '../hooks/useListFlip';
+import { shouldShowConversationLoadMore } from '../state/conversationListPagination';
 import { useAwaitingGoalPlanCounts } from './goal/useAwaitingGoalPlans';
 
 type ConversationView = 'active' | 'archived';
@@ -738,7 +739,11 @@ export function Sidebar({
           </section>
         ) : null}
         {normalConversations.map((conv) => renderConversationRow(conv))}
-        {conversationHasMore && conversationNextCursor && conversations.length > 0 ? (
+        {shouldShowConversationLoadMore({
+          conversationCount: conversations.length,
+          hasMore: conversationHasMore,
+          nextCursor: conversationNextCursor,
+        }) ? (
           <button
             type="button"
             className="sidebar-load-more"
