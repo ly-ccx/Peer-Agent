@@ -59,8 +59,10 @@ export async function runDesktopRuntimePipeline({
     maxTurns,
   }, { signal });
 
-  // Desktop 外层已经以 AbortError 驱动 chat:stream:aborted 与资源清理；公共
-  // Pipeline 使用结构化 cancelled 结果，Adapter 在宿主边界恢复既有语义。
+  // Desktop 外层已经以异常驱动 chat:stream:error / aborted 与资源清理；公共
+  // Pipeline 使用结构化终态，Adapter 在宿主边界恢复既有语义，不能把 failed 当成功返回，
+  // 否则外层只会看到“无终态结果”并覆盖真实错误，甚至遗漏 renderer 收口事件。
   if (result.status === 'cancelled') throw createDesktopAbortError();
+  if (result.status === 'failed') throw new Error(result.reason || 'runtime_pipeline_failed');
   return result;
 }

@@ -458,7 +458,9 @@ describe('llm chat service tool materialization', () => {
     assert.equal(capturedBodies[1].reasoning_effort, undefined);
     assert.equal(events.find((event) => event.channel === 'chat:stream:delta')?.payload.content, 'ok');
     assert.equal(events.some((event) => event.channel === 'chat:stream:error'), false);
-    assert.equal(events.some((event) => event.channel === 'chat:stream:done'), true);
+    const doneEvent = events.find((event) => event.channel === 'chat:stream:done');
+    assert.equal(doneEvent?.payload.streamId, 's1');
+    assert.equal(doneEvent?.payload.conversationId, 'c1');
     assert.deepEqual(runtimeEvents.map((event) => event.type), [
       'session.started',
       'message.delta',
@@ -1898,6 +1900,7 @@ describe('llm chat service tool materialization', () => {
       assert.ok(firstWithStream, 'expected at least one broadcast with an active stream');
       assert.deepEqual(firstWithStream[0], {
         conversationId: 'c1',
+        streamId: 's1',
         workspacePath: '/ws/alpha',
         originWorkspacePath: '/ws/alpha',
       });
@@ -1967,6 +1970,7 @@ describe('llm chat service tool materialization', () => {
       assert.ok(firstWithStream, 'expected at least one active stream snapshot');
       assert.deepEqual(firstWithStream[0], {
         conversationId: 'c-goal',
+        streamId: 's-goal',
         workspacePath: originWs,
         originWorkspacePath: originWs,
       });

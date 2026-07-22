@@ -341,6 +341,30 @@ export class ConversationStore {
     this.streamRoutes.delete(streamId);
   }
 
+  /**
+   * 用 main 进程的权威活跃流快照收口 renderer 遗留运行态。
+   * 只清理当前 streamId 已不在权威集合里的会话，避免误结束其它仍在运行的会话。
+   */
+  settleInactiveStreams(activeStreamIds: Iterable<string>): readonly string[] {
+    const active = new Set(Array.from(activeStreamIds, (streamId) => String(streamId)));
+    const settled: string[] = [];
+    for (const [conversationId, state] of this.buckets) {
+      const streamId = state.streamId;
+      if (!state.isStreaming || !streamId || active.has(streamId)) continue;
+      this.setState(conversationId, {
+        isStreaming: false,
+        activeUsage: null,
+        pendingPermissionCalls: [],
+        toolProgress: null,
+        turnStartedAt: null,
+        streamId: null,
+      });
+      this.clearStream(streamId);
+      settled.push(conversationId);
+    }
+    return settled;
+  }
+
   private notify(conversationId: string): void {
     const set = this.listeners.get(conversationId);
     if (!set) return;

@@ -379,11 +379,15 @@ function MainApp() {
       conversationIds: readonly string[],
       streams: readonly {
         conversationId: string;
+        streamId: string;
         workspacePath: string | null;
         originWorkspacePath?: string | null;
       }[],
     ) => {
       applyRunningConversationIds(new Set(conversationIds));
+      // main 的活跃流投影是运行态真值。若终态 IPC 在 renderer 重载/路由切换时丢失，
+      // 以仍然活跃的 streamId 集合兜底清理 conversationStore，且不会误结束其它会话。
+      conversationStore.settleInactiveStreams(streams.map((stream) => stream.streamId));
       const wsPaths = new Set<string>();
       for (const s of streams) {
         const origin = s.originWorkspacePath ?? s.workspacePath;

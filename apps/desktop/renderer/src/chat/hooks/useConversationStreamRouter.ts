@@ -202,8 +202,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     });
 
     const offDone = clientApi.onChatStreamDone(
-      ({ streamId, usage, lifetimeUsage, triggerTokens, contextWindow }) => {
-        const cid = conversationStore.resolveConversation(streamId);
+      ({ streamId, conversationId, usage, lifetimeUsage, triggerTokens, contextWindow }) => {
+        const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         // 流正常收尾，重试横幅若仍残留一并清除。
         clearRecoveryNotice(cid);
@@ -303,8 +303,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       });
     });
 
-    const offAborted = clientApi.onChatStreamAborted(({ streamId }) => {
-      const cid = conversationStore.resolveConversation(streamId);
+    const offAborted = clientApi.onChatStreamAborted(({ streamId, conversationId }) => {
+      const cid = conversationStore.resolveEventConversation(streamId, conversationId);
       if (!cid) return;
       if (cid === activeRef.current) {
         // 中断时丢弃打字机积压缓冲（而非 flush 吐完），否则用户点停止后
@@ -410,8 +410,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       });
     });
 
-    const offError = clientApi.onChatStreamError(({ streamId, error, usage, lifetimeUsage }) => {
-      const cid = conversationStore.resolveConversation(streamId);
+    const offError = clientApi.onChatStreamError(({ streamId, conversationId, error, usage, lifetimeUsage }) => {
+      const cid = conversationStore.resolveEventConversation(streamId, conversationId);
       if (!cid) return;
       if (cid === activeRef.current) {
         // 异常终止（含复读兜底自动 error）同样丢弃积压缓冲，避免残留 delta 继续涌出。

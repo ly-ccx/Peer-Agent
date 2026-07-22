@@ -298,6 +298,7 @@ function wrapWebContentsForRuntimeEvents(
   streamRecord,
   {
     conversationStore = null,
+    llmConfigStore = null,
     emitRuntimeEvent = null,
     failRuntimeTurn = null,
   } = {},
@@ -489,7 +490,14 @@ function wrapWebContentsForRuntimeEvents(
         });
         persistStreamRecord({ final: true, interrupted: true });
       }
-      return realWebContents.send(channel, payload);
+      const routedPayload = (
+        channel === 'chat:stream:done'
+        || channel === 'chat:stream:error'
+        || channel === 'chat:stream:aborted'
+      ) && streamRecord.conversationId
+        ? { ...payload, conversationId: streamRecord.conversationId }
+        : payload;
+      return realWebContents.send(channel, routedPayload);
     },
   };
 }
@@ -595,6 +603,7 @@ export function createLlmChatService({
           ?? null;
         byConversation.set(record.conversationId, {
           conversationId: record.conversationId,
+          streamId: record.streamId,
           // 绿点真值：origin（会话发起工作区）
           workspacePath: originWorkspacePath,
           originWorkspacePath,
@@ -724,6 +733,7 @@ export function createLlmChatService({
       // 累积代理:拦截 delta/thinking 追加到记录,其余事件透传给真实 webContents。
       accumulatingWebContents = wrapWebContentsForRuntimeEvents(webContents, streamRecord, {
         conversationStore,
+        llmConfigStore,
         emitRuntimeEvent,
         failRuntimeTurn: (reason) => runtimeSessions.failStream(streamId, reason),
       });
@@ -1163,7 +1173,10 @@ export function createLlmChatService({
       granted: false,
       reason: 'stream_aborted',
     });
-    active.webContents.send('chat:stream:aborted', { streamId });
+    active.webContents.send('chat:stream:aborted', {
+      streamId,
+      ...(active.conversationId ? { conversationId: active.conversationId } : {}),
+    });
     // abort 直接走真实 webContents，绕过累积代理；故在此显式收口终态并落盘，
     // 再走保留期（不立即删除），让切回被中断的后台轮次也能回放已累积正文。
     active.terminalEventSent = true;
