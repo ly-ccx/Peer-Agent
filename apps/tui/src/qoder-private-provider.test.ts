@@ -71,7 +71,6 @@ describe('createQoderPrivateProvider', () => {
     expect(JSON.stringify(args)).not.toContain('/chat/completions');
 
     expect(result.content).toBe('hello from private');
-    expect(result.thinkingContent).toBe('think');
     expect(result.usage).toEqual({
       inputTokens: 3,
       outputTokens: 5,

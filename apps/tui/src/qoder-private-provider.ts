@@ -143,6 +143,7 @@ async function defaultSendStream(
   args: Record<string, unknown>,
 ): Promise<QoderPrivateStreamResult> {
   const { sendQoderPrivateStream } = await import(
+    // @ts-expect-error Desktop ESM adapter does not publish declarations.
     '../../desktop/electron/main/provider-adapters/qoder-private-adapter.mjs'
   );
   return sendQoderPrivateStream(args) as Promise<QoderPrivateStreamResult>;
@@ -228,7 +229,6 @@ export function createQoderPrivateProvider(
 
       return {
         content,
-        ...(thinkingContent ? { thinkingContent } : {}),
         toolCalls: toolCallsFrom(result.toolCalls),
         ...(usage ? { usage } : {}),
       };

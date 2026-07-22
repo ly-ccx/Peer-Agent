@@ -45,7 +45,7 @@ describe('TUI model environment', () => {
         baseUrl: 'https://chatgpt.example/codex',
         authMethod: 'oauth_chatgpt',
         credentialStored: true,
-        configFile: '/tmp/llm-providers.json',
+        configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
       }),
       loadSharedSelection: () => ({
         source: 'desktop-default',
@@ -57,7 +57,7 @@ describe('TUI model environment', () => {
         authMethod: 'oauth_chatgpt',
         credentialStored: true,
         oauthTokens: { access: 'hidden' },
-        configFile: '/tmp/llm-providers.json',
+        configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
         persistOAuthTokens() {},
       }),
     });
@@ -75,24 +75,24 @@ describe('TUI model environment', () => {
       loadSharedMetadata: () => ({
         source: 'desktop-default', providerId: 'openai', credentialId: 'credential-a',
         displayName: 'Provider A', model: 'model-a', baseUrl: 'https://a.example/v1',
-        authMethod: 'api_key', credentialStored: true, configFile: '/tmp/llm-providers.json',
+        authMethod: 'api_key', credentialStored: true, configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
       }),
       loadSharedMetadataList: () => [
         {
           source: 'desktop-default', providerId: 'openai', credentialId: 'credential-a',
           displayName: 'Provider A', model: 'model-a', baseUrl: 'https://a.example/v1',
-          authMethod: 'api_key', credentialStored: true, configFile: '/tmp/llm-providers.json',
+          authMethod: 'api_key', credentialStored: true, configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
         },
         {
           source: 'desktop-default', providerId: 'openai', credentialId: 'credential-b',
           displayName: 'Provider B', model: 'model-b', modelLabel: 'Model B Label',
           baseUrl: 'https://b.example/v1',
-          authMethod: 'oauth_chatgpt', credentialStored: true, configFile: '/tmp/llm-providers.json',
+          authMethod: 'oauth_chatgpt', credentialStored: true, configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
         },
         {
           source: 'desktop-default', providerId: 'google', credentialId: 'credential-unsupported',
           displayName: 'Unsupported', model: 'model-c', baseUrl: 'https://c.example/v1',
-          authMethod: 'oauth_google', credentialStored: true, configFile: '/tmp/llm-providers.json',
+          authMethod: 'oauth_google', credentialStored: true, configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
         },
       ],
       loadSharedSelection: (options) => ({
@@ -100,7 +100,7 @@ describe('TUI model environment', () => {
         credentialId: options?.credentialId ?? 'credential-a', displayName: 'Provider',
         model: options?.credentialId === 'credential-b' ? 'model-b' : 'model-a',
         baseUrl: 'https://example.test/v1', authMethod: 'api_key', credentialStored: true,
-        apiKey: 'hidden', configFile: '/tmp/llm-providers.json', persistOAuthTokens() {},
+        apiKey: 'hidden', configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium', persistOAuthTokens() {},
       }),
     });
 
@@ -121,14 +121,14 @@ describe('TUI model environment', () => {
         source: 'desktop-default', providerId: 'openai', credentialId: 'qoder-channel',
         displayName: 'Qoder CLI', model: 'gm51model', modelLabel: 'GLM-5.2',
         baseUrl: 'https://api2-v2.qoder.sh/model/v1', authMethod: 'qoder_local_auth',
-        credentialStored: true, configFile: '/tmp/llm-providers.json',
+        credentialStored: true, configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
       }),
       loadSharedMetadataList: () => ([
         {
           source: 'desktop-default', providerId: 'openai', credentialId: 'qoder-channel',
           displayName: 'Qoder CLI', model: 'gm51model', modelLabel: 'GLM-5.2',
           baseUrl: 'https://api2-v2.qoder.sh/model/v1', authMethod: 'qoder_local_auth',
-          credentialStored: true, configFile: '/tmp/llm-providers.json',
+          credentialStored: true, configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
         },
       ]),
     });
@@ -145,7 +145,7 @@ describe('TUI model environment', () => {
         source: 'desktop-default', providerId: 'openai', credentialId: 'desktop-group',
         displayName: 'ChatGPT subscription', model: 'gpt-locked',
         baseUrl: 'https://chatgpt.example/codex', authMethod: 'oauth_chatgpt',
-        credentialStored: true, configFile: '/tmp/llm-providers.json',
+        credentialStored: true, configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
       }),
       loadSharedSelection: () => { throw new Error('keychain_cancelled'); },
     });
@@ -174,20 +174,20 @@ describe('TUI model environment', () => {
       loadSharedMetadata: () => ({
         source: 'desktop-default', providerId: 'xai', credentialId: 'credential-grok',
         displayName: 'Grok', model: 'grok-4.5', baseUrl: 'https://grok.example',
-        authMethod: 'oauth_grok', credentialStored: true, configFile: '/tmp/llm-providers.json',
+        authMethod: 'oauth_grok', credentialStored: true, configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
         contextWindow: 500_000,
       }),
       loadSharedMetadataList: () => [
         {
           source: 'desktop-default', providerId: 'xai', credentialId: 'credential-grok',
           displayName: 'Grok', model: 'grok-4.5', baseUrl: 'https://grok.example',
-          authMethod: 'oauth_grok', credentialStored: true, configFile: '/tmp/llm-providers.json',
+          authMethod: 'oauth_grok', credentialStored: true, configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
           contextWindow: 500_000,
         },
         {
           source: 'desktop-default', providerId: 'openai', credentialId: 'credential-api',
           displayName: 'Idealab', model: 'gpt-test', baseUrl: 'https://api.example/v1',
-          authMethod: 'api_key', credentialStored: true, configFile: '/tmp/llm-providers.json',
+          authMethod: 'api_key', credentialStored: true, configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
         },
       ],
       loadSharedSelection: () => null,

@@ -23,7 +23,7 @@ describe('context-compact structural summary', () => {
         {
           id: 'call-1',
           name: 'bash',
-          arguments: { command: 'rg compact apps/tui' },
+          arguments: JSON.stringify({ command: 'rg compact apps/tui' }),
         },
       ]),
       { role: 'tool', name: 'bash', content: 'command-registry.ts', toolCallId: 'call-1' },

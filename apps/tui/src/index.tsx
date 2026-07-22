@@ -89,8 +89,8 @@ function sharedProvider(credentialId: string) {
       providerId: credentialId,
       baseUrl: metadata.baseUrl,
       async getAccessToken() {
-        // @ts-ignore Desktop ESM adapter without local type declarations.
         const { loadQoderAccessToken } = await import(
+          // @ts-expect-error Desktop ESM adapter does not publish declarations.
           '../../desktop/electron/main/provider-adapters/qoder-local-auth.mjs'
         );
         return loadQoderAccessToken();

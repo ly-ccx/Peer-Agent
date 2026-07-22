@@ -214,6 +214,9 @@ function ChatHistory({
         if (message.role === 'system') {
           const phase = message.compact?.phase ?? 'done';
           const label = phase === 'progress' ? 'COMPACTING' : 'COMPACTED';
+          const compactSummary = phase === 'done'
+            ? `Earlier conversation (compacted) · ${message.compact?.summarizedCount ?? 0} msgs · Structural`
+            : message.content;
           return (
             <box key={message.id} flexDirection="column" marginBottom={1} marginTop={1}>
               <box flexDirection="row">
@@ -221,7 +224,7 @@ function ChatHistory({
                 <text fg={COLOR.accent}><strong>{label}</strong></text>
                 <text fg={COLOR.muted}> {'─'.repeat(8)}</text>
               </box>
-              <text selectable fg={COLOR.muted}>{message.content || ' '}</text>
+              <text selectable fg={COLOR.muted}>{compactSummary || ' '}</text>
             </box>
           );
         }

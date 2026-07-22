@@ -480,9 +480,15 @@ describe('TUI app layout', () => {
 });
 
 describe('TUI compact progress and separator rendering', () => {
-  test('ChatHistory renders system compact progress and done separators', () => {
+  test('ChatHistory keeps progress visible and collapses completed handoffs to the desktop summary', () => {
     expect(appSource).toContain("if (message.role === 'system')");
     expect(appSource).toContain("phase === 'progress' ? 'COMPACTING' : 'COMPACTED'");
+    expect(appSource).toContain("phase === 'done'");
+    expect(appSource).toContain('Earlier conversation (compacted)');
+    expect(appSource).toContain('${message.compact?.summarizedCount ?? 0} msgs · Structural');
+    expect(appSource).toContain(': message.content;');
+    expect(appSource).toContain("{compactSummary || ' '}");
+    expect(appSource).not.toContain("{message.content || ' '}");
     expect(appSource).toContain("compactContext: async () => (await controller.compact()).notice");
   });
 });

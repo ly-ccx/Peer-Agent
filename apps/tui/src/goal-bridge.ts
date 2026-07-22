@@ -104,23 +104,21 @@ function asString(value: unknown): string | null {
 
 function normalizeTasks(tasks: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(tasks)) return [];
-  return tasks
-    .map((task, index) => {
-      if (!task || typeof task !== 'object') return null;
-      const record = task as Record<string, unknown>;
-      const title = asString(record.title) ?? `task-${index + 1}`;
-      const taskId = asString(record.taskId) ?? `task-${index + 1}`;
-      const dependsOn = Array.isArray(record.dependsOn)
-        ? record.dependsOn.filter((item): item is string => typeof item === 'string')
-        : [];
-      return {
-        taskId,
-        title,
-        ...(dependsOn.length > 0 ? { dependsOn } : {}),
-        status: typeof record.status === 'string' ? record.status : 'pending',
-      };
-    })
-    .filter((item): item is Record<string, unknown> => Boolean(item));
+  return tasks.flatMap((task, index): Array<Record<string, unknown>> => {
+    if (!task || typeof task !== 'object') return [];
+    const record = task as Record<string, unknown>;
+    const title = asString(record.title) ?? `task-${index + 1}`;
+    const taskId = asString(record.taskId) ?? `task-${index + 1}`;
+    const dependsOn = Array.isArray(record.dependsOn)
+      ? record.dependsOn.filter((item): item is string => typeof item === 'string')
+      : [];
+    return [{
+      taskId,
+      title,
+      ...(dependsOn.length > 0 ? { dependsOn } : {}),
+      status: typeof record.status === 'string' ? record.status : 'pending',
+    }];
+  });
 }
 
 function deriveTitle(title: unknown, goal: unknown): string {
