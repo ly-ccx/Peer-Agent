@@ -35,6 +35,16 @@ describe('TUI app layout', () => {
     expect(composerSource).toContain('height={5}');
   });
 
+  test('keeps composer input text readable with the active theme whether focused or not', () => {
+    const composerSource = appSource.slice(
+      appSource.indexOf('function Composer('),
+      appSource.indexOf('function ComposerDock'),
+    );
+
+    expect(composerSource).toContain('textColor={COLOR.text}');
+    expect(composerSource).toContain('focusedTextColor={COLOR.text}');
+  });
+
   test('lets long chat history shrink and scroll without compressing the composer dock', () => {
     const historySource = appSource.slice(
       appSource.indexOf('function ChatHistory'),

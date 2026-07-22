@@ -699,6 +699,8 @@ function Composer({ controller, snapshot, disabled, focused, locale, onValueChan
         ref={editor}
         focused={focused && !disabled}
         placeholder={composerPlaceholder(locale, disabled)}
+        textColor={COLOR.text}
+        focusedTextColor={COLOR.text}
         wrapMode="word"
         onContentChange={() => applyImageChips()}
         onKeyDown={(event) => {
