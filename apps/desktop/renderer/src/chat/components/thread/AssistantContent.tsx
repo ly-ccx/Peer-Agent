@@ -5,6 +5,7 @@ import { groupSegments, splitFinalTextGroup } from '../../state/streamSegments';
 import { formatDuration } from '../../state/format';
 import {
   createProcessExpansionState,
+  isProcessTimelineActive,
   toggleProcessExpansion,
   updateProcessActivity,
 } from '../../state/processExpansion';
@@ -92,33 +93,6 @@ function useAutoCollapsingExpanded(isActive: boolean) {
   return { expanded: state.expanded, toggleExpanded };
 }
 
-/**
- * 过程区是否仍在进行。
- * - 思考中 / 工具未返回：展开
- * - 多轮工具间隙（末尾是已完成工具组）：仍保持展开，避免闪烁
- * - 过程结束后开始输出最终正文，或整轮流式结束：收起成「已处理」摘要
- */
-function isProcessingActive(
-  groups: SegmentGroup[],
-  isStreaming: boolean,
-): boolean {
-  if (!isStreaming || !groups.some(isProcessingGroup)) return false;
-  const lastGroup = groups[groups.length - 1];
-  if (lastGroup?.type === 'thinking') return true;
-  const hasPendingTools = groups.some(
-    (group) =>
-      group.type === 'tool-call-group'
-      && group.calls.some((call) => call.result === undefined),
-  );
-  if (hasPendingTools) return true;
-  // 最终正文已开始流式输出：过程完成，允许自动收起
-  if (lastGroup?.type === 'text' && lastGroup.content.trim().length > 0) {
-    return false;
-  }
-  // 工具轮次间隙：暂不收起
-  return true;
-}
-
 function buildProcessingSummary(groups: SegmentGroup[], durationMs: number | undefined, isZh: boolean): string {
   const prefix = isZh ? '已处理' : 'Processed';
   if (typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs > 0) {
@@ -169,9 +143,9 @@ function AssistantContentImpl({
     [groups],
   );
   const keepAllTextOutside = interactionCalls.length > 0 && answeredText === null;
-  // 过程仍在进行（思考中 / 工具未返回）时保持完整时间线；
-  // 过程结束后即使整轮仍在流式输出最终正文，也拆出折叠区外的正文并允许自动收起。
-  const processingIsActive = isProcessingActive(groups, isStreaming);
+  // 一旦本轮出现思考/工具，整个流式生命周期保持同一时间线；协议没有可靠的
+  // “中途 text 已是最终正文”信号，只有真正终态后才拆出正文并自动收起一次。
+  const processingIsActive = isProcessTimelineActive(groups, isStreaming);
   const completedSplit = useMemo(
     () => (processingIsActive || groups.length === 0
       ? undefined
