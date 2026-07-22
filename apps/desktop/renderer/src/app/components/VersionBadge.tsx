@@ -9,8 +9,8 @@ import { UpdateModal } from './UpdateModal';
  *
  * 行为（按确认的产品设计）：
  *   - 始终展示当前版本号（vX.Y.Z）。
- *   - 有可用更新时（available）：版本号旁显示文字 Tag「新版本」，比红点更直观。
- *   - 下载中（downloading）：Tag 原地升级为 mini 环形进度 + 百分比文字。
+ *   - 有可用更新时（available）：版本号旁显示更新图标，与版本号共享点击入口。
+ *   - 下载中（downloading）：更新图标原地升级为 mini 环形进度 + 百分比文字。
  *   - 下载完成（downloaded / ready-to-open）：版本号旁持久挂「安装」按钮
  *     （Codex 模式），不再弹出右下角 toast。
  *   - 点击版本号：打开更新摘要弹窗（无更新时顺带触发一次检查）。
@@ -102,6 +102,25 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
           onClick={handleClick}
         >
           <span className="sidebar-version-text">v{status.currentVersion}</span>
+          {isAvailable ? (
+            <span className="sidebar-version-update-icon">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v9" />
+                <path d="m8.5 12.5 3.5 3.5 3.5-3.5" />
+              </svg>
+            </span>
+          ) : null}
         </button>
 
         {showProgress ? (
@@ -113,12 +132,6 @@ export function VersionBadge({ i18n }: { readonly i18n: I18nRuntime }) {
           >
             <span className="sidebar-version-progress-ring" aria-hidden="true" />
             <span className="sidebar-version-progress-text">{progressPercent}%</span>
-          </span>
-        ) : null}
-
-        {isAvailable ? (
-          <span className="sidebar-version-new-tag" aria-hidden="true">
-            {i18n.t('updater.badge.newTag')}
           </span>
         ) : null}
 

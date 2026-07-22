@@ -18,6 +18,7 @@
   .sidebar-version-text-btn {
     display: inline-flex;
     align-items: center;
+    gap: 4px;
     padding: 2px 6px;
     border-radius: var(--ui-radius-control);
     border: none;
@@ -40,20 +41,19 @@
     color: var(--cinnabar-seal);
   }
 
-  /* 「新版本」文字 Tag：比红点更直观，印泥红底白字小胶囊 */
-  .sidebar-version-tag {
+  /* 有可用更新：版本号后的下载图标，与版本号共享点击区域。 */
+  .sidebar-version-update-icon {
     display: inline-flex;
     align-items: center;
-    padding: 1px 6px;
-    border-radius: var(--ui-radius-round);
-    background: var(--cinnabar-seal);
-    color: var(--za-accent-ink);
-    font-size: 10px;
-    font-weight: 600;
-    line-height: 1.4;
-    cursor: pointer;
-    white-space: nowrap;
+    justify-content: center;
+    width: 13px;
+    height: 13px;
+    flex: 0 0 13px;
     animation: motion-pulse-attention var(--za-motion-slow) var(--za-ease-spring) both;
+  }
+
+  .sidebar-version-update-icon svg {
+    display: block;
   }
 
   /* 下载中：进度环 + 百分比文字容器 */
