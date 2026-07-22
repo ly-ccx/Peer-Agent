@@ -8,12 +8,17 @@ import {
   estimateSummaryChars,
   estimateTextTokens,
   extractRecoverableClues,
+  extractRecentDecisionAnchors,
   formatCompactSummary,
   estimateTokensFromMessages,
   estimateToolsTokens,
+  flattenSummaryForCarryForward,
+  mergeContinuityAndDeltaSummary,
   microcompactMessagesForContext,
   resetCircuitBreaker,
   resolveSummaryTokenBudget,
+  truncateSummaryInputPreferTail,
+  buildHandoffContent,
 } from './context-compactor.mjs';
 
 const COMPACTOR_SOURCE = readFileSync(
@@ -1079,3 +1084,122 @@ describe('P0 recoverable microcompact + summary budget', () => {
     assert.ok(clues.suggestedRetrieval.length > 0);
   });
 });
+
+
+describe('compaction summary quality regressions', () => {
+  it('does not nest a prior merged carry-forward blob when re-merging continuity', () => {
+    const nestedPrior = [
+      '## Carry-forward summary from previous compaction',
+      '### Previous compacted context 1',
+      'id: compaction-old',
+      'method: llm',
+      'representedMessages: 1254',
+      '## Carry-forward summary from previous compaction',
+      '### Previous compacted context 1',
+      'id: compaction-older',
+      'method: llm',
+      'representedMessages: 800',
+      'old aper merge conflict topic',
+      '',
+      '## Delta summary since previous compaction (454 messages)',
+      'still talking about aper checkpoints',
+      '',
+      '## Delta summary since previous compaction (825 messages)',
+      'more nested aper text',
+    ].join('\n');
+
+    const merged = mergeContinuityAndDeltaSummary({
+      continuityContext: [{
+        id: 'previous-compact',
+        method: 'llm',
+        originalMessageCount: 2079,
+        beforeTokens: 100_000,
+        afterTokens: 8_000,
+        summary: nestedPrior,
+      }],
+      compactSummary: 'User chose 方案2 responsive main action area.',
+      oldCount: 12,
+    });
+
+    assert.match(merged, /方案2 responsive main action area/);
+    // One structural carry-forward header for this merge is fine; recursive nested
+    // "Previous compacted context" metadata wrappers must not reappear.
+    assert.equal((merged.match(/## Carry-forward summary from previous compaction/g) || []).length, 1);
+    assert.doesNotMatch(merged, /### Previous compacted context/);
+    assert.doesNotMatch(merged, /^id: compaction-old$/m);
+    assert.doesNotMatch(merged, /## Carry-forward summary from previous compaction\n## Carry-forward/);
+  });
+
+  it('prefers the recent tail when truncating oversized summary input', () => {
+    const head = 'HEAD_TOPIC_OLD_APER_MERGE_'.repeat(200);
+    const tail = 'TAIL_DECISION_PLAN2_RESPONSIVE_MAIN_ACTION';
+    const input = `${head}\n${tail}`;
+    const truncated = truncateSummaryInputPreferTail(input, 500);
+    assert.ok(truncated.length <= 500);
+    assert.match(truncated, /TAIL_DECISION_PLAN2_RESPONSIVE_MAIN_ACTION/);
+    assert.match(truncated, /kept recent tail near compaction point/);
+    assert.doesNotMatch(truncated, /^HEAD_TOPIC_OLD_APER_MERGE_/);
+  });
+
+  it('keeps recent multi-option user decisions in the handoff anchors', async () => {
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      ...Array.from({ length: 20 }, (_, i) => ({ role: 'user', content: `old-noise-${i} ${'x'.repeat(40)}` })),
+      {
+        role: 'assistant',
+        content: [
+          '方案1：底部固定操作条',
+          '方案2：响应式主操作区（推荐）',
+          '方案3：折叠更多菜单',
+        ].join('\n'),
+      },
+      { role: 'user', content: '方案2' },
+    ];
+
+    const anchors = extractRecentDecisionAnchors(messages);
+    assert.ok(anchors.some((item) => item.includes('方案2')));
+
+    const result = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      contextWindow: 100_000,
+      providerConfig: null,
+      force: true,
+    });
+
+    assert.equal(result.compacted, true);
+    const handoff = result.messages.find((message) => message?._compaction);
+    assert.ok(handoff);
+    assert.match(handoff.content, /最近用户决策与方案锚点/);
+    assert.match(handoff.content, /方案2/);
+    assert.match(handoff._compaction.summary, /方案2/);
+    assert.ok(Array.isArray(handoff._compaction.decisionAnchors));
+    assert.ok(handoff._compaction.decisionAnchors.some((item) => item.includes('方案2')));
+  });
+
+  it('flattens nested carry-forward wrappers for continuity input', () => {
+    const nested = [
+      '## Carry-forward summary from previous compaction',
+      '### Previous compacted context 1',
+      'id: abc',
+      'method: llm',
+      'representedMessages: 10',
+      'body keeps user decision 方案2',
+    ].join('\n');
+    const flat = flattenSummaryForCarryForward(nested);
+    assert.match(flat, /方案2/);
+    assert.doesNotMatch(flat, /Carry-forward summary/);
+    assert.doesNotMatch(flat, /Previous compacted context/);
+    assert.doesNotMatch(flat, /^id: abc$/m);
+  });
+
+  it('source uses tail-prefer truncation for summary input', () => {
+    assert.match(COMPACTOR_SOURCE, /truncateSummaryInputPreferTail/);
+    assert.doesNotMatch(
+      COMPACTOR_SOURCE,
+      /summaryInput\.slice\(0,\s*summaryBudget\.summaryMaxInputTokens/,
+    );
+    assert.match(COMPACTOR_SOURCE, /最近用户决策与方案锚点/);
+  });
+});
+

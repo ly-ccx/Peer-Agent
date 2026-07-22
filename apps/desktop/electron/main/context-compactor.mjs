@@ -1026,7 +1026,7 @@ async function summarizeWithLLM({
   const summaryInput = formatOldMessagesForSummary(oldMessages);
   const summaryMessages = [
     { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
-    { role: 'user', content: summaryInput.slice(0, summaryBudget.summaryMaxInputTokens * COMPACTION_CONFIG.charsPerToken) },
+    { role: 'user', content: truncateSummaryInputPreferTail(summaryInput, summaryBudget.summaryMaxInputTokens * COMPACTION_CONFIG.charsPerToken) },
     { role: 'user', content: COMPACT_PROMPT },
   ];
 
@@ -1057,7 +1057,7 @@ async function summarizeWithLLM({
       model,
       system: SUMMARY_SYSTEM_PROMPT,
       messages: [
-        { role: 'user', content: summaryInput.slice(0, summaryBudget.summaryMaxInputTokens * COMPACTION_CONFIG.charsPerToken) },
+        { role: 'user', content: truncateSummaryInputPreferTail(summaryInput, summaryBudget.summaryMaxInputTokens * COMPACTION_CONFIG.charsPerToken) },
         { role: 'user', content: COMPACT_PROMPT },
       ],
       max_tokens: summaryMaxTokens,
@@ -1334,21 +1334,107 @@ function summarizeOldMessages(oldMessages) {
 
 // ── Build Compacted Messages ──
 
-function buildHandoffContent({ compactSummary, oldCount }) {
+/**
+ * Prefer the recent tail near the compaction point when summary input exceeds budget.
+ * Head-first truncation drops the newest decisions (e.g. multi-option plans, "方案2").
+ */
+function truncateSummaryInputPreferTail(text, maxChars) {
+  const value = String(text ?? '');
+  const limit = Number(maxChars);
+  if (!Number.isFinite(limit) || limit <= 0) return '';
+  if (value.length <= limit) return value;
+  const marker = '\n...[summary input truncated: kept recent tail near compaction point; older head omitted]...\n';
+  if (limit <= marker.length) return value.slice(-limit);
+  const tailBudget = limit - marker.length;
+  return `${marker}${value.slice(-tailBudget)}`;
+}
+
+/**
+ * Strip recursive carry-forward wrappers so re-merge does not nest prior merged blobs.
+ * Keeps the semantic body; drops structural headers added by previous merges.
+ */
+function flattenSummaryForCarryForward(summary) {
+  let text = String(summary ?? '').trim();
+  if (!text) return '';
+  // Iteratively peel nested wrappers from prior merges.
+  for (let i = 0; i < 8; i += 1) {
+    const before = text;
+    text = text
+      .replace(/^##\s*Carry-forward summary from previous compaction\s*\n+/i, '')
+      .replace(/^##\s*Delta summary since previous compaction\s*\([^)]*\)\s*\n+/gim, '')
+      .replace(/^###\s*Previous compacted context\s+\d+\s*\n+/gim, '')
+      .replace(/^id:\s*.+\n/gim, '')
+      .replace(/^method:\s*.+\n/gim, '')
+      .replace(/^representedMessages:\s*.+\n/gim, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    if (text === before) break;
+  }
+  return text;
+}
+
+/**
+ * Pull recent user decision / multi-option anchors that must survive handoff even if
+ * LLM summary drifts toward older topics.
+ */
+function extractRecentDecisionAnchors(messages, { limit = 8, maxChars = 900 } = {}) {
+  const list = Array.isArray(messages) ? messages : [];
+  const anchors = [];
+  const decisionLike = /方案\s*[0-9一二三四五六七八九十]+|option\s*[1-9a-c]|选择|就按|用这个|按这个|选第|采纳|确认按|按方案/i;
+  const multiOption = /方案\s*[1-9一二三]|Option\s*[1-9A-C]|方案一|方案二|方案三/i;
+
+  for (let i = list.length - 1; i >= 0 && anchors.length < limit; i -= 1) {
+    const message = list[i];
+    if (!message || message.role !== 'user' || message._compaction) continue;
+    const raw = typeof message.content === 'string'
+      ? message.content.trim()
+      : Array.isArray(message.content)
+        ? message.content.map((part) => (typeof part?.text === 'string' ? part.text : '')).join('\n').trim()
+        : '';
+    if (!raw) continue;
+    if (raw.startsWith('[上下文交接') || raw.startsWith('## Carry-forward')) continue;
+
+    const shortDecision = raw.length <= 240;
+    const looksLikeDecision = decisionLike.test(raw) || (multiOption.test(raw) && raw.length > 40);
+    if (!shortDecision && !looksLikeDecision) continue;
+
+    const clipped = raw.length > maxChars ? `${raw.slice(0, maxChars)}…` : raw;
+    // de-dupe exact repeats
+    if (!anchors.includes(clipped)) anchors.push(clipped);
+  }
+  return anchors.reverse();
+}
+
+function formatDecisionAnchorsSection(anchors) {
+  const items = Array.isArray(anchors) ? anchors.filter((item) => typeof item === 'string' && item.trim()) : [];
+  if (!items.length) return '';
+  return [
+    '## 最近用户决策与方案锚点',
+    '以下为压缩点附近必须保留的用户决策/多方案结论，后续执行不得丢弃或改写成无关旧话题：',
+    ...items.map((item, index) => `${index + 1}. ${item}`),
+  ].join('\n');
+}
+
+function buildHandoffContent({ compactSummary, oldCount, decisionAnchors = [] }) {
   const summary = compactSummary?.trim()
     || 'Earlier conversation was removed from the active prompt because compaction summary generation was unavailable. Continue from the recent messages and ask for clarification if required.';
+  const decisionSection = formatDecisionAnchorsSection(decisionAnchors);
+  // Avoid duplicating anchors when they were already embedded into the stored summary.
+  const summaryHasAnchors = summary.includes('## 最近用户决策与方案锚点');
+  const leadingDecision = decisionSection && !summaryHasAnchors ? [decisionSection, ''] : [];
 
   return [
     `[上下文交接 - 共压缩 ${oldCount} 条消息]`,
     '',
     '以下是之前工作进展的压缩交接。请基于这份交接和后续保留的最近消息继续任务，不要重复已经完成的工作。',
     '',
+    ...leadingDecision,
     '## 已完成的工作与关键上下文',
     summary,
     '',
     '## 继续执行要求',
-    '- 优先承接用户最近的明确要求。',
-    '- 如果交接摘要和最近消息冲突，以最近消息为准。',
+    '- 优先承接用户最近的明确要求与上方决策锚点。',
+    '- 如果交接摘要和最近消息冲突，以最近消息与决策锚点为准。',
     '- 如需核验证据，优先使用本地工具按需读取文件、命令输出或 artifact，而不是要求用户重新提供上下文。',
   ].join('\n');
 }
@@ -1371,29 +1457,41 @@ function normalizeContinuityContext(continuityContext = []) {
 function buildContinuityCarryForwardSummary(continuityContext) {
   const items = normalizeContinuityContext(continuityContext);
   if (!items.length) return '';
-  return items
-    .map((item, index) => [
-      `### Previous compacted context ${index + 1}`,
-      `id: ${item.id}`,
-      `method: ${item.method}`,
-      `representedMessages: ${item.originalMessageCount}`,
-      item.summary.trim() || '[previous compacted context summary unavailable]',
-    ].join('\n'))
-    .join('\n\n');
+  // Only carry the latest continuity item, and flatten any prior merge wrappers so
+  // repeated compaction cannot nest "## Carry-forward ..." blobs forever.
+  const latest = items[items.length - 1];
+  const flattened = flattenSummaryForCarryForward(latest.summary)
+    || latest.summary.trim()
+    || '[previous compacted context summary unavailable]';
+  return flattened;
 }
 
-function mergeContinuityAndDeltaSummary({ continuityContext, compactSummary, oldCount }) {
+function mergeContinuityAndDeltaSummary({ continuityContext, compactSummary, oldCount, decisionAnchors = [] }) {
   const previousSummary = buildContinuityCarryForwardSummary(continuityContext);
-  const deltaSummary = compactSummary?.trim()
+  const deltaSummary = flattenSummaryForCarryForward(compactSummary)
+    || compactSummary?.trim()
     || `No semantic delta summary was available for the ${oldCount} newly compacted messages.`;
-  if (!previousSummary) return deltaSummary;
-  return [
-    '## Carry-forward summary from previous compaction',
-    previousSummary,
-    '',
-    `## Delta summary since previous compaction (${oldCount} messages)`,
-    deltaSummary,
-  ].join('\n');
+  const decisionSection = formatDecisionAnchorsSection(decisionAnchors);
+  let merged;
+  if (!previousSummary) {
+    merged = deltaSummary;
+  } else {
+    // One-level merge only: previous body (already flattened) + this delta.
+    // Do not store another full nested carry-forward of a prior merge result.
+    merged = [
+      '## Carry-forward summary from previous compaction',
+      previousSummary,
+      '',
+      `## Delta summary since previous compaction (${oldCount} messages)`,
+      deltaSummary,
+    ].join('\n');
+  }
+  // Persist decision anchors inside the stored summary so later continuity carry-forward
+  // still retains them even after the original messages leave the active window.
+  if (decisionSection) {
+    return `${decisionSection}\n\n${merged}`;
+  }
+  return merged;
 }
 
 function countContinuityMessages(continuityContext) {
@@ -1412,19 +1510,28 @@ function buildCompactedMessages({
   continuityContext = [],
   fallbackReason = null,
   fallbackDetail = null,
+  decisionAnchors = [],
 }) {
   const result = [{ role: 'system', content: systemPrompt }];
   const previousMessageCount = countContinuityMessages(continuityContext);
   const representedMessageCount = previousMessageCount + oldCount;
+  const anchors = Array.isArray(decisionAnchors) ? decisionAnchors : [];
   const mergedSummary = mergeContinuityAndDeltaSummary({
     continuityContext,
     compactSummary,
     oldCount,
+    decisionAnchors: anchors,
   });
 
   result.push({
     role: 'user',
-    content: buildHandoffContent({ compactSummary: mergedSummary, oldCount: representedMessageCount }),
+    content: buildHandoffContent({
+      compactSummary: mergedSummary,
+      oldCount: representedMessageCount,
+      // Anchors already embedded in mergedSummary for continuity persistence;
+      // still pass explicitly so handoff rendering stays robust if summary is empty.
+      decisionAnchors: anchors,
+    }),
     _compaction: {
       method,
       fallbackReason: fallbackReason || undefined,
@@ -1434,7 +1541,9 @@ function buildCompactedMessages({
       previousMessageCount,
       beforeTokens,
       afterTokens,
+      // Store merged summary (with decision anchors) for subsequent continuity carry-forward.
       summary: mergedSummary || '',
+      decisionAnchors: anchors,
     },
   });
 
@@ -1516,6 +1625,7 @@ export async function compactIfNeeded({
 
     const beforeTokens = estimateTokensFromMessages(messages);
     // Emergency: just keep recent messages
+    const decisionAnchors = extractRecentDecisionAnchors(old);
     const result = buildCompactedMessages({
       systemPrompt,
       compactSummary: null,
@@ -1530,6 +1640,7 @@ export async function compactIfNeeded({
       continuityContext,
       fallbackReason: 'circuit_breaker',
       fallbackDetail: 'LLM summary circuit breaker tripped after repeated failures',
+      decisionAnchors,
     });
 
     console.warn(
@@ -1691,6 +1802,7 @@ export async function compactIfNeeded({
   }
 
   // Build result
+  const decisionAnchors = extractRecentDecisionAnchors(old);
   let result = buildCompactedMessages({
     systemPrompt,
     compactSummary,
@@ -1702,6 +1814,7 @@ export async function compactIfNeeded({
     continuityContext,
     fallbackReason,
     fallbackDetail,
+    decisionAnchors,
   });
 
   let afterTokens = estimateTokensFromMessages(result);
@@ -1747,6 +1860,7 @@ export async function compactIfNeeded({
         continuityContext,
         fallbackReason: 'insufficient_reduction',
         fallbackDetail: `${rejectedMethod} candidate left ${rejectedBudgetTokens} tokens against trigger ${triggerLimit}`,
+        decisionAnchors,
       });
       const candidateAfterTokens = estimateTokensFromMessages(candidate);
       setCompactionAfterTokens(candidate, candidateAfterTokens);
@@ -1825,4 +1939,9 @@ export {
   formatCompactSummary,
   extractRecoverableClues,
   resolveSummaryTokenBudget,
+  truncateSummaryInputPreferTail,
+  flattenSummaryForCarryForward,
+  extractRecentDecisionAnchors,
+  mergeContinuityAndDeltaSummary,
+  buildHandoffContent,
 };
