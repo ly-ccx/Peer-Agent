@@ -136,8 +136,8 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
             const list = await clientApi.conversationsList({ status: 'active' });
             const rows = Array.isArray(list)
               ? list
-              : Array.isArray((list as { items?: unknown[] } | null)?.items)
-                ? ((list as { items: unknown[] }).items)
+              : Array.isArray((list as { items?: readonly unknown[] } | null)?.items)
+                ? ((list as { items: readonly unknown[] }).items)
                 : [];
             hits = rows.map((item) => ({
               id: String((item as { id?: string }).id || ''),

@@ -725,7 +725,12 @@ export function createLlmChatService({
       runtimeEventState: { sessionStarted: true },
       // 终态事件去重:保证 done/error/aborted 三选一恰好发一次,防止压缩等中间阶段抛错后界面悬挂。
       terminalEventSent: false,
+      // Goal handoff 必须等待 sendMessage finally 真正释放 Runtime turn，不能把 UI done
+      // 当成 session 已空闲。Promise 暴露给 forceCompleteConversationStreams 聚合等待。
+      released: null,
+      resolveReleased: null,
     };
+    streamRecord.released = new Promise((resolve) => { streamRecord.resolveReleased = resolve; });
     let accumulatingWebContents = webContents;
     try {
       activeStreams.set(streamId, streamRecord);
@@ -1167,6 +1172,8 @@ export function createLlmChatService({
         streamRecord.terminalStatus || 'error',
         streamRecord.terminalStatus || 'stream_error',
       );
+      streamRecord.resolveReleased?.();
+      streamRecord.resolveReleased = null;
       // 方案 3：不立即删除，保留终态记录一段时间，使切回已结束的后台轮次可经
       // reattach 回放完整终态快照；保留期满后由 retireStream 内的计时器硬删除。
       retireStream(streamId);
@@ -1183,9 +1190,11 @@ export function createLlmChatService({
     const normalized = typeof conversationId === 'string' ? conversationId.trim() : '';
     if (!normalized) return { completed: 0, streamIds: [] };
     const completedIds = [];
+    const releasePromises = [];
     for (const [streamId, record] of activeStreams.entries()) {
       if (record?.conversationId !== normalized) continue;
       if (!isRunning(record)) continue;
+      if (record.released) releasePromises.push(record.released);
       // 先落 done 终态，后续 cancel 触发的 abort 路径会被 terminalEventSent 去重。
       if (!record.terminalEventSent) {
         const payload = {
@@ -1217,7 +1226,11 @@ export function createLlmChatService({
       retireStream(streamId);
       completedIds.push(streamId);
     }
-    return { completed: completedIds.length, streamIds: completedIds };
+    return {
+      completed: completedIds.length,
+      streamIds: completedIds,
+      released: Promise.allSettled(releasePromises),
+    };
   }
 
   function abort(streamId) {

@@ -56,7 +56,7 @@ describe('messageQueueDispatch', () => {
       remove: (id) => removed.push(id),
     });
     assert.equal(rejected, false);
-    assert.deepEqual(removed, []);
+    assert.equal(removed.length, 0);
 
     const accepted = await dispatchQueuedMessage({
       message,
@@ -64,6 +64,7 @@ describe('messageQueueDispatch', () => {
       remove: (id) => removed.push(id),
     });
     assert.equal(accepted, true);
-    assert.deepEqual(removed, ['q1']);
+    assert.equal(removed.length, 1);
+    assert.equal(removed[0], 'q1');
   });
 });

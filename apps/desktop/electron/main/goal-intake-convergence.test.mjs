@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   decideIntakeConvergence,
   isIntakeContract,
+  serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
@@ -133,6 +134,42 @@ test('plan change auto-start: 只接受 goal-accepted，拒绝 Runner 自身 per
     shouldAutoStartAcceptedGoalRunnerFromChange({ changeKind: 'runner-state' }, acceptedGoal),
     false,
   );
+});
+
+test('goal handoff: 原 intake turn 释放前绝不启动 Runner', async () => {
+  let releaseTurn;
+  const released = new Promise((resolve) => { releaseTurn = resolve; });
+  const events = [];
+
+  const handoff = serializeAcceptedGoalRunnerHandoff({
+    forceComplete: async () => {
+      events.push('force-complete');
+      return { released };
+    },
+    isStillAccepted: () => true,
+    startRunner: async () => { events.push('runner-started'); },
+  });
+
+  await Promise.resolve();
+  assert.deepEqual(events, ['force-complete']);
+  releaseTurn();
+  assert.equal(await handoff, true);
+  assert.deepEqual(events, ['force-complete', 'runner-started']);
+});
+
+test('goal handoff: 等待期间 Goal 不再 accepted 时不启动 Runner', async () => {
+  let accepted = true;
+  const events = [];
+  const result = await serializeAcceptedGoalRunnerHandoff({
+    forceComplete: async () => ({
+      released: Promise.resolve().then(() => { accepted = false; }),
+    }),
+    isStillAccepted: () => accepted,
+    startRunner: async () => { events.push('runner-started'); },
+  });
+
+  assert.equal(result, false);
+  assert.deepEqual(events, []);
 });
 
 test('conversation open recovery: 只恢复磁盘上仍为 running 的 accepted Goal', () => {

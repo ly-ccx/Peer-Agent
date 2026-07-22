@@ -346,15 +346,15 @@ export function CascadingMenu({
     .filter(Boolean)
     .join(' ');
 
-  const menuStyle: CSSProperties = coords
-    ? ({
+  const menuStyle: CSSProperties & { '--pa-cascading-menu-width'?: string } = coords
+    ? {
         position: 'fixed',
         left: coords.left,
         ...(coords.placement === 'up'
           ? { bottom: coords.bottom, top: 'auto' }
           : { top: coords.top, bottom: 'auto' }),
         '--pa-cascading-menu-width': `${coords.width}px`,
-      } as CSSProperties)
+      }
     : { position: 'fixed', left: 0, top: 0, visibility: 'hidden' };
 
   const submenuStyle: CSSProperties = submenuCoords

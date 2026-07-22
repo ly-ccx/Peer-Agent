@@ -69,6 +69,23 @@ export function shouldAutoStartAcceptedGoalRunnerFromChange(change, plan) {
     && shouldAutoStartAcceptedGoalRunner(plan);
 }
 
+/**
+ * 串行完成 intake -> Runner 交接。forceComplete 必须返回一个 release Promise，
+ * 它只在原 sendMessage 的 finally 已释放 Runtime turn 后 resolve；不能仅凭 UI 流已
+ * 标记 done 就启动下一轮，否则同一 conversation session 会撞上 active turn。
+ */
+export async function serializeAcceptedGoalRunnerHandoff({
+  forceComplete,
+  isStillAccepted,
+  startRunner,
+}) {
+  const handoff = await forceComplete();
+  await handoff?.released;
+  if (typeof isStillAccepted === 'function' && !isStillAccepted()) return false;
+  await startRunner();
+  return true;
+}
+
 /** 主进程重启后内存 session 丢失，打开会话时恢复磁盘上仍标记 running 的 Goal。 */
 export function shouldRecoverAcceptedGoalRunnerOnConversationOpen(plan) {
   return shouldAutoStartAcceptedGoalRunner(plan)

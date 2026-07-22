@@ -59,6 +59,7 @@ import { resolveConversationModelProviderId } from './conversation-model-binding
 import { createGoalPlanStore, goalPlanIsSelfDriven } from './goal-plan-store.mjs';
 import {
   decideIntakeConvergence,
+  serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
   shouldRecoverAcceptedGoalRunnerOnConversationOpen,
@@ -1956,14 +1957,17 @@ function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
   if (!planId) return;
   const plan = goalPlanStore.getPlan?.(planId) || goalPlanStore.getActivePlanByConversation?.(payload.conversationId);
   if (!shouldAutoStartAcceptedGoalRunnerFromChange(payload, plan)) return;
-  // 先强制收口同会话 intake 流，避免 Runner 与前台 agent loop 抢同一会话。
-  try {
-    llmChatService?.forceCompleteConversationStreams?.(plan.conversationId, { reason: 'goal_handoff' });
-  } catch (error) {
-    console.warn('[main] force-complete intake stream failed:', error?.message || error);
-  }
   if (!goalRunner) return;
-  void goalRunner.start(plan.planId).catch((error) => {
+  // 串行收口同会话 intake 流：等待原 sendMessage finally 释放 Runtime turn 后，
+  // 再启动 Runner。仅发送 UI done 或同步 cancel 都不足以证明 session 已空闲。
+  void serializeAcceptedGoalRunnerHandoff({
+    forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
+      plan.conversationId,
+      { reason: 'goal_handoff' },
+    ) ?? { released: Promise.resolve() },
+    isStillAccepted: () => shouldAutoStartAcceptedGoalRunner(goalPlanStore.getPlan?.(plan.planId)),
+    startRunner: () => goalRunner.start(plan.planId),
+  }).catch((error) => {
     console.error('[main] plan-change auto-start goal runner failed:', error?.message || error);
   });
 }

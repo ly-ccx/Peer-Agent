@@ -43,6 +43,7 @@ interface PendingProviderDraft extends Record<string, unknown> {
   readonly apiKey: string;
   readonly customHeaders?: Record<string, string>;
   readonly name: string;
+  readonly authMethod: LlmAuthMethod;
 }
 
 interface FormState {
