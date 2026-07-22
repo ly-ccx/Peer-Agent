@@ -94,28 +94,33 @@ describe('tool result summary', () => {
   });
 
   test('thinking status label uses a trailing three-dot animation without a leading spinner', () => {
-    expect(thinkingSpinnerGlyph(0)).toBe('⠋');
-    expect(thinkingSpinnerGlyph(1)).toBe('⠙');
+    expect(thinkingSpinnerGlyph(0)).toBe('|');
+    expect(thinkingSpinnerGlyph(1)).toBe('/');
+    expect(thinkingSpinnerGlyph(2)).toBe('-');
+    expect(thinkingSpinnerGlyph(3)).toBe('\\');
+    expect(thinkingSpinnerGlyph(4)).toBe('|');
+    // Braille spinners sit high vs CJK/Latin text; keep composer spinner non-Braille.
+    expect(thinkingSpinnerGlyph(0)).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
     expect(thinkingStatusLabel(0, false)).toBe('Thinking.');
     expect(thinkingStatusLabel(1, false)).toBe('Thinking..');
     expect(thinkingStatusLabel(2, true)).toBe('Thinking...');
     expect(thinkingStatusLabel(3, true)).toBe('Thinking.');
-    expect(thinkingStatusLabel(0, false)).not.toMatch(/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+    expect(thinkingStatusLabel(0, false)).not.toMatch(/^[|/\-\\]/);
   });
 
   test('composer running status line pairs spinner with status label', () => {
     expect(composerRunningStatusLine({
       frame: 0,
       statusLabel: 'Working…',
-    })).toBe('⠋ Working…');
+    })).toBe('| Working…');
     expect(composerRunningStatusLine({
       frame: 1,
       statusLabel: '运行中…',
-    })).toBe('⠙ 运行中…');
+    })).toBe('/ 运行中…');
     expect(composerRunningStatusLine({
       frame: 2,
       statusLabel: 'Cancelling…',
-    })).toBe('⠹ Cancelling…');
+    })).toBe('- Cancelling…');
   });
 
   test('running tool glyph is larger and breathes across frames', () => {

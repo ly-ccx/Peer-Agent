@@ -263,12 +263,14 @@ export function toolStatusGlyph(status: ToolPresentationStatus): string {
   }
 }
 
-const THINKING_CURSOR_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const;
+// Prefer geometric/line glyphs over Braille: Braille dots sit high in many terminal
+// fonts and look misaligned next to CJK/Latin status labels like "运行中…".
+const THINKING_CURSOR_FRAMES = ['|', '/', '-', '\\'] as const;
 const RUNNING_DOT_FRAMES = ['●', '◉', '○', '◉'] as const;
 
-/** Single spinner glyph used by thinking placeholders and composer running status. */
+/** Single spinner glyph used by composer running status. */
 export function thinkingSpinnerGlyph(frame: number): string {
-  return THINKING_CURSOR_FRAMES[Math.abs(frame) % THINKING_CURSOR_FRAMES.length] ?? '⠋';
+  return THINKING_CURSOR_FRAMES[Math.abs(frame) % THINKING_CURSOR_FRAMES.length] ?? '|';
 }
 
 const THINKING_DOT_FRAMES = ['.', '..', '...'] as const;
@@ -281,7 +283,7 @@ export function thinkingStatusLabel(frame: number, _hasThinkingContent = false):
 
 /**
  * Footer running-status line:
- * `⠋ Working…`
+ * `| Working…`
  */
 export function composerRunningStatusLine(options: {
   readonly frame: number;
