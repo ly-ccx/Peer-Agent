@@ -88,7 +88,8 @@ describe('TUI theme tokens', () => {
     expect(toolStatusColor('completed')).toBe(COLOR.tool);
     expect(toolStatusColor('failed')).toBe(COLOR.toolFailed);
     expect(toolStatusColor('running')).toBe(COLOR.toolRunning);
-    expect(contextUsageColor(10)).toBe(COLOR.muted);
+    expect(contextUsageColor(10)).toBe(COLOR.user);
+    expect(contextUsageColor(undefined)).toBe(COLOR.user);
     expect(contextUsageColor(85)).toBe(COLOR.warning);
     expect(contextUsageColor(95)).toBe(COLOR.danger);
 
@@ -97,8 +98,10 @@ describe('TUI theme tokens', () => {
     expect(contextUsageColor(95)).toBe(LIGHT_PALETTE.danger);
   });
 
-  test('running tool glyph is enlarged', () => {
-    expect(TOOL_CHROME.glyphRunning).toBe('●');
+  test('tool status glyphs follow Crush design (✓ completed, ◇ running)', () => {
+    expect(TOOL_CHROME.glyphCompleted).toBe('✓');
+    expect(TOOL_CHROME.glyphRunning).toBe('◇');
+    expect(TOOL_CHROME.glyphFailed).toBe('✗');
   });
 });
 

@@ -19,11 +19,17 @@ export function ComposerRunningStatusBar({
       flexDirection="row"
       width="100%"
       flexShrink={0}
-      paddingBottom={0}
+      justifyContent="space-between"
+      paddingLeft={1}
+      paddingRight={1}
     >
       <text fg={COLOR.accent} wrapMode="none">
         <span>{spinner}</span>
-        <span> {statusLabel}</span>
+        <span>  {statusLabel}</span>
+      </text>
+      <text fg={COLOR.subtle} wrapMode="none">
+        <span>PEER</span>
+        <span fg={COLOR.accent}> / ACTIVE</span>
       </text>
     </box>
   );
@@ -58,68 +64,45 @@ function StatusPair({ label, value, accent = false }: {
   );
 }
 
+export function contextMeterParts(percent: number | undefined, width: number): {
+  readonly filled: string;
+  readonly empty: string;
+} {
+  if (width <= 0) return { filled: '', empty: '' };
+  const bounded = Math.max(0, Math.min(100, percent ?? 0));
+  const filledCount = Math.round((bounded / 100) * width);
+  return {
+    filled: '━'.repeat(filledCount),
+    empty: '─'.repeat(width - filledCount),
+  };
+}
+
+export function contextMeter(percent: number | undefined, width: number): string {
+  const { filled, empty } = contextMeterParts(percent, width);
+  return `${filled}${empty}`;
+}
+
 function ContextStatus({ status, short = false }: {
   readonly status: ComposerStatus;
   readonly short?: boolean;
 }) {
-  const color = contextUsageColor(status.contextPercent, COLOR.muted);
+  const color = contextUsageColor(status.contextPercent);
+  const width = short ? 6 : 12;
+  const { filled, empty } = contextMeterParts(status.contextPercent, width);
+  const percent = status.contextPercent === undefined ? '?' : `${status.contextPercent}%`;
   return (
-    <span fg={color}>
-      {short ? status.contextShort : status.context}
-    </span>
+    <>
+      <span fg={color}>{filled}</span>
+      <span fg={COLOR.muted}>{empty}</span>
+      <span fg={color}> {percent}</span>
+    </>
   );
 }
 
-/** Above the input: mode + access on the left, workspace on the right. */
-export function ComposerControlsBar({ status, layout }: {
-  readonly status: ComposerStatus;
-  readonly layout: ComposerStatusLayout;
-}) {
-  const workspaceValue = layout === 'wide' ? status.workspace : status.workspaceShort;
-
-  if (layout === 'narrow') {
-    return (
-      <box flexDirection="column" width="100%" paddingLeft={1} paddingRight={1} paddingBottom={0}>
-        <text fg={COLOR.muted} wrapMode="none">
-          <StatusPair label="mode" value={status.mode} accent />
-        </text>
-        <text fg={COLOR.muted} wrapMode="none">
-          <StatusPair label="access" value={status.permissionShort} />
-        </text>
-        <text fg={COLOR.muted} wrapMode="none">
-          <StatusPair label="lang" value={status.languageShort} />
-        </text>
-        <text fg={COLOR.muted} wrapMode="none">
-          <StatusPair label="workspace" value={workspaceValue} />
-        </text>
-      </box>
-    );
-  }
-
-  return (
-    <box
-      width="100%"
-      flexDirection="row"
-      justifyContent="space-between"
-      paddingLeft={1}
-      paddingRight={1}
-      paddingBottom={0}
-    >
-      <text fg={COLOR.muted} wrapMode="none">
-        <StatusPair label="mode" value={status.mode} accent />
-        <StatusSeparator />
-        <StatusPair label="access" value={layout === 'compact' ? status.permissionShort : status.permission} />
-        <StatusSeparator />
-        <StatusPair label="lang" value={layout === 'compact' ? status.languageShort : status.language} />
-      </text>
-      <text fg={COLOR.muted} wrapMode="none">
-        <StatusPair label="workspace" value={workspaceValue} />
-      </text>
-    </box>
-  );
-}
-
-/** Below the input: model · reasoning on the left, context pinned to the right. */
+/**
+ * Below the input: mode · access on the left, model + context on the right.
+ * No lang / workspace here — workspace lives in the session topbar.
+ */
 export function ComposerStatusBar({ status, layout }: {
   readonly status: ComposerStatus;
   readonly layout: ComposerStatusLayout;
@@ -127,9 +110,14 @@ export function ComposerStatusBar({ status, layout }: {
   if (layout === 'narrow') {
     return (
       <box flexDirection="column" width="100%" paddingLeft={1} paddingRight={1} paddingTop={0}>
-        <text fg={COLOR.textSoft} wrapMode="none">{status.model}</text>
-        <text fg={COLOR.muted} wrapMode="none">{status.reasoning}</text>
         <text fg={COLOR.muted} wrapMode="none">
+          <StatusPair label="mode" value={status.mode} accent />
+          <StatusSeparator />
+          <StatusPair label="access" value={status.permissionShort} />
+        </text>
+        <text fg={COLOR.muted} wrapMode="none">
+          <span fg={COLOR.textSoft}>{status.model}</span>
+          {' '}
           <ContextStatus status={status} short />
         </text>
       </box>
@@ -146,11 +134,16 @@ export function ComposerStatusBar({ status, layout }: {
       paddingTop={0}
     >
       <text fg={COLOR.muted} wrapMode="none">
-        <span fg={COLOR.textSoft}>{status.model}</span>
+        <StatusPair label="mode" value={status.mode} accent />
         <StatusSeparator />
-        <span fg={COLOR.muted}>{status.reasoning}</span>
+        <StatusPair
+          label="access"
+          value={layout === 'compact' ? status.permissionShort : status.permission}
+        />
       </text>
       <text fg={COLOR.muted} wrapMode="none">
+        <span fg={COLOR.textSoft}>{status.model}</span>
+        {' '}
         <ContextStatus status={status} short={layout === 'compact'} />
       </text>
     </box>

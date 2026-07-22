@@ -253,13 +253,12 @@ export const PICKER_CHROME = {
 export const TOOL_CHROME = {
   branchFirst: '  ╰ ',
   branchRest: '    ',
-  // Use the same visual footprint for all terminal tool statuses; color carries state.
-  glyphCompleted: '●',
-  glyphFailed: '●',
-  glyphCancelled: '●',
-  // Larger filled circle for in-flight tools; UI also breathes this glyph.
-  glyphRunning: '●',
-  glyphUnknown: '●',
+  // Crush design: completed ✓, running ◇; color still carries status tone.
+  glyphCompleted: '✓',
+  glyphFailed: '✗',
+  glyphCancelled: '○',
+  glyphRunning: '◇',
+  glyphUnknown: '·',
 } as const;
 
 export function toolStatusColor(status: string): string {
@@ -278,11 +277,15 @@ export function toolStatusColor(status: string): string {
   }
 }
 
-export function contextUsageColor(percent: number | undefined, fallback = COLOR.muted): string {
+/**
+ * Context usage accent for the status-bar meter.
+ * Low usage stays cyan (design), high usage escalates to warning/danger.
+ */
+export function contextUsageColor(percent: number | undefined, fallback = COLOR.user): string {
   if (percent === undefined) return fallback;
   if (percent >= 90) return COLOR.danger;
   if (percent >= 80) return COLOR.warning;
-  return fallback;
+  return COLOR.user;
 }
 
 export type TuiThemeState = {
