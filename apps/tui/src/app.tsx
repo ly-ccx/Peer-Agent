@@ -2154,7 +2154,14 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       })() : null}
 
       {commandNotice && !commandSurface ? (
-        <text fg={COLOR.accent}>{commandNotice}</text>
+        <box
+          flexShrink={0}
+          width="100%"
+          paddingLeft={layout.outerPadding}
+          paddingRight={layout.outerPadding}
+        >
+          <text fg={COLOR.accent}>{commandNotice}</text>
+        </box>
       ) : null}
 
       {permissionSurface ? (

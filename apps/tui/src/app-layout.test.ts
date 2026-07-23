@@ -296,6 +296,18 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('}, 180);');
   });
 
+  test('insets transient notices with the responsive outer padding', () => {
+    const noticeSource = appSource.slice(
+      appSource.indexOf('{commandNotice && !commandSurface ? ('),
+      appSource.indexOf('{permissionSurface ? ('),
+    );
+
+    expect(noticeSource).toContain('width="100%"');
+    expect(noticeSource).toContain('paddingLeft={layout.outerPadding}');
+    expect(noticeSource).toContain('paddingRight={layout.outerPadding}');
+    expect(noticeSource).toContain('<text fg={COLOR.accent}>{commandNotice}</text>');
+  });
+
   test('auto-dismisses transient command notices and cancels superseded timers', () => {
     expect(appSource).toContain('const COMMAND_NOTICE_DURATION_MS = 3_000;');
     expect(appSource).toContain('if (!commandNotice) return;');
