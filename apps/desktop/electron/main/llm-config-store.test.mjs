@@ -517,6 +517,47 @@ test('Qoder local auth provider exposes catalog display label without changing r
   }
 }));
 
+test('Qoder keeps the selected context tier when a saved model is absent from the live catalog', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const provider = store.addProvider({
+    provider: 'openai',
+    channelId: 'qoder',
+    authMethod: 'qoder_local_auth',
+    name: 'Qoder',
+    model: 'cmodel',
+    contextWindow: 180_000,
+    maxOutputTokens: 20_000,
+    modelOptions: [{
+      id: 'contextTier',
+      label: '上下文档位',
+      kind: 'select',
+      defaultValue: '200K',
+      choices: [
+        {
+          value: '200K',
+          label: '200K',
+          requestValue: '200K',
+          contextWindow: 200_000,
+          inputTokenLimit: 180_000,
+        },
+        {
+          value: '1M',
+          label: '1M',
+          requestValue: '1M',
+          contextWindow: 1_000_000,
+          inputTokenLimit: 980_000,
+        },
+      ],
+    }],
+    modelOptionValues: { contextTier: '1M' },
+  });
+
+  assert.equal(provider.contextWindow, 980_000);
+  assert.equal(provider.maxOutputTokens, 20_000);
+  assert.deepEqual(provider.modelOptionValues, { contextTier: '1M' });
+  assert.equal(provider.modelOptions?.[0]?.choices?.[1]?.inputTokenLimit, 980_000);
+}));
+
 test('Qoder connection test probes the selected private chat model', async () => withStore(async ({ configFile }) => {
   const previousFetch = globalThis.fetch;
   const previousToken = process.env.QODER_ACCESS_TOKEN;

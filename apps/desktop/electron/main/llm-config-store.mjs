@@ -166,11 +166,15 @@ function isLocalCliAuthMethod(value) {
 }
 
 function applyQoderModelMetadata(item) {
-  const metadata = getQoderModelMetadata(item.model);
-  if (metadata?.label) item.modelLabel = metadata.label;
+  const catalogMetadata = getQoderModelMetadata(item.model);
+  if (catalogMetadata?.label) item.modelLabel = catalogMetadata.label;
+  const metadata = catalogMetadata || {
+    contextWindow: item.contextWindow,
+    modelOptions: item.modelOptions,
+  };
   // 与发送链路同口径：按 contextTier 档位投影后的可用输入窗口（1M 档 − 输出预留），
-  // 而非目录原始窗口。渲染层回退分母与压缩预检都消费该值，口径不齐会导致
-  // 切模型后百分比失真（328k/180k=100%）甚至误触发压缩。
+  // 而非目录原始窗口。历史模型不在实时目录时，继续使用持久化的 modelOptions，
+  // 避免已选择的档位退回旧 contextWindow。
   const optionProjection = resolveQoderModelOptionProjection(metadata, item.modelOptionValues);
   item.contextWindow = optionProjection?.inputTokenLimit
     ?? metadata?.contextWindow
