@@ -15,7 +15,7 @@ describe('context pressure', () => {
     expect(estimateTokensFromMessages(cjk)).toBeGreaterThan(estimateTokensFromMessages(english));
   });
 
-  test('triggerTokens prefers the larger of estimate and usage', () => {
+  test('keeps next-request input and compaction pressure independent from historical usage', () => {
     const messages: ModelMessage[] = [
       { role: 'user', content: 'hello world' },
       { role: 'assistant', content: 'hi' },
@@ -25,33 +25,33 @@ describe('context pressure', () => {
       usage: { inputTokens: 1, cacheReadTokens: 0 },
       contextWindow: 100_000,
     });
-    expect(lowUsage.triggerTokens).toBe(lowUsage.estimatedTokens);
-    expect(lowUsage.triggerTokens).toBeGreaterThan(1);
+    expect(lowUsage.nextRequestInputTokens).toBe(lowUsage.estimatedTokens);
+    expect(lowUsage.compactionPressureTokens).toBe(lowUsage.estimatedTokens);
+    expect(lowUsage.nextRequestInputTokens).toBeGreaterThan(1);
 
     const highUsage = computeContextPressure({
       messages,
       usage: { inputTokens: 12_000, cacheReadTokens: 3_000 },
       contextWindow: 100_000,
     });
-    expect(highUsage.triggerTokens).toBe(15_000);
     expect(highUsage.usageTokens).toBe(15_000);
+    expect(highUsage.nextRequestInputTokens).toBe(highUsage.estimatedTokens);
+    expect(highUsage.compactionPressureTokens).toBe(highUsage.estimatedTokens);
+    expect(highUsage.nextRequestInputTokens).toBeLessThan(highUsage.usageTokens);
   });
 
   test('shouldCompact when pressure reaches 80% of the window', () => {
-    const messages: ModelMessage[] = [
-      { role: 'user', content: 'x'.repeat(4_000) },
-    ];
     const below = computeContextPressure({
-      messages,
-      usage: { inputTokens: 79_000 },
+      messages: [{ role: 'user', content: 'x'.repeat(315_000) }],
+      usage: { inputTokens: 99_000 },
       contextWindow: 100_000,
     });
     expect(below.shouldCompact).toBe(false);
     expect(below.percent).toBe(79);
 
     const above = computeContextPressure({
-      messages,
-      usage: { inputTokens: 80_000 },
+      messages: [{ role: 'user', content: 'x'.repeat(320_000) }],
+      usage: { inputTokens: 1 },
       contextWindow: 100_000,
     });
     expect(above.shouldCompact).toBe(true);
@@ -68,6 +68,7 @@ describe('context pressure', () => {
       draftText: 'd'.repeat(4_000),
     });
     expect(withDraft.estimatedTokens).toBeGreaterThan(withoutDraft.estimatedTokens);
-    expect(withDraft.triggerTokens).toBeGreaterThan(withoutDraft.triggerTokens);
+    expect(withDraft.nextRequestInputTokens).toBeGreaterThan(withoutDraft.nextRequestInputTokens);
+    expect(withDraft.compactionPressureTokens).toBeGreaterThan(withoutDraft.compactionPressureTokens);
   });
 });

@@ -1,13 +1,14 @@
 import type { ModelMessage } from '@peer-agent/runtime-node';
 
 /**
- * CLI context-pressure helpers aligned with Desktop Runtime preflight:
- * - triggerTokens = max(local estimate of messages, last usage input+cacheRead)
- * - auto-compact when triggerTokens / contextWindow >= triggerRatio (0.8)
+ * CLI context accounting aligned with Desktop Runtime preflight:
+ * - nextRequestInputTokens estimates the messages in the next final request
+ * - compactionPressureTokens is the independent conservative auto-compact signal
+ * - provider usage is diagnostic only and never locks either value at a historical high-water mark
  *
  * Desktop also folds tool-schema tokens into the estimate. CLI currently
- * estimates conversation messages only (no tool-schema inventory here),
- * which is still far closer to Desktop than "last usage only".
+ * estimates conversation messages only because tool schemas are projected later
+ * by the runtime pipeline.
  */
 
 export const TUI_COMPACTION_CONFIG = Object.freeze({
@@ -27,7 +28,10 @@ export interface ContextPressureUsage {
 export interface ContextPressureInfo {
   readonly estimatedTokens: number;
   readonly usageTokens: number;
-  readonly triggerTokens: number;
+  /** Estimated input for the next final provider request; used by status display. */
+  readonly nextRequestInputTokens: number;
+  /** Conservative pressure used only for automatic compaction decisions. */
+  readonly compactionPressureTokens: number;
   readonly contextWindow: number | null;
   readonly triggerRatio: number;
   readonly shouldCompact: boolean;
@@ -103,23 +107,29 @@ export function computeContextPressure(input: {
     estimateTokensFromMessages(input.messages)
     + Math.ceil(estimateTextTokens(input.draftText));
   const usageTokens = usageTokensFromSnapshot(input.usage);
-  const triggerTokens = Math.max(estimatedTokens, usageTokens);
+  // The next request is projected from the messages that will actually be sent.
+  // Keep compaction pressure independent so historical provider usage cannot pin
+  // either the status display or a post-compaction snapshot at an old high-water mark.
+  const nextRequestInputTokens = estimatedTokens;
+  const compactionPressureTokens = estimatedTokens;
   const contextWindow =
     Number.isFinite(input.contextWindow) && (input.contextWindow as number) > 0
       ? Math.floor(input.contextWindow as number)
       : null;
   const triggerRatio = TUI_COMPACTION_CONFIG.triggerRatio;
   const shouldCompact =
-    contextWindow != null && triggerTokens >= Math.floor(contextWindow * triggerRatio);
+    contextWindow != null
+    && compactionPressureTokens >= Math.floor(contextWindow * triggerRatio);
   const percent =
     contextWindow != null
-      ? Math.min(100, Math.max(0, Math.round((triggerTokens / contextWindow) * 100)))
+      ? Math.min(100, Math.max(0, Math.round((nextRequestInputTokens / contextWindow) * 100)))
       : null;
 
   return {
     estimatedTokens,
     usageTokens,
-    triggerTokens,
+    nextRequestInputTokens,
+    compactionPressureTokens,
     contextWindow,
     triggerRatio,
     shouldCompact,

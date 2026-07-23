@@ -46,10 +46,10 @@ describe('composer status', () => {
     });
   });
 
-  test('prefers triggerTokens pressure numerator over last usage alone', () => {
-    // usage alone would be ~2%; pressure seed is 5% of the window.
+  test('uses next-request input tokens instead of the last provider usage high-water mark', () => {
+    // Historical usage is ~79%; the next request projection is 5% of the window.
     expect(contextStatus(
-      { inputTokens: 7_060 },
+      { inputTokens: 280_000 },
       353_000,
       17_650,
     )).toEqual({
@@ -63,8 +63,8 @@ describe('composer status', () => {
       mode: 'chat',
       modelLabel: 'gpt-5.6-sol',
       contextWindow: 353_000,
-      usage: { inputTokens: 7_060 },
-      triggerTokens: 17_650,
+      usage: { inputTokens: 280_000 },
+      nextRequestInputTokens: 17_650,
     })).toMatchObject({
       context: 'context 5%',
       contextShort: 'ctx 5%',

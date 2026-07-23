@@ -1215,7 +1215,7 @@ describe('chat controller', () => {
     expect(planCoordinator.getSnapshot()?.plan.title).toBe('Plan only');
   });
 
-  test('publishes triggerTokens pressure after a completed turn', async () => {
+  test('publishes next-request input separately from historical usage', async () => {
     const model: ChatModelPort = {
       initialize: (input) => initialState(input.input),
       async runTurn(state) {
@@ -1239,7 +1239,9 @@ describe('chat controller', () => {
     await controller.send('hello pressure');
     const snapshot = controller.getSnapshot();
     expect(snapshot.usage?.inputTokens).toBe(1_200);
-    expect(snapshot.triggerTokens).toBeGreaterThanOrEqual(1_500);
+    expect(snapshot.nextRequestInputTokens).toBeGreaterThan(0);
+    expect(snapshot.nextRequestInputTokens).toBeLessThan(1_500);
+    expect(snapshot.compactionPressureTokens).toBe(snapshot.nextRequestInputTokens);
   });
 
   test('auto-compacts before send when pressure crosses the soft threshold', async () => {
@@ -1270,8 +1272,8 @@ describe('chat controller', () => {
               ...state.modelMessages,
               { role: 'assistant', content: `reply-${state.modelMessages.length}` },
             ],
-            // Keep usage high enough that the next send still sees pressure
-            // until structural compact rewrites history.
+            // Historical usage remains high after compaction; it must not pin the
+            // next-request projection or retrigger compaction by itself.
             usage: { inputTokens: 90_000 },
           },
           output: `reply-${state.modelMessages.length}`,
@@ -1287,13 +1289,12 @@ describe('chat controller', () => {
 
     // Seed enough transcript for structural compact to have something to summarize.
     for (let index = 0; index < 12; index += 1) {
-      await controller.send(`seed-${index} ${'x'.repeat(200)}`);
+      await controller.send(`seed-${index} ${'x'.repeat(30_000)}`);
     }
     const beforeAuto = controller.getSnapshot().messages.length;
     expect(beforeAuto).toBeGreaterThan(10);
-    expect(controller.getSnapshot().triggerTokens).toBeGreaterThanOrEqual(80_000);
 
-    // High usage + non-trivial history should have already auto-compacted during
+    // Large projected input + non-trivial history should have already auto-compacted during
     // the seed loop (and/or on the next send). Durable UI separator is the signal.
     await controller.send('trigger-auto-compact');
     const after = controller.getSnapshot();
@@ -1345,7 +1346,7 @@ describe('chat controller', () => {
       getContextWindow: () => 100_000,
     });
 
-    // Seed transcript so structural compact has content; high usage keeps pressure hot.
+    // Seed transcript so structural compact has content without crossing the threshold yet.
     for (let index = 0; index < 12; index += 1) {
       await controller.send(`seed-${index} ${'x'.repeat(200)}`);
     }
@@ -1361,7 +1362,7 @@ describe('chat controller', () => {
       }
     });
 
-    await controller.send(`pressure ${'y'.repeat(200)}`);
+    await controller.send(`pressure ${'y'.repeat(320_000)}`);
     unsubscribe();
 
     expect(statuses).toContain('compacting');

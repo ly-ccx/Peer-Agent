@@ -1242,7 +1242,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     reasoningEffort: selectedModel?.reasoningEffort,
     usage: snapshot.usage,
     contextWindow,
-    triggerTokens: snapshot.triggerTokens,
+    nextRequestInputTokens: snapshot.nextRequestInputTokens,
   });
   const layout = responsiveLayout(terminal.width, terminal.height);
   const topbarDividerWidth = composerContentWidth(terminal.width, layout.outerPadding);

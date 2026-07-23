@@ -92,11 +92,10 @@ export interface ChatSnapshot {
   readonly session?: RuntimeSessionSnapshot;
   readonly plan?: PlanSnapshot;
   readonly usage?: ModelUsage;
-  /**
-   * Compression-pressure numerator (aligned with Desktop Runtime triggerTokens):
-   * max(local estimate of model messages, last usage input+cacheRead).
-   */
-  readonly triggerTokens?: number;
+  /** Estimated input tokens for the next final provider request. */
+  readonly nextRequestInputTokens?: number;
+  /** Independent conservative pressure used only to trigger automatic compaction. */
+  readonly compactionPressureTokens?: number;
   readonly error?: string;
 }
 
@@ -388,7 +387,8 @@ export function createChatController(options: {
     const pressure = pressureFor(messages, next.usage);
     return {
       ...next,
-      triggerTokens: pressure.triggerTokens,
+      nextRequestInputTokens: pressure.nextRequestInputTokens,
+      compactionPressureTokens: pressure.compactionPressureTokens,
     };
   };
 
@@ -717,7 +717,8 @@ export function createChatController(options: {
       const images = sendOptions?.images?.filter((image) => Boolean(image.url)) ?? [];
       if ((!trimmed && images.length === 0) || activeTurn) return;
 
-      // Pre-send auto-compact: same soft threshold as Desktop (triggerTokens >= 0.8 * window).
+      // Pre-send auto-compact: same soft threshold as Desktop
+      // (compactionPressureTokens >= 0.8 * window).
       // Uses structural compact (manual /compact path), not Desktop LLM summarizer.
       const draftForPressure = trimmed
         || (images.length > 0 ? `[image${images.length > 1 ? 's' : ''}]` : '');
