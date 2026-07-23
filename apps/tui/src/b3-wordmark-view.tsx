@@ -62,7 +62,7 @@ export function breatheSignalColor(phase: number): string {
   // Sine wave: 0 at start, 1 at midpoint, 0 at end.
   const sine = (Math.sin(phase * Math.PI * 2 - Math.PI / 2) + 1) / 2;
   const t = sine * BREATHE_AMPLITUDE;
-  return lerpHex(base, '#ffffff', t);
+  return lerpHex(base, COLOR.brandHighlight, t);
 }
 
 // ── Line renderer ──────────────────────────────────────────────────

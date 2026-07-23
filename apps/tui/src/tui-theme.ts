@@ -21,7 +21,18 @@ export type TuiPalette = {
   readonly panel: string;
   readonly panelRaised: string;
   readonly userPanel: string;
+  /** Selected menu/list item background. */
   readonly selection: string;
+  /** Mouse/keyboard text selection, always supplied as a foreground/background pair. */
+  readonly textSelectionBackground: string;
+  readonly textSelectionForeground: string;
+  /** Editable text interaction states. */
+  readonly inputBackground: string;
+  readonly inputForeground: string;
+  readonly inputPlaceholder: string;
+  readonly inputSelectionBackground: string;
+  readonly inputSelectionForeground: string;
+  readonly inputCursor: string;
   readonly border: string;
   readonly borderFocus: string;
   readonly text: string;
@@ -31,6 +42,10 @@ export type TuiPalette = {
   readonly dim: string;
   readonly accent: string;
   readonly accentSoft: string;
+  /** Interactive link foreground. */
+  readonly link: string;
+  /** Bright endpoint for branded glow/gradient effects. */
+  readonly brandHighlight: string;
   readonly user: string;
   readonly info: string;
   readonly success: string;
@@ -65,6 +80,14 @@ export const DARK_PALETTE: TuiPalette = Object.freeze({
   panelRaised: '#161616',
   userPanel: '#10212a',
   selection: '#1c1c1c',
+  textSelectionBackground: '#A3E635',
+  textSelectionForeground: '#111827',
+  inputBackground: '#111111',
+  inputForeground: '#E5E5E5',
+  inputPlaceholder: '#737373',
+  inputSelectionBackground: '#A3E635',
+  inputSelectionForeground: '#111827',
+  inputCursor: '#A3E635',
   border: '#2a2a2a',
   borderFocus: '#3f3f46',
 
@@ -76,6 +99,8 @@ export const DARK_PALETTE: TuiPalette = Object.freeze({
 
   accent: '#a3e635',
   accentSoft: '#bef264',
+  link: '#7dd3fc',
+  brandHighlight: '#ffffff',
   user: '#7dd3fc',
   info: '#7189c9',
 
@@ -109,6 +134,14 @@ export const LIGHT_PALETTE: TuiPalette = Object.freeze({
   panelRaised: '#F7F9FC', // --paper-sheet
   userPanel: '#E8F1FF', // soft user blue
   selection: '#E8EEF7', // --chrome-hover-ish
+  textSelectionBackground: '#1E3A5F',
+  textSelectionForeground: '#FFFFFF',
+  inputBackground: '#FFFFFF',
+  inputForeground: '#1A2332',
+  inputPlaceholder: '#6B7585',
+  inputSelectionBackground: '#1E3A5F',
+  inputSelectionForeground: '#FFFFFF',
+  inputCursor: '#4D7C0F',
   border: '#DCE0E8', // --chrome-hairline
   borderFocus: '#C8CEDA',
 
@@ -120,6 +153,8 @@ export const LIGHT_PALETTE: TuiPalette = Object.freeze({
 
   accent: '#4D7C0F', // deep lime on light
   accentSoft: '#65A30D',
+  link: '#2563EB',
+  brandHighlight: '#FFFFFF',
   user: '#2563EB', // azure-ish user
   info: '#4F7CFF', // --azure-seal
 

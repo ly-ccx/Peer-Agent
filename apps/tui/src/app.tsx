@@ -5,6 +5,7 @@ import type { LocalAccessLevel } from '@peer-agent/protocol';
 import type { RuntimeModelSelection } from '@peer-agent/runtime-node';
 
 import { B3Wordmark } from './b3-wordmark-view.tsx';
+import { ThemedText, ThemedTextarea } from './themed-primitives.tsx';
 import { MarkdownView } from './markdown-view.tsx';
 import { copyTextToClipboard, selectionCopyNotice } from './tui-clipboard.ts';
 import { buildTuiHelpSections } from './command-registry.ts';
@@ -163,11 +164,11 @@ function ThinkingStatusLabel({
   const frame = useStatusAnimationFrame(true, THINKING_SPINNER_INTERVAL_MS);
   return (
     <box flexDirection="column">
-      <text selectable fg={COLOR.muted}>
+      <ThemedText selectable fg={COLOR.muted}>
         {thinkingStatusLabel(frame, hasThinkingContent)}
-      </text>
+      </ThemedText>
       {thinkingText ? (
-        <text selectable fg={COLOR.muted}>{thinkingText}</text>
+        <ThemedText selectable fg={COLOR.muted}>{thinkingText}</ThemedText>
       ) : null}
     </box>
   );
@@ -221,11 +222,11 @@ function ToolActivityTimeline({
       </box>
       <box flexGrow={1} minWidth={0} flexDirection="column">
         <box flexDirection="row" width="100%">
-          <text selectable fg={color} width={12} wrapMode="none">{presentation.toolName}</text>
-          <text selectable fg={COLOR.textSoft} flexGrow={1} wrapMode="none">{summary}</text>
-          <text selectable fg={presentation.status === 'running' ? COLOR.accent : COLOR.muted} width={7} wrapMode="none">
+          <ThemedText selectable fg={color} width={12} wrapMode="none">{presentation.toolName}</ThemedText>
+          <ThemedText selectable fg={COLOR.textSoft} flexGrow={1} wrapMode="none">{summary}</ThemedText>
+          <ThemedText selectable fg={presentation.status === 'running' ? COLOR.accent : COLOR.muted} width={7} wrapMode="none">
             {formatToolDuration(presentation)}
-          </text>
+          </ThemedText>
           <text fg={canExpand ? COLOR.muted : COLOR.subtle} width={2} wrapMode="none" onMouseDown={canExpand ? onToggle : undefined}>
             {canExpand ? (expanded ? '−' : '+') : ' '}
           </text>
@@ -233,7 +234,7 @@ function ToolActivityTimeline({
         {detailLines.map((line, index) => (
           <box key={`${presentation.toolCallId ?? presentation.toolName}-detail-${index}`} flexDirection="row">
             <text fg={COLOR.subtle}>│ </text>
-            <text selectable fg={COLOR.toolDetail}>{line || ' '}</text>
+            <ThemedText selectable fg={COLOR.toolDetail}>{line || ' '}</ThemedText>
           </box>
         ))}
       </box>
@@ -283,7 +284,7 @@ function ChatHistory({
                 <text fg={COLOR.accent}><strong>{label}</strong></text>
                 <text fg={COLOR.muted}> {'─'.repeat(8)}</text>
               </box>
-              <text selectable fg={COLOR.muted}>{compactSummary || ' '}</text>
+              <ThemedText selectable fg={COLOR.muted}>{compactSummary || ' '}</ThemedText>
             </box>
           );
         }
@@ -354,13 +355,13 @@ function ChatHistory({
                         );
                       }
                       return (
-                        <text
+                        <ThemedText
                           key={`${message.id}-thinking-${segmentIndex}`}
                           selectable
                           fg={COLOR.muted}
                         >
                           {text}
-                        </text>
+                        </ThemedText>
                       );
                     }
                     if (segment.type === 'tool-call') {
@@ -379,9 +380,9 @@ function ChatHistory({
                   : (
                     <>
                       {thinkingText && message.pending ? (
-                        <text selectable fg={COLOR.muted}>{thinkingText}</text>
+                        <ThemedText selectable fg={COLOR.muted}>{thinkingText}</ThemedText>
                       ) : thinkingText ? (
-                        <text selectable fg={COLOR.muted}>{thinkingText}</text>
+                        <ThemedText selectable fg={COLOR.muted}>{thinkingText}</ThemedText>
                       ) : null}
                       {legacyTools.map((tool, toolIndex) => {
                         const toolKey = `${message.id}-tool-${tool.toolCallId ?? toolIndex}`;
@@ -411,9 +412,9 @@ function ChatHistory({
               <box flexDirection="row" flexGrow={1} minWidth={0}>
                 <text fg={COLOR.user}>{APP_CHROME.userRailBar}</text>
                 <box flexDirection="column" flexGrow={1} minWidth={0}>
-                  {userText ? <text selectable fg={COLOR.text}>{userText}</text> : null}
-                  {imageLabel ? <text selectable fg={COLOR.user}>{imageLabel}</text> : null}
-                  {!userText && !imageLabel ? <text selectable fg={COLOR.textSoft}>{' '}</text> : null}
+                  {userText ? <ThemedText selectable fg={COLOR.text}>{userText}</ThemedText> : null}
+                  {imageLabel ? <ThemedText selectable fg={COLOR.user}>{imageLabel}</ThemedText> : null}
+                  {!userText && !imageLabel ? <ThemedText selectable fg={COLOR.textSoft}>{' '}</ThemedText> : null}
                 </box>
               </box>
             </box>
@@ -695,7 +696,7 @@ function Composer({ controller, snapshot, disabled, focused, locale, onValueChan
 
   return (
     <box flexDirection="column" border borderStyle="rounded" borderColor={snapshot.status === 'idle' ? COLOR.border : COLOR.accent} height={5} paddingLeft={1} paddingRight={1} backgroundColor={COLOR.panel}>
-      <textarea
+      <ThemedTextarea
         ref={editor}
         focused={focused && !disabled}
         placeholder={composerPlaceholder(locale, disabled)}
@@ -902,11 +903,21 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const selectedModelRef = useRef<RuntimeModelSelection | null>(
     modelSelection?.getSelection() ?? null,
   );
+  const persistence = useMemo(() => createTuiConversationPersistence({
+    workspacePath: host.workspaceRoot,
+    initialMode: 'chat',
+    initialModel: modelSelection?.getSelection() ?? {
+      providerId: 'unknown',
+      modelId: modelLabel,
+      reasoningEffort: 'default',
+    },
+  }), [host.workspaceRoot, modelLabel, modelSelection]);
   const controller = useMemo(
     () => createChatController({
       host,
       model,
       planCoordinator,
+      getConversationId: () => persistence.ensureConversation(),
       getContextWindow: () => {
         const selection = selectedModelRef.current;
         if (!selection || !modelSelection) return undefined;
@@ -916,7 +927,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         )?.contextWindow;
       },
     }),
-    [host, model, planCoordinator, modelSelection],
+    [host, model, planCoordinator, modelSelection, persistence],
   );
   controllerRef.current = controller;
   const [snapshot, setSnapshot] = useState(() => controller.getSnapshot());
@@ -1013,15 +1024,6 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     readonly providerId: string;
     readonly modelId: string;
   } | null>(null);
-  const persistence = useMemo(() => createTuiConversationPersistence({
-    workspacePath: host.workspaceRoot,
-    initialMode: controller.getSnapshot().mode,
-    initialModel: modelSelection?.getSelection() ?? {
-      providerId: 'unknown',
-      modelId: modelLabel,
-      reasoningEffort: 'default',
-    },
-  }), [controller, host.workspaceRoot, modelLabel, modelSelection]);
   const [accessLevel, setAccessLevel] = useState<LocalAccessLevel>(() => host.getAccessLevel());
   const [locale, setLocale] = useState<TuiLocale>(() => languageStore?.getLocale() ?? 'zh-CN');
   const [themeMode, setThemeMode] = useState<TuiThemeMode>(() => themeStore?.getMode() ?? 'dark');

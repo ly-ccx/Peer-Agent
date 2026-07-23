@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { COLOR, MARKDOWN_CHROME } from './tui-theme.ts';
+import { ThemedText } from './themed-primitives.tsx';
 
 type TableAlignment = 'left' | 'center' | 'right';
 
@@ -143,7 +144,7 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
     if (match[2] !== undefined) nodes.push(<strong key={key}>{inline(match[2], key)}</strong>);
     else if (match[4] !== undefined) nodes.push(<span key={key} fg={COLOR.code} bg={COLOR.codeBackground}>{match[4]}</span>);
     else if (match[6] !== undefined) nodes.push(<em key={key}>{inline(match[6], key)}</em>);
-    else nodes.push(<span key={key} fg="#7dd3fc">{match[7]}</span>);
+    else nodes.push(<span key={key} fg={COLOR.link}>{match[7]}</span>);
     cursor = pattern.lastIndex;
   }
   if (cursor < text.length) nodes.push(text.slice(cursor));
@@ -168,7 +169,7 @@ function DiffCodeBlock({ text }: { text: string }) {
   return (
     <box flexDirection="column">
       {(text || ' ').split('\n').map((line, index) => (
-        <text key={`diff-line-${index}`} selectable fg={diffLineColor(line)}>{line || ' '}</text>
+        <ThemedText key={`diff-line-${index}`} selectable fg={diffLineColor(line)}>{line || ' '}</ThemedText>
       ))}
     </box>
   );
@@ -248,10 +249,10 @@ function TableBlock({ headers, rows, alignments }: {
 
   return (
     <box flexDirection="column" marginBottom={1}>
-      <text selectable fg={COLOR.textSoft}><strong>{headerLine}</strong></text>
-      <text selectable fg={COLOR.muted}>{separator}</text>
+      <ThemedText selectable fg={COLOR.textSoft}><strong>{headerLine}</strong></ThemedText>
+      <ThemedText selectable fg={COLOR.muted}>{separator}</ThemedText>
       {dataLines.map((line, i) => (
-        <text key={`row-${i}`} selectable fg={COLOR.text}>{line}</text>
+        <ThemedText key={`row-${i}`} selectable fg={COLOR.text}>{line}</ThemedText>
       ))}
     </box>
   );
@@ -268,25 +269,25 @@ export function MarkdownView({ content }: { content: string }) {
             : block.level === 2
               ? MARKDOWN_CHROME.headingH2
               : MARKDOWN_CHROME.headingH3;
-          return <text key={key} selectable fg={block.level <= 2 ? COLOR.accent : COLOR.text} marginBottom={1}><strong>{prefix}{inline(block.text, key)}</strong></text>;
+          return <ThemedText key={key} selectable fg={block.level <= 2 ? COLOR.accent : COLOR.text} marginBottom={1}><strong>{prefix}{inline(block.text, key)}</strong></ThemedText>;
         }
         if (block.type === 'code') {
           return (
             <box key={key} flexDirection="column" backgroundColor={COLOR.codeBackground} paddingLeft={1} paddingRight={1} marginBottom={1}>
-              {block.language ? <text selectable fg={COLOR.muted}>{block.language}</text> : null}
+              {block.language ? <ThemedText selectable fg={COLOR.muted}>{block.language}</ThemedText> : null}
               {block.language.toLowerCase() === 'diff'
                 ? <DiffCodeBlock text={block.text} />
-                : <text selectable fg={COLOR.text}>{block.text || ' '}</text>}
+                : <ThemedText selectable fg={COLOR.text}>{block.text || ' '}</ThemedText>}
             </box>
           );
         }
-        if (block.type === 'quote') return <text key={key} selectable fg={COLOR.muted} marginBottom={1}>{MARKDOWN_CHROME.quotePrefix}{inline(block.text, key)}</text>;
-        if (block.type === 'rule') return <text key={key} selectable fg={COLOR.muted} marginBottom={1}>────────────────────────────────────────</text>;
+        if (block.type === 'quote') return <ThemedText key={key} selectable fg={COLOR.muted} marginBottom={1}>{MARKDOWN_CHROME.quotePrefix}{inline(block.text, key)}</ThemedText>;
+        if (block.type === 'rule') return <ThemedText key={key} selectable fg={COLOR.muted} marginBottom={1}>────────────────────────────────────────</ThemedText>;
         if (block.type === 'list') {
           return (
             <box key={key} flexDirection="column" marginBottom={1}>
               {block.items.map((item, itemIndex) => (
-                <text key={`${key}-${itemIndex}`} selectable fg={COLOR.text}>{block.ordered ? `${itemIndex + 1}. ` : MARKDOWN_CHROME.listBullet}{inline(item, `${key}-${itemIndex}`)}</text>
+                <ThemedText key={`${key}-${itemIndex}`} selectable fg={COLOR.text}>{block.ordered ? `${itemIndex + 1}. ` : MARKDOWN_CHROME.listBullet}{inline(item, `${key}-${itemIndex}`)}</ThemedText>
               ))}
             </box>
           );
@@ -301,7 +302,7 @@ export function MarkdownView({ content }: { content: string }) {
             />
           );
         }
-        return <text key={key} selectable fg={COLOR.text} marginBottom={1}>{inline(block.text, key)}</text>;
+        return <ThemedText key={key} selectable fg={COLOR.text} marginBottom={1}>{inline(block.text, key)}</ThemedText>;
       })}
     </box>
   );
