@@ -2716,6 +2716,30 @@
   font-variant-numeric: tabular-nums;
 }
 
+.chat-header-cap-builtin-group + .chat-header-cap-builtin-group {
+  margin-top: 1px;
+}
+
+.chat-header-cap-builtin-head {
+  width: 100%;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--graphite-soft);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-header-cap-builtin-head:hover {
+  background: var(--chrome-hover);
+}
+
 .chat-header-cap-item {
   display: flex;
   align-items: center;

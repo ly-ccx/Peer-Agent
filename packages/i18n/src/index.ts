@@ -587,6 +587,9 @@ export type TranslationKey =
   | 'header.capabilities.group.mcp'
   | 'header.capabilities.group.plugin'
   | 'header.capabilities.group.builtin'
+  | 'header.capabilities.builtin.localExecution'
+  | 'header.capabilities.builtin.browserControl'
+  | 'header.capabilities.builtin.webAccess'
   | 'header.capabilities.empty'
   | 'header.capabilities.manage'
   | 'header.capabilities.toolCount'
@@ -1182,6 +1185,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'header.capabilities.group.mcp': 'MCP',
     'header.capabilities.group.plugin': '插件',
     'header.capabilities.group.builtin': '内置',
+    'header.capabilities.builtin.localExecution': '本地执行',
+    'header.capabilities.builtin.browserControl': '浏览器操作',
+    'header.capabilities.builtin.webAccess': '网页访问',
     'header.capabilities.empty': '暂无已挂载的能力',
     'header.capabilities.manage': '管理',
     'header.capabilities.toolCount': '{count} 个工具',
@@ -1776,6 +1782,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'header.capabilities.group.mcp': 'MCP',
     'header.capabilities.group.plugin': 'Plugins',
     'header.capabilities.group.builtin': 'Built-in',
+    'header.capabilities.builtin.localExecution': 'Local execution',
+    'header.capabilities.builtin.browserControl': 'Browser control',
+    'header.capabilities.builtin.webAccess': 'Web access',
     'header.capabilities.empty': 'No capabilities mounted',
     'header.capabilities.manage': 'Manage',
     'header.capabilities.toolCount': '{count} tools',

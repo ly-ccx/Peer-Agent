@@ -5,6 +5,7 @@ import type {
   LocalAccessLevel,
   SkillSummary,
 } from '@peer-agent/protocol';
+import type { Dispatch, SetStateAction } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../../clientApi';
 
@@ -27,6 +28,17 @@ interface CapabilityService {
   readonly rows: readonly CapabilityRow[];
 }
 
+type BuiltinGroupLabelKey =
+  | 'header.capabilities.builtin.localExecution'
+  | 'header.capabilities.builtin.browserControl'
+  | 'header.capabilities.builtin.webAccess';
+
+interface BuiltinCapabilityGroup {
+  readonly key: 'localExecution' | 'browserControl' | 'webAccess';
+  readonly labelKey: BuiltinGroupLabelKey;
+  readonly rows: readonly CapabilityRow[];
+}
+
 interface CapabilityGroup {
   readonly key: 'skill' | 'mcp' | 'plugin' | 'builtin';
   readonly labelKey:
@@ -40,6 +52,8 @@ interface CapabilityGroup {
    * rows 仍保留全部工具用于计数/兜底。
    */
   readonly services?: readonly CapabilityService[];
+  /** 内置能力按用途分组；仅改变展示层，不改变 manifest、状态或执行入口。 */
+  readonly builtinGroups?: readonly BuiltinCapabilityGroup[];
 }
 
 /**
@@ -116,18 +130,27 @@ export function ChatHeaderCapabilities({
   const [open, setOpen] = useState(false);
   const [capabilities, setCapabilities] = useState<readonly CapabilityManifest[]>([]);
   const [skills, setSkills] = useState<readonly SkillSummary[]>([]);
-  // 已展开的服务节点 id 集合；默认空集合 = 全部折叠（仅显示服务名 + 工具数）。
+  // 默认折叠二级入口，仅在用户选择服务或内置分组后展示具体能力。
   const [expandedServices, setExpandedServices] = useState<ReadonlySet<string>>(() => new Set());
+  const [expandedBuiltinGroups, setExpandedBuiltinGroups] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const anchorRef = useRef<HTMLDivElement | null>(null);
 
-  const toggleService = useCallback((serviceId: string) => {
-    setExpandedServices((prev) => {
-      const next = new Set(prev);
-      if (next.has(serviceId)) next.delete(serviceId);
-      else next.add(serviceId);
-      return next;
-    });
-  }, []);
+  const toggleExpandedItem = useCallback(
+    (
+      itemId: string,
+      setItems: Dispatch<SetStateAction<ReadonlySet<string>>>,
+    ) => {
+      setItems((prev) => {
+        const next = new Set(prev);
+        if (next.has(itemId)) next.delete(itemId);
+        else next.add(itemId);
+        return next;
+      });
+    },
+    [],
+  );
 
   // 实时拉取能力与技能；失败静默兜底为空态。
   useEffect(() => {
@@ -221,11 +244,35 @@ export function ChatHeaderCapabilities({
         rows: bucket.rows,
       };
     });
+    const builtinGroups = ([
+      {
+        key: 'localExecution',
+        labelKey: 'header.capabilities.builtin.localExecution',
+        rows: builtinRows.filter((row) => row.id.startsWith('local.shell.')),
+      },
+      {
+        key: 'browserControl',
+        labelKey: 'header.capabilities.builtin.browserControl',
+        rows: builtinRows.filter((row) => row.id.startsWith('local.web.control.')),
+      },
+      {
+        key: 'webAccess',
+        labelKey: 'header.capabilities.builtin.webAccess',
+        rows: builtinRows.filter(
+          (row) => !row.id.startsWith('local.shell.') && !row.id.startsWith('local.web.control.'),
+        ),
+      },
+    ] satisfies BuiltinCapabilityGroup[]).filter((group) => group.rows.length > 0);
     return [
       { key: 'skill', labelKey: 'header.capabilities.group.skill', rows: skillRows },
       { key: 'mcp', labelKey: 'header.capabilities.group.mcp', rows: mcpRows, services: mcpServices },
       { key: 'plugin', labelKey: 'header.capabilities.group.plugin', rows: pluginRows },
-      { key: 'builtin', labelKey: 'header.capabilities.group.builtin', rows: builtinRows },
+      {
+        key: 'builtin',
+        labelKey: 'header.capabilities.group.builtin',
+        rows: builtinRows,
+        builtinGroups,
+      },
     ];
   }, [capabilities, skills, i18n, localAccessLevel]);
 
@@ -289,7 +336,7 @@ export function ChatHeaderCapabilities({
                             type="button"
                             className="chat-header-cap-service-head"
                             aria-expanded={isExpanded}
-                            onClick={() => toggleService(service.id)}
+                            onClick={() => toggleExpandedItem(service.id, setExpandedServices)}
                           >
                             <svg
                               className={`chat-header-cap-service-caret${isExpanded ? ' expanded' : ''}`}
@@ -331,17 +378,69 @@ export function ChatHeaderCapabilities({
                         </div>
                       );
                     })
-                  : group.rows.map((row) => (
-                      <div className="chat-header-cap-item" key={`${group.key}:${row.id}`}>
-                        <span className={`chat-header-cap-dot tone-${row.tone}`} aria-hidden="true" />
-                        <span className="chat-header-cap-item-name" title={row.name}>
-                          {row.name}
-                        </span>
-                        <span className="chat-header-cap-item-status">
-                          {i18n.t(STATUS_KEY[row.tone])}
-                        </span>
-                      </div>
-                    ))}
+                  : group.builtinGroups
+                    ? group.builtinGroups.map((builtinGroup) => {
+                        const isExpanded = expandedBuiltinGroups.has(builtinGroup.key);
+                        return (
+                          <div className="chat-header-cap-builtin-group" key={builtinGroup.key}>
+                            <button
+                              type="button"
+                              className="chat-header-cap-builtin-head"
+                              aria-expanded={isExpanded}
+                              onClick={() =>
+                                toggleExpandedItem(builtinGroup.key, setExpandedBuiltinGroups)
+                              }
+                            >
+                              <svg
+                                className={`chat-header-cap-service-caret${isExpanded ? ' expanded' : ''}`}
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                aria-hidden="true"
+                              >
+                                <path d="m9 18 6-6-6-6" />
+                              </svg>
+                              <span className="chat-header-cap-service-name">
+                                {i18n.t(builtinGroup.labelKey)}
+                              </span>
+                              <span className="chat-header-cap-service-count">
+                                {builtinGroup.rows.length}
+                              </span>
+                            </button>
+                            {isExpanded ? (
+                              <div className="chat-header-cap-service-tools">
+                                {builtinGroup.rows.map((row) => (
+                                  <div className="chat-header-cap-item" key={`${group.key}:${row.id}`}>
+                                    <span className={`chat-header-cap-dot tone-${row.tone}`} aria-hidden="true" />
+                                    <span className="chat-header-cap-item-name" title={row.name}>
+                                      {row.name}
+                                    </span>
+                                    <span className="chat-header-cap-item-status">
+                                      {i18n.t(STATUS_KEY[row.tone])}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })
+                    : group.rows.map((row) => (
+                        <div className="chat-header-cap-item" key={`${group.key}:${row.id}`}>
+                          <span className={`chat-header-cap-dot tone-${row.tone}`} aria-hidden="true" />
+                          <span className="chat-header-cap-item-name" title={row.name}>
+                            {row.name}
+                          </span>
+                          <span className="chat-header-cap-item-status">
+                            {i18n.t(STATUS_KEY[row.tone])}
+                          </span>
+                        </div>
+                      ))}
               </div>
             ))
           )}
