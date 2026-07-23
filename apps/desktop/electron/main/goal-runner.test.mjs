@@ -641,7 +641,12 @@ test('Runner 每轮重新读 store，不依赖旧内存 plan', async () => {
 });
 
 test('runtime failed: 失败会进入 failed 状态', async () => {
-  const plan = createApprovedPlan();
+  const plan = createApprovedPlan({
+    tasks: [
+      { taskId: 't1', order: 0, title: 'Task 1', status: 'running', evidenceRefs: [] },
+      { taskId: 't2', order: 1, title: 'Task 2', status: 'pending', evidenceRefs: [] },
+    ],
+  });
   const runtime = {
     async runGoalTurn() {
       throw new Error('runtime exploded');
@@ -655,7 +660,63 @@ test('runtime failed: 失败会进入 failed 状态', async () => {
   assert.equal(got.status, 'failed');
   assert.equal(got.runner.status, 'failed');
   assert.equal(got.runner.lastError, 'runtime exploded');
+  assert.equal(got.tasks.find((task) => task.taskId === 't1')?.status, 'failed');
+  assert.equal(got.tasks.find((task) => task.taskId === 't1')?.failureReason, 'runtime exploded');
+  assert.equal(got.tasks.find((task) => task.taskId === 't2')?.status, 'pending');
 });
+
+test('stream failed: 会把 running 叶子任务同步标 failed', async () => {
+  const plan = createApprovedPlan({
+    tasks: [
+      { taskId: 't1', order: 0, title: 'Task 1', status: 'running', evidenceRefs: [] },
+      { taskId: 't2', order: 1, title: 'Task 2', status: 'pending', evidenceRefs: [] },
+    ],
+  });
+  const runtime = {
+    async runGoalTurn() {
+      return {
+        terminalStatus: 'error',
+        failureReason: 'provider stream disconnected',
+      };
+    },
+  };
+  const events = [];
+  const runner = createRunner({ runtime, events });
+
+  await runner.start(plan.planId, { awaitIdle: true });
+
+  const got = store.getPlan(plan.planId);
+  assert.equal(got.status, 'failed');
+  assert.equal(got.runner.status, 'failed');
+  assert.equal(got.tasks.find((task) => task.taskId === 't1')?.status, 'failed');
+  assert.equal(got.tasks.find((task) => task.taskId === 't1')?.failureReason, 'provider stream disconnected');
+  assert.equal(got.tasks.find((task) => task.taskId === 't2')?.status, 'pending');
+  assert.ok(
+    events.some((event) => event.type === 'goalRunner:failed' && event.failedTaskIds?.includes('t1')),
+    '应在 failed 事件里带回 failedTaskIds',
+  );
+});
+
+test('stream failed: 若无 running 叶子，会把首个 pending 标 failed 避免面板假 pending', async () => {
+  const plan = createApprovedPlan();
+  const runtime = {
+    async runGoalTurn() {
+      return {
+        terminalStatus: 'error',
+        failureReason: 'provider stream disconnected',
+      };
+    },
+  };
+  const runner = createRunner({ runtime });
+
+  await runner.start(plan.planId, { awaitIdle: true });
+
+  const got = store.getPlan(plan.planId);
+  assert.equal(got.status, 'failed');
+  assert.equal(got.tasks.find((task) => task.taskId === 't1')?.status, 'failed');
+  assert.equal(got.tasks.find((task) => task.taskId === 't2')?.status, 'pending');
+});
+
 
 test('AgentRunOutcome: requestedUserInput 会阻塞 Runner 且不继续自驱', async () => {
   const plan = createApprovedPlan();

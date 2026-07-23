@@ -74,6 +74,96 @@ function collectLeafTasks(plan) {
   return out;
 }
 
+
+function markActiveLeafTasksFailed(goalPlanStore, planId, message) {
+  const plan = typeof goalPlanStore?.getPlan === 'function' ? goalPlanStore.getPlan(planId) : null;
+  if (!plan || typeof goalPlanStore?.recordTaskEvidence !== 'function') return [];
+  const reason = typeof message === 'string' && message.trim()
+    ? message.trim()
+    : 'Goal Runner failed';
+  const updated = [];
+  for (const task of collectLeafTasks(plan)) {
+    const status = String(task?.status ?? 'pending');
+    if (status !== 'running' && status !== 'waiting_user' && status !== 'blocked') continue;
+    const taskId = typeof task?.taskId === 'string' ? task.taskId : null;
+    if (!taskId) continue;
+    try {
+      goalPlanStore.recordTaskEvidence(planId, taskId, {
+        status: 'failed',
+        failureReason: reason,
+        result: reason,
+      });
+      updated.push(taskId);
+    } catch (error) {
+      // Keep plan-level failure even if a single task write fails.
+    }
+  }
+  // If no leaf was in an active status, mark the first non-terminal pending leaf so
+  // the panel reflects that work stopped mid-flight rather than looking "still pending".
+  if (updated.length === 0) {
+    const pending = collectLeafTasks(goalPlanStore.getPlan(planId) || plan)
+      .find((task) => String(task?.status ?? 'pending') === 'pending' && typeof task?.taskId === 'string');
+    if (pending) {
+      try {
+        goalPlanStore.recordTaskEvidence(planId, pending.taskId, {
+          status: 'failed',
+          failureReason: reason,
+          result: reason,
+        });
+        updated.push(pending.taskId);
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return updated;
+}
+
+function failPlanRun(goalPlanStore, planId, message, {
+  appendRunEvent,
+  emit,
+  summaryCode = 'runner_failed',
+  source = 'runner',
+  turnNumber = null,
+} = {}) {
+  const reason = typeof message === 'string' && message.trim()
+    ? message.trim()
+    : 'Goal Runner failed';
+  const current = typeof goalPlanStore?.getPlan === 'function' ? goalPlanStore.getPlan(planId) : null;
+  if (current && !TERMINAL_PLAN_STATUSES.has(current.status)) {
+    goalPlanStore.setPlanStatus(planId, 'failed');
+  }
+  const failedTaskIds = markActiveLeafTasksFailed(goalPlanStore, planId, reason);
+  if (typeof goalPlanStore?.setRunnerState === 'function') {
+    goalPlanStore.setRunnerState(planId, {
+      enabled: true,
+      status: 'failed',
+      intent: 'block',
+      phase: 'blocked',
+      lastError: reason,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+  if (typeof appendRunEvent === 'function') {
+    appendRunEvent(planId, {
+      type: 'problem_found',
+      summary: `Goal Runner failed: ${reason}`,
+      payload: {
+        summaryCode,
+        message: reason,
+        reason: source,
+        ...(turnNumber == null ? {} : { turnNumber }),
+        ...(failedTaskIds.length ? { failedTaskIds } : {}),
+      },
+    });
+  }
+  if (typeof emit === 'function') {
+    emit('goalRunner:failed', { planId, error: reason, failedTaskIds });
+  }
+  return failedTaskIds;
+}
+
+
 function collectStringSet(values) {
   const refs = new Set();
   for (const value of Array.isArray(values) ? values : []) {
@@ -879,23 +969,12 @@ export function createGoalRunner({
       .catch((error) => {
         const message = errorMessage(error);
         logger?.warn?.('[goal-runner] pump failed:', error);
-        const current = goalPlanStore.getPlan(planId);
-        if (current && !TERMINAL_PLAN_STATUSES.has(current.status)) {
-          goalPlanStore.setPlanStatus(planId, 'failed');
-        }
-        goalPlanStore.setRunnerState(planId, {
-          enabled: true,
-          status: 'failed',
-          intent: 'block',
-          lastError: message,
-          updatedAt: now(),
+        failPlanRun(goalPlanStore, planId, message, {
+          appendRunEvent,
+          emit,
+          summaryCode: 'runner_failed',
+          source: 'pump',
         });
-        appendRunEvent(planId, {
-          type: 'problem_found',
-          summary: `Goal Runner failed: ${message}`,
-          payload: { source: 'pump', summaryCode: 'runner_failed', message, error: message },
-        });
-        emit('goalRunner:failed', { planId, error: message });
       })
       .finally(() => {
         if (sessions.get(planId) === session) sessions.delete(planId);
@@ -1442,21 +1521,13 @@ export function createGoalRunner({
         });
       } catch (error) {
         const message = errorMessage(error);
-        goalPlanStore.setPlanStatus(planId, 'failed');
-        goalPlanStore.setRunnerState(planId, {
-          enabled: true,
-          status: 'failed',
-          intent: 'block',
-          phase: 'blocked',
-          lastError: message,
-          updatedAt: now(),
+        failPlanRun(goalPlanStore, planId, message, {
+          appendRunEvent,
+          emit,
+          summaryCode: 'turn_failed',
+          source: 'runGoalTurn',
+          turnNumber,
         });
-        appendRunEvent(planId, {
-          type: 'problem_found',
-          summary: `Goal Runner turn failed: ${message}`,
-          payload: { source: 'runGoalTurn', summaryCode: 'turn_failed', message, error: message, turnNumber },
-        });
-        emit('goalRunner:failed', { planId, error: message });
         return getState(planId);
       }
 
@@ -1563,21 +1634,13 @@ export function createGoalRunner({
 
       if (result?.terminalStatus === 'error') {
         const message = result.failureReason || 'Goal Runner turn stream failed';
-        goalPlanStore.setPlanStatus(planId, 'failed');
-        goalPlanStore.setRunnerState(planId, {
-          enabled: true,
-          status: 'failed',
-          intent: 'block',
-          phase: 'blocked',
-          lastError: message,
-          updatedAt: now(),
+        failPlanRun(goalPlanStore, planId, message, {
+          appendRunEvent,
+          emit,
+          summaryCode: 'stream_failed',
+          source: 'stream_error',
+          turnNumber,
         });
-        appendRunEvent(planId, {
-          type: 'problem_found',
-          summary: `Goal Runner stream failed: ${message}`,
-          payload: { summaryCode: 'stream_failed', message, reason: 'stream_error' },
-        });
-        emit('goalRunner:failed', { planId, error: message });
         return getState(planId);
       }
 
@@ -1657,21 +1720,13 @@ export function createGoalRunner({
 
       if (result?.failed) {
         const message = result.failureReason || 'Goal Runner failed';
-        goalPlanStore.setPlanStatus(planId, 'failed');
-        goalPlanStore.setRunnerState(planId, {
-          enabled: true,
-          status: 'failed',
-          intent: 'block',
-          phase: 'blocked',
-          lastError: message,
-          updatedAt: now(),
+        failPlanRun(goalPlanStore, planId, message, {
+          appendRunEvent,
+          emit,
+          summaryCode: 'runner_failed',
+          source: 'runtime_failed',
+          turnNumber,
         });
-        appendRunEvent(planId, {
-          type: 'problem_found',
-          summary: `Goal Runner failed: ${message}`,
-          payload: { summaryCode: 'runner_failed', message, reason: 'runtime_failed' },
-        });
-        emit('goalRunner:failed', { planId, error: message });
         return getState(planId);
       }
 
