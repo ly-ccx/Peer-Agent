@@ -48,16 +48,23 @@ function parseBlocks(markdown: string): MarkdownBlock[] {
       continue;
     }
 
-    const fence = line.match(/^\s*```([^`]*)$/);
+    const fence = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
     if (fence) {
+      const marker = fence[1]!;
+      const markerCharacter = marker[0]!;
+      const isClosingFence = (candidate: string): boolean => {
+        const trimmed = candidate.trim();
+        return trimmed.length >= marker.length
+          && [...trimmed].every((character) => character === markerCharacter);
+      };
       const body: string[] = [];
       index += 1;
-      while (index < lines.length && !/^\s*```\s*$/.test(lines[index] ?? '')) {
+      while (index < lines.length && !isClosingFence(lines[index] ?? '')) {
         body.push(lines[index] ?? '');
         index += 1;
       }
       if (index < lines.length) index += 1;
-      blocks.push({ type: 'code', language: fence[1]?.trim() ?? '', text: body.join('\n') });
+      blocks.push({ type: 'code', language: fence[2]?.trim() ?? '', text: body.join('\n') });
       continue;
     }
 

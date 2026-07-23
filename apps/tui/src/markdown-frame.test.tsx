@@ -31,21 +31,32 @@ afterEach(() => {
 });
 
 describe('Markdown terminal frame', () => {
-  test('formats headings, emphasis, inline code, and fenced code without source markers', async () => {
+  test('formats headings, emphasis, inline code, and fenced TypeScript without source markers', async () => {
     const frame = await renderMarkdown([
       '## Rendered heading',
       '',
       'Text with **bold**, *italic*, and `inline code`.',
       '',
       '```ts',
-      'const answer = 42;',
+      'type Result = {',
+      "  status: 'ok';",
+      '  value: number;',
+      '};',
+      '',
+      'const result: Result = { status: \'ok\', value: 42 };',
       '```',
+      '',
+      'The code above remains multiline.',
     ].join('\n'));
 
     expect(frame).toContain('› Rendered heading');
     expect(frame).toContain('Text with bold, italic, and inline code.');
     expect(frame).toContain('ts');
-    expect(frame).toContain('const answer = 42;');
+    expect(frame).toContain('type Result = {');
+    expect(frame).toContain("  status: 'ok';");
+    expect(frame).toContain('  value: number;');
+    expect(frame).toContain('const result: Result');
+    expect(frame).toContain('The code above remains multiline.');
     expect(frame).not.toContain('##');
     expect(frame).not.toContain('**');
     expect(frame).not.toContain('`inline code`');
