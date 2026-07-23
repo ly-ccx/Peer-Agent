@@ -287,4 +287,42 @@ describe('Markdown terminal frame', () => {
     ];
     expect([r, g, b]).toEqual(expected);
   });
+
+  test('applies distinct colors for TypeScript keywords, strings, and comments', async () => {
+    const setup = await renderMarkdownSetup([
+      '```ts',
+      "const label = 'ok'; // note",
+      'type Flag = boolean;',
+      '```',
+    ].join('\n'));
+
+    const keyword = colorForText(setup, 'const');
+    const stringLiteral = colorForText(setup, "'ok'");
+    const comment = colorForText(setup, '// note');
+    const typeName = colorForText(setup, 'Flag');
+
+    expect(keyword).toEqual([184, 243, 91, 255]); // accent
+    expect(stringLiteral).toEqual([104, 211, 145, 255]); // success
+    expect(comment).toEqual([105, 115, 125, 255]); // muted
+    expect(typeName).toEqual([169, 217, 232, 255]); // info
+    expect(new Set([keyword, stringLiteral, comment, typeName].map((color) => color?.join(','))).size).toBe(4);
+  });
+
+  test('highlights Python and SQL fences with semantic colors', async () => {
+    const setup = await renderMarkdownSetup([
+      '```python',
+      'def run():',
+      '    return 1',
+      '```',
+      '',
+      '```sql',
+      'SELECT 1;',
+      '```',
+    ].join('\n'));
+
+    expect(colorForText(setup, 'def')).toEqual([184, 243, 91, 255]);
+    expect(colorForText(setup, 'SELECT')).toEqual([184, 243, 91, 255]);
+    expect(colorForText(setup, '1')).toEqual([230, 184, 106, 255]); // warning/number
+  });
+
 });

@@ -4,6 +4,7 @@ import { useTerminalDimensions } from '@opentui/react';
 
 import { COLOR, MARKDOWN_CHROME } from './tui-theme.ts';
 import { ThemedText } from './themed-primitives.tsx';
+import { highlightCode, type SyntaxTokenKind } from './code-highlighter.ts';
 
 type TableAlignment = 'left' | 'center' | 'right';
 
@@ -180,6 +181,42 @@ function diffLineColor(line: string): string {
   if (line.startsWith('+')) return COLOR.diffAdd;
   if (line.startsWith('-')) return COLOR.diffDelete;
   return COLOR.text;
+}
+
+
+function syntaxTokenColor(kind: SyntaxTokenKind): string {
+  switch (kind) {
+    case 'keyword':
+      return COLOR.accent;
+    case 'type':
+      return COLOR.info;
+    case 'string':
+    case 'property':
+      return COLOR.success;
+    case 'comment':
+      return COLOR.muted;
+    case 'number':
+    case 'literal':
+      return COLOR.warning;
+    case 'function':
+      return COLOR.accentSoft;
+    case 'operator':
+    case 'punctuation':
+      return COLOR.textSoft;
+    default:
+      return COLOR.text;
+  }
+}
+
+function HighlightedCodeBlock({ text, language }: { text: string; language: string }) {
+  const tokens = highlightCode(text || ' ', language);
+  return (
+    <MarkdownText selectable>
+      {tokens.map((token, index) => (
+        <span key={`tok-${index}`} fg={syntaxTokenColor(token.kind)}>{token.text}</span>
+      ))}
+    </MarkdownText>
+  );
 }
 
 function DiffCodeBlock({ text }: { text: string }) {
@@ -386,7 +423,9 @@ export function MarkdownView({ content, width, tone = 'default', textAttributes 
               {block.language ? <MarkdownText selectable fg={COLOR.muted}>{block.language}</MarkdownText> : null}
               {block.language.toLowerCase() === 'diff'
                 ? <DiffCodeBlock text={block.text} />
-                : <MarkdownText selectable fg={COLOR.text}>{block.text || ' '}</MarkdownText>}
+                : block.language
+                  ? <HighlightedCodeBlock text={block.text} language={block.language} />
+                  : <MarkdownText selectable fg={COLOR.text}>{block.text || ' '}</MarkdownText>}
             </box>
           );
         }
