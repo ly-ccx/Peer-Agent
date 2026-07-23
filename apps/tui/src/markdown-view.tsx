@@ -10,7 +10,7 @@ type MarkdownBlock =
   | { type: 'heading'; level: number; text: string }
   | { type: 'paragraph'; text: string }
   | { type: 'quote'; text: string }
-  | { type: 'list'; ordered: boolean; items: string[] }
+  | { type: 'list'; ordered: boolean; start: number; items: string[] }
   | { type: 'code'; language: string; text: string }
   | { type: 'rule' }
   | { type: 'table'; headers: string[]; rows: string[][]; alignments: TableAlignment[] };
@@ -98,6 +98,7 @@ function parseBlocks(markdown: string): MarkdownBlock[] {
     const listItem = line.match(/^\s*(?:([-+*])|(\d+)[.)])\s+(.+)$/);
     if (listItem) {
       const ordered = Boolean(listItem[2]);
+      const start = ordered ? Number.parseInt(listItem[2]!, 10) : 1;
       const items = [listItem[3]!];
       index += 1;
       while (index < lines.length) {
@@ -106,7 +107,7 @@ function parseBlocks(markdown: string): MarkdownBlock[] {
         items.push(next[3]!);
         index += 1;
       }
-      blocks.push({ type: 'list', ordered, items });
+      blocks.push({ type: 'list', ordered, start, items });
       continue;
     }
 
@@ -309,9 +310,15 @@ function TableBlock({ headers, rows, alignments, width }: {
   return <DataTable headers={headers} rows={rows} alignments={alignments} />;
 }
 
-export function MarkdownView({ content, width }: { content: string; width?: number }) {
+export function MarkdownView({ content, width, tone = 'default' }: {
+  content: string;
+  width?: number;
+  tone?: 'default' | 'muted';
+}) {
   const terminal = useTerminalDimensions();
   const availableWidth = Math.max(20, width ?? terminal.width);
+  const bodyColor = tone === 'muted' ? COLOR.muted : COLOR.text;
+  const headingColor = tone === 'muted' ? COLOR.textSoft : COLOR.accent;
   const blocks = parseBlocks(content || ' ');
   return (
     <box flexDirection="column">
@@ -326,7 +333,7 @@ export function MarkdownView({ content, width }: { content: string; width?: numb
             : block.level === 2
               ? MARKDOWN_CHROME.headingH2
               : MARKDOWN_CHROME.headingH3;
-          return <ThemedText key={key} selectable fg={block.level <= 2 ? COLOR.accent : COLOR.text} marginBottom={marginBottom}><strong>{prefix}{inline(block.text, key)}</strong></ThemedText>;
+          return <ThemedText key={key} selectable fg={block.level <= 2 ? headingColor : bodyColor} marginBottom={marginBottom}><strong>{prefix}{inline(block.text, key)}</strong></ThemedText>;
         }
         if (block.type === 'code') {
           return (
@@ -344,7 +351,7 @@ export function MarkdownView({ content, width }: { content: string; width?: numb
           return (
             <box key={key} flexDirection="column" marginBottom={marginBottom}>
               {block.items.map((item, itemIndex) => (
-                <ThemedText key={`${key}-${itemIndex}`} selectable fg={COLOR.text}>{block.ordered ? `${itemIndex + 1}. ` : MARKDOWN_CHROME.listBullet}{inline(item, `${key}-${itemIndex}`)}</ThemedText>
+                <ThemedText key={`${key}-${itemIndex}`} selectable fg={bodyColor}>{block.ordered ? `${block.start + itemIndex}. ` : MARKDOWN_CHROME.listBullet}{inline(item, `${key}-${itemIndex}`)}</ThemedText>
               ))}
             </box>
           );
@@ -361,7 +368,7 @@ export function MarkdownView({ content, width }: { content: string; width?: numb
             </box>
           );
         }
-        return <ThemedText key={key} selectable fg={COLOR.text} marginBottom={marginBottom}>{inline(block.text, key)}</ThemedText>;
+        return <ThemedText key={key} selectable fg={bodyColor} marginBottom={marginBottom}>{inline(block.text, key)}</ThemedText>;
       })}
     </box>
   );

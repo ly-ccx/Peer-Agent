@@ -7,8 +7,12 @@ import { COLOR } from './tui-theme.ts';
 
 const renderers: TestRendererSetup[] = [];
 
-async function renderMarkdownSetup(content: string, width = 80): Promise<TestRendererSetup> {
-  const setup = await testRender(<MarkdownView content={content} width={width} />, { width, height: 30 });
+async function renderMarkdownSetup(
+  content: string,
+  width = 80,
+  tone: 'default' | 'muted' = 'default',
+): Promise<TestRendererSetup> {
+  const setup = await testRender(<MarkdownView content={content} width={width} tone={tone} />, { width, height: 30 });
   renderers.push(setup);
   await setup.flush();
   await setup.renderOnce();
@@ -198,6 +202,31 @@ describe('Markdown terminal frame', () => {
     const secondRow = multipleLines.findIndex((line) => line.includes('Second paragraph.'));
     expect(secondRow - firstRow).toBe(2);
     expect(multipleLines.slice(secondRow + 1).every((line) => !line.trim())).toBe(true);
+  });
+
+  test('renders muted reasoning lists with emphasis and inline code instead of source markers', async () => {
+    const setup = await renderMarkdownSetup([
+      '1. **响应结构不匹配**：客户端把 `Content-Type` 当成 JSON。',
+      '',
+      '2. **并发写 checkpoint 的 race**：旧的 `upload.parts` 覆盖新状态。',
+      '',
+      '3. **状态不一致**：检查 `completedPartIds`。',
+    ].join('\n'), 100, 'muted');
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain('1. 响应结构不匹配：客户端把 Content-Type 当成 JSON。');
+    expect(frame).toContain('2. 并发写 checkpoint 的 race：旧的 upload.parts 覆盖新状态。');
+    expect(frame).toContain('3. 状态不一致：检查 completedPartIds。');
+    expect(frame).not.toContain('**');
+    expect(frame).not.toContain('`');
+
+    const body = colorForText(setup, '客户端把');
+    const hex = COLOR.muted.replace('#', '');
+    expect(body?.slice(0, 3)).toEqual([
+      Number.parseInt(hex.slice(0, 2), 16),
+      Number.parseInt(hex.slice(2, 4), 16),
+      Number.parseInt(hex.slice(4, 6), 16),
+    ]);
   });
 
   test('list items use body text foreground color like paragraphs', async () => {

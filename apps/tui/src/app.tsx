@@ -169,7 +169,7 @@ function ThinkingStatusLabel({
         {thinkingStatusLabel(frame, hasThinkingContent)}
       </ThemedText>
       {thinkingText ? (
-        <ThemedText selectable fg={COLOR.muted}>{thinkingText}</ThemedText>
+        <MarkdownView content={thinkingText} tone="muted" />
       ) : null}
     </box>
   );
@@ -377,13 +377,11 @@ function ChatHistory({
                         );
                       }
                       return (
-                        <ThemedText
+                        <MarkdownView
                           key={`${message.id}-thinking-${segmentIndex}`}
-                          selectable
-                          fg={COLOR.muted}
-                        >
-                          {text}
-                        </ThemedText>
+                          content={text}
+                          tone="muted"
+                        />
                       );
                     }
                     if (segment.type === 'tool-call') {
@@ -401,10 +399,8 @@ function ChatHistory({
                   })
                   : (
                     <>
-                      {thinkingText && message.pending ? (
-                        <ThemedText selectable fg={COLOR.muted}>{thinkingText}</ThemedText>
-                      ) : thinkingText ? (
-                        <ThemedText selectable fg={COLOR.muted}>{thinkingText}</ThemedText>
+                      {thinkingText ? (
+                        <MarkdownView content={thinkingText} tone="muted" />
                       ) : null}
                       {legacyTools.map((tool, toolIndex) => {
                         const toolKey = `${message.id}-tool-${tool.toolCallId ?? toolIndex}`;
