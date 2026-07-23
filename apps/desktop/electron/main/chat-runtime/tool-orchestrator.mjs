@@ -286,7 +286,16 @@ export async function executeModelToolCall({
   // 「服务名: 工具名」），表达层用它渲染工具卡标题。这里按 name 从投影反查并随
   // tool-call 事件透传，避免渲染层只能显示裸 capability 名（如 mcp__server__tool）。
   const displayName = resolveCapabilityDisplayName(runtimeProjection, name);
-  webContents.send('chat:stream:tool-call', { streamId, tool: name, displayName, args, toolCallId });
+  // 工具生命周期时间以主进程为真值来源：覆盖权限等待与实际执行，renderer 只负责展示。
+  const startedAtMs = Date.now();
+  webContents.send('chat:stream:tool-call', {
+    streamId,
+    tool: name,
+    displayName,
+    args,
+    toolCallId,
+    startedAtMs,
+  });
   // Goal Runner 实时工具计数：在工具派发处经 toolContext 透传单一接缝触发，覆盖所有 provider。
   if (typeof toolContext?.onToolCall === 'function') {
     try {
@@ -335,7 +344,19 @@ export async function executeModelToolCall({
     mcpRegistry,
     goalPlanStore,
   });
-  if (signal?.aborted) return { aborted: true, args, output: '' };
+  if (signal?.aborted) {
+    const endedAtMs = Date.now();
+    webContents.send('chat:stream:tool-result', {
+      streamId,
+      toolCallId,
+      result: '工具调用已中断',
+      evidenceRefs: [],
+      startedAtMs,
+      endedAtMs,
+      durationMs: Math.max(0, endedAtMs - startedAtMs),
+    });
+    return { aborted: true, args, output: '' };
+  }
   const rawOutput = materializeToolOutput(result);
   const evidenceRefs = collectToolEvidenceRefs({ toolCallId, execution: result.execution });
   if (evidenceRefs.length > 0 && typeof goalPlanStore?.recordEvidenceRefs === 'function') {
@@ -355,7 +376,16 @@ export async function executeModelToolCall({
   }
   const output = appendEvidenceRefsToToolOutput(rawOutput, evidenceRefs);
   const streamResult = formatToolResultForStream({ name, args, output });
-  webContents.send('chat:stream:tool-result', { streamId, toolCallId, result: streamResult, evidenceRefs });
+  const endedAtMs = Date.now();
+  webContents.send('chat:stream:tool-result', {
+    streamId,
+    toolCallId,
+    result: streamResult,
+    evidenceRefs,
+    startedAtMs,
+    endedAtMs,
+    durationMs: Math.max(0, endedAtMs - startedAtMs),
+  });
   const controlSignal = extractToolControlSignal(result);
   return { aborted: false, args, output, result, controlSignal };
 }

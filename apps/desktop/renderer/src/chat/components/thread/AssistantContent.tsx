@@ -2,6 +2,7 @@ import { memo, useContext, useEffect, useMemo, useState } from 'react';
 import { useConversationToolProgress } from '../../hooks/useConversationState';
 import { parseInteractionToolViewFromCandidates } from '../../state/interactionToolView';
 import { groupSegments, splitFinalTextGroup } from '../../state/streamSegments';
+import { buildProcessingSummary } from '../../state/processingSummary';
 import { formatDuration } from '../../state/format';
 import {
   createProcessExpansionState,
@@ -93,25 +94,6 @@ function useAutoCollapsingExpanded(isActive: boolean) {
   return { expanded: state.expanded, toggleExpanded };
 }
 
-function buildProcessingSummary(groups: SegmentGroup[], durationMs: number | undefined, isZh: boolean): string {
-  const prefix = isZh ? '已处理' : 'Processed';
-  if (typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs > 0) {
-    return `${prefix} ${formatDuration(durationMs)}`;
-  }
-
-  const toolCallCount = groups.reduce(
-    (count, group) => count + (group.type === 'tool-call-group' ? group.calls.length : 0),
-    0,
-  );
-  if (toolCallCount > 0) {
-    return isZh
-      ? `${prefix} ${toolCallCount} 次工具调用`
-      : `${prefix} ${toolCallCount} tool call${toolCallCount > 1 ? 's' : ''}`;
-  }
-
-  return prefix;
-}
-
 function AssistantContentImpl({
   conversationId,
   segments,
@@ -167,7 +149,7 @@ function AssistantContentImpl({
     return null;
   }
 
-  const processingSummary = buildProcessingSummary(groups, durationMs, isZh);
+  const processingSummary = buildProcessingSummary(groups, durationMs, isStreaming, isZh);
   // 过程进行中展示完整时间线；过程结束后（含最终正文仍在流式输出时）：
   // - 默认把最后一段非空正文留在折叠区外（即使其后还有 tool-call）；
   // - 有未完成交互卡时，该轮所有 text 都外露（选项依赖的决策上下文）。
@@ -416,6 +398,9 @@ function ToolCallCard({ tc, isZh }: { readonly tc: ToolCallLegacy; readonly isZh
           )}
         </span>
         <span className="tool-call-label">{labelPreview}</span>
+        {isDone && typeof tc.durationMs === 'number' && Number.isFinite(tc.durationMs) ? (
+          <span className="tool-call-duration">{formatDuration(tc.durationMs)}</span>
+        ) : null}
         <svg className="tool-call-expand" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={expanded ? undefined : { transform: 'rotate(-90deg)' }}>
           <path d="m6 9 6 6 6-6" />
         </svg>

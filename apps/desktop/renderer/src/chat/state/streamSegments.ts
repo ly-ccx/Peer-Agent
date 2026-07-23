@@ -21,6 +21,9 @@ export function normalizeStreamSegment(segment: ContentSegment): ContentSegment 
       result: segment.result,
       synthetic: segment.synthetic,
       toolCallId: segment.toolCallId,
+      startedAtMs: segment.startedAtMs,
+      endedAtMs: segment.endedAtMs,
+      durationMs: segment.durationMs,
     };
   }
   return { type: segment.type, content: segment.content || '' };
@@ -30,7 +33,7 @@ export function normalizeStreamSegment(segment: ContentSegment): ContentSegment 
 export function segmentsSignature(segments: readonly ContentSegment[]): string {
   return JSON.stringify(segments.map((segment) => {
     if (segment.type === 'tool-call') {
-      return [segment.type, segment.toolCallId || '', segment.tool || '', JSON.stringify(segment.args || {}), segment.result || '', segment.synthetic ? '1' : '0'];
+      return [segment.type, segment.toolCallId || '', segment.tool || '', JSON.stringify(segment.args || {}), segment.result || '', segment.synthetic ? '1' : '0', segment.startedAtMs ?? '', segment.endedAtMs ?? '', segment.durationMs ?? ''];
     }
     return [segment.type, segment.content || ''];
   }));

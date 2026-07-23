@@ -22,7 +22,13 @@ const tool = (tool: string, over: Partial<Extract<ContentSegment, { type: 'tool-
 describe('normalizeStreamSegment', () => {
   it('fills default args and keeps structured fields for tool-call', () => {
     const out = normalizeStreamSegment({ type: 'tool-call', tool: 't' } as ContentSegment);
-    assert.deepEqual(out, { type: 'tool-call', tool: 't', displayName: undefined, args: {}, result: undefined, synthetic: undefined, toolCallId: undefined });
+    assert.deepEqual(out, { type: 'tool-call', tool: 't', displayName: undefined, args: {}, result: undefined, synthetic: undefined, toolCallId: undefined, startedAtMs: undefined, endedAtMs: undefined, durationMs: undefined });
+  });
+  it('preserves tool lifecycle timing metadata', () => {
+    const out = normalizeStreamSegment(tool('timed', { startedAtMs: 100, endedAtMs: 350, durationMs: 250 }));
+    assert.equal(out.type === 'tool-call' ? out.startedAtMs : undefined, 100);
+    assert.equal(out.type === 'tool-call' ? out.endedAtMs : undefined, 350);
+    assert.equal(out.type === 'tool-call' ? out.durationMs : undefined, 250);
   });
   it('defaults content to empty string for text/thinking', () => {
     assert.deepEqual(normalizeStreamSegment({ type: 'text' } as ContentSegment), { type: 'text', content: '' });

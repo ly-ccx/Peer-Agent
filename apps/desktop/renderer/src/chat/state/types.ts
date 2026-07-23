@@ -69,6 +69,10 @@ export type ContentSegment =
       result?: string;
       synthetic?: boolean;
       toolCallId?: string;
+      /** 主进程记录的工具生命周期时间；旧历史可缺省。 */
+      startedAtMs?: number;
+      endedAtMs?: number;
+      durationMs?: number;
     };
 
 /** 渲染分组时使用的工具调用形态（聚合相邻 tool-call 段后的展示模型）。 */
@@ -80,6 +84,9 @@ export interface ToolCallLegacy {
   result?: string;
   synthetic?: boolean;
   toolCallId?: string;
+  startedAtMs?: number;
+  endedAtMs?: number;
+  durationMs?: number;
 }
 
 /** 压缩（compaction）留痕元数据：随消息走的表达层元数据。 */

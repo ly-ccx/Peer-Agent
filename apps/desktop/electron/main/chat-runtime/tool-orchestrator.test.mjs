@@ -137,7 +137,14 @@ describe('tool evidence refs', () => {
       assert.ok(refs.some((ref) => ref.evidenceRef === 'tool-result://call_read_plan'));
       assert.ok(refs.some((ref) => ref.evidenceRef === `goal-plan://${plan.planId}`));
       assert.ok(refs.every((ref) => ref.planId === plan.planId));
-      assert.ok(sent.some((event) => event.channel === 'chat:stream:tool-result'));
+      const toolCallEvent = sent.find((event) => event.channel === 'chat:stream:tool-call');
+      const toolResultEvent = sent.find((event) => event.channel === 'chat:stream:tool-result');
+      assert.ok(toolCallEvent);
+      assert.ok(toolResultEvent);
+      assert.equal(typeof toolCallEvent.payload.startedAtMs, 'number');
+      assert.equal(toolResultEvent.payload.startedAtMs, toolCallEvent.payload.startedAtMs);
+      assert.equal(typeof toolResultEvent.payload.endedAtMs, 'number');
+      assert.equal(toolResultEvent.payload.durationMs, toolResultEvent.payload.endedAtMs - toolCallEvent.payload.startedAtMs);
     } finally {
       rmSync(tmpRoot, { recursive: true, force: true });
     }
