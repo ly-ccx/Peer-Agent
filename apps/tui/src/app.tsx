@@ -238,8 +238,8 @@ function ToolActivityTimeline({
       <box flexGrow={1} minWidth={0} flexDirection="column">
         <box flexDirection="row" width="100%">
           <ThemedText selectable fg={COLOR.textSoft} width={12} wrapMode="none">{presentation.toolName}</ThemedText>
-          <ThemedText selectable fg={COLOR.muted} flexGrow={1} wrapMode="none">{summary}</ThemedText>
-          <ThemedText selectable fg={color} width={8} wrapMode="none">{status}</ThemedText>
+          <ThemedText selectable fg={COLOR.muted} flexGrow={1} minWidth={0} wrapMode="none">{summary}</ThemedText>
+          <ThemedText selectable fg={color} width={8} flexShrink={0} marginLeft={2} wrapMode="none">{status}</ThemedText>
           <ThemedText selectable fg={presentation.status === 'running' ? COLOR.accent : COLOR.subtle} width={7} wrapMode="none">
             {formatToolDuration(presentation)}
           </ThemedText>
