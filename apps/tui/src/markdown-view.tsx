@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useTerminalDimensions } from '@opentui/react';
 
 import { COLOR, MARKDOWN_CHROME } from './tui-theme.ts';
 import { ThemedText } from './themed-primitives.tsx';
@@ -212,53 +213,98 @@ function padCell(text: string, width: number, alignment: TableAlignment): string
   return `${text}${' '.repeat(gap)}`;
 }
 
-function TableBlock({ headers, rows, alignments }: {
-  readonly headers: readonly string[];
-  readonly rows: readonly (readonly string[])[];
-  readonly alignments: readonly TableAlignment[];
-}) {
-  const columnCount = headers.length;
-  const colWidths = headers.map((h, i) => displayWidth(h));
+const SUMMARY_HEADERS = new Set(['项', '字段', '属性', 'key', 'field', 'property']);
+const SUMMARY_VALUE_HEADERS = new Set(['结果', '值', '说明', 'value', 'result', 'description']);
+const GRID_GAP = 3;
 
-  for (const row of rows) {
-    for (let i = 0; i < columnCount; i += 1) {
-      const cellWidth = displayWidth(row[i] ?? '');
-      if (cellWidth > (colWidths[i] ?? 0)) colWidths[i] = cellWidth;
-    }
-  }
+function isSummaryTable(headers: readonly string[], rows: readonly (readonly string[])[]): boolean {
+  if (headers.length !== 2 || rows.length === 0) return false;
+  const first = headers[0]?.trim().toLowerCase() ?? '';
+  const second = headers[1]?.trim().toLowerCase() ?? '';
+  return rows.every((row) => displayWidth(row[0] ?? '') <= 16)
+    && (SUMMARY_HEADERS.has(first) || SUMMARY_VALUE_HEADERS.has(second));
+}
 
-  const renderRow = (cells: readonly string[], isHeader: boolean) => {
-    const parts = cells.slice(0, columnCount).map((cell, i) =>
-      padCell(cell ?? '', colWidths[i] ?? 0, alignments[i] ?? 'left'),
-    );
-    while (parts.length < columnCount) {
-      parts.push(padCell('', colWidths[parts.length] ?? 0, alignments[parts.length] ?? 'left'));
-    }
-    return ` ${parts.join(' │ ')} `;
-  };
+function columnWidths(headers: readonly string[], rows: readonly (readonly string[])[]): number[] {
+  return headers.map((header, column) => Math.max(
+    displayWidth(header),
+    ...rows.map((row) => displayWidth(row[column] ?? '')),
+  ));
+}
 
-  const separator = ` ${colWidths.map((w, i) => {
-    const a = alignments[i] ?? 'left';
-    const left = a === 'center' || a === 'right' ? ':' : '';
-    const right = a === 'center' || a === 'left' ? ':' : '';
-    return `${left}${'─'.repeat(Math.max(2, w))}${right}`;
-  }).join('─┼─')} `;
-
-  const headerLine = renderRow(headers, true);
-  const dataLines = rows.map((row) => renderRow(row, false));
-
+function KeyValueTable({ rows, width }: { rows: readonly (readonly string[])[]; width: number }) {
+  const keyWidth = Math.max(...rows.map((row) => displayWidth(row[0] ?? '')));
+  const stacked = keyWidth + GRID_GAP + 12 > width;
   return (
     <box flexDirection="column" marginBottom={1}>
-      <ThemedText selectable fg={COLOR.textSoft}><strong>{headerLine}</strong></ThemedText>
-      <ThemedText selectable fg={COLOR.muted}>{separator}</ThemedText>
-      {dataLines.map((line, i) => (
-        <ThemedText key={`row-${i}`} selectable fg={COLOR.text}>{line}</ThemedText>
+      {rows.map((row, index) => stacked ? (
+        <box key={`summary-${index}`} flexDirection="column" marginBottom={index < rows.length - 1 ? 1 : 0}>
+          <ThemedText selectable fg={COLOR.muted} attributes={1}>{inline(row[0] ?? '', `summary-key-${index}`)}</ThemedText>
+          <box paddingLeft={2}><ThemedText selectable fg={COLOR.text}>{inline(row[1] ?? '', `summary-value-${index}`)}</ThemedText></box>
+        </box>
+      ) : (
+        <box key={`summary-${index}`} flexDirection="row">
+          <ThemedText selectable fg={COLOR.muted} attributes={1}>{padCell(row[0] ?? '', keyWidth, 'left')}{' '.repeat(GRID_GAP)}</ThemedText>
+          <ThemedText selectable fg={COLOR.text} flexShrink={1}>{inline(row[1] ?? '', `summary-value-${index}`)}</ThemedText>
+        </box>
       ))}
     </box>
   );
 }
 
-export function MarkdownView({ content }: { content: string }) {
+function StackedTable({ headers, rows }: { headers: readonly string[]; rows: readonly (readonly string[])[] }) {
+  const labelWidth = Math.max(...headers.map(displayWidth));
+  return (
+    <box flexDirection="column" marginBottom={1}>
+      {rows.map((row, rowIndex) => (
+        <box key={`stacked-${rowIndex}`} flexDirection="column" marginBottom={rowIndex < rows.length - 1 ? 1 : 0}>
+          <ThemedText selectable fg={COLOR.muted} attributes={1}>[{rowIndex + 1}]</ThemedText>
+          {headers.map((header, column) => (
+            <box key={`stacked-${rowIndex}-${column}`} flexDirection="row" paddingLeft={2}>
+              <ThemedText selectable fg={COLOR.muted}>{padCell(header, labelWidth, 'left')}{'  '}</ThemedText>
+              <ThemedText selectable fg={COLOR.text} flexShrink={1}>{inline(row[column] ?? '', `stacked-${rowIndex}-${column}`)}</ThemedText>
+            </box>
+          ))}
+        </box>
+      ))}
+    </box>
+  );
+}
+
+function DataTable({ headers, rows, alignments }: {
+  headers: readonly string[];
+  rows: readonly (readonly string[])[];
+  alignments: readonly TableAlignment[];
+}) {
+  const widths = columnWidths(headers, rows);
+  const renderRow = (cells: readonly string[]) => widths.map((width, column) => (
+    padCell(cells[column] ?? '', width, alignments[column] ?? 'left')
+  )).join(' '.repeat(GRID_GAP));
+  return (
+    <box flexDirection="column" marginBottom={1}>
+      <ThemedText selectable fg={COLOR.textSoft} attributes={1}>{renderRow(headers)}</ThemedText>
+      <ThemedText selectable fg={COLOR.muted}>{widths.map((width) => '─'.repeat(width)).join(' '.repeat(GRID_GAP))}</ThemedText>
+      {rows.map((row, index) => <ThemedText key={`row-${index}`} selectable fg={COLOR.text}>{renderRow(row)}</ThemedText>)}
+    </box>
+  );
+}
+
+function TableBlock({ headers, rows, alignments, width }: {
+  readonly headers: readonly string[];
+  readonly rows: readonly (readonly string[])[];
+  readonly alignments: readonly TableAlignment[];
+  readonly width: number;
+}) {
+  if (isSummaryTable(headers, rows)) return <KeyValueTable rows={rows} width={width} />;
+  const naturalWidth = columnWidths(headers, rows).reduce((sum, value) => sum + value, 0)
+    + Math.max(0, headers.length - 1) * GRID_GAP;
+  if (naturalWidth > width) return <StackedTable headers={headers} rows={rows} />;
+  return <DataTable headers={headers} rows={rows} alignments={alignments} />;
+}
+
+export function MarkdownView({ content, width }: { content: string; width?: number }) {
+  const terminal = useTerminalDimensions();
+  const availableWidth = Math.max(20, width ?? terminal.width);
   return (
     <box flexDirection="column">
       {parseBlocks(content || ' ').map((block, index) => {
@@ -299,6 +345,7 @@ export function MarkdownView({ content }: { content: string }) {
               headers={block.headers}
               rows={block.rows}
               alignments={block.alignments}
+              width={availableWidth}
             />
           );
         }

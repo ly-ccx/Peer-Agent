@@ -7,8 +7,8 @@ import { COLOR } from './tui-theme.ts';
 
 const renderers: TestRendererSetup[] = [];
 
-async function renderMarkdownSetup(content: string): Promise<TestRendererSetup> {
-  const setup = await testRender(<MarkdownView content={content} />, { width: 80, height: 20 });
+async function renderMarkdownSetup(content: string, width = 80): Promise<TestRendererSetup> {
+  const setup = await testRender(<MarkdownView content={content} width={width} />, { width, height: 30 });
   renderers.push(setup);
   await setup.flush();
   await setup.renderOnce();
@@ -100,14 +100,64 @@ describe('Markdown terminal frame', () => {
     expect(frame).toContain('92021');
     expect(frame).toContain('electron main');
 
-    // Separator line rendered
-    expect(frame).toContain('│');
+    // Data tables use a restrained header rule without vertical borders.
+    expect(frame).not.toContain('│');
     expect(frame).toContain('─');
 
-    // Raw pipe markers from source should not leak as a collapsed single line
+    // CJK-aware padding keeps each numeric value in the same visual column.
     const lines = frame.split('\n');
-    const tableLines = lines.filter((l) => l.includes('│') || l.includes('─'));
-    expect(tableLines.length).toBeGreaterThanOrEqual(3);
+    const previewLine = lines.find((line) => line.includes('preview')) ?? '';
+    const mainLine = lines.find((line) => line.includes('main')) ?? '';
+    expect(previewLine.indexOf('91972')).toBe(mainLine.indexOf('92021'));
+  });
+
+  test('renders two-column conclusion summaries as key-value rows with inline Markdown', async () => {
+    const setup = await renderMarkdownSetup([
+      '| 项 | 结果 |',
+      '| --- | --- |',
+      '| 任务 | `dee4519e` |',
+      '| 主因 | **中文长文本** 已命中门禁 |',
+    ].join('\n'));
+    const frame = setup.captureCharFrame();
+
+    expect(frame).toContain('任务');
+    expect(frame).toContain('dee4519e');
+    expect(frame).toContain('中文长文本 已命中门禁');
+    expect(frame).not.toContain('项');
+    expect(frame).not.toContain('结果');
+    expect(frame).not.toContain('─');
+    expect(colorForText(setup, 'dee4519e')).toBeDefined();
+  });
+
+  test('stacks data records when their natural width exceeds the terminal', async () => {
+    const setup = await renderMarkdownSetup([
+      '| 任务 | 状态 | 说明 |',
+      '| --- | --- | --- |',
+      '| 构建 | 成功 | 这是一段很长的中文说明内容 |',
+      '| 测试 | 失败 | another long explanation |',
+    ].join('\n'), 32);
+    const frame = setup.captureCharFrame();
+
+    expect(frame).toContain('[1]');
+    expect(frame).toContain('[2]');
+    expect(frame).toContain('任务  构建');
+    expect(frame).toContain('说明');
+    expect(frame).toContain('这是一段很长的中文说明内');
+    expect(frame).toContain('容');
+    expect(frame).not.toContain('─');
+  });
+
+  test('stacks a summary key above its value on very narrow terminals', async () => {
+    const setup = await renderMarkdownSetup([
+      '| 项 | 结果 |',
+      '| --- | --- |',
+      '| 是否整理问题 | 是，属于清洗缺口 |',
+    ].join('\n'), 20);
+    const frame = setup.captureCharFrame();
+    const keyLine = frame.split('\n').findIndex((line) => line.includes('是否整理问题'));
+    const valueLine = frame.split('\n').findIndex((line) => line.includes('是，属于清洗缺口'));
+
+    expect(valueLine).toBeGreaterThan(keyLine);
   });
 
   test('does not collapse a table into a single paragraph line', async () => {
