@@ -213,15 +213,6 @@ function ToolStatusGlyph({ status }: { readonly status: ToolPresentationStatus }
   return <>{animatedToolStatusGlyph(status, frame)}</>;
 }
 
-function toolStatusLabel(status: ToolPresentationStatus): string {
-  if (status === 'completed') return 'done';
-  if (status === 'failed') return 'failed';
-  if (status === 'denied') return 'denied';
-  if (status === 'cancelled') return 'stopped';
-  if (status === 'running') return 'running';
-  return 'unknown';
-}
-
 function isEvidenceDetail(line: string): boolean {
   return /(?:evidence|artifact)(?:ref)?s?\b|(?:tool-result|local-shell-artifact|artifact):\/\//i.test(line);
 }
@@ -241,7 +232,8 @@ function ToolActivityTimeline({
     : [];
   const summary = toolActivitySummary(presentation);
   const canExpand = presentation.detail.trim().length > 0;
-  const status = toolStatusLabel(presentation.status);
+  // Status is already carried by the leading glyph + color; avoid a redundant
+  // trailing word like "done" next to ✓.
   return (
     <box flexDirection="row">
       <box width={2} flexDirection="column" alignItems="center">
@@ -252,8 +244,7 @@ function ToolActivityTimeline({
         <box flexDirection="row" width="100%">
           <ThemedText selectable fg={COLOR.textSoft} width={12} wrapMode="none">{presentation.toolName}</ThemedText>
           <ThemedText selectable fg={COLOR.muted} flexGrow={1} minWidth={0} wrapMode="none">{summary}</ThemedText>
-          <ThemedText selectable fg={color} width={8} flexShrink={0} marginLeft={2} wrapMode="none">{status}</ThemedText>
-          <ThemedText selectable fg={presentation.status === 'running' ? COLOR.accent : COLOR.subtle} width={7} wrapMode="none">
+          <ThemedText selectable fg={presentation.status === 'running' ? COLOR.accent : COLOR.subtle} width={7} marginLeft={2} flexShrink={0} wrapMode="none">
             {formatToolDuration(presentation)}
           </ThemedText>
           <text fg={canExpand ? COLOR.muted : COLOR.subtle} width={2} wrapMode="none" onMouseDown={canExpand ? onToggle : undefined}>

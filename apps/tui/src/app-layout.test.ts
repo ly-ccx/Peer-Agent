@@ -563,10 +563,11 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('width={12}');
     expect(appSource).toContain('formatToolDuration(presentation)');
     expect(appSource).toContain('const summary = toolActivitySummary(presentation)');
-    // The flexible summary truncates before the fixed status column, which always
-    // retains two cells of breathing room (for example: "…  done").
+    // Summary grows; duration sits on the right. Status is glyph-only (no "done" column).
     expect(appSource).toContain('fg={COLOR.muted} flexGrow={1} minWidth={0} wrapMode="none">{summary}');
-    expect(appSource).toContain('fg={color} width={8} flexShrink={0} marginLeft={2} wrapMode="none">{status}');
+    expect(appSource).not.toContain('function toolStatusLabel');
+    expect(appSource).not.toContain("if (status === 'completed') return 'done';");
+    expect(appSource).not.toContain('width={8} flexShrink={0} marginLeft={2} wrapMode="none">{status}');
     expect(appSource).toContain("{canExpand ? (expanded ? '−' : '+') : ' '}");
     expect(appSource).toContain('onMouseDown={canExpand ? onToggle : undefined}');
     expect(appSource).not.toContain('<box flexDirection="row" onMouseDown={onToggle}>');
