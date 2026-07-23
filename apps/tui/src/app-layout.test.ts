@@ -21,6 +21,17 @@ describe('TUI app layout', () => {
     expect(appSource).toContain("!isWelcome && goalView && goalLayout.mode === 'side-panel'");
   });
 
+  test('refreshes Goal state from shared store events instead of polling', () => {
+    const goalRefreshEffect = appSource.slice(
+      appSource.indexOf('// Shared store events keep CLI and Desktop panels'),
+      appSource.indexOf('const handleResumeConversationSummary'),
+    );
+
+    expect(goalRefreshEffect).toContain('bridge.subscribeChanges');
+    expect(goalRefreshEffect).toContain('event.conversationId === conversationId');
+    expect(goalRefreshEffect).not.toContain('setInterval');
+  });
+
   test('switches B3 terminal mappings at the approved width thresholds', () => {
     expect(appSource).toContain('const wordmarkVariant = terminal.width >= 76');
     expect(appSource).toContain(": terminal.width >= 42");

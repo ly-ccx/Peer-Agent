@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test, beforeEach, afterEach } from 'node:test';
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -636,6 +637,58 @@ test('onChange: 回调抛错不影响写盘事实（Evidence 已落盘）', () =
 test('onChange: 不传回调时所有写操作正常（向后兼容）', () => {
   const plan = store.createPlan(draftWithTasks());
   assert.equal(store.getPlan(plan.planId)?.version, 1);
+});
+
+test('subscribeChanges: 已运行的 Desktop store 能收到独立 CLI 进程的持久化变更', async () => {
+  const storeDir = path.join(tmpRoot, 'shared-goal-plans');
+  const desktopStore = createGoalPlanStore({ storeDir });
+  const conversationId = 'shared-conversation-uuid';
+  let unsubscribe = () => {};
+  const eventPromise = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('timed out waiting for external goal change')), 10_000);
+    unsubscribe = desktopStore.subscribeChanges((event) => {
+      if (event.writerPid === process.pid || event.conversationId !== conversationId) return;
+      clearTimeout(timeout);
+      resolve(event);
+    });
+  });
+  const moduleUrl = new URL('./goal-plan-store.mjs', import.meta.url).href;
+  const script = `
+    import { createGoalPlanStore } from ${JSON.stringify(moduleUrl)};
+    const childStore = createGoalPlanStore({ storeDir: process.argv[1] });
+    childStore.createPlan({
+      title: 'CLI goal',
+      goal: 'Show in Desktop panel',
+      conversationId: process.argv[2],
+      workflowKind: 'goal_self_driven',
+      tasks: [{ title: 'one task' }],
+    });
+  `;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script, storeDir, conversationId], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let childStderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk) => { childStderr += chunk; });
+  const childExit = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`CLI writer exited ${code}: ${childStderr}`));
+    });
+  });
+
+  try {
+    const [event] = await Promise.all([eventPromise, childExit]);
+    assert.equal(event.conversationId, conversationId);
+    assert.equal(event.changeKind, 'persist');
+    assert.notEqual(event.writerPid, process.pid);
+    const plans = desktopStore.listPlanDetailsByConversation(conversationId);
+    assert.equal(plans.length, 1);
+    assert.equal(plans[0].title, 'CLI goal');
+  } finally {
+    unsubscribe();
+  }
 });
 
 // ---- deletePlanByConversation：删除会话级联硬删除计划（见 ADR 34） ----

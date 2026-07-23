@@ -9,7 +9,10 @@ describe('TuiGoalBridge', () => {
   test('statically imports Desktop createGoalPlanStore for packaged CLI', async () => {
     const source = await readFile(new URL('./goal-bridge.ts', import.meta.url), 'utf8');
     expect(source).toContain("from '../../desktop/electron/main/goal-plan-store.mjs'");
+    expect(source).toContain("from '../../desktop/electron/main/data-store.mjs'");
+    expect(source).toContain("return pathOf('goalPlans')");
     expect(source).toContain('createGoalPlanStore({');
+    expect(source).toContain('subscribeChanges: (listener) => store.subscribeChanges(listener)');
     expect(source).not.toContain('findGoalPlanStorePath');
     expect(source).not.toContain('loadGoalPlanStoreFactory');
     expect(source).not.toContain('Unable to locate Desktop goal-plan-store.mjs');

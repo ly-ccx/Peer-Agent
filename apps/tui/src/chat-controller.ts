@@ -338,6 +338,8 @@ export function createChatController(options: {
   readonly model: ChatModelPort;
   readonly sessionId?: string;
   readonly conversationId?: string;
+  /** Resolve the persisted conversation at turn start so /new and /resume cannot reuse stale identity. */
+  readonly getConversationId?: () => string;
   readonly initialMode?: TuiMode;
   readonly sessionController?: RuntimeSessionController;
   readonly planCoordinator?: PlanCoordinator;
@@ -346,7 +348,8 @@ export function createChatController(options: {
 }): ChatController {
   const listeners = new Set<(snapshot: ChatSnapshot) => void>();
   const sessionId = options.sessionId ?? 'tui-chat';
-  const conversationId = options.conversationId ?? sessionId;
+  const resolveConversationId = options.getConversationId
+    ?? (() => options.conversationId ?? sessionId);
   const initialMode = normalizeTuiMode(options.initialMode);
   let snapshot: ChatSnapshot = { status: 'idle', mode: initialMode, messages: [] };
   let activeTurn: RuntimeSessionTurnHandle | null = null;
@@ -727,7 +730,14 @@ export function createChatController(options: {
         await runStructuralCompact({ source: 'auto' });
       }
 
-      const existingSession = sessions.get(sessionId);
+      const conversationId = resolveConversationId();
+      let existingSession = sessions.get(sessionId);
+      if (existingSession && existingSession.conversationId !== conversationId) {
+        if (!sessions.delete(sessionId)) {
+          throw new Error(`Cannot switch conversation while runtime session ${sessionId} is active`);
+        }
+        existingSession = null;
+      }
       activeTurn = existingSession
         ? sessions.resume({ sessionId, streamId: `${sessionId}:stream:${existingSession.nextTurnIndex}` })
         : sessions.start({

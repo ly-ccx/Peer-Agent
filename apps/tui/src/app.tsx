@@ -1192,7 +1192,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     contextWindow,
     triggerTokens: snapshot.triggerTokens,
   });
-  const layout = responsiveLayout(terminal.width);
+  const layout = responsiveLayout(terminal.width, terminal.height);
   const topbarDividerWidth = composerContentWidth(terminal.width, layout.outerPadding);
   const goalView = goalStatusFromSharedPlan(sharedGoalPlan);
   const goalLayout = goalStatusLayout(terminal.width);
@@ -1281,7 +1281,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     setApprovalSelection(0);
     setApproval(next);
   }), [host]);
-  // Poll shared goal-plan store so CLI shows plans created via goal_create_plan.
+  // Shared store events keep CLI and Desktop panels on the same persisted Goal facts.
   // 用 getPlan 取全量 plan（含 tasks + progress overlay），
   // 修此前 listPlansByConversation 只返回 index meta 导致的「0/0」。
   useEffect(() => {
@@ -1305,8 +1305,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       setSharedGoalPlan(full ?? null);
     };
     refresh();
-    const timer = setInterval(refresh, 1200);
-    return () => clearInterval(timer);
+    return bridge.subscribeChanges((event) => {
+      if (!event.conversationId || event.conversationId === conversationId) refresh();
+    });
   }, [host, snapshot.mode, snapshot.status, snapshot.messages.length, snapshot.session?.conversationId, goalEventTick]);
 
   const handleResumeConversationSummary = useCallback((selected: TuiConversationSummary | undefined) => {

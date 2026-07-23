@@ -6,6 +6,7 @@ import {
   writeFileSync,
   unlinkSync,
   renameSync,
+  watch,
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -53,6 +54,15 @@ function readJsonl(filePath) {
 function appendJsonl(filePath, obj) {
   mkdirSync(path.dirname(filePath), { recursive: true });
   appendFileSync(filePath, JSON.stringify(obj) + '\n', 'utf8');
+}
+
+function writeGoalChangeEvent(storeDir, event) {
+  appendJsonl(path.join(storeDir, '.changes.jsonl'), {
+    ...event,
+    revision: `${Date.now()}-${randomUUID()}`,
+    writerPid: process.pid,
+    changedAt: new Date().toISOString(),
+  });
 }
 
 function writeJsonl(filePath, items) {
@@ -1144,6 +1154,7 @@ function isInactivePlan(plan) {
 export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange } = {}) {
   const indexFile = path.join(storeDir, 'index.jsonl');
   const evidenceIndexFile = path.join(storeDir, 'evidence-index.jsonl');
+  const changeFile = path.join(storeDir, '.changes.jsonl');
   // onChange 可变引用：Desktop 在构造时注入；TUI 需在建好 store 之后再挂
   // auto-start 闸门（见 goal-runner-adapter），故暴露 setOnChange 修改同一引用。
   let onChangeCallback = typeof onChange === 'function' ? onChange : null;
@@ -1161,24 +1172,81 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
   // - planId / conversationId: 供 renderer 做会话域过滤
   // - changeKind: 变更分级（persist | delete | runner-progress | runner-state）
   // - runner: runner-progress 时附带最新 runner，便于 UI 本地 patch
-  function notifyChanged(reason, planId, options = {}) {
-    if (typeof onChangeCallback !== 'function') return;
+  function createChangePayload(reason, planId, options = {}) {
+    const conversationId =
+      options.conversationId !== undefined
+        ? options.conversationId ?? null
+        : null;
+    return {
+      reason,
+      planId: planId ?? null,
+      conversationId,
+      changeKind: options.changeKind ?? reason ?? 'persist',
+      ...(options.runner ? { runner: options.runner } : {}),
+    };
+  }
+
+  function publishPersistedChange(reason, planId, options = {}) {
+    const payload = createChangePayload(reason, planId, options);
     try {
-      const conversationId =
-        options.conversationId !== undefined
-          ? options.conversationId ?? null
-          : null;
-      onChangeCallback({
-        reason,
-        planId: planId ?? null,
-        conversationId,
-        changeKind: options.changeKind ?? reason ?? 'persist',
-        ...(options.runner ? { runner: options.runner } : {}),
-      });
+      writeGoalChangeEvent(storeDir, payload);
+    } catch (err) {
+      // 外部同步失败不回滚已完成的计划写盘，但必须保留可诊断信号。
+      console.warn('[goal-plan-store] change event write failed:', err);
+    }
+    if (options.notifyLocal === false || typeof onChangeCallback !== 'function') return;
+    try {
+      onChangeCallback(payload);
     } catch (err) {
       // 广播失败不影响写盘结果，但显式打印以便排查（不要静默吞）。
       console.warn('[goal-plan-store] onChange broadcast failed:', err);
     }
+  }
+
+  function notifyChanged(reason, planId, options = {}) {
+    if (typeof onChangeCallback !== 'function') return;
+    try {
+      onChangeCallback(createChangePayload(reason, planId, options));
+    } catch (err) {
+      // 广播失败不影响写盘结果，但显式打印以便排查（不要静默吞）。
+      console.warn('[goal-plan-store] onChange broadcast failed:', err);
+    }
+  }
+
+  function subscribeChanges(listener) {
+    if (typeof listener !== 'function') return () => {};
+    mkdirSync(storeDir, { recursive: true });
+    if (!existsSync(changeFile)) writeFileSync(changeFile, '', 'utf8');
+    let offset = Buffer.byteLength(readFileSync(changeFile, 'utf8'));
+    let pending = '';
+    const drain = () => {
+      try {
+        const content = readFileSync(changeFile, 'utf8');
+        if (Buffer.byteLength(content) < offset) {
+          offset = 0;
+          pending = '';
+        }
+        const delta = Buffer.from(content).subarray(offset).toString('utf8');
+        offset = Buffer.byteLength(content);
+        if (!delta) return;
+        const lines = `${pending}${delta}`.split('\n');
+        pending = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            listener(JSON.parse(line));
+          } catch {
+            // Ignore malformed historical rows while preserving later valid events.
+          }
+        }
+      } catch {
+        // A concurrent writer may be between filesystem observations; the next event will retry.
+      }
+    };
+    const watcher = watch(changeFile, { persistent: false }, drain);
+    // Close the read→watch race: pick up rows appended after the initial offset snapshot.
+    drain();
+    return () => watcher.close();
   }
 
   /** Runner 高频进度字段：仅计数/阶段跳动时走 runner-progress，避免无关会话全量 list。 */
@@ -1240,13 +1308,12 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     syncIndex(next);
     // 落盘后保留 overlay 内容一致；完整 persist 路径会清 overlay。
     runnerProgressOverlay.set(planId, next);
-    if (notify) {
-      notifyChanged('persist', next.planId, {
-        conversationId: next.conversationId ?? null,
-        changeKind: 'runner-progress',
-        runner: next.runner ?? null,
-      });
-    }
+    publishPersistedChange('persist', next.planId, {
+      conversationId: next.conversationId ?? null,
+      changeKind: 'runner-progress',
+      runner: next.runner ?? null,
+      notifyLocal: notify,
+    });
     return next;
   }
 
@@ -1379,7 +1446,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     clearRunnerProgressState(next.planId);
     writeJsonAtomic(planFile(next.planId), next);
     syncIndex(next);
-    notifyChanged('persist', next.planId, {
+    publishPersistedChange('persist', next.planId, {
       conversationId: next.conversationId ?? null,
       changeKind: options.changeKind ?? 'persist',
       ...(options.runner ? { runner: options.runner } : {}),
@@ -2431,7 +2498,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     try {
       if (existsSync(planFile(planId))) unlinkSync(planFile(planId));
     } catch {}
-    notifyChanged('delete', planId, {
+    publishPersistedChange('delete', planId, {
       conversationId,
       changeKind: 'delete',
     });
@@ -2475,7 +2542,7 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     }
     // 批量删除只广播一次，避免抖动；planId 传 null 表示非单一计划变更。
     for (const meta of removed) clearRunnerProgressState(meta.planId);
-    notifyChanged('delete', null, {
+    publishPersistedChange('delete', null, {
       conversationId: normalizedConversationId,
       changeKind: 'delete',
     });
@@ -2512,5 +2579,6 @@ export function createGoalPlanStore({ storeDir = pathOf('goalPlans'), onChange }
     deletePlan,
     deletePlanByConversation,
     setOnChange,
+    subscribeChanges,
   };
 }

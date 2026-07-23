@@ -57,6 +57,7 @@ import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
 import { createConversationStore } from './conversation-store.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 import { createGoalPlanStore, goalPlanIsSelfDriven } from './goal-plan-store.mjs';
+import { bindExternalGoalPlanChanges } from './goal-plan-change-bridge.mjs';
 import {
   decideIntakeConvergence,
   serializeAcceptedGoalRunnerHandoff,
@@ -285,6 +286,11 @@ const goalPlanStore = createGoalPlanStore({
 });
 let goalRunner = null;
 let taskNotificationBroker = null;
+const stopGoalPlanChangeSubscription = bindExternalGoalPlanChanges({
+  goalPlanStore,
+  broadcast: broadcastToAllWindows,
+  getTaskNotificationBroker: () => taskNotificationBroker,
+});
 const promptSnapshotStore = createPromptSnapshotStore();
 const contextBaselineRecorder = createContextBaselineRecorder({
   promptSnapshotStore,
@@ -3017,6 +3023,7 @@ app.on('window-all-closed', () => {
 // 退出前清理自动更新周期检测定时器，避免定时器泄漏。
 app.on('before-quit', () => {
   stopConversationChangeSubscription();
+  stopGoalPlanChangeSubscription();
   shortcutService.dispose();
   try {
     stopAutoUpdater();

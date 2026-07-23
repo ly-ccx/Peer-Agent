@@ -842,6 +842,52 @@ describe('chat controller', () => {
     expect(second?.nextTurnIndex).toBe(2);
   });
 
+  test('rebinds the runtime session and tool context when the persisted conversation changes', async () => {
+    let conversationId = 'conversation-one';
+    const observedConversationIds: Array<string | undefined> = [];
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        if (state.toolExecutions.length === 0) {
+          return {
+            kind: 'tool_calls',
+            state,
+            calls: [{
+              toolCallId: `call-${observedConversationIds.length}`,
+              capabilityId: 'local.file.read',
+              arguments: { path: 'note.txt' },
+            }],
+          };
+        }
+        return { kind: 'completed', state };
+      },
+      applyToolResults(state, results) {
+        return { ...state, toolExecutions: results.map((item) => item.result) };
+      },
+    };
+    const controller = createChatController({
+      model,
+      sessionId: 'tui-chat',
+      getConversationId: () => conversationId,
+      host: host((_capabilityId, _arguments, context) => {
+        observedConversationIds.push(context?.conversationId);
+        return execution('file contents');
+      }),
+    });
+
+    await controller.send('first conversation');
+    const first = controller.getSnapshot().session;
+    conversationId = 'conversation-two';
+    await controller.send('resumed conversation');
+    const second = controller.getSnapshot().session;
+
+    expect(observedConversationIds).toEqual(['conversation-one', 'conversation-two']);
+    expect(first?.conversationId).toBe('conversation-one');
+    expect(first?.lastTurn?.turnIndex).toBe(0);
+    expect(second?.conversationId).toBe('conversation-two');
+    expect(second?.lastTurn?.turnIndex).toBe(0);
+  });
+
   test('passes stable session and turn context to tool execution', async () => {
     let observedContext: TuiExecutionContext | undefined;
     const model: ChatModelPort = {

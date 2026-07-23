@@ -5,9 +5,6 @@
  * Also enforces Goal-mode intake: before an accepted/executing plan exists for
  * the conversation, side-effect tools (shell/write) are blocked.
  */
-import { homedir } from 'node:os';
-import path from 'node:path';
-
 import type { RuntimeToolDefinition } from '@peer-agent/runtime-core';
 import type { RuntimeSdkProviderExecution, RuntimeSdkToolCall } from '@peer-agent/runtime-sdk';
 // Static import so `bun --compile` embeds the shared Desktop store into peer.
@@ -15,6 +12,8 @@ import type { RuntimeSdkProviderExecution, RuntimeSdkToolCall } from '@peer-agen
 // Desktop store is plain ESM without a declaration file.
 // @ts-expect-error -- shared .mjs module has no adjacent .d.ts
 import { createGoalPlanStore } from '../../desktop/electron/main/goal-plan-store.mjs';
+// @ts-expect-error -- shared .mjs module has no adjacent .d.ts
+import { pathOf } from '../../desktop/electron/main/data-store.mjs';
 
 import type { TuiMode } from './tui-mode.ts';
 
@@ -93,10 +92,15 @@ export interface TuiGoalBridge {
   }): Promise<RuntimeSdkProviderExecution>;
   listPlansByConversation(conversationId: string | null | undefined): readonly any[];
   getPlan(planId: string): any | null;
+  subscribeChanges(listener: (event: {
+    readonly conversationId?: string | null;
+    readonly planId?: string | null;
+    readonly changeKind?: string | null;
+  }) => void): () => void;
 }
 
 function goalPlansDir(): string {
-  return path.join(homedir(), '.peer-agent', 'goal-plans');
+  return pathOf('goalPlans');
 }
 
 function asString(value: unknown): string | null {
@@ -438,6 +442,7 @@ export function createTuiGoalBridge(options?: {
     execute,
     listPlansByConversation,
     getPlan,
+    subscribeChanges: (listener) => store.subscribeChanges(listener),
   };
 }
 
