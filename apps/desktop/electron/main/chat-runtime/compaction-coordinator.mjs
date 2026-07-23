@@ -287,18 +287,28 @@ async function persistAndNotifyCompaction({
   contextWindow = null,
   tools = null,
 }) {
-  if (persistCompaction && conversationId) {
-    await persistCompaction({ conversationId, compactResult, preservePendingAssistant: true });
-  }
-  // 登记表收尾与事件 emit 单一来源：先清登记表再 emit done。
-  endCompaction({ conversationId, streamId });
-  // notification.afterTokens 仅覆盖 system + messages；工具 schema 同样会在每次
-  // 请求全量发送，因此完成事件要沿用预算器口径给出可直接投影的完整快照。
+  // 压缩后的真实请求消息和工具 schema 共同构成下一次最终请求投影。
+  // 必须先算出投影并随消息一起持久化，确保共享快照绑定 replaceMessages 产生的新 revision。
   const compactedBudget = computeContextBudget({
     messages: compactResult.messages,
     contextWindow,
     tools,
   });
+  if (persistCompaction && conversationId) {
+    await persistCompaction({
+      conversationId,
+      compactResult,
+      preservePendingAssistant: true,
+      requestProjection: {
+        nextRequestInputTokens: compactedBudget.contextTokens,
+        contextWindow: compactedBudget.contextWindow,
+      },
+    });
+  }
+  // 登记表收尾与事件 emit 单一来源：先清登记表再 emit done。
+  endCompaction({ conversationId, streamId });
+  // notification.afterTokens 仅覆盖 system + messages；工具 schema 同样会在每次
+  // 请求全量发送，因此完成事件要沿用预算器口径给出可直接投影的完整快照。
   webContents.send('chat:compaction', {
     conversationId,
     streamId,

@@ -1,6 +1,6 @@
 import { createConversationStore } from '@peer-agent/conversation-store';
 import { realpathSync } from 'node:fs';
-import type { RuntimeModelSelection } from '@peer-agent/runtime-node';
+import type { ModelMessage, RuntimeModelSelection } from '@peer-agent/runtime-node';
 
 import type { AssistantSegment, ChatController, ChatMessage, ChatMessageImage, ChatSnapshot } from './chat-controller.ts';
 import { normalizeTuiMode, type TuiMode } from './tui-mode.ts';
@@ -15,9 +15,25 @@ export interface TuiConversationSummary {
 export interface TuiConversationRestore {
   readonly id: string;
   readonly mode: TuiMode;
+  /** Complete UI transcript, including historical compaction boundaries. */
   readonly messages: readonly ChatMessage[];
+  /** Active provider history after the latest shared compaction boundary. */
+  readonly modelMessages?: readonly ModelMessage[];
+  /** Latest cumulative summary admitted through System Context. */
+  readonly continuityContext?: string;
   readonly modelSelection?: RuntimeModelSelection;
   readonly usage?: NonNullable<ChatSnapshot['usage']>;
+  readonly contextSnapshot?: {
+    readonly nextRequestInputTokens: number;
+    readonly contextWindow: number | null;
+    readonly model: string;
+  };
+}
+
+interface ConversationChangeEvent {
+  readonly conversationId?: string;
+  readonly writerPid?: number;
+  readonly revision?: string;
 }
 
 interface ConversationStore {
@@ -31,8 +47,16 @@ interface ConversationStore {
   appendMessage(id: string, message: ChatMessage & { timestamp: number }): unknown;
   replaceMessages?(id: string, messages: readonly Record<string, unknown>[], options?: { allowEmpty?: boolean }): unknown;
   updateMode(id: string, mode: TuiMode): unknown;
-  updateModelEffort(id: string, input: { effort: string; modelProviderId: string | null }): unknown;
+  updateModelEffort(id: string, input: { effort: string; modelProviderId: string | null; model?: string }): unknown;
+  updateContextSnapshot?(id: string, snapshot: {
+    nextRequestInputTokens: number;
+    contextWindow: number | null;
+    modelProviderId: string | null;
+    model: string;
+    source: 'tui';
+  }): unknown;
   addUsage(id: string, usage: NonNullable<ChatSnapshot['usage']>): unknown;
+  subscribeChanges?(listener: (event: ConversationChangeEvent) => void): () => void;
 }
 
 export interface TuiConversationPersistence {
@@ -41,6 +65,7 @@ export interface TuiConversationPersistence {
   listResumable(): readonly TuiConversationSummary[];
   loadConversation(id: string): TuiConversationRestore | null;
   resumeConversation(conversation: TuiConversationRestore): void;
+  subscribeExternalChanges(listener: (conversationId: string) => void): () => void;
   syncSnapshot(snapshot: ChatSnapshot): void;
   syncModel(selection: RuntimeModelSelection): void;
   startNewConversation(mode: TuiMode): void;
@@ -53,7 +78,11 @@ export function resumeTuiConversation(
 ): boolean {
   if (controller.getSnapshot().status !== 'idle') return false;
   persistence.resumeConversation(conversation);
-  if (!controller.restore(conversation)) {
+  if (!controller.restore({
+    ...conversation,
+    nextRequestInputTokens: conversation.contextSnapshot?.nextRequestInputTokens,
+    requestProjection: conversation.contextSnapshot,
+  })) {
     throw new Error('Conversation restore invariant failed after the idle-state check.');
   }
   return true;
@@ -142,6 +171,11 @@ function storedCompactMeta(value: unknown): ChatMessage['compact'] | undefined {
     ...(typeof record.beforeCount === 'number' ? { beforeCount: record.beforeCount } : {}),
     ...(typeof record.afterCount === 'number' ? { afterCount: record.afterCount } : {}),
     ...(typeof record.summarizedCount === 'number' ? { summarizedCount: record.summarizedCount } : {}),
+    ...(typeof record.beforeTokens === 'number' ? { beforeTokens: record.beforeTokens } : {}),
+    ...(typeof record.afterTokens === 'number' ? { afterTokens: record.afterTokens } : {}),
+    ...(typeof record.summary === 'string' ? { summary: record.summary } : {}),
+    ...(typeof record.handoffContent === 'string' ? { handoffContent: record.handoffContent } : {}),
+    ...(typeof record.retainedUserCount === 'number' ? { retainedUserCount: record.retainedUserCount } : {}),
   };
 }
 
@@ -390,17 +424,94 @@ function toolsFromStored(value: Record<string, unknown>): {
   };
 }
 
+function compactionRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function storedCompactionCard(value: Record<string, unknown>): ChatMessage['compact'] | undefined {
+  const record = compactionRecord(value._compaction);
+  if (!record) return undefined;
+  const originalMessageCount = storedToken(record.originalMessageCount) ?? 0;
+  const afterCount = storedToken(record.afterMessageCount, record.keptMessageCount) ?? 0;
+  return {
+    phase: 'done',
+    beforeCount: originalMessageCount,
+    afterCount,
+    summarizedCount: Math.max(0, originalMessageCount - afterCount),
+    ...(typeof record.summary === 'string' ? { summary: record.summary } : {}),
+    handoffContent: value.content as string,
+  };
+}
+
+function modelMessagesFromStored(value: Record<string, unknown>): ModelMessage[] {
+  if (compactionRecord(value._compaction)) return [];
+  const role = String(value.role);
+  const content = typeof value.content === 'string' ? value.content : '';
+  if (role === 'user') return [{ role: 'user', content }];
+  if (role === 'system') return [];
+
+  const restored = toolsFromStored(value);
+  const tools = restored.tools ?? (restored.tool ? [restored.tool] : []);
+  if (role === 'assistant' || role === 'tool') {
+    if (tools.length === 0) {
+      return role === 'assistant' && content ? [{ role: 'assistant', content }] : [];
+    }
+    const calls = tools.map((tool, index) => ({
+      id: tool.toolCallId || `restored-tool-${index}`,
+      name: tool.capabilityId,
+      arguments: JSON.stringify(tool.arguments ?? {}),
+    }));
+    return [
+      ...(role === 'assistant' || content
+        ? [{ role: 'assistant' as const, content, toolCalls: calls }]
+        : []),
+      ...tools.map((tool, index) => ({
+        role: 'tool' as const,
+        content: tool.detail,
+        toolCallId: calls[index]!.id,
+      })),
+    ];
+  }
+  return [];
+}
+
+function activeStoredContext(messages: readonly Record<string, unknown>[]): {
+  readonly modelMessages: readonly ModelMessage[];
+  readonly continuityContext?: string;
+} {
+  let boundaryIndex = -1;
+  let continuityContext: string | undefined;
+  messages.forEach((message, index) => {
+    const marker = compactionRecord(message._compaction);
+    if (!marker) return;
+    boundaryIndex = index;
+    continuityContext = (
+      typeof marker.summary === 'string' && marker.summary.trim()
+        ? marker.summary
+        : typeof message.content === 'string'
+          ? message.content
+          : ''
+    ).trim() || undefined;
+  });
+  return {
+    modelMessages: messages.slice(boundaryIndex + 1).flatMap(modelMessagesFromStored),
+    ...(continuityContext ? { continuityContext } : {}),
+  };
+}
+
 function storedMessage(value: Record<string, unknown>, index: number): ChatMessage | null {
   if (!['user', 'assistant', 'tool', 'system'].includes(String(value.role)) || typeof value.content !== 'string') return null;
   const usage = storedUsage(value.usage);
   const restoredTools = toolsFromStored(value);
-  const compact = storedCompactMeta(value.compact);
+  const compact = storedCompactMeta(value.compact) ?? storedCompactionCard(value);
   const images = imagesFromStoredAttachments(value);
   // Do not restore in-flight compact progress rows.
   if (compact?.phase === 'progress' || value.pending === true && String(value.role) === 'system') return null;
   return {
     id: typeof value.id === 'string' ? value.id : `restored-${index}`,
-    role: value.role as ChatMessage['role'],
+    role: compactionRecord(value._compaction) ? 'system' : value.role as ChatMessage['role'],
     content: value.content,
     ...(images ? { images } : {}),
     ...(usage ? { usage } : {}),
@@ -483,6 +594,7 @@ export function createTuiConversationPersistence(options: {
     store.updateModelEffort(conversationId, {
       effort: model.reasoningEffort,
       modelProviderId: modelProviderId(model),
+      model: model.modelId,
     });
     return conversationId;
   }
@@ -512,16 +624,41 @@ export function createTuiConversationPersistence(options: {
       try {
         const stored = store.getConversation(id);
         if (!stored || !Array.isArray(stored.messages)) return null;
-        const messages = stored.messages
+        const storedMessages = stored.messages as Record<string, unknown>[];
+        const messages = storedMessages
           .map((message, index) => storedMessage(message, index))
           .filter((message): message is ChatMessage => Boolean(message));
         if (messages.length === 0) return null;
+        const activeContext = activeStoredContext(storedMessages);
+        const contextSnapshot = stored.contextSnapshot && typeof stored.contextSnapshot === 'object'
+          ? stored.contextSnapshot as Record<string, unknown>
+          : null;
+        const storedTokens = Number(contextSnapshot?.nextRequestInputTokens);
+        const storedWindow = Number(contextSnapshot?.contextWindow);
+        const storedModel = typeof contextSnapshot?.model === 'string'
+          ? contextSnapshot.model.trim()
+          : '';
         return {
           id,
           mode: normalizeTuiMode(stored.mode, 'chat'),
           messages,
+          modelMessages: activeContext.modelMessages,
+          ...(activeContext.continuityContext
+            ? { continuityContext: activeContext.continuityContext }
+            : {}),
           modelSelection: restoredSelection(stored),
           usage: restoredContextUsage(messages),
+          ...(Number.isFinite(storedTokens) && storedTokens >= 0 && storedModel
+            ? {
+              contextSnapshot: {
+                nextRequestInputTokens: Math.floor(storedTokens),
+                contextWindow: Number.isFinite(storedWindow) && storedWindow > 0
+                  ? Math.floor(storedWindow)
+                  : null,
+                model: storedModel,
+              },
+            }
+            : {}),
         };
       } catch (error) {
         reportError(error);
@@ -535,6 +672,15 @@ export function createTuiConversationPersistence(options: {
       usageMessageIds = new Set();
       if (conversation.modelSelection) model = conversation.modelSelection;
     },
+    subscribeExternalChanges(listener) {
+      if (!store.subscribeChanges) return () => {};
+      return store.subscribeChanges((event) => {
+        if (event.writerPid === process.pid) return;
+        const currentId = conversationId;
+        if (!currentId || event.conversationId !== currentId) return;
+        listener(currentId);
+      });
+    },
     syncSnapshot(snapshot) {
       try {
         mode = snapshot.mode;
@@ -544,32 +690,13 @@ export function createTuiConversationPersistence(options: {
         const id = ensureConversation();
         store.updateMode(id, mode);
 
-        // When CLI continues after a long-stream interrupt, clear historical
-        // interrupted markers on already-persisted messages so Desktop reload
-        // no longer shows a stale "已中断 / 继续生成" action.
-        if (store.replaceMessages) {
-          const stored = store.getConversation(id);
-          const storedMessages = Array.isArray(stored?.messages)
-            ? [...stored.messages] as Record<string, unknown>[]
-            : [];
-          if (storedMessages.length > 0) {
-            let changed = false;
-            const rewritten = storedMessages.map((message) => {
-              const messageId = typeof message.id === 'string' ? message.id : '';
-              if (!messageId || message.interrupted !== true) return message;
-              const live = stableMessages.find((item) => item.id === messageId);
-              if (!live || live.interrupted === true) return message;
-              changed = true;
-              const { interrupted: _removed, ...rest } = message;
-              return rest;
-            });
-            if (changed) {
-              store.replaceMessages(id, rewritten);
-            }
-          }
-        }
-
-        const newMessages = stableMessages.filter((message) => !persistedMessageIds.has(message.id));
+        const compactMessage = [...stableMessages]
+          .reverse()
+          .find((message) => message.compact?.phase === 'done' && message.compact.handoffContent);
+        const compact = compactMessage?.compact;
+        const newMessages = stableMessages.filter((message) => (
+          !persistedMessageIds.has(message.id) && message.id !== compactMessage?.id
+        ));
         const completedAssistant = snapshot.status === 'idle'
           ? [...newMessages].reverse().find((message) => message.role === 'assistant')
           : undefined;
@@ -593,9 +720,76 @@ export function createTuiConversationPersistence(options: {
           persistedMessageIds.add(message.id);
         }
 
+        // Rewrite only after ordinary messages are durable, so first-sync and
+        // incremental compaction locate the same complete user-turn boundary.
+        if (store.replaceMessages) {
+          const stored = store.getConversation(id);
+          const storedMessages = Array.isArray(stored?.messages)
+            ? [...stored.messages] as Record<string, unknown>[]
+            : [];
+          let changed = false;
+          let rewritten = storedMessages.map((message) => {
+            const messageId = typeof message.id === 'string' ? message.id : '';
+            if (!messageId || message.interrupted !== true) return message;
+            const live = stableMessages.find((item) => item.id === messageId);
+            if (!live || live.interrupted === true) return message;
+            changed = true;
+            const { interrupted: _removed, ...rest } = message;
+            return rest;
+          });
+          const alreadyPersisted = compactMessage
+            ? rewritten.some((message) => message.id === compactMessage.id && compactionRecord(message._compaction))
+            : false;
+          if (compactMessage && compact && !alreadyPersisted) {
+            const retainedUserCount = Math.max(0, Math.floor(compact.retainedUserCount ?? 0));
+            const userIndexes = rewritten
+              .map((message, index) => ({ message, index }))
+              .filter(({ message }) => message.role === 'user' && !compactionRecord(message._compaction));
+            const insertionIndex = retainedUserCount > 0 && userIndexes.length >= retainedUserCount
+              ? userIndexes[userIndexes.length - retainedUserCount]!.index
+              : rewritten.length;
+            const marker = {
+              id: compactMessage.id,
+              role: 'user',
+              content: compact.handoffContent,
+              timestamp: now(),
+              _compaction: {
+                method: 'structural',
+                originalMessageCount: compact.beforeCount ?? 0,
+                previousMessageCount: 0,
+                deltaMessageCount: compact.summarizedCount ?? 0,
+                beforeTokens: compact.beforeTokens ?? 0,
+                afterTokens: compact.afterTokens ?? 0,
+                summary: compact.summary ?? '',
+                decisionAnchors: [],
+              },
+            };
+            rewritten = [
+              ...rewritten.slice(0, insertionIndex),
+              marker,
+              ...rewritten.slice(insertionIndex),
+            ];
+            changed = true;
+            persistedMessageIds.add(compactMessage.id);
+          }
+          if (changed) {
+            store.replaceMessages(id, rewritten);
+          }
+        }
+
         if (snapshot.status === 'idle' && snapshot.usage && completedAssistant && !usageMessageIds.has(completedAssistant.id)) {
           store.addUsage(id, snapshot.usage);
           usageMessageIds.add(completedAssistant.id);
+        }
+
+        if (snapshot.status === 'idle' && snapshot.requestProjection && store.updateContextSnapshot) {
+          store.updateContextSnapshot(id, {
+            nextRequestInputTokens: snapshot.requestProjection.nextRequestInputTokens,
+            contextWindow: snapshot.requestProjection.contextWindow,
+            modelProviderId: modelProviderId(model),
+            model: snapshot.requestProjection.model,
+            source: 'tui',
+          });
         }
       } catch (error) {
         reportError(error);
@@ -608,6 +802,7 @@ export function createTuiConversationPersistence(options: {
         store.updateModelEffort(conversationId, {
           effort: selection.reasoningEffort,
           modelProviderId: modelProviderId(selection),
+          model: selection.modelId,
         });
       } catch (error) {
         reportError(error);

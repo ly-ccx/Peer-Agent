@@ -33,6 +33,70 @@ test('addUsage accumulates lifetime usage on index meta', () => {
   }
 });
 
+test('context snapshot is shared while revision and model still match', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'shared context' });
+    store.updateModelEffort(conv.id, { modelProviderId: 'provider-1', model: 'model-1' });
+    store.appendMessage(conv.id, { id: 'm1', role: 'user', content: 'hello' });
+
+    store.updateContextSnapshot(conv.id, {
+      nextRequestInputTokens: 19_500,
+      contextWindow: 500_000,
+      source: 'tui',
+    });
+
+    const loaded = store.getConversation(conv.id);
+    assert.equal(loaded.contentRevision, 1);
+    assert.deepEqual(loaded.contextSnapshot, {
+      nextRequestInputTokens: 19_500,
+      contextWindow: 500_000,
+      contentRevision: 1,
+      modelProviderId: 'provider-1',
+      model: 'model-1',
+      computedAt: loaded.contextSnapshot.computedAt,
+      source: 'tui',
+    });
+  } finally {
+    cleanup();
+  }
+});
+
+test('message, compaction, and model changes invalidate the shared context snapshot', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'invalidate context' });
+    store.updateModelEffort(conv.id, { modelProviderId: 'provider-1', model: 'model-1' });
+    store.updateContextSnapshot(conv.id, {
+      nextRequestInputTokens: 10,
+      contextWindow: 100,
+      source: 'desktop',
+    });
+    assert.ok(store.getConversation(conv.id).contextSnapshot);
+
+    store.appendMessage(conv.id, { id: 'm1', role: 'user', content: 'changed' });
+    assert.equal(store.getConversation(conv.id).contextSnapshot, null);
+
+    store.updateContextSnapshot(conv.id, {
+      nextRequestInputTokens: 20,
+      contextWindow: 100,
+      source: 'tui',
+    });
+    store.replaceMessages(conv.id, [{ id: 'summary', role: 'system', content: 'compacted' }]);
+    assert.equal(store.getConversation(conv.id).contextSnapshot, null);
+
+    store.updateContextSnapshot(conv.id, {
+      nextRequestInputTokens: 5,
+      contextWindow: 100,
+      source: 'desktop',
+    });
+    store.updateModelEffort(conv.id, { modelProviderId: 'provider-2', model: 'model-2' });
+    assert.equal(store.getConversation(conv.id).contextSnapshot, null);
+  } finally {
+    cleanup();
+  }
+});
+
 test('replaceMessages refuses a stale empty overwrite but allows an explicitly requested clear', () => {
   const { store, cleanup } = freshStore();
   try {
@@ -588,6 +652,44 @@ test('store change subscription observes writes from another store instance', as
     assert.equal(event.workspacePath, '/workspace');
     assert.equal(event.changeType, 'created');
     assert.equal(typeof event.revision, 'string');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('CLI continuation invalidates Desktop context and publishes one shared replacement snapshot', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'peer-conversations-context-'));
+  try {
+    const desktopStore = createConversationStore({ storeDir: dir });
+    const tuiStore = createConversationStore({ storeDir: dir });
+    const conversation = desktopStore.createConversation({ title: 'cross-client context' });
+    desktopStore.updateModelEffort(conversation.id, {
+      modelProviderId: 'provider-1::model-1',
+      model: 'model-1',
+    });
+    desktopStore.appendMessage(conversation.id, { id: 'desktop-user', role: 'user', content: 'start' });
+    desktopStore.updateContextSnapshot(conversation.id, {
+      nextRequestInputTokens: 195_000,
+      contextWindow: 500_000,
+      source: 'desktop',
+    });
+    assert.equal(tuiStore.getConversation(conversation.id).contextSnapshot.nextRequestInputTokens, 195_000);
+
+    tuiStore.appendMessage(conversation.id, { id: 'tui-user', role: 'user', content: 'continue' });
+    assert.equal(desktopStore.getConversation(conversation.id).contextSnapshot, null);
+
+    tuiStore.appendMessage(conversation.id, { id: 'tui-assistant', role: 'assistant', content: 'continued' });
+    tuiStore.updateContextSnapshot(conversation.id, {
+      nextRequestInputTokens: 42_500,
+      contextWindow: 500_000,
+      source: 'tui',
+    });
+
+    const shared = desktopStore.getConversation(conversation.id);
+    assert.equal(shared.contextSnapshot.nextRequestInputTokens, 42_500);
+    assert.equal(shared.contextSnapshot.contextWindow, 500_000);
+    assert.equal(shared.contextSnapshot.contentRevision, shared.contentRevision);
+    assert.equal(shared.contextSnapshot.source, 'tui');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

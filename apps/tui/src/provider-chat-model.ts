@@ -17,6 +17,7 @@ import type {
   ChatModelState,
   ChatModelToolCall,
 } from './chat-controller.ts';
+import { estimateTextTokens, estimateTokensFromMessages } from './context-pressure.ts';
 import { normalizeTuiRuntimeMode, type TuiRuntimeMode } from './tui-mode.ts';
 
 function toUserModelContent(
@@ -45,6 +46,7 @@ export interface CreateProviderChatModelOptions {
   readonly getSystemPrompt?: () => string;
   readonly getModel?: () => string;
   readonly getReasoningEffort?: () => ModelReasoningEffort;
+  readonly getContextWindow?: () => number | undefined;
 }
 
 function parameters(tool: RuntimeToolDefinition): Readonly<Record<string, unknown>> {
@@ -176,8 +178,19 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
       const tools = projectedToolDefinitions.map(toModelTool);
       const streamId = context.run.streamId ?? 'tui-chat';
       const reasoningEffort = options.getReasoningEffort?.();
+      const model = options.getModel?.() ?? options.model;
+      const toolTokens = estimateTextTokens(JSON.stringify(tools));
+      const contextWindowRaw = Number(options.getContextWindow?.());
+      const contextWindow = Number.isFinite(contextWindowRaw) && contextWindowRaw > 0
+        ? Math.floor(contextWindowRaw)
+        : null;
+      const requestProjection = (messages: readonly ModelMessage[]) => ({
+        nextRequestInputTokens: Math.ceil(estimateTokensFromMessages(messages) + toolTokens),
+        contextWindow,
+        model,
+      });
       const result = await (options.getProvider?.() ?? options.provider).stream({
-        model: options.getModel?.() ?? options.model,
+        model,
         messages: state.modelMessages,
         tools,
         ...(!reasoningEffort || reasoningEffort === 'default' ? {} : { reasoningEffort }),
@@ -217,15 +230,17 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         };
       }
 
+      const completedModelMessages: readonly ModelMessage[] = [
+        ...state.modelMessages,
+        { role: 'assistant', content: result.content },
+      ];
       return {
         kind: 'completed',
         state: {
           ...state,
-          modelMessages: [
-            ...state.modelMessages,
-            { role: 'assistant', content: result.content },
-          ],
+          modelMessages: completedModelMessages,
           usage: result.usage,
+          requestProjection: requestProjection(completedModelMessages),
         },
         output: result.content,
       };

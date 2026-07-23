@@ -482,6 +482,16 @@ function wrapWebContentsForRuntimeEvents(
           });
         }
         persistStreamRecord({ final: true, interrupted: erroredTerminal });
+        if (!erroredTerminal
+          && Number.isFinite(Number(payload?.nextRequestInputTokens))
+          && typeof conversationStore?.updateContextSnapshot === 'function'
+          && streamRecord.conversationId) {
+          conversationStore.updateContextSnapshot(streamRecord.conversationId, {
+            nextRequestInputTokens: Number(payload.nextRequestInputTokens),
+            contextWindow: Number.isFinite(Number(payload?.contextWindow)) ? Number(payload.contextWindow) : null,
+            source: 'desktop',
+          });
+        }
       } else if (channel === 'chat:stream:aborted') {
         streamRecord.terminalEventSent = true;
         streamRecord.terminalStatus = 'aborted';

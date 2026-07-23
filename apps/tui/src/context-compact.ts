@@ -9,6 +9,12 @@ export interface StructuralCompactResult {
   readonly beforeCount: number;
   readonly afterCount: number;
   readonly summarizedCount: number;
+  /** Cumulative continuity summary injected through System Context after compaction. */
+  readonly summary?: string;
+  /** User-facing handoff content persisted as the shared `_compaction` marker. */
+  readonly handoffContent?: string;
+  /** Number of complete user turns retained after the shared boundary. */
+  readonly retainedUserCount?: number;
   readonly reason?: 'empty' | 'nothing-to-compact';
 }
 
@@ -112,7 +118,10 @@ function buildHandoffContent(summary: string, oldCount: number): string {
  */
 export function compactModelMessagesStructurally(
   messages: readonly ModelMessage[],
-  options: { readonly keepRecentCount?: number } = {},
+  options: {
+    readonly keepRecentCount?: number;
+    readonly previousContinuity?: string;
+  } = {},
 ): StructuralCompactResult {
   const keepRecentCount = options.keepRecentCount ?? TUI_COMPACT_KEEP_RECENT;
   const beforeCount = messages.length;
@@ -145,13 +154,39 @@ export function compactModelMessagesStructurally(
     };
   }
 
-  const splitAt = nonSystem.length - keepRecentCount;
+  let splitAt = nonSystem.length - keepRecentCount;
+  // The shared boundary must start at a complete user turn. This also keeps any
+  // assistant/tool group that belongs to that user together in the retained suffix.
+  while (splitAt > 0 && nonSystem[splitAt]?.role !== 'user') {
+    splitAt -= 1;
+  }
   const oldMessages = nonSystem.slice(0, splitAt);
   const keepMessages = nonSystem.slice(splitAt);
-  const summary = buildStructuralSummary(oldMessages);
+  if (oldMessages.length === 0) {
+    return {
+      compacted: false,
+      messages,
+      beforeCount,
+      afterCount: beforeCount,
+      summarizedCount: 0,
+      reason: 'nothing-to-compact',
+    };
+  }
+  const structuralSummary = buildStructuralSummary(oldMessages);
+  const previousContinuity = options.previousContinuity?.trim();
+  const summary = previousContinuity
+    ? [
+        '## Previous compacted context',
+        previousContinuity,
+        '',
+        '## Newly compacted context',
+        structuralSummary,
+      ].join('\n')
+    : structuralSummary;
+  const handoffContent = buildHandoffContent(summary, oldMessages.length);
   const handoff: ModelMessage = {
     role: 'user',
-    content: buildHandoffContent(summary, oldMessages.length),
+    content: handoffContent,
   };
 
   const nextMessages: ModelMessage[] = [
@@ -166,5 +201,8 @@ export function compactModelMessagesStructurally(
     beforeCount,
     afterCount: nextMessages.length,
     summarizedCount: oldMessages.length,
+    summary,
+    handoffContent,
+    retainedUserCount: keepMessages.filter((message) => message.role === 'user').length,
   };
 }

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildPersistedCompactedMessages } from './conversation-compaction-persistence.mjs';
+import {
+  buildPersistedCompactedMessages,
+  persistCompactedConversation,
+} from './conversation-compaction-persistence.mjs';
 
 const compactedMessages = [
   { role: 'system', content: 'system prompt' },
@@ -221,5 +224,67 @@ describe('conversation compaction persistence', () => {
     assert.deepEqual(persisted.slice(0, 2), sourceMessages.slice(0, 2));
     assert.equal(persisted[2].id, 'compaction-id');
     assert.deepEqual(persisted.slice(3), sourceMessages.slice(-2));
+  });
+
+  it('writes the compacted projection only after replaceMessages creates the new revision', () => {
+    const calls = [];
+    const store = {
+      replaceMessages(conversationId, messages) {
+        calls.push(['replace', conversationId, messages]);
+        return { contentRevision: 8 };
+      },
+      updateContextSnapshot(conversationId, snapshot) {
+        calls.push(['snapshot', conversationId, snapshot]);
+        return { contentRevision: 8, contextSnapshot: snapshot };
+      },
+    };
+
+    const result = persistCompactedConversation({
+      store,
+      conversationId: 'c1',
+      messages: compactedMessages,
+      requestProjection: {
+        nextRequestInputTokens: 42_500,
+        contextWindow: 500_000,
+      },
+      computedAt: '2026-07-23T00:00:00.000Z',
+    });
+
+    assert.deepEqual(calls.map(([kind]) => kind), ['replace', 'snapshot']);
+    assert.deepEqual(calls[1], [
+      'snapshot',
+      'c1',
+      {
+        nextRequestInputTokens: 42_500,
+        contextWindow: 500_000,
+        computedAt: '2026-07-23T00:00:00.000Z',
+        source: 'desktop',
+      },
+    ]);
+    assert.equal(result.contentRevision, 8);
+  });
+
+  it('fails instead of reporting a completed compaction when the shared snapshot is rejected', () => {
+    const store = {
+      replaceMessages() {
+        return { contentRevision: 8 };
+      },
+      updateContextSnapshot() {
+        return null;
+      },
+    };
+
+    assert.throws(
+      () => persistCompactedConversation({
+        store,
+        conversationId: 'c1',
+        messages: compactedMessages,
+        requestProjection: {
+          nextRequestInputTokens: 42_500,
+          contextWindow: 500_000,
+        },
+      }),
+      /Failed to persist compacted context snapshot/,
+    );
   });
 });

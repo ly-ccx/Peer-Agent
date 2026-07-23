@@ -5,7 +5,7 @@ export type ComposerStatusLayout = 'wide' | 'compact' | 'narrow';
 
 /**
  * Footer running status: spinner + status text only.
- * Mounted above the mode controls bar.
+ * Mounted above the quiet divider that separates activity from the input.
  */
 export function ComposerRunningStatusBar({
   spinner,
@@ -35,7 +35,7 @@ export function ComposerRunningStatusBar({
   );
 }
 
-/** Thin rule between running status (if any) and the mode controls bar. */
+/** Thin rule between running status (if any) and the composer input. */
 export function ComposerModeDivider({ width }: { readonly width: number }) {
   const cols = Math.max(1, Math.floor(width));
   return (

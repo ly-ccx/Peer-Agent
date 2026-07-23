@@ -14,7 +14,7 @@ import {
 } from '@peer-agent/runtime-sdk';
 
 import { compactModelMessagesStructurally } from './context-compact.ts';
-import { computeContextPressure } from './context-pressure.ts';
+import { computeContextPressure, estimateTokensFromMessages } from './context-pressure.ts';
 import {
   GOAL_CAPABILITY_IDS,
   normalizeExplorerRequest,
@@ -45,6 +45,14 @@ export interface ChatCompactMeta {
   readonly beforeCount?: number;
   readonly afterCount?: number;
   readonly summarizedCount?: number;
+  readonly beforeTokens?: number;
+  readonly afterTokens?: number;
+  /** Cumulative summary admitted through System Context after this boundary. */
+  readonly summary?: string;
+  /** Shared handoff content persisted on the `_compaction` marker. */
+  readonly handoffContent?: string;
+  /** Number of complete user turns retained after the shared boundary. */
+  readonly retainedUserCount?: number;
 }
 
 export interface ChatMessageImage {
@@ -101,6 +109,7 @@ export interface ChatSnapshot {
   readonly session?: RuntimeSessionSnapshot;
   readonly plan?: PlanSnapshot;
   readonly usage?: ModelUsage;
+  readonly requestProjection?: ChatModelState['requestProjection'];
   /** Estimated input tokens for the next final provider request. */
   readonly nextRequestInputTokens?: number;
   /** Independent conservative pressure used only to trigger automatic compaction. */
@@ -137,6 +146,11 @@ export interface ChatModelState {
   readonly toolExecutions: readonly RuntimeSdkProviderExecution[];
   readonly pendingToolCalls?: readonly ModelToolCall[];
   readonly usage?: ModelUsage;
+  readonly requestProjection?: {
+    readonly nextRequestInputTokens: number;
+    readonly contextWindow: number | null;
+    readonly model: string;
+  };
 }
 
 export interface ChatModelPort extends RuntimePipelineModelAdapter<
@@ -149,8 +163,15 @@ export interface ChatModelPort extends RuntimePipelineModelAdapter<
 
 export interface ChatRestoreInput {
   readonly mode: TuiMode;
+  /** Complete UI transcript, including historical compaction markers. */
   readonly messages: readonly ChatMessage[];
+  /** Active provider history after the latest shared compaction boundary. */
+  readonly modelMessages?: readonly ModelMessage[];
+  /** Latest cumulative compaction summary, admitted through System Context. */
+  readonly continuityContext?: string;
   readonly usage?: ModelUsage;
+  readonly nextRequestInputTokens?: number;
+  readonly requestProjection?: ChatModelState['requestProjection'];
 }
 
 export interface ChatCompactResult {
@@ -172,9 +193,12 @@ export interface ChatController {
   compact(): Promise<ChatCompactResult>;
   send(content: string, options?: { readonly images?: readonly ChatMessageImage[] }): Promise<void>;
   runGoalTurn(content: string): Promise<{
-    readonly continued: true;
+    readonly continued: boolean;
     readonly explorers: readonly TuiExplorerRequest[];
     readonly toolCallCount: number;
+    readonly failed?: boolean;
+    readonly failureReason?: string;
+    readonly terminalStatus?: 'error' | 'aborted' | string;
   }>;
   runExplorer(input: Parameters<TuiGoalWorkerAdapter['runExplorer']>[0]): ReturnType<TuiGoalWorkerAdapter['runExplorer']>;
   runVerifier(input: Parameters<TuiGoalWorkerAdapter['runVerifier']>[0]): ReturnType<TuiGoalWorkerAdapter['runVerifier']>;
@@ -392,6 +416,7 @@ export function createChatController(options: {
   let snapshot: ChatSnapshot = { status: 'idle', mode: initialMode, messages: [] };
   let activeTurn: RuntimeSessionTurnHandle | null = null;
   let conversationModelMessages: readonly ModelMessage[] = [];
+  let conversationContinuityContext: string | undefined;
   let executionEvidenceIds: string[] = [];
   let sequence = 0;
   let goalTurnCollector: {
@@ -434,7 +459,7 @@ export function createChatController(options: {
     const pressure = pressureFor(messages, next.usage);
     return {
       ...next,
-      nextRequestInputTokens: pressure.nextRequestInputTokens,
+      nextRequestInputTokens: next.nextRequestInputTokens ?? pressure.nextRequestInputTokens,
       compactionPressureTokens: pressure.compactionPressureTokens,
     };
   };
@@ -493,7 +518,9 @@ export function createChatController(options: {
     publishProgress(78);
     await sleep(25);
 
-    const result = compactModelMessagesStructurally(conversationModelMessages);
+    const result = compactModelMessagesStructurally(conversationModelMessages, {
+      previousContinuity: conversationContinuityContext,
+    });
     if (!result.compacted) {
       const notice =
         result.reason === 'empty'
@@ -517,7 +544,36 @@ export function createChatController(options: {
       };
     }
 
-    conversationModelMessages = result.messages as ModelMessage[];
+    const previousProjection = snapshot.requestProjection;
+    const previousMessageTokens = estimateTokensFromMessages(conversationModelMessages);
+    const previousContinuityTokens = conversationContinuityContext
+      ? estimateTokensFromMessages([{ role: 'system', content: conversationContinuityContext }])
+      : 0;
+    conversationModelMessages = result.messages
+      .filter((message) => !(
+        message.role === 'user'
+        && typeof message.content === 'string'
+        && message.content === result.handoffContent
+      )) as ModelMessage[];
+    conversationContinuityContext = result.summary?.trim() || result.handoffContent?.trim() || undefined;
+    const compactedContextTokens =
+      estimateTokensFromMessages(conversationModelMessages)
+      + (conversationContinuityContext
+        ? estimateTokensFromMessages([{ role: 'system', content: conversationContinuityContext }])
+        : 0);
+    const requestProjection = previousProjection
+      ? {
+          ...previousProjection,
+          nextRequestInputTokens:
+            compactedContextTokens
+            + Math.max(
+              0,
+              previousProjection.nextRequestInputTokens
+                - previousMessageTokens
+                - previousContinuityTokens,
+            ),
+        }
+      : undefined;
     const prefix = opts.source === 'auto' ? 'Auto-compacted' : 'Compacted';
     const doneContent =
       `${prefix} ${result.beforeCount} → ${result.afterCount} messages` +
@@ -532,6 +588,11 @@ export function createChatController(options: {
         beforeCount: result.beforeCount,
         afterCount: result.afterCount,
         summarizedCount: result.summarizedCount,
+        ...(previousProjection ? { beforeTokens: previousProjection.nextRequestInputTokens } : {}),
+        ...(requestProjection ? { afterTokens: requestProjection.nextRequestInputTokens } : {}),
+        summary: result.summary,
+        handoffContent: result.handoffContent,
+        retainedUserCount: result.retainedUserCount,
       },
     };
     // Preserve UI transcript and usage; only provider history shrinks. Progress row becomes a durable separator.
@@ -542,6 +603,8 @@ export function createChatController(options: {
       messages: [...withoutProgress, doneMessage],
       plan: snapshot.plan,
       usage: snapshot.usage,
+      requestProjection,
+      nextRequestInputTokens: requestProjection?.nextRequestInputTokens,
       error: undefined,
     }));
 
@@ -755,9 +818,12 @@ export function createChatController(options: {
       const messages = input.messages
         .filter((message) => !message.pending)
         .map((message) => ({ ...message, pending: undefined }));
-      conversationModelMessages = messages
-        .filter((message) => message.role === 'user' || message.role === 'assistant')
-        .map((message) => ({ role: message.role as 'user' | 'assistant', content: message.content }));
+      conversationModelMessages = input.modelMessages
+        ? [...input.modelMessages]
+        : messages
+            .filter((message) => message.role === 'user' || message.role === 'assistant')
+            .map((message) => ({ role: message.role as 'user' | 'assistant', content: message.content }));
+      conversationContinuityContext = input.continuityContext?.trim() || undefined;
       executionEvidenceIds = [];
       sequence = restoredMessageSequence(messages);
       publish(withPressure({
@@ -765,6 +831,10 @@ export function createChatController(options: {
         mode: normalizeTuiMode(input.mode),
         messages,
         usage: input.usage,
+        requestProjection: input.requestProjection,
+        ...(input.nextRequestInputTokens === undefined
+          ? {}
+          : { nextRequestInputTokens: input.nextRequestInputTokens }),
       }));
       return true;
     },
@@ -850,6 +920,17 @@ export function createChatController(options: {
               ...(images.length > 0 ? { images } : {}),
               history,
               modelMessages: conversationModelMessages,
+              ...(conversationContinuityContext
+                ? {
+                    systemContextBlocks: [{
+                      id: 'conversation.compaction',
+                      title: 'Conversation Continuity',
+                      content: conversationContinuityContext,
+                      layer: 'conversation',
+                      trust: 'continuity',
+                    }],
+                  }
+                : {}),
               turnId: turn.turnId,
               turnIndex: turn.turnIndex,
             },
@@ -887,6 +968,7 @@ export function createChatController(options: {
           session: sessions.get(sessionId) ?? undefined,
           plan: options.planCoordinator?.getSnapshot() ?? undefined,
           usage: result.state?.usage,
+          requestProjection: result.state?.requestProjection,
           messages: finalizePendingMessages(snapshot.messages, {
             interrupted: failed,
             error: failureDetail,
@@ -919,6 +1001,7 @@ export function createChatController(options: {
     clear() {
       if (activeTurn) return false;
       conversationModelMessages = [];
+      conversationContinuityContext = undefined;
       executionEvidenceIds = [];
       publish(withPressure({ status: 'idle', mode: snapshot.mode, messages: [] }, []));
       return true;
@@ -953,7 +1036,18 @@ export function createChatController(options: {
       try {
         this.setMode('goal');
         await this.send(content);
-        if (snapshot.error) throw new Error(snapshot.error);
+        if (snapshot.error) {
+          // Structured failure so Goal Runner can mark the plan/task failed
+          // without relying only on thrown exceptions.
+          return {
+            continued: false as const,
+            failed: true as const,
+            failureReason: snapshot.error,
+            terminalStatus: 'error' as const,
+            explorers: [...collector.explorers],
+            toolCallCount: collector.toolCallCount,
+          };
+        }
         return {
           continued: true as const,
           explorers: [...collector.explorers],

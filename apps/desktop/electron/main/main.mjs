@@ -74,7 +74,10 @@ import {
 import { fetchProviderSubscriptionQuota, resolveGeminiCodeAssistProjectId } from './subscription-quota.mjs';
 import { applyGoalMessageRoute, routeGoalMessage } from './goal-message-router.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
-import { buildPersistedCompactedMessages } from './conversation-compaction-persistence.mjs';
+import {
+  buildPersistedCompactedMessages,
+  persistCompactedConversation,
+} from './conversation-compaction-persistence.mjs';
 import { compactIfNeeded, estimateTokensFromMessages } from './context-compactor.mjs';
 import {
   beginCompaction,
@@ -342,6 +345,7 @@ function persistCompactionToConversation({
   compactResult,
   preservePendingAssistant = false,
   sourceMessages = null,
+  requestProjection = null,
 }) {
   const conv = conversationStore.getConversation(conversationId);
   if (!conv) return null;
@@ -354,7 +358,12 @@ function persistCompactionToConversation({
     keptCount,
     preservePendingAssistant,
   });
-  return conversationStore.replaceMessages(conversationId, compactedMessages);
+  return persistCompactedConversation({
+    store: conversationStore,
+    conversationId,
+    messages: compactedMessages,
+    requestProjection,
+  });
 }
 
 function continuityContextFromCompactionResult(result) {
@@ -2243,10 +2252,17 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
       return { compacted: false };
     }
 
+    // 手动压缩不经过会话 runtime projection，当前无法重建当轮工具 schema；
+    // 但共享仓与完成事件仍必须复用同一份压缩后消息投影，避免两端再次分叉。
+    const requestProjection = {
+      nextRequestInputTokens: estimateTokensFromMessages(result.messages),
+      contextWindow: contextWindow > 0 ? contextWindow : null,
+    };
     persistCompactionToConversation({
       conversationId,
       compactResult: result,
       sourceMessages: activeMessages,
+      requestProjection,
     });
 
     try {
@@ -2275,10 +2291,7 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     const notification = result.notification
       ? {
           ...result.notification,
-          // 手动压缩目前不经过会话 runtime projection，无法重建该会话当轮的工具 schema；
-          // 至少返回 system + 压缩后 messages 的可靠快照，renderer 的本地 live 估算会补齐实时增量。
-          nextRequestInputTokens: estimateTokensFromMessages(result.messages),
-          contextWindow,
+          ...requestProjection,
         }
       : undefined;
     if (notification) {

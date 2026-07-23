@@ -874,14 +874,14 @@ function ComposerDock({
       paddingLeft={layout.outerPadding}
       paddingRight={layout.outerPadding}
     >
-      {/* Canonical dock: one quiet line, no card or enclosing border. */}
-      <ComposerModeDivider width={dividerWidth} />
+      {/* Running status sits above the quiet divider; the line separates activity from the input. No card or enclosing border. */}
       {composerLayout.showRunningStatus ? (
         <ComposerRunningStatusLabel
           locale={locale}
           runStatus={snapshot.status === 'cancelling' ? 'cancelling' : snapshot.status === 'compacting' ? 'compacting' : 'running'}
         />
       ) : null}
+      <ComposerModeDivider width={dividerWidth} />
       <box position="relative" width="100%" height={composerLayout.shellRows} overflow="visible">
         {slashOpen ? (
           <SlashCommandMenu
@@ -1022,6 +1022,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   );
   controllerRef.current = controller;
   const [snapshot, setSnapshot] = useState(() => controller.getSnapshot());
+  const [externalConversationRevision, setExternalConversationRevision] = useState(0);
   // 与 Desktop 对齐的共享 Goal Runner：goal_create_plan 写盘后由 store onChange
   // 的 auto-start 闸门 kick；runGoalTurn 通过 controller.send 驱动会话继续执行。
   // 仅在共享 store 存在（host.goalBridge）时创建；测试 host 可能不带 bridge。
@@ -1409,6 +1410,24 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     persistence.syncSnapshot(next);
     setSnapshot(next);
   }), [controller, persistence]);
+  useEffect(() => persistence.subscribeExternalChanges(() => {
+    setExternalConversationRevision((revision) => revision + 1);
+  }), [persistence]);
+  useEffect(() => {
+    if (externalConversationRevision === 0 || snapshot.status !== 'idle') return;
+    const conversationId = persistence.getConversationId();
+    if (!conversationId) {
+      setExternalConversationRevision(0);
+      return;
+    }
+    const conversation = persistence.loadConversation(conversationId);
+    setExternalConversationRevision(0);
+    if (!conversation || !resumeTuiConversation(controller, persistence, conversation)) return;
+    if (conversation.modelSelection && modelSelection) {
+      modelSelection.setSelection(conversation.modelSelection);
+      setSelectedModel(conversation.modelSelection);
+    }
+  }, [controller, externalConversationRevision, modelSelection, persistence, snapshot.status]);
   useEffect(() => {
     if (!goalRunner) return undefined;
     // 用 runner 领域事件驱动轻量重拉（替代旧局部 RuntimeGoalController 订阅）。

@@ -205,6 +205,7 @@ describe('chat compaction coordinator', () => {
   it('emits the post-compaction context snapshot only after persistence succeeds', async () => {
     const events = [];
     const ordering = [];
+    let persistedProjection = null;
     const tools = [
       {
         type: 'function',
@@ -226,8 +227,9 @@ describe('chat compaction coordinator', () => {
       contextWindow: 200_000,
       providerConfig: null,
       signal: new AbortController().signal,
-      persistCompaction: async () => {
+      persistCompaction: async ({ requestProjection }) => {
         ordering.push('persist');
+        persistedProjection = requestProjection;
       },
       conversationId: 'c1',
       streamId: 's1',
@@ -249,6 +251,10 @@ describe('chat compaction coordinator', () => {
     assert.equal(done.conversationId, 'c1');
     assert.deepEqual(ordering, ['persist', 'done']);
     assert.equal(done.contextWindow, 200_000);
+    assert.deepEqual(persistedProjection, {
+      nextRequestInputTokens: done.nextRequestInputTokens,
+      contextWindow: done.contextWindow,
+    });
     assert.equal(
       done.nextRequestInputTokens,
       estimateTokensFromMessages(result.messages) + estimateToolsTokens(tools),

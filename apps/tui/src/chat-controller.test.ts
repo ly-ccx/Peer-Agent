@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'bun:test';
+import type { ModelMessage } from '@peer-agent/runtime-node';
 import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
 
 import {
   createChatController,
   type ChatModelPort,
   type ChatModelState,
+  type ChatSystemContextBlock,
 } from './chat-controller.ts';
+import { estimateTokensFromMessages } from './context-pressure.ts';
 import { GOAL_CAPABILITY_IDS } from './goal-bridge.ts';
 import { createPlanCoordinator, type RuntimePlan } from './plan-mode.ts';
 import type { TuiExecutionContext, TuiHost } from './tui-host.ts';
@@ -595,10 +598,19 @@ describe('chat controller', () => {
     expect(controller.getSnapshot().session?.lastTurn?.reason).toBe('provider exploded');
   });
 
-  test('compacts modelMessages while preserving UI transcript', async () => {
+  test('compacts modelMessages while preserving UI transcript and the shared request projection', async () => {
     let observedModelMessageCount = 0;
+    let observedInputHistoryTokens = 0;
+    let observedContinuityTokens = 0;
     const model: ChatModelPort = {
       initialize(input) {
+        observedInputHistoryTokens = estimateTokensFromMessages(input.input.modelMessages);
+        observedContinuityTokens = estimateTokensFromMessages(
+          (input.input.systemContextBlocks ?? []).map((block) => ({
+            role: 'system' as const,
+            content: block.content,
+          })),
+        );
         return {
           messages: [
             ...input.input.history,
@@ -613,16 +625,23 @@ describe('chat controller', () => {
       },
       async runTurn(state) {
         observedModelMessageCount = state.modelMessages.length;
+        const reply = `reply-${state.modelMessages.length}-${'y'.repeat(2_000)}`;
+        const completedModelMessages = [
+          ...state.modelMessages,
+          { role: 'assistant' as const, content: reply },
+        ];
         return {
           kind: 'completed',
           state: {
             ...state,
-            modelMessages: [
-              ...state.modelMessages,
-              { role: 'assistant', content: `reply-${state.modelMessages.length}` },
-            ],
+            modelMessages: completedModelMessages,
+            requestProjection: {
+              nextRequestInputTokens: estimateTokensFromMessages(completedModelMessages) + 77,
+              contextWindow: 500_000,
+              model: 'model-a',
+            },
           },
-          output: `reply-${state.modelMessages.length}`,
+          output: reply,
         };
       },
       applyToolResults: (state) => state,
@@ -630,17 +649,28 @@ describe('chat controller', () => {
     const controller = createChatController({ host: host(), model });
 
     for (let index = 0; index < 6; index += 1) {
-      await controller.send(`message-${index}`);
+      await controller.send(`message-${index}-${'x'.repeat(2_000)}`);
     }
     const beforeUiCount = controller.getSnapshot().messages.length;
     const beforeModelCount = observedModelMessageCount;
+    const beforeProjection = controller.getSnapshot().requestProjection;
     expect(beforeModelCount).toBeGreaterThan(8);
+    expect(beforeProjection).toBeDefined();
 
     const result = await controller.compact();
+    const compactedProjection = controller.getSnapshot().requestProjection;
 
     expect(result.ok).toBe(true);
     expect(result.compacted).toBe(true);
     expect(result.afterCount).toBeLessThan(result.beforeCount);
+    expect(compactedProjection?.model).toBe('model-a');
+    expect(compactedProjection?.contextWindow).toBe(500_000);
+    expect(compactedProjection?.nextRequestInputTokens).toBeLessThan(
+      beforeProjection?.nextRequestInputTokens ?? Number.POSITIVE_INFINITY,
+    );
+    expect(controller.getSnapshot().nextRequestInputTokens).toBe(
+      compactedProjection?.nextRequestInputTokens,
+    );
     // UI transcript keeps prior turns and appends one durable compact separator.
     expect(controller.getSnapshot().messages).toHaveLength(beforeUiCount + 1);
     expect(
@@ -651,6 +681,10 @@ describe('chat controller', () => {
 
     await controller.send('after-compact');
     expect(observedModelMessageCount).toBeLessThan(beforeModelCount + 2);
+    expect(observedContinuityTokens).toBeGreaterThan(0);
+    expect(compactedProjection?.nextRequestInputTokens).toBe(
+      observedInputHistoryTokens + observedContinuityTokens + 77,
+    );
     // UI transcript keeps prior turns and appends the new exchange.
     expect(controller.getSnapshot().messages.length).toBeGreaterThan(beforeUiCount);
     expect(
@@ -783,6 +817,59 @@ describe('chat controller', () => {
       { role: 'tool', content: 'tool evidence' },
       { role: 'assistant', content: 'original answer' },
     ]]);
+  });
+
+  test('restores shared compacted provider history without re-sending hidden UI history', async () => {
+    let observedModelMessages: readonly ModelMessage[] = [];
+    let observedContextBlocks: readonly ChatSystemContextBlock[] = [];
+    const model: ChatModelPort = {
+      initialize(input) {
+        observedModelMessages = input.input.modelMessages;
+        observedContextBlocks = input.input.systemContextBlocks ?? [];
+        return initialState(input.input);
+      },
+      async runTurn(state) {
+        return { kind: 'completed', state, output: 'continued' };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({ host: host(), model });
+
+    expect(controller.restore({
+      mode: 'chat',
+      messages: [
+        { id: 'old-user', role: 'user', content: 'hidden old text' },
+        {
+          id: 'compact',
+          role: 'system',
+          content: 'Earlier conversation (compacted)',
+          compact: { phase: 'done', summary: 'durable decision' },
+        },
+        { id: 'recent-user', role: 'user', content: 'recent request' },
+        { id: 'recent-assistant', role: 'assistant', content: 'recent answer' },
+      ],
+      modelMessages: [
+        { role: 'user', content: 'recent request' },
+        { role: 'assistant', content: 'recent answer' },
+      ],
+      continuityContext: 'durable decision',
+    })).toBe(true);
+
+    await controller.send('continue');
+
+    expect(observedModelMessages).toEqual([
+      { role: 'user', content: 'recent request' },
+      { role: 'assistant', content: 'recent answer' },
+    ]);
+    expect(JSON.stringify(observedModelMessages)).not.toContain('hidden old text');
+    expect(observedContextBlocks).toEqual([{
+      id: 'conversation.compaction',
+      title: 'Conversation Continuity',
+      content: 'durable decision',
+      layer: 'conversation',
+      trust: 'continuity',
+    }]);
+    expect(controller.getSnapshot().messages.map((message) => message.id)).toContain('old-user');
   });
 
   test('keeps restored goal history IDs unique after tool-heavy turns', async () => {

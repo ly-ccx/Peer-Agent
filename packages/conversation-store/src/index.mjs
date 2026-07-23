@@ -98,6 +98,28 @@ function normalizeStatuses(status) {
   return null;
 }
 
+function normalizeContextSnapshot(snapshot, meta) {
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  const nextRequestInputTokens = Number(snapshot.nextRequestInputTokens);
+  const contentRevision = Number(snapshot.contentRevision);
+  if (!Number.isFinite(nextRequestInputTokens) || nextRequestInputTokens < 0) return null;
+  if (!Number.isSafeInteger(contentRevision) || contentRevision < 0) return null;
+  const contextWindowRaw = Number(snapshot.contextWindow);
+  const contextWindow = Number.isFinite(contextWindowRaw) && contextWindowRaw > 0 ? contextWindowRaw : null;
+  const modelProviderId = normalizeModelProviderId(snapshot.modelProviderId);
+  const model = typeof snapshot.model === 'string' && snapshot.model.trim() ? snapshot.model.trim() : null;
+  const computedAt = typeof snapshot.computedAt === 'string' && snapshot.computedAt.trim()
+    ? snapshot.computedAt
+    : null;
+  const source = snapshot.source === 'desktop' || snapshot.source === 'tui' ? snapshot.source : null;
+  if (!computedAt || !source) return null;
+  if (contentRevision !== Number(meta?.contentRevision ?? 0)) return null;
+  if (modelProviderId !== normalizeModelProviderId(meta?.modelProviderId)) return null;
+  const metaModel = typeof meta?.model === 'string' && meta.model.trim() ? meta.model.trim() : null;
+  if (model !== metaModel) return null;
+  return { nextRequestInputTokens, contextWindow, contentRevision, modelProviderId, model, computedAt, source };
+}
+
 function normalizeMeta(meta) {
   const status = normalizeStatus(meta?.status);
   const pinnedAt = typeof meta?.pinnedAt === 'string' && meta.pinnedAt.trim() ? meta.pinnedAt : null;
@@ -105,12 +127,21 @@ function normalizeMeta(meta) {
   // messageCount 写入 index 后，列表路径可直接读 meta；缺省时保持 undefined，由 withMessageCount 惰性回填。
   const messageCount = Number.isFinite(Number(meta?.messageCount)) ? Number(meta.messageCount) : undefined;
   const model = typeof meta?.model === 'string' && meta.model.trim() ? meta.model.trim() : null;
-  return {
+  const contentRevisionRaw = Number(meta?.contentRevision);
+  const contentRevision = Number.isSafeInteger(contentRevisionRaw) && contentRevisionRaw >= 0
+    ? contentRevisionRaw
+    : 0;
+  const normalizedBase = {
     ...meta,
+    contentRevision,
+  };
+  return {
+    ...normalizedBase,
     mode: normalizeMode(meta?.mode),
     effort: normalizeEffort(meta?.effort),
     modelProviderId: normalizeModelProviderId(meta?.modelProviderId),
     model,
+    contextSnapshot: normalizeContextSnapshot(meta?.contextSnapshot, normalizedBase),
     status,
     archivedAt: status === 'archived' ? (meta?.archivedAt || meta?.updatedAt || meta?.createdAt || null) : null,
     pinnedAt,
@@ -441,6 +472,8 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
       pinnedAt: null,
       pinnedOrder: null,
       messageCount: 0,
+      contentRevision: 0,
+      contextSnapshot: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -466,13 +499,44 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     const index = readIndex();
     const meta = index.find((c) => c.id === id);
     if (!meta) return null;
+    const previousProviderId = normalizeModelProviderId(meta.modelProviderId);
+    const previousModel = typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : null;
     if (effort !== undefined) meta.effort = normalizeEffort(effort);
     if (modelProviderId !== undefined) meta.modelProviderId = normalizeModelProviderId(modelProviderId);
     // 发送成功后可把本轮实际 model 快照落盘；null/空串表示清除。
     if (model !== undefined) {
       meta.model = typeof model === 'string' && model.trim() ? model.trim() : null;
     }
+    if (previousProviderId !== normalizeModelProviderId(meta.modelProviderId)
+      || previousModel !== (typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : null)) {
+      meta.contextSnapshot = null;
+    }
     meta.updatedAt = new Date().toISOString();
+    writeJsonl(indexFile, index);
+    return withMessageCount(meta);
+  }
+
+  function updateContextSnapshot(id, snapshot = {}) {
+    const index = readIndex();
+    const meta = index.find((c) => c.id === id);
+    if (!meta) return null;
+    const contentRevisionRaw = Number(meta.contentRevision);
+    const contentRevision = Number.isSafeInteger(contentRevisionRaw) && contentRevisionRaw >= 0
+      ? contentRevisionRaw
+      : 0;
+    const candidate = {
+      ...snapshot,
+      contentRevision,
+      modelProviderId: normalizeModelProviderId(meta.modelProviderId),
+      model: typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : null,
+      computedAt: typeof snapshot.computedAt === 'string' && snapshot.computedAt.trim()
+        ? snapshot.computedAt
+        : new Date().toISOString(),
+    };
+    const normalized = normalizeContextSnapshot(candidate, { ...meta, contentRevision });
+    if (!normalized) return null;
+    meta.contentRevision = contentRevision;
+    meta.contextSnapshot = normalized;
     writeJsonl(indexFile, index);
     return withMessageCount(meta);
   }
@@ -509,6 +573,8 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
       meta.messageCount = prevCount === null
         ? readJsonl(convFile(id)).length
         : prevCount + 1;
+      meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
+      meta.contextSnapshot = null;
       meta.updatedAt = new Date().toISOString();
       writeJsonl(indexFile, index);
       return { ...meta, messages: readJsonl(convFile(id)) };
@@ -522,7 +588,12 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     writeJsonl(convFile(id), messages);
     const index = readIndex();
     const meta = index.find((c) => c.id === id);
-    if (meta) { meta.updatedAt = new Date().toISOString(); writeJsonl(indexFile, index); }
+    if (meta) {
+      meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
+      meta.contextSnapshot = null;
+      meta.updatedAt = new Date().toISOString();
+      writeJsonl(indexFile, index);
+    }
     return meta ? { ...meta, messages } : null;
   }
 
@@ -536,6 +607,8 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     const meta = index.find((c) => c.id === id);
     if (meta) {
       meta.messageCount = Array.isArray(newMessages) ? newMessages.length : 0;
+      meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
+      meta.contextSnapshot = null;
       meta.updatedAt = new Date().toISOString();
       writeJsonl(indexFile, index);
     }
@@ -566,7 +639,12 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     writeJsonl(convFile(id), messages);
     const index = readIndex();
     const meta = index.find((c) => c.id === id);
-    if (meta) { meta.updatedAt = new Date().toISOString(); writeJsonl(indexFile, index); }
+    if (meta) {
+      meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
+      meta.contextSnapshot = null;
+      meta.updatedAt = new Date().toISOString();
+      writeJsonl(indexFile, index);
+    }
     return meta ? { ...meta, messages } : null;
   }
 
@@ -765,6 +843,7 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     updateTitle: changed(updateTitle, 'metadata-updated'),
     updateMode: changed(updateMode, 'metadata-updated'),
     updateModelEffort: changed(updateModelEffort, 'metadata-updated'),
+    updateContextSnapshot: changed(updateContextSnapshot, 'metadata-updated'),
     appendMessage: changed(appendMessage, 'messages-updated'),
     updateLastMessage: changed(updateLastMessage, 'messages-updated'),
     updateMessageById: changed(updateMessageById, 'messages-updated'),

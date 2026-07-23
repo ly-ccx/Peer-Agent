@@ -7,6 +7,16 @@ export interface ConversationUsage {
   readonly [key: string]: unknown;
 }
 
+export interface ConversationContextSnapshot {
+  readonly nextRequestInputTokens: number;
+  readonly contextWindow: number | null;
+  readonly contentRevision: number;
+  readonly modelProviderId: string | null;
+  readonly model: string | null;
+  readonly computedAt: string;
+  readonly source: 'desktop' | 'tui';
+}
+
 export interface ConversationMeta {
   readonly id: string;
   readonly title?: string;
@@ -15,6 +25,8 @@ export interface ConversationMeta {
   readonly updatedAt?: string;
   readonly model?: string;
   readonly modelProviderId?: string | null;
+  readonly contentRevision?: number;
+  readonly contextSnapshot?: ConversationContextSnapshot | null;
   readonly effort?: string;
   readonly messageCount?: number;
   readonly [key: string]: unknown;
@@ -68,6 +80,7 @@ export interface ConversationStore {
   appendMessage(id: string, message: object): unknown;
   updateMode(id: string, mode: string): unknown;
   updateModelEffort(id: string, input: { effort?: string; modelProviderId?: string | null; model?: string | null }): unknown;
+  updateContextSnapshot(id: string, snapshot: Omit<ConversationContextSnapshot, 'contentRevision' | 'computedAt'> & { computedAt?: string }): ConversationMeta | null;
   addUsage(id: string, usage: ConversationUsage): unknown;
   subscribeChanges(listener: (event: ConversationChangeEvent) => void, options?: { interval?: number }): () => void;
   readonly [key: string]: unknown;

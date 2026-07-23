@@ -42,6 +42,19 @@ describe('TUI app layout', () => {
     expect(appSource).toContain("!isWelcome && goalView && goalLayout.mode === 'side-panel'");
   });
 
+  test('reloads the active CLI conversation only after an external revision reaches idle', () => {
+    const externalReloadEffect = appSource.slice(
+      appSource.indexOf('useEffect(() => persistence.subscribeExternalChanges'),
+      appSource.indexOf('useEffect(() => {\n    if (!goalRunner)'),
+    );
+
+    expect(externalReloadEffect).toContain('setExternalConversationRevision');
+    expect(externalReloadEffect).toContain("snapshot.status !== 'idle'");
+    expect(externalReloadEffect).toContain('persistence.loadConversation(conversationId)');
+    expect(externalReloadEffect).toContain('resumeTuiConversation(controller, persistence, conversation)');
+    expect(externalReloadEffect).toContain('setExternalConversationRevision(0)');
+  });
+
   test('refreshes Goal state from shared store events instead of polling', () => {
     const goalRefreshEffect = appSource.slice(
       appSource.indexOf('// Shared store events keep CLI and Desktop panels'),
@@ -83,7 +96,7 @@ describe('TUI app layout', () => {
     expect(composerSource).not.toContain('borderStyle=');
     expect(composerSource).toContain('height={height}');
     expect(dockSource).toContain('height={composerLayout.inputRows}');
-    expect(dockSource).toContain('no card or enclosing border');
+    expect(dockSource).toContain('Running status sits above the quiet divider');
   });
 
   test('keeps composer input text readable with the active theme whether focused or not', () => {
@@ -238,9 +251,9 @@ describe('TUI app layout', () => {
     const runningAt = dockSource.indexOf('<ComposerRunningStatusLabel');
     const inputAt = dockSource.indexOf('<Composer\n');
     const statusAt = dockSource.indexOf('<ComposerStatusBar status={status} layout={statusLayout} />');
-    expect(dividerAt).toBeGreaterThanOrEqual(0);
-    expect(runningAt).toBeGreaterThan(dividerAt);
-    expect(inputAt).toBeGreaterThan(runningAt);
+    expect(runningAt).toBeGreaterThanOrEqual(0);
+    expect(dividerAt).toBeGreaterThan(runningAt);
+    expect(inputAt).toBeGreaterThan(dividerAt);
     expect(statusAt).toBeGreaterThan(inputAt);
   });
 

@@ -12,6 +12,7 @@ import {
   createProviderChatModel,
   createUnavailableChatModel,
 } from './provider-chat-model.ts';
+import { estimateTextTokens, estimateTokensFromMessages } from './context-pressure.ts';
 import type { TuiHost } from './tui-host.ts';
 
 const toolDefinitions: RuntimeToolDefinition[] = [{
@@ -66,6 +67,7 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     const requests: ModelProviderRequest[] = [];
     let modelId = 'model-a';
     let effort: 'default' | 'high' = 'default';
+    let contextWindow = 128_000;
     const provider: ModelProvider = {
       async stream(request) {
         requests.push(request);
@@ -79,18 +81,28 @@ describe('OpenAI-compatible TUI chat adapter', () => {
         model: modelId,
         getModel: () => modelId,
         getReasoningEffort: () => effort,
+        getContextWindow: () => contextWindow,
       }),
     });
 
     await controller.send('first');
     modelId = 'model-b';
     effort = 'high';
+    contextWindow = 500_000;
     await controller.send('second');
 
     expect(requests[0]?.model).toBe('model-a');
     expect(requests[0]?.reasoningEffort).toBeUndefined();
     expect(requests[1]?.model).toBe('model-b');
     expect(requests[1]?.reasoningEffort).toBe('high');
+    const finalSnapshot = controller.getSnapshot();
+    expect(finalSnapshot.requestProjection?.model).toBe('model-b');
+    expect(finalSnapshot.requestProjection?.contextWindow).toBe(500_000);
+    const sentRequestTokens = Math.ceil(
+      estimateTokensFromMessages(requests[1]!.messages)
+      + estimateTextTokens(JSON.stringify(requests[1]!.tools ?? [])),
+    );
+    expect(finalSnapshot.requestProjection?.nextRequestInputTokens).toBeGreaterThan(sentRequestTokens);
   });
 
   test('routes each turn through the provider selected at turn start', async () => {

@@ -183,6 +183,12 @@ const model = provider
       model: modelConfig.model,
       getModel: () => modelSelection.getSelection().modelId,
       getReasoningEffort: () => modelSelection.getSelection().reasoningEffort,
+      getContextWindow: () => {
+        const selection = modelSelection.getSelection();
+        return modelSelection.catalog.find((entry) => (
+          entry.providerId === selection.providerId && entry.modelId === selection.modelId
+        ))?.contextWindow;
+      },
       toolDefinitionsForMode: (mode) => host.toolDefinitionsForMode?.(mode) ?? host.toolDefinitions,
       systemPrompt: systemPrompt(),
       getSystemPrompt: systemPrompt,

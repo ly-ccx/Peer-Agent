@@ -67,6 +67,47 @@ describe('context-compact structural summary', () => {
     expect(result.messages).toBe(messages);
   });
 
+  test('starts the retained suffix at a complete user turn', () => {
+    const messages = [
+      user('old request'),
+      assistant('old answer'),
+      user('tool request'),
+      assistant('', [{ id: 'call-1', name: 'lookup', arguments: '{}' }]),
+      { role: 'tool', toolCallId: 'call-1', content: 'tool result' } satisfies ModelMessage,
+      assistant('tool answer'),
+      user('recent request'),
+      assistant('recent answer'),
+    ];
+
+    const result = compactModelMessagesStructurally(messages, { keepRecentCount: 4 });
+
+    expect(result.compacted).toBe(true);
+    expect(result.retainedUserCount).toBe(2);
+    expect(result.messages.slice(1).map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+      'tool',
+      'assistant',
+      'user',
+      'assistant',
+    ]);
+  });
+
+  test('carries the previous compacted context into the next cumulative summary', () => {
+    const messages = Array.from({ length: 12 }, (_, index) => (
+      index % 2 === 0 ? user(`request ${index}`) : assistant(`answer ${index}`)
+    ));
+
+    const result = compactModelMessagesStructurally(messages, {
+      keepRecentCount: 4,
+      previousContinuity: 'prior compacted decision',
+    });
+
+    expect(result.summary).toContain('prior compacted decision');
+    expect(result.summary).toContain('Newly compacted context');
+    expect(result.handoffContent).toContain('prior compacted decision');
+  });
+
   test('uses default keep-recent window size', () => {
     expect(TUI_COMPACT_KEEP_RECENT).toBe(8);
   });
