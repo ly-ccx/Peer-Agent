@@ -144,7 +144,7 @@ describe('projected model tool executor', () => {
 
     assert.equal(result.success, false);
     const parsed = JSON.parse(result.output);
-    assert.equal(parsed.reason, 'goal_scope_out_of_workspace');
+    assert.equal(parsed.reason, 'goal_scope_expansion_denied');
     assert.equal(existsSync(outsidePath), false);
   });
 

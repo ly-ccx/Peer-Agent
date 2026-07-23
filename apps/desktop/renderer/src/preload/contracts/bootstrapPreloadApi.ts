@@ -562,7 +562,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly consumePendingTask: () => Promise<PendingTask | null>;
   readonly peekPendingTask: () => Promise<PendingTask | null>;
   readonly clearPendingTask: () => Promise<boolean>;
-  readonly chatCompact: (params: { conversationId: string; streamId: string }) => Promise<{ compacted: boolean; notification?: { method: string; beforeTokens: number; afterTokens: number; oldMessageCount: number; keptMessageCount: number; contextTokens?: number; triggerTokens?: number; contextWindow?: number | null } }>;
+  readonly chatCompact: (params: { conversationId: string; streamId: string }) => Promise<{ compacted: boolean; notification?: { method: string; beforeTokens: number; afterTokens: number; oldMessageCount: number; keptMessageCount: number; nextRequestInputTokens?: number; contextWindow?: number | null } }>;
   // 按会话查询当前压缩态（切会话恢复横幅用）。压缩态真值在主进程登记表，渲染层只表达。
   readonly chatCompactionGet: (params: { conversationId: string }) => Promise<{ compacting: true; streamId: string; percent: number | null; manual: boolean } | null>;
   readonly promptSnapshotsList: (params?: { limit?: number }) => Promise<readonly PromptSnapshotIndexEntry[]>;
@@ -585,10 +585,9 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     conversationId?: string;
     usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number };
     lifetimeUsage?: LifetimeUsage;
-    // contextTokens 是最近实际发送量（主圆环）；triggerTokens 是压缩 preflight 压力分子（tooltip）。
+    // ADR 52：下一次最终请求预计输入；UI 与发送前压缩共用。
     // compactionSuggested 仅表达上下文压力；自动压缩由下一次 Runtime preflight 阻塞执行。
-    contextTokens?: number;
-    triggerTokens?: number;
+    nextRequestInputTokens?: number;
     contextWindow?: number;
     compactionSuggested?: boolean;
   }) => void) => () => void;
@@ -628,7 +627,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     delayMs?: number;
     reason?: string;
   }) => void) => () => void;
-  readonly onChatCompaction: (listener: (payload: { conversationId: string; streamId: string; stage?: 'start' | 'progress' | 'done' | 'idle'; percent?: number; receivedChars?: number; estimatedTotalChars?: number; method?: string; beforeTokens?: number; afterTokens?: number; oldMessageCount?: number; keptMessageCount?: number; contextTokens?: number; triggerTokens?: number; contextWindow?: number | null; microcompacted?: boolean }) => void) => () => void;
+  readonly onChatCompaction: (listener: (payload: { conversationId: string; streamId: string; stage?: 'start' | 'progress' | 'done' | 'idle'; percent?: number; receivedChars?: number; estimatedTotalChars?: number; method?: string; beforeTokens?: number; afterTokens?: number; oldMessageCount?: number; keptMessageCount?: number; nextRequestInputTokens?: number; contextWindow?: number | null; microcompacted?: boolean }) => void) => () => void;
   // 全局活跃流变更广播:main 在任一会话开始/结束流式时推送最新运行中的会话 id 列表。
   readonly onChatActiveStreamsChanged: (listener: (payload: {
     conversationIds: readonly string[];

@@ -36,6 +36,7 @@ describe('Tool Registry', () => {
 
     assert.deepEqual(names, [
       TOOL_NAMES.bash,
+      TOOL_NAMES.listFiles,
       TOOL_NAMES.readFile,
       TOOL_NAMES.searchFiles,
       TOOL_NAMES.editFile,
@@ -273,7 +274,7 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
 
   it('projects only explicitly allowed readonly tools in explorer mode', () => {
     const names = materializedNames('explorer');
-    assert.deepEqual(names, ['read_file', 'search_files']);
+    assert.deepEqual(names, ['list_files', 'read_file', 'search_files']);
   });
 
   it('keeps the public model projection aligned with the host capability projection', () => {

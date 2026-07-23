@@ -36,12 +36,9 @@ import type {
   ToolProgress,
 } from './types';
 
-/** 主进程下发的权威双口径快照：主圆环用 contextTokens，压缩触发用 triggerTokens。 */
+/** ADR 52：主进程下发的下一次最终请求上下文投影。 */
 export interface AuthoritativeContext {
-  /** 实际发送上下文占用（主圆环）。 */
-  contextTokens: number;
-  /** 压缩触发压力（与 Runtime preflight 同源）。 */
-  triggerTokens: number;
+  nextRequestInputTokens: number;
   contextWindow: number | null;
 }
 

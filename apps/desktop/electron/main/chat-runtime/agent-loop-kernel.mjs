@@ -45,10 +45,9 @@ export function createAgentLoopKernel({
   // provider 无关的「模型轮次」信号：每次 addUsage（每轮恰好一次）回调一次。
   // 用于 Goal Runner 展示用的实时轮次计数，与具体 provider 解耦。
   onRound = null,
-  // 口径统一：回合自然结束时，由各 loop 注入的闭包返回「权威上下文用量」快照
-  // （{ contextTokens, triggerTokens, contextWindow, compactionSuggested }），随 done 事件下发。
-  // renderer 只消费用量/压力投影；真正的自动压缩由下一次 provider 请求前的 Runtime
-  // preflight 阻塞执行，不能从 done 旁路启动。返回 null 表示不附带。
+  // ADR 52：回合自然结束时，由各 loop 注入的闭包返回下一次最终请求投影
+  // （{ nextRequestInputTokens, contextWindow, compactionSuggested }），随 done 事件下发。
+  // renderer 与下一次 provider 请求前的 Runtime preflight 消费同一口径；返回 null 表示不附带。
   getContextInfo = null,
 } = {}) {
   const normalizedMaxTurns = normalizeAgentLoopMaxTurns(maxTurns);
@@ -115,9 +114,7 @@ export function createAgentLoopKernel({
   function sendDone() {
     // 回合自然结束：附带实际上下文用量与权威压力快照，供渲染端圆环对齐。
     // compactionSuggested 不授权 renderer 另起压缩任务；下一次 Runtime preflight 负责压缩并续跑。
-    // 闭包取数失败不得影响收尾。
-    // 把「最后一轮 usage 快照」传给 getContextInfo：contextTokens 优先采用 provider
-    // 真实 input+cacheRead，triggerTokens 仍按 Runtime preflight 的预算口径判定。
+    // 最后一轮 usage 快照只供诊断校准；闭包取数失败不得影响收尾。
     let contextInfo = null;
     if (typeof getContextInfo === 'function') {
       try {
@@ -128,10 +125,9 @@ export function createAgentLoopKernel({
     }
     const payload = { streamId, usage };
     if (contextInfo && typeof contextInfo === 'object') {
-      if (typeof contextInfo.contextTokens === 'number') payload.contextTokens = contextInfo.contextTokens;
-      // triggerTokens 是 Runtime preflight 真正用于判断自动压缩的分子（tooltip 压缩压力）。
-      // contextTokens 是实际发送量（主圆环）。两者都下发，UI 按职责拆分消费。
-      if (typeof contextInfo.triggerTokens === 'number') payload.triggerTokens = contextInfo.triggerTokens;
+      if (typeof contextInfo.nextRequestInputTokens === 'number') {
+        payload.nextRequestInputTokens = contextInfo.nextRequestInputTokens;
+      }
       if (typeof contextInfo.contextWindow === 'number') payload.contextWindow = contextInfo.contextWindow;
       if (typeof contextInfo.compactionSuggested === 'boolean') {
         payload.compactionSuggested = contextInfo.compactionSuggested;

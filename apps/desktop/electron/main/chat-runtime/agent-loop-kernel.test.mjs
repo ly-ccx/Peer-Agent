@@ -75,16 +75,13 @@ describe('agent loop kernel', () => {
     assert.equal(loop.usage.inputTokens, 120);
   });
 
-  it('attaches authoritative context info from getContextInfo onto the done payload', () => {
+  it('attaches the authoritative next-request context projection onto the done payload', () => {
     const webContents = makeWebContents();
     const loop = createAgentLoopKernel({
       webContents,
       streamId: 's1ctx',
-      // 口径统一 + 回合结束触发：loop 注入返回权威上下文快照的闭包，
-      // sendDone 必须把实际发送量 contextTokens、压缩判定用 triggerTokens、窗口与压力透传到 done 事件。
       getContextInfo: () => ({
-        contextTokens: 31_000,
-        triggerTokens: 84_000,
+        nextRequestInputTokens: 84_000,
         contextWindow: 100_000,
         compactionSuggested: true,
       }),
@@ -97,8 +94,7 @@ describe('agent loop kernel', () => {
       payload: {
         streamId: 's1ctx',
         usage: loop.usage,
-        contextTokens: 31_000,
-        triggerTokens: 84_000,
+        nextRequestInputTokens: 84_000,
         contextWindow: 100_000,
         compactionSuggested: true,
       },
@@ -142,16 +138,18 @@ describe('agent loop kernel', () => {
     const loop = createAgentLoopKernel({
       webContents,
       streamId: 's1partial',
-      // 类型守卫：非 number 的 contextTokens / 非 boolean 的 compactionSuggested 应被丢弃，
-      // 只透传形状正确的字段，避免脏数据污染渲染端进度条与自动压缩判定。
-      getContextInfo: () => ({ contextTokens: 1234, contextWindow: 'oops', compactionSuggested: 'yes' }),
+      getContextInfo: () => ({
+        nextRequestInputTokens: 1234,
+        contextWindow: 'oops',
+        compactionSuggested: 'yes',
+      }),
     });
 
     loop.sendDone();
 
     assert.deepEqual(webContents.events, [{
       channel: 'chat:stream:done',
-      payload: { streamId: 's1partial', usage: loop.usage, contextTokens: 1234 },
+      payload: { streamId: 's1partial', usage: loop.usage, nextRequestInputTokens: 1234 },
     }]);
   });
 

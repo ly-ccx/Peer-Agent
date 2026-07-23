@@ -97,16 +97,14 @@ export function computeContextBudget({
   providerConfig = null,
   maxOutputTokens = null,
 }) {
-  // 工具 schema（tools）每次请求都全量发送给 provider，必须计入上下文用量；
-  // 否则进度条只算 messages，会远低于 provider 实际计入的 input tokens。
+  // ADR 52：预算只统计下一次最终请求投影。调用方负责传入经过 provider 清洗与
+  // microcompaction 后会真正发送的 messages；tools schema 也属于每次请求输入。
+  // 上一次 provider usage 仅保留为诊断/校准信息，不得把下一请求预算锁在历史高水位。
   const estimatedTokens =
     estimateTokensFromMessages(Array.isArray(messages) ? messages : []) +
     estimateToolsTokens(tools);
-  // 与进度条对齐：有 provider 真实 usage 时，触发也取 max(本地估算, usage)。
-  // 避免「条已满但本地低估仍不压」的口径割裂（ADR 42 后续收口）。
   const usageTokens = contextTokensFromUsageSnapshot(usageSnapshot);
-  const contextTokens =
-    usageTokens != null ? Math.max(estimatedTokens, usageTokens) : estimatedTokens;
+  const contextTokens = estimatedTokens;
   const normalizedWindow = Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null;
   const triggerRatio = COMPACTION_CONFIG.triggerRatio;
   const hardRatio = Math.max(triggerRatio, CONTEXT_BUDGET_GUARD.hardRatio);
@@ -256,29 +254,26 @@ export function computeContextInfo({
   displayMessages = null,
   usageSnapshot = null,
 }) {
-  // 触发口径：与 runCompactionCheck 同源，纳入 usage 快照。
-  const budget = computeContextBudget({ messages, contextWindow, tools, usageSnapshot });
-
-  // 实际发送口径：优先真实 usage 快照，其次发送切片估算，最后回退本地估算。
-  const usageTokens = contextTokensFromUsageSnapshot(usageSnapshot);
-  let displayTokens;
-  if (usageTokens != null) {
-    displayTokens = usageTokens;
-  } else if (Array.isArray(displayMessages)) {
-    displayTokens = estimateTokensFromMessages(displayMessages) + estimateToolsTokens(tools);
-  } else {
-    displayTokens = budget.estimatedTokens ?? budget.contextTokens;
-  }
+  // ADR 52：先形成下一次最终请求投影。调用方若已经持有 provider 最终发送切片，
+  // 通过 displayMessages 传入；否则按所有 provider 共享的 Layer 1 规则投影。
+  const projectedMessages = Array.isArray(displayMessages)
+    ? displayMessages
+    : applyMicrocompaction(Array.isArray(messages) ? messages : [], { log: () => {} }).messages;
+  const budget = computeContextBudget({
+    messages: projectedMessages,
+    contextWindow,
+    tools,
+    usageSnapshot,
+  });
 
   return {
-    // 最近一次实际发送上下文；保留给诊断，不作为 Renderer 主圆环分子。
-    contextTokens: displayTokens,
+    // ADR 52：下一次最终请求预计输入是唯一上下文占用口径。
+    nextRequestInputTokens: budget.contextTokens,
     contextWindow: budget.contextWindow,
     triggerRatio: budget.triggerRatio,
-    // 触发判定：与 preflight 同源（估算 ∪ usage）。
     compactionSuggested: budget.overSoftLimit,
-    // Runtime preflight 触发口径，也是 Renderer 主圆环分子。
-    triggerTokens: budget.contextTokens,
+    // 上一次 provider 实测只用于诊断，不参与当前占用或压缩判断。
+    lastActualInputTokens: contextTokensFromUsageSnapshot(usageSnapshot),
   };
 }
 
@@ -310,9 +305,7 @@ async function persistAndNotifyCompaction({
     stage: 'done',
     emergency,
     ...compactResult.notification,
-    contextTokens: compactedBudget.contextTokens,
-    // 语义压缩已持久化，压缩后的完整预算就是下一轮 preflight 的触发分子。
-    triggerTokens: compactedBudget.contextTokens,
+    nextRequestInputTokens: compactedBudget.contextTokens,
     contextWindow: compactedBudget.contextWindow,
   });
 }
@@ -335,8 +328,11 @@ export async function runCompactionCheck({
   usageSnapshot = null,
   rebuildSystemPrompt = null,
 }) {
+  // ADR 52：preflight 与 UI 对同一下一请求投影计数。Layer 2 语义压缩仍接收
+  // 原始 messages，以便在需要时总结完整历史；预算判断只看 Layer 1 后的发送切片。
+  const projectedMessages = applyMicrocompaction(messages, { log: () => {} }).messages;
   const budget = computeContextBudget({
-    messages,
+    messages: projectedMessages,
     contextWindow,
     tools,
     usageSnapshot,
@@ -492,10 +488,7 @@ export async function runCompactionCheck({
         streamId,
         stage: 'idle',
         emergency,
-        contextTokens: effectiveInfo.contextTokens,
-        // Layer 1 已完成后，主圆环必须展示接下来真正参与 Layer 2 阈值判断的预算。
-        // 否则会出现圆环已越过 soft 线、但语义压缩实际被 microcompaction 取消的假警报。
-        triggerTokens: effectiveInfo.triggerTokens,
+        nextRequestInputTokens: effectiveInfo.nextRequestInputTokens,
         contextWindow: effectiveInfo.contextWindow,
         microcompacted: true,
       });
@@ -504,8 +497,7 @@ export async function runCompactionCheck({
         messages: effectiveMessages,
         compactResult,
         microcompacted: true,
-        contextTokens: effectiveInfo.contextTokens,
-        triggerTokens: effectiveInfo.triggerTokens,
+        nextRequestInputTokens: effectiveInfo.nextRequestInputTokens,
         contextWindow: effectiveInfo.contextWindow,
       };
     }

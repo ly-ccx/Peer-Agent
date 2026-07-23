@@ -202,7 +202,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     });
 
     const offDone = clientApi.onChatStreamDone(
-      ({ streamId, conversationId, usage, lifetimeUsage, contextTokens, triggerTokens, contextWindow }) => {
+      ({ streamId, conversationId, usage, lifetimeUsage, nextRequestInputTokens, contextWindow }) => {
         const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         // 流正常收尾，重试横幅若仍残留一并清除。
@@ -234,14 +234,11 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           streamId: null,
         });
 
-        // 双口径：contextTokens → 主圆环；triggerTokens → 压缩压力（tooltip）。
-        // 两者都来自 Runtime getContextInfo，但职责分离。
-        if (typeof contextTokens === 'number' || typeof triggerTokens === 'number') {
+        if (typeof nextRequestInputTokens === 'number') {
           conversationStore.setState(cid, (prev) => ({
             authoritativeContext: mergeAuthoritativeContextSnapshot({
               previous: prev.authoritativeContext,
-              nextContextTokens: typeof contextTokens === 'number' ? contextTokens : null,
-              nextTriggerTokens: typeof triggerTokens === 'number' ? triggerTokens : null,
+              nextRequestInputTokens,
               nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
               mode: 'final',
             }),
@@ -509,7 +506,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     );
 
     const offCompaction = clientApi.onChatCompaction(
-      ({ conversationId, streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount, contextTokens, triggerTokens, contextWindow, microcompacted }) => {
+      ({ conversationId, streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount, nextRequestInputTokens, contextWindow, microcompacted }) => {
         const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         if (stage === 'start') {
@@ -536,15 +533,11 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         if (stage === 'idle') {
           cancelCompactionDoneTimer(cid, streamId);
           conversationStore.setState(cid, (prev) => {
-            // 已确认的 Layer 1 会改变接下来真正参与 Layer 2 判定的 triggerTokens，允许
-            // 压力真实回落；普通 idle 仍只允许抬升，避免不完整快照制造假下降。
-            // 同时写入实际发送 contextTokens，主圆环按实际占用显示。
             const nextAuthoritative =
-              typeof contextTokens === 'number' || typeof triggerTokens === 'number'
+              typeof nextRequestInputTokens === 'number'
                 ? mergeAuthoritativeContextSnapshot({
                     previous: prev.authoritativeContext,
-                    nextContextTokens: typeof contextTokens === 'number' ? contextTokens : null,
-                    nextTriggerTokens: typeof triggerTokens === 'number' ? triggerTokens : null,
+                    nextRequestInputTokens,
                     nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
                     mode: microcompacted === true ? 'final' : 'midturn',
                   })
@@ -576,14 +569,12 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
             streamId,
             now: completedAt,
           }),
-          // 语义压缩完成：双口径写入（context 主圆环 + trigger 压缩压力），允许真实回落。
-          // 缺快照时保留旧值，避免事件字段缺失让主圆环切换到另一套本地口径。
+          // 语义压缩完成后允许统一投影真实回落；缺快照时保留旧值。
           authoritativeContext:
-            typeof contextTokens === 'number' || typeof triggerTokens === 'number'
+            typeof nextRequestInputTokens === 'number'
               ? mergeAuthoritativeContextSnapshot({
                   previous: prev.authoritativeContext,
-                  nextContextTokens: typeof contextTokens === 'number' ? contextTokens : null,
-                  nextTriggerTokens: typeof triggerTokens === 'number' ? triggerTokens : null,
+                  nextRequestInputTokens,
                   nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
                   mode: 'final',
                 })

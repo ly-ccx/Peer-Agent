@@ -447,11 +447,10 @@ export function ChatSurface({
   const setActiveUsage = useMemo(() => makeSetter('activeUsage'), [makeSetter]) as Dispatch<
     SetStateAction<TokenUsageState | null>
   >;
-  // 口径统一：主进程随回合结束（done）下发的权威双口径快照。
-  // 主圆环用 contextTokens，压缩压力用 triggerTokens；null = 本会话尚无权威快照。
+  // ADR 52：主进程随回合结束下发下一次最终请求投影。
   const authoritativeContext = convState.authoritativeContext;
   const setAuthoritativeContext = useMemo(() => makeSetter('authoritativeContext'), [makeSetter]) as Dispatch<
-    SetStateAction<{ contextTokens: number; triggerTokens: number; contextWindow: number | null } | null>
+    SetStateAction<{ nextRequestInputTokens: number; contextWindow: number | null } | null>
   >;
   const providerRecoveryNotice = convState.providerRecoveryNotice;
   const setProviderRecoveryNotice = useMemo(() => makeSetter('providerRecoveryNotice'), [makeSetter]) as Dispatch<
@@ -799,9 +798,7 @@ export function ChatSurface({
     railItemsCacheRef.current = { conversationId, isZh, cache };
     return cache.items;
   }, [conversationId, isStreaming, isZh, messages]);
-  // 主圆环口径：优先使用 Runtime preflight 真正用于自动压缩判定的 triggerTokens；
-  // 本地历史估算仅用于尚未收到权威快照的冷启动降级。草稿/附件和本轮真实 input
-  // 只允许抬升压力，不会把主圆环切换成「最近实际发送量」口径。
+  // 本地历史估算仅用于尚未收到 Runtime 下一请求投影的冷启动降级。
   const historyTokenCacheRef = useRef<{
     conversationId: string | null;
     cache: ConversationTokenEstimateCache;
@@ -820,12 +817,7 @@ export function ChatSurface({
     return next.totalTokens;
   }, [conversationId, isStreaming, messages]);
   // 草稿 token 增量由 ComposerTokenUsageDisplay 的叶子订阅计算，避免字符输入唤醒消息表面。
-  // 主圆环用实际发送 contextTokens；压缩压力用 triggerTokens（tooltip）。
-  const authoritativeContextTokens = authoritativeContext?.contextTokens ?? null;
-  const authoritativeTriggerTokens =
-    authoritativeContext?.triggerTokens
-    ?? authoritativeContext?.contextTokens
-    ?? null;
+  const authoritativeNextRequestInputTokens = authoritativeContext?.nextRequestInputTokens ?? null;
   // 进度条分母优先用权威 contextWindow（与触发判定同窗口），消除 provider 配置窗口与
   // 主进程实际所用窗口不一致时的百分比偏差；权威窗口未知时回退到 provider 配置窗口。
   const authoritativeContextWindow = authoritativeContext?.contextWindow ?? undefined;
@@ -1431,12 +1423,10 @@ export function ChatSurface({
     // 发送瞬间固化「发送前可见占用」为权威种子：草稿清空后不会仅因口径切换从 63% 掉到 36%。
     // 真实压缩 / stream done 仍会覆盖；切换模型会清空。
     const seeded = seedAuthoritativeContextOnSend({
-      previousAuthoritativeTokens: authoritativeContext?.contextTokens ?? null,
-      previousTriggerTokens: authoritativeContext?.triggerTokens ?? null,
+      previousNextRequestInputTokens: authoritativeContext?.nextRequestInputTokens ?? null,
       historyContextTokens,
-      sentDraftTokens: estimateDraftTokens(text, sentAttachments),
-      previousContextWindow: authoritativeContext?.contextWindow ?? null,
-      fallbackContextWindow: activeProvider?.contextWindow ?? null,
+      draftContextTokens: estimateDraftTokens(text, sentAttachments),
+      contextWindow: authoritativeContext?.contextWindow ?? activeProvider?.contextWindow ?? null,
     });
     setAuthoritativeContext(seeded);
 
@@ -2168,8 +2158,7 @@ export function ChatSurface({
             conversationId={conversationId}
             historyContextTokens={historyContextTokens}
             attachments={attachments}
-            authoritativeContextTokens={authoritativeContextTokens}
-            authoritativeTriggerTokens={authoritativeTriggerTokens}
+            authoritativeNextRequestInputTokens={authoritativeNextRequestInputTokens}
             providers={providers}
             tokenUsage={tokenUsage}
             activeUsage={activeUsage}

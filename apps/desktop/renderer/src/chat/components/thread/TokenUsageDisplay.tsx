@@ -185,8 +185,7 @@ export function TokenUsageDisplay({
   providers,
   tokenUsage,
   activeUsage,
-  contextTokens,
-  triggerTokens,
+  nextRequestInputTokens,
   contextWindow,
   isStreaming,
   isZh,
@@ -202,13 +201,8 @@ export function TokenUsageDisplay({
   readonly providers: readonly LlmProviderConfigView[];
   readonly tokenUsage: TokenUsageState | null;
   readonly activeUsage?: TokenUsageState | null;
-  /** 实际发送上下文占用（主圆环分子 + tooltip）。 */
-  readonly contextTokens?: number;
-  /**
-   * 压缩触发压力（仅保留 prop 兼容；tooltip 不再展示，触发逻辑在 runtime）。
-   * @deprecated UI 不再消费；可逐步从调用方移除。
-   */
-  readonly triggerTokens?: number;
+  /** ADR 52：下一次最终请求预计输入（主圆环分子 + Runtime preflight 同源）。 */
+  readonly nextRequestInputTokens?: number;
   /** 权威上下文窗口（与压缩触发同窗口）。传入时优先于 provider 配置窗口，消除百分比偏差。 */
   readonly contextWindow?: number;
   readonly isStreaming?: boolean;
@@ -270,18 +264,17 @@ export function TokenUsageDisplay({
     };
   }, [quotaProviderId]);
 
-  const hasInfo = tokenUsage || activeUsage || contextTokens || defaultProvider?.contextWindow || defaultProvider?.inputPrice != null;
+  const hasInfo = tokenUsage || activeUsage || nextRequestInputTokens || defaultProvider?.contextWindow || defaultProvider?.inputPrice != null;
   if (!hasInfo) return null;
 
   const input = (tokenUsage?.input ?? 0) + (activeUsage?.input ?? 0);
   const output = (tokenUsage?.output ?? 0) + (activeUsage?.output ?? 0);
   const cacheWrite = (tokenUsage?.cacheWrite ?? 0) + (activeUsage?.cacheWrite ?? 0);
   const cacheRead = (tokenUsage?.cacheRead ?? 0) + (activeUsage?.cacheRead ?? 0);
-  // billedTokens 仅用于费用估算；上下文圆环分子只接受压缩触发预算 token，
-  // 禁止用 lifetime 计费累计（input+output）回退，否则长会话会误显示 100%。
+  // 累计 usage 仅用于费用估算；上下文圆环只接受下一次最终请求投影。
   const currentContextTokens =
-    typeof contextTokens === 'number' && Number.isFinite(contextTokens)
-      ? Math.max(0, contextTokens)
+    typeof nextRequestInputTokens === 'number' && Number.isFinite(nextRequestInputTokens)
+      ? Math.max(0, nextRequestInputTokens)
       : 0;
   const cacheDenominator = input + cacheRead;
   const cacheHitPercent = cacheDenominator > 0 ? Math.round((cacheRead / cacheDenominator) * 100) : null;
@@ -305,9 +298,7 @@ export function TokenUsageDisplay({
   const ctxWindow = (typeof contextWindow === 'number' && contextWindow > 0) ? contextWindow : defaultProvider?.contextWindow;
   const ctxPercent = ctxWindow ? Math.min((currentContextTokens / ctxWindow) * 100, 100) : null;
   const hasCtxRing = Boolean(ctxWindow && ctxPercent != null);
-  // 圆环 hover：只展示「上下文」占用，叠加缓存命中率与订阅剩余额度。
-  // 压缩触发仍由 runtime 的 triggerTokens 负责，不在 UI 重复展示，避免干扰。
-  void triggerTokens;
+  // 圆环 hover：只展示下一次请求预计占用，叠加缓存命中率与订阅剩余额度。
   const quotaTooltipLine = formatQuotaTooltipLine(subscriptionQuota ?? undefined, isZh);
   const ctxTooltipLines: readonly string[] = hasCtxRing
     ? [
