@@ -1,3 +1,5 @@
+import { SHARED_LOCAL_TOOL_CONTRACTS } from '@peer-agent/runtime-core';
+
 /**
  * Web 能力本地工具定义（Manifest）—— 见 ADR 38（local.web.fetch）。
  *
@@ -14,7 +16,7 @@
  */
 
 export const WEB_TOOL_NAMES = Object.freeze({
-  webFetch: 'web_fetch',
+  webFetch: SHARED_LOCAL_TOOL_CONTRACTS.webFetch.toolName,
 });
 
 const WEB_FETCH_PROMPT = [
@@ -30,11 +32,12 @@ const WEB_FETCH_PROMPT = [
 export const WEB_TOOL_DEFINITIONS = [
   {
     name: WEB_TOOL_NAMES.webFetch,
-    capabilityId: 'local.web.fetch',
+    capabilityId: SHARED_LOCAL_TOOL_CONTRACTS.webFetch.capabilityId,
+    availableInModes: ['chat', 'plan', 'goal'],
     prompt: () => WEB_FETCH_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-web-provider',
-      executorCapabilityId: 'local.web.fetch',
+      executorCapabilityId: SHARED_LOCAL_TOOL_CONTRACTS.webFetch.capabilityId,
     }),
     permissionPolicy: {
       kind: 'web-fetch',

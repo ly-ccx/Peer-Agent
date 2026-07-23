@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 
+import { SHARED_LOCAL_TOOL_CONTRACTS } from '@peer-agent/runtime-core';
+
 export const SEARCH_TOOL_NAMES = {
-  batchSearch: 'batch_search',
+  batchSearch: SHARED_LOCAL_TOOL_CONTRACTS.batchSearch.toolName,
 };
 
 const promptAssetCache = new Map();
@@ -25,16 +27,13 @@ function readPromptAsset(filename) {
 export const SEARCH_TOOL_DEFINITIONS = [
   {
     name: SEARCH_TOOL_NAMES.batchSearch,
-    capabilityId: 'local.search.aggregate',
+    capabilityId: SHARED_LOCAL_TOOL_CONTRACTS.batchSearch.capabilityId,
     prompt: () => readPromptAsset('batch_search.txt'),
-    // 只读聚合检索，暴露给 chat / goal 主循环。
-    // explorer 子 Agent 的只读工具是 ADR 35 的显式 allowlist（read_file/search_files），
-    // 将 batch_search 纳入 explorer 属于对该 allowlist 契约的扩展（A 级），超出本方案边界，
-    // 暂不纳入；后续如需可单独评估。见 docs/design/batch-search-parallel-aggregation.md。
-    availableInModes: ['chat', 'plan', 'goal'],
+    // 只读聚合检索对齐到 chat / plan / goal / explorer。
+    availableInModes: ['chat', 'plan', 'goal', 'explorer'],
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-search-aggregate-provider',
-      executorCapabilityId: 'local.search.aggregate',
+      executorCapabilityId: SHARED_LOCAL_TOOL_CONTRACTS.batchSearch.capabilityId,
     }),
     permissionPolicy: {
       kind: 'file-read',

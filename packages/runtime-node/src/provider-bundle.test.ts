@@ -31,11 +31,14 @@ test('node provider bundle exposes a host-neutral projection and governed runtim
       { name: 'write_file', capabilityId: 'local.file.write' },
       { name: 'edit_file', capabilityId: 'local.file.edit' },
       { name: 'search_files', capabilityId: 'local.file.search' },
-      { name: 'local_shell_exec', capabilityId: 'local.shell.exec' },
+      { name: 'batch_search', capabilityId: 'local.search.aggregate' },
+      { name: 'bash', capabilityId: 'local.shell.exec' },
+      { name: 'shell_stop', capabilityId: 'local.shell.stop' },
+      { name: 'web_fetch', capabilityId: 'local.web.fetch' },
       { name: 'request_user_input', capabilityId: 'local.interaction.request_user_input' },
     ],
   );
-  assert.equal(bundle.providers.length, 3);
+  assert.equal(bundle.providers.length, 5);
 
   const execution = await bundle.runtime.execute({
     sessionId: 'session-1',
@@ -75,13 +78,27 @@ test('node provider bundle materializes mode scopes into read-only plan and expl
   const compact = createNodeProviderBundle({ workspaceRoot, mode: 'compact', ...fixedClock() });
   const system = createNodeProviderBundle({ workspaceRoot, mode: 'system', ...fixedClock() });
 
+  const explorerCapabilities = [
+    'local.file.read',
+    'local.file.list',
+    'local.file.search',
+    'local.search.aggregate',
+  ];
+  const planCapabilities = [
+    'local.file.read',
+    'local.file.list',
+    'local.file.search',
+    'local.search.aggregate',
+    'local.web.fetch',
+    'local.interaction.request_user_input',
+  ];
   assert.deepEqual(
     plan.projection.tools.map((tool) => tool.capabilityId),
-    ['local.file.read', 'local.file.list', 'local.file.search', 'local.interaction.request_user_input'],
+    planCapabilities,
   );
   assert.deepEqual(
     explorer.projection.tools.map((tool) => tool.capabilityId),
-    ['local.file.read', 'local.file.list', 'local.file.search', 'local.interaction.request_user_input'],
+    explorerCapabilities,
   );
   const fullCapabilities = [
     'local.file.read',
@@ -89,12 +106,26 @@ test('node provider bundle materializes mode scopes into read-only plan and expl
     'local.file.write',
     'local.file.edit',
     'local.file.search',
+    'local.search.aggregate',
     'local.shell.exec',
+    'local.shell.stop',
+    'local.web.fetch',
     'local.interaction.request_user_input',
   ];
   assert.deepEqual(goal.projection.tools.map((tool) => tool.capabilityId), fullCapabilities);
-  assert.deepEqual(compact.projection.tools.map((tool) => tool.capabilityId), fullCapabilities);
-  assert.deepEqual(system.projection.tools.map((tool) => tool.capabilityId), fullCapabilities);
+  assert.deepEqual(compact.projection.tools.map((tool) => tool.capabilityId), []);
+  assert.deepEqual(system.projection.tools.map((tool) => tool.capabilityId), []);
+});
+
+test('node provider bundle omits shell execution and stop together when shell is disabled', async (t) => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-runtime-node-no-shell-'));
+  t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
+
+  const bundle = createNodeProviderBundle({ workspaceRoot, shell: false, ...fixedClock() });
+  const capabilityIds = bundle.projection.tools.map((tool) => tool.capabilityId);
+  assert.equal(capabilityIds.includes('local.shell.exec'), false);
+  assert.equal(capabilityIds.includes('local.shell.stop'), false);
+  assert.equal(bundle.providers.some((provider) => provider.providerId === 'runtime-node.shell'), false);
 });
 
 test('pipeline tool executor resolves only projected names and blocks unprojected calls', async (t) => {

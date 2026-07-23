@@ -3,10 +3,15 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 
 import type { LocalAccessLevel } from '@peer-agent/protocol';
-import type { RuntimeToolDefinition } from '@peer-agent/runtime-core';
+import {
+  collectToolEvidenceRefs,
+  isRuntimeToolAvailableInMode,
+  type RuntimeToolDefinition,
+} from '@peer-agent/runtime-core';
 import {
   createConfiguredNodeHookRunner,
   createNodeProviderBundle,
+  createNodeShellTaskManager,
   NODE_SHELL_RISK_ORDER,
   type NodeRuntimePermissionPrompt,
 } from '@peer-agent/runtime-node';
@@ -18,7 +23,11 @@ import type {
 
 import { createTuiGoalBridge } from './goal-bridge.ts';
 import { createTuiSkillMcpBridge } from './skill-mcp-bridge.ts';
-import { normalizeTuiMode, TUI_RUNTIME_MODES, type TuiMode } from './tui-mode.ts';
+import {
+  normalizeTuiRuntimeMode,
+  TUI_RUNTIME_MODES,
+  type TuiRuntimeMode,
+} from './tui-mode.ts';
 import { normalizeLocalAccessLevel } from './tui-permission-policy.ts';
 
 export type TuiApprovalDecision = 'allow-once' | 'allow-session' | 'deny';
@@ -35,7 +44,7 @@ export interface TuiExecutionContext {
   readonly streamId?: string;
   readonly turnId: string;
   readonly turnIndex: number;
-  readonly mode?: TuiMode;
+  readonly mode?: TuiRuntimeMode;
   readonly signal?: AbortSignal;
 }
 
@@ -49,8 +58,8 @@ export interface TuiHost {
   readonly skillMcpBridge?: ReturnType<typeof createTuiSkillMcpBridge>;
   getAccessLevel(): LocalAccessLevel;
   setAccessLevel(value: unknown): LocalAccessLevel;
-  capabilitiesForMode?(mode: TuiMode): readonly string[];
-  toolDefinitionsForMode?(mode: TuiMode): readonly RuntimeToolDefinition[];
+  capabilitiesForMode?(mode: TuiRuntimeMode): readonly string[];
+  toolDefinitionsForMode?(mode: TuiRuntimeMode): readonly RuntimeToolDefinition[];
   execute(
     capabilityId: string,
     arguments_: Record<string, unknown>,
@@ -199,20 +208,56 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     });
   };
 
-  const bundles = new Map<TuiMode, ReturnType<typeof createNodeProviderBundle>>();
+  const shellTaskManager = createNodeShellTaskManager({
+    workspaceRoot,
+    artifactRoot: path.join(userDataPath, 'shell-artifacts'),
+  });
+  const bundles = new Map<TuiRuntimeMode, ReturnType<typeof createNodeProviderBundle>>();
   for (const mode of TUI_RUNTIME_MODES) {
     bundles.set(mode, createNodeProviderBundle({
       workspaceRoot,
       mode,
       hookRunner,
       requestPermission,
+      shell: { taskManager: shellTaskManager },
     }));
   }
-  const bundleForMode = (mode: TuiMode) => bundles.get(mode)!;
+  const bundleForMode = (mode: TuiRuntimeMode) => bundles.get(mode)!;
   const defaultBundle = bundleForMode('chat');
   // Shared on-disk goal plan store + goal tools (aligned with Desktop).
-  const goalBridge = createTuiGoalBridge();
+  const goalBridge = createTuiGoalBridge({
+    storeDir: path.join(userDataPath, 'goal-plans'),
+  });
   const skillMcpBridge = createTuiSkillMcpBridge({ userDataPath });
+
+  const recordExecutionEvidence = (
+    execution: RuntimeSdkProviderExecution,
+    options: {
+      readonly capabilityId: string;
+      readonly conversationId?: string;
+      readonly streamId?: string;
+      readonly toolCallId: string;
+    },
+  ): RuntimeSdkProviderExecution => {
+    const evidenceRefs = collectToolEvidenceRefs({
+      toolCallId: options.toolCallId,
+      execution,
+    });
+    if (evidenceRefs.length === 0) return execution;
+    try {
+      goalBridge.store.recordEvidenceRefs({
+        conversationId: options.conversationId ?? null,
+        streamId: options.streamId ?? null,
+        toolCallId: options.toolCallId,
+        capabilityId: options.capabilityId,
+        evidenceRefs,
+        artifactRefs: evidenceRefs.filter((ref) => !ref.startsWith('tool-result://')),
+      });
+    } catch (error) {
+      console.warn('[tui-host] failed to register EvidenceIndex refs:', error);
+    }
+    return execution;
+  };
 
   let callSequence = 0;
   const execute = async (
@@ -220,7 +265,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     args: Record<string, unknown>,
     context?: TuiExecutionContext,
   ) => {
-    const mode = normalizeTuiMode(context?.mode);
+    const mode = normalizeTuiRuntimeMode(context?.mode);
     const bundle = bundleForMode(mode);
     const toolCallId = `tui-tool-${++callSequence}`;
 
@@ -250,7 +295,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     }
 
     if (goalBridge.isGoalCapability(capabilityId)) {
-      return goalBridge.execute({
+      const execution = await goalBridge.execute({
         capabilityId,
         args,
         conversationId: context?.conversationId,
@@ -258,15 +303,27 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
         workspaceRoot: bundle.workspaceRoot,
         toolCallId,
       });
+      return recordExecutionEvidence(execution, {
+        capabilityId,
+        conversationId: context?.conversationId,
+        streamId: context?.streamId,
+        toolCallId,
+      });
     }
 
     if (skillMcpBridge.isCapability(capabilityId)) {
-      return skillMcpBridge.execute({
+      const execution = await skillMcpBridge.execute({
         capabilityId,
         args,
         toolCallId,
         mode,
         requestPermission: requestPermission as never,
+      });
+      return recordExecutionEvidence(execution, {
+        capabilityId,
+        conversationId: context?.conversationId,
+        streamId: context?.streamId,
+        toolCallId,
       });
     }
 
@@ -291,23 +348,31 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
         signal: context.signal,
       } : {}),
     });
-    return context ? executionContext.run({ ...context, mode }, run) : run();
+    const execution = await (context
+      ? executionContext.run({ ...context, mode }, run)
+      : run());
+    return recordExecutionEvidence(execution, {
+      capabilityId,
+      conversationId: context?.conversationId,
+      streamId: context?.streamId,
+      toolCallId,
+    });
   };
 
-  const withBridgeTools = (mode: TuiMode, tools: readonly RuntimeToolDefinition[]) => {
+  const withBridgeTools = (
+    mode: TuiRuntimeMode,
+    tools: readonly RuntimeToolDefinition[],
+  ) => {
     const existing = new Set(tools.map((tool) => tool.capabilityId));
     const extras: RuntimeToolDefinition[] = [];
-    for (const tool of skillMcpBridge.toolDefinitions()) {
-      if (existing.has(tool.capabilityId)) continue;
+    const bridgeTools = [
+      ...skillMcpBridge.toolDefinitions(),
+      ...goalBridge.toolDefinitions,
+    ];
+    for (const tool of bridgeTools) {
+      if (!isRuntimeToolAvailableInMode(tool, mode) || existing.has(tool.capabilityId)) continue;
       existing.add(tool.capabilityId);
       extras.push(tool);
-    }
-    if (mode === 'goal' || mode === 'plan') {
-      for (const tool of goalBridge.toolDefinitions) {
-        if (existing.has(tool.capabilityId)) continue;
-        existing.add(tool.capabilityId);
-        extras.push(tool);
-      }
     }
     return extras.length > 0 ? [...tools, ...extras] : tools;
   };
@@ -325,12 +390,12 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     getAccessLevel: () => accessLevel,
     setAccessLevel,
     capabilitiesForMode(mode) {
-      const normalized = normalizeTuiMode(mode);
+      const normalized = normalizeTuiRuntimeMode(mode);
       return withBridgeTools(normalized, bundleForMode(normalized).projection.tools)
         .map((tool) => tool.capabilityId);
     },
     toolDefinitionsForMode(mode) {
-      const normalized = normalizeTuiMode(mode);
+      const normalized = normalizeTuiRuntimeMode(mode);
       return withBridgeTools(normalized, bundleForMode(normalized).projection.tools);
     },
     execute,

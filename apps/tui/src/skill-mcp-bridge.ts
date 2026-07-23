@@ -20,6 +20,7 @@ import { createMcpToolDefinitionsFromRegistry } from '../../desktop/electron/mai
 
 const MCP_PREFIX = 'local.mcp.';
 const SKILL_PREFIX = 'local.skill.';
+const USER_MODE_SCOPES = Object.freeze(['chat', 'plan', 'goal'] as const);
 
 type PermissionDecision = Readonly<{ granted: boolean; reason: string }>;
 type PermissionRequestHandler = (prompt: never) => Promise<PermissionDecision>;
@@ -98,6 +99,7 @@ function skillToolDefinition(skill: TuiSkillSummary): RuntimeToolDefinition {
   return {
     name: `skill__${skill.skillId}`,
     capabilityId: `${SKILL_PREFIX}${skill.skillId}`,
+    modeScopes: USER_MODE_SCOPES,
     description: description || `Load the local skill ${skill.name || skill.skillId} instructions.`,
     inputSchema: {
       type: 'object',
@@ -121,6 +123,7 @@ function mcpToolDefinitions(registry: McpRegistry): readonly RuntimeToolDefiniti
   return createMcpToolDefinitionsFromRegistry(registry).map((tool: Readonly<Record<string, unknown>>) => ({
     name: String(tool.name || tool.capabilityId || 'mcp_tool'),
     capabilityId: String(tool.capabilityId || ''),
+    modeScopes: USER_MODE_SCOPES,
     description: typeof tool.description === 'string'
       ? tool.description
       : typeof tool.prompt === 'function'

@@ -1,3 +1,5 @@
+import { DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS } from '@peer-agent/runtime-core';
+
 /**
  * 内嵌浏览器操控工具定义（Manifest）—— 见 ADR 40（local.web.control）。
  *
@@ -16,11 +18,11 @@
  */
 
 export const BROWSER_TOOL_NAMES = Object.freeze({
-  navigate: 'browser_navigate',
-  click: 'browser_click',
-  type: 'browser_type',
-  screenshot: 'browser_screenshot',
-  readDom: 'browser_read_dom',
+  navigate: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserNavigate.toolName,
+  click: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserClick.toolName,
+  type: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserType.toolName,
+  screenshot: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserScreenshot.toolName,
+  readDom: DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserReadDom.toolName,
 });
 
 /**
@@ -28,12 +30,14 @@ export const BROWSER_TOOL_NAMES = Object.freeze({
  * 并按 call.capabilityId 分流到具体工具（仿 local.file provider）。
  */
 export const BROWSER_CAPABILITY_TO_TOOL = Object.freeze({
-  'local.web.control.navigate': BROWSER_TOOL_NAMES.navigate,
-  'local.web.control.click': BROWSER_TOOL_NAMES.click,
-  'local.web.control.type': BROWSER_TOOL_NAMES.type,
-  'local.web.control.screenshot': BROWSER_TOOL_NAMES.screenshot,
-  'local.web.control.readDom': BROWSER_TOOL_NAMES.readDom,
+  [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserNavigate.capabilityId]: BROWSER_TOOL_NAMES.navigate,
+  [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserClick.capabilityId]: BROWSER_TOOL_NAMES.click,
+  [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserType.capabilityId]: BROWSER_TOOL_NAMES.type,
+  [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserScreenshot.capabilityId]: BROWSER_TOOL_NAMES.screenshot,
+  [DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserReadDom.capabilityId]: BROWSER_TOOL_NAMES.readDom,
 });
+
+const BROWSER_CONTROL_MODE_SCOPES = Object.freeze(['chat', 'goal']);
 
 const NAVIGATE_PROMPT = [
   'Navigate the active browser tab bound to the current conversation (the one shown in the',
@@ -71,15 +75,22 @@ const BROWSER_CONTROL_RUNTIME = Object.freeze({
   adapter: 'runtime-gateway.local-browser-control-provider',
 });
 
+function browserContractFields(contract) {
+  return {
+    capabilityId: contract.capabilityId,
+    availableInModes: BROWSER_CONTROL_MODE_SCOPES,
+    runtime: Object.freeze({
+      ...BROWSER_CONTROL_RUNTIME,
+      executorCapabilityId: contract.capabilityId,
+    }),
+  };
+}
+
 function navigateTool() {
   return {
     name: BROWSER_TOOL_NAMES.navigate,
-    capabilityId: 'local.web.control.navigate',
+    ...browserContractFields(DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserNavigate),
     prompt: () => NAVIGATE_PROMPT,
-    runtime: Object.freeze({
-      ...BROWSER_CONTROL_RUNTIME,
-      executorCapabilityId: 'local.web.control.navigate',
-    }),
     permissionPolicy: { kind: 'browser-control' },
     inputSchema: {
       type: 'object',
@@ -98,12 +109,8 @@ function navigateTool() {
 function clickTool() {
   return {
     name: BROWSER_TOOL_NAMES.click,
-    capabilityId: 'local.web.control.click',
+    ...browserContractFields(DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserClick),
     prompt: () => CLICK_PROMPT,
-    runtime: Object.freeze({
-      ...BROWSER_CONTROL_RUNTIME,
-      executorCapabilityId: 'local.web.control.click',
-    }),
     permissionPolicy: { kind: 'browser-control' },
     inputSchema: {
       type: 'object',
@@ -129,12 +136,8 @@ function clickTool() {
 function typeTool() {
   return {
     name: BROWSER_TOOL_NAMES.type,
-    capabilityId: 'local.web.control.type',
+    ...browserContractFields(DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserType),
     prompt: () => TYPE_PROMPT,
-    runtime: Object.freeze({
-      ...BROWSER_CONTROL_RUNTIME,
-      executorCapabilityId: 'local.web.control.type',
-    }),
     permissionPolicy: { kind: 'browser-control' },
     inputSchema: {
       type: 'object',
@@ -165,12 +168,8 @@ function typeTool() {
 function screenshotTool() {
   return {
     name: BROWSER_TOOL_NAMES.screenshot,
-    capabilityId: 'local.web.control.screenshot',
+    ...browserContractFields(DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserScreenshot),
     prompt: () => SCREENSHOT_PROMPT,
-    runtime: Object.freeze({
-      ...BROWSER_CONTROL_RUNTIME,
-      executorCapabilityId: 'local.web.control.screenshot',
-    }),
     permissionPolicy: { kind: 'browser-control' },
     inputSchema: {
       type: 'object',
@@ -188,12 +187,8 @@ function screenshotTool() {
 function readDomTool() {
   return {
     name: BROWSER_TOOL_NAMES.readDom,
-    capabilityId: 'local.web.control.readDom',
+    ...browserContractFields(DESKTOP_ONLY_LOCAL_TOOL_CONTRACTS.browserReadDom),
     prompt: () => READ_DOM_PROMPT,
-    runtime: Object.freeze({
-      ...BROWSER_CONTROL_RUNTIME,
-      executorCapabilityId: 'local.web.control.readDom',
-    }),
     permissionPolicy: { kind: 'browser-control' },
     inputSchema: {
       type: 'object',

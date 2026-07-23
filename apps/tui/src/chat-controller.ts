@@ -15,10 +15,19 @@ import {
 
 import { compactModelMessagesStructurally } from './context-compact.ts';
 import { computeContextPressure } from './context-pressure.ts';
+import {
+  GOAL_CAPABILITY_IDS,
+  normalizeExplorerRequest,
+  type TuiExplorerRequest,
+} from './goal-bridge.ts';
+import {
+  createTuiGoalWorkerAdapter,
+  type TuiGoalWorkerAdapter,
+} from './goal-worker-adapter.ts';
 import type { PlanCoordinator, PlanSnapshot } from './plan-mode.ts';
 import { parseRuntimePlanText } from './plan-mode.ts';
 import type { TuiHost } from './tui-host.ts';
-import { normalizeTuiMode, type TuiMode } from './tui-mode.ts';
+import { normalizeTuiMode, normalizeTuiRuntimeMode, type TuiMode } from './tui-mode.ts';
 import {
   createToolPresentation,
   formatToolResultSummary,
@@ -104,11 +113,20 @@ export interface ChatModelToolCall extends RuntimePipelineToolCall {
   readonly arguments: Record<string, unknown>;
 }
 
+export interface ChatSystemContextBlock {
+  readonly id: string;
+  readonly title: string;
+  readonly content: string;
+  readonly layer?: string;
+  readonly trust?: string;
+}
+
 export interface ChatModelInput {
   readonly content: string;
   readonly images?: readonly ChatMessageImage[];
   readonly history: readonly ChatMessage[];
   readonly modelMessages: readonly ModelMessage[];
+  readonly systemContextBlocks?: readonly ChatSystemContextBlock[];
   readonly turnId: string;
   readonly turnIndex: number;
 }
@@ -153,6 +171,13 @@ export interface ChatController {
   /** Compress modelMessages with a structural summary; UI transcript keeps a progress then separator. Idle only. */
   compact(): Promise<ChatCompactResult>;
   send(content: string, options?: { readonly images?: readonly ChatMessageImage[] }): Promise<void>;
+  runGoalTurn(content: string): Promise<{
+    readonly continued: true;
+    readonly explorers: readonly TuiExplorerRequest[];
+    readonly toolCallCount: number;
+  }>;
+  runExplorer(input: Parameters<TuiGoalWorkerAdapter['runExplorer']>[0]): ReturnType<TuiGoalWorkerAdapter['runExplorer']>;
+  runVerifier(input: Parameters<TuiGoalWorkerAdapter['runVerifier']>[0]): ReturnType<TuiGoalWorkerAdapter['runVerifier']>;
   executeGoalTask(
     task: RuntimeGoalTaskInput,
     context: RuntimeGoalTaskExecutionContext,
@@ -277,7 +302,6 @@ function upsertAssistantTool(
   return next;
 }
 
-/** Drop empty thinking placeholders; keep messages that already received content. */
 /** Clear historical interrupted markers when the conversation continues. */
 export function clearInterruptedMarkers(
   messages: readonly ChatMessage[],
@@ -292,6 +316,7 @@ export function clearInterruptedMarkers(
   return { messages: changed ? next : (messages as ChatMessage[]), changed };
 }
 
+/** Drop empty thinking placeholders; keep messages that already received content. */
 function finalizePendingMessages(
   messages: readonly ChatMessage[],
   options?: { readonly interrupted?: boolean; readonly error?: string },
@@ -369,7 +394,15 @@ export function createChatController(options: {
   let conversationModelMessages: readonly ModelMessage[] = [];
   let executionEvidenceIds: string[] = [];
   let sequence = 0;
+  let goalTurnCollector: {
+    readonly explorers: TuiExplorerRequest[];
+    toolCallCount: number;
+  } | null = null;
   const sessions = options.sessionController ?? createRuntimeSessionController();
+  const goalWorkers = createTuiGoalWorkerAdapter({
+    model: options.model,
+    host: options.host,
+  });
 
   const publish = (next: ChatSnapshot) => {
     snapshot = next;
@@ -616,6 +649,7 @@ export function createChatController(options: {
     model: options.model,
     tools: {
       async execute(call, context) {
+        if (goalTurnCollector) goalTurnCollector.toolCallCount += 1;
         // Attach tool-call progress to the current assistant turn (Desktop model):
         // multiple tools share one assistant message via `tools[]` / segments.
         flushStreamDeltaBuffer();
@@ -639,11 +673,19 @@ export function createChatController(options: {
             ? { conversationId: context.run.conversationId }
             : {}),
           ...(context.run.streamId ? { streamId: context.run.streamId } : {}),
-          mode: normalizeTuiMode(context.run.mode),
+          mode: normalizeTuiRuntimeMode(context.run.mode),
           turnId: context.run.input.turnId,
           turnIndex: context.run.input.turnIndex,
           ...(context.signal ? { signal: context.signal } : {}),
         });
+        if (
+          goalTurnCollector
+          && call.capabilityId === GOAL_CAPABILITY_IDS.explore
+          && execution.result.status === 'success'
+        ) {
+          const request = normalizeExplorerRequest(call.arguments);
+          if (request) goalTurnCollector.explorers.push(request);
+        }
         const evidence = execution.result.evidence;
         const evidenceId = evidence && typeof evidence === 'object' && 'evidenceId' in evidence
           ? String(evidence.evidenceId)
@@ -894,6 +936,38 @@ export function createChatController(options: {
       }
 
       return runStructuralCompact({ source: 'manual' });
+    },
+    async runGoalTurn(content) {
+      if (activeTurn || snapshot.status !== 'idle') {
+        throw new Error('chat_turn_active');
+      }
+      if (goalTurnCollector) {
+        throw new Error('goal_turn_collector_active');
+      }
+
+      const collector = {
+        explorers: [] as TuiExplorerRequest[],
+        toolCallCount: 0,
+      };
+      goalTurnCollector = collector;
+      try {
+        this.setMode('goal');
+        await this.send(content);
+        if (snapshot.error) throw new Error(snapshot.error);
+        return {
+          continued: true as const,
+          explorers: [...collector.explorers],
+          toolCallCount: collector.toolCallCount,
+        };
+      } finally {
+        if (goalTurnCollector === collector) goalTurnCollector = null;
+      }
+    },
+    runExplorer(input) {
+      return goalWorkers.runExplorer(input);
+    },
+    runVerifier(input) {
+      return goalWorkers.runVerifier(input);
     },
     async executeGoalTask(task, context) {
       if (activeTurn) return { status: 'blocked', reason: 'chat_turn_active' };

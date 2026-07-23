@@ -272,15 +272,16 @@ describe('createLocalSkillProvider', () => {
     });
   });
 
-  // M1·C：allowed-tools 兜底注入 —— local skill 本质靠 shell 执行 instructions
+  // M1·C：allowed-tools 兜底注入 —— local skill 本质靠 canonical shell 工具执行 instructions
   describe('allowed-tools 兜底注入（C）', () => {
-    it('未声明 allowed-tools → 兜底注入 local_shell_exec（evidence + instructions）', async () => {
+    it('未声明 allowed-tools → 兜底注入 bash（evidence + instructions）', async () => {
       const skills = [{ skillId: 'ata-all', name: 'ata-all', instructions: '调用 aone-kit call-tool' }];
       const provider = createLocalSkillProvider({ skillStore: mockSkillStore(skills) });
       const result = await provider.executeCapability(makeRequest('local.skill.ata-all', {}));
-      assert.deepEqual(result.result.evidence.allowedTools, ['local_shell_exec']);
+      assert.deepEqual(result.result.evidence.allowedTools, ['bash']);
       assert.match(result.result.outputPreview, /allowed-tools/);
-      assert.match(result.result.outputPreview, /local_shell_exec/);
+      assert.match(result.result.outputPreview, /bash/);
+      assert.doesNotMatch(result.result.outputPreview, /local_shell_exec/);
     });
 
     it('已声明 allowed-tools → 保留不覆盖（兜底不生效）', async () => {

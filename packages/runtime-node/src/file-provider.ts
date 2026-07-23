@@ -15,6 +15,7 @@ import type {
 } from '@peer-agent/runtime-core';
 import type { RuntimeSdkToolCall } from '@peer-agent/runtime-sdk';
 
+import { runNodeFileSearch } from './file-search.ts';
 import type { NodeFileProviderOptions } from './provider-contracts.ts';
 import {
   asRecord,
@@ -26,18 +27,13 @@ import {
 
 const DEFAULT_MAX_READ_BYTES = 2_000_000;
 const PREVIEW_CHARS = 4_000;
-const SEARCH_MAX_FILE_BYTES = 1_000_000;
-const SEARCH_DEFAULT_MAX_RESULTS = 50;
-const SEARCH_MAX_RESULTS = 200;
 const READ_MODE_SCOPES = Object.freeze([
   'chat',
   'plan',
   'goal',
-  'compact',
-  'system',
   'explorer',
 ] as const);
-const WRITE_MODE_SCOPES = Object.freeze(['chat', 'goal', 'compact', 'system'] as const);
+const WRITE_MODE_SCOPES = Object.freeze(['chat', 'goal'] as const);
 
 export const NODE_FILE_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Object.freeze([
   {
@@ -144,27 +140,6 @@ function cancelledResult(call: RuntimeSdkToolCall, clock: ReturnType<typeof crea
   });
 }
 
-async function collectSearchFiles(root: string, signal?: AbortSignal): Promise<string[]> {
-  const rootStat = await stat(root);
-  if (rootStat.isFile()) return [root];
-  if (!rootStat.isDirectory()) throw new Error('not_a_file_or_directory');
-  const files: string[] = [];
-  const pending = [root];
-  while (pending.length > 0) {
-    if (signal?.aborted) throw new Error('aborted');
-    const directory = pending.pop()!;
-    const entries = await readdir(directory, { withFileTypes: true });
-    entries.sort((left, right) => left.name.localeCompare(right.name));
-    for (const entry of entries) {
-      if (entry.name === '.git' || entry.name === 'node_modules') continue;
-      const entryPath = resolve(directory, entry.name);
-      if (entry.isDirectory()) pending.push(entryPath);
-      else if (entry.isFile()) files.push(entryPath);
-    }
-  }
-  return files.sort();
-}
-
 export function createNodeFileProvider(options: NodeFileProviderOptions): CapabilityProvider {
   if (!options?.workspaceRoot) throw new TypeError('Node file provider requires workspaceRoot.');
   const workspaceRoot = resolve(options.workspaceRoot);
@@ -221,31 +196,30 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
 
         if (request.capabilityId === 'local.file.search') {
           const query = requireString(input, 'query');
-          const caseSensitive = input.case_sensitive === true;
-          const requestedMax = typeof input.max_results === 'number' ? Math.floor(input.max_results) : SEARCH_DEFAULT_MAX_RESULTS;
-          const maxResults = Math.min(SEARCH_MAX_RESULTS, Math.max(1, requestedMax));
-          const needle = caseSensitive ? query : query.toLocaleLowerCase();
-          const matches: Array<{ path: string; line: number; text: string }> = [];
-          const files = await collectSearchFiles(targetPath, context.signal);
-          for (const filePath of files) {
-            if (matches.length >= maxResults) break;
-            try {
-              const fileStat = await stat(filePath);
-              if (fileStat.size > SEARCH_MAX_FILE_BYTES) continue;
-              const content = await readFile(filePath, 'utf8');
-              if (content.includes('\0')) continue;
-              for (const [index, line] of content.split(/\r?\n/).entries()) {
-                const haystack = caseSensitive ? line : line.toLocaleLowerCase();
-                if (haystack.includes(needle)) matches.push({ path: relativeDisplayPath(workspaceRoot, filePath), line: index + 1, text: line });
-                if (matches.length >= maxResults) break;
-              }
-            } catch { /* unreadable entries are skipped */ }
-          }
+          const searchResult = await runNodeFileSearch({
+            workspaceRoot,
+            targetPath,
+            query,
+            caseSensitive: input.case_sensitive === true,
+            maxResults: input.max_results as number | undefined,
+            signal: context.signal,
+          });
           const grant = createNodePermissionGrant({ clock, call, decision: 'allow', reason: 'file_search' });
           return createNodeToolResult({
-            clock, call, status: 'completed', summary: `Found ${matches.length} match(es) under ${displayPath}.`,
-            output: { query, path: displayPath, matches, matchCount: matches.length, truncated: matches.length >= maxResults },
-            outputPreview: { query, path: displayPath, matches: matches.slice(0, 20), matchCount: matches.length },
+            clock, call, status: 'completed', summary: `Found ${searchResult.matchCount} match(es) under ${displayPath}.`,
+            output: {
+              query,
+              path: displayPath,
+              matches: searchResult.matches,
+              matchCount: searchResult.matchCount,
+              truncated: searchResult.truncated,
+            },
+            outputPreview: {
+              query,
+              path: displayPath,
+              matches: searchResult.matches.slice(0, 20),
+              matchCount: searchResult.matchCount,
+            },
             grant, metadata: { path: displayPath, operation: 'search' },
           });
         }

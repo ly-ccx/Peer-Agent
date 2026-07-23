@@ -847,6 +847,8 @@ describe('TUI conversation persistence', () => {
 
     const persistence = createTuiConversationPersistence({
       workspacePath: '/tmp/peer-interrupted-clear',
+      initialMode: 'chat',
+      initialModel: selection,
       store: store as never,
     });
     persistence.resumeConversation({

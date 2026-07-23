@@ -6,3 +6,4 @@ export * from './permission.ts';
 export * from './capability-registry.ts';
 export * from './projection.ts';
 export * from './projection-materializers.ts';
+export * from './local-tool-contracts.ts';

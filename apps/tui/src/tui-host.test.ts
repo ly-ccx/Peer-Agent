@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -28,6 +28,18 @@ function sessionContext(sessionId: string, turnIndex = 0): TuiExecutionContext {
     turnIndex,
     signal: new AbortController().signal,
   };
+}
+
+async function waitFor(
+  predicate: () => Promise<boolean> | boolean,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Timed out after ${timeoutMs}ms.`);
 }
 
 afterEach(async () => {
@@ -72,16 +84,19 @@ describe('TUI Runtime host', () => {
       }],
     }));
     const host = createTuiHost({ workspaceRoot, userDataPath });
-    const capabilities = (mode: 'chat' | 'plan' | 'goal' | 'explorer') =>
-      host.capabilitiesForMode?.(mode) ?? [];
-    const toolNames = (mode: 'chat' | 'plan' | 'goal' | 'explorer') =>
-      (host.toolDefinitionsForMode?.(mode) ?? []).map((tool) => tool.capabilityId);
+    const capabilities = (
+      mode: 'chat' | 'plan' | 'goal' | 'explorer' | 'compact' | 'system',
+    ) => host.capabilitiesForMode?.(mode) ?? [];
+    const toolNames = (
+      mode: 'chat' | 'plan' | 'goal' | 'explorer' | 'compact' | 'system',
+    ) => (host.toolDefinitionsForMode?.(mode) ?? []).map((tool) => tool.capabilityId);
 
     expect(capabilities('chat')).toEqual(expect.arrayContaining([
       'local.file.read',
       'local.file.list',
       'local.file.write',
       'local.shell.exec',
+      'local.shell.stop',
     ]));
     // Goal mode keeps chat write/shell tools and adds shared Desktop goal tools.
     expect(capabilities('goal')).toEqual(expect.arrayContaining([
@@ -89,17 +104,18 @@ describe('TUI Runtime host', () => {
       'local.file.list',
       'local.file.write',
       'local.shell.exec',
-      'local.goal.create',
-      'local.goal.update',
-      'local.goal.read',
+      'local.shell.stop',
+      'local.goal.create_plan',
+      'local.goal.update_task',
+      'local.goal.get_plan',
     ]));
     // Plan mode stays read-only for local files, but projects goal plan tools.
     expect(capabilities('plan')).toEqual(expect.arrayContaining([
       'local.file.read',
       'local.file.list',
-      'local.goal.create',
-      'local.goal.update',
-      'local.goal.read',
+      'local.goal.create_plan',
+      'local.goal.update_task',
+      'local.goal.get_plan',
     ]));
     expect(capabilities('explorer')).toEqual(expect.arrayContaining([
       'local.file.read',
@@ -114,10 +130,19 @@ describe('TUI Runtime host', () => {
     expect([...toolNames('plan')]).toEqual([...capabilities('plan')]);
     expect([...toolNames('goal')]).toEqual([...capabilities('goal')]);
     expect([...toolNames('explorer')]).toEqual([...capabilities('explorer')]);
+    expect([...toolNames('compact')]).toEqual([...capabilities('compact')]);
+    expect([...toolNames('system')]).toEqual([...capabilities('system')]);
     expect(toolNames('plan')).not.toContain('local.file.write');
     expect(toolNames('plan')).not.toContain('local.shell.exec');
-    expect(toolNames('goal')).toContain('local.goal.create');
+    expect(toolNames('plan')).not.toContain('local.shell.stop');
+    expect(toolNames('plan')).not.toContain('local.goal.explore');
+    expect(toolNames('explorer')).not.toContain('local.shell.stop');
+    expect(toolNames('goal')).toContain('local.goal.create_plan');
+    expect(toolNames('goal')).toContain('local.goal.explore');
     expect(toolNames('goal')).toContain('local.shell.exec');
+    expect(toolNames('goal')).toContain('local.shell.stop');
+    expect(toolNames('compact')).toEqual([]);
+    expect(toolNames('system')).toEqual([]);
   });
 
   test('rejects non-projected write and shell capabilities before approval in plan and explorer', async () => {
@@ -207,6 +232,103 @@ describe('TUI Runtime host', () => {
     expect(execution.result.status).toBe('completed');
     expect((execution.result.output as { stdout?: string }).stdout).toBe('bun-compatible');
     expect(approvals).toHaveLength(0);
+  });
+
+  test('stops a chat background shell from goal through the shared task manager', async () => {
+    const workspaceRoot = await createWorkspace();
+    const userDataPath = await createWorkspace();
+    const host = createTuiHost({ workspaceRoot, userDataPath, accessLevel: 'full_local' });
+    const conversationId = 'cross-mode-shell';
+    const chatContext: TuiExecutionContext = {
+      ...sessionContext(conversationId, 0),
+      mode: 'chat',
+    };
+    const goalContext: TuiExecutionContext = {
+      ...sessionContext(conversationId, 1),
+      mode: 'goal',
+    };
+    let taskId: string | undefined;
+    let stopped = false;
+
+    try {
+      const started = await host.execute('local.shell.exec', {
+        command: `node -e "process.stdout.write('tui-shell-ready\\n'); setInterval(() => {}, 1000)"`,
+        background: true,
+        timeoutMs: 10_000,
+      }, chatContext);
+      expect(started.result.status).toBe('completed');
+      const startedOutput = started.result.output as {
+        taskId?: string;
+        status?: string;
+        startedAt?: string;
+        artifactRef?: string;
+        artifactRefs?: readonly string[];
+        localPath?: string;
+      };
+      taskId = startedOutput.taskId;
+      expect(taskId).toMatch(/^shell_[0-9a-f-]{36}$/i);
+      expect(startedOutput.status).toBe('running');
+      expect(startedOutput.artifactRef).toBe(`local-shell-artifact://${taskId}`);
+      expect(startedOutput.artifactRefs).toEqual([
+        `local-shell-artifact://${taskId}/stdout`,
+        `local-shell-artifact://${taskId}/stderr`,
+        `local-shell-artifact://${taskId}/metadata`,
+      ]);
+      expect(startedOutput.localPath).toBeUndefined();
+
+      const artifactDir = path.join(
+        userDataPath,
+        'shell-artifacts',
+        startedOutput.startedAt!.slice(0, 10),
+        taskId!,
+      );
+      const stdoutPath = path.join(artifactDir, 'stdout.txt');
+      await waitFor(async () => (await readFile(stdoutPath, 'utf8')).includes('tui-shell-ready'));
+
+      const stoppedExecution = await host.execute('local.shell.stop', {
+        taskId,
+        reason: 'cross_mode_test',
+      }, goalContext);
+      expect(stoppedExecution.result.status).toBe('completed');
+      const stoppedOutput = stoppedExecution.result.output as {
+        taskId?: string;
+        stopped?: boolean;
+        status?: string;
+        reason?: string;
+        artifactRef?: string;
+        artifactRefs?: readonly string[];
+      };
+      stopped = stoppedOutput.stopped === true;
+      expect(stoppedOutput).toMatchObject({
+        taskId,
+        stopped: true,
+        status: 'cancelled',
+        reason: 'cross_mode_test',
+        artifactRef: startedOutput.artifactRef,
+      });
+      expect(stoppedOutput.artifactRefs).toEqual(startedOutput.artifactRefs);
+      expect(await readFile(stdoutPath, 'utf8')).toContain('tui-shell-ready');
+
+      const metadata = JSON.parse(await readFile(path.join(artifactDir, 'metadata.json'), 'utf8')) as {
+        taskId?: string;
+        status?: string;
+        stopReason?: string;
+        completedAt?: string;
+      };
+      expect(metadata).toMatchObject({
+        taskId,
+        status: 'cancelled',
+        stopReason: 'cross_mode_test',
+      });
+      expect(metadata.completedAt).toBeTruthy();
+    } finally {
+      if (taskId && !stopped) {
+        await host.execute('local.shell.stop', {
+          taskId,
+          reason: 'test_cleanup',
+        }, goalContext);
+      }
+    }
   });
 
   test('surfaces shell approval and records an allow decision', async () => {
@@ -708,5 +830,59 @@ describe('TUI Runtime host', () => {
     expect(promptSource).toBe('hook-approval');
     expect(approvalCount).toBe(1);
     expect(await Bun.file(path.join(workspaceRoot, 'unified.txt')).exists()).toBe(true);
+  });
+
+  test('registers real Tool Results in Goal EvidenceIndex without trusting invented refs', async () => {
+    const workspaceRoot = await createWorkspace();
+    const userDataPath = path.join(workspaceRoot, '.peer-agent-test');
+    await writeFile(path.join(workspaceRoot, 'evidence.txt'), 'governed evidence', 'utf8');
+    const host = createTuiHost({ workspaceRoot, userDataPath });
+    const conversationId = 'evidence-index-session';
+    const context = (turnIndex: number): TuiExecutionContext => ({
+      ...sessionContext(conversationId, turnIndex),
+      mode: 'goal',
+    });
+
+    const created = await host.execute('local.goal.create', {
+      title: 'Evidence registration',
+      goal: 'Complete a task only with a real Tool Result',
+      tasks: [{ taskId: 'evidence-task', title: 'Read the governed file' }],
+    }, context(0));
+    const planId = (created.result.output as { planId?: string }).planId;
+    expect(planId).toBeTruthy();
+
+    const invented = await host.execute('local.goal.update', {
+      planId,
+      taskId: 'evidence-task',
+      status: 'completed',
+      evidenceRefs: ['tool-result://invented'],
+      result: 'must be rejected',
+    }, context(1));
+    expect(invented.result.status).toBe('failed');
+
+    const read = await host.execute('local.file.read', {
+      path: 'evidence.txt',
+    }, context(2));
+    expect(read.result.status).toBe('completed');
+    const evidenceRef = `tool-result://${read.result.toolCallId}`;
+
+    const updated = await host.execute('local.goal.update', {
+      planId,
+      taskId: 'evidence-task',
+      status: 'completed',
+      evidenceRefs: [evidenceRef],
+      result: 'read completed',
+    }, context(3));
+    expect(updated.result.status).toBe('success');
+
+    const loaded = await host.execute('local.goal.read', { planId }, context(4));
+    const plan = (loaded.result.output as { plan?: any }).plan;
+    expect(plan?.tasks?.[0]).toMatchObject({
+      taskId: 'evidence-task',
+      status: 'completed',
+      evidenceRefs: [evidenceRef],
+      result: 'read completed',
+    });
+    expect(plan?.progress).toMatchObject({ total: 1, completed: 1, percent: 100 });
   });
 });

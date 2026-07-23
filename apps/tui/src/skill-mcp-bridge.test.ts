@@ -72,6 +72,8 @@ describe('TuiSkillMcpBridge', () => {
       expect(bridge.listMcpTools().map((tool) => tool.capabilityId)).toContain(
         'local.mcp.demo-server.echo',
       );
+      expect(bridge.listSkillTools()[0]?.modeScopes).toEqual(['chat', 'plan', 'goal']);
+      expect(bridge.listMcpTools()[0]?.modeScopes).toEqual(['chat', 'plan', 'goal']);
       expect(bridge.discoveryHint()).toContain('demo-skill');
       expect(bridge.discoveryHint()).toContain('mcp__demo-server__echo');
     } finally {

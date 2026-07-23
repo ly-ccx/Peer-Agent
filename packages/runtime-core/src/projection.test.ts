@@ -53,14 +53,18 @@ test('createRuntimeProjection preserves order and includes all tools without a m
   assert.equal('mode' in nullModeProjection, false);
 });
 
-test('mode filtering keeps unscoped tools compatible except for explorer', () => {
+test('mode filtering keeps unscoped tools only in normal user-facing modes', () => {
   const unscoped = createTool('unscoped');
   const planOnly = createTool('plan-only', { modeScopes: ['plan'] });
   const explorerRead = createTool('explorer-read', { modeScopes: ['chat', 'explorer'] });
   const tools = [unscoped, planOnly, explorerRead];
 
   assert.equal(isRuntimeToolAvailableInMode(unscoped, 'chat'), true);
+  assert.equal(isRuntimeToolAvailableInMode(unscoped, 'plan'), true);
+  assert.equal(isRuntimeToolAvailableInMode(unscoped, 'goal'), true);
   assert.equal(isRuntimeToolAvailableInMode(unscoped, 'explorer'), false);
+  assert.equal(isRuntimeToolAvailableInMode(unscoped, 'compact'), false);
+  assert.equal(isRuntimeToolAvailableInMode(unscoped, 'system'), false);
   assert.deepEqual(
     filterRuntimeToolsForMode(tools, 'plan').map((tool) => tool.name),
     ['unscoped', 'plan-only'],

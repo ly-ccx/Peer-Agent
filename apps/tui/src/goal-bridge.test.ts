@@ -51,7 +51,11 @@ describe('TuiGoalBridge', () => {
         GOAL_TOOL_NAMES.createPlan,
         GOAL_TOOL_NAMES.updateTask,
         GOAL_TOOL_NAMES.getPlan,
+        GOAL_TOOL_NAMES.requestExplorer,
       ]);
+      expect(
+        bridge.toolDefinitions.find((tool) => tool.name === GOAL_TOOL_NAMES.requestExplorer)?.modeScopes,
+      ).toEqual(['goal']);
 
       const blocked = bridge.evaluateIntake({
         mode: 'goal',
@@ -62,6 +66,13 @@ describe('TuiGoalBridge', () => {
       if (!blocked.allowed) {
         expect(blocked.reason).toContain('goal_create_plan');
       }
+
+      const stopAllowed = bridge.evaluateIntake({
+        mode: 'goal',
+        conversationId: 'conv-intake',
+        capabilityId: 'local.shell.stop',
+      });
+      expect(stopAllowed.allowed).toBe(true);
 
       const readAllowed = bridge.evaluateIntake({
         mode: 'goal',
@@ -104,6 +115,39 @@ describe('TuiGoalBridge', () => {
     }
   });
 
+  test('request_explorer registers a structured Goal Runner request without executing it inline', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-goal-explorer-'));
+    try {
+      const bridge = createTuiGoalBridge({ storeDir });
+      const result = await bridge.execute({
+        capabilityId: GOAL_TOOL_NAMES.requestExplorer,
+        conversationId: 'conv-explorer',
+        mode: 'goal',
+        args: {
+          question: 'Where is the capability projected?',
+          reason: 'Confirm the runtime boundary',
+          scope: { include: ['packages/runtime-node'], exclude: ['node_modules'] },
+        },
+      });
+      expect(result.result.status).toBe('success');
+      expect(result.result.output).toMatchObject({
+        registered: true,
+        question: 'Where is the capability projected?',
+        reason: 'Confirm the runtime boundary',
+        scope: { include: ['packages/runtime-node'], exclude: ['node_modules'] },
+      });
+      const invalid = await bridge.execute({
+        capabilityId: GOAL_CAPABILITY_IDS.explore,
+        conversationId: 'conv-explorer',
+        mode: 'goal',
+        args: { question: '   ' },
+      });
+      expect(invalid.result.status).toBe('failed');
+    } finally {
+      await rm(storeDir, { recursive: true, force: true });
+    }
+  });
+
   test('goal_update_task and goal_get_plan read/write shared store', async () => {
     const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-goal-upd-'));
     try {
@@ -119,6 +163,13 @@ describe('TuiGoalBridge', () => {
       });
       const planId = (created.result.output as { planId?: string }).planId;
       expect(planId).toBeTruthy();
+      bridge.store.recordEvidenceRefs({
+        planId,
+        conversationId: 'conv-update',
+        evidenceRefs: ['local-shell-artifact://demo'],
+        toolCallId: 'shell-demo',
+        capabilityId: 'local.shell.exec',
+      });
 
       const updated = await bridge.execute({
         capabilityId: GOAL_TOOL_NAMES.updateTask,
@@ -143,6 +194,13 @@ describe('TuiGoalBridge', () => {
       expect(got.result.status).toBe('success');
       const plan = (got.result.output as { plan?: any }).plan;
       expect(plan?.planId).toBe(planId);
+      expect(plan?.tasks?.[0]).toMatchObject({
+        taskId: 't1',
+        status: 'completed',
+        evidenceRefs: ['local-shell-artifact://demo'],
+        result: 'done',
+      });
+      expect(plan?.progress).toMatchObject({ total: 1, completed: 1, percent: 100 });
     } finally {
       await rm(storeDir, { recursive: true, force: true });
     }

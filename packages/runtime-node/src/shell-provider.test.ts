@@ -4,11 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import type { CapabilityExecutionContext, CapabilityRequest } from '@peer-agent/runtime-core';
+import {
+  collectToolEvidenceRefs,
+  type CapabilityExecutionContext,
+  type CapabilityRequest,
+} from '@peer-agent/runtime-core';
 
 import type { NodeCapabilityPermissionPrompt } from './provider-contracts.ts';
 import { classifyNodeShellCommand } from './shell-classifier.ts';
 import { createNodeShellProvider } from './shell-provider.ts';
+import { createNodeShellTaskManager } from './shell-task-manager.ts';
 
 function request(command: string, extra: Record<string, unknown> = {}): CapabilityRequest {
   return {
@@ -19,6 +24,19 @@ function request(command: string, extra: Record<string, unknown> = {}): Capabili
       input: { command, ...extra },
     },
     input: { command, ...extra },
+  };
+}
+
+function stopRequest(taskId: string, reason?: string): CapabilityRequest {
+  const input = { taskId, ...(reason ? { reason } : {}) };
+  return {
+    capabilityId: 'local.shell.stop',
+    toolCall: {
+      toolCallId: `call-stop-${taskId}`,
+      capabilityId: 'local.shell.stop',
+      input,
+    },
+    input,
   };
 }
 
@@ -136,4 +154,94 @@ test('shell provider terminates on AbortSignal and timeout', async (t) => {
   );
   assert.equal(timedOut.status, 'timeout');
   assert.equal((timedOut.output as { timedOut?: boolean }).timedOut, true);
+});
+
+test('shell provider starts and stops a background task through one scoped manager', async (t) => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-runtime-node-shell-background-'));
+  t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
+  const taskManager = createNodeShellTaskManager({
+    workspaceRoot,
+    artifactRoot: path.join(workspaceRoot, 'artifacts'),
+    killGraceMs: 20,
+  });
+  const taskIds: string[] = [];
+  t.after(async () => {
+    await Promise.all(taskIds.map((taskId) => taskManager.stopTask(taskId, 'test_cleanup')));
+  });
+  let approvalCalls = 0;
+  const provider = createNodeShellProvider({
+    workspaceRoot,
+    taskManager,
+    requestApproval() {
+      approvalCalls += 1;
+      return { granted: true };
+    },
+  });
+
+  const started = await provider.execute(
+    request(`node -e "process.stdout.write('ready\\n'); setInterval(() => {}, 1000)"`, {
+      background: true,
+      timeoutMs: 10_000,
+    }),
+    context(),
+  );
+  assert.equal(started.status, 'completed');
+  const startedOutput = started.output as {
+    taskId: string;
+    status: string;
+    artifactRef: string;
+    artifactRefs: string[];
+  };
+  taskIds.push(startedOutput.taskId);
+  assert.match(startedOutput.taskId, /^shell_[0-9a-f-]{36}$/i);
+  assert.equal(startedOutput.status, 'running');
+  assert.equal(startedOutput.artifactRef, `local-shell-artifact://${startedOutput.taskId}`);
+  const executionEvidenceRefs = collectToolEvidenceRefs({
+    toolCallId: started.toolCallId,
+    execution: { result: started },
+  });
+  assert.deepEqual(executionEvidenceRefs, [
+    `tool-result://${started.toolCallId}`,
+    ...startedOutput.artifactRefs,
+    startedOutput.artifactRef,
+  ]);
+  assert.equal(taskManager.getTask(startedOutput.taskId)?.status, 'running');
+  assert.equal(approvalCalls, 1);
+
+  const stopped = await provider.execute(stopRequest(startedOutput.taskId, 'provider_test'), context());
+  assert.equal(stopped.status, 'completed');
+  const stoppedOutput = stopped.output as {
+    taskId: string;
+    stopped: boolean;
+    status: string;
+    reason: string;
+    artifactRef: string;
+    artifactRefs: string[];
+  };
+  assert.equal(stoppedOutput.taskId, startedOutput.taskId);
+  assert.equal(stoppedOutput.stopped, true);
+  assert.equal(stoppedOutput.status, 'cancelled');
+  assert.equal(stoppedOutput.reason, 'provider_test');
+  assert.equal(stoppedOutput.artifactRef, startedOutput.artifactRef);
+  assert.deepEqual(stoppedOutput.artifactRefs, startedOutput.artifactRefs);
+  assert.equal(approvalCalls, 1);
+
+  const repeated = await provider.execute(stopRequest(startedOutput.taskId), context());
+  assert.equal(repeated.status, 'completed');
+  assert.equal((repeated.output as { stopped: boolean }).stopped, false);
+
+  const missing = await provider.execute(
+    stopRequest('shell_00000000-0000-4000-8000-000000000000'),
+    context(),
+  );
+  assert.equal(missing.status, 'failed');
+  assert.equal(missing.error?.code, 'shell_task_not_found');
+});
+
+test('shell provider rejects malformed task ids without exposing process control', async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-runtime-node-shell-invalid-stop-'));
+  const provider = createNodeShellProvider({ workspaceRoot });
+  const result = await provider.execute(stopRequest('1234'), context());
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'invalid_task_id');
 });

@@ -9,6 +9,59 @@ export type EvidenceRedactor = (record: EvidenceRecord) => EvidenceRecord;
 
 export type RuntimeEvidenceObject = Readonly<Record<string, unknown>>;
 
+export interface CollectToolEvidenceRefsOptions {
+  readonly toolCallId?: unknown;
+  readonly execution?: unknown;
+}
+
+function asEvidenceObject(value: unknown): Readonly<Record<string, unknown>> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : null;
+}
+
+function addEvidenceRefStrings(target: Set<string>, value: unknown): void {
+  if (typeof value === 'string' && value.trim()) {
+    target.add(value.trim());
+    return;
+  }
+  if (!Array.isArray(value)) return;
+  for (const item of value) {
+    if (typeof item === 'string' && item.trim()) target.add(item.trim());
+  }
+}
+
+/**
+ * Collect the canonical refs exposed by a governed tool execution.
+ *
+ * The collector deliberately reads only known Tool Result fields. It never scans
+ * arbitrary model-visible output for URI-looking strings, so untrusted output
+ * cannot register itself as Evidence.
+ */
+export function collectToolEvidenceRefs(
+  options: CollectToolEvidenceRefsOptions = {},
+): string[] {
+  const refs = new Set<string>();
+  if (typeof options.toolCallId === 'string' && options.toolCallId.trim()) {
+    refs.add(`tool-result://${options.toolCallId.trim()}`);
+  }
+
+  const execution = asEvidenceObject(options.execution);
+  const result = asEvidenceObject(execution?.result);
+  const evidence = asEvidenceObject(result?.evidence);
+  addEvidenceRefStrings(refs, evidence?.artifactRefs);
+
+  const outputPreview = asEvidenceObject(result?.outputPreview);
+  addEvidenceRefStrings(refs, outputPreview?.artifactRef);
+  addEvidenceRefStrings(refs, outputPreview?.artifactRefs);
+
+  const localToolResultRef = asEvidenceObject(outputPreview?.localToolResultRef);
+  addEvidenceRefStrings(refs, localToolResultRef?.artifactRef);
+  addEvidenceRefStrings(refs, localToolResultRef?.artifactRefs);
+
+  return [...refs];
+}
+
 export interface CreateEvidenceBundleOptions {
   readonly evidenceId?: string;
   readonly toolCallId?: string;

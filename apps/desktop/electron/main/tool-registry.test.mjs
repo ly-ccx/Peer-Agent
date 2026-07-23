@@ -36,6 +36,7 @@ describe('Tool Registry', () => {
 
     assert.deepEqual(names, [
       TOOL_NAMES.bash,
+      TOOL_NAMES.shellStop,
       TOOL_NAMES.listFiles,
       TOOL_NAMES.readFile,
       TOOL_NAMES.searchFiles,
@@ -49,6 +50,10 @@ describe('Tool Registry', () => {
     assert.equal(editTool.runtime.migrationTarget, 'runtime-gateway.local-tool-host');
     assert.equal(editTool.runtime.executorCapabilityId, 'local.file.edit');
     assert.equal(editTool.permissionPolicy.requiresFreshRead, true);
+
+    const shellStopTool = getToolDefinition(TOOL_NAMES.shellStop);
+    assert.equal(shellStopTool.capabilityId, 'legacy.local.shell.stop');
+    assert.equal(shellStopTool.runtime.executorCapabilityId, 'local.shell.stop');
   });
 
   it('rejects duplicate tool names', () => {
@@ -167,13 +172,13 @@ describe('Goal mode runtime tool exposure', () => {
     const registry = createRuntimeToolRegistry();
     const goalTool = registry.getTool('goal_update_task');
     assert.ok(goalTool, 'goal_update_task should be registered in the runtime tool registry');
-    assert.equal(goalTool.runtime.executorCapabilityId, 'local.goal.update');
+    assert.equal(goalTool.runtime.executorCapabilityId, 'local.goal.update_task');
 
     const projection = createRuntimeProjectionFromToolRegistry(registry);
     const goalCapability = projection.capabilities.find(
-      (cap) => cap.capabilityId === 'local.goal.update',
+      (cap) => cap.capabilityId === 'local.goal.update_task',
     );
-    assert.ok(goalCapability, 'local.goal.update should appear in the runtime projection');
+    assert.ok(goalCapability, 'local.goal.update_task should appear in the runtime projection');
 
     const openAiTools = buildOpenAIToolsFromRuntimeProjection(projection, registry);
     const names = openAiTools.map((tool) => tool.function.name);
@@ -226,7 +231,7 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
 
   it('projects execution tools so goal mode can self-drive (explore→act→verify)', () => {
     const names = materializedNames('goal');
-    for (const execTool of ['bash', 'read_file', 'search_files', 'edit_file', 'write_file', 'batch_search']) {
+    for (const execTool of ['bash', 'shell_stop', 'read_file', 'search_files', 'edit_file', 'write_file', 'batch_search']) {
       assert.ok(
         names.includes(execTool),
         `${execTool} should be materialized in goal mode so it can execute, not just plan`,
@@ -238,7 +243,7 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     const registry = createRuntimeToolRegistry();
     const projection = createRuntimeProjectionFromToolRegistry(registry, { mode: 'goal' });
     const byName = new Map(projection.capabilities.map((capability) => [capability.name, capability]));
-    for (const execTool of ['bash', 'read_file', 'search_files', 'edit_file', 'write_file', 'batch_search']) {
+    for (const execTool of ['bash', 'shell_stop', 'read_file', 'search_files', 'edit_file', 'write_file', 'batch_search']) {
       assert.equal(
         byName.get(execTool)?.health,
         'available',
@@ -261,20 +266,21 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     const registry = createRuntimeToolRegistry();
     const projection = createRuntimeProjectionFromToolRegistry(registry, { mode: 'chat' });
     const goalCapability = projection.capabilities.find(
-      (cap) => cap.capabilityId === 'local.goal.update',
+      (cap) => cap.capabilityId === 'local.goal.update_task',
     );
     assert.ok(goalCapability, 'goal capability should still appear in the projection');
     assert.equal(goalCapability.health, 'mode_excluded');
   });
 
-  it('keeps non-goal tools available in chat mode', () => {
+  it('keeps shared shell execution and stop tools available in chat mode', () => {
     const names = materializedNames('chat');
     assert.ok(names.includes('bash'), 'bash should remain available in chat mode');
+    assert.ok(names.includes('shell_stop'), 'shell_stop should remain available in chat mode');
   });
 
   it('projects only explicitly allowed readonly tools in explorer mode', () => {
     const names = materializedNames('explorer');
-    assert.deepEqual(names, ['list_files', 'read_file', 'search_files']);
+    assert.deepEqual(names, ['list_files', 'read_file', 'search_files', 'batch_search']);
   });
 
   it('keeps the public model projection aligned with the host capability projection', () => {

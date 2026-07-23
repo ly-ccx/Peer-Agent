@@ -4,6 +4,7 @@ import {
   appendEvidenceRecords,
   appendHookEvidence,
   applyEvidenceRedactors,
+  collectToolEvidenceRefs,
   createEvidenceBundle,
   sanitizeHookEvidenceRecord,
   type EvidenceRecord,
@@ -46,6 +47,54 @@ test('createEvidenceBundle normalizes portable evidence defaults', () => {
     redactions: [],
     artifactRefs: [],
   });
+});
+
+test('collectToolEvidenceRefs preserves canonical tool and artifact refs in stable order', () => {
+  const refs = collectToolEvidenceRefs({
+    toolCallId: ' call-1 ',
+    execution: {
+      result: {
+        evidence: {
+          artifactRefs: [
+            'local-shell-artifact://a',
+            'local-shell-artifact://a',
+          ],
+        },
+        outputPreview: {
+          artifactRef: 'local-browser-artifact://b',
+          artifactRefs: ['local-shell-artifact://c'],
+          localToolResultRef: {
+            artifactRef: 'local-shell-artifact://c',
+            artifactRefs: ['local-web-artifact://d'],
+          },
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(refs, [
+    'tool-result://call-1',
+    'local-shell-artifact://a',
+    'local-browser-artifact://b',
+    'local-shell-artifact://c',
+    'local-web-artifact://d',
+  ]);
+});
+
+test('collectToolEvidenceRefs ignores arbitrary output and malformed result fields', () => {
+  assert.deepEqual(collectToolEvidenceRefs({
+    toolCallId: ' ',
+    execution: {
+      result: {
+        output: {
+          evidenceRefs: ['model-invented://ref'],
+          artifactRef: 'model-invented://artifact',
+        },
+        evidence: 'not-an-object',
+        outputPreview: [],
+      },
+    },
+  }), []);
 });
 
 test('applyEvidenceRedactors applies redactors in order without side effects', () => {

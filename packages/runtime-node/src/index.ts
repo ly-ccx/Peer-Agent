@@ -79,12 +79,42 @@ export {
 export { createNodeRuntimeHostAdapter } from './host-adapter.ts';
 export { createNodeProviderBundle } from './provider-bundle.ts';
 export {
+  createNodeSearchAggregateProvider,
+  NODE_SEARCH_AGGREGATE_CAPABILITY_MANIFESTS,
+} from './search-aggregate-provider.ts';
+export {
   classifyNodeShellCommand,
   compareNodeShellRisk,
   NODE_SHELL_RISK_ORDER,
   normalizeNodeShellCwd,
 } from './shell-classifier.ts';
 export { createNodeShellProvider, NODE_SHELL_CAPABILITY_MANIFESTS } from './shell-provider.ts';
+export { createNodeShellArtifactStore } from './shell-artifact-store.ts';
+export type {
+  CreateNodeShellArtifactStoreOptions,
+  NodeShellArtifactDescriptor,
+  NodeShellArtifactMetadata,
+  NodeShellArtifactSession,
+  NodeShellArtifactStore,
+} from './shell-artifact-store.ts';
+export { createNodeShellTaskManager } from './shell-task-manager.ts';
+export type {
+  CreateNodeShellTaskManagerOptions,
+  NodeShellStopResult,
+  NodeShellTaskHandle,
+  NodeShellTaskManager,
+  NodeShellTaskOutput,
+  NodeShellTaskSnapshot,
+  NodeShellTaskStatus,
+  RunNodeShellTaskOptions,
+} from './shell-task-manager.ts';
+export { createNodeWebArtifactStore } from './web-artifact-store.ts';
+export { fetchNodeWebPage, normalizeWebUrl, stripHtml } from './web-fetch-engine.ts';
+export type { NodeWebFetchProviderOptions } from './web-fetch-provider.ts';
+export {
+  createNodeWebFetchProvider,
+  NODE_WEB_FETCH_CAPABILITY_MANIFESTS,
+} from './web-fetch-provider.ts';
 export type {
   CreateNodeHookRunnerOptions,
   NodeHookConfig,

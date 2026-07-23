@@ -1,4 +1,4 @@
-import type { RuntimeToolDefinition } from '@peer-agent/runtime-core';
+import { collectToolEvidenceRefs, type RuntimeToolDefinition } from '@peer-agent/runtime-core';
 import type {
   ModelContentPart,
   ModelMessage,
@@ -12,11 +12,12 @@ import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
 import type {
   ChatMessage,
   ChatMessageImage,
+  ChatModelInput,
   ChatModelPort,
   ChatModelState,
   ChatModelToolCall,
 } from './chat-controller.ts';
-import { normalizeTuiMode, type TuiMode } from './tui-mode.ts';
+import { normalizeTuiRuntimeMode, type TuiRuntimeMode } from './tui-mode.ts';
 
 function toUserModelContent(
   content: string,
@@ -39,7 +40,7 @@ export interface CreateProviderChatModelOptions {
   readonly getProvider?: () => ModelProvider;
   readonly model: string;
   readonly toolDefinitions?: readonly RuntimeToolDefinition[];
-  readonly toolDefinitionsForMode?: (mode: TuiMode) => readonly RuntimeToolDefinition[];
+  readonly toolDefinitionsForMode?: (mode: TuiRuntimeMode) => readonly RuntimeToolDefinition[];
   readonly systemPrompt?: string;
   readonly getSystemPrompt?: () => string;
   readonly getModel?: () => string;
@@ -95,23 +96,38 @@ const GOAL_MODE_SYSTEM_PROMPT = `You are in Goal mode (self-driven). Before any 
 
 function executionContent(execution: RuntimeSdkProviderExecution): string {
   const result = execution.result;
+  const evidenceRefs = collectToolEvidenceRefs({
+    toolCallId: result.toolCallId,
+    execution,
+  });
   const view = {
     status: result.status,
     ...(result.output === undefined ? {} : { output: result.output }),
     ...(result.outputPreview === undefined ? {} : { outputPreview: result.outputPreview }),
     ...(result.error === undefined ? {} : { error: result.error }),
+    ...(evidenceRefs.length === 0 ? {} : { evidenceRefs }),
   };
   return JSON.stringify(view);
 }
 
+function formatSystemContextBlocks(
+  blocks: ChatModelInput['systemContextBlocks'],
+): string | null {
+  if (!blocks || blocks.length === 0) return null;
+  const sections = blocks
+    .filter((block) => block.content.trim().length > 0)
+    .map((block) => `## ${block.title}\n${block.content.trim()}`);
+  return sections.length > 0 ? sections.join('\n\n') : null;
+}
+
 export function createProviderChatModel(options: CreateProviderChatModelOptions): ChatModelPort {
   const defaultToolDefinitions = options.toolDefinitions ?? [];
-  const toolDefinitionsForMode = (mode: TuiMode) =>
+  const toolDefinitionsForMode = (mode: TuiRuntimeMode) =>
     options.toolDefinitionsForMode?.(mode) ?? defaultToolDefinitions;
 
   return {
     initialize(input, context) {
-      const mode = normalizeTuiMode(context.run.mode);
+      const mode = normalizeTuiRuntimeMode(context.run.mode);
       const baseSystemPrompt = options.getSystemPrompt?.() ?? options.systemPrompt;
       const modePrompt =
         mode === 'plan'
@@ -119,7 +135,8 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           : mode === 'goal'
             ? GOAL_MODE_SYSTEM_PROMPT
             : null;
-      const systemPrompts = [baseSystemPrompt, modePrompt]
+      const turnSystemContext = formatSystemContextBlocks(input.input.systemContextBlocks);
+      const systemPrompts = [baseSystemPrompt, modePrompt, turnSystemContext]
         .filter((prompt): prompt is string => Boolean(prompt));
       const userContent = toUserModelContent(input.input.content, input.input.images);
       // Always re-inject mode system prompts so mid-session mode switches
@@ -153,7 +170,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
       };
     },
     async runTurn(state, context) {
-      const mode = normalizeTuiMode(context.run.mode);
+      const mode = normalizeTuiRuntimeMode(context.run.mode);
       const projectedToolDefinitions = toolDefinitionsForMode(mode);
       const toolsByName = new Map(projectedToolDefinitions.map((tool) => [tool.name, tool]));
       const tools = projectedToolDefinitions.map(toModelTool);

@@ -19,8 +19,9 @@ import type {
   NodeRuntimePermissionResponse,
   NodeRuntimeSession,
 } from './contracts.ts';
+import type { NodeShellTaskManager } from './shell-task-manager.ts';
 
-export type NodeCapabilityApprovalKind = 'file-write' | 'shell-exec';
+export type NodeCapabilityApprovalKind = 'file-write' | 'shell-exec' | 'web-fetch';
 
 export interface NodeCapabilityPermissionPrompt
   extends NodeRuntimeCapabilityPermissionPrompt {
@@ -51,6 +52,9 @@ export interface NodeShellProviderOptions {
   readonly maxOutputBytes?: number;
   readonly shellPath?: string;
   readonly env?: NodeJS.ProcessEnv;
+  readonly artifactRoot?: string;
+  readonly killGraceMs?: number;
+  readonly taskManager?: NodeShellTaskManager;
 }
 
 export interface CreateNodeProviderBundleOptions {
@@ -66,6 +70,7 @@ export interface CreateNodeProviderBundleOptions {
   readonly mode?: string;
   readonly file?: Omit<NodeFileProviderOptions, 'workspaceRoot' | 'requestApproval' | 'now' | 'idFactory'> | false;
   readonly shell?: Omit<NodeShellProviderOptions, 'workspaceRoot' | 'requestApproval' | 'now' | 'idFactory'> | false;
+  readonly web?: { readonly artifactRoot?: string } | false;
   /** Pass false to omit request_user_input from the bundle. */
   readonly interaction?: false;
 }

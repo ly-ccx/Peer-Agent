@@ -11,9 +11,14 @@ import { createTuiSharedGoalRunner } from './goal-runner-adapter.ts';
  * 与 Desktop 行为对齐——这是此前 CLI goal 模式「永远停在 0/0 · accepted」的缺失环节。
  */
 
-function createFakeChat() {
+function createFakeChat(options: {
+  runGoalTurn?: (content: string, turnNumber: number) => unknown | Promise<unknown>;
+  runExplorer?: (input: any) => unknown | Promise<unknown>;
+  runVerifier?: (input: any) => unknown | Promise<unknown>;
+} = {}) {
   const listeners = new Set<(snapshot: { status: string }) => void>();
   let status = 'idle';
+  let turnNumber = 0;
   const sentMessages: string[] = [];
   return {
     sentMessages,
@@ -26,8 +31,19 @@ function createFakeChat() {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    async send(content: string) {
+    async runGoalTurn(content: string) {
       sentMessages.push(content);
+      turnNumber += 1;
+      if (options.runGoalTurn) return options.runGoalTurn(content, turnNumber);
+      return { continued: true as const, explorers: [], toolCallCount: 0 };
+    },
+    async runExplorer(input: any) {
+      if (options.runExplorer) return options.runExplorer(input);
+      return { status: 'failed', summary: 'unused fake explorer', evidenceRefs: [] };
+    },
+    async runVerifier(input: any) {
+      if (options.runVerifier) return options.runVerifier(input);
+      return { passed: false, summary: 'unused fake verifier', evidenceRefs: [] };
     },
   };
 }
@@ -38,6 +54,19 @@ function createAcceptedGoalArgs() {
     goal: 'Verify CLI auto-starts the shared Goal Runner after goal_create_plan',
     tasks: [{ title: 'First task' }, { title: 'Second task' }],
   };
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(`Timed out after ${timeoutMs}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 describe('createTuiSharedGoalRunner', () => {
@@ -119,12 +148,205 @@ describe('createTuiSharedGoalRunner', () => {
     }
   });
 
+  test('Goal 回合登记的 Explorer 请求会由 TUI Worker 执行并回写真实 Evidence', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-goal-explorer-'));
+    let cleanupRunner: ReturnType<typeof createTuiSharedGoalRunner> | null = null;
+    let cleanupPlanId: string | null = null;
+    try {
+      const bridge = createTuiGoalBridge({ storeDir });
+      const exploredQuestions: string[] = [];
+      const chat = createFakeChat({
+        runGoalTurn: (_content, turnNumber) => turnNumber === 1
+          ? {
+              continued: true,
+              explorers: [{
+                question: 'Where is the target symbol used?',
+                reason: 'Ground the next implementation step',
+                scope: { include: ['apps/tui/src'], exclude: ['dist'] },
+              }],
+              toolCallCount: 1,
+            }
+          : { continue: false, intent: 'verify', toolCallCount: 0 },
+        runExplorer: ({ explorer }) => {
+          exploredQuestions.push(explorer.request.question);
+          return {
+            status: 'completed',
+            summary: 'Found the governed usage',
+            findings: [{
+              claim: 'The symbol is used by the TUI Goal adapter.',
+              evidenceRefs: ['tool-result://tui-explorer-evidence'],
+            }],
+            evidenceRefs: ['tool-result://tui-explorer-evidence'],
+            toolEvidenceRefs: ['tool-result://tui-explorer-evidence'],
+            confidence: 'high',
+            toolCallCount: 1,
+          };
+        },
+      });
+      const runner = createTuiSharedGoalRunner({
+        bridge,
+        chat: chat as any,
+        autoStart: false,
+      });
+      cleanupRunner = runner;
+
+      const created = await bridge.execute({
+        capabilityId: GOAL_CAPABILITY_IDS.create,
+        conversationId: 'conv-explorer-worker',
+        mode: 'goal',
+        workspaceRoot: process.cwd(),
+        args: createAcceptedGoalArgs(),
+      });
+      const planId = (created.result.output as { planId?: string }).planId!;
+      cleanupPlanId = planId;
+
+      await runner.start(planId);
+      await waitFor(() => {
+        const runnerState = bridge.getPlan(planId)?.runner;
+        return runnerState?.explorers?.[0]?.status === 'completed'
+          && (runnerState.toolCallCount ?? 0) >= 1;
+      });
+
+      expect(exploredQuestions).toEqual(['Where is the target symbol used?']);
+      const plan = bridge.getPlan(planId);
+      expect(plan?.runner?.explorers).toHaveLength(1);
+      expect(plan?.runner?.explorers?.[0]).toMatchObject({
+        status: 'completed',
+        evidenceRefs: ['tool-result://tui-explorer-evidence'],
+        report: {
+          findings: [{
+            claim: 'The symbol is used by the TUI Goal adapter.',
+            evidenceRefs: ['tool-result://tui-explorer-evidence'],
+          }],
+          evidenceRefs: ['tool-result://tui-explorer-evidence'],
+          confidence: 'high',
+        },
+      });
+      expect(plan?.runner?.toolCallCount).toBeGreaterThanOrEqual(1);
+    } finally {
+      if (cleanupRunner && cleanupPlanId) {
+        const runner = cleanupRunner;
+        const planId = cleanupPlanId;
+        runner.clear(planId);
+        await runner.waitForIdle(planId);
+      }
+      await rm(storeDir, { recursive: true, force: true });
+    }
+  });
+
+  test('完成门通过后会调用 TUI Verifier，并在报告通过后完成计划', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-goal-verifier-'));
+    let cleanupRunner: ReturnType<typeof createTuiSharedGoalRunner> | null = null;
+    let cleanupPlanId: string | null = null;
+    try {
+      const bridge = createTuiGoalBridge({ storeDir });
+      const verifierCalls: any[] = [];
+      const taskEvidenceRefs = [
+        'tool-result://tui-verifier-task-1',
+        'tool-result://tui-verifier-task-2',
+      ];
+      const chat = createFakeChat({
+        runGoalTurn: () => {
+          const planId = cleanupPlanId!;
+          bridge.store.recordEvidenceRefs({
+            planId,
+            conversationId: 'conv-verifier-worker',
+            evidenceRefs: taskEvidenceRefs,
+            toolCallId: 'tui-verifier-setup',
+            capabilityId: 'local.file.read',
+          });
+          bridge.store.recordTaskEvidence(planId, 'verify-t1', {
+            status: 'completed',
+            evidenceRefs: [taskEvidenceRefs[0]],
+          });
+          bridge.store.recordTaskEvidence(planId, 'verify-t2', {
+            status: 'completed',
+            evidenceRefs: [taskEvidenceRefs[1]],
+          });
+          return {};
+        },
+        runVerifier: (input) => {
+          verifierCalls.push(input);
+          return {
+            passed: true,
+            summary: 'TUI verifier confirmed the governed evidence',
+            failedCriteria: [],
+            missingEvidence: [],
+            risks: [],
+            evidenceRefs: taskEvidenceRefs,
+            recommendedNextAction: 'synthesize',
+            toolCallCount: 1,
+          };
+        },
+      });
+      const runner = createTuiSharedGoalRunner({
+        bridge,
+        chat: chat as any,
+        autoStart: false,
+      });
+      cleanupRunner = runner;
+
+      const created = await bridge.execute({
+        capabilityId: GOAL_CAPABILITY_IDS.create,
+        conversationId: 'conv-verifier-worker',
+        mode: 'goal',
+        workspaceRoot: process.cwd(),
+        args: {
+          title: 'Verify completed goal',
+          goal: 'Complete only after the TUI Verifier checks governed evidence',
+          tasks: [
+            { taskId: 'verify-t1', title: 'First verified task' },
+            { taskId: 'verify-t2', title: 'Second verified task' },
+          ],
+        },
+      });
+      const planId = (created.result.output as { planId?: string }).planId!;
+      cleanupPlanId = planId;
+
+      await runner.start(planId);
+      await runner.waitForIdle(planId);
+
+      expect(verifierCalls).toHaveLength(1);
+      expect(verifierCalls[0]).toMatchObject({
+        planId,
+        gate: { passed: true },
+      });
+      expect(typeof verifierCalls[0].verifierRunId).toBe('string');
+      const plan = bridge.getPlan(planId);
+      expect(plan).toMatchObject({
+        status: 'completed',
+        progress: { total: 2, completed: 2, percent: 100 },
+        runner: { status: 'completed' },
+      });
+      expect(plan?.runner?.verifierRuns).toHaveLength(1);
+      expect(plan?.runner?.verifierRuns?.[0]).toMatchObject({
+        verifierRunId: verifierCalls[0].verifierRunId,
+        status: 'passed',
+        evidenceRefs: taskEvidenceRefs,
+        report: {
+          passed: true,
+          failedCriteria: [],
+          missingEvidence: [],
+          risks: [],
+          evidenceRefs: taskEvidenceRefs,
+          recommendedNextAction: 'synthesize',
+        },
+      });
+    } finally {
+      if (cleanupRunner && cleanupPlanId) {
+        cleanupRunner.clear(cleanupPlanId);
+        await cleanupRunner.waitForIdle(cleanupPlanId);
+      }
+      await rm(storeDir, { recursive: true, force: true });
+    }
+  });
+
   test('进度展示取全量 plan（getPlan 含 tasks/progress），不再是 index meta 的 0/0', async () => {
     const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-goal-progress-'));
     try {
       const bridge = createTuiGoalBridge({ storeDir });
       const chat = createFakeChat();
-      createTuiSharedGoalRunner({ bridge, chat: chat as any });
+      createTuiSharedGoalRunner({ bridge, chat: chat as any, autoStart: false });
 
       const created = await bridge.execute({
         capabilityId: GOAL_CAPABILITY_IDS.create,

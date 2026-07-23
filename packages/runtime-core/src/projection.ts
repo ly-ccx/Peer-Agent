@@ -86,7 +86,7 @@ export function isRuntimeToolAvailableInMode(
 
   const modeScopes = tool.modeScopes;
   if (!Array.isArray(modeScopes) || modeScopes.length === 0) {
-    return mode !== 'explorer';
+    return mode === 'chat' || mode === 'plan' || mode === 'goal';
   }
   return modeScopes.includes(mode);
 }

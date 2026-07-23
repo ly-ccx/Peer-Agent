@@ -3,7 +3,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   cycleTuiMode,
   isTuiMode,
+  isTuiRuntimeMode,
   normalizeTuiMode,
+  normalizeTuiRuntimeMode,
   TUI_MODE_PROJECTION_RULES,
   TUI_MODES,
   TUI_RUNTIME_MODES,
@@ -27,32 +29,49 @@ describe('TUI modes', () => {
     expect(TUI_MODES.some(({ mode }) => mode === 'explorer')).toBe(false);
   });
 
-  test('defines projection rules for all four runtime modes', () => {
-    expect(TUI_RUNTIME_MODES).toEqual(['chat', 'plan', 'goal', 'explorer']);
+  test('defines projection rules for all user-facing and internal runtime modes', () => {
+    expect(TUI_RUNTIME_MODES).toEqual([
+      'chat',
+      'plan',
+      'goal',
+      'explorer',
+      'compact',
+      'system',
+    ]);
     expect(TUI_MODE_PROJECTION_RULES.map((rule) => rule.mode)).toEqual([
       'chat',
       'plan',
       'goal',
       'explorer',
+      'compact',
+      'system',
     ]);
     expect(tuiModeAllowsWriteTools('chat')).toBe(true);
     expect(tuiModeAllowsWriteTools('goal')).toBe(true);
     expect(tuiModeAllowsWriteTools('plan')).toBe(false);
     expect(tuiModeAllowsWriteTools('explorer')).toBe(false);
+    expect(tuiModeAllowsWriteTools('compact')).toBe(false);
+    expect(tuiModeAllowsWriteTools('system')).toBe(false);
     expect(tuiModeProjectionRule('plan')).toMatchObject({
       readOnly: true,
       userSelectable: true,
     });
-    expect(tuiModeProjectionRule('explorer')).toMatchObject({
+    expect(tuiModeProjectionRule('compact')).toMatchObject({
       readOnly: true,
       userSelectable: false,
     });
   });
 
-  test('keeps Explorer valid for internal Runtime use while excluding it from user choices', () => {
+  test('keeps internal modes out of user choices without downgrading runtime projection', () => {
     expect(TUI_MODES.every(({ mode }) => isTuiMode(mode))).toBe(true);
     expect(isTuiMode('explorer')).toBe(true);
+    expect(isTuiMode('compact')).toBe(false);
     expect(isTuiMode('system')).toBe(false);
+    expect(isTuiRuntimeMode('compact')).toBe(true);
+    expect(isTuiRuntimeMode('system')).toBe(true);
+    expect(normalizeTuiMode('compact')).toBe('chat');
+    expect(normalizeTuiRuntimeMode('compact')).toBe('compact');
+    expect(normalizeTuiRuntimeMode('system')).toBe('system');
     expect(normalizeTuiMode('unknown')).toBe('chat');
     expect(normalizeTuiMode('unknown', 'goal')).toBe('goal');
   });

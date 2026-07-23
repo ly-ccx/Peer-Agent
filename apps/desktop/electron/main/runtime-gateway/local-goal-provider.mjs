@@ -1,3 +1,9 @@
+import {
+  LEGACY_LOCAL_CAPABILITY_ID_ALIASES,
+  SHARED_LOCAL_TOOL_CONTRACTS,
+  canonicalizeLocalCapabilityId,
+} from '@peer-agent/runtime-core';
+
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 
@@ -15,10 +21,15 @@ import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
  * - "completed 必须带 evidenceRefs" 的治理约束由 store 强制；provider 仅转译失败为工具结果。
  */
 
-const GOAL_CAPABILITY_ID = 'local.goal.update';
-const GOAL_CREATE_CAPABILITY_ID = 'local.goal.create';
-const GOAL_READ_CAPABILITY_ID = 'local.goal.read';
-const GOAL_EXPLORE_CAPABILITY_ID = 'local.goal.explore';
+const GOAL_CAPABILITY_ID = SHARED_LOCAL_TOOL_CONTRACTS.goalUpdateTask.capabilityId;
+const GOAL_CREATE_CAPABILITY_ID = SHARED_LOCAL_TOOL_CONTRACTS.goalCreatePlan.capabilityId;
+const GOAL_READ_CAPABILITY_ID = SHARED_LOCAL_TOOL_CONTRACTS.goalGetPlan.capabilityId;
+const GOAL_EXPLORE_CAPABILITY_ID = SHARED_LOCAL_TOOL_CONTRACTS.requestExplorer.capabilityId;
+const LEGACY_GOAL_CAPABILITY_IDS = Object.freeze(
+  Object.keys(LEGACY_LOCAL_CAPABILITY_ID_ALIASES).filter((capabilityId) => (
+    canonicalizeLocalCapabilityId(capabilityId).startsWith('local.goal.')
+  )),
+);
 
 function parseArgs(call) {
   const raw = call?.arguments;
@@ -470,16 +481,26 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
   }
 
   async function executeCapability(request, context = {}) {
-    if (request?.call?.capabilityId === GOAL_CREATE_CAPABILITY_ID) {
-      return executeCreatePlan(request, context);
+    const capabilityId = canonicalizeLocalCapabilityId(request?.call?.capabilityId ?? '');
+    const normalizedRequest = capabilityId === request?.call?.capabilityId
+      ? request
+      : {
+          ...request,
+          call: {
+            ...request?.call,
+            capabilityId,
+          },
+        };
+    if (capabilityId === GOAL_CREATE_CAPABILITY_ID) {
+      return executeCreatePlan(normalizedRequest, context);
     }
-    if (request?.call?.capabilityId === GOAL_READ_CAPABILITY_ID) {
-      return executeGetPlan(request, context);
+    if (capabilityId === GOAL_READ_CAPABILITY_ID) {
+      return executeGetPlan(normalizedRequest, context);
     }
-    if (request?.call?.capabilityId === GOAL_EXPLORE_CAPABILITY_ID) {
-      return executeRequestExplorer(request, context);
+    if (capabilityId === GOAL_EXPLORE_CAPABILITY_ID) {
+      return executeRequestExplorer(normalizedRequest, context);
     }
-    return executeUpdateTask(request, context);
+    return executeUpdateTask(normalizedRequest, context);
   }
 
   return {
@@ -489,6 +510,7 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
       GOAL_CREATE_CAPABILITY_ID,
       GOAL_READ_CAPABILITY_ID,
       GOAL_EXPLORE_CAPABILITY_ID,
+      ...LEGACY_GOAL_CAPABILITY_IDS,
     ],
     executeCapability,
   };

@@ -5,7 +5,11 @@
  * Also enforces Goal-mode intake: before an accepted/executing plan exists for
  * the conversation, side-effect tools (shell/write) are blocked.
  */
-import type { RuntimeToolDefinition } from '@peer-agent/runtime-core';
+import {
+  SHARED_LOCAL_TOOL_CONTRACTS,
+  canonicalizeLocalCapabilityId,
+  type RuntimeToolDefinition,
+} from '@peer-agent/runtime-core';
 import type { RuntimeSdkProviderExecution, RuntimeSdkToolCall } from '@peer-agent/runtime-sdk';
 // Static import so `bun --compile` embeds the shared Desktop store into peer.
 // Runtime path-walking fails inside /$bunfs of the packaged binary.
@@ -18,15 +22,17 @@ import { pathOf } from '../../desktop/electron/main/data-store.mjs';
 import type { TuiMode } from './tui-mode.ts';
 
 export const GOAL_TOOL_NAMES = Object.freeze({
-  createPlan: 'goal_create_plan',
-  updateTask: 'goal_update_task',
-  getPlan: 'goal_get_plan',
+  createPlan: SHARED_LOCAL_TOOL_CONTRACTS.goalCreatePlan.toolName,
+  updateTask: SHARED_LOCAL_TOOL_CONTRACTS.goalUpdateTask.toolName,
+  getPlan: SHARED_LOCAL_TOOL_CONTRACTS.goalGetPlan.toolName,
+  requestExplorer: SHARED_LOCAL_TOOL_CONTRACTS.requestExplorer.toolName,
 });
 
 export const GOAL_CAPABILITY_IDS = Object.freeze({
-  create: 'local.goal.create',
-  update: 'local.goal.update',
-  read: 'local.goal.read',
+  create: SHARED_LOCAL_TOOL_CONTRACTS.goalCreatePlan.capabilityId,
+  update: SHARED_LOCAL_TOOL_CONTRACTS.goalUpdateTask.capabilityId,
+  read: SHARED_LOCAL_TOOL_CONTRACTS.goalGetPlan.capabilityId,
+  explore: SHARED_LOCAL_TOOL_CONTRACTS.requestExplorer.capabilityId,
 });
 
 const GOAL_CAPABILITY_SET = new Set<string>(Object.values(GOAL_CAPABILITY_IDS));
@@ -35,9 +41,10 @@ const GOAL_ALWAYS_ALLOWED = new Set<string>([
   GOAL_CAPABILITY_IDS.create,
   GOAL_CAPABILITY_IDS.update,
   GOAL_CAPABILITY_IDS.read,
-  'local.file.read',
-  'local.search.content',
-  'local.search.aggregate',
+  SHARED_LOCAL_TOOL_CONTRACTS.shellStop.capabilityId,
+  SHARED_LOCAL_TOOL_CONTRACTS.readFile.capabilityId,
+  SHARED_LOCAL_TOOL_CONTRACTS.searchFiles.capabilityId,
+  SHARED_LOCAL_TOOL_CONTRACTS.batchSearch.capabilityId,
   'local.web.fetch',
   'local.browser.navigate',
   'local.browser.click',
@@ -106,6 +113,35 @@ function goalPlansDir(): string {
 
 function asString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+export interface TuiExplorerRequest {
+  readonly question: string;
+  readonly reason: string;
+  readonly scope: {
+    readonly include: readonly string[];
+    readonly exclude: readonly string[];
+  };
+}
+
+export function normalizeExplorerRequest(
+  args: Record<string, unknown>,
+): TuiExplorerRequest | null {
+  const question = asString(args.question);
+  if (!question) return null;
+  const reason = asString(args.reason) ?? '';
+  const scopeRecord = args.scope && typeof args.scope === 'object'
+    ? args.scope as Record<string, unknown>
+    : {};
+  const include = Array.isArray(scopeRecord.include)
+    ? scopeRecord.include.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .map((value) => value.trim())
+    : [];
+  const exclude = Array.isArray(scopeRecord.exclude)
+    ? scopeRecord.exclude.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .map((value) => value.trim())
+    : [];
+  return { question, reason, scope: { include, exclude } };
 }
 
 function normalizeTasks(tasks: unknown): Array<Record<string, unknown>> {
@@ -206,7 +242,7 @@ export function createTuiGoalBridge(options?: {
     {
       name: GOAL_TOOL_NAMES.createPlan,
       capabilityId: GOAL_CAPABILITY_IDS.create,
-      availableInModes: ['plan', 'goal'],
+      modeScopes: ['plan', 'goal'],
       description:
         'Create a persistent, trackable goal/plan. In Goal mode, establish the objective and subtasks before side-effecting work.',
       inputSchema: {
@@ -235,7 +271,7 @@ export function createTuiGoalBridge(options?: {
     {
       name: GOAL_TOOL_NAMES.updateTask,
       capabilityId: GOAL_CAPABILITY_IDS.update,
-      availableInModes: ['plan', 'goal'],
+      modeScopes: ['plan', 'goal'],
       description: 'Record execution evidence for a goal/plan subtask.',
       inputSchema: {
         type: 'object',
@@ -258,7 +294,7 @@ export function createTuiGoalBridge(options?: {
     {
       name: GOAL_TOOL_NAMES.getPlan,
       capabilityId: GOAL_CAPABILITY_IDS.read,
-      availableInModes: ['plan', 'goal'],
+      modeScopes: ['plan', 'goal'],
       description: 'Read back an existing goal/plan or list active plans for the conversation.',
       inputSchema: {
         type: 'object',
@@ -266,6 +302,28 @@ export function createTuiGoalBridge(options?: {
           planId: { type: 'string' },
         },
         required: [],
+      },
+    } as RuntimeToolDefinition,
+    {
+      name: GOAL_TOOL_NAMES.requestExplorer,
+      capabilityId: GOAL_CAPABILITY_IDS.explore,
+      modeScopes: ['goal'],
+      description: 'Register a focused read-only Explorer request for the Goal Runner to execute after this turn.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          question: { type: 'string' },
+          reason: { type: 'string' },
+          scope: {
+            type: 'object',
+            properties: {
+              include: { type: 'array', items: { type: 'string' } },
+              exclude: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['include', 'exclude'],
+          },
+        },
+        required: ['question', 'reason'],
       },
     } as RuntimeToolDefinition,
   ];
@@ -309,10 +367,11 @@ export function createTuiGoalBridge(options?: {
   }): { readonly allowed: true } | { readonly allowed: false; readonly reason: string } {
     const mode = String(options.mode ?? '');
     if (mode !== 'goal') return { allowed: true };
-    if (GOAL_ALWAYS_ALLOWED.has(options.capabilityId) || GOAL_CAPABILITY_SET.has(options.capabilityId)) {
+    const capabilityId = canonicalizeLocalCapabilityId(options.capabilityId);
+    if (GOAL_ALWAYS_ALLOWED.has(capabilityId) || GOAL_CAPABILITY_SET.has(capabilityId)) {
       return { allowed: true };
     }
-    if (!isSideEffectCapability(options.capabilityId)) return { allowed: true };
+    if (!isSideEffectCapability(capabilityId)) return { allowed: true };
 
     const plans = listPlansByConversation(options.conversationId ?? null);
     if (hasReadyPlan(plans)) return { allowed: true };
@@ -332,7 +391,7 @@ export function createTuiGoalBridge(options?: {
     readonly workspaceRoot?: string | null;
     readonly toolCallId?: string;
   }): Promise<RuntimeSdkProviderExecution> {
-    const capabilityId = options.capabilityId;
+    const capabilityId = canonicalizeLocalCapabilityId(options.capabilityId);
     const call: RuntimeSdkToolCall = {
       toolCallId: options.toolCallId ?? `tui-goal-${Date.now()}`,
       capabilityId,
@@ -403,16 +462,22 @@ export function createTuiGoalBridge(options?: {
         if (typeof store.recordTaskEvidence !== 'function') {
           return failedExecution(call, 'goal store unavailable', 'recordTaskEvidence is not available');
         }
-        const updated = store.recordTaskEvidence({
-          planId,
-          taskId,
+        const change = {
           status: asString(options.args.status) ?? undefined,
           evidenceRefs: Array.isArray(options.args.evidenceRefs) ? options.args.evidenceRefs : [],
           result: asString(options.args.result) ?? undefined,
           failureReason: asString(options.args.failureReason) ?? undefined,
           blockedReason: asString(options.args.blockedReason) ?? undefined,
-          criterionResults: options.args.criterionResults,
-        });
+        };
+        let updated = store.recordTaskEvidence(planId, taskId, change);
+        if (updated && options.args.criterionResults !== undefined
+          && typeof store.recordCriterionResults === 'function') {
+          const withCriteria = store.recordCriterionResults(planId, options.args.criterionResults);
+          if (withCriteria) updated = withCriteria;
+        }
+        if (!updated) {
+          return failedExecution(call, 'goal_update_task failed', `Goal plan not found: ${planId}`);
+        }
         return okExecution(call, `Updated task ${taskId}`, {
           ok: true,
           planId,
@@ -437,6 +502,18 @@ export function createTuiGoalBridge(options?: {
         });
       }
 
+      if (capabilityId === GOAL_CAPABILITY_IDS.explore || capabilityId === GOAL_TOOL_NAMES.requestExplorer) {
+        const request = normalizeExplorerRequest(options.args);
+        if (!request) {
+          return failedExecution(call, 'request_explorer failed', 'question is required');
+        }
+        return okExecution(call, `Explorer request registered: ${request.question}`, {
+          ok: true,
+          registered: true,
+          ...request,
+        });
+      }
+
       return failedExecution(call, 'unknown goal capability', `Unsupported goal capability: ${capabilityId}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -447,12 +524,14 @@ export function createTuiGoalBridge(options?: {
   return {
     store,
     toolDefinitions,
-    isGoalCapability: (capabilityId) => (
-      GOAL_CAPABILITY_SET.has(capabilityId)
-      || capabilityId === GOAL_TOOL_NAMES.createPlan
-      || capabilityId === GOAL_TOOL_NAMES.updateTask
-      || capabilityId === GOAL_TOOL_NAMES.getPlan
-    ),
+    isGoalCapability: (capabilityId) => {
+      const canonicalCapabilityId = canonicalizeLocalCapabilityId(capabilityId);
+      return GOAL_CAPABILITY_SET.has(canonicalCapabilityId)
+        || capabilityId === GOAL_TOOL_NAMES.createPlan
+        || capabilityId === GOAL_TOOL_NAMES.updateTask
+        || capabilityId === GOAL_TOOL_NAMES.getPlan
+        || capabilityId === GOAL_TOOL_NAMES.requestExplorer;
+    },
     evaluateIntake,
     execute,
     listPlansByConversation,

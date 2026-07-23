@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 
 import {
+  SHARED_LOCAL_TOOL_CONTRACT_LIST,
   createCapabilityProviderRegistry,
   createRuntimeProjection,
   type CapabilityExecutionContext,
@@ -27,28 +28,33 @@ import {
   createNodeToolResult,
   createProviderRuntimeClock,
 } from './provider-utils.ts';
+import {
+  createNodeSearchAggregateProvider,
+  NODE_SEARCH_AGGREGATE_CAPABILITY_MANIFESTS,
+} from './search-aggregate-provider.ts';
 import { createNodeShellProvider, NODE_SHELL_CAPABILITY_MANIFESTS } from './shell-provider.ts';
 import {
   createNodeInteractionProvider,
-  INTERACTION_CAPABILITY_ID,
   NODE_INTERACTION_CAPABILITY_MANIFESTS,
-  REQUEST_USER_INPUT_TOOL_NAME,
 } from './interaction-provider.ts';
+import {
+  createNodeWebFetchProvider,
+  NODE_WEB_FETCH_CAPABILITY_MANIFESTS,
+} from './web-fetch-provider.ts';
 
-const FILE_TOOL_NAMES: Readonly<Record<string, string>> = Object.freeze({
-  'local.file.read': 'read_file',
-  'local.file.list': 'list_files',
-  'local.file.write': 'write_file',
-  'local.file.edit': 'edit_file',
-  'local.file.search': 'search_files',
-});
+const CANONICAL_MODEL_TOOL_NAMES: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(
+    SHARED_LOCAL_TOOL_CONTRACT_LIST.map((contract) => [
+      contract.capabilityId,
+      contract.toolName,
+    ]),
+  ),
+);
 
 function manifestToToolDefinition(manifest: CapabilityManifest): RuntimeToolDefinition {
   return {
-    name: manifest.capabilityId === INTERACTION_CAPABILITY_ID
-      ? REQUEST_USER_INPUT_TOOL_NAME
-      : FILE_TOOL_NAMES[manifest.capabilityId]
-        ?? manifest.capabilityId.replace(/[^A-Za-z0-9_]+/g, '_'),
+    name: CANONICAL_MODEL_TOOL_NAMES[manifest.capabilityId]
+      ?? manifest.capabilityId.replace(/[^A-Za-z0-9_]+/g, '_'),
     capabilityId: manifest.capabilityId,
     description: manifest.description ?? manifest.displayName,
     inputSchema: manifest.inputSchema,
@@ -97,13 +103,20 @@ export function createNodeProviderBundle(
   const requestCapabilityApproval = options.requestCapabilityApproval
     ?? options.requestPermission;
   const providers = [
-    ...(options.file === false ? [] : [createNodeFileProvider({
-      workspaceRoot,
-      requestApproval: requestCapabilityApproval,
-      now: clock.now,
-      idFactory: clock.idFactory,
-      ...(options.file ?? {}),
-    })]),
+    ...(options.file === false ? [] : [
+      createNodeFileProvider({
+        workspaceRoot,
+        requestApproval: requestCapabilityApproval,
+        now: clock.now,
+        idFactory: clock.idFactory,
+        ...(options.file ?? {}),
+      }),
+      createNodeSearchAggregateProvider({
+        workspaceRoot,
+        now: clock.now,
+        idFactory: clock.idFactory,
+      }),
+    ]),
     ...(options.shell === false ? [] : [createNodeShellProvider({
       workspaceRoot,
       requestApproval: requestCapabilityApproval,
@@ -111,13 +124,22 @@ export function createNodeProviderBundle(
       idFactory: clock.idFactory,
       ...(options.shell ?? {}),
     })]),
+    ...(options.web === false ? [] : [createNodeWebFetchProvider({
+      workspaceRoot,
+      requestApproval: requestCapabilityApproval,
+      now: clock.now,
+      idFactory: clock.idFactory,
+      ...(options.web ?? {}),
+    })]),
     ...(options.interaction === false ? [] : [createNodeInteractionProvider({
       clock,
     })]),
   ];
   const manifests = Object.freeze([
     ...(options.file === false ? [] : NODE_FILE_CAPABILITY_MANIFESTS),
+    ...(options.file === false ? [] : NODE_SEARCH_AGGREGATE_CAPABILITY_MANIFESTS),
     ...(options.shell === false ? [] : NODE_SHELL_CAPABILITY_MANIFESTS),
+    ...(options.web === false ? [] : NODE_WEB_FETCH_CAPABILITY_MANIFESTS),
     ...(options.interaction === false ? [] : NODE_INTERACTION_CAPABILITY_MANIFESTS),
   ]);
   const toolDefinitions = Object.freeze(manifests.map(manifestToToolDefinition));

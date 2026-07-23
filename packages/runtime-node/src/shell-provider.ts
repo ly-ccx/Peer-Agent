@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 
 import type {
@@ -16,18 +15,22 @@ import {
   createProviderRuntimeClock,
 } from './provider-utils.ts';
 import { classifyNodeShellCommand } from './shell-classifier.ts';
+import {
+  createNodeShellTaskManager,
+  type NodeShellTaskOutput,
+} from './shell-task-manager.ts';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 2_000_000;
 const PREVIEW_CHARS = 4_000;
-const SHELL_MODE_SCOPES = Object.freeze(['chat', 'goal', 'compact', 'system'] as const);
+const SHELL_MODE_SCOPES = Object.freeze(['chat', 'goal'] as const);
 
 export const NODE_SHELL_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Object.freeze([
   {
     capabilityId: 'local.shell.exec',
     displayName: 'Run shell command',
-    description: 'Run a shell command inside the active workspace with risk-based approval.',
+    description: 'Run a foreground or background shell command inside the active workspace with risk-based approval.',
     riskLevel: 'L3_sensitive',
     modeScopes: SHELL_MODE_SCOPES,
     inputSchema: {
@@ -36,132 +39,33 @@ export const NODE_SHELL_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Ob
         command: { type: 'string' },
         cwd: { type: 'string' },
         timeoutMs: { type: 'number' },
+        background: { type: 'boolean' },
       },
       required: ['command'],
       additionalProperties: false,
     },
   },
+  {
+    capabilityId: 'local.shell.stop',
+    displayName: 'Stop shell task',
+    description: 'Stop a shell task started by this host and workspace using its opaque task id.',
+    riskLevel: 'L2_low_write',
+    modeScopes: SHELL_MODE_SCOPES,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', minLength: 43, maxLength: 43 },
+        reason: { type: 'string' },
+      },
+      required: ['taskId'],
+      additionalProperties: false,
+    },
+  },
 ]);
-
-interface ShellOutput {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly exitCode: number | null;
-  readonly signal: NodeJS.Signals | null;
-  readonly timedOut: boolean;
-  readonly cancelled: boolean;
-  readonly truncated: boolean;
-}
 
 function normalizeTimeout(value: unknown, fallback: number, max: number): number {
   if (!Number.isFinite(value)) return fallback;
   return Math.max(1, Math.min(max, Math.floor(value as number)));
-}
-
-function capOutput(buffer: string, value: Buffer, maxBytes: number): { text: string; truncated: boolean } {
-  if (Buffer.byteLength(buffer) >= maxBytes) return { text: buffer, truncated: true };
-  const remaining = maxBytes - Buffer.byteLength(buffer);
-  if (value.byteLength <= remaining) return { text: buffer + value.toString('utf8'), truncated: false };
-  return { text: buffer + value.subarray(0, remaining).toString('utf8'), truncated: true };
-}
-
-async function runShellCommand({
-  shellPath,
-  command,
-  cwd,
-  env,
-  timeoutMs,
-  maxOutputBytes,
-  signal,
-}: {
-  readonly shellPath: string;
-  readonly command: string;
-  readonly cwd: string;
-  readonly env: NodeJS.ProcessEnv;
-  readonly timeoutMs: number;
-  readonly maxOutputBytes: number;
-  readonly signal?: AbortSignal;
-}): Promise<ShellOutput> {
-  if (signal?.aborted) {
-    return {
-      stdout: '', stderr: '', exitCode: null, signal: null,
-      timedOut: false, cancelled: true, truncated: false,
-    };
-  }
-
-  return await new Promise((resolvePromise, reject) => {
-    const child = spawn(shellPath, ['-lc', command], {
-      cwd,
-      env,
-      detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    let truncated = false;
-    let timedOut = false;
-    let cancelled = false;
-    let settled = false;
-
-    const kill = (killSignal: NodeJS.Signals) => {
-      if (process.platform !== 'win32' && child.pid) {
-        try {
-          process.kill(-child.pid, killSignal);
-          return;
-        } catch {
-          // Fall back to the direct child when the process group has already exited.
-        }
-      }
-      if (!child.killed) child.kill(killSignal);
-    };
-    const stop = () => {
-      kill('SIGTERM');
-      setTimeout(() => kill('SIGKILL'), 250).unref();
-    };
-    const onAbort = () => {
-      cancelled = true;
-      stop();
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      stop();
-    }, timeoutMs);
-    timeout.unref();
-
-    child.stdout?.on('data', (chunk: Buffer) => {
-      const next = capOutput(stdout, chunk, maxOutputBytes);
-      stdout = next.text;
-      truncated ||= next.truncated;
-    });
-    child.stderr?.on('data', (chunk: Buffer) => {
-      const next = capOutput(stderr, chunk, maxOutputBytes);
-      stderr = next.text;
-      truncated ||= next.truncated;
-    });
-    child.once('error', (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      signal?.removeEventListener('abort', onAbort);
-      reject(error);
-    });
-    child.once('close', (exitCode, closeSignal) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      signal?.removeEventListener('abort', onAbort);
-      resolvePromise({
-        stdout,
-        stderr,
-        exitCode,
-        signal: closeSignal,
-        timedOut,
-        cancelled,
-        truncated,
-      });
-    });
-  });
 }
 
 function requireCommand(input: Record<string, unknown>): string {
@@ -171,7 +75,21 @@ function requireCommand(input: Record<string, unknown>): string {
   return input.command.trim();
 }
 
-function classificationMetadata(classification: ReturnType<typeof classifyNodeShellCommand>): Readonly<Record<string, unknown>> {
+function requireTaskId(input: Record<string, unknown>): string {
+  if (typeof input.taskId !== 'string' || !/^shell_[0-9a-f-]{36}$/i.test(input.taskId.trim())) {
+    throw new Error('invalid_task_id');
+  }
+  return input.taskId.trim();
+}
+
+function stopReason(input: Record<string, unknown>): string | undefined {
+  if (typeof input.reason !== 'string') return undefined;
+  return input.reason.trim() || undefined;
+}
+
+function classificationMetadata(
+  classification: ReturnType<typeof classifyNodeShellCommand>,
+): Readonly<Record<string, unknown>> {
   return {
     allowed: classification.allowed,
     command: classification.command,
@@ -183,6 +101,72 @@ function classificationMetadata(classification: ReturnType<typeof classifyNodeSh
   };
 }
 
+function taskOutputPayload(output: NodeShellTaskOutput): Readonly<Record<string, unknown>> {
+  return {
+    taskId: output.taskId,
+    toolCallId: output.toolCallId,
+    command: output.command,
+    cwd: output.cwd,
+    status: output.status,
+    stdout: output.stdout,
+    stderr: output.stderr,
+    exitCode: output.exitCode,
+    signal: output.signal,
+    timedOut: output.timedOut,
+    cancelled: output.cancelled,
+    interrupted: output.interrupted,
+    stopReason: output.stopReason,
+    truncated: output.truncated,
+    startedAt: output.startedAt,
+    completedAt: output.completedAt,
+    artifactRef: output.artifact.artifactRef,
+    artifactRefs: output.artifact.artifactRefs,
+  };
+}
+
+function taskOutputPreview(output: NodeShellTaskOutput): Readonly<Record<string, unknown>> {
+  return {
+    taskId: output.taskId,
+    status: output.status,
+    command: output.command,
+    stdout: output.stdout.slice(0, PREVIEW_CHARS),
+    stderr: output.stderr.slice(0, PREVIEW_CHARS),
+    exitCode: output.exitCode,
+    signal: output.signal,
+    timedOut: output.timedOut,
+    cancelled: output.cancelled,
+    interrupted: output.interrupted,
+    stopReason: output.stopReason,
+    truncated: output.truncated,
+    artifactRef: output.artifact.artifactRef,
+    artifactRefs: output.artifact.artifactRefs,
+  };
+}
+
+function taskResultStatus(output: NodeShellTaskOutput): RuntimeToolResult['status'] {
+  return output.status;
+}
+
+function taskError(output: NodeShellTaskOutput): RuntimeToolResult['error'] | undefined {
+  if (output.status === 'completed') return undefined;
+  const code = output.status === 'timeout'
+    ? 'shell_timeout'
+    : output.status === 'cancelled'
+      ? 'aborted'
+      : 'shell_exit_nonzero';
+  return {
+    code,
+    message: output.stopReason ?? output.status,
+    recoverable: true,
+  };
+}
+
+function taskSummary(output: NodeShellTaskOutput, timeoutMs: number): string {
+  if (output.status === 'cancelled') return 'Shell command was cancelled.';
+  if (output.status === 'timeout') return `Shell command timed out after ${timeoutMs}ms.`;
+  return `Shell command exited with code ${output.exitCode}.`;
+}
+
 export function createNodeShellProvider(options: NodeShellProviderOptions): CapabilityProvider {
   if (!options?.workspaceRoot) {
     throw new TypeError('Node shell provider requires workspaceRoot.');
@@ -191,8 +175,15 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Capa
   const clock = createProviderRuntimeClock(options);
   const defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxTimeoutMs = options.maxTimeoutMs ?? DEFAULT_MAX_TIMEOUT_MS;
-  const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
-  const shellPath = options.shellPath || process.env.SHELL || '/bin/sh';
+  const taskManager = options.taskManager ?? createNodeShellTaskManager({
+    workspaceRoot,
+    artifactRoot: options.artifactRoot,
+    shellPath: options.shellPath,
+    env: options.env,
+    maxOutputBytes: options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
+    killGraceMs: options.killGraceMs,
+    now: clock.now,
+  });
 
   return {
     providerId: 'runtime-node.shell',
@@ -201,6 +192,75 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Capa
       const call = request.toolCall as RuntimeSdkToolCall;
       const input = asRecord(request.input ?? request.toolCall.input);
       try {
+        if (call.capabilityId === 'local.shell.stop') {
+          const taskId = requireTaskId(input);
+          const result = await taskManager.stopTask(taskId, stopReason(input));
+          const grant = createNodePermissionGrant({
+            clock,
+            call,
+            decision: 'allow',
+            reason: 'shell_task_stop_same_scope',
+            metadata: { taskId, workspaceRoot },
+          });
+          if (!result.found) {
+            return createNodeToolResult({
+              clock,
+              call,
+              status: 'failed',
+              summary: `Shell task not found: ${taskId}.`,
+              output: result,
+              outputPreview: result,
+              grant,
+              error: {
+                code: 'shell_task_not_found',
+                message: result.reason,
+                recoverable: true,
+              },
+              metadata: { taskId, workspaceRoot },
+            });
+          }
+
+          const artifactRefs = result.artifact?.artifactRefs ?? [];
+          const output = {
+            taskId: result.taskId,
+            stopped: result.stopped,
+            status: result.status,
+            reason: result.reason,
+            artifactRef: result.artifact?.artifactRef ?? null,
+            artifactRefs,
+            ...(result.output ? { task: taskOutputPayload(result.output) } : {}),
+          };
+          return createNodeToolResult({
+            clock,
+            call,
+            status: 'completed',
+            summary: result.stopped
+              ? `Shell task stopped: ${result.taskId}.`
+              : `Shell task was already ${result.status}: ${result.taskId}.`,
+            output,
+            outputPreview: {
+              taskId: result.taskId,
+              stopped: result.stopped,
+              status: result.status,
+              reason: result.reason,
+              artifactRef: result.artifact?.artifactRef ?? null,
+              artifactRefs,
+            },
+            grant,
+            artifactRefs,
+            metadata: {
+              taskId: result.taskId,
+              stopped: result.stopped,
+              taskStatus: result.status,
+              workspaceRoot,
+            },
+          });
+        }
+
+        if (call.capabilityId !== 'local.shell.exec') {
+          throw new Error(`unsupported_shell_capability:${call.capabilityId}`);
+        }
+
         const command = requireCommand(input);
         const classification = classifyNodeShellCommand({
           command,
@@ -235,7 +295,7 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Capa
                 capabilityId: call.capabilityId,
                 args: input,
                 workspacePath: workspaceRoot,
-                reason: `${classification.category}: ${command}`,
+                reason: 'Shell execution requires local approval.',
                 confirmation: {
                   kind: 'capability-approval',
                   approvalKind: 'shell-exec',
@@ -281,58 +341,77 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Capa
             metadata: classificationData,
           });
         }
+
         const timeoutMs = normalizeTimeout(input.timeoutMs, defaultTimeoutMs, maxTimeoutMs);
-        const shellOutput = await runShellCommand({
-          shellPath,
+        const background = input.background === true;
+        const task = await taskManager.runTask({
+          toolCallId: call.toolCallId,
           command,
           cwd: classification.cwd,
-          env: { ...process.env, ...(options.env ?? {}) },
           timeoutMs,
-          maxOutputBytes,
-          signal: context.signal,
+          classification: classificationData,
+          signal: background ? undefined : context.signal,
         });
-        const status: RuntimeToolResult['status'] = shellOutput.cancelled
-          ? 'cancelled'
-          : shellOutput.timedOut
-            ? 'timeout'
-            : shellOutput.exitCode === 0
-              ? 'completed'
-              : 'failed';
         const grant = createNodePermissionGrant({
           clock,
           call,
           decision: 'allow',
-          reason: classification.decision === 'allow' ? 'classified_readonly' : 'approved_shell_execution',
+          reason: classification.decision === 'allow'
+            ? 'classified_readonly'
+            : 'approved_shell_execution',
           metadata: classificationData,
         });
+
+        if (background) {
+          const artifactRefs = task.artifact.artifactRefs;
+          const output = {
+            taskId: task.taskId,
+            backgroundTaskId: task.taskId,
+            toolCallId: task.toolCallId,
+            command,
+            cwd: classification.cwd,
+            status: 'running',
+            startedAt: task.startedAt,
+            timeoutMs,
+            artifactRef: task.artifact.artifactRef,
+            artifactRefs,
+          };
+          return createNodeToolResult({
+            clock,
+            call,
+            status: 'completed',
+            summary: `Shell background task started: ${task.taskId}.`,
+            output,
+            outputPreview: output,
+            grant,
+            artifactRefs,
+            metadata: {
+              ...classificationData,
+              taskId: task.taskId,
+              timeoutMs,
+              background: true,
+            },
+          });
+        }
+
+        const shellOutput = await task.completion;
+        const status = taskResultStatus(shellOutput);
         return createNodeToolResult({
           clock,
           call,
           status,
-          summary: shellOutput.cancelled
-            ? 'Shell command was cancelled.'
-            : shellOutput.timedOut
-              ? `Shell command timed out after ${timeoutMs}ms.`
-              : `Shell command exited with code ${shellOutput.exitCode}.`,
-          output: { command, cwd: classification.cwd, ...shellOutput },
-          outputPreview: {
-            command,
-            stdout: shellOutput.stdout.slice(0, PREVIEW_CHARS),
-            stderr: shellOutput.stderr.slice(0, PREVIEW_CHARS),
-            exitCode: shellOutput.exitCode,
-            timedOut: shellOutput.timedOut,
-            cancelled: shellOutput.cancelled,
-            truncated: shellOutput.truncated,
-          },
+          summary: taskSummary(shellOutput, timeoutMs),
+          output: taskOutputPayload(shellOutput),
+          outputPreview: taskOutputPreview(shellOutput),
           grant,
-          error: status === 'completed'
-            ? undefined
-            : {
-                code: status === 'timeout' ? 'shell_timeout' : status === 'cancelled' ? 'aborted' : 'shell_exit_nonzero',
-                message: status,
-                recoverable: true,
-              },
-          metadata: { ...classification, timeoutMs },
+          error: taskError(shellOutput),
+          artifactRefs: shellOutput.artifact.artifactRefs,
+          metadata: {
+            ...classificationData,
+            taskId: task.taskId,
+            timeoutMs,
+            background: false,
+          },
         });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);

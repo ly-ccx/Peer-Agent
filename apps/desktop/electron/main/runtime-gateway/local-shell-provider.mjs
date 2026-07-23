@@ -21,7 +21,11 @@ function readShellArgs(call) {
   const args = call.arguments && typeof call.arguments === 'object'
     ? call.arguments
     : null;
-  if (args && Object.keys(args).length > 0 && (args.command || args.cwd)) {
+  if (
+    args
+    && Object.keys(args).length > 0
+    && (args.command || args.cwd || args.taskId || args.backgroundTaskId || args.toolCallId)
+  ) {
     return args;
   }
   return call.argumentsPreview && typeof call.argumentsPreview === 'object'

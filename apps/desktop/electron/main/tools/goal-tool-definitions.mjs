@@ -1,8 +1,10 @@
+import { SHARED_LOCAL_TOOL_CONTRACTS } from '@peer-agent/runtime-core';
+
 /**
  * Plan / Goal 目标追踪工具定义（Manifest）—— 见 Plan 模式设计与 Goal 模式设计。
  *
  * 该工具经正规运行时链路暴露：
- *   Capability Provider(local.goal.update) → Manifest(本文件) → Runtime Projection
+ *   Capability Provider(local.goal.update_task) → Manifest(本文件) → Runtime Projection
  *     → Tool Call(goal_update_task) → PermissionGrant → Evidence
  *
  * 用途：Plan 模式用这些工具建立审批前的持久计划；Goal 模式用同一套
@@ -13,10 +15,10 @@
  */
 
 export const GOAL_TOOL_NAMES = Object.freeze({
-  createPlan: 'goal_create_plan',
-  updateTask: 'goal_update_task',
-  getPlan: 'goal_get_plan',
-  requestExplorer: 'request_explorer',
+  createPlan: SHARED_LOCAL_TOOL_CONTRACTS.goalCreatePlan.toolName,
+  updateTask: SHARED_LOCAL_TOOL_CONTRACTS.goalUpdateTask.toolName,
+  getPlan: SHARED_LOCAL_TOOL_CONTRACTS.goalGetPlan.toolName,
+  requestExplorer: SHARED_LOCAL_TOOL_CONTRACTS.requestExplorer.toolName,
 });
 
 const GOAL_CREATE_PLAN_PROMPT = [
@@ -73,14 +75,14 @@ const REQUEST_EXPLORER_PROMPT = [
 export const GOAL_TOOL_DEFINITIONS = [
   {
     name: GOAL_TOOL_NAMES.createPlan,
-    capabilityId: 'local.goal.create',
+    capabilityId: SHARED_LOCAL_TOOL_CONTRACTS.goalCreatePlan.capabilityId,
     // 在 plan 与 goal 模式投影给模型（ADR 35）。plan 用于产出/求批准计划,goal 用于自驱规划;
     // mode 隔离在 Runtime Projection 层强制,不依赖系统提示词或执行层闸门兜底。
     availableInModes: ['plan', 'goal'],
     prompt: () => GOAL_CREATE_PLAN_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-goal-provider',
-      executorCapabilityId: 'local.goal.create',
+      executorCapabilityId: SHARED_LOCAL_TOOL_CONTRACTS.goalCreatePlan.capabilityId,
     }),
     permissionPolicy: {
       kind: 'goal-create',
@@ -193,13 +195,13 @@ export const GOAL_TOOL_DEFINITIONS = [
   },
   {
     name: GOAL_TOOL_NAMES.updateTask,
-    capabilityId: 'local.goal.update',
+    capabilityId: SHARED_LOCAL_TOOL_CONTRACTS.goalUpdateTask.capabilityId,
     // 在 plan 与 goal 模式投影给模型（ADR 35）。
     availableInModes: ['plan', 'goal'],
     prompt: () => GOAL_TOOL_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-goal-provider',
-      executorCapabilityId: 'local.goal.update',
+      executorCapabilityId: SHARED_LOCAL_TOOL_CONTRACTS.goalUpdateTask.capabilityId,
     }),
     permissionPolicy: {
       kind: 'goal-update',
@@ -276,13 +278,13 @@ export const GOAL_TOOL_DEFINITIONS = [
   },
   {
     name: GOAL_TOOL_NAMES.getPlan,
-    capabilityId: 'local.goal.read',
+    capabilityId: SHARED_LOCAL_TOOL_CONTRACTS.goalGetPlan.capabilityId,
     // 在 plan 与 goal 模式投影给模型（ADR 35）。
     availableInModes: ['plan', 'goal'],
     prompt: () => GOAL_GET_PLAN_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-goal-provider',
-      executorCapabilityId: 'local.goal.read',
+      executorCapabilityId: SHARED_LOCAL_TOOL_CONTRACTS.goalGetPlan.capabilityId,
     }),
     permissionPolicy: {
       kind: 'goal-read',
@@ -302,14 +304,14 @@ export const GOAL_TOOL_DEFINITIONS = [
   },
   {
     name: GOAL_TOOL_NAMES.requestExplorer,
-    capabilityId: 'local.goal.explore',
+    capabilityId: SHARED_LOCAL_TOOL_CONTRACTS.requestExplorer.capabilityId,
     // 仅在 goal 模式投影给模型（ADR 35）。Explorer 是 Runner 编排的只读子 Agent，
     // 登记式：本工具仅把请求记入回合，由 Goal Runner 在回合结束后派发执行。
-    availableInModes: ['plan', 'goal'],
+    availableInModes: ['goal'],
     prompt: () => REQUEST_EXPLORER_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-goal-provider',
-      executorCapabilityId: 'local.goal.explore',
+      executorCapabilityId: SHARED_LOCAL_TOOL_CONTRACTS.requestExplorer.capabilityId,
     }),
     permissionPolicy: {
       kind: 'goal-explore',

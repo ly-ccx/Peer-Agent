@@ -15,6 +15,10 @@ test('interaction manifests expose request_user_input', () => {
     INTERACTION_CAPABILITY_ID,
   );
   assert.equal(REQUEST_USER_INPUT_TOOL_NAME, 'request_user_input');
+  assert.deepEqual(
+    NODE_INTERACTION_CAPABILITY_MANIFESTS[0]?.modeScopes,
+    ['chat', 'plan', 'goal'],
+  );
 });
 
 test('interaction provider returns terminal control signal', async () => {

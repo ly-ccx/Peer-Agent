@@ -4,6 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
+import {
+  LEGACY_LOCAL_CAPABILITY_ID_ALIASES,
+  SHARED_LOCAL_TOOL_CONTRACTS,
+} from '@peer-agent/runtime-core';
+
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { createLocalGoalProvider } from './local-goal-provider.mjs';
 
@@ -11,10 +16,10 @@ let tmpRoot;
 let store;
 let provider;
 
-function createCall(args = {}, toolCallId = 'local.goal.update:test') {
+function createCall(args = {}, toolCallId = 'local.goal.update_task:test') {
   return {
     toolCallId,
-    capabilityId: 'local.goal.update',
+    capabilityId: 'local.goal.update_task',
     arguments: args,
     argumentsPreview: args,
     occurredAt: new Date().toISOString(),
@@ -64,14 +69,24 @@ describe('local goal provider', () => {
     rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  it('declares the governed goal capability ids', () => {
-    assert.equal(provider.providerId, 'local.goal.update');
+  it('declares canonical goal capability ids plus inbound legacy aliases', () => {
+    assert.equal(
+      provider.providerId,
+      SHARED_LOCAL_TOOL_CONTRACTS.goalUpdateTask.capabilityId,
+    );
     assert.deepEqual(provider.capabilityIds, [
-      'local.goal.update',
+      SHARED_LOCAL_TOOL_CONTRACTS.goalUpdateTask.capabilityId,
+      SHARED_LOCAL_TOOL_CONTRACTS.goalCreatePlan.capabilityId,
+      SHARED_LOCAL_TOOL_CONTRACTS.goalGetPlan.capabilityId,
+      SHARED_LOCAL_TOOL_CONTRACTS.requestExplorer.capabilityId,
       'local.goal.create',
+      'local.goal.update',
       'local.goal.read',
-      'local.goal.explore',
     ]);
+    assert.equal(
+      LEGACY_LOCAL_CAPABILITY_ID_ALIASES['local.goal.update'],
+      SHARED_LOCAL_TOOL_CONTRACTS.goalUpdateTask.capabilityId,
+    );
   });
 
   it('acks a request_explorer registration via local.goal.explore', async () => {
@@ -118,12 +133,12 @@ describe('local goal provider', () => {
     assert.equal(payload.ok, false);
   });
 
-  it('creates an awaiting_approval plan via local.goal.create', async () => {
+  it('creates an awaiting_approval plan via local.goal.create_plan', async () => {
     const execution = await provider.executeCapability(
       {
         call: {
-          toolCallId: 'local.goal.create:test',
-          capabilityId: 'local.goal.create',
+          toolCallId: 'local.goal.create_plan:test',
+          capabilityId: 'local.goal.create_plan',
           arguments: {
             title: '重构鉴权',
             goal: '把鉴权抽到独立模块',
@@ -136,7 +151,7 @@ describe('local goal provider', () => {
     );
 
     assert.equal(execution.grant.granted, true);
-    assert.equal(execution.grant.scope, 'local.goal.create');
+    assert.equal(execution.grant.scope, 'local.goal.create_plan');
     assert.equal(execution.result.status, 'success');
 
     const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
@@ -162,8 +177,8 @@ describe('local goal provider', () => {
     const execution = await provider.executeCapability(
       {
         call: {
-          toolCallId: 'local.goal.create:goal-mode',
-          capabilityId: 'local.goal.create',
+          toolCallId: 'local.goal.create_plan:goal-mode',
+          capabilityId: 'local.goal.create_plan',
           arguments: {
             title: '修复失败测试',
             goal: '定位并修复失败测试',
@@ -202,8 +217,8 @@ describe('local goal provider', () => {
     const execution = await provider.executeCapability(
       {
         call: {
-          toolCallId: 'local.goal.create:bad',
-          capabilityId: 'local.goal.create',
+          toolCallId: 'local.goal.create_plan:bad',
+          capabilityId: 'local.goal.create_plan',
           arguments: { title: 'x' },
           occurredAt: new Date().toISOString(),
         },
@@ -233,7 +248,7 @@ describe('local goal provider', () => {
     );
 
     assert.equal(execution.grant.granted, true);
-    assert.equal(execution.grant.scope, 'local.goal.update');
+    assert.equal(execution.grant.scope, 'local.goal.update_task');
     assert.equal(execution.result.status, 'success');
 
     const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
@@ -290,13 +305,13 @@ describe('local goal provider', () => {
     assert.equal(payload.ok, false);
   });
 
-  it('reads back a plan with authoritative taskIds via local.goal.read', async () => {
+  it('reads back a plan with authoritative taskIds via local.goal.get_plan', async () => {
     const plan = seedPlan();
     const execution = await provider.executeCapability(
       {
         call: {
-          toolCallId: 'local.goal.read:test',
-          capabilityId: 'local.goal.read',
+          toolCallId: 'local.goal.get_plan:test',
+          capabilityId: 'local.goal.get_plan',
           arguments: { planId: plan.planId },
           occurredAt: new Date().toISOString(),
         },
@@ -305,7 +320,7 @@ describe('local goal provider', () => {
     );
 
     assert.equal(execution.result.status, 'success');
-    assert.equal(execution.grant.scope, 'local.goal.read');
+    assert.equal(execution.grant.scope, 'local.goal.get_plan');
     assert.equal(execution.grant.granted, true);
     const payload = JSON.parse(execution.result.outputPreview.legacyResult.output);
     assert.equal(payload.ok, true);
@@ -320,8 +335,8 @@ describe('local goal provider', () => {
     const created = await provider.executeCapability(
       {
         call: {
-          toolCallId: 'local.goal.create:conv',
-          capabilityId: 'local.goal.create',
+          toolCallId: 'local.goal.create_plan:conv',
+          capabilityId: 'local.goal.create_plan',
           arguments: {
             title: '重构鉴权',
             goal: '把鉴权抽到独立模块',
@@ -337,8 +352,8 @@ describe('local goal provider', () => {
     const execution = await provider.executeCapability(
       {
         call: {
-          toolCallId: 'local.goal.read:conv',
-          capabilityId: 'local.goal.read',
+          toolCallId: 'local.goal.get_plan:conv',
+          capabilityId: 'local.goal.get_plan',
           arguments: {},
           occurredAt: new Date().toISOString(),
         },
@@ -363,8 +378,8 @@ describe('local goal provider', () => {
     const execution = await provider.executeCapability(
       {
         call: {
-          toolCallId: 'local.goal.read:missing',
-          capabilityId: 'local.goal.read',
+          toolCallId: 'local.goal.get_plan:missing',
+          capabilityId: 'local.goal.get_plan',
           arguments: { planId: 'does-not-exist' },
           occurredAt: new Date().toISOString(),
         },

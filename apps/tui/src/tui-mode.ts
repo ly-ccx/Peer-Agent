@@ -1,4 +1,5 @@
 export type TuiMode = 'chat' | 'plan' | 'goal' | 'explorer';
+export type TuiRuntimeMode = TuiMode | 'compact' | 'system';
 
 export interface TuiModeOption {
   readonly mode: TuiMode;
@@ -16,7 +17,7 @@ export interface TuiModeOption {
  * TUI-facing contract: which modes are read-only and which allow write tools.
  */
 export interface TuiModeProjectionRule {
-  readonly mode: TuiMode;
+  readonly mode: TuiRuntimeMode;
   readonly readOnly: boolean;
   /** Whether write/shell capabilities may be projected for this mode. */
   readonly allowsWriteTools: boolean;
@@ -49,6 +50,18 @@ export const TUI_MODE_PROJECTION_RULES: readonly TuiModeProjectionRule[] = Objec
     allowsWriteTools: false,
     userSelectable: false,
   },
+  {
+    mode: 'compact',
+    readOnly: true,
+    allowsWriteTools: false,
+    userSelectable: false,
+  },
+  {
+    mode: 'system',
+    readOnly: true,
+    allowsWriteTools: false,
+    userSelectable: false,
+  },
 ]);
 
 export const TUI_MODES: readonly TuiModeOption[] = Object.freeze([
@@ -77,12 +90,18 @@ export const TUI_MODES: readonly TuiModeOption[] = Object.freeze([
   },
 ]);
 
-export const TUI_RUNTIME_MODES: readonly TuiMode[] = Object.freeze([
+export const TUI_RUNTIME_MODES: readonly TuiRuntimeMode[] = Object.freeze([
+  ...TUI_MODES.map((option) => option.mode),
+  'explorer',
+  'compact',
+  'system',
+]);
+
+const TUI_MODE_SET = new Set<TuiMode>([
   ...TUI_MODES.map((option) => option.mode),
   'explorer',
 ]);
-
-const TUI_MODE_SET = new Set<TuiMode>(TUI_RUNTIME_MODES);
+const TUI_RUNTIME_MODE_SET = new Set<TuiRuntimeMode>(TUI_RUNTIME_MODES);
 const TUI_MODE_PROJECTION_BY_MODE = new Map(
   TUI_MODE_PROJECTION_RULES.map((rule) => [rule.mode, rule] as const),
 );
@@ -95,11 +114,22 @@ export function normalizeTuiMode(value: unknown, fallback: TuiMode = 'chat'): Tu
   return isTuiMode(value) ? value : fallback;
 }
 
-export function tuiModeProjectionRule(mode: TuiMode): TuiModeProjectionRule {
+export function isTuiRuntimeMode(value: unknown): value is TuiRuntimeMode {
+  return typeof value === 'string' && TUI_RUNTIME_MODE_SET.has(value as TuiRuntimeMode);
+}
+
+export function normalizeTuiRuntimeMode(
+  value: unknown,
+  fallback: TuiRuntimeMode = 'chat',
+): TuiRuntimeMode {
+  return isTuiRuntimeMode(value) ? value : fallback;
+}
+
+export function tuiModeProjectionRule(mode: TuiRuntimeMode): TuiModeProjectionRule {
   return TUI_MODE_PROJECTION_BY_MODE.get(mode) ?? TUI_MODE_PROJECTION_RULES[0]!;
 }
 
-export function tuiModeAllowsWriteTools(mode: TuiMode): boolean {
+export function tuiModeAllowsWriteTools(mode: TuiRuntimeMode): boolean {
   return tuiModeProjectionRule(mode).allowsWriteTools;
 }
 

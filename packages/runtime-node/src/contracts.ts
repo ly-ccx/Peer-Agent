@@ -50,7 +50,7 @@ export interface NodeRuntimeCapabilityPermissionPrompt {
   readonly reason: string;
   readonly confirmation: {
     readonly kind: 'capability-approval';
-    readonly approvalKind: 'file-write' | 'shell-exec';
+    readonly approvalKind: 'file-write' | 'shell-exec' | 'web-fetch';
     readonly reason: string;
   };
   readonly scope: {

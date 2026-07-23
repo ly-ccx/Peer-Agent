@@ -117,9 +117,17 @@ test('background shell tasks can be stopped through the task manager', async () 
   assert.equal(started.result.outputPreview.status, 'running');
   assert.match(started.result.outputPreview.backgroundTaskId, /^shell_/);
 
-  const stopResult = provider.stopActiveTask();
-  assert.equal(stopResult.stopped, true);
-  assert.equal(stopResult.taskId, started.result.outputPreview.backgroundTaskId);
+  const stopCall = {
+    ...toolCall('shell-stop', ''),
+    capabilityId: 'local.shell.stop',
+    arguments: { taskId: started.result.outputPreview.backgroundTaskId },
+    argumentsPreview: {},
+  };
+  const stopped = await provider.executeCapability({ call: stopCall }, { locale: 'zh-CN' });
+  assert.equal(stopped.grant.granted, true);
+  assert.equal(stopped.result.status, 'success');
+  assert.equal(stopped.result.outputPreview.stopped, true);
+  assert.equal(stopped.result.outputPreview.taskId, started.result.outputPreview.backgroundTaskId);
   await new Promise((resolve) => setTimeout(resolve, 80));
 
   rmSync(tmpDir, { recursive: true, force: true });

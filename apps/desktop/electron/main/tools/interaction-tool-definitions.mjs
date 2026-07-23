@@ -1,3 +1,5 @@
+import { SHARED_LOCAL_TOOL_CONTRACTS } from '@peer-agent/runtime-core';
+
 /**
  * Interaction 模式本地工具定义（Manifest）—— 见 request_user_input 设计。
  *
@@ -14,7 +16,7 @@
  */
 
 export const INTERACTION_TOOL_NAMES = Object.freeze({
-  requestUserInput: 'request_user_input',
+  requestUserInput: SHARED_LOCAL_TOOL_CONTRACTS.requestUserInput.toolName,
 });
 
 const REQUEST_USER_INPUT_PROMPT = [
@@ -28,11 +30,12 @@ const REQUEST_USER_INPUT_PROMPT = [
 export const INTERACTION_TOOL_DEFINITIONS = [
   {
     name: INTERACTION_TOOL_NAMES.requestUserInput,
-    capabilityId: 'local.interaction.request_user_input',
+    capabilityId: SHARED_LOCAL_TOOL_CONTRACTS.requestUserInput.capabilityId,
+    availableInModes: ['chat', 'plan', 'goal'],
     prompt: () => REQUEST_USER_INPUT_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-interaction-provider',
-      executorCapabilityId: 'local.interaction.request_user_input',
+      executorCapabilityId: SHARED_LOCAL_TOOL_CONTRACTS.requestUserInput.capabilityId,
     }),
     permissionPolicy: {
       kind: 'interaction',

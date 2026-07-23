@@ -6,6 +6,7 @@ import {
   type ChatModelPort,
   type ChatModelState,
 } from './chat-controller.ts';
+import { GOAL_CAPABILITY_IDS } from './goal-bridge.ts';
 import { createPlanCoordinator, type RuntimePlan } from './plan-mode.ts';
 import type { TuiExecutionContext, TuiHost } from './tui-host.ts';
 
@@ -125,6 +126,75 @@ describe('chat controller', () => {
     await controller.send('inspect');
 
     expect(observedContext?.mode).toBe('explorer');
+  });
+
+  test('collects only successful Explorer requests for one Goal turn and clears the collector', async () => {
+    let initializedTurns = 0;
+    const model: ChatModelPort = {
+      initialize(input) {
+        initializedTurns += 1;
+        return initialState(input.input);
+      },
+      async runTurn(state) {
+        if (initializedTurns === 1 && state.toolExecutions.length === 0) {
+          return {
+            kind: 'tool_calls',
+            state,
+            calls: [
+              {
+                toolCallId: 'explore-success',
+                capabilityId: GOAL_CAPABILITY_IDS.explore,
+                arguments: {
+                  question: '  Where is the symbol used?  ',
+                  reason: '  Ground the implementation  ',
+                  scope: { include: ['  src  '], exclude: ['  dist  '] },
+                },
+              },
+              {
+                toolCallId: 'explore-failed',
+                capabilityId: GOAL_CAPABILITY_IDS.explore,
+                arguments: {
+                  question: 'This request fails',
+                  reason: 'Must not be dispatched',
+                },
+              },
+            ],
+          };
+        }
+        return { kind: 'completed', state, output: 'goal turn complete' };
+      },
+      applyToolResults(state, results) {
+        return { ...state, toolExecutions: results.map((item) => item.result) };
+      },
+    };
+    const controller = createChatController({
+      model,
+      host: host((_capabilityId, arguments_) => ({
+        result: arguments_.question === 'This request fails'
+          ? {
+              status: 'failed',
+              outputPreview: 'registration failed',
+              evidence: { source: 'test' },
+            }
+          : {
+              status: 'success',
+              output: { registered: true },
+              outputPreview: 'registered',
+              evidence: { source: 'test' },
+            },
+      } as RuntimeSdkProviderExecution)),
+    });
+
+    const first = await controller.runGoalTurn('first goal tick');
+    expect(first.toolCallCount).toBe(2);
+    expect(first.explorers).toEqual([{
+      question: 'Where is the symbol used?',
+      reason: 'Ground the implementation',
+      scope: { include: ['src'], exclude: ['dist'] },
+    }]);
+
+    const second = await controller.runGoalTurn('second goal tick');
+    expect(second).toEqual({ continued: true, explorers: [], toolCallCount: 0 });
   });
 
   test('streams assistant deltas into one message', async () => {

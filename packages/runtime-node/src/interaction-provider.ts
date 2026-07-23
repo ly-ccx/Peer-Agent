@@ -27,9 +27,6 @@ const INTERACTION_MODE_SCOPES = Object.freeze([
   'chat',
   'plan',
   'goal',
-  'compact',
-  'system',
-  'explorer',
 ] as const);
 
 export const NODE_INTERACTION_CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = Object.freeze([

@@ -16,10 +16,10 @@
  *    触发的 change 不会反向自激；
  * 3. 向 TUI 暴露 runner 状态订阅（供状态面板展示）与控制入口（/goal pause 等）。
  *
- * 与 Desktop 的差异（有意为之）：
- * - explorerRunner / verifierRunner 传 null：TUI 暂无并行子会话执行器。
- *   runner 已有降级逻辑（explorer 请求会 block 并说明原因；无 verifier 时
- *   verification gate 走 evaluateVerificationGate 纯判定）。
+ * Worker 对齐：
+ * - Explorer / Verifier 由 ChatController 暴露的窄接口执行；
+ * - Controller 内部为每个 Worker 创建独立 explorer-mode Runtime Pipeline，
+ *   因此共享 Runner 不接触模型、工具投影或主聊天历史。
  */
 
 // @ts-expect-error -- shared .mjs modules ship without adjacent .d.ts（同 goal-bridge.ts 的处理）
@@ -41,6 +41,7 @@ export interface TuiSharedGoalRunner {
   pause(planId: string, reason?: string): unknown;
   resume(planId: string): Promise<unknown>;
   clear(planId: string): unknown;
+  waitForIdle(planId: string): Promise<unknown>;
   getState(planId: string): unknown;
   /** 订阅 runner 领域事件（started/tickCompleted/blocked/completed/failed/paused 等）。 */
   subscribe(listener: (event: TuiGoalRunnerEvent) => void): () => void;
@@ -49,8 +50,8 @@ export interface TuiSharedGoalRunner {
 export interface TuiGoalTurnRuntime {
   /** 等待当前 intake turn（若仍在跑）结束，再 kick Runner，避免与活跃 turn 冲突。 */
   whenIdle(): Promise<void>;
-  /** Runner 每个 tick 通过它驱动 CLI chat 继续执行；对应 Desktop 的 runGoalTurn。 */
-  sendGoalTurn(content: string): Promise<void>;
+  /** Runner 每个 tick 通过它驱动 CLI chat，并返回该回合登记的 Worker 请求。 */
+  runGoalTurn(content: string): ReturnType<ChatController['runGoalTurn']>;
 }
 
 function buildGoalRunnerMessage(plan: any, turnNumber: number): string {
@@ -74,7 +75,10 @@ function createIdleWaiter(chat: Pick<ChatController, 'getSnapshot' | 'subscribe'
 
 export function createTuiSharedGoalRunner(options: {
   readonly bridge: TuiGoalBridge;
-  readonly chat: Pick<ChatController, 'getSnapshot' | 'subscribe' | 'send'>;
+  readonly chat: Pick<
+    ChatController,
+    'getSnapshot' | 'subscribe' | 'runGoalTurn' | 'runExplorer' | 'runVerifier'
+  >;
   /** 是否订阅 store onChange 并自动 kick（仅真实运行时开启；测试可注入禁用）。 */
   readonly autoStart?: boolean;
   readonly logger?: Pick<Console, 'warn' | 'error'>;
@@ -98,9 +102,7 @@ export function createTuiSharedGoalRunner(options: {
 
   const runtime: TuiGoalTurnRuntime = {
     whenIdle,
-    sendGoalTurn: async (content) => {
-      await chat.send(content);
-    },
+    runGoalTurn: (content) => chat.runGoalTurn(content),
   };
 
   const runner = createGoalRunner({
@@ -109,16 +111,19 @@ export function createTuiSharedGoalRunner(options: {
       async runGoalTurn({ plan, turnNumber }: { plan: any; turnNumber: number }) {
         try {
           // 与 Desktop runGoalTurn 同语义：把 tick 消息作为下一轮 user 输入交给会话。
-          await runtime.sendGoalTurn(buildGoalRunnerMessage(plan, turnNumber));
-          return { continued: true };
+          return await runtime.runGoalTurn(buildGoalRunnerMessage(plan, turnNumber));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           return { failed: true, failureReason: message };
         }
       },
     },
-    explorerRunner: null,
-    verifierRunner: null,
+    explorerRunner: {
+      runExplorer: (input: Parameters<ChatController['runExplorer']>[0]) => chat.runExplorer(input),
+    },
+    verifierRunner: {
+      runVerifier: (input: Parameters<ChatController['runVerifier']>[0]) => chat.runVerifier(input),
+    },
     emitEvent: (event: TuiGoalRunnerEvent) => emit(event),
     logger,
   });
@@ -163,6 +168,7 @@ export function createTuiSharedGoalRunner(options: {
       return runner.resume(planId);
     },
     clear: (planId) => runner.clear(planId),
+    waitForIdle: (planId) => runner.waitForIdle(planId),
     getState: (planId) => runner.getState(planId),
     subscribe(listener) {
       listeners.add(listener);

@@ -1,3 +1,8 @@
+import {
+  SHARED_LOCAL_TOOL_CONTRACTS,
+  canonicalizeLocalCapabilityId,
+} from '@peer-agent/runtime-core';
+
 import { TOOL_CHROME } from './tui-theme.ts';
 
 const DEFAULT_MAX_LENGTH = 1_200;
@@ -13,10 +18,10 @@ export type ToolPresentationStatus =
   | 'running'
   | 'unknown';
 
-const GOAL_STATUS_CAPABILITY_IDS = new Set([
-  'local.goal.create',
-  'local.goal.update',
-  'local.goal.read',
+const GOAL_STATUS_CAPABILITY_IDS = new Set<string>([
+  SHARED_LOCAL_TOOL_CONTRACTS.goalCreatePlan.capabilityId,
+  SHARED_LOCAL_TOOL_CONTRACTS.goalUpdateTask.capabilityId,
+  SHARED_LOCAL_TOOL_CONTRACTS.goalGetPlan.capabilityId,
 ]);
 
 export interface ToolPresentation {
@@ -505,8 +510,13 @@ export function toolActivitySummary(presentation: ToolPresentation, maxLength = 
 }
 
 export function isGoalStatusToolPresentation(presentation: ToolPresentation): boolean {
-  return GOAL_STATUS_CAPABILITY_IDS.has(presentation.capabilityId)
-    || ['goal_create_plan', 'goal_update_task', 'goal_get_plan'].includes(presentation.toolName);
+  return GOAL_STATUS_CAPABILITY_IDS.has(
+    canonicalizeLocalCapabilityId(presentation.capabilityId),
+  ) || new Set<string>([
+    SHARED_LOCAL_TOOL_CONTRACTS.goalCreatePlan.toolName,
+    SHARED_LOCAL_TOOL_CONTRACTS.goalUpdateTask.toolName,
+    SHARED_LOCAL_TOOL_CONTRACTS.goalGetPlan.toolName,
+  ]).has(presentation.toolName);
 }
 
 export function scrambleStatusLabel(label: string, frame: number, revealFrames = 6): string {

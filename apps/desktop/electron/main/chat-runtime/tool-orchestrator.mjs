@@ -1,3 +1,5 @@
+import { collectToolEvidenceRefs } from '@peer-agent/runtime-core';
+
 import { executeProjectedModelTool } from './projected-tool-executor.mjs';
 
 export function createToolContext({
@@ -190,24 +192,7 @@ function addStringRefs(target, value) {
   }
 }
 
-export function collectToolEvidenceRefs({ toolCallId, execution } = {}) {
-  const refs = new Set();
-  if (typeof toolCallId === 'string' && toolCallId.trim()) {
-    refs.add(`tool-result://${toolCallId.trim()}`);
-  }
-
-  const result = execution?.result;
-  const evidence = result?.evidence;
-  addStringRefs(refs, evidence?.artifactRefs);
-
-  const outputPreview = result?.outputPreview;
-  addStringRefs(refs, outputPreview?.artifactRef);
-  addStringRefs(refs, outputPreview?.artifactRefs);
-  addStringRefs(refs, outputPreview?.localToolResultRef?.artifactRef);
-  addStringRefs(refs, outputPreview?.localToolResultRef?.artifactRefs);
-
-  return Array.from(refs);
-}
+export { collectToolEvidenceRefs };
 
 function mergeEvidenceRefs(existing, incoming) {
   const refs = new Set();

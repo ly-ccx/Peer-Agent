@@ -1,12 +1,15 @@
 import { readFileSync } from 'node:fs';
 
+import { SHARED_LOCAL_TOOL_CONTRACTS } from '@peer-agent/runtime-core';
+
 export const TOOL_NAMES = {
-  bash: 'bash',
-  readFile: 'read_file',
-  listFiles: 'list_files',
-  searchFiles: 'search_files',
-  editFile: 'edit_file',
-  writeFile: 'write_file',
+  bash: SHARED_LOCAL_TOOL_CONTRACTS.shellExec.toolName,
+  shellStop: SHARED_LOCAL_TOOL_CONTRACTS.shellStop.toolName,
+  readFile: SHARED_LOCAL_TOOL_CONTRACTS.readFile.toolName,
+  listFiles: SHARED_LOCAL_TOOL_CONTRACTS.listFiles.toolName,
+  searchFiles: SHARED_LOCAL_TOOL_CONTRACTS.searchFiles.toolName,
+  editFile: SHARED_LOCAL_TOOL_CONTRACTS.editFile.toolName,
+  writeFile: SHARED_LOCAL_TOOL_CONTRACTS.writeFile.toolName,
 };
 
 const promptAssetCache = new Map();
@@ -36,8 +39,8 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
     capabilityId: 'legacy.local.shell.exec',
     prompt: () => readPromptAsset('bash.txt'),
     // Explorer 第一版只允许结构化文件读取，不投影通用 shell。
-    availableInModes: ['chat', 'plan', 'goal'],
-    runtime: legacyRuntime('local.shell.exec'),
+    availableInModes: ['chat', 'goal'],
+    runtime: legacyRuntime(SHARED_LOCAL_TOOL_CONTRACTS.shellExec.capabilityId),
     permissionPolicy: {
       kind: 'shell',
       requiresReviewForWrites: true,
@@ -55,11 +58,36 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
     },
   },
   {
+    name: TOOL_NAMES.shellStop,
+    capabilityId: 'legacy.local.shell.stop',
+    prompt: () => 'Stop a running background shell task by task id or tool call id. When neither is provided, stop the active shell task.',
+    availableInModes: ['chat', 'goal'],
+    runtime: legacyRuntime(SHARED_LOCAL_TOOL_CONTRACTS.shellStop.capabilityId),
+    permissionPolicy: {
+      kind: 'shell',
+      requiresReviewForWrites: false,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'Background shell task id.',
+        },
+        toolCallId: {
+          type: 'string',
+          description: 'Tool call id that started the shell task.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: TOOL_NAMES.listFiles,
     capabilityId: 'legacy.local.file.list',
     prompt: () => 'List the immediate entries in a directory. Use this instead of shell commands when you only need directory contents.',
     availableInModes: ['chat', 'plan', 'explorer', 'goal'],
-    runtime: legacyRuntime('local.file.list'),
+    runtime: legacyRuntime(SHARED_LOCAL_TOOL_CONTRACTS.listFiles.capabilityId),
     permissionPolicy: {
       kind: 'file-read',
       requiresReviewForOutsideWorkspace: false,
@@ -80,7 +108,7 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
     capabilityId: 'legacy.local.file.read',
     prompt: () => readPromptAsset('read_file.txt'),
     availableInModes: ['chat', 'plan', 'explorer', 'goal'],
-    runtime: legacyRuntime('local.file.read'),
+    runtime: legacyRuntime(SHARED_LOCAL_TOOL_CONTRACTS.readFile.capabilityId),
     permissionPolicy: {
       kind: 'file-read',
       requiresReviewForOutsideWorkspace: false,
@@ -103,7 +131,7 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
     prompt: () => readPromptAsset('search_files.txt'),
     // 只读搜索：Explorer 子 Agent 可用，用于在 workspace 内按内容定位文件。
     availableInModes: ['chat', 'plan', 'explorer', 'goal'],
-    runtime: legacyRuntime('local.file.search'),
+    runtime: legacyRuntime(SHARED_LOCAL_TOOL_CONTRACTS.searchFiles.capabilityId),
     permissionPolicy: {
       kind: 'file-read',
       requiresReviewForOutsideWorkspace: false,
@@ -137,8 +165,8 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
     name: TOOL_NAMES.editFile,
     capabilityId: 'legacy.local.file.edit',
     prompt: () => readPromptAsset('edit_file.txt'),
-    availableInModes: ['chat', 'plan', 'goal'],
-    runtime: legacyRuntime('local.file.edit'),
+    availableInModes: ['chat', 'goal'],
+    runtime: legacyRuntime(SHARED_LOCAL_TOOL_CONTRACTS.editFile.capabilityId),
     permissionPolicy: {
       kind: 'file-write',
       requiresFreshRead: true,
@@ -172,8 +200,8 @@ export const LEGACY_LOCAL_TOOL_DEFINITIONS = [
     name: TOOL_NAMES.writeFile,
     capabilityId: 'legacy.local.file.write',
     prompt: () => readPromptAsset('write_file.txt'),
-    availableInModes: ['chat', 'plan', 'goal'],
-    runtime: legacyRuntime('local.file.write'),
+    availableInModes: ['chat', 'goal'],
+    runtime: legacyRuntime(SHARED_LOCAL_TOOL_CONTRACTS.writeFile.capabilityId),
     permissionPolicy: {
       kind: 'file-write',
       requiresFreshReadForOverwrite: true,
