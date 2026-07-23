@@ -779,9 +779,17 @@ function Composer({ controller, snapshot, disabled, focused, locale, onValueChan
             shift: event.shift,
             eventType: event.eventType,
           });
-          if (action === 'none' || action === 'newline') return;
+          if (action === 'none') return;
+          // OpenTUI's default bindings only map plain Enter → newline and have
+          // no shift+return binding; control-char fallback also drops \r. Own
+          // both submit and newline so Shift+Enter actually inserts a line and
+          // onContentChange can grow the composer shell (up to 5 rows).
           event.preventDefault();
           event.stopPropagation();
+          if (action === 'newline') {
+            editor.current?.newLine();
+            return;
+          }
           if (action === 'submit') submit();
         }}
       />

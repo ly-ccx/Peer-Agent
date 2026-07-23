@@ -45,7 +45,8 @@ export type ComposerEnterAction = 'submit' | 'newline' | 'suppress' | 'none';
 
 /**
  * Keeps the text area's multiline editing and message submission bindings separate.
- * Only the first unmodified Enter submits; Shift+Enter remains native newline input,
+ * Only the first unmodified Enter submits; Shift+Enter is handled as newline
+ * (caller must insert via Textarea.newLine — OpenTUI has no shift+return binding),
  * while repeat/release events are suppressed so one physical key press acts once.
  */
 export function composerEnterAction(input: ComposerEnterInput): ComposerEnterAction {

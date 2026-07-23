@@ -73,9 +73,14 @@ describe('runtime controls', () => {
     })).toBe('submit');
   });
 
-  test('leaves Shift+Enter to the textarea so it inserts a newline', () => {
+  test('maps Shift+Enter to newline so the composer can insert a line', () => {
     expect(composerEnterAction({
       keyName: 'return',
+      shift: true,
+      eventType: 'press',
+    })).toBe('newline');
+    expect(composerEnterAction({
+      keyName: 'enter',
       shift: true,
       eventType: 'press',
     })).toBe('newline');

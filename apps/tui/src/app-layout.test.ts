@@ -109,6 +109,24 @@ describe('TUI app layout', () => {
     expect(composerSource).toContain('focusedTextColor={COLOR.text}');
   });
 
+  test('owns Shift+Enter by inserting a newline instead of empty-returning to OpenTUI', () => {
+    const composerSource = appSource.slice(
+      appSource.indexOf('function Composer('),
+      appSource.indexOf('function ComposerDock'),
+    );
+    const keyDownSource = composerSource.slice(
+      composerSource.indexOf('onKeyDown='),
+      composerSource.indexOf('/>'),
+    );
+
+    // Regression: OpenTUI has no shift+return binding and drops control-char \r,
+    // so Peer must preventDefault and call newLine() itself for action=newline.
+    expect(keyDownSource).toContain("action === 'newline'");
+    expect(keyDownSource).toContain('event.preventDefault()');
+    expect(keyDownSource).toContain('editor.current?.newLine()');
+    expect(keyDownSource).not.toContain("action === 'none' || action === 'newline'");
+  });
+
   test('lets long chat history shrink and scroll without compressing the composer dock', () => {
     const historySource = appSource.slice(
       appSource.indexOf('function ChatHistory'),
