@@ -226,10 +226,10 @@ export async function rehydrateSystemPromptAfterCompaction({
   }
 }
 
-// 从 provider 真实 usage 快照折算「实际发送的上下文 token」。
-// 取「最后一轮请求」的 input + cacheRead（不含 output），这正是 provider 计入的输入上下文大小。
-// ⚠️ 必须是「最后一轮快照」而非跨轮累加值（kernel.usage 是 lifetime 累加，用于计费 ledger，
-// 不能当上下文大小用）。无可用快照时返回 null，由上层回退到发送切片估算。
+// 从 provider 真实 usage 快照折算「上一请求实测输入」。
+// 取「最后一轮请求」的 input + cacheRead（不含 output）。
+// ⚠️ 必须是「最后一轮快照」而非跨轮累加值（kernel.usage 是 lifetime 累加，用于计费 ledger）。
+// ADR 52：该值仅作 lastActualInputTokens 诊断/校准，不得锁死下一请求占用分子。
 export function contextTokensFromUsageSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return null;
   const input = Number(snapshot.inputTokens) || 0;
@@ -238,24 +238,26 @@ export function contextTokensFromUsageSnapshot(snapshot) {
   return total > 0 ? total : null;
 }
 
-// 口径（ADR 42 数据面；UI 主圆环消费 contextTokens，压缩触发与 tooltip 消费 triggerTokens）：
-// - 实际发送口径（contextTokens）：表示「本回合实际发送给模型的上下文大小」，取值优先级：
-//     1) provider 真实 usage 快照（最后一轮 input + cacheRead）；
-//     2) 回退为对「实际发送切片 displayMessages」的估算；
-//     3) 再回退为对完整会话 messages 的估算（兼容未传 displayMessages 的旧调用）。
-// - 压缩压力口径（compactionSuggested / triggerTokens）：与 preflight 一致，取
-//   max(完整会话本地估算, usage 快照)。有真实 usage 高水位时必须建议压缩，
-//   避免实际输入已满但自动压缩不跑；无 usage 时仍退回本地估算。
-// - 分母口径（contextWindow）：与触发判定同一 normalizedWindow，不变。
+// ADR 52 统一口径：
+// - nextRequestInputTokens：下一次最终请求预计输入 = 投影 messages + tools schema。
+// - displayMessages（可选）：调用方已持有的「下一请求投影」切片；不是上一轮 lastSent。
+// - usageSnapshot：仅回填 lastActualInputTokens 诊断字段，不参与占用分子。
+// - compactionSuggested：基于同一投影预算的 soft 线判断。
+// - contextWindow：分母，与触发判定同一 normalizedWindow。
 export function computeContextInfo({
   messages,
   contextWindow,
   tools = null,
+  // 可选：调用方已持有的「下一请求投影」切片（例如已完成 Layer 1 的 effectiveMessages）。
+  // 注意：这不是上一轮 lastSent / 已发出请求切片。回合结束后的 getContextInfo 应传
+  // 当前 Runtime 会话（含本轮最终 assistant / tool result），让本函数自行投影。
   displayMessages = null,
   usageSnapshot = null,
 }) {
-  // ADR 52：先形成下一次最终请求投影。调用方若已经持有 provider 最终发送切片，
-  // 通过 displayMessages 传入；否则按所有 provider 共享的 Layer 1 规则投影。
+  // ADR 52：先形成下一次最终请求投影。
+  // - 默认：对当前 messages 应用共享 Layer 1 microcompaction。
+  // - 若调用方已持有下一请求投影（如压缩后的 effectiveMessages），经 displayMessages 传入，避免重复微压缩。
+  // usageSnapshot 仅作诊断/校准，不锁死下一请求预算。
   const projectedMessages = Array.isArray(displayMessages)
     ? displayMessages
     : applyMicrocompaction(Array.isArray(messages) ? messages : [], { log: () => {} }).messages;
@@ -430,7 +432,8 @@ export async function runCompactionCheck({
       streamId,
       tools,
       preserveLatestUserTurn,
-      usageTokens: budget.usageTokens,
+      // ADR 52：不把 usage 高水位传给 Layer2 触发；触发只看投影预算。
+      usageTokens: null,
     });
 
     if (compactResult.compacted) {

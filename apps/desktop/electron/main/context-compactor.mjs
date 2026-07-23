@@ -1609,8 +1609,8 @@ export async function compactIfNeeded({
   connectionRecoveryOptions = {},
   tools = null,
   preserveLatestUserTurn = false,
-  // 可选：provider 真实 usage（input + cacheRead）。有值时触发阈值取 max(本地估算, usage)，
-  // 与进度条 / coordinator 预算口径对齐，避免「条已满但本地低估仍不压」。
+  // 可选：provider 真实 usage（input + cacheRead）。ADR 52：仅诊断，不参与 Layer2 触发。
+  // 触发只看下一请求投影估算（messages + tools schema）。
   usageTokens = null,
 }) {
   const microcompactResult = microcompactMessagesForContext(messages);
@@ -1666,10 +1666,11 @@ export async function compactIfNeeded({
 
   // Estimate current tokens（含工具 schema：tools 每次请求都全量发送，必须计入触发口径，
   // 否则会出现「进度条/触发器都没算工具，但 provider 已超窗」）。
-  // 若有 provider 真实 usage 高水位，取 max(本地估算, usage)，与进度条 soft 线对齐。
+  // ADR 52：触发只看下一请求投影估算；usageTokens 参数保留兼容，不抬高触发水位。
   const estimatedLocal = estimateTokensFromMessages(messages) + estimateToolsTokens(tools);
   const usageNum = Number.isFinite(usageTokens) && usageTokens > 0 ? usageTokens : null;
-  const estimated = usageNum != null ? Math.max(estimatedLocal, usageNum) : estimatedLocal;
+  void usageNum; // 诊断兼容字段，不参与 shouldRunCompaction
+  const estimated = estimatedLocal;
 
   if (!shouldRunCompaction({ force, estimatedTokens: estimated, contextWindow, messages })) {
     // Layer 1 可能已压回 soft 线。保留 messages（已微压缩）并标记 microcompacted，

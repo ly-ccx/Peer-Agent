@@ -60,23 +60,19 @@ export async function agentLoopAnthropic({
   let effectiveSystemPrompt = systemPrompt;
   let effectiveSystem = effectiveSystemPrompt;
   let apiMessages = sanitizeApiMessages(messages);
-  // 最后一轮「实际发送切片」（微压缩+清洗后真正发给 provider 的消息）。供 getContextInfo
-  // 实际发送量在 provider usage 缺失时回退估算之用；不参与压缩触发判定。
-  let lastSentMessages = null;
   const loop = createAgentLoopKernel({
     webContents,
     streamId,
     onRound: agentProgress?.onRound,
-    // 触发口径按「当前 Runtime apiMessages + system」判定；实际发送量优先采用 kernel
-    // 传入的 provider 真实 usage 快照（最后一轮 input+cacheRead），
-    // 其次回退到对「最后一轮实际发送切片」的估算，最后回退完整会话估算。
+    // ADR 52：右下角 / done 快照必须投影「下一请求」输入量。
+    // Anthropic 路径 system 与 messages 分离，投影时补上当前 effectiveSystem；
+    // 用当前 Runtime apiMessages（含本轮最终 assistant / tool result），
+    // 由 computeContextInfo 做 Layer 1 微压缩投影；不得回退到上一轮 lastSent 切片。
+    // usageSnapshot 仅作诊断校准，不锁死下一请求预算。
     getContextInfo: ({ usageSnapshot = null } = {}) => computeContextInfo({
       messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
       contextWindow,
       tools,
-      displayMessages: lastSentMessages
-        ? [{ role: 'system', content: effectiveSystem }, ...lastSentMessages]
-        : null,
       usageSnapshot,
     }),
   });
@@ -118,7 +114,7 @@ export async function agentLoopAnthropic({
           continuityContext,
           tools,
           preserveLatestUserTurn: true,
-          // 对齐进度条：上一轮真实 usage 高水位也参与 soft 触发。
+          // usageSnapshot 仅诊断/校准；soft 触发以当前下一请求投影为准。
           usageSnapshot: loop.getLastTurnUsage?.() ?? null,
           rebuildSystemPrompt,
         });
@@ -135,8 +131,9 @@ export async function agentLoopAnthropic({
           loop.clearLastTurnUsage?.();
         }
 
+        // Provider adapter 只接收实际发送切片；完整历史仍由 Desktop Model Adapter 持有。
+        // 下一请求占用由 getContextInfo 基于当前 apiMessages + system 投影，不缓存 lastSent。
         const sendMessages = sanitizeApiMessages(applyMicrocompaction(apiMessages).messages);
-        lastSentMessages = sendMessages;
         const providerResponse = await sendAnthropicMessagesStream({
           baseUrl,
           apiKey,

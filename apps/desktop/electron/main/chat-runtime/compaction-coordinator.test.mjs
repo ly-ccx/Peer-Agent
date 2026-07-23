@@ -427,6 +427,11 @@ describe('microcompaction 前后触发预算不变量', () => {
 });
 
 describe.skip('ADR 42 旧双口径行为（由 ADR 52 统一投影取代）', () => {
+  // 旧双口径（usage 锁分子 / max(估算, usage) 触发）已由 ADR 52 统一投影取代。
+  // 现行行为见下方 "ADR 52 next-request projection"。
+});
+
+describe('ADR 52 next-request projection', () => {
   // 本地构造一段「完整会话量很大」的消息（含多条大 tool 结果），用于对比两种数据口径。
   function buildBigConversation() {
     const big = 'x'.repeat(8000);
@@ -457,60 +462,57 @@ describe.skip('ADR 42 旧双口径行为（由 ADR 52 统一投影取代）', ()
     assert.equal(contextTokensFromUsageSnapshot({ outputTokens: 999 }), null, '仅 output 不算上下文');
   });
 
-  it('显示口径优先采用 provider usage 快照；触发取 max(估算, usage)', () => {
+  it('usage 快照只回填 lastActual，不锁死 nextRequest 分子', () => {
     const full = buildBigConversation();
-    // 真实场景：压缩后实际发送量很小，provider usage 快照体现这一点。
     const usageSnapshot = { inputTokens: 800, outputTokens: 100, cacheWriteTokens: 0, cacheReadTokens: 200 };
     const info = computeContextInfo({ messages: full, contextWindow: 200_000, usageSnapshot });
+    const projected = computeContextInfo({ messages: full, contextWindow: 200_000 });
 
-    // 显示口径 = usage 快照的 input+cacheRead = 1000，反映实际发送上下文（压缩后回落）。
-    assert.equal(info.nextRequestInputTokens, 1000, '有 usage 快照时 contextTokens 必须采用显示口径');
-    // 触发口径 = max(完整会话估算, usage)；此处估算更大。
-    const fullTokens = estimateTokensFromMessages(full);
-    assert.equal(
-      info.triggerTokens,
-      Math.max(fullTokens, 1000),
-      `触发口径(${info.triggerTokens}) 应是 max(完整会话估算 ${fullTokens}, usage 1000)`,
-    );
-    assert.ok(
-      info.nextRequestInputTokens < info.triggerTokens,
-      `显示口径(${info.nextRequestInputTokens}) 应远小于触发口径(${info.triggerTokens})——这正是压缩后能回落的关键`,
-    );
+    // ADR 52：分子始终是下一请求投影（messages + tools schema），usage 仅诊断。
+    assert.equal(info.nextRequestInputTokens, projected.nextRequestInputTokens, 'usage 不得改写 nextRequest 分子');
+    assert.equal(info.lastActualInputTokens, 1000, 'lastActual = input + cacheRead');
+    assert.equal(info.compactionSuggested, projected.compactionSuggested, '触发建议只看投影预算');
   });
 
-  it('无 usage 快照但有 displayMessages 时，显示口径按发送切片估算（小于完整集合）', () => {
+  it('displayMessages 作为下一请求投影切片时，分子采用该切片而不是完整历史', () => {
     const full = buildBigConversation();
-    const sent = applyMicrocompaction(full).messages;
+    // 模拟调用方已持有的下一请求投影（如 Layer1 后的有效发送切片）。
+    const sent = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'q' },
+      { role: 'assistant', content: 'a' },
+    ];
     const info = computeContextInfo({ messages: full, contextWindow: 200_000, displayMessages: sent });
+    const projectedFromSent = computeContextInfo({ messages: sent, contextWindow: 200_000 });
 
     assert.equal(
       info.nextRequestInputTokens,
-      estimateTokensFromMessages(sent),
-      '无 usage 时显示口径 = 对发送切片 displayMessages 的估算',
+      projectedFromSent.nextRequestInputTokens,
+      'displayMessages 是下一请求投影，不是 lastSent 历史缓存',
     );
     assert.ok(
-      info.nextRequestInputTokens < info.triggerTokens,
-      '发送切片显示口径应小于完整会话触发口径',
+      info.nextRequestInputTokens < computeContextInfo({ messages: full, contextWindow: 200_000 }).nextRequestInputTokens,
+      '投影切片应小于完整历史',
     );
   });
 
-  it('压缩触发判定：小显示口径不能压制「估算已越线」的建议', () => {
+  it('压缩触发判定：下一请求投影越 soft 线时建议压缩，usage 小值不能压掉建议', () => {
     const full = buildBigConversation();
-    const fullTokens = estimateTokensFromMessages(full);
+    const projected = computeContextInfo({ messages: full, contextWindow: 200_000 });
     const ratio = COMPACTION_CONFIG.triggerRatio;
-    const windowAbove = Math.floor(fullTokens / ratio) - 1; // 完整集合越过触发线
-    // 即便显示口径很小（usage 快照仅 500），估算已越线时 compactionSuggested 仍必须为 true。
+    const windowAbove = Math.floor(projected.nextRequestInputTokens / ratio) - 1;
     const info = computeContextInfo({
       messages: full,
       contextWindow: windowAbove,
       usageSnapshot: { inputTokens: 500, cacheReadTokens: 0 },
     });
-    assert.equal(info.nextRequestInputTokens, 500, '显示口径采用 usage 快照');
-    assert.equal(info.compactionSuggested, true, '估算已越 soft 线时仍建议压缩，不被小显示口径压制');
+    assert.equal(info.nextRequestInputTokens, projected.nextRequestInputTokens, 'usage 小值不得改写分子');
+    assert.equal(info.compactionSuggested, true, '投影已越 soft 线时仍建议压缩');
+    assert.equal(info.lastActualInputTokens, 500, 'usage 只进 lastActual');
   });
 
-  it('usage 高水位触发：本地估算未超 soft 线但真实 usage 已超时，预算与建议均触发', () => {
-    // 模拟用户截图场景：本地估算偏低，进度条 usage 已接近满窗。
+  it('usage 高水位不得单独抬高 nextRequest 或 soft 触发', () => {
+    // 本地估算偏低、usage 已接近满窗时，仍只按下一请求投影计分子与触发。
     const messages = [
       { role: 'system', content: 'sys' },
       { role: 'user', content: 'short' },
@@ -519,28 +521,25 @@ describe.skip('ADR 42 旧双口径行为（由 ADR 52 统一投影取代）', ()
     const estimated = estimateTokensFromMessages(messages);
     const contextWindow = 100_000;
     const softLimit = Math.floor(contextWindow * COMPACTION_CONFIG.triggerRatio);
-    assert.ok(estimated < softLimit, '本地估算必须低于 soft 线，才能验证 usage 路径');
+    assert.ok(estimated < softLimit, '本地估算必须低于 soft 线，才能验证 usage 不抬高路径');
 
-    // usage 越过 soft 线但未到 hard 线（0.95），应走 soft 触发而非 force/emergency。
     const usageTokens = softLimit + 1;
     const usageSnapshot = { inputTokens: usageTokens, cacheReadTokens: 0 };
 
     const budget = computeContextBudget({ messages, contextWindow, usageSnapshot });
     assert.equal(budget.estimatedTokens, estimated);
     assert.equal(budget.usageTokens, usageTokens);
-    assert.equal(budget.contextTokens, usageTokens, '触发量取 max(估算, usage)');
-    assert.equal(budget.overSoftLimit, true);
-    assert.equal(budget.shouldCompact, true);
-    assert.equal(budget.force, false, '仅 soft 越线不应 force');
-    assert.equal(budget.emergency, false, '仅 soft 越线不应 emergency');
+    assert.equal(budget.contextTokens, estimated, '预算分子只看投影估算，不取 usage 高水位');
+    assert.equal(budget.overSoftLimit, false);
+    assert.equal(budget.shouldCompact, false);
 
     const info = computeContextInfo({ messages, contextWindow, usageSnapshot });
-    assert.equal(info.nextRequestInputTokens, usageTokens, '进度条显示 usage');
-    assert.equal(info.triggerTokens, usageTokens, '触发与显示同源（均为 usage 高水位）');
-    assert.equal(info.compactionSuggested, true, 'usage 过 soft 线时必须建议压缩');
+    assert.equal(info.nextRequestInputTokens, estimated, '进度条分子 = 投影估算');
+    assert.equal(info.lastActualInputTokens, usageTokens, 'usage 仅诊断');
+    assert.equal(info.compactionSuggested, false, 'usage 高水位不得单独建议压缩');
   });
 
-  it('runCompactionCheck 在 usage 高水位时也会走 threshold 路径（即便估算未超）', async () => {
+  it('runCompactionCheck 在 usage 高水位但投影未超 soft 时不触发压缩', async () => {
     const messages = [
       { role: 'system', content: 'sys' },
       { role: 'user', content: 'u'.repeat(200) },
@@ -571,16 +570,65 @@ describe.skip('ADR 42 旧双口径行为（由 ADR 52 统一投影取代）', ()
         },
       },
     });
-
-    // 无 providerConfig 时走结构化/fallback 路径，但必须真正 compacted。
-    assert.equal(result.compacted, true, 'usage 过 soft 线必须触发压缩');
-    assert.ok(
+    assert.equal(result.compacted, false, '投影未越 soft 线时不得因 usage 触发压缩');
+    assert.equal(
       events.some((e) => e.channel === 'chat:compaction' && e.payload.stage === 'start'),
-      '应发出压缩 start 横幅',
+      false,
+      '不应发出压缩 start 横幅',
+    );
+  });
+
+  it('回合结束后投影包含本轮新增 tool result 与 assistant 内容', () => {
+    // 回归：getContextInfo 若仍用 lastSent（上一轮已发送切片），会漏掉本轮 tool/assistant。
+    const beforeTurn = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'please inspect file' },
+    ];
+    const afterTurn = [
+      ...beforeTurn,
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'bash', arguments: '{}' } }],
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: 'tool-result-payload-' + 'z'.repeat(20_000) },
+      { role: 'assistant', content: 'final answer after tools' },
+    ];
+    const tools = [
+      {
+        type: 'function',
+        function: {
+          name: 'bash',
+          description: 'run shell',
+          parameters: { type: 'object', properties: { command: { type: 'string' } } },
+        },
+      },
+    ];
+
+    const before = computeContextInfo({ messages: beforeTurn, contextWindow: 500_000, tools });
+    const after = computeContextInfo({ messages: afterTurn, contextWindow: 500_000, tools });
+    const lastSentOnly = computeContextInfo({
+      messages: afterTurn,
+      contextWindow: 500_000,
+      tools,
+      displayMessages: beforeTurn,
+    });
+
+    assert.ok(
+      after.nextRequestInputTokens > before.nextRequestInputTokens + 4_000,
+      `本轮 tool/assistant 必须抬高 nextRequest（before=${before.nextRequestInputTokens}, after=${after.nextRequestInputTokens}）`,
+    );
+    assert.equal(
+      lastSentOnly.nextRequestInputTokens,
+      before.nextRequestInputTokens,
+      '若错误传入 lastSent 作为 displayMessages，会复现 10% 低估路径',
+    );
+    assert.ok(
+      after.nextRequestInputTokens > lastSentOnly.nextRequestInputTokens,
+      '当前 apiMessages 投影必须高于 lastSent 切片，堵住 47.5k/10% 低估',
     );
   });
 });
-
 
 describe('静默 microcompaction 与占用显示口径对齐', () => {
   function buildMicrocompactableConversation() {
