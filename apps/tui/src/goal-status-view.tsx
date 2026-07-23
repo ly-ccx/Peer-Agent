@@ -1,5 +1,7 @@
 import { COLOR } from './tui-theme.ts';
-import { goalTaskGlyph, type GoalStatusViewModel } from './goal-status-model.ts';
+import { goalStatusFromSharedPlan, goalTaskGlyph, type GoalStatusViewModel } from './goal-status-model.ts';
+import type { TuiGoalPlan } from './goal-plan-history.ts';
+import { selectionWindow } from './tui-experience.ts';
 
 function statusColor(status: string): string {
   if (status === 'completed') return COLOR.success;
@@ -8,13 +10,23 @@ function statusColor(status: string): string {
   return COLOR.muted;
 }
 
-export function GoalStatusPanel({ view, width }: {
+export function GoalStatusPanel({
+  view,
+  width,
+  missionPosition = 1,
+  totalPlans = 1,
+  onOpenHistory,
+}: {
   readonly view: GoalStatusViewModel;
   readonly width: number;
+  readonly missionPosition?: number;
+  readonly totalPlans?: number;
+  readonly onOpenHistory?: () => void;
 }) {
   const progressWidth = Math.max(8, width - 6);
   const progressDone = Math.round(progressWidth * view.percent / 100);
   const progressTrack = `${'━'.repeat(progressDone)}${'─'.repeat(progressWidth - progressDone)}`;
+  const missionOrdinal = String(missionPosition).padStart(2, '0');
 
   return (
     <box
@@ -32,9 +44,16 @@ export function GoalStatusPanel({ view, width }: {
       gap={1}
     >
       <box flexDirection="row" justifyContent="space-between">
-        <text fg={COLOR.accent}><strong>MISSION / 01</strong></text>
+        <text fg={COLOR.accent} onMouseDown={totalPlans > 1 ? onOpenHistory : undefined}>
+          <strong>MISSION / {missionOrdinal} OF {totalPlans}</strong>
+        </text>
         <text fg={statusColor(view.status)}>● {view.status.toUpperCase()}</text>
       </box>
+      {totalPlans > 1 ? (
+        <text fg={COLOR.muted} wrapMode="none" onMouseDown={onOpenHistory}>
+          {totalPlans} GOALS · /goals switch
+        </text>
+      ) : null}
       <text fg={COLOR.text} wrapMode="word"><strong>{view.title}</strong></text>
       <box flexDirection="column">
         <box flexDirection="row" justifyContent="space-between">
@@ -71,11 +90,77 @@ export function GoalStatusPanel({ view, width }: {
   );
 }
 
-export function GoalCompactSummary({ view }: { readonly view: GoalStatusViewModel }) {
+export function GoalCompactSummary({
+  view,
+  missionPosition = 1,
+  totalPlans = 1,
+  onOpenHistory,
+}: {
+  readonly view: GoalStatusViewModel;
+  readonly missionPosition?: number;
+  readonly totalPlans?: number;
+  readonly onOpenHistory?: () => void;
+}) {
   const current = view.currentTask ? ` · ${goalTaskGlyph(view.currentTask.status)} ${view.currentTask.title}` : '';
   return (
-    <text fg={statusColor(view.status)} wrapMode="none">
-      Goal {view.completed}/{view.total} · {view.percent}% · {view.status}{current}
+    <text fg={statusColor(view.status)} wrapMode="none" onMouseDown={totalPlans > 1 ? onOpenHistory : undefined}>
+      Goal {missionPosition}/{totalPlans} · tasks {view.completed}/{view.total} · {view.percent}% · {view.status}{current}
     </text>
+  );
+}
+
+export function GoalPlanPicker({
+  plans,
+  selectedIndex,
+  currentPlanId,
+  query,
+  maxVisible,
+  onSelect,
+}: {
+  readonly plans: readonly TuiGoalPlan[];
+  readonly selectedIndex: number;
+  readonly currentPlanId: string | null;
+  readonly query: string;
+  readonly maxVisible: number;
+  readonly onSelect: (planId: string) => void;
+}) {
+  const visiblePlans = selectionWindow(plans, selectedIndex, maxVisible);
+  return (
+    <box
+      flexDirection="column"
+      flexShrink={0}
+      border={['top']}
+      borderColor={COLOR.border}
+      backgroundColor={COLOR.background}
+      paddingTop={1}
+      paddingBottom={1}
+    >
+      <text fg={COLOR.accent} wrapMode="none"><strong>Goal history</strong> · {plans.length} formal goals</text>
+      <text fg={COLOR.muted} wrapMode="none">Search: {query || '…'}</text>
+      {visiblePlans.length === 0 ? (
+        <text fg={COLOR.muted}>No matching formal goals.</text>
+      ) : visiblePlans.map(({ item: plan, index }) => {
+        const selected = index === selectedIndex;
+        const view = goalStatusFromSharedPlan(plan);
+        const current = plan.planId === currentPlanId;
+        return (
+          <box
+            key={plan.planId}
+            flexDirection="row"
+            height={1}
+            justifyContent="space-between"
+            onMouseDown={() => onSelect(plan.planId)}
+          >
+            <text fg={selected ? COLOR.accent : COLOR.textSoft} wrapMode="none" flexGrow={1} minWidth={0}>
+              {selected ? '› ' : '  '}{index + 1}. {view?.title ?? 'Goal'}{current ? ' ✓' : ''}
+            </text>
+            <text fg={statusColor(view?.status ?? 'unknown')} wrapMode="none" flexShrink={0} marginLeft={2}>
+              {view?.status ?? 'unknown'} · {view?.completed ?? 0}/{view?.total ?? 0}
+            </text>
+          </box>
+        );
+      })}
+      <text fg={COLOR.muted} wrapMode="none">type search · ↑↓ choose · enter view · esc close</text>
+    </box>
   );
 }

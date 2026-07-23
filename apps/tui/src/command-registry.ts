@@ -15,6 +15,7 @@ export type TuiCommandAction =
   | { readonly type: 'compact-context' }
   | { readonly type: 'history-navigation'; readonly direction: 'earlier' | 'later' | 'latest' }
   | { readonly type: 'open-resume-picker' }
+  | { readonly type: 'open-goal-picker' }
   | { readonly type: 'goal-control'; readonly control: 'pause' | 'resume' | 'cancel' }
   | { readonly type: 'quit' };
 
@@ -62,6 +63,7 @@ export const TUI_COMMAND_REGISTRY: readonly TuiCommandDefinition[] = Object.free
   { id: 'history-later', label: 'Later history', description: 'Show the next bounded page; alias: /history later', keywords: ['newer', 'next', 'transcript'], action: { type: 'history-navigation', direction: 'later' } },
   { id: 'history-latest', label: 'Latest history', description: 'Return to the default latest window; alias: /history latest', keywords: ['newest', 'bottom', 'transcript'], action: { type: 'history-navigation', direction: 'latest' } },
   { id: 'resume', label: 'Resume session', description: 'Restore and continue a saved conversation', keywords: ['session', 'conversation', 'history', 'restore'], action: { type: 'open-resume-picker' } },
+  { id: 'goals', label: 'Goal history', description: 'Switch between formal goals in this conversation', keywords: ['goal', 'mission', 'history', 'switch'], action: { type: 'open-goal-picker' } },
   { id: 'goal-pause', label: 'Pause goal', description: 'Pause the active goal after the current safe boundary', keywords: ['hold'], action: { type: 'goal-control', control: 'pause' }, visible: GOAL_RUNNING },
   { id: 'goal-resume', label: 'Resume goal', description: 'Resume the paused goal', keywords: ['continue'], action: { type: 'goal-control', control: 'resume' }, visible: GOAL_PAUSED },
   { id: 'goal-cancel', label: 'Cancel goal', description: 'Cancel the active goal', keywords: ['stop', 'abort'], action: { type: 'goal-control', control: 'cancel' }, visible: GOAL_ACTIVE },

@@ -49,6 +49,10 @@ describe('TUI app layout', () => {
     );
 
     expect(goalRefreshEffect).toContain('bridge.subscribeChanges');
+    expect(goalRefreshEffect).toContain('bridge.listPlanDetailsByConversation(conversationId)');
+    expect(goalRefreshEffect).toContain('displayableGoalPlans');
+    expect(goalRefreshEffect).not.toContain('.reverse()');
+    expect(goalRefreshEffect).not.toContain('plans.at(-1)');
     expect(goalRefreshEffect).toContain('event.conversationId === conversationId');
     expect(goalRefreshEffect).not.toContain('setInterval');
   });
@@ -636,9 +640,11 @@ describe('TUI app layout', () => {
     expect(splitWorkspaceIndex).toBeGreaterThan(topbarIndex);
     expect(appSource).toContain('flexDirection="row"\n        width="100%"\n        flexGrow={1}\n        minHeight={0}');
     expect(appSource).toContain("goalLayout.mode === 'side-panel'");
-    expect(appSource).toContain('<GoalStatusPanel view={goalView} width={goalLayout.panelWidth} />');
+    expect(appSource).toContain('totalPlans={sharedGoalPlans.length}');
+    expect(appSource).toContain('onOpenHistory={openGoalHistory}');
     expect(appSource).toContain("goalLayout.mode === 'compact-summary'");
-    expect(appSource).toContain('<GoalCompactSummary view={goalView} />');
+    expect(appSource).toContain('<GoalCompactSummary');
+    expect(appSource).toContain('missionPosition={missionPosition}');
     expect(goalStatusViewSource).toContain('backgroundColor={COLOR.background}');
     expect(goalStatusViewSource).not.toContain('backgroundColor={COLOR.panel}');
     expect(goalStatusViewSource).toContain("border={['left']}");
@@ -669,11 +675,20 @@ describe('TUI app layout', () => {
   });
 
   test('presents goals as a mission rail with progress and current-work emphasis', () => {
-    expect(goalStatusViewSource).toContain('<strong>MISSION / 01</strong>');
+    expect(goalStatusViewSource).toContain('MISSION / {missionOrdinal} OF {totalPlans}');
+    expect(goalStatusViewSource).toContain('/goals switch');
     expect(goalStatusViewSource).toContain("const progressTrack = `${'━'.repeat(progressDone)}${'─'.repeat(progressWidth - progressDone)}`;");
     expect(goalStatusViewSource).toContain('NOW WORKING');
     expect(goalStatusViewSource).toContain('border={[\'left\']}');
     expect(goalStatusViewSource).not.toContain('borderStyle="rounded"');
+  });
+
+  test('opens a searchable formal Goal history picker and switches the displayed mission', () => {
+    expect(appSource).toContain("experience.surface.picker === 'goal'");
+    expect(appSource).toContain('filterGoalPlanHistory(sharedGoalPlans, goalSurface.query)');
+    expect(appSource).toContain('<GoalPlanPicker');
+    expect(appSource).toContain('moveTuiSurfaceSelection(current.surface, direction, goalPickerPlans.length)');
+    expect(appSource).toContain('selectGoalFromHistory(plan.planId)');
   });
 
 });

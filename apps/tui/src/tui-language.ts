@@ -195,6 +195,8 @@ export type TuiMessageKey =
   | 'command.history-latest.description'
   | 'command.resume.label'
   | 'command.resume.description'
+  | 'command.goals.label'
+  | 'command.goals.description'
   | 'command.goal-pause.label'
   | 'command.goal-pause.description'
   | 'command.goal-resume.label'
@@ -267,6 +269,8 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'command.history-latest.description': '返回默认最新窗口；别名：/history latest',
     'command.resume.label': '恢复会话',
     'command.resume.description': '恢复并继续已保存的会话',
+    'command.goals.label': '目标历史',
+    'command.goals.description': '切换本会话中的正式目标',
     'command.goal-pause.label': '暂停目标',
     'command.goal-pause.description': '在当前安全边界后暂停活动目标',
     'command.goal-resume.label': '继续目标',
@@ -338,6 +342,8 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'command.history-latest.description': 'Return to the default latest window; alias: /history latest',
     'command.resume.label': 'Resume session',
     'command.resume.description': 'Restore and continue a saved conversation',
+    'command.goals.label': 'Goal history',
+    'command.goals.description': 'Switch between formal goals in this conversation',
     'command.goal-pause.label': 'Pause goal',
     'command.goal-pause.description': 'Pause the active goal after the current safe boundary',
     'command.goal-resume.label': 'Resume goal',

@@ -27,6 +27,7 @@ describe('TUI command registry', () => {
       'history-later',
       'history-latest',
       'resume',
+      'goals',
       'help',
       'quit',
     ]);
@@ -53,6 +54,11 @@ describe('TUI command registry', () => {
     expect(resolveTuiCommandInput('/history later', idle)?.id).toBe('history-later');
     expect(resolveTuiCommandInput('/history latest', idle)?.id).toBe('history-latest');
     expect(resolveTuiCommandInput('/history unknown', idle)).toBeNull();
+  });
+
+  test('exposes a Goal history switcher without treating history as parallel active work', () => {
+    expect(resolveTuiCommandInput('/goals', idle)?.action).toEqual({ type: 'open-goal-picker' });
+    expect(filterTuiCommandRegistry('goal history', idle).map((command) => command.id)).toContain('goals');
   });
 
   test('builds help content from the live command registry', () => {
@@ -83,6 +89,9 @@ describe('TUI command localization', () => {
     const historyEarlier = commands.find((command) => command.id === 'history-earlier');
     expect(historyEarlier?.label).toBe('更早历史');
     expect(historyEarlier?.description).toContain('/history earlier');
+    const goals = commands.find((command) => command.id === 'goals');
+    expect(goals?.label).toBe('目标历史');
+    expect(goals?.description).toBe('切换本会话中的正式目标');
   });
 
   test('filters by localized Chinese text', () => {

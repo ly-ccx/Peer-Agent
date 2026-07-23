@@ -91,6 +91,7 @@ export interface TuiGoalBridge {
     readonly toolCallId?: string;
   }): Promise<RuntimeSdkProviderExecution>;
   listPlansByConversation(conversationId: string | null | undefined): readonly any[];
+  listPlanDetailsByConversation(conversationId: string | null | undefined): readonly any[];
   getPlan(planId: string): any | null;
   subscribeChanges(listener: (event: {
     readonly conversationId?: string | null;
@@ -287,6 +288,20 @@ export function createTuiGoalBridge(options?: {
     }
   }
 
+  function listPlanDetailsByConversation(conversationId: string | null | undefined): readonly any[] {
+    if (!conversationId) return [];
+    try {
+      if (typeof store.listPlanDetailsByConversation === 'function') {
+        return store.listPlanDetailsByConversation(conversationId) ?? [];
+      }
+      return listPlansByConversation(conversationId)
+        .map((meta) => getPlan(meta?.planId) ?? meta)
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
   function evaluateIntake(options: {
     readonly mode: TuiMode | string | null | undefined;
     readonly conversationId?: string | null;
@@ -441,6 +456,7 @@ export function createTuiGoalBridge(options?: {
     evaluateIntake,
     execute,
     listPlansByConversation,
+    listPlanDetailsByConversation,
     getPlan,
     subscribeChanges: (listener) => store.subscribeChanges(listener),
   };

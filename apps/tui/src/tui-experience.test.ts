@@ -28,7 +28,7 @@ describe('TUI experience model', () => {
   test('derives commands from the shared registry and keeps Explorer internal', () => {
     expect(filterTuiCommands('').map((command) => command.id)).toEqual([
       'model', 'mode', 'permissions', 'language', 'theme', 'skill', 'mcp', 'clear', 'compact',
-      'history-earlier', 'history-later', 'history-latest', 'resume', 'help', 'quit',
+      'history-earlier', 'history-later', 'history-latest', 'resume', 'goals', 'help', 'quit',
     ]);
     expect(TUI_COMMANDS.map((command) => command.id)).not.toContain('mode-explorer');
     expect(filterTuiCommands('provider').map((command) => command.id)).toEqual(['model']);
@@ -128,6 +128,8 @@ describe('TUI experience model', () => {
     expect(applyTuiCommand(state, mode).surface).toMatchObject({ type: 'picker', picker: 'mode' });
     const resume = TUI_COMMANDS.find((item) => item.id === 'resume')!;
     expect(applyTuiCommand(state, resume).surface).toMatchObject({ type: 'picker', picker: 'resume' });
+    const goals = TUI_COMMANDS.find((item) => item.id === 'goals')!;
+    expect(applyTuiCommand(state, goals).surface).toMatchObject({ type: 'picker', picker: 'goal' });
     const help = TUI_COMMANDS.find((item) => item.id === 'help')!;
     expect(applyTuiCommand(state, help).surface).toMatchObject({ type: 'picker', picker: 'help' });
     const language = TUI_COMMANDS.find((item) => item.id === 'language')!;

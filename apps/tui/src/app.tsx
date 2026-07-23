@@ -67,10 +67,17 @@ import {
 } from './plan-mode.ts';
 import { createTuiSharedGoalRunner } from './goal-runner-adapter.ts';
 import {
+  displayableGoalPlans,
+  filterGoalPlanHistory,
+  selectActiveGoalPlanId,
+  selectPreferredGoalPlanId,
+  type TuiGoalPlan,
+} from './goal-plan-history.ts';
+import {
   goalStatusFromSharedPlan,
   goalStatusLayout,
 } from './goal-status-model.ts';
-import { GoalCompactSummary, GoalStatusPanel } from './goal-status-view.tsx';
+import { GoalCompactSummary, GoalPlanPicker, GoalStatusPanel } from './goal-status-view.tsx';
 import {
   buildModelPickerView,
   cycleModelPickerGroup,
@@ -124,6 +131,7 @@ import {
   escapeFooter,
   filterTuiCommands,
   openCommandPanel,
+  openPicker,
   selectionWindow,
   showUserInput,
   slashCommandWindow,
@@ -1033,8 +1041,22 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       return null;
     }
   }, [host, controller]);
-  // Shared Desktop goal-plan store snapshot for this conversation (if any).
-  const [sharedGoalPlan, setSharedGoalPlan] = useState<any | null>(null);
+  // Shared Desktop goal-plan store snapshots for this conversation.
+  // Keep formal Goal history as a list; the selected plan only controls presentation.
+  const [sharedGoalPlans, setSharedGoalPlans] = useState<readonly TuiGoalPlan[]>([]);
+  const [selectedGoalPlanId, setSelectedGoalPlanId] = useState<string | null>(null);
+  const sharedGoalPlan = useMemo(
+    () => sharedGoalPlans.find((plan) => plan.planId === selectedGoalPlanId) ?? null,
+    [sharedGoalPlans, selectedGoalPlanId],
+  );
+  const activeGoalPlanId = useMemo(
+    () => selectActiveGoalPlanId(sharedGoalPlans),
+    [sharedGoalPlans],
+  );
+  const activeSharedGoalPlan = useMemo(
+    () => sharedGoalPlans.find((plan) => plan.planId === activeGoalPlanId) ?? null,
+    [activeGoalPlanId, sharedGoalPlans],
+  );
   // Runner 领域事件触发的轻量重拉信号（started/tickCompleted/blocked/... 时 +1）。
   const [goalEventTick, setGoalEventTick] = useState(0);
   const [approval, setApproval] = useState<PendingApproval | null>(null);
@@ -1146,12 +1168,19 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const mcpSurface = experience.surface.type === 'picker' && experience.surface.picker === 'mcp'
     ? experience.surface
     : null;
+  const goalSurface = experience.surface.type === 'picker' && experience.surface.picker === 'goal'
+    ? experience.surface
+    : null;
   const slashSurface = experience.surface.type === 'slash-suggestions'
     ? experience.surface
     : null;
-  const goalStatus = sharedGoalPlan?.runner?.status === 'paused'
+  const activeGoalRunnerStatus = activeSharedGoalPlan?.runner?.status;
+  const goalStatus = activeGoalRunnerStatus === 'paused'
     ? 'paused'
-    : sharedGoalPlan && ['accepted', 'executing'].includes(String(sharedGoalPlan?.status ?? ''))
+    : activeSharedGoalPlan && (
+      activeGoalRunnerStatus === 'running'
+      || ['accepted', 'executing'].includes(String(activeSharedGoalPlan.status ?? ''))
+    )
       ? 'running'
       : 'none';
   const commandItems = commandSurface
@@ -1165,6 +1194,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     : [];
   const mcpItems = mcpSurface
     ? mcpServers.filter((server) => `${server.displayName} ${server.id}`.toLowerCase().includes(mcpSurface.query.toLowerCase()))
+    : [];
+  const goalPickerPlans = goalSurface
+    ? filterGoalPlanHistory(sharedGoalPlans, goalSurface.query)
     : [];
   const modeSurface = experience.surface.type === 'picker' && experience.surface.picker === 'mode'
     ? experience.surface
@@ -1263,6 +1295,10 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const slashSelection = slashSurface?.selectedIndex ?? 0;
   const modeSelection = modeSurface?.selectedIndex ?? 0;
   const modelPickerSelection = modelSurface?.selectedIndex ?? 0;
+  const goalPickerSelection = Math.min(
+    goalSurface?.selectedIndex ?? 0,
+    Math.max(0, goalPickerPlans.length - 1),
+  );
   const permissionSelection = permissionSurface?.selectedIndex ?? permissionPolicyIndex(accessLevel);
   const languageSelection = languageSurface?.selectedIndex ?? languageIndex(locale);
   const themeSelection = themeSurface?.selectedIndex
@@ -1299,6 +1335,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const layout = responsiveLayout(terminal.width, terminal.height);
   const topbarDividerWidth = composerContentWidth(terminal.width, layout.outerPadding);
   const goalView = goalStatusFromSharedPlan(sharedGoalPlan);
+  const selectedGoalIndex = Math.max(
+    0,
+    sharedGoalPlans.findIndex((plan) => plan.planId === selectedGoalPlanId),
+  );
+  const missionPosition = selectedGoalIndex + 1;
   const goalLayout = goalStatusLayout(terminal.width);
   const pickerLayout = responsivePickerLayout(
     terminal.height,
@@ -1386,27 +1427,23 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     setApproval(next);
   }), [host]);
   // Shared store events keep CLI and Desktop panels on the same persisted Goal facts.
-  // 用 getPlan 取全量 plan（含 tasks + progress overlay），
-  // 修此前 listPlansByConversation 只返回 index meta 导致的「0/0」。
+  // Full details are required before applying Desktop's display rules because
+  // index metadata does not contain activation.kind (used to hide intake plans).
   useEffect(() => {
     const bridge = host.goalBridge;
     if (!bridge) return undefined;
     const conversationId = persistence.getConversationId();
     if (!conversationId) {
-      setSharedGoalPlan(null);
+      setSharedGoalPlans([]);
+      setSelectedGoalPlanId(null);
       return undefined;
     }
     const refresh = () => {
-      const plans = bridge.listPlansByConversation(conversationId);
-      const activeMeta = [...plans]
-        .reverse()
-        .find((plan) => !['cancelled', 'completed', 'failed'].includes(String(plan?.status ?? '')))
-        ?? plans.at(-1)
-        ?? null;
-      const full = activeMeta && typeof bridge.getPlan === 'function'
-        ? bridge.getPlan(activeMeta.planId)
-        : activeMeta;
-      setSharedGoalPlan(full ?? null);
+      const plans = displayableGoalPlans(
+        bridge.listPlanDetailsByConversation(conversationId),
+      );
+      setSharedGoalPlans(plans);
+      setSelectedGoalPlanId((current) => selectPreferredGoalPlanId(plans, current));
     };
     refresh();
     return bridge.subscribeChanges((event) => {
@@ -1486,9 +1523,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       return `History page · ${nextProjection.window.hiddenBefore} earlier · ${nextProjection.window.hiddenAfter} newer messages hidden`;
     },
     controlGoal: (control) => {
-      if (!sharedGoalPlan || !goalRunner) return 'No active goal';
-      const planId = sharedGoalPlan.planId;
-      const runnerStatus = sharedGoalPlan.runner?.status ?? sharedGoalPlan.status;
+      if (!activeSharedGoalPlan || !goalRunner) return 'No active goal';
+      const planId = activeSharedGoalPlan.planId;
+      const runnerStatus = activeSharedGoalPlan.runner?.status ?? activeSharedGoalPlan.status;
       if (control === 'pause' && runnerStatus === 'running') {
         goalRunner.pause(planId);
         return 'Goal paused';
@@ -1519,6 +1556,16 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     return true;
   };
 
+  const openGoalHistory = () => {
+    setExperience((current) => openPicker(current, 'goal'));
+  };
+
+  const selectGoalFromHistory = (planId: string) => {
+    setSelectedGoalPlanId(planId);
+    setExperience((current) => escapeFooter(current));
+    queueMicrotask(() => composerRef.current?.focus());
+  };
+
   useKeyboard((key) => {
     const keyMeta = Boolean((key as { meta?: boolean; super?: boolean }).meta || (key as { super?: boolean }).super);
     const liveSelection = renderer.getSelection()?.getSelectedText?.() ?? selectedTextRef.current;
@@ -1540,10 +1587,10 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     }
     if (control === 'interrupt') {
       controller.cancel();
-      if (sharedGoalPlan && goalRunner) {
-        const runnerStatus = sharedGoalPlan.runner?.status ?? sharedGoalPlan.status;
+      if (activeSharedGoalPlan && goalRunner) {
+        const runnerStatus = activeSharedGoalPlan.runner?.status ?? activeSharedGoalPlan.status;
         if (['accepted', 'executing', 'running', 'paused'].includes(String(runnerStatus))) {
-          goalRunner.clear(sharedGoalPlan.planId);
+          goalRunner.clear(activeSharedGoalPlan.planId);
         }
       }
       queueMicrotask(() => composerRef.current?.focus());
@@ -1923,6 +1970,54 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         return;
       }
     }
+    if (goalSurface) {
+      if (key.name === 'escape') {
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+        return;
+      }
+      if (key.name === 'up' || key.name === 'down') {
+        const direction = key.name === 'up' ? -1 : 1;
+        setExperience((current) => current.surface.type === 'picker' && current.surface.picker === 'goal'
+          ? {
+              ...current,
+              surface: moveTuiSurfaceSelection(current.surface, direction, goalPickerPlans.length),
+            }
+          : current);
+        return;
+      }
+      if (key.name === 'backspace') {
+        setExperience((current) => current.surface.type === 'picker' && current.surface.picker === 'goal'
+          ? {
+              ...current,
+              surface: {
+                ...current.surface,
+                query: current.surface.query.slice(0, -1),
+                selectedIndex: 0,
+              },
+            }
+          : current);
+        return;
+      }
+      if ((key.name === 'return' || key.name === 'enter') && goalPickerPlans.length > 0) {
+        const plan = goalPickerPlans[goalPickerSelection] ?? goalPickerPlans[0];
+        if (plan) selectGoalFromHistory(plan.planId);
+        return;
+      }
+      if (!key.ctrl && !keyMeta && key.sequence.length === 1 && key.sequence >= ' ') {
+        setExperience((current) => current.surface.type === 'picker' && current.surface.picker === 'goal'
+          ? {
+              ...current,
+              surface: {
+                ...current.surface,
+                query: `${current.surface.query}${key.sequence}`,
+                selectedIndex: 0,
+              },
+            }
+          : current);
+      }
+      return;
+    }
     if (skillSurface || mcpSurface) {
       const items = skillSurface ? skillItems : mcpItems;
       const surface = (skillSurface ?? mcpSurface)!;
@@ -2015,9 +2110,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       }
       return;
     }
-    if (sharedGoalPlan && goalRunner && !approval && snapshot.plan?.status !== 'awaiting_approval') {
-      const planId = sharedGoalPlan.planId;
-      const runnerStatus = sharedGoalPlan.runner?.status ?? sharedGoalPlan.status;
+    if (activeSharedGoalPlan && goalRunner && !approval && snapshot.plan?.status !== 'awaiting_approval') {
+      const planId = activeSharedGoalPlan.planId;
+      const runnerStatus = activeSharedGoalPlan.runner?.status ?? activeSharedGoalPlan.status;
       if (key.name === 'p' && runnerStatus === 'running') {
         goalRunner.pause(planId);
         return;
@@ -2245,7 +2340,12 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
 
       {goalView && goalLayout.mode === 'compact-summary' ? (
         <box flexShrink={0} marginLeft={layout.outerPadding} marginRight={layout.outerPadding}>
-          <GoalCompactSummary view={goalView} />
+          <GoalCompactSummary
+            view={goalView}
+            missionPosition={missionPosition}
+            totalPlans={sharedGoalPlans.length}
+            onOpenHistory={openGoalHistory}
+          />
         </box>
       ) : null}
 
@@ -2370,6 +2470,17 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           selectedIndex={resumeSurface.selectedIndex}
           maxVisible={Math.min(8, pickerLayout.commandMaxVisible)}
           onResume={handleResumeConversationSummary}
+        />
+      ) : null}
+
+      {goalSurface ? (
+        <GoalPlanPicker
+          plans={goalPickerPlans}
+          selectedIndex={goalPickerSelection}
+          currentPlanId={selectedGoalPlanId}
+          query={goalSurface.query}
+          maxVisible={Math.min(8, pickerLayout.commandMaxVisible)}
+          onSelect={selectGoalFromHistory}
         />
       ) : null}
 
@@ -2636,7 +2747,13 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       )}
         </box>
         {!isWelcome && goalView && goalLayout.mode === 'side-panel' ? (
-          <GoalStatusPanel view={goalView} width={goalLayout.panelWidth} />
+          <GoalStatusPanel
+            view={goalView}
+            width={goalLayout.panelWidth}
+            missionPosition={missionPosition}
+            totalPlans={sharedGoalPlans.length}
+            onOpenHistory={openGoalHistory}
+          />
         ) : null}
       </box>
     </box>
