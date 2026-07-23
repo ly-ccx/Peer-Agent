@@ -3,6 +3,7 @@ import { testRender } from '@opentui/react/test-utils';
 import type { TestRendererSetup } from '@opentui/core/testing';
 
 import { MarkdownView } from './markdown-view.tsx';
+import { COLOR } from './tui-theme.ts';
 
 const renderers: TestRendererSetup[] = [];
 
@@ -41,7 +42,7 @@ describe('Markdown terminal frame', () => {
       '```',
     ].join('\n'));
 
-    expect(frame).toContain('▸ Rendered heading');
+    expect(frame).toContain('› Rendered heading');
     expect(frame).toContain('Text with bold, italic, and inline code.');
     expect(frame).toContain('ts');
     expect(frame).toContain('const answer = 42;');
@@ -121,5 +122,39 @@ describe('Markdown terminal frame', () => {
     expect(lines.length).toBeGreaterThanOrEqual(3);
     expect(lines.some((l) => l.includes('A'))).toBe(true);
     expect(lines.some((l) => l.includes('1'))).toBe(true);
+  });
+
+  test('list items use body text foreground color like paragraphs', async () => {
+    const setup = await renderMarkdownSetup([
+      'Paragraph body text here.',
+      '',
+      '1. Ordered list item alpha',
+      '2. Ordered list item beta',
+      '',
+      '- Unordered list item gamma',
+    ].join('\n'));
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain('1. Ordered list item alpha');
+    expect(frame).toContain('• Unordered list item gamma');
+
+    const paragraph = colorForText(setup, 'Paragraph body text here.');
+    const ordered = colorForText(setup, 'Ordered list item alpha');
+    const unordered = colorForText(setup, 'Unordered list item gamma');
+
+    // #e5e5e5 dark / #1A2332 light — compare via rendered span equality with paragraph
+    expect(paragraph).toBeDefined();
+    expect(ordered).toEqual(paragraph);
+    expect(unordered).toEqual(paragraph);
+
+    // Guard that the shared body color is the theme text token, not default white
+    const [r, g, b] = paragraph!;
+    const hex = COLOR.text.replace('#', '');
+    const expected = [
+      Number.parseInt(hex.slice(0, 2), 16),
+      Number.parseInt(hex.slice(2, 4), 16),
+      Number.parseInt(hex.slice(4, 6), 16),
+    ];
+    expect([r, g, b]).toEqual(expected);
   });
 });

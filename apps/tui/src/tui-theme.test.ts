@@ -4,9 +4,12 @@ import path from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
 
 import {
+  APP_CHROME,
   COLOR,
   DARK_PALETTE,
+  GOAL_CHROME,
   LIGHT_PALETTE,
+  MARKDOWN_CHROME,
   PICKER_CHROME,
   TOOL_CHROME,
   applyThemeMode,
@@ -102,6 +105,23 @@ describe('TUI theme tokens', () => {
     expect(TOOL_CHROME.glyphCompleted).toBe('✓');
     expect(TOOL_CHROME.glyphRunning).toBe('◇');
     expect(TOOL_CHROME.glyphFailed).toBe('✗');
+    expect(TOOL_CHROME.runningFrames).toEqual(['◇', '◆', '◇', '◆']);
+  });
+
+  test('markdown/app/goal chrome glyphs stay centralized', () => {
+    expect(MARKDOWN_CHROME.headingH1).toBe('▌ ');
+    expect(MARKDOWN_CHROME.headingH2).toBe('› ');
+    expect(MARKDOWN_CHROME.headingH3).toBe('• ');
+    expect(MARKDOWN_CHROME.listBullet).toBe('• ');
+    expect(APP_CHROME.brandMark).toBe('◆');
+    expect(APP_CHROME.onlineDot).toBe('●');
+    expect(APP_CHROME.offlineDot).toBe('○');
+    expect(APP_CHROME.userRailBar).toBe('▌ ');
+    expect(GOAL_CHROME.glyphCompleted).toBe('✓');
+    expect(GOAL_CHROME.glyphRunning).toBe('▶');
+    expect(GOAL_CHROME.glyphPending).toBe('○');
+    // h2 caret matches picker selected caret (design figure-2 style)
+    expect(MARKDOWN_CHROME.headingH2).toBe(PICKER_CHROME.caretSelected);
   });
 });
 

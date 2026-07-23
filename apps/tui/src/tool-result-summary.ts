@@ -286,8 +286,6 @@ export function toolStatusGlyph(status: ToolPresentationStatus): string {
 // Prefer geometric/line glyphs over Braille: Braille dots sit high in many terminal
 // fonts and look misaligned next to CJK/Latin status labels like "运行中…".
 const THINKING_CURSOR_FRAMES = ['|', '/', '-', '\\'] as const;
-// Soft pulse around the design-running glyph (◇), not a green status dot.
-const RUNNING_DOT_FRAMES = ['◇', '◆', '◇', '◆'] as const;
 
 /** Single spinner glyph used by composer running status. */
 export function thinkingSpinnerGlyph(frame: number): string {
@@ -316,7 +314,8 @@ export function composerRunningStatusLine(options: {
 
 /** Breathing/pulsing leading glyph for in-flight tool rows. */
 export function runningToolStatusGlyph(frame: number): string {
-  return RUNNING_DOT_FRAMES[Math.abs(frame) % RUNNING_DOT_FRAMES.length] ?? TOOL_CHROME.glyphRunning;
+  const frames = TOOL_CHROME.runningFrames;
+  return frames[Math.abs(frame) % frames.length] ?? TOOL_CHROME.glyphRunning;
 }
 
 /** Prefer animated glyph only while status is running. */

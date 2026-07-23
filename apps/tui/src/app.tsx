@@ -124,6 +124,7 @@ import {
   updateCommandPanelQuery,
 } from './tui-experience.ts';
 import {
+  APP_CHROME,
   COLOR,
   PICKER_CHROME,
   TOOL_CHROME,
@@ -408,7 +409,7 @@ function ChatHistory({
             <box key={message.id} flexDirection="row" width="100%" marginBottom={1}>
               <box width={7}><text fg={COLOR.muted}>YOU</text></box>
               <box flexDirection="row" flexGrow={1} minWidth={0}>
-                <text fg={COLOR.user}>▌ </text>
+                <text fg={COLOR.user}>{APP_CHROME.userRailBar}</text>
                 <box flexDirection="column" flexGrow={1} minWidth={0}>
                   {userText ? <text selectable fg={COLOR.text}>{userText}</text> : null}
                   {imageLabel ? <text selectable fg={COLOR.user}>{imageLabel}</text> : null}
@@ -942,13 +943,64 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const [mcpServers, setMcpServers] = useState<readonly TuiMcpServerSummary[]>(() => host.skillMcpBridge?.listMcpServers() ?? []);
   const renderer = useRenderer();
   const selectedTextRef = useRef('');
+  const lastAutoCopiedTextRef = useRef('');
+  const selectionCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hasTextSelection, setHasTextSelection] = useState(false);
+
+  const copySelectionText = useCallback((text: string, options?: { readonly clearOnSuccess?: boolean }) => {
+    const textToCopy = text;
+    if (textToCopy.trim().length === 0) {
+      setCommandNotice(selectionCopyNotice({ ok: false, method: 'none', error: 'empty selection' }, 0));
+      return;
+    }
+    void copyTextToClipboard(textToCopy, {
+      writeOsc52: (value) => renderer.copyToClipboardOSC52(value),
+    }).then((result) => {
+      setCommandNotice(selectionCopyNotice(result, textToCopy.length));
+      if (!result.ok) return;
+      lastAutoCopiedTextRef.current = textToCopy;
+      if (options?.clearOnSuccess) {
+        selectedTextRef.current = '';
+        setHasTextSelection(false);
+        renderer.clearSelection();
+      }
+    });
+  }, [renderer]);
 
   useSelectionHandler((selection) => {
     const next = selection?.getSelectedText?.() ?? '';
     selectedTextRef.current = next;
     setHasTextSelection(next.length > 0);
+
+    if (selectionCopyTimerRef.current) {
+      clearTimeout(selectionCopyTimerRef.current);
+      selectionCopyTimerRef.current = null;
+    }
+
+    // Empty selection: reset dedupe so re-selecting the same text can copy again.
+    if (next.trim().length === 0) {
+      lastAutoCopiedTextRef.current = '';
+      return;
+    }
+
+    // Debounce while the user is still dragging to avoid intermediate copies.
+    selectionCopyTimerRef.current = setTimeout(() => {
+      selectionCopyTimerRef.current = null;
+      const text = selectedTextRef.current;
+      if (text.trim().length === 0) return;
+      if (text === lastAutoCopiedTextRef.current) return;
+      copySelectionText(text);
+    }, 180);
   });
+
+  useEffect(() => {
+    return () => {
+      if (selectionCopyTimerRef.current) {
+        clearTimeout(selectionCopyTimerRef.current);
+        selectionCopyTimerRef.current = null;
+      }
+    };
+  }, []);
   const [resumeItems, setResumeItems] = useState<readonly TuiConversationSummary[]>([]);
   const [selectedModel, setSelectedModel] = useState<RuntimeModelSelection | null>(
     () => modelSelection?.getSelection() ?? null,
@@ -1344,18 +1396,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     });
     if (control === 'copy-selection') {
       const textToCopy = liveSelection.trim().length > 0 ? liveSelection : selectedTextRef.current;
-      void copyTextToClipboard(textToCopy, {
-        writeOsc52: (value) => renderer.copyToClipboardOSC52(value),
-      }).then((result) => {
-        if (!result.ok) {
-          setCommandNotice(selectionCopyNotice(result, textToCopy.length));
-        }
-        if (result.ok) {
-          selectedTextRef.current = '';
-          setHasTextSelection(false);
-          renderer.clearSelection();
-        }
-      });
+      copySelectionText(textToCopy, { clearOnSuccess: true });
       return;
     }
     if (control === 'interrupt') {
@@ -1991,7 +2032,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
             gap={1}
           >
             <text fg={COLOR.textSoft} wrapMode="none">
-              <span fg={COLOR.accent}>◆</span>
+              <span fg={COLOR.accent}>{APP_CHROME.brandMark}</span>
               <strong> PEER</strong>
             </text>
             <text fg={COLOR.muted} wrapMode="none" flexShrink={1}>
@@ -2001,7 +2042,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
             <text fg={COLOR.muted} wrapMode="none">
               {sessionTopbarModel}
             </text>
-            <text fg={COLOR.success} wrapMode="none">●</text>
+            <text fg={COLOR.success} wrapMode="none">{APP_CHROME.onlineDot}</text>
           </box>
           <box marginLeft={layout.outerPadding} marginRight={layout.outerPadding}>
             <ComposerModeDivider width={topbarDividerWidth} />
@@ -2350,13 +2391,13 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
               if (skillSurface) {
                 const skill = item as TuiSkillSummary;
                 return <box key={skill.skillId} flexDirection="column" backgroundColor={selected ? COLOR.selection : undefined} paddingLeft={1}>
-                  <text fg={skill.enabled === false ? COLOR.muted : COLOR.text}>{selected ? '› ' : '  '}{skill.enabled === false ? '○' : '●'} {skill.name ?? skill.skillId}</text>
+                  <text fg={skill.enabled === false ? COLOR.muted : COLOR.text}>{selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}{skill.enabled === false ? APP_CHROME.offlineDot : APP_CHROME.onlineDot} {skill.name ?? skill.skillId}</text>
                   <text fg={COLOR.muted} wrapMode="none">  {skill.description ?? skill.skillId}</text>
                 </box>;
               }
               const server = item as TuiMcpServerSummary;
               return <box key={server.id} flexDirection="column" backgroundColor={selected ? COLOR.selection : undefined} paddingLeft={1}>
-                <text fg={server.enabled ? COLOR.text : COLOR.muted}>{selected ? '› ' : '  '}{server.enabled ? '●' : '○'} {server.displayName}</text>
+                <text fg={server.enabled ? COLOR.text : COLOR.muted}>{selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}{server.enabled ? APP_CHROME.onlineDot : APP_CHROME.offlineDot} {server.displayName}</text>
                 <text fg={COLOR.muted} wrapMode="none">  {server.health?.status ?? tuiMessage(locale, 'mcp.status.unknown')} · {server.visibleToolsCount}/{server.toolsCount} {tuiMessage(locale, 'mcp.status.tools')} · {server.tools.map((tool) => tool.name ?? tool.toolName).filter(Boolean).join(', ') || tuiMessage(locale, 'mcp.status.noTools')}</text>
               </box>;
             })}

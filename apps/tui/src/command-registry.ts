@@ -129,7 +129,7 @@ export function buildTuiHelpSections(
         'Ctrl+C  cancel stream / clear draft / quit',
         'Ctrl+X then M/O/P  model / mode / permissions',
         'Ctrl+X then 1/2/3  Agent / Plan / Goal',
-        'Drag to select chat text, then Ctrl/Cmd+C to copy',
+        'Drag to select chat text to auto-copy (Ctrl/Cmd+C still works)',
       ],
     },
     {
@@ -152,7 +152,7 @@ export function buildTuiHelpSections(
       lines: [
         'Type / to search commands',
         'Click a tool result to expand full output',
-        'Select chat text with the mouse, then Ctrl/Cmd+C to copy',
+        'Select chat text with the mouse to auto-copy; Ctrl/Cmd+C also copies',
         'ctx shows context usage for the current model',
       ],
     },

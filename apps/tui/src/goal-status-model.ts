@@ -1,5 +1,7 @@
 import type { RuntimeGoalSnapshot } from '@peer-agent/runtime-sdk';
 
+import { GOAL_CHROME } from './tui-theme.ts';
+
 export type GoalStatusLayoutMode = 'side-panel' | 'compact-summary';
 
 export interface GoalStatusTaskView {
@@ -117,9 +119,9 @@ export function goalStatusFromSharedPlan(value: unknown): GoalStatusViewModel | 
 }
 
 export function goalTaskGlyph(status: string): string {
-  if (status === 'completed') return '✓';
-  if (status === 'running') return '▶';
-  if (status === 'failed' || status === 'blocked' || status === 'waiting_user') return '!';
-  if (status === 'cancelled') return '–';
-  return '○';
+  if (status === 'completed') return GOAL_CHROME.glyphCompleted;
+  if (status === 'running') return GOAL_CHROME.glyphRunning;
+  if (status === 'failed' || status === 'blocked' || status === 'waiting_user') return GOAL_CHROME.glyphFailed;
+  if (status === 'cancelled') return GOAL_CHROME.glyphCancelled;
+  return GOAL_CHROME.glyphPending;
 }

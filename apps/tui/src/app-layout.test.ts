@@ -287,6 +287,15 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('hasSelection');
   });
 
+  test('auto-copies stable mouse selections and surfaces copy result notices', () => {
+    expect(appSource).toContain('lastAutoCopiedTextRef');
+    expect(appSource).toContain('selectionCopyTimerRef');
+    expect(appSource).toContain('copySelectionText');
+    expect(appSource).toContain('setCommandNotice(selectionCopyNotice(result, textToCopy.length))');
+    expect(appSource).toContain('if (text === lastAutoCopiedTextRef.current) return;');
+    expect(appSource).toContain('}, 180);');
+  });
+
   test('auto-dismisses transient command notices and cancels superseded timers', () => {
     expect(appSource).toContain('const COMMAND_NOTICE_DURATION_MS = 3_000;');
     expect(appSource).toContain('if (!commandNotice) return;');
@@ -430,7 +439,7 @@ describe('TUI app layout', () => {
     expect(appSource).not.toContain('<strong>YOU</strong>');
     expect(appSource).toContain('<strong>PEER</strong>');
     // Cyan bar sits on the user body column, not before the YOU label.
-    expect(appSource).toContain('<text fg={COLOR.user}>▌ </text>');
+    expect(appSource).toContain('<text fg={COLOR.user}>{APP_CHROME.userRailBar}</text>');
     expect(appSource).toContain('function ToolActivityTimeline');
     expect(appSource).toContain('width={12}');
     expect(appSource).toContain('formatToolDuration(presentation)');
@@ -519,7 +528,7 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('{sessionTopbarModel}');
     expect(appSource).toContain('sessionTopbarModelLabel(');
     expect(appSource).toContain('compactWorkspacePath(host.workspaceRoot)');
-    expect(appSource).toContain('<text fg={COLOR.success} wrapMode="none">●</text>');
+    expect(appSource).toContain('<text fg={COLOR.success} wrapMode="none">{APP_CHROME.onlineDot}</text>');
     expect(appSource).not.toContain('backgroundColor={COLOR.border}');
     expect(appSource).toContain('composerContentWidth(terminal.width, layout.outerPadding)');
     expect(appSource).toContain('<ComposerModeDivider width={topbarDividerWidth} />');

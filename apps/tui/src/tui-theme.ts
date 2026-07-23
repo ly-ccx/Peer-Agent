@@ -249,6 +249,35 @@ export const PICKER_CHROME = {
   get danger() { return COLOR.dangerSoft; },
 } as const;
 
+/**
+ * Markdown chrome glyphs.
+ * h2 uses the same thin caret as design figure-2 / picker (`›`), not a filled triangle.
+ */
+export const MARKDOWN_CHROME = {
+  headingH1: '▌ ',
+  headingH2: '› ',
+  headingH3: '• ',
+  listBullet: '• ',
+  quotePrefix: '│ ',
+} as const;
+
+/** Session / app chrome glyphs (topbar, user rail, enable dots). */
+export const APP_CHROME = {
+  brandMark: '◆',
+  onlineDot: '●',
+  offlineDot: '○',
+  userRailBar: '▌ ',
+} as const;
+
+/** Goal task status glyphs. */
+export const GOAL_CHROME = {
+  glyphCompleted: '✓',
+  glyphRunning: '▶',
+  glyphFailed: '!',
+  glyphCancelled: '–',
+  glyphPending: '○',
+} as const;
+
 /** Tool timeline markers and branch characters. */
 export const TOOL_CHROME = {
   branchFirst: '  ╰ ',
@@ -258,7 +287,10 @@ export const TOOL_CHROME = {
   glyphFailed: '✗',
   glyphCancelled: '○',
   glyphRunning: '◇',
+  glyphRunningPulse: '◆',
   glyphUnknown: '·',
+  /** Soft pulse frames around the design-running glyph (◇). */
+  runningFrames: ['◇', '◆', '◇', '◆'] as const,
 } as const;
 
 export function toolStatusColor(status: string): string {

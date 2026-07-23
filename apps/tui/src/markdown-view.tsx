@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { COLOR } from './tui-theme.ts';
+import { COLOR, MARKDOWN_CHROME } from './tui-theme.ts';
 
 type TableAlignment = 'left' | 'center' | 'right';
 
@@ -263,7 +263,11 @@ export function MarkdownView({ content }: { content: string }) {
       {parseBlocks(content || ' ').map((block, index) => {
         const key = `${block.type}-${index}`;
         if (block.type === 'heading') {
-          const prefix = block.level === 1 ? '▌ ' : block.level === 2 ? '▸ ' : '• ';
+          const prefix = block.level === 1
+            ? MARKDOWN_CHROME.headingH1
+            : block.level === 2
+              ? MARKDOWN_CHROME.headingH2
+              : MARKDOWN_CHROME.headingH3;
           return <text key={key} selectable fg={block.level <= 2 ? COLOR.accent : COLOR.text} marginBottom={1}><strong>{prefix}{inline(block.text, key)}</strong></text>;
         }
         if (block.type === 'code') {
@@ -276,13 +280,13 @@ export function MarkdownView({ content }: { content: string }) {
             </box>
           );
         }
-        if (block.type === 'quote') return <text key={key} selectable fg={COLOR.muted} marginBottom={1}>│ {inline(block.text, key)}</text>;
+        if (block.type === 'quote') return <text key={key} selectable fg={COLOR.muted} marginBottom={1}>{MARKDOWN_CHROME.quotePrefix}{inline(block.text, key)}</text>;
         if (block.type === 'rule') return <text key={key} selectable fg={COLOR.muted} marginBottom={1}>────────────────────────────────────────</text>;
         if (block.type === 'list') {
           return (
             <box key={key} flexDirection="column" marginBottom={1}>
               {block.items.map((item, itemIndex) => (
-                <text key={`${key}-${itemIndex}`} selectable>{block.ordered ? `${itemIndex + 1}. ` : '• '}{inline(item, `${key}-${itemIndex}`)}</text>
+                <text key={`${key}-${itemIndex}`} selectable fg={COLOR.text}>{block.ordered ? `${itemIndex + 1}. ` : MARKDOWN_CHROME.listBullet}{inline(item, `${key}-${itemIndex}`)}</text>
               ))}
             </box>
           );
