@@ -33,21 +33,38 @@ afterEach(() => {
 });
 
 describe('TUI theme tokens', () => {
-  test('exposes frost-aligned light and dark palettes', () => {
-    expect(DARK_PALETTE.background).toBe('#0a0a0a');
-    expect(DARK_PALETTE.accent).toBe('#a3e635');
+  test('exposes canonical semantic palettes with readable light and dark hierarchy', () => {
+    expect(DARK_PALETTE.background).toBe('#080a0c');
+    expect(DARK_PALETTE.panel).toBe('#0d1013');
+    expect(DARK_PALETTE.panelRaised).toBe('#12161a');
+    expect(DARK_PALETTE.accent).toBe('#b8f35b');
+    expect(DARK_PALETTE.user).toBe('#a9d9e8');
+    expect(DARK_PALETTE.success).toBe('#68d391');
+    expect(DARK_PALETTE.warning).toBe('#e6b86a');
+    expect(DARK_PALETTE.danger).toBe('#ef7373');
+    expect(DARK_PALETTE.inputBackground).toBe(DARK_PALETTE.background);
+
     expect(LIGHT_PALETTE.background).toBe('#F3F5F8');
     expect(LIGHT_PALETTE.panel).toBe('#FFFFFF');
     expect(LIGHT_PALETTE.text).toBe('#1A2332');
     expect(LIGHT_PALETTE.accent).toBe('#4D7C0F');
+    expect(LIGHT_PALETTE.inputBackground).toBe(LIGHT_PALETTE.background);
   });
 
   test('applyThemeScheme mutates live COLOR and picker chrome getters', () => {
     applyThemeScheme('light');
     expect(COLOR.background).toBe(LIGHT_PALETTE.background);
     expect(COLOR.text).toBe(LIGHT_PALETTE.text);
-    expect(PICKER_CHROME.selectedBackground).toBe(LIGHT_PALETTE.selection);
-    expect(PICKER_CHROME.idleBackground).toBe(LIGHT_PALETTE.panel);
+    expect(PICKER_CHROME.selectedBackground).toBe(LIGHT_PALETTE.background);
+    expect(PICKER_CHROME.idleBackground).toBe(LIGHT_PALETTE.background);
+    expect(PICKER_CHROME.selectedBackground).toBe(PICKER_CHROME.idleBackground);
+    expect(PICKER_CHROME.selectedBackground).not.toBe(LIGHT_PALETTE.panel);
+    expect(PICKER_CHROME.caretSelected).toBe('› ');
+    expect(PICKER_CHROME.caretIdle).toBe('  ');
+    expect(PICKER_CHROME.checkCurrent).toBe(' ✓');
+    expect(PICKER_CHROME.title).toBe(LIGHT_PALETTE.info);
+    expect(PICKER_CHROME.separator).toBe('─');
+    expect(PICKER_CHROME.hintSeparator).toBe(' · ');
 
     applyThemeScheme('dark');
     expect(COLOR.background).toBe(DARK_PALETTE.background);

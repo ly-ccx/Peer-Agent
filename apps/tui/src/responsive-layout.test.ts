@@ -17,6 +17,13 @@ describe('responsive TUI layout', () => {
     });
   });
 
+  test('keeps vertical breathing room when height allows and yields it on short terminals', () => {
+    expect(responsiveLayout(120, 24).outerPaddingY).toBe(1);
+    expect(responsiveLayout(120, 17).outerPaddingY).toBe(0);
+    expect(responsiveLayout(60, 24).outerPaddingY).toBe(1);
+    expect(responsiveLayout(60, 17).outerPaddingY).toBe(0);
+  });
+
   test.each([
     [120, 3, 114],
     [100, 2, 96],

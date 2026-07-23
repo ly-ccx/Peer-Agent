@@ -22,6 +22,7 @@ import {
   ComposerStatusBar,
   type ComposerStatusLayout,
 } from './composer-status-view.tsx';
+import { composerLayoutModel } from './composer-layout-model.ts';
 import { compactWorkspacePath, createComposerStatus, type ComposerStatus } from './composer-status.ts';
 import {
   createChatController,
@@ -199,6 +200,19 @@ function ToolStatusGlyph({ status }: { readonly status: ToolPresentationStatus }
   return <>{animatedToolStatusGlyph(status, frame)}</>;
 }
 
+function toolStatusLabel(status: ToolPresentationStatus): string {
+  if (status === 'completed') return 'done';
+  if (status === 'failed') return 'failed';
+  if (status === 'denied') return 'denied';
+  if (status === 'cancelled') return 'stopped';
+  if (status === 'running') return 'running';
+  return 'unknown';
+}
+
+function isEvidenceDetail(line: string): boolean {
+  return /(?:evidence|artifact)(?:ref)?s?\b|(?:tool-result|local-shell-artifact|artifact):\/\//i.test(line);
+}
+
 function ToolActivityTimeline({
   presentation,
   expanded,
@@ -214,29 +228,35 @@ function ToolActivityTimeline({
     : [];
   const summary = toolActivitySummary(presentation);
   const canExpand = presentation.detail.trim().length > 0;
+  const status = toolStatusLabel(presentation.status);
   return (
     <box flexDirection="row">
-      <box width={3} flexDirection="column" alignItems="center">
+      <box width={2} flexDirection="column" alignItems="center">
         <text fg={color}><ToolStatusGlyph status={presentation.status} /></text>
-        {expanded && detailLines.length > 0 ? <text fg={COLOR.subtle}>│</text> : null}
+        {expanded && detailLines.length > 0 ? <text fg={COLOR.subtle}>┆</text> : null}
       </box>
       <box flexGrow={1} minWidth={0} flexDirection="column">
         <box flexDirection="row" width="100%">
-          <ThemedText selectable fg={color} width={12} wrapMode="none">{presentation.toolName}</ThemedText>
-          <ThemedText selectable fg={COLOR.textSoft} flexGrow={1} wrapMode="none">{summary}</ThemedText>
-          <ThemedText selectable fg={presentation.status === 'running' ? COLOR.accent : COLOR.muted} width={7} wrapMode="none">
+          <ThemedText selectable fg={COLOR.textSoft} width={12} wrapMode="none">{presentation.toolName}</ThemedText>
+          <ThemedText selectable fg={COLOR.muted} flexGrow={1} wrapMode="none">{summary}</ThemedText>
+          <ThemedText selectable fg={color} width={8} wrapMode="none">{status}</ThemedText>
+          <ThemedText selectable fg={presentation.status === 'running' ? COLOR.accent : COLOR.subtle} width={7} wrapMode="none">
             {formatToolDuration(presentation)}
           </ThemedText>
           <text fg={canExpand ? COLOR.muted : COLOR.subtle} width={2} wrapMode="none" onMouseDown={canExpand ? onToggle : undefined}>
             {canExpand ? (expanded ? '−' : '+') : ' '}
           </text>
         </box>
-        {detailLines.map((line, index) => (
-          <box key={`${presentation.toolCallId ?? presentation.toolName}-detail-${index}`} flexDirection="row">
-            <text fg={COLOR.subtle}>│ </text>
-            <ThemedText selectable fg={COLOR.toolDetail}>{line || ' '}</ThemedText>
-          </box>
-        ))}
+        {detailLines.map((line, index) => {
+          const evidence = isEvidenceDetail(line);
+          return (
+            <box key={`${presentation.toolCallId ?? presentation.toolName}-detail-${index}`} flexDirection="row">
+              <text fg={COLOR.subtle}>┆ </text>
+              {evidence ? <text fg={COLOR.success}>evidence </text> : null}
+              <ThemedText selectable fg={evidence ? COLOR.textSoft : COLOR.toolDetail}>{line || ' '}</ThemedText>
+            </box>
+          );
+        })}
       </box>
     </box>
   );
@@ -250,6 +270,8 @@ function ChatHistory({
   readonly layout: ReturnType<typeof responsiveLayout>;
 }) {
   const [expandedTools, setExpandedTools] = useState<ReadonlySet<string>>(new Set());
+  const roleRailWidth = 7;
+  const roleBodyGap = layout.density === 'compact' ? 2 : 1;
 
   const toggleTool = (messageId: string) => {
     setExpandedTools((current) => {
@@ -329,8 +351,8 @@ function ChatHistory({
           };
 
           return (
-            <box key={message.id} flexDirection="row" marginBottom={1}>
-              <box width={7}><text fg={COLOR.accent}><strong>PEER</strong></text></box>
+            <box key={message.id} flexDirection="row" gap={roleBodyGap} marginBottom={1}>
+              <box width={roleRailWidth}><text fg={COLOR.accent}><strong>PEER</strong></text></box>
               <box flexDirection="column" flexGrow={1} minWidth={0}>
                 {showThinkingPlaceholder ? (
                   <ThinkingStatusLabel
@@ -407,11 +429,11 @@ function ChatHistory({
           );
           // Crush-style user turn: muted YOU rail + cyan bar on the body column.
           return (
-            <box key={message.id} flexDirection="row" width="100%" marginBottom={1}>
-              <box width={7}><text fg={COLOR.muted}>YOU</text></box>
+            <box key={message.id} flexDirection="row" width="100%" gap={roleBodyGap} marginBottom={1}>
+              <box width={roleRailWidth}><text fg={COLOR.muted}>YOU</text></box>
               <box flexDirection="row" flexGrow={1} minWidth={0}>
                 <text fg={COLOR.user}>{APP_CHROME.userRailBar}</text>
-                <box flexDirection="column" flexGrow={1} minWidth={0}>
+                <box flexDirection="column" flexGrow={1} minWidth={0} paddingLeft={1}>
                   {userText ? <ThemedText selectable fg={COLOR.text}>{userText}</ThemedText> : null}
                   {imageLabel ? <ThemedText selectable fg={COLOR.user}>{imageLabel}</ThemedText> : null}
                   {!userText && !imageLabel ? <ThemedText selectable fg={COLOR.textSoft}>{' '}</ThemedText> : null}
@@ -425,7 +447,7 @@ function ChatHistory({
         const presentation = resolveToolPresentation(message);
         if (isGoalStatusToolPresentation(presentation)) return null;
         return (
-          <box key={message.id} flexDirection="column" marginBottom={1}>
+          <box key={message.id} flexDirection="column">
             <ToolActivityTimeline
               presentation={presentation}
               expanded={toolExpanded}
@@ -452,11 +474,12 @@ function ErrorBanner({
   );
 }
 
-function SlashCommandMenu({ commands, selectedIndex, maxVisible, showDescriptions }: {
+function SlashCommandMenu({ commands, selectedIndex, maxVisible, showDescriptions, bottom }: {
   readonly commands: readonly TuiCommand[];
   readonly selectedIndex: number;
   readonly maxVisible: number;
   readonly showDescriptions: boolean;
+  readonly bottom: number;
 }) {
   const visibleCommands = slashCommandWindow(commands, selectedIndex, maxVisible);
 
@@ -465,15 +488,12 @@ function SlashCommandMenu({ commands, selectedIndex, maxVisible, showDescription
       position="absolute"
       left={0}
       right={0}
-      bottom={5}
+      bottom={bottom}
       zIndex={100}
       flexDirection="column"
-      border
-      borderStyle="rounded"
-      borderColor={COLOR.border}
-      backgroundColor={COLOR.panel}
-      paddingLeft={1}
-      paddingRight={1}
+      border={['top']}
+      borderColor={PICKER_CHROME.border}
+      backgroundColor={PICKER_CHROME.idleBackground}
     >
       {visibleCommands.length === 0 ? (
         <text fg={COLOR.muted}>No matching commands</text>
@@ -485,7 +505,7 @@ function SlashCommandMenu({ commands, selectedIndex, maxVisible, showDescription
             flexDirection="row"
             height={1}
             justifyContent="space-between"
-            backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+            backgroundColor={PICKER_CHROME.idleBackground}
           >
             <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
               {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}/{command.id}
@@ -508,8 +528,22 @@ function ResumePickerMenu({ rows, selectedIndex, maxVisible, onResume }: {
 }) {
   const visibleRows = selectionWindow(rows, selectedIndex, maxVisible);
   return (
-    <box flexDirection="column" flexShrink={0} border borderStyle="rounded" borderColor={COLOR.border} backgroundColor={COLOR.panel} paddingLeft={1} paddingRight={1}>
-      <text fg={COLOR.accent} wrapMode="none"><strong>Resume session</strong></text>
+    <box
+      flexDirection="column"
+      flexShrink={0}
+      border={['top']}
+      borderColor={PICKER_CHROME.border}
+      backgroundColor={PICKER_CHROME.idleBackground}
+      marginLeft={1}
+      marginRight={1}
+      marginTop={1}
+      marginBottom={1}
+      paddingLeft={1}
+      paddingRight={1}
+      paddingTop={1}
+      paddingBottom={1}
+    >
+      <text fg={PICKER_CHROME.title} wrapMode="none"><strong>Resume session</strong></text>
       {rows.length === 0 ? <text fg={COLOR.muted}>No saved conversations to resume.</text> : visibleRows.map(({ item: row, index }) => {
         const selected = index === selectedIndex;
         return (
@@ -517,7 +551,7 @@ function ResumePickerMenu({ rows, selectedIndex, maxVisible, onResume }: {
             key={row.id}
             flexDirection="row"
             height={1}
-            backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+            backgroundColor={PICKER_CHROME.idleBackground}
             onMouseDown={() => onResume(row)}
           >
             <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
@@ -541,6 +575,7 @@ function ModelPickerMenu({
   selectedIndex,
   maxVisible,
   showHint,
+  bottom,
 }: {
   readonly title: string;
   readonly subtitle?: string;
@@ -551,6 +586,7 @@ function ModelPickerMenu({
   readonly selectedIndex: number;
   readonly maxVisible: number;
   readonly showHint: boolean;
+  readonly bottom: number;
 }) {
   // Map selectable-row index onto absolute row index so section headers stay visible.
   const selectableAbsoluteIndexes = rows
@@ -568,17 +604,14 @@ function ModelPickerMenu({
       position="absolute"
       left={0}
       right={0}
-      bottom={5}
+      bottom={bottom}
       zIndex={100}
       flexDirection="column"
-      border
-      borderStyle="rounded"
-      borderColor={COLOR.border}
-      backgroundColor={COLOR.panel}
-      paddingLeft={1}
-      paddingRight={1}
+      border={['top']}
+      borderColor={PICKER_CHROME.border}
+      backgroundColor={PICKER_CHROME.idleBackground}
     >
-      <text fg={COLOR.accent} wrapMode="none"><strong>{title}</strong>{subtitle ? ` · ${subtitle}` : ''}</text>
+      <text fg={PICKER_CHROME.title} wrapMode="none"><strong>{title}</strong>{subtitle ? ` · ${subtitle}` : ''}</text>
       {groups.length > 0 ? (
         // Wrap chips and highlight the active group more clearly than brackets alone.
         <text wrapMode="word">
@@ -635,7 +668,7 @@ function ModelPickerMenu({
   );
 }
 
-function Composer({ controller, snapshot, disabled, focused, locale, onValueChange, editorRef, imagePathRegistry }: {
+function Composer({ controller, snapshot, disabled, focused, locale, onValueChange, editorRef, imagePathRegistry, height = 1, backgroundColor }: {
   readonly controller: ChatController;
   readonly snapshot: ChatSnapshot;
   readonly disabled: boolean;
@@ -644,6 +677,8 @@ function Composer({ controller, snapshot, disabled, focused, locale, onValueChan
   readonly onValueChange: (value: string) => void;
   readonly editorRef: RefObject<TextareaRenderable | null>;
   readonly imagePathRegistry: Map<string, string>;
+  readonly height?: number;
+  readonly backgroundColor?: string;
 }) {
   const editor = editorRef;
   const chipifyPendingRef = useRef(false);
@@ -695,10 +730,11 @@ function Composer({ controller, snapshot, disabled, focused, locale, onValueChan
   };
 
   return (
-    <box flexDirection="column" border borderStyle="rounded" borderColor={snapshot.status === 'idle' ? COLOR.border : COLOR.accent} height={5} paddingLeft={1} paddingRight={1} backgroundColor={COLOR.panel}>
-      <ThemedTextarea
+    <ThemedTextarea
         ref={editor}
         focused={focused && !disabled}
+        height={height}
+        backgroundColor={backgroundColor}
         placeholder={composerPlaceholder(locale, disabled)}
         textColor={COLOR.text}
         focusedTextColor={COLOR.text}
@@ -716,7 +752,6 @@ function Composer({ controller, snapshot, disabled, focused, locale, onValueChan
           if (action === 'submit') submit();
         }}
       />
-    </box>
   );
 }
 
@@ -733,6 +768,7 @@ function ComposerDock({
   status,
   statusLayout,
   layout,
+  draft,
   slashOpen,
   slashItems,
   slashSelection,
@@ -760,6 +796,7 @@ function ComposerDock({
   readonly status: ComposerStatus;
   readonly statusLayout: ComposerStatusLayout;
   readonly layout: ReturnType<typeof responsiveLayout>;
+  readonly draft: string;
   readonly slashOpen: boolean;
   readonly slashItems: readonly TuiCommand[];
   readonly slashSelection: number;
@@ -777,13 +814,19 @@ function ComposerDock({
   readonly modelPickerShowHint: boolean;
 }) {
   const menuReserve = slashOpen
-    ? Math.min(slashMaxVisible, Math.max(1, slashItems.length)) + 2
+    ? Math.min(slashMaxVisible, Math.max(1, slashItems.length)) + 1
     : modelPickerOpen
       // groups + search + optional hint around the visible rows
-      ? Math.min(modelPickerMaxVisible, Math.max(1, modelPickerRows.length)) + 4
+      ? Math.min(modelPickerMaxVisible, Math.max(1, modelPickerRows.length)) + 3
       : 0;
   const terminal = useTerminalDimensions();
   const dividerWidth = composerContentWidth(terminal.width, layout.outerPadding);
+  const composerLayout = composerLayoutModel({
+    draft,
+    contentWidth: dividerWidth,
+    runtimeStatus: snapshot.status,
+  });
+  const composerBackground = COLOR.background;
 
   return (
     <box
@@ -794,23 +837,22 @@ function ComposerDock({
       paddingLeft={layout.outerPadding}
       paddingRight={layout.outerPadding}
     >
-      {/* Running status + divider only while active; thinking stays in chat history. */}
-      {snapshot.status !== 'idle' ? (
-        <>
-          <ComposerRunningStatusLabel
-            locale={locale}
-            runStatus={snapshot.status === 'cancelling' ? 'cancelling' : snapshot.status === 'compacting' ? 'compacting' : 'running'}
-          />
-          <ComposerModeDivider width={dividerWidth} />
-        </>
+      {/* Canonical dock: one quiet line, no card or enclosing border. */}
+      <ComposerModeDivider width={dividerWidth} />
+      {composerLayout.showRunningStatus ? (
+        <ComposerRunningStatusLabel
+          locale={locale}
+          runStatus={snapshot.status === 'cancelling' ? 'cancelling' : snapshot.status === 'compacting' ? 'compacting' : 'running'}
+        />
       ) : null}
-      <box position="relative" width="100%" height={5} overflow="visible">
+      <box position="relative" width="100%" height={composerLayout.shellRows} overflow="visible">
         {slashOpen ? (
           <SlashCommandMenu
             commands={slashItems}
             selectedIndex={slashSelection}
             maxVisible={slashMaxVisible}
             showDescriptions={slashShowDescriptions}
+            bottom={composerLayout.pickerBottom}
           />
         ) : null}
         {modelPickerOpen ? (
@@ -824,18 +866,28 @@ function ComposerDock({
             selectedIndex={modelPickerSelection}
             maxVisible={modelPickerMaxVisible}
             showHint={modelPickerShowHint}
+            bottom={composerLayout.pickerBottom}
           />
         ) : null}
-              <Composer
-        controller={controller}
-        snapshot={snapshot}
-        disabled={disabled}
-        focused={focused}
-        locale={locale}
-        onValueChange={onValueChange}
-        editorRef={editorRef}
-        imagePathRegistry={imagePathRegistry}
-      />
+        <box flexDirection="row" width="100%">
+          <text fg={composerLayout.showRunningStatus ? COLOR.warning : COLOR.accent}>
+            <strong>{composerLayout.promptGlyph}</strong>
+          </text>
+          <box flexGrow={1} paddingLeft={1}>
+            <Composer
+              controller={controller}
+              snapshot={snapshot}
+              disabled={disabled}
+              focused={focused}
+              locale={locale}
+              onValueChange={onValueChange}
+              editorRef={editorRef}
+              imagePathRegistry={imagePathRegistry}
+              height={composerLayout.inputRows}
+              backgroundColor={composerBackground}
+            />
+          </box>
+        </box>
       </box>
       <ComposerStatusBar status={status} layout={statusLayout} />
     </box>
@@ -1967,13 +2019,53 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       flexDirection="column"
       width="100%"
       height="100%"
-      gap={1}
       backgroundColor={COLOR.background}
-      paddingTop={layout.outerPaddingY}
-      paddingBottom={layout.outerPaddingY}
     >
-      <box flexDirection="row" width="100%" height="100%" gap={1}>
-        <box flexDirection="column" flexGrow={1} minWidth={0} height="100%" gap={1}>
+      {/* Session topbar spans conversation and Mission rail. */}
+      {!isWelcome ? (
+        <box
+          flexDirection="column"
+          width="100%"
+          flexShrink={0}
+          paddingTop={layout.outerPaddingY}
+        >
+          <box
+            flexDirection="row"
+            alignItems="center"
+            flexShrink={0}
+            height={1}
+            paddingLeft={layout.outerPadding}
+            paddingRight={layout.outerPadding}
+            gap={1}
+          >
+            <text fg={COLOR.textSoft} wrapMode="none">
+              <span fg={COLOR.accent}>{APP_CHROME.brandMark}</span>
+              <strong> PEER</strong>
+            </text>
+            <text fg={COLOR.muted} wrapMode="none" flexShrink={1}>
+              {sessionWorkspacePath}
+            </text>
+            <box flexGrow={1} minWidth={1} />
+            <text fg={COLOR.muted} wrapMode="none">
+              {sessionTopbarModel}
+            </text>
+            <text fg={COLOR.success} wrapMode="none">{APP_CHROME.onlineDot}</text>
+          </box>
+          <box marginLeft={layout.outerPadding} marginRight={layout.outerPadding} flexShrink={0}>
+            <ComposerModeDivider width={topbarDividerWidth} />
+          </box>
+        </box>
+      ) : null}
+      {/* Split workspace starts below the full-width session topbar. */}
+      <box
+        flexDirection="row"
+        width="100%"
+        flexGrow={1}
+        minHeight={0}
+        paddingTop={isWelcome ? layout.outerPaddingY : 0}
+        paddingBottom={layout.outerPaddingY}
+      >
+        <box flexDirection="column" flexGrow={1} minWidth={0} minHeight={0}>
       {isWelcome ? (
         <box flexGrow={1} flexDirection="column" justifyContent="center" alignItems="center" paddingLeft={layout.outerPadding} paddingRight={layout.outerPadding}>
           <box width="100%" flexDirection="column" alignItems="center" gap={2}>
@@ -2002,6 +2094,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
                 status={composerStatus}
                 statusLayout={composerStatusLayout}
                 layout={layout}
+                draft={composerDraft}
                 slashOpen={Boolean(slashSurface)}
                 slashItems={slashItems}
                 slashSelection={slashSelection}
@@ -2027,29 +2120,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         </box>
       ) : (
         <>
-          <box
-            flexDirection="row"
-            alignItems="center"
-            paddingLeft={layout.outerPadding}
-            paddingRight={layout.outerPadding}
-            gap={1}
-          >
-            <text fg={COLOR.textSoft} wrapMode="none">
-              <span fg={COLOR.accent}>{APP_CHROME.brandMark}</span>
-              <strong> PEER</strong>
-            </text>
-            <text fg={COLOR.muted} wrapMode="none" flexShrink={1}>
-              {sessionWorkspacePath}
-            </text>
-            <box flexGrow={1} minWidth={1} />
-            <text fg={COLOR.muted} wrapMode="none">
-              {sessionTopbarModel}
-            </text>
-            <text fg={COLOR.success} wrapMode="none">{APP_CHROME.onlineDot}</text>
-          </box>
-          <box marginLeft={layout.outerPadding} marginRight={layout.outerPadding}>
-            <ComposerModeDivider width={topbarDividerWidth} />
-          </box>
+          <box height={1} flexShrink={0} />
           <ChatHistory snapshot={snapshot} layout={layout} />
 
       {snapshot.error ? <ErrorBanner message={snapshot.error} layout={layout} /> : null}
@@ -2067,7 +2138,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
               return (
                 <box
                   key={option.decision}
-                  backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+                  backgroundColor={PICKER_CHROME.idleBackground}
                   paddingLeft={selected ? 0 : 0}
                 >
                   <text fg={selected ? option.color : COLOR.muted}>
@@ -2093,11 +2164,10 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         <box
           flexDirection="column"
           flexShrink={0}
-          border
-          borderStyle="rounded"
-          borderColor={COLOR.accent}
-          padding={1}
-          backgroundColor={COLOR.panel}
+          border={['top']}
+          borderColor={PICKER_CHROME.border}
+          paddingTop={1}
+          backgroundColor={PICKER_CHROME.idleBackground}
           marginLeft={layout.outerPadding}
           marginRight={layout.outerPadding}
         >
@@ -2109,7 +2179,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
               return (
                 <box
                   key={`${option.shortcut}-${option.label}`}
-                  backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+                  backgroundColor={PICKER_CHROME.idleBackground}
                 >
                   <text fg={selected ? option.color : COLOR.muted}>
                     {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}
@@ -2139,7 +2209,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
                 return (
                   <box
                     key={option.decision}
-                    backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+                    backgroundColor={PICKER_CHROME.idleBackground}
                   >
                     <text fg={selected ? option.color : COLOR.muted}>
                       {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}
@@ -2170,12 +2240,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           flexDirection="column"
           height={pickerLayout.modePanelRows}
           flexShrink={0}
-          border
-          borderStyle="rounded"
-          borderColor={COLOR.accent}
-          backgroundColor={COLOR.panel}
-          paddingLeft={1}
-          paddingRight={1}
+          border={['top']}
+          borderColor={PICKER_CHROME.border}
+          backgroundColor={PICKER_CHROME.idleBackground}
           paddingTop={pickerLayout.verticalPadding}
           paddingBottom={pickerLayout.verticalPadding}
         >
@@ -2187,7 +2254,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
                 key={option.policy}
                 flexDirection="column"
                 flexShrink={0}
-                backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+                backgroundColor={PICKER_CHROME.idleBackground}
               >
                 <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
                   {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}
@@ -2221,12 +2288,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           flexDirection="column"
           height={pickerLayout.modePanelRows}
           flexShrink={0}
-          border
-          borderStyle="rounded"
-          borderColor={COLOR.accent}
-          backgroundColor={COLOR.panel}
-          paddingLeft={1}
-          paddingRight={1}
+          border={['top']}
+          borderColor={PICKER_CHROME.border}
+          backgroundColor={PICKER_CHROME.idleBackground}
           paddingTop={pickerLayout.verticalPadding}
           paddingBottom={pickerLayout.verticalPadding}
         >
@@ -2242,7 +2306,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
               <box
                 key={option.locale}
                 flexDirection="row"
-                backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+                backgroundColor={PICKER_CHROME.idleBackground}
               >
                 <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
                   {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}
@@ -2265,12 +2329,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           flexDirection="column"
           height={pickerLayout.modePanelRows}
           flexShrink={0}
-          border
-          borderStyle="rounded"
-          borderColor={COLOR.accent}
-          backgroundColor={COLOR.panel}
-          paddingLeft={1}
-          paddingRight={1}
+          border={['top']}
+          borderColor={PICKER_CHROME.border}
+          backgroundColor={PICKER_CHROME.idleBackground}
           paddingTop={pickerLayout.verticalPadding}
           paddingBottom={pickerLayout.verticalPadding}
         >
@@ -2289,7 +2350,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
               <box
                 key={option.mode}
                 flexDirection="row"
-                backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+                backgroundColor={PICKER_CHROME.idleBackground}
               >
                 <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
                   {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}
@@ -2312,12 +2373,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           flexDirection="column"
           height={pickerLayout.modePanelRows}
           flexShrink={0}
-          border
-          borderStyle="rounded"
-          borderColor={COLOR.accent}
-          backgroundColor={COLOR.panel}
-          paddingLeft={1}
-          paddingRight={1}
+          border={['top']}
+          borderColor={PICKER_CHROME.border}
+          backgroundColor={PICKER_CHROME.idleBackground}
           paddingTop={pickerLayout.verticalPadding}
           paddingBottom={pickerLayout.verticalPadding}
         >
@@ -2338,7 +2396,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
                 key={option.mode}
                 flexDirection="column"
                 flexShrink={0}
-                backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+                backgroundColor={PICKER_CHROME.idleBackground}
               >
                 <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
                   {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}
@@ -2359,12 +2417,9 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         <box
           flexDirection="column"
           flexShrink={0}
-          border
-          borderStyle="rounded"
-          borderColor={COLOR.accent}
-          backgroundColor={COLOR.panel}
-          paddingLeft={1}
-          paddingRight={1}
+          border={['top']}
+          borderColor={PICKER_CHROME.border}
+          backgroundColor={PICKER_CHROME.idleBackground}
           paddingTop={pickerLayout.verticalPadding}
           paddingBottom={pickerLayout.verticalPadding}
         >
@@ -2421,16 +2476,13 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
         <box
           flexDirection="column"
           flexShrink={0}
-          border
-          borderStyle="rounded"
-          borderColor={COLOR.accent}
-          backgroundColor={COLOR.panel}
-          paddingLeft={1}
-          paddingRight={1}
+          border={['top']}
+          borderColor={PICKER_CHROME.border}
+          backgroundColor={PICKER_CHROME.idleBackground}
           paddingTop={pickerLayout.verticalPadding}
           paddingBottom={pickerLayout.verticalPadding}
         >
-          <text fg={COLOR.accent} wrapMode="none"><strong>Commands</strong></text>
+          <text fg={PICKER_CHROME.title} wrapMode="none"><strong>Commands</strong></text>
           {pickerLayout.showContext ? (
             <text fg={COLOR.muted} wrapMode="none">{commandSurface.query ? `Search: ${commandSurface.query}` : 'Type to search commands'}</text>
           ) : null}
@@ -2441,7 +2493,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
                 key={command.id}
                 flexDirection="column"
                 flexShrink={0}
-                backgroundColor={selected ? PICKER_CHROME.selectedBackground : PICKER_CHROME.idleBackground}
+                backgroundColor={PICKER_CHROME.idleBackground}
               >
                 <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
                   {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}{command.label}
@@ -2466,6 +2518,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           status={composerStatus}
           statusLayout={composerStatusLayout}
           layout={layout}
+          draft={composerDraft}
           slashOpen={Boolean(slashSurface)}
           slashItems={slashItems}
           slashSelection={slashSelection}

@@ -72,8 +72,8 @@ export function contextMeterParts(percent: number | undefined, width: number): {
   const bounded = Math.max(0, Math.min(100, percent ?? 0));
   const filledCount = Math.round((bounded / 100) * width);
   return {
-    filled: '━'.repeat(filledCount),
-    empty: '─'.repeat(width - filledCount),
+    filled: '█'.repeat(filledCount),
+    empty: '░'.repeat(width - filledCount),
   };
 }
 
@@ -109,7 +109,7 @@ export function ComposerStatusBar({ status, layout }: {
 }) {
   if (layout === 'narrow') {
     return (
-      <box flexDirection="column" width="100%" paddingLeft={1} paddingRight={1} paddingTop={0}>
+      <box flexDirection="column" width="100%" paddingLeft={1} paddingTop={0}>
         <text fg={COLOR.muted} wrapMode="none">
           <StatusPair label="mode" value={status.mode} accent />
           <StatusSeparator />
@@ -130,7 +130,6 @@ export function ComposerStatusBar({ status, layout }: {
       flexDirection="row"
       justifyContent="space-between"
       paddingLeft={1}
-      paddingRight={1}
       paddingTop={0}
     >
       <text fg={COLOR.muted} wrapMode="none">

@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Peer TUI · Visual Prototype</title>
+  <title>Peer TUI · Canonical Design Prototype</title>
+  <meta name="description" content="Peer TUI 后续视觉与交互实现的唯一对齐母版" />
   <style>
     :root {
       color-scheme: dark;
@@ -44,13 +45,13 @@
     button { color: inherit; }
 
     .window {
-      height: 100vh;
-      min-height: 680px;
+      height: calc(100vh - 24px);
+      min-height: 656px;
       display: grid;
       grid-template-rows: 44px minmax(0, 1fr) auto;
       max-width: 1540px;
-      margin: 0 auto;
-      border-inline: 1px solid #11161a;
+      margin: 12px auto;
+      border: 1px solid #11161a;
       background: rgba(8, 10, 12, .86);
     }
 
@@ -88,12 +89,12 @@
     }
 
     .stream {
-      width: min(900px, calc(100% - 64px));
+      width: calc(100% - 44px);
       margin: 0 auto;
-      padding: 30px 0 46px;
+      padding: 18px 0 22px;
     }
 
-    .turn { display: grid; grid-template-columns: 72px 1fr; gap: 20px; padding: 15px 0; }
+    .turn { display: grid; grid-template-columns: 72px 1fr; gap: 20px; padding: 8px 0; }
     .who { padding-top: 2px; color: var(--muted); font-size: 10px; letter-spacing: .13em; text-transform: uppercase; }
     .who.peer { color: var(--ice); }
     .message { color: var(--soft); }
@@ -176,39 +177,66 @@
     .hint { margin-top: 30px; color: var(--dim); font-size: 10px; }
     kbd { padding: 1px 5px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; background: var(--surface); }
 
+    /* Canonical picker: a quiet terminal layer, separated by one rule — never a floating card. */
+    .picker-sheet {
+      margin: 10px 22px 12px;
+      padding: 8px 12px 9px;
+      border: 0;
+      border-top: 1px solid var(--line);
+      background: transparent;
+    }
+    .picker-head, .picker-row, .picker-hint { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: baseline; }
+    .picker-head { margin-bottom: 4px; color: var(--muted); font-size: 9px; letter-spacing: .14em; }
+    .picker-head strong { color: var(--ice); font-weight: 600; }
+    .picker-row { min-height: 21px; color: var(--soft); line-height: 21px; cursor: default; }
+    .picker-row .caret { color: transparent; font-weight: 700; }
+    .picker-row .meta { padding-right: 2px; color: var(--dim); font-size: 10px; }
+    .picker-row.selected { color: var(--text); background: linear-gradient(90deg, rgba(184,243,91,.055), transparent 68%); }
+    .picker-row.selected .caret { color: var(--lime); }
+    .picker-row.current .label::after { content: '  ✓'; color: var(--green); }
+    .picker-hint { margin-top: 4px; color: var(--dim); font-size: 9px; }
+    .picker-hint span { grid-column: 2 / 4; }
+
+    /* Canonical composer: part of the terminal canvas, never a white card or full border. */
     .dock {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 310px;
-      border-top: 1px solid var(--line);
-      background: #090b0d;
+      background: linear-gradient(180deg, rgba(13,16,19,.2), #090b0d 38%);
     }
-    .dock-main { min-width: 0; padding: 10px 22px 13px; }
-    .activity { display: flex; align-items: center; height: 25px; color: var(--muted); font-size: 10px; }
-    .activity .spinner { color: var(--lime); margin-right: 9px; animation: pulse 1.3s ease-in-out infinite; }
+    .dock-main { min-width: 0; padding: 9px 22px 12px; }
+    .activity { display: none; align-items: center; min-height: 20px; margin: 0 0 5px 26px; color: var(--muted); font-size: 10px; }
+    .running .activity { display: flex; }
+    .activity .spinner { color: var(--amber); margin-right: 9px; animation: pulse 1.3s ease-in-out infinite; }
     .activity b { color: var(--soft); font-weight: 500; }
     .activity .trail { flex: 1; margin: 0 11px; border-top: 1px dotted var(--line); }
     .active-label { color: var(--dim); letter-spacing: .1em; }
-    .active-label em { color: var(--lime); font-style: normal; }
+    .active-label em { color: var(--amber); font-style: normal; }
 
     .input-shell {
       display: grid;
-      grid-template-columns: 26px 1fr auto;
+      grid-template-columns: 22px minmax(0, 1fr) auto;
       align-items: start;
-      min-height: 58px;
-      padding: 11px 13px;
-      border: 1px solid #303941;
-      background: var(--surface);
-      box-shadow: inset 0 0 0 1px rgba(169,217,232,.015), 0 10px 35px rgba(0,0,0,.22);
+      min-height: 34px;
+      padding: 3px 0 5px;
+      border: 0;
+      border-top: 1px solid var(--line);
+      background: transparent;
     }
-    .input-shell:focus-within { border-color: #52636e; box-shadow: 0 0 0 1px rgba(169,217,232,.08); }
-    .prompt-mark { color: var(--ice-strong); padding-top: 1px; font-weight: 700; }
-    textarea { width: 100%; height: 34px; resize: none; border: 0; outline: 0; color: var(--text); background: transparent; line-height: 1.55; }
+    .input-shell:focus-within { border-top-color: #3a454d; }
+    .prompt-mark { color: var(--lime); padding-top: 1px; font-weight: 700; text-shadow: 0 0 12px rgba(184,243,91,.22); }
+    textarea { width: 100%; min-height: 24px; height: 24px; max-height: 140px; resize: none; overflow-y: auto; border: 0; outline: 0; color: var(--text); background: transparent; line-height: 1.55; }
     textarea::placeholder { color: #4a555e; }
-    .send { border: 0; background: transparent; color: var(--dim); cursor: pointer; padding: 2px 0 0 10px; }
-    .send:hover { color: var(--ice); }
-    .statusbar { display: flex; gap: 10px; align-items: center; padding-top: 7px; color: var(--dim); font-size: 10px; }
+    .send { border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--dim); cursor: pointer; padding: 2px 0 2px 13px; }
+    .send:hover, .send:focus-visible { color: var(--lime); outline: 0; }
+    .running .prompt-mark, .running .send { color: var(--amber); text-shadow: none; }
+    .statusbar { display: flex; gap: 10px; align-items: center; padding: 3px 0 0 22px; color: var(--dim); font-size: 10px; }
     .statusbar b { color: var(--muted); font-weight: 500; }
     .statusbar .right { margin-left: auto; }
+    .state-switch { display: inline-flex; gap: 4px; }
+    .state-switch button { border: 0; padding: 1px 4px; color: var(--dim); background: transparent; cursor: pointer; }
+    .state-switch button.active { color: var(--soft); }
+    .state-switch button.active::before { content: "·"; color: var(--lime); margin-right: 3px; }
+    .running .state-switch button.active::before { color: var(--amber); }
     .context-meter { display: inline-block; width: 42px; height: 3px; margin: 0 5px 2px; background: var(--line); }
     .context-meter span { display: block; width: 28%; height: 100%; background: var(--ice); }
     .dock-side { display: flex; align-items: center; padding: 0 22px; border-left: 1px solid var(--line); color: var(--dim); font-size: 10px; }
@@ -221,6 +249,10 @@
       .mission { display: none; }
       .dock { grid-template-columns: 1fr; }
       .dock-side { display: none; }
+      .picker-sheet { margin: 8px 14px 10px; padding: 7px 8px 8px; }
+      .picker-head, .picker-row, .picker-hint { grid-template-columns: 16px minmax(0, 1fr); }
+      .picker-head > :last-child, .picker-row .meta { display: none; }
+      .picker-hint span { grid-column: 2; }
       .stream { width: calc(100% - 32px); }
     }
   </style>
@@ -291,20 +323,28 @@
       </aside>
     </section>
 
-    <footer class="dock">
+    <footer class="dock" id="dock" data-canonical-composer="true">
       <div class="dock-main">
-        <div class="activity"><span class="spinner">◆</span><b id="activity-text">正在生成视觉原型</b><span class="trail"></span><span class="active-label">PEER / <em>ACTIVE</em></span></div>
+        <div class="activity"><span class="spinner">◆</span><b id="activity-text">正在运行本地能力</b><span class="trail"></span><span class="active-label">PEER / <em>RUNNING</em></span></div>
+        <section class="picker-sheet" data-canonical-picker="true" aria-label="Command suggestions">
+          <div class="picker-head"><span></span><strong>COMMANDS</strong><span>3 MATCHES</span></div>
+          <div class="picker-row selected"><span class="caret">›</span><span class="label">/model</span><span class="meta">switch active model</span></div>
+          <div class="picker-row"><span class="caret">›</span><span class="label">/mode</span><span class="meta">change interaction mode</span></div>
+          <div class="picker-row current"><span class="caret">›</span><span class="label">/permissions</span><span class="meta">standard</span></div>
+          <div class="picker-hint"><span>↑↓ choose · enter select · esc close</span></div>
+        </section>
         <div class="input-shell">
-          <span class="prompt-mark">❯</span>
-          <textarea id="composer" aria-label="Message" placeholder="Ask Peer anything…"></textarea>
-          <button class="send" id="send" title="Send">↵</button>
+          <span class="prompt-mark" id="prompt-mark">›</span>
+          <textarea id="composer" rows="1" aria-label="Message" placeholder="Ask Peer anything…"></textarea>
+          <button class="send" id="send" type="button" title="Send message">↵ send</button>
         </div>
         <div class="statusbar">
-          <span>mode <b>goal</b></span><span>·</span><span>access <b>standard</b></span><span>·</span><span>lang <b>zh-CN</b></span>
+          <span>mode <b>goal</b></span><span>·</span><span>access <b>standard</b></span>
+          <span class="state-switch" aria-label="Prototype state"><button class="active" type="button" data-mode="idle">idle</button><button type="button" data-mode="running">running</button></span>
           <span class="right">gpt-5.6-sol <i class="context-meter"><span></span></i> 28%</span>
         </div>
       </div>
-      <div class="dock-side"><span>workspace&nbsp; <b>peer_agent</b><br />goal runner&nbsp; <b>tick 1 / 8</b></span></div>
+      <div class="dock-side"><span>canonical prototype&nbsp; <b>peer-tui-crush</b><br />implementation alignment&nbsp; <b>single source</b></span></div>
     </footer>
   </main>
 
@@ -315,22 +355,48 @@
     const mission = document.querySelector('.mission');
     const workspace = document.querySelector('.workspace');
     const dock = document.querySelector('.dock');
+    const stateButtons = document.querySelectorAll('[data-mode]');
+
+    function resizeComposer() {
+      composer.style.height = '24px';
+      composer.style.height = Math.min(composer.scrollHeight, 140) + 'px';
+    }
+
+    function setMode(mode) {
+      const running = mode === 'running';
+      dock.classList.toggle('running', running);
+      send.textContent = running ? '■ stop' : '↵ send';
+      send.title = running ? 'Stop generation' : 'Send message';
+      stateButtons.forEach((button) => button.classList.toggle('active', button.dataset.mode === mode));
+      if (running && !activity.textContent.startsWith('正在')) activity.textContent = '正在运行本地能力';
+    }
 
     function submitMessage() {
       const value = composer.value.trim();
-      if (!value) return;
+      if (!value || dock.classList.contains('running')) {
+        if (dock.classList.contains('running')) setMode('idle');
+        return;
+      }
       activity.textContent = '正在处理：' + value.slice(0, 28) + (value.length > 28 ? '…' : '');
       composer.value = '';
-      setTimeout(() => { activity.textContent = '等待下一步指令'; }, 1800);
+      resizeComposer();
+      setMode('running');
     }
 
     send.addEventListener('click', submitMessage);
+    stateButtons.forEach((button) => button.addEventListener('click', () => setMode(button.dataset.mode)));
+    composer.addEventListener('input', resizeComposer);
     composer.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && dock.classList.contains('running')) {
+        setMode('idle');
+        return;
+      }
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
         submitMessage();
       }
     });
+    resizeComposer();
 
     document.addEventListener('keydown', (event) => {
       if (event.key.toLowerCase() !== 'g' || document.activeElement === composer) return;

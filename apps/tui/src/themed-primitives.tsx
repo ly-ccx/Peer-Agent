@@ -24,7 +24,6 @@ export const ThemedTextarea = forwardRef<TextareaRenderable, TextareaProps>(
   function ThemedTextarea(props, ref) {
     return (
       <textarea
-        {...props}
         ref={ref}
         backgroundColor={COLOR.inputBackground}
         textColor={COLOR.inputForeground}
@@ -32,6 +31,7 @@ export const ThemedTextarea = forwardRef<TextareaRenderable, TextareaProps>(
         selectionBg={COLOR.inputSelectionBackground}
         selectionFg={COLOR.inputSelectionForeground}
         cursorColor={COLOR.inputCursor}
+        {...props}
       />
     );
   },

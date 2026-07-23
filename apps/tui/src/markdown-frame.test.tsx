@@ -85,10 +85,10 @@ describe('Markdown terminal frame', () => {
     const metadata = colorForText(setup, 'diff --git a/file.ts b/file.ts');
     const context = colorForText(setup, ' const stable = true;');
 
-    expect(add).toEqual([74, 222, 128, 255]);
-    expect(deletion).toEqual([248, 113, 113, 255]);
-    expect(hunk).toEqual([103, 232, 249, 255]);
-    expect(metadata).toEqual([115, 115, 115, 255]);
+    expect(add).toEqual([104, 211, 145, 255]);
+    expect(deletion).toEqual([239, 115, 115, 255]);
+    expect(hunk).toEqual([169, 217, 232, 255]);
+    expect(metadata).toEqual([105, 115, 125, 255]);
     expect(new Set([add, deletion, hunk, metadata, context].map((color) => color?.join(','))).size).toBe(5);
   });
 
@@ -183,6 +183,21 @@ describe('Markdown terminal frame', () => {
     expect(lines.length).toBeGreaterThanOrEqual(3);
     expect(lines.some((l) => l.includes('A'))).toBe(true);
     expect(lines.some((l) => l.includes('1'))).toBe(true);
+  });
+
+  test('keeps spacing between Markdown blocks but adds no trailing blank row', async () => {
+    const single = await renderMarkdown('Only one paragraph.');
+    const singleLines = single.split('\n');
+    const singleRow = singleLines.findIndex((line) => line.includes('Only one paragraph.'));
+    expect(singleRow).toBeGreaterThanOrEqual(0);
+    expect(singleLines.slice(singleRow + 1).every((line) => !line.trim())).toBe(true);
+
+    const multiple = await renderMarkdown('First paragraph.\n\nSecond paragraph.');
+    const multipleLines = multiple.split('\n');
+    const firstRow = multipleLines.findIndex((line) => line.includes('First paragraph.'));
+    const secondRow = multipleLines.findIndex((line) => line.includes('Second paragraph.'));
+    expect(secondRow - firstRow).toBe(2);
+    expect(multipleLines.slice(secondRow + 1).every((line) => !line.trim())).toBe(true);
   });
 
   test('list items use body text foreground color like paragraphs', async () => {

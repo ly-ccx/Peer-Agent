@@ -71,56 +71,58 @@ type MutablePalette = {
 };
 
 /**
- * Frost dark — terminal-tuned surfaces close to desktop dark chrome,
- * with TUI lime accent retained for mode / status readability.
+ * Canonical dark palette — mirrors peer-tui-crush.html semantic tokens.
+ * Surfaces establish depth; ice identifies people/information; lime is reserved
+ * for focus and primary interaction; green/amber/red communicate outcomes.
  */
 export const DARK_PALETTE: TuiPalette = Object.freeze({
-  background: '#0a0a0a',
-  panel: '#111111',
-  panelRaised: '#161616',
-  userPanel: '#10212a',
-  selection: '#1c1c1c',
-  textSelectionBackground: '#A3E635',
-  textSelectionForeground: '#111827',
-  inputBackground: '#111111',
-  inputForeground: '#E5E5E5',
-  inputPlaceholder: '#737373',
-  inputSelectionBackground: '#A3E635',
-  inputSelectionForeground: '#111827',
-  inputCursor: '#A3E635',
-  border: '#2a2a2a',
-  borderFocus: '#3f3f46',
+  background: '#080a0c',
+  panel: '#0d1013',
+  panelRaised: '#12161a',
+  userPanel: '#0d1013',
+  selection: '#171c21',
+  textSelectionBackground: '#b8f35b',
+  textSelectionForeground: '#080a0c',
+  // The composer belongs to the canvas rather than a separate input card.
+  inputBackground: '#080a0c',
+  inputForeground: '#e7ebee',
+  inputPlaceholder: '#69737d',
+  inputSelectionBackground: '#b8f35b',
+  inputSelectionForeground: '#080a0c',
+  inputCursor: '#b8f35b',
+  border: '#20262c',
+  borderFocus: '#3e4851',
 
-  text: '#e5e5e5',
-  textSoft: '#d4d4d4',
-  muted: '#737373',
-  subtle: '#525252',
-  dim: '#404040',
+  text: '#e7ebee',
+  textSoft: '#b8c0c7',
+  muted: '#69737d',
+  subtle: '#56616b',
+  dim: '#3e4851',
 
-  accent: '#a3e635',
-  accentSoft: '#bef264',
-  link: '#7dd3fc',
+  accent: '#b8f35b',
+  accentSoft: '#d0fa8e',
+  link: '#a9d9e8',
   brandHighlight: '#ffffff',
-  user: '#7dd3fc',
-  info: '#7189c9',
+  user: '#a9d9e8',
+  info: '#a9d9e8',
 
-  success: '#86efac',
-  warning: '#fbbf24',
-  danger: '#fb7185',
-  dangerSoft: '#fca5a5',
+  success: '#68d391',
+  warning: '#e6b86a',
+  danger: '#ef7373',
+  dangerSoft: '#f59a9a',
 
-  tool: '#86efac',
-  toolFailed: '#fb7185',
-  toolRunning: '#fde68a',
-  toolCancelled: '#a3a3a3',
-  toolDetail: '#a3a3a3',
+  tool: '#68d391',
+  toolFailed: '#ef7373',
+  toolRunning: '#e6b86a',
+  toolCancelled: '#69737d',
+  toolDetail: '#69737d',
 
-  code: '#bef264',
-  codeBackground: '#171717',
-  diffAdd: '#4ade80',
-  diffDelete: '#f87171',
-  diffHunk: '#67e8f9',
-  diffMeta: '#737373',
+  code: '#b8f35b',
+  codeBackground: '#12161a',
+  diffAdd: '#68d391',
+  diffDelete: '#ef7373',
+  diffHunk: '#a9d9e8',
+  diffMeta: '#69737d',
 });
 
 /**
@@ -136,7 +138,8 @@ export const LIGHT_PALETTE: TuiPalette = Object.freeze({
   selection: '#E8EEF7', // --chrome-hover-ish
   textSelectionBackground: '#1E3A5F',
   textSelectionForeground: '#FFFFFF',
-  inputBackground: '#FFFFFF',
+  // Match the light canvas so the composer never becomes a detached white card.
+  inputBackground: '#F3F5F8',
   inputForeground: '#1A2332',
   inputPlaceholder: '#6B7585',
   inputSelectionBackground: '#1E3A5F',
@@ -268,18 +271,26 @@ export function applyThemeMode(
   return { mode, scheme };
 }
 
-/** Shared picker chrome — reads live COLOR so theme switches propagate. */
+/**
+ * Shared picker language — a terminal layer, not a floating card.
+ *
+ * One quiet separator establishes hierarchy. Selection is carried by the thin
+ * caret and accent text; rows intentionally keep the canvas background so a
+ * full-width highlight never becomes a second panel.
+ */
 export const PICKER_CHROME = {
   caretSelected: '› ',
   caretIdle: '  ',
   checkCurrent: ' ✓',
-  get selectedBackground() { return COLOR.selection; },
-  get idleBackground() { return COLOR.panel; },
+  separator: '─',
+  hintSeparator: ' · ',
+  get selectedBackground() { return COLOR.background; },
+  get idleBackground() { return COLOR.background; },
   get selectedForeground() { return COLOR.accent; },
   get idleForeground() { return COLOR.text; },
   get mutedForeground() { return COLOR.muted; },
   get border() { return COLOR.border; },
-  get title() { return COLOR.accent; },
+  get title() { return COLOR.info; },
   get warning() { return COLOR.warning; },
   get danger() { return COLOR.dangerSoft; },
 } as const;

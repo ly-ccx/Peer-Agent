@@ -20,18 +20,19 @@ export interface TuiResponsivePickerLayout {
   readonly commandMaxVisible: number;
 }
 
-export function responsiveLayout(columns: number): TuiResponsiveLayout {
+export function responsiveLayout(columns: number, rows = 24): TuiResponsiveLayout {
+  const hasVerticalSafety = Math.max(1, Math.floor(rows)) >= 18;
   if (columns >= 120) return {
     density: 'wide', showDescriptions: true, showHints: true,
-    stackActions: false, outerPadding: 3, outerPaddingY: 1, welcomeWidth: '75%',
+    stackActions: false, outerPadding: 3, outerPaddingY: hasVerticalSafety ? 1 : 0, welcomeWidth: '75%',
   };
   if (columns >= 80) return {
     density: 'compact', showDescriptions: true, showHints: true,
-    stackActions: false, outerPadding: 2, outerPaddingY: 1, welcomeWidth: '88%',
+    stackActions: false, outerPadding: 2, outerPaddingY: hasVerticalSafety ? 1 : 0, welcomeWidth: '88%',
   };
   if (columns >= 60) return {
     density: 'narrow', showDescriptions: false, showHints: true,
-    stackActions: true, outerPadding: 1, outerPaddingY: 1, welcomeWidth: '100%',
+    stackActions: true, outerPadding: 1, outerPaddingY: hasVerticalSafety ? 1 : 0, welcomeWidth: '100%',
   };
   return {
     density: 'minimal', showDescriptions: false, showHints: false,

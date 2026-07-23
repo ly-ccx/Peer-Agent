@@ -13,6 +13,27 @@ describe('TUI app layout', () => {
     expect(appSource).not.toContain('wordmarkFont');
   });
 
+  test('keeps the workbench away from the terminal edges without collapsing its header', () => {
+    expect(appSource).toContain('paddingTop={layout.outerPaddingY}');
+    expect(appSource).toContain('paddingBottom={layout.outerPaddingY}');
+    expect(appSource).toContain('paddingTop={menuReserve}');
+    expect(appSource).toContain('const layout = responsiveLayout(terminal.width, terminal.height)');
+    expect(appSource).toContain('flexDirection="row"\n        width="100%"\n        flexGrow={1}\n        minHeight={0}');
+    expect(appSource).toContain('<box flexDirection="column" flexGrow={1} minWidth={0} minHeight={0}>');
+    expect(appSource).not.toContain('<box flexDirection="column" flexGrow={1} minWidth={0} height="100%">');
+
+    const topbarSource = appSource.slice(
+      appSource.indexOf('<span fg={COLOR.accent}>{APP_CHROME.brandMark}</span>'),
+      appSource.indexOf('<ChatHistory snapshot={snapshot} layout={layout} />'),
+    );
+    expect(topbarSource).toContain('flexShrink={0}');
+    expect(topbarSource).toContain('height={1}');
+    expect(topbarSource).toContain('{sessionWorkspacePath}');
+    expect(topbarSource).toContain('{sessionTopbarModel}');
+    expect(topbarSource).toContain('<ComposerModeDivider width={topbarDividerWidth} />');
+    expect(topbarSource).toContain('<box height={1} flexShrink={0} />');
+  });
+
   test('keeps the CLI home visible for an empty session even when a Goal exists', () => {
     const welcomeCondition = appSource.match(/const isWelcome = [\s\S]*?isComposerSurface;/)?.[0] ?? '';
 
@@ -45,14 +66,20 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('<box width={layout.welcomeWidth} maxWidth={112}>');
   });
 
-  test('renders the composer with OpenTUI rounded corners without changing its height', () => {
+  test('renders the composer as a quiet unbordered line with layout-driven height', () => {
     const composerSource = appSource.slice(
       appSource.indexOf('function Composer('),
       appSource.indexOf('function ComposerDock'),
     );
+    const dockSource = appSource.slice(
+      appSource.indexOf('function ComposerDock'),
+      appSource.indexOf('export function App'),
+    );
 
-    expect(composerSource).toContain('borderStyle="rounded"');
-    expect(composerSource).toContain('height={5}');
+    expect(composerSource).not.toContain('borderStyle=');
+    expect(composerSource).toContain('height={height}');
+    expect(dockSource).toContain('height={composerLayout.inputRows}');
+    expect(dockSource).toContain('no card or enclosing border');
   });
 
   test('keeps composer input text readable with the active theme whether focused or not', () => {
@@ -101,6 +128,14 @@ describe('TUI app layout', () => {
     expect(resumeSource).toContain('selectionWindow(rows, selectedIndex, maxVisible)');
     expect(resumeSource).toContain('visibleRows.map(({ item: row, index })');
     expect(resumeSource).toContain('flexShrink={0}');
+    expect(resumeSource).toContain('marginLeft={1}');
+    expect(resumeSource).toContain('marginRight={1}');
+    expect(resumeSource).toContain('marginTop={1}');
+    expect(resumeSource).toContain('marginBottom={1}');
+    expect(resumeSource).toContain('paddingLeft={1}');
+    expect(resumeSource).toContain('paddingRight={1}');
+    expect(resumeSource).toContain('paddingTop={1}');
+    expect(resumeSource).toContain('paddingBottom={1}');
     expect(resumeSource).not.toContain('position="absolute"');
     expect(resumeSource).not.toContain('bottom={5}');
     expect(resumeSource).not.toContain('rows.slice(0, 8)');
@@ -186,27 +221,19 @@ describe('TUI app layout', () => {
     expect(runningLabelSource).toContain("'compacting'");
     expect(runningLabelSource).not.toContain('composerEscToCancelHint');
     expect(runningLabelSource).not.toContain('cancelHint');
-    expect(dockSource).toContain("snapshot.status !== 'idle'");
+    expect(dockSource).toContain('composerLayout.showRunningStatus ?');
     expect(dockSource).toContain('<ComposerRunningStatusLabel');
     expect(dockSource).toContain('composerContentWidth(terminal.width, layout.outerPadding)');
     expect(dockSource).toContain('<ComposerModeDivider width={dividerWidth} />');
     expect(statusViewSource).not.toContain("{'─'.repeat(80)}");
     expect(statusViewSource).toContain("{'─'.repeat(cols)}");
-    // Divider must only render with the running status (not when idle).
-    const activeBlock = dockSource.slice(
-      dockSource.indexOf("snapshot.status !== 'idle'"),
-      dockSource.indexOf('<Composer\n'),
-    );
-    expect(activeBlock).toContain('<ComposerRunningStatusLabel');
-    expect(activeBlock).toContain('<ComposerModeDivider width={dividerWidth} />');
-    expect(activeBlock).toContain(') : null}');
-    const runningAt = dockSource.indexOf('<ComposerRunningStatusLabel');
     const dividerAt = dockSource.indexOf('<ComposerModeDivider width={dividerWidth} />');
+    const runningAt = dockSource.indexOf('<ComposerRunningStatusLabel');
     const inputAt = dockSource.indexOf('<Composer\n');
     const statusAt = dockSource.indexOf('<ComposerStatusBar status={status} layout={statusLayout} />');
-    expect(runningAt).toBeGreaterThanOrEqual(0);
-    expect(dividerAt).toBeGreaterThan(runningAt);
-    expect(inputAt).toBeGreaterThan(dividerAt);
+    expect(dividerAt).toBeGreaterThanOrEqual(0);
+    expect(runningAt).toBeGreaterThan(dividerAt);
+    expect(inputAt).toBeGreaterThan(runningAt);
     expect(statusAt).toBeGreaterThan(inputAt);
   });
 
@@ -242,7 +269,7 @@ describe('TUI app layout', () => {
   test('keeps slash suggestions as a bounded overlay anchored above the composer', () => {
     const slashMenuSource = appSource.slice(
       appSource.indexOf('function SlashCommandMenu'),
-      appSource.indexOf('function Composer('),
+      appSource.indexOf('function ResumePickerMenu'),
     );
     const dockSource = appSource.slice(
       appSource.indexOf('function ComposerDock'),
@@ -252,11 +279,17 @@ describe('TUI app layout', () => {
     expect(slashMenuSource).toContain('position="absolute"');
     expect(slashMenuSource).toContain('left={0}');
     expect(slashMenuSource).toContain('right={0}');
-    expect(slashMenuSource).toContain('bottom={5}');
+    expect(slashMenuSource).toContain('bottom={bottom}');
+    expect(dockSource).toContain('bottom={composerLayout.pickerBottom}');
+    expect(slashMenuSource).not.toContain('bottom={5}');
+    expect(slashMenuSource).not.toContain('paddingTop={1}');
+    expect(dockSource).toContain('Math.min(slashMaxVisible, Math.max(1, slashItems.length)) + 1');
     expect(slashMenuSource).toContain('zIndex={100}');
     expect(slashMenuSource).toContain('flexDirection="row"');
     expect(slashMenuSource).toContain('height={1}');
-    expect(dockSource).toContain('<box position="relative" width="100%" height={5} overflow="visible">');
+    expect(dockSource).toContain('<box position="relative" width="100%" height={composerLayout.shellRows} overflow="visible">');
+    expect(dockSource).toContain('<box flexDirection="row" width="100%">');
+    expect(dockSource).not.toContain('<box flexDirection="row" width="100%" paddingTop={1}>');
     expect(dockSource).toContain('<SlashCommandMenu');
     expect(dockSource.indexOf('<SlashCommandMenu')).toBeLessThan(dockSource.indexOf('<Composer\n'));
     expect(appSource).toContain("experience.surface.type === 'slash-suggestions'");
@@ -283,6 +316,7 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('<ErrorBanner message={snapshot.error} layout={layout} />');
     expect(appSource).toContain('const menuReserve = slashOpen');
     expect(appSource).toContain('paddingTop={menuReserve}');
+    expect(appSource).not.toContain('paddingTop={menuReserve + layout.outerPaddingY}');
   });
 
   test('makes chat history text selectable and copies active selection on Ctrl/Cmd+C', () => {
@@ -343,7 +377,10 @@ describe('TUI app layout', () => {
     expect(modelPickerSource).toContain('position="absolute"');
     expect(modelPickerSource).toContain('left={0}');
     expect(modelPickerSource).toContain('right={0}');
-    expect(modelPickerSource).toContain('bottom={5}');
+    expect(modelPickerSource).toContain('bottom={bottom}');
+    expect(modelPickerSource).not.toContain('bottom={5}');
+    expect(modelPickerSource).not.toContain('paddingTop={1}');
+    expect(dockSource).toContain('Math.min(modelPickerMaxVisible, Math.max(1, modelPickerRows.length)) + 3');
     expect(modelPickerSource).toContain('zIndex={100}');
     expect(modelPickerSource).toContain('<strong>{title}</strong>');
     // Group chips must wrap so later providers are not clipped off-screen.
@@ -386,6 +423,7 @@ describe('TUI app layout', () => {
     expect(statusViewSource).not.toContain('label="workspace"');
     expect(statusViewSource).not.toContain('{status.reasoning}');
     expect(wideStatusSource).toContain('justifyContent="space-between"');
+    expect(statusSource).not.toContain('paddingRight={1}');
     expect(wideStatusSource.match(/<text /g)?.length).toBe(2);
     expect(wideStatusSource).toContain('<StatusPair label="mode" value={status.mode} accent />');
     expect(wideStatusSource).toContain('value={layout === \'compact\' ? status.permissionShort : status.permission}');
@@ -394,7 +432,7 @@ describe('TUI app layout', () => {
   });
 
   test('adapts picker density and keeps approval choices on separate rows', () => {
-    expect(appSource).toContain('const layout = responsiveLayout(terminal.width)');
+    expect(appSource).toContain('const layout = responsiveLayout(terminal.width, terminal.height)');
     expect(appSource).toContain('<box flexDirection="column" gap={0} flexShrink={0}>');
     expect(appSource).toContain('Action  {details.action}');
     expect(appSource).toContain('Where   {details.location}');
@@ -406,9 +444,40 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('paddingLeft={layout.outerPadding}');
     expect(appSource).toContain('<ChatHistory snapshot={snapshot} layout={layout} />');
     expect(appSource).toContain('paddingRight={layout.outerPadding}');
-    expect(appSource).toContain('paddingTop={layout.outerPaddingY}');
-    expect(appSource).toContain('paddingBottom={layout.outerPaddingY}');
+    expect(appSource).toContain('paddingTop={menuReserve}');
+    expect(appSource).not.toContain('paddingTop={menuReserve + layout.outerPaddingY}');
+    expect(appSource).toContain('paddingBottom={pickerLayout.verticalPadding}');
     expect(appSource).not.toContain('paddingLeft={2}');
+  });
+
+  test('keeps selection surfaces on the terminal canvas without card chrome', () => {
+    const pickerRanges = [
+      ['function SlashCommandMenu(', 'function ResumePickerMenu('],
+      ['function ResumePickerMenu(', 'function ModelPickerMenu('],
+      ['function ModelPickerMenu(', 'function ComposerDock('],
+      ['{permissionSurface ? (', '{themeSurface ? ('],
+      ['{themeSurface ? (', '{modeSurface ? ('],
+      ['{modeSurface ? (', '{helpSurface ? ('],
+      ['{commandSurface ? (', '<ComposerDock'],
+    ] as const;
+
+    for (const [start, end] of pickerRanges) {
+      const startIndex = appSource.indexOf(start);
+      const endIndex = appSource.indexOf(end, startIndex + start.length);
+      expect(startIndex).toBeGreaterThanOrEqual(0);
+      expect(endIndex).toBeGreaterThan(startIndex);
+
+      const pickerSource = appSource.slice(startIndex, endIndex);
+      expect(pickerSource).not.toContain('borderStyle="rounded"');
+      expect(pickerSource).not.toContain('backgroundColor={COLOR.panel}');
+      expect(pickerSource).not.toContain('backgroundColor={PICKER_CHROME.selectedBackground}');
+    }
+
+    expect(appSource).toContain("border={['top']}");
+    expect(appSource).toContain('borderColor={PICKER_CHROME.border}');
+    expect(appSource).toContain('backgroundColor={PICKER_CHROME.idleBackground}');
+    expect(appSource).toContain('selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground');
+    expect(appSource).toContain('PICKER_CHROME.checkCurrent');
   });
 
   test('prevents short-terminal picker rows from collapsing onto each other', () => {
@@ -456,9 +525,28 @@ describe('TUI app layout', () => {
     expect(appSource).not.toContain('MARKDOWN_STYLE');
   });
 
+  test('uses one-way turn spacing instead of stacking top and bottom margins', () => {
+    const historySource = appSource.slice(
+      appSource.indexOf('function ChatHistory'),
+      appSource.indexOf('function ErrorBanner'),
+    );
+
+    expect(historySource).toContain('gap={roleBodyGap} marginBottom={1}>');
+    expect(historySource).not.toContain('marginTop={1} marginBottom={1}');
+    expect(historySource).not.toContain('<box key={message.id} flexDirection="column" marginBottom={1}>');
+  });
+
   test('renders YOU/PEER lanes and a real tool activity timeline', () => {
+    // Wide terminals use the available conversation width; responsive outer padding
+    // remains the single safety margin when space is scarce.
+    expect(appSource).not.toContain('terminal.width - 112');
+    expect(appSource).toContain('const roleRailWidth = 7;');
+    expect(appSource).toContain("const roleBodyGap = layout.density === 'compact' ? 2 : 1;");
+    expect(appSource).toContain('gap={roleBodyGap} marginBottom={1}');
+    expect(appSource).toContain('paddingLeft={layout.outerPadding}');
+    expect(appSource).toContain('paddingRight={layout.outerPadding}');
     // YOU is a muted left rail label (not a highlighted title row).
-    expect(appSource).toContain('<box width={7}><text fg={COLOR.muted}>YOU</text></box>');
+    expect(appSource).toContain('<box width={roleRailWidth}><text fg={COLOR.muted}>YOU</text></box>');
     expect(appSource).not.toContain('<strong>YOU</strong>');
     expect(appSource).toContain('<strong>PEER</strong>');
     // Cyan bar sits on the user body column, not before the YOU label.
@@ -470,7 +558,7 @@ describe('TUI app layout', () => {
     expect(appSource).toContain("{canExpand ? (expanded ? '−' : '+') : ' '}");
     expect(appSource).toContain('onMouseDown={canExpand ? onToggle : undefined}');
     expect(appSource).not.toContain('<box flexDirection="row" onMouseDown={onToggle}>');
-    expect(appSource).toContain('>│ </text>');
+    expect(appSource).toContain('<text fg={color}><ToolStatusGlyph status={presentation.status} /></text>');
     expect(appSource).toContain('toolStatusColor(presentation.status)');
     expect(appSource).toContain('resolveToolPresentation(message)');
     // Crush tool timeline: status glyph + kind label + summary + duration.
@@ -523,7 +611,8 @@ describe('TUI app layout', () => {
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i] ?? '';
       if (!/\bborder\b/.test(line) || /borderStyle|borderColor|COLOR\.border/.test(line)) continue;
-      // standalone `border` prop line — next few lines must declare rounded style
+      // Only a standalone JSX `border` prop requires a rounded border style.
+      if (line.trim() !== 'border') continue;
       const window = lines.slice(i, i + 4).join('\n');
       expect(window).toContain('borderStyle="rounded"');
     }
@@ -531,12 +620,20 @@ describe('TUI app layout', () => {
     expect(appSource).not.toMatch(/\bborder\s+borderColor=/);
   });
 
-  test('uses the main interaction area plus a right Goal status area without a persistent left navigation', () => {
-    expect(appSource).toContain('<box flexDirection="row" width="100%" height="100%" gap={1}>');
+  test('uses a full-width topbar above one continuous workbench and Mission rail', () => {
+    const topbarIndex = appSource.indexOf('Session topbar spans conversation and Mission rail.');
+    const splitWorkspaceIndex = appSource.indexOf('Split workspace starts below the full-width session topbar.');
+
+    expect(topbarIndex).toBeGreaterThan(-1);
+    expect(splitWorkspaceIndex).toBeGreaterThan(topbarIndex);
+    expect(appSource).toContain('flexDirection="row"\n        width="100%"\n        flexGrow={1}\n        minHeight={0}');
     expect(appSource).toContain("goalLayout.mode === 'side-panel'");
     expect(appSource).toContain('<GoalStatusPanel view={goalView} width={goalLayout.panelWidth} />');
     expect(appSource).toContain("goalLayout.mode === 'compact-summary'");
     expect(appSource).toContain('<GoalCompactSummary view={goalView} />');
+    expect(goalStatusViewSource).toContain('backgroundColor={COLOR.background}');
+    expect(goalStatusViewSource).not.toContain('backgroundColor={COLOR.panel}');
+    expect(goalStatusViewSource).toContain("border={['left']}");
     expect(appSource).not.toContain('LeftNavigation');
   });
 
@@ -564,7 +661,7 @@ describe('TUI app layout', () => {
   });
 
   test('presents goals as a mission rail with progress and current-work emphasis', () => {
-    expect(goalStatusViewSource).toContain('<strong>MISSION</strong>');
+    expect(goalStatusViewSource).toContain('<strong>MISSION / 01</strong>');
     expect(goalStatusViewSource).toContain("const progressTrack = `${'━'.repeat(progressDone)}${'─'.repeat(progressWidth - progressDone)}`;");
     expect(goalStatusViewSource).toContain('NOW WORKING');
     expect(goalStatusViewSource).toContain('border={[\'left\']}');
@@ -594,7 +691,9 @@ describe('TUI Ask user option selection', () => {
 
     const askUserCardSource = appSource.slice(cardStart, cardEnd);
     expect(askUserCardSource).toContain('flexShrink={0}');
-    expect(askUserCardSource).toContain('borderColor={COLOR.accent}');
+    expect(askUserCardSource).toContain("border={['top']}");
+    expect(askUserCardSource).toContain('borderColor={PICKER_CHROME.border}');
+    expect(askUserCardSource).toContain('backgroundColor={PICKER_CHROME.idleBackground}');
     expect(askUserCardSource).toContain('{pendingUserInput.question}');
     expect(askUserCardSource).toContain('userInputOptions.map');
   });

@@ -26,28 +26,34 @@ export function GoalStatusPanel({ view, width }: {
       borderColor={COLOR.border}
       backgroundColor={COLOR.background}
       paddingLeft={2}
-      paddingRight={1}
+      paddingRight={2}
+      paddingTop={1}
+      paddingBottom={1}
       gap={1}
     >
       <box flexDirection="row" justifyContent="space-between">
-        <text fg={COLOR.accent}><strong>MISSION</strong></text>
-        <text fg={statusColor(view.status)}>{view.status.toUpperCase()}</text>
+        <text fg={COLOR.accent}><strong>MISSION / 01</strong></text>
+        <text fg={statusColor(view.status)}>● {view.status.toUpperCase()}</text>
       </box>
       <text fg={COLOR.text} wrapMode="word"><strong>{view.title}</strong></text>
       <box flexDirection="column">
+        <box flexDirection="row" justifyContent="space-between">
+          <text fg={COLOR.muted}>{view.completed} / {view.total} COMPLETE</text>
+          <text fg={COLOR.muted}>{view.percent}%</text>
+        </box>
         <text fg={COLOR.accent} wrapMode="none">{progressTrack}</text>
-        <text fg={COLOR.muted}>{view.completed} of {view.total} complete · {view.percent}%</text>
       </box>
       {view.currentTask ? (
-        <box flexDirection="column" border={['left']} borderColor={COLOR.accent} paddingLeft={1}>
+        <box flexDirection="column">
           <text fg={COLOR.muted}>NOW WORKING</text>
-          <text fg={COLOR.text} wrapMode="word">
-            {goalTaskGlyph(view.currentTask.status)} {view.currentTask.title}
-          </text>
+          <box flexDirection="column" border={['left']} borderColor={COLOR.accent} paddingLeft={1}>
+            <text fg={COLOR.accent}>◇ ACTIVE</text>
+            <text fg={COLOR.text} wrapMode="word">{view.currentTask.title}</text>
+          </box>
         </box>
       ) : null}
       <box flexDirection="column" flexGrow={1} overflow="hidden">
-        <text fg={COLOR.muted}>QUEUE</text>
+        <text fg={COLOR.muted}>TASKS</text>
         {view.tasks.slice(0, 10).map((task) => (
           <text key={task.id} fg={task.status === 'running' ? COLOR.text : statusColor(task.status)} wrapMode="word">
             {goalTaskGlyph(task.status)}  {task.title}
@@ -69,7 +75,7 @@ export function GoalCompactSummary({ view }: { readonly view: GoalStatusViewMode
   const current = view.currentTask ? ` · ${goalTaskGlyph(view.currentTask.status)} ${view.currentTask.title}` : '';
   return (
     <text fg={statusColor(view.status)} wrapMode="none">
-      Goal {view.completed}/{view.total} · {view.status}{current}
+      Goal {view.completed}/{view.total} · {view.percent}% · {view.status}{current}
     </text>
   );
 }

@@ -312,21 +312,25 @@ function TableBlock({ headers, rows, alignments, width }: {
 export function MarkdownView({ content, width }: { content: string; width?: number }) {
   const terminal = useTerminalDimensions();
   const availableWidth = Math.max(20, width ?? terminal.width);
+  const blocks = parseBlocks(content || ' ');
   return (
     <box flexDirection="column">
-      {parseBlocks(content || ' ').map((block, index) => {
+      {blocks.map((block, index) => {
         const key = `${block.type}-${index}`;
+        // Space separates Markdown blocks; the final block must not add a tail
+        // because the enclosing conversation turn owns inter-message rhythm.
+        const marginBottom = index < blocks.length - 1 ? 1 : 0;
         if (block.type === 'heading') {
           const prefix = block.level === 1
             ? MARKDOWN_CHROME.headingH1
             : block.level === 2
               ? MARKDOWN_CHROME.headingH2
               : MARKDOWN_CHROME.headingH3;
-          return <ThemedText key={key} selectable fg={block.level <= 2 ? COLOR.accent : COLOR.text} marginBottom={1}><strong>{prefix}{inline(block.text, key)}</strong></ThemedText>;
+          return <ThemedText key={key} selectable fg={block.level <= 2 ? COLOR.accent : COLOR.text} marginBottom={marginBottom}><strong>{prefix}{inline(block.text, key)}</strong></ThemedText>;
         }
         if (block.type === 'code') {
           return (
-            <box key={key} flexDirection="column" backgroundColor={COLOR.codeBackground} paddingLeft={1} paddingRight={1} marginBottom={1}>
+            <box key={key} flexDirection="column" backgroundColor={COLOR.codeBackground} paddingLeft={1} paddingRight={1} marginBottom={marginBottom}>
               {block.language ? <ThemedText selectable fg={COLOR.muted}>{block.language}</ThemedText> : null}
               {block.language.toLowerCase() === 'diff'
                 ? <DiffCodeBlock text={block.text} />
@@ -334,11 +338,11 @@ export function MarkdownView({ content, width }: { content: string; width?: numb
             </box>
           );
         }
-        if (block.type === 'quote') return <ThemedText key={key} selectable fg={COLOR.muted} marginBottom={1}>{MARKDOWN_CHROME.quotePrefix}{inline(block.text, key)}</ThemedText>;
-        if (block.type === 'rule') return <ThemedText key={key} selectable fg={COLOR.muted} marginBottom={1}>────────────────────────────────────────</ThemedText>;
+        if (block.type === 'quote') return <ThemedText key={key} selectable fg={COLOR.muted} marginBottom={marginBottom}>{MARKDOWN_CHROME.quotePrefix}{inline(block.text, key)}</ThemedText>;
+        if (block.type === 'rule') return <ThemedText key={key} selectable fg={COLOR.muted} marginBottom={marginBottom}>────────────────────────────────────────</ThemedText>;
         if (block.type === 'list') {
           return (
-            <box key={key} flexDirection="column" marginBottom={1}>
+            <box key={key} flexDirection="column" marginBottom={marginBottom}>
               {block.items.map((item, itemIndex) => (
                 <ThemedText key={`${key}-${itemIndex}`} selectable fg={COLOR.text}>{block.ordered ? `${itemIndex + 1}. ` : MARKDOWN_CHROME.listBullet}{inline(item, `${key}-${itemIndex}`)}</ThemedText>
               ))}
@@ -347,16 +351,17 @@ export function MarkdownView({ content, width }: { content: string; width?: numb
         }
         if (block.type === 'table') {
           return (
-            <TableBlock
-              key={key}
-              headers={block.headers}
-              rows={block.rows}
-              alignments={block.alignments}
-              width={availableWidth}
-            />
+            <box key={key} marginBottom={marginBottom}>
+              <TableBlock
+                headers={block.headers}
+                rows={block.rows}
+                alignments={block.alignments}
+                width={availableWidth}
+              />
+            </box>
           );
         }
-        return <ThemedText key={key} selectable fg={COLOR.text} marginBottom={1}>{inline(block.text, key)}</ThemedText>;
+        return <ThemedText key={key} selectable fg={COLOR.text} marginBottom={marginBottom}>{inline(block.text, key)}</ThemedText>;
       })}
     </box>
   );
