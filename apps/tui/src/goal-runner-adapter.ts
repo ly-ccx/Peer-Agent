@@ -152,10 +152,11 @@ export function createTuiSharedGoalRunner(options: {
     })();
   }
 
-  if (options.autoStart !== false && typeof store?.setOnChange === 'function') {
-    // goal-bridge 建 store 时未传 onChange；这里经 setOnChange 挂 auto-start 闸门。
-    // Desktop 是 store 构造时注入 onChange，语义一致。
-    store.setOnChange((payload: any) => {
+  // 经 bridge.subscribeChanges 挂 auto-start，而不是独占 store.setOnChange。
+  // goal-bridge 会 fan-out 进程内 onChange，同时保留 .changes.jsonl 跨进程兜底；
+  // 这样 TUI Goal 面板也能在 create 当下立刻刷新。
+  if (options.autoStart !== false && typeof bridge.subscribeChanges === 'function') {
+    bridge.subscribeChanges((payload: any) => {
       maybeAutoStartFromChange(payload);
     });
   }

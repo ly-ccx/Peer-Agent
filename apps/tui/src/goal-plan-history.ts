@@ -47,10 +47,17 @@ export function selectPreferredGoalPlanId(
   plans: readonly TuiGoalPlan[],
   currentPlanId: string | null | undefined,
 ): string | null {
+  // Always follow live work when any non-terminal plan exists. Sticking to a
+  // previous selection made the side panel show a finished Goal after
+  // goal_create_plan minted a newer one in the same conversation.
+  const activePlanId = selectActiveGoalPlanId(plans);
+  if (activePlanId) {
+    return activePlanId;
+  }
   if (currentPlanId && plans.some((plan) => plan.planId === currentPlanId)) {
     return currentPlanId;
   }
-  return selectActiveGoalPlanId(plans) ?? plans[0]?.planId ?? null;
+  return plans[0]?.planId ?? null;
 }
 
 export function selectActiveGoalPlanId(

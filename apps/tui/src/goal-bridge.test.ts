@@ -12,10 +12,51 @@ describe('TuiGoalBridge', () => {
     expect(source).toContain("from '../../desktop/electron/main/data-store.mjs'");
     expect(source).toContain("return pathOf('goalPlans')");
     expect(source).toContain('createGoalPlanStore({');
-    expect(source).toContain('subscribeChanges: (listener) => store.subscribeChanges(listener)');
+    expect(source).toContain('subscribeChanges: subscribeLocalChanges');
+    expect(source).toContain('localChangeListeners');
+    expect(source).toContain('store.setOnChange');
     expect(source).not.toContain('findGoalPlanStorePath');
     expect(source).not.toContain('loadGoalPlanStoreFactory');
     expect(source).not.toContain('Unable to locate Desktop goal-plan-store.mjs');
+  });
+
+
+  test('notifies in-process subscribers immediately on goal_create_plan', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-goal-notify-'));
+    try {
+      const bridge = createTuiGoalBridge({ storeDir });
+      const events: Array<Record<string, unknown>> = [];
+      const unsubscribe = bridge.subscribeChanges((event) => {
+        events.push(event as Record<string, unknown>);
+      });
+      try {
+        const created = await bridge.execute({
+          capabilityId: GOAL_TOOL_NAMES.createPlan,
+          conversationId: 'conv-live-panel',
+          mode: 'goal',
+          workspaceRoot: process.cwd(),
+          args: {
+            title: 'Live panel',
+            goal: 'Show goal panel as soon as the plan is created',
+            tasks: [{ title: 'Notify subscribers on create' }],
+          },
+        });
+        expect(created.result.status).toBe('success');
+        const planId = (created.result.output as { planId?: string }).planId;
+        expect(typeof planId).toBe('string');
+        // Must observe the create event without waiting for turn-end / fs.watch.
+        expect(events.some((event) => event.planId === planId)).toBe(true);
+        expect(
+          events.some((event) => event.planId === planId && event.conversationId === 'conv-live-panel'),
+        ).toBe(true);
+        const listed = bridge.listPlanDetailsByConversation('conv-live-panel');
+        expect(listed.some((plan) => plan?.planId === planId)).toBe(true);
+      } finally {
+        unsubscribe();
+      }
+    } finally {
+      await rm(storeDir, { recursive: true, force: true });
+    }
   });
 
   test('creates a real shared store without injecting a mock store', async () => {

@@ -46,7 +46,7 @@ describe('TUI Goal plan history', () => {
     ).toEqual(['latest', 'older']);
   });
 
-  test('prefers active work, preserves an explicit history selection, then falls back to newest', () => {
+  test('follows active work even when a terminal history selection still exists', () => {
     const plans = [
       plan({ planId: 'latest-completed', updatedAt: '2026-07-23T03:00:00.000Z' }),
       plan({ planId: 'accepted', status: 'accepted', updatedAt: '2026-07-23T02:00:00.000Z' }),
@@ -54,9 +54,29 @@ describe('TUI Goal plan history', () => {
     ];
 
     expect(selectPreferredGoalPlanId(plans, null)).toBe('executing');
-    expect(selectPreferredGoalPlanId(plans, 'latest-completed')).toBe('latest-completed');
+    // Creating a new Goal must take over the side panel instead of sticking to
+    // the previously displayed completed mission.
+    expect(selectPreferredGoalPlanId(plans, 'latest-completed')).toBe('executing');
     expect(selectPreferredGoalPlanId([plans[0]], 'missing')).toBe('latest-completed');
     expect(selectPreferredGoalPlanId([], 'missing')).toBeNull();
+  });
+
+  test('switches from an older active selection to the preferred live Goal', () => {
+    const plans = [
+      plan({ planId: 'new-accepted', status: 'accepted', updatedAt: '2026-07-23T04:00:00.000Z' }),
+      plan({ planId: 'old-accepted', status: 'accepted', updatedAt: '2026-07-23T02:00:00.000Z' }),
+      plan({ planId: 'done', status: 'completed', updatedAt: '2026-07-23T03:00:00.000Z' }),
+    ];
+    expect(selectPreferredGoalPlanId(plans, 'old-accepted')).toBe('new-accepted');
+    expect(selectPreferredGoalPlanId(plans, 'done')).toBe('new-accepted');
+  });
+
+  test('preserves an explicit selection only when every plan is terminal', () => {
+    const plans = [
+      plan({ planId: 'latest-completed', updatedAt: '2026-07-23T03:00:00.000Z' }),
+      plan({ planId: 'older-completed', updatedAt: '2026-07-23T02:00:00.000Z' }),
+    ];
+    expect(selectPreferredGoalPlanId(plans, 'older-completed')).toBe('older-completed');
   });
 
   test('does not revive terminal history from a stale runner overlay', () => {

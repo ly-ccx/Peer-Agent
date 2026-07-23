@@ -100,10 +100,17 @@ export interface TuiGoalBridge {
   listPlansByConversation(conversationId: string | null | undefined): readonly any[];
   listPlanDetailsByConversation(conversationId: string | null | undefined): readonly any[];
   getPlan(planId: string): any | null;
+  /**
+   * Subscribe to goal-plan changes for this process.
+   * Prefer in-process store onChange fan-out so the TUI panel can refresh as
+   * soon as goal_create_plan persists — not only after the chat turn ends or
+   * after an fs.watch drain of .changes.jsonl.
+   */
   subscribeChanges(listener: (event: {
     readonly conversationId?: string | null;
     readonly planId?: string | null;
     readonly changeKind?: string | null;
+    readonly reason?: string | null;
   }) => void): () => void;
 }
 
@@ -237,6 +244,44 @@ export function createTuiGoalBridge(options?: {
   const store = options?.store ?? createGoalPlanStore({
     storeDir: options?.storeDir ?? goalPlansDir(),
   });
+
+  // Multi-listener fan-out over store.setOnChange / onChange.
+  // Runner auto-start and the TUI Goal panel both need the same in-process
+  // notify; overwriting setOnChange would drop one of them.
+  type GoalChangeListener = (event: {
+    readonly conversationId?: string | null;
+    readonly planId?: string | null;
+    readonly changeKind?: string | null;
+    readonly reason?: string | null;
+  }) => void;
+  const localChangeListeners = new Set<GoalChangeListener>();
+  // Desktop injects onChange at construct time; TUI store starts without one.
+  // Own the single setOnChange slot and fan out to local listeners.
+  if (typeof store?.setOnChange === 'function') {
+    store.setOnChange((payload: any) => {
+      for (const listener of localChangeListeners) {
+        try {
+          listener(payload);
+        } catch {
+          // Listener failures must not break store write paths.
+        }
+      }
+    });
+  }
+
+  function subscribeLocalChanges(listener: GoalChangeListener): () => void {
+    if (typeof listener !== 'function') return () => {};
+    localChangeListeners.add(listener);
+    // Keep disk watcher as a cross-process safety net (Desktop ↔ CLI).
+    const unsubDisk =
+      typeof store?.subscribeChanges === 'function'
+        ? store.subscribeChanges(listener)
+        : () => {};
+    return () => {
+      localChangeListeners.delete(listener);
+      unsubDisk();
+    };
+  }
 
   const toolDefinitions: RuntimeToolDefinition[] = [
     {
@@ -537,7 +582,7 @@ export function createTuiGoalBridge(options?: {
     listPlansByConversation,
     listPlanDetailsByConversation,
     getPlan,
-    subscribeChanges: (listener) => store.subscribeChanges(listener),
+    subscribeChanges: subscribeLocalChanges,
   };
 }
 
