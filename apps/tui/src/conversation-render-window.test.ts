@@ -184,6 +184,64 @@ describe('conversation render window', () => {
       .toEqual(['u5', 'a5', 'u6', 'a6']);
   });
 
+  test('keeps earlier paging moving when the current page is a single oversized message', () => {
+    const policy: ConversationRenderWindowPolicy = {
+      fallbackMaxMessages: 4,
+      fallbackMaxChars: 50,
+      historyPageMessages: 4,
+      historyPageMaxChars: 50,
+      emergencyMaxMessages: 5,
+      emergencyMaxChars: 200,
+    };
+    const messages = [
+      ...Array.from({ length: 6 }, (_, index) => [
+        message(`u${index}`, 'user', `q${index}`),
+        message(`a${index}`, 'assistant', `a${index}`),
+      ]).flat(),
+      message('huge', 'assistant', 'H'.repeat(10_000)),
+      message('u_end', 'user', '需要'),
+      message('a_end', 'assistant', 'reply'),
+    ];
+
+    let state = createConversationRenderWindowState();
+    let projection = projectConversationRenderWindow(messages, state, policy);
+    expect(projection.messages.map((item) => item.id)).toEqual(['u_end', 'a_end']);
+    expect(projection.window.hiddenBefore).toBeGreaterThan(0);
+
+    // First earlier must leave the latest tail. A huge predecessor may pull its
+    // whole turn into the page via start alignment; subsequent earlier must still
+    // advance instead of re-anchoring to the same window.
+    const firstEarlier = navigateConversationHistory(messages, state, 'earlier', policy);
+    const firstProjection = projectConversationRenderWindow(messages, firstEarlier, policy);
+    expect(firstProjection.window.mode).toBe('history');
+    expect(firstProjection.messages.some((item) => item.id === 'u_end')).toBe(false);
+    expect(firstProjection.messages.some((item) => item.id === 'a_end')).toBe(false);
+    expect(firstProjection.window.startIndex).toBeLessThan(projection.window.startIndex);
+    expect(firstProjection.window.canLoadEarlier).toBe(true);
+    expect(firstProjection.window.hiddenBefore).toBeGreaterThan(0);
+
+    const secondEarlier = navigateConversationHistory(messages, firstEarlier, 'earlier', policy);
+    const secondProjection = projectConversationRenderWindow(messages, secondEarlier, policy);
+    expect(secondProjection.window.mode).toBe('history');
+    expect(secondProjection.window.hiddenBefore).toBeLessThan(firstProjection.window.hiddenBefore);
+    expect(secondProjection.window.startIndex).toBeLessThan(firstProjection.window.startIndex);
+
+    // Exact screenshot stuck page: only "需要", with the newer reply hidden.
+    // earlier must leave that singleton instead of re-selecting it forever.
+    const singletonStuck = {
+      mode: 'history' as const,
+      startMessageId: 'u_end',
+      endMessageId: 'u_end',
+    };
+    const fromSingleton = navigateConversationHistory(messages, singletonStuck, 'earlier', policy);
+    const fromSingletonProjection = projectConversationRenderWindow(messages, fromSingleton, policy);
+    expect(fromSingletonProjection.window.mode).toBe('history');
+    expect(fromSingletonProjection.messages.some((item) => item.id === 'u_end')).toBe(false);
+    expect(fromSingletonProjection.window.startIndex).toBeLessThan(
+      projectConversationRenderWindow(messages, singletonStuck, policy).window.startIndex,
+    );
+  });
+
   test('keeps a history page stable when new messages append', () => {
     const messages = Array.from({ length: 6 }, (_, index) => [
       message(`u${index}`, 'user'),

@@ -383,23 +383,53 @@ export function navigateConversationHistory(
 
   if (direction === 'earlier') {
     if (!current.window.canLoadEarlier) return state;
-    const endAnchor = current.window.startIndex;
-    const selectedStart = scanBackwardStart(
-      messages,
-      endAnchor,
-      policy.historyPageMessages,
-      policy.historyPageMaxChars,
-    );
-    const startIndex = alignStartToTurn(messages, selectedStart, 0);
-    const endIndex = alignEndToTurn(messages, endAnchor, messages.length - 1);
-    const startMessage = messages[startIndex];
-    const endMessage = messages[endIndex];
-    if (!startMessage || !endMessage) return state;
-    return {
-      mode: 'history',
-      startMessageId: startMessage.id,
-      endMessageId: endMessage.id,
+    // Prefer a one-turn visual overlap on the current page head. When that head
+    // message alone already fills the page budget, overlapping re-selects the
+    // same singleton page forever (e.g. one short user turn after a huge tool
+    // result). Force an exclusive end before the current start so earlier always
+    // progresses while canLoadEarlier is true.
+    const currentStart = current.window.startIndex;
+    const exclusiveEnd = Math.max(0, currentStart - 1);
+    const headMessage = messages[currentStart];
+    const headAloneFillsBudget = !!headMessage
+      && estimateMessageChars(headMessage) >= policy.historyPageMaxChars;
+    const singletonPage = currentStart === current.window.endIndex;
+    let endAnchor = (headAloneFillsBudget || singletonPage)
+      ? exclusiveEnd
+      : currentStart;
+
+    const buildEarlierState = (anchor: number): ConversationRenderWindowState | null => {
+      const selectedStart = scanBackwardStart(
+        messages,
+        anchor,
+        policy.historyPageMessages,
+        policy.historyPageMaxChars,
+      );
+      const startIndex = alignStartToTurn(messages, selectedStart, 0);
+      // Cap end so turn alignment cannot expand back into the previous page
+      // when we intentionally stepped before the current start.
+      const alignedEnd = alignEndToTurn(messages, anchor, messages.length - 1);
+      const endIndex = anchor < currentStart
+        ? Math.min(alignedEnd, exclusiveEnd)
+        : alignedEnd;
+      if (startIndex >= currentStart && currentStart > 0) return null;
+      const startMessage = messages[startIndex];
+      const endMessage = messages[endIndex];
+      if (!startMessage || !endMessage) return null;
+      return {
+        mode: 'history',
+        startMessageId: startMessage.id,
+        endMessageId: endMessage.id,
+      };
     };
+
+    const preferred = buildEarlierState(endAnchor);
+    if (preferred) return preferred;
+    if (endAnchor !== exclusiveEnd) {
+      const forced = buildEarlierState(exclusiveEnd);
+      if (forced) return forced;
+    }
+    return state;
   }
 
   if (!current.window.canLoadLater) return createConversationRenderWindowState();
