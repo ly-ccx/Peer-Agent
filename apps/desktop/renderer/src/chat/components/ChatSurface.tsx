@@ -248,7 +248,8 @@ async function loadConversationMessages(conversationId: string): Promise<{
     : null;
   const storedTokens = Number(storedContext?.nextRequestInputTokens);
   const storedWindow = Number(storedContext?.contextWindow);
-  const authoritativeContext: AuthoritativeContext | null = Number.isFinite(storedTokens) && storedTokens >= 0
+  // 0 不是有效占用快照；恢复时忽略，回退本地历史估算，避免一进会话就显示 0%。
+  const authoritativeContext: AuthoritativeContext | null = Number.isFinite(storedTokens) && storedTokens > 0
     ? {
       nextRequestInputTokens: Math.floor(storedTokens),
       contextWindow: Number.isFinite(storedWindow) && storedWindow > 0 ? Math.floor(storedWindow) : null,

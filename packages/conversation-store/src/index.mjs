@@ -102,7 +102,8 @@ function normalizeContextSnapshot(snapshot, meta) {
   if (!snapshot || typeof snapshot !== 'object') return null;
   const nextRequestInputTokens = Number(snapshot.nextRequestInputTokens);
   const contentRevision = Number(snapshot.contentRevision);
-  if (!Number.isFinite(nextRequestInputTokens) || nextRequestInputTokens < 0) return null;
+  // 0 不是有效占用快照（空会话用 null 表示未知/未计算），拒绝落盘与恢复。
+  if (!Number.isFinite(nextRequestInputTokens) || nextRequestInputTokens <= 0) return null;
   if (!Number.isSafeInteger(contentRevision) || contentRevision < 0) return null;
   const contextWindowRaw = Number(snapshot.contextWindow);
   const contextWindow = Number.isFinite(contextWindowRaw) && contextWindowRaw > 0 ? contextWindowRaw : null;

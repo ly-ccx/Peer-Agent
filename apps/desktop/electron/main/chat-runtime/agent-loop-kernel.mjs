@@ -125,7 +125,10 @@ export function createAgentLoopKernel({
     }
     const payload = { streamId, usage };
     if (contextInfo && typeof contextInfo === 'object') {
-      if (typeof contextInfo.nextRequestInputTokens === 'number') {
+      // 只下发正数权威投影；0 表示缺失/空，交给 renderer 保留上一快照或本地历史。
+      if (typeof contextInfo.nextRequestInputTokens === 'number'
+        && Number.isFinite(contextInfo.nextRequestInputTokens)
+        && contextInfo.nextRequestInputTokens > 0) {
         payload.nextRequestInputTokens = contextInfo.nextRequestInputTokens;
       }
       if (typeof contextInfo.contextWindow === 'number') payload.contextWindow = contextInfo.contextWindow;

@@ -482,8 +482,10 @@ function wrapWebContentsForRuntimeEvents(
           });
         }
         persistStreamRecord({ final: true, interrupted: erroredTerminal });
+        // 只落盘正数投影：0 不是有效占用，写进去会让下次恢复直接显示 0%。
         if (!erroredTerminal
           && Number.isFinite(Number(payload?.nextRequestInputTokens))
+          && Number(payload.nextRequestInputTokens) > 0
           && typeof conversationStore?.updateContextSnapshot === 'function'
           && streamRecord.conversationId) {
           conversationStore.updateContextSnapshot(streamRecord.conversationId, {

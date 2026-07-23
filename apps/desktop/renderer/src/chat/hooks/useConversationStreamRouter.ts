@@ -234,7 +234,10 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           streamId: null,
         });
 
-        if (typeof nextRequestInputTokens === 'number') {
+        // 权威占用只接受正数：0/NaN 表示缺失快照，不能 final 覆盖成 0%。
+        if (typeof nextRequestInputTokens === 'number'
+          && Number.isFinite(nextRequestInputTokens)
+          && nextRequestInputTokens > 0) {
           conversationStore.setState(cid, (prev) => ({
             authoritativeContext: mergeAuthoritativeContextSnapshot({
               previous: prev.authoritativeContext,
@@ -537,6 +540,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           conversationStore.setState(cid, (prev) => {
             const nextAuthoritative =
               typeof nextRequestInputTokens === 'number'
+                && Number.isFinite(nextRequestInputTokens)
+                && nextRequestInputTokens > 0
                 ? mergeAuthoritativeContextSnapshot({
                     previous: prev.authoritativeContext,
                     nextRequestInputTokens,
@@ -574,6 +579,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           // 语义压缩完成后允许统一投影真实回落；缺快照时保留旧值。
           authoritativeContext:
             typeof nextRequestInputTokens === 'number'
+              && Number.isFinite(nextRequestInputTokens)
+              && nextRequestInputTokens > 0
               ? mergeAuthoritativeContextSnapshot({
                   previous: prev.authoritativeContext,
                   nextRequestInputTokens,
