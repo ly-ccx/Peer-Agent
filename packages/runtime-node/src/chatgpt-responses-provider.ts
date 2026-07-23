@@ -17,6 +17,12 @@ export interface CreateChatGptResponsesProviderOptions {
   readonly fetch?: typeof globalThis.fetch;
   readonly refreshTokens?: (tokens: ChatGptOAuthTokens) => Promise<ChatGptOAuthTokens>;
   readonly persistTokens?: (tokens: ChatGptOAuthTokens) => void;
+  /**
+   * Optional channel-specific request headers (e.g. Grok client identity).
+   * Merged after the built-in Responses headers so callers can override
+   * non-auth fields when a channel requires a distinct surface/version.
+   */
+  readonly extraHeaders?: Readonly<Record<string, string>>;
 }
 
 function contentText(content: ModelMessage['content']): string {
@@ -186,6 +192,7 @@ export function createChatGptResponsesProvider(options: CreateChatGptResponsesPr
           ...(tokens.accountId ? { 'chatgpt-account-id': tokens.accountId } : {}),
           'OpenAI-Beta': 'responses=experimental',
           originator: 'peer-agent',
+          ...(options.extraHeaders ?? {}),
         },
         body: JSON.stringify(requestBody(request)),
         signal: request.signal,

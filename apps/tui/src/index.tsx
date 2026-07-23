@@ -58,6 +58,17 @@ function sharedProvider(credentialId: string) {
     return createChatGptResponsesProvider({
       baseUrl: metadata.baseUrl,
       fetch: providerFetch,
+      // Match desktop provider-channels Grok identity so CLI does not hit HTTP 426
+      // "Grok CLI version (none) is outdated" without requiring a local grok CLI.
+      ...(metadata.authMethod === 'oauth_grok'
+        ? {
+            extraHeaders: {
+              'X-XAI-Token-Auth': 'xai-grok-cli',
+              'x-grok-client-surface': 'grok-build',
+              'x-grok-client-version': '0.1.202',
+            },
+          }
+        : {}),
       resolveTokens() {
         const selection = modelConfig.resolveSharedSelection?.(credentialId);
         if (!selection?.oauthTokens) {

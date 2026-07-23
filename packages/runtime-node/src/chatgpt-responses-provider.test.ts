@@ -73,3 +73,26 @@ test('ChatGPT Responses provider refreshes and persists expiring OAuth tokens', 
   await provider.stream({ model: 'gpt-test', messages: [], tools: [] });
   assert.equal(persisted, 'new');
 });
+
+test('ChatGPT Responses provider forwards Grok channel identity headers', async () => {
+  let captured: Headers | undefined;
+  const provider = createChatGptResponsesProvider({
+    baseUrl: 'https://cli-chat-proxy.grok.com/v1',
+    tokens: { access: 'grok-access' },
+    extraHeaders: {
+      'X-XAI-Token-Auth': 'xai-grok-cli',
+      'x-grok-client-surface': 'grok-build',
+      'x-grok-client-version': '0.1.202',
+    },
+    fetch: async (_input, init) => {
+      captured = new Headers(init?.headers);
+      return response(['data: [DONE]']);
+    },
+  });
+  await provider.stream({ model: 'grok-4.5', messages: [], tools: [] });
+  assert.equal(captured?.get('authorization'), 'Bearer grok-access');
+  assert.equal(captured?.get('x-xai-token-auth'), 'xai-grok-cli');
+  assert.equal(captured?.get('x-grok-client-surface'), 'grok-build');
+  assert.equal(captured?.get('x-grok-client-version'), '0.1.202');
+  assert.equal(captured?.get('openai-beta'), 'responses=experimental');
+});
