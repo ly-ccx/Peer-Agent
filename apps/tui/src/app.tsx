@@ -132,6 +132,7 @@ import {
   type TuiExperienceState,
   updateCommandPanelQuery,
 } from './tui-experience.ts';
+import { ThinkingView } from './thinking-view.tsx';
 import {
   APP_CHROME,
   COLOR,
@@ -171,14 +172,10 @@ function ThinkingStatusLabel({
 }) {
   const frame = useStatusAnimationFrame(true, THINKING_SPINNER_INTERVAL_MS);
   return (
-    <box flexDirection="column">
-      <ThemedText selectable fg={COLOR.muted}>
-        {thinkingStatusLabel(frame, hasThinkingContent)}
-      </ThemedText>
-      {thinkingText ? (
-        <MarkdownView content={thinkingText} tone="muted" />
-      ) : null}
-    </box>
+    <ThinkingView
+      content={thinkingText}
+      label={thinkingStatusLabel(frame, hasThinkingContent)}
+    />
   );
 }
 
@@ -400,10 +397,9 @@ function ChatHistory({
                         );
                       }
                       return (
-                        <MarkdownView
+                        <ThinkingView
                           key={`${message.id}-thinking-${segmentIndex}`}
                           content={text}
-                          tone="muted"
                         />
                       );
                     }
@@ -423,7 +419,7 @@ function ChatHistory({
                   : (
                     <>
                       {thinkingText ? (
-                        <MarkdownView content={thinkingText} tone="muted" />
+                        <ThinkingView content={thinkingText} />
                       ) : null}
                       {legacyTools.map((tool, toolIndex) => {
                         const toolKey = `${message.id}-tool-${tool.toolCallId ?? toolIndex}`;

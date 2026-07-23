@@ -1,10 +1,18 @@
-import type { ReactNode } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
+import type { TextProps } from '@opentui/react';
 import { useTerminalDimensions } from '@opentui/react';
 
 import { COLOR, MARKDOWN_CHROME } from './tui-theme.ts';
 import { ThemedText } from './themed-primitives.tsx';
 
 type TableAlignment = 'left' | 'center' | 'right';
+
+const MarkdownTextAttributesContext = createContext(0);
+
+function MarkdownText(props: TextProps) {
+  const inheritedAttributes = useContext(MarkdownTextAttributesContext);
+  return <ThemedText {...props} attributes={(props.attributes ?? 0) | inheritedAttributes} />;
+}
 
 type MarkdownBlock =
   | { type: 'heading'; level: number; text: string }
@@ -178,7 +186,7 @@ function DiffCodeBlock({ text }: { text: string }) {
   return (
     <box flexDirection="column">
       {(text || ' ').split('\n').map((line, index) => (
-        <ThemedText key={`diff-line-${index}`} selectable fg={diffLineColor(line)}>{line || ' '}</ThemedText>
+        <MarkdownText key={`diff-line-${index}`} selectable fg={diffLineColor(line)}>{line || ' '}</MarkdownText>
       ))}
     </box>
   );
@@ -274,13 +282,13 @@ function KeyValueTable({ rows, width }: { rows: readonly (readonly string[])[]; 
     <box flexDirection="column" marginBottom={1}>
       {rows.map((row, index) => stacked ? (
         <box key={`summary-${index}`} flexDirection="column" marginBottom={index < rows.length - 1 ? 1 : 0}>
-          <ThemedText selectable fg={COLOR.muted} attributes={1}>{inline(row[0] ?? '', `summary-key-${index}`)}</ThemedText>
-          <box paddingLeft={2}><ThemedText selectable fg={COLOR.text}>{inline(row[1] ?? '', `summary-value-${index}`)}</ThemedText></box>
+          <MarkdownText selectable fg={COLOR.muted} attributes={1}>{inline(row[0] ?? '', `summary-key-${index}`)}</MarkdownText>
+          <box paddingLeft={2}><MarkdownText selectable fg={COLOR.text}>{inline(row[1] ?? '', `summary-value-${index}`)}</MarkdownText></box>
         </box>
       ) : (
         <box key={`summary-${index}`} flexDirection="row">
-          <ThemedText selectable fg={COLOR.muted} attributes={1}>{padCell(row[0] ?? '', keyWidth, 'left')}{' '.repeat(GRID_GAP)}</ThemedText>
-          <ThemedText selectable fg={COLOR.text} flexShrink={1}>{inline(row[1] ?? '', `summary-value-${index}`)}</ThemedText>
+          <MarkdownText selectable fg={COLOR.muted} attributes={1}>{padCell(row[0] ?? '', keyWidth, 'left')}{' '.repeat(GRID_GAP)}</MarkdownText>
+          <MarkdownText selectable fg={COLOR.text} flexShrink={1}>{inline(row[1] ?? '', `summary-value-${index}`)}</MarkdownText>
         </box>
       ))}
     </box>
@@ -293,11 +301,11 @@ function StackedTable({ headers, rows }: { headers: readonly string[]; rows: rea
     <box flexDirection="column" marginBottom={1}>
       {rows.map((row, rowIndex) => (
         <box key={`stacked-${rowIndex}`} flexDirection="column" marginBottom={rowIndex < rows.length - 1 ? 1 : 0}>
-          <ThemedText selectable fg={COLOR.muted} attributes={1}>[{rowIndex + 1}]</ThemedText>
+          <MarkdownText selectable fg={COLOR.muted} attributes={1}>[{rowIndex + 1}]</MarkdownText>
           {headers.map((header, column) => (
             <box key={`stacked-${rowIndex}-${column}`} flexDirection="row" paddingLeft={2}>
-              <ThemedText selectable fg={COLOR.muted}>{padCell(header, labelWidth, 'left')}{'  '}</ThemedText>
-              <ThemedText selectable fg={COLOR.text} flexShrink={1}>{inline(row[column] ?? '', `stacked-${rowIndex}-${column}`)}</ThemedText>
+              <MarkdownText selectable fg={COLOR.muted}>{padCell(header, labelWidth, 'left')}{'  '}</MarkdownText>
+              <MarkdownText selectable fg={COLOR.text} flexShrink={1}>{inline(row[column] ?? '', `stacked-${rowIndex}-${column}`)}</MarkdownText>
             </box>
           ))}
         </box>
@@ -323,10 +331,10 @@ function DataTable({ headers, rows, alignments }: {
   });
   return (
     <box flexDirection="column" marginBottom={1}>
-      <ThemedText selectable fg={COLOR.textSoft} attributes={1}>{renderRow(headers, 'header')}</ThemedText>
-      <ThemedText selectable fg={COLOR.muted}>{widths.map((width) => '─'.repeat(width)).join(' '.repeat(GRID_GAP))}</ThemedText>
+      <MarkdownText selectable fg={COLOR.textSoft} attributes={1}>{renderRow(headers, 'header')}</MarkdownText>
+      <MarkdownText selectable fg={COLOR.muted}>{widths.map((width) => '─'.repeat(width)).join(' '.repeat(GRID_GAP))}</MarkdownText>
       {rows.map((row, index) => (
-        <ThemedText key={`row-${index}`} selectable fg={COLOR.text}>{renderRow(row, `row-${index}`)}</ThemedText>
+        <MarkdownText key={`row-${index}`} selectable fg={COLOR.text}>{renderRow(row, `row-${index}`)}</MarkdownText>
       ))}
     </box>
   );
@@ -345,10 +353,11 @@ function TableBlock({ headers, rows, alignments, width }: {
   return <DataTable headers={headers} rows={rows} alignments={alignments} />;
 }
 
-export function MarkdownView({ content, width, tone = 'default' }: {
+export function MarkdownView({ content, width, tone = 'default', textAttributes = 0 }: {
   content: string;
   width?: number;
   tone?: 'default' | 'muted';
+  textAttributes?: number;
 }) {
   const terminal = useTerminalDimensions();
   const availableWidth = Math.max(20, width ?? terminal.width);
@@ -356,8 +365,9 @@ export function MarkdownView({ content, width, tone = 'default' }: {
   const headingColor = tone === 'muted' ? COLOR.textSoft : COLOR.accent;
   const blocks = parseBlocks(content || ' ');
   return (
-    <box flexDirection="column">
-      {blocks.map((block, index) => {
+    <MarkdownTextAttributesContext.Provider value={textAttributes}>
+      <box flexDirection="column">
+        {blocks.map((block, index) => {
         const key = `${block.type}-${index}`;
         // Space separates Markdown blocks; the final block must not add a tail
         // because the enclosing conversation turn owns inter-message rhythm.
@@ -368,25 +378,25 @@ export function MarkdownView({ content, width, tone = 'default' }: {
             : block.level === 2
               ? MARKDOWN_CHROME.headingH2
               : MARKDOWN_CHROME.headingH3;
-          return <ThemedText key={key} selectable fg={block.level <= 2 ? headingColor : bodyColor} marginBottom={marginBottom}><strong>{prefix}{inline(block.text, key)}</strong></ThemedText>;
+          return <MarkdownText key={key} selectable fg={block.level <= 2 ? headingColor : bodyColor} marginBottom={marginBottom}><strong>{prefix}{inline(block.text, key)}</strong></MarkdownText>;
         }
         if (block.type === 'code') {
           return (
             <box key={key} flexDirection="column" backgroundColor={COLOR.codeBackground} paddingLeft={1} paddingRight={1} marginBottom={marginBottom}>
-              {block.language ? <ThemedText selectable fg={COLOR.muted}>{block.language}</ThemedText> : null}
+              {block.language ? <MarkdownText selectable fg={COLOR.muted}>{block.language}</MarkdownText> : null}
               {block.language.toLowerCase() === 'diff'
                 ? <DiffCodeBlock text={block.text} />
-                : <ThemedText selectable fg={COLOR.text}>{block.text || ' '}</ThemedText>}
+                : <MarkdownText selectable fg={COLOR.text}>{block.text || ' '}</MarkdownText>}
             </box>
           );
         }
-        if (block.type === 'quote') return <ThemedText key={key} selectable fg={COLOR.muted} marginBottom={marginBottom}>{MARKDOWN_CHROME.quotePrefix}{inline(block.text, key)}</ThemedText>;
-        if (block.type === 'rule') return <ThemedText key={key} selectable fg={COLOR.muted} marginBottom={marginBottom}>────────────────────────────────────────</ThemedText>;
+        if (block.type === 'quote') return <MarkdownText key={key} selectable fg={COLOR.muted} marginBottom={marginBottom}>{MARKDOWN_CHROME.quotePrefix}{inline(block.text, key)}</MarkdownText>;
+        if (block.type === 'rule') return <MarkdownText key={key} selectable fg={COLOR.muted} marginBottom={marginBottom}>────────────────────────────────────────</MarkdownText>;
         if (block.type === 'list') {
           return (
             <box key={key} flexDirection="column" marginBottom={marginBottom}>
               {block.items.map((item, itemIndex) => (
-                <ThemedText key={`${key}-${itemIndex}`} selectable fg={bodyColor}>{block.ordered ? `${block.start + itemIndex}. ` : MARKDOWN_CHROME.listBullet}{inline(item, `${key}-${itemIndex}`)}</ThemedText>
+                <MarkdownText key={`${key}-${itemIndex}`} selectable fg={bodyColor}>{block.ordered ? `${block.start + itemIndex}. ` : MARKDOWN_CHROME.listBullet}{inline(item, `${key}-${itemIndex}`)}</MarkdownText>
               ))}
             </box>
           );
@@ -403,8 +413,9 @@ export function MarkdownView({ content, width, tone = 'default' }: {
             </box>
           );
         }
-        return <ThemedText key={key} selectable fg={bodyColor} marginBottom={marginBottom}>{inline(block.text, key)}</ThemedText>;
-      })}
-    </box>
+        return <MarkdownText key={key} selectable fg={bodyColor} marginBottom={marginBottom}>{inline(block.text, key)}</MarkdownText>;
+        })}
+      </box>
+    </MarkdownTextAttributesContext.Provider>
   );
 }

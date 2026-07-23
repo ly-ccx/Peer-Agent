@@ -167,7 +167,8 @@ describe('TUI app layout', () => {
     expect(historySource).toContain('message.segments');
     expect(historySource).toContain("segment.type === 'thinking'");
     expect(historySource).toContain("segment.type === 'tool-call'");
-    expect(historySource.match(/tone="muted"/g)).toHaveLength(2);
+    expect(historySource).toContain('<ThinkingView');
+    expect(historySource).toContain('<MarkdownView');
     expect(historySource).not.toContain('<ThemedText selectable fg={COLOR.muted}>{thinkingText}</ThemedText>');
     // Ordered map over segments, not a fixed thinking block followed by tools[] only.
     expect(historySource).toContain('segments.map((segment, segmentIndex)');
