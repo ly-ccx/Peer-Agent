@@ -6,7 +6,10 @@ import { BrandStartupLoader } from './app/components/BrandStartupLoader';
 import { QuickChatWindow } from './app/components/QuickChatWindow';
 import { displayShortcut } from './app/components/ShortcutsPanel';
 import { useConfirm } from './app/components/ConfirmProvider';
-import { shouldRefreshQuickChatConversationList } from './app/state/quickChatSubmission';
+import {
+  navigateToQuickChatConversation,
+  shouldRefreshQuickChatConversationList,
+} from './app/state/quickChatSubmission';
 import { CONVERSATION_LIST_PAGE_SIZE, useDesktopBootstrap } from './app/state/useDesktopBootstrap';
 import { useBrandStartupMinHold } from './app/state/useBrandStartupMinHold';
 import { ChatSurface } from './chat/components/ChatSurface';
@@ -277,12 +280,23 @@ function MainApp() {
   useEffect(() => {
     return clientApi.onQuickChatOpenConversation(({ conversationId, workspacePath, planId, messageId }) => {
       void (async () => {
-        if (workspacePath) {
-          await clientApi.workspaceSetActive({ path: workspacePath });
-          setActiveWorkspace(workspacePath);
-          await refreshConversations(workspacePath, conversationView);
-        }
-        setActiveConversationId(conversationId);
+        await navigateToQuickChatConversation(
+          { conversationId, workspacePath },
+          {
+            openChatPage: () => {
+              setActivePage('chat');
+              setConversationView('active');
+            },
+            activateWorkspace: async (nextWorkspacePath) => {
+              await clientApi.workspaceSetActive({ path: nextWorkspacePath });
+              setActiveWorkspace(nextWorkspacePath);
+            },
+            refreshConversations: (nextWorkspacePath) => (
+              refreshConversations(nextWorkspacePath, conversationView)
+            ),
+            selectConversation: setActiveConversationId,
+          },
+        );
         if (messageId) {
           notificationMessageRequestRef.current += 1;
           setNotificationMessageTarget({

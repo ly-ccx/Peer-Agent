@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
 import {
+  navigateToQuickChatConversation,
   runQuickChatSubmission,
   shouldRefreshQuickChatConversationList,
 } from './quickChatSubmission.ts';
@@ -9,6 +10,29 @@ describe('shouldRefreshQuickChatConversationList', () => {
   it('refreshes only when the created conversation belongs to the active workspace', () => {
     assert.equal(shouldRefreshQuickChatConversationList('/workspace/a', '/workspace/a'), true);
     assert.equal(shouldRefreshQuickChatConversationList('/workspace/b', '/workspace/a'), false);
+  });
+});
+
+describe('navigateToQuickChatConversation', () => {
+  it('opens chat before switching workspace and selecting the conversation', async () => {
+    const calls: string[] = [];
+
+    await navigateToQuickChatConversation(
+      { conversationId: 'conversation-1', workspacePath: '/workspace/a' },
+      {
+        openChatPage: () => { calls.push('open-chat'); },
+        activateWorkspace: async (workspacePath) => { calls.push(`activate:${workspacePath}`); },
+        refreshConversations: async (workspacePath) => { calls.push(`refresh:${workspacePath}`); },
+        selectConversation: (conversationId) => { calls.push(`select:${conversationId}`); },
+      },
+    );
+
+    assert.deepEqual(calls, [
+      'open-chat',
+      'activate:/workspace/a',
+      'refresh:/workspace/a',
+      'select:conversation-1',
+    ]);
   });
 });
 
