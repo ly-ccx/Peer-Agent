@@ -3,6 +3,7 @@ import { applyTuiCommand, type TuiCommand, type TuiExperienceState } from './tui
 export interface TuiCommandExecutionHandlers {
   readonly clearChat: () => boolean;
   readonly compactContext: () => string | Promise<string>;
+  readonly navigateHistory: (direction: 'earlier' | 'later' | 'latest') => string;
   readonly controlGoal: (control: 'pause' | 'resume' | 'cancel') => string;
   readonly quit: () => void;
   readonly setNotice: (notice: string | null) => void;
@@ -26,6 +27,8 @@ export function executeTuiCommand(
       handlers.setNotice('Compacting context…');
       void noticeOrPromise.then((notice) => handlers.setNotice(notice));
     }
+  } else if (action.type === 'history-navigation') {
+    handlers.setNotice(handlers.navigateHistory(action.direction));
   } else if (action.type === 'goal-control') {
     handlers.setNotice(handlers.controlGoal(action.control));
   } else if (action.type === 'quit') {

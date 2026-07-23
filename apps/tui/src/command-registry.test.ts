@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildTuiHelpSections,
   filterTuiCommandRegistry,
+  resolveTuiCommandInput,
   TUI_COMMAND_REGISTRY,
   visibleTuiCommands,
 } from './command-registry.ts';
@@ -22,6 +23,9 @@ describe('TUI command registry', () => {
       'mcp',
       'clear',
       'compact',
+      'history-earlier',
+      'history-later',
+      'history-latest',
       'resume',
       'help',
       'quit',
@@ -41,6 +45,14 @@ describe('TUI command registry', () => {
     expect(visibleTuiCommands({ goalStatus: 'running' }).map((command) => command.id)).toContain('goal-cancel');
     expect(visibleTuiCommands({ goalStatus: 'paused' }).map((command) => command.id)).toContain('goal-resume');
     expect(visibleTuiCommands({ goalStatus: 'paused' }).map((command) => command.id)).not.toContain('goal-pause');
+  });
+
+  test('resolves discoverable history commands and spaced aliases', () => {
+    expect(resolveTuiCommandInput('/history-earlier', idle)?.id).toBe('history-earlier');
+    expect(resolveTuiCommandInput('/history earlier', idle)?.id).toBe('history-earlier');
+    expect(resolveTuiCommandInput('/history later', idle)?.id).toBe('history-later');
+    expect(resolveTuiCommandInput('/history latest', idle)?.id).toBe('history-latest');
+    expect(resolveTuiCommandInput('/history unknown', idle)).toBeNull();
   });
 
   test('builds help content from the live command registry', () => {
@@ -68,6 +80,9 @@ describe('TUI command localization', () => {
     const mcp = commands.find((command) => command.id === 'mcp');
     expect(mcp?.label).toBe('MCP 服务器');
     expect(mcp?.description).toBe('管理 MCP 服务器并查看工具状态');
+    const historyEarlier = commands.find((command) => command.id === 'history-earlier');
+    expect(historyEarlier?.label).toBe('更早历史');
+    expect(historyEarlier?.description).toContain('/history earlier');
   });
 
   test('filters by localized Chinese text', () => {

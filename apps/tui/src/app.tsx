@@ -8,8 +8,15 @@ import { B3Wordmark } from './b3-wordmark-view.tsx';
 import { ThemedText, ThemedTextarea } from './themed-primitives.tsx';
 import { MarkdownView } from './markdown-view.tsx';
 import { copyTextToClipboard, selectionCopyNotice } from './tui-clipboard.ts';
-import { buildTuiHelpSections } from './command-registry.ts';
+import { buildTuiHelpSections, resolveTuiCommandInput } from './command-registry.ts';
 import { executeTuiCommand } from './command-execution.ts';
+import {
+  createConversationRenderWindowState,
+  navigateConversationHistory,
+  projectConversationRenderWindow,
+  type ConversationRenderWindow,
+  type ConversationRenderWindowState,
+} from './conversation-render-window.ts';
 import type { TuiMcpServerSummary, TuiSkillSummary } from './skill-mcp-bridge.ts';
 import {
   createTuiConversationPersistence,
@@ -263,10 +270,12 @@ function ToolActivityTimeline({
 }
 
 function ChatHistory({
-  snapshot,
+  messages,
+  window,
   layout,
 }: {
-  readonly snapshot: ChatSnapshot;
+  readonly messages: readonly ChatMessage[];
+  readonly window: ConversationRenderWindow;
   readonly layout: ReturnType<typeof responsiveLayout>;
 }) {
   const [expandedTools, setExpandedTools] = useState<ReadonlySet<string>>(new Set());
@@ -292,7 +301,21 @@ function ChatHistory({
       paddingLeft={layout.outerPadding}
       paddingRight={layout.outerPadding}
     >
-      {snapshot.messages.map((message) => {
+      {window.hiddenBefore > 0 ? (
+        <box flexDirection="column" marginBottom={1}>
+          <ThemedText selectable fg={COLOR.muted}>
+            {window.reason === 'latest-compaction' && !window.emergencyTruncated
+              ? `↑ Showing from the latest compaction · ${window.hiddenBefore} earlier messages hidden · /history earlier`
+              : `↑ ${window.hiddenBefore} earlier messages hidden · /history earlier`}
+          </ThemedText>
+          {window.emergencyTruncated ? (
+            <ThemedText selectable fg={COLOR.warning}>
+              Recent history was capped for terminal performance.
+            </ThemedText>
+          ) : null}
+        </box>
+      ) : null}
+      {messages.map((message) => {
         if (message.role === 'system') {
           const phase = message.compact?.phase ?? 'done';
           const label = phase === 'progress' ? 'COMPACTING' : 'COMPACTED';
@@ -452,6 +475,13 @@ function ChatHistory({
           </box>
         );
       })}
+      {window.hiddenAfter > 0 ? (
+        <box marginTop={1}>
+          <ThemedText selectable fg={COLOR.muted}>
+            {`↓ ${window.hiddenAfter} newer messages hidden · /history later · /history latest`}
+          </ThemedText>
+        </box>
+      ) : null}
     </scrollbox>
   );
 }
@@ -664,13 +694,15 @@ function ModelPickerMenu({
   );
 }
 
-function Composer({ controller, snapshot, disabled, focused, locale, onValueChange, editorRef, imagePathRegistry, height = 1, backgroundColor }: {
+function Composer({ controller, snapshot, disabled, focused, locale, onValueChange, onBeforeSend, onCommandInput, editorRef, imagePathRegistry, height = 1, backgroundColor }: {
   readonly controller: ChatController;
   readonly snapshot: ChatSnapshot;
   readonly disabled: boolean;
   readonly focused: boolean;
   readonly locale: TuiLocale;
   readonly onValueChange: (value: string) => void;
+  readonly onBeforeSend: () => void;
+  readonly onCommandInput: (input: string) => boolean;
   readonly editorRef: RefObject<TextareaRenderable | null>;
   readonly imagePathRegistry: Map<string, string>;
   readonly height?: number;
@@ -709,9 +741,18 @@ function Composer({ controller, snapshot, disabled, focused, locale, onValueChan
   const submit = () => {
     const value = editor.current?.plainText ?? '';
     const trimmed = value.trim();
-    if (!trimmed || isSlashCommandInput(trimmed) || disabled || snapshot.status !== 'idle') return;
+    if (!trimmed || disabled || snapshot.status !== 'idle') return;
+    if (isSlashCommandInput(trimmed)) {
+      if (!onCommandInput(trimmed)) return;
+      editor.current?.clear();
+      lastComposerValueRef.current = '';
+      onValueChange('');
+      return;
+    }
     editor.current?.clear();
     lastComposerValueRef.current = '';
+    onValueChange('');
+    onBeforeSend();
     void (async () => {
       const attachment = await loadLocalImageAttachments(value, { pathByKey: imagePathRegistry });
       // Keep typed text only. Pure-image turns send empty content + images[];
@@ -759,6 +800,8 @@ function ComposerDock({
   focused,
   locale,
   onValueChange,
+  onBeforeSend,
+  onCommandInput,
   editorRef,
   imagePathRegistry,
   status,
@@ -787,6 +830,8 @@ function ComposerDock({
   readonly focused: boolean;
   readonly locale: TuiLocale;
   readonly onValueChange: (value: string) => void;
+  readonly onBeforeSend: () => void;
+  readonly onCommandInput: (input: string) => boolean;
   readonly editorRef: RefObject<TextareaRenderable | null>;
   readonly imagePathRegistry: Map<string, string>;
   readonly status: ComposerStatus;
@@ -877,6 +922,8 @@ function ComposerDock({
               focused={focused}
               locale={locale}
               onValueChange={onValueChange}
+              onBeforeSend={onBeforeSend}
+              onCommandInput={onCommandInput}
               editorRef={editorRef}
               imagePathRegistry={imagePathRegistry}
               height={composerLayout.inputRows}
@@ -1080,6 +1127,19 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const [composerDraft, setComposerDraft] = useState('');
   const imagePathRegistryRef = useRef(new Map<string, string>());
   const [experience, setExperience] = useState<TuiExperienceState>(() => createTuiExperienceState());
+  const [renderWindowState, setRenderWindowState] = useState<ConversationRenderWindowState>(
+    () => createConversationRenderWindowState(),
+  );
+  const renderWindowConversationId = persistence.getConversationId()
+    ?? snapshot.session?.conversationId
+    ?? null;
+  const renderProjection = useMemo(
+    () => projectConversationRenderWindow(snapshot.messages, renderWindowState),
+    [snapshot.messages, renderWindowState],
+  );
+  useEffect(() => {
+    setRenderWindowState(createConversationRenderWindowState());
+  }, [renderWindowConversationId]);
   const visibleTurn = snapshot.session?.activeTurn ?? snapshot.session?.lastTurn;
   const commandSurface = experience.surface.type === 'picker' && experience.surface.picker === 'command'
     ? experience.surface
@@ -1390,6 +1450,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       ...current,
       mode: conversation.mode,
     }));
+    setRenderWindowState(createConversationRenderWindowState());
     setComposerDraft('');
     queueMicrotask(() => composerRef.current?.focus());
   }, [controller, modelSelection, persistence, snapshot.status]);
@@ -1403,10 +1464,31 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const runCommand = (command: TuiCommand) => executeTuiCommand(command, {
     clearChat: () => {
       const cleared = controller.clear();
-      if (cleared) persistence.startNewConversation(controller.getSnapshot().mode);
+      if (cleared) {
+        persistence.startNewConversation(controller.getSnapshot().mode);
+        setRenderWindowState(createConversationRenderWindowState());
+      }
       return cleared;
     },
     compactContext: async () => (await controller.compact()).notice,
+    navigateHistory: (direction) => {
+      if (direction === 'earlier' && !renderProjection.window.canLoadEarlier) {
+        return 'Already at the beginning of the conversation';
+      }
+      if (direction === 'later' && !renderProjection.window.canLoadLater) {
+        setRenderWindowState(createConversationRenderWindowState());
+        return 'Already showing the latest conversation';
+      }
+      const nextState = navigateConversationHistory(
+        snapshot.messages,
+        renderWindowState,
+        direction,
+      );
+      const nextProjection = projectConversationRenderWindow(snapshot.messages, nextState);
+      setRenderWindowState(nextState);
+      if (nextProjection.window.mode === 'latest') return 'Showing the latest conversation';
+      return `History page · ${nextProjection.window.hiddenBefore} earlier · ${nextProjection.window.hiddenAfter} newer messages hidden`;
+    },
     controlGoal: (control) => {
       if (!sharedGoalPlan || !goalRunner) return 'No active goal';
       const planId = sharedGoalPlan.planId;
@@ -1430,6 +1512,16 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     setNotice: setCommandNotice,
     updateExperience: setExperience,
   });
+
+  const runSlashCommandInput = (input: string): boolean => {
+    const command = resolveTuiCommandInput(input, { goalStatus }, locale);
+    if (!command) {
+      setCommandNotice(`Unknown command: ${input}`);
+      return true;
+    }
+    runCommand(command);
+    return true;
+  };
 
   useKeyboard((key) => {
     const keyMeta = Boolean((key as { meta?: boolean; super?: boolean }).meta || (key as { super?: boolean }).super);
@@ -2106,6 +2198,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
                 modelPickerSelection={modelPickerSelection}
                 modelPickerMaxVisible={welcomeModelMaxVisible}
                 modelPickerShowHint={layout.showHints}
+                onBeforeSend={() => setRenderWindowState(createConversationRenderWindowState())}
+                onCommandInput={runSlashCommandInput}
                 onValueChange={(value) => {
                   setComposerDraft(value);
                   setExperience((current) => syncSlashSuggestions(current, value));
@@ -2117,7 +2211,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       ) : (
         <>
           <box height={1} flexShrink={0} />
-          <ChatHistory snapshot={snapshot} layout={layout} />
+          <ChatHistory
+            messages={renderProjection.messages}
+            window={renderProjection.window}
+            layout={layout}
+          />
 
       {snapshot.error ? <ErrorBanner message={snapshot.error} layout={layout} /> : null}
 
@@ -2530,6 +2628,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           modelPickerSelection={modelPickerSelection}
           modelPickerMaxVisible={slashMaxVisible}
           modelPickerShowHint={layout.showHints}
+          onBeforeSend={() => setRenderWindowState(createConversationRenderWindowState())}
+          onCommandInput={runSlashCommandInput}
           onValueChange={(value) => {
             setComposerDraft(value);
             setExperience((current) => syncSlashSuggestions(current, value));

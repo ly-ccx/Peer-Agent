@@ -13,6 +13,7 @@ export type TuiCommandAction =
   | { readonly type: 'show-help' }
   | { readonly type: 'clear-chat' }
   | { readonly type: 'compact-context' }
+  | { readonly type: 'history-navigation'; readonly direction: 'earlier' | 'later' | 'latest' }
   | { readonly type: 'open-resume-picker' }
   | { readonly type: 'goal-control'; readonly control: 'pause' | 'resume' | 'cancel' }
   | { readonly type: 'quit' };
@@ -57,6 +58,9 @@ export const TUI_COMMAND_REGISTRY: readonly TuiCommandDefinition[] = Object.free
   { id: 'mcp', label: 'MCP Servers', description: 'Manage MCP Servers and inspect tool status', keywords: ['server', 'tools', 'capability'], action: { type: 'open-mcp-picker' } },
   { id: 'clear', label: 'Clear chat', description: 'Clear messages, model context, and errors', keywords: ['reset', 'conversation', 'error'], action: { type: 'clear-chat' } },
   { id: 'compact', label: 'Compact context', description: 'Compress model context with a structural summary; UI transcript stays', keywords: ['compress', 'summary', 'context', 'tokens'], action: { type: 'compact-context' } },
+  { id: 'history-earlier', label: 'Earlier history', description: 'Show the previous bounded page; alias: /history earlier', keywords: ['older', 'previous', 'transcript'], action: { type: 'history-navigation', direction: 'earlier' } },
+  { id: 'history-later', label: 'Later history', description: 'Show the next bounded page; alias: /history later', keywords: ['newer', 'next', 'transcript'], action: { type: 'history-navigation', direction: 'later' } },
+  { id: 'history-latest', label: 'Latest history', description: 'Return to the default latest window; alias: /history latest', keywords: ['newest', 'bottom', 'transcript'], action: { type: 'history-navigation', direction: 'latest' } },
   { id: 'resume', label: 'Resume session', description: 'Restore and continue a saved conversation', keywords: ['session', 'conversation', 'history', 'restore'], action: { type: 'open-resume-picker' } },
   { id: 'goal-pause', label: 'Pause goal', description: 'Pause the active goal after the current safe boundary', keywords: ['hold'], action: { type: 'goal-control', control: 'pause' }, visible: GOAL_RUNNING },
   { id: 'goal-resume', label: 'Resume goal', description: 'Resume the paused goal', keywords: ['continue'], action: { type: 'goal-control', control: 'resume' }, visible: GOAL_PAUSED },
@@ -107,6 +111,28 @@ export function filterTuiCommandRegistry(
     const haystack = [command.id, command.label, command.description, ...command.keywords].join(' ').toLowerCase();
     return terms.every((term) => haystack.includes(term));
   });
+}
+
+/**
+ * Resolve manually submitted slash input. History navigation keeps the
+ * discoverable hyphenated command IDs while also supporting `/history <verb>`.
+ */
+export function resolveTuiCommandInput(
+  input: string,
+  context: TuiCommandContext,
+  locale: TuiLocale = 'en-US',
+): TuiCommandDefinition | null {
+  const match = /^\/([a-z0-9-]+)(?:\s+([a-z0-9-]+))?\s*$/i.exec(input.trim());
+  if (!match) return null;
+  const commandName = match[1]?.toLowerCase() ?? '';
+  const argument = match[2]?.toLowerCase();
+  const commandId = commandName === 'history' && argument
+    ? `history-${argument}`
+    : argument
+      ? ''
+      : commandName;
+  if (!commandId) return null;
+  return visibleTuiCommands(context, locale).find((command) => command.id === commandId) ?? null;
 }
 
 export interface TuiHelpSection {

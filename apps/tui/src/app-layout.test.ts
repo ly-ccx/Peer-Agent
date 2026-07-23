@@ -24,7 +24,7 @@ describe('TUI app layout', () => {
 
     const topbarSource = appSource.slice(
       appSource.indexOf('<span fg={COLOR.accent}>{APP_CHROME.brandMark}</span>'),
-      appSource.indexOf('<ChatHistory snapshot={snapshot} layout={layout} />'),
+      appSource.indexOf('<ChatHistory'),
     );
     expect(topbarSource).toContain('flexShrink={0}');
     expect(topbarSource).toContain('height={1}');
@@ -444,7 +444,8 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('pickerLayout.showDescriptions ?');
     expect(appSource).toContain('pickerLayout.showHints ?');
     expect(appSource).toContain('paddingLeft={layout.outerPadding}');
-    expect(appSource).toContain('<ChatHistory snapshot={snapshot} layout={layout} />');
+    expect(appSource).toContain('messages={renderProjection.messages}');
+    expect(appSource).toContain('window={renderProjection.window}');
     expect(appSource).toContain('paddingRight={layout.outerPadding}');
     expect(appSource).toContain('paddingTop={menuReserve}');
     expect(appSource).not.toContain('paddingTop={menuReserve + layout.outerPaddingY}');
@@ -716,5 +717,28 @@ describe('TUI compact progress and separator rendering', () => {
     expect(appSource).toContain("{compactSummary || ' '}");
     expect(appSource).not.toContain("{message.content || ' '}");
     expect(appSource).toContain("compactContext: async () => (await controller.compact()).notice");
+  });
+});
+
+describe('TUI conversation render window wiring', () => {
+  test('projects messages before ChatHistory and renders bounded-history notices', () => {
+    const historyStart = appSource.indexOf('function ChatHistory');
+    const historyEnd = appSource.indexOf('function ErrorBanner', historyStart);
+    const historySource = appSource.slice(historyStart, historyEnd);
+
+    expect(appSource).toContain('projectConversationRenderWindow(snapshot.messages, renderWindowState)');
+    expect(appSource).toContain('messages={renderProjection.messages}');
+    expect(appSource).toContain('window={renderProjection.window}');
+    expect(historySource).toContain('messages.map((message)');
+    expect(historySource).not.toContain('snapshot.messages.map');
+    expect(historySource).toContain('/history earlier');
+    expect(historySource).toContain('/history later · /history latest');
+  });
+
+  test('resets to latest for conversation changes and explicit sends', () => {
+    expect(appSource).toContain('setRenderWindowState(createConversationRenderWindowState())');
+    expect(appSource).toContain('}, [renderWindowConversationId]);');
+    expect(appSource.match(/onBeforeSend=\{\(\) => setRenderWindowState\(createConversationRenderWindowState\(\)\)\}/g))
+      .toHaveLength(2);
   });
 });

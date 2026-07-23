@@ -5,6 +5,7 @@ import { createTuiExperienceState, syncSlashSuggestions, TUI_COMMANDS } from './
 
 const quit = TUI_COMMANDS.find((command) => command.id === 'quit')!;
 const compact = TUI_COMMANDS.find((command) => command.id === 'compact')!;
+const historyEarlier = TUI_COMMANDS.find((command) => command.id === 'history-earlier')!;
 const skill = TUI_COMMANDS.find((command) => command.id === 'skill')!;
 const mcp = TUI_COMMANDS.find((command) => command.id === 'mcp')!;
 
@@ -12,12 +13,17 @@ function harness() {
   let state = createTuiExperienceState('chat');
   let quitCount = 0;
   let compactCount = 0;
+  const historyDirections: string[] = [];
   const notices: Array<string | null> = [];
   const handlers = {
     clearChat: () => true,
     compactContext: () => {
       compactCount += 1;
       return 'Compacted model context 20 → 9 messages (summarized 12)';
+    },
+    navigateHistory: (direction: 'earlier' | 'later' | 'latest') => {
+      historyDirections.push(direction);
+      return `History: ${direction}`;
     },
     controlGoal: () => 'unused',
     quit: () => { quitCount += 1; },
@@ -29,6 +35,7 @@ function harness() {
     get state() { return state; },
     get quitCount() { return quitCount; },
     get compactCount() { return compactCount; },
+    get historyDirections() { return historyDirections; },
     get notices() { return notices; },
     setState(next: typeof state) { state = next; },
   };
@@ -67,5 +74,14 @@ describe('TUI command execution', () => {
 
     expect(subject.compactCount).toBe(1);
     expect(subject.notices.at(-1)).toContain('Compacted model context');
+  });
+
+  test('executes history navigation through the shared dispatcher', () => {
+    const subject = harness();
+
+    executeTuiCommand(historyEarlier, subject.handlers);
+
+    expect(subject.historyDirections).toEqual(['earlier']);
+    expect(subject.notices.at(-1)).toBe('History: earlier');
   });
 });
