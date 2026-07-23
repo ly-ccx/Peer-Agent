@@ -210,6 +210,33 @@ function displayWidth(text: string): number {
   return width;
 }
 
+function inlineVisibleText(text: string): string {
+  const pattern = /(\*\*|__)(.+?)\1|(`+)(.+?)\3|(\*|_)(.+?)\5|\[([^\]]+)\]\(([^)]+)\)/g;
+  let visible = text;
+  let previous: string;
+  do {
+    previous = visible;
+    visible = visible.replace(pattern, (_match, _strong, strongText, _code, codeText, _emphasis, emphasisText, label) => (
+      strongText ?? codeText ?? emphasisText ?? label ?? ''
+    ));
+  } while (visible !== previous);
+  return visible;
+}
+
+function inlineDisplayWidth(text: string): number {
+  return displayWidth(inlineVisibleText(text));
+}
+
+function cellPadding(text: string, width: number, alignment: TableAlignment): [number, number] {
+  const gap = Math.max(0, width - inlineDisplayWidth(text));
+  if (alignment === 'right') return [gap, 0];
+  if (alignment === 'center') {
+    const left = Math.floor(gap / 2);
+    return [left, gap - left];
+  }
+  return [0, gap];
+}
+
 function padCell(text: string, width: number, alignment: TableAlignment): string {
   const gap = Math.max(0, width - displayWidth(text));
   if (alignment === 'right') return `${' '.repeat(gap)}${text}`;
@@ -235,8 +262,8 @@ function isSummaryTable(headers: readonly string[], rows: readonly (readonly str
 
 function columnWidths(headers: readonly string[], rows: readonly (readonly string[])[]): number[] {
   return headers.map((header, column) => Math.max(
-    displayWidth(header),
-    ...rows.map((row) => displayWidth(row[column] ?? '')),
+    inlineDisplayWidth(header),
+    ...rows.map((row) => inlineDisplayWidth(row[column] ?? '')),
   ));
 }
 
@@ -285,14 +312,22 @@ function DataTable({ headers, rows, alignments }: {
   alignments: readonly TableAlignment[];
 }) {
   const widths = columnWidths(headers, rows);
-  const renderRow = (cells: readonly string[]) => widths.map((width, column) => (
-    padCell(cells[column] ?? '', width, alignments[column] ?? 'left')
-  )).join(' '.repeat(GRID_GAP));
+  const renderRow = (cells: readonly string[], keyPrefix: string) => widths.flatMap((width, column) => {
+    const text = cells[column] ?? '';
+    const [left, right] = cellPadding(text, width, alignments[column] ?? 'left');
+    return [
+      ' '.repeat(left),
+      ...inline(text, `${keyPrefix}-${column}`),
+      ' '.repeat(right + (column < widths.length - 1 ? GRID_GAP : 0)),
+    ];
+  });
   return (
     <box flexDirection="column" marginBottom={1}>
-      <ThemedText selectable fg={COLOR.textSoft} attributes={1}>{renderRow(headers)}</ThemedText>
+      <ThemedText selectable fg={COLOR.textSoft} attributes={1}>{renderRow(headers, 'header')}</ThemedText>
       <ThemedText selectable fg={COLOR.muted}>{widths.map((width) => '─'.repeat(width)).join(' '.repeat(GRID_GAP))}</ThemedText>
-      {rows.map((row, index) => <ThemedText key={`row-${index}`} selectable fg={COLOR.text}>{renderRow(row)}</ThemedText>)}
+      {rows.map((row, index) => (
+        <ThemedText key={`row-${index}`} selectable fg={COLOR.text}>{renderRow(row, `row-${index}`)}</ThemedText>
+      ))}
     </box>
   );
 }

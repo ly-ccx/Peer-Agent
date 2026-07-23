@@ -126,6 +126,31 @@ describe('Markdown terminal frame', () => {
     expect(previewLine.indexOf('91972')).toBe(mainLine.indexOf('92021'));
   });
 
+  test('renders inline Markdown inside wide table cells and aligns by visible width', async () => {
+    const setup = await renderMarkdownSetup([
+      '| 语言 | 配置 | 说明 |',
+      '| --- | --- | --- |',
+      '| **Rust** | `Cargo.toml` | *快速* [文档](https://rust-lang.org) |',
+      '| 中文 | package.json | 普通说明 |',
+    ].join('\n'), 100);
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain('Rust');
+    expect(frame).toContain('Cargo.toml');
+    expect(frame).toContain('快速 文档');
+    expect(frame).not.toContain('**');
+    expect(frame).not.toContain('`');
+    expect(frame).not.toContain('*快速*');
+    expect(frame).not.toContain('https://rust-lang.org');
+
+    const lines = frame.split('\n');
+    const rustLine = lines.find((line) => line.includes('Rust')) ?? '';
+    const chineseLine = lines.find((line) => line.includes('中文')) ?? '';
+    const visualColumn = (line: string, marker: string) => Array.from(line.slice(0, line.indexOf(marker)))
+      .reduce((width, character) => width + (/\p{Script=Han}/u.test(character) ? 2 : 1), 0);
+    expect(visualColumn(rustLine, 'Cargo.toml')).toBe(visualColumn(chineseLine, 'package.json'));
+  });
+
   test('renders two-column conclusion summaries as key-value rows with inline Markdown', async () => {
     const setup = await renderMarkdownSetup([
       '| 项 | 结果 |',
