@@ -1412,6 +1412,64 @@ describe('chat controller', () => {
     expect(planCoordinator.getSnapshot()?.plan.title).toBe('Plan only');
   });
 
+  test('publishes the current request projection while the provider turn is pending', async () => {
+    let releaseTurn!: () => void;
+    const turnPending = new Promise<void>((resolve) => {
+      releaseTurn = resolve;
+    });
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        await turnPending;
+        return {
+          kind: 'completed',
+          state: {
+            ...state,
+            usage: { inputTokens: 2_000 },
+            requestProjection: {
+              nextRequestInputTokens: 2_100,
+              contextWindow: 100_000,
+              model: 'pending-test',
+            },
+          },
+          output: 'done',
+        };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({
+      host: host(),
+      model,
+      getContextWindow: () => 100_000,
+    });
+    expect(controller.restore({
+      mode: 'chat',
+      messages: [{ id: 'old-user', role: 'user', content: 'existing context' }],
+      modelMessages: [{ role: 'user', content: 'existing context' }],
+      usage: { inputTokens: 1_000 },
+      nextRequestInputTokens: 1_000,
+      requestProjection: {
+        nextRequestInputTokens: 1_000,
+        contextWindow: 100_000,
+        model: 'pending-test',
+      },
+    })).toBe(true);
+
+    const beforeSendTokens = estimateTokensFromMessages([
+      { role: 'user', content: 'existing context' },
+    ]);
+    const pending = controller.send('new message increases the projected request');
+    const running = controller.getSnapshot();
+    expect(running.status).toBe('running');
+    expect(running.usage?.inputTokens).toBe(1_000);
+    expect(running.nextRequestInputTokens).toBeGreaterThan(beforeSendTokens);
+    expect(running.requestProjection?.nextRequestInputTokens).toBe(running.nextRequestInputTokens);
+    expect(running.requestProjection?.model).toBe('pending-test');
+
+    releaseTurn();
+    await pending;
+  });
+
   test('publishes next-request input separately from historical usage', async () => {
     const model: ChatModelPort = {
       initialize: (input) => initialState(input.input),

@@ -891,11 +891,29 @@ export function createChatController(options: {
       const uiMessages = clearedMessages.filter((message) => !message.pending);
       const userContent = trimmed
         || (images.length > 0 ? `[image${images.length > 1 ? 's' : ''}]` : '');
+      // Provider usage for this turn is not available yet. Project the exact request-visible
+      // transcript now so the running frame cannot temporarily collapse context occupancy to 0%.
+      const preflightMessages: readonly ModelMessage[] = [
+        ...conversationModelMessages,
+        { role: 'user', content: userContent },
+      ];
+      const runningPressure = pressureFor(preflightMessages, snapshot.usage);
+      const preflightProjection = snapshot.requestProjection
+        ? {
+            ...snapshot.requestProjection,
+            nextRequestInputTokens: runningPressure.nextRequestInputTokens,
+            contextWindow: resolveContextWindow() ?? snapshot.requestProjection.contextWindow,
+          }
+        : undefined;
       publish({
         status: 'running',
         mode: turnMode,
         activeTurnMode: turnMode,
         session: sessions.get(sessionId) ?? undefined,
+        usage: snapshot.usage,
+        nextRequestInputTokens: runningPressure.nextRequestInputTokens,
+        compactionPressureTokens: runningPressure.compactionPressureTokens,
+        requestProjection: preflightProjection,
         messages: [
           ...uiMessages,
           {
