@@ -21,6 +21,7 @@ describe('TUI command registry', () => {
       'theme',
       'skill',
       'mcp',
+      'new',
       'clear',
       'compact',
       'history-earlier',
@@ -56,6 +57,11 @@ describe('TUI command registry', () => {
     expect(resolveTuiCommandInput('/history unknown', idle)).toBeNull();
   });
 
+  test('exposes /new as a real new-session action', () => {
+    expect(resolveTuiCommandInput('/new', idle)?.action).toEqual({ type: 'new-session' });
+    expect(filterTuiCommandRegistry('new session', idle).map((command) => command.id)).toContain('new');
+  });
+
   test('exposes a Goal history switcher without treating history as parallel active work', () => {
     expect(resolveTuiCommandInput('/goals', idle)?.action).toEqual({ type: 'open-goal-picker' });
     expect(filterTuiCommandRegistry('goal history', idle).map((command) => command.id)).toContain('goals');
@@ -86,6 +92,9 @@ describe('TUI command localization', () => {
     const mcp = commands.find((command) => command.id === 'mcp');
     expect(mcp?.label).toBe('MCP 服务器');
     expect(mcp?.description).toBe('管理 MCP 服务器并查看工具状态');
+    const newSession = commands.find((command) => command.id === 'new');
+    expect(newSession?.label).toBe('新会话');
+    expect(newSession?.description).toBe('开启全新空会话并回到首页');
     const historyEarlier = commands.find((command) => command.id === 'history-earlier');
     expect(historyEarlier?.label).toBe('更早历史');
     expect(historyEarlier?.description).toContain('/history earlier');

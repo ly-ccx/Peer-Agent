@@ -12,6 +12,7 @@ export type TuiCommandAction =
   | { readonly type: 'open-mcp-picker' }
   | { readonly type: 'show-help' }
   | { readonly type: 'clear-chat' }
+  | { readonly type: 'new-session' }
   | { readonly type: 'compact-context' }
   | { readonly type: 'history-navigation'; readonly direction: 'earlier' | 'later' | 'latest' }
   | { readonly type: 'open-resume-picker' }
@@ -57,12 +58,13 @@ export const TUI_COMMAND_REGISTRY: readonly TuiCommandDefinition[] = Object.free
   },
   { id: 'skill', label: 'Skills', description: 'Browse, enable, disable, refresh, insert, or invoke Skills', keywords: ['capability', 'manage'], action: { type: 'open-skill-picker' } },
   { id: 'mcp', label: 'MCP Servers', description: 'Manage MCP Servers and inspect tool status', keywords: ['server', 'tools', 'capability'], action: { type: 'open-mcp-picker' } },
+  { id: 'new', label: 'New session', description: 'Start a fresh empty session and return to the home screen', keywords: ['session', 'home', 'fresh', 'reset', 'create'], shortcut: 'Ctrl+X N', action: { type: 'new-session' } },
   { id: 'clear', label: 'Clear chat', description: 'Clear messages, model context, and errors', keywords: ['reset', 'conversation', 'error'], action: { type: 'clear-chat' } },
   { id: 'compact', label: 'Compact context', description: 'Compress model context with a structural summary; UI transcript stays', keywords: ['compress', 'summary', 'context', 'tokens'], action: { type: 'compact-context' } },
   { id: 'history-earlier', label: 'Earlier history', description: 'Show the previous bounded page; alias: /history earlier', keywords: ['older', 'previous', 'transcript'], action: { type: 'history-navigation', direction: 'earlier' } },
   { id: 'history-later', label: 'Later history', description: 'Show the next bounded page; alias: /history later', keywords: ['newer', 'next', 'transcript'], action: { type: 'history-navigation', direction: 'later' } },
   { id: 'history-latest', label: 'Latest history', description: 'Return to the default latest window; alias: /history latest', keywords: ['newest', 'bottom', 'transcript'], action: { type: 'history-navigation', direction: 'latest' } },
-  { id: 'resume', label: 'Resume session', description: 'Restore and continue a saved conversation', keywords: ['session', 'conversation', 'history', 'restore'], action: { type: 'open-resume-picker' } },
+  { id: 'resume', label: 'Resume session', description: 'Restore and continue a saved conversation', keywords: ['session', 'conversation', 'history', 'restore'], shortcut: 'Ctrl+X L', action: { type: 'open-resume-picker' } },
   { id: 'goals', label: 'Goal history', description: 'Switch between formal goals in this conversation', keywords: ['goal', 'mission', 'history', 'switch'], action: { type: 'open-goal-picker' } },
   { id: 'goal-pause', label: 'Pause goal', description: 'Pause the active goal after the current safe boundary', keywords: ['hold'], action: { type: 'goal-control', control: 'pause' }, visible: GOAL_RUNNING },
   { id: 'goal-resume', label: 'Resume goal', description: 'Resume the paused goal', keywords: ['continue'], action: { type: 'goal-control', control: 'resume' }, visible: GOAL_PAUSED },
@@ -156,6 +158,8 @@ export function buildTuiHelpSections(
         'Shift+Enter  newline',
         'Ctrl+C  cancel stream / clear draft / quit',
         'Ctrl+X then M/O/P  model / mode / permissions',
+        'Ctrl+X then N  new session',
+        'Ctrl+X then L  resume session',
         'Ctrl+X then 1/2/3  Agent / Plan / Goal',
         'Drag to select chat text to auto-copy (Ctrl/Cmd+C still works)',
       ],

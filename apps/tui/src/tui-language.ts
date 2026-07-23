@@ -183,6 +183,8 @@ export type TuiMessageKey =
   | 'theme.switched.light'
   | 'theme.switched.dark'
   | 'theme.switched.system'
+  | 'command.new.label'
+  | 'command.new.description'
   | 'command.clear.label'
   | 'command.clear.description'
   | 'command.compact.label'
@@ -257,6 +259,8 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'theme.switched.light': '已切换为浅色主题',
     'theme.switched.dark': '已切换为深色主题',
     'theme.switched.system': '已切换为跟随系统主题',
+    'command.new.label': '新会话',
+    'command.new.description': '开启全新空会话并回到首页',
     'command.clear.label': '清空会话',
     'command.clear.description': '清空消息、模型上下文与错误',
     'command.compact.label': '压缩上下文',
@@ -330,6 +334,8 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'theme.switched.light': 'Switched to light theme',
     'theme.switched.dark': 'Switched to dark theme',
     'theme.switched.system': 'Switched to system theme',
+    'command.new.label': 'New session',
+    'command.new.description': 'Start a fresh empty session and return to the home screen',
     'command.clear.label': 'Clear chat',
     'command.clear.description': 'Clear messages, model context, and errors',
     'command.compact.label': 'Compact context',

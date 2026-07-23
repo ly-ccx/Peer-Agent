@@ -8,6 +8,7 @@ const compact = TUI_COMMANDS.find((command) => command.id === 'compact')!;
 const historyEarlier = TUI_COMMANDS.find((command) => command.id === 'history-earlier')!;
 const skill = TUI_COMMANDS.find((command) => command.id === 'skill')!;
 const mcp = TUI_COMMANDS.find((command) => command.id === 'mcp')!;
+const newSession = TUI_COMMANDS.find((command) => command.id === 'new')!;
 
 function harness() {
   let state = createTuiExperienceState('chat');
@@ -15,8 +16,17 @@ function harness() {
   let compactCount = 0;
   const historyDirections: string[] = [];
   const notices: Array<string | null> = [];
+  let clearCount = 0;
+  let newSessionCount = 0;
   const handlers = {
-    clearChat: () => true,
+    clearChat: () => {
+      clearCount += 1;
+      return true;
+    },
+    startNewSession: () => {
+      newSessionCount += 1;
+      return true;
+    },
     compactContext: () => {
       compactCount += 1;
       return 'Compacted model context 20 → 9 messages (summarized 12)';
@@ -35,6 +45,8 @@ function harness() {
     get state() { return state; },
     get quitCount() { return quitCount; },
     get compactCount() { return compactCount; },
+    get clearCount() { return clearCount; },
+    get newSessionCount() { return newSessionCount; },
     get historyDirections() { return historyDirections; },
     get notices() { return notices; },
     setState(next: typeof state) { state = next; },
@@ -83,5 +95,15 @@ describe('TUI command execution', () => {
 
     expect(subject.historyDirections).toEqual(['earlier']);
     expect(subject.notices.at(-1)).toBe('History: earlier');
+  });
+
+  test('executes /new through the shared dispatcher and surfaces notice', () => {
+    const subject = harness();
+
+    executeTuiCommand(newSession, subject.handlers);
+
+    expect(subject.newSessionCount).toBe(1);
+    expect(subject.notices.at(-1)).toBe('New session');
+    expect(subject.state.surface).toEqual({ type: 'composer' });
   });
 });

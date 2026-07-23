@@ -10,6 +10,7 @@ import { MarkdownView } from './markdown-view.tsx';
 import { copyTextToClipboard, selectionCopyNotice } from './tui-clipboard.ts';
 import { buildTuiHelpSections, resolveTuiCommandInput } from './command-registry.ts';
 import { executeTuiCommand } from './command-execution.ts';
+import { resolveLeaderKey } from './leader-key.ts';
 import {
   createConversationRenderWindowState,
   navigateConversationHistory,
@@ -1063,6 +1064,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const [approvalSelection, setApprovalSelection] = useState(0);
   const [planSelection, setPlanSelection] = useState(0);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
+  const [leaderArmed, setLeaderArmed] = useState(false);
   const [skills, setSkills] = useState<readonly TuiSkillSummary[]>(() => host.skillMcpBridge?.listSkills() ?? []);
   const [mcpServers, setMcpServers] = useState<readonly TuiMcpServerSummary[]>(() => host.skillMcpBridge?.listMcpServers() ?? []);
   const renderer = useRenderer();
@@ -1503,6 +1505,20 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       }
       return cleared;
     },
+    startNewSession: () => {
+      const started = controller.clear();
+      if (started) {
+        persistence.startNewConversation(controller.getSnapshot().mode);
+        setRenderWindowState(createConversationRenderWindowState());
+        setComposerDraft('');
+        composerRef.current?.clear();
+        setSharedGoalPlans([]);
+        setSelectedGoalPlanId(null);
+        setExperience((current) => escapeFooter(current));
+        queueMicrotask(() => composerRef.current?.focus());
+      }
+      return started;
+    },
     compactContext: async () => (await controller.compact()).notice,
     navigateHistory: (direction) => {
       if (direction === 'earlier' && !renderProjection.window.canLoadEarlier) {
@@ -1607,6 +1623,47 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       setExperience((current) => syncSlashSuggestions(current, ''));
       queueMicrotask(() => composerRef.current?.focus());
       return;
+    }
+
+    const eventType = (key as { eventType?: 'press' | 'repeat' | 'release' }).eventType
+      ?? ((key as { repeated?: boolean }).repeated ? 'repeat' : 'press');
+    const leader = resolveLeaderKey({
+      armed: leaderArmed,
+      keyName: key.name,
+      ctrl: key.ctrl,
+      meta: keyMeta,
+      shift: Boolean(key.shift),
+      eventType,
+    });
+    if (leader.type !== 'none') {
+      key.preventDefault?.();
+      key.stopPropagation?.();
+      if (leader.type === 'arm') {
+        setLeaderArmed(true);
+        setCommandNotice('Ctrl+X · M model · O mode · P permissions · N new · L resume · 1/2/3 mode');
+        return;
+      }
+      if (leader.type === 'consume') {
+        return;
+      }
+      setLeaderArmed(false);
+      if (leader.type === 'cancel') {
+        setCommandNotice(null);
+        return;
+      }
+      if (leader.type === 'mode') {
+        selectMode(leader.mode);
+        return;
+      }
+      if (leader.type === 'command') {
+        const command = resolveTuiCommandInput(`/${leader.commandId}`, { goalStatus }, locale);
+        if (command) {
+          runCommand(command);
+        } else {
+          setCommandNotice(`Unknown leader command: ${leader.commandId}`);
+        }
+        return;
+      }
     }
 
     if (modelSurface) {
