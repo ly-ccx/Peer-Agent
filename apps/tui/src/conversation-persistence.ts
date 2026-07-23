@@ -29,6 +29,7 @@ interface ConversationStore {
   getConversation(id: string): (Record<string, unknown> & { messages?: readonly Record<string, unknown>[] }) | null;
   createConversation(input?: { title?: string; workspacePath?: string; mode?: TuiMode }): { id: string };
   appendMessage(id: string, message: ChatMessage & { timestamp: number }): unknown;
+  replaceMessages?(id: string, messages: readonly Record<string, unknown>[], options?: { allowEmpty?: boolean }): unknown;
   updateMode(id: string, mode: TuiMode): unknown;
   updateModelEffort(id: string, input: { effort: string; modelProviderId: string | null }): unknown;
   addUsage(id: string, usage: NonNullable<ChatSnapshot['usage']>): unknown;
@@ -542,6 +543,32 @@ export function createTuiConversationPersistence(options: {
 
         const id = ensureConversation();
         store.updateMode(id, mode);
+
+        // When CLI continues after a long-stream interrupt, clear historical
+        // interrupted markers on already-persisted messages so Desktop reload
+        // no longer shows a stale "已中断 / 继续生成" action.
+        if (store.replaceMessages) {
+          const stored = store.getConversation(id);
+          const storedMessages = Array.isArray(stored?.messages)
+            ? [...stored.messages] as Record<string, unknown>[]
+            : [];
+          if (storedMessages.length > 0) {
+            let changed = false;
+            const rewritten = storedMessages.map((message) => {
+              const messageId = typeof message.id === 'string' ? message.id : '';
+              if (!messageId || message.interrupted !== true) return message;
+              const live = stableMessages.find((item) => item.id === messageId);
+              if (!live || live.interrupted === true) return message;
+              changed = true;
+              const { interrupted: _removed, ...rest } = message;
+              return rest;
+            });
+            if (changed) {
+              store.replaceMessages(id, rewritten);
+            }
+          }
+        }
+
         const newMessages = stableMessages.filter((message) => !persistedMessageIds.has(message.id));
         const completedAssistant = snapshot.status === 'idle'
           ? [...newMessages].reverse().find((message) => message.role === 'assistant')

@@ -110,7 +110,11 @@ import { ChatGoalApprovalCard } from './goal/ChatGoalApprovalCard';
 import { MessageQueue } from './MessageQueue';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
-import { historyBeforeEditedUserMessage, serializeConversationMessages } from '../state/editHistory';
+import {
+  clearInterruptedMarkers,
+  historyBeforeEditedUserMessage,
+  serializeConversationMessages,
+} from '../state/editHistory';
 import { MessageRail } from './thread/MessageRail';
 import { useConversationState } from '../hooks/useConversationState';
 import { beginConversationCompaction } from '../state/automaticCompaction';
@@ -1383,8 +1387,18 @@ export function ChatSurface({
     const now = Date.now();
     const userMsg: ChatMsg = { id: nextId(), role: 'user', content: text, timestamp: now, attachments: sentAttachments.length ? sentAttachments : undefined };
     const assistantMsg: ChatMsg = { id: nextId(), role: 'assistant', content: '', segments: [], timestamp: now };
-    setMessages((prev) => [...(historyOverride ?? prev), userMsg, assistantMsg]);
+    const baseHistory = historyOverride ?? messages;
+    const clearedHistory = clearInterruptedMarkers(baseHistory);
+    setMessages([...clearedHistory.messages, userMsg, assistantMsg]);
 
+    // Continuing a conversation retires historical interrupted markers so Desktop no longer
+    // shows a stale "已中断" label on older assistant turns after CLI/Desktop resume.
+    if (clearedHistory.changed) {
+      await clientApi.conversationsReplaceMessages({
+        id: conversationId,
+        messages: serializeConversationMessages(clearedHistory.messages),
+      });
+    }
     await clientApi.conversationsAppendMessage({ id: conversationId, message: { id: userMsg.id, role: 'user', content: text, timestamp: now, attachments: userMsg.attachments } });
     await clientApi.conversationsAppendMessage({ id: conversationId, message: { id: assistantMsg.id, role: 'assistant', content: '', timestamp: now } });
     onConversationUpdated?.();
@@ -1399,7 +1413,7 @@ export function ChatSurface({
     conversationStore.setState(conversationId, { streamId, turnStartedAt });
     setIsStreaming(true);
 
-    const contextMessages = [...(historyOverride ?? messages), userMsg];
+    const contextMessages = [...clearedHistory.messages, userMsg];
     const apiMessages = toApiMessages(contextMessages);
     const contextAttachments = buildConversationAttachmentContext(contextMessages);
     const continuityContext = buildConversationContinuityContext(contextMessages);

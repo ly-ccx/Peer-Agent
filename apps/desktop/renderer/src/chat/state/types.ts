@@ -148,8 +148,9 @@ export interface ChatMsg {
   compaction?: CompactionMeta;
   attachments?: ChatAttachment[];
   // (b) 长流中断保留：已产出内容的 assistant 消息因连接中断而未自然收尾时，
-  // 标记为 interrupted=true。表达层据此显示"已中断"标记与"继续生成"入口；
+  // 标记为 interrupted=true。表达层据此显示"已中断"文案；
   // 经既有 replace-messages 开放袋持久化，重启后仍可见。
+  // 会话继续后会清掉历史 interrupted，避免旧标记残留。
   interrupted?: boolean;
 }
 

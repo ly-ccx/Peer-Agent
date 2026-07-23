@@ -246,20 +246,11 @@ function ChatTurnImpl({
                   )
                 ) : null}
                 {msg.role === 'assistant' && msg.interrupted && !isLive ? (
-                  <span className="chat-msg-interrupted">
-                    <span
-                      className="chat-msg-interrupted-mark"
-                      title={isZh ? '连接中断，本轮未自然结束' : 'Connection interrupted; this turn did not finish'}
-                    >
-                      {isZh ? '已中断' : 'Interrupted'}
-                    </span>
-                    <button
-                      type="button"
-                      className="chat-msg-continue-btn"
-                      onClick={() => onRegenerate(messageIndex)}
-                    >
-                      {isZh ? '继续生成' : 'Continue'}
-                    </button>
+                  <span
+                    className="chat-msg-interrupted-mark"
+                    title={isZh ? '连接中断，本轮未自然结束' : 'Connection interrupted; this turn did not finish'}
+                  >
+                    {isZh ? '已中断' : 'Interrupted'}
                   </span>
                 ) : null}
               </div>

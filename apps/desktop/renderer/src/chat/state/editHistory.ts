@@ -11,6 +11,24 @@ export function historyBeforeEditedUserMessage(
   return messages.slice(0, messageIndex);
 }
 
+/**
+ * Clear historical `interrupted` markers when the conversation continues.
+ * Returns the original array reference when nothing changes.
+ */
+export function clearInterruptedMarkers(messages: readonly ChatMsg[]): {
+  messages: ChatMsg[];
+  changed: boolean;
+} {
+  let changed = false;
+  const next = messages.map((message) => {
+    if (message.interrupted !== true) return message;
+    changed = true;
+    const { interrupted: _removed, ...rest } = message;
+    return rest;
+  });
+  return { messages: changed ? next : (messages as ChatMsg[]), changed };
+}
+
 export function serializeConversationMessages(messages: readonly ChatMsg[]): Record<string, unknown>[] {
   return messages.map((message) => ({
     id: message.id,
@@ -22,6 +40,6 @@ export function serializeConversationMessages(messages: readonly ChatMsg[]): Rec
     timestamp: message.timestamp,
     _compaction: message.compaction,
     attachments: message.attachments,
-    interrupted: message.interrupted,
+    ...(message.interrupted === true ? { interrupted: true } : {}),
   }));
 }

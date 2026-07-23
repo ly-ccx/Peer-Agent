@@ -278,6 +278,20 @@ function upsertAssistantTool(
 }
 
 /** Drop empty thinking placeholders; keep messages that already received content. */
+/** Clear historical interrupted markers when the conversation continues. */
+export function clearInterruptedMarkers(
+  messages: readonly ChatMessage[],
+): { messages: ChatMessage[]; changed: boolean } {
+  let changed = false;
+  const next = messages.map((message) => {
+    if (message.interrupted !== true) return message;
+    changed = true;
+    const { interrupted: _removed, ...rest } = message;
+    return rest;
+  });
+  return { messages: changed ? next : (messages as ChatMessage[]), changed };
+}
+
 function finalizePendingMessages(
   messages: readonly ChatMessage[],
   options?: { readonly interrupted?: boolean; readonly error?: string },
@@ -748,11 +762,14 @@ export function createChatController(options: {
           });
       const turn = activeTurn;
       const turnMode = snapshot.mode;
-      const history = snapshot.messages.filter(
+      // Continuing a conversation retires historical interrupted markers so Desktop no longer
+      // keeps a stale "已中断 / 继续生成" state on older assistant turns.
+      const clearedMessages = clearInterruptedMarkers(snapshot.messages).messages;
+      const history = clearedMessages.filter(
         (message) => !message.pending && message.role !== 'system',
       );
       // Keep system separators in the UI transcript while excluding them from turn history.
-      const uiMessages = snapshot.messages.filter((message) => !message.pending);
+      const uiMessages = clearedMessages.filter((message) => !message.pending);
       const userContent = trimmed
         || (images.length > 0 ? `[image${images.length > 1 ? 's' : ''}]` : '');
       publish({

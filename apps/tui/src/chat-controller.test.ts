@@ -1075,6 +1075,46 @@ describe('chat controller', () => {
     expect(assistant?.interrupted).toBe(true);
   });
 
+  test('clears historical interrupted markers when the conversation continues', async () => {
+    let turns = 0;
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      runTurn(state) {
+        turns += 1;
+        if (turns === 1) {
+          throw new Error('provider_stream_error: connection reset');
+        }
+        return {
+          kind: 'completed',
+          state: {
+            ...state,
+            messages: [...state.messages, { id: 'assistant-2', role: 'assistant', content: 'recovered' }],
+            modelMessages: [...state.modelMessages, { role: 'assistant', content: 'recovered' }],
+          },
+          output: 'recovered',
+        };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({
+      model,
+      host: host(),
+    });
+
+    await controller.send('first');
+    const interrupted = [...controller.getSnapshot().messages]
+      .reverse()
+      .find((message) => message.role === 'assistant');
+    expect(interrupted?.interrupted).toBe(true);
+
+    await controller.send('continue please');
+    const snap = controller.getSnapshot();
+    const historical = snap.messages.find((message) => message.id === interrupted?.id);
+    expect(historical?.interrupted).toBeUndefined();
+    expect(snap.messages.filter((message) => message.interrupted === true)).toHaveLength(0);
+    expect(snap.messages.some((message) => message.role === 'user' && message.content === 'continue please')).toBe(true);
+  });
+
   test('publishes running intermediate tool state before completion', async () => {
     let release: (() => void) | undefined;
     const gate = new Promise<void>((resolve) => {

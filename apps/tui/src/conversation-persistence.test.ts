@@ -795,4 +795,87 @@ describe('TUI conversation persistence', () => {
     });
   });
 
+
+  test('clears historical interrupted markers when continuing a conversation', () => {
+    const messages = [
+      {
+        id: 'user-1',
+        role: 'user',
+        content: 'hello',
+        timestamp: 1,
+      },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: 'partial',
+        interrupted: true,
+        timestamp: 2,
+      },
+    ];
+    let stored = {
+      id: 'conv-1',
+      mode: 'chat',
+      messages: [...messages],
+    };
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const store = {
+      listConversations() { return []; },
+      getConversation(id: string) {
+        return id === stored.id ? { ...stored, messages: stored.messages.map((message) => ({ ...message })) } : null;
+      },
+      createConversation() {
+        return { id: stored.id };
+      },
+      appendMessage(_id: string, message: Record<string, unknown>) {
+        calls.push({ method: 'appendMessage', args: [message] });
+        stored = {
+          ...stored,
+          messages: [...stored.messages, message as typeof messages[number]],
+        };
+      },
+      replaceMessages(_id: string, nextMessages: readonly Record<string, unknown>[]) {
+        calls.push({ method: 'replaceMessages', args: [nextMessages] });
+        stored = {
+          ...stored,
+          messages: nextMessages.map((message) => ({ ...message })) as typeof messages,
+        };
+      },
+      updateMode() {},
+      updateModelEffort() {},
+      addUsage() {},
+    };
+
+    const persistence = createTuiConversationPersistence({
+      workspacePath: '/tmp/peer-interrupted-clear',
+      store: store as never,
+    });
+    persistence.resumeConversation({
+      id: 'conv-1',
+      title: 'interrupted',
+      updatedAt: new Date(0).toISOString(),
+      mode: 'chat',
+      messages: [
+        { id: 'user-1', role: 'user', content: 'hello' },
+        { id: 'assistant-1', role: 'assistant', content: 'partial', interrupted: true },
+      ],
+    } as never);
+
+    // Simulate CLI continuing: live snapshot no longer carries interrupted on assistant-1.
+    persistence.syncSnapshot({
+      status: 'running',
+      mode: 'chat',
+      messages: [
+        { id: 'user-1', role: 'user', content: 'hello' },
+        { id: 'assistant-1', role: 'assistant', content: 'partial' },
+        { id: 'user-2', role: 'user', content: 'continue' },
+        { id: 'assistant-2', role: 'assistant', content: '', pending: true },
+      ],
+    } as never);
+
+    expect(calls.some((call) => call.method === 'replaceMessages')).toBe(true);
+    const rewritten = stored.messages.find((message) => message.id === 'assistant-1');
+    expect(rewritten?.interrupted).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(rewritten ?? {}, 'interrupted')).toBe(false);
+  });
+
 });
