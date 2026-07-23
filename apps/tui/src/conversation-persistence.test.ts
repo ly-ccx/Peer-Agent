@@ -1065,6 +1065,90 @@ describe('TUI conversation persistence', () => {
     expect(replaceCount).toBe(1);
   });
 
+  test('retries a shared compaction marker after replaceMessages returns null', () => {
+    const baseMessages = [
+      { id: 'user-1', role: 'user' as const, content: 'old request' },
+      { id: 'assistant-1', role: 'assistant' as const, content: 'old answer' },
+      { id: 'user-2', role: 'user' as const, content: 'retained request' },
+      { id: 'assistant-2', role: 'assistant' as const, content: 'retained answer' },
+    ];
+    let stored: { id: string; mode: string; messages: Record<string, unknown>[] } = {
+      id: 'conv-compact-retry',
+      mode: 'chat',
+      messages: [],
+    };
+    let replaceAttempts = 0;
+    const errors: unknown[] = [];
+    const store = {
+      listConversations() { return []; },
+      getConversation(id: string) {
+        return id === stored.id
+          ? { ...stored, messages: stored.messages.map((message) => ({ ...message })) }
+          : null;
+      },
+      createConversation() { return { id: stored.id }; },
+      appendMessage(_id: string, message: Record<string, unknown>) {
+        stored = { ...stored, messages: [...stored.messages, { ...message }] };
+      },
+      replaceMessages(_id: string, messages: readonly Record<string, unknown>[]) {
+        replaceAttempts += 1;
+        if (replaceAttempts === 1) return null;
+        stored = { ...stored, messages: messages.map((message) => ({ ...message })) };
+        return { ...stored, messages: stored.messages.map((message) => ({ ...message })) };
+      },
+      updateMode() {},
+      updateModelEffort() {},
+      addUsage() {},
+    };
+    const persistence = createTuiConversationPersistence({
+      workspacePath: '/workspace',
+      initialMode: 'chat',
+      initialModel: selection,
+      store: store as never,
+      onError: (error) => errors.push(error),
+    });
+    const compactedSnapshot = snapshot({
+      messages: [
+        ...baseMessages,
+        {
+          id: 'compact-retry',
+          role: 'system',
+          content: 'Compacted 4 → 2 messages (summarized 2)',
+          compact: {
+            phase: 'done',
+            beforeCount: 4,
+            afterCount: 2,
+            summarizedCount: 2,
+            beforeTokens: 700,
+            afterTokens: 250,
+            summary: 'retry-safe summary',
+            handoffContent: 'Earlier conversation (compacted)',
+            retainedUserCount: 1,
+          },
+        },
+      ],
+    });
+
+    persistence.syncSnapshot(compactedSnapshot);
+    expect(replaceAttempts).toBe(1);
+    expect(stored.messages.some((message) => Boolean(message._compaction))).toBe(false);
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0])).toContain('Failed to persist shared compaction marker');
+
+    persistence.syncSnapshot(compactedSnapshot);
+    persistence.syncSnapshot(compactedSnapshot);
+
+    expect(replaceAttempts).toBe(2);
+    expect(stored.messages.filter((message) => Boolean(message._compaction))).toHaveLength(1);
+    expect(stored.messages.map((message) => message.id)).toEqual([
+      'user-1',
+      'assistant-1',
+      'compact-retry',
+      'user-2',
+      'assistant-2',
+    ]);
+  });
+
   test('clears historical interrupted markers when continuing a conversation', () => {
     const messages = [
       {

@@ -770,10 +770,15 @@ export function createTuiConversationPersistence(options: {
               ...rewritten.slice(insertionIndex),
             ];
             changed = true;
-            persistedMessageIds.add(compactMessage.id);
           }
           if (changed) {
-            store.replaceMessages(id, rewritten);
+            const replaced = store.replaceMessages(id, rewritten);
+            if (replaced === null) {
+              throw new Error(`Failed to persist shared compaction marker for ${id}`);
+            }
+            if (compactMessage && !alreadyPersisted) {
+              persistedMessageIds.add(compactMessage.id);
+            }
           }
         }
 
