@@ -1423,6 +1423,7 @@ describe('llm chat service tool materialization', () => {
     ]);
     const recovery = events.find((event) => event.channel === 'chat:stream:provider-recovery');
     assert.ok(recovery);
+    assert.equal(recovery.payload.conversationId, 'c1');
     assert.equal(recovery.payload.fromProviderId, 'p-chatgpt');
     assert.equal(recovery.payload.toProviderId, 'p-compatible');
     assert.match(recovery.payload.reason, /HTTP 403/);

@@ -282,6 +282,29 @@ describe('conversationStore', () => {
     assert.equal(store.resolveConversation('stream-A'), 'A');
   });
 
+  it('routes a background recovery notice by authoritative event identity', () => {
+    const store = new ConversationStore();
+    store.routeStream('stream-background', 'foreground');
+
+    const conversationId = store.resolveEventConversation('stream-background', 'background');
+    assert.equal(conversationId, 'background');
+    store.setState(conversationId, {
+      providerRecoveryNotice: {
+        kind: 'connection',
+        status: 'retrying',
+        provider: 'Background provider',
+      },
+    });
+
+    assert.equal(store.getSnapshot('foreground').providerRecoveryNotice, null);
+    assert.deepEqual(store.getSnapshot('background').providerRecoveryNotice, {
+      kind: 'connection',
+      status: 'retrying',
+      provider: 'Background provider',
+    });
+    assert.equal(store.resolveConversation('stream-background'), 'background');
+  });
+
   it('supports functional updater patches over previous snapshot', () => {
     const store = new ConversationStore();
     store.setState('A', { messages: [msg('m1', 'one')] });

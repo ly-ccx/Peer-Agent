@@ -428,6 +428,7 @@ function wrapWebContentsForRuntimeEvents(
           tool: toolName,
           args: payload?.args && typeof payload.args === 'object' ? payload.args : {},
           toolCallId: typeof payload?.toolCallId === 'string' ? payload.toolCallId : undefined,
+          startedAtMs: Number.isFinite(payload?.startedAtMs) ? payload.startedAtMs : undefined,
           result: undefined,
         });
         persistStreamRecord();
@@ -439,6 +440,9 @@ function wrapWebContentsForRuntimeEvents(
           if (toolCallId && segment.toolCallId && segment.toolCallId !== toolCallId) continue;
           if (segment.result !== undefined) continue;
           segment.result = typeof payload?.result === 'string' ? payload.result : '';
+          segment.startedAtMs = Number.isFinite(payload?.startedAtMs) ? payload.startedAtMs : segment.startedAtMs;
+          segment.endedAtMs = Number.isFinite(payload?.endedAtMs) ? payload.endedAtMs : undefined;
+          segment.durationMs = Number.isFinite(payload?.durationMs) ? payload.durationMs : undefined;
           break;
         }
         persistStreamRecord();
@@ -1088,6 +1092,7 @@ export function createLlmChatService({
             if (retry > 0 && !attemptResult.terminalError) {
               accumulatingWebContents.send('chat:stream:connection-recovery', {
                 streamId,
+                conversationId,
                 provider: describeProviderTarget(provider),
                 model: provider.model,
                 status: 'recovered',
@@ -1100,6 +1105,7 @@ export function createLlmChatService({
           const delayMs = SAME_PROVIDER_RETRY_DELAYS_MS[retry];
           accumulatingWebContents.send('chat:stream:connection-recovery', {
             streamId,
+            conversationId,
             provider: describeProviderTarget(provider),
             model: provider.model,
             status: 'retrying',
@@ -1120,6 +1126,7 @@ export function createLlmChatService({
         if (nextProvider && attemptResult.replayable) {
           accumulatingWebContents.send('chat:stream:provider-recovery', {
             streamId,
+            conversationId,
             fromProviderId: provider.id,
             fromProvider: describeProviderTarget(provider),
             toProviderId: nextProvider.id,

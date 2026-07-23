@@ -593,10 +593,10 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   }) => void) => () => void;
   readonly onChatStreamAborted: (listener: (payload: { streamId: string; conversationId?: string }) => void) => () => void;
   readonly onChatStreamUsage: (listener: (payload: { streamId: string; usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number } }) => void) => () => void;
-  readonly onChatStreamToolCall: (listener: (payload: { streamId: string; tool: string; displayName?: string | null; args: Record<string, unknown>; toolCallId: string }) => void) => () => void;
+  readonly onChatStreamToolCall: (listener: (payload: { streamId: string; tool: string; displayName?: string | null; args: Record<string, unknown>; toolCallId: string; startedAtMs?: number }) => void) => () => void;
   // 流式工具参数进度(Codex 式实时体感)。仅是 provider 流式提示,不替代 Tool Result / Evidence。
   readonly onChatStreamToolProgress: (listener: (payload: { streamId: string; toolCallId: string; tool: string; path: string | null; receivedChars: number; receivedLines: number }) => void) => () => void;
-  readonly onChatStreamToolResult: (listener: (payload: { streamId: string; toolCallId: string; result: string }) => void) => () => void;
+  readonly onChatStreamToolResult: (listener: (payload: { streamId: string; toolCallId: string; result: string; startedAtMs?: number; endedAtMs?: number; durationMs?: number }) => void) => () => void;
   readonly onChatStreamPermissionRequest: (listener: (payload: { streamId: string; call: ClientToolCall }) => void) => () => void;
   readonly onChatStreamError: (listener: (payload: {
     streamId: string;
@@ -607,6 +607,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   }) => void) => () => void;
   readonly onChatStreamProviderRecovery: (listener: (payload: {
     streamId: string;
+    conversationId: string;
     fromProviderId?: string;
     fromProvider?: string;
     toProviderId?: string;
@@ -616,6 +617,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   }) => void) => () => void;
   readonly onChatStreamConnectionRecovery: (listener: (payload: {
     streamId: string;
+    conversationId: string;
     provider?: string;
     model?: string;
     status?: 'retrying' | 'recovered';

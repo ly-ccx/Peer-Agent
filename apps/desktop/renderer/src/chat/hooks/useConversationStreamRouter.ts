@@ -358,7 +358,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       conversationStore.setState(cid, { toolProgress: { tool, path, receivedLines } });
     });
 
-    const offToolCall = clientApi.onChatStreamToolCall(({ streamId, tool, displayName, args, toolCallId }) => {
+    const offToolCall = clientApi.onChatStreamToolCall(({ streamId, tool, displayName, args, toolCallId, startedAtMs }) => {
       const cid = conversationStore.resolveConversation(streamId);
       if (!cid) return;
       // 内置浏览器工具：通知上层自动展开 Workbench。仅前台触发，避免后台会话抢占视图。
@@ -372,13 +372,13 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         const last = msgs[msgs.length - 1];
         if (!last || last.role !== 'assistant') return {};
         const segments = [...(last.segments || [])];
-        segments.push({ type: 'tool-call', tool, displayName, args, toolCallId, result: undefined });
+        segments.push({ type: 'tool-call', tool, displayName, args, toolCallId, result: undefined, startedAtMs });
         // 持久化真值由主进程累积代理负责，渲染端仅更新表达层，避免双写。
         return { messages: [...msgs.slice(0, -1), { ...last, segments }] };
       });
     });
 
-    const offToolResult = clientApi.onChatStreamToolResult(({ streamId, toolCallId, result }) => {
+    const offToolResult = clientApi.onChatStreamToolResult(({ streamId, toolCallId, result, startedAtMs, endedAtMs, durationMs }) => {
       const cid = conversationStore.resolveConversation(streamId);
       if (!cid) return;
       if (cid === activeRef.current) {
@@ -393,7 +393,9 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         // 单值最新态，收尾即清不会误伤后续工具（后续工具会再次 set 新的进度）。
         if (!last || last.role !== 'assistant') return { toolProgress: null };
         const segments = (last.segments || []).map((seg) =>
-          seg.type === 'tool-call' && seg.toolCallId === toolCallId ? { ...seg, result } : seg,
+          seg.type === 'tool-call' && seg.toolCallId === toolCallId
+            ? { ...seg, result, startedAtMs: startedAtMs ?? seg.startedAtMs, endedAtMs, durationMs }
+            : seg,
         );
         return { messages: [...msgs.slice(0, -1), { ...last, segments }], toolProgress: null };
       });
@@ -474,8 +476,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     });
 
     const offProviderRecovery = clientApi.onChatStreamProviderRecovery(
-      ({ streamId, fromProvider, toProvider, reason }) => {
-        const cid = conversationStore.resolveConversation(streamId);
+      ({ streamId, conversationId, fromProvider, toProvider, reason }) => {
+        const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         conversationStore.setState(cid, {
           providerRecoveryNotice: { kind: 'provider', fromProvider, toProvider, reason },
@@ -484,8 +486,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     );
 
     const offConnectionRecovery = clientApi.onChatStreamConnectionRecovery(
-      ({ streamId, provider, model, status, fromConnection, toConnection, connection, attempt, maxRetries, delayMs, reason }) => {
-        const cid = conversationStore.resolveConversation(streamId);
+      ({ streamId, conversationId, provider, model, status, fromConnection, toConnection, connection, attempt, maxRetries, delayMs, reason }) => {
+        const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         conversationStore.setState(cid, {
           providerRecoveryNotice: {
