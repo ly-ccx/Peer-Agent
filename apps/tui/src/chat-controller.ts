@@ -218,6 +218,15 @@ function withDerivedAssistantFields(message: ChatMessage, segments: readonly Ass
   };
 }
 
+function restoredMessageSequence(messages: readonly ChatMessage[]): number {
+  return messages.reduce((highest, message) => {
+    const match = /^(?:user|assistant|compact)-(\d+)$/.exec(message.id);
+    if (!match) return highest;
+    const value = Number(match[1]);
+    return Number.isSafeInteger(value) ? Math.max(highest, value) : highest;
+  }, messages.length);
+}
+
 /**
  * Upsert a tool presentation onto the current assistant turn.
  * Creates a pending assistant placeholder when none exists yet (tool-first turn).
@@ -691,7 +700,7 @@ export function createChatController(options: {
         .filter((message) => message.role === 'user' || message.role === 'assistant')
         .map((message) => ({ role: message.role as 'user' | 'assistant', content: message.content }));
       executionEvidenceIds = [];
-      sequence = messages.length;
+      sequence = restoredMessageSequence(messages);
       publish(withPressure({
         status: 'idle',
         mode: normalizeTuiMode(input.mode),

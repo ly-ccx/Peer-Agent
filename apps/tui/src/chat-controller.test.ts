@@ -715,6 +715,72 @@ describe('chat controller', () => {
     ]]);
   });
 
+  test('keeps restored goal history IDs unique after tool-heavy turns', async () => {
+    const controller = createChatController({
+      host: host(),
+      model: {
+        initialize: (input) => initialState(input.input),
+        async runTurn(state) {
+          if (state.toolExecutions.length === 0) {
+            return {
+              kind: 'tool_calls',
+              state,
+              calls: [{
+                toolCallId: 'call-next',
+                capabilityId: 'local.file.read',
+                arguments: { path: 'next.txt' },
+              }],
+            };
+          }
+          return { kind: 'completed', state, output: 'next complete' };
+        },
+        applyToolResults: (state, executions) => ({
+          ...state,
+          toolExecutions: [...state.toolExecutions, ...executions.map((item) => item.result)],
+        }),
+      } satisfies ChatModelPort,
+    });
+
+    expect(controller.restore({
+      mode: 'goal',
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Goal Runner tick 1' },
+        {
+          id: 'assistant-5',
+          role: 'assistant',
+          content: 'first complete',
+          tools: [{
+            capabilityId: 'local.file.read',
+            toolName: 'read_file',
+            status: 'completed',
+            argumentSummary: 'first.txt',
+            detail: 'first.txt',
+            detailLines: ['first.txt'],
+            startedAt: 1_000,
+            completedAt: 1_250,
+            durationMs: 250,
+          }],
+        },
+      ],
+    })).toBe(true);
+
+    await controller.send('Goal Runner tick 2');
+
+    const messages = controller.getSnapshot().messages;
+    expect(messages.map((message) => message.id)).toEqual([
+      'user-1',
+      'assistant-5',
+      'user-6',
+      'assistant-7',
+    ]);
+    expect(new Set(messages.map((message) => message.id)).size).toBe(messages.length);
+    expect(messages[1]?.tools?.[0]).toMatchObject({
+      startedAt: 1_000,
+      completedAt: 1_250,
+      durationMs: 250,
+    });
+  });
+
   test('refuses to restore while a turn is running', async () => {
     let release!: () => void;
     let started!: () => void;
