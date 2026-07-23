@@ -1037,7 +1037,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const goalRunner = useMemo(() => {
     if (!host.goalBridge) return null;
     try {
-      return createTuiSharedGoalRunner({ bridge: host.goalBridge, chat: controller });
+      return createTuiSharedGoalRunner({
+        bridge: host.goalBridge,
+        chat: controller,
+        getConversationId: () => persistence.getConversationId(),
+      });
     } catch {
       return null;
     }

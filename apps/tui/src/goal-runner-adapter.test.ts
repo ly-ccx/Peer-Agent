@@ -85,7 +85,11 @@ describe('createTuiSharedGoalRunner', () => {
     try {
       const bridge = createTuiGoalBridge({ storeDir });
       const chat = createFakeChat();
-      const runner = createTuiSharedGoalRunner({ bridge, chat: chat as any });
+      const runner = createTuiSharedGoalRunner({
+        bridge,
+        chat: chat as any,
+        getConversationId: () => 'conv-auto-start',
+      });
 
       const events: string[] = [];
       runner.subscribe((event) => events.push(event.type));
@@ -117,12 +121,115 @@ describe('createTuiSharedGoalRunner', () => {
     }
   });
 
+  test('共享 store 的多个 TUI runtime 只由 GoalPlan 所属 conversation 自动推进', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-goal-owner-'));
+    try {
+      const ownerBridge = createTuiGoalBridge({ storeDir });
+      const observerBridge = createTuiGoalBridge({ storeDir });
+      const ownerChat = createFakeChat();
+      const observerChat = createFakeChat();
+      createTuiSharedGoalRunner({
+        bridge: ownerBridge,
+        chat: ownerChat as any,
+        getConversationId: () => 'conv-owner',
+      });
+      createTuiSharedGoalRunner({
+        bridge: observerBridge,
+        chat: observerChat as any,
+        getConversationId: () => 'conv-observer',
+      });
+
+      const created = await ownerBridge.execute({
+        capabilityId: GOAL_TOOL_NAMES.createPlan,
+        conversationId: 'conv-owner',
+        mode: 'goal',
+        workspaceRoot: process.cwd(),
+        args: createAcceptedGoalArgs(),
+      });
+      const planId = (created.result.output as { planId?: string }).planId!;
+
+      await waitFor(() => ownerChat.sentMessages.length > 0);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(ownerChat.sentMessages[0]).toContain(planId);
+      expect(observerChat.sentMessages).toHaveLength(0);
+    } finally {
+      await rm(storeDir, { recursive: true, force: true });
+    }
+  });
+
+  test('等待活跃 turn 期间切换 conversation 后不会延迟串入 Goal tick', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-goal-delayed-owner-'));
+    try {
+      const bridge = createTuiGoalBridge({ storeDir });
+      const chat = createFakeChat();
+      chat.setStatus('streaming');
+      let runtimeConversationId = 'conv-delayed-owner';
+      createTuiSharedGoalRunner({
+        bridge,
+        chat: chat as any,
+        getConversationId: () => runtimeConversationId,
+      });
+
+      await bridge.execute({
+        capabilityId: GOAL_TOOL_NAMES.createPlan,
+        conversationId: 'conv-delayed-owner',
+        mode: 'goal',
+        workspaceRoot: process.cwd(),
+        args: createAcceptedGoalArgs(),
+      });
+      runtimeConversationId = 'conv-new-window';
+      chat.setStatus('idle');
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      expect(chat.sentMessages).toHaveLength(0);
+    } finally {
+      await rm(storeDir, { recursive: true, force: true });
+    }
+  });
+
+  test('错误 conversation 手动 start 也不会写 runner 状态或发送 tick', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-goal-manual-owner-'));
+    try {
+      const bridge = createTuiGoalBridge({ storeDir });
+      const chat = createFakeChat();
+      const runner = createTuiSharedGoalRunner({
+        bridge,
+        chat: chat as any,
+        getConversationId: () => 'conv-wrong',
+        autoStart: false,
+      });
+      const created = await bridge.execute({
+        capabilityId: GOAL_TOOL_NAMES.createPlan,
+        conversationId: 'conv-owner',
+        mode: 'goal',
+        workspaceRoot: process.cwd(),
+        args: createAcceptedGoalArgs(),
+      });
+      const planId = (created.result.output as { planId?: string }).planId!;
+      const before = bridge.getPlan(planId)?.runner;
+
+      await runner.start(planId);
+      await runner.resume(planId);
+      await runner.waitForIdle(planId);
+
+      expect(chat.sentMessages).toHaveLength(0);
+      expect(bridge.getPlan(planId)?.runner).toEqual(before);
+    } finally {
+      await rm(storeDir, { recursive: true, force: true });
+    }
+  });
+
   test('Runner 自己写盘触发的 change 不会反向自激重复 start', async () => {
     const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-goal-noloop-'));
     try {
       const bridge = createTuiGoalBridge({ storeDir });
       const chat = createFakeChat();
-      createTuiSharedGoalRunner({ bridge, chat: chat as any });
+      createTuiSharedGoalRunner({
+        bridge,
+        chat: chat as any,
+        getConversationId: () => 'conv-no-self-loop',
+      });
 
       const created = await bridge.execute({
         capabilityId: GOAL_TOOL_NAMES.createPlan,
@@ -186,6 +293,7 @@ describe('createTuiSharedGoalRunner', () => {
       const runner = createTuiSharedGoalRunner({
         bridge,
         chat: chat as any,
+        getConversationId: () => 'conv-explorer-worker',
         autoStart: false,
       });
       cleanupRunner = runner;
@@ -282,6 +390,7 @@ describe('createTuiSharedGoalRunner', () => {
       const runner = createTuiSharedGoalRunner({
         bridge,
         chat: chat as any,
+        getConversationId: () => 'conv-verifier-worker',
         autoStart: false,
       });
       cleanupRunner = runner;
@@ -346,7 +455,12 @@ describe('createTuiSharedGoalRunner', () => {
     try {
       const bridge = createTuiGoalBridge({ storeDir });
       const chat = createFakeChat();
-      createTuiSharedGoalRunner({ bridge, chat: chat as any, autoStart: false });
+      createTuiSharedGoalRunner({
+        bridge,
+        chat: chat as any,
+        getConversationId: () => 'conv-progress',
+        autoStart: false,
+      });
 
       const created = await bridge.execute({
         capabilityId: GOAL_CAPABILITY_IDS.create,

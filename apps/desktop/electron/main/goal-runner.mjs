@@ -684,12 +684,16 @@ export function createGoalRunner({
   explorerRunner = null,
   verifierRunner = null,
   emitEvent = null,
+  canRunPlan = null,
   now = () => new Date().toISOString(),
   logger = console,
 } = {}) {
   if (!goalPlanStore) throw new Error('createGoalRunner requires goalPlanStore');
   if (!chatRuntime || typeof chatRuntime.runGoalTurn !== 'function') {
     throw new Error('createGoalRunner requires chatRuntime.runGoalTurn');
+  }
+  if (canRunPlan !== null && typeof canRunPlan !== 'function') {
+    throw new Error('createGoalRunner canRunPlan must be a function when provided');
   }
 
   const sessions = new Map();
@@ -1042,6 +1046,11 @@ export function createGoalRunner({
     // start 是多入口的 kick（plan change、chat outcome、IPC），必须以活跃 session 为幂等边界。
     // 否则重复 kick 会反复写 action_started，写入本身又可能触发新的 change 回调。
     if (getSession(planId)) return getState(planId);
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return null;
+    // 可选宿主归属门禁必须先于任何共享状态写入。多个 runtime 可以观察同一 store，
+    // 但只有 GoalPlan 所属 conversation 的 runtime 可以创建执行 session。
+    if (canRunPlan && !canRunPlan(plan)) return getState(planId);
     const initialized = initializeRunner(planId, options);
     if (!initialized) return null;
     appendRunEvent(planId, {
@@ -1062,6 +1071,8 @@ export function createGoalRunner({
   async function resume(planId, options = {}) {
     const plan = goalPlanStore.getPlan(planId);
     if (!plan) return null;
+    // resume 与 start 一样是执行入口，必须在改写共享 runner 状态前校验宿主归属。
+    if (canRunPlan && !canRunPlan(plan)) return getState(planId);
     const canResumeVerificationBlock =
       plan.status === 'completed'
       && plan.runner?.status === 'blocked'
@@ -1265,6 +1276,9 @@ export function createGoalRunner({
       // （见下方 "plan = goalPlanStore.getPlan(...)"），const 会在该路径抛 TypeError。
       let plan = goalPlanStore.getPlan(planId);
       if (!plan) return null;
+      // 每轮都重新校验宿主归属，防止 start 后、真正发送 tick 前会话发生切换。
+      // 归属丢失只终止当前宿主的本地 pump，不改写共享 GoalPlan 状态。
+      if (canRunPlan && !canRunPlan(plan)) return getState(planId);
 
       if (plan.status === 'completed' || hasCompletedProgress(plan)) {
         const gate = evaluatePlanVerificationGate(plan);
