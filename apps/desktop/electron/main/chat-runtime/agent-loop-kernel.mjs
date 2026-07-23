@@ -249,6 +249,12 @@ export function handleTerminalTextResponse({
     return { action: 'stop', reason: 'unsupported-tool-claim-exhausted' };
   }
 
+  // sendDone 会在这里读取 Runtime 当前消息投影来生成右下角占用快照。
+  // 先把本轮最终回复纳入历史，确保「回复结束」与「下一次发送前」看到的是同一份上下文；
+  // 否则 done 只能看到上一轮实际发送切片，下一次发送重建历史时才补上 assistant，口径会跳变。
+  if (Array.isArray(apiMessages)) {
+    apiMessages.push({ role: 'assistant', content });
+  }
   loop.sendDone();
   return { action: 'done' };
 }

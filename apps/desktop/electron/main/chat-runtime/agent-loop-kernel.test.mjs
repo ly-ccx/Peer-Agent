@@ -214,10 +214,18 @@ describe('agent loop kernel', () => {
     assert.deepEqual(webContents.events[0].payload.usage, loop.usage);
   });
 
-  it('emits done for terminal text responses', () => {
+  it('projects the terminal assistant reply before emitting the done context snapshot', () => {
     const webContents = makeWebContents();
-    const loop = createAgentLoopKernel({ webContents, streamId: 's3' });
-    const apiMessages = [];
+    const apiMessages = [{ role: 'user', content: 'question' }];
+    const observedMessages = [];
+    const loop = createAgentLoopKernel({
+      webContents,
+      streamId: 's3',
+      getContextInfo: () => {
+        observedMessages.push(structuredClone(apiMessages));
+        return { nextRequestInputTokens: apiMessages.length * 100, contextWindow: 1_000 };
+      },
+    });
 
     const result = handleTerminalTextResponse({
       text: 'finished',
@@ -227,10 +235,19 @@ describe('agent loop kernel', () => {
     });
 
     assert.deepEqual(result, { action: 'done' });
-    assert.deepEqual(apiMessages, []);
+    assert.deepEqual(apiMessages, [
+      { role: 'user', content: 'question' },
+      { role: 'assistant', content: 'finished' },
+    ]);
+    assert.deepEqual(observedMessages, [apiMessages]);
     assert.deepEqual(webContents.events, [{
       channel: 'chat:stream:done',
-      payload: { streamId: 's3', usage: loop.usage },
+      payload: {
+        streamId: 's3',
+        usage: loop.usage,
+        nextRequestInputTokens: 200,
+        contextWindow: 1_000,
+      },
     }]);
   });
 
