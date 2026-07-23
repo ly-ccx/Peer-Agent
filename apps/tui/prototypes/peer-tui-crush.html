@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Peer TUI · Visual Prototype</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080a0c;
+      --surface: #0d1013;
+      --raised: #12161a;
+      --line: #20262c;
+      --line-soft: #171c21;
+      --text: #e7ebee;
+      --soft: #b8c0c7;
+      --muted: #69737d;
+      --dim: #3e4851;
+      --ice: #a9d9e8;
+      --ice-strong: #c5edf6;
+      --lime: #b8f35b;
+      --green: #68d391;
+      --amber: #e6b86a;
+      --red: #ef7373;
+      --purple: #aa8cff;
+      --mono: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 46% -20%, rgba(169, 217, 232, .07), transparent 34rem),
+        var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.55;
+      overflow: hidden;
+    }
+
+    button, textarea { font: inherit; }
+    button { color: inherit; }
+
+    .window {
+      height: 100vh;
+      min-height: 680px;
+      display: grid;
+      grid-template-rows: 44px minmax(0, 1fr) auto;
+      max-width: 1540px;
+      margin: 0 auto;
+      border-inline: 1px solid #11161a;
+      background: rgba(8, 10, 12, .86);
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 22px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(8, 10, 12, .92);
+      backdrop-filter: blur(14px);
+      letter-spacing: .02em;
+    }
+
+    .brand { display: flex; align-items: center; gap: 9px; font-weight: 750; letter-spacing: .12em; }
+    .mark { color: var(--ice-strong); text-shadow: 0 0 18px rgba(169,217,232,.35); }
+    .branch { color: var(--muted); font-size: 11px; }
+    .branch b { color: var(--soft); font-weight: 500; }
+    .top-spacer { flex: 1; }
+    .model { color: var(--muted); font-size: 11px; }
+    .model strong { color: var(--soft); font-weight: 500; }
+    .online { width: 6px; height: 6px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 10px rgba(184,243,91,.7); }
+
+    .workspace {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 310px;
+    }
+
+    .conversation {
+      min-width: 0;
+      overflow: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--dim) transparent;
+    }
+
+    .stream {
+      width: min(900px, calc(100% - 64px));
+      margin: 0 auto;
+      padding: 30px 0 46px;
+    }
+
+    .turn { display: grid; grid-template-columns: 72px 1fr; gap: 20px; padding: 15px 0; }
+    .who { padding-top: 2px; color: var(--muted); font-size: 10px; letter-spacing: .13em; text-transform: uppercase; }
+    .who.peer { color: var(--ice); }
+    .message { color: var(--soft); }
+    .message p { margin: 0 0 10px; }
+    .message p:last-child { margin-bottom: 0; }
+    .message strong { color: var(--text); }
+
+    .user-turn .message {
+      color: var(--text);
+      padding-left: 13px;
+      border-left: 2px solid var(--ice);
+    }
+
+    .event-group {
+      margin: 13px 0 13px 92px;
+      border-left: 1px solid var(--line);
+    }
+
+    .event {
+      position: relative;
+      display: grid;
+      grid-template-columns: 21px 110px 1fr auto;
+      gap: 9px;
+      min-height: 34px;
+      align-items: start;
+      padding: 7px 10px 7px 15px;
+      color: var(--muted);
+      transition: background .16s ease;
+    }
+    .event:hover { background: rgba(255,255,255,.018); }
+    .event::before { content: ""; position: absolute; left: -3px; top: 15px; width: 5px; height: 5px; border-radius: 50%; background: var(--dim); }
+    .event.done::before { background: var(--green); }
+    .event.running::before { background: var(--lime); box-shadow: 0 0 9px rgba(184,243,91,.55); }
+    .event .glyph { color: var(--soft); }
+    .event .kind { color: var(--soft); }
+    .event .detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .event .time { color: var(--dim); font-size: 11px; }
+    .event.running .kind, .event.running .glyph { color: var(--lime); }
+
+    .code-line {
+      margin: 9px 0 3px;
+      padding: 10px 13px;
+      background: var(--surface);
+      border: 1px solid var(--line-soft);
+      color: #94a1ab;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .code-line .prompt { color: var(--lime); }
+    .code-line .path { color: var(--ice); }
+
+    .mission {
+      min-height: 0;
+      padding: 27px 22px 24px 25px;
+      border-left: 1px solid var(--line);
+      background: rgba(13, 16, 19, .58);
+      overflow: auto;
+    }
+    .eyebrow { display: flex; justify-content: space-between; color: var(--ice); font-size: 10px; font-weight: 700; letter-spacing: .16em; }
+    .eyebrow .state { color: var(--lime); font-weight: 500; }
+    .mission h2 { margin: 15px 0 19px; font-size: 15px; line-height: 1.5; letter-spacing: -.01em; }
+    .progress-meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; }
+    .progress { height: 2px; margin: 8px 0 5px; background: var(--line); }
+    .progress span { display: block; height: 100%; width: 50%; background: var(--lime); box-shadow: 0 0 7px rgba(184,243,91,.35); transition: width .4s ease; }
+    .section-label { margin: 27px 0 9px; color: var(--muted); font-size: 9px; letter-spacing: .16em; }
+    .current {
+      padding: 10px 0 10px 13px;
+      border-left: 2px solid var(--lime);
+      color: var(--text);
+      background: linear-gradient(90deg, rgba(184,243,91,.045), transparent);
+    }
+    .current small { display: block; color: var(--lime); margin-bottom: 4px; letter-spacing: .08em; }
+    .task { display: grid; grid-template-columns: 16px 1fr; gap: 9px; padding: 8px 0; color: var(--muted); }
+    .task.done { color: #8c969e; }
+    .task.done .task-icon { color: var(--green); }
+    .task.active { color: var(--text); }
+    .task.active .task-icon { color: var(--lime); }
+    .task-icon { color: var(--dim); }
+    .hint { margin-top: 30px; color: var(--dim); font-size: 10px; }
+    kbd { padding: 1px 5px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; background: var(--surface); }
+
+    .dock {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 310px;
+      border-top: 1px solid var(--line);
+      background: #090b0d;
+    }
+    .dock-main { min-width: 0; padding: 10px 22px 13px; }
+    .activity { display: flex; align-items: center; height: 25px; color: var(--muted); font-size: 10px; }
+    .activity .spinner { color: var(--lime); margin-right: 9px; animation: pulse 1.3s ease-in-out infinite; }
+    .activity b { color: var(--soft); font-weight: 500; }
+    .activity .trail { flex: 1; margin: 0 11px; border-top: 1px dotted var(--line); }
+    .active-label { color: var(--dim); letter-spacing: .1em; }
+    .active-label em { color: var(--lime); font-style: normal; }
+
+    .input-shell {
+      display: grid;
+      grid-template-columns: 26px 1fr auto;
+      align-items: start;
+      min-height: 58px;
+      padding: 11px 13px;
+      border: 1px solid #303941;
+      background: var(--surface);
+      box-shadow: inset 0 0 0 1px rgba(169,217,232,.015), 0 10px 35px rgba(0,0,0,.22);
+    }
+    .input-shell:focus-within { border-color: #52636e; box-shadow: 0 0 0 1px rgba(169,217,232,.08); }
+    .prompt-mark { color: var(--ice-strong); padding-top: 1px; font-weight: 700; }
+    textarea { width: 100%; height: 34px; resize: none; border: 0; outline: 0; color: var(--text); background: transparent; line-height: 1.55; }
+    textarea::placeholder { color: #4a555e; }
+    .send { border: 0; background: transparent; color: var(--dim); cursor: pointer; padding: 2px 0 0 10px; }
+    .send:hover { color: var(--ice); }
+    .statusbar { display: flex; gap: 10px; align-items: center; padding-top: 7px; color: var(--dim); font-size: 10px; }
+    .statusbar b { color: var(--muted); font-weight: 500; }
+    .statusbar .right { margin-left: auto; }
+    .context-meter { display: inline-block; width: 42px; height: 3px; margin: 0 5px 2px; background: var(--line); }
+    .context-meter span { display: block; width: 28%; height: 100%; background: var(--ice); }
+    .dock-side { display: flex; align-items: center; padding: 0 22px; border-left: 1px solid var(--line); color: var(--dim); font-size: 10px; }
+    .dock-side b { color: var(--muted); font-weight: 500; }
+
+    @keyframes pulse { 50% { opacity: .35; } }
+
+    @media (max-width: 900px) {
+      .workspace { grid-template-columns: 1fr; }
+      .mission { display: none; }
+      .dock { grid-template-columns: 1fr; }
+      .dock-side { display: none; }
+      .stream { width: calc(100% - 32px); }
+    }
+  </style>
+</head>
+<body>
+  <main class="window">
+    <header class="topbar">
+      <div class="brand"><span class="mark">◆</span><span>PEER</span></div>
+      <span class="branch">~/DEV/github/<b>peer_agent</b></span>
+      <span class="top-spacer"></span>
+      <span class="model">OPENAI / <strong>GPT-5.6-SOL</strong></span>
+      <span class="online" title="runtime online"></span>
+    </header>
+
+    <section class="workspace">
+      <div class="conversation">
+        <div class="stream">
+          <article class="turn user-turn">
+            <div class="who">YOU</div>
+            <div class="message">这个运行中太丑了，整体也太丑了，能不能学一下 Crush 的 TUI 界面构成，给出一版新的设计。</div>
+          </article>
+
+          <article class="turn">
+            <div class="who peer">PEER</div>
+            <div class="message">
+              <p>我会先把现有界面拆成<strong>内容流、活动轨道、目标状态和输入坞</strong>四层，再用更克制的边界重新组织。</p>
+              <p>借鉴 Crush 的重点是信息密度和终端节奏，不复制它的品牌。Peer 继续使用 Frost 冷色与荧光绿运行态。</p>
+            </div>
+          </article>
+
+          <div class="event-group">
+            <div class="event done">
+              <span class="glyph">✓</span><span class="kind">Read</span><span class="detail">apps/tui/src/tui-theme.ts</span><span class="time">0.1s</span>
+            </div>
+            <div class="event done">
+              <span class="glyph">✓</span><span class="kind">Search</span><span class="detail">Frost · MISSION · running status</span><span class="time">0.2s</span>
+            </div>
+            <div class="event running">
+              <span class="glyph">◇</span><span class="kind">Write</span><span class="detail">apps/tui/prototypes/peer-tui-crush.html</span><span class="time">now</span>
+            </div>
+          </div>
+
+          <article class="turn">
+            <div class="who peer">PEER</div>
+            <div class="message">
+              <p>首屏构图已经建立。侧栏只承载持久目标，工具调用回归对话时间线；“运行中”不再是突兀的提示条，而是输入区上方的一条轻量活动轨道。</p>
+              <div class="code-line"><span class="prompt">❯</span> open <span class="path">apps/tui/prototypes/peer-tui-crush.html</span></div>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <aside class="mission">
+        <div class="eyebrow"><span>MISSION / 01</span><span class="state">● EXECUTING</span></div>
+        <h2>制作 TUI HTML 效果稿</h2>
+        <div class="progress-meta"><span>2 / 4 COMPLETE</span><span id="percent">50%</span></div>
+        <div class="progress"><span id="progress"></span></div>
+
+        <div class="section-label">NOW WORKING</div>
+        <div class="current"><small>◇ ACTIVE</small><span id="current-task">在浏览器预览并修正首屏构图</span></div>
+
+        <div class="section-label">TASKS</div>
+        <div class="task done"><span class="task-icon">✓</span><span>提取现有 Peer TUI 的配色与界面元素</span></div>
+        <div class="task done"><span class="task-icon">✓</span><span>制作可交互的单文件 TUI 效果稿</span></div>
+        <div class="task active"><span class="task-icon">◇</span><span>在浏览器预览并修正首屏构图</span></div>
+        <div class="task"><span class="task-icon">○</span><span>检查 HTML 文件、关键模块和交互是否完整</span></div>
+        <div class="hint"><kbd>g</kbd> toggle goal panel&nbsp;&nbsp; <kbd>esc</kbd> stop</div>
+      </aside>
+    </section>
+
+    <footer class="dock">
+      <div class="dock-main">
+        <div class="activity"><span class="spinner">◆</span><b id="activity-text">正在生成视觉原型</b><span class="trail"></span><span class="active-label">PEER / <em>ACTIVE</em></span></div>
+        <div class="input-shell">
+          <span class="prompt-mark">❯</span>
+          <textarea id="composer" aria-label="Message" placeholder="Ask Peer anything…"></textarea>
+          <button class="send" id="send" title="Send">↵</button>
+        </div>
+        <div class="statusbar">
+          <span>mode <b>goal</b></span><span>·</span><span>access <b>standard</b></span><span>·</span><span>lang <b>zh-CN</b></span>
+          <span class="right">gpt-5.6-sol <i class="context-meter"><span></span></i> 28%</span>
+        </div>
+      </div>
+      <div class="dock-side"><span>workspace&nbsp; <b>peer_agent</b><br />goal runner&nbsp; <b>tick 1 / 8</b></span></div>
+    </footer>
+  </main>
+
+  <script>
+    const composer = document.getElementById('composer');
+    const send = document.getElementById('send');
+    const activity = document.getElementById('activity-text');
+    const mission = document.querySelector('.mission');
+    const workspace = document.querySelector('.workspace');
+    const dock = document.querySelector('.dock');
+
+    function submitMessage() {
+      const value = composer.value.trim();
+      if (!value) return;
+      activity.textContent = '正在处理：' + value.slice(0, 28) + (value.length > 28 ? '…' : '');
+      composer.value = '';
+      setTimeout(() => { activity.textContent = '等待下一步指令'; }, 1800);
+    }
+
+    send.addEventListener('click', submitMessage);
+    composer.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        submitMessage();
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key.toLowerCase() !== 'g' || document.activeElement === composer) return;
+      const hidden = mission.style.display === 'none';
+      mission.style.display = hidden ? '' : 'none';
+      workspace.style.gridTemplateColumns = hidden ? '' : '1fr';
+      dock.style.gridTemplateColumns = hidden ? '' : '1fr';
+      document.querySelector('.dock-side').style.display = hidden ? '' : 'none';
+    });
+  </script>
+</body>
+</html>
