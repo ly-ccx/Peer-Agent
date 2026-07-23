@@ -17,7 +17,7 @@ import type {
   ChatModelState,
   ChatModelToolCall,
 } from './chat-controller.ts';
-import { estimateTextTokens, estimateTokensFromMessages } from './context-pressure.ts';
+import { computeNextRequestInputTokens } from './context-pressure.ts';
 import { normalizeTuiRuntimeMode, type TuiRuntimeMode } from './tui-mode.ts';
 
 function toUserModelContent(
@@ -179,13 +179,13 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
       const streamId = context.run.streamId ?? 'tui-chat';
       const reasoningEffort = options.getReasoningEffort?.();
       const model = options.getModel?.() ?? options.model;
-      const toolTokens = estimateTextTokens(JSON.stringify(tools));
+      // Same tools-schema estimate as Desktop computeContextBudget / estimateToolsTokens.
       const contextWindowRaw = Number(options.getContextWindow?.());
       const contextWindow = Number.isFinite(contextWindowRaw) && contextWindowRaw > 0
         ? Math.floor(contextWindowRaw)
         : null;
       const requestProjection = (messages: readonly ModelMessage[]) => ({
-        nextRequestInputTokens: Math.ceil(estimateTokensFromMessages(messages) + toolTokens),
+        nextRequestInputTokens: computeNextRequestInputTokens({ messages, tools }),
         contextWindow,
         model,
       });

@@ -441,6 +441,11 @@ export function createChatController(options: {
       : undefined;
   };
 
+  const resolveToolsForPressure = () => {
+    const mode = snapshot.mode;
+    return options.host.toolDefinitionsForMode?.(mode) ?? options.host.toolDefinitions;
+  };
+
   const pressureFor = (
     messages: readonly ModelMessage[],
     usage?: ModelUsage,
@@ -450,6 +455,8 @@ export function createChatController(options: {
     usage,
     contextWindow: resolveContextWindow(),
     draftText,
+    // Desktop computeContextBudget folds tools schema into nextRequestInputTokens.
+    tools: resolveToolsForPressure(),
   });
 
   const withPressure = (
