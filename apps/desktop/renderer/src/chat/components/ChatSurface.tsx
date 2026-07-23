@@ -51,14 +51,7 @@ import {
   estimateDraftTokens,
   type ConversationTokenEstimateCache,
 } from '../state/tokenEstimate';
-import {
-  MAX_ATTACHMENTS,
-  MAX_IMAGE_BYTES,
-  MAX_TEXT_FILE_BYTES,
-  isTextLikeFile,
-  readAsDataUrl,
-  readAsText,
-} from '../state/attachmentIntake';
+import { intakeAttachments } from '../state/attachmentIntake';
 import {
   normalizeStreamSegment,
   segmentsSignature,
@@ -117,6 +110,7 @@ import { ChatGoalApprovalCard } from './goal/ChatGoalApprovalCard';
 import { MessageQueue } from './MessageQueue';
 import { PermissionGateStrip } from './thread/PermissionGateStrip';
 import { MessageActionBar, type MessageActionId } from './thread/MessageActionBar';
+import { historyBeforeEditedUserMessage, serializeConversationMessages } from '../state/editHistory';
 import { MessageRail } from './thread/MessageRail';
 import { useConversationState } from '../hooks/useConversationState';
 import { beginConversationCompaction } from '../state/automaticCompaction';
@@ -1241,60 +1235,11 @@ export function ChatSurface({
   }, [removePendingPermissionCall]);
 
   const addFiles = useCallback(async (files: FileList | File[] | null | undefined) => {
-    const incoming = Array.from(files ?? []);
-    if (!incoming.length) return;
-
-    setAttachmentError(null);
-    const next: ChatAttachment[] = [];
-    for (const file of incoming) {
-      if (attachments.length + next.length >= MAX_ATTACHMENTS) {
-        setAttachmentError(isZh ? `最多只能添加 ${MAX_ATTACHMENTS} 个附件` : `You can attach up to ${MAX_ATTACHMENTS} files`);
-        break;
-      }
-
-      try {
-        if (file.type.startsWith('image/')) {
-          if (file.size > MAX_IMAGE_BYTES) {
-            setAttachmentError(isZh ? `${file.name} 超过 8MB，未添加` : `${file.name} is larger than 8MB and was not attached`);
-            continue;
-          }
-          next.push({
-            id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            name: file.name || 'image',
-            mimeType: file.type || 'image/png',
-            size: file.size,
-            kind: 'image',
-            dataUrl: await readAsDataUrl(file),
-          });
-        } else if (isTextLikeFile(file)) {
-          if (file.size > MAX_TEXT_FILE_BYTES) {
-            setAttachmentError(isZh ? `${file.name} 超过 512KB，未添加` : `${file.name} is larger than 512KB and was not attached`);
-            continue;
-          }
-          next.push({
-            id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            name: file.name || 'file.txt',
-            mimeType: file.type || 'text/plain',
-            size: file.size,
-            kind: 'text',
-            text: await readAsText(file),
-          });
-        } else {
-          next.push({
-            id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            name: file.name || 'file',
-            mimeType: file.type || 'application/octet-stream',
-            size: file.size,
-            kind: 'unsupported',
-          });
-          setAttachmentError(isZh ? `${file.name || '文件'} 暂不支持读取内容，仅附带文件信息` : `${file.name || 'File'} content is not supported yet; only file metadata was attached`);
-        }
-      } catch (error) {
-        setAttachmentError(error instanceof Error ? error.message : (isZh ? '读取附件失败' : 'Failed to read attachment'));
-      }
+    const result = await intakeAttachments(files, attachments.length, isZh);
+    setAttachmentError(result.error);
+    if (result.attachments.length) {
+      setAttachments((prev) => [...prev, ...result.attachments]);
     }
-
-    if (next.length) setAttachments((prev) => [...prev, ...next]);
   }, [attachments.length, isZh]);
 
   const removeAttachment = useCallback((id: string) => {
@@ -1405,7 +1350,12 @@ export function ChatSurface({
 
   // 核心发送路径:给定文本(+ 可选附件)就执行一次 agent turn。
   // handleSend(用户输入)与 pending-task 续传(跨重启)都复用它,避免另造发送路径。
-  const submitMessage = useCallback(async (text: string, sentAttachments: ChatAttachment[], submitEffort?: string) => {
+  const submitMessage = useCallback(async (
+    text: string,
+    sentAttachments: ChatAttachment[],
+    submitEffort?: string,
+    historyOverride?: readonly ChatMsg[],
+  ) => {
     if ((!text && sentAttachments.length === 0) || isStreaming || !hasProvider || !conversationId || loadStatus !== 'ready') return false;
     setStreamError(null);
     setActiveUsage(null);
@@ -1433,7 +1383,7 @@ export function ChatSurface({
     const now = Date.now();
     const userMsg: ChatMsg = { id: nextId(), role: 'user', content: text, timestamp: now, attachments: sentAttachments.length ? sentAttachments : undefined };
     const assistantMsg: ChatMsg = { id: nextId(), role: 'assistant', content: '', segments: [], timestamp: now };
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    setMessages((prev) => [...(historyOverride ?? prev), userMsg, assistantMsg]);
 
     await clientApi.conversationsAppendMessage({ id: conversationId, message: { id: userMsg.id, role: 'user', content: text, timestamp: now, attachments: userMsg.attachments } });
     await clientApi.conversationsAppendMessage({ id: conversationId, message: { id: assistantMsg.id, role: 'assistant', content: '', timestamp: now } });
@@ -1449,7 +1399,7 @@ export function ChatSurface({
     conversationStore.setState(conversationId, { streamId, turnStartedAt });
     setIsStreaming(true);
 
-    const contextMessages = [...messages, userMsg];
+    const contextMessages = [...(historyOverride ?? messages), userMsg];
     const apiMessages = toApiMessages(contextMessages);
     const contextAttachments = buildConversationAttachmentContext(contextMessages);
     const continuityContext = buildConversationContinuityContext(contextMessages);
@@ -1687,6 +1637,28 @@ export function ChatSurface({
     });
     onConversationUpdated?.();
   }, [conversationId, isStreaming, messages, onConversationUpdated]);
+
+  const handleEditMessage = useCallback(async (
+    messageId: string,
+    editedText: string,
+    editedAttachments: readonly ChatAttachment[],
+  ) => {
+    if (isStreaming || !hasProvider || !conversationId || loadStatus !== 'ready') return false;
+    const text = editedText.trim();
+    if (!text && editedAttachments.length === 0) return false;
+    const retainedMessages = historyBeforeEditedUserMessage(messages, messageId);
+    if (!retainedMessages) return false;
+
+    // 先把目标原消息及后续旧分支从持久化中清掉，再沿现有发送链路创建唯一的新消息。
+    await clientApi.conversationsReplaceMessages({
+      id: conversationId,
+      messages: serializeConversationMessages(retainedMessages),
+      allowEmpty: true,
+    });
+    await submitMessage(text, [...editedAttachments], undefined, retainedMessages);
+    return true;
+  }, [isStreaming, hasProvider, conversationId, loadStatus, messages, submitMessage]);
+  const stableHandleEditMessage = useStableCallback(handleEditMessage);
 
   const handleMessageAction = useCallback((msgIndex: number, action: MessageActionId) => {
     if (action === 'regenerate') void handleRegenerate(msgIndex);
@@ -1958,6 +1930,7 @@ export function ChatSurface({
                   isZh={isZh}
                   i18n={i18n}
                   onMessageAction={stableHandleMessageAction}
+                  onEditMessage={stableHandleEditMessage}
                   onRegenerate={stableHandleRegenerate}
                   onPreviewImage={setImagePreview}
                   turnIndex={turnIndex}

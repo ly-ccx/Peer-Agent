@@ -23,6 +23,7 @@ function identity(turn: ChatTurnRenderIdentity['turn']): ChatTurnRenderIdentity 
     isZh: true,
     i18n: runtime,
     onMessageAction: callback,
+    onEditMessage: callback,
     onRegenerate: callback,
     onPreviewImage: callback,
     turnIndex: 0,

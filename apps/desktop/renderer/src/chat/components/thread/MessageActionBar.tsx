@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 
-export type MessageActionId = 'copy' | 'regenerate' | 'delete' | 'branch';
+export type MessageActionId = 'copy' | 'edit' | 'regenerate' | 'delete' | 'branch';
 
 interface MessageActionBarProps {
   readonly role: 'user' | 'assistant' | 'system' | 'tool';
@@ -43,11 +43,12 @@ export function MessageActionBar({
   const copyLabel = justCopied ? i18n.t('chat.message.action.copied') : i18n.t('chat.message.action.copy');
   const hasContent = content.trim().length > 0;
   const canCopy = hasContent;
+  const canEditMessage = role === 'user' && canEdit && !isStreaming;
   const canRegenerate = role === 'assistant' && canEdit && !isStreaming;
   const canDelete = canEdit && !isStreaming;
   const canBranch = hasContent && !isStreaming;
 
-  if (!canCopy && !canRegenerate && !canDelete && !canBranch) return null;
+  if (!canCopy && !canEditMessage && !canRegenerate && !canDelete && !canBranch) return null;
 
   return (
     <div className="message-action-bar" onMouseLeave={handleMouseLeave}>
@@ -63,6 +64,13 @@ export function MessageActionBar({
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
             </svg>
           )}
+        </button>
+      ) : null}
+      {canEditMessage ? (
+        <button type="button" onClick={() => onAction('edit')} title={i18n.locale.startsWith('zh') ? '编辑消息' : 'Edit message'} aria-label={i18n.locale.startsWith('zh') ? '编辑消息' : 'Edit message'}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
+          </svg>
         </button>
       ) : null}
       {canRegenerate ? (

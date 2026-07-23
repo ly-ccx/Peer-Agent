@@ -9,6 +9,7 @@ export interface ChatTurnRenderIdentity {
   readonly isZh: boolean;
   readonly i18n: unknown;
   readonly onMessageAction: unknown;
+  readonly onEditMessage: unknown;
   readonly onRegenerate: unknown;
   readonly onPreviewImage: unknown;
   readonly turnIndex: number;
@@ -32,6 +33,7 @@ export function areChatTurnRenderPropsEqual(
     || previous.isZh !== next.isZh
     || previous.i18n !== next.i18n
     || previous.onMessageAction !== next.onMessageAction
+    || previous.onEditMessage !== next.onEditMessage
     || previous.onRegenerate !== next.onRegenerate
     || previous.onPreviewImage !== next.onPreviewImage
     || previous.turnIndex !== next.turnIndex

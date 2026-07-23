@@ -1,3 +1,5 @@
+import type { ChatAttachment } from './types';
+
 // 附件接收（intake）的纯逻辑与上限常量：判定文本类文件、把 File 读成 dataURL / 文本。
 // 从 ChatSurface.tsx 下沉而来，行为保持不变。
 //
@@ -44,4 +46,79 @@ export function readAsText(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error('failed to read file'));
     reader.readAsText(file);
   });
+}
+
+export interface AttachmentIntakeResult {
+  readonly attachments: ChatAttachment[];
+  readonly error: string | null;
+}
+
+/**
+ * 把用户选择的文件转换为消息附件。主输入框与历史消息编辑器共享此入口，
+ * 保证数量、大小、类型和错误提示规则一致。
+ */
+export async function intakeAttachments(
+  files: FileList | File[] | null | undefined,
+  existingCount: number,
+  isZh: boolean,
+  createId: () => string = () => `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+): Promise<AttachmentIntakeResult> {
+  const incoming = Array.from(files ?? []);
+  const attachments: ChatAttachment[] = [];
+  let error: string | null = null;
+
+  for (const file of incoming) {
+    if (existingCount + attachments.length >= MAX_ATTACHMENTS) {
+      error = isZh
+        ? `最多只能添加 ${MAX_ATTACHMENTS} 个附件`
+        : `You can attach up to ${MAX_ATTACHMENTS} files`;
+      break;
+    }
+    try {
+      if (file.type.startsWith('image/')) {
+        if (file.size > MAX_IMAGE_BYTES) {
+          error = isZh ? `${file.name} 超过 8MB，未添加` : `${file.name} is larger than 8MB and was not attached`;
+          continue;
+        }
+        attachments.push({
+          id: createId(),
+          name: file.name || 'image',
+          mimeType: file.type || 'image/png',
+          size: file.size,
+          kind: 'image',
+          dataUrl: await readAsDataUrl(file),
+        });
+      } else if (isTextLikeFile(file)) {
+        if (file.size > MAX_TEXT_FILE_BYTES) {
+          error = isZh ? `${file.name} 超过 512KB，未添加` : `${file.name} is larger than 512KB and was not attached`;
+          continue;
+        }
+        attachments.push({
+          id: createId(),
+          name: file.name || 'file.txt',
+          mimeType: file.type || 'text/plain',
+          size: file.size,
+          kind: 'text',
+          text: await readAsText(file),
+        });
+      } else {
+        attachments.push({
+          id: createId(),
+          name: file.name || 'file',
+          mimeType: file.type || 'application/octet-stream',
+          size: file.size,
+          kind: 'unsupported',
+        });
+        error = isZh
+          ? `${file.name || '文件'} 暂不支持读取内容，仅附带文件信息`
+          : `${file.name || 'File'} content is not supported yet; only file metadata was attached`;
+      }
+    } catch (cause) {
+      error = cause instanceof Error
+        ? cause.message
+        : (isZh ? '读取附件失败' : 'Failed to read attachment');
+    }
+  }
+
+  return { attachments, error };
 }

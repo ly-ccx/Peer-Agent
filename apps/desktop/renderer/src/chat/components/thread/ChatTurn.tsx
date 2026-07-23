@@ -1,5 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { intakeAttachments } from '../../state/attachmentIntake';
 import { formatDuration, formatTime } from '../../state/format';
 import type { ChatAttachment } from '../../state/types';
 import type { ChatTurn as ChatTurnModel } from '../../state/chatTurns';
@@ -17,6 +18,7 @@ interface ChatTurnProps {
   readonly isZh: boolean;
   readonly i18n: I18nRuntime;
   readonly onMessageAction: (messageIndex: number, action: MessageActionId) => void;
+  readonly onEditMessage: (messageId: string, text: string, attachments: readonly ChatAttachment[]) => Promise<boolean>;
   readonly onRegenerate: (messageIndex: number) => void;
   readonly onPreviewImage: (attachment: ChatAttachment) => void;
   readonly turnIndex: number;
@@ -55,6 +57,7 @@ function ChatTurnImpl({
   isZh,
   i18n,
   onMessageAction,
+  onEditMessage,
   onRegenerate,
   onPreviewImage,
   turnIndex,
@@ -65,6 +68,58 @@ function ChatTurnImpl({
     (element: HTMLElement | null) => onMeasure(turnIndex, element),
     [onMeasure, turnIndex],
   );
+  const editFileInputRef = useRef<HTMLInputElement>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+  const [editAttachments, setEditAttachments] = useState<ChatAttachment[]>([]);
+  const [editAttachmentError, setEditAttachmentError] = useState<string | null>(null);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+
+  const beginEdit = useCallback((messageId: string, content: string, attachments: readonly ChatAttachment[]) => {
+    if (isLive) return;
+    setEditingMessageId(messageId);
+    setEditDraft(content);
+    setEditAttachments([...attachments]);
+    setEditAttachmentError(null);
+  }, [isLive]);
+  const cancelEdit = useCallback(() => {
+    if (isSubmittingEdit) return;
+    setEditingMessageId(null);
+    setEditDraft('');
+    setEditAttachments([]);
+    setEditAttachmentError(null);
+  }, [isSubmittingEdit]);
+  const addEditFiles = useCallback(async (files: FileList | File[] | null | undefined) => {
+    const result = await intakeAttachments(files, editAttachments.length, isZh);
+    setEditAttachmentError(result.error);
+    if (result.attachments.length) {
+      setEditAttachments((current) => [...current, ...result.attachments]);
+    }
+  }, [editAttachments.length, isZh]);
+  const reorderEditAttachment = useCallback((fromIndex: number, toIndex: number) => {
+    setEditAttachments((current) => {
+      if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= current.length || toIndex >= current.length) return current;
+      const next = [...current];
+      const [moved] = next.splice(fromIndex, 1);
+      if (!moved) return current;
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+  }, []);
+  const submitEdit = useCallback(async () => {
+    if (!editingMessageId || (!editDraft.trim() && editAttachments.length === 0) || isSubmittingEdit) return;
+    setIsSubmittingEdit(true);
+    try {
+      if (await onEditMessage(editingMessageId, editDraft, editAttachments)) {
+        setEditingMessageId(null);
+        setEditDraft('');
+        setEditAttachments([]);
+        setEditAttachmentError(null);
+      }
+    } finally {
+      setIsSubmittingEdit(false);
+    }
+  }, [editAttachments, editDraft, editingMessageId, isSubmittingEdit, onEditMessage]);
 
   return (
     <section
@@ -86,15 +141,75 @@ function ChatTurnImpl({
               <div className="chat-msg-body">
                 {msg.role === 'user' ? (
                   <>
-                    {msg.content ? <p>{msg.content}</p> : null}
-                    {msg.attachments?.length ? (
-                      <AttachmentStrip
-                        attachments={msg.attachments}
-                        readOnly
-                        isZh={isZh}
-                        onPreviewImage={onPreviewImage}
-                      />
-                    ) : null}
+                    {editingMessageId === msg.id ? (
+                      <div className="chat-message-editor">
+                        <textarea
+                          autoFocus
+                          value={editDraft}
+                          disabled={isSubmittingEdit}
+                          onChange={(event) => setEditDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Escape') cancelEdit();
+                            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) void submitEdit();
+                          }}
+                          aria-label={isZh ? '编辑消息内容' : 'Edit message content'}
+                        />
+                        {editAttachments.length ? (
+                          <AttachmentStrip
+                            attachments={editAttachments}
+                            onRemove={(id) => {
+                              setEditAttachments((current) => current.filter((attachment) => attachment.id !== id));
+                              setEditAttachmentError(null);
+                            }}
+                            onReorder={reorderEditAttachment}
+                            isZh={isZh}
+                            onPreviewImage={onPreviewImage}
+                          />
+                        ) : null}
+                        {editAttachmentError ? <div className="chat-message-editor-error">{editAttachmentError}</div> : null}
+                        <div className="chat-message-editor-actions">
+                          <button
+                            type="button"
+                            disabled={isSubmittingEdit}
+                            onClick={() => editFileInputRef.current?.click()}
+                          >
+                            {isZh ? '添加附件' : 'Add attachment'}
+                          </button>
+                          <input
+                            ref={editFileInputRef}
+                            type="file"
+                            multiple
+                            className="chat-file-input"
+                            disabled={isSubmittingEdit}
+                            onChange={(event) => {
+                              void addEditFiles(event.currentTarget.files);
+                              event.currentTarget.value = '';
+                            }}
+                          />
+                          <span className="chat-message-editor-spacer" />
+                          <button type="button" disabled={isSubmittingEdit} onClick={cancelEdit}>{isZh ? '取消' : 'Cancel'}</button>
+                          <button
+                            type="button"
+                            disabled={(!editDraft.trim() && editAttachments.length === 0) || isSubmittingEdit}
+                            onClick={() => { void submitEdit(); }}
+                          >
+                            {isSubmittingEdit ? (isZh ? '发送中…' : 'Sending…') : (isZh ? '保存并发送' : 'Save & send')}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {msg.content ? <p>{msg.content}</p> : null}
+                        {msg.attachments?.length ? (
+                          <AttachmentStrip
+                            attachments={msg.attachments}
+                            readOnly
+                            isZh={isZh}
+                            onPreviewImage={onPreviewImage}
+                          />
+                        ) : null}
+                      </>
+                    )}
                   </>
                 ) : (
                   <InteractionAnsweredContext.Provider value={answeredText}>
@@ -115,7 +230,10 @@ function ChatTurnImpl({
                   content={msg.content}
                   canEdit={true}
                   isStreaming={isLive}
-                  onAction={(action) => onMessageAction(messageIndex, action)}
+                  onAction={(action) => {
+                    if (action === 'edit') beginEdit(msg.id, msg.content, msg.attachments ?? []);
+                    else onMessageAction(messageIndex, action);
+                  }}
                   i18n={i18n}
                 />
                 {msg.role === 'assistant' ? (
