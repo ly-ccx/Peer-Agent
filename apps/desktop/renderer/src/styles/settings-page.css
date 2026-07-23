@@ -1658,12 +1658,25 @@
   box-shadow: 0 0 0 1px var(--pa-border-subtle);
 }
 
-.usage-heatmap {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.usage-heatmap-viewport {
+  width: 100%;
   overflow-x: auto;
   padding-bottom: 4px;
+  overscroll-behavior-inline: contain;
+}
+
+.usage-heatmap {
+  --usage-heatmap-cell-size: 12px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: max-content;
+  padding-bottom: 4px;
+}
+
+.usage-heatmap__content {
+  width: max-content;
 }
 
 .usage-heatmap__months {
@@ -1688,23 +1701,23 @@
 
 .usage-heatmap__weekdays {
   display: grid;
-  grid-template-rows: repeat(7, 12px);
+  grid-template-rows: repeat(7, var(--usage-heatmap-cell-size));
   gap: 3px;
   color: var(--pa-text-secondary);
   font-size: 11px;
-  line-height: 12px;
+  line-height: var(--usage-heatmap-cell-size);
 }
 
 .usage-heatmap__grid {
   display: grid;
   grid-auto-flow: column;
-  grid-template-rows: repeat(7, 12px);
+  grid-template-rows: repeat(7, var(--usage-heatmap-cell-size));
   gap: 3px;
 }
 
 .usage-heatmap__cell {
-  width: 12px;
-  height: 12px;
+  width: var(--usage-heatmap-cell-size);
+  height: var(--usage-heatmap-cell-size);
   border-radius: 2px;
   background: color-mix(in srgb, var(--pa-border-subtle) 70%, transparent);
   box-sizing: border-box;
@@ -1741,6 +1754,70 @@
   gap: 4px;
   color: var(--pa-text-secondary);
   font-size: 11px;
+}
+
+/* 短周期（7 天 / 1 个月）单行日条：等分铺满整行，与趋势图边界对齐 */
+.usage-heatmap-strip {
+  position: relative;
+  width: 100%;
+  padding-top: 44px; /* 给上方悬浮 tooltip 留位，避免被上层容器裁切 */
+  padding-bottom: 18px; /* 给底部月份刻度留位 */
+}
+
+.usage-heatmap-strip__row {
+  position: relative;
+  display: flex;
+  gap: 3px;
+  width: 100%;
+}
+
+.usage-heatmap-strip__cell {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 26px;
+  border-radius: 3px;
+  box-sizing: border-box;
+  transition: transform 0.08s ease;
+}
+
+.usage-heatmap-strip__cell:hover {
+  transform: scaleY(1.12);
+}
+
+.usage-heatmap-strip__ticks {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 14px;
+  pointer-events: none;
+}
+
+.usage-heatmap-strip__tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(2px);
+  color: var(--pa-text-secondary);
+  font-size: 11px;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.usage-heatmap-strip__tick::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 3px;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 5px solid var(--pa-border-subtle);
+}
+
+.usage-heatmap-strip__tooltip {
+  top: -6px; /* 相对 __row 顶部略上移，配合 translate(-50%,-100%) 悬浮在格子上方 */
+  pointer-events: none;
 }
 
 .usage-trend-block {

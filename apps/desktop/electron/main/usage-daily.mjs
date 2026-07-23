@@ -2,14 +2,14 @@
  * 请求日志按天聚合（Token 热力图 / 趋势图数据源）。
  *
  * 数据源：usage/requests.jsonl（请求级 at + tokens）
- * 范围：7d / 1m / 3m / 6m / 1y（默认 1y）
+ * 范围：7d / 1m / 3m / 6m / 1y（默认 1m）
  * 不做：不从会话 lifetimeUsage 反推历史天粒度。
  */
 
 import { createUsageRequestLog } from './usage-request-log.mjs';
 
 export const USAGE_DAILY_RANGES = Object.freeze(['7d', '1m', '3m', '6m', '1y']);
-export const DEFAULT_USAGE_DAILY_RANGE = '1y';
+export const DEFAULT_USAGE_DAILY_RANGE = '1m';
 
 function finiteNumber(value) {
   const n = Number(value);

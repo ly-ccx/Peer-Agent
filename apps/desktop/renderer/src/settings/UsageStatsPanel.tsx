@@ -1,5 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { clientApi } from '../clientApi';
 import type {
   UsageDailyDay,
@@ -168,45 +169,61 @@ function TokenHeatmap({
     return labels;
   }, [weeks, i18n.locale]);
 
+  const density = days.length <= 31 ? 'short' : days.length <= 93 ? 'medium' : 'long';
+  const cellSize = density === 'medium' ? 14 : 12;
+  const columnTemplate = `repeat(${weeks.length}, var(--usage-heatmap-cell-size))`;
+
+  // 短周期（7 天 / 1 个月）：单行日条，与下方趋势图左右边界对齐；
+  // 日历矩阵只在长周期（3 个月及以上）保留。
+  if (density === 'short') {
+    return <HeatmapDayStrip days={days} maxTokens={maxTokens} i18n={i18n} />;
+  }
+
   return (
-    <div className="usage-heatmap">
-      <div className="usage-heatmap__months" style={{ gridTemplateColumns: `28px repeat(${weeks.length}, 12px)` }}>
-        <span />
-        {weeks.map((_, weekIndex) => {
-          const label = monthLabels.find((item) => item.weekIndex === weekIndex)?.label || '';
-          return (
-            <span key={`m-${weekIndex}`} className="usage-heatmap__month">
-              {label}
-            </span>
-          );
-        })}
-      </div>
-      <div className="usage-heatmap__body">
-        <div className="usage-heatmap__weekdays">
-          <span>{WEEKDAY_LABELS[0]}</span>
+    <div className="usage-heatmap-viewport">
+      <div
+        className={`usage-heatmap usage-heatmap--${density}`}
+        style={{ '--usage-heatmap-cell-size': `${cellSize}px` } as CSSProperties}
+      >
+      <div className="usage-heatmap__content">
+        <div className="usage-heatmap__months" style={{ gridTemplateColumns: `28px ${columnTemplate}` }}>
           <span />
-          <span>{WEEKDAY_LABELS[1]}</span>
-          <span />
-          <span>{WEEKDAY_LABELS[2]}</span>
-          <span />
-          <span />
+          {weeks.map((_, weekIndex) => {
+            const label = monthLabels.find((item) => item.weekIndex === weekIndex)?.label || '';
+            return (
+              <span key={`m-${weekIndex}`} className="usage-heatmap__month">
+                {label}
+              </span>
+            );
+          })}
         </div>
-        <div className="usage-heatmap__grid" style={{ gridTemplateColumns: `repeat(${weeks.length}, 12px)` }}>
-          {weeks.map((week, weekIndex) =>
-            week.map((day, dayIndex) => {
-              if (!day) {
-                return <span key={`e-${weekIndex}-${dayIndex}`} className="usage-heatmap__cell usage-heatmap__cell--empty" />;
-              }
-              const level = intensityLevel(day.totalTokens, maxTokens);
-              return (
-                <span
-                  key={day.date}
-                  className={`usage-heatmap__cell usage-heatmap__cell--l${level}`}
-                  title={`${day.date}: ${formatTokenCount(day.totalTokens)} tokens · ${formatCount(day.requestCount)} req`}
-                />
-              );
-            }),
-          )}
+        <div className="usage-heatmap__body">
+          <div className="usage-heatmap__weekdays">
+            <span>{WEEKDAY_LABELS[0]}</span>
+            <span />
+            <span>{WEEKDAY_LABELS[1]}</span>
+            <span />
+            <span>{WEEKDAY_LABELS[2]}</span>
+            <span />
+            <span />
+          </div>
+          <div className="usage-heatmap__grid" style={{ gridTemplateColumns: columnTemplate }}>
+            {weeks.map((week, weekIndex) =>
+              week.map((day, dayIndex) => {
+                if (!day) {
+                  return <span key={`e-${weekIndex}-${dayIndex}`} className="usage-heatmap__cell usage-heatmap__cell--empty" />;
+                }
+                const level = intensityLevel(day.totalTokens, maxTokens);
+                return (
+                  <span
+                    key={day.date}
+                    className={`usage-heatmap__cell usage-heatmap__cell--l${level}`}
+                    title={`${day.date}: ${formatTokenCount(day.totalTokens)} tokens · ${formatCount(day.requestCount)} req`}
+                  />
+                );
+              }),
+            )}
+          </div>
         </div>
       </div>
       <div className="usage-heatmap__legend">
@@ -218,6 +235,92 @@ function TokenHeatmap({
         <span className="usage-heatmap__cell usage-heatmap__cell--l4" />
         <span>{i18n.t('settings.usage.heatmap.more')}</span>
       </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 短周期（7 天 / 1 个月）热力图：一行等分日条，铺满整行，
+ * 与下方趋势图左右边界对齐；跨月处标注月份刻度；hover 复用趋势图 tooltip 风格。
+ */
+function HeatmapDayStrip({
+  days,
+  maxTokens,
+  i18n,
+}: {
+  readonly days: readonly UsageDailyDay[];
+  readonly maxTokens: number;
+  readonly i18n: I18nRuntime;
+}) {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const count = days.length;
+  const active = hoverIndex != null ? days[hoverIndex] : null;
+
+  // 跨月刻度：找到每个月 1 号所在的格子索引，在其上方放一个小标记。
+  const monthTicks = useMemo(() => {
+    const ticks: Array<{ index: number; label: string }> = [];
+    days.forEach((day, index) => {
+      const d = parseLocalDate(day.date);
+      if (d.getDate() !== 1) return;
+      ticks.push({
+        index,
+        label: i18n.locale.startsWith('zh')
+          ? `${d.getMonth() + 1}月`
+          : d.toLocaleString(i18n.locale, { month: 'short' }),
+      });
+    });
+    return ticks;
+  }, [days, i18n.locale]);
+
+  if (count === 0) return null;
+
+  return (
+    <div className="usage-heatmap-strip" onMouseLeave={() => setHoverIndex(null)}>
+      <div className="usage-heatmap-strip__row">
+        {days.map((day, index) => {
+          const level = intensityLevel(day.totalTokens, maxTokens);
+          return (
+            <span
+              key={day.date}
+              className={`usage-heatmap-strip__cell usage-heatmap__cell--l${level}`}
+              onMouseEnter={() => setHoverIndex(index)}
+            />
+          );
+        })}
+        {active && hoverIndex != null ? (
+          <div
+            className="usage-heatmap-strip__tooltip usage-trend__tooltip"
+            style={{
+              // 与趋势图一致：tooltip 水平居中于格子，并夹在 8%–92% 防止贴边溢出。
+              left: `${Math.min(92, Math.max(8, ((hoverIndex + 0.5) / count) * 100))}%`,
+            }}
+          >
+            <div className="usage-trend__tooltip-date">{active.date}</div>
+            <div className="usage-trend__tooltip-row">
+              <span>{formatTokenCount(active.totalTokens)}</span>
+              <span>tokens</span>
+            </div>
+            <div className="usage-trend__tooltip-row">
+              <span>{formatCount(active.requestCount)}</span>
+              <span>req</span>
+            </div>
+          </div>
+        ) : null}
+      </div>
+      {monthTicks.length > 0 ? (
+        <div className="usage-heatmap-strip__ticks">
+          {monthTicks.map((tick) => (
+            <span
+              key={`${tick.index}-${tick.label}`}
+              className="usage-heatmap-strip__tick"
+              style={{ left: `${(tick.index / count) * 100}%` }}
+            >
+              {tick.label}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -295,6 +398,8 @@ function TokenTrendChart({
         <svg
           className="usage-trend__svg"
           viewBox={`0 0 ${width} ${height}`}
+          /* Stretch to container: default meet letterboxes and breaks hover/tooltip x mapping. */
+          preserveAspectRatio="none"
           role="img"
           aria-label={i18n.t('settings.usage.trend')}
           onMouseMove={(event) => resolveHoverIndex(event.clientX, event.currentTarget)}
@@ -345,7 +450,8 @@ function TokenTrendChart({
           <div
             className="usage-trend__tooltip"
             style={{
-              left: `${(active.x / width) * 100}%`,
+              /* Clamp so edge points don't push the tooltip past the chart bounds. */
+              left: `${Math.min(92, Math.max(8, (active.x / width) * 100))}%`,
               top: `${Math.max(8, (active.y / height) * 100 - 8)}%`,
             }}
           >
@@ -373,7 +479,7 @@ function TokenTrendChart({
 export function UsageStatsPanel({ i18n }: { readonly i18n: I18nRuntime }) {
   const [snapshot, setSnapshot] = useState<UsageStatsSnapshot | null>(null);
   const [daily, setDaily] = useState<UsageDailySnapshot | null>(null);
-  const [range, setRange] = useState<UsageDailyRange>('1y');
+  const [range, setRange] = useState<UsageDailyRange>('1m');
   const [loading, setLoading] = useState(true);
   const [dailyLoading, setDailyLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

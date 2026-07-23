@@ -6,9 +6,9 @@ import {
   toLocalDateKey,
 } from './usage-daily.mjs';
 
-test('normalizeUsageDailyRange falls back to 1y', () => {
+test('normalizeUsageDailyRange falls back to 1m', () => {
   assert.equal(normalizeUsageDailyRange('6m'), '6m');
-  assert.equal(normalizeUsageDailyRange('nope'), '1y');
+  assert.equal(normalizeUsageDailyRange('nope'), '1m');
 });
 
 test('buildUsageDailySnapshot fills empty range with zeros', () => {
