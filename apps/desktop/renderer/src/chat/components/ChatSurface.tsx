@@ -118,7 +118,11 @@ import {
 import { MessageRail } from './thread/MessageRail';
 import { useConversationState } from '../hooks/useConversationState';
 import { beginConversationCompaction } from '../state/automaticCompaction';
-import { conversationStore, type ConversationRuntimeState } from '../state/conversationStore';
+import {
+  conversationStore,
+  type AuthoritativeContext,
+  type ConversationRuntimeState,
+} from '../state/conversationStore';
 import { createFrameCoalescer } from '../state/frameCoalescer';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { useStreamingReport } from '../hooks/useStreamingReport';
@@ -221,9 +225,17 @@ async function loadConversationMessages(conversationId: string): Promise<{
   mode: ChatMode;
   effort: EffortLevel;
   modelProviderId: string | null;
+  authoritativeContext: AuthoritativeContext | null;
 }> {
   const conv = await clientApi.conversationsGet({ id: conversationId });
-  if (!conv?.messages) return { messages: [], tokenUsage: null, mode: 'chat', effort: 'default', modelProviderId: null };
+  if (!conv?.messages) return {
+    messages: [],
+    tokenUsage: null,
+    mode: 'chat',
+    effort: 'default',
+    modelProviderId: null,
+    authoritativeContext: null,
+  };
   // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'，历史 'goal' 归一化为 'plan'。
   const convMode: ChatMode = normalizeChatMode(conv.mode);
   // 思考强度 + 模型 provider 也按会话持久化在会话 meta 上（与 mode 同口径，每会话独立）。
@@ -231,6 +243,17 @@ async function loadConversationMessages(conversationId: string): Promise<{
   const convEffort: EffortLevel = isEffortLevel(conv.effort) ? conv.effort : 'default';
   const convModelProviderId: string | null =
     typeof conv.modelProviderId === 'string' && conv.modelProviderId ? conv.modelProviderId : null;
+  const storedContext = conv.contextSnapshot && typeof conv.contextSnapshot === 'object'
+    ? conv.contextSnapshot as Record<string, unknown>
+    : null;
+  const storedTokens = Number(storedContext?.nextRequestInputTokens);
+  const storedWindow = Number(storedContext?.contextWindow);
+  const authoritativeContext: AuthoritativeContext | null = Number.isFinite(storedTokens) && storedTokens >= 0
+    ? {
+      nextRequestInputTokens: Math.floor(storedTokens),
+      contextWindow: Number.isFinite(storedWindow) && storedWindow > 0 ? Math.floor(storedWindow) : null,
+    }
+    : null;
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0;
   const loaded = conv.messages.map((m: Record<string, unknown>) => {
     const msg: ChatMsg = {
@@ -289,6 +312,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
       mode: convMode,
       effort: convEffort,
       modelProviderId: convModelProviderId,
+      authoritativeContext,
     };
   }
   return {
@@ -299,6 +323,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
     mode: convMode,
     effort: convEffort,
     modelProviderId: convModelProviderId,
+    authoritativeContext,
   };
 }
 
@@ -881,13 +906,21 @@ export function ChatSurface({
     setTokenUsage(null);
     let cancelled = false;
     void (async () => {
-      const { messages: loaded, tokenUsage: usage, mode: convMode, effort: convEffort, modelProviderId: convModelProviderId } = await loadConversationMessages(conversationId);
+      const {
+        messages: loaded,
+        tokenUsage: usage,
+        mode: convMode,
+        effort: convEffort,
+        modelProviderId: convModelProviderId,
+        authoritativeContext: storedAuthoritativeContext,
+      } = await loadConversationMessages(conversationId);
       if (cancelled) return;
       // 消息可以先投影到 UI，但 loadStatus 必须保持 loading，直到下面的 compaction/stream
       // reattach 全部收敛；否则自动出队会把「流状态尚未知」误判为「确认空闲」。
       convActions.set({
         messages: loaded,
         tokenUsage: usage,
+        authoritativeContext: storedAuthoritativeContext,
       });
       // 对话模式随会话恢复:每会话各自独立,切换会话即切到该会话自己的模式。
       setMode(convMode);
@@ -1012,10 +1045,18 @@ export function ChatSurface({
     if (!conversationId || !conversationRevision || isStreaming) return;
     if (appliedExternalRevisionRef.current === conversationRevision) return;
     let cancelled = false;
-    void loadConversationMessages(conversationId).then(({ messages: loaded, tokenUsage: usage }) => {
+    void loadConversationMessages(conversationId).then(({
+      messages: loaded,
+      tokenUsage: usage,
+      authoritativeContext: storedAuthoritativeContext,
+    }) => {
       if (cancelled) return;
       appliedExternalRevisionRef.current = conversationRevision;
-      convActions.commitLoad({ messages: loaded, tokenUsage: usage });
+      convActions.commitLoad({
+        messages: loaded,
+        tokenUsage: usage,
+        authoritativeContext: storedAuthoritativeContext,
+      });
     });
     return () => { cancelled = true; };
   }, [conversationId, conversationRevision, convActions, isStreaming]);
@@ -2144,6 +2185,7 @@ export function ChatSurface({
           <ComposerTokenUsageDisplay
             conversationId={conversationId}
             historyContextTokens={historyContextTokens}
+            contextReady={isDraftConversation || loadStatus === 'ready'}
             attachments={attachments}
             authoritativeNextRequestInputTokens={authoritativeNextRequestInputTokens}
             providers={providers}

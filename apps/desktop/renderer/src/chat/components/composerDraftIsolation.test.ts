@@ -44,15 +44,15 @@ test('token usage prefers authoritative effective context over local full-histor
   assert.match(tokenUsage, /resolveContextOccupancyTokens/);
   assert.match(
     tokenUsage,
-    /authoritativeContextTokens,\s*historyContextTokens,\s*draftContextTokens/,
+    /authoritativeNextRequestInputTokens,\s*historyContextTokens,\s*draftContextTokens/,
   );
   assert.doesNotMatch(
     tokenUsage,
     /Math\.max\(authoritativeWithDraft,\s*localContextTokens\)/,
   );
   // 流式仅用本轮 input+cacheRead 抬升，禁止把 lifetime 计费累计当上下文。
-  assert.match(tokenUsage, /activeUsage\.input/);
-  assert.match(tokenUsage, /activeUsage\.cacheRead/);
+  assert.doesNotMatch(tokenUsage, /lifetimeUsage/);
+  assert.doesNotMatch(tokenUsage, /Math\.max\([^)]*tokenUsage/);
 });
 
 test('send path seeds authoritative occupancy before clearing the draft', async () => {
@@ -67,6 +67,25 @@ test('context ring never falls back to billed lifetime totals', async () => {
   assert.doesNotMatch(display, /contextTokens \?\? billedTokens/);
   assert.match(
     display,
-    /typeof contextTokens === 'number' && Number\.isFinite\(contextTokens\)/,
+    /typeof nextRequestInputTokens === 'number' && Number\.isFinite\(nextRequestInputTokens\)/,
   );
+});
+
+test('external conversation reload replaces or clears the shared context snapshot', async () => {
+  const surface = await readSource('./ChatSurface.tsx');
+  assert.match(
+    surface,
+    /authoritativeContext: storedAuthoritativeContext,\s*\}\) => \{/,
+  );
+  assert.match(
+    surface,
+    /convActions\.commitLoad\(\{\s*messages: loaded,\s*tokenUsage: usage,\s*authoritativeContext: storedAuthoritativeContext,/,
+  );
+});
+
+test('unknown restored context never renders as a percentage', async () => {
+  const tokenUsage = await readSource('./thread/TokenUsageDisplay.tsx');
+  assert.match(tokenUsage, /currentContextTokens =\s*[\s\S]*?: null;/);
+  assert.match(tokenUsage, /ctxWindow && currentContextTokens != null[\s\S]*?\? Math\.min/);
+  assert.match(tokenUsage, /hasCtxRing \? \([\s\S]*?: currentContextTokens != null && currentContextTokens > 0 \? \(/);
 });

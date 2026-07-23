@@ -10,6 +10,7 @@ type TokenUsageDisplayProps = React.ComponentProps<typeof TokenUsageDisplay>;
 type ComposerTokenUsageDisplayProps = Omit<TokenUsageDisplayProps, 'nextRequestInputTokens'> & {
   readonly conversationId: string | null;
   readonly historyContextTokens: number;
+  readonly contextReady: boolean;
   readonly attachments: readonly ChatAttachment[];
   readonly authoritativeNextRequestInputTokens?: number | null;
 };
@@ -18,6 +19,7 @@ type ComposerTokenUsageDisplayProps = Omit<TokenUsageDisplayProps, 'nextRequestI
 export function ComposerTokenUsageDisplay({
   conversationId,
   historyContextTokens,
+  contextReady,
   attachments,
   authoritativeNextRequestInputTokens = null,
   ...props
@@ -28,12 +30,13 @@ export function ComposerTokenUsageDisplay({
     authoritativeNextRequestInputTokens,
     historyContextTokens,
     draftContextTokens,
+    contextReady,
   });
 
   return (
     <TokenUsageDisplay
       {...props}
-      nextRequestInputTokens={nextRequestInputTokens}
+      nextRequestInputTokens={nextRequestInputTokens ?? undefined}
     />
   );
 }

@@ -16,11 +16,21 @@ describe('unified next-request context projection', () => {
     }), 42_000);
   });
 
-  it('falls back to local history before a runtime projection exists', () => {
+  it('keeps an existing conversation unknown until messages and its Runtime snapshot finish restoring', () => {
+    assert.equal(resolveContextOccupancyTokens({
+      authoritativeNextRequestInputTokens: null,
+      historyContextTokens: 0,
+      draftContextTokens: 0,
+      contextReady: false,
+    }), null);
+  });
+
+  it('falls back to restored local history when no Runtime projection exists', () => {
     assert.equal(resolveContextOccupancyTokens({
       authoritativeNextRequestInputTokens: null,
       historyContextTokens: 10_000,
       draftContextTokens: 2_000,
+      contextReady: true,
     }), 12_000);
   });
 

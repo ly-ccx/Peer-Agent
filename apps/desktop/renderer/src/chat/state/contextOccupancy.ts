@@ -5,6 +5,8 @@ export interface ContextOccupancyInput {
   readonly historyContextTokens: number;
   readonly draftContextTokens: number;
   readonly authoritativeNextRequestInputTokens?: number | null;
+  /** Existing conversations stay unknown until messages and the persisted Runtime snapshot restore together. */
+  readonly contextReady?: boolean;
 }
 
 export interface SeedAuthoritativeContextInput {
@@ -29,7 +31,8 @@ function finiteNonNegative(value: unknown): number | null {
   return Math.max(0, value);
 }
 
-export function resolveContextOccupancyTokens(input: ContextOccupancyInput): number {
+export function resolveContextOccupancyTokens(input: ContextOccupancyInput): number | null {
+  if (input.contextReady === false) return null;
   const history = finiteNonNegative(input.historyContextTokens) ?? 0;
   const draft = finiteNonNegative(input.draftContextTokens) ?? 0;
   const authoritative = finiteNonNegative(input.authoritativeNextRequestInputTokens);
@@ -45,7 +48,7 @@ export function seedAuthoritativeContextOnSend(
     authoritativeNextRequestInputTokens: input.previousNextRequestInputTokens,
   });
   return {
-    nextRequestInputTokens,
+    nextRequestInputTokens: nextRequestInputTokens ?? 0,
     contextWindow: finiteNonNegative(input.contextWindow),
   };
 }

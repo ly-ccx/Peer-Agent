@@ -272,10 +272,11 @@ export function TokenUsageDisplay({
   const cacheWrite = (tokenUsage?.cacheWrite ?? 0) + (activeUsage?.cacheWrite ?? 0);
   const cacheRead = (tokenUsage?.cacheRead ?? 0) + (activeUsage?.cacheRead ?? 0);
   // 累计 usage 仅用于费用估算；上下文圆环只接受下一次最终请求投影。
+  // 缺失代表会话上下文尚未恢复，必须保持未知，不能伪装成 0 或有效百分比。
   const currentContextTokens =
     typeof nextRequestInputTokens === 'number' && Number.isFinite(nextRequestInputTokens)
       ? Math.max(0, nextRequestInputTokens)
-      : 0;
+      : null;
   const cacheDenominator = input + cacheRead;
   const cacheHitPercent = cacheDenominator > 0 ? Math.round((cacheRead / cacheDenominator) * 100) : null;
   // 仅当前选中模型支持 Prompt 缓存时才展示缓存命中率，避免切到无缓存模型后仍显示旧模型遗留的累计缓存数据。
@@ -296,13 +297,15 @@ export function TokenUsageDisplay({
   // 口径统一：分母优先用调用方传入的权威上下文窗口（与压缩触发同窗口），
   // 仅在未提供（>0 校验）时回退到 provider 配置窗口，避免两套窗口导致百分比与触发线不符。
   const ctxWindow = (typeof contextWindow === 'number' && contextWindow > 0) ? contextWindow : defaultProvider?.contextWindow;
-  const ctxPercent = ctxWindow ? Math.min((currentContextTokens / ctxWindow) * 100, 100) : null;
-  const hasCtxRing = Boolean(ctxWindow && ctxPercent != null);
+  const ctxPercent = ctxWindow && currentContextTokens != null
+    ? Math.min((currentContextTokens / ctxWindow) * 100, 100)
+    : null;
+  const hasCtxRing = ctxWindow != null && currentContextTokens != null && ctxPercent != null;
   // 圆环 hover：只展示下一次请求预计占用，叠加缓存命中率与订阅剩余额度。
   const quotaTooltipLine = formatQuotaTooltipLine(subscriptionQuota ?? undefined, isZh);
   const ctxTooltipLines: readonly string[] = hasCtxRing
     ? [
-        `${isZh ? '上下文' : 'Context'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow as number)} (${Math.round(ctxPercent as number)}%)`,
+        `${isZh ? '上下文' : 'Context'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow)} (${Math.round(ctxPercent)}%)`,
         ...(showCacheHit
           ? [
               isZh
@@ -370,7 +373,7 @@ export function TokenUsageDisplay({
             onChange={onEffortChange}
           />
         ) : null}
-        {ctxWindow && ctxPercent != null ? (
+        {hasCtxRing ? (
           <Tooltip lines={ctxTooltipLines} placement="top">
             <span className="ctx-usage" aria-label={ctxTooltip} tabIndex={0}>
               <span
@@ -381,7 +384,7 @@ export function TokenUsageDisplay({
               <span className="ctx-pct">{Math.round(ctxPercent)}%</span>
             </span>
           </Tooltip>
-        ) : currentContextTokens > 0 ? (
+        ) : currentContextTokens != null && currentContextTokens > 0 ? (
           <>{formatTokenCount(currentContextTokens)} tokens</>
         ) : null}
         {costStr ? (
