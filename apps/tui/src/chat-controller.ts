@@ -232,7 +232,11 @@ export interface ChatController {
   clear(): boolean;
   /** Compress modelMessages with a structural summary; UI transcript keeps a progress then separator. Idle only. */
   compact(): Promise<ChatCompactResult>;
-  send(content: string, options?: { readonly images?: readonly ChatMessageImage[] }): Promise<void>;
+  send(content: string, options?: {
+    readonly images?: readonly ChatMessageImage[];
+    /** Goal Runner ticks: feed the model without rendering a user bubble (Desktop parity). */
+    readonly hideFromUi?: boolean;
+  }): Promise<void>;
   runGoalTurn(content: string): Promise<{
     readonly continued: boolean;
     readonly explorers: readonly TuiExplorerRequest[];
@@ -958,6 +962,7 @@ export function createChatController(options: {
     async send(content, sendOptions) {
       const trimmed = content.trim();
       const images = sendOptions?.images?.filter((image) => Boolean(image.url)) ?? [];
+      const hideFromUi = sendOptions?.hideFromUi === true;
       if ((!trimmed && images.length === 0) || activeTurn) return;
 
       // Pre-send auto-compact: same soft threshold as Desktop
@@ -1028,12 +1033,16 @@ export function createChatController(options: {
         requestProjection: preflightProjection,
         messages: [
           ...uiMessages,
-          {
-            id: `user-${++sequence}`,
-            role: 'user',
-            content: userContent,
-            ...(images.length > 0 ? { images } : {}),
-          },
+          // Desktop parity: Goal Runner ticks feed the model (preflightMessages)
+          // but do not render a synthetic user bubble in the transcript.
+          ...(hideFromUi
+            ? []
+            : [{
+                id: `user-${++sequence}`,
+                role: 'user' as const,
+                content: userContent,
+                ...(images.length > 0 ? { images } : {}),
+              }]),
           // Insert a pending assistant immediately so the UI can show a Thinking
           // transition state before the first token arrives (Claude Code / Qoder style).
           {
@@ -1223,7 +1232,8 @@ export function createChatController(options: {
       goalTurnCollector = collector;
       try {
         this.setMode('goal');
-        await this.send(content);
+        // Hide Goal Runner tick text from the chat transcript (Desktop parity).
+        await this.send(content, { hideFromUi: true });
         if (snapshot.error) {
           // Structured failure so Goal Runner can mark the plan/task failed
           // without relying only on thrown exceptions.

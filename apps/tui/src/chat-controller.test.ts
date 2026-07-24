@@ -189,6 +189,9 @@ describe('chat controller', () => {
     });
 
     const first = await controller.runGoalTurn('first goal tick');
+    expect(controller.getSnapshot().messages.some((message) => (
+      message.role === 'user' && message.content.includes('goal tick')
+    ))).toBe(false);
     expect(first.toolCallCount).toBe(2);
     expect(first.explorers).toEqual([{
       question: 'Where is the symbol used?',
@@ -199,6 +202,7 @@ describe('chat controller', () => {
     const second = await controller.runGoalTurn('second goal tick');
     expect(second).toEqual({ continued: true, explorers: [], toolCallCount: 0 });
   });
+
 
   test('streams assistant deltas into one message', async () => {
     const model: ChatModelPort = {
