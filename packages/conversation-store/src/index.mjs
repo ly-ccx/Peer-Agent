@@ -560,11 +560,29 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     return withMessageCount(meta);
   }
 
+
+  function isEmptyUserMessage(message) {
+    if (!message || message.role !== 'user') return false;
+    const content = typeof message.content === 'string' ? message.content.trim() : '';
+    if (content.length > 0) return false;
+    return !Array.isArray(message.attachments) || message.attachments.length === 0;
+  }
+
+  function withoutEmptyUserMessages(messages) {
+    if (!Array.isArray(messages)) return [];
+    return messages.filter((message) => !isEmptyUserMessage(message));
+  }
+
   function appendMessage(id, message) {
     return withFileLock(indexFile, () => {
       const index = readIndex();
       const meta = index.find((c) => c.id === id);
       if (!meta) return null;
+      // Refuse empty user bubbles (no text, no attachments). They only surface as a bare
+      // "你" label in the UI and have no durable conversation value.
+      if (isEmptyUserMessage(message)) {
+        return withMessageCount(meta);
+      }
       withFileLock(convFile(id), () => appendJsonl(convFile(id), message));
       if (!meta.title && message.role === 'user') {
         meta.title = message.content.slice(0, 50);
@@ -600,20 +618,21 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
 
   function replaceMessages(id, newMessages, options = {}) {
     const existingMessages = readJsonl(convFile(id));
-    if (newMessages.length === 0 && existingMessages.length > 0 && options.allowEmpty !== true) {
+    const durableMessages = withoutEmptyUserMessages(newMessages);
+    if (durableMessages.length === 0 && existingMessages.length > 0 && options.allowEmpty !== true) {
       throw new Error(`Refusing to replace non-empty conversation ${id} with an empty message list`);
     }
-    writeJsonl(convFile(id), newMessages);
+    writeJsonl(convFile(id), durableMessages);
     const index = readIndex();
     const meta = index.find((c) => c.id === id);
     if (meta) {
-      meta.messageCount = Array.isArray(newMessages) ? newMessages.length : 0;
+      meta.messageCount = Array.isArray(durableMessages) ? durableMessages.length : 0;
       meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
       meta.contextSnapshot = null;
       meta.updatedAt = new Date().toISOString();
       writeJsonl(indexFile, index);
     }
-    return meta ? { ...meta, messages: newMessages } : null;
+    return meta ? { ...meta, messages: durableMessages } : null;
   }
 
   /**

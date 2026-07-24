@@ -29,6 +29,7 @@ import { IDLE_COMPACTION_STATE } from '../state/types';
 import {
   getTextContent,
   isEmptyAssistantPlaceholder,
+  isEmptyUserMessage,
   markDanglingToolCallsInterrupted,
 } from '../state/streamSegments';
 import type { ChatMsg } from '../state/types';
@@ -84,10 +85,14 @@ function appendThinking(messages: readonly ChatMsg[], chunk: string): ChatMsg[] 
 function persistMessages(conversationId: string, msgs: readonly ChatMsg[]): void {
   // A stream can finish after its bucket was reset during a page/mode switch. That empty
   // snapshot is not an intentional clear and must never replace persisted history.
+  // Also drop empty user bubbles (no text, no attachments): they are residual noise and
+  // must not be re-written by stream-end full-list replace after the user deleted them.
   if (!conversationId || msgs.length === 0) return;
+  const durable = msgs.filter((m) => !isEmptyUserMessage(m));
+  if (durable.length === 0) return;
   void clientApi.conversationsReplaceMessages({
     id: conversationId,
-    messages: msgs.map((m) => ({
+    messages: durable.map((m) => ({
       id: m.id,
       role: m.role,
       content: m.content,
@@ -235,6 +240,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         });
 
         // 权威占用只接受正数：0/NaN 表示缺失快照，不能 final 覆盖成 0%。
+        // 有有效投影时 final 合并并清 provisional；若缺失但当前仍是发送前 seed，
+        // 也走 final 合并一次，让 provisional 保留标记，resolve 端可用 history 抬升。
         if (typeof nextRequestInputTokens === 'number'
           && Number.isFinite(nextRequestInputTokens)
           && nextRequestInputTokens > 0) {
@@ -246,6 +253,18 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
               mode: 'final',
             }),
           }));
+        } else {
+          conversationStore.setState(cid, (prev) => {
+            if (!prev.authoritativeContext?.provisional) return {};
+            return {
+              authoritativeContext: mergeAuthoritativeContextSnapshot({
+                previous: prev.authoritativeContext,
+                nextRequestInputTokens: null,
+                nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
+                mode: 'final',
+              }),
+            };
+          });
         }
 
         // 用量账本真值在主进程：优先反映 lifetimeUsage，否则按本轮 msgUsage 累加。

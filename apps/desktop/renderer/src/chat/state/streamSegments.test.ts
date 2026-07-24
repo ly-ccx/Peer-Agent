@@ -6,6 +6,7 @@ import {
   mergeReattachedSegments,
   contentFromSegments,
   isEmptyAssistantPlaceholder,
+  isEmptyUserMessage,
   groupSegments,
   splitFinalTextGroup,
   getTextContent,
@@ -130,6 +131,19 @@ describe('isEmptyAssistantPlaceholder', () => {
     assert.equal(isEmptyAssistantPlaceholder({ role: 'user', content: '', segments: [] }), false);
   });
 });
+
+describe('isEmptyUserMessage', () => {
+  it('true for empty user without attachments', () => {
+    assert.equal(isEmptyUserMessage({ role: 'user', content: '' }), true);
+    assert.equal(isEmptyUserMessage({ role: 'user', content: '   ', attachments: [] }), true);
+  });
+  it('false when text or attachments present, or role is not user', () => {
+    assert.equal(isEmptyUserMessage({ role: 'user', content: 'hi' }), false);
+    assert.equal(isEmptyUserMessage({ role: 'user', content: '', attachments: [{ name: 'a.png' } as never] }), false);
+    assert.equal(isEmptyUserMessage({ role: 'assistant', content: '' }), false);
+  });
+});
+
 
 describe('groupSegments', () => {
   it('merges consecutive thinking and groups consecutive tool-calls', () => {
