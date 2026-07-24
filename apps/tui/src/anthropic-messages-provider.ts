@@ -3,12 +3,14 @@ import type {
   ModelProvider,
   ModelProviderRequest,
   ModelProviderResult,
-  ModelStreamEvent,
   ModelToolCall,
   ModelToolDefinition,
   ModelUsage,
 } from '@peer-agent/runtime-node';
 import { ModelProviderHttpError, ModelProviderStreamError } from '@peer-agent/runtime-node';
+
+import { sendAnthropicMessagesStreamFromDesktop } from './desktop-provider-adapters.ts';
+import { createTuiWebContentsBridge } from './tui-web-contents-bridge.ts';
 
 export interface CreateAnthropicMessagesProviderOptions {
   readonly providerId: string;
@@ -130,39 +132,6 @@ function toolCallsFrom(
     .filter((call) => call.name);
 }
 
-/**
- * Desktop stream adapters write live deltas through Electron webContents.
- * TUI has no renderer IPC, so bridge those channels into ModelProvider onEvent.
- */
-function createTuiWebContentsBridge(
-  onEvent?: (event: ModelStreamEvent) => void,
-): { send: (channel: string, payload?: Record<string, unknown>) => void; isDestroyed: () => boolean } {
-  return {
-    isDestroyed: () => false,
-    send(channel, payload = {}) {
-      if (!onEvent) return;
-      const content = typeof payload.content === 'string' ? payload.content : '';
-      if (!content) return;
-      if (channel === 'chat:stream:delta') {
-        onEvent({ type: 'text.delta', content });
-        return;
-      }
-      if (channel === 'chat:stream:thinking') {
-        onEvent({ type: 'reasoning.delta', content });
-      }
-    },
-  };
-}
-
-async function defaultSendStream(
-  args: Record<string, unknown>,
-): Promise<AnthropicMessagesStreamResult> {
-  const { sendAnthropicMessagesStream } = await import(
-    // @ts-expect-error Desktop ESM adapter does not publish declarations.
-    '../../desktop/electron/main/provider-adapters/anthropic-messages-adapter.mjs'
-  );
-  return sendAnthropicMessagesStream(args) as Promise<AnthropicMessagesStreamResult>;
-}
 
 function effortFrom(request: ModelProviderRequest): string {
   if (!request.reasoningEffort || request.reasoningEffort === 'default') return 'default';
@@ -177,7 +146,8 @@ function effortFrom(request: ModelProviderRequest): string {
 export function createAnthropicMessagesProvider(
   options: CreateAnthropicMessagesProviderOptions,
 ): ModelProvider {
-  const sendStream = options.sendStream ?? defaultSendStream;
+  const sendStream = options.sendStream
+    ?? ((args: Record<string, unknown>) => sendAnthropicMessagesStreamFromDesktop(args) as Promise<AnthropicMessagesStreamResult>);
 
   return {
     async stream(request: ModelProviderRequest): Promise<ModelProviderResult> {

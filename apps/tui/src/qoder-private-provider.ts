@@ -3,11 +3,13 @@ import type {
   ModelProvider,
   ModelProviderRequest,
   ModelProviderResult,
-  ModelStreamEvent,
   ModelToolCall,
   ModelUsage,
 } from '@peer-agent/runtime-node';
 import { ModelProviderHttpError, ModelProviderStreamError } from '@peer-agent/runtime-node';
+
+import { sendQoderPrivateStreamFromDesktop } from './desktop-provider-adapters.ts';
+import { createTuiWebContentsBridge } from './tui-web-contents-bridge.ts';
 
 export interface CreateQoderPrivateProviderOptions {
   readonly providerId: string;
@@ -115,39 +117,6 @@ function toolCallsFrom(
     .filter((call) => call.name);
 }
 
-/**
- * Desktop consumeOpenAIStream writes live deltas through Electron webContents.
- * TUI has no renderer IPC, so bridge those channels into ModelProvider onEvent.
- */
-function createTuiWebContentsBridge(
-  onEvent?: (event: ModelStreamEvent) => void,
-): { send: (channel: string, payload?: Record<string, unknown>) => void; isDestroyed: () => boolean } {
-  return {
-    isDestroyed: () => false,
-    send(channel, payload = {}) {
-      if (!onEvent) return;
-      const content = typeof payload.content === 'string' ? payload.content : '';
-      if (!content) return;
-      if (channel === 'chat:stream:delta') {
-        onEvent({ type: 'text.delta', content });
-        return;
-      }
-      if (channel === 'chat:stream:thinking') {
-        onEvent({ type: 'reasoning.delta', content });
-      }
-    },
-  };
-}
-
-async function defaultSendStream(
-  args: Record<string, unknown>,
-): Promise<QoderPrivateStreamResult> {
-  const { sendQoderPrivateStream } = await import(
-    // @ts-expect-error Desktop ESM adapter does not publish declarations.
-    '../../desktop/electron/main/provider-adapters/qoder-private-adapter.mjs'
-  );
-  return sendQoderPrivateStream(args) as Promise<QoderPrivateStreamResult>;
-}
 
 function modelOptionValuesFrom(request: ModelProviderRequest): Record<string, unknown> {
   if (!request.reasoningEffort || request.reasoningEffort === 'default') {
@@ -166,7 +135,8 @@ function modelOptionValuesFrom(request: ModelProviderRequest): Record<string, un
 export function createQoderPrivateProvider(
   options: CreateQoderPrivateProviderOptions,
 ): ModelProvider {
-  const sendStream = options.sendStream ?? defaultSendStream;
+  const sendStream = options.sendStream
+    ?? ((args: Record<string, unknown>) => sendQoderPrivateStreamFromDesktop(args) as Promise<QoderPrivateStreamResult>);
 
   return {
     async stream(request: ModelProviderRequest): Promise<ModelProviderResult> {

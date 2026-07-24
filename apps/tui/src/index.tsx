@@ -25,6 +25,13 @@ import {
 } from './provider-chat-model.ts';
 import { createQoderPrivateProvider } from './qoder-private-provider.ts';
 import { createAnthropicMessagesProvider } from './anthropic-messages-provider.ts';
+import { createGeminiProvider } from './gemini-provider.ts';
+import { resolveTuiWire } from './provider-wire-matrix.ts';
+import {
+  ensureFreshGoogleTokensFromDesktop,
+  ensureFreshGrokTokensFromDesktop,
+  loadQoderAccessTokenFromDesktop,
+} from './desktop-provider-adapters.ts';
 import { createTuiHost } from './tui-host.ts';
 import { createTuiProviderFetch } from './provider-transport.ts';
 import { createTuiShutdown } from './tui-shutdown.ts';
@@ -52,130 +59,144 @@ const modelConfig = resolveTuiModelConfig(process.env, { userDataPath });
 const sharedMetadata = modelConfig.sharedMetadata;
 function sharedProvider(credentialId: string) {
   const metadata = modelConfig.sharedProviders?.find((item) => item.credentialId === credentialId);
-  if (!metadata) throw new Error(`Provider "${credentialId}" is no longer available.`);
-
-  // ChatGPT subscription and Grok official both speak OpenAI Responses.
-  if (metadata.authMethod === 'oauth_chatgpt' || metadata.authMethod === 'oauth_grok') {
-    return createChatGptResponsesProvider({
-      baseUrl: metadata.baseUrl,
-      fetch: providerFetch,
-      // Match desktop provider-channels Grok identity so CLI does not hit HTTP 426
-      // "Grok CLI version (none) is outdated" without requiring a local grok CLI.
-      ...(metadata.authMethod === 'oauth_grok'
-        ? {
-            extraHeaders: {
-              'X-XAI-Token-Auth': 'xai-grok-cli',
-              'x-grok-client-surface': 'grok-build',
-              'x-grok-client-version': '0.1.202',
-            },
-          }
-        : {}),
-      resolveTokens() {
-        const selection = modelConfig.resolveSharedSelection?.(credentialId);
-        if (!selection?.oauthTokens) {
-          throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
-        }
-        return selection.oauthTokens;
-      },
-      async refreshTokens(tokens) {
-        if (metadata.authMethod === 'oauth_chatgpt') {
-          return refreshChatGptOAuthTokens(tokens);
-        }
-        // @ts-ignore Desktop ESM adapter without local type declarations.
-        const { ensureFreshGrokTokens } = await import('../../desktop/electron/main/llm-oauth/grok-oauth.mjs');
-        const fresh = await ensureFreshGrokTokens(tokens, { fetchImpl: providerFetch });
-        return fresh.tokens;
-      },
-      persistTokens(tokens) {
-        const selection = modelConfig.resolveSharedSelection?.(credentialId);
-        if (!selection) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
-        selection.persistOAuthTokens(tokens);
-      },
-    });
-  }
-
-  // Qoder must reuse Desktop qoder-private (prepareInfer + private SSE), not
-  // token + OpenAI-compatible /chat/completions.
-  if (metadata.authMethod === 'qoder_local_auth') {
-    return createQoderPrivateProvider({
-      providerId: credentialId,
-      baseUrl: metadata.baseUrl,
-      async getAccessToken() {
-        const { loadQoderAccessToken } = await import(
-          // @ts-expect-error Desktop ESM adapter does not publish declarations.
-          '../../desktop/electron/main/provider-adapters/qoder-local-auth.mjs'
-        );
-        return loadQoderAccessToken();
-      },
-    });
-  }
-
-  // Anthropic official / Anthropic-compatible channels speak /v1/messages.
-  // Do not silently coerce them to OpenAI-compatible chat/completions.
-  const isAnthropicWire =
-    metadata.providerId === 'anthropic'
-    || metadata.channelId === 'anthropic'
-    || metadata.channelId === 'anthropic-compatible';
-  if (isAnthropicWire) {
-    return createAnthropicMessagesProvider({
-      providerId: credentialId,
-      baseUrl: metadata.baseUrl,
-      async getApiKey() {
-        const selection = modelConfig.resolveSharedSelection?.(credentialId);
-        if (!selection?.apiKey) {
-          throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
-        }
-        return selection.apiKey;
-      },
-    });
-  }
+  if (!metadata) throw new Error(`Provider credential not found: ${credentialId}`);
 
   return {
-    async stream(request: Parameters<ReturnType<typeof createOpenAICompatibleProvider>['stream']>[0]) {
+    async stream(request: Parameters<NonNullable<typeof host.chatModel>['stream']>[0]) {
       const selection = modelConfig.resolveSharedSelection?.(credentialId);
-      if (!selection) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
-
-      let apiKey = selection.apiKey;
-      let baseUrl = selection.baseUrl;
-
-      if (selection.authMethod === 'oauth_google') {
-        if (!selection.oauthTokens) {
-          throw new Error('Desktop Google OAuth tokens are locked. Allow Keychain access and retry.');
-        }
-        // @ts-ignore Desktop ESM adapter without local type declarations.
-        const { ensureFreshGoogleTokens } = await import('../../desktop/electron/main/llm-oauth/google-oauth.mjs');
-        const fresh = await ensureFreshGoogleTokens(selection.oauthTokens, { fetchImpl: providerFetch });
-        if (fresh.refreshed) selection.persistOAuthTokens(fresh.tokens);
-        apiKey = fresh.tokens.access;
-        // Prefer Google's OpenAI-compatible gateway so CLI can reuse the shared
-        // chat/completions adapter instead of reimplementing Gemini SSE.
-        if (baseUrl.includes('generativelanguage.googleapis.com') && !baseUrl.includes('/openai')) {
-          baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai';
-        }
+      if (!selection) {
+        throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
       }
 
-      if (!apiKey) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
-      return createOpenAICompatibleProvider({
-        config: {
+      const decision = resolveTuiWire({
+        channelId: metadata.channelId,
+        authMethod: metadata.authMethod,
+        providerId: metadata.providerId,
+        displayName: metadata.displayName,
+      });
+      if (decision.kind === 'unsupported') {
+        throw new Error(decision.reason);
+      }
+
+      // ChatGPT / Grok OAuth use OpenAI Responses.
+      if (decision.wire === 'openai-responses') {
+        return createChatGptResponsesProvider({
+          baseUrl: metadata.baseUrl,
+          fetch: providerFetch,
+          // Match desktop provider-channels Grok identity so CLI does not hit HTTP 426
+          // "Grok CLI version (none) is outdated" without requiring a local grok CLI.
+          ...(metadata.authMethod === 'oauth_grok'
+            ? {
+                extraHeaders: {
+                  'X-XAI-Token-Auth': 'xai-grok-cli',
+                  'x-grok-client-surface': 'grok-build',
+                  'x-grok-client-version': '0.1.202',
+                },
+              }
+            : {}),
+          resolveTokens() {
+            const current = modelConfig.resolveSharedSelection?.(credentialId);
+            if (!current?.oauthTokens) {
+              throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
+            }
+            return current.oauthTokens;
+          },
+          async refreshTokens(tokens) {
+            if (metadata.authMethod === 'oauth_chatgpt') {
+              return refreshChatGptOAuthTokens(tokens);
+            }
+            const fresh = await ensureFreshGrokTokensFromDesktop(tokens, { fetchImpl: providerFetch });
+            return fresh.tokens;
+          },
+          persistTokens(tokens) {
+            const current = modelConfig.resolveSharedSelection?.(credentialId);
+            if (!current) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
+            current.persistOAuthTokens(tokens);
+          },
+        }).stream(request);
+      }
+
+      // Qoder private SSE wire (not OpenAI-compatible chat/completions).
+      if (decision.wire === 'qoder-private') {
+        return createQoderPrivateProvider({
           providerId: credentialId,
-          apiKey,
-          baseUrl,
-        },
-        fetch: providerFetch,
-      }).stream(request);
+          baseUrl: metadata.baseUrl,
+          async getAccessToken() {
+            const current = modelConfig.resolveSharedSelection?.(credentialId);
+            if (current?.apiKey) return current.apiKey;
+            return loadQoderAccessTokenFromDesktop();
+          },
+        }).stream(request);
+      }
+
+      // Anthropic Messages API (/v1/messages), not OpenAI-compatible chat/completions.
+      if (decision.wire === 'anthropic-messages') {
+        return createAnthropicMessagesProvider({
+          providerId: credentialId,
+          baseUrl: metadata.baseUrl,
+          async getApiKey() {
+            const current = modelConfig.resolveSharedSelection?.(credentialId);
+            if (!current?.apiKey) {
+              throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
+            }
+            return current.apiKey;
+          },
+        }).stream(request);
+      }
+
+      // Gemini generateContent SSE (Code Assist for OAuth; never .../v1beta/openai).
+      if (decision.wire === 'gemini') {
+        return createGeminiProvider({
+          providerId: credentialId,
+          baseUrl: metadata.baseUrl,
+          authMethod: metadata.authMethod || decision.authMethod || 'api_key',
+          async getApiKey() {
+            const current = modelConfig.resolveSharedSelection?.(credentialId);
+            if (current?.apiKey) return current.apiKey;
+            if (metadata.authMethod === 'oauth_google' && current?.oauthTokens) {
+              const fresh = await ensureFreshGoogleTokensFromDesktop(current.oauthTokens);
+              if (fresh?.access) {
+                current.persistOAuthTokens?.(fresh);
+                return String(fresh.access);
+              }
+            }
+            throw new Error(
+              metadata.authMethod === 'oauth_google'
+                ? 'Google OAuth access token is unavailable. Sign in via Desktop or unlock Keychain and retry.'
+                : 'Desktop credential is locked. Allow Keychain access and retry.',
+            );
+          },
+          async getProjectId() {
+            const current = modelConfig.resolveSharedSelection?.(credentialId);
+            const tokens = current?.oauthTokens as { projectId?: string; project_id?: string } | undefined;
+            return tokens?.projectId || tokens?.project_id || null;
+          },
+        }).stream(request);
+      }
+
+      // True OpenAI-compatible chat/completions only.
+      if (decision.wire === 'openai-chat') {
+        const current = modelConfig.resolveSharedSelection?.(credentialId);
+        const apiKey = current?.apiKey;
+        if (!apiKey) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
+        return createOpenAICompatibleProvider({
+          config: {
+            providerId: credentialId,
+            apiKey,
+            baseUrl: metadata.baseUrl,
+          },
+          fetch: providerFetch,
+        }).stream(request);
+      }
+
+      throw new Error(
+        `TUI has no provider constructor for wire "${decision.wire}" `
+        + `(channel=${decision.channelId}, auth=${decision.authMethod}).`,
+      );
     },
   };
 }
-const provider = sharedMetadata
-  ? sharedProvider(sharedMetadata.credentialId)
-  : modelConfig.configured
-    ? createOpenAICompatibleProvider({
-        config: await resolveOpenAICompatibleProviderConfig({
-          providerId: 'openai-compatible', credentials: modelConfig.credentials,
-        }),
-        fetch: providerFetch,
-      })
-    : null;
+
 const preferredCatalogEntry = modelConfig.catalog.find((entry) => (
   entry.providerId === modelConfig.providerId
   && entry.modelId === modelConfig.model
