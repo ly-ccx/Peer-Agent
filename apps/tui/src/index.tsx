@@ -197,6 +197,10 @@ function sharedProvider(credentialId: string) {
   };
 }
 
+// Seed the chat model with the selected Desktop-projected provider. Later model
+// switches resolve through the same sharedProvider seam in getProvider below.
+const provider = sharedMetadata ? sharedProvider(modelConfig.providerId) : undefined;
+
 const preferredCatalogEntry = modelConfig.catalog.find((entry) => (
   entry.providerId === modelConfig.providerId
   && entry.modelId === modelConfig.model
