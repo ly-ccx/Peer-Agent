@@ -597,8 +597,8 @@ describe('TUI app layout', () => {
     // Cyan bar sits on the user body column, not before the YOU label.
     expect(appSource).toContain('<text fg={COLOR.user}>{APP_CHROME.userRailBar}</text>');
     expect(appSource).toContain('function ToolActivityTimeline');
-    // Tool kind is content-sized (not a fixed 12-col pad) so short labels like "Read" stay tight.
-    expect(appSource).toContain('flexShrink={0} marginRight={1} wrapMode="none">{presentation.toolName}');
+    // Tool kind is content-sized with a modest gap (not a fixed 12-col pad).
+    expect(appSource).toContain('flexShrink={0} marginRight={2} wrapMode="none">{presentation.toolName}');
     expect(appSource).not.toContain('width={12} wrapMode="none">{presentation.toolName}');
     expect(appSource).toContain('formatToolDuration(presentation)');
     expect(appSource).toContain('const summary = toolActivitySummary(presentation)');
