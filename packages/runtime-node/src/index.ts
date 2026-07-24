@@ -22,6 +22,7 @@ export type {
 } from './provider-contracts.ts';
 export { createNodeFileProvider, NODE_FILE_CAPABILITY_MANIFESTS } from './file-provider.ts';
 export {
+  enforceConversationArtifactBudget,
   materializeToolResultContent,
   removeConversationToolArtifacts,
   resolveToolArtifactDir,

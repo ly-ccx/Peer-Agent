@@ -7,7 +7,7 @@
 //
 // 原则:It moves evidence out of prompt and keeps the route back.
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -19,6 +19,8 @@ export const TOOL_RESULT_MATERIALIZE_CONFIG = Object.freeze({
   /** 错误结果保留双倍预览(17 号文档:错误结果多留上下文)。 */
   errorPreviewMultiplier: 2,
   maxKeyFindings: 5,
+  /** 单会话 artifact 目录体积上限;超出按 mtime LRU 逐出最旧文件。 */
+  maxConversationBytes: 256 * 1024 * 1024,
 });
 
 export interface ToolResultArtifact {
@@ -43,18 +45,67 @@ export function resolveToolArtifactDir(options: { baseDir?: string; conversation
   return join(base, sanitizeSegment(options.conversationId, 'unscoped'));
 }
 
+/**
+ * 体积治理(LRU):目录总体积超预算时按 mtime 从旧到新逐出,直到回到预算内。
+ * 治理失败不阻断主链路(材料化本体仍成功);被逐出的 ref 悬空属已知取舍,
+ * ref 模板已注明 artifact 缺失时才允许重新执行原命令。
+ */
+export function enforceConversationArtifactBudget(options: {
+  readonly conversationId?: string | null;
+  readonly baseDir?: string;
+  readonly maxBytes?: number;
+}): void {
+  const dir = resolveToolArtifactDir(options);
+  const maxBytes = options.maxBytes ?? TOOL_RESULT_MATERIALIZE_CONFIG.maxConversationBytes;
+  let entries: Array<{ path: string; size: number; mtimeMs: number }>;
+  try {
+    entries = readdirSync(dir)
+      .map((name) => {
+        const path = join(dir, name);
+        const stat = statSync(path);
+        return stat.isFile() ? { path, size: stat.size, mtimeMs: stat.mtimeMs } : null;
+      })
+      .filter((entry): entry is { path: string; size: number; mtimeMs: number } => entry !== null);
+  } catch {
+    return;
+  }
+  let total = entries.reduce((sum, entry) => sum + entry.size, 0);
+  if (total <= maxBytes) return;
+  entries.sort((a, b) => a.mtimeMs - b.mtimeMs);
+  for (const entry of entries) {
+    if (total <= maxBytes) break;
+    try {
+      rmSync(entry.path, { force: true });
+      total -= entry.size;
+    } catch {
+      // 单文件逐出失败跳过,继续尝试更新的文件。
+    }
+  }
+}
+
 export function writeToolResultArtifact(options: {
   readonly conversationId?: string | null;
   readonly toolCallId?: string | null;
   readonly tool?: string | null;
   readonly content: string;
   readonly baseDir?: string;
+  readonly maxConversationBytes?: number;
 }): ToolResultArtifact {
   const dir = resolveToolArtifactDir(options);
   mkdirSync(dir, { recursive: true });
   const name = `${sanitizeSegment(options.tool, 'tool')}-${sanitizeSegment(options.toolCallId, String(Date.now()))}.txt`;
   const artifactPath = join(dir, name);
   writeFileSync(artifactPath, options.content, 'utf8');
+  // 写后执行体积治理:刚写入的文件 mtime 最新,LRU 不会误逐出它。
+  try {
+    enforceConversationArtifactBudget({
+      conversationId: options.conversationId,
+      baseDir: options.baseDir,
+      maxBytes: options.maxConversationBytes,
+    });
+  } catch {
+    // 体积治理失败不阻断材料化。
+  }
   return {
     artifactPath,
     byteCount: Buffer.byteLength(options.content, 'utf8'),
