@@ -13,7 +13,10 @@ import {
   estimateContextMessagesTokens,
   estimateContextTextTokens,
   estimateContextToolsTokens,
+  extractRecoverableClues,
   formatCompactionMessagesForSummary,
+  microcompactMessagesForContext,
+  previewHistoricalText,
   runCompactionSummaryCascade,
   splitMessagesForCompaction,
 } from '@peer-agent/runtime-core';
@@ -100,8 +103,11 @@ const estimateTokensFromMessages = estimateContextMessagesTokens;
 const estimateToolsTokens = estimateContextToolsTokens;
 
 // ── Historical Tool Result Microcompaction ──
+// 实现已下沉 runtime-core microcompact.ts(23 号治理文档阶段 E,Desktop/CLI 单源)。
+// 以下 legacy* 块为平移前的历史实现,不再被导出或调用,下一批次整块删除。
 
-function previewHistoricalText(text, maxChars = MICROCOMPACTION_CONFIG.previewChars) {
+// eslint-disable-next-line no-unused-vars
+function legacyPreviewHistoricalText(text, maxChars = MICROCOMPACTION_CONFIG.previewChars) {
   const value = String(text ?? '');
   if (value.length <= maxChars) return value;
   const headChars = Math.max(200, Math.floor(maxChars * 0.55));
@@ -290,7 +296,7 @@ function uniqueNonEmptyStrings(values, limit = 12) {
  * 从将被裁掉的历史正文中抽取可回捞线索（artifact / path / retrieval command）。
  * 目标：即使原文没有结构化 local_*_ref，压缩后仍留下可再读入口。
  */
-function extractRecoverableClues(text, { limit = 12 } = {}) {
+function legacyExtractRecoverableClues(text, { limit = 12 } = {}) {
   const value = String(text ?? '');
   if (!value) {
     return { artifactRefs: [], paths: [], suggestedRetrieval: [] };
@@ -348,7 +354,7 @@ function extractRecoverableClues(text, { limit = 12 } = {}) {
 }
 
 function compactLongHistoricalString(text, previewChars) {
-  const clues = extractRecoverableClues(text);
+  const clues = legacyExtractRecoverableClues(text);
   const hasClues = clues.artifactRefs.length > 0
     || clues.paths.length > 0
     || clues.suggestedRetrieval.length > 0;
@@ -457,7 +463,8 @@ function microcompactMessageContent(content, config) {
   return { content, compacted: false, beforeChars: 0, afterChars: 0 };
 }
 
-export function microcompactMessagesForContext(messages, options = {}) {
+// eslint-disable-next-line no-unused-vars
+function legacyMicrocompactMessagesForContext(messages, options = {}) {
   const config = { ...MICROCOMPACTION_CONFIG, ...options };
   let recentNonSystemSeen = 0;
   const compactableIndexes = new Set();
@@ -1753,6 +1760,7 @@ export {
   estimateSummaryChars,
   formatCompactSummary,
   extractRecoverableClues,
+  microcompactMessagesForContext,
   resolveSummaryTokenBudget,
   truncateSummaryInputPreferTail,
   flattenSummaryForCarryForward,

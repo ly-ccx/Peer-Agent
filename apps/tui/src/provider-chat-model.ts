@@ -4,6 +4,7 @@ import {
   COMPACTION_SUMMARY_SYSTEM_PROMPT,
   decideContextCompaction,
   isPromptTooLongError,
+  microcompactMessagesForContext,
   splitMessagesForCompaction,
   type RuntimeToolDefinition,
 } from '@peer-agent/runtime-core';
@@ -15,6 +16,7 @@ import type {
   ModelToolCall,
   ModelToolDefinition,
 } from '@peer-agent/runtime-node';
+import { materializeToolResultContent } from '@peer-agent/runtime-node';
 import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
 
 import type {
@@ -115,7 +117,7 @@ const PLAN_MODE_SYSTEM_PROMPT = `You are in read-only Plan mode. Investigate onl
 // Intake gate blocks shell/write until a plan exists for this conversation.
 const GOAL_MODE_SYSTEM_PROMPT = `You are in Goal mode (self-driven). Before any side-effecting work (bash, write_file, edit_file, etc.), you MUST call the tool goal_create_plan with a clear goal, ordered tasks, and success criteria. Read-only investigation tools and goal_get_plan / goal_update_task are allowed. Do not invent progress: only goal_update_task records task completion. If a plan already exists, use goal_get_plan and continue from it. Prefer goal_create_plan over dumping a free-form JSON plan in the assistant message.`;
 
-function executionContent(execution: RuntimeSdkProviderExecution): string {
+function executionContent(execution: RuntimeSdkProviderExecution, conversationId?: string): string {
   const result = execution.result;
   const evidenceRefs = collectToolEvidenceRefs({
     toolCallId: result.toolCallId,
@@ -128,7 +130,20 @@ function executionContent(execution: RuntimeSdkProviderExecution): string {
     ...(result.error === undefined ? {} : { error: result.error }),
     ...(evidenceRefs.length === 0 ? {} : { evidenceRefs }),
   };
-  return JSON.stringify(view);
+  const json = JSON.stringify(view);
+  // Layer 0 材料化(与 Desktop tool-orchestrator 同源):超阈值输出落盘 artifact,
+  // provider 消息只留 ref 骨架;写盘失败降级为原文,交给共享 microcompact 兜底。
+  try {
+    return materializeToolResultContent({
+      conversationId,
+      toolCallId: result.toolCallId,
+      tool: 'tool',
+      content: json,
+      isError: result.status === 'failed',
+    }).content;
+  } catch {
+    return json;
+  }
 }
 
 function formatSystemContextBlocks(
@@ -325,6 +340,8 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         ],
         modelMessages,
         toolExecutions: [],
+        // 供工具结果材料化按会话归档 artifact(跨端共享 ~/.peer-agent/artifacts/<conv>)。
+        ...(context.run.conversationId ? { conversationId: context.run.conversationId } : {}),
       };
     },
     async runTurn(state, context) {
@@ -348,10 +365,15 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
 
       // 与 Desktop 同语义的 loop 中途 preflight(21 号文档 13.2):每次 provider 请求前
       // 按共享阈值判定;越线则先确定性结构化压缩再发送,不盲发超窗请求。
+      // Layer 1(共享 microcompact,与 Desktop 同源):发送切片对历史工具结果证据引用化,
+      // state 保留原文(Desktop apiMessages 同构);resume 重建的大 tool detail 在此收敛。
       let workingMessages = state.modelMessages;
+      const projectSendMessages = (messages: readonly ModelMessage[]): readonly ModelMessage[] =>
+        microcompactMessagesForContext(messages).messages;
+      let sendMessages = projectSendMessages(workingMessages);
       const midTurnCompactions: MidTurnCompaction[] = [];
       const preflight = decideContextCompaction({
-        pressureTokens: computeNextRequestInputTokens({ messages: workingMessages, tools }),
+        pressureTokens: computeNextRequestInputTokens({ messages: sendMessages, tools }),
         contextWindow,
       });
       if (preflight.shouldCompact) {
@@ -363,12 +385,13 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         if (compacted) {
           workingMessages = compacted.messages;
           midTurnCompactions.push(compacted.record);
+          sendMessages = projectSendMessages(workingMessages);
         }
       }
 
       const sendOnce = () => streamWithSafeRetry((options.getProvider?.() ?? options.provider), {
         model,
-        messages: workingMessages,
+        messages: sendMessages,
         tools,
         ...(!reasoningEffort || reasoningEffort === 'default' ? {} : { reasoningEffort }),
         signal: context.signal,
@@ -398,6 +421,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         if (!emergency) throw error;
         workingMessages = emergency.messages;
         midTurnCompactions.push(emergency.record);
+        sendMessages = projectSendMessages(workingMessages);
         result = await sendOnce();
       }
 
@@ -444,7 +468,9 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           ...state,
           modelMessages: completedModelMessages,
           usage: result.usage,
-          requestProjection: requestProjection(completedModelMessages),
+          // 投影用发送口径(Layer 1 后)切片,与 Desktop computeContextInfo 同成分,
+          // 使同一会话两端占用收敛。
+          requestProjection: requestProjection(projectSendMessages(completedModelMessages)),
           ...(accumulatedCompactions.length > 0
             ? { midTurnCompactions: accumulatedCompactions }
             : {}),
@@ -460,7 +486,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           ...executions.map((execution) => ({
             role: 'tool' as const,
             toolCallId: execution.call.toolCallId,
-            content: executionContent(execution.result),
+            content: executionContent(execution.result, state.conversationId),
           })),
         ],
         toolExecutions: [

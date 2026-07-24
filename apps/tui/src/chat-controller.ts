@@ -156,6 +156,8 @@ export interface ChatModelState {
   readonly messages: readonly ChatMessage[];
   readonly modelMessages: readonly ModelMessage[];
   readonly toolExecutions: readonly RuntimeSdkProviderExecution[];
+  /** 会话 id(initialize 时从 run 写入):供工具结果材料化按会话归档 artifact。 */
+  readonly conversationId?: string;
   readonly pendingToolCalls?: readonly ModelToolCall[];
   readonly usage?: ModelUsage;
   readonly requestProjection?: {

@@ -8,5 +8,6 @@ export * from './projection.ts';
 export * from './projection-materializers.ts';
 export * from './local-tool-contracts.ts';
 export * from './context-compaction.ts';
+export * from './microcompact.ts';
 export * from './context-projection.ts';
 export * from './context-projection-lifecycle.ts';

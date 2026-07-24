@@ -51,6 +51,7 @@ import { createHostRestarter } from './host-restart.mjs';
 import { resolveDockIconPaths } from './dock-icon-paths.mjs';
 import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
 import { buildRuntimeTools, createLlmChatService } from './llm-chat-service.mjs';
+import { removeConversationToolArtifacts } from '@peer-agent/runtime-node';
 import { createContextProjectionLifecycle } from '@peer-agent/runtime-core';
 import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
 import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
@@ -1947,6 +1948,12 @@ ipcMain.handle('conversations:delete', (_, { id }) => {
   } catch (err) {
     // 级联清理失败不回滚会话删除，但显式告警以便排查（不要静默吞）。
     console.warn('[main] cascade deletePlanByConversation failed:', err);
+  }
+  try {
+    // 工具结果材料化 artifact 随会话级联清理(17 号文档阶段 E / ADR 34 同口径)。
+    removeConversationToolArtifacts({ conversationId: id });
+  } catch (err) {
+    console.warn('[main] cascade removeConversationToolArtifacts failed:', err);
   }
   return result;
 });
