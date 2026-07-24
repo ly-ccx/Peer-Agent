@@ -32,6 +32,8 @@ export interface ComposerStatus {
   readonly language: string;
   readonly languageShort: string;
   readonly model: string;
+  /** Short effort level for footer display, e.g. high / low / auto. */
+  readonly effort: string;
   readonly reasoning: string;
   readonly context: string;
   readonly contextShort: string;
@@ -133,6 +135,7 @@ export function createComposerStatus(input: ComposerStatusInput): ComposerStatus
     language: language.label,
     languageShort: language.locale === 'zh-CN' ? 'zh' : 'en',
     model: modelIdFromLabel(input.modelLabel),
+    effort: input.reasoningEffort?.trim() || 'auto',
     reasoning: `reasoning ${input.reasoningEffort?.trim() || 'auto'}`,
     ...context,
   };

@@ -88,6 +88,7 @@ describe('composer status', () => {
       language: '中文',
       languageShort: 'zh',
       model: 'gpt-5.6-sol',
+      effort: 'auto',
       reasoning: 'reasoning auto',
       context: 'context 0%',
     });
@@ -111,6 +112,7 @@ describe('composer status', () => {
       mode: 'explorer',
       permission: 'read only',
       permissionShort: 'read',
+      effort: 'high',
       reasoning: 'reasoning high',
       context: 'context 0 / ?',
     });

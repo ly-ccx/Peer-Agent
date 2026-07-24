@@ -97,9 +97,19 @@ function ContextStatus({ status, short = false }: {
 }
 
 /**
- * Below the input: mode · access on the left, model + context on the right.
+ * Below the input: mode · access on the left, model · effort + context on the right.
  * No lang / workspace here — workspace lives in the session topbar.
  */
+function ModelEffortLabel({ status }: { readonly status: ComposerStatus }) {
+  return (
+    <>
+      <span fg={COLOR.textSoft}>{status.model}</span>
+      <StatusSeparator />
+      <span fg={COLOR.textSoft}>{status.effort}</span>
+    </>
+  );
+}
+
 export function ComposerStatusBar({ status, layout }: {
   readonly status: ComposerStatus;
   readonly layout: ComposerStatusLayout;
@@ -113,7 +123,7 @@ export function ComposerStatusBar({ status, layout }: {
           <StatusPair label="access" value={status.permissionShort} />
         </text>
         <text fg={COLOR.muted} wrapMode="none">
-          <span fg={COLOR.textSoft}>{status.model}</span>
+          <ModelEffortLabel status={status} />
           {' '}
           <ContextStatus status={status} short />
         </text>
@@ -138,7 +148,7 @@ export function ComposerStatusBar({ status, layout }: {
         />
       </text>
       <text fg={COLOR.muted} wrapMode="none">
-        <span fg={COLOR.textSoft}>{status.model}</span>
+        <ModelEffortLabel status={status} />
         {' '}
         <ContextStatus status={status} short={layout === 'compact'} />
       </text>
