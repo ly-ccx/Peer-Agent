@@ -454,7 +454,7 @@ describe('TUI app layout', () => {
     expect(statusViewSource).toContain('flexDirection="column"');
   });
 
-  test('renders footer statusbar as mode · access left and model + context right', () => {
+  test('renders footer statusbar as mode · access left and model · effort + context right', () => {
     const statusSource = statusViewSource.slice(statusViewSource.indexOf('export function ComposerStatusBar'));
     const wideStatusSource = statusSource.slice(statusSource.lastIndexOf('return ('));
 
@@ -467,7 +467,11 @@ describe('TUI app layout', () => {
     expect(wideStatusSource.match(/<text /g)?.length).toBe(2);
     expect(wideStatusSource).toContain('<StatusPair label="mode" value={status.mode} accent />');
     expect(wideStatusSource).toContain('value={layout === \'compact\' ? status.permissionShort : status.permission}');
-    expect(wideStatusSource).toContain('{status.model}');
+    // model · effort is composed by ModelEffortLabel (status.model / status.effort live there).
+    expect(wideStatusSource).toContain('<ModelEffortLabel status={status} />');
+    expect(statusViewSource).toContain('function ModelEffortLabel');
+    expect(statusViewSource).toContain('{status.model}');
+    expect(statusViewSource).toContain('{status.effort}');
     expect(wideStatusSource).toContain('<ContextStatus status={status} short={layout === \'compact\'} />');
   });
 
@@ -593,7 +597,9 @@ describe('TUI app layout', () => {
     // Cyan bar sits on the user body column, not before the YOU label.
     expect(appSource).toContain('<text fg={COLOR.user}>{APP_CHROME.userRailBar}</text>');
     expect(appSource).toContain('function ToolActivityTimeline');
-    expect(appSource).toContain('width={12}');
+    // Tool kind is content-sized (not a fixed 12-col pad) so short labels like "Read" stay tight.
+    expect(appSource).toContain('flexShrink={0} marginRight={1} wrapMode="none">{presentation.toolName}');
+    expect(appSource).not.toContain('width={12} wrapMode="none">{presentation.toolName}');
     expect(appSource).toContain('formatToolDuration(presentation)');
     expect(appSource).toContain('const summary = toolActivitySummary(presentation)');
     // Summary grows; duration sits on the right. Status is glyph-only (no "done" column).

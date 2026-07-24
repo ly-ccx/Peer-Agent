@@ -251,7 +251,8 @@ function ToolActivityTimeline({
       </box>
       <box flexGrow={1} minWidth={0} flexDirection="column">
         <box flexDirection="row" width="100%">
-          <ThemedText selectable fg={COLOR.textSoft} width={12} wrapMode="none">{presentation.toolName}</ThemedText>
+          {/* Content-sized label + small gap; fixed width={12} left a large hole after short names like "Read". */}
+          <ThemedText selectable fg={COLOR.textSoft} flexShrink={0} marginRight={1} wrapMode="none">{presentation.toolName}</ThemedText>
           <ThemedText selectable fg={COLOR.muted} flexGrow={1} minWidth={0} wrapMode="none">{summary}</ThemedText>
           <ThemedText selectable fg={presentation.status === 'running' ? COLOR.accent : COLOR.subtle} width={7} marginLeft={2} flexShrink={0} wrapMode="none">
             {formatToolDuration(presentation)}
