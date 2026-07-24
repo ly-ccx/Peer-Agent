@@ -3,15 +3,12 @@ import { COLOR, contextUsageColor } from './tui-theme.ts';
 
 export type ComposerStatusLayout = 'wide' | 'compact' | 'narrow';
 
-/**
- * Footer running status: spinner + status text only.
- * Mounted above the quiet divider that separates activity from the input.
- */
+/** Footer running status, mounted above the quiet input divider. */
 export function ComposerRunningStatusBar({
-  spinner,
+  activity,
   statusLabel,
 }: {
-  readonly spinner: string;
+  readonly activity: string;
   readonly statusLabel: string;
 }) {
   return (
@@ -24,8 +21,8 @@ export function ComposerRunningStatusBar({
       paddingRight={1}
     >
       <text fg={COLOR.accent} wrapMode="none">
-        <span>{spinner}</span>
-        <span>  {statusLabel}</span>
+        <span>{activity}</span>
+        <span fg={COLOR.textSoft}>  {statusLabel}</span>
       </text>
       <text fg={COLOR.subtle} wrapMode="none">
         <span>PEER</span>

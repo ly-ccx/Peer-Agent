@@ -117,7 +117,8 @@ import {
   isGoalStatusToolPresentation,
   toolActivitySummary,
   resolveToolPresentation,
-  scrambleStatusLabel,
+  runningActivityField,
+  formatRunningElapsed,
   thinkingSpinnerGlyph,
   thinkingStatusLabel,
   toolHeadline,
@@ -192,17 +193,21 @@ function ThinkingStatusLabel({
 function ComposerRunningStatusLabel({
   locale,
   runStatus,
+  width,
 }: {
   readonly locale: TuiLocale;
   readonly runStatus: 'running' | 'cancelling' | 'compacting';
+  readonly width: number;
 }) {
   const frame = useStatusAnimationFrame(true, THINKING_SPINNER_INTERVAL_MS);
-  const spinner = thinkingSpinnerGlyph(frame);
-  const statusLabel = scrambleStatusLabel(composerRunningStatusLabel(locale, runStatus), frame);
+  const startedAtRef = useRef(Date.now());
+  const activity = runningActivityField(frame, width);
+  const elapsed = formatRunningElapsed(Date.now() - startedAtRef.current);
+  const status = composerRunningStatusLabel(locale, runStatus);
   return (
     <ComposerRunningStatusBar
-      spinner={spinner}
-      statusLabel={statusLabel}
+      activity={activity}
+      statusLabel={width < 30 ? `· ${elapsed}` : `${status} · ${elapsed}`}
     />
   );
 }
@@ -887,6 +892,7 @@ function ComposerDock({
         <ComposerRunningStatusLabel
           locale={locale}
           runStatus={snapshot.status === 'cancelling' ? 'cancelling' : snapshot.status === 'compacting' ? 'compacting' : 'running'}
+          width={dividerWidth}
         />
       ) : null}
       <ComposerModeDivider width={dividerWidth} />

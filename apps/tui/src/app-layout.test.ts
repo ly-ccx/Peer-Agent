@@ -238,7 +238,7 @@ describe('TUI app layout', () => {
     expect(appSource).not.toContain('thinkingText={dockThinkingText}');
   });
 
-  test('mounts a Qoder-style running status bar above the input', () => {
+  test('mounts a Crush-style running status bar above the input', () => {
     const dockSource = appSource.slice(
       appSource.indexOf('function ComposerDock'),
       appSource.indexOf('export function App'),
@@ -253,7 +253,8 @@ describe('TUI app layout', () => {
     expect(statusViewSource).not.toContain('cancelHint');
     expect(appSource).toContain('function ComposerRunningStatusLabel');
     expect(runningLabelSource).toContain('useStatusAnimationFrame(true, THINKING_SPINNER_INTERVAL_MS)');
-    expect(runningLabelSource).toContain('thinkingSpinnerGlyph(frame)');
+    expect(runningLabelSource).toContain('runningActivityField(frame, width)');
+    expect(runningLabelSource).toContain('Date.now() - startedAtRef.current');
     expect(runningLabelSource).toContain('composerRunningStatusLabel(locale, runStatus)');
     expect(dockSource).toContain("snapshot.status === 'compacting' ? 'compacting'");
     expect(runningLabelSource).toContain("'compacting'");
@@ -262,6 +263,7 @@ describe('TUI app layout', () => {
     expect(dockSource).toContain('composerLayout.showRunningStatus ?');
     expect(dockSource).toContain('<ComposerRunningStatusLabel');
     expect(dockSource).toContain('composerContentWidth(terminal.width, layout.outerPadding)');
+    expect(dockSource).toContain('width={dividerWidth}');
     expect(dockSource).toContain('<ComposerModeDivider width={dividerWidth} />');
     expect(statusViewSource).not.toContain("{'─'.repeat(80)}");
     expect(statusViewSource).toContain("{'─'.repeat(cols)}");

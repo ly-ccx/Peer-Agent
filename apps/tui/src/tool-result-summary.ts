@@ -305,16 +305,36 @@ export function thinkingStatusLabel(frame: number, _hasThinkingContent = false):
   return `Thinking${dots}`;
 }
 
-/**
- * Footer running-status line:
- * `| Working…`
- */
+const RUNNING_ACTIVITY_GLYPHS = '0123456789abcdefABCDEF~!@#$%^&*+=_';
+
+/** A deterministic, continuously changing Crush-style character field. */
+export function runningActivityField(frame: number, width = 80): string {
+  const length = width >= 48 ? 12 : width >= 30 ? 8 : 4;
+  return Array.from({ length }, (_, index) => {
+    const offset = Math.abs(frame * 11 + index * 17 + index * index * 3);
+    return RUNNING_ACTIVITY_GLYPHS[offset % RUNNING_ACTIVITY_GLYPHS.length] ?? '0';
+  }).join('');
+}
+
+export function formatRunningElapsed(elapsedMs: number): string {
+  const seconds = Math.max(0, Math.floor(elapsedMs / 1_000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+/** Character field + stable real status + elapsed time, with narrow-width fallback. */
 export function composerRunningStatusLine(options: {
   readonly frame: number;
   readonly statusLabel: string;
+  readonly elapsedMs?: number;
+  readonly width?: number;
 }): string {
-  const label = options.statusLabel.trim();
-  return `${thinkingSpinnerGlyph(options.frame)} ${label}`.trimEnd();
+  const width = options.width ?? 80;
+  const activity = runningActivityField(options.frame, width);
+  const elapsed = formatRunningElapsed(options.elapsedMs ?? 0);
+  if (width < 30) return `${activity} · ${elapsed}`;
+  return `${activity}  ${options.statusLabel.trim()} · ${elapsed}`;
 }
 
 /** Breathing/pulsing leading glyph for in-flight tool rows. */

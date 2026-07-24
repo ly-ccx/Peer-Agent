@@ -4,7 +4,9 @@ import {
   animatedToolStatusGlyph,
   composerRunningStatusLine,
   createToolPresentation,
+  formatRunningElapsed,
   formatToolDuration,
+  runningActivityField,
   scrambleStatusLabel,
   formatToolResultSummary,
   formatInteractionToolDetail,
@@ -154,19 +156,28 @@ describe('tool result summary', () => {
     expect(thinkingStatusLabel(0, false)).not.toMatch(/^[|/\-\\]/);
   });
 
-  test('composer running status line pairs spinner with status label', () => {
+  test('composer running status uses a continuous character field and elapsed time', () => {
+    expect(runningActivityField(0, 80)).toHaveLength(12);
+    expect(runningActivityField(1, 80)).not.toBe(runningActivityField(0, 80));
+    expect(formatRunningElapsed(999)).toBe('0s');
+    expect(formatRunningElapsed(65_000)).toBe('1:05');
     expect(composerRunningStatusLine({
       frame: 0,
       statusLabel: 'Working…',
-    })).toBe('| Working…');
-    expect(composerRunningStatusLine({
-      frame: 1,
-      statusLabel: '运行中…',
-    })).toBe('/ 运行中…');
+      elapsedMs: 8_000,
+      width: 80,
+    })).toMatch(/^.{12}  Working… · 8s$/);
+  });
+
+  test('composer running status degrades cleanly at compact and narrow widths', () => {
+    expect(runningActivityField(0, 40)).toHaveLength(8);
+    expect(runningActivityField(0, 20)).toHaveLength(4);
     expect(composerRunningStatusLine({
       frame: 2,
       statusLabel: 'Cancelling…',
-    })).toBe('- Cancelling…');
+      elapsedMs: 12_000,
+      width: 20,
+    })).toMatch(/^.{4} · 12s$/);
   });
 
   test('uses Crush glyphs: ✓ completed and animated ◇ running', () => {
