@@ -4,7 +4,6 @@ import { fetchWithConnectionRecovery } from '../provider-transports/recovering-f
 import { consumeOpenAIStream } from './openai-chat-adapter.mjs';
 import {
   getQoderModelMetadata,
-  listQoderModels,
   resolveQoderModelOptionProjection,
 } from './qoder-model-catalog.mjs';
 import { prepareQoderInferRequest, resolveQoderInferenceEndpoint } from './qoder-local-auth.mjs';
@@ -143,7 +142,8 @@ export function computeQoderQueueWaitMs(queueInfo, { attempt = 0 } = {}) {
   const base = Number.isFinite(hinted) && hinted > 0 ? hinted : QODER_QUEUE_DEFAULT_WAIT_MS;
   // Cap each wait; add mild backoff so long queues do not spin too aggressively.
   const withBackoff = base + Math.min(attempt, 3) * 2_000;
-  return Math.min(Math.max(1_000, withBackoff), QODER_QUEUE_MAX_WAIT_MS);
+  // Keep a small floor to avoid tight spin, but honor short waitTime hints (tests/local).
+  return Math.min(Math.max(50, withBackoff), QODER_QUEUE_MAX_WAIT_MS);
 }
 
 function formatQoderQueueError(errorText, { attempts, waitTimeMs, queueType } = {}) {
@@ -158,6 +158,7 @@ async function sendQoderStreamWithResilience(sendOnce, {
   streamId = null,
   maxQueueRetries = QODER_QUEUE_MAX_RETRIES,
   transientRetryDelaysMs = QODER_TRANSIENT_RETRY_DELAYS_MS,
+  waitImpl = sleepMs,
 } = {}) {
   let queueAttempts = 0;
   let transientAttempts = 0;
@@ -188,14 +189,14 @@ async function sendQoderStreamWithResilience(sendOnce, {
       } catch {
         /* renderer may not listen */
       }
-      await sleepMs(waitMs, signal);
+      await waitImpl(waitMs, signal);
       queueAttempts += 1;
       continue;
     }
 
     if (classification.kind === 'transient' && transientAttempts < transientRetryDelaysMs.length) {
       const waitMs = transientRetryDelaysMs[transientAttempts];
-      await sleepMs(waitMs, signal);
+      await waitImpl(waitMs, signal);
       transientAttempts += 1;
       continue;
     }
@@ -648,15 +649,9 @@ export function buildQoderRemoteChatAsk({
 }
 
 async function getQoderModelMetadataForSend(model) {
-  const syncMetadata = getQoderModelMetadata(model);
-  if (syncMetadata) return syncMetadata;
-  try {
-    const { models } = await listQoderModels();
-    const id = String(model || '').trim().toLowerCase();
-    return models.find((entry) => entry.id.toLowerCase() === id) || null;
-  } catch {
-    return null;
-  }
+  // Stream send must not block on live catalog discovery (official SDK can take seconds).
+  // Use the latest local/sync cache only; missing metadata still allows a valid request body.
+  return getQoderModelMetadata(model);
 }
 
 export function qoderTurnTaskId(streamId) {
@@ -876,6 +871,7 @@ export async function sendQoderPrivateStream({
   modelOptionValues = {},
   maxQueueRetries = QODER_QUEUE_MAX_RETRIES,
   transientRetryDelaysMs = QODER_TRANSIENT_RETRY_DELAYS_MS,
+  waitImpl = sleepMs,
 } = {}) {
   return sendQoderStreamWithResilience(async () => {
   const catalogMetadata = await getQoderModelMetadataForSend(model);
@@ -1020,5 +1016,6 @@ export async function sendQoderPrivateStream({
     streamId,
     maxQueueRetries,
     transientRetryDelaysMs,
+    waitImpl,
   });
 }

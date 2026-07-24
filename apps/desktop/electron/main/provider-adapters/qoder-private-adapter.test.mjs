@@ -929,6 +929,7 @@ describe('qoder private adapter', () => {
         streamId: 's-qoder-queue-retry',
         maxQueueRetries: 2,
         transientRetryDelaysMs: [],
+        waitImpl: async () => {},
       });
 
       assert.equal(result.ok, true);
@@ -965,6 +966,7 @@ describe('qoder private adapter', () => {
         streamId: 's-qoder-queue-exhausted',
         maxQueueRetries: 1,
         transientRetryDelaysMs: [],
+        waitImpl: async () => {},
       });
 
       assert.equal(result.ok, false);
