@@ -138,6 +138,30 @@ export function estimateContextToolsTokens(tools: readonly ToolLike[] | ToolLike
   return Math.ceil(tokens);
 }
 
+/**
+ * Host-neutral prompt-too-long classification shared by Desktop provider loops
+ * and CLI/TUI emergency recovery. Providers surface this failure in many shapes;
+ * classification must stay single-sourced so both hosts retry under the same policy.
+ */
+export function isPromptTooLongError(
+  status: number | null | undefined,
+  text: string | null | undefined,
+): boolean {
+  if (status === 413) return true;
+  const value = String(text ?? '').toLowerCase();
+  return (
+    value.includes('prompt_too_long')
+    || value.includes('context_length_exceeded')
+    || value.includes('maximum context length')
+    || value.includes('context window')
+    || value.includes('context too long')
+    || value.includes('input is too long')
+    || value.includes('exceeds model context')
+    || value.includes('too many tokens')
+    || value.includes('token limit')
+  );
+}
+
 export function decideContextCompaction(options: {
   pressureTokens: number | null | undefined;
   contextWindow: number | null | undefined;

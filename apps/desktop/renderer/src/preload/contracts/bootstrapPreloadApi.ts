@@ -565,6 +565,14 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly chatCompact: (params: { conversationId: string; streamId: string }) => Promise<{ compacted: boolean; notification?: { method: string; beforeTokens: number; afterTokens: number; oldMessageCount: number; keptMessageCount: number; nextRequestInputTokens?: number; contextWindow?: number | null } }>;
   // 按会话查询当前压缩态（切会话恢复横幅用）。压缩态真值在主进程登记表，渲染层只表达。
   readonly chatCompactionGet: (params: { conversationId: string }) => Promise<{ compacting: true; streamId: string; percent: number | null; manual: boolean } | null>;
+  // restored 重投影(21 号文档 13.3):快照缺失/跨宿主时由 Runtime 按完整成分重算占用并回写共享快照。
+  readonly chatContextRestored?: (params: { conversationId: string }) => Promise<{
+    phase: 'restored';
+    nextRequestInputTokens: number;
+    contextWindow: number | null;
+    percent?: number | null;
+    pressure?: string;
+  } | null>;
   readonly promptSnapshotsList: (params?: { limit?: number }) => Promise<readonly PromptSnapshotIndexEntry[]>;
   readonly promptSnapshotsGet: (params: { id: string }) => Promise<PromptSnapshotRecord | null>;
   readonly promptContextEpochsList: (params?: { limit?: number }) => Promise<readonly PromptContextEpochRecord[]>;

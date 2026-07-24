@@ -1,4 +1,5 @@
 import { createConversationStore } from '@peer-agent/conversation-store';
+import { buildCompactionMarker } from '@peer-agent/protocol';
 import { realpathSync } from 'node:fs';
 import type { ModelMessage, RuntimeModelSelection } from '@peer-agent/runtime-node';
 
@@ -753,8 +754,10 @@ export function createTuiConversationPersistence(options: {
               role: 'user',
               content: compact.handoffContent,
               timestamp: now(),
-              _compaction: {
-                method: 'structural',
+              // 共享 marker 形状经 protocol buildCompactionMarker 产出(23 号治理文档不变式 3);
+              // method 取真实级联结果(llm/structured/fallback_drop),不再硬编码 structural。
+              _compaction: buildCompactionMarker({
+                method: compact.method,
                 originalMessageCount: compact.beforeCount ?? 0,
                 previousMessageCount: 0,
                 deltaMessageCount: compact.summarizedCount ?? 0,
@@ -762,7 +765,7 @@ export function createTuiConversationPersistence(options: {
                 afterTokens: compact.afterTokens ?? 0,
                 summary: compact.summary ?? '',
                 decisionAnchors: [],
-              },
+              }),
             };
             rewritten = [
               ...rewritten.slice(0, insertionIndex),

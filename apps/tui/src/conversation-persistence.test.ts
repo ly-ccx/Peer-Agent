@@ -1021,6 +1021,7 @@ describe('TUI conversation persistence', () => {
           content: 'Compacted 6 → 4 messages (summarized 2)',
           compact: {
             phase: 'done',
+            method: 'structured',
             beforeCount: 6,
             afterCount: 4,
             summarizedCount: 2,
@@ -1052,7 +1053,7 @@ describe('TUI conversation persistence', () => {
       content: 'Earlier conversation (compacted)',
       timestamp: 456,
       _compaction: {
-        method: 'structural',
+        method: 'structured',
         originalMessageCount: 6,
         previousMessageCount: 0,
         deltaMessageCount: 2,

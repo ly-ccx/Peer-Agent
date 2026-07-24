@@ -1,3 +1,4 @@
+import { isPromptTooLongError } from '@peer-agent/runtime-core';
 import {
   COMPACTION_CONFIG,
   compactIfNeeded,
@@ -31,20 +32,10 @@ export function buildCompactionProviderConfig({
   };
 }
 
+// PTL 分类单一来源在 runtime-core isPromptTooLongError(双端同策略);
+// 保留旧名供 Desktop 既有调用方/测试使用。
 export function isPromptTooLongResponse(status, text) {
-  if (status === 413) return true;
-  const value = String(text || '').toLowerCase();
-  return (
-    value.includes('prompt_too_long') ||
-    value.includes('context_length_exceeded') ||
-    value.includes('maximum context length') ||
-    value.includes('context window') ||
-    value.includes('context too long') ||
-    value.includes('input is too long') ||
-    value.includes('exceeds model context') ||
-    value.includes('too many tokens') ||
-    value.includes('token limit')
-  );
+  return isPromptTooLongError(status, text);
 }
 
 export function buildPromptTooLongRecoveryError({ text = '', providerTracePath = null, retryUsed = false } = {}) {

@@ -94,6 +94,8 @@ function buildRuntimeTools({ mcpRegistry, providerType, mode }) {
 }
 
 export { buildAnthropicTools, buildOpenAITools, buildSystemPrompt };
+// restored 重投影(21 号文档 13.3)需要按模式投影工具 schema,导出供 main 复用。
+export { buildRuntimeTools };
 export { normalizeAnthropicMessages, normalizeOpenAIMessages };
 export { hasUnsupportedToolClaim };
 export { finalizeDanglingToolSegments, terminalDanglingNote };

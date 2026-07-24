@@ -50,7 +50,8 @@ import { listQoderModels } from './provider-adapters/qoder-model-catalog.mjs';
 import { createHostRestarter } from './host-restart.mjs';
 import { resolveDockIconPaths } from './dock-icon-paths.mjs';
 import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
-import { createLlmChatService } from './llm-chat-service.mjs';
+import { buildRuntimeTools, createLlmChatService } from './llm-chat-service.mjs';
+import { createContextProjectionLifecycle } from '@peer-agent/runtime-core';
 import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
 import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
@@ -79,6 +80,7 @@ import {
   persistCompactedConversation,
 } from './conversation-compaction-persistence.mjs';
 import { runCompactionCheck } from './chat-runtime/compaction-coordinator.mjs';
+import { applyMicrocompaction } from './chat-runtime/compaction-coordinator.mjs';
 import { getCompaction } from './chat-runtime/compaction-registry.mjs';
 import { resolveProviderCredential, refreshExpiredOAuthProviders } from './provider-credential-resolver.mjs';
 import {
@@ -2266,6 +2268,80 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
 // 压缩态真值落在主进程登记表，渲染层只负责表达，不再各自持有运行真值。
 ipcMain.handle('chat:compaction:get', (_event, { conversationId } = {}) =>
   getCompaction(conversationId));
+
+// ── restored 重投影(21 号文档 13.3 / 23 号治理文档 Phase 1.4)──
+// 会话打开时若持久化快照缺失/失效/来自其他宿主(source ≠ desktop),renderer 调此处
+// 按当前宿主的完整成分(全量 system context + 模式投影工具 schema + active 历史)重算投影,
+// 而不是用缺成分的本地估算兜底(那正是历史上 RC1 失准的根源)。
+// 重算成功后回写 contextSnapshot(source: desktop),下次打开直接命中。
+ipcMain.handle('chat:context:restored', (_event, { conversationId } = {}) => {
+  const conv = conversationStore.getConversation(conversationId);
+  if (!conv || !conv.messages?.length) return null;
+
+  const activeMessages = toRuntimeMessages(conv.messages);
+  if (activeMessages.length === 0) return null;
+  const continuityContext = continuityContextFromMessages(conv.messages);
+
+  const providers = llmConfigStore.listProviders().filter((p) => p.apiKeyConfigured);
+  const provider = (conv.modelProviderId && providers.find((p) => p.id === conv.modelProviderId))
+    || providers.find((p) => p.isDefault)
+    || providers[0]
+    || null;
+  const workspacePath = conv.workspacePath || settingsStore.getAll().activeWorkspace || null;
+  const mode = typeof conv.mode === 'string' && conv.mode ? conv.mode : 'chat';
+
+  const systemContext = buildSystemContext(workspacePath, {
+    conversationId,
+    continuityContext,
+    mode,
+    provider: provider?.provider ?? null,
+    model: provider?.model ?? null,
+  });
+  const systemPrompt = renderSystemContext(systemContext);
+  let tools = null;
+  try {
+    tools = buildRuntimeTools({
+      mcpRegistry,
+      providerType: provider?.provider === 'anthropic' ? 'anthropic' : 'openai',
+      mode,
+    }).tools;
+  } catch (error) {
+    // 工具投影失败时仍可给出 system+messages 投影,但降级为部分成分;记录以便排查。
+    console.warn('[main] restored projection tools unavailable:', error?.message || error);
+  }
+
+  const projectedMessages = applyMicrocompaction(
+    [{ role: 'system', content: systemPrompt }, ...activeMessages],
+    { log: () => {} },
+  ).messages;
+  const lifecycle = createContextProjectionLifecycle();
+  const snapshot = lifecycle.restored({
+    messages: projectedMessages,
+    tools,
+    contextWindow: provider?.contextWindow || null,
+    reason: 'restored',
+  });
+  const projection = snapshot.projection;
+  if (!Number.isFinite(projection.nextRequestInputTokens) || projection.nextRequestInputTokens <= 0) {
+    return null;
+  }
+  try {
+    conversationStore.updateContextSnapshot(conversationId, {
+      nextRequestInputTokens: projection.nextRequestInputTokens,
+      contextWindow: projection.contextWindow,
+      source: 'desktop',
+    });
+  } catch (error) {
+    console.warn('[main] failed to persist restored projection:', error?.message || error);
+  }
+  return {
+    phase: 'restored',
+    nextRequestInputTokens: projection.nextRequestInputTokens,
+    contextWindow: projection.contextWindow,
+    percent: projection.percent,
+    pressure: projection.pressure,
+  };
+});
 
 ipcMain.handle('prompt-snapshots:list', (_event, params = {}) =>
   promptSnapshotStore.list({ limit: params?.limit }));

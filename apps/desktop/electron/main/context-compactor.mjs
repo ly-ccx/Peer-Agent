@@ -18,6 +18,7 @@ import {
   splitMessagesForCompaction,
 } from '@peer-agent/runtime-core';
 import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli-identity.mjs';
+import { buildCompactionMarker } from '@peer-agent/protocol';
 import { encodeOpenAIResponsesRequest } from './provider-encoders/responses-encoder.mjs';
 import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 import { logCompactionDiagnostic } from './compaction-diagnostic-log.mjs';
@@ -1336,10 +1337,10 @@ function buildCompactedMessages({
       // still pass explicitly so handoff rendering stays robust if summary is empty.
       decisionAnchors: anchors,
     }),
-    _compaction: {
+    _compaction: buildCompactionMarker({
       method,
-      fallbackReason: fallbackReason || undefined,
-      fallbackDetail: fallbackDetail || undefined,
+      fallbackReason,
+      fallbackDetail,
       originalMessageCount: representedMessageCount,
       deltaMessageCount: oldCount,
       previousMessageCount,
@@ -1348,7 +1349,7 @@ function buildCompactedMessages({
       // Store merged summary (with decision anchors) for subsequent continuity carry-forward.
       summary: mergedSummary || '',
       decisionAnchors: anchors,
-    },
+    }),
   });
 
   result.push(...keepMessages);

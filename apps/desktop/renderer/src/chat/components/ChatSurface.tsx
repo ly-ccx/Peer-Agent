@@ -245,13 +245,20 @@ async function loadConversationMessages(conversationId: string): Promise<{
     : null;
   const storedTokens = Number(storedContext?.nextRequestInputTokens);
   const storedWindow = Number(storedContext?.contextWindow);
-  // 0 不是有效占用快照；恢复时忽略，回退本地历史估算，避免一进会话就显示 0%。
-  const authoritativeContext: AuthoritativeContext | null = Number.isFinite(storedTokens) && storedTokens > 0
-    ? {
-      nextRequestInputTokens: Math.floor(storedTokens),
-      contextWindow: Number.isFinite(storedWindow) && storedWindow > 0 ? Math.floor(storedWindow) : null,
-    }
-    : null;
+  // 跨宿主守卫(21 号文档 13.3):source ≠ desktop 的快照不直接采信——TUI 的成分
+  // (轻量 system prompt/工具集)与 Desktop 不同,直接显示会把「TUI 的下一请求」当成
+  // 「Desktop 的下一请求」。置 null 后由 restored 重投影按本宿主成分重算。
+  // 无 source 的历史快照视为本宿主旧数据,继续采信。
+  const storedSource = typeof storedContext?.source === 'string' ? storedContext.source : null;
+  const storedSourceTrusted = storedSource == null || storedSource === 'desktop';
+  // 0 不是有效占用快照；恢复时忽略，回退未知 + restored 重投影，避免一进会话就显示 0%。
+  const authoritativeContext: AuthoritativeContext | null =
+    storedSourceTrusted && Number.isFinite(storedTokens) && storedTokens > 0
+      ? {
+        nextRequestInputTokens: Math.floor(storedTokens),
+        contextWindow: Number.isFinite(storedWindow) && storedWindow > 0 ? Math.floor(storedWindow) : null,
+      }
+      : null;
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0;
   const loaded = conv.messages.map((m: Record<string, unknown>) => {
     const msg: ChatMsg = {
@@ -826,6 +833,41 @@ export function ChatSurface({
   const authoritativeContextWindow = authoritativeContext?.contextWindow ?? undefined;
   // 当前轮进行中(流式/压缩)。草稿是否有内容由输入叶子自行判断。
   const isBusy = isStreaming || isCompactionActive;
+
+  // restored 重投影(21 号文档 13.3):会话就绪但无权威快照(缺失/失效/跨宿主被守卫置 null)时,
+  // 请求 Runtime 按完整成分重算;未知期间圆环保持 unknown,不渲染伪造百分比。
+  // 运行中不触发:投影由 chat:context:projection 稳定阶段事件接管。
+  useEffect(() => {
+    if (loadStatus !== 'ready' || !conversationId || isDraftConversation) return;
+    if (authoritativeContext != null || isBusy) return;
+    if (typeof clientApi.chatContextRestored !== 'function') return;
+    let cancelled = false;
+    void clientApi.chatContextRestored({ conversationId })
+      .then((snap) => {
+        if (cancelled || !snap) return;
+        if (typeof snap.nextRequestInputTokens === 'number'
+          && Number.isFinite(snap.nextRequestInputTokens)
+          && snap.nextRequestInputTokens > 0) {
+          setAuthoritativeContext({
+            nextRequestInputTokens: Math.floor(snap.nextRequestInputTokens),
+            contextWindow: typeof snap.contextWindow === 'number' && snap.contextWindow > 0
+              ? Math.floor(snap.contextWindow)
+              : null,
+          });
+        }
+      })
+      .catch(() => {
+        // 重投影失败保持未知,下一轮 done 仍会带来新快照。
+      });
+    return () => { cancelled = true; };
+  }, [
+    loadStatus,
+    conversationId,
+    isDraftConversation,
+    authoritativeContext == null,
+    isBusy,
+    setAuthoritativeContext,
+  ]);
 
   useEffect(() => {
     setAttachments([]);

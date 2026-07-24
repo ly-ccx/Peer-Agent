@@ -2,6 +2,9 @@ import {
   collectToolEvidenceRefs,
   COMPACTION_SUMMARY_PROMPT,
   COMPACTION_SUMMARY_SYSTEM_PROMPT,
+  decideContextCompaction,
+  isPromptTooLongError,
+  splitMessagesForCompaction,
   type RuntimeToolDefinition,
 } from '@peer-agent/runtime-core';
 import type {
@@ -21,7 +24,13 @@ import type {
   ChatModelPort,
   ChatModelState,
   ChatModelToolCall,
+  MidTurnCompaction,
 } from './chat-controller.ts';
+import {
+  buildHandoffContent,
+  buildStructuralSummary,
+  TUI_COMPACT_KEEP_RECENT,
+} from './context-compact.ts';
 import { computeNextRequestInputTokens } from './context-pressure.ts';
 import { normalizeTuiRuntimeMode, type TuiRuntimeMode } from './tui-mode.ts';
 import {
@@ -208,6 +217,46 @@ async function streamWithSafeRetry(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+/**
+ * turn 内确定性结构化压缩(21 号文档 13.2 安全边界:仅在下一次 provider 请求前)。
+ * 不在 loop 中嵌套 LLM 摘要调用;切分/摘要/handoff 均复用共享实现。
+ * 无可压内容时返回 null,由调用方决定继续/抛错。
+ */
+function compactModelMessagesMidTurn(input: {
+  readonly messages: readonly ModelMessage[];
+  readonly tools: readonly ModelToolDefinition[];
+  readonly reason: MidTurnCompaction['reason'];
+}): { readonly messages: readonly ModelMessage[]; readonly record: MidTurnCompaction } | null {
+  const split = splitMessagesForCompaction(input.messages, {
+    keepRecentCount: TUI_COMPACT_KEEP_RECENT,
+    preserveLatestUserTurn: true,
+  });
+  if (split.oldMessages.length === 0) return null;
+  const beforeTokens = computeNextRequestInputTokens({ messages: input.messages, tools: input.tools });
+  const summary = buildStructuralSummary(split.oldMessages as readonly ModelMessage[]);
+  const handoffContent = buildHandoffContent(summary, split.oldMessages.length);
+  const nextMessages: readonly ModelMessage[] = [
+    ...split.systemMessages,
+    { role: 'user', content: handoffContent },
+    ...split.keepMessages,
+  ];
+  return {
+    messages: nextMessages,
+    record: {
+      reason: input.reason,
+      method: 'structured',
+      beforeCount: input.messages.length,
+      afterCount: nextMessages.length,
+      summarizedCount: split.oldMessages.length,
+      beforeTokens,
+      afterTokens: computeNextRequestInputTokens({ messages: nextMessages, tools: input.tools }),
+      summary,
+      handoffContent,
+      retainedUserCount: split.keepMessages.filter((message) => message.role === 'user').length,
+    },
+  };
+}
+
 export function createProviderChatModel(options: CreateProviderChatModelOptions): ChatModelPort {
   const defaultToolDefinitions = options.toolDefinitions ?? [];
   const toolDefinitionsForMode = (mode: TuiRuntimeMode) =>
@@ -296,9 +345,30 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         contextWindow,
         model,
       });
-      const result = await streamWithSafeRetry((options.getProvider?.() ?? options.provider), {
+
+      // 与 Desktop 同语义的 loop 中途 preflight(21 号文档 13.2):每次 provider 请求前
+      // 按共享阈值判定;越线则先确定性结构化压缩再发送,不盲发超窗请求。
+      let workingMessages = state.modelMessages;
+      const midTurnCompactions: MidTurnCompaction[] = [];
+      const preflight = decideContextCompaction({
+        pressureTokens: computeNextRequestInputTokens({ messages: workingMessages, tools }),
+        contextWindow,
+      });
+      if (preflight.shouldCompact) {
+        const compacted = compactModelMessagesMidTurn({
+          messages: workingMessages,
+          tools,
+          reason: 'preflight',
+        });
+        if (compacted) {
+          workingMessages = compacted.messages;
+          midTurnCompactions.push(compacted.record);
+        }
+      }
+
+      const sendOnce = () => streamWithSafeRetry((options.getProvider?.() ?? options.provider), {
         model,
-        messages: state.modelMessages,
+        messages: workingMessages,
         tools,
         ...(!reasoningEffort || reasoningEffort === 'default' ? {} : { reasoningEffort }),
         signal: context.signal,
@@ -311,6 +381,30 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           }
         },
       });
+
+      let result;
+      try {
+        result = await sendOnce();
+      } catch (error) {
+        // PTL emergency 与 Desktop 同策略(分类同源 runtime-core,同一请求最多重试一次):
+        // 强制结构化压缩后重发;压不动或非 PTL 错误则原样抛出。
+        const text = error instanceof Error ? error.message : String(error);
+        if (context.signal?.aborted || !isPromptTooLongError(null, text)) throw error;
+        const emergency = compactModelMessagesMidTurn({
+          messages: workingMessages,
+          tools,
+          reason: 'emergency',
+        });
+        if (!emergency) throw error;
+        workingMessages = emergency.messages;
+        midTurnCompactions.push(emergency.record);
+        result = await sendOnce();
+      }
+
+      const accumulatedCompactions = [
+        ...(state.midTurnCompactions ?? []),
+        ...midTurnCompactions,
+      ];
 
       if (result.toolCalls.length > 0) {
         const calls: ChatModelToolCall[] = result.toolCalls.map((call) => {
@@ -327,18 +421,21 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           state: {
             ...state,
             modelMessages: [
-              ...state.modelMessages,
+              ...workingMessages,
               { role: 'assistant', content: result.content || null, toolCalls: result.toolCalls },
             ],
             pendingToolCalls: result.toolCalls,
             usage: result.usage,
+            ...(accumulatedCompactions.length > 0
+              ? { midTurnCompactions: accumulatedCompactions }
+              : {}),
           },
           calls,
         };
       }
 
       const completedModelMessages: readonly ModelMessage[] = [
-        ...state.modelMessages,
+        ...workingMessages,
         { role: 'assistant', content: result.content },
       ];
       return {
@@ -348,6 +445,9 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           modelMessages: completedModelMessages,
           usage: result.usage,
           requestProjection: requestProjection(completedModelMessages),
+          ...(accumulatedCompactions.length > 0
+            ? { midTurnCompactions: accumulatedCompactions }
+            : {}),
         },
         output: result.content,
       };

@@ -163,6 +163,26 @@ export interface ChatModelState {
     readonly contextWindow: number | null;
     readonly model: string;
   };
+  /**
+   * turn 内自动压缩记录(21 号文档 13.2 安全边界:provider 请求前 preflight /
+   * PTL emergency)。controller 在 turn 结束后据此更新连续性上下文、发布压缩分隔消息并
+   * 经 persistence 写入共享 `_compaction` marker。
+   */
+  readonly midTurnCompactions?: readonly MidTurnCompaction[];
+}
+
+/** turn 内自动压缩的结构化记录(确定性 structural 摘要,不在 loop 中嵌套 LLM 调用)。 */
+export interface MidTurnCompaction {
+  readonly reason: 'preflight' | 'emergency';
+  readonly method: CompactionMethod;
+  readonly beforeCount: number;
+  readonly afterCount: number;
+  readonly summarizedCount: number;
+  readonly beforeTokens: number;
+  readonly afterTokens: number;
+  readonly summary: string;
+  readonly handoffContent: string;
+  readonly retainedUserCount: number;
 }
 
 export interface ChatModelPort extends RuntimePipelineModelAdapter<
@@ -538,7 +558,9 @@ export function createChatController(options: {
     publishProgress(12);
     await sleep(25);
     const split = splitMessagesForCompaction(conversationModelMessages, {
-      keepRecentCount: TUI_COMPACT_KEEP_RECENT,
+      // 与 Desktop 同语义(23 号治理文档不变式 4):
+      // 手动 /compact = 真·全量压缩(keep 0);自动 = 保留最新真人 user turn + 近期窗口。
+      keepRecentCount: opts.source === 'auto' ? TUI_COMPACT_KEEP_RECENT : 0,
       preserveLatestUserTurn: opts.source === 'auto',
     });
     if (split.oldMessages.length === 0) {
@@ -1035,6 +1057,51 @@ export function createChatController(options: {
         streamedPreviewText = '';
         if (result.state) conversationModelMessages = result.state.modelMessages;
 
+        // turn 内自动压缩收尾(preflight/emergency):连续性 carry-forward、从 provider 历史
+        // 剔除 handoff(TUI 约定:摘要走 system continuity)、发布压缩分隔消息——
+        // persistence 据其 compact meta 写入共享 `_compaction` marker。
+        const midTurnCompactions = result.state?.midTurnCompactions ?? [];
+        let midTurnCompactMessage: ChatMessage | null = null;
+        if (midTurnCompactions.length > 0) {
+          for (const record of midTurnCompactions) {
+            const previous = conversationContinuityContext?.trim();
+            conversationContinuityContext = previous
+              ? [
+                  '## Previous compacted context',
+                  previous,
+                  '',
+                  '## Newly compacted context',
+                  record.summary,
+                ].join('\n')
+              : record.summary;
+          }
+          const handoffContents = new Set(midTurnCompactions.map((record) => record.handoffContent));
+          conversationModelMessages = conversationModelMessages.filter((message) => !(
+            message.role === 'user'
+            && typeof message.content === 'string'
+            && handoffContents.has(message.content)
+          ));
+          const last = midTurnCompactions[midTurnCompactions.length - 1]!;
+          midTurnCompactMessage = {
+            id: `compact-${++sequence}`,
+            role: 'system',
+            content: `Auto-compacted mid-turn ${last.beforeCount} → ${last.afterCount} messages (summarized ${last.summarizedCount})`,
+            compact: {
+              phase: 'done',
+              percent: 100,
+              method: last.method,
+              beforeCount: last.beforeCount,
+              afterCount: last.afterCount,
+              summarizedCount: last.summarizedCount,
+              beforeTokens: last.beforeTokens,
+              afterTokens: last.afterTokens,
+              summary: conversationContinuityContext,
+              handoffContent: last.handoffContent,
+              retainedUserCount: last.retainedUserCount,
+            },
+          };
+        }
+
         if (result.status === 'cancelled') turn.cancel(result.reason);
         else if (result.status === 'exhausted') turn.fail('turn_limit_exhausted');
         else if (result.status === 'failed') turn.fail(result.reason || 'provider_stream_error');
@@ -1064,10 +1131,13 @@ export function createChatController(options: {
           plan: options.planCoordinator?.getSnapshot() ?? undefined,
           usage: result.state?.usage,
           requestProjection: result.state?.requestProjection,
-          messages: finalizePendingMessages(snapshot.messages, {
-            interrupted: failed,
-            error: failureDetail,
-          }),
+          messages: [
+            ...finalizePendingMessages(snapshot.messages, {
+              interrupted: failed,
+              error: failureDetail,
+            }),
+            ...(midTurnCompactMessage ? [midTurnCompactMessage] : []),
+          ],
           error: failureDetail,
         }));
       } catch (error) {
