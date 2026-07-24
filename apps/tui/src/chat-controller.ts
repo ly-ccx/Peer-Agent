@@ -1,6 +1,7 @@
 import type { ModelMessage, ModelToolCall, ModelUsage } from '@peer-agent/runtime-node';
 import {
   formatCompactionMessagesForSummary,
+  microcompactMessagesForContext,
   runCompactionSummaryCascade,
   splitMessagesForCompaction,
   type CompactionMethod,
@@ -486,12 +487,26 @@ export function createChatController(options: {
     return options.host.toolDefinitionsForMode?.(mode) ?? options.host.toolDefinitions;
   };
 
+  // Layer 1 投影缓存:同一 messages 引用只微压缩一次,避免每次 publish 重扫长会话。
+  // 显示/触发分子与实际发送切片(provider-chat-model 同一共享 microcompact)同口径,
+  // 消除「TUI 显示原文量、Desktop 显示投影量」的跨端分叉。
+  let microProjectionCache: {
+    source: readonly ModelMessage[];
+    projected: readonly ModelMessage[];
+  } | null = null;
+  const microProjected = (messages: readonly ModelMessage[]): readonly ModelMessage[] => {
+    if (microProjectionCache?.source === messages) return microProjectionCache.projected;
+    const projected = microcompactMessagesForContext(messages).messages;
+    microProjectionCache = { source: messages, projected };
+    return projected;
+  };
+
   const pressureFor = (
     messages: readonly ModelMessage[],
     usage?: ModelUsage,
     draftText?: string,
   ) => computeContextPressure({
-    messages,
+    messages: microProjected(messages),
     usage,
     contextWindow: resolveContextWindow(),
     draftText,
@@ -923,15 +938,20 @@ export function createChatController(options: {
       conversationContinuityContext = input.continuityContext?.trim() || undefined;
       executionEvidenceIds = [];
       sequence = restoredMessageSequence(messages);
+      // 恢复时不直信持久化快照的分子(可能是旧版全量口径):本地按当前
+      // 发送口径(共享 microcompact 投影)重算,与 Desktop restored 重投影同精神;
+      // 快照的 model/contextWindow 元信息保留。
+      const restoredPressure = pressureFor(conversationModelMessages, input.usage);
+      const restoredProjection = input.requestProjection
+        ? { ...input.requestProjection, nextRequestInputTokens: restoredPressure.nextRequestInputTokens }
+        : undefined;
       publish(withPressure({
         status: 'idle',
         mode: normalizeTuiMode(input.mode),
         messages,
         usage: input.usage,
-        requestProjection: input.requestProjection,
-        ...(input.nextRequestInputTokens === undefined
-          ? {}
-          : { nextRequestInputTokens: input.nextRequestInputTokens }),
+        requestProjection: restoredProjection,
+        nextRequestInputTokens: restoredPressure.nextRequestInputTokens,
       }));
       return true;
     },

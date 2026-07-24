@@ -1554,8 +1554,10 @@ describe('chat controller', () => {
     });
 
     // Seed enough transcript for structural compact to have something to summarize.
-    for (let index = 0; index < 12; index += 1) {
-      await controller.send(`seed-${index} ${'x'.repeat(30_000)}`);
+    // 单条低于共享 microcompact 的 triggerChars(6000),使 Layer 1 投影削不掉它们——
+    // 发送前压力必须按「真实会发送的切片」越过 soft 线才触发 Layer 2。
+    for (let index = 0; index < 72; index += 1) {
+      await controller.send(`seed-${index} ${'x'.repeat(5_000)}`);
     }
     const beforeAuto = controller.getSnapshot().messages.length;
     expect(beforeAuto).toBeGreaterThan(10);
@@ -1572,7 +1574,12 @@ describe('chat controller', () => {
     expect(compactMarkers.length).toBeGreaterThan(0);
     // Structural compact keeps a small recent window; provider history should
     // not keep growing unbounded under repeated high-pressure sends.
-    expect(Math.max(...observedModelMessageCounts)).toBeLessThan(20);
+    // 新口径下(单条 5k 字符、Layer 1 削不掉),首次越线前历史自然长到 ~百余条;
+    // 关键断言是压缩后回落:最后一次 turn 看到的 provider 历史必须远小于峰值。
+    const peak = Math.max(...observedModelMessageCounts);
+    const finalCount = observedModelMessageCounts.at(-1)!;
+    expect(peak).toBeLessThan(160);
+    expect(finalCount).toBeLessThan(Math.max(20, Math.floor(peak / 3)));
   });
 
   test('auto-compact publishes full progress frames and compacting footer status', async () => {

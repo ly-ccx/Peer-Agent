@@ -382,12 +382,14 @@ describe('TUI conversation persistence', () => {
     });
     const controller = createChatController({ host: inertHost(), model: createDemoChatModel() });
     expect(resumeTuiConversation(controller, persistence, restored!)).toBe(true);
-    expect(controller.getSnapshot().requestProjection).toEqual({
-      nextRequestInputTokens: 39_000,
-      contextWindow: 500_000,
-      model: 'model-b',
-    });
-    expect(controller.getSnapshot().nextRequestInputTokens).toBe(39_000);
+    // 恢复时不直信持久化快照的分子(旧版可能是全量口径):分子按当前发送口径
+    // 本地重算(这里的小 fixture 远小于 39k);model/contextWindow 元信息保留。
+    const projection = controller.getSnapshot().requestProjection;
+    expect(projection?.model).toBe('model-b');
+    expect(projection?.contextWindow).toBe(500_000);
+    expect(projection?.nextRequestInputTokens).toBeGreaterThan(0);
+    expect(projection?.nextRequestInputTokens).toBeLessThan(39_000);
+    expect(controller.getSnapshot().nextRequestInputTokens).toBe(projection?.nextRequestInputTokens);
     persistence.syncSnapshot(snapshot({
       mode: 'goal',
       messages: [
