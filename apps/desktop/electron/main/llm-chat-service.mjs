@@ -1242,6 +1242,10 @@ export function createLlmChatService({
       try {
         runtimeSessions.settleStream(streamId, 'completed', reason);
       } catch {}
+      // Handoff waits on released; resolve here so Runner is not blocked if the
+      // original sendMessage finally path is delayed or never reached.
+      record.resolveReleased?.();
+      record.resolveReleased = null;
       retireStream(streamId);
       completedIds.push(streamId);
     }
@@ -1270,6 +1274,9 @@ export function createLlmChatService({
     active.terminalStatus = 'aborted';
     active.interrupted = true;
     active.persist?.({ final: true, interrupted: true });
+    // Ensure handoff / waiters do not hang if sendMessage finally is delayed.
+    active.resolveReleased?.();
+    active.resolveReleased = null;
     retireStream(streamId);
     return { aborted: true };
   }

@@ -26,6 +26,8 @@ export function renderSystemCorePrompt() {
         'If a tool call fails or returns no usable output, say that directly. Do not infer or invent the missing result.',
         'Do not present planned commands or expected output as if they were executed output.',
         'Do not end an assistant turn after saying you will inspect, search, run, read, modify, or verify local state. In the same turn, either emit the tool call or answer without promising tool use.',
+        `Never narrate "writing" / "正在写入" as if a file write is already in progress. Emit a real ${TOOL_NAMES.writeFile} or ${TOOL_NAMES.editFile} tool call first; only after the tool result may you claim the file was written.`,
+        `For large documents, prefer chunked writes: create or replace with a bounded ${TOOL_NAMES.writeFile}, then append/revise with multiple ${TOOL_NAMES.editFile} calls. Avoid one giant write payload that can stall mid-stream before the tool call lands.`,
       ]),
     ].join('\n'),
     [

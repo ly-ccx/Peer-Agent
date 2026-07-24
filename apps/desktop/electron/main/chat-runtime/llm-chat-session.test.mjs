@@ -138,4 +138,95 @@ describe('Desktop chat Runtime session lifecycle', () => {
     assert.equal(events.filter((event) => event.channel === 'chat:stream:aborted').length, 1);
     assert.equal(events.some((event) => event.channel === 'chat:stream:done'), false);
   });
+
+  it('resolves released on force-complete so goal handoff does not hang', async () => {
+    let resolveFetchStarted;
+    const fetchStarted = new Promise((resolve) => { resolveFetchStarted = resolve; });
+    globalThis.fetch = async (_url, init = {}) => {
+      resolveFetchStarted();
+      return new Promise((_resolve, reject) => {
+        const rejectAbort = () => {
+          const error = new Error('Aborted');
+          error.name = 'AbortError';
+          reject(error);
+        };
+        if (init.signal?.aborted) rejectAbort();
+        else init.signal?.addEventListener('abort', rejectAbort, { once: true });
+      });
+    };
+
+    const runtimeSessionAdapter = createDesktopRuntimeSessionAdapter();
+    const service = createLlmChatService({
+      llmConfigStore: createLlmConfigStore(),
+      runtimeSessionAdapter,
+    });
+    const outcomePromise = service.sendMessage({
+      messages: [{ role: 'user', content: 'wait' }],
+      streamId: 'stream-handoff',
+      conversationId: 'conversation-handoff',
+      webContents: createWebContents(),
+    });
+
+    await fetchStarted;
+    const handoff = service.forceCompleteConversationStreams('conversation-handoff', {
+      reason: 'goal_handoff',
+    });
+    assert.equal(handoff.completed >= 1, true);
+    await assert.doesNotReject(
+      () => Promise.race([
+        handoff.released,
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('released hung after force-complete')), 200);
+        }),
+      ]),
+    );
+    await outcomePromise;
+    assert.equal(runtimeSessionAdapter.getSession('conversation-handoff')?.status, 'idle');
+  });
+
+  it('allows a new turn after abort without stale active-turn lock', async () => {
+    let resolveFetchStarted;
+    const fetchStarted = new Promise((resolve) => { resolveFetchStarted = resolve; });
+    globalThis.fetch = async (_url, init = {}) => {
+      resolveFetchStarted();
+      return new Promise((_resolve, reject) => {
+        const rejectAbort = () => {
+          const error = new Error('Aborted');
+          error.name = 'AbortError';
+          reject(error);
+        };
+        if (init.signal?.aborted) rejectAbort();
+        else init.signal?.addEventListener('abort', rejectAbort, { once: true });
+      });
+    };
+
+    const runtimeSessionAdapter = createDesktopRuntimeSessionAdapter();
+    const service = createLlmChatService({
+      llmConfigStore: createLlmConfigStore(),
+      runtimeSessionAdapter,
+    });
+    const firstOutcome = service.sendMessage({
+      messages: [{ role: 'user', content: 'wait' }],
+      streamId: 'stream-abort-1',
+      conversationId: 'conversation-resume',
+      webContents: createWebContents(),
+    });
+    await fetchStarted;
+    service.abort('stream-abort-1');
+    await firstOutcome;
+
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'ok' } }] },
+      '[DONE]',
+    ]), { status: 200 });
+    // If abort left an active turn / unresolved lock, this would throw.
+    const second = await service.sendMessage({
+      messages: [{ role: 'user', content: 'continue' }],
+      streamId: 'stream-abort-2',
+      conversationId: 'conversation-resume',
+      webContents: createWebContents(),
+    });
+    assert.ok(['completed', 'done'].includes(second.terminalStatus), `unexpected terminalStatus: ${second.terminalStatus}`);
+    assert.equal(runtimeSessionAdapter.getSession('conversation-resume')?.status, 'idle');
+  });
 });

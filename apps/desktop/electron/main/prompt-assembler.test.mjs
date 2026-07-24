@@ -72,6 +72,8 @@ describe('System Context assembly', () => {
     assert.equal(context.snapshot.model, 'test-model');
     assert.equal(context.snapshot.sectionRefs.length, 5);
     assert.match(renderSystemContext(context), /Evidence discipline/);
+    assert.match(renderSystemContext(context), /Never narrate "writing" \/ "正在写入"/);
+    assert.match(renderSystemContext(context), /prefer chunked writes/);
     assert.match(renderSystemContext(context), /Current workspace: \/tmp\/workspace/);
     assert.match(renderSystemContext(context), /Provider family: OpenAI-compatible chat/);
   });
