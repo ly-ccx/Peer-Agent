@@ -24,6 +24,7 @@ import {
   createUnavailableChatModel,
 } from './provider-chat-model.ts';
 import { createQoderPrivateProvider } from './qoder-private-provider.ts';
+import { createAnthropicMessagesProvider } from './anthropic-messages-provider.ts';
 import { createTuiHost } from './tui-host.ts';
 import { createTuiProviderFetch } from './provider-transport.ts';
 import { createTuiShutdown } from './tui-shutdown.ts';
@@ -105,6 +106,26 @@ function sharedProvider(credentialId: string) {
           '../../desktop/electron/main/provider-adapters/qoder-local-auth.mjs'
         );
         return loadQoderAccessToken();
+      },
+    });
+  }
+
+  // Anthropic official / Anthropic-compatible channels speak /v1/messages.
+  // Do not silently coerce them to OpenAI-compatible chat/completions.
+  const isAnthropicWire =
+    metadata.providerId === 'anthropic'
+    || metadata.channelId === 'anthropic'
+    || metadata.channelId === 'anthropic-compatible';
+  if (isAnthropicWire) {
+    return createAnthropicMessagesProvider({
+      providerId: credentialId,
+      baseUrl: metadata.baseUrl,
+      async getApiKey() {
+        const selection = modelConfig.resolveSharedSelection?.(credentialId);
+        if (!selection?.apiKey) {
+          throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
+        }
+        return selection.apiKey;
       },
     });
   }

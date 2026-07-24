@@ -63,6 +63,8 @@ export interface SharedModelCredentialStore {
 export interface SharedModelMetadata {
   readonly source: 'desktop-default';
   readonly providerId: string;
+  /** Desktop channel id when present (openai / anthropic / anthropic-compatible / qoder / ...). */
+  readonly channelId?: string;
   readonly credentialId: string;
   readonly displayName: string;
   readonly model: string;
@@ -402,9 +404,11 @@ function metadataFromSelected(
     supportedReasoningEfforts,
     selected.reasoningDefaultEffort,
   );
+  const channelId = selected.channelId?.trim() || undefined;
   return {
     source: 'desktop-default',
     providerId: selected.provider?.trim() || 'openai',
+    ...(channelId ? { channelId } : {}),
     credentialId: credentialIdOf(selected),
     displayName: selected.name?.trim() || selected.model?.trim() || 'Desktop default',
     model: selected.model?.trim() || '',
