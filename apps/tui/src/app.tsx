@@ -155,7 +155,7 @@ import {
 } from './tui-theme.ts';
 
 const COMMAND_NOTICE_DURATION_MS = 3_000;
-const THINKING_SPINNER_INTERVAL_MS = 120;
+const THINKING_SPINNER_INTERVAL_MS = 80;
 
 
 function useStatusAnimationFrame(active: boolean, intervalMs = 280): number {

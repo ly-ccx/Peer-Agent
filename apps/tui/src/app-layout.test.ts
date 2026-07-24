@@ -210,7 +210,7 @@ describe('TUI app layout', () => {
   });
 
   test('keeps the thinking status docked above composer and animates trailing dots quickly', () => {
-    expect(appSource).toContain('const THINKING_SPINNER_INTERVAL_MS = 120;');
+    expect(appSource).toContain('const THINKING_SPINNER_INTERVAL_MS = 80;');
     const labelSource = appSource.slice(
       appSource.indexOf('function ThinkingStatusLabel'),
       appSource.indexOf('function ToolStatusGlyph'),

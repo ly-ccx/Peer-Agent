@@ -100,7 +100,15 @@ export function estimateContextMessagesTokens(messages: readonly MessageLike[] |
           tokens += CONTEXT_PROJECTION_CONFIG.toolCallBlockOverhead;
           tokens += estimateContextTextTokens(part.tool_use_id ?? part.id ?? part.name);
           tokens += estimateJson(part.content ?? part.response);
-        } else if (type === 'image' || type === 'image_url' || type === 'input_image') {
+        } else if (
+          type === 'image'
+          || type === 'image_url'
+          || type === 'input_image'
+          || type === 'document'
+          || type === 'file'
+          || type === 'input_file'
+        ) {
+          // 二进制/媒体块一律 flat 计:绝不能落到 estimateJson 把 base64 当文本展开。
           tokens += CONTEXT_PROJECTION_CONFIG.imageTokens;
         } else {
           tokens += estimateJson(part);

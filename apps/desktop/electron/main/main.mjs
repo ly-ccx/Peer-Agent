@@ -498,6 +498,65 @@ function toRuntimeMessages(messages = []) {
     }));
 }
 
+/**
+ * restored 重投影专用切片:与 renderer 真实发送口径(toApiMessages)同成分。
+ * toRuntimeMessages 是 Goal Runner 的裸文本切片(丢 attachments/segments),拿它做占用
+ * 投影会系统性偏低——这正是「打开 4%、发送后 18%」假跳变的根因。这里补齐:
+ * - assistant segments:工具调用记录近似为历史事实文本(对齐 formatHistoricalLocalRecordForApi 量级);
+ * - user 附件:文本附件计全文,图片转 image_url 分片(共享估算器 flat 计,不展开 base64)。
+ */
+function toProjectionMessages(messages = []) {
+  const list = Array.isArray(messages) ? messages : [];
+  let lastCompactionIndex = -1;
+  for (let i = 0; i < list.length; i += 1) {
+    if (list[i]?._compaction) lastCompactionIndex = i;
+  }
+  const active = lastCompactionIndex >= 0 ? list.slice(lastCompactionIndex + 1) : list;
+  const projected = [];
+  for (const message of active) {
+    if (!message || (message.role !== 'user' && message.role !== 'assistant')) continue;
+    const textParts = [];
+    if (Array.isArray(message.segments) && message.segments.length > 0) {
+      // 与 getApiContent 同构:有 segments 时以 segments 为准(thinking 丢弃、工具段转历史记录)。
+      for (const segment of message.segments) {
+        if (!segment || segment.type === 'thinking') continue;
+        if (segment.type === 'tool-call') {
+          textParts.push([
+            `[tool] ${segment.tool || ''}`,
+            typeof segment.args === 'string' ? segment.args : JSON.stringify(segment.args ?? {}),
+            typeof segment.result === 'string' ? segment.result : '',
+          ].filter(Boolean).join('\n'));
+        } else if (segment.type === 'text' && segment.content) {
+          textParts.push(segment.content);
+        }
+      }
+    } else if (typeof message.content === 'string' && message.content) {
+      textParts.push(message.content);
+    }
+    const imageParts = [];
+    if (Array.isArray(message.attachments)) {
+      for (const attachment of message.attachments) {
+        if (attachment?.kind === 'image') {
+          // 占位 url 即可:共享估算器对 image_url 块 flat 计 imageTokens,不读 url 内容。
+          imageParts.push({ type: 'image_url', image_url: { url: 'attachment://image' } });
+        } else if (attachment?.kind === 'text' && typeof attachment.text === 'string' && attachment.text) {
+          textParts.push(attachment.text);
+        }
+      }
+    }
+    const text = textParts.filter(Boolean).join('\n\n');
+    if (imageParts.length > 0) {
+      const parts = [];
+      if (text) parts.push({ type: 'text', text });
+      parts.push(...imageParts);
+      projected.push({ role: message.role, content: parts });
+    } else {
+      projected.push({ role: message.role, content: text });
+    }
+  }
+  return projected;
+}
+
 function buildGoalRunnerMessage(plan, turnNumber) {
   const planLabel = plan?.title || plan?.goal || plan?.planId || 'goal';
   return `Goal Runner tick ${turnNumber} for goal "${planLabel}" (planId=${plan?.planId || 'unknown'}). Continue from the active GoalPlan state.`;
@@ -2278,7 +2337,7 @@ ipcMain.handle('chat:context:restored', (_event, { conversationId } = {}) => {
   const conv = conversationStore.getConversation(conversationId);
   if (!conv || !conv.messages?.length) return null;
 
-  const activeMessages = toRuntimeMessages(conv.messages);
+  const activeMessages = toProjectionMessages(conv.messages);
   if (activeMessages.length === 0) return null;
   const continuityContext = continuityContextFromMessages(conv.messages);
 
@@ -2296,6 +2355,10 @@ ipcMain.handle('chat:context:restored', (_event, { conversationId } = {}) => {
     mode,
     provider: provider?.provider ?? null,
     model: provider?.model ?? null,
+    // 与真实发送的 buildSystemContext 尽量同成分(goal-plan / mcp-host source 在
+    // goal 模式下占比最大);renderer 侧的 configInstructions/附件元数据为小头,缺失可接受。
+    goalPlanStore,
+    mcpRegistry,
   });
   const systemPrompt = renderSystemContext(systemContext);
   let tools = null;
