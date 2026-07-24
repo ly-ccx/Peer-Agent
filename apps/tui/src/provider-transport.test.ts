@@ -8,6 +8,14 @@ import {
   shouldBypassProxy,
 } from './provider-transport.ts';
 
+function connectionError(message: string, code?: string): Error {
+  const error = new TypeError(message);
+  if (code) {
+    (error as Error & { cause?: { code?: string } }).cause = { code };
+  }
+  return error;
+}
+
 describe('TUI provider transport', () => {
   test('selects standard proxy variables by URL scheme', () => {
     const env = {
@@ -99,6 +107,8 @@ describe('TUI provider transport', () => {
       systemRootCertificates: ['system-ca'],
       macosTrustedCertificates: ['enterprise-ca'],
       fetch: fakeFetch,
+      // Keep this unit test focused on CA/proxy wiring.
+      connectionRecovery: false,
     });
 
     await providerFetch('https://chatgpt.com/backend-api/codex');
@@ -112,6 +122,63 @@ describe('TUI provider transport', () => {
       },
     });
   });
+
+  test('re-reads system proxy on each request when not fixed', async () => {
+    const proxies: Array<string | undefined> = [];
+    let reads = 0;
+    const fakeFetch = Object.assign(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        proxies.push((init as { proxy?: string } | undefined)?.proxy);
+        return new Response(null, { status: 204 });
+      },
+      { preconnect() {} },
+    ) as typeof globalThis.fetch;
+    const providerFetch = createTuiProviderFetch({
+      env: {},
+      systemRootCertificates: [],
+      macosTrustedCertificates: [],
+      fetch: fakeFetch,
+      connectionRecovery: false,
+      readSystemProxy: () => {
+        reads += 1;
+        return reads === 1
+          ? { https: 'http://stale-proxy.example:1' }
+          : { https: 'http://fresh-proxy.example:2' };
+      },
+    });
+
+    await providerFetch('https://api.example.test/one');
+    await providerFetch('https://api.example.test/two');
+
+    expect(reads).toBe(2);
+    expect(proxies).toEqual([
+      'http://stale-proxy.example:1',
+      'http://fresh-proxy.example:2',
+    ]);
+  });
+
+  test('retries a transient connection failure without restarting the CLI process', async () => {
+    let attempts = 0;
+    const fakeFetch = Object.assign(
+      async () => {
+        attempts += 1;
+        if (attempts === 1) throw connectionError('fetch failed', 'ECONNRESET');
+        return new Response(null, { status: 204 });
+      },
+      { preconnect() {} },
+    ) as typeof globalThis.fetch;
+    const providerFetch = createTuiProviderFetch({
+      env: {},
+      systemRootCertificates: [],
+      macosTrustedCertificates: [],
+      systemProxy: {},
+      fetch: fakeFetch,
+    });
+
+    const response = await providerFetch('https://api.example.test/chat');
+    expect(response.status).toBe(204);
+    expect(attempts).toBe(2);
+  });
 });
 
 test('production transport keeps TLS certificate verification enabled', async () => {
@@ -119,4 +186,5 @@ test('production transport keeps TLS certificate verification enabled', async ()
   expect(source).toContain('rejectUnauthorized: true');
   expect(source).not.toContain('rejectUnauthorized: false');
   expect(source).not.toContain('NODE_TLS_REJECT_UNAUTHORIZED');
+  expect(source).toContain('fetchWithConnectionRecovery');
 });
