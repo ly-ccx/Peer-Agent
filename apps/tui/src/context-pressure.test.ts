@@ -117,7 +117,7 @@ describe('context pressure', () => {
   });
 
   test('shared nextRequest budget matches Desktop formula: messages + tools', () => {
-    const messages: ModelMessage[] = [
+    const messages = [
       { role: 'user', content: 'hello' },
       {
         role: 'assistant',
@@ -129,7 +129,7 @@ describe('context pressure', () => {
         role: 'tool',
         content: [{ type: 'tool_result', id: 'call-1', content: 'ok' }],
       },
-    ];
+    ] as unknown as ModelMessage[];
     const tools = [
       {
         name: 'local.bash',

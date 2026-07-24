@@ -78,13 +78,8 @@ import {
   buildPersistedCompactedMessages,
   persistCompactedConversation,
 } from './conversation-compaction-persistence.mjs';
-import { compactIfNeeded, estimateTokensFromMessages } from './context-compactor.mjs';
-import {
-  beginCompaction,
-  endCompaction,
-  updateCompactionProgress,
-  getCompaction,
-} from './chat-runtime/compaction-registry.mjs';
+import { runCompactionCheck } from './chat-runtime/compaction-coordinator.mjs';
+import { getCompaction } from './chat-runtime/compaction-registry.mjs';
 import { resolveProviderCredential, refreshExpiredOAuthProviders } from './provider-credential-resolver.mjs';
 import {
   initAutoUpdater,
@@ -2210,61 +2205,33 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     ...activeMessages.map((m) => ({ role: m.role, content: m.content })),
   ];
 
-  // 登记表与事件 emit 单一来源：先登记会话压缩态再 emit start，
-  // 使切会话查询（chat:compaction:get）能恢复手动 /compact 的横幅。
-  beginCompaction({ conversationId, streamId, manual: true });
-  event.sender.send('chat:compaction', { conversationId, streamId, stage: 'start', manual: true });
-  // 字符级真实进度：压缩器流式收摘要时逐 chunk 回调，转发为 progress 事件。
-  let lastSentPercent = -1;
-  const onProgress = ({ receivedChars, estimatedTotalChars }) => {
-    const total = estimatedTotalChars > 0 ? estimatedTotalChars : 1;
-    const percent = Math.min(99, Math.round((receivedChars / total) * 100));
-    // 节流：百分比无变化时不重复发，减少 IPC 噪声。
-    if (percent === lastSentPercent) return;
-    lastSentPercent = percent;
-    updateCompactionProgress({ conversationId, streamId, percent });
-    event.sender.send('chat:compaction', {
-      conversationId,
-      streamId,
-      stage: 'progress',
-      manual: true,
-      receivedChars,
-      estimatedTotalChars,
-      percent,
-    });
-  };
+  // 登记表/横幅/进度/持久化/完成事件全部收敛到 runCompactionCheck 单入口（manual 语义）：
+  // 手动 /compact = force 全量压缩 + 强制横幅；不再在 handler 内复制平行实现。
+  // 见 knowledge/architecture/23-compaction-path-root-governance.md（单闸门不变式）。
   try {
-    const result = await compactIfNeeded({
+    const outcome = await runCompactionCheck({
       messages: apiMessages,
       systemPrompt,
       contextWindow,
       providerConfig,
-      force: true,
-      continuityContext: priorContinuityContext,
-      onProgress,
-      webContents: event.sender,
-      streamId,
-    });
-
-    if (!result.compacted) {
-      endCompaction({ conversationId, streamId });
-      event.sender.send('chat:compaction', { conversationId, streamId, stage: 'idle', manual: true });
-      return { compacted: false };
-    }
-
-    // 手动压缩不经过会话 runtime projection，当前无法重建当轮工具 schema；
-    // 但共享仓与完成事件仍必须复用同一份压缩后消息投影，避免两端再次分叉。
-    const requestProjection = {
-      nextRequestInputTokens: estimateTokensFromMessages(result.messages),
-      contextWindow: contextWindow > 0 ? contextWindow : null,
-    };
-    persistCompactionToConversation({
+      // 手动路径的持久化需要用过滤后的 activeMessages 作为源切片（剔除 /compact 命令与旧 marker）。
+      persistCompaction: (args) => persistCompactionToConversation({
+        ...args,
+        sourceMessages: activeMessages,
+      }),
       conversationId,
-      compactResult: result,
-      sourceMessages: activeMessages,
-      requestProjection,
+      streamId,
+      webContents: event.sender,
+      force: true,
+      manual: true,
+      // 手动 /compact 保持真·全量压缩语义：不保留最新用户原文。
+      preserveLatestUserTurn: false,
+      continuityContext: priorContinuityContext,
     });
 
+    if (!outcome.compacted) return { compacted: false };
+
+    const result = outcome.compactResult;
     try {
       const baselineContext = buildSystemContext(workspacePath, {
         conversationId,
@@ -2286,22 +2253,10 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
       console.warn('[main] failed to record compact baseline:', error?.message || error);
     }
 
-    // 无论是否有 notification，压缩已结束，先清登记表再 emit done，保证可查询真值收尾。
-    endCompaction({ conversationId, streamId });
-    const notification = result.notification
-      ? {
-          ...result.notification,
-          ...requestProjection,
-        }
-      : undefined;
-    if (notification) {
-      event.sender.send('chat:compaction', { conversationId, streamId, stage: 'done', manual: true, ...notification });
-    }
-
-    return { compacted: true, notification };
+    // done 事件已由 coordinator 统一发出（含 manual 标记与压缩后投影）；这里只回 IPC 结果。
+    return { compacted: true, notification: result.notification };
   } catch (error) {
-    endCompaction({ conversationId, streamId });
-    event.sender.send('chat:compaction', { conversationId, streamId, stage: 'idle', manual: true });
+    // 横幅收尾（idle）已由 coordinator 的 settleBannerIdle 处理，这里只上报错误。
     throw error;
   }
 });

@@ -38,6 +38,43 @@ afterEach(() => {
 });
 
 describe('Desktop chat Runtime session lifecycle', () => {
+  it('persists the authoritative next-request context snapshot on normal completion', async () => {
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'ok' } }] },
+      '[DONE]',
+    ]), { status: 200 });
+
+    const snapshots = [];
+    const conversationStore = {
+      updateContextSnapshot: (conversationId, snapshot) => {
+        snapshots.push({ conversationId, snapshot });
+        return { id: conversationId, contextSnapshot: snapshot };
+      },
+    };
+    const service = createLlmChatService({
+      llmConfigStore: createLlmConfigStore(),
+      conversationStore,
+      runtimeSessionAdapter: createDesktopRuntimeSessionAdapter(),
+    });
+    const events = [];
+
+    const outcome = await service.sendMessage({
+      messages: [{ role: 'user', content: 'hello' }],
+      streamId: 'stream-context-snapshot',
+      conversationId: 'conversation-context-snapshot',
+      webContents: createWebContents(events),
+    });
+
+    assert.equal(outcome.terminalStatus, 'done');
+    assert.equal(snapshots.length, 1);
+    assert.equal(snapshots[0].conversationId, 'conversation-context-snapshot');
+    assert.equal(Number.isFinite(snapshots[0].snapshot.nextRequestInputTokens), true);
+    assert.equal(snapshots[0].snapshot.nextRequestInputTokens > 0, true);
+    const done = events.find((event) => event.channel === 'chat:stream:done');
+    assert.equal(Number.isFinite(done?.payload?.nextRequestInputTokens), true);
+    assert.equal(done.payload.nextRequestInputTokens, snapshots[0].snapshot.nextRequestInputTokens);
+  });
+
   it('resumes the same SDK session across consecutive conversation turns', async () => {
     globalThis.fetch = async () => new Response(sse([
       { choices: [{ delta: { content: 'ok' } }] },
@@ -156,6 +193,7 @@ describe('Desktop chat Runtime session lifecycle', () => {
     };
 
     const runtimeSessionAdapter = createDesktopRuntimeSessionAdapter();
+    const runtimeEvents = [];
     const service = createLlmChatService({
       llmConfigStore: createLlmConfigStore(),
       runtimeSessionAdapter,
@@ -164,14 +202,20 @@ describe('Desktop chat Runtime session lifecycle', () => {
       messages: [{ role: 'user', content: 'wait' }],
       streamId: 'stream-handoff',
       conversationId: 'conversation-handoff',
-      webContents: createWebContents(),
+      webContents: createWebContents(runtimeEvents),
     });
 
     await fetchStarted;
     const handoff = service.forceCompleteConversationStreams('conversation-handoff', {
       reason: 'goal_handoff',
+      graceMs: 20,
     });
     assert.equal(handoff.completed >= 1, true);
+    assert.equal(
+      runtimeEvents.some((event) => event.channel === 'chat:stream:done'),
+      false,
+      'handoff must not steal the normal agent-loop done before the grace window',
+    );
     await assert.doesNotReject(
       () => Promise.race([
         handoff.released,
@@ -179,6 +223,11 @@ describe('Desktop chat Runtime session lifecycle', () => {
           setTimeout(() => reject(new Error('released hung after force-complete')), 200);
         }),
       ]),
+    );
+    assert.equal(
+      runtimeEvents.some((event) => event.channel === 'chat:stream:done'),
+      true,
+      'timeout fallback must still unlock the renderer',
     );
     await outcomePromise;
     assert.equal(runtimeSessionAdapter.getSession('conversation-handoff')?.status, 'idle');

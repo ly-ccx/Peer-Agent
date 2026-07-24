@@ -9,6 +9,7 @@ import {
   createOpenAICompatibleProvider,
   refreshChatGptOAuthTokens,
   resolveOpenAICompatibleProviderConfig,
+  type ModelProviderRequest,
 } from '@peer-agent/runtime-node';
 
 import { App } from './app.tsx';
@@ -62,7 +63,7 @@ function sharedProvider(credentialId: string) {
   if (!metadata) throw new Error(`Provider credential not found: ${credentialId}`);
 
   return {
-    async stream(request: Parameters<NonNullable<typeof host.chatModel>['stream']>[0]) {
+    async stream(request: ModelProviderRequest) {
       const selection = modelConfig.resolveSharedSelection?.(credentialId);
       if (!selection) {
         throw new Error('Desktop credential is locked. Allow Keychain access and retry.');

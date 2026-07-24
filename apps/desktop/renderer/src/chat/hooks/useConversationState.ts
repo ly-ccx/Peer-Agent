@@ -72,6 +72,23 @@ export function useConversationDraft(conversationId: string | null): string {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+/** 只让占用圆环叶子响应高频流式预览增量，避免 delta 唤醒整个消息表面。 */
+export function useConversationStreamPreviewTokens(conversationId: string | null): number {
+  const subscribe = useCallback(
+    (listener: () => void) => conversationStore.subscribeSelector(
+      conversationId,
+      snapshot => snapshot.streamPreviewTokens,
+      listener,
+    ),
+    [conversationId],
+  );
+  const getSnapshot = useCallback(
+    () => conversationStore.getSnapshot(conversationId).streamPreviewTokens,
+    [conversationId],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
 /** 只让活动消息里的进度提示响应高频工具参数进度。 */
 export function useConversationToolProgress(
   conversationId: string | null,

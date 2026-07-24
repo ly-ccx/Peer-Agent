@@ -8,9 +8,11 @@ import {
   buildCompactionProviderConfig,
   buildPromptTooLongRecoveryError,
   computeContextInfo,
-  isPromptTooLongResponse,
-  runCompactionCheck,
 } from './compaction-coordinator.mjs';
+import {
+  coordinateDesktopProviderRequest,
+  recoverFromPromptTooLong,
+} from './provider-request-coordinator.mjs';
 import { sanitizeApiMessages } from './message-sanitizer.mjs';
 import * as responseGuard from './response-guard.mjs';
 import {
@@ -57,6 +59,7 @@ export async function agentLoopGemini({
   const loop = createAgentLoopKernel({
     webContents,
     streamId,
+    conversationId,
     onRound: agentProgress?.onRound,
     // ADR 52：右下角 / done 快照必须投影「下一请求」输入量。
     // 用当前 Runtime apiMessages（含本轮最终 assistant / tool result + system），
@@ -68,6 +71,8 @@ export async function agentLoopGemini({
       tools,
       usageSnapshot,
     }),
+    // per-turn 投影生命周期的稳定输入：tool_result / turn_complete 边界取当前 Runtime 会话。
+    getProjectionInput: () => ({ messages: apiMessages, tools, contextWindow }),
   });
   const providerConfig = buildCompactionProviderConfig({
     provider: 'gemini',
@@ -93,7 +98,7 @@ export async function agentLoopGemini({
     model: {
       initialize: () => ({ provider: 'gemini' }),
       runTurn: async (state) => {
-        const compaction = await runCompactionCheck({
+        const compaction = await coordinateDesktopProviderRequest({
           messages: apiMessages,
           systemPrompt: effectiveSystemPrompt,
           contextWindow,
@@ -109,6 +114,7 @@ export async function agentLoopGemini({
           // usageSnapshot 仅诊断/校准；soft 触发以当前下一请求投影为准。
           usageSnapshot: loop.getLastTurnUsage?.() ?? null,
           rebuildSystemPrompt,
+          contextLifecycle: loop.contextLifecycle,
         });
         if (compaction.compacted || compaction.microcompacted) {
           apiMessages = compaction.messages;
@@ -144,9 +150,12 @@ export async function agentLoopGemini({
 
         if (!providerResponse.ok) {
           const text = providerResponse.errorText || '';
-          const promptTooLong = isPromptTooLongResponse(providerResponse.status, text);
-          if (promptTooLong && !promptTooLongRetryUsed) {
-            const emergencyCompaction = await runCompactionCheck({
+          // PTL 分类与 emergency 重试策略收敛到共享 helper（同一请求最多重试一次）。
+          const recovery = await recoverFromPromptTooLong({
+            status: providerResponse.status,
+            errorText: text,
+            retryUsed: promptTooLongRetryUsed,
+            request: {
               messages: apiMessages,
               systemPrompt: effectiveSystemPrompt,
               contextWindow,
@@ -156,23 +165,20 @@ export async function agentLoopGemini({
               conversationId,
               streamId,
               webContents,
-              emergency: true,
-              force: true,
               continuityContext,
               tools,
               preserveLatestUserTurn: true,
               rebuildSystemPrompt,
-        });
-            if (emergencyCompaction.compacted) {
-              apiMessages = emergencyCompaction.messages;
-              if (typeof emergencyCompaction.systemPrompt === 'string' && emergencyCompaction.systemPrompt.trim()) {
-                effectiveSystemPrompt = emergencyCompaction.systemPrompt;
-              }
-              promptTooLongRetryUsed = true;
-              return { kind: 'continue', state };
-            }
+              contextLifecycle: loop.contextLifecycle,
+            },
+          });
+          if (recovery.retried) {
+            apiMessages = recovery.messages;
+            if (recovery.systemPrompt) effectiveSystemPrompt = recovery.systemPrompt;
+            promptTooLongRetryUsed = true;
+            return { kind: 'continue', state };
           }
-          if (promptTooLong) {
+          if (recovery.promptTooLong) {
             loop.sendError(buildPromptTooLongRecoveryError({
               text,
               providerTracePath: providerResponse.providerTracePath,
@@ -246,6 +252,8 @@ export async function agentLoopGemini({
           content: JSON.stringify(functionResponses),
           geminiContent: { role: 'user', parts: functionResponses },
         });
+        // 稳定边界：tool result 已写入 Runtime 会话，发布 tool_result 投影替换流式预览。
+        loop.publishToolResultProjection();
         return state;
       },
       onStopped: () => loop.sendDone(),
@@ -270,11 +278,9 @@ export async function agentLoopGemini({
           goalPlanStore,
         });
         if (toolExecution.aborted) throw createDesktopAbortError();
-        // goal_create_plan / request_user_input 等 terminal 工具：立即 sendDone，
-        // 不依赖后续 pipeline onStopped 时序，避免 UI 卡在「正在思考」。
-        if (toolExecution.controlSignal?.terminal) {
-          try { loop.sendDone(); } catch {}
-        }
+        // terminal 工具（goal_create_plan / request_user_input 等）不得在这里 sendDone：
+        // 必须先走 applyToolResults 写入 tool result，再由 pipeline onStopped 统一收尾，
+        // 否则 done 快照会丢掉本轮 tool result，右下角占用会卡在发送前 seed。
         return {
           call,
           result: toolExecution,

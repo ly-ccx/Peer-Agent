@@ -3,8 +3,16 @@ import {
   createAgentLoopKernel,
   handleTerminalTextResponse,
 } from './agent-loop-kernel.mjs';
-import { computeContextInfo } from './compaction-coordinator.mjs';
+import {
+  buildCompactionProviderConfig,
+  buildPromptTooLongRecoveryError,
+  computeContextInfo,
+} from './compaction-coordinator.mjs';
 import { sanitizeApiMessages } from './message-sanitizer.mjs';
+import {
+  coordinateDesktopProviderRequest,
+  recoverFromPromptTooLong,
+} from './provider-request-coordinator.mjs';
 import * as responseGuard from './response-guard.mjs';
 import {
   createDesktopAbortError,
@@ -58,23 +66,38 @@ export async function agentLoopQoder({
   agentProgress = null,
   maxOutputTokens = 0,
   resolvedChannel = null,
+  persistCompaction = null,
+  continuityContext = [],
+  rebuildSystemPrompt = null,
   sendStream = sendQoderPrivateStream,
   emitRuntimeEvent = null,
   runtimeEventState = undefined,
   providerId = null,
   runtimeMode = 'chat',
 }) {
-  const apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
+  let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
+  const providerConfig = buildCompactionProviderConfig({
+    provider: 'qoder',
+    baseUrl,
+    apiKey,
+    model,
+    maxOutputTokens,
+    resolvedChannel,
+  });
   const loop = createAgentLoopKernel({
     webContents,
     streamId,
+    conversationId,
     onRound: agentProgress?.onRound,
     getContextInfo: () => computeContextInfo({
       messages: apiMessages,
       contextWindow,
       tools,
     }),
+    // per-turn 投影生命周期的稳定输入：tool_result / turn_complete 边界取当前 Runtime 会话。
+    getProjectionInput: () => ({ messages: apiMessages, tools, contextWindow }),
   });
+  let promptTooLongRetryUsed = false;
 
   await runDesktopRuntimePipeline({
     sessionId: conversationId || streamId,
@@ -90,6 +113,25 @@ export async function agentLoopQoder({
     model: {
       initialize: () => ({ provider: 'qoder-private' }),
       runTurn: async (state) => {
+        const coordinated = await coordinateDesktopProviderRequest({
+          messages: apiMessages,
+          systemPrompt,
+          contextWindow,
+          providerConfig,
+          signal,
+          persistCompaction,
+          conversationId,
+          streamId,
+          webContents,
+          continuityContext,
+          tools,
+          preserveLatestUserTurn: true,
+          usageSnapshot: loop.getLastTurnUsage?.() ?? null,
+          rebuildSystemPrompt,
+          contextLifecycle: loop.contextLifecycle,
+        });
+        apiMessages = coordinated.messages;
+        if (coordinated.compacted) loop.clearLastTurnUsage?.();
         const providerResponse = await sendStream({
           baseUrl,
           apiKey,
@@ -111,13 +153,48 @@ export async function agentLoopQoder({
         if (signal?.aborted) throw makeAbortError();
         loop.addUsage(providerResponse.streamUsage);
         if (!providerResponse.ok) {
-          if (providerResponse.providerError) {
-            loop.sendError(`${providerResponse.errorText || 'qoder_private_error'}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
+          const errorText = providerResponse.errorText || '';
+          // PTL 分类与 emergency 重试策略与其他 loop 同源(同一请求最多重试一次)。
+          const recovery = await recoverFromPromptTooLong({
+            status: providerResponse.status,
+            errorText,
+            retryUsed: promptTooLongRetryUsed,
+            request: {
+              messages: apiMessages,
+              systemPrompt,
+              contextWindow,
+              providerConfig,
+              signal,
+              persistCompaction,
+              conversationId,
+              streamId,
+              webContents,
+              continuityContext,
+              tools,
+              preserveLatestUserTurn: true,
+              rebuildSystemPrompt,
+              contextLifecycle: loop.contextLifecycle,
+            },
+          });
+          if (recovery.retried) {
+            apiMessages = recovery.messages;
+            promptTooLongRetryUsed = true;
+            return { kind: 'continue', state };
+          }
+          if (recovery.promptTooLong) {
+            loop.sendError(buildPromptTooLongRecoveryError({
+              text: errorText,
+              providerTracePath: providerResponse.providerTracePath,
+              retryUsed: promptTooLongRetryUsed,
+            }));
+          } else if (providerResponse.providerError) {
+            loop.sendError(`${errorText || 'qoder_private_error'}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
           } else {
-            loop.sendHttpError(providerResponse.status, providerResponse.errorText || 'qoder_private_error');
+            loop.sendHttpError(providerResponse.status, errorText || 'qoder_private_error');
           }
           return { kind: 'completed', state, reason: 'provider_error' };
         }
+        promptTooLongRetryUsed = false;
 
         const content = providerResponse.content || '';
         const thinkingContent = providerResponse.thinkingContent || '';
@@ -176,6 +253,8 @@ export async function agentLoopQoder({
             content: toolExecution.output,
           });
         }
+        // 稳定边界：tool result 已写入 Runtime 会话，发布 tool_result 投影替换流式预览。
+        loop.publishToolResultProjection();
         return state;
       },
       onStopped: () => loop.sendDone(),
@@ -200,11 +279,9 @@ export async function agentLoopQoder({
           goalPlanStore,
         });
         if (toolExecution.aborted) throw createDesktopAbortError();
-        // goal_create_plan / request_user_input 等 terminal 工具：立即 sendDone，
-        // 不依赖后续 pipeline onStopped 时序，避免 UI 卡在「正在思考」。
-        if (toolExecution.controlSignal?.terminal) {
-          try { loop.sendDone(); } catch {}
-        }
+        // terminal 工具（goal_create_plan / request_user_input 等）不得在这里 sendDone：
+        // 必须先走 applyToolResults 写入 tool result，再由 pipeline onStopped 统一收尾，
+        // 否则 done 快照会丢掉本轮 tool result，右下角占用会卡在发送前 seed。
         return {
           call,
           result: toolExecution,

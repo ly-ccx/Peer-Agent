@@ -7,6 +7,11 @@
  * still terminate the turn; the next user message can start a fresh request.
  */
 
+export type FetchLike = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>;
+
 const CONNECTION_FAILURE_PATTERNS = [
   /fetch failed/i,
   /SELF_SIGNED_CERT/i,
@@ -34,7 +39,7 @@ export const DEFAULT_CONNECTION_RETRY_JITTER_RATIO = 0.5;
 export const DEFAULT_CONNECT_TIMEOUT_MS = 20_000;
 
 export interface RecoveringFetchOptions {
-  readonly fetchImpl?: typeof globalThis.fetch;
+  readonly fetchImpl?: FetchLike;
   readonly retryDelaysMs?: readonly number[];
   readonly retryJitterRatio?: number;
   readonly randomImpl?: () => number;
@@ -127,7 +132,7 @@ function applyJitter(delayMs: number, ratio: number, randomImpl: () => number): 
 }
 
 async function callWithConnectTimeout(
-  fetchImpl: typeof globalThis.fetch,
+  fetchImpl: FetchLike,
   input: RequestInfo | URL,
   init: RequestInit | undefined,
   connectTimeoutMs: number,
@@ -210,7 +215,7 @@ export async function fetchWithConnectionRecovery(
         reason: describeConnectionFailure(error),
       });
       if (delayMs > 0) {
-        await waitImpl(delayMs, init?.signal);
+        await waitImpl(delayMs, init?.signal ?? undefined);
       }
     }
   }

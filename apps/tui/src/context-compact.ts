@@ -3,20 +3,10 @@ import type { ModelMessage, ModelToolCall } from '@peer-agent/runtime-node';
 /** Keep the most recent non-system messages after structural compaction. */
 export const TUI_COMPACT_KEEP_RECENT = 8;
 
-export interface StructuralCompactResult {
-  readonly compacted: boolean;
-  readonly messages: readonly ModelMessage[];
-  readonly beforeCount: number;
-  readonly afterCount: number;
-  readonly summarizedCount: number;
-  /** Cumulative continuity summary injected through System Context after compaction. */
-  readonly summary?: string;
-  /** User-facing handoff content persisted as the shared `_compaction` marker. */
-  readonly handoffContent?: string;
-  /** Number of complete user turns retained after the shared boundary. */
-  readonly retainedUserCount?: number;
-  readonly reason?: 'empty' | 'nothing-to-compact';
-}
+// 历史上这里还有一套私有切分 compactModelMessagesStructurally；
+// 切分已统一到 runtime-core splitMessagesForCompaction（chat-controller 直接消费），
+// 本模块只保留 TUI 结构化摘要与 handoff 文本生成，避免第二套切分算法回潮。
+// 见 knowledge/architecture/23-compaction-path-root-governance.md。
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -101,7 +91,7 @@ export function buildStructuralSummary(oldMessages: readonly ModelMessage[]): st
   return parts.join('\n').trim();
 }
 
-function buildHandoffContent(summary: string, oldCount: number): string {
+export function buildHandoffContent(summary: string, oldCount: number): string {
   return [
     `[Context handoff — compacted ${oldCount} messages]`,
     '',
@@ -112,97 +102,3 @@ function buildHandoffContent(summary: string, oldCount: number): string {
   ].join('\n');
 }
 
-/**
- * Structurally compact model messages for TUI provider history.
- * Keeps the most recent non-system messages and replaces older ones with one handoff user message.
- */
-export function compactModelMessagesStructurally(
-  messages: readonly ModelMessage[],
-  options: {
-    readonly keepRecentCount?: number;
-    readonly previousContinuity?: string;
-  } = {},
-): StructuralCompactResult {
-  const keepRecentCount = options.keepRecentCount ?? TUI_COMPACT_KEEP_RECENT;
-  const beforeCount = messages.length;
-  if (beforeCount === 0) {
-    return {
-      compacted: false,
-      messages,
-      beforeCount,
-      afterCount: 0,
-      summarizedCount: 0,
-      reason: 'empty',
-    };
-  }
-
-  // Preserve any leading system messages outside the compact window.
-  let systemPrefixCount = 0;
-  while (systemPrefixCount < messages.length && messages[systemPrefixCount]?.role === 'system') {
-    systemPrefixCount += 1;
-  }
-
-  const nonSystem = messages.slice(systemPrefixCount);
-  if (nonSystem.length <= keepRecentCount) {
-    return {
-      compacted: false,
-      messages,
-      beforeCount,
-      afterCount: beforeCount,
-      summarizedCount: 0,
-      reason: 'nothing-to-compact',
-    };
-  }
-
-  let splitAt = nonSystem.length - keepRecentCount;
-  // The shared boundary must start at a complete user turn. This also keeps any
-  // assistant/tool group that belongs to that user together in the retained suffix.
-  while (splitAt > 0 && nonSystem[splitAt]?.role !== 'user') {
-    splitAt -= 1;
-  }
-  const oldMessages = nonSystem.slice(0, splitAt);
-  const keepMessages = nonSystem.slice(splitAt);
-  if (oldMessages.length === 0) {
-    return {
-      compacted: false,
-      messages,
-      beforeCount,
-      afterCount: beforeCount,
-      summarizedCount: 0,
-      reason: 'nothing-to-compact',
-    };
-  }
-  const structuralSummary = buildStructuralSummary(oldMessages);
-  const previousContinuity = options.previousContinuity?.trim();
-  const summary = previousContinuity
-    ? [
-        '## Previous compacted context',
-        previousContinuity,
-        '',
-        '## Newly compacted context',
-        structuralSummary,
-      ].join('\n')
-    : structuralSummary;
-  const handoffContent = buildHandoffContent(summary, oldMessages.length);
-  const handoff: ModelMessage = {
-    role: 'user',
-    content: handoffContent,
-  };
-
-  const nextMessages: ModelMessage[] = [
-    ...messages.slice(0, systemPrefixCount),
-    handoff,
-    ...keepMessages,
-  ];
-
-  return {
-    compacted: true,
-    messages: nextMessages,
-    beforeCount,
-    afterCount: nextMessages.length,
-    summarizedCount: oldMessages.length,
-    summary,
-    handoffContent,
-    retainedUserCount: keepMessages.filter((message) => message.role === 'user').length,
-  };
-}

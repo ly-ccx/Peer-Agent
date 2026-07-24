@@ -8,7 +8,6 @@ import {
   computeContextBudget,
   computeContextInfo,
   contextTokensFromUsageSnapshot,
-  CONTEXT_BUDGET_GUARD,
   isPromptTooLongResponse,
   rehydrateSystemPromptAfterCompaction,
   runCompactionCheck,
@@ -106,7 +105,7 @@ describe('chat compaction coordinator', () => {
       },
     ];
     const totalTokens = estimateTokensFromMessages(messages) + estimateToolsTokens(tools);
-    const hardWindow = Math.floor(totalTokens / CONTEXT_BUDGET_GUARD.hardRatio) - 1;
+    const hardWindow = Math.floor(totalTokens / COMPACTION_CONFIG.hardRatio) - 1;
     const budget = computeContextBudget({ messages, tools, contextWindow: hardWindow });
 
     assert.equal(budget.contextTokens, totalTokens);
@@ -754,7 +753,7 @@ describe('P0 summary reserve + post-compact rehydration', () => {
     );
     assert.equal(
       budget.hardLimit,
-      Math.floor(contextWindow * Math.max(COMPACTION_CONFIG.triggerRatio, CONTEXT_BUDGET_GUARD.hardRatio)),
+      Math.floor(contextWindow * Math.max(COMPACTION_CONFIG.triggerRatio, COMPACTION_CONFIG.hardRatio)),
     );
     // 摘要预留体现在 effectiveContextWindow，并在剩余不足时通过 overSummaryHeadroom 提前触发。
     assert.ok(budget.effectiveContextWindow < contextWindow);

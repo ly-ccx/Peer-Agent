@@ -8,65 +8,51 @@ import {
 } from './contextOccupancy.ts';
 
 describe('unified next-request context projection', () => {
-  it('adds draft to the authoritative next-request projection', () => {
+  it('adds draft preview to the authoritative Runtime projection', () => {
     assert.equal(resolveContextOccupancyTokens({
       authoritativeNextRequestInputTokens: 40_000,
-      historyContextTokens: 10_000,
       draftContextTokens: 2_000,
     }), 42_000);
   });
 
-  it('keeps an existing conversation unknown until messages and its Runtime snapshot finish restoring', () => {
+  it('keeps context unknown until the Runtime projection is restored', () => {
     assert.equal(resolveContextOccupancyTokens({
       authoritativeNextRequestInputTokens: null,
-      historyContextTokens: 0,
-      draftContextTokens: 0,
+      draftContextTokens: 2_000,
       contextReady: false,
+    }), null);
+    assert.equal(resolveContextOccupancyTokens({
+      authoritativeNextRequestInputTokens: null,
+      draftContextTokens: 2_000,
+      contextReady: true,
     }), null);
   });
 
-  it('falls back to restored local history when no Runtime projection exists', () => {
-    assert.equal(resolveContextOccupancyTokens({
-      authoritativeNextRequestInputTokens: null,
-      historyContextTokens: 10_000,
-      draftContextTokens: 2_000,
-      contextReady: true,
-    }), 12_000);
-  });
-
-  it('ignores authoritative zero so history is not wiped after send', () => {
+  it('never turns an invalid zero projection into local history truth', () => {
     assert.equal(resolveContextOccupancyTokens({
       authoritativeNextRequestInputTokens: 0,
-      historyContextTokens: 50_000,
-      draftContextTokens: 0,
+      draftContextTokens: 2_000,
       contextReady: true,
-    }), 50_000);
+    }), null);
   });
 
   it('seeds the sent draft so clearing the composer does not lower the ring', () => {
-    const seeded = seedAuthoritativeContextOnSend({
+    assert.deepEqual(seedAuthoritativeContextOnSend({
       previousNextRequestInputTokens: 40_000,
-      historyContextTokens: 10_000,
       draftContextTokens: 2_000,
       contextWindow: 128_000,
-    });
-    assert.deepEqual(seeded, {
+    }), {
       nextRequestInputTokens: 42_000,
       contextWindow: 128_000,
     });
   });
 
-  it('seeds from history+draft when previous authority is missing or zero', () => {
-    const seeded = seedAuthoritativeContextOnSend({
+  it('does not invent a seed when Runtime authority is missing', () => {
+    assert.equal(seedAuthoritativeContextOnSend({
       previousNextRequestInputTokens: 0,
-      historyContextTokens: 20_000,
       draftContextTokens: 1_000,
       contextWindow: 128_000,
-    });
-    assert.deepEqual(seeded, {
-      nextRequestInputTokens: 21_000,
-      contextWindow: 128_000,
-    });
+    }), null);
   });
 
   it('never substitutes lifetime billing usage for context occupancy', () => {

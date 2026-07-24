@@ -81,12 +81,10 @@ function shouldShowCompactionStart(messages, budget) {
   return estimateTokensFromMessages(messages) > budget.contextWindow * budget.triggerRatio;
 }
 
-// 发送前预算守卫（方案 A 最小闭环）：soft 线沿用既有自动压缩触发线，hard 线
-// 是 provider 请求前的硬拦截线。方案 C 的完整 Context Budget Manager 会把这里抽象为
-// 跨 provider 的预算规划器；本轮只在 coordinator 内集中计算，避免扩大 adapter 改动面。
-export const CONTEXT_BUDGET_GUARD = Object.freeze({
-  hardRatio: 0.95,
-});
+// hard 线不再在 coordinator 另设常量:runtime-core CONTEXT_PROJECTION_CONFIG.hardRatio
+// 是唯一真值(经 COMPACTION_CONFIG 透传),保证 Desktop 预算拦截与 TUI/共享投影的
+// pressure 分级同一条 hard 线。历史上这里曾有独立 CONTEXT_BUDGET_GUARD(0.95),
+// 与 runtime-core(0.92)分叉,已收敛删除。
 
 export function computeContextBudget({
   messages,
@@ -107,7 +105,7 @@ export function computeContextBudget({
   const contextTokens = estimatedTokens;
   const normalizedWindow = Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null;
   const triggerRatio = COMPACTION_CONFIG.triggerRatio;
-  const hardRatio = Math.max(triggerRatio, CONTEXT_BUDGET_GUARD.hardRatio);
+  const hardRatio = Math.max(triggerRatio, COMPACTION_CONFIG.hardRatio);
 
   // 摘要输出 + 安全区预留：不改写公开 soft/hard 触发线（仍按 window*ratio），
   // 但暴露 reserved/effective 字段，并在「剩余窗口已不够摘要」时提前触发压缩。
@@ -286,6 +284,7 @@ async function persistAndNotifyCompaction({
   streamId,
   webContents,
   emergency = false,
+  manual = false,
   contextWindow = null,
   tools = null,
 }) {
@@ -316,6 +315,7 @@ async function persistAndNotifyCompaction({
     streamId,
     stage: 'done',
     emergency,
+    ...(manual ? { manual: true } : {}),
     ...compactResult.notification,
     nextRequestInputTokens: compactedBudget.contextTokens,
     contextWindow: compactedBudget.contextWindow,
@@ -334,6 +334,9 @@ export async function runCompactionCheck({
   webContents,
   emergency = false,
   force = false,
+  // 手动 /compact：强制展示横幅并在全部横幅事件上标记 manual，
+  // 使手动路径与自动/紧急路径共用同一入口而不丢 UI 语义。
+  manual = false,
   continuityContext = [],
   tools = null,
   preserveLatestUserTurn = false,
@@ -379,15 +382,21 @@ export async function runCompactionCheck({
     return { compacted: false, messages };
   }
 
-  const showStart = emergency || shouldShowCompactionStart(messages, budget);
+  const showStart = manual || emergency || shouldShowCompactionStart(messages, budget);
   // 字符级真实进度：仅在展示横幅时构造回调，压缩器流式收摘要时逐 chunk 回调，
-  // 转发为 progress 事件。载荷与节流策略与手动 /compact 路径（main.mjs）保持一致。
+  // 转发为 progress 事件。手动与自动路径同源，载荷与节流策略一致。
   let onProgress;
   if (showStart) {
     // 登记表与事件 emit 单一来源：先登记会话压缩态再 emit start，
     // 使切会话查询（chat:compaction:get）与横幅事件流一致。
-    beginCompaction({ conversationId, streamId, manual: false });
-    webContents.send('chat:compaction', { conversationId, streamId, stage: 'start', emergency });
+    beginCompaction({ conversationId, streamId, manual });
+    webContents.send('chat:compaction', {
+      conversationId,
+      streamId,
+      stage: 'start',
+      emergency,
+      ...(manual ? { manual: true } : {}),
+    });
     let lastSentPercent = -1;
     onProgress = ({ receivedChars, estimatedTotalChars }) => {
       const total = estimatedTotalChars > 0 ? estimatedTotalChars : 1;
@@ -401,6 +410,7 @@ export async function runCompactionCheck({
         streamId,
         stage: 'progress',
         emergency,
+        ...(manual ? { manual: true } : {}),
         receivedChars,
         estimatedTotalChars,
         percent,
@@ -415,7 +425,13 @@ export async function runCompactionCheck({
     if (settledBanner) return;
     settledBanner = true;
     endCompaction({ conversationId, streamId });
-    webContents.send('chat:compaction', { conversationId, streamId, stage: 'idle', emergency });
+    webContents.send('chat:compaction', {
+      conversationId,
+      streamId,
+      stage: 'idle',
+      emergency,
+      ...(manual ? { manual: true } : {}),
+    });
   };
 
   try {
@@ -430,6 +446,8 @@ export async function runCompactionCheck({
       onProgress,
       webContents,
       streamId,
+      // circuit breaker 按会话隔离(23 号治理文档不变式 6)。
+      conversationId,
       tools,
       preserveLatestUserTurn,
       // ADR 52：不把 usage 高水位传给 Layer2 触发；触发只看投影预算。
@@ -444,6 +462,7 @@ export async function runCompactionCheck({
         streamId,
         webContents,
         emergency,
+        manual,
         contextWindow,
         tools,
       });

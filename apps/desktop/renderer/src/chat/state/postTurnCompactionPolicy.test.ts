@@ -33,21 +33,26 @@ describe('post-turn compaction policy', () => {
     assert.match(surfaceSource, /submitMessage = useCallback[\s\S]*loadStatus !== 'ready'/);
   });
 
-  it('splits ring occupancy and compaction pressure into dual fields', () => {
+  it('keeps ring occupancy on the authoritative Runtime projection', () => {
     assert.match(
       routerSource,
-      /nextContextTokens/,
-      'stream/compaction events must project actual sent context into the ring numerator',
+      /nextRequestInputTokens/,
+      'stream and compaction events must consume the Runtime next-request projection',
     );
     assert.match(
       routerSource,
-      /nextTriggerTokens/,
-      'stream/compaction events must keep triggerTokens for compaction pressure',
+      /mergeAuthoritativeContextSnapshot/,
+      'Runtime projections must merge through the authoritative snapshot reducer',
+    );
+    assert.doesNotMatch(
+      routerSource,
+      /\bnextContextTokens\b|\bnextTriggerTokens\b/,
+      'Renderer must not rebuild separate occupancy or compaction-pressure truths',
     );
     assert.match(
       routerSource,
       /microcompacted\s*===\s*true\s*\?\s*'final'\s*:\s*'midturn'/,
-      'a confirmed Layer 1 result must be allowed to lower the dual-field snapshot',
+      'a confirmed Layer 1 result must be allowed to lower the authoritative snapshot',
     );
     assert.match(
       displaySource,

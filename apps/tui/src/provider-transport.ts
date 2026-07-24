@@ -172,9 +172,10 @@ export function createTuiProviderFetch(
     });
   };
 
-  return Object.assign(providerFetch, {
-    preconnect: typeof underlyingFetch.preconnect === 'function'
+  const preconnect: typeof globalThis.fetch.preconnect =
+    typeof underlyingFetch.preconnect === 'function'
       ? underlyingFetch.preconnect.bind(underlyingFetch)
-      : undefined,
-  });
+      : () => {};
+
+  return Object.assign(providerFetch, { preconnect });
 }

@@ -7,6 +7,8 @@
  * dynamically so the import surface stays localized.
  */
 
+import type { ChatGptOAuthTokens } from '@peer-agent/runtime-node';
+
 export type DesktopStreamArgs = Record<string, unknown>;
 
 export async function loadQoderAccessTokenFromDesktop(): Promise<string> {
@@ -48,18 +50,8 @@ export async function sendGeminiStreamFromDesktop(
 }
 
 export async function ensureFreshGoogleTokensFromDesktop(
-  tokens: {
-    access: string;
-    refresh?: string;
-    expires?: number;
-    [key: string]: unknown;
-  },
-): Promise<{
-  access: string;
-  refresh?: string;
-  expires?: number;
-  [key: string]: unknown;
-}> {
+  tokens: ChatGptOAuthTokens,
+): Promise<ChatGptOAuthTokens> {
   const { ensureFreshGoogleTokens } = await import(
     // @ts-expect-error Desktop ESM adapter does not publish declarations.
     '../../desktop/electron/main/llm-oauth/google-oauth.mjs'
@@ -71,20 +63,10 @@ export async function ensureFreshGoogleTokensFromDesktop(
 export const GEMINI_CODE_ASSIST_BASE_URL = 'https://cloudcode-pa.googleapis.com';
 
 export async function ensureFreshGrokTokensFromDesktop(
-  tokens: {
-    access: string;
-    refresh?: string;
-    expires?: number;
-    [key: string]: unknown;
-  },
+  tokens: ChatGptOAuthTokens,
   options?: { fetchImpl?: typeof fetch },
 ): Promise<{
-  tokens: {
-    access: string;
-    refresh?: string;
-    expires?: number;
-    [key: string]: unknown;
-  };
+  tokens: ChatGptOAuthTokens;
   [key: string]: unknown;
 }> {
   const { ensureFreshGrokTokens } = await import(

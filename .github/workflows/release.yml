@@ -280,9 +280,12 @@ jobs:
           files: release-assets/*
           fail_on_unmatched_files: true
 
-  # ── npm 全局 CLI 包装包（@peer-agent/cli）—— 依赖 GitHub Release 资产已就绪 ──
-  # postinstall 会按版本从本 Release 拉 peer + helper 归档；无 NPM_TOKEN 时跳过。
+  # ── npm 发布：Open Runtime 库 + CLI 安装器 ──
+  # 1) protocol / runtime-core / runtime-sdk：开放 Runtime 产品面（随 VERSION stamp）
+  # 2) @peer-agent/cli：CLI 薄安装器（postinstall 拉 GitHub Release 二进制）
   # monorepo 源码 TUI 包是 @peer-agent/tui；对外安装器才是 @peer-agent/cli。
+  # runtime-node 保持 private，永不 publish。
+  # 无 NPM_TOKEN 时跳过 npm 发布（GitHub Release 仍会发布）。
   publish-npm:
     needs: [meta, release]
     runs-on: ubuntu-latest
@@ -292,14 +295,62 @@ jobs:
         with:
           ref: ${{ github.ref }}
 
-      - name: Setup Node
+      - name: Setup Node / pnpm
         uses: actions/setup-node@v4
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      - name: Stamp version onto npm-cli package
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install monorepo deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Stamp version onto managed packages
         run: node scripts/stamp-version.mjs ${{ needs.meta.outputs.version }}
+
+      - name: Build open runtime libraries
+        run: |
+          pnpm --filter @peer-agent/protocol build
+          pnpm --filter @peer-agent/runtime-core build
+          pnpm --filter @peer-agent/runtime-sdk build
+
+      - name: Guard runtime package manifests
+        run: node scripts/check-runtime-packages.mjs --contents
+
+      - name: Publish open runtime libraries to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "NPM_TOKEN not set — skip npm publish (GitHub Release still published)."
+            exit 0
+          fi
+          VERSION="${{ needs.meta.outputs.version }}"
+          if [[ "$VERSION" == *"-beta."* ]]; then
+            TAG=beta
+          elif [[ "$VERSION" == *"-alpha."* ]]; then
+            TAG=alpha
+          elif [[ "$VERSION" == *"-rc."* ]]; then
+            TAG=rc
+          else
+            TAG=latest
+          fi
+          echo "Publishing open runtime packages @$VERSION with dist-tag $TAG"
+          # Publish leaf → dependent order so dependencies resolve after publish.
+          # Exact-version lookup makes release reruns idempotent: npm versions are immutable.
+          for pkg in protocol runtime-core runtime-sdk; do
+            SPEC="@peer-agent/$pkg@$VERSION"
+            if npm view "$SPEC" version >/dev/null 2>&1; then
+              echo "→ $SPEC already exists; skipping"
+              continue
+            fi
+            echo "→ Publishing $SPEC"
+            # pnpm publish rewrites workspace: deps to registry versions.
+            pnpm --filter "@peer-agent/$pkg" publish --access public --tag "$TAG" --no-git-checks
+          done
 
       - name: Publish @peer-agent/cli to npm
         working-directory: packages/npm-cli

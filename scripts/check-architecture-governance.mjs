@@ -470,15 +470,22 @@ function assertChatRuntimeCompactionCoordinatorIsModular() {
       fail(`llm-chat-service.mjs must not own Compaction Coordinator behavior (${forbidden}); use chat-runtime/compaction-coordinator.mjs.`);
     }
   }
+  const requestCoordinatorPath = 'apps/desktop/electron/main/chat-runtime/provider-request-coordinator.mjs';
+  const requestCoordinator = readText(requestCoordinatorPath);
+  if (!requestCoordinator.includes('runCompactionCheck')) {
+    fail(`${requestCoordinatorPath} must own the shared request-preflight compaction check.`);
+  }
   const agentLoopFiles = [
     'apps/desktop/electron/main/chat-runtime/openai-agent-loop.mjs',
     'apps/desktop/electron/main/chat-runtime/anthropic-agent-loop.mjs',
+    'apps/desktop/electron/main/chat-runtime/gemini-agent-loop.mjs',
+    'apps/desktop/electron/main/chat-runtime/qoder-agent-loop.mjs',
   ];
   for (const filePath of agentLoopFiles) {
     if (!existsSync(path.join(repoRoot, filePath))) continue;
     const content = readText(filePath);
-    if (!content.includes('runCompactionCheck')) {
-      fail(`${filePath} must delegate compaction checks to chat-runtime/compaction-coordinator.mjs.`);
+    if (!content.includes('coordinateDesktopProviderRequest')) {
+      fail(`${filePath} must delegate request-preflight compaction to provider-request-coordinator.mjs.`);
     }
   }
 }
@@ -578,6 +585,28 @@ function assertPromptBaselineIsRecorded() {
   }
 }
 
+function assertContextProjectionPolicyIsCentralized() {
+  const desktopCompactor = readText('apps/desktop/electron/main/context-compactor.mjs');
+  const tuiPressure = readText('apps/tui/src/context-pressure.ts');
+  const rendererEstimate = readText('apps/desktop/renderer/src/chat/state/tokenEstimate.ts');
+
+  if (!desktopCompactor.includes('...CONTEXT_PROJECTION_CONFIG')) {
+    fail('Desktop context compactor must consume CONTEXT_PROJECTION_CONFIG from runtime-core.');
+  }
+  if (/triggerRatio\s*:\s*0\.\d+|hardRatio\s*:\s*0\.\d+/.test(desktopCompactor)) {
+    fail('Desktop must not define local context-compaction ratios; keep them in runtime-core.');
+  }
+  if (!tuiPressure.includes("from '@peer-agent/runtime-core'")) {
+    fail('CLI/TUI context pressure must delegate to runtime-core.');
+  }
+  if (/const\s+(?:CHARS_PER_TOKEN|CJK_CHARS_PER_TOKEN|IMAGE_TOKENS|TRIGGER_RATIO|HARD_RATIO)\b/.test(tuiPressure)) {
+    fail('CLI/TUI must not define local context projection constants.');
+  }
+  if (/estimateConversationHistoryTokens|ConversationTokenEstimateCache/.test(rendererEstimate)) {
+    fail('Renderer must not estimate conversation history; it may only estimate the unsubmitted draft preview.');
+  }
+}
+
 function assertChatRuntimeAgentLoopsAreModular() {
   const loopPaths = [
     'apps/desktop/electron/main/chat-runtime/openai-agent-loop.mjs',
@@ -613,7 +642,7 @@ function assertChatRuntimeAgentLoopsAreModular() {
 
   if (existsSync(path.join(repoRoot, loopPaths[0]))) {
     const openaiLoop = readText(loopPaths[0]);
-    for (const snippet of ['sendOpenAIChatStream', 'runCompactionCheck', 'executeModelToolCall', 'createAgentLoopKernel', 'handleTerminalTextResponse']) {
+    for (const snippet of ['sendOpenAIChatStream', 'coordinateDesktopProviderRequest', 'executeModelToolCall', 'createAgentLoopKernel', 'handleTerminalTextResponse']) {
       if (!openaiLoop.includes(snippet)) {
         fail(`${loopPaths[0]} is missing required provider loop dependency ${snippet}.`);
       }
@@ -629,7 +658,7 @@ function assertChatRuntimeAgentLoopsAreModular() {
   }
   if (existsSync(path.join(repoRoot, loopPaths[1]))) {
     const anthropicLoop = readText(loopPaths[1]);
-    for (const snippet of ['sendAnthropicMessagesStream', 'runCompactionCheck', 'executeModelToolCall', 'createAgentLoopKernel', 'handleTerminalTextResponse']) {
+    for (const snippet of ['sendAnthropicMessagesStream', 'coordinateDesktopProviderRequest', 'executeModelToolCall', 'createAgentLoopKernel', 'handleTerminalTextResponse']) {
       if (!anthropicLoop.includes(snippet)) {
         fail(`${loopPaths[1]} is missing required provider loop dependency ${snippet}.`);
       }
@@ -775,6 +804,7 @@ assertChatRuntimeCompactionCoordinatorIsModular();
 assertChatRuntimeResponseGuardIsModular();
 assertPromptBaselineIsRecorded();
 assertChatRuntimeAgentLoopsAreModular();
+assertContextProjectionPolicyIsCentralized();
 
 if (failures.length > 0) {
   console.error('Architecture governance check failed:');

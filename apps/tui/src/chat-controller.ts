@@ -1,5 +1,11 @@
 import type { ModelMessage, ModelToolCall, ModelUsage } from '@peer-agent/runtime-node';
 import {
+  formatCompactionMessagesForSummary,
+  runCompactionSummaryCascade,
+  splitMessagesForCompaction,
+  type CompactionMethod,
+} from '@peer-agent/runtime-core';
+import {
   createRuntimePipeline,
   createRuntimeSessionController,
   type RuntimePipelineModelAdapter,
@@ -13,7 +19,11 @@ import {
   type RuntimeSdkProviderExecution,
 } from '@peer-agent/runtime-sdk';
 
-import { compactModelMessagesStructurally } from './context-compact.ts';
+import {
+  buildHandoffContent,
+  buildStructuralSummary,
+  TUI_COMPACT_KEEP_RECENT,
+} from './context-compact.ts';
 import { computeContextPressure, estimateTokensFromMessages } from './context-pressure.ts';
 import {
   GOAL_CAPABILITY_IDS,
@@ -51,6 +61,8 @@ export interface ChatCompactMeta {
   readonly summary?: string;
   /** Shared handoff content persisted on the `_compaction` marker. */
   readonly handoffContent?: string;
+  /** Shared Desktop/CLI summary cascade method used for this boundary. */
+  readonly method?: CompactionMethod;
   /** Number of complete user turns retained after the shared boundary. */
   readonly retainedUserCount?: number;
 }
@@ -159,7 +171,13 @@ export interface ChatModelPort extends RuntimePipelineModelAdapter<
   ChatModelToolCall,
   RuntimeSdkProviderExecution,
   string
-> {}
+> {
+  summarizeCompaction?(input: {
+    readonly messages: readonly ModelMessage[];
+    readonly formattedHistory: string;
+    readonly onProgress?: (percent: number) => void;
+  }): Promise<string>;
+}
 
 export interface ChatRestoreInput {
   readonly mode: TuiMode;
@@ -517,18 +535,19 @@ export function createChatController(options: {
       }));
     };
 
-    // Same progress frames for manual / auto so auto-compact feels complete.
     publishProgress(12);
-    await sleep(35);
-    publishProgress(48);
-    await sleep(35);
-    publishProgress(78);
     await sleep(25);
-
-    const result = compactModelMessagesStructurally(conversationModelMessages, {
-      previousContinuity: conversationContinuityContext,
+    const split = splitMessagesForCompaction(conversationModelMessages, {
+      keepRecentCount: TUI_COMPACT_KEEP_RECENT,
+      preserveLatestUserTurn: opts.source === 'auto',
     });
-    if (!result.compacted) {
+    if (split.oldMessages.length === 0) {
+      const result = {
+        compacted: false,
+        beforeCount,
+        afterCount: beforeCount,
+        reason: beforeCount === 0 ? 'empty' : 'nothing-to-compact',
+      } as const;
       const notice =
         result.reason === 'empty'
           ? (opts.source === 'auto' ? 'Auto-compact skipped: empty context' : 'Nothing to compact')
@@ -551,6 +570,36 @@ export function createChatController(options: {
       };
     }
 
+    publishProgress(48);
+    const previousContinuity = conversationContinuityContext?.trim();
+    const structuralSummary = buildStructuralSummary(split.oldMessages as readonly ModelMessage[]);
+    const cascade = await runCompactionSummaryCascade({
+      oldMessages: split.oldMessages as readonly ModelMessage[],
+      summarizeWithLlm: options.model.summarizeCompaction
+        ? () => options.model.summarizeCompaction!({
+            messages: split.oldMessages as readonly ModelMessage[],
+            formattedHistory: formatCompactionMessagesForSummary(split.oldMessages),
+            onProgress: (percent) => publishProgress(Math.max(28, Math.min(76, Math.round(28 + (percent * 0.48))))),
+          })
+        : undefined,
+      summarizeStructurally: () => [previousContinuity, structuralSummary].filter(Boolean).join('\n\n'),
+      fallbackSummary: previousContinuity || 'Earlier conversation was removed because no safe summary could be produced.',
+    });
+    publishProgress(78);
+    await sleep(25);
+    const summary = cascade.summary.trim();
+    const handoffContent = buildHandoffContent(summary, split.oldMessages.length);
+    const result = {
+      compacted: true,
+      messages: [...split.systemMessages, ...split.keepMessages] as readonly ModelMessage[],
+      beforeCount,
+      afterCount: split.systemMessages.length + split.keepMessages.length,
+      summarizedCount: split.oldMessages.length,
+      summary,
+      handoffContent,
+      method: cascade.method,
+      retainedUserCount: split.keepMessages.filter((message) => message.role === 'user').length,
+    } as const;
     const previousProjection = snapshot.requestProjection;
     const previousMessageTokens = estimateTokensFromMessages(conversationModelMessages);
     const previousContinuityTokens = conversationContinuityContext
@@ -599,6 +648,7 @@ export function createChatController(options: {
         ...(requestProjection ? { afterTokens: requestProjection.nextRequestInputTokens } : {}),
         summary: result.summary,
         handoffContent: result.handoffContent,
+        method: result.method,
         retainedUserCount: result.retainedUserCount,
       },
     };
@@ -634,6 +684,11 @@ export function createChatController(options: {
     readonly content: string;
   }> = [];
   let streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  // stream_preview（21 号文档 13.2）：本 turn 内尚未稳定写入 active history 的
+  // assistant 正文累积（不含 reasoning，隐藏推理不进下一请求）。
+  // 以稳定基线 conversationModelMessages 为底，draftText 通道叠加；
+  // 稳定边界（turn 结束 / 新 turn 开始）归零，禁止多路累加。
+  let streamedPreviewText = '';
 
   const appendAssistantDelta = (
     messages: ChatMessage[],
@@ -693,8 +748,19 @@ export function createChatController(options: {
     if (streamDeltaBuffer.length === 0) return;
     const events = streamDeltaBuffer.splice(0, streamDeltaBuffer.length);
     const messages = [...snapshot.messages];
-    for (const event of events) appendAssistantDelta(messages, event);
-    publish({ ...snapshot, messages });
+    for (const event of events) {
+      appendAssistantDelta(messages, event);
+      if (event.type === 'message.delta') streamedPreviewText += event.content;
+    }
+    // 与 Desktop stream_preview 同语义：稳定基线 + 本 turn 已流式正文的单一叠加源，
+    // 每次 flush 全量重算替换上一帧预览，不做多路累加。
+    const pressure = pressureFor(conversationModelMessages, snapshot.usage, streamedPreviewText);
+    publish({
+      ...snapshot,
+      messages,
+      nextRequestInputTokens: pressure.nextRequestInputTokens,
+      compactionPressureTokens: pressure.compactionPressureTokens,
+    });
   };
 
   const enqueueStreamDelta = (event: { readonly type: 'message.delta' | 'reasoning.delta'; readonly content: string }) => {
@@ -863,6 +929,8 @@ export function createChatController(options: {
       if (preflightPressure.shouldCompact) {
         await runStructuralCompact({ source: 'auto' });
       }
+      // 新 turn 开始：上一 turn 的流式预览增量不得沿用。
+      streamedPreviewText = '';
 
       const conversationId = resolveConversationId();
       let existingSession = sessions.get(sessionId);
@@ -963,6 +1031,8 @@ export function createChatController(options: {
           { signal: turn.signal },
         );
         flushStreamDeltaBuffer();
+        // turn 结束是稳定边界：流式预览归零，交给 requestProjection / withPressure 全量重算。
+        streamedPreviewText = '';
         if (result.state) conversationModelMessages = result.state.modelMessages;
 
         if (result.status === 'cancelled') turn.cancel(result.reason);
@@ -1002,6 +1072,7 @@ export function createChatController(options: {
         }));
       } catch (error) {
         flushStreamDeltaBuffer();
+        streamedPreviewText = '';
         const wasCancelled = turn.signal.aborted;
         const detail = errorMessage(error);
         if (wasCancelled) turn.cancel(detail);

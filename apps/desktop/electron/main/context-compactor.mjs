@@ -6,6 +6,17 @@
  * Layer 3: 手动 /compact 指令（通过 chat:compact IPC handler）
  */
 
+import {
+  COMPACTION_SUMMARY_PROMPT as COMPACT_PROMPT,
+  COMPACTION_SUMMARY_SYSTEM_PROMPT as SUMMARY_SYSTEM_PROMPT,
+  CONTEXT_PROJECTION_CONFIG,
+  estimateContextMessagesTokens,
+  estimateContextTextTokens,
+  estimateContextToolsTokens,
+  formatCompactionMessagesForSummary,
+  runCompactionSummaryCascade,
+  splitMessagesForCompaction,
+} from '@peer-agent/runtime-core';
 import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli-identity.mjs';
 import { encodeOpenAIResponsesRequest } from './provider-encoders/responses-encoder.mjs';
 import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
@@ -13,21 +24,8 @@ import { logCompactionDiagnostic } from './compaction-diagnostic-log.mjs';
 import { neutralizeToolCallSyntax } from './chat-runtime/message-sanitizer.mjs';
 
 const COMPACTION_CONFIG = {
-  triggerRatio: 0.8,
-  charsPerToken: 4,
-  // 中文/日文/韩文等 CJK 字符的分词密度远高于英文：英文约 4 字符/token，
-  // CJK 约 1.7 字符/token（实测一段中文按 /4 会被低估约 2 倍）。两段分别估算，
-  // 避免把大量中文按 /4 系统性腰斩，导致进度条远低于 provider 实际计入的 input tokens。
-  cjkCharsPerToken: 1.7,
-  // 图片/文档块的固定 token 近似开销。
-  imageTokens: 2000,
-  // 每条消息的框架开销（role / 分隔符等结构性 token），对标 provider 计费口径。
-  // 旧实现按「+10 字符 / 4」≈ 2.5 token，偏小，这里直接以 token 计 4。
-  messageFramingTokens: 4,
-  // 每个 tool_use / tool_result 块除正文外的固定结构开销（块头、id、type 等）。
-  toolCallBlockOverhead: 8,
-  // 每个工具 schema 定义除 JSON 文本外的固定开销（名称包装、分隔等）。
-  toolDefinitionOverhead: 16,
+  // Token 投影与自动压缩阈值只有 runtime-core 一份真值；Desktop 这里只追加摘要执行参数。
+  ...CONTEXT_PROJECTION_CONFIG,
   // 摘要输出上限不再写死：在 summarizeWithLLM 内复用当前模型的 maxOutputTokens，
   // 未配置时回退到 12000，避免长摘要被小上限截断（压缩后内容看不全）。
   summaryMaxInputTokens: 80_000,   // 摘要输入的上限（旧消息文本）
@@ -54,220 +52,51 @@ const MICROCOMPACTION_CONFIG = {
   previewChars: 800,
 };
 
-// 摘要专用 system prompt（对标 CC AGENT_CONTEXT_SUMMARY_SYSTEM_PROMPT）
-const SUMMARY_SYSTEM_PROMPT =
-  '你是对话摘要专家。请将以下对话历史压缩为详细摘要，保留关键信息：用户意图、重要决策、技术概念、文件变更、错误修复、待办事项。特别要详细记录用户的具体执行动作与操作步骤——用户要求做了什么、实际改动了哪些文件、命令/操作执行到哪一步、当前停在何处——因为原文已全量压缩、不再保留，连续性完全依赖本摘要承载。输出纯文本，不要用 markdown。';
+// ── Circuit breaker state (per-conversation scope) ──
+// 历史上是 module 级全局计数,会跨会话串状态(A 会话连续失败会熔断 B 会话的压缩)。
+// 现按 conversationId(缺省回退 streamId / 全局桶)隔离,见 23 号治理文档不变式 6。
 
-// 9 章节 compaction prompt（对标 CC BASE_COMPACT_PROMPT）
-const COMPACT_PROMPT = `Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
-This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.
+const compactionFailuresByScope = new Map();
 
-Before providing your final summary, wrap your analysis in <analysis> tags to organize your thoughts. In your analysis:
-1. Chronologically analyze each message and section of the conversation. For each section identify:
-   - The user's explicit requests and intents
-   - Your approach to addressing the user's requests
-   - Key decisions, technical concepts and code patterns
-   - Specific details like file names, code snippets, function signatures
-   - Errors that you ran into and how you fixed them
-   - Pay special attention to specific user feedback
-
-Your summary should include the following sections:
-
-1. Primary Request and Intent: Capture all of the user's explicit requests and intents in detail
-2. Key Technical Concepts: List all important technical concepts, technologies, and frameworks discussed.
-3. Files and Code Sections: Enumerate specific files and code sections examined, modified, or created. Include a summary of why this file read or edit is important.
-4. Errors and fixes: List all errors that you ran into, and how you fixed them. Pay special attention to specific user feedback.
-5. Problem Solving: Document problems solved and any ongoing troubleshooting efforts.
-6. All user messages: List ALL user messages that are not tool results.
-7. Pending Tasks: Outline any pending tasks that you have explicitly been asked to work on.
-8. Current Work: Describe in detail precisely what was being worked on immediately before this summary request. CRITICAL — record the user's concrete execution actions and operation steps in detail: what the user asked to do, which files were actually changed, what commands/operations were run and to which step they progressed, and exactly where things currently stand. The original conversation is fully compacted and NOT retained, so continuity depends entirely on this summary capturing those execution details.
-9. Optional Next Step: List the next step related to the most recent work. Include direct quotes from the most recent conversation.
-
-CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
-
-Here's an example of how your output should be structured:
-
-<example>
-<analysis>
-[Your thought process, ensuring all points are covered]
-</analysis>
-
-<summary>
-1. Primary Request and Intent:
-   [Detailed description]
-
-2. Key Technical Concepts:
-   - [Concept 1]
-   - [Concept 2]
-
-3. Files and Code Sections:
-   - [File Name]
-      - [Summary of why this file is important]
-      - [Code Snippet if applicable]
-
-4. Errors and fixes:
-    - [Error description]:
-      - [How you fixed it]
-      - [User feedback on the error if any]
-
-5. Problem Solving:
-   [Description of solved problems and ongoing troubleshooting]
-
-6. All user messages:
-    - [Non-tool-use user message]
-    - [...]
-
-7. Pending Tasks:
-   - [Task 1]
-   - [Task 2]
-
-8. Current Work:
-   [Precise description of current work]
-
-9. Optional Next Step:
-   [Optional Next step to take]
-
-</summary>
-</example>
-
-Please provide your summary based on the conversation so far, following this structure and ensuring precision and thoroughness in your response.`;
-
-// ── Circuit breaker state (module-level, per session) ──
-
-let consecutiveCompactionFailures = 0;
-
-export function resetCircuitBreaker() {
-  consecutiveCompactionFailures = 0;
+function breakerScopeKey(scope) {
+  return typeof scope === 'string' && scope ? scope : '__global__';
 }
 
-function isCircuitBreakerTripped() {
-  return consecutiveCompactionFailures >= COMPACTION_CONFIG.circuitBreakerThreshold;
+export function resetCircuitBreaker(scope = null) {
+  if (scope == null) {
+    compactionFailuresByScope.clear();
+    return;
+  }
+  compactionFailuresByScope.delete(breakerScopeKey(scope));
 }
 
-function recordCompactionSuccess() {
-  consecutiveCompactionFailures = 0;
+function isCircuitBreakerTripped(scope) {
+  return (compactionFailuresByScope.get(breakerScopeKey(scope)) ?? 0)
+    >= COMPACTION_CONFIG.circuitBreakerThreshold;
 }
 
-function recordCompactionFailure() {
-  consecutiveCompactionFailures++;
-  if (isCircuitBreakerTripped()) {
+function recordCompactionSuccess(scope) {
+  compactionFailuresByScope.delete(breakerScopeKey(scope));
+}
+
+function recordCompactionFailure(scope) {
+  const key = breakerScopeKey(scope);
+  const failures = (compactionFailuresByScope.get(key) ?? 0) + 1;
+  compactionFailuresByScope.set(key, failures);
+  if (failures >= COMPACTION_CONFIG.circuitBreakerThreshold) {
     console.warn(
-      `[context-compactor] Circuit breaker tripped after ${consecutiveCompactionFailures} consecutive failures — skipping future compaction attempts this session`,
+      `[context-compactor] Circuit breaker tripped for scope=${key} after ${failures} consecutive failures — skipping future compaction attempts for this conversation`,
     );
   }
 }
 
 // ── Token Estimation （对标 CC roughTokenCountEstimationForMessages）──
 
-// CJK 字符范围（中日韩统一表意文字、扩展 A、兼容表意、假名、谚文、全角标点）。
-// 命中这些字符的部分按 cjkCharsPerToken 估，其余按 charsPerToken 估，
-// 避免中文被「/4」系统性低估约 2 倍。
-const CJK_REGEX =
-  /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef\uac00-\ud7af]/g;
-
-/**
- * CJK 感知的文本 token 估算：CJK 字符按更高权重（约 1.7 字符/token），
- * 其余字符按英文权重（约 4 字符/token）。返回 token 数（未取整，便于累加）。
- */
-function estimateTextTokens(text) {
-  if (!text) return 0;
-  const str = typeof text === 'string' ? text : String(text);
-  const cjkMatches = str.match(CJK_REGEX);
-  const cjkCount = cjkMatches ? cjkMatches.length : 0;
-  const otherCount = str.length - cjkCount;
-  return (
-    cjkCount / COMPACTION_CONFIG.cjkCharsPerToken +
-    otherCount / COMPACTION_CONFIG.charsPerToken
-  );
-}
-
-function estimateTokensFromMessages(messages) {
-  let tokens = 0;
-  for (const m of messages) {
-    if (typeof m.content === 'string') {
-      tokens += estimateTextTokens(m.content);
-    } else if (Array.isArray(m.content)) {
-      for (const block of m.content) {
-        if (block.type === 'text' && block.text) {
-          tokens += estimateTextTokens(block.text);
-        } else if (block.type === 'tool_use') {
-          tokens += estimateTextTokens(block.name || '');
-          tokens += estimateTextTokens(JSON.stringify(block.input || {}));
-          tokens += COMPACTION_CONFIG.toolCallBlockOverhead;
-        } else if (block.type === 'tool_result') {
-          tokens += estimateTextTokens(
-            typeof block.content === 'string'
-              ? block.content
-              : JSON.stringify(block.content ?? ''),
-          );
-          tokens += COMPACTION_CONFIG.toolCallBlockOverhead;
-        } else if (
-          block.type === 'image' ||
-          block.type === 'image_url' ||
-          block.type === 'input_image' ||
-          block.type === 'document'
-        ) {
-          // 图片/文档以固定开销计。注意：未归一化前图片块的 type 可能是 'image_url'
-          // （renderer apiMessageMapping）或 'input_image'（OpenAI responses），其内部
-          // 携带的 base64 data URL 极大；若漏判会被 JSON.stringify 整段计入，导致几 MB
-          // 的图片被估成上百万 token，进而每轮都误触发压缩。
-          tokens += COMPACTION_CONFIG.imageTokens; // fixed image tokens
-        } else {
-          tokens += estimateTextTokens(JSON.stringify(block));
-        }
-      }
-    }
-    tokens += COMPACTION_CONFIG.messageFramingTokens; // 每条消息框架开销
-  }
-  return Math.ceil(tokens);
-}
-
-/**
- * 估算工具 schema 在每次请求里占用的 token。
- *
- * 工具定义（名称 + 描述 + JSON Schema 参数）是每次请求都全量发送给 provider 的，
- * 但旧实现的进度条/压缩触发完全没算它们。47 个工具的 schema 实测可达上万 token，
- * 是「进度条只有 ~100k 但 provider 报 input exceeds context window」的最大缺口。
- *
- * 兼容多种工具结构：
- * - Anthropic: { name, description, input_schema }
- * - OpenAI chat: { type:'function', function:{ name, description, parameters } }
- * - OpenAI responses / 扁平: { name, description, parameters }
- * - Gemini: { functionDeclarations: [{ name, description, parameters }] }
- *
- * @param {Array|object} tools 工具定义列表（或包含 functionDeclarations 的对象）
- * @returns {number} 估算 token 数
- */
-function estimateToolsTokens(tools) {
-  if (!tools) return 0;
-  // Gemini 形态：{ functionDeclarations: [...] } 或其数组
-  let list = tools;
-  if (!Array.isArray(list)) {
-    if (Array.isArray(tools.functionDeclarations)) {
-      list = tools.functionDeclarations;
-    } else {
-      list = [tools];
-    }
-  }
-  let tokens = 0;
-  for (const tool of list) {
-    if (!tool || typeof tool !== 'object') continue;
-    if (Array.isArray(tool.functionDeclarations)) {
-      tokens += estimateToolsTokens(tool.functionDeclarations);
-      continue;
-    }
-    const fn = tool.function && typeof tool.function === 'object' ? tool.function : tool;
-    const name = fn.name || tool.name || '';
-    const description = fn.description || tool.description || '';
-    const schema =
-      fn.parameters ?? fn.input_schema ?? tool.parameters ?? tool.input_schema ?? {};
-    tokens += estimateTextTokens(name);
-    tokens += estimateTextTokens(description);
-    tokens += estimateTextTokens(JSON.stringify(schema ?? {}));
-    tokens += COMPACTION_CONFIG.toolDefinitionOverhead;
-  }
-  return Math.ceil(tokens);
-}
+// Compatibility exports for existing Desktop callers. The implementation and constants live in
+// runtime-core so Desktop and CLI/TUI cannot drift in token projection or compaction pressure.
+const estimateTextTokens = estimateContextTextTokens;
+const estimateTokensFromMessages = estimateContextMessagesTokens;
+const estimateToolsTokens = estimateContextToolsTokens;
 
 // ── Historical Tool Result Microcompaction ──
 
@@ -799,36 +628,11 @@ function findCurrentTurnStart(convMsgs) {
 }
 
 function splitForCompaction(messages, { preserveLatestUserTurn = false } = {}) {
-  const systemMsgs = messages.filter((m) => m.role === 'system');
-  const convMsgs = messages.filter((m) => m.role !== 'system');
-
-  // 默认保持手动 /compact 的“真·全量压缩”：旧消息全部摘要，连当前轮原文也不保留。
-  // 自动 preflight 压缩则必须保留最新真人 user turn：用户刚发送的原文不能被 summary 代替。
-  const currentTurnStart = preserveLatestUserTurn ? findCurrentTurnStart(convMsgs) : -1;
-  let initialKeep;
-  let initialOld;
-  if (currentTurnStart >= 0) {
-    const latestUser = convMsgs[currentTurnStart];
-    const currentTurnTail = convMsgs.slice(currentTurnStart + 1);
-    const unclosedTailStart = findUnclosedToolTailStart(currentTurnTail);
-    initialKeep = [latestUser, ...currentTurnTail.slice(unclosedTailStart)];
-    initialOld = [
-      ...convMsgs.slice(0, currentTurnStart),
-      ...currentTurnTail.slice(0, unclosedTailStart),
-    ];
-  } else {
-    // ⚠️ 全量压缩时显式把 keep 设为空：slice(-0) ≡ slice(0) 会把切分反转。
-    initialKeep = [];
-    initialOld = convMsgs;
-  }
-
-  // 异常 provider 历史若让 keep 从 tool_result 开始，兜底把对应 tool_use 一并拉入，
-  // 避免发送孤立工具结果。
-  const split = expandKeepForToolContinuity({ keep: initialKeep, old: initialOld });
+  const split = splitMessagesForCompaction(messages, { preserveLatestUserTurn });
   return {
-    keep: split.keep,
-    old: split.old,
-    systemMsgs,
+    keep: [...split.keepMessages],
+    old: [...split.oldMessages],
+    systemMsgs: [...split.systemMessages],
   };
 }
 
@@ -864,8 +668,8 @@ function formatCompactSummary(summary) {
     );
   }
 
-  // Clean up extra whitespace
-  formatted = formatted.replace(/\n\n\n+/g, '\n\n');
+  // Clean up extra whitespace（3 个及以上连续换行压成 2 个；\u000a 即 LF）
+  formatted = formatted.replace(/\u000a{3,}/g, '\u000a\u000a');
 
   return formatted.trim();
 }
@@ -1606,6 +1410,8 @@ export async function compactIfNeeded({
   onProgress,
   webContents = null,
   streamId = null,
+  // circuit breaker 隔离域:优先 conversationId,缺省回退 streamId,避免跨会话串熔断状态。
+  conversationId = null,
   connectionRecoveryOptions = {},
   tools = null,
   preserveLatestUserTurn = false,
@@ -1616,9 +1422,10 @@ export async function compactIfNeeded({
   const microcompactResult = microcompactMessagesForContext(messages);
   messages = microcompactResult.messages;
   const previousMessageCount = countContinuityMessages(continuityContext);
+  const breakerScope = conversationId || streamId || null;
 
   // Circuit breaker: stop trying if we've failed too many times
-  if (isCircuitBreakerTripped()) {
+  if (isCircuitBreakerTripped(breakerScope)) {
     // Still do basic structural compaction + drop as last resort
     const { keep, old } = splitForCompaction(messages, { preserveLatestUserTurn });
     if (old.length === 0) return { compacted: false, messages };
@@ -1722,7 +1529,7 @@ export async function compactIfNeeded({
             console.log(
               `[context-compactor] LLM summary success (${compactSummary.length} chars)`,
             );
-            recordCompactionSuccess();
+            recordCompactionSuccess(breakerScope);
           }
           break; // success, exit retry loop
         } catch (err) {
@@ -1788,18 +1595,24 @@ export async function compactIfNeeded({
         errorCode: err?.code ?? err?.cause?.code ?? null,
         errorCause: err?.cause?.message ?? null,
       });
-      recordCompactionFailure();
+      recordCompactionFailure(breakerScope);
     }
   }
 
-  // Tier 2: Structural summary fallback
-  if (!compactSummary) {
-    compactSummary = summarizeOldMessages(old);
-    method = compactSummary ? 'structural' : 'fallback_drop';
-    if (!fallbackReason) {
-      // providerConfig 存在但 compactSummary 为空且未进 catch（理论兜底），标注未知。
-      fallbackReason = providerConfig ? 'llm_unavailable' : fallbackReason;
-    }
+  // Shared candidate selection keeps Desktop and CLI on the same
+  // LLM → structural → safe-drop order. Desktop still owns provider retries,
+  // diagnostics, and summary formatting above.
+  const summarySelection = await runCompactionSummaryCascade({
+    oldMessages: old,
+    summarizeWithLlm: compactSummary ? async () => compactSummary : undefined,
+    summarizeStructurally: summarizeOldMessages,
+    fallbackSummary: '',
+  });
+  compactSummary = summarySelection.summary;
+  method = summarySelection.method === 'structured' ? 'structural' : summarySelection.method;
+  if (method !== 'llm' && !fallbackReason) {
+    // providerConfig 存在但 compactSummary 为空且未进 catch（理论兜底），标注未知。
+    fallbackReason = providerConfig ? 'llm_unavailable' : fallbackReason;
   }
 
   // Build result

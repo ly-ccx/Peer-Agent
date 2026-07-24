@@ -1,0 +1,17 @@
+{
+  "name": "peer-agent-external-host-example",
+  "private": true,
+  "type": "module",
+  "description": "Minimal external host that depends only on published Peer Agent open runtime packages (no Desktop/CLI app required).",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@peer-agent/protocol": "file:../../packages/protocol",
+    "@peer-agent/runtime-core": "file:../../packages/runtime-core",
+    "@peer-agent/runtime-sdk": "file:../../packages/runtime-sdk"
+  }
+}

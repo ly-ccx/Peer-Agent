@@ -8,9 +8,11 @@ import {
   buildCompactionProviderConfig,
   buildPromptTooLongRecoveryError,
   computeContextInfo,
-  isPromptTooLongResponse,
-  runCompactionCheck,
 } from './compaction-coordinator.mjs';
+import {
+  coordinateDesktopProviderRequest,
+  recoverFromPromptTooLong,
+} from './provider-request-coordinator.mjs';
 import { sanitizeApiMessages } from './message-sanitizer.mjs';
 import * as responseGuard from './response-guard.mjs';
 import {
@@ -63,6 +65,7 @@ export async function agentLoopAnthropic({
   const loop = createAgentLoopKernel({
     webContents,
     streamId,
+    conversationId,
     onRound: agentProgress?.onRound,
     // ADR 52：右下角 / done 快照必须投影「下一请求」输入量。
     // Anthropic 路径 system 与 messages 分离，投影时补上当前 effectiveSystem；
@@ -74,6 +77,12 @@ export async function agentLoopAnthropic({
       contextWindow,
       tools,
       usageSnapshot,
+    }),
+    // per-turn 投影生命周期的稳定输入：同 getContextInfo 口径补上 system。
+    getProjectionInput: () => ({
+      messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
+      tools,
+      contextWindow,
     }),
   });
   const providerConfig = buildCompactionProviderConfig({
@@ -101,7 +110,7 @@ export async function agentLoopAnthropic({
     model: {
       initialize: () => ({ provider: 'anthropic' }),
       runTurn: async (state) => {
-        const compaction = await runCompactionCheck({
+        const compaction = await coordinateDesktopProviderRequest({
           messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
           systemPrompt: effectiveSystem,
           contextWindow,
@@ -117,6 +126,7 @@ export async function agentLoopAnthropic({
           // usageSnapshot 仅诊断/校准；soft 触发以当前下一请求投影为准。
           usageSnapshot: loop.getLastTurnUsage?.() ?? null,
           rebuildSystemPrompt,
+          contextLifecycle: loop.contextLifecycle,
         });
         if (compaction.compacted || compaction.microcompacted) {
           if (typeof compaction.systemPrompt === 'string' && compaction.systemPrompt.trim()) {
@@ -156,9 +166,13 @@ export async function agentLoopAnthropic({
 
         if (!providerResponse.ok) {
           const text = providerResponse.errorText || '';
-          const promptTooLong = isPromptTooLongResponse(providerResponse.status, text);
-          if (promptTooLong && !promptTooLongRetryUsed) {
-            const emergencyCompaction = await runCompactionCheck({
+          // PTL 分类与 emergency 重试策略收敛到共享 helper（同一请求最多重试一次）。
+          // Anthropic 路径 system/messages 分离：投入时拼 system，恢复时再拆回。
+          const recovery = await recoverFromPromptTooLong({
+            status: providerResponse.status,
+            errorText: text,
+            retryUsed: promptTooLongRetryUsed,
+            request: {
               messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
               systemPrompt: effectiveSystem,
               contextWindow,
@@ -168,27 +182,24 @@ export async function agentLoopAnthropic({
               conversationId,
               streamId,
               webContents,
-              emergency: true,
-              force: true,
               continuityContext,
               tools,
               preserveLatestUserTurn: true,
               rebuildSystemPrompt,
-        });
-            if (emergencyCompaction.compacted) {
-              if (typeof emergencyCompaction.systemPrompt === 'string' && emergencyCompaction.systemPrompt.trim()) {
-                effectiveSystemPrompt = emergencyCompaction.systemPrompt;
-              }
-              effectiveSystem = emergencyCompaction.messages
-                .filter((message) => message.role === 'system')
-                .map((message) => message.content)
-                .join('\n\n') || effectiveSystemPrompt;
-              apiMessages = emergencyCompaction.messages.filter((message) => message.role !== 'system');
-              promptTooLongRetryUsed = true;
-              return { kind: 'continue', state };
-            }
+              contextLifecycle: loop.contextLifecycle,
+            },
+          });
+          if (recovery.retried) {
+            if (recovery.systemPrompt) effectiveSystemPrompt = recovery.systemPrompt;
+            effectiveSystem = recovery.messages
+              .filter((message) => message.role === 'system')
+              .map((message) => message.content)
+              .join('\n\n') || effectiveSystemPrompt;
+            apiMessages = recovery.messages.filter((message) => message.role !== 'system');
+            promptTooLongRetryUsed = true;
+            return { kind: 'continue', state };
           }
-          if (promptTooLong) {
+          if (recovery.promptTooLong) {
             loop.sendError(buildPromptTooLongRecoveryError({
               text,
               providerTracePath: providerResponse.providerTracePath,
@@ -279,6 +290,8 @@ export async function agentLoopAnthropic({
         });
         // 先配对所有 tool_use，再由 Pipeline 根据 terminal signal 决定是否停止。
         apiMessages.push({ role: 'user', content: toolResults });
+        // 稳定边界：tool result 已写入 Runtime 会话，发布 tool_result 投影替换流式预览。
+        loop.publishToolResultProjection();
         return state;
       },
       onStopped: () => loop.sendDone(),
@@ -303,11 +316,9 @@ export async function agentLoopAnthropic({
           goalPlanStore,
         });
         if (toolExecution.aborted) throw createDesktopAbortError();
-        // goal_create_plan / request_user_input 等 terminal 工具：立即 sendDone，
-        // 不依赖后续 pipeline onStopped 时序，避免 UI 卡在「正在思考」。
-        if (toolExecution.controlSignal?.terminal) {
-          try { loop.sendDone(); } catch {}
-        }
+        // terminal 工具（goal_create_plan / request_user_input 等）不得在这里 sendDone：
+        // 必须先走 applyToolResults 写入 tool result，再由 pipeline onStopped 统一收尾，
+        // 否则 done 快照会丢掉本轮 tool result，右下角占用会卡在发送前 seed。
         return {
           call,
           result: toolExecution,

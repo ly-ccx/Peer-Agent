@@ -13,7 +13,8 @@ test('draft input and draft token estimates stay in composer leaf subscriptions'
 
   assert.match(surface, /<ComposerDraftControls[\s\S]*?conversationId=\{conversationId\}/);
   assert.match(surface, /onPrimaryAction=\{stableHandlePrimaryAction\}/);
-  assert.match(surface, /<ComposerTokenUsageDisplay[\s\S]*?historyContextTokens=\{historyContextTokens\}/);
+  assert.match(surface, /<ComposerTokenUsageDisplay[\s\S]*?authoritativeNextRequestInputTokens=\{authoritativeNextRequestInputTokens\}/);
+  assert.doesNotMatch(surface, /historyContextTokens/);
   assert.doesNotMatch(surface, /const draft\s*=\s*convState\.draft/);
   assert.doesNotMatch(surface, /value=\{draft\}/);
   // 发送路径可用 estimateDraftTokens(text, sentAttachments) 固化权威种子；
@@ -44,7 +45,7 @@ test('token usage prefers authoritative effective context over local full-histor
   assert.match(tokenUsage, /resolveContextOccupancyTokens/);
   assert.match(
     tokenUsage,
-    /authoritativeNextRequestInputTokens,\s*historyContextTokens,\s*draftContextTokens/,
+    /authoritativeNextRequestInputTokens,\s*draftContextTokens/,
   );
   assert.doesNotMatch(
     tokenUsage,
@@ -55,11 +56,16 @@ test('token usage prefers authoritative effective context over local full-histor
   assert.doesNotMatch(tokenUsage, /Math\.max\([^)]*tokenUsage/);
 });
 
-test('send path seeds authoritative occupancy before clearing the draft', async () => {
+test('send path seeds occupancy only when Runtime authority already exists', async () => {
   const surface = await readSource('./ChatSurface.tsx');
+  assert.match(surface, /if \(authoritativeContext\)/);
   assert.match(surface, /seedAuthoritativeContextOnSend/);
-  assert.match(surface, /setAuthoritativeContext\(seeded\)/);
+  assert.match(surface, /if \(seeded\) setAuthoritativeContext\(seeded\)/);
   assert.match(surface, /estimateDraftTokens\(text, sentAttachments\)/);
+  assert.match(
+    surface,
+    /contextReady=\{loadStatus === 'ready' && authoritativeContext != null\}/,
+  );
 });
 
 test('context ring never falls back to billed lifetime totals', async () => {

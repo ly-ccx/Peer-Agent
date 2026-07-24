@@ -630,6 +630,19 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     reason?: string;
   }) => void) => () => void;
   readonly onChatCompaction: (listener: (payload: { conversationId: string; streamId: string; stage?: 'start' | 'progress' | 'done' | 'idle'; percent?: number; receivedChars?: number; estimatedTotalChars?: number; method?: string; beforeTokens?: number; afterTokens?: number; oldMessageCount?: number; keptMessageCount?: number; nextRequestInputTokens?: number; contextWindow?: number | null; microcompacted?: boolean }) => void) => () => void;
+  // 21 号文档第十三章:per-turn 上下文投影稳定阶段快照;renderer 以 streamId+revision 序合并。
+  readonly onChatContextProjection?: (listener: (payload: {
+    streamId: string;
+    conversationId?: string | null;
+    revision: number;
+    phase: string;
+    nextRequestInputTokens: number | null;
+    previewInputTokens?: number | null;
+    compactionPressureTokens?: number | null;
+    contextWindow: number | null;
+    percent?: number | null;
+    pressure?: string;
+  }) => void) => () => void;
   // 全局活跃流变更广播:main 在任一会话开始/结束流式时推送最新运行中的会话 id 列表。
   readonly onChatActiveStreamsChanged: (listener: (payload: {
     conversationIds: readonly string[];

@@ -8,6 +8,7 @@
     "dev": "pnpm --filter @peer-agent/desktop dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
+    "context:parity-check": "node scripts/check-architecture-governance.mjs",
     "architecture:check": "node scripts/check-architecture-governance.mjs",
     "version:check": "node scripts/check-version.mjs",
     "runtime:pack-check": "node scripts/check-runtime-packages.mjs --contents",

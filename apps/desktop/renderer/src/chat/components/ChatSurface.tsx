@@ -46,11 +46,7 @@ import {
   type MessageRailItemCache,
 } from '../state/messageRailItems';
 import { seedAuthoritativeContextOnSend } from '../state/contextOccupancy';
-import {
-  estimateConversationHistoryTokensIncremental,
-  estimateDraftTokens,
-  type ConversationTokenEstimateCache,
-} from '../state/tokenEstimate';
+import { estimateDraftTokens } from '../state/tokenEstimate';
 import { intakeAttachments } from '../state/attachmentIntake';
 import {
   normalizeStreamSegment,
@@ -823,24 +819,6 @@ export function ChatSurface({
     railItemsCacheRef.current = { conversationId, isZh, cache };
     return cache.items;
   }, [conversationId, isStreaming, isZh, messages]);
-  // 本地历史估算仅用于尚未收到 Runtime 下一请求投影的冷启动降级。
-  const historyTokenCacheRef = useRef<{
-    conversationId: string | null;
-    cache: ConversationTokenEstimateCache;
-  } | null>(null);
-  const historyContextTokens = useMemo(() => {
-    const previous = historyTokenCacheRef.current;
-    const sameConversationCache = previous?.conversationId === conversationId
-      ? previous.cache
-      : undefined;
-    const next = estimateConversationHistoryTokensIncremental(
-      messages,
-      sameConversationCache,
-      isStreaming && Boolean(sameConversationCache),
-    );
-    historyTokenCacheRef.current = { conversationId, cache: next };
-    return next.totalTokens;
-  }, [conversationId, isStreaming, messages]);
   // 草稿 token 增量由 ComposerTokenUsageDisplay 的叶子订阅计算，避免字符输入唤醒消息表面。
   const authoritativeNextRequestInputTokens = authoritativeContext?.nextRequestInputTokens ?? null;
   // 进度条分母优先用权威 contextWindow（与触发判定同窗口），消除 provider 配置窗口与
@@ -1417,15 +1395,18 @@ export function ChatSurface({
       return true;
     }
 
-    // 发送瞬间固化「发送前可见占用」为权威种子：草稿清空后不会仅因口径切换从 63% 掉到 36%。
-    // 真实压缩 / stream done 仍会覆盖；切换模型会清空。
-    const seeded = seedAuthoritativeContextOnSend({
-      previousNextRequestInputTokens: authoritativeContext?.nextRequestInputTokens ?? null,
-      historyContextTokens,
-      draftContextTokens: estimateDraftTokens(text, sentAttachments),
-      contextWindow: authoritativeContext?.contextWindow ?? activeProvider?.contextWindow ?? null,
-    });
-    setAuthoritativeContext(seeded);
+    // 发送瞬间仅在已有 Runtime 权威快照（或全新草稿会话）时并入草稿 seed。
+    // 老会话若 contextSnapshot=null，完整落盘历史可能远大于 Runtime 的微压缩投影；
+    // 用 history 兜底会把数 MB 记录错误显示成 100%。此时保持未知，等待本轮正常 done
+    // 写入 nextRequestInputTokens 后再显示真实占用。
+    if (authoritativeContext) {
+      const seeded = seedAuthoritativeContextOnSend({
+        previousNextRequestInputTokens: authoritativeContext.nextRequestInputTokens,
+        draftContextTokens: estimateDraftTokens(text, sentAttachments),
+        contextWindow: authoritativeContext.contextWindow ?? activeProvider?.contextWindow ?? null,
+      });
+      if (seeded) setAuthoritativeContext(seeded);
+    }
 
     const now = Date.now();
     const userMsg: ChatMsg = { id: nextId(), role: 'user', content: text, timestamp: now, attachments: sentAttachments.length ? sentAttachments : undefined };
@@ -1482,7 +1463,6 @@ export function ChatSurface({
     gitBranchPrefix,
     workspacePath,
     authoritativeContext,
-    historyContextTokens,
     activeProvider?.contextWindow,
     setAuthoritativeContext,
   ]);
@@ -2190,8 +2170,7 @@ export function ChatSurface({
           </div>
           <ComposerTokenUsageDisplay
             conversationId={conversationId}
-            historyContextTokens={historyContextTokens}
-            contextReady={isDraftConversation || loadStatus === 'ready'}
+            contextReady={loadStatus === 'ready' && authoritativeContext != null}
             attachments={attachments}
             authoritativeNextRequestInputTokens={authoritativeNextRequestInputTokens}
             providers={providers}

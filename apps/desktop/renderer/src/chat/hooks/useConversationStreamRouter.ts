@@ -33,7 +33,8 @@ import {
   markDanglingToolCallsInterrupted,
 } from '../state/streamSegments';
 import type { ChatMsg } from '../state/types';
-import { mergeAuthoritativeContextSnapshot } from '../state/contextOccupancy';
+import { applyContextProjectionEvent, mergeAuthoritativeContextSnapshot } from '../state/contextOccupancy';
+import { estimateStreamDeltaTokens } from '../state/tokenEstimate';
 import { useTypewriterStream } from './useTypewriterStream';
 
 /** 路由器需要的、无法下沉到 store 的应用级回调（按会话 id 携带上下文）。 */
@@ -191,6 +192,12 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       } else {
         conversationStore.setState(cid, (prev) => ({ messages: appendText(prev.messages, content) }));
       }
+      // stream_preview（21 号文档 13.2 renderer 侧）：在最近稳定投影之上叠加尚未
+      // 稳定写入 active history 的 assistant delta 浮点估算；稳定阶段快照到达时归零。
+      // 隐藏推理（thinking）不进下一请求，不计入。
+      conversationStore.setState(cid, (prev) => ({
+        streamPreviewTokens: (prev.streamPreviewTokens ?? 0) + estimateStreamDeltaTokens(content),
+      }));
     });
 
     const offThinking = clientApi.onChatStreamThinking(({ streamId, content }) => {
@@ -237,6 +244,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           toolProgress: null,
           turnStartedAt: null,
           streamId: null,
+          // turn_complete 稳定投影已（或即将）替换流式预览，增量归零。
+          streamPreviewTokens: 0,
         });
 
         // 权威占用只接受正数：0/NaN 表示缺失快照，不能 final 覆盖成 0%。
@@ -253,18 +262,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
               mode: 'final',
             }),
           }));
-        } else {
-          conversationStore.setState(cid, (prev) => {
-            if (!prev.authoritativeContext?.provisional) return {};
-            return {
-              authoritativeContext: mergeAuthoritativeContextSnapshot({
-                previous: prev.authoritativeContext,
-                nextRequestInputTokens: null,
-                nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
-                mode: 'final',
-              }),
-            };
-          });
         }
 
         // 用量账本真值在主进程：优先反映 lifetimeUsage，否则按本轮 msgUsage 累加。
@@ -323,6 +320,29 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       });
     });
 
+    // 21 号文档第十三章：消费主进程 per-turn 投影稳定阶段快照
+    // （request_preflight / post_compaction / tool_result / turn_complete）。
+    // 同 streamId 内以单调 revision 丢弃乱序旧快照；稳定快照到达后流式预览归零。
+    const offContextProjection = clientApi.onChatContextProjection
+      ? clientApi.onChatContextProjection((payload) => {
+          const cid = conversationStore.resolveEventConversation(
+            payload.streamId,
+            payload.conversationId ?? undefined,
+          );
+          if (!cid) return;
+          conversationStore.setState(cid, (prev) => ({
+            authoritativeContext: applyContextProjectionEvent({
+              previous: prev.authoritativeContext,
+              streamId: payload.streamId ?? null,
+              revision: payload.revision,
+              nextRequestInputTokens: payload.nextRequestInputTokens,
+              contextWindow: payload.contextWindow,
+            }) ?? prev.authoritativeContext,
+            streamPreviewTokens: 0,
+          }));
+        })
+      : () => {};
+
     const offAborted = clientApi.onChatStreamAborted(({ streamId, conversationId }) => {
       const cid = conversationStore.resolveEventConversation(streamId, conversationId);
       if (!cid) return;
@@ -342,6 +362,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         toolProgress: null,
         turnStartedAt: null,
         streamId: null,
+        streamPreviewTokens: 0,
       });
       conversationStore.setState(cid, (prev) => {
         const msgs = prev.messages as ChatMsg[];
@@ -447,6 +468,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         pendingPermissionCalls: [],
         toolProgress: null,
         streamError: error,
+        streamPreviewTokens: 0,
         // 最终失败时清除“正在重试连接”横幅，避免与错误提示叠加残留。
         providerRecoveryNotice: null,
       });
@@ -677,6 +699,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       offThinking();
       offDone();
       offUsage();
+      offContextProjection();
       offAborted();
       offToolProgress();
       offToolCall();

@@ -964,6 +964,10 @@ export function createLlmChatService({
               goalPlanStore,
               agentProgress,
               resolvedChannel,
+              // qoder 与其他 loop 同权:压缩必须持久化、携带连续性上下文、支持压缩后 system 重建。
+              persistCompaction,
+              continuityContext,
+              rebuildSystemPrompt,
               emitRuntimeEvent,
               runtimeEventState: streamRecord.runtimeEventState,
               providerId: provider.id,
@@ -1201,21 +1205,37 @@ export function createLlmChatService({
   }
 
   /**
-   * Goal handoff 专用：把某会话仍 running 的 intake 流强制收口为 done。
-   * 先标记 terminalEventSent 再 cancel，避免 agent loop 后续 abort/error 覆盖终态。
-   * 用于 goal_create_plan 后 Runner 接管前解锁 UI，并让 outcome resolve 路径不再卡死。
+   * Goal handoff 专用：等待 intake 流自行完成 terminal tool 收尾；只有超时才强制兜底。
+   *
+   * goal_create_plan 会同步触发 plan change，而此时 tools.execute 尚未返回，tool result 也尚未
+   * 写回 Runtime 消息。若这里立即发裸 done + cancel，会抢在 agent loop 的正常 sendDone 前面，
+   * terminalEventSent 随即阻断携带 nextRequestInputTokens 的正确 done，导致 contextSnapshot 永久 null。
+   *
+   * 因此先给 pipeline 一个短暂自然收尾窗口：applyToolResults → onStopped → sendDone → 持久化
+   * contextSnapshot。仅在该路径真的卡住时，才沿用旧的强制 done/cancel 兜底以解锁 UI。
    */
-  function forceCompleteConversationStreams(conversationId, { reason = 'goal_handoff' } = {}) {
+  function forceCompleteConversationStreams(
+    conversationId,
+    { reason = 'goal_handoff', graceMs = 250 } = {},
+  ) {
     const normalized = typeof conversationId === 'string' ? conversationId.trim() : '';
-    if (!normalized) return { completed: 0, streamIds: [] };
+    if (!normalized) return { completed: 0, streamIds: [], released: Promise.resolve([]) };
     const completedIds = [];
     const releasePromises = [];
+    const normalizedGraceMs = Number.isFinite(Number(graceMs))
+      ? Math.max(0, Number(graceMs))
+      : 250;
+
     for (const [streamId, record] of activeStreams.entries()) {
       if (record?.conversationId !== normalized) continue;
       if (!isRunning(record)) continue;
       if (record.released) releasePromises.push(record.released);
-      // 先落 done 终态，后续 cancel 触发的 abort 路径会被 terminalEventSent 去重。
-      if (!record.terminalEventSent) {
+      completedIds.push(streamId);
+
+      setTimeout(() => {
+        // 正常 terminal tool 路径已经发送权威 done 或释放 turn：不再干预。
+        if (!isRunning(record) || record.terminalEventSent) return;
+
         const payload = {
           streamId,
           conversationId: normalized,
@@ -1229,26 +1249,27 @@ export function createLlmChatService({
         record.terminalEventSent = true;
         record.terminalStatus = 'completed';
         record.interrupted = false;
-      }
-      try {
-        runtimeSessions.cancelStream(streamId, reason);
-      } catch (error) {
-        console.warn('[llm-chat] force-complete cancel failed:', error?.message || error);
-      }
-      permissionGate.settleStreamPermissionRequests(streamId, {
-        granted: false,
-        reason,
-      });
-      try {
-        runtimeSessions.settleStream(streamId, 'completed', reason);
-      } catch {}
-      // Handoff waits on released; resolve here so Runner is not blocked if the
-      // original sendMessage finally path is delayed or never reached.
-      record.resolveReleased?.();
-      record.resolveReleased = null;
-      retireStream(streamId);
-      completedIds.push(streamId);
+
+        try {
+          runtimeSessions.cancelStream(streamId, reason);
+        } catch (error) {
+          console.warn('[llm-chat] force-complete cancel failed:', error?.message || error);
+        }
+        permissionGate.settleStreamPermissionRequests(streamId, {
+          granted: false,
+          reason,
+        });
+        try {
+          runtimeSessions.settleStream(streamId, 'completed', reason);
+        } catch {}
+        // Handoff waits on released; resolve here so Runner is not blocked if the
+        // original sendMessage finally path is delayed or never reached.
+        record.resolveReleased?.();
+        record.resolveReleased = null;
+        retireStream(streamId);
+      }, normalizedGraceMs);
     }
+
     return {
       completed: completedIds.length,
       streamIds: completedIds,

@@ -1,6 +1,9 @@
 export const AGENT_LOOP_UNBOUNDED = Number.POSITIVE_INFINITY;
 export const DEFAULT_AGENT_LOOP_MAX_TURNS = AGENT_LOOP_UNBOUNDED;
 
+import { createContextProjectionLifecycle } from '@peer-agent/runtime-core';
+import { applyMicrocompaction } from './compaction-coordinator.mjs';
+
 export function normalizeAgentLoopMaxTurns(value) {
   if (value === undefined || value === null || value === '' || value === false) {
     return AGENT_LOOP_UNBOUNDED;
@@ -38,6 +41,7 @@ function hasBillableUsage(usage) {
 export function createAgentLoopKernel({
   webContents,
   streamId,
+  conversationId = null,
   maxTurns = defaultAgentLoopMaxTurns(),
   maxUnsupportedToolRetries = 1,
   maxEmptyResponseRetries = 1,
@@ -49,8 +53,66 @@ export function createAgentLoopKernel({
   // （{ nextRequestInputTokens, contextWindow, compactionSuggested }），随 done 事件下发。
   // renderer 与下一次 provider 请求前的 Runtime preflight 消费同一口径；返回 null 表示不附带。
   getContextInfo = null,
+  // 21 号文档第十三章：per-turn 投影生命周期的稳定输入闭包。
+  // 返回 { messages, tools, contextWindow }（messages 为当前 Runtime apiMessages）；
+  // kernel 在稳定边界（tool_result / turn_complete）对其做 Layer 1 投影后发布快照。
+  // 未提供时不创建生命周期（测试/旧调用方兼容）。
+  getProjectionInput = null,
 } = {}) {
   const normalizedMaxTurns = normalizeAgentLoopMaxTurns(maxTurns);
+  // per-turn 投影生命周期：同一个 agent turn 内所有阶段（request_preflight /
+  // post_compaction / tool_result / turn_complete）共用单调 revision，renderer 以
+  // revision 序丢弃乱序快照，不再靠 Math.max 锁高位。发布失败不得影响主循环。
+  const contextLifecycle = typeof getProjectionInput === 'function'
+    ? createContextProjectionLifecycle((snapshot) => {
+        try {
+          webContents?.send?.('chat:context:projection', {
+            streamId,
+            conversationId,
+            revision: snapshot.revision,
+            phase: snapshot.projection.phase,
+            nextRequestInputTokens: snapshot.projection.nextRequestInputTokens,
+            previewInputTokens: snapshot.projection.previewInputTokens,
+            compactionPressureTokens: snapshot.projection.compactionPressureTokens,
+            contextWindow: snapshot.projection.contextWindow,
+            percent: snapshot.projection.percent,
+            pressure: snapshot.projection.pressure,
+          });
+        } catch {
+          // 投影事件只服务展示，发送失败不影响 agent loop。
+        }
+      })
+    : null;
+
+  function stableProjectionInput() {
+    if (typeof getProjectionInput !== 'function') return null;
+    try {
+      const input = getProjectionInput();
+      if (!input || !Array.isArray(input.messages)) return null;
+      // 与 computeContextInfo 同口径：稳定阶段先做 Layer 1 微压缩投影，
+      // 保证生命周期快照与 done 快照 / preflight 预算的分子成分一致。
+      return {
+        messages: applyMicrocompaction(input.messages, { log: () => {} }).messages,
+        tools: input.tools ?? null,
+        contextWindow: input.contextWindow ?? null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function publishToolResultProjection() {
+    if (!contextLifecycle) return;
+    const input = stableProjectionInput();
+    if (input) contextLifecycle.toolResult(input);
+  }
+
+  function publishTurnCompleteProjection() {
+    if (!contextLifecycle) return;
+    const input = stableProjectionInput();
+    if (input) contextLifecycle.turnComplete(input);
+  }
+
   const usage = {
     inputTokens: 0,
     outputTokens: 0,
@@ -115,6 +177,8 @@ export function createAgentLoopKernel({
     // 回合自然结束：附带实际上下文用量与权威压力快照，供渲染端圆环对齐。
     // compactionSuggested 不授权 renderer 另起压缩任务；下一次 Runtime preflight 负责压缩并续跑。
     // 最后一轮 usage 快照只供诊断校准；闭包取数失败不得影响收尾。
+    // 21 号文档第十三章：done 前先发布 turn_complete 稳定投影，替换流式预览。
+    publishTurnCompleteProjection();
     let contextInfo = null;
     if (typeof getContextInfo === 'function') {
       try {
@@ -178,6 +242,10 @@ export function createAgentLoopKernel({
     sendError,
     sendHttpError,
     sendLoopExhausted,
+    // per-turn 投影生命周期：loop 把它传给 provider-request-coordinator，
+    // 使 preflight / post_compaction 与 tool_result / turn_complete 共用同一 revision 序。
+    contextLifecycle,
+    publishToolResultProjection,
   };
 }
 

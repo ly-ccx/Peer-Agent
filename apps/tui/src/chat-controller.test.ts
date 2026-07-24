@@ -603,6 +603,11 @@ describe('chat controller', () => {
     let observedInputHistoryTokens = 0;
     let observedContinuityTokens = 0;
     const model: ChatModelPort = {
+      async summarizeCompaction({ messages, formattedHistory }) {
+        expect(messages.length).toBeGreaterThan(0);
+        expect(formattedHistory).toContain('message-0');
+        return 'semantic summary from the active CLI provider';
+      },
       initialize(input) {
         observedInputHistoryTokens = estimateTokensFromMessages(input.input.modelMessages);
         observedContinuityTokens = estimateTokensFromMessages(
@@ -673,11 +678,12 @@ describe('chat controller', () => {
     );
     // UI transcript keeps prior turns and appends one durable compact separator.
     expect(controller.getSnapshot().messages).toHaveLength(beforeUiCount + 1);
-    expect(
-      controller.getSnapshot().messages.some(
-        (message) => message.role === 'system' && message.compact?.phase === 'done',
-      ),
-    ).toBe(true);
+    const compactBoundary = controller.getSnapshot().messages.find(
+      (message) => message.role === 'system' && message.compact?.phase === 'done',
+    );
+    expect(compactBoundary?.compact?.method).toBe('llm');
+    expect(compactBoundary?.compact?.summary).toBe('semantic summary from the active CLI provider');
+    expect(compactBoundary?.compact?.handoffContent).toContain('semantic summary from the active CLI provider');
 
     await controller.send('after-compact');
     expect(observedModelMessageCount).toBeLessThan(beforeModelCount + 2);
@@ -693,8 +699,11 @@ describe('chat controller', () => {
   });
 
   
-  test('compact publishes progress then durable separator in UI transcript', async () => {
+  test('compact falls back to the shared structural summary when the CLI provider fails', async () => {
     const model: ChatModelPort = {
+      async summarizeCompaction() {
+        throw new Error('summary provider unavailable');
+      },
       initialize(input) {
         return {
           messages: [
@@ -743,6 +752,8 @@ describe('chat controller', () => {
     const finalSystem = controller.getSnapshot().messages.filter((message) => message.role === 'system');
     expect(finalSystem).toHaveLength(1);
     expect(finalSystem[0]?.compact?.phase).toBe('done');
+    expect(finalSystem[0]?.compact?.method).toBe('structured');
+    expect(finalSystem[0]?.compact?.summary).toContain('message-0');
     expect(finalSystem[0]?.content).toContain('Compacted');
     expect(seen.some((entry) => entry.startsWith('progress:'))).toBe(true);
     expect(seen.some((entry) => entry.startsWith('done:'))).toBe(true);

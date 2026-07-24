@@ -598,7 +598,6 @@ describe('createProviderChatModel stream recovery', () => {
       }),
     });
     const realSetTimeout = globalThis.setTimeout;
-    // @ts-expect-error test stub collapses retry delay
     globalThis.setTimeout = ((fn: (...args: unknown[]) => void, _ms?: number, ...args: unknown[]) => {
       waits.push(typeof _ms === 'number' ? _ms : 0);
       return realSetTimeout(fn, 0, ...args);

@@ -224,6 +224,12 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.on('chat:compaction', handler);
     return () => ipcRenderer.removeListener('chat:compaction', handler);
   },
+  // 21 号文档第十三章:per-turn 上下文投影稳定阶段快照(preflight/tool_result/turn_complete/post_compaction)。
+  onChatContextProjection: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('chat:context:projection', handler);
+    return () => ipcRenderer.removeListener('chat:context:projection', handler);
+  },
   onChatActiveStreamsChanged: (listener) => {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('chat:stream:active-changed', handler);

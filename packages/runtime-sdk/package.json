@@ -1,6 +1,6 @@
 {
   "name": "@peer-agent/runtime-sdk",
-  "version": "0.1.0",
+  "version": "0.0.1-beta.41",
   "description": "Public host-neutral orchestration SDK for Peer Agent runtimes.",
   "type": "module",
   "license": "MIT",
@@ -30,7 +30,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

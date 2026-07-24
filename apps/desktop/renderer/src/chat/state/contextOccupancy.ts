@@ -7,16 +7,16 @@
 // - 0   只允许出现在「真的空会话」；绝不能作为权威值去盖掉已有历史
 
 export interface ContextOccupancyInput {
-  readonly historyContextTokens: number;
   readonly draftContextTokens: number;
   readonly authoritativeNextRequestInputTokens?: number | null;
+  /** 流式预览增量：仅在有权威基线时叠加，稳定快照到达后归零。 */
+  readonly streamPreviewTokens?: number | null;
   /** Existing conversations stay unknown until messages and the persisted Runtime snapshot restore together. */
   readonly contextReady?: boolean;
 }
 
 export interface SeedAuthoritativeContextInput {
   readonly previousNextRequestInputTokens?: number | null;
-  readonly historyContextTokens: number;
   readonly draftContextTokens: number;
   readonly contextWindow?: number | null;
 }
@@ -29,6 +29,8 @@ export interface SeedAuthoritativeContextResult {
 export interface AuthoritativeContextSnapshot {
   readonly nextRequestInputTokens: number;
   readonly contextWindow: number | null;
+  readonly revision?: number | null;
+  readonly streamId?: string | null;
 }
 
 function finiteNonNegative(value: unknown): number | null {
@@ -44,21 +46,20 @@ function finitePositive(value: unknown): number | null {
 
 export function resolveContextOccupancyTokens(input: ContextOccupancyInput): number | null {
   if (input.contextReady === false) return null;
-  const history = finiteNonNegative(input.historyContextTokens) ?? 0;
   const draft = finiteNonNegative(input.draftContextTokens) ?? 0;
-  // 权威 0 不能盖掉本地历史：真·空会话时 history 也是 0，结果仍是 0。
+  const preview = finiteNonNegative(input.streamPreviewTokens ?? null) ?? 0;
+  // Renderer 只允许在 Runtime 投影之上追加尚未提交的草稿预览与流式 delta 预览。
+  // 已落盘历史不是 provider 请求输入，不能作为权威值回退，否则压缩记录会被重复累计。
   const authoritative = finitePositive(input.authoritativeNextRequestInputTokens);
-  return (authoritative ?? history) + draft;
+  return authoritative == null ? null : authoritative + draft + Math.ceil(preview);
 }
 
 export function seedAuthoritativeContextOnSend(
   input: SeedAuthoritativeContextInput,
-): SeedAuthoritativeContextResult {
-  const history = finiteNonNegative(input.historyContextTokens) ?? 0;
+): SeedAuthoritativeContextResult | null {
   const draft = finiteNonNegative(input.draftContextTokens) ?? 0;
-  // 发送瞬间：显示口径是「权威基线 + 草稿」。草稿随发送清空后，必须把草稿并入权威种子。
-  // previous 缺失/0 时回退本地历史，避免空权威把环打成 0%。
-  const base = finitePositive(input.previousNextRequestInputTokens) ?? history;
+  const base = finitePositive(input.previousNextRequestInputTokens);
+  if (base == null) return null;
   return {
     nextRequestInputTokens: base + draft,
     contextWindow: finiteNonNegative(input.contextWindow),
@@ -93,5 +94,37 @@ export function mergeAuthoritativeContextSnapshot(input: {
   return {
     nextRequestInputTokens: resolvedTokens,
     contextWindow: nextWindow,
+  };
+}
+
+/**
+ * 21 号文档第十三章：消费主进程 per-turn 投影生命周期的稳定阶段快照。
+ * 同一 streamId 内以单调 revision 丢弃乱序旧快照（替代 midturn Math.max 锁高）；
+ * 换流（新 turn）时直接接受新序。非正数 tokens 视为无效，保留旧快照。
+ */
+export function applyContextProjectionEvent(input: {
+  readonly previous: AuthoritativeContextSnapshot | null;
+  readonly streamId: string | null;
+  readonly revision: number | null | undefined;
+  readonly nextRequestInputTokens: number | null | undefined;
+  readonly contextWindow: number | null | undefined;
+}): AuthoritativeContextSnapshot | null {
+  const nextTokens = finitePositive(input.nextRequestInputTokens);
+  if (nextTokens == null) return input.previous;
+  const revision = Number.isFinite(input.revision) ? Number(input.revision) : null;
+  const previous = input.previous ?? null;
+  const sameStream = Boolean(
+    previous?.streamId && input.streamId && previous.streamId === input.streamId,
+  );
+  const previousRevision = Number.isFinite(previous?.revision) ? Number(previous?.revision) : null;
+  // 同流乱序保护：旧 revision 不得覆盖新快照。
+  if (sameStream && revision != null && previousRevision != null && revision <= previousRevision) {
+    return previous;
+  }
+  return {
+    nextRequestInputTokens: nextTokens,
+    contextWindow: finiteNonNegative(input.contextWindow) ?? previous?.contextWindow ?? null,
+    revision,
+    streamId: input.streamId ?? null,
   };
 }
