@@ -20,7 +20,9 @@ import {
 } from './runtime-pipeline-adapter.mjs';
 import { executeModelToolCall } from './tool-orchestrator.mjs';
 
-const QODER_STREAM_IDLE_TIMEOUT_MS = 30_000;
+// Reasoning models and slow queues may pause SSE longer than a short chat idle window.
+// Keep a hard cap so hung streams still fail, but avoid treating 30s thinking gaps as fatal.
+export const QODER_STREAM_IDLE_TIMEOUT_MS = 120_000;
 
 function makeAbortError() {
   const error = new Error('Aborted');

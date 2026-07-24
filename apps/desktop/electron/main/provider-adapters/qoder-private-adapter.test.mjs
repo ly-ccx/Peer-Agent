@@ -5,6 +5,8 @@ import {
   buildQoderPrivateHeaders,
   buildQoderPrivateRequestBody,
   buildQoderRemoteChatAsk,
+  classifyQoderStreamFailure,
+  computeQoderQueueWaitMs,
   normalizeQoderModel,
   normalizeQoderPreparedEndpoint,
   mergeConsecutiveAssistants,
@@ -877,4 +879,103 @@ describe('qoder private adapter', () => {
       }
     });
   });
+
+  it('classifies 10605 queue payloads and caps wait time', () => {
+    const queued = classifyQoderStreamFailure(
+      'provider_stream_error: {"code":"10605","message":{"isQueued":true,"queueType":"slow","waitTime":15228,"queueCount":12}}',
+    );
+    assert.equal(queued.kind, 'queued');
+    assert.equal(queued.code, '10605');
+    assert.equal(queued.queueType, 'slow');
+    assert.equal(queued.waitTimeMs, 15228);
+    assert.equal(computeQoderQueueWaitMs(queued), 15228);
+    assert.equal(computeQoderQueueWaitMs({ waitTimeMs: 999_999 }), 120_000);
+
+    const transient = classifyQoderStreamFailure('provider_stream_error: Rate limit exceeded: tpm (OutputTokens)');
+    assert.equal(transient.kind, 'transient');
+
+    const fatal = classifyQoderStreamFailure('provider_stream_error: Failed to convert request');
+    assert.equal(fatal.kind, null);
+  });
+
+  it('waits and retries when Qoder reports 10605 isQueued', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    let calls = 0;
+    const events = [];
+    globalThis.fetch = async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response([
+          'data: {"code":"10605","message":{"isQueued":true,"queueType":"slow","waitTime":20,"queueCount":3}}',
+          '',
+        ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      }
+      return new Response([
+        'data: {"choices":[{"delta":{"content":"ready"}}]}',
+        'data: [DONE]',
+        '',
+      ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    };
+
+    try {
+      const result = await sendQoderPrivateStream({
+        baseUrl: 'https://example.test/model/v1',
+        apiKey: 'token',
+        model: 'unsupported-model',
+        messages: [{ role: 'user', content: 'hi' }],
+        webContents: { send: (channel, payload) => events.push({ channel, payload }) },
+        streamId: 's-qoder-queue-retry',
+        maxQueueRetries: 2,
+        transientRetryDelaysMs: [],
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.content, 'ready');
+      assert.equal(calls, 2);
+      assert.ok(events.some((event) => event.channel === 'chat:stream:status' && event.payload?.status === 'queued'));
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
+  it('surfaces qoder_queue_timeout after exhausting queue waits', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
+    process.env.PEER_AGENT_PROVIDER_TRACE = '0';
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return new Response([
+        'data: {"code":"10605","message":{"isQueued":true,"queueType":"slow","waitTime":15,"queueCount":99}}',
+        '',
+      ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    };
+
+    try {
+      const result = await sendQoderPrivateStream({
+        baseUrl: 'https://example.test/model/v1',
+        apiKey: 'token',
+        model: 'unsupported-model',
+        messages: [{ role: 'user', content: 'hi' }],
+        webContents: { send: () => {} },
+        streamId: 's-qoder-queue-exhausted',
+        maxQueueRetries: 1,
+        transientRetryDelaysMs: [],
+      });
+
+      assert.equal(result.ok, false);
+      assert.equal(result.queueExhausted, true);
+      assert.match(result.errorText, /qoder_queue_timeout/);
+      assert.equal(calls, 2); // initial + 1 retry
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
+      else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
+    }
+  });
+
 });

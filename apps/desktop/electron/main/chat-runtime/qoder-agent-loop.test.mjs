@@ -190,7 +190,7 @@ describe('agentLoopQoder', () => {
     assert.deepEqual(attempts[0].tools, tools);
     assert.equal(attempts[0].bufferThinkingDeltas, false);
     assert.equal(attempts[0].emitBufferedThinkingDeltas, true);
-    assert.equal(attempts[0].streamIdleTimeoutMs, 30000);
+    assert.equal(attempts[0].streamIdleTimeoutMs, 120000);
     assert.ok(attempts[1].messages.some((message) => /reasoning-only output/.test(message.content)));
     assert.equal(sent.some((event) => event.channel === 'chat:stream:done'), false);
     const error = sent.find((event) => event.channel === 'chat:stream:error');

@@ -94,19 +94,35 @@ function extractProviderEnvelopeError(parsed) {
 
 function extractProviderTopLevelError(parsed) {
   if (!parsed || typeof parsed !== 'object') return null;
-  const message = typeof parsed.message === 'string' ? parsed.message : '';
   const type = typeof parsed.type === 'string' ? parsed.type : '';
-  const code = typeof parsed.code === 'string' ? parsed.code : '';
+  const code = parsed.code != null ? String(parsed.code) : '';
   const details = typeof parsed.details === 'string' ? parsed.details : '';
-  if (!message) return null;
+  const messageField = parsed.message;
+  const nestedQueue = messageField && typeof messageField === 'object' && !Array.isArray(messageField)
+    ? messageField
+    : null;
+  const message = typeof messageField === 'string'
+    ? messageField
+    : nestedQueue
+      ? JSON.stringify(messageField)
+      : '';
+  const isQueued = nestedQueue?.isQueued === true
+    || nestedQueue?.queued === true
+    || code === '10605'
+    || /isQueued["']?\s*:\s*true/i.test(message);
+  if (!message && !isQueued) return null;
   if (
-    parsed.success !== false &&
-    !type.toLowerCase().includes('error') &&
-    !code.toLowerCase().includes('error')
+    !isQueued
+    && parsed.success !== false
+    && !type.toLowerCase().includes('error')
+    && !code.toLowerCase().includes('error')
+    && code !== '10605'
   ) return null;
   return {
-    type: type || code || 'provider_stream_error',
-    message: details ? `${message}: ${details}` : message,
+    type: type || code || (isQueued ? '10605' : 'provider_stream_error'),
+    message: details
+      ? `${message || code}: ${details}`
+      : (message || (isQueued ? JSON.stringify({ code: code || '10605', message: nestedQueue }) : code)),
   };
 }
 

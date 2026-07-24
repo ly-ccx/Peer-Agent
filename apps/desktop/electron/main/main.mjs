@@ -2337,7 +2337,21 @@ ipcMain.handle('chat:context:restored', (_event, { conversationId } = {}) => {
   const conv = conversationStore.getConversation(conversationId);
   if (!conv || !conv.messages?.length) return null;
 
-  const activeMessages = toProjectionMessages(conv.messages);
+  // 同一会话存在两条真实请求路径、组成不同(ADR 42 口径分离):
+  // - 用户直接发送(chat send):renderer 富口径——segments 历史事实 + 附件;
+  // - Goal Runner tick:瘦口径——裸文本历史 + tick 指令,连续性走 system 摘要。
+  // restored 必须按「下一次实际会走哪条路」选口径,否则 goal 会话打开值与 tick 运行值
+  // 互相跳变(曾现象:idle 4% → tick 运行 2%,两个数各自都真,但口径不连续)。
+  const conversationPlans = typeof goalPlanStore?.listPlansByConversation === 'function'
+    ? goalPlanStore.listPlansByConversation(conversationId)
+    : [];
+  const runningPlan = conversationPlans.find((plan) => plan?.runner?.status === 'running') ?? null;
+  const activeMessages = runningPlan
+    ? [
+        ...toRuntimeMessages(conv.messages),
+        { role: 'user', content: buildGoalRunnerMessage(runningPlan, (runningPlan.runner?.roundCount ?? 0) + 1) },
+      ]
+    : toProjectionMessages(conv.messages);
   if (activeMessages.length === 0) return null;
   const continuityContext = continuityContextFromMessages(conv.messages);
 
