@@ -161,12 +161,20 @@ describe('tool result summary', () => {
     expect(runningActivityField(1, 80)).not.toBe(runningActivityField(0, 80));
     expect(formatRunningElapsed(999)).toBe('0s');
     expect(formatRunningElapsed(65_000)).toBe('1:05');
+    // Generic running: activity field + timer only (no static "Working…" label).
     expect(composerRunningStatusLine({
       frame: 0,
-      statusLabel: 'Working…',
+      statusLabel: '',
       elapsedMs: 8_000,
       width: 80,
-    })).toMatch(/^.{12}  Working… · 8s$/);
+    })).toMatch(/^.{12} · 8s$/);
+    // Exceptional states keep a stable semantic label.
+    expect(composerRunningStatusLine({
+      frame: 0,
+      statusLabel: 'Cancelling…',
+      elapsedMs: 8_000,
+      width: 80,
+    })).toMatch(/^.{12}  Cancelling… · 8s$/);
   });
 
   test('composer running status degrades cleanly at compact and narrow widths', () => {

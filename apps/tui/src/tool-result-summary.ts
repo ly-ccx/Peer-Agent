@@ -333,8 +333,10 @@ export function composerRunningStatusLine(options: {
   const width = options.width ?? 80;
   const activity = runningActivityField(options.frame, width);
   const elapsed = formatRunningElapsed(options.elapsedMs ?? 0);
-  if (width < 30) return `${activity} · ${elapsed}`;
-  return `${activity}  ${options.statusLabel.trim()} · ${elapsed}`;
+  const label = options.statusLabel.trim();
+  // Empty label (generic running) keeps the Crush-style activity field + timer.
+  if (width < 30 || !label) return `${activity} · ${elapsed}`;
+  return `${activity}  ${label} · ${elapsed}`;
 }
 
 /** Breathing/pulsing leading glyph for in-flight tool rows. */

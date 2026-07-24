@@ -203,11 +203,15 @@ function ComposerRunningStatusLabel({
   const startedAtRef = useRef(Date.now());
   const activity = runningActivityField(frame, width);
   const elapsed = formatRunningElapsed(Date.now() - startedAtRef.current);
-  const status = composerRunningStatusLabel(locale, runStatus);
+  // Scheme D: generic running is activity + elapsed only. Real exceptional
+  // states (cancel/compact) keep a stable label for semantic clarity.
+  const statusLabel = runStatus === 'running'
+    ? `· ${elapsed}`
+    : `${composerRunningStatusLabel(locale, runStatus)} · ${elapsed}`;
   return (
     <ComposerRunningStatusBar
       activity={activity}
-      statusLabel={width < 30 ? `· ${elapsed}` : `${status} · ${elapsed}`}
+      statusLabel={statusLabel}
     />
   );
 }
