@@ -17,7 +17,14 @@ const CONNECTION_FAILURE_PATTERNS = [
   /ERR_CERT_/i,
   /ECONNRESET|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN/i,
   /UND_ERR_|HeadersTimeoutError|ConnectTimeoutError|SocketError/i,
-  /network|socket hang up|connection reset|connection refused|temporarily unavailable/i,
+  // Bun/Node stream body drops during proxy/VPN jitter.
+  /socket connection was closed unexpectedly/i,
+  /connection closed unexpectedly/i,
+  /socket hang up/i,
+  /other side closed/i,
+  /premature close/i,
+  /network|connection reset|connection refused|temporarily unavailable/i,
+  /stream interrupted/i,
 ];
 
 /** One short backoff before a second connect attempt. */

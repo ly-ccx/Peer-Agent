@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeToolDefinition } from '@peer-agent/runtime-core';
+import {
+  COMPACTION_SUMMARY_PROMPT,
+  COMPACTION_SUMMARY_SYSTEM_PROMPT,
+  type RuntimeToolDefinition,
+} from '@peer-agent/runtime-core';
 import type {
   ModelProvider,
   ModelProviderRequest,
@@ -507,6 +511,41 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     expect(content).toContain('side-effecting');
   });
 
+  test('uses the active provider and shared prompts for compaction without exposing tools', async () => {
+    const requests: ModelProviderRequest[] = [];
+    const progress: number[] = [];
+    const provider: ModelProvider = {
+      async stream(request) {
+        requests.push(request);
+        request.onEvent?.({ type: 'text.delta', content: 'semantic summary' });
+        return completed('semantic summary');
+      },
+    };
+    const model = createProviderChatModel({
+      provider,
+      model: 'model-test',
+      toolDefinitions,
+    });
+
+    const summary = await model.summarizeCompaction?.({
+      messages: [{ role: 'user', content: 'old turn' }],
+      formattedHistory: '[user]: old turn',
+      onProgress: (percent) => progress.push(percent),
+    });
+
+    expect(summary).toBe('semantic summary');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.model).toBe('model-test');
+    expect(requests[0]?.tools).toEqual([]);
+    expect(requests[0]?.temperature).toBe(0.2);
+    expect(requests[0]?.messages).toEqual([
+      { role: 'system', content: COMPACTION_SUMMARY_SYSTEM_PROMPT },
+      { role: 'user', content: '[user]: old turn' },
+      { role: 'user', content: COMPACTION_SUMMARY_PROMPT },
+    ]);
+    expect(progress.at(-1)).toBe(100);
+  });
+
   test('injects a Plan-mode system prompt for plan turns', async () => {
     const requests: ModelProviderRequest[] = [];
     const provider: ModelProvider = {
@@ -534,3 +573,93 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     expect(content).toContain('You are in read-only Plan mode');
   });
 });
+
+
+describe('createProviderChatModel stream recovery', () => {
+  test('retries recoverable stream failure before any deltas', async () => {
+    let attempts = 0;
+    const waits: number[] = [];
+    const provider: ModelProvider = {
+      async stream(request) {
+        attempts += 1;
+        if (attempts === 1) {
+          throw connectionError('The socket connection was closed unexpectedly.');
+        }
+        request.onEvent?.({ type: 'text.delta', content: 'ok after retry' });
+        return completed('ok after retry');
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        toolDefinitions: [],
+      }),
+    });
+    const realSetTimeout = globalThis.setTimeout;
+    // @ts-expect-error test stub collapses retry delay
+    globalThis.setTimeout = ((fn: (...args: unknown[]) => void, _ms?: number, ...args: unknown[]) => {
+      waits.push(typeof _ms === 'number' ? _ms : 0);
+      return realSetTimeout(fn, 0, ...args);
+    }) as typeof setTimeout;
+
+    try {
+      await controller.send('hello');
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+
+    expect(attempts).toBe(2);
+    expect(waits.length).toBeGreaterThan(0);
+    expect(controller.getSnapshot().error).toBeUndefined();
+    expect(controller.getSnapshot().messages.at(-1)?.content).toContain('ok after retry');
+  });
+
+  test('does not retry after partial deltas were emitted', async () => {
+    let attempts = 0;
+    const provider: ModelProvider = {
+      async stream(request) {
+        attempts += 1;
+        request.onEvent?.({ type: 'text.delta', content: 'partial ' });
+        throw connectionError('The socket connection was closed unexpectedly.');
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        toolDefinitions: [],
+      }),
+    });
+    await controller.send('hello');
+    expect(attempts).toBe(1);
+    expect(controller.getSnapshot().error).toContain('socket connection was closed unexpectedly');
+  });
+
+  test('does not retry non-recoverable provider errors', async () => {
+    let attempts = 0;
+    const provider: ModelProvider = {
+      async stream() {
+        attempts += 1;
+        throw new Error('invalid api key');
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        toolDefinitions: [],
+      }),
+    });
+    await controller.send('hello');
+    expect(attempts).toBe(1);
+    expect(controller.getSnapshot().error).toContain('invalid api key');
+  });
+});
+
+function connectionError(message: string): Error {
+  return new TypeError(message);
+}

@@ -1,4 +1,9 @@
-import { collectToolEvidenceRefs, type RuntimeToolDefinition } from '@peer-agent/runtime-core';
+import {
+  collectToolEvidenceRefs,
+  COMPACTION_SUMMARY_PROMPT,
+  COMPACTION_SUMMARY_SYSTEM_PROMPT,
+  type RuntimeToolDefinition,
+} from '@peer-agent/runtime-core';
 import type {
   ModelContentPart,
   ModelMessage,
@@ -19,6 +24,11 @@ import type {
 } from './chat-controller.ts';
 import { computeNextRequestInputTokens } from './context-pressure.ts';
 import { normalizeTuiRuntimeMode, type TuiRuntimeMode } from './tui-mode.ts';
+import {
+  DEFAULT_CONNECTION_RETRY_DELAYS_MS,
+  describeConnectionFailure,
+  isRecoverableConnectionFailure,
+} from './recovering-fetch.ts';
 
 function toUserModelContent(
   content: string,
@@ -122,12 +132,109 @@ function formatSystemContextBlocks(
   return sections.length > 0 ? sections.join('\n\n') : null;
 }
 
+
+/** One short whole-turn retry for recoverable connect/stream drops before any deltas. */
+const DEFAULT_STREAM_RETRY_DELAYS_MS = DEFAULT_CONNECTION_RETRY_DELAYS_MS;
+
+async function waitForRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!(ms > 0)) return;
+  if (signal?.aborted) {
+    const error = new Error('The operation was aborted.');
+    error.name = 'AbortError';
+    throw error;
+  }
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      const error = new Error('The operation was aborted.');
+      error.name = 'AbortError';
+      reject(error);
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+async function streamWithSafeRetry(
+  provider: ModelProvider,
+  request: Parameters<ModelProvider['stream']>[0],
+  options: {
+    readonly retryDelaysMs?: readonly number[];
+    readonly waitImpl?: (ms: number, signal?: AbortSignal) => Promise<void>;
+    readonly onRetry?: (info: { attempt: number; maxRetries: number; delayMs: number; reason: string }) => void;
+  } = {},
+): Promise<Awaited<ReturnType<ModelProvider['stream']>>> {
+  const retryDelaysMs = options.retryDelaysMs ?? DEFAULT_STREAM_RETRY_DELAYS_MS;
+  const waitImpl = options.waitImpl ?? waitForRetry;
+  const maxRetries = retryDelaysMs.length;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    let progressEmitted = false;
+    const originalOnEvent = request.onEvent;
+    try {
+      return await provider.stream({
+        ...request,
+        onEvent(event) {
+          if (event.type === 'text.delta' || event.type === 'reasoning.delta') {
+            progressEmitted = true;
+          }
+          originalOnEvent?.(event);
+        },
+      });
+    } catch (error) {
+      lastError = error;
+      const canRetry =
+        attempt < maxRetries
+        && !progressEmitted
+        && !request.signal?.aborted
+        && isRecoverableConnectionFailure(error);
+      if (!canRetry) throw error;
+      const delayMs = retryDelaysMs[attempt] ?? 0;
+      options.onRetry?.({
+        attempt: attempt + 1,
+        maxRetries,
+        delayMs,
+        reason: describeConnectionFailure(error),
+      });
+      await waitImpl(delayMs, request.signal);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 export function createProviderChatModel(options: CreateProviderChatModelOptions): ChatModelPort {
   const defaultToolDefinitions = options.toolDefinitions ?? [];
   const toolDefinitionsForMode = (mode: TuiRuntimeMode) =>
     options.toolDefinitionsForMode?.(mode) ?? defaultToolDefinitions;
 
   return {
+    async summarizeCompaction(input) {
+      let streamedChars = 0;
+      const result = await streamWithSafeRetry((options.getProvider?.() ?? options.provider), {
+        model: options.getModel?.() ?? options.model,
+        messages: [
+          { role: 'system', content: COMPACTION_SUMMARY_SYSTEM_PROMPT },
+          { role: 'user', content: input.formattedHistory },
+          { role: 'user', content: COMPACTION_SUMMARY_PROMPT },
+        ],
+        tools: [],
+        temperature: 0.2,
+        maxOutputTokens: 4096,
+        onEvent(event) {
+          if (event.type !== 'text.delta') return;
+          streamedChars += event.content.length;
+          input.onProgress?.(Math.min(95, 10 + Math.floor(streamedChars / 80)));
+        },
+      });
+      input.onProgress?.(100);
+      return result.content;
+    },
     initialize(input, context) {
       const mode = normalizeTuiRuntimeMode(context.run.mode);
       const baseSystemPrompt = options.getSystemPrompt?.() ?? options.systemPrompt;
@@ -189,7 +296,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         contextWindow,
         model,
       });
-      const result = await (options.getProvider?.() ?? options.provider).stream({
+      const result = await streamWithSafeRetry((options.getProvider?.() ?? options.provider), {
         model,
         messages: state.modelMessages,
         tools,

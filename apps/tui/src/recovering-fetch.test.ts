@@ -83,7 +83,16 @@ describe('CLI recovering fetch', () => {
     expect(attempts).toBe(DEFAULT_CONNECTION_RETRY_DELAYS_MS.length + 1);
   });
 
-  test('describes connection failures with optional cause codes', () => {
+  
+  test('classifies Bun socket closed and stream interrupted as recoverable', () => {
+    expect(isRecoverableConnectionFailure(
+      connectionError('The socket connection was closed unexpectedly. For more information, pass verbose: true in the second argument to fetch()'),
+    )).toBe(true);
+    expect(isRecoverableConnectionFailure(connectionError('Stream interrupted'))).toBe(true);
+    expect(isRecoverableConnectionFailure(connectionError('other side closed'))).toBe(true);
+    expect(isRecoverableConnectionFailure(connectionError('premature close'))).toBe(true);
+  });
+test('describes connection failures with optional cause codes', () => {
     expect(describeConnectionFailure(connectionError('fetch failed', 'ECONNRESET')))
       .toBe('fetch failed (ECONNRESET)');
   });
