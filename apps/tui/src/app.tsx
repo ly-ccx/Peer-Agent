@@ -880,20 +880,31 @@ function ComposerDock({
       : 0;
   const terminal = useTerminalDimensions();
   const dividerWidth = composerContentWidth(terminal.width, layout.outerPadding);
-  // Prefer OpenTUI soft-wrap visual rows over pure draft estimation so natural
-  // typing grows the shell as soon as the caret wraps (not only on resize).
-  const [measuredVisualRows, setMeasuredVisualRows] = useState(1);
+  // Measure the live editor geometry, but never make height growth depend only on
+  // post-layout virtualLineCount (that becomes a chicken-and-egg after the first wraps).
+  // Primary source of truth is pure draft+wrapWidth estimation; live metrics only refine it.
+  const [measuredEditorWidth, setMeasuredEditorWidth] = useState<number | undefined>(undefined);
+  const [measuredVisualRows, setMeasuredVisualRows] = useState<number | undefined>(undefined);
   useEffect(() => {
     const editor = editorRef.current as (TextareaRenderable & {
       virtualLineCount?: number;
+      width?: number;
     }) | null;
-    const next = Math.max(1, Math.floor(editor?.virtualLineCount ?? 1));
-    setMeasuredVisualRows((current) => (current === next ? current : next));
+    if (!editor) return;
+    const nextWidth = Math.max(1, Math.floor(editor.width ?? 0));
+    if (nextWidth > 0) {
+      setMeasuredEditorWidth((current) => (current === nextWidth ? current : nextWidth));
+    }
+    const nextRows = Math.max(1, Math.floor(editor.virtualLineCount ?? 0));
+    if (nextRows > 0) {
+      setMeasuredVisualRows((current) => (current === nextRows ? current : nextRows));
+    }
   }, [draft, dividerWidth, editorRef, snapshot.status]);
   const composerLayout = composerLayoutModel({
     draft,
     contentWidth: dividerWidth,
     runtimeStatus: snapshot.status,
+    measuredEditorWidth,
     measuredVisualRows,
   });
   const composerBackground = COLOR.background;

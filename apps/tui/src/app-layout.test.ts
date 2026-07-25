@@ -97,6 +97,7 @@ describe('TUI app layout', () => {
     expect(composerSource).toContain('height={height}');
     expect(dockSource).toContain('height={composerLayout.inputRows}');
     expect(dockSource).toContain('virtualLineCount');
+    expect(dockSource).toContain('measuredEditorWidth');
     expect(dockSource).toContain('measuredVisualRows');
     expect(dockSource).toContain('Running status sits above the quiet divider');
   });

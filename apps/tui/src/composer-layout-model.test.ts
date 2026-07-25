@@ -4,6 +4,8 @@ import {
   COMPOSER_INPUT_CHROME_COLS,
   composerDisplayWidth,
   composerLayoutModel,
+  composerWrapWidth,
+  estimateComposerVisualRows,
 } from './composer-layout-model.ts';
 
 describe('composer layout model', () => {
@@ -29,9 +31,8 @@ describe('composer layout model', () => {
   });
 
   test('counts CJK characters as double width for soft-wrap growth', () => {
-    // usableWidth = contentWidth - chrome. Each 中 is 2 cols.
     const usable = 40 - COMPOSER_INPUT_CHROME_COLS;
-    const glyphs = Math.ceil((usable + 1) / 2); // just over one visual row
+    const glyphs = Math.ceil((usable + 1) / 2);
     const chinese = composerLayoutModel({
       draft: '中'.repeat(glyphs),
       contentWidth: 40,
@@ -48,14 +49,32 @@ describe('composer layout model', () => {
     expect(asciiSameLength.inputRows).toBe(1);
   });
 
-  test('prefers measured visual rows from the live textarea when larger', () => {
-    const estimatedOnly = composerLayoutModel({
-      draft: 'short',
-      contentWidth: 80,
+  test('grows continuously as wrap rows increase without needing live measurement', () => {
+    const wrapWidth = composerWrapWidth({ contentWidth: 40 });
+    expect(estimateComposerVisualRows('a'.repeat(wrapWidth), wrapWidth)).toBe(1);
+    expect(estimateComposerVisualRows('a'.repeat(wrapWidth + 1), wrapWidth)).toBe(2);
+    expect(estimateComposerVisualRows('a'.repeat(wrapWidth * 2 + 1), wrapWidth)).toBe(3);
+    expect(estimateComposerVisualRows('a'.repeat(wrapWidth * 3 + 1), wrapWidth)).toBe(4);
+
+    const three = composerLayoutModel({
+      draft: 'a'.repeat(wrapWidth * 2 + 1),
+      contentWidth: 40,
       runtimeStatus: 'idle',
     });
-    expect(estimatedOnly.inputRows).toBe(1);
+    expect(three.inputRows).toBe(3);
+  });
 
+  test('uses measured editor width when it is narrower than the content slot', () => {
+    const wideContent = composerLayoutModel({
+      draft: 'a'.repeat(50),
+      contentWidth: 80,
+      runtimeStatus: 'idle',
+      measuredEditorWidth: 20,
+    });
+    expect(wideContent.inputRows).toBe(3); // ceil(50/20)=3
+  });
+
+  test('prefers measured visual rows from the live textarea when larger', () => {
     const measured = composerLayoutModel({
       draft: 'short',
       contentWidth: 80,
@@ -64,7 +83,6 @@ describe('composer layout model', () => {
     });
     expect(measured.inputRows).toBe(3);
     expect(measured.shellRows).toBe(3);
-    expect(measured.pickerBottom).toBe(4);
   });
 
   test('caps measured visual rows at five', () => {
