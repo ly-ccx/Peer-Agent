@@ -351,6 +351,10 @@ describe('TUI app layout', () => {
       appSource.indexOf('function ErrorBanner'),
       appSource.indexOf('function SlashCommandMenu'),
     );
+    const dockSource = appSource.slice(
+      appSource.indexOf('function ComposerDock'),
+      appSource.indexOf('export function App'),
+    );
 
     expect(errorBannerSource).toContain('<box flexShrink={0}');
     expect(errorBannerSource).not.toContain('height={1}');
@@ -360,6 +364,10 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('const menuReserve = slashOpen');
     expect(appSource).toContain('paddingTop={menuReserve}');
     expect(appSource).not.toContain('paddingTop={menuReserve + layout.outerPaddingY}');
+    // Model picker reserve must include title so absolute overlay does not overdraw ErrorBanner.
+    expect(dockSource).toContain('+ 1 // title');
+    expect(dockSource).toContain('modelPickerVisibleRows + modelPickerChromeRows');
+    expect(dockSource).toContain('(modelPickerShowHint ? 1 : 0)');
   });
 
   test('makes chat history text selectable and copies active selection on Ctrl/Cmd+C', () => {
@@ -423,7 +431,10 @@ describe('TUI app layout', () => {
     expect(modelPickerSource).toContain('bottom={bottom}');
     expect(modelPickerSource).not.toContain('bottom={5}');
     expect(modelPickerSource).not.toContain('paddingTop={1}');
-    expect(dockSource).toContain('Math.min(modelPickerMaxVisible, Math.max(1, modelPickerRows.length)) + 3');
+    expect(dockSource).toContain('const modelPickerChromeRows =');
+    expect(dockSource).toContain('+ 1 // title');
+    expect(dockSource).toContain('modelPickerVisibleRows + modelPickerChromeRows');
+    expect(dockSource).not.toContain('Math.min(modelPickerMaxVisible, Math.max(1, modelPickerRows.length)) + 3');
     expect(modelPickerSource).toContain('zIndex={100}');
     expect(modelPickerSource).toContain('<strong>{title}</strong>');
     // Group chips must wrap so later providers are not clipped off-screen.

@@ -872,11 +872,23 @@ function ComposerDock({
   readonly modelPickerMaxVisible: number;
   readonly modelPickerShowHint: boolean;
 }) {
+  // Absolute picker height must match reserved paddingTop so ErrorBanner/history
+  // above the dock are not character-overdrawn. Count every chrome row that
+  // ModelPickerMenu actually renders (title was previously missing).
+  const modelPickerVisibleRows = Math.min(
+    modelPickerMaxVisible,
+    Math.max(1, modelPickerRows.length),
+  );
+  const modelPickerChromeRows =
+    1 // top border
+    + 1 // title
+    + (modelPickerGroups.length > 0 ? 1 : 0)
+    + 1 // search
+    + (modelPickerShowHint ? 1 : 0);
   const menuReserve = slashOpen
-    ? Math.min(slashMaxVisible, Math.max(1, slashItems.length)) + 1
+    ? Math.min(slashMaxVisible, Math.max(1, slashItems.length)) + 1 // top border
     : modelPickerOpen
-      // groups + search + optional hint around the visible rows
-      ? Math.min(modelPickerMaxVisible, Math.max(1, modelPickerRows.length)) + 3
+      ? modelPickerVisibleRows + modelPickerChromeRows
       : 0;
   const terminal = useTerminalDimensions();
   const dividerWidth = composerContentWidth(terminal.width, layout.outerPadding);
@@ -1400,7 +1412,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     : layout.density === 'narrow'
       ? 3
       : 2;
-  const welcomeModelVisibleRows = Math.min(welcomeModelMaxVisible, Math.max(1, modelPickerSelectableRows.length)) + 2;
+  // Match ModelPickerMenu chrome: title + groups + search (hint/border handled by the extra +2 offset below).
+  const welcomeModelVisibleRows = Math.min(welcomeModelMaxVisible, Math.max(1, modelPickerSelectableRows.length))
+    + 1 // title
+    + (modelPickerGroupLabels.length > 0 ? 1 : 0)
+    + 1; // search
   const commandWindow = commandSurface
     ? slashCommandWindow(commandItems, commandSelection, pickerLayout.commandMaxVisible)
     : [];
