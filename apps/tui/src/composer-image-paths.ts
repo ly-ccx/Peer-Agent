@@ -118,6 +118,39 @@ export function extractImagePathTokens(text: string): string[] {
   return paths;
 }
 
+/**
+ * Split the draft into meaningful segments (text fragments and image chips)
+ * and check whether every non-empty segment still appears in target.
+ * This detects mid-text insertion where the previous draft is preserved
+ * but split by the newly pasted content.
+ *
+ * Segments are split on image chips AND on whitespace, because a pasted
+ * image path inserted at the caret will also split plain text fragments.
+ */
+function allSegmentsPresentIn(draft: string, target: string): boolean {
+  // Split on image chips, keeping the chips as segments too.
+  const chipSegments = draft
+    .split(IMAGE_CHIP_SPLIT_RE)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  // Further split each non-chip segment on whitespace into word-like tokens.
+  const segments: string[] = [];
+  for (const seg of chipSegments) {
+    if (seg.startsWith('[Image ') && seg.endsWith(']')) {
+      // Image chip — keep as-is.
+      segments.push(seg);
+    } else {
+      // Plain text — split on whitespace to handle mid-word insertion.
+      const words = seg.split(/\s+/).filter((w) => w.length > 0);
+      if (words.length === 0) continue;
+      segments.push(...words);
+    }
+  }
+  if (segments.length === 0) return false;
+  // Every segment must appear in target for this to be a mid-text insertion.
+  return segments.every((seg) => target.includes(seg));
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -134,6 +167,12 @@ export function mergeImagePasteWithExistingDraft(nextText: string, previousDraft
   if (nextText.includes(previousDraft) || previousDraft.includes(nextText)) return nextText;
   const imagePaths = extractImagePathTokens(nextText);
   if (imagePaths.length === 0) return nextText;
+
+  // Check whether all non-empty segments of the previous draft (text fragments
+  // and image chips alike) are still present in nextText. If they are, the
+  // paste was an insertion at the caret, not a full-textarea replacement, so
+  // we must not merge — doing so would duplicate the existing content.
+  if (allSegmentsPresentIn(previousDraft, nextText)) return nextText;
 
   const previous = previousDraft.replace(/[ 	]+$/g, '');
   const next = nextText.replace(/^[ 	]+/g, '');

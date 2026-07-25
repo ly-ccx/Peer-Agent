@@ -105,6 +105,78 @@ describe('extractImagePathTokens + loadLocalImageAttachments', () => {
     expect(mergeImagePasteWithExistingDraft('先帮我看一下这个问题', '先帮我看一下这个问题很长')).toBe('先帮我看一下这个问题');
   });
 
+  test('does not duplicate content when pasting image mid-text (caret insertion)', () => {
+    const imagePath1 = '/var/folders/x/otty-paste/46-B9694CBE.png';
+    const imagePath2 = '/var/folders/x/otty-paste/49-1A896806.png';
+    // Previous draft had text + one image chip
+    const previousDraft = `sad [Image 46-B9694CBE.png]`;
+    // User pasted a new image path in the middle (between "sad" and the chip)
+    const nextText = `sad ${imagePath2} [Image 46-B9694CBE.png]`;
+    // Should NOT merge — all previous segments are still present in nextText
+    expect(mergeImagePasteWithExistingDraft(nextText, previousDraft)).toBe(nextText);
+  });
+
+  test('does not duplicate content when pasting image between two text segments', () => {
+    const imagePath = '/var/folders/x/otty-paste/49-1A896806.png';
+    const previousDraft = 'hello world';
+    // User pasted image path in the middle of the text
+    const nextText = `hello ${imagePath} world`;
+    // All segments of previousDraft ("hello" and "world") are present
+    expect(mergeImagePasteWithExistingDraft(nextText, previousDraft)).toBe(nextText);
+  });
+
+  test('still merges when paste fully replaces textarea (no previous content remains)', () => {
+    const imagePath = '/var/folders/x/otty-paste/4617829306.png';
+    // Previous draft is completely gone — paste replaced everything
+    expect(mergeImagePasteWithExistingDraft(imagePath, 'completely different text')).toBe(
+      `completely different text ${imagePath}`,
+    );
+  });
+
+  test('does not duplicate when previous draft has image chip and paste splits text around it', () => {
+    const imagePath = '/var/folders/x/otty-paste/49-1A896806.png';
+    const previousDraft = 'sad [Image 46-B9694CBE.png] mode_agent_access';
+    // Paste inserted in the middle, splitting the draft
+    const nextText = `sad ${imagePath} [Image 46-B9694CBE.png] mode_agent_access`;
+    expect(mergeImagePasteWithExistingDraft(nextText, previousDraft)).toBe(nextText);
+  });
+
+  test('does not duplicate content when pasting image mid-text (caret insertion)', () => {
+    const imagePath1 = '/var/folders/x/otty-paste/46-B9694CBE.png';
+    const imagePath2 = '/var/folders/x/otty-paste/49-1A896806.png';
+    // Previous draft had text + one image chip
+    const previousDraft = `sad [Image 46-B9694CBE.png]`;
+    // User pasted a new image path in the middle (between "sad" and the chip)
+    const nextText = `sad ${imagePath2} [Image 46-B9694CBE.png]`;
+    // Should NOT merge — all previous segments are still present in nextText
+    expect(mergeImagePasteWithExistingDraft(nextText, previousDraft)).toBe(nextText);
+  });
+
+  test('does not duplicate content when pasting image between two text segments', () => {
+    const imagePath = '/var/folders/x/otty-paste/49-1A896806.png';
+    const previousDraft = 'hello world';
+    // User pasted image path in the middle of the text
+    const nextText = `hello ${imagePath} world`;
+    // All segments of previousDraft ("hello" and "world") are present
+    expect(mergeImagePasteWithExistingDraft(nextText, previousDraft)).toBe(nextText);
+  });
+
+  test('still merges when paste fully replaces textarea (no previous content remains)', () => {
+    const imagePath = '/var/folders/x/otty-paste/4617829306.png';
+    // Previous draft is completely gone — paste replaced everything
+    expect(mergeImagePasteWithExistingDraft(imagePath, 'completely different text')).toBe(
+      `completely different text ${imagePath}`,
+    );
+  });
+
+  test('does not duplicate when previous draft has image chip and paste splits text around it', () => {
+    const imagePath = '/var/folders/x/otty-paste/49-1A896806.png';
+    const previousDraft = 'sad [Image 46-B9694CBE.png] mode_agent_access';
+    // Paste inserted in the middle, splitting the draft
+    const nextText = `sad ${imagePath} [Image 46-B9694CBE.png] mode_agent_access`;
+    expect(mergeImagePasteWithExistingDraft(nextText, previousDraft)).toBe(nextText);
+  });
+
   test('loads existing image files into data-url MessageImage payloads', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'peer-tui-image-'));
     const imagePath = path.join(dir, 'shot.png');
