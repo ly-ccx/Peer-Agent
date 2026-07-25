@@ -8,6 +8,7 @@ import {
   createRuntimeToolProjection,
   renderSystemContext,
 } from './llm-prompts.mjs';
+import { CANONICAL_HISTORY_PROJECTOR_VERSION } from '@peer-agent/runtime-core';
 import {
   normalizeAnthropicMessages,
   normalizeOpenAIMessages,
@@ -493,6 +494,7 @@ function wrapWebContentsForRuntimeEvents(
           conversationStore.updateContextSnapshot(streamRecord.conversationId, {
             nextRequestInputTokens: Number(payload.nextRequestInputTokens),
             contextWindow: Number.isFinite(Number(payload?.contextWindow)) ? Number(payload.contextWindow) : null,
+            projectorVersion: CANONICAL_HISTORY_PROJECTOR_VERSION,
             source: 'desktop',
           });
         }

@@ -1,5 +1,9 @@
 import { createConversationStore } from '@peer-agent/conversation-store';
 import { buildCompactionMarker } from '@peer-agent/protocol';
+import {
+  CANONICAL_HISTORY_PROJECTOR_VERSION,
+  projectConversationHistory,
+} from '@peer-agent/runtime-core';
 import { realpathSync } from 'node:fs';
 import type { ModelMessage, RuntimeModelSelection } from '@peer-agent/runtime-node';
 
@@ -28,6 +32,7 @@ export interface TuiConversationRestore {
     readonly nextRequestInputTokens: number;
     readonly contextWindow: number | null;
     readonly model: string;
+    readonly projectorVersion: number;
   };
 }
 
@@ -54,6 +59,7 @@ interface ConversationStore {
     contextWindow: number | null;
     modelProviderId: string | null;
     model: string;
+    projectorVersion: number;
     source: 'tui';
   }): unknown;
   addUsage(id: string, usage: NonNullable<ChatSnapshot['usage']>): unknown;
@@ -446,59 +452,16 @@ function storedCompactionCard(value: Record<string, unknown>): ChatMessage['comp
   };
 }
 
-function modelMessagesFromStored(value: Record<string, unknown>): ModelMessage[] {
-  if (compactionRecord(value._compaction)) return [];
-  const role = String(value.role);
-  const content = typeof value.content === 'string' ? value.content : '';
-  if (role === 'user') return [{ role: 'user', content }];
-  if (role === 'system') return [];
-
-  const restored = toolsFromStored(value);
-  const tools = restored.tools ?? (restored.tool ? [restored.tool] : []);
-  if (role === 'assistant' || role === 'tool') {
-    if (tools.length === 0) {
-      return role === 'assistant' && content ? [{ role: 'assistant', content }] : [];
-    }
-    const calls = tools.map((tool, index) => ({
-      id: tool.toolCallId || `restored-tool-${index}`,
-      name: tool.capabilityId,
-      arguments: JSON.stringify(tool.arguments ?? {}),
-    }));
-    return [
-      ...(role === 'assistant' || content
-        ? [{ role: 'assistant' as const, content, toolCalls: calls }]
-        : []),
-      ...tools.map((tool, index) => ({
-        role: 'tool' as const,
-        content: tool.detail,
-        toolCallId: calls[index]!.id,
-      })),
-    ];
-  }
-  return [];
-}
-
 function activeStoredContext(messages: readonly Record<string, unknown>[]): {
   readonly modelMessages: readonly ModelMessage[];
   readonly continuityContext?: string;
 } {
-  let boundaryIndex = -1;
-  let continuityContext: string | undefined;
-  messages.forEach((message, index) => {
-    const marker = compactionRecord(message._compaction);
-    if (!marker) return;
-    boundaryIndex = index;
-    continuityContext = (
-      typeof marker.summary === 'string' && marker.summary.trim()
-        ? marker.summary
-        : typeof message.content === 'string'
-          ? message.content
-          : ''
-    ).trim() || undefined;
-  });
+  const projected = projectConversationHistory(messages);
   return {
-    modelMessages: messages.slice(boundaryIndex + 1).flatMap(modelMessagesFromStored),
-    ...(continuityContext ? { continuityContext } : {}),
+    modelMessages: projected.messages as readonly ModelMessage[],
+    ...(projected.continuityContext
+      ? { continuityContext: projected.continuityContext }
+      : {}),
   };
 }
 
@@ -636,6 +599,7 @@ export function createTuiConversationPersistence(options: {
           : null;
         const storedTokens = Number(contextSnapshot?.nextRequestInputTokens);
         const storedWindow = Number(contextSnapshot?.contextWindow);
+        const storedProjectorVersion = Number(contextSnapshot?.projectorVersion);
         const storedModel = typeof contextSnapshot?.model === 'string'
           ? contextSnapshot.model.trim()
           : '';
@@ -649,7 +613,10 @@ export function createTuiConversationPersistence(options: {
             : {}),
           modelSelection: restoredSelection(stored),
           usage: restoredContextUsage(messages),
-          ...(Number.isFinite(storedTokens) && storedTokens >= 0 && storedModel
+          ...(Number.isFinite(storedTokens)
+            && storedTokens >= 0
+            && storedModel
+            && storedProjectorVersion === CANONICAL_HISTORY_PROJECTOR_VERSION
             ? {
               contextSnapshot: {
                 nextRequestInputTokens: Math.floor(storedTokens),
@@ -657,6 +624,7 @@ export function createTuiConversationPersistence(options: {
                   ? Math.floor(storedWindow)
                   : null,
                 model: storedModel,
+                projectorVersion: CANONICAL_HISTORY_PROJECTOR_VERSION,
               },
             }
             : {}),
@@ -796,6 +764,7 @@ export function createTuiConversationPersistence(options: {
             contextWindow: snapshot.requestProjection.contextWindow,
             modelProviderId: modelProviderId(model),
             model: snapshot.requestProjection.model,
+            projectorVersion: CANONICAL_HISTORY_PROJECTOR_VERSION,
             source: 'tui',
           });
         }

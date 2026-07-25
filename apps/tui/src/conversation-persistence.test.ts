@@ -171,6 +171,7 @@ describe('TUI conversation persistence', () => {
         contextWindow: 500_000,
         modelProviderId: 'provider-a::model-a',
         model: 'model-a',
+        projectorVersion: 1,
         source: 'tui',
       }],
     });
@@ -326,6 +327,7 @@ describe('TUI conversation persistence', () => {
         nextRequestInputTokens: 39_000,
         contextWindow: 500_000,
         model: 'model-b',
+        projectorVersion: 1,
       },
       messages: [
         { id: 'old-user', role: 'user', content: 'remember this' },
@@ -378,6 +380,7 @@ describe('TUI conversation persistence', () => {
         nextRequestInputTokens: 39_000,
         contextWindow: 500_000,
         model: 'model-b',
+        projectorVersion: 1,
       },
     });
     const controller = createChatController({ host: inertHost(), model: createDemoChatModel() });
@@ -403,6 +406,46 @@ describe('TUI conversation persistence', () => {
       method: 'appendMessage',
       args: ['stored-1', { id: 'new-user', role: 'user', content: 'continue', timestamp: 456 }],
     }]);
+  });
+
+  test('rejects a legacy context snapshot without the canonical projector version', () => {
+    const stored = {
+      id: 'legacy-projection',
+      mode: 'chat',
+      model: 'model-a',
+      contextSnapshot: {
+        nextRequestInputTokens: 210_000,
+        contextWindow: 500_000,
+        model: 'model-a',
+      },
+      messages: [
+        { id: 'legacy-user', role: 'user', content: 'resume me' },
+        { id: 'legacy-assistant', role: 'assistant', content: 'ready' },
+      ],
+    };
+    const persistence = createTuiConversationPersistence({
+      workspacePath: '/workspace',
+      initialMode: 'chat',
+      initialModel: selection,
+      store: {
+        listConversations: () => [stored],
+        getConversation: (id: string) => id === stored.id ? stored : null,
+        createConversation: () => ({ id: 'unused' }),
+        appendMessage() {},
+        updateMode() {},
+        updateModelEffort() {},
+        addUsage() {},
+      },
+    });
+
+    const restored = persistence.loadConversation(stored.id);
+
+    expect(restored).not.toBeNull();
+    expect(restored?.contextSnapshot).toBeUndefined();
+    expect(restored?.modelMessages).toEqual([
+      { role: 'user', content: 'resume me' },
+      { role: 'assistant', content: 'ready' },
+    ]);
   });
 
   test('loads the complete Desktop transcript but resumes only after the latest compaction marker', () => {
@@ -476,12 +519,13 @@ describe('TUI conversation persistence', () => {
     expect(restored?.continuityContext).toBe('remember the durable decision');
     expect(restored?.modelMessages).toEqual([
       { role: 'user', content: 'use the tool' },
+      { role: 'assistant', content: 'done' },
       {
         role: 'assistant',
-        content: 'done',
+        content: null,
         toolCalls: [{ id: 'call-1', name: 'lookup', arguments: '{"key":"value"}' }],
       },
-      { role: 'tool', content: 'tool output', toolCallId: 'call-1' },
+      { role: 'tool', content: 'tool output', toolCallId: 'call-1', name: 'lookup' },
     ]);
     expect(JSON.stringify(restored?.modelMessages)).not.toContain('old secret context');
   });

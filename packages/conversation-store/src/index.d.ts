@@ -15,6 +15,7 @@ export interface ConversationContextSnapshot {
   readonly model: string | null;
   readonly computedAt: string;
   readonly source: 'desktop' | 'tui';
+  readonly projectorVersion: number;
 }
 
 export interface ConversationMeta {

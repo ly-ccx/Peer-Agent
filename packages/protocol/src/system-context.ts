@@ -94,7 +94,11 @@ export interface ChatProviderMessage {
 }
 
 export interface ChatSendRequest {
-  readonly messages: readonly ChatProviderMessage[];
+  /**
+   * @deprecated Desktop Main projects canonical history from conversationId.
+   * Kept optional only for non-persisted/legacy callers during migration.
+   */
+  readonly messages?: readonly ChatProviderMessage[];
   readonly streamId: string;
   /**
    * 助手消息的持久化主键（renderer 在发送前已 append 的空 assistant 占位消息 id）。

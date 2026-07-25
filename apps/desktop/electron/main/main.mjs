@@ -52,7 +52,11 @@ import { resolveDockIconPaths } from './dock-icon-paths.mjs';
 import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
 import { buildRuntimeTools, createLlmChatService } from './llm-chat-service.mjs';
 import { removeConversationToolArtifacts } from '@peer-agent/runtime-node';
-import { createContextProjectionLifecycle } from '@peer-agent/runtime-core';
+import {
+  CANONICAL_HISTORY_PROJECTOR_VERSION,
+  createContextProjectionLifecycle,
+  projectConversationHistory,
+} from '@peer-agent/runtime-core';
 import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
 import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
@@ -377,18 +381,16 @@ function continuityContextFromCompactionResult(result) {
   }];
 }
 
-function continuityContextFromMessages(messages = []) {
-  const index = messages.findLastIndex((message) => message?._compaction);
-  if (index < 0) return [];
-  const message = messages[index];
-  const handoff = message._compaction;
+function desktopContinuityContextFromProjection(projection) {
+  const handoff = projection?.continuity;
+  if (!handoff) return [];
   return [{
-    id: `conversation-compact:${message.id || index}`,
-    method: handoff.method || 'unknown',
-    originalMessageCount: handoff.originalMessageCount ?? 0,
-    beforeTokens: handoff.beforeTokens ?? 0,
-    afterTokens: handoff.afterTokens ?? 0,
-    summary: handoff.summary || message.content || '',
+    id: `conversation-compact:${handoff.sourceMessageId}`,
+    method: handoff.method,
+    originalMessageCount: handoff.originalMessageCount,
+    beforeTokens: handoff.beforeTokens,
+    afterTokens: handoff.afterTokens,
+    summary: handoff.summary,
   }];
 }
 
@@ -480,82 +482,25 @@ function getRunnerWebContents() {
   return getMainWindowWebContents(BrowserWindow.getAllWindows());
 }
 
-function toRuntimeMessages(messages = []) {
-  const list = Array.isArray(messages) ? messages : [];
-  // 口径分离（ADR 42）：按最后一条 _compaction 边界切片，只保留压缩点之后的尾部原文，
-  // 丢弃压缩点之前的原文（那部分仅供 UI 回看，摘要经 continuityContext 注入 system）。
-  // 与对话模式发送口径（renderer apiMessageMapping.ts 的 lastCompactionIndex+slice）对齐，
-  // 避免目标模式每 tick 把压缩前全量历史重复喂回、上下文停在高位并触发重复压缩。
-  let lastCompactionIndex = -1;
-  for (let i = 0; i < list.length; i += 1) {
-    if (list[i]?._compaction) lastCompactionIndex = i;
-  }
-  const active = lastCompactionIndex >= 0 ? list.slice(lastCompactionIndex + 1) : list;
-  return active
-    .filter((message) => message && (message.role === 'user' || message.role === 'assistant'))
-    .map((message) => ({
-      role: message.role,
-      content: typeof message.content === 'string' ? message.content : '',
-    }));
-}
-
-/**
- * restored 重投影专用切片:与 renderer 真实发送口径(toApiMessages)同成分。
- * toRuntimeMessages 是 Goal Runner 的裸文本切片(丢 attachments/segments),拿它做占用
- * 投影会系统性偏低——这正是「打开 4%、发送后 18%」假跳变的根因。这里补齐:
- * - assistant segments:工具调用记录近似为历史事实文本(对齐 formatHistoricalLocalRecordForApi 量级);
- * - user 附件:文本附件计全文,图片转 image_url 分片(共享估算器 flat 计,不展开 base64)。
- */
-function toProjectionMessages(messages = []) {
-  const list = Array.isArray(messages) ? messages : [];
-  let lastCompactionIndex = -1;
-  for (let i = 0; i < list.length; i += 1) {
-    if (list[i]?._compaction) lastCompactionIndex = i;
-  }
-  const active = lastCompactionIndex >= 0 ? list.slice(lastCompactionIndex + 1) : list;
-  const projected = [];
-  for (const message of active) {
-    if (!message || (message.role !== 'user' && message.role !== 'assistant')) continue;
-    const textParts = [];
-    if (Array.isArray(message.segments) && message.segments.length > 0) {
-      // 与 getApiContent 同构:有 segments 时以 segments 为准(thinking 丢弃、工具段转历史记录)。
-      for (const segment of message.segments) {
-        if (!segment || segment.type === 'thinking') continue;
-        if (segment.type === 'tool-call') {
-          textParts.push([
-            `[tool] ${segment.tool || ''}`,
-            typeof segment.args === 'string' ? segment.args : JSON.stringify(segment.args ?? {}),
-            typeof segment.result === 'string' ? segment.result : '',
-          ].filter(Boolean).join('\n'));
-        } else if (segment.type === 'text' && segment.content) {
-          textParts.push(segment.content);
-        }
+function toDesktopProviderMessages(messages = []) {
+  return messages.map((message) => ({
+    role: message.role,
+    content: message.content,
+    ...(Array.isArray(message.toolCalls) && message.toolCalls.length > 0
+      ? {
+        tool_calls: message.toolCalls.map((call) => ({
+          id: call.id,
+          type: 'function',
+          function: {
+            name: call.name,
+            arguments: call.arguments,
+          },
+        })),
       }
-    } else if (typeof message.content === 'string' && message.content) {
-      textParts.push(message.content);
-    }
-    const imageParts = [];
-    if (Array.isArray(message.attachments)) {
-      for (const attachment of message.attachments) {
-        if (attachment?.kind === 'image') {
-          // 占位 url 即可:共享估算器对 image_url 块 flat 计 imageTokens,不读 url 内容。
-          imageParts.push({ type: 'image_url', image_url: { url: 'attachment://image' } });
-        } else if (attachment?.kind === 'text' && typeof attachment.text === 'string' && attachment.text) {
-          textParts.push(attachment.text);
-        }
-      }
-    }
-    const text = textParts.filter(Boolean).join('\n\n');
-    if (imageParts.length > 0) {
-      const parts = [];
-      if (text) parts.push({ type: 'text', text });
-      parts.push(...imageParts);
-      projected.push({ role: message.role, content: parts });
-    } else {
-      projected.push({ role: message.role, content: text });
-    }
-  }
-  return projected;
+      : {}),
+    ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+    ...(message.name ? { name: message.name } : {}),
+  }));
 }
 
 function buildGoalRunnerMessage(plan, turnNumber) {
@@ -883,14 +828,12 @@ goalRunner = createGoalRunner({
         startedAt,
       }));
       
+      const canonicalHistory = projectConversationHistory(conversation.messages);
       const messages = [
-        ...toRuntimeMessages(conversation.messages),
+        ...toDesktopProviderMessages(canonicalHistory.messages),
         { role: 'user', content: buildGoalRunnerMessage(plan, turnNumber) },
       ];
-      // 口径分离（ADR 42）：toRuntimeMessages 已按 _compaction 边界切掉压缩点前原文，
-      // 这里把压缩摘要（handoff）经 continuityContext 注入 system，避免历史丢失。
-      // 与对话模式发送链路（main.mjs priorContinuityContext）同口径。
-      const goalContinuityContext = continuityContextFromMessages(conversation.messages);
+      const goalContinuityContext = desktopContinuityContextFromProjection(canonicalHistory);
       // Goal Runner 实时计数 sink：把「模型每轮」和「每次工具调用」即时写回 store。
       // setRunnerState 内部 persist→notifyChanged 会广播 goalRunner:changed，
       // 渲染层据此实时刷新底部「轮次 / 工具」数字（roundCount 为展示计数，与预算 turnCount 解耦）。
@@ -2064,7 +2007,7 @@ function convergeIntakeAfterGoalTurn(conversationId, outcome) {
 }
 
 ipcMain.handle('chat:send', (event, {
-  messages,
+  messages: legacyMessages,
   streamId,
   effort,
   mode,
@@ -2079,6 +2022,20 @@ ipcMain.handle('chat:send', (event, {
   configInstructions,
   contextExtensions,
 }) => {
+  const persistedConversation = conversationId
+    ? conversationStore.getConversation(conversationId)
+    : null;
+  const persistedProjection = persistedConversation?.messages
+    ? projectConversationHistory(persistedConversation.messages)
+    : null;
+  const messages = persistedProjection
+    ? toDesktopProviderMessages(persistedProjection.messages)
+    : Array.isArray(legacyMessages)
+      ? legacyMessages
+      : [];
+  const resolvedContinuityContext = persistedConversation?.messages
+    ? desktopContinuityContextFromProjection(persistedProjection)
+    : continuityContext;
   if (mode === 'goal' && conversationId && typeof goalPlanStore.upsertGoalContract === 'function') {
     const goal = latestUserTextFromProviderMessages(messages);
     if (goal) {
@@ -2153,7 +2110,7 @@ ipcMain.handle('chat:send', (event, {
     contextAttachments,
     runtimeReminders,
     attachmentContext,
-    continuityContext,
+    continuityContext: resolvedContinuityContext,
     configInstructions,
     contextExtensions,
   });
@@ -2206,9 +2163,10 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     (m) => !(m.role === 'user' && typeof m.content === 'string' && m.content.trim() === '/compact'),
   );
   if (filteredMessages.length === 0) return { compacted: false };
-  const priorContinuityContext = continuityContextFromMessages(filteredMessages);
-  const activeMessages = filteredMessages.filter((m) => !m?._compaction);
-  if (activeMessages.length === 0) return { compacted: false };
+  const canonicalHistory = projectConversationHistory(filteredMessages);
+  const priorContinuityContext = desktopContinuityContextFromProjection(canonicalHistory);
+  const activeSourceMessages = filteredMessages.slice(canonicalHistory.compactionBoundaryIndex + 1);
+  if (canonicalHistory.messages.length === 0) return { compacted: false };
 
   const workspacePath = settingsStore.getAll().activeWorkspace || null;
 
@@ -2270,7 +2228,7 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
 
   const apiMessages = [
     { role: 'system', content: systemPrompt },
-    ...activeMessages.map((m) => ({ role: m.role, content: m.content })),
+    ...toDesktopProviderMessages(canonicalHistory.messages),
   ];
 
   // 登记表/横幅/进度/持久化/完成事件全部收敛到 runCompactionCheck 单入口（manual 语义）：
@@ -2282,10 +2240,10 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
       systemPrompt,
       contextWindow,
       providerConfig,
-      // 手动路径的持久化需要用过滤后的 activeMessages 作为源切片（剔除 /compact 命令与旧 marker）。
+      // 手动路径的持久化需要用 Projector 分界后的 raw rows 作为源切片。
       persistCompaction: (args) => persistCompactionToConversation({
         ...args,
-        sourceMessages: activeMessages,
+        sourceMessages: activeSourceMessages,
       }),
       conversationId,
       streamId,
@@ -2353,14 +2311,15 @@ ipcMain.handle('chat:context:restored', (_event, { conversationId } = {}) => {
     ? goalPlanStore.listPlansByConversation(conversationId)
     : [];
   const runningPlan = conversationPlans.find((plan) => plan?.runner?.status === 'running') ?? null;
+  const canonicalHistory = projectConversationHistory(conv.messages);
   const activeMessages = runningPlan
     ? [
-        ...toRuntimeMessages(conv.messages),
+        ...canonicalHistory.messages,
         { role: 'user', content: buildGoalRunnerMessage(runningPlan, (runningPlan.runner?.roundCount ?? 0) + 1) },
       ]
-    : toProjectionMessages(conv.messages);
+    : canonicalHistory.messages;
   if (activeMessages.length === 0) return null;
-  const continuityContext = continuityContextFromMessages(conv.messages);
+  const continuityContext = desktopContinuityContextFromProjection(canonicalHistory);
 
   const providers = llmConfigStore.listProviders().filter((p) => p.apiKeyConfigured);
   const provider = (conv.modelProviderId && providers.find((p) => p.id === conv.modelProviderId))
@@ -2413,6 +2372,7 @@ ipcMain.handle('chat:context:restored', (_event, { conversationId } = {}) => {
     conversationStore.updateContextSnapshot(conversationId, {
       nextRequestInputTokens: projection.nextRequestInputTokens,
       contextWindow: projection.contextWindow,
+      projectorVersion: CANONICAL_HISTORY_PROJECTOR_VERSION,
       source: 'desktop',
     });
   } catch (error) {

@@ -43,6 +43,7 @@ test('context snapshot is shared while revision and model still match', () => {
     store.updateContextSnapshot(conv.id, {
       nextRequestInputTokens: 19_500,
       contextWindow: 500_000,
+      projectorVersion: 1,
       source: 'tui',
     });
 
@@ -56,6 +57,7 @@ test('context snapshot is shared while revision and model still match', () => {
       model: 'model-1',
       computedAt: loaded.contextSnapshot.computedAt,
       source: 'tui',
+      projectorVersion: 1,
     });
   } finally {
     cleanup();
@@ -671,6 +673,7 @@ test('CLI continuation invalidates Desktop context and publishes one shared repl
     desktopStore.updateContextSnapshot(conversation.id, {
       nextRequestInputTokens: 195_000,
       contextWindow: 500_000,
+      projectorVersion: 1,
       source: 'desktop',
     });
     assert.equal(tuiStore.getConversation(conversation.id).contextSnapshot.nextRequestInputTokens, 195_000);
@@ -682,6 +685,7 @@ test('CLI continuation invalidates Desktop context and publishes one shared repl
     tuiStore.updateContextSnapshot(conversation.id, {
       nextRequestInputTokens: 42_500,
       contextWindow: 500_000,
+      projectorVersion: 1,
       source: 'tui',
     });
 
@@ -690,6 +694,7 @@ test('CLI continuation invalidates Desktop context and publishes one shared repl
     assert.equal(shared.contextSnapshot.contextWindow, 500_000);
     assert.equal(shared.contextSnapshot.contentRevision, shared.contentRevision);
     assert.equal(shared.contextSnapshot.source, 'tui');
+    assert.equal(shared.contextSnapshot.projectorVersion, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -952,4 +957,3 @@ test('listConversations can skip messageCount for workspace discovery', () => {
     cleanup();
   }
 });
-

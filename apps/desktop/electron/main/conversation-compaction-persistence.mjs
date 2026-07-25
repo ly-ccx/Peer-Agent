@@ -1,3 +1,5 @@
+import { CANONICAL_HISTORY_PROJECTOR_VERSION } from '@peer-agent/runtime-core';
+
 export function isPendingAssistantMessage(message) {
   return message?.role === 'assistant';
 }
@@ -73,6 +75,7 @@ export function persistCompactedConversation({
     nextRequestInputTokens: requestProjection.nextRequestInputTokens,
     contextWindow: requestProjection.contextWindow,
     computedAt,
+    projectorVersion: CANONICAL_HISTORY_PROJECTOR_VERSION,
     source: 'desktop',
   });
   if (!snapshotted) {

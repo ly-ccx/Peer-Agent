@@ -1,4 +1,5 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
+import { CANONICAL_HISTORY_PROJECTOR_VERSION } from '@peer-agent/runtime-core';
 import type {
   ClientToolCall,
   ConfigInstructionContextItem,
@@ -61,10 +62,8 @@ import {
   findNextSerializedToolCall,
   parseSerializedToolSegments,
 } from '../state/streamSegments';
-import { toApiMessages } from '../state/apiMessageMapping';
 import {
   buildConversationAttachmentContext,
-  buildConversationContinuityContext,
   buildConfigInstructionContext,
   buildReplyLanguageContext,
   buildGitBranchPrefixContext,
@@ -76,8 +75,6 @@ import {
 import { IDLE_COMPACTION_STATE } from '../state/types';
 import type {
   ChatAttachment,
-  ChatApiContentPart,
-  ChatApiMessage,
   ContentSegment,
   ToolCallLegacy,
   CompactionMeta,
@@ -245,15 +242,21 @@ async function loadConversationMessages(conversationId: string): Promise<{
     : null;
   const storedTokens = Number(storedContext?.nextRequestInputTokens);
   const storedWindow = Number(storedContext?.contextWindow);
-  // 跨宿主守卫(21 号文档 13.3):source ≠ desktop 的快照不直接采信——TUI 的成分
-  // (轻量 system prompt/工具集)与 Desktop 不同,直接显示会把「TUI 的下一请求」当成
-  // 「Desktop 的下一请求」。置 null 后由 restored 重投影按本宿主成分重算。
+  const storedProjectorVersion = Number(storedContext?.projectorVersion);
+  // 跨宿主守卫(21 号文档 13.3):source ≠ desktop 的快照不直接采信。History Projector
+  // 与 System Context Assembler 已共享，但宿主可用工具、运行时扩展和 provider encoding
+  // 仍可能不同；置 null 后由 restored 按 Desktop 的完整 canonical request 重算。
   // 无 source 的历史快照视为本宿主旧数据,继续采信。
   const storedSource = typeof storedContext?.source === 'string' ? storedContext.source : null;
   const storedSourceTrusted = storedSource == null || storedSource === 'desktop';
+  const storedProjectorTrusted =
+    storedProjectorVersion === CANONICAL_HISTORY_PROJECTOR_VERSION;
   // 0 不是有效占用快照；恢复时忽略，回退未知 + restored 重投影，避免一进会话就显示 0%。
   const authoritativeContext: AuthoritativeContext | null =
-    storedSourceTrusted && Number.isFinite(storedTokens) && storedTokens > 0
+    storedSourceTrusted
+      && storedProjectorTrusted
+      && Number.isFinite(storedTokens)
+      && storedTokens > 0
       ? {
         nextRequestInputTokens: Math.floor(storedTokens),
         contextWindow: Number.isFinite(storedWindow) && storedWindow > 0 ? Math.floor(storedWindow) : null,
@@ -1480,15 +1483,13 @@ export function ChatSurface({
     setIsStreaming(true);
 
     const contextMessages = [...clearedHistory.messages, userMsg];
-    const apiMessages = toApiMessages(contextMessages);
     const contextAttachments = buildConversationAttachmentContext(contextMessages);
-    const continuityContext = buildConversationContinuityContext(contextMessages);
     const configInstructions = [
       ...buildConfigInstructionContext(systemInstructions),
       ...buildReplyLanguageContext(replyLanguage),
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
-    void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId, modelProviderId, workspacePath, contextAttachments, continuityContext, configInstructions });
+    void clientApi.chatSend({ streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
     return true;
   }, [
     isStreaming,
@@ -1666,13 +1667,22 @@ export function ChatSurface({
     if (!target || target.role !== 'assistant') return;
 
     const contextMessages = messages.slice(0, msgIndex);
-    const newAssistant: ChatMsg = { id: nextId(), role: 'assistant', content: '', segments: [] };
+    const newAssistant: ChatMsg = {
+      id: nextId(),
+      role: 'assistant',
+      content: '',
+      segments: [],
+      timestamp: Date.now(),
+    };
     setMessages([...contextMessages, newAssistant]);
     setStreamError(null);
     setActiveUsage(null);
     setProviderRecoveryNotice(null);
 
-    await clientApi.conversationsUpdateLastMessage({ id: conversationId, content: '' });
+    await clientApi.conversationsReplaceMessages({
+      id: conversationId,
+      messages: serializeConversationMessages([...contextMessages, newAssistant]),
+    });
 
     const streamId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const turnStartedAt = Date.now();
@@ -1682,15 +1692,13 @@ export function ChatSurface({
     conversationStore.setState(conversationId, { streamId, turnStartedAt });
     setIsStreaming(true);
 
-    const apiMessages = toApiMessages(contextMessages);
     const contextAttachments = buildConversationAttachmentContext(contextMessages);
-    const continuityContext = buildConversationContinuityContext(contextMessages);
     const configInstructions = [
       ...buildConfigInstructionContext(systemInstructions),
       ...buildReplyLanguageContext(replyLanguage),
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
-    void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: newAssistant.id, effort, mode, conversationId, modelProviderId, workspacePath, contextAttachments, continuityContext, configInstructions });
+    void clientApi.chatSend({ streamId, assistantMessageId: newAssistant.id, effort, mode, conversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
   }, [isStreaming, hasProvider, conversationId, messages, effort, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
 
   const handleBranch = useCallback(async (msgIndex: number) => {

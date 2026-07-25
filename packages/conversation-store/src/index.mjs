@@ -113,12 +113,25 @@ function normalizeContextSnapshot(snapshot, meta) {
     ? snapshot.computedAt
     : null;
   const source = snapshot.source === 'desktop' || snapshot.source === 'tui' ? snapshot.source : null;
+  const projectorVersionRaw = Number(snapshot.projectorVersion);
+  const projectorVersion = Number.isSafeInteger(projectorVersionRaw) && projectorVersionRaw > 0
+    ? projectorVersionRaw
+    : 0;
   if (!computedAt || !source) return null;
   if (contentRevision !== Number(meta?.contentRevision ?? 0)) return null;
   if (modelProviderId !== normalizeModelProviderId(meta?.modelProviderId)) return null;
   const metaModel = typeof meta?.model === 'string' && meta.model.trim() ? meta.model.trim() : null;
   if (model !== metaModel) return null;
-  return { nextRequestInputTokens, contextWindow, contentRevision, modelProviderId, model, computedAt, source };
+  return {
+    nextRequestInputTokens,
+    contextWindow,
+    contentRevision,
+    modelProviderId,
+    model,
+    computedAt,
+    source,
+    projectorVersion,
+  };
 }
 
 function normalizeMeta(meta) {

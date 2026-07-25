@@ -258,6 +258,7 @@ describe('conversation compaction persistence', () => {
         nextRequestInputTokens: 42_500,
         contextWindow: 500_000,
         computedAt: '2026-07-23T00:00:00.000Z',
+        projectorVersion: 1,
         source: 'desktop',
       },
     ]);
