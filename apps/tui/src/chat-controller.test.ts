@@ -228,6 +228,157 @@ describe('chat controller', () => {
     ]);
   });
 
+  test('grows the running context preview above provider-observed usage', async () => {
+    let releaseTurn!: () => void;
+    let emittedDelta!: () => void;
+    const turnPending = new Promise<void>((resolve) => {
+      releaseTurn = resolve;
+    });
+    const deltaEmitted = new Promise<void>((resolve) => {
+      emittedDelta = resolve;
+    });
+    const streamedText = 'x'.repeat(40_000);
+    const model: ChatModelPort = {
+      initialize: (input) => ({
+        ...initialState(input.input),
+        usage: input.input.usage,
+      }),
+      async runTurn(state, context) {
+        context.emit({ type: 'message.delta', streamId: 'preview-test', content: streamedText });
+        emittedDelta();
+        await turnPending;
+        return {
+          kind: 'completed',
+          state: {
+            ...state,
+            modelMessages: [
+              ...state.modelMessages,
+              { role: 'assistant', content: streamedText },
+            ],
+          },
+          output: streamedText,
+        };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({
+      host: host(),
+      model,
+      getContextWindow: () => 500_000,
+    });
+    expect(controller.restore({
+      mode: 'chat',
+      messages: [
+        { id: 'old-user', role: 'user', content: 'existing context' },
+        { id: 'old-assistant', role: 'assistant', content: 'existing answer' },
+      ],
+      modelMessages: [
+        { role: 'user', content: 'existing context' },
+        { role: 'assistant', content: 'existing answer' },
+      ],
+      usage: { inputTokens: 40_000, outputTokens: 100 },
+    })).toBe(true);
+
+    const providerObservedBaseline = controller.getSnapshot().nextRequestInputTokens ?? 0;
+    const pending = controller.send('continue');
+    try {
+      await deltaEmitted;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const running = controller.getSnapshot();
+      expect(running.status).toBe('running');
+      expect(running.nextRequestInputTokens).toBeGreaterThan(providerObservedBaseline);
+      expect(running.compactionPressureTokens).toBe(providerObservedBaseline);
+    } finally {
+      releaseTurn();
+      await pending;
+    }
+  });
+
+  test('publishes a stable context projection after tool results enter model history', async () => {
+    let releaseSecondRound!: () => void;
+    let secondRoundStarted!: () => void;
+    const secondRoundPending = new Promise<void>((resolve) => {
+      releaseSecondRound = resolve;
+    });
+    const didStartSecondRound = new Promise<void>((resolve) => {
+      secondRoundStarted = resolve;
+    });
+    const toolResultText = 'tool-result-content '.repeat(1_000);
+    const model: ChatModelPort = {
+      initialize: (input) => ({
+        ...initialState(input.input),
+        usage: input.input.usage,
+      }),
+      async runTurn(state) {
+        if (state.toolExecutions.length === 0) {
+          return {
+            kind: 'tool_calls',
+            state: {
+              ...state,
+              modelMessages: [
+                ...state.modelMessages,
+                {
+                  role: 'assistant',
+                  content: null,
+                  toolCalls: [{ id: 'projection-tool', name: 'read_file', arguments: '{}' }],
+                },
+              ],
+              usage: { inputTokens: 1_100 },
+            },
+            calls: [{
+              toolCallId: 'projection-tool',
+              capabilityId: 'local.file.read',
+              arguments: { path: 'large.txt' },
+            }],
+          };
+        }
+        secondRoundStarted();
+        await secondRoundPending;
+        return { kind: 'completed', state, output: 'done' };
+      },
+      applyToolResults(state, executions) {
+        return {
+          ...state,
+          modelMessages: [
+            ...state.modelMessages,
+            ...executions.map((item) => ({
+              role: 'tool' as const,
+              toolCallId: item.call.toolCallId,
+              content: toolResultText,
+            })),
+          ],
+          toolExecutions: [
+            ...state.toolExecutions,
+            ...executions.map((item) => item.result),
+          ],
+        };
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model,
+      getContextWindow: () => 100_000,
+    });
+    expect(controller.restore({
+      mode: 'chat',
+      messages: [{ id: 'old-user', role: 'user', content: 'existing context' }],
+      modelMessages: [{ role: 'user', content: 'existing context' }],
+      usage: { inputTokens: 1_000 },
+    })).toBe(true);
+
+    const providerObservedBaseline = controller.getSnapshot().nextRequestInputTokens ?? 0;
+    const pending = controller.send('read the large result');
+    try {
+      await didStartSecondRound;
+      const afterToolResult = controller.getSnapshot();
+      expect(afterToolResult.status).toBe('running');
+      expect(afterToolResult.nextRequestInputTokens).toBeGreaterThan(providerObservedBaseline);
+    } finally {
+      releaseSecondRound();
+      await pending;
+    }
+  });
+
   test('inserts a pending assistant placeholder as soon as send() starts', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {

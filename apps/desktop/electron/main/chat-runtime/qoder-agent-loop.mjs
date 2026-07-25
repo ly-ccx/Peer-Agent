@@ -110,6 +110,9 @@ export async function agentLoopQoder({
     signal,
     emitRuntimeEvent,
     eventState: runtimeEventState,
+    lifecycle: {
+      toolResultsApplied: () => loop.publishToolResultProjection(),
+    },
     model: {
       initialize: () => ({ provider: 'qoder-private' }),
       runTurn: async (state) => {
@@ -231,8 +234,6 @@ export async function agentLoopQoder({
             content: toolExecution.output,
           });
         }
-        // 稳定边界：tool result 已写入 Runtime 会话，发布 tool_result 投影替换流式预览。
-        loop.publishToolResultProjection();
         return state;
       },
       onStopped: () => loop.sendDone(),

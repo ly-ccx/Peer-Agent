@@ -2,9 +2,11 @@ import type { ModelMessage, ModelToolCall, ModelUsage } from '@peer-agent/runtim
 import {
   COMPACTION_PROGRESS_CONFIG,
   compactMessagesWithSummaryStrategy,
+  createContextProjectionLifecycle,
   formatCompactionMessagesForSummary,
   microcompactMessagesForContext,
   type CompactionMethod,
+  type ContextProjectionLifecycle,
 } from '@peer-agent/runtime-core';
 import {
   createRuntimePipeline,
@@ -785,11 +787,10 @@ export function createChatController(options: {
     readonly content: string;
   }> = [];
   let streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
-  // stream_preview（21 号文档 13.2）：本 turn 内尚未稳定写入 active history 的
-  // assistant 正文累积（不含 reasoning，隐藏推理不进下一请求）。
-  // 以稳定基线 conversationModelMessages 为底，draftText 通道叠加；
-  // 稳定边界（turn 结束 / 新 turn 开始）归零，禁止多路累加。
-  let streamedPreviewText = '';
+  // Shared per-turn projection lifecycle owns stream accumulation and stable
+  // tool-result replacement. The TUI adapter only publishes its snapshots.
+  let turnProjectionLifecycle: ContextProjectionLifecycle | null = null;
+  let turnStableModelMessageCount = 0;
 
   const appendAssistantDelta = (
     messages: ChatMessage[],
@@ -849,18 +850,19 @@ export function createChatController(options: {
     if (streamDeltaBuffer.length === 0) return;
     const events = streamDeltaBuffer.splice(0, streamDeltaBuffer.length);
     const messages = [...snapshot.messages];
+    let previewInputTokens: number | null = null;
     for (const event of events) {
       appendAssistantDelta(messages, event);
-      if (event.type === 'message.delta') streamedPreviewText += event.content;
+      if (event.type === 'message.delta') {
+        previewInputTokens = turnProjectionLifecycle
+          ?.streamPreview(event.content)
+          .projection.previewInputTokens ?? null;
+      }
     }
-    // 与 Desktop stream_preview 同语义：稳定基线 + 本 turn 已流式正文的单一叠加源，
-    // 每次 flush 全量重算替换上一帧预览，不做多路累加。
-    const pressure = pressureFor(conversationModelMessages, snapshot.usage, streamedPreviewText);
     publish({
       ...snapshot,
       messages,
-      nextRequestInputTokens: pressure.nextRequestInputTokens,
-      compactionPressureTokens: pressure.compactionPressureTokens,
+      nextRequestInputTokens: previewInputTokens ?? snapshot.nextRequestInputTokens,
     });
   };
 
@@ -884,6 +886,41 @@ export function createChatController(options: {
     string
   >({
     model: options.model,
+    lifecycle: {
+      toolResultsApplied(state, executions) {
+        flushStreamDeltaBuffer();
+        const pressure = pressureFor(state.modelMessages, state.usage);
+        const pendingStart = state.modelMessages.length >= turnStableModelMessageCount
+          ? turnStableModelMessageCount
+          : Math.max(0, state.modelMessages.length - executions.length - 1);
+        const pendingMessages = state.modelMessages.slice(pendingStart);
+        const pendingInputTokens = estimateTokensFromMessages(pendingMessages);
+        // The last provider observation is the stable request baseline. Model
+        // output plus retained tool results are explicit pending preview, never
+        // a competing whole-history estimate.
+        const stableInputTokens = pressure.usageTokens > 0
+          ? pressure.usageTokens + pendingInputTokens
+          : pressure.estimatedTokens;
+        turnStableModelMessageCount = state.modelMessages.length;
+        const projection = turnProjectionLifecycle?.toolResult({
+          contextWindow: resolveContextWindow(),
+          currentInputTokens: stableInputTokens,
+          reason: 'tool_result',
+        });
+        publish({
+          ...snapshot,
+          nextRequestInputTokens:
+            projection?.projection.nextRequestInputTokens
+            ?? stableInputTokens,
+          // A tool result is a stable preflight boundary, but automatic
+          // compaction still waits for the shared provider accounting gate.
+          compactionPressureTokens:
+            pressure.usageTokens > 0
+              ? pressure.usageTokens
+              : stableInputTokens,
+        });
+      },
+    },
     tools: {
       async execute(call, context) {
         if (goalTurnCollector) goalTurnCollector.toolCallCount += 1;
@@ -1066,9 +1103,6 @@ export function createChatController(options: {
       if (preflightPressure.shouldCompact) {
         await runStructuralCompact({ source: 'auto' });
       }
-      // 新 turn 开始：上一 turn 的流式预览增量不得沿用。
-      streamedPreviewText = '';
-
       const conversationId = resolveConversationId();
       let existingSession = sessions.get(sessionId);
       if (existingSession && existingSession.conversationId !== conversationId) {
@@ -1102,11 +1136,20 @@ export function createChatController(options: {
         ...conversationModelMessages,
         { role: 'user', content: userContent },
       ];
+      turnStableModelMessageCount = preflightMessages.length;
       const runningPressure = pressureFor(preflightMessages, snapshot.usage);
+      turnProjectionLifecycle = createContextProjectionLifecycle();
+      const runningProjection = turnProjectionLifecycle.requestPreflight({
+        contextWindow: resolveContextWindow(),
+        currentInputTokens: runningPressure.nextRequestInputTokens,
+        reason: 'request_preflight',
+      }).projection;
       const preflightProjection = snapshot.requestProjection
         ? {
             ...snapshot.requestProjection,
-            nextRequestInputTokens: runningPressure.nextRequestInputTokens,
+            nextRequestInputTokens:
+              runningProjection.nextRequestInputTokens
+              ?? runningPressure.nextRequestInputTokens,
             contextWindow: resolveContextWindow() ?? snapshot.requestProjection.contextWindow,
           }
         : undefined;
@@ -1116,7 +1159,9 @@ export function createChatController(options: {
         activeTurnMode: turnMode,
         session: sessions.get(sessionId) ?? undefined,
         usage: snapshot.usage,
-        nextRequestInputTokens: runningPressure.nextRequestInputTokens,
+        nextRequestInputTokens:
+          runningProjection.nextRequestInputTokens
+          ?? runningPressure.nextRequestInputTokens,
         compactionPressureTokens: runningPressure.compactionPressureTokens,
         requestProjection: preflightProjection,
         messages: [
@@ -1173,8 +1218,6 @@ export function createChatController(options: {
           { signal: turn.signal },
         );
         flushStreamDeltaBuffer();
-        // turn 结束是稳定边界：流式预览归零，交给 requestProjection / withPressure 全量重算。
-        streamedPreviewText = '';
         if (result.state) conversationModelMessages = result.state.modelMessages;
 
         // turn 内自动压缩收尾(preflight/emergency):连续性 carry-forward、从 provider 历史
@@ -1244,6 +1287,15 @@ export function createChatController(options: {
           : result.status === 'failed'
             ? (result.reason || 'provider_stream_error')
             : undefined;
+        const completedPressure = pressureFor(
+          conversationModelMessages,
+          result.state?.usage,
+        );
+        const completedProjection = turnProjectionLifecycle?.turnComplete({
+          contextWindow: resolveContextWindow(),
+          currentInputTokens: completedPressure.nextRequestInputTokens,
+          reason: 'turn_complete',
+        }).projection;
         publish(withPressure({
           status: 'idle',
           mode: snapshot.mode,
@@ -1251,6 +1303,9 @@ export function createChatController(options: {
           plan: options.planCoordinator?.getSnapshot() ?? undefined,
           usage: result.state?.usage,
           requestProjection: result.state?.requestProjection,
+          nextRequestInputTokens:
+            completedProjection?.nextRequestInputTokens
+            ?? completedPressure.nextRequestInputTokens,
           messages: [
             ...finalizePendingMessages(snapshot.messages, {
               interrupted: failed,
@@ -1262,7 +1317,6 @@ export function createChatController(options: {
         }));
       } catch (error) {
         flushStreamDeltaBuffer();
-        streamedPreviewText = '';
         const wasCancelled = turn.signal.aborted;
         const detail = errorMessage(error);
         if (wasCancelled) turn.cancel(detail);
@@ -1281,6 +1335,8 @@ export function createChatController(options: {
           usage: snapshot.usage,
         }));
       } finally {
+        turnProjectionLifecycle = null;
+        turnStableModelMessageCount = 0;
         if (activeTurn === turn) activeTurn = null;
       }
     },

@@ -504,7 +504,7 @@ function assertChatRuntimeCompactionCoordinatorIsModular() {
   for (const filePath of agentLoopFiles) {
     if (!existsSync(path.join(repoRoot, filePath))) continue;
     const content = readText(filePath);
-    if (!content.includes('coordinateDesktopProviderRequest')) {
+    if (!content.includes('executeDesktopProviderRequest')) {
       fail(`${filePath} must delegate request-preflight compaction to provider-request-coordinator.mjs.`);
     }
   }
@@ -662,7 +662,7 @@ function assertChatRuntimeAgentLoopsAreModular() {
 
   if (existsSync(path.join(repoRoot, loopPaths[0]))) {
     const openaiLoop = readText(loopPaths[0]);
-    for (const snippet of ['sendOpenAIChatStream', 'coordinateDesktopProviderRequest', 'executeModelToolCall', 'createAgentLoopKernel', 'handleTerminalTextResponse']) {
+    for (const snippet of ['sendOpenAIChatStream', 'executeDesktopProviderRequest', 'executeModelToolCall', 'createAgentLoopKernel', 'handleTerminalTextResponse']) {
       if (!openaiLoop.includes(snippet)) {
         fail(`${loopPaths[0]} is missing required provider loop dependency ${snippet}.`);
       }
@@ -678,7 +678,7 @@ function assertChatRuntimeAgentLoopsAreModular() {
   }
   if (existsSync(path.join(repoRoot, loopPaths[1]))) {
     const anthropicLoop = readText(loopPaths[1]);
-    for (const snippet of ['sendAnthropicMessagesStream', 'coordinateDesktopProviderRequest', 'executeModelToolCall', 'createAgentLoopKernel', 'handleTerminalTextResponse']) {
+    for (const snippet of ['sendAnthropicMessagesStream', 'executeDesktopProviderRequest', 'executeModelToolCall', 'createAgentLoopKernel', 'handleTerminalTextResponse']) {
       if (!anthropicLoop.includes(snippet)) {
         fail(`${loopPaths[1]} is missing required provider loop dependency ${snippet}.`);
       }

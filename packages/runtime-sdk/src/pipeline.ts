@@ -132,6 +132,12 @@ export function createRuntimePipeline<
           }
 
           state = await options.model.applyToolResults(state, executions, currentContext);
+          try {
+            await options.lifecycle?.toolResultsApplied?.(state, executions, currentContext);
+          } catch {
+            // Lifecycle observers publish projections/presentation only. Their
+            // failure must not change model or tool execution semantics.
+          }
           const terminalExecution = executions.find((execution) => execution.terminal);
           if (terminalExecution) {
             await options.model.onStopped?.(state, executions, currentContext);

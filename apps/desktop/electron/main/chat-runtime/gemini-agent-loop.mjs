@@ -89,6 +89,9 @@ export async function agentLoopGemini({
     signal,
     emitRuntimeEvent,
     eventState: runtimeEventState,
+    lifecycle: {
+      toolResultsApplied: () => loop.publishToolResultProjection(),
+    },
     model: {
       initialize: () => ({ provider: 'gemini' }),
       runTurn: async (state) => {
@@ -215,8 +218,6 @@ export async function agentLoopGemini({
           content: JSON.stringify(functionResponses),
           geminiContent: { role: 'user', parts: functionResponses },
         });
-        // 稳定边界：tool result 已写入 Runtime 会话，发布 tool_result 投影替换流式预览。
-        loop.publishToolResultProjection();
         return state;
       },
       onStopped: () => loop.sendDone(),

@@ -100,6 +100,9 @@ export async function agentLoopAnthropic({
     signal,
     emitRuntimeEvent,
     eventState: runtimeEventState,
+    lifecycle: {
+      toolResultsApplied: () => loop.publishToolResultProjection(),
+    },
     model: {
       initialize: () => ({ provider: 'anthropic' }),
       runTurn: async (state) => {
@@ -249,8 +252,6 @@ export async function agentLoopAnthropic({
         });
         // 先配对所有 tool_use，再由 Pipeline 根据 terminal signal 决定是否停止。
         apiMessages.push({ role: 'user', content: toolResults });
-        // 稳定边界：tool result 已写入 Runtime 会话，发布 tool_result 投影替换流式预览。
-        loop.publishToolResultProjection();
         return state;
       },
       onStopped: () => loop.sendDone(),

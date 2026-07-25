@@ -106,6 +106,9 @@ export async function agentLoopOpenAI({
     signal,
     emitRuntimeEvent,
     eventState: runtimeEventState,
+    lifecycle: {
+      toolResultsApplied: () => loop.publishToolResultProjection(),
+    },
     model: {
       initialize: () => ({ provider: 'openai' }),
       runTurn: async (state) => {
@@ -230,8 +233,6 @@ export async function agentLoopOpenAI({
             content: toolExecution.output,
           });
         }
-        // 稳定边界：tool result 已写入 Runtime 会话，发布 tool_result 投影替换流式预览。
-        loop.publishToolResultProjection();
         return state;
       },
       onStopped: () => loop.sendDone(),

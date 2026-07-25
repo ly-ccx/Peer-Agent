@@ -36,12 +36,14 @@ export async function runDesktopRuntimePipeline({
   signal,
   model,
   tools,
+  lifecycle = null,
   emitRuntimeEvent = null,
   eventState = undefined,
 }) {
   const pipeline = createRuntimePipeline({
     model,
     tools,
+    ...(lifecycle ? { lifecycle } : {}),
     events: createDesktopPipelineEventAdapter({
       emitRuntimeEvent,
       state: eventState,

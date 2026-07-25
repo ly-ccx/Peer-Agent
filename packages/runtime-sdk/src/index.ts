@@ -41,6 +41,7 @@ export type {
   RuntimePipelineCompletedTurn,
   RuntimePipelineContinueTurn,
   RuntimePipelineEventSink,
+  RuntimePipelineLifecycleObserver,
   RuntimePipelineModelAdapter,
   RuntimePipelineOptions,
   RuntimePipelineRunInput,
