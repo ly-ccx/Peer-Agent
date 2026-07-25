@@ -1088,6 +1088,12 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
             && entry.modelId === selection.modelId,
         )?.contextWindow;
       },
+      getModelKey: () => {
+        const selection = selectedModelRef.current;
+        return selection
+          ? `${selection.providerId}::${selection.modelId}`
+          : `unknown::${modelLabel}`;
+      },
     }),
     [host, model, planCoordinator, modelSelection, persistence],
   );
@@ -1399,7 +1405,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     reasoningEffort: selectedModel?.reasoningEffort,
     usage: snapshot.usage,
     contextWindow,
-    nextRequestInputTokens: snapshot.nextRequestInputTokens,
+    contextAccounting: snapshot.contextAccounting,
   });
   const layout = responsiveLayout(terminal.width, terminal.height);
   const topbarDividerWidth = composerContentWidth(terminal.width, layout.outerPadding);

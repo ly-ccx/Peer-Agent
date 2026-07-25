@@ -251,6 +251,10 @@ const model = provider
         : provider,
       model: modelConfig.model,
       getModel: () => modelSelection.getSelection().modelId,
+      getModelKey: () => {
+        const selection = modelSelection.getSelection();
+        return `${selection.providerId}::${selection.modelId}`;
+      },
       getReasoningEffort: () => modelSelection.getSelection().reasoningEffort,
       getContextWindow: () => {
         const selection = modelSelection.getSelection();

@@ -33,8 +33,7 @@ import {
   markDanglingToolCallsInterrupted,
 } from '../state/streamSegments';
 import type { ChatMsg } from '../state/types';
-import { applyContextProjectionEvent, mergeAuthoritativeContextSnapshot } from '../state/contextOccupancy';
-import { estimateStreamDeltaTokens } from '../state/tokenEstimate';
+import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 import { useTypewriterStream } from './useTypewriterStream';
 
 /** 路由器需要的、无法下沉到 store 的应用级回调（按会话 id 携带上下文）。 */
@@ -107,6 +106,19 @@ function persistMessages(conversationId: string, msgs: readonly ChatMsg[]): void
   });
 }
 
+function acceptAccountingSnapshot(
+  previous: ContextAccountingSnapshot | null,
+  next: ContextAccountingSnapshot,
+): ContextAccountingSnapshot {
+  if (previous == null || previous.modelKey !== next.modelKey) return next;
+  if (next.contentRevision < previous.contentRevision) return previous;
+  if (
+    next.contentRevision === previous.contentRevision
+    && next.revision <= previous.revision
+  ) return previous;
+  return next;
+}
+
 /**
  * 在 App 顶层挂载一次的全局流路由器。返回前台打字机控制器，供前台 ChatSurface 在发送时
  * reset（切流时清空残留缓冲），其余调用方无需关心。
@@ -176,6 +188,19 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       if (event.type === 'session.started' && event.streamId && event.conversationId) {
         conversationStore.routeStream(event.streamId, event.conversationId);
       }
+      if (event.type === 'context.accounting') {
+        const cid = conversationStore.resolveEventConversation(
+          event.streamId ?? '',
+          event.snapshot.conversationId,
+        );
+        if (!cid) return;
+        conversationStore.setState(cid, (prev) => ({
+          contextAccounting: acceptAccountingSnapshot(
+            prev.contextAccounting,
+            event.snapshot,
+          ),
+        }));
+      }
     });
 
     const offDelta = clientApi.onChatStreamDelta(({ streamId, content }) => {
@@ -192,12 +217,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       } else {
         conversationStore.setState(cid, (prev) => ({ messages: appendText(prev.messages, content) }));
       }
-      // stream_preview（21 号文档 13.2 renderer 侧）：在最近稳定投影之上叠加尚未
-      // 稳定写入 active history 的 assistant delta 浮点估算；稳定阶段快照到达时归零。
-      // 隐藏推理（thinking）不进下一请求，不计入。
-      conversationStore.setState(cid, (prev) => ({
-        streamPreviewTokens: (prev.streamPreviewTokens ?? 0) + estimateStreamDeltaTokens(content),
-      }));
     });
 
     const offThinking = clientApi.onChatStreamThinking(({ streamId, content }) => {
@@ -214,7 +233,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     });
 
     const offDone = clientApi.onChatStreamDone(
-      ({ streamId, conversationId, usage, lifetimeUsage, nextRequestInputTokens, contextWindow }) => {
+      ({ streamId, conversationId, usage, lifetimeUsage, contextAccounting }) => {
         const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         // 流正常收尾，重试横幅若仍残留一并清除。
@@ -244,23 +263,14 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           toolProgress: null,
           turnStartedAt: null,
           streamId: null,
-          // turn_complete 稳定投影已（或即将）替换流式预览，增量归零。
-          streamPreviewTokens: 0,
         });
 
-        // 权威占用只接受正数：0/NaN 表示缺失快照，不能 final 覆盖成 0%。
-        // 有有效投影时 final 合并并清 provisional；若缺失但当前仍是发送前 seed，
-        // 也走 final 合并一次，让 provisional 保留标记，resolve 端可用 history 抬升。
-        if (typeof nextRequestInputTokens === 'number'
-          && Number.isFinite(nextRequestInputTokens)
-          && nextRequestInputTokens > 0) {
+        if (contextAccounting?.version === 1) {
           conversationStore.setState(cid, (prev) => ({
-            authoritativeContext: mergeAuthoritativeContextSnapshot({
-              previous: prev.authoritativeContext,
-              nextRequestInputTokens,
-              nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
-              mode: 'final',
-            }),
+            contextAccounting: acceptAccountingSnapshot(
+              prev.contextAccounting,
+              contextAccounting,
+            ),
           }));
         }
 
@@ -320,29 +330,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       });
     });
 
-    // 21 号文档第十三章：消费主进程 per-turn 投影稳定阶段快照
-    // （request_preflight / post_compaction / tool_result / turn_complete）。
-    // 同 streamId 内以单调 revision 丢弃乱序旧快照；稳定快照到达后流式预览归零。
-    const offContextProjection = clientApi.onChatContextProjection
-      ? clientApi.onChatContextProjection((payload) => {
-          const cid = conversationStore.resolveEventConversation(
-            payload.streamId,
-            payload.conversationId ?? undefined,
-          );
-          if (!cid) return;
-          conversationStore.setState(cid, (prev) => ({
-            authoritativeContext: applyContextProjectionEvent({
-              previous: prev.authoritativeContext,
-              streamId: payload.streamId ?? null,
-              revision: payload.revision,
-              nextRequestInputTokens: payload.nextRequestInputTokens,
-              contextWindow: payload.contextWindow,
-            }) ?? prev.authoritativeContext,
-            streamPreviewTokens: 0,
-          }));
-        })
-      : () => {};
-
     const offAborted = clientApi.onChatStreamAborted(({ streamId, conversationId }) => {
       const cid = conversationStore.resolveEventConversation(streamId, conversationId);
       if (!cid) return;
@@ -362,7 +349,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         toolProgress: null,
         turnStartedAt: null,
         streamId: null,
-        streamPreviewTokens: 0,
       });
       conversationStore.setState(cid, (prev) => {
         const msgs = prev.messages as ChatMsg[];
@@ -468,7 +454,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         pendingPermissionCalls: [],
         toolProgress: null,
         streamError: error,
-        streamPreviewTokens: 0,
         // 最终失败时清除“正在重试连接”横幅，避免与错误提示叠加残留。
         providerRecoveryNotice: null,
       });
@@ -552,7 +537,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     );
 
     const offCompaction = clientApi.onChatCompaction(
-      ({ conversationId, streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount, nextRequestInputTokens, contextWindow, microcompacted }) => {
+      ({ conversationId, streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount }) => {
         const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         if (stage === 'start') {
@@ -578,26 +563,12 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         }
         if (stage === 'idle') {
           cancelCompactionDoneTimer(cid, streamId);
-          conversationStore.setState(cid, (prev) => {
-            const nextAuthoritative =
-              typeof nextRequestInputTokens === 'number'
-                && Number.isFinite(nextRequestInputTokens)
-                && nextRequestInputTokens > 0
-                ? mergeAuthoritativeContextSnapshot({
-                    previous: prev.authoritativeContext,
-                    nextRequestInputTokens,
-                    nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
-                    mode: microcompacted === true ? 'final' : 'midturn',
-                  })
-                : prev.authoritativeContext;
-            return {
-              compactionState: reduceCompactionLifecycle(prev.compactionState, {
-                stage: 'idle',
-                streamId,
-              }),
-              authoritativeContext: nextAuthoritative,
-            };
-          });
+          conversationStore.setState(cid, (prev) => ({
+            compactionState: reduceCompactionLifecycle(prev.compactionState, {
+              stage: 'idle',
+              streamId,
+            }),
+          }));
           return;
         }
         const activeCompaction = conversationStore.getSnapshot(cid).compactionState;
@@ -617,18 +588,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
             streamId,
             now: completedAt,
           }),
-          // 语义压缩完成后允许统一投影真实回落；缺快照时保留旧值。
-          authoritativeContext:
-            typeof nextRequestInputTokens === 'number'
-              && Number.isFinite(nextRequestInputTokens)
-              && nextRequestInputTokens > 0
-              ? mergeAuthoritativeContextSnapshot({
-                  previous: prev.authoritativeContext,
-                  nextRequestInputTokens,
-                  nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
-                  mode: 'final',
-                })
-              : prev.authoritativeContext,
         }));
         if (
           !method ||
@@ -699,7 +658,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       offThinking();
       offDone();
       offUsage();
-      offContextProjection();
       offAborted();
       offToolProgress();
       offToolCall();

@@ -38,9 +38,10 @@ afterEach(() => {
 });
 
 describe('Desktop chat Runtime session lifecycle', () => {
-  it('persists the authoritative next-request context snapshot on normal completion', async () => {
+  it('persists the shared context accounting snapshot on normal completion', async () => {
     globalThis.fetch = async () => new Response(sse([
       { choices: [{ delta: { content: 'ok' } }] },
+      { choices: [{ delta: {} }], usage: { prompt_tokens: 120, completion_tokens: 2 } },
       '[DONE]',
     ]), { status: 200 });
 
@@ -68,11 +69,11 @@ describe('Desktop chat Runtime session lifecycle', () => {
     assert.equal(outcome.terminalStatus, 'done');
     assert.equal(snapshots.length, 1);
     assert.equal(snapshots[0].conversationId, 'conversation-context-snapshot');
-    assert.equal(Number.isFinite(snapshots[0].snapshot.nextRequestInputTokens), true);
-    assert.equal(snapshots[0].snapshot.nextRequestInputTokens > 0, true);
+    assert.equal(snapshots[0].snapshot.version, 1);
+    assert.equal(snapshots[0].snapshot.authoritativeInputTokens, 120);
+    assert.equal(snapshots[0].snapshot.pressureSource, 'provider_usage');
     const done = events.find((event) => event.channel === 'chat:stream:done');
-    assert.equal(Number.isFinite(done?.payload?.nextRequestInputTokens), true);
-    assert.equal(done.payload.nextRequestInputTokens, snapshots[0].snapshot.nextRequestInputTokens);
+    assert.deepEqual(done.payload.contextAccounting, snapshots[0].snapshot);
   });
 
   it('resumes the same SDK session across consecutive conversation turns', async () => {
@@ -121,8 +122,12 @@ describe('Desktop chat Runtime session lifecycle', () => {
     assert.equal(resumedSession.lastTurn.turnId, 'conversation-1:turn:1');
     assert.equal(resumedSession.lastTurn.streamId, 'stream-2');
     assert.equal(resumedSession.nextTurnIndex, 2);
-    assert.deepEqual(runtimeEvents.map((event) => event.sequence), [1, 2, 3, 4, 5, 6]);
-    assert.deepEqual(runtimeEvents.map((event) => event.streamId), [
+    assert.deepEqual(
+      runtimeEvents.map((event) => event.sequence),
+      runtimeEvents.map((_, index) => index + 1),
+    );
+    const lifecycleEvents = runtimeEvents.filter((event) => event.type !== 'context.accounting');
+    assert.deepEqual(lifecycleEvents.map((event) => event.streamId), [
       'stream-1',
       'stream-1',
       'stream-1',
@@ -130,6 +135,7 @@ describe('Desktop chat Runtime session lifecycle', () => {
       'stream-2',
       'stream-2',
     ]);
+    assert.equal(runtimeEvents.some((event) => event.type === 'context.accounting'), true);
   });
 
   it('propagates Desktop abort through the SDK-owned signal and preserves cancelled state', async () => {

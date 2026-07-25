@@ -1,5 +1,6 @@
 import type { RuntimeDecision } from '@peer-agent/runtime-core';
 import type {
+  ContextAccountingSnapshot,
   RuntimeExecuteRequest,
   RuntimeExecutionContext,
   RuntimeToolCall,
@@ -28,7 +29,8 @@ export type RuntimeSdkEventType =
   | 'permission.requested'
   | 'permission.resolved'
   | 'tool.completed'
-  | 'compaction.progress';
+  | 'compaction.progress'
+  | 'context.accounting';
 
 export type RuntimeSdkToolCall = RuntimeToolCall;
 export type RuntimeSdkExecuteRequest = RuntimeExecuteRequest;
@@ -151,6 +153,12 @@ export interface RuntimeSdkCompactionProgressEvent extends RuntimeSdkEventBase {
   readonly label?: string;
 }
 
+/** Shared Desktop/TUI context-capacity state. Presentation consumes this verbatim. */
+export interface RuntimeSdkContextAccountingEvent extends RuntimeSdkEventBase {
+  readonly type: 'context.accounting';
+  readonly snapshot: ContextAccountingSnapshot;
+}
+
 export interface RuntimeSdkMessageCompletedEvent extends RuntimeSdkEventBase {
   readonly type: 'message.completed';
   readonly streamId: string;
@@ -210,6 +218,7 @@ export type RuntimeSdkEvent =
   | RuntimeSdkMessageDeltaEvent
   | RuntimeSdkReasoningDeltaEvent
   | RuntimeSdkCompactionProgressEvent
+  | RuntimeSdkContextAccountingEvent
   | RuntimeSdkMessageCompletedEvent
   | RuntimeSdkRuntimeErrorEvent
   | RuntimeSdkToolStartedEvent

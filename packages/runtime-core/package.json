@@ -39,6 +39,9 @@
     "test": "node --test src/*.test.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
+  "dependencies": {
+    "@peer-agent/protocol": "workspace:*"
+  },
   "devDependencies": {
     "typescript": "^5.9.3"
   }

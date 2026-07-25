@@ -6,6 +6,67 @@ import {
 } from './anthropic-messages-provider.ts';
 
 describe('createAnthropicMessagesProvider', () => {
+  test('counts and sends the same canonical system, history, tools, and cache shape', async () => {
+    let counted: Record<string, unknown> | undefined;
+    let sent: Record<string, unknown> | undefined;
+    const provider = createAnthropicMessagesProvider({
+      providerId: 'anthropic-cred',
+      getApiKey: async () => 'sk-ant-test',
+      countInputTokens: async (args) => {
+        counted = args;
+        return { inputTokens: 498_138, source: 'provider_count_api' };
+      },
+      sendStream: async (args) => {
+        sent = args;
+        return {
+          ok: true,
+          textContent: 'done',
+          toolUseBlocks: [],
+          streamUsage: { inputTokens: 498_138, outputTokens: 1, cacheReadTokens: 20_000 },
+        };
+      },
+    });
+    const request = {
+      model: 'claude-sonnet-4-20250514',
+      messages: [
+        { role: 'system' as const, content: 'shared system' },
+        { role: 'user' as const, content: 'inspect' },
+        {
+          role: 'assistant' as const,
+          content: null,
+          toolCalls: [{ id: 'tool-1', name: 'read_file', arguments: '{"path":"a.txt"}' }],
+        },
+        { role: 'tool' as const, toolCallId: 'tool-1', content: 'tool evidence' },
+      ],
+      tools: [{
+        name: 'read_file',
+        description: 'read',
+        parameters: { type: 'object', properties: { path: { type: 'string' } } },
+      }],
+      reasoningEffort: 'high' as const,
+      maxOutputTokens: 4_096,
+    };
+
+    expect(await provider.countInputTokens?.(request)).toEqual({
+      inputTokens: 498_138,
+      source: 'provider_count_api',
+    });
+    await provider.stream(request);
+
+    for (const key of [
+      'model',
+      'system',
+      'messages',
+      'tools',
+      'effort',
+      'supportsReasoning',
+      'maxOutputTokens',
+      'promptCaching',
+    ]) {
+      expect(counted?.[key]).toEqual(sent?.[key]);
+    }
+  });
+
   test('calls Desktop-style sendStream with Anthropic tools and split system', async () => {
     const calls: Record<string, unknown>[] = [];
     const provider = createAnthropicMessagesProvider({

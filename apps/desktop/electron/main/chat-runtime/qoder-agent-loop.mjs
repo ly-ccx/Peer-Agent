@@ -6,7 +6,6 @@ import {
 import {
   buildCompactionProviderConfig,
   buildPromptTooLongRecoveryError,
-  computeContextInfo,
   isPromptTooLongResponse,
 } from './compaction-coordinator.mjs';
 import { sanitizeApiMessages } from './message-sanitizer.mjs';
@@ -74,6 +73,8 @@ export async function agentLoopQoder({
   runtimeEventState = undefined,
   providerId = null,
   runtimeMode = 'chat',
+  accountingIdentity = null,
+  initialContextAccounting = null,
 }) {
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
   const providerConfig = buildCompactionProviderConfig({
@@ -89,14 +90,15 @@ export async function agentLoopQoder({
     streamId,
     conversationId,
     onRound: agentProgress?.onRound,
-    getContextInfo: ({ usageSnapshot = null } = {}) => computeContextInfo({
-      messages: apiMessages,
-      contextWindow,
-      tools,
-      usageSnapshot,
-    }),
-    // per-turn 投影生命周期的稳定输入：tool_result / turn_complete 边界取当前 Runtime 会话。
-    getProjectionInput: () => ({ messages: apiMessages, tools, contextWindow }),
+    emitRuntimeEvent,
+    accountingIdentity: accountingIdentity ?? {
+      conversationId: conversationId || streamId,
+      contentRevision: 0,
+      modelKey: providerId || model,
+    },
+    initialContextAccounting,
+    contextWindow,
+    countCapability: { kind: 'observed_usage_only' },
   });
 
   await runDesktopRuntimePipeline({
@@ -132,7 +134,14 @@ export async function agentLoopQoder({
             preserveLatestUserTurn: true,
             usageSnapshot: loop.getLastTurnUsage?.() ?? null,
             rebuildSystemPrompt,
-            contextLifecycle: loop.contextLifecycle,
+            accountingIdentity: accountingIdentity ?? {
+              conversationId: conversationId || streamId,
+              contentRevision: 0,
+              modelKey: providerId || model,
+            },
+            initialContextAccounting: loop.getContextAccounting(),
+            countCapability: { kind: 'observed_usage_only' },
+            onContextAccounting: loop.acceptContextAccounting,
           },
           buildCanonicalRequest: ({ messages: projectedMessages }) => ({
             model,
@@ -148,7 +157,7 @@ export async function agentLoopQoder({
             endpoint: resolvedChannel?.endpoint,
             ...canonicalRequest,
             signal,
-            webContents,
+            webContents: loop.providerWebContents,
             streamId,
             bufferThinkingDeltas: false,
             emitBufferedThinkingDeltas: true,

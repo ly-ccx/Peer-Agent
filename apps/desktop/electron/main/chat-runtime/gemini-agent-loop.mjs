@@ -1,4 +1,5 @@
 import { sendGeminiStream } from '../provider-adapters/gemini-adapter.mjs';
+import { countGeminiCanonicalRequest } from '../provider-adapters/context-count-adapter.mjs';
 import {
   createAgentLoopKernel,
   handleTerminalTextResponse,
@@ -6,7 +7,6 @@ import {
 import {
   buildCompactionProviderConfig,
   buildPromptTooLongRecoveryError,
-  computeContextInfo,
   isPromptTooLongResponse,
 } from './compaction-coordinator.mjs';
 import { executeDesktopProviderRequest } from './provider-request-coordinator.mjs';
@@ -50,6 +50,9 @@ export async function agentLoopGemini({
   runtimeEventState = undefined,
   providerId = null,
   runtimeMode = 'chat',
+  accountingIdentity = null,
+  initialContextAccounting = null,
+  authMethod = resolvedChannel?.authMethod ?? 'api_key',
 }) {
   let effectiveSystemPrompt = systemPrompt;
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: effectiveSystemPrompt }, ...messages]);
@@ -58,16 +61,17 @@ export async function agentLoopGemini({
     streamId,
     conversationId,
     onRound: agentProgress?.onRound,
-    // ADR 56：provider usage 是显示与压缩的权威输入；messages 投影只在
-    // 尚未获得 provider 观测时保留为兼容诊断。
-    getContextInfo: ({ usageSnapshot = null } = {}) => computeContextInfo({
-      messages: apiMessages,
-      contextWindow,
-      tools,
-      usageSnapshot,
-    }),
-    // per-turn 投影生命周期的稳定输入：tool_result / turn_complete 边界取当前 Runtime 会话。
-    getProjectionInput: () => ({ messages: apiMessages, tools, contextWindow }),
+    emitRuntimeEvent,
+    accountingIdentity: accountingIdentity ?? {
+      conversationId: conversationId || streamId,
+      contentRevision: 0,
+      modelKey: providerId || model,
+    },
+    initialContextAccounting,
+    contextWindow,
+    countCapability: authMethod === 'api_key'
+      ? { kind: 'provider_count_api' }
+      : { kind: 'observed_usage_only' },
   });
   const providerConfig = buildCompactionProviderConfig({
     provider: 'gemini',
@@ -111,7 +115,28 @@ export async function agentLoopGemini({
             preserveLatestUserTurn: true,
             usageSnapshot: loop.getLastTurnUsage?.() ?? null,
             rebuildSystemPrompt,
-            contextLifecycle: loop.contextLifecycle,
+            accountingIdentity: accountingIdentity ?? {
+              conversationId: conversationId || streamId,
+              contentRevision: 0,
+              modelKey: providerId || model,
+            },
+            initialContextAccounting: loop.getContextAccounting(),
+            countCapability: authMethod === 'api_key'
+              ? { kind: 'provider_count_api' }
+              : { kind: 'observed_usage_only' },
+            ...(authMethod === 'api_key'
+              ? {
+                  countRequest: (canonicalRequest) => countGeminiCanonicalRequest({
+                    baseUrl,
+                    apiKey,
+                    headers: resolvedChannel?.headers,
+                    ...canonicalRequest,
+                    maxOutputTokens,
+                    signal,
+                  }),
+                }
+              : {}),
+            onContextAccounting: loop.acceptContextAccounting,
           },
           buildCanonicalRequest: ({ messages: projectedMessages }) => ({
             model,
@@ -127,12 +152,12 @@ export async function agentLoopGemini({
             ...canonicalRequest,
             supportsReasoning: Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning),
             maxOutputTokens,
-            authMethod: resolvedChannel?.authMethod,
+            authMethod,
             projectId: resolvedChannel?.oauthProjectId,
             userPromptId: streamId || conversationId || undefined,
             sessionId: conversationId || streamId || undefined,
             signal,
-            webContents,
+            webContents: loop.providerWebContents,
             streamId,
           }),
         });

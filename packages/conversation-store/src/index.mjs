@@ -100,37 +100,103 @@ function normalizeStatuses(status) {
 
 function normalizeContextSnapshot(snapshot, meta) {
   if (!snapshot || typeof snapshot !== 'object') return null;
-  const nextRequestInputTokens = Number(snapshot.nextRequestInputTokens);
+  if (snapshot.version !== 1) return null;
+  const conversationId = typeof snapshot.conversationId === 'string'
+    ? snapshot.conversationId.trim()
+    : '';
   const contentRevision = Number(snapshot.contentRevision);
-  // 0 不是有效占用快照（空会话用 null 表示未知/未计算），拒绝落盘与恢复。
-  if (!Number.isFinite(nextRequestInputTokens) || nextRequestInputTokens <= 0) return null;
+  const modelKey = typeof snapshot.modelKey === 'string' ? snapshot.modelKey.trim() : '';
+  const revision = Number(snapshot.revision);
+  const compactionEpoch = Number(snapshot.compactionEpoch);
+  if (!conversationId || !modelKey) return null;
   if (!Number.isSafeInteger(contentRevision) || contentRevision < 0) return null;
-  const contextWindowRaw = Number(snapshot.contextWindow);
-  const contextWindow = Number.isFinite(contextWindowRaw) && contextWindowRaw > 0 ? contextWindowRaw : null;
-  const modelProviderId = normalizeModelProviderId(snapshot.modelProviderId);
-  const model = typeof snapshot.model === 'string' && snapshot.model.trim() ? snapshot.model.trim() : null;
-  const computedAt = typeof snapshot.computedAt === 'string' && snapshot.computedAt.trim()
-    ? snapshot.computedAt
-    : null;
-  const source = snapshot.source === 'desktop' || snapshot.source === 'tui' ? snapshot.source : null;
-  const projectorVersionRaw = Number(snapshot.projectorVersion);
-  const projectorVersion = Number.isSafeInteger(projectorVersionRaw) && projectorVersionRaw > 0
-    ? projectorVersionRaw
-    : 0;
-  if (!computedAt || !source) return null;
+  if (!Number.isSafeInteger(revision) || revision < 0) return null;
+  if (!Number.isSafeInteger(compactionEpoch) || compactionEpoch < 0) return null;
+  const phases = new Set([
+    'request_preflight',
+    'stream_preview',
+    'tool_result',
+    'post_compaction',
+    'turn_complete',
+    'restored',
+    'model_changed',
+  ]);
+  if (!phases.has(snapshot.phase)) return null;
+  const normalizeNullablePositive = (value) => {
+    if (value === null || value === undefined) return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.floor(number) : undefined;
+  };
+  const normalizeNullableNonNegative = (value) => {
+    if (value === null || value === undefined) return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? number : undefined;
+  };
+  const contextWindow = normalizeNullablePositive(snapshot.contextWindow);
+  const inputBudget = normalizeNullablePositive(snapshot.inputBudget);
+  const compactionThresholdTokens = normalizeNullablePositive(snapshot.compactionThresholdTokens);
+  const authoritativeInputTokens = normalizeNullableNonNegative(snapshot.authoritativeInputTokens);
+  const percent = normalizeNullableNonNegative(snapshot.percent);
+  if (
+    contextWindow === undefined
+    || inputBudget === undefined
+    || compactionThresholdTokens === undefined
+    || authoritativeInputTokens === undefined
+    || percent === undefined
+  ) return null;
+  const pressureSources = new Set([
+    'provider_usage',
+    'provider_count_api',
+    'provider_tokenizer',
+    'provider_error_evidence',
+    'unknown',
+  ]);
+  if (!pressureSources.has(snapshot.pressureSource)) return null;
+  if (typeof snapshot.pendingUncountedChanges !== 'boolean') return null;
+  const pendingContentChars = Number(snapshot.pendingContentChars);
+  if (!Number.isSafeInteger(pendingContentChars) || pendingContentChars < 0) return null;
+  const capability = snapshot.countCapability;
+  if (!capability || typeof capability !== 'object') return null;
+  if (![
+    'provider_count_api',
+    'provider_tokenizer',
+    'observed_usage_only',
+    'unavailable',
+  ].includes(capability.kind)) return null;
+  if (
+    capability.kind === 'provider_tokenizer'
+    && (typeof capability.tokenizerVersion !== 'string' || !capability.tokenizerVersion.trim())
+  ) return null;
+  if (snapshot.counterStatus !== 'active' && snapshot.counterStatus !== 'degraded') return null;
+  const updatedAt = Number(snapshot.updatedAt);
+  if (!Number.isFinite(updatedAt) || updatedAt < 0) return null;
+  if (conversationId !== String(meta?.id ?? '')) return null;
   if (contentRevision !== Number(meta?.contentRevision ?? 0)) return null;
-  if (modelProviderId !== normalizeModelProviderId(meta?.modelProviderId)) return null;
-  const metaModel = typeof meta?.model === 'string' && meta.model.trim() ? meta.model.trim() : null;
-  if (model !== metaModel) return null;
+  const expectedModelKey = normalizeModelProviderId(meta?.modelProviderId)
+    ?? (typeof meta?.model === 'string' && meta.model.trim() ? meta.model.trim() : null);
+  if (!expectedModelKey || modelKey !== expectedModelKey) return null;
   return {
-    nextRequestInputTokens,
-    contextWindow,
+    ...snapshot,
+    version: 1,
+    conversationId,
     contentRevision,
-    modelProviderId,
-    model,
-    computedAt,
-    source,
-    projectorVersion,
+    modelKey,
+    revision,
+    phase: snapshot.phase,
+    compactionEpoch,
+    contextWindow,
+    inputBudget,
+    compactionThresholdTokens,
+    authoritativeInputTokens,
+    percent,
+    pressureSource: snapshot.pressureSource,
+    pendingUncountedChanges: snapshot.pendingUncountedChanges,
+    pendingContentChars,
+    countCapability: capability.kind === 'provider_tokenizer'
+      ? { kind: capability.kind, tokenizerVersion: capability.tokenizerVersion.trim() }
+      : { kind: capability.kind },
+    counterStatus: snapshot.counterStatus,
+    updatedAt,
   };
 }
 
@@ -540,12 +606,10 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
       : 0;
     const candidate = {
       ...snapshot,
+      conversationId: id,
       contentRevision,
-      modelProviderId: normalizeModelProviderId(meta.modelProviderId),
-      model: typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : null,
-      computedAt: typeof snapshot.computedAt === 'string' && snapshot.computedAt.trim()
-        ? snapshot.computedAt
-        : new Date().toISOString(),
+      modelKey: normalizeModelProviderId(meta.modelProviderId)
+        ?? (typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : ''),
     };
     const normalized = normalizeContextSnapshot(candidate, { ...meta, contentRevision });
     if (!normalized) return null;

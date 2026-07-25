@@ -1,41 +1,24 @@
 import type React from 'react';
-import { useConversationDraft, useConversationStreamPreviewTokens } from '../hooks/useConversationState';
-import { resolveContextOccupancyTokens } from '../state/contextOccupancy';
-import { estimateDraftTokens } from '../state/tokenEstimate';
-import type { ChatAttachment } from '../state/types';
+import { useConversationContextAccounting } from '../hooks/useConversationState';
 import { TokenUsageDisplay } from './thread/TokenUsageDisplay';
 
 type TokenUsageDisplayProps = React.ComponentProps<typeof TokenUsageDisplay>;
 
-type ComposerTokenUsageDisplayProps = Omit<TokenUsageDisplayProps, 'nextRequestInputTokens'> & {
+type ComposerTokenUsageDisplayProps = Omit<TokenUsageDisplayProps, 'contextAccounting'> & {
   readonly conversationId: string | null;
-  readonly contextReady: boolean;
-  readonly attachments: readonly ChatAttachment[];
-  readonly authoritativeNextRequestInputTokens?: number | null;
 };
 
-/** 高频草稿与流式预览变化只在工具栏叶子中叠加；历史投影由 Runtime 快照提供。 */
+/** Renderer does not estimate draft/stream tokens; it renders the shared snapshot verbatim. */
 export function ComposerTokenUsageDisplay({
   conversationId,
-  contextReady,
-  attachments,
-  authoritativeNextRequestInputTokens = null,
   ...props
 }: ComposerTokenUsageDisplayProps) {
-  const draft = useConversationDraft(conversationId);
-  const streamPreviewTokens = useConversationStreamPreviewTokens(conversationId);
-  const draftContextTokens = estimateDraftTokens(draft, attachments);
-  const nextRequestInputTokens = resolveContextOccupancyTokens({
-    authoritativeNextRequestInputTokens,
-    draftContextTokens,
-    streamPreviewTokens,
-    contextReady,
-  });
+  const contextAccounting = useConversationContextAccounting(conversationId);
 
   return (
     <TokenUsageDisplay
       {...props}
-      nextRequestInputTokens={nextRequestInputTokens ?? undefined}
+      contextAccounting={contextAccounting}
     />
   );
 }

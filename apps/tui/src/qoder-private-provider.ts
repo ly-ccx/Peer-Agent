@@ -139,6 +139,7 @@ export function createQoderPrivateProvider(
     ?? ((args: Record<string, unknown>) => sendQoderPrivateStreamFromDesktop(args) as Promise<QoderPrivateStreamResult>);
 
   return {
+    contextCountCapability: { kind: 'observed_usage_only' },
     async stream(request: ModelProviderRequest): Promise<ModelProviderResult> {
       const apiKey = await options.getAccessToken();
       if (!apiKey?.trim()) {

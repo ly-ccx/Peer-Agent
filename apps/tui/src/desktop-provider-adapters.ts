@@ -49,6 +49,26 @@ export async function sendGeminiStreamFromDesktop(
   return sendGeminiStream(args) as Promise<Record<string, unknown>>;
 }
 
+export async function countAnthropicRequestFromDesktop(
+  args: DesktopStreamArgs,
+): Promise<{ inputTokens: number; source: 'provider_count_api' }> {
+  const { countAnthropicCanonicalRequest } = await import(
+    // @ts-expect-error Desktop ESM adapter does not publish declarations.
+    '../../desktop/electron/main/provider-adapters/context-count-adapter.mjs'
+  );
+  return countAnthropicCanonicalRequest(args);
+}
+
+export async function countGeminiRequestFromDesktop(
+  args: DesktopStreamArgs,
+): Promise<{ inputTokens: number; source: 'provider_count_api' }> {
+  const { countGeminiCanonicalRequest } = await import(
+    // @ts-expect-error Desktop ESM adapter does not publish declarations.
+    '../../desktop/electron/main/provider-adapters/context-count-adapter.mjs'
+  );
+  return countGeminiCanonicalRequest(args);
+}
+
 export async function ensureFreshGoogleTokensFromDesktop(
   tokens: ChatGptOAuthTokens,
 ): Promise<ChatGptOAuthTokens> {
@@ -75,4 +95,3 @@ export async function ensureFreshGrokTokensFromDesktop(
   );
   return ensureFreshGrokTokens(tokens, options);
 }
-

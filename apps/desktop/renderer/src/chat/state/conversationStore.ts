@@ -23,7 +23,10 @@
 //   - 发送/账本真值仍在主进程：本 store 只持有 renderer 表达层的运行态投影，不引入新的
 //     执行真值。
 
-import type { ClientToolCall } from '@peer-agent/protocol';
+import type {
+  ClientToolCall,
+  ContextAccountingSnapshot,
+} from '@peer-agent/protocol';
 
 import type { ChatMode } from './preferences';
 import { IDLE_COMPACTION_STATE } from './types.ts';
@@ -35,16 +38,6 @@ import type {
   TokenUsageState,
   ToolProgress,
 } from './types';
-
-/** ADR 52：主进程下发的下一次最终请求上下文投影。 */
-export interface AuthoritativeContext {
-  nextRequestInputTokens: number;
-  contextWindow: number | null;
-  /** per-turn 投影生命周期的单调 revision（同 streamId 内丢弃乱序旧快照）。 */
-  revision?: number | null;
-  /** 产生该快照的 streamId；换流（新 turn）时 revision 序重新开始。 */
-  streamId?: string | null;
-}
 
 /** 单个会话的运行时状态切片：从 ChatSurface 迁出的会话级字段集合。 */
 export interface ConversationRuntimeState {
@@ -60,13 +53,8 @@ export interface ConversationRuntimeState {
   readonly streamError: string | null;
   readonly tokenUsage: TokenUsageState | null;
   readonly activeUsage: TokenUsageState | null;
-  readonly authoritativeContext: AuthoritativeContext | null;
-  /**
-   * 流式预览增量（21 号文档 13.2 stream_preview 的 renderer 侧）：
-   * 以最近稳定投影为基线，只计尚未稳定写入 active history 的 assistant delta 估算；
-   * 稳定阶段快照（tool_result / turn_complete / preflight）到达时归零，禁止多路累加。
-   */
-  readonly streamPreviewTokens: number;
+  /** ADR 56: renderer consumes the provider-backed snapshot verbatim. */
+  readonly contextAccounting: ContextAccountingSnapshot | null;
   readonly providerRecoveryNotice: ProviderRecoveryNotice | null;
   readonly toolProgress: ToolProgress | null;
   readonly pendingPermissionCalls: readonly ClientToolCall[];
@@ -89,8 +77,7 @@ export const EMPTY_CONVERSATION_STATE: ConversationRuntimeState = Object.freeze(
   streamError: null,
   tokenUsage: null,
   activeUsage: null,
-  authoritativeContext: null,
-  streamPreviewTokens: 0,
+  contextAccounting: null,
   providerRecoveryNotice: null,
   toolProgress: null,
   pendingPermissionCalls: Object.freeze([]) as readonly ClientToolCall[],

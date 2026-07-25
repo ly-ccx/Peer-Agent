@@ -9,7 +9,10 @@ import type {
 } from '@peer-agent/runtime-node';
 import { ModelProviderHttpError, ModelProviderStreamError } from '@peer-agent/runtime-node';
 
-import { sendAnthropicMessagesStreamFromDesktop } from './desktop-provider-adapters.ts';
+import {
+  countAnthropicRequestFromDesktop,
+  sendAnthropicMessagesStreamFromDesktop,
+} from './desktop-provider-adapters.ts';
 import { createTuiWebContentsBridge } from './tui-web-contents-bridge.ts';
 
 export interface CreateAnthropicMessagesProviderOptions {
@@ -21,6 +24,9 @@ export interface CreateAnthropicMessagesProviderOptions {
    * so TUI reuses the same anthropic-messages wire as the desktop client.
    */
   readonly sendStream?: (args: Record<string, unknown>) => Promise<AnthropicMessagesStreamResult>;
+  readonly countInputTokens?: (
+    args: Record<string, unknown>,
+  ) => Promise<{ inputTokens: number; source: 'provider_count_api' }>;
 }
 
 export interface AnthropicMessagesStreamResult {
@@ -148,8 +154,29 @@ export function createAnthropicMessagesProvider(
 ): ModelProvider {
   const sendStream = options.sendStream
     ?? ((args: Record<string, unknown>) => sendAnthropicMessagesStreamFromDesktop(args) as Promise<AnthropicMessagesStreamResult>);
+  const countInputTokens = options.countInputTokens ?? countAnthropicRequestFromDesktop;
 
   return {
+    contextCountCapability: { kind: 'provider_count_api' },
+    async countInputTokens(request) {
+      const apiKey = await options.getApiKey();
+      if (!apiKey?.trim()) return null;
+      const { system, messages } = splitSystemAndMessages(request.messages);
+      const effort = effortFrom(request);
+      return countInputTokens({
+        baseUrl: options.baseUrl,
+        apiKey,
+        model: request.model,
+        system,
+        messages,
+        tools: toAnthropicTools(request.tools),
+        effort,
+        supportsReasoning: Boolean(effort && effort !== 'off'),
+        maxOutputTokens: request.maxOutputTokens,
+        signal: request.signal,
+        promptCaching: true,
+      });
+    },
     async stream(request: ModelProviderRequest): Promise<ModelProviderResult> {
       const apiKey = await options.getApiKey();
       if (!apiKey?.trim()) {

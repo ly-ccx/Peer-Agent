@@ -11,6 +11,7 @@ import { ModelProviderHttpError, ModelProviderStreamError } from '@peer-agent/ru
 
 import {
   GEMINI_CODE_ASSIST_BASE_URL,
+  countGeminiRequestFromDesktop,
   sendGeminiStreamFromDesktop,
 } from './desktop-provider-adapters.ts';
 import { createTuiWebContentsBridge } from './tui-web-contents-bridge.ts';
@@ -46,6 +47,9 @@ export interface CreateGeminiProviderOptions {
   readonly getApiKey: () => Promise<string>;
   readonly getProjectId?: () => Promise<string | null | undefined>;
   readonly sendStream?: (args: Record<string, unknown>) => Promise<GeminiStreamResult>;
+  readonly countInputTokens?: (
+    args: Record<string, unknown>,
+  ) => Promise<{ inputTokens: number; source: 'provider_count_api' }>;
 }
 
 function usageFrom(streamUsage: GeminiStreamResult['streamUsage']): ModelUsage | undefined {
@@ -135,8 +139,29 @@ async function defaultSendStream(args: Record<string, unknown>): Promise<GeminiS
  */
 export function createGeminiProvider(options: CreateGeminiProviderOptions): ModelProvider {
   const sendStream = options.sendStream ?? defaultSendStream;
+  const countInputTokens = options.countInputTokens ?? countGeminiRequestFromDesktop;
 
   return {
+    contextCountCapability: options.authMethod === 'api_key'
+      ? { kind: 'provider_count_api' }
+      : { kind: 'observed_usage_only' },
+    ...(options.authMethod === 'api_key'
+      ? {
+          async countInputTokens(request: ModelProviderRequest) {
+            const apiKey = await options.getApiKey();
+            if (!apiKey?.trim()) return null;
+            return countInputTokens({
+              baseUrl: resolveBaseUrl(options),
+              apiKey,
+              model: request.model,
+              messages: toDesktopMessages(request.messages),
+              tools: toDesktopTools(request.tools),
+              maxOutputTokens: request.maxOutputTokens,
+              signal: request.signal,
+            });
+          },
+        }
+      : {}),
     async stream(request: ModelProviderRequest): Promise<ModelProviderResult> {
       const apiKey = await options.getApiKey();
       if (!apiKey?.trim()) {

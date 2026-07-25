@@ -176,6 +176,7 @@ export function createChatGptResponsesProvider(options: CreateChatGptResponsesPr
   const fetchImpl = options.fetch ?? globalThis.fetch;
   let tokens = options.tokens;
   return {
+    contextCountCapability: { kind: 'observed_usage_only' },
     async stream(request) {
       tokens ??= options.resolveTokens?.();
       if (!tokens?.access) throw new Error('desktop_model_credential_unavailable');

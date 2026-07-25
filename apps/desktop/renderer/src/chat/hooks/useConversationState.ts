@@ -19,6 +19,7 @@ import {
   type ConversationRuntimeState,
 } from '../state/conversationStore';
 import type { QueuedMessage, ToolProgress } from '../state/types';
+import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 
 /** 绑定到具体 conversationId 的运行态写入句柄。 */
 export interface ConversationActions {
@@ -72,18 +73,20 @@ export function useConversationDraft(conversationId: string | null): string {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-/** 只让占用圆环叶子响应高频流式预览增量，避免 delta 唤醒整个消息表面。 */
-export function useConversationStreamPreviewTokens(conversationId: string | null): number {
+/** 只让占用圆环叶子响应 accounting revision，避免唤醒整个消息表面。 */
+export function useConversationContextAccounting(
+  conversationId: string | null,
+): ContextAccountingSnapshot | null {
   const subscribe = useCallback(
     (listener: () => void) => conversationStore.subscribeSelector(
       conversationId,
-      snapshot => snapshot.streamPreviewTokens,
+      snapshot => snapshot.contextAccounting,
       listener,
     ),
     [conversationId],
   );
   const getSnapshot = useCallback(
-    () => conversationStore.getSnapshot(conversationId).streamPreviewTokens,
+    () => conversationStore.getSnapshot(conversationId).contextAccounting,
     [conversationId],
   );
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);

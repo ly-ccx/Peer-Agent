@@ -36,7 +36,6 @@ import {
   buildStructuralSummary,
   TUI_COMPACT_KEEP_RECENT,
 } from './context-compact.ts';
-import { computeNextRequestInputTokens } from './context-pressure.ts';
 import { normalizeTuiRuntimeMode, type TuiRuntimeMode } from './tui-mode.ts';
 import {
   DEFAULT_CONNECTION_RETRY_DELAYS_MS,
@@ -69,6 +68,7 @@ export interface CreateProviderChatModelOptions {
   readonly systemPrompt?: string;
   readonly getSystemPrompt?: (context: ProviderSystemPromptContext) => string;
   readonly getModel?: () => string;
+  readonly getModelKey?: () => string;
   readonly getReasoningEffort?: () => ModelReasoningEffort;
   readonly getContextWindow?: () => number | undefined;
 }
@@ -312,6 +312,9 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         modelMessages,
         toolExecutions: [],
         ...(input.input.usage ? { usage: input.input.usage } : {}),
+        ...(input.input.contextAccounting
+          ? { contextAccounting: input.input.contextAccounting }
+          : {}),
         // 供工具结果材料化按会话归档 artifact(跨端共享 ~/.peer-agent/artifacts/<conv>)。
         ...(context.run.conversationId ? { conversationId: context.run.conversationId } : {}),
       };
@@ -324,6 +327,8 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
       const streamId = context.run.streamId ?? 'tui-chat';
       const reasoningEffort = options.getReasoningEffort?.();
       const model = options.getModel?.() ?? options.model;
+      const modelKey = options.getModelKey?.() ?? model;
+      const activeProvider = options.getProvider?.() ?? options.provider;
       const contextWindowRaw = Number(options.getContextWindow?.());
       const contextWindow = Number.isFinite(contextWindowRaw) && contextWindowRaw > 0
         ? Math.floor(contextWindowRaw)
@@ -341,8 +346,28 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         CanonicalRequest,
         Awaited<ReturnType<ModelProvider['stream']>>
       >({
+        identity: {
+          conversationId: context.run.conversationId ?? context.run.sessionId,
+          contentRevision: (state.contextAccounting?.contentRevision ?? 0) + 1,
+          modelKey,
+        },
         contextWindow,
-        countCapability: { kind: 'observed_usage_only' },
+        countCapability:
+          activeProvider.contextCountCapability
+          ?? (activeProvider.countInputTokens
+            ? { kind: 'provider_tokenizer', tokenizerVersion: 'provider-adapter' }
+            : { kind: 'observed_usage_only' }),
+        initialSnapshot: state.contextAccounting,
+        countRequest: activeProvider.countInputTokens
+          ? (request) => activeProvider.countInputTokens!(request)
+          : undefined,
+        onSnapshot(snapshot) {
+          context.emit({
+            type: 'context.accounting',
+            streamId,
+            snapshot,
+          });
+        },
         buildRequest(pipelineState) {
           return {
             model,
@@ -352,10 +377,6 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           };
         },
         async compact({ state: pipelineState, reason }) {
-          const beforeTokens = computeNextRequestInputTokens({
-            messages: pipelineState.messages,
-            tools,
-          });
           const compactReason = reason === 'provider_overflow' ? 'overflow' : 'preflight';
           const emitCompactionProgress = (
             percent: number,
@@ -409,8 +430,6 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
             beforeCount: pipelineState.messages.length,
             afterCount: nextMessages.length,
             summarizedCount: strategy.oldMessages.length,
-            beforeTokens,
-            afterTokens: computeNextRequestInputTokens({ messages: nextMessages, tools }),
             summary: strategy.summary,
             handoffContent: strategy.handoffContent,
             retainedUserCount: strategy.keepMessages.filter(
@@ -421,7 +440,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           return { compacted: true, state: { messages: nextMessages } };
         },
         send(request) {
-          return streamWithSafeRetry((options.getProvider?.() ?? options.provider), {
+          return streamWithSafeRetry(activeProvider, {
             ...request,
             signal: context.signal,
             onEvent(event) {
@@ -452,13 +471,6 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
       const result = accountingResult.response;
       if (!result) throw new Error('Provider request completed without a response.');
       const workingMessages = accountingResult.state.messages;
-      const requestProjection = accountingResult.snapshot.authoritativeInputTokens == null
-        ? undefined
-        : {
-            nextRequestInputTokens: accountingResult.snapshot.authoritativeInputTokens,
-            contextWindow,
-            model,
-          };
 
       const accumulatedCompactions = [
         ...(state.midTurnCompactions ?? []),
@@ -485,7 +497,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
             ],
             pendingToolCalls: result.toolCalls,
             usage: result.usage,
-            ...(requestProjection ? { requestProjection } : {}),
+            contextAccounting: accountingResult.snapshot,
             ...(accumulatedCompactions.length > 0
               ? { midTurnCompactions: accumulatedCompactions }
               : {}),
@@ -504,7 +516,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           ...state,
           modelMessages: completedModelMessages,
           usage: result.usage,
-          ...(requestProjection ? { requestProjection } : {}),
+          contextAccounting: accountingResult.snapshot,
           ...(accumulatedCompactions.length > 0
             ? { midTurnCompactions: accumulatedCompactions }
             : {}),

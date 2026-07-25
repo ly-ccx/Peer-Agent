@@ -10,7 +10,6 @@ import {
 import {
   buildCompactionProviderConfig,
   buildPromptTooLongRecoveryError,
-  computeContextInfo,
   isPromptTooLongResponse,
 } from './compaction-coordinator.mjs';
 import { executeDesktopProviderRequest } from './provider-request-coordinator.mjs';
@@ -59,6 +58,8 @@ export async function agentLoopOpenAI({
   runtimeEventState = undefined,
   providerId = null,
   runtimeMode = 'chat',
+  accountingIdentity = null,
+  initialContextAccounting = null,
 }) {
   let effectiveSystemPrompt = systemPrompt;
   // 按鉴权方式选择 OpenAI 协议族的传输 adapter,保持循环逻辑统一。
@@ -72,16 +73,15 @@ export async function agentLoopOpenAI({
     streamId,
     conversationId,
     onRound: agentProgress?.onRound,
-    // ADR 56：provider usage 是显示与压缩的权威输入；messages 投影只在
-    // 尚未获得 provider 观测时保留为兼容诊断。
-    getContextInfo: ({ usageSnapshot = null } = {}) => computeContextInfo({
-      messages: apiMessages,
-      contextWindow,
-      tools,
-      usageSnapshot,
-    }),
-    // per-turn 投影生命周期的稳定输入：tool_result / turn_complete 边界取当前 Runtime 会话。
-    getProjectionInput: () => ({ messages: apiMessages, tools, contextWindow }),
+    emitRuntimeEvent,
+    accountingIdentity: accountingIdentity ?? {
+      conversationId: conversationId || streamId,
+      contentRevision: 0,
+      modelKey: providerId || model,
+    },
+    initialContextAccounting,
+    contextWindow,
+    countCapability: { kind: 'observed_usage_only' },
   });
   const providerConfig = buildCompactionProviderConfig({
     provider: 'openai',
@@ -128,7 +128,14 @@ export async function agentLoopOpenAI({
             preserveLatestUserTurn: true,
             usageSnapshot: loop.getLastTurnUsage?.() ?? null,
             rebuildSystemPrompt,
-            contextLifecycle: loop.contextLifecycle,
+            accountingIdentity: accountingIdentity ?? {
+              conversationId: conversationId || streamId,
+              contentRevision: 0,
+              modelKey: providerId || model,
+            },
+            initialContextAccounting: loop.getContextAccounting(),
+            countCapability: { kind: 'observed_usage_only' },
+            onContextAccounting: loop.acceptContextAccounting,
           },
           buildCanonicalRequest: ({ messages: projectedMessages }) => ({
             model,
@@ -148,7 +155,7 @@ export async function agentLoopOpenAI({
             promptCaching: resolvedChannel?.supportsPromptCaching ?? supportsPromptCaching,
             maxOutputTokens,
             signal,
-            webContents,
+            webContents: loop.providerWebContents,
             streamId,
             usePublicStreamConsumer: shouldUsePublicOpenAIChatStream(resolvedChannel, useResponses),
           }),

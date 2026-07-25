@@ -9,6 +9,10 @@ import type {
   ModelProviderRequest,
   ModelProviderResult,
 } from '@peer-agent/runtime-node';
+import {
+  estimateContextMessagesTokens as estimateTokensFromMessages,
+  estimateContextTextTokens as estimateTextTokens,
+} from '@peer-agent/runtime-core';
 import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
 
 import { createChatController } from './chat-controller.ts';
@@ -16,7 +20,6 @@ import {
   createProviderChatModel,
   createUnavailableChatModel,
 } from './provider-chat-model.ts';
-import { estimateTextTokens, estimateTokensFromMessages } from './context-pressure.ts';
 import type { TuiHost } from './tui-host.ts';
 import { buildTuiSystemPrompt } from './tui-language.ts';
 
@@ -109,13 +112,13 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     expect(requests[1]?.model).toBe('model-b');
     expect(requests[1]?.reasoningEffort).toBe('high');
     const finalSnapshot = controller.getSnapshot();
-    expect(finalSnapshot.requestProjection?.model).toBe('model-b');
-    expect(finalSnapshot.requestProjection?.contextWindow).toBe(500_000);
+    expect(finalSnapshot.contextAccounting?.modelKey).toBe('model-b');
+    expect(finalSnapshot.contextAccounting?.contextWindow).toBe(500_000);
     const sentRequestTokens = Math.ceil(
       estimateTokensFromMessages(requests[1]!.messages)
       + estimateTextTokens(JSON.stringify(requests[1]!.tools ?? [])),
     );
-    expect(finalSnapshot.requestProjection?.nextRequestInputTokens).toBe(sentRequestTokens);
+    expect(finalSnapshot.contextAccounting?.authoritativeInputTokens).toBe(sentRequestTokens);
   });
 
   test('compacts before the next send when provider usage observed 498K input', async () => {
@@ -807,7 +810,7 @@ describe('createProviderChatModel mid-turn LLM compaction', () => {
       toolDefinitions: [],
     });
 
-    const state = model.initialize(
+    const state = await model.initialize(
       makeInput('latest-user', 900),
       makeContext(),
     );
@@ -819,6 +822,7 @@ describe('createProviderChatModel mid-turn LLM compaction', () => {
         }
       }),
     );
+    if (result.kind !== 'completed') throw new Error(`Expected completed, got ${result.kind}`);
 
     expect(result.kind).toBe('completed');
     expect(progressEvents.some((percent) => percent >= 8)).toBe(true);
@@ -869,11 +873,12 @@ describe('createProviderChatModel mid-turn LLM compaction', () => {
       toolDefinitions: [],
     });
 
-    const state = model.initialize(
+    const state = await model.initialize(
       makeInput('latest-user', 950),
       makeContext(),
     );
     const result = await model.runTurn(state, makeContext());
+    if (result.kind !== 'completed') throw new Error(`Expected completed, got ${result.kind}`);
 
     expect(result.kind).toBe('completed');
     expect(result.state.midTurnCompactions?.length ?? 0).toBeGreaterThanOrEqual(1);

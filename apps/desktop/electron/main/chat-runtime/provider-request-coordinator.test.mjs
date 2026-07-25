@@ -6,7 +6,7 @@ import {
 } from './provider-request-coordinator.mjs';
 
 describe('Desktop provider request coordinator', () => {
-  it('returns the request_preflight projection from the same messages used for sending', async () => {
+  it('coordinates compaction without publishing a parallel context projection', async () => {
     const result = await coordinateDesktopProviderRequest({
       messages: [
         { role: 'system', content: 'system' },
@@ -19,15 +19,13 @@ describe('Desktop provider request coordinator', () => {
     });
 
     assert.equal(result.compacted, false);
-    assert.equal(result.projection.projection.phase, 'request_preflight');
-    assert.equal(
-      result.projection.projection.nextRequestInputTokens,
-      result.contextInfo.nextRequestInputTokens,
-    );
-    assert.deepEqual(result.projectedMessages, result.messages);
+    assert.equal('projection' in result, false);
+    assert.equal('contextInfo' in result, false);
+    assert.equal('projectedMessages' in result, false);
+    assert.equal(result.messages.length, 2);
   });
 
-  it('applies the shared microcompaction before projecting the provider request', async () => {
+  it('leaves canonical request shaping to the shared accounting pipeline', async () => {
     const result = await coordinateDesktopProviderRequest({
       messages: [
         { role: 'system', content: 'system' },
@@ -41,9 +39,12 @@ describe('Desktop provider request coordinator', () => {
     });
 
     assert.equal(result.compacted, false);
-    assert.ok(result.projection.revision > 0);
-    assert.equal(result.projection.projection.quality, 'projected');
-    assert.equal(result.projection.projection.reason, 'request_preflight');
+    assert.deepEqual(result.messages, [
+      { role: 'system', content: 'system' },
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'working' },
+      { role: 'assistant', content: 'done' },
+    ]);
   });
 
   it('uses provider-observed 498K input as compaction authority before sending', async () => {

@@ -226,16 +226,12 @@ describe('conversation compaction persistence', () => {
     assert.deepEqual(persisted.slice(3), sourceMessages.slice(-2));
   });
 
-  it('writes the compacted projection only after replaceMessages creates the new revision', () => {
+  it('persists only the compacted transcript; accounting is owned by the shared pipeline', () => {
     const calls = [];
     const store = {
       replaceMessages(conversationId, messages) {
         calls.push(['replace', conversationId, messages]);
         return { contentRevision: 8 };
-      },
-      updateContextSnapshot(conversationId, snapshot) {
-        calls.push(['snapshot', conversationId, snapshot]);
-        return { contentRevision: 8, contextSnapshot: snapshot };
       },
     };
 
@@ -243,49 +239,26 @@ describe('conversation compaction persistence', () => {
       store,
       conversationId: 'c1',
       messages: compactedMessages,
-      requestProjection: {
-        nextRequestInputTokens: 42_500,
-        contextWindow: 500_000,
-      },
-      computedAt: '2026-07-23T00:00:00.000Z',
     });
 
-    assert.deepEqual(calls.map(([kind]) => kind), ['replace', 'snapshot']);
-    assert.deepEqual(calls[1], [
-      'snapshot',
-      'c1',
-      {
-        nextRequestInputTokens: 42_500,
-        contextWindow: 500_000,
-        computedAt: '2026-07-23T00:00:00.000Z',
-        projectorVersion: 1,
-        source: 'desktop',
-      },
-    ]);
+    assert.deepEqual(calls.map(([kind]) => kind), ['replace']);
     assert.equal(result.contentRevision, 8);
   });
 
-  it('fails instead of reporting a completed compaction when the shared snapshot is rejected', () => {
+  it('does not require a renderer-era snapshot write to complete persistence', () => {
     const store = {
       replaceMessages() {
         return { contentRevision: 8 };
       },
       updateContextSnapshot() {
-        return null;
+        throw new Error('legacy snapshot seam must not be called');
       },
     };
 
-    assert.throws(
-      () => persistCompactedConversation({
-        store,
-        conversationId: 'c1',
-        messages: compactedMessages,
-        requestProjection: {
-          nextRequestInputTokens: 42_500,
-          contextWindow: 500_000,
-        },
-      }),
-      /Failed to persist compacted context snapshot/,
-    );
+    assert.equal(persistCompactedConversation({
+      store,
+      conversationId: 'c1',
+      messages: compactedMessages,
+    }).contentRevision, 8);
   });
 });

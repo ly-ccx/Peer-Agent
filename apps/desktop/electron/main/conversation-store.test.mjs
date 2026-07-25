@@ -16,6 +16,30 @@ function freshStore() {
   return { store, dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
+function accountingSnapshot(input = {}) {
+  return {
+    version: 1,
+    conversationId: 'placeholder',
+    contentRevision: 0,
+    modelKey: 'provider-1',
+    revision: 1,
+    phase: 'turn_complete',
+    compactionEpoch: 0,
+    contextWindow: 500_000,
+    inputBudget: 500_000,
+    compactionThresholdTokens: 400_000,
+    authoritativeInputTokens: 19_500,
+    percent: 4,
+    pressureSource: 'provider_usage',
+    pendingUncountedChanges: false,
+    pendingContentChars: 0,
+    countCapability: { kind: 'observed_usage_only' },
+    counterStatus: 'active',
+    updatedAt: 1,
+    ...input,
+  };
+}
+
 test('addUsage accumulates lifetime usage on index meta', () => {
   const { store, cleanup } = freshStore();
   try {
@@ -40,25 +64,15 @@ test('context snapshot is shared while revision and model still match', () => {
     store.updateModelEffort(conv.id, { modelProviderId: 'provider-1', model: 'model-1' });
     store.appendMessage(conv.id, { id: 'm1', role: 'user', content: 'hello' });
 
-    store.updateContextSnapshot(conv.id, {
-      nextRequestInputTokens: 19_500,
-      contextWindow: 500_000,
-      projectorVersion: 1,
-      source: 'tui',
-    });
+    store.updateContextSnapshot(conv.id, accountingSnapshot());
 
     const loaded = store.getConversation(conv.id);
     assert.equal(loaded.contentRevision, 1);
-    assert.deepEqual(loaded.contextSnapshot, {
-      nextRequestInputTokens: 19_500,
-      contextWindow: 500_000,
+    assert.deepEqual(loaded.contextSnapshot, accountingSnapshot({
+      conversationId: conv.id,
       contentRevision: 1,
-      modelProviderId: 'provider-1',
-      model: 'model-1',
-      computedAt: loaded.contextSnapshot.computedAt,
-      source: 'tui',
-      projectorVersion: 1,
-    });
+      modelKey: 'provider-1',
+    }));
   } finally {
     cleanup();
   }
@@ -69,29 +83,35 @@ test('message, compaction, and model changes invalidate the shared context snaps
   try {
     const conv = store.createConversation({ title: 'invalidate context' });
     store.updateModelEffort(conv.id, { modelProviderId: 'provider-1', model: 'model-1' });
-    store.updateContextSnapshot(conv.id, {
-      nextRequestInputTokens: 10,
+    store.updateContextSnapshot(conv.id, accountingSnapshot({
       contextWindow: 100,
-      source: 'desktop',
-    });
+      inputBudget: 100,
+      compactionThresholdTokens: 80,
+      authoritativeInputTokens: 10,
+      percent: 10,
+    }));
     assert.ok(store.getConversation(conv.id).contextSnapshot);
 
     store.appendMessage(conv.id, { id: 'm1', role: 'user', content: 'changed' });
     assert.equal(store.getConversation(conv.id).contextSnapshot, null);
 
-    store.updateContextSnapshot(conv.id, {
-      nextRequestInputTokens: 20,
+    store.updateContextSnapshot(conv.id, accountingSnapshot({
       contextWindow: 100,
-      source: 'tui',
-    });
+      inputBudget: 100,
+      compactionThresholdTokens: 80,
+      authoritativeInputTokens: 20,
+      percent: 20,
+    }));
     store.replaceMessages(conv.id, [{ id: 'summary', role: 'system', content: 'compacted' }]);
     assert.equal(store.getConversation(conv.id).contextSnapshot, null);
 
-    store.updateContextSnapshot(conv.id, {
-      nextRequestInputTokens: 5,
+    store.updateContextSnapshot(conv.id, accountingSnapshot({
       contextWindow: 100,
-      source: 'desktop',
-    });
+      inputBudget: 100,
+      compactionThresholdTokens: 80,
+      authoritativeInputTokens: 5,
+      percent: 5,
+    }));
     store.updateModelEffort(conv.id, { modelProviderId: 'provider-2', model: 'model-2' });
     assert.equal(store.getConversation(conv.id).contextSnapshot, null);
   } finally {
@@ -670,31 +690,32 @@ test('CLI continuation invalidates Desktop context and publishes one shared repl
       model: 'model-1',
     });
     desktopStore.appendMessage(conversation.id, { id: 'desktop-user', role: 'user', content: 'start' });
-    desktopStore.updateContextSnapshot(conversation.id, {
-      nextRequestInputTokens: 195_000,
-      contextWindow: 500_000,
-      projectorVersion: 1,
-      source: 'desktop',
-    });
-    assert.equal(tuiStore.getConversation(conversation.id).contextSnapshot.nextRequestInputTokens, 195_000);
+    desktopStore.updateContextSnapshot(conversation.id, accountingSnapshot({
+      modelKey: 'provider-1::model-1',
+      authoritativeInputTokens: 195_000,
+      percent: 39,
+    }));
+    assert.equal(
+      tuiStore.getConversation(conversation.id).contextSnapshot.authoritativeInputTokens,
+      195_000,
+    );
 
     tuiStore.appendMessage(conversation.id, { id: 'tui-user', role: 'user', content: 'continue' });
     assert.equal(desktopStore.getConversation(conversation.id).contextSnapshot, null);
 
     tuiStore.appendMessage(conversation.id, { id: 'tui-assistant', role: 'assistant', content: 'continued' });
-    tuiStore.updateContextSnapshot(conversation.id, {
-      nextRequestInputTokens: 42_500,
-      contextWindow: 500_000,
-      projectorVersion: 1,
-      source: 'tui',
-    });
+    tuiStore.updateContextSnapshot(conversation.id, accountingSnapshot({
+      modelKey: 'provider-1::model-1',
+      authoritativeInputTokens: 42_500,
+      percent: 9,
+    }));
 
     const shared = desktopStore.getConversation(conversation.id);
-    assert.equal(shared.contextSnapshot.nextRequestInputTokens, 42_500);
+    assert.equal(shared.contextSnapshot.authoritativeInputTokens, 42_500);
     assert.equal(shared.contextSnapshot.contextWindow, 500_000);
     assert.equal(shared.contextSnapshot.contentRevision, shared.contentRevision);
-    assert.equal(shared.contextSnapshot.source, 'tui');
-    assert.equal(shared.contextSnapshot.projectorVersion, 1);
+    assert.equal(shared.contextSnapshot.modelKey, 'provider-1::model-1');
+    assert.equal(shared.contextSnapshot.version, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

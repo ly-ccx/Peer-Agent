@@ -1,15 +1,23 @@
+import type {
+  ContextAccountingPhase,
+  ContextAccountingSnapshot,
+  ContextCountCapability,
+  ContextCountVerification,
+  ContextOverflowEvidence,
+} from '@peer-agent/protocol';
 import {
   CONTEXT_PROJECTION_CONFIG,
   decideContextCompaction,
   isPromptTooLongError,
   type CompactionDecision,
 } from './context-projection.ts';
+import type { ContextAccountingIdentity } from './context-accounting-lifecycle.ts';
 
-export type ContextCountCapability =
-  | { readonly kind: 'provider_count_api' }
-  | { readonly kind: 'provider_tokenizer'; readonly tokenizerVersion: string }
-  | { readonly kind: 'observed_usage_only' }
-  | { readonly kind: 'unavailable' };
+export type {
+  ContextAccountingSnapshot,
+  ContextCountCapability,
+  ContextOverflowEvidence,
+} from '@peer-agent/protocol';
 
 export type ObservedUsageInput = Readonly<{
   inputTokens?: number | null;
@@ -24,47 +32,6 @@ export type ObservedUsageInput = Readonly<{
 export type ExactCountResult = Readonly<{
   inputTokens: number;
   source: 'provider_count_api' | 'provider_tokenizer';
-}>;
-
-export type ContextOverflowEvidence = Readonly<{
-  requestedTokens?: number;
-  maximumTokens?: number;
-  status?: number;
-  message: string;
-}>;
-
-export type ContextAccountingSnapshot = Readonly<{
-  version: 1;
-  compactionEpoch: number;
-  contextWindow: number | null;
-  inputBudget: number | null;
-  compactionThresholdTokens: number | null;
-  authoritativeInputTokens: number | null;
-  percent: number | null;
-  pressureSource:
-    | 'provider_usage'
-    | 'provider_count_api'
-    | 'provider_tokenizer'
-    | 'provider_error_evidence'
-    | 'unknown';
-  pendingUncountedChanges: boolean;
-  countCapability: ContextCountCapability;
-  lastObserved?: Readonly<{
-    inputTokens: number;
-    requestFingerprint: string;
-    compactionEpoch: number;
-    source: 'provider_usage';
-    observedAt: number;
-    supersededByCompactionRevision?: number;
-  }>;
-  nextCounted?: Readonly<{
-    inputTokens: number;
-    requestFingerprint: string;
-    compactionEpoch: number;
-    source: 'provider_count_api' | 'provider_tokenizer';
-    countedAt: number;
-  }>;
-  lastOverflow?: ContextOverflowEvidence;
 }>;
 
 export type ContextCompactionReason =
@@ -82,10 +49,17 @@ type CompactResult<TState> = Readonly<{
 }>;
 
 export type ContextAccountingPipelineOptions<TState, TRequest, TResponse> = Readonly<{
+  identity: ContextAccountingIdentity | (() => ContextAccountingIdentity);
   contextWindow: number | null | undefined | (() => number | null | undefined);
   requiredOutputReserveTokens?: number;
   compactionThresholdRatio?: number;
   countCapability?: ContextCountCapability;
+  initialSnapshot?: ContextAccountingSnapshot | null;
+  driftToleranceRatio?: number;
+  onSnapshot?: (
+    snapshot: ContextAccountingSnapshot,
+    phase: ContextAccountingPhase,
+  ) => void;
   buildRequest: (state: TState) => MaybePromise<TRequest>;
   countRequest?: (request: TRequest) => MaybePromise<ExactCountResult | number | null | undefined>;
   compact: (input: Readonly<{
@@ -104,8 +78,9 @@ export type ContextAccountingPipelineOptions<TState, TRequest, TResponse> = Read
 export type ContextAccountingExecuteInput<TState> = Readonly<{
   state: TState;
   lastObservedUsage?: ObservedUsageInput | null;
+  lastObservedRequestFingerprint?: string | null;
   forceCompact?: boolean;
-  command?: 'send' | 'manual_compact';
+  command?: 'send' | 'manual_compact' | 'count_only';
 }>;
 
 export type ContextAccountingExecuteResult<TState, TRequest, TResponse> = Readonly<{
@@ -128,6 +103,12 @@ function finiteTokenCount(value: unknown): number {
 function finiteWindow(value: unknown): number | null {
   const count = finiteTokenCount(value);
   return count > 0 ? count : null;
+}
+
+function finiteRevision(value: unknown): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : 0;
 }
 
 export function normalizeObservedInputTokens(usage: ObservedUsageInput | null | undefined): number | null {
@@ -241,18 +222,38 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
   const now = options.now ?? Date.now;
   const fingerprint = options.fingerprintRequest ?? fingerprintCanonicalRequest;
   const capability = resolveCapability(options.countCapability, typeof options.countRequest === 'function');
-  let compactionEpoch = 0;
-  let lastObserved: ContextAccountingSnapshot['lastObserved'];
-  let nextCounted: ContextAccountingSnapshot['nextCounted'];
-  let lastOverflow: ContextOverflowEvidence | undefined;
-  let lastOverflowEpoch: number | undefined;
-  let compactionRevision = 0;
+  const identity = () => (
+    typeof options.identity === 'function' ? options.identity() : options.identity
+  );
+  const initialIdentity = identity();
+  const initial = options.initialSnapshot
+    && options.initialSnapshot.version === 1
+    && options.initialSnapshot.conversationId === initialIdentity.conversationId
+    && options.initialSnapshot.modelKey === initialIdentity.modelKey
+    ? options.initialSnapshot
+    : null;
+  let compactionEpoch = initial?.compactionEpoch ?? 0;
+  let lastObserved: ContextAccountingSnapshot['lastObserved'] = initial?.lastObserved;
+  let nextCounted: ContextAccountingSnapshot['nextCounted'] = initial?.nextCounted;
+  let lastOverflow: ContextOverflowEvidence | undefined = initial?.lastOverflow;
+  let lastOverflowEpoch: number | undefined =
+    initial?.pressureSource === 'provider_error_evidence'
+      ? initial.compactionEpoch
+      : undefined;
+  let compactionRevision = initial?.lastObserved?.supersededByCompactionRevision ?? 0;
+  let verification: ContextCountVerification | undefined = initial?.verification;
+  let counterStatus: ContextAccountingSnapshot['counterStatus'] =
+    initial?.counterStatus ?? 'active';
+  let revision = initial?.revision ?? 0;
+  let phase: ContextAccountingPhase = initial?.phase ?? 'restored';
+  let latestBuiltFingerprint: string | null = null;
 
   const contextWindow = () => finiteWindow(
     typeof options.contextWindow === 'function' ? options.contextWindow() : options.contextWindow,
   );
 
   const buildSnapshot = (): ContextAccountingSnapshot => {
+    const currentIdentity = identity();
     const window = contextWindow();
     const reserve = Math.max(0, finiteTokenCount(options.requiredOutputReserveTokens));
     const inputBudget = window == null ? null : Math.max(1, window - reserve);
@@ -269,12 +270,32 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
       lastOverflowEpoch === compactionEpoch
         ? finiteTokenCount(lastOverflow?.requestedTokens) || null
         : null;
-    const authority = activeCounted ?? activeObserved;
+    const observedMatchesCurrent =
+      activeObserved?.requestFingerprint === latestBuiltFingerprint;
+    const countedMatchesCurrent =
+      activeCounted?.requestFingerprint === latestBuiltFingerprint;
+    const observedSupersedesCount = Boolean(
+      activeObserved
+      && activeCounted
+      && activeObserved.requestFingerprint === activeCounted.requestFingerprint,
+    );
+    const authority = observedMatchesCurrent
+      ? activeObserved
+      : countedMatchesCurrent
+        ? activeCounted
+        : observedSupersedesCount
+          ? activeObserved
+          : activeCounted ?? activeObserved;
     const authoritativeInputTokens = authority?.inputTokens ?? activeOverflowTokens;
     const pressureSource = authority?.source
       ?? (activeOverflowTokens ? 'provider_error_evidence' : 'unknown');
     return {
       version: 1,
+      conversationId: currentIdentity.conversationId,
+      contentRevision: finiteRevision(currentIdentity.contentRevision),
+      modelKey: currentIdentity.modelKey,
+      revision,
+      phase,
       compactionEpoch,
       contextWindow: window,
       inputBudget,
@@ -284,17 +305,32 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
         ? null
         : Math.min(100, Math.round((authoritativeInputTokens / window) * 100)),
       pressureSource,
-      pendingUncountedChanges: !activeCounted,
+      pendingUncountedChanges:
+        authoritativeInputTokens == null
+        || (!observedMatchesCurrent && !countedMatchesCurrent),
+      pendingContentChars: 0,
       countCapability: capability,
+      counterStatus,
+      updatedAt: now(),
       ...(lastObserved ? { lastObserved } : {}),
       ...(activeCounted ? { nextCounted: activeCounted } : {}),
       ...(lastOverflow ? { lastOverflow } : {}),
+      ...(verification ? { verification } : {}),
     };
+  };
+
+  const publish = (nextPhase: ContextAccountingPhase): ContextAccountingSnapshot => {
+    phase = nextPhase;
+    revision += 1;
+    const snapshot = buildSnapshot();
+    options.onSnapshot?.(snapshot, nextPhase);
+    return snapshot;
   };
 
   const observe = (
     usage: ObservedUsageInput | null | undefined,
     requestFingerprint: string,
+    verifyCount = true,
   ) => {
     const inputTokens = normalizeObservedInputTokens(usage);
     if (inputTokens == null) return;
@@ -305,16 +341,52 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
       source: 'provider_usage',
       observedAt: now(),
     };
+    if (
+      verifyCount
+      && nextCounted
+      && nextCounted.requestFingerprint === requestFingerprint
+    ) {
+      const absoluteDelta = Math.abs(nextCounted.inputTokens - inputTokens);
+      const relativeDelta = absoluteDelta / Math.max(1, inputTokens);
+      const tolerance = Number.isFinite(options.driftToleranceRatio)
+        ? Math.max(0, Number(options.driftToleranceRatio))
+        : 0.02;
+      verification = {
+        requestFingerprint,
+        countedInputTokens: nextCounted.inputTokens,
+        observedInputTokens: inputTokens,
+        absoluteDelta,
+        relativeDelta,
+        tolerance,
+        status: relativeDelta <= tolerance ? 'verified' : 'drift',
+        verifiedAt: now(),
+      };
+      if (verification.status === 'drift') {
+        counterStatus = 'degraded';
+        nextCounted = undefined;
+      }
+    }
   };
 
   const count = async (request: TRequest, requestFingerprint: string) => {
     nextCounted = undefined;
-    if (!options.countRequest) return;
+    if (!options.countRequest || counterStatus === 'degraded') return;
     const before = fingerprint(request);
     if (before !== requestFingerprint) {
       throw new Error('context_request_fingerprint_mismatch: request changed before exact count');
     }
-    const counted = exactResult(await options.countRequest(request), capability);
+    let rawCount: ExactCountResult | number | null | undefined;
+    try {
+      rawCount = await options.countRequest(request);
+    } catch {
+      // Counting is advisory to the send path. A provider count endpoint may
+      // be unavailable even when message generation is healthy; degrade
+      // explicitly and continue with observed usage instead of blocking chat.
+      counterStatus = 'degraded';
+      nextCounted = undefined;
+      return;
+    }
+    const counted = exactResult(rawCount, capability);
     const after = fingerprint(request);
     if (after !== requestFingerprint) {
       throw new Error('context_request_fingerprint_mismatch: exact counter mutated the canonical request');
@@ -333,6 +405,7 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
     const request = await options.buildRequest(state);
     const requestFingerprint = fingerprint(request);
     await count(request, requestFingerprint);
+    latestBuiltFingerprint = requestFingerprint;
     return { request, requestFingerprint };
   };
 
@@ -381,14 +454,31 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
     input: ContextAccountingExecuteInput<TState>,
   ): Promise<ContextAccountingExecuteResult<TState, TRequest, TResponse>> => {
     if (input.lastObservedUsage) {
-      const provisional = await options.buildRequest(input.state);
-      observe(input.lastObservedUsage, fingerprint(provisional));
+      const legacyFingerprint =
+        (typeof input.lastObservedRequestFingerprint === 'string'
+          && input.lastObservedRequestFingerprint.trim())
+        || initial?.lastObserved?.requestFingerprint
+        || `unbound_observation_${identity().conversationId}_${compactionEpoch}`;
+      observe(input.lastObservedUsage, legacyFingerprint, false);
     }
 
     let state = input.state;
     let built = await build(state);
     let decision = decide();
     let compacted = false;
+    if (input.command === 'count_only') {
+      const snapshot = publish('restored');
+      return {
+        state,
+        request: built.request,
+        response: null,
+        snapshot,
+        decision,
+        compactionEpoch,
+        compacted,
+        retriedAfterOverflow: false,
+      };
+    }
     const forceReason: ContextCompactionReason | null = input.command === 'manual_compact'
       ? 'manual'
       : input.forceCompact
@@ -412,17 +502,21 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
     }
 
     if (input.command === 'manual_compact') {
+      const snapshot = publish(compacted ? 'post_compaction' : 'request_preflight');
       return {
         state,
         request: built.request,
         response: null,
-        snapshot: buildSnapshot(),
+        snapshot,
         decision,
         compactionEpoch,
         compacted,
         retriedAfterOverflow: false,
       };
     }
+
+    if (compacted) publish('post_compaction');
+    publish('request_preflight');
 
     const assertFingerprint = () => {
       if (fingerprint(built.request) !== built.requestFingerprint) {
@@ -446,6 +540,8 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
       retriedAfterOverflow = true;
       state = recovered.state;
       built = await build(state);
+      publish('post_compaction');
+      publish('request_preflight');
       assertFingerprint();
       response = await options.send(built.request);
     }
@@ -460,6 +556,8 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
         retriedAfterOverflow = true;
         state = recovered.state;
         built = await build(state);
+        publish('post_compaction');
+        publish('request_preflight');
         assertFingerprint();
         response = await options.send(built.request);
       }
@@ -475,11 +573,16 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
     }
 
     observe(options.getUsage?.(response), built.requestFingerprint);
+    // The response may add assistant/tool-call content to the next request.
+    // Preserve the observed request as authority but mark the next request as
+    // pending until it is rebuilt and counted.
+    latestBuiltFingerprint = null;
+    const snapshot = publish('turn_complete');
     return {
       state,
       request: built.request,
       response,
-      snapshot: buildSnapshot(),
+      snapshot,
       decision,
       compactionEpoch,
       compacted,

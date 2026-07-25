@@ -61,6 +61,7 @@ export function createOpenAICompatibleProvider(
   const fetchImplementation = options.fetch ?? globalThis.fetch;
 
   return {
+    contextCountCapability: { kind: 'observed_usage_only' },
     async stream(request) {
       const response = await fetchImplementation(endpoint(options.config.baseUrl), {
         method: 'POST',

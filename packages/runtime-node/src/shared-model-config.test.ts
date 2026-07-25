@@ -99,9 +99,9 @@ test('loadSharedModelMetadata reads only non-sensitive metadata', () => {
     assert.equal(metadata?.modelLabel, 'GPT Shared Label');
     assert.equal(metadata?.credentialId, 'credential-group');
     assert.equal(metadata?.credentialStored, true);
-    // No Desktop levels → BASE fallback (same as Desktop normalizeEffortLevels).
+    // No Desktop levels → BASE fallback; Desktop's resolver prefers high.
     assert.deepEqual(metadata?.supportedReasoningEfforts, ['off', 'low', 'default', 'high']);
-    assert.equal(metadata?.defaultReasoningEffort, 'default');
+    assert.equal(metadata?.defaultReasoningEffort, 'high');
     assert.deepEqual(credentials.reads, { apiKey: 0, oauth: 0 });
   } finally {
     rmSync(userDataPath, { recursive: true, force: true });
@@ -563,4 +563,3 @@ test('loadSharedModelMetadata projects Desktop reasoningEffortLevels', () => {
     rmSync(userDataPath, { recursive: true, force: true });
   }
 });
-

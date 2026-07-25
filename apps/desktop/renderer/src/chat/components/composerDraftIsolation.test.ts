@@ -4,7 +4,7 @@ import test from 'node:test';
 
 const readSource = (path: string) => readFile(new URL(path, import.meta.url), 'utf8');
 
-test('draft input and draft token estimates stay in composer leaf subscriptions', async () => {
+test('draft input stays in the composer leaf and never becomes context token authority', async () => {
   const [surface, controls, tokenUsage] = await Promise.all([
     readSource('./ChatSurface.tsx'),
     readSource('./ComposerDraftControls.tsx'),
@@ -13,19 +13,12 @@ test('draft input and draft token estimates stay in composer leaf subscriptions'
 
   assert.match(surface, /<ComposerDraftControls[\s\S]*?conversationId=\{conversationId\}/);
   assert.match(surface, /onPrimaryAction=\{stableHandlePrimaryAction\}/);
-  assert.match(surface, /<ComposerTokenUsageDisplay[\s\S]*?authoritativeNextRequestInputTokens=\{authoritativeNextRequestInputTokens\}/);
-  assert.doesNotMatch(surface, /historyContextTokens/);
-  assert.doesNotMatch(surface, /const draft\s*=\s*convState\.draft/);
-  assert.doesNotMatch(surface, /value=\{draft\}/);
-  // 发送路径可用 estimateDraftTokens(text, sentAttachments) 固化权威种子；
-  // 不得再订阅草稿字符串做展示估算。
-  assert.doesNotMatch(surface, /estimateDraftTokens\(draft/);
-
+  assert.doesNotMatch(surface, /estimateDraftTokens|estimateStreamDeltaTokens/);
   assert.match(controls, /const draft = useConversationDraft\(conversationId\)/);
-  assert.match(controls, /value=\{draft\}/);
   assert.match(controls, /conversationStore\.setDraft\(conversationId, value\)/);
-  assert.match(tokenUsage, /const draft = useConversationDraft\(conversationId\)/);
-  assert.match(tokenUsage, /estimateDraftTokens\(draft, attachments\)/);
+  assert.match(tokenUsage, /useConversationContextAccounting\(conversationId\)/);
+  assert.match(tokenUsage, /contextAccounting=\{contextAccounting\}/);
+  assert.doesNotMatch(tokenUsage, /useConversationDraft|estimateDraftTokens|estimateStreamDeltaTokens/);
 });
 
 test('send actions read the latest draft from the conversation bucket', async () => {
@@ -39,59 +32,46 @@ test('send actions read the latest draft from the conversation bucket', async ()
   assert.doesNotMatch(surface, /\}, \[draft, attachments,/);
 });
 
-test('token usage prefers authoritative effective context over local full-history max', async () => {
-  const tokenUsage = await readSource('./ComposerTokenUsageDisplay.tsx');
-  // 有权威快照时必须走统一口径 resolveContextOccupancyTokens，不能再 Math.max 抬回本地完整历史。
-  assert.match(tokenUsage, /resolveContextOccupancyTokens/);
-  assert.match(
-    tokenUsage,
-    /authoritativeNextRequestInputTokens,\s*draftContextTokens/,
-  );
-  assert.doesNotMatch(
-    tokenUsage,
-    /Math\.max\(authoritativeWithDraft,\s*localContextTokens\)/,
-  );
-  // 流式仅用本轮 input+cacheRead 抬升，禁止把 lifetime 计费累计当上下文。
-  assert.doesNotMatch(tokenUsage, /lifetimeUsage/);
-  assert.doesNotMatch(tokenUsage, /Math\.max\([^)]*tokenUsage/);
-});
-
-test('send path seeds occupancy only when Runtime authority already exists', async () => {
-  const surface = await readSource('./ChatSurface.tsx');
-  assert.match(surface, /if \(authoritativeContext\)/);
-  assert.match(surface, /seedAuthoritativeContextOnSend/);
-  assert.match(surface, /if \(seeded\) setAuthoritativeContext\(seeded\)/);
-  assert.match(surface, /estimateDraftTokens\(text, sentAttachments\)/);
-  assert.match(
-    surface,
-    /contextReady=\{loadStatus === 'ready' && authoritativeContext != null\}/,
-  );
-});
-
-test('context ring never falls back to billed lifetime totals', async () => {
+test('context ring renders the shared accounting snapshot without a local fallback', async () => {
   const display = await readSource('./thread/TokenUsageDisplay.tsx');
-  assert.doesNotMatch(display, /contextTokens \?\? billedTokens/);
+
   assert.match(
     display,
-    /typeof nextRequestInputTokens === 'number' && Number\.isFinite\(nextRequestInputTokens\)/,
+    /contextAccounting\?\.authoritativeInputTokens/,
   );
+  assert.match(display, /contextAccounting\?\.percent/);
+  assert.match(display, /contextAccounting\?\.pendingUncountedChanges === true/);
+  assert.match(display, /contextAccounting\?\.counterStatus === 'degraded'/);
+  assert.match(display, /Exact count drifted from provider usage/);
+  assert.doesNotMatch(display, /lifetimeUsage|resolveContextOccupancyTokens|estimateDraftTokens/);
+  assert.doesNotMatch(display, /contextTokens \?\? billedTokens/);
 });
 
-test('external conversation reload replaces or clears the shared context snapshot', async () => {
+test('send path does not seed or estimate context occupancy', async () => {
   const surface = await readSource('./ChatSurface.tsx');
+
+  assert.doesNotMatch(surface, /seedAuthoritativeContextOnSend|seedContextAccountingOnSend/);
+  assert.doesNotMatch(surface, /estimateDraftTokens\(text, sentAttachments\)/);
+  assert.doesNotMatch(surface, /contextReady=/);
+});
+
+test('external conversation reload replaces or clears the shared accounting snapshot', async () => {
+  const surface = await readSource('./ChatSurface.tsx');
+
   assert.match(
     surface,
-    /authoritativeContext: storedAuthoritativeContext,\s*\}\) => \{/,
+    /contextAccounting: storedContextAccountingSnapshot,\s*\}\s*=\s*await loadConversationMessages/,
   );
   assert.match(
     surface,
-    /convActions\.commitLoad\(\{\s*messages: loaded,\s*tokenUsage: usage,\s*authoritativeContext: storedAuthoritativeContext,/,
+    /convActions\.commitLoad\(\{[\s\S]*contextAccounting: storedContextAccountingSnapshot/,
   );
 });
 
-test('unknown restored context never renders as a percentage', async () => {
-  const tokenUsage = await readSource('./thread/TokenUsageDisplay.tsx');
-  assert.match(tokenUsage, /currentContextTokens =\s*[\s\S]*?: null;/);
-  assert.match(tokenUsage, /ctxWindow && currentContextTokens != null[\s\S]*?\? Math\.min/);
-  assert.match(tokenUsage, /hasCtxRing \? \([\s\S]*?: currentContextTokens != null && currentContextTokens > 0 \? \(/);
+test('unknown restored context renders as unknown, never zero percent', async () => {
+  const display = await readSource('./thread/TokenUsageDisplay.tsx');
+
+  assert.match(display, /const ctxPercent =[\s\S]*contextAccounting\?\.percent/);
+  assert.match(display, /ctxPercent == null \? '\?' : `\$\{Math\.round\(ctxPercent\)\}%`/);
+  assert.match(display, /Context pending measurement/);
 });

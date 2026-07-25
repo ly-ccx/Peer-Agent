@@ -18,6 +18,30 @@ function makeWebContents() {
   };
 }
 
+function accountingSnapshot(input = {}) {
+  return {
+    version: 1,
+    conversationId: 'conversation-1',
+    contentRevision: 2,
+    modelKey: 'model-1',
+    revision: 3,
+    phase: 'turn_complete',
+    compactionEpoch: 0,
+    contextWindow: 100_000,
+    inputBudget: 100_000,
+    compactionThresholdTokens: 80_000,
+    authoritativeInputTokens: 84_000,
+    percent: 84,
+    pressureSource: 'provider_usage',
+    pendingUncountedChanges: false,
+    pendingContentChars: 0,
+    countCapability: { kind: 'observed_usage_only' },
+    counterStatus: 'active',
+    updatedAt: 1,
+    ...input,
+  };
+}
+
 describe('agent loop kernel', () => {
   it('defaults to an unbounded loop so model terminal responses control completion', () => {
     const loop = createAgentLoopKernel({ webContents: makeWebContents(), streamId: 's0' });
@@ -42,10 +66,11 @@ describe('agent loop kernel', () => {
       cacheWriteTokens: 5,
       cacheReadTokens: 11,
     });
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:done',
-      payload: { streamId: 's1', usage: loop.usage },
-    }]);
+    assert.equal(webContents.events.length, 1);
+    assert.equal(webContents.events[0].channel, 'chat:stream:done');
+    assert.deepEqual(webContents.events[0].payload.usage, loop.usage);
+    assert.equal(webContents.events[0].payload.contextAccounting.version, 1);
+    assert.equal(webContents.events[0].payload.contextAccounting.pressureSource, 'unknown');
   });
 
   it('exposes last-turn usage for preflight compaction and clears it after compact', () => {
@@ -75,82 +100,59 @@ describe('agent loop kernel', () => {
     assert.equal(loop.usage.inputTokens, 120);
   });
 
-  it('attaches the authoritative next-request context projection onto the done payload', () => {
+  it('attaches the accepted shared accounting snapshot onto the done payload', () => {
     const webContents = makeWebContents();
     const loop = createAgentLoopKernel({
       webContents,
       streamId: 's1ctx',
-      getContextInfo: () => ({
-        nextRequestInputTokens: 84_000,
-        contextWindow: 100_000,
-        compactionSuggested: true,
-      }),
+      accountingIdentity: {
+        conversationId: 'conversation-1',
+        contentRevision: 2,
+        modelKey: 'model-1',
+      },
     });
+    loop.acceptContextAccounting(accountingSnapshot());
 
     loop.sendDone();
 
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:done',
-      payload: {
-        streamId: 's1ctx',
-        usage: loop.usage,
-        nextRequestInputTokens: 84_000,
-        contextWindow: 100_000,
-        compactionSuggested: true,
-      },
-    }]);
+    const done = webContents.events[0];
+    assert.equal(done.channel, 'chat:stream:done');
+    assert.equal(done.payload.streamId, 's1ctx');
+    assert.equal(done.payload.contextAccounting.authoritativeInputTokens, 84_000);
+    assert.equal(done.payload.contextAccounting.percent, 84);
+    assert.equal(done.payload.contextAccounting.modelKey, 'model-1');
   });
 
-  it('omits context fields when getContextInfo is absent (backward compatible done payload)', () => {
+  it('emits an explicit unknown snapshot when provider authority is unavailable', () => {
     const webContents = makeWebContents();
     const loop = createAgentLoopKernel({ webContents, streamId: 's1noctx' });
 
     loop.sendDone();
 
-    // 无 getContextInfo 的旧路径：done 负载不得凭空冒出 context 字段，避免渲染端误判。
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:done',
-      payload: { streamId: 's1noctx', usage: loop.usage },
-    }]);
+    const snapshot = webContents.events[0].payload.contextAccounting;
+    assert.equal(snapshot.authoritativeInputTokens, null);
+    assert.equal(snapshot.percent, null);
+    assert.equal(snapshot.pendingUncountedChanges, true);
   });
 
-  it('keeps the done payload clean when getContextInfo throws', () => {
+  it('marks provider stream deltas pending through the shared lifecycle', () => {
     const webContents = makeWebContents();
+    const runtimeEvents = [];
     const loop = createAgentLoopKernel({
       webContents,
-      streamId: 's1throw',
-      // 闭包取数失败不得影响回合收尾：吞掉异常，done 照常发出且不带半成品 context 字段。
-      getContextInfo: () => {
-        throw new Error('context probe failed');
-      },
+      streamId: 's1stream',
+      emitRuntimeEvent: (event) => runtimeEvents.push(event),
     });
 
-    loop.sendDone();
-
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:done',
-      payload: { streamId: 's1throw', usage: loop.usage },
-    }]);
-  });
-
-  it('only forwards context fields of the expected primitive types', () => {
-    const webContents = makeWebContents();
-    const loop = createAgentLoopKernel({
-      webContents,
-      streamId: 's1partial',
-      getContextInfo: () => ({
-        nextRequestInputTokens: 1234,
-        contextWindow: 'oops',
-        compactionSuggested: 'yes',
-      }),
+    loop.providerWebContents.send('chat:stream:delta', {
+      streamId: 's1stream',
+      content: 'streamed text',
     });
 
-    loop.sendDone();
-
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:done',
-      payload: { streamId: 's1partial', usage: loop.usage, nextRequestInputTokens: 1234 },
-    }]);
+    assert.equal(webContents.events[0].channel, 'chat:stream:delta');
+    assert.equal(loop.getContextAccounting().phase, 'stream_preview');
+    assert.equal(loop.getContextAccounting().pendingContentChars, 13);
+    assert.equal(runtimeEvents.at(-1).type, 'context.accounting');
   });
 
   it('invokes onRound exactly once per addUsage, including when usage is null', () => {
@@ -214,17 +216,12 @@ describe('agent loop kernel', () => {
     assert.deepEqual(webContents.events[0].payload.usage, loop.usage);
   });
 
-  it('projects the terminal assistant reply before emitting the done context snapshot', () => {
+  it('appends the terminal assistant reply before emitting the done snapshot', () => {
     const webContents = makeWebContents();
     const apiMessages = [{ role: 'user', content: 'question' }];
-    const observedMessages = [];
     const loop = createAgentLoopKernel({
       webContents,
       streamId: 's3',
-      getContextInfo: () => {
-        observedMessages.push(structuredClone(apiMessages));
-        return { nextRequestInputTokens: apiMessages.length * 100, contextWindow: 1_000 };
-      },
     });
 
     const result = handleTerminalTextResponse({
@@ -239,16 +236,9 @@ describe('agent loop kernel', () => {
       { role: 'user', content: 'question' },
       { role: 'assistant', content: 'finished' },
     ]);
-    assert.deepEqual(observedMessages, [apiMessages]);
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:done',
-      payload: {
-        streamId: 's3',
-        usage: loop.usage,
-        nextRequestInputTokens: 200,
-        contextWindow: 1_000,
-      },
-    }]);
+    assert.equal(webContents.events[0].channel, 'chat:stream:done');
+    assert.equal(webContents.events[0].payload.contextAccounting.version, 1);
+    assert.equal(webContents.events[0].payload.contextAccounting.percent, null);
   });
 
   it('emits an error for empty terminal text responses', () => {

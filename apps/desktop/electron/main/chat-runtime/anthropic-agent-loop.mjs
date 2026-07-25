@@ -1,4 +1,5 @@
 import { sendAnthropicMessagesStream } from '../provider-adapters/anthropic-messages-adapter.mjs';
+import { countAnthropicCanonicalRequest } from '../provider-adapters/context-count-adapter.mjs';
 import {
   createAgentLoopKernel,
   handleTerminalTextResponse,
@@ -6,7 +7,6 @@ import {
 import {
   buildCompactionProviderConfig,
   buildPromptTooLongRecoveryError,
-  computeContextInfo,
   isPromptTooLongResponse,
 } from './compaction-coordinator.mjs';
 import { executeDesktopProviderRequest } from './provider-request-coordinator.mjs';
@@ -55,6 +55,8 @@ export async function agentLoopAnthropic({
   runtimeEventState = undefined,
   providerId = null,
   runtimeMode = 'chat',
+  accountingIdentity = null,
+  initialContextAccounting = null,
 }) {
   let effectiveSystemPrompt = systemPrompt;
   let effectiveSystem = effectiveSystemPrompt;
@@ -64,20 +66,15 @@ export async function agentLoopAnthropic({
     streamId,
     conversationId,
     onRound: agentProgress?.onRound,
-    // ADR 56：Anthropic usage（含独立 cache-read）是权威输入；
-    // system + messages 投影只保留为尚无观测时的兼容诊断。
-    getContextInfo: ({ usageSnapshot = null } = {}) => computeContextInfo({
-      messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
-      contextWindow,
-      tools,
-      usageSnapshot,
-    }),
-    // per-turn 投影生命周期的稳定输入：同 getContextInfo 口径补上 system。
-    getProjectionInput: () => ({
-      messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
-      tools,
-      contextWindow,
-    }),
+    emitRuntimeEvent,
+    accountingIdentity: accountingIdentity ?? {
+      conversationId: conversationId || streamId,
+      contentRevision: 0,
+      modelKey: providerId || model,
+    },
+    initialContextAccounting,
+    contextWindow,
+    countCapability: { kind: 'provider_count_api' },
   });
   const providerConfig = buildCompactionProviderConfig({
     provider: 'anthropic',
@@ -122,7 +119,27 @@ export async function agentLoopAnthropic({
             preserveLatestUserTurn: true,
             usageSnapshot: loop.getLastTurnUsage?.() ?? null,
             rebuildSystemPrompt,
-            contextLifecycle: loop.contextLifecycle,
+            accountingIdentity: accountingIdentity ?? {
+              conversationId: conversationId || streamId,
+              contentRevision: 0,
+              modelKey: providerId || model,
+            },
+            initialContextAccounting: loop.getContextAccounting(),
+            countCapability: { kind: 'provider_count_api' },
+            countRequest: (canonicalRequest) => countAnthropicCanonicalRequest({
+              baseUrl,
+              apiKey,
+              headers: resolvedChannel?.headers,
+              ...canonicalRequest,
+              supportsReasoning: effectiveSupportsReasoning,
+              reasoningParamStyle: resolvedChannel?.reasoningParamStyle,
+              reasoningEffortMap: resolvedChannel?.reasoningEffortMap,
+              promptCaching:
+                resolvedChannel?.supportsPromptCaching ?? supportsPromptCaching,
+              maxOutputTokens,
+              signal,
+            }),
+            onContextAccounting: loop.acceptContextAccounting,
           },
           buildCanonicalRequest: ({ messages: projectedMessages, systemPrompt: projectedSystem }) => ({
             model,
@@ -145,7 +162,7 @@ export async function agentLoopAnthropic({
               promptCaching: resolvedChannel?.supportsPromptCaching ?? supportsPromptCaching,
               maxOutputTokens,
               signal,
-              webContents,
+              webContents: loop.providerWebContents,
               streamId,
             }),
         });

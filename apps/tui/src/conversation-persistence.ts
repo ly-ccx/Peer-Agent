@@ -1,7 +1,7 @@
 import { createConversationStore } from '@peer-agent/conversation-store';
 import { buildCompactionMarker } from '@peer-agent/protocol';
+import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 import {
-  CANONICAL_HISTORY_PROJECTOR_VERSION,
   projectConversationHistory,
 } from '@peer-agent/runtime-core';
 import { realpathSync } from 'node:fs';
@@ -28,12 +28,7 @@ export interface TuiConversationRestore {
   readonly continuityContext?: string;
   readonly modelSelection?: RuntimeModelSelection;
   readonly usage?: NonNullable<ChatSnapshot['usage']>;
-  readonly contextSnapshot?: {
-    readonly nextRequestInputTokens: number;
-    readonly contextWindow: number | null;
-    readonly model: string;
-    readonly projectorVersion: number;
-  };
+  readonly contextSnapshot?: ContextAccountingSnapshot;
 }
 
 interface ConversationChangeEvent {
@@ -54,14 +49,7 @@ interface ConversationStore {
   replaceMessages?(id: string, messages: readonly Record<string, unknown>[], options?: { allowEmpty?: boolean }): unknown;
   updateMode(id: string, mode: TuiMode): unknown;
   updateModelEffort(id: string, input: { effort: string; modelProviderId: string | null; model?: string }): unknown;
-  updateContextSnapshot?(id: string, snapshot: {
-    nextRequestInputTokens: number;
-    contextWindow: number | null;
-    modelProviderId: string | null;
-    model: string;
-    projectorVersion: number;
-    source: 'tui';
-  }): unknown;
+  updateContextSnapshot?(id: string, snapshot: ContextAccountingSnapshot): unknown;
   addUsage(id: string, usage: NonNullable<ChatSnapshot['usage']>): unknown;
   subscribeChanges?(listener: (event: ConversationChangeEvent) => void): () => void;
 }
@@ -87,8 +75,7 @@ export function resumeTuiConversation(
   persistence.resumeConversation(conversation);
   if (!controller.restore({
     ...conversation,
-    nextRequestInputTokens: conversation.contextSnapshot?.nextRequestInputTokens,
-    requestProjection: conversation.contextSnapshot,
+    contextAccounting: conversation.contextSnapshot,
   })) {
     throw new Error('Conversation restore invariant failed after the idle-state check.');
   }
@@ -581,15 +568,12 @@ export function createTuiConversationPersistence(options: {
         if (messages.length === 0) return null;
         const activeContext = activeStoredContext(storedMessages);
         const providerUsage = restoredProviderUsage(messages);
-        const contextSnapshot = stored.contextSnapshot && typeof stored.contextSnapshot === 'object'
-          ? stored.contextSnapshot as Record<string, unknown>
-          : null;
-        const storedTokens = Number(contextSnapshot?.nextRequestInputTokens);
-        const storedWindow = Number(contextSnapshot?.contextWindow);
-        const storedProjectorVersion = Number(contextSnapshot?.projectorVersion);
-        const storedModel = typeof contextSnapshot?.model === 'string'
-          ? contextSnapshot.model.trim()
-          : '';
+        const contextSnapshot = stored.contextSnapshot
+          && typeof stored.contextSnapshot === 'object'
+          && (stored.contextSnapshot as { version?: unknown }).version === 1
+          && (stored.contextSnapshot as { conversationId?: unknown }).conversationId === id
+          ? stored.contextSnapshot as unknown as ContextAccountingSnapshot
+          : undefined;
         return {
           id,
           mode: normalizeTuiMode(stored.mode, 'chat'),
@@ -600,21 +584,7 @@ export function createTuiConversationPersistence(options: {
             : {}),
           modelSelection: restoredSelection(stored),
           ...(providerUsage ? { usage: providerUsage } : {}),
-          ...(Number.isFinite(storedTokens)
-            && storedTokens >= 0
-            && storedModel
-            && storedProjectorVersion === CANONICAL_HISTORY_PROJECTOR_VERSION
-            ? {
-              contextSnapshot: {
-                nextRequestInputTokens: Math.floor(storedTokens),
-                contextWindow: Number.isFinite(storedWindow) && storedWindow > 0
-                  ? Math.floor(storedWindow)
-                  : null,
-                model: storedModel,
-                projectorVersion: CANONICAL_HISTORY_PROJECTOR_VERSION,
-              },
-            }
-            : {}),
+          ...(contextSnapshot ? { contextSnapshot } : {}),
         };
       } catch (error) {
         reportError(error);
@@ -745,15 +715,8 @@ export function createTuiConversationPersistence(options: {
           usageMessageIds.add(completedAssistant.id);
         }
 
-        if (snapshot.status === 'idle' && snapshot.requestProjection && store.updateContextSnapshot) {
-          store.updateContextSnapshot(id, {
-            nextRequestInputTokens: snapshot.requestProjection.nextRequestInputTokens,
-            contextWindow: snapshot.requestProjection.contextWindow,
-            modelProviderId: modelProviderId(model),
-            model: snapshot.requestProjection.model,
-            projectorVersion: CANONICAL_HISTORY_PROJECTOR_VERSION,
-            source: 'tui',
-          });
+        if (snapshot.status === 'idle' && snapshot.contextAccounting && store.updateContextSnapshot) {
+          store.updateContextSnapshot(id, snapshot.contextAccounting);
         }
       } catch (error) {
         reportError(error);

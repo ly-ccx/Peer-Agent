@@ -1,3 +1,5 @@
+import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
+
 export interface ConversationUsage {
   readonly inputTokens?: number;
   readonly outputTokens?: number;
@@ -7,16 +9,7 @@ export interface ConversationUsage {
   readonly [key: string]: unknown;
 }
 
-export interface ConversationContextSnapshot {
-  readonly nextRequestInputTokens: number;
-  readonly contextWindow: number | null;
-  readonly contentRevision: number;
-  readonly modelProviderId: string | null;
-  readonly model: string | null;
-  readonly computedAt: string;
-  readonly source: 'desktop' | 'tui';
-  readonly projectorVersion: number;
-}
+export type ConversationContextSnapshot = ContextAccountingSnapshot;
 
 export interface ConversationMeta {
   readonly id: string;
@@ -81,7 +74,7 @@ export interface ConversationStore {
   appendMessage(id: string, message: object): unknown;
   updateMode(id: string, mode: string): unknown;
   updateModelEffort(id: string, input: { effort?: string; modelProviderId?: string | null; model?: string | null }): unknown;
-  updateContextSnapshot(id: string, snapshot: Omit<ConversationContextSnapshot, 'contentRevision' | 'computedAt'> & { computedAt?: string }): ConversationMeta | null;
+  updateContextSnapshot(id: string, snapshot: ConversationContextSnapshot): ConversationMeta | null;
   addUsage(id: string, usage: ConversationUsage): unknown;
   subscribeChanges(listener: (event: ConversationChangeEvent) => void, options?: { interval?: number }): () => void;
   readonly [key: string]: unknown;
@@ -94,3 +87,4 @@ export function rankConversationMatch(
   query?: string,
   options?: { includeWorkspaceNameMatch?: boolean },
 ): number;
+import type { ContextAccountingSnapshot } from '@peer-agent/protocol';

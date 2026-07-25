@@ -1,4 +1,7 @@
-import type { LocalAccessLevel } from '@peer-agent/protocol';
+import type {
+  ContextAccountingSnapshot,
+  LocalAccessLevel,
+} from '@peer-agent/protocol';
 
 import { permissionPolicyLabels } from './tui-permission-policy.ts';
 import type { TuiMode } from './tui-mode.ts';
@@ -19,8 +22,8 @@ export interface ComposerStatusInput {
   readonly reasoningEffort?: string;
   readonly contextWindow?: number;
   readonly usage?: ComposerUsageSnapshot;
-  /** Estimated input tokens for the next final provider request. */
-  readonly nextRequestInputTokens?: number;
+  /** ADR 56: provider-backed accounting is the only capacity source. */
+  readonly contextAccounting?: ContextAccountingSnapshot;
 }
 
 export interface ComposerStatus {
@@ -88,29 +91,35 @@ function compactTokens(tokens: number): string {
 }
 
 export function contextStatus(
-  usage: ComposerUsageSnapshot | undefined,
-  contextWindow: number | undefined,
-  nextRequestInputTokens?: number,
+  accounting: ContextAccountingSnapshot | undefined,
+  contextWindow?: number,
 ): Pick<ComposerStatus, 'context' | 'contextShort' | 'contextPercent'> {
-  // Display the next final request projection. Provider usage is only a fallback
-  // for legacy/restored snapshots that do not yet carry the projection.
-  const usageTokens = contextTokensFromUsage(usage);
-  const tokens = Number.isFinite(nextRequestInputTokens) && (nextRequestInputTokens as number) >= 0
-    ? Math.floor(nextRequestInputTokens as number)
-    : usageTokens;
-  if (!Number.isFinite(contextWindow) || contextWindow! <= 0) {
+  const window = accounting?.contextWindow ?? contextWindow;
+  const tokens = accounting?.authoritativeInputTokens;
+  const pending = accounting?.pendingUncountedChanges === true;
+  const degraded = accounting?.counterStatus === 'degraded';
+  const statusMark = `${pending ? '+' : ''}${degraded ? '!' : ''}`;
+  if (tokens == null) {
+    const suffix = statusMark ? ` ${statusMark}` : '';
     return {
-      context: `context ${compactTokens(tokens)} / ?`,
-      contextShort: `ctx ${compactTokens(tokens)} / ?`,
+      context: `context ?${suffix}`,
+      contextShort: `ctx ?${suffix}`,
+    };
+  }
+  if (!Number.isFinite(window) || window! <= 0) {
+    const suffix = statusMark ? ` ${statusMark}` : '';
+    return {
+      context: `context ${compactTokens(tokens)} / ?${suffix}`,
+      contextShort: `ctx ${compactTokens(tokens)} / ?${suffix}`,
     };
   }
 
-  const rawPercent = (tokens / contextWindow!) * 100;
+  const rawPercent = accounting?.percent ?? 0;
   const percent = Math.min(100, Math.max(0, Math.round(rawPercent)));
   const displayPercent = tokens > 0 && rawPercent < 1 ? '<1%' : `${percent}%`;
   return {
-    context: `context ${displayPercent}`,
-    contextShort: `ctx ${displayPercent}`,
+    context: `context ${displayPercent}${statusMark}`,
+    contextShort: `ctx ${displayPercent}${statusMark}`,
     contextPercent: percent,
   };
 }
@@ -121,9 +130,8 @@ export function createComposerStatus(input: ComposerStatusInput): ComposerStatus
     ? permissionPolicyLabels('read_only')
     : permissionPolicyLabels(input.accessLevel ?? 'ask_before_local');
   const context = contextStatus(
-    input.usage,
+    input.contextAccounting,
     input.contextWindow ?? contextWindowForModel(input.modelLabel),
-    input.nextRequestInputTokens,
   );
   const language = languageOption(input.locale ?? 'zh-CN');
   return {

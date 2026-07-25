@@ -128,7 +128,6 @@ describe('resolveModelSwitchState', () => {
     }), {
       modelProviderId: 'chatgpt::gpt-5.6-sol',
       effort: 'max',
-      authoritativeContext: null,
     });
   });
 
@@ -141,7 +140,6 @@ describe('resolveModelSwitchState', () => {
     }), {
       modelProviderId: 'grok::grok-4.5',
       effort: 'high',
-      authoritativeContext: null,
     });
   });
 });

@@ -53,10 +53,14 @@ import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendin
 import { buildRuntimeTools, createLlmChatService } from './llm-chat-service.mjs';
 import { removeConversationToolArtifacts } from '@peer-agent/runtime-node';
 import {
-  CANONICAL_HISTORY_PROJECTOR_VERSION,
-  createContextProjectionLifecycle,
+  createContextAccountingCompactionPipeline,
+  createUnknownContextAccountingSnapshot,
   projectConversationHistory,
 } from '@peer-agent/runtime-core';
+import {
+  countAnthropicCanonicalRequest,
+  countGeminiCanonicalRequest,
+} from './provider-adapters/context-count-adapter.mjs';
 import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
 import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
@@ -347,7 +351,6 @@ function persistCompactionToConversation({
   compactResult,
   preservePendingAssistant = false,
   sourceMessages = null,
-  requestProjection = null,
 }) {
   const conv = conversationStore.getConversation(conversationId);
   if (!conv) return null;
@@ -364,7 +367,6 @@ function persistCompactionToConversation({
     store: conversationStore,
     conversationId,
     messages: compactedMessages,
-    requestProjection,
   });
 }
 
@@ -2205,8 +2207,9 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
   }
 
   let providerConfig = null;
+  let resolvedChannel = null;
   if (provider && credential?.apiKey) {
-    const resolvedChannel = resolveChannel({
+    resolvedChannel = resolveChannel({
       ...provider,
       apiKey: credential.apiKey,
       accountId: credential.accountId,
@@ -2225,6 +2228,16 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     };
   }
   const contextWindow = provider?.contextWindow || 0;
+  let tools = null;
+  try {
+    tools = buildRuntimeTools({
+      mcpRegistry,
+      providerType: provider?.provider === 'anthropic' ? 'anthropic' : 'openai',
+      mode: conv.mode || 'chat',
+    }).tools;
+  } catch (error) {
+    console.warn('[main] compact tool projection unavailable:', error?.message || error);
+  }
 
   const apiMessages = [
     { role: 'system', content: systemPrompt },
@@ -2235,27 +2248,120 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
   // 手动 /compact = force 全量压缩 + 强制横幅；不再在 handler 内复制平行实现。
   // 见 knowledge/architecture/23-compaction-path-root-governance.md（单闸门不变式）。
   try {
-    const outcome = await runCompactionCheck({
-      messages: apiMessages,
-      systemPrompt,
+    const exactAnthropic = resolvedChannel?.wire === 'anthropic-messages'
+      && Boolean(credential?.apiKey);
+    const exactGemini = resolvedChannel?.wire === 'gemini'
+      && credential?.authMethod === 'api_key'
+      && Boolean(credential?.apiKey);
+    let outcome = null;
+    const accountingPipeline = createContextAccountingCompactionPipeline({
+      identity: {
+        conversationId,
+        contentRevision: Number.isSafeInteger(conv.contentRevision)
+          ? conv.contentRevision + 1
+          : 1,
+        modelKey: provider?.id || provider?.model || 'unknown-model',
+      },
       contextWindow,
-      providerConfig,
-      // 手动路径的持久化需要用 Projector 分界后的 raw rows 作为源切片。
-      persistCompaction: (args) => persistCompactionToConversation({
-        ...args,
-        sourceMessages: activeSourceMessages,
-      }),
-      conversationId,
-      streamId,
-      webContents: event.sender,
-      force: true,
-      manual: true,
-      // 手动 /compact 保持真·全量压缩语义：不保留最新用户原文。
-      preserveLatestUserTurn: false,
-      continuityContext: priorContinuityContext,
+      countCapability: exactAnthropic || exactGemini
+        ? { kind: 'provider_count_api' }
+        : { kind: 'observed_usage_only' },
+      initialSnapshot:
+        conv.contextSnapshot?.version === 1
+        && conv.contextSnapshot.modelKey === (provider?.id || provider?.model)
+          ? conv.contextSnapshot
+          : null,
+      buildRequest(state) {
+        if (exactAnthropic) {
+          const system = state.messages
+            .filter((message) => message.role === 'system')
+            .map((message) => message.content)
+            .join('\n\n');
+          return {
+            model: provider.model,
+            system,
+            messages: state.messages.filter((message) => message.role !== 'system'),
+            tools,
+            effort: conv.effort || 'default',
+            supportsReasoning: Boolean(provider.supportsReasoning),
+            promptCaching: Boolean(provider.supportsPromptCaching),
+            maxOutputTokens: provider.maxOutputTokens || 0,
+          };
+        }
+        return {
+          model: provider?.model || '',
+          messages: state.messages,
+          tools,
+          maxOutputTokens: provider?.maxOutputTokens || 0,
+        };
+      },
+      countRequest: exactAnthropic
+        ? (request) => countAnthropicCanonicalRequest({
+            baseUrl: provider.baseUrl,
+            apiKey: credential.apiKey,
+            headers: resolvedChannel?.headers,
+            ...request,
+          })
+        : exactGemini
+          ? (request) => countGeminiCanonicalRequest({
+              baseUrl: provider.baseUrl,
+              apiKey: credential.apiKey,
+              headers: resolvedChannel?.headers,
+              ...request,
+            })
+          : undefined,
+      async compact({ state }) {
+        outcome = await runCompactionCheck({
+          messages: state.messages,
+          systemPrompt,
+          contextWindow,
+          providerConfig,
+          // 手动路径的持久化需要用 Projector 分界后的 raw rows 作为源切片。
+          persistCompaction: (args) => persistCompactionToConversation({
+            ...args,
+            sourceMessages: activeSourceMessages,
+          }),
+          conversationId,
+          streamId,
+          webContents: event.sender,
+          force: true,
+          manual: true,
+          preserveLatestUserTurn: false,
+          continuityContext: priorContinuityContext,
+        });
+        return {
+          compacted: Boolean(outcome?.compacted),
+          state: {
+            messages: Array.isArray(outcome?.messages)
+              ? outcome.messages
+              : state.messages,
+          },
+        };
+      },
+      send: async () => {
+        throw new Error('manual_compact_must_not_send');
+      },
+      onSnapshot(snapshot) {
+        emitRuntimeEvent({
+          type: 'context.accounting',
+          sessionId: conversationId,
+          conversationId,
+          streamId,
+          snapshot,
+        });
+      },
     });
-
-    if (!outcome.compacted) return { compacted: false };
+    const accountingResult = await accountingPipeline.execute({
+      state: { messages: apiMessages },
+      command: 'manual_compact',
+    });
+    if (accountingResult.snapshot.version === 1) {
+      conversationStore.updateContextSnapshot(
+        conversationId,
+        accountingResult.snapshot,
+      );
+    }
+    if (!outcome?.compacted) return { compacted: false };
 
     const result = outcome.compactResult;
     try {
@@ -2298,7 +2404,10 @@ ipcMain.handle('chat:compaction:get', (_event, { conversationId } = {}) =>
 // 按当前宿主的完整成分(全量 system context + 模式投影工具 schema + active 历史)重算投影,
 // 而不是用缺成分的本地估算兜底(那正是历史上 RC1 失准的根源)。
 // 重算成功后回写 contextSnapshot(source: desktop),下次打开直接命中。
-ipcMain.handle('chat:context:restored', (_event, { conversationId } = {}) => {
+ipcMain.handle('chat:context:restored', async (
+  _event,
+  { conversationId, modelProviderId = null } = {},
+) => {
   const conv = conversationStore.getConversation(conversationId);
   if (!conv || !conv.messages?.length) return null;
 
@@ -2322,7 +2431,8 @@ ipcMain.handle('chat:context:restored', (_event, { conversationId } = {}) => {
   const continuityContext = desktopContinuityContextFromProjection(canonicalHistory);
 
   const providers = llmConfigStore.listProviders().filter((p) => p.apiKeyConfigured);
-  const provider = (conv.modelProviderId && providers.find((p) => p.id === conv.modelProviderId))
+  const provider = (modelProviderId && providers.find((p) => p.id === modelProviderId))
+    || (conv.modelProviderId && providers.find((p) => p.id === conv.modelProviderId))
     || providers.find((p) => p.isDefault)
     || providers[0]
     || null;
@@ -2357,34 +2467,98 @@ ipcMain.handle('chat:context:restored', (_event, { conversationId } = {}) => {
     [{ role: 'system', content: systemPrompt }, ...activeMessages],
     { log: () => {} },
   ).messages;
-  const lifecycle = createContextProjectionLifecycle();
-  const snapshot = lifecycle.restored({
-    messages: projectedMessages,
-    tools,
-    contextWindow: provider?.contextWindow || null,
-    reason: 'restored',
-  });
-  const projection = snapshot.projection;
-  if (!Number.isFinite(projection.nextRequestInputTokens) || projection.nextRequestInputTokens <= 0) {
-    return null;
+  const identity = {
+    conversationId,
+    contentRevision: Number.isSafeInteger(conv.contentRevision)
+      ? conv.contentRevision
+      : 0,
+    modelKey: provider?.id || provider?.model || 'unknown-model',
+  };
+  const resolvedChannel = provider ? resolveChannel(provider) : null;
+  let credential = null;
+  try {
+    credential = provider
+      ? await resolveProviderCredential({ provider, llmConfigStore })
+      : null;
+  } catch {
+    credential = null;
+  }
+  const exactAnthropic = resolvedChannel?.wire === 'anthropic-messages'
+    && Boolean(credential?.apiKey);
+  const exactGemini = resolvedChannel?.wire === 'gemini'
+    && credential?.authMethod === 'api_key'
+    && Boolean(credential?.apiKey);
+  const countCapability = exactAnthropic || exactGemini
+    ? { kind: 'provider_count_api' }
+    : { kind: 'observed_usage_only' };
+  let snapshot;
+  if (exactAnthropic || exactGemini) {
+    const canonicalRequest = exactAnthropic
+      ? {
+          model: provider.model,
+          system: systemPrompt,
+          messages: projectedMessages.filter((message) => message.role !== 'system'),
+          tools,
+          effort: conv.effort || 'default',
+          supportsReasoning: Boolean(provider.supportsReasoning),
+          promptCaching: Boolean(provider.supportsPromptCaching),
+          maxOutputTokens: provider.maxOutputTokens || 0,
+        }
+      : {
+          model: provider.model,
+          messages: projectedMessages,
+          tools,
+          maxOutputTokens: provider.maxOutputTokens || 0,
+        };
+    const pipeline = createContextAccountingCompactionPipeline({
+      identity,
+      contextWindow: provider.contextWindow || null,
+      countCapability,
+      initialSnapshot:
+        conv.contextSnapshot?.version === 1
+        && conv.contextSnapshot.modelKey === identity.modelKey
+          ? conv.contextSnapshot
+          : null,
+      buildRequest: () => canonicalRequest,
+      countRequest: exactAnthropic
+        ? (request) => countAnthropicCanonicalRequest({
+            baseUrl: provider.baseUrl,
+            apiKey: credential.apiKey,
+            headers: resolvedChannel?.headers,
+            ...request,
+          })
+        : (request) => countGeminiCanonicalRequest({
+            baseUrl: provider.baseUrl,
+            apiKey: credential.apiKey,
+            headers: resolvedChannel?.headers,
+            ...request,
+          }),
+      compact: ({ state }) => ({ compacted: false, state }),
+      send: async () => {
+        throw new Error('restored_count_only_must_not_send');
+      },
+    });
+    snapshot = (await pipeline.execute({
+      state: null,
+      command: 'count_only',
+    })).snapshot;
+  } else {
+    snapshot = createUnknownContextAccountingSnapshot({
+      identity,
+      contextWindow: provider?.contextWindow || null,
+      countCapability,
+      phase: 'restored',
+      revision: conv.contextSnapshot?.revision ?? 0,
+      compactionEpoch: conv.contextSnapshot?.compactionEpoch ?? 0,
+      pendingUncountedChanges: activeMessages.length > 0,
+    });
   }
   try {
-    conversationStore.updateContextSnapshot(conversationId, {
-      nextRequestInputTokens: projection.nextRequestInputTokens,
-      contextWindow: projection.contextWindow,
-      projectorVersion: CANONICAL_HISTORY_PROJECTOR_VERSION,
-      source: 'desktop',
-    });
+    conversationStore.updateContextSnapshot(conversationId, snapshot);
   } catch (error) {
     console.warn('[main] failed to persist restored projection:', error?.message || error);
   }
-  return {
-    phase: 'restored',
-    nextRequestInputTokens: projection.nextRequestInputTokens,
-    contextWindow: projection.contextWindow,
-    percent: projection.percent,
-    pressure: projection.pressure,
-  };
+  return snapshot;
 });
 
 ipcMain.handle('prompt-snapshots:list', (_event, params = {}) =>

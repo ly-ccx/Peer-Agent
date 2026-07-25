@@ -9,6 +9,37 @@ import {
   modelIdFromLabel,
   workspaceBasename,
 } from './composer-status.ts';
+import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
+
+function accounting(
+  inputTokens: number,
+  contextWindow: number | null,
+  pendingUncountedChanges = false,
+  counterStatus: ContextAccountingSnapshot['counterStatus'] = 'active',
+): ContextAccountingSnapshot {
+  return {
+    version: 1,
+    conversationId: 'conversation-1',
+    contentRevision: 1,
+    modelKey: 'provider::model',
+    revision: 1,
+    phase: pendingUncountedChanges ? 'stream_preview' : 'turn_complete',
+    compactionEpoch: 0,
+    contextWindow,
+    inputBudget: contextWindow,
+    compactionThresholdTokens:
+      contextWindow == null ? null : Math.floor(contextWindow * 0.8),
+    authoritativeInputTokens: inputTokens,
+    percent:
+      contextWindow == null ? null : Math.min(100, Math.round((inputTokens / contextWindow) * 100)),
+    pressureSource: 'provider_usage',
+    pendingUncountedChanges,
+    pendingContentChars: pendingUncountedChanges ? 12 : 0,
+    countCapability: { kind: 'observed_usage_only' },
+    counterStatus,
+    updatedAt: 1,
+  };
+}
 
 describe('composer status', () => {
   test('formats a real workspace without exposing the home directory owner', () => {
@@ -34,24 +65,32 @@ describe('composer status', () => {
   });
 
   test('shows a truthful percentage only when the context window is known', () => {
-    expect(contextStatus({ inputTokens: 35_300 }, 353_000)).toEqual({
+    expect(contextStatus(accounting(35_300, 353_000), 353_000)).toEqual({
       context: 'context 10%',
       contextShort: 'ctx 10%',
       contextPercent: 10,
     });
-    expect(contextStatus({ inputTokens: 1 }, 353_000).context).toBe('context <1%');
-    expect(contextStatus({ inputTokens: 12_345 }, undefined)).toEqual({
+    expect(contextStatus(accounting(1, 353_000), 353_000).context).toBe('context <1%');
+    expect(contextStatus(accounting(12_345, null), undefined)).toEqual({
       context: 'context 12k / ?',
       contextShort: 'ctx 12k / ?',
     });
   });
 
-  test('uses next-request input tokens instead of the last provider usage high-water mark', () => {
-    // Historical usage is ~79%; the next request projection is 5% of the window.
+  test('marks provider count drift without inventing another percentage', () => {
+    expect(contextStatus(accounting(35_300, 353_000, false, 'degraded'), 353_000)).toEqual({
+      context: 'context 10%!',
+      contextShort: 'ctx 10%!',
+      contextPercent: 10,
+    });
+    expect(contextStatus(accounting(35_300, 353_000, true, 'degraded'), 353_000).context)
+      .toBe('context 10%+!');
+  });
+
+  test('uses only the provider-backed accounting snapshot', () => {
     expect(contextStatus(
-      { inputTokens: 280_000 },
+      accounting(17_650, 353_000),
       353_000,
-      17_650,
     )).toEqual({
       context: 'context 5%',
       contextShort: 'ctx 5%',
@@ -64,7 +103,7 @@ describe('composer status', () => {
       modelLabel: 'gpt-5.6-sol',
       contextWindow: 353_000,
       usage: { inputTokens: 280_000 },
-      nextRequestInputTokens: 17_650,
+      contextAccounting: accounting(17_650, 353_000),
     })).toMatchObject({
       context: 'context 5%',
       contextShort: 'ctx 5%',
@@ -90,7 +129,7 @@ describe('composer status', () => {
       model: 'gpt-5.6-sol',
       effort: 'auto',
       reasoning: 'reasoning auto',
-      context: 'context 0%',
+      context: 'context ?',
     });
 
     expect(createComposerStatus({
@@ -114,7 +153,7 @@ describe('composer status', () => {
       permissionShort: 'read',
       effort: 'high',
       reasoning: 'reasoning high',
-      context: 'context 0 / ?',
+      context: 'context ?',
     });
 
     expect(createComposerStatus({
@@ -127,8 +166,7 @@ describe('composer status', () => {
       permissionShort: 'approve',
     });
 
-    // Catalog-provided windows (e.g. grok-4.5 from llm-providers.json) should
-    // replace the unknown-window fallback.
+    // A known model window alone is not token authority.
     expect(createComposerStatus({
       workspaceRoot: '/tmp/project',
       mode: 'chat',
@@ -136,8 +174,8 @@ describe('composer status', () => {
       contextWindow: 500_000,
       usage: { inputTokens: 0 },
     })).toMatchObject({
-      context: 'context 0%',
-      contextShort: 'ctx 0%',
+      context: 'context ?',
+      contextShort: 'ctx ?',
     });
   });
 });

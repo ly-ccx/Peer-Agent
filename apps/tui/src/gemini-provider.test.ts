@@ -6,6 +6,59 @@ import {
 } from './gemini-provider.ts';
 
 describe('createGeminiProvider', () => {
+  test('API-key count and send share the same canonical history, tools, and output limit', async () => {
+    let counted: Record<string, unknown> | undefined;
+    let sent: Record<string, unknown> | undefined;
+    const provider = createGeminiProvider({
+      providerId: 'gemini-cred',
+      authMethod: 'api_key',
+      getApiKey: async () => 'AIza-test',
+      countInputTokens: async (args) => {
+        counted = args;
+        return { inputTokens: 501_244, source: 'provider_count_api' };
+      },
+      sendStream: async (args) => {
+        sent = args;
+        return {
+          ok: true,
+          content: 'done',
+          toolCalls: [],
+          streamUsage: { inputTokens: 501_244, outputTokens: 1 },
+        };
+      },
+    });
+    const request = {
+      model: 'gemini-2.5-pro',
+      messages: [
+        { role: 'system' as const, content: 'shared system' },
+        { role: 'user' as const, content: 'inspect' },
+        {
+          role: 'assistant' as const,
+          content: null,
+          toolCalls: [{ id: 'tool-1', name: 'read_file', arguments: '{"path":"a.txt"}' }],
+        },
+        { role: 'tool' as const, toolCallId: 'tool-1', content: 'tool evidence' },
+      ],
+      tools: [{
+        name: 'read_file',
+        description: 'read',
+        parameters: { type: 'object', properties: { path: { type: 'string' } } },
+      }],
+      reasoningEffort: 'high' as const,
+      maxOutputTokens: 8_192,
+    };
+
+    expect(await provider.countInputTokens?.(request)).toEqual({
+      inputTokens: 501_244,
+      source: 'provider_count_api',
+    });
+    await provider.stream(request);
+
+    for (const key of ['model', 'messages', 'tools', 'maxOutputTokens']) {
+      expect(counted?.[key]).toEqual(sent?.[key]);
+    }
+  });
+
   test('calls Desktop-style sendGeminiStream without openai shim rewrite', async () => {
     const calls: Record<string, unknown>[] = [];
     const provider = createGeminiProvider({

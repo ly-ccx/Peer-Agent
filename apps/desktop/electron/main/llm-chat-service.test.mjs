@@ -18,6 +18,41 @@ function sse(frames) {
   return frames.map((frame) => `data: ${typeof frame === 'string' ? frame : JSON.stringify(frame)}\n\n`).join('');
 }
 
+function observedContextSnapshot({
+  conversationId,
+  modelKey,
+  inputTokens,
+  contextWindow,
+}) {
+  return {
+    version: 1,
+    conversationId,
+    contentRevision: 0,
+    modelKey,
+    revision: 1,
+    phase: 'turn_complete',
+    compactionEpoch: 0,
+    contextWindow,
+    inputBudget: contextWindow,
+    compactionThresholdTokens: Math.floor(contextWindow * 0.8),
+    authoritativeInputTokens: inputTokens,
+    percent: Math.round((inputTokens / contextWindow) * 100),
+    pressureSource: 'provider_usage',
+    pendingUncountedChanges: true,
+    pendingContentChars: 0,
+    countCapability: { kind: 'observed_usage_only' },
+    counterStatus: 'active',
+    updatedAt: 1,
+    lastObserved: {
+      inputTokens,
+      requestFingerprint: 'previous-request',
+      compactionEpoch: 0,
+      source: 'provider_usage',
+      observedAt: 1,
+    },
+  };
+}
+
 async function runProjectedTool(name, args, workspacePath, toolContext = null, options = {}) {
   return executeProjectedModelTool({
     name,
@@ -461,16 +496,23 @@ describe('llm chat service tool materialization', () => {
     const doneEvent = events.find((event) => event.channel === 'chat:stream:done');
     assert.equal(doneEvent?.payload.streamId, 's1');
     assert.equal(doneEvent?.payload.conversationId, 'c1');
-    assert.deepEqual(runtimeEvents.map((event) => event.type), [
+    const messageRuntimeEvents = runtimeEvents.filter(
+      (event) => event.type !== 'context.accounting',
+    );
+    assert.deepEqual(
+      messageRuntimeEvents.map((event) => event.type),
+      [
       'session.started',
       'message.delta',
       'message.completed',
-    ]);
+      ],
+    );
+    assert.equal(runtimeEvents.some((event) => event.type === 'context.accounting'), true);
     assert.equal(runtimeEvents.every((event) => event.sessionId === 'c1'), true);
     assert.equal(runtimeEvents.every((event) => event.streamId === 's1'), true);
     assert.equal(runtimeEvents.every((event) => event.conversationId === 'c1'), true);
-    assert.equal(runtimeEvents[1]?.content, 'ok');
-    assert.equal(runtimeEvents[2]?.content, 'ok');
+    assert.equal(messageRuntimeEvents[1]?.content, 'ok');
+    assert.equal(messageRuntimeEvents[2]?.content, 'ok');
   });
 
   it('continues the same OpenAI turn after automatic compaction while preserving the latest user input', async () => {
@@ -511,6 +553,17 @@ describe('llm chat service tool materialization', () => {
             contextWindow: 9_000,
           }],
           getDecryptedApiKey: () => 'test-key',
+        },
+        conversationStore: {
+          getConversation: () => ({
+            contentRevision: 0,
+            contextSnapshot: observedContextSnapshot({
+              conversationId: 'c-compact-continue',
+              modelKey: 'p1',
+              inputTokens: 8_500,
+              contextWindow: 9_000,
+            }),
+          }),
         },
       });
 
@@ -580,6 +633,17 @@ describe('llm chat service tool materialization', () => {
             contextWindow: 9_000,
           }],
           getDecryptedApiKey: () => 'test-key',
+        },
+        conversationStore: {
+          getConversation: () => ({
+            contentRevision: 0,
+            contextSnapshot: observedContextSnapshot({
+              conversationId: 'c-compact-persist-fail',
+              modelKey: 'p1',
+              inputTokens: 8_500,
+              contextWindow: 9_000,
+            }),
+          }),
         },
         persistCompaction: async () => {
           throw new Error('persist failed for test');
@@ -843,7 +907,13 @@ describe('llm chat service tool materialization', () => {
       apiKeyConfigured: true,
       supportsReasoning: true,
     };
-    globalThis.fetch = async (_url, init) => {
+    globalThis.fetch = async (url, init) => {
+      if (String(url).includes('/count_tokens')) {
+        return new Response(JSON.stringify({ input_tokens: 10 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       const body = JSON.parse(init.body);
       capturedBodies.push(body);
       if (capturedBodies.length === 1) {

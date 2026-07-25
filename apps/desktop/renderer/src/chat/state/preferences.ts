@@ -107,7 +107,7 @@ export function resolveModelSwitchEffort(
   return resolvePreferredEffort(targetLevels, preferredDefault);
 }
 
-/** 模型切换的表达层原子状态：绑定目标模型、投影思考档位、废弃旧模型窗口快照。 */
+/** 模型切换的表达层状态；accounting invalidation由共享生命周期负责。 */
 export function resolveModelSwitchState({
   providerId,
   currentEffort,
@@ -121,12 +121,10 @@ export function resolveModelSwitchState({
 }): {
   modelProviderId: string;
   effort: EffortLevel;
-  authoritativeContext: null;
 } {
   return {
     modelProviderId: providerId,
     effort: resolveModelSwitchEffort(currentEffort, targetLevels, preferredDefault),
-    authoritativeContext: null,
   };
 }
 

@@ -1,12 +1,13 @@
+import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 import type { ModelMessage, ModelToolCall, ModelUsage } from '@peer-agent/runtime-node';
 import {
   COMPACTION_PROGRESS_CONFIG,
   compactMessagesWithSummaryStrategy,
-  createContextProjectionLifecycle,
+  createContextAccountingCompactionPipeline,
+  createContextAccountingLifecycle,
   formatCompactionMessagesForSummary,
-  microcompactMessagesForContext,
   type CompactionMethod,
-  type ContextProjectionLifecycle,
+  type ContextAccountingLifecycle,
 } from '@peer-agent/runtime-core';
 import {
   createRuntimePipeline,
@@ -27,7 +28,6 @@ import {
   buildStructuralSummary,
   TUI_COMPACT_KEEP_RECENT,
 } from './context-compact.ts';
-import { computeContextPressure, estimateTokensFromMessages } from './context-pressure.ts';
 import {
   GOAL_CAPABILITY_IDS,
   normalizeExplorerRequest,
@@ -124,11 +124,8 @@ export interface ChatSnapshot {
   readonly session?: RuntimeSessionSnapshot;
   readonly plan?: PlanSnapshot;
   readonly usage?: ModelUsage;
-  readonly requestProjection?: ChatModelState['requestProjection'];
-  /** Estimated input tokens for the next final provider request. */
-  readonly nextRequestInputTokens?: number;
-  /** Independent conservative pressure used only to trigger automatic compaction. */
-  readonly compactionPressureTokens?: number;
+  /** ADR 56: the only authoritative context-capacity state. */
+  readonly contextAccounting?: ContextAccountingSnapshot;
   readonly error?: string;
 }
 
@@ -152,6 +149,7 @@ export interface ChatModelInput {
   readonly modelMessages: readonly ModelMessage[];
   /** Last provider-observed usage, carried into the next request accounting epoch. */
   readonly usage?: ModelUsage;
+  readonly contextAccounting?: ContextAccountingSnapshot;
   readonly systemContextBlocks?: readonly ChatSystemContextBlock[];
   readonly turnId: string;
   readonly turnIndex: number;
@@ -165,11 +163,7 @@ export interface ChatModelState {
   readonly conversationId?: string;
   readonly pendingToolCalls?: readonly ModelToolCall[];
   readonly usage?: ModelUsage;
-  readonly requestProjection?: {
-    readonly nextRequestInputTokens: number;
-    readonly contextWindow: number | null;
-    readonly model: string;
-  };
+  readonly contextAccounting?: ContextAccountingSnapshot;
   /**
    * turn 内自动压缩记录(21 号文档 13.2 安全边界:provider 请求前 preflight /
    * PTL emergency)。controller 在 turn 结束后据此更新连续性上下文、发布压缩分隔消息并
@@ -185,8 +179,8 @@ export interface MidTurnCompaction {
   readonly beforeCount: number;
   readonly afterCount: number;
   readonly summarizedCount: number;
-  readonly beforeTokens: number;
-  readonly afterTokens: number;
+  readonly beforeTokens?: number;
+  readonly afterTokens?: number;
   readonly summary: string;
   readonly handoffContent: string;
   readonly retainedUserCount: number;
@@ -221,8 +215,7 @@ export interface ChatRestoreInput {
   /** Latest cumulative compaction summary, admitted through System Context. */
   readonly continuityContext?: string;
   readonly usage?: ModelUsage;
-  readonly nextRequestInputTokens?: number;
-  readonly requestProjection?: ChatModelState['requestProjection'];
+  readonly contextAccounting?: ContextAccountingSnapshot;
 }
 
 export interface ChatCompactResult {
@@ -491,6 +484,7 @@ export function createChatController(options: {
   readonly planCoordinator?: PlanCoordinator;
   /** Optional live context-window resolver for auto-compact thresholds / pressure. */
   readonly getContextWindow?: () => number | undefined;
+  readonly getModelKey?: () => string;
 }): ChatController {
   const listeners = new Set<(snapshot: ChatSnapshot) => void>();
   const sessionId = options.sessionId ?? 'tui-chat';
@@ -524,70 +518,6 @@ export function createChatController(options: {
       ? Math.floor(value as number)
       : undefined;
   };
-
-  const resolveToolsForPressure = () => {
-    const mode = snapshot.mode;
-    return options.host.toolDefinitionsForMode?.(mode) ?? options.host.toolDefinitions;
-  };
-
-  // Layer 1 投影缓存:同一 messages 引用只微压缩一次,避免每次 publish 重扫长会话。
-  // 显示/触发分子与实际发送切片(provider-chat-model 同一共享 microcompact)同口径,
-  // 消除「TUI 显示原文量、Desktop 显示投影量」的跨端分叉。
-  let microProjectionCache: {
-    source: readonly ModelMessage[];
-    projected: readonly ModelMessage[];
-  } | null = null;
-  const microProjected = (messages: readonly ModelMessage[]): readonly ModelMessage[] => {
-    if (microProjectionCache?.source === messages) return microProjectionCache.projected;
-    const projected = microcompactMessagesForContext(messages).messages;
-    microProjectionCache = { source: messages, projected };
-    return projected;
-  };
-
-  const pressureFor = (
-    messages: readonly ModelMessage[],
-    usage?: ModelUsage,
-    draftText?: string,
-  ) => {
-    const continuityBlocks = conversationContinuityContext
-      ? [{
-          id: 'conversation.compaction',
-          title: 'Conversation Continuity',
-          content: conversationContinuityContext,
-          layer: 'L7_CONTINUITY',
-          trust: 'runtime',
-        }]
-      : undefined;
-    const systemMessages = options.model.projectSystemMessages?.({
-      mode: snapshot.activeTurnMode ?? snapshot.mode,
-      conversationId: resolveConversationId(),
-      ...(continuityBlocks ? { systemContextBlocks: continuityBlocks } : {}),
-    }) ?? [];
-    return computeContextPressure({
-      messages: [
-        ...systemMessages,
-        ...microProjected(messages).filter((message) => message.role !== 'system'),
-      ],
-      usage,
-      contextWindow: resolveContextWindow(),
-      draftText,
-      // Desktop computeContextBudget folds tools schema into nextRequestInputTokens.
-      tools: resolveToolsForPressure(),
-    });
-  };
-
-  const withPressure = (
-    next: ChatSnapshot,
-    messages: readonly ModelMessage[] = conversationModelMessages,
-  ): ChatSnapshot => {
-    const pressure = pressureFor(messages, next.usage);
-    return {
-      ...next,
-      nextRequestInputTokens: next.nextRequestInputTokens ?? pressure.nextRequestInputTokens,
-      compactionPressureTokens: pressure.compactionPressureTokens,
-    };
-  };
-
 
   const runStructuralCompact = async (opts: {
     readonly source: 'manual' | 'auto';
@@ -624,14 +554,14 @@ export function createChatController(options: {
         compact: { phase: 'progress', percent },
       };
       const without = snapshot.messages.filter((message) => message.id !== progressId);
-      publish(withPressure({
+      publish({
         ...snapshot,
         status: 'compacting',
         messages: [...without, progressMessage],
         plan: snapshot.plan,
         usage: snapshot.usage,
         error: undefined,
-      }));
+      });
     };
 
     // Soft stage floors before stream tokens arrive; live percent uses received/estimated.
@@ -670,14 +600,14 @@ export function createChatController(options: {
         result.reason === 'empty'
           ? (opts.source === 'auto' ? 'Auto-compact skipped: empty context' : 'Nothing to compact')
           : (opts.source === 'auto' ? 'Auto-compact skipped: already compact enough' : 'Context is already compact enough');
-      publish(withPressure({
+      publish({
         ...snapshot,
         status: previousStatus === 'compacting' ? 'idle' : previousStatus,
         messages: snapshot.messages.filter((message) => message.id !== progressId),
         plan: snapshot.plan,
         usage: snapshot.usage,
         error: undefined,
-      }));
+      });
       return {
         ok: true,
         compacted: false,
@@ -703,11 +633,7 @@ export function createChatController(options: {
       method: strategy.method!,
       retainedUserCount: strategy.keepMessages.filter((message) => message.role === 'user').length,
     } as const;
-    const previousProjection = snapshot.requestProjection;
-    const previousMessageTokens = estimateTokensFromMessages(conversationModelMessages);
-    const previousContinuityTokens = conversationContinuityContext
-      ? estimateTokensFromMessages([{ role: 'system', content: conversationContinuityContext }])
-      : 0;
+    const beforeTokens = snapshot.contextAccounting?.authoritativeInputTokens ?? undefined;
     conversationModelMessages = result.messages
       .filter((message) => !(
         message.role === 'user'
@@ -715,24 +641,6 @@ export function createChatController(options: {
         && message.content === result.handoffContent
       )) as ModelMessage[];
     conversationContinuityContext = result.summary?.trim() || result.handoffContent?.trim() || undefined;
-    const compactedContextTokens =
-      estimateTokensFromMessages(conversationModelMessages)
-      + (conversationContinuityContext
-        ? estimateTokensFromMessages([{ role: 'system', content: conversationContinuityContext }])
-        : 0);
-    const requestProjection = previousProjection
-      ? {
-          ...previousProjection,
-          nextRequestInputTokens:
-            compactedContextTokens
-            + Math.max(
-              0,
-              previousProjection.nextRequestInputTokens
-                - previousMessageTokens
-                - previousContinuityTokens,
-            ),
-        }
-      : undefined;
     const prefix = opts.source === 'auto' ? 'Auto-compacted' : 'Compacted';
     const doneContent =
       `${prefix} ${result.beforeCount} → ${result.afterCount} messages` +
@@ -747,8 +655,7 @@ export function createChatController(options: {
         beforeCount: result.beforeCount,
         afterCount: result.afterCount,
         summarizedCount: result.summarizedCount,
-        ...(previousProjection ? { beforeTokens: previousProjection.nextRequestInputTokens } : {}),
-        ...(requestProjection ? { afterTokens: requestProjection.nextRequestInputTokens } : {}),
+        ...(beforeTokens === undefined ? {} : { beforeTokens }),
         summary: result.summary,
         handoffContent: result.handoffContent,
         method: result.method,
@@ -757,16 +664,14 @@ export function createChatController(options: {
     };
     // Preserve UI transcript and usage; only provider history shrinks. Progress row becomes a durable separator.
     const withoutProgress = snapshot.messages.filter((message) => message.id !== progressId);
-    publish(withPressure({
+    publish({
       ...snapshot,
       status: previousStatus === 'compacting' ? 'idle' : previousStatus,
       messages: [...withoutProgress, doneMessage],
       plan: snapshot.plan,
       usage: snapshot.usage,
-      requestProjection,
-      nextRequestInputTokens: requestProjection?.nextRequestInputTokens,
       error: undefined,
-    }));
+    });
 
     return {
       ok: true,
@@ -787,10 +692,9 @@ export function createChatController(options: {
     readonly content: string;
   }> = [];
   let streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
-  // Shared per-turn projection lifecycle owns stream accumulation and stable
-  // tool-result replacement. The TUI adapter only publishes its snapshots.
-  let turnProjectionLifecycle: ContextProjectionLifecycle | null = null;
-  let turnStableModelMessageCount = 0;
+  // Shared per-turn accounting lifecycle owns revision order and pending
+  // stream/tool changes. The TUI adapter only publishes its snapshots.
+  let turnAccountingLifecycle: ContextAccountingLifecycle | null = null;
 
   const appendAssistantDelta = (
     messages: ChatMessage[],
@@ -850,19 +754,19 @@ export function createChatController(options: {
     if (streamDeltaBuffer.length === 0) return;
     const events = streamDeltaBuffer.splice(0, streamDeltaBuffer.length);
     const messages = [...snapshot.messages];
-    let previewInputTokens: number | null = null;
+    let accounting = turnAccountingLifecycle?.current();
     for (const event of events) {
       appendAssistantDelta(messages, event);
-      if (event.type === 'message.delta') {
-        previewInputTokens = turnProjectionLifecycle
-          ?.streamPreview(event.content)
-          .projection.previewInputTokens ?? null;
-      }
+      accounting = turnAccountingLifecycle?.streamPreview(event.content) ?? accounting;
     }
     publish({
       ...snapshot,
       messages,
-      nextRequestInputTokens: previewInputTokens ?? snapshot.nextRequestInputTokens,
+      ...(accounting
+        ? {
+            contextAccounting: accounting,
+          }
+        : {}),
     });
   };
 
@@ -889,35 +793,24 @@ export function createChatController(options: {
     lifecycle: {
       toolResultsApplied(state, executions) {
         flushStreamDeltaBuffer();
-        const pressure = pressureFor(state.modelMessages, state.usage);
-        const pendingStart = state.modelMessages.length >= turnStableModelMessageCount
-          ? turnStableModelMessageCount
-          : Math.max(0, state.modelMessages.length - executions.length - 1);
-        const pendingMessages = state.modelMessages.slice(pendingStart);
-        const pendingInputTokens = estimateTokensFromMessages(pendingMessages);
-        // The last provider observation is the stable request baseline. Model
-        // output plus retained tool results are explicit pending preview, never
-        // a competing whole-history estimate.
-        const stableInputTokens = pressure.usageTokens > 0
-          ? pressure.usageTokens + pendingInputTokens
-          : pressure.estimatedTokens;
-        turnStableModelMessageCount = state.modelMessages.length;
-        const projection = turnProjectionLifecycle?.toolResult({
-          contextWindow: resolveContextWindow(),
-          currentInputTokens: stableInputTokens,
-          reason: 'tool_result',
-        });
+        const addedContentChars = executions.reduce((total, execution) => {
+          try {
+            return total + JSON.stringify(execution.result).length;
+          } catch {
+            return total;
+          }
+        }, 0);
+        const accounting = turnAccountingLifecycle?.markPending(
+          'tool_result',
+          addedContentChars,
+        );
         publish({
           ...snapshot,
-          nextRequestInputTokens:
-            projection?.projection.nextRequestInputTokens
-            ?? stableInputTokens,
-          // A tool result is a stable preflight boundary, but automatic
-          // compaction still waits for the shared provider accounting gate.
-          compactionPressureTokens:
-            pressure.usageTokens > 0
-              ? pressure.usageTokens
-              : stableInputTokens,
+          ...(accounting
+            ? {
+                contextAccounting: accounting,
+              }
+            : {}),
         });
       },
     },
@@ -1007,6 +900,30 @@ export function createChatController(options: {
           enqueueStreamDelta(event);
           return null;
         }
+        if (event.type === 'context.accounting') {
+          const incoming = event.snapshot;
+          const current = turnAccountingLifecycle?.current();
+          if (
+            !current
+            || current.conversationId !== incoming.conversationId
+            || current.modelKey !== incoming.modelKey
+          ) {
+            turnAccountingLifecycle = createContextAccountingLifecycle({
+              initialSnapshot: incoming,
+            });
+          }
+          const lifecycle = turnAccountingLifecycle;
+          if (!lifecycle) return null;
+          const accounting = lifecycle.stable(
+            incoming,
+            incoming.phase,
+          );
+          publish({
+            ...snapshot,
+            contextAccounting: accounting,
+          });
+          return null;
+        }
         if (event.type === 'compaction.progress') {
           const percent = Math.max(0, Math.min(100, Math.round(Number(event.percent) || 0)));
           const label = typeof event.label === 'string' && event.label.trim()
@@ -1025,7 +942,7 @@ export function createChatController(options: {
             },
           };
           const without = snapshot.messages.filter((message) => message.id !== progressId);
-          publish(withPressure({
+          publish({
             ...snapshot,
             status: percent >= 100 || event.phase === 'done' ? 'running' : 'compacting',
             messages: percent >= 100 || event.phase === 'done'
@@ -1034,7 +951,7 @@ export function createChatController(options: {
             plan: snapshot.plan,
             usage: snapshot.usage,
             error: undefined,
-          }));
+          });
         }
         return null;
       },
@@ -1067,21 +984,16 @@ export function createChatController(options: {
       conversationContinuityContext = input.continuityContext?.trim() || undefined;
       executionEvidenceIds = [];
       sequence = restoredMessageSequence(messages);
-      // 恢复时不直信持久化快照的分子(可能是旧版全量口径):本地按当前
-      // 发送口径(共享 microcompact 投影)重算,与 Desktop restored 重投影同精神;
-      // 快照的 model/contextWindow 元信息保留。
-      const restoredPressure = pressureFor(conversationModelMessages, input.usage);
-      const restoredProjection = input.requestProjection
-        ? { ...input.requestProjection, nextRequestInputTokens: restoredPressure.nextRequestInputTokens }
-        : undefined;
-      publish(withPressure({
+      // ADR 56: restore consumes the persisted provider-backed snapshot
+      // verbatim. A legacy projection is never promoted to numeric authority.
+      const accounting = input.contextAccounting;
+      publish({
         status: 'idle',
         mode: normalizeTuiMode(input.mode),
         messages,
         usage: input.usage,
-        requestProjection: restoredProjection,
-        nextRequestInputTokens: restoredPressure.nextRequestInputTokens,
-      }));
+        contextAccounting: accounting,
+      });
       return true;
     },
     async send(content, sendOptions) {
@@ -1090,19 +1002,8 @@ export function createChatController(options: {
       const hideFromUi = sendOptions?.hideFromUi === true;
       if ((!trimmed && images.length === 0) || activeTurn) return;
 
-      // Pre-send auto-compact: same soft threshold as Desktop
-      // (compactionPressureTokens >= 0.8 * window).
-      // Uses structural compact (manual /compact path), not Desktop LLM summarizer.
-      const draftForPressure = trimmed
+      const pendingContent = trimmed
         || (images.length > 0 ? `[image${images.length > 1 ? 's' : ''}]` : '');
-      const preflightPressure = pressureFor(
-        conversationModelMessages,
-        snapshot.usage,
-        draftForPressure,
-      );
-      if (preflightPressure.shouldCompact) {
-        await runStructuralCompact({ source: 'auto' });
-      }
       const conversationId = resolveConversationId();
       let existingSession = sessions.get(sessionId);
       if (existingSession && existingSession.conversationId !== conversationId) {
@@ -1130,40 +1031,22 @@ export function createChatController(options: {
       const uiMessages = clearedMessages.filter((message) => !message.pending);
       const userContent = trimmed
         || (images.length > 0 ? `[image${images.length > 1 ? 's' : ''}]` : '');
-      // Provider usage for this turn is not available yet. Project the exact request-visible
-      // transcript now so the running frame cannot temporarily collapse context occupancy to 0%.
-      const preflightMessages: readonly ModelMessage[] = [
-        ...conversationModelMessages,
-        { role: 'user', content: userContent },
-      ];
-      turnStableModelMessageCount = preflightMessages.length;
-      const runningPressure = pressureFor(preflightMessages, snapshot.usage);
-      turnProjectionLifecycle = createContextProjectionLifecycle();
-      const runningProjection = turnProjectionLifecycle.requestPreflight({
-        contextWindow: resolveContextWindow(),
-        currentInputTokens: runningPressure.nextRequestInputTokens,
-        reason: 'request_preflight',
-      }).projection;
-      const preflightProjection = snapshot.requestProjection
-        ? {
-            ...snapshot.requestProjection,
-            nextRequestInputTokens:
-              runningProjection.nextRequestInputTokens
-              ?? runningPressure.nextRequestInputTokens,
-            contextWindow: resolveContextWindow() ?? snapshot.requestProjection.contextWindow,
-          }
-        : undefined;
+      if (snapshot.contextAccounting) {
+        turnAccountingLifecycle = createContextAccountingLifecycle({
+          initialSnapshot: snapshot.contextAccounting,
+        });
+      }
+      const pendingAccounting = turnAccountingLifecycle?.markPending(
+        'request_preflight',
+        pendingContent.length,
+      );
       publish({
         status: 'running',
         mode: turnMode,
         activeTurnMode: turnMode,
         session: sessions.get(sessionId) ?? undefined,
         usage: snapshot.usage,
-        nextRequestInputTokens:
-          runningProjection.nextRequestInputTokens
-          ?? runningPressure.nextRequestInputTokens,
-        compactionPressureTokens: runningPressure.compactionPressureTokens,
-        requestProjection: preflightProjection,
+        contextAccounting: pendingAccounting ?? snapshot.contextAccounting,
         messages: [
           ...uiMessages,
           // Desktop parity: Goal Runner ticks feed the model (preflightMessages)
@@ -1200,6 +1083,9 @@ export function createChatController(options: {
               history,
               modelMessages: conversationModelMessages,
               ...(snapshot.usage ? { usage: snapshot.usage } : {}),
+              ...(snapshot.contextAccounting
+                ? { contextAccounting: snapshot.contextAccounting }
+                : {}),
               ...(conversationContinuityContext
                 ? {
                     systemContextBlocks: [{
@@ -1287,25 +1173,17 @@ export function createChatController(options: {
           : result.status === 'failed'
             ? (result.reason || 'provider_stream_error')
             : undefined;
-        const completedPressure = pressureFor(
-          conversationModelMessages,
-          result.state?.usage,
-        );
-        const completedProjection = turnProjectionLifecycle?.turnComplete({
-          contextWindow: resolveContextWindow(),
-          currentInputTokens: completedPressure.nextRequestInputTokens,
-          reason: 'turn_complete',
-        }).projection;
-        publish(withPressure({
+        const completedAccounting =
+          result.state?.contextAccounting
+          ?? turnAccountingLifecycle?.current()
+          ?? snapshot.contextAccounting;
+        publish({
           status: 'idle',
           mode: snapshot.mode,
           session: sessions.get(sessionId) ?? undefined,
           plan: options.planCoordinator?.getSnapshot() ?? undefined,
           usage: result.state?.usage,
-          requestProjection: result.state?.requestProjection,
-          nextRequestInputTokens:
-            completedProjection?.nextRequestInputTokens
-            ?? completedPressure.nextRequestInputTokens,
+          contextAccounting: completedAccounting,
           messages: [
             ...finalizePendingMessages(snapshot.messages, {
               interrupted: failed,
@@ -1314,7 +1192,7 @@ export function createChatController(options: {
             ...(midTurnCompactMessage ? [midTurnCompactMessage] : []),
           ],
           error: failureDetail,
-        }));
+        });
       } catch (error) {
         flushStreamDeltaBuffer();
         const wasCancelled = turn.signal.aborted;
@@ -1323,7 +1201,9 @@ export function createChatController(options: {
         else turn.fail(detail);
         // Keep already-executed tool results and any partial assistant text.
         // Mark the latest assistant as interrupted so Desktop/TUI can recover.
-        publish(withPressure({
+        const failedAccounting = turnAccountingLifecycle?.current()
+          ?? snapshot.contextAccounting;
+        publish({
           status: 'idle',
           mode: snapshot.mode,
           session: sessions.get(sessionId) ?? undefined,
@@ -1333,10 +1213,10 @@ export function createChatController(options: {
           }),
           error: wasCancelled ? undefined : detail,
           usage: snapshot.usage,
-        }));
+          contextAccounting: failedAccounting,
+        });
       } finally {
-        turnProjectionLifecycle = null;
-        turnStableModelMessageCount = 0;
+        turnAccountingLifecycle = null;
         if (activeTurn === turn) activeTurn = null;
       }
     },
@@ -1345,7 +1225,11 @@ export function createChatController(options: {
       conversationModelMessages = [];
       conversationContinuityContext = undefined;
       executionEvidenceIds = [];
-      publish(withPressure({ status: 'idle', mode: snapshot.mode, messages: [] }, []));
+      publish({
+        status: 'idle',
+        mode: snapshot.mode,
+        messages: [],
+      });
       return true;
     },
     async compact() {
@@ -1360,7 +1244,61 @@ export function createChatController(options: {
         };
       }
 
-      return runStructuralCompact({ source: 'manual' });
+      const before = snapshot.contextAccounting;
+      const beforeMessageCount = conversationModelMessages.length;
+      const compactOutcome: { value?: ChatCompactResult } = {};
+      const pipeline = createContextAccountingCompactionPipeline<
+        { messages: readonly ModelMessage[] },
+        { messages: readonly ModelMessage[] },
+        never
+      >({
+        identity: {
+          conversationId: resolveConversationId(),
+          contentRevision: (before?.contentRevision ?? 0) + 1,
+          modelKey:
+            options.getModelKey?.()
+            ?? before?.modelKey
+            ?? 'unknown-model',
+        },
+        contextWindow: resolveContextWindow(),
+        countCapability:
+          before?.countCapability ?? { kind: 'observed_usage_only' },
+        initialSnapshot: before,
+        buildRequest: (state) => ({ messages: state.messages }),
+        async compact() {
+          const result = await runStructuralCompact({ source: 'manual' });
+          compactOutcome.value = result;
+          return {
+            compacted: result.compacted,
+            state: { messages: conversationModelMessages },
+          };
+        },
+        send: async () => {
+          throw new Error('manual_compact_must_not_send');
+        },
+      });
+      const result = await pipeline.execute({
+        state: { messages: conversationModelMessages },
+        command: 'manual_compact',
+      });
+      const accounting = result.snapshot;
+      publish({
+        ...snapshot,
+        contextAccounting: accounting,
+      });
+      const outcome = compactOutcome.value;
+      return {
+        ok: true,
+        compacted: result.compacted,
+        beforeCount: outcome?.beforeCount ?? beforeMessageCount,
+        afterCount: outcome?.afterCount ?? conversationModelMessages.length,
+        summarizedCount: outcome?.summarizedCount ?? 0,
+        notice: outcome?.notice ?? (
+          result.compacted
+            ? 'Compacted model context'
+            : 'Context is already compact enough'
+        ),
+      };
     },
     async runGoalTurn(content) {
       if (activeTurn || snapshot.status !== 'idle') {

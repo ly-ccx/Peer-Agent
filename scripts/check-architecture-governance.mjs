@@ -605,25 +605,58 @@ function assertPromptBaselineIsRecorded() {
   }
 }
 
-function assertContextProjectionPolicyIsCentralized() {
-  const desktopCompactor = readText('apps/desktop/electron/main/context-compactor.mjs');
-  const tuiPressure = readText('apps/tui/src/context-pressure.ts');
-  const rendererEstimate = readText('apps/desktop/renderer/src/chat/state/tokenEstimate.ts');
+function assertContextAccountingPolicyIsCentralized() {
+  const protocol = readText('packages/protocol/src/context-accounting.ts');
+  const pipeline = readText('packages/runtime-core/src/context-accounting-pipeline.ts');
+  const tuiController = readText('apps/tui/src/chat-controller.ts');
+  const rendererRouter = readText('apps/desktop/renderer/src/chat/hooks/useConversationStreamRouter.ts');
+  const tokenUsageDisplay = readText('apps/desktop/renderer/src/chat/components/thread/TokenUsageDisplay.tsx');
+  const preload = readText('apps/desktop/electron/preload/preload.cjs');
+  const preloadContract = readText('apps/desktop/renderer/src/preload/contracts/bootstrapPreloadApi.ts');
+  const compactionCoordinator = readText(
+    'apps/desktop/electron/main/chat-runtime/compaction-coordinator.mjs',
+  );
 
-  if (!desktopCompactor.includes('...CONTEXT_PROJECTION_CONFIG')) {
-    fail('Desktop context compactor must consume CONTEXT_PROJECTION_CONFIG from runtime-core.');
+  if (!protocol.includes('export interface ContextAccountingSnapshot')) {
+    fail('Protocol must define ContextAccountingSnapshot as the cross-host context-capacity state.');
   }
-  if (/triggerRatio\s*:\s*0\.\d+|hardRatio\s*:\s*0\.\d+/.test(desktopCompactor)) {
-    fail('Desktop must not define local context-compaction ratios; keep them in runtime-core.');
+  for (const stage of ['buildRequest', 'countRequest', 'compact', 'send', 'getUsage']) {
+    if (!pipeline.includes(stage)) {
+      fail(`runtime-core context accounting pipeline is missing stage ${stage}.`);
+    }
   }
-  if (!tuiPressure.includes("from '@peer-agent/runtime-core'")) {
-    fail('CLI/TUI context pressure must delegate to runtime-core.');
+  for (const legacy of ['requestProjection', 'nextRequestInputTokens', 'compactionPressureTokens']) {
+    if (tuiController.includes(legacy)) {
+      fail(`TUI controller must not retain legacy context state (${legacy}).`);
+    }
   }
-  if (/const\s+(?:CHARS_PER_TOKEN|CJK_CHARS_PER_TOKEN|IMAGE_TOKENS|TRIGGER_RATIO|HARD_RATIO)\b/.test(tuiPressure)) {
-    fail('CLI/TUI must not define local context projection constants.');
+  if (tuiController.includes("from './context-pressure.ts'")) {
+    fail('TUI controller must consume ContextAccountingSnapshot instead of a host-local pressure estimator.');
   }
-  if (/estimateConversationHistoryTokens|ConversationTokenEstimateCache/.test(rendererEstimate)) {
-    fail('Renderer must not estimate conversation history; it may only estimate the unsubmitted draft preview.');
+  for (const legacyPath of [
+    'apps/desktop/renderer/src/chat/state/contextOccupancy.ts',
+    'apps/desktop/renderer/src/chat/state/tokenEstimate.ts',
+  ]) {
+    if (existsSync(path.join(repoRoot, legacyPath))) {
+      fail(`Renderer-local context estimator must remain deleted: ${legacyPath}.`);
+    }
+  }
+  if (!rendererRouter.includes("event.type === 'context.accounting'")) {
+    fail('Renderer stream router must consume Runtime context.accounting events.');
+  }
+  if (/chat:context:projection|onChatContextProjection/.test(preload)) {
+    fail('Legacy chat:context:projection IPC must not return.');
+  }
+  for (const legacy of ['nextRequestInputTokens', 'compactionPressureTokens']) {
+    if (preloadContract.includes(legacy) || compactionCoordinator.includes(legacy)) {
+      fail(`Compaction IPC must not publish a parallel context-capacity field (${legacy}).`);
+    }
+  }
+  if (
+    !tokenUsageDisplay.includes("counterStatus === 'degraded'")
+    || !tokenUsageDisplay.includes('Exact count drifted from provider usage')
+  ) {
+    fail('Desktop context display must surface provider count drift degradation.');
   }
 }
 
@@ -824,7 +857,7 @@ assertChatRuntimeCompactionCoordinatorIsModular();
 assertChatRuntimeResponseGuardIsModular();
 assertPromptBaselineIsRecorded();
 assertChatRuntimeAgentLoopsAreModular();
-assertContextProjectionPolicyIsCentralized();
+assertContextAccountingPolicyIsCentralized();
 
 if (failures.length > 0) {
   console.error('Architecture governance check failed:');

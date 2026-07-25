@@ -8,7 +8,6 @@ import {
   createRuntimeToolProjection,
   renderSystemContext,
 } from './llm-prompts.mjs';
-import { CANONICAL_HISTORY_PROJECTOR_VERSION } from '@peer-agent/runtime-core';
 import {
   normalizeAnthropicMessages,
   normalizeOpenAIMessages,
@@ -485,18 +484,14 @@ function wrapWebContentsForRuntimeEvents(
           });
         }
         persistStreamRecord({ final: true, interrupted: erroredTerminal });
-        // 只落盘正数投影：0 不是有效占用，写进去会让下次恢复直接显示 0%。
         if (!erroredTerminal
-          && Number.isFinite(Number(payload?.nextRequestInputTokens))
-          && Number(payload.nextRequestInputTokens) > 0
+          && payload?.contextAccounting?.version === 1
           && typeof conversationStore?.updateContextSnapshot === 'function'
           && streamRecord.conversationId) {
-          conversationStore.updateContextSnapshot(streamRecord.conversationId, {
-            nextRequestInputTokens: Number(payload.nextRequestInputTokens),
-            contextWindow: Number.isFinite(Number(payload?.contextWindow)) ? Number(payload.contextWindow) : null,
-            projectorVersion: CANONICAL_HISTORY_PROJECTOR_VERSION,
-            source: 'desktop',
-          });
+          conversationStore.updateContextSnapshot(
+            streamRecord.conversationId,
+            payload.contextAccounting,
+          );
         }
       } else if (channel === 'chat:stream:aborted') {
         streamRecord.terminalEventSent = true;
@@ -844,6 +839,23 @@ export function createLlmChatService({
           accountId: credential.accountId,
           oauthProjectId: provider.oauthProjectId || credential.oauthProjectId || null,
         });
+        const storedConversation = conversationId
+          ? conversationStore?.getConversation?.(conversationId)
+          : null;
+        const accountingIdentity = {
+          conversationId: conversationId || streamId,
+          contentRevision:
+            Number.isSafeInteger(storedConversation?.contentRevision)
+            && storedConversation.contentRevision >= 0
+              ? storedConversation.contentRevision
+              : 0,
+          modelKey: provider.id || provider.model,
+        };
+        const initialContextAccounting =
+          storedConversation?.contextSnapshot?.version === 1
+          && storedConversation.contextSnapshot.modelKey === accountingIdentity.modelKey
+            ? storedConversation.contextSnapshot
+            : null;
 
         const systemContext = buildSystemContext(runWorkspacePath, {
           contextAttachments,
@@ -976,6 +988,8 @@ export function createLlmChatService({
               runtimeEventState: streamRecord.runtimeEventState,
               providerId: provider.id,
               runtimeMode: mode,
+              accountingIdentity,
+              initialContextAccounting,
             });
           } else if (resolvedChannel.wire === 'anthropic-messages') {
             await agentLoopAnthropic({
@@ -1011,6 +1025,8 @@ export function createLlmChatService({
               runtimeEventState: streamRecord.runtimeEventState,
               providerId: provider.id,
               runtimeMode: mode,
+              accountingIdentity,
+              initialContextAccounting,
             });
           } else if (resolvedChannel.wire === 'gemini') {
             await agentLoopGemini({
@@ -1040,10 +1056,13 @@ export function createLlmChatService({
               mcpRegistry,
               goalPlanStore,
               resolvedChannel,
+              authMethod: credential.authMethod,
               emitRuntimeEvent,
               runtimeEventState: streamRecord.runtimeEventState,
               providerId: provider.id,
               runtimeMode: mode,
+              accountingIdentity,
+              initialContextAccounting,
             });
           } else {
             await agentLoopOpenAI({
@@ -1081,6 +1100,8 @@ export function createLlmChatService({
               runtimeEventState: streamRecord.runtimeEventState,
               providerId: provider.id,
               runtimeMode: mode,
+              accountingIdentity,
+              initialContextAccounting,
             });
           }
         } catch (err) {

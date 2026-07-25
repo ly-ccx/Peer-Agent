@@ -228,49 +228,6 @@ export function contextTokensFromUsageSnapshot(snapshot) {
   return total > 0 ? total : null;
 }
 
-// ADR 56 迁移口径：
-// - provider usage 可用时，它是当前上下文与压缩判断的权威下界。
-// - 无 usage/exact count 时暂时回退 legacy projection，并显式标记来源。
-// - displayMessages（可选）：调用方已持有的「下一请求投影」切片；不是上一轮 lastSent。
-// - usageSnapshot：同时回填 lastActualInputTokens，并参与占用分子与压缩判断。
-// - compactionSuggested：基于同一投影预算的 soft 线判断。
-// - contextWindow：分母，与触发判定同一 normalizedWindow。
-export function computeContextInfo({
-  messages,
-  contextWindow,
-  tools = null,
-  // 可选：调用方已持有的「下一请求投影」切片（例如已完成 Layer 1 的 effectiveMessages）。
-  // 注意：这不是上一轮 lastSent / 已发出请求切片。回合结束后的 getContextInfo 应传
-  // 当前 Runtime 会话（含本轮最终 assistant / tool result），让本函数自行投影。
-  displayMessages = null,
-  usageSnapshot = null,
-}) {
-  // ADR 52：先形成下一次最终请求投影。
-  // - 默认：对当前 messages 应用共享 Layer 1 microcompaction。
-  // - 若调用方已持有下一请求投影（如压缩后的 effectiveMessages），经 displayMessages 传入，避免重复微压缩。
-  // usageSnapshot 是 provider 实测；有值时不能被较低的 legacy projection 覆盖。
-  const projectedMessages = Array.isArray(displayMessages)
-    ? displayMessages
-    : applyMicrocompaction(Array.isArray(messages) ? messages : [], { log: () => {} }).messages;
-  const budget = computeContextBudget({
-    messages: projectedMessages,
-    contextWindow,
-    tools,
-    usageSnapshot,
-  });
-
-  return {
-    // ADR 56：provider 实测优先；legacy projection 只作为尚无实测时的迁移回退。
-    nextRequestInputTokens: budget.contextTokens,
-    contextWindow: budget.contextWindow,
-    triggerRatio: budget.triggerRatio,
-    compactionSuggested: budget.overSoftLimit,
-    lastActualInputTokens: contextTokensFromUsageSnapshot(usageSnapshot),
-    contextSource: budget.contextSource,
-    pendingUncountedChanges: budget.contextSource !== 'provider_usage',
-  };
-}
-
 async function persistAndNotifyCompaction({
   persistCompaction,
   conversationId,
@@ -279,31 +236,18 @@ async function persistAndNotifyCompaction({
   webContents,
   emergency = false,
   manual = false,
-  contextWindow = null,
-  tools = null,
 }) {
-  // 压缩后的真实请求消息和工具 schema 共同构成下一次最终请求投影。
-  // 必须先算出投影并随消息一起持久化，确保共享快照绑定 replaceMessages 产生的新 revision。
-  const compactedBudget = computeContextBudget({
-    messages: compactResult.messages,
-    contextWindow,
-    tools,
-  });
   if (persistCompaction && conversationId) {
     await persistCompaction({
       conversationId,
       compactResult,
       preservePendingAssistant: true,
-      requestProjection: {
-        nextRequestInputTokens: compactedBudget.contextTokens,
-        contextWindow: compactedBudget.contextWindow,
-      },
     });
   }
   // 登记表收尾与事件 emit 单一来源：先清登记表再 emit done。
   endCompaction({ conversationId, streamId });
-  // notification.afterTokens 仅覆盖 system + messages；工具 schema 同样会在每次
-  // 请求全量发送，因此完成事件要沿用预算器口径给出可直接投影的完整快照。
+  // Compaction events report lifecycle and compactor diagnostics only. The
+  // rebuilt request is counted by ContextAccountingSnapshot after this stage.
   webContents.send('chat:compaction', {
     conversationId,
     streamId,
@@ -311,8 +255,6 @@ async function persistAndNotifyCompaction({
     emergency,
     ...(manual ? { manual: true } : {}),
     ...compactResult.notification,
-    nextRequestInputTokens: compactedBudget.contextTokens,
-    contextWindow: compactedBudget.contextWindow,
   });
 }
 
@@ -463,8 +405,6 @@ export async function runCompactionCheck({
         webContents,
         emergency,
         manual,
-        contextWindow,
-        tools,
       });
       // done 通知本身即为 start 的收尾。只有持久化与 done 都完成后才标记已结算；
       // 若 persistCompaction 抛错，catch 分支必须还能补发 idle，避免压缩态悬挂。
@@ -505,14 +445,6 @@ export async function runCompactionCheck({
       || effectiveMessages !== messages,
     );
     if (microApplied && webContents?.send && conversationId) {
-      const effectiveInfo = computeContextInfo({
-        messages: effectiveMessages,
-        contextWindow,
-        tools,
-        displayMessages: effectiveMessages,
-        // 计算 Layer 1 后的有效发送量：忽略上一轮高水位 usage，避免旧快照锁死新预算。
-        usageSnapshot: null,
-      });
       settledBanner = true;
       endCompaction({ conversationId, streamId });
       webContents.send('chat:compaction', {
@@ -520,8 +452,6 @@ export async function runCompactionCheck({
         streamId,
         stage: 'idle',
         emergency,
-        nextRequestInputTokens: effectiveInfo.nextRequestInputTokens,
-        contextWindow: effectiveInfo.contextWindow,
         microcompacted: true,
       });
       return {
@@ -529,8 +459,6 @@ export async function runCompactionCheck({
         messages: effectiveMessages,
         compactResult,
         microcompacted: true,
-        nextRequestInputTokens: effectiveInfo.nextRequestInputTokens,
-        contextWindow: effectiveInfo.contextWindow,
       };
     }
 

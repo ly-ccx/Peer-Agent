@@ -184,7 +184,11 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
-  packages/conversation-store: {}
+  packages/conversation-store:
+    dependencies:
+      '@peer-agent/protocol':
+        specifier: workspace:*
+        version: link:../protocol
 
   packages/credential-helper:
     devDependencies:
@@ -214,6 +218,10 @@ importers:
         version: 5.9.3
 
   packages/runtime-core:
+    dependencies:
+      '@peer-agent/protocol':
+        specifier: workspace:*
+        version: link:../protocol
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -221,6 +229,9 @@ importers:
 
   packages/runtime-node:
     dependencies:
+      '@peer-agent/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@peer-agent/runtime-core':
         specifier: workspace:*
         version: link:../runtime-core

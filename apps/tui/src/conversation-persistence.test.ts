@@ -13,9 +13,8 @@ import {
   type ChatSnapshot,
 } from './chat-controller.ts';
 import {
-  estimateContextMessagesTokens,
-  microcompactMessagesForContext,
-} from '@peer-agent/runtime-core';
+  type ContextAccountingSnapshot,
+} from '@peer-agent/protocol';
 import type { TuiHost } from './tui-host.ts';
 
 function createStoreRecorder() {
@@ -46,6 +45,32 @@ function snapshot(input: Partial<ChatSnapshot> = {}): ChatSnapshot {
     status: 'idle',
     mode: 'chat',
     messages: [],
+    ...input,
+  };
+}
+
+function accountingSnapshot(
+  input: Partial<ContextAccountingSnapshot> = {},
+): ContextAccountingSnapshot {
+  return {
+    version: 1,
+    conversationId: 'conversation-1',
+    contentRevision: 2,
+    modelKey: 'provider-a::model-a',
+    revision: 3,
+    phase: 'turn_complete',
+    compactionEpoch: 0,
+    contextWindow: 500_000,
+    inputBudget: 491_808,
+    compactionThresholdTokens: 401_408,
+    authoritativeInputTokens: 42_500,
+    percent: 8.5,
+    pressureSource: 'provider_usage',
+    pendingUncountedChanges: false,
+    pendingContentChars: 0,
+    countCapability: { kind: 'observed_usage_only' },
+    counterStatus: 'active',
+    updatedAt: 123,
     ...input,
   };
 }
@@ -142,7 +167,7 @@ describe('TUI conversation persistence', () => {
     expect(changeListener).toBeUndefined();
   });
 
-  test('persists the CLI final-request projection for the shared conversation', () => {
+  test('persists the shared context accounting snapshot verbatim', () => {
     const recorder = createStoreRecorder();
     const persistence = createTuiConversationPersistence({
       workspacePath: '/workspace',
@@ -159,25 +184,14 @@ describe('TUI conversation persistence', () => {
         { id: 'assistant-projection', role: 'assistant', content: 'continued' },
       ],
       usage: { inputTokens: 200, outputTokens: 20, totalTokens: 220 },
-      requestProjection: {
-        nextRequestInputTokens: 42_500,
-        contextWindow: 500_000,
-        model: 'model-a',
-      },
+      contextAccounting: accountingSnapshot(),
     });
 
     const conversationId = persistence.getConversationId();
     expect(conversationId).toBeDefined();
     expect(recorder.calls.find((call) => call.method === 'updateContextSnapshot')).toEqual({
       method: 'updateContextSnapshot',
-      args: [conversationId, {
-        nextRequestInputTokens: 42_500,
-        contextWindow: 500_000,
-        modelProviderId: 'provider-a::model-a',
-        model: 'model-a',
-        projectorVersion: 1,
-        source: 'tui',
-      }],
+      args: [conversationId, accountingSnapshot()],
     });
   });
 
@@ -328,10 +342,24 @@ describe('TUI conversation persistence', () => {
       model: 'model-b',
       effort: 'low',
       contextSnapshot: {
-        nextRequestInputTokens: 39_000,
+        version: 1 as const,
+        conversationId: 'stored-1',
+        contentRevision: 2,
+        modelKey: 'provider-b::model-b',
+        revision: 3,
+        phase: 'turn_complete' as const,
+        compactionEpoch: 0,
         contextWindow: 500_000,
-        model: 'model-b',
-        projectorVersion: 1,
+        inputBudget: 500_000,
+        compactionThresholdTokens: 400_000,
+        authoritativeInputTokens: 39_000,
+        percent: 8,
+        pressureSource: 'provider_usage' as const,
+        pendingUncountedChanges: true,
+        pendingContentChars: 0,
+        countCapability: { kind: 'observed_usage_only' as const },
+        counterStatus: 'active' as const,
+        updatedAt: 1,
       },
       messages: [
         { id: 'old-user', role: 'user', content: 'remember this' },
@@ -379,23 +407,12 @@ describe('TUI conversation persistence', () => {
         { role: 'assistant', content: 'remembered' },
       ],
       modelSelection: { providerId: 'provider-b', modelId: 'model-b', reasoningEffort: 'low' },
-      contextSnapshot: {
-        nextRequestInputTokens: 39_000,
-        contextWindow: 500_000,
-        model: 'model-b',
-        projectorVersion: 1,
-      },
+      contextSnapshot: stored.contextSnapshot,
     });
     const controller = createChatController({ host: inertHost(), model: createDemoChatModel() });
     expect(resumeTuiConversation(controller, persistence, restored!)).toBe(true);
-    // 恢复时不直信持久化快照的分子(旧版可能是全量口径):分子按当前发送口径
-    // 本地重算(这里的小 fixture 远小于 39k);model/contextWindow 元信息保留。
-    const projection = controller.getSnapshot().requestProjection;
-    expect(projection?.model).toBe('model-b');
-    expect(projection?.contextWindow).toBe(500_000);
-    expect(projection?.nextRequestInputTokens).toBeGreaterThan(0);
-    expect(projection?.nextRequestInputTokens).toBeLessThan(39_000);
-    expect(controller.getSnapshot().nextRequestInputTokens).toBe(projection?.nextRequestInputTokens);
+    expect(controller.getSnapshot().contextAccounting).toEqual(stored.contextSnapshot);
+    expect(controller.getSnapshot().contextAccounting?.authoritativeInputTokens).toBe(39_000);
     persistence.syncSnapshot(snapshot({
       mode: 'goal',
       messages: [
@@ -584,7 +601,7 @@ describe('TUI conversation persistence', () => {
     unsubscribe();
   });
 
-  test('restores tool-heavy context from canonical history when provider usage is unavailable', () => {
+  test('keeps restored tool-heavy context unknown when provider authority is unavailable', () => {
     const stored = {
       id: 'legacy-context',
       mode: 'chat',
@@ -625,10 +642,8 @@ describe('TUI conversation persistence', () => {
     expect(restored?.usage).toBeUndefined();
     if (!restored?.modelMessages) throw new Error('canonical history was not restored');
     expect(resumeTuiConversation(controller, persistence, restored)).toBe(true);
-    const expectedTokens = estimateContextMessagesTokens(
-      microcompactMessagesForContext(restored.modelMessages).messages,
-    );
-    expect(controller.getSnapshot().nextRequestInputTokens).toBe(expectedTokens);
+    expect(controller.getSnapshot().contextAccounting).toBeUndefined();
+    expect(controller.getSnapshot().contextAccounting).toBeUndefined();
   });
 
   test('filters the active conversation and ignores missing or corrupt stored sessions', () => {
