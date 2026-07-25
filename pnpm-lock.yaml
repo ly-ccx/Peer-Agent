@@ -48,6 +48,9 @@ importers:
       '@peer-agent/runtime-sdk':
         specifier: workspace:*
         version: link:../../packages/runtime-sdk
+      '@peer-agent/system-context':
+        specifier: workspace:*
+        version: link:../../packages/system-context
       '@peer-agent/task-thread':
         specifier: workspace:*
         version: link:../../packages/task-thread
@@ -142,6 +145,9 @@ importers:
       '@peer-agent/runtime-sdk':
         specifier: workspace:*
         version: link:../../packages/runtime-sdk
+      '@peer-agent/system-context':
+        specifier: workspace:*
+        version: link:../../packages/system-context
       adm-zip:
         specifier: ^0.5.17
         version: 0.5.17
@@ -238,6 +244,8 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/system-context: {}
 
   packages/task-thread:
     dependencies:

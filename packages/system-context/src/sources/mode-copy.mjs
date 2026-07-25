@@ -1,4 +1,4 @@
-// 单一 mode 文案源（single source of truth）。
+// 跨宿主单一 mode 文案源（single source of truth）。
 // 历史上 mode-source.mjs 与 runtime-reminder-source.mjs 各自维护了一份重复的 MODE_COPY，
 // 新增模式文案时两处都要改，存在「改一处漏一处」的漂移风险（详见 Goal 模式设计 §5）。
 // 现已收敛到本模块：两个 source 均从此处 import，新增/修改模式文案只改这一处。
@@ -38,6 +38,7 @@ export const MODE_COPY = {
   goal: [
     'Mode: goal.',
     'Self-driven goal mode: the user gives a goal and boundaries, and you autonomously drive it to a verifiable done state. Unlike plan mode, you do NOT wait for step-by-step approval before executing — default to making progress.',
+    'Before the first side-effecting action, establish the formal GoalPlan with goal_create_plan. If a plan already exists, re-read it with goal_get_plan and continue; do not invent taskIds or report progress outside goal_update_task.',
     'Run the loop: explore (gather context) → plan (define success criteria + ordered subtasks as internal scaffolding) → act (execute) → verify (check against success criteria) → if not met, adjust and continue. The plan is internal navigation, not an approval gate you must clear first.',
     'Completion is evidence-based: a subtask or the goal may only be marked completed when backed by Evidence from an actual tool result (tests, build, file state, checks). Never declare done from assertion alone. Record each completion back via goal_update_task with evidenceRefs as you go.',
     'Minimize interruptions: only stop to ask the user (via request_user_input) when the goal is ambiguous, a decision involves product/business trade-offs, an action is high-risk or irreversible, permission/credentials are missing, or verification conflicts with the goal. Otherwise keep going.',

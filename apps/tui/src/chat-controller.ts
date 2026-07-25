@@ -195,6 +195,12 @@ export interface ChatModelPort extends RuntimePipelineModelAdapter<
   RuntimeSdkProviderExecution,
   string
 > {
+  /** Project the exact System Context messages that the next provider request will send. */
+  projectSystemMessages?(input: {
+    readonly mode: TuiMode;
+    readonly conversationId?: string;
+    readonly systemContextBlocks?: readonly ChatSystemContextBlock[];
+  }): readonly ModelMessage[];
   summarizeCompaction?(input: {
     readonly messages: readonly ModelMessage[];
     readonly formattedHistory: string;
@@ -509,14 +515,33 @@ export function createChatController(options: {
     messages: readonly ModelMessage[],
     usage?: ModelUsage,
     draftText?: string,
-  ) => computeContextPressure({
-    messages: microProjected(messages),
-    usage,
-    contextWindow: resolveContextWindow(),
-    draftText,
-    // Desktop computeContextBudget folds tools schema into nextRequestInputTokens.
-    tools: resolveToolsForPressure(),
-  });
+  ) => {
+    const continuityBlocks = conversationContinuityContext
+      ? [{
+          id: 'conversation.compaction',
+          title: 'Conversation Continuity',
+          content: conversationContinuityContext,
+          layer: 'L7_CONTINUITY',
+          trust: 'runtime',
+        }]
+      : undefined;
+    const systemMessages = options.model.projectSystemMessages?.({
+      mode: snapshot.activeTurnMode ?? snapshot.mode,
+      conversationId: resolveConversationId(),
+      ...(continuityBlocks ? { systemContextBlocks: continuityBlocks } : {}),
+    }) ?? [];
+    return computeContextPressure({
+      messages: [
+        ...systemMessages,
+        ...microProjected(messages).filter((message) => message.role !== 'system'),
+      ],
+      usage,
+      contextWindow: resolveContextWindow(),
+      draftText,
+      // Desktop computeContextBudget folds tools schema into nextRequestInputTokens.
+      tools: resolveToolsForPressure(),
+    });
+  };
 
   const withPressure = (
     next: ChatSnapshot,

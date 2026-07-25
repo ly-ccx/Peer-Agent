@@ -23,6 +23,7 @@
     "@peer-agent/runtime-core": "workspace:*",
     "@peer-agent/runtime-node": "workspace:*",
     "@peer-agent/runtime-sdk": "workspace:*",
+    "@peer-agent/system-context": "workspace:*",
     "adm-zip": "^0.5.17",
     "react": "19.2.7",
     "react-devtools-core": "7.0.1",

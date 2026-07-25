@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+// Node-backed Source shared by Desktop and standalone TUI.
 import os from 'node:os';
 import path from 'node:path';
 
@@ -218,9 +219,9 @@ export function createProjectInstructionsPromptSource(options = {}) {
     trust: 'workspace',
     observe(input = {}) {
       const workspacePath = input.workspacePath ? path.resolve(input.workspacePath) : null;
-      if (!workspacePath) return { workspacePath: null, files: [] };
-
       const files = collectConfigInstructions(input);
+      if (!workspacePath) return { workspacePath: null, files };
+
       const seenPaths = new Set();
       for (const candidate of collectCandidateFiles(workspacePath, input)) {
         if (seenPaths.has(candidate.path)) continue;
@@ -249,10 +250,10 @@ export function createProjectInstructionsPromptSource(options = {}) {
       return { workspacePath, files };
     },
     render(observation) {
-      if (!observation.workspacePath || observation.files.length === 0) return [];
+      if (observation.files.length === 0) return [];
 
       return observation.files
-        .filter((file) => file.content)
+        .filter((file) => file.content && (file.scope === 'config' || observation.workspacePath))
         .map((file) => ({
           id: makeSectionId(file, observation.workspacePath),
           layer: 'L3_INSTRUCTIONS',

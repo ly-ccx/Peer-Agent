@@ -1,3 +1,4 @@
+// Canonical Implementation shared by Desktop and TUI.
 // Goal 计划事实上下文 Source —— 见 Goal 计划 taskId 恢复设计。
 //
 // 作用：plan 与 goal 模式下，把「当前会话活动计划」的权威 taskId + 状态 + 进度，作为

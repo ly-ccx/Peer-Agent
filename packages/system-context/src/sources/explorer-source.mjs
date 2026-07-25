@@ -1,3 +1,4 @@
+// Shared Explorer runtime context Source.
 // Explorer 子 Agent 上下文 Source —— 见 docs/design/goal-runner-explorer-task-list.md Slice 5。
 //
 // 作用：explorer 模式下，把 Runner 动态派发的 Explorer 子 Agent 的任务简报（brief）、

@@ -1,5 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import {
+  assembleSystemContext,
+  type AssembledSystemContext,
+  type SystemContextInput,
+} from '@peer-agent/system-context';
 
 export type TuiLocale = 'zh-CN' | 'en-US';
 
@@ -43,9 +48,6 @@ const REPLY_LANGUAGE_INSTRUCTIONS: Readonly<Record<TuiLocale, string>> = Object.
   'en-US': 'Always reply to the user in English.',
 });
 
-const BASE_SYSTEM_PROMPT =
-  'You are Peer Agent. Use the available governed tools when they help answer the user.';
-
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -88,11 +90,44 @@ export function buildReplyLanguageInstruction(replyLanguage: string | null | und
 export function buildTuiSystemPrompt(
   replyLanguage: string | null | undefined,
   contextExtensions: readonly string[] = [],
+  input: SystemContextInput = {},
 ): string {
+  return buildTuiSystemContext(replyLanguage, contextExtensions, input).rendered;
+}
+
+export function buildTuiSystemContext(
+  replyLanguage: string | null | undefined,
+  contextExtensions: readonly string[] = [],
+  input: SystemContextInput = {},
+): AssembledSystemContext {
   const instruction = buildReplyLanguageInstruction(replyLanguage);
-  return [BASE_SYSTEM_PROMPT, instruction, ...contextExtensions]
-    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
-    .join('\n\n');
+  return assembleSystemContext({
+    ...input,
+    configInstructions: [
+      ...(Array.isArray(input.configInstructions) ? input.configInstructions : []),
+      ...(instruction
+        ? [{
+            id: 'tui.reply-language',
+            title: 'Reply language',
+            source: 'tui-language',
+            priority: -100,
+            content: instruction,
+          }]
+        : []),
+    ],
+    contextExtensions: [
+      ...(Array.isArray(input.contextExtensions) ? input.contextExtensions : []),
+      ...contextExtensions
+        .filter((content) => typeof content === 'string' && content.trim().length > 0)
+        .map((content, index) => ({
+          id: `tui.host-extension-${index + 1}`,
+          title: 'TUI host capability discovery',
+          sourceKind: 'host',
+          layer: 'L4_CAPABILITIES',
+          content,
+        })),
+    ],
+  });
 }
 
 export function createTuiLanguageStore({

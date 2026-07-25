@@ -1,3 +1,4 @@
+// Shared provider/model cognition Source; wire encoding stays in adapters.
 const PROVIDER_RULES = {
   openai: [
     'Provider family: OpenAI-compatible chat.',

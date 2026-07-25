@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createGoalRunnerPromptSource } from './goal-runner-source.mjs';
+import { createGoalRunnerPromptSource } from '@peer-agent/system-context';
 
 function makeStore(plan) {
   return {

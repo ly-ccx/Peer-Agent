@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createVerifierPromptSource } from './verifier-source.mjs';
+import { createVerifierPromptSource } from '@peer-agent/system-context';
 
 const sampleContext = {
   verifierRunId: 'verifier-1',

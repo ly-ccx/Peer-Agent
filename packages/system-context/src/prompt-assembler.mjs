@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+// This is the only System Context assembly Implementation. Hosts inject facts.
 import { joinPromptSections } from './rendering.mjs';
 import { createPromptSourceRegistry } from './prompt-source-registry.mjs';
 import { createAttachmentPromptSource } from './sources/attachment-source.mjs';

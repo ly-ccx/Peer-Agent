@@ -1485,6 +1485,38 @@ describe('chat controller', () => {
     await pending;
   });
 
+  test('includes the exact projected System Context in restored occupancy', () => {
+    const systemContent = 'shared-system-context '.repeat(400);
+    const model: ChatModelPort = {
+      projectSystemMessages: () => [{ role: 'system', content: systemContent }],
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        return { kind: 'completed', state, output: 'done' };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({
+      host: host(),
+      model,
+      getContextWindow: () => 100_000,
+    });
+
+    expect(controller.restore({
+      mode: 'chat',
+      messages: [{ id: 'user-1', role: 'user', content: 'restored' }],
+      modelMessages: [{ role: 'user', content: 'restored' }],
+    })).toBe(true);
+
+    const projected = controller.getSnapshot().nextRequestInputTokens ?? 0;
+    expect(projected).toBeGreaterThan(estimateTokensFromMessages([
+      { role: 'user', content: 'restored' },
+    ]));
+    expect(projected).toBeGreaterThanOrEqual(estimateTokensFromMessages([
+      { role: 'system', content: systemContent },
+      { role: 'user', content: 'restored' },
+    ]));
+  });
+
   test('publishes next-request input separately from historical usage', async () => {
     const model: ChatModelPort = {
       initialize: (input) => initialState(input.input),

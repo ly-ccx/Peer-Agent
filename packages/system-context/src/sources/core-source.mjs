@@ -1,5 +1,6 @@
 import { bulletList, joinPromptSections } from '../rendering.mjs';
 
+// Shared host-neutral identity and Evidence discipline.
 const TOOL_NAMES = {
   bash: 'bash',
   readFile: 'read_file',

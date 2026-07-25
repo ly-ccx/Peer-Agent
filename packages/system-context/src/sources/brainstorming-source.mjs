@@ -1,5 +1,5 @@
 import { bulletList, joinPromptSections } from '../rendering.mjs';
-import { resolveGoalPlanGate } from '../../chat-runtime/goal-mode-gate.mjs';
+import { resolveGoalPlanGate } from '../goal-plan-facts.mjs';
 
 // Brainstorming-before-implementation behavior, adapted from the "superpowers"
 // brainstorming skill into a resident Peer Agent behavior norm (L1_AGENT layer).

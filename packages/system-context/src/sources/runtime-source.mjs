@@ -1,3 +1,4 @@
+// Shared workspace runtime Source.
 export function renderRuntimeContext(workspacePath) {
   const lines = [];
   if (workspacePath) {

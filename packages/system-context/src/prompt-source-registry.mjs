@@ -1,3 +1,4 @@
+// Canonical PromptSource registry shared by Desktop and TUI.
 function assertSource(source) {
   if (!source || typeof source !== 'object') {
     throw new Error('Prompt source must be an object.');

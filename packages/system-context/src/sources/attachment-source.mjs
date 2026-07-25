@@ -1,3 +1,4 @@
+// Shared attachment metadata Source.
 const MAX_ATTACHMENT_CONTEXT_ROWS = 20;
 
 function normalizeAttachment(item, index) {

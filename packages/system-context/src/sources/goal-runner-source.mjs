@@ -19,7 +19,7 @@
 // - 只读 goal-plan-store，不写盘、不触发授权、不伪造 Tool Result/Evidence。
 // - 事实与指令分属不同 section，trust 边界清晰。
 
-import { neutralizeToolCallSyntax } from '../../chat-runtime/message-sanitizer.mjs';
+import { neutralizeToolCallSyntax } from '../sanitize-context-text.mjs';
 
 const MAX_SCOPE_ITEMS = 12;
 const MAX_CRITERIA_ITEMS = 12;

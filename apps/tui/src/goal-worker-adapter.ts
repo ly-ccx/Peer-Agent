@@ -3,12 +3,10 @@ import {
   type RuntimePipelineToolExecution,
 } from '@peer-agent/runtime-sdk';
 import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
-
-// Shared System Context sources are plain ESM without adjacent declarations.
-// @ts-expect-error -- shared .mjs module has no adjacent .d.ts
-import { createExplorerPromptSource } from '../../desktop/electron/main/prompt/sources/explorer-source.mjs';
-// @ts-expect-error -- shared .mjs module has no adjacent .d.ts
-import { createVerifierPromptSource } from '../../desktop/electron/main/prompt/sources/verifier-source.mjs';
+import {
+  createExplorerPromptSource,
+  createVerifierPromptSource,
+} from '@peer-agent/system-context';
 
 import type {
   ChatMessage,

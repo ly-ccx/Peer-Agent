@@ -1,4 +1,4 @@
-import { neutralizeToolCallSyntax } from '../../chat-runtime/message-sanitizer.mjs';
+import { neutralizeToolCallSyntax } from '../sanitize-context-text.mjs';
 
 const MAX_CONTINUITY_SUMMARIES = 3;
 const MAX_SUMMARY_CHARS = 12_000;

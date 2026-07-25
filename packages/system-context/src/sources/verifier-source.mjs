@@ -1,3 +1,4 @@
+// Shared Verifier runtime context Source.
 // Verifier 子 Agent 上下文 Source —— 见 goal-mode-multi-agent-orchestration-plan.md Slice 5。
 //
 // Verifier 复用 explorer 模式的只读工具投影，但拥有独立的 verifierContext：

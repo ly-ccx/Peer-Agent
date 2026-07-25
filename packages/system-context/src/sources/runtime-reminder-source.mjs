@@ -1,5 +1,6 @@
 import { MODE_COPY } from './mode-copy.mjs';
 
+// Shared mode and runtime reminder Source.
 const ALLOWED_REMINDER_LAYERS = new Set([
   'L2_RUNTIME',
   'L5_TOOL_RULES',

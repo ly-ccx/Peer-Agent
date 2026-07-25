@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { createBrainstormingPromptSource } from './brainstorming-source.mjs';
+import { createBrainstormingPromptSource } from '@peer-agent/system-context';
 
 // resolveGoalPlanGate 读取 goalPlanStore.listPlansByConversation(conversationId)，
 // 可执行状态为 approved / executing / completed。

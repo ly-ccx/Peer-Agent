@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 
 import {
   buildReplyLanguageInstruction,
+  buildTuiSystemContext,
   buildTuiSystemPrompt,
   composerPlaceholder,
   composerRunningStatusLabel,
@@ -81,6 +82,24 @@ describe('reply language prompt', () => {
     const prompt = buildTuiSystemPrompt('zh-CN');
     expect(prompt).toContain('Peer Agent');
     expect(prompt).toContain('中文');
+  });
+
+  test('uses the canonical assembler layers and stable hash', () => {
+    const input = {
+      workspacePath: tempDir(),
+      conversationId: 'shared-conversation',
+      provider: 'openai',
+      model: 'gpt-test',
+      mode: 'goal',
+    };
+    const first = buildTuiSystemContext('en-US', ['Skill discovery'], input);
+    const second = buildTuiSystemContext('en-US', ['Skill discovery'], input);
+
+    expect(first.sections.map((section) => section.id)).toContain('core.identity');
+    expect(first.sections.map((section) => section.id)).toContain('runtime.mode');
+    expect(first.sections.map((section) => section.id)).toContain('runtime.contextExtensions.tui.host-extension-1');
+    expect(first.snapshot.renderedHash).toBe(second.snapshot.renderedHash);
+    expect(first.rendered).toBe(second.rendered);
   });
 });
 

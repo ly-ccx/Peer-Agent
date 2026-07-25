@@ -1,4 +1,4 @@
-import { neutralizeToolCallSyntax } from '../../chat-runtime/message-sanitizer.mjs';
+import { neutralizeToolCallSyntax } from '../sanitize-context-text.mjs';
 
 const ALLOWED_EXTENSION_LAYERS = new Set([
   'L3_INSTRUCTIONS',

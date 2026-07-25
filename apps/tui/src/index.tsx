@@ -23,6 +23,7 @@ import { createTuiLocalAccessStore } from './tui-local-access-store.ts';
 import {
   createProviderChatModel,
   createUnavailableChatModel,
+  type ProviderSystemPromptContext,
 } from './provider-chat-model.ts';
 import { createQoderPrivateProvider } from './qoder-private-provider.ts';
 import { createAnthropicMessagesProvider } from './anthropic-messages-provider.ts';
@@ -217,10 +218,31 @@ const modelSelection = createTuiModelSelectionControl({
     ?? (modelConfig.configured ? ['off', 'low', 'default', 'high'] : ['default']),
   catalog: modelConfig.catalog,
 });
-const systemPrompt = () => buildTuiSystemPrompt(
-  languageStore.getReplyLanguage(),
-  [host.skillMcpBridge?.discoveryHint() ?? ''],
-);
+const systemPrompt = (context: ProviderSystemPromptContext) => {
+  const selection = modelSelection.getSelection();
+  const providerMetadata = modelConfig.sharedProviders?.find(
+    (item) => item.credentialId === selection.providerId,
+  );
+  return buildTuiSystemPrompt(
+    languageStore.getReplyLanguage(),
+    [host.skillMcpBridge?.discoveryHint() ?? ''],
+    {
+      workspacePath: workspaceRoot,
+      provider: providerMetadata?.channelId ?? selection.providerId,
+      model: selection.modelId,
+      effort: selection.reasoningEffort,
+      mode: context.mode,
+      conversationId: context.conversationId ?? null,
+      goalPlanStore: host.goalBridge?.store,
+      mcpRegistry: host.skillMcpBridge?.mcpRegistry,
+      continuityContext: context.systemContextBlocks?.map((block) => ({
+        id: block.id,
+        method: 'tui',
+        content: block.content,
+      })) ?? [],
+    },
+  );
+};
 const model = provider
   ? createProviderChatModel({
       provider,
@@ -237,7 +259,6 @@ const model = provider
         ))?.contextWindow;
       },
       toolDefinitionsForMode: (mode) => host.toolDefinitionsForMode?.(mode) ?? host.toolDefinitions,
-      systemPrompt: systemPrompt(),
       getSystemPrompt: systemPrompt,
     })
   : createUnavailableChatModel(missingModelConfigurationMessage());

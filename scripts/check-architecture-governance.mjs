@@ -172,19 +172,19 @@ function assertSystemContextProtocolContracts() {
     fail('ChatSurface must lower persisted configured instructions into protocol configInstructions.');
   }
 
-  const projectInstructionsSource = readText('apps/desktop/electron/main/prompt/sources/project-instructions-source.mjs');
+  const projectInstructionsSource = readText('packages/system-context/src/sources/project-instructions-source.mjs');
   if (!projectInstructionsSource.includes('configInstructions')) {
     fail('project-instructions-source.mjs must admit configured instructions through the project.instructions Context Source.');
   }
 
-  const promptAssembler = readText('apps/desktop/electron/main/prompt/prompt-assembler.mjs');
+  const promptAssembler = readText('packages/system-context/src/prompt-assembler.mjs');
   if (!promptAssembler.includes('createProviderPromptSource')) {
     fail('Default System Context assembly must register runtime.provider for provider/model prompt selection.');
   }
   if (!promptAssembler.includes('createContextExtensionPromptSource')) {
     fail('Default System Context assembly must register runtime.contextExtensions for controlled Plugin/Skill/MCP context contributions.');
   }
-  const providerSourcePath = 'apps/desktop/electron/main/prompt/sources/provider-source.mjs';
+  const providerSourcePath = 'packages/system-context/src/sources/provider-source.mjs';
   if (!existsSync(path.join(repoRoot, providerSourcePath))) {
     fail(`Provider/model Context Source is missing: ${providerSourcePath}`);
   } else {
@@ -196,7 +196,7 @@ function assertSystemContextProtocolContracts() {
     }
   }
 
-  const extensionSourcePath = 'apps/desktop/electron/main/prompt/sources/context-extension-source.mjs';
+  const extensionSourcePath = 'packages/system-context/src/sources/context-extension-source.mjs';
   if (!existsSync(path.join(repoRoot, extensionSourcePath))) {
     fail(`Controlled context extension source is missing: ${extensionSourcePath}`);
   } else {
@@ -205,6 +205,26 @@ function assertSystemContextProtocolContracts() {
       if (!extensionSource.includes(snippet)) {
         fail(`${extensionSourcePath} must keep Plugin/Skill/MCP context contributions bounded (${snippet}).`);
       }
+    }
+  }
+
+  const desktopPromptAdapter = readText('apps/desktop/electron/main/prompt/index.mjs');
+  if (!desktopPromptAdapter.includes("from '@peer-agent/system-context'")) {
+    fail('Desktop System Context adapter must consume @peer-agent/system-context.');
+  }
+
+  const tuiLanguage = readText('apps/tui/src/tui-language.ts');
+  if (!tuiLanguage.includes("from '@peer-agent/system-context'")) {
+    fail('TUI System Context adapter must consume @peer-agent/system-context.');
+  }
+  if (tuiLanguage.includes('BASE_SYSTEM_PROMPT')) {
+    fail('TUI must not maintain a parallel BASE_SYSTEM_PROMPT.');
+  }
+
+  const tuiProvider = readText('apps/tui/src/provider-chat-model.ts');
+  for (const forbidden of ['PLAN_MODE_SYSTEM_PROMPT', 'GOAL_MODE_SYSTEM_PROMPT', 'formatSystemContextBlocks']) {
+    if (tuiProvider.includes(forbidden)) {
+      fail(`TUI provider adapter must not bypass PromptAssembler with ${forbidden}.`);
     }
   }
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { createMcpHostPromptSource } from './mcp-host-source.mjs';
+import { createMcpHostPromptSource } from '@peer-agent/system-context';
 
 function fakeRegistry({ path = '/home/u/.peer-agent/mcp-registry.json', servers = [] } = {}) {
   return {

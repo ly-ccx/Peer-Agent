@@ -30,6 +30,7 @@
     "@peer-agent/runtime-core": "workspace:*",
     "@peer-agent/runtime-node": "workspace:*",
     "@peer-agent/runtime-sdk": "workspace:*",
+    "@peer-agent/system-context": "workspace:*",
     "@peer-agent/task-thread": "workspace:*",
     "@peer-agent/ui": "workspace:*",
     "@qoder-ai/qoder-agent-sdk": "^1.0.15",

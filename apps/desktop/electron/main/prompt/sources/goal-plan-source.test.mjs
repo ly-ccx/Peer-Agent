@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { createGoalPlanPromptSource } from './goal-plan-source.mjs';
+import { createGoalPlanPromptSource } from '@peer-agent/system-context';
 
 function fakeStore(plansByConversation = {}) {
   return {

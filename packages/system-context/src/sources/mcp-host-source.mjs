@@ -1,3 +1,4 @@
+// Registry is injected by the host; this Source remains read-only.
 // MCP 自我认知 Source —— 让 Peer Agent 第一反应就知道「我自己就是一个 MCP host」。
 //
 // 背景（踩坑）：处理「安装 / 配置 / 管理 MCP」类请求时，Agent 曾第一反应去扫描外部

@@ -18,6 +18,7 @@ import {
 } from './provider-chat-model.ts';
 import { estimateTextTokens, estimateTokensFromMessages } from './context-pressure.ts';
 import type { TuiHost } from './tui-host.ts';
+import { buildTuiSystemPrompt } from './tui-language.ts';
 
 const toolDefinitions: RuntimeToolDefinition[] = [{
   name: 'read_file',
@@ -415,17 +416,24 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     };
     const controller = createChatController({
       host: host(),
-      model: createProviderChatModel({ provider, model: 'model-test', toolDefinitions: [] }),
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        toolDefinitions: [],
+        getSystemPrompt: () => 'canonical shared System Context',
+      }),
     });
 
     await controller.send('first');
     await controller.send('second');
 
     expect(requests[1]?.messages).toEqual([
+      { role: 'system', content: 'canonical shared System Context' },
       { role: 'user', content: 'first' },
       { role: 'assistant', content: 'answer-1' },
       { role: 'user', content: 'second' },
     ]);
+    expect(requests[1]?.messages.filter((message) => message.role === 'system')).toHaveLength(1);
   });
 
   test('cancels the provider request through AbortSignal', async () => {
@@ -497,6 +505,10 @@ describe('OpenAI-compatible TUI chat adapter', () => {
         provider,
         model: 'model-test',
         toolDefinitions: [],
+        getSystemPrompt: (context) => buildTuiSystemPrompt('en-US', [], {
+          mode: context.mode,
+          conversationId: context.conversationId,
+        }),
       }),
     });
 
@@ -506,9 +518,10 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     const content = typeof system?.content === 'string'
       ? system.content
       : JSON.stringify(system?.content ?? '');
-    expect(content).toContain('You are in Goal mode');
+    expect(content).toContain('Mode: goal');
+    expect(content).toContain('Self-driven goal mode');
     expect(content).toContain('goal_create_plan');
-    expect(content).toContain('side-effecting');
+    expect(content).toContain('side-effect');
   });
 
   test('uses the active provider and shared prompts for compaction without exposing tools', async () => {
@@ -561,6 +574,10 @@ describe('OpenAI-compatible TUI chat adapter', () => {
         provider,
         model: 'model-test',
         toolDefinitions: [],
+        getSystemPrompt: (context) => buildTuiSystemPrompt('en-US', [], {
+          mode: context.mode,
+          conversationId: context.conversationId,
+        }),
       }),
     });
 
@@ -570,7 +587,8 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     const content = typeof system?.content === 'string'
       ? system.content
       : JSON.stringify(system?.content ?? '');
-    expect(content).toContain('You are in read-only Plan mode');
+    expect(content).toContain('Mode: plan');
+    expect(content).toContain('Plan-before-execute');
   });
 });
 
