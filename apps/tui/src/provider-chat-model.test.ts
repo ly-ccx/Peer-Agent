@@ -141,10 +141,19 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     await controller.send('first');
     await controller.send('second');
 
-    expect(requests).toHaveLength(2);
-    expect(requests[1]?.messages).toHaveLength(2);
-    expect(String(requests[1]?.messages[0]?.content)).toContain('[Context handoff');
-    expect(requests[1]?.messages[1]?.content).toBe('second');
+    const isCompactionRequest = (request: ModelProviderRequest) =>
+      request.messages.some(
+        (message) =>
+          message.role === 'system'
+          && typeof message.content === 'string'
+          && message.content.includes(COMPACTION_SUMMARY_SYSTEM_PROMPT.slice(0, 40)),
+      );
+    const mainRequests = requests.filter((request) => !isCompactionRequest(request));
+    expect(mainRequests.length).toBeGreaterThanOrEqual(2);
+    expect(requests.some(isCompactionRequest)).toBe(true);
+    expect(mainRequests[1]?.messages).toHaveLength(2);
+    expect(String(mainRequests[1]?.messages[0]?.content)).toContain('[Context handoff');
+    expect(mainRequests[1]?.messages[1]?.content).toBe('second');
   });
 
   test('routes each turn through the provider selected at turn start', async () => {
@@ -593,7 +602,10 @@ describe('OpenAI-compatible TUI chat adapter', () => {
       { role: 'user', content: '[user]: old turn' },
       { role: 'user', content: COMPACTION_SUMMARY_PROMPT },
     ]);
-    expect(progress.at(-1)).toBe(100);
+    // Live summary stream reports received/estimated progress and intentionally stays below 100.
+    expect(progress.length).toBeGreaterThan(0);
+    expect(progress.at(-1)!).toBeGreaterThanOrEqual(15);
+    expect(progress.at(-1)!).toBeLessThan(100);
   });
 
   test('injects a Plan-mode system prompt for plan turns', async () => {
@@ -713,6 +725,166 @@ describe('createProviderChatModel stream recovery', () => {
     expect(controller.getSnapshot().error).toContain('invalid api key');
   });
 });
+
+
+
+
+
+describe('createProviderChatModel mid-turn LLM compaction', () => {
+  function makeContext(emit?: (event: { type: string; percent?: number }) => void) {
+    return {
+      run: {
+        mode: 'agent' as const,
+        streamId: 'test-stream',
+        conversationId: 'conv-test',
+      },
+      signal: new AbortController().signal,
+      emit(event: { type: string; percent?: number }) {
+        emit?.(event);
+        return null;
+      },
+    } as any;
+  }
+
+  function makeInput(content: string, usageInputTokens: number) {
+    const modelMessages = [
+      { role: 'user' as const, content: 'old-1' },
+      { role: 'assistant' as const, content: 'old-reply-1' },
+      { role: 'user' as const, content: 'old-2' },
+      { role: 'assistant' as const, content: 'old-reply-2' },
+    ];
+    const history = [
+      { id: 'u1', role: 'user' as const, content: 'old-1' },
+      { id: 'a1', role: 'assistant' as const, content: 'old-reply-1' },
+      { id: 'u2', role: 'user' as const, content: 'old-2' },
+      { id: 'a2', role: 'assistant' as const, content: 'old-reply-2' },
+    ];
+    return {
+      input: {
+        content,
+        history,
+        modelMessages,
+        mode: 'agent' as const,
+        usage: { inputTokens: usageInputTokens },
+      },
+    } as any;
+  }
+
+  test('mid-turn compact prefers LLM summary and emits compaction.progress', async () => {
+    const streams: ModelProviderRequest[] = [];
+    const progressEvents: number[] = [];
+    let mainTurns = 0;
+    const provider: ModelProvider = {
+      async stream(request) {
+        streams.push(request);
+        const isCompaction = request.messages.some(
+          (message) =>
+            message.role === 'system'
+            && typeof message.content === 'string'
+            && message.content.includes(COMPACTION_SUMMARY_SYSTEM_PROMPT.slice(0, 40)),
+        );
+        if (isCompaction) {
+          request.onEvent?.({ type: 'text.delta', content: 'LLM mid-turn summary body' });
+          return {
+            content: 'LLM mid-turn summary body',
+            toolCalls: [],
+            usage: { inputTokens: 80 },
+          };
+        }
+        mainTurns += 1;
+        return {
+          content: `reply-${mainTurns}`,
+          toolCalls: [],
+          usage: { inputTokens: 120 },
+        };
+      },
+    };
+
+    const model = createProviderChatModel({
+      provider,
+      model: 'model-test',
+      getContextWindow: () => 1_000,
+      toolDefinitions: [],
+    });
+
+    const state = model.initialize(
+      makeInput('latest-user', 900),
+      makeContext(),
+    );
+    const result = await model.runTurn(
+      state,
+      makeContext((event) => {
+        if (event.type === 'compaction.progress' && typeof event.percent === 'number') {
+          progressEvents.push(event.percent);
+        }
+      }),
+    );
+
+    expect(result.kind).toBe('completed');
+    expect(progressEvents.some((percent) => percent >= 8)).toBe(true);
+    expect(
+      streams.some((request) =>
+        request.messages.some(
+          (message) =>
+            message.role === 'system'
+            && typeof message.content === 'string'
+            && message.content.includes(COMPACTION_SUMMARY_SYSTEM_PROMPT.slice(0, 40)),
+        ),
+      ),
+    ).toBe(true);
+    expect(result.state.midTurnCompactions?.length ?? 0).toBeGreaterThanOrEqual(1);
+    expect(result.state.midTurnCompactions?.[0]?.method).toBe('llm');
+    expect(result.state.modelMessages.some((message) =>
+      typeof message.content === 'string' && message.content.includes('[Context handoff'),
+    )).toBe(true);
+    expect(result.output).toBe('reply-1');
+  });
+
+  test('mid-turn compact falls back to structural when LLM summary fails', async () => {
+    let mainTurns = 0;
+    const provider: ModelProvider = {
+      async stream(request) {
+        const isCompaction = request.messages.some(
+          (message) =>
+            message.role === 'system'
+            && typeof message.content === 'string'
+            && message.content.includes(COMPACTION_SUMMARY_SYSTEM_PROMPT.slice(0, 40)),
+        );
+        if (isCompaction) {
+          throw new Error('summary provider unavailable');
+        }
+        mainTurns += 1;
+        return {
+          content: `ok-${mainTurns}`,
+          toolCalls: [],
+          usage: { inputTokens: 150 },
+        };
+      },
+    };
+
+    const model = createProviderChatModel({
+      provider,
+      model: 'model-test',
+      getContextWindow: () => 1_000,
+      toolDefinitions: [],
+    });
+
+    const state = model.initialize(
+      makeInput('latest-user', 950),
+      makeContext(),
+    );
+    const result = await model.runTurn(state, makeContext());
+
+    expect(result.kind).toBe('completed');
+    expect(result.state.midTurnCompactions?.length ?? 0).toBeGreaterThanOrEqual(1);
+    expect(result.state.midTurnCompactions?.[0]?.method).toBe('structured');
+    expect(result.state.modelMessages.some((message) =>
+      typeof message.content === 'string' && message.content.includes('[Context handoff'),
+    )).toBe(true);
+    expect(result.output).toBe('ok-1');
+  });
+});
+
 
 function connectionError(message: string): Error {
   return new TypeError(message);

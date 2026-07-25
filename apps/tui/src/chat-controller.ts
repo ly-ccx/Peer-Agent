@@ -176,7 +176,7 @@ export interface ChatModelState {
   readonly midTurnCompactions?: readonly MidTurnCompaction[];
 }
 
-/** turn 内自动压缩的结构化记录(确定性 structural 摘要,不在 loop 中嵌套 LLM 调用)。 */
+/** turn 内自动压缩记录(优先 LLM 摘要,失败回退 structural;与 Desktop mid-turn 对齐)。 */
 export interface MidTurnCompaction {
   readonly reason: 'preflight' | 'emergency';
   readonly method: CompactionMethod;
@@ -968,6 +968,36 @@ export function createChatController(options: {
       emit(event) {
         if (event.type === 'message.delta' || event.type === 'reasoning.delta') {
           enqueueStreamDelta(event);
+          return null;
+        }
+        if (event.type === 'compaction.progress') {
+          const percent = Math.max(0, Math.min(100, Math.round(Number(event.percent) || 0)));
+          const label = typeof event.label === 'string' && event.label.trim()
+            ? event.label.trim()
+            : 'Auto-compacting context';
+          const progressId = `midturn-compact-${event.streamId ?? 'tui-chat'}`;
+          const content = `${label}  ${renderCompactProgressBar(percent)}  ${percent}%`;
+          const progressMessage: ChatMessage = {
+            id: progressId,
+            role: 'system',
+            content,
+            pending: percent < 100,
+            compact: {
+              phase: percent >= 100 || event.phase === 'done' ? 'done' : 'progress',
+              percent,
+            },
+          };
+          const without = snapshot.messages.filter((message) => message.id !== progressId);
+          publish(withPressure({
+            ...snapshot,
+            status: percent >= 100 || event.phase === 'done' ? 'running' : 'compacting',
+            messages: percent >= 100 || event.phase === 'done'
+              ? without
+              : [...without, progressMessage],
+            plan: snapshot.plan,
+            usage: snapshot.usage,
+            error: undefined,
+          }));
         }
         return null;
       },

@@ -6,6 +6,7 @@ import {
   compactMessagesWithSummaryStrategy,
   createContextAccountingCompactionPipeline,
   estimateCompactionProgressPercent,
+  formatCompactionMessagesForSummary,
   microcompactMessagesForContext,
   resolveMaxSummaryChars,
   type RuntimeToolDefinition,
@@ -229,6 +230,46 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
     return content ? [{ role: 'system', content }] : [];
   };
 
+  const summarizeCompaction = async (input: {
+    readonly messages: readonly ModelMessage[];
+    readonly formattedHistory: string;
+    readonly onProgress?: (percent: number) => void;
+  }): Promise<string> => {
+    let streamedChars = 0;
+    const inputChars = input.formattedHistory.length;
+    const maxSummaryChars = resolveMaxSummaryChars({ maxOutputTokens: 4096 });
+    const reportLiveProgress = () => {
+      input.onProgress?.(
+        estimateCompactionProgressPercent({
+          inputChars,
+          maxSummaryChars,
+          receivedChars: streamedChars,
+          minPercent: COMPACTION_PROGRESS_CONFIG.stagePreparedPercent,
+        }),
+      );
+    };
+    const result = await streamWithSafeRetry((options.getProvider?.() ?? options.provider), {
+      model: options.getModel?.() ?? options.model,
+      messages: [
+        { role: 'system', content: COMPACTION_SUMMARY_SYSTEM_PROMPT },
+        { role: 'user', content: input.formattedHistory },
+        { role: 'user', content: COMPACTION_SUMMARY_PROMPT },
+      ],
+      tools: [],
+      temperature: 0.2,
+      maxOutputTokens: 4096,
+      onEvent(event) {
+        if (event.type !== 'text.delta') return;
+        streamedChars += event.content.length;
+        // Shared Desktop/CLI progress: received/estimated summary chars.
+        reportLiveProgress();
+      },
+    });
+    // Live stream never reports 100; controller post-process + done own the finish.
+    reportLiveProgress();
+    return result.content;
+  };
+
   return {
     projectSystemMessages(context) {
       return systemMessagesFor({
@@ -237,41 +278,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         systemContextBlocks: context.systemContextBlocks,
       });
     },
-    async summarizeCompaction(input) {
-      let streamedChars = 0;
-      const inputChars = input.formattedHistory.length;
-      const maxSummaryChars = resolveMaxSummaryChars({ maxOutputTokens: 4096 });
-      const reportLiveProgress = () => {
-        input.onProgress?.(
-          estimateCompactionProgressPercent({
-            inputChars,
-            maxSummaryChars,
-            receivedChars: streamedChars,
-            minPercent: COMPACTION_PROGRESS_CONFIG.stagePreparedPercent,
-          }),
-        );
-      };
-      const result = await streamWithSafeRetry((options.getProvider?.() ?? options.provider), {
-        model: options.getModel?.() ?? options.model,
-        messages: [
-          { role: 'system', content: COMPACTION_SUMMARY_SYSTEM_PROMPT },
-          { role: 'user', content: input.formattedHistory },
-          { role: 'user', content: COMPACTION_SUMMARY_PROMPT },
-        ],
-        tools: [],
-        temperature: 0.2,
-        maxOutputTokens: 4096,
-        onEvent(event) {
-          if (event.type !== 'text.delta') return;
-          streamedChars += event.content.length;
-          // Shared Desktop/CLI progress: received/estimated summary chars.
-          reportLiveProgress();
-        },
-      });
-      // Live stream never reports 100; controller post-process + done own the finish.
-      reportLiveProgress();
-      return result.content;
-    },
+    summarizeCompaction,
     initialize(input, context) {
       const mode = normalizeTuiRuntimeMode(context.run.mode);
       const systemMessages = systemMessagesFor({
@@ -349,15 +356,45 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
             messages: pipelineState.messages,
             tools,
           });
+          const compactReason = reason === 'provider_overflow' ? 'overflow' : 'preflight';
+          const emitCompactionProgress = (
+            percent: number,
+            phase: 'started' | 'progress' | 'done' = 'progress',
+          ) => {
+            const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+            context.emit({
+              type: 'compaction.progress',
+              streamId,
+              percent: clamped,
+              reason: compactReason,
+              phase,
+              label: compactReason === 'overflow'
+                ? 'Auto-compacting after overflow'
+                : 'Auto-compacting context',
+            });
+          };
+
+          // Align mid-turn compact with Desktop: LLM summary first, structural fallback.
+          emitCompactionProgress(COMPACTION_PROGRESS_CONFIG.stageStartedPercent, 'started');
+          emitCompactionProgress(COMPACTION_PROGRESS_CONFIG.stagePreparedPercent, 'progress');
           const strategy = await compactMessagesWithSummaryStrategy({
             messages: pipelineState.messages,
             keepRecentCount: TUI_COMPACT_KEEP_RECENT,
             preserveLatestUserTurn: true,
+            summarizeWithLlm: async (oldMessages) => {
+              const formattedHistory = formatCompactionMessagesForSummary(oldMessages);
+              return summarizeCompaction({
+                messages: oldMessages as readonly ModelMessage[],
+                formattedHistory,
+                onProgress: (percent) => emitCompactionProgress(percent, 'progress'),
+              });
+            },
             summarizeStructurally: (messages) =>
               buildStructuralSummary(messages as readonly ModelMessage[]),
             buildHandoffContent,
           });
           if (!strategy.compacted || !strategy.summary || !strategy.handoffContent) {
+            emitCompactionProgress(100, 'done');
             return { compacted: false, state: pipelineState };
           }
           const nextMessages: readonly ModelMessage[] = [
@@ -365,6 +402,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
             { role: 'user', content: strategy.handoffContent },
             ...strategy.keepMessages,
           ];
+          emitCompactionProgress(COMPACTION_PROGRESS_CONFIG.stagePostProcessPercent, 'progress');
           midTurnCompactions.push({
             reason: reason === 'provider_overflow' ? 'emergency' : 'preflight',
             method: strategy.method ?? 'structured',
@@ -379,6 +417,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
               (message) => message.role === 'user',
             ).length,
           });
+          emitCompactionProgress(100, 'done');
           return { compacted: true, state: { messages: nextMessages } };
         },
         send(request) {

@@ -27,7 +27,8 @@ export type RuntimeSdkEventType =
   | 'hook.completed'
   | 'permission.requested'
   | 'permission.resolved'
-  | 'tool.completed';
+  | 'tool.completed'
+  | 'compaction.progress';
 
 export type RuntimeSdkToolCall = RuntimeToolCall;
 export type RuntimeSdkExecuteRequest = RuntimeExecuteRequest;
@@ -137,6 +138,19 @@ export interface RuntimeSdkReasoningDeltaEvent extends RuntimeSdkEventBase {
   readonly content: string;
 }
 
+/**
+ * Mid-turn / automatic compaction progress for host UI surfaces.
+ * percent is 0-100; hosts should treat values below 100 as live progress.
+ */
+export interface RuntimeSdkCompactionProgressEvent extends RuntimeSdkEventBase {
+  readonly type: 'compaction.progress';
+  readonly streamId: string;
+  readonly percent: number;
+  readonly reason?: 'preflight' | 'overflow' | 'manual' | string;
+  readonly phase?: 'started' | 'progress' | 'done';
+  readonly label?: string;
+}
+
 export interface RuntimeSdkMessageCompletedEvent extends RuntimeSdkEventBase {
   readonly type: 'message.completed';
   readonly streamId: string;
@@ -195,6 +209,7 @@ export type RuntimeSdkEvent =
   | RuntimeSdkSessionStartedEvent
   | RuntimeSdkMessageDeltaEvent
   | RuntimeSdkReasoningDeltaEvent
+  | RuntimeSdkCompactionProgressEvent
   | RuntimeSdkMessageCompletedEvent
   | RuntimeSdkRuntimeErrorEvent
   | RuntimeSdkToolStartedEvent
