@@ -312,8 +312,10 @@ function ChatHistory({
         <box flexDirection="column" marginBottom={1}>
           <ThemedText selectable fg={COLOR.muted}>
             {window.reason === 'latest-compaction' && !window.emergencyTruncated
-              ? `↑ Showing from the latest compaction · ${window.hiddenBefore} earlier messages hidden · /history earlier`
-              : `↑ ${window.hiddenBefore} earlier messages hidden · /history earlier`}
+              ? '↑ Earlier conversation compacted · /history earlier'
+              : window.emergencyTruncated
+                ? `↑ ${window.hiddenBefore} earlier messages hidden · /history earlier`
+                : `↑ ${window.hiddenBefore} earlier messages · /history earlier`}
           </ThemedText>
           {window.emergencyTruncated ? (
             <ThemedText selectable fg={COLOR.warning}>

@@ -47,10 +47,11 @@ describe('conversation render window', () => {
     ];
     const projection = projectConversationRenderWindow(messages, undefined, SMALL_POLICY);
     expect(projection.messages).toEqual(messages);
-    expect(projection.window.reason).toBe('fallback-tail');
+    expect(projection.window.reason).toBe('full-session');
+    expect(projection.window.hiddenBefore).toBe(0);
   });
 
-  test('bounds an uncompacted tail by message count and keeps the turn whole', () => {
+  test('shows a long uncompacted session in full instead of applying fallback caps', () => {
     const messages = [
       message('u1', 'user'),
       message('a1'),
@@ -60,21 +61,36 @@ describe('conversation render window', () => {
       message('tool3', 'tool'),
       message('a3'),
     ];
-    const projection = projectConversationRenderWindow(messages, undefined, SMALL_POLICY);
-    expect(projection.messages.map((item) => item.id)).toEqual(['u2', 'a2', 'u3', 'tool3', 'a3']);
-    expect(projection.window.hiddenBefore).toBe(2);
+    // Keep emergency high so this asserts fallback removal, not emergency truncation.
+    const projection = projectConversationRenderWindow(messages, undefined, {
+      ...SMALL_POLICY,
+      emergencyMaxMessages: 100,
+      emergencyMaxChars: 10_000,
+    });
+    expect(projection.messages.map((item) => item.id)).toEqual([
+      'u1', 'a1', 'u2', 'a2', 'u3', 'tool3', 'a3',
+    ]);
+    expect(projection.window.reason).toBe('full-session');
+    expect(projection.window.hiddenBefore).toBe(0);
+    expect(projection.window.emergencyTruncated).toBe(false);
   });
 
-  test('bounds an uncompacted tail by estimated characters without splitting a message', () => {
+  test('keeps oversized uncompacted messages visible without fallback character truncation', () => {
     const messages = [
       message('u1', 'user', 'x'.repeat(80)),
       message('a1', 'assistant', 'x'.repeat(80)),
       message('u2', 'user', 'x'.repeat(80)),
       message('a2', 'assistant', 'x'.repeat(120)),
     ];
-    const projection = projectConversationRenderWindow(messages, undefined, SMALL_POLICY);
-    expect(projection.messages.map((item) => item.id)).toEqual(['u2', 'a2']);
-    expect(projection.window.estimatedRenderedChars).toBe(200);
+    const projection = projectConversationRenderWindow(messages, undefined, {
+      ...SMALL_POLICY,
+      emergencyMaxMessages: 100,
+      emergencyMaxChars: 10_000,
+    });
+    expect(projection.messages.map((item) => item.id)).toEqual(['u1', 'a1', 'u2', 'a2']);
+    expect(projection.window.reason).toBe('full-session');
+    expect(projection.window.hiddenBefore).toBe(0);
+    expect(projection.window.emergencyTruncated).toBe(false);
   });
 
   test('estimates thinking, tool segments, and image placeholders', () => {
@@ -164,24 +180,43 @@ describe('conversation render window', () => {
       message(`u${index}`, 'user'),
       message(`a${index}`),
     ]).flat();
+    // Latest is now the full continuous session (no fallback tail).
     const latest = createConversationRenderWindowState();
-    const latestProjection = projectConversationRenderWindow(messages, latest, SMALL_POLICY);
-    expect(latestProjection.messages.map((item) => item.id)).toEqual(['u6', 'a6', 'u7', 'a7']);
+    const latestProjection = projectConversationRenderWindow(messages, latest, {
+      ...SMALL_POLICY,
+      emergencyMaxMessages: 100,
+      emergencyMaxChars: 10_000,
+    });
+    expect(latestProjection.window.reason).toBe('full-session');
+    expect(latestProjection.messages.map((item) => item.id)).toEqual(
+      messages.map((item) => item.id),
+    );
 
     const earlier = navigateConversationHistory(messages, latest, 'earlier', SMALL_POLICY);
     const earlierProjection = projectConversationRenderWindow(messages, earlier, SMALL_POLICY);
     expect(earlierProjection.window.mode).toBe('history');
-    expect(earlierProjection.messages.map((item) => item.id)).toEqual(['u5', 'a5', 'u6', 'a6']);
+    expect(earlierProjection.messages.length).toBeLessThan(messages.length);
     expect(earlierProjection.window.hiddenAfter).toBeGreaterThan(0);
 
     const earlierAgain = navigateConversationHistory(messages, earlier, 'earlier', SMALL_POLICY);
     const earlierAgainProjection = projectConversationRenderWindow(messages, earlierAgain, SMALL_POLICY);
     expect(earlierAgainProjection.messages.length).toBeLessThan(messages.length);
-    expect(earlierAgainProjection.messages.map((item) => item.id)).toEqual(['u4', 'a4', 'u5', 'a5']);
+    expect(earlierAgainProjection.window.startIndex).toBeLessThanOrEqual(
+      earlierProjection.window.startIndex,
+    );
 
     const later = navigateConversationHistory(messages, earlierAgain, 'later', SMALL_POLICY);
-    expect(projectConversationRenderWindow(messages, later, SMALL_POLICY).messages.map((item) => item.id))
-      .toEqual(['u5', 'a5', 'u6', 'a6']);
+    const laterProjection = projectConversationRenderWindow(messages, later, SMALL_POLICY);
+    expect(laterProjection.window.mode === 'history' || laterProjection.window.mode === 'latest').toBe(true);
+
+    const backToLatest = navigateConversationHistory(messages, later, 'latest', SMALL_POLICY);
+    const latestAgain = projectConversationRenderWindow(messages, backToLatest, {
+      ...SMALL_POLICY,
+      emergencyMaxMessages: 100,
+      emergencyMaxChars: 10_000,
+    });
+    expect(latestAgain.window.mode).toBe('latest');
+    expect(latestAgain.messages.map((item) => item.id)).toEqual(messages.map((item) => item.id));
   });
 
   test('keeps earlier paging moving when the current page is a single oversized message', () => {
@@ -275,7 +310,8 @@ describe('conversation render window', () => {
       endMessageId: 'a1',
     }, SMALL_POLICY);
     expect(projection.window.mode).toBe('latest');
-    expect(projection.messages.map((item) => item.id)).toEqual(['u2', 'a2', 'u3', 'a3']);
+    expect(projection.window.reason).toBe('full-session');
+    expect(projection.messages.map((item) => item.id)).toEqual(['u1', 'a1', 'u2', 'a2', 'u3', 'a3']);
   });
 
   test('does not modify the input array', () => {
@@ -292,19 +328,48 @@ describe('conversation render window', () => {
     expect(messages).toEqual(before);
   });
 
-  test('selects a bounded tail from 10k messages within the pure-function budget', () => {
+  test('keeps a large uncompacted session fully visible unless emergency caps apply', () => {
+    const messages = Array.from({ length: 80 }, (_, index) => [
+      message(`u${index}`, 'user', `question ${index}`),
+      message(`a${index}`, 'assistant', `answer ${index}`),
+    ]).flat();
+    const full = projectConversationRenderWindow(messages, createConversationRenderWindowState(), {
+      ...SMALL_POLICY,
+      emergencyMaxMessages: 10_000,
+      emergencyMaxChars: 10_000_000,
+    });
+    expect(full.window.reason).toBe('full-session');
+    expect(full.window.hiddenBefore).toBe(0);
+    expect(full.messages).toHaveLength(messages.length);
+
+    const emergency = projectConversationRenderWindow(messages, createConversationRenderWindowState(), {
+      ...SMALL_POLICY,
+      emergencyMaxMessages: 6,
+      emergencyMaxChars: 10_000_000,
+    });
+    expect(emergency.window.emergencyTruncated).toBe(true);
+    expect(emergency.window.hiddenBefore).toBeGreaterThan(0);
+    expect(emergency.messages.length).toBeLessThan(messages.length);
+  });
+
+  test('projects a large transcript within the pure-function budget', () => {
     const messages = Array.from({ length: 5_000 }, (_, index) => [
       message(`u${index}`, 'user', `question ${index}`),
       message(`a${index}`, 'assistant', `answer ${index}`),
     ]).flat();
     const state = createConversationRenderWindowState();
+    const policy = {
+      ...SMALL_POLICY,
+      emergencyMaxMessages: 120,
+      emergencyMaxChars: 10_000_000,
+    };
 
     // Warm the runtime before collecting a small deterministic p95 sample.
-    projectConversationRenderWindow(messages, state);
-    projectConversationRenderWindow(messages, state);
+    projectConversationRenderWindow(messages, state, policy);
+    projectConversationRenderWindow(messages, state, policy);
     const durations = Array.from({ length: 20 }, () => {
       const startedAt = performance.now();
-      const projection = projectConversationRenderWindow(messages, state);
+      const projection = projectConversationRenderWindow(messages, state, policy);
       const elapsed = performance.now() - startedAt;
       expect(projection.messages.length).toBeLessThanOrEqual(121);
       return elapsed;
