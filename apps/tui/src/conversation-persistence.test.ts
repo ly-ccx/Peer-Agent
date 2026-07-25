@@ -12,6 +12,10 @@ import {
   createDemoChatModel,
   type ChatSnapshot,
 } from './chat-controller.ts';
+import {
+  estimateContextMessagesTokens,
+  microcompactMessagesForContext,
+} from '@peer-agent/runtime-core';
 import type { TuiHost } from './tui-host.ts';
 
 function createStoreRecorder() {
@@ -375,7 +379,6 @@ describe('TUI conversation persistence', () => {
         { role: 'assistant', content: 'remembered' },
       ],
       modelSelection: { providerId: 'provider-b', modelId: 'model-b', reasoningEffort: 'low' },
-      usage: { inputTokens: 27, totalTokens: 27 },
       contextSnapshot: {
         nextRequestInputTokens: 39_000,
         contextWindow: 500_000,
@@ -581,13 +584,23 @@ describe('TUI conversation persistence', () => {
     unsubscribe();
   });
 
-  test('estimates restored context for legacy conversations without per-message usage', () => {
+  test('restores tool-heavy context from canonical history when provider usage is unavailable', () => {
     const stored = {
       id: 'legacy-context',
       mode: 'chat',
       messages: [
-        { id: 'legacy-user', role: 'user', content: '请继续分析这个历史会话' },
-        { id: 'legacy-assistant', role: 'assistant', content: 'Existing context in English.' },
+        { id: 'legacy-user', role: 'user', content: 'continue' },
+        {
+          id: 'legacy-assistant',
+          role: 'assistant',
+          content: 'done',
+          segments: [{
+            type: 'tool-call',
+            tool: 'bash',
+            args: { command: 'inspect' },
+            result: 'tool evidence '.repeat(4_000),
+          }],
+        },
       ],
     };
     const persistence = createTuiConversationPersistence({
@@ -606,9 +619,16 @@ describe('TUI conversation persistence', () => {
     });
 
     const restored = persistence.loadConversation(stored.id);
+    const controller = createChatController({ host: inertHost(), model: createDemoChatModel() });
 
     expect(restored).not.toBeNull();
-    expect(restored?.usage).toEqual({ inputTokens: 34, totalTokens: 34 });
+    expect(restored?.usage).toBeUndefined();
+    if (!restored?.modelMessages) throw new Error('canonical history was not restored');
+    expect(resumeTuiConversation(controller, persistence, restored)).toBe(true);
+    const expectedTokens = estimateContextMessagesTokens(
+      microcompactMessagesForContext(restored.modelMessages).messages,
+    );
+    expect(controller.getSnapshot().nextRequestInputTokens).toBe(expectedTokens);
   });
 
   test('filters the active conversation and ignores missing or corrupt stored sessions', () => {

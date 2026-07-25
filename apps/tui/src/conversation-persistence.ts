@@ -485,26 +485,12 @@ function storedMessage(value: Record<string, unknown>, index: number): ChatMessa
   };
 }
 
-const CJK_REGEX =
-  /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef\uac00-\ud7af]/g;
-
-function estimateTextTokens(text: string): number {
-  const cjkCount = text.match(CJK_REGEX)?.length ?? 0;
-  return Math.ceil(cjkCount / 1.7 + (text.length - cjkCount) / 4);
-}
-
-function restoredContextUsage(
+function restoredProviderUsage(
   messages: readonly ChatMessage[],
 ): NonNullable<ChatSnapshot['usage']> | undefined {
-  const providerUsage = [...messages]
+  return [...messages]
     .reverse()
     .find((message) => message.role === 'assistant' && message.usage)?.usage;
-  if (providerUsage) return providerUsage;
-  const inputTokens = messages.reduce(
-    (total, message) => total + 10 + estimateTextTokens(message.content),
-    0,
-  );
-  return inputTokens > 0 ? { inputTokens, totalTokens: inputTokens } : undefined;
 }
 
 function restoredSelection(value: Record<string, unknown>): RuntimeModelSelection | undefined {
@@ -594,6 +580,7 @@ export function createTuiConversationPersistence(options: {
           .filter((message): message is ChatMessage => Boolean(message));
         if (messages.length === 0) return null;
         const activeContext = activeStoredContext(storedMessages);
+        const providerUsage = restoredProviderUsage(messages);
         const contextSnapshot = stored.contextSnapshot && typeof stored.contextSnapshot === 'object'
           ? stored.contextSnapshot as Record<string, unknown>
           : null;
@@ -612,7 +599,7 @@ export function createTuiConversationPersistence(options: {
             ? { continuityContext: activeContext.continuityContext }
             : {}),
           modelSelection: restoredSelection(stored),
-          usage: restoredContextUsage(messages),
+          ...(providerUsage ? { usage: providerUsage } : {}),
           ...(Number.isFinite(storedTokens)
             && storedTokens >= 0
             && storedModel
