@@ -4,15 +4,12 @@ import {
   handleTerminalTextResponse,
 } from './agent-loop-kernel.mjs';
 import {
-  applyMicrocompaction,
   buildCompactionProviderConfig,
   buildPromptTooLongRecoveryError,
   computeContextInfo,
+  isPromptTooLongResponse,
 } from './compaction-coordinator.mjs';
-import {
-  coordinateDesktopProviderRequest,
-  recoverFromPromptTooLong,
-} from './provider-request-coordinator.mjs';
+import { executeDesktopProviderRequest } from './provider-request-coordinator.mjs';
 import { sanitizeApiMessages } from './message-sanitizer.mjs';
 import * as responseGuard from './response-guard.mjs';
 import {
@@ -61,10 +58,8 @@ export async function agentLoopGemini({
     streamId,
     conversationId,
     onRound: agentProgress?.onRound,
-    // ADR 52：右下角 / done 快照必须投影「下一请求」输入量。
-    // 用当前 Runtime apiMessages（含本轮最终 assistant / tool result + system），
-    // 由 computeContextInfo 做 Layer 1 微压缩投影；不得回退到上一轮 lastSent 切片。
-    // usageSnapshot 仅作诊断校准，不锁死下一请求预算。
+    // ADR 56：provider usage 是显示与压缩的权威输入；messages 投影只在
+    // 尚未获得 provider 观测时保留为兼容诊断。
     getContextInfo: ({ usageSnapshot = null } = {}) => computeContextInfo({
       messages: apiMessages,
       contextWindow,
@@ -82,7 +77,6 @@ export async function agentLoopGemini({
     maxOutputTokens,
     resolvedChannel,
   });
-  let promptTooLongRetryUsed = false;
 
   await runDesktopRuntimePipeline({
     sessionId: conversationId || streamId,
@@ -98,91 +92,61 @@ export async function agentLoopGemini({
     model: {
       initialize: () => ({ provider: 'gemini' }),
       runTurn: async (state) => {
-        const compaction = await coordinateDesktopProviderRequest({
-          messages: apiMessages,
-          systemPrompt: effectiveSystemPrompt,
-          contextWindow,
-          providerConfig,
-          signal,
-          persistCompaction,
-          conversationId,
-          streamId,
-          webContents,
-          continuityContext,
-          tools,
-          preserveLatestUserTurn: true,
-          // usageSnapshot 仅诊断/校准；soft 触发以当前下一请求投影为准。
-          usageSnapshot: loop.getLastTurnUsage?.() ?? null,
-          rebuildSystemPrompt,
-          contextLifecycle: loop.contextLifecycle,
+        const execution = await executeDesktopProviderRequest({
+          request: {
+            messages: apiMessages,
+            systemPrompt: effectiveSystemPrompt,
+            contextWindow,
+            providerConfig,
+            signal,
+            persistCompaction,
+            conversationId,
+            streamId,
+            webContents,
+            continuityContext,
+            tools,
+            preserveLatestUserTurn: true,
+            usageSnapshot: loop.getLastTurnUsage?.() ?? null,
+            rebuildSystemPrompt,
+            contextLifecycle: loop.contextLifecycle,
+          },
+          buildCanonicalRequest: ({ messages: projectedMessages }) => ({
+            model,
+            messages: sanitizeApiMessages(projectedMessages),
+            tools,
+            effort,
+          }),
+          send: (canonicalRequest) => sendGeminiStream({
+            baseUrl,
+            apiKey,
+            endpoint: resolvedChannel?.endpoint,
+            headers: resolvedChannel?.headers,
+            ...canonicalRequest,
+            supportsReasoning: Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning),
+            maxOutputTokens,
+            authMethod: resolvedChannel?.authMethod,
+            projectId: resolvedChannel?.oauthProjectId,
+            userPromptId: streamId || conversationId || undefined,
+            sessionId: conversationId || streamId || undefined,
+            signal,
+            webContents,
+            streamId,
+          }),
         });
-        if (compaction.compacted || compaction.microcompacted) {
-          apiMessages = compaction.messages;
-          if (typeof compaction.systemPrompt === 'string' && compaction.systemPrompt.trim()) {
-            effectiveSystemPrompt = compaction.systemPrompt;
-          }
-          // 语义压缩或静默微压缩后，清掉陈旧 usage，避免压缩前高水位继续锁死显示/触发。
-          loop.clearLastTurnUsage?.();
+        apiMessages = execution.messages;
+        if (typeof execution.systemPrompt === 'string' && execution.systemPrompt.trim()) {
+          effectiveSystemPrompt = execution.systemPrompt;
         }
-
-        // Provider adapter 只接收实际发送切片；完整历史仍由 Desktop Model Adapter 持有。
-        // 下一请求占用由 getContextInfo 基于当前 apiMessages 投影，不缓存 lastSent。
-        const sendMessages = sanitizeApiMessages(applyMicrocompaction(apiMessages).messages);
-        const providerResponse = await sendGeminiStream({
-          baseUrl,
-          apiKey,
-          endpoint: resolvedChannel?.endpoint,
-          headers: resolvedChannel?.headers,
-          model,
-          messages: sendMessages,
-          tools,
-          effort,
-          supportsReasoning: Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning),
-          maxOutputTokens,
-          authMethod: resolvedChannel?.authMethod,
-          projectId: resolvedChannel?.oauthProjectId,
-          userPromptId: streamId || conversationId || undefined,
-          sessionId: conversationId || streamId || undefined,
-          signal,
-          webContents,
-          streamId,
-        });
+        if (execution.compacted) loop.clearLastTurnUsage?.();
+        const providerResponse = execution.response;
 
         if (!providerResponse.ok) {
           const text = providerResponse.errorText || '';
-          // PTL 分类与 emergency 重试策略收敛到共享 helper（同一请求最多重试一次）。
-          const recovery = await recoverFromPromptTooLong({
-            status: providerResponse.status,
-            errorText: text,
-            retryUsed: promptTooLongRetryUsed,
-            request: {
-              messages: apiMessages,
-              systemPrompt: effectiveSystemPrompt,
-              contextWindow,
-              providerConfig,
-              signal,
-              persistCompaction,
-              conversationId,
-              streamId,
-              webContents,
-              continuityContext,
-              tools,
-              preserveLatestUserTurn: true,
-              rebuildSystemPrompt,
-              contextLifecycle: loop.contextLifecycle,
-            },
-          });
-          if (recovery.retried) {
-            apiMessages = recovery.messages;
-            if (recovery.systemPrompt) effectiveSystemPrompt = recovery.systemPrompt;
-            promptTooLongRetryUsed = true;
-            return { kind: 'continue', state };
-          }
-          if (recovery.promptTooLong) {
+          if (isPromptTooLongResponse(providerResponse.status, text)) {
             loop.sendError(buildPromptTooLongRecoveryError({
               text,
               providerTracePath: providerResponse.providerTracePath,
-              retryUsed: promptTooLongRetryUsed,
+              retryUsed: execution.retriedAfterOverflow,
             }));
           } else if (providerResponse.providerError) {
             loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
@@ -191,7 +155,6 @@ export async function agentLoopGemini({
           }
           return { kind: 'completed', state, reason: 'provider_error' };
         }
-        promptTooLongRetryUsed = false;
 
         const { content, thinkingContent, toolCalls, streamUsage } = providerResponse;
         loop.addUsage(streamUsage);

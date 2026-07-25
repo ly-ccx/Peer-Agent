@@ -17,7 +17,7 @@ describe('context pressure', () => {
     expect(estimateTokensFromMessages(cjk)).toBeGreaterThan(estimateTokensFromMessages(english));
   });
 
-  test('keeps next-request input and compaction pressure independent from historical usage', () => {
+  test('uses provider observed usage as the authoritative lower bound', () => {
     const messages: ModelMessage[] = [
       { role: 'user', content: 'hello world' },
       { role: 'assistant', content: 'hi' },
@@ -27,9 +27,9 @@ describe('context pressure', () => {
       usage: { inputTokens: 1, cacheReadTokens: 0 },
       contextWindow: 100_000,
     });
-    expect(lowUsage.nextRequestInputTokens).toBe(lowUsage.estimatedTokens);
-    expect(lowUsage.compactionPressureTokens).toBe(lowUsage.estimatedTokens);
-    expect(lowUsage.nextRequestInputTokens).toBeGreaterThan(1);
+    expect(lowUsage.nextRequestInputTokens).toBe(1);
+    expect(lowUsage.compactionPressureTokens).toBe(1);
+    expect(lowUsage.source).toBe('provider_usage');
 
     const highUsage = computeContextPressure({
       messages,
@@ -37,15 +37,15 @@ describe('context pressure', () => {
       contextWindow: 100_000,
     });
     expect(highUsage.usageTokens).toBe(15_000);
-    expect(highUsage.nextRequestInputTokens).toBe(highUsage.estimatedTokens);
-    expect(highUsage.compactionPressureTokens).toBe(highUsage.estimatedTokens);
-    expect(highUsage.nextRequestInputTokens).toBeLessThan(highUsage.usageTokens);
+    expect(highUsage.nextRequestInputTokens).toBe(highUsage.usageTokens);
+    expect(highUsage.compactionPressureTokens).toBe(highUsage.usageTokens);
+    expect(highUsage.nextRequestInputTokens).toBeGreaterThan(highUsage.estimatedTokens);
   });
 
   test('shouldCompact when pressure reaches 80% of the window', () => {
     const below = computeContextPressure({
       messages: [{ role: 'user', content: 'x'.repeat(315_000) }],
-      usage: { inputTokens: 99_000 },
+      usage: { inputTokens: 79_000 },
       contextWindow: 100_000,
     });
     expect(below.shouldCompact).toBe(false);
@@ -53,7 +53,7 @@ describe('context pressure', () => {
 
     const above = computeContextPressure({
       messages: [{ role: 'user', content: 'x'.repeat(320_000) }],
-      usage: { inputTokens: 1 },
+      usage: { inputTokens: 80_000 },
       contextWindow: 100_000,
     });
     expect(above.shouldCompact).toBe(true);

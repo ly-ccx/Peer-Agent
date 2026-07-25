@@ -2,10 +2,9 @@ import {
   collectToolEvidenceRefs,
   COMPACTION_SUMMARY_PROMPT,
   COMPACTION_SUMMARY_SYSTEM_PROMPT,
-  decideContextCompaction,
-  isPromptTooLongError,
+  compactMessagesWithSummaryStrategy,
+  createContextAccountingCompactionPipeline,
   microcompactMessagesForContext,
-  splitMessagesForCompaction,
   type RuntimeToolDefinition,
 } from '@peer-agent/runtime-core';
 import type {
@@ -218,46 +217,6 @@ async function streamWithSafeRetry(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-/**
- * turn 内确定性结构化压缩(21 号文档 13.2 安全边界:仅在下一次 provider 请求前)。
- * 不在 loop 中嵌套 LLM 摘要调用;切分/摘要/handoff 均复用共享实现。
- * 无可压内容时返回 null,由调用方决定继续/抛错。
- */
-function compactModelMessagesMidTurn(input: {
-  readonly messages: readonly ModelMessage[];
-  readonly tools: readonly ModelToolDefinition[];
-  readonly reason: MidTurnCompaction['reason'];
-}): { readonly messages: readonly ModelMessage[]; readonly record: MidTurnCompaction } | null {
-  const split = splitMessagesForCompaction(input.messages, {
-    keepRecentCount: TUI_COMPACT_KEEP_RECENT,
-    preserveLatestUserTurn: true,
-  });
-  if (split.oldMessages.length === 0) return null;
-  const beforeTokens = computeNextRequestInputTokens({ messages: input.messages, tools: input.tools });
-  const summary = buildStructuralSummary(split.oldMessages as readonly ModelMessage[]);
-  const handoffContent = buildHandoffContent(summary, split.oldMessages.length);
-  const nextMessages: readonly ModelMessage[] = [
-    ...split.systemMessages,
-    { role: 'user', content: handoffContent },
-    ...split.keepMessages,
-  ];
-  return {
-    messages: nextMessages,
-    record: {
-      reason: input.reason,
-      method: 'structured',
-      beforeCount: input.messages.length,
-      afterCount: nextMessages.length,
-      summarizedCount: split.oldMessages.length,
-      beforeTokens,
-      afterTokens: computeNextRequestInputTokens({ messages: nextMessages, tools: input.tools }),
-      summary,
-      handoffContent,
-      retainedUserCount: split.keepMessages.filter((message) => message.role === 'user').length,
-    },
-  };
-}
-
 export function createProviderChatModel(options: CreateProviderChatModelOptions): ChatModelPort {
   const defaultToolDefinitions = options.toolDefinitions ?? [];
   const toolDefinitionsForMode = (mode: TuiRuntimeMode) =>
@@ -328,6 +287,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         ],
         modelMessages,
         toolExecutions: [],
+        ...(input.input.usage ? { usage: input.input.usage } : {}),
         // 供工具结果材料化按会话归档 artifact(跨端共享 ~/.peer-agent/artifacts/<conv>)。
         ...(context.run.conversationId ? { conversationId: context.run.conversationId } : {}),
       };
@@ -340,78 +300,109 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
       const streamId = context.run.streamId ?? 'tui-chat';
       const reasoningEffort = options.getReasoningEffort?.();
       const model = options.getModel?.() ?? options.model;
-      // Same tools-schema estimate as Desktop computeContextBudget / estimateToolsTokens.
       const contextWindowRaw = Number(options.getContextWindow?.());
       const contextWindow = Number.isFinite(contextWindowRaw) && contextWindowRaw > 0
         ? Math.floor(contextWindowRaw)
         : null;
-      const requestProjection = (messages: readonly ModelMessage[]) => ({
-        nextRequestInputTokens: computeNextRequestInputTokens({ messages, tools }),
-        contextWindow,
-        model,
-      });
-
-      // 与 Desktop 同语义的 loop 中途 preflight(21 号文档 13.2):每次 provider 请求前
-      // 按共享阈值判定;越线则先确定性结构化压缩再发送,不盲发超窗请求。
-      // Layer 1(共享 microcompact,与 Desktop 同源):发送切片对历史工具结果证据引用化,
-      // state 保留原文(Desktop apiMessages 同构);resume 重建的大 tool detail 在此收敛。
-      let workingMessages = state.modelMessages;
-      const projectSendMessages = (messages: readonly ModelMessage[]): readonly ModelMessage[] =>
-        microcompactMessagesForContext(messages).messages;
-      let sendMessages = projectSendMessages(workingMessages);
       const midTurnCompactions: MidTurnCompaction[] = [];
-      const preflight = decideContextCompaction({
-        pressureTokens: computeNextRequestInputTokens({ messages: sendMessages, tools }),
+      type PipelineState = Readonly<{ messages: readonly ModelMessage[] }>;
+      type CanonicalRequest = Readonly<{
+        model: string;
+        messages: readonly ModelMessage[];
+        tools: readonly ModelToolDefinition[];
+        reasoningEffort?: ModelReasoningEffort;
+      }>;
+      const accountingPipeline = createContextAccountingCompactionPipeline<
+        PipelineState,
+        CanonicalRequest,
+        Awaited<ReturnType<ModelProvider['stream']>>
+      >({
         contextWindow,
-      });
-      if (preflight.shouldCompact) {
-        const compacted = compactModelMessagesMidTurn({
-          messages: workingMessages,
-          tools,
-          reason: 'preflight',
-        });
-        if (compacted) {
-          workingMessages = compacted.messages;
-          midTurnCompactions.push(compacted.record);
-          sendMessages = projectSendMessages(workingMessages);
-        }
-      }
-
-      const sendOnce = () => streamWithSafeRetry((options.getProvider?.() ?? options.provider), {
-        model,
-        messages: sendMessages,
-        tools,
-        ...(!reasoningEffort || reasoningEffort === 'default' ? {} : { reasoningEffort }),
-        signal: context.signal,
-        onEvent(event) {
-          if (event.type === 'text.delta') {
-            context.emit({ type: 'message.delta', streamId, content: event.content });
+        countCapability: { kind: 'observed_usage_only' },
+        buildRequest(pipelineState) {
+          return {
+            model,
+            messages: microcompactMessagesForContext(pipelineState.messages).messages,
+            tools,
+            ...(!reasoningEffort || reasoningEffort === 'default' ? {} : { reasoningEffort }),
+          };
+        },
+        async compact({ state: pipelineState, reason }) {
+          const beforeTokens = computeNextRequestInputTokens({
+            messages: pipelineState.messages,
+            tools,
+          });
+          const strategy = await compactMessagesWithSummaryStrategy({
+            messages: pipelineState.messages,
+            keepRecentCount: TUI_COMPACT_KEEP_RECENT,
+            preserveLatestUserTurn: true,
+            summarizeStructurally: (messages) =>
+              buildStructuralSummary(messages as readonly ModelMessage[]),
+            buildHandoffContent,
+          });
+          if (!strategy.compacted || !strategy.summary || !strategy.handoffContent) {
+            return { compacted: false, state: pipelineState };
           }
-          if (event.type === 'reasoning.delta') {
-            context.emit({ type: 'reasoning.delta', streamId, content: event.content });
-          }
+          const nextMessages: readonly ModelMessage[] = [
+            ...strategy.systemMessages,
+            { role: 'user', content: strategy.handoffContent },
+            ...strategy.keepMessages,
+          ];
+          midTurnCompactions.push({
+            reason: reason === 'provider_overflow' ? 'emergency' : 'preflight',
+            method: strategy.method ?? 'structured',
+            beforeCount: pipelineState.messages.length,
+            afterCount: nextMessages.length,
+            summarizedCount: strategy.oldMessages.length,
+            beforeTokens,
+            afterTokens: computeNextRequestInputTokens({ messages: nextMessages, tools }),
+            summary: strategy.summary,
+            handoffContent: strategy.handoffContent,
+            retainedUserCount: strategy.keepMessages.filter(
+              (message) => message.role === 'user',
+            ).length,
+          });
+          return { compacted: true, state: { messages: nextMessages } };
+        },
+        send(request) {
+          return streamWithSafeRetry((options.getProvider?.() ?? options.provider), {
+            ...request,
+            signal: context.signal,
+            onEvent(event) {
+              if (event.type === 'text.delta') {
+                context.emit({ type: 'message.delta', streamId, content: event.content });
+              }
+              if (event.type === 'reasoning.delta') {
+                context.emit({ type: 'reasoning.delta', streamId, content: event.content });
+              }
+            },
+          });
+        },
+        getUsage(response) {
+          return response.usage;
         },
       });
-
-      let result;
-      try {
-        result = await sendOnce();
-      } catch (error) {
-        // PTL emergency 与 Desktop 同策略(分类同源 runtime-core,同一请求最多重试一次):
-        // 强制结构化压缩后重发;压不动或非 PTL 错误则原样抛出。
-        const text = error instanceof Error ? error.message : String(error);
-        if (context.signal?.aborted || !isPromptTooLongError(null, text)) throw error;
-        const emergency = compactModelMessagesMidTurn({
-          messages: workingMessages,
-          tools,
-          reason: 'emergency',
-        });
-        if (!emergency) throw error;
-        workingMessages = emergency.messages;
-        midTurnCompactions.push(emergency.record);
-        sendMessages = projectSendMessages(workingMessages);
-        result = await sendOnce();
-      }
+      const accountingResult = await accountingPipeline.execute({
+        state: { messages: state.modelMessages },
+        ...(state.usage
+          ? {
+              lastObservedUsage: {
+                inputTokens: state.usage.inputTokens,
+                cacheReadTokens: state.usage.cacheReadTokens,
+              },
+            }
+          : {}),
+      });
+      const result = accountingResult.response;
+      if (!result) throw new Error('Provider request completed without a response.');
+      const workingMessages = accountingResult.state.messages;
+      const requestProjection = accountingResult.snapshot.authoritativeInputTokens == null
+        ? undefined
+        : {
+            nextRequestInputTokens: accountingResult.snapshot.authoritativeInputTokens,
+            contextWindow,
+            model,
+          };
 
       const accumulatedCompactions = [
         ...(state.midTurnCompactions ?? []),
@@ -438,6 +429,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
             ],
             pendingToolCalls: result.toolCalls,
             usage: result.usage,
+            ...(requestProjection ? { requestProjection } : {}),
             ...(accumulatedCompactions.length > 0
               ? { midTurnCompactions: accumulatedCompactions }
               : {}),
@@ -456,9 +448,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           ...state,
           modelMessages: completedModelMessages,
           usage: result.usage,
-          // 投影用发送口径(Layer 1 后)切片,与 Desktop computeContextInfo 同成分,
-          // 使同一会话两端占用收敛。
-          requestProjection: requestProjection(projectSendMessages(completedModelMessages)),
+          ...(requestProjection ? { requestProjection } : {}),
           ...(accumulatedCompactions.length > 0
             ? { midTurnCompactions: accumulatedCompactions }
             : {}),

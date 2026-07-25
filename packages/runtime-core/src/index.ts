@@ -11,3 +11,4 @@ export * from './context-compaction.ts';
 export * from './microcompact.ts';
 export * from './context-projection.ts';
 export * from './context-projection-lifecycle.ts';
+export * from './context-accounting-pipeline.ts';

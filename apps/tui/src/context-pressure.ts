@@ -24,6 +24,7 @@ export interface ContextPressureInfo {
   readonly usageTokens: number;
   readonly nextRequestInputTokens: number;
   readonly compactionPressureTokens: number;
+  readonly source: 'provider_usage' | 'legacy_estimate';
   readonly contextWindow: number | null;
   readonly triggerRatio: number;
   readonly shouldCompact: boolean;
@@ -91,22 +92,30 @@ export function computeContextPressure(input: {
   });
   const usageTokens =
     safeTokenCount(input.usage?.inputTokens) + safeTokenCount(input.usage?.cacheReadTokens);
+  // ADR 56: once provider usage exists it is the authoritative lower bound for
+  // display and compaction. The legacy estimate is used only until a provider
+  // observation or provider-aligned exact count is available.
+  const authoritativeTokens = usageTokens > 0 ? usageTokens : estimatedTokens;
   const contextWindow = safeTokenCount(input.contextWindow) || null;
+  const hasProviderObservation = usageTokens > 0;
   const decision = decideContextCompaction({
-    pressureTokens: estimatedTokens,
+    // Local estimates remain a compatibility display only. Automatic
+    // compaction is gated exclusively by provider-observed usage.
+    pressureTokens: hasProviderObservation ? usageTokens : null,
     contextWindow,
   });
 
   return {
     estimatedTokens,
     usageTokens,
-    nextRequestInputTokens: estimatedTokens,
-    compactionPressureTokens: estimatedTokens,
+    nextRequestInputTokens: authoritativeTokens,
+    compactionPressureTokens: authoritativeTokens,
+    source: usageTokens > 0 ? 'provider_usage' : 'legacy_estimate',
     contextWindow,
     triggerRatio: decision.triggerRatio,
-    shouldCompact: decision.shouldCompact,
+    shouldCompact: hasProviderObservation && decision.shouldCompact,
     percent: contextWindow == null
       ? null
-      : Math.min(100, Math.round((estimatedTokens / contextWindow) * 100)),
+      : Math.min(100, Math.round((authoritativeTokens / contextWindow) * 100)),
   };
 }

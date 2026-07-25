@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { runCompactionSummaryCascade, splitMessagesForCompaction } from './context-compaction.ts';
+import {
+  compactMessagesWithSummaryStrategy,
+  runCompactionSummaryCascade,
+  splitMessagesForCompaction,
+} from './context-compaction.ts';
 
 test('summary cascade prefers the injected LLM summarizer', async () => {
   const result = await runCompactionSummaryCascade({
@@ -72,4 +76,25 @@ test('automatic split keeps an unfinished tool call in the active tail', () => {
   });
   assert.deepEqual(split.oldMessages, [previous]);
   assert.deepEqual(split.keepMessages, [latestUser, toolUse]);
+});
+
+test('shared summary strategy owns split safety and fallback ordering', async () => {
+  const result = await compactMessagesWithSummaryStrategy({
+    messages: [
+      { role: 'system', content: 'system' },
+      { role: 'user', content: 'old' },
+      { role: 'assistant', content: 'done' },
+      { role: 'user', content: 'latest' },
+    ],
+    preserveLatestUserTurn: true,
+    summarizeWithLlm: async () => 'semantic handoff',
+    summarizeStructurally: () => 'structural handoff',
+    buildHandoffContent: (summary, count) => `${count}:${summary}`,
+  });
+
+  assert.equal(result.compacted, true);
+  assert.equal(result.method, 'llm');
+  assert.equal(result.summary, 'semantic handoff');
+  assert.equal(result.handoffContent, '2:semantic handoff');
+  assert.deepEqual(result.keepMessages, [{ role: 'user', content: 'latest' }]);
 });

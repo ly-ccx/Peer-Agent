@@ -53,7 +53,12 @@ export interface CompactionDecision {
   hardLimit: number | null;
 }
 
-type MessageLike = Readonly<{ role?: string; content?: unknown }>;
+type MessageLike = Readonly<{
+  role?: string;
+  content?: unknown;
+  toolCalls?: readonly unknown[];
+  tool_calls?: readonly unknown[];
+}>;
 type ToolLike = Readonly<Record<string, unknown>>;
 
 const CJK_REGEX =
@@ -117,6 +122,18 @@ export function estimateContextMessagesTokens(messages: readonly MessageLike[] |
     } else if (content != null) {
       tokens += estimateJson(content);
     }
+    const topLevelToolCalls = message.toolCalls ?? message.tool_calls;
+    for (const rawCall of topLevelToolCalls ?? []) {
+      if (!rawCall || typeof rawCall !== 'object') continue;
+      const call = rawCall as Record<string, unknown>;
+      const fn = call.function && typeof call.function === 'object'
+        ? call.function as Record<string, unknown>
+        : call;
+      tokens += CONTEXT_PROJECTION_CONFIG.toolCallBlockOverhead;
+      tokens += estimateContextTextTokens(call.id);
+      tokens += estimateContextTextTokens(fn.name);
+      tokens += estimateJson(fn.arguments ?? fn.input ?? call.arguments ?? call.input);
+    }
     tokens += CONTEXT_PROJECTION_CONFIG.messageFramingTokens;
   }
   return Math.ceil(tokens);
@@ -161,6 +178,7 @@ export function isPromptTooLongError(
     value.includes('prompt_too_long')
     || value.includes('context_length_exceeded')
     || value.includes('maximum context length')
+    || value.includes('maximum prompt length')
     || value.includes('context window')
     || value.includes('context too long')
     || value.includes('input is too long')
@@ -188,9 +206,9 @@ export function decideContextCompaction(options: {
   const hardLimit = Math.floor(contextWindow * hardRatio);
   const reserveLimit = Math.max(1, contextWindow - Math.max(0, options.summaryReserveTokens ?? 0));
   if (pressureTokens > contextWindow) return { shouldCompact: true, force: true, pressure: 'overflow', reason: 'context_overflow', triggerRatio, hardRatio, softLimit, hardLimit };
-  if (pressureTokens > hardLimit) return { shouldCompact: true, force: true, pressure: 'hard', reason: 'hard_limit', triggerRatio, hardRatio, softLimit, hardLimit };
-  if (pressureTokens > reserveLimit) return { shouldCompact: true, force: false, pressure: 'soft', reason: 'insufficient_summary_headroom', triggerRatio, hardRatio, softLimit, hardLimit };
-  if (pressureTokens > softLimit) return { shouldCompact: true, force: false, pressure: 'soft', reason: 'soft_limit', triggerRatio, hardRatio, softLimit, hardLimit };
+  if (pressureTokens >= hardLimit) return { shouldCompact: true, force: true, pressure: 'hard', reason: 'hard_limit', triggerRatio, hardRatio, softLimit, hardLimit };
+  if (pressureTokens >= reserveLimit) return { shouldCompact: true, force: false, pressure: 'soft', reason: 'insufficient_summary_headroom', triggerRatio, hardRatio, softLimit, hardLimit };
+  if (pressureTokens >= softLimit) return { shouldCompact: true, force: false, pressure: 'soft', reason: 'soft_limit', triggerRatio, hardRatio, softLimit, hardLimit };
   return { shouldCompact: false, force: false, pressure: 'ok', reason: 'below_threshold', triggerRatio, hardRatio, softLimit, hardLimit };
 }
 
@@ -207,18 +225,24 @@ export function projectContext(options: {
   now?: number;
 }): ContextProjection {
   const contextWindow = finitePositive(options.contextWindow);
-  const nextRequestInputTokens = estimateContextMessagesTokens(options.messages)
+  const projectedInputTokens = estimateContextMessagesTokens(options.messages)
     + estimateContextToolsTokens(options.tools)
     + (finitePositive(options.draftTokens) ?? 0);
+  const currentInputTokens = finitePositive(options.currentInputTokens);
+  // Provider-observed usage is authoritative. The local projection remains a
+  // diagnostic fallback only until an observation exists.
+  const nextRequestInputTokens = currentInputTokens ?? projectedInputTokens;
   const previewInputTokens = finitePositive(options.previewInputTokens);
   const compactionPressureTokens = previewInputTokens ?? nextRequestInputTokens;
   const decision = decideContextCompaction({ pressureTokens: compactionPressureTokens, contextWindow });
   return {
     version: 1,
     phase: options.phase,
-    quality: options.quality ?? (options.phase === 'stream_preview' ? 'preview' : 'projected'),
+    quality:
+      options.quality
+      ?? (options.phase === 'stream_preview' ? 'preview' : currentInputTokens ? 'exact' : 'projected'),
     reason: options.reason ?? decision.reason,
-    currentInputTokens: finitePositive(options.currentInputTokens),
+    currentInputTokens,
     nextRequestInputTokens,
     previewInputTokens,
     compactionPressureTokens,

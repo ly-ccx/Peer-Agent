@@ -79,7 +79,26 @@ describe('chat compaction coordinator', () => {
     assert.equal(isPromptTooLongResponse(400, 'context window exceeded'), true);
     assert.equal(isPromptTooLongResponse(400, 'input is too long for this model'), true);
     assert.equal(isPromptTooLongResponse(400, 'exceeds model context window'), true);
+    assert.equal(
+      isPromptTooLongResponse(
+        400,
+        'This model maximum prompt length is 500000 but the request contains 501244 tokens.',
+      ),
+      true,
+    );
     assert.equal(isPromptTooLongResponse(500, 'temporary outage'), false);
+  });
+
+  it('never lets a low estimate override 498K provider-observed input', () => {
+    const budget = computeContextBudget({
+      messages: [{ role: 'user', content: 'tiny local projection' }],
+      contextWindow: 500_000,
+      usageSnapshot: { inputTokens: 498_138, cacheReadTokens: 0 },
+    });
+
+    assert.equal(budget.contextTokens, 498_138);
+    assert.equal(budget.usageTokens, 498_138);
+    assert.equal(budget.shouldCompact, true);
   });
 
   it('builds explicit prompt-too-long recovery errors', () => {
@@ -339,8 +358,8 @@ describe('computeContextInfo（进度条用量与压缩触发口径单一来源�
   it('compactionSuggested 用与 shouldCompact 完全相同的 triggerRatio 阈值线', () => {
     const tokens = estimateTokensFromMessages(messages);
     const ratio = COMPACTION_CONFIG.triggerRatio;
-    // 阈值线正下方（未越线）：不建议压缩。+1 是为了避开恰好相等的边界。
-    const windowBelow = Math.ceil(tokens / ratio) + 1;
+    // 阈值线正下方（未达到）：不建议压缩。阈值本身按 >= 触发。
+    const windowBelow = Math.ceil((tokens + 1) / ratio);
     // 阈值线正上方（已越线）：建议压缩。
     const windowAbove = Math.floor(tokens / ratio) - 1;
     assert.equal(computeContextInfo({ messages, contextWindow: windowBelow }).compactionSuggested, false);
@@ -430,7 +449,7 @@ describe.skip('ADR 42 旧双口径行为（由 ADR 52 统一投影取代）', ()
   // 现行行为见下方 "ADR 52 next-request projection"。
 });
 
-describe('ADR 52 next-request projection', () => {
+describe('ADR 56 provider-observed context accounting', () => {
   // 本地构造一段「完整会话量很大」的消息（含多条大 tool 结果），用于对比两种数据口径。
   function buildBigConversation() {
     const big = 'x'.repeat(8000);
@@ -461,16 +480,14 @@ describe('ADR 52 next-request projection', () => {
     assert.equal(contextTokensFromUsageSnapshot({ outputTokens: 999 }), null, '仅 output 不算上下文');
   });
 
-  it('usage 快照只回填 lastActual，不锁死 nextRequest 分子', () => {
+  it('usage 快照是权威分子，不允许本地估算覆盖', () => {
     const full = buildBigConversation();
     const usageSnapshot = { inputTokens: 800, outputTokens: 100, cacheWriteTokens: 0, cacheReadTokens: 200 };
     const info = computeContextInfo({ messages: full, contextWindow: 200_000, usageSnapshot });
-    const projected = computeContextInfo({ messages: full, contextWindow: 200_000 });
-
-    // ADR 52：分子始终是下一请求投影（messages + tools schema），usage 仅诊断。
-    assert.equal(info.nextRequestInputTokens, projected.nextRequestInputTokens, 'usage 不得改写 nextRequest 分子');
+    assert.equal(info.nextRequestInputTokens, 1000, 'provider usage 必须成为权威分子');
     assert.equal(info.lastActualInputTokens, 1000, 'lastActual = input + cacheRead');
-    assert.equal(info.compactionSuggested, projected.compactionSuggested, '触发建议只看投影预算');
+    assert.equal(info.contextSource, 'provider_usage');
+    assert.equal(info.pendingUncountedChanges, false);
   });
 
   it('displayMessages 作为下一请求投影切片时，分子采用该切片而不是完整历史', () => {
@@ -495,7 +512,7 @@ describe('ADR 52 next-request projection', () => {
     );
   });
 
-  it('压缩触发判定：下一请求投影越 soft 线时建议压缩，usage 小值不能压掉建议', () => {
+  it('有 provider usage 时不再让本地估算制造第二套触发事实', () => {
     const full = buildBigConversation();
     const projected = computeContextInfo({ messages: full, contextWindow: 200_000 });
     const ratio = COMPACTION_CONFIG.triggerRatio;
@@ -505,13 +522,12 @@ describe('ADR 52 next-request projection', () => {
       contextWindow: windowAbove,
       usageSnapshot: { inputTokens: 500, cacheReadTokens: 0 },
     });
-    assert.equal(info.nextRequestInputTokens, projected.nextRequestInputTokens, 'usage 小值不得改写分子');
-    assert.equal(info.compactionSuggested, true, '投影已越 soft 线时仍建议压缩');
-    assert.equal(info.lastActualInputTokens, 500, 'usage 只进 lastActual');
+    assert.equal(info.nextRequestInputTokens, 500, 'provider usage 是唯一权威数值');
+    assert.equal(info.compactionSuggested, false, '未精确计量的新内容不能伪装成估算触发');
+    assert.equal(info.lastActualInputTokens, 500);
   });
 
-  it('usage 高水位不得单独抬高 nextRequest 或 soft 触发', () => {
-    // 本地估算偏低、usage 已接近满窗时，仍只按下一请求投影计分子与触发。
+  it('usage 高水位必须抬高上下文并触发压缩', () => {
     const messages = [
       { role: 'system', content: 'sys' },
       { role: 'user', content: 'short' },
@@ -528,17 +544,17 @@ describe('ADR 52 next-request projection', () => {
     const budget = computeContextBudget({ messages, contextWindow, usageSnapshot });
     assert.equal(budget.estimatedTokens, estimated);
     assert.equal(budget.usageTokens, usageTokens);
-    assert.equal(budget.contextTokens, estimated, '预算分子只看投影估算，不取 usage 高水位');
-    assert.equal(budget.overSoftLimit, false);
-    assert.equal(budget.shouldCompact, false);
+    assert.equal(budget.contextTokens, usageTokens, '预算分子必须采用 provider usage');
+    assert.equal(budget.overSoftLimit, true);
+    assert.equal(budget.shouldCompact, true);
 
     const info = computeContextInfo({ messages, contextWindow, usageSnapshot });
-    assert.equal(info.nextRequestInputTokens, estimated, '进度条分子 = 投影估算');
-    assert.equal(info.lastActualInputTokens, usageTokens, 'usage 仅诊断');
-    assert.equal(info.compactionSuggested, false, 'usage 高水位不得单独建议压缩');
+    assert.equal(info.nextRequestInputTokens, usageTokens, '进度条分子 = provider usage');
+    assert.equal(info.lastActualInputTokens, usageTokens);
+    assert.equal(info.compactionSuggested, true, 'usage 高水位必须建议压缩');
   });
 
-  it('runCompactionCheck 在 usage 高水位但投影未超 soft 时不触发压缩', async () => {
+  it('runCompactionCheck 在 usage 高水位时触发压缩', async () => {
     const messages = [
       { role: 'system', content: 'sys' },
       { role: 'user', content: 'u'.repeat(200) },
@@ -569,11 +585,11 @@ describe('ADR 52 next-request projection', () => {
         },
       },
     });
-    assert.equal(result.compacted, false, '投影未越 soft 线时不得因 usage 触发压缩');
+    assert.equal(result.compacted, true, 'provider usage 越线时必须压缩');
     assert.equal(
       events.some((e) => e.channel === 'chat:compaction' && e.payload.stage === 'start'),
-      false,
-      '不应发出压缩 start 横幅',
+      true,
+      '应发出压缩 start 横幅',
     );
   });
 

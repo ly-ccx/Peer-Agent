@@ -203,3 +203,63 @@ export async function runCompactionSummaryCascade<TMessage extends CompactionMes
     fallbackDetail,
   };
 }
+
+export type CompactionStrategyResult<TMessage extends CompactionMessage> = Readonly<{
+  compacted: boolean;
+  systemMessages: readonly TMessage[];
+  keepMessages: readonly TMessage[];
+  oldMessages: readonly TMessage[];
+  summary?: string;
+  handoffContent?: string;
+  method?: CompactionSummaryResult['method'];
+  fallbackReason?: CompactionSummaryResult['fallbackReason'];
+  fallbackDetail?: string;
+}>;
+
+/**
+ * Shared strategy boundary used by both Desktop and CLI/TUI. Hosts provide the
+ * LLM/structural summarizers and handoff formatting, while split safety and
+ * fallback ordering remain owned by runtime-core.
+ */
+export async function compactMessagesWithSummaryStrategy<TMessage extends CompactionMessage>(
+  options: Readonly<{
+    messages: readonly TMessage[];
+    preserveLatestUserTurn?: boolean;
+    keepRecentCount?: number;
+    summarizeWithLlm?: (oldMessages: readonly TMessage[]) => Promise<string | null | undefined>;
+    summarizeStructurally: (oldMessages: readonly TMessage[]) => string | null | undefined;
+    buildHandoffContent: (summary: string, oldCount: number) => string;
+    fallbackSummary?: string;
+  }>,
+): Promise<CompactionStrategyResult<TMessage>> {
+  const split = splitMessagesForCompaction(options.messages, {
+    preserveLatestUserTurn: options.preserveLatestUserTurn,
+    keepRecentCount: options.keepRecentCount,
+  });
+  if (split.oldMessages.length === 0) {
+    return {
+      compacted: false,
+      systemMessages: split.systemMessages,
+      keepMessages: split.keepMessages,
+      oldMessages: split.oldMessages,
+    };
+  }
+  const cascade = await runCompactionSummaryCascade({
+    oldMessages: split.oldMessages,
+    summarizeWithLlm: options.summarizeWithLlm,
+    summarizeStructurally: options.summarizeStructurally,
+    fallbackSummary: options.fallbackSummary,
+  });
+  const summary = cascade.summary.trim();
+  return {
+    compacted: true,
+    systemMessages: split.systemMessages,
+    keepMessages: split.keepMessages,
+    oldMessages: split.oldMessages,
+    summary,
+    handoffContent: options.buildHandoffContent(summary, split.oldMessages.length),
+    method: cascade.method,
+    fallbackReason: cascade.fallbackReason,
+    fallbackDetail: cascade.fallbackDetail,
+  };
+}

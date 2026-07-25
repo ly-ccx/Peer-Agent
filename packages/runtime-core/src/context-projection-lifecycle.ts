@@ -59,7 +59,12 @@ export function createContextProjectionLifecycle(
       currentInputTokens: input.currentInputTokens ?? stableInput.currentInputTokens,
       previewInputTokens,
       phase,
-      quality: phase === 'stream_preview' ? 'preview' : 'projected',
+      quality:
+        phase === 'stream_preview'
+          ? 'preview'
+          : (input.currentInputTokens ?? stableInput.currentInputTokens) != null
+            ? 'exact'
+            : 'projected',
       reason: input.reason ?? phase,
       now: input.now,
     });

@@ -1517,7 +1517,7 @@ describe('chat controller', () => {
     ]));
   });
 
-  test('publishes next-request input separately from historical usage', async () => {
+  test('publishes provider-observed input as the authoritative context value', async () => {
     const model: ChatModelPort = {
       initialize: (input) => initialState(input.input),
       async runTurn(state) {
@@ -1541,8 +1541,7 @@ describe('chat controller', () => {
     await controller.send('hello pressure');
     const snapshot = controller.getSnapshot();
     expect(snapshot.usage?.inputTokens).toBe(1_200);
-    expect(snapshot.nextRequestInputTokens).toBeGreaterThan(0);
-    expect(snapshot.nextRequestInputTokens).toBeLessThan(1_500);
+    expect(snapshot.nextRequestInputTokens).toBe(1_500);
     expect(snapshot.compactionPressureTokens).toBe(snapshot.nextRequestInputTokens);
   });
 

@@ -6,10 +6,11 @@ import {
   decideContextCompaction,
   estimateContextMessagesTokens,
   estimateContextToolsTokens,
+  isPromptTooLongError,
   projectContext,
 } from './context-projection.ts';
 
-test('projects one next-request value from messages, tools and draft', () => {
+test('provider-observed input is never replaced by a lower local projection', () => {
   const messages = [
     { role: 'user', content: 'hello' },
     { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'read', input: { path: '/tmp/a' } }] },
@@ -19,16 +20,16 @@ test('projects one next-request value from messages, tools and draft', () => {
     messages,
     tools,
     draftTokens: 9,
-    currentInputTokens: 120,
+    currentInputTokens: 498_138,
     contextWindow: 1_000,
     phase: 'request_preflight',
     now: 42,
   });
   assert.equal(projection.version, 1);
   assert.equal(projection.updatedAt, 42);
-  assert.equal(projection.nextRequestInputTokens, estimateContextMessagesTokens(messages) + estimateContextToolsTokens(tools) + 9);
+  assert.equal(projection.nextRequestInputTokens, 498_138);
   assert.equal(projection.compactionPressureTokens, projection.nextRequestInputTokens);
-  assert.equal(projection.quality, 'projected');
+  assert.equal(projection.quality, 'exact');
 });
 
 test('stream preview changes display pressure without changing the request projection', () => {
@@ -78,4 +79,29 @@ test('CJK, image and tool blocks are accounted consistently', () => {
     ],
   }]);
   assert.ok(rich > plain + 2_000);
+});
+
+test('top-level assistant toolCalls arguments are never omitted from message accounting', () => {
+  const small = estimateContextMessagesTokens([{
+    role: 'assistant',
+    content: '',
+    toolCalls: [{ id: 'call-1', name: 'local.bash', arguments: { command: 'x' } }],
+  }]);
+  const large = estimateContextMessagesTokens([{
+    role: 'assistant',
+    content: '',
+    toolCalls: [{ id: 'call-1', name: 'local.bash', arguments: { command: 'x'.repeat(400_000) } }],
+  }]);
+
+  assert.ok(large > small + 90_000);
+});
+
+test('recognizes Grok maximum prompt length overflow evidence', () => {
+  assert.equal(
+    isPromptTooLongError(
+      400,
+      "This model's maximum prompt length is 500000 but the request contains 501244 tokens.",
+    ),
+    true,
+  );
 });

@@ -7,12 +7,10 @@ import {
   buildCompactionProviderConfig,
   buildPromptTooLongRecoveryError,
   computeContextInfo,
+  isPromptTooLongResponse,
 } from './compaction-coordinator.mjs';
 import { sanitizeApiMessages } from './message-sanitizer.mjs';
-import {
-  coordinateDesktopProviderRequest,
-  recoverFromPromptTooLong,
-} from './provider-request-coordinator.mjs';
+import { executeDesktopProviderRequest } from './provider-request-coordinator.mjs';
 import * as responseGuard from './response-guard.mjs';
 import {
   createDesktopAbortError,
@@ -91,15 +89,15 @@ export async function agentLoopQoder({
     streamId,
     conversationId,
     onRound: agentProgress?.onRound,
-    getContextInfo: () => computeContextInfo({
+    getContextInfo: ({ usageSnapshot = null } = {}) => computeContextInfo({
       messages: apiMessages,
       contextWindow,
       tools,
+      usageSnapshot,
     }),
     // per-turn 投影生命周期的稳定输入：tool_result / turn_complete 边界取当前 Runtime 会话。
     getProjectionInput: () => ({ messages: apiMessages, tools, contextWindow }),
   });
-  let promptTooLongRetryUsed = false;
 
   await runDesktopRuntimePipeline({
     sessionId: conversationId || streamId,
@@ -115,79 +113,58 @@ export async function agentLoopQoder({
     model: {
       initialize: () => ({ provider: 'qoder-private' }),
       runTurn: async (state) => {
-        const coordinated = await coordinateDesktopProviderRequest({
-          messages: apiMessages,
-          systemPrompt,
-          contextWindow,
-          providerConfig,
-          signal,
-          persistCompaction,
-          conversationId,
-          streamId,
-          webContents,
-          continuityContext,
-          tools,
-          preserveLatestUserTurn: true,
-          usageSnapshot: loop.getLastTurnUsage?.() ?? null,
-          rebuildSystemPrompt,
-          contextLifecycle: loop.contextLifecycle,
+        const execution = await executeDesktopProviderRequest({
+          request: {
+            messages: apiMessages,
+            systemPrompt,
+            contextWindow,
+            providerConfig,
+            signal,
+            persistCompaction,
+            conversationId,
+            streamId,
+            webContents,
+            continuityContext,
+            tools,
+            preserveLatestUserTurn: true,
+            usageSnapshot: loop.getLastTurnUsage?.() ?? null,
+            rebuildSystemPrompt,
+            contextLifecycle: loop.contextLifecycle,
+          },
+          buildCanonicalRequest: ({ messages: projectedMessages }) => ({
+            model,
+            messages: sanitizeApiMessages(projectedMessages),
+            tools,
+            maxOutputTokens,
+            modelOptions,
+            modelOptionValues,
+          }),
+          send: (canonicalRequest) => sendStream({
+            baseUrl,
+            apiKey,
+            endpoint: resolvedChannel?.endpoint,
+            ...canonicalRequest,
+            signal,
+            webContents,
+            streamId,
+            bufferThinkingDeltas: false,
+            emitBufferedThinkingDeltas: true,
+            streamIdleTimeoutMs: QODER_STREAM_IDLE_TIMEOUT_MS,
+          }),
         });
-        apiMessages = coordinated.messages;
-        if (coordinated.compacted) loop.clearLastTurnUsage?.();
-        const providerResponse = await sendStream({
-          baseUrl,
-          apiKey,
-          endpoint: resolvedChannel?.endpoint,
-          model,
-          messages: sanitizeApiMessages(apiMessages),
-          tools,
-          maxOutputTokens,
-          modelOptions,
-          modelOptionValues,
-          signal,
-          webContents,
-          streamId,
-          bufferThinkingDeltas: false,
-          emitBufferedThinkingDeltas: true,
-          streamIdleTimeoutMs: QODER_STREAM_IDLE_TIMEOUT_MS,
-        });
+        apiMessages = execution.messages;
+        if (execution.compacted) loop.clearLastTurnUsage?.();
+        const providerResponse = execution.response;
 
         if (signal?.aborted) throw makeAbortError();
         loop.addUsage(providerResponse.streamUsage);
         if (!providerResponse.ok) {
           const errorText = providerResponse.errorText || '';
-          // PTL 分类与 emergency 重试策略与其他 loop 同源(同一请求最多重试一次)。
-          const recovery = await recoverFromPromptTooLong({
-            status: providerResponse.status,
-            errorText,
-            retryUsed: promptTooLongRetryUsed,
-            request: {
-              messages: apiMessages,
-              systemPrompt,
-              contextWindow,
-              providerConfig,
-              signal,
-              persistCompaction,
-              conversationId,
-              streamId,
-              webContents,
-              continuityContext,
-              tools,
-              preserveLatestUserTurn: true,
-              rebuildSystemPrompt,
-              contextLifecycle: loop.contextLifecycle,
-            },
-          });
-          if (recovery.retried) {
-            apiMessages = recovery.messages;
-            promptTooLongRetryUsed = true;
-            return { kind: 'continue', state };
-          }
-          if (recovery.promptTooLong) {
+          if (isPromptTooLongResponse(providerResponse.status, errorText)) {
             loop.sendError(buildPromptTooLongRecoveryError({
               text: errorText,
               providerTracePath: providerResponse.providerTracePath,
-              retryUsed: promptTooLongRetryUsed,
+              retryUsed: execution.retriedAfterOverflow,
             }));
           } else if (providerResponse.providerError) {
             loop.sendError(`${errorText || 'qoder_private_error'}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
@@ -196,7 +173,6 @@ export async function agentLoopQoder({
           }
           return { kind: 'completed', state, reason: 'provider_error' };
         }
-        promptTooLongRetryUsed = false;
 
         const content = providerResponse.content || '';
         const thinkingContent = providerResponse.thinkingContent || '';

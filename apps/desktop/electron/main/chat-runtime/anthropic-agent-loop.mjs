@@ -4,15 +4,12 @@ import {
   handleTerminalTextResponse,
 } from './agent-loop-kernel.mjs';
 import {
-  applyMicrocompaction,
   buildCompactionProviderConfig,
   buildPromptTooLongRecoveryError,
   computeContextInfo,
+  isPromptTooLongResponse,
 } from './compaction-coordinator.mjs';
-import {
-  coordinateDesktopProviderRequest,
-  recoverFromPromptTooLong,
-} from './provider-request-coordinator.mjs';
+import { executeDesktopProviderRequest } from './provider-request-coordinator.mjs';
 import { sanitizeApiMessages } from './message-sanitizer.mjs';
 import * as responseGuard from './response-guard.mjs';
 import {
@@ -67,11 +64,8 @@ export async function agentLoopAnthropic({
     streamId,
     conversationId,
     onRound: agentProgress?.onRound,
-    // ADR 52：右下角 / done 快照必须投影「下一请求」输入量。
-    // Anthropic 路径 system 与 messages 分离，投影时补上当前 effectiveSystem；
-    // 用当前 Runtime apiMessages（含本轮最终 assistant / tool result），
-    // 由 computeContextInfo 做 Layer 1 微压缩投影；不得回退到上一轮 lastSent 切片。
-    // usageSnapshot 仅作诊断校准，不锁死下一请求预算。
+    // ADR 56：Anthropic usage（含独立 cache-read）是权威输入；
+    // system + messages 投影只保留为尚无观测时的兼容诊断。
     getContextInfo: ({ usageSnapshot = null } = {}) => computeContextInfo({
       messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
       contextWindow,
@@ -94,7 +88,6 @@ export async function agentLoopAnthropic({
     resolvedChannel,
   });
   let effectiveSupportsReasoning = Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning);
-  let promptTooLongRetryUsed = false;
 
   await runDesktopRuntimePipeline({
     sessionId: conversationId || streamId,
@@ -110,100 +103,67 @@ export async function agentLoopAnthropic({
     model: {
       initialize: () => ({ provider: 'anthropic' }),
       runTurn: async (state) => {
-        const compaction = await coordinateDesktopProviderRequest({
-          messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
-          systemPrompt: effectiveSystem,
-          contextWindow,
-          providerConfig,
-          signal,
-          persistCompaction,
-          conversationId,
-          streamId,
-          webContents,
-          continuityContext,
-          tools,
-          preserveLatestUserTurn: true,
-          // usageSnapshot 仅诊断/校准；soft 触发以当前下一请求投影为准。
-          usageSnapshot: loop.getLastTurnUsage?.() ?? null,
-          rebuildSystemPrompt,
-          contextLifecycle: loop.contextLifecycle,
+        const execution = await executeDesktopProviderRequest({
+          request: {
+            messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
+            systemPrompt: effectiveSystem,
+            contextWindow,
+            providerConfig,
+            signal,
+            persistCompaction,
+            conversationId,
+            streamId,
+            webContents,
+            continuityContext,
+            tools,
+            preserveLatestUserTurn: true,
+            usageSnapshot: loop.getLastTurnUsage?.() ?? null,
+            rebuildSystemPrompt,
+            contextLifecycle: loop.contextLifecycle,
+          },
+          buildCanonicalRequest: ({ messages: projectedMessages, systemPrompt: projectedSystem }) => ({
+            model,
+            system: projectedSystem,
+            messages: sanitizeApiMessages(
+              projectedMessages.filter((message) => message.role !== 'system'),
+            ),
+            tools,
+            effort,
+          }),
+          send: (canonicalRequest) => sendAnthropicMessagesStream({
+              baseUrl,
+              apiKey,
+              endpoint: resolvedChannel?.endpoint,
+              headers: resolvedChannel?.headers,
+              ...canonicalRequest,
+              supportsReasoning: effectiveSupportsReasoning,
+              reasoningParamStyle: resolvedChannel?.reasoningParamStyle,
+              reasoningEffortMap: resolvedChannel?.reasoningEffortMap,
+              promptCaching: resolvedChannel?.supportsPromptCaching ?? supportsPromptCaching,
+              maxOutputTokens,
+              signal,
+              webContents,
+              streamId,
+            }),
         });
-        if (compaction.compacted || compaction.microcompacted) {
-          if (typeof compaction.systemPrompt === 'string' && compaction.systemPrompt.trim()) {
-            effectiveSystemPrompt = compaction.systemPrompt;
-          }
-          effectiveSystem = compaction.messages
-            .filter((message) => message.role === 'system')
-            .map((message) => message.content)
-            .join('\n\n') || effectiveSystemPrompt;
-          apiMessages = compaction.messages.filter((message) => message.role !== 'system');
-          // 语义压缩或静默微压缩后，清掉陈旧 usage，避免压缩前高水位继续锁死显示/触发。
-          loop.clearLastTurnUsage?.();
+        if (typeof execution.systemPrompt === 'string' && execution.systemPrompt.trim()) {
+          effectiveSystemPrompt = execution.systemPrompt;
         }
-
-        // Provider adapter 只接收实际发送切片；完整历史仍由 Desktop Model Adapter 持有。
-        // 下一请求占用由 getContextInfo 基于当前 apiMessages + system 投影，不缓存 lastSent。
-        const sendMessages = sanitizeApiMessages(applyMicrocompaction(apiMessages).messages);
-        const providerResponse = await sendAnthropicMessagesStream({
-          baseUrl,
-          apiKey,
-          endpoint: resolvedChannel?.endpoint,
-          headers: resolvedChannel?.headers,
-          model,
-          system: effectiveSystem,
-          messages: sendMessages,
-          tools,
-          effort,
-          supportsReasoning: effectiveSupportsReasoning,
-          reasoningParamStyle: resolvedChannel?.reasoningParamStyle,
-          reasoningEffortMap: resolvedChannel?.reasoningEffortMap,
-          promptCaching: resolvedChannel?.supportsPromptCaching ?? supportsPromptCaching,
-          maxOutputTokens,
-          signal,
-          webContents,
-          streamId,
-        });
+        effectiveSystem = execution.messages
+          .filter((message) => message.role === 'system')
+          .map((message) => message.content)
+          .join('\n\n') || effectiveSystemPrompt;
+        apiMessages = execution.messages.filter((message) => message.role !== 'system');
+        if (execution.compacted) loop.clearLastTurnUsage?.();
+        const providerResponse = execution.response;
 
         if (!providerResponse.ok) {
           const text = providerResponse.errorText || '';
-          // PTL 分类与 emergency 重试策略收敛到共享 helper（同一请求最多重试一次）。
-          // Anthropic 路径 system/messages 分离：投入时拼 system，恢复时再拆回。
-          const recovery = await recoverFromPromptTooLong({
-            status: providerResponse.status,
-            errorText: text,
-            retryUsed: promptTooLongRetryUsed,
-            request: {
-              messages: [{ role: 'system', content: effectiveSystem }, ...apiMessages],
-              systemPrompt: effectiveSystem,
-              contextWindow,
-              providerConfig,
-              signal,
-              persistCompaction,
-              conversationId,
-              streamId,
-              webContents,
-              continuityContext,
-              tools,
-              preserveLatestUserTurn: true,
-              rebuildSystemPrompt,
-              contextLifecycle: loop.contextLifecycle,
-            },
-          });
-          if (recovery.retried) {
-            if (recovery.systemPrompt) effectiveSystemPrompt = recovery.systemPrompt;
-            effectiveSystem = recovery.messages
-              .filter((message) => message.role === 'system')
-              .map((message) => message.content)
-              .join('\n\n') || effectiveSystemPrompt;
-            apiMessages = recovery.messages.filter((message) => message.role !== 'system');
-            promptTooLongRetryUsed = true;
-            return { kind: 'continue', state };
-          }
-          if (recovery.promptTooLong) {
+          if (isPromptTooLongResponse(providerResponse.status, text)) {
             loop.sendError(buildPromptTooLongRecoveryError({
               text,
               providerTracePath: providerResponse.providerTracePath,
-              retryUsed: promptTooLongRetryUsed,
+              retryUsed: execution.retriedAfterOverflow,
             }));
           } else if (providerResponse.providerError) {
             loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
@@ -212,7 +172,6 @@ export async function agentLoopAnthropic({
           }
           return { kind: 'completed', state, reason: 'provider_error' };
         }
-        promptTooLongRetryUsed = false;
 
         const {
           textContent,

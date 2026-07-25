@@ -76,7 +76,15 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     const provider: ModelProvider = {
       async stream(request) {
         requests.push(request);
-        return completed('done');
+        return {
+          ...completed('done'),
+          usage: {
+            inputTokens: Math.ceil(
+              estimateTokensFromMessages(request.messages)
+              + estimateTextTokens(JSON.stringify(request.tools ?? [])),
+            ),
+          },
+        };
       },
     };
     const controller = createChatController({
@@ -107,7 +115,36 @@ describe('OpenAI-compatible TUI chat adapter', () => {
       estimateTokensFromMessages(requests[1]!.messages)
       + estimateTextTokens(JSON.stringify(requests[1]!.tools ?? [])),
     );
-    expect(finalSnapshot.requestProjection?.nextRequestInputTokens).toBeGreaterThan(sentRequestTokens);
+    expect(finalSnapshot.requestProjection?.nextRequestInputTokens).toBe(sentRequestTokens);
+  });
+
+  test('compacts before the next send when provider usage observed 498K input', async () => {
+    const requests: ModelProviderRequest[] = [];
+    const provider: ModelProvider = {
+      async stream(request) {
+        requests.push(request);
+        return {
+          ...completed(`done-${requests.length}`),
+          usage: { inputTokens: requests.length === 1 ? 498_138 : 2_000 },
+        };
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({
+        provider,
+        model: 'grok-4.5',
+        getContextWindow: () => 500_000,
+      }),
+    });
+
+    await controller.send('first');
+    await controller.send('second');
+
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.messages).toHaveLength(2);
+    expect(String(requests[1]?.messages[0]?.content)).toContain('[Context handoff');
+    expect(requests[1]?.messages[1]?.content).toBe('second');
   });
 
   test('routes each turn through the provider selected at turn start', async () => {

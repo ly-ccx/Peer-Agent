@@ -1,8 +1,11 @@
-import { createContextProjectionLifecycle } from '@peer-agent/runtime-core';
+import {
+  createContextAccountingCompactionPipeline,
+  createContextProjectionLifecycle,
+  parseContextOverflowEvidence,
+} from '@peer-agent/runtime-core';
 import {
   applyMicrocompaction,
   computeContextInfo,
-  isPromptTooLongResponse,
   runCompactionCheck,
 } from './compaction-coordinator.mjs';
 
@@ -98,42 +101,116 @@ export async function coordinateDesktopProviderRequest({
 }
 
 /**
- * 统一的 prompt-too-long 分类 + emergency 压缩重试策略（同一请求最多重试一次）。
- * 各 provider loop 在 providerResponse 失败时调用，不再各自复制分类与 emergency 块；
- * loop 只负责把返回的压缩后 messages/systemPrompt 映射回自身形态。
+ * Desktop provider 请求的共享执行入口。
  *
- * 返回：
- * - { promptTooLong: false }                          —— 非 PTL 错误，loop 走自己的错误分支；
- * - { promptTooLong: true, retried: false }           —— PTL 但不可重试（已重试过 / 压不动）；
- * - { promptTooLong: true, retried: true, messages, systemPrompt } —— 已 emergency 压缩，应 continue 重试。
+ * runtime-core 拥有 build -> count/observe -> decide -> compact -> rebuild ->
+ * send -> observe -> overflow retry 的状态机；这里仅适配 Desktop 的消息形态、
+ * compactor 与 provider transport。
  */
-export async function recoverFromPromptTooLong({
-  status,
-  errorText,
-  retryUsed = false,
+export async function executeDesktopProviderRequest({
   request,
+  send,
+  compactRequest = coordinateDesktopProviderRequest,
+  getUsage = (response) => response?.streamUsage ?? null,
+  buildCanonicalRequest = ({ messages, systemPrompt, tools, model }) => ({
+    messages,
+    systemPrompt,
+    tools,
+    model,
+  }),
 }) {
-  if (!isPromptTooLongResponse(status, errorText)) {
-    return { promptTooLong: false, retried: false };
-  }
-  if (retryUsed) {
-    return { promptTooLong: true, retried: false };
-  }
-  const emergencyCompaction = await coordinateDesktopProviderRequest({
-    ...request,
-    emergency: true,
-    force: true,
+  const sourceMessages = Array.isArray(request?.messages) ? request.messages : [];
+  const sourceSystemPrompt = typeof request?.systemPrompt === 'string'
+    ? request.systemPrompt
+    : '';
+  const pipeline = createContextAccountingCompactionPipeline({
+    contextWindow: request?.contextWindow,
+    countCapability: { kind: 'observed_usage_only' },
+    buildRequest(state) {
+      const projectedMessages = applyMicrocompaction(state.messages, { log: () => {} }).messages;
+      return buildCanonicalRequest({
+        messages: projectedMessages,
+        systemPrompt: state.systemPrompt,
+        tools: request?.tools ?? null,
+        model: request?.providerConfig?.model ?? null,
+      });
+    },
+    async compact({ state, reason, emergency }) {
+      const result = await compactRequest({
+        ...request,
+        messages: state.messages,
+        systemPrompt: state.systemPrompt,
+        usageSnapshot: null,
+        force: true,
+        emergency: emergency || reason === 'provider_overflow',
+        // The shared pipeline publishes the external lifecycle once after the
+        // canonical request has been rebuilt; suppress the legacy coordinator's
+        // duplicate lifecycle emission inside the strategy adapter.
+        contextLifecycle: null,
+      });
+      if (!result?.compacted) return { compacted: false, state };
+      return {
+        compacted: true,
+        state: {
+          messages: Array.isArray(result.messages) ? result.messages : state.messages,
+          systemPrompt:
+            typeof result.systemPrompt === 'string' && result.systemPrompt.trim()
+              ? result.systemPrompt
+              : state.systemPrompt,
+        },
+      };
+    },
+    send,
+    getUsage,
+    getOverflow(response) {
+      if (response?.ok !== false) return null;
+      return parseContextOverflowEvidence({
+        status: response.status,
+        errorText: response.errorText ?? '',
+      });
+    },
   });
-  if (!emergencyCompaction.compacted) {
-    return { promptTooLong: true, retried: false };
-  }
-  return {
-    promptTooLong: true,
-    retried: true,
-    messages: emergencyCompaction.messages,
-    systemPrompt:
-      typeof emergencyCompaction.systemPrompt === 'string' && emergencyCompaction.systemPrompt.trim()
-        ? emergencyCompaction.systemPrompt
-        : null,
+  const accounting = await pipeline.execute({
+    state: {
+      messages: sourceMessages,
+      systemPrompt: sourceSystemPrompt,
+    },
+    ...(request?.usageSnapshot ? { lastObservedUsage: request.usageSnapshot } : {}),
+  });
+  const finalMessages = accounting.state.messages;
+  const projectedMessages = accounting.request.messages;
+  const contextInfo = computeContextInfo({
+    messages: finalMessages,
+    displayMessages: projectedMessages,
+    contextWindow: request?.contextWindow,
+    tools: request?.tools,
+    usageSnapshot: getUsage(accounting.response),
+  });
+  const lifecycle = request?.contextLifecycle ?? createContextProjectionLifecycle();
+  const projectionInput = {
+    messages: projectedMessages,
+    tools: request?.tools,
+    contextWindow: request?.contextWindow,
+    currentInputTokens: accounting.snapshot.authoritativeInputTokens,
   };
+  if (accounting.compacted) {
+    lifecycle.postCompaction({ ...projectionInput, reason: 'post_compaction' });
+  }
+  const projection = lifecycle.requestPreflight({
+    ...projectionInput,
+    reason: accounting.retriedAfterOverflow
+      ? 'post_overflow_retry'
+      : accounting.compacted
+        ? 'post_compaction_request_preflight'
+        : 'request_preflight',
+  });
+  return Object.freeze({
+    ...accounting,
+    response: accounting.response,
+    messages: finalMessages,
+    systemPrompt: accounting.state.systemPrompt,
+    projectedMessages,
+    contextInfo,
+    projection,
+  });
 }

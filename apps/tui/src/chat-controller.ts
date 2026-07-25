@@ -1,9 +1,8 @@
 import type { ModelMessage, ModelToolCall, ModelUsage } from '@peer-agent/runtime-node';
 import {
+  compactMessagesWithSummaryStrategy,
   formatCompactionMessagesForSummary,
   microcompactMessagesForContext,
-  runCompactionSummaryCascade,
-  splitMessagesForCompaction,
   type CompactionMethod,
 } from '@peer-agent/runtime-core';
 import {
@@ -148,6 +147,8 @@ export interface ChatModelInput {
   readonly images?: readonly ChatMessageImage[];
   readonly history: readonly ChatMessage[];
   readonly modelMessages: readonly ModelMessage[];
+  /** Last provider-observed usage, carried into the next request accounting epoch. */
+  readonly usage?: ModelUsage;
   readonly systemContextBlocks?: readonly ChatSystemContextBlock[];
   readonly turnId: string;
   readonly turnIndex: number;
@@ -603,13 +604,30 @@ export function createChatController(options: {
 
     publishProgress(12);
     await sleep(25);
-    const split = splitMessagesForCompaction(conversationModelMessages, {
-      // 与 Desktop 同语义(23 号治理文档不变式 4):
-      // 手动 /compact = 真·全量压缩(keep 0);自动 = 保留最新真人 user turn + 近期窗口。
+    publishProgress(48);
+    const previousContinuity = conversationContinuityContext?.trim();
+    const strategy = await compactMessagesWithSummaryStrategy({
+      messages: conversationModelMessages,
       keepRecentCount: opts.source === 'auto' ? TUI_COMPACT_KEEP_RECENT : 0,
       preserveLatestUserTurn: opts.source === 'auto',
+      summarizeWithLlm: options.model.summarizeCompaction
+        ? (oldMessages) => options.model.summarizeCompaction!({
+            messages: oldMessages as readonly ModelMessage[],
+            formattedHistory: formatCompactionMessagesForSummary(oldMessages),
+            onProgress: (percent) => publishProgress(
+              Math.max(28, Math.min(76, Math.round(28 + (percent * 0.48)))),
+            ),
+          })
+        : undefined,
+      summarizeStructurally: (oldMessages) => [
+        previousContinuity,
+        buildStructuralSummary(oldMessages as readonly ModelMessage[]),
+      ].filter(Boolean).join('\n\n'),
+      buildHandoffContent,
+      fallbackSummary:
+        previousContinuity || 'Earlier conversation was removed because no safe summary could be produced.',
     });
-    if (split.oldMessages.length === 0) {
+    if (!strategy.compacted) {
       const result = {
         compacted: false,
         beforeCount,
@@ -638,35 +656,20 @@ export function createChatController(options: {
       };
     }
 
-    publishProgress(48);
-    const previousContinuity = conversationContinuityContext?.trim();
-    const structuralSummary = buildStructuralSummary(split.oldMessages as readonly ModelMessage[]);
-    const cascade = await runCompactionSummaryCascade({
-      oldMessages: split.oldMessages as readonly ModelMessage[],
-      summarizeWithLlm: options.model.summarizeCompaction
-        ? () => options.model.summarizeCompaction!({
-            messages: split.oldMessages as readonly ModelMessage[],
-            formattedHistory: formatCompactionMessagesForSummary(split.oldMessages),
-            onProgress: (percent) => publishProgress(Math.max(28, Math.min(76, Math.round(28 + (percent * 0.48))))),
-          })
-        : undefined,
-      summarizeStructurally: () => [previousContinuity, structuralSummary].filter(Boolean).join('\n\n'),
-      fallbackSummary: previousContinuity || 'Earlier conversation was removed because no safe summary could be produced.',
-    });
     publishProgress(78);
     await sleep(25);
-    const summary = cascade.summary.trim();
-    const handoffContent = buildHandoffContent(summary, split.oldMessages.length);
+    const summary = strategy.summary!.trim();
+    const handoffContent = strategy.handoffContent!;
     const result = {
       compacted: true,
-      messages: [...split.systemMessages, ...split.keepMessages] as readonly ModelMessage[],
+      messages: [...strategy.systemMessages, ...strategy.keepMessages] as readonly ModelMessage[],
       beforeCount,
-      afterCount: split.systemMessages.length + split.keepMessages.length,
-      summarizedCount: split.oldMessages.length,
+      afterCount: strategy.systemMessages.length + strategy.keepMessages.length,
+      summarizedCount: strategy.oldMessages.length,
       summary,
       handoffContent,
-      method: cascade.method,
-      retainedUserCount: split.keepMessages.filter((message) => message.role === 'user').length,
+      method: strategy.method!,
+      retainedUserCount: strategy.keepMessages.filter((message) => message.role === 'user').length,
     } as const;
     const previousProjection = snapshot.requestProjection;
     const previousMessageTokens = estimateTokensFromMessages(conversationModelMessages);
@@ -1091,6 +1094,7 @@ export function createChatController(options: {
               ...(images.length > 0 ? { images } : {}),
               history,
               modelMessages: conversationModelMessages,
+              ...(snapshot.usage ? { usage: snapshot.usage } : {}),
               ...(conversationContinuityContext
                 ? {
                     systemContextBlocks: [{

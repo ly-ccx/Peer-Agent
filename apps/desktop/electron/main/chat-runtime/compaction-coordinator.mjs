@@ -86,14 +86,14 @@ export function computeContextBudget({
   providerConfig = null,
   maxOutputTokens = null,
 }) {
-  // ADR 52：预算只统计下一次最终请求投影。调用方负责传入经过 provider 清洗与
-  // microcompaction 后会真正发送的 messages；tools schema 也属于每次请求输入。
-  // 上一次 provider usage 仅保留为诊断/校准信息，不得把下一请求预算锁在历史高水位。
+  // ADR 56：provider observed usage 一旦存在，就成为显示和压缩判断的权威下界。
+  // legacy estimate 仅在尚未取得 provider usage / exact count 的迁移期回退使用。
   const estimatedTokens =
     estimateTokensFromMessages(Array.isArray(messages) ? messages : []) +
     estimateToolsTokens(tools);
   const usageTokens = contextTokensFromUsageSnapshot(usageSnapshot);
-  const contextTokens = estimatedTokens;
+  const contextTokens = usageTokens ?? estimatedTokens;
+  const contextSource = usageTokens != null ? 'provider_usage' : 'legacy_estimate';
   const normalizedWindow = Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null;
   const triggerRatio = COMPACTION_CONFIG.triggerRatio;
   const hardRatio = Math.max(triggerRatio, COMPACTION_CONFIG.hardRatio);
@@ -121,10 +121,10 @@ export function computeContextBudget({
   const hardLimit = normalizedWindow != null ? Math.floor(normalizedWindow * hardRatio) : null;
   // 剩余空间不足摘要输出/安全区时，即使未越过 soft 线也建议压缩。
   const summaryHeadroomLimit = effectiveWindow;
-  const overSoftLimit = softLimit != null && contextTokens > softLimit;
+  const overSoftLimit = softLimit != null && contextTokens >= softLimit;
   const overSummaryHeadroom =
-    summaryHeadroomLimit != null && contextTokens > summaryHeadroomLimit;
-  const overHardLimit = hardLimit != null && contextTokens > hardLimit;
+    summaryHeadroomLimit != null && contextTokens >= summaryHeadroomLimit;
+  const overHardLimit = hardLimit != null && contextTokens >= hardLimit;
   const overContextWindow = normalizedWindow != null && contextTokens > normalizedWindow;
   const force = overHardLimit || overContextWindow;
   const emergency = force;
@@ -141,6 +141,7 @@ export function computeContextBudget({
     contextTokens,
     estimatedTokens,
     usageTokens,
+    contextSource,
     contextWindow: normalizedWindow,
     effectiveContextWindow: effectiveWindow,
     triggerRatio,
@@ -218,7 +219,7 @@ export async function rehydrateSystemPromptAfterCompaction({
 // 从 provider 真实 usage 快照折算「上一请求实测输入」。
 // 取「最后一轮请求」的 input + cacheRead（不含 output）。
 // ⚠️ 必须是「最后一轮快照」而非跨轮累加值（kernel.usage 是 lifetime 累加，用于计费 ledger）。
-// ADR 52：该值仅作 lastActualInputTokens 诊断/校准，不得锁死下一请求占用分子。
+// ADR 56：该值是 provider 已观测请求的权威输入，不得被本地估算覆盖。
 export function contextTokensFromUsageSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return null;
   const input = Number(snapshot.inputTokens) || 0;
@@ -227,10 +228,11 @@ export function contextTokensFromUsageSnapshot(snapshot) {
   return total > 0 ? total : null;
 }
 
-// ADR 52 统一口径：
-// - nextRequestInputTokens：下一次最终请求预计输入 = 投影 messages + tools schema。
+// ADR 56 迁移口径：
+// - provider usage 可用时，它是当前上下文与压缩判断的权威下界。
+// - 无 usage/exact count 时暂时回退 legacy projection，并显式标记来源。
 // - displayMessages（可选）：调用方已持有的「下一请求投影」切片；不是上一轮 lastSent。
-// - usageSnapshot：仅回填 lastActualInputTokens 诊断字段，不参与占用分子。
+// - usageSnapshot：同时回填 lastActualInputTokens，并参与占用分子与压缩判断。
 // - compactionSuggested：基于同一投影预算的 soft 线判断。
 // - contextWindow：分母，与触发判定同一 normalizedWindow。
 export function computeContextInfo({
@@ -246,7 +248,7 @@ export function computeContextInfo({
   // ADR 52：先形成下一次最终请求投影。
   // - 默认：对当前 messages 应用共享 Layer 1 microcompaction。
   // - 若调用方已持有下一请求投影（如压缩后的 effectiveMessages），经 displayMessages 传入，避免重复微压缩。
-  // usageSnapshot 仅作诊断/校准，不锁死下一请求预算。
+  // usageSnapshot 是 provider 实测；有值时不能被较低的 legacy projection 覆盖。
   const projectedMessages = Array.isArray(displayMessages)
     ? displayMessages
     : applyMicrocompaction(Array.isArray(messages) ? messages : [], { log: () => {} }).messages;
@@ -258,13 +260,14 @@ export function computeContextInfo({
   });
 
   return {
-    // ADR 52：下一次最终请求预计输入是唯一上下文占用口径。
+    // ADR 56：provider 实测优先；legacy projection 只作为尚无实测时的迁移回退。
     nextRequestInputTokens: budget.contextTokens,
     contextWindow: budget.contextWindow,
     triggerRatio: budget.triggerRatio,
     compactionSuggested: budget.overSoftLimit,
-    // 上一次 provider 实测只用于诊断，不参与当前占用或压缩判断。
     lastActualInputTokens: contextTokensFromUsageSnapshot(usageSnapshot),
+    contextSource: budget.contextSource,
+    pendingUncountedChanges: budget.contextSource !== 'provider_usage',
   };
 }
 
@@ -344,7 +347,13 @@ export async function runCompactionCheck({
     usageSnapshot,
     providerConfig,
   });
-  force = Boolean(force || budget.force);
+  // Provider 实测越过 soft 线时必须强制进入 Layer 2；否则 compactIfNeeded 会用
+  // 较低的 legacy estimate 重新判定并把这次权威触发吞掉。
+  force = Boolean(
+    force
+    || budget.force
+    || (budget.contextSource === 'provider_usage' && budget.shouldCompact),
+  );
   emergency = Boolean(emergency || budget.emergency);
 
   // 压缩时机诊断:在唯一入口打印触发判定的全部输入,便于定位"何时/因何压缩"。
@@ -441,8 +450,8 @@ export async function runCompactionCheck({
       conversationId,
       tools,
       preserveLatestUserTurn,
-      // ADR 52：不把 usage 高水位传给 Layer2 触发；触发只看投影预算。
-      usageTokens: null,
+      // Provider usage 已在 coordinator 单点决策并转成 force；Layer2 不再二次解释。
+      usageTokens: budget.usageTokens,
     });
 
     if (compactResult.compacted) {
