@@ -53,6 +53,26 @@ describe('image chips', () => {
     expect(chipifyImagePathsInText(once)).toBe('[Image a.png] hello');
   });
 
+
+  test('never extracts path tokens from chip labels', () => {
+    const chipped = '[Image ...41-F4C365D4.png] 看图';
+    expect(extractImagePathTokens(chipped)).toEqual([]);
+    expect(chipifyImagePathsInText(chipped)).toBe(chipped);
+  });
+
+  test('flattens nested image chips instead of leaving broken tokens', () => {
+    const nested = '[Image [Image ...41-F4C365D4.png]] 有个诉求';
+    expect(chipifyImagePathsInText(nested)).toBe('[Image ...41-F4C365D4.png] 有个诉求');
+  });
+
+  test('compacts a full-path chip into a short label without nesting', () => {
+    const fullPathChip = '[Image /var/folders/x/otty-paste/very-long-prefix-41-F4C365D4.png]';
+    // Long absolute labels are normalized so soft-wrap cannot split them mid-path.
+    expect(chipifyImagePathsInText(fullPathChip)).toBe('[Image ...41-F4C365D4.png]');
+    expect(extractImagePathTokens(fullPathChip)).toEqual([]);
+  });
+
+
   test('expands chips back to absolute paths via registry', () => {
     const full = '/var/folders/x/otty-paste/4617829306.png';
     const registry = new Map<string, string>();
