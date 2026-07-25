@@ -34,6 +34,8 @@ import { composerLayoutModel } from './composer-layout-model.ts';
 import { compactWorkspacePath, createComposerStatus, type ComposerStatus } from './composer-status.ts';
 import {
   createChatController,
+  formatCompactingStatusLabel,
+  latestCompactProgressPercent,
   type ChatController,
   type ChatMessage,
   type ChatModelPort,
@@ -194,20 +196,27 @@ function ComposerRunningStatusLabel({
   locale,
   runStatus,
   width,
+  compactPercent,
 }: {
   readonly locale: TuiLocale;
   readonly runStatus: 'running' | 'cancelling' | 'compacting';
   readonly width: number;
+  readonly compactPercent?: number;
 }) {
   const frame = useStatusAnimationFrame(true, THINKING_SPINNER_INTERVAL_MS);
   const startedAtRef = useRef(Date.now());
   const activity = runningActivityField(frame, width);
   const elapsed = formatRunningElapsed(Date.now() - startedAtRef.current);
   // Scheme D: generic running is activity + elapsed only. Real exceptional
-  // states (cancel/compact) keep a stable label for semantic clarity.
+  // states keep a label; compacting also shows live percent + progress bar.
   const statusLabel = runStatus === 'running'
     ? `· ${elapsed}`
-    : `${composerRunningStatusLabel(locale, runStatus)} · ${elapsed}`;
+    : runStatus === 'compacting'
+      ? `${formatCompactingStatusLabel({
+          label: composerRunningStatusLabel(locale, runStatus),
+          percent: compactPercent,
+        })} · ${elapsed}`
+      : `${composerRunningStatusLabel(locale, runStatus)} · ${elapsed}`;
   return (
     <ComposerRunningStatusBar
       activity={activity}
@@ -936,6 +945,11 @@ function ComposerDock({
           locale={locale}
           runStatus={snapshot.status === 'cancelling' ? 'cancelling' : snapshot.status === 'compacting' ? 'compacting' : 'running'}
           width={dividerWidth}
+          compactPercent={
+            snapshot.status === 'compacting'
+              ? latestCompactProgressPercent(snapshot.messages)
+              : undefined
+          }
         />
       ) : null}
       <ComposerModeDivider width={dividerWidth} />

@@ -259,7 +259,10 @@ describe('TUI app layout', () => {
     expect(runningLabelSource).toContain('runningActivityField(frame, width)');
     expect(runningLabelSource).toContain('Date.now() - startedAtRef.current');
     expect(runningLabelSource).toContain('composerRunningStatusLabel(locale, runStatus)');
+    expect(runningLabelSource).toContain('formatCompactingStatusLabel');
+    expect(runningLabelSource).toContain('compactPercent');
     expect(dockSource).toContain("snapshot.status === 'compacting' ? 'compacting'");
+    expect(dockSource).toContain('latestCompactProgressPercent(snapshot.messages)');
     expect(runningLabelSource).toContain("'compacting'");
     expect(runningLabelSource).not.toContain('composerEscToCancelHint');
     expect(runningLabelSource).not.toContain('cancelHint');
@@ -777,6 +780,13 @@ describe('TUI Ask user option selection', () => {
 });
 
 describe('TUI compact progress and separator rendering', () => {
+  test('ComposerRunningStatusLabel surfaces live compact percent + bar while compacting', () => {
+    expect(appSource).toContain('formatCompactingStatusLabel');
+    expect(appSource).toContain('latestCompactProgressPercent(snapshot.messages)');
+    expect(appSource).toContain('compactPercent');
+    expect(appSource).toContain("runStatus === 'compacting'");
+  });
+
   test('ChatHistory keeps progress visible and collapses completed handoffs to the desktop summary', () => {
     expect(appSource).toContain("if (message.role === 'system')");
     expect(appSource).toContain("phase === 'progress' ? 'COMPACTING' : 'COMPACTED'");

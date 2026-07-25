@@ -1,5 +1,6 @@
 import type { ModelMessage, ModelToolCall, ModelUsage } from '@peer-agent/runtime-node';
 import {
+  COMPACTION_PROGRESS_CONFIG,
   compactMessagesWithSummaryStrategy,
   formatCompactionMessagesForSummary,
   microcompactMessagesForContext,
@@ -447,6 +448,35 @@ export function renderCompactProgressBar(percent: number, width = 16): string {
   return `[${'█'.repeat(filled)}${'░'.repeat(width - filled)}]`;
 }
 
+/** Latest in-flight compact progress percent from UI messages, if any. */
+export function latestCompactProgressPercent(
+  messages: readonly ChatMessage[],
+): number | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== 'system' || message.compact?.phase !== 'progress') continue;
+    const percent = message.compact.percent;
+    if (typeof percent === 'number' && Number.isFinite(percent)) {
+      return Math.max(0, Math.min(100, Math.round(percent)));
+    }
+  }
+  return undefined;
+}
+
+/** Status-line text for compacting: label + bar + percent. */
+export function formatCompactingStatusLabel(input: {
+  readonly label: string;
+  readonly percent?: number;
+  readonly barWidth?: number;
+}): string {
+  const base = input.label.trim() || 'Compacting';
+  if (typeof input.percent !== 'number' || !Number.isFinite(input.percent)) {
+    return base;
+  }
+  const percent = Math.max(0, Math.min(100, Math.round(input.percent)));
+  return `${base} ${renderCompactProgressBar(percent, input.barWidth ?? 16)} ${percent}%`;
+}
+
 export function createChatController(options: {
   readonly host: TuiHost;
   readonly model: ChatModelPort;
@@ -602,9 +632,10 @@ export function createChatController(options: {
       }));
     };
 
-    publishProgress(12);
+    // Soft stage floors before stream tokens arrive; live percent uses received/estimated.
+    publishProgress(COMPACTION_PROGRESS_CONFIG.stageStartedPercent);
     await sleep(25);
-    publishProgress(48);
+    publishProgress(COMPACTION_PROGRESS_CONFIG.stagePreparedPercent);
     const previousContinuity = conversationContinuityContext?.trim();
     const strategy = await compactMessagesWithSummaryStrategy({
       messages: conversationModelMessages,
@@ -614,9 +645,8 @@ export function createChatController(options: {
         ? (oldMessages) => options.model.summarizeCompaction!({
             messages: oldMessages as readonly ModelMessage[],
             formattedHistory: formatCompactionMessagesForSummary(oldMessages),
-            onProgress: (percent) => publishProgress(
-              Math.max(28, Math.min(76, Math.round(28 + (percent * 0.48)))),
-            ),
+            // Percent is already estimateCompactionProgressPercent from runtime-core.
+            onProgress: (percent) => publishProgress(percent),
           })
         : undefined,
       summarizeStructurally: (oldMessages) => [
@@ -656,7 +686,7 @@ export function createChatController(options: {
       };
     }
 
-    publishProgress(78);
+    publishProgress(COMPACTION_PROGRESS_CONFIG.stagePostProcessPercent);
     await sleep(25);
     const summary = strategy.summary!.trim();
     const handoffContent = strategy.handoffContent!;

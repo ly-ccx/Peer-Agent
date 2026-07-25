@@ -4,6 +4,9 @@ import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
 
 import {
   createChatController,
+  formatCompactingStatusLabel,
+  latestCompactProgressPercent,
+  renderCompactProgressBar,
   type ChatModelPort,
   type ChatModelState,
   type ChatSystemContextBlock,
@@ -1661,11 +1664,21 @@ describe('chat controller', () => {
 
     const statuses: string[] = [];
     const progressPercents: number[] = [];
+    const progressContents: string[] = [];
+    const dockLabels: string[] = [];
     const unsubscribe = controller.subscribe((snapshot) => {
       statuses.push(snapshot.status);
+      const latestPercent = latestCompactProgressPercent(snapshot.messages);
+      if (snapshot.status === 'compacting' && typeof latestPercent === 'number') {
+        dockLabels.push(formatCompactingStatusLabel({
+          label: '压缩中…',
+          percent: latestPercent,
+        }));
+      }
       for (const message of snapshot.messages) {
         if (message.compact?.phase === 'progress' && typeof message.compact.percent === 'number') {
           progressPercents.push(message.compact.percent);
+          if (typeof message.content === 'string') progressContents.push(message.content);
         }
       }
     });
@@ -1674,9 +1687,12 @@ describe('chat controller', () => {
     unsubscribe();
 
     expect(statuses).toContain('compacting');
-    expect(progressPercents).toContain(12);
-    expect(progressPercents).toContain(48);
-    expect(progressPercents).toContain(78);
+    // Soft stage floors from COMPACTION_PROGRESS_CONFIG (no LLM stream in this structural path).
+    expect(progressPercents).toContain(8);
+    expect(progressPercents).toContain(15);
+    expect(progressPercents).toContain(99);
+    expect(progressContents.some((content) => content.includes(renderCompactProgressBar(15)))).toBe(true);
+    expect(dockLabels.some((label) => label.includes(renderCompactProgressBar(15)) && label.includes('15%'))).toBe(true);
     expect(controller.getSnapshot().status).toBe('idle');
     expect(
       controller.getSnapshot().messages.some((message) =>
@@ -1685,5 +1701,57 @@ describe('chat controller', () => {
         && message.content.includes('Auto-compacted'),
       ),
     ).toBe(true);
+  });
+});
+
+
+describe('compact progress presentation helpers', () => {
+  test('renderCompactProgressBar clamps and fills by percent', () => {
+    expect(renderCompactProgressBar(0, 10)).toBe('[░░░░░░░░░░]');
+    expect(renderCompactProgressBar(50, 10)).toBe('[█████░░░░░]');
+    expect(renderCompactProgressBar(100, 10)).toBe('[██████████]');
+    expect(renderCompactProgressBar(150, 4)).toBe('[████]');
+  });
+
+  test('latestCompactProgressPercent reads the newest progress frame only', () => {
+    expect(latestCompactProgressPercent([])).toBeUndefined();
+    expect(
+      latestCompactProgressPercent([
+        {
+          id: 'done',
+          role: 'system',
+          content: 'done',
+          compact: { phase: 'done', percent: 100 },
+        },
+      ]),
+    ).toBeUndefined();
+    expect(
+      latestCompactProgressPercent([
+        {
+          id: 'p1',
+          role: 'system',
+          content: 'a',
+          compact: { phase: 'progress', percent: 12 },
+        },
+        {
+          id: 'user',
+          role: 'user',
+          content: 'hi',
+        },
+        {
+          id: 'p2',
+          role: 'system',
+          content: 'b',
+          compact: { phase: 'progress', percent: 78 },
+        },
+      ]),
+    ).toBe(78);
+  });
+
+  test('formatCompactingStatusLabel includes bar + percent when available', () => {
+    expect(formatCompactingStatusLabel({ label: '压缩中…' })).toBe('压缩中…');
+    expect(formatCompactingStatusLabel({ label: '压缩中…', percent: 48 })).toBe(
+      `压缩中… ${renderCompactProgressBar(48)} 48%`,
+    );
   });
 });

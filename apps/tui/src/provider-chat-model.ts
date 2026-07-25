@@ -1,10 +1,13 @@
 import {
   collectToolEvidenceRefs,
+  COMPACTION_PROGRESS_CONFIG,
   COMPACTION_SUMMARY_PROMPT,
   COMPACTION_SUMMARY_SYSTEM_PROMPT,
   compactMessagesWithSummaryStrategy,
   createContextAccountingCompactionPipeline,
+  estimateCompactionProgressPercent,
   microcompactMessagesForContext,
+  resolveMaxSummaryChars,
   type RuntimeToolDefinition,
 } from '@peer-agent/runtime-core';
 import type {
@@ -236,6 +239,18 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
     },
     async summarizeCompaction(input) {
       let streamedChars = 0;
+      const inputChars = input.formattedHistory.length;
+      const maxSummaryChars = resolveMaxSummaryChars({ maxOutputTokens: 4096 });
+      const reportLiveProgress = () => {
+        input.onProgress?.(
+          estimateCompactionProgressPercent({
+            inputChars,
+            maxSummaryChars,
+            receivedChars: streamedChars,
+            minPercent: COMPACTION_PROGRESS_CONFIG.stagePreparedPercent,
+          }),
+        );
+      };
       const result = await streamWithSafeRetry((options.getProvider?.() ?? options.provider), {
         model: options.getModel?.() ?? options.model,
         messages: [
@@ -249,10 +264,12 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         onEvent(event) {
           if (event.type !== 'text.delta') return;
           streamedChars += event.content.length;
-          input.onProgress?.(Math.min(95, 10 + Math.floor(streamedChars / 80)));
+          // Shared Desktop/CLI progress: received/estimated summary chars.
+          reportLiveProgress();
         },
       });
-      input.onProgress?.(100);
+      // Live stream never reports 100; controller post-process + done own the finish.
+      reportLiveProgress();
       return result.content;
     },
     initialize(input, context) {

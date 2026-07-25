@@ -7,12 +7,14 @@
  */
 
 import {
+  COMPACTION_PROGRESS_CONFIG,
   COMPACTION_SUMMARY_PROMPT as COMPACT_PROMPT,
   COMPACTION_SUMMARY_SYSTEM_PROMPT as SUMMARY_SYSTEM_PROMPT,
   CONTEXT_PROJECTION_CONFIG,
   estimateContextMessagesTokens,
   estimateContextTextTokens,
   estimateContextToolsTokens,
+  estimateSummaryChars as estimateSummaryCharsCore,
   extractRecoverableClues,
   formatCompactionMessagesForSummary,
   microcompactMessagesForContext,
@@ -36,12 +38,9 @@ const COMPACTION_CONFIG = {
   summaryTemperature: 0.2,
   maxPtlRetries: 3,
   circuitBreakerThreshold: 3,
-  // ── 进度估算（进度条分母）──
-  // 摘要产出长度 ≈ 输入对话长度 × 压缩比。经验值：语义摘要约把原文压到 ~12%。
-  // 用它而非「模型最大输出容量(maxOutputTokens*4)」作分母，避免进度收尾约 30% 即跳满。
-  summaryCompressionRatio: 0.12,
-  // 估算下限，避免极短对话时分母过小导致进度瞬间满。
-  minEstimatedSummaryChars: 1_200,
+  // 进度估算真值在 runtime-core/compaction-progress；Desktop 只 re-export 兼容字段。
+  summaryCompressionRatio: COMPACTION_PROGRESS_CONFIG.summaryCompressionRatio,
+  minEstimatedSummaryChars: COMPACTION_PROGRESS_CONFIG.minEstimatedSummaryChars,
   // 摘要生成默认输出预算；provider 未配置 maxOutputTokens 时回退到此值。
   defaultSummaryMaxTokens: 12_000,
   // 自动压缩触发时预留给「摘要输出」的 token，避免窗口顶满后摘要请求自身失败。
@@ -320,45 +319,11 @@ async function readSseStream(res, onData) {
 }
 
 /**
- * 估算压缩摘要的产出字符数，用作进度条分母。
- *
- * 设计目标：让进度平稳爬升、结尾跳变很小（而不是收尾约 30% 即跳满）。
- * - 基准 = 输入对话字符数 × 压缩比（summaryCompressionRatio）。
- * - 夹逼到 [minEstimatedSummaryChars, maxSummaryChars]，其中 maxSummaryChars
- *   为模型最大输出容量（maxOutputTokens*4），保证不会超过物理上限。
- * - 动态扩张：当真实接收量 receivedChars 已逼近/超过估计值时，把分母抬到
- *   receivedChars 之上（×expandFactor），保证 percent 单调不回退、且在 done
- *   之前不会提前到 100%。
- *
- * @param {object} params
- * @param {number} params.inputChars 摘要输入（旧消息文本）字符数
- * @param {number} params.maxSummaryChars 物理上限 = summaryMaxTokens * charsPerToken
- * @param {number} [params.receivedChars=0] 已流式接收的摘要字符数
- * @returns {number} 估计的摘要总字符数（分母），恒为正整数
+ * Desktop wrapper around runtime-core estimateSummaryChars (single progress source).
+ * Kept as a local export so existing Desktop tests/call sites stay stable.
  */
 function estimateSummaryChars({ inputChars, maxSummaryChars, receivedChars = 0 }) {
-  const safeInput = Number.isFinite(inputChars) && inputChars > 0 ? inputChars : 0;
-  const minChars = COMPACTION_CONFIG.minEstimatedSummaryChars;
-  // 物理上限兜底：异常入参时退回到一个合理的正数上限。
-  const upperBound =
-    Number.isFinite(maxSummaryChars) && maxSummaryChars > minChars
-      ? maxSummaryChars
-      : Math.max(minChars, COMPACTION_CONFIG.charsPerToken * 12000);
-
-  // 基准估计：输入 × 压缩比，夹逼到 [min, upperBound]。
-  const base = Math.round(safeInput * COMPACTION_CONFIG.summaryCompressionRatio);
-  let estimate = Math.min(upperBound, Math.max(minChars, base));
-
-  // 动态扩张：真实产出逼近估计值时，把分母抬到接收量之上，避免提前到满，
-  // 同时仍不超过物理上限。expandFactor 留出 ~5% 余量让进度继续平滑爬升：
-  // 末段比值 ≈ 1/expandFactor ≈ 95%（而非 1.15 时的 ≈87%），减小收尾跳变。
-  if (receivedChars > 0) {
-    const expandFactor = 1.05;
-    const expanded = Math.ceil(receivedChars * expandFactor);
-    estimate = Math.min(upperBound, Math.max(estimate, expanded));
-  }
-
-  return Math.max(minChars, estimate);
+  return estimateSummaryCharsCore({ inputChars, maxSummaryChars, receivedChars });
 }
 
 /**
