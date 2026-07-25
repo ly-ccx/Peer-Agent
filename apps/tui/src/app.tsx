@@ -781,7 +781,9 @@ function Composer({ controller, snapshot, disabled, focused, locale, onValueChan
         placeholder={composerPlaceholder(locale, disabled)}
         textColor={COLOR.text}
         focusedTextColor={COLOR.text}
-        wrapMode="word"
+        // char wrap: soft-wrap at the right edge even for continuous CJK with no spaces.
+        // word wrap only breaks on whitespace and leaves Chinese stuck on one visual line.
+        wrapMode="char"
         onContentChange={() => applyImageChips()}
         onKeyDown={(event) => {
           const action = composerEnterAction({

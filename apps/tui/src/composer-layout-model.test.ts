@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { composerLayoutModel } from './composer-layout-model.ts';
+import { composerDisplayWidth, composerLayoutModel } from './composer-layout-model.ts';
 
 describe('composer layout model', () => {
   test('keeps an empty idle composer compact and quiet', () => {
@@ -22,6 +22,26 @@ describe('composer layout model', () => {
     expect(multiline.pickerBottom).toBe(4);
     expect(capped.inputRows).toBe(5);
     expect(capped.pickerBottom).toBe(6);
+  });
+
+  test('counts CJK characters as double width for soft-wrap growth', () => {
+    // usableWidth = contentWidth - 4 = 36. Each 中 is 2 cols → 20 glyphs = 40 cols → 2 rows.
+    const chinese = composerLayoutModel({
+      draft: '中'.repeat(20),
+      contentWidth: 40,
+      runtimeStatus: 'idle',
+    });
+    expect(composerDisplayWidth('中'.repeat(20))).toBe(40);
+    expect(chinese.inputRows).toBe(2);
+
+    // Same glyph count under string.length would stay 1 row if we only used length;
+    // display-width math must force growth earlier than ASCII of equal length.
+    const asciiSameLength = composerLayoutModel({
+      draft: 'a'.repeat(20),
+      contentWidth: 40,
+      runtimeStatus: 'idle',
+    });
+    expect(asciiSameLength.inputRows).toBe(1);
   });
 
   test('uses the active prompt and status for every runtime state', () => {
