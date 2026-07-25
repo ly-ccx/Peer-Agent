@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
-import { composerDisplayWidth, composerLayoutModel } from './composer-layout-model.ts';
+import {
+  COMPOSER_INPUT_CHROME_COLS,
+  composerDisplayWidth,
+  composerLayoutModel,
+} from './composer-layout-model.ts';
 
 describe('composer layout model', () => {
   test('keeps an empty idle composer compact and quiet', () => {
@@ -25,23 +29,52 @@ describe('composer layout model', () => {
   });
 
   test('counts CJK characters as double width for soft-wrap growth', () => {
-    // usableWidth = contentWidth - 4 = 36. Each 中 is 2 cols → 20 glyphs = 40 cols → 2 rows.
+    // usableWidth = contentWidth - chrome. Each 中 is 2 cols.
+    const usable = 40 - COMPOSER_INPUT_CHROME_COLS;
+    const glyphs = Math.ceil((usable + 1) / 2); // just over one visual row
     const chinese = composerLayoutModel({
-      draft: '中'.repeat(20),
+      draft: '中'.repeat(glyphs),
       contentWidth: 40,
       runtimeStatus: 'idle',
     });
-    expect(composerDisplayWidth('中'.repeat(20))).toBe(40);
+    expect(composerDisplayWidth('中'.repeat(glyphs))).toBe(glyphs * 2);
     expect(chinese.inputRows).toBe(2);
 
-    // Same glyph count under string.length would stay 1 row if we only used length;
-    // display-width math must force growth earlier than ASCII of equal length.
     const asciiSameLength = composerLayoutModel({
-      draft: 'a'.repeat(20),
+      draft: 'a'.repeat(glyphs),
       contentWidth: 40,
       runtimeStatus: 'idle',
     });
     expect(asciiSameLength.inputRows).toBe(1);
+  });
+
+  test('prefers measured visual rows from the live textarea when larger', () => {
+    const estimatedOnly = composerLayoutModel({
+      draft: 'short',
+      contentWidth: 80,
+      runtimeStatus: 'idle',
+    });
+    expect(estimatedOnly.inputRows).toBe(1);
+
+    const measured = composerLayoutModel({
+      draft: 'short',
+      contentWidth: 80,
+      runtimeStatus: 'idle',
+      measuredVisualRows: 3,
+    });
+    expect(measured.inputRows).toBe(3);
+    expect(measured.shellRows).toBe(3);
+    expect(measured.pickerBottom).toBe(4);
+  });
+
+  test('caps measured visual rows at five', () => {
+    const measured = composerLayoutModel({
+      draft: 'short',
+      contentWidth: 80,
+      runtimeStatus: 'idle',
+      measuredVisualRows: 9,
+    });
+    expect(measured.inputRows).toBe(5);
   });
 
   test('uses the active prompt and status for every runtime state', () => {

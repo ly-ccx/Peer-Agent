@@ -11,6 +11,13 @@ export interface ComposerLayoutModel {
 }
 
 /**
+ * Columns reserved left of the textarea inside the composer content width:
+ * prompt glyph (1) + paddingLeft (1). Add 1 for layout rounding so estimates
+ * grow slightly before the true right edge rather than after it.
+ */
+export const COMPOSER_INPUT_CHROME_COLS = 3;
+
+/**
  * Terminal display columns for a string. Wide East-Asian glyphs count as 2 so
  * soft-wrap row estimates match what the terminal actually paints.
  */
@@ -18,7 +25,6 @@ export function composerDisplayWidth(text: string): number {
   let width = 0;
   for (const char of text) {
     const code = char.codePointAt(0) ?? 0;
-    // Surrogate pairs / emoji modifiers: treat non-BMP as width 2 when wide.
     if (
       code >= 0x1100 && (
         code <= 0x115f
@@ -47,28 +53,38 @@ export function composerDisplayWidth(text: string): number {
   return width;
 }
 
+function clampComposerRows(rows: number): number {
+  if (!Number.isFinite(rows)) return 1;
+  return Math.min(5, Math.max(1, Math.floor(rows)));
+}
+
 /**
  * Pure presentation model for the borderless composer. The editor grows upward
  * with its draft while remaining bounded so conversation history stays primary.
  *
- * Row count uses terminal display width (not JS string length) so CJK input
- * soft-wraps and grows the shell at the true right edge.
+ * Prefer OpenTUI `virtualLineCount` (soft-wrapped visual rows) when measured.
+ * Fall back to display-width estimation so height can still grow before the
+ * first measure lands.
  */
 export function composerLayoutModel(input: {
   readonly draft: string;
   readonly contentWidth: number;
   readonly runtimeStatus: ComposerVisualState;
+  /** Soft-wrapped visual rows reported by the live textarea, when available. */
+  readonly measuredVisualRows?: number;
 }): ComposerLayoutModel {
-  // Reserve columns for the prompt glyph + gap so estimates match the textarea width.
-  const usableWidth = Math.max(12, input.contentWidth - 4);
-  const visualRows = Math.max(
+  const usableWidth = Math.max(12, input.contentWidth - COMPOSER_INPUT_CHROME_COLS);
+  const estimatedRows = Math.max(
     1,
     input.draft.split('\n').reduce((rows, line) => {
       const cols = composerDisplayWidth(line);
       return rows + Math.max(1, Math.ceil(cols / usableWidth));
     }, 0),
   );
-  const inputRows = Math.min(5, visualRows);
+  const measuredRows = input.measuredVisualRows == null
+    ? 1
+    : clampComposerRows(input.measuredVisualRows);
+  const inputRows = clampComposerRows(Math.max(estimatedRows, measuredRows));
   const showRunningStatus = input.runtimeStatus !== 'idle';
 
   return {

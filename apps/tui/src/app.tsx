@@ -880,10 +880,21 @@ function ComposerDock({
       : 0;
   const terminal = useTerminalDimensions();
   const dividerWidth = composerContentWidth(terminal.width, layout.outerPadding);
+  // Prefer OpenTUI soft-wrap visual rows over pure draft estimation so natural
+  // typing grows the shell as soon as the caret wraps (not only on resize).
+  const [measuredVisualRows, setMeasuredVisualRows] = useState(1);
+  useEffect(() => {
+    const editor = editorRef.current as (TextareaRenderable & {
+      virtualLineCount?: number;
+    }) | null;
+    const next = Math.max(1, Math.floor(editor?.virtualLineCount ?? 1));
+    setMeasuredVisualRows((current) => (current === next ? current : next));
+  }, [draft, dividerWidth, editorRef, snapshot.status]);
   const composerLayout = composerLayoutModel({
     draft,
     contentWidth: dividerWidth,
     runtimeStatus: snapshot.status,
+    measuredVisualRows,
   });
   const composerBackground = COLOR.background;
 
