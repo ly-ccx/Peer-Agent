@@ -296,7 +296,8 @@ function ChatHistory({
   readonly layout: ReturnType<typeof responsiveLayout>;
 }) {
   const [expandedTools, setExpandedTools] = useState<ReadonlySet<string>>(new Set());
-  const roleRailWidth = 7;
+  // PEER is 4 cols; keep a 1-col pad so the label stays aligned without a wide empty gutter.
+  const roleRailWidth = 5;
   const roleBodyGap = layout.density === 'compact' ? 2 : 1;
 
   const toggleTool = (messageId: string) => {
@@ -322,10 +323,10 @@ function ChatHistory({
         <box flexDirection="column" marginBottom={1}>
           <ThemedText selectable fg={COLOR.muted}>
             {window.reason === 'latest-compaction' && !window.emergencyTruncated
-              ? '↑ Earlier conversation compacted · /history earlier'
+              ? '↑ Earlier conversation compacted · /history'
               : window.emergencyTruncated
-                ? `↑ ${window.hiddenBefore} earlier messages hidden · /history earlier`
-                : `↑ ${window.hiddenBefore} earlier messages · /history earlier`}
+                ? `↑ ${window.hiddenBefore} earlier messages hidden · /history`
+                : `↑ ${window.hiddenBefore} earlier messages · /history`}
           </ThemedText>
           {window.emergencyTruncated ? (
             <ThemedText selectable fg={COLOR.warning}>
@@ -496,7 +497,7 @@ function ChatHistory({
       {window.hiddenAfter > 0 ? (
         <box marginTop={1}>
           <ThemedText selectable fg={COLOR.muted}>
-            {`↓ ${window.hiddenAfter} newer messages hidden · /history later · /history latest`}
+            {`↓ ${window.hiddenAfter} newer messages hidden · /history · Esc return to latest`}
           </ThemedText>
         </box>
       ) : null}
@@ -1723,6 +1724,13 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     }
     if (control === 'dismiss-surface') {
       setExperience((current) => escapeFooter(current));
+      queueMicrotask(() => composerRef.current?.focus());
+      return;
+    }
+    // Esc while browsing history pages returns to the default latest window.
+    if (key.name === 'escape' && renderProjection.window.mode === 'history') {
+      setRenderWindowState(createConversationRenderWindowState());
+      setCommandNotice('Showing the latest conversation');
       queueMicrotask(() => composerRef.current?.focus());
       return;
     }

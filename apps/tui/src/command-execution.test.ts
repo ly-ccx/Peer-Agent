@@ -5,7 +5,7 @@ import { createTuiExperienceState, syncSlashSuggestions, TUI_COMMANDS } from './
 
 const quit = TUI_COMMANDS.find((command) => command.id === 'quit')!;
 const compact = TUI_COMMANDS.find((command) => command.id === 'compact')!;
-const historyEarlier = TUI_COMMANDS.find((command) => command.id === 'history-earlier')!;
+const history = TUI_COMMANDS.find((command) => command.id === 'history')!;
 const skill = TUI_COMMANDS.find((command) => command.id === 'skill')!;
 const mcp = TUI_COMMANDS.find((command) => command.id === 'mcp')!;
 const newSession = TUI_COMMANDS.find((command) => command.id === 'new')!;
@@ -91,7 +91,7 @@ describe('TUI command execution', () => {
   test('executes history navigation through the shared dispatcher', () => {
     const subject = harness();
 
-    executeTuiCommand(historyEarlier, subject.handlers);
+    executeTuiCommand(history, subject.handlers);
 
     expect(subject.historyDirections).toEqual(['earlier']);
     expect(subject.notices.at(-1)).toBe('History: earlier');

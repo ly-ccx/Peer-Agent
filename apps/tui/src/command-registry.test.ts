@@ -24,9 +24,7 @@ describe('TUI command registry', () => {
       'new',
       'clear',
       'compact',
-      'history-earlier',
-      'history-later',
-      'history-latest',
+      'history',
       'resume',
       'goals',
       'help',
@@ -50,6 +48,7 @@ describe('TUI command registry', () => {
   });
 
   test('resolves discoverable history commands and spaced aliases', () => {
+    expect(resolveTuiCommandInput('/history', idle)?.id).toBe('history');
     expect(resolveTuiCommandInput('/history-earlier', idle)?.id).toBe('history-earlier');
     expect(resolveTuiCommandInput('/history earlier', idle)?.id).toBe('history-earlier');
     expect(resolveTuiCommandInput('/history later', idle)?.id).toBe('history-later');
@@ -95,9 +94,9 @@ describe('TUI command localization', () => {
     const newSession = commands.find((command) => command.id === 'new');
     expect(newSession?.label).toBe('新会话');
     expect(newSession?.description).toBe('开启全新空会话并回到首页');
-    const historyEarlier = commands.find((command) => command.id === 'history-earlier');
-    expect(historyEarlier?.label).toBe('更早历史');
-    expect(historyEarlier?.description).toContain('/history earlier');
+    const history = commands.find((command) => command.id === 'history');
+    expect(history?.label).toBe('历史');
+    expect(history?.description).toContain('Esc');
     const goals = commands.find((command) => command.id === 'goals');
     expect(goals?.label).toBe('目标历史');
     expect(goals?.description).toBe('切换本会话中的正式目标');

@@ -28,7 +28,7 @@ describe('TUI experience model', () => {
   test('derives commands from the shared registry and keeps Explorer internal', () => {
     expect(filterTuiCommands('').map((command) => command.id)).toEqual([
       'model', 'mode', 'permissions', 'language', 'theme', 'skill', 'mcp', 'new', 'clear', 'compact',
-      'history-earlier', 'history-later', 'history-latest', 'resume', 'goals', 'help', 'quit',
+      'history', 'resume', 'goals', 'help', 'quit',
     ]);
     expect(TUI_COMMANDS.map((command) => command.id)).not.toContain('mode-explorer');
     expect(filterTuiCommands('provider').map((command) => command.id)).toEqual(['model']);

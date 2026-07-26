@@ -602,7 +602,7 @@ describe('TUI app layout', () => {
     // Wide terminals use the available conversation width; responsive outer padding
     // remains the single safety margin when space is scarce.
     expect(appSource).not.toContain('terminal.width - 112');
-    expect(appSource).toContain('const roleRailWidth = 7;');
+    expect(appSource).toContain('const roleRailWidth = 5;');
     expect(appSource).toContain("const roleBodyGap = layout.density === 'compact' ? 2 : 1;");
     expect(appSource).toContain('gap={roleBodyGap} marginBottom={1}');
     expect(appSource).toContain('paddingLeft={layout.outerPadding}');

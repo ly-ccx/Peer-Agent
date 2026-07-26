@@ -138,9 +138,11 @@ describe('ui messages', () => {
   });
 
   test('history navigation command messages follow locale', () => {
+    expect(tuiMessage('zh-CN', 'command.history.label')).toBe('历史');
     expect(tuiMessage('zh-CN', 'command.history-earlier.label')).toBe('更早历史');
     expect(tuiMessage('zh-CN', 'command.history-later.label')).toBe('较新历史');
     expect(tuiMessage('zh-CN', 'command.history-latest.label')).toBe('最新历史');
+    expect(tuiMessage('en-US', 'command.history.label')).toBe('History');
     expect(tuiMessage('en-US', 'command.history-earlier.label')).toBe('Earlier history');
   });
 
