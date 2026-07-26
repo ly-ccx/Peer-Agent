@@ -2425,53 +2425,51 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       height="100%"
       backgroundColor={COLOR.background}
     >
-      {/* Session topbar spans conversation and Mission rail. */}
-      {!isWelcome ? (
+      {/* Session topbar always spans the full width (welcome + conversation). */}
+      <box
+        flexDirection="column"
+        width="100%"
+        flexShrink={0}
+        paddingTop={layout.outerPaddingY}
+      >
         <box
-          flexDirection="column"
-          width="100%"
+          flexDirection="row"
+          alignItems="center"
           flexShrink={0}
-          paddingTop={layout.outerPaddingY}
+          height={1}
+          paddingLeft={layout.outerPadding}
+          paddingRight={layout.outerPadding}
+          gap={1}
         >
-          <box
-            flexDirection="row"
-            alignItems="center"
-            flexShrink={0}
-            height={1}
-            paddingLeft={layout.outerPadding}
-            paddingRight={layout.outerPadding}
-            gap={1}
-          >
-            <text fg={COLOR.textSoft} wrapMode="none">
-              <span fg={COLOR.accent}>{APP_CHROME.brandMark}</span>
-              <strong> PEER</strong>
+          <text fg={COLOR.textSoft} wrapMode="none">
+            <span fg={COLOR.accent}>{APP_CHROME.brandMark}</span>
+            <strong> PEER</strong>
+          </text>
+          <text fg={COLOR.muted} wrapMode="none" flexShrink={1}>
+            {sessionWorkspacePath}
+          </text>
+          <box flexGrow={1} minWidth={1} />
+          <text fg={COLOR.muted} wrapMode="none">
+            {sessionTopbarModel}
+          </text>
+          {sessionTopbarQuota ? (
+            <text fg={subscriptionQuotaColor(sessionTopbarQuotaRemaining)} wrapMode="none">
+              {sessionTopbarQuota}
             </text>
-            <text fg={COLOR.muted} wrapMode="none" flexShrink={1}>
-              {sessionWorkspacePath}
-            </text>
-            <box flexGrow={1} minWidth={1} />
-            {sessionTopbarQuota ? (
-              <text fg={subscriptionQuotaColor(sessionTopbarQuotaRemaining)} wrapMode="none">
-                {sessionTopbarQuota}
-              </text>
-            ) : null}
-            <text fg={COLOR.muted} wrapMode="none">
-              {sessionTopbarModel}
-            </text>
-            <text fg={COLOR.success} wrapMode="none">{APP_CHROME.onlineDot}</text>
-          </box>
-          <box marginLeft={layout.outerPadding} marginRight={layout.outerPadding} flexShrink={0}>
-            <ComposerModeDivider width={topbarDividerWidth} />
-          </box>
+          ) : null}
+          <text fg={COLOR.success} wrapMode="none">{APP_CHROME.onlineDot}</text>
         </box>
-      ) : null}
+        <box marginLeft={layout.outerPadding} marginRight={layout.outerPadding} flexShrink={0}>
+          <ComposerModeDivider width={topbarDividerWidth} />
+        </box>
+      </box>
       {/* Split workspace starts below the full-width session topbar. */}
       <box
         flexDirection="row"
         width="100%"
         flexGrow={1}
         minHeight={0}
-        paddingTop={isWelcome ? layout.outerPaddingY : 0}
+        paddingTop={0}
         paddingBottom={layout.outerPaddingY}
       >
         <box flexDirection="column" flexGrow={1} minWidth={0} minHeight={0}>

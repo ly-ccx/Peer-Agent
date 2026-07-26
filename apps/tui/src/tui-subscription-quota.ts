@@ -14,6 +14,7 @@ import {
   ensureFreshGrokTokensFromDesktop,
 } from './desktop-provider-adapters.ts';
 import { createTuiSharedModelCredentialStore } from './model-credential-store.ts';
+import { createTuiProviderFetch } from './provider-transport.ts';
 import type { TuiLocale } from './tui-language.ts';
 import { COLOR } from './tui-theme.ts';
 
@@ -103,6 +104,15 @@ type QuotaFetchers = {
   }) => Promise<LlmSubscriptionQuota>;
 };
 
+
+/**
+ * Use the same system-proxy + trusted-CA fetch path as TUI model calls.
+ * Bare globalThis.fetch fails under macOS system proxy / corporate MITM CAs.
+ */
+function createQuotaFetchImpl(): typeof fetch {
+  return createTuiProviderFetch();
+}
+
 async function loadQuotaFetchers(): Promise<QuotaFetchers> {
   // Reuse Desktop main-process fetchers (already unit-tested against provider payloads).
   // TUI already imports Desktop ESM adapters the same way for OAuth refresh.
@@ -174,7 +184,7 @@ export async function fetchTuiSubscriptionQuota(
       tokens = await refreshGoogle(tokens);
       selection.persistOAuthTokens(tokens);
     } else if (selection.authMethod === 'oauth_grok') {
-      const fresh = await refreshGrok(tokens, { fetchImpl: options.fetchImpl });
+      const fresh = await refreshGrok(tokens, { fetchImpl: options.fetchImpl ?? createQuotaFetchImpl() });
       tokens = fresh.tokens;
       selection.persistOAuthTokens(tokens);
     }
@@ -198,19 +208,19 @@ export async function fetchTuiSubscriptionQuota(
       return await fetchers.fetchChatGptUsage({
         accessToken: tokens.access,
         accountId: selection.accountId,
-        fetchImpl: options.fetchImpl,
+        fetchImpl: options.fetchImpl ?? createQuotaFetchImpl(),
       });
     }
     if (selection.authMethod === 'oauth_google') {
       return await fetchers.fetchGeminiQuota({
         accessToken: tokens.access,
         projectId: selection.oauthProjectId,
-        fetchImpl: options.fetchImpl,
+        fetchImpl: options.fetchImpl ?? createQuotaFetchImpl(),
       });
     }
     return await fetchers.fetchGrokQuota({
       accessToken: tokens.access,
-      fetchImpl: options.fetchImpl,
+      fetchImpl: options.fetchImpl ?? createQuotaFetchImpl(),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
