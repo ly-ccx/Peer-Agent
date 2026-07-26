@@ -22,6 +22,9 @@ files:
   # 读到 node_modules 下的 .ts 触发 ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING。
   - "!node_modules/@peer-agent/*/src"
   - "!node_modules/@peer-agent/*/tsconfig*.json"
+  # system-context 没有 dist：运行时入口就是 src/index.mjs，必须重新 include。
+  # 排除通配会把它整包 src 踢出 asar，导致 mac 打包后 Verify packaged runtime entries 失败。
+  - "node_modules/@peer-agent/system-context/src/**"
 
 extraResources:
   # Dock 深浅色图标。正式包运行时由主进程根据外观模式动态选择。
