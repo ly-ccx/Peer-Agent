@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { contextMeter, contextMeterParts } from './composer-status-view.tsx';
+import {
+  contextMeter,
+  contextMeterParts,
+  neonActivityColor,
+} from './composer-status-view.tsx';
+import { COLOR } from './tui-theme.ts';
 
 describe('composer context meter', () => {
   test('renders bounded usage as a chunky block meter', () => {
@@ -13,5 +18,32 @@ describe('composer context meter', () => {
     expect(contextMeterParts(25, 8)).toEqual({ filled: '██', empty: '░░░░░░' });
     expect(contextMeterParts(150, 4)).toEqual({ filled: '████', empty: '' });
     expect(contextMeterParts(undefined, 4)).toEqual({ filled: '', empty: '░░░░' });
+  });
+});
+
+describe('crush-style neon activity colors', () => {
+  test('returns continuous hex colors rather than a 3-token discrete palette', () => {
+    const samples = Array.from({ length: 12 }, (_, index) => neonActivityColor(index, 0));
+    for (const sample of samples) {
+      expect(sample).toMatch(/^#[0-9a-fA-F]{6}$/);
+    }
+    // Adjacent glyphs should not hard-jump between only accent/info/success.
+    const unique = new Set(samples);
+    expect(unique.size).toBeGreaterThan(3);
+  });
+
+  test('scrolls the gradient when the animation frame advances', () => {
+    expect(neonActivityColor(0, 1)).not.toBe(neonActivityColor(0, 0));
+    // Frame shift should match spatial shift (crush offset = index + frame).
+    expect(neonActivityColor(0, 3)).toBe(neonActivityColor(3, 0));
+  });
+
+  test('stays within Frost accent↔info family endpoints', () => {
+    const endpoints = new Set([COLOR.accent.toLowerCase(), COLOR.info.toLowerCase()]);
+    const first = neonActivityColor(0, 0).toLowerCase();
+    expect(first).toMatch(/^#[0-9a-f]{6}$/);
+    // At least one sample in a full cycle should hit an endpoint stop.
+    const cycle = Array.from({ length: 48 }, (_, index) => neonActivityColor(index, 0).toLowerCase());
+    expect(cycle.some((color) => endpoints.has(color))).toBe(true);
   });
 });
