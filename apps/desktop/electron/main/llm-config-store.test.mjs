@@ -1303,3 +1303,80 @@ test('backfillMissingPricingFromModelsDev matches canonical model ids', async ()
   assert.equal(reloaded.inputPrice, 2.5);
   assert.equal(reloaded.outputPrice, 10);
 }));
+
+
+test('duplicateModel clones model metadata in the same group with -copy model id', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const base = store.addProvider({
+    provider: 'anthropic',
+    authMethod: 'api_key',
+    apiKey: 'shared-secret',
+    baseUrl: 'https://api.anthropic.com',
+    name: 'Claude Opus',
+    model: 'claude-opus-4-8',
+    modelLabel: 'Claude Opus 4.8',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    inputPrice: 5,
+    outputPrice: 25,
+    cacheWritePrice: 6.25,
+    cacheReadPrice: 0.5,
+    supportsVision: true,
+    supportsReasoning: true,
+    supportsPromptCaching: false,
+    metadataSource: 'remote',
+    pricingSource: 'manual',
+    metadataSyncedAt: '2026-01-02T03:04:05.000Z',
+  });
+  store.setDefault(base.id);
+
+  const copy = store.duplicateModel(base.id);
+
+  assert.equal(copy.groupId, base.groupId);
+  assert.notEqual(copy.id, base.id);
+  assert.equal(copy.model, 'claude-opus-4-8-copy');
+  assert.match(copy.name, /\(Copy\)/);
+  assert.match(copy.modelLabel, /\(Copy\)/);
+  assert.equal(copy.isDefault, false);
+  assert.equal(store.listProviders().find((p) => p.id === base.id)?.isDefault, true);
+  assert.equal(copy.contextWindow, 1_000_000);
+  assert.equal(copy.maxOutputTokens, 128_000);
+  assert.equal(copy.inputPrice, 5);
+  assert.equal(copy.outputPrice, 25);
+  assert.equal(copy.cacheWritePrice, 6.25);
+  assert.equal(copy.cacheReadPrice, 0.5);
+  assert.equal(copy.supportsVision, true);
+  assert.equal(copy.supportsReasoning, true);
+  assert.equal(copy.supportsPromptCaching, false);
+  assert.equal(copy.metadataSource, 'remote');
+  assert.equal(copy.pricingSource, 'manual');
+  assert.equal(copy.baseUrl, base.baseUrl);
+  assert.equal(store.getDecryptedApiKey(copy.id), 'shared-secret');
+
+  const grouped = store.listProviders().filter((p) => p.groupId === base.groupId);
+  assert.equal(grouped.length, 2);
+}));
+
+test('duplicateModel increments model id when -copy already exists', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const base = store.addProvider({
+    provider: 'openai',
+    authMethod: 'api_key',
+    apiKey: 'k',
+    model: 'gpt-x',
+    name: 'GPT X',
+  });
+  store.addModel(base.groupId, { model: 'gpt-x-copy', name: 'GPT X (Copy)' });
+
+  const copy = store.duplicateModel(base.id);
+  assert.equal(copy.model, 'gpt-x-copy-2');
+  assert.equal(copy.groupId, base.groupId);
+
+  const copy3 = store.duplicateModel(base.id);
+  assert.equal(copy3.model, 'gpt-x-copy-3');
+}));
+
+test('duplicateModel throws when source id is missing', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  assert.throws(() => store.duplicateModel('missing-id'), /Provider missing-id not found/);
+}));

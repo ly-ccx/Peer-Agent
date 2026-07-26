@@ -2671,6 +2671,11 @@ ipcMain.handle('llm:duplicate', (_, { id }) => {
   llmConfigStore.duplicateProvider(id);
   return llmConfigStore.listProviders();
 });
+// 同渠道复制一条模型配置（模型参数克隆，凭证继承）。
+ipcMain.handle('llm:duplicate-model', (_, { id }) => {
+  llmConfigStore.duplicateModel(id);
+  return llmConfigStore.listProviders();
+});
 // B-2 在已有 provider 组内新增一个模型:凭证继承自组内首条,无需重填 apiKey。
 ipcMain.handle('llm:add-model', (_, { groupId, ...patch }) => {
   llmConfigStore.addModel(groupId, patch);

@@ -15,8 +15,10 @@ export function ConfiguredModelRow({
   model,
   result,
   testing,
+  duplicating = false,
   onSetDefault,
   onTest,
+  onDuplicate,
   onEdit,
   onDelete,
 }: {
@@ -24,8 +26,10 @@ export function ConfiguredModelRow({
   readonly model: LlmProviderConfigView;
   readonly result?: LlmProviderTestResult;
   readonly testing: boolean;
+  readonly duplicating?: boolean;
   readonly onSetDefault: () => void;
   readonly onTest: () => void;
+  readonly onDuplicate: () => void;
   readonly onEdit: () => void;
   readonly onDelete: () => void;
 }) {
@@ -96,9 +100,10 @@ export function ConfiguredModelRow({
 
         <div className="llm-configured-model-actions">
           {!model.isDefault ? <button type="button" onClick={onSetDefault} disabled={oauthNotConnected}>{zh ? '设为默认' : 'Set default'}</button> : null}
-          <button type="button" onClick={onTest} disabled={testing}>{testing ? '…' : (zh ? '测试' : 'Test')}</button>
-          <button type="button" onClick={onEdit}>{zh ? '设置' : 'Settings'}</button>
-          <button type="button" className="danger" onClick={onDelete}>{zh ? '删除' : 'Delete'}</button>
+          <button type="button" onClick={onTest} disabled={testing || duplicating}>{testing ? '…' : (zh ? '测试' : 'Test')}</button>
+          <button type="button" onClick={onDuplicate} disabled={testing || duplicating}>{duplicating ? '…' : (zh ? '复制' : 'Duplicate')}</button>
+          <button type="button" onClick={onEdit} disabled={duplicating}>{zh ? '设置' : 'Settings'}</button>
+          <button type="button" className="danger" onClick={onDelete} disabled={duplicating}>{zh ? '删除' : 'Delete'}</button>
         </div>
       </div>
     </details>
