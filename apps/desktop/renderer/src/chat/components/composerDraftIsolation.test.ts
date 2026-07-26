@@ -41,9 +41,9 @@ test('context ring renders the shared accounting snapshot without a local fallba
     /contextAccounting\?\.authoritativeInputTokens/,
   );
   assert.match(display, /contextAccounting\?\.percent/);
-  assert.match(display, /contextAccounting\?\.pendingUncountedChanges === true/);
   assert.match(display, /contextAccounting\?\.counterStatus === 'degraded'/);
   assert.match(display, /Exact count drifted from provider usage/);
+  assert.doesNotMatch(display, /包含尚未计量的草稿|Includes uncounted draft/);
   assert.doesNotMatch(display, /contextPending\s*\?\s*'\+'\s*:/);
   assert.doesNotMatch(display, /lifetimeUsage|resolveContextOccupancyTokens|estimateDraftTokens/);
   assert.doesNotMatch(display, /contextTokens \?\? billedTokens/);

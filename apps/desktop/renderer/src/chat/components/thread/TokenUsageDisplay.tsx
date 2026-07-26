@@ -318,18 +318,15 @@ export function TokenUsageDisplay({
         ? 0
         : null;
   const hasCtxRing = ctxWindow != null;
-  const contextPending = contextAccounting?.pendingUncountedChanges === true;
   const contextCounterDegraded = contextAccounting?.counterStatus === 'degraded';
-  // 圆环 hover：展示 provider 支撑的计量、待计量状态、漂移告警与附加诊断。
+  // 圆环 hover：展示用户可理解的上下文计量、漂移告警与附加诊断。
+  // pendingUncountedChanges 是 Runtime 内部状态，不向用户暴露实现细节。
   const quotaTooltipLine = formatQuotaTooltipLine(subscriptionQuota ?? undefined, isZh);
   const ctxTooltipLines: readonly string[] = hasCtxRing
     ? [
         currentContextTokens != null && ctxPercent != null
           ? `${isZh ? '上下文' : 'Context'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow)} (${Math.round(ctxPercent)}%)`
           : `${isZh ? '上下文待计量' : 'Context pending measurement'} / ${formatTokenCount(ctxWindow)}`,
-        ...(contextPending
-          ? [isZh ? '包含尚未计量的草稿、流式输出或工具结果' : 'Includes uncounted draft, stream, or tool changes']
-          : []),
         ...(contextCounterDegraded
           ? [
               isZh
