@@ -407,7 +407,6 @@ export function TokenUsageDisplay({
               />
               <span className="ctx-pct">
                 {ctxPercent == null ? '?' : `${Math.round(ctxPercent)}%`}
-                {contextPending ? '+' : ''}
                 {contextCounterDegraded ? '!' : ''}
               </span>
             </span>

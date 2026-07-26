@@ -658,6 +658,9 @@ function assertContextAccountingPolicyIsCentralized() {
   ) {
     fail('Desktop context display must surface provider count drift degradation.');
   }
+  if (/contextPending\s*\?\s*'\+'\s*:/.test(tokenUsageDisplay)) {
+    fail('Desktop context percentage must not expose pending accounting through a custom + suffix.');
+  }
 }
 
 function assertChatRuntimeAgentLoopsAreModular() {

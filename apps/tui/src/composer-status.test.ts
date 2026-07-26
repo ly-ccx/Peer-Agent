@@ -77,14 +77,22 @@ describe('composer status', () => {
     });
   });
 
-  test('marks provider count drift without inventing another percentage', () => {
+  test('marks provider count drift without exposing pending state in the percentage', () => {
     expect(contextStatus(accounting(35_300, 353_000, false, 'degraded'), 353_000)).toEqual({
       context: 'context 10%!',
       contextShort: 'ctx 10%!',
       contextPercent: 10,
     });
     expect(contextStatus(accounting(35_300, 353_000, true, 'degraded'), 353_000).context)
-      .toBe('context 10%+!');
+      .toBe('context 10%!');
+  });
+
+  test('keeps pending accounting internal instead of adding a symbol to context usage', () => {
+    expect(contextStatus(accounting(35_300, 353_000, true), 353_000)).toEqual({
+      context: 'context 10%',
+      contextShort: 'ctx 10%',
+      contextPercent: 10,
+    });
   });
 
   test('uses only the provider-backed accounting snapshot', () => {

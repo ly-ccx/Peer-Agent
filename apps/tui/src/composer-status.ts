@@ -96,9 +96,8 @@ export function contextStatus(
 ): Pick<ComposerStatus, 'context' | 'contextShort' | 'contextPercent'> {
   const window = accounting?.contextWindow ?? contextWindow;
   const tokens = accounting?.authoritativeInputTokens;
-  const pending = accounting?.pendingUncountedChanges === true;
   const degraded = accounting?.counterStatus === 'degraded';
-  const statusMark = `${pending ? '+' : ''}${degraded ? '!' : ''}`;
+  const statusMark = degraded ? '!' : '';
   if (tokens == null) {
     const suffix = statusMark ? ` ${statusMark}` : '';
     return {
