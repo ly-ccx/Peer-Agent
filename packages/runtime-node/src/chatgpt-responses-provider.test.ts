@@ -96,3 +96,57 @@ test('ChatGPT Responses provider forwards Grok channel identity headers', async 
   assert.equal(captured?.get('x-grok-client-version'), '0.1.202');
   assert.equal(captured?.get('openai-beta'), 'responses=experimental');
 });
+
+test('ChatGPT Responses provider normalizes dotted historical tool names for wire encoding', async () => {
+  let body: any;
+  const provider = createChatGptResponsesProvider({
+    baseUrl: 'https://chatgpt.example/codex',
+    tokens: { access: 'access' },
+    fetch: async (_input, init) => {
+      body = JSON.parse(String(init?.body ?? '{}'));
+      return response(['data: [DONE]']);
+    },
+  });
+
+  await provider.stream({
+    model: 'gpt-test',
+    messages: [
+      { role: 'user', content: 'continue' },
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          {
+            id: 'call_hist_1',
+            name: 'local.file.read',
+            arguments: '{"path":"README.md"}',
+          },
+        ],
+      },
+      {
+        role: 'tool',
+        toolCallId: 'call_hist_1',
+        content: 'ok',
+      },
+    ],
+    tools: [
+      {
+        name: 'local.file.read',
+        description: 'Read a local file',
+        parameters: { type: 'object' },
+      },
+    ],
+  });
+
+  const functionCall = body.input.find((item: any) => item?.type === 'function_call');
+  assert.equal(functionCall?.name, 'local_file_read');
+  assert.equal(functionCall?.call_id, 'call_hist_1');
+  assert.match(functionCall?.name ?? '', /^[a-zA-Z0-9_-]+$/);
+
+  const toolDef = body.tools.find((tool: any) => tool?.type === 'function');
+  assert.equal(toolDef?.name, 'local_file_read');
+  assert.match(toolDef?.name ?? '', /^[a-zA-Z0-9_-]+$/);
+
+  const toolOutput = body.input.find((item: any) => item?.type === 'function_call_output');
+  assert.equal(toolOutput?.call_id, 'call_hist_1');
+});

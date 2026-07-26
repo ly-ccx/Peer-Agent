@@ -34,6 +34,14 @@ function contentText(content: ModelMessage['content']): string {
     .join('\n');
 }
 
+// Responses API requires function/tool names to match ^[a-zA-Z0-9_-]+$.
+// Historical sessions may still store dotted capability ids (e.g. local.file.read).
+// Execution pairing depends on call_id, so wire-side normalization is safe.
+function normalizeFunctionName(value: string | undefined): string {
+  const normalized = String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return normalized || 'tool';
+}
+
 function messageInput(message: ModelMessage): Record<string, unknown>[] {
   if (message.role === 'tool') {
     return [{ type: 'function_call_output', call_id: message.toolCallId, output: contentText(message.content) }];
@@ -41,7 +49,12 @@ function messageInput(message: ModelMessage): Record<string, unknown>[] {
   const items: Record<string, unknown>[] = [];
   if (message.role === 'assistant' && message.toolCalls) {
     for (const call of message.toolCalls) {
-      items.push({ type: 'function_call', call_id: call.id, name: call.name, arguments: call.arguments });
+      items.push({
+        type: 'function_call',
+        call_id: call.id,
+        name: normalizeFunctionName(call.name),
+        arguments: call.arguments,
+      });
     }
   }
   if (message.content) {
@@ -86,7 +99,12 @@ function requestBody(request: ModelProviderRequest): Record<string, unknown> {
     model: request.model,
     ...(system ? { instructions: system } : {}),
     input,
-    tools: (request.tools ?? []).map((tool) => ({ type: 'function', name: tool.name, description: tool.description, parameters: tool.parameters ?? {} })),
+    tools: (request.tools ?? []).map((tool) => ({
+      type: 'function',
+      name: normalizeFunctionName(tool.name),
+      description: tool.description,
+      parameters: tool.parameters ?? {},
+    })),
     tool_choice: 'auto',
     parallel_tool_calls: true,
     ...(!request.reasoningEffort || request.reasoningEffort === 'default'
