@@ -1,6 +1,6 @@
 [package]
 name = "peer-credential-helper"
-version = "0.0.1-beta.42"
+version = "0.0.1-beta.43"
 edition = "2024"
 rust-version = "1.85"
 
