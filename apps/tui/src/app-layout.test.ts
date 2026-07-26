@@ -109,8 +109,8 @@ describe('TUI app layout', () => {
       appSource.indexOf('function ComposerDock'),
     );
 
-    expect(composerSource).toContain('textColor={COLOR.text}');
-    expect(composerSource).toContain('focusedTextColor={COLOR.text}');
+    expect(composerSource).toContain('textColor={COLOR.inputForeground}');
+    expect(composerSource).toContain('focusedTextColor={COLOR.inputForeground}');
   });
 
   test('owns Shift+Enter by inserting a newline instead of empty-returning to OpenTUI', () => {
@@ -132,8 +132,13 @@ describe('TUI app layout', () => {
   });
 
   test('lets long chat history shrink and scroll without compressing the composer dock', () => {
+    const historyStart = (() => {
+      const contextBar = appSource.indexOf('function UserContextBar');
+      const chatHistory = appSource.indexOf('function ChatHistory');
+      return contextBar === -1 ? chatHistory : Math.min(contextBar, chatHistory);
+    })();
     const historySource = appSource.slice(
-      appSource.indexOf('function ChatHistory'),
+      historyStart,
       appSource.indexOf('function ErrorBanner'),
     );
     const dockSource = appSource.slice(
@@ -145,9 +150,12 @@ describe('TUI app layout', () => {
     expect(historySource).toContain('flexShrink={1}');
     expect(historySource).toContain('minHeight={0}');
     expect(historySource).toContain('stickyScroll');
-    expect(historySource).toContain('shouldPinLatestUserMessage');
-    expect(historySource).toContain('conversationBottomSpacerHeight');
-    expect(historySource).toContain('conversationMessageRenderId(message.id)');
+    expect(historySource).toContain('stickyStart="bottom"');
+    expect(historySource).toContain('UserContextBar');
+    expect(historySource).toContain('resolveContextUserMessageId');
+    expect(historySource).toContain('isActiveTurn');
+    expect(historySource).not.toContain('bottomSpacerHeight');
+    expect(historySource).not.toContain('projectPinnedTurnMessages');
     expect(dockSource).toContain('flexShrink={0}');
   });
 
@@ -170,14 +178,12 @@ describe('TUI app layout', () => {
     expect(resumeSource).toContain('selectionWindow(rows, selectedIndex, maxVisible)');
     expect(resumeSource).toContain('visibleRows.map(({ item: row, index })');
     expect(resumeSource).toContain('flexShrink={0}');
-    expect(resumeSource).toContain('marginLeft={1}');
-    expect(resumeSource).toContain('marginRight={1}');
-    expect(resumeSource).toContain('marginTop={1}');
-    expect(resumeSource).toContain('marginBottom={1}');
-    expect(resumeSource).toContain('paddingLeft={1}');
-    expect(resumeSource).toContain('paddingRight={1}');
+    expect(resumeSource).toContain('paddingLeft={outerPadding}');
+    expect(resumeSource).toContain('paddingRight={outerPadding}');
     expect(resumeSource).toContain('paddingTop={1}');
     expect(resumeSource).toContain('paddingBottom={1}');
+    expect(resumeSource).not.toContain('marginLeft={1}');
+    expect(resumeSource).not.toContain('marginRight={1}');
     expect(resumeSource).not.toContain('position="absolute"');
     expect(resumeSource).not.toContain('bottom={5}');
     expect(resumeSource).not.toContain('rows.slice(0, 8)');
@@ -694,7 +700,7 @@ describe('TUI app layout', () => {
   });
 
   test('uses a full-width topbar above one continuous workbench and Mission rail', () => {
-    const topbarIndex = appSource.indexOf('Session topbar spans conversation and Mission rail.');
+    const topbarIndex = appSource.indexOf('Session topbar always spans the full width (welcome + conversation).');
     const splitWorkspaceIndex = appSource.indexOf('Split workspace starts below the full-width session topbar.');
 
     expect(topbarIndex).toBeGreaterThan(-1);
@@ -751,6 +757,9 @@ describe('TUI app layout', () => {
     expect(appSource).toContain("experience.surface.picker === 'goal'");
     expect(appSource).toContain('filterGoalPlanHistory(sharedGoalPlans, goalSurface.query)');
     expect(appSource).toContain('<GoalPlanPicker');
+    expect(appSource).toContain('outerPadding={layout.outerPadding}');
+    expect(goalStatusViewSource).toContain('paddingLeft={outerPadding}');
+    expect(goalStatusViewSource).toContain('paddingRight={outerPadding}');
     expect(appSource).toContain('moveTuiSurfaceSelection(current.surface, direction, goalPickerPlans.length)');
     expect(appSource).toContain('selectGoalFromHistory(plan.planId)');
   });
