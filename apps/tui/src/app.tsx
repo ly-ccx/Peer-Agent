@@ -2575,12 +2575,12 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           <text fg={COLOR.muted} wrapMode="none">
             {sessionTopbarModel}
           </text>
+          <text fg={COLOR.success} wrapMode="none">{APP_CHROME.onlineDot}</text>
           {sessionTopbarQuota ? (
             <text fg={subscriptionQuotaColor(sessionTopbarQuotaRemaining)} wrapMode="none">
               {sessionTopbarQuota}
             </text>
           ) : null}
-          <text fg={COLOR.success} wrapMode="none">{APP_CHROME.onlineDot}</text>
         </box>
         <box marginLeft={layout.outerPadding} marginRight={layout.outerPadding} flexShrink={0}>
           <ComposerModeDivider width={topbarDividerWidth} />
