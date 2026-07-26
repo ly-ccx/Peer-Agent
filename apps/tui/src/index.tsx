@@ -33,6 +33,7 @@ import { resolveTuiWire } from './provider-wire-matrix.ts';
 import {
   ensureFreshGoogleTokensFromDesktop,
   ensureFreshGrokTokensFromDesktop,
+  startGrokReLoginFromDesktop,
   loadQoderAccessTokenFromDesktop,
 } from './desktop-provider-adapters.ts';
 import { createTuiHost } from './tui-host.ts';
@@ -108,8 +109,21 @@ function sharedProvider(credentialId: string) {
             if (metadata.authMethod === 'oauth_chatgpt') {
               return refreshChatGptOAuthTokens(tokens);
             }
-            const fresh = await ensureFreshGrokTokensFromDesktop(tokens, { fetchImpl: providerFetch });
-            return fresh.tokens;
+            try {
+              const fresh = await ensureFreshGrokTokensFromDesktop(tokens, { fetchImpl: providerFetch });
+              return fresh.tokens;
+            } catch (err: any) {
+              if (err?.code === 'grok_oauth_scope_upgrade_required') {
+                // Scope upgrade requires a fresh device flow — refresh tokens
+                // cannot add `api:access`. Auto-trigger re-login in the CLI.
+                const reLoginTokens = await startGrokReLoginFromDesktop({ fetchImpl: providerFetch });
+                // Persist the new tokens so subsequent requests don't re-trigger.
+                const current = modelConfig.resolveSharedSelection?.(credentialId);
+                if (current) current.persistOAuthTokens(reLoginTokens);
+                return reLoginTokens;
+              }
+              throw err;
+            }
           },
           persistTokens(tokens) {
             const current = modelConfig.resolveSharedSelection?.(credentialId);
