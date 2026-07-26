@@ -55,3 +55,33 @@ test('same runtime facts produce stable sections, checksums, and rendered hash',
   assert.equal(first.snapshot.renderedHash, second.snapshot.renderedHash);
   assert.equal(first.snapshot.id, second.snapshot.id);
 });
+
+test('continuity injection keeps full summary body without fixed 12k truncation', () => {
+  const longSummary = [
+    'Current Work: restore unfinished continuity details.',
+    `Pending Tasks:\n- last unfinished action marker ${'y'.repeat(13_500)}`,
+    'Optional Next Step: continue the last unfinished action without asking the user to restate it.',
+  ].join('\n\n');
+  assert.ok(longSummary.length > 12_000);
+
+  const context = assembleSystemContext({
+    workspacePath: '/tmp/peer-system-context',
+    continuityContext: [{
+      id: 'compact-long',
+      method: 'llm',
+      originalMessageCount: 64,
+      beforeTokens: 150000,
+      afterTokens: 28000,
+      summary: longSummary,
+    }],
+  });
+
+  const continuity = context.sections.find((section) => section.id === 'runtime.continuity');
+  assert.ok(continuity);
+  assert.match(continuity.content, /integrity priority/);
+  assert.doesNotMatch(continuity.content, /\[continuity summary truncated\]/);
+  assert.ok(continuity.content.includes(longSummary));
+  assert.equal(continuity.source.integrityFirst, true);
+  assert.equal(continuity.source.summaries[0].summaryChars, longSummary.length);
+  assert.match(context.rendered, /last unfinished action marker/);
+});

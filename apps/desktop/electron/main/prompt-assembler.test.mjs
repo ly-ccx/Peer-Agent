@@ -272,10 +272,44 @@ describe('System Context assembly', () => {
     ]);
     const rendered = renderSystemContext(context);
     assert.match(rendered, /Continuity context from previous compaction/);
-    assert.match(rendered, /not fresh evidence/);
+    assert.match(rendered, /integrity priority/);
+    assert.match(rendered, /not a replacement for Tool Result \/ Evidence/);
     assert.match(rendered, /finish architecture governance/);
     assert.equal(context.snapshot.sectionRefs[4].source.summaryCount, 1);
     assert.equal(context.snapshot.sectionRefs[4].source.summaries[0].method, 'llm');
+    assert.equal(context.snapshot.sectionRefs[4].source.integrityFirst, true);
+  });
+
+  it('injects full continuity summary without a fixed 12k character chop', () => {
+    const longSummary = [
+      'Current Work: finish continuity integrity injection.',
+      `Pending Tasks:\n- keep the last unfinished step: ${'x'.repeat(13_000)}`,
+      'Decision Anchors: integrity-first, no mechanical truncation.',
+    ].join('\n\n');
+    assert.ok(longSummary.length > 12_000, 'fixture must exceed the old 12k hard cap');
+
+    const context = buildSystemContext('/tmp/workspace', {
+      continuityContext: [{
+        id: 'compaction-long',
+        method: 'llm',
+        originalMessageCount: 88,
+        beforeTokens: 180000,
+        afterTokens: 32000,
+        summary: longSummary,
+      }],
+    });
+
+    const continuity = context.sections.find((section) => section.id === 'runtime.continuity');
+    assert.ok(continuity);
+    assert.match(continuity.content, /Current Work: finish continuity integrity injection/);
+    assert.match(continuity.content, /Decision Anchors: integrity-first, no mechanical truncation/);
+    assert.doesNotMatch(continuity.content, /\[continuity summary truncated\]/);
+    assert.ok(
+      continuity.content.includes(longSummary),
+      'full summary body must be injected without mechanical truncation',
+    );
+    assert.equal(continuity.source.summaries[0].summaryChars, longSummary.length);
+    assert.equal(continuity.source.integrityFirst, true);
   });
 
   it('renders provider/model selection as runtime context instead of provider wire formatting', () => {

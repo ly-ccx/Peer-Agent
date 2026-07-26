@@ -1,7 +1,16 @@
 import { neutralizeToolCallSyntax } from '../sanitize-context-text.mjs';
 
+/**
+ * Continuity injection prefers integrity over mechanical length chopping.
+ *
+ * Compaction already produces a cumulative handoff summary (carry-forward + delta).
+ * Inject that body whole into system context. Do not re-truncate the summary text
+ * with a fixed character budget — that would undo LLM compaction's purpose.
+ *
+ * We still keep a small recent-item window for callers that pass multiple items,
+ * but production paths typically supply only the latest cumulative handoff.
+ */
 const MAX_CONTINUITY_SUMMARIES = 3;
-const MAX_SUMMARY_CHARS = 12_000;
 
 function normalizeContinuityItem(item, index) {
   if (!item || typeof item !== 'object') return null;
@@ -12,28 +21,42 @@ function normalizeContinuityItem(item, index) {
       : '');
   if (!summary) return null;
   return {
-    id: typeof item.id === 'string' ? item.id : `continuity-${index}`,
-    method: typeof item.method === 'string' ? item.method : 'unknown',
-    originalMessageCount: Number.isFinite(item.originalMessageCount) ? item.originalMessageCount : 0,
-    beforeTokens: Number.isFinite(item.beforeTokens) ? item.beforeTokens : 0,
-    afterTokens: Number.isFinite(item.afterTokens) ? item.afterTokens : 0,
-    summary: summary.length > MAX_SUMMARY_CHARS
-      ? `${summary.slice(0, MAX_SUMMARY_CHARS)}\n[continuity summary truncated]`
-      : summary,
+    id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `continuity-${index + 1}`,
+    // Integrity-first: keep the full summary body produced by compaction.
+    summary,
+    method: typeof item.method === 'string' && item.method.trim() ? item.method.trim() : 'unknown',
+    originalMessageCount: Number.isFinite(item.originalMessageCount) ? item.originalMessageCount : null,
+    beforeTokens: Number.isFinite(item.beforeTokens) ? item.beforeTokens : null,
+    afterTokens: Number.isFinite(item.afterTokens) ? item.afterTokens : null,
   };
+}
+
+function formatContinuityItem(item, index) {
+  const meta = [
+    `method=${item.method}`,
+    item.originalMessageCount != null ? `originalMessages=${item.originalMessageCount}` : null,
+    item.beforeTokens != null ? `beforeTokens=${item.beforeTokens}` : null,
+    item.afterTokens != null ? `afterTokens=${item.afterTokens}` : null,
+    `summaryChars=${item.summary.length}`,
+  ].filter(Boolean).join('; ');
+  return [
+    `## Continuity Summary ${index + 1}`,
+    meta,
+    '',
+    item.summary,
+  ].join('\n');
 }
 
 function formatContinuityContext(items) {
   return [
     'Continuity context from previous compaction.',
-    'This is a navigation aid, not fresh evidence. If continuity context conflicts with recent user messages, follow the recent user messages. If local facts matter, verify them with tools before claiming them.',
+    'This is the cumulative handoff summary for navigation and unfinished work.',
+    'Injected with integrity priority: the summary body is kept complete (not mechanically truncated by a fixed character budget).',
+    'It is continuity context, not a replacement for Tool Result / Evidence.',
+    'If it conflicts with newer user messages, prefer the latest user messages.',
+    'If local facts matter, verify them with tools before claiming them.',
     '',
-    ...items.map((item, index) => [
-      `## Continuity Summary ${index + 1}`,
-      `method=${item.method}; originalMessages=${item.originalMessageCount}; beforeTokens=${item.beforeTokens}; afterTokens=${item.afterTokens}`,
-      '',
-      item.summary,
-    ].join('\n')),
+    ...items.map((item, index) => formatContinuityItem(item, index)),
   ].join('\n');
 }
 
@@ -41,31 +64,34 @@ export function createContinuityPromptSource() {
   return {
     id: 'runtime.continuity',
     layer: 'L7_CONTINUITY',
-    priority: 0,
+    priority: 10,
     trust: 'runtime',
     observe(input = {}) {
       const rawItems = Array.isArray(input.continuityContext)
         ? input.continuityContext
         : [];
       const items = rawItems
-        .map(normalizeContinuityItem)
+        .map((item, index) => normalizeContinuityItem(item, index))
         .filter(Boolean)
+        // Prefer the most recent cumulative handoffs when multiple are supplied.
         .slice(-MAX_CONTINUITY_SUMMARIES);
       return { items };
     },
-    render(observation) {
-      if (!observation.items.length) return [];
+    render(observation = {}) {
+      const items = Array.isArray(observation.items) ? observation.items : [];
+      if (!items.length) return [];
       return [{
         id: 'runtime.continuity',
         layer: 'L7_CONTINUITY',
-        priority: 0,
-        title: 'Continuity context',
-        content: formatContinuityContext(observation.items),
+        priority: 10,
+        title: 'Continuity Context',
+        content: formatContinuityContext(items),
         source: {
           id: 'runtime.continuity',
           kind: 'compaction-continuity',
-          summaryCount: observation.items.length,
-          summaries: observation.items.map((item) => ({
+          integrityFirst: true,
+          summaryCount: items.length,
+          summaries: items.map((item) => ({
             id: item.id,
             method: item.method,
             originalMessageCount: item.originalMessageCount,
