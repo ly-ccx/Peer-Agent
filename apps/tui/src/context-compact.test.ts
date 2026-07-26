@@ -4,6 +4,7 @@ import type { ModelMessage } from '@peer-agent/runtime-node';
 import {
   buildHandoffContent,
   buildStructuralSummary,
+  formatCompactMethodLabel,
   TUI_COMPACT_KEEP_RECENT,
 } from './context-compact.ts';
 
@@ -60,5 +61,12 @@ describe('context-compact structural summary', () => {
 
   test('uses default keep-recent window size', () => {
     expect(TUI_COMPACT_KEEP_RECENT).toBe(8);
+  });
+
+  test('formatCompactMethodLabel maps cascade methods for UI', () => {
+    expect(formatCompactMethodLabel('llm')).toBe('LLM');
+    expect(formatCompactMethodLabel('structured')).toBe('Structural');
+    expect(formatCompactMethodLabel('fallback_drop')).toBe('Fallback');
+    expect(formatCompactMethodLabel(undefined)).toBe('Unknown');
   });
 });

@@ -808,7 +808,8 @@ describe('TUI compact progress and separator rendering', () => {
     expect(appSource).toContain("phase === 'progress' ? 'COMPACTING' : 'COMPACTED'");
     expect(appSource).toContain("phase === 'done'");
     expect(appSource).toContain('Earlier conversation (compacted)');
-    expect(appSource).toContain('${message.compact?.summarizedCount ?? 0} msgs · Structural');
+    expect(appSource).toContain('formatCompactMethodLabel(message.compact?.method)');
+    expect(appSource).toContain('${message.compact?.summarizedCount ?? 0} msgs · ${formatCompactMethodLabel(message.compact?.method)}');
     expect(appSource).toContain(': message.content;');
     expect(appSource).toContain("{compactSummary || ' '}");
     expect(appSource).not.toContain("{message.content || ' '}");

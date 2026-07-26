@@ -48,6 +48,7 @@ import {
   type ChatModelPort,
   type ChatSnapshot,
 } from './chat-controller.ts';
+import { formatCompactMethodLabel } from './context-compact.ts';
 import {
   chipifyImagePathsInText,
   extractImagePathTokens,
@@ -469,7 +470,7 @@ function ChatHistory({
           const phase = message.compact?.phase ?? 'done';
           const label = phase === 'progress' ? 'COMPACTING' : 'COMPACTED';
           const compactSummary = phase === 'done'
-            ? `Earlier conversation (compacted) · ${message.compact?.summarizedCount ?? 0} msgs · Structural`
+            ? `Earlier conversation (compacted) · ${message.compact?.summarizedCount ?? 0} msgs · ${formatCompactMethodLabel(message.compact?.method)}`
             : message.content;
           return (
             <box key={message.id} flexDirection="column" marginBottom={1} marginTop={1}>

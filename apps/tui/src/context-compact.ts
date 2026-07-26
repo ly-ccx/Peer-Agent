@@ -1,4 +1,5 @@
 import type { ModelMessage, ModelToolCall } from '@peer-agent/runtime-node';
+import type { CompactionMethod } from '@peer-agent/runtime-core';
 
 /** Keep the most recent non-system messages after structural compaction. */
 export const TUI_COMPACT_KEEP_RECENT = 8;
@@ -89,6 +90,21 @@ export function buildStructuralSummary(oldMessages: readonly ModelMessage[]): st
   }
 
   return parts.join('\n').trim();
+}
+
+
+/** UI label for the shared Desktop/CLI compaction cascade method. */
+export function formatCompactMethodLabel(method?: CompactionMethod | null): string {
+  switch (method) {
+    case 'llm':
+      return 'LLM';
+    case 'structured':
+      return 'Structural';
+    case 'fallback_drop':
+      return 'Fallback';
+    default:
+      return 'Unknown';
+  }
 }
 
 export function buildHandoffContent(summary: string, oldCount: number): string {
