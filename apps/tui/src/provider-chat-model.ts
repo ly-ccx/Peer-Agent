@@ -222,6 +222,43 @@ async function streamWithSafeRetry(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+
+/** Align with Desktop: keep recent tail of summary input under a token budget. */
+const TUI_SUMMARY_MAX_INPUT_TOKENS = 80_000;
+const TUI_SUMMARY_CHARS_PER_TOKEN = 4;
+const TUI_SUMMARY_SAFETY_RESERVE_TOKENS = 4_000;
+
+export function truncateSummaryInputPreferTail(text: string, maxChars: number): string {
+  const value = String(text ?? '');
+  const limit = Number(maxChars);
+  if (!Number.isFinite(limit) || limit <= 0) return '';
+  if (value.length <= limit) return value;
+  const marker = '\n...[summary input truncated: kept recent tail near compaction point; older head omitted]...\n';
+  if (limit <= marker.length) return value.slice(-limit);
+  const tailBudget = limit - marker.length;
+  return `${marker}${value.slice(-tailBudget)}`;
+}
+
+export function resolveTuiSummaryInputMaxChars(options: {
+  readonly contextWindow?: number | null;
+  readonly maxOutputTokens?: number | null;
+} = {}): number {
+  const summaryMaxTokens = Math.max(
+    1_024,
+    Math.min(
+      Number(options.maxOutputTokens) > 0 ? Number(options.maxOutputTokens) : 4_096,
+      12_000,
+    ),
+  );
+  let summaryMaxInputTokens = TUI_SUMMARY_MAX_INPUT_TOKENS;
+  const windowTokens = Number(options.contextWindow);
+  if (Number.isFinite(windowTokens) && windowTokens > 0) {
+    const usableInput = Math.max(2_000, windowTokens - summaryMaxTokens - TUI_SUMMARY_SAFETY_RESERVE_TOKENS);
+    summaryMaxInputTokens = Math.min(summaryMaxInputTokens, usableInput);
+  }
+  return Math.max(1, Math.floor(summaryMaxInputTokens * TUI_SUMMARY_CHARS_PER_TOKEN));
+}
+
 export function createProviderChatModel(options: CreateProviderChatModelOptions): ChatModelPort {
   const defaultToolDefinitions = options.toolDefinitions ?? [];
   const toolDefinitionsForMode = (mode: TuiRuntimeMode) =>
@@ -240,7 +277,14 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
     ) => void;
   }): Promise<string> => {
     let streamedChars = 0;
-    const inputChars = input.formattedHistory.length;
+    const summaryInputMaxChars = resolveTuiSummaryInputMaxChars({
+      contextWindow: typeof (options as { contextWindow?: number }).contextWindow === 'number'
+        ? (options as { contextWindow?: number }).contextWindow
+        : undefined,
+      maxOutputTokens: 4096,
+    });
+    const boundedHistory = truncateSummaryInputPreferTail(input.formattedHistory, summaryInputMaxChars);
+    const inputChars = boundedHistory.length;
     const maxSummaryChars = resolveMaxSummaryChars({ maxOutputTokens: 4096 });
     const reportLiveProgress = () => {
       input.onProgress?.(
@@ -258,7 +302,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         model: options.getModel?.() ?? options.model,
         messages: [
           { role: 'system', content: COMPACTION_SUMMARY_SYSTEM_PROMPT },
-          { role: 'user', content: input.formattedHistory },
+          { role: 'user', content: boundedHistory },
           { role: 'user', content: COMPACTION_SUMMARY_PROMPT },
         ],
         tools: [],

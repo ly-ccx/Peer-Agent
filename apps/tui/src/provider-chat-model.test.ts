@@ -23,6 +23,7 @@ import {
 } from './provider-chat-model.ts';
 import type { TuiHost } from './tui-host.ts';
 import { buildTuiSystemPrompt } from './tui-language.ts';
+import { resolveTuiSummaryInputMaxChars, truncateSummaryInputPreferTail } from './provider-chat-model.ts';
 
 const toolDefinitions: RuntimeToolDefinition[] = [{
   name: 'read_file',
@@ -979,3 +980,22 @@ describe('createProviderChatModel mid-turn LLM compaction', () => {
 function connectionError(message: string): Error {
   return new TypeError(message);
 }
+
+describe('TUI summary input budget', () => {
+  test('truncateSummaryInputPreferTail keeps recent tail under budget', () => {
+    const input = 'HEAD-' + 'x'.repeat(1000) + '-TAIL';
+    const out = truncateSummaryInputPreferTail(input, 240);
+    expect(out.length).toBeLessThanOrEqual(240);
+    expect(out.endsWith('-TAIL')).toBe(true);
+    expect(out).toContain('summary input truncated');
+    expect(out.startsWith('HEAD-')).toBe(false);
+  });
+
+  test('resolveTuiSummaryInputMaxChars respects context window', () => {
+    const maxChars = resolveTuiSummaryInputMaxChars({ contextWindow: 32_000, maxOutputTokens: 4_096 });
+    // usable ~= 32000 - 4096 - 4000 = 23904 tokens * 4 chars
+    expect(maxChars).toBeLessThanOrEqual(80_000 * 4);
+    expect(maxChars).toBeGreaterThan(2_000 * 4);
+  });
+});
+
