@@ -115,6 +115,7 @@ export function GoalPlanPicker({
   currentPlanId,
   query,
   maxVisible,
+  outerPadding,
   onSelect,
 }: {
   readonly plans: readonly TuiGoalPlan[];
@@ -122,6 +123,7 @@ export function GoalPlanPicker({
   readonly currentPlanId: string | null;
   readonly query: string;
   readonly maxVisible: number;
+  readonly outerPadding: number;
   readonly onSelect: (planId: string) => void;
 }) {
   const visiblePlans = selectionWindow(plans, selectedIndex, maxVisible);
@@ -132,6 +134,8 @@ export function GoalPlanPicker({
       border={['top']}
       borderColor={COLOR.border}
       backgroundColor={COLOR.background}
+      paddingLeft={outerPadding}
+      paddingRight={outerPadding}
       paddingTop={1}
       paddingBottom={1}
     >
