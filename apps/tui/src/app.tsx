@@ -1222,6 +1222,14 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const [themeMode, setThemeMode] = useState<TuiThemeMode>(() => themeStore?.getMode() ?? 'dark');
   // Force chrome re-render after palette mutation (COLOR is a shared mutable object).
   const [, setThemeTick] = useState(0);
+  // Keep open sessions in sync when OS auto-switches light/dark under mode=system.
+  useEffect(() => {
+    if (!themeStore) return;
+    return themeStore.subscribe((state) => {
+      setThemeMode(state.mode);
+      setThemeTick((tick) => tick + 1);
+    });
+  }, [themeStore]);
   const [composerDraft, setComposerDraft] = useState('');
   const imagePathRegistryRef = useRef(new Map<string, string>());
   const [experience, setExperience] = useState<TuiExperienceState>(() => createTuiExperienceState());
