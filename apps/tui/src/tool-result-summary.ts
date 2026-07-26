@@ -317,10 +317,21 @@ export function runningActivityField(frame: number, width = 80): string {
 }
 
 export function formatRunningElapsed(elapsedMs: number): string {
-  const seconds = Math.max(0, Math.floor(elapsedMs / 1_000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+  // Wall-clock elapsed as compact day/hour/minute/second units (not clock-style mm:ss).
+  let remaining = Math.max(0, Math.floor(elapsedMs / 1_000));
+  const days = Math.floor(remaining / 86_400);
+  remaining %= 86_400;
+  const hours = Math.floor(remaining / 3_600);
+  remaining %= 3_600;
+  const minutes = Math.floor(remaining / 60);
+  const seconds = remaining % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  // Always keep seconds so short runs stay readable (e.g. "31s", "1m5s").
+  if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+  return parts.join('');
 }
 
 /** Character field + stable real status + elapsed time, with narrow-width fallback. */

@@ -160,7 +160,10 @@ describe('tool result summary', () => {
     expect(runningActivityField(0, 80)).toHaveLength(12);
     expect(runningActivityField(1, 80)).not.toBe(runningActivityField(0, 80));
     expect(formatRunningElapsed(999)).toBe('0s');
-    expect(formatRunningElapsed(65_000)).toBe('1:05');
+    expect(formatRunningElapsed(31_000)).toBe('31s');
+    expect(formatRunningElapsed(65_000)).toBe('1m5s');
+    expect(formatRunningElapsed(3_661_000)).toBe('1h1m1s');
+    expect(formatRunningElapsed(90_061_000)).toBe('1d1h1m1s');
     // Generic running: activity field + timer only (no static "Working…" label).
     expect(composerRunningStatusLine({
       frame: 0,

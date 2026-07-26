@@ -221,6 +221,7 @@ function ComposerRunningStatusLabel({
     <ComposerRunningStatusBar
       activity={activity}
       statusLabel={statusLabel}
+      frame={frame}
     />
   );
 }

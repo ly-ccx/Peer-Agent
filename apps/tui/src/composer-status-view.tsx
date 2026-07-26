@@ -4,12 +4,22 @@ import { COLOR, contextUsageColor } from './tui-theme.ts';
 export type ComposerStatusLayout = 'wide' | 'compact' | 'narrow';
 
 /** Footer running status, mounted above the quiet input divider. */
+/** Soft neon palette for the Crush-style activity field (accent / ice / lime-adjacent). */
+const NEON_ACTIVITY_COLORS = [COLOR.accent, COLOR.info, COLOR.success] as const;
+
+export function neonActivityColor(index: number, frame = 0): string {
+  return NEON_ACTIVITY_COLORS[Math.abs(index + frame) % NEON_ACTIVITY_COLORS.length] ?? COLOR.accent;
+}
+
 export function ComposerRunningStatusBar({
   activity,
   statusLabel,
+  frame = 0,
 }: {
   readonly activity: string;
   readonly statusLabel: string;
+  /** Animation frame — shifts per-character neon colors without changing glyphs. */
+  readonly frame?: number;
 }) {
   return (
     <box
@@ -20,8 +30,12 @@ export function ComposerRunningStatusBar({
       paddingLeft={1}
       paddingRight={1}
     >
-      <text fg={COLOR.accent} wrapMode="none">
-        <span>{activity}</span>
+      <text wrapMode="none">
+        {[...activity].map((character, index) => (
+          <span key={`${index}-${character}`} fg={neonActivityColor(index, frame)}>
+            {character}
+          </span>
+        ))}
         <span fg={COLOR.textSoft}>  {statusLabel}</span>
       </text>
       <text fg={COLOR.subtle} wrapMode="none">
