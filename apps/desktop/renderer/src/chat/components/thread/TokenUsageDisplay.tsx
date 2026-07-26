@@ -1,4 +1,8 @@
-import type { LlmProviderConfigView, LlmSubscriptionQuota } from '@peer-agent/protocol';
+import type {
+  ContextAccountingSnapshot,
+  LlmProviderConfigView,
+  LlmSubscriptionQuota,
+} from '@peer-agent/protocol';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { DropdownOption } from '../../../app/components/Dropdown';
@@ -185,7 +189,8 @@ export function TokenUsageDisplay({
   providers,
   tokenUsage,
   activeUsage,
-  nextRequestInputTokens,
+  contextAccounting,
+  emptyContext = false,
   contextWindow,
   isStreaming,
   isZh,
@@ -201,8 +206,10 @@ export function TokenUsageDisplay({
   readonly providers: readonly LlmProviderConfigView[];
   readonly tokenUsage: TokenUsageState | null;
   readonly activeUsage?: TokenUsageState | null;
-  /** ADR 52：下一次最终请求预计输入（主圆环分子 + Runtime preflight 同源）。 */
-  readonly nextRequestInputTokens?: number;
+  /** ADR 56: the sole context-capacity state. */
+  readonly contextAccounting?: ContextAccountingSnapshot | null;
+  /** A brand-new draft has no conversation history and therefore starts at 0%. */
+  readonly emptyContext?: boolean;
   /** 权威上下文窗口（与压缩触发同窗口）。传入时优先于 provider 配置窗口，消除百分比偏差。 */
   readonly contextWindow?: number;
   readonly isStreaming?: boolean;
@@ -264,19 +271,22 @@ export function TokenUsageDisplay({
     };
   }, [quotaProviderId]);
 
-  const hasInfo = tokenUsage || activeUsage || nextRequestInputTokens || defaultProvider?.contextWindow || defaultProvider?.inputPrice != null;
+  const hasInfo = tokenUsage || activeUsage || contextAccounting || defaultProvider?.contextWindow || defaultProvider?.inputPrice != null;
   if (!hasInfo) return null;
 
   const input = (tokenUsage?.input ?? 0) + (activeUsage?.input ?? 0);
   const output = (tokenUsage?.output ?? 0) + (activeUsage?.output ?? 0);
   const cacheWrite = (tokenUsage?.cacheWrite ?? 0) + (activeUsage?.cacheWrite ?? 0);
   const cacheRead = (tokenUsage?.cacheRead ?? 0) + (activeUsage?.cacheRead ?? 0);
-  // 累计 usage 仅用于费用估算；上下文圆环只接受下一次最终请求投影。
+  // 累计 usage 仅用于费用估算；上下文圆环只接受共享计量快照。
   // 缺失代表会话上下文尚未恢复，必须保持未知，不能伪装成 0 或有效百分比。
   const currentContextTokens =
-    typeof nextRequestInputTokens === 'number' && Number.isFinite(nextRequestInputTokens)
-      ? Math.max(0, nextRequestInputTokens)
-      : null;
+    typeof contextAccounting?.authoritativeInputTokens === 'number'
+      && Number.isFinite(contextAccounting.authoritativeInputTokens)
+      ? Math.max(0, contextAccounting.authoritativeInputTokens)
+      : emptyContext && contextAccounting == null
+        ? 0
+        : null;
   const cacheDenominator = input + cacheRead;
   const cacheHitPercent = cacheDenominator > 0 ? Math.round((cacheRead / cacheDenominator) * 100) : null;
   // 仅当前选中模型支持 Prompt 缓存时才展示缓存命中率，避免切到无缓存模型后仍显示旧模型遗留的累计缓存数据。
@@ -296,16 +306,34 @@ export function TokenUsageDisplay({
 
   // 口径统一：分母优先用调用方传入的权威上下文窗口（与压缩触发同窗口），
   // 仅在未提供（>0 校验）时回退到 provider 配置窗口，避免两套窗口导致百分比与触发线不符。
-  const ctxWindow = (typeof contextWindow === 'number' && contextWindow > 0) ? contextWindow : defaultProvider?.contextWindow;
-  const ctxPercent = ctxWindow && currentContextTokens != null
-    ? Math.min((currentContextTokens / ctxWindow) * 100, 100)
-    : null;
-  const hasCtxRing = ctxWindow != null && currentContextTokens != null && ctxPercent != null;
-  // 圆环 hover：只展示下一次请求预计占用，叠加缓存命中率与订阅剩余额度。
+  const ctxWindow = contextAccounting?.contextWindow
+    ?? ((typeof contextWindow === 'number' && contextWindow > 0)
+      ? contextWindow
+      : defaultProvider?.contextWindow);
+  const ctxPercent =
+    typeof contextAccounting?.percent === 'number'
+    && Number.isFinite(contextAccounting.percent)
+      ? Math.min(Math.max(contextAccounting.percent, 0), 100)
+      : emptyContext && contextAccounting == null
+        ? 0
+        : null;
+  const hasCtxRing = ctxWindow != null;
+  const contextCounterDegraded = contextAccounting?.counterStatus === 'degraded';
+  // 圆环 hover：展示用户可理解的上下文计量、漂移告警与附加诊断。
+  // pendingUncountedChanges 是 Runtime 内部状态，不向用户暴露实现细节。
   const quotaTooltipLine = formatQuotaTooltipLine(subscriptionQuota ?? undefined, isZh);
   const ctxTooltipLines: readonly string[] = hasCtxRing
     ? [
-        `${isZh ? '上下文' : 'Context'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow)} (${Math.round(ctxPercent)}%)`,
+        currentContextTokens != null && ctxPercent != null
+          ? `${isZh ? '上下文' : 'Context'} ${formatTokenCount(currentContextTokens)} / ${formatTokenCount(ctxWindow)} (${Math.round(ctxPercent)}%)`
+          : `${isZh ? '上下文待计量' : 'Context pending measurement'} / ${formatTokenCount(ctxWindow)}`,
+        ...(contextCounterDegraded
+          ? [
+              isZh
+                ? '精确计数与 provider usage 漂移，已降级采用 provider usage'
+                : 'Exact count drifted from provider usage; using provider usage',
+            ]
+          : []),
         ...(showCacheHit
           ? [
               isZh
@@ -378,10 +406,13 @@ export function TokenUsageDisplay({
             <span className="ctx-usage" aria-label={ctxTooltip} tabIndex={0}>
               <span
                 className="ctx-ring"
-                style={{ '--ctx-pct': ctxPercent } as CSSProperties}
+                style={{ '--ctx-pct': ctxPercent ?? 0 } as CSSProperties}
                 aria-hidden
               />
-              <span className="ctx-pct">{Math.round(ctxPercent)}%</span>
+              <span className="ctx-pct">
+                {ctxPercent == null ? '?' : `${Math.round(ctxPercent)}%`}
+                {contextCounterDegraded ? '!' : ''}
+              </span>
             </span>
           </Tooltip>
         ) : currentContextTokens != null && currentContextTokens > 0 ? (

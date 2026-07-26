@@ -6,40 +6,41 @@
  * Layer 3: 手动 /compact 指令（通过 chat:compact IPC handler）
  */
 
+import {
+  COMPACTION_PROGRESS_CONFIG,
+  COMPACTION_SUMMARY_PROMPT as COMPACT_PROMPT,
+  COMPACTION_SUMMARY_SYSTEM_PROMPT as SUMMARY_SYSTEM_PROMPT,
+  CONTEXT_PROJECTION_CONFIG,
+  estimateContextMessagesTokens,
+  estimateContextTextTokens,
+  estimateContextToolsTokens,
+  estimateSummaryChars as estimateSummaryCharsCore,
+  extractRecoverableClues,
+  formatCompactionMessagesForSummary,
+  microcompactMessagesForContext,
+  previewHistoricalText,
+  runCompactionSummaryCascade,
+  splitMessagesForCompaction,
+} from '@peer-agent/runtime-core';
 import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli-identity.mjs';
+import { buildCompactionMarker } from '@peer-agent/protocol';
 import { encodeOpenAIResponsesRequest } from './provider-encoders/responses-encoder.mjs';
 import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 import { logCompactionDiagnostic } from './compaction-diagnostic-log.mjs';
 import { neutralizeToolCallSyntax } from './chat-runtime/message-sanitizer.mjs';
 
 const COMPACTION_CONFIG = {
-  triggerRatio: 0.8,
-  charsPerToken: 4,
-  // 中文/日文/韩文等 CJK 字符的分词密度远高于英文：英文约 4 字符/token，
-  // CJK 约 1.7 字符/token（实测一段中文按 /4 会被低估约 2 倍）。两段分别估算，
-  // 避免把大量中文按 /4 系统性腰斩，导致进度条远低于 provider 实际计入的 input tokens。
-  cjkCharsPerToken: 1.7,
-  // 图片/文档块的固定 token 近似开销。
-  imageTokens: 2000,
-  // 每条消息的框架开销（role / 分隔符等结构性 token），对标 provider 计费口径。
-  // 旧实现按「+10 字符 / 4」≈ 2.5 token，偏小，这里直接以 token 计 4。
-  messageFramingTokens: 4,
-  // 每个 tool_use / tool_result 块除正文外的固定结构开销（块头、id、type 等）。
-  toolCallBlockOverhead: 8,
-  // 每个工具 schema 定义除 JSON 文本外的固定开销（名称包装、分隔等）。
-  toolDefinitionOverhead: 16,
+  // Token 投影与自动压缩阈值只有 runtime-core 一份真值；Desktop 这里只追加摘要执行参数。
+  ...CONTEXT_PROJECTION_CONFIG,
   // 摘要输出上限不再写死：在 summarizeWithLLM 内复用当前模型的 maxOutputTokens，
   // 未配置时回退到 12000，避免长摘要被小上限截断（压缩后内容看不全）。
   summaryMaxInputTokens: 80_000,   // 摘要输入的上限（旧消息文本）
   summaryTemperature: 0.2,
   maxPtlRetries: 3,
   circuitBreakerThreshold: 3,
-  // ── 进度估算（进度条分母）──
-  // 摘要产出长度 ≈ 输入对话长度 × 压缩比。经验值：语义摘要约把原文压到 ~12%。
-  // 用它而非「模型最大输出容量(maxOutputTokens*4)」作分母，避免进度收尾约 30% 即跳满。
-  summaryCompressionRatio: 0.12,
-  // 估算下限，避免极短对话时分母过小导致进度瞬间满。
-  minEstimatedSummaryChars: 1_200,
+  // 进度估算真值在 runtime-core/compaction-progress；Desktop 只 re-export 兼容字段。
+  summaryCompressionRatio: COMPACTION_PROGRESS_CONFIG.summaryCompressionRatio,
+  minEstimatedSummaryChars: COMPACTION_PROGRESS_CONFIG.minEstimatedSummaryChars,
   // 摘要生成默认输出预算；provider 未配置 maxOutputTokens 时回退到此值。
   defaultSummaryMaxTokens: 12_000,
   // 自动压缩触发时预留给「摘要输出」的 token，避免窗口顶满后摘要请求自身失败。
@@ -48,630 +49,51 @@ const COMPACTION_CONFIG = {
   safetyReserveTokens: 1_000,
 };
 
-const MICROCOMPACTION_CONFIG = {
-  keepRecentCount: 8,
-  triggerChars: 6_000,
-  previewChars: 800,
-};
+// ── Circuit breaker state (per-conversation scope) ──
+// 历史上是 module 级全局计数,会跨会话串状态(A 会话连续失败会熔断 B 会话的压缩)。
+// 现按 conversationId(缺省回退 streamId / 全局桶)隔离,见 23 号治理文档不变式 6。
 
-// 摘要专用 system prompt（对标 CC AGENT_CONTEXT_SUMMARY_SYSTEM_PROMPT）
-const SUMMARY_SYSTEM_PROMPT =
-  '你是对话摘要专家。请将以下对话历史压缩为详细摘要，保留关键信息：用户意图、重要决策、技术概念、文件变更、错误修复、待办事项。特别要详细记录用户的具体执行动作与操作步骤——用户要求做了什么、实际改动了哪些文件、命令/操作执行到哪一步、当前停在何处——因为原文已全量压缩、不再保留，连续性完全依赖本摘要承载。输出纯文本，不要用 markdown。';
+const compactionFailuresByScope = new Map();
 
-// 9 章节 compaction prompt（对标 CC BASE_COMPACT_PROMPT）
-const COMPACT_PROMPT = `Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
-This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.
-
-Before providing your final summary, wrap your analysis in <analysis> tags to organize your thoughts. In your analysis:
-1. Chronologically analyze each message and section of the conversation. For each section identify:
-   - The user's explicit requests and intents
-   - Your approach to addressing the user's requests
-   - Key decisions, technical concepts and code patterns
-   - Specific details like file names, code snippets, function signatures
-   - Errors that you ran into and how you fixed them
-   - Pay special attention to specific user feedback
-
-Your summary should include the following sections:
-
-1. Primary Request and Intent: Capture all of the user's explicit requests and intents in detail
-2. Key Technical Concepts: List all important technical concepts, technologies, and frameworks discussed.
-3. Files and Code Sections: Enumerate specific files and code sections examined, modified, or created. Include a summary of why this file read or edit is important.
-4. Errors and fixes: List all errors that you ran into, and how you fixed them. Pay special attention to specific user feedback.
-5. Problem Solving: Document problems solved and any ongoing troubleshooting efforts.
-6. All user messages: List ALL user messages that are not tool results.
-7. Pending Tasks: Outline any pending tasks that you have explicitly been asked to work on.
-8. Current Work: Describe in detail precisely what was being worked on immediately before this summary request. CRITICAL — record the user's concrete execution actions and operation steps in detail: what the user asked to do, which files were actually changed, what commands/operations were run and to which step they progressed, and exactly where things currently stand. The original conversation is fully compacted and NOT retained, so continuity depends entirely on this summary capturing those execution details.
-9. Optional Next Step: List the next step related to the most recent work. Include direct quotes from the most recent conversation.
-
-CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
-
-Here's an example of how your output should be structured:
-
-<example>
-<analysis>
-[Your thought process, ensuring all points are covered]
-</analysis>
-
-<summary>
-1. Primary Request and Intent:
-   [Detailed description]
-
-2. Key Technical Concepts:
-   - [Concept 1]
-   - [Concept 2]
-
-3. Files and Code Sections:
-   - [File Name]
-      - [Summary of why this file is important]
-      - [Code Snippet if applicable]
-
-4. Errors and fixes:
-    - [Error description]:
-      - [How you fixed it]
-      - [User feedback on the error if any]
-
-5. Problem Solving:
-   [Description of solved problems and ongoing troubleshooting]
-
-6. All user messages:
-    - [Non-tool-use user message]
-    - [...]
-
-7. Pending Tasks:
-   - [Task 1]
-   - [Task 2]
-
-8. Current Work:
-   [Precise description of current work]
-
-9. Optional Next Step:
-   [Optional Next step to take]
-
-</summary>
-</example>
-
-Please provide your summary based on the conversation so far, following this structure and ensuring precision and thoroughness in your response.`;
-
-// ── Circuit breaker state (module-level, per session) ──
-
-let consecutiveCompactionFailures = 0;
-
-export function resetCircuitBreaker() {
-  consecutiveCompactionFailures = 0;
+function breakerScopeKey(scope) {
+  return typeof scope === 'string' && scope ? scope : '__global__';
 }
 
-function isCircuitBreakerTripped() {
-  return consecutiveCompactionFailures >= COMPACTION_CONFIG.circuitBreakerThreshold;
+export function resetCircuitBreaker(scope = null) {
+  if (scope == null) {
+    compactionFailuresByScope.clear();
+    return;
+  }
+  compactionFailuresByScope.delete(breakerScopeKey(scope));
 }
 
-function recordCompactionSuccess() {
-  consecutiveCompactionFailures = 0;
+function isCircuitBreakerTripped(scope) {
+  return (compactionFailuresByScope.get(breakerScopeKey(scope)) ?? 0)
+    >= COMPACTION_CONFIG.circuitBreakerThreshold;
 }
 
-function recordCompactionFailure() {
-  consecutiveCompactionFailures++;
-  if (isCircuitBreakerTripped()) {
+function recordCompactionSuccess(scope) {
+  compactionFailuresByScope.delete(breakerScopeKey(scope));
+}
+
+function recordCompactionFailure(scope) {
+  const key = breakerScopeKey(scope);
+  const failures = (compactionFailuresByScope.get(key) ?? 0) + 1;
+  compactionFailuresByScope.set(key, failures);
+  if (failures >= COMPACTION_CONFIG.circuitBreakerThreshold) {
     console.warn(
-      `[context-compactor] Circuit breaker tripped after ${consecutiveCompactionFailures} consecutive failures — skipping future compaction attempts this session`,
+      `[context-compactor] Circuit breaker tripped for scope=${key} after ${failures} consecutive failures — skipping future compaction attempts for this conversation`,
     );
   }
 }
 
 // ── Token Estimation （对标 CC roughTokenCountEstimationForMessages）──
 
-// CJK 字符范围（中日韩统一表意文字、扩展 A、兼容表意、假名、谚文、全角标点）。
-// 命中这些字符的部分按 cjkCharsPerToken 估，其余按 charsPerToken 估，
-// 避免中文被「/4」系统性低估约 2 倍。
-const CJK_REGEX =
-  /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef\uac00-\ud7af]/g;
-
-/**
- * CJK 感知的文本 token 估算：CJK 字符按更高权重（约 1.7 字符/token），
- * 其余字符按英文权重（约 4 字符/token）。返回 token 数（未取整，便于累加）。
- */
-function estimateTextTokens(text) {
-  if (!text) return 0;
-  const str = typeof text === 'string' ? text : String(text);
-  const cjkMatches = str.match(CJK_REGEX);
-  const cjkCount = cjkMatches ? cjkMatches.length : 0;
-  const otherCount = str.length - cjkCount;
-  return (
-    cjkCount / COMPACTION_CONFIG.cjkCharsPerToken +
-    otherCount / COMPACTION_CONFIG.charsPerToken
-  );
-}
-
-function estimateTokensFromMessages(messages) {
-  let tokens = 0;
-  for (const m of messages) {
-    if (typeof m.content === 'string') {
-      tokens += estimateTextTokens(m.content);
-    } else if (Array.isArray(m.content)) {
-      for (const block of m.content) {
-        if (block.type === 'text' && block.text) {
-          tokens += estimateTextTokens(block.text);
-        } else if (block.type === 'tool_use') {
-          tokens += estimateTextTokens(block.name || '');
-          tokens += estimateTextTokens(JSON.stringify(block.input || {}));
-          tokens += COMPACTION_CONFIG.toolCallBlockOverhead;
-        } else if (block.type === 'tool_result') {
-          tokens += estimateTextTokens(
-            typeof block.content === 'string'
-              ? block.content
-              : JSON.stringify(block.content ?? ''),
-          );
-          tokens += COMPACTION_CONFIG.toolCallBlockOverhead;
-        } else if (
-          block.type === 'image' ||
-          block.type === 'image_url' ||
-          block.type === 'input_image' ||
-          block.type === 'document'
-        ) {
-          // 图片/文档以固定开销计。注意：未归一化前图片块的 type 可能是 'image_url'
-          // （renderer apiMessageMapping）或 'input_image'（OpenAI responses），其内部
-          // 携带的 base64 data URL 极大；若漏判会被 JSON.stringify 整段计入，导致几 MB
-          // 的图片被估成上百万 token，进而每轮都误触发压缩。
-          tokens += COMPACTION_CONFIG.imageTokens; // fixed image tokens
-        } else {
-          tokens += estimateTextTokens(JSON.stringify(block));
-        }
-      }
-    }
-    tokens += COMPACTION_CONFIG.messageFramingTokens; // 每条消息框架开销
-  }
-  return Math.ceil(tokens);
-}
-
-/**
- * 估算工具 schema 在每次请求里占用的 token。
- *
- * 工具定义（名称 + 描述 + JSON Schema 参数）是每次请求都全量发送给 provider 的，
- * 但旧实现的进度条/压缩触发完全没算它们。47 个工具的 schema 实测可达上万 token，
- * 是「进度条只有 ~100k 但 provider 报 input exceeds context window」的最大缺口。
- *
- * 兼容多种工具结构：
- * - Anthropic: { name, description, input_schema }
- * - OpenAI chat: { type:'function', function:{ name, description, parameters } }
- * - OpenAI responses / 扁平: { name, description, parameters }
- * - Gemini: { functionDeclarations: [{ name, description, parameters }] }
- *
- * @param {Array|object} tools 工具定义列表（或包含 functionDeclarations 的对象）
- * @returns {number} 估算 token 数
- */
-function estimateToolsTokens(tools) {
-  if (!tools) return 0;
-  // Gemini 形态：{ functionDeclarations: [...] } 或其数组
-  let list = tools;
-  if (!Array.isArray(list)) {
-    if (Array.isArray(tools.functionDeclarations)) {
-      list = tools.functionDeclarations;
-    } else {
-      list = [tools];
-    }
-  }
-  let tokens = 0;
-  for (const tool of list) {
-    if (!tool || typeof tool !== 'object') continue;
-    if (Array.isArray(tool.functionDeclarations)) {
-      tokens += estimateToolsTokens(tool.functionDeclarations);
-      continue;
-    }
-    const fn = tool.function && typeof tool.function === 'object' ? tool.function : tool;
-    const name = fn.name || tool.name || '';
-    const description = fn.description || tool.description || '';
-    const schema =
-      fn.parameters ?? fn.input_schema ?? tool.parameters ?? tool.input_schema ?? {};
-    tokens += estimateTextTokens(name);
-    tokens += estimateTextTokens(description);
-    tokens += estimateTextTokens(JSON.stringify(schema ?? {}));
-    tokens += COMPACTION_CONFIG.toolDefinitionOverhead;
-  }
-  return Math.ceil(tokens);
-}
-
-// ── Historical Tool Result Microcompaction ──
-
-function previewHistoricalText(text, maxChars = MICROCOMPACTION_CONFIG.previewChars) {
-  const value = String(text ?? '');
-  if (value.length <= maxChars) return value;
-  const headChars = Math.max(200, Math.floor(maxChars * 0.55));
-  const tailChars = Math.max(160, maxChars - headChars - 80);
-  return `${value.slice(0, headChars)}\n...[historical context preview truncated: ${value.length} chars]...\n${value.slice(-tailChars)}`;
-}
-
-function tryParseJsonObject(text) {
-  if (typeof text !== 'string') return null;
-  const trimmed = text.trim();
-  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return null;
-  try {
-    const parsed = JSON.parse(trimmed);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function pickDefined(source, fields) {
-  const result = {};
-  for (const field of fields) {
-    if (source?.[field] !== undefined) result[field] = source[field];
-  }
-  return result;
-}
-
-function compactLocalRefPayload(payload, previewChars) {
-  if (payload?.kind === 'local_tool_result_ref') {
-    const compacted = {
-      kind: payload.kind,
-      microCompacted: true,
-      note: 'Historical local tool result compacted; use artifact paths or suggestedRetrieval for full output.',
-      ...pickDefined(payload, [
-        'tool',
-        'command',
-        'cwd',
-        'status',
-        'exitCode',
-        'stdoutPath',
-        'stderrPath',
-        'metadataPath',
-        'artifactRef',
-        'artifactRefs',
-        'stdoutChars',
-        'stderrChars',
-        'stdoutLines',
-        'stderrLines',
-        'contextPreviewTruncated',
-        'suggestedRetrieval',
-      ]),
-    };
-    if (payload.stdoutPreview) {
-      compacted.stdoutPreview = previewHistoricalText(payload.stdoutPreview, previewChars);
-    }
-    if (payload.stderrPreview) {
-      compacted.stderrPreview = previewHistoricalText(payload.stderrPreview, Math.min(previewChars, 400));
-    }
-    return compacted;
-  }
-
-  if (payload?.kind === 'local_file_ref') {
-    return {
-      kind: payload.kind,
-      microCompacted: true,
-      note: 'Historical local file read compacted; use path or suggestedRetrieval for full content.',
-      ...pickDefined(payload, [
-        'tool',
-        'path',
-        'chars',
-        'lines',
-        'mtimeMs',
-        'sizeBytes',
-        'contentHash',
-        'fullRead',
-        'contextPreviewTruncated',
-        'suggestedRetrieval',
-      ]),
-      preview: previewHistoricalText(payload.preview ?? '', previewChars),
-    };
-  }
-
-  if (payload?.kind === 'local_capability_result_ref') {
-    const outputPreview = payload.outputPreview && typeof payload.outputPreview === 'object'
-      ? compactCapabilityOutputPreview(payload.outputPreview, previewChars)
-      : payload.outputPreview;
-    return {
-      kind: payload.kind,
-      microCompacted: true,
-      note: 'Historical local capability result compacted; use artifact paths or suggestedRetrieval for full output.',
-      ...pickDefined(payload, [
-        'tool',
-        'capabilityId',
-        'status',
-        'artifactRef',
-        'artifactRefs',
-        'suggestedRetrieval',
-      ]),
-      outputPreview,
-    };
-  }
-
-  return null;
-}
-
-function compactCapabilityOutputPreview(preview, previewChars) {
-  const next = {
-    ...pickDefined(preview, [
-      'status',
-      'tool',
-      'capabilityId',
-      'cwd',
-      'exitCode',
-      'stdoutPath',
-      'stderrPath',
-      'metadataPath',
-      'artifactRef',
-      'artifactRefs',
-      'stdoutChars',
-      'stderrChars',
-      'stdoutLines',
-      'stderrLines',
-      'contextPreviewTruncated',
-      'suggestedRetrieval',
-    ]),
-  };
-
-  // nested shell/file refs inside capability output
-  if (preview.localToolResultRef && typeof preview.localToolResultRef === 'object') {
-    next.localToolResultRef = compactLocalRefPayload(
-      { kind: 'local_tool_result_ref', ...preview.localToolResultRef },
-      previewChars,
-    ) || {
-      ...pickDefined(preview.localToolResultRef, [
-        'tool',
-        'command',
-        'cwd',
-        'status',
-        'exitCode',
-        'stdoutPath',
-        'stderrPath',
-        'metadataPath',
-        'artifactRef',
-        'artifactRefs',
-        'suggestedRetrieval',
-      ]),
-      microCompacted: true,
-    };
-  }
-
-  if (typeof preview.preview === 'string') {
-    next.preview = previewHistoricalText(preview.preview, previewChars);
-  }
-  if (typeof preview.stdoutPreview === 'string') {
-    next.stdoutPreview = previewHistoricalText(preview.stdoutPreview, previewChars);
-  }
-  if (typeof preview.stderrPreview === 'string') {
-    next.stderrPreview = previewHistoricalText(preview.stderrPreview, Math.min(previewChars, 400));
-  }
-
-  // Drop large unstructured blobs that are recoverable via artifact refs.
-  if (preview.aggregated && typeof preview.aggregated === 'object') {
-    next.aggregated = {
-      ...pickDefined(preview.aggregated, ['matchCount', 'truncated', 'laneCount']),
-      note: 'Aggregated match details dropped by microcompact; use artifactRefs/suggestedRetrieval.',
-    };
-  }
-
-  return next;
-}
-
-function uniqueNonEmptyStrings(values, limit = 12) {
-  const seen = new Set();
-  const result = [];
-  for (const value of values) {
-    const text = String(value ?? '').trim();
-    if (!text || seen.has(text)) continue;
-    seen.add(text);
-    result.push(text);
-    if (result.length >= limit) break;
-  }
-  return result;
-}
-
-/**
- * 从将被裁掉的历史正文中抽取可回捞线索（artifact / path / retrieval command）。
- * 目标：即使原文没有结构化 local_*_ref，压缩后仍留下可再读入口。
- */
-function extractRecoverableClues(text, { limit = 12 } = {}) {
-  const value = String(text ?? '');
-  if (!value) {
-    return { artifactRefs: [], paths: [], suggestedRetrieval: [] };
-  }
-
-  const artifactRefs = uniqueNonEmptyStrings([
-    ...(value.match(/local-[a-z0-9-]+-artifact:\/\/[^\s"'`\]]+/gi) || []),
-    ...(value.match(/tool-result:\/\/[^\s"'`\]]+/gi) || []),
-    ...(value.match(/goal-plan:\/\/[^\s"'`\]]+/gi) || []),
-  ], limit);
-
-  const pathPatterns = [
-    /(?:stdoutPath|stderrPath|metadataPath|path)\s*[:=]\s*["']([^"']+)["']/g,
-    /(?:^|\s)(\/(?:Users|home|tmp|var|private|Volumes)\/[^\s"'`\]]+)/g,
-    /(?:^|\s)([A-Za-z]:\\[^\s"'`\]]+)/g,
-  ];
-  const paths = [];
-  for (const pattern of pathPatterns) {
-    for (const match of value.matchAll(pattern)) {
-      const candidate = match[1] || match[0];
-      if (candidate) paths.push(candidate.trim());
-    }
-  }
-
-  const retrievalPatterns = [
-    /(?:^|\n)\s*((?:rg|tail|sed|cat|head|read_file)\b[^\n]{0,240})/g,
-  ];
-  const suggestedRetrieval = [];
-  for (const pattern of retrievalPatterns) {
-    for (const match of value.matchAll(pattern)) {
-      const cmd = String(match[1] || '').trim();
-      if (cmd.length >= 8) suggestedRetrieval.push(cmd);
-    }
-  }
-
-  // If we only have artifact paths, synthesize cheap retrieval commands.
-  for (const ref of artifactRefs) {
-    if (ref.startsWith('local-shell-artifact://') || ref.includes('/stdout')) {
-      suggestedRetrieval.push(`tail -n 120 "${ref}"`);
-    }
-  }
-  for (const filePath of uniqueNonEmptyStrings(paths, 6)) {
-    if (filePath.includes('stdout') || filePath.endsWith('.txt') || filePath.endsWith('.log')) {
-      suggestedRetrieval.push(`tail -n 120 "${filePath}"`);
-    } else {
-      suggestedRetrieval.push(`sed -n '1,120p' "${filePath}"`);
-    }
-  }
-
-  return {
-    artifactRefs: uniqueNonEmptyStrings(artifactRefs, limit),
-    paths: uniqueNonEmptyStrings(paths, limit),
-    suggestedRetrieval: uniqueNonEmptyStrings(suggestedRetrieval, limit),
-  };
-}
-
-function compactLongHistoricalString(text, previewChars) {
-  const clues = extractRecoverableClues(text);
-  const hasClues = clues.artifactRefs.length > 0
-    || clues.paths.length > 0
-    || clues.suggestedRetrieval.length > 0;
-  const lines = [
-    hasClues
-      ? '[历史长文本已从活跃上下文压缩为预览；请用下方可回捞线索按需读取原文]'
-      : '[历史长文本已从活跃上下文压缩为预览；原文没有可恢复的本地 artifact ref]',
-    `originalChars: ${text.length}`,
-  ];
-  if (clues.artifactRefs.length > 0) {
-    lines.push(`artifactRefs: ${JSON.stringify(clues.artifactRefs)}`);
-  }
-  if (clues.paths.length > 0) {
-    lines.push(`paths: ${JSON.stringify(clues.paths)}`);
-  }
-  if (clues.suggestedRetrieval.length > 0) {
-    lines.push('suggestedRetrieval:');
-    for (const cmd of clues.suggestedRetrieval) {
-      lines.push(`  - ${cmd}`);
-    }
-  }
-  lines.push('', previewHistoricalText(text, previewChars));
-  return lines.join('\n');
-}
-
-function microcompactStringContent(content, config) {
-  const parsed = tryParseJsonObject(content);
-  if (parsed) {
-    const compactedRef = compactLocalRefPayload(parsed, config.previewChars);
-    if (compactedRef) {
-      const nextContent = JSON.stringify(compactedRef, null, 2);
-      if (nextContent.length < content.length) {
-        return {
-          content: nextContent,
-          compacted: true,
-          beforeChars: content.length,
-          afterChars: nextContent.length,
-        };
-      }
-    }
-  }
-
-  if (content.length <= config.triggerChars) {
-    return { content, compacted: false, beforeChars: content.length, afterChars: content.length };
-  }
-
-  const nextContent = compactLongHistoricalString(content, config.previewChars);
-  return {
-    content: nextContent,
-    compacted: true,
-    beforeChars: content.length,
-    afterChars: nextContent.length,
-  };
-}
-
-function microcompactBlockContent(block, config) {
-  if (block?.type === 'tool_result' && typeof block.content === 'string') {
-    const result = microcompactStringContent(block.content, config);
-    if (result.compacted) {
-      return {
-        block: { ...block, content: result.content },
-        compacted: true,
-        beforeChars: result.beforeChars,
-        afterChars: result.afterChars,
-      };
-    }
-  }
-
-  if (block?.type === 'text' && typeof block.text === 'string' && block.text.length > config.triggerChars) {
-    const result = microcompactStringContent(block.text, config);
-    if (result.compacted) {
-      return {
-        block: { ...block, text: result.content },
-        compacted: true,
-        beforeChars: result.beforeChars,
-        afterChars: result.afterChars,
-      };
-    }
-  }
-
-  return { block, compacted: false, beforeChars: 0, afterChars: 0 };
-}
-
-function microcompactMessageContent(content, config) {
-  if (typeof content === 'string') {
-    const result = microcompactStringContent(content, config);
-    return { content: result.content, compacted: result.compacted, beforeChars: result.beforeChars, afterChars: result.afterChars };
-  }
-
-  if (Array.isArray(content)) {
-    let compacted = false;
-    let beforeChars = 0;
-    let afterChars = 0;
-    const blocks = content.map((block) => {
-      const result = microcompactBlockContent(block, config);
-      if (result.compacted) {
-        compacted = true;
-        beforeChars += result.beforeChars;
-        afterChars += result.afterChars;
-      }
-      return result.block;
-    });
-    return { content: blocks, compacted, beforeChars, afterChars };
-  }
-
-  return { content, compacted: false, beforeChars: 0, afterChars: 0 };
-}
-
-export function microcompactMessagesForContext(messages, options = {}) {
-  const config = { ...MICROCOMPACTION_CONFIG, ...options };
-  let recentNonSystemSeen = 0;
-  const compactableIndexes = new Set();
-
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index];
-    if (message?.role === 'system' || message?._compaction) continue;
-    recentNonSystemSeen++;
-    if (recentNonSystemSeen > config.keepRecentCount) {
-      compactableIndexes.add(index);
-    }
-  }
-
-  let compactedCount = 0;
-  let beforeChars = 0;
-  let afterChars = 0;
-  const nextMessages = messages.map((message, index) => {
-    if (!compactableIndexes.has(index)) return message;
-    const result = microcompactMessageContent(message.content, config);
-    if (!result.compacted) return message;
-    compactedCount++;
-    beforeChars += result.beforeChars;
-    afterChars += result.afterChars;
-    return {
-      ...message,
-      content: result.content,
-      _microCompaction: {
-        method: 'historical_context_preview',
-        beforeChars: result.beforeChars,
-        afterChars: result.afterChars,
-      },
-    };
-  });
-
-  return {
-    messages: compactedCount > 0 ? nextMessages : messages,
-    stats: {
-      compactedCount,
-      beforeChars,
-      afterChars,
-      savedChars: Math.max(0, beforeChars - afterChars),
-    },
-  };
-}
+// Compatibility exports for existing Desktop callers. The implementation and constants live in
+// runtime-core so Desktop and CLI/TUI cannot drift in token projection or compaction pressure.
+const estimateTextTokens = estimateContextTextTokens;
+const estimateTokensFromMessages = estimateContextMessagesTokens;
+const estimateToolsTokens = estimateContextToolsTokens;
 
 // ── Message Grouping（对标 CC groupMessagesByApiRound）──
 
@@ -799,36 +221,11 @@ function findCurrentTurnStart(convMsgs) {
 }
 
 function splitForCompaction(messages, { preserveLatestUserTurn = false } = {}) {
-  const systemMsgs = messages.filter((m) => m.role === 'system');
-  const convMsgs = messages.filter((m) => m.role !== 'system');
-
-  // 默认保持手动 /compact 的“真·全量压缩”：旧消息全部摘要，连当前轮原文也不保留。
-  // 自动 preflight 压缩则必须保留最新真人 user turn：用户刚发送的原文不能被 summary 代替。
-  const currentTurnStart = preserveLatestUserTurn ? findCurrentTurnStart(convMsgs) : -1;
-  let initialKeep;
-  let initialOld;
-  if (currentTurnStart >= 0) {
-    const latestUser = convMsgs[currentTurnStart];
-    const currentTurnTail = convMsgs.slice(currentTurnStart + 1);
-    const unclosedTailStart = findUnclosedToolTailStart(currentTurnTail);
-    initialKeep = [latestUser, ...currentTurnTail.slice(unclosedTailStart)];
-    initialOld = [
-      ...convMsgs.slice(0, currentTurnStart),
-      ...currentTurnTail.slice(0, unclosedTailStart),
-    ];
-  } else {
-    // ⚠️ 全量压缩时显式把 keep 设为空：slice(-0) ≡ slice(0) 会把切分反转。
-    initialKeep = [];
-    initialOld = convMsgs;
-  }
-
-  // 异常 provider 历史若让 keep 从 tool_result 开始，兜底把对应 tool_use 一并拉入，
-  // 避免发送孤立工具结果。
-  const split = expandKeepForToolContinuity({ keep: initialKeep, old: initialOld });
+  const split = splitMessagesForCompaction(messages, { preserveLatestUserTurn });
   return {
-    keep: split.keep,
-    old: split.old,
-    systemMsgs,
+    keep: [...split.keepMessages],
+    old: [...split.oldMessages],
+    systemMsgs: [...split.systemMessages],
   };
 }
 
@@ -864,8 +261,8 @@ function formatCompactSummary(summary) {
     );
   }
 
-  // Clean up extra whitespace
-  formatted = formatted.replace(/\n\n\n+/g, '\n\n');
+  // Clean up extra whitespace（3 个及以上连续换行压成 2 个；\u000a 即 LF）
+  formatted = formatted.replace(/\u000a{3,}/g, '\u000a\u000a');
 
   return formatted.trim();
 }
@@ -922,45 +319,11 @@ async function readSseStream(res, onData) {
 }
 
 /**
- * 估算压缩摘要的产出字符数，用作进度条分母。
- *
- * 设计目标：让进度平稳爬升、结尾跳变很小（而不是收尾约 30% 即跳满）。
- * - 基准 = 输入对话字符数 × 压缩比（summaryCompressionRatio）。
- * - 夹逼到 [minEstimatedSummaryChars, maxSummaryChars]，其中 maxSummaryChars
- *   为模型最大输出容量（maxOutputTokens*4），保证不会超过物理上限。
- * - 动态扩张：当真实接收量 receivedChars 已逼近/超过估计值时，把分母抬到
- *   receivedChars 之上（×expandFactor），保证 percent 单调不回退、且在 done
- *   之前不会提前到 100%。
- *
- * @param {object} params
- * @param {number} params.inputChars 摘要输入（旧消息文本）字符数
- * @param {number} params.maxSummaryChars 物理上限 = summaryMaxTokens * charsPerToken
- * @param {number} [params.receivedChars=0] 已流式接收的摘要字符数
- * @returns {number} 估计的摘要总字符数（分母），恒为正整数
+ * Desktop wrapper around runtime-core estimateSummaryChars (single progress source).
+ * Kept as a local export so existing Desktop tests/call sites stay stable.
  */
 function estimateSummaryChars({ inputChars, maxSummaryChars, receivedChars = 0 }) {
-  const safeInput = Number.isFinite(inputChars) && inputChars > 0 ? inputChars : 0;
-  const minChars = COMPACTION_CONFIG.minEstimatedSummaryChars;
-  // 物理上限兜底：异常入参时退回到一个合理的正数上限。
-  const upperBound =
-    Number.isFinite(maxSummaryChars) && maxSummaryChars > minChars
-      ? maxSummaryChars
-      : Math.max(minChars, COMPACTION_CONFIG.charsPerToken * 12000);
-
-  // 基准估计：输入 × 压缩比，夹逼到 [min, upperBound]。
-  const base = Math.round(safeInput * COMPACTION_CONFIG.summaryCompressionRatio);
-  let estimate = Math.min(upperBound, Math.max(minChars, base));
-
-  // 动态扩张：真实产出逼近估计值时，把分母抬到接收量之上，避免提前到满，
-  // 同时仍不超过物理上限。expandFactor 留出 ~5% 余量让进度继续平滑爬升：
-  // 末段比值 ≈ 1/expandFactor ≈ 95%（而非 1.15 时的 ≈87%），减小收尾跳变。
-  if (receivedChars > 0) {
-    const expandFactor = 1.05;
-    const expanded = Math.ceil(receivedChars * expandFactor);
-    estimate = Math.min(upperBound, Math.max(estimate, expanded));
-  }
-
-  return Math.max(minChars, estimate);
+  return estimateSummaryCharsCore({ inputChars, maxSummaryChars, receivedChars });
 }
 
 /**
@@ -1010,6 +373,7 @@ async function summarizeWithLLM({
   streamId = null,
   connectionRecoveryOptions = {},
   contextWindow = null,
+  onProviderUsage = null,
 }) {
   const { provider, baseUrl, apiKey, model } = providerConfig;
 
@@ -1035,6 +399,14 @@ async function summarizeWithLLM({
   const maxSummaryChars = summaryMaxTokens * COMPACTION_CONFIG.charsPerToken;
   const inputChars = summaryInput.length;
   let accumulated = '';
+  let summaryUsage = null;
+  const reportUsage = () => {
+    try {
+      onProviderUsage?.(summaryUsage);
+    } catch {
+      // Usage telemetry must not change compaction semantics.
+    }
+  };
   const reportProgress = () => {
     if (typeof onProgress !== 'function') return;
     try {
@@ -1105,6 +477,21 @@ async function summarizeWithLLM({
         accumulated += evt.delta.text;
         reportProgress();
       }
+      if (evt?.type === 'message_start' && evt?.message?.usage) {
+        const usage = evt.message.usage;
+        summaryUsage = {
+          inputTokens: usage.input_tokens ?? 0,
+          outputTokens: 0,
+          cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+          cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
+        };
+      }
+      if (evt?.type === 'message_delta' && evt?.usage) {
+        summaryUsage = {
+          ...(summaryUsage || {}),
+          outputTokens: evt.usage.output_tokens ?? 0,
+        };
+      }
     });
 
     logCompactionDiagnostic('summarize:done', {
@@ -1112,6 +499,7 @@ async function summarizeWithLLM({
       accumulatedChars: accumulated.length,
       empty: accumulated.length === 0,
     });
+    reportUsage();
     return accumulated || null;
   }
 
@@ -1168,6 +556,18 @@ async function summarizeWithLLM({
         accumulated += evt.response.output_text;
         reportProgress();
       }
+      if (evt?.type === 'response.completed' && evt?.response?.usage) {
+        const usage = evt.response.usage;
+        const cached = usage.input_tokens_details?.cached_tokens
+          ?? usage.prompt_tokens_details?.cached_tokens
+          ?? 0;
+        summaryUsage = {
+          inputTokens: Math.max(0, (usage.input_tokens ?? 0) - cached),
+          outputTokens: usage.output_tokens ?? 0,
+          cacheReadTokens: cached,
+          cacheWriteTokens: 0,
+        };
+      }
     });
 
     logCompactionDiagnostic('summarize:done', {
@@ -1175,6 +575,7 @@ async function summarizeWithLLM({
       accumulatedChars: accumulated.length,
       empty: accumulated.length === 0,
     });
+    reportUsage();
     return accumulated || null;
   }
 
@@ -1186,6 +587,7 @@ async function summarizeWithLLM({
     max_completion_tokens: summaryMaxTokens,
     temperature: COMPACTION_CONFIG.summaryTemperature,
     stream: true,
+    stream_options: { include_usage: true },
   };
 
   const res = await fetchWithConnectionRecovery(url, {
@@ -1226,6 +628,17 @@ async function summarizeWithLLM({
       accumulated += delta;
       reportProgress();
     }
+    if (evt?.usage) {
+      const cached = evt.usage.prompt_tokens_details?.cached_tokens
+        ?? evt.usage.prompt_cache_hit_tokens
+        ?? 0;
+      summaryUsage = {
+        inputTokens: Math.max(0, (evt.usage.prompt_tokens ?? 0) - cached),
+        outputTokens: evt.usage.completion_tokens ?? 0,
+        cacheReadTokens: cached,
+        cacheWriteTokens: 0,
+      };
+    }
   });
 
   logCompactionDiagnostic('summarize:done', {
@@ -1233,6 +646,7 @@ async function summarizeWithLLM({
     accumulatedChars: accumulated.length,
     empty: accumulated.length === 0,
   });
+  reportUsage();
   return accumulated || null;
 }
 
@@ -1532,10 +946,10 @@ function buildCompactedMessages({
       // still pass explicitly so handoff rendering stays robust if summary is empty.
       decisionAnchors: anchors,
     }),
-    _compaction: {
+    _compaction: buildCompactionMarker({
       method,
-      fallbackReason: fallbackReason || undefined,
-      fallbackDetail: fallbackDetail || undefined,
+      fallbackReason,
+      fallbackDetail,
       originalMessageCount: representedMessageCount,
       deltaMessageCount: oldCount,
       previousMessageCount,
@@ -1544,7 +958,7 @@ function buildCompactedMessages({
       // Store merged summary (with decision anchors) for subsequent continuity carry-forward.
       summary: mergedSummary || '',
       decisionAnchors: anchors,
-    },
+    }),
   });
 
   result.push(...keepMessages);
@@ -1606,19 +1020,23 @@ export async function compactIfNeeded({
   onProgress,
   webContents = null,
   streamId = null,
+  // circuit breaker 隔离域:优先 conversationId,缺省回退 streamId,避免跨会话串熔断状态。
+  conversationId = null,
   connectionRecoveryOptions = {},
   tools = null,
   preserveLatestUserTurn = false,
-  // 可选：provider 真实 usage（input + cacheRead）。有值时触发阈值取 max(本地估算, usage)，
-  // 与进度条 / coordinator 预算口径对齐，避免「条已满但本地低估仍不压」。
+  // 可选：provider 真实 usage（input + cacheRead）。ADR 52：仅诊断，不参与 Layer2 触发。
+  // 触发只看下一请求投影估算（messages + tools schema）。
   usageTokens = null,
+  onProviderUsage = null,
 }) {
   const microcompactResult = microcompactMessagesForContext(messages);
   messages = microcompactResult.messages;
   const previousMessageCount = countContinuityMessages(continuityContext);
+  const breakerScope = conversationId || streamId || null;
 
   // Circuit breaker: stop trying if we've failed too many times
-  if (isCircuitBreakerTripped()) {
+  if (isCircuitBreakerTripped(breakerScope)) {
     // Still do basic structural compaction + drop as last resort
     const { keep, old } = splitForCompaction(messages, { preserveLatestUserTurn });
     if (old.length === 0) return { compacted: false, messages };
@@ -1666,10 +1084,11 @@ export async function compactIfNeeded({
 
   // Estimate current tokens（含工具 schema：tools 每次请求都全量发送，必须计入触发口径，
   // 否则会出现「进度条/触发器都没算工具，但 provider 已超窗」）。
-  // 若有 provider 真实 usage 高水位，取 max(本地估算, usage)，与进度条 soft 线对齐。
+  // ADR 52：触发只看下一请求投影估算；usageTokens 参数保留兼容，不抬高触发水位。
   const estimatedLocal = estimateTokensFromMessages(messages) + estimateToolsTokens(tools);
   const usageNum = Number.isFinite(usageTokens) && usageTokens > 0 ? usageTokens : null;
-  const estimated = usageNum != null ? Math.max(estimatedLocal, usageNum) : estimatedLocal;
+  void usageNum; // 诊断兼容字段，不参与 shouldRunCompaction
+  const estimated = estimatedLocal;
 
   if (!shouldRunCompaction({ force, estimatedTokens: estimated, contextWindow, messages })) {
     // Layer 1 可能已压回 soft 线。保留 messages（已微压缩）并标记 microcompacted，
@@ -1703,6 +1122,7 @@ export async function compactIfNeeded({
   if (providerConfig) {
     try {
       for (let attempt = 1; attempt <= COMPACTION_CONFIG.maxPtlRetries; attempt++) {
+        let usageReported = false;
         try {
           const rawSummary = await summarizeWithLLM({
             oldMessages: old,
@@ -1713,6 +1133,10 @@ export async function compactIfNeeded({
             streamId,
             connectionRecoveryOptions,
             contextWindow,
+            onProviderUsage(usage) {
+              usageReported = true;
+              onProviderUsage?.(usage);
+            },
           });
 
           if (rawSummary) {
@@ -1721,10 +1145,11 @@ export async function compactIfNeeded({
             console.log(
               `[context-compactor] LLM summary success (${compactSummary.length} chars)`,
             );
-            recordCompactionSuccess();
+            recordCompactionSuccess(breakerScope);
           }
           break; // success, exit retry loop
         } catch (err) {
+          if (!usageReported) onProviderUsage?.(null);
           const errMsg = err?.message || '';
           const isPromptTooLong =
             errMsg.includes('prompt_too_long') ||
@@ -1787,18 +1212,24 @@ export async function compactIfNeeded({
         errorCode: err?.code ?? err?.cause?.code ?? null,
         errorCause: err?.cause?.message ?? null,
       });
-      recordCompactionFailure();
+      recordCompactionFailure(breakerScope);
     }
   }
 
-  // Tier 2: Structural summary fallback
-  if (!compactSummary) {
-    compactSummary = summarizeOldMessages(old);
-    method = compactSummary ? 'structural' : 'fallback_drop';
-    if (!fallbackReason) {
-      // providerConfig 存在但 compactSummary 为空且未进 catch（理论兜底），标注未知。
-      fallbackReason = providerConfig ? 'llm_unavailable' : fallbackReason;
-    }
+  // Shared candidate selection keeps Desktop and CLI on the same
+  // LLM → structural → safe-drop order. Desktop still owns provider retries,
+  // diagnostics, and summary formatting above.
+  const summarySelection = await runCompactionSummaryCascade({
+    oldMessages: old,
+    summarizeWithLlm: compactSummary ? async () => compactSummary : undefined,
+    summarizeStructurally: summarizeOldMessages,
+    fallbackSummary: '',
+  });
+  compactSummary = summarySelection.summary;
+  method = summarySelection.method === 'structured' ? 'structural' : summarySelection.method;
+  if (method !== 'llm' && !fallbackReason) {
+    // providerConfig 存在但 compactSummary 为空且未进 catch（理论兜底），标注未知。
+    fallbackReason = providerConfig ? 'llm_unavailable' : fallbackReason;
   }
 
   // Build result
@@ -1938,6 +1369,7 @@ export {
   estimateSummaryChars,
   formatCompactSummary,
   extractRecoverableClues,
+  microcompactMessagesForContext,
   resolveSummaryTokenBudget,
   truncateSummaryInputPreferTail,
   flattenSummaryForCarryForward,

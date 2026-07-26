@@ -1,14 +1,18 @@
 import { describe, expect, test } from 'bun:test';
+import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 import type { ModelMessage } from '@peer-agent/runtime-node';
 import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
+import { estimateContextMessagesTokens as estimateTokensFromMessages } from '@peer-agent/runtime-core';
 
 import {
   createChatController,
+  formatCompactingStatusLabel,
+  latestCompactProgressPercent,
+  renderCompactProgressBar,
   type ChatModelPort,
   type ChatModelState,
   type ChatSystemContextBlock,
 } from './chat-controller.ts';
-import { estimateTokensFromMessages } from './context-pressure.ts';
 import { GOAL_CAPABILITY_IDS } from './goal-bridge.ts';
 import { createPlanCoordinator, type RuntimePlan } from './plan-mode.ts';
 import type { TuiExecutionContext, TuiHost } from './tui-host.ts';
@@ -58,6 +62,32 @@ const initialState = (input: { content: string }): ChatModelState => ({
   modelMessages: [{ role: 'user', content: input.content }],
   toolExecutions: [],
 });
+
+function accountingSnapshot(
+  input: Partial<ContextAccountingSnapshot> = {},
+): ContextAccountingSnapshot {
+  return {
+    version: 1,
+    conversationId: 'tui-chat',
+    contentRevision: 1,
+    modelKey: 'model-a',
+    revision: 1,
+    phase: 'turn_complete',
+    compactionEpoch: 0,
+    contextWindow: 500_000,
+    inputBudget: 500_000,
+    compactionThresholdTokens: 400_000,
+    authoritativeInputTokens: 40_000,
+    percent: 8,
+    pressureSource: 'provider_usage',
+    pendingUncountedChanges: false,
+    pendingContentChars: 0,
+    countCapability: { kind: 'observed_usage_only' },
+    counterStatus: 'active',
+    updatedAt: 1,
+    ...input,
+  };
+}
 
 describe('chat controller', () => {
   test('queues the next user-facing mode while keeping the active turn mode fixed', async () => {
@@ -189,6 +219,9 @@ describe('chat controller', () => {
     });
 
     const first = await controller.runGoalTurn('first goal tick');
+    expect(controller.getSnapshot().messages.some((message) => (
+      message.role === 'user' && message.content.includes('goal tick')
+    ))).toBe(false);
     expect(first.toolCallCount).toBe(2);
     expect(first.explorers).toEqual([{
       question: 'Where is the symbol used?',
@@ -199,6 +232,7 @@ describe('chat controller', () => {
     const second = await controller.runGoalTurn('second goal tick');
     expect(second).toEqual({ continued: true, explorers: [], toolCallCount: 0 });
   });
+
 
   test('streams assistant deltas into one message', async () => {
     const model: ChatModelPort = {
@@ -219,6 +253,176 @@ describe('chat controller', () => {
       ['user', 'hi'],
       ['assistant', 'hello world'],
     ]);
+  });
+
+  test('marks streamed content pending without fabricating a larger token percentage', async () => {
+    let releaseTurn!: () => void;
+    let emittedDelta!: () => void;
+    const turnPending = new Promise<void>((resolve) => {
+      releaseTurn = resolve;
+    });
+    const deltaEmitted = new Promise<void>((resolve) => {
+      emittedDelta = resolve;
+    });
+    const streamedText = 'x'.repeat(40_000);
+    const model: ChatModelPort = {
+      initialize: (input) => ({
+        ...initialState(input.input),
+        usage: input.input.usage,
+      }),
+      async runTurn(state, context) {
+        context.emit({ type: 'message.delta', streamId: 'preview-test', content: streamedText });
+        emittedDelta();
+        await turnPending;
+        return {
+          kind: 'completed',
+          state: {
+            ...state,
+            modelMessages: [
+              ...state.modelMessages,
+              { role: 'assistant', content: streamedText },
+            ],
+          },
+          output: streamedText,
+        };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({
+      host: host(),
+      model,
+      getContextWindow: () => 500_000,
+    });
+    expect(controller.restore({
+      mode: 'chat',
+      messages: [
+        { id: 'old-user', role: 'user', content: 'existing context' },
+        { id: 'old-assistant', role: 'assistant', content: 'existing answer' },
+      ],
+      modelMessages: [
+        { role: 'user', content: 'existing context' },
+        { role: 'assistant', content: 'existing answer' },
+      ],
+      usage: { inputTokens: 40_000, outputTokens: 100 },
+      contextAccounting: accountingSnapshot(),
+    })).toBe(true);
+
+    const providerObservedBaseline = controller.getSnapshot().contextAccounting;
+    const pending = controller.send('continue');
+    try {
+      await deltaEmitted;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const running = controller.getSnapshot();
+      expect(running.status).toBe('running');
+      expect(running.contextAccounting?.authoritativeInputTokens).toBe(
+        providerObservedBaseline?.authoritativeInputTokens,
+      );
+      expect(running.contextAccounting?.percent).toBe(providerObservedBaseline?.percent);
+      expect(running.contextAccounting?.phase).toBe('stream_preview');
+      expect(running.contextAccounting?.pendingUncountedChanges).toBe(true);
+      expect(running.contextAccounting?.pendingContentChars).toBeGreaterThan(streamedText.length);
+    } finally {
+      releaseTurn();
+      await pending;
+    }
+  });
+
+  test('marks tool results pending while preserving provider-backed authority', async () => {
+    let releaseSecondRound!: () => void;
+    let secondRoundStarted!: () => void;
+    const secondRoundPending = new Promise<void>((resolve) => {
+      releaseSecondRound = resolve;
+    });
+    const didStartSecondRound = new Promise<void>((resolve) => {
+      secondRoundStarted = resolve;
+    });
+    const toolResultText = 'tool-result-content '.repeat(1_000);
+    const model: ChatModelPort = {
+      initialize: (input) => ({
+        ...initialState(input.input),
+        usage: input.input.usage,
+      }),
+      async runTurn(state) {
+        if (state.toolExecutions.length === 0) {
+          return {
+            kind: 'tool_calls',
+            state: {
+              ...state,
+              modelMessages: [
+                ...state.modelMessages,
+                {
+                  role: 'assistant',
+                  content: null,
+                  toolCalls: [{ id: 'projection-tool', name: 'read_file', arguments: '{}' }],
+                },
+              ],
+              usage: { inputTokens: 1_100 },
+            },
+            calls: [{
+              toolCallId: 'projection-tool',
+              capabilityId: 'local.file.read',
+              arguments: { path: 'large.txt' },
+            }],
+          };
+        }
+        secondRoundStarted();
+        await secondRoundPending;
+        return { kind: 'completed', state, output: 'done' };
+      },
+      applyToolResults(state, executions) {
+        return {
+          ...state,
+          modelMessages: [
+            ...state.modelMessages,
+            ...executions.map((item) => ({
+              role: 'tool' as const,
+              toolCallId: item.call.toolCallId,
+              content: toolResultText,
+            })),
+          ],
+          toolExecutions: [
+            ...state.toolExecutions,
+            ...executions.map((item) => item.result),
+          ],
+        };
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model,
+      getContextWindow: () => 100_000,
+    });
+    expect(controller.restore({
+      mode: 'chat',
+      messages: [{ id: 'old-user', role: 'user', content: 'existing context' }],
+      modelMessages: [{ role: 'user', content: 'existing context' }],
+      usage: { inputTokens: 1_000 },
+      contextAccounting: accountingSnapshot({
+        contextWindow: 100_000,
+        inputBudget: 100_000,
+        compactionThresholdTokens: 80_000,
+        authoritativeInputTokens: 1_000,
+        percent: 1,
+      }),
+    })).toBe(true);
+
+    const providerObservedBaseline =
+      controller.getSnapshot().contextAccounting?.authoritativeInputTokens;
+    const pending = controller.send('read the large result');
+    try {
+      await didStartSecondRound;
+      const afterToolResult = controller.getSnapshot();
+      expect(afterToolResult.status).toBe('running');
+      expect(afterToolResult.contextAccounting?.authoritativeInputTokens).toBe(
+        providerObservedBaseline,
+      );
+      expect(afterToolResult.contextAccounting?.phase).toBe('tool_result');
+      expect(afterToolResult.contextAccounting?.pendingUncountedChanges).toBe(true);
+      expect(afterToolResult.contextAccounting?.pendingContentChars).toBeGreaterThan(0);
+    } finally {
+      releaseSecondRound();
+      await pending;
+    }
   });
 
   test('inserts a pending assistant placeholder as soon as send() starts', async () => {
@@ -589,6 +793,14 @@ describe('chat controller', () => {
       applyToolResults: (state) => state,
     };
     const controller = createChatController({ host: host(), model });
+    expect(controller.restore({
+      mode: 'chat',
+      messages: [
+        { id: 'prior-user', role: 'user', content: 'earlier' },
+        { id: 'prior-assistant', role: 'assistant', content: 'answer' },
+      ],
+      usage: { inputTokens: 99, outputTokens: 1, totalTokens: 100 },
+    })).toBe(true);
 
     await controller.send('fail');
 
@@ -596,13 +808,19 @@ describe('chat controller', () => {
     expect(controller.getSnapshot().error).toBe('provider exploded');
     expect(controller.getSnapshot().session?.lastTurn?.status).toBe('failed');
     expect(controller.getSnapshot().session?.lastTurn?.reason).toBe('provider exploded');
+    expect(controller.getSnapshot().usage).toBeUndefined();
   });
 
-  test('compacts modelMessages while preserving UI transcript and the shared request projection', async () => {
+  test('compacts modelMessages while preserving UI transcript and invalidating old authority', async () => {
     let observedModelMessageCount = 0;
     let observedInputHistoryTokens = 0;
     let observedContinuityTokens = 0;
     const model: ChatModelPort = {
+      async summarizeCompaction({ messages, formattedHistory }) {
+        expect(messages.length).toBeGreaterThan(0);
+        expect(formattedHistory).toContain('message-0');
+        return 'semantic summary from the active CLI provider';
+      },
       initialize(input) {
         observedInputHistoryTokens = estimateTokensFromMessages(input.input.modelMessages);
         observedContinuityTokens = estimateTokensFromMessages(
@@ -635,56 +853,61 @@ describe('chat controller', () => {
           state: {
             ...state,
             modelMessages: completedModelMessages,
-            requestProjection: {
-              nextRequestInputTokens: estimateTokensFromMessages(completedModelMessages) + 77,
-              contextWindow: 500_000,
-              model: 'model-a',
-            },
           },
           output: reply,
         };
       },
       applyToolResults: (state) => state,
     };
-    const controller = createChatController({ host: host(), model });
+    const controller = createChatController({
+      host: host(),
+      model,
+      getModelKey: () => 'model-a',
+      getContextWindow: () => 500_000,
+    });
+    expect(controller.restore({
+      mode: 'chat',
+      messages: [],
+      modelMessages: [],
+      contextAccounting: accountingSnapshot(),
+    })).toBe(true);
 
     for (let index = 0; index < 6; index += 1) {
       await controller.send(`message-${index}-${'x'.repeat(2_000)}`);
     }
     const beforeUiCount = controller.getSnapshot().messages.length;
     const beforeModelCount = observedModelMessageCount;
-    const beforeProjection = controller.getSnapshot().requestProjection;
+    const beforeAccounting = controller.getSnapshot().contextAccounting;
     expect(beforeModelCount).toBeGreaterThan(8);
-    expect(beforeProjection).toBeDefined();
+    expect(beforeAccounting).toBeDefined();
 
     const result = await controller.compact();
-    const compactedProjection = controller.getSnapshot().requestProjection;
+    const compactedAccounting = controller.getSnapshot().contextAccounting;
 
     expect(result.ok).toBe(true);
     expect(result.compacted).toBe(true);
     expect(result.afterCount).toBeLessThan(result.beforeCount);
-    expect(compactedProjection?.model).toBe('model-a');
-    expect(compactedProjection?.contextWindow).toBe(500_000);
-    expect(compactedProjection?.nextRequestInputTokens).toBeLessThan(
-      beforeProjection?.nextRequestInputTokens ?? Number.POSITIVE_INFINITY,
+    expect(compactedAccounting?.modelKey).toBe('model-a');
+    expect(compactedAccounting?.contextWindow).toBe(500_000);
+    expect(compactedAccounting?.phase).toBe('post_compaction');
+    expect(compactedAccounting?.compactionEpoch).toBe(
+      (beforeAccounting?.compactionEpoch ?? 0) + 1,
     );
-    expect(controller.getSnapshot().nextRequestInputTokens).toBe(
-      compactedProjection?.nextRequestInputTokens,
-    );
+    expect(compactedAccounting?.authoritativeInputTokens).toBeNull();
+    expect(compactedAccounting?.pendingUncountedChanges).toBe(true);
     // UI transcript keeps prior turns and appends one durable compact separator.
     expect(controller.getSnapshot().messages).toHaveLength(beforeUiCount + 1);
-    expect(
-      controller.getSnapshot().messages.some(
-        (message) => message.role === 'system' && message.compact?.phase === 'done',
-      ),
-    ).toBe(true);
+    const compactBoundary = controller.getSnapshot().messages.find(
+      (message) => message.role === 'system' && message.compact?.phase === 'done',
+    );
+    expect(compactBoundary?.compact?.method).toBe('llm');
+    expect(compactBoundary?.compact?.summary).toBe('semantic summary from the active CLI provider');
+    expect(compactBoundary?.compact?.handoffContent).toContain('semantic summary from the active CLI provider');
 
     await controller.send('after-compact');
     expect(observedModelMessageCount).toBeLessThan(beforeModelCount + 2);
     expect(observedContinuityTokens).toBeGreaterThan(0);
-    expect(compactedProjection?.nextRequestInputTokens).toBe(
-      observedInputHistoryTokens + observedContinuityTokens + 77,
-    );
+    expect(observedInputHistoryTokens).toBe(0);
     // UI transcript keeps prior turns and appends the new exchange.
     expect(controller.getSnapshot().messages.length).toBeGreaterThan(beforeUiCount);
     expect(
@@ -693,8 +916,11 @@ describe('chat controller', () => {
   });
 
   
-  test('compact publishes progress then durable separator in UI transcript', async () => {
+  test('compact falls back to the shared structural summary when the CLI provider fails', async () => {
     const model: ChatModelPort = {
+      async summarizeCompaction() {
+        throw new Error('summary provider unavailable');
+      },
       initialize(input) {
         return {
           messages: [
@@ -743,6 +969,8 @@ describe('chat controller', () => {
     const finalSystem = controller.getSnapshot().messages.filter((message) => message.role === 'system');
     expect(finalSystem).toHaveLength(1);
     expect(finalSystem[0]?.compact?.phase).toBe('done');
+    expect(finalSystem[0]?.compact?.method).toBe('structured');
+    expect(finalSystem[0]?.compact?.summary).toContain('message-0');
     expect(finalSystem[0]?.content).toContain('Compacted');
     expect(seen.some((entry) => entry.startsWith('progress:'))).toBe(true);
     expect(seen.some((entry) => entry.startsWith('done:'))).toBe(true);
@@ -1412,7 +1640,93 @@ describe('chat controller', () => {
     expect(planCoordinator.getSnapshot()?.plan.title).toBe('Plan only');
   });
 
-  test('publishes next-request input separately from historical usage', async () => {
+  test('marks the current request pending while the provider turn is running', async () => {
+    let releaseTurn!: () => void;
+    const turnPending = new Promise<void>((resolve) => {
+      releaseTurn = resolve;
+    });
+    const model: ChatModelPort = {
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        await turnPending;
+        return {
+          kind: 'completed',
+          state: {
+            ...state,
+            usage: { inputTokens: 2_000 },
+            contextAccounting: accountingSnapshot({
+              modelKey: 'pending-test',
+              contextWindow: 100_000,
+              inputBudget: 100_000,
+              compactionThresholdTokens: 80_000,
+              authoritativeInputTokens: 2_000,
+              percent: 2,
+            }),
+          },
+          output: 'done',
+        };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({
+      host: host(),
+      model,
+      getContextWindow: () => 100_000,
+    });
+    expect(controller.restore({
+      mode: 'chat',
+      messages: [{ id: 'old-user', role: 'user', content: 'existing context' }],
+      modelMessages: [{ role: 'user', content: 'existing context' }],
+      usage: { inputTokens: 1_000 },
+      contextAccounting: accountingSnapshot({
+        modelKey: 'pending-test',
+        contextWindow: 100_000,
+        inputBudget: 100_000,
+        compactionThresholdTokens: 80_000,
+        authoritativeInputTokens: 1_000,
+        percent: 1,
+      }),
+    })).toBe(true);
+
+    const pending = controller.send('new message increases the projected request');
+    const running = controller.getSnapshot();
+    expect(running.status).toBe('running');
+    expect(running.usage?.inputTokens).toBe(1_000);
+    expect(running.contextAccounting?.authoritativeInputTokens).toBe(1_000);
+    expect(running.contextAccounting?.modelKey).toBe('pending-test');
+    expect(running.contextAccounting?.pendingUncountedChanges).toBe(true);
+    expect(running.contextAccounting?.pendingContentChars).toBeGreaterThan(0);
+
+    releaseTurn();
+    await pending;
+  });
+
+  test('does not estimate restored System Context without provider authority', () => {
+    const systemContent = 'shared-system-context '.repeat(400);
+    const model: ChatModelPort = {
+      projectSystemMessages: () => [{ role: 'system', content: systemContent }],
+      initialize: (input) => initialState(input.input),
+      async runTurn(state) {
+        return { kind: 'completed', state, output: 'done' };
+      },
+      applyToolResults: (state) => state,
+    };
+    const controller = createChatController({
+      host: host(),
+      model,
+      getContextWindow: () => 100_000,
+    });
+
+    expect(controller.restore({
+      mode: 'chat',
+      messages: [{ id: 'user-1', role: 'user', content: 'restored' }],
+      modelMessages: [{ role: 'user', content: 'restored' }],
+    })).toBe(true);
+
+    expect(controller.getSnapshot().contextAccounting).toBeUndefined();
+  });
+
+  test('publishes provider-backed accounting as the authoritative context value', async () => {
     const model: ChatModelPort = {
       initialize: (input) => initialState(input.input),
       async runTurn(state) {
@@ -1421,6 +1735,13 @@ describe('chat controller', () => {
           state: {
             ...state,
             usage: { inputTokens: 1_200, cacheReadTokens: 300 },
+            contextAccounting: accountingSnapshot({
+              contextWindow: 100_000,
+              inputBudget: 100_000,
+              compactionThresholdTokens: 80_000,
+              authoritativeInputTokens: 1_500,
+              percent: 2,
+            }),
           },
           output: 'done',
         };
@@ -1436,18 +1757,13 @@ describe('chat controller', () => {
     await controller.send('hello pressure');
     const snapshot = controller.getSnapshot();
     expect(snapshot.usage?.inputTokens).toBe(1_200);
-    expect(snapshot.nextRequestInputTokens).toBeGreaterThan(0);
-    expect(snapshot.nextRequestInputTokens).toBeLessThan(1_500);
-    expect(snapshot.compactionPressureTokens).toBe(snapshot.nextRequestInputTokens);
+    expect(snapshot.contextAccounting?.authoritativeInputTokens).toBe(1_500);
+    expect(snapshot.contextAccounting?.pressureSource).toBe('provider_usage');
   });
 
-  test('auto-compacts before send when pressure crosses the soft threshold', async () => {
-    const observedModelMessageCounts: number[] = [];
-    // Mirror the existing compact test: accumulate modelMessages on each turn so
-    // the controller has a real provider history to compress.
+  test('does not run a renderer-local heuristic compaction from message size', async () => {
     const model: ChatModelPort = {
       initialize(input) {
-        observedModelMessageCounts.push(input.input.modelMessages.length);
         return {
           messages: [
             ...input.input.history,
@@ -1469,8 +1785,6 @@ describe('chat controller', () => {
               ...state.modelMessages,
               { role: 'assistant', content: `reply-${state.modelMessages.length}` },
             ],
-            // Historical usage remains high after compaction; it must not pin the
-            // next-request projection or retrigger compaction by itself.
             usage: { inputTokens: 90_000 },
           },
           output: `reply-${state.modelMessages.length}`,
@@ -1484,29 +1798,17 @@ describe('chat controller', () => {
       getContextWindow: () => 100_000,
     });
 
-    // Seed enough transcript for structural compact to have something to summarize.
-    for (let index = 0; index < 12; index += 1) {
-      await controller.send(`seed-${index} ${'x'.repeat(30_000)}`);
-    }
-    const beforeAuto = controller.getSnapshot().messages.length;
-    expect(beforeAuto).toBeGreaterThan(10);
-
-    // Large projected input + non-trivial history should have already auto-compacted during
-    // the seed loop (and/or on the next send). Durable UI separator is the signal.
-    await controller.send('trigger-auto-compact');
-    const after = controller.getSnapshot();
-    const compactMarkers = after.messages.filter((message) =>
-      message.role === 'system'
-      && typeof message.content === 'string'
-      && message.content.includes('Auto-compacted'),
-    );
-    expect(compactMarkers.length).toBeGreaterThan(0);
-    // Structural compact keeps a small recent window; provider history should
-    // not keep growing unbounded under repeated high-pressure sends.
-    expect(Math.max(...observedModelMessageCounts)).toBeLessThan(20);
+    await controller.send(`pressure ${'y'.repeat(320_000)}`);
+    expect(
+      controller.getSnapshot().messages.some((message) =>
+        message.role === 'system'
+        && typeof message.content === 'string'
+        && message.content.includes('compacted'),
+      ),
+    ).toBe(false);
   });
 
-  test('auto-compact publishes full progress frames and compacting footer status', async () => {
+  test('manual compact publishes full progress frames and compacting footer status', async () => {
     const model: ChatModelPort = {
       initialize(input) {
         return {
@@ -1550,29 +1852,99 @@ describe('chat controller', () => {
 
     const statuses: string[] = [];
     const progressPercents: number[] = [];
+    const progressContents: string[] = [];
+    const dockLabels: string[] = [];
     const unsubscribe = controller.subscribe((snapshot) => {
       statuses.push(snapshot.status);
+      const latestPercent = latestCompactProgressPercent(snapshot.messages);
+      if (snapshot.status === 'compacting' && typeof latestPercent === 'number') {
+        dockLabels.push(formatCompactingStatusLabel({
+          label: '压缩中…',
+          percent: latestPercent,
+        }));
+      }
       for (const message of snapshot.messages) {
         if (message.compact?.phase === 'progress' && typeof message.compact.percent === 'number') {
           progressPercents.push(message.compact.percent);
+          if (typeof message.content === 'string') progressContents.push(message.content);
         }
       }
     });
 
-    await controller.send(`pressure ${'y'.repeat(320_000)}`);
+    const compactResult = await controller.compact();
     unsubscribe();
 
+    expect(compactResult.compacted).toBe(true);
     expect(statuses).toContain('compacting');
-    expect(progressPercents).toContain(12);
-    expect(progressPercents).toContain(48);
-    expect(progressPercents).toContain(78);
+    // Soft stage floors from COMPACTION_PROGRESS_CONFIG (no LLM stream in this structural path).
+    expect(progressPercents).toContain(8);
+    expect(progressPercents).toContain(15);
+    expect(progressPercents).toContain(99);
+    // Progress bar must appear only in the composer status dock, not in the
+    // system transcript marker (avoids the double-bar compacting UI).
+    expect(progressContents.every((content) => !content.includes('['))).toBe(true);
+    expect(progressContents.every((content) => !content.includes('%'))).toBe(true);
+    expect(progressContents.some((content) => /compacting context/i.test(content))).toBe(true);
+    expect(dockLabels.some((label) => label.includes(renderCompactProgressBar(15)) && label.includes('15%'))).toBe(true);
     expect(controller.getSnapshot().status).toBe('idle');
     expect(
       controller.getSnapshot().messages.some((message) =>
         message.role === 'system'
         && typeof message.content === 'string'
-        && message.content.includes('Auto-compacted'),
+        && message.content.includes('Compacted'),
       ),
     ).toBe(true);
+  });
+});
+
+
+describe('compact progress presentation helpers', () => {
+  test('renderCompactProgressBar clamps and fills by percent', () => {
+    expect(renderCompactProgressBar(0, 10)).toBe('[░░░░░░░░░░]');
+    expect(renderCompactProgressBar(50, 10)).toBe('[█████░░░░░]');
+    expect(renderCompactProgressBar(100, 10)).toBe('[██████████]');
+    expect(renderCompactProgressBar(150, 4)).toBe('[████]');
+  });
+
+  test('latestCompactProgressPercent reads the newest progress frame only', () => {
+    expect(latestCompactProgressPercent([])).toBeUndefined();
+    expect(
+      latestCompactProgressPercent([
+        {
+          id: 'done',
+          role: 'system',
+          content: 'done',
+          compact: { phase: 'done', percent: 100 },
+        },
+      ]),
+    ).toBeUndefined();
+    expect(
+      latestCompactProgressPercent([
+        {
+          id: 'p1',
+          role: 'system',
+          content: 'a',
+          compact: { phase: 'progress', percent: 12 },
+        },
+        {
+          id: 'user',
+          role: 'user',
+          content: 'hi',
+        },
+        {
+          id: 'p2',
+          role: 'system',
+          content: 'b',
+          compact: { phase: 'progress', percent: 78 },
+        },
+      ]),
+    ).toBe(78);
+  });
+
+  test('formatCompactingStatusLabel includes bar + percent when available', () => {
+    expect(formatCompactingStatusLabel({ label: '压缩中…' })).toBe('压缩中…');
+    expect(formatCompactingStatusLabel({ label: '压缩中…', percent: 48 })).toBe(
+      `压缩中… ${renderCompactProgressBar(48)} 48%`,
+    );
   });
 });

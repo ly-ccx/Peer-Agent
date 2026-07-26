@@ -1,6 +1,6 @@
 {
   "name": "@peer-agent/runtime-node",
-  "version": "0.1.0",
+  "version": "0.0.1-beta.42",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -21,6 +21,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@peer-agent/protocol": "workspace:*",
     "@peer-agent/runtime-core": "workspace:*",
     "@peer-agent/runtime-sdk": "workspace:*"
   },

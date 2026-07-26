@@ -134,6 +134,24 @@ export interface RuntimePipelineEventSink {
   emit(event: RuntimeSdkEventInput): RuntimeSdkEvent | null;
 }
 
+/**
+ * Observes stable Runtime Pipeline state transitions after the model adapter
+ * has committed them. Hosts use this seam for projections and presentation;
+ * observer failures never change pipeline execution.
+ */
+export interface RuntimePipelineLifecycleObserver<
+  TInput = unknown,
+  TState = unknown,
+  TCall extends RuntimePipelineToolCall = RuntimePipelineToolCall,
+  TToolResult = RuntimeSdkToolResult,
+> {
+  toolResultsApplied?(
+    state: TState,
+    executions: readonly RuntimePipelineToolExecution<TCall, TToolResult>[],
+    context: RuntimePipelineTurnContext<TInput>,
+  ): void | Promise<void>;
+}
+
 export interface RuntimePipelineOptions<
   TInput = unknown,
   TState = unknown,
@@ -144,6 +162,7 @@ export interface RuntimePipelineOptions<
   readonly model: RuntimePipelineModelAdapter<TInput, TState, TCall, TToolResult, TOutput>;
   readonly tools: RuntimePipelineToolExecutor<TInput, TCall, TToolResult>;
   readonly events?: RuntimePipelineEventSink;
+  readonly lifecycle?: RuntimePipelineLifecycleObserver<TInput, TState, TCall, TToolResult>;
   readonly defaultMaxTurns?: number;
 }
 

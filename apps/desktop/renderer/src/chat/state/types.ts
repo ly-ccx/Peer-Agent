@@ -1,7 +1,7 @@
 // chat 表达层的共享领域类型。
 //
-// 这些类型原先私有定义在 ChatSurface.tsx 内，被多个纯逻辑 Module（tokenEstimate /
-// attachmentIntake / streamSegments / apiMessageMapping / contextSources）以及组件本身共同依赖。
+// 这些类型原先私有定义在 ChatSurface.tsx 内，被多个纯逻辑 Module（attachmentIntake /
+// streamSegments / apiMessageMapping / contextSources）以及组件本身共同依赖。
 // 下沉到 chat/state/types.ts 后，state 层的纯逻辑 Module 与 components 层都从这里 import，
 // 避免出现「state Module 反向 import 组件文件」的依赖倒置，保持「界面表达依赖下层状态/逻辑、
 // 而非相反」的分层方向。

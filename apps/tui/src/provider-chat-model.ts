@@ -1,4 +1,17 @@
-import { collectToolEvidenceRefs, type RuntimeToolDefinition } from '@peer-agent/runtime-core';
+import {
+  collectToolEvidenceRefs,
+  COMPACTION_PROGRESS_CONFIG,
+  COMPACTION_SUMMARY_PROMPT,
+  COMPACTION_SUMMARY_SYSTEM_PROMPT,
+  compactMessagesWithSummaryStrategy,
+  createContextAccountingCompactionPipeline,
+  createRuntimeUsageAccounting,
+  estimateCompactionProgressPercent,
+  formatCompactionMessagesForSummary,
+  microcompactMessagesForContext,
+  resolveMaxSummaryChars,
+  type RuntimeToolDefinition,
+} from '@peer-agent/runtime-core';
 import type {
   ModelContentPart,
   ModelMessage,
@@ -7,6 +20,7 @@ import type {
   ModelToolCall,
   ModelToolDefinition,
 } from '@peer-agent/runtime-node';
+import { materializeToolResultContent } from '@peer-agent/runtime-node';
 import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
 
 import type {
@@ -16,9 +30,19 @@ import type {
   ChatModelPort,
   ChatModelState,
   ChatModelToolCall,
+  MidTurnCompaction,
 } from './chat-controller.ts';
-import { computeNextRequestInputTokens } from './context-pressure.ts';
+import {
+  buildHandoffContent,
+  buildStructuralSummary,
+  TUI_COMPACT_KEEP_RECENT,
+} from './context-compact.ts';
 import { normalizeTuiRuntimeMode, type TuiRuntimeMode } from './tui-mode.ts';
+import {
+  DEFAULT_CONNECTION_RETRY_DELAYS_MS,
+  describeConnectionFailure,
+  isRecoverableConnectionFailure,
+} from './recovering-fetch.ts';
 
 function toUserModelContent(
   content: string,
@@ -43,10 +67,17 @@ export interface CreateProviderChatModelOptions {
   readonly toolDefinitions?: readonly RuntimeToolDefinition[];
   readonly toolDefinitionsForMode?: (mode: TuiRuntimeMode) => readonly RuntimeToolDefinition[];
   readonly systemPrompt?: string;
-  readonly getSystemPrompt?: () => string;
+  readonly getSystemPrompt?: (context: ProviderSystemPromptContext) => string;
   readonly getModel?: () => string;
+  readonly getModelKey?: () => string;
   readonly getReasoningEffort?: () => ModelReasoningEffort;
   readonly getContextWindow?: () => number | undefined;
+}
+
+export interface ProviderSystemPromptContext {
+  readonly mode: TuiRuntimeMode;
+  readonly conversationId?: string;
+  readonly systemContextBlocks?: ChatModelInput['systemContextBlocks'];
 }
 
 function parameters(tool: RuntimeToolDefinition): Readonly<Record<string, unknown>> {
@@ -87,16 +118,7 @@ function parseArguments(call: ModelToolCall): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-const PLAN_JSON_SHAPE =
-  '{"planId":"unique-id","title":"short title","goal":"goal statement","tasks":[{"taskId":"stable-id","title":"one action"}],"successCriteria":[{"description":"verifiable result"}]}';
-
-const PLAN_MODE_SYSTEM_PROMPT = `You are in read-only Plan mode. Investigate only with the projected read-only tools. Do not claim to modify files or execute the plan. End with exactly one JSON object (a fenced json block is allowed) using this shape: ${PLAN_JSON_SHAPE}. The plan remains a draft until the user chooses Approve and execute.`;
-
-// Goal mode must create a plan via goal_create_plan before side-effect tools.
-// Intake gate blocks shell/write until a plan exists for this conversation.
-const GOAL_MODE_SYSTEM_PROMPT = `You are in Goal mode (self-driven). Before any side-effecting work (bash, write_file, edit_file, etc.), you MUST call the tool goal_create_plan with a clear goal, ordered tasks, and success criteria. Read-only investigation tools and goal_get_plan / goal_update_task are allowed. Do not invent progress: only goal_update_task records task completion. If a plan already exists, use goal_get_plan and continue from it. Prefer goal_create_plan over dumping a free-form JSON plan in the assistant message.`;
-
-function executionContent(execution: RuntimeSdkProviderExecution): string {
+function executionContent(execution: RuntimeSdkProviderExecution, conversationId?: string): string {
   const result = execution.result;
   const evidenceRefs = collectToolEvidenceRefs({
     toolCallId: result.toolCallId,
@@ -109,50 +131,225 @@ function executionContent(execution: RuntimeSdkProviderExecution): string {
     ...(result.error === undefined ? {} : { error: result.error }),
     ...(evidenceRefs.length === 0 ? {} : { evidenceRefs }),
   };
-  return JSON.stringify(view);
+  const json = JSON.stringify(view);
+  // Layer 0 材料化(与 Desktop tool-orchestrator 同源):超阈值输出落盘 artifact,
+  // provider 消息只留 ref 骨架;写盘失败降级为原文,交给共享 microcompact 兜底。
+  try {
+    return materializeToolResultContent({
+      conversationId,
+      toolCallId: result.toolCallId,
+      tool: 'tool',
+      content: json,
+      isError: result.status === 'failed',
+    }).content;
+  } catch {
+    return json;
+  }
 }
 
-function formatSystemContextBlocks(
-  blocks: ChatModelInput['systemContextBlocks'],
-): string | null {
-  if (!blocks || blocks.length === 0) return null;
-  const sections = blocks
-    .filter((block) => block.content.trim().length > 0)
-    .map((block) => `## ${block.title}\n${block.content.trim()}`);
-  return sections.length > 0 ? sections.join('\n\n') : null;
+/** One short whole-turn retry for recoverable connect/stream drops before any deltas. */
+const DEFAULT_STREAM_RETRY_DELAYS_MS = DEFAULT_CONNECTION_RETRY_DELAYS_MS;
+
+async function waitForRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!(ms > 0)) return;
+  if (signal?.aborted) {
+    const error = new Error('The operation was aborted.');
+    error.name = 'AbortError';
+    throw error;
+  }
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      const error = new Error('The operation was aborted.');
+      error.name = 'AbortError';
+      reject(error);
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+async function streamWithSafeRetry(
+  provider: ModelProvider,
+  request: Parameters<ModelProvider['stream']>[0],
+  options: {
+    readonly retryDelaysMs?: readonly number[];
+    readonly waitImpl?: (ms: number, signal?: AbortSignal) => Promise<void>;
+    readonly onRetry?: (info: { attempt: number; maxRetries: number; delayMs: number; reason: string }) => void;
+  } = {},
+): Promise<Awaited<ReturnType<ModelProvider['stream']>>> {
+  const retryDelaysMs = options.retryDelaysMs ?? DEFAULT_STREAM_RETRY_DELAYS_MS;
+  const waitImpl = options.waitImpl ?? waitForRetry;
+  const maxRetries = retryDelaysMs.length;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    let progressEmitted = false;
+    const originalOnEvent = request.onEvent;
+    try {
+      return await provider.stream({
+        ...request,
+        onEvent(event) {
+          if (event.type === 'text.delta' || event.type === 'reasoning.delta') {
+            progressEmitted = true;
+          }
+          originalOnEvent?.(event);
+        },
+      });
+    } catch (error) {
+      lastError = error;
+      const canRetry =
+        attempt < maxRetries
+        && !progressEmitted
+        && !request.signal?.aborted
+        && isRecoverableConnectionFailure(error);
+      if (!canRetry) throw error;
+      const delayMs = retryDelaysMs[attempt] ?? 0;
+      options.onRetry?.({
+        attempt: attempt + 1,
+        maxRetries,
+        delayMs,
+        reason: describeConnectionFailure(error),
+      });
+      await waitImpl(delayMs, request.signal);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+
+/** Align with Desktop: keep recent tail of summary input under a token budget. */
+const TUI_SUMMARY_MAX_INPUT_TOKENS = 80_000;
+const TUI_SUMMARY_CHARS_PER_TOKEN = 4;
+const TUI_SUMMARY_SAFETY_RESERVE_TOKENS = 4_000;
+
+export function truncateSummaryInputPreferTail(text: string, maxChars: number): string {
+  const value = String(text ?? '');
+  const limit = Number(maxChars);
+  if (!Number.isFinite(limit) || limit <= 0) return '';
+  if (value.length <= limit) return value;
+  const marker = '\n...[summary input truncated: kept recent tail near compaction point; older head omitted]...\n';
+  if (limit <= marker.length) return value.slice(-limit);
+  const tailBudget = limit - marker.length;
+  return `${marker}${value.slice(-tailBudget)}`;
+}
+
+export function resolveTuiSummaryInputMaxChars(options: {
+  readonly contextWindow?: number | null;
+  readonly maxOutputTokens?: number | null;
+} = {}): number {
+  const summaryMaxTokens = Math.max(
+    1_024,
+    Math.min(
+      Number(options.maxOutputTokens) > 0 ? Number(options.maxOutputTokens) : 4_096,
+      12_000,
+    ),
+  );
+  let summaryMaxInputTokens = TUI_SUMMARY_MAX_INPUT_TOKENS;
+  const windowTokens = Number(options.contextWindow);
+  if (Number.isFinite(windowTokens) && windowTokens > 0) {
+    const usableInput = Math.max(2_000, windowTokens - summaryMaxTokens - TUI_SUMMARY_SAFETY_RESERVE_TOKENS);
+    summaryMaxInputTokens = Math.min(summaryMaxInputTokens, usableInput);
+  }
+  return Math.max(1, Math.floor(summaryMaxInputTokens * TUI_SUMMARY_CHARS_PER_TOKEN));
 }
 
 export function createProviderChatModel(options: CreateProviderChatModelOptions): ChatModelPort {
   const defaultToolDefinitions = options.toolDefinitions ?? [];
   const toolDefinitionsForMode = (mode: TuiRuntimeMode) =>
     options.toolDefinitionsForMode?.(mode) ?? defaultToolDefinitions;
+  const systemMessagesFor = (context: ProviderSystemPromptContext): readonly ModelMessage[] => {
+    const content = options.getSystemPrompt?.(context) ?? options.systemPrompt;
+    return content ? [{ role: 'system', content }] : [];
+  };
+
+  const summarizeCompaction = async (input: {
+    readonly messages: readonly ModelMessage[];
+    readonly formattedHistory: string;
+    readonly onProgress?: (percent: number) => void;
+    readonly onUsage?: (
+      usage: Awaited<ReturnType<ModelProvider['stream']>>['usage'],
+    ) => void;
+  }): Promise<string> => {
+    let streamedChars = 0;
+    const summaryInputMaxChars = resolveTuiSummaryInputMaxChars({
+      contextWindow: typeof (options as { contextWindow?: number }).contextWindow === 'number'
+        ? (options as { contextWindow?: number }).contextWindow
+        : undefined,
+      maxOutputTokens: 4096,
+    });
+    const boundedHistory = truncateSummaryInputPreferTail(input.formattedHistory, summaryInputMaxChars);
+    const inputChars = boundedHistory.length;
+    const maxSummaryChars = resolveMaxSummaryChars({ maxOutputTokens: 4096 });
+    const reportLiveProgress = () => {
+      input.onProgress?.(
+        estimateCompactionProgressPercent({
+          inputChars,
+          maxSummaryChars,
+          receivedChars: streamedChars,
+          minPercent: COMPACTION_PROGRESS_CONFIG.stagePreparedPercent,
+        }),
+      );
+    };
+    let result: Awaited<ReturnType<ModelProvider['stream']>>;
+    try {
+      result = await streamWithSafeRetry((options.getProvider?.() ?? options.provider), {
+        model: options.getModel?.() ?? options.model,
+        messages: [
+          { role: 'system', content: COMPACTION_SUMMARY_SYSTEM_PROMPT },
+          { role: 'user', content: boundedHistory },
+          { role: 'user', content: COMPACTION_SUMMARY_PROMPT },
+        ],
+        tools: [],
+        temperature: 0.2,
+        maxOutputTokens: 4096,
+        onEvent(event) {
+          if (event.type !== 'text.delta') return;
+          streamedChars += event.content.length;
+          // Shared Desktop/CLI progress: received/estimated summary chars.
+          reportLiveProgress();
+        },
+      });
+    } catch (error) {
+      input.onUsage?.(undefined);
+      throw error;
+    }
+    // Live stream never reports 100; controller post-process + done own the finish.
+    reportLiveProgress();
+    input.onUsage?.(result.usage);
+    return result.content;
+  };
 
   return {
+    projectSystemMessages(context) {
+      return systemMessagesFor({
+        mode: normalizeTuiRuntimeMode(context.mode),
+        ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+        systemContextBlocks: context.systemContextBlocks,
+      });
+    },
+    summarizeCompaction,
     initialize(input, context) {
       const mode = normalizeTuiRuntimeMode(context.run.mode);
-      const baseSystemPrompt = options.getSystemPrompt?.() ?? options.systemPrompt;
-      const modePrompt =
-        mode === 'plan'
-          ? PLAN_MODE_SYSTEM_PROMPT
-          : mode === 'goal'
-            ? GOAL_MODE_SYSTEM_PROMPT
-            : null;
-      const turnSystemContext = formatSystemContextBlocks(input.input.systemContextBlocks);
-      const systemPrompts = [baseSystemPrompt, modePrompt, turnSystemContext]
-        .filter((prompt): prompt is string => Boolean(prompt));
-      const userContent = toUserModelContent(input.input.content, input.input.images);
-      // Always re-inject mode system prompts so mid-session mode switches
-      // (especially Goal intake) take effect on the next turn.
-      const historyWithoutModeSystem = input.input.modelMessages.filter((message) => {
-        if (message.role !== 'system' || typeof message.content !== 'string') return true;
-        return !(
-          message.content.includes('You are in Goal mode')
-          || message.content.includes('You are in read-only Plan mode')
-        );
+      const systemMessages = systemMessagesFor({
+        mode,
+        ...(context.run.conversationId ? { conversationId: context.run.conversationId } : {}),
+        systemContextBlocks: input.input.systemContextBlocks,
       });
+      const userContent = toUserModelContent(input.input.content, input.input.images);
+      // System Context is rebuilt from current host facts every turn. Never retain
+      // a previous host's prompt or accumulate duplicate system messages.
+      const historyWithoutSystem = input.input.modelMessages.filter(
+        (message) => message.role !== 'system',
+      );
       const modelMessages: ModelMessage[] = [
-        ...systemPrompts.map((content) => ({ role: 'system' as const, content })),
-        ...historyWithoutModeSystem,
+        ...systemMessages,
+        ...historyWithoutSystem,
         { role: 'user', content: userContent },
       ];
       return {
@@ -169,6 +366,15 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         ],
         modelMessages,
         toolExecutions: [],
+        // A resumed usage value belongs to an earlier runtime turn. Every new
+        // turn starts a fresh accumulator while context capacity resumes from
+        // contextAccounting only.
+        usageAccounting: createRuntimeUsageAccounting(),
+        ...(input.input.contextAccounting
+          ? { contextAccounting: input.input.contextAccounting }
+          : {}),
+        // 供工具结果材料化按会话归档 artifact(跨端共享 ~/.peer-agent/artifacts/<conv>)。
+        ...(context.run.conversationId ? { conversationId: context.run.conversationId } : {}),
       };
     },
     async runTurn(state, context) {
@@ -179,31 +385,160 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
       const streamId = context.run.streamId ?? 'tui-chat';
       const reasoningEffort = options.getReasoningEffort?.();
       const model = options.getModel?.() ?? options.model;
-      // Same tools-schema estimate as Desktop computeContextBudget / estimateToolsTokens.
+      const modelKey = options.getModelKey?.() ?? model;
+      const activeProvider = options.getProvider?.() ?? options.provider;
       const contextWindowRaw = Number(options.getContextWindow?.());
       const contextWindow = Number.isFinite(contextWindowRaw) && contextWindowRaw > 0
         ? Math.floor(contextWindowRaw)
         : null;
-      const requestProjection = (messages: readonly ModelMessage[]) => ({
-        nextRequestInputTokens: computeNextRequestInputTokens({ messages, tools }),
+      const usageAccounting = state.usageAccounting ?? createRuntimeUsageAccounting();
+      const midTurnCompactions: MidTurnCompaction[] = [];
+      type PipelineState = Readonly<{ messages: readonly ModelMessage[] }>;
+      type CanonicalRequest = Readonly<{
+        model: string;
+        messages: readonly ModelMessage[];
+        tools: readonly ModelToolDefinition[];
+        reasoningEffort?: ModelReasoningEffort;
+      }>;
+      const accountingPipeline = createContextAccountingCompactionPipeline<
+        PipelineState,
+        CanonicalRequest,
+        Awaited<ReturnType<ModelProvider['stream']>>
+      >({
+        identity: {
+          conversationId: context.run.conversationId ?? context.run.sessionId,
+          contentRevision: (state.contextAccounting?.contentRevision ?? 0) + 1,
+          modelKey,
+        },
         contextWindow,
-        model,
-      });
-      const result = await (options.getProvider?.() ?? options.provider).stream({
-        model,
-        messages: state.modelMessages,
-        tools,
-        ...(!reasoningEffort || reasoningEffort === 'default' ? {} : { reasoningEffort }),
-        signal: context.signal,
-        onEvent(event) {
-          if (event.type === 'text.delta') {
-            context.emit({ type: 'message.delta', streamId, content: event.content });
+        countCapability:
+          activeProvider.contextCountCapability
+          ?? (activeProvider.countInputTokens
+            ? { kind: 'provider_tokenizer', tokenizerVersion: 'provider-adapter' }
+            : { kind: 'observed_usage_only' }),
+        initialSnapshot: state.contextAccounting,
+        countRequest: activeProvider.countInputTokens
+          ? (request) => activeProvider.countInputTokens!(request)
+          : undefined,
+        onSnapshot(snapshot) {
+          context.emit({
+            type: 'context.accounting',
+            streamId,
+            snapshot,
+          });
+        },
+        buildRequest(pipelineState) {
+          return {
+            model,
+            messages: microcompactMessagesForContext(pipelineState.messages).messages,
+            tools,
+            ...(!reasoningEffort || reasoningEffort === 'default' ? {} : { reasoningEffort }),
+          };
+        },
+        async compact({ state: pipelineState, reason }) {
+          const compactReason = reason === 'provider_overflow' ? 'overflow' : 'preflight';
+          const emitCompactionProgress = (
+            percent: number,
+            phase: 'started' | 'progress' | 'done' = 'progress',
+          ) => {
+            const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+            context.emit({
+              type: 'compaction.progress',
+              streamId,
+              percent: clamped,
+              reason: compactReason,
+              phase,
+              label: compactReason === 'overflow'
+                ? 'Auto-compacting after overflow'
+                : 'Auto-compacting context',
+            });
+          };
+
+          // Align mid-turn compact with Desktop: LLM summary first, structural fallback.
+          emitCompactionProgress(COMPACTION_PROGRESS_CONFIG.stageStartedPercent, 'started');
+          emitCompactionProgress(COMPACTION_PROGRESS_CONFIG.stagePreparedPercent, 'progress');
+          const strategy = await compactMessagesWithSummaryStrategy({
+            messages: pipelineState.messages,
+            keepRecentCount: TUI_COMPACT_KEEP_RECENT,
+            preserveLatestUserTurn: true,
+            summarizeWithLlm: async (oldMessages) => {
+              const formattedHistory = formatCompactionMessagesForSummary(oldMessages);
+              return summarizeCompaction({
+                messages: oldMessages as readonly ModelMessage[],
+                formattedHistory,
+                onProgress: (percent) => emitCompactionProgress(percent, 'progress'),
+                onUsage: (usage) => {
+                  usageAccounting.observeProviderRequest(usage, {
+                    requestPurpose: 'compaction_summary',
+                    capacityBearing: false,
+                  });
+                },
+              });
+            },
+            summarizeStructurally: (messages) =>
+              buildStructuralSummary(messages as readonly ModelMessage[]),
+            buildHandoffContent,
+          });
+          if (!strategy.compacted || !strategy.summary || !strategy.handoffContent) {
+            emitCompactionProgress(100, 'done');
+            return { compacted: false, state: pipelineState };
           }
-          if (event.type === 'reasoning.delta') {
-            context.emit({ type: 'reasoning.delta', streamId, content: event.content });
-          }
+          const nextMessages: readonly ModelMessage[] = [
+            ...strategy.systemMessages,
+            { role: 'user', content: strategy.handoffContent },
+            ...strategy.keepMessages,
+          ];
+          emitCompactionProgress(COMPACTION_PROGRESS_CONFIG.stagePostProcessPercent, 'progress');
+          midTurnCompactions.push({
+            reason: reason === 'provider_overflow' ? 'emergency' : 'preflight',
+            method: strategy.method ?? 'structured',
+            beforeCount: pipelineState.messages.length,
+            afterCount: nextMessages.length,
+            summarizedCount: strategy.oldMessages.length,
+            summary: strategy.summary,
+            handoffContent: strategy.handoffContent,
+            retainedUserCount: strategy.keepMessages.filter(
+              (message) => message.role === 'user',
+            ).length,
+          });
+          emitCompactionProgress(100, 'done');
+          return { compacted: true, state: { messages: nextMessages } };
+        },
+        send(request) {
+          return streamWithSafeRetry(activeProvider, {
+            ...request,
+            signal: context.signal,
+            onEvent(event) {
+              if (event.type === 'text.delta') {
+                context.emit({ type: 'message.delta', streamId, content: event.content });
+              }
+              if (event.type === 'reasoning.delta') {
+                context.emit({ type: 'reasoning.delta', streamId, content: event.content });
+              }
+            },
+          });
+        },
+        getUsage(response) {
+          return response.usage;
+        },
+        onProviderRequest({ usage, requestFingerprint }) {
+          usageAccounting.observeProviderRequest(usage, {
+            requestFingerprint,
+          });
         },
       });
+      const accountingResult = await accountingPipeline.execute({
+        state: { messages: state.modelMessages },
+      });
+      const result = accountingResult.response;
+      if (!result) throw new Error('Provider request completed without a response.');
+      const workingMessages = accountingResult.state.messages;
+      const turnUsage = usageAccounting.snapshot().turnTotal;
+
+      const accumulatedCompactions = [
+        ...(state.midTurnCompactions ?? []),
+        ...midTurnCompactions,
+      ];
 
       if (result.toolCalls.length > 0) {
         const calls: ChatModelToolCall[] = result.toolCalls.map((call) => {
@@ -220,18 +555,23 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           state: {
             ...state,
             modelMessages: [
-              ...state.modelMessages,
+              ...workingMessages,
               { role: 'assistant', content: result.content || null, toolCalls: result.toolCalls },
             ],
             pendingToolCalls: result.toolCalls,
-            usage: result.usage,
+            usageAccounting,
+            usage: turnUsage,
+            contextAccounting: accountingResult.snapshot,
+            ...(accumulatedCompactions.length > 0
+              ? { midTurnCompactions: accumulatedCompactions }
+              : {}),
           },
           calls,
         };
       }
 
       const completedModelMessages: readonly ModelMessage[] = [
-        ...state.modelMessages,
+        ...workingMessages,
         { role: 'assistant', content: result.content },
       ];
       return {
@@ -239,8 +579,12 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         state: {
           ...state,
           modelMessages: completedModelMessages,
-          usage: result.usage,
-          requestProjection: requestProjection(completedModelMessages),
+          usageAccounting,
+          usage: turnUsage,
+          contextAccounting: accountingResult.snapshot,
+          ...(accumulatedCompactions.length > 0
+            ? { midTurnCompactions: accumulatedCompactions }
+            : {}),
         },
         output: result.content,
       };
@@ -253,7 +597,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           ...executions.map((execution) => ({
             role: 'tool' as const,
             toolCallId: execution.call.toolCallId,
-            content: executionContent(execution.result),
+            content: executionContent(execution.result, state.conversationId),
           })),
         ],
         toolExecutions: [

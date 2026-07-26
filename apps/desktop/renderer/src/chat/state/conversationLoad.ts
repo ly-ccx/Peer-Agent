@@ -14,6 +14,7 @@ import { normalizeChatMode, type ChatMode } from './preferences';
 import {
   foldCliToolMessagesForDesktop,
   isEmptyAssistantPlaceholder,
+  isEmptyUserMessage,
   migrateToSegments,
   parseSerializedToolSegments,
 } from './streamSegments';
@@ -53,7 +54,7 @@ export function usageFromLifetime(lifetime: {
  * - 兼容老会话的多种段落形态（segments / toolCalls / 序列化工具段）。
  * - 计费优先读 index meta 的权威累计 lifetimeUsage（不受压缩影响）；老会话无该字段时
  *   才回退到遍历消息累加（此路径会被压缩低估，属兼容降级）。
- * - 剥离空 assistant 占位（isEmptyAssistantPlaceholder），避免历史里残留空泡。
+ * - 剥离空 assistant 占位（isEmptyAssistantPlaceholder），以及无附件的空 user 消息（isEmptyUserMessage），避免历史里残留空泡。
  */
 export async function loadConversationMessages(conversationId: string): Promise<{
   messages: ChatMsg[];
@@ -110,7 +111,7 @@ export async function loadConversationMessages(conversationId: string): Promise<
       msg.interrupted = true;
     }
     return msg;
-  }).filter((message) => !isEmptyAssistantPlaceholder(message));
+  }).filter((message) => !isEmptyAssistantPlaceholder(message) && !isEmptyUserMessage(message));
   // ADR 23: 计费优先读 index meta 的权威累计 lifetimeUsage(不受压缩影响)。
   // 仅当老会话尚无该字段时,才回退到遍历消息累加(此路径会被压缩低估,属兼容降级)。
   const lifetime = conv.lifetimeUsage as

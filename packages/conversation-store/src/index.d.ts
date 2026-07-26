@@ -1,3 +1,10 @@
+import type {
+  ContextAccountingObserved,
+  ContextAccountingSnapshot,
+  ConversationLifetimeUsage,
+  RuntimeTurnUsage,
+} from '@peer-agent/protocol';
+
 export interface ConversationUsage {
   readonly inputTokens?: number;
   readonly outputTokens?: number;
@@ -7,15 +14,7 @@ export interface ConversationUsage {
   readonly [key: string]: unknown;
 }
 
-export interface ConversationContextSnapshot {
-  readonly nextRequestInputTokens: number;
-  readonly contextWindow: number | null;
-  readonly contentRevision: number;
-  readonly modelProviderId: string | null;
-  readonly model: string | null;
-  readonly computedAt: string;
-  readonly source: 'desktop' | 'tui';
-}
+export type ConversationContextSnapshot = ContextAccountingSnapshot;
 
 export interface ConversationMeta {
   readonly id: string;
@@ -76,20 +75,47 @@ export interface ConversationStore {
     includeWorkspaceNameMatch?: boolean;
   }): ConversationMeta[];
   getConversation(id: string): StoredConversation | null;
+  getLatestContextObservation(
+    id: string,
+    options?: { modelKey?: string | null },
+  ): ContextAccountingObserved | null;
   createConversation(input?: { title?: string; workspacePath?: string; mode?: string }): ConversationMeta;
   appendMessage(id: string, message: object): unknown;
   updateMode(id: string, mode: string): unknown;
   updateModelEffort(id: string, input: { effort?: string; modelProviderId?: string | null; model?: string | null }): unknown;
-  updateContextSnapshot(id: string, snapshot: Omit<ConversationContextSnapshot, 'contentRevision' | 'computedAt'> & { computedAt?: string }): ConversationMeta | null;
+  updateContextSnapshot(id: string, snapshot: ConversationContextSnapshot): ConversationMeta | null;
   addUsage(id: string, usage: ConversationUsage): unknown;
+  recordRuntimeTurnUsage(
+    id: string,
+    input: {
+      usage: RuntimeTurnUsage;
+      attribution?: {
+        id?: string;
+        at?: string;
+        streamId?: string | null;
+        modelProviderId?: string | null;
+        model?: string | null;
+        providerName?: string | null;
+        estimatedCostUsd?: number | null;
+        pricingSource?: string | null;
+      };
+    },
+  ): {
+    lifetimeUsage: ConversationLifetimeUsage;
+    ledgerRow: Readonly<Record<string, unknown>>;
+  } | null;
   subscribeChanges(listener: (event: ConversationChangeEvent) => void, options?: { interval?: number }): () => void;
   readonly [key: string]: unknown;
 }
 
-export function createConversationStore(options?: { storeDir?: string }): ConversationStore;
+export function createConversationStore(options?: {
+  storeDir?: string;
+  usageLogFile?: string;
+}): ConversationStore;
 
 export function rankConversationMatch(
   meta: Pick<ConversationMeta, 'title' | 'workspacePath'> | null | undefined,
   query?: string,
   options?: { includeWorkspaceNameMatch?: boolean },
 ): number;
+import type { ContextAccountingSnapshot } from '@peer-agent/protocol';

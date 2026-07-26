@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, it } from 'node:test';
 import {
+  COMPACTION_SUMMARY_PROMPT,
+  COMPACTION_SUMMARY_SYSTEM_PROMPT,
+} from '@peer-agent/runtime-core';
+import {
   COMPACTION_CONFIG,
   compactIfNeeded,
   estimateSummaryChars,
@@ -296,7 +300,7 @@ describe('context compactor', () => {
     assert.equal(result.messages, messages);
   });
 
-  it('compacts when usageTokens exceed soft limit even if local estimate is low', async () => {
+  it('keeps usageTokens diagnostic when the next-request estimate is below the soft limit', async () => {
     const messages = buildMessages(12, 20);
     const estimated = estimateTokensFromMessages(messages);
     const contextWindow = 100_000;
@@ -311,8 +315,8 @@ describe('context compactor', () => {
       usageTokens: softLimit + 10,
     });
 
-    assert.equal(result.compacted, true, 'usage 过 soft 线时必须压缩');
-    assert.notEqual(result.messages, messages);
+    assert.equal(result.compacted, false, 'usage 只用于诊断，不得抬高压缩触发水位');
+    assert.equal(result.messages, messages);
   });
 
   it('estimates image_url / input_image blocks as fixed cost, not their base64 length', () => {
@@ -671,12 +675,10 @@ describe('context compactor', () => {
   });
 
   it('summary prompts require detailed user execution actions / operation steps (0011)', () => {
-    // 真·全量压缩后原文不再保留，连续性靠摘要承载 → 摘要 prompt 必须显式要求记录执行动作/操作步骤。
-    // SUMMARY_SYSTEM_PROMPT（中文 fallback 摘要）强调「执行动作/操作步骤」。
-    assert.match(COMPACTOR_SOURCE, /执行动作/);
-    assert.match(COMPACTOR_SOURCE, /操作步骤/);
-    // COMPACT_PROMPT（英文 9 章节）第 8 节强调 execution actions / operation steps。
-    assert.match(COMPACTOR_SOURCE, /concrete execution actions and operation steps/);
+    // 真·全量压缩后原文不再保留，连续性靠摘要承载 → 共享摘要 prompt 必须显式要求记录执行动作/操作步骤。
+    assert.match(COMPACTION_SUMMARY_SYSTEM_PROMPT, /执行动作/);
+    assert.match(COMPACTION_SUMMARY_SYSTEM_PROMPT, /操作步骤/);
+    assert.match(COMPACTION_SUMMARY_PROMPT, /concrete execution actions and operation steps/);
   });
 
   it('neutralizes pseudo tool-call syntax in compact summaries before continuity injection', () => {
@@ -802,10 +804,25 @@ describe('context compactor · streaming progress (0007)', () => {
     const sseChunks = deltas.map(
       (t) => `data: ${JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: t } })}\n\n`,
     );
+    sseChunks.unshift(`data: ${JSON.stringify({
+      type: 'message_start',
+      message: {
+        usage: {
+          input_tokens: 80,
+          cache_read_input_tokens: 5,
+          cache_creation_input_tokens: 2,
+        },
+      },
+    })}\n\n`);
+    sseChunks.push(`data: ${JSON.stringify({
+      type: 'message_delta',
+      usage: { output_tokens: 7 },
+    })}\n\n`);
     sseChunks.push('data: [DONE]\n\n');
     globalThis.fetch = async () => makeSseResponse(sseChunks);
 
     const progressEvents = [];
+    const observedUsage = [];
     const result = await compactIfNeeded({
       messages: buildMessages(12, 20),
       systemPrompt: 'system prompt',
@@ -818,6 +835,7 @@ describe('context compactor · streaming progress (0007)', () => {
       },
       force: true,
       onProgress: (p) => progressEvents.push(p),
+      onProviderUsage: (usage) => observedUsage.push(usage),
     });
 
     restoreFetch();
@@ -835,6 +853,12 @@ describe('context compactor · streaming progress (0007)', () => {
     }
     // estimatedTotalChars 为正，作为百分比分母。
     assert.ok(progressEvents.at(-1).estimatedTotalChars > 0);
+    assert.deepEqual(observedUsage, [{
+      inputTokens: 80,
+      outputTokens: 7,
+      cacheReadTokens: 5,
+      cacheWriteTokens: 2,
+    }]);
   });
 
   it('uses OpenAI Responses wire for ChatGPT subscription compaction', async () => {
@@ -1202,4 +1226,3 @@ describe('compaction summary quality regressions', () => {
     assert.match(COMPACTOR_SOURCE, /最近用户决策与方案锚点/);
   });
 });
-

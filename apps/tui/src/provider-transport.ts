@@ -3,6 +3,7 @@ import { rootCertificates } from 'node:tls';
 
 import { loadMacosTrustedCertificates } from './macos-trusted-certificates.ts';
 import { readMacosSystemProxy, type SystemProxyConfig } from './macos-system-proxy.ts';
+import { fetchWithConnectionRecovery } from './recovering-fetch.ts';
 
 export interface TuiProviderTransportEnvironment {
   readonly [key: string]: string | undefined;
@@ -96,8 +97,17 @@ export interface CreateTuiProviderFetchOptions {
   readonly readFile?: typeof readFileSync;
   readonly systemRootCertificates?: readonly string[];
   readonly macosTrustedCertificates?: readonly string[];
+  /**
+   * Optional fixed system proxy. When omitted, macOS system proxy is re-read
+   * on each request so network/proxy recovery after jitter does not require
+   * restarting the CLI.
+   */
   readonly systemProxy?: SystemProxyConfig;
+  /** Optional system-proxy reader used when `systemProxy` is not fixed. */
+  readonly readSystemProxy?: () => SystemProxyConfig;
   readonly fetch?: typeof globalThis.fetch;
+  /** Disable connect/request recovery (useful in focused unit tests). */
+  readonly connectionRecovery?: boolean;
 }
 
 export function mergeTrustedCertificates(
@@ -113,6 +123,9 @@ export function mergeTrustedCertificates(
 /**
  * Creates the TUI provider transport. Proxy routing stays in this adapter and
  * additional CAs extend, rather than replace, the platform trust store.
+ *
+ * Transient connection failures (reset / timeout / fetch failed) are retried
+ * once with a short backoff so network jitter does not force a CLI restart.
  */
 export function createTuiProviderFetch(
   options: CreateTuiProviderFetchOptions = {},
@@ -129,24 +142,40 @@ export function createTuiProviderFetch(
     extraCa,
   );
   const underlyingFetch = options.fetch ?? globalThis.fetch;
-  const systemProxy = options.systemProxy ?? readMacosSystemProxy();
+  const fixedSystemProxy = options.systemProxy;
+  const readSystemProxy = options.readSystemProxy ?? readMacosSystemProxy;
+  const connectionRecovery = options.connectionRecovery !== false;
 
   const providerFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(
       input instanceof Request ? input.url : input instanceof URL ? input.href : input,
     );
+    // Re-read system proxy unless the caller fixed one. This avoids sticky
+    // proxy/no-proxy state after VPN or network recovery without restarting.
+    const systemProxy = fixedSystemProxy ?? readSystemProxy();
     const proxy = proxyForUrl(url, env, systemProxy);
-    return underlyingFetch(input, {
+    const requestInit = {
       ...init,
       proxy,
       tls: {
         ca,
         rejectUnauthorized: true,
       },
+    } as RequestInit;
+
+    if (!connectionRecovery) {
+      return underlyingFetch(input, requestInit);
+    }
+
+    return fetchWithConnectionRecovery(input, requestInit, {
+      fetchImpl: underlyingFetch,
     });
   };
 
-  return Object.assign(providerFetch, {
-    preconnect: underlyingFetch.preconnect.bind(underlyingFetch),
-  });
+  const preconnect: typeof globalThis.fetch.preconnect =
+    typeof underlyingFetch.preconnect === 'function'
+      ? underlyingFetch.preconnect.bind(underlyingFetch)
+      : () => {};
+
+  return Object.assign(providerFetch, { preconnect });
 }

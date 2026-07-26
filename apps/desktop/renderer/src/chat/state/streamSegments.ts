@@ -203,6 +203,19 @@ export function isEmptyAssistantPlaceholder(message: Pick<ChatMsg, 'role' | 'con
   );
 }
 
+/**
+ * 判定是否为「无正文且无附件的空 user 消息」。
+ * 这类消息只剩角色标签「你」，是历史残留/竞态产物；图片-only user 不算空。
+ */
+export function isEmptyUserMessage(
+  message: Pick<ChatMsg, 'role' | 'content' | 'attachments'> & { attachments?: readonly unknown[] | null },
+): boolean {
+  if (message.role !== 'user') return false;
+  const content = typeof message.content === 'string' ? message.content.trim() : '';
+  if (content.length > 0) return false;
+  return !Array.isArray(message.attachments) || message.attachments.length === 0;
+}
+
 /** 把扁平分段聚合成渲染分组，严格保留 thinking / text / tool-call 的原始时间顺序。 */
 export function groupSegments(segments: ContentSegment[]): SegmentGroup[] {
   const groups: SegmentGroup[] = [];

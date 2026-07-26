@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 
 import {
   buildReplyLanguageInstruction,
+  buildTuiSystemContext,
   buildTuiSystemPrompt,
   composerPlaceholder,
   composerRunningStatusLabel,
@@ -82,6 +83,24 @@ describe('reply language prompt', () => {
     expect(prompt).toContain('Peer Agent');
     expect(prompt).toContain('中文');
   });
+
+  test('uses the canonical assembler layers and stable hash', () => {
+    const input = {
+      workspacePath: tempDir(),
+      conversationId: 'shared-conversation',
+      provider: 'openai',
+      model: 'gpt-test',
+      mode: 'goal',
+    };
+    const first = buildTuiSystemContext('en-US', ['Skill discovery'], input);
+    const second = buildTuiSystemContext('en-US', ['Skill discovery'], input);
+
+    expect(first.sections.map((section) => section.id)).toContain('core.identity');
+    expect(first.sections.map((section) => section.id)).toContain('runtime.mode');
+    expect(first.sections.map((section) => section.id)).toContain('runtime.contextExtensions.tui.host-extension-1');
+    expect(first.snapshot.renderedHash).toBe(second.snapshot.renderedHash);
+    expect(first.rendered).toBe(second.rendered);
+  });
 });
 
 describe('ui messages', () => {
@@ -119,9 +138,11 @@ describe('ui messages', () => {
   });
 
   test('history navigation command messages follow locale', () => {
+    expect(tuiMessage('zh-CN', 'command.history.label')).toBe('历史');
     expect(tuiMessage('zh-CN', 'command.history-earlier.label')).toBe('更早历史');
     expect(tuiMessage('zh-CN', 'command.history-later.label')).toBe('较新历史');
     expect(tuiMessage('zh-CN', 'command.history-latest.label')).toBe('最新历史');
+    expect(tuiMessage('en-US', 'command.history.label')).toBe('History');
     expect(tuiMessage('en-US', 'command.history-earlier.label')).toBe('Earlier history');
   });
 

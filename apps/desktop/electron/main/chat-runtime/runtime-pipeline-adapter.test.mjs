@@ -47,10 +47,14 @@ describe('Desktop Runtime Pipeline adapter', () => {
 
   it('injects model and tool adapters into the public pipeline', async () => {
     const calls = [];
+    const lifecycleStates = [];
     const result = await runDesktopRuntimePipeline({
       sessionId: 'session-1',
       streamId: 'stream-1',
       maxTurns: 3,
+      lifecycle: {
+        toolResultsApplied: (state) => lifecycleStates.push([...state.outputs]),
+      },
       model: {
         initialize: () => ({ phase: 0, outputs: [] }),
         runTurn: (state) => state.phase === 0
@@ -77,6 +81,7 @@ describe('Desktop Runtime Pipeline adapter', () => {
     assert.equal(result.output, 'tool-result');
     assert.equal(result.toolCalls, 1);
     assert.deepEqual(calls, ['local.test']);
+    assert.deepEqual(lifecycleStates, [['tool-result']]);
   });
 
   it('converts structured pipeline failure back to Desktop error semantics', async () => {

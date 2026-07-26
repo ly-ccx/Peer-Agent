@@ -23,7 +23,10 @@
 //   - 发送/账本真值仍在主进程：本 store 只持有 renderer 表达层的运行态投影，不引入新的
 //     执行真值。
 
-import type { ClientToolCall } from '@peer-agent/protocol';
+import type {
+  ClientToolCall,
+  ContextAccountingSnapshot,
+} from '@peer-agent/protocol';
 
 import type { ChatMode } from './preferences';
 import { IDLE_COMPACTION_STATE } from './types.ts';
@@ -35,12 +38,6 @@ import type {
   TokenUsageState,
   ToolProgress,
 } from './types';
-
-/** ADR 52：主进程下发的下一次最终请求上下文投影。 */
-export interface AuthoritativeContext {
-  nextRequestInputTokens: number;
-  contextWindow: number | null;
-}
 
 /** 单个会话的运行时状态切片：从 ChatSurface 迁出的会话级字段集合。 */
 export interface ConversationRuntimeState {
@@ -56,7 +53,8 @@ export interface ConversationRuntimeState {
   readonly streamError: string | null;
   readonly tokenUsage: TokenUsageState | null;
   readonly activeUsage: TokenUsageState | null;
-  readonly authoritativeContext: AuthoritativeContext | null;
+  /** ADR 56: renderer consumes the provider-backed snapshot verbatim. */
+  readonly contextAccounting: ContextAccountingSnapshot | null;
   readonly providerRecoveryNotice: ProviderRecoveryNotice | null;
   readonly toolProgress: ToolProgress | null;
   readonly pendingPermissionCalls: readonly ClientToolCall[];
@@ -79,7 +77,7 @@ export const EMPTY_CONVERSATION_STATE: ConversationRuntimeState = Object.freeze(
   streamError: null,
   tokenUsage: null,
   activeUsage: null,
-  authoritativeContext: null,
+  contextAccounting: null,
   providerRecoveryNotice: null,
   toolProgress: null,
   pendingPermissionCalls: Object.freeze([]) as readonly ClientToolCall[],

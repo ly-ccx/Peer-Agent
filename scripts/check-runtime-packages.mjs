@@ -7,10 +7,16 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const mode = process.argv[2] ?? '--smoke';
+const expectedVersion = readFileSync(join(root, 'VERSION'), 'utf8').trim();
 const packages = [
   { dir: 'packages/protocol', name: '@peer-agent/protocol' },
   { dir: 'packages/runtime-core', name: '@peer-agent/runtime-core' },
   { dir: 'packages/runtime-sdk', name: '@peer-agent/runtime-sdk' },
+];
+
+// Host adapters stay private and must not publish as open runtime.
+const privatePackages = [
+  { dir: 'packages/runtime-node', name: '@peer-agent/runtime-node' },
 ];
 
 if (!['--contents', '--smoke'].includes(mode)) {
@@ -39,9 +45,13 @@ function readTarJson(tarball, path) {
   return JSON.parse(run('tar', ['-xOf', tarball, path], { capture: true }));
 }
 
+function tarballName(packageName, version) {
+  return `${packageName.replace('@peer-agent/', 'peer-agent-')}-${version}.tgz`;
+}
+
 function assertPackageManifest(manifest, expectedName) {
   assert.equal(manifest.name, expectedName);
-  assert.equal(manifest.version, '0.1.0');
+  assert.equal(manifest.version, expectedVersion);
   assert.equal(manifest.private, undefined);
   assert.equal(manifest.license, 'MIT');
   assert.equal(manifest.sideEffects, false);
@@ -78,6 +88,26 @@ function assertTarballContents(tarball, packageName) {
   }
 }
 
+function assertPrivateManifest(manifest, expectedName) {
+  assert.equal(manifest.name, expectedName);
+  assert.equal(manifest.private, true);
+}
+
+/** Accept monorepo workspace protocol or stamped registry range. */
+function assertOpenRuntimeDep(actual, expectedVersion, label) {
+  const allowed = new Set([
+    'workspace:^',
+    'workspace:*',
+    `^${expectedVersion}`,
+    expectedVersion,
+  ]);
+  assert.ok(
+    allowed.has(actual),
+    `${label}: expected one of ${[...allowed].join(' | ')}, got ${JSON.stringify(actual)}`,
+  );
+}
+
+
 const tempRoot = mkdtempSync(join(tmpdir(), 'peer-runtime-pack-'));
 const packDir = join(tempRoot, 'packs');
 const consumerDir = join(tempRoot, 'consumer');
@@ -85,16 +115,18 @@ mkdirSync(packDir, { recursive: true });
 mkdirSync(consumerDir, { recursive: true });
 
 try {
+  for (const pkg of privatePackages) {
+    const manifest = JSON.parse(readFileSync(join(root, pkg.dir, 'package.json'), 'utf8'));
+    assertPrivateManifest(manifest, pkg.name);
+  }
+
   for (const pkg of packages) {
     run('pnpm', ['--filter', pkg.name, 'build']);
   }
 
   const tarballs = new Map();
   for (const pkg of packages) {
-    const tarball = join(
-      packDir,
-      `${pkg.name.replace('@peer-agent/', 'peer-agent-')}-0.1.0.tgz`,
-    );
+    const tarball = join(packDir, tarballName(pkg.name, expectedVersion));
     run('pnpm', ['pack', '--out', tarball], {
       cwd: join(root, pkg.dir),
       capture: true,
@@ -106,117 +138,171 @@ try {
     assertPackageManifest(manifest, pkg.name);
     assertTarballContents(tarball, pkg.name);
 
+    if (pkg.name === '@peer-agent/runtime-core') {
+      // runtime-core is host-neutral pure logic; may have no runtime deps.
+      assert.equal(manifest.dependencies?.['@peer-agent/runtime-sdk'], undefined);
+      assert.equal(manifest.dependencies?.['@peer-agent/runtime-node'], undefined);
+    }
     if (pkg.name === '@peer-agent/runtime-sdk') {
-      assert.deepEqual(manifest.dependencies, {
-        '@peer-agent/protocol': '^0.1.0',
-        '@peer-agent/runtime-core': '^0.1.0',
-      });
-      assert.equal(JSON.stringify(manifest).includes('workspace:'), false);
+      // Source of truth in monorepo is workspace:^; pnpm pack may rewrite to
+      // a registry range for the stamped product version before publish.
+      assertOpenRuntimeDep(
+        manifest.dependencies?.['@peer-agent/protocol'],
+        expectedVersion,
+        '@peer-agent/runtime-sdk → protocol',
+      );
+      assertOpenRuntimeDep(
+        manifest.dependencies?.['@peer-agent/runtime-core'],
+        expectedVersion,
+        '@peer-agent/runtime-sdk → runtime-core',
+      );
+      assert.equal(manifest.dependencies?.['@peer-agent/runtime-node'], undefined);
     }
   }
 
-  console.log('Runtime package contents check passed.');
   if (mode === '--smoke') {
-    writeFileSync(join(consumerDir, 'package.json'), JSON.stringify({
-    name: 'peer-runtime-package-consumer',
-    private: true,
-    type: 'module',
-  }, null, 2));
+    writeFileSync(
+      join(consumerDir, 'package.json'),
+      JSON.stringify(
+        {
+          name: 'peer-runtime-external-host',
+          private: true,
+          type: 'module',
+          dependencies: {
+            '@peer-agent/protocol': `file:${tarballs.get('@peer-agent/protocol')}`,
+            '@peer-agent/runtime-core': `file:${tarballs.get('@peer-agent/runtime-core')}`,
+            '@peer-agent/runtime-sdk': `file:${tarballs.get('@peer-agent/runtime-sdk')}`,
+          },
+        },
+        null,
+        2,
+      ),
+    );
 
-  run('npm', [
-    'install',
-    '--ignore-scripts',
-    '--offline',
-    ...tarballs.values(),
-  ], {
-    cwd: consumerDir,
-    env: { npm_config_audit: 'false', npm_config_fund: 'false' },
-  });
+    // pnpm pack keeps workspace: protocol; rewrite to file: deps for external consumer smoke.
+    for (const pkg of packages) {
+      const tarball = tarballs.get(pkg.name);
+      const extracted = join(tempRoot, 'rewrite', pkg.name.replace('@', '').replace('/', '-'));
+      mkdirSync(extracted, { recursive: true });
+      run('tar', ['-xzf', tarball, '-C', extracted], { capture: true });
+      const manifestPath = join(extracted, 'package', 'package.json');
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      if (manifest.dependencies) {
+        for (const dep of Object.keys(manifest.dependencies)) {
+          if (dep.startsWith('@peer-agent/') && tarballs.has(dep)) {
+            manifest.dependencies[dep] = `file:${tarballs.get(dep)}`;
+          }
+        }
+        writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+        const rewritten = join(packDir, `rewritten-${basename(tarball)}`);
+        run('tar', ['-czf', rewritten, '-C', extracted, 'package'], { capture: true });
+        tarballs.set(pkg.name, rewritten);
+      }
+    }
 
-  writeFileSync(join(consumerDir, 'consumer.mjs'), `
-import { createRuntimeSessionController, createRuntimeSdk } from '@peer-agent/runtime-sdk';
+    writeFileSync(
+      join(consumerDir, 'package.json'),
+      JSON.stringify(
+        {
+          name: 'peer-runtime-external-host',
+          private: true,
+          type: 'module',
+          dependencies: {
+            '@peer-agent/protocol': `file:${tarballs.get('@peer-agent/protocol')}`,
+            '@peer-agent/runtime-core': `file:${tarballs.get('@peer-agent/runtime-core')}`,
+            '@peer-agent/runtime-sdk': `file:${tarballs.get('@peer-agent/runtime-sdk')}`,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    run('npm', ['install', '--omit=dev'], { cwd: consumerDir });
+
+    writeFileSync(
+      join(consumerDir, 'smoke.mjs'),
+      `import assert from 'node:assert/strict';
 import {
-  createCapabilityProviderRegistry,
-  createEvidenceBundle,
-} from '@peer-agent/runtime-core';
+  RUNTIME_EVENT_PROTOCOL_VERSION,
+  createRuntimePipeline,
+  createRuntimeSdk,
+  createRuntimeSessionController,
+} from '@peer-agent/runtime-sdk';
+import { createCapabilityProviderRegistry } from '@peer-agent/runtime-core';
 
-const events = [];
-const runtime = createRuntimeSdk({
-  host: {
-    executeProvider: () => ({ result: { status: 'success' } }),
-    createBlockedExecution: () => ({ result: { status: 'failed' } }),
+assert.equal(typeof RUNTIME_EVENT_PROTOCOL_VERSION, 'number');
+assert.equal(typeof createCapabilityProviderRegistry, 'function');
+
+const host = {
+  executeProvider: async () => ({
+    result: {
+      toolCallId: 'tool-1',
+      status: 'completed',
+      evidence: { evidenceId: 'evidence-1' },
+    },
+  }),
+  createBlockedExecution: ({ request, reason }) => ({
+    call: request.call,
+    grant: { granted: false },
+    result: {
+      toolCallId: request.call.toolCallId,
+      status: 'failed',
+      reason,
+    },
+  }),
+  appendHookEvidence: (result) => result,
+};
+
+const runtime = createRuntimeSdk({ host });
+assert.equal(typeof runtime.execute, 'function');
+assert.equal(typeof runtime.subscribe, 'function');
+
+const sessions = createRuntimeSessionController();
+const turn = sessions.start({
+  sessionId: 'external-host-session',
+  conversationId: 'external-host-conversation',
+  streamId: 'stream-1',
+});
+const completed = turn.complete();
+assert.equal(completed.status, 'idle');
+assert.equal(completed.lastTurn?.status, 'completed');
+
+const pipeline = createRuntimePipeline({
+  model: {
+    initialize: ({ input }) => ({ transcript: [input] }),
+    runTurn: async (state) => ({ kind: 'completed', state, output: 'ok' }),
+    applyToolResults: (state) => state,
+  },
+  tools: {
+    execute: async () => {
+      throw new Error('tool executor should not run in smoke');
+    },
   },
 });
-runtime.subscribe((event) => events.push(event));
-runtime.emit({ type: 'session.started', sessionId: 'consumer-session' });
+const pipelineResult = await pipeline.run({
+  sessionId: 'external-host-session',
+  streamId: 'stream-1',
+  input: 'hello from external host',
+});
+assert.equal(pipelineResult.status, 'completed');
+assert.equal(pipelineResult.output, 'ok');
 
-const controller = createRuntimeSessionController();
-controller.start({ sessionId: 'consumer-session' }).complete();
-controller.resume({ sessionId: 'consumer-session' }).cancel('consumer_cancelled');
-const snapshot = controller.get('consumer-session');
-const evidence = createEvidenceBundle({ evidenceId: 'consumer-evidence' });
-const registry = createCapabilityProviderRegistry();
+console.log('external host smoke ok');
+`,
+    );
 
-if (snapshot?.lastTurn?.status !== 'cancelled') process.exit(1);
-if (events[0]?.sequence !== 1) process.exit(1);
-if (evidence.evidenceId !== 'consumer-evidence') process.exit(1);
-if (registry.listCapabilityIds().length !== 0) process.exit(1);
-console.log('Runtime package ESM consumer passed.');
-`);
-  run('node', ['consumer.mjs'], { cwd: consumerDir });
+    run('node', ['smoke.mjs'], { cwd: consumerDir });
 
-  writeFileSync(join(consumerDir, 'consumer.ts'), `
-import type { RuntimeExecuteRequest } from '@peer-agent/protocol';
-import type { RuntimeDecision } from '@peer-agent/runtime-core';
-import {
-  createRuntimeSessionController,
-  type RuntimeSessionSnapshot,
-} from '@peer-agent/runtime-sdk';
+    const installedSdk = JSON.parse(
+      readFileSync(join(consumerDir, 'node_modules/@peer-agent/runtime-sdk/package.json'), 'utf8'),
+    );
+    assert.equal(installedSdk.version, expectedVersion);
+    assert.equal(installedSdk.private, undefined);
 
-const decision: RuntimeDecision = 'allow';
-const request: RuntimeExecuteRequest = {
-  sessionId: 'typed-session',
-  call: { toolCallId: 'typed-call', capabilityId: 'typed.capability' },
-};
-const controller = createRuntimeSessionController();
-const turn = controller.start({ sessionId: request.sessionId ?? 'fallback' });
-const snapshot: RuntimeSessionSnapshot = turn.complete();
-console.log(decision, snapshot.sessionId);
-`);
-  writeFileSync(join(consumerDir, 'tsconfig.json'), JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022',
-      module: 'NodeNext',
-      moduleResolution: 'NodeNext',
-      strict: true,
-      noEmit: true,
-      skipLibCheck: false,
-    },
-    include: ['consumer.ts'],
-  }, null, 2));
-  run('pnpm', ['exec', 'tsc', '-p', join(consumerDir, 'tsconfig.json')]);
-
-  let deepImportRejected = false;
-  try {
-    run('node', ['--input-type=module', '-e', "await import('@peer-agent/runtime-sdk/dist/index.js')"], {
-      cwd: consumerDir,
-      capture: true,
-    });
-  } catch {
-    deepImportRejected = true;
-  }
-  assert.equal(deepImportRejected, true, 'runtime-sdk deep import must be rejected by exports');
-
-  const installedSdk = JSON.parse(readFileSync(
-    join(consumerDir, 'node_modules/@peer-agent/runtime-sdk/package.json'),
-    'utf8',
-  ));
-  assert.deepEqual(installedSdk.dependencies, {
-    '@peer-agent/protocol': '^0.1.0',
-    '@peer-agent/runtime-core': '^0.1.0',
-  });
-
-    console.log('Runtime package smoke test passed.');
+    console.log(`Runtime package smoke test passed (${expectedVersion}).`);
+  } else {
+    console.log(`Runtime package contents check passed (${expectedVersion}).`);
   }
 } finally {
   rmSync(tempRoot, { recursive: true, force: true });

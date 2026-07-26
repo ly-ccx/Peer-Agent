@@ -12,6 +12,11 @@ const packageJsonFiles = [
   'packages/chat-kernel/package.json',
   'packages/i18n/package.json',
   'packages/npm-cli/package.json',
+  // Open Runtime libraries — public packages and private host adapter share product VERSION.
+  'packages/protocol/package.json',
+  'packages/runtime-core/package.json',
+  'packages/runtime-sdk/package.json',
+  'packages/runtime-node/package.json',
   'packages/task-thread/package.json',
   'packages/ui/package.json',
 ];

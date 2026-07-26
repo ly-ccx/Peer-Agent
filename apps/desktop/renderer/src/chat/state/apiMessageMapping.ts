@@ -13,11 +13,10 @@
 import type {
   ChatApiContentPart,
   ChatApiMessage,
-  ChatApiToolCall,
   ChatAttachment,
   ChatMsg,
-  ContentSegment,
 } from './types';
+import { projectConversationHistory } from '@peer-agent/runtime-core';
 import { formatBytes } from './format.ts';
 import { formatHistoricalLocalRecordForApi, sanitizeAssistantHistoryTextForApi } from './historicalLocalRecord.ts';
 
@@ -95,110 +94,34 @@ export function hasApiMessageContent(content: string | ChatApiContentPart[] | nu
   });
 }
 
-function hasApiMessagePayload(message: ChatApiMessage): boolean {
-  return hasApiMessageContent(message.content) || Boolean(message.tool_calls?.length) || Boolean(message.tool_call_id);
-}
-
-function sanitizeToolCallId(value: string): string {
-  const safe = value.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+|_+$/g, '');
-  return safe || 'tool_call';
-}
-
-function stableToolCallId(message: ChatMsg, index: number, segment: ContentSegment): string | null {
-  if (segment.type !== 'tool-call') return null;
-  const existing = segment.toolCallId?.trim();
-  if (existing) return existing;
-  if (!segment.tool?.trim() || segment.result === undefined) return null;
-  return `tool_call_${sanitizeToolCallId(message.id)}_${index}`;
-}
-
-function safeToolArguments(args: unknown): string {
-  if (args === undefined || args === null) return '{}';
-  try {
-    const serialized = JSON.stringify(args);
-    return serialized && serialized !== 'undefined' ? serialized : '{}';
-  } catch {
-    return JSON.stringify({ raw: String(args) });
-  }
-}
-
-function structuredToolMessages(message: ChatMsg, index: number, segment: ContentSegment): ChatApiMessage[] | null {
-  if (message.role !== 'assistant' || segment.type !== 'tool-call') return null;
-  const name = segment.tool?.trim();
-  if (!name || segment.result === undefined) return null;
-  const id = stableToolCallId(message, index, segment);
-  if (!id) return null;
-  const toolCall: ChatApiToolCall = {
-    id,
-    type: 'function',
-    function: {
-      name,
-      arguments: safeToolArguments(segment.args ?? {}),
-    },
-  };
-  return [
-    { role: 'assistant', content: null, tool_calls: [toolCall] },
-    { role: 'tool', tool_call_id: id, name, content: segment.result ?? '' },
-  ];
-}
-
-function textMessage(role: ChatMsg['role'], text: string): ChatApiMessage | null {
-  const content = text.trim();
-  return content ? { role, content } : null;
-}
-
-function getStructuredApiMessages(message: ChatMsg): ChatApiMessage[] {
-  if (!message.segments?.length || message.role !== 'assistant') {
-    const content = getApiMessageContent(message);
-    return hasApiMessageContent(content) ? [{ role: message.role, content }] : [];
-  }
-
-  const apiMessages: ChatApiMessage[] = [];
-  const pendingText: string[] = [];
-  const flushText = () => {
-    const item = textMessage(message.role, pendingText.filter(Boolean).join('\n\n'));
-    pendingText.length = 0;
-    if (item) apiMessages.push(item);
-  };
-
-  message.segments.forEach((segment, index) => {
-    if (segment.type === 'thinking') return;
-    if (segment.type === 'text') {
-      const content = sanitizeAssistantHistoryTextForApi(segment.content || '');
-      if (content.trim()) pendingText.push(content);
-      return;
-    }
-
-    const toolMessages = structuredToolMessages(message, index, segment);
-    if (toolMessages) {
-      flushText();
-      apiMessages.push(...toolMessages);
-      return;
-    }
-
-    const historicalRecord = formatHistoricalLocalRecordForApi(segment);
-    if (historicalRecord.trim()) pendingText.push(historicalRecord);
-  });
-
-  flushText();
-  return apiMessages.filter(hasApiMessagePayload);
-}
-
-/** 把会话映射为 API 消息序列：跳过最后一条 compaction 之前的 UI 原文、compaction 消息与空 assistant 消息。 */
+/**
+ * Thin Desktop transport adapter.
+ *
+ * Persisted/view history semantics belong exclusively to runtime-core's canonical
+ * projector. This adapter only lowers provider-neutral camelCase tool fields to
+ * the Desktop IPC/OpenAI-style transport shape.
+ */
 export function toApiMessages(messages: readonly ChatMsg[]): ChatApiMessage[] {
-  const lastCompactionIndex = messages.reduce(
-    (latest, message, index) => (message.compaction ? index : latest),
-    -1,
-  );
-  const activeMessages = lastCompactionIndex >= 0 ? messages.slice(lastCompactionIndex + 1) : messages;
-
-  const apiMessages: ChatApiMessage[] = [];
-  for (const message of activeMessages) {
-    if (message.compaction) continue;
-    for (const apiMessage of getStructuredApiMessages(message)) {
-      if (apiMessage.role === 'assistant' && !hasApiMessagePayload(apiMessage)) continue;
-      apiMessages.push(apiMessage);
-    }
-  }
-  return apiMessages;
+  return projectConversationHistory(messages).messages.map((message) => ({
+    role: message.role,
+    content: typeof message.content === 'string' || message.content == null
+      ? message.content
+      : message.content.map((part) => part.type === 'text'
+        ? { type: 'text' as const, text: part.text }
+        : { type: 'image_url' as const, image_url: { url: part.image_url.url } }),
+    ...(message.toolCalls?.length
+      ? {
+        tool_calls: message.toolCalls.map((call) => ({
+          id: call.id,
+          type: 'function' as const,
+          function: {
+            name: call.name,
+            arguments: call.arguments,
+          },
+        })),
+      }
+      : {}),
+    ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+    ...(message.name ? { name: message.name } : {}),
+  }));
 }

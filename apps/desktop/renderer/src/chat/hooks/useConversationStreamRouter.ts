@@ -29,10 +29,11 @@ import { IDLE_COMPACTION_STATE } from '../state/types';
 import {
   getTextContent,
   isEmptyAssistantPlaceholder,
+  isEmptyUserMessage,
   markDanglingToolCallsInterrupted,
 } from '../state/streamSegments';
 import type { ChatMsg } from '../state/types';
-import { mergeAuthoritativeContextSnapshot } from '../state/contextOccupancy';
+import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 import { useTypewriterStream } from './useTypewriterStream';
 
 /** 路由器需要的、无法下沉到 store 的应用级回调（按会话 id 携带上下文）。 */
@@ -84,10 +85,14 @@ function appendThinking(messages: readonly ChatMsg[], chunk: string): ChatMsg[] 
 function persistMessages(conversationId: string, msgs: readonly ChatMsg[]): void {
   // A stream can finish after its bucket was reset during a page/mode switch. That empty
   // snapshot is not an intentional clear and must never replace persisted history.
+  // Also drop empty user bubbles (no text, no attachments): they are residual noise and
+  // must not be re-written by stream-end full-list replace after the user deleted them.
   if (!conversationId || msgs.length === 0) return;
+  const durable = msgs.filter((m) => !isEmptyUserMessage(m));
+  if (durable.length === 0) return;
   void clientApi.conversationsReplaceMessages({
     id: conversationId,
-    messages: msgs.map((m) => ({
+    messages: durable.map((m) => ({
       id: m.id,
       role: m.role,
       content: m.content,
@@ -99,6 +104,19 @@ function persistMessages(conversationId: string, msgs: readonly ChatMsg[]): void
       interrupted: m.interrupted,
     })),
   });
+}
+
+function acceptAccountingSnapshot(
+  previous: ContextAccountingSnapshot | null,
+  next: ContextAccountingSnapshot,
+): ContextAccountingSnapshot {
+  if (previous == null || previous.modelKey !== next.modelKey) return next;
+  if (next.contentRevision < previous.contentRevision) return previous;
+  if (
+    next.contentRevision === previous.contentRevision
+    && next.revision <= previous.revision
+  ) return previous;
+  return next;
 }
 
 /**
@@ -170,6 +188,19 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       if (event.type === 'session.started' && event.streamId && event.conversationId) {
         conversationStore.routeStream(event.streamId, event.conversationId);
       }
+      if (event.type === 'context.accounting') {
+        const cid = conversationStore.resolveEventConversation(
+          event.streamId ?? '',
+          event.snapshot.conversationId,
+        );
+        if (!cid) return;
+        conversationStore.setState(cid, (prev) => ({
+          contextAccounting: acceptAccountingSnapshot(
+            prev.contextAccounting,
+            event.snapshot,
+          ),
+        }));
+      }
     });
 
     const offDelta = clientApi.onChatStreamDelta(({ streamId, content }) => {
@@ -202,7 +233,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     });
 
     const offDone = clientApi.onChatStreamDone(
-      ({ streamId, conversationId, usage, lifetimeUsage, nextRequestInputTokens, contextWindow }) => {
+      ({ streamId, conversationId, usage, lifetimeUsage, contextAccounting }) => {
         const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         // 流正常收尾，重试横幅若仍残留一并清除。
@@ -234,14 +265,12 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           streamId: null,
         });
 
-        if (typeof nextRequestInputTokens === 'number') {
+        if (contextAccounting?.version === 1) {
           conversationStore.setState(cid, (prev) => ({
-            authoritativeContext: mergeAuthoritativeContextSnapshot({
-              previous: prev.authoritativeContext,
-              nextRequestInputTokens,
-              nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
-              mode: 'final',
-            }),
+            contextAccounting: acceptAccountingSnapshot(
+              prev.contextAccounting,
+              contextAccounting,
+            ),
           }));
         }
 
@@ -278,10 +307,12 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
               segments: markDanglingToolCallsInterrupted(last.segments, '工具结果未返回（本轮已结束）'),
             };
             const updated = [...msgs.slice(0, -1), patched];
-            persistMessages(cid, updated);
+            // Main already persisted the final assistant payload and the
+            // matching context snapshot atomically before routing `done`.
+            // Replacing the transcript here would increment contentRevision
+            // and clear that snapshot immediately after it was written.
             return { messages: updated };
           }
-          persistMessages(cid, msgs);
           return {};
         });
         onUpdatedRef.current?.(cid);
@@ -508,7 +539,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     );
 
     const offCompaction = clientApi.onChatCompaction(
-      ({ conversationId, streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount, nextRequestInputTokens, contextWindow, microcompacted }) => {
+      ({ conversationId, streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount }) => {
         const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         if (stage === 'start') {
@@ -534,24 +565,12 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         }
         if (stage === 'idle') {
           cancelCompactionDoneTimer(cid, streamId);
-          conversationStore.setState(cid, (prev) => {
-            const nextAuthoritative =
-              typeof nextRequestInputTokens === 'number'
-                ? mergeAuthoritativeContextSnapshot({
-                    previous: prev.authoritativeContext,
-                    nextRequestInputTokens,
-                    nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
-                    mode: microcompacted === true ? 'final' : 'midturn',
-                  })
-                : prev.authoritativeContext;
-            return {
-              compactionState: reduceCompactionLifecycle(prev.compactionState, {
-                stage: 'idle',
-                streamId,
-              }),
-              authoritativeContext: nextAuthoritative,
-            };
-          });
+          conversationStore.setState(cid, (prev) => ({
+            compactionState: reduceCompactionLifecycle(prev.compactionState, {
+              stage: 'idle',
+              streamId,
+            }),
+          }));
           return;
         }
         const activeCompaction = conversationStore.getSnapshot(cid).compactionState;
@@ -571,16 +590,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
             streamId,
             now: completedAt,
           }),
-          // 语义压缩完成后允许统一投影真实回落；缺快照时保留旧值。
-          authoritativeContext:
-            typeof nextRequestInputTokens === 'number'
-              ? mergeAuthoritativeContextSnapshot({
-                  previous: prev.authoritativeContext,
-                  nextRequestInputTokens,
-                  nextWindow: typeof contextWindow === 'number' ? contextWindow : null,
-                  mode: 'final',
-                })
-              : prev.authoritativeContext,
         }));
         if (
           !method ||

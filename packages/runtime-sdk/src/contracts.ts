@@ -1,5 +1,6 @@
 import type { RuntimeDecision } from '@peer-agent/runtime-core';
 import type {
+  ContextAccountingSnapshot,
   RuntimeExecuteRequest,
   RuntimeExecutionContext,
   RuntimeToolCall,
@@ -27,7 +28,9 @@ export type RuntimeSdkEventType =
   | 'hook.completed'
   | 'permission.requested'
   | 'permission.resolved'
-  | 'tool.completed';
+  | 'tool.completed'
+  | 'compaction.progress'
+  | 'context.accounting';
 
 export type RuntimeSdkToolCall = RuntimeToolCall;
 export type RuntimeSdkExecuteRequest = RuntimeExecuteRequest;
@@ -137,6 +140,25 @@ export interface RuntimeSdkReasoningDeltaEvent extends RuntimeSdkEventBase {
   readonly content: string;
 }
 
+/**
+ * Mid-turn / automatic compaction progress for host UI surfaces.
+ * percent is 0-100; hosts should treat values below 100 as live progress.
+ */
+export interface RuntimeSdkCompactionProgressEvent extends RuntimeSdkEventBase {
+  readonly type: 'compaction.progress';
+  readonly streamId: string;
+  readonly percent: number;
+  readonly reason?: 'preflight' | 'overflow' | 'manual' | string;
+  readonly phase?: 'started' | 'progress' | 'done';
+  readonly label?: string;
+}
+
+/** Shared Desktop/TUI context-capacity state. Presentation consumes this verbatim. */
+export interface RuntimeSdkContextAccountingEvent extends RuntimeSdkEventBase {
+  readonly type: 'context.accounting';
+  readonly snapshot: ContextAccountingSnapshot;
+}
+
 export interface RuntimeSdkMessageCompletedEvent extends RuntimeSdkEventBase {
   readonly type: 'message.completed';
   readonly streamId: string;
@@ -195,6 +217,8 @@ export type RuntimeSdkEvent =
   | RuntimeSdkSessionStartedEvent
   | RuntimeSdkMessageDeltaEvent
   | RuntimeSdkReasoningDeltaEvent
+  | RuntimeSdkCompactionProgressEvent
+  | RuntimeSdkContextAccountingEvent
   | RuntimeSdkMessageCompletedEvent
   | RuntimeSdkRuntimeErrorEvent
   | RuntimeSdkToolStartedEvent

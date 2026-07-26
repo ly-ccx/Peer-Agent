@@ -1,17 +1,18 @@
 export {
   assembleSystemContext,
   createDefaultPromptSourceRegistry,
+  createPromptSourceRegistry,
+  createAttachmentPromptSource,
+  createBrainstormingPromptSource,
+  createContinuityPromptSource,
+  createContextExtensionPromptSource,
+  createGoalPlanPromptSource,
+  createModePromptSource,
+  createProjectInstructionsPromptSource,
+  createProviderPromptSource,
+  createRuntimeReminderPromptSource,
+  renderBrainstormingPrompt,
+  renderRuntimeContext,
   renderSystemContext,
-} from './prompt-assembler.mjs';
-export { createPromptSourceRegistry } from './prompt-source-registry.mjs';
-export { createAttachmentPromptSource } from './sources/attachment-source.mjs';
-export { createContinuityPromptSource } from './sources/continuity-source.mjs';
-export { createContextExtensionPromptSource } from './sources/context-extension-source.mjs';
-export { createGoalPlanPromptSource } from './sources/goal-plan-source.mjs';
-export { renderSystemCorePrompt } from './sources/core-source.mjs';
-export { createBrainstormingPromptSource, renderBrainstormingPrompt } from './sources/brainstorming-source.mjs';
-export { createModePromptSource } from './sources/mode-source.mjs';
-export { createProviderPromptSource } from './sources/provider-source.mjs';
-export { createProjectInstructionsPromptSource } from './sources/project-instructions-source.mjs';
-export { createRuntimeReminderPromptSource } from './sources/runtime-reminder-source.mjs';
-export { renderRuntimeContext } from './sources/runtime-source.mjs';
+  renderSystemCorePrompt,
+} from '@peer-agent/system-context';

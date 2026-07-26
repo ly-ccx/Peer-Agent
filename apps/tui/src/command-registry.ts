@@ -61,9 +61,11 @@ export const TUI_COMMAND_REGISTRY: readonly TuiCommandDefinition[] = Object.free
   { id: 'new', label: 'New session', description: 'Start a fresh empty session and return to the home screen', keywords: ['session', 'home', 'fresh', 'reset', 'create'], shortcut: 'Ctrl+X N', action: { type: 'new-session' } },
   { id: 'clear', label: 'Clear chat', description: 'Clear messages, model context, and errors', keywords: ['reset', 'conversation', 'error'], action: { type: 'clear-chat' } },
   { id: 'compact', label: 'Compact context', description: 'Compress model context with a structural summary; UI transcript stays', keywords: ['compress', 'summary', 'context', 'tokens'], action: { type: 'compact-context' } },
-  { id: 'history-earlier', label: 'Earlier history', description: 'Show the previous bounded page; alias: /history earlier', keywords: ['older', 'previous', 'transcript'], action: { type: 'history-navigation', direction: 'earlier' } },
-  { id: 'history-later', label: 'Later history', description: 'Show the next bounded page; alias: /history later', keywords: ['newer', 'next', 'transcript'], action: { type: 'history-navigation', direction: 'later' } },
-  { id: 'history-latest', label: 'Latest history', description: 'Return to the default latest window; alias: /history latest', keywords: ['newest', 'bottom', 'transcript'], action: { type: 'history-navigation', direction: 'latest' } },
+  { id: 'history', label: 'History', description: 'Browse compacted earlier pages; press again for older, Esc to return to latest', keywords: ['older', 'previous', 'earlier', 'transcript', 'archive'], action: { type: 'history-navigation', direction: 'earlier' } },
+  // Hidden aliases — not shown in palette but resolvable via /history later|latest|earlier
+  { id: 'history-earlier', label: 'Earlier history', description: 'Show the previous bounded page', keywords: ['older', 'previous', 'transcript'], action: { type: 'history-navigation', direction: 'earlier' }, visible: (): boolean => false },
+  { id: 'history-later', label: 'Later history', description: 'Show the next bounded page', keywords: ['newer', 'next', 'transcript'], action: { type: 'history-navigation', direction: 'later' }, visible: (): boolean => false },
+  { id: 'history-latest', label: 'Latest history', description: 'Return to the default latest window', keywords: ['newest', 'bottom', 'transcript'], action: { type: 'history-navigation', direction: 'latest' }, visible: (): boolean => false },
   { id: 'resume', label: 'Resume session', description: 'Restore and continue a saved conversation', keywords: ['session', 'conversation', 'history', 'restore'], shortcut: 'Ctrl+X L', action: { type: 'open-resume-picker' } },
   { id: 'goals', label: 'Goal history', description: 'Switch between formal goals in this conversation', keywords: ['goal', 'mission', 'history', 'switch'], action: { type: 'open-goal-picker' } },
   { id: 'goal-pause', label: 'Pause goal', description: 'Pause the active goal after the current safe boundary', keywords: ['hold'], action: { type: 'goal-control', control: 'pause' }, visible: GOAL_RUNNING },
@@ -118,8 +120,9 @@ export function filterTuiCommandRegistry(
 }
 
 /**
- * Resolve manually submitted slash input. History navigation keeps the
- * discoverable hyphenated command IDs while also supporting `/history <verb>`.
+ * Resolve manually submitted slash input. The unified `/history` command
+ * defaults to `earlier`; `/history later` and `/history latest` are still
+ * resolvable as hidden aliases for power users.
  */
 export function resolveTuiCommandInput(
   input: string,
@@ -136,7 +139,19 @@ export function resolveTuiCommandInput(
       ? ''
       : commandName;
   if (!commandId) return null;
-  return visibleTuiCommands(context, locale).find((command) => command.id === commandId) ?? null;
+  // Search the full registry (including hidden aliases) for resolution,
+  // not just visibleTuiCommands — /history later must still work.
+  const localized = localizeTuiCommands(
+    TUI_COMMAND_REGISTRY.filter((command) => command.visible?.(context) ?? true),
+    locale,
+  );
+  const visibleMatch = localized.find((command) => command.id === commandId);
+  if (visibleMatch) return visibleMatch;
+  // Hidden aliases (history-earlier, history-later, history-latest)
+  return localizeTuiCommands(
+    TUI_COMMAND_REGISTRY.filter((command) => !(command.visible?.(context) ?? true)),
+    locale,
+  ).find((command) => command.id === commandId) ?? null;
 }
 
 export interface TuiHelpSection {

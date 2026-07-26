@@ -22,6 +22,15 @@ export type {
 } from './provider-contracts.ts';
 export { createNodeFileProvider, NODE_FILE_CAPABILITY_MANIFESTS } from './file-provider.ts';
 export {
+  enforceConversationArtifactBudget,
+  materializeToolResultContent,
+  removeConversationToolArtifacts,
+  resolveToolArtifactDir,
+  TOOL_RESULT_MATERIALIZE_CONFIG,
+  writeToolResultArtifact,
+} from './tool-artifact-store.ts';
+export type { MaterializedToolResult, ToolResultArtifact } from './tool-artifact-store.ts';
+export {
   createNodeInteractionProvider,
   INTERACTION_CAPABILITY_ID,
   NODE_INTERACTION_CAPABILITY_MANIFESTS,

@@ -1,4 +1,5 @@
 import type { ModelReasoningEffort } from './model-catalog.ts';
+import type { ContextCountCapability } from '@peer-agent/protocol';
 
 export type ModelMessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
@@ -73,6 +74,11 @@ export interface ModelProviderResult {
 }
 
 export interface ModelProvider {
+  readonly contextCountCapability?: ContextCountCapability;
+  countInputTokens?(request: ModelProviderRequest): Promise<{
+    readonly inputTokens: number;
+    readonly source: 'provider_count_api' | 'provider_tokenizer';
+  } | null>;
   stream(request: ModelProviderRequest): Promise<ModelProviderResult>;
 }
 

@@ -18,6 +18,30 @@ function makeWebContents() {
   };
 }
 
+function accountingSnapshot(input = {}) {
+  return {
+    version: 1,
+    conversationId: 'conversation-1',
+    contentRevision: 2,
+    modelKey: 'model-1',
+    revision: 3,
+    phase: 'turn_complete',
+    compactionEpoch: 0,
+    contextWindow: 100_000,
+    inputBudget: 100_000,
+    compactionThresholdTokens: 80_000,
+    authoritativeInputTokens: 84_000,
+    percent: 84,
+    pressureSource: 'provider_usage',
+    pendingUncountedChanges: false,
+    pendingContentChars: 0,
+    countCapability: { kind: 'observed_usage_only' },
+    counterStatus: 'active',
+    updatedAt: 1,
+    ...input,
+  };
+}
+
 describe('agent loop kernel', () => {
   it('defaults to an unbounded loop so model terminal responses control completion', () => {
     const loop = createAgentLoopKernel({ webContents: makeWebContents(), streamId: 's0' });
@@ -28,7 +52,7 @@ describe('agent loop kernel', () => {
     assert.equal(normalizeAgentLoopMaxTurns('42'), 42);
   });
 
-  it('accumulates usage and emits done events with the shared usage object', () => {
+  it('accumulates runtime-turn usage and emits its explicit scope', () => {
     const webContents = makeWebContents();
     const loop = createAgentLoopKernel({ webContents, streamId: 's1' });
 
@@ -37,120 +61,106 @@ describe('agent loop kernel', () => {
     loop.sendDone();
 
     assert.deepEqual(loop.usage, {
+      usageScope: 'runtime_turn',
+      providerRequestCount: 2,
       inputTokens: 9,
       outputTokens: 3,
       cacheWriteTokens: 5,
       cacheReadTokens: 11,
+      totalTokens: 28,
     });
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:done',
-      payload: { streamId: 's1', usage: loop.usage },
-    }]);
+    assert.equal(webContents.events.length, 1);
+    assert.equal(webContents.events[0].channel, 'chat:stream:done');
+    assert.deepEqual(webContents.events[0].payload.usage, loop.usage);
+    assert.equal(webContents.events[0].payload.contextAccounting.version, 1);
+    assert.equal(webContents.events[0].payload.contextAccounting.pressureSource, 'unknown');
   });
 
-  it('exposes last-turn usage for preflight compaction and clears it after compact', () => {
+  it('keeps provider-request evidence separate from the runtime-turn total', () => {
     const loop = createAgentLoopKernel({ webContents: makeWebContents(), streamId: 's1u' });
 
-    assert.equal(loop.getLastTurnUsage(), null);
+    assert.equal(loop.usageAccounting.snapshot().lastRequest, null);
     loop.addUsage({ inputTokens: 100, outputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 50 });
-    assert.deepEqual(loop.getLastTurnUsage(), {
+    assert.deepEqual(loop.usageAccounting.snapshot().lastRequest, {
+      usageScope: 'provider_request',
+      requestIndex: 1,
+      requestPurpose: 'agent',
       inputTokens: 100,
       outputTokens: 5,
       cacheWriteTokens: 0,
       cacheReadTokens: 50,
+      totalTokens: 155,
     });
 
     // 下一轮覆盖，不累加。
     loop.addUsage({ inputTokens: 20, cacheReadTokens: 3 });
-    assert.deepEqual(loop.getLastTurnUsage(), {
+    assert.deepEqual(loop.usageAccounting.snapshot().lastRequest, {
+      usageScope: 'provider_request',
+      requestIndex: 2,
+      requestPurpose: 'agent',
       inputTokens: 20,
       outputTokens: 0,
       cacheWriteTokens: 0,
       cacheReadTokens: 3,
+      totalTokens: 23,
     });
 
-    loop.clearLastTurnUsage();
-    assert.equal(loop.getLastTurnUsage(), null);
-    // lifetime ledger 不受 clear 影响。
     assert.equal(loop.usage.inputTokens, 120);
   });
 
-  it('attaches the authoritative next-request context projection onto the done payload', () => {
+  it('attaches the accepted shared accounting snapshot onto the done payload', () => {
     const webContents = makeWebContents();
     const loop = createAgentLoopKernel({
       webContents,
       streamId: 's1ctx',
-      getContextInfo: () => ({
-        nextRequestInputTokens: 84_000,
-        contextWindow: 100_000,
-        compactionSuggested: true,
-      }),
+      accountingIdentity: {
+        conversationId: 'conversation-1',
+        contentRevision: 2,
+        modelKey: 'model-1',
+      },
     });
+    loop.acceptContextAccounting(accountingSnapshot());
 
     loop.sendDone();
 
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:done',
-      payload: {
-        streamId: 's1ctx',
-        usage: loop.usage,
-        nextRequestInputTokens: 84_000,
-        contextWindow: 100_000,
-        compactionSuggested: true,
-      },
-    }]);
+    const done = webContents.events[0];
+    assert.equal(done.channel, 'chat:stream:done');
+    assert.equal(done.payload.streamId, 's1ctx');
+    assert.equal(done.payload.contextAccounting.authoritativeInputTokens, 84_000);
+    assert.equal(done.payload.contextAccounting.percent, 84);
+    assert.equal(done.payload.contextAccounting.modelKey, 'model-1');
   });
 
-  it('omits context fields when getContextInfo is absent (backward compatible done payload)', () => {
+  it('emits an explicit unknown snapshot when provider authority is unavailable', () => {
     const webContents = makeWebContents();
     const loop = createAgentLoopKernel({ webContents, streamId: 's1noctx' });
 
     loop.sendDone();
 
-    // 无 getContextInfo 的旧路径：done 负载不得凭空冒出 context 字段，避免渲染端误判。
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:done',
-      payload: { streamId: 's1noctx', usage: loop.usage },
-    }]);
+    const snapshot = webContents.events[0].payload.contextAccounting;
+    assert.equal(snapshot.authoritativeInputTokens, null);
+    assert.equal(snapshot.percent, null);
+    assert.equal(snapshot.pendingUncountedChanges, true);
   });
 
-  it('keeps the done payload clean when getContextInfo throws', () => {
+  it('marks provider stream deltas pending through the shared lifecycle', () => {
     const webContents = makeWebContents();
+    const runtimeEvents = [];
     const loop = createAgentLoopKernel({
       webContents,
-      streamId: 's1throw',
-      // 闭包取数失败不得影响回合收尾：吞掉异常，done 照常发出且不带半成品 context 字段。
-      getContextInfo: () => {
-        throw new Error('context probe failed');
-      },
+      streamId: 's1stream',
+      emitRuntimeEvent: (event) => runtimeEvents.push(event),
     });
 
-    loop.sendDone();
-
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:done',
-      payload: { streamId: 's1throw', usage: loop.usage },
-    }]);
-  });
-
-  it('only forwards context fields of the expected primitive types', () => {
-    const webContents = makeWebContents();
-    const loop = createAgentLoopKernel({
-      webContents,
-      streamId: 's1partial',
-      getContextInfo: () => ({
-        nextRequestInputTokens: 1234,
-        contextWindow: 'oops',
-        compactionSuggested: 'yes',
-      }),
+    loop.providerWebContents.send('chat:stream:delta', {
+      streamId: 's1stream',
+      content: 'streamed text',
     });
 
-    loop.sendDone();
-
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:done',
-      payload: { streamId: 's1partial', usage: loop.usage, nextRequestInputTokens: 1234 },
-    }]);
+    assert.equal(webContents.events[0].channel, 'chat:stream:delta');
+    assert.equal(loop.getContextAccounting().phase, 'stream_preview');
+    assert.equal(loop.getContextAccounting().pendingContentChars, 13);
+    assert.equal(runtimeEvents.at(-1).type, 'context.accounting');
   });
 
   it('invokes onRound exactly once per addUsage, including when usage is null', () => {
@@ -181,6 +191,27 @@ describe('agent loop kernel', () => {
 
     assert.doesNotThrow(() => loop.addUsage({ inputTokens: 5 }));
     assert.equal(loop.usage.inputTokens, 5);
+  });
+
+  it('preserves prior billing and context evidence when a later request fails', () => {
+    const webContents = makeWebContents();
+    const loop = createAgentLoopKernel({ webContents, streamId: 's1-error' });
+    loop.addUsage(
+      { inputTokens: 35, outputTokens: 2 },
+      { requestFingerprint: 'request-1' },
+    );
+    loop.addUsage(null, { requestFingerprint: 'request-2' });
+    loop.sendError('provider failed');
+
+    const payload = webContents.events[0].payload;
+    assert.equal(payload.usage.usageScope, 'runtime_turn');
+    assert.equal(payload.usage.providerRequestCount, 2);
+    assert.equal(payload.usage.totalTokens, 37);
+    assert.equal(
+      loop.usageAccounting.snapshot().lastRequest.requestFingerprint,
+      'request-1',
+    );
+    assert.equal(payload.contextAccounting.version, 1);
   });
 
   it('caps unsupported tool retries and formats stream errors', () => {
@@ -214,17 +245,12 @@ describe('agent loop kernel', () => {
     assert.deepEqual(webContents.events[0].payload.usage, loop.usage);
   });
 
-  it('projects the terminal assistant reply before emitting the done context snapshot', () => {
+  it('appends the terminal assistant reply before emitting the done snapshot', () => {
     const webContents = makeWebContents();
     const apiMessages = [{ role: 'user', content: 'question' }];
-    const observedMessages = [];
     const loop = createAgentLoopKernel({
       webContents,
       streamId: 's3',
-      getContextInfo: () => {
-        observedMessages.push(structuredClone(apiMessages));
-        return { nextRequestInputTokens: apiMessages.length * 100, contextWindow: 1_000 };
-      },
     });
 
     const result = handleTerminalTextResponse({
@@ -239,16 +265,9 @@ describe('agent loop kernel', () => {
       { role: 'user', content: 'question' },
       { role: 'assistant', content: 'finished' },
     ]);
-    assert.deepEqual(observedMessages, [apiMessages]);
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:done',
-      payload: {
-        streamId: 's3',
-        usage: loop.usage,
-        nextRequestInputTokens: 200,
-        contextWindow: 1_000,
-      },
-    }]);
+    assert.equal(webContents.events[0].channel, 'chat:stream:done');
+    assert.equal(webContents.events[0].payload.contextAccounting.version, 1);
+    assert.equal(webContents.events[0].payload.contextAccounting.percent, null);
   });
 
   it('emits an error for empty terminal text responses', () => {
@@ -263,10 +282,10 @@ describe('agent loop kernel', () => {
     });
 
     assert.deepEqual(result, { action: 'stop', reason: 'empty-response' });
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:error',
-      payload: { streamId: 's4', error: 'empty response' },
-    }]);
+    assert.equal(webContents.events[0].channel, 'chat:stream:error');
+    assert.equal(webContents.events[0].payload.streamId, 's4');
+    assert.equal(webContents.events[0].payload.error, 'empty response');
+    assert.equal(webContents.events[0].payload.contextAccounting.version, 1);
   });
 
   it('retries once when text is empty but thinking is present', () => {
@@ -305,10 +324,13 @@ describe('agent loop kernel', () => {
     });
 
     assert.deepEqual(result, { action: 'stop', reason: 'thinking-only-response-exhausted' });
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:error',
-      payload: { streamId: 's4b2', error: 'thinking-only response /tmp/thinking-only.jsonl' },
-    }]);
+    assert.equal(webContents.events[0].channel, 'chat:stream:error');
+    assert.equal(webContents.events[0].payload.streamId, 's4b2');
+    assert.equal(
+      webContents.events[0].payload.error,
+      'thinking-only response /tmp/thinking-only.jsonl',
+    );
+    assert.equal(webContents.events[0].payload.contextAccounting.version, 1);
   });
 
   it('retries once when an empty terminal response follows OpenAI tool results', () => {
@@ -373,10 +395,10 @@ describe('agent loop kernel', () => {
     });
 
     assert.deepEqual(result, { action: 'stop', reason: 'empty-response' });
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:error',
-      payload: { streamId: 's4e', error: 'empty response' },
-    }]);
+    assert.equal(webContents.events[0].channel, 'chat:stream:error');
+    assert.equal(webContents.events[0].payload.streamId, 's4e');
+    assert.equal(webContents.events[0].payload.error, 'empty response');
+    assert.equal(webContents.events[0].payload.contextAccounting.version, 1);
   });
 
   it('adds one retry instruction for unsupported tool claims', () => {
@@ -417,10 +439,13 @@ describe('agent loop kernel', () => {
       reason: 'unsupported-tool-claim-exhausted',
     });
     // 重试耗尽不能伪装成正常 done，否则 UI 会表现为“思考完直接没了”。
-    assert.deepEqual(webContents.events, [{
-      channel: 'chat:stream:error',
-      payload: { streamId: 's6', error: 'unsupported response /tmp/provider-trace.jsonl' },
-    }]);
+    assert.equal(webContents.events[0].channel, 'chat:stream:error');
+    assert.equal(webContents.events[0].payload.streamId, 's6');
+    assert.equal(
+      webContents.events[0].payload.error,
+      'unsupported response /tmp/provider-trace.jsonl',
+    );
+    assert.equal(webContents.events[0].payload.contextAccounting.version, 1);
   });
 });
 

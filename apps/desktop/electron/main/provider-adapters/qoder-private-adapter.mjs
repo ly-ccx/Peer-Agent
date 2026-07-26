@@ -4,10 +4,217 @@ import { fetchWithConnectionRecovery } from '../provider-transports/recovering-f
 import { consumeOpenAIStream } from './openai-chat-adapter.mjs';
 import {
   getQoderModelMetadata,
-  listQoderModels,
   resolveQoderModelOptionProjection,
 } from './qoder-model-catalog.mjs';
 import { prepareQoderInferRequest, resolveQoderInferenceEndpoint } from './qoder-local-auth.mjs';
+
+
+/** Qoder slow-queue (10605) and transient stream failures. */
+export const QODER_QUEUE_MAX_RETRIES = 3;
+export const QODER_QUEUE_MAX_WAIT_MS = 120_000;
+export const QODER_QUEUE_DEFAULT_WAIT_MS = 15_000;
+export const QODER_TRANSIENT_RETRY_DELAYS_MS = [2_000, 5_000];
+export const QODER_CONNECTION_RETRY_DELAYS_MS = [1_000, 3_000];
+
+function sleepMs(ms, signal) {
+  const wait = Math.max(0, Number(ms) || 0);
+  if (wait <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener?.('abort', onAbort);
+      resolve();
+    }, wait);
+    const onAbort = () => {
+      clearTimeout(timer);
+      const error = new Error('Aborted');
+      error.name = 'AbortError';
+      reject(error);
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+  });
+}
+
+function tryParseJsonObject(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractJsonObjectsFromText(text) {
+  const raw = String(text || '');
+  const objects = [];
+  const direct = tryParseJsonObject(raw);
+  if (direct) objects.push(direct);
+  // Greedy-ish scan for nested JSON objects embedded in provider_stream_error text.
+  for (let i = 0; i < raw.length; i += 1) {
+    if (raw[i] !== '{') continue;
+    let depth = 0;
+    for (let j = i; j < raw.length; j += 1) {
+      if (raw[j] === '{') depth += 1;
+      else if (raw[j] === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          const candidate = tryParseJsonObject(raw.slice(i, j + 1));
+          if (candidate) objects.push(candidate);
+          i = j;
+          break;
+        }
+      }
+    }
+  }
+  return objects;
+}
+
+function normalizeQueuePayload(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const nestedMessage = payload.message && typeof payload.message === 'object' ? payload.message : null;
+  const source = nestedMessage || payload;
+  const code = String(payload.code ?? nestedMessage?.code ?? payload.type ?? '');
+  const isQueued = source.isQueued === true
+    || source.queued === true
+    || code === '10605'
+    || /isQueued["']?\s*:\s*true/i.test(JSON.stringify(payload));
+  if (!isQueued && code !== '10605') return null;
+  const waitTimeRaw = source.waitTime ?? source.wait_time ?? source.estimatedWaitMs ?? nestedMessage?.waitTime;
+  const waitTimeMs = Number(waitTimeRaw);
+  return {
+    kind: 'queued',
+    code: code || '10605',
+    queueType: source.queueType || source.queue_type || null,
+    waitTimeMs: Number.isFinite(waitTimeMs) && waitTimeMs > 0 ? waitTimeMs : QODER_QUEUE_DEFAULT_WAIT_MS,
+    queueCount: Number(source.queueCount ?? source.queue_count) || null,
+    raw: payload,
+  };
+}
+
+/**
+ * Classify Qoder stream/HTTP failures for retry policy.
+ * @returns {{ kind: 'queued'|'transient'|null, waitTimeMs?: number, code?: string, queueType?: string|null, queueCount?: number|null }}
+ */
+export function classifyQoderStreamFailure(errorText, streamError = null) {
+  const text = String(errorText || streamError?.message || '');
+  const type = String(streamError?.type || '');
+  const objects = extractJsonObjectsFromText(text);
+  for (const obj of objects) {
+    const queue = normalizeQueuePayload(obj);
+    if (queue) return queue;
+    const nested = obj.error && typeof obj.error === 'object' ? normalizeQueuePayload(obj.error) : null;
+    if (nested) return nested;
+    const body = tryParseJsonObject(obj.body);
+    if (body) {
+      const fromBody = normalizeQueuePayload(body);
+      if (fromBody) return fromBody;
+    }
+  }
+  if (/10605|isQueued|queueType["']?\s*:\s*["']?slow/i.test(text)) {
+    const waitMatch = text.match(/waitTime["']?\s*:\s*(\d+)/i);
+    return {
+      kind: 'queued',
+      code: '10605',
+      waitTimeMs: waitMatch ? Number(waitMatch[1]) : QODER_QUEUE_DEFAULT_WAIT_MS,
+      queueType: /queueType["']?\s*:\s*["']?(\w+)/i.exec(text)?.[1] || null,
+      queueCount: null,
+    };
+  }
+  // Do not treat idle_timeout as auto-retryable here: the stream already waited
+  // streamIdleTimeoutMs with no data; immediate re-request usually repeats the hang.
+  if (
+    /\b429\b|rate limit|Rate limit|tpm|All models failed|All backends failed|ECONNRESET|ETIMEDOUT|fetch failed|socket hang up/i.test(text)
+  ) {
+    return { kind: 'transient', code: type || 'transient' };
+  }
+  return { kind: null };
+}
+
+export function computeQoderQueueWaitMs(queueInfo, { attempt = 0 } = {}) {
+  const hinted = Number(queueInfo?.waitTimeMs);
+  const base = Number.isFinite(hinted) && hinted > 0 ? hinted : QODER_QUEUE_DEFAULT_WAIT_MS;
+  // Cap each wait; add mild backoff so long queues do not spin too aggressively.
+  const withBackoff = base + Math.min(attempt, 3) * 2_000;
+  // Keep a small floor to avoid tight spin, but honor short waitTime hints (tests/local).
+  return Math.min(Math.max(50, withBackoff), QODER_QUEUE_MAX_WAIT_MS);
+}
+
+function formatQoderQueueError(errorText, { attempts, waitTimeMs, queueType } = {}) {
+  const waitSec = Math.round((waitTimeMs || 0) / 1000);
+  const typeLabel = queueType ? ` (${queueType})` : '';
+  return `qoder_queue_timeout: still queued after ${attempts} wait(s)${typeLabel}, last estimated wait ~${waitSec}s. ${errorText || ''}`.trim();
+}
+
+async function sendQoderStreamWithResilience(sendOnce, {
+  signal = null,
+  webContents = null,
+  streamId = null,
+  maxQueueRetries = QODER_QUEUE_MAX_RETRIES,
+  transientRetryDelaysMs = QODER_TRANSIENT_RETRY_DELAYS_MS,
+  waitImpl = sleepMs,
+} = {}) {
+  let queueAttempts = 0;
+  let transientAttempts = 0;
+  let lastResult = null;
+  while (true) {
+    lastResult = await sendOnce();
+    if (lastResult?.ok) return lastResult;
+    if (signal?.aborted) return lastResult;
+
+    const classification = classifyQoderStreamFailure(lastResult?.errorText, {
+      type: lastResult?.streamErrorType,
+      message: lastResult?.errorText,
+    });
+
+    if (classification.kind === 'queued' && queueAttempts < maxQueueRetries) {
+      const waitMs = computeQoderQueueWaitMs(classification, { attempt: queueAttempts });
+      try {
+        webContents?.send?.('chat:stream:status', {
+          streamId,
+          status: 'queued',
+          provider: 'qoder',
+          code: classification.code || '10605',
+          queueType: classification.queueType,
+          waitMs,
+          attempt: queueAttempts + 1,
+          maxAttempts: maxQueueRetries,
+        });
+      } catch {
+        /* renderer may not listen */
+      }
+      await waitImpl(waitMs, signal);
+      queueAttempts += 1;
+      continue;
+    }
+
+    if (classification.kind === 'transient' && transientAttempts < transientRetryDelaysMs.length) {
+      const waitMs = transientRetryDelaysMs[transientAttempts];
+      await waitImpl(waitMs, signal);
+      transientAttempts += 1;
+      continue;
+    }
+
+    if (classification.kind === 'queued') {
+      return {
+        ...lastResult,
+        errorText: formatQoderQueueError(lastResult?.errorText, {
+          attempts: queueAttempts,
+          waitTimeMs: classification.waitTimeMs,
+          queueType: classification.queueType,
+        }),
+        queueExhausted: true,
+      };
+    }
+    return lastResult;
+  }
+}
 
 function qoderModelServerHost(env = process.env) {
   const explicit = String(env.QODER_MODEL_SERVER_HOST || '').trim();
@@ -442,15 +649,9 @@ export function buildQoderRemoteChatAsk({
 }
 
 async function getQoderModelMetadataForSend(model) {
-  const syncMetadata = getQoderModelMetadata(model);
-  if (syncMetadata) return syncMetadata;
-  try {
-    const { models } = await listQoderModels();
-    const id = String(model || '').trim().toLowerCase();
-    return models.find((entry) => entry.id.toLowerCase() === id) || null;
-  } catch {
-    return null;
-  }
+  // Stream send must not block on live catalog discovery (official SDK can take seconds).
+  // Use the latest local/sync cache only; missing metadata still allows a valid request body.
+  return getQoderModelMetadata(model);
 }
 
 export function qoderTurnTaskId(streamId) {
@@ -532,7 +733,7 @@ async function sendQoderPreparedStream({
     streamId,
     provider: 'qoder',
     model: requestBody.model_config.key,
-    retryDelaysMs: [],
+    retryDelaysMs: QODER_CONNECTION_RETRY_DELAYS_MS,
     allowSecondaryFallback: false,
   });
   trace.recordResponse(res);
@@ -578,6 +779,7 @@ async function sendQoderPreparedStream({
       status: res.status,
       errorText,
       providerError: true,
+      streamErrorType: streamResult.streamError.type,
       messages: requestBody.messages,
       providerTracePath: tracePath,
     };
@@ -667,7 +869,11 @@ export async function sendQoderPrivateStream({
   streamIdleTimeoutMs = 0,
   modelOptions,
   modelOptionValues = {},
+  maxQueueRetries = QODER_QUEUE_MAX_RETRIES,
+  transientRetryDelaysMs = QODER_TRANSIENT_RETRY_DELAYS_MS,
+  waitImpl = sleepMs,
 } = {}) {
+  return sendQoderStreamWithResilience(async () => {
   const catalogMetadata = await getQoderModelMetadataForSend(model);
   const metadata = catalogMetadata && Array.isArray(modelOptions)
     ? { ...catalogMetadata, modelOptions }
@@ -726,7 +932,7 @@ export async function sendQoderPrivateStream({
     streamId,
     provider: 'qoder',
     model: body.model,
-    retryDelaysMs: [],
+    retryDelaysMs: QODER_CONNECTION_RETRY_DELAYS_MS,
     allowSecondaryFallback: false,
   });
   trace.recordResponse(res);
@@ -773,6 +979,7 @@ export async function sendQoderPrivateStream({
       status: res.status,
       errorText,
       providerError: true,
+      streamErrorType: streamResult.streamError.type,
       messages: body.messages,
       providerTracePath: tracePath,
     };
@@ -803,4 +1010,12 @@ export async function sendQoderPrivateStream({
     providerTracePath: tracePath,
     ...streamResult,
   };
+  }, {
+    signal,
+    webContents,
+    streamId,
+    maxQueueRetries,
+    transientRetryDelaysMs,
+    waitImpl,
+  });
 }

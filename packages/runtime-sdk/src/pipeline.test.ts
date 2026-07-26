@@ -79,6 +79,7 @@ test('runs text-only model turns to completion without a host dependency', async
 
 test('feeds ordered tool executions back into the model before the next turn', async () => {
   const order: string[] = [];
+  const observedTranscripts: string[][] = [];
   const pipeline = createRuntimePipeline<string, State, ToolCall, ToolResult, string>({
     model: {
       initialize: ({ input }) => ({ phase: 0, transcript: [input] }),
@@ -107,6 +108,11 @@ test('feeds ordered tool executions back into the model before the next turn', a
         ],
       }),
     },
+    lifecycle: {
+      toolResultsApplied(state) {
+        observedTranscripts.push([...state.transcript]);
+      },
+    },
     tools: {
       execute: async (call, context): Promise<RuntimePipelineToolExecution<ToolCall, ToolResult>> => {
         order.push(`${context.turn}:${context.index}:${call.name}`);
@@ -122,6 +128,7 @@ test('feeds ordered tool executions back into the model before the next turn', a
   assert.equal(result.turns, 2);
   assert.equal(result.toolCalls, 2);
   assert.deepEqual(order, ['0:0:one', '0:1:two']);
+  assert.deepEqual(observedTranscripts, [['start', 'one-result', 'two-result']]);
 });
 
 test('stops after all calls in a turn when a tool returns a terminal control signal', async () => {

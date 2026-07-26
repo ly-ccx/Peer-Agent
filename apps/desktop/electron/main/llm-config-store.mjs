@@ -103,6 +103,18 @@ const PROVIDER_DEFAULTS = {
   anthropic: { baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-20250514' },
 };
 
+// 为同渠道内复制的模型生成不冲突的 model id：base-copy / base-copy-2 ...
+function nextCopyModelId(baseModel, existingModels) {
+  const base = String(baseModel || '').trim() || 'model';
+  const taken = new Set((existingModels || []).map((m) => String(m || '').trim()).filter(Boolean));
+  let candidate = `${base}-copy`;
+  if (!taken.has(candidate)) return candidate;
+  let n = 2;
+  while (taken.has(`${base}-copy-${n}`)) n += 1;
+  return `${base}-copy-${n}`;
+}
+
+
 function parseLegacyTokens(stored, decryptSecret = decryptLegacySecret) {
   const raw = decryptSecret(stored);
   if (!raw) return null;
@@ -1177,6 +1189,50 @@ export function createLlmConfigStore({
   // 继承自组内首条记录,调用方无需重填凭证;模型级参数由 patch 提供。
   // 复用 addProvider 的完整 wire/channel/定价解析,保证路由字段正确。
   // 所有认证类型都允许在同一连接下持久化多个已配置模型；目录本身只提供候选。
+  // 同渠道复制一条模型配置：新 id、model 追加 -copy、显示名追加「副本」/(Copy)，
+  // 模型侧元数据一并克隆；连接信息与密钥由 group 继承（走 addModel）。
+  function duplicateModel(id) {
+    const items = readAll();
+    const source = items.find((i) => i.id === id);
+    if (!source) throw new Error(`Provider ${id} not found`);
+    const groupId = source.groupId || source.id;
+    const siblings = items.filter((i) => (i.groupId || i.id) === groupId);
+    const modelId = nextCopyModelId(
+      source.model,
+      siblings.map((s) => s.model),
+    );
+    const copyName = nextCopyName(
+      source.name || source.modelLabel || source.model || 'model',
+      siblings.map((s) => s.name),
+    );
+    const sourceLabel = source.modelLabel || source.name || source.model || 'model';
+    const copyLabel = nextCopyName(
+      sourceLabel,
+      siblings.map((s) => s.modelLabel || s.name),
+    );
+    return addModel(groupId, {
+      model: modelId,
+      name: copyName,
+      modelLabel: copyLabel,
+      contextWindow: source.contextWindow,
+      maxOutputTokens: source.maxOutputTokens,
+      inputPrice: source.inputPrice,
+      outputPrice: source.outputPrice,
+      cacheWritePrice: source.cacheWritePrice,
+      cacheReadPrice: source.cacheReadPrice,
+      supportsVision: source.supportsVision,
+      supportsReasoning: source.supportsReasoning,
+      supportsPromptCaching: source.supportsPromptCaching,
+      reasoningParamStyle: source.reasoningParamStyle,
+      reasoningEffortMap: source.reasoningEffortMap,
+      modelOptions: source.modelOptions,
+      modelOptionValues: source.modelOptionValues,
+      metadataSource: source.metadataSource,
+      pricingSource: source.pricingSource,
+      metadataSyncedAt: source.metadataSyncedAt,
+    });
+  }
+
   function addModel(groupId, patch = {}) {
     if (!groupId) throw new Error('groupId is required');
     const items = readAll();
@@ -1354,7 +1410,7 @@ export function createLlmConfigStore({
     return { updated, examined: items.length, skipped: false };
   }
 
-  return { listProviders, listGroups, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, getApiKeyRequestConfig, setOAuthTokens, testConnection, backfillMissingPricingFromModelsDev };
+  return { listProviders, listGroups, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, duplicateModel, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, getApiKeyRequestConfig, setOAuthTokens, testConnection, backfillMissingPricingFromModelsDev };
 }
 
 async function testOpenAI(resolved, model, start) {

@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  hasEmptyWriteNarration,
   hasLiteralToolCallSyntax,
+  hasUnsupportedToolClaim,
   shouldRetryNoToolResponse,
 } from './response-guard.mjs';
 
@@ -73,5 +75,25 @@ describe('shouldRetryNoToolResponse with literal tool-call syntax', () => {
 
   it('still returns false for a clean normal answer', () => {
     assert.equal(shouldRetryNoToolResponse('Here is the explanation you asked for.'), false);
+  });
+});
+
+describe('empty write narration guard', () => {
+  it('detects Chinese empty-write progress claims', () => {
+    assert.equal(hasEmptyWriteNarration('正在写入完整调研文档。'), true);
+    assert.equal(hasEmptyWriteNarration('正在把结论写成调研文档'), true);
+    assert.equal(hasEmptyWriteNarration('开始写入调研文档'), true);
+    assert.equal(hasUnsupportedToolClaim('正在写入完整调研文档。'), true);
+  });
+
+  it('retries empty write narration so the model emits a real write tool call', () => {
+    assert.equal(shouldRetryNoToolResponse('正在写入完整调研文档。'), true);
+    assert.equal(shouldRetryNoToolResponse('Now writing the full document with the research findings.'), true);
+  });
+
+  it('does not treat normal coding plans as empty write narration', () => {
+    assert.equal(hasEmptyWriteNarration('OK，开始写代码。我会先写 CascadingMenu.tsx。'), false);
+    assert.equal(shouldRetryNoToolResponse('OK，开始写代码。我会先写 CascadingMenu.tsx。'), false);
+    assert.equal(shouldRetryNoToolResponse('I will write the component next.'), false);
   });
 });

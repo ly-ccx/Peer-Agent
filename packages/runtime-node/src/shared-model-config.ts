@@ -63,6 +63,8 @@ export interface SharedModelCredentialStore {
 export interface SharedModelMetadata {
   readonly source: 'desktop-default';
   readonly providerId: string;
+  /** Desktop channel id when present (openai / anthropic / anthropic-compatible / qoder / ...). */
+  readonly channelId?: string;
   readonly credentialId: string;
   readonly displayName: string;
   readonly model: string;
@@ -385,7 +387,11 @@ export function resolveDefaultReasoningEffort(
   if (preferred && isModelReasoningEffort(preferred) && levels.includes(preferred)) {
     return preferred;
   }
-  if (levels.includes('default')) return 'default';
+  // Align with Desktop resolvePreferredEffort: prefer high over the first listed
+  // level so Grok (low/medium/high, channel default high) does not fall back to low.
+  for (const candidate of ['high', 'default', 'medium', 'low'] as const) {
+    if (levels.includes(candidate)) return candidate;
+  }
   return levels[0] ?? 'default';
 }
 
@@ -402,9 +408,11 @@ function metadataFromSelected(
     supportedReasoningEfforts,
     selected.reasoningDefaultEffort,
   );
+  const channelId = selected.channelId?.trim() || undefined;
   return {
     source: 'desktop-default',
     providerId: selected.provider?.trim() || 'openai',
+    ...(channelId ? { channelId } : {}),
     credentialId: credentialIdOf(selected),
     displayName: selected.name?.trim() || selected.model?.trim() || 'Desktop default',
     model: selected.model?.trim() || '',

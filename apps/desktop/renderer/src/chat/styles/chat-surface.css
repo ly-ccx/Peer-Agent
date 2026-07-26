@@ -1131,11 +1131,13 @@
   border-radius: var(--radius-lg);
   background: var(--control-composer);
   padding: var(--space-2);
+  /* 轻微阴影衬托浮起感，层级低于 popover/card。 */
+  box-shadow: var(--shadow-composer);
   transition: border-color var(--za-motion-medium), box-shadow var(--za-motion-medium);
 }
 .chat-composer:focus-within {
   border-color: var(--graphite-base);
-  box-shadow: 0 0 0 3px var(--za-focus);
+  box-shadow: var(--shadow-composer), 0 0 0 3px var(--za-focus);
 }
 
 .slash-command-menu {

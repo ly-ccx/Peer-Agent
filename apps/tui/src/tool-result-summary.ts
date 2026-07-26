@@ -305,16 +305,49 @@ export function thinkingStatusLabel(frame: number, _hasThinkingContent = false):
   return `Thinking${dots}`;
 }
 
-/**
- * Footer running-status line:
- * `| Working…`
- */
+const RUNNING_ACTIVITY_GLYPHS = '0123456789abcdefABCDEF~!@#$%^&*+=_';
+
+/** A deterministic, continuously changing Crush-style character field. */
+export function runningActivityField(frame: number, width = 80): string {
+  const length = width >= 48 ? 12 : width >= 30 ? 8 : 4;
+  return Array.from({ length }, (_, index) => {
+    const offset = Math.abs(frame * 11 + index * 17 + index * index * 3);
+    return RUNNING_ACTIVITY_GLYPHS[offset % RUNNING_ACTIVITY_GLYPHS.length] ?? '0';
+  }).join('');
+}
+
+export function formatRunningElapsed(elapsedMs: number): string {
+  // Wall-clock elapsed as compact day/hour/minute/second units (not clock-style mm:ss).
+  let remaining = Math.max(0, Math.floor(elapsedMs / 1_000));
+  const days = Math.floor(remaining / 86_400);
+  remaining %= 86_400;
+  const hours = Math.floor(remaining / 3_600);
+  remaining %= 3_600;
+  const minutes = Math.floor(remaining / 60);
+  const seconds = remaining % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  // Always keep seconds so short runs stay readable (e.g. "31s", "1m5s").
+  if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+  return parts.join('');
+}
+
+/** Character field + stable real status + elapsed time, with narrow-width fallback. */
 export function composerRunningStatusLine(options: {
   readonly frame: number;
   readonly statusLabel: string;
+  readonly elapsedMs?: number;
+  readonly width?: number;
 }): string {
+  const width = options.width ?? 80;
+  const activity = runningActivityField(options.frame, width);
+  const elapsed = formatRunningElapsed(options.elapsedMs ?? 0);
   const label = options.statusLabel.trim();
-  return `${thinkingSpinnerGlyph(options.frame)} ${label}`.trimEnd();
+  // Empty label (generic running) keeps the Crush-style activity field + timer.
+  if (width < 30 || !label) return `${activity} · ${elapsed}`;
+  return `${activity}  ${label} · ${elapsed}`;
 }
 
 /** Breathing/pulsing leading glyph for in-flight tool rows. */

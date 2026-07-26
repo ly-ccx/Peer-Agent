@@ -1,6 +1,6 @@
 # @peer-agent/protocol
 
-Host-neutral TypeScript contracts shared by Peer Agent runtimes and clients.
+Host-neutral protocol contracts for Peer Agent runtimes, hosts, and clients.
 
 ## Install
 
@@ -8,25 +8,18 @@ Host-neutral TypeScript contracts shared by Peer Agent runtimes and clients.
 npm install @peer-agent/protocol
 ```
 
-## Scope
+`@peer-agent/protocol` contains the cross-host contract layer: runtime tool calls/results, capability manifests, grants, Evidence, Goal/task contracts, session/runtime snapshots, and related TypeScript types.
 
-This package owns serializable cross-layer contracts such as capability projection, permission grants, tool calls and results, execution records, chat messages, goals, memory, system context, and updater state.
+It does **not** execute local tools, access Electron, or install the `peer` CLI.
 
-It contains no Electron, filesystem, child-process, network, or UI implementation.
+## Who should use it
 
-```ts
-import type {
-  ClientToolCall,
-  ClientToolResult,
-  PermissionGrant,
-  RuntimeExecuteRequest,
-} from '@peer-agent/protocol';
-```
+- custom Peer Agent hosts / adapters
+- integrations that exchange runtime events or tool contracts
+- TypeScript libraries that need stable host-neutral types
 
-Use the package root export only. Deep imports into `src` or `dist` are not public API.
+Most external hosts can install `@peer-agent/runtime-sdk`; it brings protocol transitively. Install protocol directly when you only need contracts/types.
 
-## Compatibility
+## Version policy
 
-`@peer-agent/protocol` follows SemVer independently from the Peer Agent Desktop application. Runtime packages in the same `0.x` minor line declare their supported protocol range explicitly.
-
-See `@peer-agent/runtime-sdk` for host-neutral orchestration.
+The public Open Runtime packages follow the repository root `VERSION` and the same release tag as Desktop / CLI during beta.

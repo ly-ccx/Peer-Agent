@@ -1,10 +1,16 @@
 import { sendQoderPrivateStream } from '../provider-adapters/qoder-private-adapter.mjs';
+import { contextAccountingModelKey } from '@peer-agent/protocol';
 import {
   createAgentLoopKernel,
   handleTerminalTextResponse,
 } from './agent-loop-kernel.mjs';
-import { computeContextInfo } from './compaction-coordinator.mjs';
+import {
+  buildCompactionProviderConfig,
+  buildPromptTooLongRecoveryError,
+  isPromptTooLongResponse,
+} from './compaction-coordinator.mjs';
 import { sanitizeApiMessages } from './message-sanitizer.mjs';
+import { executeDesktopProviderRequest } from './provider-request-coordinator.mjs';
 import * as responseGuard from './response-guard.mjs';
 import {
   createDesktopAbortError,
@@ -12,7 +18,9 @@ import {
 } from './runtime-pipeline-adapter.mjs';
 import { executeModelToolCall } from './tool-orchestrator.mjs';
 
-const QODER_STREAM_IDLE_TIMEOUT_MS = 30_000;
+// Reasoning models and slow queues may pause SSE longer than a short chat idle window.
+// Keep a hard cap so hung streams still fail, but avoid treating 30s thinking gaps as fatal.
+export const QODER_STREAM_IDLE_TIMEOUT_MS = 120_000;
 
 function makeAbortError() {
   const error = new Error('Aborted');
@@ -58,22 +66,40 @@ export async function agentLoopQoder({
   agentProgress = null,
   maxOutputTokens = 0,
   resolvedChannel = null,
+  persistCompaction = null,
+  continuityContext = [],
+  rebuildSystemPrompt = null,
   sendStream = sendQoderPrivateStream,
   emitRuntimeEvent = null,
   runtimeEventState = undefined,
   providerId = null,
   runtimeMode = 'chat',
+  accountingIdentity = null,
+  initialContextAccounting = null,
 }) {
-  const apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
+  let apiMessages = sanitizeApiMessages([{ role: 'system', content: systemPrompt }, ...messages]);
+  const providerConfig = buildCompactionProviderConfig({
+    provider: 'qoder',
+    baseUrl,
+    apiKey,
+    model,
+    maxOutputTokens,
+    resolvedChannel,
+  });
   const loop = createAgentLoopKernel({
     webContents,
     streamId,
+    conversationId,
     onRound: agentProgress?.onRound,
-    getContextInfo: () => computeContextInfo({
-      messages: apiMessages,
-      contextWindow,
-      tools,
-    }),
+    emitRuntimeEvent,
+    accountingIdentity: accountingIdentity ?? {
+      conversationId: conversationId || streamId,
+      contentRevision: 0,
+      modelKey: contextAccountingModelKey(providerId, model),
+    },
+    initialContextAccounting,
+    contextWindow,
+    countCapability: { kind: 'observed_usage_only' },
   });
 
   await runDesktopRuntimePipeline({
@@ -87,34 +113,77 @@ export async function agentLoopQoder({
     signal,
     emitRuntimeEvent,
     eventState: runtimeEventState,
+    lifecycle: {
+      toolResultsApplied: () => loop.publishToolResultProjection(),
+    },
     model: {
       initialize: () => ({ provider: 'qoder-private' }),
       runTurn: async (state) => {
-        const providerResponse = await sendStream({
-          baseUrl,
-          apiKey,
-          endpoint: resolvedChannel?.endpoint,
-          model,
-          messages: sanitizeApiMessages(apiMessages),
-          tools,
-          maxOutputTokens,
-          modelOptions,
-          modelOptionValues,
-          signal,
-          webContents,
-          streamId,
-          bufferThinkingDeltas: false,
-          emitBufferedThinkingDeltas: true,
-          streamIdleTimeoutMs: QODER_STREAM_IDLE_TIMEOUT_MS,
+        const execution = await executeDesktopProviderRequest({
+          request: {
+            messages: apiMessages,
+            systemPrompt,
+            contextWindow,
+            providerConfig,
+            signal,
+            persistCompaction,
+            conversationId,
+            streamId,
+            webContents,
+            continuityContext,
+            tools,
+            preserveLatestUserTurn: true,
+            runtimeUsageAccounting: loop.usageAccounting,
+            onProviderRequest: ({ usage, requestFingerprint }) => {
+              loop.addUsage(usage, { requestFingerprint });
+            },
+            rebuildSystemPrompt,
+            accountingIdentity: accountingIdentity ?? {
+              conversationId: conversationId || streamId,
+              contentRevision: 0,
+              modelKey: contextAccountingModelKey(providerId, model),
+            },
+            initialContextAccounting: loop.getContextAccounting(),
+            countCapability: { kind: 'observed_usage_only' },
+            onContextAccounting: loop.acceptContextAccounting,
+          },
+          buildCanonicalRequest: ({ messages: projectedMessages }) => ({
+            model,
+            messages: sanitizeApiMessages(projectedMessages),
+            tools,
+            maxOutputTokens,
+            modelOptions,
+            modelOptionValues,
+          }),
+          send: (canonicalRequest) => sendStream({
+            baseUrl,
+            apiKey,
+            endpoint: resolvedChannel?.endpoint,
+            ...canonicalRequest,
+            signal,
+            webContents: loop.providerWebContents,
+            streamId,
+            bufferThinkingDeltas: false,
+            emitBufferedThinkingDeltas: true,
+            streamIdleTimeoutMs: QODER_STREAM_IDLE_TIMEOUT_MS,
+          }),
         });
+        apiMessages = execution.messages;
+        const providerResponse = execution.response;
 
         if (signal?.aborted) throw makeAbortError();
-        loop.addUsage(providerResponse.streamUsage);
         if (!providerResponse.ok) {
-          if (providerResponse.providerError) {
-            loop.sendError(`${providerResponse.errorText || 'qoder_private_error'}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
+          const errorText = providerResponse.errorText || '';
+          if (isPromptTooLongResponse(providerResponse.status, errorText)) {
+            loop.sendError(buildPromptTooLongRecoveryError({
+              text: errorText,
+              providerTracePath: providerResponse.providerTracePath,
+              retryUsed: execution.retriedAfterOverflow,
+            }));
+          } else if (providerResponse.providerError) {
+            loop.sendError(`${errorText || 'qoder_private_error'}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
           } else {
-            loop.sendHttpError(providerResponse.status, providerResponse.errorText || 'qoder_private_error');
+            loop.sendHttpError(providerResponse.status, errorText || 'qoder_private_error');
           }
           return { kind: 'completed', state, reason: 'provider_error' };
         }
@@ -200,11 +269,9 @@ export async function agentLoopQoder({
           goalPlanStore,
         });
         if (toolExecution.aborted) throw createDesktopAbortError();
-        // goal_create_plan / request_user_input 等 terminal 工具：立即 sendDone，
-        // 不依赖后续 pipeline onStopped 时序，避免 UI 卡在「正在思考」。
-        if (toolExecution.controlSignal?.terminal) {
-          try { loop.sendDone(); } catch {}
-        }
+        // terminal 工具（goal_create_plan / request_user_input 等）不得在这里 sendDone：
+        // 必须先走 applyToolResults 写入 tool result，再由 pipeline onStopped 统一收尾，
+        // 否则 done 快照会丢掉本轮 tool result，右下角占用会卡在发送前 seed。
         return {
           call,
           result: toolExecution,

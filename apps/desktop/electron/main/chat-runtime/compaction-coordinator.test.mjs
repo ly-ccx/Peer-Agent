@@ -6,9 +6,7 @@ import {
   buildCompactionProviderConfig,
   buildPromptTooLongRecoveryError,
   computeContextBudget,
-  computeContextInfo,
   contextTokensFromUsageSnapshot,
-  CONTEXT_BUDGET_GUARD,
   isPromptTooLongResponse,
   rehydrateSystemPromptAfterCompaction,
   runCompactionCheck,
@@ -80,7 +78,26 @@ describe('chat compaction coordinator', () => {
     assert.equal(isPromptTooLongResponse(400, 'context window exceeded'), true);
     assert.equal(isPromptTooLongResponse(400, 'input is too long for this model'), true);
     assert.equal(isPromptTooLongResponse(400, 'exceeds model context window'), true);
+    assert.equal(
+      isPromptTooLongResponse(
+        400,
+        'This model maximum prompt length is 500000 but the request contains 501244 tokens.',
+      ),
+      true,
+    );
     assert.equal(isPromptTooLongResponse(500, 'temporary outage'), false);
+  });
+
+  it('never lets a low estimate override 498K provider-observed input', () => {
+    const budget = computeContextBudget({
+      messages: [{ role: 'user', content: 'tiny local projection' }],
+      contextWindow: 500_000,
+      usageSnapshot: { inputTokens: 498_138, cacheReadTokens: 0 },
+    });
+
+    assert.equal(budget.contextTokens, 498_138);
+    assert.equal(budget.usageTokens, 498_138);
+    assert.equal(budget.shouldCompact, true);
   });
 
   it('builds explicit prompt-too-long recovery errors', () => {
@@ -106,7 +123,7 @@ describe('chat compaction coordinator', () => {
       },
     ];
     const totalTokens = estimateTokensFromMessages(messages) + estimateToolsTokens(tools);
-    const hardWindow = Math.floor(totalTokens / CONTEXT_BUDGET_GUARD.hardRatio) - 1;
+    const hardWindow = Math.floor(totalTokens / COMPACTION_CONFIG.hardRatio) - 1;
     const budget = computeContextBudget({ messages, tools, contextWindow: hardWindow });
 
     assert.equal(budget.contextTokens, totalTokens);
@@ -202,10 +219,9 @@ describe('chat compaction coordinator', () => {
     assert.equal(result.messages.at(-1).content, 'current question');
   });
 
-  it('emits the post-compaction context snapshot only after persistence succeeds', async () => {
+  it('emits compaction diagnostics only after transcript persistence succeeds', async () => {
     const events = [];
     const ordering = [];
-    let persistedProjection = null;
     const tools = [
       {
         type: 'function',
@@ -227,9 +243,8 @@ describe('chat compaction coordinator', () => {
       contextWindow: 200_000,
       providerConfig: null,
       signal: new AbortController().signal,
-      persistCompaction: async ({ requestProjection }) => {
+      persistCompaction: async () => {
         ordering.push('persist');
-        persistedProjection = requestProjection;
       },
       conversationId: 'c1',
       streamId: 's1',
@@ -250,17 +265,8 @@ describe('chat compaction coordinator', () => {
     assert.ok(done, 'successful compaction must emit done');
     assert.equal(done.conversationId, 'c1');
     assert.deepEqual(ordering, ['persist', 'done']);
-    assert.equal(done.contextWindow, 200_000);
-    assert.deepEqual(persistedProjection, {
-      nextRequestInputTokens: done.nextRequestInputTokens,
-      contextWindow: done.contextWindow,
-    });
-    assert.equal(
-      done.nextRequestInputTokens,
-      estimateTokensFromMessages(result.messages) + estimateToolsTokens(tools),
-      'done snapshot must use the same messages + tool schema budget as the context meter',
-    );
-    assert.ok(done.nextRequestInputTokens > done.afterTokens, 'tool schema tokens must not be omitted');
+    assert.equal('contextWindow' in done, false);
+    assert.equal('nextRequestInputTokens' in done, false);
   });
 
   it('rethrows when a compacted persist fails and settles the banner to idle', async () => {
@@ -304,66 +310,6 @@ describe('chat compaction coordinator', () => {
   });
 });
 
-describe('computeContextInfo（进度条用量与压缩触发口径单一来源）', () => {
-  const messages = [
-    { role: 'system', content: 'system prompt' },
-    { role: 'user', content: 'x'.repeat(4000) },
-    { role: 'assistant', content: 'y'.repeat(4000) },
-  ];
-
-  it('contextTokens 与压缩触发使用同一估算函数（estimateTokensFromMessages）', () => {
-    const info = computeContextInfo({ messages, contextWindow: 100_000 });
-    // 口径统一的核心：进度条分子必须 === 压缩触发判定所用的估算，逐字节相等。
-    assert.equal(info.nextRequestInputTokens, estimateTokensFromMessages(messages));
-  });
-
-  it('contextTokens 计入工具 schema（tools 每次请求都全量发送）', () => {
-    const tools = [
-      {
-        name: 'search_files',
-        description: 'Search file contents across the workspace',
-        input_schema: {
-          type: 'object',
-          properties: { query: { type: 'string' } },
-          required: ['query'],
-        },
-      },
-    ];
-    const withoutTools = computeContextInfo({ messages, contextWindow: 100_000 });
-    const withTools = computeContextInfo({ messages, contextWindow: 100_000, tools });
-    const toolTokens = estimateToolsTokens(tools);
-    assert.ok(toolTokens > 0, 'tool schema should cost tokens');
-    // 进度条分子 = messages + tools，二者口径单一来源。
-    assert.equal(withTools.nextRequestInputTokens, withoutTools.nextRequestInputTokens + toolTokens);
-  });
-
-  it('compactionSuggested 用与 shouldCompact 完全相同的 triggerRatio 阈值线', () => {
-    const tokens = estimateTokensFromMessages(messages);
-    const ratio = COMPACTION_CONFIG.triggerRatio;
-    // 阈值线正下方（未越线）：不建议压缩。+1 是为了避开恰好相等的边界。
-    const windowBelow = Math.ceil(tokens / ratio) + 1;
-    // 阈值线正上方（已越线）：建议压缩。
-    const windowAbove = Math.floor(tokens / ratio) - 1;
-    assert.equal(computeContextInfo({ messages, contextWindow: windowBelow }).compactionSuggested, false);
-    assert.equal(computeContextInfo({ messages, contextWindow: windowAbove }).compactionSuggested, true);
-    // 回执里必须带回 triggerRatio，渲染端无需自己猜阈值。
-    assert.equal(computeContextInfo({ messages, contextWindow: windowAbove }).triggerRatio, ratio);
-  });
-
-  it('无有效上下文窗口时归一化为 null 且不建议压缩', () => {
-    for (const contextWindow of [0, -1, undefined, Number.NaN]) {
-      const info = computeContextInfo({ messages, contextWindow });
-      assert.equal(info.contextWindow, null);
-      assert.equal(info.compactionSuggested, false);
-    }
-  });
-
-  it('messages 非数组时安全降级为 0 token', () => {
-    assert.equal(computeContextInfo({ messages: null, contextWindow: 100_000 }).nextRequestInputTokens, 0);
-    assert.equal(computeContextInfo({ messages: undefined, contextWindow: 100_000 }).nextRequestInputTokens, 0);
-  });
-});
-
 // microcompaction 预算回归：原始集合与 Layer 1 后集合是两个明确阶段；
 // 压缩触发应投影当前阶段真正用于下一步判定的 triggerTokens，主圆环则消费 contextTokens。
 describe('microcompaction 前后触发预算不变量', () => {
@@ -398,35 +344,34 @@ describe('microcompaction 前后触发预算不变量', () => {
   it('完整集合与显式微压缩后的集合投影为同一个下一请求输入量', () => {
     const full = buildConversationWithBigToolResults();
     const sent = applyMicrocompaction(full).messages;
-
-    const fullInfo = computeContextInfo({ messages: full, contextWindow: 200_000 });
-    const sentInfo = computeContextInfo({ messages: sent, contextWindow: 200_000 });
-
-    assert.equal(
-      fullInfo.nextRequestInputTokens,
-      sentInfo.nextRequestInputTokens,
-      '统一投影必须先应用与发送链路相同的 microcompaction',
-    );
+    const projected = applyMicrocompaction(full).messages;
+    assert.deepEqual(projected, sent);
   });
 
   it('压缩建议与下一请求输入量来自同一预算', () => {
     const full = buildConversationWithBigToolResults();
-    const projectedTokens = computeContextInfo({ messages: full, contextWindow: 200_000 }).nextRequestInputTokens;
+    const projected = applyMicrocompaction(full).messages;
+    const projectedTokens = estimateTokensFromMessages(projected);
     const ratio = COMPACTION_CONFIG.triggerRatio;
     const windowAbove = Math.floor(projectedTokens / ratio) - 1;
     const windowBelow = Math.ceil(projectedTokens / ratio) + 1;
 
-    const above = computeContextInfo({ messages: full, contextWindow: windowAbove });
-    const below = computeContextInfo({ messages: full, contextWindow: windowBelow });
+    const above = computeContextBudget({ messages: projected, contextWindow: windowAbove });
+    const below = computeContextBudget({ messages: projected, contextWindow: windowBelow });
 
-    assert.equal(above.nextRequestInputTokens, projectedTokens);
-    assert.equal(above.compactionSuggested, true);
-    assert.equal(below.nextRequestInputTokens, projectedTokens);
-    assert.equal(below.compactionSuggested, false);
+    assert.equal(above.contextTokens, projectedTokens);
+    assert.equal(above.overSoftLimit, true);
+    assert.equal(below.contextTokens, projectedTokens);
+    assert.equal(below.overSoftLimit, false);
   });
 });
 
 describe.skip('ADR 42 旧双口径行为（由 ADR 52 统一投影取代）', () => {
+  // 旧双口径（usage 锁分子 / max(估算, usage) 触发）已由 ADR 52 统一投影取代。
+  // 现行行为见下方 "ADR 52 next-request projection"。
+});
+
+describe('ADR 56 provider-observed context accounting', () => {
   // 本地构造一段「完整会话量很大」的消息（含多条大 tool 结果），用于对比两种数据口径。
   function buildBigConversation() {
     const big = 'x'.repeat(8000);
@@ -457,60 +402,39 @@ describe.skip('ADR 42 旧双口径行为（由 ADR 52 统一投影取代）', ()
     assert.equal(contextTokensFromUsageSnapshot({ outputTokens: 999 }), null, '仅 output 不算上下文');
   });
 
-  it('显示口径优先采用 provider usage 快照；触发取 max(估算, usage)', () => {
+  it('usage 快照是权威分子，不允许本地估算覆盖', () => {
     const full = buildBigConversation();
-    // 真实场景：压缩后实际发送量很小，provider usage 快照体现这一点。
     const usageSnapshot = { inputTokens: 800, outputTokens: 100, cacheWriteTokens: 0, cacheReadTokens: 200 };
-    const info = computeContextInfo({ messages: full, contextWindow: 200_000, usageSnapshot });
-
-    // 显示口径 = usage 快照的 input+cacheRead = 1000，反映实际发送上下文（压缩后回落）。
-    assert.equal(info.nextRequestInputTokens, 1000, '有 usage 快照时 contextTokens 必须采用显示口径');
-    // 触发口径 = max(完整会话估算, usage)；此处估算更大。
-    const fullTokens = estimateTokensFromMessages(full);
-    assert.equal(
-      info.triggerTokens,
-      Math.max(fullTokens, 1000),
-      `触发口径(${info.triggerTokens}) 应是 max(完整会话估算 ${fullTokens}, usage 1000)`,
-    );
-    assert.ok(
-      info.nextRequestInputTokens < info.triggerTokens,
-      `显示口径(${info.nextRequestInputTokens}) 应远小于触发口径(${info.triggerTokens})——这正是压缩后能回落的关键`,
-    );
-  });
-
-  it('无 usage 快照但有 displayMessages 时，显示口径按发送切片估算（小于完整集合）', () => {
-    const full = buildBigConversation();
-    const sent = applyMicrocompaction(full).messages;
-    const info = computeContextInfo({ messages: full, contextWindow: 200_000, displayMessages: sent });
-
-    assert.equal(
-      info.nextRequestInputTokens,
-      estimateTokensFromMessages(sent),
-      '无 usage 时显示口径 = 对发送切片 displayMessages 的估算',
-    );
-    assert.ok(
-      info.nextRequestInputTokens < info.triggerTokens,
-      '发送切片显示口径应小于完整会话触发口径',
-    );
-  });
-
-  it('压缩触发判定：小显示口径不能压制「估算已越线」的建议', () => {
-    const full = buildBigConversation();
-    const fullTokens = estimateTokensFromMessages(full);
-    const ratio = COMPACTION_CONFIG.triggerRatio;
-    const windowAbove = Math.floor(fullTokens / ratio) - 1; // 完整集合越过触发线
-    // 即便显示口径很小（usage 快照仅 500），估算已越线时 compactionSuggested 仍必须为 true。
-    const info = computeContextInfo({
+    const budget = computeContextBudget({
       messages: full,
+      contextWindow: 200_000,
+      usageSnapshot,
+    });
+    assert.equal(budget.contextTokens, 1000, 'provider usage 必须成为权威分子');
+    assert.equal(budget.usageTokens, 1000, 'usage = input + cacheRead');
+    assert.equal(budget.contextSource, 'provider_usage');
+  });
+
+  it('有 provider usage 时不再让本地估算制造第二套触发事实', () => {
+    const full = buildBigConversation();
+    const projectedMessages = applyMicrocompaction(full).messages;
+    const projected = computeContextBudget({
+      messages: projectedMessages,
+      contextWindow: 200_000,
+    });
+    const ratio = COMPACTION_CONFIG.triggerRatio;
+    const windowAbove = Math.floor(projected.contextTokens / ratio) - 1;
+    const budget = computeContextBudget({
+      messages: projectedMessages,
       contextWindow: windowAbove,
       usageSnapshot: { inputTokens: 500, cacheReadTokens: 0 },
     });
-    assert.equal(info.nextRequestInputTokens, 500, '显示口径采用 usage 快照');
-    assert.equal(info.compactionSuggested, true, '估算已越 soft 线时仍建议压缩，不被小显示口径压制');
+    assert.equal(budget.contextTokens, 500, 'provider usage 是唯一权威数值');
+    assert.equal(budget.shouldCompact, false, '未精确计量的新内容不能伪装成估算触发');
+    assert.equal(budget.usageTokens, 500);
   });
 
-  it('usage 高水位触发：本地估算未超 soft 线但真实 usage 已超时，预算与建议均触发', () => {
-    // 模拟用户截图场景：本地估算偏低，进度条 usage 已接近满窗。
+  it('usage 高水位必须抬高上下文并触发压缩', () => {
     const messages = [
       { role: 'system', content: 'sys' },
       { role: 'user', content: 'short' },
@@ -519,28 +443,21 @@ describe.skip('ADR 42 旧双口径行为（由 ADR 52 统一投影取代）', ()
     const estimated = estimateTokensFromMessages(messages);
     const contextWindow = 100_000;
     const softLimit = Math.floor(contextWindow * COMPACTION_CONFIG.triggerRatio);
-    assert.ok(estimated < softLimit, '本地估算必须低于 soft 线，才能验证 usage 路径');
+    assert.ok(estimated < softLimit, '本地估算必须低于 soft 线，才能验证 usage 不抬高路径');
 
-    // usage 越过 soft 线但未到 hard 线（0.95），应走 soft 触发而非 force/emergency。
     const usageTokens = softLimit + 1;
     const usageSnapshot = { inputTokens: usageTokens, cacheReadTokens: 0 };
 
     const budget = computeContextBudget({ messages, contextWindow, usageSnapshot });
     assert.equal(budget.estimatedTokens, estimated);
     assert.equal(budget.usageTokens, usageTokens);
-    assert.equal(budget.contextTokens, usageTokens, '触发量取 max(估算, usage)');
+    assert.equal(budget.contextTokens, usageTokens, '预算分子必须采用 provider usage');
     assert.equal(budget.overSoftLimit, true);
     assert.equal(budget.shouldCompact, true);
-    assert.equal(budget.force, false, '仅 soft 越线不应 force');
-    assert.equal(budget.emergency, false, '仅 soft 越线不应 emergency');
 
-    const info = computeContextInfo({ messages, contextWindow, usageSnapshot });
-    assert.equal(info.nextRequestInputTokens, usageTokens, '进度条显示 usage');
-    assert.equal(info.triggerTokens, usageTokens, '触发与显示同源（均为 usage 高水位）');
-    assert.equal(info.compactionSuggested, true, 'usage 过 soft 线时必须建议压缩');
   });
 
-  it('runCompactionCheck 在 usage 高水位时也会走 threshold 路径（即便估算未超）', async () => {
+  it('runCompactionCheck 在 usage 高水位时触发压缩', async () => {
     const messages = [
       { role: 'system', content: 'sys' },
       { role: 'user', content: 'u'.repeat(200) },
@@ -571,16 +488,58 @@ describe.skip('ADR 42 旧双口径行为（由 ADR 52 统一投影取代）', ()
         },
       },
     });
-
-    // 无 providerConfig 时走结构化/fallback 路径，但必须真正 compacted。
-    assert.equal(result.compacted, true, 'usage 过 soft 线必须触发压缩');
-    assert.ok(
+    assert.equal(result.compacted, true, 'provider usage 越线时必须压缩');
+    assert.equal(
       events.some((e) => e.channel === 'chat:compaction' && e.payload.stage === 'start'),
+      true,
       '应发出压缩 start 横幅',
     );
   });
-});
 
+  it('回合结束后投影包含本轮新增 tool result 与 assistant 内容', () => {
+    // 回归：getContextInfo 若仍用 lastSent（上一轮已发送切片），会漏掉本轮 tool/assistant。
+    const beforeTurn = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'please inspect file' },
+    ];
+    const afterTurn = [
+      ...beforeTurn,
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'bash', arguments: '{}' } }],
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: 'tool-result-payload-' + 'z'.repeat(20_000) },
+      { role: 'assistant', content: 'final answer after tools' },
+    ];
+    const tools = [
+      {
+        type: 'function',
+        function: {
+          name: 'bash',
+          description: 'run shell',
+          parameters: { type: 'object', properties: { command: { type: 'string' } } },
+        },
+      },
+    ];
+
+    const before = computeContextBudget({
+      messages: applyMicrocompaction(beforeTurn).messages,
+      contextWindow: 500_000,
+      tools,
+    });
+    const after = computeContextBudget({
+      messages: applyMicrocompaction(afterTurn).messages,
+      contextWindow: 500_000,
+      tools,
+    });
+
+    assert.ok(
+      after.contextTokens > before.contextTokens + 4_000,
+      '当前 apiMessages 投影必须高于 lastSent 切片，堵住 47.5k/10% 低估',
+    );
+  });
+});
 
 describe('静默 microcompaction 与占用显示口径对齐', () => {
   function buildMicrocompactableConversation() {
@@ -602,7 +561,7 @@ describe('静默 microcompaction 与占用显示口径对齐', () => {
     return messages;
   }
 
-  it('runCompactionCheck：微压缩后返回并发布统一的下一请求输入量', async () => {
+  it('runCompactionCheck：微压缩后只返回有效消息，不发布第二套容量状态', async () => {
     const messages = buildMicrocompactableConversation();
     const fullEstimated = estimateTokensFromMessages(messages);
     const micro = applyMicrocompaction(messages).messages;
@@ -643,42 +602,21 @@ describe('静默 microcompaction 与占用显示口径对齐', () => {
       JSON.stringify(messages),
       '返回消息应为微压缩后的有效上下文',
     );
-    assert.ok(
-      typeof result.nextRequestInputTokens === 'number' && result.nextRequestInputTokens > 0,
-      '应回传有效 nextRequestInputTokens',
-    );
-    assert.equal(result.nextRequestInputTokens, microEstimated);
-    assert.ok(
-      result.nextRequestInputTokens < fullEstimated,
-      `有效占用应低于完整历史: effective=${result.nextRequestInputTokens} full=${fullEstimated}`,
-    );
-    assert.ok(
-      result.nextRequestInputTokens <= soft,
-      `有效占用应回到 soft 线以下: effective=${result.nextRequestInputTokens} soft=${soft}`,
-    );
+    assert.equal(estimateTokensFromMessages(result.messages), microEstimated);
+    assert.equal('nextRequestInputTokens' in result, false);
+    assert.equal('contextWindow' in result, false);
 
     const idle = events.find((e) => e.channel === 'chat:compaction' && e.payload.stage === 'idle');
-    assert.ok(idle, '应发送 chat:compaction idle 携带有效占用');
+    assert.ok(idle, '应发送 chat:compaction idle 收尾横幅');
     assert.equal(idle.payload.microcompacted, true);
-    assert.equal(idle.payload.nextRequestInputTokens, result.nextRequestInputTokens);
+    assert.equal('nextRequestInputTokens' in idle.payload, false);
+    assert.equal('contextWindow' in idle.payload, false);
     assert.ok(
       !events.some((e) => e.channel === 'chat:compaction' && e.payload.stage === 'done'),
       '取消语义压缩时不应发 done 横幅',
     );
   });
 
-  it('computeContextInfo：有 displayMessages 时显示口径采用有效发送切片，不被完整历史抬高', () => {
-    const full = buildMicrocompactableConversation();
-    const sent = applyMicrocompaction(full).messages;
-    const info = computeContextInfo({
-      messages: full,
-      contextWindow: 200_000,
-      displayMessages: sent,
-      usageSnapshot: null,
-    });
-    assert.equal(info.nextRequestInputTokens, estimateTokensFromMessages(sent));
-    assert.ok(info.nextRequestInputTokens < estimateTokensFromMessages(full));
-  });
 });
 
 
@@ -706,7 +644,7 @@ describe('P0 summary reserve + post-compact rehydration', () => {
     );
     assert.equal(
       budget.hardLimit,
-      Math.floor(contextWindow * Math.max(COMPACTION_CONFIG.triggerRatio, CONTEXT_BUDGET_GUARD.hardRatio)),
+      Math.floor(contextWindow * Math.max(COMPACTION_CONFIG.triggerRatio, COMPACTION_CONFIG.hardRatio)),
     );
     // 摘要预留体现在 effectiveContextWindow，并在剩余不足时通过 overSummaryHeadroom 提前触发。
     assert.ok(budget.effectiveContextWindow < contextWindow);

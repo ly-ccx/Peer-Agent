@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createExplorerPromptSource } from './explorer-source.mjs';
+import { createExplorerPromptSource } from '@peer-agent/system-context';
 
 const sampleContext = {
   explorerId: 'exp-1',

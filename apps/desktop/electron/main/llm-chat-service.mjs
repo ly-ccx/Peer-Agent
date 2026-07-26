@@ -8,6 +8,7 @@ import {
   createRuntimeToolProjection,
   renderSystemContext,
 } from './llm-prompts.mjs';
+import { contextAccountingModelKey } from '@peer-agent/protocol';
 import {
   normalizeAnthropicMessages,
   normalizeOpenAIMessages,
@@ -39,6 +40,7 @@ import { fetchWithConnectionRecovery } from './provider-transports/recovering-fe
 import { getQoderModelMetadata, resolveQoderModelOptionProjection } from './provider-adapters/qoder-model-catalog.mjs';
 import { detectTailRepetition } from './repetition-detector.mjs';
 import { createUsageRequestLog } from './usage-request-log.mjs';
+import { estimateUsageCostUsd } from './usage-stats.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 
 const activeStreams = new Map();
@@ -94,6 +96,8 @@ function buildRuntimeTools({ mcpRegistry, providerType, mode }) {
 }
 
 export { buildAnthropicTools, buildOpenAITools, buildSystemPrompt };
+// restored 重投影(21 号文档 13.3)需要按模式投影工具 schema,导出供 main 复用。
+export { buildRuntimeTools };
 export { normalizeAnthropicMessages, normalizeOpenAIMessages };
 export { hasUnsupportedToolClaim };
 export { finalizeDanglingToolSegments, terminalDanglingNote };
@@ -185,42 +189,65 @@ function buildAgentRunOutcome(streamRecord = {}) {
 }
 
 function recordConversationUsage({ conversationStore, streamRecord, usage, usageRequestLog, llmConfigStore }) {
-  if (!conversationStore?.addUsage || !streamRecord?.conversationId || !hasBillableUsage(usage)) return null;
+  if (
+    (!conversationStore?.recordRuntimeTurnUsage && !conversationStore?.addUsage)
+    || !streamRecord?.conversationId
+    || !hasBillableUsage(usage)
+  ) return null;
   if (streamRecord.usageRecorded) return null;
   try {
-    const lifetimeUsage = conversationStore.addUsage(streamRecord.conversationId, usage);
-    streamRecord.usageRecorded = Boolean(lifetimeUsage);
-
-    // 1) 把本轮实际 provider/model 快照写回会话 meta，避免长期 null 导致统计归到「未绑定」。
-    //    但若用户绑定了解析失败的历史 id，本轮只是强绑定回退到默认，则不要用默认覆盖原绑定。
-    //    若历史 groupId::model 能解析到真实记录，则回写真实 id（顺带迁移）。
-    // 2) 追加请求级 usage 日志，供后续按请求聚合。
-    if (lifetimeUsage) {
-      const requestedModelProviderId = streamRecord.modelProviderId || null;
-      const actualModelProviderId = streamRecord.actualModelProviderId || null;
-      const model = streamRecord.actualModel || null;
-      const providers = typeof llmConfigStore?.listProviders === 'function'
-        ? llmConfigStore.listProviders()
-        : [];
-      const patch = resolveConversationModelBindingPatch({
-        providers,
-        requestedModelProviderId,
-        actualModelProviderId,
-        actualModel: model,
-      });
-      const modelProviderId = patch.modelProviderId
-        || actualModelProviderId
-        || requestedModelProviderId
-        || null;
-      try {
-        if (typeof conversationStore.updateModelEffort === 'function') {
-          conversationStore.updateModelEffort(streamRecord.conversationId, patch);
-        }
-      } catch (error) {
-        console.warn('[llm-chat] failed to persist provider snapshot:', error?.message || error);
+    const requestedModelProviderId = streamRecord.modelProviderId || null;
+    const actualModelProviderId = streamRecord.actualModelProviderId || null;
+    const model = streamRecord.actualModel || null;
+    const providers = typeof llmConfigStore?.listProviders === 'function'
+      ? llmConfigStore.listProviders()
+      : [];
+    const patch = resolveConversationModelBindingPatch({
+      providers,
+      requestedModelProviderId,
+      actualModelProviderId,
+      actualModel: model,
+    });
+    const modelProviderId = patch.modelProviderId
+      || actualModelProviderId
+      || requestedModelProviderId
+      || null;
+    try {
+      if (typeof conversationStore.updateModelEffort === 'function') {
+        conversationStore.updateModelEffort(streamRecord.conversationId, patch);
       }
+    } catch (error) {
+      console.warn('[llm-chat] failed to persist provider snapshot:', error?.message || error);
+    }
 
-      try {
+    let lifetimeUsage = null;
+    if (
+      usage?.usageScope === 'runtime_turn'
+      && typeof conversationStore.recordRuntimeTurnUsage === 'function'
+    ) {
+      const cost = estimateUsageCostUsd(usage, streamRecord.actualPricing || {});
+      const recorded = conversationStore.recordRuntimeTurnUsage(
+        streamRecord.conversationId,
+        {
+          usage,
+          attribution: {
+            id: streamRecord.streamId || undefined,
+            streamId: streamRecord.streamId || null,
+            modelProviderId,
+            model,
+            providerName: streamRecord.actualProviderName || null,
+            estimatedCostUsd: cost.hasPricing ? cost.estimatedCostUsd : null,
+            pricingSource: streamRecord.actualPricingSource || null,
+          },
+        },
+      );
+      lifetimeUsage = recorded?.lifetimeUsage ?? null;
+    } else {
+      // Compatibility for injected legacy stores/adapters. Production Desktop
+      // and TUI both use recordRuntimeTurnUsage.
+      lifetimeUsage = conversationStore.addUsage?.(streamRecord.conversationId, usage);
+      if (lifetimeUsage) {
+        try {
         usageRequestLog?.append?.({
           id: streamRecord.streamId || undefined,
           conversationId: streamRecord.conversationId,
@@ -229,14 +256,17 @@ function recordConversationUsage({ conversationStore, streamRecord, usage, usage
           model,
           providerName: streamRecord.actualProviderName || null,
           usage,
+          providerRequestCount: usage?.providerRequestCount,
           pricing: streamRecord.actualPricing || {},
           pricingSource: streamRecord.actualPricingSource || null,
         });
-      } catch (error) {
-        console.warn('[llm-chat] failed to append usage request log:', error?.message || error);
+        } catch (error) {
+          console.warn('[llm-chat] failed to append usage request log:', error?.message || error);
+        }
       }
     }
 
+    streamRecord.usageRecorded = Boolean(lifetimeUsage);
     return lifetimeUsage;
   } catch (error) {
     console.warn('[llm-chat] failed to record conversation usage:', error?.message || error);
@@ -342,6 +372,12 @@ function wrapWebContentsForRuntimeEvents(
         ? sourceSegments.map((segment) => ({ ...segment }))
         : [],
     };
+    if (final && Number.isFinite(streamRecord.startedAt)) {
+      patch.durationMs = Math.max(0, now - streamRecord.startedAt);
+    }
+    if (final && hasBillableUsage(streamRecord.finalUsage)) {
+      patch.usage = { ...streamRecord.finalUsage };
+    }
     if (final && interrupted) patch.interrupted = true;
     try {
       conversationStore.updateMessageById(
@@ -482,15 +518,13 @@ function wrapWebContentsForRuntimeEvents(
           });
         }
         persistStreamRecord({ final: true, interrupted: erroredTerminal });
-        if (!erroredTerminal
-          && Number.isFinite(Number(payload?.nextRequestInputTokens))
+        if (payload?.contextAccounting?.version === 1
           && typeof conversationStore?.updateContextSnapshot === 'function'
           && streamRecord.conversationId) {
-          conversationStore.updateContextSnapshot(streamRecord.conversationId, {
-            nextRequestInputTokens: Number(payload.nextRequestInputTokens),
-            contextWindow: Number.isFinite(Number(payload?.contextWindow)) ? Number(payload.contextWindow) : null,
-            source: 'desktop',
-          });
+          conversationStore.updateContextSnapshot(
+            streamRecord.conversationId,
+            payload.contextAccounting,
+          );
         }
       } else if (channel === 'chat:stream:aborted') {
         streamRecord.terminalEventSent = true;
@@ -838,6 +872,23 @@ export function createLlmChatService({
           accountId: credential.accountId,
           oauthProjectId: provider.oauthProjectId || credential.oauthProjectId || null,
         });
+        const storedConversation = conversationId
+          ? conversationStore?.getConversation?.(conversationId)
+          : null;
+        const accountingIdentity = {
+          conversationId: conversationId || streamId,
+          contentRevision:
+            Number.isSafeInteger(storedConversation?.contentRevision)
+            && storedConversation.contentRevision >= 0
+              ? storedConversation.contentRevision
+              : 0,
+          modelKey: contextAccountingModelKey(provider.id, provider.model),
+        };
+        const initialContextAccounting =
+          storedConversation?.contextSnapshot?.version === 1
+          && storedConversation.contextSnapshot.modelKey === accountingIdentity.modelKey
+            ? storedConversation.contextSnapshot
+            : null;
 
         const systemContext = buildSystemContext(runWorkspacePath, {
           contextAttachments,
@@ -962,10 +1013,16 @@ export function createLlmChatService({
               goalPlanStore,
               agentProgress,
               resolvedChannel,
+              // qoder 与其他 loop 同权:压缩必须持久化、携带连续性上下文、支持压缩后 system 重建。
+              persistCompaction,
+              continuityContext,
+              rebuildSystemPrompt,
               emitRuntimeEvent,
               runtimeEventState: streamRecord.runtimeEventState,
               providerId: provider.id,
               runtimeMode: mode,
+              accountingIdentity,
+              initialContextAccounting,
             });
           } else if (resolvedChannel.wire === 'anthropic-messages') {
             await agentLoopAnthropic({
@@ -1001,6 +1058,8 @@ export function createLlmChatService({
               runtimeEventState: streamRecord.runtimeEventState,
               providerId: provider.id,
               runtimeMode: mode,
+              accountingIdentity,
+              initialContextAccounting,
             });
           } else if (resolvedChannel.wire === 'gemini') {
             await agentLoopGemini({
@@ -1030,10 +1089,13 @@ export function createLlmChatService({
               mcpRegistry,
               goalPlanStore,
               resolvedChannel,
+              authMethod: credential.authMethod,
               emitRuntimeEvent,
               runtimeEventState: streamRecord.runtimeEventState,
               providerId: provider.id,
               runtimeMode: mode,
+              accountingIdentity,
+              initialContextAccounting,
             });
           } else {
             await agentLoopOpenAI({
@@ -1071,6 +1133,8 @@ export function createLlmChatService({
               runtimeEventState: streamRecord.runtimeEventState,
               providerId: provider.id,
               runtimeMode: mode,
+              accountingIdentity,
+              initialContextAccounting,
             });
           }
         } catch (err) {
@@ -1199,21 +1263,37 @@ export function createLlmChatService({
   }
 
   /**
-   * Goal handoff 专用：把某会话仍 running 的 intake 流强制收口为 done。
-   * 先标记 terminalEventSent 再 cancel，避免 agent loop 后续 abort/error 覆盖终态。
-   * 用于 goal_create_plan 后 Runner 接管前解锁 UI，并让 outcome resolve 路径不再卡死。
+   * Goal handoff 专用：等待 intake 流自行完成 terminal tool 收尾；只有超时才强制兜底。
+   *
+   * goal_create_plan 会同步触发 plan change，而此时 tools.execute 尚未返回，tool result 也尚未
+   * 写回 Runtime 消息。若这里立即发裸 done + cancel，会抢在 agent loop 的正常 sendDone 前面，
+   * terminalEventSent 随即阻断携带 nextRequestInputTokens 的正确 done，导致 contextSnapshot 永久 null。
+   *
+   * 因此先给 pipeline 一个短暂自然收尾窗口：applyToolResults → onStopped → sendDone → 持久化
+   * contextSnapshot。仅在该路径真的卡住时，才沿用旧的强制 done/cancel 兜底以解锁 UI。
    */
-  function forceCompleteConversationStreams(conversationId, { reason = 'goal_handoff' } = {}) {
+  function forceCompleteConversationStreams(
+    conversationId,
+    { reason = 'goal_handoff', graceMs = 250 } = {},
+  ) {
     const normalized = typeof conversationId === 'string' ? conversationId.trim() : '';
-    if (!normalized) return { completed: 0, streamIds: [] };
+    if (!normalized) return { completed: 0, streamIds: [], released: Promise.resolve([]) };
     const completedIds = [];
     const releasePromises = [];
+    const normalizedGraceMs = Number.isFinite(Number(graceMs))
+      ? Math.max(0, Number(graceMs))
+      : 250;
+
     for (const [streamId, record] of activeStreams.entries()) {
       if (record?.conversationId !== normalized) continue;
       if (!isRunning(record)) continue;
       if (record.released) releasePromises.push(record.released);
-      // 先落 done 终态，后续 cancel 触发的 abort 路径会被 terminalEventSent 去重。
-      if (!record.terminalEventSent) {
+      completedIds.push(streamId);
+
+      setTimeout(() => {
+        // 正常 terminal tool 路径已经发送权威 done 或释放 turn：不再干预。
+        if (!isRunning(record) || record.terminalEventSent) return;
+
         const payload = {
           streamId,
           conversationId: normalized,
@@ -1227,22 +1307,27 @@ export function createLlmChatService({
         record.terminalEventSent = true;
         record.terminalStatus = 'completed';
         record.interrupted = false;
-      }
-      try {
-        runtimeSessions.cancelStream(streamId, reason);
-      } catch (error) {
-        console.warn('[llm-chat] force-complete cancel failed:', error?.message || error);
-      }
-      permissionGate.settleStreamPermissionRequests(streamId, {
-        granted: false,
-        reason,
-      });
-      try {
-        runtimeSessions.settleStream(streamId, 'completed', reason);
-      } catch {}
-      retireStream(streamId);
-      completedIds.push(streamId);
+
+        try {
+          runtimeSessions.cancelStream(streamId, reason);
+        } catch (error) {
+          console.warn('[llm-chat] force-complete cancel failed:', error?.message || error);
+        }
+        permissionGate.settleStreamPermissionRequests(streamId, {
+          granted: false,
+          reason,
+        });
+        try {
+          runtimeSessions.settleStream(streamId, 'completed', reason);
+        } catch {}
+        // Handoff waits on released; resolve here so Runner is not blocked if the
+        // original sendMessage finally path is delayed or never reached.
+        record.resolveReleased?.();
+        record.resolveReleased = null;
+        retireStream(streamId);
+      }, normalizedGraceMs);
     }
+
     return {
       completed: completedIds.length,
       streamIds: completedIds,
@@ -1268,6 +1353,9 @@ export function createLlmChatService({
     active.terminalStatus = 'aborted';
     active.interrupted = true;
     active.persist?.({ final: true, interrupted: true });
+    // Ensure handoff / waiters do not hang if sendMessage finally is delayed.
+    active.resolveReleased?.();
+    active.resolveReleased = null;
     retireStream(streamId);
     return { aborted: true };
   }

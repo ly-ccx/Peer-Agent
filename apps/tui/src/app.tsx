@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import type { TextareaRenderable } from '@opentui/core';
+import type { ScrollBoxRenderable, TextareaRenderable } from '@opentui/core';
 import { useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } from '@opentui/react';
-import type { LocalAccessLevel } from '@peer-agent/protocol';
+import { contextAccountingModelKey, type LlmSubscriptionQuota, type LocalAccessLevel } from '@peer-agent/protocol';
 import type { RuntimeModelSelection } from '@peer-agent/runtime-node';
 
 import { B3Wordmark } from './b3-wordmark-view.tsx';
@@ -18,6 +18,13 @@ import {
   type ConversationRenderWindow,
   type ConversationRenderWindowState,
 } from './conversation-render-window.ts';
+import {
+  conversationMessageRenderId,
+  latestUserMessage,
+  resolveContextUserMessageId,
+  summarizeUserContext,
+} from './conversation-scroll.ts';
+
 import type { TuiMcpServerSummary, TuiSkillSummary } from './skill-mcp-bridge.ts';
 import {
   createTuiConversationPersistence,
@@ -34,11 +41,14 @@ import { composerLayoutModel } from './composer-layout-model.ts';
 import { compactWorkspacePath, createComposerStatus, type ComposerStatus } from './composer-status.ts';
 import {
   createChatController,
+  formatCompactingStatusLabel,
+  latestCompactProgressPercent,
   type ChatController,
   type ChatMessage,
   type ChatModelPort,
   type ChatSnapshot,
 } from './chat-controller.ts';
+import { formatCompactMethodLabel } from './context-compact.ts';
 import {
   chipifyImagePathsInText,
   extractImagePathTokens,
@@ -91,6 +101,15 @@ import {
   type ModelPickerViewRow,
   type TuiModelSelectionControl,
 } from './tui-model-selection.ts';
+import {
+  fetchTuiSubscriptionQuota,
+  formatTuiTopbarQuota,
+  remainingPercentFromQuota,
+  subscriptionQuotaColor,
+  supportsTuiSubscriptionQuota,
+  resolveSharedAuthMethod,
+  TUI_SUBSCRIPTION_QUOTA_REFRESH_MS,
+} from './tui-subscription-quota.ts';
 import type { PendingApproval, TuiHost } from './tui-host.ts';
 import { TUI_MODES, tuiModeOption, type TuiMode } from './tui-mode.ts';
 import {
@@ -117,7 +136,8 @@ import {
   isGoalStatusToolPresentation,
   toolActivitySummary,
   resolveToolPresentation,
-  scrambleStatusLabel,
+  runningActivityField,
+  formatRunningElapsed,
   thinkingSpinnerGlyph,
   thinkingStatusLabel,
   toolHeadline,
@@ -154,7 +174,7 @@ import {
 } from './tui-theme.ts';
 
 const COMMAND_NOTICE_DURATION_MS = 3_000;
-const THINKING_SPINNER_INTERVAL_MS = 120;
+const THINKING_SPINNER_INTERVAL_MS = 80;
 
 
 function useStatusAnimationFrame(active: boolean, intervalMs = 280): number {
@@ -192,17 +212,33 @@ function ThinkingStatusLabel({
 function ComposerRunningStatusLabel({
   locale,
   runStatus,
+  width,
+  compactPercent,
 }: {
   readonly locale: TuiLocale;
   readonly runStatus: 'running' | 'cancelling' | 'compacting';
+  readonly width: number;
+  readonly compactPercent?: number;
 }) {
   const frame = useStatusAnimationFrame(true, THINKING_SPINNER_INTERVAL_MS);
-  const spinner = thinkingSpinnerGlyph(frame);
-  const statusLabel = scrambleStatusLabel(composerRunningStatusLabel(locale, runStatus), frame);
+  const startedAtRef = useRef(Date.now());
+  const activity = runningActivityField(frame, width);
+  const elapsed = formatRunningElapsed(Date.now() - startedAtRef.current);
+  // Scheme D: generic running is activity + elapsed only. Real exceptional
+  // states keep a label; compacting also shows live percent + progress bar.
+  const statusLabel = runStatus === 'running'
+    ? `· ${elapsed}`
+    : runStatus === 'compacting'
+      ? `${formatCompactingStatusLabel({
+          label: composerRunningStatusLabel(locale, runStatus),
+          percent: compactPercent,
+        })} · ${elapsed}`
+      : `${composerRunningStatusLabel(locale, runStatus)} · ${elapsed}`;
   return (
     <ComposerRunningStatusBar
-      spinner={spinner}
+      activity={activity}
       statusLabel={statusLabel}
+      frame={frame}
     />
   );
 }
@@ -242,7 +278,8 @@ function ToolActivityTimeline({
       </box>
       <box flexGrow={1} minWidth={0} flexDirection="column">
         <box flexDirection="row" width="100%">
-          <ThemedText selectable fg={COLOR.textSoft} width={12} wrapMode="none">{presentation.toolName}</ThemedText>
+          {/* Content-sized label + modest gap; fixed width={12} was too wide, marginRight={1} too tight. */}
+          <ThemedText selectable fg={COLOR.textSoft} flexShrink={0} marginRight={2} wrapMode="none">{presentation.toolName}</ThemedText>
           <ThemedText selectable fg={COLOR.muted} flexGrow={1} minWidth={0} wrapMode="none">{summary}</ThemedText>
           <ThemedText selectable fg={presentation.status === 'running' ? COLOR.accent : COLOR.subtle} width={7} marginLeft={2} flexShrink={0} wrapMode="none">
             {formatToolDuration(presentation)}
@@ -266,18 +303,64 @@ function ToolActivityTimeline({
   );
 }
 
+function UserContextBar({
+  text,
+  imageLabel,
+  layout,
+}: {
+  readonly text: string;
+  readonly imageLabel: string | null;
+  readonly layout: ReturnType<typeof responsiveLayout>;
+}) {
+  const summary = summarizeUserContext(text, imageLabel, layout.density === 'compact' ? 72 : 96);
+  return (
+    <box
+      flexShrink={0}
+      flexDirection="row"
+      width="100%"
+      gap={1}
+      paddingLeft={layout.outerPadding}
+      paddingRight={layout.outerPadding}
+      marginBottom={1}
+    >
+      <box width={5}><text fg={COLOR.muted}>YOU</text></box>
+      <box flexDirection="row" flexGrow={1} minWidth={0}>
+        <text fg={COLOR.user}>{APP_CHROME.userRailBar}</text>
+        <box flexGrow={1} minWidth={0} paddingLeft={1}>
+          <ThemedText selectable fg={COLOR.text} wrapMode="none">{summary}</ThemedText>
+        </box>
+      </box>
+    </box>
+  );
+}
+
 function ChatHistory({
   messages,
   window,
   layout,
+  isActiveTurn,
 }: {
   readonly messages: readonly ChatMessage[];
   readonly window: ConversationRenderWindow;
   readonly layout: ReturnType<typeof responsiveLayout>;
+  /** Running chat/goal turn — context bar sticks to the latest user prompt. */
+  readonly isActiveTurn: boolean;
 }) {
   const [expandedTools, setExpandedTools] = useState<ReadonlySet<string>>(new Set());
-  const roleRailWidth = 7;
+  const scrollRef = useRef<ScrollBoxRenderable | null>(null);
+  const [viewportScreenTop, setViewportScreenTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const [rowScreenTops, setRowScreenTops] = useState<Readonly<Record<string, number>>>({});
+  // PEER is 4 cols; keep a 1-col pad so the label stays aligned without a wide empty gutter.
+  const roleRailWidth = 5;
   const roleBodyGap = layout.density === 'compact' ? 2 : 1;
+
+  const userMessages = useMemo(
+    () => messages.filter((message) => message.role === 'user'),
+    [messages],
+  );
+  const latestUser = useMemo(() => latestUserMessage(messages), [messages]);
+  const userIds = useMemo(() => userMessages.map((message) => message.id), [userMessages]);
 
   const toggleTool = (messageId: string) => {
     setExpandedTools((current) => {
@@ -288,22 +371,92 @@ function ChatHistory({
     });
   };
 
+  // Sample scroll geometry so idle browsing can map the viewport to a user turn.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const sample = () => {
+      const scroll = scrollRef.current as (ScrollBoxRenderable & {
+        content?: {
+          findDescendantById?: (id: string) => { y?: number } | undefined;
+        };
+        viewport?: { y?: number; height?: number };
+      }) | null;
+      if (scroll) {
+        const nextViewportTop = Number(scroll.viewport?.y ?? 0);
+        const nextViewportHeight = Number(scroll.viewport?.height ?? 0);
+        setViewportScreenTop((current) => (current === nextViewportTop ? current : nextViewportTop));
+        setViewportHeight((current) => (current === nextViewportHeight ? current : nextViewportHeight));
+
+        if (!isActiveTurn && userIds.length > 0) {
+          const nextTops: Record<string, number> = {};
+          for (const id of userIds) {
+            const child = scroll.content?.findDescendantById?.(conversationMessageRenderId(id));
+            if (child && typeof child.y === 'number') nextTops[id] = child.y;
+          }
+          setRowScreenTops((current) => {
+            const currentKeys = Object.keys(current);
+            const nextKeys = Object.keys(nextTops);
+            if (
+              currentKeys.length === nextKeys.length
+              && nextKeys.every((key) => current[key] === nextTops[key])
+            ) {
+              return current;
+            }
+            return nextTops;
+          });
+        }
+      }
+      timer = setTimeout(sample, isActiveTurn ? 250 : 120);
+    };
+    sample();
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [isActiveTurn, userIds]);
+
+  const contextUserId = useMemo(() => resolveContextUserMessageId(userIds, {
+    isActiveTurn,
+    latestUserId: latestUser?.id ?? null,
+    rowScreenTops,
+    viewportScreenTop,
+    viewportHeight,
+  }), [userIds, isActiveTurn, latestUser?.id, rowScreenTops, viewportScreenTop, viewportHeight]);
+
+  const contextUser = useMemo(
+    () => userMessages.find((message) => message.id === contextUserId) ?? latestUser,
+    [userMessages, contextUserId, latestUser],
+  );
+  const contextBody = contextUser
+    ? formatUserMessageBody(contextUser.content, contextUser.images)
+    : null;
+
   return (
-    <scrollbox
-      flexGrow={1}
-      flexShrink={1}
-      minHeight={0}
-      stickyScroll
-      stickyStart="bottom"
-      paddingLeft={layout.outerPadding}
-      paddingRight={layout.outerPadding}
-    >
+    <box flexGrow={1} flexShrink={1} minHeight={0} flexDirection="column">
+      {contextBody ? (
+        <UserContextBar
+          text={contextBody.text}
+          imageLabel={contextBody.imageLabel}
+          layout={layout}
+        />
+      ) : null}
+      <scrollbox
+        ref={scrollRef}
+        flexGrow={1}
+        flexShrink={1}
+        minHeight={0}
+        stickyScroll
+        stickyStart="bottom"
+        paddingLeft={layout.outerPadding}
+        paddingRight={layout.outerPadding}
+      >
       {window.hiddenBefore > 0 ? (
         <box flexDirection="column" marginBottom={1}>
           <ThemedText selectable fg={COLOR.muted}>
             {window.reason === 'latest-compaction' && !window.emergencyTruncated
-              ? `↑ Showing from the latest compaction · ${window.hiddenBefore} earlier messages hidden · /history earlier`
-              : `↑ ${window.hiddenBefore} earlier messages hidden · /history earlier`}
+              ? '↑ Earlier conversation compacted · /history'
+              : window.emergencyTruncated
+                ? `↑ ${window.hiddenBefore} earlier messages hidden · /history`
+                : `↑ ${window.hiddenBefore} earlier messages · /history`}
           </ThemedText>
           {window.emergencyTruncated ? (
             <ThemedText selectable fg={COLOR.warning}>
@@ -312,13 +465,17 @@ function ChatHistory({
           ) : null}
         </box>
       ) : null}
-      {messages.map((message) => {
+{messages.map((message) => {
         if (message.role === 'system') {
           const phase = message.compact?.phase ?? 'done';
           const label = phase === 'progress' ? 'COMPACTING' : 'COMPACTED';
+          // Progress percent/bar belongs to the composer status dock only.
+          // Chat history keeps a plain marker so users never see two bars.
           const compactSummary = phase === 'done'
-            ? `Earlier conversation (compacted) · ${message.compact?.summarizedCount ?? 0} msgs · Structural`
-            : message.content;
+            ? `Earlier conversation (compacted) · ${message.compact?.summarizedCount ?? 0} msgs · ${formatCompactMethodLabel(message.compact?.method)}`
+            : phase === 'progress'
+              ? (message.content?.replace(/\s*\[[█░]+\]\s*\d+%\s*$/u, '').trim() || 'Compacting context…')
+              : message.content;
           return (
             <box key={message.id} flexDirection="column" marginBottom={1} marginTop={1}>
               <box flexDirection="row">
@@ -444,7 +601,7 @@ function ChatHistory({
           );
           // Crush-style user turn: muted YOU rail + cyan bar on the body column.
           return (
-            <box key={message.id} flexDirection="row" width="100%" gap={roleBodyGap} marginBottom={1}>
+            <box id={conversationMessageRenderId(message.id)} key={message.id} flexDirection="row" width="100%" gap={roleBodyGap} marginBottom={1}>
               <box width={roleRailWidth}><text fg={COLOR.muted}>YOU</text></box>
               <box flexDirection="row" flexGrow={1} minWidth={0}>
                 <text fg={COLOR.user}>{APP_CHROME.userRailBar}</text>
@@ -474,11 +631,12 @@ function ChatHistory({
       {window.hiddenAfter > 0 ? (
         <box marginTop={1}>
           <ThemedText selectable fg={COLOR.muted}>
-            {`↓ ${window.hiddenAfter} newer messages hidden · /history later · /history latest`}
+            {`↓ ${window.hiddenAfter} newer messages hidden · /history · Esc return to latest`}
           </ThemedText>
         </box>
       ) : null}
     </scrollbox>
+    </box>
   );
 }
 
@@ -542,10 +700,11 @@ function SlashCommandMenu({ commands, selectedIndex, maxVisible, showDescription
   );
 }
 
-function ResumePickerMenu({ rows, selectedIndex, maxVisible, onResume }: {
+function ResumePickerMenu({ rows, selectedIndex, maxVisible, outerPadding, onResume }: {
   readonly rows: readonly TuiConversationSummary[];
   readonly selectedIndex: number;
   readonly maxVisible: number;
+  readonly outerPadding: number;
   readonly onResume: (row: TuiConversationSummary) => void;
 }) {
   const visibleRows = selectionWindow(rows, selectedIndex, maxVisible);
@@ -556,12 +715,8 @@ function ResumePickerMenu({ rows, selectedIndex, maxVisible, onResume }: {
       border={['top']}
       borderColor={PICKER_CHROME.border}
       backgroundColor={PICKER_CHROME.idleBackground}
-      marginLeft={1}
-      marginRight={1}
-      marginTop={1}
-      marginBottom={1}
-      paddingLeft={1}
-      paddingRight={1}
+      paddingLeft={outerPadding}
+      paddingRight={outerPadding}
       paddingTop={1}
       paddingBottom={1}
     >
@@ -764,14 +919,17 @@ function Composer({ controller, snapshot, disabled, focused, locale, onValueChan
 
   return (
     <ThemedTextarea
+        key={`composer-input-${backgroundColor ?? COLOR.inputBackground}-${COLOR.inputForeground}`}
         ref={editor}
         focused={focused && !disabled}
         height={height}
-        backgroundColor={backgroundColor}
+        backgroundColor={backgroundColor ?? COLOR.inputBackground}
         placeholder={composerPlaceholder(locale, disabled)}
-        textColor={COLOR.text}
-        focusedTextColor={COLOR.text}
-        wrapMode="word"
+        textColor={COLOR.inputForeground}
+        focusedTextColor={COLOR.inputForeground}
+        // char wrap: soft-wrap at the right edge even for continuous CJK with no spaces.
+        // word wrap only breaks on whitespace and leaves Chinese stuck on one visual line.
+        wrapMode="char"
         onContentChange={() => applyImageChips()}
         onKeyDown={(event) => {
           const action = composerEnterAction({
@@ -858,20 +1016,56 @@ function ComposerDock({
   readonly modelPickerMaxVisible: number;
   readonly modelPickerShowHint: boolean;
 }) {
+  // Absolute picker height must match reserved paddingTop so ErrorBanner/history
+  // above the dock are not character-overdrawn. Count every chrome row that
+  // ModelPickerMenu actually renders (title was previously missing).
+  const modelPickerVisibleRows = Math.min(
+    modelPickerMaxVisible,
+    Math.max(1, modelPickerRows.length),
+  );
+  const modelPickerChromeRows =
+    1 // top border
+    + 1 // title
+    + (modelPickerGroups.length > 0 ? 1 : 0)
+    + 1 // search
+    + (modelPickerShowHint ? 1 : 0);
   const menuReserve = slashOpen
-    ? Math.min(slashMaxVisible, Math.max(1, slashItems.length)) + 1
+    ? Math.min(slashMaxVisible, Math.max(1, slashItems.length)) + 1 // top border
     : modelPickerOpen
-      // groups + search + optional hint around the visible rows
-      ? Math.min(modelPickerMaxVisible, Math.max(1, modelPickerRows.length)) + 3
+      ? modelPickerVisibleRows + modelPickerChromeRows
       : 0;
   const terminal = useTerminalDimensions();
   const dividerWidth = composerContentWidth(terminal.width, layout.outerPadding);
+  // Measure the live editor geometry, but never make height growth depend only on
+  // post-layout virtualLineCount (that becomes a chicken-and-egg after the first wraps).
+  // Primary source of truth is pure draft+wrapWidth estimation; live metrics only refine it.
+  const [measuredEditorWidth, setMeasuredEditorWidth] = useState<number | undefined>(undefined);
+  const [measuredVisualRows, setMeasuredVisualRows] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    const editor = editorRef.current as (TextareaRenderable & {
+      virtualLineCount?: number;
+      width?: number;
+    }) | null;
+    if (!editor) return;
+    const nextWidth = Math.max(1, Math.floor(editor.width ?? 0));
+    if (nextWidth > 0) {
+      setMeasuredEditorWidth((current) => (current === nextWidth ? current : nextWidth));
+    }
+    const nextRows = Math.max(1, Math.floor(editor.virtualLineCount ?? 0));
+    if (nextRows > 0) {
+      setMeasuredVisualRows((current) => (current === nextRows ? current : nextRows));
+    }
+  }, [draft, dividerWidth, editorRef, snapshot.status]);
   const composerLayout = composerLayoutModel({
     draft,
     contentWidth: dividerWidth,
     runtimeStatus: snapshot.status,
+    measuredEditorWidth,
+    measuredVisualRows,
   });
-  const composerBackground = COLOR.background;
+  // Use the dedicated input surface token (not canvas background) so auto
+  // theme switches recolor the editor even when OpenTUI keeps mount defaults.
+  const composerBackground = COLOR.inputBackground;
 
   return (
     <box
@@ -887,6 +1081,12 @@ function ComposerDock({
         <ComposerRunningStatusLabel
           locale={locale}
           runStatus={snapshot.status === 'cancelling' ? 'cancelling' : snapshot.status === 'compacting' ? 'compacting' : 'running'}
+          width={dividerWidth}
+          compactPercent={
+            snapshot.status === 'compacting'
+              ? latestCompactProgressPercent(snapshot.messages)
+              : undefined
+          }
         />
       ) : null}
       <ComposerModeDivider width={dividerWidth} />
@@ -1010,6 +1210,10 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       modelId: modelLabel,
       reasoningEffort: 'default',
     },
+    getContextWindow: (selection) => modelSelection?.catalog.find(
+      (entry) => entry.providerId === selection.providerId
+        && entry.modelId === selection.modelId,
+    )?.contextWindow,
   }), [host.workspaceRoot, modelLabel, modelSelection]);
   const controller = useMemo(
     () => createChatController({
@@ -1025,6 +1229,12 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
             && entry.modelId === selection.modelId,
         )?.contextWindow;
       },
+      getModelKey: () => {
+        const selection = selectedModelRef.current;
+        return selection
+          ? contextAccountingModelKey(selection.providerId, selection.modelId)
+          : contextAccountingModelKey('unknown', modelLabel);
+      },
     }),
     [host, model, planCoordinator, modelSelection, persistence],
   );
@@ -1037,7 +1247,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const goalRunner = useMemo(() => {
     if (!host.goalBridge) return null;
     try {
-      return createTuiSharedGoalRunner({ bridge: host.goalBridge, chat: controller });
+      return createTuiSharedGoalRunner({
+        bridge: host.goalBridge,
+        chat: controller,
+        getConversationId: () => persistence.getConversationId(),
+      });
     } catch {
       return null;
     }
@@ -1143,7 +1357,57 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const [locale, setLocale] = useState<TuiLocale>(() => languageStore?.getLocale() ?? 'zh-CN');
   const [themeMode, setThemeMode] = useState<TuiThemeMode>(() => themeStore?.getMode() ?? 'dark');
   // Force chrome re-render after palette mutation (COLOR is a shared mutable object).
-  const [, setThemeTick] = useState(0);
+  // Read themeTick in render so React always keeps this state as a render dependency.
+  const [themeTick, setThemeTick] = useState(0);
+  void themeTick;
+  // Keep open sessions in sync when OS auto-switches light/dark under mode=system.
+  useEffect(() => {
+    if (!themeStore) return;
+    return themeStore.subscribe((state) => {
+      setThemeMode(state.mode);
+      setThemeTick((tick) => tick + 1);
+    });
+  }, [themeStore]);
+  // Subscription quota for OAuth providers (ChatGPT / Gemini / Grok).
+  const [subscriptionQuota, setSubscriptionQuota] = useState<LlmSubscriptionQuota | null>(null);
+  useEffect(() => {
+    const credentialId = selectedModel?.providerId;
+    if (!credentialId) {
+      setSubscriptionQuota(null);
+      return;
+    }
+    const authMethod = resolveSharedAuthMethod({ credentialId });
+    if (!supportsTuiSubscriptionQuota(authMethod)) {
+      setSubscriptionQuota(null);
+      return;
+    }
+
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const next = await fetchTuiSubscriptionQuota({ credentialId });
+        if (!cancelled) setSubscriptionQuota(next);
+      } catch {
+        if (!cancelled) {
+          setSubscriptionQuota({
+            success: false,
+            status: 'fetch_failed',
+            providerId: credentialId,
+            error: 'Quota fetch failed',
+          });
+        }
+      }
+    };
+
+    void refresh();
+    const timer = setInterval(() => {
+      void refresh();
+    }, TUI_SUBSCRIPTION_QUOTA_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [selectedModel?.providerId]);
   const [composerDraft, setComposerDraft] = useState('');
   const imagePathRegistryRef = useRef(new Map<string, string>());
   const [experience, setExperience] = useState<TuiExperienceState>(() => createTuiExperienceState());
@@ -1318,6 +1582,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     selectedModel,
     modelLabel,
   );
+  const sessionTopbarQuota = formatTuiTopbarQuota(subscriptionQuota, locale);
+  const sessionTopbarQuotaRemaining = remainingPercentFromQuota(subscriptionQuota);
   const sessionWorkspacePath = compactWorkspacePath(host.workspaceRoot);
   const contextWindow = modelSelection?.catalog.find(
     (entry) => entry.providerId === selectedModel?.providerId
@@ -1332,7 +1598,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     reasoningEffort: selectedModel?.reasoningEffort,
     usage: snapshot.usage,
     contextWindow,
-    nextRequestInputTokens: snapshot.nextRequestInputTokens,
+    contextAccounting: snapshot.contextAccounting,
+    emptyContext: renderWindowConversationId == null && snapshot.messages.length === 0,
   });
   const layout = responsiveLayout(terminal.width, terminal.height);
   const topbarDividerWidth = composerContentWidth(terminal.width, layout.outerPadding);
@@ -1359,7 +1626,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     : layout.density === 'narrow'
       ? 3
       : 2;
-  const welcomeModelVisibleRows = Math.min(welcomeModelMaxVisible, Math.max(1, modelPickerSelectableRows.length)) + 2;
+  // Match ModelPickerMenu chrome: title + groups + search (hint/border handled by the extra +2 offset below).
+  const welcomeModelVisibleRows = Math.min(welcomeModelMaxVisible, Math.max(1, modelPickerSelectableRows.length))
+    + 1 // title
+    + (modelPickerGroupLabels.length > 0 ? 1 : 0)
+    + 1; // search
   const commandWindow = commandSurface
     ? slashCommandWindow(commandItems, commandSelection, pickerLayout.commandMaxVisible)
     : [];
@@ -1632,6 +1903,13 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     }
     if (control === 'dismiss-surface') {
       setExperience((current) => escapeFooter(current));
+      queueMicrotask(() => composerRef.current?.focus());
+      return;
+    }
+    // Esc while browsing history pages returns to the default latest window.
+    if (key.name === 'escape' && renderProjection.window.mode === 'history') {
+      setRenderWindowState(createConversationRenderWindowState());
+      setCommandNotice('Showing the latest conversation');
       queueMicrotask(() => composerRef.current?.focus());
       return;
     }
@@ -2275,48 +2553,51 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       height="100%"
       backgroundColor={COLOR.background}
     >
-      {/* Session topbar spans conversation and Mission rail. */}
-      {!isWelcome ? (
+      {/* Session topbar always spans the full width (welcome + conversation). */}
+      <box
+        flexDirection="column"
+        width="100%"
+        flexShrink={0}
+        paddingTop={layout.outerPaddingY}
+      >
         <box
-          flexDirection="column"
-          width="100%"
+          flexDirection="row"
+          alignItems="center"
           flexShrink={0}
-          paddingTop={layout.outerPaddingY}
+          height={1}
+          paddingLeft={layout.outerPadding}
+          paddingRight={layout.outerPadding}
+          gap={1}
         >
-          <box
-            flexDirection="row"
-            alignItems="center"
-            flexShrink={0}
-            height={1}
-            paddingLeft={layout.outerPadding}
-            paddingRight={layout.outerPadding}
-            gap={1}
-          >
-            <text fg={COLOR.textSoft} wrapMode="none">
-              <span fg={COLOR.accent}>{APP_CHROME.brandMark}</span>
-              <strong> PEER</strong>
+          <text fg={COLOR.textSoft} wrapMode="none">
+            <span fg={COLOR.accent}>{APP_CHROME.brandMark}</span>
+            <strong> PEER</strong>
+          </text>
+          <text fg={COLOR.muted} wrapMode="none" flexShrink={1}>
+            {sessionWorkspacePath}
+          </text>
+          <box flexGrow={1} minWidth={1} />
+          <text fg={COLOR.muted} wrapMode="none">
+            {sessionTopbarModel}
+          </text>
+          <text fg={COLOR.success} wrapMode="none">{APP_CHROME.onlineDot}</text>
+          {sessionTopbarQuota ? (
+            <text fg={subscriptionQuotaColor(sessionTopbarQuotaRemaining)} wrapMode="none">
+              {sessionTopbarQuota}
             </text>
-            <text fg={COLOR.muted} wrapMode="none" flexShrink={1}>
-              {sessionWorkspacePath}
-            </text>
-            <box flexGrow={1} minWidth={1} />
-            <text fg={COLOR.muted} wrapMode="none">
-              {sessionTopbarModel}
-            </text>
-            <text fg={COLOR.success} wrapMode="none">{APP_CHROME.onlineDot}</text>
-          </box>
-          <box marginLeft={layout.outerPadding} marginRight={layout.outerPadding} flexShrink={0}>
-            <ComposerModeDivider width={topbarDividerWidth} />
-          </box>
+          ) : null}
         </box>
-      ) : null}
+        <box marginLeft={layout.outerPadding} marginRight={layout.outerPadding} flexShrink={0}>
+          <ComposerModeDivider width={topbarDividerWidth} />
+        </box>
+      </box>
       {/* Split workspace starts below the full-width session topbar. */}
       <box
         flexDirection="row"
         width="100%"
         flexGrow={1}
         minHeight={0}
-        paddingTop={isWelcome ? layout.outerPaddingY : 0}
+        paddingTop={0}
         paddingBottom={layout.outerPaddingY}
       >
         <box flexDirection="column" flexGrow={1} minWidth={0} minHeight={0}>
@@ -2381,6 +2662,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
             messages={renderProjection.messages}
             window={renderProjection.window}
             layout={layout}
+            isActiveTurn={snapshot.status !== 'idle' || goalStatus === 'running'}
           />
 
       {snapshot.error ? <ErrorBanner message={snapshot.error} layout={layout} /> : null}
@@ -2508,6 +2790,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           border={['top']}
           borderColor={PICKER_CHROME.border}
           backgroundColor={PICKER_CHROME.idleBackground}
+          paddingLeft={layout.outerPadding}
+          paddingRight={layout.outerPadding}
           paddingTop={pickerLayout.verticalPadding}
           paddingBottom={pickerLayout.verticalPadding}
         >
@@ -2544,6 +2828,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           rows={resumeItems}
           selectedIndex={resumeSurface.selectedIndex}
           maxVisible={Math.min(8, pickerLayout.commandMaxVisible)}
+          outerPadding={layout.outerPadding}
           onResume={handleResumeConversationSummary}
         />
       ) : null}
@@ -2555,6 +2840,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           currentPlanId={selectedGoalPlanId}
           query={goalSurface.query}
           maxVisible={Math.min(8, pickerLayout.commandMaxVisible)}
+          outerPadding={layout.outerPadding}
           onSelect={selectGoalFromHistory}
         />
       ) : null}
@@ -2567,6 +2853,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           border={['top']}
           borderColor={PICKER_CHROME.border}
           backgroundColor={PICKER_CHROME.idleBackground}
+          paddingLeft={layout.outerPadding}
+          paddingRight={layout.outerPadding}
           paddingTop={pickerLayout.verticalPadding}
           paddingBottom={pickerLayout.verticalPadding}
         >
@@ -2608,6 +2896,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           border={['top']}
           borderColor={PICKER_CHROME.border}
           backgroundColor={PICKER_CHROME.idleBackground}
+          paddingLeft={layout.outerPadding}
+          paddingRight={layout.outerPadding}
           paddingTop={pickerLayout.verticalPadding}
           paddingBottom={pickerLayout.verticalPadding}
         >
@@ -2652,6 +2942,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           border={['top']}
           borderColor={PICKER_CHROME.border}
           backgroundColor={PICKER_CHROME.idleBackground}
+          paddingLeft={layout.outerPadding}
+          paddingRight={layout.outerPadding}
           paddingTop={pickerLayout.verticalPadding}
           paddingBottom={pickerLayout.verticalPadding}
         >
@@ -2696,6 +2988,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           border={['top']}
           borderColor={PICKER_CHROME.border}
           backgroundColor={PICKER_CHROME.idleBackground}
+          paddingLeft={layout.outerPadding}
+          paddingRight={layout.outerPadding}
           paddingTop={pickerLayout.verticalPadding}
           paddingBottom={pickerLayout.verticalPadding}
         >
@@ -2755,6 +3049,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
           border={['top']}
           borderColor={PICKER_CHROME.border}
           backgroundColor={PICKER_CHROME.idleBackground}
+          paddingLeft={layout.outerPadding}
+          paddingRight={layout.outerPadding}
           paddingTop={pickerLayout.verticalPadding}
           paddingBottom={pickerLayout.verticalPadding}
         >

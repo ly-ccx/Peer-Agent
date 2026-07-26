@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
-import { composerLayoutModel } from './composer-layout-model.ts';
+import {
+  COMPOSER_INPUT_CHROME_COLS,
+  composerDisplayWidth,
+  composerLayoutModel,
+  composerWrapWidth,
+  estimateComposerVisualRows,
+} from './composer-layout-model.ts';
 
 describe('composer layout model', () => {
   test('keeps an empty idle composer compact and quiet', () => {
@@ -22,6 +28,71 @@ describe('composer layout model', () => {
     expect(multiline.pickerBottom).toBe(4);
     expect(capped.inputRows).toBe(5);
     expect(capped.pickerBottom).toBe(6);
+  });
+
+  test('counts CJK characters as double width for soft-wrap growth', () => {
+    const usable = 40 - COMPOSER_INPUT_CHROME_COLS;
+    const glyphs = Math.ceil((usable + 1) / 2);
+    const chinese = composerLayoutModel({
+      draft: '中'.repeat(glyphs),
+      contentWidth: 40,
+      runtimeStatus: 'idle',
+    });
+    expect(composerDisplayWidth('中'.repeat(glyphs))).toBe(glyphs * 2);
+    expect(chinese.inputRows).toBe(2);
+
+    const asciiSameLength = composerLayoutModel({
+      draft: 'a'.repeat(glyphs),
+      contentWidth: 40,
+      runtimeStatus: 'idle',
+    });
+    expect(asciiSameLength.inputRows).toBe(1);
+  });
+
+  test('grows continuously as wrap rows increase without needing live measurement', () => {
+    const wrapWidth = composerWrapWidth({ contentWidth: 40 });
+    expect(estimateComposerVisualRows('a'.repeat(wrapWidth), wrapWidth)).toBe(1);
+    expect(estimateComposerVisualRows('a'.repeat(wrapWidth + 1), wrapWidth)).toBe(2);
+    expect(estimateComposerVisualRows('a'.repeat(wrapWidth * 2 + 1), wrapWidth)).toBe(3);
+    expect(estimateComposerVisualRows('a'.repeat(wrapWidth * 3 + 1), wrapWidth)).toBe(4);
+
+    const three = composerLayoutModel({
+      draft: 'a'.repeat(wrapWidth * 2 + 1),
+      contentWidth: 40,
+      runtimeStatus: 'idle',
+    });
+    expect(three.inputRows).toBe(3);
+  });
+
+  test('uses measured editor width when it is narrower than the content slot', () => {
+    const wideContent = composerLayoutModel({
+      draft: 'a'.repeat(50),
+      contentWidth: 80,
+      runtimeStatus: 'idle',
+      measuredEditorWidth: 20,
+    });
+    expect(wideContent.inputRows).toBe(3); // ceil(50/20)=3
+  });
+
+  test('prefers measured visual rows from the live textarea when larger', () => {
+    const measured = composerLayoutModel({
+      draft: 'short',
+      contentWidth: 80,
+      runtimeStatus: 'idle',
+      measuredVisualRows: 3,
+    });
+    expect(measured.inputRows).toBe(3);
+    expect(measured.shellRows).toBe(3);
+  });
+
+  test('caps measured visual rows at five', () => {
+    const measured = composerLayoutModel({
+      draft: 'short',
+      contentWidth: 80,
+      runtimeStatus: 'idle',
+      measuredVisualRows: 9,
+    });
+    expect(measured.inputRows).toBe(5);
   });
 
   test('uses the active prompt and status for every runtime state', () => {

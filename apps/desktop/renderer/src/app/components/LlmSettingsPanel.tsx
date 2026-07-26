@@ -741,6 +741,22 @@ export function LlmSettingsPanel({
     }
   };
 
+  // 同渠道复制一条模型：立刻落库，刷新后打开新副本的设置弹窗。
+  const handleDuplicateModel = async (id: string) => {
+    setDuplicatingId(id);
+    try {
+      const beforeIds = new Set(providers.map((p) => p.id));
+      await clientApi.llmDuplicateModel({ id });
+      const latest = await refresh();
+      const created = (latest ?? []).find((p) => !beforeIds.has(p.id));
+      if (created) setModelSettingsId(created.id);
+    } catch (err: unknown) {
+      setTestResults((prev) => ({ ...prev, [id]: { success: false, error: err instanceof Error ? err.message : 'Duplicate failed' } }));
+    } finally {
+      setDuplicatingId(null);
+    }
+  };
+
   const handleSetDefault = async (id: string) => {
     await clientApi.llmSetDefault({ id });
     await refresh();
@@ -1094,8 +1110,10 @@ export function LlmSettingsPanel({
                     model={p}
                     result={testResults[p.id]}
                     testing={testingId === p.id}
+                    duplicating={duplicatingId === p.id}
                     onSetDefault={() => void handleSetDefault(p.id)}
                     onTest={() => void handleTest(p.id)}
+                    onDuplicate={() => void handleDuplicateModel(p.id)}
                     onEdit={() => setModelSettingsId(p.id)}
                     onDelete={() => void handleDelete(p.id)}
                   />

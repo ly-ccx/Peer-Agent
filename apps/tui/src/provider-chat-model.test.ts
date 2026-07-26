@@ -1,10 +1,19 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeToolDefinition } from '@peer-agent/runtime-core';
+import {
+  COMPACTION_SUMMARY_PROMPT,
+  COMPACTION_SUMMARY_SYSTEM_PROMPT,
+  createRestoredObservedContextAccountingSnapshot,
+  type RuntimeToolDefinition,
+} from '@peer-agent/runtime-core';
 import type {
   ModelProvider,
   ModelProviderRequest,
   ModelProviderResult,
 } from '@peer-agent/runtime-node';
+import {
+  estimateContextMessagesTokens as estimateTokensFromMessages,
+  estimateContextTextTokens as estimateTextTokens,
+} from '@peer-agent/runtime-core';
 import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
 
 import { createChatController } from './chat-controller.ts';
@@ -12,8 +21,9 @@ import {
   createProviderChatModel,
   createUnavailableChatModel,
 } from './provider-chat-model.ts';
-import { estimateTextTokens, estimateTokensFromMessages } from './context-pressure.ts';
 import type { TuiHost } from './tui-host.ts';
+import { buildTuiSystemPrompt } from './tui-language.ts';
+import { resolveTuiSummaryInputMaxChars, truncateSummaryInputPreferTail } from './provider-chat-model.ts';
 
 const toolDefinitions: RuntimeToolDefinition[] = [{
   name: 'read_file',
@@ -71,7 +81,15 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     const provider: ModelProvider = {
       async stream(request) {
         requests.push(request);
-        return completed('done');
+        return {
+          ...completed('done'),
+          usage: {
+            inputTokens: Math.ceil(
+              estimateTokensFromMessages(request.messages)
+              + estimateTextTokens(JSON.stringify(request.tools ?? [])),
+            ),
+          },
+        };
       },
     };
     const controller = createChatController({
@@ -96,13 +114,51 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     expect(requests[1]?.model).toBe('model-b');
     expect(requests[1]?.reasoningEffort).toBe('high');
     const finalSnapshot = controller.getSnapshot();
-    expect(finalSnapshot.requestProjection?.model).toBe('model-b');
-    expect(finalSnapshot.requestProjection?.contextWindow).toBe(500_000);
+    expect(finalSnapshot.contextAccounting?.modelKey).toBe('model-b');
+    expect(finalSnapshot.contextAccounting?.contextWindow).toBe(500_000);
     const sentRequestTokens = Math.ceil(
       estimateTokensFromMessages(requests[1]!.messages)
       + estimateTextTokens(JSON.stringify(requests[1]!.tools ?? [])),
     );
-    expect(finalSnapshot.requestProjection?.nextRequestInputTokens).toBeGreaterThan(sentRequestTokens);
+    expect(finalSnapshot.contextAccounting?.authoritativeInputTokens).toBe(sentRequestTokens);
+  });
+
+  test('compacts before the next send when provider usage observed 498K input', async () => {
+    const requests: ModelProviderRequest[] = [];
+    const provider: ModelProvider = {
+      async stream(request) {
+        requests.push(request);
+        return {
+          ...completed(`done-${requests.length}`),
+          usage: { inputTokens: requests.length === 1 ? 498_138 : 2_000 },
+        };
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({
+        provider,
+        model: 'grok-4.5',
+        getContextWindow: () => 500_000,
+      }),
+    });
+
+    await controller.send('first');
+    await controller.send('second');
+
+    const isCompactionRequest = (request: ModelProviderRequest) =>
+      request.messages.some(
+        (message) =>
+          message.role === 'system'
+          && typeof message.content === 'string'
+          && message.content.includes(COMPACTION_SUMMARY_SYSTEM_PROMPT.slice(0, 40)),
+      );
+    const mainRequests = requests.filter((request) => !isCompactionRequest(request));
+    expect(mainRequests.length).toBeGreaterThanOrEqual(2);
+    expect(requests.some(isCompactionRequest)).toBe(true);
+    expect(mainRequests[1]?.messages).toHaveLength(2);
+    expect(String(mainRequests[1]?.messages[0]?.content)).toContain('[Context handoff');
+    expect(mainRequests[1]?.messages[1]?.content).toBe('second');
   });
 
   test('routes each turn through the provider selected at turn start', async () => {
@@ -226,9 +282,13 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     await controller.send('hi');
 
     expect(controller.getSnapshot().messages.at(-1)?.content).toBe('hello world');
-    expect(controller.getSnapshot().usage).toEqual({
+    expect(controller.getSnapshot().usage as unknown).toEqual({
+      usageScope: 'runtime_turn',
+      providerRequestCount: 1,
       inputTokens: 3,
       outputTokens: 2,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
       totalTokens: 5,
     });
     expect(requests[0]?.model).toBe('model-test');
@@ -254,10 +314,22 @@ describe('OpenAI-compatible TUI chat adapter', () => {
           return {
             content: '',
             toolCalls: [{ id: 'call-1', name: 'read_file', arguments: '{"path":"note.txt"}' }],
+            usage: {
+              inputTokens: 30,
+              outputTokens: 2,
+              cacheReadTokens: 5,
+            },
           };
         }
         request.onEvent?.({ type: 'text.delta', content: 'read complete' });
-        return completed('read complete');
+        return {
+          ...completed('read complete'),
+          usage: {
+            inputTokens: 40,
+            outputTokens: 3,
+            cacheReadTokens: 5,
+          },
+        };
       },
     };
     const controller = createChatController({
@@ -293,6 +365,52 @@ describe('OpenAI-compatible TUI chat adapter', () => {
       },
     ]);
     expect(controller.getSnapshot().messages.at(-1)?.content).toBe('read complete');
+    // Billing covers both provider requests, while context capacity remains
+    // bound to the final provider request only.
+    expect(controller.getSnapshot().usage as unknown).toEqual({
+      usageScope: 'runtime_turn',
+      providerRequestCount: 2,
+      inputTokens: 70,
+      outputTokens: 5,
+      cacheReadTokens: 10,
+      cacheWriteTokens: 0,
+      totalTokens: 85,
+    });
+    expect(controller.getSnapshot().contextAccounting?.authoritativeInputTokens).toBe(45);
+  });
+
+  test('keeps prior request billing and counts a later failed provider request', async () => {
+    let requests = 0;
+    const provider: ModelProvider = {
+      async stream() {
+        requests += 1;
+        if (requests === 1) {
+          return {
+            content: '',
+            toolCalls: [{ id: 'call-1', name: 'read_file', arguments: '{"path":"note.txt"}' }],
+            usage: { inputTokens: 30, outputTokens: 2 },
+          };
+        }
+        throw new Error('provider failed after tool result');
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({ provider, model: 'model-test', toolDefinitions }),
+    });
+
+    await controller.send('read then fail');
+
+    expect(controller.getSnapshot().error).toContain('provider failed after tool result');
+    expect(controller.getSnapshot().usage as unknown).toEqual({
+      usageScope: 'runtime_turn',
+      providerRequestCount: 2,
+      inputTokens: 30,
+      outputTokens: 2,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 32,
+    });
   });
 
   test('recovers invalid JSON tool arguments without crashing the turn', async () => {
@@ -411,17 +529,24 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     };
     const controller = createChatController({
       host: host(),
-      model: createProviderChatModel({ provider, model: 'model-test', toolDefinitions: [] }),
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        toolDefinitions: [],
+        getSystemPrompt: () => 'canonical shared System Context',
+      }),
     });
 
     await controller.send('first');
     await controller.send('second');
 
     expect(requests[1]?.messages).toEqual([
+      { role: 'system', content: 'canonical shared System Context' },
       { role: 'user', content: 'first' },
       { role: 'assistant', content: 'answer-1' },
       { role: 'user', content: 'second' },
     ]);
+    expect(requests[1]?.messages.filter((message) => message.role === 'system')).toHaveLength(1);
   });
 
   test('cancels the provider request through AbortSignal', async () => {
@@ -493,6 +618,10 @@ describe('OpenAI-compatible TUI chat adapter', () => {
         provider,
         model: 'model-test',
         toolDefinitions: [],
+        getSystemPrompt: (context) => buildTuiSystemPrompt('en-US', [], {
+          mode: context.mode,
+          conversationId: context.conversationId,
+        }),
       }),
     });
 
@@ -502,9 +631,48 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     const content = typeof system?.content === 'string'
       ? system.content
       : JSON.stringify(system?.content ?? '');
-    expect(content).toContain('You are in Goal mode');
+    expect(content).toContain('Mode: goal');
+    expect(content).toContain('Self-driven goal mode');
     expect(content).toContain('goal_create_plan');
-    expect(content).toContain('side-effecting');
+    expect(content).toContain('side-effect');
+  });
+
+  test('uses the active provider and shared prompts for compaction without exposing tools', async () => {
+    const requests: ModelProviderRequest[] = [];
+    const progress: number[] = [];
+    const provider: ModelProvider = {
+      async stream(request) {
+        requests.push(request);
+        request.onEvent?.({ type: 'text.delta', content: 'semantic summary' });
+        return completed('semantic summary');
+      },
+    };
+    const model = createProviderChatModel({
+      provider,
+      model: 'model-test',
+      toolDefinitions,
+    });
+
+    const summary = await model.summarizeCompaction?.({
+      messages: [{ role: 'user', content: 'old turn' }],
+      formattedHistory: '[user]: old turn',
+      onProgress: (percent) => progress.push(percent),
+    });
+
+    expect(summary).toBe('semantic summary');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.model).toBe('model-test');
+    expect(requests[0]?.tools).toEqual([]);
+    expect(requests[0]?.temperature).toBe(0.2);
+    expect(requests[0]?.messages).toEqual([
+      { role: 'system', content: COMPACTION_SUMMARY_SYSTEM_PROMPT },
+      { role: 'user', content: '[user]: old turn' },
+      { role: 'user', content: COMPACTION_SUMMARY_PROMPT },
+    ]);
+    // Live summary stream reports received/estimated progress and intentionally stays below 100.
+    expect(progress.length).toBeGreaterThan(0);
+    expect(progress.at(-1)!).toBeGreaterThanOrEqual(15);
+    expect(progress.at(-1)!).toBeLessThan(100);
   });
 
   test('injects a Plan-mode system prompt for plan turns', async () => {
@@ -522,6 +690,10 @@ describe('OpenAI-compatible TUI chat adapter', () => {
         provider,
         model: 'model-test',
         toolDefinitions: [],
+        getSystemPrompt: (context) => buildTuiSystemPrompt('en-US', [], {
+          mode: context.mode,
+          conversationId: context.conversationId,
+        }),
       }),
     });
 
@@ -531,6 +703,299 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     const content = typeof system?.content === 'string'
       ? system.content
       : JSON.stringify(system?.content ?? '');
-    expect(content).toContain('You are in read-only Plan mode');
+    expect(content).toContain('Mode: plan');
+    expect(content).toContain('Plan-before-execute');
   });
 });
+
+
+describe('createProviderChatModel stream recovery', () => {
+  test('retries recoverable stream failure before any deltas', async () => {
+    let attempts = 0;
+    const waits: number[] = [];
+    const provider: ModelProvider = {
+      async stream(request) {
+        attempts += 1;
+        if (attempts === 1) {
+          throw connectionError('The socket connection was closed unexpectedly.');
+        }
+        request.onEvent?.({ type: 'text.delta', content: 'ok after retry' });
+        return completed('ok after retry');
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        toolDefinitions: [],
+      }),
+    });
+    const realSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = ((fn: (...args: unknown[]) => void, _ms?: number, ...args: unknown[]) => {
+      waits.push(typeof _ms === 'number' ? _ms : 0);
+      return realSetTimeout(fn, 0, ...args);
+    }) as typeof setTimeout;
+
+    try {
+      await controller.send('hello');
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+
+    expect(attempts).toBe(2);
+    expect(waits.length).toBeGreaterThan(0);
+    expect(controller.getSnapshot().error).toBeUndefined();
+    expect(controller.getSnapshot().messages.at(-1)?.content).toContain('ok after retry');
+  });
+
+  test('does not retry after partial deltas were emitted', async () => {
+    let attempts = 0;
+    const provider: ModelProvider = {
+      async stream(request) {
+        attempts += 1;
+        request.onEvent?.({ type: 'text.delta', content: 'partial ' });
+        throw connectionError('The socket connection was closed unexpectedly.');
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        toolDefinitions: [],
+      }),
+    });
+    await controller.send('hello');
+    expect(attempts).toBe(1);
+    expect(controller.getSnapshot().error).toContain('socket connection was closed unexpectedly');
+  });
+
+  test('does not retry non-recoverable provider errors', async () => {
+    let attempts = 0;
+    const provider: ModelProvider = {
+      async stream() {
+        attempts += 1;
+        throw new Error('invalid api key');
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({
+        provider,
+        model: 'model-test',
+        toolDefinitions: [],
+      }),
+    });
+    await controller.send('hello');
+    expect(attempts).toBe(1);
+    expect(controller.getSnapshot().error).toContain('invalid api key');
+  });
+});
+
+
+
+
+
+describe('createProviderChatModel mid-turn LLM compaction', () => {
+  function makeContext(emit?: (event: { type: string; percent?: number }) => void) {
+    return {
+      run: {
+        mode: 'agent' as const,
+        streamId: 'test-stream',
+        conversationId: 'conv-test',
+      },
+      signal: new AbortController().signal,
+      emit(event: { type: string; percent?: number }) {
+        emit?.(event);
+        return null;
+      },
+    } as any;
+  }
+
+  function makeInput(content: string, usageInputTokens: number) {
+    const modelMessages = [
+      { role: 'user' as const, content: 'old-1' },
+      { role: 'assistant' as const, content: 'old-reply-1' },
+      { role: 'user' as const, content: 'old-2' },
+      { role: 'assistant' as const, content: 'old-reply-2' },
+    ];
+    const history = [
+      { id: 'u1', role: 'user' as const, content: 'old-1' },
+      { id: 'a1', role: 'assistant' as const, content: 'old-reply-1' },
+      { id: 'u2', role: 'user' as const, content: 'old-2' },
+      { id: 'a2', role: 'assistant' as const, content: 'old-reply-2' },
+    ];
+    return {
+      input: {
+        content,
+        history,
+        modelMessages,
+        mode: 'agent' as const,
+        usage: { inputTokens: usageInputTokens },
+        contextAccounting: createRestoredObservedContextAccountingSnapshot({
+          identity: {
+            conversationId: 'conv-test',
+            contentRevision: 0,
+            modelKey: 'model-test',
+          },
+          contextWindow: 1_000,
+          countCapability: { kind: 'observed_usage_only' },
+          usage: { inputTokens: usageInputTokens },
+        }),
+      },
+    } as any;
+  }
+
+  test('mid-turn compact prefers LLM summary and emits compaction.progress', async () => {
+    const streams: ModelProviderRequest[] = [];
+    const progressEvents: number[] = [];
+    let mainTurns = 0;
+    const provider: ModelProvider = {
+      async stream(request) {
+        streams.push(request);
+        const isCompaction = request.messages.some(
+          (message) =>
+            message.role === 'system'
+            && typeof message.content === 'string'
+            && message.content.includes(COMPACTION_SUMMARY_SYSTEM_PROMPT.slice(0, 40)),
+        );
+        if (isCompaction) {
+          request.onEvent?.({ type: 'text.delta', content: 'LLM mid-turn summary body' });
+          return {
+            content: 'LLM mid-turn summary body',
+            toolCalls: [],
+            usage: { inputTokens: 80 },
+          };
+        }
+        mainTurns += 1;
+        return {
+          content: `reply-${mainTurns}`,
+          toolCalls: [],
+          usage: { inputTokens: 120 },
+        };
+      },
+    };
+
+    const model = createProviderChatModel({
+      provider,
+      model: 'model-test',
+      getContextWindow: () => 1_000,
+      toolDefinitions: [],
+    });
+
+    const state = await model.initialize(
+      makeInput('latest-user', 900),
+      makeContext(),
+    );
+    const result = await model.runTurn(
+      state,
+      makeContext((event) => {
+        if (event.type === 'compaction.progress' && typeof event.percent === 'number') {
+          progressEvents.push(event.percent);
+        }
+      }),
+    );
+    if (result.kind !== 'completed') throw new Error(`Expected completed, got ${result.kind}`);
+
+    expect(result.kind).toBe('completed');
+    expect(progressEvents.some((percent) => percent >= 8)).toBe(true);
+    expect(
+      streams.some((request) =>
+        request.messages.some(
+          (message) =>
+            message.role === 'system'
+            && typeof message.content === 'string'
+            && message.content.includes(COMPACTION_SUMMARY_SYSTEM_PROMPT.slice(0, 40)),
+        ),
+      ),
+    ).toBe(true);
+    expect(result.state.midTurnCompactions?.length ?? 0).toBeGreaterThanOrEqual(1);
+    expect(result.state.midTurnCompactions?.[0]?.method).toBe('llm');
+    expect(result.state.usage as unknown).toEqual({
+      usageScope: 'runtime_turn',
+      providerRequestCount: 2,
+      inputTokens: 200,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 200,
+    });
+    expect(result.state.contextAccounting?.authoritativeInputTokens).toBe(120);
+    expect(result.state.modelMessages.some((message) =>
+      typeof message.content === 'string' && message.content.includes('[Context handoff'),
+    )).toBe(true);
+    expect(result.output).toBe('reply-1');
+  });
+
+  test('mid-turn compact falls back to structural when LLM summary fails', async () => {
+    let mainTurns = 0;
+    const provider: ModelProvider = {
+      async stream(request) {
+        const isCompaction = request.messages.some(
+          (message) =>
+            message.role === 'system'
+            && typeof message.content === 'string'
+            && message.content.includes(COMPACTION_SUMMARY_SYSTEM_PROMPT.slice(0, 40)),
+        );
+        if (isCompaction) {
+          throw new Error('summary provider unavailable');
+        }
+        mainTurns += 1;
+        return {
+          content: `ok-${mainTurns}`,
+          toolCalls: [],
+          usage: { inputTokens: 150 },
+        };
+      },
+    };
+
+    const model = createProviderChatModel({
+      provider,
+      model: 'model-test',
+      getContextWindow: () => 1_000,
+      toolDefinitions: [],
+    });
+
+    const state = await model.initialize(
+      makeInput('latest-user', 950),
+      makeContext(),
+    );
+    const result = await model.runTurn(state, makeContext());
+    if (result.kind !== 'completed') throw new Error(`Expected completed, got ${result.kind}`);
+
+    expect(result.kind).toBe('completed');
+    expect(result.state.midTurnCompactions?.length ?? 0).toBeGreaterThanOrEqual(1);
+    expect(result.state.midTurnCompactions?.[0]?.method).toBe('structured');
+    expect((result.state.usage as { providerRequestCount?: number })?.providerRequestCount).toBe(2);
+    expect(result.state.usage?.inputTokens).toBe(150);
+    expect(result.state.modelMessages.some((message) =>
+      typeof message.content === 'string' && message.content.includes('[Context handoff'),
+    )).toBe(true);
+    expect(result.output).toBe('ok-1');
+  });
+});
+
+
+function connectionError(message: string): Error {
+  return new TypeError(message);
+}
+
+describe('TUI summary input budget', () => {
+  test('truncateSummaryInputPreferTail keeps recent tail under budget', () => {
+    const input = 'HEAD-' + 'x'.repeat(1000) + '-TAIL';
+    const out = truncateSummaryInputPreferTail(input, 240);
+    expect(out.length).toBeLessThanOrEqual(240);
+    expect(out.endsWith('-TAIL')).toBe(true);
+    expect(out).toContain('summary input truncated');
+    expect(out.startsWith('HEAD-')).toBe(false);
+  });
+
+  test('resolveTuiSummaryInputMaxChars respects context window', () => {
+    const maxChars = resolveTuiSummaryInputMaxChars({ contextWindow: 32_000, maxOutputTokens: 4_096 });
+    // usable ~= 32000 - 4096 - 4000 = 23904 tokens * 4 chars
+    expect(maxChars).toBeLessThanOrEqual(80_000 * 4);
+    expect(maxChars).toBeGreaterThan(2_000 * 4);
+  });
+});
+

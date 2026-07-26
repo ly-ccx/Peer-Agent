@@ -63,4 +63,33 @@ describe('Desktop Runtime session adapter', () => {
     assert.equal(cancelled.lastTurn.status, 'cancelled');
     assert.equal(adapter.getSession('conversation-1').lastTurn.status, 'cancelled');
   });
+
+  it('reclaims a stale active turn so the next stream can resume the same conversation', () => {
+    const adapter = createDesktopRuntimeSessionAdapter();
+    const stale = adapter.startStream({ streamId: 'stream-stale', conversationId: 'conversation-1' });
+    assert.equal(stale.signal.aborted, false);
+    assert.equal(adapter.getSession('conversation-1').status, 'running');
+
+    // Without reclaim this used to throw "already has an active turn" and block Goal resume.
+    const next = adapter.startStream({ streamId: 'stream-next', conversationId: 'conversation-1' });
+
+    assert.equal(stale.signal.aborted, true);
+    assert.equal(next.sessionId, 'conversation-1');
+    assert.equal(next.turnIndex, 1);
+    assert.equal(adapter.getActiveTurn('stream-stale'), null);
+    assert.equal(adapter.getActiveTurn('stream-next')?.streamId, 'stream-next');
+    assert.equal(adapter.getSession('conversation-1').status, 'running');
+    assert.equal(adapter.getSession('conversation-1').lastTurn?.reason, 'stale_active_turn_reclaimed');
+  });
+
+  it('reclaims the same stream id instead of hard-failing re-entry', () => {
+    const adapter = createDesktopRuntimeSessionAdapter();
+    const first = adapter.startStream({ streamId: 'stream-same', conversationId: 'conversation-1' });
+    const second = adapter.startStream({ streamId: 'stream-same', conversationId: 'conversation-1' });
+
+    assert.equal(first.signal.aborted, true);
+    assert.equal(second.sessionId, 'conversation-1');
+    assert.equal(second.turnIndex, 1);
+    assert.equal(adapter.getActiveTurn('stream-same')?.turnIndex, 1);
+  });
 });

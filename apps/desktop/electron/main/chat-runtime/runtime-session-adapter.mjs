@@ -18,15 +18,41 @@ export function createDesktopRuntimeSessionAdapter({
 } = {}) {
   const activeTurns = new Map();
 
+  function reclaimStaleActiveTurn(sessionId, { reason = 'stale_active_turn_reclaimed' } = {}) {
+    // Prefer tracked stream map so settleStream clears Desktop-side ownership first.
+    for (const [otherStreamId, turn] of activeTurns.entries()) {
+      if (turn?.sessionId === sessionId) {
+        settleStream(otherStreamId, 'aborted', reason);
+      }
+    }
+    // Controller may still hold a running turn after map drift; force-cancel so resume can proceed.
+    const snapshot = controller.get(sessionId);
+    if (snapshot?.status === 'running' || snapshot?.activeTurn) {
+      try {
+        controller.cancel(sessionId, reason);
+      } catch {
+        // ignore double-cancel races; the goal is only to free the lock
+      }
+    }
+  }
+
   function startStream({ streamId, conversationId = null } = {}) {
     const normalizedStreamId = requireStreamId(streamId);
     if (activeTurns.has(normalizedStreamId)) {
-      throw new Error(`Desktop stream ${normalizedStreamId} already has an active Runtime turn`);
+      // Same stream id re-entry: reclaim instead of hard-failing and blocking Goal resume.
+      settleStream(normalizedStreamId, 'aborted', 'stale_stream_replaced');
     }
 
     const sessionId = resolveSessionId(normalizedStreamId, conversationId);
     const existing = controller.get(sessionId);
-    const turn = existing
+    if (existing?.status === 'running' || existing?.activeTurn) {
+      reclaimStaleActiveTurn(sessionId, {
+        reason: 'stale_active_turn_reclaimed',
+      });
+    }
+
+    const sessionAfterReclaim = controller.get(sessionId);
+    const turn = sessionAfterReclaim
       ? controller.resume({ sessionId, streamId: normalizedStreamId })
       : controller.start({
           sessionId,

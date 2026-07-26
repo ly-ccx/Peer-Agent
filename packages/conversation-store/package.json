@@ -12,5 +12,8 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs"
+  },
+  "dependencies": {
+    "@peer-agent/protocol": "workspace:*"
   }
 }

@@ -1,8 +1,8 @@
 /**
- * 请求级 usage 日志（精简版）。
+ * Runtime-turn usage 日志（精简版）。
  *
  * 目标：
- * - 发送成功后按「单次请求」落盘 provider/model/token/cost 快照
+ * - 发送成功后按「一次用户 Runtime turn」落盘 provider/model/token/cost 快照
  * - 给后续统计提供比会话 lifetimeUsage 更细的归因数据
  *
  * 不做：
@@ -55,6 +55,11 @@ export function createUsageRequestLog({
       modelProviderId: optionalText(entry.modelProviderId),
       model: optionalText(entry.model),
       providerName: optionalText(entry.providerName),
+      usageScope: 'runtime_turn',
+      providerRequestCount: Math.max(
+        1,
+        Math.floor(finiteNumber(entry.providerRequestCount || usage.providerRequestCount) || 1),
+      ),
       inputTokens: finiteNumber(usage.inputTokens),
       outputTokens: finiteNumber(usage.outputTokens),
       cacheReadTokens: finiteNumber(usage.cacheReadTokens),

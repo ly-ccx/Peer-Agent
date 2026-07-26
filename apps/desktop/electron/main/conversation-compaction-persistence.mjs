@@ -55,28 +55,13 @@ export function buildPersistedCompactedMessages({
 }
 
 /**
- * Persist compacted transcript first, then bind the next-request projection to
- * the content revision created by replaceMessages. Keeping both writes here
- * prevents automatic and manual compaction from drifting into separate paths.
+ * Persist the compacted transcript. Context accounting is written only after
+ * the shared accounting pipeline rebuilds and recounts the canonical request.
  */
 export function persistCompactedConversation({
   store,
   conversationId,
   messages,
-  requestProjection = null,
-  computedAt = new Date().toISOString(),
 }) {
-  const replaced = store.replaceMessages(conversationId, messages);
-  if (!requestProjection) return replaced;
-
-  const snapshotted = store.updateContextSnapshot(conversationId, {
-    nextRequestInputTokens: requestProjection.nextRequestInputTokens,
-    contextWindow: requestProjection.contextWindow,
-    computedAt,
-    source: 'desktop',
-  });
-  if (!snapshotted) {
-    throw new Error(`Failed to persist compacted context snapshot for ${conversationId}`);
-  }
-  return snapshotted;
+  return store.replaceMessages(conversationId, messages);
 }

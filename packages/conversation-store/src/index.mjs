@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, ren
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { contextAccountingModelKey } from '@peer-agent/protocol';
 
 function defaultStoreDir() {
   const dataHome = process.env.PEER_AGENT_HOME || process.env.PEER_USER_DATA_PATH || path.join(os.homedir(), '.peer-agent');
@@ -32,6 +33,27 @@ function writeJsonl(filePath, rows) {
 function appendJsonl(filePath, row) {
   mkdirSync(path.dirname(filePath), { recursive: true });
   appendFileSync(filePath, JSON.stringify(row) + '\n', 'utf8');
+}
+
+function readJson(filePath) {
+  if (!existsSync(filePath)) return null;
+  try {
+    return JSON.parse(readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeJson(filePath, value) {
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  writeFileSync(temporaryPath, JSON.stringify(value), 'utf8');
+  try {
+    renameSync(temporaryPath, filePath);
+  } catch (error) {
+    try { unlinkSync(temporaryPath); } catch {}
+    throw error;
+  }
 }
 
 function writeChangeEvent(storeDir, event) {
@@ -100,24 +122,108 @@ function normalizeStatuses(status) {
 
 function normalizeContextSnapshot(snapshot, meta) {
   if (!snapshot || typeof snapshot !== 'object') return null;
-  const nextRequestInputTokens = Number(snapshot.nextRequestInputTokens);
+  if (snapshot.version !== 1) return null;
+  const conversationId = typeof snapshot.conversationId === 'string'
+    ? snapshot.conversationId.trim()
+    : '';
   const contentRevision = Number(snapshot.contentRevision);
-  if (!Number.isFinite(nextRequestInputTokens) || nextRequestInputTokens < 0) return null;
+  const modelKey = typeof snapshot.modelKey === 'string' ? snapshot.modelKey.trim() : '';
+  const revision = Number(snapshot.revision);
+  const compactionEpoch = Number(snapshot.compactionEpoch);
+  if (!conversationId || !modelKey) return null;
   if (!Number.isSafeInteger(contentRevision) || contentRevision < 0) return null;
-  const contextWindowRaw = Number(snapshot.contextWindow);
-  const contextWindow = Number.isFinite(contextWindowRaw) && contextWindowRaw > 0 ? contextWindowRaw : null;
-  const modelProviderId = normalizeModelProviderId(snapshot.modelProviderId);
-  const model = typeof snapshot.model === 'string' && snapshot.model.trim() ? snapshot.model.trim() : null;
-  const computedAt = typeof snapshot.computedAt === 'string' && snapshot.computedAt.trim()
-    ? snapshot.computedAt
-    : null;
-  const source = snapshot.source === 'desktop' || snapshot.source === 'tui' ? snapshot.source : null;
-  if (!computedAt || !source) return null;
+  if (!Number.isSafeInteger(revision) || revision < 0) return null;
+  if (!Number.isSafeInteger(compactionEpoch) || compactionEpoch < 0) return null;
+  const phases = new Set([
+    'request_preflight',
+    'stream_preview',
+    'tool_result',
+    'post_compaction',
+    'turn_complete',
+    'restored',
+    'model_changed',
+  ]);
+  if (!phases.has(snapshot.phase)) return null;
+  const normalizeNullablePositive = (value) => {
+    if (value === null || value === undefined) return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.floor(number) : undefined;
+  };
+  const normalizeNullableNonNegative = (value) => {
+    if (value === null || value === undefined) return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? number : undefined;
+  };
+  const contextWindow = normalizeNullablePositive(snapshot.contextWindow);
+  const inputBudget = normalizeNullablePositive(snapshot.inputBudget);
+  const compactionThresholdTokens = normalizeNullablePositive(snapshot.compactionThresholdTokens);
+  const authoritativeInputTokens = normalizeNullableNonNegative(snapshot.authoritativeInputTokens);
+  const percent = normalizeNullableNonNegative(snapshot.percent);
+  if (
+    contextWindow === undefined
+    || inputBudget === undefined
+    || compactionThresholdTokens === undefined
+    || authoritativeInputTokens === undefined
+    || percent === undefined
+  ) return null;
+  const pressureSources = new Set([
+    'provider_usage',
+    'provider_count_api',
+    'provider_tokenizer',
+    'provider_error_evidence',
+    'unknown',
+  ]);
+  if (!pressureSources.has(snapshot.pressureSource)) return null;
+  if (typeof snapshot.pendingUncountedChanges !== 'boolean') return null;
+  const pendingContentChars = Number(snapshot.pendingContentChars);
+  if (!Number.isSafeInteger(pendingContentChars) || pendingContentChars < 0) return null;
+  const capability = snapshot.countCapability;
+  if (!capability || typeof capability !== 'object') return null;
+  if (![
+    'provider_count_api',
+    'provider_tokenizer',
+    'observed_usage_only',
+    'unavailable',
+  ].includes(capability.kind)) return null;
+  if (
+    capability.kind === 'provider_tokenizer'
+    && (typeof capability.tokenizerVersion !== 'string' || !capability.tokenizerVersion.trim())
+  ) return null;
+  if (snapshot.counterStatus !== 'active' && snapshot.counterStatus !== 'degraded') return null;
+  const updatedAt = Number(snapshot.updatedAt);
+  if (!Number.isFinite(updatedAt) || updatedAt < 0) return null;
+  if (conversationId !== String(meta?.id ?? '')) return null;
   if (contentRevision !== Number(meta?.contentRevision ?? 0)) return null;
-  if (modelProviderId !== normalizeModelProviderId(meta?.modelProviderId)) return null;
-  const metaModel = typeof meta?.model === 'string' && meta.model.trim() ? meta.model.trim() : null;
-  if (model !== metaModel) return null;
-  return { nextRequestInputTokens, contextWindow, contentRevision, modelProviderId, model, computedAt, source };
+  const providerBinding = normalizeModelProviderId(meta?.modelProviderId);
+  const storedModel = typeof meta?.model === 'string' && meta.model.trim()
+    ? meta.model.trim()
+    : null;
+  const expectedModelKey = contextAccountingModelKey(providerBinding, storedModel);
+  const legacyModelKey = providerBinding ?? storedModel;
+  if (modelKey !== expectedModelKey && modelKey !== legacyModelKey) return null;
+  return {
+    ...snapshot,
+    version: 1,
+    conversationId,
+    contentRevision,
+    modelKey: expectedModelKey,
+    revision,
+    phase: snapshot.phase,
+    compactionEpoch,
+    contextWindow,
+    inputBudget,
+    compactionThresholdTokens,
+    authoritativeInputTokens,
+    percent,
+    pressureSource: snapshot.pressureSource,
+    pendingUncountedChanges: snapshot.pendingUncountedChanges,
+    pendingContentChars,
+    countCapability: capability.kind === 'provider_tokenizer'
+      ? { kind: capability.kind, tokenizerVersion: capability.tokenizerVersion.trim() }
+      : { kind: capability.kind },
+    counterStatus: snapshot.counterStatus,
+    updatedAt,
+  };
 }
 
 function normalizeMeta(meta) {
@@ -217,13 +323,25 @@ function sortByUpdatedAtDesc(items) {
   });
 }
 
-export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
+export function createConversationStore({
+  storeDir = defaultStoreDir(),
+  usageLogFile = path.join(path.dirname(storeDir), 'usage', 'requests.jsonl'),
+} = {}) {
   const indexFile = path.join(storeDir, 'index.jsonl');
+  const contextSnapshotDir = path.join(storeDir, '.context-snapshots');
 
   // 撤销 'goal'→'plan' 兼容映射前,先对存量数据做一次性迁移,避免历史 'goal' 被误判为自驱语义。
   migrateLegacyGoalMode(storeDir, indexFile);
 
   function convFile(id) { return path.join(storeDir, `${id}.jsonl`); }
+  function contextSnapshotFile(id) {
+    return path.join(contextSnapshotDir, `${encodeURIComponent(id)}.json`);
+  }
+  function durableContextSnapshot(meta) {
+    return normalizeContextSnapshot(readJson(contextSnapshotFile(meta.id)), meta)
+      ?? meta.contextSnapshot
+      ?? null;
+  }
   function publishChange(meta, changeType) {
     if (!meta?.id) return;
     writeChangeEvent(storeDir, {
@@ -501,14 +619,16 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     if (!meta) return null;
     const previousProviderId = normalizeModelProviderId(meta.modelProviderId);
     const previousModel = typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : null;
+    const previousContextModelKey = contextAccountingModelKey(previousProviderId, previousModel);
     if (effort !== undefined) meta.effort = normalizeEffort(effort);
     if (modelProviderId !== undefined) meta.modelProviderId = normalizeModelProviderId(modelProviderId);
     // 发送成功后可把本轮实际 model 快照落盘；null/空串表示清除。
     if (model !== undefined) {
       meta.model = typeof model === 'string' && model.trim() ? model.trim() : null;
     }
-    if (previousProviderId !== normalizeModelProviderId(meta.modelProviderId)
-      || previousModel !== (typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : null)) {
+    const nextProviderId = normalizeModelProviderId(meta.modelProviderId);
+    const nextModel = typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : null;
+    if (previousContextModelKey !== contextAccountingModelKey(nextProviderId, nextModel)) {
       meta.contextSnapshot = null;
     }
     meta.updatedAt = new Date().toISOString();
@@ -526,18 +646,24 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
       : 0;
     const candidate = {
       ...snapshot,
+      conversationId: id,
       contentRevision,
-      modelProviderId: normalizeModelProviderId(meta.modelProviderId),
-      model: typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : null,
-      computedAt: typeof snapshot.computedAt === 'string' && snapshot.computedAt.trim()
-        ? snapshot.computedAt
-        : new Date().toISOString(),
+      modelKey: contextAccountingModelKey(
+        normalizeModelProviderId(meta.modelProviderId),
+        typeof meta.model === 'string' ? meta.model : null,
+      ),
     };
     const normalized = normalizeContextSnapshot(candidate, { ...meta, contentRevision });
     if (!normalized) return null;
     meta.contentRevision = contentRevision;
     meta.contextSnapshot = normalized;
     writeJsonl(indexFile, index);
+    // Keep the capacity snapshot in a sidecar as the cross-process authority.
+    // Older Desktop/TUI builds rewrite the whole index after normalizing fields
+    // they understand and can erase a newer snapshot. The sidecar survives that
+    // metadata write and is still rejected normally when model/content revision
+    // no longer matches.
+    writeJson(contextSnapshotFile(id), normalized);
     return withMessageCount(meta);
   }
 
@@ -546,7 +672,58 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     const meta = index.find((c) => c.id === id);
     if (!meta) return null;
     const messages = readJsonl(convFile(id));
-    return { ...meta, messages };
+    return {
+      ...meta,
+      contextSnapshot: durableContextSnapshot(meta),
+      messages,
+    };
+  }
+
+  /**
+   * Return the last provider-request observation retained by the context
+   * sidecar. The sidecar may be stale for the current content revision after a
+   * new message is appended; that is intentional here: callers use this exact
+   * request observation as a pending restore baseline. Runtime-turn billing
+   * rows are never consulted.
+   */
+  function getLatestContextObservation(id, { modelKey } = {}) {
+    const conversationId = typeof id === 'string' ? id.trim() : '';
+    if (!conversationId) return null;
+    const meta = readIndex().find((candidate) => candidate.id === conversationId);
+    if (!meta) return null;
+    const rawSnapshot = readJson(contextSnapshotFile(conversationId))
+      ?? meta.contextSnapshot
+      ?? null;
+    if (!rawSnapshot || rawSnapshot.version !== 1) return null;
+    if (String(rawSnapshot.conversationId || '') !== conversationId) return null;
+    const expectedModelKey = typeof modelKey === 'string' && modelKey.trim()
+      ? contextAccountingModelKey(modelKey.trim(), null)
+      : contextAccountingModelKey(
+          normalizeModelProviderId(meta.modelProviderId),
+          typeof meta.model === 'string' ? meta.model : null,
+        );
+    const observedModelKey = contextAccountingModelKey(rawSnapshot.modelKey, null);
+    if (observedModelKey !== expectedModelKey) return null;
+    const observation = rawSnapshot.lastObserved;
+    if (!observation || observation.source !== 'provider_usage') return null;
+    if (observation.supersededByCompactionRevision !== undefined) return null;
+    const inputTokens = Number(observation.inputTokens);
+    const compactionEpoch = Number(observation.compactionEpoch);
+    const observedAt = Number(observation.observedAt);
+    const requestFingerprint = typeof observation.requestFingerprint === 'string'
+      ? observation.requestFingerprint.trim()
+      : '';
+    if (!Number.isFinite(inputTokens) || inputTokens < 0) return null;
+    if (!Number.isSafeInteger(compactionEpoch) || compactionEpoch < 0) return null;
+    if (compactionEpoch !== Number(rawSnapshot.compactionEpoch)) return null;
+    if (!Number.isFinite(observedAt) || observedAt < 0 || !requestFingerprint) return null;
+    return {
+      inputTokens: Math.floor(inputTokens),
+      requestFingerprint,
+      compactionEpoch,
+      source: 'provider_usage',
+      observedAt,
+    };
   }
 
   function updateTitle(id, title) {
@@ -559,11 +736,29 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     return withMessageCount(meta);
   }
 
+
+  function isEmptyUserMessage(message) {
+    if (!message || message.role !== 'user') return false;
+    const content = typeof message.content === 'string' ? message.content.trim() : '';
+    if (content.length > 0) return false;
+    return !Array.isArray(message.attachments) || message.attachments.length === 0;
+  }
+
+  function withoutEmptyUserMessages(messages) {
+    if (!Array.isArray(messages)) return [];
+    return messages.filter((message) => !isEmptyUserMessage(message));
+  }
+
   function appendMessage(id, message) {
     return withFileLock(indexFile, () => {
       const index = readIndex();
       const meta = index.find((c) => c.id === id);
       if (!meta) return null;
+      // Refuse empty user bubbles (no text, no attachments). They only surface as a bare
+      // "你" label in the UI and have no durable conversation value.
+      if (isEmptyUserMessage(message)) {
+        return withMessageCount(meta);
+      }
       withFileLock(convFile(id), () => appendJsonl(convFile(id), message));
       if (!meta.title && message.role === 'user') {
         meta.title = message.content.slice(0, 50);
@@ -599,20 +794,21 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
 
   function replaceMessages(id, newMessages, options = {}) {
     const existingMessages = readJsonl(convFile(id));
-    if (newMessages.length === 0 && existingMessages.length > 0 && options.allowEmpty !== true) {
+    const durableMessages = withoutEmptyUserMessages(newMessages);
+    if (durableMessages.length === 0 && existingMessages.length > 0 && options.allowEmpty !== true) {
       throw new Error(`Refusing to replace non-empty conversation ${id} with an empty message list`);
     }
-    writeJsonl(convFile(id), newMessages);
+    writeJsonl(convFile(id), durableMessages);
     const index = readIndex();
     const meta = index.find((c) => c.id === id);
     if (meta) {
-      meta.messageCount = Array.isArray(newMessages) ? newMessages.length : 0;
+      meta.messageCount = Array.isArray(durableMessages) ? durableMessages.length : 0;
       meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
       meta.contextSnapshot = null;
       meta.updatedAt = new Date().toISOString();
       writeJsonl(indexFile, index);
     }
-    return meta ? { ...meta, messages: newMessages } : null;
+    return meta ? { ...meta, messages: durableMessages } : null;
   }
 
   /**
@@ -672,6 +868,117 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     meta.updatedAt = new Date().toISOString();
     writeJsonl(indexFile, index);
     return meta.lifetimeUsage;
+  }
+
+  /**
+   * Canonical durable sink for one completed runtime turn.
+   *
+   * This is intentionally deeper than the Desktop/TUI hosts: it validates the
+   * scope, updates conversation lifetime, and appends the runtime-turn ledger
+   * row together so both hosts have identical persistence semantics.
+   */
+  function recordRuntimeTurnUsage(id, { usage, attribution = {} } = {}) {
+    if (usage?.usageScope !== 'runtime_turn') {
+      throw new TypeError('recordRuntimeTurnUsage requires usageScope=runtime_turn');
+    }
+    const providerRequestCount = Number(usage.providerRequestCount);
+    if (!Number.isSafeInteger(providerRequestCount) || providerRequestCount < 1) {
+      throw new TypeError('recordRuntimeTurnUsage requires providerRequestCount >= 1');
+    }
+    const conversationId = typeof id === 'string' ? id.trim() : '';
+    if (!conversationId) return null;
+    const ledgerId = typeof attribution.id === 'string' && attribution.id.trim()
+      ? attribution.id.trim()
+      : `runtime_turn_${Date.now()}_${randomUUID()}`;
+    const usageTransactionFile = path.join(storeDir, '.usage-ledger-transaction');
+    return withFileLock(usageTransactionFile, () => {
+      const existing = readJsonl(usageLogFile).find(
+        (row) => row?.id === ledgerId && row?.conversationId === conversationId,
+      );
+      if (existing) {
+        const meta = readIndex().find((candidate) => candidate.id === conversationId);
+        return meta
+          ? {
+              lifetimeUsage: {
+                usageScope: 'conversation_lifetime',
+                runtimeTurnCount: Number(meta.runtimeTurnCount || 0),
+                inputTokens: Number(meta.lifetimeUsage?.inputTokens || 0),
+                outputTokens: Number(meta.lifetimeUsage?.outputTokens || 0),
+                cacheReadTokens: Number(meta.lifetimeUsage?.cacheReadTokens || 0),
+                cacheWriteTokens: Number(meta.lifetimeUsage?.cacheWriteTokens || 0),
+                totalTokens:
+                  Number(meta.lifetimeUsage?.inputTokens || 0)
+                  + Number(meta.lifetimeUsage?.outputTokens || 0)
+                  + Number(meta.lifetimeUsage?.cacheReadTokens || 0)
+                  + Number(meta.lifetimeUsage?.cacheWriteTokens || 0),
+              },
+              ledgerRow: existing,
+            }
+          : null;
+      }
+
+      const normalizedToken = (value) => {
+        const number = Number(value);
+        return Number.isFinite(number) && number >= 0 ? Math.floor(number) : 0;
+      };
+      const tokens = {
+        inputTokens: normalizedToken(usage.inputTokens),
+        outputTokens: normalizedToken(usage.outputTokens),
+        cacheReadTokens: normalizedToken(usage.cacheReadTokens),
+        cacheWriteTokens: normalizedToken(usage.cacheWriteTokens),
+      };
+      const index = readIndex();
+      const meta = index.find((candidate) => candidate.id === conversationId);
+      if (!meta) return null;
+      const previous = meta.lifetimeUsage || {};
+      meta.lifetimeUsage = {
+        inputTokens: Number(previous.inputTokens || 0) + tokens.inputTokens,
+        outputTokens: Number(previous.outputTokens || 0) + tokens.outputTokens,
+        cacheReadTokens: Number(previous.cacheReadTokens || 0) + tokens.cacheReadTokens,
+        cacheWriteTokens: Number(previous.cacheWriteTokens || 0) + tokens.cacheWriteTokens,
+      };
+      meta.runtimeTurnCount = Math.max(0, Math.floor(Number(meta.runtimeTurnCount) || 0)) + 1;
+      meta.updatedAt = new Date().toISOString();
+      writeJsonl(indexFile, index);
+
+      const optionalText = (value) => (
+        typeof value === 'string' && value.trim() ? value.trim() : null
+      );
+      const estimatedCost = Number(attribution.estimatedCostUsd);
+      const ledgerRow = {
+        id: ledgerId,
+        at: optionalText(attribution.at) || new Date().toISOString(),
+        conversationId,
+        streamId: optionalText(attribution.streamId),
+        modelProviderId: optionalText(attribution.modelProviderId),
+        model: optionalText(attribution.model),
+        providerName: optionalText(attribution.providerName),
+        usageScope: 'runtime_turn',
+        providerRequestCount,
+        ...tokens,
+        totalTokens:
+          tokens.inputTokens
+          + tokens.outputTokens
+          + tokens.cacheReadTokens
+          + tokens.cacheWriteTokens,
+        estimatedCostUsd: Number.isFinite(estimatedCost) ? estimatedCost : null,
+        pricingSource: optionalText(attribution.pricingSource),
+      };
+      appendJsonl(usageLogFile, ledgerRow);
+      return {
+        lifetimeUsage: {
+          usageScope: 'conversation_lifetime',
+          runtimeTurnCount: meta.runtimeTurnCount,
+          ...meta.lifetimeUsage,
+          totalTokens:
+            meta.lifetimeUsage.inputTokens
+            + meta.lifetimeUsage.outputTokens
+            + meta.lifetimeUsage.cacheReadTokens
+            + meta.lifetimeUsage.cacheWriteTokens,
+        },
+        ledgerRow,
+      };
+    });
   }
 
   function setArchiveStatus(id, status) {
@@ -780,6 +1087,10 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     const index = readIndex().filter((c) => c.id !== id);
     writeJsonl(indexFile, index);
     try { if (existsSync(convFile(id))) unlinkSync(convFile(id)); } catch {}
+    try {
+      const snapshotFile = contextSnapshotFile(id);
+      if (existsSync(snapshotFile)) unlinkSync(snapshotFile);
+    } catch {}
     return index.map((meta) => {
       return withMessageCount(meta);
     });
@@ -840,6 +1151,7 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     searchConversations,
     createConversation: changed(createConversation, 'created'),
     getConversation,
+    getLatestContextObservation,
     updateTitle: changed(updateTitle, 'metadata-updated'),
     updateMode: changed(updateMode, 'metadata-updated'),
     updateModelEffort: changed(updateModelEffort, 'metadata-updated'),
@@ -849,6 +1161,7 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     updateMessageById: changed(updateMessageById, 'messages-updated'),
     replaceMessages: changed(replaceMessages, 'messages-updated'),
     addUsage: changed(addUsage, 'metadata-updated'),
+    recordRuntimeTurnUsage: changed(recordRuntimeTurnUsage, 'metadata-updated'),
     archiveConversation: changed(archiveConversation, 'metadata-updated'),
     restoreConversation: changed(restoreConversation, 'metadata-updated'),
     pinConversation: changed(pinConversation, 'metadata-updated'),

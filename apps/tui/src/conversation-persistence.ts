@@ -1,4 +1,17 @@
 import { createConversationStore } from '@peer-agent/conversation-store';
+import {
+  buildCompactionMarker,
+  contextAccountingModelKey,
+} from '@peer-agent/protocol';
+import type {
+  ContextAccountingObserved,
+  ContextAccountingSnapshot,
+  RuntimeTurnUsage,
+} from '@peer-agent/protocol';
+import {
+  createRestoredObservedContextAccountingSnapshot,
+  projectConversationHistory,
+} from '@peer-agent/runtime-core';
 import { realpathSync } from 'node:fs';
 import type { ModelMessage, RuntimeModelSelection } from '@peer-agent/runtime-node';
 
@@ -23,11 +36,7 @@ export interface TuiConversationRestore {
   readonly continuityContext?: string;
   readonly modelSelection?: RuntimeModelSelection;
   readonly usage?: NonNullable<ChatSnapshot['usage']>;
-  readonly contextSnapshot?: {
-    readonly nextRequestInputTokens: number;
-    readonly contextWindow: number | null;
-    readonly model: string;
-  };
+  readonly contextSnapshot?: ContextAccountingSnapshot;
 }
 
 interface ConversationChangeEvent {
@@ -48,14 +57,19 @@ interface ConversationStore {
   replaceMessages?(id: string, messages: readonly Record<string, unknown>[], options?: { allowEmpty?: boolean }): unknown;
   updateMode(id: string, mode: TuiMode): unknown;
   updateModelEffort(id: string, input: { effort: string; modelProviderId: string | null; model?: string }): unknown;
-  updateContextSnapshot?(id: string, snapshot: {
-    nextRequestInputTokens: number;
-    contextWindow: number | null;
-    modelProviderId: string | null;
-    model: string;
-    source: 'tui';
-  }): unknown;
+  updateContextSnapshot?(id: string, snapshot: ContextAccountingSnapshot): unknown;
+  getLatestContextObservation?(
+    id: string,
+    options?: { modelKey?: string | null },
+  ): ContextAccountingObserved | null;
   addUsage(id: string, usage: NonNullable<ChatSnapshot['usage']>): unknown;
+  recordRuntimeTurnUsage?(
+    id: string,
+    input: {
+      usage: RuntimeTurnUsage;
+      attribution?: Readonly<Record<string, unknown>>;
+    },
+  ): unknown;
   subscribeChanges?(listener: (event: ConversationChangeEvent) => void): () => void;
 }
 
@@ -80,8 +94,7 @@ export function resumeTuiConversation(
   persistence.resumeConversation(conversation);
   if (!controller.restore({
     ...conversation,
-    nextRequestInputTokens: conversation.contextSnapshot?.nextRequestInputTokens,
-    requestProjection: conversation.contextSnapshot,
+    contextAccounting: conversation.contextSnapshot,
   })) {
     throw new Error('Conversation restore invariant failed after the idle-state check.');
   }
@@ -112,6 +125,18 @@ function storedUsage(value: unknown): NonNullable<ChatSnapshot['usage']> | undef
     ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
     ...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
   };
+}
+
+function runtimeTurnUsage(value: unknown): RuntimeTurnUsage | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const usage = value as Partial<RuntimeTurnUsage>;
+  const providerRequestCount = Number(usage.providerRequestCount);
+  if (
+    usage.usageScope !== 'runtime_turn'
+    || !Number.isSafeInteger(providerRequestCount)
+    || providerRequestCount < 1
+  ) return null;
+  return usage as RuntimeTurnUsage;
 }
 
 function storedToolPresentation(value: unknown): ChatMessage['tool'] | undefined {
@@ -445,59 +470,16 @@ function storedCompactionCard(value: Record<string, unknown>): ChatMessage['comp
   };
 }
 
-function modelMessagesFromStored(value: Record<string, unknown>): ModelMessage[] {
-  if (compactionRecord(value._compaction)) return [];
-  const role = String(value.role);
-  const content = typeof value.content === 'string' ? value.content : '';
-  if (role === 'user') return [{ role: 'user', content }];
-  if (role === 'system') return [];
-
-  const restored = toolsFromStored(value);
-  const tools = restored.tools ?? (restored.tool ? [restored.tool] : []);
-  if (role === 'assistant' || role === 'tool') {
-    if (tools.length === 0) {
-      return role === 'assistant' && content ? [{ role: 'assistant', content }] : [];
-    }
-    const calls = tools.map((tool, index) => ({
-      id: tool.toolCallId || `restored-tool-${index}`,
-      name: tool.capabilityId,
-      arguments: JSON.stringify(tool.arguments ?? {}),
-    }));
-    return [
-      ...(role === 'assistant' || content
-        ? [{ role: 'assistant' as const, content, toolCalls: calls }]
-        : []),
-      ...tools.map((tool, index) => ({
-        role: 'tool' as const,
-        content: tool.detail,
-        toolCallId: calls[index]!.id,
-      })),
-    ];
-  }
-  return [];
-}
-
 function activeStoredContext(messages: readonly Record<string, unknown>[]): {
   readonly modelMessages: readonly ModelMessage[];
   readonly continuityContext?: string;
 } {
-  let boundaryIndex = -1;
-  let continuityContext: string | undefined;
-  messages.forEach((message, index) => {
-    const marker = compactionRecord(message._compaction);
-    if (!marker) return;
-    boundaryIndex = index;
-    continuityContext = (
-      typeof marker.summary === 'string' && marker.summary.trim()
-        ? marker.summary
-        : typeof message.content === 'string'
-          ? message.content
-          : ''
-    ).trim() || undefined;
-  });
+  const projected = projectConversationHistory(messages);
   return {
-    modelMessages: messages.slice(boundaryIndex + 1).flatMap(modelMessagesFromStored),
-    ...(continuityContext ? { continuityContext } : {}),
+    modelMessages: projected.messages as readonly ModelMessage[],
+    ...(projected.continuityContext
+      ? { continuityContext: projected.continuityContext }
+      : {}),
   };
 }
 
@@ -521,41 +503,37 @@ function storedMessage(value: Record<string, unknown>, index: number): ChatMessa
   };
 }
 
-const CJK_REGEX =
-  /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef\uac00-\ud7af]/g;
-
-function estimateTextTokens(text: string): number {
-  const cjkCount = text.match(CJK_REGEX)?.length ?? 0;
-  return Math.ceil(cjkCount / 1.7 + (text.length - cjkCount) / 4);
-}
-
-function restoredContextUsage(
+function restoredProviderUsage(
   messages: readonly ChatMessage[],
 ): NonNullable<ChatSnapshot['usage']> | undefined {
-  const providerUsage = [...messages]
+  return [...messages]
     .reverse()
     .find((message) => message.role === 'assistant' && message.usage)?.usage;
-  if (providerUsage) return providerUsage;
-  const inputTokens = messages.reduce(
-    (total, message) => total + 10 + estimateTextTokens(message.content),
-    0,
-  );
-  return inputTokens > 0 ? { inputTokens, totalTokens: inputTokens } : undefined;
 }
 
 function restoredSelection(value: Record<string, unknown>): RuntimeModelSelection | undefined {
-  if (typeof value.modelProviderId !== 'string' || typeof value.effort !== 'string') return undefined;
-  const separator = value.modelProviderId.indexOf('::');
-  if (separator <= 0 || separator === value.modelProviderId.length - 2) return undefined;
+  if (
+    typeof value.modelProviderId !== 'string'
+    || typeof value.model !== 'string'
+    || typeof value.effort !== 'string'
+  ) return undefined;
+  const binding = value.modelProviderId.trim();
+  const modelId = value.model.trim();
+  if (!binding || !modelId) return undefined;
+  const legacySuffix = `::${modelId}`;
+  const providerId = binding.endsWith(legacySuffix)
+    ? binding.slice(0, -legacySuffix.length)
+    : binding;
+  if (!providerId) return undefined;
   return {
-    providerId: value.modelProviderId.slice(0, separator),
-    modelId: value.modelProviderId.slice(separator + 2),
+    providerId,
+    modelId,
     reasoningEffort: value.effort as RuntimeModelSelection['reasoningEffort'],
   };
 }
 
 function modelProviderId(selection: RuntimeModelSelection): string {
-  return `${selection.providerId}::${selection.modelId}`;
+  return selection.providerId;
 }
 
 function normalizeWorkspacePath(workspacePath: string): string {
@@ -570,6 +548,7 @@ export function createTuiConversationPersistence(options: {
   readonly workspacePath: string;
   readonly initialMode: TuiMode;
   readonly initialModel: RuntimeModelSelection;
+  readonly getContextWindow?: (selection: RuntimeModelSelection) => number | undefined;
   readonly store?: ConversationStore;
   readonly now?: () => number;
   readonly onError?: (error: unknown) => void;
@@ -630,14 +609,45 @@ export function createTuiConversationPersistence(options: {
           .filter((message): message is ChatMessage => Boolean(message));
         if (messages.length === 0) return null;
         const activeContext = activeStoredContext(storedMessages);
-        const contextSnapshot = stored.contextSnapshot && typeof stored.contextSnapshot === 'object'
-          ? stored.contextSnapshot as Record<string, unknown>
+        const providerUsage = restoredProviderUsage(messages);
+        const modelSelection = restoredSelection(stored);
+        const observedUsage = modelSelection
+          ? store.getLatestContextObservation?.(id, {
+              modelKey: contextAccountingModelKey(
+                modelSelection.providerId,
+                modelSelection.modelId,
+              ),
+            })
           : null;
-        const storedTokens = Number(contextSnapshot?.nextRequestInputTokens);
-        const storedWindow = Number(contextSnapshot?.contextWindow);
-        const storedModel = typeof contextSnapshot?.model === 'string'
-          ? contextSnapshot.model.trim()
-          : '';
+        const persistedContextSnapshot = stored.contextSnapshot
+          && typeof stored.contextSnapshot === 'object'
+          && (stored.contextSnapshot as { version?: unknown }).version === 1
+          && (stored.contextSnapshot as { conversationId?: unknown }).conversationId === id
+          ? stored.contextSnapshot as unknown as ContextAccountingSnapshot
+          : undefined;
+        const contentRevision = Number.isSafeInteger(Number(stored.contentRevision))
+          ? Math.max(0, Number(stored.contentRevision))
+          : 0;
+        const contextSnapshot = persistedContextSnapshot ?? (
+          modelSelection && observedUsage
+            ? createRestoredObservedContextAccountingSnapshot({
+                identity: {
+                  conversationId: id,
+                  contentRevision,
+                  modelKey: contextAccountingModelKey(
+                    modelSelection.providerId,
+                    modelSelection.modelId,
+                  ),
+                },
+                contextWindow: options.getContextWindow?.(modelSelection),
+                countCapability: { kind: 'observed_usage_only' },
+                usage: observedUsage,
+                compactionEpoch: observedUsage.compactionEpoch,
+                pendingUncountedChanges: true,
+                now: now(),
+              })
+            : undefined
+        );
         return {
           id,
           mode: normalizeTuiMode(stored.mode, 'chat'),
@@ -646,19 +656,9 @@ export function createTuiConversationPersistence(options: {
           ...(activeContext.continuityContext
             ? { continuityContext: activeContext.continuityContext }
             : {}),
-          modelSelection: restoredSelection(stored),
-          usage: restoredContextUsage(messages),
-          ...(Number.isFinite(storedTokens) && storedTokens >= 0 && storedModel
-            ? {
-              contextSnapshot: {
-                nextRequestInputTokens: Math.floor(storedTokens),
-                contextWindow: Number.isFinite(storedWindow) && storedWindow > 0
-                  ? Math.floor(storedWindow)
-                  : null,
-                model: storedModel,
-              },
-            }
-            : {}),
+          ...(modelSelection ? { modelSelection } : {}),
+          ...(providerUsage ? { usage: providerUsage } : {}),
+          ...(contextSnapshot ? { contextSnapshot } : {}),
         };
       } catch (error) {
         reportError(error);
@@ -753,8 +753,10 @@ export function createTuiConversationPersistence(options: {
               role: 'user',
               content: compact.handoffContent,
               timestamp: now(),
-              _compaction: {
-                method: 'structural',
+              // 共享 marker 形状经 protocol buildCompactionMarker 产出(23 号治理文档不变式 3);
+              // method 取真实级联结果(llm/structured/fallback_drop),不再硬编码 structural。
+              _compaction: buildCompactionMarker({
+                method: compact.method,
                 originalMessageCount: compact.beforeCount ?? 0,
                 previousMessageCount: 0,
                 deltaMessageCount: compact.summarizedCount ?? 0,
@@ -762,7 +764,7 @@ export function createTuiConversationPersistence(options: {
                 afterTokens: compact.afterTokens ?? 0,
                 summary: compact.summary ?? '',
                 decisionAnchors: [],
-              },
+              }),
             };
             rewritten = [
               ...rewritten.slice(0, insertionIndex),
@@ -783,18 +785,27 @@ export function createTuiConversationPersistence(options: {
         }
 
         if (snapshot.status === 'idle' && snapshot.usage && completedAssistant && !usageMessageIds.has(completedAssistant.id)) {
-          store.addUsage(id, snapshot.usage);
+          const scopedUsage = runtimeTurnUsage(snapshot.usage);
+          if (scopedUsage && store.recordRuntimeTurnUsage) {
+            store.recordRuntimeTurnUsage(id, {
+              usage: scopedUsage,
+              attribution: {
+                id: `tui:${id}:${completedAssistant.id}`,
+                at: new Date(now()).toISOString(),
+                modelProviderId: modelProviderId(model),
+                model: model.modelId,
+              },
+            });
+          } else {
+            // Compatibility for demo models and older injected stores. Provider
+            // production paths always emit the tagged runtime-turn contract.
+            store.addUsage(id, snapshot.usage);
+          }
           usageMessageIds.add(completedAssistant.id);
         }
 
-        if (snapshot.status === 'idle' && snapshot.requestProjection && store.updateContextSnapshot) {
-          store.updateContextSnapshot(id, {
-            nextRequestInputTokens: snapshot.requestProjection.nextRequestInputTokens,
-            contextWindow: snapshot.requestProjection.contextWindow,
-            modelProviderId: modelProviderId(model),
-            model: snapshot.requestProjection.model,
-            source: 'tui',
-          });
+        if (snapshot.status === 'idle' && snapshot.contextAccounting && store.updateContextSnapshot) {
+          store.updateContextSnapshot(id, snapshot.contextAccounting);
         }
       } catch (error) {
         reportError(error);

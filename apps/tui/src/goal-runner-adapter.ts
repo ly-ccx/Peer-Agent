@@ -79,11 +79,13 @@ export function createTuiSharedGoalRunner(options: {
     ChatController,
     'getSnapshot' | 'subscribe' | 'runGoalTurn' | 'runExplorer' | 'runVerifier'
   >;
+  /** 当前 TUI runtime 正在承载的 conversation。GoalPlan 只能由其所属 conversation 推进。 */
+  readonly getConversationId: () => string | undefined;
   /** 是否订阅 store onChange 并自动 kick（仅真实运行时开启；测试可注入禁用）。 */
   readonly autoStart?: boolean;
   readonly logger?: Pick<Console, 'warn' | 'error'>;
 }): TuiSharedGoalRunner {
-  const { bridge, chat } = options;
+  const { bridge, chat, getConversationId } = options;
   const logger = options.logger ?? console;
   const store = bridge.store;
   const listeners = new Set<(event: TuiGoalRunnerEvent) => void>();
@@ -99,6 +101,15 @@ export function createTuiSharedGoalRunner(options: {
   };
 
   const whenIdle = createIdleWaiter(chat);
+  const ownsPlan = (plan: { conversationId?: unknown } | null | undefined): boolean => {
+    const ownerConversationId = typeof plan?.conversationId === 'string'
+      ? plan.conversationId.trim()
+      : '';
+    const runtimeConversationId = getConversationId()?.trim() ?? '';
+    return ownerConversationId.length > 0
+      && runtimeConversationId.length > 0
+      && ownerConversationId === runtimeConversationId;
+  };
 
   const runtime: TuiGoalTurnRuntime = {
     whenIdle,
@@ -107,6 +118,7 @@ export function createTuiSharedGoalRunner(options: {
 
   const runner = createGoalRunner({
     goalPlanStore: store,
+    canRunPlan: ownsPlan,
     chatRuntime: {
       async runGoalTurn({ plan, turnNumber }: { plan: any; turnNumber: number }) {
         try {
@@ -134,14 +146,15 @@ export function createTuiSharedGoalRunner(options: {
     const planId = typeof payload?.planId === 'string' ? payload.planId : null;
     if (!planId) return;
     const plan = typeof store?.getPlan === 'function' ? store.getPlan(planId) : null;
-    if (!shouldAutoStartAcceptedGoalRunnerFromChange(payload, plan)) return;
+    if (!shouldAutoStartAcceptedGoalRunnerFromChange(payload, plan) || !ownsPlan(plan)) return;
     void (async () => {
       try {
         // 等 intake turn 结束再 kick，避免与当前活跃 turn 冲突
         // （Desktop 用 forceComplete + released；TUI 用快照 status === 'idle' 等价）。
         await runtime.whenIdle();
         const latest = typeof store?.getPlan === 'function' ? store.getPlan(planId) : null;
-        if (!shouldAutoStartAcceptedGoalRunnerFromChange(payload, latest)) return;
+        // 等待期间 TUI 可能已经切换 conversation，必须重新确认 plan 仍归当前 runtime。
+        if (!shouldAutoStartAcceptedGoalRunnerFromChange(payload, latest) || !ownsPlan(latest)) return;
         await runner.start(planId);
       } catch (error) {
         logger.error?.(

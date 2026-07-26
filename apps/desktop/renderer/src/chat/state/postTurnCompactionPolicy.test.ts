@@ -33,21 +33,21 @@ describe('post-turn compaction policy', () => {
     assert.match(surfaceSource, /submitMessage = useCallback[\s\S]*loadStatus !== 'ready'/);
   });
 
-  it('splits ring occupancy and compaction pressure into dual fields', () => {
+  it('keeps ring occupancy on the shared Runtime accounting snapshot', () => {
     assert.match(
       routerSource,
-      /nextContextTokens/,
-      'stream/compaction events must project actual sent context into the ring numerator',
+      /event\.type === 'context\.accounting'/,
+      'stream routing must consume Runtime context.accounting events',
     );
     assert.match(
       routerSource,
-      /nextTriggerTokens/,
-      'stream/compaction events must keep triggerTokens for compaction pressure',
+      /acceptAccountingSnapshot/,
+      'Runtime snapshots must pass through the revision guard',
     );
-    assert.match(
+    assert.doesNotMatch(
       routerSource,
-      /microcompacted\s*===\s*true\s*\?\s*'final'\s*:\s*'midturn'/,
-      'a confirmed Layer 1 result must be allowed to lower the dual-field snapshot',
+      /\bnextRequestInputTokens\b|\bnextContextTokens\b|\bnextTriggerTokens\b/,
+      'Renderer must not rebuild a second context truth',
     );
     assert.match(
       displaySource,
@@ -61,8 +61,8 @@ describe('post-turn compaction policy', () => {
     );
     assert.doesNotMatch(
       surfaceSource,
-      /setAuthoritativeContext\(null\)/,
-      'conversation switching must not discard the selected conversation bucket dual-field snapshot',
+      /setContextAccountingSnapshot\(null\)/,
+      'conversation switching must not discard the selected conversation accounting snapshot',
     );
   });
 });

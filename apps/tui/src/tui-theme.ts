@@ -371,26 +371,87 @@ export type TuiThemeState = {
   readonly scheme: TuiThemeScheme;
 };
 
+export type TuiThemeChangeListener = (state: TuiThemeState) => void;
+
 export type TuiThemeStore = {
   readonly getState: () => TuiThemeState;
   readonly getMode: () => TuiThemeMode;
   readonly getScheme: () => TuiThemeScheme;
   readonly setMode: (mode: TuiThemeMode) => TuiThemeState;
+  /**
+   * Subscribe to palette/mode changes. System-theme watching starts with the
+   * first subscriber and stops when the last one unsubscribes.
+   */
+  readonly subscribe: (listener: TuiThemeChangeListener) => () => void;
 };
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+
+export type SystemThemeWatcherOptions = {
+  readonly getMode: () => TuiThemeMode;
+  readonly onChange: (state: TuiThemeState) => void;
+  readonly intervalMs?: number;
+  readonly detectPrefersDark?: () => boolean;
+  readonly setIntervalFn?: typeof setInterval;
+  readonly clearIntervalFn?: typeof clearInterval;
+};
+
+/**
+ * Poll system appearance while mode === 'system' and re-apply COLOR when it
+ * flips. Terminal hosts have no reliable appearance-change event, so a light
+ * poll keeps open TUI sessions in sync with OS auto light/dark switches.
+ */
+export function startSystemThemeWatcher(options: SystemThemeWatcherOptions): () => void {
+  const intervalMs = options.intervalMs ?? 3000;
+  const detectPrefersDark = options.detectPrefersDark ?? (() => detectSystemPrefersDark());
+  const setIntervalFn = options.setIntervalFn ?? setInterval;
+  const clearIntervalFn = options.clearIntervalFn ?? clearInterval;
+
+  let lastPrefersDark = detectPrefersDark();
+  let stopped = false;
+
+  const tick = (): void => {
+    if (stopped) return;
+    if (options.getMode() !== 'system') return;
+
+    const prefersDark = detectPrefersDark();
+    if (prefersDark === lastPrefersDark) return;
+    lastPrefersDark = prefersDark;
+    options.onChange(applyThemeMode('system', prefersDark));
+  };
+
+  const timer = setIntervalFn(tick, intervalMs);
+  return () => {
+    stopped = true;
+    clearIntervalFn(timer);
+  };
+}
+
 /**
  * Persist theme mode in the same settings.json as locale
  * (`~/.peer-agent/settings.json` via host userDataPath).
  */
+export type TuiThemeStoreOptions = {
+  readonly userDataPath: string;
+  /**
+   * System-theme watch config. Pass `false` to disable (tests).
+   * Watching is lazy: starts with first subscribe(), stops on last unsubscribe.
+   */
+  readonly systemThemeWatch?: false | {
+    readonly intervalMs?: number;
+    readonly detectPrefersDark?: () => boolean;
+    readonly setIntervalFn?: typeof setInterval;
+    readonly clearIntervalFn?: typeof clearInterval;
+  };
+};
+
 export function createTuiThemeStore({
   userDataPath,
-}: {
-  readonly userDataPath: string;
-}): TuiThemeStore {
+  systemThemeWatch,
+}: TuiThemeStoreOptions): TuiThemeStore {
   const settingsFile = path.join(userDataPath, 'settings.json');
 
   const readSettings = (): Record<string, unknown> => {
@@ -419,20 +480,58 @@ export function createTuiThemeStore({
   const initial = readState();
   applyThemeMode(initial.mode);
 
+  const listeners = new Set<TuiThemeChangeListener>();
+  let stopWatcher: (() => void) | null = null;
+
+  const notify = (state: TuiThemeState): void => {
+    for (const listener of listeners) listener(state);
+  };
+
+  const getMode = (): TuiThemeMode => normalizeTuiThemeMode(readSettings().themeMode, activeMode);
+
+  const ensureWatcher = (): void => {
+    if (systemThemeWatch === false || stopWatcher) return;
+    const watch = systemThemeWatch === undefined ? {} : systemThemeWatch;
+    stopWatcher = startSystemThemeWatcher({
+      getMode,
+      onChange: notify,
+      intervalMs: watch.intervalMs,
+      detectPrefersDark: watch.detectPrefersDark,
+      setIntervalFn: watch.setIntervalFn,
+      clearIntervalFn: watch.clearIntervalFn,
+    });
+  };
+
+  const maybeStopWatcher = (): void => {
+    if (listeners.size > 0 || !stopWatcher) return;
+    stopWatcher();
+    stopWatcher = null;
+  };
+
   return {
     getState: () => {
-      const mode = normalizeTuiThemeMode(readSettings().themeMode, activeMode);
+      const mode = getMode();
       return { mode, scheme: resolveThemeScheme(mode) };
     },
-    getMode: () => normalizeTuiThemeMode(readSettings().themeMode, activeMode),
-    getScheme: () => resolveThemeScheme(normalizeTuiThemeMode(readSettings().themeMode, activeMode)),
+    getMode,
+    getScheme: () => resolveThemeScheme(getMode()),
     setMode(mode) {
       const nextMode = normalizeTuiThemeMode(mode, 'dark');
       writeSettings({
         ...readSettings(),
         themeMode: nextMode,
       });
-      return applyThemeMode(nextMode);
+      const next = applyThemeMode(nextMode);
+      notify(next);
+      return next;
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      ensureWatcher();
+      return () => {
+        listeners.delete(listener);
+        maybeStopWatcher();
+      };
     },
   };
 }

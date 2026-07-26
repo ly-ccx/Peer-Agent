@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -12,7 +12,11 @@ import {
   createDemoChatModel,
   type ChatSnapshot,
 } from './chat-controller.ts';
+import {
+  type ContextAccountingSnapshot,
+} from '@peer-agent/protocol';
 import type { TuiHost } from './tui-host.ts';
+import { createConversationStore } from '@peer-agent/conversation-store';
 
 function createStoreRecorder() {
   const calls: Array<{ method: string; args: unknown[] }> = [];
@@ -42,6 +46,32 @@ function snapshot(input: Partial<ChatSnapshot> = {}): ChatSnapshot {
     status: 'idle',
     mode: 'chat',
     messages: [],
+    ...input,
+  };
+}
+
+function accountingSnapshot(
+  input: Partial<ContextAccountingSnapshot> = {},
+): ContextAccountingSnapshot {
+  return {
+    version: 1,
+    conversationId: 'conversation-1',
+    contentRevision: 2,
+    modelKey: 'provider-a::model-a',
+    revision: 3,
+    phase: 'turn_complete',
+    compactionEpoch: 0,
+    contextWindow: 500_000,
+    inputBudget: 491_808,
+    compactionThresholdTokens: 401_408,
+    authoritativeInputTokens: 42_500,
+    percent: 8.5,
+    pressureSource: 'provider_usage',
+    pendingUncountedChanges: false,
+    pendingContentChars: 0,
+    countCapability: { kind: 'observed_usage_only' },
+    counterStatus: 'active',
+    updatedAt: 123,
     ...input,
   };
 }
@@ -101,9 +131,59 @@ describe('TUI conversation persistence', () => {
     });
     expect(recorder.calls.find((call) => call.method === 'updateModelEffort')?.args[1]).toEqual({
       effort: 'high',
-      modelProviderId: 'provider-a::model-a',
+      modelProviderId: 'provider-a',
       model: 'model-a',
     });
+  });
+
+  test('writes scoped TUI turns through the shared lifetime and ledger transaction', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'peer-tui-usage-scope-'));
+    const usageLogFile = path.join(dir, 'usage', 'requests.jsonl');
+    try {
+      const store = createConversationStore({
+        storeDir: path.join(dir, 'conversations'),
+        usageLogFile,
+      });
+      const persistence = createTuiConversationPersistence({
+        workspacePath: '/workspace',
+        initialMode: 'chat',
+        initialModel: selection,
+        now: () => 123,
+        store: store as never,
+      });
+
+      persistence.syncSnapshot(snapshot({
+        messages: [
+          { id: 'user-scoped', role: 'user', content: 'hello' },
+          { id: 'assistant-scoped', role: 'assistant', content: 'done' },
+        ],
+        usage: {
+          usageScope: 'runtime_turn',
+          providerRequestCount: 2,
+          inputTokens: 70,
+          outputTokens: 5,
+          cacheReadTokens: 10,
+          cacheWriteTokens: 0,
+          totalTokens: 85,
+        },
+      } as Partial<ChatSnapshot>));
+
+      const id = persistence.getConversationId();
+      expect(id).toBeDefined();
+      if (!id) throw new Error('Expected persisted conversation id.');
+      expect(store.getConversation(id)?.lifetimeUsage).toEqual({
+        inputTokens: 70,
+        outputTokens: 5,
+        cacheReadTokens: 10,
+        cacheWriteTokens: 0,
+      });
+      const ledger = JSON.parse(readFileSync(usageLogFile, 'utf8').trim());
+      expect(ledger.usageScope).toBe('runtime_turn');
+      expect(ledger.providerRequestCount).toBe(2);
+      expect(ledger.totalTokens).toBe(85);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('forwards only external changes for the active CLI conversation', () => {
@@ -138,7 +218,7 @@ describe('TUI conversation persistence', () => {
     expect(changeListener).toBeUndefined();
   });
 
-  test('persists the CLI final-request projection for the shared conversation', () => {
+  test('persists the shared context accounting snapshot verbatim', () => {
     const recorder = createStoreRecorder();
     const persistence = createTuiConversationPersistence({
       workspacePath: '/workspace',
@@ -155,24 +235,14 @@ describe('TUI conversation persistence', () => {
         { id: 'assistant-projection', role: 'assistant', content: 'continued' },
       ],
       usage: { inputTokens: 200, outputTokens: 20, totalTokens: 220 },
-      requestProjection: {
-        nextRequestInputTokens: 42_500,
-        contextWindow: 500_000,
-        model: 'model-a',
-      },
+      contextAccounting: accountingSnapshot(),
     });
 
     const conversationId = persistence.getConversationId();
     expect(conversationId).toBeDefined();
     expect(recorder.calls.find((call) => call.method === 'updateContextSnapshot')).toEqual({
       method: 'updateContextSnapshot',
-      args: [conversationId, {
-        nextRequestInputTokens: 42_500,
-        contextWindow: 500_000,
-        modelProviderId: 'provider-a::model-a',
-        model: 'model-a',
-        source: 'tui',
-      }],
+      args: [conversationId, accountingSnapshot()],
     });
   });
 
@@ -323,9 +393,24 @@ describe('TUI conversation persistence', () => {
       model: 'model-b',
       effort: 'low',
       contextSnapshot: {
-        nextRequestInputTokens: 39_000,
+        version: 1 as const,
+        conversationId: 'stored-1',
+        contentRevision: 2,
+        modelKey: 'provider-b::model-b',
+        revision: 3,
+        phase: 'turn_complete' as const,
+        compactionEpoch: 0,
         contextWindow: 500_000,
-        model: 'model-b',
+        inputBudget: 500_000,
+        compactionThresholdTokens: 400_000,
+        authoritativeInputTokens: 39_000,
+        percent: 8,
+        pressureSource: 'provider_usage' as const,
+        pendingUncountedChanges: true,
+        pendingContentChars: 0,
+        countCapability: { kind: 'observed_usage_only' as const },
+        counterStatus: 'active' as const,
+        updatedAt: 1,
       },
       messages: [
         { id: 'old-user', role: 'user', content: 'remember this' },
@@ -373,21 +458,12 @@ describe('TUI conversation persistence', () => {
         { role: 'assistant', content: 'remembered' },
       ],
       modelSelection: { providerId: 'provider-b', modelId: 'model-b', reasoningEffort: 'low' },
-      usage: { inputTokens: 27, totalTokens: 27 },
-      contextSnapshot: {
-        nextRequestInputTokens: 39_000,
-        contextWindow: 500_000,
-        model: 'model-b',
-      },
+      contextSnapshot: stored.contextSnapshot,
     });
     const controller = createChatController({ host: inertHost(), model: createDemoChatModel() });
     expect(resumeTuiConversation(controller, persistence, restored!)).toBe(true);
-    expect(controller.getSnapshot().requestProjection).toEqual({
-      nextRequestInputTokens: 39_000,
-      contextWindow: 500_000,
-      model: 'model-b',
-    });
-    expect(controller.getSnapshot().nextRequestInputTokens).toBe(39_000);
+    expect(controller.getSnapshot().contextAccounting).toEqual(stored.contextSnapshot);
+    expect(controller.getSnapshot().contextAccounting?.authoritativeInputTokens).toBe(39_000);
     persistence.syncSnapshot(snapshot({
       mode: 'goal',
       messages: [
@@ -401,6 +477,105 @@ describe('TUI conversation persistence', () => {
       method: 'appendMessage',
       args: ['stored-1', { id: 'new-user', role: 'user', content: 'continue', timestamp: 456 }],
     }]);
+  });
+
+  test('rejects a legacy context snapshot without the canonical projector version', () => {
+    const stored = {
+      id: 'legacy-projection',
+      mode: 'chat',
+      model: 'model-a',
+      contextSnapshot: {
+        nextRequestInputTokens: 210_000,
+        contextWindow: 500_000,
+        model: 'model-a',
+      },
+      messages: [
+        { id: 'legacy-user', role: 'user', content: 'resume me' },
+        { id: 'legacy-assistant', role: 'assistant', content: 'ready' },
+      ],
+    };
+    const persistence = createTuiConversationPersistence({
+      workspacePath: '/workspace',
+      initialMode: 'chat',
+      initialModel: selection,
+      store: {
+        listConversations: () => [stored],
+        getConversation: (id: string) => id === stored.id ? stored : null,
+        createConversation: () => ({ id: 'unused' }),
+        appendMessage() {},
+        updateMode() {},
+        updateModelEffort() {},
+        addUsage() {},
+      },
+    });
+
+    const restored = persistence.loadConversation(stored.id);
+
+    expect(restored).not.toBeNull();
+    expect(restored?.contextSnapshot).toBeUndefined();
+    expect(restored?.modelMessages).toEqual([
+      { role: 'user', content: 'resume me' },
+      { role: 'assistant', content: 'ready' },
+    ]);
+  });
+
+  test('restores provider-request context observation without reading runtime-turn billing', () => {
+    const stored = {
+      id: 'observed-restore',
+      mode: 'chat',
+      modelProviderId: 'provider-b',
+      model: 'grok-4.5',
+      effort: 'high',
+      contentRevision: 2,
+      contextSnapshot: null,
+      messages: [
+        { id: 'user-1', role: 'user', content: 'hello' },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: 'world',
+        },
+      ],
+    };
+    const persistence = createTuiConversationPersistence({
+      workspacePath: '/workspace',
+      initialMode: 'chat',
+      initialModel: selection,
+      getContextWindow: () => 500_000,
+      now: () => 456,
+      store: {
+        listConversations: () => [stored],
+        getConversation: (id: string) => id === stored.id ? stored : null,
+        createConversation: () => ({ id: 'unused' }),
+        appendMessage() {},
+        updateMode() {},
+        updateModelEffort() {},
+        addUsage() {},
+        getLatestContextObservation() {
+          return {
+            inputTokens: 45_000,
+            requestFingerprint: 'request-final',
+            compactionEpoch: 0,
+            source: 'provider_usage' as const,
+            observedAt: 123,
+          };
+        },
+      },
+    });
+
+    const restored = persistence.loadConversation(stored.id);
+
+    expect(restored?.modelSelection).toEqual({
+      providerId: 'provider-b',
+      modelId: 'grok-4.5',
+      reasoningEffort: 'high',
+    });
+    expect(restored?.contextSnapshot?.authoritativeInputTokens).toBe(45_000);
+    expect(restored?.contextSnapshot?.percent).toBe(9);
+    expect(restored?.contextSnapshot?.pressureSource).toBe('provider_usage');
+    expect(restored?.contextSnapshot?.pendingUncountedChanges).toBe(true);
+    expect(restored?.contextSnapshot?.lastObserved?.requestFingerprint).toBe('request-final');
+    expect(restored?.contextSnapshot?.lastObserved?.observedAt).toBe(123);
   });
 
   test('loads the complete Desktop transcript but resumes only after the latest compaction marker', () => {
@@ -474,12 +649,13 @@ describe('TUI conversation persistence', () => {
     expect(restored?.continuityContext).toBe('remember the durable decision');
     expect(restored?.modelMessages).toEqual([
       { role: 'user', content: 'use the tool' },
+      { role: 'assistant', content: 'done' },
       {
         role: 'assistant',
-        content: 'done',
+        content: null,
         toolCalls: [{ id: 'call-1', name: 'lookup', arguments: '{"key":"value"}' }],
       },
-      { role: 'tool', content: 'tool output', toolCallId: 'call-1' },
+      { role: 'tool', content: 'tool output', toolCallId: 'call-1', name: 'lookup' },
     ]);
     expect(JSON.stringify(restored?.modelMessages)).not.toContain('old secret context');
   });
@@ -535,13 +711,23 @@ describe('TUI conversation persistence', () => {
     unsubscribe();
   });
 
-  test('estimates restored context for legacy conversations without per-message usage', () => {
+  test('keeps restored tool-heavy context unknown when provider authority is unavailable', () => {
     const stored = {
       id: 'legacy-context',
       mode: 'chat',
       messages: [
-        { id: 'legacy-user', role: 'user', content: '请继续分析这个历史会话' },
-        { id: 'legacy-assistant', role: 'assistant', content: 'Existing context in English.' },
+        { id: 'legacy-user', role: 'user', content: 'continue' },
+        {
+          id: 'legacy-assistant',
+          role: 'assistant',
+          content: 'done',
+          segments: [{
+            type: 'tool-call',
+            tool: 'bash',
+            args: { command: 'inspect' },
+            result: 'tool evidence '.repeat(4_000),
+          }],
+        },
       ],
     };
     const persistence = createTuiConversationPersistence({
@@ -560,9 +746,14 @@ describe('TUI conversation persistence', () => {
     });
 
     const restored = persistence.loadConversation(stored.id);
+    const controller = createChatController({ host: inertHost(), model: createDemoChatModel() });
 
     expect(restored).not.toBeNull();
-    expect(restored?.usage).toEqual({ inputTokens: 34, totalTokens: 34 });
+    expect(restored?.usage).toBeUndefined();
+    if (!restored?.modelMessages) throw new Error('canonical history was not restored');
+    expect(resumeTuiConversation(controller, persistence, restored)).toBe(true);
+    expect(controller.getSnapshot().contextAccounting).toBeUndefined();
+    expect(controller.getSnapshot().contextAccounting).toBeUndefined();
   });
 
   test('filters the active conversation and ignores missing or corrupt stored sessions', () => {
@@ -1021,6 +1212,7 @@ describe('TUI conversation persistence', () => {
           content: 'Compacted 6 → 4 messages (summarized 2)',
           compact: {
             phase: 'done',
+            method: 'structured',
             beforeCount: 6,
             afterCount: 4,
             summarizedCount: 2,
@@ -1052,7 +1244,7 @@ describe('TUI conversation persistence', () => {
       content: 'Earlier conversation (compacted)',
       timestamp: 456,
       _compaction: {
-        method: 'structural',
+        method: 'structured',
         originalMessageCount: 6,
         previousMessageCount: 0,
         deltaMessageCount: 2,

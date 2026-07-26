@@ -3,18 +3,17 @@ import {
   shouldUsePublicOpenAIChatStream,
 } from '../provider-adapters/openai-chat-adapter.mjs';
 import { sendOpenAIResponsesStream } from '../provider-adapters/openai-responses-adapter.mjs';
+import { contextAccountingModelKey } from '@peer-agent/protocol';
 import {
   createAgentLoopKernel,
   handleTerminalTextResponse,
 } from './agent-loop-kernel.mjs';
 import {
-  applyMicrocompaction,
   buildCompactionProviderConfig,
   buildPromptTooLongRecoveryError,
-  computeContextInfo,
   isPromptTooLongResponse,
-  runCompactionCheck,
 } from './compaction-coordinator.mjs';
+import { executeDesktopProviderRequest } from './provider-request-coordinator.mjs';
 import { sanitizeApiMessages } from './message-sanitizer.mjs';
 import * as responseGuard from './response-guard.mjs';
 import {
@@ -60,6 +59,8 @@ export async function agentLoopOpenAI({
   runtimeEventState = undefined,
   providerId = null,
   runtimeMode = 'chat',
+  accountingIdentity = null,
+  initialContextAccounting = null,
 }) {
   let effectiveSystemPrompt = systemPrompt;
   // 按鉴权方式选择 OpenAI 协议族的传输 adapter,保持循环逻辑统一。
@@ -68,23 +69,20 @@ export async function agentLoopOpenAI({
     ? (args) => sendOpenAIResponsesStream({ ...args, accountId, omitMaxOutputTokens: authMethod === 'oauth_chatgpt' })
     : sendOpenAIChatStream;
   let apiMessages = sanitizeApiMessages([{ role: 'system', content: effectiveSystemPrompt }, ...messages]);
-  // 最后一轮「实际发送切片」（微压缩+清洗后真正发给 provider 的消息，已含 system）。供
-  // getContextInfo 实际发送量在 provider usage 缺失时回退估算之用；不参与压缩触发判定。
-  let lastSentMessages = null;
   const loop = createAgentLoopKernel({
     webContents,
     streamId,
+    conversationId,
     onRound: agentProgress?.onRound,
-    // 触发口径按「当前 Runtime apiMessages」（已含 system）判定；实际发送量优先采用 kernel
-    // 传入的 provider 真实 usage 快照（最后一轮 input+cacheRead），
-    // 其次回退到对「最后一轮实际发送切片」的估算，最后回退完整会话估算。
-    getContextInfo: ({ usageSnapshot = null } = {}) => computeContextInfo({
-      messages: apiMessages,
-      contextWindow,
-      tools,
-      displayMessages: lastSentMessages,
-      usageSnapshot,
-    }),
+    emitRuntimeEvent,
+    accountingIdentity: accountingIdentity ?? {
+      conversationId: conversationId || streamId,
+      contentRevision: 0,
+      modelKey: contextAccountingModelKey(providerId, model),
+    },
+    initialContextAccounting,
+    contextWindow,
+    countCapability: { kind: 'observed_usage_only' },
   });
   const providerConfig = buildCompactionProviderConfig({
     provider: 'openai',
@@ -97,7 +95,6 @@ export async function agentLoopOpenAI({
     authMethod,
   });
   let effectiveSupportsReasoning = Boolean(resolvedChannel?.supportsReasoning ?? supportsReasoning);
-  let promptTooLongRetryUsed = false;
 
   await runDesktopRuntimePipeline({
     sessionId: conversationId || streamId,
@@ -110,95 +107,76 @@ export async function agentLoopOpenAI({
     signal,
     emitRuntimeEvent,
     eventState: runtimeEventState,
+    lifecycle: {
+      toolResultsApplied: () => loop.publishToolResultProjection(),
+    },
     model: {
       initialize: () => ({ provider: 'openai' }),
       runTurn: async (state) => {
-        // 自动 preflight 压缩：触发判定按完整 apiMessages 估算；切分时保留最新真人 user turn，
-        // 避免用户刚发送的原文被 compaction summary 代替。
-        const compaction = await runCompactionCheck({
-          messages: apiMessages,
-          systemPrompt: effectiveSystemPrompt,
-          contextWindow,
-          providerConfig,
-          signal,
-          persistCompaction,
-          conversationId,
-          streamId,
-          webContents,
-          continuityContext,
-          tools,
-          preserveLatestUserTurn: true,
-          // 对齐进度条：上一轮真实 usage 高水位也参与 soft 触发。
-          usageSnapshot: loop.getLastTurnUsage?.() ?? null,
-          rebuildSystemPrompt,
+        const execution = await executeDesktopProviderRequest({
+          request: {
+            messages: apiMessages,
+            systemPrompt: effectiveSystemPrompt,
+            contextWindow,
+            providerConfig,
+            signal,
+            persistCompaction,
+            conversationId,
+            streamId,
+            webContents,
+            continuityContext,
+            tools,
+            preserveLatestUserTurn: true,
+            runtimeUsageAccounting: loop.usageAccounting,
+            onProviderRequest: ({ usage, requestFingerprint }) => {
+              loop.addUsage(usage, { requestFingerprint });
+            },
+            rebuildSystemPrompt,
+            accountingIdentity: accountingIdentity ?? {
+              conversationId: conversationId || streamId,
+              contentRevision: 0,
+              modelKey: contextAccountingModelKey(providerId, model),
+            },
+            initialContextAccounting: loop.getContextAccounting(),
+            countCapability: { kind: 'observed_usage_only' },
+            onContextAccounting: loop.acceptContextAccounting,
+          },
+          buildCanonicalRequest: ({ messages: projectedMessages }) => ({
+            model,
+            messages: sanitizeApiMessages(projectedMessages),
+            tools,
+            effort,
+          }),
+          send: (canonicalRequest) => sendStream({
+            baseUrl,
+            apiKey,
+            endpoint: resolvedChannel?.endpoint,
+            headers: resolvedChannel?.headers,
+            ...canonicalRequest,
+            supportsReasoning: effectiveSupportsReasoning,
+            reasoningParamStyle: resolvedChannel?.reasoningParamStyle || 'openai-effort',
+            reasoningEffortMap: resolvedChannel?.reasoningEffortMap,
+            promptCaching: resolvedChannel?.supportsPromptCaching ?? supportsPromptCaching,
+            maxOutputTokens,
+            signal,
+            webContents: loop.providerWebContents,
+            streamId,
+            usePublicStreamConsumer: shouldUsePublicOpenAIChatStream(resolvedChannel, useResponses),
+          }),
         });
-        if (compaction.compacted || compaction.microcompacted) {
-          apiMessages = compaction.messages;
-          if (typeof compaction.systemPrompt === 'string' && compaction.systemPrompt.trim()) {
-            effectiveSystemPrompt = compaction.systemPrompt;
-          }
-          // 语义压缩或静默微压缩后，清掉陈旧 usage，避免压缩前高水位继续锁死显示/触发。
-          loop.clearLastTurnUsage?.();
+        apiMessages = execution.messages;
+        if (typeof execution.systemPrompt === 'string' && execution.systemPrompt.trim()) {
+          effectiveSystemPrompt = execution.systemPrompt;
         }
-
-        // Provider adapter 只接收实际发送切片；完整历史仍由 Desktop Model Adapter 持有。
-        const sendMessages = sanitizeApiMessages(applyMicrocompaction(apiMessages).messages);
-        lastSentMessages = sendMessages;
-        const providerResponse = await sendStream({
-          baseUrl,
-          apiKey,
-          endpoint: resolvedChannel?.endpoint,
-          headers: resolvedChannel?.headers,
-          model,
-          messages: sendMessages,
-          tools,
-          effort,
-          supportsReasoning: effectiveSupportsReasoning,
-          reasoningParamStyle: resolvedChannel?.reasoningParamStyle || 'openai-effort',
-          reasoningEffortMap: resolvedChannel?.reasoningEffortMap,
-          promptCaching: resolvedChannel?.supportsPromptCaching ?? supportsPromptCaching,
-          maxOutputTokens,
-          signal,
-          webContents,
-          streamId,
-          usePublicStreamConsumer: shouldUsePublicOpenAIChatStream(resolvedChannel, useResponses),
-        });
+        const providerResponse = execution.response;
 
         if (!providerResponse.ok) {
           const text = providerResponse.errorText || '';
-          const promptTooLong = isPromptTooLongResponse(providerResponse.status, text);
-          if (promptTooLong && !promptTooLongRetryUsed) {
-            const emergencyCompaction = await runCompactionCheck({
-              messages: apiMessages,
-              systemPrompt: effectiveSystemPrompt,
-              contextWindow,
-              providerConfig,
-              signal,
-              persistCompaction,
-              conversationId,
-              streamId,
-              webContents,
-              emergency: true,
-              force: true,
-              continuityContext,
-              tools,
-              preserveLatestUserTurn: true,
-              rebuildSystemPrompt,
-        });
-            if (emergencyCompaction.compacted) {
-              apiMessages = emergencyCompaction.messages;
-              if (typeof emergencyCompaction.systemPrompt === 'string' && emergencyCompaction.systemPrompt.trim()) {
-                effectiveSystemPrompt = emergencyCompaction.systemPrompt;
-              }
-              promptTooLongRetryUsed = true;
-              return { kind: 'continue', state };
-            }
-          }
-          if (promptTooLong) {
+          if (isPromptTooLongResponse(providerResponse.status, text)) {
             loop.sendError(buildPromptTooLongRecoveryError({
               text,
               providerTracePath: providerResponse.providerTracePath,
-              retryUsed: promptTooLongRetryUsed,
+              retryUsed: execution.retriedAfterOverflow,
             }));
           } else if (providerResponse.providerError) {
             loop.sendError(`${text}${providerResponse.providerTracePath ? ` provider_trace=${providerResponse.providerTracePath}` : ''}`);
@@ -207,10 +185,8 @@ export async function agentLoopOpenAI({
           }
           return { kind: 'completed', state, reason: 'provider_error' };
         }
-        promptTooLongRetryUsed = false;
 
-        const { content, thinkingContent, toolCalls, streamUsage } = providerResponse;
-        loop.addUsage(streamUsage);
+        const { content, thinkingContent, toolCalls } = providerResponse;
         if (!toolCalls.length) {
           if (
             effectiveSupportsReasoning &&
@@ -290,11 +266,9 @@ export async function agentLoopOpenAI({
           goalPlanStore,
         });
         if (toolExecution.aborted) throw createDesktopAbortError();
-        // goal_create_plan / request_user_input 等 terminal 工具：立即 sendDone，
-        // 不依赖后续 pipeline onStopped 时序，避免 UI 卡在「正在思考」。
-        if (toolExecution.controlSignal?.terminal) {
-          try { loop.sendDone(); } catch {}
-        }
+        // terminal 工具（goal_create_plan / request_user_input 等）不得在这里 sendDone：
+        // 必须先走 applyToolResults 写入 tool result，再由 pipeline onStopped 统一收尾，
+        // 否则 done 快照会丢掉本轮 tool result，右下角占用会卡在发送前 seed。
         return {
           call,
           result: toolExecution,

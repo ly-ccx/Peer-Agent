@@ -2,10 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import type { ModelMessage } from '@peer-agent/runtime-node';
 
 import {
+  buildHandoffContent,
   buildStructuralSummary,
-  compactModelMessagesStructurally,
+  formatCompactMethodLabel,
   TUI_COMPACT_KEEP_RECENT,
 } from './context-compact.ts';
+
+// 切分算法已统一到 runtime-core splitMessagesForCompaction(见 23 号治理文档);
+// 本文件只覆盖 TUI 保留的结构化摘要与 handoff 文本生成。
 
 function user(content: string): ModelMessage {
   return { role: 'user', content };
@@ -36,79 +40,33 @@ describe('context-compact structural summary', () => {
     expect(summary).toContain('Tool result');
   });
 
-  test('compacts older messages into one handoff and keeps recent window', () => {
-    const messages: ModelMessage[] = [
-      { role: 'system', content: 'system prompt' },
-      ...Array.from({ length: 12 }, (_, index) => [
-        user(`user-${index}`),
-        assistant(`assistant-${index}`),
-      ]).flat(),
-    ];
-
-    const result = compactModelMessagesStructurally(messages, { keepRecentCount: 4 });
-    expect(result.compacted).toBe(true);
-    expect(result.summarizedCount).toBe(20);
-    expect(result.messages[0]).toEqual({ role: 'system', content: 'system prompt' });
-    expect(result.messages[1]?.role).toBe('user');
-    expect(String(result.messages[1]?.content)).toContain('Context handoff');
-    expect(result.messages.slice(-4)).toEqual(messages.slice(-4));
-    expect(result.afterCount).toBe(1 + 1 + 4);
-  });
-
-  test('no-ops when history is already within keep window', () => {
-    const messages = [user('a'), assistant('b')];
-    const result = compactModelMessagesStructurally(messages);
-    expect(result).toMatchObject({
-      compacted: false,
-      reason: 'nothing-to-compact',
-      beforeCount: 2,
-      afterCount: 2,
-    });
-    expect(result.messages).toBe(messages);
-  });
-
-  test('starts the retained suffix at a complete user turn', () => {
-    const messages = [
-      user('old request'),
-      assistant('old answer'),
-      user('tool request'),
-      assistant('', [{ id: 'call-1', name: 'lookup', arguments: '{}' }]),
-      { role: 'tool', toolCallId: 'call-1', content: 'tool result' } satisfies ModelMessage,
-      assistant('tool answer'),
-      user('recent request'),
-      assistant('recent answer'),
-    ];
-
-    const result = compactModelMessagesStructurally(messages, { keepRecentCount: 4 });
-
-    expect(result.compacted).toBe(true);
-    expect(result.retainedUserCount).toBe(2);
-    expect(result.messages.slice(1).map((message) => message.role)).toEqual([
-      'user',
-      'assistant',
-      'tool',
-      'assistant',
-      'user',
-      'assistant',
+  test('records a trailing user message without an assistant reply', () => {
+    const summary = buildStructuralSummary([
+      user('answered request'),
+      assistant('answer'),
+      user('pending request'),
     ]);
+
+    expect(summary).toContain('**User**: pending request');
+    expect(summary).toContain('(no reply yet in compacted span)');
   });
 
-  test('carries the previous compacted context into the next cumulative summary', () => {
-    const messages = Array.from({ length: 12 }, (_, index) => (
-      index % 2 === 0 ? user(`request ${index}`) : assistant(`answer ${index}`)
-    ));
+  test('handoff content carries the shared marker framing and summary body', () => {
+    const handoff = buildHandoffContent('## Structural body', 42);
 
-    const result = compactModelMessagesStructurally(messages, {
-      keepRecentCount: 4,
-      previousContinuity: 'prior compacted decision',
-    });
-
-    expect(result.summary).toContain('prior compacted decision');
-    expect(result.summary).toContain('Newly compacted context');
-    expect(result.handoffContent).toContain('prior compacted decision');
+    expect(handoff).toContain('[Context handoff — compacted 42 messages]');
+    expect(handoff).toContain('Do not redo completed work.');
+    expect(handoff).toContain('## Structural body');
   });
 
   test('uses default keep-recent window size', () => {
     expect(TUI_COMPACT_KEEP_RECENT).toBe(8);
+  });
+
+  test('formatCompactMethodLabel maps cascade methods for UI', () => {
+    expect(formatCompactMethodLabel('llm')).toBe('LLM');
+    expect(formatCompactMethodLabel('structured')).toBe('Structural');
+    expect(formatCompactMethodLabel('fallback_drop')).toBe('Fallback');
+    expect(formatCompactMethodLabel(undefined)).toBe('Unknown');
   });
 });

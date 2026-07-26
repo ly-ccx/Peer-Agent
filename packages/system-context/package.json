@@ -1,0 +1,27 @@
+{
+  "name": "@peer-agent/system-context",
+  "version": "0.0.1-beta.41",
+  "description": "Canonical Node System Context assembler and Prompt Sources shared by Peer Agent hosts.",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node --check src/index.mjs",
+    "test": "node --test src/*.test.mjs",
+    "typecheck": "node --check src/index.mjs"
+  }
+}

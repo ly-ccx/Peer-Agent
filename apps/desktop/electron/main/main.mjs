@@ -50,7 +50,19 @@ import { listQoderModels } from './provider-adapters/qoder-model-catalog.mjs';
 import { createHostRestarter } from './host-restart.mjs';
 import { resolveDockIconPaths } from './dock-icon-paths.mjs';
 import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
-import { createLlmChatService } from './llm-chat-service.mjs';
+import { buildRuntimeTools, createLlmChatService } from './llm-chat-service.mjs';
+import { removeConversationToolArtifacts } from '@peer-agent/runtime-node';
+import {
+  createContextAccountingCompactionPipeline,
+  createRestoredObservedContextAccountingSnapshot,
+  createUnknownContextAccountingSnapshot,
+  projectConversationHistory,
+} from '@peer-agent/runtime-core';
+import { contextAccountingModelKey } from '@peer-agent/protocol';
+import {
+  countAnthropicCanonicalRequest,
+  countGeminiCanonicalRequest,
+} from './provider-adapters/context-count-adapter.mjs';
 import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
 import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
@@ -78,13 +90,9 @@ import {
   buildPersistedCompactedMessages,
   persistCompactedConversation,
 } from './conversation-compaction-persistence.mjs';
-import { compactIfNeeded, estimateTokensFromMessages } from './context-compactor.mjs';
-import {
-  beginCompaction,
-  endCompaction,
-  updateCompactionProgress,
-  getCompaction,
-} from './chat-runtime/compaction-registry.mjs';
+import { runCompactionCheck } from './chat-runtime/compaction-coordinator.mjs';
+import { applyMicrocompaction } from './chat-runtime/compaction-coordinator.mjs';
+import { getCompaction } from './chat-runtime/compaction-registry.mjs';
 import { resolveProviderCredential, refreshExpiredOAuthProviders } from './provider-credential-resolver.mjs';
 import {
   initAutoUpdater,
@@ -345,7 +353,6 @@ function persistCompactionToConversation({
   compactResult,
   preservePendingAssistant = false,
   sourceMessages = null,
-  requestProjection = null,
 }) {
   const conv = conversationStore.getConversation(conversationId);
   if (!conv) return null;
@@ -362,7 +369,6 @@ function persistCompactionToConversation({
     store: conversationStore,
     conversationId,
     messages: compactedMessages,
-    requestProjection,
   });
 }
 
@@ -379,18 +385,16 @@ function continuityContextFromCompactionResult(result) {
   }];
 }
 
-function continuityContextFromMessages(messages = []) {
-  const index = messages.findLastIndex((message) => message?._compaction);
-  if (index < 0) return [];
-  const message = messages[index];
-  const handoff = message._compaction;
+function desktopContinuityContextFromProjection(projection) {
+  const handoff = projection?.continuity;
+  if (!handoff) return [];
   return [{
-    id: `conversation-compact:${message.id || index}`,
-    method: handoff.method || 'unknown',
-    originalMessageCount: handoff.originalMessageCount ?? 0,
-    beforeTokens: handoff.beforeTokens ?? 0,
-    afterTokens: handoff.afterTokens ?? 0,
-    summary: handoff.summary || message.content || '',
+    id: `conversation-compact:${handoff.sourceMessageId}`,
+    method: handoff.method,
+    originalMessageCount: handoff.originalMessageCount,
+    beforeTokens: handoff.beforeTokens,
+    afterTokens: handoff.afterTokens,
+    summary: handoff.summary,
   }];
 }
 
@@ -482,23 +486,25 @@ function getRunnerWebContents() {
   return getMainWindowWebContents(BrowserWindow.getAllWindows());
 }
 
-function toRuntimeMessages(messages = []) {
-  const list = Array.isArray(messages) ? messages : [];
-  // 口径分离（ADR 42）：按最后一条 _compaction 边界切片，只保留压缩点之后的尾部原文，
-  // 丢弃压缩点之前的原文（那部分仅供 UI 回看，摘要经 continuityContext 注入 system）。
-  // 与对话模式发送口径（renderer apiMessageMapping.ts 的 lastCompactionIndex+slice）对齐，
-  // 避免目标模式每 tick 把压缩前全量历史重复喂回、上下文停在高位并触发重复压缩。
-  let lastCompactionIndex = -1;
-  for (let i = 0; i < list.length; i += 1) {
-    if (list[i]?._compaction) lastCompactionIndex = i;
-  }
-  const active = lastCompactionIndex >= 0 ? list.slice(lastCompactionIndex + 1) : list;
-  return active
-    .filter((message) => message && (message.role === 'user' || message.role === 'assistant'))
-    .map((message) => ({
-      role: message.role,
-      content: typeof message.content === 'string' ? message.content : '',
-    }));
+function toDesktopProviderMessages(messages = []) {
+  return messages.map((message) => ({
+    role: message.role,
+    content: message.content,
+    ...(Array.isArray(message.toolCalls) && message.toolCalls.length > 0
+      ? {
+        tool_calls: message.toolCalls.map((call) => ({
+          id: call.id,
+          type: 'function',
+          function: {
+            name: call.name,
+            arguments: call.arguments,
+          },
+        })),
+      }
+      : {}),
+    ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+    ...(message.name ? { name: message.name } : {}),
+  }));
 }
 
 function buildGoalRunnerMessage(plan, turnNumber) {
@@ -826,14 +832,12 @@ goalRunner = createGoalRunner({
         startedAt,
       }));
       
+      const canonicalHistory = projectConversationHistory(conversation.messages);
       const messages = [
-        ...toRuntimeMessages(conversation.messages),
+        ...toDesktopProviderMessages(canonicalHistory.messages),
         { role: 'user', content: buildGoalRunnerMessage(plan, turnNumber) },
       ];
-      // 口径分离（ADR 42）：toRuntimeMessages 已按 _compaction 边界切掉压缩点前原文，
-      // 这里把压缩摘要（handoff）经 continuityContext 注入 system，避免历史丢失。
-      // 与对话模式发送链路（main.mjs priorContinuityContext）同口径。
-      const goalContinuityContext = continuityContextFromMessages(conversation.messages);
+      const goalContinuityContext = desktopContinuityContextFromProjection(canonicalHistory);
       // Goal Runner 实时计数 sink：把「模型每轮」和「每次工具调用」即时写回 store。
       // setRunnerState 内部 persist→notifyChanged 会广播 goalRunner:changed，
       // 渲染层据此实时刷新底部「轮次 / 工具」数字（roundCount 为展示计数，与预算 turnCount 解耦）。
@@ -1892,6 +1896,12 @@ ipcMain.handle('conversations:delete', (_, { id }) => {
     // 级联清理失败不回滚会话删除，但显式告警以便排查（不要静默吞）。
     console.warn('[main] cascade deletePlanByConversation failed:', err);
   }
+  try {
+    // 工具结果材料化 artifact 随会话级联清理(17 号文档阶段 E / ADR 34 同口径)。
+    removeConversationToolArtifacts({ conversationId: id });
+  } catch (err) {
+    console.warn('[main] cascade removeConversationToolArtifacts failed:', err);
+  }
   return result;
 });
 // 累计计费账本:独立于消息/压缩,累加到 index meta 的 lifetimeUsage(见 ADR 23)。
@@ -2001,7 +2011,7 @@ function convergeIntakeAfterGoalTurn(conversationId, outcome) {
 }
 
 ipcMain.handle('chat:send', (event, {
-  messages,
+  messages: legacyMessages,
   streamId,
   effort,
   mode,
@@ -2016,6 +2026,20 @@ ipcMain.handle('chat:send', (event, {
   configInstructions,
   contextExtensions,
 }) => {
+  const persistedConversation = conversationId
+    ? conversationStore.getConversation(conversationId)
+    : null;
+  const persistedProjection = persistedConversation?.messages
+    ? projectConversationHistory(persistedConversation.messages)
+    : null;
+  const messages = persistedProjection
+    ? toDesktopProviderMessages(persistedProjection.messages)
+    : Array.isArray(legacyMessages)
+      ? legacyMessages
+      : [];
+  const resolvedContinuityContext = persistedConversation?.messages
+    ? desktopContinuityContextFromProjection(persistedProjection)
+    : continuityContext;
   if (mode === 'goal' && conversationId && typeof goalPlanStore.upsertGoalContract === 'function') {
     const goal = latestUserTextFromProviderMessages(messages);
     if (goal) {
@@ -2090,7 +2114,7 @@ ipcMain.handle('chat:send', (event, {
     contextAttachments,
     runtimeReminders,
     attachmentContext,
-    continuityContext,
+    continuityContext: resolvedContinuityContext,
     configInstructions,
     contextExtensions,
   });
@@ -2143,9 +2167,10 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     (m) => !(m.role === 'user' && typeof m.content === 'string' && m.content.trim() === '/compact'),
   );
   if (filteredMessages.length === 0) return { compacted: false };
-  const priorContinuityContext = continuityContextFromMessages(filteredMessages);
-  const activeMessages = filteredMessages.filter((m) => !m?._compaction);
-  if (activeMessages.length === 0) return { compacted: false };
+  const canonicalHistory = projectConversationHistory(filteredMessages);
+  const priorContinuityContext = desktopContinuityContextFromProjection(canonicalHistory);
+  const activeSourceMessages = filteredMessages.slice(canonicalHistory.compactionBoundaryIndex + 1);
+  if (canonicalHistory.messages.length === 0) return { compacted: false };
 
   const workspacePath = settingsStore.getAll().activeWorkspace || null;
 
@@ -2184,8 +2209,9 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
   }
 
   let providerConfig = null;
+  let resolvedChannel = null;
   if (provider && credential?.apiKey) {
-    const resolvedChannel = resolveChannel({
+    resolvedChannel = resolveChannel({
       ...provider,
       apiKey: credential.apiKey,
       accountId: credential.accountId,
@@ -2204,67 +2230,142 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
     };
   }
   const contextWindow = provider?.contextWindow || 0;
+  let tools = null;
+  try {
+    tools = buildRuntimeTools({
+      mcpRegistry,
+      providerType: provider?.provider === 'anthropic' ? 'anthropic' : 'openai',
+      mode: conv.mode || 'chat',
+    }).tools;
+  } catch (error) {
+    console.warn('[main] compact tool projection unavailable:', error?.message || error);
+  }
 
   const apiMessages = [
     { role: 'system', content: systemPrompt },
-    ...activeMessages.map((m) => ({ role: m.role, content: m.content })),
+    ...toDesktopProviderMessages(canonicalHistory.messages),
   ];
 
-  // 登记表与事件 emit 单一来源：先登记会话压缩态再 emit start，
-  // 使切会话查询（chat:compaction:get）能恢复手动 /compact 的横幅。
-  beginCompaction({ conversationId, streamId, manual: true });
-  event.sender.send('chat:compaction', { conversationId, streamId, stage: 'start', manual: true });
-  // 字符级真实进度：压缩器流式收摘要时逐 chunk 回调，转发为 progress 事件。
-  let lastSentPercent = -1;
-  const onProgress = ({ receivedChars, estimatedTotalChars }) => {
-    const total = estimatedTotalChars > 0 ? estimatedTotalChars : 1;
-    const percent = Math.min(99, Math.round((receivedChars / total) * 100));
-    // 节流：百分比无变化时不重复发，减少 IPC 噪声。
-    if (percent === lastSentPercent) return;
-    lastSentPercent = percent;
-    updateCompactionProgress({ conversationId, streamId, percent });
-    event.sender.send('chat:compaction', {
-      conversationId,
-      streamId,
-      stage: 'progress',
-      manual: true,
-      receivedChars,
-      estimatedTotalChars,
-      percent,
-    });
-  };
+  // 登记表/横幅/进度/持久化/完成事件全部收敛到 runCompactionCheck 单入口（manual 语义）：
+  // 手动 /compact = force 全量压缩 + 强制横幅；不再在 handler 内复制平行实现。
+  // 见 knowledge/architecture/23-compaction-path-root-governance.md（单闸门不变式）。
   try {
-    const result = await compactIfNeeded({
-      messages: apiMessages,
-      systemPrompt,
+    const exactAnthropic = resolvedChannel?.wire === 'anthropic-messages'
+      && Boolean(credential?.apiKey);
+    const exactGemini = resolvedChannel?.wire === 'gemini'
+      && credential?.authMethod === 'api_key'
+      && Boolean(credential?.apiKey);
+    let outcome = null;
+    const accountingPipeline = createContextAccountingCompactionPipeline({
+      identity: {
+        conversationId,
+        contentRevision: Number.isSafeInteger(conv.contentRevision)
+          ? conv.contentRevision + 1
+          : 1,
+        modelKey: contextAccountingModelKey(provider?.id, provider?.model),
+      },
       contextWindow,
-      providerConfig,
-      force: true,
-      continuityContext: priorContinuityContext,
-      onProgress,
-      webContents: event.sender,
-      streamId,
+      countCapability: exactAnthropic || exactGemini
+        ? { kind: 'provider_count_api' }
+        : { kind: 'observed_usage_only' },
+      initialSnapshot:
+        conv.contextSnapshot?.version === 1
+        && conv.contextSnapshot.modelKey === contextAccountingModelKey(provider?.id, provider?.model)
+          ? conv.contextSnapshot
+          : null,
+      buildRequest(state) {
+        if (exactAnthropic) {
+          const system = state.messages
+            .filter((message) => message.role === 'system')
+            .map((message) => message.content)
+            .join('\n\n');
+          return {
+            model: provider.model,
+            system,
+            messages: state.messages.filter((message) => message.role !== 'system'),
+            tools,
+            effort: conv.effort || 'default',
+            supportsReasoning: Boolean(provider.supportsReasoning),
+            promptCaching: Boolean(provider.supportsPromptCaching),
+            maxOutputTokens: provider.maxOutputTokens || 0,
+          };
+        }
+        return {
+          model: provider?.model || '',
+          messages: state.messages,
+          tools,
+          maxOutputTokens: provider?.maxOutputTokens || 0,
+        };
+      },
+      countRequest: exactAnthropic
+        ? (request) => countAnthropicCanonicalRequest({
+            baseUrl: provider.baseUrl,
+            apiKey: credential.apiKey,
+            headers: resolvedChannel?.headers,
+            ...request,
+          })
+        : exactGemini
+          ? (request) => countGeminiCanonicalRequest({
+              baseUrl: provider.baseUrl,
+              apiKey: credential.apiKey,
+              headers: resolvedChannel?.headers,
+              ...request,
+            })
+          : undefined,
+      async compact({ state }) {
+        outcome = await runCompactionCheck({
+          messages: state.messages,
+          systemPrompt,
+          contextWindow,
+          providerConfig,
+          // 手动路径的持久化需要用 Projector 分界后的 raw rows 作为源切片。
+          persistCompaction: (args) => persistCompactionToConversation({
+            ...args,
+            sourceMessages: activeSourceMessages,
+          }),
+          conversationId,
+          streamId,
+          webContents: event.sender,
+          force: true,
+          manual: true,
+          preserveLatestUserTurn: false,
+          continuityContext: priorContinuityContext,
+        });
+        return {
+          compacted: Boolean(outcome?.compacted),
+          state: {
+            messages: Array.isArray(outcome?.messages)
+              ? outcome.messages
+              : state.messages,
+          },
+        };
+      },
+      send: async () => {
+        throw new Error('manual_compact_must_not_send');
+      },
+      onSnapshot(snapshot) {
+        emitRuntimeEvent({
+          type: 'context.accounting',
+          sessionId: conversationId,
+          conversationId,
+          streamId,
+          snapshot,
+        });
+      },
     });
-
-    if (!result.compacted) {
-      endCompaction({ conversationId, streamId });
-      event.sender.send('chat:compaction', { conversationId, streamId, stage: 'idle', manual: true });
-      return { compacted: false };
+    const accountingResult = await accountingPipeline.execute({
+      state: { messages: apiMessages },
+      command: 'manual_compact',
+    });
+    if (accountingResult.snapshot.version === 1) {
+      conversationStore.updateContextSnapshot(
+        conversationId,
+        accountingResult.snapshot,
+      );
     }
+    if (!outcome?.compacted) return { compacted: false };
 
-    // 手动压缩不经过会话 runtime projection，当前无法重建当轮工具 schema；
-    // 但共享仓与完成事件仍必须复用同一份压缩后消息投影，避免两端再次分叉。
-    const requestProjection = {
-      nextRequestInputTokens: estimateTokensFromMessages(result.messages),
-      contextWindow: contextWindow > 0 ? contextWindow : null,
-    };
-    persistCompactionToConversation({
-      conversationId,
-      compactResult: result,
-      sourceMessages: activeMessages,
-      requestProjection,
-    });
-
+    const result = outcome.compactResult;
     try {
       const baselineContext = buildSystemContext(workspacePath, {
         conversationId,
@@ -2286,22 +2387,10 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
       console.warn('[main] failed to record compact baseline:', error?.message || error);
     }
 
-    // 无论是否有 notification，压缩已结束，先清登记表再 emit done，保证可查询真值收尾。
-    endCompaction({ conversationId, streamId });
-    const notification = result.notification
-      ? {
-          ...result.notification,
-          ...requestProjection,
-        }
-      : undefined;
-    if (notification) {
-      event.sender.send('chat:compaction', { conversationId, streamId, stage: 'done', manual: true, ...notification });
-    }
-
-    return { compacted: true, notification };
+    // done 事件已由 coordinator 统一发出（含 manual 标记与压缩后投影）；这里只回 IPC 结果。
+    return { compacted: true, notification: result.notification };
   } catch (error) {
-    endCompaction({ conversationId, streamId });
-    event.sender.send('chat:compaction', { conversationId, streamId, stage: 'idle', manual: true });
+    // 横幅收尾（idle）已由 coordinator 的 settleBannerIdle 处理，这里只上报错误。
     throw error;
   }
 });
@@ -2311,6 +2400,182 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
 // 压缩态真值落在主进程登记表，渲染层只负责表达，不再各自持有运行真值。
 ipcMain.handle('chat:compaction:get', (_event, { conversationId } = {}) =>
   getCompaction(conversationId));
+
+// ── restored 重投影(21 号文档 13.3 / 23 号治理文档 Phase 1.4)──
+// 会话打开时若持久化快照缺失/失效/来自其他宿主(source ≠ desktop),renderer 调此处
+// 按当前宿主的完整成分(全量 system context + 模式投影工具 schema + active 历史)重算投影,
+// 而不是用缺成分的本地估算兜底(那正是历史上 RC1 失准的根源)。
+// 重算成功后回写 contextSnapshot(source: desktop),下次打开直接命中。
+ipcMain.handle('chat:context:restored', async (
+  _event,
+  { conversationId, modelProviderId = null } = {},
+) => {
+  const conv = conversationStore.getConversation(conversationId);
+  if (!conv || !conv.messages?.length) return null;
+
+  // 同一会话存在两条真实请求路径、组成不同(ADR 42 口径分离):
+  // - 用户直接发送(chat send):renderer 富口径——segments 历史事实 + 附件;
+  // - Goal Runner tick:瘦口径——裸文本历史 + tick 指令,连续性走 system 摘要。
+  // restored 必须按「下一次实际会走哪条路」选口径,否则 goal 会话打开值与 tick 运行值
+  // 互相跳变(曾现象:idle 4% → tick 运行 2%,两个数各自都真,但口径不连续)。
+  const conversationPlans = typeof goalPlanStore?.listPlansByConversation === 'function'
+    ? goalPlanStore.listPlansByConversation(conversationId)
+    : [];
+  const runningPlan = conversationPlans.find((plan) => plan?.runner?.status === 'running') ?? null;
+  const canonicalHistory = projectConversationHistory(conv.messages);
+  const activeMessages = runningPlan
+    ? [
+        ...canonicalHistory.messages,
+        { role: 'user', content: buildGoalRunnerMessage(runningPlan, (runningPlan.runner?.roundCount ?? 0) + 1) },
+      ]
+    : canonicalHistory.messages;
+  if (activeMessages.length === 0) return null;
+  const continuityContext = desktopContinuityContextFromProjection(canonicalHistory);
+
+  const providers = llmConfigStore.listProviders().filter((p) => p.apiKeyConfigured);
+  const provider = (modelProviderId && providers.find((p) => p.id === modelProviderId))
+    || (conv.modelProviderId && providers.find((p) => p.id === conv.modelProviderId))
+    || providers.find((p) => p.isDefault)
+    || providers[0]
+    || null;
+  const workspacePath = conv.workspacePath || settingsStore.getAll().activeWorkspace || null;
+  const mode = typeof conv.mode === 'string' && conv.mode ? conv.mode : 'chat';
+
+  const systemContext = buildSystemContext(workspacePath, {
+    conversationId,
+    continuityContext,
+    mode,
+    provider: provider?.provider ?? null,
+    model: provider?.model ?? null,
+    // 与真实发送的 buildSystemContext 尽量同成分(goal-plan / mcp-host source 在
+    // goal 模式下占比最大);renderer 侧的 configInstructions/附件元数据为小头,缺失可接受。
+    goalPlanStore,
+    mcpRegistry,
+  });
+  const systemPrompt = renderSystemContext(systemContext);
+  let tools = null;
+  try {
+    tools = buildRuntimeTools({
+      mcpRegistry,
+      providerType: provider?.provider === 'anthropic' ? 'anthropic' : 'openai',
+      mode,
+    }).tools;
+  } catch (error) {
+    // 工具投影失败时仍可给出 system+messages 投影,但降级为部分成分;记录以便排查。
+    console.warn('[main] restored projection tools unavailable:', error?.message || error);
+  }
+
+  const projectedMessages = applyMicrocompaction(
+    [{ role: 'system', content: systemPrompt }, ...activeMessages],
+    { log: () => {} },
+  ).messages;
+  const identity = {
+    conversationId,
+    contentRevision: Number.isSafeInteger(conv.contentRevision)
+      ? conv.contentRevision
+      : 0,
+    modelKey: contextAccountingModelKey(provider?.id, provider?.model),
+  };
+  const resolvedChannel = provider ? resolveChannel(provider) : null;
+  let credential = null;
+  try {
+    credential = provider
+      ? await resolveProviderCredential({ provider, llmConfigStore })
+      : null;
+  } catch {
+    credential = null;
+  }
+  const exactAnthropic = resolvedChannel?.wire === 'anthropic-messages'
+    && Boolean(credential?.apiKey);
+  const exactGemini = resolvedChannel?.wire === 'gemini'
+    && credential?.authMethod === 'api_key'
+    && Boolean(credential?.apiKey);
+  const countCapability = exactAnthropic || exactGemini
+    ? { kind: 'provider_count_api' }
+    : { kind: 'observed_usage_only' };
+  let snapshot;
+  if (exactAnthropic || exactGemini) {
+    const canonicalRequest = exactAnthropic
+      ? {
+          model: provider.model,
+          system: systemPrompt,
+          messages: projectedMessages.filter((message) => message.role !== 'system'),
+          tools,
+          effort: conv.effort || 'default',
+          supportsReasoning: Boolean(provider.supportsReasoning),
+          promptCaching: Boolean(provider.supportsPromptCaching),
+          maxOutputTokens: provider.maxOutputTokens || 0,
+        }
+      : {
+          model: provider.model,
+          messages: projectedMessages,
+          tools,
+          maxOutputTokens: provider.maxOutputTokens || 0,
+        };
+    const pipeline = createContextAccountingCompactionPipeline({
+      identity,
+      contextWindow: provider.contextWindow || null,
+      countCapability,
+      initialSnapshot:
+        conv.contextSnapshot?.version === 1
+        && conv.contextSnapshot.modelKey === identity.modelKey
+          ? conv.contextSnapshot
+          : null,
+      buildRequest: () => canonicalRequest,
+      countRequest: exactAnthropic
+        ? (request) => countAnthropicCanonicalRequest({
+            baseUrl: provider.baseUrl,
+            apiKey: credential.apiKey,
+            headers: resolvedChannel?.headers,
+            ...request,
+          })
+        : (request) => countGeminiCanonicalRequest({
+            baseUrl: provider.baseUrl,
+            apiKey: credential.apiKey,
+            headers: resolvedChannel?.headers,
+            ...request,
+          }),
+      compact: ({ state }) => ({ compacted: false, state }),
+      send: async () => {
+        throw new Error('restored_count_only_must_not_send');
+      },
+    });
+    snapshot = (await pipeline.execute({
+      state: null,
+      command: 'count_only',
+    })).snapshot;
+  } else {
+    const restoredUsage = conversationStore.getLatestContextObservation?.(
+      conversationId,
+      { modelKey: identity.modelKey },
+    );
+    snapshot = restoredUsage
+      ? createRestoredObservedContextAccountingSnapshot({
+          identity,
+          contextWindow: provider?.contextWindow || null,
+          countCapability,
+          usage: restoredUsage,
+          revision: conv.contextSnapshot?.revision ?? 0,
+          compactionEpoch: restoredUsage.compactionEpoch,
+          pendingUncountedChanges: activeMessages.length > 0,
+        })
+      : createUnknownContextAccountingSnapshot({
+          identity,
+          contextWindow: provider?.contextWindow || null,
+          countCapability,
+          phase: 'restored',
+          revision: conv.contextSnapshot?.revision ?? 0,
+          compactionEpoch: conv.contextSnapshot?.compactionEpoch ?? 0,
+          pendingUncountedChanges: activeMessages.length > 0,
+        });
+  }
+  try {
+    conversationStore.updateContextSnapshot(conversationId, snapshot);
+  } catch (error) {
+    console.warn('[main] failed to persist restored projection:', error?.message || error);
+  }
+  return snapshot;
+});
 
 ipcMain.handle('prompt-snapshots:list', (_event, params = {}) =>
   promptSnapshotStore.list({ limit: params?.limit }));
@@ -2403,6 +2668,11 @@ ipcMain.handle('llm:update', (_, { id, ...patch }) => {
 });
 ipcMain.handle('llm:duplicate', (_, { id }) => {
   llmConfigStore.duplicateProvider(id);
+  return llmConfigStore.listProviders();
+});
+// 同渠道复制一条模型配置（模型参数克隆，凭证继承）。
+ipcMain.handle('llm:duplicate-model', (_, { id }) => {
+  llmConfigStore.duplicateModel(id);
   return llmConfigStore.listProviders();
 });
 // B-2 在已有 provider 组内新增一个模型:凭证继承自组内首条,无需重填 apiKey。

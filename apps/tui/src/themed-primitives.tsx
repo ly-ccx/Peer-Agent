@@ -22,16 +22,20 @@ export function ThemedText(props: TextProps) {
 /** Theme-controlled editable surface for the multiline composer. */
 export const ThemedTextarea = forwardRef<TextareaRenderable, TextareaProps>(
   function ThemedTextarea(props, ref) {
+    // Apply theme colors AFTER props so a live palette mutation always wins for
+    // semantic input chrome. Callers may still override via props, but those
+    // overrides must also be re-evaluated each render (no mount-only defaults).
     return (
       <textarea
         ref={ref}
-        backgroundColor={COLOR.inputBackground}
-        textColor={COLOR.inputForeground}
-        placeholderColor={COLOR.inputPlaceholder}
-        selectionBg={COLOR.inputSelectionBackground}
-        selectionFg={COLOR.inputSelectionForeground}
-        cursorColor={COLOR.inputCursor}
         {...props}
+        backgroundColor={props.backgroundColor ?? COLOR.inputBackground}
+        textColor={props.textColor ?? COLOR.inputForeground}
+        focusedTextColor={props.focusedTextColor ?? props.textColor ?? COLOR.inputForeground}
+        placeholderColor={props.placeholderColor ?? COLOR.inputPlaceholder}
+        selectionBg={props.selectionBg ?? COLOR.inputSelectionBackground}
+        selectionFg={props.selectionFg ?? COLOR.inputSelectionForeground}
+        cursorColor={props.cursorColor ?? COLOR.inputCursor}
       />
     );
   },

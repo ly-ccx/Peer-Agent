@@ -154,6 +154,8 @@ contextBridge.exposeInMainWorld('peerAgent', {
   chatStreamListActive: () => ipcRenderer.invoke('chat:stream:list-active'),
   chatCompact: (params) => ipcRenderer.invoke('chat:compact', params),
   chatCompactionGet: (params) => ipcRenderer.invoke('chat:compaction:get', params),
+  // restored 重投影:快照缺失/跨宿主时由 Runtime 按完整成分重算占用。
+  chatContextRestored: (params) => ipcRenderer.invoke('chat:context:restored', params),
   promptSnapshotsList: (params) => ipcRenderer.invoke('prompt-snapshots:list', params),
   promptSnapshotsGet: (params) => ipcRenderer.invoke('prompt-snapshots:get', params),
   promptContextEpochsList: (params) => ipcRenderer.invoke('prompt-context-epochs:list', params),
@@ -241,6 +243,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   llmAddProvider: (config) => ipcRenderer.invoke('llm:add', config),
   llmUpdateProvider: (params) => ipcRenderer.invoke('llm:update', params),
   llmDuplicateProvider: (params) => ipcRenderer.invoke('llm:duplicate', params),
+  llmDuplicateModel: (params) => ipcRenderer.invoke('llm:duplicate-model', params),
   llmAddModel: (params) => ipcRenderer.invoke('llm:add-model', params),
   llmRemoveProvider: (params) => ipcRenderer.invoke('llm:remove', params),
   llmRemoveGroup: (params) => ipcRenderer.invoke('llm:remove-group', params),

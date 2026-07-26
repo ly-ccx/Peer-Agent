@@ -1,3 +1,4 @@
+import { isPromptTooLongError } from '@peer-agent/runtime-core';
 import {
   COMPACTION_CONFIG,
   compactIfNeeded,
@@ -31,20 +32,10 @@ export function buildCompactionProviderConfig({
   };
 }
 
+// PTL 分类单一来源在 runtime-core isPromptTooLongError(双端同策略);
+// 保留旧名供 Desktop 既有调用方/测试使用。
 export function isPromptTooLongResponse(status, text) {
-  if (status === 413) return true;
-  const value = String(text || '').toLowerCase();
-  return (
-    value.includes('prompt_too_long') ||
-    value.includes('context_length_exceeded') ||
-    value.includes('maximum context length') ||
-    value.includes('context window') ||
-    value.includes('context too long') ||
-    value.includes('input is too long') ||
-    value.includes('exceeds model context') ||
-    value.includes('too many tokens') ||
-    value.includes('token limit')
-  );
+  return isPromptTooLongError(status, text);
 }
 
 export function buildPromptTooLongRecoveryError({ text = '', providerTracePath = null, retryUsed = false } = {}) {
@@ -81,12 +72,10 @@ function shouldShowCompactionStart(messages, budget) {
   return estimateTokensFromMessages(messages) > budget.contextWindow * budget.triggerRatio;
 }
 
-// 发送前预算守卫（方案 A 最小闭环）：soft 线沿用既有自动压缩触发线，hard 线
-// 是 provider 请求前的硬拦截线。方案 C 的完整 Context Budget Manager 会把这里抽象为
-// 跨 provider 的预算规划器；本轮只在 coordinator 内集中计算，避免扩大 adapter 改动面。
-export const CONTEXT_BUDGET_GUARD = Object.freeze({
-  hardRatio: 0.95,
-});
+// hard 线不再在 coordinator 另设常量:runtime-core CONTEXT_PROJECTION_CONFIG.hardRatio
+// 是唯一真值(经 COMPACTION_CONFIG 透传),保证 Desktop 预算拦截与 TUI/共享投影的
+// pressure 分级同一条 hard 线。历史上这里曾有独立 CONTEXT_BUDGET_GUARD(0.95),
+// 与 runtime-core(0.92)分叉,已收敛删除。
 
 export function computeContextBudget({
   messages,
@@ -97,17 +86,17 @@ export function computeContextBudget({
   providerConfig = null,
   maxOutputTokens = null,
 }) {
-  // ADR 52：预算只统计下一次最终请求投影。调用方负责传入经过 provider 清洗与
-  // microcompaction 后会真正发送的 messages；tools schema 也属于每次请求输入。
-  // 上一次 provider usage 仅保留为诊断/校准信息，不得把下一请求预算锁在历史高水位。
+  // ADR 56：provider observed usage 一旦存在，就成为显示和压缩判断的权威下界。
+  // legacy estimate 仅在尚未取得 provider usage / exact count 的迁移期回退使用。
   const estimatedTokens =
     estimateTokensFromMessages(Array.isArray(messages) ? messages : []) +
     estimateToolsTokens(tools);
   const usageTokens = contextTokensFromUsageSnapshot(usageSnapshot);
-  const contextTokens = estimatedTokens;
+  const contextTokens = usageTokens ?? estimatedTokens;
+  const contextSource = usageTokens != null ? 'provider_usage' : 'legacy_estimate';
   const normalizedWindow = Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null;
   const triggerRatio = COMPACTION_CONFIG.triggerRatio;
-  const hardRatio = Math.max(triggerRatio, CONTEXT_BUDGET_GUARD.hardRatio);
+  const hardRatio = Math.max(triggerRatio, COMPACTION_CONFIG.hardRatio);
 
   // 摘要输出 + 安全区预留：不改写公开 soft/hard 触发线（仍按 window*ratio），
   // 但暴露 reserved/effective 字段，并在「剩余窗口已不够摘要」时提前触发压缩。
@@ -132,10 +121,10 @@ export function computeContextBudget({
   const hardLimit = normalizedWindow != null ? Math.floor(normalizedWindow * hardRatio) : null;
   // 剩余空间不足摘要输出/安全区时，即使未越过 soft 线也建议压缩。
   const summaryHeadroomLimit = effectiveWindow;
-  const overSoftLimit = softLimit != null && contextTokens > softLimit;
+  const overSoftLimit = softLimit != null && contextTokens >= softLimit;
   const overSummaryHeadroom =
-    summaryHeadroomLimit != null && contextTokens > summaryHeadroomLimit;
-  const overHardLimit = hardLimit != null && contextTokens > hardLimit;
+    summaryHeadroomLimit != null && contextTokens >= summaryHeadroomLimit;
+  const overHardLimit = hardLimit != null && contextTokens >= hardLimit;
   const overContextWindow = normalizedWindow != null && contextTokens > normalizedWindow;
   const force = overHardLimit || overContextWindow;
   const emergency = force;
@@ -152,6 +141,7 @@ export function computeContextBudget({
     contextTokens,
     estimatedTokens,
     usageTokens,
+    contextSource,
     contextWindow: normalizedWindow,
     effectiveContextWindow: effectiveWindow,
     triggerRatio,
@@ -226,55 +216,16 @@ export async function rehydrateSystemPromptAfterCompaction({
   }
 }
 
-// 从 provider 真实 usage 快照折算「实际发送的上下文 token」。
-// 取「最后一轮请求」的 input + cacheRead（不含 output），这正是 provider 计入的输入上下文大小。
-// ⚠️ 必须是「最后一轮快照」而非跨轮累加值（kernel.usage 是 lifetime 累加，用于计费 ledger，
-// 不能当上下文大小用）。无可用快照时返回 null，由上层回退到发送切片估算。
+// 从 provider 真实 usage 快照折算「上一请求实测输入」。
+// 取「最后一轮请求」的 input + cacheRead（不含 output）。
+// ⚠️ 必须是「最后一轮快照」而非跨轮累加值（kernel.usage 是 lifetime 累加，用于计费 ledger）。
+// ADR 56：该值是 provider 已观测请求的权威输入，不得被本地估算覆盖。
 export function contextTokensFromUsageSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return null;
   const input = Number(snapshot.inputTokens) || 0;
   const cacheRead = Number(snapshot.cacheReadTokens) || 0;
   const total = input + cacheRead;
   return total > 0 ? total : null;
-}
-
-// 口径（ADR 42 数据面；UI 主圆环消费 contextTokens，压缩触发与 tooltip 消费 triggerTokens）：
-// - 实际发送口径（contextTokens）：表示「本回合实际发送给模型的上下文大小」，取值优先级：
-//     1) provider 真实 usage 快照（最后一轮 input + cacheRead）；
-//     2) 回退为对「实际发送切片 displayMessages」的估算；
-//     3) 再回退为对完整会话 messages 的估算（兼容未传 displayMessages 的旧调用）。
-// - 压缩压力口径（compactionSuggested / triggerTokens）：与 preflight 一致，取
-//   max(完整会话本地估算, usage 快照)。有真实 usage 高水位时必须建议压缩，
-//   避免实际输入已满但自动压缩不跑；无 usage 时仍退回本地估算。
-// - 分母口径（contextWindow）：与触发判定同一 normalizedWindow，不变。
-export function computeContextInfo({
-  messages,
-  contextWindow,
-  tools = null,
-  displayMessages = null,
-  usageSnapshot = null,
-}) {
-  // ADR 52：先形成下一次最终请求投影。调用方若已经持有 provider 最终发送切片，
-  // 通过 displayMessages 传入；否则按所有 provider 共享的 Layer 1 规则投影。
-  const projectedMessages = Array.isArray(displayMessages)
-    ? displayMessages
-    : applyMicrocompaction(Array.isArray(messages) ? messages : [], { log: () => {} }).messages;
-  const budget = computeContextBudget({
-    messages: projectedMessages,
-    contextWindow,
-    tools,
-    usageSnapshot,
-  });
-
-  return {
-    // ADR 52：下一次最终请求预计输入是唯一上下文占用口径。
-    nextRequestInputTokens: budget.contextTokens,
-    contextWindow: budget.contextWindow,
-    triggerRatio: budget.triggerRatio,
-    compactionSuggested: budget.overSoftLimit,
-    // 上一次 provider 实测只用于诊断，不参与当前占用或压缩判断。
-    lastActualInputTokens: contextTokensFromUsageSnapshot(usageSnapshot),
-  };
 }
 
 async function persistAndNotifyCompaction({
@@ -284,39 +235,26 @@ async function persistAndNotifyCompaction({
   streamId,
   webContents,
   emergency = false,
-  contextWindow = null,
-  tools = null,
+  manual = false,
 }) {
-  // 压缩后的真实请求消息和工具 schema 共同构成下一次最终请求投影。
-  // 必须先算出投影并随消息一起持久化，确保共享快照绑定 replaceMessages 产生的新 revision。
-  const compactedBudget = computeContextBudget({
-    messages: compactResult.messages,
-    contextWindow,
-    tools,
-  });
   if (persistCompaction && conversationId) {
     await persistCompaction({
       conversationId,
       compactResult,
       preservePendingAssistant: true,
-      requestProjection: {
-        nextRequestInputTokens: compactedBudget.contextTokens,
-        contextWindow: compactedBudget.contextWindow,
-      },
     });
   }
   // 登记表收尾与事件 emit 单一来源：先清登记表再 emit done。
   endCompaction({ conversationId, streamId });
-  // notification.afterTokens 仅覆盖 system + messages；工具 schema 同样会在每次
-  // 请求全量发送，因此完成事件要沿用预算器口径给出可直接投影的完整快照。
+  // Compaction events report lifecycle and compactor diagnostics only. The
+  // rebuilt request is counted by ContextAccountingSnapshot after this stage.
   webContents.send('chat:compaction', {
     conversationId,
     streamId,
     stage: 'done',
     emergency,
+    ...(manual ? { manual: true } : {}),
     ...compactResult.notification,
-    nextRequestInputTokens: compactedBudget.contextTokens,
-    contextWindow: compactedBudget.contextWindow,
   });
 }
 
@@ -332,10 +270,14 @@ export async function runCompactionCheck({
   webContents,
   emergency = false,
   force = false,
+  // 手动 /compact：强制展示横幅并在全部横幅事件上标记 manual，
+  // 使手动路径与自动/紧急路径共用同一入口而不丢 UI 语义。
+  manual = false,
   continuityContext = [],
   tools = null,
   preserveLatestUserTurn = false,
   usageSnapshot = null,
+  runtimeUsageAccounting = null,
   rebuildSystemPrompt = null,
 }) {
   // ADR 52：preflight 与 UI 对同一下一请求投影计数。Layer 2 语义压缩仍接收
@@ -348,7 +290,13 @@ export async function runCompactionCheck({
     usageSnapshot,
     providerConfig,
   });
-  force = Boolean(force || budget.force);
+  // Provider 实测越过 soft 线时必须强制进入 Layer 2；否则 compactIfNeeded 会用
+  // 较低的 legacy estimate 重新判定并把这次权威触发吞掉。
+  force = Boolean(
+    force
+    || budget.force
+    || (budget.contextSource === 'provider_usage' && budget.shouldCompact),
+  );
   emergency = Boolean(emergency || budget.emergency);
 
   // 压缩时机诊断:在唯一入口打印触发判定的全部输入,便于定位"何时/因何压缩"。
@@ -377,15 +325,21 @@ export async function runCompactionCheck({
     return { compacted: false, messages };
   }
 
-  const showStart = emergency || shouldShowCompactionStart(messages, budget);
+  const showStart = manual || emergency || shouldShowCompactionStart(messages, budget);
   // 字符级真实进度：仅在展示横幅时构造回调，压缩器流式收摘要时逐 chunk 回调，
-  // 转发为 progress 事件。载荷与节流策略与手动 /compact 路径（main.mjs）保持一致。
+  // 转发为 progress 事件。手动与自动路径同源，载荷与节流策略一致。
   let onProgress;
   if (showStart) {
     // 登记表与事件 emit 单一来源：先登记会话压缩态再 emit start，
     // 使切会话查询（chat:compaction:get）与横幅事件流一致。
-    beginCompaction({ conversationId, streamId, manual: false });
-    webContents.send('chat:compaction', { conversationId, streamId, stage: 'start', emergency });
+    beginCompaction({ conversationId, streamId, manual });
+    webContents.send('chat:compaction', {
+      conversationId,
+      streamId,
+      stage: 'start',
+      emergency,
+      ...(manual ? { manual: true } : {}),
+    });
     let lastSentPercent = -1;
     onProgress = ({ receivedChars, estimatedTotalChars }) => {
       const total = estimatedTotalChars > 0 ? estimatedTotalChars : 1;
@@ -399,6 +353,7 @@ export async function runCompactionCheck({
         streamId,
         stage: 'progress',
         emergency,
+        ...(manual ? { manual: true } : {}),
         receivedChars,
         estimatedTotalChars,
         percent,
@@ -413,7 +368,13 @@ export async function runCompactionCheck({
     if (settledBanner) return;
     settledBanner = true;
     endCompaction({ conversationId, streamId });
-    webContents.send('chat:compaction', { conversationId, streamId, stage: 'idle', emergency });
+    webContents.send('chat:compaction', {
+      conversationId,
+      streamId,
+      stage: 'idle',
+      emergency,
+      ...(manual ? { manual: true } : {}),
+    });
   };
 
   try {
@@ -428,9 +389,18 @@ export async function runCompactionCheck({
       onProgress,
       webContents,
       streamId,
+      // circuit breaker 按会话隔离(23 号治理文档不变式 6)。
+      conversationId,
       tools,
       preserveLatestUserTurn,
+      // Provider usage 已在 coordinator 单点决策并转成 force；Layer2 不再二次解释。
       usageTokens: budget.usageTokens,
+      onProviderUsage: (usage) => {
+        runtimeUsageAccounting?.observeProviderRequest?.(usage, {
+          requestPurpose: 'compaction_summary',
+          capacityBearing: false,
+        });
+      },
     });
 
     if (compactResult.compacted) {
@@ -441,8 +411,7 @@ export async function runCompactionCheck({
         streamId,
         webContents,
         emergency,
-        contextWindow,
-        tools,
+        manual,
       });
       // done 通知本身即为 start 的收尾。只有持久化与 done 都完成后才标记已结算；
       // 若 persistCompaction 抛错，catch 分支必须还能补发 idle，避免压缩态悬挂。
@@ -483,14 +452,6 @@ export async function runCompactionCheck({
       || effectiveMessages !== messages,
     );
     if (microApplied && webContents?.send && conversationId) {
-      const effectiveInfo = computeContextInfo({
-        messages: effectiveMessages,
-        contextWindow,
-        tools,
-        displayMessages: effectiveMessages,
-        // 计算 Layer 1 后的有效发送量：忽略上一轮高水位 usage，避免旧快照锁死新预算。
-        usageSnapshot: null,
-      });
       settledBanner = true;
       endCompaction({ conversationId, streamId });
       webContents.send('chat:compaction', {
@@ -498,8 +459,6 @@ export async function runCompactionCheck({
         streamId,
         stage: 'idle',
         emergency,
-        nextRequestInputTokens: effectiveInfo.nextRequestInputTokens,
-        contextWindow: effectiveInfo.contextWindow,
         microcompacted: true,
       });
       return {
@@ -507,8 +466,6 @@ export async function runCompactionCheck({
         messages: effectiveMessages,
         compactResult,
         microcompacted: true,
-        nextRequestInputTokens: effectiveInfo.nextRequestInputTokens,
-        contextWindow: effectiveInfo.contextWindow,
       };
     }
 

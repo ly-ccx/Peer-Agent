@@ -1,6 +1,13 @@
 export const AGENT_LOOP_UNBOUNDED = Number.POSITIVE_INFINITY;
 export const DEFAULT_AGENT_LOOP_MAX_TURNS = AGENT_LOOP_UNBOUNDED;
 
+import {
+  createContextAccountingLifecycle,
+  createRuntimeUsageAccounting,
+  createUnknownContextAccountingSnapshot,
+  isContextAccountingSnapshotCurrent,
+} from '@peer-agent/runtime-core';
+
 export function normalizeAgentLoopMaxTurns(value) {
   if (value === undefined || value === null || value === '' || value === false) {
     return AGENT_LOOP_UNBOUNDED;
@@ -38,6 +45,7 @@ function hasBillableUsage(usage) {
 export function createAgentLoopKernel({
   webContents,
   streamId,
+  conversationId = null,
   maxTurns = defaultAgentLoopMaxTurns(),
   maxUnsupportedToolRetries = 1,
   maxEmptyResponseRetries = 1,
@@ -45,27 +53,82 @@ export function createAgentLoopKernel({
   // provider 无关的「模型轮次」信号：每次 addUsage（每轮恰好一次）回调一次。
   // 用于 Goal Runner 展示用的实时轮次计数，与具体 provider 解耦。
   onRound = null,
-  // ADR 52：回合自然结束时，由各 loop 注入的闭包返回下一次最终请求投影
-  // （{ nextRequestInputTokens, contextWindow, compactionSuggested }），随 done 事件下发。
-  // renderer 与下一次 provider 请求前的 Runtime preflight 消费同一口径；返回 null 表示不附带。
-  getContextInfo = null,
+  emitRuntimeEvent = null,
+  accountingIdentity = null,
+  initialContextAccounting = null,
+  contextWindow = null,
+  countCapability = { kind: 'observed_usage_only' },
 } = {}) {
   const normalizedMaxTurns = normalizeAgentLoopMaxTurns(maxTurns);
-  const usage = {
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheWriteTokens: 0,
-    cacheReadTokens: 0,
+  const normalizedIdentity = {
+    conversationId: String(
+      accountingIdentity?.conversationId || conversationId || streamId || 'desktop',
+    ),
+    contentRevision: Number.isSafeInteger(accountingIdentity?.contentRevision)
+      && accountingIdentity.contentRevision >= 0
+      ? accountingIdentity.contentRevision
+      : 0,
+    modelKey: String(accountingIdentity?.modelKey || 'unknown-model'),
   };
-  // 最后一轮 usage 快照（每轮覆盖，非累加）。显示口径需要「最后一轮请求实际发送的
-  // input + cacheRead」来反映真实上下文大小；上面的 usage 是 lifetime 累加（计费 ledger），
-  // 不能当上下文大小用。详见 ADR 42。null 表示尚无可用的 provider usage。
-  let lastTurnUsage = null;
+  const initialSnapshot = isContextAccountingSnapshotCurrent(
+    initialContextAccounting,
+    normalizedIdentity,
+  )
+    ? initialContextAccounting
+    : createUnknownContextAccountingSnapshot({
+        identity: normalizedIdentity,
+        contextWindow,
+        countCapability,
+        phase: 'request_preflight',
+        pendingUncountedChanges: true,
+      });
+  const contextLifecycle = createContextAccountingLifecycle({
+    initialSnapshot,
+    onSnapshot(snapshot) {
+      try {
+        emitRuntimeEvent?.({
+          type: 'context.accounting',
+          sessionId: normalizedIdentity.conversationId,
+          streamId,
+          conversationId: normalizedIdentity.conversationId,
+          snapshot,
+        });
+      } catch {
+        // Accounting telemetry must not interrupt the provider loop.
+      }
+    },
+  });
+
+  function acceptContextAccounting(next) {
+    return contextLifecycle.stable(next, next.phase);
+  }
+
+  function publishToolResultProjection() {
+    contextLifecycle.markPending('tool_result');
+  }
+
+  const providerWebContents = {
+    send(channel, payload) {
+      if (
+        (channel === 'chat:stream:delta' || channel === 'chat:stream:thinking')
+        && typeof payload?.content === 'string'
+        && payload.content
+      ) {
+        contextLifecycle.streamPreview(payload.content);
+      }
+      return webContents?.send?.(channel, payload);
+    },
+  };
+
+  // One runtime turn may contain many provider requests. Keep their two
+  // meanings explicit: lastRequest is context-capacity truth; turnTotal is the
+  // billable aggregate persisted by the terminal path.
+  const usageAccounting = createRuntimeUsageAccounting();
   let unsupportedToolRetries = 0;
   let emptyResponseRetries = 0;
   let thinkingOnlyRetries = 0;
 
-  function addUsage(streamUsage = null) {
+  function addUsage(streamUsage = null, metadata = {}) {
     // 每轮模型响应恰好调用一次 addUsage，故在此回调 onRound 作为「轮次」信号。
     // 放在 streamUsage 空判定之前，确保无计费 usage 的轮次也被计入。
     if (typeof onRound === 'function') {
@@ -75,22 +138,7 @@ export function createAgentLoopKernel({
         // 进度回调失败不得影响主循环。
       }
     }
-    if (!streamUsage) return usage;
-    usage.inputTokens += streamUsage.inputTokens || 0;
-    usage.outputTokens += streamUsage.outputTokens || 0;
-    usage.cacheWriteTokens += streamUsage.cacheWriteTokens || 0;
-    usage.cacheReadTokens += streamUsage.cacheReadTokens || 0;
-    // 记录本轮快照（覆盖式）：仅当本轮带到了真实 input/cacheRead 才更新，
-    // 避免无计费 usage 的轮次把上一轮有效快照清掉。
-    if ((streamUsage.inputTokens || 0) > 0 || (streamUsage.cacheReadTokens || 0) > 0) {
-      lastTurnUsage = {
-        inputTokens: streamUsage.inputTokens || 0,
-        outputTokens: streamUsage.outputTokens || 0,
-        cacheWriteTokens: streamUsage.cacheWriteTokens || 0,
-        cacheReadTokens: streamUsage.cacheReadTokens || 0,
-      };
-    }
-    return usage;
+    return usageAccounting.observeProviderRequest(streamUsage, metadata).turnTotal;
   }
 
   function claimUnsupportedToolRetry() {
@@ -112,32 +160,22 @@ export function createAgentLoopKernel({
   }
 
   function sendDone() {
-    // 回合自然结束：附带实际上下文用量与权威压力快照，供渲染端圆环对齐。
-    // compactionSuggested 不授权 renderer 另起压缩任务；下一次 Runtime preflight 负责压缩并续跑。
-    // 最后一轮 usage 快照只供诊断校准；闭包取数失败不得影响收尾。
-    let contextInfo = null;
-    if (typeof getContextInfo === 'function') {
-      try {
-        contextInfo = getContextInfo({ usageSnapshot: lastTurnUsage });
-      } catch {
-        contextInfo = null;
-      }
-    }
-    const payload = { streamId, usage };
-    if (contextInfo && typeof contextInfo === 'object') {
-      if (typeof contextInfo.nextRequestInputTokens === 'number') {
-        payload.nextRequestInputTokens = contextInfo.nextRequestInputTokens;
-      }
-      if (typeof contextInfo.contextWindow === 'number') payload.contextWindow = contextInfo.contextWindow;
-      if (typeof contextInfo.compactionSuggested === 'boolean') {
-        payload.compactionSuggested = contextInfo.compactionSuggested;
-      }
-    }
+    const usage = usageAccounting.snapshot().turnTotal;
+    const payload = {
+      streamId,
+      usage,
+      contextAccounting: contextLifecycle.current(),
+    };
     webContents?.send?.('chat:stream:done', payload);
   }
 
   function sendError(error) {
-    const payload = { streamId, error };
+    const usage = usageAccounting.snapshot().turnTotal;
+    const payload = {
+      streamId,
+      error,
+      contextAccounting: contextLifecycle.current(),
+    };
     if (hasBillableUsage(usage)) payload.usage = usage;
     webContents?.send?.('chat:stream:error', payload);
   }
@@ -153,21 +191,13 @@ export function createAgentLoopKernel({
     );
   }
 
-  function getLastTurnUsage() {
-    return lastTurnUsage;
-  }
-
-  function clearLastTurnUsage() {
-    // 压缩成功后清掉陈旧 usage，避免下一轮 preflight 被压缩前的高水位反复强制触发。
-    lastTurnUsage = null;
-  }
-
   return {
     maxTurns: normalizedMaxTurns,
-    usage,
+    get usage() {
+      return usageAccounting.snapshot().turnTotal;
+    },
+    usageAccounting,
     addUsage,
-    getLastTurnUsage,
-    clearLastTurnUsage,
     claimUnsupportedToolRetry,
     claimEmptyResponseRetry,
     claimThinkingOnlyRetry,
@@ -175,6 +205,11 @@ export function createAgentLoopKernel({
     sendError,
     sendHttpError,
     sendLoopExhausted,
+    contextLifecycle,
+    acceptContextAccounting,
+    getContextAccounting: () => contextLifecycle.current(),
+    providerWebContents,
+    publishToolResultProjection,
   };
 }
 

@@ -1,4 +1,5 @@
 import { collectToolEvidenceRefs } from '@peer-agent/runtime-core';
+import { materializeToolResultContent } from '@peer-agent/runtime-node';
 
 import { executeProjectedModelTool } from './projected-tool-executor.mjs';
 
@@ -361,6 +362,21 @@ export async function executeModelToolCall({
   }
   const output = appendEvidenceRefsToToolOutput(rawOutput, evidenceRefs);
   const streamResult = formatToolResultForStream({ name, args, output });
+  // Layer 0 材料化(17 号文档 §3.1 / 23 号台账阶段 E):回灌给模型的超阈值输出
+  // 落盘 artifact,消息内只留 ref 骨架(预览+检索命令);UI 流(streamResult)不受影响。
+  // 已是结构化 local_*_ref 的输出(shell/file/batch_search)在内部直接跳过。
+  let providerOutput = output;
+  try {
+    providerOutput = materializeToolResultContent({
+      conversationId,
+      toolCallId,
+      tool: name,
+      content: output,
+      isError: !result.success,
+    }).content;
+  } catch (err) {
+    console.warn('[tool-orchestrator] tool result materialization failed, falling back to inline output:', err?.message || err);
+  }
   const endedAtMs = Date.now();
   webContents.send('chat:stream:tool-result', {
     streamId,
@@ -372,5 +388,5 @@ export async function executeModelToolCall({
     durationMs: Math.max(0, endedAtMs - startedAtMs),
   });
   const controlSignal = extractToolControlSignal(result);
-  return { aborted: false, args, output, result, controlSignal };
+  return { aborted: false, args, output: providerOutput, result, controlSignal };
 }

@@ -172,19 +172,19 @@ function assertSystemContextProtocolContracts() {
     fail('ChatSurface must lower persisted configured instructions into protocol configInstructions.');
   }
 
-  const projectInstructionsSource = readText('apps/desktop/electron/main/prompt/sources/project-instructions-source.mjs');
+  const projectInstructionsSource = readText('packages/system-context/src/sources/project-instructions-source.mjs');
   if (!projectInstructionsSource.includes('configInstructions')) {
     fail('project-instructions-source.mjs must admit configured instructions through the project.instructions Context Source.');
   }
 
-  const promptAssembler = readText('apps/desktop/electron/main/prompt/prompt-assembler.mjs');
+  const promptAssembler = readText('packages/system-context/src/prompt-assembler.mjs');
   if (!promptAssembler.includes('createProviderPromptSource')) {
     fail('Default System Context assembly must register runtime.provider for provider/model prompt selection.');
   }
   if (!promptAssembler.includes('createContextExtensionPromptSource')) {
     fail('Default System Context assembly must register runtime.contextExtensions for controlled Plugin/Skill/MCP context contributions.');
   }
-  const providerSourcePath = 'apps/desktop/electron/main/prompt/sources/provider-source.mjs';
+  const providerSourcePath = 'packages/system-context/src/sources/provider-source.mjs';
   if (!existsSync(path.join(repoRoot, providerSourcePath))) {
     fail(`Provider/model Context Source is missing: ${providerSourcePath}`);
   } else {
@@ -196,7 +196,7 @@ function assertSystemContextProtocolContracts() {
     }
   }
 
-  const extensionSourcePath = 'apps/desktop/electron/main/prompt/sources/context-extension-source.mjs';
+  const extensionSourcePath = 'packages/system-context/src/sources/context-extension-source.mjs';
   if (!existsSync(path.join(repoRoot, extensionSourcePath))) {
     fail(`Controlled context extension source is missing: ${extensionSourcePath}`);
   } else {
@@ -205,6 +205,26 @@ function assertSystemContextProtocolContracts() {
       if (!extensionSource.includes(snippet)) {
         fail(`${extensionSourcePath} must keep Plugin/Skill/MCP context contributions bounded (${snippet}).`);
       }
+    }
+  }
+
+  const desktopPromptAdapter = readText('apps/desktop/electron/main/prompt/index.mjs');
+  if (!desktopPromptAdapter.includes("from '@peer-agent/system-context'")) {
+    fail('Desktop System Context adapter must consume @peer-agent/system-context.');
+  }
+
+  const tuiLanguage = readText('apps/tui/src/tui-language.ts');
+  if (!tuiLanguage.includes("from '@peer-agent/system-context'")) {
+    fail('TUI System Context adapter must consume @peer-agent/system-context.');
+  }
+  if (tuiLanguage.includes('BASE_SYSTEM_PROMPT')) {
+    fail('TUI must not maintain a parallel BASE_SYSTEM_PROMPT.');
+  }
+
+  const tuiProvider = readText('apps/tui/src/provider-chat-model.ts');
+  for (const forbidden of ['PLAN_MODE_SYSTEM_PROMPT', 'GOAL_MODE_SYSTEM_PROMPT', 'formatSystemContextBlocks']) {
+    if (tuiProvider.includes(forbidden)) {
+      fail(`TUI provider adapter must not bypass PromptAssembler with ${forbidden}.`);
     }
   }
 }
@@ -470,15 +490,22 @@ function assertChatRuntimeCompactionCoordinatorIsModular() {
       fail(`llm-chat-service.mjs must not own Compaction Coordinator behavior (${forbidden}); use chat-runtime/compaction-coordinator.mjs.`);
     }
   }
+  const requestCoordinatorPath = 'apps/desktop/electron/main/chat-runtime/provider-request-coordinator.mjs';
+  const requestCoordinator = readText(requestCoordinatorPath);
+  if (!requestCoordinator.includes('runCompactionCheck')) {
+    fail(`${requestCoordinatorPath} must own the shared request-preflight compaction check.`);
+  }
   const agentLoopFiles = [
     'apps/desktop/electron/main/chat-runtime/openai-agent-loop.mjs',
     'apps/desktop/electron/main/chat-runtime/anthropic-agent-loop.mjs',
+    'apps/desktop/electron/main/chat-runtime/gemini-agent-loop.mjs',
+    'apps/desktop/electron/main/chat-runtime/qoder-agent-loop.mjs',
   ];
   for (const filePath of agentLoopFiles) {
     if (!existsSync(path.join(repoRoot, filePath))) continue;
     const content = readText(filePath);
-    if (!content.includes('runCompactionCheck')) {
-      fail(`${filePath} must delegate compaction checks to chat-runtime/compaction-coordinator.mjs.`);
+    if (!content.includes('executeDesktopProviderRequest')) {
+      fail(`${filePath} must delegate request-preflight compaction to provider-request-coordinator.mjs.`);
     }
   }
 }
@@ -578,6 +605,127 @@ function assertPromptBaselineIsRecorded() {
   }
 }
 
+function assertContextAccountingPolicyIsCentralized() {
+  const protocol = readText('packages/protocol/src/context-accounting.ts');
+  const pipeline = readText('packages/runtime-core/src/context-accounting-pipeline.ts');
+  const tuiController = readText('apps/tui/src/chat-controller.ts');
+  const rendererRouter = readText('apps/desktop/renderer/src/chat/hooks/useConversationStreamRouter.ts');
+  const composerTokenUsage = readText(
+    'apps/desktop/renderer/src/chat/components/ComposerTokenUsageDisplay.tsx',
+  );
+  const desktopMain = readText('apps/desktop/electron/main/main.mjs');
+  const conversationStore = readText('packages/conversation-store/src/index.mjs');
+  const tuiPersistence = readText('apps/tui/src/conversation-persistence.ts');
+  const tuiComposerStatus = readText('apps/tui/src/composer-status.ts');
+  const contextRestore = readText('apps/desktop/renderer/src/chat/state/contextRestore.ts');
+  const tokenUsageDisplay = readText('apps/desktop/renderer/src/chat/components/thread/TokenUsageDisplay.tsx');
+  const preload = readText('apps/desktop/electron/preload/preload.cjs');
+  const preloadContract = readText('apps/desktop/renderer/src/preload/contracts/bootstrapPreloadApi.ts');
+  const compactionCoordinator = readText(
+    'apps/desktop/electron/main/chat-runtime/compaction-coordinator.mjs',
+  );
+
+  if (!protocol.includes('export interface ContextAccountingSnapshot')) {
+    fail('Protocol must define ContextAccountingSnapshot as the cross-host context-capacity state.');
+  }
+  if (!protocol.includes('export function contextAccountingModelKey')) {
+    fail('Protocol must own the canonical providerId::modelId context identity.');
+  }
+  for (const stage of ['buildRequest', 'countRequest', 'compact', 'send', 'getUsage']) {
+    if (!pipeline.includes(stage)) {
+      fail(`runtime-core context accounting pipeline is missing stage ${stage}.`);
+    }
+  }
+  for (const legacy of ['requestProjection', 'nextRequestInputTokens', 'compactionPressureTokens']) {
+    if (tuiController.includes(legacy)) {
+      fail(`TUI controller must not retain legacy context state (${legacy}).`);
+    }
+  }
+  if (tuiController.includes("from './context-pressure.ts'")) {
+    fail('TUI controller must consume ContextAccountingSnapshot instead of a host-local pressure estimator.');
+  }
+  for (const legacyPath of [
+    'apps/desktop/renderer/src/chat/state/contextOccupancy.ts',
+    'apps/desktop/renderer/src/chat/state/tokenEstimate.ts',
+  ]) {
+    if (existsSync(path.join(repoRoot, legacyPath))) {
+      fail(`Renderer-local context estimator must remain deleted: ${legacyPath}.`);
+    }
+  }
+  if (!rendererRouter.includes("event.type === 'context.accounting'")) {
+    fail('Renderer stream router must consume Runtime context.accounting events.');
+  }
+  if (/chat:context:projection|onChatContextProjection/.test(preload)) {
+    fail('Legacy chat:context:projection IPC must not return.');
+  }
+  for (const legacy of ['nextRequestInputTokens', 'compactionPressureTokens']) {
+    if (preloadContract.includes(legacy) || compactionCoordinator.includes(legacy)) {
+      fail(`Compaction IPC must not publish a parallel context-capacity field (${legacy}).`);
+    }
+  }
+  if (
+    !tokenUsageDisplay.includes("counterStatus === 'degraded'")
+    || !tokenUsageDisplay.includes('Exact count drifted from provider usage')
+  ) {
+    fail('Desktop context display must surface provider count drift degradation.');
+  }
+  if (/contextPending\s*\?\s*'\+'\s*:/.test(tokenUsageDisplay)) {
+    fail('Desktop context percentage must not expose pending accounting through a custom + suffix.');
+  }
+  const doneHandler = rendererRouter.match(
+    /const offDone = clientApi\.onChatStreamDone\(([\s\S]*?)const offUsage =/,
+  )?.[1] ?? '';
+  const normalCompletion = doneHandler.slice(
+    doneHandler.indexOf("if (last?.role === 'assistant')"),
+  );
+  if (!normalCompletion || /persistMessages\(/.test(normalCompletion)) {
+    fail('Renderer normal done handling must not replace messages after main persists context accounting.');
+  }
+  for (const required of [
+    'conversationStore.getLatestContextObservation',
+    'createRestoredObservedContextAccountingSnapshot',
+  ]) {
+    if (!desktopMain.includes(required)) {
+      fail(`Desktop observed-only restore is missing durable provider evidence: ${required}.`);
+    }
+  }
+  for (const forbidden of [
+    'latestObservedUsageFromMessages',
+    'getLatestObservedUsage',
+  ]) {
+    if (desktopMain.includes(forbidden) || tuiPersistence.includes(forbidden)) {
+      fail(`Context restore must never read billing/message usage: ${forbidden}.`);
+    }
+  }
+  if (!conversationStore.includes('getLatestContextObservation')) {
+    fail('Conversation store must expose the provider-request context observation sidecar.');
+  }
+  if (
+    !conversationStore.includes("path.join(storeDir, '.context-snapshots')")
+    || !conversationStore.includes('durableContextSnapshot(meta)')
+  ) {
+    fail('Shared context snapshots must survive legacy cross-process index rewrites via a sidecar.');
+  }
+  if (!tuiPersistence.includes('store.getLatestContextObservation')) {
+    fail('TUI restore must consume the shared context observation sidecar.');
+  }
+  if (
+    !conversationStore.includes('recordRuntimeTurnUsage')
+    || !tuiPersistence.includes('store.recordRuntimeTurnUsage')
+  ) {
+    fail('Desktop/TUI must share the scoped runtime-turn persistence seam.');
+  }
+  if (!contextRestore.includes("snapshot.pressureSource === 'unknown'")) {
+    fail('Desktop must restore every unknown snapshot instead of treating restored unknown as usable.');
+  }
+  if (
+    !composerTokenUsage.includes('emptyContext={conversationId == null}')
+    || !tuiComposerStatus.includes('emptyContext && accounting == null')
+  ) {
+    fail('A brand-new empty Desktop/TUI conversation must display 0%, while restored unknown stays unknown.');
+  }
+}
+
 function assertChatRuntimeAgentLoopsAreModular() {
   const loopPaths = [
     'apps/desktop/electron/main/chat-runtime/openai-agent-loop.mjs',
@@ -613,7 +761,7 @@ function assertChatRuntimeAgentLoopsAreModular() {
 
   if (existsSync(path.join(repoRoot, loopPaths[0]))) {
     const openaiLoop = readText(loopPaths[0]);
-    for (const snippet of ['sendOpenAIChatStream', 'runCompactionCheck', 'executeModelToolCall', 'createAgentLoopKernel', 'handleTerminalTextResponse']) {
+    for (const snippet of ['sendOpenAIChatStream', 'executeDesktopProviderRequest', 'executeModelToolCall', 'createAgentLoopKernel', 'handleTerminalTextResponse']) {
       if (!openaiLoop.includes(snippet)) {
         fail(`${loopPaths[0]} is missing required provider loop dependency ${snippet}.`);
       }
@@ -629,7 +777,7 @@ function assertChatRuntimeAgentLoopsAreModular() {
   }
   if (existsSync(path.join(repoRoot, loopPaths[1]))) {
     const anthropicLoop = readText(loopPaths[1]);
-    for (const snippet of ['sendAnthropicMessagesStream', 'runCompactionCheck', 'executeModelToolCall', 'createAgentLoopKernel', 'handleTerminalTextResponse']) {
+    for (const snippet of ['sendAnthropicMessagesStream', 'executeDesktopProviderRequest', 'executeModelToolCall', 'createAgentLoopKernel', 'handleTerminalTextResponse']) {
       if (!anthropicLoop.includes(snippet)) {
         fail(`${loopPaths[1]} is missing required provider loop dependency ${snippet}.`);
       }
@@ -775,6 +923,7 @@ assertChatRuntimeCompactionCoordinatorIsModular();
 assertChatRuntimeResponseGuardIsModular();
 assertPromptBaselineIsRecorded();
 assertChatRuntimeAgentLoopsAreModular();
+assertContextAccountingPolicyIsCentralized();
 
 if (failures.length > 0) {
   console.error('Architecture governance check failed:');

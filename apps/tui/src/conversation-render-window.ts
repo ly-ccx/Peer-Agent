@@ -1,9 +1,9 @@
 import type { ChatMessage } from './chat-controller.ts';
 
 export interface ConversationRenderWindowPolicy {
-  /** Default latest-window message cap when no completed compaction exists. */
+  /** Legacy field kept for compatibility; latest mode no longer applies this cap. */
   readonly fallbackMaxMessages: number;
-  /** Default latest-window character budget when no completed compaction exists. */
+  /** Legacy field kept for compatibility; latest mode no longer applies this budget. */
   readonly fallbackMaxChars: number;
   /** Maximum top-level messages in one history page. */
   readonly historyPageMessages: number;
@@ -16,12 +16,14 @@ export interface ConversationRenderWindowPolicy {
 }
 
 export const DEFAULT_TUI_RENDER_WINDOW_POLICY: ConversationRenderWindowPolicy = Object.freeze({
+  // Kept for API compatibility / history-page helpers; latest mode no longer uses these caps.
   fallbackMaxMessages: 120,
   fallbackMaxChars: 160_000,
   historyPageMessages: 80,
-  historyPageMaxChars: 160_000,
-  emergencyMaxMessages: 600,
-  emergencyMaxChars: 800_000,
+  historyPageMaxChars: 400_000,
+  // Emergency-only guardrail for pathological transcripts (not the normal path).
+  emergencyMaxMessages: 2000,
+  emergencyMaxChars: 2_000_000,
 });
 
 export type ConversationRenderWindowState =
@@ -34,6 +36,7 @@ export type ConversationRenderWindowState =
 
 export type ConversationRenderWindowReason =
   | 'latest-compaction'
+  | 'full-session'
   | 'fallback-tail'
   | 'history-page'
   | 'empty';
@@ -308,38 +311,36 @@ function projectLatest(
   const endIndex = messages.length - 1;
   const compactionIndex = lastCompletedCompactionIndex(messages);
 
-  if (compactionIndex >= 0) {
-    const guardStart = scanBackwardStart(
-      messages,
-      endIndex,
-      policy.emergencyMaxMessages,
-      policy.emergencyMaxChars,
-      compactionIndex,
-    );
-    const alignedGuardStart = alignStartToTurn(messages, guardStart, compactionIndex);
-    const startIndex = Math.max(compactionIndex, alignedGuardStart);
-    return projectRange(messages, {
-      mode: 'latest',
-      startIndex,
-      endIndex,
-      reason: 'latest-compaction',
-      compactionMessageId: messages[compactionIndex]?.id,
-      emergencyTruncated: startIndex > compactionIndex,
-    });
-  }
+  // Default UX: continuous transcript.
+  // - With a completed compaction: show compaction boundary → now.
+  // - Without compaction: show the full session.
+  // Only emergency caps may hide messages on this path.
+  let startIndex = compactionIndex >= 0 ? compactionIndex : 0;
+  let reason: ConversationRenderWindowReason = compactionIndex >= 0
+    ? 'latest-compaction'
+    : 'full-session';
+  let emergencyTruncated = false;
 
-  const selectedStart = scanBackwardStart(
+  const guardStart = scanBackwardStart(
     messages,
     endIndex,
-    policy.fallbackMaxMessages,
-    policy.fallbackMaxChars,
+    policy.emergencyMaxMessages,
+    policy.emergencyMaxChars,
+    startIndex,
   );
-  const startIndex = alignStartToTurn(messages, selectedStart, 0);
+  const alignedGuardStart = alignStartToTurn(messages, guardStart, startIndex);
+  if (alignedGuardStart > startIndex) {
+    startIndex = alignedGuardStart;
+    emergencyTruncated = true;
+  }
+
   return projectRange(messages, {
     mode: 'latest',
     startIndex,
     endIndex,
-    reason: 'fallback-tail',
+    reason,
+    compactionMessageId: compactionIndex >= 0 ? messages[compactionIndex]?.id : undefined,
+    emergencyTruncated,
   });
 }
 

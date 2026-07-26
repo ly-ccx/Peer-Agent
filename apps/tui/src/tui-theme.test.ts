@@ -19,6 +19,7 @@ import {
   detectSystemPrefersDark,
   normalizeTuiThemeMode,
   resolveThemeScheme,
+  startSystemThemeWatcher,
   toolStatusColor,
 } from './tui-theme.ts';
 
@@ -146,7 +147,7 @@ describe('createTuiThemeStore', () => {
   test('persists themeMode and applies palette on setMode', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'peer-tui-theme-'));
     tempDirs.push(dir);
-    const store = createTuiThemeStore({ userDataPath: dir });
+    const store = createTuiThemeStore({ userDataPath: dir, systemThemeWatch: false });
 
     expect(store.getMode()).toBe('dark');
     expect(COLOR.background).toBe(DARK_PALETTE.background);
@@ -161,7 +162,7 @@ describe('createTuiThemeStore', () => {
     const saved = JSON.parse(readFileSync(settingsPath, 'utf8')) as { themeMode?: string };
     expect(saved.themeMode).toBe('light');
 
-    const reloaded = createTuiThemeStore({ userDataPath: dir });
+    const reloaded = createTuiThemeStore({ userDataPath: dir, systemThemeWatch: false });
     expect(reloaded.getMode()).toBe('light');
     expect(COLOR.background).toBe(LIGHT_PALETTE.background);
   });
@@ -171,5 +172,90 @@ describe('createTuiThemeStore', () => {
     expect(COLOR.background).toBe(LIGHT_PALETTE.background);
     applyThemeMode('system', true);
     expect(COLOR.background).toBe(DARK_PALETTE.background);
+  });
+
+  test('startSystemThemeWatcher reapplies palette when system appearance flips', () => {
+    let prefersDark = true;
+    let mode: 'light' | 'dark' | 'system' = 'system';
+    applyThemeMode('system', true);
+    expect(COLOR.background).toBe(DARK_PALETTE.background);
+
+    const ticks: Array<() => void> = [];
+    const changes: Array<{ mode: string; scheme: string }> = [];
+    const stop = startSystemThemeWatcher({
+      getMode: () => mode,
+      detectPrefersDark: () => prefersDark,
+      onChange: (state) => changes.push(state),
+      intervalMs: 10,
+      setIntervalFn: ((fn: () => void) => {
+        ticks.push(fn);
+        return 1 as unknown as ReturnType<typeof setInterval>;
+      }) as typeof setInterval,
+      clearIntervalFn: (() => {}) as typeof clearInterval,
+    });
+
+    // no flip yet
+    ticks[0]?.();
+    expect(changes).toEqual([]);
+    expect(COLOR.background).toBe(DARK_PALETTE.background);
+
+    prefersDark = false;
+    ticks[0]?.();
+    expect(changes).toEqual([{ mode: 'system', scheme: 'light' }]);
+    expect(COLOR.background).toBe(LIGHT_PALETTE.background);
+
+    // fixed mode should ignore system flips
+    mode = 'dark';
+    applyThemeMode('dark');
+    prefersDark = true;
+    ticks[0]?.();
+    expect(changes).toHaveLength(1);
+    expect(COLOR.background).toBe(DARK_PALETTE.background);
+
+    stop();
+  });
+
+  test('theme store subscribe starts watcher and notifies on system flip', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'peer-tui-theme-watch-'));
+    tempDirs.push(dir);
+
+    let prefersDark = true;
+    const ticks: Array<() => void> = [];
+    const store = createTuiThemeStore({
+      userDataPath: dir,
+      systemThemeWatch: {
+        intervalMs: 10,
+        detectPrefersDark: () => prefersDark,
+        setIntervalFn: ((fn: () => void) => {
+          ticks.push(fn);
+          return 1 as unknown as ReturnType<typeof setInterval>;
+        }) as typeof setInterval,
+        clearIntervalFn: (() => {}) as typeof clearInterval,
+      },
+    });
+
+    // setMode uses real OS detection for the initial apply; the watcher below
+    // injects a controllable detectPrefersDark for subsequent flips.
+    store.setMode('system');
+    expect(store.getMode()).toBe('system');
+
+    // watcher should not start until subscribe
+    expect(ticks).toHaveLength(0);
+
+    const events: Array<{ mode: string; scheme: string }> = [];
+    const unsubscribe = store.subscribe((state) => events.push(state));
+    expect(ticks).toHaveLength(1);
+
+    // Seed last-seen value, then flip.
+    prefersDark = true;
+    ticks[0]?.();
+    const beforeFlip = events.length;
+    prefersDark = false;
+    ticks[0]?.();
+    expect(events.slice(beforeFlip)).toEqual([{ mode: 'system', scheme: 'light' }]);
+    expect(COLOR.background).toBe(LIGHT_PALETTE.background);
+    expect(store.getScheme()).toBe('light');
+
+    unsubscribe();
   });
 });

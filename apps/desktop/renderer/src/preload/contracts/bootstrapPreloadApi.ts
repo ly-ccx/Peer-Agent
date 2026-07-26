@@ -6,6 +6,7 @@ import type {
   ClientSessionState,
   ClientToolCall,
   ClientToolResult,
+  ContextAccountingSnapshot,
   ExecutionStatus,
   GoalApproval,
   GoalManualConfirmation,
@@ -466,7 +467,7 @@ export interface BootstrapPreloadApi {
     lifetimeUsage?: unknown;
   }[]>;
 readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null; mode?: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }>;
-  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage; contextSnapshot?: { nextRequestInputTokens: number; contextWindow: number | null; contentRevision: number; modelProviderId: string | null; model: string; source: 'desktop' | 'tui'; computedAt: string } | null } | null>;
+  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage; contextSnapshot?: ContextAccountingSnapshot | null } | null>;
   readonly onConversationsChanged: (listener: (event: { conversationId: string; workspacePath: string | null; changeType: 'created' | 'messages-updated' | 'metadata-updated' | 'deleted'; revision: string; writerPid: number; changedAt: string }) => void) => () => void;
   readonly onWorkspacesChanged: (listener: (event: { workspacePath: string }) => void) => () => void;
   readonly conversationsUpdateTitle: (params: { id: string; title: string }) => Promise<unknown>;
@@ -562,9 +563,14 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly consumePendingTask: () => Promise<PendingTask | null>;
   readonly peekPendingTask: () => Promise<PendingTask | null>;
   readonly clearPendingTask: () => Promise<boolean>;
-  readonly chatCompact: (params: { conversationId: string; streamId: string }) => Promise<{ compacted: boolean; notification?: { method: string; beforeTokens: number; afterTokens: number; oldMessageCount: number; keptMessageCount: number; nextRequestInputTokens?: number; contextWindow?: number | null } }>;
+  readonly chatCompact: (params: { conversationId: string; streamId: string }) => Promise<{ compacted: boolean; notification?: { method: string; beforeTokens: number; afterTokens: number; oldMessageCount: number; keptMessageCount: number } }>;
   // 按会话查询当前压缩态（切会话恢复横幅用）。压缩态真值在主进程登记表，渲染层只表达。
   readonly chatCompactionGet: (params: { conversationId: string }) => Promise<{ compacting: true; streamId: string; percent: number | null; manual: boolean } | null>;
+  // restored 重投影(21 号文档 13.3):快照缺失/跨宿主时由 Runtime 按完整成分重算占用并回写共享快照。
+  readonly chatContextRestored?: (params: {
+    conversationId: string;
+    modelProviderId?: string | null;
+  }) => Promise<ContextAccountingSnapshot | null>;
   readonly promptSnapshotsList: (params?: { limit?: number }) => Promise<readonly PromptSnapshotIndexEntry[]>;
   readonly promptSnapshotsGet: (params: { id: string }) => Promise<PromptSnapshotRecord | null>;
   readonly promptContextEpochsList: (params?: { limit?: number }) => Promise<readonly PromptContextEpochRecord[]>;
@@ -585,11 +591,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     conversationId?: string;
     usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number };
     lifetimeUsage?: LifetimeUsage;
-    // ADR 52：下一次最终请求预计输入；UI 与发送前压缩共用。
-    // compactionSuggested 仅表达上下文压力；自动压缩由下一次 Runtime preflight 阻塞执行。
-    nextRequestInputTokens?: number;
-    contextWindow?: number;
-    compactionSuggested?: boolean;
+    contextAccounting?: ContextAccountingSnapshot;
   }) => void) => () => void;
   readonly onChatStreamAborted: (listener: (payload: { streamId: string; conversationId?: string }) => void) => () => void;
   readonly onChatStreamUsage: (listener: (payload: { streamId: string; usage?: { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number } }) => void) => () => void;
@@ -629,7 +631,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     delayMs?: number;
     reason?: string;
   }) => void) => () => void;
-  readonly onChatCompaction: (listener: (payload: { conversationId: string; streamId: string; stage?: 'start' | 'progress' | 'done' | 'idle'; percent?: number; receivedChars?: number; estimatedTotalChars?: number; method?: string; beforeTokens?: number; afterTokens?: number; oldMessageCount?: number; keptMessageCount?: number; nextRequestInputTokens?: number; contextWindow?: number | null; microcompacted?: boolean }) => void) => () => void;
+  readonly onChatCompaction: (listener: (payload: { conversationId: string; streamId: string; stage?: 'start' | 'progress' | 'done' | 'idle'; percent?: number; receivedChars?: number; estimatedTotalChars?: number; method?: string; beforeTokens?: number; afterTokens?: number; oldMessageCount?: number; keptMessageCount?: number; microcompacted?: boolean }) => void) => () => void;
   // 全局活跃流变更广播:main 在任一会话开始/结束流式时推送最新运行中的会话 id 列表。
   readonly onChatActiveStreamsChanged: (listener: (payload: {
     conversationIds: readonly string[];
@@ -654,6 +656,7 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
   readonly llmUpdateProvider: (params: { id: string; [key: string]: unknown }) => Promise<LlmProviderConfigView>;
   // 复制一个已有 provider（订阅类型不支持），返回复制后的完整列表。
   readonly llmDuplicateProvider: (params: { id: string }) => Promise<readonly LlmProviderConfigView[]>;
+  readonly llmDuplicateModel: (params: { id: string }) => Promise<readonly LlmProviderConfigView[]>;
   // B-2 在已有 provider 组内新增一个模型：凭证继承自组内首条，无需重填 apiKey。返回完整列表。
   readonly llmAddModel: (params: { groupId: string; [key: string]: unknown }) => Promise<readonly LlmProviderConfigView[]>;
   readonly llmRemoveProvider: (params: { id: string }) => Promise<readonly LlmProviderConfigView[]>;

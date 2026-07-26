@@ -48,6 +48,9 @@ importers:
       '@peer-agent/runtime-sdk':
         specifier: workspace:*
         version: link:../../packages/runtime-sdk
+      '@peer-agent/system-context':
+        specifier: workspace:*
+        version: link:../../packages/system-context
       '@peer-agent/task-thread':
         specifier: workspace:*
         version: link:../../packages/task-thread
@@ -142,6 +145,9 @@ importers:
       '@peer-agent/runtime-sdk':
         specifier: workspace:*
         version: link:../../packages/runtime-sdk
+      '@peer-agent/system-context':
+        specifier: workspace:*
+        version: link:../../packages/system-context
       adm-zip:
         specifier: ^0.5.17
         version: 0.5.17
@@ -178,7 +184,11 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
-  packages/conversation-store: {}
+  packages/conversation-store:
+    dependencies:
+      '@peer-agent/protocol':
+        specifier: workspace:*
+        version: link:../protocol
 
   packages/credential-helper:
     devDependencies:
@@ -208,6 +218,10 @@ importers:
         version: 5.9.3
 
   packages/runtime-core:
+    dependencies:
+      '@peer-agent/protocol':
+        specifier: workspace:*
+        version: link:../protocol
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -215,6 +229,9 @@ importers:
 
   packages/runtime-node:
     dependencies:
+      '@peer-agent/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@peer-agent/runtime-core':
         specifier: workspace:*
         version: link:../runtime-core
@@ -238,6 +255,8 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/system-context: {}
 
   packages/task-thread:
     dependencies:

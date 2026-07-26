@@ -1,11 +1,14 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
+import { createUnknownContextAccountingSnapshot } from '@peer-agent/runtime-core';
 import type {
   ClientToolCall,
   ConfigInstructionContextItem,
+  ContextAccountingSnapshot,
   ContextAttachmentItem,
   ContinuityContextItem,
   LlmProviderConfigView,
 } from '@peer-agent/protocol';
+import { contextAccountingModelKey } from '@peer-agent/protocol';
 import type React from 'react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
@@ -40,17 +43,12 @@ import {
   canAutoDispatchQueuedMessage,
   dispatchQueuedMessage,
 } from '../state/messageQueueDispatch';
+import { shouldRestoreContextAccounting } from '../state/contextRestore';
 import { getProviderModelDisplayLabel } from '../state/providerDisplay';
 import {
   buildMessageRailItemsIncremental,
   type MessageRailItemCache,
 } from '../state/messageRailItems';
-import { seedAuthoritativeContextOnSend } from '../state/contextOccupancy';
-import {
-  estimateConversationHistoryTokensIncremental,
-  estimateDraftTokens,
-  type ConversationTokenEstimateCache,
-} from '../state/tokenEstimate';
 import { intakeAttachments } from '../state/attachmentIntake';
 import {
   normalizeStreamSegment,
@@ -58,16 +56,15 @@ import {
   mergeReattachedSegments,
   contentFromSegments,
   isEmptyAssistantPlaceholder,
+  isEmptyUserMessage,
   groupSegments,
   getTextContent,
   migrateToSegments,
   findNextSerializedToolCall,
   parseSerializedToolSegments,
 } from '../state/streamSegments';
-import { toApiMessages } from '../state/apiMessageMapping';
 import {
   buildConversationAttachmentContext,
-  buildConversationContinuityContext,
   buildConfigInstructionContext,
   buildReplyLanguageContext,
   buildGitBranchPrefixContext,
@@ -79,8 +76,6 @@ import {
 import { IDLE_COMPACTION_STATE } from '../state/types';
 import type {
   ChatAttachment,
-  ChatApiContentPart,
-  ChatApiMessage,
   ContentSegment,
   ToolCallLegacy,
   CompactionMeta,
@@ -120,7 +115,6 @@ import { useConversationState } from '../hooks/useConversationState';
 import { beginConversationCompaction } from '../state/automaticCompaction';
 import {
   conversationStore,
-  type AuthoritativeContext,
   type ConversationRuntimeState,
 } from '../state/conversationStore';
 import { createFrameCoalescer } from '../state/frameCoalescer';
@@ -225,7 +219,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
   mode: ChatMode;
   effort: EffortLevel;
   modelProviderId: string | null;
-  authoritativeContext: AuthoritativeContext | null;
+  contextAccounting: ContextAccountingSnapshot | null;
 }> {
   const conv = await clientApi.conversationsGet({ id: conversationId });
   if (!conv?.messages) return {
@@ -234,7 +228,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
     mode: 'chat',
     effort: 'default',
     modelProviderId: null,
-    authoritativeContext: null,
+    contextAccounting: null,
   };
   // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'，历史 'goal' 归一化为 'plan'。
   const convMode: ChatMode = normalizeChatMode(conv.mode);
@@ -243,17 +237,8 @@ async function loadConversationMessages(conversationId: string): Promise<{
   const convEffort: EffortLevel = isEffortLevel(conv.effort) ? conv.effort : 'default';
   const convModelProviderId: string | null =
     typeof conv.modelProviderId === 'string' && conv.modelProviderId ? conv.modelProviderId : null;
-  const storedContext = conv.contextSnapshot && typeof conv.contextSnapshot === 'object'
-    ? conv.contextSnapshot as Record<string, unknown>
-    : null;
-  const storedTokens = Number(storedContext?.nextRequestInputTokens);
-  const storedWindow = Number(storedContext?.contextWindow);
-  const authoritativeContext: AuthoritativeContext | null = Number.isFinite(storedTokens) && storedTokens >= 0
-    ? {
-      nextRequestInputTokens: Math.floor(storedTokens),
-      contextWindow: Number.isFinite(storedWindow) && storedWindow > 0 ? Math.floor(storedWindow) : null,
-    }
-    : null;
+  const contextAccounting: ContextAccountingSnapshot | null =
+    conv.contextSnapshot?.version === 1 ? conv.contextSnapshot : null;
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0;
   const loaded = conv.messages.map((m: Record<string, unknown>) => {
     const msg: ChatMsg = {
@@ -293,7 +278,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
       msg.interrupted = true;
     }
     return msg;
-  }).filter((message) => !isEmptyAssistantPlaceholder(message));
+  }).filter((message) => !isEmptyAssistantPlaceholder(message) && !isEmptyUserMessage(message));
   // ADR 23: 计费优先读 index meta 的权威累计 lifetimeUsage(不受压缩影响)。
   // 仅当老会话尚无该字段时,才回退到遍历消息累加(此路径会被压缩低估,属兼容降级)。
   const lifetime = conv.lifetimeUsage as
@@ -312,7 +297,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
       mode: convMode,
       effort: convEffort,
       modelProviderId: convModelProviderId,
-      authoritativeContext,
+      contextAccounting,
     };
   }
   return {
@@ -323,7 +308,7 @@ async function loadConversationMessages(conversationId: string): Promise<{
     mode: convMode,
     effort: convEffort,
     modelProviderId: convModelProviderId,
-    authoritativeContext,
+    contextAccounting,
   };
 }
 
@@ -471,9 +456,9 @@ export function ChatSurface({
     SetStateAction<TokenUsageState | null>
   >;
   // ADR 52：主进程随回合结束下发下一次最终请求投影。
-  const authoritativeContext = convState.authoritativeContext;
-  const setAuthoritativeContext = useMemo(() => makeSetter('authoritativeContext'), [makeSetter]) as Dispatch<
-    SetStateAction<{ nextRequestInputTokens: number; contextWindow: number | null } | null>
+  const contextAccounting = convState.contextAccounting;
+  const setContextAccountingSnapshot = useMemo(() => makeSetter('contextAccounting'), [makeSetter]) as Dispatch<
+    SetStateAction<ContextAccountingSnapshot | null>
   >;
   const providerRecoveryNotice = convState.providerRecoveryNotice;
   const setProviderRecoveryNotice = useMemo(() => makeSetter('providerRecoveryNotice'), [makeSetter]) as Dispatch<
@@ -771,12 +756,37 @@ export function ChatSurface({
       preferredDefault: targetProvider?.reasoningDefaultEffort,
     });
 
-    // done 事件里的窗口属于上一模型。切模型后必须立即失效，展示层才能回退到目标
-    // provider 的模型级 contextWindow；下一轮结束后再由新模型快照接管。
-    setAuthoritativeContext(transition.authoritativeContext);
+    const countCapability =
+      targetProvider?.provider === 'anthropic'
+        ? { kind: 'provider_count_api' as const }
+        : { kind: 'observed_usage_only' as const };
+    setContextAccountingSnapshot(
+      createUnknownContextAccountingSnapshot({
+        identity: {
+          conversationId: conversationId || '__draft__',
+          contentRevision: contextAccounting?.contentRevision ?? 0,
+          modelKey: contextAccountingModelKey(providerId, targetProvider?.model),
+        },
+        contextWindow: targetProvider?.contextWindow ?? null,
+        countCapability,
+        phase: 'model_changed',
+        revision: (contextAccounting?.revision ?? 0) + 1,
+        compactionEpoch: contextAccounting?.compactionEpoch ?? 0,
+        pendingUncountedChanges: messages.length > 0,
+      }),
+    );
     changeModelProviderId(transition.modelProviderId);
     if (transition.effort !== effort) changeEffort(transition.effort);
-  }, [changeEffort, changeModelProviderId, effort, providers, setAuthoritativeContext]);
+  }, [
+    changeEffort,
+    changeModelProviderId,
+    contextAccounting,
+    conversationId,
+    effort,
+    messages.length,
+    providers,
+    setContextAccountingSnapshot,
+  ]);
   const isZh = i18n.locale === 'zh-CN';
   const compactionNoticeLabel = compactionStateLabel(compactionState, isZh);
   const currentTurnContext = useMemo(() => {
@@ -821,31 +831,46 @@ export function ChatSurface({
     railItemsCacheRef.current = { conversationId, isZh, cache };
     return cache.items;
   }, [conversationId, isStreaming, isZh, messages]);
-  // 本地历史估算仅用于尚未收到 Runtime 下一请求投影的冷启动降级。
-  const historyTokenCacheRef = useRef<{
-    conversationId: string | null;
-    cache: ConversationTokenEstimateCache;
-  } | null>(null);
-  const historyContextTokens = useMemo(() => {
-    const previous = historyTokenCacheRef.current;
-    const sameConversationCache = previous?.conversationId === conversationId
-      ? previous.cache
-      : undefined;
-    const next = estimateConversationHistoryTokensIncremental(
-      messages,
-      sameConversationCache,
-      isStreaming && Boolean(sameConversationCache),
-    );
-    historyTokenCacheRef.current = { conversationId, cache: next };
-    return next.totalTokens;
-  }, [conversationId, isStreaming, messages]);
-  // 草稿 token 增量由 ComposerTokenUsageDisplay 的叶子订阅计算，避免字符输入唤醒消息表面。
-  const authoritativeNextRequestInputTokens = authoritativeContext?.nextRequestInputTokens ?? null;
-  // 进度条分母优先用权威 contextWindow（与触发判定同窗口），消除 provider 配置窗口与
-  // 主进程实际所用窗口不一致时的百分比偏差；权威窗口未知时回退到 provider 配置窗口。
-  const authoritativeContextWindow = authoritativeContext?.contextWindow ?? undefined;
+  const contextAccountingWindow = contextAccounting?.contextWindow ?? undefined;
   // 当前轮进行中(流式/压缩)。草稿是否有内容由输入叶子自行判断。
   const isBusy = isStreaming || isCompactionActive;
+
+  // restored 计量:会话就绪但无权威快照(缺失/失效/跨宿主被守卫置 null)时,
+  // 请求 Runtime 按完整成分重算;未知期间圆环保持 unknown,不渲染伪造百分比。
+  // 运行中不触发:计量由 Runtime context.accounting 事件接管。
+  useEffect(() => {
+    if (loadStatus !== 'ready' || !conversationId || isDraftConversation) return;
+    const requiresRestore = shouldRestoreContextAccounting({
+      snapshot: contextAccounting,
+      providerId: activeProvider?.id ?? modelProviderId,
+      model: activeProvider?.model,
+    });
+    if (!requiresRestore || isBusy) return;
+    if (typeof clientApi.chatContextRestored !== 'function') return;
+    let cancelled = false;
+    void clientApi.chatContextRestored({
+      conversationId,
+      modelProviderId: activeProvider?.id ?? modelProviderId,
+    })
+      .then((snap) => {
+        if (cancelled || !snap) return;
+        setContextAccountingSnapshot(snap);
+      })
+      .catch(() => {
+        // 重投影失败保持未知,下一轮 done 仍会带来新快照。
+      });
+    return () => { cancelled = true; };
+  }, [
+    loadStatus,
+    conversationId,
+    isDraftConversation,
+    contextAccounting,
+    activeProvider?.id,
+    activeProvider?.model,
+    modelProviderId,
+    isBusy,
+    setContextAccountingSnapshot,
+  ]);
 
   useEffect(() => {
     setAttachments([]);
@@ -884,7 +909,7 @@ export function ChatSurface({
     // 压缩横幅真值在主进程登记表（按会话），切会话时先归零本地表达，避免上一会话的
     // 压缩横幅/进度残留到新会话；随后由下方查询按"新会话是否确在压缩"重新点亮。
     setCompactionState(IDLE_COMPACTION_STATE);
-    // authoritativeContext 已按 conversationId 分桶。切换订阅时必须保留目标会话自己的
+    // contextAccounting 已按 conversationId 分桶。切换订阅时必须保留目标会话自己的
     // triggerTokens 快照；主动清空会让同一会话退回本地历史估算，造成百分比口径跳变。
     // 切换会话时一并清掉本轮计时锚点,避免上一会话的实时跳秒残留到新会话。
     // 打字机缓冲的清空已上移到 useConversationStreamRouter（随前台会话切换自动 reset）。
@@ -912,7 +937,7 @@ export function ChatSurface({
         mode: convMode,
         effort: convEffort,
         modelProviderId: convModelProviderId,
-        authoritativeContext: storedAuthoritativeContext,
+        contextAccounting: storedContextAccountingSnapshot,
       } = await loadConversationMessages(conversationId);
       if (cancelled) return;
       // 消息可以先投影到 UI，但 loadStatus 必须保持 loading，直到下面的 compaction/stream
@@ -920,7 +945,7 @@ export function ChatSurface({
       convActions.set({
         messages: loaded,
         tokenUsage: usage,
-        authoritativeContext: storedAuthoritativeContext,
+        contextAccounting: storedContextAccountingSnapshot,
       });
       // 对话模式随会话恢复:每会话各自独立,切换会话即切到该会话自己的模式。
       setMode(convMode);
@@ -1048,14 +1073,14 @@ export function ChatSurface({
     void loadConversationMessages(conversationId).then(({
       messages: loaded,
       tokenUsage: usage,
-      authoritativeContext: storedAuthoritativeContext,
+      contextAccounting: storedContextAccountingSnapshot,
     }) => {
       if (cancelled) return;
       appliedExternalRevisionRef.current = conversationRevision;
       convActions.commitLoad({
         messages: loaded,
         tokenUsage: usage,
-        authoritativeContext: storedAuthoritativeContext,
+        contextAccounting: storedContextAccountingSnapshot,
       });
     });
     return () => { cancelled = true; };
@@ -1415,16 +1440,6 @@ export function ChatSurface({
       return true;
     }
 
-    // 发送瞬间固化「发送前可见占用」为权威种子：草稿清空后不会仅因口径切换从 63% 掉到 36%。
-    // 真实压缩 / stream done 仍会覆盖；切换模型会清空。
-    const seeded = seedAuthoritativeContextOnSend({
-      previousNextRequestInputTokens: authoritativeContext?.nextRequestInputTokens ?? null,
-      historyContextTokens,
-      draftContextTokens: estimateDraftTokens(text, sentAttachments),
-      contextWindow: authoritativeContext?.contextWindow ?? activeProvider?.contextWindow ?? null,
-    });
-    setAuthoritativeContext(seeded);
-
     const now = Date.now();
     const userMsg: ChatMsg = { id: nextId(), role: 'user', content: text, timestamp: now, attachments: sentAttachments.length ? sentAttachments : undefined };
     const assistantMsg: ChatMsg = { id: nextId(), role: 'assistant', content: '', segments: [], timestamp: now };
@@ -1455,15 +1470,13 @@ export function ChatSurface({
     setIsStreaming(true);
 
     const contextMessages = [...clearedHistory.messages, userMsg];
-    const apiMessages = toApiMessages(contextMessages);
     const contextAttachments = buildConversationAttachmentContext(contextMessages);
-    const continuityContext = buildConversationContinuityContext(contextMessages);
     const configInstructions = [
       ...buildConfigInstructionContext(systemInstructions),
       ...buildReplyLanguageContext(replyLanguage),
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
-    void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId, modelProviderId, workspacePath, contextAttachments, continuityContext, configInstructions });
+    void clientApi.chatSend({ streamId, assistantMessageId: assistantMsg.id, effort: turnEffort, mode, conversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
     return true;
   }, [
     isStreaming,
@@ -1479,10 +1492,6 @@ export function ChatSurface({
     replyLanguage,
     gitBranchPrefix,
     workspacePath,
-    authoritativeContext,
-    historyContextTokens,
-    activeProvider?.contextWindow,
-    setAuthoritativeContext,
   ]);
 
   const handleSend = useCallback(async () => {
@@ -1642,13 +1651,22 @@ export function ChatSurface({
     if (!target || target.role !== 'assistant') return;
 
     const contextMessages = messages.slice(0, msgIndex);
-    const newAssistant: ChatMsg = { id: nextId(), role: 'assistant', content: '', segments: [] };
+    const newAssistant: ChatMsg = {
+      id: nextId(),
+      role: 'assistant',
+      content: '',
+      segments: [],
+      timestamp: Date.now(),
+    };
     setMessages([...contextMessages, newAssistant]);
     setStreamError(null);
     setActiveUsage(null);
     setProviderRecoveryNotice(null);
 
-    await clientApi.conversationsUpdateLastMessage({ id: conversationId, content: '' });
+    await clientApi.conversationsReplaceMessages({
+      id: conversationId,
+      messages: serializeConversationMessages([...contextMessages, newAssistant]),
+    });
 
     const streamId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const turnStartedAt = Date.now();
@@ -1658,15 +1676,13 @@ export function ChatSurface({
     conversationStore.setState(conversationId, { streamId, turnStartedAt });
     setIsStreaming(true);
 
-    const apiMessages = toApiMessages(contextMessages);
     const contextAttachments = buildConversationAttachmentContext(contextMessages);
-    const continuityContext = buildConversationContinuityContext(contextMessages);
     const configInstructions = [
       ...buildConfigInstructionContext(systemInstructions),
       ...buildReplyLanguageContext(replyLanguage),
       ...buildGitBranchPrefixContext(gitBranchPrefix),
     ];
-    void clientApi.chatSend({ messages: apiMessages, streamId, assistantMessageId: newAssistant.id, effort, mode, conversationId, modelProviderId, workspacePath, contextAttachments, continuityContext, configInstructions });
+    void clientApi.chatSend({ streamId, assistantMessageId: newAssistant.id, effort, mode, conversationId, modelProviderId, workspacePath, contextAttachments, configInstructions });
   }, [isStreaming, hasProvider, conversationId, messages, effort, mode, modelProviderId, systemInstructions, replyLanguage, gitBranchPrefix, workspacePath]);
 
   const handleBranch = useCallback(async (msgIndex: number) => {
@@ -1683,7 +1699,11 @@ export function ChatSurface({
 
   const handleDeleteMessage = useCallback(async (msgIndex: number) => {
     if (!conversationId || isStreaming) return;
-    const updated = messages.filter((_, i) => i !== msgIndex);
+    // Drop the target message and any residual empty user bubbles so a later
+    // stream-end full-list replace cannot resurrect a bare "你" message.
+    const updated = messages
+      .filter((_, i) => i !== msgIndex)
+      .filter((m) => !isEmptyUserMessage(m));
     setMessages(updated);
     await clientApi.conversationsReplaceMessages({
       id: conversationId,
@@ -2184,14 +2204,10 @@ export function ChatSurface({
           </div>
           <ComposerTokenUsageDisplay
             conversationId={conversationId}
-            historyContextTokens={historyContextTokens}
-            contextReady={isDraftConversation || loadStatus === 'ready'}
-            attachments={attachments}
-            authoritativeNextRequestInputTokens={authoritativeNextRequestInputTokens}
             providers={providers}
             tokenUsage={tokenUsage}
             activeUsage={activeUsage}
-            contextWindow={authoritativeContextWindow}
+            contextWindow={contextAccountingWindow}
             isStreaming={isStreaming}
             isZh={isZh}
             effort={effort}
