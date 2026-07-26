@@ -54,9 +54,12 @@ import { buildRuntimeTools, createLlmChatService } from './llm-chat-service.mjs'
 import { removeConversationToolArtifacts } from '@peer-agent/runtime-node';
 import {
   createContextAccountingCompactionPipeline,
+  createRestoredObservedContextAccountingSnapshot,
   createUnknownContextAccountingSnapshot,
+  latestObservedUsageFromMessages,
   projectConversationHistory,
 } from '@peer-agent/runtime-core';
+import { contextAccountingModelKey } from '@peer-agent/protocol';
 import {
   countAnthropicCanonicalRequest,
   countGeminiCanonicalRequest,
@@ -2260,7 +2263,7 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
         contentRevision: Number.isSafeInteger(conv.contentRevision)
           ? conv.contentRevision + 1
           : 1,
-        modelKey: provider?.id || provider?.model || 'unknown-model',
+        modelKey: contextAccountingModelKey(provider?.id, provider?.model),
       },
       contextWindow,
       countCapability: exactAnthropic || exactGemini
@@ -2268,7 +2271,7 @@ ipcMain.handle('chat:compact', async (event, { conversationId, streamId }) => {
         : { kind: 'observed_usage_only' },
       initialSnapshot:
         conv.contextSnapshot?.version === 1
-        && conv.contextSnapshot.modelKey === (provider?.id || provider?.model)
+        && conv.contextSnapshot.modelKey === contextAccountingModelKey(provider?.id, provider?.model)
           ? conv.contextSnapshot
           : null,
       buildRequest(state) {
@@ -2472,7 +2475,7 @@ ipcMain.handle('chat:context:restored', async (
     contentRevision: Number.isSafeInteger(conv.contentRevision)
       ? conv.contentRevision
       : 0,
-    modelKey: provider?.id || provider?.model || 'unknown-model',
+    modelKey: contextAccountingModelKey(provider?.id, provider?.model),
   };
   const resolvedChannel = provider ? resolveChannel(provider) : null;
   let credential = null;
@@ -2543,15 +2546,29 @@ ipcMain.handle('chat:context:restored', async (
       command: 'count_only',
     })).snapshot;
   } else {
-    snapshot = createUnknownContextAccountingSnapshot({
-      identity,
-      contextWindow: provider?.contextWindow || null,
-      countCapability,
-      phase: 'restored',
-      revision: conv.contextSnapshot?.revision ?? 0,
-      compactionEpoch: conv.contextSnapshot?.compactionEpoch ?? 0,
-      pendingUncountedChanges: activeMessages.length > 0,
-    });
+    const restoredUsage = latestObservedUsageFromMessages(conv.messages)
+      ?? conversationStore.getLatestObservedUsage?.(conversationId, {
+        model: provider?.model,
+      });
+    snapshot = restoredUsage
+      ? createRestoredObservedContextAccountingSnapshot({
+          identity,
+          contextWindow: provider?.contextWindow || null,
+          countCapability,
+          usage: restoredUsage,
+          revision: conv.contextSnapshot?.revision ?? 0,
+          compactionEpoch: conv.contextSnapshot?.compactionEpoch ?? 0,
+          pendingUncountedChanges: activeMessages.length > 0,
+        })
+      : createUnknownContextAccountingSnapshot({
+          identity,
+          contextWindow: provider?.contextWindow || null,
+          countCapability,
+          phase: 'restored',
+          revision: conv.contextSnapshot?.revision ?? 0,
+          compactionEpoch: conv.contextSnapshot?.compactionEpoch ?? 0,
+          pendingUncountedChanges: activeMessages.length > 0,
+        });
   }
   try {
     conversationStore.updateContextSnapshot(conversationId, snapshot);

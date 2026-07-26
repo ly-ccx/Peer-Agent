@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { TextareaRenderable } from '@opentui/core';
 import { useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } from '@opentui/react';
-import type { LocalAccessLevel } from '@peer-agent/protocol';
+import { contextAccountingModelKey, type LocalAccessLevel } from '@peer-agent/protocol';
 import type { RuntimeModelSelection } from '@peer-agent/runtime-node';
 
 import { B3Wordmark } from './b3-wordmark-view.tsx';
@@ -1073,6 +1073,10 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       modelId: modelLabel,
       reasoningEffort: 'default',
     },
+    getContextWindow: (selection) => modelSelection?.catalog.find(
+      (entry) => entry.providerId === selection.providerId
+        && entry.modelId === selection.modelId,
+    )?.contextWindow,
   }), [host.workspaceRoot, modelLabel, modelSelection]);
   const controller = useMemo(
     () => createChatController({
@@ -1091,8 +1095,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       getModelKey: () => {
         const selection = selectedModelRef.current;
         return selection
-          ? `${selection.providerId}::${selection.modelId}`
-          : `unknown::${modelLabel}`;
+          ? contextAccountingModelKey(selection.providerId, selection.modelId)
+          : contextAccountingModelKey('unknown', modelLabel);
       },
     }),
     [host, model, planCoordinator, modelSelection, persistence],
@@ -1406,6 +1410,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     usage: snapshot.usage,
     contextWindow,
     contextAccounting: snapshot.contextAccounting,
+    emptyContext: renderWindowConversationId == null && snapshot.messages.length === 0,
   });
   const layout = responsiveLayout(terminal.width, terminal.height);
   const topbarDividerWidth = composerContentWidth(terminal.width, layout.outerPadding);

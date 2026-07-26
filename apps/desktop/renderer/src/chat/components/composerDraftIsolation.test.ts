@@ -18,6 +18,7 @@ test('draft input stays in the composer leaf and never becomes context token aut
   assert.match(controls, /conversationStore\.setDraft\(conversationId, value\)/);
   assert.match(tokenUsage, /useConversationContextAccounting\(conversationId\)/);
   assert.match(tokenUsage, /contextAccounting=\{contextAccounting\}/);
+  assert.match(tokenUsage, /emptyContext=\{conversationId == null\}/);
   assert.doesNotMatch(tokenUsage, /useConversationDraft|estimateDraftTokens|estimateStreamDeltaTokens/);
 });
 
@@ -75,4 +76,5 @@ test('unknown restored context renders as unknown, never zero percent', async ()
   assert.match(display, /const ctxPercent =[\s\S]*contextAccounting\?\.percent/);
   assert.match(display, /ctxPercent == null \? '\?' : `\$\{Math\.round\(ctxPercent\)\}%`/);
   assert.match(display, /Context pending measurement/);
+  assert.match(display, /emptyContext && contextAccounting == null/);
 });

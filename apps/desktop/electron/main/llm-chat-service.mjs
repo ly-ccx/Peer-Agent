@@ -8,6 +8,7 @@ import {
   createRuntimeToolProjection,
   renderSystemContext,
 } from './llm-prompts.mjs';
+import { contextAccountingModelKey } from '@peer-agent/protocol';
 import {
   normalizeAnthropicMessages,
   normalizeOpenAIMessages,
@@ -344,6 +345,12 @@ function wrapWebContentsForRuntimeEvents(
         ? sourceSegments.map((segment) => ({ ...segment }))
         : [],
     };
+    if (final && Number.isFinite(streamRecord.startedAt)) {
+      patch.durationMs = Math.max(0, now - streamRecord.startedAt);
+    }
+    if (final && hasBillableUsage(streamRecord.finalUsage)) {
+      patch.usage = { ...streamRecord.finalUsage };
+    }
     if (final && interrupted) patch.interrupted = true;
     try {
       conversationStore.updateMessageById(
@@ -849,7 +856,7 @@ export function createLlmChatService({
             && storedConversation.contentRevision >= 0
               ? storedConversation.contentRevision
               : 0,
-          modelKey: provider.id || provider.model,
+          modelKey: contextAccountingModelKey(provider.id, provider.model),
         };
         const initialContextAccounting =
           storedConversation?.contextSnapshot?.version === 1

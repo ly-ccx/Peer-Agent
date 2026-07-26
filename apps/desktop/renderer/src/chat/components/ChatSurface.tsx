@@ -8,6 +8,7 @@ import type {
   ContinuityContextItem,
   LlmProviderConfigView,
 } from '@peer-agent/protocol';
+import { contextAccountingModelKey } from '@peer-agent/protocol';
 import type React from 'react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
@@ -42,6 +43,7 @@ import {
   canAutoDispatchQueuedMessage,
   dispatchQueuedMessage,
 } from '../state/messageQueueDispatch';
+import { shouldRestoreContextAccounting } from '../state/contextRestore';
 import { getProviderModelDisplayLabel } from '../state/providerDisplay';
 import {
   buildMessageRailItemsIncremental,
@@ -763,7 +765,7 @@ export function ChatSurface({
         identity: {
           conversationId: conversationId || '__draft__',
           contentRevision: contextAccounting?.contentRevision ?? 0,
-          modelKey: providerId,
+          modelKey: contextAccountingModelKey(providerId, targetProvider?.model),
         },
         contextWindow: targetProvider?.contextWindow ?? null,
         countCapability,
@@ -838,13 +840,11 @@ export function ChatSurface({
   // 运行中不触发:计量由 Runtime context.accounting 事件接管。
   useEffect(() => {
     if (loadStatus !== 'ready' || !conversationId || isDraftConversation) return;
-    const requiresRestore =
-      contextAccounting == null
-      || contextAccounting.modelKey !== (activeProvider?.id ?? modelProviderId)
-      || (
-        contextAccounting.pressureSource === 'unknown'
-        && contextAccounting.phase === 'model_changed'
-      );
+    const requiresRestore = shouldRestoreContextAccounting({
+      snapshot: contextAccounting,
+      providerId: activeProvider?.id ?? modelProviderId,
+      model: activeProvider?.model,
+    });
     if (!requiresRestore || isBusy) return;
     if (typeof clientApi.chatContextRestored !== 'function') return;
     let cancelled = false;
@@ -866,6 +866,7 @@ export function ChatSurface({
     isDraftConversation,
     contextAccounting,
     activeProvider?.id,
+    activeProvider?.model,
     modelProviderId,
     isBusy,
     setContextAccountingSnapshot,

@@ -559,7 +559,7 @@ describe('llm chat service tool materialization', () => {
             contentRevision: 0,
             contextSnapshot: observedContextSnapshot({
               conversationId: 'c-compact-continue',
-              modelKey: 'p1',
+              modelKey: 'p1::test-model',
               inputTokens: 8_500,
               contextWindow: 9_000,
             }),
@@ -639,7 +639,7 @@ describe('llm chat service tool materialization', () => {
             contentRevision: 0,
             contextSnapshot: observedContextSnapshot({
               conversationId: 'c-compact-persist-fail',
-              modelKey: 'p1',
+              modelKey: 'p1::test-model',
               inputTokens: 8_500,
               contextWindow: 9_000,
             }),

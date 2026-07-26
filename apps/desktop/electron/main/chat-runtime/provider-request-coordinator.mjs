@@ -2,6 +2,7 @@ import {
   createContextAccountingCompactionPipeline,
   parseContextOverflowEvidence,
 } from '@peer-agent/runtime-core';
+import { contextAccountingModelKey } from '@peer-agent/protocol';
 import {
   applyMicrocompaction,
   runCompactionCheck,
@@ -89,11 +90,10 @@ export async function executeDesktopProviderRequest({
     identity: request?.accountingIdentity ?? {
       conversationId: request?.conversationId || request?.streamId || 'desktop',
       contentRevision: 0,
-      modelKey:
-        request?.providerConfig?.providerId
-        || request?.providerConfig?.id
-        || request?.providerConfig?.model
-        || 'unknown-model',
+      modelKey: contextAccountingModelKey(
+        request?.providerConfig?.providerId ?? request?.providerConfig?.id,
+        request?.providerConfig?.model,
+      ),
     },
     contextWindow: request?.contextWindow,
     countCapability: request?.countCapability ?? { kind: 'observed_usage_only' },

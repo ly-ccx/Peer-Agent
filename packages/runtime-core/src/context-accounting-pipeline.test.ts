@@ -3,6 +3,8 @@ import test from 'node:test';
 
 import {
   createContextAccountingCompactionPipeline,
+  createRestoredObservedContextAccountingSnapshot,
+  latestObservedUsageFromMessages,
   normalizeObservedInputTokens,
 } from './context-accounting-pipeline.ts';
 
@@ -87,6 +89,39 @@ test('normalizes observed input without double-counting provider cache fields', 
     }),
     100,
   );
+});
+
+test('restores a numeric provider-observed baseline from the last durable assistant usage', () => {
+  const usage = latestObservedUsageFromMessages([
+    { role: 'assistant', usage: { input: 10_000, cacheRead: 2_500 } },
+    { role: 'user', content: 'next question' },
+    { role: 'assistant', usage: { inputTokens: 42_000, cacheReadTokens: 3_000 } },
+  ]);
+
+  assert.deepEqual(usage, {
+    inputTokens: 42_000,
+    cacheReadTokens: 3_000,
+  });
+
+  const snapshot = createRestoredObservedContextAccountingSnapshot({
+    identity: {
+      conversationId: 'conversation-restored-observed',
+      contentRevision: 9,
+      modelKey: 'provider-a::grok-4.5',
+    },
+    contextWindow: 500_000,
+    countCapability: { kind: 'observed_usage_only' },
+    usage,
+    pendingUncountedChanges: true,
+    now: 456,
+  });
+
+  assert.equal(snapshot.phase, 'restored');
+  assert.equal(snapshot.authoritativeInputTokens, 45_000);
+  assert.equal(snapshot.percent, 9);
+  assert.equal(snapshot.pressureSource, 'provider_usage');
+  assert.equal(snapshot.pendingUncountedChanges, true);
+  assert.equal(snapshot.lastObserved?.inputTokens, 45_000);
 });
 
 test('publishes the complete accounting snapshot and degrades a drifting exact counter', async () => {

@@ -19,6 +19,7 @@ export function ComposerTokenUsageDisplay({
     <TokenUsageDisplay
       {...props}
       contextAccounting={contextAccounting}
+      emptyContext={conversationId == null}
     />
   );
 }

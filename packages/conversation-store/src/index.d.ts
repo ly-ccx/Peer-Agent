@@ -70,6 +70,10 @@ export interface ConversationStore {
     includeWorkspaceNameMatch?: boolean;
   }): ConversationMeta[];
   getConversation(id: string): StoredConversation | null;
+  getLatestObservedUsage(
+    id: string,
+    options?: { model?: string | null },
+  ): { inputTokens: number; cacheReadTokens: number } | null;
   createConversation(input?: { title?: string; workspacePath?: string; mode?: string }): ConversationMeta;
   appendMessage(id: string, message: object): unknown;
   updateMode(id: string, mode: string): unknown;
@@ -80,7 +84,10 @@ export interface ConversationStore {
   readonly [key: string]: unknown;
 }
 
-export function createConversationStore(options?: { storeDir?: string }): ConversationStore;
+export function createConversationStore(options?: {
+  storeDir?: string;
+  usageLogFile?: string;
+}): ConversationStore;
 
 export function rankConversationMatch(
   meta: Pick<ConversationMeta, 'title' | 'workspacePath'> | null | undefined,

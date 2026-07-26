@@ -307,10 +307,12 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
               segments: markDanglingToolCallsInterrupted(last.segments, '工具结果未返回（本轮已结束）'),
             };
             const updated = [...msgs.slice(0, -1), patched];
-            persistMessages(cid, updated);
+            // Main already persisted the final assistant payload and the
+            // matching context snapshot atomically before routing `done`.
+            // Replacing the transcript here would increment contentRevision
+            // and clear that snapshot immediately after it was written.
             return { messages: updated };
           }
-          persistMessages(cid, msgs);
           return {};
         });
         onUpdatedRef.current?.(cid);

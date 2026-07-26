@@ -1,7 +1,12 @@
 import { createConversationStore } from '@peer-agent/conversation-store';
-import { buildCompactionMarker } from '@peer-agent/protocol';
+import {
+  buildCompactionMarker,
+  contextAccountingModelKey,
+} from '@peer-agent/protocol';
 import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 import {
+  createRestoredObservedContextAccountingSnapshot,
+  latestObservedUsageFromMessages,
   projectConversationHistory,
 } from '@peer-agent/runtime-core';
 import { realpathSync } from 'node:fs';
@@ -50,6 +55,10 @@ interface ConversationStore {
   updateMode(id: string, mode: TuiMode): unknown;
   updateModelEffort(id: string, input: { effort: string; modelProviderId: string | null; model?: string }): unknown;
   updateContextSnapshot?(id: string, snapshot: ContextAccountingSnapshot): unknown;
+  getLatestObservedUsage?(
+    id: string,
+    options?: { model?: string | null },
+  ): { inputTokens: number; cacheReadTokens: number } | null;
   addUsage(id: string, usage: NonNullable<ChatSnapshot['usage']>): unknown;
   subscribeChanges?(listener: (event: ConversationChangeEvent) => void): () => void;
 }
@@ -481,18 +490,28 @@ function restoredProviderUsage(
 }
 
 function restoredSelection(value: Record<string, unknown>): RuntimeModelSelection | undefined {
-  if (typeof value.modelProviderId !== 'string' || typeof value.effort !== 'string') return undefined;
-  const separator = value.modelProviderId.indexOf('::');
-  if (separator <= 0 || separator === value.modelProviderId.length - 2) return undefined;
+  if (
+    typeof value.modelProviderId !== 'string'
+    || typeof value.model !== 'string'
+    || typeof value.effort !== 'string'
+  ) return undefined;
+  const binding = value.modelProviderId.trim();
+  const modelId = value.model.trim();
+  if (!binding || !modelId) return undefined;
+  const legacySuffix = `::${modelId}`;
+  const providerId = binding.endsWith(legacySuffix)
+    ? binding.slice(0, -legacySuffix.length)
+    : binding;
+  if (!providerId) return undefined;
   return {
-    providerId: value.modelProviderId.slice(0, separator),
-    modelId: value.modelProviderId.slice(separator + 2),
+    providerId,
+    modelId,
     reasoningEffort: value.effort as RuntimeModelSelection['reasoningEffort'],
   };
 }
 
 function modelProviderId(selection: RuntimeModelSelection): string {
-  return `${selection.providerId}::${selection.modelId}`;
+  return selection.providerId;
 }
 
 function normalizeWorkspacePath(workspacePath: string): string {
@@ -507,6 +526,7 @@ export function createTuiConversationPersistence(options: {
   readonly workspacePath: string;
   readonly initialMode: TuiMode;
   readonly initialModel: RuntimeModelSelection;
+  readonly getContextWindow?: (selection: RuntimeModelSelection) => number | undefined;
   readonly store?: ConversationStore;
   readonly now?: () => number;
   readonly onError?: (error: unknown) => void;
@@ -568,12 +588,37 @@ export function createTuiConversationPersistence(options: {
         if (messages.length === 0) return null;
         const activeContext = activeStoredContext(storedMessages);
         const providerUsage = restoredProviderUsage(messages);
-        const contextSnapshot = stored.contextSnapshot
+        const modelSelection = restoredSelection(stored);
+        const observedUsage = latestObservedUsageFromMessages(storedMessages)
+          ?? store.getLatestObservedUsage?.(id, { model: modelSelection?.modelId });
+        const persistedContextSnapshot = stored.contextSnapshot
           && typeof stored.contextSnapshot === 'object'
           && (stored.contextSnapshot as { version?: unknown }).version === 1
           && (stored.contextSnapshot as { conversationId?: unknown }).conversationId === id
           ? stored.contextSnapshot as unknown as ContextAccountingSnapshot
           : undefined;
+        const contentRevision = Number.isSafeInteger(Number(stored.contentRevision))
+          ? Math.max(0, Number(stored.contentRevision))
+          : 0;
+        const contextSnapshot = persistedContextSnapshot ?? (
+          modelSelection && observedUsage
+            ? createRestoredObservedContextAccountingSnapshot({
+                identity: {
+                  conversationId: id,
+                  contentRevision,
+                  modelKey: contextAccountingModelKey(
+                    modelSelection.providerId,
+                    modelSelection.modelId,
+                  ),
+                },
+                contextWindow: options.getContextWindow?.(modelSelection),
+                countCapability: { kind: 'observed_usage_only' },
+                usage: observedUsage,
+                pendingUncountedChanges: true,
+                now: now(),
+              })
+            : undefined
+        );
         return {
           id,
           mode: normalizeTuiMode(stored.mode, 'chat'),
@@ -582,7 +627,7 @@ export function createTuiConversationPersistence(options: {
           ...(activeContext.continuityContext
             ? { continuityContext: activeContext.continuityContext }
             : {}),
-          modelSelection: restoredSelection(stored),
+          ...(modelSelection ? { modelSelection } : {}),
           ...(providerUsage ? { usage: providerUsage } : {}),
           ...(contextSnapshot ? { contextSnapshot } : {}),
         };

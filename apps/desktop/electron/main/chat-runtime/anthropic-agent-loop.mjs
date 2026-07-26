@@ -1,5 +1,6 @@
 import { sendAnthropicMessagesStream } from '../provider-adapters/anthropic-messages-adapter.mjs';
 import { countAnthropicCanonicalRequest } from '../provider-adapters/context-count-adapter.mjs';
+import { contextAccountingModelKey } from '@peer-agent/protocol';
 import {
   createAgentLoopKernel,
   handleTerminalTextResponse,
@@ -70,7 +71,7 @@ export async function agentLoopAnthropic({
     accountingIdentity: accountingIdentity ?? {
       conversationId: conversationId || streamId,
       contentRevision: 0,
-      modelKey: providerId || model,
+      modelKey: contextAccountingModelKey(providerId, model),
     },
     initialContextAccounting,
     contextWindow,
@@ -122,7 +123,7 @@ export async function agentLoopAnthropic({
             accountingIdentity: accountingIdentity ?? {
               conversationId: conversationId || streamId,
               contentRevision: 0,
-              modelKey: providerId || model,
+              modelKey: contextAccountingModelKey(providerId, model),
             },
             initialContextAccounting: loop.getContextAccounting(),
             countCapability: { kind: 'provider_count_api' },

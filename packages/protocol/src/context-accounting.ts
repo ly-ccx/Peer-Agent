@@ -20,6 +20,31 @@ export type ContextAccountingPressureSource =
   | 'provider_error_evidence'
   | 'unknown';
 
+/**
+ * Canonical cross-host model identity used by context accounting.
+ *
+ * Desktop persists a credential/provider id and model separately. Older TUI
+ * builds persisted `${providerId}::${modelId}` in the provider-id field. This
+ * normalizer makes both shapes converge without treating a host migration as a
+ * model change.
+ */
+export function contextAccountingModelKey(
+  providerId: string | null | undefined,
+  modelId: string | null | undefined,
+): string {
+  const provider = typeof providerId === 'string' && providerId.trim()
+    ? providerId.trim()
+    : 'unknown-provider';
+  const model = typeof modelId === 'string' && modelId.trim()
+    ? modelId.trim()
+    : '';
+  const separator = provider.lastIndexOf('::');
+  const baseProvider = separator > 0 ? provider.slice(0, separator) : provider;
+  const embeddedModel = separator > 0 ? provider.slice(separator + 2) : '';
+  const resolvedModel = model || embeddedModel;
+  return resolvedModel ? `${baseProvider}::${resolvedModel}` : baseProvider;
+}
+
 export interface ContextAccountingObserved {
   readonly inputTokens: number;
   readonly requestFingerprint: string;

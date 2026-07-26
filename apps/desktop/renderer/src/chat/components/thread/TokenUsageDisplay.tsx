@@ -190,6 +190,7 @@ export function TokenUsageDisplay({
   tokenUsage,
   activeUsage,
   contextAccounting,
+  emptyContext = false,
   contextWindow,
   isStreaming,
   isZh,
@@ -207,6 +208,8 @@ export function TokenUsageDisplay({
   readonly activeUsage?: TokenUsageState | null;
   /** ADR 56: the sole context-capacity state. */
   readonly contextAccounting?: ContextAccountingSnapshot | null;
+  /** A brand-new draft has no conversation history and therefore starts at 0%. */
+  readonly emptyContext?: boolean;
   /** 权威上下文窗口（与压缩触发同窗口）。传入时优先于 provider 配置窗口，消除百分比偏差。 */
   readonly contextWindow?: number;
   readonly isStreaming?: boolean;
@@ -281,7 +284,9 @@ export function TokenUsageDisplay({
     typeof contextAccounting?.authoritativeInputTokens === 'number'
       && Number.isFinite(contextAccounting.authoritativeInputTokens)
       ? Math.max(0, contextAccounting.authoritativeInputTokens)
-      : null;
+      : emptyContext && contextAccounting == null
+        ? 0
+        : null;
   const cacheDenominator = input + cacheRead;
   const cacheHitPercent = cacheDenominator > 0 ? Math.round((cacheRead / cacheDenominator) * 100) : null;
   // 仅当前选中模型支持 Prompt 缓存时才展示缓存命中率，避免切到无缓存模型后仍显示旧模型遗留的累计缓存数据。
@@ -309,7 +314,9 @@ export function TokenUsageDisplay({
     typeof contextAccounting?.percent === 'number'
     && Number.isFinite(contextAccounting.percent)
       ? Math.min(Math.max(contextAccounting.percent, 0), 100)
-      : null;
+      : emptyContext && contextAccounting == null
+        ? 0
+        : null;
   const hasCtxRing = ctxWindow != null;
   const contextPending = contextAccounting?.pendingUncountedChanges === true;
   const contextCounterDegraded = contextAccounting?.counterStatus === 'degraded';

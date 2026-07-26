@@ -119,6 +119,18 @@ describe('composer status', () => {
     });
   });
 
+  test('shows zero for a brand-new empty session without treating restored unknown as zero', () => {
+    expect(contextStatus(undefined, 500_000, true)).toEqual({
+      context: 'context 0%',
+      contextShort: 'ctx 0%',
+      contextPercent: 0,
+    });
+    expect(contextStatus(undefined, 500_000, false)).toEqual({
+      context: 'context ?',
+      contextShort: 'ctx ?',
+    });
+  });
+
   test('derives mode permission and actual default reasoning status', () => {
     expect(createComposerStatus({
       workspaceRoot: '/Users/alice/Projects/peer_agent',

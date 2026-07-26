@@ -3,6 +3,7 @@ import {
   shouldUsePublicOpenAIChatStream,
 } from '../provider-adapters/openai-chat-adapter.mjs';
 import { sendOpenAIResponsesStream } from '../provider-adapters/openai-responses-adapter.mjs';
+import { contextAccountingModelKey } from '@peer-agent/protocol';
 import {
   createAgentLoopKernel,
   handleTerminalTextResponse,
@@ -77,7 +78,7 @@ export async function agentLoopOpenAI({
     accountingIdentity: accountingIdentity ?? {
       conversationId: conversationId || streamId,
       contentRevision: 0,
-      modelKey: providerId || model,
+      modelKey: contextAccountingModelKey(providerId, model),
     },
     initialContextAccounting,
     contextWindow,
@@ -131,7 +132,7 @@ export async function agentLoopOpenAI({
             accountingIdentity: accountingIdentity ?? {
               conversationId: conversationId || streamId,
               contentRevision: 0,
-              modelKey: providerId || model,
+              modelKey: contextAccountingModelKey(providerId, model),
             },
             initialContextAccounting: loop.getContextAccounting(),
             countCapability: { kind: 'observed_usage_only' },

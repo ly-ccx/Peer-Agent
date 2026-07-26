@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createConversationStore } from './conversation-store.mjs';
@@ -71,10 +71,101 @@ test('context snapshot is shared while revision and model still match', () => {
     assert.deepEqual(loaded.contextSnapshot, accountingSnapshot({
       conversationId: conv.id,
       contentRevision: 1,
-      modelKey: 'provider-1',
+      modelKey: 'provider-1::model-1',
     }));
   } finally {
     cleanup();
+  }
+});
+
+test('context snapshot sidecar survives an older client clearing the index field', () => {
+  const { store, dir, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'sidecar context' });
+    store.updateModelEffort(conv.id, { modelProviderId: 'provider-1', model: 'model-1' });
+    store.appendMessage(conv.id, { id: 'm1', role: 'user', content: 'hello' });
+    store.updateContextSnapshot(conv.id, accountingSnapshot());
+
+    const indexFile = path.join(dir, 'index.jsonl');
+    const rows = readFileSync(indexFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map(JSON.parse);
+    rows.find((row) => row.id === conv.id).contextSnapshot = null;
+    writeFileSync(indexFile, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
+
+    assert.equal(
+      store.getConversation(conv.id).contextSnapshot.authoritativeInputTokens,
+      19_500,
+    );
+
+    store.appendMessage(conv.id, { id: 'm2', role: 'user', content: 'changed' });
+    assert.equal(
+      store.getConversation(conv.id).contextSnapshot,
+      null,
+      'content revision still invalidates the sidecar',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('legacy TUI composite binding migrates to Desktop provider id without invalidating context', () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const conv = store.createConversation({ title: 'binding migration' });
+    store.updateModelEffort(conv.id, {
+      modelProviderId: 'provider-1::model-1',
+      model: 'model-1',
+    });
+    store.appendMessage(conv.id, { id: 'm1', role: 'user', content: 'hello' });
+    store.updateContextSnapshot(conv.id, accountingSnapshot({
+      modelKey: 'provider-1::model-1',
+    }));
+
+    store.updateModelEffort(conv.id, {
+      modelProviderId: 'provider-1',
+      model: 'model-1',
+    });
+
+    const loaded = store.getConversation(conv.id);
+    assert.equal(loaded.modelProviderId, 'provider-1');
+    assert.equal(loaded.contextSnapshot.modelKey, 'provider-1::model-1');
+    assert.equal(loaded.contextSnapshot.authoritativeInputTokens, 19_500);
+  } finally {
+    cleanup();
+  }
+});
+
+test('shared store restores the latest provider usage when legacy messages have no usage', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'peer-conversations-observed-'));
+  const usageLogFile = path.join(dir, 'usage', 'requests.jsonl');
+  const storeDir = path.join(dir, 'conversations');
+  try {
+    const store = createConversationStore({ storeDir, usageLogFile });
+    const conv = store.createConversation({ title: 'observed fallback' });
+    mkdirSync(path.dirname(usageLogFile), { recursive: true });
+    writeFileSync(usageLogFile, [
+      JSON.stringify({
+        conversationId: conv.id,
+        model: 'grok-4.5',
+        inputTokens: 10_000,
+        cacheReadTokens: 5_000,
+      }),
+      JSON.stringify({
+        conversationId: conv.id,
+        model: 'grok-4.5',
+        inputTokens: 42_000,
+        cacheReadTokens: 3_000,
+      }),
+    ].join('\n') + '\n');
+
+    assert.deepEqual(
+      store.getLatestObservedUsage(conv.id, { model: 'grok-4.5' }),
+      { inputTokens: 42_000, cacheReadTokens: 3_000 },
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

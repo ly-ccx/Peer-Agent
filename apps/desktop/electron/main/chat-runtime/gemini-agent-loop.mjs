@@ -1,5 +1,6 @@
 import { sendGeminiStream } from '../provider-adapters/gemini-adapter.mjs';
 import { countGeminiCanonicalRequest } from '../provider-adapters/context-count-adapter.mjs';
+import { contextAccountingModelKey } from '@peer-agent/protocol';
 import {
   createAgentLoopKernel,
   handleTerminalTextResponse,
@@ -65,7 +66,7 @@ export async function agentLoopGemini({
     accountingIdentity: accountingIdentity ?? {
       conversationId: conversationId || streamId,
       contentRevision: 0,
-      modelKey: providerId || model,
+      modelKey: contextAccountingModelKey(providerId, model),
     },
     initialContextAccounting,
     contextWindow,
@@ -118,7 +119,7 @@ export async function agentLoopGemini({
             accountingIdentity: accountingIdentity ?? {
               conversationId: conversationId || streamId,
               contentRevision: 0,
-              modelKey: providerId || model,
+              modelKey: contextAccountingModelKey(providerId, model),
             },
             initialContextAccounting: loop.getContextAccounting(),
             countCapability: authMethod === 'api_key'

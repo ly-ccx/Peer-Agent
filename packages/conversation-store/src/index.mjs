@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, ren
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { contextAccountingModelKey } from '@peer-agent/protocol';
 
 function defaultStoreDir() {
   const dataHome = process.env.PEER_AGENT_HOME || process.env.PEER_USER_DATA_PATH || path.join(os.homedir(), '.peer-agent');
@@ -32,6 +33,27 @@ function writeJsonl(filePath, rows) {
 function appendJsonl(filePath, row) {
   mkdirSync(path.dirname(filePath), { recursive: true });
   appendFileSync(filePath, JSON.stringify(row) + '\n', 'utf8');
+}
+
+function readJson(filePath) {
+  if (!existsSync(filePath)) return null;
+  try {
+    return JSON.parse(readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeJson(filePath, value) {
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  writeFileSync(temporaryPath, JSON.stringify(value), 'utf8');
+  try {
+    renameSync(temporaryPath, filePath);
+  } catch (error) {
+    try { unlinkSync(temporaryPath); } catch {}
+    throw error;
+  }
 }
 
 function writeChangeEvent(storeDir, event) {
@@ -172,15 +194,19 @@ function normalizeContextSnapshot(snapshot, meta) {
   if (!Number.isFinite(updatedAt) || updatedAt < 0) return null;
   if (conversationId !== String(meta?.id ?? '')) return null;
   if (contentRevision !== Number(meta?.contentRevision ?? 0)) return null;
-  const expectedModelKey = normalizeModelProviderId(meta?.modelProviderId)
-    ?? (typeof meta?.model === 'string' && meta.model.trim() ? meta.model.trim() : null);
-  if (!expectedModelKey || modelKey !== expectedModelKey) return null;
+  const providerBinding = normalizeModelProviderId(meta?.modelProviderId);
+  const storedModel = typeof meta?.model === 'string' && meta.model.trim()
+    ? meta.model.trim()
+    : null;
+  const expectedModelKey = contextAccountingModelKey(providerBinding, storedModel);
+  const legacyModelKey = providerBinding ?? storedModel;
+  if (modelKey !== expectedModelKey && modelKey !== legacyModelKey) return null;
   return {
     ...snapshot,
     version: 1,
     conversationId,
     contentRevision,
-    modelKey,
+    modelKey: expectedModelKey,
     revision,
     phase: snapshot.phase,
     compactionEpoch,
@@ -297,13 +323,25 @@ function sortByUpdatedAtDesc(items) {
   });
 }
 
-export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
+export function createConversationStore({
+  storeDir = defaultStoreDir(),
+  usageLogFile = path.join(path.dirname(storeDir), 'usage', 'requests.jsonl'),
+} = {}) {
   const indexFile = path.join(storeDir, 'index.jsonl');
+  const contextSnapshotDir = path.join(storeDir, '.context-snapshots');
 
   // 撤销 'goal'→'plan' 兼容映射前,先对存量数据做一次性迁移,避免历史 'goal' 被误判为自驱语义。
   migrateLegacyGoalMode(storeDir, indexFile);
 
   function convFile(id) { return path.join(storeDir, `${id}.jsonl`); }
+  function contextSnapshotFile(id) {
+    return path.join(contextSnapshotDir, `${encodeURIComponent(id)}.json`);
+  }
+  function durableContextSnapshot(meta) {
+    return normalizeContextSnapshot(readJson(contextSnapshotFile(meta.id)), meta)
+      ?? meta.contextSnapshot
+      ?? null;
+  }
   function publishChange(meta, changeType) {
     if (!meta?.id) return;
     writeChangeEvent(storeDir, {
@@ -581,14 +619,16 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     if (!meta) return null;
     const previousProviderId = normalizeModelProviderId(meta.modelProviderId);
     const previousModel = typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : null;
+    const previousContextModelKey = contextAccountingModelKey(previousProviderId, previousModel);
     if (effort !== undefined) meta.effort = normalizeEffort(effort);
     if (modelProviderId !== undefined) meta.modelProviderId = normalizeModelProviderId(modelProviderId);
     // 发送成功后可把本轮实际 model 快照落盘；null/空串表示清除。
     if (model !== undefined) {
       meta.model = typeof model === 'string' && model.trim() ? model.trim() : null;
     }
-    if (previousProviderId !== normalizeModelProviderId(meta.modelProviderId)
-      || previousModel !== (typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : null)) {
+    const nextProviderId = normalizeModelProviderId(meta.modelProviderId);
+    const nextModel = typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : null;
+    if (previousContextModelKey !== contextAccountingModelKey(nextProviderId, nextModel)) {
       meta.contextSnapshot = null;
     }
     meta.updatedAt = new Date().toISOString();
@@ -608,14 +648,22 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
       ...snapshot,
       conversationId: id,
       contentRevision,
-      modelKey: normalizeModelProviderId(meta.modelProviderId)
-        ?? (typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : ''),
+      modelKey: contextAccountingModelKey(
+        normalizeModelProviderId(meta.modelProviderId),
+        typeof meta.model === 'string' ? meta.model : null,
+      ),
     };
     const normalized = normalizeContextSnapshot(candidate, { ...meta, contentRevision });
     if (!normalized) return null;
     meta.contentRevision = contentRevision;
     meta.contextSnapshot = normalized;
     writeJsonl(indexFile, index);
+    // Keep the capacity snapshot in a sidecar as the cross-process authority.
+    // Older Desktop/TUI builds rewrite the whole index after normalizing fields
+    // they understand and can erase a newer snapshot. The sidecar survives that
+    // metadata write and is still rejected normally when model/content revision
+    // no longer matches.
+    writeJson(contextSnapshotFile(id), normalized);
     return withMessageCount(meta);
   }
 
@@ -624,7 +672,34 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     const meta = index.find((c) => c.id === id);
     if (!meta) return null;
     const messages = readJsonl(convFile(id));
-    return { ...meta, messages };
+    return {
+      ...meta,
+      contextSnapshot: durableContextSnapshot(meta),
+      messages,
+    };
+  }
+
+  function getLatestObservedUsage(id, { model } = {}) {
+    const conversationId = typeof id === 'string' ? id.trim() : '';
+    const expectedModel = typeof model === 'string' ? model.trim() : '';
+    if (!conversationId || !existsSync(usageLogFile)) return null;
+    const rows = readJsonl(usageLogFile);
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const row = rows[index];
+      if (row?.conversationId !== conversationId) continue;
+      if (expectedModel && typeof row.model === 'string' && row.model.trim() !== expectedModel) {
+        continue;
+      }
+      const inputTokens = Number(row?.inputTokens);
+      const cacheReadTokens = Number(row?.cacheReadTokens);
+      const input = Number.isFinite(inputTokens) && inputTokens >= 0 ? Math.floor(inputTokens) : 0;
+      const cacheRead = Number.isFinite(cacheReadTokens) && cacheReadTokens >= 0
+        ? Math.floor(cacheReadTokens)
+        : 0;
+      if (input <= 0 && cacheRead <= 0) continue;
+      return { inputTokens: input, cacheReadTokens: cacheRead };
+    }
+    return null;
   }
 
   function updateTitle(id, title) {
@@ -877,6 +952,10 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     const index = readIndex().filter((c) => c.id !== id);
     writeJsonl(indexFile, index);
     try { if (existsSync(convFile(id))) unlinkSync(convFile(id)); } catch {}
+    try {
+      const snapshotFile = contextSnapshotFile(id);
+      if (existsSync(snapshotFile)) unlinkSync(snapshotFile);
+    } catch {}
     return index.map((meta) => {
       return withMessageCount(meta);
     });
@@ -937,6 +1016,7 @@ export function createConversationStore({ storeDir = defaultStoreDir() } = {}) {
     searchConversations,
     createConversation: changed(createConversation, 'created'),
     getConversation,
+    getLatestObservedUsage,
     updateTitle: changed(updateTitle, 'metadata-updated'),
     updateMode: changed(updateMode, 'metadata-updated'),
     updateModelEffort: changed(updateModelEffort, 'metadata-updated'),

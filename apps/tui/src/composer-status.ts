@@ -24,6 +24,8 @@ export interface ComposerStatusInput {
   readonly usage?: ComposerUsageSnapshot;
   /** ADR 56: provider-backed accounting is the only capacity source. */
   readonly contextAccounting?: ContextAccountingSnapshot;
+  /** A new session with no persisted conversation history starts at 0%. */
+  readonly emptyContext?: boolean;
 }
 
 export interface ComposerStatus {
@@ -93,12 +95,20 @@ function compactTokens(tokens: number): string {
 export function contextStatus(
   accounting: ContextAccountingSnapshot | undefined,
   contextWindow?: number,
+  emptyContext = false,
 ): Pick<ComposerStatus, 'context' | 'contextShort' | 'contextPercent'> {
   const window = accounting?.contextWindow ?? contextWindow;
   const tokens = accounting?.authoritativeInputTokens;
   const degraded = accounting?.counterStatus === 'degraded';
   const statusMark = degraded ? '!' : '';
   if (tokens == null) {
+    if (emptyContext && accounting == null) {
+      return {
+        context: 'context 0%',
+        contextShort: 'ctx 0%',
+        contextPercent: 0,
+      };
+    }
     const suffix = statusMark ? ` ${statusMark}` : '';
     return {
       context: `context ?${suffix}`,
@@ -131,6 +141,7 @@ export function createComposerStatus(input: ComposerStatusInput): ComposerStatus
   const context = contextStatus(
     input.contextAccounting,
     input.contextWindow ?? contextWindowForModel(input.modelLabel),
+    input.emptyContext,
   );
   const language = languageOption(input.locale ?? 'zh-CN');
   return {

@@ -130,7 +130,7 @@ describe('TUI conversation persistence', () => {
     });
     expect(recorder.calls.find((call) => call.method === 'updateModelEffort')?.args[1]).toEqual({
       effort: 'high',
-      modelProviderId: 'provider-a::model-a',
+      modelProviderId: 'provider-a',
       model: 'model-a',
     });
   });
@@ -466,6 +466,57 @@ describe('TUI conversation persistence', () => {
       { role: 'user', content: 'resume me' },
       { role: 'assistant', content: 'ready' },
     ]);
+  });
+
+  test('restores provider-observed context from durable usage when the shared snapshot is missing', () => {
+    const stored = {
+      id: 'observed-restore',
+      mode: 'chat',
+      modelProviderId: 'provider-b',
+      model: 'grok-4.5',
+      effort: 'high',
+      contentRevision: 2,
+      contextSnapshot: null,
+      messages: [
+        { id: 'user-1', role: 'user', content: 'hello' },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: 'world',
+        },
+      ],
+    };
+    const persistence = createTuiConversationPersistence({
+      workspacePath: '/workspace',
+      initialMode: 'chat',
+      initialModel: selection,
+      getContextWindow: () => 500_000,
+      now: () => 456,
+      store: {
+        listConversations: () => [stored],
+        getConversation: (id: string) => id === stored.id ? stored : null,
+        createConversation: () => ({ id: 'unused' }),
+        appendMessage() {},
+        updateMode() {},
+        updateModelEffort() {},
+        addUsage() {},
+        getLatestObservedUsage() {
+          return { inputTokens: 42_000, cacheReadTokens: 3_000 };
+        },
+      },
+    });
+
+    const restored = persistence.loadConversation(stored.id);
+
+    expect(restored?.modelSelection).toEqual({
+      providerId: 'provider-b',
+      modelId: 'grok-4.5',
+      reasoningEffort: 'high',
+    });
+    expect(restored?.contextSnapshot?.authoritativeInputTokens).toBe(45_000);
+    expect(restored?.contextSnapshot?.percent).toBe(9);
+    expect(restored?.contextSnapshot?.pressureSource).toBe('provider_usage');
+    expect(restored?.contextSnapshot?.pendingUncountedChanges).toBe(true);
   });
 
   test('loads the complete Desktop transcript but resumes only after the latest compaction marker', () => {

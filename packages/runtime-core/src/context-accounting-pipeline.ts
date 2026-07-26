@@ -119,6 +119,125 @@ export function normalizeObservedInputTokens(usage: ObservedUsageInput | null | 
   return total > 0 ? total : null;
 }
 
+function storedUsageToken(...values: readonly unknown[]): number | undefined {
+  const value = values.find((candidate) => (
+    typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0
+  ));
+  return typeof value === 'number' ? Math.floor(value) : undefined;
+}
+
+/**
+ * Reads the last provider-observed request usage from a host-neutral durable
+ * transcript. Desktop stores input/cacheRead while TUI stores
+ * inputTokens/cacheReadTokens; both are accepted here.
+ */
+export function latestObservedUsageFromMessages(
+  messages: readonly unknown[] | null | undefined,
+): ObservedUsageInput | null {
+  if (!Array.isArray(messages)) return null;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || typeof message !== 'object' || Array.isArray(message)) continue;
+    const record = message as Record<string, unknown>;
+    if (record.role !== 'assistant') continue;
+    const usage = record.usage;
+    if (!usage || typeof usage !== 'object' || Array.isArray(usage)) continue;
+    const fields = usage as Record<string, unknown>;
+    const inputTokens = storedUsageToken(fields.inputTokens, fields.input);
+    const cacheReadTokens = storedUsageToken(fields.cacheReadTokens, fields.cacheRead);
+    if ((inputTokens ?? 0) <= 0 && (cacheReadTokens ?? 0) <= 0) continue;
+    return {
+      inputTokens: inputTokens ?? 0,
+      cacheReadTokens: cacheReadTokens ?? 0,
+      ...(typeof fields.inputIncludesCache === 'boolean'
+        ? { inputIncludesCache: fields.inputIncludesCache }
+        : {}),
+    };
+  }
+  return null;
+}
+
+/**
+ * Restores the last provider-backed baseline for observed-only channels.
+ *
+ * The restored number describes the last request actually measured by the
+ * provider. It remains marked pending because the assistant response and any
+ * later durable changes have not yet been measured as the next request.
+ */
+export function createRestoredObservedContextAccountingSnapshot(input: Readonly<{
+  identity: ContextAccountingIdentity;
+  contextWindow: number | null | undefined;
+  countCapability: ContextCountCapability;
+  usage: ObservedUsageInput | null | undefined;
+  revision?: number;
+  compactionEpoch?: number;
+  pendingUncountedChanges?: boolean;
+  now?: number;
+}>): ContextAccountingSnapshot {
+  const contextWindow = finiteWindow(input.contextWindow);
+  const inputTokens = normalizeObservedInputTokens(input.usage);
+  const revision = finiteRevision(input.revision);
+  const compactionEpoch = finiteRevision(input.compactionEpoch);
+  if (inputTokens == null) {
+    return {
+      version: 1,
+      conversationId: input.identity.conversationId,
+      contentRevision: finiteRevision(input.identity.contentRevision),
+      modelKey: input.identity.modelKey,
+      revision,
+      phase: 'restored',
+      compactionEpoch,
+      contextWindow,
+      inputBudget: contextWindow,
+      compactionThresholdTokens: contextWindow == null
+        ? null
+        : Math.floor(contextWindow * CONTEXT_PROJECTION_CONFIG.triggerRatio),
+      authoritativeInputTokens: null,
+      percent: null,
+      pressureSource: 'unknown',
+      pendingUncountedChanges: input.pendingUncountedChanges ?? true,
+      pendingContentChars: 0,
+      countCapability: input.countCapability,
+      counterStatus: 'active',
+      updatedAt: input.now ?? Date.now(),
+    };
+  }
+  const observedAt = input.now ?? Date.now();
+  const requestFingerprint =
+    `restored_observation_${input.identity.conversationId}_${compactionEpoch}`;
+  return {
+    version: 1,
+    conversationId: input.identity.conversationId,
+    contentRevision: finiteRevision(input.identity.contentRevision),
+    modelKey: input.identity.modelKey,
+    revision,
+    phase: 'restored',
+    compactionEpoch,
+    contextWindow,
+    inputBudget: contextWindow,
+    compactionThresholdTokens: contextWindow == null
+      ? null
+      : Math.floor(contextWindow * CONTEXT_PROJECTION_CONFIG.triggerRatio),
+    authoritativeInputTokens: inputTokens,
+    percent: contextWindow == null
+      ? null
+      : Math.min(100, Math.round((inputTokens / contextWindow) * 100)),
+    pressureSource: 'provider_usage',
+    pendingUncountedChanges: input.pendingUncountedChanges ?? true,
+    pendingContentChars: 0,
+    countCapability: input.countCapability,
+    counterStatus: 'active',
+    updatedAt: observedAt,
+    lastObserved: {
+      inputTokens,
+      requestFingerprint,
+      compactionEpoch,
+      source: 'provider_usage',
+      observedAt,
+    },
+  };
+}
+
 function stableValue(value: unknown, seen: WeakSet<object>): unknown {
   if (value == null || typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'number') return Number.isFinite(value) ? value : String(value);

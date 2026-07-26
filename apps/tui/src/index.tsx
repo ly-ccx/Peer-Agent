@@ -2,6 +2,7 @@
 
 import { createCliRenderer } from '@opentui/core';
 import { createRoot } from '@opentui/react';
+import { contextAccountingModelKey } from '@peer-agent/protocol';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -253,7 +254,7 @@ const model = provider
       getModel: () => modelSelection.getSelection().modelId,
       getModelKey: () => {
         const selection = modelSelection.getSelection();
-        return `${selection.providerId}::${selection.modelId}`;
+        return contextAccountingModelKey(selection.providerId, selection.modelId);
       },
       getReasoningEffort: () => modelSelection.getSelection().reasoningEffort,
       getContextWindow: () => {

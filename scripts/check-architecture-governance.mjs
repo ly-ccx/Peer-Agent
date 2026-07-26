@@ -610,6 +610,14 @@ function assertContextAccountingPolicyIsCentralized() {
   const pipeline = readText('packages/runtime-core/src/context-accounting-pipeline.ts');
   const tuiController = readText('apps/tui/src/chat-controller.ts');
   const rendererRouter = readText('apps/desktop/renderer/src/chat/hooks/useConversationStreamRouter.ts');
+  const composerTokenUsage = readText(
+    'apps/desktop/renderer/src/chat/components/ComposerTokenUsageDisplay.tsx',
+  );
+  const desktopMain = readText('apps/desktop/electron/main/main.mjs');
+  const conversationStore = readText('packages/conversation-store/src/index.mjs');
+  const tuiPersistence = readText('apps/tui/src/conversation-persistence.ts');
+  const tuiComposerStatus = readText('apps/tui/src/composer-status.ts');
+  const contextRestore = readText('apps/desktop/renderer/src/chat/state/contextRestore.ts');
   const tokenUsageDisplay = readText('apps/desktop/renderer/src/chat/components/thread/TokenUsageDisplay.tsx');
   const preload = readText('apps/desktop/electron/preload/preload.cjs');
   const preloadContract = readText('apps/desktop/renderer/src/preload/contracts/bootstrapPreloadApi.ts');
@@ -619,6 +627,9 @@ function assertContextAccountingPolicyIsCentralized() {
 
   if (!protocol.includes('export interface ContextAccountingSnapshot')) {
     fail('Protocol must define ContextAccountingSnapshot as the cross-host context-capacity state.');
+  }
+  if (!protocol.includes('export function contextAccountingModelKey')) {
+    fail('Protocol must own the canonical providerId::modelId context identity.');
   }
   for (const stage of ['buildRequest', 'countRequest', 'compact', 'send', 'getUsage']) {
     if (!pipeline.includes(stage)) {
@@ -660,6 +671,45 @@ function assertContextAccountingPolicyIsCentralized() {
   }
   if (/contextPending\s*\?\s*'\+'\s*:/.test(tokenUsageDisplay)) {
     fail('Desktop context percentage must not expose pending accounting through a custom + suffix.');
+  }
+  const doneHandler = rendererRouter.match(
+    /const offDone = clientApi\.onChatStreamDone\(([\s\S]*?)const offUsage =/,
+  )?.[1] ?? '';
+  const normalCompletion = doneHandler.slice(
+    doneHandler.indexOf("if (last?.role === 'assistant')"),
+  );
+  if (!normalCompletion || /persistMessages\(/.test(normalCompletion)) {
+    fail('Renderer normal done handling must not replace messages after main persists context accounting.');
+  }
+  for (const required of [
+    'latestObservedUsageFromMessages(conv.messages)',
+    'conversationStore.getLatestObservedUsage',
+    'createRestoredObservedContextAccountingSnapshot',
+  ]) {
+    if (!desktopMain.includes(required)) {
+      fail(`Desktop observed-only restore is missing durable provider evidence: ${required}.`);
+    }
+  }
+  if (!conversationStore.includes('getLatestObservedUsage')) {
+    fail('Conversation store must expose the shared request-usage restore fallback.');
+  }
+  if (
+    !conversationStore.includes("path.join(storeDir, '.context-snapshots')")
+    || !conversationStore.includes('durableContextSnapshot(meta)')
+  ) {
+    fail('Shared context snapshots must survive legacy cross-process index rewrites via a sidecar.');
+  }
+  if (!tuiPersistence.includes('store.getLatestObservedUsage')) {
+    fail('TUI restore must consume the shared request-usage fallback.');
+  }
+  if (!contextRestore.includes("snapshot.pressureSource === 'unknown'")) {
+    fail('Desktop must restore every unknown snapshot instead of treating restored unknown as usable.');
+  }
+  if (
+    !composerTokenUsage.includes('emptyContext={conversationId == null}')
+    || !tuiComposerStatus.includes('emptyContext && accounting == null')
+  ) {
+    fail('A brand-new empty Desktop/TUI conversation must display 0%, while restored unknown stays unknown.');
   }
 }
 
