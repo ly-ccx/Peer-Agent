@@ -30,6 +30,7 @@ describe('TUI app layout', () => {
     expect(topbarSource).toContain('height={1}');
     expect(topbarSource).toContain('{sessionWorkspacePath}');
     expect(topbarSource).toContain('{sessionTopbarModel}');
+    expect(topbarSource).toContain('{sessionTopbarQuota}');
     expect(topbarSource).toContain('<ComposerModeDivider width={topbarDividerWidth} />');
     expect(topbarSource).toContain('<box height={1} flexShrink={0} />');
   });
@@ -144,6 +145,9 @@ describe('TUI app layout', () => {
     expect(historySource).toContain('flexShrink={1}');
     expect(historySource).toContain('minHeight={0}');
     expect(historySource).toContain('stickyScroll');
+    expect(historySource).toContain('shouldPinLatestUserMessage');
+    expect(historySource).toContain('conversationBottomSpacerHeight');
+    expect(historySource).toContain('conversationMessageRenderId(message.id)');
     expect(dockSource).toContain('flexShrink={0}');
   });
 
@@ -718,6 +722,9 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('{sessionWorkspacePath}');
     expect(appSource).toContain('{sessionTopbarModel}');
     expect(appSource).toContain('sessionTopbarModelLabel(');
+    expect(appSource).toContain('{sessionTopbarQuota}');
+    expect(appSource).toContain('formatTuiTopbarQuota(');
+    expect(appSource).toContain('fetchTuiSubscriptionQuota');
     expect(appSource).toContain('compactWorkspacePath(host.workspaceRoot)');
     expect(appSource).toContain('<text fg={COLOR.success} wrapMode="none">{APP_CHROME.onlineDot}</text>');
     expect(appSource).not.toContain('backgroundColor={COLOR.border}');
@@ -811,8 +818,8 @@ describe('TUI conversation render window wiring', () => {
     expect(appSource).toContain('window={renderProjection.window}');
     expect(historySource).toContain('messages.map((message)');
     expect(historySource).not.toContain('snapshot.messages.map');
-    expect(historySource).toContain('/history earlier');
-    expect(historySource).toContain('/history later · /history latest');
+    expect(historySource).toContain('/history');
+    expect(historySource).toContain('Esc return to latest');
   });
 
   test('resets to latest for conversation changes and explicit sends', () => {

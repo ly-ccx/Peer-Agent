@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { TextareaRenderable } from '@opentui/core';
 import { useKeyboard, useRenderer, useSelectionHandler, useTerminalDimensions } from '@opentui/react';
-import { contextAccountingModelKey, type LocalAccessLevel } from '@peer-agent/protocol';
+import { contextAccountingModelKey, type LlmSubscriptionQuota, type LocalAccessLevel } from '@peer-agent/protocol';
 import type { RuntimeModelSelection } from '@peer-agent/runtime-node';
 
 import { B3Wordmark } from './b3-wordmark-view.tsx';
@@ -93,6 +93,15 @@ import {
   type ModelPickerViewRow,
   type TuiModelSelectionControl,
 } from './tui-model-selection.ts';
+import {
+  fetchTuiSubscriptionQuota,
+  formatTuiTopbarQuota,
+  remainingPercentFromQuota,
+  subscriptionQuotaColor,
+  supportsTuiSubscriptionQuota,
+  resolveSharedAuthMethod,
+  TUI_SUBSCRIPTION_QUOTA_REFRESH_MS,
+} from './tui-subscription-quota.ts';
 import type { PendingApproval, TuiHost } from './tui-host.ts';
 import { TUI_MODES, tuiModeOption, type TuiMode } from './tui-mode.ts';
 import {
@@ -1231,6 +1240,46 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       setThemeTick((tick) => tick + 1);
     });
   }, [themeStore]);
+  // Subscription quota for OAuth providers (ChatGPT / Gemini / Grok).
+  const [subscriptionQuota, setSubscriptionQuota] = useState<LlmSubscriptionQuota | null>(null);
+  useEffect(() => {
+    const credentialId = selectedModel?.providerId;
+    if (!credentialId) {
+      setSubscriptionQuota(null);
+      return;
+    }
+    const authMethod = resolveSharedAuthMethod({ credentialId });
+    if (!supportsTuiSubscriptionQuota(authMethod)) {
+      setSubscriptionQuota(null);
+      return;
+    }
+
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const next = await fetchTuiSubscriptionQuota({ credentialId });
+        if (!cancelled) setSubscriptionQuota(next);
+      } catch {
+        if (!cancelled) {
+          setSubscriptionQuota({
+            success: false,
+            status: 'fetch_failed',
+            providerId: credentialId,
+            error: 'Quota fetch failed',
+          });
+        }
+      }
+    };
+
+    void refresh();
+    const timer = setInterval(() => {
+      void refresh();
+    }, TUI_SUBSCRIPTION_QUOTA_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [selectedModel?.providerId]);
   const [composerDraft, setComposerDraft] = useState('');
   const imagePathRegistryRef = useRef(new Map<string, string>());
   const [experience, setExperience] = useState<TuiExperienceState>(() => createTuiExperienceState());
@@ -1405,6 +1454,8 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     selectedModel,
     modelLabel,
   );
+  const sessionTopbarQuota = formatTuiTopbarQuota(subscriptionQuota, locale);
+  const sessionTopbarQuotaRemaining = remainingPercentFromQuota(subscriptionQuota);
   const sessionWorkspacePath = compactWorkspacePath(host.workspaceRoot);
   const contextWindow = modelSelection?.catalog.find(
     (entry) => entry.providerId === selectedModel?.providerId
@@ -2399,6 +2450,11 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
               {sessionWorkspacePath}
             </text>
             <box flexGrow={1} minWidth={1} />
+            {sessionTopbarQuota ? (
+              <text fg={subscriptionQuotaColor(sessionTopbarQuotaRemaining)} wrapMode="none">
+                {sessionTopbarQuota}
+              </text>
+            ) : null}
             <text fg={COLOR.muted} wrapMode="none">
               {sessionTopbarModel}
             </text>
