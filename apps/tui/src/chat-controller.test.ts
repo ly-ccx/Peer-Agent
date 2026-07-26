@@ -793,6 +793,14 @@ describe('chat controller', () => {
       applyToolResults: (state) => state,
     };
     const controller = createChatController({ host: host(), model });
+    expect(controller.restore({
+      mode: 'chat',
+      messages: [
+        { id: 'prior-user', role: 'user', content: 'earlier' },
+        { id: 'prior-assistant', role: 'assistant', content: 'answer' },
+      ],
+      usage: { inputTokens: 99, outputTokens: 1, totalTokens: 100 },
+    })).toBe(true);
 
     await controller.send('fail');
 
@@ -800,6 +808,7 @@ describe('chat controller', () => {
     expect(controller.getSnapshot().error).toBe('provider exploded');
     expect(controller.getSnapshot().session?.lastTurn?.status).toBe('failed');
     expect(controller.getSnapshot().session?.lastTurn?.reason).toBe('provider exploded');
+    expect(controller.getSnapshot().usage).toBeUndefined();
   });
 
   test('compacts modelMessages while preserving UI transcript and invalidating old authority', async () => {

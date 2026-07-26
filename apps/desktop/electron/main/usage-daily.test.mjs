@@ -32,6 +32,8 @@ test('buildUsageDailySnapshot aggregates by local day and ignores out-of-range r
   const rows = [
     {
       at: new Date(2026, 6, 19, 9, 0, 0).toISOString(),
+      usageScope: 'runtime_turn',
+      providerRequestCount: 3,
       inputTokens: 100,
       outputTokens: 20,
       cacheReadTokens: 5,
@@ -68,12 +70,12 @@ test('buildUsageDailySnapshot aggregates by local day and ignores out-of-range r
   assert.equal(today.cacheReadTokens, 5);
   assert.equal(today.cacheWriteTokens, 1);
   assert.equal(today.totalTokens, 186);
-  assert.equal(today.requestCount, 2);
+  assert.equal(today.requestCount, 4);
   assert.equal(today.estimatedCostUsd, 0.03);
   assert.equal(yesterday.totalTokens, 30);
   assert.equal(yesterday.requestCount, 1);
   assert.equal(yesterday.estimatedCostUsd, null);
-  assert.equal(snap.totals.requestCount, 3);
+  assert.equal(snap.totals.requestCount, 5);
   assert.equal(snap.totals.activeDayCount, 2);
   assert.equal(snap.totals.maxTokens, 186);
   assert.equal(snap.notes.emptyLog, false);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -16,6 +16,7 @@ import {
   type ContextAccountingSnapshot,
 } from '@peer-agent/protocol';
 import type { TuiHost } from './tui-host.ts';
+import { createConversationStore } from '@peer-agent/conversation-store';
 
 function createStoreRecorder() {
   const calls: Array<{ method: string; args: unknown[] }> = [];
@@ -133,6 +134,56 @@ describe('TUI conversation persistence', () => {
       modelProviderId: 'provider-a',
       model: 'model-a',
     });
+  });
+
+  test('writes scoped TUI turns through the shared lifetime and ledger transaction', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'peer-tui-usage-scope-'));
+    const usageLogFile = path.join(dir, 'usage', 'requests.jsonl');
+    try {
+      const store = createConversationStore({
+        storeDir: path.join(dir, 'conversations'),
+        usageLogFile,
+      });
+      const persistence = createTuiConversationPersistence({
+        workspacePath: '/workspace',
+        initialMode: 'chat',
+        initialModel: selection,
+        now: () => 123,
+        store: store as never,
+      });
+
+      persistence.syncSnapshot(snapshot({
+        messages: [
+          { id: 'user-scoped', role: 'user', content: 'hello' },
+          { id: 'assistant-scoped', role: 'assistant', content: 'done' },
+        ],
+        usage: {
+          usageScope: 'runtime_turn',
+          providerRequestCount: 2,
+          inputTokens: 70,
+          outputTokens: 5,
+          cacheReadTokens: 10,
+          cacheWriteTokens: 0,
+          totalTokens: 85,
+        },
+      } as Partial<ChatSnapshot>));
+
+      const id = persistence.getConversationId();
+      expect(id).toBeDefined();
+      if (!id) throw new Error('Expected persisted conversation id.');
+      expect(store.getConversation(id)?.lifetimeUsage).toEqual({
+        inputTokens: 70,
+        outputTokens: 5,
+        cacheReadTokens: 10,
+        cacheWriteTokens: 0,
+      });
+      const ledger = JSON.parse(readFileSync(usageLogFile, 'utf8').trim());
+      expect(ledger.usageScope).toBe('runtime_turn');
+      expect(ledger.providerRequestCount).toBe(2);
+      expect(ledger.totalTokens).toBe(85);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('forwards only external changes for the active CLI conversation', () => {
@@ -468,7 +519,7 @@ describe('TUI conversation persistence', () => {
     ]);
   });
 
-  test('restores provider-observed context from durable usage when the shared snapshot is missing', () => {
+  test('restores provider-request context observation without reading runtime-turn billing', () => {
     const stored = {
       id: 'observed-restore',
       mode: 'chat',
@@ -500,8 +551,14 @@ describe('TUI conversation persistence', () => {
         updateMode() {},
         updateModelEffort() {},
         addUsage() {},
-        getLatestObservedUsage() {
-          return { inputTokens: 42_000, cacheReadTokens: 3_000 };
+        getLatestContextObservation() {
+          return {
+            inputTokens: 45_000,
+            requestFingerprint: 'request-final',
+            compactionEpoch: 0,
+            source: 'provider_usage' as const,
+            observedAt: 123,
+          };
         },
       },
     });
@@ -517,6 +574,8 @@ describe('TUI conversation persistence', () => {
     expect(restored?.contextSnapshot?.percent).toBe(9);
     expect(restored?.contextSnapshot?.pressureSource).toBe('provider_usage');
     expect(restored?.contextSnapshot?.pendingUncountedChanges).toBe(true);
+    expect(restored?.contextSnapshot?.lastObserved?.requestFingerprint).toBe('request-final');
+    expect(restored?.contextSnapshot?.lastObserved?.observedAt).toBe(123);
   });
 
   test('loads the complete Desktop transcript but resumes only after the latest compaction marker', () => {

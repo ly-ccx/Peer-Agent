@@ -127,7 +127,10 @@ export async function agentLoopOpenAI({
             continuityContext,
             tools,
             preserveLatestUserTurn: true,
-            usageSnapshot: loop.getLastTurnUsage?.() ?? null,
+            runtimeUsageAccounting: loop.usageAccounting,
+            onProviderRequest: ({ usage, requestFingerprint }) => {
+              loop.addUsage(usage, { requestFingerprint });
+            },
             rebuildSystemPrompt,
             accountingIdentity: accountingIdentity ?? {
               conversationId: conversationId || streamId,
@@ -165,7 +168,6 @@ export async function agentLoopOpenAI({
         if (typeof execution.systemPrompt === 'string' && execution.systemPrompt.trim()) {
           effectiveSystemPrompt = execution.systemPrompt;
         }
-        if (execution.compacted) loop.clearLastTurnUsage?.();
         const providerResponse = execution.response;
 
         if (!providerResponse.ok) {
@@ -184,8 +186,7 @@ export async function agentLoopOpenAI({
           return { kind: 'completed', state, reason: 'provider_error' };
         }
 
-        const { content, thinkingContent, toolCalls, streamUsage } = providerResponse;
-        loop.addUsage(streamUsage);
+        const { content, thinkingContent, toolCalls } = providerResponse;
         if (!toolCalls.length) {
           if (
             effectiveSupportsReasoning &&

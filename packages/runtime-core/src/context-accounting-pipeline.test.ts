@@ -4,7 +4,6 @@ import test from 'node:test';
 import {
   createContextAccountingCompactionPipeline,
   createRestoredObservedContextAccountingSnapshot,
-  latestObservedUsageFromMessages,
   normalizeObservedInputTokens,
 } from './context-accounting-pipeline.ts';
 
@@ -13,6 +12,16 @@ test('provider observed usage is authoritative and triggers compaction before th
   const pipeline = createContextAccountingCompactionPipeline({
     identity: { conversationId: 'conversation-observed', contentRevision: 1, modelKey: 'grok-4.5' },
     contextWindow: 500_000,
+    initialSnapshot: createRestoredObservedContextAccountingSnapshot({
+      identity: {
+        conversationId: 'conversation-observed',
+        contentRevision: 1,
+        modelKey: 'grok-4.5',
+      },
+      contextWindow: 500_000,
+      countCapability: { kind: 'observed_usage_only' },
+      usage: { inputTokens: 498_138, cacheReadTokens: 0 },
+    }),
     buildRequest: (state: { messages: string[] }) => ({ messages: [...state.messages] }),
     compact: async ({ state, reason }) => {
       compactReasons.push(reason);
@@ -28,10 +37,7 @@ test('provider observed usage is authoritative and triggers compaction before th
     getUsage: (response) => response.usage,
   });
 
-  const result = await pipeline.execute({
-    state: { messages: ['large history'] },
-    lastObservedUsage: { inputTokens: 498_138, cacheReadTokens: 0 },
-  });
+  const result = await pipeline.execute({ state: { messages: ['large history'] } });
 
   assert.deepEqual(compactReasons, ['observed_threshold']);
   assert.equal(result.compactionEpoch, 1);
@@ -43,6 +49,7 @@ test('provider observed usage is authoritative and triggers compaction before th
 test('Grok prompt overflow enters the same emergency compaction and single retry path', async () => {
   let sends = 0;
   let compactions = 0;
+  const providerRequests: Array<{ usage: unknown; error?: unknown }> = [];
   const pipeline = createContextAccountingCompactionPipeline({
     identity: { conversationId: 'conversation-overflow', contentRevision: 1, modelKey: 'grok-4.5' },
     contextWindow: 500_000,
@@ -61,6 +68,7 @@ test('Grok prompt overflow enters the same emergency compaction and single retry
       return { ok: true, usage: { inputTokens: 100_000 } };
     },
     getUsage: (response) => response.usage,
+    onProviderRequest: ({ usage, error }) => providerRequests.push({ usage, error }),
   });
 
   const result = await pipeline.execute({ state: { messages: ['old', 'latest'] } });
@@ -70,6 +78,10 @@ test('Grok prompt overflow enters the same emergency compaction and single retry
   assert.equal(result.retriedAfterOverflow, true);
   assert.equal(result.snapshot.lastOverflow?.requestedTokens, 501_244);
   assert.equal(result.snapshot.lastOverflow?.maximumTokens, 500_000);
+  assert.equal(providerRequests.length, 2);
+  assert.equal(providerRequests[0]?.usage, null);
+  assert.ok(providerRequests[0]?.error instanceof Error);
+  assert.deepEqual(providerRequests[1]?.usage, { inputTokens: 100_000 });
 });
 
 test('normalizes observed input without double-counting provider cache fields', () => {
@@ -91,18 +103,7 @@ test('normalizes observed input without double-counting provider cache fields', 
   );
 });
 
-test('restores a numeric provider-observed baseline from the last durable assistant usage', () => {
-  const usage = latestObservedUsageFromMessages([
-    { role: 'assistant', usage: { input: 10_000, cacheRead: 2_500 } },
-    { role: 'user', content: 'next question' },
-    { role: 'assistant', usage: { inputTokens: 42_000, cacheReadTokens: 3_000 } },
-  ]);
-
-  assert.deepEqual(usage, {
-    inputTokens: 42_000,
-    cacheReadTokens: 3_000,
-  });
-
+test('restores a numeric baseline only from explicit provider-request evidence', () => {
   const snapshot = createRestoredObservedContextAccountingSnapshot({
     identity: {
       conversationId: 'conversation-restored-observed',
@@ -111,7 +112,13 @@ test('restores a numeric provider-observed baseline from the last durable assist
     },
     contextWindow: 500_000,
     countCapability: { kind: 'observed_usage_only' },
-    usage,
+    usage: {
+      inputTokens: 45_000,
+      requestFingerprint: 'request-final',
+      compactionEpoch: 2,
+      observedAt: 123,
+    },
+    compactionEpoch: 2,
     pendingUncountedChanges: true,
     now: 456,
   });
@@ -122,6 +129,8 @@ test('restores a numeric provider-observed baseline from the last durable assist
   assert.equal(snapshot.pressureSource, 'provider_usage');
   assert.equal(snapshot.pendingUncountedChanges, true);
   assert.equal(snapshot.lastObserved?.inputTokens, 45_000);
+  assert.equal(snapshot.lastObserved?.requestFingerprint, 'request-final');
+  assert.equal(snapshot.lastObserved?.observedAt, 123);
 });
 
 test('publishes the complete accounting snapshot and degrades a drifting exact counter', async () => {

@@ -682,16 +682,23 @@ function assertContextAccountingPolicyIsCentralized() {
     fail('Renderer normal done handling must not replace messages after main persists context accounting.');
   }
   for (const required of [
-    'latestObservedUsageFromMessages(conv.messages)',
-    'conversationStore.getLatestObservedUsage',
+    'conversationStore.getLatestContextObservation',
     'createRestoredObservedContextAccountingSnapshot',
   ]) {
     if (!desktopMain.includes(required)) {
       fail(`Desktop observed-only restore is missing durable provider evidence: ${required}.`);
     }
   }
-  if (!conversationStore.includes('getLatestObservedUsage')) {
-    fail('Conversation store must expose the shared request-usage restore fallback.');
+  for (const forbidden of [
+    'latestObservedUsageFromMessages',
+    'getLatestObservedUsage',
+  ]) {
+    if (desktopMain.includes(forbidden) || tuiPersistence.includes(forbidden)) {
+      fail(`Context restore must never read billing/message usage: ${forbidden}.`);
+    }
+  }
+  if (!conversationStore.includes('getLatestContextObservation')) {
+    fail('Conversation store must expose the provider-request context observation sidecar.');
   }
   if (
     !conversationStore.includes("path.join(storeDir, '.context-snapshots')")
@@ -699,8 +706,14 @@ function assertContextAccountingPolicyIsCentralized() {
   ) {
     fail('Shared context snapshots must survive legacy cross-process index rewrites via a sidecar.');
   }
-  if (!tuiPersistence.includes('store.getLatestObservedUsage')) {
-    fail('TUI restore must consume the shared request-usage fallback.');
+  if (!tuiPersistence.includes('store.getLatestContextObservation')) {
+    fail('TUI restore must consume the shared context observation sidecar.');
+  }
+  if (
+    !conversationStore.includes('recordRuntimeTurnUsage')
+    || !tuiPersistence.includes('store.recordRuntimeTurnUsage')
+  ) {
+    fail('Desktop/TUI must share the scoped runtime-turn persistence seam.');
   }
   if (!contextRestore.includes("snapshot.pressureSource === 'unknown'")) {
     fail('Desktop must restore every unknown snapshot instead of treating restored unknown as usable.');

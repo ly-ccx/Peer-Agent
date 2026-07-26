@@ -3,6 +3,7 @@ export const DEFAULT_AGENT_LOOP_MAX_TURNS = AGENT_LOOP_UNBOUNDED;
 
 import {
   createContextAccountingLifecycle,
+  createRuntimeUsageAccounting,
   createUnknownContextAccountingSnapshot,
   isContextAccountingSnapshotCurrent,
 } from '@peer-agent/runtime-core';
@@ -119,21 +120,15 @@ export function createAgentLoopKernel({
     },
   };
 
-  const usage = {
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheWriteTokens: 0,
-    cacheReadTokens: 0,
-  };
-  // 最后一轮 usage 快照（每轮覆盖，非累加）。显示口径需要「最后一轮请求实际发送的
-  // input + cacheRead」来反映真实上下文大小；上面的 usage 是 lifetime 累加（计费 ledger），
-  // 不能当上下文大小用。详见 ADR 42。null 表示尚无可用的 provider usage。
-  let lastTurnUsage = null;
+  // One runtime turn may contain many provider requests. Keep their two
+  // meanings explicit: lastRequest is context-capacity truth; turnTotal is the
+  // billable aggregate persisted by the terminal path.
+  const usageAccounting = createRuntimeUsageAccounting();
   let unsupportedToolRetries = 0;
   let emptyResponseRetries = 0;
   let thinkingOnlyRetries = 0;
 
-  function addUsage(streamUsage = null) {
+  function addUsage(streamUsage = null, metadata = {}) {
     // 每轮模型响应恰好调用一次 addUsage，故在此回调 onRound 作为「轮次」信号。
     // 放在 streamUsage 空判定之前，确保无计费 usage 的轮次也被计入。
     if (typeof onRound === 'function') {
@@ -143,22 +138,7 @@ export function createAgentLoopKernel({
         // 进度回调失败不得影响主循环。
       }
     }
-    if (!streamUsage) return usage;
-    usage.inputTokens += streamUsage.inputTokens || 0;
-    usage.outputTokens += streamUsage.outputTokens || 0;
-    usage.cacheWriteTokens += streamUsage.cacheWriteTokens || 0;
-    usage.cacheReadTokens += streamUsage.cacheReadTokens || 0;
-    // 记录本轮快照（覆盖式）：仅当本轮带到了真实 input/cacheRead 才更新，
-    // 避免无计费 usage 的轮次把上一轮有效快照清掉。
-    if ((streamUsage.inputTokens || 0) > 0 || (streamUsage.cacheReadTokens || 0) > 0) {
-      lastTurnUsage = {
-        inputTokens: streamUsage.inputTokens || 0,
-        outputTokens: streamUsage.outputTokens || 0,
-        cacheWriteTokens: streamUsage.cacheWriteTokens || 0,
-        cacheReadTokens: streamUsage.cacheReadTokens || 0,
-      };
-    }
-    return usage;
+    return usageAccounting.observeProviderRequest(streamUsage, metadata).turnTotal;
   }
 
   function claimUnsupportedToolRetry() {
@@ -180,6 +160,7 @@ export function createAgentLoopKernel({
   }
 
   function sendDone() {
+    const usage = usageAccounting.snapshot().turnTotal;
     const payload = {
       streamId,
       usage,
@@ -189,7 +170,12 @@ export function createAgentLoopKernel({
   }
 
   function sendError(error) {
-    const payload = { streamId, error };
+    const usage = usageAccounting.snapshot().turnTotal;
+    const payload = {
+      streamId,
+      error,
+      contextAccounting: contextLifecycle.current(),
+    };
     if (hasBillableUsage(usage)) payload.usage = usage;
     webContents?.send?.('chat:stream:error', payload);
   }
@@ -205,21 +191,13 @@ export function createAgentLoopKernel({
     );
   }
 
-  function getLastTurnUsage() {
-    return lastTurnUsage;
-  }
-
-  function clearLastTurnUsage() {
-    // 压缩成功后清掉陈旧 usage，避免下一轮 preflight 被压缩前的高水位反复强制触发。
-    lastTurnUsage = null;
-  }
-
   return {
     maxTurns: normalizedMaxTurns,
-    usage,
+    get usage() {
+      return usageAccounting.snapshot().turnTotal;
+    },
+    usageAccounting,
     addUsage,
-    getLastTurnUsage,
-    clearLastTurnUsage,
     claimUnsupportedToolRetry,
     claimEmptyResponseRetry,
     claimThinkingOnlyRetry,

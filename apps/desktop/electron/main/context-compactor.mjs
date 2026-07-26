@@ -373,6 +373,7 @@ async function summarizeWithLLM({
   streamId = null,
   connectionRecoveryOptions = {},
   contextWindow = null,
+  onProviderUsage = null,
 }) {
   const { provider, baseUrl, apiKey, model } = providerConfig;
 
@@ -398,6 +399,14 @@ async function summarizeWithLLM({
   const maxSummaryChars = summaryMaxTokens * COMPACTION_CONFIG.charsPerToken;
   const inputChars = summaryInput.length;
   let accumulated = '';
+  let summaryUsage = null;
+  const reportUsage = () => {
+    try {
+      onProviderUsage?.(summaryUsage);
+    } catch {
+      // Usage telemetry must not change compaction semantics.
+    }
+  };
   const reportProgress = () => {
     if (typeof onProgress !== 'function') return;
     try {
@@ -468,6 +477,21 @@ async function summarizeWithLLM({
         accumulated += evt.delta.text;
         reportProgress();
       }
+      if (evt?.type === 'message_start' && evt?.message?.usage) {
+        const usage = evt.message.usage;
+        summaryUsage = {
+          inputTokens: usage.input_tokens ?? 0,
+          outputTokens: 0,
+          cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+          cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
+        };
+      }
+      if (evt?.type === 'message_delta' && evt?.usage) {
+        summaryUsage = {
+          ...(summaryUsage || {}),
+          outputTokens: evt.usage.output_tokens ?? 0,
+        };
+      }
     });
 
     logCompactionDiagnostic('summarize:done', {
@@ -475,6 +499,7 @@ async function summarizeWithLLM({
       accumulatedChars: accumulated.length,
       empty: accumulated.length === 0,
     });
+    reportUsage();
     return accumulated || null;
   }
 
@@ -531,6 +556,18 @@ async function summarizeWithLLM({
         accumulated += evt.response.output_text;
         reportProgress();
       }
+      if (evt?.type === 'response.completed' && evt?.response?.usage) {
+        const usage = evt.response.usage;
+        const cached = usage.input_tokens_details?.cached_tokens
+          ?? usage.prompt_tokens_details?.cached_tokens
+          ?? 0;
+        summaryUsage = {
+          inputTokens: Math.max(0, (usage.input_tokens ?? 0) - cached),
+          outputTokens: usage.output_tokens ?? 0,
+          cacheReadTokens: cached,
+          cacheWriteTokens: 0,
+        };
+      }
     });
 
     logCompactionDiagnostic('summarize:done', {
@@ -538,6 +575,7 @@ async function summarizeWithLLM({
       accumulatedChars: accumulated.length,
       empty: accumulated.length === 0,
     });
+    reportUsage();
     return accumulated || null;
   }
 
@@ -549,6 +587,7 @@ async function summarizeWithLLM({
     max_completion_tokens: summaryMaxTokens,
     temperature: COMPACTION_CONFIG.summaryTemperature,
     stream: true,
+    stream_options: { include_usage: true },
   };
 
   const res = await fetchWithConnectionRecovery(url, {
@@ -589,6 +628,17 @@ async function summarizeWithLLM({
       accumulated += delta;
       reportProgress();
     }
+    if (evt?.usage) {
+      const cached = evt.usage.prompt_tokens_details?.cached_tokens
+        ?? evt.usage.prompt_cache_hit_tokens
+        ?? 0;
+      summaryUsage = {
+        inputTokens: Math.max(0, (evt.usage.prompt_tokens ?? 0) - cached),
+        outputTokens: evt.usage.completion_tokens ?? 0,
+        cacheReadTokens: cached,
+        cacheWriteTokens: 0,
+      };
+    }
   });
 
   logCompactionDiagnostic('summarize:done', {
@@ -596,6 +646,7 @@ async function summarizeWithLLM({
     accumulatedChars: accumulated.length,
     empty: accumulated.length === 0,
   });
+  reportUsage();
   return accumulated || null;
 }
 
@@ -977,6 +1028,7 @@ export async function compactIfNeeded({
   // 可选：provider 真实 usage（input + cacheRead）。ADR 52：仅诊断，不参与 Layer2 触发。
   // 触发只看下一请求投影估算（messages + tools schema）。
   usageTokens = null,
+  onProviderUsage = null,
 }) {
   const microcompactResult = microcompactMessagesForContext(messages);
   messages = microcompactResult.messages;
@@ -1070,6 +1122,7 @@ export async function compactIfNeeded({
   if (providerConfig) {
     try {
       for (let attempt = 1; attempt <= COMPACTION_CONFIG.maxPtlRetries; attempt++) {
+        let usageReported = false;
         try {
           const rawSummary = await summarizeWithLLM({
             oldMessages: old,
@@ -1080,6 +1133,10 @@ export async function compactIfNeeded({
             streamId,
             connectionRecoveryOptions,
             contextWindow,
+            onProviderUsage(usage) {
+              usageReported = true;
+              onProviderUsage?.(usage);
+            },
           });
 
           if (rawSummary) {
@@ -1092,6 +1149,7 @@ export async function compactIfNeeded({
           }
           break; // success, exit retry loop
         } catch (err) {
+          if (!usageReported) onProviderUsage?.(null);
           const errMsg = err?.message || '';
           const isPromptTooLong =
             errMsg.includes('prompt_too_long') ||

@@ -1004,13 +1004,19 @@ describe('llm chat service tool materialization', () => {
           getDecryptedApiKey: () => 'test-key',
         },
         conversationStore: {
-          addUsage: (id, usage) => {
-            usageWrites.push({ id, usage });
+          recordRuntimeTurnUsage: (id, input) => {
+            usageWrites.push({ id, ...input });
             return {
-              inputTokens: 112,
-              outputTokens: 13,
-              cacheWriteTokens: 7,
-              cacheReadTokens: 55,
+              lifetimeUsage: {
+                usageScope: 'conversation_lifetime',
+                runtimeTurnCount: 4,
+                inputTokens: 112,
+                outputTokens: 13,
+                cacheWriteTokens: 7,
+                cacheReadTokens: 55,
+                totalTokens: 187,
+              },
+              ledgerRow: { id: 's1' },
             };
           },
         },
@@ -1028,10 +1034,13 @@ describe('llm chat service tool materialization', () => {
       assert.equal(outcome.requestedUserInput, false);
       assert.equal(outcome.toolCallCount, 0);
       assert.deepEqual(outcome.usage, {
+        usageScope: 'runtime_turn',
+        providerRequestCount: 1,
         inputTokens: 7,
         outputTokens: 3,
         cacheWriteTokens: 0,
         cacheReadTokens: 5,
+        totalTokens: 15,
       });
     } finally {
       globalThis.fetch = previousFetch;
@@ -1040,19 +1049,34 @@ describe('llm chat service tool materialization', () => {
     assert.deepEqual(usageWrites, [{
       id: 'c1',
       usage: {
+        usageScope: 'runtime_turn',
+        providerRequestCount: 1,
         inputTokens: 7,
         outputTokens: 3,
         cacheWriteTokens: 0,
         cacheReadTokens: 5,
+        totalTokens: 15,
+      },
+      attribution: {
+        id: 's1',
+        streamId: 's1',
+        modelProviderId: 'p1',
+        model: 'test-model',
+        providerName: null,
+        estimatedCostUsd: null,
+        pricingSource: null,
       },
     }]);
     const done = events.find((event) => event.channel === 'chat:stream:done');
     assert.ok(done);
     assert.deepEqual(done.payload.lifetimeUsage, {
+      usageScope: 'conversation_lifetime',
+      runtimeTurnCount: 4,
       inputTokens: 112,
       outputTokens: 13,
       cacheWriteTokens: 7,
       cacheReadTokens: 55,
+      totalTokens: 187,
     });
   });
 
@@ -1061,6 +1085,7 @@ describe('llm chat service tool materialization', () => {
     const previousFetch = globalThis.fetch;
     const events = [];
     const usageWrites = [];
+    const contextWrites = [];
     globalThis.fetch = async () => new Response(sse([
       {
         choices: [{ delta: {} }],
@@ -1096,6 +1121,9 @@ describe('llm chat service tool materialization', () => {
               cacheReadTokens: 40,
             };
           },
+          updateContextSnapshot: (id, snapshot) => {
+            contextWrites.push({ id, snapshot });
+          },
         },
       });
 
@@ -1114,10 +1142,13 @@ describe('llm chat service tool materialization', () => {
     assert.deepEqual(usageWrites, [{
       id: 'c1',
       usage: {
+        usageScope: 'runtime_turn',
+        providerRequestCount: 1,
         inputTokens: 20,
         outputTokens: 0,
         cacheWriteTokens: 0,
         cacheReadTokens: 10,
+        totalTokens: 30,
       },
     }]);
     const error = events.find((event) => event.channel === 'chat:stream:error');
@@ -1129,6 +1160,9 @@ describe('llm chat service tool materialization', () => {
       cacheWriteTokens: 0,
       cacheReadTokens: 40,
     });
+    assert.equal(contextWrites.length, 1);
+    assert.equal(contextWrites[0].id, 'c1');
+    assert.equal(contextWrites[0].snapshot.lastObserved.inputTokens, 30);
   });
 
   it('parses an OpenAI stream frame that ends without a trailing newline', async () => {

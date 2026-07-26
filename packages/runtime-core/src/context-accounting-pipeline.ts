@@ -21,7 +21,13 @@ export type {
 
 export type ObservedUsageInput = Readonly<{
   inputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
   cacheReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  requestFingerprint?: string;
+  compactionEpoch?: number;
+  observedAt?: number;
   /**
    * Some providers report cached input as a subset of inputTokens. Existing Peer
    * adapters normalize cache as a separate amount, so false is the safe default.
@@ -70,6 +76,12 @@ export type ContextAccountingPipelineOptions<TState, TRequest, TResponse> = Read
   }>) => MaybePromise<CompactResult<TState>>;
   send: (request: TRequest) => Promise<TResponse>;
   getUsage?: (response: TResponse) => ObservedUsageInput | null | undefined;
+  onProviderRequest?: (event: Readonly<{
+    requestFingerprint: string;
+    usage: ObservedUsageInput | null;
+    response?: TResponse;
+    error?: unknown;
+  }>) => void;
   getOverflow?: (response: TResponse) => ContextOverflowEvidence | null | undefined;
   fingerprintRequest?: (request: TRequest) => string;
   now?: () => number;
@@ -77,8 +89,6 @@ export type ContextAccountingPipelineOptions<TState, TRequest, TResponse> = Read
 
 export type ContextAccountingExecuteInput<TState> = Readonly<{
   state: TState;
-  lastObservedUsage?: ObservedUsageInput | null;
-  lastObservedRequestFingerprint?: string | null;
   forceCompact?: boolean;
   command?: 'send' | 'manual_compact' | 'count_only';
 }>;
@@ -119,44 +129,6 @@ export function normalizeObservedInputTokens(usage: ObservedUsageInput | null | 
   return total > 0 ? total : null;
 }
 
-function storedUsageToken(...values: readonly unknown[]): number | undefined {
-  const value = values.find((candidate) => (
-    typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0
-  ));
-  return typeof value === 'number' ? Math.floor(value) : undefined;
-}
-
-/**
- * Reads the last provider-observed request usage from a host-neutral durable
- * transcript. Desktop stores input/cacheRead while TUI stores
- * inputTokens/cacheReadTokens; both are accepted here.
- */
-export function latestObservedUsageFromMessages(
-  messages: readonly unknown[] | null | undefined,
-): ObservedUsageInput | null {
-  if (!Array.isArray(messages)) return null;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!message || typeof message !== 'object' || Array.isArray(message)) continue;
-    const record = message as Record<string, unknown>;
-    if (record.role !== 'assistant') continue;
-    const usage = record.usage;
-    if (!usage || typeof usage !== 'object' || Array.isArray(usage)) continue;
-    const fields = usage as Record<string, unknown>;
-    const inputTokens = storedUsageToken(fields.inputTokens, fields.input);
-    const cacheReadTokens = storedUsageToken(fields.cacheReadTokens, fields.cacheRead);
-    if ((inputTokens ?? 0) <= 0 && (cacheReadTokens ?? 0) <= 0) continue;
-    return {
-      inputTokens: inputTokens ?? 0,
-      cacheReadTokens: cacheReadTokens ?? 0,
-      ...(typeof fields.inputIncludesCache === 'boolean'
-        ? { inputIncludesCache: fields.inputIncludesCache }
-        : {}),
-    };
-  }
-  return null;
-}
-
 /**
  * Restores the last provider-backed baseline for observed-only channels.
  *
@@ -177,7 +149,9 @@ export function createRestoredObservedContextAccountingSnapshot(input: Readonly<
   const contextWindow = finiteWindow(input.contextWindow);
   const inputTokens = normalizeObservedInputTokens(input.usage);
   const revision = finiteRevision(input.revision);
-  const compactionEpoch = finiteRevision(input.compactionEpoch);
+  const compactionEpoch = finiteRevision(
+    input.compactionEpoch ?? input.usage?.compactionEpoch,
+  );
   if (inputTokens == null) {
     return {
       version: 1,
@@ -202,9 +176,15 @@ export function createRestoredObservedContextAccountingSnapshot(input: Readonly<
       updatedAt: input.now ?? Date.now(),
     };
   }
-  const observedAt = input.now ?? Date.now();
-  const requestFingerprint =
-    `restored_observation_${input.identity.conversationId}_${compactionEpoch}`;
+  const restoredObservedAt = Number(input.usage?.observedAt);
+  const observedAt = Number.isFinite(restoredObservedAt) && restoredObservedAt >= 0
+    ? restoredObservedAt
+    : input.now ?? Date.now();
+  const restoredFingerprint = typeof input.usage?.requestFingerprint === 'string'
+    ? input.usage.requestFingerprint.trim()
+    : '';
+  const requestFingerprint = restoredFingerprint
+    || `restored_observation_${input.identity.conversationId}_${compactionEpoch}`;
   return {
     version: 1,
     conversationId: input.identity.conversationId,
@@ -572,15 +552,6 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
   const execute = async (
     input: ContextAccountingExecuteInput<TState>,
   ): Promise<ContextAccountingExecuteResult<TState, TRequest, TResponse>> => {
-    if (input.lastObservedUsage) {
-      const legacyFingerprint =
-        (typeof input.lastObservedRequestFingerprint === 'string'
-          && input.lastObservedRequestFingerprint.trim())
-        || initial?.lastObserved?.requestFingerprint
-        || `unbound_observation_${identity().conversationId}_${compactionEpoch}`;
-      observe(input.lastObservedUsage, legacyFingerprint, false);
-    }
-
     let state = input.state;
     let built = await build(state);
     let decision = decide();
@@ -645,9 +616,38 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
 
     let retriedAfterOverflow = false;
     let response: TResponse;
+    let responseUsage: ObservedUsageInput | null = null;
+    const sendRequest = async (): Promise<TResponse> => {
+      try {
+        const nextResponse = await options.send(built.request);
+        responseUsage = options.getUsage?.(nextResponse) ?? null;
+        try {
+          options.onProviderRequest?.({
+            requestFingerprint: built.requestFingerprint,
+            usage: responseUsage,
+            response: nextResponse,
+          });
+        } catch {
+          // Usage telemetry must not change provider semantics.
+        }
+        return nextResponse;
+      } catch (error) {
+        responseUsage = null;
+        try {
+          options.onProviderRequest?.({
+            requestFingerprint: built.requestFingerprint,
+            usage: null,
+            error,
+          });
+        } catch {
+          // Usage telemetry must not change provider semantics.
+        }
+        throw error;
+      }
+    };
     try {
       assertFingerprint();
-      response = await options.send(built.request);
+      response = await sendRequest();
     } catch (error) {
       const evidence = parseContextOverflowEvidence(error);
       if (!evidence) throw error;
@@ -662,7 +662,7 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
       publish('post_compaction');
       publish('request_preflight');
       assertFingerprint();
-      response = await options.send(built.request);
+      response = await sendRequest();
     }
 
     const responseOverflow = overflowFromResponse(response);
@@ -678,7 +678,7 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
         publish('post_compaction');
         publish('request_preflight');
         assertFingerprint();
-        response = await options.send(built.request);
+        response = await sendRequest();
       }
     }
 
@@ -691,7 +691,7 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
       lastOverflowEpoch = compactionEpoch;
     }
 
-    observe(options.getUsage?.(response), built.requestFingerprint);
+    observe(responseUsage, built.requestFingerprint);
     // The response may add assistant/tool-call content to the next request.
     // Preserve the observed request as authority but mark the next request as
     // pending until it is rebuilt and counted.

@@ -5,6 +5,7 @@ import {
   COMPACTION_SUMMARY_SYSTEM_PROMPT,
   compactMessagesWithSummaryStrategy,
   createContextAccountingCompactionPipeline,
+  createRuntimeUsageAccounting,
   estimateCompactionProgressPercent,
   formatCompactionMessagesForSummary,
   microcompactMessagesForContext,
@@ -234,6 +235,9 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
     readonly messages: readonly ModelMessage[];
     readonly formattedHistory: string;
     readonly onProgress?: (percent: number) => void;
+    readonly onUsage?: (
+      usage: Awaited<ReturnType<ModelProvider['stream']>>['usage'],
+    ) => void;
   }): Promise<string> => {
     let streamedChars = 0;
     const inputChars = input.formattedHistory.length;
@@ -248,25 +252,32 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         }),
       );
     };
-    const result = await streamWithSafeRetry((options.getProvider?.() ?? options.provider), {
-      model: options.getModel?.() ?? options.model,
-      messages: [
-        { role: 'system', content: COMPACTION_SUMMARY_SYSTEM_PROMPT },
-        { role: 'user', content: input.formattedHistory },
-        { role: 'user', content: COMPACTION_SUMMARY_PROMPT },
-      ],
-      tools: [],
-      temperature: 0.2,
-      maxOutputTokens: 4096,
-      onEvent(event) {
-        if (event.type !== 'text.delta') return;
-        streamedChars += event.content.length;
-        // Shared Desktop/CLI progress: received/estimated summary chars.
-        reportLiveProgress();
-      },
-    });
+    let result: Awaited<ReturnType<ModelProvider['stream']>>;
+    try {
+      result = await streamWithSafeRetry((options.getProvider?.() ?? options.provider), {
+        model: options.getModel?.() ?? options.model,
+        messages: [
+          { role: 'system', content: COMPACTION_SUMMARY_SYSTEM_PROMPT },
+          { role: 'user', content: input.formattedHistory },
+          { role: 'user', content: COMPACTION_SUMMARY_PROMPT },
+        ],
+        tools: [],
+        temperature: 0.2,
+        maxOutputTokens: 4096,
+        onEvent(event) {
+          if (event.type !== 'text.delta') return;
+          streamedChars += event.content.length;
+          // Shared Desktop/CLI progress: received/estimated summary chars.
+          reportLiveProgress();
+        },
+      });
+    } catch (error) {
+      input.onUsage?.(undefined);
+      throw error;
+    }
     // Live stream never reports 100; controller post-process + done own the finish.
     reportLiveProgress();
+    input.onUsage?.(result.usage);
     return result.content;
   };
 
@@ -311,7 +322,10 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         ],
         modelMessages,
         toolExecutions: [],
-        ...(input.input.usage ? { usage: input.input.usage } : {}),
+        // A resumed usage value belongs to an earlier runtime turn. Every new
+        // turn starts a fresh accumulator while context capacity resumes from
+        // contextAccounting only.
+        usageAccounting: createRuntimeUsageAccounting(),
         ...(input.input.contextAccounting
           ? { contextAccounting: input.input.contextAccounting }
           : {}),
@@ -333,6 +347,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
       const contextWindow = Number.isFinite(contextWindowRaw) && contextWindowRaw > 0
         ? Math.floor(contextWindowRaw)
         : null;
+      const usageAccounting = state.usageAccounting ?? createRuntimeUsageAccounting();
       const midTurnCompactions: MidTurnCompaction[] = [];
       type PipelineState = Readonly<{ messages: readonly ModelMessage[] }>;
       type CanonicalRequest = Readonly<{
@@ -408,6 +423,12 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
                 messages: oldMessages as readonly ModelMessage[],
                 formattedHistory,
                 onProgress: (percent) => emitCompactionProgress(percent, 'progress'),
+                onUsage: (usage) => {
+                  usageAccounting.observeProviderRequest(usage, {
+                    requestPurpose: 'compaction_summary',
+                    capacityBearing: false,
+                  });
+                },
               });
             },
             summarizeStructurally: (messages) =>
@@ -456,21 +477,19 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         getUsage(response) {
           return response.usage;
         },
+        onProviderRequest({ usage, requestFingerprint }) {
+          usageAccounting.observeProviderRequest(usage, {
+            requestFingerprint,
+          });
+        },
       });
       const accountingResult = await accountingPipeline.execute({
         state: { messages: state.modelMessages },
-        ...(state.usage
-          ? {
-              lastObservedUsage: {
-                inputTokens: state.usage.inputTokens,
-                cacheReadTokens: state.usage.cacheReadTokens,
-              },
-            }
-          : {}),
       });
       const result = accountingResult.response;
       if (!result) throw new Error('Provider request completed without a response.');
       const workingMessages = accountingResult.state.messages;
+      const turnUsage = usageAccounting.snapshot().turnTotal;
 
       const accumulatedCompactions = [
         ...(state.midTurnCompactions ?? []),
@@ -496,7 +515,8 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
               { role: 'assistant', content: result.content || null, toolCalls: result.toolCalls },
             ],
             pendingToolCalls: result.toolCalls,
-            usage: result.usage,
+            usageAccounting,
+            usage: turnUsage,
             contextAccounting: accountingResult.snapshot,
             ...(accumulatedCompactions.length > 0
               ? { midTurnCompactions: accumulatedCompactions }
@@ -515,7 +535,8 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         state: {
           ...state,
           modelMessages: completedModelMessages,
-          usage: result.usage,
+          usageAccounting,
+          usage: turnUsage,
           contextAccounting: accountingResult.snapshot,
           ...(accumulatedCompactions.length > 0
             ? { midTurnCompactions: accumulatedCompactions }

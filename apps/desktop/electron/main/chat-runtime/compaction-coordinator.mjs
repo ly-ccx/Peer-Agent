@@ -277,6 +277,7 @@ export async function runCompactionCheck({
   tools = null,
   preserveLatestUserTurn = false,
   usageSnapshot = null,
+  runtimeUsageAccounting = null,
   rebuildSystemPrompt = null,
 }) {
   // ADR 52：preflight 与 UI 对同一下一请求投影计数。Layer 2 语义压缩仍接收
@@ -394,6 +395,12 @@ export async function runCompactionCheck({
       preserveLatestUserTurn,
       // Provider usage 已在 coordinator 单点决策并转成 force；Layer2 不再二次解释。
       usageTokens: budget.usageTokens,
+      onProviderUsage: (usage) => {
+        runtimeUsageAccounting?.observeProviderRequest?.(usage, {
+          requestPurpose: 'compaction_summary',
+          capacityBearing: false,
+        });
+      },
     });
 
     if (compactResult.compacted) {

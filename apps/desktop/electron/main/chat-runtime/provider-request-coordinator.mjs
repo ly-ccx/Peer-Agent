@@ -29,6 +29,7 @@ export async function coordinateDesktopProviderRequest({
   tools = null,
   preserveLatestUserTurn = true,
   usageSnapshot = null,
+  runtimeUsageAccounting = null,
   rebuildSystemPrompt = null,
   force = false,
   emergency = false,
@@ -48,6 +49,7 @@ export async function coordinateDesktopProviderRequest({
     tools,
     preserveLatestUserTurn,
     usageSnapshot,
+    runtimeUsageAccounting,
     rebuildSystemPrompt,
     force,
     emergency,
@@ -132,6 +134,7 @@ export async function executeDesktopProviderRequest({
     },
     send,
     getUsage,
+    onProviderRequest: request?.onProviderRequest,
     getOverflow(response) {
       if (response?.ok !== false) return null;
       return parseContextOverflowEvidence({
@@ -145,7 +148,6 @@ export async function executeDesktopProviderRequest({
       messages: sourceMessages,
       systemPrompt: sourceSystemPrompt,
     },
-    ...(request?.usageSnapshot ? { lastObservedUsage: request.usageSnapshot } : {}),
   });
   const finalMessages = accounting.state.messages;
   const projectedMessages = accounting.request.messages;

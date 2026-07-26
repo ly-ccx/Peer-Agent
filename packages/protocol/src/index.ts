@@ -4,6 +4,14 @@ export type LocalAccessLevel =
   | 'restricted_local'
   | 'full_local';
 
+export type {
+  ConversationLifetimeUsage,
+  ProviderRequestUsage,
+  RuntimeTurnUsage,
+  UsageAmounts,
+  UsageScope,
+} from './usage-accounting.ts';
+
 export type CapabilityRiskLevel =
   | 'L0_inert'
   | 'L1_local_read'

@@ -1,5 +1,9 @@
-import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
+import type {
+  ContextAccountingSnapshot,
+  RuntimeTurnUsage,
+} from '@peer-agent/protocol';
 import type { ModelMessage, ModelToolCall, ModelUsage } from '@peer-agent/runtime-node';
+import type { RuntimeUsageAccounting } from '@peer-agent/runtime-core';
 import {
   COMPACTION_PROGRESS_CONFIG,
   compactMessagesWithSummaryStrategy,
@@ -49,6 +53,7 @@ import {
 
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system';
 export type ChatRunStatus = 'idle' | 'running' | 'cancelling' | 'compacting';
+export type ChatUsage = ModelUsage | RuntimeTurnUsage;
 
 const STREAM_BUFFER_FLUSH_MS = 32;
 
@@ -94,7 +99,7 @@ export interface ChatMessage {
    * Prefer `segments` for ordered thinking/tool interleaving.
    */
   readonly thinkingContent?: string;
-  readonly usage?: ModelUsage;
+  readonly usage?: ChatUsage;
   /**
    * Tool presentations attached to the current assistant turn.
    * Desktop-compatible: multiple tool-calls share one assistant message.
@@ -123,7 +128,7 @@ export interface ChatSnapshot {
   readonly messages: readonly ChatMessage[];
   readonly session?: RuntimeSessionSnapshot;
   readonly plan?: PlanSnapshot;
-  readonly usage?: ModelUsage;
+  readonly usage?: ChatUsage;
   /** ADR 56: the only authoritative context-capacity state. */
   readonly contextAccounting?: ContextAccountingSnapshot;
   readonly error?: string;
@@ -148,7 +153,7 @@ export interface ChatModelInput {
   readonly history: readonly ChatMessage[];
   readonly modelMessages: readonly ModelMessage[];
   /** Last provider-observed usage, carried into the next request accounting epoch. */
-  readonly usage?: ModelUsage;
+  readonly usage?: ChatUsage;
   readonly contextAccounting?: ContextAccountingSnapshot;
   readonly systemContextBlocks?: readonly ChatSystemContextBlock[];
   readonly turnId: string;
@@ -162,7 +167,9 @@ export interface ChatModelState {
   /** 会话 id(initialize 时从 run 写入):供工具结果材料化按会话归档 artifact。 */
   readonly conversationId?: string;
   readonly pendingToolCalls?: readonly ModelToolCall[];
-  readonly usage?: ModelUsage;
+  /** Shared per-runtime-turn accumulator; never seed it from restored/lifetime usage. */
+  readonly usageAccounting?: RuntimeUsageAccounting;
+  readonly usage?: ChatUsage;
   readonly contextAccounting?: ContextAccountingSnapshot;
   /**
    * turn 内自动压缩记录(21 号文档 13.2 安全边界:provider 请求前 preflight /
@@ -214,7 +221,7 @@ export interface ChatRestoreInput {
   readonly modelMessages?: readonly ModelMessage[];
   /** Latest cumulative compaction summary, admitted through System Context. */
   readonly continuityContext?: string;
-  readonly usage?: ModelUsage;
+  readonly usage?: ChatUsage;
   readonly contextAccounting?: ContextAccountingSnapshot;
 }
 
@@ -695,6 +702,7 @@ export function createChatController(options: {
   // Shared per-turn accounting lifecycle owns revision order and pending
   // stream/tool changes. The TUI adapter only publishes its snapshots.
   let turnAccountingLifecycle: ContextAccountingLifecycle | null = null;
+  let activeRuntimeTurnUsage: ChatUsage | undefined;
 
   const appendAssistantDelta = (
     messages: ChatMessage[],
@@ -1020,6 +1028,7 @@ export function createChatController(options: {
             streamId: `${sessionId}:stream:0`,
           });
       const turn = activeTurn;
+      activeRuntimeTurnUsage = undefined;
       const turnMode = snapshot.mode;
       // Continuing a conversation retires historical interrupted markers so Desktop no longer
       // keeps a stale "已中断 / 继续生成" state on older assistant turns.
@@ -1103,6 +1112,15 @@ export function createChatController(options: {
           },
           { signal: turn.signal },
         );
+        const accountedTurn = result.state?.usageAccounting?.snapshot().turnTotal;
+        activeRuntimeTurnUsage = accountedTurn && (
+          accountedTurn.inputTokens > 0
+          || accountedTurn.outputTokens > 0
+          || accountedTurn.cacheReadTokens > 0
+          || accountedTurn.cacheWriteTokens > 0
+        )
+          ? accountedTurn
+          : result.state?.usage;
         flushStreamDeltaBuffer();
         if (result.state) conversationModelMessages = result.state.modelMessages;
 
@@ -1182,7 +1200,7 @@ export function createChatController(options: {
           mode: snapshot.mode,
           session: sessions.get(sessionId) ?? undefined,
           plan: options.planCoordinator?.getSnapshot() ?? undefined,
-          usage: result.state?.usage,
+          usage: activeRuntimeTurnUsage,
           contextAccounting: completedAccounting,
           messages: [
             ...finalizePendingMessages(snapshot.messages, {
@@ -1212,11 +1230,13 @@ export function createChatController(options: {
             error: detail,
           }),
           error: wasCancelled ? undefined : detail,
-          usage: snapshot.usage,
+          // Never charge the previous completed turn to this failed turn.
+          usage: activeRuntimeTurnUsage,
           contextAccounting: failedAccounting,
         });
       } finally {
         turnAccountingLifecycle = null;
+        activeRuntimeTurnUsage = undefined;
         if (activeTurn === turn) activeTurn = null;
       }
     },

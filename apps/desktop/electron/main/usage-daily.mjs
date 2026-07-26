@@ -123,13 +123,17 @@ export function buildUsageDailySnapshot({
     bucket.cacheReadTokens += cacheReadTokens;
     bucket.cacheWriteTokens += cacheWriteTokens;
     bucket.totalTokens += totalTokens;
-    bucket.requestCount += 1;
-    requestCount += 1;
+    const providerRequestCount = Math.max(
+      1,
+      Math.floor(finiteNumber(row.providerRequestCount) || 1),
+    );
+    bucket.requestCount += providerRequestCount;
+    requestCount += providerRequestCount;
 
     if (row.estimatedCostUsd != null && Number.isFinite(Number(row.estimatedCostUsd))) {
       bucket.estimatedCostUsd += Number(row.estimatedCostUsd);
       bucket.hasCost = true;
-      pricedRequestCount += 1;
+      pricedRequestCount += providerRequestCount;
     }
   }
 

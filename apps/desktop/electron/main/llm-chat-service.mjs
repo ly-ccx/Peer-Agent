@@ -40,6 +40,7 @@ import { fetchWithConnectionRecovery } from './provider-transports/recovering-fe
 import { getQoderModelMetadata, resolveQoderModelOptionProjection } from './provider-adapters/qoder-model-catalog.mjs';
 import { detectTailRepetition } from './repetition-detector.mjs';
 import { createUsageRequestLog } from './usage-request-log.mjs';
+import { estimateUsageCostUsd } from './usage-stats.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 
 const activeStreams = new Map();
@@ -188,42 +189,65 @@ function buildAgentRunOutcome(streamRecord = {}) {
 }
 
 function recordConversationUsage({ conversationStore, streamRecord, usage, usageRequestLog, llmConfigStore }) {
-  if (!conversationStore?.addUsage || !streamRecord?.conversationId || !hasBillableUsage(usage)) return null;
+  if (
+    (!conversationStore?.recordRuntimeTurnUsage && !conversationStore?.addUsage)
+    || !streamRecord?.conversationId
+    || !hasBillableUsage(usage)
+  ) return null;
   if (streamRecord.usageRecorded) return null;
   try {
-    const lifetimeUsage = conversationStore.addUsage(streamRecord.conversationId, usage);
-    streamRecord.usageRecorded = Boolean(lifetimeUsage);
-
-    // 1) 把本轮实际 provider/model 快照写回会话 meta，避免长期 null 导致统计归到「未绑定」。
-    //    但若用户绑定了解析失败的历史 id，本轮只是强绑定回退到默认，则不要用默认覆盖原绑定。
-    //    若历史 groupId::model 能解析到真实记录，则回写真实 id（顺带迁移）。
-    // 2) 追加请求级 usage 日志，供后续按请求聚合。
-    if (lifetimeUsage) {
-      const requestedModelProviderId = streamRecord.modelProviderId || null;
-      const actualModelProviderId = streamRecord.actualModelProviderId || null;
-      const model = streamRecord.actualModel || null;
-      const providers = typeof llmConfigStore?.listProviders === 'function'
-        ? llmConfigStore.listProviders()
-        : [];
-      const patch = resolveConversationModelBindingPatch({
-        providers,
-        requestedModelProviderId,
-        actualModelProviderId,
-        actualModel: model,
-      });
-      const modelProviderId = patch.modelProviderId
-        || actualModelProviderId
-        || requestedModelProviderId
-        || null;
-      try {
-        if (typeof conversationStore.updateModelEffort === 'function') {
-          conversationStore.updateModelEffort(streamRecord.conversationId, patch);
-        }
-      } catch (error) {
-        console.warn('[llm-chat] failed to persist provider snapshot:', error?.message || error);
+    const requestedModelProviderId = streamRecord.modelProviderId || null;
+    const actualModelProviderId = streamRecord.actualModelProviderId || null;
+    const model = streamRecord.actualModel || null;
+    const providers = typeof llmConfigStore?.listProviders === 'function'
+      ? llmConfigStore.listProviders()
+      : [];
+    const patch = resolveConversationModelBindingPatch({
+      providers,
+      requestedModelProviderId,
+      actualModelProviderId,
+      actualModel: model,
+    });
+    const modelProviderId = patch.modelProviderId
+      || actualModelProviderId
+      || requestedModelProviderId
+      || null;
+    try {
+      if (typeof conversationStore.updateModelEffort === 'function') {
+        conversationStore.updateModelEffort(streamRecord.conversationId, patch);
       }
+    } catch (error) {
+      console.warn('[llm-chat] failed to persist provider snapshot:', error?.message || error);
+    }
 
-      try {
+    let lifetimeUsage = null;
+    if (
+      usage?.usageScope === 'runtime_turn'
+      && typeof conversationStore.recordRuntimeTurnUsage === 'function'
+    ) {
+      const cost = estimateUsageCostUsd(usage, streamRecord.actualPricing || {});
+      const recorded = conversationStore.recordRuntimeTurnUsage(
+        streamRecord.conversationId,
+        {
+          usage,
+          attribution: {
+            id: streamRecord.streamId || undefined,
+            streamId: streamRecord.streamId || null,
+            modelProviderId,
+            model,
+            providerName: streamRecord.actualProviderName || null,
+            estimatedCostUsd: cost.hasPricing ? cost.estimatedCostUsd : null,
+            pricingSource: streamRecord.actualPricingSource || null,
+          },
+        },
+      );
+      lifetimeUsage = recorded?.lifetimeUsage ?? null;
+    } else {
+      // Compatibility for injected legacy stores/adapters. Production Desktop
+      // and TUI both use recordRuntimeTurnUsage.
+      lifetimeUsage = conversationStore.addUsage?.(streamRecord.conversationId, usage);
+      if (lifetimeUsage) {
+        try {
         usageRequestLog?.append?.({
           id: streamRecord.streamId || undefined,
           conversationId: streamRecord.conversationId,
@@ -232,14 +256,17 @@ function recordConversationUsage({ conversationStore, streamRecord, usage, usage
           model,
           providerName: streamRecord.actualProviderName || null,
           usage,
+          providerRequestCount: usage?.providerRequestCount,
           pricing: streamRecord.actualPricing || {},
           pricingSource: streamRecord.actualPricingSource || null,
         });
-      } catch (error) {
-        console.warn('[llm-chat] failed to append usage request log:', error?.message || error);
+        } catch (error) {
+          console.warn('[llm-chat] failed to append usage request log:', error?.message || error);
+        }
       }
     }
 
+    streamRecord.usageRecorded = Boolean(lifetimeUsage);
     return lifetimeUsage;
   } catch (error) {
     console.warn('[llm-chat] failed to record conversation usage:', error?.message || error);
@@ -491,8 +518,7 @@ function wrapWebContentsForRuntimeEvents(
           });
         }
         persistStreamRecord({ final: true, interrupted: erroredTerminal });
-        if (!erroredTerminal
-          && payload?.contextAccounting?.version === 1
+        if (payload?.contextAccounting?.version === 1
           && typeof conversationStore?.updateContextSnapshot === 'function'
           && streamRecord.conversationId) {
           conversationStore.updateContextSnapshot(

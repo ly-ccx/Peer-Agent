@@ -42,9 +42,12 @@ test('appendUsageRequestLog writes request snapshot with estimated cost', () => 
       outputPrice: 10,
     },
     pricingSource: 'models.dev-reference',
+    providerRequestCount: 3,
   });
 
   assert.equal(record.inputTokens, 1_000_000);
+  assert.equal(record.usageScope, 'runtime_turn');
+  assert.equal(record.providerRequestCount, 3);
   assert.ok(Math.abs(record.estimatedCostUsd - 2.5) < 1e-9);
 
   const lines = readFileSync(logFile, 'utf8').trim().split('\n');
@@ -53,6 +56,8 @@ test('appendUsageRequestLog writes request snapshot with estimated cost', () => 
   assert.equal(saved.modelProviderId, 'openai::gpt-4o');
   assert.equal(saved.model, 'gpt-4o');
   assert.equal(saved.conversationId, 'conv-1');
+  assert.equal(saved.usageScope, 'runtime_turn');
+  assert.equal(saved.providerRequestCount, 3);
 });
 
 test('readAll returns trailing entries', () => {

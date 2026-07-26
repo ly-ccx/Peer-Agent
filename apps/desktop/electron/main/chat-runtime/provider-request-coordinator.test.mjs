@@ -4,6 +4,7 @@ import {
   coordinateDesktopProviderRequest,
   executeDesktopProviderRequest,
 } from './provider-request-coordinator.mjs';
+import { createRestoredObservedContextAccountingSnapshot } from '@peer-agent/runtime-core';
 
 describe('Desktop provider request coordinator', () => {
   it('coordinates compaction without publishing a parallel context projection', async () => {
@@ -59,7 +60,21 @@ describe('Desktop provider request coordinator', () => {
         systemPrompt: 'system',
         contextWindow: 500_000,
         providerConfig: { model: 'grok-4.5' },
-        usageSnapshot: { inputTokens: 498_138 },
+        accountingIdentity: {
+          conversationId: 'conversation-observed',
+          contentRevision: 1,
+          modelKey: 'provider::grok-4.5',
+        },
+        initialContextAccounting: createRestoredObservedContextAccountingSnapshot({
+          identity: {
+            conversationId: 'conversation-observed',
+            contentRevision: 0,
+            modelKey: 'provider::grok-4.5',
+          },
+          contextWindow: 500_000,
+          countCapability: { kind: 'observed_usage_only' },
+          usage: { inputTokens: 498_138 },
+        }),
       },
       compactRequest: async ({ messages, systemPrompt }) => {
         compactCalls += 1;

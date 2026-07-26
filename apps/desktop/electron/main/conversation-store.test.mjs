@@ -57,6 +57,76 @@ test('addUsage accumulates lifetime usage on index meta', () => {
   }
 });
 
+test('recordRuntimeTurnUsage serializes scoped lifetime and runtime-turn ledger writes', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'conv-usage-scope-'));
+  const storeDir = path.join(dir, 'conversations');
+  const usageLogFile = path.join(dir, 'usage', 'requests.jsonl');
+  try {
+    const store = createConversationStore({ storeDir, usageLogFile });
+    const conv = store.createConversation({ title: 'scoped usage' });
+    const recorded = store.recordRuntimeTurnUsage(conv.id, {
+      usage: {
+        usageScope: 'runtime_turn',
+        providerRequestCount: 3,
+        inputTokens: 120,
+        outputTokens: 9,
+        cacheReadTokens: 15,
+        cacheWriteTokens: 0,
+        totalTokens: 144,
+      },
+      attribution: {
+        id: 'turn-1',
+        modelProviderId: 'provider-1',
+        model: 'grok-4.5',
+      },
+    });
+
+    assert.equal(recorded.lifetimeUsage.usageScope, 'conversation_lifetime');
+    assert.equal(recorded.lifetimeUsage.runtimeTurnCount, 1);
+    assert.equal(recorded.lifetimeUsage.totalTokens, 144);
+    assert.deepEqual(JSON.parse(readFileSync(usageLogFile, 'utf8').trim()), {
+      id: 'turn-1',
+      at: recorded.ledgerRow.at,
+      conversationId: conv.id,
+      streamId: null,
+      modelProviderId: 'provider-1',
+      model: 'grok-4.5',
+      providerName: null,
+      usageScope: 'runtime_turn',
+      providerRequestCount: 3,
+      inputTokens: 120,
+      outputTokens: 9,
+      cacheReadTokens: 15,
+      cacheWriteTokens: 0,
+      totalTokens: 144,
+      estimatedCostUsd: null,
+      pricingSource: null,
+    });
+    const duplicate = store.recordRuntimeTurnUsage(conv.id, {
+      usage: {
+        usageScope: 'runtime_turn',
+        providerRequestCount: 3,
+        inputTokens: 120,
+        outputTokens: 9,
+        cacheReadTokens: 15,
+        cacheWriteTokens: 0,
+        totalTokens: 144,
+      },
+      attribution: { id: 'turn-1' },
+    });
+    assert.equal(duplicate.lifetimeUsage.runtimeTurnCount, 1);
+    assert.equal(readFileSync(usageLogFile, 'utf8').trim().split('\n').length, 1);
+    assert.throws(
+      () => store.recordRuntimeTurnUsage(conv.id, {
+        usage: { usageScope: 'provider_request', providerRequestCount: 1 },
+      }),
+      /usageScope=runtime_turn/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('context snapshot is shared while revision and model still match', () => {
   const { store, cleanup } = freshStore();
   try {
@@ -137,32 +207,52 @@ test('legacy TUI composite binding migrates to Desktop provider id without inval
   }
 });
 
-test('shared store restores the latest provider usage when legacy messages have no usage', () => {
+test('shared store restores only provider-request observations, never runtime-turn billing rows', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'peer-conversations-observed-'));
   const usageLogFile = path.join(dir, 'usage', 'requests.jsonl');
   const storeDir = path.join(dir, 'conversations');
   try {
     const store = createConversationStore({ storeDir, usageLogFile });
     const conv = store.createConversation({ title: 'observed fallback' });
+    store.updateModelEffort(conv.id, {
+      modelProviderId: 'provider-1',
+      model: 'grok-4.5',
+    });
+    store.updateContextSnapshot(conv.id, accountingSnapshot({
+      modelKey: 'provider-1::grok-4.5',
+      lastObserved: {
+        inputTokens: 45_000,
+        requestFingerprint: 'request-final',
+        compactionEpoch: 0,
+        source: 'provider_usage',
+        observedAt: 123,
+      },
+    }));
+    // Advancing content invalidates the current snapshot but must retain its
+    // last provider-request observation as a pending restore baseline.
+    store.appendMessage(conv.id, { id: 'next-user', role: 'user', content: 'continue' });
     mkdirSync(path.dirname(usageLogFile), { recursive: true });
     writeFileSync(usageLogFile, [
       JSON.stringify({
         conversationId: conv.id,
         model: 'grok-4.5',
-        inputTokens: 10_000,
-        cacheReadTokens: 5_000,
-      }),
-      JSON.stringify({
-        conversationId: conv.id,
-        model: 'grok-4.5',
-        inputTokens: 42_000,
-        cacheReadTokens: 3_000,
+        usageScope: 'runtime_turn',
+        inputTokens: 145_639,
+        cacheReadTokens: 0,
       }),
     ].join('\n') + '\n');
 
     assert.deepEqual(
-      store.getLatestObservedUsage(conv.id, { model: 'grok-4.5' }),
-      { inputTokens: 42_000, cacheReadTokens: 3_000 },
+      store.getLatestContextObservation(conv.id, {
+        modelKey: 'provider-1::grok-4.5',
+      }),
+      {
+        inputTokens: 45_000,
+        requestFingerprint: 'request-final',
+        compactionEpoch: 0,
+        source: 'provider_usage',
+        observedAt: 123,
+      },
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

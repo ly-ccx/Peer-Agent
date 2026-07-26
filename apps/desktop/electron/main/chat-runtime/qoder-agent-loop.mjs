@@ -133,7 +133,10 @@ export async function agentLoopQoder({
             continuityContext,
             tools,
             preserveLatestUserTurn: true,
-            usageSnapshot: loop.getLastTurnUsage?.() ?? null,
+            runtimeUsageAccounting: loop.usageAccounting,
+            onProviderRequest: ({ usage, requestFingerprint }) => {
+              loop.addUsage(usage, { requestFingerprint });
+            },
             rebuildSystemPrompt,
             accountingIdentity: accountingIdentity ?? {
               conversationId: conversationId || streamId,
@@ -166,11 +169,9 @@ export async function agentLoopQoder({
           }),
         });
         apiMessages = execution.messages;
-        if (execution.compacted) loop.clearLastTurnUsage?.();
         const providerResponse = execution.response;
 
         if (signal?.aborted) throw makeAbortError();
-        loop.addUsage(providerResponse.streamUsage);
         if (!providerResponse.ok) {
           const errorText = providerResponse.errorText || '';
           if (isPromptTooLongResponse(providerResponse.status, errorText)) {

@@ -679,27 +679,51 @@ export function createConversationStore({
     };
   }
 
-  function getLatestObservedUsage(id, { model } = {}) {
+  /**
+   * Return the last provider-request observation retained by the context
+   * sidecar. The sidecar may be stale for the current content revision after a
+   * new message is appended; that is intentional here: callers use this exact
+   * request observation as a pending restore baseline. Runtime-turn billing
+   * rows are never consulted.
+   */
+  function getLatestContextObservation(id, { modelKey } = {}) {
     const conversationId = typeof id === 'string' ? id.trim() : '';
-    const expectedModel = typeof model === 'string' ? model.trim() : '';
-    if (!conversationId || !existsSync(usageLogFile)) return null;
-    const rows = readJsonl(usageLogFile);
-    for (let index = rows.length - 1; index >= 0; index -= 1) {
-      const row = rows[index];
-      if (row?.conversationId !== conversationId) continue;
-      if (expectedModel && typeof row.model === 'string' && row.model.trim() !== expectedModel) {
-        continue;
-      }
-      const inputTokens = Number(row?.inputTokens);
-      const cacheReadTokens = Number(row?.cacheReadTokens);
-      const input = Number.isFinite(inputTokens) && inputTokens >= 0 ? Math.floor(inputTokens) : 0;
-      const cacheRead = Number.isFinite(cacheReadTokens) && cacheReadTokens >= 0
-        ? Math.floor(cacheReadTokens)
-        : 0;
-      if (input <= 0 && cacheRead <= 0) continue;
-      return { inputTokens: input, cacheReadTokens: cacheRead };
-    }
-    return null;
+    if (!conversationId) return null;
+    const meta = readIndex().find((candidate) => candidate.id === conversationId);
+    if (!meta) return null;
+    const rawSnapshot = readJson(contextSnapshotFile(conversationId))
+      ?? meta.contextSnapshot
+      ?? null;
+    if (!rawSnapshot || rawSnapshot.version !== 1) return null;
+    if (String(rawSnapshot.conversationId || '') !== conversationId) return null;
+    const expectedModelKey = typeof modelKey === 'string' && modelKey.trim()
+      ? contextAccountingModelKey(modelKey.trim(), null)
+      : contextAccountingModelKey(
+          normalizeModelProviderId(meta.modelProviderId),
+          typeof meta.model === 'string' ? meta.model : null,
+        );
+    const observedModelKey = contextAccountingModelKey(rawSnapshot.modelKey, null);
+    if (observedModelKey !== expectedModelKey) return null;
+    const observation = rawSnapshot.lastObserved;
+    if (!observation || observation.source !== 'provider_usage') return null;
+    if (observation.supersededByCompactionRevision !== undefined) return null;
+    const inputTokens = Number(observation.inputTokens);
+    const compactionEpoch = Number(observation.compactionEpoch);
+    const observedAt = Number(observation.observedAt);
+    const requestFingerprint = typeof observation.requestFingerprint === 'string'
+      ? observation.requestFingerprint.trim()
+      : '';
+    if (!Number.isFinite(inputTokens) || inputTokens < 0) return null;
+    if (!Number.isSafeInteger(compactionEpoch) || compactionEpoch < 0) return null;
+    if (compactionEpoch !== Number(rawSnapshot.compactionEpoch)) return null;
+    if (!Number.isFinite(observedAt) || observedAt < 0 || !requestFingerprint) return null;
+    return {
+      inputTokens: Math.floor(inputTokens),
+      requestFingerprint,
+      compactionEpoch,
+      source: 'provider_usage',
+      observedAt,
+    };
   }
 
   function updateTitle(id, title) {
@@ -844,6 +868,117 @@ export function createConversationStore({
     meta.updatedAt = new Date().toISOString();
     writeJsonl(indexFile, index);
     return meta.lifetimeUsage;
+  }
+
+  /**
+   * Canonical durable sink for one completed runtime turn.
+   *
+   * This is intentionally deeper than the Desktop/TUI hosts: it validates the
+   * scope, updates conversation lifetime, and appends the runtime-turn ledger
+   * row together so both hosts have identical persistence semantics.
+   */
+  function recordRuntimeTurnUsage(id, { usage, attribution = {} } = {}) {
+    if (usage?.usageScope !== 'runtime_turn') {
+      throw new TypeError('recordRuntimeTurnUsage requires usageScope=runtime_turn');
+    }
+    const providerRequestCount = Number(usage.providerRequestCount);
+    if (!Number.isSafeInteger(providerRequestCount) || providerRequestCount < 1) {
+      throw new TypeError('recordRuntimeTurnUsage requires providerRequestCount >= 1');
+    }
+    const conversationId = typeof id === 'string' ? id.trim() : '';
+    if (!conversationId) return null;
+    const ledgerId = typeof attribution.id === 'string' && attribution.id.trim()
+      ? attribution.id.trim()
+      : `runtime_turn_${Date.now()}_${randomUUID()}`;
+    const usageTransactionFile = path.join(storeDir, '.usage-ledger-transaction');
+    return withFileLock(usageTransactionFile, () => {
+      const existing = readJsonl(usageLogFile).find(
+        (row) => row?.id === ledgerId && row?.conversationId === conversationId,
+      );
+      if (existing) {
+        const meta = readIndex().find((candidate) => candidate.id === conversationId);
+        return meta
+          ? {
+              lifetimeUsage: {
+                usageScope: 'conversation_lifetime',
+                runtimeTurnCount: Number(meta.runtimeTurnCount || 0),
+                inputTokens: Number(meta.lifetimeUsage?.inputTokens || 0),
+                outputTokens: Number(meta.lifetimeUsage?.outputTokens || 0),
+                cacheReadTokens: Number(meta.lifetimeUsage?.cacheReadTokens || 0),
+                cacheWriteTokens: Number(meta.lifetimeUsage?.cacheWriteTokens || 0),
+                totalTokens:
+                  Number(meta.lifetimeUsage?.inputTokens || 0)
+                  + Number(meta.lifetimeUsage?.outputTokens || 0)
+                  + Number(meta.lifetimeUsage?.cacheReadTokens || 0)
+                  + Number(meta.lifetimeUsage?.cacheWriteTokens || 0),
+              },
+              ledgerRow: existing,
+            }
+          : null;
+      }
+
+      const normalizedToken = (value) => {
+        const number = Number(value);
+        return Number.isFinite(number) && number >= 0 ? Math.floor(number) : 0;
+      };
+      const tokens = {
+        inputTokens: normalizedToken(usage.inputTokens),
+        outputTokens: normalizedToken(usage.outputTokens),
+        cacheReadTokens: normalizedToken(usage.cacheReadTokens),
+        cacheWriteTokens: normalizedToken(usage.cacheWriteTokens),
+      };
+      const index = readIndex();
+      const meta = index.find((candidate) => candidate.id === conversationId);
+      if (!meta) return null;
+      const previous = meta.lifetimeUsage || {};
+      meta.lifetimeUsage = {
+        inputTokens: Number(previous.inputTokens || 0) + tokens.inputTokens,
+        outputTokens: Number(previous.outputTokens || 0) + tokens.outputTokens,
+        cacheReadTokens: Number(previous.cacheReadTokens || 0) + tokens.cacheReadTokens,
+        cacheWriteTokens: Number(previous.cacheWriteTokens || 0) + tokens.cacheWriteTokens,
+      };
+      meta.runtimeTurnCount = Math.max(0, Math.floor(Number(meta.runtimeTurnCount) || 0)) + 1;
+      meta.updatedAt = new Date().toISOString();
+      writeJsonl(indexFile, index);
+
+      const optionalText = (value) => (
+        typeof value === 'string' && value.trim() ? value.trim() : null
+      );
+      const estimatedCost = Number(attribution.estimatedCostUsd);
+      const ledgerRow = {
+        id: ledgerId,
+        at: optionalText(attribution.at) || new Date().toISOString(),
+        conversationId,
+        streamId: optionalText(attribution.streamId),
+        modelProviderId: optionalText(attribution.modelProviderId),
+        model: optionalText(attribution.model),
+        providerName: optionalText(attribution.providerName),
+        usageScope: 'runtime_turn',
+        providerRequestCount,
+        ...tokens,
+        totalTokens:
+          tokens.inputTokens
+          + tokens.outputTokens
+          + tokens.cacheReadTokens
+          + tokens.cacheWriteTokens,
+        estimatedCostUsd: Number.isFinite(estimatedCost) ? estimatedCost : null,
+        pricingSource: optionalText(attribution.pricingSource),
+      };
+      appendJsonl(usageLogFile, ledgerRow);
+      return {
+        lifetimeUsage: {
+          usageScope: 'conversation_lifetime',
+          runtimeTurnCount: meta.runtimeTurnCount,
+          ...meta.lifetimeUsage,
+          totalTokens:
+            meta.lifetimeUsage.inputTokens
+            + meta.lifetimeUsage.outputTokens
+            + meta.lifetimeUsage.cacheReadTokens
+            + meta.lifetimeUsage.cacheWriteTokens,
+        },
+        ledgerRow,
+      };
+    });
   }
 
   function setArchiveStatus(id, status) {
@@ -1016,7 +1151,7 @@ export function createConversationStore({
     searchConversations,
     createConversation: changed(createConversation, 'created'),
     getConversation,
-    getLatestObservedUsage,
+    getLatestContextObservation,
     updateTitle: changed(updateTitle, 'metadata-updated'),
     updateMode: changed(updateMode, 'metadata-updated'),
     updateModelEffort: changed(updateModelEffort, 'metadata-updated'),
@@ -1026,6 +1161,7 @@ export function createConversationStore({
     updateMessageById: changed(updateMessageById, 'messages-updated'),
     replaceMessages: changed(replaceMessages, 'messages-updated'),
     addUsage: changed(addUsage, 'metadata-updated'),
+    recordRuntimeTurnUsage: changed(recordRuntimeTurnUsage, 'metadata-updated'),
     archiveConversation: changed(archiveConversation, 'metadata-updated'),
     restoreConversation: changed(restoreConversation, 'metadata-updated'),
     pinConversation: changed(pinConversation, 'metadata-updated'),

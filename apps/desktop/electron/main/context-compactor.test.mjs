@@ -804,10 +804,25 @@ describe('context compactor · streaming progress (0007)', () => {
     const sseChunks = deltas.map(
       (t) => `data: ${JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: t } })}\n\n`,
     );
+    sseChunks.unshift(`data: ${JSON.stringify({
+      type: 'message_start',
+      message: {
+        usage: {
+          input_tokens: 80,
+          cache_read_input_tokens: 5,
+          cache_creation_input_tokens: 2,
+        },
+      },
+    })}\n\n`);
+    sseChunks.push(`data: ${JSON.stringify({
+      type: 'message_delta',
+      usage: { output_tokens: 7 },
+    })}\n\n`);
     sseChunks.push('data: [DONE]\n\n');
     globalThis.fetch = async () => makeSseResponse(sseChunks);
 
     const progressEvents = [];
+    const observedUsage = [];
     const result = await compactIfNeeded({
       messages: buildMessages(12, 20),
       systemPrompt: 'system prompt',
@@ -820,6 +835,7 @@ describe('context compactor · streaming progress (0007)', () => {
       },
       force: true,
       onProgress: (p) => progressEvents.push(p),
+      onProviderUsage: (usage) => observedUsage.push(usage),
     });
 
     restoreFetch();
@@ -837,6 +853,12 @@ describe('context compactor · streaming progress (0007)', () => {
     }
     // estimatedTotalChars 为正，作为百分比分母。
     assert.ok(progressEvents.at(-1).estimatedTotalChars > 0);
+    assert.deepEqual(observedUsage, [{
+      inputTokens: 80,
+      outputTokens: 7,
+      cacheReadTokens: 5,
+      cacheWriteTokens: 2,
+    }]);
   });
 
   it('uses OpenAI Responses wire for ChatGPT subscription compaction', async () => {
@@ -1204,4 +1226,3 @@ describe('compaction summary quality regressions', () => {
     assert.match(COMPACTOR_SOURCE, /最近用户决策与方案锚点/);
   });
 });
-

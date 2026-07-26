@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   COMPACTION_SUMMARY_PROMPT,
   COMPACTION_SUMMARY_SYSTEM_PROMPT,
+  createRestoredObservedContextAccountingSnapshot,
   type RuntimeToolDefinition,
 } from '@peer-agent/runtime-core';
 import type {
@@ -280,9 +281,13 @@ describe('OpenAI-compatible TUI chat adapter', () => {
     await controller.send('hi');
 
     expect(controller.getSnapshot().messages.at(-1)?.content).toBe('hello world');
-    expect(controller.getSnapshot().usage).toEqual({
+    expect(controller.getSnapshot().usage as unknown).toEqual({
+      usageScope: 'runtime_turn',
+      providerRequestCount: 1,
       inputTokens: 3,
       outputTokens: 2,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
       totalTokens: 5,
     });
     expect(requests[0]?.model).toBe('model-test');
@@ -308,10 +313,22 @@ describe('OpenAI-compatible TUI chat adapter', () => {
           return {
             content: '',
             toolCalls: [{ id: 'call-1', name: 'read_file', arguments: '{"path":"note.txt"}' }],
+            usage: {
+              inputTokens: 30,
+              outputTokens: 2,
+              cacheReadTokens: 5,
+            },
           };
         }
         request.onEvent?.({ type: 'text.delta', content: 'read complete' });
-        return completed('read complete');
+        return {
+          ...completed('read complete'),
+          usage: {
+            inputTokens: 40,
+            outputTokens: 3,
+            cacheReadTokens: 5,
+          },
+        };
       },
     };
     const controller = createChatController({
@@ -347,6 +364,52 @@ describe('OpenAI-compatible TUI chat adapter', () => {
       },
     ]);
     expect(controller.getSnapshot().messages.at(-1)?.content).toBe('read complete');
+    // Billing covers both provider requests, while context capacity remains
+    // bound to the final provider request only.
+    expect(controller.getSnapshot().usage as unknown).toEqual({
+      usageScope: 'runtime_turn',
+      providerRequestCount: 2,
+      inputTokens: 70,
+      outputTokens: 5,
+      cacheReadTokens: 10,
+      cacheWriteTokens: 0,
+      totalTokens: 85,
+    });
+    expect(controller.getSnapshot().contextAccounting?.authoritativeInputTokens).toBe(45);
+  });
+
+  test('keeps prior request billing and counts a later failed provider request', async () => {
+    let requests = 0;
+    const provider: ModelProvider = {
+      async stream() {
+        requests += 1;
+        if (requests === 1) {
+          return {
+            content: '',
+            toolCalls: [{ id: 'call-1', name: 'read_file', arguments: '{"path":"note.txt"}' }],
+            usage: { inputTokens: 30, outputTokens: 2 },
+          };
+        }
+        throw new Error('provider failed after tool result');
+      },
+    };
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({ provider, model: 'model-test', toolDefinitions }),
+    });
+
+    await controller.send('read then fail');
+
+    expect(controller.getSnapshot().error).toContain('provider failed after tool result');
+    expect(controller.getSnapshot().usage as unknown).toEqual({
+      usageScope: 'runtime_turn',
+      providerRequestCount: 2,
+      inputTokens: 30,
+      outputTokens: 2,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 32,
+    });
   });
 
   test('recovers invalid JSON tool arguments without crashing the turn', async () => {
@@ -769,6 +832,16 @@ describe('createProviderChatModel mid-turn LLM compaction', () => {
         modelMessages,
         mode: 'agent' as const,
         usage: { inputTokens: usageInputTokens },
+        contextAccounting: createRestoredObservedContextAccountingSnapshot({
+          identity: {
+            conversationId: 'conv-test',
+            contentRevision: 0,
+            modelKey: 'model-test',
+          },
+          contextWindow: 1_000,
+          countCapability: { kind: 'observed_usage_only' },
+          usage: { inputTokens: usageInputTokens },
+        }),
       },
     } as any;
   }
@@ -838,6 +911,16 @@ describe('createProviderChatModel mid-turn LLM compaction', () => {
     ).toBe(true);
     expect(result.state.midTurnCompactions?.length ?? 0).toBeGreaterThanOrEqual(1);
     expect(result.state.midTurnCompactions?.[0]?.method).toBe('llm');
+    expect(result.state.usage as unknown).toEqual({
+      usageScope: 'runtime_turn',
+      providerRequestCount: 2,
+      inputTokens: 200,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 200,
+    });
+    expect(result.state.contextAccounting?.authoritativeInputTokens).toBe(120);
     expect(result.state.modelMessages.some((message) =>
       typeof message.content === 'string' && message.content.includes('[Context handoff'),
     )).toBe(true);
@@ -883,6 +966,8 @@ describe('createProviderChatModel mid-turn LLM compaction', () => {
     expect(result.kind).toBe('completed');
     expect(result.state.midTurnCompactions?.length ?? 0).toBeGreaterThanOrEqual(1);
     expect(result.state.midTurnCompactions?.[0]?.method).toBe('structured');
+    expect((result.state.usage as { providerRequestCount?: number })?.providerRequestCount).toBe(2);
+    expect(result.state.usage?.inputTokens).toBe(150);
     expect(result.state.modelMessages.some((message) =>
       typeof message.content === 'string' && message.content.includes('[Context handoff'),
     )).toBe(true);

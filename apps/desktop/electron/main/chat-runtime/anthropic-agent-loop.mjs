@@ -118,7 +118,10 @@ export async function agentLoopAnthropic({
             continuityContext,
             tools,
             preserveLatestUserTurn: true,
-            usageSnapshot: loop.getLastTurnUsage?.() ?? null,
+            runtimeUsageAccounting: loop.usageAccounting,
+            onProviderRequest: ({ usage, requestFingerprint }) => {
+              loop.addUsage(usage, { requestFingerprint });
+            },
             rebuildSystemPrompt,
             accountingIdentity: accountingIdentity ?? {
               conversationId: conversationId || streamId,
@@ -175,7 +178,6 @@ export async function agentLoopAnthropic({
           .map((message) => message.content)
           .join('\n\n') || effectiveSystemPrompt;
         apiMessages = execution.messages.filter((message) => message.role !== 'system');
-        if (execution.compacted) loop.clearLastTurnUsage?.();
         const providerResponse = execution.response;
 
         if (!providerResponse.ok) {
@@ -200,9 +202,7 @@ export async function agentLoopAnthropic({
           thinkingSignature,
           toolUseBlocks,
           stopReason,
-          streamUsage,
         } = providerResponse;
-        loop.addUsage(streamUsage);
         const effectiveToolUseBlocks = stopReason === 'tool_use' ? toolUseBlocks : [];
         if (!effectiveToolUseBlocks.length) {
           if (

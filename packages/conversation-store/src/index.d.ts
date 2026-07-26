@@ -1,4 +1,9 @@
-import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
+import type {
+  ContextAccountingObserved,
+  ContextAccountingSnapshot,
+  ConversationLifetimeUsage,
+  RuntimeTurnUsage,
+} from '@peer-agent/protocol';
 
 export interface ConversationUsage {
   readonly inputTokens?: number;
@@ -70,16 +75,35 @@ export interface ConversationStore {
     includeWorkspaceNameMatch?: boolean;
   }): ConversationMeta[];
   getConversation(id: string): StoredConversation | null;
-  getLatestObservedUsage(
+  getLatestContextObservation(
     id: string,
-    options?: { model?: string | null },
-  ): { inputTokens: number; cacheReadTokens: number } | null;
+    options?: { modelKey?: string | null },
+  ): ContextAccountingObserved | null;
   createConversation(input?: { title?: string; workspacePath?: string; mode?: string }): ConversationMeta;
   appendMessage(id: string, message: object): unknown;
   updateMode(id: string, mode: string): unknown;
   updateModelEffort(id: string, input: { effort?: string; modelProviderId?: string | null; model?: string | null }): unknown;
   updateContextSnapshot(id: string, snapshot: ConversationContextSnapshot): ConversationMeta | null;
   addUsage(id: string, usage: ConversationUsage): unknown;
+  recordRuntimeTurnUsage(
+    id: string,
+    input: {
+      usage: RuntimeTurnUsage;
+      attribution?: {
+        id?: string;
+        at?: string;
+        streamId?: string | null;
+        modelProviderId?: string | null;
+        model?: string | null;
+        providerName?: string | null;
+        estimatedCostUsd?: number | null;
+        pricingSource?: string | null;
+      };
+    },
+  ): {
+    lifetimeUsage: ConversationLifetimeUsage;
+    ledgerRow: Readonly<Record<string, unknown>>;
+  } | null;
   subscribeChanges(listener: (event: ConversationChangeEvent) => void, options?: { interval?: number }): () => void;
   readonly [key: string]: unknown;
 }

@@ -56,7 +56,6 @@ import {
   createContextAccountingCompactionPipeline,
   createRestoredObservedContextAccountingSnapshot,
   createUnknownContextAccountingSnapshot,
-  latestObservedUsageFromMessages,
   projectConversationHistory,
 } from '@peer-agent/runtime-core';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
@@ -2546,10 +2545,10 @@ ipcMain.handle('chat:context:restored', async (
       command: 'count_only',
     })).snapshot;
   } else {
-    const restoredUsage = latestObservedUsageFromMessages(conv.messages)
-      ?? conversationStore.getLatestObservedUsage?.(conversationId, {
-        model: provider?.model,
-      });
+    const restoredUsage = conversationStore.getLatestContextObservation?.(
+      conversationId,
+      { modelKey: identity.modelKey },
+    );
     snapshot = restoredUsage
       ? createRestoredObservedContextAccountingSnapshot({
           identity,
@@ -2557,7 +2556,7 @@ ipcMain.handle('chat:context:restored', async (
           countCapability,
           usage: restoredUsage,
           revision: conv.contextSnapshot?.revision ?? 0,
-          compactionEpoch: conv.contextSnapshot?.compactionEpoch ?? 0,
+          compactionEpoch: restoredUsage.compactionEpoch,
           pendingUncountedChanges: activeMessages.length > 0,
         })
       : createUnknownContextAccountingSnapshot({

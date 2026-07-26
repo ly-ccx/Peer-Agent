@@ -3,10 +3,13 @@ import {
   buildCompactionMarker,
   contextAccountingModelKey,
 } from '@peer-agent/protocol';
-import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
+import type {
+  ContextAccountingObserved,
+  ContextAccountingSnapshot,
+  RuntimeTurnUsage,
+} from '@peer-agent/protocol';
 import {
   createRestoredObservedContextAccountingSnapshot,
-  latestObservedUsageFromMessages,
   projectConversationHistory,
 } from '@peer-agent/runtime-core';
 import { realpathSync } from 'node:fs';
@@ -55,11 +58,18 @@ interface ConversationStore {
   updateMode(id: string, mode: TuiMode): unknown;
   updateModelEffort(id: string, input: { effort: string; modelProviderId: string | null; model?: string }): unknown;
   updateContextSnapshot?(id: string, snapshot: ContextAccountingSnapshot): unknown;
-  getLatestObservedUsage?(
+  getLatestContextObservation?(
     id: string,
-    options?: { model?: string | null },
-  ): { inputTokens: number; cacheReadTokens: number } | null;
+    options?: { modelKey?: string | null },
+  ): ContextAccountingObserved | null;
   addUsage(id: string, usage: NonNullable<ChatSnapshot['usage']>): unknown;
+  recordRuntimeTurnUsage?(
+    id: string,
+    input: {
+      usage: RuntimeTurnUsage;
+      attribution?: Readonly<Record<string, unknown>>;
+    },
+  ): unknown;
   subscribeChanges?(listener: (event: ConversationChangeEvent) => void): () => void;
 }
 
@@ -115,6 +125,18 @@ function storedUsage(value: unknown): NonNullable<ChatSnapshot['usage']> | undef
     ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
     ...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
   };
+}
+
+function runtimeTurnUsage(value: unknown): RuntimeTurnUsage | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const usage = value as Partial<RuntimeTurnUsage>;
+  const providerRequestCount = Number(usage.providerRequestCount);
+  if (
+    usage.usageScope !== 'runtime_turn'
+    || !Number.isSafeInteger(providerRequestCount)
+    || providerRequestCount < 1
+  ) return null;
+  return usage as RuntimeTurnUsage;
 }
 
 function storedToolPresentation(value: unknown): ChatMessage['tool'] | undefined {
@@ -589,8 +611,14 @@ export function createTuiConversationPersistence(options: {
         const activeContext = activeStoredContext(storedMessages);
         const providerUsage = restoredProviderUsage(messages);
         const modelSelection = restoredSelection(stored);
-        const observedUsage = latestObservedUsageFromMessages(storedMessages)
-          ?? store.getLatestObservedUsage?.(id, { model: modelSelection?.modelId });
+        const observedUsage = modelSelection
+          ? store.getLatestContextObservation?.(id, {
+              modelKey: contextAccountingModelKey(
+                modelSelection.providerId,
+                modelSelection.modelId,
+              ),
+            })
+          : null;
         const persistedContextSnapshot = stored.contextSnapshot
           && typeof stored.contextSnapshot === 'object'
           && (stored.contextSnapshot as { version?: unknown }).version === 1
@@ -614,6 +642,7 @@ export function createTuiConversationPersistence(options: {
                 contextWindow: options.getContextWindow?.(modelSelection),
                 countCapability: { kind: 'observed_usage_only' },
                 usage: observedUsage,
+                compactionEpoch: observedUsage.compactionEpoch,
                 pendingUncountedChanges: true,
                 now: now(),
               })
@@ -756,7 +785,22 @@ export function createTuiConversationPersistence(options: {
         }
 
         if (snapshot.status === 'idle' && snapshot.usage && completedAssistant && !usageMessageIds.has(completedAssistant.id)) {
-          store.addUsage(id, snapshot.usage);
+          const scopedUsage = runtimeTurnUsage(snapshot.usage);
+          if (scopedUsage && store.recordRuntimeTurnUsage) {
+            store.recordRuntimeTurnUsage(id, {
+              usage: scopedUsage,
+              attribution: {
+                id: `tui:${id}:${completedAssistant.id}`,
+                at: new Date(now()).toISOString(),
+                modelProviderId: modelProviderId(model),
+                model: model.modelId,
+              },
+            });
+          } else {
+            // Compatibility for demo models and older injected stores. Provider
+            // production paths always emit the tagged runtime-turn contract.
+            store.addUsage(id, snapshot.usage);
+          }
           usageMessageIds.add(completedAssistant.id);
         }
 
