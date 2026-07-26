@@ -1880,7 +1880,11 @@ describe('chat controller', () => {
     expect(progressPercents).toContain(8);
     expect(progressPercents).toContain(15);
     expect(progressPercents).toContain(99);
-    expect(progressContents.some((content) => content.includes(renderCompactProgressBar(15)))).toBe(true);
+    // Progress bar must appear only in the composer status dock, not in the
+    // system transcript marker (avoids the double-bar compacting UI).
+    expect(progressContents.every((content) => !content.includes('['))).toBe(true);
+    expect(progressContents.every((content) => !content.includes('%'))).toBe(true);
+    expect(progressContents.some((content) => /compacting context/i.test(content))).toBe(true);
     expect(dockLabels.some((label) => label.includes(renderCompactProgressBar(15)) && label.includes('15%'))).toBe(true);
     expect(controller.getSnapshot().status).toBe('idle');
     expect(

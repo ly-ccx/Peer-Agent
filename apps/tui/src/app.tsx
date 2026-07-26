@@ -469,9 +469,13 @@ function ChatHistory({
         if (message.role === 'system') {
           const phase = message.compact?.phase ?? 'done';
           const label = phase === 'progress' ? 'COMPACTING' : 'COMPACTED';
+          // Progress percent/bar belongs to the composer status dock only.
+          // Chat history keeps a plain marker so users never see two bars.
           const compactSummary = phase === 'done'
             ? `Earlier conversation (compacted) · ${message.compact?.summarizedCount ?? 0} msgs · ${formatCompactMethodLabel(message.compact?.method)}`
-            : message.content;
+            : phase === 'progress'
+              ? (message.content?.replace(/\s*\[[█░]+\]\s*\d+%\s*$/u, '').trim() || 'Compacting context…')
+              : message.content;
           return (
             <box key={message.id} flexDirection="column" marginBottom={1} marginTop={1}>
               <box flexDirection="row">

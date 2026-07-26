@@ -552,7 +552,9 @@ export function createChatController(options: {
 
     const label = opts.source === 'auto' ? 'Auto-compacting context' : 'Compacting context';
     const publishProgress = (percent: number) => {
-      const content = `${label}  ${renderCompactProgressBar(percent)}  ${percent}%`;
+      // Keep the transcript marker plain. Live percent + bar render only in the
+      // composer status dock so compacting never shows two progress bars.
+      const content = label;
       const progressMessage: ChatMessage = {
         id: progressId,
         role: 'system',
@@ -938,7 +940,8 @@ export function createChatController(options: {
             ? event.label.trim()
             : 'Auto-compacting context';
           const progressId = `midturn-compact-${event.streamId ?? 'tui-chat'}`;
-          const content = `${label}  ${renderCompactProgressBar(percent)}  ${percent}%`;
+          // Transcript marker stays plain; live bar/percent only in status dock.
+          const content = label;
           const progressMessage: ChatMessage = {
             id: progressId,
             role: 'system',
