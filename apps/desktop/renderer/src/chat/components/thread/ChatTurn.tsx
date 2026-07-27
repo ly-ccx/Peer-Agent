@@ -134,10 +134,12 @@ function ChatTurnImpl({
             <CompactionSummaryCard compaction={msg.compaction} isZh={isZh} />
           ) : (
             <>
-              {msg.timestamp ? <time className="chat-msg-time">{formatTime(msg.timestamp)}</time> : null}
-              <span className="chat-msg-role-label">
-                {msg.role === 'user' ? (isZh ? '你' : 'You') : 'Peer Agent'}
-              </span>
+              <div className="chat-msg-meta">
+                <span className="chat-msg-role-label">
+                  {msg.role === 'user' ? (isZh ? '你' : 'You') : 'Peer Agent'}
+                </span>
+                {msg.timestamp ? <time className="chat-msg-time">{formatTime(msg.timestamp)}</time> : null}
+              </div>
               <div className="chat-msg-body">
                 {msg.role === 'user' ? (
                   <>

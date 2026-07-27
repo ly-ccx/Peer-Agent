@@ -281,20 +281,25 @@
   animation: motion-enter-rise var(--za-motion-slow) var(--za-ease-decelerate) both;
 }
 
+/* 角色名与时间同一行，总耗时（thinking-toggle）仍独立展示。 */
+.chat-msg-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
 .chat-msg-time {
-  display: block;
   font-size: var(--ui-font-caption, 11px);
   color: var(--graphite-mute);
-  margin-bottom: var(--space-1);
   font-family: var(--font-mono);
 }
 
 .chat-msg-role-label {
-  display: block;
   font-size: var(--ui-font-caption, 11px);
   font-weight: 600;
   letter-spacing: 0.02em;
-  margin-bottom: var(--space-1);
   font-family: var(--font-mono);
 }
 .chat-msg-user .chat-msg-role-label {
