@@ -7,22 +7,27 @@
     <title>Peer Agent — Docs</title>
     <style>
       :root {
-        --bg: #0f1114;
-        --bg-elevated: #161a20;
-        --ink: #f2f4f7;
-        --ink-soft: #a8b0bb;
-        --ink-fade: #7a8390;
-        --line: rgba(255, 255, 255, 0.08);
-        --line-strong: rgba(255, 255, 255, 0.12);
-        --azure: #6eb0d6;
-        --azure-strong: #3b7fab;
-        --graphite-btn: #f5f7fa;
-        --graphite-btn-ink: #1a1d21;
-        --sidebar-w: 248px;
-        --toc-w: 220px;
+        --bg: #f5f5f7;
+        --bg-elevated: #ffffff;
+        --ink: #1d1d1f;
+        --ink-soft: #6e6e73;
+        --ink-fade: #86868b;
+        --line: rgba(0, 0, 0, 0.08);
+        --line-strong: rgba(0, 0, 0, 0.12);
+        --azure: #3b7fab;
+        --azure-strong: #2f6a8f;
+        --azure-soft: #d8e4ee;
+        --paper: #f7f9fc;
+        --code-bg: #eef1f6;
+        --code-ink: #243041;
+        --graphite-btn: #1a1d21;
+        --graphite-btn-ink: #f5f7fa;
         --nav-h: 52px;
-        --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter",
-          "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", system-ui, sans-serif;
+        --sidebar-w: 240px;
+        --toc-w: 200px;
+        --wide: 1120px;
+        --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+          "Inter", "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", system-ui, sans-serif;
         --mono: "SF Mono", "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
       }
       * { box-sizing: border-box; }
@@ -41,7 +46,7 @@
       code, pre, kbd { font-family: var(--mono); }
       code {
         font-size: 0.9em;
-        background: rgba(255,255,255,0.06);
+        background: rgba(0,0,0,0.05);
         border: 1px solid var(--line);
         border-radius: 6px;
         padding: 0.1em 0.4em;
@@ -50,12 +55,12 @@
         margin: 0 0 16px;
         padding: 14px 16px;
         border-radius: 12px;
-        background: #0b0d10;
+        background: #eef1f6;
         border: 1px solid var(--line);
         overflow: auto;
         font-size: 12.5px;
         line-height: 1.65;
-        color: #d8e0ea;
+        color: #243041;
         max-width: 760px;
       }
       pre code { background: transparent; border: 0; padding: 0; font-size: inherit; }
@@ -63,13 +68,13 @@
       .topnav {
         position: sticky; top: 0; z-index: 50; height: var(--nav-h);
         display: flex; align-items: center;
-        border-bottom: 1px solid var(--line);
-        background: rgba(15, 17, 20, 0.82);
-        backdrop-filter: blur(18px) saturate(1.2);
-        -webkit-backdrop-filter: blur(18px) saturate(1.2);
+        border-bottom: 1px solid rgba(0,0,0,0.06);
+        background: rgba(245, 245, 247, 0.72);
+        backdrop-filter: saturate(180%) blur(20px);
+        -webkit-backdrop-filter: saturate(180%) blur(20px);
       }
       .topnav-inner {
-        width: min(1440px, 100%); margin: 0 auto; padding: 0 18px;
+        width: min(var(--wide), calc(100% - 36px)); margin: 0 auto; padding: 0 18px;
         display: flex; align-items: center; justify-content: space-between; gap: 16px;
       }
       .brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 650; font-size: 14px; letter-spacing: -0.02em; }
@@ -83,7 +88,7 @@
       }
 .top-links { display: flex; align-items: center; gap: 4px; flex: 1; margin-left: 18px; }
       .top-links a { font-size: 13px; color: var(--ink-soft); padding: 8px 12px; border-radius: 8px; }
-      .top-links a:hover { color: var(--ink); background: rgba(255,255,255,0.04); }
+      .top-links a:hover { color: var(--ink); background: rgba(0,0,0,0.04); }
       .top-links a.active { color: var(--ink); position: relative; }
       .top-links a.active::after {
         content: ""; position: absolute; left: 12px; right: 12px; bottom: 2px; height: 2px;
@@ -92,14 +97,14 @@
       .top-actions { display: flex; align-items: center; gap: 10px; }
       .lang {
         display: inline-flex; align-items: center; height: 30px; padding: 2px;
-        border-radius: 980px; background: rgba(255,255,255,0.05); border: 1px solid var(--line); gap: 1px;
+        border-radius: 980px; background: rgba(0,0,0,0.04); border: 1px solid var(--line); gap: 1px;
       }
       .lang button {
         appearance: none; border: 0; background: transparent; color: var(--ink-fade);
         font-size: 11px; font-weight: 650; min-width: 30px; height: 24px; border-radius: 980px;
         cursor: pointer; padding: 0 8px;
       }
-      .lang button[aria-pressed="true"] { background: rgba(255,255,255,0.1); color: var(--ink); }
+      .lang button[aria-pressed="true"] { background: rgba(0,0,0,0.08); color: var(--ink); }
       .btn {
         display: inline-flex; align-items: center; justify-content: center; height: 32px;
         padding: 0 14px; border-radius: 980px; font-size: 12.5px; font-weight: 600;
@@ -107,13 +112,13 @@
       }
       .btn-primary { background: var(--graphite-btn); color: var(--graphite-btn-ink) !important; }
       .btn-ghost { background: transparent; border-color: var(--line-strong); color: var(--ink-soft); }
-      .btn-ghost:hover { color: var(--ink); background: rgba(255,255,255,0.04); }
+      .btn-ghost:hover { color: var(--ink); background: rgba(0,0,0,0.04); }
 
       .shell {
         display: grid;
         grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--toc-w);
         min-height: calc(100vh - var(--nav-h));
-        width: min(1440px, 100%); margin: 0 auto;
+        width: min(var(--wide), 100%); margin: 0 auto;
       }
       .sidebar {
         position: sticky; top: var(--nav-h); height: calc(100vh - var(--nav-h));
@@ -129,7 +134,7 @@
         background: transparent; color: var(--ink-soft); font-size: 13.5px; padding: 8px 10px;
         border-radius: 8px; cursor: pointer; margin: 1px 0;
       }
-      .nav-item:hover { color: var(--ink); background: rgba(255,255,255,0.04); }
+      .nav-item:hover { color: var(--ink); background: rgba(0,0,0,0.04); }
       .nav-item.active {
         color: var(--azure); background: rgba(59, 127, 171, 0.12);
         font-weight: 600;
@@ -177,7 +182,7 @@
         display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0 22px; max-width: 780px;
       }
       .card {
-        border: 1px solid var(--line); background: rgba(255,255,255,0.03);
+        border: 1px solid var(--line); background: var(--bg-elevated);
         border-radius: 14px; padding: 16px;
       }
       .card h3 { margin: 0 0 8px; font-size: 15px; }
@@ -188,13 +193,13 @@
       }
       .steps li {
         counter-increment: step; position: relative; padding: 12px 12px 12px 44px;
-        border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.02);
+        border: 1px solid var(--line); border-radius: 12px; background: var(--bg-elevated);
         margin-bottom: 10px;
       }
       .steps li::before {
         content: counter(step); position: absolute; left: 12px; top: 12px; width: 22px; height: 22px;
         border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700;
-        background: rgba(255,255,255,0.08); color: var(--ink);
+        background: rgba(0,0,0,0.06); color: var(--ink);
       }
       .table-wrap {
         overflow: auto; margin: 12px 0 20px; border: 1px solid var(--line);
@@ -205,13 +210,13 @@
         text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); color: var(--ink-soft);
         vertical-align: top;
       }
-      th { color: var(--ink); font-weight: 600; background: rgba(255,255,255,0.03); white-space: nowrap; }
+      th { color: var(--ink); font-weight: 600; background: rgba(0,0,0,0.03); white-space: nowrap; }
       tr:last-child td { border-bottom: 0; }
       td code { white-space: nowrap; }
       .inline-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 8px; }
       .kbd {
         display: inline-block; min-width: 1.4em; padding: 0 6px; border-radius: 6px;
-        border: 1px solid var(--line-strong); background: rgba(255,255,255,0.05);
+        border: 1px solid var(--line-strong); background: rgba(0,0,0,0.04);
         font-family: var(--mono); font-size: 12px; color: var(--ink);
       }
       .toc {
