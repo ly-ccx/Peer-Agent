@@ -3,10 +3,25 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      (function () {
+        try {
+          var key = "peer-theme";
+          var pref = localStorage.getItem(key) || "system";
+          if (pref !== "light" && pref !== "dark" && pref !== "system") pref = "system";
+          var systemDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var theme = pref === "dark" || (pref === "system" && systemDark) ? "dark" : "light";
+          document.documentElement.setAttribute("data-theme", theme);
+          document.documentElement.setAttribute("data-theme-pref", pref);
+        } catch (e) {}
+      })();
+    </script>
     <link rel="icon" href="./favicon.png" type="image/png" />
     <title>Peer Agent</title>
     <style>
       :root {
+        --graphite-btn: #1a1d21;
+        --graphite-btn-ink: #f5f7fa;
         --bg: #f5f5f7;
         --bg-elevated: #ffffff;
         --ink: #1d1d1f;
@@ -29,6 +44,81 @@
           "Inter", "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", system-ui, sans-serif;
         --mono: "SF Mono", "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
       }
+
+      html[data-theme="light"] {
+        color-scheme: light;
+      }
+      html[data-theme="dark"] {
+        color-scheme: dark;
+        --bg: #0f1114;
+        --bg-elevated: #161a20;
+        --ink: #f2f4f7;
+        --ink-soft: #a7b0bc;
+        --ink-fade: #7e8794;
+        --line: rgba(255, 255, 255, 0.10);
+        --line-strong: rgba(255, 255, 255, 0.14);
+        --graphite: #f5f7fa;
+        --graphite-hover: #ffffff;
+        --graphite-btn: #f5f7fa;
+        --graphite-btn-ink: #121417;
+        --azure: #6eb0d6;
+        --azure-strong: #8fc4e2;
+        --azure-soft: rgba(110, 176, 214, 0.18);
+        --paper: #12161c;
+        --fill: #1b212a;
+        --composer: #1a2028;
+        --hairline: rgba(255, 255, 255, 0.10);
+        --code-bg: #0b0d10;
+        --code-ink: #d8e0ea;
+        --shadow: 0 2px 8px rgba(0,0,0,.35), 0 28px 60px rgba(0,0,0,.45);
+        --shadow-soft: 0 1px 2px rgba(0,0,0,.35), 0 12px 28px rgba(0,0,0,.35);
+        --nav-bg: rgba(15, 17, 20, 0.78);
+        --nav-border: rgba(255, 255, 255, 0.08);
+        --chip-bg: rgba(255, 255, 255, 0.06);
+        --chip-active-bg: #1c222b;
+        --hover-fill: rgba(255, 255, 255, 0.06);
+        --card-bg: rgba(255, 255, 255, 0.03);
+      }
+      html[data-theme="light"] {
+        --nav-bg: rgba(245, 245, 247, 0.72);
+        --nav-border: rgba(0, 0, 0, 0.06);
+        --chip-bg: rgba(0, 0, 0, 0.04);
+        --chip-active-bg: #ffffff;
+        --hover-fill: rgba(0, 0, 0, 0.04);
+        --card-bg: #ffffff;
+      }
+      :root {
+        --nav-bg: rgba(245, 245, 247, 0.72);
+        --nav-border: rgba(0, 0, 0, 0.06);
+        --chip-bg: rgba(0, 0, 0, 0.04);
+        --chip-active-bg: #ffffff;
+        --hover-fill: rgba(0, 0, 0, 0.04);
+        --card-bg: #ffffff;
+      }
+      .theme-toggle {
+        appearance: none;
+        border: 1px solid var(--line);
+        background: var(--chip-bg);
+        color: var(--ink-soft);
+        width: 34px;
+        height: 28px;
+        border-radius: 980px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        padding: 0;
+        transition: background .15s ease, color .15s ease, border-color .15s ease;
+      }
+      .theme-toggle:hover { color: var(--ink); background: var(--hover-fill); }
+      .theme-toggle svg { width: 15px; height: 15px; display: block; }
+      .theme-toggle[data-mode="light"] .icon-moon { display: none; }
+      .theme-toggle[data-mode="dark"] .icon-sun { display: none; }
+      .theme-toggle[data-mode="system"] .icon-sun,
+      .theme-toggle[data-mode="system"] .icon-moon { display: none; }
+      .theme-toggle[data-mode="system"] .icon-system { display: block; }
+      .theme-toggle .icon-system { display: none; }
+
 
       * { box-sizing: border-box; }
       html { scroll-behavior: smooth; }
@@ -53,8 +143,8 @@
         height: 48px;
         backdrop-filter: saturate(180%) blur(20px);
         -webkit-backdrop-filter: saturate(180%) blur(20px);
-        background: rgba(245, 245, 247, 0.72);
-        border-bottom: 1px solid rgba(0,0,0,0.06);
+        background: var(--nav-bg);
+        border-bottom: 1px solid var(--nav-border);
       }
       .nav-inner {
         width: min(var(--wide), calc(100% - 40px));
@@ -93,7 +183,7 @@
       }
       .nav-links a:hover { opacity: 1; }
       .nav-links a.btn-link {
-        color: #fff !important;
+        color: var(--graphite-btn-ink) !important;
         background: var(--graphite);
         border-radius: 980px;
         padding: 6px 12px;
@@ -108,7 +198,7 @@
         height: 28px;
         padding: 2px;
         border-radius: 980px;
-        background: rgba(0,0,0,0.04);
+        background: var(--chip-bg);
         gap: 1px;
       }
       .lang button {
@@ -125,7 +215,7 @@
         padding: 0 8px;
       }
       .lang button[aria-pressed="true"] {
-        background: #fff;
+        background: var(--chip-active-bg);
         color: var(--ink);
         box-shadow: 0 1px 2px rgba(0,0,0,.08);
       }
@@ -228,7 +318,7 @@
         transition: background .15s ease, color .15s ease, box-shadow .15s ease;
       }
       .shell-switch button[aria-pressed="true"] {
-        background: #fff;
+        background: var(--chip-active-bg);
         color: var(--ink);
         box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.04);
       }
@@ -301,7 +391,7 @@
       .sb-new {
         display: flex; align-items: center; justify-content: space-between;
         min-height: 32px; padding: 0 10px; border-radius: 8px;
-        border: 1px solid var(--hairline); background: #fff;
+        border: 1px solid var(--hairline); background: var(--chip-active-bg);
         font-size: 12.5px; font-weight: 550;
       }
       .sb-new kbd {
@@ -353,7 +443,7 @@
         border-radius: 16px 16px 6px 16px; padding: 10px 12px; font-size: 13px;
       }
       .msg-agent {
-        border: 1px solid var(--hairline); background: #fff;
+        border: 1px solid var(--hairline); background: var(--chip-active-bg);
         border-radius: 16px 16px 16px 6px; padding: 12px 14px; font-size: 13px;
         box-shadow: 0 1px 2px rgba(0,0,0,0.03);
       }
@@ -375,7 +465,7 @@
       .composer-tools { display: flex; gap: 6px; flex-wrap: wrap; }
       .chip {
         height: 22px; padding: 0 8px; border-radius: 980px;
-        border: 1px solid var(--hairline); background: #fff;
+        border: 1px solid var(--hairline); background: var(--chip-active-bg);
         color: var(--ink-soft); font-size: 11px;
         display: inline-flex; align-items: center;
       }
@@ -733,7 +823,7 @@
     <header class="nav">
       <div class="nav-inner">
         <div class="nav-brand">
-          <img class="mark" src="./logo.png" alt="" width="18" height="18" />
+          <img class="mark" data-logo-light="./logo-light.png" data-logo-dark="./logo-dark.png" src="./logo-light.png" alt="" width="18" height="18" />
           <span>Peer Agent</span>
         </div>
         <div class="nav-links">
@@ -742,6 +832,19 @@
           <a href="./changelog.html" data-i18n="nav.changelog">Changelog</a>
           <a href="https://github.com/ly-ccx/Peer-Agent" target="_blank" rel="noreferrer" data-i18n="nav.github">GitHub</a>
           <a class="btn-link" href="#get" data-i18n="nav.download">Download</a>
+                    <button type="button" class="theme-toggle" data-mode="system" aria-label="Theme: System">
+            <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4"></circle>
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+            </svg>
+            <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 14.5A8.5 8.5 0 1 1 9.5 3a7 7 0 0 0 11.5 11.5z"></path>
+            </svg>
+            <svg class="icon-system" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="12" rx="2"></rect>
+              <path d="M8 20h8M12 16v4"></path>
+            </svg>
+          </button>
           <div class="lang lang-toggle" role="group" aria-label="Language">
             <button type="button" id="lang-en" data-lang="en" aria-pressed="true">EN</button>
             <button type="button" id="lang-zh" data-lang="zh" aria-pressed="false">中文</button>
@@ -784,7 +887,7 @@
           <div class="workspace">
             <aside class="sidebar">
               <div class="sb-brand">
-                <img class="mark" src="./logo.png" alt="" width="18" height="18" />
+                <img class="mark" data-logo-light="./logo-light.png" data-logo-dark="./logo-dark.png" src="./logo-light.png" alt="" width="18" height="18" />
                 <span>Peer Agent</span>
               </div>
               <div class="sb-workspace">
@@ -1389,5 +1492,83 @@
                 setLang(detectLang(), false);
       })();
     </script>
+  
+    <script>
+      (function () {
+        var KEY = "peer-theme";
+        var order = ["system", "light", "dark"];
+        function systemDark() {
+          return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        }
+        function normalizePref(pref) {
+          return pref === "light" || pref === "dark" || pref === "system" ? pref : "system";
+        }
+        function resolveTheme(pref) {
+          pref = normalizePref(pref);
+          if (pref === "dark") return "dark";
+          if (pref === "light") return "light";
+          return systemDark() ? "dark" : "light";
+        }
+        function readPref() {
+          try { return normalizePref(localStorage.getItem(KEY) || "system"); }
+          catch (e) { return "system"; }
+        }
+        function writePref(pref) {
+          try { localStorage.setItem(KEY, pref); } catch (e) {}
+        }
+        function labels(pref, theme) {
+          if (pref === "system") return theme === "dark" ? "Theme: System (Dark)" : "Theme: System (Light)";
+          return pref === "dark" ? "Theme: Dark" : "Theme: Light";
+        }
+        function applyLogos(theme) {
+          document.querySelectorAll("img.mark[data-logo-light][data-logo-dark]").forEach(function (img) {
+            var next = theme === "dark" ? img.getAttribute("data-logo-dark") : img.getAttribute("data-logo-light");
+            if (next && img.getAttribute("src") !== next) img.setAttribute("src", next);
+          });
+        }
+        function applyTheme(pref) {
+          pref = normalizePref(pref);
+          var theme = resolveTheme(pref);
+          document.documentElement.setAttribute("data-theme", theme);
+          document.documentElement.setAttribute("data-theme-pref", pref);
+          applyLogos(theme);
+          document.querySelectorAll(".theme-toggle").forEach(function (btn) {
+            btn.setAttribute("data-mode", pref);
+            btn.setAttribute("aria-label", labels(pref, theme));
+            btn.title = labels(pref, theme);
+          });
+        }
+        function cyclePref(pref) {
+          var i = order.indexOf(normalizePref(pref));
+          return order[(i + 1) % order.length];
+        }
+        function bind() {
+          document.querySelectorAll(".theme-toggle").forEach(function (btn) {
+            if (btn.__themeBound) return;
+            btn.__themeBound = true;
+            btn.addEventListener("click", function () {
+              var next = cyclePref(readPref());
+              writePref(next);
+              applyTheme(next);
+            });
+          });
+        }
+        applyTheme(readPref());
+        bind();
+        if (window.matchMedia) {
+          var mq = window.matchMedia("(prefers-color-scheme: dark)");
+          var onChange = function () {
+            if (readPref() === "system") applyTheme("system");
+          };
+          if (mq.addEventListener) mq.addEventListener("change", onChange);
+          else if (mq.addListener) mq.addListener(onChange);
+        }
+        document.addEventListener("DOMContentLoaded", function () {
+          applyTheme(readPref());
+          bind();
+        });
+      })();
+    </script>
+
   </body>
 </html>
