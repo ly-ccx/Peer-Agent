@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!--
+    Peer Agent macOS menu-bar master.
+
+    Keep this artwork monochrome: Electron marks the rendered PNG as a macOS
+    Template Image, so the system supplies the final light/dark appearance.
+  -->
+  <mask id="face-cutouts" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16">
+    <rect width="16" height="16" fill="white"/>
+    <circle cx="5.35" cy="6.55" r="0.9" fill="black"/>
+    <circle cx="10.65" cy="6.55" r="0.9" fill="black"/>
+    <path
+      d="M5.35 9.4C6.05 10.55 6.9 11.1 8 11.1C9.1 11.1 9.95 10.55 10.65 9.4"
+      fill="none"
+      stroke="black"
+      stroke-width="1.35"
+      stroke-linecap="round"
+    />
+  </mask>
+  <rect
+    x="1.25"
+    y="1.25"
+    width="13.5"
+    height="13.5"
+    rx="4.25"
+    fill="black"
+    mask="url(#face-cutouts)"
+  />
+</svg>

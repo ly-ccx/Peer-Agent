@@ -639,6 +639,21 @@ function MainApp() {
   }, [activeWorkspace]);
 
   useEffect(() => {
+    const offNewChat = clientApi.onTrayNewChat?.(() => {
+      void handleNewChat();
+    });
+    const offMore = clientApi.onTrayMore?.(() => {
+      setActivePage('chat');
+      setConversationView('active');
+      void refreshConversations(activeWorkspace, 'active');
+    });
+    return () => {
+      offNewChat?.();
+      offMore?.();
+    };
+  }, [activeWorkspace, handleNewChat, refreshConversations]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing) return;
       const key = event.key.toLowerCase();

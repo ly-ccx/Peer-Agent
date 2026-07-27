@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, shell, webContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, shell, Tray, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -49,6 +49,7 @@ import { listGeminiModels, preferGeminiModel } from './provider-adapters/gemini-
 import { listQoderModels } from './provider-adapters/qoder-model-catalog.mjs';
 import { createHostRestarter } from './host-restart.mjs';
 import { resolveDockIconPaths } from './dock-icon-paths.mjs';
+import { createTrayController, TRAY_RECENT_LIMIT } from './tray-controller.mjs';
 import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
 import { buildRuntimeTools, createLlmChatService } from './llm-chat-service.mjs';
 import { removeConversationToolArtifacts } from '@peer-agent/runtime-node';
@@ -269,6 +270,7 @@ const stopConversationChangeSubscription = conversationStore.subscribeChanges((e
   }
 
   broadcastToAllWindows('conversations:changed', event);
+  trayController?.scheduleRefresh?.();
 });
 // 主窗口当前前台会话（由 renderer 通过 conversation:set-active 上报），用于同会话通知抑制。
 let activeConversationIdForNotifications = null;
@@ -297,6 +299,7 @@ const goalPlanStore = createGoalPlanStore({
 });
 let goalRunner = null;
 let taskNotificationBroker = null;
+let trayController = null;
 const stopGoalPlanChangeSubscription = bindExternalGoalPlanChanges({
   goalPlanStore,
   broadcast: broadcastToAllWindows,
@@ -421,20 +424,21 @@ function isMainAppForegroundForNotifications() {
 function openConversationFromTaskNotification(payload = {}) {
   const conversationId = typeof payload.conversationId === 'string' ? payload.conversationId : '';
   const workspacePath = typeof payload.workspacePath === 'string' ? payload.workspacePath : '';
+  const eventPayload = {
+    conversationId,
+    workspacePath,
+    planId: payload.planId ?? payload.taskId ?? null,
+    messageId: typeof payload.messageId === 'string' ? payload.messageId : null,
+    attentionVersion: payload.attentionVersion ?? null,
+    source: payload.source || 'system-notification',
+  };
   const mainWindow = getPeerAgentMainWindow();
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
     if (conversationId) {
-      mainWindow.webContents.send('quick-chat:open-conversation', {
-        conversationId,
-        workspacePath,
-        planId: payload.planId ?? payload.taskId ?? null,
-        messageId: typeof payload.messageId === 'string' ? payload.messageId : null,
-        attentionVersion: payload.attentionVersion ?? null,
-        source: payload.source || 'system-notification',
-      });
+      mainWindow.webContents.send('quick-chat:open-conversation', eventPayload);
     }
     return true;
   }
@@ -443,18 +447,96 @@ function openConversationFromTaskNotification(payload = {}) {
   const created = getPeerAgentMainWindow();
   if (created && !created.isDestroyed() && conversationId) {
     created.webContents.once('did-finish-load', () => {
-      created.webContents.send('quick-chat:open-conversation', {
-        conversationId,
-        workspacePath,
-        planId: payload.planId ?? payload.taskId ?? null,
-        messageId: typeof payload.messageId === 'string' ? payload.messageId : null,
-        attentionVersion: payload.attentionVersion ?? null,
-        source: payload.source || 'system-notification',
-      });
+      if (!created.isDestroyed()) {
+        created.webContents.send('quick-chat:open-conversation', eventPayload);
+      }
     });
     return true;
   }
   return false;
+}
+
+function showOrCreateMainWindow() {
+  const existing = getPeerAgentMainWindow();
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
+    existing.focus();
+    return existing;
+  }
+  createWindow();
+  return getPeerAgentMainWindow();
+}
+
+function sendMainWindowChannel(channel, payload) {
+  const existing = getPeerAgentMainWindow();
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
+    existing.focus();
+    existing.webContents.send(channel, payload);
+    return;
+  }
+  createWindow();
+  const created = getPeerAgentMainWindow();
+  if (created && !created.isDestroyed()) {
+    created.webContents.once('did-finish-load', () => {
+      if (!created.isDestroyed()) {
+        created.webContents.send(channel, payload);
+      }
+    });
+  }
+}
+
+function openTrayNewChat() {
+  sendMainWindowChannel('tray:new-chat', { source: 'tray' });
+}
+
+function openTrayMore() {
+  sendMainWindowChannel('tray:more', { source: 'tray' });
+}
+
+async function listTrayRecentConversations({ limit = TRAY_RECENT_LIMIT } = {}) {
+  const listed = conversationStore.listConversations({
+    status: 'active',
+    limit: Math.max(1, Math.min(Number(limit) || TRAY_RECENT_LIMIT, TRAY_RECENT_LIMIT)),
+  });
+  return (Array.isArray(listed) ? listed : []).map((item) => ({
+    id: item.id,
+    title: item.title,
+    workspacePath: item.workspacePath,
+    updatedAt: item.updatedAt,
+  }));
+}
+
+function createAppTrayController() {
+  return createTrayController({
+    Tray,
+    Menu,
+    nativeImage,
+    app,
+    isPackaged,
+    workspaceRoot: workspaceRoot || path.join(__dirname, '../../..'),
+    resourcesRoot: process.resourcesPath,
+    listRecentConversations: listTrayRecentConversations,
+    handlers: {
+      onOpenConversation: (payload) => {
+        openConversationFromTaskNotification({
+          conversationId: payload?.conversationId,
+          workspacePath: payload?.workspacePath,
+          source: payload?.source || 'tray-recent',
+        });
+      },
+      onMore: () => openTrayMore(),
+      onNewChat: () => openTrayNewChat(),
+      onOpenApp: () => {
+        showOrCreateMainWindow();
+      },
+      onQuit: () => {
+        app.quit();
+      },
+    },
+  });
 }
 
 function showTaskSystemNotification({ title, body, onClick }) {
@@ -3242,6 +3324,14 @@ app.whenReady().then(async () => {
 
   createWindow();
 
+  // 菜单栏托盘：Recent 会话 + New Chat / Open / Quit（P0 原生 Menu）。
+  try {
+    trayController = createAppTrayController();
+  } catch (err) {
+    console.warn('[tray] init failed:', err);
+    trayController = null;
+  }
+
   // 任务完成系统通知 Broker：订阅 goalPlans 变更、去重、前台抑制、点击回流。
   try {
     taskNotificationBroker = createTaskNotificationBroker({
@@ -3306,6 +3396,12 @@ app.on('before-quit', () => {
   stopConversationChangeSubscription();
   stopGoalPlanChangeSubscription();
   shortcutService.dispose();
+  try {
+    trayController?.destroy?.();
+  } catch (err) {
+    console.warn('[tray] destroy failed:', err);
+  }
+  trayController = null;
   try {
     stopAutoUpdater();
   } catch (err) {

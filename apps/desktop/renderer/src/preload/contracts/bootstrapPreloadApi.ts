@@ -735,6 +735,10 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     attentionVersion?: number | null;
     source?: string;
   }) => void) => () => void;
+  /** 菜单栏托盘：New Chat。 */
+  readonly onTrayNewChat: (listener: (payload?: { source?: string }) => void) => () => void;
+  /** 菜单栏托盘：More → 聚焦主窗会话列表。 */
+  readonly onTrayMore: (listener: (payload?: { source?: string }) => void) => () => void;
   /** 上报主窗口当前前台会话，供任务系统通知做同会话抑制。 */
   readonly setActiveConversation: (payload: {
     conversationId: string | null;

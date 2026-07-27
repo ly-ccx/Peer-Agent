@@ -310,6 +310,16 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.on('quick-chat:open-conversation', handler);
     return () => ipcRenderer.removeListener('quick-chat:open-conversation', handler);
   },
+  onTrayNewChat: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('tray:new-chat', handler);
+    return () => ipcRenderer.removeListener('tray:new-chat', handler);
+  },
+  onTrayMore: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('tray:more', handler);
+    return () => ipcRenderer.removeListener('tray:more', handler);
+  },
   // 上报主窗口当前前台会话，供任务系统通知做同会话抑制 / 已读。
   setActiveConversation: (payload) => ipcRenderer.invoke('conversation:set-active', payload || {}),
   onRuntimeEvent: (listener) => {
