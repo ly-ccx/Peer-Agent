@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   listShellPermissionRules: () => ipcRenderer.invoke('shell:permissions:list'),
   addShellPermissionRule: (rule) => ipcRenderer.invoke('shell:permissions:add', rule),
   listSkills: () => ipcRenderer.invoke('skills:list'),
+  getSkillDetail: (skillId) => ipcRenderer.invoke('skills:get-detail', { skillId }),
   refreshSkills: () => ipcRenderer.invoke('skills:refresh'),
   uploadSkill: (zipBase64) => ipcRenderer.invoke('skills:upload', { zipBase64 }),
   enableSkill: (skillId) => ipcRenderer.invoke('skills:enable', { skillId }),

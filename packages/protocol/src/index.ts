@@ -74,13 +74,26 @@ export interface CapabilityManifest {
   readonly providerLabel?: string;
 }
 
+export type SkillScope = 'global' | 'workspace';
+
 export interface SkillSummary {
   readonly skillId: string;
   readonly name: string;
   readonly description: string;
+  /** Layer 2 清单 reminder 的发现性提示；可为空字符串。 */
+  readonly whenToUse: string;
   readonly version: string;
   readonly dataLevel: DataLevel;
   readonly enabled: boolean;
+  /** Skill 的安装范围；workspace Skill 只属于对应工作空间。 */
+  readonly scope: SkillScope;
+  /** scope=workspace 时对应的工作空间绝对路径。 */
+  readonly workspacePath?: string | null;
+}
+
+export interface SkillDetail extends SkillSummary {
+  readonly instructions: string;
+  readonly sourcePath: string;
 }
 
 /**

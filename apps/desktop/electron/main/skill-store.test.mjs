@@ -212,6 +212,87 @@ describe('createSkillStore', () => {
     assert.equal(store.listSkills()[0].skillId, 'real-skill');
   });
 
+  it('keeps mounted state isolated and persisted per workspace', () => {
+    writeSkill(userDataPath, 'demo', '---\nskillId: demo\nname: Demo\ndescription: Workspace skill\n---\nBody');
+    const workspaceA = path.join(userDataPath, 'workspace-a');
+    const workspaceB = path.join(userDataPath, 'workspace-b');
+    const store = createSkillStore({ userDataPath, workspacePath: workspaceA });
+
+    store.disableSkill('demo');
+    assert.equal(store.listSkills()[0].enabled, false);
+    store.setWorkspacePath(workspaceB);
+    assert.equal(store.listSkills()[0].enabled, true);
+    store.disableSkill('demo');
+    store.enableSkill('demo');
+    store.setWorkspacePath(workspaceA);
+    assert.equal(store.listSkills()[0].enabled, false);
+
+    const restored = createSkillStore({ userDataPath, workspacePath: workspaceB });
+    assert.equal(restored.listSkills()[0].enabled, true);
+    restored.setWorkspacePath(workspaceA);
+    assert.equal(restored.listSkills()[0].enabled, false);
+  });
+
+  it('allows one workspace to override a legacy global disable', () => {
+    writeSkill(userDataPath, 'demo', '---\nskillId: demo\nname: Demo\ndescription: Workspace skill\n---\nBody');
+    createSkillStore({ userDataPath }).disableSkill('demo');
+    const workspaceA = path.join(userDataPath, 'workspace-a');
+    const workspaceB = path.join(userDataPath, 'workspace-b');
+    const store = createSkillStore({ userDataPath, workspacePath: workspaceA });
+    assert.equal(store.listSkills()[0].enabled, false);
+    store.enableSkill('demo');
+    assert.equal(store.listSkills()[0].enabled, true);
+    store.setWorkspacePath(workspaceB);
+    assert.equal(store.listSkills()[0].enabled, false);
+  });
+
+  it('separates global and workspace skills and exposes detail content', () => {
+    writeSkill(userDataPath, 'global-demo', '---\nskillId: global-demo\nname: Global Demo\ndescription: Global skill\nwhenToUse: Use globally\n---\nGlobal body');
+    const workspace = path.join(userDataPath, 'workspace-a');
+    const workspaceSkillDir = path.join(workspace, 'skills', 'workspace-demo');
+    mkdirSync(workspaceSkillDir, { recursive: true });
+    writeFileSync(path.join(workspaceSkillDir, 'SKILL.md'), '---\nskillId: workspace-demo\nname: Workspace Demo\ndescription: Workspace skill\nwhenToUse: Use in this project\n---\nWorkspace body');
+
+    const store = createSkillStore({ userDataPath, workspacePath: workspace });
+    const summaries = store.listSkills();
+    assert.equal(summaries.find((skill) => skill.skillId === 'global-demo')?.scope, 'global');
+    const workspaceSummary = summaries.find((skill) => skill.skillId === 'workspace-demo');
+    assert.equal(workspaceSummary?.scope, 'workspace');
+    assert.equal(workspaceSummary?.workspacePath, workspace);
+
+    const detail = store.getSkillDetail('workspace-demo');
+    assert.equal(detail?.instructions, 'Workspace body');
+    assert.equal(detail?.whenToUse, 'Use in this project');
+    assert.equal(detail?.sourcePath, path.join(workspaceSkillDir, 'SKILL.md'));
+  });
+
+  it('prefers a workspace skill when its id shadows a global skill', () => {
+    writeSkill(userDataPath, 'demo', '---\nskillId: demo\nname: Global Demo\ndescription: Global skill\n---\nGlobal body');
+    const workspace = path.join(userDataPath, 'workspace-a');
+    const workspaceSkillDir = path.join(workspace, 'skills', 'demo');
+    mkdirSync(workspaceSkillDir, { recursive: true });
+    writeFileSync(path.join(workspaceSkillDir, 'SKILL.md'), '---\nskillId: demo\nname: Workspace Demo\ndescription: Workspace skill\n---\nWorkspace body');
+
+    const store = createSkillStore({ userDataPath, workspacePath: workspace });
+    assert.equal(store.listSkills().filter((skill) => skill.skillId === 'demo').length, 1);
+    assert.equal(store.listSkills()[0].scope, 'workspace');
+    assert.equal(store.getSkillDetail('demo')?.instructions, 'Workspace body');
+  });
+
+  it('reloads workspace-local skills when the active workspace changes', () => {
+    const workspaceA = path.join(userDataPath, 'workspace-a');
+    const workspaceB = path.join(userDataPath, 'workspace-b');
+    for (const [workspace, id] of [[workspaceA, 'skill-a'], [workspaceB, 'skill-b']]) {
+      const dir = path.join(workspace, 'skills', id);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, 'SKILL.md'), `---\nskillId: ${id}\nname: ${id}\ndescription: Workspace skill\n---\nBody`);
+    }
+    const store = createSkillStore({ userDataPath, workspacePath: workspaceA });
+    assert.equal(store.listSkills()[0].skillId, 'skill-a');
+    store.setWorkspacePath(workspaceB);
+    assert.equal(store.listSkills()[0].skillId, 'skill-b');
+  });
+
   it('ignores directories without SKILL.md', () => {
     mkdirSync(path.join(userDataPath, 'skills', 'empty-dir'), { recursive: true });
     writeSkill(userDataPath, 'valid', '---\nskillId: valid\nname: Valid\ndescription: A valid skill\n---\nBody');

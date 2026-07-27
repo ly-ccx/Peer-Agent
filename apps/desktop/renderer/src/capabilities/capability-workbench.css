@@ -347,7 +347,39 @@
   /* ── Skills Panel ── */
 
   .skill-panel {
+    @apply grid gap-5;
+  }
+
+  .skill-scope-section {
     @apply grid gap-3;
+  }
+
+  .skill-scope-header {
+    @apply flex items-end justify-between gap-4;
+    padding: 4px 2px 0;
+  }
+
+  .skill-scope-header h3 {
+    @apply m-0 text-[16px] font-semibold;
+    color: var(--za-text);
+  }
+
+  .skill-scope-header p {
+    @apply m-0 mt-1 text-[12px];
+    color: var(--za-text-muted);
+  }
+
+  .skill-scope-header > span {
+    @apply rounded-full px-2 py-0.5 text-[11px] font-medium;
+    color: var(--za-text-muted);
+    background: color-mix(in srgb, var(--za-text) 8%, transparent);
+  }
+
+  .skill-scope-empty {
+    @apply rounded-[10px] px-4 py-8 text-center text-[13px];
+    color: var(--za-text-muted);
+    border: 1px dashed var(--za-line);
+    background: color-mix(in srgb, var(--za-panel-1) 70%, transparent);
   }
 
   .skill-panel-content {
@@ -560,11 +592,12 @@
   }
 
   .skill-card {
-    @apply flex min-w-0 items-start gap-3 px-4 py-3;
+    @apply flex min-w-0 items-start gap-3 overflow-hidden px-4 py-3;
     border: 1px solid var(--za-line);
     border-radius: 10px;
     color: var(--za-text);
     background: var(--za-panel-1);
+    cursor: pointer;
     transition: opacity 0.2s, box-shadow 0.2s, border-color 0.2s;
   }
 
@@ -1047,5 +1080,103 @@
   .mcp-drawer-credentials .mcp-credential-delete:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  /* ── Skill detail dialog ── */
+  .skill-detail-overlay {
+    @apply fixed inset-0 flex items-center justify-center;
+    z-index: 1000;
+    padding: 40px;
+    background: rgba(5, 8, 14, 0.62);
+    backdrop-filter: blur(10px);
+  }
+
+  .skill-detail-dialog {
+    @apply flex min-h-0 w-full flex-col overflow-hidden rounded-[28px];
+    width: min(900px, 90vw);
+    max-height: min(820px, 88vh);
+    color: var(--za-text);
+    background: color-mix(in srgb, var(--za-thread-bg) 92%, #fff 8%);
+    border: 1px solid color-mix(in srgb, var(--za-line) 76%, #fff 24%);
+    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.45);
+  }
+
+  .skill-detail-header {
+    @apply flex items-start gap-4;
+    padding: 30px 32px 20px;
+  }
+
+  .skill-detail-avatar {
+    flex: 0 0 auto;
+    width: 58px;
+    height: 58px;
+    font-size: 22px;
+  }
+
+  .skill-detail-heading { @apply min-w-0 flex-1; }
+  .skill-detail-title-row { @apply flex flex-wrap items-center gap-2; }
+  .skill-detail-title-row h2 { @apply m-0 text-[24px] font-semibold; }
+  .skill-detail-heading > p {
+    @apply m-0 mt-2 text-[14px] leading-6;
+    color: var(--za-text-muted);
+  }
+
+  .skill-scope-badge { @apply rounded-full px-2.5 py-1 text-[11px] font-medium; }
+  .skill-scope-badge--workspace { color: #60a5fa; background: rgba(59, 130, 246, 0.14); }
+  .skill-scope-badge--global { color: var(--za-text-muted); background: color-mix(in srgb, var(--za-text) 8%, transparent); }
+
+  .skill-detail-toggle { @apply relative mt-1 inline-flex h-7 w-12 cursor-pointer items-center; }
+  .skill-detail-toggle input { @apply sr-only; }
+  .skill-detail-toggle > span[aria-hidden='true'] {
+    @apply h-7 w-12 rounded-full;
+    background: color-mix(in srgb, var(--za-text) 16%, transparent);
+    transition: background 160ms ease;
+  }
+  .skill-detail-toggle > span[aria-hidden='true']::after {
+    content: '';
+    @apply absolute left-1 top-1 h-5 w-5 rounded-full bg-white;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    transition: transform 160ms ease;
+  }
+  .skill-detail-toggle input:checked + span { background: #3b82f6; }
+  .skill-detail-toggle input:checked + span::after { transform: translateX(20px); }
+
+  .skill-detail-close {
+    @apply flex h-8 w-8 items-center justify-center rounded-full border-0 bg-transparent text-[26px] leading-none;
+    color: var(--za-text-muted);
+    cursor: pointer;
+  }
+  .skill-detail-close:hover { color: var(--za-text); background: color-mix(in srgb, var(--za-text) 8%, transparent); }
+
+  .skill-detail-meta {
+    @apply flex flex-wrap items-center gap-3 px-8 pb-4 text-[12px];
+    color: var(--za-text-muted);
+  }
+  .skill-detail-meta code {
+    @apply max-w-full truncate rounded-md px-2 py-1;
+    background: color-mix(in srgb, var(--za-text) 7%, transparent);
+  }
+
+  .skill-detail-content {
+    @apply min-h-0 flex-1 overflow-y-auto rounded-t-[22px] px-8 py-7;
+    margin: 0 18px 18px;
+    background: color-mix(in srgb, var(--za-thread-bg) 80%, #000 20%);
+    border: 1px solid color-mix(in srgb, var(--za-line) 80%, transparent);
+  }
+  .skill-detail-content .markdown-content { font-size: 14px; line-height: 1.75; }
+  .skill-detail-when {
+    @apply mb-6 rounded-xl p-4;
+    background: color-mix(in srgb, #3b82f6 9%, transparent);
+    border: 1px solid color-mix(in srgb, #3b82f6 22%, transparent);
+  }
+  .skill-detail-when h3, .skill-detail-when p { @apply m-0; }
+  .skill-detail-when h3 { @apply mb-2 text-[13px] font-semibold; }
+  .skill-detail-when p { @apply text-[13px] leading-6; color: var(--za-text-muted); }
+
+  @media (max-width: 720px) {
+    .skill-detail-overlay { padding: 16px; }
+    .skill-detail-header { padding: 22px 20px 16px; }
+    .skill-detail-content { margin: 0 10px 10px; padding: 20px; }
+    .skill-detail-meta { padding-inline: 20px; }
   }
 }

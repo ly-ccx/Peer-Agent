@@ -73,6 +73,7 @@ type McpRegistry = Readonly<{
 
 export interface SkillMcpBridgeOptions {
   readonly userDataPath: string;
+  readonly workspacePath?: string | null;
   readonly skillStore?: SkillStore;
   readonly mcpRegistry?: McpRegistry;
   readonly skillProvider?: SharedProvider;
@@ -151,7 +152,7 @@ function callFor(input: SkillMcpExecuteInput): RuntimeSdkToolCall & Readonly<Rec
 
 export function createTuiSkillMcpBridge(options: SkillMcpBridgeOptions) {
   const skillStore: SkillStore = options.skillStore
-    ?? createSkillStore({ userDataPath: options.userDataPath }) as SkillStore;
+    ?? createSkillStore({ userDataPath: options.userDataPath, workspacePath: options.workspacePath ?? null }) as SkillStore;
   const mcpRegistry: McpRegistry = options.mcpRegistry ?? createMcpRegistry({
     registryPath: path.join(options.userDataPath, 'mcp-registry.json'),
   }) as McpRegistry;

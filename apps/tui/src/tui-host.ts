@@ -228,7 +228,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
   const goalBridge = createTuiGoalBridge({
     storeDir: path.join(userDataPath, 'goal-plans'),
   });
-  const skillMcpBridge = createTuiSkillMcpBridge({ userDataPath });
+  const skillMcpBridge = createTuiSkillMcpBridge({ userDataPath, workspacePath: workspaceRoot });
 
   const recordExecutionEvidence = (
     execution: RuntimeSdkProviderExecution,

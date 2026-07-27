@@ -32,6 +32,7 @@ import type {
   PromptSnapshotIndexEntry,
   PromptSnapshotRecord,
   RuntimeProjection,
+  SkillDetail,
   SkillSummary,
   AvailableSkillSummary,
   SkillLinkResult,
@@ -387,6 +388,7 @@ export interface BootstrapPreloadApi {
   readonly listShellPermissionRules: () => Promise<readonly Record<string, unknown>[]>;
   readonly addShellPermissionRule: (rule: Record<string, unknown>) => Promise<readonly Record<string, unknown>[]>;
   readonly listSkills: () => Promise<readonly SkillSummary[]>;
+  readonly getSkillDetail: (skillId: string) => Promise<SkillDetail | null>;
   readonly refreshSkills: () => Promise<readonly SkillSummary[]>;
   readonly uploadSkill: (zipBase64: string) => Promise<SkillSummary | null>;
   readonly enableSkill: (skillId: string) => Promise<readonly SkillSummary[]>;

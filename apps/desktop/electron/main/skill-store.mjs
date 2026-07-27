@@ -134,39 +134,133 @@ function loadSingleSkill(skillDir, dirName) {
   };
 }
 
-export function createSkillStore({ userDataPath, sourceRoots = [] }) {
+export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath = null } = {}) {
   const skillsRoot = path.join(userDataPath, 'skills');
   // 「借用来源」目录（如 a1 公共 skill 仓 ~/.agents/skills）。
   // 注意：sourceRoots 不再被自动合并进 loadSkills —— 它们只作为
   // listAvailableSkills 的候选来源，用户显式 linkSkill 后才会在 skillsRoot
-  // 建软链，从而被 loadSkills 当作本地技能加载。enable/disable/install 仍只写 skillsRoot。
+  // 建软链，从而被 loadSkills 当作本地技能加载。install/link 仍只写 skillsRoot。
+  // 开关挂载（enable/disable）按工作区隔离：全局库可共享，是否对本工作区生效单独记。
   const borrowSourceRoots = (Array.isArray(sourceRoots) ? sourceRoots : [])
     .filter((root) => typeof root === 'string' && root && root !== skillsRoot);
   let skills = [];
-  let disabledSet = new Set();
+  /** @type {Set<string>} 全局硬禁用（对所有工作区生效） */
+  let globalDisabledSet = new Set();
+  /**
+   * 工作区级卸载集合：workspaceKey -> Set(skillId)
+   * 语义：skill 仍安装在全局库，但对本工作区不挂载（list/injection 视为 disabled）。
+   * 未出现在 map 中的工作区：默认挂载全部「未全局禁用」的 skill（兼容旧行为）。
+   */
+  let workspaceDisabledMap = new Map();
+  /** 工作区显式挂载集合，用于覆盖旧版全局 disabled 状态。 */
+  let workspaceEnabledMap = new Map();
+  let activeWorkspaceKey = normalizeWorkspaceKey(workspacePath);
+
+  function workspaceSkillsRoot(wsKey = activeWorkspaceKey) {
+    return wsKey ? path.join(wsKey, 'skills') : null;
+  }
 
   function settingsPath() {
     return path.join(skillsRoot, SETTINGS_FILENAME);
+  }
+
+  function normalizeWorkspaceKey(wsPath) {
+    if (typeof wsPath !== 'string') return null;
+    const trimmed = wsPath.trim();
+    if (!trimmed) return null;
+    try {
+      return path.resolve(trimmed);
+    } catch {
+      return trimmed;
+    }
   }
 
   function loadSettings() {
     try {
       if (existsSync(settingsPath())) {
         const raw = JSON.parse(readFileSync(settingsPath(), 'utf8'));
-        disabledSet = new Set(Array.isArray(raw.disabled) ? raw.disabled : []);
+        globalDisabledSet = new Set(Array.isArray(raw.disabled) ? raw.disabled : []);
+        workspaceDisabledMap = new Map();
+        workspaceEnabledMap = new Map();
+        const workspaceDisabled = raw && typeof raw.workspaceDisabled === 'object' && raw.workspaceDisabled
+          ? raw.workspaceDisabled
+          : {};
+        const workspaceEnabled = raw && typeof raw.workspaceEnabled === 'object' && raw.workspaceEnabled
+          ? raw.workspaceEnabled
+          : {};
+        for (const [key, value] of Object.entries(workspaceDisabled)) {
+          const nk = normalizeWorkspaceKey(key);
+          if (!nk) continue;
+          workspaceDisabledMap.set(
+            nk,
+            new Set(Array.isArray(value) ? value.filter((id) => typeof id === 'string' && id.trim()) : []),
+          );
+        }
+        for (const [key, value] of Object.entries(workspaceEnabled)) {
+          const nk = normalizeWorkspaceKey(key);
+          if (!nk) continue;
+          workspaceEnabledMap.set(
+            nk,
+            new Set(Array.isArray(value) ? value.filter((id) => typeof id === 'string' && id.trim()) : []),
+          );
+        }
       }
     } catch {
-      disabledSet = new Set();
+      globalDisabledSet = new Set();
+      workspaceDisabledMap = new Map();
+      workspaceEnabledMap = new Map();
     }
   }
 
   function saveSettings() {
     try {
       if (!existsSync(skillsRoot)) mkdirSync(skillsRoot, { recursive: true });
-      writeFileSync(settingsPath(), JSON.stringify({ disabled: [...disabledSet] }, null, 2), 'utf8');
+      const workspaceDisabled = {};
+      const workspaceEnabled = {};
+      for (const [key, set] of workspaceDisabledMap.entries()) {
+        workspaceDisabled[key] = [...set];
+      }
+      for (const [key, set] of workspaceEnabledMap.entries()) {
+        workspaceEnabled[key] = [...set];
+      }
+      writeFileSync(
+        settingsPath(),
+        JSON.stringify(
+          {
+            disabled: [...globalDisabledSet],
+            workspaceDisabled,
+            workspaceEnabled,
+          },
+          null,
+          2,
+        ),
+        'utf8',
+      );
     } catch {
       // silent
     }
+  }
+
+  function workspaceDisabledSetFor(wsKey = activeWorkspaceKey) {
+    if (!wsKey) return new Set();
+    return workspaceDisabledMap.get(wsKey) ?? new Set();
+  }
+
+  function isSkillMounted(skillId, wsKey = activeWorkspaceKey) {
+    if (!wsKey) return !globalDisabledSet.has(skillId);
+    if (workspaceEnabledMap.get(wsKey)?.has(skillId)) return true;
+    if (globalDisabledSet.has(skillId)) return false;
+    return !workspaceDisabledSetFor(wsKey).has(skillId);
+  }
+
+  function setWorkspacePath(wsPath) {
+    activeWorkspaceKey = normalizeWorkspaceKey(wsPath);
+    loadSkills();
+    return activeWorkspaceKey;
+  }
+
+  function getWorkspacePath() {
+    return activeWorkspaceKey;
   }
 
   function loadSkillsFromRoot(root) {
@@ -193,14 +287,30 @@ export function createSkillStore({ userDataPath, sourceRoots = [] }) {
   function loadSkills() {
     loadSettings();
 
-    // 只扫描主目录 skillsRoot。借用自 sourceRoots 的技能以软链形式存在于
-    // skillsRoot 下，statSync 跟随软链时会将其识别为目录，从而被一并加载。
-    skills = loadSkillsFromRoot(skillsRoot).sort((a, b) => a.skillId.localeCompare(b.skillId));
+    const globalSkills = loadSkillsFromRoot(skillsRoot).map((skill) => ({
+      ...skill,
+      scope: 'global',
+      workspacePath: null,
+    }));
+    const workspaceRoot = workspaceSkillsRoot();
+    const workspaceSkills = workspaceRoot
+      ? loadSkillsFromRoot(workspaceRoot).map((skill) => ({
+        ...skill,
+        scope: 'workspace',
+        workspacePath: activeWorkspaceKey,
+      }))
+      : [];
+    // 当前工作空间的同名 Skill 优先于全局版本，避免运行时注入两个同 ID Skill。
+    const workspaceIds = new Set(workspaceSkills.map((skill) => skill.skillId));
+    skills = [
+      ...workspaceSkills,
+      ...globalSkills.filter((skill) => !workspaceIds.has(skill.skillId)),
+    ].sort((a, b) => a.skillId.localeCompare(b.skillId));
     return skills;
   }
 
   function listSkills() {
-    return skills.map(({ skillId, name, description, whenToUse, version, dataLevel }) => ({
+    return skills.map(({ skillId, name, description, whenToUse, version, dataLevel, scope, workspacePath: skillWorkspacePath }) => ({
       skillId,
       name,
       description,
@@ -208,18 +318,54 @@ export function createSkillStore({ userDataPath, sourceRoots = [] }) {
       whenToUse: whenToUse || '',
       version,
       dataLevel,
-      enabled: !disabledSet.has(skillId),
+      // enabled = 对本工作区是否挂载（全局硬禁用优先）。
+      enabled: isSkillMounted(skillId),
+      scope,
+      workspacePath: skillWorkspacePath,
     }));
   }
 
+  function ensureWorkspaceDisabledSet(wsKey = activeWorkspaceKey) {
+    if (!wsKey) return null;
+    if (!workspaceDisabledMap.has(wsKey)) {
+      // 首次对本工作区写入时，从「当前默认全挂载」物化一个空卸载集。
+      workspaceDisabledMap.set(wsKey, new Set());
+    }
+    return workspaceDisabledMap.get(wsKey);
+  }
+
+  /** 对本工作区挂载 skill（打开开关）。 */
   function enableSkill(skillId) {
-    disabledSet.delete(skillId);
+    if (typeof skillId !== 'string' || !skillId.trim()) return listSkills();
+    const id = skillId.trim();
+    const wsKey = activeWorkspaceKey;
+    if (wsKey) {
+      const set = ensureWorkspaceDisabledSet(wsKey);
+      set?.delete(id);
+      if (!workspaceEnabledMap.has(wsKey)) workspaceEnabledMap.set(wsKey, new Set());
+      workspaceEnabledMap.get(wsKey).add(id);
+    } else {
+      globalDisabledSet.delete(id);
+    }
     saveSettings();
     return listSkills();
   }
 
+  /**
+   * 对本工作区卸载 skill（关闭开关）。不删除全局安装包。
+   * 无工作区上下文时回退为全局禁用（兼容旧 CLI/测试路径）。
+   */
   function disableSkill(skillId) {
-    disabledSet.add(skillId);
+    if (typeof skillId !== 'string' || !skillId.trim()) return listSkills();
+    const id = skillId.trim();
+    const wsKey = activeWorkspaceKey;
+    if (wsKey) {
+      const set = ensureWorkspaceDisabledSet(wsKey);
+      set?.add(id);
+      workspaceEnabledMap.get(wsKey)?.delete(id);
+    } else {
+      globalDisabledSet.add(id);
+    }
     saveSettings();
     return listSkills();
   }
@@ -370,6 +516,24 @@ export function createSkillStore({ userDataPath, sourceRoots = [] }) {
     };
   }
 
+  function getSkillDetail(skillId) {
+    const skill = findSkill(skillId);
+    if (!skill) return null;
+    return {
+      skillId: skill.skillId,
+      name: skill.name,
+      description: skill.description,
+      whenToUse: skill.whenToUse || '',
+      version: skill.version,
+      dataLevel: skill.dataLevel,
+      enabled: isSkillMounted(skill.skillId),
+      scope: skill.scope,
+      workspacePath: skill.workspacePath,
+      instructions: skill.instructions,
+      sourcePath: path.join(skill.skillDir, SKILL_FILENAME),
+    };
+  }
+
   function installSkillFromZip(zipBuffer) {
     const zip = new AdmZip(zipBuffer);
     const entries = zip.getEntries();
@@ -454,9 +618,13 @@ export function createSkillStore({ userDataPath, sourceRoots = [] }) {
     listSkills,
     findSkill,
     readSkillContext,
+    getSkillDetail,
     refresh,
     enableSkill,
     disableSkill,
+    setWorkspacePath,
+    getWorkspacePath,
+    isSkillMounted,
     installSkillFromZip,
     installSkillFromTgz,
     listAvailableSkills,
