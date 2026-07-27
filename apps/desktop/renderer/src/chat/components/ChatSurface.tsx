@@ -157,25 +157,19 @@ function summarizeUserMessageForContext(msg: ChatMsg, isZh: boolean): string {
 }
 
 function findCurrentTurnIdForScroll(container: HTMLDivElement): string | null {
-  const probeY = container.getBoundingClientRect().top + CURRENT_TURN_CONTEXT_PROBE_PX;
-  const turnElements = Array.from(container.querySelectorAll<HTMLElement>('[data-chat-turn-id]'));
-  let candidate: HTMLElement | null = null;
+  // 滚动路径上避免 querySelectorAll 全量扫 turn：用 elementFromPoint 做 O(1) 命中，
+  // 再向上找最近的 data-chat-turn-id。虚拟窗口外本来就没有 DOM，全量扫也无意义。
+  const bounds = container.getBoundingClientRect();
+  const probeY = bounds.top + CURRENT_TURN_CONTEXT_PROBE_PX;
+  const probeX = bounds.left + Math.min(48, Math.max(8, bounds.width / 2));
+  const hit = document.elementFromPoint(probeX, probeY);
+  if (!(hit instanceof Element) || !container.contains(hit)) return null;
 
-  for (const turnElement of turnElements) {
-    const rect = turnElement.getBoundingClientRect();
-    if (rect.top <= probeY && rect.bottom > probeY) {
-      candidate = turnElement;
-      break;
-    }
-    if (rect.top <= probeY) {
-      candidate = turnElement;
-    }
-  }
-
+  const candidate = hit.closest<HTMLElement>('[data-chat-turn-id]');
   const turnId = candidate?.dataset.chatTurnId ?? null;
-  if (!turnId) return null;
+  if (!turnId || !candidate) return null;
 
-  const userMessage = candidate?.querySelector<HTMLElement>('.chat-msg-user');
+  const userMessage = candidate.querySelector<HTMLElement>('.chat-msg-user');
   if (userMessage && userMessage.getBoundingClientRect().bottom > probeY) return null;
 
   return turnId;
@@ -624,14 +618,19 @@ export function ChatSurface({
     const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     const atBottom = distanceToBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
     shouldAutoScrollRef.current = atBottom;
-    setIsThreadAtBottom(atBottom);
+    setIsThreadAtBottom((previous) => (previous === atBottom ? previous : atBottom));
     return atBottom;
   }, []);
 
-  const saveThreadScrollSnapshot = useCallback((id: string | null, container: HTMLDivElement | null) => {
+  const saveThreadScrollSnapshot = useCallback((
+    id: string | null,
+    container: HTMLDivElement | null,
+    knownTurnId?: string | null,
+  ) => {
     if (!id || !container) return;
     const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    const turnId = findCurrentTurnIdForScroll(container);
+    // 滚动帧内若调用方已探测过 turnId，复用结果，避免同一帧重复 DOM 命中。
+    const turnId = knownTurnId !== undefined ? knownTurnId : findCurrentTurnIdForScroll(container);
     const turnElement = turnId
       ? container.querySelector<HTMLElement>(`[data-chat-turn-id="${CSS.escape(turnId)}"]`)
       : null;
@@ -643,8 +642,10 @@ export function ChatSurface({
     });
   }, []);
 
-  const updateCurrentTurnContext = useCallback((container: HTMLDivElement | null) => {
-    setCurrentTurnId(container ? findCurrentTurnIdForScroll(container) : null);
+  const updateCurrentTurnContext = useCallback((container: HTMLDivElement | null): string | null => {
+    const nextTurnId = container ? findCurrentTurnIdForScroll(container) : null;
+    setCurrentTurnId((previous) => (previous === nextTurnId ? previous : nextTurnId));
+    return nextTurnId;
   }, []);
 
   const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -665,14 +666,16 @@ export function ChatSurface({
     const container = event.currentTarget;
     // Scroll can dispatch far faster than React can commit a long thread. Keep the latest
     // container state and coalesce virtual range updates and geometry probes to one pass per frame.
+    // updateVirtualViewport 仅在虚拟窗口边界变化时 setState；其余 sticky/header 状态也做同值短路。
     threadScrollCoalescerRef.current.request(() => {
       updateVirtualViewport();
       updateThreadBottomState(container);
-      updateCurrentTurnContext(container);
+      const turnId = updateCurrentTurnContext(container);
       if (pendingThreadScrollRestoreRef.current?.conversationId !== conversationId) {
-        saveThreadScrollSnapshot(conversationId, container);
+        saveThreadScrollSnapshot(conversationId, container, turnId);
       }
-      setThreadScrolled(container.scrollTop > 4);
+      const scrolled = container.scrollTop > 4;
+      setThreadScrolled((previous) => (previous === scrolled ? previous : scrolled));
     });
   }, [conversationId, saveThreadScrollSnapshot, updateCurrentTurnContext, updateThreadBottomState, updateVirtualViewport]);
 
