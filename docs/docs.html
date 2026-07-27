@@ -86,7 +86,7 @@
         object-fit: contain;
         flex-shrink: 0;
       }
-.top-links { display: flex; align-items: center; gap: 4px; flex: 1; margin-left: 18px; }
+.top-links { display: flex; align-items: center; gap: 4px; }
       .top-links a { font-size: 13px; color: var(--ink-soft); padding: 8px 12px; border-radius: 8px; }
       .top-links a:hover { color: var(--ink); background: rgba(0,0,0,0.04); }
       .top-links a.active { color: var(--ink); position: relative; }
@@ -94,7 +94,7 @@
         content: ""; position: absolute; left: 12px; right: 12px; bottom: 2px; height: 2px;
         border-radius: 2px; background: var(--azure);
       }
-      .top-actions { display: flex; align-items: center; gap: 10px; }
+      .top-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
       .lang {
         display: inline-flex; align-items: center; height: 30px; padding: 2px;
         border-radius: 980px; background: rgba(0,0,0,0.04); border: 1px solid var(--line); gap: 1px;
@@ -258,17 +258,18 @@
           <img class="mark" src="./logo-light.png" alt="" width="18" height="18" />
           <span>Peer Agent</span>
         </a>
-        <nav class="top-links" aria-label="Primary">
-          <a class="active" href="./docs.html" data-i18n="nav.docs">Docs</a>
-          <a href="./changelog.html" data-i18n="nav.changelog">Changelog</a>
-          <a href="https://github.com/ly-ccx/Peer-Agent" target="_blank" rel="noreferrer" data-i18n="nav.github">GitHub</a>
-        </nav>
         <div class="top-actions">
+          <nav class="top-links" aria-label="Primary">
+            <a class="active" href="./docs.html" data-i18n="nav.docs">Docs</a>
+            <a href="./index.html#mechanisms" data-i18n="nav.mechanisms">Why Peer</a>
+            <a href="./changelog.html" data-i18n="nav.changelog">Changelog</a>
+            <a href="https://github.com/ly-ccx/Peer-Agent" target="_blank" rel="noreferrer" data-i18n="nav.github">GitHub</a>
+          </nav>
+          <a class="btn btn-primary" href="./index.html#get" data-i18n="nav.download">Download</a>
           <div class="lang lang-toggle" role="group" aria-label="Language">
             <button type="button" id="lang-en" data-lang="en" aria-pressed="true">EN</button>
             <button type="button" id="lang-zh" data-lang="zh" aria-pressed="false">中文</button>
           </div>
-          <a class="btn btn-primary" href="./index.html#get" data-i18n="nav.download">Download</a>
         </div>
       </div>
     </header>
@@ -1138,7 +1139,7 @@ Evidence owns governance.</code></pre>
         // Dense i18n: English defaults are in HTML; ZH overrides + a few EN labels live here.
         var ui = {
           en: {
-            "nav.docs": "Docs", "nav.changelog": "Changelog", "nav.github": "GitHub", "nav.download": "Download",
+            "nav.docs": "Docs", "nav.mechanisms": "Why Peer", "nav.changelog": "Changelog", "nav.github": "GitHub", "nav.download": "Download",
             "nav.prev": "Previous", "nav.next": "Next",
             "nav.welcome": "Welcome", "nav.install": "Install", "nav.desktop": "Desktop", "nav.cli": "CLI", "nav.model": "Connect a model",
             "nav.runtime": "Local Runtime", "nav.permissions": "Permissions", "nav.evidence": "Evidence",
@@ -1250,7 +1251,7 @@ Evidence owns governance.</code></pre>
             documentTitle: "Peer Agent — Docs"
           },
           zh: {
-            "nav.docs": "文档", "nav.changelog": "更新日志", "nav.github": "GitHub", "nav.download": "下载",
+            "nav.docs": "文档", "nav.mechanisms": "为什么", "nav.changelog": "更新日志", "nav.github": "GitHub", "nav.download": "下载",
             "nav.prev": "上一页", "nav.next": "下一页",
             "nav.welcome": "欢迎", "nav.install": "安装", "nav.desktop": "Desktop", "nav.cli": "CLI", "nav.model": "连接模型",
             "nav.runtime": "本地 Runtime", "nav.permissions": "权限", "nav.evidence": "Evidence",

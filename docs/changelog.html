@@ -65,6 +65,7 @@
 .nav-links { display: flex; align-items: center; gap: 16px; }
       .nav-links a { font-size: 12px; color: rgba(0,0,0,0.8); opacity: 0.88; }
       .nav-links a:hover { opacity: 1; }
+      .nav-links a.active { opacity: 1; color: var(--ink); font-weight: 600; }
       .nav-links a.btn-link {
         color: #fff !important; background: var(--graphite); border-radius: 980px;
         padding: 6px 12px; opacity: 1; font-weight: 500;
@@ -212,8 +213,10 @@
           <span>Peer Agent</span>
         </a>
         <div class="nav-links">
-          <a href="./index.html" data-i18n="nav.home">Home</a>
           <a href="./docs.html" data-i18n="nav.docs">Docs</a>
+          <a href="./index.html#mechanisms" data-i18n="nav.mechanisms">Why Peer</a>
+          <a class="active" href="./changelog.html" data-i18n="nav.changelog">Changelog</a>
+          <a href="https://github.com/ly-ccx/Peer-Agent" target="_blank" rel="noreferrer" data-i18n="nav.github">GitHub</a>
           <a class="btn-link" href="./index.html#get" data-i18n="nav.download">Download</a>
           <div class="lang lang-toggle" role="group" aria-label="Language">
             <button type="button" id="lang-en" data-lang="en" aria-pressed="true">EN</button>
@@ -254,8 +257,10 @@
 
         var ui = {
           en: {
-            "nav.home": "Home",
             "nav.docs": "Docs",
+            "nav.mechanisms": "Why Peer",
+            "nav.changelog": "Changelog",
+            "nav.github": "GitHub",
             "nav.download": "Download",
             "hero.kicker": "Release notes",
             "hero.title": "Changelog",
@@ -270,8 +275,10 @@
             documentTitle: "Peer Agent — Changelog"
           },
           zh: {
-            "nav.home": "首页",
             "nav.docs": "文档",
+            "nav.mechanisms": "为什么",
+            "nav.changelog": "更新日志",
+            "nav.github": "GitHub",
             "nav.download": "下载",
             "hero.kicker": "版本说明",
             "hero.title": "更新日志",
