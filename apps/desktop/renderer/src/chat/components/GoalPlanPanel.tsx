@@ -350,7 +350,7 @@ function buildManualDodConfirmation(
   };
 }
 
-const RUN_TRACE_COLLAPSED_EVENT_COUNT = 12;
+const RUN_TRACE_COLLAPSED_EVENT_COUNT = 1;
 
 const RUN_EVENT_ISSUE_TYPES = new Set<GoalRunEvent['type']>([
   'validation_failed',
@@ -1389,9 +1389,9 @@ function PlanCard({
   const lockedOpen = awaitingLock || !!isMain;
   const [expanded, setExpanded] = useState<boolean>(defaultExpanded || lockedOpen);
   const effectiveExpanded = lockedOpen || expanded;
-  // 子任务明细默认收起：主卡进入时只显示「标题 + 描述 + 进度条」，
-  // 点进度条才展开 goal-task-list。
-  const [tasksExpanded, setTasksExpanded] = useState(false);
+  // 子任务明细默认展开：主卡进入时直接展示 goal-task-list，
+  // 点进度条可手动收起。
+  const [tasksExpanded, setTasksExpanded] = useState(true);
   const nextStep = getGoalPlanNextStep(plan);
   const nextStepCopy = goalPlanNextStepCopy(isZh);
   const progress = safeProgress(plan);
