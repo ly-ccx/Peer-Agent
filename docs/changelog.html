@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="./favicon.png" type="image/png" />
     <title>Peer Agent — Changelog</title>
     <style>
       :root {
@@ -54,13 +55,14 @@
         font-size: 14px; font-weight: 600; letter-spacing: -0.02em;
       }
       .mark {
-        width: 15px; height: 15px; border-radius: 4px;
-        background: linear-gradient(145deg, #1a1d21, #3a4048); position: relative;
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
+        display: inline-block;
+        object-fit: contain;
+        flex-shrink: 0;
       }
-      .mark::after {
-        content: ""; position: absolute; inset: 4px; border-radius: 1.5px; background: var(--azure);
-      }
-      .nav-links { display: flex; align-items: center; gap: 16px; }
+.nav-links { display: flex; align-items: center; gap: 16px; }
       .nav-links a { font-size: 12px; color: rgba(0,0,0,0.8); opacity: 0.88; }
       .nav-links a:hover { opacity: 1; }
       .nav-links a.btn-link {
@@ -206,7 +208,7 @@
     <header class="nav">
       <div class="nav-inner">
         <a class="nav-brand" href="./index.html">
-          <span class="mark" aria-hidden="true"></span>
+          <img class="mark" src="./logo-light.png" alt="" width="18" height="18" />
           <span>Peer Agent</span>
         </a>
         <div class="nav-links">

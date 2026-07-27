@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="./favicon.png" type="image/png" />
     <title>Peer Agent — Docs</title>
     <style>
       :root {
@@ -73,13 +74,14 @@
       }
       .brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 650; font-size: 14px; letter-spacing: -0.02em; }
       .mark {
-        width: 16px; height: 16px; border-radius: 4px;
-        background: linear-gradient(145deg, #e8ecf2, #9aa3ad); position: relative;
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
+        display: inline-block;
+        object-fit: contain;
+        flex-shrink: 0;
       }
-      .mark::after {
-        content: ""; position: absolute; inset: 4px; border-radius: 1.5px; background: var(--azure-strong);
-      }
-      .top-links { display: flex; align-items: center; gap: 4px; flex: 1; margin-left: 18px; }
+.top-links { display: flex; align-items: center; gap: 4px; flex: 1; margin-left: 18px; }
       .top-links a { font-size: 13px; color: var(--ink-soft); padding: 8px 12px; border-radius: 8px; }
       .top-links a:hover { color: var(--ink); background: rgba(255,255,255,0.04); }
       .top-links a.active { color: var(--ink); position: relative; }
@@ -248,7 +250,7 @@
     <header class="topnav">
       <div class="topnav-inner">
         <a class="brand" href="./index.html">
-          <span class="mark" aria-hidden="true"></span>
+          <img class="mark" src="./logo-light.png" alt="" width="18" height="18" />
           <span>Peer Agent</span>
         </a>
         <nav class="top-links" aria-label="Primary">
