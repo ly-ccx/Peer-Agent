@@ -912,6 +912,147 @@ Evidence owns governance.</code></pre>
           </p>
         </article>
 
+
+        <!-- ================= PLUGIN ================= -->
+        <article class="doc-page" data-page="plugin" hidden>
+          <div class="crumb"><div class="crumb-left"><span data-i18n="group.capabilities">Capabilities</span><span>/</span><strong data-i18n="nav.plugin">Plugins</strong></div></div>
+          <h1 data-i18n="plugin.title">Plugins</h1>
+          <p class="lede" data-i18n="plugin.lede">
+            A Plugin is a local capability package — the packaging and distribution unit for local providers, adapters,
+            optional local MCP configs, permission declarations, and install metadata. Plugins do not own cognition and
+            are not the permission source of truth.
+          </p>
+
+          <h2 id="plugin-what" data-i18n="plugin.whatTitle">What a Plugin is</h2>
+          <ul>
+            <li data-i18n="plugin.what1"><strong>Capability package</strong> — one or more capability manifests shipped together.</li>
+            <li data-i18n="plugin.what2"><strong>Local adapters</strong> — how those capabilities actually run on the device (native bridge, local process, etc.).</li>
+            <li data-i18n="plugin.what3"><strong>Optional local MCP config</strong> — a Plugin may bundle or register local MCP servers, but MCP remains a transport, not the product object.</li>
+            <li data-i18n="plugin.what4"><strong>Install metadata</strong> — publisher, version, signature/trust metadata, settings/diagnostics contributions.</li>
+          </ul>
+          <div class="callout" data-i18n="plugin.not">
+            <strong>Plugin is not:</strong> the agent brain, a free-pass permission grant, or a cloud remote-control channel.
+            It only declares “what I can do”; whether it runs still depends on Runtime Projection + PermissionGrant + Evidence.
+          </div>
+
+          <h2 id="plugin-vs" data-i18n="plugin.vsTitle">Plugin vs Skill vs MCP</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th data-i18n="plugin.thObject">Object</th>
+                  <th data-i18n="plugin.thRole">Role</th>
+                  <th data-i18n="plugin.thNot">Not for</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Plugin</strong></td>
+                  <td data-i18n="plugin.vsPluginRole">Local capability packaging & distribution</td>
+                  <td data-i18n="plugin.vsPluginNot">Deciding when the agent should act; storing permission truth alone</td>
+                </tr>
+                <tr>
+                  <td><strong>Skill</strong></td>
+                  <td data-i18n="plugin.vsSkillRole">Reusable instruction / playbook package (SKILL.md)</td>
+                  <td data-i18n="plugin.vsSkillNot">Hosting new local execution providers</td>
+                </tr>
+                <tr>
+                  <td><strong>MCP</strong></td>
+                  <td data-i18n="plugin.vsMcpRole">Tool/resource transport protocol</td>
+                  <td data-i18n="plugin.vsMcpNot">Product object, permission model, or governance model</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2 id="plugin-chain" data-i18n="plugin.chainTitle">Still the same chain</h2>
+          <pre><code>Plugin package
+  → Capability Manifest(s)
+    → Runtime Projection
+      → Tool Call
+        → PermissionGrant
+          → Local execution
+            → Evidence</code></pre>
+          <p data-i18n="plugin.chainBody">
+            Any Plugin, Skill, or MCP server must enter this path. There is no blessed side door for “plugin tools”
+            that skip projection or grants.
+          </p>
+
+          <h2 id="plugin-contains" data-i18n="plugin.containsTitle">What a Plugin can contain</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th data-i18n="plugin.thPiece">Piece</th>
+                  <th data-i18n="plugin.thMeaning">Meaning</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td data-i18n="plugin.c1a">Capability manifests</td>
+                  <td data-i18n="plugin.c1b">Declared capabilities the Runtime may project</td>
+                </tr>
+                <tr>
+                  <td data-i18n="plugin.c2a">Local adapters</td>
+                  <td data-i18n="plugin.c2b">Native bridge / local process adapters that execute on device</td>
+                </tr>
+                <tr>
+                  <td data-i18n="plugin.c3a">Local MCP config</td>
+                  <td data-i18n="plugin.c3b">Optional bundled local MCP server registration</td>
+                </tr>
+                <tr>
+                  <td data-i18n="plugin.c4a">Permission declarations</td>
+                  <td data-i18n="plugin.c4b">What the package claims it needs — not the final grant</td>
+                </tr>
+                <tr>
+                  <td data-i18n="plugin.c5a">UI contributions</td>
+                  <td data-i18n="plugin.c5b">Settings / diagnostics contribution metadata when needed</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2 id="plugin-registry" data-i18n="plugin.regTitle">Local registration layers</h2>
+          <p data-i18n="plugin.regBody">
+            Local registration is designed as three layers that must not be mixed into one folder:
+          </p>
+          <ol class="steps">
+            <li data-i18n="plugin.r1"><strong>Built-in</strong> — first-party capabilities shipped with the client (for example Local Shell is a core provider, not a random plugin).</li>
+            <li data-i18n="plugin.r2"><strong>User-installed</strong> — formal packages recorded under Electron <code>userData</code> plugin registry (e.g. <code>plugins/registry.json</code>).</li>
+            <li data-i18n="plugin.r3"><strong>Workspace / dev</strong> — development-time manifests (compatibility path under workspace <code>capabilities/*.json</code>) for debugging, not third-party distribution.</li>
+          </ol>
+          <div class="callout warn" data-i18n="plugin.regWarn">
+            <strong>Compat note:</strong> workspace <code>capabilities/*.json</code> is a development/compat entry, not the long-term home for packaged third-party plugins.
+          </div>
+
+          <h2 id="plugin-lifecycle" data-i18n="plugin.lifeTitle">Lifecycle (product view)</h2>
+          <ol class="steps">
+            <li data-i18n="plugin.l1"><strong>Install / register</strong> — package lands in the user plugin registry or a declared source root.</li>
+            <li data-i18n="plugin.l2"><strong>Discover manifests</strong> — Runtime loads capability manifests from the package.</li>
+            <li data-i18n="plugin.l3"><strong>Project</strong> — only projected capabilities become model-visible tools for the current workspace/session.</li>
+            <li data-i18n="plugin.l4"><strong>Authorize</strong> — user PermissionGrant (or valid prior grant scope) before execution.</li>
+            <li data-i18n="plugin.l5"><strong>Execute locally</strong> — adapters / local MCP run on the device.</li>
+            <li data-i18n="plugin.l6"><strong>Evidence</strong> — structured results return as Evidence / ClientToolResult trail.</li>
+          </ol>
+
+          <h2 id="plugin-not-shell" data-i18n="plugin.shellTitle">Local Shell is not “just a plugin”</h2>
+          <p data-i18n="plugin.shellBody">
+            Local Shell / Bash is a first-class high-risk built-in Capability Provider. It is modeled as core local power with
+            command safety classification and Evidence, not as an ordinary third-party plugin toggle.
+          </p>
+
+          <h2 id="plugin-when" data-i18n="plugin.whenTitle">When to use a Plugin</h2>
+          <ul>
+            <li data-i18n="plugin.when1">You need a new local capability family (adapters/providers) packaged for install and update.</li>
+            <li data-i18n="plugin.when2">You want to ship local MCP + manifests + settings metadata as one distributable unit.</li>
+            <li data-i18n="plugin.when3">You need clear publisher/install metadata and a governed enable path on the device.</li>
+          </ul>
+          <p data-i18n="plugin.whenNot">
+            If you only need a reusable playbook, use a Skill. If you only need an external tool transport, use MCP.
+            If you need cloud-only business APIs, that belongs to cloud MCP / cloud projection — not a local Plugin pretending to be remote control.
+          </p>
+        </article>
+
         <!-- ================= FAQ ================= -->
         <article class="doc-page" data-page="faq" hidden>
           <div class="crumb"><div class="crumb-left"><span data-i18n="group.help">Help</span><span>/</span><strong data-i18n="nav.faq">FAQ</strong></div></div>
@@ -980,7 +1121,8 @@ Evidence owns governance.</code></pre>
           { groupKey: "group.capabilities", items: [
             { id: "capabilities", labelKey: "nav.capabilities" },
             { id: "mcp", labelKey: "nav.mcp" },
-            { id: "skill", labelKey: "nav.skill" }
+            { id: "skill", labelKey: "nav.skill" },
+            { id: "plugin", labelKey: "nav.plugin" }
           ]},
           { groupKey: "group.help", items: [
             { id: "faq", labelKey: "nav.faq" }
@@ -995,7 +1137,7 @@ Evidence owns governance.</code></pre>
             "nav.prev": "Previous", "nav.next": "Next",
             "nav.welcome": "Welcome", "nav.install": "Install", "nav.desktop": "Desktop", "nav.cli": "CLI", "nav.model": "Connect a model",
             "nav.runtime": "Local Runtime", "nav.permissions": "Permissions", "nav.evidence": "Evidence",
-            "nav.capabilities": "Overview", "nav.mcp": "MCP", "nav.skill": "Skills", "nav.faq": "FAQ",
+            "nav.capabilities": "Overview", "nav.mcp": "MCP", "nav.skill": "Skills", "nav.plugin": "Plugins", "nav.faq": "FAQ",
             "group.getStarted": "Get started", "group.concepts": "Concepts", "group.capabilities": "Capabilities", "group.help": "Help",
             "toc.title": "On this page", "action.copy": "Copy page", "action.copied": "Copied",
             
@@ -1046,6 +1188,60 @@ Evidence owns governance.</code></pre>
             "skill.when2": "Team conventions that should travel as packages, not as one-off prompt paste.",
             "skill.when3": "Domain procedures that should stay local and auditable, with optional tool allow-lists.",
             "skill.whenNot": "If you need a live external API tool surface, prefer MCP. If you need a new local execution provider family, prefer Plugin/Provider — not a Skill body pretending to be a tool host.",
+            
+            "plugin.title": "Plugins",
+            "plugin.lede": "A Plugin is a local capability package — the packaging and distribution unit for local providers, adapters, optional local MCP configs, permission declarations, and install metadata. Plugins do not own cognition and are not the permission source of truth.",
+            "plugin.whatTitle": "What a Plugin is",
+            "plugin.what1": "Capability package — one or more capability manifests shipped together.",
+            "plugin.what2": "Local adapters — how those capabilities actually run on the device (native bridge, local process, etc.).",
+            "plugin.what3": "Optional local MCP config — a Plugin may bundle or register local MCP servers, but MCP remains a transport, not the product object.",
+            "plugin.what4": "Install metadata — publisher, version, signature/trust metadata, settings/diagnostics contributions.",
+            "plugin.not": "Plugin is not: the agent brain, a free-pass permission grant, or a cloud remote-control channel. It only declares “what I can do”; whether it runs still depends on Runtime Projection + PermissionGrant + Evidence.",
+            "plugin.vsTitle": "Plugin vs Skill vs MCP",
+            "plugin.thObject": "Object",
+            "plugin.thRole": "Role",
+            "plugin.thNot": "Not for",
+            "plugin.vsPluginRole": "Local capability packaging & distribution",
+            "plugin.vsPluginNot": "Deciding when the agent should act; storing permission truth alone",
+            "plugin.vsSkillRole": "Reusable instruction / playbook package (SKILL.md)",
+            "plugin.vsSkillNot": "Hosting new local execution providers",
+            "plugin.vsMcpRole": "Tool/resource transport protocol",
+            "plugin.vsMcpNot": "Product object, permission model, or governance model",
+            "plugin.chainTitle": "Still the same chain",
+            "plugin.chainBody": "Any Plugin, Skill, or MCP server must enter this path. There is no blessed side door for “plugin tools” that skip projection or grants.",
+            "plugin.containsTitle": "What a Plugin can contain",
+            "plugin.thPiece": "Piece",
+            "plugin.thMeaning": "Meaning",
+            "plugin.c1a": "Capability manifests",
+            "plugin.c1b": "Declared capabilities the Runtime may project",
+            "plugin.c2a": "Local adapters",
+            "plugin.c2b": "Native bridge / local process adapters that execute on device",
+            "plugin.c3a": "Local MCP config",
+            "plugin.c3b": "Optional bundled local MCP server registration",
+            "plugin.c4a": "Permission declarations",
+            "plugin.c4b": "What the package claims it needs — not the final grant",
+            "plugin.c5a": "UI contributions",
+            "plugin.c5b": "Settings / diagnostics contribution metadata when needed",
+            "plugin.regTitle": "Local registration layers",
+            "plugin.regBody": "Local registration is designed as three layers that must not be mixed into one folder:",
+            "plugin.r1": "Built-in — first-party capabilities shipped with the client (for example Local Shell is a core provider, not a random plugin).",
+            "plugin.r2": "User-installed — formal packages recorded under Electron userData plugin registry (e.g. plugins/registry.json).",
+            "plugin.r3": "Workspace / dev — development-time manifests (compatibility path under workspace capabilities/*.json) for debugging, not third-party distribution.",
+            "plugin.regWarn": "Compat note: workspace capabilities/*.json is a development/compat entry, not the long-term home for packaged third-party plugins.",
+            "plugin.lifeTitle": "Lifecycle (product view)",
+            "plugin.l1": "Install / register — package lands in the user plugin registry or a declared source root.",
+            "plugin.l2": "Discover manifests — Runtime loads capability manifests from the package.",
+            "plugin.l3": "Project — only projected capabilities become model-visible tools for the current workspace/session.",
+            "plugin.l4": "Authorize — user PermissionGrant (or valid prior grant scope) before execution.",
+            "plugin.l5": "Execute locally — adapters / local MCP run on the device.",
+            "plugin.l6": "Evidence — structured results return as Evidence / ClientToolResult trail.",
+            "plugin.shellTitle": "Local Shell is not “just a plugin”",
+            "plugin.shellBody": "Local Shell / Bash is a first-class high-risk built-in Capability Provider. It is modeled as core local power with command safety classification and Evidence, not as an ordinary third-party plugin toggle.",
+            "plugin.whenTitle": "When to use a Plugin",
+            "plugin.when1": "You need a new local capability family (adapters/providers) packaged for install and update.",
+            "plugin.when2": "You want to ship local MCP + manifests + settings metadata as one distributable unit.",
+            "plugin.when3": "You need clear publisher/install metadata and a governed enable path on the device.",
+            "plugin.whenNot": "If you only need a reusable playbook, use a Skill. If you only need an external tool transport, use MCP. If you need cloud-only business APIs, that belongs to cloud MCP / cloud projection — not a local Plugin pretending to be remote control.",
             documentTitle: "Peer Agent — Docs"
           },
           zh: {
@@ -1053,7 +1249,7 @@ Evidence owns governance.</code></pre>
             "nav.prev": "上一页", "nav.next": "下一页",
             "nav.welcome": "欢迎", "nav.install": "安装", "nav.desktop": "Desktop", "nav.cli": "CLI", "nav.model": "连接模型",
             "nav.runtime": "本地 Runtime", "nav.permissions": "权限", "nav.evidence": "Evidence",
-            "nav.capabilities": "能力总览", "nav.mcp": "MCP", "nav.skill": "Skills", "nav.faq": "常见问题",
+            "nav.capabilities": "能力总览", "nav.mcp": "MCP", "nav.skill": "Skills", "nav.plugin": "Plugins", "nav.faq": "常见问题",
             "group.getStarted": "开始使用", "group.concepts": "核心概念", "group.capabilities": "能力", "group.help": "帮助",
             "toc.title": "本页目录", "action.copy": "复制全文", "action.copied": "已复制",
             "welcome.title": "欢迎使用 Peer Agent",
@@ -1296,6 +1492,60 @@ Evidence owns governance.</code></pre>
             "skill.when2": "需要以包形式传播的团队约定，而不是一次性粘贴提示词。",
             "skill.when3": "应保持本地与可审计的领域流程，可附带工具允许列表。",
             "skill.whenNot": "若需要实时外部 API 工具面，优先 MCP。若需要新的本机执行 provider 族，优先 Plugin/Provider —— 不要让 Skill 正文假装成 tool host。",
+            
+            "plugin.title": "Plugins",
+            "plugin.lede": "Plugin 是本地能力包——用于打包与分发本地 provider、adapter、可选本地 MCP 配置、权限声明与安装元数据。Plugin 不拥有认知，也不是权限事实源。",
+            "plugin.whatTitle": "Plugin 是什么",
+            "plugin.what1": "能力包 — 一起交付的一个或多个 capability manifest。",
+            "plugin.what2": "本地 adapter — 这些能力如何在设备上真正执行（native bridge、本地进程等）。",
+            "plugin.what3": "可选本地 MCP 配置 — Plugin 可捆绑或注册本地 MCP，但 MCP 仍是传输层，不是产品对象。",
+            "plugin.what4": "安装元数据 — 发布方、版本、签名/信任信息、设置/诊断贡献。",
+            "plugin.not": "Plugin 不是：Agent 大脑、一劳永逸的权限通行证，也不是云端远程控制通道。它只声明“我能做什么”；能否运行仍取决于 Runtime Projection + PermissionGrant + Evidence。",
+            "plugin.vsTitle": "Plugin vs Skill vs MCP",
+            "plugin.thObject": "对象",
+            "plugin.thRole": "职责",
+            "plugin.thNot": "不适合",
+            "plugin.vsPluginRole": "本地能力打包与分发",
+            "plugin.vsPluginNot": "决定 Agent 何时行动；单独充当权限真相",
+            "plugin.vsSkillRole": "可复用指令 / playbook 包（SKILL.md）",
+            "plugin.vsSkillNot": "承载新的本机执行 provider",
+            "plugin.vsMcpRole": "工具/资源传输协议",
+            "plugin.vsMcpNot": "产品对象、权限模型或治理模型",
+            "plugin.chainTitle": "仍然是同一条链",
+            "plugin.chainBody": "任何 Plugin、Skill 或 MCP server 都必须进入这条路径。不存在跳过 projection 或授权的“插件旁路”。",
+            "plugin.containsTitle": "Plugin 可以包含什么",
+            "plugin.thPiece": "组成部分",
+            "plugin.thMeaning": "含义",
+            "plugin.c1a": "Capability manifests",
+            "plugin.c1b": "Runtime 可投影的已声明能力",
+            "plugin.c2a": "Local adapters",
+            "plugin.c2b": "在设备上执行的 native bridge / 本地进程 adapter",
+            "plugin.c3a": "Local MCP config",
+            "plugin.c3b": "可选捆绑的本地 MCP 注册",
+            "plugin.c4a": "权限声明",
+            "plugin.c4b": "包声称需要什么 — 不是最终 grant",
+            "plugin.c5a": "UI 贡献",
+            "plugin.c5b": "需要时的设置 / 诊断贡献元数据",
+            "plugin.regTitle": "本地注册分层",
+            "plugin.regBody": "本地注册设计为三层，不能混在一个目录：",
+            "plugin.r1": "内置 — 客户端随附的一等能力（例如 Local Shell 是核心 provider，不是随便一个插件）。",
+            "plugin.r2": "用户安装 — 记录在 Electron userData 插件 registry（如 plugins/registry.json）的正式包。",
+            "plugin.r3": "工作区 / 开发 — 开发态 manifest（兼容路径 workspace capabilities/*.json）用于调试，不是第三方分发主路径。",
+            "plugin.regWarn": "兼容说明：workspace capabilities/*.json 是开发/兼容入口，不是第三方正式插件的长期归宿。",
+            "plugin.lifeTitle": "生命周期（产品视角）",
+            "plugin.l1": "安装 / 注册 — 包进入用户 plugin registry 或声明的 source root。",
+            "plugin.l2": "发现 manifests — Runtime 从包中加载 capability manifests。",
+            "plugin.l3": "投影 — 只有被投影的能力才会成为当前工作区/会话的模型可见工具。",
+            "plugin.l4": "授权 — 执行前需要用户 PermissionGrant（或有效既有 grant 范围）。",
+            "plugin.l5": "本地执行 — adapter / 本地 MCP 在设备上运行。",
+            "plugin.l6": "Evidence — 结构化结果作为 Evidence / ClientToolResult 轨迹返回。",
+            "plugin.shellTitle": "Local Shell 不是“普通插件”",
+            "plugin.shellBody": "Local Shell / Bash 是一等高风险内置 Capability Provider。它按核心本机权力建模（含命令安全分级与 Evidence），不是普通第三方插件开关。",
+            "plugin.whenTitle": "什么时候用 Plugin",
+            "plugin.when1": "需要把新的本机能力族（adapter/provider）打包安装与升级。",
+            "plugin.when2": "希望把本地 MCP + manifests + 设置元数据作为一个可分发单元交付。",
+            "plugin.when3": "需要清晰的发布方/安装元数据，以及设备上可治理的启用路径。",
+            "plugin.whenNot": "若只要可复用 playbook，用 Skill。若只要外部工具传输，用 MCP。若只要云端业务 API，那属于云端 MCP / 云端 projection —— 不要用本地 Plugin 假装远程控制。",
             documentTitle: "Peer Agent — 文档"
           }
         };
