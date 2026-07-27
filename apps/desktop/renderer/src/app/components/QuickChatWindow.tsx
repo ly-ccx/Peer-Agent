@@ -21,6 +21,7 @@ import {
   isChatMode,
   isLocalAccessLevel,
   modeLabel,
+  modePickerValue,
   modeTitle,
   normalizeEffortLevels,
   resolveDraftModelProviderId,
@@ -210,7 +211,7 @@ export function QuickChatWindow() {
         : kind === 'effort'
           ? effort
           : kind === 'mode'
-            ? mode
+            ? modePickerValue(mode)
             : localAccessLevel;
     const nextState: InlineQuickChatPopoverState = {
       kind,

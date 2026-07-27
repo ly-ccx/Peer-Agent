@@ -13,6 +13,8 @@ import {
 const DEFAULT_SOURCE_IDS = [
   'core.identity',
   'agent.brainstorming',
+  'agent.adaptive-planning',
+  'agent.diagnosis-gate',
   'runtime.workspace',
   'runtime.provider',
   'runtime.attachments',

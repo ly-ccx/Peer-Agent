@@ -78,7 +78,8 @@ export const GOAL_TOOL_DEFINITIONS = [
     capabilityId: SHARED_LOCAL_TOOL_CONTRACTS.goalCreatePlan.capabilityId,
     // 在 plan 与 goal 模式投影给模型（ADR 35）。plan 用于产出/求批准计划,goal 用于自驱规划;
     // mode 隔离在 Runtime Projection 层强制,不依赖系统提示词或执行层闸门兜底。
-    availableInModes: ['plan', 'goal'],
+    // Agent 默认（wire=chat）与 legacy goal 共用自驱规划工具；plan 保留人审路径。
+    availableInModes: ['chat', 'plan', 'goal'],
     prompt: () => GOAL_CREATE_PLAN_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-goal-provider',
@@ -197,7 +198,8 @@ export const GOAL_TOOL_DEFINITIONS = [
     name: GOAL_TOOL_NAMES.updateTask,
     capabilityId: SHARED_LOCAL_TOOL_CONTRACTS.goalUpdateTask.capabilityId,
     // 在 plan 与 goal 模式投影给模型（ADR 35）。
-    availableInModes: ['plan', 'goal'],
+    // Agent 默认（wire=chat）与 legacy goal 共用自驱规划工具；plan 保留人审路径。
+    availableInModes: ['chat', 'plan', 'goal'],
     prompt: () => GOAL_TOOL_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-goal-provider',
@@ -280,7 +282,8 @@ export const GOAL_TOOL_DEFINITIONS = [
     name: GOAL_TOOL_NAMES.getPlan,
     capabilityId: SHARED_LOCAL_TOOL_CONTRACTS.goalGetPlan.capabilityId,
     // 在 plan 与 goal 模式投影给模型（ADR 35）。
-    availableInModes: ['plan', 'goal'],
+    // Agent 默认（wire=chat）与 legacy goal 共用自驱规划工具；plan 保留人审路径。
+    availableInModes: ['chat', 'plan', 'goal'],
     prompt: () => GOAL_GET_PLAN_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-goal-provider',
@@ -307,7 +310,8 @@ export const GOAL_TOOL_DEFINITIONS = [
     capabilityId: SHARED_LOCAL_TOOL_CONTRACTS.requestExplorer.capabilityId,
     // 仅在 goal 模式投影给模型（ADR 35）。Explorer 是 Runner 编排的只读子 Agent，
     // 登记式：本工具仅把请求记入回合，由 Goal Runner 在回合结束后派发执行。
-    availableInModes: ['goal'],
+    // request_explorer：Agent（chat）与 legacy goal 自驱编排可用。
+    availableInModes: ['chat', 'goal'],
     prompt: () => REQUEST_EXPLORER_PROMPT,
     runtime: Object.freeze({
       adapter: 'runtime-gateway.local-goal-provider',

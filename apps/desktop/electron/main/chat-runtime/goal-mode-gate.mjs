@@ -295,11 +295,11 @@ export function evaluateGoalModeGate({
   writableRoots = null,
   boundaries = null,
 } = {}) {
-  // wire 值迁移后（见 ADR 41 / goal-mode-ultrathink-workflow 设计文档十一章）：
+  // wire 值迁移后（见 ADR 41 / agent-mode-default-and-adaptive-planning）：
   // - plan 模式：审批门。计划获批前拒绝一切有副作用能力（下方逻辑）。
-  // - goal 模式：自驱目标模式，不施加整模式「计划审批门」，改用确定性 hooks·阶段一。
-  // - 其余模式（chat 等）不施加任何额外闸门。
-  if (mode === 'goal') {
+  // - Agent 默认（wire=chat）与 legacy goal：自驱内核，不施加整模式「计划审批门」，
+  //   改用确定性 hooks·阶段一（写盘范围 / 不可逆确认 / intake write-gate）。
+  if (mode === 'goal' || mode === 'chat') {
     // 规划 / 回写 / 提问：始终放行。
     if (PLAN_ALWAYS_ALLOWED_TOOLS.has(toolName)) return { allowed: true };
     // 惰性 / 只读能力：直接放行。

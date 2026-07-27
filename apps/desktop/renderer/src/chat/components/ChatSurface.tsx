@@ -27,6 +27,7 @@ import {
   isLocalAccessLevel,
   isChatMode,
   modeLabel,
+  modePickerValue,
   modeTitle,
   normalizeChatMode,
   resolveDraftModelProviderId,
@@ -2151,7 +2152,7 @@ export function ChatSurface({
           conversationId={conversationId}
           isZh={isZh}
           isStreaming={isStreaming}
-          enabled={mode === 'plan' || mode === 'goal'}
+          enabled={mode === 'plan' || mode === 'goal' || mode === 'chat'}
         />
         {messageQueue.length > 0 ? (
           <MessageQueue
@@ -2183,7 +2184,7 @@ export function ChatSurface({
           <div className="chat-composer-toolbar-left">
             <Dropdown
               className="composer-dropdown composer-mode-dropdown"
-              value={mode}
+              value={modePickerValue(mode)}
               options={CHAT_MODES.map((m) => ({
                 value: m,
                 label: modeLabel(m, isZh),

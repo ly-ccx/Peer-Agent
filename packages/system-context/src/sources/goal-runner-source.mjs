@@ -15,7 +15,7 @@
 //   完成必须回写 Evidence、不越界、需用户决策时停止）。
 //
 // 治理（与 AGENTS.md 一致）：
-// - 仅在 mode==='goal' 且存在活动计划时渲染；chat / plan 模式零额外 token。
+// - 在 mode==='goal' 或 mode==='chat'(Agent 默认自驱) 且存在活动计划时渲染；纯 plan 规划 turn 不注入 runner 续推。
 // - 只读 goal-plan-store，不写盘、不触发授权、不伪造 Tool Result/Evidence。
 // - 事实与指令分属不同 section，trust 边界清晰。
 
@@ -393,9 +393,9 @@ export function createGoalRunnerPromptSource() {
     trust: 'runtime',
     observe(input = {}) {
       const mode = asString(input.mode) || 'chat';
-      // 按 turn 的执行模式渲染:Runner 驱动的 turn(含 plan 批准后启动的)一律 mode:'goal',
-      // 故仍以 mode==='goal' 为准注入续推上下文;chat 及未托管的 plan turn 零额外 token。
-      if (mode !== 'goal') return { plan: null };
+      // 按 turn 的执行模式渲染:Runner 驱动 turn 可能是 mode:'goal'（含 plan 批准后）
+      // 或 Agent 默认 mode:'chat'；未托管的纯 plan 规划 turn 零额外 token。
+      if (mode !== 'goal' && mode !== 'chat') return { plan: null };
       const store = input.goalPlanStore;
       const conversationId = input.conversationId ?? null;
       if (!store || typeof store.getActivePlanByConversation !== 'function') {

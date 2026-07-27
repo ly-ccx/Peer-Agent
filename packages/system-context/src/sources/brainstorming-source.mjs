@@ -62,11 +62,10 @@ export function createBrainstormingPromptSource() {
     priority: 0,
     trust: 'builtin',
     observe(input = {}) {
-      // 阶段感知：plan 模式一旦有「已就绪（获批/执行中/已完成）」的计划，
-      // 即进入连续执行阶段，撤掉设计协作规范，避免与「一口气执行完成」冲突。
-      // 草拟阶段（计划尚未获批）与非 plan 模式仍保留 brainstorming。
-      // 历史 'goal' 模式别名按当前 'plan' 处理（正名兼容）。
-      if (input.mode === 'plan' || input.mode === 'goal') {
+      // 阶段感知：一旦有「已就绪（获批/执行中/已完成）」的计划，进入连续执行阶段，
+      // 撤掉设计协作规范，避免与「一口气执行完成」冲突。
+      // 覆盖 plan 人审路径，以及 Agent 默认（chat）/ legacy goal 自驱路径。
+      if (input.mode === 'plan' || input.mode === 'goal' || input.mode === 'chat') {
         const planGate = resolveGoalPlanGate(input.conversationId, input.goalPlanStore);
         if (planGate.hasApprovedPlan) {
           return { available: false };

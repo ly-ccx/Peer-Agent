@@ -56,21 +56,27 @@ describe('System Context assembly', () => {
     assert.deepEqual(context.sections.map((section) => section.id), [
       'core.identity',
       'agent.brainstorming',
+      'agent.adaptive-planning',
+      'agent.diagnosis-gate',
       'agent.mcp-host',
       'runtime.workspace',
       'runtime.provider',
+      'runtime.mode',
     ]);
     assert.equal(context.sections[0].layer, 'L0_CORE');
-    assert.equal(context.sections[1].layer, 'L1_AGENT');
-    assert.equal(context.sections[2].layer, 'L1_AGENT');
-    assert.equal(context.sections[3].layer, 'L2_RUNTIME');
+    assert.equal(context.sections[1].layer, 'L1_AGENT'); // brainstorming
+    assert.equal(context.sections[2].layer, 'L1_AGENT'); // adaptive-planning
+    assert.equal(context.sections[3].layer, 'L1_AGENT'); // diagnosis-gate
+    assert.equal(context.sections[4].layer, 'L1_AGENT'); // mcp-host
+    assert.equal(context.sections[5].layer, 'L2_RUNTIME'); // workspace
     assert.match(context.sections[0].checksum, /^[a-f0-9]{64}$/);
     assert.match(context.snapshot.renderedHash, /^[a-f0-9]{64}$/);
     assert.equal(context.snapshot.conversationId, 'c1');
     assert.equal(context.snapshot.workspacePath, '/tmp/workspace');
     assert.equal(context.snapshot.provider, 'openai');
     assert.equal(context.snapshot.model, 'test-model');
-    assert.equal(context.snapshot.sectionRefs.length, 5);
+    assert.equal(context.snapshot.sectionRefs.length, context.sections.length);
+    assert.equal(context.snapshot.sectionRefs.length, 8);
     assert.match(renderSystemContext(context), /Evidence discipline/);
     assert.match(renderSystemContext(context), /Never narrate "writing" \/ "正在写入"/);
     assert.match(renderSystemContext(context), /prefer chunked writes/);
@@ -119,9 +125,12 @@ describe('System Context assembly', () => {
     assert.deepEqual(context.sections.map((section) => section.id), [
       'core.identity',
       'agent.brainstorming',
+      'agent.adaptive-planning',
+      'agent.diagnosis-gate',
       'agent.mcp-host',
       'runtime.workspace',
       'runtime.attachments',
+      'runtime.mode',
     ]);
     const rendered = renderSystemContext(context);
     assert.match(rendered, /User-provided attachment context/);
@@ -131,9 +140,11 @@ describe('System Context assembly', () => {
     assert.match(rendered, /user_text_part/);
     assert.doesNotMatch(rendered, /SHOULD_NOT_BE_IN_SYSTEM_PROMPT/);
     assert.doesNotMatch(rendered, /data:image\/png/);
-    assert.equal(context.snapshot.sectionRefs[4].source.attachmentCount, 2);
-    assert.equal(context.snapshot.sectionRefs[4].source.attachments[0].name, 'screen.png');
-    assert.equal(context.snapshot.sectionRefs[4].source.attachments[1].contentIncluded, true);
+    const attachmentRef = context.snapshot.sectionRefs.find((ref) => ref.id === 'runtime.attachments');
+    assert.ok(attachmentRef, 'attachment section ref must exist');
+    assert.equal(attachmentRef.source.attachmentCount, 2);
+    assert.equal(attachmentRef.source.attachments[0].name, 'screen.png');
+    assert.equal(attachmentRef.source.attachments[1].contentIncluded, true);
   });
 
   it('renders first-class context attachments through the attachment source', () => {
@@ -166,9 +177,12 @@ describe('System Context assembly', () => {
     assert.equal(attachmentSection.source.attachments[0].lifecycle, 'ephemeral');
   });
 
-  it('adds mode reminders only when the turn needs a non-default mode section', () => {
+  it('always injects Agent mode reminder for default chat, and preserves non-chat mode sections', () => {
     const defaultContext = buildSystemContext('/tmp/workspace');
-    assert.equal(defaultContext.sections.some((section) => section.id === 'runtime.mode'), false);
+    const defaultMode = defaultContext.sections.find((section) => section.id === 'runtime.mode');
+    assert.ok(defaultMode, 'default chat/Agent must inject runtime.mode');
+    assert.match(defaultMode.content, /Mode: agent/);
+    assert.match(defaultMode.content, /Self-driven agent mode/);
 
     const compactContext = buildSystemContext('/tmp/workspace', {
       mode: 'compact',
@@ -214,7 +228,7 @@ describe('System Context assembly', () => {
     assert.equal(planContext.snapshot.mode, 'plan');
   });
 
-  it('renders the self-driven goal reminder for goal mode (wire 值迁移后 goal 独立成模式)', () => {
+  it('renders the self-driven agent reminder for goal mode (legacy wire shares Agent kernel)', () => {
     const goalContext = buildSystemContext('/tmp/workspace', {
       mode: 'goal',
       provider: 'anthropic',
@@ -223,11 +237,29 @@ describe('System Context assembly', () => {
 
     const modeSection = goalContext.sections.find((section) => section.id === 'runtime.mode');
     assert.ok(modeSection, 'goal mode must produce a runtime.mode section');
-    // wire 值迁移后:'goal' 是独立的自驱目标模式,渲染自己的 MODE_COPY.goal 文案,不再回落到 plan。
-    assert.match(modeSection.content, /Mode: goal/);
-    assert.match(modeSection.content, /Self-driven goal mode/);
+    // Agent 默认重构后: chat/goal 共用 Agent 自驱文案 (MODE_COPY), 不再是独立的 Mode: goal 文案。
+    assert.match(modeSection.content, /Mode: agent/);
+    assert.match(modeSection.content, /Self-driven agent mode/);
+    assert.match(modeSection.content, /L0 Direct/);
     // 且不应再渲染成 plan 审批门文案。
-    assert.doesNotMatch(modeSection.content, /Mode: plan/);
+    assert.doesNotMatch(modeSection.content, /Mode: plan\./);
+  });
+
+  it('renders the same agent self-driven reminder for default chat mode', () => {
+    const chatContext = buildSystemContext('/tmp/workspace', {
+      mode: 'chat',
+      provider: 'anthropic',
+      model: 'claude-opus',
+    });
+    const modeSection = chatContext.sections.find((section) => section.id === 'runtime.mode');
+    assert.ok(modeSection, 'chat/Agent mode must produce a runtime.mode section');
+    assert.match(modeSection.content, /Mode: agent/);
+    assert.match(modeSection.content, /Self-driven agent mode/);
+    // adaptive planning + diagnosis sources should be present for Agent default.
+    const adaptive = chatContext.sections.find((section) => section.id === 'agent.adaptive-planning');
+    const diagnosis = chatContext.sections.find((section) => section.id === 'agent.diagnosis-gate');
+    assert.ok(adaptive, 'chat mode should inject adaptive-planning source');
+    assert.ok(diagnosis, 'chat mode should inject diagnosis-gate source');
   });
 
   it('renders explicit runtime reminders without mixing them into user messages', () => {
@@ -266,8 +298,11 @@ describe('System Context assembly', () => {
     assert.deepEqual(context.sections.map((section) => section.id), [
       'core.identity',
       'agent.brainstorming',
+      'agent.adaptive-planning',
+      'agent.diagnosis-gate',
       'agent.mcp-host',
       'runtime.workspace',
+      'runtime.mode',
       'runtime.continuity',
     ]);
     const rendered = renderSystemContext(context);
@@ -275,9 +310,11 @@ describe('System Context assembly', () => {
     assert.match(rendered, /integrity priority/);
     assert.match(rendered, /not a replacement for Tool Result \/ Evidence/);
     assert.match(rendered, /finish architecture governance/);
-    assert.equal(context.snapshot.sectionRefs[4].source.summaryCount, 1);
-    assert.equal(context.snapshot.sectionRefs[4].source.summaries[0].method, 'llm');
-    assert.equal(context.snapshot.sectionRefs[4].source.integrityFirst, true);
+    const continuityRef = context.snapshot.sectionRefs.find((ref) => ref.id === 'runtime.continuity');
+    assert.ok(continuityRef, 'continuity section ref must exist');
+    assert.equal(continuityRef.source.summaryCount, 1);
+    assert.equal(continuityRef.source.summaries[0].method, 'llm');
+    assert.equal(continuityRef.source.integrityFirst, true);
   });
 
   it('injects full continuity summary without a fixed 12k character chop', () => {
@@ -409,16 +446,23 @@ describe('System Context assembly', () => {
     assert.deepEqual(context.sections.map((section) => section.id), [
       'core.identity',
       'agent.brainstorming',
+      'agent.adaptive-planning',
+      'agent.diagnosis-gate',
       'agent.mcp-host',
       'runtime.workspace',
       'project.instructions.agents.md',
+      'runtime.mode',
     ]);
-    assert.equal(context.sections[4].layer, 'L3_INSTRUCTIONS');
-    assert.equal(context.sections[4].trust, 'workspace');
-    assert.match(context.sections[4].content, /Project instructions from AGENTS\.md/);
-    assert.match(context.sections[4].content, /Follow repository-specific engineering rules/);
-    assert.equal(context.snapshot.sectionRefs[4].source.kind, 'workspace-file');
-    assert.equal(context.snapshot.sectionRefs[4].source.filename, 'AGENTS.md');
+    const agentsSection = context.sections.find((section) => section.id === 'project.instructions.agents.md');
+    assert.ok(agentsSection, 'AGENTS.md section must exist');
+    assert.equal(agentsSection.layer, 'L3_INSTRUCTIONS');
+    assert.equal(agentsSection.trust, 'workspace');
+    assert.match(agentsSection.content, /Project instructions from AGENTS\.md/);
+    assert.match(agentsSection.content, /Follow repository-specific engineering rules/);
+    const agentsRef = context.snapshot.sectionRefs.find((ref) => ref.id === 'project.instructions.agents.md');
+    assert.ok(agentsRef);
+    assert.equal(agentsRef.source.kind, 'workspace-file');
+    assert.equal(agentsRef.source.filename, 'AGENTS.md');
   }));
 
   it('keeps project instructions after core evidence discipline even when they contain conflicting text', () => withTempWorkspace((workspacePath) => {

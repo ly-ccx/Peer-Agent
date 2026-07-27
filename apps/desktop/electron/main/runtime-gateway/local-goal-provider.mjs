@@ -158,7 +158,9 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
           successCriteria: args.successCriteria,
           createdBy: 'agent',
         };
-        const plan = mode === 'goal' && typeof goalPlanStore.upsertGoalContract === 'function'
+        // Agent 默认（chat）与 legacy goal：创建即 accepted 自驱契约；plan 模式仍走 awaiting_approval。
+        const selfDriven = mode === 'goal' || mode === 'chat';
+        const plan = selfDriven && typeof goalPlanStore.upsertGoalContract === 'function'
           ? goalPlanStore.upsertGoalContract(conversationId, {
             ...draft,
             status: 'accepted',
@@ -188,7 +190,7 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
           // 权威 taskId 清单：第一时间把 store 生成的 taskId 经 Tool Result 回显给模型，
           // 避免后续 goal_update_task 凭记忆/被压缩历史猜 taskId（见 0006 提案根因 1）。
           tasks: summarizeTasks(plan.tasks),
-          note: mode === 'goal'
+          note: selfDriven
             ? (locale === 'zh-CN'
               ? 'Goal 契约已接受。Runner 可在边界内自驱推进；子任务完成、失败或阻塞时请用上面 tasks[].taskId 回写 Evidence。'
               : 'Goal contract accepted. The runner may continue autonomously within boundaries; use tasks[].taskId above when writing back evidence.')
@@ -220,7 +222,7 @@ export function createLocalGoalProvider({ goalPlanStore = createGoalPlanStore() 
           // Goal 创建是 intake 与托管执行之间的明确边界：当前 agent loop 在工具结果
           // 落证后停止回灌，再由 main 编排层于本回合结束后启动 Goal Runner。
           // Plan 模式仍等待审批，因此不能携带此终止信号。
-          ...(status === 'success' && mode === 'goal'
+          ...(status === 'success' && selfDriven
             ? { control: { terminal: true, reason: 'goal_handoff' } }
             : {}),
         },

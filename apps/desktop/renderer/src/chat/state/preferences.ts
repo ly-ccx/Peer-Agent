@@ -246,15 +246,34 @@ export function accessLevelTitle(level: LocalAccessLevel, isZh: boolean): string
 }
 
 export function modeLabel(mode: ChatMode, isZh: boolean): string {
-  if (mode === 'plan') return isZh ? '计划模式' : 'Plan mode';
-  if (mode === 'goal') return isZh ? '目标模式' : 'Goal mode';
-  return isZh ? 'Agent模式' : 'Agent mode';
+  if (mode === 'plan') return isZh ? 'Plan' : 'Plan';
+  // wire chat = 默认 Agent；legacy goal 兼容显示为 Agent（同一自驱内核）
+  if (mode === 'chat' || mode === 'goal') return isZh ? 'Agent' : 'Agent';
+  return isZh ? 'Agent' : 'Agent';
+}
+
+/**
+ * 模式切换器展示/选中用的产品值。
+ *
+ * wire 仍可能是 legacy `goal`，但产品层只暴露 Agent(chat)/Plan。
+ * Dropdown 按 option.value 匹配 label；若不把 goal 映射到 chat，
+ * 会在选项里找不到匹配项，直接把原始 wire 值 "goal" 显示出来。
+ */
+export function modePickerValue(mode: ChatMode): 'chat' | 'plan' {
+  if (mode === 'plan') return 'plan';
+  return 'chat';
 }
 
 export function modeTitle(mode: ChatMode, isZh: boolean): string {
-  if (mode === 'plan') return isZh ? '先规划后执行：先与你共同产出结构化实现计划，批准后再执行' : 'Plan before execute: co-author a structured plan, then execute after approval';
-  if (mode === 'goal') return isZh ? '自驱目标模式：你给目标和边界，Agent 自主推进到可验证完成，只在高风险或需决策时打扰你' : 'Self-driven goal mode: give a goal and boundaries; the agent drives to a verifiable done state, interrupting only for high-risk or decision points';
-  return isZh ? '直接对话并按需调用工具' : 'Answer directly and call tools as needed';
+  if (mode === 'plan') {
+    return isZh
+      ? '先规划后执行：先与你共同产出结构化实现计划，批准后再执行'
+      : 'Plan before execute: co-author a structured plan, then execute after approval';
+  }
+  // Agent（chat / legacy goal）：自适应规划 + 自驱执行
+  return isZh
+    ? '默认 Agent：按任务深度自动规划并执行（L0–L3），高风险或需决策时再打断你；旧 goal 会话兼容为同一自驱内核'
+    : 'Default Agent: adaptively plan and execute (L0–L3); interrupt only for high-risk or decisions; legacy goal uses the same self-driven kernel';
 }
 
 export function effortLabel(level: EffortLevel, isZh: boolean): string {
@@ -268,7 +287,8 @@ export function effortLabel(level: EffortLevel, isZh: boolean): string {
 }
 
 /** 合法对话模式枚举。 */
-export const CHAT_MODES: readonly ChatMode[] = ['chat', 'plan', 'goal'];
+// 产品层只暴露 Agent(chat) / Plan；legacy goal 仍可从会话读取，但不进模式切换器。
+export const CHAT_MODES: readonly ChatMode[] = ['chat', 'plan'];
 
 /** ChatMode 类型守卫（只接受当前 wire 值）。 */
 export function isChatMode(value: unknown): value is ChatMode {

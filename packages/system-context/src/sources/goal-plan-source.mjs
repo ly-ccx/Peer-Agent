@@ -7,7 +7,7 @@
 //
 // 治理（与 AGENTS.md 一致）：
 // - 这是事实上下文（L7_CONTINUITY / trust=runtime），不是系统指令；taskId 以此为准。
-// - 在 mode==='plan' 或 mode==='goal' 且存在活动计划时渲染；chat 模式零额外 token。
+// - 在 mode==='plan' / mode==='goal' / mode==='chat'(Agent 默认) 且存在活动计划时渲染。
 // - 只读 goal-plan-store，不写盘、不触发授权。
 
 const MAX_PLANS = 4;
@@ -99,8 +99,8 @@ export function createGoalPlanPromptSource() {
     observe(input = {}) {
       const mode = typeof input.mode === 'string' ? input.mode : 'chat';
       // 计划事实上下文在 plan 与 goal 两模式都需要:plan 用于产出/审批计划,goal 用于自驱执行
-      // 中的活动计划权威 taskId(见 ADR 41 / goal-mode-ultrathink-workflow)。chat 模式零额外 token。
-      if (mode !== 'plan' && mode !== 'goal') return { plans: [] };
+      // 中的活动计划权威 taskId(见 ADR 41 / agent-mode-default)。Agent(chat)/goal/plan 均注入。
+      if (mode !== 'plan' && mode !== 'goal' && mode !== 'chat') return { plans: [] };
       const store = input.goalPlanStore;
       const conversationId = input.conversationId ?? null;
       if (!store || typeof store.listPlanDetailsByConversation !== 'function') {

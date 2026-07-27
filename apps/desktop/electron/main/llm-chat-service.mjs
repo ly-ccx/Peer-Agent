@@ -728,7 +728,8 @@ export function createLlmChatService({
     // active Goal 可绑定 targetWorkspacePath；此时工具 cwd / 项目指令切换到 target，
     // origin 作为 runtime context extension 注入，不再把 origin 当写入边界。
     const conversationWorkspacePath = resolveRunWorkspacePathForRun(conversationId, incomingWorkspacePath);
-    const goalWorkspaceBinding = mode === 'goal'
+    // Agent 默认（chat）与 legacy goal 均可绑定 active Goal 的 target workspace。
+    const goalWorkspaceBinding = (mode === 'goal' || mode === 'chat')
       ? resolveActiveGoalExecutionBinding(conversationId, conversationWorkspacePath, goalPlanStore)
       : null;
     const runWorkspacePath = goalWorkspaceBinding?.executionWorkspacePath || conversationWorkspacePath;

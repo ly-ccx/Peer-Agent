@@ -181,7 +181,7 @@ export async function executeProjectedModelTool({
   const requestedCwd = resolveSafeWorkspaceRoot(workspacePath);
   const mode = toolContext?.mode ?? 'chat';
   const conversationId = toolContext?.conversationId ?? null;
-  const goalBinding = mode === 'goal'
+  const goalBinding = (mode === 'goal' || mode === 'chat')
     ? resolveActiveGoalExecutionBinding(conversationId, requestedCwd, goalPlanStore)
     : null;
   const cwd = resolveSafeWorkspaceRoot(goalBinding?.executionWorkspacePath ?? requestedCwd);
@@ -207,8 +207,10 @@ export async function executeProjectedModelTool({
     planGate: resolveGoalPlanGate(conversationId, goalPlanStore),
     args,
     workspacePath: cwd,
-    writableRoots: mode === 'goal' ? goalBinding?.writableRoots : null,
-    boundaries: mode === 'goal' ? (goalBinding?.boundaries ?? resolveActivePlanBoundaries(conversationId, goalPlanStore)) : null,
+    writableRoots: (mode === 'goal' || mode === 'chat') ? goalBinding?.writableRoots : null,
+    boundaries: (mode === 'goal' || mode === 'chat')
+      ? (goalBinding?.boundaries ?? resolveActivePlanBoundaries(conversationId, goalPlanStore))
+      : null,
   });
   if (!gate.allowed) {
     return {

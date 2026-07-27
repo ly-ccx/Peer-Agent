@@ -1522,6 +1522,7 @@ ipcMain.handle('workspace:ensure-default', () => {
   }
   settingsStore.merge({ workspaces, activeWorkspace: defaultDir });
   llmChatService.setWorkspacePath(defaultDir);
+  skillStore?.setWorkspacePath?.(defaultDir);
   return { path: defaultDir, name, created };
 });
 
@@ -1541,17 +1542,20 @@ ipcMain.handle('workspace:add', async (event) => {
     // 全局 activeWorkspacePath 滞后」导致兜底链取到旧值（运行根目录主真值已按会话解析，
     // 此处仅保证兜底一致性）。
     llmChatService.setWorkspacePath(dir);
+    skillStore?.setWorkspacePath?.(dir);
     return { path: dir, name, existing: true };
   }
   workspaces.push({ path: dir, name, addedAt: new Date().toISOString() });
   settingsStore.merge({ workspaces, activeWorkspace: dir });
   llmChatService.setWorkspacePath(dir);
+  skillStore?.setWorkspacePath?.(dir);
   return { path: dir, name, existing: false };
 });
 
 ipcMain.handle('workspace:set-active', (_, { path: wsPath }) => {
   settingsStore.merge({ activeWorkspace: wsPath || null });
   llmChatService.setWorkspacePath(wsPath || null);
+  skillStore?.setWorkspacePath?.(wsPath || null);
   return { activeWorkspace: wsPath || null };
 });
 
@@ -1560,6 +1564,7 @@ ipcMain.handle('workspace:remove', (_, { path: wsPath }) => {
   const workspaces = (all.workspaces || []).filter((w) => w.path !== wsPath);
   const active = all.activeWorkspace === wsPath ? null : all.activeWorkspace;
   settingsStore.merge({ workspaces, activeWorkspace: active });
+  skillStore?.setWorkspacePath?.(active || null);
   return { workspaces, activeWorkspace: active };
 });
 
@@ -2122,7 +2127,8 @@ ipcMain.handle('chat:send', (event, {
   const resolvedContinuityContext = persistedConversation?.messages
     ? desktopContinuityContextFromProjection(persistedProjection)
     : continuityContext;
-  if (mode === 'goal' && conversationId && typeof goalPlanStore.upsertGoalContract === 'function') {
+  // Agent 默认（chat）与 legacy goal 共享 intake / 路由契约。
+  if ((mode === 'goal' || mode === 'chat') && conversationId && typeof goalPlanStore.upsertGoalContract === 'function') {
     const goal = latestUserTextFromProviderMessages(messages);
     if (goal) {
       try {
@@ -2202,7 +2208,7 @@ ipcMain.handle('chat:send', (event, {
   });
   // goal 模式首答回合结束后补 intake 判别收敛（方案 C）：不改变返回给渲染端的 outcome，
   // 仅在回合 resolve 后按 outcome 决定是否静默移除残留的 intake 契约。
-  if (mode === 'goal' && conversationId) {
+  if ((mode === 'goal' || mode === 'chat') && conversationId) {
     return Promise.resolve(outcomePromise).then((outcome) => {
       convergeIntakeAfterGoalTurn(conversationId, outcome);
       const acceptedGoal = goalPlanStore.getActivePlanByConversation(conversationId);
@@ -3254,7 +3260,13 @@ app.whenReady().then(async () => {
   // a1 公共 skill 仓（~/.agents/skills）作为「借用来源」：不再自动合并，只用于
   // listAvailableSkills 列举候选，用户显式 link 后才在 userData/skills 下建软链。
   const sourceRoots = [path.join(os.homedir(), '.agents', 'skills')];
-  skillStore = disableLocalSkill ? null : createSkillStore({ userDataPath, sourceRoots });
+  skillStore = disableLocalSkill
+    ? null
+    : createSkillStore({
+        userDataPath,
+        sourceRoots,
+        workspacePath: settingsStore.getAll().activeWorkspace || null,
+      });
 
   // 冷启动：shell 环境快照与首窗创建并行，不阻塞 createWindow。
   // buildShellSpawnArgs 在快照未就绪时会 fallback 到 login shell。
@@ -3298,6 +3310,10 @@ app.whenReady().then(async () => {
 
   // ── Skills (local only) ──
   ipcMain.handle('skills:list', () => skillStore?.listSkills() ?? []);
+  ipcMain.handle('skills:get-detail', (_event, { skillId } = {}) => {
+    if (!skillStore) throw new Error('skill_store_not_available');
+    return skillStore.getSkillDetail(skillId);
+  });
   ipcMain.handle('skills:refresh', () => { skillStore?.refresh(); return skillStore?.listSkills() ?? []; });
   ipcMain.handle('skills:upload', (_event, { zipBase64 }) => {
     if (!skillStore) throw new Error('skill_store_not_available');

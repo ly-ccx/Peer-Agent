@@ -252,24 +252,24 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     }
   });
 
-  it('excludes goal tools when mode is chat', () => {
+  it('projects goal tools when mode is chat (Agent default shares self-driven kernel)', () => {
     const names = materializedNames('chat');
     for (const goalTool of GOAL_TOOL_NAMES) {
       assert.ok(
-        !names.includes(goalTool),
-        `${goalTool} must not be materialized in chat mode`,
+        names.includes(goalTool),
+        `${goalTool} should be materialized in chat/Agent mode`,
       );
     }
   });
 
-  it('marks goal capabilities as mode_excluded in the chat projection', () => {
+  it('marks goal capabilities as available in the chat projection', () => {
     const registry = createRuntimeToolRegistry();
     const projection = createRuntimeProjectionFromToolRegistry(registry, { mode: 'chat' });
     const goalCapability = projection.capabilities.find(
       (cap) => cap.capabilityId === 'local.goal.update_task',
     );
-    assert.ok(goalCapability, 'goal capability should still appear in the projection');
-    assert.equal(goalCapability.health, 'mode_excluded');
+    assert.ok(goalCapability, 'goal capability should appear in the projection');
+    assert.equal(goalCapability.health, 'available');
   });
 
   it('keeps shared shell execution and stop tools available in chat mode', () => {

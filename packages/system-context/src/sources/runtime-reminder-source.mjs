@@ -32,9 +32,9 @@ function normalizeLayer(value, fallback = 'L6_MODE_REMINDER') {
 function fromRuntimeMode(input = {}) {
   const mode = normalizeMode(input.mode);
   const effort = normalizeEffort(input.effort);
-  const includeMode = mode !== 'chat';
+  // Agent 默认（wire=chat）与 plan/goal 一样始终注入 mode reminder。
+  // chat 已承载 Agent 自驱哲学，不能再因 mode==='chat' 跳过 MODE_COPY。
   const includeEffort = effort !== 'default';
-  if (!includeMode && !includeEffort) return null;
 
   const lines = [
     ...(MODE_COPY[mode] ?? [`Mode: ${mode}.`]),
