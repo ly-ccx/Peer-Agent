@@ -1,0 +1,1392 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Peer Agent</title>
+    <style>
+      :root {
+        --bg: #f5f5f7;
+        --bg-elevated: #ffffff;
+        --ink: #1d1d1f;
+        --ink-soft: #6e6e73;
+        --ink-fade: #86868b;
+        --line: rgba(0, 0, 0, 0.08);
+        --graphite: #1a1d21;
+        --graphite-hover: #2a2d33;
+        --azure: #3b7fab;
+        --azure-soft: #d8e4ee;
+        --paper: #f7f9fc;
+        --fill: #eaedf2;
+        --composer: #eff2f6;
+        --hairline: #dce0e8;
+        --shadow: 0 2px 8px rgba(0,0,0,.04), 0 28px 60px rgba(0,0,0,.10);
+        --shadow-soft: 0 1px 2px rgba(0,0,0,.04), 0 12px 28px rgba(0,0,0,.08);
+        --max: 980px;
+        --wide: 1120px;
+        --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+          "Inter", "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", system-ui, sans-serif;
+        --mono: "SF Mono", "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        font-family: var(--font);
+        color: var(--ink);
+        background: var(--bg);
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        line-height: 1.47059;
+        letter-spacing: -0.01em;
+      }
+      a { color: inherit; text-decoration: none; }
+      button { font: inherit; }
+
+      /* —— Apple-like global nav —— */
+      .nav {
+        position: sticky;
+        top: 0;
+        z-index: 40;
+        height: 48px;
+        backdrop-filter: saturate(180%) blur(20px);
+        -webkit-backdrop-filter: saturate(180%) blur(20px);
+        background: rgba(245, 245, 247, 0.72);
+        border-bottom: 1px solid rgba(0,0,0,0.06);
+      }
+      .nav-inner {
+        width: min(var(--wide), calc(100% - 40px));
+        height: 100%;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .nav-brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      .mark {
+        width: 15px;
+        height: 15px;
+        border-radius: 4px;
+        background: linear-gradient(145deg, #1a1d21, #3a4048);
+        position: relative;
+      }
+      .mark::after {
+        content: "";
+        position: absolute;
+        inset: 4px;
+        border-radius: 1.5px;
+        background: var(--azure);
+      }
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
+      .nav-links a {
+        font-size: 12px;
+        color: rgba(0,0,0,0.8);
+        opacity: 0.88;
+      }
+      .nav-links a:hover { opacity: 1; }
+      .nav-links a.btn-link {
+        color: #fff !important;
+        background: var(--graphite);
+        border-radius: 980px;
+        padding: 6px 12px;
+        opacity: 1;
+        font-weight: 500;
+      }
+      .nav-links a.btn-link:hover { background: var(--graphite-hover); }
+
+      .lang {
+        display: inline-flex;
+        align-items: center;
+        height: 28px;
+        padding: 2px;
+        border-radius: 980px;
+        background: rgba(0,0,0,0.04);
+        gap: 1px;
+      }
+      .lang button {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: var(--ink-fade);
+        font-size: 11px;
+        font-weight: 600;
+        min-width: 30px;
+        height: 24px;
+        border-radius: 980px;
+        cursor: pointer;
+        padding: 0 8px;
+      }
+      .lang button[aria-pressed="true"] {
+        background: #fff;
+        color: var(--ink);
+        box-shadow: 0 1px 2px rgba(0,0,0,.08);
+      }
+
+      /* —— Hero —— */
+      .hero {
+        padding: 72px 0 28px;
+        text-align: center;
+      }
+      .hero-inner {
+        width: min(var(--max), calc(100% - 40px));
+        margin: 0 auto;
+      }
+      .kicker {
+        margin: 0 0 14px;
+        font-size: 17px;
+        font-weight: 600;
+        color: var(--azure);
+        letter-spacing: -0.01em;
+      }
+      h1 {
+        margin: 0 auto 12px;
+        max-width: none;
+        white-space: nowrap;
+        font-size: clamp(40px, 6.2vw, 72px);
+        line-height: 1.05;
+        font-weight: 650;
+        letter-spacing: -0.035em;
+        color: var(--ink);
+      }
+      html[lang="zh-CN"] h1 {
+        letter-spacing: -0.02em;
+      }
+      .subhead {
+        margin: 0 auto 28px;
+        max-width: 34em;
+        font-size: clamp(17px, 2.1vw, 21px);
+        line-height: 1.381;
+        font-weight: 400;
+        color: var(--ink-soft);
+        letter-spacing: -0.01em;
+      }
+      .cta {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 14px 22px;
+        margin-bottom: 10px;
+      }
+      .cta a {
+        font-size: 17px;
+        font-weight: 400;
+        letter-spacing: -0.01em;
+      }
+      .cta-primary {
+        color: #fff !important;
+        background: var(--graphite);
+        border-radius: 980px;
+        padding: 11px 20px;
+        transition: background .2s ease;
+      }
+      .cta-primary:hover { background: var(--graphite-hover); }
+      .cta-secondary {
+        color: var(--azure);
+        padding: 11px 4px;
+      }
+      .cta-secondary:hover { text-decoration: underline; text-underline-offset: 3px; }
+      .fine {
+        margin-top: 14px;
+        font-size: 12px;
+        color: var(--ink-fade);
+      }
+
+      /* —— Product stage —— */
+      .shell-switch {
+        width: min(var(--wide), calc(100% - 28px));
+        margin: 0 auto 14px;
+        display: flex;
+        justify-content: center;
+      }
+      .shell-switch-inner {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        padding: 3px;
+        border-radius: 980px;
+        background: rgba(0,0,0,0.05);
+      }
+      .shell-switch button {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: var(--ink-fade);
+        font-size: 13px;
+        font-weight: 550;
+        height: 32px;
+        padding: 0 16px;
+        border-radius: 980px;
+        cursor: pointer;
+        transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+      }
+      .shell-switch button[aria-pressed="true"] {
+        background: #fff;
+        color: var(--ink);
+        box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.04);
+      }
+      .shell-switch button:hover { color: var(--ink); }
+
+      .stage {
+        width: min(var(--wide), calc(100% - 28px));
+        margin: 18px auto 0;
+        padding-bottom: 56px;
+      }
+      .stage-frame {
+        position: relative;
+        border-radius: 22px;
+        padding: 10px;
+        background: linear-gradient(180deg, #e8eaed 0%, #d9dde3 100%);
+        box-shadow: var(--shadow);
+      }
+      .window {
+        border-radius: 14px;
+        overflow: hidden;
+        background: var(--paper);
+        border: 1px solid rgba(255,255,255,0.55);
+      }
+      .window-chrome {
+        height: 38px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 14px;
+        border-bottom: 1px solid var(--hairline);
+        background: linear-gradient(180deg, #fbfcfd, #f1f3f6);
+      }
+      .dots { display: flex; gap: 6px; }
+      .dots i {
+        width: 10px; height: 10px; border-radius: 50%;
+        background: #d2d5db; display: block;
+      }
+      .window-title {
+        margin-left: 6px;
+        font-size: 12px;
+        color: var(--ink-fade);
+      }
+      .workspace {
+        display: grid;
+        grid-template-columns: 220px 1fr;
+        min-height: 390px;
+      }
+      .sidebar {
+        border-right: 1px solid var(--hairline);
+        background: rgba(243,245,248,0.92);
+        padding: 12px 10px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .sb-brand {
+        display: flex; align-items: center; gap: 8px;
+        padding: 2px 6px 6px; font-size: 13px; font-weight: 600;
+      }
+      .sb-brand .mark { width: 16px; height: 16px; }
+      .sb-workspace {
+        display: flex; align-items: center; justify-content: space-between;
+        min-height: 32px; padding: 0 10px; border-radius: 8px;
+        background: rgba(26,29,33,0.04); font-size: 12px; color: var(--ink-soft);
+      }
+      .sb-workspace strong { color: var(--ink); font-weight: 600; }
+      .sb-workspace .branch {
+        font-family: var(--mono); font-size: 10.5px; color: var(--ink-fade);
+      }
+      .sb-new {
+        display: flex; align-items: center; justify-content: space-between;
+        min-height: 32px; padding: 0 10px; border-radius: 8px;
+        border: 1px solid var(--hairline); background: #fff;
+        font-size: 12.5px; font-weight: 550;
+      }
+      .sb-new kbd {
+        font-family: var(--mono); font-size: 10px; color: var(--ink-fade);
+        border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 5px;
+      }
+      .sb-section {
+        font-size: 11px; color: var(--ink-fade); letter-spacing: .04em;
+        text-transform: uppercase; padding: 4px 8px 0;
+      }
+      .conv-list { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+      .conv-item {
+        appearance: none; border: 1px solid transparent; background: transparent;
+        width: 100%; text-align: left; display: grid;
+        grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: center;
+        min-height: 36px; padding: 7px 10px; border-radius: 9px;
+        cursor: pointer; color: var(--ink-soft);
+      }
+      .conv-item:hover { background: rgba(26,29,33,0.04); color: var(--ink); }
+      .conv-item.active {
+        background: rgba(26,29,33,0.07); color: var(--ink);
+        border-color: rgba(220,224,232,0.95);
+      }
+      .conv-title {
+        font-size: 12.5px; font-weight: 550;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .conv-time { font-size: 11px; color: var(--ink-fade); }
+      .sb-bottom {
+        margin-top: auto; display: flex; justify-content: space-between;
+        padding: 6px 8px 2px; color: var(--ink-fade); font-size: 11px;
+      }
+      .thread {
+        padding: 16px 18px 14px;
+        display: flex; flex-direction: column; gap: 12px;
+        background: linear-gradient(180deg, rgba(247,249,252,0.5), transparent 80px), var(--paper);
+      }
+      .thread-top {
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      }
+      .thread-top-title {
+        font-size: 13px; font-weight: 600;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .thread-top-meta { font-size: 11.5px; color: var(--ink-fade); }
+      .msg { max-width: 92%; }
+      .msg-user {
+        margin-left: auto; background: var(--fill);
+        border-radius: 16px 16px 6px 16px; padding: 10px 12px; font-size: 13px;
+      }
+      .msg-agent {
+        border: 1px solid var(--hairline); background: #fff;
+        border-radius: 16px 16px 16px 6px; padding: 12px 14px; font-size: 13px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+      }
+      .trace {
+        margin-top: 10px; border: 1px solid var(--azure-soft);
+        background: rgba(216,228,238,0.32); border-radius: 10px; padding: 8px 10px;
+        font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft);
+        display: grid; gap: 4px;
+      }
+      .trace strong { color: var(--azure); font-weight: 600; }
+      .composer {
+        margin-top: auto; border: 1px solid var(--hairline);
+        background: var(--composer); border-radius: 14px;
+        display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px;
+        align-items: end; padding: 10px; box-shadow: var(--shadow-soft);
+      }
+      .composer-main { min-width: 0; display: grid; gap: 7px; }
+      .composer-text { color: var(--ink-fade); font-size: 12.5px; }
+      .composer-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+      .chip {
+        height: 22px; padding: 0 8px; border-radius: 980px;
+        border: 1px solid var(--hairline); background: #fff;
+        color: var(--ink-soft); font-size: 11px;
+        display: inline-flex; align-items: center;
+      }
+      .send {
+        width: 30px; height: 30px; border-radius: 980px;
+        background: var(--graphite); color: #fff;
+        display: grid; place-items: center; font-size: 14px;
+      }
+
+      /* —— CLI / TUI mock —— */
+      .view-panel[hidden] { display: none !important; }
+
+      .cli-window {
+        border-radius: 14px;
+        overflow: hidden;
+        background: #111317;
+        border: 1px solid rgba(255,255,255,0.06);
+        min-height: 390px;
+        display: flex;
+        flex-direction: column;
+        color: #e8ecf2;
+        font-family: var(--mono);
+      }
+      .cli-chrome {
+        height: 38px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 14px;
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+        background: #161a20;
+      }
+      .cli-chrome .dots i { background: rgba(232,236,242,0.22); }
+      .cli-title {
+        margin-left: 6px;
+        font-size: 12px;
+        color: rgba(232,236,242,0.48);
+      }
+      .cli-body {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        padding: 14px 16px 12px;
+        gap: 12px;
+        background:
+          radial-gradient(800px 240px at 20% 0%, rgba(59,127,171,0.10), transparent 55%),
+          #111317;
+      }
+      .cli-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 11.5px;
+        color: rgba(232,236,242,0.45);
+      }
+      .cli-header strong {
+        color: #d8e4ee;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      .cli-thread {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        min-height: 0;
+        overflow: hidden;
+      }
+      .cli-line {
+        font-size: 12.5px;
+        line-height: 1.55;
+        color: rgba(232,236,242,0.88);
+      }
+      .cli-line.user { color: #f5f7fa; }
+      .cli-line .prompt {
+        color: #7ba8c8;
+        margin-right: 8px;
+      }
+      .cli-line .role {
+        color: rgba(232,236,242,0.38);
+        margin-right: 8px;
+      }
+      .cli-trace {
+        margin-left: 18px;
+        border-left: 2px solid rgba(59,127,171,0.45);
+        padding: 6px 0 6px 12px;
+        display: grid;
+        gap: 4px;
+        font-size: 11.5px;
+        color: rgba(232,236,242,0.62);
+      }
+      .cli-trace strong { color: #7ba8c8; font-weight: 600; }
+      .cli-status {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+        font-size: 11.5px;
+        color: rgba(232,236,242,0.52);
+        padding-top: 4px;
+      }
+      .cli-status .pair { display: inline-flex; gap: 6px; align-items: center; }
+      .cli-status .lbl { color: rgba(232,236,242,0.34); }
+      .cli-status .val { color: #d8e4ee; }
+      .cli-status .accent { color: #7ba8c8; }
+      .cli-meter {
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.02em;
+      }
+      .cli-input {
+        border-top: 1px solid rgba(255,255,255,0.06);
+        padding: 10px 12px 12px;
+        display: grid;
+        gap: 8px;
+        background: #14181e;
+      }
+      .cli-input-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12.5px;
+        color: rgba(232,236,242,0.72);
+      }
+      .cli-input-row .caret {
+        color: #7ba8c8;
+      }
+      .cli-input-row .placeholder {
+        color: rgba(232,236,242,0.38);
+      }
+      .cli-hints {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 12px;
+        font-size: 11px;
+        color: rgba(232,236,242,0.34);
+      }
+      .cli-hints kbd {
+        font-family: var(--mono);
+        color: rgba(232,236,242,0.55);
+      }
+
+      /* —— Feature strip (Apple section rhythm) —— */
+      .section {
+        padding: 88px 0 24px;
+        text-align: center;
+      }
+      .section-inner {
+        width: min(var(--max), calc(100% - 40px));
+        margin: 0 auto;
+      }
+      .section h2 {
+        margin: 0 auto 10px;
+        max-width: 14ch;
+        font-size: clamp(32px, 4.5vw, 48px);
+        line-height: 1.08349;
+        font-weight: 650;
+        letter-spacing: -0.025em;
+      }
+      html[lang="zh-CN"] .section h2 { max-width: 12ch; }
+      .section .lead {
+        margin: 0 auto 42px;
+        max-width: 36em;
+        font-size: 19px;
+        line-height: 1.4211;
+        color: var(--ink-soft);
+      }
+      .features {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 18px;
+        text-align: left;
+      }
+      .feature {
+        background: var(--bg-elevated);
+        border-radius: 22px;
+        padding: 28px 24px 26px;
+        min-height: 180px;
+        box-shadow: 0 1px 0 rgba(0,0,0,0.03);
+      }
+      .feature .icon {
+        width: 28px; height: 28px; border-radius: 8px;
+        display: grid; place-items: center;
+        background: rgba(26,29,33,0.05);
+        color: var(--ink); font-size: 13px; margin-bottom: 16px;
+      }
+      .feature h3 {
+        margin: 0 0 8px;
+        font-size: 21px;
+        line-height: 1.2;
+        letter-spacing: -0.02em;
+        font-weight: 600;
+      }
+      .feature p {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.45;
+        color: var(--ink-soft);
+      }
+
+      /* —— Get section —— */
+      .get {
+        padding: 72px 0 96px;
+      }
+      .get-inner {
+        width: min(var(--wide), calc(100% - 40px));
+        margin: 0 auto;
+      }
+      .get-head {
+        text-align: center;
+        margin-bottom: 28px;
+      }
+      .get-head h2 {
+        margin: 0 0 8px;
+        font-size: clamp(28px, 3.8vw, 40px);
+        letter-spacing: -0.025em;
+        font-weight: 650;
+      }
+      .get-head p {
+        margin: 0 auto;
+        max-width: 34em;
+        color: var(--ink-soft);
+        font-size: 17px;
+      }
+      .get-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .tile {
+        background: var(--bg-elevated);
+        border-radius: 22px;
+        padding: 28px 26px 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-height: 240px;
+      }
+      .tile .label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--azure);
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+      }
+      .tile h3 {
+        margin: 0;
+        font-size: 28px;
+        letter-spacing: -0.025em;
+        font-weight: 650;
+      }
+      .tile p {
+        margin: 0;
+        color: var(--ink-soft);
+        font-size: 15px;
+        line-height: 1.45;
+        flex: 1;
+      }
+      .tile-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .tile-actions a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 40px;
+        padding: 0 16px;
+        border-radius: 980px;
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .tile-actions .primary {
+        background: var(--graphite);
+        color: #fff !important;
+      }
+      .tile-actions .primary:hover { background: var(--graphite-hover); }
+      .tile-actions .secondary {
+        background: rgba(0,0,0,0.05);
+        color: var(--ink);
+      }
+      .tile-actions .secondary:hover { background: rgba(0,0,0,0.08); }
+      .tile-actions .text {
+        color: var(--azure);
+        padding: 0 4px;
+        height: auto;
+      }
+      .tile-actions .text:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+      .term {
+        margin-top: 16px;
+        grid-column: 1 / -1;
+        border-radius: 18px;
+        overflow: hidden;
+        background: #1d1d1f;
+        color: #f5f5f7;
+      }
+      .term-bar {
+        display: flex; align-items: center; gap: 8px;
+        padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.06);
+        color: rgba(245,245,247,0.45); font-size: 12px;
+      }
+      .term-bar i {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: rgba(245,245,247,0.18); display: inline-block;
+      }
+      .term pre {
+        margin: 0; padding: 16px 18px 18px;
+        font-family: var(--mono); font-size: 13px; line-height: 1.65;
+        white-space: pre-wrap; word-break: break-word;
+      }
+      .term .cmt { color: rgba(245,245,247,0.38); }
+      .term .cmd { color: #e8eef5; }
+      .term .ok { color: #8fb4cf; }
+
+      footer {
+        border-top: 1px solid var(--line);
+        padding: 22px 0 40px;
+        color: var(--ink-fade);
+        font-size: 12px;
+      }
+      .footer-inner {
+        width: min(var(--wide), calc(100% - 40px));
+        margin: 0 auto;
+        display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+      }
+      .footer-links { display: flex; gap: 16px; }
+      .footer-links a:hover { color: var(--ink-soft); }
+
+      .preview-note {
+        position: fixed; right: 14px; bottom: 14px; z-index: 50;
+        font-size: 11px; color: var(--ink-soft);
+        background: rgba(255,255,255,0.9);
+        border: 1px solid var(--line); border-radius: 980px;
+        padding: 6px 10px; box-shadow: var(--shadow-soft);
+      }
+
+      @media (max-width: 900px) {
+        .features, .get-grid { grid-template-columns: 1fr; }
+        .workspace { grid-template-columns: 1fr; }
+        .sidebar { display: none; }
+        .hero { padding-top: 48px; }
+        .section { padding-top: 64px; }
+      }
+      @media (max-width: 640px) {
+        .nav-links a:not(.btn-link) { display: none; }
+        h1 { white-space: normal; font-size: clamp(34px, 9vw, 48px); }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="nav">
+      <div class="nav-inner">
+        <div class="nav-brand">
+          <span class="mark" aria-hidden="true"></span>
+          <span>Peer Agent</span>
+        </div>
+        <div class="nav-links">
+          <a href="#mechanisms" data-i18n="nav.mechanisms">Why Peer</a>
+          <a href="./changelog.html" data-i18n="nav.changelog">Changelog</a>
+          <a href="https://github.com/yinLiangDream/Peer-Agent" target="_blank" rel="noreferrer" data-i18n="nav.github">GitHub</a>
+          <a class="btn-link" href="#get" data-i18n="nav.download">Download</a>
+          <div class="lang lang-toggle" role="group" aria-label="Language">
+            <button type="button" id="lang-en" data-lang="en" aria-pressed="true">EN</button>
+            <button type="button" id="lang-zh" data-lang="zh" aria-pressed="false">中文</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div class="hero-inner">
+        <p class="kicker" data-i18n="hero.eyebrow">Desktop + CLI</p>
+        <h1 data-i18n="hero.title">Local hands for your AI</h1>
+        <p class="subhead" data-i18n="hero.lede">
+          Authorized. Executed on your machine. Backed by Evidence.
+          Desktop and `peer` CLI share one local Runtime.
+        </p>
+        <div class="cta">
+          <a class="cta-primary" href="#get" data-i18n="hero.ctaPrimary">Download desktop</a>
+          <a class="cta-secondary" href="#download-cli" data-i18n="hero.ctaCli">Install CLI →</a>
+        </div>
+        <div class="fine" data-i18n="hero.meta">Keys stay local · Capability-gated · Evidence-backed</div>
+      </div>
+    </section>
+
+    <div class="shell-switch" role="group" aria-label="Shell">
+      <div class="shell-switch-inner">
+        <button type="button" id="shell-desktop" data-shell="desktop" aria-pressed="true" data-i18n="shell.desktop">Desktop</button>
+        <button type="button" id="shell-cli" data-shell="cli" aria-pressed="false" data-i18n="shell.cli">CLI · peer</button>
+      </div>
+    </div>
+
+    <section class="stage" aria-label="Product preview">
+      <div class="stage-frame">
+        <div class="view-panel" id="view-desktop">
+        <div class="window">
+          <div class="window-chrome">
+            <div class="dots" aria-hidden="true"><i></i><i></i><i></i></div>
+            <div class="window-title" data-i18n="demo.windowTitle">Peer Agent · peer_agent</div>
+          </div>
+          <div class="workspace">
+            <aside class="sidebar">
+              <div class="sb-brand">
+                <span class="mark" aria-hidden="true"></span>
+                <span>Peer Agent</span>
+              </div>
+              <div class="sb-workspace">
+                <span>
+                  <strong data-i18n="demo.workspaceName">peer_agent</strong>
+                  <span class="branch" data-i18n="demo.workspaceBranch">dev/0.0.1</span>
+                </span>
+                <span aria-hidden="true">▾</span>
+              </div>
+              <div class="sb-new">
+                <span data-i18n="demo.newTask">New Task</span>
+                <kbd>⌘N</kbd>
+              </div>
+              <div class="sb-section" data-i18n="demo.conversations">Conversations</div>
+              <div class="conv-list" role="listbox">
+                <button type="button" class="conv-item active" data-conv="release" role="option" aria-selected="true">
+                  <span class="conv-title" data-i18n="demo.convReleaseTitle">Ship release checklist</span>
+                  <span class="conv-time" data-i18n="demo.convReleaseTime">2m</span>
+                </button>
+                <button type="button" class="conv-item" data-conv="mcp" role="option" aria-selected="false">
+                  <span class="conv-title" data-i18n="demo.convMcpTitle">Debug MCP install</span>
+                  <span class="conv-time" data-i18n="demo.convMcpTime">1h</span>
+                </button>
+                <button type="button" class="conv-item" data-conv="landing" role="option" aria-selected="false">
+                  <span class="conv-title" data-i18n="demo.convLandingTitle">Landing page layout</span>
+                  <span class="conv-time" data-i18n="demo.convLandingTime">Yesterday</span>
+                </button>
+              </div>
+              <div class="sb-bottom">
+                <span data-i18n="demo.settings">Settings</span>
+                <span>v0.0.1</span>
+              </div>
+            </aside>
+            <div class="thread">
+              <div class="thread-top">
+                <div class="thread-top-title" id="demo-thread-title">Ship release checklist</div>
+                <div class="thread-top-meta" data-i18n="demo.threadMeta">Local · Evidence on</div>
+              </div>
+              <div class="msg msg-user" id="demo-user-msg">Inspect the local repo and summarize shippable changes.</div>
+              <div class="msg msg-agent">
+                <span id="demo-agent-msg">Read git status and recent commits. Suggest verifying the desktop build before writing release notes.</span>
+                <div class="trace">
+                  <div id="demo-trace1"><strong>tool</strong> · git.status · authorized</div>
+                  <div id="demo-trace2"><strong>evidence</strong> · 12 files · 3 commits · local only</div>
+                </div>
+              </div>
+              <div class="composer">
+                <div class="composer-main">
+                  <div class="composer-text" id="demo-composer">Continue: draft a one-page release checklist…</div>
+                  <div class="composer-tools">
+                    <span class="chip" data-i18n="demo.chipMode">Agent</span>
+                    <span class="chip" data-i18n="demo.chipAccess">Ask first</span>
+                    <span class="chip" data-i18n="demo.chipModel">GPT-5.2</span>
+                  </div>
+                </div>
+                <div class="send" aria-hidden="true">↑</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        </div><!-- /view-desktop -->
+
+        <div class="view-panel" id="view-cli" hidden>
+          <div class="cli-window">
+            <div class="cli-chrome">
+              <div class="dots" aria-hidden="true"><i></i><i></i><i></i></div>
+              <div class="cli-title" data-i18n="cli.windowTitle">peer · ~/.peer-agent</div>
+            </div>
+            <div class="cli-body">
+              <div class="cli-header">
+                <div><strong>PEER</strong> <span data-i18n="cli.headerMeta">TUI · shared Runtime</span></div>
+                <div data-i18n="cli.cwd">cwd ~/Documents/DEV/github/peer_agent</div>
+              </div>
+              <div class="cli-thread">
+                <div class="cli-line user"><span class="prompt">›</span><span id="cli-user-msg">Inspect the local repo and summarize shippable changes.</span></div>
+                <div class="cli-line"><span class="role">agent</span><span id="cli-agent-msg">Read git status and recent commits. Suggest verifying the desktop build before writing release notes.</span></div>
+                <div class="cli-trace">
+                  <div id="cli-trace1"><strong>tool</strong> · git.status · authorized</div>
+                  <div id="cli-trace2"><strong>evidence</strong> · 12 files · 3 commits · local only</div>
+                </div>
+              </div>
+              <div class="cli-status">
+                <div class="pair">
+                  <span class="lbl" data-i18n="cli.modeLabel">mode</span>
+                  <span class="val accent" data-i18n="cli.modeValue">agent</span>
+                  <span class="lbl">·</span>
+                  <span class="lbl" data-i18n="cli.accessLabel">access</span>
+                  <span class="val" data-i18n="cli.accessValue">ask</span>
+                </div>
+                <div class="pair">
+                  <span class="val" data-i18n="cli.modelValue">GPT-5.2</span>
+                  <span class="lbl">·</span>
+                  <span class="val" data-i18n="cli.effortValue">high</span>
+                  <span class="lbl">·</span>
+                  <span class="val cli-meter" data-i18n="cli.contextValue">ctx ███░░ 38%</span>
+                </div>
+              </div>
+            </div>
+            <div class="cli-input">
+              <div class="cli-input-row">
+                <span class="caret">›</span>
+                <span class="placeholder" id="cli-composer">Continue: draft a one-page release checklist…</span>
+              </div>
+              <div class="cli-hints">
+                <span><kbd>/</kbd> <span data-i18n="cli.hintSlash">commands</span></span>
+                <span><kbd>tab</kbd> <span data-i18n="cli.hintTab">complete</span></span>
+                <span data-i18n="cli.hintShared">same ~/.peer-agent as Desktop</span>
+              </div>
+            </div>
+          </div>
+        </div><!-- /view-cli -->
+      </div>
+    </section>
+
+    <section class="section" id="mechanisms">
+      <div class="section-inner">
+        <h2 data-i18n="mechanisms.title">Designed around control.</h2>
+        <p class="lead" data-i18n="mechanisms.subtitle">
+          Not another chat shell. A local executive surface with two first-class entries.
+        </p>
+        <div class="features">
+          <article class="feature">
+            <div class="icon">⌘</div>
+            <h3 data-i18n="mechanisms.channelTitle">Desktop + CLI</h3>
+            <p data-i18n="mechanisms.channelBody">
+              Electron Desktop and `peer` TUI. Install via npm or Release — terminal work needs no GUI.
+            </p>
+          </article>
+          <article class="feature">
+            <div class="icon">◎</div>
+            <h3 data-i18n="mechanisms.threadTitle">One local Runtime</h3>
+            <p data-i18n="mechanisms.threadBody">
+              Both shells share ~/.peer-agent: settings, conversations, credentials, same capabilities.
+            </p>
+          </article>
+          <article class="feature">
+            <div class="icon">✦</div>
+            <h3 data-i18n="mechanisms.evidenceTitle">Evidence, not vibes</h3>
+            <p data-i18n="mechanisms.evidenceBody">
+              Authorization, tools, and results expand as Evidence you can replay — in GUI or TUI.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="get" id="get">
+      <div class="get-inner">
+        <div class="get-head">
+          <h2 data-i18n="download.title">Get Peer Agent.</h2>
+          <p data-i18n="download.body">
+            Desktop GUI and CLI (`peer`) ship on the same release tag and share one local Runtime.
+          </p>
+        </div>
+        <div class="get-grid">
+          <article class="tile">
+            <div class="label" data-i18n="download.desktopBadge">Desktop</div>
+            <h3 data-i18n="download.desktopTitle">Workbench</h3>
+            <p data-i18n="download.desktopBody">
+              Thread, Workbench, Evidence, and visual governance in a native-feeling shell.
+            </p>
+            <div class="tile-actions">
+              <a class="primary" href="https://github.com/yinLiangDream/Peer-Agent/releases" target="_blank" rel="noreferrer" data-i18n="download.macos">macOS</a>
+              <a class="secondary" href="https://github.com/yinLiangDream/Peer-Agent/releases" target="_blank" rel="noreferrer" data-i18n="download.windows">Windows</a>
+            </div>
+          </article>
+          <article class="tile" id="download-cli">
+            <div class="label" data-i18n="download.cliBadge">CLI</div>
+            <h3 data-i18n="download.cliTitle">peer</h3>
+            <p data-i18n="download.cliBody">
+              No Desktop required. npm `@peer-agent/cli` or archive with peer + peer-credential-helper.
+            </p>
+            <div class="tile-actions">
+              <a class="primary" href="https://www.npmjs.com/package/@peer-agent/cli" target="_blank" rel="noreferrer" data-i18n="download.npm">npm install</a>
+              <a class="text" href="./changelog.html" data-i18n="download.changelog">Changelog →</a>
+            </div>
+          </article>
+          <div class="term" aria-label="CLI install">
+            <div class="term-bar">
+              <i></i><i></i><i></i>
+              <span data-i18n="download.termTitle">Terminal</span>
+            </div>
+            <pre><span class="cmt" data-i18n="download.termCmt1"># install (when published)</span>
+<span class="cmd">npm install -g @peer-agent/cli</span>
+<span class="cmd">peer --version</span>
+<span class="cmd">peer</span>  <span class="cmt" data-i18n="download.termCmt2"># TUI · same ~/.peer-agent as Desktop</span>
+<span class="ok" data-i18n="download.termNote"># or extract peer-darwin-arm64.tar.gz · keep peer + helper together</span></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <div class="footer-inner">
+        <div data-i18n="footer.copy">Peer Agent · early preview · MIT</div>
+        <div class="footer-links">
+          <a href="./changelog.html" data-i18n="footer.changelog">Changelog</a>
+          <a href="https://github.com/yinLiangDream/Peer-Agent" target="_blank" rel="noreferrer" data-i18n="footer.repo">Repo</a>
+          <a href="https://github.com/yinLiangDream/Peer-Agent/issues" target="_blank" rel="noreferrer" data-i18n="footer.issues">Issues</a>
+        </div>
+      </div>
+    </footer>
+
+    <div class="preview-note" data-i18n="preview.note">github pages</div>
+
+<script>
+      (function () {
+        var STORAGE_KEY = "peer-landing-lang";
+
+        var messages = {
+          en: {
+            "nav.mechanisms": "Why Peer",
+            "nav.changelog": "Changelog",
+            "nav.github": "GitHub",
+            "nav.download": "Download",
+            "shell.desktop": "Desktop",
+            "shell.cli": "CLI · peer",
+            "cli.windowTitle": "peer · ~/.peer-agent",
+            "cli.headerMeta": "TUI · shared Runtime",
+            "cli.cwd": "cwd ~/Documents/DEV/github/peer_agent",
+            "cli.modeLabel": "mode",
+            "cli.modeValue": "agent",
+            "cli.accessLabel": "access",
+            "cli.accessValue": "ask",
+            "cli.modelValue": "GPT-5.2",
+            "cli.effortValue": "high",
+            "cli.contextValue": "ctx ███░░ 38%",
+            "cli.hintSlash": "commands",
+            "cli.hintTab": "complete",
+            "cli.hintShared": "same ~/.peer-agent as Desktop",
+            "hero.eyebrow": "Desktop + CLI",
+            "hero.title": "Local hands for your AI",
+            "hero.lede":
+              "Authorized. Executed on your machine. Backed by Evidence. Desktop and `peer` CLI share one local Runtime.",
+            "hero.ctaPrimary": "Download desktop",
+            "hero.ctaCli": "Install CLI →",
+            "hero.ctaSecondary": "View source",
+            "hero.meta": "Keys stay local · Capability-gated · Evidence-backed",
+            "demo.windowTitle": "Peer Agent · peer_agent",
+            "demo.workspaceName": "peer_agent",
+            "demo.workspaceBranch": "dev/0.0.1",
+            "demo.newTask": "New Task",
+            "demo.conversations": "Conversations",
+            "demo.convReleaseTitle": "Ship release checklist",
+            "demo.convReleaseTime": "2m",
+            "demo.convMcpTitle": "Debug MCP install",
+            "demo.convMcpTime": "1h",
+            "demo.convLandingTitle": "Landing page layout",
+            "demo.convLandingTime": "Yesterday",
+            "demo.settings": "Settings",
+            "demo.threadMeta": "Local · Evidence on",
+            "demo.chipMode": "Agent",
+            "demo.chipAccess": "Ask first",
+            "demo.chipModel": "GPT-5.2",
+            "mechanisms.title": "Designed around control.",
+            "mechanisms.subtitle":
+              "Not another chat shell. A local executive surface with two first-class entries.",
+            "mechanisms.channelTitle": "Desktop + CLI",
+            "mechanisms.channelBody":
+              "Electron Desktop and `peer` TUI. Install via npm or Release — terminal work needs no GUI.",
+            "mechanisms.threadTitle": "One local Runtime",
+            "mechanisms.threadBody":
+              "Both shells share ~/.peer-agent: settings, conversations, credentials, same capabilities.",
+            "mechanisms.evidenceTitle": "Evidence, not vibes",
+            "mechanisms.evidenceBody":
+              "Authorization, tools, and results expand as Evidence you can replay — in GUI or TUI.",
+            "trust.localLabel": "Local-first",
+            "trust.localBody": " Data & keys stay on device",
+            "trust.authLabel": "Authorized",
+            "trust.authBody": " Capabilities on demand",
+            "trust.evidenceLabel": "Evidence",
+            "trust.evidenceBody": " Execution is traceable",
+            "download.title": "Get Peer Agent.",
+            "download.body":
+              "Desktop GUI and CLI (`peer`) ship on the same release tag and share one local Runtime.",
+            "download.desktopTitle": "Workbench",
+            "download.desktopBadge": "Desktop",
+            "download.desktopBody":
+              "Thread, Workbench, Evidence, and visual governance in a native-feeling shell.",
+            "download.cliTitle": "peer",
+            "download.cliBadge": "CLI",
+            "download.cliBody":
+              "No Desktop required. npm `@peer-agent/cli` or archive with peer + peer-credential-helper.",
+            "download.macos": "macOS",
+            "download.windows": "Windows",
+            "download.npm": "npm install",
+            "download.changelog": "Changelog →",
+            "download.releases": "Releases →",
+            "download.termTitle": "Terminal",
+            "download.termCmt1": "# install (when published)",
+            "download.termCmt2": "# TUI · same ~/.peer-agent as Desktop",
+            "download.termNote":
+              "# or extract peer-darwin-arm64.tar.gz · keep peer + helper together",
+            "download.meta": "Same release tag",
+            "footer.copy": "Peer Agent · early preview · MIT",
+            "footer.changelog": "Changelog",
+            "footer.repo": "Repo",
+            "footer.issues": "Issues",
+            "preview.note": "github pages",
+            documentTitle: "Peer Agent",
+          },
+          zh: {
+            "nav.mechanisms": "为什么",
+            "nav.changelog": "更新日志",
+            "nav.github": "GitHub",
+            "nav.download": "下载",
+            "shell.desktop": "Desktop",
+            "shell.cli": "CLI · peer",
+            "cli.windowTitle": "peer · ~/.peer-agent",
+            "cli.headerMeta": "TUI · 共享 Runtime",
+            "cli.cwd": "cwd ~/Documents/DEV/github/peer_agent",
+            "cli.modeLabel": "mode",
+            "cli.modeValue": "agent",
+            "cli.accessLabel": "access",
+            "cli.accessValue": "ask",
+            "cli.modelValue": "GPT-5.2",
+            "cli.effortValue": "high",
+            "cli.contextValue": "ctx ███░░ 38%",
+            "cli.hintSlash": "命令",
+            "cli.hintTab": "补全",
+            "cli.hintShared": "与 Desktop 共用 ~/.peer-agent",
+            "hero.eyebrow": "Desktop + CLI",
+            "hero.title": "你的 AI，本地双手",
+            "hero.lede":
+              "本地授权。本机执行。Evidence 可回放。Desktop 与 `peer` CLI 共享同一本地 Runtime。",
+            "hero.ctaPrimary": "下载桌面版",
+            "hero.ctaCli": "安装 CLI →",
+            "hero.ctaSecondary": "查看源码",
+            "hero.meta": "密钥留在本地 · 能力按需授权 · 执行有证据",
+            "demo.windowTitle": "Peer Agent · peer_agent",
+            "demo.workspaceName": "peer_agent",
+            "demo.workspaceBranch": "dev/0.0.1",
+            "demo.newTask": "新建任务",
+            "demo.conversations": "会话",
+            "demo.convReleaseTitle": "发版 checklist",
+            "demo.convReleaseTime": "2 分钟",
+            "demo.convMcpTitle": "排查 MCP 安装",
+            "demo.convMcpTime": "1 小时",
+            "demo.convLandingTitle": "落地页排版",
+            "demo.convLandingTime": "昨天",
+            "demo.settings": "设置",
+            "demo.threadMeta": "本地 · Evidence 开启",
+            "demo.chipMode": "Agent",
+            "demo.chipAccess": "先询问",
+            "demo.chipModel": "GPT-5.2",
+            "mechanisms.title": "为掌控而设计。",
+            "mechanisms.subtitle": "不是又一个聊天壳。本地执行面，两个一等入口。",
+            "mechanisms.channelTitle": "Desktop + CLI",
+            "mechanisms.channelBody":
+              "Electron Desktop 与 `peer` TUI。npm 或 Release 安装，终端场景不必装 GUI。",
+            "mechanisms.threadTitle": "同一本地 Runtime",
+            "mechanisms.threadBody":
+              "共享 ~/.peer-agent：设置、会话、凭证，同一套能力语义。",
+            "mechanisms.evidenceTitle": "Evidence，不是感觉",
+            "mechanisms.evidenceBody":
+              "授权、工具与结果可展开回放 —— GUI 与 TUI 皆然。",
+            "trust.localLabel": "本地优先",
+            "trust.localBody": " 数据与密钥留在本机",
+            "trust.authLabel": "按需授权",
+            "trust.authBody": " 能力按需开放",
+            "trust.evidenceLabel": "可追踪",
+            "trust.evidenceBody": " 执行有证据",
+            "download.title": "获取 Peer Agent。",
+            "download.body": "Desktop 与 CLI（`peer`）同一 release tag，共享本地 Runtime。",
+            "download.desktopTitle": "工作台",
+            "download.desktopBadge": "Desktop",
+            "download.desktopBody": "Thread、Workbench、Evidence 与可视化治理。",
+            "download.cliTitle": "peer",
+            "download.cliBadge": "CLI",
+            "download.cliBody": "不必装 Desktop。npm `@peer-agent/cli`，或 peer + helper 压缩包。",
+            "download.macos": "macOS",
+            "download.windows": "Windows",
+            "download.npm": "npm 安装",
+            "download.changelog": "更新日志 →",
+            "download.releases": "发布页 →",
+            "download.termTitle": "终端",
+            "download.termCmt1": "# 安装（发布后）",
+            "download.termCmt2": "# TUI · 与 Desktop 共用 ~/.peer-agent",
+            "download.termNote": "# 或解压 peer-darwin-arm64.tar.gz · peer 与 helper 同目录",
+            "download.meta": "同一 release tag",
+            "footer.copy": "Peer Agent · 早期预览 · MIT",
+            "footer.changelog": "更新日志",
+            "footer.repo": "仓库",
+            "footer.issues": "反馈",
+            "preview.note": "GitHub Pages",
+            documentTitle: "Peer Agent — 落地页预览",
+          },
+        };
+
+        function detectLang() {
+          try {
+            var saved = localStorage.getItem(STORAGE_KEY);
+            if (saved === "en" || saved === "zh") return saved;
+          } catch (e) {}
+
+          var nav =
+            (navigator.languages && navigator.languages[0]) ||
+            navigator.language ||
+            navigator.userLanguage ||
+            "en";
+          return String(nav).toLowerCase().startsWith("zh") ? "zh" : "en";
+        }
+
+        function applyLang(lang) {
+          var pack = messages[lang] || messages.en;
+          var htmlLang = lang === "zh" ? "zh-CN" : "en";
+          document.documentElement.lang = htmlLang;
+          document.title = pack.documentTitle;
+
+          document.querySelectorAll("[data-i18n]").forEach(function (el) {
+            var key = el.getAttribute("data-i18n");
+            if (!key || pack[key] == null) return;
+            // Allow intentional HTML in a few mono trace lines only.
+            if (key === "demo.trace1" || key === "demo.trace2") {
+              el.innerHTML = pack[key];
+            } else {
+              el.textContent = pack[key];
+            }
+          });
+
+          var enBtn = document.getElementById("lang-en");
+          var zhBtn = document.getElementById("lang-zh");
+          if (enBtn) enBtn.setAttribute("aria-pressed", lang === "en" ? "true" : "false");
+          if (zhBtn) zhBtn.setAttribute("aria-pressed", lang === "zh" ? "true" : "false");
+
+          var group = document.querySelector(".lang-toggle");
+          if (group) {
+            group.setAttribute("aria-label", lang === "zh" ? "语言" : "Language");
+          }
+        }
+
+        function setLang(lang, persist) {
+          if (lang !== "en" && lang !== "zh") lang = "en";
+          applyLang(lang);
+          if (persist) {
+            try {
+              localStorage.setItem(STORAGE_KEY, lang);
+            } catch (e) {}
+          }
+        }
+
+        document.querySelectorAll(".lang-toggle button").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            setLang(btn.getAttribute("data-lang"), true);
+          });
+        });
+
+
+        var scenes = {
+          release: {
+            en: {
+              title: "Ship release checklist",
+              user: "Inspect the local repo and summarize shippable changes.",
+              agent:
+                "Read git status and recent commits. Suggest verifying the desktop build before writing release notes.",
+              trace1: "<strong>tool</strong> · git.status · authorized",
+              trace2: "<strong>evidence</strong> · 12 files · 3 commits · local only",
+              composer: "Continue: draft a one-page release checklist…",
+            },
+            zh: {
+              title: "发版 checklist",
+              user: "检查本地仓库，并总结今天可发版的改动。",
+              agent: "已读取 git 状态与最近提交。建议先验证桌面构建，再写 release notes。",
+              trace1: "<strong>tool</strong> · git.status · 已授权",
+              trace2: "<strong>evidence</strong> · 12 个文件 · 3 次提交 · 仅本地",
+              composer: "继续：生成一页 release checklist…",
+            },
+          },
+          mcp: {
+            en: {
+              title: "Debug MCP install",
+              user: "Why is the DingTalk MCP server disabled in my registry?",
+              agent:
+                "Checked the local MCP registry. The server is installed but marked disabled; enable it and re-sync tools.",
+              trace1: "<strong>tool</strong> · mcp.list · authorized",
+              trace2: "<strong>evidence</strong> · 2 servers · 1 disabled · local only",
+              composer: "Enable dingtalk MCP and verify tools…",
+            },
+            zh: {
+              title: "排查 MCP 安装",
+              user: "为什么钉钉 MCP 在本地 registry 里是 disabled？",
+              agent: "已检查本地 MCP registry。服务已安装但被标记为 disabled；启用后重新同步工具即可。",
+              trace1: "<strong>tool</strong> · mcp.list · 已授权",
+              trace2: "<strong>evidence</strong> · 2 个服务 · 1 个禁用 · 仅本地",
+              composer: "启用钉钉 MCP 并验证工具…",
+            },
+          },
+          landing: {
+            en: {
+              title: "Landing page layout",
+              user: "Align the landing mock with the real desktop shell.",
+              agent:
+                "Sidebar should show workspace + conversations, not channel chips. Keep composer as graphite control surface.",
+              trace1: "<strong>tool</strong> · read_file · authorized",
+              trace2: "<strong>evidence</strong> · sidebar.tsx · chat-composer.css · local only",
+              composer: "Tighten spacing and make conversation rows clickable…",
+            },
+            zh: {
+              title: "落地页排版",
+              user: "把落地页中间 mock 对齐真实桌面壳。",
+              agent: "侧栏应是工作区 + 会话列表，而不是 Channel 芯片。Composer 保持石墨控制面。",
+              trace1: "<strong>tool</strong> · read_file · 已授权",
+              trace2: "<strong>evidence</strong> · sidebar.tsx · chat-composer.css · 仅本地",
+              composer: "收紧间距，并让会话行可点击…",
+            },
+          },
+        };
+
+        var activeConv = "release";
+
+        function currentLang() {
+          return document.documentElement.lang === "zh-CN" ? "zh" : "en";
+        }
+
+        function renderScene(convId) {
+          var scene = scenes[convId] || scenes.release;
+          var pack = scene[currentLang()] || scene.en;
+          var titleEl = document.getElementById("demo-thread-title");
+          var userEl = document.getElementById("demo-user-msg");
+          var agentEl = document.getElementById("demo-agent-msg");
+          var t1 = document.getElementById("demo-trace1");
+          var t2 = document.getElementById("demo-trace2");
+          var composerEl = document.getElementById("demo-composer");
+          if (titleEl) titleEl.textContent = pack.title;
+          if (userEl) userEl.textContent = pack.user;
+          if (agentEl) agentEl.textContent = pack.agent;
+          if (t1) t1.innerHTML = pack.trace1;
+          if (t2) t2.innerHTML = pack.trace2;
+          if (composerEl) composerEl.textContent = pack.composer;
+
+          var cliUser = document.getElementById("cli-user-msg");
+          var cliAgent = document.getElementById("cli-agent-msg");
+          var cliT1 = document.getElementById("cli-trace1");
+          var cliT2 = document.getElementById("cli-trace2");
+          var cliComposer = document.getElementById("cli-composer");
+          if (cliUser) cliUser.textContent = pack.user;
+          if (cliAgent) cliAgent.textContent = pack.agent;
+          if (cliT1) cliT1.innerHTML = pack.trace1;
+          if (cliT2) cliT2.innerHTML = pack.trace2;
+          if (cliComposer) cliComposer.textContent = pack.composer;
+        }
+
+        function selectConv(convId) {
+          activeConv = convId;
+          document.querySelectorAll(".conv-item").forEach(function (btn) {
+            var on = btn.getAttribute("data-conv") === convId;
+            btn.classList.toggle("active", on);
+            btn.setAttribute("aria-selected", on ? "true" : "false");
+          });
+          renderScene(convId);
+        }
+
+        document.querySelectorAll(".conv-item").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            selectConv(btn.getAttribute("data-conv"));
+          });
+        });
+
+        var _applyLang = applyLang;
+        applyLang = function (lang) {
+          _applyLang(lang);
+          renderScene(activeConv);
+        };
+
+
+        
+        var activeShell = "desktop";
+        function setShell(shell) {
+          activeShell = shell === "cli" ? "cli" : "desktop";
+          var desktop = document.getElementById("view-desktop");
+          var cli = document.getElementById("view-cli");
+          if (desktop) desktop.hidden = activeShell !== "desktop";
+          if (cli) cli.hidden = activeShell !== "cli";
+          document.querySelectorAll(".shell-switch button").forEach(function (btn) {
+            var on = btn.getAttribute("data-shell") === activeShell;
+            btn.setAttribute("aria-pressed", on ? "true" : "false");
+          });
+        }
+        document.querySelectorAll(".shell-switch button").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            setShell(btn.getAttribute("data-shell"));
+          });
+        });
+        // Deep-link: #download-cli or #cli opens CLI shell
+        if (location.hash === "#download-cli" || location.hash === "#cli") {
+          setShell("cli");
+        }
+
+        document.querySelectorAll('a[href="#download-cli"], a[href="#cli"]').forEach(function (a) {
+          a.addEventListener("click", function () {
+            setShell("cli");
+          });
+        });
+
+
+
+                setLang(detectLang(), false);
+      })();
+    </script>
+  </body>
+</html>
