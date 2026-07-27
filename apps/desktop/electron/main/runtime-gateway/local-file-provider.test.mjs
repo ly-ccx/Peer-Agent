@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
-import { createLocalFileProvider } from './local-file-provider.mjs';
+import { createLocalFileProvider, MAX_WRITE_FILE_BYTES } from './local-file-provider.mjs';
 
 let tmpDir;
 
@@ -207,6 +207,49 @@ describe('local file provider', () => {
     );
 
     assert.equal(execution.result.status, 'denied');
+  });
+
+  it('write_file blocks content larger than 32KB and allows 32KB boundary', async () => {
+    const provider = createLocalFileProvider({ workspaceRoot: tmpDir });
+    const toolContext = {
+      conversationId: 'c1',
+      readFiles: new Map(),
+    };
+    const overLimitPath = path.join(tmpDir, 'over-limit.md');
+    const boundaryPath = path.join(tmpDir, 'boundary.md');
+
+    const overLimit = await provider.executeCapability(
+      {
+        call: createCall('local.file.write', {
+          path: overLimitPath,
+          content: 'a'.repeat(MAX_WRITE_FILE_BYTES + 1),
+        }),
+      },
+      {
+        workspaceRoot: tmpDir,
+        toolContext,
+        locale: 'zh-CN',
+      },
+    );
+    assert.equal(overLimit.result.status, 'denied');
+    assert.match(JSON.parse(overLimit.result.outputPreview.fileResult.output).reason, /32|chunked|exceeds/i);
+    assert.equal(existsSync(overLimitPath), false);
+
+    const boundary = await provider.executeCapability(
+      {
+        call: createCall('local.file.write', {
+          path: boundaryPath,
+          content: 'b'.repeat(MAX_WRITE_FILE_BYTES),
+        }),
+      },
+      {
+        workspaceRoot: tmpDir,
+        toolContext,
+        locale: 'zh-CN',
+      },
+    );
+    assert.equal(boundary.result.status, 'success');
+    assert.equal(readFileSync(boundaryPath, 'utf8').length, MAX_WRITE_FILE_BYTES);
   });
 
   it('search_files allows outside-workspace paths when permission is granted', async () => {

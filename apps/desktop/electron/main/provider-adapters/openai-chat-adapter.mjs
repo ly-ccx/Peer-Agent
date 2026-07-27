@@ -126,13 +126,16 @@ function extractProviderTopLevelError(parsed) {
   };
 }
 
+/** Default SSE idle timeout for OpenAI-compatible chat streams (Grok etc.). */
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
+
 function streamIdleTimeoutError(ms) {
   const error = new Error(`provider_stream_idle_timeout: no SSE data received for ${ms}ms`);
   error.type = 'provider_stream_idle_timeout';
   return error;
 }
 
-async function readStreamChunk(reader, signal, idleTimeoutMs) {
+async function readStreamChunk(reader, signal, idleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT_MS) {
   const timeoutMs = Number(idleTimeoutMs);
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return reader.read();
   let timer = null;
@@ -327,7 +330,11 @@ export async function consumeOpenAIStream(res, webContents, streamId, trace = nu
     await throwIfSseReaderAborted(signal, reader);
     let chunk;
     try {
-      chunk = await readStreamChunk(reader, signal, options.streamIdleTimeoutMs);
+      chunk = await readStreamChunk(
+        reader,
+        signal,
+        options.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+      );
     } catch (error) {
       state.streamError = {
         type: error?.type || error?.name || 'provider_stream_error',

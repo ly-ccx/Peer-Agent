@@ -1,13 +1,15 @@
 Write complete content to a local file. Creates the file if it does not exist and replaces the file if it does.
 
 Use this tool when:
-- Creating a new file with known complete content.
+- Creating a new file with known complete content that fits the size limit.
 - Replacing a generated artifact or a small file where the user explicitly asked for full replacement.
 
 Rules:
 - Path may be absolute or workspace-relative; absolute paths may write outside the session workspace after permission approval.
 - Prefer edit_file for existing user-authored files.
 - Before replacing an existing file, use read_file to inspect the current content and set allow_overwrite=true only for intentional full replacement.
+- content hard limit: 32KB UTF-8 (32768 bytes). Larger content is blocked.
+- For large documents, use chunked writes: write a short skeleton/outline with write_file, then append/revise with multiple edit_file calls. Never emit one giant write payload that can stall mid-stream.
 - Do not create documentation, config, or source files merely as a proposal; create them only when the user asked for implementation or the task requires it.
 - After writing important files, verify with a read, test, or relevant command when feasible.
 - Report the write result from the tool output; do not claim follow-up validation unless it actually ran.

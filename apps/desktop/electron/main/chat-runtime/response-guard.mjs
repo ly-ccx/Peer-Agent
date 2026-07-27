@@ -49,10 +49,12 @@ export function shouldRetryNoToolResponse(text) {
 
 export function unsupportedToolResponseCorrection() {
   return [
-    'The previous assistant output emitted tool-call protocol text, but this turn produced no executable tool call.',
+    'The previous assistant output claimed a write or leaked tool protocol, but this turn produced no executable tool call.',
     'Discard that output.',
-    'Do not narrate "writing" / "正在写入" before a real write_file or edit_file tool call.',
-    'If a large document must be written, emit chunked write_file/edit_file tool calls now instead of one giant payload.',
+    'Do not narrate "writing" / "正在写入" / "开始写入" as if a file write is already in progress.',
+    'In this turn, emit a real write_file or edit_file tool call first; only after the tool result may you claim the file was written.',
+    'For large documents, use chunked writes only: write_file content must stay within 32KB (UTF-8); create a short skeleton with write_file, then append/revise with multiple edit_file calls.',
+    'Never emit one giant write_file payload for multi-section docs — that stalls the provider stream and times out.',
     'If the user request requires local filesystem, git, shell, build, runtime, or verification facts, call an available tool now.',
     'Do not print tool-call markup as normal text. Either emit the tool call in this turn, or answer in normal prose without protocol tags.',
   ].join(' ');

@@ -19,7 +19,7 @@ import { fetchWithConnectionRecovery } from '../provider-transports/recovering-f
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
 import { parseSseDataPayload, throwIfSseReaderAborted } from './sse-line.mjs';
 
-const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 30_000;
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
 
 function extractCachedInputTokens(usage) {
   return usage?.input_tokens_details?.cached_tokens

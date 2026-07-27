@@ -6,6 +6,7 @@ import {
   hasLiteralToolCallSyntax,
   hasUnsupportedToolClaim,
   shouldRetryNoToolResponse,
+  unsupportedToolResponseCorrection,
 } from './response-guard.mjs';
 
 describe('hasLiteralToolCallSyntax', () => {
@@ -95,5 +96,13 @@ describe('empty write narration guard', () => {
     assert.equal(hasEmptyWriteNarration('OK，开始写代码。我会先写 CascadingMenu.tsx。'), false);
     assert.equal(shouldRetryNoToolResponse('OK，开始写代码。我会先写 CascadingMenu.tsx。'), false);
     assert.equal(shouldRetryNoToolResponse('I will write the component next.'), false);
+  });
+
+  it('correction text requires real tool calls and 32KB chunked writes', () => {
+    const correction = unsupportedToolResponseCorrection();
+    assert.match(correction, /write_file or edit_file/i);
+    assert.match(correction, /32KB/);
+    assert.match(correction, /chunked writes/i);
+    assert.match(correction, /开始写入|正在写入/);
   });
 });

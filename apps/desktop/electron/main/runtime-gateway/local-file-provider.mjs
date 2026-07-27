@@ -11,6 +11,8 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 
 const MAX_TOOL_CONTEXT_CHARS = 4_000;
+/** Hard cap for write_file content (UTF-8 bytes). Giant single payloads stall SSE tool-arg streams. */
+export const MAX_WRITE_FILE_BYTES = 32 * 1024;
 
 const FILE_CAPABILITY_TO_TOOL = {
   'local.file.read': 'read_file',
@@ -525,6 +527,15 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
       const filePath = resolveToolPath(args.path, cwd);
       if (typeof args.content !== 'string') {
         return formatToolFailure('write_file', 'blocked', 'content must be a string', { path: filePath });
+      }
+      const contentBytes = Buffer.byteLength(args.content, 'utf8');
+      if (contentBytes > MAX_WRITE_FILE_BYTES) {
+        return formatToolFailure(
+          'write_file',
+          'blocked',
+          `write_file content exceeds ${MAX_WRITE_FILE_BYTES} bytes (got ${contentBytes}). Use chunked writes: write a short skeleton with write_file, then append/revise with multiple edit_file calls. Do not emit one giant payload.`,
+          { path: filePath, contentBytes, maxBytes: MAX_WRITE_FILE_BYTES },
+        );
       }
 
       const exists = existsSync(filePath);
