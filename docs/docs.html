@@ -52,8 +52,8 @@
         --bg: #0f1114;
         --bg-elevated: #161a20;
         --ink: #f2f4f7;
-        --ink-soft: #a7b0bc;
-        --ink-fade: #7e8794;
+        --ink-soft: #c2c9d2;
+        --ink-fade: #98a1ad;
         --line: rgba(255, 255, 255, 0.10);
         --line-strong: rgba(255, 255, 255, 0.14);
         --graphite: #f5f7fa;
@@ -139,18 +139,7 @@
         border-radius: 6px;
         padding: 0.1em 0.4em;
       }
-      pre {
-        margin: 0 0 16px;
-        padding: 14px 16px;
-        border-radius: 12px;
-        background: #eef1f6;
-        border: 1px solid var(--line);
-        overflow: auto;
-        font-size: 12.5px;
-        line-height: 1.65;
-        color: #243041;
-        max-width: 760px;
-      }
+      pre { margin: 0 0 16px; padding: 14px 16px; border-radius: 12px; background: var(--code-bg); border: 1px solid var(--line); overflow: auto; font-size: 12.5px; line-height: 1.65; color: var(--code-ink); max-width: 760px; }
       pre code { background: transparent; border: 0; padding: 0; font-size: inherit; }
 
       .topnav {
@@ -165,7 +154,7 @@
         width: min(var(--wide), 100%); margin: 0 auto; padding: 0;
         display: flex; align-items: center; justify-content: space-between; gap: 16px;
       }
-      .brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 650; font-size: 14px; letter-spacing: -0.02em; }
+      .brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 650; font-size: 14px; letter-spacing: -0.02em;  color: var(--ink); }
       .mark {
         width: 18px;
         height: 18px;
