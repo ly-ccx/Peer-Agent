@@ -11,7 +11,7 @@ import {
   type TuiSurface,
 } from './surface-state.ts';
 import type { TuiLocale } from './tui-language.ts';
-import type { TuiMode } from './tui-mode.ts';
+import { TUI_MODES, tuiModePickerValue, type TuiMode } from './tui-mode.ts';
 
 export type TuiCommand = TuiCommandDefinition;
 
@@ -126,13 +126,17 @@ export function openPicker(
   state: TuiExperienceState,
   picker: Exclude<import('./surface-state.ts').TuiPickerKind, 'command'>,
 ): TuiExperienceState {
+  // Mode picker only lists Agent(chat)/Plan. Legacy goal maps onto Agent index.
+  const selectedIndex = picker === 'mode'
+    ? Math.max(0, TUI_MODES.findIndex((option) => option.mode === tuiModePickerValue(state.mode)))
+    : 0;
   return {
     ...state,
     surface: requestTuiSurface(state.surface, {
       type: 'picker',
       picker,
       query: '',
-      selectedIndex: 0,
+      selectedIndex,
     }),
   };
 }

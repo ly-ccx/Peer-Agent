@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 
 import {
   cycleTuiMode,
@@ -12,25 +12,40 @@ import {
   tuiModeAllowsWriteTools,
   tuiModeForKey,
   tuiModeOption,
+  tuiModePickerValue,
   tuiModeProjectionRule,
 } from './tui-mode.ts';
 
-describe('TUI modes', () => {
-  test('declares only user-facing chat, plan and goal modes in stable keyboard order', () => {
-    expect(TUI_MODES.map(({ mode, shortcut }) => [mode, shortcut])).toEqual([
+describe('tui mode catalog', () => {
+  test('exposes only Agent(chat) and Plan in the user-facing picker', () => {
+    expect(TUI_MODES.map(({ mode, shortcut, label }) => [mode, shortcut, label])).toEqual([
       // Wire value remains `chat` for Runtime/Desktop; product label is Agent.
-      ['chat', '1'],
-      ['plan', '2'],
-      ['goal', '3'],
+      ['chat', '1', 'Agent'],
+      ['plan', '2', 'Plan'],
     ]);
-    expect(tuiModeOption('chat').label).toBe('Agent');
-    expect(tuiModeOption('plan').readOnly).toBe(true);
-    expect(tuiModeOption('goal').readOnly).toBe(false);
+    expect(TUI_MODES.some(({ mode }) => mode === 'goal')).toBe(false);
     expect(TUI_MODES.some(({ mode }) => mode === 'explorer')).toBe(false);
+    expect(tuiModeOption('chat').label).toBe('Agent');
+    expect(tuiModeOption('goal').label).toBe('Agent');
+    expect(tuiModeOption('goal').readOnly).toBe(false);
+    expect(tuiModeOption('plan').readOnly).toBe(true);
   });
 
-  test('defines projection rules for all user-facing and internal runtime modes', () => {
-    expect(TUI_RUNTIME_MODES).toEqual([
+  test('keeps legacy goal as a valid wire mode, not user-selectable', () => {
+    expect(isTuiMode('goal')).toBe(true);
+    expect(tuiModeProjectionRule('goal')).toMatchObject({
+      mode: 'goal',
+      readOnly: false,
+      allowsWriteTools: true,
+      userSelectable: false,
+    });
+    expect(tuiModePickerValue('goal')).toBe('chat');
+    expect(tuiModePickerValue('chat')).toBe('chat');
+    expect(tuiModePickerValue('plan')).toBe('plan');
+  });
+
+  test('declares projection rules for user-facing and runtime-only modes', () => {
+    expect(TUI_MODE_PROJECTION_RULES.map(({ mode }) => mode)).toEqual([
       'chat',
       'plan',
       'goal',
@@ -38,7 +53,7 @@ describe('TUI modes', () => {
       'compact',
       'system',
     ]);
-    expect(TUI_MODE_PROJECTION_RULES.map((rule) => rule.mode)).toEqual([
+    expect(TUI_RUNTIME_MODES).toEqual([
       'chat',
       'plan',
       'goal',
@@ -50,45 +65,47 @@ describe('TUI modes', () => {
     expect(tuiModeAllowsWriteTools('goal')).toBe(true);
     expect(tuiModeAllowsWriteTools('plan')).toBe(false);
     expect(tuiModeAllowsWriteTools('explorer')).toBe(false);
-    expect(tuiModeAllowsWriteTools('compact')).toBe(false);
-    expect(tuiModeAllowsWriteTools('system')).toBe(false);
     expect(tuiModeProjectionRule('plan')).toMatchObject({
+      mode: 'plan',
       readOnly: true,
+      allowsWriteTools: false,
       userSelectable: true,
     });
-    expect(tuiModeProjectionRule('compact')).toMatchObject({
+    expect(tuiModeProjectionRule('explorer')).toMatchObject({
+      mode: 'explorer',
       readOnly: true,
+      allowsWriteTools: false,
       userSelectable: false,
     });
   });
 
-  test('keeps internal modes out of user choices without downgrading runtime projection', () => {
+  test('normalizes unknown values and validates runtime mode aliases', () => {
     expect(TUI_MODES.every(({ mode }) => isTuiMode(mode))).toBe(true);
     expect(isTuiMode('explorer')).toBe(true);
     expect(isTuiMode('compact')).toBe(false);
-    expect(isTuiMode('system')).toBe(false);
     expect(isTuiRuntimeMode('compact')).toBe(true);
     expect(isTuiRuntimeMode('system')).toBe(true);
-    expect(normalizeTuiMode('compact')).toBe('chat');
-    expect(normalizeTuiRuntimeMode('compact')).toBe('compact');
-    expect(normalizeTuiRuntimeMode('system')).toBe('system');
+    expect(isTuiRuntimeMode('unknown')).toBe(false);
     expect(normalizeTuiMode('unknown')).toBe('chat');
-    expect(normalizeTuiMode('unknown', 'goal')).toBe('goal');
+    expect(normalizeTuiMode('goal')).toBe('goal');
+    expect(normalizeTuiMode('unknown', 'plan')).toBe('plan');
+    expect(normalizeTuiRuntimeMode('system')).toBe('system');
+    expect(normalizeTuiRuntimeMode('unknown', 'compact')).toBe('compact');
   });
 
-  test('cycles only through user-facing modes in both directions', () => {
+  test('cycles only Agent and Plan; legacy goal pivots from Agent', () => {
     expect(cycleTuiMode('chat')).toBe('plan');
-    expect(cycleTuiMode('goal')).toBe('chat');
-    expect(cycleTuiMode('chat', -1)).toBe('goal');
-    expect(cycleTuiMode('explorer')).toBe('chat');
+    expect(cycleTuiMode('plan')).toBe('chat');
+    expect(cycleTuiMode('goal')).toBe('plan');
+    expect(cycleTuiMode('chat', -1)).toBe('plan');
+    expect(cycleTuiMode('goal', -1)).toBe('plan');
   });
 
-  test('maps only Ctrl+1 through Ctrl+3 to direct mode changes', () => {
-    expect(tuiModeForKey('1', true)).toBe('chat');
-    expect(tuiModeForKey('2', true)).toBe('plan');
-    expect(tuiModeForKey('3', true)).toBe('goal');
-    expect(tuiModeForKey('4', true)).toBeNull();
-    expect(tuiModeForKey('2', false)).toBeNull();
-    expect(tuiModeForKey('5', true)).toBeNull();
+  test('maps bare digit shortcuts only for picker modes', () => {
+    expect(tuiModeForKey('1', false)).toBe('chat');
+    expect(tuiModeForKey('2', false)).toBe('plan');
+    expect(tuiModeForKey('3', false)).toBe(null);
+    expect(tuiModeForKey('1', true)).toBe(null);
+    expect(tuiModeForKey('2', false, true)).toBe(null);
   });
 });

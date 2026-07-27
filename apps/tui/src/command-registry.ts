@@ -40,7 +40,7 @@ const GOAL_PAUSED = (context: TuiCommandContext): boolean => context.goalStatus 
 
 export const TUI_COMMAND_REGISTRY: readonly TuiCommandDefinition[] = Object.freeze([
   { id: 'model', label: 'Model', description: 'Choose model and reasoning effort', keywords: ['provider', 'llm', 'effort'], shortcut: 'Ctrl+X M', action: { type: 'open-model-picker' } },
-  { id: 'mode', label: 'Mode', description: 'Choose Agent, Plan, or Goal', keywords: ['agent', 'chat', 'plan', 'goal'], shortcut: 'Ctrl+X O', action: { type: 'open-mode-picker' } },
+  { id: 'mode', label: 'Mode', description: 'Choose Agent or Plan', keywords: ['agent', 'chat', 'plan', 'goal'], shortcut: 'Ctrl+X O', action: { type: 'open-mode-picker' } },
   { id: 'permissions', label: 'Permissions', description: 'Choose the session permission policy', keywords: ['access', 'approval', 'ask'], shortcut: 'Ctrl+X P', action: { type: 'open-permission-picker' } },
   {
     id: 'language',

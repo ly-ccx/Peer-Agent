@@ -111,7 +111,7 @@ import {
   TUI_SUBSCRIPTION_QUOTA_REFRESH_MS,
 } from './tui-subscription-quota.ts';
 import type { PendingApproval, TuiHost } from './tui-host.ts';
-import { TUI_MODES, tuiModeOption, type TuiMode } from './tui-mode.ts';
+import { TUI_MODES, tuiModeOption, tuiModePickerValue, type TuiMode } from './tui-mode.ts';
 import {
   composerPlaceholder,
   composerRunningStatusLabel,
@@ -2969,7 +2969,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
                 <text fg={selected ? PICKER_CHROME.selectedForeground : PICKER_CHROME.idleForeground} wrapMode="none">
                   {selected ? PICKER_CHROME.caretSelected : PICKER_CHROME.caretIdle}
                   [{option.shortcut}] {option.label}
-                  {snapshot.mode === option.mode ? PICKER_CHROME.checkCurrent : ''}
+                  {tuiModePickerValue(snapshot.mode) === option.mode ? PICKER_CHROME.checkCurrent : ''}
                 </text>
                 {pickerLayout.showDescriptions ? <text fg={COLOR.muted} wrapMode="none">    {option.description}</text> : null}
               </box>
