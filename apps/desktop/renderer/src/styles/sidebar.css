@@ -494,7 +494,7 @@
 .channel-conversation-list .conversation-row.active {
   background: var(--ui-surface-selected, var(--za-sidebar-thread-active-bg));
   border-color: transparent;
-  box-shadow: none;
+  box-shadow: var(--shadow-soft, var(--shadow-composer));
   color: var(--graphite-base);
   font-weight: 500;
 }

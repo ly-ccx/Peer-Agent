@@ -139,8 +139,9 @@
   --shadow-card-active: 0 1px 3px rgba(26, 29, 33, 0.10), 0 8px 22px rgba(26, 29, 33, 0.12);
   --shadow-popover: 0 2px 12px rgba(26, 29, 33, 0.06);
   --shadow-drag: 0 4px 16px rgba(26, 29, 33, 0.10);
-  /* 输入框轻微浮起：近距离柔光 + 极轻扩散，不抢内容层级。 */
-  --shadow-composer: 0 1px 2px rgba(26, 29, 33, 0.06), 0 6px 18px rgba(26, 29, 33, 0.08);
+  /* 统一软阴影：输入框 / 侧栏选中态等同级轻浮起。 */
+  --shadow-soft: 0 1px 2px rgba(26, 29, 33, 0.06), 0 6px 18px rgba(26, 29, 33, 0.08);
+  --shadow-composer: var(--shadow-soft);
 
   /* ─────────────────────────────────────────────────────────────
    *  Vellum 兼容别名（18 个旧组件 CSS / TSX 文件零改动）
@@ -383,8 +384,9 @@
   --shadow-card-active: 0 1px 3px rgba(0, 0, 0, 0.34), 0 9px 24px rgba(0, 0, 0, 0.38);
   --shadow-popover: 0 2px 12px rgba(0, 0, 0, 0.40);
   --shadow-drag: 0 4px 16px rgba(0, 0, 0, 0.55);
-  /* 深色输入框轻微浮起：略加重，避免在暗底上“贴死”。 */
-  --shadow-composer: 0 1px 2px rgba(0, 0, 0, 0.28), 0 8px 22px rgba(0, 0, 0, 0.34);
+  /* 深色统一软阴影：略加重，避免在暗底上“贴死”。 */
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.28), 0 8px 22px rgba(0, 0, 0, 0.34);
+  --shadow-composer: var(--shadow-soft);
 
   /* ─── Vellum 兼容别名 ─── */
   --surface-vellum-base: var(--paper-base);
