@@ -226,12 +226,6 @@ export type TuiMessageKey =
   | 'command.compact.description'
   | 'command.history.label'
   | 'command.history.description'
-  | 'command.history-earlier.label'
-  | 'command.history-earlier.description'
-  | 'command.history-later.label'
-  | 'command.history-later.description'
-  | 'command.history-latest.label'
-  | 'command.history-latest.description'
   | 'command.resume.label'
   | 'command.resume.description'
   | 'command.goals.label'
@@ -304,12 +298,6 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'command.compact.description': '用结构化摘要压缩模型上下文；界面记录保留',
     'command.history.label': '历史',
     'command.history.description': '浏览压缩前的更早页面；再次输入翻更早，Esc 返回最新',
-    'command.history-earlier.label': '更早历史',
-    'command.history-earlier.description': '显示上一页有界历史',
-    'command.history-later.label': '较新历史',
-    'command.history-later.description': '显示下一页有界历史',
-    'command.history-latest.label': '最新历史',
-    'command.history-latest.description': '返回默认最新窗口',
     'command.resume.label': '恢复会话',
     'command.resume.description': '恢复并继续已保存的会话',
     'command.goals.label': '目标历史',
@@ -380,13 +368,7 @@ const MESSAGES: Readonly<Record<TuiLocale, Readonly<Record<TuiMessageKey, string
     'command.compact.label': 'Compact context',
     'command.compact.description': 'Compress model context with a structural summary; UI transcript stays',
     'command.history.label': 'History',
-    'command.history.description': 'Browse compacted earlier pages; press again for older, Esc to return to latest',
-    'command.history-earlier.label': 'Earlier history',
-    'command.history-earlier.description': 'Show the previous bounded page',
-    'command.history-later.label': 'Later history',
-    'command.history-later.description': 'Show the next bounded page',
-    'command.history-latest.label': 'Latest history',
-    'command.history-latest.description': 'Return to the default latest window',
+    'command.history.description': 'Browse compacted history; /history later|latest for other windows, Esc returns to latest',
     'command.resume.label': 'Resume session',
     'command.resume.description': 'Restore and continue a saved conversation',
     'command.goals.label': 'Goal history',

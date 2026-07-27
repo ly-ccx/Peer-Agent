@@ -47,12 +47,28 @@ describe('TUI command registry', () => {
     expect(visibleTuiCommands({ goalStatus: 'paused' }).map((command) => command.id)).not.toContain('goal-pause');
   });
 
-  test('resolves discoverable history commands and spaced aliases', () => {
+    test('resolves /history and direction args on the single history command', () => {
     expect(resolveTuiCommandInput('/history', idle)?.id).toBe('history');
-    expect(resolveTuiCommandInput('/history-earlier', idle)?.id).toBe('history-earlier');
-    expect(resolveTuiCommandInput('/history earlier', idle)?.id).toBe('history-earlier');
-    expect(resolveTuiCommandInput('/history later', idle)?.id).toBe('history-later');
-    expect(resolveTuiCommandInput('/history latest', idle)?.id).toBe('history-latest');
+    expect(resolveTuiCommandInput('/history', idle)?.action).toEqual({
+      type: 'history-navigation',
+      direction: 'earlier',
+    });
+    expect(resolveTuiCommandInput('/history earlier', idle)?.action).toEqual({
+      type: 'history-navigation',
+      direction: 'earlier',
+    });
+    expect(resolveTuiCommandInput('/history later', idle)?.id).toBe('history');
+    expect(resolveTuiCommandInput('/history later', idle)?.action).toEqual({
+      type: 'history-navigation',
+      direction: 'later',
+    });
+    expect(resolveTuiCommandInput('/history latest', idle)?.action).toEqual({
+      type: 'history-navigation',
+      direction: 'latest',
+    });
+    expect(resolveTuiCommandInput('/history-earlier', idle)).toBeNull();
+    expect(resolveTuiCommandInput('/history-later', idle)).toBeNull();
+    expect(resolveTuiCommandInput('/history-latest', idle)).toBeNull();
     expect(resolveTuiCommandInput('/history unknown', idle)).toBeNull();
   });
 
