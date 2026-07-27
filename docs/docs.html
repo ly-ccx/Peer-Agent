@@ -35,7 +35,7 @@
         --code-ink: #243041;
         --graphite-btn: #1a1d21;
         --graphite-btn-ink: #f5f7fa;
-        --nav-h: 52px;
+        --nav-h: 48px;
         --sidebar-w: 240px;
         --toc-w: 200px;
         --wide: 1120px;
@@ -154,7 +154,7 @@
         width: min(var(--wide), 100%); margin: 0 auto; padding: 0;
         display: flex; align-items: center; justify-content: space-between; gap: 16px;
       }
-      .brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 650; font-size: 14px; letter-spacing: -0.02em;  color: var(--ink); }
+      .brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; letter-spacing: -0.02em; color: var(--ink); }
       .mark {
         width: 18px;
         height: 18px;
@@ -163,31 +163,27 @@
         object-fit: contain;
         flex-shrink: 0;
       }
-.top-links { display: flex; align-items: center; gap: 4px; }
-      .top-links a { font-size: 13px; color: var(--ink-soft); padding: 8px 12px; border-radius: 8px; }
-      .top-links a:hover { color: var(--ink); background: var(--chip-bg); }
-      .top-links a.active { color: var(--ink); position: relative; }
-      .top-links a.active::after {
-        content: ""; position: absolute; left: 12px; right: 12px; bottom: 2px; height: 2px;
-        border-radius: 2px; background: var(--azure);
-      }
-      .top-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.top-links { display: flex; align-items: center; gap: 18px; }
+      .top-links a { font-size: 12px; color: var(--ink-soft); opacity: 0.88; padding: 0; border-radius: 0; }
+      .top-links a:hover { color: var(--ink); opacity: 1; background: transparent; }
+      .top-links a.active { color: var(--ink); opacity: 1; font-weight: 600; position: static; }
+      .top-actions { display: flex; align-items: center; gap: 16px; margin-left: auto; }
       .lang {
-        display: inline-flex; align-items: center; height: 30px; padding: 2px;
-        border-radius: 980px; background: var(--chip-bg); border: 1px solid var(--line); gap: 1px;
+        display: inline-flex; align-items: center; height: 28px; padding: 2px;
+        border-radius: 980px; background: var(--chip-bg); border: 0; gap: 1px;
       }
       .lang button {
         appearance: none; border: 0; background: transparent; color: var(--ink-fade);
-        font-size: 11px; font-weight: 650; min-width: 30px; height: 24px; border-radius: 980px;
+        font-size: 11px; font-weight: 600; min-width: 30px; height: 24px; border-radius: 980px;
         cursor: pointer; padding: 0 8px;
       }
       .lang button[aria-pressed="true"] { background: var(--hover-fill); color: var(--ink); }
       .btn {
-        display: inline-flex; align-items: center; justify-content: center; height: 32px;
-        padding: 0 14px; border-radius: 980px; font-size: 12.5px; font-weight: 600;
+        display: inline-flex; align-items: center; justify-content: center; height: auto;
+        padding: 6px 12px; border-radius: 980px; font-size: 12px; font-weight: 500;
         border: 1px solid transparent; cursor: pointer;
       }
-      .btn-primary { background: var(--graphite-btn); color: var(--graphite-btn-ink) !important; }
+      .btn-primary { background: var(--graphite-btn); color: var(--graphite-btn-ink) !important; opacity: 1; }
       .btn-ghost { background: transparent; border-color: var(--line-strong); color: var(--ink-soft); }
       .btn-ghost:hover { color: var(--ink); background: var(--chip-bg); }
 
