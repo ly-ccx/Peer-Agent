@@ -2,6 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import type { UpdaterStatus } from '@peer-agent/protocol';
 import type { CSSProperties } from 'react';
 import { Overlay } from './Overlay';
+import { selectReleaseNotesByLocale } from './releaseNotesLocale';
 import { ReleaseNotesView } from './ReleaseNotesView';
 
 /**
@@ -44,6 +45,10 @@ export function UpdateModal({
   const { phase } = status;
   const newVersion = status.availableVersion ?? '';
   const percent = Math.max(0, Math.min(100, Math.round(status.percent ?? 0)));
+  const localizedReleaseNotes = selectReleaseNotesByLocale(
+    status.releaseNotes,
+    i18n.locale,
+  );
 
   if (!open) return null;
 
@@ -126,8 +131,8 @@ export function UpdateModal({
                 {i18n.t('updater.modal.releaseNotes')}
               </div>
               <div className="updater-modal-notes-body is-flat">
-                {status.releaseNotes ? (
-                  <ReleaseNotesView html={status.releaseNotes} />
+                {localizedReleaseNotes ? (
+                  <ReleaseNotesView html={localizedReleaseNotes} />
                 ) : (
                   <p className="updater-modal-empty-notes">
                     {i18n.t('updater.modal.noReleaseNotes')}
