@@ -1,0 +1,1341 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Peer Agent — Docs</title>
+    <style>
+      :root {
+        --bg: #0f1114;
+        --bg-elevated: #161a20;
+        --bg-soft: #1b2027;
+        --ink: #f2f4f7;
+        --ink-soft: #a8b0bb;
+        --ink-fade: #7a8390;
+        --line: rgba(255, 255, 255, 0.08);
+        --line-strong: rgba(255, 255, 255, 0.12);
+        --azure: #6eb0d6;
+        --azure-strong: #3b7fab;
+        --graphite: #e8ecf2;
+        --graphite-btn: #f5f7fa;
+        --graphite-btn-ink: #1a1d21;
+        --hairline: rgba(255, 255, 255, 0.08);
+        --sidebar-w: 248px;
+        --toc-w: 200px;
+        --nav-h: 52px;
+        --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter",
+          "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", system-ui, sans-serif;
+        --mono: "SF Mono", "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+        --radius: 12px;
+        --shadow: 0 1px 2px rgba(0,0,0,.25), 0 18px 40px rgba(0,0,0,.28);
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        font-family: var(--font);
+        color: var(--ink);
+        background: var(--bg);
+        -webkit-font-smoothing: antialiased;
+        line-height: 1.55;
+        letter-spacing: -0.01em;
+      }
+      a { color: inherit; text-decoration: none; }
+      button { font: inherit; color: inherit; }
+      code, pre, kbd {
+        font-family: var(--mono);
+      }
+      code {
+        font-size: 0.9em;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 0.1em 0.4em;
+      }
+      pre {
+        margin: 0;
+        padding: 14px 16px;
+        border-radius: 12px;
+        background: #0b0d10;
+        border: 1px solid var(--line);
+        overflow: auto;
+        font-size: 12.5px;
+        line-height: 1.6;
+        color: #d8e0ea;
+      }
+      pre code {
+        background: transparent;
+        border: 0;
+        padding: 0;
+        font-size: inherit;
+      }
+
+      /* top nav */
+      .topnav {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        height: var(--nav-h);
+        display: flex;
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+        background: rgba(15, 17, 20, 0.82);
+        backdrop-filter: blur(18px) saturate(1.2);
+        -webkit-backdrop-filter: blur(18px) saturate(1.2);
+      }
+      .topnav-inner {
+        width: min(1440px, 100%);
+        margin: 0 auto;
+        padding: 0 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        font-weight: 650;
+        letter-spacing: -0.02em;
+        font-size: 14px;
+      }
+      .mark {
+        width: 16px;
+        height: 16px;
+        border-radius: 4px;
+        background: linear-gradient(145deg, #e8ecf2, #9aa3ad);
+        position: relative;
+      }
+      .mark::after {
+        content: "";
+        position: absolute;
+        inset: 4px;
+        border-radius: 1.5px;
+        background: var(--azure-strong);
+      }
+      .top-links {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex: 1;
+        margin-left: 18px;
+      }
+      .top-links a {
+        font-size: 13px;
+        color: var(--ink-soft);
+        padding: 8px 12px;
+        border-radius: 8px;
+      }
+      .top-links a:hover { color: var(--ink); background: rgba(255,255,255,0.04); }
+      .top-links a.active {
+        color: var(--ink);
+        position: relative;
+      }
+      .top-links a.active::after {
+        content: "";
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        bottom: 2px;
+        height: 2px;
+        border-radius: 2px;
+        background: var(--azure);
+      }
+      .top-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .lang {
+        display: inline-flex;
+        align-items: center;
+        height: 30px;
+        padding: 2px;
+        border-radius: 980px;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid var(--line);
+        gap: 1px;
+      }
+      .lang button {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: var(--ink-fade);
+        font-size: 11px;
+        font-weight: 650;
+        min-width: 30px;
+        height: 24px;
+        border-radius: 980px;
+        cursor: pointer;
+        padding: 0 8px;
+      }
+      .lang button[aria-pressed="true"] {
+        background: rgba(255,255,255,0.1);
+        color: var(--ink);
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 32px;
+        padding: 0 14px;
+        border-radius: 980px;
+        font-size: 12.5px;
+        font-weight: 600;
+        border: 1px solid transparent;
+        cursor: pointer;
+      }
+      .btn-primary {
+        background: var(--graphite-btn);
+        color: var(--graphite-btn-ink) !important;
+      }
+      .btn-primary:hover { filter: brightness(0.96); }
+      .btn-ghost {
+        background: transparent;
+        border-color: var(--line-strong);
+        color: var(--ink-soft);
+      }
+      .btn-ghost:hover {
+        color: var(--ink);
+        background: rgba(255,255,255,0.04);
+      }
+
+      /* shell */
+      .shell {
+        display: grid;
+        grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--toc-w);
+        min-height: calc(100vh - var(--nav-h));
+        width: min(1440px, 100%);
+        margin: 0 auto;
+      }
+      .sidebar {
+        position: sticky;
+        top: var(--nav-h);
+        height: calc(100vh - var(--nav-h));
+        overflow: auto;
+        border-right: 1px solid var(--line);
+        padding: 18px 12px 28px;
+      }
+      .nav-group { margin-bottom: 18px; }
+      .nav-group-title {
+        font-size: 11px;
+        font-weight: 650;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--ink-fade);
+        padding: 6px 10px 8px;
+      }
+      .nav-item {
+        display: block;
+        width: 100%;
+        text-align: left;
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: var(--ink-soft);
+        font-size: 13.5px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+        border-left: 2px solid transparent;
+        margin: 1px 0;
+      }
+      .nav-item:hover {
+        color: var(--ink);
+        background: rgba(255,255,255,0.04);
+      }
+      .nav-item.active {
+        color: var(--azure);
+        background: rgba(59, 127, 171, 0.12);
+        border-left-color: var(--azure);
+        font-weight: 600;
+      }
+
+      .content {
+        min-width: 0;
+        padding: 28px 36px 80px;
+      }
+      .doc-page[hidden] { display: none !important; }
+      .crumb {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 18px;
+        color: var(--ink-fade);
+        font-size: 12.5px;
+      }
+      .crumb-left { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .crumb strong { color: var(--ink-soft); font-weight: 550; }
+      h1 {
+        margin: 0 0 14px;
+        font-size: clamp(28px, 3.6vw, 40px);
+        line-height: 1.12;
+        letter-spacing: -0.03em;
+        font-weight: 650;
+      }
+      .lede {
+        margin: 0 0 28px;
+        max-width: 62ch;
+        font-size: 16.5px;
+        line-height: 1.6;
+        color: var(--ink-soft);
+      }
+      .doc-page h2 {
+        margin: 36px 0 12px;
+        font-size: 22px;
+        letter-spacing: -0.02em;
+        font-weight: 650;
+        scroll-margin-top: 76px;
+      }
+      .doc-page h3 {
+        margin: 22px 0 8px;
+        font-size: 16px;
+        font-weight: 650;
+        color: var(--ink);
+        scroll-margin-top: 76px;
+      }
+      .doc-page p {
+        margin: 0 0 14px;
+        max-width: 68ch;
+        color: var(--ink-soft);
+        font-size: 15px;
+        line-height: 1.65;
+      }
+      .doc-page ul, .doc-page ol {
+        margin: 0 0 16px;
+        padding-left: 1.2em;
+        max-width: 68ch;
+        color: var(--ink-soft);
+        font-size: 15px;
+      }
+      .doc-page li { margin: 0 0 8px; }
+      .callout {
+        margin: 18px 0 22px;
+        padding: 14px 16px;
+        border-radius: 12px;
+        border: 1px solid rgba(59,127,171,0.28);
+        background: rgba(59,127,171,0.1);
+        color: var(--ink-soft);
+        font-size: 14px;
+        max-width: 68ch;
+      }
+      .callout strong { color: var(--ink); }
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin: 16px 0 22px;
+        max-width: 760px;
+      }
+      .card {
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.03);
+        border-radius: 14px;
+        padding: 16px;
+      }
+      .card h3 { margin: 0 0 8px; font-size: 15px; }
+      .card p { margin: 0; font-size: 13.5px; }
+      .steps {
+        counter-reset: step;
+        list-style: none;
+        padding: 0;
+        margin: 0 0 18px;
+        max-width: 68ch;
+      }
+      .steps li {
+        counter-increment: step;
+        position: relative;
+        padding: 12px 12px 12px 44px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(255,255,255,0.02);
+        margin-bottom: 10px;
+      }
+      .steps li::before {
+        content: counter(step);
+        position: absolute;
+        left: 12px;
+        top: 12px;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font-size: 12px;
+        font-weight: 700;
+        background: rgba(255,255,255,0.08);
+        color: var(--ink);
+      }
+      .table-wrap {
+        overflow: auto;
+        margin: 12px 0 20px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        max-width: 760px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13.5px;
+      }
+      th, td {
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+        color: var(--ink-soft);
+      }
+      th {
+        color: var(--ink);
+        font-weight: 600;
+        background: rgba(255,255,255,0.03);
+      }
+      tr:last-child td { border-bottom: 0; }
+      .inline-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 18px 0 8px;
+      }
+
+      /* right TOC */
+      .toc {
+        position: sticky;
+        top: var(--nav-h);
+        height: calc(100vh - var(--nav-h));
+        overflow: auto;
+        border-left: 1px solid var(--line);
+        padding: 22px 14px 28px 16px;
+      }
+      .toc-title {
+        font-size: 11px;
+        font-weight: 650;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--ink-fade);
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        font-size: 12.5px;
+        color: var(--ink-fade);
+        padding: 6px 0 6px 10px;
+        border-left: 2px solid transparent;
+        line-height: 1.35;
+      }
+      .toc a:hover { color: var(--ink-soft); }
+      .toc a.active {
+        color: var(--azure);
+        border-left-color: var(--azure);
+      }
+
+      .mobile-bar {
+        display: none;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+
+      @media (max-width: 1100px) {
+        .shell { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
+        .toc { display: none; }
+      }
+      @media (max-width: 860px) {
+        .shell { grid-template-columns: 1fr; }
+        .sidebar {
+          position: relative;
+          top: 0;
+          height: auto;
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+          padding-bottom: 10px;
+        }
+        .content { padding: 20px 16px 64px; }
+        .grid-2 { grid-template-columns: 1fr; }
+        .top-links a:not(.active) { display: none; }
+        .mobile-bar { display: flex; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topnav">
+      <div class="topnav-inner">
+        <a class="brand" href="./index.html">
+          <span class="mark" aria-hidden="true"></span>
+          <span>Peer Agent</span>
+        </a>
+        <nav class="top-links" aria-label="Primary">
+          <a class="active" href="./docs.html" data-i18n="nav.docs">Docs</a>
+          <a href="./changelog.html" data-i18n="nav.changelog">Changelog</a>
+          <a href="https://github.com/yinLiangDream/Peer-Agent" target="_blank" rel="noreferrer" data-i18n="nav.github">GitHub</a>
+        </nav>
+        <div class="top-actions">
+          <div class="lang lang-toggle" role="group" aria-label="Language">
+            <button type="button" id="lang-en" data-lang="en" aria-pressed="true">EN</button>
+            <button type="button" id="lang-zh" data-lang="zh" aria-pressed="false">中文</button>
+          </div>
+          <a class="btn btn-primary" href="./index.html#get" data-i18n="nav.download">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <div class="shell">
+      <aside class="sidebar" id="sidebar"></aside>
+
+      <main class="content">
+        <div class="mobile-bar">
+          <button class="btn btn-ghost" type="button" id="prev-btn" data-i18n="nav.prev">Previous</button>
+          <button class="btn btn-ghost" type="button" id="next-btn" data-i18n="nav.next">Next</button>
+        </div>
+
+        <!-- pages -->
+        <article class="doc-page" id="page-welcome" data-page="welcome">
+          <div class="crumb">
+            <div class="crumb-left">
+              <span data-i18n="group.getStarted">Get started</span>
+              <span>/</span>
+              <strong data-i18n="nav.welcome">Welcome</strong>
+            </div>
+            <button class="btn btn-ghost" type="button" id="copy-page" data-i18n="action.copy">Copy page</button>
+          </div>
+          <h1 data-i18n="welcome.title">Welcome to Peer Agent</h1>
+          <p class="lede" data-i18n="welcome.lede">
+            Local hands for your AI. Peer Agent is a privacy-first desktop and CLI agent platform:
+            every capability is authorized, executed on your machine, and left as Evidence you can audit.
+          </p>
+
+          <h2 id="welcome-core" data-i18n="welcome.coreTitle">Core idea</h2>
+          <p data-i18n="welcome.coreBody">
+            Peer Agent follows one chain: Capability Provider → Manifest → Runtime Projection →
+            Tool Call → PermissionGrant → Evidence. The cloud can reason; local owns capability.
+          </p>
+          <div class="grid-2">
+            <div class="card">
+              <h3 data-i18n="welcome.cardDesktopTitle">Desktop</h3>
+              <p data-i18n="welcome.cardDesktopBody">A governable workbench for Thread, Workbench, and visual Evidence.</p>
+            </div>
+            <div class="card">
+              <h3 data-i18n="welcome.cardCliTitle">CLI · peer</h3>
+              <p data-i18n="welcome.cardCliBody">First-class terminal entry. No Desktop required. Same local Runtime.</p>
+            </div>
+          </div>
+
+          <h2 id="welcome-principles" data-i18n="welcome.principlesTitle">Principles</h2>
+          <ul>
+            <li data-i18n="welcome.p1"><strong>Local-first</strong> — keys, files, and execution stay on your machine.</li>
+            <li data-i18n="welcome.p2"><strong>Permission-gated</strong> — capabilities run only after explicit grants.</li>
+            <li data-i18n="welcome.p3"><strong>Evidence-backed</strong> — tool results return structured artifacts you can inspect.</li>
+          </ul>
+
+          <h2 id="welcome-quick" data-i18n="welcome.quickTitle">Quick start</h2>
+          <ol class="steps">
+            <li data-i18n="welcome.s1">Install Desktop from Releases, or install CLI with <code>npm install -g @peer-agent/cli</code>.</li>
+            <li data-i18n="welcome.s2">Open Peer Agent and configure a model provider.</li>
+            <li data-i18n="welcome.s3">Start a task. Approve capabilities when asked. Review Evidence after runs.</li>
+          </ol>
+          <div class="inline-actions">
+            <a class="btn btn-primary" href="#install" data-page-link="install" data-i18n="welcome.ctaInstall">Install</a>
+            <a class="btn btn-ghost" href="#desktop" data-page-link="desktop" data-i18n="welcome.ctaDesktop">Desktop guide</a>
+            <a class="btn btn-ghost" href="#cli" data-page-link="cli" data-i18n="welcome.ctaCli">CLI guide</a>
+          </div>
+        </article>
+
+        <article class="doc-page" id="page-install" data-page="install" hidden>
+          <div class="crumb">
+            <div class="crumb-left">
+              <span data-i18n="group.getStarted">Get started</span><span>/</span>
+              <strong data-i18n="nav.install">Install</strong>
+            </div>
+          </div>
+          <h1 data-i18n="install.title">Install</h1>
+          <p class="lede" data-i18n="install.lede">
+            Choose Desktop for a visual workbench, or CLI for terminal / headless use. Both share
+            <code>~/.peer-agent</code>.
+          </p>
+
+          <h2 id="install-desktop" data-i18n="install.desktopTitle">Desktop</h2>
+          <p data-i18n="install.desktopBody">
+            Download the latest macOS or Windows build from GitHub Releases and install like a normal app.
+          </p>
+          <div class="inline-actions">
+            <a class="btn btn-primary" href="https://github.com/yinLiangDream/Peer-Agent/releases" target="_blank" rel="noreferrer">Releases</a>
+          </div>
+
+          <h2 id="install-cli" data-i18n="install.cliTitle">CLI only</h2>
+          <p data-i18n="install.cliBody">
+            Requires Node.js 20+. The npm package downloads platform binaries from the matching Release tag.
+          </p>
+          <pre><code>npm install -g @peer-agent/cli
+peer --version
+peer</code></pre>
+          <div class="callout" data-i18n="install.cliNote">
+            <strong>Note:</strong> keep <code>peer</code> and <code>peer-credential-helper</code> together when using archive installs.
+          </div>
+
+          <h2 id="install-source" data-i18n="install.sourceTitle">From source</h2>
+          <pre><code>git clone https://github.com/yinLiangDream/Peer-Agent.git
+cd Peer-Agent
+pnpm install
+pnpm --filter @peer-agent/desktop dev</code></pre>
+        </article>
+
+        <article class="doc-page" id="page-desktop" data-page="desktop" hidden>
+          <div class="crumb">
+            <div class="crumb-left">
+              <span data-i18n="group.getStarted">Get started</span><span>/</span>
+              <strong data-i18n="nav.desktop">Desktop</strong>
+            </div>
+          </div>
+          <h1 data-i18n="desktop.title">Desktop workbench</h1>
+          <p class="lede" data-i18n="desktop.lede">
+            Desktop is the visual shell: Executive Thread in the center, workspace sidebar on the left,
+            Workbench and Evidence when you need deeper inspection.
+          </p>
+          <h2 id="desktop-layout" data-i18n="desktop.layoutTitle">Layout</h2>
+          <ul>
+            <li data-i18n="desktop.l1"><strong>Sidebar</strong> — workspace, new task, conversation list.</li>
+            <li data-i18n="desktop.l2"><strong>Thread</strong> — decision and execution stream, not an IM wall.</li>
+            <li data-i18n="desktop.l3"><strong>Composer</strong> — mode, access, model chips; send tasks from here.</li>
+            <li data-i18n="desktop.l4"><strong>Evidence</strong> — expandable tool traces and artifacts after actions.</li>
+          </ul>
+          <h2 id="desktop-first" data-i18n="desktop.firstTitle">First run</h2>
+          <ol class="steps">
+            <li data-i18n="desktop.s1">Open Peer Agent and pick or create a workspace.</li>
+            <li data-i18n="desktop.s2">Configure a model in Settings if none is available.</li>
+            <li data-i18n="desktop.s3">Start with a small local task (read a file, summarize git status).</li>
+            <li data-i18n="desktop.s4">When a permission prompt appears, grant only what you need.</li>
+          </ol>
+        </article>
+
+        <article class="doc-page" id="page-cli" data-page="cli" hidden>
+          <div class="crumb">
+            <div class="crumb-left">
+              <span data-i18n="group.getStarted">Get started</span><span>/</span>
+              <strong data-i18n="nav.cli">CLI</strong>
+            </div>
+          </div>
+          <h1 data-i18n="cli.title">CLI · peer</h1>
+          <p class="lede" data-i18n="cli.lede">
+            <code>peer</code> is a first-class TUI entry. It uses the same local Runtime, settings,
+            conversations, and credentials as Desktop under <code>~/.peer-agent</code>.
+          </p>
+          <h2 id="cli-start" data-i18n="cli.startTitle">Start</h2>
+          <pre><code>peer
+peer --version</code></pre>
+          <h2 id="cli-status" data-i18n="cli.statusTitle">Status bar</h2>
+          <p data-i18n="cli.statusBody">
+            The TUI status row typically surfaces mode, access policy, model, effort, and context usage —
+            so terminal sessions stay as governable as the GUI.
+          </p>
+          <h2 id="cli-commands" data-i18n="cli.commandsTitle">Slash commands</h2>
+          <p data-i18n="cli.commandsBody">
+            Type <code>/</code> in the composer for commands (model, mode, MCP, goals, and more as they ship).
+            Use Tab for completion where available.
+          </p>
+          <div class="callout" data-i18n="cli.shared">
+            <strong>Shared Runtime:</strong> start in terminal, continue later in Desktop — same local state.
+          </div>
+        </article>
+
+        <article class="doc-page" id="page-model" data-page="model" hidden>
+          <div class="crumb">
+            <div class="crumb-left">
+              <span data-i18n="group.getStarted">Get started</span><span>/</span>
+              <strong data-i18n="nav.model">Connect a model</strong>
+            </div>
+          </div>
+          <h1 data-i18n="model.title">Connect a model</h1>
+          <p class="lede" data-i18n="model.lede">
+            Peer Agent is model-provider flexible. Configure credentials locally; keys stay in your machine-side storage path.
+          </p>
+          <h2 id="model-desktop" data-i18n="model.desktopTitle">In Desktop</h2>
+          <ol class="steps">
+            <li data-i18n="model.s1">Open Settings → Models / Providers.</li>
+            <li data-i18n="model.s2">Add a provider and paste the API key or local endpoint.</li>
+            <li data-i18n="model.s3">Select a default model for new threads.</li>
+          </ol>
+          <h2 id="model-cli" data-i18n="model.cliTitle">In CLI</h2>
+          <p data-i18n="model.cliBody">
+            Use the TUI model command / settings path once installed. Configuration is shared with Desktop via
+            <code>~/.peer-agent</code>.
+          </p>
+        </article>
+
+        <article class="doc-page" id="page-runtime" data-page="runtime" hidden>
+          <div class="crumb">
+            <div class="crumb-left">
+              <span data-i18n="group.concepts">Concepts</span><span>/</span>
+              <strong data-i18n="nav.runtime">Local Runtime</strong>
+            </div>
+          </div>
+          <h1 data-i18n="runtime.title">Local Runtime</h1>
+          <p class="lede" data-i18n="runtime.lede">
+            The local Runtime is the product spine. Shells (Desktop / CLI) are presentations;
+            capability truth lives locally.
+          </p>
+          <h2 id="runtime-chain" data-i18n="runtime.chainTitle">Capability chain</h2>
+          <pre><code>Capability Provider
+  → Manifest
+    → Runtime Projection
+      → Tool Call
+        → PermissionGrant
+          → Evidence</code></pre>
+          <h2 id="runtime-home" data-i18n="runtime.homeTitle">Data home</h2>
+          <p data-i18n="runtime.homeBody">
+            Shared local state lives under <code>~/.peer-agent</code> — settings, conversations, credentials, and runtime artifacts.
+          </p>
+        </article>
+
+        <article class="doc-page" id="page-permissions" data-page="permissions" hidden>
+          <div class="crumb">
+            <div class="crumb-left">
+              <span data-i18n="group.concepts">Concepts</span><span>/</span>
+              <strong data-i18n="nav.permissions">Permissions</strong>
+            </div>
+          </div>
+          <h1 data-i18n="perm.title">Permissions</h1>
+          <p class="lede" data-i18n="perm.lede">
+            Peer Agent does not treat prompt text as authorization. Capabilities need PermissionGrant
+            before local execution.
+          </p>
+          <h2 id="perm-ask" data-i18n="perm.askTitle">Ask first</h2>
+          <p data-i18n="perm.askBody">
+            Default posture is cautious: sensitive tools (filesystem writes, shell, network-ish actions)
+            should surface a clear approval path.
+          </p>
+          <h2 id="perm-scope" data-i18n="perm.scopeTitle">Scope</h2>
+          <p data-i18n="perm.scopeBody">
+            Prefer workspace-scoped access over machine-wide access. Grant the smallest capability that completes the task.
+          </p>
+        </article>
+
+        <article class="doc-page" id="page-evidence" data-page="evidence" hidden>
+          <div class="crumb">
+            <div class="crumb-left">
+              <span data-i18n="group.concepts">Concepts</span><span>/</span>
+              <strong data-i18n="nav.evidence">Evidence</strong>
+            </div>
+          </div>
+          <h1 data-i18n="evidence.title">Evidence</h1>
+          <p class="lede" data-i18n="evidence.lede">
+            Evidence is the audit surface. When the agent reads a file, runs a command, or calls a tool,
+            you should be able to expand what happened — not just trust a chat summary.
+          </p>
+          <h2 id="evidence-what" data-i18n="evidence.whatTitle">What you get</h2>
+          <ul>
+            <li data-i18n="evidence.w1">Tool identity and authorization state</li>
+            <li data-i18n="evidence.w2">Structured result metadata</li>
+            <li data-i18n="evidence.w3">Artifact references for larger outputs</li>
+          </ul>
+          <h2 id="evidence-why" data-i18n="evidence.whyTitle">Why it matters</h2>
+          <p data-i18n="evidence.whyBody">
+            Local agents are powerful. Evidence keeps model intent, local execution, and user authorization separate and reviewable.
+          </p>
+        </article>
+
+        <article class="doc-page" id="page-capabilities" data-page="capabilities" hidden>
+          <div class="crumb">
+            <div class="crumb-left">
+              <span data-i18n="group.capabilities">Capabilities</span><span>/</span>
+              <strong data-i18n="nav.capabilities">Overview</strong>
+            </div>
+          </div>
+          <h1 data-i18n="cap.title">Capabilities overview</h1>
+          <p class="lede" data-i18n="cap.lede">
+            Capabilities are declared, projected to the model as tools, then executed only after grants.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th data-i18n="cap.thArea">Area</th>
+                  <th data-i18n="cap.thExamples">Examples</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td data-i18n="cap.r1a">Files</td>
+                  <td data-i18n="cap.r1b">Read, search, edit workspace files</td>
+                </tr>
+                <tr>
+                  <td data-i18n="cap.r2a">Shell</td>
+                  <td data-i18n="cap.r2b">Run local commands under policy</td>
+                </tr>
+                <tr>
+                  <td data-i18n="cap.r3a">MCP</td>
+                  <td data-i18n="cap.r3b">Install and call MCP servers from local registry</td>
+                </tr>
+                <tr>
+                  <td data-i18n="cap.r4a">App automation</td>
+                  <td data-i18n="cap.r4b">Desktop-side automation paths as they ship</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="doc-page" id="page-mcp" data-page="mcp" hidden>
+          <div class="crumb">
+            <div class="crumb-left">
+              <span data-i18n="group.capabilities">Capabilities</span><span>/</span>
+              <strong data-i18n="nav.mcp">MCP</strong>
+            </div>
+          </div>
+          <h1 data-i18n="mcp.title">MCP servers</h1>
+          <p class="lede" data-i18n="mcp.lede">
+            Peer Agent can load MCP servers from a local registry. Disabled servers stay installed but not projected as tools until enabled.
+          </p>
+          <h2 id="mcp-flow" data-i18n="mcp.flowTitle">Typical flow</h2>
+          <ol class="steps">
+            <li data-i18n="mcp.s1">Install or register an MCP server locally.</li>
+            <li data-i18n="mcp.s2">Enable it in the registry / settings UI or CLI path.</li>
+            <li data-i18n="mcp.s3">Re-sync tools so the model can call them under permission rules.</li>
+          </ol>
+        </article>
+
+        <article class="doc-page" id="page-faq" data-page="faq" hidden>
+          <div class="crumb">
+            <div class="crumb-left">
+              <span data-i18n="group.help">Help</span><span>/</span>
+              <strong data-i18n="nav.faq">FAQ</strong>
+            </div>
+          </div>
+          <h1 data-i18n="faq.title">FAQ</h1>
+          <h2 id="faq-cloud" data-i18n="faq.q1">Does Peer Agent upload my files to the cloud?</h2>
+          <p data-i18n="faq.a1">
+            Capability execution is local. Model providers only receive what the agent deliberately sends in prompts/tool payloads — review permissions and Evidence.
+          </p>
+          <h2 id="faq-cli-desktop" data-i18n="faq.q2">Do CLI and Desktop share history?</h2>
+          <p data-i18n="faq.a2">
+            Yes. Both use the same local Runtime home under <code>~/.peer-agent</code>.
+          </p>
+          <h2 id="faq-windows" data-i18n="faq.q3">Is Windows supported?</h2>
+          <p data-i18n="faq.a3">
+            Desktop targets macOS and Windows builds via Releases. CLI multi-arch coverage expands as binaries ship on the same release tags.
+          </p>
+          <h2 id="faq-support" data-i18n="faq.q4">Where do I report issues?</h2>
+          <p data-i18n="faq.a4">
+            Use GitHub Issues on the Peer-Agent repository.
+          </p>
+          <div class="inline-actions">
+            <a class="btn btn-ghost" href="https://github.com/yinLiangDream/Peer-Agent/issues" target="_blank" rel="noreferrer">Issues</a>
+            <a class="btn btn-ghost" href="./changelog.html" data-i18n="faq.changelog">Changelog</a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="toc" id="toc" aria-label="On this page">
+        <div class="toc-title" data-i18n="toc.title">On this page</div>
+        <div id="toc-links"></div>
+      </aside>
+    </div>
+
+    <script>
+      (function () {
+        var STORAGE_KEY = "peer-landing-lang";
+
+        var NAV = [
+          {
+            groupKey: "group.getStarted",
+            items: [
+              { id: "welcome", labelKey: "nav.welcome" },
+              { id: "install", labelKey: "nav.install" },
+              { id: "desktop", labelKey: "nav.desktop" },
+              { id: "cli", labelKey: "nav.cli" },
+              { id: "model", labelKey: "nav.model" }
+            ]
+          },
+          {
+            groupKey: "group.concepts",
+            items: [
+              { id: "runtime", labelKey: "nav.runtime" },
+              { id: "permissions", labelKey: "nav.permissions" },
+              { id: "evidence", labelKey: "nav.evidence" }
+            ]
+          },
+          {
+            groupKey: "group.capabilities",
+            items: [
+              { id: "capabilities", labelKey: "nav.capabilities" },
+              { id: "mcp", labelKey: "nav.mcp" }
+            ]
+          },
+          {
+            groupKey: "group.help",
+            items: [{ id: "faq", labelKey: "nav.faq" }]
+          }
+        ];
+
+        var PAGE_ORDER = NAV.flatMap(function (g) { return g.items.map(function (i) { return i.id; }); });
+
+        var ui = {
+          en: {
+            "nav.docs": "Docs",
+            "nav.changelog": "Changelog",
+            "nav.github": "GitHub",
+            "nav.download": "Download",
+            "nav.prev": "Previous",
+            "nav.next": "Next",
+            "nav.welcome": "Welcome",
+            "nav.install": "Install",
+            "nav.desktop": "Desktop",
+            "nav.cli": "CLI",
+            "nav.model": "Connect a model",
+            "nav.runtime": "Local Runtime",
+            "nav.permissions": "Permissions",
+            "nav.evidence": "Evidence",
+            "nav.capabilities": "Overview",
+            "nav.mcp": "MCP",
+            "nav.faq": "FAQ",
+            "group.getStarted": "Get started",
+            "group.concepts": "Concepts",
+            "group.capabilities": "Capabilities",
+            "group.help": "Help",
+            "toc.title": "On this page",
+            "action.copy": "Copy page",
+            "action.copied": "Copied",
+            "welcome.title": "Welcome to Peer Agent",
+            "welcome.lede": "Local hands for your AI. Peer Agent is a privacy-first desktop and CLI agent platform: every capability is authorized, executed on your machine, and left as Evidence you can audit.",
+            "welcome.coreTitle": "Core idea",
+            "welcome.coreBody": "Peer Agent follows one chain: Capability Provider → Manifest → Runtime Projection → Tool Call → PermissionGrant → Evidence. The cloud can reason; local owns capability.",
+            "welcome.cardDesktopTitle": "Desktop",
+            "welcome.cardDesktopBody": "A governable workbench for Thread, Workbench, and visual Evidence.",
+            "welcome.cardCliTitle": "CLI · peer",
+            "welcome.cardCliBody": "First-class terminal entry. No Desktop required. Same local Runtime.",
+            "welcome.principlesTitle": "Principles",
+            "welcome.p1": "Local-first — keys, files, and execution stay on your machine.",
+            "welcome.p2": "Permission-gated — capabilities run only after explicit grants.",
+            "welcome.p3": "Evidence-backed — tool results return structured artifacts you can inspect.",
+            "welcome.quickTitle": "Quick start",
+            "welcome.s1": "Install Desktop from Releases, or install CLI with npm install -g @peer-agent/cli.",
+            "welcome.s2": "Open Peer Agent and configure a model provider.",
+            "welcome.s3": "Start a task. Approve capabilities when asked. Review Evidence after runs.",
+            "welcome.ctaInstall": "Install",
+            "welcome.ctaDesktop": "Desktop guide",
+            "welcome.ctaCli": "CLI guide",
+            "install.title": "Install",
+            "install.lede": "Choose Desktop for a visual workbench, or CLI for terminal / headless use. Both share ~/.peer-agent.",
+            "install.desktopTitle": "Desktop",
+            "install.desktopBody": "Download the latest macOS or Windows build from GitHub Releases and install like a normal app.",
+            "install.cliTitle": "CLI only",
+            "install.cliBody": "Requires Node.js 20+. The npm package downloads platform binaries from the matching Release tag.",
+            "install.cliNote": "Note: keep peer and peer-credential-helper together when using archive installs.",
+            "install.sourceTitle": "From source",
+            "desktop.title": "Desktop workbench",
+            "desktop.lede": "Desktop is the visual shell: Executive Thread in the center, workspace sidebar on the left, Workbench and Evidence when you need deeper inspection.",
+            "desktop.layoutTitle": "Layout",
+            "desktop.l1": "Sidebar — workspace, new task, conversation list.",
+            "desktop.l2": "Thread — decision and execution stream, not an IM wall.",
+            "desktop.l3": "Composer — mode, access, model chips; send tasks from here.",
+            "desktop.l4": "Evidence — expandable tool traces and artifacts after actions.",
+            "desktop.firstTitle": "First run",
+            "desktop.s1": "Open Peer Agent and pick or create a workspace.",
+            "desktop.s2": "Configure a model in Settings if none is available.",
+            "desktop.s3": "Start with a small local task (read a file, summarize git status).",
+            "desktop.s4": "When a permission prompt appears, grant only what you need.",
+            "cli.title": "CLI · peer",
+            "cli.lede": "peer is a first-class TUI entry. It uses the same local Runtime, settings, conversations, and credentials as Desktop under ~/.peer-agent.",
+            "cli.startTitle": "Start",
+            "cli.statusTitle": "Status bar",
+            "cli.statusBody": "The TUI status row typically surfaces mode, access policy, model, effort, and context usage — so terminal sessions stay as governable as the GUI.",
+            "cli.commandsTitle": "Slash commands",
+            "cli.commandsBody": "Type / in the composer for commands (model, mode, MCP, goals, and more as they ship). Use Tab for completion where available.",
+            "cli.shared": "Shared Runtime: start in terminal, continue later in Desktop — same local state.",
+            "model.title": "Connect a model",
+            "model.lede": "Peer Agent is model-provider flexible. Configure credentials locally; keys stay in your machine-side storage path.",
+            "model.desktopTitle": "In Desktop",
+            "model.s1": "Open Settings → Models / Providers.",
+            "model.s2": "Add a provider and paste the API key or local endpoint.",
+            "model.s3": "Select a default model for new threads.",
+            "model.cliTitle": "In CLI",
+            "model.cliBody": "Use the TUI model command / settings path once installed. Configuration is shared with Desktop via ~/.peer-agent.",
+            "runtime.title": "Local Runtime",
+            "runtime.lede": "The local Runtime is the product spine. Shells (Desktop / CLI) are presentations; capability truth lives locally.",
+            "runtime.chainTitle": "Capability chain",
+            "runtime.homeTitle": "Data home",
+            "runtime.homeBody": "Shared local state lives under ~/.peer-agent — settings, conversations, credentials, and runtime artifacts.",
+            "perm.title": "Permissions",
+            "perm.lede": "Peer Agent does not treat prompt text as authorization. Capabilities need PermissionGrant before local execution.",
+            "perm.askTitle": "Ask first",
+            "perm.askBody": "Default posture is cautious: sensitive tools (filesystem writes, shell, network-ish actions) should surface a clear approval path.",
+            "perm.scopeTitle": "Scope",
+            "perm.scopeBody": "Prefer workspace-scoped access over machine-wide access. Grant the smallest capability that completes the task.",
+            "evidence.title": "Evidence",
+            "evidence.lede": "Evidence is the audit surface. When the agent reads a file, runs a command, or calls a tool, you should be able to expand what happened — not just trust a chat summary.",
+            "evidence.whatTitle": "What you get",
+            "evidence.w1": "Tool identity and authorization state",
+            "evidence.w2": "Structured result metadata",
+            "evidence.w3": "Artifact references for larger outputs",
+            "evidence.whyTitle": "Why it matters",
+            "evidence.whyBody": "Local agents are powerful. Evidence keeps model intent, local execution, and user authorization separate and reviewable.",
+            "cap.title": "Capabilities overview",
+            "cap.lede": "Capabilities are declared, projected to the model as tools, then executed only after grants.",
+            "cap.thArea": "Area",
+            "cap.thExamples": "Examples",
+            "cap.r1a": "Files",
+            "cap.r1b": "Read, search, edit workspace files",
+            "cap.r2a": "Shell",
+            "cap.r2b": "Run local commands under policy",
+            "cap.r3a": "MCP",
+            "cap.r3b": "Install and call MCP servers from local registry",
+            "cap.r4a": "App automation",
+            "cap.r4b": "Desktop-side automation paths as they ship",
+            "mcp.title": "MCP servers",
+            "mcp.lede": "Peer Agent can load MCP servers from a local registry. Disabled servers stay installed but not projected as tools until enabled.",
+            "mcp.flowTitle": "Typical flow",
+            "mcp.s1": "Install or register an MCP server locally.",
+            "mcp.s2": "Enable it in the registry / settings UI or CLI path.",
+            "mcp.s3": "Re-sync tools so the model can call them under permission rules.",
+            "faq.title": "FAQ",
+            "faq.q1": "Does Peer Agent upload my files to the cloud?",
+            "faq.a1": "Capability execution is local. Model providers only receive what the agent deliberately sends in prompts/tool payloads — review permissions and Evidence.",
+            "faq.q2": "Do CLI and Desktop share history?",
+            "faq.a2": "Yes. Both use the same local Runtime home under ~/.peer-agent.",
+            "faq.q3": "Is Windows supported?",
+            "faq.a3": "Desktop targets macOS and Windows builds via Releases. CLI multi-arch coverage expands as binaries ship on the same release tags.",
+            "faq.q4": "Where do I report issues?",
+            "faq.a4": "Use GitHub Issues on the Peer-Agent repository.",
+            "faq.changelog": "Changelog",
+            documentTitle: "Peer Agent — Docs"
+          },
+          zh: {
+            "nav.docs": "文档",
+            "nav.changelog": "更新日志",
+            "nav.github": "GitHub",
+            "nav.download": "下载",
+            "nav.prev": "上一页",
+            "nav.next": "下一页",
+            "nav.welcome": "欢迎",
+            "nav.install": "安装",
+            "nav.desktop": "Desktop",
+            "nav.cli": "CLI",
+            "nav.model": "连接模型",
+            "nav.runtime": "本地 Runtime",
+            "nav.permissions": "权限",
+            "nav.evidence": "Evidence",
+            "nav.capabilities": "能力总览",
+            "nav.mcp": "MCP",
+            "nav.faq": "常见问题",
+            "group.getStarted": "开始使用",
+            "group.concepts": "核心概念",
+            "group.capabilities": "能力",
+            "group.help": "帮助",
+            "toc.title": "本页目录",
+            "action.copy": "复制全文",
+            "action.copied": "已复制",
+            "welcome.title": "欢迎使用 Peer Agent",
+            "welcome.lede": "你的 AI，本地双手。Peer Agent 是隐私优先的 Desktop + CLI Agent 平台：每一项能力都需授权、在本机执行，并以 Evidence 留下可审计痕迹。",
+            "welcome.coreTitle": "核心理念",
+            "welcome.coreBody": "Peer Agent 遵循同一条链：Capability Provider → Manifest → Runtime Projection → Tool Call → PermissionGrant → Evidence。云端可负责认知，本地负责能力。",
+            "welcome.cardDesktopTitle": "Desktop",
+            "welcome.cardDesktopBody": "可治理的工作台：Thread、Workbench 与可视化 Evidence。",
+            "welcome.cardCliTitle": "CLI · peer",
+            "welcome.cardCliBody": "一等终端入口。不必装 Desktop。共享同一本地 Runtime。",
+            "welcome.principlesTitle": "原则",
+            "welcome.p1": "本地优先 — 密钥、文件与执行留在本机。",
+            "welcome.p2": "权限门控 — 能力只有在明确授权后才会执行。",
+            "welcome.p3": "证据可回放 — 工具结果以结构化产物形式可检查。",
+            "welcome.quickTitle": "快速开始",
+            "welcome.s1": "从 Releases 安装 Desktop，或用 npm install -g @peer-agent/cli 安装 CLI。",
+            "welcome.s2": "打开 Peer Agent，配置模型提供商。",
+            "welcome.s3": "发起任务；按需批准能力；运行后查看 Evidence。",
+            "welcome.ctaInstall": "安装",
+            "welcome.ctaDesktop": "Desktop 指南",
+            "welcome.ctaCli": "CLI 指南",
+            "install.title": "安装",
+            "install.lede": "需要图形工作台就装 Desktop；终端 / headless 用 CLI。两者共享 ~/.peer-agent。",
+            "install.desktopTitle": "Desktop",
+            "install.desktopBody": "从 GitHub Releases 下载最新 macOS / Windows 构建，按常规应用安装。",
+            "install.cliTitle": "仅 CLI",
+            "install.cliBody": "需要 Node.js 20+。npm 包会从匹配的 Release tag 下载平台二进制。",
+            "install.cliNote": "注意：使用压缩包安装时，保持 peer 与 peer-credential-helper 同目录。",
+            "install.sourceTitle": "从源码运行",
+            "desktop.title": "Desktop 工作台",
+            "desktop.lede": "Desktop 是可视化壳：中间是执行线程，左侧是工作区侧栏，需要时展开 Workbench 与 Evidence。",
+            "desktop.layoutTitle": "布局",
+            "desktop.l1": "侧栏 — 工作区、新建任务、会话列表。",
+            "desktop.l2": "线程 — 决策与执行流，不是 IM 气泡墙。",
+            "desktop.l3": "Composer — mode / access / model；从这里发送任务。",
+            "desktop.l4": "Evidence — 可展开的工具轨迹与产物。",
+            "desktop.firstTitle": "首次使用",
+            "desktop.s1": "打开 Peer Agent，选择或创建工作区。",
+            "desktop.s2": "若无可用模型，在设置中配置。",
+            "desktop.s3": "先用小任务试跑（读文件、总结 git 状态）。",
+            "desktop.s4": "出现权限提示时，只授予完成任务所需的最小能力。",
+            "cli.title": "CLI · peer",
+            "cli.lede": "peer 是一等 TUI 入口。与 Desktop 共享 ~/.peer-agent 下的 Runtime、设置、会话与凭证。",
+            "cli.startTitle": "启动",
+            "cli.statusTitle": "状态栏",
+            "cli.statusBody": "TUI 状态行通常展示 mode、access、model、effort 与上下文用量，让终端会话同样可治理。",
+            "cli.commandsTitle": "斜杠命令",
+            "cli.commandsBody": "在输入框输入 / 打开命令（model、mode、MCP、goal 等）。可用处支持 Tab 补全。",
+            "cli.shared": "共享 Runtime：终端里开始，桌面里继续 — 同一份本地状态。",
+            "model.title": "连接模型",
+            "model.lede": "Peer Agent 支持多模型提供商。凭证配置在本地；密钥留在本机存储路径。",
+            "model.desktopTitle": "在 Desktop 中",
+            "model.s1": "打开 设置 → 模型 / 提供商。",
+            "model.s2": "添加提供商并填入 API Key 或本地 endpoint。",
+            "model.s3": "为新会话选择默认模型。",
+            "model.cliTitle": "在 CLI 中",
+            "model.cliBody": "安装后通过 TUI 的模型命令 / 设置路径配置。配置经 ~/.peer-agent 与 Desktop 共享。",
+            "runtime.title": "本地 Runtime",
+            "runtime.lede": "本地 Runtime 是产品主轴。Desktop / CLI 只是呈现层；能力真相在本地。",
+            "runtime.chainTitle": "能力链",
+            "runtime.homeTitle": "数据目录",
+            "runtime.homeBody": "共享本地状态位于 ~/.peer-agent — 设置、会话、凭证与运行产物。",
+            "perm.title": "权限",
+            "perm.lede": "Peer Agent 不把提示词当授权。能力必须在 PermissionGrant 之后才能本地执行。",
+            "perm.askTitle": "先询问",
+            "perm.askBody": "默认姿态谨慎：敏感工具（写文件、Shell、类网络动作）应给出清晰批准路径。",
+            "perm.scopeTitle": "作用域",
+            "perm.scopeBody": "优先工作区范围，而不是整机范围。只授予完成任务所需的最小能力。",
+            "evidence.title": "Evidence",
+            "evidence.lede": "Evidence 是审计面。当 Agent 读文件、跑命令或调用工具时，你应能展开发生了什么 — 而不只是相信聊天摘要。",
+            "evidence.whatTitle": "你会看到什么",
+            "evidence.w1": "工具身份与授权状态",
+            "evidence.w2": "结构化结果元数据",
+            "evidence.w3": "较大输出的产物引用",
+            "evidence.whyTitle": "为什么重要",
+            "evidence.whyBody": "本地 Agent 很强。Evidence 让模型意图、本地执行与用户授权保持分离且可复查。",
+            "cap.title": "能力总览",
+            "cap.lede": "能力先声明，再投影为模型工具，并在授权后执行。",
+            "cap.thArea": "领域",
+            "cap.thExamples": "示例",
+            "cap.r1a": "文件",
+            "cap.r1b": "读取、搜索、编辑工作区文件",
+            "cap.r2a": "Shell",
+            "cap.r2b": "在策略下运行本地命令",
+            "cap.r3a": "MCP",
+            "cap.r3b": "从本地 registry 安装并调用 MCP 服务",
+            "cap.r4a": "应用自动化",
+            "cap.r4b": "桌面侧自动化能力（随版本推进）",
+            "mcp.title": "MCP 服务器",
+            "mcp.lede": "Peer Agent 可从本地 registry 加载 MCP。禁用的服务仍可安装，但在启用前不会投影为工具。",
+            "mcp.flowTitle": "典型流程",
+            "mcp.s1": "在本地安装或注册 MCP 服务。",
+            "mcp.s2": "在 registry / 设置 UI 或 CLI 路径中启用。",
+            "mcp.s3": "重新同步工具，使模型可在权限规则下调用。",
+            "faq.title": "常见问题",
+            "faq.q1": "Peer Agent 会把我的文件上传到云端吗？",
+            "faq.a1": "能力执行在本地。模型提供商只会收到 Agent 有意放进提示/工具载荷的内容 — 请检查权限与 Evidence。",
+            "faq.q2": "CLI 和 Desktop 共享历史吗？",
+            "faq.a2": "会。两者共用 ~/.peer-agent 下的本地 Runtime 主目录。",
+            "faq.q3": "支持 Windows 吗？",
+            "faq.a3": "Desktop 通过 Releases 提供 macOS 与 Windows 构建。CLI 多架构覆盖随同 tag 二进制推进。",
+            "faq.q4": "在哪里反馈问题？",
+            "faq.a4": "请到 Peer-Agent 仓库的 GitHub Issues。",
+            "faq.changelog": "更新日志",
+            documentTitle: "Peer Agent — 文档"
+          }
+        };
+
+        var activePage = "welcome";
+        var activeLang = "en";
+
+        function detectLang() {
+          try {
+            var saved = localStorage.getItem(STORAGE_KEY);
+            if (saved === "en" || saved === "zh") return saved;
+          } catch (e) {}
+          var nav = (navigator.languages && navigator.languages[0]) || navigator.language || "en";
+          return String(nav).toLowerCase().startsWith("zh") ? "zh" : "en";
+        }
+
+        function t(key) {
+          var pack = ui[activeLang] || ui.en;
+          return pack[key] != null ? pack[key] : (ui.en[key] != null ? ui.en[key] : key);
+        }
+
+        function applyStaticI18n() {
+          var pack = ui[activeLang] || ui.en;
+          document.documentElement.lang = activeLang === "zh" ? "zh-CN" : "en";
+          document.title = pack.documentTitle;
+          document.querySelectorAll("[data-i18n]").forEach(function (el) {
+            var key = el.getAttribute("data-i18n");
+            if (!key || pack[key] == null) return;
+            el.textContent = pack[key];
+          });
+          var enBtn = document.getElementById("lang-en");
+          var zhBtn = document.getElementById("lang-zh");
+          if (enBtn) enBtn.setAttribute("aria-pressed", activeLang === "en" ? "true" : "false");
+          if (zhBtn) zhBtn.setAttribute("aria-pressed", activeLang === "zh" ? "true" : "false");
+        }
+
+        function renderSidebar() {
+          var root = document.getElementById("sidebar");
+          if (!root) return;
+          root.innerHTML = "";
+          NAV.forEach(function (group) {
+            var g = document.createElement("div");
+            g.className = "nav-group";
+            var title = document.createElement("div");
+            title.className = "nav-group-title";
+            title.textContent = t(group.groupKey);
+            g.appendChild(title);
+            group.items.forEach(function (item) {
+              var btn = document.createElement("button");
+              btn.type = "button";
+              btn.className = "nav-item" + (item.id === activePage ? " active" : "");
+              btn.setAttribute("data-page", item.id);
+              btn.textContent = t(item.labelKey);
+              btn.addEventListener("click", function () {
+                setPage(item.id, true);
+              });
+              g.appendChild(btn);
+            });
+            root.appendChild(g);
+          });
+        }
+
+        function buildToc() {
+          var pageEl = document.querySelector('.doc-page[data-page="' + activePage + '"]');
+          var tocRoot = document.getElementById("toc-links");
+          if (!pageEl || !tocRoot) return;
+          tocRoot.innerHTML = "";
+          var heads = pageEl.querySelectorAll("h2[id], h3[id]");
+          heads.forEach(function (h) {
+            var a = document.createElement("a");
+            a.href = "#" + h.id;
+            a.textContent = h.textContent;
+            if (h.tagName.toLowerCase() === "h3") {
+              a.style.paddingLeft = "18px";
+              a.style.fontSize = "12px";
+            }
+            a.addEventListener("click", function (e) {
+              e.preventDefault();
+              h.scrollIntoView({ behavior: "smooth", block: "start" });
+              history.replaceState(null, "", "#" + activePage + "/" + h.id);
+              setActiveToc(h.id);
+            });
+            tocRoot.appendChild(a);
+          });
+          if (!heads.length) {
+            var empty = document.createElement("div");
+            empty.style.color = "var(--ink-fade)";
+            empty.style.fontSize = "12px";
+            empty.textContent = "—";
+            tocRoot.appendChild(empty);
+          }
+        }
+
+        function setActiveToc(id) {
+          document.querySelectorAll("#toc-links a").forEach(function (a) {
+            a.classList.toggle("active", a.getAttribute("href") === "#" + id);
+          });
+        }
+
+        function setPage(id, push) {
+          if (PAGE_ORDER.indexOf(id) < 0) id = "welcome";
+          activePage = id;
+          document.querySelectorAll(".doc-page").forEach(function (el) {
+            el.hidden = el.getAttribute("data-page") !== id;
+          });
+          renderSidebar();
+          buildToc();
+          window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
+          if (push) {
+            history.pushState({ page: id }, "", "#" + id);
+          } else {
+            var hash = location.hash.replace(/^#/, "");
+            if (!hash || hash.split("/")[0] !== id) {
+              history.replaceState({ page: id }, "", "#" + id);
+            }
+          }
+          // deep link heading
+          var parts = (location.hash || "").replace(/^#/, "").split("/");
+          if (parts[1]) {
+            var el = document.getElementById(parts[1]);
+            if (el) {
+              setTimeout(function () {
+                el.scrollIntoView({ behavior: "smooth", block: "start" });
+                setActiveToc(parts[1]);
+              }, 30);
+            }
+          }
+        }
+
+        function parseHash() {
+          var raw = (location.hash || "").replace(/^#/, "");
+          if (!raw) return { page: "welcome", heading: null };
+          var parts = raw.split("/");
+          return { page: parts[0] || "welcome", heading: parts[1] || null };
+        }
+
+        function setLang(lang, persist) {
+          activeLang = lang === "zh" ? "zh" : "en";
+          applyStaticI18n();
+          renderSidebar();
+          buildToc();
+          if (persist) {
+            try { localStorage.setItem(STORAGE_KEY, activeLang); } catch (e) {}
+          }
+        }
+
+        // copy page text
+        var copyBtn = document.getElementById("copy-page");
+        if (copyBtn) {
+          copyBtn.addEventListener("click", function () {
+            var pageEl = document.querySelector('.doc-page[data-page="' + activePage + '"]');
+            if (!pageEl) return;
+            var text = pageEl.innerText.replace(/\n{3,}/g, "\n\n").trim();
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(function () {
+                copyBtn.textContent = t("action.copied");
+                setTimeout(function () { copyBtn.textContent = t("action.copy"); }, 1200);
+              });
+            }
+          });
+        }
+
+        // page links inside content
+        document.querySelectorAll("[data-page-link]").forEach(function (a) {
+          a.addEventListener("click", function (e) {
+            e.preventDefault();
+            setPage(a.getAttribute("data-page-link"), true);
+          });
+        });
+
+        // prev/next
+        function sibling(delta) {
+          var i = PAGE_ORDER.indexOf(activePage);
+          var n = PAGE_ORDER[i + delta];
+          if (n) setPage(n, true);
+        }
+        var prev = document.getElementById("prev-btn");
+        var next = document.getElementById("next-btn");
+        if (prev) prev.addEventListener("click", function () { sibling(-1); });
+        if (next) next.addEventListener("click", function () { sibling(1); });
+
+        document.querySelectorAll(".lang-toggle button").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            setLang(btn.getAttribute("data-lang"), true);
+          });
+        });
+
+        window.addEventListener("hashchange", function () {
+          var h = parseHash();
+          setPage(h.page, false);
+        });
+
+        // scroll spy for toc
+        window.addEventListener("scroll", function () {
+          var pageEl = document.querySelector('.doc-page[data-page="' + activePage + '"]');
+          if (!pageEl) return;
+          var heads = Array.prototype.slice.call(pageEl.querySelectorAll("h2[id], h3[id]"));
+          if (!heads.length) return;
+          var current = heads[0].id;
+          var y = window.scrollY + 90;
+          heads.forEach(function (h) {
+            if (h.offsetTop <= y) current = h.id;
+          });
+          setActiveToc(current);
+        }, { passive: true });
+
+        // init
+        setLang(detectLang(), false);
+        var initial = parseHash();
+        setPage(initial.page, false);
+      })();
+    </script>
+  </body>
+</html>
