@@ -34,7 +34,9 @@ const COMPACTION_CONFIG = {
   ...CONTEXT_PROJECTION_CONFIG,
   // 摘要输出上限不再写死：在 summarizeWithLLM 内复用当前模型的 maxOutputTokens，
   // 未配置时回退到 12000，避免长摘要被小上限截断（压缩后内容看不全）。
-  summaryMaxInputTokens: 80_000,   // 摘要输入的上限（旧消息文本）
+  // 摘要输入不设静态上限；仅受当前模型上下文窗口、输出预算与安全区约束。
+  // 自动预检原样保留最近完整轮次；当前轮包含在内，工具调用与结果随轮次成对保留。
+  preserveRecentTurns: 4,
   summaryTemperature: 0.2,
   maxPtlRetries: 3,
   circuitBreakerThreshold: 3,
@@ -220,8 +222,14 @@ function findCurrentTurnStart(convMsgs) {
   return -1;
 }
 
-function splitForCompaction(messages, { preserveLatestUserTurn = false } = {}) {
-  const split = splitMessagesForCompaction(messages, { preserveLatestUserTurn });
+function splitForCompaction(
+  messages,
+  { preserveLatestUserTurn = false, preserveRecentTurns = COMPACTION_CONFIG.preserveRecentTurns } = {},
+) {
+  const split = splitMessagesForCompaction(messages, {
+    preserveLatestUserTurn,
+    preserveRecentTurns,
+  });
   return {
     keep: [...split.keepMessages],
     old: [...split.oldMessages],
@@ -329,7 +337,7 @@ function estimateSummaryChars({ inputChars, maxSummaryChars, receivedChars = 0 }
 /**
  * 为摘要生成解析输出/输入预算。
  * - 输出：复用模型 maxOutputTokens，并夹在安全范围内
- * - 输入：summaryMaxInputTokens，同时为输出与 safety 预留空间（当 contextWindow 可知时）
+ * - 输入：不设产品级静态上限；模型窗口可知时仅扣除输出与 safety，未知时不截断
  */
 function resolveSummaryTokenBudget(providerConfig = {}, { contextWindow = null } = {}) {
   const configuredOutput = Number(providerConfig?.maxOutputTokens);
@@ -348,13 +356,13 @@ function resolveSummaryTokenBudget(providerConfig = {}, { contextWindow = null }
     Math.min(summaryMaxTokens, COMPACTION_CONFIG.summaryOutputReserveTokens * 2),
   );
 
-  let summaryMaxInputTokens = COMPACTION_CONFIG.summaryMaxInputTokens;
   const windowTokens = Number(contextWindow);
-  if (Number.isFinite(windowTokens) && windowTokens > 0) {
-    // 摘要请求本身也占窗口：给输出与安全区留空，避免 prompt-too-long 在摘要阶段发生。
-    const usableInput = Math.max(2_000, windowTokens - summaryMaxTokens - safety);
-    summaryMaxInputTokens = Math.min(summaryMaxInputTokens, usableInput);
-  }
+  // 不再把摘要输入截在固定的 80k；能送多少由当前模型窗口决定。
+  // 窗口未知时返回 Infinity，调用侧会直接使用完整旧消息。
+  const summaryMaxInputTokens =
+    Number.isFinite(windowTokens) && windowTokens > 0
+      ? Math.max(2_000, windowTokens - summaryMaxTokens - safety)
+      : Number.POSITIVE_INFINITY;
 
   return {
     summaryMaxTokens,
@@ -1025,6 +1033,7 @@ export async function compactIfNeeded({
   connectionRecoveryOptions = {},
   tools = null,
   preserveLatestUserTurn = false,
+  preserveRecentTurns = COMPACTION_CONFIG.preserveRecentTurns,
   // 可选：provider 真实 usage（input + cacheRead）。ADR 52：仅诊断，不参与 Layer2 触发。
   // 触发只看下一请求投影估算（messages + tools schema）。
   usageTokens = null,
@@ -1038,7 +1047,7 @@ export async function compactIfNeeded({
   // Circuit breaker: stop trying if we've failed too many times
   if (isCircuitBreakerTripped(breakerScope)) {
     // Still do basic structural compaction + drop as last resort
-    const { keep, old } = splitForCompaction(messages, { preserveLatestUserTurn });
+    const { keep, old } = splitForCompaction(messages, { preserveLatestUserTurn, preserveRecentTurns });
     if (old.length === 0) return { compacted: false, messages };
 
     const beforeTokens = estimateTokensFromMessages(messages);
@@ -1102,7 +1111,7 @@ export async function compactIfNeeded({
   }
 
   // Split
-  const { keep, old } = splitForCompaction(messages, { preserveLatestUserTurn });
+  const { keep, old } = splitForCompaction(messages, { preserveLatestUserTurn, preserveRecentTurns });
   if (old.length === 0) {
     return { compacted: false, messages };
   }
@@ -1376,4 +1385,5 @@ export {
   extractRecentDecisionAnchors,
   mergeContinuityAndDeltaSummary,
   buildHandoffContent,
+  summarizeOldMessages,
 };

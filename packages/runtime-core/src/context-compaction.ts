@@ -11,7 +11,7 @@ export type CompactionMessage = Readonly<{
 export type CompactionMethod = 'llm' | 'structured' | 'fallback_drop';
 
 export const COMPACTION_SUMMARY_SYSTEM_PROMPT =
-  '你是对话摘要专家。请将以下对话历史压缩为详细摘要，保留关键信息：用户意图、重要决策、技术概念、文件变更、错误修复、待办事项。特别要详细记录用户的具体执行动作与操作步骤——用户要求做了什么、实际改动了哪些文件、命令/操作执行到哪一步、当前停在何处——因为原文已全量压缩、不再保留，连续性完全依赖本摘要承载。输出纯文本，不要用 markdown。';
+  '你是上下文交接专家。请把历史压缩成可验证、可继续执行的交接清单。必须区分事实与计划，稳定保留：当前目标与验收标准；用户最近要求及关键原话；已确认、已否决（含原因）和待确认的决策；已读取、已修改、已创建的文件；已执行命令及真实结果；错误、失败尝试与原因；当前运行状态；精确下一步；Evidence、artifact ref 和可重新读取位置；已经完成且不应重复执行的工作。没有证据的事项不得写成已完成。原文压缩后不再保留，连续性完全依赖本摘要承载。输出纯文本，不要用 markdown。';
 
 export const COMPACTION_SUMMARY_PROMPT = `Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
 This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.
@@ -34,10 +34,13 @@ Your summary should include the following sections:
 3. Files and Code Sections: Enumerate specific files and code sections examined, modified, or created. Include a summary of why this file read or edit is important.
 4. Errors and fixes: List all errors that you ran into, and how you fixed them. Pay special attention to specific user feedback.
 5. Problem Solving: Document problems solved and any ongoing troubleshooting efforts.
-6. All user messages: List ALL user messages that are not tool results. These are critical for understanding user feedback and changing intent.
-7. Pending Tasks: Outline any pending tasks that you have explicitly been asked to work on.
-8. Current Work: Describe in detail precisely what was being worked on immediately before this summary request. CRITICAL — record the user's concrete execution actions and operation steps in detail: what the user asked to do, which files were actually changed, what commands/operations were run and to which step they progressed, and exactly where things currently stand. The original conversation is fully compacted and NOT retained, so continuity depends entirely on this summary capturing those execution details.
-9. Optional Next Step: List the next step related to the most recent work. Include direct quotes from the most recent conversation.
+6. Decisions: Separate confirmed, rejected (with reasons), and pending decisions. Never collapse a rejected option into the final choice.
+7. All user messages: List ALL user messages that are not tool results. Quote the most recent requirements that affect current work.
+8. Evidence and recovery: Preserve Tool Result/Evidence/artifact refs, rerunnable retrieval hints, and exact locations that can be read again. Do not present an unverified plan as completed work.
+9. Pending Tasks: Outline any pending tasks that you have explicitly been asked to work on.
+10. Current Work: Describe in detail precisely what was being worked on immediately before this summary request. CRITICAL — record the user's concrete execution actions and operation steps in detail: what the user asked to do, which files were actually changed, what commands/operations were run and their real outcomes, and exactly where things currently stand. The original conversation is fully compacted and NOT retained, so continuity depends entirely on this summary capturing those execution details.
+11. Do Not Repeat: List completed, rejected, or failed work that must not be rerun without new evidence or a changed requirement.
+12. Exact Next Step: State the next executable step, its success criterion, and any blocker. Include direct quotes from the most recent conversation.
 
 CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
 
@@ -110,11 +113,17 @@ function isHumanUserMessage(message: CompactionMessage): boolean {
   return blocks.length === 0 || blocks.some((block) => block.type !== 'tool_result');
 }
 
-function findCurrentTurnStart(messages: readonly CompactionMessage[]): number {
+function findRecentTurnStart(
+  messages: readonly CompactionMessage[],
+  turnCount: number,
+): number {
+  let remaining = Math.max(1, Math.floor(turnCount));
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (isHumanUserMessage(messages[index]!)) return index;
+    if (!isHumanUserMessage(messages[index]!)) continue;
+    remaining -= 1;
+    if (remaining === 0) return index;
   }
-  return -1;
+  return messages.length > 0 ? 0 : -1;
 }
 
 function findUnclosedToolTailStart(messages: readonly CompactionMessage[]): number {
@@ -147,19 +156,35 @@ function expandKeepForToolContinuity<TMessage extends CompactionMessage>(
  */
 export function splitMessagesForCompaction<TMessage extends CompactionMessage>(
   messages: readonly TMessage[],
-  options: { readonly preserveLatestUserTurn?: boolean; readonly keepRecentCount?: number } = {},
+  options: {
+    readonly preserveLatestUserTurn?: boolean;
+    readonly preserveRecentTurns?: number;
+    readonly keepRecentCount?: number;
+  } = {},
 ): CompactionSplit<TMessage> {
   const systemMessages = messages.filter((message) => message.role === 'system');
   const conversation = messages.filter((message) => message.role !== 'system');
-  const currentTurnStart = options.preserveLatestUserTurn ? findCurrentTurnStart(conversation) : -1;
+  const recentTurnCount = options.preserveLatestUserTurn
+    ? Math.max(1, Math.floor(options.preserveRecentTurns ?? 1))
+    : 0;
+  const recentTurnStart = recentTurnCount > 0
+    ? findRecentTurnStart(conversation, recentTurnCount)
+    : -1;
+  const hasHumanTurn = conversation.some(isHumanUserMessage);
 
   let keepMessages: TMessage[];
   let oldMessages: TMessage[];
-  if (currentTurnStart >= 0) {
-    const currentTail = conversation.slice(currentTurnStart + 1);
-    const unclosedTailStart = findUnclosedToolTailStart(currentTail);
-    keepMessages = [conversation[currentTurnStart]!, ...currentTail.slice(unclosedTailStart)];
-    oldMessages = [...conversation.slice(0, currentTurnStart), ...currentTail.slice(0, unclosedTailStart)];
+  if (recentTurnStart >= 0 && hasHumanTurn) {
+    const recentTail = conversation.slice(recentTurnStart);
+    if (recentTurnCount === 1) {
+      const currentTail = recentTail.slice(1);
+      const unclosedTailStart = findUnclosedToolTailStart(currentTail);
+      keepMessages = [recentTail[0]!, ...currentTail.slice(unclosedTailStart)];
+      oldMessages = [...conversation.slice(0, recentTurnStart), ...currentTail.slice(0, unclosedTailStart)];
+    } else {
+      keepMessages = recentTail;
+      oldMessages = conversation.slice(0, recentTurnStart);
+    }
   } else {
     const requested = Math.max(0, Math.floor(options.keepRecentCount ?? 0));
     const keepCount = Math.min(requested, conversation.length);
@@ -225,6 +250,7 @@ export async function compactMessagesWithSummaryStrategy<TMessage extends Compac
   options: Readonly<{
     messages: readonly TMessage[];
     preserveLatestUserTurn?: boolean;
+    preserveRecentTurns?: number;
     keepRecentCount?: number;
     summarizeWithLlm?: (oldMessages: readonly TMessage[]) => Promise<string | null | undefined>;
     summarizeStructurally: (oldMessages: readonly TMessage[]) => string | null | undefined;
@@ -234,6 +260,7 @@ export async function compactMessagesWithSummaryStrategy<TMessage extends Compac
 ): Promise<CompactionStrategyResult<TMessage>> {
   const split = splitMessagesForCompaction(options.messages, {
     preserveLatestUserTurn: options.preserveLatestUserTurn,
+    preserveRecentTurns: options.preserveRecentTurns,
     keepRecentCount: options.keepRecentCount,
   });
   if (split.oldMessages.length === 0) {

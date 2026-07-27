@@ -23,6 +23,7 @@ import {
   resolveSummaryTokenBudget,
   truncateSummaryInputPreferTail,
   buildHandoffContent,
+  summarizeOldMessages,
 } from './context-compactor.mjs';
 
 const COMPACTOR_SOURCE = readFileSync(
@@ -511,6 +512,7 @@ describe('context compactor', () => {
       providerConfig: null,
       force: true,
       preserveLatestUserTurn: true,
+      preserveRecentTurns: 1,
     });
 
     assert.equal(result.compacted, true);
@@ -547,6 +549,7 @@ describe('context compactor', () => {
       contextWindow: 100_000,
       providerConfig: null,
       preserveLatestUserTurn: true,
+      preserveRecentTurns: 1,
     });
 
     assert.equal(result.compacted, true);
@@ -583,6 +586,7 @@ describe('context compactor', () => {
       providerConfig: null,
       force: true,
       preserveLatestUserTurn: true,
+      preserveRecentTurns: 1,
     });
 
     assert.equal(result.compacted, true);
@@ -615,6 +619,7 @@ describe('context compactor', () => {
       providerConfig: null,
       force: true,
       preserveLatestUserTurn: true,
+      preserveRecentTurns: 1,
     });
 
     assert.equal(result.compacted, true);
@@ -648,6 +653,7 @@ describe('context compactor', () => {
       providerConfig: null,
       force: true,
       preserveLatestUserTurn: true,
+      preserveRecentTurns: 1,
     });
 
     assert.equal(result.compacted, true);
@@ -674,11 +680,16 @@ describe('context compactor', () => {
     assert.equal(result.compacted, false);
   });
 
-  it('summary prompts require detailed user execution actions / operation steps (0011)', () => {
-    // 真·全量压缩后原文不再保留，连续性靠摘要承载 → 共享摘要 prompt 必须显式要求记录执行动作/操作步骤。
-    assert.match(COMPACTION_SUMMARY_SYSTEM_PROMPT, /执行动作/);
-    assert.match(COMPACTION_SUMMARY_SYSTEM_PROMPT, /操作步骤/);
-    assert.match(COMPACTION_SUMMARY_PROMPT, /concrete execution actions and operation steps/);
+  it('summary prompts require a verifiable continuity handoff checklist', () => {
+    // 历史原文离开活动窗口后，摘要必须保住决策、证据、真实状态和精确下一步。
+    assert.match(COMPACTION_SUMMARY_SYSTEM_PROMPT, /验收标准/);
+    assert.match(COMPACTION_SUMMARY_SYSTEM_PROMPT, /已否决/);
+    assert.match(COMPACTION_SUMMARY_SYSTEM_PROMPT, /Evidence/);
+    assert.match(COMPACTION_SUMMARY_SYSTEM_PROMPT, /不应重复执行/);
+    assert.match(COMPACTION_SUMMARY_PROMPT, /rejected \(with reasons\)/);
+    assert.match(COMPACTION_SUMMARY_PROMPT, /Evidence and recovery/);
+    assert.match(COMPACTION_SUMMARY_PROMPT, /Do Not Repeat/);
+    assert.match(COMPACTION_SUMMARY_PROMPT, /Exact Next Step/);
   });
 
   it('neutralizes pseudo tool-call syntax in compact summaries before continuity injection', () => {
@@ -1086,17 +1097,24 @@ describe('P0 recoverable microcompact + summary budget', () => {
     assert.match(content, /stdout\.txt/);
   });
 
-  it('resolveSummaryTokenBudget reserves output and safety room against context window', () => {
+  it('resolveSummaryTokenBudget uses the model window instead of a fixed input cap', () => {
     const budget = resolveSummaryTokenBudget(
       { maxOutputTokens: 8000 },
-      { contextWindow: 32_000 },
+      { contextWindow: 258_000 },
     );
     assert.equal(budget.summaryMaxTokens, 8000);
     assert.ok(budget.outputReserveTokens >= COMPACTION_CONFIG.summaryOutputReserveTokens);
     assert.equal(budget.safetyReserveTokens, COMPACTION_CONFIG.safetyReserveTokens);
-    // input budget must leave room for summary output + safety
-    assert.ok(budget.summaryMaxInputTokens <= 32_000 - budget.summaryMaxTokens - budget.safetyReserveTokens);
-    assert.ok(budget.summaryMaxInputTokens < COMPACTION_CONFIG.summaryMaxInputTokens);
+    assert.equal(
+      budget.summaryMaxInputTokens,
+      258_000 - budget.summaryMaxTokens - budget.safetyReserveTokens,
+    );
+    assert.ok(budget.summaryMaxInputTokens > 80_000);
+  });
+
+  it('resolveSummaryTokenBudget leaves input uncapped when the model window is unknown', () => {
+    const budget = resolveSummaryTokenBudget({ maxOutputTokens: 8000 });
+    assert.equal(budget.summaryMaxInputTokens, Number.POSITIVE_INFINITY);
   });
 
   it('extractRecoverableClues finds artifact refs and paths', () => {
@@ -1215,6 +1233,36 @@ describe('compaction summary quality regressions', () => {
     assert.doesNotMatch(flat, /Carry-forward summary/);
     assert.doesNotMatch(flat, /Previous compacted context/);
     assert.doesNotMatch(flat, /^id: abc$/m);
+  });
+
+  it('continuity fixture answers the long-session questions from the compacted handoff', () => {
+    const artifactRef = 'local-shell-artifact://shell_continuity/stdout';
+    const fixture = [
+      { role: 'user', content: '目标：完成上下文压缩，验收标准是连续性问题全部答对。方案 A 不采用，因为会丢工具证据；最终选择方案 B。' },
+      { role: 'assistant', content: '已确认方案 B；方案 A 已否决。准备修改 src/context.ts。' },
+      { role: 'assistant', content: `已读取 src/context.ts。Evidence: ${artifactRef}` },
+      { role: 'assistant', content: '已修改 src/context.ts；已创建 test/continuity.test.ts。' },
+      { role: 'assistant', content: '执行 pnpm test 失败，原因是 fixture mismatch。' },
+      { role: 'user', content: '当前停在修复 fixture；下一步更新断言后重新执行 pnpm test。不要重复采用方案 A。' },
+    ];
+
+    const summary = summarizeOldMessages(fixture);
+    assert.ok(summary);
+    const questions = [
+      { question: '用户最终选了哪个方案？', expected: ['方案 B'] },
+      { question: '哪个方案被否决，为什么？', expected: ['方案 A 不采用', '会丢工具证据'] },
+      { question: '哪些文件真正修改过？', expected: ['src/context.ts', 'test/continuity.test.ts'] },
+      { question: '哪条命令失败了？', expected: ['pnpm test 失败', 'fixture mismatch'] },
+      { question: '当前任务停在哪里？', expected: ['当前停在修复 fixture'] },
+      { question: '下一步应该做什么？', expected: ['下一步更新断言'] },
+      { question: '证据从哪里重新读取？', expected: [artifactRef] },
+      { question: '什么工作不应重复？', expected: ['不要重复采用方案 A'] },
+    ];
+    for (const { question, expected } of questions) {
+      for (const answer of expected) {
+        assert.ok(summary.includes(answer), `${question} missing answer fragment: ${answer}`);
+      }
+    }
   });
 
   it('source uses tail-prefer truncation for summary input', () => {

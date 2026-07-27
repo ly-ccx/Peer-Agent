@@ -420,9 +420,12 @@ export const AssistantContent = memo(AssistantContentImpl);
 export function CompactionSummaryCard({ compaction, isZh }: { readonly compaction: CompactionMeta; readonly isZh: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const methodLabel =
-    compaction.method === 'llm' ? 'LLM'
-    : compaction.method === 'structural' ? (isZh ? '结构' : 'Structural')
-    : (isZh ? '截断' : 'Truncated');
+    compaction.method === 'llm' ? 'LLM summary'
+    : compaction.method === 'structured' || compaction.method === 'structural'
+      ? 'Structured fallback'
+      : compaction.method === 'fallback_drop'
+        ? 'Fallback drop'
+        : compaction.method;
   const fallbackReasonLabel = compaction.fallbackReason
     ? (isZh
       ? ({
@@ -449,6 +452,12 @@ export function CompactionSummaryCard({ compaction, isZh }: { readonly compactio
       : `${compaction.deltaMessageCount} this run / ${compaction.originalMessageCount} total`)
     : `${compaction.originalMessageCount} msgs`;
 
+  const fallbackDropWarning = compaction.method === 'fallback_drop'
+    ? (isZh
+      ? '警告：本次未生成可用摘要，只保留了近期上下文；较早细节可能丢失。'
+      : 'Warning: no usable summary was generated; only recent context was kept and older details may be lost.')
+    : null;
+
   return (
     <div className="compaction-summary-card">
       <button type="button" className="compaction-summary-toggle" onClick={() => setExpanded(!expanded)}>
@@ -463,6 +472,9 @@ export function CompactionSummaryCard({ compaction, isZh }: { readonly compactio
           <path d="m6 9 6 6 6-6" />
         </svg>
       </button>
+      {fallbackDropWarning ? (
+        <div className="compaction-summary-body" role="alert">{fallbackDropWarning}</div>
+      ) : null}
       {expanded ? (
         <div className="compaction-summary-body">
           {neutralizeToolCallSyntaxForDisplay((compaction as unknown as Record<string, unknown>).summary

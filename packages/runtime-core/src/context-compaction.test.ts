@@ -2,10 +2,27 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  COMPACTION_SUMMARY_PROMPT,
+  COMPACTION_SUMMARY_SYSTEM_PROMPT,
   compactMessagesWithSummaryStrategy,
   runCompactionSummaryCascade,
   splitMessagesForCompaction,
 } from './context-compaction.ts';
+
+test('continuity handoff prompt covers the long-session continuity questions', () => {
+  const prompt = `${COMPACTION_SUMMARY_SYSTEM_PROMPT}\n${COMPACTION_SUMMARY_PROMPT}`;
+  const requiredSignals = [
+    '验收标准',
+    'rejected (with reasons)',
+    'Files and Code Sections',
+    'real outcomes',
+    'Current Work',
+    'Exact Next Step',
+    'Evidence and recovery',
+    'Do Not Repeat',
+  ];
+  for (const signal of requiredSignals) assert.ok(prompt.includes(signal), `missing continuity signal: ${signal}`);
+});
 
 test('summary cascade prefers the injected LLM summarizer', async () => {
   const result = await runCompactionSummaryCascade({
@@ -51,6 +68,44 @@ test('automatic split preserves the latest human turn', () => {
   assert.deepEqual(split.oldMessages, [oldUser, oldAssistant]);
   assert.deepEqual(split.keepMessages, [latestUser]);
   assert.equal(split.systemMessages.length, 1);
+});
+
+test('automatic split preserves the requested recent complete turns', () => {
+  const messages = [
+    { role: 'user', content: 'turn 1' },
+    { role: 'assistant', content: 'answer 1' },
+    { role: 'user', content: 'turn 2' },
+    { role: 'assistant', toolCalls: [{ id: 'call-2' }], content: 'using tool' },
+    { role: 'tool', toolCallId: 'call-2', content: 'tool result' },
+    { role: 'assistant', content: 'answer 2' },
+    { role: 'user', content: 'turn 3' },
+    { role: 'assistant', content: 'answer 3' },
+    { role: 'user', content: 'turn 4' },
+  ] as const;
+
+  const split = splitMessagesForCompaction(messages, {
+    preserveLatestUserTurn: true,
+    preserveRecentTurns: 3,
+  });
+
+  assert.deepEqual(split.oldMessages, messages.slice(0, 2));
+  assert.deepEqual(split.keepMessages, messages.slice(2));
+  assert.equal(split.keepMessages[1], messages[3]);
+  assert.equal(split.keepMessages[2], messages[4]);
+});
+
+test('automatic split keeps every available turn when fewer than requested exist', () => {
+  const messages = [
+    { role: 'user', content: 'turn 1' },
+    { role: 'assistant', content: 'answer 1' },
+    { role: 'user', content: 'turn 2' },
+  ] as const;
+  const split = splitMessagesForCompaction(messages, {
+    preserveLatestUserTurn: true,
+    preserveRecentTurns: 4,
+  });
+  assert.deepEqual(split.oldMessages, []);
+  assert.deepEqual(split.keepMessages, messages);
 });
 
 test('manual split keeps the requested recent tail and never starts it with an orphan tool result', () => {
