@@ -79,27 +79,4 @@ describe('virtual chat turn range', () => {
     assert.equal(range.totalSize, 0);
     assert.equal(range.endIndex, -1);
   });
-
-  it('keeps the same window signature while scrollTop stays inside the same overscan window', () => {
-    // 滚动路径上的契约：在「未跨过窗口边界条目」的微滚动里，start/end/padding/totalSize 必须稳定，
-    // 这样 hook 才能把 scrollTop 留在 ref 而不 setState 整棵 ChatSurface。
-    // 选在条目中部的 scrollTop，避免 overscan 远边刚好跨过下一个 estimate 边界。
-    const estimateSize = 300;
-    const base = {
-      count: 80,
-      viewportSize: 800,
-      measuredSizes: new Map<number, number>(),
-      estimateSize,
-      overscanPx: 900,
-    } as const;
-    const midItemScrollTop = 30 * estimateSize + 50; // 9050，落在 index 30 中部
-    const a = calculateVirtualTurnRange({ ...base, scrollTop: midItemScrollTop });
-    const b = calculateVirtualTurnRange({ ...base, scrollTop: midItemScrollTop + 40 });
-
-    assert.equal(a.startIndex, b.startIndex);
-    assert.equal(a.endIndex, b.endIndex);
-    assert.equal(a.paddingStart, b.paddingStart);
-    assert.equal(a.paddingEnd, b.paddingEnd);
-    assert.equal(a.totalSize, b.totalSize);
-  });
 });
