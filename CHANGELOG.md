@@ -8,6 +8,31 @@ All notable changes to Peer Agent are tracked here.
 
 - Remove the unused `cu-proxy-core` Rust health stub and `local.health` scaffold (capability, provider, IPC, packaging, and tests). Keep `peer-credential-helper`.
 
+## 0.0.1-beta.44 - 2026-07-28
+
+### Added
+
+- Default **Agent** mode with L0–L3 adaptive planning, diagnosis gate for symptom fixes, and Plan kept as approval-gated workflow.
+- macOS menu-bar tray for recent sessions and quick activation.
+- Skills global/workspace split and capability detail dialog.
+- First-run model setup path for empty chat.
+- Product documentation site (landing + changelog + denser docs content).
+
+### Changed
+
+- Desktop/CLI mode product surface is Agent/Plan only; legacy `goal` displays as Agent and keeps the self-driven kernel.
+- Cap `write_file` payload size and raise stream idle timeout.
+- Widen docs changelog content measure.
+
+### Fixed
+
+- CLI multi-image paste: same-basename files no longer collapse; local path strings no longer leak into message text.
+- CLI mode picker no longer exposes Goal as a separate selectable mode.
+- Preserve continuity during compaction; prevent glued GPT reasoning status phrases.
+- Sidebar no longer flashes empty conversation list on refresh; softer sidebar edge.
+- Keep protocol tests out of npm package dist.
+
+
 ## 0.0.1-beta.26 - 2026-07-07
 
 ### Added
