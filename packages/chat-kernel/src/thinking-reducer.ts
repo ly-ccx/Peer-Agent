@@ -206,6 +206,49 @@ function hasCompositeKey(data: unknown): boolean {
     && readNumber(data, ['iteration', 'round']) !== undefined;
 }
 
+/**
+ * Join streamed thinking/reasoning deltas without gluing adjacent status phrases.
+ *
+ * Providers (esp. GPT reasoning summaries) often emit short status phrases that
+ * lack a trailing space/newline. Naive string concat turns
+ * "Planning inspection" + "Investigating path" into "...inspectionInvestigating...".
+ *
+ * Rules (conservative — never drop provider whitespace, never break mid-token streams):
+ * - empty prev/next: return the non-empty side
+ * - either side already has boundary whitespace: concat as-is
+ * - next looks like a new English status phrase (starts with uppercase letter)
+ *   after a word or sentence punctuation → insert a newline
+ * - otherwise concat as-is (token-level "Plan"+"ning", CJK, lowercase continuations)
+ */
+export function joinThinkingContent(previous: string, next: string): string {
+  if (!previous) return next;
+  if (!next) return previous;
+
+  const lastChar = previous[previous.length - 1] ?? '';
+  const firstChar = next[0] ?? '';
+
+  // Provider already separated chunks (space / newline / tab / CJK full-width space).
+  if (/\s/.test(lastChar) || /\s/.test(firstChar)) {
+    return previous + next;
+  }
+
+  // Only intervene when the next delta looks like a new status phrase:
+  // starts with an uppercase letter (Latin / Unicode Lu), while previous ends
+  // with a word char or sentence-ending punctuation. Mid-token streams
+  // ("Plan"+"ning") and CJK continuations stay untouched.
+  const nextStartsStatusPhrase = /[A-Z\p{Lu}]/u.test(firstChar);
+  if (!nextStartsStatusPhrase) {
+    return previous + next;
+  }
+
+  const prevEndsBoundary = /[\p{L}\p{N}.!?;:。！？；：…]/u.test(lastChar);
+  if (!prevEndsBoundary) {
+    return previous + next;
+  }
+
+  return `${previous}\n${next}`;
+}
+
 function appendThinkingContent(process: ThinkingProcess, data: unknown): ThinkingProcess {
   const content = readString(data, ['content', 'delta', 'text', 'message']);
   if (!content) return process;
@@ -226,7 +269,7 @@ function appendThinkingContent(process: ThinkingProcess, data: unknown): Thinkin
 
   return updateLastIteration(process, (iteration) => ({
     ...iteration,
-    thinkingContent: iteration.thinkingContent + content,
+    thinkingContent: joinThinkingContent(iteration.thinkingContent, content),
     status: 'thinking',
   }), data);
 }
