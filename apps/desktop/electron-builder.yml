@@ -94,7 +94,7 @@ nsis:
 # generateUpdatesFilesForAllChannels 确保即使一次构建也按版本号语义写入对应通道清单。
 publish:
   provider: github
-  owner: yinLiangDream
+  owner: ly-ccx
   repo: Peer-Agent
   releaseType: release
 

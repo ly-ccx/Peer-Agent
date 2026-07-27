@@ -57,7 +57,7 @@ export function resolvePlatformTarget(platform = process.platform, arch = proces
  * @param {{ owner?: string, repo?: string }} [opts]
  */
 export function releaseAssetUrl(version, target, opts = {}) {
-  const owner = opts.owner ?? process.env.PEER_AGENT_GITHUB_OWNER ?? 'yinLiangDream';
+  const owner = opts.owner ?? process.env.PEER_AGENT_GITHUB_OWNER ?? 'ly-ccx';
   const repo = opts.repo ?? process.env.PEER_AGENT_GITHUB_REPO ?? 'Peer-Agent';
   const tag = version.startsWith('v') ? version : `v${version}`;
   return `https://github.com/${owner}/${repo}/releases/download/${tag}/${target.archive}`;

@@ -28,10 +28,10 @@ describe('releaseAssetUrl', () => {
     assert.ok(target);
     assert.equal(
       releaseAssetUrl('0.0.1-beta.38', target, {
-        owner: 'yinLiangDream',
+        owner: 'ly-ccx',
         repo: 'Peer-Agent',
       }),
-      'https://github.com/yinLiangDream/Peer-Agent/releases/download/v0.0.1-beta.38/peer-darwin-arm64.tar.gz',
+      'https://github.com/ly-ccx/Peer-Agent/releases/download/v0.0.1-beta.38/peer-darwin-arm64.tar.gz',
     );
   });
 

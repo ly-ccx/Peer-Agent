@@ -100,7 +100,7 @@ Current Release assets: **macOS Apple Silicon** (`peer-darwin-arm64.tar.gz`). Ot
 
 #### Option B — GitHub Release archive
 
-1. Open the [latest Release](https://github.com/yinLiangDream/Peer-Agent/releases) and download `peer-darwin-arm64.tar.gz`.
+1. Open the [latest Release](https://github.com/ly-ccx/Peer-Agent/releases) and download `peer-darwin-arm64.tar.gz`.
 2. Extract and keep **both** binaries in the **same directory** (the credential helper is resolved next to `peer`):
 
 ```bash

@@ -29,7 +29,7 @@ if (!existsSync(binary) || !existsSync(helper)) {
       'or set PEER_AGENT_RELEASE_URL to a direct archive URL and reinstall.',
       '',
       'Manual fallback: download peer-*-*.tar.gz from',
-      '  https://github.com/yinLiangDream/Peer-Agent/releases',
+      '  https://github.com/ly-ccx/Peer-Agent/releases',
       'and keep peer + peer-credential-helper in the same directory.',
     ].join('\n'),
   );

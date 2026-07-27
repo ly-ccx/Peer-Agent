@@ -22,7 +22,7 @@ describe('auto-updater mac manual download helpers', () => {
   describe('buildDmgUrl', () => {
     it('builds the dmg URL following the artifactName convention', () => {
       const url = buildDmgUrl({
-        owner: 'yinLiangDream',
+        owner: 'ly-ccx',
         repo: 'Peer-Agent',
         version: '0.0.1-beta.7',
         arch: 'arm64',
@@ -30,13 +30,13 @@ describe('auto-updater mac manual download helpers', () => {
       // 文件名片段需 URL 编码（点号等保持原样，连字符约定不变）。
       assert.equal(
         url,
-        'https://github.com/yinLiangDream/Peer-Agent/releases/download/v0.0.1-beta.7/Peer-Agent-0.0.1-beta.7-arm64.dmg',
+        'https://github.com/ly-ccx/Peer-Agent/releases/download/v0.0.1-beta.7/Peer-Agent-0.0.1-beta.7-arm64.dmg',
       );
     });
 
     it('uses the provided arch segment', () => {
       const url = buildDmgUrl({
-        owner: 'yinLiangDream',
+        owner: 'ly-ccx',
         repo: 'Peer-Agent',
         version: '1.2.3',
         arch: 'x64',
@@ -48,13 +48,13 @@ describe('auto-updater mac manual download helpers', () => {
   describe('buildReleaseUrl', () => {
     it('builds the release tag page URL', () => {
       const url = buildReleaseUrl({
-        owner: 'yinLiangDream',
+        owner: 'ly-ccx',
         repo: 'Peer-Agent',
         version: '0.0.1-beta.7',
       });
       assert.equal(
         url,
-        'https://github.com/yinLiangDream/Peer-Agent/releases/tag/v0.0.1-beta.7',
+        'https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.0.1-beta.7',
       );
     });
   });

@@ -35,7 +35,7 @@ const { autoUpdater } = electronUpdater;
 const PRERELEASE_PATTERN = /-(beta|alpha|rc)\b/i;
 
 /** GitHub 发布源（与 electron-builder.yml 的 publish 配置保持一致）。 */
-const GITHUB_OWNER = 'yinLiangDream';
+const GITHUB_OWNER = 'ly-ccx';
 const GITHUB_REPO = 'Peer-Agent';
 
 /** mac 自管下载的 dmg 存放子目录（位于系统临时目录下）。 */

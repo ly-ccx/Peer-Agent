@@ -36,7 +36,7 @@ try {
   console.error(`[@peer-agent/cli] postinstall failed: ${message}`);
   console.error(
     '[@peer-agent/cli] You can still install manually from GitHub Releases: ' +
-      `https://github.com/yinLiangDream/Peer-Agent/releases/tag/v${version}`,
+      `https://github.com/ly-ccx/Peer-Agent/releases/tag/v${version}`,
   );
   // Fail install so global users notice missing binaries instead of a broken `peer`.
   process.exit(1);

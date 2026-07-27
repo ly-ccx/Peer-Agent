@@ -10,12 +10,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yinLiangDream/Peer-Agent.git",
+    "url": "git+https://github.com/ly-ccx/Peer-Agent.git",
     "directory": "packages/runtime-sdk"
   },
-  "homepage": "https://github.com/yinLiangDream/Peer-Agent#readme",
+  "homepage": "https://github.com/ly-ccx/Peer-Agent#readme",
   "bugs": {
-    "url": "https://github.com/yinLiangDream/Peer-Agent/issues"
+    "url": "https://github.com/ly-ccx/Peer-Agent/issues"
   },
   "publishConfig": {
     "access": "public"
