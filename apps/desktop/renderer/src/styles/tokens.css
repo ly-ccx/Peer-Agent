@@ -5,7 +5,7 @@
  *
  * 红线（不可逾越）：
  *   1. Azure 不上 CTA       2. H1 字号 ≥ 30px
- *   3. Serif 标题不可去     4. 单屏 azure ≤ 3
+ *   3. 标题与正文统一 sans  4. 单屏 azure ≤ 3
  *   5. 纯黑禁 / 纯白仅环境层 6. 状态不只靠颜色
  *   7. 阴影限定 2 场景      8. 圆角 ≤ 16px
  *
@@ -33,7 +33,9 @@
 
 @theme {
   --font-sans: "Inter", -apple-system, "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", system-ui, sans-serif;
-  --font-serif-zh: "Noto Serif SC", "Source Han Serif SC", "Songti SC", STSong, serif;
+  /* 与 Chat 正文统一：取消中文 serif / 宋体栈，旧调用点零改动即可全量切到 sans。 */
+  --font-serif-zh: var(--font-sans);
+  --font-sans-zh: var(--font-sans);
   --font-mono: "IBM Plex Mono", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
   --color-paper-sheet: #F7F9FC;
   --color-paper-base: #EDF1F6;
