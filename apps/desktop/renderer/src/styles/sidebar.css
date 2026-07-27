@@ -64,17 +64,17 @@
   }
 }
 
-/* 中间内容区向左投下的内侧阴影：保留 1px 分隔线，同时增强栏间层次。 */
+/* 中间内容区向左投下的内侧阴影：保留 1px 分隔线，同时轻量增强栏间层次。 */
 .app-sidebar::after {
   content: '';
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
-  width: 16px;
+  width: 8px;
   z-index: 4;
   pointer-events: none;
-  background: linear-gradient(to right, transparent, rgba(0, 0, 0, 0.05));
+  background: linear-gradient(to right, transparent, rgba(0, 0, 0, 0.03));
 }
 
 /* ── Sidebar Resizer（左栏右缘拖拽条，镜像右侧 workbench-resizer）── */
