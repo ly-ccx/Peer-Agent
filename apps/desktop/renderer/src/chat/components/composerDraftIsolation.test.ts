@@ -73,7 +73,10 @@ test('external conversation reload replaces or clears the shared accounting snap
 test('unknown restored context renders as unknown, never zero percent', async () => {
   const display = await readSource('./thread/TokenUsageDisplay.tsx');
 
-  assert.match(display, /const ctxPercent =[\s\S]*contextAccounting\?\.percent/);
+  assert.match(display, /resolveStickyContextDisplay/);
+  assert.match(display, /lastKnown/);
+  assert.match(display, /const liveCtxPercent =[\s\S]*contextAccounting\?\.percent/);
+  assert.match(display, /const ctxPercent = stickyDisplay\.percent/);
   assert.match(display, /ctxPercent == null \? '\?' : `\$\{Math\.round\(ctxPercent\)\}%`/);
   assert.match(display, /Context pending measurement/);
   assert.match(display, /emptyContext && contextAccounting == null/);

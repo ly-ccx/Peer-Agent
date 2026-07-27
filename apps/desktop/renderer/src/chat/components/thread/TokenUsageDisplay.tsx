@@ -18,6 +18,7 @@ import { formatTokenCount } from '../../state/format';
 import { getProviderDisplayName } from '../../state/providerDisplay';
 import { effortIndexForLevel, effortIndexFromValue, effortLevelForDisplay, snapEffortValue } from './effortSlider';
 import type { TokenUsageState } from '../../state/types';
+import { resolveStickyContextDisplay } from './stickyContextDisplay';
 
 function ReasoningEffortSlider({
   effort,
@@ -271,6 +272,52 @@ export function TokenUsageDisplay({
     };
   }, [quotaProviderId]);
 
+  // Live occupancy still comes only from shared contextAccounting.
+  // When a turn temporarily drops it to unknown, stick to lastKnown for display.
+  // Scope by conversation + model so sticky values never leak across sessions.
+  const stickyScopeKey = [
+    contextAccounting?.conversationId ?? (emptyContext ? 'empty' : 'unknown'),
+    contextAccounting?.modelKey ?? selectedModelProviderId ?? defaultProvider?.id ?? 'default',
+  ].join('|');
+  const liveContextTokens =
+    typeof contextAccounting?.authoritativeInputTokens === 'number'
+      && Number.isFinite(contextAccounting.authoritativeInputTokens)
+      ? Math.max(0, contextAccounting.authoritativeInputTokens)
+      : emptyContext && contextAccounting == null
+        ? 0
+        : null;
+  const liveCtxPercent =
+    typeof contextAccounting?.percent === 'number'
+    && Number.isFinite(contextAccounting.percent)
+      ? Math.min(Math.max(contextAccounting.percent, 0), 100)
+      : emptyContext && contextAccounting == null
+        ? 0
+        : null;
+  const [lastKnownContext, setLastKnownContext] = useState<{
+    scopeKey: string;
+    percent: number | null;
+    tokens: number | null;
+  }>({ scopeKey: stickyScopeKey, percent: null, tokens: null });
+  useEffect(() => {
+    setLastKnownContext((prev) => {
+      if (prev.scopeKey !== stickyScopeKey) {
+        return {
+          scopeKey: stickyScopeKey,
+          percent: liveCtxPercent,
+          tokens: liveContextTokens,
+        };
+      }
+      if (liveCtxPercent == null && liveContextTokens == null) {
+        return prev;
+      }
+      return {
+        scopeKey: stickyScopeKey,
+        percent: liveCtxPercent ?? prev.percent,
+        tokens: liveContextTokens ?? prev.tokens,
+      };
+    });
+  }, [stickyScopeKey, liveCtxPercent, liveContextTokens]);
+
   const hasInfo = tokenUsage || activeUsage || contextAccounting || defaultProvider?.contextWindow || defaultProvider?.inputPrice != null;
   if (!hasInfo) return null;
 
@@ -279,14 +326,19 @@ export function TokenUsageDisplay({
   const cacheWrite = (tokenUsage?.cacheWrite ?? 0) + (activeUsage?.cacheWrite ?? 0);
   const cacheRead = (tokenUsage?.cacheRead ?? 0) + (activeUsage?.cacheRead ?? 0);
   // 累计 usage 仅用于费用估算；上下文圆环只接受共享计量快照。
-  // 缺失代表会话上下文尚未恢复，必须保持未知，不能伪装成 0 或有效百分比。
-  const currentContextTokens =
-    typeof contextAccounting?.authoritativeInputTokens === 'number'
-      && Number.isFinite(contextAccounting.authoritativeInputTokens)
-      ? Math.max(0, contextAccounting.authoritativeInputTokens)
-      : emptyContext && contextAccounting == null
-        ? 0
-        : null;
+  // 缺失时：若本会话从未有过计量结果则显示「?」；
+  // 若仅是发送/流式过程中的短暂未知，则保留 lastKnown 百分比，避免闪成「?」。
+  const stickyLastKnown =
+    lastKnownContext.scopeKey === stickyScopeKey
+      ? lastKnownContext
+      : { percent: null as number | null, tokens: null as number | null };
+  const stickyDisplay = resolveStickyContextDisplay({
+    livePercent: liveCtxPercent,
+    liveTokens: liveContextTokens,
+    lastKnownPercent: stickyLastKnown.percent,
+    lastKnownTokens: stickyLastKnown.tokens,
+  });
+  const currentContextTokens = stickyDisplay.tokens;
   const cacheDenominator = input + cacheRead;
   const cacheHitPercent = cacheDenominator > 0 ? Math.round((cacheRead / cacheDenominator) * 100) : null;
   // 仅当前选中模型支持 Prompt 缓存时才展示缓存命中率，避免切到无缓存模型后仍显示旧模型遗留的累计缓存数据。
@@ -310,13 +362,9 @@ export function TokenUsageDisplay({
     ?? ((typeof contextWindow === 'number' && contextWindow > 0)
       ? contextWindow
       : defaultProvider?.contextWindow);
-  const ctxPercent =
-    typeof contextAccounting?.percent === 'number'
-    && Number.isFinite(contextAccounting.percent)
-      ? Math.min(Math.max(contextAccounting.percent, 0), 100)
-      : emptyContext && contextAccounting == null
-        ? 0
-        : null;
+  // 圆环百分比：优先 live contextAccounting.percent，暂缺时回退 lastKnown。
+  // 从未有过计量结果时仍显示「?」；禁止用草稿字符或本地估算伪装成有效百分比。
+  const ctxPercent = stickyDisplay.percent;
   const hasCtxRing = ctxWindow != null;
   const contextCounterDegraded = contextAccounting?.counterStatus === 'degraded';
   // 圆环 hover：展示用户可理解的上下文计量、漂移告警与附加诊断。

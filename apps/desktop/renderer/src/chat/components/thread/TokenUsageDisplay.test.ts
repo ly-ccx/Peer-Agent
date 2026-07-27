@@ -6,6 +6,7 @@ import {
   effortLevelForDisplay,
   snapEffortValue,
 } from './effortSlider.ts';
+import { resolveStickyContextDisplay } from './stickyContextDisplay.ts';
 
 describe('reasoning effort slider', () => {
   it('uses the persisted effort for idle display and the slider value only while previewing', () => {
@@ -39,3 +40,40 @@ describe('reasoning effort slider', () => {
     assert.equal(snapEffortValue(76, 3), 100);
   });
 });
+
+
+describe('resolveStickyContextDisplay', () => {
+  it('keeps lastKnown percent/tokens when live values are temporarily unknown', async () => {
+    assert.deepEqual(
+      resolveStickyContextDisplay({
+        livePercent: null,
+        liveTokens: null,
+        lastKnownPercent: 57,
+        lastKnownTokens: 432_300,
+      }),
+      { percent: 57, tokens: 432_300 },
+    );
+  });
+
+  it('prefers live values and only falls back to "?" when never measured', async () => {
+    assert.deepEqual(
+      resolveStickyContextDisplay({
+        livePercent: 12,
+        liveTokens: 1_000,
+        lastKnownPercent: 57,
+        lastKnownTokens: 432_300,
+      }),
+      { percent: 12, tokens: 1_000 },
+    );
+    assert.deepEqual(
+      resolveStickyContextDisplay({
+        livePercent: null,
+        liveTokens: null,
+        lastKnownPercent: null,
+        lastKnownTokens: null,
+      }),
+      { percent: null, tokens: null },
+    );
+  });
+});
+
