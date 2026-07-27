@@ -714,7 +714,7 @@ Evidence owns governance.</code></pre>
           <h1 data-i18n="cap.title">Capabilities overview</h1>
           <p class="lede" data-i18n="cap.lede">
             Capabilities are declared through providers/manifests, projected to the model as tools, then executed only after PermissionGrant.
-            There is no blessed “secret side door” for shell vs MCP vs plugins.
+            There is no blessed “secret side door” for shell vs MCP vs plugins vs skills.
           </p>
           <div class="table-wrap">
             <table>
@@ -786,6 +786,132 @@ Evidence owns governance.</code></pre>
           </div>
         </article>
 
+
+        <!-- ================= SKILL ================= -->
+        <article class="doc-page" data-page="skill" hidden>
+          <div class="crumb"><div class="crumb-left"><span data-i18n="group.capabilities">Capabilities</span><span>/</span><strong data-i18n="nav.skill">Skills</strong></div></div>
+          <h1 data-i18n="skill.title">Skills</h1>
+          <p class="lede" data-i18n="skill.lede">
+            A Skill is a reusable instruction package for the agent — not a remote tool server.
+            Peer Agent loads Skills from local packages (<code>SKILL.md</code>), manages enable/disable state,
+            and injects selected skill context into the conversation under the same Runtime governance chain.
+          </p>
+
+          <h2 id="skill-what" data-i18n="skill.whatTitle">What a Skill is</h2>
+          <ul>
+            <li data-i18n="skill.what1"><strong>Package</strong> — a folder or archive containing <code>SKILL.md</code> (required) plus optional <code>assets/</code>.</li>
+            <li data-i18n="skill.what2"><strong>Frontmatter</strong> — name/description, optional <code>whenToUse</code>, <code>allowed-tools</code>, license metadata.</li>
+            <li data-i18n="skill.what3"><strong>Body</strong> — the procedure / playbook the model should follow when the skill is active.</li>
+            <li data-i18n="skill.what4"><strong>Local store</strong> — installed skills live under the app user-data skill root; enable/disable is persisted in local settings.</li>
+          </ul>
+          <div class="callout" data-i18n="skill.notTool">
+            <strong>Not the same as MCP:</strong> MCP projects external tools into the Runtime.
+            Skills primarily inject structured instruction context and optional tool-allow hints — they still cannot bypass PermissionGrant / Evidence.
+          </div>
+
+          <h2 id="skill-vs" data-i18n="skill.vsTitle">Skill vs Plugin vs MCP</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th data-i18n="skill.thObject">Object</th>
+                  <th data-i18n="skill.thRole">Role</th>
+                  <th data-i18n="skill.thUser">What you manage</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Skill</strong></td>
+                  <td data-i18n="skill.vsSkillRole">Reusable agent playbook / instruction package</td>
+                  <td data-i18n="skill.vsSkillUser">Install, enable/disable, insert/invoke into a thread</td>
+                </tr>
+                <tr>
+                  <td><strong>Plugin</strong></td>
+                  <td data-i18n="skill.vsPluginRole">Local capability packaging & distribution unit</td>
+                  <td data-i18n="skill.vsPluginUser">Ship providers/adapters as packages</td>
+                </tr>
+                <tr>
+                  <td><strong>MCP</strong></td>
+                  <td data-i18n="skill.vsMcpRole">Tool transport protocol for external tools</td>
+                  <td data-i18n="skill.vsMcpUser">Register/enable servers so tools can project</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2 id="skill-package" data-i18n="skill.packageTitle">Package shape</h2>
+          <pre><code>my-skill/
+  SKILL.md          # required (YAML frontmatter + markdown body)
+  assets/           # optional attachments
+  ...</code></pre>
+          <p data-i18n="skill.packageBody">
+            Install sources currently include zip and tgz archives that contain <code>SKILL.md</code> at the archive root
+            (or one top-level folder that contains it). Empty descriptions are treated as invalid noise and dropped.
+          </p>
+
+          <h2 id="skill-lifecycle" data-i18n="skill.lifeTitle">Lifecycle on device</h2>
+          <ol class="steps">
+            <li data-i18n="skill.l1"><strong>Discover / install</strong> — load from local skill roots or install from zip/tgz into the user skill store.</li>
+            <li data-i18n="skill.l2"><strong>List</strong> — each skill exposes id, name, description, whenToUse, version, enabled state.</li>
+            <li data-i18n="skill.l3"><strong>Enable / disable</strong> — disabled skills remain installed but stay out of the active set.</li>
+            <li data-i18n="skill.l4"><strong>Borrow / link</strong> — optional source roots can expose available skills that can be linked into the local store.</li>
+            <li data-i18n="skill.l5"><strong>Use in a thread</strong> — insert or invoke skill context; model follows the playbook while tools still require grants.</li>
+            <li data-i18n="skill.l6"><strong>Refresh</strong> — re-scan roots / store after install or external edits.</li>
+          </ol>
+
+          <h2 id="skill-cli" data-i18n="skill.cliTitle">CLI: <code>/skill</code></h2>
+          <p data-i18n="skill.cliBody">
+            In the TUI slash palette, <code>/skill</code> opens Skills management: browse installed skills,
+            enable/disable, refresh, insert, or invoke. Desktop has the corresponding Skills UI over the same store concepts.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th data-i18n="skill.thAction">Action</th>
+                  <th data-i18n="skill.thMeaning">Meaning</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td data-i18n="skill.aBrowse">Browse</td>
+                  <td data-i18n="skill.aBrowseM">See installed skills and enabled state</td>
+                </tr>
+                <tr>
+                  <td data-i18n="skill.aToggle">Enable / disable</td>
+                  <td data-i18n="skill.aToggleM">Keep package installed while controlling participation</td>
+                </tr>
+                <tr>
+                  <td data-i18n="skill.aRefresh">Refresh</td>
+                  <td data-i18n="skill.aRefreshM">Reload from local roots / store</td>
+                </tr>
+                <tr>
+                  <td data-i18n="skill.aInsert">Insert</td>
+                  <td data-i18n="skill.aInsertM">Inject skill context into the current thread for the model to follow</td>
+                </tr>
+                <tr>
+                  <td data-i18n="skill.aInvoke">Invoke</td>
+                  <td data-i18n="skill.aInvokeM">Start using the skill as the active playbook for the next steps</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout warn" data-i18n="skill.cliWarn">
+            <strong>Governance:</strong> enabling a Skill is not a blanket shell grant. Any tool the skill encourages still goes through
+            Runtime Projection → PermissionGrant → Evidence.
+          </div>
+
+          <h2 id="skill-when" data-i18n="skill.whenTitle">When to use Skills</h2>
+          <ul>
+            <li data-i18n="skill.when1">Repeatable workflows you want the agent to follow consistently (release checklist, review rubric, incident playbook).</li>
+            <li data-i18n="skill.when2">Team conventions that should travel as packages, not as one-off prompt paste.</li>
+            <li data-i18n="skill.when3">Domain procedures that should stay local and auditable, with optional tool allow-lists.</li>
+          </ul>
+          <p data-i18n="skill.whenNot">
+            If you need a live external API tool surface, prefer MCP. If you need a new local execution provider family, prefer Plugin/Provider — not a Skill body pretending to be a tool host.
+          </p>
+        </article>
+
         <!-- ================= FAQ ================= -->
         <article class="doc-page" data-page="faq" hidden>
           <div class="crumb"><div class="crumb-left"><span data-i18n="group.help">Help</span><span>/</span><strong data-i18n="nav.faq">FAQ</strong></div></div>
@@ -853,7 +979,8 @@ Evidence owns governance.</code></pre>
           ]},
           { groupKey: "group.capabilities", items: [
             { id: "capabilities", labelKey: "nav.capabilities" },
-            { id: "mcp", labelKey: "nav.mcp" }
+            { id: "mcp", labelKey: "nav.mcp" },
+            { id: "skill", labelKey: "nav.skill" }
           ]},
           { groupKey: "group.help", items: [
             { id: "faq", labelKey: "nav.faq" }
@@ -868,7 +995,7 @@ Evidence owns governance.</code></pre>
             "nav.prev": "Previous", "nav.next": "Next",
             "nav.welcome": "Welcome", "nav.install": "Install", "nav.desktop": "Desktop", "nav.cli": "CLI", "nav.model": "Connect a model",
             "nav.runtime": "Local Runtime", "nav.permissions": "Permissions", "nav.evidence": "Evidence",
-            "nav.capabilities": "Overview", "nav.mcp": "MCP", "nav.faq": "FAQ",
+            "nav.capabilities": "Overview", "nav.mcp": "MCP", "nav.skill": "Skills", "nav.faq": "FAQ",
             "group.getStarted": "Get started", "group.concepts": "Concepts", "group.capabilities": "Capabilities", "group.help": "Help",
             "toc.title": "On this page", "action.copy": "Copy page", "action.copied": "Copied",
             documentTitle: "Peer Agent — Docs"
@@ -878,7 +1005,7 @@ Evidence owns governance.</code></pre>
             "nav.prev": "上一页", "nav.next": "下一页",
             "nav.welcome": "欢迎", "nav.install": "安装", "nav.desktop": "Desktop", "nav.cli": "CLI", "nav.model": "连接模型",
             "nav.runtime": "本地 Runtime", "nav.permissions": "权限", "nav.evidence": "Evidence",
-            "nav.capabilities": "能力总览", "nav.mcp": "MCP", "nav.faq": "常见问题",
+            "nav.capabilities": "能力总览", "nav.mcp": "MCP", "nav.skill": "Skills", "nav.faq": "常见问题",
             "group.getStarted": "开始使用", "group.concepts": "核心概念", "group.capabilities": "能力", "group.help": "帮助",
             "toc.title": "本页目录", "action.copy": "复制全文", "action.copied": "已复制",
             "welcome.title": "欢迎使用 Peer Agent",
@@ -1039,7 +1166,7 @@ Evidence owns governance.</code></pre>
             "evidence.s3": "长 Goal 会话里，把 Evidence 当作跨多步审计轨迹。",
             "evidence.compact": "相关：/compact 会用结构化摘要压缩模型上下文，UI 转录可保留 —— 但 Evidence/产物仍比摘要文本更重要。",
             "cap.title": "能力总览",
-            "cap.lede": "能力经 provider/manifest 声明，投影为模型工具，并在 PermissionGrant 后执行。Shell、MCP、插件没有“秘密旁路”。",
+            "cap.lede": "能力经 provider/manifest 声明，投影为模型工具，并在 PermissionGrant 后执行。Shell、MCP、插件、Skills 没有“秘密旁路”。",
             "cap.thArea": "领域", "cap.thExamples": "示例", "cap.thGuard": "治理要点",
             "cap.r1a": "文件", "cap.r1b": "读取 / 搜索 / 编辑工作区文件", "cap.r1c": "优先工作区作用域；写入应可经 Evidence 复查",
             "cap.r2a": "Shell", "cap.r2b": "构建、测试、git、脚本", "cap.r2c": "高影响——保持先询问；检查 stdout 产物",
@@ -1073,6 +1200,54 @@ Evidence owns governance.</code></pre>
             "faq.q6": "去哪里报 bug？",
             "faq.a6": "yinLiangDream/Peer-Agent 的 GitHub Issues。尽量注明 Desktop 还是 CLI、版本（peer --version / 应用版本），并附 Evidence 片段。",
             "faq.changelog": "更新日志", "faq.download": "下载",
+            
+            "skill.title": "Skills",
+            "skill.lede": "Skill 是给 Agent 复用的指令包，不是远程工具服务器。Peer Agent 从本地包（SKILL.md）加载 Skills，管理启用/禁用，并在同一套 Runtime 治理链下把选中的 skill 上下文注入会话。",
+            "skill.whatTitle": "Skill 是什么",
+            "skill.what1": "包 — 含 SKILL.md（必需）与可选 assets/ 的目录或压缩包。",
+            "skill.what2": "Frontmatter — name/description，可选 whenToUse、allowed-tools、license 元数据。",
+            "skill.what3": "正文 — skill 激活后模型应遵循的流程 / playbook。",
+            "skill.what4": "本地 store — 安装在应用 user-data skill 根目录；启用/禁用写入本地 settings。",
+            "skill.notTool": "与 MCP 不同：MCP 把外部工具投影进 Runtime。Skill 主要注入结构化指令上下文与可选工具允许提示 —— 仍不能绕过 PermissionGrant / Evidence。",
+            "skill.vsTitle": "Skill vs Plugin vs MCP",
+            "skill.thObject": "对象",
+            "skill.thRole": "职责",
+            "skill.thUser": "你管理什么",
+            "skill.vsSkillRole": "可复用的 Agent playbook / 指令包",
+            "skill.vsSkillUser": "安装、启用/禁用、插入/调用到线程",
+            "skill.vsPluginRole": "本地能力打包与分发单元",
+            "skill.vsPluginUser": "以包形式交付 provider/adapter",
+            "skill.vsMcpRole": "外部工具的传输协议",
+            "skill.vsMcpUser": "注册/启用 server，使工具可被投影",
+            "skill.packageTitle": "包结构",
+            "skill.packageBody": "当前支持在压缩包根（或仅一层顶层目录）包含 SKILL.md 的 zip / tgz。空 description 会被视为无效噪音并丢弃。",
+            "skill.lifeTitle": "本机生命周期",
+            "skill.l1": "发现 / 安装 — 从本地 skill roots 加载，或从 zip/tgz 安装到用户 skill store。",
+            "skill.l2": "列表 — 每个 skill 暴露 id、name、description、whenToUse、version、enabled。",
+            "skill.l3": "启用 / 禁用 — 禁用后仍保留安装，但不进入活跃集合。",
+            "skill.l4": "借用 / 链接 — 可选 source roots 可暴露可 link 进本地 store 的技能。",
+            "skill.l5": "在线程中使用 — 插入或调用 skill 上下文；模型跟随 playbook，工具仍需授权。",
+            "skill.l6": "刷新 — 安装或外部修改后重新扫描 roots / store。",
+            "skill.cliTitle": "CLI：/skill",
+            "skill.cliBody": "TUI 斜杠面板中 /skill 打开 Skills 管理：浏览已安装技能、启用/禁用、刷新、插入或调用。Desktop 有对应 Skills UI，共享同一 store 概念。",
+            "skill.thAction": "动作",
+            "skill.thMeaning": "含义",
+            "skill.aBrowse": "浏览",
+            "skill.aBrowseM": "查看已安装技能与启用状态",
+            "skill.aToggle": "启用 / 禁用",
+            "skill.aToggleM": "保留安装包，同时控制是否参与",
+            "skill.aRefresh": "刷新",
+            "skill.aRefreshM": "从本地 roots / store 重新加载",
+            "skill.aInsert": "插入",
+            "skill.aInsertM": "把 skill 上下文注入当前线程，供模型遵循",
+            "skill.aInvoke": "调用",
+            "skill.aInvokeM": "把该 skill 作为后续步骤的活跃 playbook",
+            "skill.cliWarn": "治理：启用 Skill 不是整机 shell 授权。Skill 鼓励的任何工具仍走 Runtime Projection → PermissionGrant → Evidence。",
+            "skill.whenTitle": "什么时候用 Skills",
+            "skill.when1": "希望 Agent 稳定遵循的可重复流程（发版清单、审查标准、事故 playbook）。",
+            "skill.when2": "需要以包形式传播的团队约定，而不是一次性粘贴提示词。",
+            "skill.when3": "应保持本地与可审计的领域流程，可附带工具允许列表。",
+            "skill.whenNot": "若需要实时外部 API 工具面，优先 MCP。若需要新的本机执行 provider 族，优先 Plugin/Provider —— 不要让 Skill 正文假装成 tool host。",
             documentTitle: "Peer Agent — 文档"
           }
         };
