@@ -992,7 +992,16 @@ export function createLlmConfigStore({
     if (patch.name !== undefined) item.name = patch.name;
     if (patch.baseUrl !== undefined) item.baseUrl = patch.baseUrl;
     if (patch.model !== undefined) {
-      item.model = patch.model;
+      const nextModel = String(patch.model || '').trim();
+      if (!nextModel) throw new Error('model is required');
+      // 同渠道内 model id 必须唯一；允许保留自身当前值。
+      if (items.some((other) => other.id !== id
+        && (other.groupId || other.id) === groupId
+        && String(other.model || '').trim() === nextModel)) {
+        throw new Error(`Model ${nextModel} already exists in provider group`);
+      }
+      item.model = nextModel;
+      // 改 model 后默认清掉旧昵称；若本次 patch 同时带 modelLabel，随后会写回。
       delete item.modelLabel;
     }
     applyExplicitModelMetadataPatch(item, patch);

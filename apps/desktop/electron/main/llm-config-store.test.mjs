@@ -1380,3 +1380,52 @@ test('duplicateModel throws when source id is missing', () => withStore(({ confi
   const store = createLlmConfigStore({ configFile });
   assert.throws(() => store.duplicateModel('missing-id'), /Provider missing-id not found/);
 }));
+
+
+test('updateProvider renames model id within the same group', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const base = store.addProvider({
+    provider: 'anthropic',
+    authMethod: 'api_key',
+    apiKey: 'k',
+    model: 'claude-a',
+    modelLabel: 'Claude A',
+  });
+  const updated = store.updateProvider(base.id, {
+    model: 'claude-b',
+    modelLabel: 'Claude B',
+  });
+  assert.equal(updated.model, 'claude-b');
+  assert.equal(updated.modelLabel, 'Claude B');
+  assert.equal(updated.groupId, base.groupId);
+}));
+
+test('updateProvider rejects empty model id', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const base = store.addProvider({
+    provider: 'openai',
+    authMethod: 'api_key',
+    apiKey: 'k',
+    model: 'gpt-a',
+  });
+  assert.throws(() => store.updateProvider(base.id, { model: '   ' }), /model is required/);
+}));
+
+test('updateProvider rejects model id that already exists in the same group', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const base = store.addProvider({
+    provider: 'openai',
+    authMethod: 'api_key',
+    apiKey: 'k',
+    model: 'model-a',
+  });
+  store.addModel(base.groupId, { model: 'model-b' });
+  assert.throws(
+    () => store.updateProvider(base.id, { model: 'model-b' }),
+    /already exists in provider group/,
+  );
+  // 保留自身 model id 允许。
+  const same = store.updateProvider(base.id, { model: 'model-a', modelLabel: 'A' });
+  assert.equal(same.model, 'model-a');
+  assert.equal(same.modelLabel, 'A');
+}));

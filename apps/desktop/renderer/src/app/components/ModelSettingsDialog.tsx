@@ -17,6 +17,7 @@ import {
 
 interface ModelSettingsForm {
   nickname: string;
+  modelId: string;
   contextWindow: string;
   maxOutputTokens: string;
   inputPrice: string;
@@ -60,6 +61,7 @@ export function ModelSettingsDialog({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [form, setForm] = useState<ModelSettingsForm>({
     nickname: model.modelLabel ?? '',
+    modelId: model.model ?? '',
     contextWindow: model.contextWindow ? String(model.contextWindow) : '',
     maxOutputTokens: model.maxOutputTokens ? String(model.maxOutputTokens) : '',
     inputPrice: model.inputPrice != null ? String(model.inputPrice) : '',
@@ -79,10 +81,16 @@ export function ModelSettingsDialog({
     setSaving(true);
     setSaveError(null);
     try {
+      const modelId = form.modelId.trim();
+      if (!modelId) {
+        setSaveError(zh ? 'Model ID 不能为空' : 'Model ID is required');
+        return;
+      }
       const reasoningEffortMap = form.supportsReasoning === 'yes'
         ? parseReasoningEffortMap(form.reasoningEffortMapText)
         : undefined;
       await onSave({
+        model: modelId,
         modelLabel: form.nickname.trim() || null,
         contextWindow: asOptionalNumber(form.contextWindow),
         maxOutputTokens: asOptionalNumber(form.maxOutputTokens),
@@ -128,7 +136,15 @@ export function ModelSettingsDialog({
                 <span className={`llm-metadata-state is-${completion}`}>{completion === 'complete' ? (zh ? '元数据完整' : 'Complete') : completion === 'partial' ? (zh ? '部分待完善' : 'Partial') : (zh ? '元数据待完善' : 'Needs metadata')}</span>
               </div>
               <label><span>{zh ? '昵称' : 'Nickname'}</span><input value={form.nickname} placeholder={zh ? '可选' : 'Optional'} onChange={(event) => setForm((current) => ({ ...current, nickname: event.target.value }))} /></label>
-              <label><span>Model ID</span><input value={model.model} readOnly /></label>
+              <label>
+                <span>Model ID</span>
+                <input
+                  value={form.modelId}
+                  placeholder={zh ? 'API 模型名（同渠道唯一）' : 'API model id (unique in channel)'}
+                  onChange={(event) => setForm((current) => ({ ...current, modelId: event.target.value }))}
+                  spellCheck={false}
+                />
+              </label>
               <div className="llm-settings-grid">
                 <label><span>{zh ? '上下文长度' : 'Context window'}</span><input type="number" min="0" value={form.contextWindow} placeholder={zh ? '未知' : 'Unknown'} onChange={(event) => setForm((current) => ({ ...current, contextWindow: event.target.value }))} /></label>
                 <label><span>{zh ? '最大输出' : 'Max output'}</span><input type="number" min="0" value={form.maxOutputTokens} placeholder={zh ? '未知' : 'Unknown'} onChange={(event) => setForm((current) => ({ ...current, maxOutputTokens: event.target.value }))} /></label>
