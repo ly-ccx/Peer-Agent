@@ -12,8 +12,28 @@ import { ShortcutsPanel } from './ShortcutsPanel';
 import { UpdatesPanel } from './UpdatesPanel';
 import { UsageStatsPanel } from '../../settings/UsageStatsPanel';
 
-type SettingsSection = 'general' | 'model' | 'skills' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage';
+export type SettingsSection = 'general' | 'model' | 'skills' | 'instructions' | 'git' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage';
 type SettingsGroup = { readonly label: string; readonly items: ReadonlyArray<{ key: SettingsSection; label: string }>; readonly lowPriority?: boolean };
+
+const SETTINGS_SECTIONS: ReadonlySet<SettingsSection> = new Set([
+  'general',
+  'model',
+  'skills',
+  'instructions',
+  'git',
+  'shortcuts',
+  'appearance',
+  'updates',
+  'archived',
+  'usage',
+]);
+
+function resolveSettingsSection(value: string | null | undefined): SettingsSection {
+  if (value && SETTINGS_SECTIONS.has(value as SettingsSection)) {
+    return value as SettingsSection;
+  }
+  return 'general';
+}
 
 /**
  * SettingsPage 是设置入口的单一表达层:
@@ -30,6 +50,7 @@ type SettingsGroup = { readonly label: string; readonly items: ReadonlyArray<{ k
 export function SettingsPage({
   availableLocales,
   i18n,
+  initialSection = 'general',
   onBack,
   onLocaleChanged,
   onReplyLanguageChanged,
@@ -40,6 +61,8 @@ export function SettingsPage({
 }: {
   readonly availableLocales: readonly LocaleCode[];
   readonly i18n: I18nRuntime;
+  /** 打开设置页时落到的分区；首启配置模型应传 `model`。 */
+  readonly initialSection?: SettingsSection | null;
   readonly onBack: () => void;
   readonly onLocaleChanged: () => Promise<void> | void;
   readonly onReplyLanguageChanged?: (replyLanguage: string) => void;
@@ -48,7 +71,7 @@ export function SettingsPage({
   readonly workspacePath: string | null;
   readonly onArchivedConversationsChanged?: () => Promise<void> | void;
 }) {
-  const [section, setSection] = useState<SettingsSection>('general');
+  const [section, setSection] = useState<SettingsSection>(() => resolveSettingsSection(initialSection));
   const [query, setQuery] = useState('');
   const isZh = i18n.locale === 'zh-CN';
   const groups: readonly SettingsGroup[] = [

@@ -1927,18 +1927,27 @@ export function ChatSurface({
               </svg>
             </div>
             <h2>
-              {workspaceLabel
-                ? (isZh ? `接下来在 ${workspaceLabel} 做什么？` : `What should we work on in ${workspaceLabel}?`)
-                : (isZh ? '接下来做什么？' : 'What should we work on?')}
+              {!hasProvider
+                ? (isZh ? '先接通模型，再开始任务' : 'Connect a model to get started')
+                : workspaceLabel
+                  ? (isZh ? `接下来在 ${workspaceLabel} 做什么？` : `What should we work on in ${workspaceLabel}?`)
+                  : (isZh ? '接下来做什么？' : 'What should we work on?')}
             </h2>
             {!hasProvider ? (
-              <p>
-                {isZh ? '请先' : 'Please '}
-                <button type="button" className="chat-link-btn" onClick={onOpenSettings}>
-                  {isZh ? '配置模型' : 'configure a model'}
-                </button>
-                {isZh ? '后开始对话' : ' to start chatting'}
-              </p>
+              <>
+                <p>
+                  {isZh ? '请先' : 'Please '}
+                  <button type="button" className="chat-link-btn" onClick={onOpenSettings}>
+                    {isZh ? '配置模型' : 'configure a model'}
+                  </button>
+                  {isZh ? '后开始对话。' : ' to start chatting.'}
+                </p>
+                <div className="chat-empty-actions">
+                  <button type="button" className="chat-empty-primary-btn" onClick={onOpenSettings}>
+                    {isZh ? '配置模型' : 'Configure model'}
+                  </button>
+                </div>
+              </>
             ) : (
               <p>{isZh ? '描述任务，或从下面选一个开始' : 'Describe a task, or pick a starting point below'}</p>
             )}

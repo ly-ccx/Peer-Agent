@@ -1,7 +1,7 @@
 import { createI18n } from '@peer-agent/i18n';
 import type { LlmProviderConfigView } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { SettingsPage } from './app/components/SettingsPage';
+import { SettingsPage, type SettingsSection } from './app/components/SettingsPage';
 import { BrandStartupLoader } from './app/components/BrandStartupLoader';
 import { QuickChatWindow } from './app/components/QuickChatWindow';
 import { displayShortcut } from './app/components/ShortcutsPanel';
@@ -79,6 +79,12 @@ function readReplyLanguage(settings: Record<string, unknown> | null | undefined)
   return typeof settings?.replyLanguage === 'string' ? settings.replyLanguage : '';
 }
 
+function readSetupModelAutoOpened(settings: Record<string, unknown> | null | undefined): boolean {
+  const onboarding = settings?.onboarding;
+  if (!onboarding || typeof onboarding !== 'object' || Array.isArray(onboarding)) return false;
+  return Boolean((onboarding as { setupModelAutoOpened?: unknown }).setupModelAutoOpened);
+}
+
 function readGitBranchPrefix(settings: Record<string, unknown> | null | undefined): string {
   return readGitBranchPrefixFromSettings(settings);
 }
@@ -99,10 +105,16 @@ function MainApp() {
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [activePage, setActivePage] = useState<AppPage>('chat');
+  const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection>('general');
   const [conversationView, setConversationView] = useState<ConversationView>('active');
   // 窗口是否处于原生全屏。全屏时交通灯被系统隐藏,据此收掉顶部为其预留的留白。
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
+  const [providersReady, setProvidersReady] = useState(false);
+  const [setupModelAutoOpened, setSetupModelAutoOpened] = useState(() =>
+    readSetupModelAutoOpened(clientApi.initialSettings),
+  );
+  const setupModelAutoOpenAttemptedRef = useRef(false);
   const [conversations, setConversations] = useState<readonly ConversationMeta[]>(
     () => startupSnapshot?.conversations as readonly ConversationMeta[] ?? [],
   );
@@ -162,7 +174,13 @@ function MainApp() {
   const refreshProviders = useCallback(async () => {
     // 表达层只展示用户明确配置的模型。远程/本机目录是设置页的候选来源，不能在聊天菜单里
     // 自动展开，否则“支持的模型”会绕过配置边界，串进 provider 的已配置模型列表。
-    try { setProviders(await clientApi.llmListProviders()); } catch {}
+    try {
+      setProviders(await clientApi.llmListProviders());
+    } catch {
+      // Keep previous providers on transient list failures.
+    } finally {
+      setProvidersReady(true);
+    }
   }, []);
 
   const refreshSeqRef = useRef(0);
@@ -334,6 +352,46 @@ function MainApp() {
       }
     }).catch(() => undefined);
   }, [applyConversationListPage, refreshProviders, refreshSettings, startupSnapshot]);
+
+  const openSettings = useCallback((section: SettingsSection = 'general') => {
+    setSettingsInitialSection(section);
+    setActivePage('settings');
+  }, []);
+
+  const markSetupModelAutoOpened = useCallback(() => {
+    if (setupModelAutoOpened) return;
+    setSetupModelAutoOpened(true);
+    void (async () => {
+      try {
+        const current = await clientApi.getSettings();
+        const prev = current?.onboarding;
+        const nextOnboarding = {
+          ...(prev && typeof prev === 'object' && !Array.isArray(prev) ? prev : {}),
+          setupModelAutoOpened: true,
+        };
+        await clientApi.updateSettings({ onboarding: nextOnboarding });
+      } catch {
+        // Preference write failure must not block opening settings.
+      }
+    })();
+  }, [setupModelAutoOpened]);
+
+  // Gate A：未配置模型时，首启自动进入 Settings/模型 一次（可返回；之后只靠空态 CTA）。
+  useEffect(() => {
+    if (!showMainShell || !providersReady) return;
+    if (setupModelAutoOpened || setupModelAutoOpenAttemptedRef.current) return;
+    if (providers.some((p) => p.apiKeyConfigured)) return;
+    setupModelAutoOpenAttemptedRef.current = true;
+    markSetupModelAutoOpened();
+    openSettings('model');
+  }, [
+    markSetupModelAutoOpened,
+    openSettings,
+    providers,
+    providersReady,
+    setupModelAutoOpened,
+    showMainShell,
+  ]);
 
   // 任务续传(ADR 21):重启后回到中断现场。
   // peek(只读不清)拿到会话锚定的待办 → 切到 sessionId(回到原会话)→ 存 resumeTask,
@@ -746,7 +804,7 @@ function MainApp() {
               onUnpinConversation={handleUnpinConversation}
               onReorderPinnedConversations={handleReorderPinnedConversations}
               onShowActiveConversations={handleShowActiveConversations}
-              onOpenSettings={() => setActivePage('settings')}
+              onOpenSettings={() => openSettings('general')}
               onWorkspaceChanged={handleWorkspaceChanged}
               startupSnapshot={startupSnapshot}
             />
@@ -766,7 +824,7 @@ function MainApp() {
                     setResumeTask(null);
                     void clientApi.clearPendingTask().catch(() => {});
                   }}
-                  onOpenSettings={() => setActivePage('settings')}
+                  onOpenSettings={() => openSettings('model')}
                   onConversationUpdated={() => { void refreshConversations(); }}
                   onStreamingChange={(convId, streaming) => {
                     if (!convId) return;
@@ -812,8 +870,10 @@ function MainApp() {
           {activePage === 'settings' ? (
             <section className="app-page-layer app-settings-page is-active">
               <SettingsPage
+                key={`settings-${settingsInitialSection}`}
                 availableLocales={availableLocales}
                 i18n={i18n}
+                initialSection={settingsInitialSection}
                 onBack={() => {
                   setActivePage('chat');
                   void refreshProviders();
