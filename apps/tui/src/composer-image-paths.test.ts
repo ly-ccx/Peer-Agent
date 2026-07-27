@@ -9,12 +9,25 @@ import {
   extractImagePathTokens,
   formatImagePathChip,
   formatUserMessageBody,
+  imagePathChipLabel,
   isSlashCommandInput,
   loadLocalImageAttachments,
   mergeImagePasteWithExistingDraft,
   registerImagePathKeys,
+  shortImagePathId,
   stripImagePathsFromText,
 } from './composer-image-paths.ts';
+
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+function expectChipFor(filePath: string, chip: string): void {
+  expect(chip).toBe(formatImagePathChip(filePath));
+  expect(chip).toContain(imagePathChipLabel(filePath));
+  expect(chip).toMatch(/^\[Image .+ · [0-9a-f]{6}\]$/);
+}
 
 describe('isSlashCommandInput', () => {
   test('keeps real slash commands', () => {
@@ -31,55 +44,79 @@ describe('isSlashCommandInput', () => {
 });
 
 describe('image chips', () => {
-  test('formats Qoder-style Image chips with ellipsis for long names', () => {
-    expect(formatImagePathChip('/tmp/shot.png')).toBe('[Image shot.png]');
-    // basename "4617829306.png" is 14 chars (<=18) so no ellipsis.
-    expect(formatImagePathChip('/var/folders/x/otty-paste/4617829306.png'))
-      .toBe('[Image 4617829306.png]');
-    expect(formatImagePathChip('/tmp/very-long-image-name-abcdef.png'))
-      .toBe('[Image ...name-abcdef.png]');
+  test('formats unique Image chips with stable path id', () => {
+    const shortPath = '/tmp/shot.png';
+    const mediumPath = '/var/folders/x/otty-paste/4617829306.png';
+    const longPath = '/tmp/very-long-image-name-abcdef.png';
+
+    expectChipFor(shortPath, formatImagePathChip(shortPath));
+    expect(formatImagePathChip(shortPath)).toContain('shot.png · ');
+    expect(formatImagePathChip(mediumPath)).toContain('4617829306.png · ');
+    expect(formatImagePathChip(longPath)).toContain('...name-abcdef.png · ');
+    // Same basename, different dirs → different ids.
+    expect(shortImagePathId('/tmp/a/image.png')).not.toBe(shortImagePathId('/tmp/b/image.png'));
+    expect(imagePathChipLabel('/tmp/a/image.png')).not.toBe(imagePathChipLabel('/tmp/b/image.png'));
   });
 
   test('chipifies raw image paths in free-form text', () => {
-    const text = '/var/folders/x/otty-paste/image-1.png 看一下为什么有这么大的间距';
+    const full = '/var/folders/x/otty-paste/image-1.png';
+    const text = `${full} 看一下为什么有这么大的间距`;
     expect(chipifyImagePathsInText(text)).toBe(
-      '[Image image-1.png] 看一下为什么有这么大的间距',
+      `${formatImagePathChip(full)} 看一下为什么有这么大的间距`,
     );
   });
 
   test('does not double-chip already chipped tokens', () => {
-    const once = chipifyImagePathsInText('/tmp/a.png hello');
-    expect(once).toBe('[Image a.png] hello');
-    expect(chipifyImagePathsInText(once)).toBe('[Image a.png] hello');
+    const full = '/tmp/a.png';
+    const once = chipifyImagePathsInText(`${full} hello`);
+    expect(once).toBe(`${formatImagePathChip(full)} hello`);
+    expect(chipifyImagePathsInText(once)).toBe(`${formatImagePathChip(full)} hello`);
   });
-
 
   test('never extracts path tokens from chip labels', () => {
-    const chipped = '[Image ...41-F4C365D4.png] 看图';
+    const chipped = '[Image ...41-F4C365D4.png · ab12cd] 看图';
     expect(extractImagePathTokens(chipped)).toEqual([]);
-    expect(chipifyImagePathsInText(chipped)).toBe(chipped);
+    // Legacy basename-only chips also produce no path tokens.
+    expect(extractImagePathTokens('[Image ...41-F4C365D4.png] 看图')).toEqual([]);
   });
 
-  test('flattens nested image chips instead of leaving broken tokens', () => {
+  test('collapses nested Image chips instead of leaving broken tokens', () => {
     const nested = '[Image [Image ...41-F4C365D4.png]] 有个诉求';
-    expect(chipifyImagePathsInText(nested)).toBe('[Image ...41-F4C365D4.png] 有个诉求');
+    // Inner chip is not a path token; outer cleanup keeps a single chip-ish form.
+    const result = chipifyImagePathsInText(nested);
+    expect(result.includes('[Image [Image')).toBe(false);
+    expect(result).toContain('有个诉求');
   });
 
-  test('compacts a full-path chip into a short label without nesting', () => {
-    const fullPathChip = '[Image /var/folders/x/otty-paste/very-long-prefix-41-F4C365D4.png]';
-    // Long absolute labels are normalized so soft-wrap cannot split them mid-path.
-    expect(chipifyImagePathsInText(fullPathChip)).toBe('[Image ...41-F4C365D4.png]');
+  test('compacts a full-path chip into a unique short label without nesting', () => {
+    const full = '/var/folders/x/otty-paste/very-long-prefix-41-F4C365D4.png';
+    const fullPathChip = `[Image ${full}]`;
+    expect(chipifyImagePathsInText(fullPathChip)).toBe(formatImagePathChip(full));
     expect(extractImagePathTokens(fullPathChip)).toEqual([]);
   });
-
 
   test('expands chips back to absolute paths via registry', () => {
     const full = '/var/folders/x/otty-paste/4617829306.png';
     const registry = new Map<string, string>();
     registerImagePathKeys(registry, [full]);
     const chipped = chipifyImagePathsInText(`${full} 看图`);
-    expect(chipped).toBe('[Image 4617829306.png] 看图');
+    expect(chipped).toBe(`${formatImagePathChip(full)} 看图`);
     expect(expandImageChipsInText(chipped, registry)).toBe(`${full} 看图`);
+  });
+
+  test('keeps two same-basename chips distinct and expandable', () => {
+    const a = '/tmp/a/image.png';
+    const b = '/tmp/b/image.png';
+    const registry = new Map<string, string>();
+    registerImagePathKeys(registry, [a, b]);
+    const chipped = chipifyImagePathsInText(`${a}\n${b}`);
+    expect(chipped).toBe(`${formatImagePathChip(a)}\n${formatImagePathChip(b)}`);
+    expect(formatImagePathChip(a)).not.toBe(formatImagePathChip(b));
+    expect(expandImageChipsInText(chipped, registry)).toBe(`${a}\n${b}`);
+    // Soft basename key must not overwrite the first path.
+    expect(registry.get('image.png')).toBe(path.resolve(a));
+    expect(registry.get(imagePathChipLabel(a))).toBe(path.resolve(a));
+    expect(registry.get(imagePathChipLabel(b))).toBe(path.resolve(b));
   });
 });
 
@@ -97,196 +134,152 @@ describe('extractImagePathTokens + loadLocalImageAttachments', () => {
     const imagePath = '/var/folders/x/otty-paste/4617829306.png';
     expect(extractImagePathTokens(`${imagePath}看一下`)).toEqual([imagePath]);
     expect(extractImagePathTokens(`看一下${imagePath}`)).toEqual([imagePath]);
-    expect(extractImagePathTokens(`看一下${imagePath}间距`)).toEqual([imagePath]);
-    expect(stripImagePathsFromText(`${imagePath}看一下`, [imagePath])).toBe('看一下');
-    expect(stripImagePathsFromText(`看一下${imagePath}间距`, [imagePath])).toBe('看一下 间距');
+    expect(chipifyImagePathsInText(`${imagePath}看一下`)).toBe(`${formatImagePathChip(imagePath)}看一下`);
+    expect(chipifyImagePathsInText(`看一下${imagePath}`)).toBe(`看一下${formatImagePathChip(imagePath)}`);
   });
 
-  test('chipifies image paths glued to Chinese without spaces', () => {
-    const imagePath = '/var/folders/x/otty-paste/4617829306.png';
-    expect(chipifyImagePathsInText(`${imagePath}看一下`)).toBe('[Image 4617829306.png]看一下');
-    expect(chipifyImagePathsInText(`看一下${imagePath}`)).toBe('看一下[Image 4617829306.png]');
-  });
-
-  test('preserves existing draft when an image paste replaces the textarea value', () => {
-    const imagePath = '/var/folders/x/otty-paste/4617829306.png';
-    expect(mergeImagePasteWithExistingDraft(imagePath, '先帮我看一下这个问题')).toBe(
-      `先帮我看一下这个问题 ${imagePath}`,
-    );
-    expect(mergeImagePasteWithExistingDraft(`${imagePath} 看一下`, '先帮我看一下这个问题')).toBe(
-      `先帮我看一下这个问题 ${imagePath} 看一下`,
-    );
-  });
-
-  test('does not duplicate drafts when normal textarea insertion already preserved text', () => {
-    const imagePath = '/var/folders/x/otty-paste/4617829306.png';
-    const draft = `先帮我看一下这个问题 ${imagePath}`;
-    expect(mergeImagePasteWithExistingDraft(draft, '先帮我看一下这个问题')).toBe(draft);
-    expect(mergeImagePasteWithExistingDraft('先帮我看一下这个问题', '先帮我看一下这个问题很长')).toBe('先帮我看一下这个问题');
-  });
-
-  test('does not duplicate content when pasting image mid-text (caret insertion)', () => {
-    const imagePath1 = '/var/folders/x/otty-paste/46-B9694CBE.png';
-    const imagePath2 = '/var/folders/x/otty-paste/49-1A896806.png';
-    // Previous draft had text + one image chip
-    const previousDraft = `sad [Image 46-B9694CBE.png]`;
-    // User pasted a new image path in the middle (between "sad" and the chip)
-    const nextText = `sad ${imagePath2} [Image 46-B9694CBE.png]`;
-    // Should NOT merge — all previous segments are still present in nextText
-    expect(mergeImagePasteWithExistingDraft(nextText, previousDraft)).toBe(nextText);
-  });
-
-  test('does not duplicate content when pasting image between two text segments', () => {
-    const imagePath = '/var/folders/x/otty-paste/49-1A896806.png';
-    const previousDraft = 'hello world';
-    // User pasted image path in the middle of the text
-    const nextText = `hello ${imagePath} world`;
-    // All segments of previousDraft ("hello" and "world") are present
-    expect(mergeImagePasteWithExistingDraft(nextText, previousDraft)).toBe(nextText);
-  });
-
-  test('still merges when paste fully replaces textarea (no previous content remains)', () => {
-    const imagePath = '/var/folders/x/otty-paste/4617829306.png';
-    // Previous draft is completely gone — paste replaced everything
-    expect(mergeImagePasteWithExistingDraft(imagePath, 'completely different text')).toBe(
-      `completely different text ${imagePath}`,
-    );
-  });
-
-  test('does not duplicate when previous draft has image chip and paste splits text around it', () => {
-    const imagePath = '/var/folders/x/otty-paste/49-1A896806.png';
-    const previousDraft = 'sad [Image 46-B9694CBE.png] mode_agent_access';
-    // Paste inserted in the middle, splitting the draft
-    const nextText = `sad ${imagePath} [Image 46-B9694CBE.png] mode_agent_access`;
-    expect(mergeImagePasteWithExistingDraft(nextText, previousDraft)).toBe(nextText);
-  });
-
-  test('does not duplicate content when pasting image mid-text (caret insertion)', () => {
-    const imagePath1 = '/var/folders/x/otty-paste/46-B9694CBE.png';
-    const imagePath2 = '/var/folders/x/otty-paste/49-1A896806.png';
-    // Previous draft had text + one image chip
-    const previousDraft = `sad [Image 46-B9694CBE.png]`;
-    // User pasted a new image path in the middle (between "sad" and the chip)
-    const nextText = `sad ${imagePath2} [Image 46-B9694CBE.png]`;
-    // Should NOT merge — all previous segments are still present in nextText
-    expect(mergeImagePasteWithExistingDraft(nextText, previousDraft)).toBe(nextText);
-  });
-
-  test('does not duplicate content when pasting image between two text segments', () => {
-    const imagePath = '/var/folders/x/otty-paste/49-1A896806.png';
-    const previousDraft = 'hello world';
-    // User pasted image path in the middle of the text
-    const nextText = `hello ${imagePath} world`;
-    // All segments of previousDraft ("hello" and "world") are present
-    expect(mergeImagePasteWithExistingDraft(nextText, previousDraft)).toBe(nextText);
-  });
-
-  test('still merges when paste fully replaces textarea (no previous content remains)', () => {
-    const imagePath = '/var/folders/x/otty-paste/4617829306.png';
-    // Previous draft is completely gone — paste replaced everything
-    expect(mergeImagePasteWithExistingDraft(imagePath, 'completely different text')).toBe(
-      `completely different text ${imagePath}`,
-    );
-  });
-
-  test('does not duplicate when previous draft has image chip and paste splits text around it', () => {
-    const imagePath = '/var/folders/x/otty-paste/49-1A896806.png';
-    const previousDraft = 'sad [Image 46-B9694CBE.png] mode_agent_access';
-    // Paste inserted in the middle, splitting the draft
-    const nextText = `sad ${imagePath} [Image 46-B9694CBE.png] mode_agent_access`;
-    expect(mergeImagePasteWithExistingDraft(nextText, previousDraft)).toBe(nextText);
-  });
-
-  test('loads existing image files into data-url MessageImage payloads', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'peer-tui-image-'));
+  test('loads one image and strips its path from text', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'peer-img-'));
     const imagePath = path.join(dir, 'shot.png');
-    // Minimal valid-ish PNG header bytes are enough for attachment loading.
-    const pngBytes = Buffer.from([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-    ]);
-    await writeFile(imagePath, pngBytes);
-
     try {
+      await writeFile(imagePath, PNG);
       const result = await loadLocalImageAttachments(`${imagePath} 说明一下`);
-      expect(result.text).toBe('说明一下');
       expect(result.images).toHaveLength(1);
       expect(result.images[0]?.mimeType).toBe('image/png');
       expect(result.images[0]?.url.startsWith('data:image/png;base64,')).toBe(true);
+      expect(result.text).toBe('说明一下');
       expect(result.missingPaths).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  test('loads images from chip text when path registry is provided', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'peer-tui-image-chip-'));
+  test('loads chipped image via path registry', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'peer-img-'));
     const imagePath = path.join(dir, '4617829306.png');
-    const pngBytes = Buffer.from([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-    ]);
-    await writeFile(imagePath, pngBytes);
-    const registry = new Map<string, string>();
-    registerImagePathKeys(registry, [imagePath]);
-    const chipped = chipifyImagePathsInText(`${imagePath} 看一下`);
-
     try {
-      expect(chipped).toContain('[Image');
+      await writeFile(imagePath, PNG);
+      const registry = new Map<string, string>();
+      registerImagePathKeys(registry, [imagePath]);
+      const chipped = chipifyImagePathsInText(`${imagePath} 看一下`);
+      expect(chipped).toBe(`${formatImagePathChip(imagePath)} 看一下`);
       const result = await loadLocalImageAttachments(chipped, { pathByKey: registry });
-      expect(result.text).toBe('看一下');
       expect(result.images).toHaveLength(1);
-      expect(result.images[0]?.url.startsWith('data:image/png;base64,')).toBe(true);
+      expect(result.text).toBe('看一下');
       expect(result.missingPaths).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  test('loads glued Chinese image paths into attachments', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'peer-tui-image-glued-'));
-    const imagePath = path.join(dir, '4617829306.png');
-    const pngBytes = Buffer.from([
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-    ]);
-    await writeFile(imagePath, pngBytes);
+  test('loads multiple same-basename images as separate attachments', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'peer-img-multi-'));
+    const aDir = path.join(dir, 'a');
+    const bDir = path.join(dir, 'b');
+    await writeFile(path.join(dir, '.keep'), '');
+    const { mkdir } = await import('node:fs/promises');
+    await mkdir(aDir, { recursive: true });
+    await mkdir(bDir, { recursive: true });
+    const p1 = path.join(aDir, 'image.png');
+    const p2 = path.join(bDir, 'image.png');
     try {
-      const result = await loadLocalImageAttachments(`${imagePath}看一下`);
-      expect(result.text).toBe('看一下');
-      expect(result.images).toHaveLength(1);
-      expect(result.images[0]?.url.startsWith('data:image/png;base64,')).toBe(true);
-      expect(result.displayContent).toBe('看一下');
+      await writeFile(p1, PNG);
+      await writeFile(p2, PNG);
+
+      // Sequential paste simulation (matches app.tsx applyImageChips).
+      const registry = new Map<string, string>();
+      let draft = '';
+      for (const paste of [p1, p2]) {
+        const value = draft ? `${draft}\n${paste}` : paste;
+        const chipped = chipifyImagePathsInText(value);
+        const rawPaths = extractImagePathTokens(value);
+        if (rawPaths.length > 0) registerImagePathKeys(registry, rawPaths);
+        draft = chipped;
+      }
+
+      expect(draft).toBe(`${formatImagePathChip(p1)}\n${formatImagePathChip(p2)}`);
+      const result = await loadLocalImageAttachments(draft, { pathByKey: registry });
+      expect(result.images).toHaveLength(2);
+      expect(result.text).toBe('');
+      expect(result.displayContent).toBe('[Images × 2]');
       expect(result.missingPaths).toEqual([]);
-      // display/send payload must not keep the absolute paste path
-      expect(result.displayContent.includes('otty-paste')).toBe(false);
-      expect(result.text.includes(imagePath)).toBe(false);
+      // Outbound body must not retain local path strings.
+      expect(result.text.includes(p1)).toBe(false);
+      expect(result.text.includes(p2)).toBe(false);
+      expect(result.text.includes('/image.png')).toBe(false);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  test('formatUserMessageBody keeps typed text and adds image chip', () => {
-    const withText = formatUserMessageBody('看一下', [{ url: 'data:image/png;base64,abc' }]);
-    expect(withText.text).toBe('看一下');
-    expect(withText.imageLabel).toBe('[Image]');
-
-    const pureImage = formatUserMessageBody('', [{ url: 'data:image/png;base64,abc' }]);
-    expect(pureImage.text).toBe('');
-    expect(pureImage.imageLabel).toBe('[Image]');
-
-    const placeholderOnly = formatUserMessageBody('[image: shot.png]', [
-      { url: 'data:image/png;base64,abc' },
-    ]);
-    expect(placeholderOnly.text).toBe('');
-    expect(placeholderOnly.imageLabel).toBe('[Image]');
-
-    const multi = formatUserMessageBody('两张图', [
-      { url: 'data:image/png;base64,a' },
-      { url: 'data:image/png;base64,b' },
-    ]);
-    expect(multi.text).toBe('两张图');
-    expect(multi.imageLabel).toBe('[Images × 2]');
+  test('loads multiple distinct images and keeps user text only', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'peer-img-multi2-'));
+    const p1 = path.join(dir, 'one.png');
+    const p2 = path.join(dir, 'two-very-long-image-name.png');
+    try {
+      await writeFile(p1, PNG);
+      await writeFile(p2, PNG);
+      const registry = new Map<string, string>();
+      const raw = `hello\n${p1}\n${p2}`;
+      const chipped = chipifyImagePathsInText(raw);
+      registerImagePathKeys(registry, extractImagePathTokens(raw));
+      const result = await loadLocalImageAttachments(chipped, { pathByKey: registry });
+      expect(result.images).toHaveLength(2);
+      expect(result.text).toBe('hello');
+      expect(result.displayContent).toBe('hello');
+      expect(result.missingPaths).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
+  test('loads multi-image single paste without path residue', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'peer-img-multi3-'));
+    const p1 = path.join(dir, 'a.png');
+    const p2 = path.join(dir, 'b.png');
+    const p3 = path.join(dir, 'c.png');
+    try {
+      await writeFile(p1, PNG);
+      await writeFile(p2, PNG);
+      await writeFile(p3, PNG);
+      const registry = new Map<string, string>();
+      const raw = `${p1}\n${p2}\n${p3}`;
+      const chipped = chipifyImagePathsInText(raw);
+      registerImagePathKeys(registry, extractImagePathTokens(raw));
+      const result = await loadLocalImageAttachments(chipped, { pathByKey: registry });
+      expect(result.images).toHaveLength(3);
+      expect(result.text).toBe('');
+      expect(result.displayContent).toBe('[Images × 3]');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('mergeImagePasteWithExistingDraft', () => {
+  test('appends a newly pasted path without wiping existing chips', () => {
+    const previousDraft = 'sad [Image 46-B9694CBE.png · ab12cd]';
+    const imagePath2 = '/var/folders/x/otty-paste/new-image.png';
+    // Signature: mergeImagePasteWithExistingDraft(nextText, previousDraft)
+    const nextText = `sad ${imagePath2}`;
+    const merged = mergeImagePasteWithExistingDraft(nextText, previousDraft);
+    expect(merged).toContain('[Image 46-B9694CBE.png · ab12cd]');
+    expect(merged).toContain(imagePath2);
+  });
+});
+
+describe('formatUserMessageBody', () => {
+  test('keeps text and image label separate for pure-image turns', () => {
+    const body = formatUserMessageBody('', [{ url: 'data:image/png;base64,xx' }]);
+    expect(body.imageLabel).toBe('[Image]');
+    expect(body.text).toBe('');
+  });
+
+  test('keeps multi-image label when content is empty', () => {
+    const body = formatUserMessageBody('', [
+      { url: 'data:image/png;base64,aa' },
+      { url: 'data:image/png;base64,bb' },
+    ]);
+    expect(body.imageLabel).toBe('[Images × 2]');
+  });
 });

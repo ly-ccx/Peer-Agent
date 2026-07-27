@@ -254,13 +254,40 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
-/** Visible chip token, Qoder-style: `[Image ...tail.png]` or `[Image short.png]`. */
+/**
+ * Stable short id for an absolute path (FNV-1a → 6 hex chars).
+ * Used so two files with the same basename still get distinct chip keys.
+ */
+export function shortImagePathId(filePath: string): string {
+  const abs = path.resolve(normalizeLocalPath(filePath));
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < abs.length; i += 1) {
+    hash ^= abs.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0').slice(0, 6);
+}
+
+/**
+ * Visible chip label (without brackets). Format:
+ *   `short.png · a1b2c3` or `...tail.png · a1b2c3`
+ * The id is a stable hash of the absolute path so same-basename files never collide.
+ */
+export function imagePathChipLabel(filePath: string, maxVisible = 18): string {
+  const absolute = path.resolve(normalizeLocalPath(filePath));
+  const base = path.basename(absolute);
+  const id = shortImagePathId(absolute);
+  if (!base) return id;
+  const visible = base.length <= maxVisible
+    ? base
+    : `...${base.slice(-Math.max(6, maxVisible - 3))}`;
+  return `${visible} · ${id}`;
+}
+
+/** Visible chip token: `[Image short.png · a1b2c3]`. */
 export function formatImagePathChip(filePath: string, maxVisible = 18): string {
-  const base = path.basename(normalizeLocalPath(filePath));
-  if (!base) return '[Image]';
-  if (base.length <= maxVisible) return `[Image ${base}]`;
-  const keep = Math.max(6, maxVisible - 3);
-  return `[Image ...${base.slice(-keep)}]`;
+  const label = imagePathChipLabel(filePath, maxVisible);
+  return label ? `[Image ${label}]` : '[Image]';
 }
 
 /**
@@ -305,11 +332,14 @@ export function chipifyImagePathsInText(text: string): string {
     .join('');
 }
 
-
 function imagePathChipKeys(filePath: string): string[] {
-  const normalized = path.resolve(normalizeLocalPath(filePath));
-  const base = path.basename(normalized);
-  const keys = new Set<string>([base, normalized, filePath, normalizeLocalPath(filePath)]);
+  const absolute = path.resolve(normalizeLocalPath(filePath));
+  const base = path.basename(absolute);
+  const uniqueLabel = imagePathChipLabel(filePath);
+  // Unique label first; absolute path next. Basename is only a soft fallback
+  // (registered carefully so two same-basename paths never overwrite each other).
+  const keys = new Set<string>([uniqueLabel, absolute, filePath, normalizeLocalPath(filePath)]);
+  if (base) keys.add(base);
   if (base.length > 18) {
     const keep = Math.max(6, 15);
     keys.add(`...${base.slice(-keep)}`);
@@ -324,8 +354,28 @@ export function registerImagePathKeys(
 ): void {
   for (const filePath of filePaths) {
     const absolute = path.resolve(normalizeLocalPath(filePath));
+    const uniqueLabel = imagePathChipLabel(filePath);
+    // Always pin unique identity keys (never collide across same basenames).
+    pathByKey.set(uniqueLabel, absolute);
+    pathByKey.set(absolute, absolute);
+    pathByKey.set(normalizeLocalPath(filePath), absolute);
+    pathByKey.set(filePath, absolute);
+
+    // Soft keys (basename / truncated): only set when free or already this path.
+    // Never let a later same-basename path silently overwrite an earlier one.
     for (const key of imagePathChipKeys(filePath)) {
-      pathByKey.set(key, absolute);
+      if (
+        key === uniqueLabel
+        || key === absolute
+        || key === normalizeLocalPath(filePath)
+        || key === filePath
+      ) {
+        continue;
+      }
+      const existing = pathByKey.get(key);
+      if (!existing || existing === absolute) {
+        pathByKey.set(key, absolute);
+      }
     }
   }
 }
@@ -384,18 +434,47 @@ export async function loadLocalImageAttachments(
     usedPaths.push(localPath);
   }
 
-  let remainingText = stripImagePathsFromText(expanded, usedPaths);
+  // Collect every alias for successfully loaded images so local path strings
+  // never remain in the outbound body (unique chips, abs paths, legacy basenames).
+  const stripTargets = new Set<string>(usedPaths);
+  for (const used of usedPaths) {
+    if (used.startsWith('data:image/')) continue;
+    const abs = path.resolve(normalizeLocalPath(used));
+    stripTargets.add(used);
+    stripTargets.add(abs);
+    stripTargets.add(formatImagePathChip(abs));
+    stripTargets.add(imagePathChipLabel(abs));
+    stripTargets.add(`[Image ${imagePathChipLabel(abs)}]`);
+    const base = path.basename(abs);
+    if (base) {
+      stripTargets.add(base);
+      stripTargets.add(`[Image ${base}]`);
+      if (base.length > 18) {
+        const keep = Math.max(6, 15);
+        stripTargets.add(`[Image ...${base.slice(-keep)}]`);
+      }
+    }
+  }
+  for (const token of tokens) {
+    if (token.startsWith('data:image/')) continue;
+    const abs = path.resolve(normalizeLocalPath(token));
+    if (usedPaths.includes(abs) || usedPaths.includes(token)) {
+      stripTargets.add(token);
+      stripTargets.add(abs);
+    }
+  }
+
+  let remainingText = stripImagePathsFromText(expanded, [...stripTargets]);
+  // Drop any leftover image chips that pointed at loaded images.
   remainingText = remainingText
     .replace(IMAGE_CHIP_RE, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
-  const labels = usedPaths
-    .filter((item) => !item.startsWith('data:image/'))
-    .map((item) => path.basename(normalizeLocalPath(item)));
-  const uniqueLabels = [...new Set(labels)];
   const displayContent = remainingText
-    || (uniqueLabels.length > 0
-      ? `[image${uniqueLabels.length > 1 ? 's' : ''}: ${uniqueLabels.join(', ')}]`
+    || (images.length > 0
+      ? formatHistoryImageLabel(images)
       : text.trim());
 
   return {
@@ -406,10 +485,6 @@ export async function loadLocalImageAttachments(
   };
 }
 
-/**
- * Visible history placeholder for image attachments in TUI chat.
- * Terminal cannot render pixels; keep a stable chip so pure-image turns do not "disappear".
- */
 export function expandImageChipsInText(
   text: string,
   pathByKey: ReadonlyMap<string, string> | Readonly<Record<string, string>>,
@@ -419,23 +494,20 @@ export function expandImageChipsInText(
     : new Map(Object.entries(pathByKey));
   return text.replace(IMAGE_CHIP_RE, (full, label: string) => {
     const key = String(label).trim();
+    // Prefer exact unique label (`name.png · ab12cd`), then bare/truncated forms.
     const bare = key.startsWith('...') ? key.slice(3) : key;
     const candidates = [key, bare, path.basename(bare)];
     for (const candidate of candidates) {
       const hit = lookup.get(candidate);
       if (hit) return hit;
     }
+    // Soft fallback for legacy basename-only chips: first matching path only.
     for (const [mapKey, fullPath] of lookup.entries()) {
+      if (mapKey === key || mapKey === bare) return fullPath;
+    }
+    for (const [, fullPath] of lookup.entries()) {
       const base = path.basename(fullPath);
-      if (
-        mapKey === key
-        || mapKey === bare
-        || base === key
-        || base === bare
-        || base.endsWith(bare)
-      ) {
-        return fullPath;
-      }
+      if (base === key || base === bare) return fullPath;
     }
     return full;
   });
