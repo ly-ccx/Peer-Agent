@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  cacheHitPercent,
   compactWorkspacePath,
   contextStatus,
   contextTokensFromUsage,
@@ -51,6 +52,14 @@ describe('composer status', () => {
   test('extracts the model id from the display label', () => {
     expect(modelIdFromLabel('gpt-5.6-sol · ChatGPT')).toBe('gpt-5.6-sol');
     expect(modelIdFromLabel('')).toBe('model not configured');
+  });
+
+  test('calculates cache hit rate from the most recent request input', () => {
+    expect(cacheHitPercent({ inputTokens: 1_200, cacheReadTokens: 300 })).toBe(20);
+    expect(cacheHitPercent({ inputTokens: 0, cacheReadTokens: 1_000 })).toBe(100);
+    expect(cacheHitPercent({ inputTokens: 1_000, cacheReadTokens: 0 })).toBe(0);
+    expect(cacheHitPercent({ inputTokens: 1_000 })).toBeUndefined();
+    expect(cacheHitPercent({ inputTokens: 0, cacheReadTokens: 0 })).toBeUndefined();
   });
 
   test('uses the repository model-catalog window for supported GPT models', () => {
@@ -137,6 +146,7 @@ describe('composer status', () => {
       mode: 'chat',
       modelLabel: 'gpt-5.6-sol · ChatGPT',
       usage: { inputTokens: 0 },
+      lastRequestUsage: { inputTokens: 1_200, cacheReadTokens: 300 },
     })).toMatchObject({
       workspace: '~/Projects/peer_agent',
       workspaceShort: 'peer_agent',
@@ -149,6 +159,8 @@ describe('composer status', () => {
       model: 'gpt-5.6-sol',
       effort: 'auto',
       reasoning: 'reasoning auto',
+      cache: 'cache 20%',
+      cachePercent: 20,
       context: 'context ?',
     });
 

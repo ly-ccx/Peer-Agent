@@ -1,5 +1,6 @@
 import type {
   ContextAccountingSnapshot,
+  ProviderRequestUsage,
   RuntimeTurnUsage,
 } from '@peer-agent/protocol';
 import type { ModelMessage, ModelToolCall, ModelUsage } from '@peer-agent/runtime-node';
@@ -129,6 +130,8 @@ export interface ChatSnapshot {
   readonly session?: RuntimeSessionSnapshot;
   readonly plan?: PlanSnapshot;
   readonly usage?: ChatUsage;
+  /** Most recent provider request usage; never a turn or conversation aggregate. */
+  readonly lastRequestUsage?: ProviderRequestUsage;
   /** ADR 56: the only authoritative context-capacity state. */
   readonly contextAccounting?: ContextAccountingSnapshot;
   readonly error?: string;
@@ -705,6 +708,7 @@ export function createChatController(options: {
   // stream/tool changes. The TUI adapter only publishes its snapshots.
   let turnAccountingLifecycle: ContextAccountingLifecycle | null = null;
   let activeRuntimeTurnUsage: ChatUsage | undefined;
+  let lastRequestUsage: ProviderRequestUsage | undefined;
 
   const appendAssistantDelta = (
     messages: ChatMessage[],
@@ -994,6 +998,7 @@ export function createChatController(options: {
             .map((message) => ({ role: message.role as 'user' | 'assistant', content: message.content }));
       conversationContinuityContext = input.continuityContext?.trim() || undefined;
       executionEvidenceIds = [];
+      lastRequestUsage = undefined;
       sequence = restoredMessageSequence(messages);
       // ADR 56: restore consumes the persisted provider-backed snapshot
       // verbatim. A legacy projection is never promoted to numeric authority.
@@ -1115,7 +1120,9 @@ export function createChatController(options: {
           },
           { signal: turn.signal },
         );
-        const accountedTurn = result.state?.usageAccounting?.snapshot().turnTotal;
+        const usageSnapshot = result.state?.usageAccounting?.snapshot();
+        lastRequestUsage = usageSnapshot?.lastRequest ?? lastRequestUsage;
+        const accountedTurn = usageSnapshot?.turnTotal;
         activeRuntimeTurnUsage = accountedTurn && (
           accountedTurn.inputTokens > 0
           || accountedTurn.outputTokens > 0
@@ -1204,6 +1211,7 @@ export function createChatController(options: {
           session: sessions.get(sessionId) ?? undefined,
           plan: options.planCoordinator?.getSnapshot() ?? undefined,
           usage: activeRuntimeTurnUsage,
+          lastRequestUsage,
           contextAccounting: completedAccounting,
           messages: [
             ...finalizePendingMessages(snapshot.messages, {
@@ -1235,6 +1243,7 @@ export function createChatController(options: {
           error: wasCancelled ? undefined : detail,
           // Never charge the previous completed turn to this failed turn.
           usage: activeRuntimeTurnUsage,
+          lastRequestUsage,
           contextAccounting: failedAccounting,
         });
       } finally {
@@ -1248,6 +1257,7 @@ export function createChatController(options: {
       conversationModelMessages = [];
       conversationContinuityContext = undefined;
       executionEvidenceIds = [];
+      lastRequestUsage = undefined;
       publish({
         status: 'idle',
         mode: snapshot.mode,

@@ -4,7 +4,9 @@ import {
   contextMeter,
   contextMeterParts,
   neonActivityColor,
+  showCacheStatus,
 } from './composer-status-view.tsx';
+import type { ComposerStatus } from './composer-status.ts';
 import { COLOR } from './tui-theme.ts';
 
 describe('composer context meter', () => {
@@ -18,6 +20,20 @@ describe('composer context meter', () => {
     expect(contextMeterParts(25, 8)).toEqual({ filled: '██', empty: '░░░░░░' });
     expect(contextMeterParts(150, 4)).toEqual({ filled: '████', empty: '' });
     expect(contextMeterParts(undefined, 4)).toEqual({ filled: '', empty: '░░░░' });
+  });
+});
+
+describe('composer cache status', () => {
+  const status = { cache: 'cache 20%' } as ComposerStatus;
+
+  test('shows cache before context only in the wide layout', () => {
+    expect(showCacheStatus('wide', status)).toBe(true);
+    expect(showCacheStatus('compact', status)).toBe(false);
+    expect(showCacheStatus('narrow', status)).toBe(false);
+  });
+
+  test('hides cache when the latest request has no reliable cache data', () => {
+    expect(showCacheStatus('wide', {} as ComposerStatus)).toBe(false);
   });
 });
 

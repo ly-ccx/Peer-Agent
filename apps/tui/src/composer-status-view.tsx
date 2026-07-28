@@ -3,6 +3,10 @@ import { COLOR, contextUsageColor } from './tui-theme.ts';
 
 export type ComposerStatusLayout = 'wide' | 'compact' | 'narrow';
 
+export function showCacheStatus(layout: ComposerStatusLayout, status: ComposerStatus): boolean {
+  return layout === 'wide' && status.cache !== undefined;
+}
+
 /** Footer running status, mounted above the quiet input divider. */
 
 /**
@@ -309,6 +313,12 @@ export function ComposerStatusBar({ status, layout }: {
       <text fg={COLOR.muted} wrapMode="none">
         <ModelEffortLabel status={status} />
         {' '}
+        {showCacheStatus(layout, status) ? (
+          <>
+            <span fg={COLOR.textSoft}>{status.cache}</span>
+            <StatusSeparator />
+          </>
+        ) : null}
         <ContextStatus status={status} short={layout === 'compact'} />
       </text>
     </box>

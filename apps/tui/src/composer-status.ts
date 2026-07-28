@@ -22,6 +22,8 @@ export interface ComposerStatusInput {
   readonly reasoningEffort?: string;
   readonly contextWindow?: number;
   readonly usage?: ComposerUsageSnapshot;
+  /** Most recent provider request usage; used only for request-local cache rate. */
+  readonly lastRequestUsage?: ComposerUsageSnapshot;
   /** ADR 56: provider-backed accounting is the only capacity source. */
   readonly contextAccounting?: ContextAccountingSnapshot;
   /** A new session with no persisted conversation history starts at 0%. */
@@ -40,6 +42,8 @@ export interface ComposerStatus {
   /** Short effort level for footer display, e.g. high / low / auto. */
   readonly effort: string;
   readonly reasoning: string;
+  readonly cache?: string;
+  readonly cachePercent?: number;
   readonly context: string;
   readonly contextShort: string;
   readonly contextPercent?: number;
@@ -82,6 +86,15 @@ function safeTokenCount(value: number | undefined): number {
 
 export function contextTokensFromUsage(usage: ComposerUsageSnapshot | undefined): number {
   return safeTokenCount(usage?.inputTokens) + safeTokenCount(usage?.cacheReadTokens);
+}
+
+export function cacheHitPercent(usage?: ComposerUsageSnapshot): number | undefined {
+  if (!usage || usage.cacheReadTokens === undefined) return undefined;
+  const inputTokens = safeTokenCount(usage.inputTokens);
+  const cacheReadTokens = safeTokenCount(usage.cacheReadTokens);
+  const totalInputTokens = inputTokens + cacheReadTokens;
+  if (totalInputTokens <= 0) return undefined;
+  return Math.min(100, Math.max(0, Math.round((cacheReadTokens / totalInputTokens) * 100)));
 }
 
 function compactTokens(tokens: number): string {
@@ -144,6 +157,7 @@ export function createComposerStatus(input: ComposerStatusInput): ComposerStatus
     input.emptyContext,
   );
   const language = languageOption(input.locale ?? 'zh-CN');
+  const cachePercent = cacheHitPercent(input.lastRequestUsage);
   return {
     workspace: compactWorkspacePath(input.workspaceRoot),
     workspaceShort: workspaceBasename(input.workspaceRoot),
@@ -155,6 +169,7 @@ export function createComposerStatus(input: ComposerStatusInput): ComposerStatus
     model: modelIdFromLabel(input.modelLabel),
     effort: input.reasoningEffort?.trim() || 'auto',
     reasoning: `reasoning ${input.reasoningEffort?.trim() || 'auto'}`,
+    ...(cachePercent === undefined ? {} : { cache: `cache ${cachePercent}%`, cachePercent }),
     ...context,
   };
 }

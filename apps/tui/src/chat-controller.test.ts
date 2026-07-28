@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 import type { ModelMessage } from '@peer-agent/runtime-node';
 import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
-import { estimateContextMessagesTokens as estimateTokensFromMessages } from '@peer-agent/runtime-core';
+import {
+  createRuntimeUsageAccounting,
+  estimateContextMessagesTokens as estimateTokensFromMessages,
+} from '@peer-agent/runtime-core';
 
 import {
   createChatController,
@@ -1730,11 +1733,14 @@ describe('chat controller', () => {
     const model: ChatModelPort = {
       initialize: (input) => initialState(input.input),
       async runTurn(state) {
+        const usageAccounting = createRuntimeUsageAccounting();
+        usageAccounting.observeProviderRequest({ inputTokens: 1_200, cacheReadTokens: 300 });
         return {
           kind: 'completed',
           state: {
             ...state,
             usage: { inputTokens: 1_200, cacheReadTokens: 300 },
+            usageAccounting,
             contextAccounting: accountingSnapshot({
               contextWindow: 100_000,
               inputBudget: 100_000,
@@ -1757,6 +1763,11 @@ describe('chat controller', () => {
     await controller.send('hello pressure');
     const snapshot = controller.getSnapshot();
     expect(snapshot.usage?.inputTokens).toBe(1_200);
+    expect(snapshot.lastRequestUsage).toMatchObject({
+      usageScope: 'provider_request',
+      inputTokens: 1_200,
+      cacheReadTokens: 300,
+    });
     expect(snapshot.contextAccounting?.authoritativeInputTokens).toBe(1_500);
     expect(snapshot.contextAccounting?.pressureSource).toBe('provider_usage');
   });

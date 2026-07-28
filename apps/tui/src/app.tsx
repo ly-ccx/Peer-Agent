@@ -1597,6 +1597,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
     modelLabel: selectedModelLabel,
     reasoningEffort: selectedModel?.reasoningEffort,
     usage: snapshot.usage,
+    lastRequestUsage: snapshot.lastRequestUsage,
     contextWindow,
     contextAccounting: snapshot.contextAccounting,
     emptyContext: renderWindowConversationId == null && snapshot.messages.length === 0,
