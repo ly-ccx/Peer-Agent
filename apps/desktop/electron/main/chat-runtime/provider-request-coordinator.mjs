@@ -28,6 +28,11 @@ export async function coordinateDesktopProviderRequest({
   continuityContext = [],
   tools = null,
   preserveLatestUserTurn = true,
+  // Goal 模式有界 keep；true 或 partial policy 对象。
+  goalKeepPolicy = null,
+  // Milestone C: 压缩事务需要 Goal Store 做 prepare/commit/mark persisted。
+  goalPlanStore = null,
+  goalPlanId = null,
   usageSnapshot = null,
   runtimeUsageAccounting = null,
   rebuildSystemPrompt = null,
@@ -48,6 +53,9 @@ export async function coordinateDesktopProviderRequest({
     continuityContext,
     tools,
     preserveLatestUserTurn,
+    goalKeepPolicy,
+    goalPlanStore,
+    goalPlanId,
     usageSnapshot,
     runtimeUsageAccounting,
     rebuildSystemPrompt,

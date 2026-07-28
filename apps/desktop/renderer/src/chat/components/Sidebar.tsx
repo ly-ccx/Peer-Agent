@@ -771,6 +771,18 @@ export function Sidebar({
               <span>{isZh ? '编辑标题' : 'Edit title'}</span>
             </button>
           ) : null}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              closeContextMenu();
+              void navigator.clipboard.writeText(contextConv.id).catch((error: unknown) => {
+                console.error('Failed to copy Session ID', error);
+              });
+            }}
+          >
+            <span>{isZh ? '复制会话 ID' : 'Copy Session ID'}</span>
+          </button>
           {isArchivedView ? (
             <>
               <button

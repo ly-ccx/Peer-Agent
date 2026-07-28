@@ -9,6 +9,7 @@ import {
 import {
   COMPACTION_CONFIG,
   compactIfNeeded,
+  degradeKeepMessagesForBudget,
   estimateSummaryChars,
   estimateTextTokens,
   extractRecoverableClues,
@@ -211,6 +212,62 @@ describe('compactIfNeeded（触发口径含工具 schema）', () => {
         return true;
       },
     );
+  });
+
+  it('degrades oversized keep tool tails when summary-only candidates cannot pass triggerLimit', async () => {
+    // Auto path: preserveLatestUserTurn keeps the unclosed tool tail, including a huge
+    // tool_result that default microcompact leaves alone (recent window). A second open
+    // tool_call keeps that result in keep (closed-only results would be summarized into old).
+    // Summary fallbacks cannot shrink keep; keep_budget_degrade must microcompact keep.
+    const hugeToolResult = 'tool-output-' + 'x'.repeat(40_000);
+    const messages = [
+      { role: 'user', content: 'old task ' + 'a'.repeat(4_000) },
+      { role: 'assistant', content: 'old answer ' + 'b'.repeat(4_000) },
+      { role: 'user', content: 'current task please inspect' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call-keep-huge',
+            type: 'function',
+            function: { name: 'bash', arguments: '{"command":"ls"}' },
+          },
+          {
+            id: 'call-keep-open',
+            type: 'function',
+            function: { name: 'bash', arguments: '{"command":"pwd"}' },
+          },
+        ],
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'call-keep-huge',
+        content: hugeToolResult,
+      },
+      // call-keep-open intentionally has no result yet → unclosed tail stays in keep
+    ];
+
+    const result = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      // triggerLimit = floor(12000 * 0.8) = 9600. Undegraded keep (~10k+ tokens from the
+      // 40k tool tail) fails; degraded keep (previewChars) must fit.
+      contextWindow: 12_000,
+      providerConfig: null,
+      force: true,
+      preserveLatestUserTurn: true,
+    });
+
+    assert.equal(result.compacted, true);
+    assert.equal(result.notification.fallbackReason, 'keep_budget_degrade');
+    assert.ok(result.notification.afterTokens < result.notification.beforeTokens);
+
+    const keptTool = result.messages.find((message) => message.role === 'tool' && message.tool_call_id === 'call-keep-huge');
+    assert.ok(keptTool, 'current-turn tool message must remain in keep');
+    const keptContent = typeof keptTool.content === 'string' ? keptTool.content : JSON.stringify(keptTool.content);
+    assert.ok(keptContent.length < hugeToolResult.length, 'keep tool_result must be microcompacted');
+    assert.ok(!keptContent.includes('x'.repeat(1_000)), 'long raw tool tail must not remain intact');
   });
 });
 
@@ -1370,3 +1427,96 @@ describe('compaction summary quality regressions', () => {
     assert.match(COMPACTOR_SOURCE, /最近用户决策与方案锚点/);
   });
 });
+
+describe('degradeKeepMessagesForBudget', () => {
+  it('microcompacts keep messages including the latest turn', () => {
+    const huge = 'y'.repeat(8_000);
+    const keep = [
+      { role: 'user', content: 'current' },
+      { role: 'tool', tool_call_id: 't1', content: huge },
+    ];
+    const result = degradeKeepMessagesForBudget(keep);
+    assert.equal(result.degraded, true);
+    assert.ok(result.stats?.compactedCount > 0);
+    assert.ok(typeof result.messages[1].content === 'string');
+    assert.ok(result.messages[1].content.length < huge.length);
+  });
+
+  it('returns degraded=false for empty keep', () => {
+    const result = degradeKeepMessagesForBudget([]);
+    assert.equal(result.degraded, false);
+  });
+});
+
+describe('goalKeepPolicy (Milestone A bounded keep)', () => {
+  it('accepts goalKeepPolicy and keeps oversized current-turn tool tails within budget', async () => {
+    // Goal 模式不再无限保留当前工具尾：即便 unclosed tool chain 很大，
+    // goalKeepPolicy 也应通过有界 keep / recovery degrade 过线。
+    const hugeToolResult = 'tool-output-' + 'x'.repeat(40_000);
+    const messages = [
+      { role: 'user', content: 'old task ' + 'a'.repeat(4_000) },
+      { role: 'assistant', content: 'old answer ' + 'b'.repeat(4_000) },
+      { role: 'user', content: 'current task please inspect' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call-keep-huge',
+            type: 'function',
+            function: { name: 'bash', arguments: '{"command":"ls"}' },
+          },
+          {
+            id: 'call-keep-open',
+            type: 'function',
+            function: { name: 'bash', arguments: '{"command":"pwd"}' },
+          },
+        ],
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'call-keep-huge',
+        content: hugeToolResult,
+      },
+    ];
+
+    const result = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      // triggerLimit = floor(12000 * 0.8) = 9600。
+      contextWindow: 12_000,
+      providerConfig: null,
+      force: true,
+      preserveLatestUserTurn: true,
+      goalKeepPolicy: true,
+    });
+
+    assert.equal(result.compacted, true);
+    assert.ok(result.goalKeep, 'goalKeep metadata should be returned');
+    assert.ok(result.goalKeep.keepBudgetTokens > 0);
+    assert.ok(
+      result.notification.afterTokens < result.notification.beforeTokens,
+      'afterTokens should be reduced',
+    );
+    // Goal keep 可能在 L0 就过线（no_provider / null），也可能走 goal_keep_budget_degrade。
+    // 只要压缩成功且 after < before 即可；不允许再炸 insufficient_reduction。
+    assert.notEqual(result.notification.fallbackReason, 'insufficient_reduction');
+
+    const keptTool = result.messages.find(
+      (message) => message.role === 'tool' && message.tool_call_id === 'call-keep-huge',
+    );
+    if (keptTool) {
+      const keptContent = typeof keptTool.content === 'string'
+        ? keptTool.content
+        : JSON.stringify(keptTool.content);
+      assert.ok(keptContent.length < hugeToolResult.length, 'goal keep must not retain full tool tail');
+    }
+  });
+
+  it('source wires goalKeepPolicy through compactIfNeeded', () => {
+    assert.match(COMPACTOR_SOURCE, /goalKeepPolicy/);
+    assert.match(COMPACTOR_SOURCE, /selectGoalKeepMessages/);
+    assert.match(COMPACTOR_SOURCE, /goal_keep_budget_degrade/);
+  });
+});
+

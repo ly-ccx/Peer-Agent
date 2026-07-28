@@ -23,5 +23,8 @@
     "build": "node --check src/index.mjs",
     "test": "node --test src/*.test.mjs",
     "typecheck": "node --check src/index.mjs"
+  },
+  "dependencies": {
+    "@peer-agent/runtime-core": "workspace:*"
   }
 }

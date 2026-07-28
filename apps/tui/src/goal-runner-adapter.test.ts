@@ -77,6 +77,7 @@ describe('createTuiSharedGoalRunner', () => {
     expect(source).toContain("from '../../desktop/electron/main/goal-runner.mjs'");
     expect(source).toContain("from '../../desktop/electron/main/goal-intake-convergence.mjs'");
     expect(source).toContain('createGoalRunner({');
+    expect(source).toContain('recoverContextCheckpoints');
     expect(source).toContain('shouldAutoStartAcceptedGoalRunnerFromChange');
   });
 

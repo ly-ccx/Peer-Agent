@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import {
@@ -723,3 +724,14 @@ describe('P0 summary reserve + post-compact rehydration', () => {
     assert.equal(result.reason, 'no_rebuild_hook');
   });
 });
+
+describe('Milestone C Goal checkpoint transaction wiring', () => {
+  it('runCompactionCheck source wires prepare/commit and mark persisted', () => {
+    const source = readFileSync(new URL('./compaction-coordinator.mjs', import.meta.url), 'utf8');
+    assert.match(source, /prepareContextCheckpoint/);
+    assert.match(source, /commitContextCheckpoint/);
+    assert.match(source, /markContextCompactionPersisted/);
+    assert.match(source, /willAttemptLayer2/);
+  });
+});
+

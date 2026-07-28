@@ -114,6 +114,10 @@ export async function agentLoopGemini({
             continuityContext,
             tools,
             preserveLatestUserTurn: true,
+            // Goal 自驱：使用有界 keep，避免当前轮工具尾无限膨胀导致压缩失败。
+            goalKeepPolicy: runtimeMode === 'goal' ? true : null,
+            // Milestone C: Goal 压缩事务串需要 store 做 prepare/commit/persisted。
+            goalPlanStore: runtimeMode === 'goal' ? goalPlanStore : null,
             runtimeUsageAccounting: loop.usageAccounting,
             onProviderRequest: ({ usage, requestFingerprint }) => {
               loop.addUsage(usage, { requestFingerprint });

@@ -20,6 +20,7 @@ import {
   microcompactMessagesForContext,
   previewHistoricalText,
   runCompactionSummaryCascade,
+  selectGoalKeepMessages,
   splitMessagesForCompaction,
 } from '@peer-agent/runtime-core';
 import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli-identity.mjs';
@@ -228,8 +229,35 @@ function findCurrentTurnStart(convMsgs) {
 
 function splitForCompaction(
   messages,
-  { preserveLatestUserTurn = false, preserveRecentTurns = COMPACTION_CONFIG.preserveRecentTurns } = {},
+  {
+    preserveLatestUserTurn = false,
+    preserveRecentTurns = COMPACTION_CONFIG.preserveRecentTurns,
+    goalKeepPolicy = null,
+    contextWindow = null,
+    recoveryLevel = 0,
+  } = {},
 ) {
+  // Goal 模式：有界 keep（turn/message/token 三重上限），不无限保留当前工具尾。
+  if (goalKeepPolicy) {
+    const selected = selectGoalKeepMessages(messages, {
+      contextWindow,
+      recoveryLevel,
+      config: goalKeepPolicy === true ? undefined : goalKeepPolicy,
+    });
+    return {
+      keep: [...selected.keepMessages],
+      old: [...selected.oldMessages],
+      systemMsgs: [...selected.systemMessages],
+      goalKeep: {
+        keepBudgetTokens: selected.keepBudgetTokens,
+        keepTokens: selected.keepTokens,
+        recoveryLevel: selected.recoveryLevel,
+        degraded: selected.degraded,
+        reason: selected.reason,
+      },
+    };
+  }
+
   const split = splitMessagesForCompaction(messages, {
     preserveLatestUserTurn,
     // 自动 preflight 的契约是只保护当前真人用户轮次；手动/空闲压缩才保留配置的最近多轮。
@@ -239,6 +267,7 @@ function splitForCompaction(
     keep: [...split.keepMessages],
     old: [...split.oldMessages],
     systemMsgs: [...split.systemMessages],
+    goalKeep: null,
   };
 }
 
@@ -956,6 +985,35 @@ function countContinuityMessages(continuityContext) {
     .reduce((sum, item) => sum + Math.max(0, item.originalMessageCount || 0), 0);
 }
 
+/**
+ * Budget degrade for the keep window.
+ *
+ * Summary-only fallbacks (llm → structural → fallback_drop) never touch keep/tools.
+ * When preserveLatestUserTurn leaves a huge current-turn tool tail in keep, those
+ * candidates cannot pass triggerLimit. Re-run microcompact on keep with
+ * keepRecentCount=0 so even the latest turn's oversized tool_result payloads
+ * become evidence previews, without dropping the turn structure itself.
+ */
+function degradeKeepMessagesForBudget(keepMessages) {
+  if (!Array.isArray(keepMessages) || keepMessages.length === 0) {
+    return { messages: keepMessages, degraded: false, stats: null };
+  }
+
+  const result = microcompactMessagesForContext(keepMessages, {
+    // Include the latest turn; default microcompact protects recent non-system msgs.
+    keepRecentCount: 0,
+    // More aggressive than the pre-split pass so keep-local tool tails shrink further.
+    triggerChars: 1_500,
+    previewChars: 400,
+  });
+
+  return {
+    messages: result.messages,
+    degraded: (result.stats?.compactedCount ?? 0) > 0,
+    stats: result.stats ?? null,
+  };
+}
+
 function buildCompactedMessages({
   systemPrompt,
   compactSummary,
@@ -1049,6 +1107,8 @@ export async function compactIfNeeded({
   tools = null,
   preserveLatestUserTurn = false,
   preserveRecentTurns = COMPACTION_CONFIG.preserveRecentTurns,
+  // Goal 模式：传 true 或 partial GoalKeepPolicyConfig。有界 keep，替代无限 current-turn 保留。
+  goalKeepPolicy = null,
   // 可选：provider 真实 usage（input + cacheRead）。ADR 52：仅诊断，不参与 Layer2 触发。
   // 触发只看下一请求投影估算（messages + tools schema）。
   usageTokens = null,
@@ -1058,11 +1118,21 @@ export async function compactIfNeeded({
   messages = microcompactResult.messages;
   const previousMessageCount = countContinuityMessages(continuityContext);
   const breakerScope = conversationId || streamId || null;
+  // Goal keep 优先于 preserveLatestUserTurn；两者同时传入时以 goal keep 为准。
+  const effectiveGoalKeepPolicy = goalKeepPolicy || null;
+  let goalKeepMeta = null;
 
   // Circuit breaker: stop trying if we've failed too many times
   if (isCircuitBreakerTripped(breakerScope)) {
     // Still do basic structural compaction + drop as last resort
-    const { keep, old } = splitForCompaction(messages, { preserveLatestUserTurn, preserveRecentTurns });
+    let { keep, old, goalKeep } = splitForCompaction(messages, {
+      preserveLatestUserTurn,
+      preserveRecentTurns,
+      goalKeepPolicy: effectiveGoalKeepPolicy,
+      contextWindow,
+      recoveryLevel: 0,
+    });
+    goalKeepMeta = goalKeep;
     if (old.length === 0) return { compacted: false, messages };
 
     const beforeTokens = estimateTokensFromMessages(messages);
@@ -1126,7 +1196,14 @@ export async function compactIfNeeded({
   }
 
   // Split
-  const { keep, old } = splitForCompaction(messages, { preserveLatestUserTurn, preserveRecentTurns });
+  let { keep, old, goalKeep } = splitForCompaction(messages, {
+    preserveLatestUserTurn,
+    preserveRecentTurns,
+    goalKeepPolicy: effectiveGoalKeepPolicy,
+    contextWindow,
+    recoveryLevel: 0,
+  });
+  goalKeepMeta = goalKeep;
   if (old.length === 0) {
     return { compacted: false, messages };
   }
@@ -1321,37 +1398,108 @@ export async function compactIfNeeded({
 
     let accepted = false;
     let minimalCandidateBudgetTokens = afterBudgetTokens;
-    for (const alternative of alternatives) {
-      const candidate = buildCompactedMessages({
-        systemPrompt,
-        compactSummary: alternative.summary,
-        oldCount: old.length,
-        keepMessages: keep,
-        method: alternative.method,
-        beforeTokens,
-        afterTokens: 0,
-        continuityContext,
-        fallbackReason: 'insufficient_reduction',
-        fallbackDetail: `${rejectedMethod} candidate left ${rejectedBudgetTokens} tokens against trigger ${triggerLimit}`,
-        decisionAnchors,
-      });
-      const candidateAfterTokens = estimateTokensFromMessages(candidate);
-      setCompactionAfterTokens(candidate, candidateAfterTokens);
-      const candidateBudgetTokens = candidateAfterTokens + toolTokens;
-      minimalCandidateBudgetTokens = Math.min(minimalCandidateBudgetTokens, candidateBudgetTokens);
-      if (
-        candidateBudgetTokens < beforeTokens
-        && (triggerLimit === null || candidateBudgetTokens <= triggerLimit)
-      ) {
-        result = candidate;
-        compactSummary = alternative.summary;
-        method = alternative.method;
-        fallbackReason = 'insufficient_reduction';
-        fallbackDetail = `${rejectedMethod} candidate left ${rejectedBudgetTokens} tokens against trigger ${triggerLimit}`;
-        afterTokens = candidateAfterTokens;
-        afterBudgetTokens = candidateBudgetTokens;
-        accepted = true;
-        break;
+    let activeKeep = keep;
+    let keepBudgetDegraded = false;
+
+    const tryCandidatesWithKeep = (keepMessages, reason, detail) => {
+      for (const alternative of alternatives) {
+        const candidate = buildCompactedMessages({
+          systemPrompt,
+          compactSummary: alternative.summary,
+          oldCount: old.length,
+          keepMessages,
+          method: alternative.method,
+          beforeTokens,
+          afterTokens: 0,
+          continuityContext,
+          fallbackReason: reason,
+          fallbackDetail: detail,
+          decisionAnchors,
+        });
+        const candidateAfterTokens = estimateTokensFromMessages(candidate);
+        setCompactionAfterTokens(candidate, candidateAfterTokens);
+        const candidateBudgetTokens = candidateAfterTokens + toolTokens;
+        minimalCandidateBudgetTokens = Math.min(minimalCandidateBudgetTokens, candidateBudgetTokens);
+        if (
+          candidateBudgetTokens < beforeTokens
+          && (triggerLimit === null || candidateBudgetTokens <= triggerLimit)
+        ) {
+          result = candidate;
+          compactSummary = alternative.summary;
+          method = alternative.method;
+          fallbackReason = reason;
+          fallbackDetail = detail;
+          afterTokens = candidateAfterTokens;
+          afterBudgetTokens = candidateBudgetTokens;
+          activeKeep = keepMessages;
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const summaryFailDetail = `${rejectedMethod} candidate left ${rejectedBudgetTokens} tokens against trigger ${triggerLimit}`;
+    accepted = tryCandidatesWithKeep(keep, 'insufficient_reduction', summaryFailDetail);
+
+    // Summary-only alternatives leave keep/tools untouched. When the keep window
+    // itself (esp. preserveLatestUserTurn / Goal tool tails) is the floor, degrade
+    // keep payloads and retry before hard-failing.
+    if (!accepted) {
+      if (effectiveGoalKeepPolicy) {
+        // Goal mode: climb recovery levels 3→5 (aggressive keep / skeleton / anchor).
+        for (const level of [3, 4, 5]) {
+          if (accepted) break;
+          const reselected = splitForCompaction(messages, {
+            preserveLatestUserTurn,
+            preserveRecentTurns,
+            goalKeepPolicy: effectiveGoalKeepPolicy,
+            contextWindow,
+            recoveryLevel: level,
+          });
+          if (!reselected.keep?.length) continue;
+          keepBudgetDegraded = true;
+          goalKeepMeta = reselected.goalKeep;
+          const degradeDetail = `${summaryFailDetail}; goal keep recoveryLevel=${level} reason=${reselected.goalKeep?.reason ?? 'n/a'}`;
+          logCompactionDiagnostic('compact:goal_keep_budget_degrade', {
+            beforeTokens,
+            triggerLimit,
+            keptMessageCount: reselected.keep.length,
+            recoveryLevel: level,
+            keepTokens: reselected.goalKeep?.keepTokens ?? null,
+            keepBudgetTokens: reselected.goalKeep?.keepBudgetTokens ?? null,
+            reason: reselected.goalKeep?.reason ?? null,
+          });
+          accepted = tryCandidatesWithKeep(
+            reselected.keep,
+            'goal_keep_budget_degrade',
+            degradeDetail,
+          );
+          if (accepted) {
+            keep = reselected.keep;
+            // old stays the original summarization set; keep is rebounded only.
+          }
+        }
+      } else {
+        const keepDegrade = degradeKeepMessagesForBudget(keep);
+        if (keepDegrade.degraded) {
+          keepBudgetDegraded = true;
+          const degradeDetail = `${summaryFailDetail}; keep microcompact savedChars=${keepDegrade.stats?.savedChars ?? 0}`;
+          logCompactionDiagnostic('compact:keep_budget_degrade', {
+            beforeTokens,
+            triggerLimit,
+            keptMessageCount: keep.length,
+            compactedCount: keepDegrade.stats?.compactedCount ?? 0,
+            savedChars: keepDegrade.stats?.savedChars ?? 0,
+          });
+          accepted = tryCandidatesWithKeep(
+            keepDegrade.messages,
+            'keep_budget_degrade',
+            degradeDetail,
+          );
+          if (accepted) {
+            keep = keepDegrade.messages;
+          }
+        }
       }
     }
 
@@ -1365,7 +1513,9 @@ export async function compactIfNeeded({
         afterBudgetTokens: minimalCandidateBudgetTokens,
         triggerLimit,
         oldMessageCount: old.length,
-        keptMessageCount: keep.length,
+        keptMessageCount: activeKeep.length,
+        keepBudgetDegraded,
+        goalKeep: goalKeepMeta,
       });
       throw error;
     }
@@ -1389,6 +1539,7 @@ export async function compactIfNeeded({
   return {
     compacted: true,
     messages: result,
+    goalKeep: goalKeepMeta,
     notification: {
       method,
       fallbackReason,
@@ -1399,6 +1550,7 @@ export async function compactIfNeeded({
       previousMessageCount,
       totalMessageCount: previousMessageCount + old.length,
       keptMessageCount: keep.length,
+      goalKeep: goalKeepMeta,
     },
   };
 }
@@ -1419,5 +1571,6 @@ export {
   extractRecentDecisionAnchors,
   mergeContinuityAndDeltaSummary,
   buildHandoffContent,
+  degradeKeepMessagesForBudget,
   summarizeOldMessages,
 };

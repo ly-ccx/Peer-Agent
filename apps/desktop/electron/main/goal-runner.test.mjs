@@ -1323,3 +1323,146 @@ test('intake·明确目标：回合调 goal_create_plan 升级为 accepted_goal 
     '明确目标分支不应触发 inquiry 收敛',
   );
 });
+
+test('recoverContextCheckpoints resumes committed checkpoint after crash', async () => {
+  const plan = store.createPlan({
+    conversationId: 'conv-recover-cp',
+    title: 'Recover checkpoint',
+    goal: 'Resume after crash',
+    tasks: [
+      { taskId: 't1', title: 'First', status: 'completed', evidenceRefs: ['tool-result://seed'] },
+      { taskId: 't2', title: 'Second', status: 'pending' },
+    ],
+  });
+  store.recordApproval(plan.planId, { decision: 'approve' });
+  store.setPlanStatus(plan.planId, 'executing');
+  store.setRunnerState(plan.planId, {
+    enabled: true,
+    status: 'running',
+    currentTaskId: 't2',
+    phase: 'act',
+    intent: 'execute',
+  });
+  const latest = store.getPlan(plan.planId);
+  const prepared = store.prepareContextCheckpoint(plan.planId, {
+    expectedPlanVersion: latest.version,
+    reason: 'process_recovery',
+    checkpoint: {
+      objectiveNow: latest.goal,
+      currentWork: 'Continue t2',
+      mostImportantFact: 't2 is next',
+      handoffNote: 'resume t2',
+      firstAction: {
+        kind: 'inspect',
+        instruction: 'Continue task t2',
+        successCheck: 'progress written with evidenceRefs',
+        requiredEvidenceRefs: [],
+      },
+      progress: {
+        total: 2,
+        completed: 1,
+        failed: 0,
+        blocked: 0,
+        percent: 50,
+        nextRunnableTaskIds: ['t2'],
+      },
+    },
+  });
+  store.commitContextCheckpoint(plan.planId, {
+    expectedPlanVersion: prepared.version,
+    expectedRunId: prepared.runner.runId,
+    checkpoint: prepared.runner.contextCheckpoint,
+  });
+  // Simulate crash: runner left in compacting_context with committed checkpoint.
+  store.setRunnerState(plan.planId, {
+    enabled: false,
+    status: 'compacting_context',
+  });
+
+  let started = 0;
+  const runtime = {
+    async runGoalTurn() {
+      started += 1;
+      return { terminalStatus: 'completed', toolCallCount: 0 };
+    },
+  };
+  const runner = createGoalRunner({
+    goalPlanStore: store,
+    chatRuntime: runtime,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  const result = runner.recoverContextCheckpoints();
+  assert.equal(result.scanned >= 1, true);
+  const hit = result.recovered.find((item) => item.planId === plan.planId && item.action === 'resume_committed');
+  assert.ok(hit, 'expected resume_committed recovery action');
+  assert.ok(hit.checkpointId);
+  // recover 会 kick pump；异步推进后状态可能从 resuming_after_compaction 继续往前走。
+  // 这里只断言恢复动作本身与 checkpoint 身份，不锁最终瞬时 runner.status。
+  const after = store.getPlan(plan.planId);
+  assert.equal(after.runner.enabled, true);
+  // either still resuming, already running after pump, or checkpoint consumed after turn
+  assert.ok(
+    after.runner.status === 'resuming_after_compaction'
+      || after.runner.status === 'running'
+      || after.runner.status === 'completed'
+      || after.runner.status === 'blocked',
+  );
+  if (after.runner.contextCheckpoint) {
+    assert.equal(after.runner.contextCheckpoint.checkpointId, hit.checkpointId);
+  } else {
+    assert.equal(after.runner.lastConsumedCheckpointId, hit.checkpointId);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await runner.waitForIdle?.(plan.planId).catch(() => {});
+});
+
+test('recoverContextCheckpoints supersedes stale preparing checkpoint', () => {
+  const plan = store.createPlan({
+    conversationId: 'conv-recover-prep',
+    title: 'Stale preparing',
+    goal: 'Drop stale prepare',
+    tasks: [{ taskId: 't1', title: 'Only', status: 'pending' }],
+  });
+  store.recordApproval(plan.planId, { decision: 'approve' });
+  store.setPlanStatus(plan.planId, 'executing');
+  store.setRunnerState(plan.planId, {
+    enabled: true,
+    status: 'running',
+    currentTaskId: 't1',
+  });
+  const latest = store.getPlan(plan.planId);
+  const prepared = store.prepareContextCheckpoint(plan.planId, {
+    expectedPlanVersion: latest.version,
+    reason: 'soft_threshold',
+    checkpoint: {
+      objectiveNow: 'x',
+      currentWork: 'y',
+      mostImportantFact: 'z',
+      handoffNote: 'h',
+      firstAction: {
+        kind: 'inspect',
+        instruction: 'continue',
+        successCheck: 'ok',
+        requiredEvidenceRefs: [],
+      },
+    },
+  });
+  // Force stale createdAt.
+  store.setRunnerState(plan.planId, {
+    contextCheckpoint: {
+      ...prepared.runner.contextCheckpoint,
+      createdAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+    },
+    status: 'compacting_context',
+  });
+  const runner = createGoalRunner({
+    goalPlanStore: store,
+    chatRuntime: { async runGoalTurn() { return {}; } },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  const result = runner.recoverContextCheckpoints({ maxAgeMs: 24 * 60 * 60 * 1000 });
+  assert.ok(result.recovered.some((item) => item.planId === plan.planId && item.action === 'supersede_preparing'));
+  const after = store.getPlan(plan.planId);
+  assert.equal(after.runner.contextCheckpoint, undefined);
+});
+

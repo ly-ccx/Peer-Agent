@@ -3687,6 +3687,20 @@ function flushPendingRuntimeEvents() {
 }
 
 app.whenReady().then(async () => {
+  // Milestone C: 进程重启后扫描 interrupted Goal compaction/resume 状态。
+  // 必须在 UI/IPC 就绪前尽早 kick，避免用户打开会话前 runner 一直挂着。
+  try {
+    if (goalRunner && typeof goalRunner.recoverContextCheckpoints === 'function') {
+      const recovery = goalRunner.recoverContextCheckpoints();
+      if (recovery?.recovered?.length) {
+        console.info(
+          `[main] recovered ${recovery.recovered.length}/${recovery.scanned} goal checkpoint(s) after startup`,
+        );
+      }
+    }
+  } catch (error) {
+    console.error('[main] recoverContextCheckpoints failed:', error?.message || error);
+  }
   setDockIcon();
   nativeTheme.on('updated', () => {
     const appearance = settingsStore.getAll().appearance;

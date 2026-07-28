@@ -8,6 +8,7 @@
  */
 
 import { derivePlanStatus, goalPlanIsSelfDriven } from './goal-plan-store.mjs';
+import { buildDeterministicGoalCheckpoint } from '@peer-agent/runtime-core';
 
 const DEFAULT_MAX_TURNS = 8;
 const DEFAULT_MAX_TOOL_CALLS = 40;
@@ -726,6 +727,171 @@ export function createGoalRunner({
     }
   }
 
+
+
+  /**
+   * Milestone C: scan executing plans for interrupted compaction/resume state.
+   * - preparing: drop stale preparing marker
+   * - committed: ensure runner is resuming_after_compaction and schedule pump
+   * - compacting_context / resuming_after_compaction without checkpoint: resume running if possible
+   */
+  function recoverContextCheckpoints({ maxAgeMs = 24 * 60 * 60 * 1000 } = {}) {
+    if (typeof goalPlanStore.listPlans !== 'function') {
+      return { scanned: 0, recovered: [], skipped: [] };
+    }
+    const plans = goalPlanStore.listPlans() || [];
+    const recovered = [];
+    const skipped = [];
+    const nowMs = Date.now();
+
+    for (const meta of plans) {
+      const planId = meta?.planId;
+      if (!planId) continue;
+      const plan = goalPlanStore.getPlan(planId);
+      if (!plan || plan.status !== 'executing') {
+        skipped.push({ planId, reason: 'not_executing' });
+        continue;
+      }
+      const runner = plan.runner || {};
+      const cp = runner.contextCheckpoint;
+      const status = runner.status;
+
+      // Stale preparing: never entered committed; drop and continue.
+      if (cp && cp.status === 'preparing') {
+        const createdAtMs = Date.parse(cp.createdAt || '') || 0;
+        const stale = !createdAtMs || (nowMs - createdAtMs) > maxAgeMs;
+        if (stale && typeof goalPlanStore.supersedeContextCheckpoint === 'function') {
+          try {
+            goalPlanStore.supersedeContextCheckpoint(planId, {
+              checkpointId: cp.checkpointId,
+              reason: 'process_recovery_stale_preparing',
+              runnerStatus: 'running',
+            });
+            recovered.push({ planId, action: 'supersede_preparing', checkpointId: cp.checkpointId });
+            if (runner.enabled) schedulePump(planId);
+            continue;
+          } catch (error) {
+            skipped.push({ planId, reason: 'supersede_failed', error: error?.message || String(error) });
+            continue;
+          }
+        }
+      }
+
+      // Committed checkpoint: force resume path and kick runner.
+      if (cp && cp.status === 'committed') {
+        try {
+          if (status !== 'resuming_after_compaction') {
+            goalPlanStore.setRunnerState(planId, {
+              enabled: true,
+              status: 'resuming_after_compaction',
+              intent: runner.intent || 'execute',
+              phase: runner.phase || 'act',
+              currentTaskId: cp.currentTaskId || runner.currentTaskId,
+              updatedAt: now(),
+            });
+          } else if (!runner.enabled) {
+            goalPlanStore.setRunnerState(planId, {
+              enabled: true,
+              status: 'resuming_after_compaction',
+              updatedAt: now(),
+            });
+          }
+          schedulePump(planId);
+          recovered.push({ planId, action: 'resume_committed', checkpointId: cp.checkpointId });
+          continue;
+        } catch (error) {
+          skipped.push({ planId, reason: 'resume_failed', error: error?.message || String(error) });
+          continue;
+        }
+      }
+
+      // Stuck in compacting/resuming without usable checkpoint.
+      if (status === 'compacting_context' || status === 'resuming_after_compaction') {
+        try {
+          goalPlanStore.setRunnerState(planId, {
+            enabled: true,
+            status: 'running',
+            intent: runner.intent || 'execute',
+            phase: runner.phase || 'act',
+            updatedAt: now(),
+          });
+          schedulePump(planId);
+          recovered.push({ planId, action: 'unstick_runner_status', previousStatus: status });
+          continue;
+        } catch (error) {
+          skipped.push({ planId, reason: 'unstick_failed', error: error?.message || String(error) });
+          continue;
+        }
+      }
+    }
+
+    logger?.info?.(
+      `[goal-runner] recoverContextCheckpoints scanned=${plans.length} recovered=${recovered.length} skipped=${skipped.length}`,
+    );
+    return {
+      scanned: plans.length,
+      recovered,
+      skipped,
+    };
+  }
+
+  function getCommittedContextCheckpoint(plan) {
+    const cp = plan?.runner?.contextCheckpoint;
+    if (!cp || typeof cp !== 'object') return null;
+    if (cp.status !== 'committed') return null;
+    return cp;
+  }
+
+  /**
+   * Prepare + commit a deterministic checkpoint before destructive compaction.
+   * Safe no-op when store APIs are unavailable.
+   */
+  function prepareAndCommitContextCheckpoint(planId, input = {}) {
+    if (typeof goalPlanStore.prepareContextCheckpoint !== 'function'
+      || typeof goalPlanStore.commitContextCheckpoint !== 'function') {
+      return goalPlanStore.getPlan(planId);
+    }
+    const plan = goalPlanStore.getPlan(planId);
+    if (!plan) return null;
+    const deterministic = buildDeterministicGoalCheckpoint({
+      plan,
+      reason: input.reason || 'soft_threshold',
+      conversationId: plan.conversationId || input.conversationId,
+      streamId: input.streamId,
+      openToolCalls: input.openToolCalls,
+      recentActions: input.recentActions,
+      budget: input.budget,
+    });
+    const prepared = goalPlanStore.prepareContextCheckpoint(planId, {
+      expectedPlanVersion: plan.version,
+      expectedRunId: plan.runner?.runId,
+      reason: deterministic.reason,
+      checkpoint: deterministic,
+      conversationId: plan.conversationId,
+    });
+    if (!prepared?.runner?.contextCheckpoint) return prepared;
+    return goalPlanStore.commitContextCheckpoint(planId, {
+      expectedPlanVersion: prepared.version,
+      expectedRunId: prepared.runner?.runId,
+      checkpoint: prepared.runner.contextCheckpoint,
+    });
+  }
+
+  function consumeContextCheckpointIfNeeded(planId, plan = goalPlanStore.getPlan(planId)) {
+    const cp = getCommittedContextCheckpoint(plan);
+    if (!cp) return plan;
+    if (typeof goalPlanStore.markContextCheckpointConsumed !== 'function') return plan;
+    try {
+      return goalPlanStore.markContextCheckpointConsumed(planId, {
+        checkpointId: cp.checkpointId,
+        runnerStatus: 'running',
+      });
+    } catch (error) {
+      logger?.warn?.('[goal-runner] consumeContextCheckpoint failed:', error);
+      return plan;
+    }
+  }
+
   function appendCheckpoint(planId, reason, plan = goalPlanStore.getPlan(planId)) {
     const nodeId = plan?.runner?.currentTaskId || plan?.runTrace?.activeNodeId;
     return appendRunEvent(planId, {
@@ -1280,6 +1446,35 @@ export function createGoalRunner({
       // 归属丢失只终止当前宿主的本地 pump，不改写共享 GoalPlan 状态。
       if (canRunPlan && !canRunPlan(plan)) return getState(planId);
 
+
+      // Milestone B: committed context checkpoint has priority over normal scheduling.
+      // Resume the same run/task before starting unrelated inspect/explore work.
+      const committedCheckpoint = getCommittedContextCheckpoint(plan);
+      if (committedCheckpoint) {
+        goalPlanStore.setRunnerState(planId, {
+          enabled: true,
+          status: 'resuming_after_compaction',
+          intent: plan.runner?.intent ?? 'execute',
+          phase: plan.runner?.phase ?? 'act',
+          currentTaskId: committedCheckpoint.currentTaskId || plan.runner?.currentTaskId,
+          updatedAt: now(),
+        });
+        appendRunEvent(planId, {
+          type: 'goal_checkpoint_committed',
+          summary: `Resuming from context checkpoint ${committedCheckpoint.checkpointId}`,
+          payload: {
+            summaryCode: 'goal_resume_from_checkpoint',
+            checkpointId: committedCheckpoint.checkpointId,
+            sequence: committedCheckpoint.sequence,
+            currentTaskId: committedCheckpoint.currentTaskId || null,
+            firstAction: committedCheckpoint.firstAction?.instruction || null,
+          },
+        });
+        // Fall through to normal runGoalTurn; system-context injects the checkpoint.
+        // After a successful non-blocked turn, consume the checkpoint so the next
+        // tick returns to ordinary scheduling.
+      }
+
       if (plan.status === 'completed' || hasCompletedProgress(plan)) {
         const gate = evaluatePlanVerificationGate(plan);
         if (!gate.passed) {
@@ -1820,6 +2015,9 @@ export function createGoalRunner({
         return getState(planId);
       }
 
+      // If this turn resumed from a committed checkpoint, consume it after progress was attempted.
+      consumeContextCheckpointIfNeeded(planId);
+
       goalPlanStore.setRunnerState(planId, {
         enabled: true,
         status: 'running',
@@ -1838,5 +2036,9 @@ export function createGoalRunner({
     clear,
     getState,
     waitForIdle,
+    // Milestone B test/debug hooks for checkpoint resume path.
+    prepareAndCommitContextCheckpoint,
+    consumeContextCheckpointIfNeeded,
+    recoverContextCheckpoints,
   };
 }

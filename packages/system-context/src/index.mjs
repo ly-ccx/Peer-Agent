@@ -13,6 +13,7 @@ export { createContextExtensionPromptSource } from './sources/context-extension-
 export { createExplorerPromptSource } from './sources/explorer-source.mjs';
 export { createGoalPlanPromptSource } from './sources/goal-plan-source.mjs';
 export { createGoalRunnerPromptSource } from './sources/goal-runner-source.mjs';
+export { createGoalCheckpointPromptSource } from './sources/goal-checkpoint-source.mjs';
 export { createMcpHostPromptSource } from './sources/mcp-host-source.mjs';
 export { createModePromptSource } from './sources/mode-source.mjs';
 export { MODE_COPY } from './sources/mode-copy.mjs';

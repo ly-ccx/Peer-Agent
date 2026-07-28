@@ -98,6 +98,7 @@ export function createCorePromptSource(): PromptSource;
 export function createExplorerPromptSource(): PromptSource;
 export function createGoalPlanPromptSource(): PromptSource;
 export function createGoalRunnerPromptSource(): PromptSource;
+export function createGoalCheckpointPromptSource(): PromptSource;
 export function createMcpHostPromptSource(): PromptSource;
 export function createModePromptSource(): PromptSource;
 export function createProjectInstructionsPromptSource(options?: Readonly<Record<string, unknown>>): PromptSource;

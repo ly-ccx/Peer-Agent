@@ -1596,3 +1596,109 @@ test('onChange: setRunnerState 状态跃迁走 runner-state 并立即落盘', ()
   assert.equal(disk.runner.status, 'running');
   assert.equal(disk.runner.enabled, true);
 });
+
+test('context checkpoint: prepare/commit/consume CAS happy path', () => {
+  const plan = store.createPlan({
+    conversationId: 'conv-cp',
+    title: 'Checkpoint resume',
+    goal: 'Persist and resume checkpoint',
+    tasks: [
+      { taskId: 't1', title: 'First', status: 'completed', evidenceRefs: ['tool-result://seed'] },
+      { taskId: 't2', title: 'Second', status: 'pending' },
+    ],
+  });
+  // seed evidence index so createPlan validation is fine; also enable runner
+  store.setRunnerState(plan.planId, {
+    enabled: true,
+    status: 'running',
+    currentTaskId: 't2',
+    phase: 'act',
+    intent: 'execute',
+  });
+  const latest = store.getPlan(plan.planId);
+  const prepared = store.prepareContextCheckpoint(plan.planId, {
+    expectedPlanVersion: latest.version,
+    reason: 'soft_threshold',
+    checkpoint: {
+      objectiveNow: latest.goal,
+      currentWork: 'Continue t2',
+      mostImportantFact: 't2 is next',
+      handoffNote: 'resume t2',
+      firstAction: {
+        kind: 'inspect',
+        instruction: 'Continue task t2',
+        successCheck: 'progress written with evidenceRefs',
+        requiredEvidenceRefs: [],
+      },
+      progress: {
+        total: 2,
+        completed: 1,
+        failed: 0,
+        blocked: 0,
+        percent: 50,
+        nextRunnableTaskIds: ['t2'],
+      },
+    },
+  });
+  assert.equal(prepared.runner.status, 'compacting_context');
+  assert.equal(prepared.runner.contextCheckpoint.status, 'preparing');
+  assert.ok(prepared.runner.runId);
+  assert.equal(prepared.runner.contextCheckpoint.currentTaskId, 't2');
+
+  const committed = store.commitContextCheckpoint(plan.planId, {
+    expectedPlanVersion: prepared.version,
+    expectedRunId: prepared.runner.runId,
+    checkpoint: prepared.runner.contextCheckpoint,
+  });
+  assert.equal(committed.runner.contextCheckpoint.status, 'committed');
+  assert.ok(committed.runner.contextCheckpoint.committedAt);
+
+  const persisted = store.markContextCompactionPersisted(plan.planId, {
+    checkpointId: committed.runner.contextCheckpoint.checkpointId,
+    conversationRevision: 'rev-1',
+  });
+  assert.equal(persisted.runner.status, 'resuming_after_compaction');
+  assert.equal(persisted.runner.compactionCount, 1);
+  assert.equal(persisted.runner.contextCheckpoint.conversationRevision, 'rev-1');
+
+  const consumed = store.markContextCheckpointConsumed(plan.planId, {
+    checkpointId: persisted.runner.contextCheckpoint.checkpointId,
+  });
+  assert.equal(consumed.runner.status, 'running');
+  assert.equal(consumed.runner.contextCheckpoint, undefined);
+  assert.equal(
+    consumed.runner.lastConsumedCheckpointId,
+    persisted.runner.contextCheckpoint.checkpointId,
+  );
+  assert.equal(consumed.runner.lastConsumedCheckpointSequence, 1);
+});
+
+test('context checkpoint: prepare CAS rejects stale plan version', () => {
+  const plan = store.createPlan({
+    conversationId: 'conv-cp-cas',
+    title: 'CAS',
+    goal: 'CAS conflict',
+    tasks: [{ taskId: 't1', title: 'Only', status: 'pending' }],
+  });
+  store.setRunnerState(plan.planId, { enabled: true, status: 'running', currentTaskId: 't1' });
+  const latest = store.getPlan(plan.planId);
+  assert.throws(
+    () => store.prepareContextCheckpoint(plan.planId, {
+      expectedPlanVersion: latest.version - 1,
+      checkpoint: {
+        objectiveNow: 'x',
+        currentWork: 'y',
+        mostImportantFact: 'z',
+        handoffNote: 'h',
+        firstAction: {
+          kind: 'inspect',
+          instruction: 'continue',
+          successCheck: 'ok',
+          requiredEvidenceRefs: [],
+        },
+      },
+    }),
+    (error) => error?.code === 'GOAL_CHECKPOINT_CONFLICT',
+  );
+});
+

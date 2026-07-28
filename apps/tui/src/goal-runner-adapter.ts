@@ -43,6 +43,12 @@ export interface TuiSharedGoalRunner {
   clear(planId: string): unknown;
   waitForIdle(planId: string): Promise<unknown>;
   getState(planId: string): unknown;
+  /** Milestone D: Desktop/TUI 共享崩溃恢复入口。 */
+  recoverContextCheckpoints?(options?: { maxAgeMs?: number }): {
+    scanned: number;
+    recovered: unknown[];
+    skipped: unknown[];
+  };
   /** 订阅 runner 领域事件（started/tickCompleted/blocked/completed/failed/paused 等）。 */
   subscribe(listener: (event: TuiGoalRunnerEvent) => void): () => void;
 }
@@ -140,6 +146,28 @@ export function createTuiSharedGoalRunner(options: {
     logger,
   });
 
+  // Milestone D: recover interrupted Goal compaction/resume on TUI start,
+  // matching Desktop app.whenReady recoverContextCheckpoints.
+  try {
+    if (typeof (runner as any).recoverContextCheckpoints === 'function') {
+      const recovery = (runner as any).recoverContextCheckpoints();
+      if (recovery?.recovered?.length) {
+        emit({
+          type: 'goalRunner:recovered',
+          recovered: recovery.recovered.length,
+          scanned: recovery.scanned,
+        } as TuiGoalRunnerEvent);
+      }
+    }
+  } catch (error) {
+    // recovery failure must not block TUI startup
+    logger.warn?.(
+      '[tui-goal-runner] recoverContextCheckpoints failed:',
+      error instanceof Error ? error.message : (error as never),
+    );
+  }
+
+
   // —— 对齐 Desktop main.mjs 的 maybeAutoStartAcceptedGoalFromPlanChange ——
   // 只有 intake → accepted_goal 的领域跃迁（changeKind === 'goal-accepted'）会 kick。
   function maybeAutoStartFromChange(payload: any) {
@@ -184,6 +212,13 @@ export function createTuiSharedGoalRunner(options: {
     clear: (planId) => runner.clear(planId),
     waitForIdle: (planId) => runner.waitForIdle(planId),
     getState: (planId) => runner.getState(planId),
+    // Milestone D: Desktop/TUI share the same crash-recovery entry.
+    recoverContextCheckpoints: (options) => {
+      if (typeof (runner as any).recoverContextCheckpoints === 'function') {
+        return (runner as any).recoverContextCheckpoints(options);
+      }
+      return { scanned: 0, recovered: [], skipped: [] };
+    },
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);

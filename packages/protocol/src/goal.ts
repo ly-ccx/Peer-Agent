@@ -168,6 +168,8 @@ export interface GoalRevision {
 export type GoalRunnerStatus =
   | 'idle'
   | 'running'
+  | 'compacting_context'
+  | 'resuming_after_compaction'
   | 'paused'
   | 'exploring'
   | 'blocked'
@@ -405,6 +407,130 @@ export interface GoalManualConfirmation {
   readonly feedback?: string;
 }
 
+/**
+ * Goal 执行检查点：跨 compaction 的权威“下一动作”真源。
+ * 聊天摘要只能解释，不能替代此结构；任务完成仍必须由 Evidence 回写。
+ * 详见 peer-knowledge/knowledge/architecture/24-goal-runner-context-checkpoint-and-seamless-resume.md
+ */
+export type GoalCheckpointStatus =
+  | 'preparing'
+  | 'committed'
+  | 'consumed'
+  | 'superseded'
+  | 'invalid';
+
+export type GoalCheckpointReason =
+  | 'soft_threshold'
+  | 'hard_threshold'
+  | 'provider_overflow'
+  | 'task_boundary'
+  | 'manual_compact'
+  | 'process_recovery';
+
+export type GoalResumePolicy =
+  | 'continue_same_turn'
+  | 'start_recovery_turn'
+  | 'verify_then_continue'
+  | 'wait_for_user';
+
+export interface GoalCheckpointProgress {
+  readonly total: number;
+  readonly completed: number;
+  readonly failed: number;
+  readonly blocked: number;
+  readonly percent: number;
+  readonly nextRunnableTaskIds: readonly string[];
+}
+
+export interface GoalCheckpointAction {
+  readonly actionId: string;
+  readonly kind: 'inspect' | 'edit' | 'write' | 'tool' | 'test' | 'verify' | 'decision';
+  readonly summary: string;
+  readonly status: 'completed' | 'failed' | 'running' | 'unknown';
+  readonly target?: string;
+  readonly evidenceRefs: readonly string[];
+  readonly result?: string;
+  readonly occurredAt?: string;
+}
+
+export interface GoalCheckpointToolCall {
+  readonly toolCallId: string;
+  readonly toolName?: string;
+  readonly status: 'requested' | 'running' | 'completed' | 'failed' | 'unknown';
+  readonly resultEvidenceRefs: readonly string[];
+  readonly replayPolicy: 'never' | 'query_status' | 'safe_retry' | 'ask_user';
+  readonly idempotencyKey?: string;
+}
+
+export interface GoalCheckpointFirstAction {
+  readonly kind: 'tool' | 'inspect' | 'edit' | 'verify' | 'synthesize' | 'wait_user';
+  readonly instruction: string;
+  readonly target?: string;
+  readonly successCheck: string;
+  readonly requiredEvidenceRefs: readonly string[];
+  readonly forbiddenUntilComplete?: readonly string[];
+}
+
+export interface GoalCheckpointBudgetSnapshot {
+  readonly contextWindow: number | null;
+  readonly beforeTokens: number;
+  readonly targetTokens: number;
+  readonly systemTokens: number;
+  readonly toolsTokens: number;
+  readonly checkpointTokens: number;
+  readonly continuityTokens: number;
+  readonly recentTailTokens: number;
+  readonly keepBudgetTokens: number;
+  readonly compactionCount: number;
+}
+
+export interface GoalExecutionCheckpoint {
+  readonly schemaVersion: 1;
+  readonly checkpointId: string;
+  readonly compactionId: string;
+  readonly sequence: number;
+  readonly status: GoalCheckpointStatus;
+  readonly reason: GoalCheckpointReason;
+
+  readonly planId: string;
+  readonly planVersion: number;
+  readonly runId: string;
+  readonly conversationId?: string;
+  readonly streamId?: string;
+  readonly contextEpochId?: string;
+  readonly conversationRevision?: string;
+
+  readonly currentTaskId?: string;
+  readonly runnerPhase?: GoalRunnerPhase;
+  readonly runnerIntent?: GoalRunnerIntent;
+  readonly progress: GoalCheckpointProgress;
+
+  readonly objectiveNow: string;
+  readonly currentWork: string;
+  readonly recentActions: readonly GoalCheckpointAction[];
+  readonly completedSincePrevious: readonly string[];
+  readonly mostImportantFact: string;
+  readonly decisions: readonly string[];
+  readonly blockers: readonly string[];
+  readonly risks: readonly string[];
+  readonly openQuestions: readonly string[];
+  readonly pendingVerifications: readonly string[];
+  readonly doNotRepeat: readonly string[];
+  readonly handoffNote: string;
+  readonly firstAction: GoalCheckpointFirstAction;
+
+  readonly evidenceRefs: readonly string[];
+  readonly mustReadEvidenceRefs: readonly string[];
+  readonly openToolCalls: readonly GoalCheckpointToolCall[];
+  readonly budget: GoalCheckpointBudgetSnapshot;
+  readonly resumePolicy: GoalResumePolicy;
+
+  readonly createdAt: string;
+  readonly committedAt?: string;
+  readonly consumedAt?: string;
+  readonly digest: string;
+}
+
 /** GoalPlan 内嵌的轻量 runner 状态；不代表工具执行事实，任务完成仍必须由 Evidence 回写。 */
 export interface GoalRunnerState {
   readonly enabled: boolean;
@@ -412,6 +538,17 @@ export interface GoalRunnerState {
   readonly intent?: GoalRunnerIntent;
   readonly phase?: GoalRunnerPhase;
   readonly currentTaskId?: string;
+  /**
+   * 一次逻辑自驱执行的持久化身份；跨 compaction / stream retry 不变。
+   * 仅在创建新 Goal 或显式重新运行终态 Goal 时生成新值。
+   */
+  readonly runId?: string;
+  /** 当前已提交、待消费的执行检查点；prompt 只注入这一份。 */
+  readonly contextCheckpoint?: GoalExecutionCheckpoint;
+  readonly lastConsumedCheckpointId?: string;
+  readonly lastConsumedCheckpointSequence?: number;
+  readonly compactionCount?: number;
+  readonly lastCompactionAt?: string;
   /** 预算计数：Runner tick 次数，用于 maxTurns 熔断判定。 */
   readonly turnCount: number;
   /** 展示计数：模型内部对话轮次，随执行实时爬升；与 turnCount（预算）解耦，仅用于 UI 呈现。 */

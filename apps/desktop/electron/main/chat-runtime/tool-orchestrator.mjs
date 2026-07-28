@@ -2,6 +2,12 @@ import { collectToolEvidenceRefs } from '@peer-agent/runtime-core';
 import { materializeToolResultContent } from '@peer-agent/runtime-node';
 
 import { executeProjectedModelTool } from './projected-tool-executor.mjs';
+import {
+  decideGoalToolReplay,
+  createGoalIdempotencyLedger,
+} from '@peer-agent/runtime-core';
+import { createDurableGoalIdempotencyLedger } from '@peer-agent/runtime-core/goal-idempotency-durable';
+import { pathOf } from '../data-store.mjs';
 
 export function createToolContext({
   conversationId = null,
@@ -251,6 +257,47 @@ export function extractToolControlSignal(result) {
   return null;
 }
 
+// Milestone D+: durable Goal tool idempotency ledger cache (planId+runId).
+// Falls back to process-local ledger when plan/run identity is incomplete.
+const goalIdempotencyLedgerCache = new Map();
+const processLocalGoalIdempotencyLedger = createGoalIdempotencyLedger();
+
+function resolveGoalIdempotencyLedger({ goalPlanStore = null, planId = null, runId = null } = {}) {
+  const normalizedPlanId = typeof planId === 'string' ? planId.trim() : '';
+  const normalizedRunId = typeof runId === 'string' ? runId.trim() : '';
+  if (!normalizedPlanId || !normalizedRunId) {
+    return processLocalGoalIdempotencyLedger;
+  }
+  const cacheKey = `${normalizedPlanId}::${normalizedRunId}`;
+  const cached = goalIdempotencyLedgerCache.get(cacheKey);
+  if (cached) return cached;
+
+  let storeDir = null;
+  if (goalPlanStore && typeof goalPlanStore.getStoreDir === 'function') {
+    try {
+      storeDir = goalPlanStore.getStoreDir();
+    } catch {
+      storeDir = null;
+    }
+  }
+  if (!storeDir) {
+    try {
+      storeDir = pathOf('goalPlans');
+    } catch {
+      storeDir = null;
+    }
+  }
+  const ledger = storeDir
+    ? createDurableGoalIdempotencyLedger({
+      storeDir,
+      planId: normalizedPlanId,
+      runId: normalizedRunId,
+    })
+    : processLocalGoalIdempotencyLedger;
+  goalIdempotencyLedgerCache.set(cacheKey, ledger);
+  return ledger;
+}
+
 export async function executeModelToolCall({
   name,
   rawArguments,
@@ -306,6 +353,103 @@ export async function executeModelToolCall({
     conversationId,
     workspacePath,
   });
+
+  // Milestone D: Goal side-effect guard. When Goal context is present, avoid
+  // replaying completed / still-running non-idempotent tool attempts after resume.
+  const goalRuntime = toolContext?.goalRuntime && typeof toolContext.goalRuntime === 'object'
+    ? toolContext.goalRuntime
+    : null;
+  const goalPlanId = goalRuntime?.planId
+    || toolContext?.planId
+    || (typeof goalPlanStore?.getActivePlanByConversation === 'function'
+      ? goalPlanStore.getActivePlanByConversation(conversationId)?.planId
+      : null);
+  const goalPlan = goalPlanId && typeof goalPlanStore?.getPlan === 'function'
+    ? goalPlanStore.getPlan(goalPlanId)
+    : null;
+  if (goalPlan?.runner?.runId) {
+    const goalIdempotencyLedger = resolveGoalIdempotencyLedger({
+      goalPlanStore,
+      planId: goalPlan.planId,
+      runId: goalPlan.runner.runId,
+    });
+    const decision = decideGoalToolReplay({
+      planId: goalPlan.planId,
+      runId: goalPlan.runner.runId,
+      taskId: goalPlan.runner.currentTaskId || null,
+      toolName: name,
+      args,
+      openToolCalls: goalPlan.runner.contextCheckpoint?.openToolCalls || [],
+      completedLedger: goalIdempotencyLedger.snapshot(),
+    });
+    if (decision.action === 'reuse') {
+      const reused = {
+        ok: true,
+        reused: true,
+        idempotencyKey: decision.idempotencyKey,
+        evidenceRefs: decision.evidenceRefs || [],
+        content: `Reused completed tool result via idempotency key ${decision.idempotencyKey.slice(0, 12)}…`,
+        result: {
+          reused: true,
+          idempotencyKey: decision.idempotencyKey,
+          evidenceRefs: decision.evidenceRefs || [],
+        },
+      };
+      webContents?.send?.('chat:stream:tool-result', {
+        streamId,
+        toolCallId,
+        result: reused.content,
+        evidenceRefs: reused.evidenceRefs,
+        startedAtMs,
+        completedAtMs: Date.now(),
+        reused: true,
+      });
+      return {
+        aborted: false,
+        args,
+        output: reused.content,
+        result: reused,
+        controlSignal: null,
+      };
+    }
+    if (decision.action === 'query_status' || decision.action === 'block' || decision.action === 'ask_user') {
+      const blocked = {
+        ok: false,
+        blocked: true,
+        reason: decision.reason,
+        action: decision.action,
+        idempotencyKey: decision.idempotencyKey,
+        mutationClass: decision.mutationClass,
+        content: `Blocked tool replay (${decision.action}): ${decision.reason}`,
+      };
+      webContents?.send?.('chat:stream:tool-result', {
+        streamId,
+        toolCallId,
+        result: blocked.content,
+        evidenceRefs: [],
+        startedAtMs,
+        completedAtMs: Date.now(),
+        blocked: true,
+      });
+      return {
+        aborted: false,
+        args,
+        output: blocked.content,
+        result: blocked,
+        controlSignal: null,
+      };
+    }
+    // Fresh execute: attach idempotency key on toolContext for downstream evidence.
+    if (toolContext && typeof toolContext === 'object') {
+      toolContext.idempotencyKey = decision.idempotencyKey;
+      toolContext.goalIdempotency = {
+        ...decision,
+        planId: goalPlan.planId,
+        runId: goalPlan.runner.runId,
+      };
+    }
+  }
+
   const result = await executeProjectedModelTool({
     name,
     args,
@@ -387,6 +531,48 @@ export async function executeModelToolCall({
     endedAtMs,
     durationMs: Math.max(0, endedAtMs - startedAtMs),
   });
+  // Remember successful Goal tool completions for future resume reuse.
+  if (
+    toolContext?.idempotencyKey
+    && result
+    && result.ok !== false
+    && !result.blocked
+    && !result.reused
+  ) {
+    try {
+      const evidenceRefs = Array.isArray(result.evidenceRefs)
+        ? result.evidenceRefs
+        : Array.isArray(result?.result?.evidenceRefs)
+          ? result.result.evidenceRefs
+          : [];
+      const decisionMeta = toolContext.goalIdempotency || {};
+      const rememberPlanId = decisionMeta.planId
+        || toolContext.goalRuntime?.planId
+        || toolContext.planId
+        || null;
+      const rememberRunId = decisionMeta.runId
+        || toolContext.goalRuntime?.runId
+        || null;
+      // Prefer identity from the decision key material when available.
+      const ledger = resolveGoalIdempotencyLedger({
+        goalPlanStore,
+        planId: rememberPlanId,
+        runId: rememberRunId,
+      });
+      ledger.remember({
+        idempotencyKey: toolContext.idempotencyKey,
+        status: 'completed',
+        evidenceRefs,
+        toolCallId,
+        toolName: name,
+        planId: rememberPlanId || undefined,
+        runId: rememberRunId || undefined,
+      });
+    } catch {
+      // ledger write must never fail tool return path
+    }
+  }
+
   const controlSignal = extractToolControlSignal(result);
   return { aborted: false, args, output: providerOutput, result, controlSignal };
 }

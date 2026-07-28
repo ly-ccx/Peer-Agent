@@ -236,6 +236,9 @@ async function persistAndNotifyCompaction({
   webContents,
   emergency = false,
   manual = false,
+  goalPlanStore = null,
+  goalCheckpointId = null,
+  goalPlanId = null,
 }) {
   if (persistCompaction && conversationId) {
     await persistCompaction({
@@ -244,6 +247,35 @@ async function persistAndNotifyCompaction({
       preservePendingAssistant: true,
     });
   }
+
+  // Milestone C: conversation 持久化成功后，才把 Goal checkpoint 标为 compaction persisted。
+  // 崩溃在「会话已压、checkpoint 未标」时仍可从 committed checkpoint 恢复。
+  if (
+    goalPlanStore
+    && typeof goalPlanStore.markContextCompactionPersisted === 'function'
+    && goalPlanId
+    && goalCheckpointId
+  ) {
+    try {
+      const conversationRevision = [
+        conversationId || 'conv',
+        compactResult?.notification?.method || 'compact',
+        goalCheckpointId,
+        Date.now(),
+      ].join(':');
+      goalPlanStore.markContextCompactionPersisted(goalPlanId, {
+        checkpointId: goalCheckpointId,
+        conversationRevision,
+        runnerStatus: 'resuming_after_compaction',
+      });
+    } catch (error) {
+      console.warn(
+        '[compaction] markContextCompactionPersisted failed:',
+        error?.message || error,
+      );
+    }
+  }
+
   // 登记表收尾与事件 emit 单一来源：先清登记表再 emit done。
   endCompaction({ conversationId, streamId });
   // Compaction events report lifecycle and compactor diagnostics only. The
@@ -255,6 +287,8 @@ async function persistAndNotifyCompaction({
     emergency,
     ...(manual ? { manual: true } : {}),
     ...compactResult.notification,
+    ...(goalPlanId ? { planId: goalPlanId } : {}),
+    ...(goalCheckpointId ? { checkpointId: goalCheckpointId } : {}),
   });
 }
 
@@ -276,6 +310,11 @@ export async function runCompactionCheck({
   continuityContext = [],
   tools = null,
   preserveLatestUserTurn = false,
+  // Goal 模式有界 keep；true 或 partial policy 对象。
+  goalKeepPolicy = null,
+  // Milestone C: Goal Store 用于压缩前 prepare/commit、压缩后 mark persisted。
+  goalPlanStore = null,
+  goalPlanId = null,
   usageSnapshot = null,
   runtimeUsageAccounting = null,
   rebuildSystemPrompt = null,
@@ -323,6 +362,98 @@ export async function runCompactionCheck({
 
   if (!budget.contextWindow && !force) {
     return { compacted: false, messages };
+  }
+
+
+  // Milestone C: Goal 自动压缩前先写 checkpoint（write-ahead）。
+  // 仅在 Goal keep 路径启用；普通 chat / 手动 compact 不改语义。
+  let activeGoalPlanId = goalPlanId || null;
+  let activeGoalCheckpointId = null;
+  // 只在真正会进入 Layer2 压缩时写 checkpoint，避免每次 preflight 误写。
+  const willAttemptLayer2 = Boolean(force || emergency || budget.shouldCompact);
+  if (
+    willAttemptLayer2
+    && goalKeepPolicy
+    && goalPlanStore
+    && typeof goalPlanStore.getActivePlanByConversation === 'function'
+    && typeof goalPlanStore.prepareContextCheckpoint === 'function'
+    && typeof goalPlanStore.commitContextCheckpoint === 'function'
+  ) {
+    try {
+      const activePlan = activeGoalPlanId
+        ? goalPlanStore.getPlan?.(activeGoalPlanId)
+        : goalPlanStore.getActivePlanByConversation(conversationId);
+      if (activePlan?.planId && activePlan?.status === 'executing') {
+        activeGoalPlanId = activePlan.planId;
+        let prepared = null;
+        const reason = emergency ? 'provider_overflow' : force ? 'hard_threshold' : 'soft_threshold';
+        if (typeof goalPlanStore.prepareAndCommitContextCheckpoint === 'function') {
+          prepared = goalPlanStore.prepareAndCommitContextCheckpoint(activePlan.planId, {
+            reason,
+            conversationId,
+            streamId,
+          });
+        } else {
+          prepared = goalPlanStore.prepareContextCheckpoint(activePlan.planId, {
+            expectedPlanVersion: activePlan.version,
+            expectedRunId: activePlan.runner?.runId,
+            reason,
+            conversationId,
+            checkpoint: {
+              objectiveNow: activePlan.goal || activePlan.title || 'Continue the active goal',
+              currentWork: activePlan.runner?.currentTaskId
+                ? `Resume task ${activePlan.runner.currentTaskId}`
+                : 'Resume the current executable scene',
+              mostImportantFact: activePlan.runner?.currentTaskId
+                ? `Current task is ${activePlan.runner.currentTaskId}`
+                : 'Continue the active goal after context compaction',
+              handoffNote: 'Context is about to compact. Resume from this checkpoint after rehydrate.',
+              firstAction: {
+                kind: 'inspect',
+                instruction: activePlan.runner?.currentTaskId
+                  ? `Continue task ${activePlan.runner.currentTaskId} after compaction`
+                  : 'Inspect the active goal plan and continue the next runnable task',
+                successCheck: 'Task progress or verification evidence is written back with evidenceRefs',
+                requiredEvidenceRefs: [],
+              },
+              progress: activePlan.progress || {
+                total: 0,
+                completed: 0,
+                failed: 0,
+                blocked: 0,
+                percent: 0,
+                nextRunnableTaskIds: [],
+              },
+            },
+          });
+          if (prepared?.runner?.contextCheckpoint) {
+            prepared = goalPlanStore.commitContextCheckpoint(activePlan.planId, {
+              expectedPlanVersion: prepared.version,
+              expectedRunId: prepared.runner?.runId,
+              checkpoint: prepared.runner.contextCheckpoint,
+            });
+          }
+        }
+        activeGoalCheckpointId = prepared?.runner?.contextCheckpoint?.checkpointId || null;
+        if (webContents?.send && activeGoalCheckpointId) {
+          webContents.send('chat:compaction', {
+            conversationId,
+            streamId,
+            stage: 'checkpointing',
+            emergency,
+            ...(manual ? { manual: true } : {}),
+            planId: activeGoalPlanId,
+            checkpointId: activeGoalCheckpointId,
+          });
+        }
+      }
+    } catch (error) {
+      // Checkpoint prepare failure must not hard-fail ordinary chat compaction.
+      console.warn(
+        '[compaction] prepare/commit Goal checkpoint failed:',
+        error?.message || error,
+      );
+    }
   }
 
   const showStart = manual || emergency || shouldShowCompactionStart(messages, budget);
@@ -405,6 +536,7 @@ export async function runCompactionCheck({
       conversationId,
       tools,
       preserveLatestUserTurn,
+      goalKeepPolicy,
       // Provider usage 已在 coordinator 单点决策并转成 force；Layer2 不再二次解释。
       usageTokens: budget.usageTokens,
       onProviderUsage: (usage) => {
@@ -424,6 +556,9 @@ export async function runCompactionCheck({
         webContents,
         emergency,
         manual,
+        goalPlanStore,
+        goalPlanId: activeGoalPlanId,
+        goalCheckpointId: activeGoalCheckpointId,
       });
       // done 通知本身即为 start 的收尾。只有持久化与 done 都完成后才标记已结算；
       // 若 persistCompaction 抛错，catch 分支必须还能补发 idle，避免压缩态悬挂。

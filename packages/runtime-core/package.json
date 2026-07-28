@@ -26,6 +26,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./goal-idempotency-durable": {
+      "types": "./dist/goal-idempotency-durable.d.ts",
+      "default": "./dist/goal-idempotency-durable.js"
     }
   },
   "files": [

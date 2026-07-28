@@ -7,6 +7,7 @@ import { createContinuityPromptSource } from './sources/continuity-source.mjs';
 import { createContextExtensionPromptSource } from './sources/context-extension-source.mjs';
 import { createGoalPlanPromptSource } from './sources/goal-plan-source.mjs';
 import { createGoalRunnerPromptSource } from './sources/goal-runner-source.mjs';
+import { createGoalCheckpointPromptSource } from './sources/goal-checkpoint-source.mjs';
 import { createMcpHostPromptSource } from './sources/mcp-host-source.mjs';
 import { createExplorerPromptSource } from './sources/explorer-source.mjs';
 import { createVerifierPromptSource } from './sources/verifier-source.mjs';
@@ -86,6 +87,7 @@ export function createDefaultPromptSourceRegistry() {
       createRuntimeReminderPromptSource(),
       createGoalPlanPromptSource(),
       createGoalRunnerPromptSource(),
+      createGoalCheckpointPromptSource(),
       createMcpHostPromptSource(),
       createExplorerPromptSource(),
       createVerifierPromptSource(),

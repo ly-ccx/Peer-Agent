@@ -23,6 +23,7 @@ const DEFAULT_SOURCE_IDS = [
   'runtime.reminders',
   'runtime.goal-plan',
   'runtime.goal-runner',
+  'runtime.goal-checkpoint',
   'agent.mcp-host',
   'runtime.explorer',
   'runtime.verifier',
@@ -87,3 +88,93 @@ test('continuity injection keeps full summary body without fixed 12k truncation'
   assert.equal(continuity.source.summaries[0].summaryChars, longSummary.length);
   assert.match(context.rendered, /last unfinished action marker/);
 });
+
+test('goal-checkpoint source injects committed checkpoint facts', async () => {
+  const { createGoalCheckpointPromptSource } = await import('./sources/goal-checkpoint-source.mjs');
+  const { normalizeGoalCheckpoint } = await import('../../runtime-core/dist/index.js');
+  const checkpoint = normalizeGoalCheckpoint({
+    planId: 'plan-cp',
+    runId: 'run-cp',
+    status: 'committed',
+    currentTaskId: 'task-2',
+    objectiveNow: 'Resume after compaction',
+    currentWork: 'Continue task-2',
+    mostImportantFact: 'Do not restart completed work',
+    handoffNote: 'Execute firstAction next',
+    firstAction: {
+      kind: 'edit',
+      instruction: 'Continue task-2 implementation',
+      successCheck: 'evidence written for task-2',
+      requiredEvidenceRefs: [],
+    },
+    progress: {
+      total: 2,
+      completed: 1,
+      failed: 0,
+      blocked: 0,
+      percent: 50,
+      nextRunnableTaskIds: ['task-2'],
+    },
+  });
+  const store = {
+    getActivePlanByConversation() {
+      return {
+        planId: 'plan-cp',
+        status: 'executing',
+        runner: {
+          enabled: true,
+          status: 'resuming_after_compaction',
+          runId: 'run-cp',
+          contextCheckpoint: checkpoint,
+          lastConsumedCheckpointSequence: 0,
+        },
+      };
+    },
+  };
+  const source = createGoalCheckpointPromptSource();
+  const observation = source.observe({ mode: 'goal', conversationId: 'c1', goalPlanStore: store });
+  const sections = source.render(observation);
+  assert.equal(sections.length, 1);
+  assert.match(sections[0].content, /Active Goal execution checkpoint/);
+  assert.match(sections[0].content, /Continue task-2 implementation/);
+  assert.equal(sections[0].source.checkpointId, checkpoint.checkpointId);
+});
+
+test('goal-checkpoint source ignores non-committed checkpoints', async () => {
+  const { createGoalCheckpointPromptSource } = await import('./sources/goal-checkpoint-source.mjs');
+  const { normalizeGoalCheckpoint } = await import('../../runtime-core/dist/index.js');
+  const checkpoint = normalizeGoalCheckpoint({
+    planId: 'plan-cp',
+    runId: 'run-cp',
+    status: 'preparing',
+    objectiveNow: 'x',
+    currentWork: 'y',
+    mostImportantFact: 'z',
+    handoffNote: 'h',
+    firstAction: {
+      kind: 'inspect',
+      instruction: 'continue',
+      successCheck: 'ok',
+      requiredEvidenceRefs: [],
+    },
+  });
+  const store = {
+    getActivePlanByConversation() {
+      return {
+        planId: 'plan-cp',
+        status: 'executing',
+        runner: {
+          enabled: true,
+          status: 'compacting_context',
+          runId: 'run-cp',
+          contextCheckpoint: checkpoint,
+        },
+      };
+    },
+  };
+  const source = createGoalCheckpointPromptSource();
+  const observation = source.observe({ mode: 'goal', conversationId: 'c1', goalPlanStore: store });
+  assert.equal(observation.checkpoint, null);
+  assert.deepEqual(source.render(observation), []);
+});
+
