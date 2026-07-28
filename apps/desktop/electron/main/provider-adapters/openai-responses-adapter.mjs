@@ -21,6 +21,103 @@ import { parseSseDataPayload, throwIfSseReaderAborted } from './sse-line.mjs';
 
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
 
+// ChatGPT 订阅偶发 server_error / 5xx 时静默重试（最多 3 次），与 llm-chat-service 的
+// same-provider 网络重试解耦：本层覆盖「连接已建立、但 provider 返回可重试业务错误」。
+// 延迟刻意短而有界，避免与 recovering-fetch 退避叠加成超长等待。
+const OPENAI_RESPONSES_TRANSIENT_RETRY_DELAYS_MS = [500, 1_500, 3_000];
+
+function sleepMs(ms, signal = null) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      const err = new Error('aborted');
+      err.name = 'AbortError';
+      reject(err);
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener?.('abort', onAbort);
+      resolve();
+    }, Math.max(0, Number(ms) || 0));
+    const onAbort = () => {
+      clearTimeout(timer);
+      const err = new Error('aborted');
+      err.name = 'AbortError';
+      reject(err);
+    };
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+  });
+}
+
+function hasReplayUnsafePartialOutput(result) {
+  if (!result || result.ok) return false;
+  if (String(result.content || '').trim()) return true;
+  if (String(result.thinkingContent || '').trim()) return true;
+  if (Array.isArray(result.toolCalls) && result.toolCalls.length > 0) return true;
+  return false;
+}
+
+/**
+ * Classify openai-responses failures that are safe to silent-retry.
+ * Only replay-safe failures (no partial model output/tool intent) qualify.
+ */
+export function isOpenAIResponsesTransientFailure(result) {
+  if (!result || result.ok) return false;
+  if (hasReplayUnsafePartialOutput(result)) return false;
+
+  const status = Number(result.status || 0);
+  if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) {
+    return true;
+  }
+
+  const type = String(result.streamError?.type || '');
+  if (type === 'server_error') return true;
+
+  const errorText = String(result.errorText || result.streamError?.message || '');
+  if (!errorText) return false;
+  if (/server_error/i.test(errorText)) return true;
+  if (/An error occurred while processing your request/i.test(errorText)) return true;
+  if (/provider_stream_error/i.test(errorText) && /retry your request/i.test(errorText)) return true;
+  if (/fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|network/i.test(errorText)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Retry wrapper for openai-responses sendOnce results.
+ * @param {() => Promise<object>} sendOnce
+ * @param {{ signal?: AbortSignal|null, transientRetryDelaysMs?: number[], waitImpl?: Function }} [options]
+ */
+export async function sendOpenAIResponsesStreamWithResilience(sendOnce, {
+  signal = null,
+  transientRetryDelaysMs = OPENAI_RESPONSES_TRANSIENT_RETRY_DELAYS_MS,
+  waitImpl = sleepMs,
+} = {}) {
+  const delays = Array.isArray(transientRetryDelaysMs) ? transientRetryDelaysMs : [];
+  let lastResult = null;
+  let transientAttempts = 0;
+
+  while (true) {
+    lastResult = await sendOnce();
+    if (lastResult?.ok) return lastResult;
+    if (signal?.aborted) return lastResult;
+    if (!isOpenAIResponsesTransientFailure(lastResult)) return lastResult;
+    if (transientAttempts >= delays.length) return lastResult;
+
+    const waitMs = delays[transientAttempts];
+    transientAttempts += 1;
+    try {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[openai-responses] transient stream failure; silent retry ${transientAttempts}/${delays.length} after ${waitMs}ms`
+      );
+      await waitImpl(waitMs, signal);
+    } catch {
+      return lastResult;
+    }
+  }
+}
+
 function extractCachedInputTokens(usage) {
   return usage?.input_tokens_details?.cached_tokens
     ?? usage?.prompt_tokens_details?.cached_tokens
@@ -262,7 +359,7 @@ async function consumeResponsesStream(
   };
 }
 
-export async function sendOpenAIResponsesStream({
+async function sendOpenAIResponsesStreamOnce({
   baseUrl,
   apiKey,
   accountId,
@@ -380,10 +477,27 @@ export async function sendOpenAIResponsesStream({
   };
 }
 
+export async function sendOpenAIResponsesStream(options = {}) {
+  const {
+    signal = null,
+    transientRetryDelaysMs = OPENAI_RESPONSES_TRANSIENT_RETRY_DELAYS_MS,
+    waitImpl = sleepMs,
+    ...sendOptions
+  } = options;
+  return sendOpenAIResponsesStreamWithResilience(
+    () => sendOpenAIResponsesStreamOnce(sendOptions),
+    { signal, transientRetryDelaysMs, waitImpl }
+  );
+}
+
 // 测试入口：挂死连接 + completed 事件场景。
 export const __test__ = {
   consumeResponsesStream,
   consumeResponsesLine,
   streamIdleTimeoutError,
   DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+  OPENAI_RESPONSES_TRANSIENT_RETRY_DELAYS_MS,
+  isOpenAIResponsesTransientFailure,
+  sendOpenAIResponsesStreamWithResilience,
+  sendOpenAIResponsesStreamOnce,
 };

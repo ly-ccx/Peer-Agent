@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { __test__ } from './openai-responses-adapter.mjs';
+import {
+  __test__,
+  isOpenAIResponsesTransientFailure,
+  sendOpenAIResponsesStreamWithResilience,
+} from './openai-responses-adapter.mjs';
 
 const { consumeResponsesStream } = __test__;
 
@@ -116,4 +120,119 @@ test('consumeResponsesStream idle-timeouts when no terminal event arrives', asyn
   assert.equal(result.content, 'partial');
   assert.equal(result.streamError?.type, 'provider_stream_idle_timeout');
   assert.equal(body.cancelled, true);
+});
+
+test('isOpenAIResponsesTransientFailure classifies ChatGPT server_error as retryable', () => {
+  assert.equal(
+    isOpenAIResponsesTransientFailure({
+      ok: false,
+      providerError: true,
+      errorText:
+        'provider_stream_error: An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists.',
+      streamError: {
+        type: 'server_error',
+        message:
+          'An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists.',
+      },
+    }),
+    true,
+  );
+
+  assert.equal(
+    isOpenAIResponsesTransientFailure({
+      ok: false,
+      status: 503,
+      errorText: 'service unavailable',
+    }),
+    true,
+  );
+
+  // Partial output already streamed: do not silent-retry (unsafe replay).
+  assert.equal(
+    isOpenAIResponsesTransientFailure({
+      ok: false,
+      content: 'partial answer',
+      streamError: { type: 'server_error', message: 'boom' },
+      errorText: 'provider_stream_error: boom',
+    }),
+    false,
+  );
+
+  // Auth / permanent failure should not retry.
+  assert.equal(
+    isOpenAIResponsesTransientFailure({
+      ok: false,
+      status: 401,
+      errorText: 'unauthorized',
+    }),
+    false,
+  );
+});
+
+test('sendOpenAIResponsesStreamWithResilience retries server_error then succeeds', async () => {
+  let calls = 0;
+  const waits = [];
+  const result = await sendOpenAIResponsesStreamWithResilience(
+    async () => {
+      calls += 1;
+      if (calls < 3) {
+        return {
+          ok: false,
+          providerError: true,
+          errorText:
+            'provider_stream_error: An error occurred while processing your request. You can retry your request',
+          streamError: {
+            type: 'server_error',
+            message: 'An error occurred while processing your request. You can retry your request',
+          },
+        };
+      }
+      return { ok: true, content: 'recovered', toolCalls: [] };
+    },
+    {
+      transientRetryDelaysMs: [1, 1, 1],
+      waitImpl: async (ms) => {
+        waits.push(ms);
+      },
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.content, 'recovered');
+  assert.equal(calls, 3); // initial + 2 retries
+  assert.deepEqual(waits, [1, 1]);
+});
+
+test('sendOpenAIResponsesStreamWithResilience surfaces error after 3 failed retries', async () => {
+  let calls = 0;
+  const waits = [];
+  const failure = {
+    ok: false,
+    providerError: true,
+    errorText:
+      'provider_stream_error: An error occurred while processing your request. You can retry your request',
+    streamError: {
+      type: 'server_error',
+      message: 'An error occurred while processing your request. You can retry your request',
+    },
+  };
+
+  const result = await sendOpenAIResponsesStreamWithResilience(
+    async () => {
+      calls += 1;
+      return failure;
+    },
+    {
+      transientRetryDelaysMs: [1, 1, 1],
+      waitImpl: async (ms) => {
+        waits.push(ms);
+      },
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.errorText, /provider_stream_error/);
+  assert.equal(result.streamError?.type, 'server_error');
+  assert.equal(calls, 4); // 1 initial + 3 retries
+  assert.deepEqual(waits, [1, 1, 1]);
 });
