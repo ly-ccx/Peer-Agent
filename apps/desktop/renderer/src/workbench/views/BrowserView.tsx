@@ -23,9 +23,9 @@ import {
 } from '../browserSessionState';
 import {
   buildBrowserOverflowMenu,
-  importSiteSessionPlaceholder,
   type BrowserMenuActionId,
 } from '../browserMenuModel';
+import { SessionImportWizard } from './SessionImportWizard';
 
 interface WebviewElement extends HTMLElement {
   src: string;
@@ -349,6 +349,7 @@ export function BrowserView({
   const editingRef = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuNotice, setMenuNotice] = useState<string | null>(null);
+  const [importWizardOpen, setImportWizardOpen] = useState(false);
   const menuWrapRef = useRef<HTMLDivElement | null>(null);
 
   const t = useMemo(
@@ -438,7 +439,7 @@ export function BrowserView({
       setMenuOpen(false);
       setMenuNotice(null);
       if (id === 'import_site_session') {
-        setMenuNotice(importSiteSessionPlaceholder(isZh));
+        setImportWizardOpen(true);
         return;
       }
       if (id === 'clear_site_data') {
@@ -704,6 +705,22 @@ export function BrowserView({
               : activeTab.title || displayUrl(activeRuntime.currentUrl)}
         </span>
       </div>
+
+      <SessionImportWizard
+        open={importWizardOpen}
+        isZh={isZh}
+        onClose={() => setImportWizardOpen(false)}
+        onImported={(result) => {
+          if (result.ok) {
+            setMenuNotice(
+              isZh
+                ? `已导入 ${result.added ?? 0} 条 Cookie`
+                : `Imported ${result.added ?? 0} cookies`,
+            );
+            activeWebview()?.reload();
+          }
+        }}
+      />
     </div>
   );
 }

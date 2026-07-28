@@ -970,6 +970,139 @@
     background: var(--ui-border-subtle, var(--chrome-hairline));
   }
 
+  /* 站点会话导入向导（Cookie only） */
+  .session-import-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(15, 18, 25, 0.45);
+  }
+  .session-import-modal {
+    width: min(440px, 100%);
+    max-height: min(560px, 90%);
+    display: flex;
+    flex-direction: column;
+    border-radius: var(--ui-radius-panel, 12px);
+    border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+    background: var(--za-surface-1, #fff);
+    box-shadow: var(--ui-shadow-menu, 0 12px 40px rgba(0, 0, 0, 0.18));
+    overflow: hidden;
+  }
+  .session-import-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px 8px;
+  }
+  .session-import-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--graphite-base);
+  }
+  .session-import-sub {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--graphite-muted, #667);
+  }
+  .session-import-close,
+  .session-import-btn {
+    border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+    background: var(--za-surface-1, #fff);
+    border-radius: var(--ui-radius-control, 8px);
+    padding: 6px 10px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--graphite-base);
+  }
+  .session-import-btn--primary {
+    background: var(--za-accent, #2f6fed);
+    border-color: transparent;
+    color: #fff;
+  }
+  .session-import-btn:disabled,
+  .session-import-list-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .session-import-body {
+    padding: 8px 16px 16px;
+    overflow: auto;
+    min-height: 0;
+    flex: 1;
+  }
+  .session-import-section-title {
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .session-import-hint,
+  .session-import-risk {
+    margin: 0 0 10px;
+    font-size: 12px;
+    color: var(--graphite-muted, #667);
+    line-height: 1.4;
+  }
+  .session-import-error {
+    margin: 0 16px 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(220, 50, 50, 0.08);
+    color: #b42318;
+    font-size: 12px;
+  }
+  .session-import-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .session-import-list-btn,
+  .session-import-check {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    width: 100%;
+    text-align: left;
+    border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: var(--za-surface-1, #fff);
+    cursor: pointer;
+  }
+  .session-import-list-btn:hover:not(:disabled),
+  .session-import-check:hover {
+    background: var(--ui-surface-hover, var(--chrome-hover));
+  }
+  .session-import-list-main {
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .session-import-list-meta {
+    font-size: 12px;
+    color: var(--graphite-muted, #667);
+  }
+  .session-import-static-item {
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: var(--ui-surface-hover, rgba(0, 0, 0, 0.04));
+    font-size: 13px;
+  }
+  .session-import-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
   /* 地址栏：填满剩余空间 */
   .browser-address {
     position: relative;

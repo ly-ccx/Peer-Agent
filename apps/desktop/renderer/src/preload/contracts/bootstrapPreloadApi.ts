@@ -413,6 +413,50 @@ export interface BootstrapPreloadApi {
     readonly bytes?: number;
     readonly error?: string;
   }>;
+  /** 列出可导入会话的浏览器 Profile（无 Cookie value）。 */
+  readonly listBrowserSessionSources: () => Promise<{
+    readonly ok: boolean;
+    readonly sources?: readonly {
+      readonly adapterId: string;
+      readonly browserName: string;
+      readonly bundleId: string;
+      readonly profiles: readonly {
+        readonly profileId: string;
+        readonly displayName: string;
+        readonly directory: string;
+        readonly hasCookieDb: boolean;
+      }[];
+    }[];
+    readonly error?: string;
+  }>;
+  /** 扫描 Profile 站点聚合（无 Cookie value）。 */
+  readonly listBrowserSessionSites: (profileId: string) => Promise<{
+    readonly ok: boolean;
+    readonly profileId?: string;
+    readonly browserName?: string;
+    readonly displayName?: string;
+    readonly sites?: readonly {
+      readonly registrableDomain: string;
+      readonly cookieCount: number;
+      readonly hostCount: number;
+      readonly hosts: readonly string[];
+    }[];
+    readonly totalCookies?: number;
+    readonly error?: string;
+  }>;
+  /** 导入选定站点 Cookie（不含密码）到 peer-browser 分区。 */
+  readonly importBrowserSiteSession: (payload: {
+    readonly profileId: string;
+    readonly registrableDomains: readonly string[];
+    readonly includeSubdomains?: boolean;
+  }) => Promise<{
+    readonly ok: boolean;
+    readonly status?: string;
+    readonly added?: number;
+    readonly failed?: number;
+    readonly stats?: Record<string, unknown>;
+    readonly error?: string;
+  }>;
   readonly listShellTasks: () => Promise<readonly Record<string, unknown>[]>;
   readonly stopActiveShellTask: () => Promise<Record<string, unknown>>;
   readonly stopShellTask: (taskId: string) => Promise<Record<string, unknown>>;

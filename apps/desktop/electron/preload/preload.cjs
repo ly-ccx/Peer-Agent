@@ -61,6 +61,17 @@ contextBridge.exposeInMainWorld('peerAgent', {
   /** 截取指定 webContents 页面并保存 PNG；savePath 可选。 */
   captureBrowserPage: (webContentsId, savePath) =>
     ipcRenderer.invoke('browser:capture-page', { webContentsId, savePath }),
+  /** 列出可导入会话的浏览器 Profile（无 Cookie value）。 */
+  listBrowserSessionSources: () => ipcRenderer.invoke('browser:list-session-sources'),
+  /** 扫描 Profile 站点聚合（无 Cookie value）。 */
+  listBrowserSessionSites: (profileId) =>
+    ipcRenderer.invoke('browser:list-session-sites', { profileId }),
+  /**
+   * 导入选定站点 Cookie 到 persist:peer-browser。
+   * 仅 Cookie，不导入密码。
+   */
+  importBrowserSiteSession: (payload) =>
+    ipcRenderer.invoke('browser:import-site-session', payload),
   listShellTasks: () => ipcRenderer.invoke('shell:tasks:list'),
   stopActiveShellTask: () => ipcRenderer.invoke('shell:tasks:stop-active'),
   stopShellTask: (taskId) => ipcRenderer.invoke('shell:tasks:stop', { taskId }),

@@ -23,6 +23,13 @@ import {
   unregisterBrowserWebContents,
   getActiveWebContentsId,
 } from './runtime-gateway/browser-control-registry.mjs';
+import { listChromeBrowserSources } from './session-import/chrome-profiles.mjs';
+import {
+  loadCookiesForSites,
+  redactLoadedCookies,
+  scanProfileSites,
+} from './session-import/import-cookies.mjs';
+import { applyCookiesToSession } from './session-import/apply-cookies.mjs';
 import { buildAppMenu } from './app-menu.mjs';
 import { createLocalShellProvider } from './runtime-gateway/local-shell-provider.mjs';
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
@@ -2130,6 +2137,93 @@ ipcMain.handle('browser:capture-page', async (event, { webContentsId, savePath }
     return { ok: false, error: err?.message || 'capture_failed' };
   }
 });
+
+/**
+ * 站点会话导入（仅 Cookie，不导入密码）。
+ * - list-sources: 发现本机 Chromium 系浏览器 Profile 摘要
+ * - list-sites: 扫描选定 Profile 的站点聚合（无 value）
+ * - import-site-session: 解密选定站点 Cookie 并写入 persist:peer-browser
+ */
+ipcMain.handle('browser:list-session-sources', async () => {
+  try {
+    if (process.platform !== 'darwin') {
+      return { ok: false, error: 'unsupported_platform', sources: [] };
+    }
+    const sources = listChromeBrowserSources().map((src) => ({
+      adapterId: src.adapterId,
+      browserName: src.browserName,
+      bundleId: src.bundleId,
+      profiles: (src.profiles || []).map((p) => ({
+        profileId: p.profileId,
+        displayName: p.displayName,
+        directory: p.directory,
+        hasCookieDb: Boolean(p.cookieDbPath),
+      })),
+    }));
+    return { ok: true, sources };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'list_sources_failed', sources: [] };
+  }
+});
+
+ipcMain.handle('browser:list-session-sites', async (_event, { profileId } = {}) => {
+  try {
+    if (!profileId || typeof profileId !== 'string') {
+      return { ok: false, error: 'invalid_profile' };
+    }
+    return await scanProfileSites(profileId);
+  } catch (err) {
+    return { ok: false, error: err?.message || 'list_sites_failed' };
+  }
+});
+
+ipcMain.handle(
+  'browser:import-site-session',
+  async (_event, { profileId, registrableDomains, includeSubdomains = true } = {}) => {
+    try {
+      if (!profileId || typeof profileId !== 'string') {
+        return { ok: false, error: 'invalid_profile' };
+      }
+      const domains = Array.isArray(registrableDomains) ? registrableDomains : [];
+      if (domains.length === 0) {
+        return { ok: false, error: 'no_domains_selected' };
+      }
+
+      const loaded = await loadCookiesForSites({
+        profileId,
+        registrableDomains: domains,
+        includeSubdomains: includeSubdomains !== false,
+      });
+      if (!loaded.ok) {
+        return {
+          ok: false,
+          error: loaded.error || 'load_cookies_failed',
+          stats: loaded.stats,
+        };
+      }
+
+      const ses = session.fromPartition(PEER_BROWSER_PARTITION);
+      const applied = await applyCookiesToSession(ses, loaded.cookies);
+      const summary = redactLoadedCookies(loaded);
+
+      return {
+        ok: applied.ok || applied.added > 0,
+        status: applied.failed === 0 ? 'cookies_applied' : 'partially_applied',
+        profileId: loaded.profileId,
+        browserName: loaded.browserName,
+        registrableDomains: domains,
+        added: applied.added,
+        failed: applied.failed,
+        stats: loaded.stats,
+        // 仅元数据，无 value
+        cookieSummaries: summary.cookies,
+        applyErrors: applied.errors,
+      };
+    } catch (err) {
+      return { ok: false, error: err?.message || 'import_failed' };
+    }
+  },
+);
 
 // ── Conversations ──
 ipcMain.handle('conversations:list', (_, params = {}) => {
