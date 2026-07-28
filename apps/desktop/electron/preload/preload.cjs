@@ -56,6 +56,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.invoke('browser:register-webcontents', registration),
   unregisterBrowserWebContents: (registration) =>
     ipcRenderer.invoke('browser:unregister-webcontents', registration),
+  /** 清除当前 origin 的站点 Cookie/存储（peer-browser 分区）；不触碰密码库。 */
+  clearBrowserSiteData: (url) => ipcRenderer.invoke('browser:clear-site-data', { url }),
+  /** 截取指定 webContents 页面并保存 PNG；savePath 可选。 */
+  captureBrowserPage: (webContentsId, savePath) =>
+    ipcRenderer.invoke('browser:capture-page', { webContentsId, savePath }),
   listShellTasks: () => ipcRenderer.invoke('shell:tasks:list'),
   stopActiveShellTask: () => ipcRenderer.invoke('shell:tasks:stop-active'),
   stopShellTask: (taskId) => ipcRenderer.invoke('shell:tasks:stop', { taskId }),

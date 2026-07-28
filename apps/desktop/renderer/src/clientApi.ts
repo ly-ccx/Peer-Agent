@@ -27,6 +27,8 @@ const unavailableApi: ClientApi = {
   onFsDirChanged: () => () => {},
   registerBrowserWebContents: unavailableMethod('registerBrowserWebContents'),
   unregisterBrowserWebContents: unavailableMethod('unregisterBrowserWebContents'),
+  clearBrowserSiteData: unavailableMethod('clearBrowserSiteData'),
+  captureBrowserPage: unavailableMethod('captureBrowserPage'),
   listShellTasks: unavailableMethod('listShellTasks'),
   stopActiveShellTask: unavailableMethod('stopActiveShellTask'),
   stopShellTask: unavailableMethod('stopShellTask'),

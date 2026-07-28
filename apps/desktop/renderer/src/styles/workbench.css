@@ -924,6 +924,52 @@
     box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
   }
 
+  /* 溢出菜单：对照 Codex 结构，P0 可点项 + 后续项 disabled */
+  .browser-menu-wrap {
+    position: relative;
+    flex: 0 0 auto;
+  }
+  .browser-overflow-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 20;
+    min-width: 220px;
+    max-width: min(320px, 80vw);
+    padding: 6px;
+    border-radius: var(--ui-radius-panel, 10px);
+    border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+    background: var(--za-surface-1, #fff);
+    box-shadow: var(--ui-shadow-menu, 0 8px 28px rgba(0, 0, 0, 0.12));
+  }
+  .browser-overflow-item {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
+    padding: 6px 10px;
+    border: none;
+    border-radius: var(--ui-radius-control, 6px);
+    background: transparent;
+    color: var(--graphite-base);
+    font-size: var(--ui-font-control, 13px);
+    text-align: left;
+    cursor: pointer;
+  }
+  .browser-overflow-item:hover:not(:disabled) {
+    background: var(--ui-surface-hover, var(--chrome-hover));
+  }
+  .browser-overflow-item:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .browser-overflow-sep {
+    height: 1px;
+    margin: 4px 6px;
+    background: var(--ui-border-subtle, var(--chrome-hairline));
+  }
+
   /* 地址栏：填满剩余空间 */
   .browser-address {
     position: relative;

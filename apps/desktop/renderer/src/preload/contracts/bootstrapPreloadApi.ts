@@ -397,6 +397,22 @@ export interface BootstrapPreloadApi {
     readonly conversationId: string | null;
     readonly browserTabId: string;
   }) => Promise<{ readonly ok: boolean; readonly cleared: boolean }>;
+  /** 清除 peer-browser 分区中当前 origin 的站点数据（不含密码库）。 */
+  readonly clearBrowserSiteData: (url: string) => Promise<{
+    readonly ok: boolean;
+    readonly origin?: string;
+    readonly error?: string;
+  }>;
+  /** 截取指定 webContents 页面为 PNG 并保存；savePath 可选。 */
+  readonly captureBrowserPage: (
+    webContentsId: number,
+    savePath?: string,
+  ) => Promise<{
+    readonly ok: boolean;
+    readonly path?: string;
+    readonly bytes?: number;
+    readonly error?: string;
+  }>;
   readonly listShellTasks: () => Promise<readonly Record<string, unknown>[]>;
   readonly stopActiveShellTask: () => Promise<Record<string, unknown>>;
   readonly stopShellTask: (taskId: string) => Promise<Record<string, unknown>>;

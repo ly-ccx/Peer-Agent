@@ -21,6 +21,11 @@ import {
   type BrowserSessionState,
   type BrowserTabSession,
 } from '../browserSessionState';
+import {
+  buildBrowserOverflowMenu,
+  importSiteSessionPlaceholder,
+  type BrowserMenuActionId,
+} from '../browserMenuModel';
 
 interface WebviewElement extends HTMLElement {
   src: string;
@@ -175,6 +180,16 @@ function IconGlobe() {
 
 function IconPlus() {
   return <svg {...ICON_PROPS}><path d="M12 5v14M5 12h14" /></svg>;
+}
+
+function IconMore() {
+  return (
+    <svg {...ICON_PROPS}>
+      <circle cx="12" cy="5" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="19" r="1.2" fill="currentColor" stroke="none" />
+    </svg>
+  );
 }
 
 function BrowserPage({
@@ -332,6 +347,9 @@ export function BrowserView({
   const activeRuntime = runtimeByTab[activeTab.id] ?? initialRuntime(activeTab);
   const [address, setAddress] = useState(() => displayUrl(activeRuntime.currentUrl));
   const editingRef = useRef(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuNotice, setMenuNotice] = useState<string | null>(null);
+  const menuWrapRef = useRef<HTMLDivElement | null>(null);
 
   const t = useMemo(
     () => ({
@@ -348,9 +366,39 @@ export function BrowserView({
       failTitle: isZh ? '无法打开此页面' : 'This page can’t be opened',
       retry: isZh ? '重试' : 'Retry',
       blank: isZh ? '空白页 · 输入网址开始浏览' : 'Blank page · type a URL to start',
+      more: isZh ? '更多' : 'More',
+      menu: isZh ? '浏览器菜单' : 'Browser menu',
+      clearConfirm: isZh
+        ? '清除当前站点在 Peer Browser 中的 Cookie 与本地数据？不会删除密码库。'
+        : 'Clear cookies and site data for this origin in Peer Browser? Password vault is not affected.',
+      clearOk: isZh ? '已清除此站点数据' : 'Site data cleared',
+      clearFail: isZh ? '清除失败' : 'Failed to clear site data',
+      shotOk: isZh ? '截图已保存' : 'Screenshot saved',
+      shotFail: isZh ? '截图失败' : 'Screenshot failed',
+      shotUnavailable: isZh ? '当前标签页尚未就绪' : 'Current tab is not ready',
+      comingSoon: isZh ? '即将推出' : 'Coming soon',
     }),
     [isZh],
   );
+
+  const overflowMenu = useMemo(() => buildBrowserOverflowMenu(isZh), [isZh]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const root = menuWrapRef.current;
+      if (root && !root.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     if (!editingRef.current) setAddress(displayUrl(activeRuntime.currentUrl));
@@ -383,6 +431,52 @@ export function BrowserView({
   const activeWebview = useCallback(
     () => handlesRef.current.get(session.activeTabId) ?? null,
     [session.activeTabId],
+  );
+
+  const handleMenuAction = useCallback(
+    async (id: BrowserMenuActionId) => {
+      setMenuOpen(false);
+      setMenuNotice(null);
+      if (id === 'import_site_session') {
+        setMenuNotice(importSiteSessionPlaceholder(isZh));
+        return;
+      }
+      if (id === 'clear_site_data') {
+        const url = activeRuntime.currentUrl || '';
+        if (!url || url === 'about:blank') {
+          setMenuNotice(isZh ? '当前无有效站点可清除' : 'No active site to clear');
+          return;
+        }
+        if (!window.confirm(t.clearConfirm)) return;
+        try {
+          const res = await clientApi.clearBrowserSiteData(url);
+          setMenuNotice(res?.ok ? t.clearOk : `${t.clearFail}${res?.error ? `: ${res.error}` : ''}`);
+          if (res?.ok) activeWebview()?.reload();
+        } catch (err) {
+          setMenuNotice(`${t.clearFail}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        return;
+      }
+      if (id === 'screenshot') {
+        const handle = activeWebview();
+        const webContentsId = handle?.getWebContentsId?.();
+        if (!webContentsId) {
+          setMenuNotice(t.shotUnavailable);
+          return;
+        }
+        try {
+          const res = await clientApi.captureBrowserPage(webContentsId);
+          if (res?.ok && res.path) setMenuNotice(`${t.shotOk}: ${res.path}`);
+          else if (res?.error === 'cancelled') setMenuNotice(null);
+          else setMenuNotice(`${t.shotFail}${res?.error ? `: ${res.error}` : ''}`);
+        } catch (err) {
+          setMenuNotice(`${t.shotFail}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        return;
+      }
+      setMenuNotice(t.comingSoon);
+    },
+    [activeRuntime.currentUrl, activeWebview, isZh, t],
   );
 
   const navigate = useCallback((url: string) => {
@@ -526,6 +620,39 @@ export function BrowserView({
             <IconGo />
           </button>
         </div>
+        <div className="browser-menu-wrap" ref={menuWrapRef}>
+          <button
+            type="button"
+            className="browser-nav-btn"
+            title={t.more}
+            aria-label={t.menu}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            <IconMore />
+          </button>
+          {menuOpen ? (
+            <div className="browser-overflow-menu" role="menu" aria-label={t.menu}>
+              {overflowMenu.map((item, index) =>
+                item.kind === 'separator' ? (
+                  <div key={`sep-${index}`} className="browser-overflow-sep" role="separator" />
+                ) : (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="menuitem"
+                    className="browser-overflow-item"
+                    disabled={!item.enabled}
+                    onClick={() => void handleMenuAction(item.id)}
+                  >
+                    {item.label}
+                  </button>
+                ),
+              )}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <div className="browser-stage">
@@ -570,9 +697,11 @@ export function BrowserView({
 
       <div className="browser-statusbar" data-loading={activeRuntime.loading}>
         <span className="browser-status-text">
-          {activeRuntime.loading
-            ? t.loading
-            : activeTab.title || displayUrl(activeRuntime.currentUrl)}
+          {menuNotice
+            ? menuNotice
+            : activeRuntime.loading
+              ? t.loading
+              : activeTab.title || displayUrl(activeRuntime.currentUrl)}
         </span>
       </div>
     </div>

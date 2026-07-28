@@ -1,12 +1,16 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, shell, Tray, webContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, session, shell, Tray, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch as fsWatch } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import os from 'node:os';
+
+/** 内嵌 Browser 持久分区（与 renderer BrowserView 一致）。 */
+const PEER_BROWSER_PARTITION = 'persist:peer-browser';
 
 const execFileAsync = promisify(execFile);
 import { createCapabilityRegistry } from './capability-registry.mjs';
@@ -2040,6 +2044,91 @@ ipcMain.handle('browser:unregister-webcontents', (_event, registration = {}) => 
   const result = unregisterBrowserWebContents(registration);
   if (hadActiveBrowser !== (getActiveWebContentsId() != null)) rebuildAppMenu();
   return result;
+});
+
+/**
+ * 清除 peer-browser 分区中与当前 origin 相关的站点数据（Cookie + 本地存储 + 缓存）。
+ * 入参 url 为当前标签页 URL；非 http(s) 时拒绝。
+ * 注意：与 Password Vault 分轨，本 IPC 不触碰密码库。
+ */
+ipcMain.handle('browser:clear-site-data', async (_event, { url } = {}) => {
+  try {
+    if (!url || typeof url !== 'string') {
+      return { ok: false, error: 'invalid_url' };
+    }
+    let origin;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return { ok: false, error: 'unsupported_scheme' };
+      }
+      origin = parsed.origin;
+    } catch {
+      return { ok: false, error: 'invalid_url' };
+    }
+    const ses = session.fromPartition(PEER_BROWSER_PARTITION);
+    await ses.clearStorageData({
+      origin,
+      storages: [
+        'cookies',
+        'localstorage',
+        'indexdb',
+        'shadercache',
+        'websql',
+        'serviceworkers',
+        'cachestorage',
+      ],
+    });
+    // 再按 origin 清理 HTTP 缓存（Electron 版本差异下尽力而为）
+    try {
+      await ses.clearCache();
+    } catch {
+      /* ignore cache clear failures */
+    }
+    return { ok: true, origin };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'clear_site_data_failed' };
+  }
+});
+
+/**
+ * 截取指定 webContents 的可见页面并保存为 PNG。
+ * savePath 可选；缺省则弹出保存对话框。
+ */
+ipcMain.handle('browser:capture-page', async (event, { webContentsId, savePath } = {}) => {
+  try {
+    const id = Number(webContentsId);
+    if (!Number.isInteger(id) || id <= 0) {
+      return { ok: false, error: 'invalid_web_contents_id' };
+    }
+    const wc = webContents.fromId(id);
+    if (!wc || (typeof wc.isDestroyed === 'function' && wc.isDestroyed())) {
+      return { ok: false, error: 'browser_unavailable' };
+    }
+    const image = await wc.capturePage();
+    if (!image || image.isEmpty?.()) {
+      return { ok: false, error: 'empty_capture' };
+    }
+    const png = image.toPNG();
+    let targetPath = typeof savePath === 'string' && savePath.trim() ? savePath.trim() : '';
+    if (!targetPath) {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const result = await dialog.showSaveDialog(win ?? undefined, {
+        title: 'Save screenshot',
+        defaultPath: path.join(app.getPath('downloads'), `peer-browser-${stamp}.png`),
+        filters: [{ name: 'PNG', extensions: ['png'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return { ok: false, error: 'cancelled' };
+      }
+      targetPath = result.filePath;
+    }
+    await writeFile(targetPath, png);
+    return { ok: true, path: targetPath, bytes: png.length };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'capture_failed' };
+  }
 });
 
 // ── Conversations ──
