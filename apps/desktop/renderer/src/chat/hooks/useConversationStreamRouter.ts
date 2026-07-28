@@ -33,6 +33,7 @@ import {
   markDanglingToolCallsInterrupted,
 } from '../state/streamSegments';
 import type { ChatMsg } from '../state/types';
+import { joinThinkingContent } from '@peer-agent/chat-kernel';
 import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 import { useTypewriterStream } from './useTypewriterStream';
 
@@ -65,7 +66,8 @@ function appendText(messages: readonly ChatMsg[], chunk: string): ChatMsg[] {
   return [...prev.slice(0, -1), { ...last, content: getTextContent(segments), segments }];
 }
 
-/** 追加思考 delta：仅与活跃的尾部 thinking 段合并，工具调用后新起一段。 */
+/** 追加思考 delta：仅与活跃的尾部 thinking 段合并，工具调用后新起一段。
+ *  GPT 多条 status phrase 无分隔符时，用 joinThinkingContent 插入换行，避免粘成一句。 */
 function appendThinking(messages: readonly ChatMsg[], chunk: string): ChatMsg[] {
   const prev = messages as ChatMsg[];
   if (!chunk) return prev;
@@ -74,7 +76,10 @@ function appendThinking(messages: readonly ChatMsg[], chunk: string): ChatMsg[] 
   const segments = [...(last.segments || [])];
   const lastSeg = segments[segments.length - 1];
   if (lastSeg && lastSeg.type === 'thinking') {
-    segments[segments.length - 1] = { type: 'thinking', content: (lastSeg.content || '') + chunk };
+    segments[segments.length - 1] = {
+      type: 'thinking',
+      content: joinThinkingContent(lastSeg.content || '', chunk),
+    };
   } else {
     segments.push({ type: 'thinking', content: chunk });
   }
