@@ -3,7 +3,10 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import electron from 'electron';
 import { createFailedClientToolResult, createPermissionGrant, nowIso } from './tool-result-factory.mjs';
-import { getActiveBrowserEntry } from './browser-control-registry.mjs';
+import {
+  getActiveBrowserEntry,
+  waitForActiveBrowserEntry,
+} from './browser-control-registry.mjs';
 
 const { webContents: electronWebContents } = electron;
 
@@ -131,21 +134,32 @@ export function createLocalBrowserControlProvider({
   artifactStore = null,
   // 便于测试注入：默认用 electron 的 webContents.fromId(注册的 id)。
   resolveWebContents = (id) => electronWebContents.fromId(id),
+  ensureBrowserReady = null,
+  browserReadyTimeoutMs = 2_500,
 } = {}) {
   const store = artifactStore ?? createBrowserArtifactStore({ userDataPath });
 
-  function resolveTarget(context = {}) {
-    const conversationId = context?.toolContext?.conversationId ?? null;
+  function resolveRegisteredTarget(conversationId) {
     const entry = getActiveBrowserEntry(conversationId);
     const id = entry?.webContentsId ?? null;
-    if (!id) {
-      return { ok: false, reason: 'no_active_browser' };
-    }
+    if (!id) return { ok: false, reason: 'no_active_browser' };
     const wc = resolveWebContents(id);
     if (!wc || (typeof wc.isDestroyed === 'function' && wc.isDestroyed())) {
       return { ok: false, reason: 'browser_unavailable' };
     }
     return { ok: true, id, wc, entry, conversationId };
+  }
+
+  async function resolveTarget(context = {}) {
+    const conversationId = context?.toolContext?.conversationId ?? null;
+    const immediate = resolveRegisteredTarget(conversationId);
+    if (immediate.ok || !conversationId) return immediate;
+
+    // tool-call 事件会先通知 Renderer 自动展开 Browser。这里等待对应会话的
+    // webview 完成注册，避免 Provider 抢在 React/dom-ready 前失败。
+    await ensureBrowserReady?.({ conversationId, timeoutMs: browserReadyTimeoutMs });
+    await waitForActiveBrowserEntry(conversationId, { timeoutMs: browserReadyTimeoutMs });
+    return resolveRegisteredTarget(conversationId);
   }
 
   function failed({ call, locale, reason, status = 'failed', dataLevel = 'D2_sensitive' }) {
@@ -235,7 +249,7 @@ export function createLocalBrowserControlProvider({
     }
 
     // 解析目标 WebContents（用户眼前那个可见 webview）。
-    const target = resolveTarget(context);
+    const target = await resolveTarget(context);
     if (!target.ok) {
       const reason =
         target.reason === 'no_active_browser'

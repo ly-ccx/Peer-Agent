@@ -6,6 +6,7 @@ import {
   registerBrowserWebContents,
   resetBrowserControlRegistryForTests,
   unregisterBrowserWebContents,
+  waitForActiveBrowserEntry,
 } from './browser-control-registry.mjs';
 
 test.beforeEach(() => resetBrowserControlRegistryForTests());
@@ -95,4 +96,50 @@ test('rejects registrations without a browser tab identity', () => {
     ok: false,
     error: 'invalid_browser_tab_id',
   });
+});
+
+test('waits for the requested conversation active target to register', async () => {
+  const waiting = waitForActiveBrowserEntry('conversation-b', { timeoutMs: 100 });
+  registerBrowserWebContents({
+    webContentsId: 11,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-1',
+    active: true,
+  });
+  registerBrowserWebContents({
+    webContentsId: 21,
+    conversationId: 'conversation-b',
+    browserTabId: 'b-1',
+    active: true,
+  });
+
+  const entry = await waiting;
+  assert.equal(entry?.conversationId, 'conversation-b');
+  assert.equal(entry?.webContentsId, 21);
+});
+
+test('returns null when the requested conversation target does not register before timeout', async () => {
+  registerBrowserWebContents({
+    webContentsId: 11,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-1',
+    active: true,
+  });
+
+  assert.equal(
+    await waitForActiveBrowserEntry('conversation-b', { timeoutMs: 5 }),
+    null,
+  );
+});
+
+test('returns an already registered target without waiting', async () => {
+  registerBrowserWebContents({
+    webContentsId: 11,
+    conversationId: 'conversation-a',
+    browserTabId: 'a-1',
+    active: true,
+  });
+
+  const entry = await waitForActiveBrowserEntry('conversation-a', { timeoutMs: 100 });
+  assert.equal(entry?.webContentsId, 11);
 });

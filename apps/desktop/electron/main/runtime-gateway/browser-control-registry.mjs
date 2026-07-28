@@ -9,7 +9,18 @@ const FALLBACK_CONVERSATION_KEY = '__none';
 
 const entriesByKey = new Map();
 const activeEntryKeyByConversation = new Map();
+const registryListeners = new Set();
 let foregroundEntryKey = null;
+
+function notifyRegistryChanged() {
+  for (const listener of registryListeners) {
+    try {
+      listener();
+    } catch {
+      // 注册表通知不能被单个等待者异常打断。
+    }
+  }
+}
 
 function conversationKey(conversationId) {
   return typeof conversationId === 'string' && conversationId ? conversationId : FALLBACK_CONVERSATION_KEY;
@@ -66,6 +77,7 @@ export function registerBrowserWebContents(entry = {}) {
     activeEntryKeyByConversation.delete(convKey);
     if (foregroundEntryKey === key) foregroundEntryKey = null;
   }
+  notifyRegistryChanged();
 
   return {
     ok: true,
@@ -95,6 +107,7 @@ export function unregisterBrowserWebContents(input) {
     activeEntryKeyByConversation.delete(convKey);
   }
   if (foregroundEntryKey === key) foregroundEntryKey = null;
+  notifyRegistryChanged();
   return { ok: true, cleared: true };
 }
 
@@ -115,8 +128,42 @@ export function getActiveWebContentsId(conversationId) {
   return entry?.webContentsId ?? null;
 }
 
+/**
+ * 等待指定会话的 active Browser target 注册。
+ * 已就绪时立即返回；超时返回 null。等待者只观察指定 conversation，绝不回退前台全局目标。
+ */
+export function waitForActiveBrowserEntry(conversationId, { timeoutMs = 2_500, signal } = {}) {
+  const ready = getActiveBrowserEntry(conversationId);
+  if (ready) return Promise.resolve(ready);
+  if (signal?.aborted) return Promise.resolve(null);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (entry) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      registryListeners.delete(onRegistryChanged);
+      signal?.removeEventListener?.('abort', onAbort);
+      resolve(entry);
+    };
+    const onRegistryChanged = () => {
+      const entry = getActiveBrowserEntry(conversationId);
+      if (entry) finish(entry);
+    };
+    const onAbort = () => finish(null);
+    const timer = setTimeout(() => finish(null), Math.max(0, Number(timeoutMs) || 0));
+    timer.unref?.();
+    registryListeners.add(onRegistryChanged);
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    // 避免 initial check 与 listener 注册之间发生注册事件的竞态。
+    onRegistryChanged();
+  });
+}
+
 export function resetBrowserControlRegistryForTests() {
   entriesByKey.clear();
   activeEntryKeyByConversation.clear();
+  registryListeners.clear();
   foregroundEntryKey = null;
 }

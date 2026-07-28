@@ -76,7 +76,43 @@ test('browser provider resolves the active tab from the tool conversation contex
   assert.deepEqual(browserB.navigations, []);
 });
 
-test('browser provider fails instead of falling back to another conversation', async () => {
+test('browser provider waits for the requested conversation target to register', async () => {
+  const browser = createWebContents('about:blank');
+  let ensureCalls = 0;
+  const provider = createLocalBrowserControlProvider({
+    userDataPath: '/tmp/peer-agent-browser-provider-test',
+    artifactStore: {},
+    resolveWebContents: (id) => id === 31 ? browser : null,
+    browserReadyTimeoutMs: 100,
+    ensureBrowserReady: async ({ conversationId }) => {
+      ensureCalls += 1;
+      assert.equal(conversationId, 'conversation-c');
+      registerBrowserWebContents({
+        webContentsId: 31,
+        conversationId,
+        browserTabId: 'c-1',
+        active: true,
+        url: browser.getURL(),
+      });
+    },
+  });
+
+  const execution = await provider.executeCapability(
+    navigateCall('https://openai.com'),
+    {
+      locale: 'en-US',
+      toolContext: { conversationId: 'conversation-c' },
+      requestPermission: async () => ({ granted: true }),
+    },
+  );
+
+  assert.equal(execution.result.status, 'success');
+  assert.equal(ensureCalls, 1);
+  assert.equal(execution.result.outputPreview.browserTabId, 'c-1');
+  assert.deepEqual(browser.navigations, ['https://openai.com']);
+});
+
+test('browser provider fails after readiness timeout instead of falling back to another conversation', async () => {
   const browserA = createWebContents('https://example.com/a');
   registerBrowserWebContents({
     webContentsId: 11,
@@ -89,6 +125,7 @@ test('browser provider fails instead of falling back to another conversation', a
     userDataPath: '/tmp/peer-agent-browser-provider-test',
     artifactStore: {},
     resolveWebContents: () => browserA,
+    browserReadyTimeoutMs: 5,
   });
 
   const execution = await provider.executeCapability(
