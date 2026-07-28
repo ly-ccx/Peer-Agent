@@ -40,6 +40,8 @@ export const DATA_STORE_ENTRIES = {
   skills:            { rel: 'skills',                  kind: 'dir',  scope: 'portable' },
   mcpRegistry:       { rel: 'mcp-registry.json',       kind: 'file', scope: 'portable' },
   mcpCredentials:    { rel: 'mcp-credentials.json',    kind: 'file', scope: 'device'   },
+  /** Browser Password manager（Phase 1）：条目 meta + safeStorage 密文，不跨设备导出。 */
+  passwordVault:     { rel: 'browser-password-vault.json', kind: 'file', scope: 'device' },
   permissions:       { rel: 'permissions',             kind: 'dir',  scope: 'portable' },
   developerSettings: { rel: 'developer-settings.json', kind: 'file', scope: 'portable' },
   settings:          { rel: 'settings.json',           kind: 'file', scope: 'portable' },

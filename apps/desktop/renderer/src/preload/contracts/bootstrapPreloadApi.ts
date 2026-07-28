@@ -457,6 +457,56 @@ export interface BootstrapPreloadApi {
     readonly stats?: Record<string, unknown>;
     readonly error?: string;
   }>;
+  /** Password manager：列表仅 meta。 */
+  readonly listPasswordVaultEntries: (origin?: string) => Promise<{
+    readonly ok: boolean;
+    readonly entries?: readonly {
+      readonly id: string;
+      readonly origin: string;
+      readonly username: string;
+      readonly createdAt: string;
+      readonly updatedAt: string;
+      readonly lastUsedAt?: string;
+    }[];
+    readonly error?: string;
+  }>;
+  readonly upsertPasswordVaultEntry: (payload: {
+    readonly id?: string;
+    readonly origin: string;
+    readonly username: string;
+    readonly password: string;
+  }) => Promise<{
+    readonly ok: boolean;
+    readonly entry?: {
+      readonly id: string;
+      readonly origin: string;
+      readonly username: string;
+      readonly createdAt: string;
+      readonly updatedAt: string;
+    };
+    readonly error?: string;
+  }>;
+  readonly deletePasswordVaultEntry: (id: string) => Promise<{
+    readonly ok: boolean;
+    readonly error?: string;
+  }>;
+  readonly revealPasswordVaultEntry: (id: string) => Promise<{
+    readonly ok: boolean;
+    readonly id?: string;
+    readonly origin?: string;
+    readonly username?: string;
+    readonly password?: string;
+    readonly error?: string;
+  }>;
+  readonly fillPasswordVaultEntry: (payload: {
+    readonly id: string;
+    readonly webContentsId: number;
+    readonly fillUsername?: boolean;
+  }) => Promise<{
+    readonly ok: boolean;
+    readonly filledUsername?: boolean;
+    readonly error?: string;
+  }>;
   readonly listShellTasks: () => Promise<readonly Record<string, unknown>[]>;
   readonly stopActiveShellTask: () => Promise<Record<string, unknown>>;
   readonly stopShellTask: (taskId: string) => Promise<Record<string, unknown>>;

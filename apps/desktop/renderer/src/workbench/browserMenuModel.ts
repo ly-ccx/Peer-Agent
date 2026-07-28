@@ -92,7 +92,7 @@ export function buildBrowserOverflowMenu(isZh: boolean): readonly BrowserMenuIte
       kind: 'action',
       id: 'password_manager',
       label: isZh ? '密码管理…' : 'Password manager…',
-      enabled: false,
+      enabled: true,
     },
     { kind: 'separator' },
     {
@@ -121,6 +121,7 @@ export const BROWSER_MENU_P0_ENABLED_IDS: ReadonlySet<BrowserMenuActionId> = new
   'screenshot',
   'import_site_session',
   'clear_site_data',
+  'password_manager',
 ]);
 
 export function importSiteSessionPlaceholder(isZh: boolean): string {

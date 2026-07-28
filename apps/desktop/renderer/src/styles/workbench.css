@@ -1103,6 +1103,62 @@
     margin-top: 12px;
   }
 
+  /* Password manager Phase 1 */
+  .password-manager-modal {
+    width: min(520px, 100%);
+    max-height: min(640px, 92%);
+  }
+  .password-manager-form,
+  .password-manager-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .password-manager-toolbar {
+    flex-direction: row;
+    align-items: center;
+  }
+  .password-manager-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+    border-radius: var(--ui-radius-control, 8px);
+    background: var(--za-surface-1, #fff);
+    color: var(--graphite-base);
+    font-size: 13px;
+  }
+  .password-manager-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+    border-radius: 8px;
+  }
+  .password-manager-row-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .password-manager-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .password-manager-secret {
+    margin-top: 4px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.04);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    word-break: break-all;
+  }
+
   /* 地址栏：填满剩余空间 */
   .browser-address {
     position: relative;

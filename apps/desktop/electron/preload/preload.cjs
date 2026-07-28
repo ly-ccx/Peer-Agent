@@ -72,6 +72,17 @@ contextBridge.exposeInMainWorld('peerAgent', {
    */
   importBrowserSiteSession: (payload) =>
     ipcRenderer.invoke('browser:import-site-session', payload),
+  /** Password manager Phase 1：列表仅 meta，无 password 明文。 */
+  listPasswordVaultEntries: (origin) =>
+    ipcRenderer.invoke('password-vault:list', { origin }),
+  upsertPasswordVaultEntry: (payload) =>
+    ipcRenderer.invoke('password-vault:upsert', payload),
+  deletePasswordVaultEntry: (id) =>
+    ipcRenderer.invoke('password-vault:delete', { id }),
+  revealPasswordVaultEntry: (id) =>
+    ipcRenderer.invoke('password-vault:reveal', { id }),
+  fillPasswordVaultEntry: (payload) =>
+    ipcRenderer.invoke('password-vault:fill', payload),
   listShellTasks: () => ipcRenderer.invoke('shell:tasks:list'),
   stopActiveShellTask: () => ipcRenderer.invoke('shell:tasks:stop-active'),
   stopShellTask: (taskId) => ipcRenderer.invoke('shell:tasks:stop', { taskId }),

@@ -30,13 +30,14 @@ describe('buildBrowserOverflowMenu', () => {
     }
   });
 
-  it('includes Password manager as disabled P1 placeholder', () => {
+  it('enables Password manager for Phase 1 user-facing vault', () => {
     const item = buildBrowserOverflowMenu(false).find(
       (i) => i.kind === 'action' && i.id === 'password_manager',
     );
     assert.ok(item && item.kind === 'action');
-    assert.equal(item.enabled, false);
+    assert.equal(item.enabled, true);
     assert.match(item.label, /Password manager/i);
+    assert.equal(BROWSER_MENU_P0_ENABLED_IDS.has('password_manager'), true);
   });
 });
 

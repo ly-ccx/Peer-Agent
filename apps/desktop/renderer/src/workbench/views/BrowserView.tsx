@@ -26,6 +26,7 @@ import {
   type BrowserMenuActionId,
 } from '../browserMenuModel';
 import { SessionImportWizard } from './SessionImportWizard';
+import { PasswordManagerPanel } from './PasswordManagerPanel';
 
 interface WebviewElement extends HTMLElement {
   src: string;
@@ -350,6 +351,7 @@ export function BrowserView({
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuNotice, setMenuNotice] = useState<string | null>(null);
   const [importWizardOpen, setImportWizardOpen] = useState(false);
+  const [passwordManagerOpen, setPasswordManagerOpen] = useState(false);
   const menuWrapRef = useRef<HTMLDivElement | null>(null);
 
   const t = useMemo(
@@ -440,6 +442,10 @@ export function BrowserView({
       setMenuNotice(null);
       if (id === 'import_site_session') {
         setImportWizardOpen(true);
+        return;
+      }
+      if (id === 'password_manager') {
+        setPasswordManagerOpen(true);
         return;
       }
       if (id === 'clear_site_data') {
@@ -720,6 +726,15 @@ export function BrowserView({
             activeWebview()?.reload();
           }
         }}
+      />
+
+      <PasswordManagerPanel
+        open={passwordManagerOpen}
+        isZh={isZh}
+        pageUrl={activeRuntime.currentUrl}
+        webContentsId={activeWebview()?.getWebContentsId?.() ?? null}
+        onClose={() => setPasswordManagerOpen(false)}
+        onStatus={(message) => setMenuNotice(message)}
       />
     </div>
   );

@@ -30,6 +30,7 @@ import {
   scanProfileSites,
 } from './session-import/import-cookies.mjs';
 import { applyCookiesToSession } from './session-import/apply-cookies.mjs';
+import { createPasswordVaultStore } from './password-vault-store.mjs';
 import { buildAppMenu } from './app-menu.mjs';
 import { createLocalShellProvider } from './runtime-gateway/local-shell-provider.mjs';
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
@@ -192,6 +193,7 @@ let skillStore;
 
 const mcpRegistry = createMcpRegistry();
 const mcpCredentialStore = createMcpCredentialStore();
+const passwordVaultStore = createPasswordVaultStore();
 const baseMcpCredentialResolver = createMcpCredentialResolver(mcpCredentialStore);
 const mcpCredentialResolver = async (auth, server) => {
   const injection = await baseMcpCredentialResolver(auth, server);
@@ -2221,6 +2223,157 @@ ipcMain.handle(
       };
     } catch (err) {
       return { ok: false, error: err?.message || 'import_failed' };
+    }
+  },
+);
+
+/**
+ * Password manager Phase 1（用户面）。
+ * 不投影给 Agent；reveal/fill 仅在用户手势后调用。
+ */
+ipcMain.handle('password-vault:list', async (_event, { origin } = {}) => {
+  try {
+    if (origin) {
+      return { ok: true, entries: passwordVaultStore.listForOrigin(origin) };
+    }
+    return { ok: true, entries: passwordVaultStore.listEntries() };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'list_failed', entries: [] };
+  }
+});
+
+ipcMain.handle('password-vault:upsert', async (_event, payload = {}) => {
+  try {
+    const entry = passwordVaultStore.upsertEntry(payload);
+    return { ok: true, entry };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'upsert_failed' };
+  }
+});
+
+ipcMain.handle('password-vault:delete', async (_event, { id } = {}) => {
+  try {
+    return passwordVaultStore.deleteEntry(id);
+  } catch (err) {
+    return { ok: false, error: err?.message || 'delete_failed' };
+  }
+});
+
+ipcMain.handle('password-vault:reveal', async (_event, { id } = {}) => {
+  try {
+    return passwordVaultStore.revealPassword(id);
+  } catch (err) {
+    return { ok: false, error: err?.message || 'reveal_failed' };
+  }
+});
+
+/**
+ * 用户手选：向指定 webContents 的密码框填充用户名/密码。
+ * 使用 sendInputEvent 输入，避免把明文写进可序列化 tool log。
+ */
+ipcMain.handle(
+  'password-vault:fill',
+  async (_event, { id, webContentsId, fillUsername = true } = {}) => {
+    try {
+      const revealed = passwordVaultStore.revealPassword(id);
+      if (!revealed?.ok) return revealed;
+
+      const wcId = Number(webContentsId);
+      if (!Number.isInteger(wcId) || wcId <= 0) {
+        return { ok: false, error: 'invalid_web_contents_id' };
+      }
+      const wc = webContents.fromId(wcId);
+      if (!wc || (typeof wc.isDestroyed === 'function' && wc.isDestroyed())) {
+        return { ok: false, error: 'browser_unavailable' };
+      }
+
+      const fieldInfo = await wc.executeJavaScript(
+        [
+          '(() => {',
+          '  const isVisible = (el) => {',
+          '    if (!el) return false;',
+          '    const s = window.getComputedStyle(el);',
+          "    return s && s.visibility !== 'hidden' && s.display !== 'none' && el.offsetParent !== null;",
+          '  };',
+          '  const passwords = [...document.querySelectorAll(\'input[type="password"]\')].filter(isVisible);',
+          '  const password = passwords[0] || null;',
+          "  if (!password) return { ok: false, reason: 'no_password_field' };",
+          '  const form = password.form;',
+          '  const candidates = form',
+          "    ? [...form.querySelectorAll('input')]",
+          "    : [...document.querySelectorAll('input')];",
+          '  const username = candidates.find((el) => {',
+          '    if (!isVisible(el) || el === password) return false;',
+          "    const type = (el.type || 'text').toLowerCase();",
+          "    if (['hidden', 'submit', 'button', 'checkbox', 'radio', 'file', 'password'].includes(type)) return false;",
+          "    const auto = (el.autocomplete || '').toLowerCase();",
+          "    const name = ((el.name || '') + ' ' + (el.id || '') + ' ' + (el.placeholder || '')).toLowerCase();",
+          "    return auto.includes('username') || auto.includes('email') || type === 'email' || /user|email|login|account/.test(name);",
+          '  }) || null;',
+          "  const mark = 'data-peer-pw-fill';",
+          "  document.querySelectorAll('[' + mark + ']').forEach((el) => el.removeAttribute(mark));",
+          "  if (username) username.setAttribute(mark, 'username');",
+          "  password.setAttribute(mark, 'password');",
+          '  return { ok: true, hasUsername: Boolean(username), origin: location.origin };',
+          '})()',
+        ].join('\n'),
+        true,
+      );
+
+      if (!fieldInfo?.ok) {
+        return { ok: false, error: fieldInfo?.reason || 'no_password_field' };
+      }
+
+      const typeIntoMarked = async (mark, text) => {
+        const sel = "[data-peer-pw-fill=\"" + mark + "\"]";
+        await wc.executeJavaScript(
+          [
+            '(() => {',
+            "  const el = document.querySelector(" + JSON.stringify(sel) + ");",
+            '  if (!el) return false;',
+            '  el.focus();',
+            "  el.value = '';",
+            "  el.dispatchEvent(new Event('input', { bubbles: true }));",
+            '  return true;',
+            '})()',
+          ].join('\n'),
+          true,
+        );
+        for (const ch of String(text)) {
+          wc.sendInputEvent({ type: 'char', keyCode: ch });
+        }
+        await wc.executeJavaScript(
+          [
+            '(() => {',
+            "  const el = document.querySelector(" + JSON.stringify(sel) + ");",
+            '  if (!el) return;',
+            "  el.dispatchEvent(new Event('input', { bubbles: true }));",
+            "  el.dispatchEvent(new Event('change', { bubbles: true }));",
+            '})()',
+          ].join('\n'),
+          true,
+        );
+      };
+
+      if (fillUsername && fieldInfo.hasUsername && revealed.username) {
+        await typeIntoMarked('username', revealed.username);
+      }
+      await typeIntoMarked('password', revealed.password);
+
+      await wc.executeJavaScript(
+        "document.querySelectorAll('[data-peer-pw-fill]').forEach((el) => el.removeAttribute('data-peer-pw-fill')); true;",
+        true,
+      );
+
+      return {
+        ok: true,
+        id: revealed.id,
+        origin: revealed.origin,
+        filledUsername: Boolean(fillUsername && fieldInfo.hasUsername),
+        pageOrigin: fieldInfo.origin,
+      };
+    } catch (err) {
+      return { ok: false, error: err?.message || 'fill_failed' };
     }
   },
 );
