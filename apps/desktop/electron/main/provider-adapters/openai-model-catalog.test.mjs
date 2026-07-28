@@ -72,7 +72,7 @@ test('GPT-5.6 subscription models expose cache pricing and max reasoning', () =>
     assert.equal(model.cacheReadPrice, pricing.cacheReadPrice);
     assert.equal(model.outputPrice, pricing.outputPrice);
     assert.equal(model.supportsPromptCaching, true);
-    assert.deepEqual(model.reasoningEffortLevels, ['low', 'default', 'high', 'max']);
+    assert.deepEqual(model.reasoningEffortLevels, ['low', 'default', 'high', 'xhigh', 'max']);
   }
 });
 

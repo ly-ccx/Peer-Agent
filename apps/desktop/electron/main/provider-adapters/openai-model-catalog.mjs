@@ -33,7 +33,7 @@ const SUBSCRIPTION_CATALOG = [
     },
   },
   // GPT-5.6 家族: codex 端点模型 id 为 gpt-5.6-{sol,terra,luna}。
-  // Codex 原生强度包含 xhigh/max 等值；Peer Agent 保持四档产品映射，max 对应“超深度思考”。
+  // Codex 原生强度包含 xhigh/max 等值；GPT-5.6 完整暴露五档，避免将 xhigh 与 max 压缩为同一产品档位。
   // 上下文窗口 353k tokens；价格与 cached-input 能力来自 OpenAI 模型目录。
   // 置于 gpt-5.5 之后:与 ChatGPT 客户端展示顺序一致,且不改变默认(仍为 gpt-5.5)。
   {
@@ -47,7 +47,7 @@ const SUBSCRIPTION_CATALOG = [
     supportsVision: true,
     supportsReasoning: true,
     supportsPromptCaching: true,
-    reasoningEffortLevels: ['low', 'default', 'high', 'max'],
+    reasoningEffortLevels: ['low', 'default', 'high', 'xhigh', 'max'],
   },
   {
     id: 'gpt-5.6-terra',
@@ -60,7 +60,7 @@ const SUBSCRIPTION_CATALOG = [
     supportsVision: true,
     supportsReasoning: true,
     supportsPromptCaching: true,
-    reasoningEffortLevels: ['low', 'default', 'high', 'max'],
+    reasoningEffortLevels: ['low', 'default', 'high', 'xhigh', 'max'],
   },
   {
     id: 'gpt-5.6-luna',
@@ -73,7 +73,7 @@ const SUBSCRIPTION_CATALOG = [
     supportsVision: true,
     supportsReasoning: true,
     supportsPromptCaching: true,
-    reasoningEffortLevels: ['low', 'default', 'high', 'max'],
+    reasoningEffortLevels: ['low', 'default', 'high', 'xhigh', 'max'],
   },
   {
     id: 'gpt-5.4',

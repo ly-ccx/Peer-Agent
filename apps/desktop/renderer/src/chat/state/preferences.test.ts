@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   BASE_EFFORT_LEVELS,
   LAST_MODEL_PROVIDER_KEY,
+  effortLabel,
   hasTunableEffortLevels,
   normalizeEffortLevels,
   readLastModelProviderId,
@@ -13,6 +14,16 @@ import {
   resolveProviderById,
   writeLastModelProviderId,
 } from './preferences.ts';
+
+describe('effortLabel', () => {
+  it('uses distinct labels for xhigh and max', () => {
+    assert.equal(effortLabel('xhigh', false), 'Extra-high reasoning');
+    assert.equal(effortLabel('max', false), 'Max reasoning');
+    assert.equal(effortLabel('xhigh', true), '超高强度思考');
+    assert.equal(effortLabel('max', true), '最大强度思考');
+    assert.notEqual(effortLabel('xhigh', false), effortLabel('max', false));
+  });
+});
 
 describe('normalizeEffortLevels', () => {
   it('falls back to BASE_EFFORT_LEVELS when input is undefined / null / empty', () => {

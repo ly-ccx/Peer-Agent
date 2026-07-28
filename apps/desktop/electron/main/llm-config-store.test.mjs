@@ -108,12 +108,12 @@ test('GPT-5.6 subscription model persists prompt cache and reasoning effort meta
 
   assert.equal(provider.cacheReadPrice, 0.5);
   assert.equal(provider.supportsPromptCaching, true);
-  assert.deepEqual(provider.reasoningEffortLevels, ['low', 'default', 'high', 'max']);
+  assert.deepEqual(provider.reasoningEffortLevels, ['low', 'default', 'high', 'xhigh', 'max']);
 
   const reloaded = createLlmConfigStore({ configFile }).listProviders()
     .find((item) => item.id === provider.id);
   assert.equal(reloaded?.supportsPromptCaching, true);
-  assert.deepEqual(reloaded?.reasoningEffortLevels, ['low', 'default', 'high', 'max']);
+  assert.deepEqual(reloaded?.reasoningEffortLevels, ['low', 'default', 'high', 'xhigh', 'max']);
 }));
 
 test('subscription provider supports multiple configured models in one group', () => withStore(({ configFile }) => {
@@ -212,11 +212,11 @@ test('subscription provider migration restores GPT-5.6 prompt cache and effort l
   const store = createLlmConfigStore({ configFile });
   const [provider] = store.listProviders();
   assert.equal(provider.supportsPromptCaching, true);
-  assert.deepEqual(provider.reasoningEffortLevels, ['low', 'default', 'high', 'max']);
+  assert.deepEqual(provider.reasoningEffortLevels, ['low', 'default', 'high', 'xhigh', 'max']);
 
   const [persisted] = readPersistedModels(configFile);
   assert.equal(persisted.supportsPromptCaching, true);
-  assert.deepEqual(persisted.reasoningEffortLevels, ['low', 'default', 'high', 'max']);
+  assert.deepEqual(persisted.reasoningEffortLevels, ['low', 'default', 'high', 'xhigh', 'max']);
 }));
 
 test('Grok OAuth records migrate to the official display name', () => withStore(({ configFile }) => {
