@@ -9,11 +9,15 @@
 - 没有的分组可删除。
 - 若本版含 CLI 产物，请保留下方「CLI（仅命令行）」/「CLI (command-line only)」小节。
 - 必须使用 locale 标记分段，弹窗按用户设置切换中英文。
-  标记写法（单独成行的 HTML 注释）：locale:zh-CN 与 locale:en-US。
+  推荐可见标记（单独成行；GitHub 渲染后仍保留，electron-updater 可识别）：
+    locale:zh-CN
+    locale:en-US
+  仍兼容 HTML 注释 `<!-- locale:zh-CN -->`，但 GitHub 渲染 HTML 会剥掉注释，
+  导致升级弹窗中英混显；新版本请优先用可见标记。
   若缺少某语言段落，客户端会回退到另一语言或全文。
 -->
 
-<!-- locale:zh-CN -->
+locale:zh-CN
 
 ## 新功能
 
@@ -36,10 +40,9 @@
   - **手动**：解压归档后将目录加入 `PATH`，执行 `peer --version` 校验，再运行 `peer`。
 - 可不装 Desktop；会话与设置仍落在 `~/.peer-agent`，与客户端共享。
 
-<!-- locale:en-US -->
+locale:en-US
 
 ## What's New
-
 -
 
 ## Improvements
