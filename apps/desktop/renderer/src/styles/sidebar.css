@@ -233,7 +233,8 @@
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
   margin: 0 var(--space-2) var(--space-1);
-  border-radius: var(--radius-sm);
+  /* Match conversation rows / new-chat: panel radius for sidebar interactive rows. */
+  border-radius: var(--ui-radius-panel, var(--radius-lg));
   cursor: pointer;
   transition: background var(--za-motion-fast);
 }
