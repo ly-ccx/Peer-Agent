@@ -679,31 +679,27 @@
   font: inherit;
   -webkit-app-region: no-drag;
 }
+/* 运行中：静止蓝点 + 外扩 ring（motion-ripple）。
+ * 变量挂在宿主上，::after 由下方共享规则统一绘制，避免重复声明互相覆盖。 */
 .sidebar-conv-spinner {
   position: relative;
   isolation: isolate;
   flex-shrink: 0;
+  overflow: visible;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--azure-seal);
-}
-/* 运行中：静止蓝点外叠加扩散圆环，表达持续进行且不影响列表布局。 */
-.sidebar-conv-spinner::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  background: color-mix(in srgb, var(--azure-seal) 50%, transparent);
+  --motion-ripple-color: var(--azure-seal);
+  --motion-ripple-strength: 50%;
   --motion-ripple-scale: 2.5;
+  --motion-ripple-duration: 1.6s;
   --motion-ripple-peak: 0.9;
-  animation: motion-ripple 1.6s var(--za-ease-standard) infinite;
-  will-change: transform, opacity;
 }
 /* 任务完成但未读：用更明亮的成功绿和稳定光晕，与运行中的动态蓝点拉开层级。 */
 .sidebar-conv-completed-unread {
   flex-shrink: 0;
+  overflow: visible;
   width: 9px;
   height: 9px;
   border-radius: 50%;
@@ -728,11 +724,13 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 4px;
+  overflow: visible;
 }
 .sidebar-conv-compacting-dot {
   position: relative;
   isolation: isolate;
   flex-shrink: 0;
+  overflow: visible;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -744,6 +742,18 @@
   --motion-ripple-peak: 0.95;
 }
 
+/* chat/styles/sidebar.css 对 `.conversation-row span` 统一 overflow-hidden（标题省略号）。
+ * 状态点也是 span，特异性 (0,1,1) 会压过单类选择器，把 motion-ripple 的外扩环裁掉。
+ * 这里用更高特异性显式放开，标题 span 仍保持省略。 */
+.conversation-row .sidebar-conv-spinner,
+.conversation-row .sidebar-conv-compacting,
+.conversation-row .sidebar-conv-compacting-dot,
+.conversation-row .sidebar-conv-completed-unread {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* 共享扩散环：变量由宿主节点注入，避免各状态点重复写 ::after 规则互相覆盖。 */
 .ws-running-dot::after,
 .sidebar-conv-spinner::after,
 .sidebar-conv-compacting-dot::after {
