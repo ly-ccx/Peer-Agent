@@ -47,9 +47,9 @@ export interface ComposerStatus {
 
 const KNOWN_CONTEXT_WINDOWS: Readonly<Record<string, number>> = Object.freeze({
   'gpt-5.5': 258_000,
-  'gpt-5.6-sol': 353_000,
-  'gpt-5.6-terra': 353_000,
-  'gpt-5.6-luna': 353_000,
+  'gpt-5.6-sol': 258_000,
+  'gpt-5.6-terra': 258_000,
+  'gpt-5.6-luna': 258_000,
 });
 
 function cleanPath(path: string): string {

@@ -204,6 +204,7 @@ test('subscription provider migration restores GPT-5.6 prompt cache and effort l
       enabled: true,
       isDefault: true,
       createdAt: '2026-01-01T00:00:00.000Z',
+      contextWindow: 353_000,
       supportsReasoning: true,
       supportsPromptCaching: false,
     },
@@ -211,10 +212,12 @@ test('subscription provider migration restores GPT-5.6 prompt cache and effort l
 
   const store = createLlmConfigStore({ configFile });
   const [provider] = store.listProviders();
+  assert.equal(provider.contextWindow, 258_000);
   assert.equal(provider.supportsPromptCaching, true);
   assert.deepEqual(provider.reasoningEffortLevels, ['low', 'default', 'high', 'xhigh', 'max']);
 
   const [persisted] = readPersistedModels(configFile);
+  assert.equal(persisted.contextWindow, 258_000);
   assert.equal(persisted.supportsPromptCaching, true);
   assert.deepEqual(persisted.reasoningEffortLevels, ['low', 'default', 'high', 'xhigh', 'max']);
 }));

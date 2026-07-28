@@ -67,7 +67,7 @@ test('GPT-5.6 subscription models expose cache pricing and max reasoning', () =>
   for (const [id, pricing] of expected) {
     const model = getSubscriptionModelMetadata(id);
     assert.ok(model);
-    assert.equal(model.contextWindow, 353_000);
+    assert.equal(model.contextWindow, 258_000);
     assert.equal(model.inputPrice, pricing.inputPrice);
     assert.equal(model.cacheReadPrice, pricing.cacheReadPrice);
     assert.equal(model.outputPrice, pricing.outputPrice);

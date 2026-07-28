@@ -34,12 +34,12 @@ const SUBSCRIPTION_CATALOG = [
   },
   // GPT-5.6 家族: codex 端点模型 id 为 gpt-5.6-{sol,terra,luna}。
   // Codex 原生强度包含 xhigh/max 等值；GPT-5.6 完整暴露五档，避免将 xhigh 与 max 压缩为同一产品档位。
-  // 上下文窗口 353k tokens；价格与 cached-input 能力来自 OpenAI 模型目录。
+  // ChatGPT OAuth 订阅可用上下文窗口为 258k tokens；价格与 cached-input 能力来自 OpenAI 模型目录。
   // 置于 gpt-5.5 之后:与 ChatGPT 客户端展示顺序一致,且不改变默认(仍为 gpt-5.5)。
   {
     id: 'gpt-5.6-sol',
     label: 'GPT-5.6 Sol',
-    contextWindow: 353_000,
+    contextWindow: 258_000,
     maxOutputTokens: 128_000,
     inputPrice: 5,
     outputPrice: 30,
@@ -52,7 +52,7 @@ const SUBSCRIPTION_CATALOG = [
   {
     id: 'gpt-5.6-terra',
     label: 'GPT-5.6 Terra',
-    contextWindow: 353_000,
+    contextWindow: 258_000,
     maxOutputTokens: 128_000,
     inputPrice: 2.5,
     outputPrice: 15,
@@ -65,7 +65,7 @@ const SUBSCRIPTION_CATALOG = [
   {
     id: 'gpt-5.6-luna',
     label: 'GPT-5.6 Luna',
-    contextWindow: 353_000,
+    contextWindow: 258_000,
     maxOutputTokens: 128_000,
     inputPrice: 1,
     outputPrice: 6,
