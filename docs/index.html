@@ -21,6 +21,7 @@
     <style>
       :root {
         --graphite-btn: #1a1d21;
+        --graphite-btn-hover: #2a2d33;
         --graphite-btn-ink: #f5f7fa;
         --bg: #f5f5f7;
         --bg-elevated: #ffffff;
@@ -36,6 +37,17 @@
         --fill: #eaedf2;
         --composer: #eff2f6;
         --hairline: #dce0e8;
+        --preview-frame-bg: linear-gradient(180deg, #e8eaed 0%, #d9dde3 100%);
+        --preview-window-bg: #f7f9fc;
+        --preview-window-border: rgba(255,255,255,0.55);
+        --preview-chrome-bg: linear-gradient(180deg, #fbfcfd, #f1f3f6);
+        --preview-dot-bg: #d2d5db;
+        --preview-sidebar-bg: rgba(243,245,248,0.92);
+        --preview-soft-fill: rgba(26,29,33,0.04);
+        --preview-active-fill: rgba(26,29,33,0.07);
+        --preview-active-border: rgba(220,224,232,0.95);
+        --preview-main-bg: linear-gradient(180deg, rgba(247,249,252,0.5), transparent 80px), #f7f9fc;
+        --preview-trace-bg: rgba(216,228,238,0.32);
         --shadow: 0 2px 8px rgba(0,0,0,.04), 0 28px 60px rgba(0,0,0,.10);
         --shadow-soft: 0 1px 2px rgba(0,0,0,.04), 0 12px 28px rgba(0,0,0,.08);
         --max: 980px;
@@ -60,6 +72,7 @@
         --graphite: #f5f7fa;
         --graphite-hover: #ffffff;
         --graphite-btn: #f5f7fa;
+        --graphite-btn-hover: #ffffff;
         --graphite-btn-ink: #121417;
         --azure: #6eb0d6;
         --azure-strong: #8fc4e2;
@@ -68,6 +81,17 @@
         --fill: #1b212a;
         --composer: #1a2028;
         --hairline: rgba(255, 255, 255, 0.10);
+        --preview-frame-bg: linear-gradient(180deg, #252b34 0%, #1b2027 100%);
+        --preview-window-bg: #12161b;
+        --preview-window-border: rgba(255,255,255,0.10);
+        --preview-chrome-bg: linear-gradient(180deg, #20262e, #191e25);
+        --preview-dot-bg: #555f6c;
+        --preview-sidebar-bg: rgba(24,29,36,0.96);
+        --preview-soft-fill: rgba(255,255,255,0.055);
+        --preview-active-fill: rgba(255,255,255,0.09);
+        --preview-active-border: rgba(255,255,255,0.12);
+        --preview-main-bg: linear-gradient(180deg, rgba(35,42,51,0.62), transparent 80px), #12161b;
+        --preview-trace-bg: rgba(60,127,171,0.18);
         --code-bg: #0b0d10;
         --code-ink: #d8e0ea;
         --shadow: 0 2px 8px rgba(0,0,0,.35), 0 28px 60px rgba(0,0,0,.45);
@@ -184,13 +208,13 @@
       .nav-links a:hover { opacity: 1; }
       .nav-links a.btn-link {
         color: var(--graphite-btn-ink) !important;
-        background: var(--graphite);
+        background: var(--graphite-btn);
         border-radius: 980px;
         padding: 6px 12px;
         opacity: 1;
         font-weight: 500;
       }
-      .nav-links a.btn-link:hover { background: var(--graphite-hover); }
+      .nav-links a.btn-link:hover { background: var(--graphite-btn-hover); }
 
       .lang {
         display: inline-flex;
@@ -271,13 +295,13 @@
         letter-spacing: -0.01em;
       }
       .cta-primary {
-        color: #fff !important;
-        background: var(--graphite);
+        color: var(--graphite-btn-ink) !important;
+        background: var(--graphite-btn);
         border-radius: 980px;
         padding: 11px 20px;
         transition: background .2s ease;
       }
-      .cta-primary:hover { background: var(--graphite-hover); }
+      .cta-primary:hover { background: var(--graphite-btn-hover); }
       .cta-secondary {
         color: var(--azure);
         padding: 11px 4px;
@@ -333,14 +357,14 @@
         position: relative;
         border-radius: 22px;
         padding: 10px;
-        background: linear-gradient(180deg, #e8eaed 0%, #d9dde3 100%);
+        background: var(--preview-frame-bg);
         box-shadow: var(--shadow);
       }
       .window {
         border-radius: 14px;
         overflow: hidden;
-        background: var(--paper);
-        border: 1px solid rgba(255,255,255,0.55);
+        background: var(--preview-window-bg);
+        border: 1px solid var(--preview-window-border);
       }
       .window-chrome {
         height: 38px;
@@ -349,12 +373,12 @@
         gap: 8px;
         padding: 0 14px;
         border-bottom: 1px solid var(--hairline);
-        background: linear-gradient(180deg, #fbfcfd, #f1f3f6);
+        background: var(--preview-chrome-bg);
       }
       .dots { display: flex; gap: 6px; }
       .dots i {
         width: 10px; height: 10px; border-radius: 50%;
-        background: #d2d5db; display: block;
+        background: var(--preview-dot-bg); display: block;
       }
       .window-title {
         margin-left: 6px;
@@ -368,7 +392,7 @@
       }
       .sidebar {
         border-right: 1px solid var(--hairline);
-        background: rgba(243,245,248,0.92);
+        background: var(--preview-sidebar-bg);
         padding: 12px 10px 10px;
         display: flex;
         flex-direction: column;
@@ -382,7 +406,7 @@
       .sb-workspace {
         display: flex; align-items: center; justify-content: space-between;
         min-height: 32px; padding: 0 10px; border-radius: 8px;
-        background: rgba(26,29,33,0.04); font-size: 12px; color: var(--ink-soft);
+        background: var(--preview-soft-fill); font-size: 12px; color: var(--ink-soft);
       }
       .sb-workspace strong { color: var(--ink); font-weight: 600; }
       .sb-workspace .branch {
@@ -410,10 +434,10 @@
         min-height: 36px; padding: 7px 10px; border-radius: 9px;
         cursor: pointer; color: var(--ink-soft);
       }
-      .conv-item:hover { background: rgba(26,29,33,0.04); color: var(--ink); }
+      .conv-item:hover { background: var(--preview-soft-fill); color: var(--ink); }
       .conv-item.active {
-        background: rgba(26,29,33,0.07); color: var(--ink);
-        border-color: rgba(220,224,232,0.95);
+        background: var(--preview-active-fill); color: var(--ink);
+        border-color: var(--preview-active-border);
       }
       .conv-title {
         font-size: 12.5px; font-weight: 550;
@@ -427,7 +451,7 @@
       .thread {
         padding: 16px 18px 14px;
         display: flex; flex-direction: column; gap: 12px;
-        background: linear-gradient(180deg, rgba(247,249,252,0.5), transparent 80px), var(--paper);
+        background: var(--preview-main-bg);
       }
       .thread-top {
         display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -449,7 +473,7 @@
       }
       .trace {
         margin-top: 10px; border: 1px solid var(--azure-soft);
-        background: rgba(216,228,238,0.32); border-radius: 10px; padding: 8px 10px;
+        background: var(--preview-trace-bg); border-radius: 10px; padding: 8px 10px;
         font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft);
         display: grid; gap: 4px;
       }
@@ -471,7 +495,7 @@
       }
       .send {
         width: 30px; height: 30px; border-radius: 980px;
-        background: var(--graphite); color: #fff;
+        background: var(--graphite-btn); color: var(--graphite-btn-ink);
         display: grid; place-items: center; font-size: 14px;
       }
 
@@ -742,10 +766,10 @@
         font-weight: 500;
       }
       .tile-actions .primary {
-        background: var(--graphite);
-        color: #fff !important;
+        background: var(--graphite-btn);
+        color: var(--graphite-btn-ink) !important;
       }
-      .tile-actions .primary:hover { background: var(--graphite-hover); }
+      .tile-actions .primary:hover { background: var(--graphite-btn-hover); }
       .tile-actions .secondary {
         background: rgba(0,0,0,0.05);
         color: var(--ink);
@@ -797,14 +821,6 @@
       }
       .footer-links { display: flex; gap: 16px; }
       .footer-links a:hover { color: var(--ink-soft); }
-
-      .preview-note {
-        position: fixed; right: 14px; bottom: 14px; z-index: 50;
-        font-size: 11px; color: var(--ink-soft);
-        background: rgba(255,255,255,0.9);
-        border: 1px solid var(--line); border-radius: 980px;
-        padding: 6px 10px; box-shadow: var(--shadow-soft);
-      }
 
       @media (max-width: 900px) {
         .features, .get-grid { grid-template-columns: 1fr; }
@@ -1092,8 +1108,6 @@
       </div>
     </footer>
 
-    <div class="preview-note" data-i18n="preview.note">github pages</div>
-
 <script>
       (function () {
         var STORAGE_KEY = "peer-landing-lang";
@@ -1189,7 +1203,6 @@
             "footer.changelog": "Changelog",
             "footer.repo": "Repo",
             "footer.issues": "Issues",
-            "preview.note": "github pages",
             documentTitle: "Peer Agent",
           },
           zh: {
@@ -1277,7 +1290,6 @@
             "footer.changelog": "更新日志",
             "footer.repo": "仓库",
             "footer.issues": "反馈",
-            "preview.note": "GitHub Pages",
             documentTitle: "Peer Agent — 落地页预览",
           },
         };
