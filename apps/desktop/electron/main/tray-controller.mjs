@@ -48,10 +48,12 @@ export function buildTrayMenuTemplate({
       const id = typeof conversation?.id === 'string' ? conversation.id : '';
       if (!id) continue;
       const title = truncateTrayTitle(conversation.title);
+      // macOS native menus ignore "\n" in label; use Electron MenuItem.sublabel
+      // (darwin >= 14.4) so workspace appears as a second line like Codex.
       const subtitle = workspaceShortName(conversation.workspacePath);
-      const label = subtitle ? `${title}\n${subtitle}` : title;
       items.push({
-        label,
+        label: title,
+        ...(subtitle ? { sublabel: subtitle } : {}),
         id: `tray-recent:${id}`,
         click: () => {
           handlers.onOpenConversation?.({

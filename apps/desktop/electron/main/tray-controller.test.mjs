@@ -73,14 +73,26 @@ describe('buildTrayMenuTemplate', () => {
 
     const recentItems = template.filter((item) => String(item.id || '').startsWith('tray-recent:'));
     assert.equal(recentItems.length, 2);
-    assert.match(recentItems[0].label, /排查任务崩溃/);
-    assert.match(recentItems[0].label, /peer_agent/);
+    assert.equal(recentItems[0].label, '排查任务崩溃');
+    assert.equal(recentItems[0].sublabel, 'peer_agent');
+    assert.equal(recentItems[1].label, '为什么上下文差这么多');
+    assert.equal(recentItems[1].sublabel, 'peer-knowledge');
     recentItems[0].click();
     assert.deepEqual(opened[0], {
       conversationId: 'c1',
       workspacePath: '/ws/peer_agent',
       source: 'tray-recent',
     });
+  });
+
+  it('omits sublabel when conversation has no workspace path', () => {
+    const template = buildTrayMenuTemplate({
+      recent: [{ id: 'c-empty-ws', title: '无工作区会话', workspacePath: '' }],
+    });
+    const recentItems = template.filter((item) => String(item.id || '').startsWith('tray-recent:'));
+    assert.equal(recentItems.length, 1);
+    assert.equal(recentItems[0].label, '无工作区会话');
+    assert.equal(recentItems[0].sublabel, undefined);
   });
 
   it('caps recent items to TRAY_RECENT_LIMIT', () => {
