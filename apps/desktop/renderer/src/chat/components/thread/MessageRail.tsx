@@ -1,4 +1,6 @@
+import { useLayoutEffect, useRef } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
+import { shouldStickMessageRailToLatest } from '../../state/threadScrollPolicy';
 
 export type MessageRailItem =
   | {
@@ -28,7 +30,20 @@ interface MessageRailProps {
  */
 export function MessageRail({ items, onSelect, i18n }: MessageRailProps) {
   const isZh = i18n.locale === 'zh-CN';
+  const listRef = useRef<HTMLDivElement>(null);
+  const previousItemCountRef = useRef(items.length);
   const messageCount = items.reduce((count, item) => count + (item.kind === 'message' ? 1 : 0), 0);
+
+  // 压缩/整表重写后条目会骤变；列表默认停在顶部最早消息。结构重写时贴到最新条目。
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const previousCount = previousItemCountRef.current;
+    previousItemCountRef.current = items.length;
+    if (!list) return;
+    if (!shouldStickMessageRailToLatest(previousCount, items.length)) return;
+    list.scrollTop = list.scrollHeight;
+  }, [items]);
+
   if (items.length === 0) return null;
 
   return (
@@ -45,7 +60,7 @@ export function MessageRail({ items, onSelect, i18n }: MessageRailProps) {
         <div className="message-rail-panel-title">
           {isZh ? `我的消息 · ${messageCount}` : `Your messages · ${messageCount}`}
         </div>
-        <div className="message-rail-panel-list">
+        <div className="message-rail-panel-list" ref={listRef}>
           {items.map((item) => (
             <button
               type="button"

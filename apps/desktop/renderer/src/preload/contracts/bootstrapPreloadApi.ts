@@ -758,7 +758,24 @@ readonly conversationsCreate: (params?: { title?: string; workspacePath?: string
     delayMs?: number;
     reason?: string;
   }) => void) => () => void;
-  readonly onChatCompaction: (listener: (payload: { conversationId: string; streamId: string; stage?: 'start' | 'progress' | 'done' | 'idle'; percent?: number; receivedChars?: number; estimatedTotalChars?: number; method?: string; beforeTokens?: number; afterTokens?: number; oldMessageCount?: number; keptMessageCount?: number; microcompacted?: boolean }) => void) => () => void;
+  readonly onChatCompaction: (listener: (payload: {
+    conversationId: string;
+    streamId: string;
+    stage?: 'start' | 'progress' | 'done' | 'idle';
+    percent?: number;
+    receivedChars?: number;
+    estimatedTotalChars?: number;
+    progressStage?: 'preparing' | 'summarizing' | 'retrying' | 'fallback';
+    attempt?: number;
+    maxAttempts?: number;
+    inputTokenBudget?: number;
+    method?: string;
+    beforeTokens?: number;
+    afterTokens?: number;
+    oldMessageCount?: number;
+    keptMessageCount?: number;
+    microcompacted?: boolean;
+  }) => void) => () => void;
   // 全局活跃流变更广播:main 在任一会话开始/结束流式时推送最新运行中的会话 id 列表。
   readonly onChatActiveStreamsChanged: (listener: (payload: {
     conversationIds: readonly string[];

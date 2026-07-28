@@ -46,14 +46,80 @@ CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
 
 Please provide your summary based on the conversation so far, following this structure and ensuring precision and thoroughness in your response.`;
 
-export function formatCompactionMessagesForSummary(messages: readonly CompactionMessage[]): string {
+export const COMPACTION_SUMMARY_PROJECTION_LIMITS = Object.freeze({
+  textChars: 12_000,
+  thinkingChars: 512,
+  toolInputChars: 2_000,
+  toolResultChars: 6_000,
+  unknownBlockChars: 4_000,
+});
+
+type SummaryProjectionLimits = Readonly<typeof COMPACTION_SUMMARY_PROJECTION_LIMITS>;
+
+function stringifyForSummary(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function truncateSummaryValue(value: unknown, maxChars: number, label: string): string {
+  const text = stringifyForSummary(value);
+  if (text.length <= maxChars) return text;
+  const marker = `\n…[${label} truncated: ${text.length} chars total]…\n`;
+  const available = Math.max(0, maxChars - marker.length);
+  const headChars = Math.ceil(available * 0.6);
+  const tailChars = Math.max(0, available - headChars);
+  return `${text.slice(0, headChars)}${marker}${tailChars > 0 ? text.slice(-tailChars) : ''}`;
+}
+
+function projectSummaryContent(content: unknown, limits: SummaryProjectionLimits): string {
+  if (typeof content === 'string') {
+    return truncateSummaryValue(content, limits.textChars, 'message text');
+  }
+  if (!Array.isArray(content)) {
+    return truncateSummaryValue(content, limits.unknownBlockChars, 'message content');
+  }
+
+  return content.map((rawBlock) => {
+    if (!rawBlock || typeof rawBlock !== 'object') {
+      return truncateSummaryValue(rawBlock, limits.unknownBlockChars, 'content block');
+    }
+    const block = rawBlock as Record<string, unknown>;
+    const type = typeof block.type === 'string' ? block.type : 'unknown';
+    if (type === 'text') {
+      return `[text] ${truncateSummaryValue(block.text ?? block.content, limits.textChars, 'text block')}`;
+    }
+    if (type === 'thinking' || type === 'reasoning') {
+      return `[${type}] ${truncateSummaryValue(block.content ?? block.thinking ?? block.text, limits.thinkingChars, `${type} block`)}`;
+    }
+    if (type === 'tool_use' || type === 'tool_call') {
+      const id = stringifyForSummary(block.id ?? block.tool_use_id ?? 'unknown');
+      const name = stringifyForSummary(block.name ?? (block.function as Record<string, unknown> | undefined)?.name ?? 'unknown');
+      const input = block.input
+        ?? block.arguments
+        ?? (block.function as Record<string, unknown> | undefined)?.arguments;
+      return `[${type} id=${id} name=${name}] ${truncateSummaryValue(input, limits.toolInputChars, 'tool input')}`;
+    }
+    if (type === 'tool_result' || type === 'tool_response') {
+      const id = stringifyForSummary(block.tool_use_id ?? block.toolCallId ?? block.id ?? 'unknown');
+      return `[${type} id=${id}] ${truncateSummaryValue(block.content ?? block.result ?? block.output, limits.toolResultChars, 'tool result')}`;
+    }
+    if (type === 'image' || type === 'image_url') {
+      return `[${type} omitted from summary input]`;
+    }
+    return `[${type}] ${truncateSummaryValue(block, limits.unknownBlockChars, `${type} block`)}`;
+  }).join('\n');
+}
+
+export function formatCompactionMessagesForSummary(
+  messages: readonly CompactionMessage[],
+  limits: SummaryProjectionLimits = COMPACTION_SUMMARY_PROJECTION_LIMITS,
+): string {
   return messages
-    .map((message) => {
-      const content = typeof message.content === 'string'
-        ? message.content
-        : JSON.stringify(message.content);
-      return `[${message.role}]: ${content}`;
-    })
+    .map((message) => `[${message.role}]: ${projectSummaryContent(message.content, limits)}`)
     .join('\n\n');
 }
 

@@ -123,6 +123,12 @@ import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { useStreamingReport } from '../hooks/useStreamingReport';
 import { useConversationStreamRouter } from '../hooks/useConversationStreamRouter';
 import { useVirtualChatTurns } from '../hooks/useVirtualChatTurns';
+import { planThreadScrollAfterMessagesChange } from '../state/threadScrollPolicy';
+import {
+  shouldShowConversationEmptyHome,
+  shouldShowConversationLoadingPlaceholder,
+} from '../state/conversationEmptyStatePolicy';
+import { shouldHardBeginConversationLoad } from '../state/conversationLoadGate';
 import {
   getTurnUserMessage,
   groupMessagesIntoTurnsIncremental,
@@ -370,6 +376,9 @@ export function ChatSurface({
   // 本组件不再持有 messages/isStreaming/... 的 useState 槽位，改为订阅当前会话切片；
   // 切会话 = 换订阅 key，物理上不存在「被复用的共享 messages 槽位」，跨会话串内容在架构层不可能发生。
   const { state: convState, actions: convActions } = useConversationState(conversationId);
+  // providers 异步到达/引用变化不得重跑会话加载 effect；用 ref 读最新列表做 model 解析。
+  const providersRef = useRef(providers);
+  providersRef.current = providers;
   // 策略甲（薄适配）：保留组件内原有的 setXxx 调用点名字不变，底层改写为对 store 的 patch。
   // makeSetter 把某个会话级字段包装成 React 风格的 Dispatch<SetStateAction<T>>（支持函数式更新）。
   const convStateRef = useRef<ConversationRuntimeState>(convState);
@@ -919,7 +928,8 @@ export function ChatSurface({
       // 草稿态：不拉磁盘、不进左侧列表；直接 ready，允许输入与发送。
       // 再次点「新建任务」时 conversationId 仍为 null，本 effect 不会重跑，draft 得以保留。
       // 模型选择沿用上次使用的模型（可解析时），而不是强制显示全局默认。
-      const draftModelId = resolveDraftModelProviderId(providers);
+      // 读 providersRef：providers 到达由下方独立 effect 补种，不触发本加载 effect。
+      const draftModelId = resolveDraftModelProviderId(providersRef.current);
       if (draftModelId) setModelProviderId(draftModelId);
       setTokenUsage(null);
       convActions.commitLoad({
@@ -928,8 +938,17 @@ export function ChatSurface({
       });
       return;
     }
-    convActions.beginLoad();
-    setTokenUsage(null);
+    // 已有 ready 消息时不要 beginLoad 清空，否则切回会话会先闪加载占位。
+    // providers 等无关依赖变化时同样走这里：静默刷新，不硬清空。
+    const existingSnapshot = conversationStore.getSnapshot(conversationId);
+    const hardBegin = shouldHardBeginConversationLoad({
+      loadStatus: existingSnapshot.loadStatus,
+      messageCount: existingSnapshot.messages.length,
+    });
+    if (hardBegin) {
+      convActions.beginLoad();
+      setTokenUsage(null);
+    }
     let cancelled = false;
     void (async () => {
       const {
@@ -941,8 +960,8 @@ export function ChatSurface({
         contextAccounting: storedContextAccountingSnapshot,
       } = await loadConversationMessages(conversationId);
       if (cancelled) return;
-      // 消息可以先投影到 UI，但 loadStatus 必须保持 loading，直到下面的 compaction/stream
-      // reattach 全部收敛；否则自动出队会把「流状态尚未知」误判为「确认空闲」。
+      // 消息可以先投影到 UI；硬加载时 loadStatus 仍保持 loading，直到 compaction/stream
+      // reattach 全部收敛；静默刷新则保持 ready，避免闪空。
       convActions.set({
         messages: loaded,
         tokenUsage: usage,
@@ -954,7 +973,7 @@ export function ChatSurface({
       // 直接 setState(不触发回写),避免恢复动作被当成用户切换而反写 meta。
       setEffort(convEffort);
       // 兼容历史 groupId::model 绑定：能解析到真实记录就回写真实 id，并迁移会话 meta。
-      const resolvedBound = resolveProviderById(providers, convModelProviderId);
+      const resolvedBound = resolveProviderById(providersRef.current, convModelProviderId);
       const restoredModelProviderId = resolvedBound?.id ?? convModelProviderId;
       setModelProviderId(restoredModelProviderId);
       if (
@@ -1056,7 +1075,7 @@ export function ChatSurface({
       convActions.commitLoad({});
     })();
     return () => { cancelled = true; };
-  }, [conversationId, convActions, providers]);
+  }, [conversationId, convActions]);
 
   // providers 异步到达后，草稿态若还没绑定模型则补一次上次模型种子。
   useEffect(() => {
@@ -1263,25 +1282,80 @@ export function ChatSurface({
     updateVirtualViewport,
   ]);
 
-  useEffect(() => {
-    if (shouldAutoScrollRef.current) {
-      scrollThreadToBottom('auto');
+  // 记录上一帧消息条数：压缩/整表重写通常会减少条数，此时旧的 index 高度缓存与新时间线错位。
+  const previousMessageCountRef = useRef(messages.length);
+  useLayoutEffect(() => {
+    const previousCount = previousMessageCountRef.current;
+    previousMessageCountRef.current = messages.length;
+    const plan = planThreadScrollAfterMessagesChange({
+      previousCount,
+      nextCount: messages.length,
+      shouldAutoScroll: shouldAutoScrollRef.current,
+    });
+
+    if (!plan.stickToBottom) {
+      const container = threadRef.current;
+      updateThreadBottomState(container);
+      updateCurrentTurnContext(container);
       return;
     }
-    const container = threadRef.current;
-    updateThreadBottomState(container);
-    updateCurrentTurnContext(container);
-  }, [messages, scrollThreadToBottom, updateCurrentTurnContext, updateThreadBottomState]);
+
+    // 压缩完成后 messages 会被整表重写：旧的按 index 缓存高度与新时间线错位，
+    // 若先按错误 totalSize 贴底，浏览器可能把 scrollTop 钳到 0，随后高度回升却停在顶部。
+    // 仅在结构重写时清空虚拟测量；流式追加/替换仍走轻量贴底。
+    if (plan.resetVirtualMeasurements) {
+      resetVirtualMeasurements();
+    }
+    scrollThreadToBottom('auto');
+    if (plan.reaffirmFrames <= 0) return;
+
+    let cancelled = false;
+    let remaining = plan.reaffirmFrames;
+    const reaffirm = () => {
+      if (cancelled || !shouldAutoScrollRef.current || remaining <= 0) return;
+      remaining -= 1;
+      scrollThreadToBottom('auto');
+      if (remaining > 0) {
+        requestAnimationFrame(reaffirm);
+      }
+    };
+    const outer = requestAnimationFrame(reaffirm);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(outer);
+    };
+  }, [
+    messages,
+    resetVirtualMeasurements,
+    scrollThreadToBottom,
+    updateCurrentTurnContext,
+    updateThreadBottomState,
+  ]);
 
   // 手动 /compact 不改 messages，上面的自动滚动 effect 不会重跑；而压缩进度横幅
   // 渲染在滚动容器最底部。若用户此时已向上滚，横幅会落在视口外，造成"点了没反应"
   // 的错觉。压缩一开始就强制滚到底，让进度横幅立即进入视口。
-  useEffect(() => {
+  // 压缩结束（finalizing -> done/idle）时再清一次测量并贴底，避免 merge 后仍停在顶部。
+  const wasCompactionActiveRef = useRef(false);
+  useLayoutEffect(() => {
     if (isCompactionActive) {
+      wasCompactionActiveRef.current = true;
       shouldAutoScrollRef.current = true;
-      scrollThreadToBottom();
+      scrollThreadToBottom('auto');
+      return;
     }
-  }, [isCompactionActive, scrollThreadToBottom]);
+    if (wasCompactionActiveRef.current) {
+      wasCompactionActiveRef.current = false;
+      shouldAutoScrollRef.current = true;
+      resetVirtualMeasurements();
+      scrollThreadToBottom('auto');
+      const outer = requestAnimationFrame(() => {
+        if (!shouldAutoScrollRef.current) return;
+        scrollThreadToBottom('auto');
+      });
+      return () => cancelAnimationFrame(outer);
+    }
+  }, [isCompactionActive, resetVirtualMeasurements, scrollThreadToBottom]);
 
   const removePendingPermissionCall = useCallback((toolCallId: string) => {
     setPendingPermissionCalls((prev) => prev.filter((call) => call.toolCallId !== toolCallId));
@@ -1918,7 +1992,13 @@ export function ChatSurface({
         </div>
       ) : null}
       <div className="chat-thread" ref={threadRef} onScroll={handleThreadScroll}>
-        {messages.length === 0 ? (
+        {/* 切会话 beginLoad 会先清空 messages；空首页仅 loadStatus === 'ready' 且无消息时显示。 */}
+        {shouldShowConversationLoadingPlaceholder({ loadStatus, messageCount: messages.length }) ? (
+          <div className="chat-thread-loading" role="status" aria-live="polite">
+            <div className="chat-thread-loading-mark" aria-hidden="true" />
+            <p>{isZh ? '正在加载会话…' : 'Loading conversation…'}</p>
+          </div>
+        ) : shouldShowConversationEmptyHome({ loadStatus, messageCount: messages.length }) ? (
           <div className="chat-empty-state">
             <div className="chat-empty-mark" aria-hidden="true">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">

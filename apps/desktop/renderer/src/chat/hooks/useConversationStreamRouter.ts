@@ -544,7 +544,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
     );
 
     const offCompaction = clientApi.onChatCompaction(
-      ({ conversationId, streamId, stage, percent, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount }) => {
+      ({ conversationId, streamId, stage, percent, progressStage, attempt, maxAttempts, inputTokenBudget, method, beforeTokens, afterTokens, oldMessageCount, keptMessageCount }) => {
         const cid = conversationStore.resolveEventConversation(streamId, conversationId);
         if (!cid) return;
         if (stage === 'start') {
@@ -563,6 +563,10 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
               stage: 'progress',
               streamId,
               percent: typeof percent === 'number' ? percent : null,
+              progressStage,
+              attempt,
+              maxAttempts,
+              inputTokenBudget,
               now: Date.now(),
             }),
           }));

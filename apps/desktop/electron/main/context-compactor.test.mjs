@@ -22,6 +22,7 @@ import {
   resetCircuitBreaker,
   resolveSummaryTokenBudget,
   truncateSummaryInputPreferTail,
+  truncateSummaryInputToTokenBudget,
   buildHandoffContent,
   summarizeOldMessages,
 } from './context-compactor.mjs';
@@ -64,6 +65,25 @@ describe('estimateTextTokens（CJK 感知比例）', () => {
     assert.equal(estimateTextTokens(''), 0);
     assert.equal(estimateTextTokens(null), 0);
     assert.equal(estimateTextTokens(undefined), 0);
+  });
+});
+
+describe('truncateSummaryInputToTokenBudget（保守摘要输入预算）', () => {
+  it('keeps mixed Chinese/JSON input within the token budget and preserves the recent tail', () => {
+    const tail = 'RECENT_DECISION_TAIL';
+    const input = `${'中文上下文与工具 JSON {"status":"ok","items":[1,2,3]}\n'.repeat(5_000)}${tail}`;
+    const budget = 2_000;
+    const truncated = truncateSummaryInputToTokenBudget(input, budget);
+
+    assert.ok(estimateTextTokens(truncated) <= budget);
+    assert.match(truncated, /conservative token budget/);
+    assert.ok(truncated.endsWith(tail));
+    assert.ok(truncated.length < input.length);
+  });
+
+  it('returns the original input when it already fits', () => {
+    const input = '短中文与 {"ok":true}';
+    assert.equal(truncateSummaryInputToTokenBudget(input, 100), input);
   });
 });
 
@@ -855,15 +875,17 @@ describe('context compactor · streaming progress (0007)', () => {
     assert.equal(result.compacted, true);
     assert.equal(result.messages[1]._compaction.method, 'llm');
 
-    // onProgress 至少被每个 delta 调用一次，receivedChars 单调递增。
-    assert.ok(progressEvents.length >= deltas.length);
+    // 阶段事件与字符事件共用 onProgress；只对含 receivedChars 的流式事件断言单调。
+    const characterProgressEvents = progressEvents.filter((event) => Number.isFinite(event.receivedChars));
+    assert.ok(characterProgressEvents.length >= deltas.length);
+    assert.equal(progressEvents[0].progressStage, 'summarizing');
     const expectedFinal = deltas.join('').length;
-    assert.equal(progressEvents.at(-1).receivedChars, expectedFinal);
-    for (let i = 1; i < progressEvents.length; i += 1) {
-      assert.ok(progressEvents[i].receivedChars >= progressEvents[i - 1].receivedChars);
+    assert.equal(characterProgressEvents.at(-1).receivedChars, expectedFinal);
+    for (let i = 1; i < characterProgressEvents.length; i += 1) {
+      assert.ok(characterProgressEvents[i].receivedChars >= characterProgressEvents[i - 1].receivedChars);
     }
     // estimatedTotalChars 为正，作为百分比分母。
-    assert.ok(progressEvents.at(-1).estimatedTotalChars > 0);
+    assert.ok(characterProgressEvents.at(-1).estimatedTotalChars > 0);
     assert.deepEqual(observedUsage, [{
       inputTokens: 80,
       outputTokens: 7,
@@ -1097,7 +1119,7 @@ describe('P0 recoverable microcompact + summary budget', () => {
     assert.match(content, /stdout\.txt/);
   });
 
-  it('resolveSummaryTokenBudget uses the model window instead of a fixed input cap', () => {
+  it('resolveSummaryTokenBudget applies a conservative provider safety ratio to the model window', () => {
     const budget = resolveSummaryTokenBudget(
       { maxOutputTokens: 8000 },
       { contextWindow: 258_000 },
@@ -1107,9 +1129,13 @@ describe('P0 recoverable microcompact + summary budget', () => {
     assert.equal(budget.safetyReserveTokens, COMPACTION_CONFIG.safetyReserveTokens);
     assert.equal(
       budget.summaryMaxInputTokens,
-      258_000 - budget.summaryMaxTokens - budget.safetyReserveTokens,
+      Math.floor(
+        (258_000 - budget.summaryMaxTokens - budget.safetyReserveTokens)
+        * COMPACTION_CONFIG.summaryInputSafetyRatio,
+      ),
     );
     assert.ok(budget.summaryMaxInputTokens > 80_000);
+    assert.ok(budget.summaryMaxInputTokens < 258_000 / 2);
   });
 
   it('resolveSummaryTokenBudget leaves input uncapped when the model window is unknown', () => {
@@ -1262,6 +1288,76 @@ describe('compaction summary quality regressions', () => {
       for (const answer of expected) {
         assert.ok(summary.includes(answer), `${question} missing answer fragment: ${answer}`);
       }
+    }
+  });
+
+  it('keeps the original old-message coverage when every PTL retry falls back', async () => {
+    const messages = [
+      { role: 'system', content: 'system prompt' },
+      ...Array.from({ length: 30 }, (_, index) => ({
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        content: `coverage-marker-${index} ${'中文与 JSON {"ok":true} '.repeat(2_000)}`,
+      })),
+    ];
+    const baseline = await compactIfNeeded({
+      messages,
+      systemPrompt: 'system prompt',
+      contextWindow: 100_000,
+      providerConfig: null,
+      force: true,
+    });
+
+    const originalFetch = globalThis.fetch;
+    let attempts = 0;
+    const payloadTokens = [];
+    globalThis.fetch = async (_url, init) => {
+      attempts += 1;
+      const body = JSON.parse(init.body);
+      const rawSummaryPayload = body.input?.find?.((message) => message.role === 'user')?.content
+        ?? body.messages?.find?.((message) => message.role === 'user')?.content
+        ?? '';
+      const summaryPayload = Array.isArray(rawSummaryPayload)
+        ? rawSummaryPayload.map((part) => part?.text ?? part?.content ?? '').join('\n')
+        : rawSummaryPayload;
+      payloadTokens.push(estimateTextTokens(summaryPayload));
+      return {
+        ok: false,
+        status: 400,
+        async text() {
+          return JSON.stringify({ error: { code: 'prompt_too_long', message: 'context_length_exceeded' } });
+        },
+      };
+    };
+    resetCircuitBreaker();
+    try {
+      const result = await compactIfNeeded({
+        messages,
+        systemPrompt: 'system prompt',
+        contextWindow: 100_000,
+        providerConfig: {
+          provider: 'openai',
+          baseUrl: 'https://example.test/v1',
+          endpoint: 'https://example.test/v1/responses',
+          apiKey: 'test-key',
+          model: 'test-model',
+          wire: 'openai-responses',
+        },
+        force: true,
+      });
+
+      assert.equal(attempts, COMPACTION_CONFIG.maxPtlRetries);
+      assert.equal(payloadTokens.length, COMPACTION_CONFIG.maxPtlRetries);
+      assert.ok(payloadTokens[1] < payloadTokens[0], `retry payload should shrink: ${payloadTokens.join(' -> ')}`);
+      assert.ok(payloadTokens[2] < payloadTokens[1], `retry payload should shrink: ${payloadTokens.join(' -> ')}`);
+      assert.equal(result.compacted, true);
+      assert.equal(result.notification.fallbackReason, 'llm_prompt_too_long');
+      assert.equal(result.notification.oldMessageCount, baseline.notification.oldMessageCount);
+      assert.equal(result.notification.totalMessageCount, baseline.notification.totalMessageCount);
+      assert.equal(result.messages[1]._compaction.deltaMessageCount, baseline.notification.oldMessageCount);
+      assert.equal(result.messages[1]._compaction.originalMessageCount, baseline.notification.totalMessageCount);
+    } finally {
+      globalThis.fetch = originalFetch;
+      resetCircuitBreaker();
     }
   });
 

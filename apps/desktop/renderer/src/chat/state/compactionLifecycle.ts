@@ -1,8 +1,17 @@
-import { IDLE_COMPACTION_STATE, type CompactionState } from './types.ts';
+import { IDLE_COMPACTION_STATE, type CompactionProgressStage, type CompactionState } from './types.ts';
 
 export type CompactionLifecycleEvent =
   | { readonly stage: 'start'; readonly streamId: string; readonly now: number }
-  | { readonly stage: 'progress'; readonly streamId: string; readonly percent: number | null; readonly now: number }
+  | {
+      readonly stage: 'progress';
+      readonly streamId: string;
+      readonly percent: number | null;
+      readonly progressStage?: CompactionProgressStage;
+      readonly attempt?: number;
+      readonly maxAttempts?: number;
+      readonly inputTokenBudget?: number;
+      readonly now: number;
+    }
   | { readonly stage: 'finalizing'; readonly streamId: string; readonly now: number }
   | { readonly stage: 'idle'; readonly streamId: string };
 
@@ -41,9 +50,18 @@ export function reduceCompactionLifecycle(
     };
   }
 
+  const previousRunning = state.phase === 'running' ? state : null;
+  const progressStage = event.progressStage ?? previousRunning?.progressStage;
+  const attempt = event.attempt ?? previousRunning?.attempt;
+  const maxAttempts = event.maxAttempts ?? previousRunning?.maxAttempts;
+  const inputTokenBudget = event.inputTokenBudget ?? previousRunning?.inputTokenBudget;
   return {
     phase: 'running',
-    percent: event.percent,
+    percent: event.percent ?? previousRunning?.percent ?? null,
+    ...(progressStage ? { progressStage } : {}),
+    ...(attempt !== undefined ? { attempt } : {}),
+    ...(maxAttempts !== undefined ? { maxAttempts } : {}),
+    ...(inputTokenBudget !== undefined ? { inputTokenBudget } : {}),
     streamId: event.streamId,
     startedAt: state.phase === 'running' && state.streamId === event.streamId
       ? state.startedAt

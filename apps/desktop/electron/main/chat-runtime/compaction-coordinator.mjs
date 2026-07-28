@@ -341,22 +341,34 @@ export async function runCompactionCheck({
       ...(manual ? { manual: true } : {}),
     });
     let lastSentPercent = -1;
-    onProgress = ({ receivedChars, estimatedTotalChars }) => {
-      const total = estimatedTotalChars > 0 ? estimatedTotalChars : 1;
-      const percent = Math.min(99, Math.round((receivedChars / total) * 100));
-      // 节流：百分比无变化时不重复发，减少 IPC 噪声。
-      if (percent === lastSentPercent) return;
-      lastSentPercent = percent;
-      updateCompactionProgress({ conversationId, streamId, percent });
+    let lastSentProgressStage = 'preparing';
+    onProgress = ({ receivedChars, estimatedTotalChars, progressStage, attempt, maxAttempts, inputTokenBudget }) => {
+      const hasCharacterProgress = Number.isFinite(receivedChars) && Number.isFinite(estimatedTotalChars);
+      const total = hasCharacterProgress && estimatedTotalChars > 0 ? estimatedTotalChars : 1;
+      const percent = hasCharacterProgress
+        ? Math.min(99, Math.round((receivedChars / total) * 100))
+        : null;
+      const stageChanged = typeof progressStage === 'string' && progressStage !== lastSentProgressStage;
+      // 节流：百分比和阶段都无变化时不重复发，减少 IPC 噪声。
+      if (!stageChanged && percent === lastSentPercent) return;
+      if (typeof progressStage === 'string') lastSentProgressStage = progressStage;
+      if (percent !== null) {
+        lastSentPercent = percent;
+        updateCompactionProgress({ conversationId, streamId, percent });
+      }
       webContents.send('chat:compaction', {
         conversationId,
         streamId,
         stage: 'progress',
         emergency,
         ...(manual ? { manual: true } : {}),
-        receivedChars,
-        estimatedTotalChars,
-        percent,
+        ...(typeof receivedChars === 'number' ? { receivedChars } : {}),
+        ...(typeof estimatedTotalChars === 'number' ? { estimatedTotalChars } : {}),
+        ...(percent !== null ? { percent } : {}),
+        ...(typeof progressStage === 'string' ? { progressStage } : {}),
+        ...(Number.isInteger(attempt) ? { attempt } : {}),
+        ...(Number.isInteger(maxAttempts) ? { maxAttempts } : {}),
+        ...(Number.isFinite(inputTokenBudget) ? { inputTokenBudget } : {}),
       });
     };
   }

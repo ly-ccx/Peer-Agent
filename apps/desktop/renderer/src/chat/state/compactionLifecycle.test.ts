@@ -56,6 +56,35 @@ describe('compaction lifecycle', () => {
     assert.equal(next, current);
   });
 
+  it('preserves visible progress stage details when character percent is unavailable', () => {
+    const started = reduceCompactionLifecycle({ phase: 'idle' }, {
+      stage: 'start',
+      streamId: 'stream-stage',
+      now: 10,
+    });
+    const retrying = reduceCompactionLifecycle(started, {
+      stage: 'progress',
+      streamId: 'stream-stage',
+      percent: null,
+      progressStage: 'retrying',
+      attempt: 2,
+      maxAttempts: 3,
+      inputTokenBudget: 21_532,
+      now: 11,
+    });
+
+    assert.deepEqual(retrying, {
+      phase: 'running',
+      percent: null,
+      progressStage: 'retrying',
+      attempt: 2,
+      maxAttempts: 3,
+      inputTokenBudget: 21_532,
+      streamId: 'stream-stage',
+      startedAt: 10,
+    });
+  });
+
   it('transitions the matching stream through progress, finalizing, and idle', () => {
     const started = reduceCompactionLifecycle({ phase: 'idle' }, {
       stage: 'start',

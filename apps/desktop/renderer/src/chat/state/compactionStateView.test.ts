@@ -36,8 +36,14 @@ describe('compactionStateView', () => {
     assert.equal(compactionProgressPercent({ phase: 'idle' }), null);
   });
 
-  it('labels running, finalizing, and failed states for surface and sidebar', () => {
+  it('keeps the original running copy across internal stages', () => {
     assert.equal(compactionStateLabel(running, true), '压缩上下文中');
+    assert.equal(compactionStateLabel({ ...running, progressStage: 'summarizing' }, true), '压缩上下文中');
+    assert.equal(
+      compactionStateLabel({ ...running, progressStage: 'retrying', attempt: 2, maxAttempts: 3 }, true),
+      '压缩上下文中',
+    );
+    assert.equal(compactionStateLabel({ ...running, progressStage: 'fallback' }, false), 'Compacting context');
     assert.equal(compactionStateLabel(finalizing, true), '刷新上下文中');
     assert.equal(compactionStateLabel(failed, false), 'Compaction failed');
     assert.equal(sidebarCompactionStateLabel(finalizing, true), '刷新上下文');

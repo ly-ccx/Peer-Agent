@@ -5,9 +5,39 @@ import {
   COMPACTION_SUMMARY_PROMPT,
   COMPACTION_SUMMARY_SYSTEM_PROMPT,
   compactMessagesWithSummaryStrategy,
+  formatCompactionMessagesForSummary,
   runCompactionSummaryCascade,
   splitMessagesForCompaction,
 } from './context-compaction.ts';
+
+test('summary projection bounds tool payloads and thinking while preserving identifiers', () => {
+  const summaryInput = formatCompactionMessagesForSummary([
+    {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', content: `THINK_HEAD-${'思考'.repeat(5_000)}-THINK_TAIL` },
+        { type: 'tool_use', id: 'tool-call-1', name: 'read_file', input: { path: '/tmp/a', payload: `INPUT_HEAD-${'参'.repeat(8_000)}-INPUT_TAIL` } },
+      ],
+    },
+    {
+      role: 'user',
+      content: [
+        { type: 'tool_result', tool_use_id: 'tool-call-1', content: `RESULT_HEAD-${'结果'.repeat(12_000)}-RESULT_TAIL` },
+      ],
+    },
+  ]);
+
+  assert.match(summaryInput, /thinking block truncated:/);
+  assert.match(summaryInput, /tool input truncated:/);
+  assert.match(summaryInput, /tool result truncated:/);
+  assert.match(summaryInput, /tool-call-1/);
+  assert.match(summaryInput, /read_file/);
+  assert.match(summaryInput, /INPUT_HEAD/);
+  assert.match(summaryInput, /INPUT_TAIL/);
+  assert.match(summaryInput, /RESULT_HEAD/);
+  assert.match(summaryInput, /RESULT_TAIL/);
+  assert.ok(summaryInput.length < 10_000, `bounded projection should remain small, got ${summaryInput.length}`);
+});
 
 test('continuity handoff prompt covers the long-session continuity questions', () => {
   const prompt = `${COMPACTION_SUMMARY_SYSTEM_PROMPT}\n${COMPACTION_SUMMARY_PROMPT}`;

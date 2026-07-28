@@ -28,6 +28,7 @@ export function sidebarConversationActivity(params: {
 export function compactionStateLabel(state: CompactionState | null | undefined, isZh: boolean): string {
   if (state?.phase === 'failed') return isZh ? '压缩失败' : 'Compaction failed';
   if (state?.phase === 'finalizing') return isZh ? '刷新上下文中' : 'Refreshing context';
+  if (state?.phase === 'running') return isZh ? '压缩上下文中' : 'Compacting context';
   return isZh ? '压缩上下文中' : 'Compacting context';
 }
 

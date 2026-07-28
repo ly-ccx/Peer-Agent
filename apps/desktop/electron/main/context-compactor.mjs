@@ -49,6 +49,10 @@ const COMPACTION_CONFIG = {
   summaryOutputReserveTokens: 4_000,
   // 额外安全区：provider framing / 工具 schema 抖动 / 估算误差。
   safetyReserveTokens: 1_000,
+  // 现场证据：本地投影 461k，而 Grok provider 实际计为 928k（约 2.01x）。
+  // 在没有 provider 原生 tokenizer 的前提下，只允许摘要输入使用可用窗口的 45%，
+  // 即使 token 密度接近该现场样本，仍保留约 10% 的请求 framing 余量。
+  summaryInputSafetyRatio: 0.45,
 };
 
 // ── Circuit breaker state (per-conversation scope) ──
@@ -228,7 +232,8 @@ function splitForCompaction(
 ) {
   const split = splitMessagesForCompaction(messages, {
     preserveLatestUserTurn,
-    preserveRecentTurns,
+    // 自动 preflight 的契约是只保护当前真人用户轮次；手动/空闲压缩才保留配置的最近多轮。
+    preserveRecentTurns: preserveLatestUserTurn ? 1 : preserveRecentTurns,
   });
   return {
     keep: [...split.keepMessages],
@@ -240,15 +245,9 @@ function splitForCompaction(
 // ── Format Old Messages for LLM Summary ──
 
 function formatOldMessagesForSummary(messages) {
-  return messages
-    .map((m) => {
-      const content =
-        typeof m.content === 'string'
-          ? m.content
-          : JSON.stringify(m.content);
-      return `[${m.role}]: ${content}`;
-    })
-    .join('\n\n');
+  // 统一走 runtime-core 的摘要投影 seam：工具参数/结果、thinking 与未知块均有独立上限，
+  // 避免 desktop 再次把完整 JSON 无界序列化进摘要请求。
+  return formatCompactionMessagesForSummary(messages);
 }
 
 // ── formatCompactSummary（对标 CC formatCompactSummary）──
@@ -359,10 +358,13 @@ function resolveSummaryTokenBudget(providerConfig = {}, { contextWindow = null }
   const windowTokens = Number(contextWindow);
   // 不再把摘要输入截在固定的 80k；能送多少由当前模型窗口决定。
   // 窗口未知时返回 Infinity，调用侧会直接使用完整旧消息。
-  const summaryMaxInputTokens =
+  const availableInputTokens =
     Number.isFinite(windowTokens) && windowTokens > 0
       ? Math.max(2_000, windowTokens - summaryMaxTokens - safety)
       : Number.POSITIVE_INFINITY;
+  const summaryMaxInputTokens = Number.isFinite(availableInputTokens)
+    ? Math.max(2_000, Math.floor(availableInputTokens * COMPACTION_CONFIG.summaryInputSafetyRatio))
+    : Number.POSITIVE_INFINITY;
 
   return {
     summaryMaxTokens,
@@ -381,6 +383,7 @@ async function summarizeWithLLM({
   streamId = null,
   connectionRecoveryOptions = {},
   contextWindow = null,
+  summaryInputTokenBudget = null,
   onProviderUsage = null,
 }) {
   const { provider, baseUrl, apiKey, model } = providerConfig;
@@ -396,9 +399,16 @@ async function summarizeWithLLM({
   });
 
   const summaryInput = formatOldMessagesForSummary(oldMessages);
+  const effectiveSummaryInputTokenBudget = Number.isFinite(Number(summaryInputTokenBudget))
+    ? Math.max(256, Math.min(summaryBudget.summaryMaxInputTokens, Math.floor(Number(summaryInputTokenBudget))))
+    : summaryBudget.summaryMaxInputTokens;
+  const boundedSummaryInput = truncateSummaryInputToTokenBudget(
+    summaryInput,
+    effectiveSummaryInputTokenBudget,
+  );
   const summaryMessages = [
     { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
-    { role: 'user', content: truncateSummaryInputPreferTail(summaryInput, summaryBudget.summaryMaxInputTokens * COMPACTION_CONFIG.charsPerToken) },
+    { role: 'user', content: boundedSummaryInput },
     { role: 'user', content: COMPACT_PROMPT },
   ];
 
@@ -437,7 +447,7 @@ async function summarizeWithLLM({
       model,
       system: SUMMARY_SYSTEM_PROMPT,
       messages: [
-        { role: 'user', content: truncateSummaryInputPreferTail(summaryInput, summaryBudget.summaryMaxInputTokens * COMPACTION_CONFIG.charsPerToken) },
+        { role: 'user', content: boundedSummaryInput },
         { role: 'user', content: COMPACT_PROMPT },
       ],
       max_tokens: summaryMaxTokens,
@@ -772,6 +782,31 @@ function truncateSummaryInputPreferTail(text, maxChars) {
 }
 
 /**
+ * Token-aware tail truncation. Uses the shared CJK/JSON-sensitive estimator directly rather than
+ * converting a token budget back into `tokens * 4` characters (the source of the 461k→928k miss).
+ */
+function truncateSummaryInputToTokenBudget(text, maxTokens) {
+  const value = String(text ?? '');
+  const limit = Number(maxTokens);
+  if (!Number.isFinite(limit)) return value;
+  if (limit <= 0) return '';
+  if (estimateTextTokens(value) <= limit) return value;
+
+  const marker = '\n...[summary input truncated by conservative token budget; kept recent tail near compaction point]...\n';
+  if (estimateTextTokens(marker) >= limit) return '';
+
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    const candidate = `${marker}${value.slice(-mid)}`;
+    if (estimateTextTokens(candidate) <= limit) low = mid;
+    else high = mid - 1;
+  }
+  return `${marker}${value.slice(-low)}`;
+}
+
+/**
  * Strip recursive carry-forward wrappers so re-merge does not nest prior merged blobs.
  * Keeps the semantic body; drops structural headers added by previous merges.
  */
@@ -984,26 +1019,6 @@ function setCompactionAfterTokens(messages, afterTokens) {
   }
 }
 
-// ── PTL Truncation ──
-
-function truncateHeadForRetry(messages) {
-  const groups = groupMessagesByApiRound(messages);
-  if (groups.length < 2) return null;
-
-  // Drop the oldest group
-  const dropCount = Math.max(1, Math.floor(groups.length * 0.2));
-  const keep = groups.slice(dropCount).flat();
-
-  // Ensure first message is not assistant
-  if (keep.length > 0 && keep[0].role === 'assistant') {
-    return [
-      { role: 'user', content: '[earlier conversation truncated]' },
-      ...keep,
-    ];
-  }
-  return keep.length > 0 ? keep : null;
-}
-
 // ── Main Orchestrator ──
 
 /**
@@ -1121,6 +1136,10 @@ export async function compactIfNeeded({
   );
 
   const beforeTokens = estimated;
+  // `old` 是本次压缩必须覆盖并从持久化历史中替换掉的完整集合，不能被 PTL 重试改写。
+  // LLM 重试只缩小临时候选；否则重试耗尽后的 structured fallback 与累计代表数都会漏掉头部消息。
+  const llmOld = [...old];
+  let summaryRetryTokenBudget = resolveSummaryTokenBudget(providerConfig, { contextWindow }).summaryMaxInputTokens;
   let compactSummary = null;
   let method = 'structural';
   // 记录"为什么没走 LLM / LLM 为什么失败"，让兜底原因在 Evidence 与 UI 可见。
@@ -1133,8 +1152,14 @@ export async function compactIfNeeded({
       for (let attempt = 1; attempt <= COMPACTION_CONFIG.maxPtlRetries; attempt++) {
         let usageReported = false;
         try {
+          onProgress?.({
+            progressStage: attempt === 1 ? 'summarizing' : 'retrying',
+            attempt,
+            maxAttempts: COMPACTION_CONFIG.maxPtlRetries,
+            inputTokenBudget: summaryRetryTokenBudget,
+          });
           const rawSummary = await summarizeWithLLM({
-            oldMessages: old,
+            oldMessages: llmOld,
             providerConfig,
             signal,
             onProgress,
@@ -1142,6 +1167,7 @@ export async function compactIfNeeded({
             streamId,
             connectionRecoveryOptions,
             contextWindow,
+            summaryInputTokenBudget: summaryRetryTokenBudget,
             onProviderUsage(usage) {
               usageReported = true;
               onProviderUsage?.(usage);
@@ -1152,7 +1178,7 @@ export async function compactIfNeeded({
             compactSummary = formatCompactSummary(rawSummary);
             method = 'llm';
             console.log(
-              `[context-compactor] LLM summary success (${compactSummary.length} chars)`,
+              `[context-compactor] LLM summary success (${compactSummary.length} chars, covered ${old.length} messages)`,
             );
             recordCompactionSuccess(breakerScope);
           }
@@ -1170,7 +1196,8 @@ export async function compactIfNeeded({
           logCompactionDiagnostic('compact:attempt_error', {
             attempt,
             maxPtlRetries: COMPACTION_CONFIG.maxPtlRetries,
-            oldMessageCount: old.length,
+            oldMessageCount: llmOld.length,
+            originalOldMessageCount: old.length,
             isPromptTooLong,
             errorName: err?.name ?? null,
             errorMessage: errMsg.slice(0, 1000),
@@ -1178,13 +1205,14 @@ export async function compactIfNeeded({
           });
 
           if (isPromptTooLong && attempt < COMPACTION_CONFIG.maxPtlRetries) {
-            // PTL retry: truncate head
-            const truncated = truncateHeadForRetry(old);
-            if (truncated) {
+            // PTL retry 按实际摘要 payload token 预算几何收敛；消息全集保持不变，
+            // 下一次 summarizeWithLLM 会在同一投影上保尾裁剪，因此请求体一定缩小且覆盖计数不变。
+            const previousBudget = summaryRetryTokenBudget;
+            summaryRetryTokenBudget = Math.max(256, Math.floor(previousBudget * 0.55));
+            if (summaryRetryTokenBudget < previousBudget) {
               console.warn(
-                `[context-compactor] PTL retry ${attempt}/${COMPACTION_CONFIG.maxPtlRetries}: ${old.length} → ${truncated.length} messages`,
+                `[context-compactor] PTL retry ${attempt}/${COMPACTION_CONFIG.maxPtlRetries}: payload budget ${previousBudget} → ${summaryRetryTokenBudget} tokens (full coverage remains ${old.length})`,
               );
-              old.splice(0, old.length, ...truncated);
               continue;
             }
           }
@@ -1214,6 +1242,11 @@ export async function compactIfNeeded({
         fallbackReason = 'llm_error';
       }
       fallbackDetail = detail.slice(0, 500);
+      onProgress?.({
+        progressStage: 'fallback',
+        attempt: COMPACTION_CONFIG.maxPtlRetries,
+        maxAttempts: COMPACTION_CONFIG.maxPtlRetries,
+      });
       logCompactionDiagnostic('compact:fallback', {
         fallbackReason,
         errorName: err?.name ?? null,
@@ -1381,6 +1414,7 @@ export {
   microcompactMessagesForContext,
   resolveSummaryTokenBudget,
   truncateSummaryInputPreferTail,
+  truncateSummaryInputToTokenBudget,
   flattenSummaryForCarryForward,
   extractRecentDecisionAnchors,
   mergeContinuityAndDeltaSummary,

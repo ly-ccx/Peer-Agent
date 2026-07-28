@@ -79,6 +79,8 @@ interface BrowserTabRuntimeState {
   readonly canBack: boolean;
   readonly canForward: boolean;
   readonly failure: BrowserFailure | null;
+  /** guest webContents id；仅在 webview dom-ready 后可用。 */
+  readonly webContentsId: number | null;
 }
 
 interface BrowserPageProps {
@@ -103,7 +105,20 @@ function initialRuntime(tab: BrowserTabSession): BrowserTabRuntimeState {
     canBack: false,
     canForward: false,
     failure: null,
+    webContentsId: null,
   };
+}
+
+/** webview guest API：未 attach / 未 dom-ready 时会 throw，不能直接在 render 里调。 */
+function safeGetWebContentsId(wv: WebviewElement | null | undefined): number | null {
+  if (!wv) return null;
+  try {
+    const id = wv.getWebContentsId();
+    if (!Number.isInteger(id) || id <= 0) return null;
+    return id;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeInput(raw: string): string {
@@ -212,10 +227,11 @@ function BrowserPage({
   const publishRegistration = useCallback((isActive = activeRef.current) => {
     const wv = webviewRef.current;
     if (!wv) return;
+    const webContentsId = safeGetWebContentsId(wv);
+    if (webContentsId == null) return;
+    registeredIdRef.current = webContentsId;
+    onRuntimeChange(tab.id, { webContentsId });
     try {
-      const webContentsId = wv.getWebContentsId();
-      if (!Number.isInteger(webContentsId) || webContentsId <= 0) return;
-      registeredIdRef.current = webContentsId;
       void clientApi.registerBrowserWebContents({
         webContentsId,
         conversationId,
@@ -227,7 +243,7 @@ function BrowserPage({
     } catch {
       // 非 Electron 环境或 guest 尚未就绪，dom-ready 后会再次发布。
     }
-  }, [conversationId, tab.id]);
+  }, [conversationId, onRuntimeChange, tab.id]);
 
   useEffect(() => {
     const wv = webviewRef.current;
@@ -300,6 +316,7 @@ function BrowserPage({
       wv.removeEventListener('did-fail-load', onFailLoad);
       wv.removeEventListener('dom-ready', onDomReady);
       onHandleChange(tab.id, null);
+      onRuntimeChange(tab.id, { webContentsId: null });
       if (registeredIdRef.current != null) {
         void clientApi.unregisterBrowserWebContents({
           webContentsId: registeredIdRef.current,
@@ -466,7 +483,7 @@ export function BrowserView({
       }
       if (id === 'screenshot') {
         const handle = activeWebview();
-        const webContentsId = handle?.getWebContentsId?.();
+        const webContentsId = safeGetWebContentsId(handle);
         if (!webContentsId) {
           setMenuNotice(t.shotUnavailable);
           return;
@@ -732,7 +749,7 @@ export function BrowserView({
         open={passwordManagerOpen}
         isZh={isZh}
         pageUrl={activeRuntime.currentUrl}
-        webContentsId={activeWebview()?.getWebContentsId?.() ?? null}
+        webContentsId={activeRuntime.webContentsId}
         onClose={() => setPasswordManagerOpen(false)}
         onStatus={(message) => setMenuNotice(message)}
       />

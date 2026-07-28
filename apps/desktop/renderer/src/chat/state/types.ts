@@ -108,12 +108,18 @@ export interface CompactionMeta {
   summary?: string;
 }
 
+export type CompactionProgressStage = 'preparing' | 'summarizing' | 'retrying' | 'fallback';
+
 /** 聊天上下文压缩过程的显式状态机。 */
 export type CompactionState =
   | { phase: 'idle' }
   | {
       phase: 'running';
       percent: number | null;
+      progressStage?: CompactionProgressStage;
+      attempt?: number;
+      maxAttempts?: number;
+      inputTokenBudget?: number;
       streamId?: string;
       startedAt: number;
     }
