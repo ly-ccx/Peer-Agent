@@ -42,6 +42,15 @@ contextBridge.exposeInMainWorld('peerAgent', {
   fileExists: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:exists', { absPath, workspaceRoot, relPath }),
   readFile: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('file:read', { absPath, workspaceRoot, relPath }),
   readDir: (absPath, workspaceRoot, relPath) => ipcRenderer.invoke('fs:read-dir', { absPath, workspaceRoot, relPath }),
+  /** 同步 Workbench 文件树要监听的目录集合（根 + 已展开）；传空数组清空。 */
+  watchDirs: (paths, workspaceRoot) => ipcRenderer.invoke('fs:watch-dirs', { paths, workspaceRoot }),
+  /** 订阅目录变更；返回 unsubscribe。payload: { dirPath } */
+  onFsDirChanged: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('fs:dir-changed', handler);
+    return () => ipcRenderer.removeListener('fs:dir-changed', handler);
+  },
   // 会话级内嵌浏览器标签控制句柄注册（见 ADR 40 / 46）。
   registerBrowserWebContents: (registration) =>
     ipcRenderer.invoke('browser:register-webcontents', registration),

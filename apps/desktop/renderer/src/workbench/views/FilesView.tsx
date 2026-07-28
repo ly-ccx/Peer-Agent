@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { useWorkbench } from '../WorkbenchContext';
+import {
+  collectDirPathsToRefresh,
+  collectWatchDirPaths,
+  mergePendingRefreshPaths,
+  pruneAfterDirReload,
+  stripTrailingSep,
+} from './filesTreeRefresh';
 
 interface FilesViewProps {
   readonly isZh: boolean;
@@ -11,11 +18,6 @@ interface DirEntry {
   readonly name: string;
   readonly isDir: boolean;
   readonly absPath: string;
-}
-
-/** 去掉路径末尾的分隔符。 */
-function stripTrailingSep(p: string): string {
-  return p.replace(/[/\\]+$/, '');
 }
 
 /** 统一为正斜杠，便于做前缀/分段比较（不改变 IPC 调用所用的原始 absPath）。 */
@@ -77,9 +79,8 @@ function TreeNode({
   const isSelected = selected != null && toForward(stripTrailingSep(selected)) === key;
   const isOpen = entry.isDir && expanded.has(entry.absPath);
   const isLoading = entry.isDir && loading.has(entry.absPath);
-  const kids = children.get(entry.absPath);
+  const kids = entry.isDir ? children.get(entry.absPath) : undefined;
 
-  // 被定位选中的目录滚动到可视区。
   useEffect(() => {
     if (isSelected && rowRef.current) {
       rowRef.current.scrollIntoView({ block: 'nearest' });
@@ -136,8 +137,8 @@ function TreeNode({
             >
               {isZh ? '空目录' : 'Empty'}
             </div>
-          ) : (
-            (kids ?? []).map((child) => (
+          ) : kids ? (
+            kids.map((child) => (
               <TreeNode
                 key={child.absPath}
                 entry={child}
@@ -151,12 +152,14 @@ function TreeNode({
                 onOpenFile={onOpenFile}
               />
             ))
-          )}
+          ) : null}
         </div>
       ) : null}
     </div>
   );
 }
+
+const WATCH_DEBOUNCE_MS = 200;
 
 export function FilesView({ isZh, workspacePath }: FilesViewProps) {
   const { filesTarget, openFile: openWorkbenchFile } = useWorkbench();
@@ -166,14 +169,41 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
   const [children, setChildren] = useState<ReadonlyMap<string, readonly DirEntry[]>>(new Map());
   const [loading, setLoading] = useState<ReadonlySet<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
   // 子节点缓存的 ref 镜像：reveal 串行展开链路时读取最新缓存，避免闭包过期。
   const childrenRef = useRef<Map<string, readonly DirEntry[]>>(new Map());
+  const expandedRef = useRef<ReadonlySet<string>>(new Set());
+  const loadingRef = useRef<ReadonlySet<string>>(new Set());
+  const selectedRef = useRef<string | null>(null);
+  const pendingRefreshRef = useRef<Set<string>>(new Set());
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 列目录并写入缓存；已缓存则直接返回。
+  expandedRef.current = expanded;
+  loadingRef.current = loading;
+  selectedRef.current = selected;
+
+  const applyReloadResult = useCallback((absPath: string, entries: readonly DirEntry[]) => {
+    const pruned = pruneAfterDirReload(absPath, entries, {
+      children: childrenRef.current,
+      expanded: expandedRef.current,
+      loading: loadingRef.current,
+      selected: selectedRef.current,
+    });
+    childrenRef.current = new Map(pruned.children);
+    setChildren(new Map(pruned.children));
+    setExpanded(new Set(pruned.expanded));
+    setLoading(new Set(pruned.loading));
+    setSelected(pruned.selected);
+  }, []);
+
+  // 列目录并写入缓存；默认命中缓存。force 时绕过缓存并裁剪消失子树。
   const loadDir = useCallback(
-    async (absPath: string): Promise<readonly DirEntry[]> => {
-      const cached = childrenRef.current.get(absPath);
-      if (cached) return cached;
+    async (absPath: string, options?: { force?: boolean }): Promise<readonly DirEntry[]> => {
+      if (!options?.force) {
+        const cached = childrenRef.current.get(absPath);
+        if (cached) return cached;
+      }
       setLoading((prev) => {
         const next = new Set(prev);
         next.add(absPath);
@@ -186,8 +216,12 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
       } catch {
         entries = [];
       }
-      childrenRef.current.set(absPath, entries);
-      setChildren(new Map(childrenRef.current));
+      if (options?.force) {
+        applyReloadResult(absPath, entries);
+      } else {
+        childrenRef.current.set(absPath, entries);
+        setChildren(new Map(childrenRef.current));
+      }
       setLoading((prev) => {
         const next = new Set(prev);
         next.delete(absPath);
@@ -195,7 +229,42 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
       });
       return entries;
     },
-    [workspacePath],
+    [workspacePath, applyReloadResult],
+  );
+
+  const refreshAllExpanded = useCallback(async () => {
+    if (!rootPath) return;
+    const paths = collectDirPathsToRefresh(rootPath, expandedRef.current);
+    setRefreshing(true);
+    try {
+      for (const dir of paths) {
+        // eslint-disable-next-line no-await-in-loop
+        await loadDir(dir, { force: true });
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }, [rootPath, loadDir]);
+
+  const flushPendingRefreshes = useCallback(async () => {
+    const batch = [...pendingRefreshRef.current];
+    pendingRefreshRef.current = new Set();
+    for (const dir of batch) {
+      // eslint-disable-next-line no-await-in-loop
+      await loadDir(dir, { force: true });
+    }
+  }, [loadDir]);
+
+  const scheduleDirRefresh = useCallback(
+    (dirPath: string) => {
+      pendingRefreshRef.current = mergePendingRefreshPaths(pendingRefreshRef.current, dirPath);
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = setTimeout(() => {
+        debounceTimerRef.current = null;
+        void flushPendingRefreshes();
+      }, WATCH_DEBOUNCE_MS);
+    },
+    [flushPendingRefreshes],
   );
 
   const toggleDir = useCallback(
@@ -227,6 +296,11 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
     setChildren(new Map());
     setLoading(new Set());
     setSelected(null);
+    pendingRefreshRef.current = new Set();
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
     if (!rootPath) {
       setExpanded(new Set());
       return;
@@ -265,6 +339,46 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
     };
   }, [filesTarget?.nonce, rootPath, loadDir]);
 
+  // 轻量 watch：只监听根 + 已展开目录；事件 debounce 后只重读受影响目录。
+  useEffect(() => {
+    if (!rootPath) {
+      void clientApi.watchDirs?.([], workspacePath ?? undefined).catch(() => {});
+      return;
+    }
+    const paths = collectWatchDirPaths(rootPath, expanded);
+    void clientApi.watchDirs?.(paths, workspacePath ?? undefined).catch(() => {});
+  }, [rootPath, expanded, workspacePath]);
+
+  useEffect(() => {
+    if (typeof clientApi.onFsDirChanged !== 'function') return undefined;
+    const unsubscribe = clientApi.onFsDirChanged((payload) => {
+      const dir = typeof payload?.dirPath === 'string' ? payload.dirPath : '';
+      if (!dir) return;
+      // 只响应当前树关心的目录（根或已展开）
+      const watched = new Set(
+        collectWatchDirPaths(rootPath, expandedRef.current).map((p) =>
+          toForward(stripTrailingSep(p)),
+        ),
+      );
+      if (!watched.has(toForward(stripTrailingSep(dir)))) return;
+      scheduleDirRefresh(dir);
+    });
+    return () => {
+      unsubscribe?.();
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+    };
+  }, [rootPath, scheduleDirRefresh]);
+
+  // 卸载时清空 main 侧 watchers
+  useEffect(() => {
+    return () => {
+      void clientApi.watchDirs?.([], workspacePath ?? undefined).catch(() => {});
+    };
+  }, [workspacePath]);
+
   if (!rootPath) {
     return (
       <div className="workbench-empty">
@@ -285,18 +399,31 @@ export function FilesView({ isZh, workspacePath }: FilesViewProps) {
   };
 
   return (
-    <div className="workbench-tree" role="tree" aria-label={isZh ? '文件树' : 'File tree'}>
-      <TreeNode
-        entry={rootEntry}
-        depth={0}
-        expanded={expanded}
-        children={children}
-        loading={loading}
-        selected={selected}
-        isZh={isZh}
-        onToggleDir={toggleDir}
-        onOpenFile={openFile}
-      />
+    <div className="workbench-files">
+      <div className="workbench-files-toolbar">
+        <button
+          type="button"
+          className="workbench-diff-btn"
+          onClick={() => void refreshAllExpanded()}
+          disabled={refreshing}
+          title={isZh ? '刷新文件树' : 'Refresh file tree'}
+        >
+          {refreshing ? (isZh ? '刷新中…' : 'Refreshing…') : isZh ? '刷新' : 'Refresh'}
+        </button>
+      </div>
+      <div className="workbench-tree" role="tree" aria-label={isZh ? '文件树' : 'File tree'}>
+        <TreeNode
+          entry={rootEntry}
+          depth={0}
+          expanded={expanded}
+          children={children}
+          loading={loading}
+          selected={selected}
+          isZh={isZh}
+          onToggleDir={toggleDir}
+          onOpenFile={openFile}
+        />
+      </div>
     </div>
   );
 }

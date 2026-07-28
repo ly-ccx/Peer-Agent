@@ -23,6 +23,8 @@ const unavailableApi: ClientApi = {
   fileExists: unavailableMethod('fileExists'),
   readFile: unavailableMethod('readFile'),
   readDir: unavailableMethod('readDir'),
+  watchDirs: unavailableMethod('watchDirs'),
+  onFsDirChanged: () => () => {},
   registerBrowserWebContents: unavailableMethod('registerBrowserWebContents'),
   unregisterBrowserWebContents: unavailableMethod('unregisterBrowserWebContents'),
   listShellTasks: unavailableMethod('listShellTasks'),

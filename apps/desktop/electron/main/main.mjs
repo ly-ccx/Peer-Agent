@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, shell, Tray, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch as fsWatch } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
@@ -1848,6 +1848,109 @@ ipcMain.handle('fs:read-dir', (_event, { absPath, workspaceRoot, relPath } = {})
   } catch {
     return { ok: false, status: 'error', entries: [], error: 'read_dir_failed' };
   }
+});
+
+// Workbench 文件树轻量目录监听：只 watch 调用方传入的目录列表（根 + 已展开），
+// 不递归整仓。每个 webContents 维护一份 watcher 集合；目录集合变化时做 diff 增删。
+// 事件经 fs:dir-changed 推回对应 renderer，payload 为 { dirPath }。
+const fileTreeWatchersByWebContents = new Map();
+
+function stopAllFileTreeWatchers(webContentsId) {
+  const map = fileTreeWatchersByWebContents.get(webContentsId);
+  if (!map) return;
+  for (const watcher of map.values()) {
+    try {
+      watcher.close();
+    } catch {
+      /* ignore close errors */
+    }
+  }
+  fileTreeWatchersByWebContents.delete(webContentsId);
+}
+
+function resolveWatchDirPath(absPath, workspaceRoot) {
+  if (!absPath || typeof absPath !== 'string') {
+    return { ok: false, resolvedPath: null };
+  }
+  try {
+    if (existsSync(absPath) && statSync(absPath).isDirectory()) {
+      return { ok: true, resolvedPath: absPath };
+    }
+  } catch {
+    /* fall through */
+  }
+  if (typeof workspaceRoot === 'string' && workspaceRoot) {
+    try {
+      const candidate = path.isAbsolute(absPath) ? absPath : path.join(workspaceRoot, absPath);
+      if (existsSync(candidate) && statSync(candidate).isDirectory()) {
+        return { ok: true, resolvedPath: candidate };
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return { ok: false, resolvedPath: null };
+}
+
+ipcMain.handle('fs:watch-dirs', (event, { paths, workspaceRoot } = {}) => {
+  const sender = event.sender;
+  const webContentsId = sender.id;
+  const requested = Array.isArray(paths)
+    ? paths.filter((p) => typeof p === 'string' && p.trim())
+    : [];
+
+  if (!fileTreeWatchersByWebContents.has(webContentsId)) {
+    fileTreeWatchersByWebContents.set(webContentsId, new Map());
+    sender.once('destroyed', () => stopAllFileTreeWatchers(webContentsId));
+  }
+  const current = fileTreeWatchersByWebContents.get(webContentsId);
+
+  const desired = new Map();
+  for (const raw of requested) {
+    const resolved = resolveWatchDirPath(raw, workspaceRoot);
+    if (resolved.ok && resolved.resolvedPath) {
+      desired.set(resolved.resolvedPath, true);
+    }
+  }
+
+  for (const [dirPath, watcher] of current.entries()) {
+    if (!desired.has(dirPath)) {
+      try {
+        watcher.close();
+      } catch {
+        /* ignore */
+      }
+      current.delete(dirPath);
+    }
+  }
+
+  for (const dirPath of desired.keys()) {
+    if (current.has(dirPath)) continue;
+    try {
+      const watcher = fsWatch(dirPath, { persistent: false }, () => {
+        if (sender.isDestroyed()) return;
+        sender.send('fs:dir-changed', { dirPath });
+      });
+      if (typeof watcher.on === 'function') {
+        watcher.on('error', () => {
+          try {
+            watcher.close();
+          } catch {
+            /* ignore */
+          }
+          current.delete(dirPath);
+        });
+      }
+      current.set(dirPath, watcher);
+    } catch {
+      /* 目录瞬时消失 / 权限问题：跳过该路径 */
+    }
+  }
+
+  return {
+    ok: true,
+    watching: [...current.keys()],
+  };
 });
 
 // 读取指定文件的完整文本内容，供 Workbench 的 Diff 视图「文件内容」分段查看。

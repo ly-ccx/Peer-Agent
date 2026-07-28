@@ -1107,6 +1107,24 @@
   }
 
   /* 文件树（「文件」视图）：跟随会话工作目录、懒加载、可点目录展开/文件查看 diff。 */
+  .workbench-files {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+  .workbench-files-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-shrink: 0;
+    padding: 6px 10px 2px;
+  }
+  .workbench-files .workbench-tree {
+    flex: 1;
+    min-height: 0;
+  }
   .workbench-tree {
     height: 100%;
     overflow: auto;

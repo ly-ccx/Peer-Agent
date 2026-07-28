@@ -359,6 +359,21 @@ export interface BootstrapPreloadApi {
     readonly error?: string;
   }>;
   /**
+   * 同步文件树轻量监听目录集合（根 + 已展开）。传空数组清空。
+   * main 侧按 webContents 维护 fs.watch，不递归整仓。
+   */
+  readonly watchDirs: (
+    paths: readonly string[],
+    workspaceRoot?: string,
+  ) => Promise<{
+    readonly ok: boolean;
+    readonly watching?: readonly string[];
+  }>;
+  /** 订阅目录变更；返回 unsubscribe。payload: { dirPath } */
+  readonly onFsDirChanged: (
+    callback: (payload: { readonly dirPath?: string }) => void,
+  ) => () => void;
+  /**
    * 内嵌浏览器控制句柄注册 —— 见 ADR 40 / 46。
    * renderer 同时上报 conversationId + browserTabId；main 按会话解析活跃网页标签，
    * 供 Agent 的 browser_* 工具经 webContents.fromId 精确操控。
