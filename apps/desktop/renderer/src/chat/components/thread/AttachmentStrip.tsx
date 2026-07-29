@@ -76,7 +76,14 @@ export function AttachmentStrip({
                 title={isZh ? '预览图片' : 'Preview image'}
                 aria-label={isZh ? `预览图片 ${attachment.name}` : `Preview image ${attachment.name}`}
               >
-                <img src={attachment.dataUrl} alt="" className="attachment-thumb" draggable={false} />
+                <img
+                  src={attachment.dataUrl}
+                  alt=""
+                  className="attachment-thumb"
+                  loading={readOnly ? 'lazy' : 'eager'}
+                  decoding="async"
+                  draggable={false}
+                />
               </button>
             ) : (
               <span className="attachment-file-icon" aria-hidden="true">

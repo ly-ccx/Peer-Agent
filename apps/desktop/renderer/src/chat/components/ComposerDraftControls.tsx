@@ -3,7 +3,6 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useConversationDraft } from '../hooks/useConversationState';
 import { loadComposerEntry, saveComposerEntry, shouldDeferEmptyComposerSave } from '../state/composerPersistence';
 import { conversationStore } from '../state/conversationStore';
-import { createFrameCoalescer } from '../state/frameCoalescer';
 import type { ChatAttachment, QueuedMessage } from '../state/types';
 import {
   detectAtQuery,
@@ -74,10 +73,6 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
   const sessionQueryRef = useRef<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const textareaResizeCoalescerRef = useRef(createFrameCoalescer({
-    request: (callback) => requestAnimationFrame(callback),
-    cancel: (frameId) => cancelAnimationFrame(frameId),
-  }));
   const persistedConversationRef = useRef<string | null | undefined>(undefined);
   const hydrationReadyConversationRef = useRef<string | null>(null);
 
@@ -174,18 +169,6 @@ export const ComposerDraftControls = memo(function ComposerDraftControls({
       window.clearTimeout(timer);
     };
   }, [atQuery, conversationId, showSessionMentions]);
-
-  // 草稿高频更新只调整输入框自身高度，不再让消息时间线参与渲染。
-  useEffect(() => {
-    textareaResizeCoalescerRef.current.request(() => {
-      const element = textareaRef.current;
-      if (!element) return;
-      element.style.height = 'auto';
-      element.style.height = `${Math.min(element.scrollHeight, 120)}px`;
-    });
-  }, [draft]);
-
-  useEffect(() => () => textareaResizeCoalescerRef.current.cancel(), []);
 
   // 草稿与队列仍沿用既有表达层持久化缝；仅把订阅移入输入叶子。
   // 切会话时：先把「离开的会话」当前桶态同步写入持久化镜像，避免入队后立刻切走导致

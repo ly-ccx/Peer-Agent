@@ -21,6 +21,7 @@
 
   .cloud-chat-composer textarea {
     @apply min-w-0 resize-none border-0 bg-transparent px-3 py-2 font-normal outline-none;
+    field-sizing: content;
     color: var(--za-text);
     caret-color: var(--za-text);
     -webkit-text-fill-color: var(--za-text);
@@ -29,7 +30,8 @@
   }
 
   .cloud-chat-composer.thread textarea {
-    @apply h-10;
+    height: auto;
+    min-height: 40px;
     max-height: 120px;
     padding-top: 10px;
     padding-bottom: 10px;

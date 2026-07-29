@@ -22,6 +22,17 @@ test('draft input stays in the composer leaf and never becomes context token aut
   assert.doesNotMatch(tokenUsage, /useConversationDraft|estimateDraftTokens|estimateStreamDeltaTokens/);
 });
 
+test('composer auto-sizing stays in CSS and does not force layout on every draft character', async () => {
+  const [controls, styles] = await Promise.all([
+    readSource('./ComposerDraftControls.tsx'),
+    readSource('../styles/chat-composer.css'),
+  ]);
+
+  assert.doesNotMatch(controls, /scrollHeight|style\.height|textareaResizeCoalescer/);
+  assert.match(styles, /field-sizing:\s*content/);
+  assert.match(styles, /\.cloud-chat-composer\.thread textarea\s*\{[\s\S]*?min-height:\s*40px[\s\S]*?max-height:\s*120px/);
+});
+
 test('send actions read the latest draft from the conversation bucket', async () => {
   const surface = await readSource('./ChatSurface.tsx');
 

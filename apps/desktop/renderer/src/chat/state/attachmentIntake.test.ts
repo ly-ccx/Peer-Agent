@@ -59,6 +59,9 @@ describe('intakeAttachments', () => {
       size: 42,
       kind: 'unsupported',
     }]);
-    assert.match(result.error ?? '', /only file metadata was attached/);
+    assert.match(
+      result.error ?? '',
+      /content is not inlined.*file info \(name\/type\/size\) was attached.*read the local file when needed/,
+    );
   });
 });
